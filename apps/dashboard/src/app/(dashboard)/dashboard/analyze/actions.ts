@@ -61,6 +61,9 @@ export interface ClassificationSummary {
 export interface SubjectData {
   address?: string
   county?: string | null
+  bedrooms?: number | null
+  bathrooms?: number | null
+  /** @deprecated Use bedrooms and bathrooms separately */
   bedsBaths?: string
   squareFeet?: number | null
   lotSizeAcres?: number | null
@@ -111,6 +114,9 @@ export interface CompItem {
   squareFeet?: number | null
   pricePerSqft?: number | null
   distanceMiles?: number | null
+  bedrooms?: number | null
+  bathrooms?: number | null
+  /** @deprecated Use bedrooms and bathrooms separately */
   bedsBaths?: string
   yearBuilt?: number | null
   adjustedPrice?: number | null

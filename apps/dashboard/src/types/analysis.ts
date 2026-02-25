@@ -10,11 +10,7 @@
 export type JobStatus = 'queued' | 'processing' | 'completed' | 'failed' | 'cancelled'
 
 export type AnalysisStep =
-  | 'cache_check'
   | 'property_fetch'
-  | 'comparables_fetch'
-  | 'permits_fetch'
-  | 'flood_fetch'
   | 'appraisal_rules'
   | 'photo_fetch'
   | 'comp_selection'
@@ -29,68 +25,51 @@ export interface StepConfig {
   step: AnalysisStep
   label: string
   description: string
+  icon: string
   required: boolean
 }
 
 export const STEP_CONFIGS: StepConfig[] = [
   {
-    step: 'cache_check',
-    label: 'Cache Check',
-    description: 'Checking for cached data',
-    required: true,
-  },
-  {
     step: 'property_fetch',
-    label: 'Property Fetch',
-    description: 'Fetching subject property details',
+    label: 'Fetching Data',
+    description: 'Property details, comparables & enrichment',
+    icon: '🏠',
     required: true,
-  },
-  {
-    step: 'comparables_fetch',
-    label: 'Comparables',
-    description: 'Fetching comparable properties',
-    required: true,
-  },
-  {
-    step: 'permits_fetch',
-    label: 'Permits',
-    description: 'Fetching building permits',
-    required: false,
-  },
-  {
-    step: 'flood_fetch',
-    label: 'Flood Zone',
-    description: 'Fetching flood zone data',
-    required: false,
   },
   {
     step: 'appraisal_rules',
-    label: 'Appraisal',
-    description: 'Applying filters and adjustments',
+    label: 'Applying Rules',
+    description: 'Filters & price adjustments',
+    icon: '📋',
     required: true,
   },
   {
     step: 'photo_fetch',
-    label: 'Photos',
-    description: 'Fetching property photos',
+    label: 'Fetching Photos',
+    description: 'Property images for analysis',
+    icon: '📷',
     required: false,
   },
   {
     step: 'comp_selection',
-    label: 'AI Selection',
-    description: 'LLM-based comp selection',
+    label: 'AI Analysis',
+    description: 'Classifying property conditions',
+    icon: '🤖',
     required: false,
   },
   {
     step: 'valuation',
-    label: 'Valuation',
-    description: 'Calculating ARV and metrics',
+    label: 'Calculating ARV',
+    description: 'Weighted valuation & metrics',
+    icon: '💰',
     required: true,
   },
   {
     step: 'response_build',
     label: 'Finalizing',
     description: 'Building response',
+    icon: '✨',
     required: true,
   },
 ]

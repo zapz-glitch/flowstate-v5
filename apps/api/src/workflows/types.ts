@@ -20,6 +20,8 @@ export interface AnalysisWorkflowParams {
   jobId: string
   /** User ID for quota tracking */
   userId: string
+  /** Property key for DO identification */
+  propertyKey: string
 
   // Property identification (one of these required)
   address?: string

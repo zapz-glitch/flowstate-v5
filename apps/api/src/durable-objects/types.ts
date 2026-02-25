@@ -83,11 +83,7 @@ export interface AnalysisResponse {
 export type JobStatus = 'queued' | 'processing' | 'completed' | 'failed' | 'cancelled'
 
 export type AnalysisStep =
-  | 'cache_check'
   | 'property_fetch'
-  | 'comparables_fetch'
-  | 'permits_fetch'
-  | 'flood_fetch'
   | 'appraisal_rules'
   | 'photo_fetch'
   | 'comp_selection'
@@ -161,54 +157,18 @@ export interface StepConfig {
 
 export const STEP_CONFIGS: StepConfig[] = [
   {
-    step: 'cache_check',
-    label: 'Cache Check',
-    description: 'Checking for cached data',
-    required: true,
-    maxRetries: 1,
-    backoffMs: 0,
-    exponentialBackoff: false,
-  },
-  {
     step: 'property_fetch',
-    label: 'Property Fetch',
-    description: 'Fetching subject property details',
+    label: 'Fetching Data',
+    description: 'Property details, comparables & enrichment',
     required: true,
     maxRetries: 3,
     backoffMs: 1000,
     exponentialBackoff: true,
-  },
-  {
-    step: 'comparables_fetch',
-    label: 'Comparables Fetch',
-    description: 'Fetching comparable properties',
-    required: true,
-    maxRetries: 3,
-    backoffMs: 1000,
-    exponentialBackoff: true,
-  },
-  {
-    step: 'permits_fetch',
-    label: 'Permits Fetch',
-    description: 'Fetching building permits',
-    required: false,
-    maxRetries: 2,
-    backoffMs: 500,
-    exponentialBackoff: false,
-  },
-  {
-    step: 'flood_fetch',
-    label: 'Flood Zone Fetch',
-    description: 'Fetching flood zone data',
-    required: false,
-    maxRetries: 2,
-    backoffMs: 500,
-    exponentialBackoff: false,
   },
   {
     step: 'appraisal_rules',
-    label: 'Appraisal Rules',
-    description: 'Applying appraisal filters and adjustments',
+    label: 'Applying Rules',
+    description: 'Filters & price adjustments',
     required: true,
     maxRetries: 1,
     backoffMs: 0,
@@ -216,8 +176,8 @@ export const STEP_CONFIGS: StepConfig[] = [
   },
   {
     step: 'photo_fetch',
-    label: 'Photo Fetch',
-    description: 'Fetching property photos from Zillow',
+    label: 'Fetching Photos',
+    description: 'Property images for analysis',
     required: false,
     maxRetries: 2,
     backoffMs: 2000,
@@ -225,8 +185,8 @@ export const STEP_CONFIGS: StepConfig[] = [
   },
   {
     step: 'comp_selection',
-    label: 'Comp Selection',
-    description: 'LLM-based comparable selection',
+    label: 'AI Analysis',
+    description: 'Classifying property conditions',
     required: false,
     maxRetries: 2,
     backoffMs: 1000,
@@ -234,8 +194,8 @@ export const STEP_CONFIGS: StepConfig[] = [
   },
   {
     step: 'valuation',
-    label: 'Valuation',
-    description: 'Calculating ARV and valuation metrics',
+    label: 'Calculating ARV',
+    description: 'Weighted valuation & metrics',
     required: true,
     maxRetries: 1,
     backoffMs: 0,
@@ -243,8 +203,8 @@ export const STEP_CONFIGS: StepConfig[] = [
   },
   {
     step: 'response_build',
-    label: 'Response Build',
-    description: 'Building final response',
+    label: 'Finalizing',
+    description: 'Building response',
     required: true,
     maxRetries: 1,
     backoffMs: 0,

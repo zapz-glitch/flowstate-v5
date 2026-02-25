@@ -400,7 +400,7 @@ function SubjectPropertyCard({ subject }: { subject: SubjectData }) {
           </div>
           <div>
             <div className="text-sm text-muted-foreground">Beds / Baths</div>
-            <div className="font-medium">{subject.bedsBaths || '?'}</div>
+            <div className="font-medium">{subject.bedrooms ?? '-'} / {subject.bathrooms ?? '-'}</div>
           </div>
           <div>
             <div className="text-sm text-muted-foreground">Square Feet</div>
@@ -455,6 +455,14 @@ function SubjectPropertyCard({ subject }: { subject: SubjectData }) {
                 </div>
               )}
             </div>
+          </div>
+        )}
+
+        {/* Classification Reasoning */}
+        {subject.classification?.reasoning && (
+          <div className="mt-4 p-3 rounded-lg bg-muted/50 border">
+            <div className="text-sm font-medium text-muted-foreground mb-1">Classification Reasoning</div>
+            <div className="text-sm text-foreground/80">{subject.classification.reasoning}</div>
           </div>
         )}
       </CardContent>
@@ -716,7 +724,7 @@ function CompCard({
 
         {/* Quick stats row */}
         <div className="flex gap-4 mt-3 text-sm text-muted-foreground flex-wrap">
-          <span>{comp.bedsBaths || '?'}</span>
+          <span>{comp.bedrooms ?? '-'} bd / {comp.bathrooms ?? '-'} ba</span>
           <span>{comp.squareFeet?.toLocaleString() || '?'} sqft</span>
           <span>Built {comp.yearBuilt || '?'}</span>
           {comp.saleDate && <span>Sold {new Date(comp.saleDate).toLocaleDateString()}</span>}

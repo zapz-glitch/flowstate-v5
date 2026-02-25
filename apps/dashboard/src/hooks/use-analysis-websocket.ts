@@ -154,6 +154,13 @@ export function useAnalysisWebSocket(
               totalDurationMs: data.totalDurationMs,
             }))
 
+            // Close WebSocket - job is done
+            if (wsRef.current) {
+              console.log('[WebSocket] Job completed, closing connection')
+              wsRef.current.close(1000, 'Job completed')
+              wsRef.current = null
+            }
+
             // Fetch the full result via polling endpoint
             if (onComplete) {
               // The result should come with the job_completed message
@@ -171,6 +178,13 @@ export function useAnalysisWebSocket(
               currentStep: null,
               error: data.error,
             }))
+
+            // Close WebSocket - job is done
+            if (wsRef.current) {
+              console.log('[WebSocket] Job failed, closing connection')
+              wsRef.current.close(1000, 'Job failed')
+              wsRef.current = null
+            }
 
             if (onError) {
               onError(data.error)

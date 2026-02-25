@@ -237,6 +237,9 @@ export interface AnalysisResponse {
   subject: {
     address: string
     county: string | null
+    bedrooms: number | null
+    bathrooms: number | null
+    /** @deprecated Use bedrooms and bathrooms separately */
     bedsBaths: string
     squareFeet: number | null
     lotSizeAcres: number | null
@@ -314,6 +317,9 @@ export interface AnalysisResponse {
       squareFeet: number | null
       pricePerSqft: number | null
       distanceMiles: number | null
+      bedrooms: number | null
+      bathrooms: number | null
+      /** @deprecated Use bedrooms and bathrooms separately */
       bedsBaths: string
       yearBuilt: number | null
       adjustedPrice: number | null
@@ -493,7 +499,9 @@ export function buildAnalysisResponse(
       squareFeet: comp.squareFeet,
       pricePerSqft: comp.pricePerSqft,
       distanceMiles: comp.distanceMiles,
-      bedsBaths: `${comp.bedrooms ?? '?'}/${comp.bathrooms ?? '?'}`,
+      bedrooms: comp.bedrooms ?? null,
+      bathrooms: comp.bathrooms ?? null,
+      bedsBaths: `${comp.bedrooms ?? '-'}/${comp.bathrooms ?? '-'}`,
       yearBuilt: comp.yearBuilt,
       adjustedPrice: comp.adjustedSalePrice,
       qualityScore: qualityScore !== null ? Math.round(qualityScore) : null,
@@ -545,7 +553,9 @@ export function buildAnalysisResponse(
     subject: {
       address: `${property.address}, ${property.city}, ${property.state} ${property.zipCode}`,
       county: property.county ?? null,
-      bedsBaths: `${property.bedrooms ?? '?'}/${property.bathrooms ?? '?'}`,
+      bedrooms: property.bedrooms ?? null,
+      bathrooms: property.bathrooms ?? null,
+      bedsBaths: `${property.bedrooms ?? '-'}/${property.bathrooms ?? '-'}`,
       squareFeet: property.squareFeet ?? null,
       lotSizeAcres: property.lotSizeAcres ?? null,
       yearBuilt: property.yearBuilt ?? null,

@@ -217,6 +217,7 @@ analyze.post('/', async (c) => {
     const workflowParams: AnalysisWorkflowParams = {
       jobId,
       userId: auth.userId,
+      propertyKey,
       address: body.address,
       streetAddress: body.streetAddress,
       city: body.city,
