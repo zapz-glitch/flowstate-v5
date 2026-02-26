@@ -55,9 +55,13 @@ async function verifyDashboardAuth(
   return { success: true, user: result }
 }
 
+// Max size for request/response body capture (50KB)
+const MAX_BODY_SIZE = 50 * 1024
+
 /**
  * Capture request body by cloning the request
  * Only captures for methods that typically have bodies
+ * Limits to 50KB to prevent storing excessively large requests
  */
 async function captureRequestBody(c: Context): Promise<string | null> {
   if (!['POST', 'PUT', 'PATCH'].includes(c.req.method)) {
@@ -66,7 +70,12 @@ async function captureRequestBody(c: Context): Promise<string | null> {
   try {
     const clonedRequest = c.req.raw.clone()
     const bodyText = await clonedRequest.text()
-    return bodyText || null
+    if (!bodyText) return null
+    // Truncate large requests
+    if (bodyText.length > MAX_BODY_SIZE) {
+      return bodyText.slice(0, MAX_BODY_SIZE) + '...[truncated]'
+    }
+    return bodyText
   } catch {
     return null
   }
@@ -74,14 +83,43 @@ async function captureRequestBody(c: Context): Promise<string | null> {
 
 /**
  * Capture response body by cloning the response
+ * Limits to 50KB to prevent storing excessively large responses
  */
 async function captureResponseBody(response: Response): Promise<string | null> {
   try {
     const clonedResponse = response.clone()
     const bodyText = await clonedResponse.text()
-    return bodyText || null
+    if (!bodyText) return null
+    // Truncate large responses
+    if (bodyText.length > MAX_BODY_SIZE) {
+      return bodyText.slice(0, MAX_BODY_SIZE) + '...[truncated]'
+    }
+    return bodyText
   } catch {
     return null
+  }
+}
+
+/**
+ * Extract property info from request body for logging/analytics
+ */
+function extractPropertyInfo(requestBody: string | null): {
+  address: string | null
+  city: string | null
+  state: string | null
+} {
+  if (!requestBody) {
+    return { address: null, city: null, state: null }
+  }
+  try {
+    const body = JSON.parse(requestBody)
+    return {
+      address: body.address || body.streetAddress || null,
+      city: body.city || null,
+      state: body.state || null,
+    }
+  } catch {
+    return { address: null, city: null, state: null }
   }
 }
 
@@ -152,10 +190,48 @@ export async function authMiddleware(
 
     await next()
 
-    // Skip usage logging for dashboard requests
-    // The api_usage_logs table has foreign key constraints that require
-    // valid api_key_id and user_id which don't exist for dashboard auth
-    // Dashboard usage is tracked separately in the dashboard's own database
+    // Calculate response time for dashboard requests
+    const dashboardResponseTimeMs = Date.now() - startTime
+
+    // Capture response body for logging
+    const dashboardResponseBody = await captureResponseBody(c.res)
+
+    // Extract property info from request for analytics
+    const dashboardPropertyInfo = extractPropertyInfo(requestBody)
+
+    // Log usage for dashboard requests (apiKeyId is null for dashboard)
+    const dashboardLogId = crypto.randomUUID()
+    try {
+      await c.env.DB.prepare(`
+        INSERT INTO api_usage_logs (
+          id, api_key_id, user_id, endpoint, method, status_code, response_time_ms,
+          property_address, property_city, property_state,
+          ip_address, user_agent, request_body, response_body, request_headers, created_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `)
+        .bind(
+          dashboardLogId,
+          null, // No API key for dashboard requests
+          dashboardAuth.user.id,
+          c.req.path,
+          c.req.method,
+          c.res.status,
+          dashboardResponseTimeMs,
+          dashboardPropertyInfo.address,
+          dashboardPropertyInfo.city,
+          dashboardPropertyInfo.state,
+          c.req.header('CF-Connecting-IP') || c.req.header('X-Forwarded-For') || null,
+          c.req.header('User-Agent') || null,
+          requestBody,
+          dashboardResponseBody,
+          requestHeaders,
+          new Date().toISOString()
+        )
+        .run()
+    } catch (error) {
+      console.error('[Auth] Failed to log dashboard usage:', error)
+    }
 
     return
   }
@@ -282,14 +358,18 @@ export async function authMiddleware(
     .bind(new Date().toISOString(), result.api_key_id)
     .run()
 
-  // Log usage with request/response bodies
+  // Extract property info from request for analytics
+  const propertyInfo = extractPropertyInfo(requestBody)
+
+  // Log usage with request/response bodies and property info
   const logId = crypto.randomUUID()
   await c.env.DB.prepare(`
     INSERT INTO api_usage_logs (
       id, api_key_id, user_id, endpoint, method, status_code, response_time_ms,
+      property_address, property_city, property_state,
       ip_address, user_agent, request_body, response_body, request_headers, created_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `)
     .bind(
       logId,
@@ -299,6 +379,9 @@ export async function authMiddleware(
       c.req.method,
       c.res.status,
       responseTimeMs,
+      propertyInfo.address,
+      propertyInfo.city,
+      propertyInfo.state,
       c.req.header('CF-Connecting-IP') || c.req.header('X-Forwarded-For') || null,
       c.req.header('User-Agent') || null,
       requestBody,

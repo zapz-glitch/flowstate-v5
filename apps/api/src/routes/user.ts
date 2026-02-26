@@ -275,7 +275,7 @@ user.get('/usage', async (c) => {
   })
 })
 
-// GET /user/usage/logs - Get usage logs with pagination
+// GET /user/usage/logs - Get usage logs with pagination and optional API key filter
 user.get('/usage/logs', async (c) => {
   const session = await getSession(c)
   if (!session?.user) {
@@ -285,13 +285,20 @@ user.get('/usage/logs', async (c) => {
   const page = parseInt(c.req.query('page') || '1')
   const limit = Math.min(parseInt(c.req.query('limit') || '20'), 100)
   const offset = (page - 1) * limit
+  const apiKeyId = c.req.query('apiKeyId') // Optional filter by API key
 
   const db = drizzle(c.env.DB)
 
-  // Get logs
+  // Build where conditions
+  const whereConditions = apiKeyId
+    ? and(eq(apiUsageLogs.userId, session.user.id), eq(apiUsageLogs.apiKeyId, apiKeyId))
+    : eq(apiUsageLogs.userId, session.user.id)
+
+  // Get logs with API key info
   const logs = await db
     .select({
       id: apiUsageLogs.id,
+      apiKeyId: apiUsageLogs.apiKeyId,
       endpoint: apiUsageLogs.endpoint,
       method: apiUsageLogs.method,
       statusCode: apiUsageLogs.statusCode,
@@ -302,16 +309,16 @@ user.get('/usage/logs', async (c) => {
       createdAt: apiUsageLogs.createdAt,
     })
     .from(apiUsageLogs)
-    .where(eq(apiUsageLogs.userId, session.user.id))
+    .where(whereConditions)
     .orderBy(desc(apiUsageLogs.createdAt))
     .limit(limit)
     .offset(offset)
 
-  // Get total count
+  // Get total count with same filter
   const countResult = await db
     .select({ count: sql<number>`count(*)` })
     .from(apiUsageLogs)
-    .where(eq(apiUsageLogs.userId, session.user.id))
+    .where(whereConditions)
 
   const total = countResult[0]?.count || 0
 

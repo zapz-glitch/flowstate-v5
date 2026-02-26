@@ -6,9 +6,10 @@
  */
 
 import type { PropertyBundle } from '../property-api'
+import type { NormalizedProperty, NormalizedComparable } from '../property-api/types'
 import type { AppraisedComparable, AppraisalResultWithFallback, WeightedARVResult } from '../appraisal'
 import type { CompSelectionResult } from '../comp-selection'
-import type { PhotoBundle } from '../photo-provider'
+import type { PhotoBundle, PropertyPhotos } from '../photo-provider'
 import type { MajorItem } from '../valuation'
 import type { ClassificationResult, PropertyClassification } from '../classification'
 
@@ -16,7 +17,180 @@ import type { ClassificationResult, PropertyClassification } from '../classifica
 export type { PropertyBundle } from '../property-api'
 export type { AppraisedComparable, AppraisalResultWithFallback } from '../appraisal'
 export type { CompSelectionResult } from '../comp-selection'
-export type { PhotoBundle } from '../photo-provider'
+export type { PhotoBundle, PropertyPhotos } from '../photo-provider'
+
+// ─── Zillow Data Merge Utility ────────────────────────────────────────────────
+
+/**
+ * Tracks which fields were supplemented from Zillow for a property
+ */
+export interface SupplementedField {
+  field: string
+  value: string | number
+  source: 'zillow'
+}
+
+/**
+ * Result of merging Zillow data into a property
+ */
+export interface MergeResult<T> {
+  property: T
+  supplementedFields: SupplementedField[]
+}
+
+/**
+ * Merge Zillow listing data into a property to fill missing CoreLogic fields.
+ * Zillow data is used as a fallback when CoreLogic data is null/undefined.
+ * Returns both the merged property and a list of which fields were supplemented.
+ *
+ * Fields that can be supplemented from Zillow:
+ * - bedrooms
+ * - bathrooms
+ * - squareFeet
+ * - yearBuilt
+ * - lastSaleDate / lastSalePrice
+ */
+export function mergeZillowDataIntoProperty<T extends NormalizedProperty | NormalizedComparable>(
+  property: T,
+  zillowData: PropertyPhotos | null | undefined
+): MergeResult<T> {
+  const supplementedFields: SupplementedField[] = []
+
+  if (!zillowData) return { property, supplementedFields }
+
+  // Create a copy to avoid mutating the original
+  const merged = { ...property }
+
+  // Merge bedrooms if missing
+  if (merged.bedrooms == null && zillowData.bedrooms != null) {
+    merged.bedrooms = zillowData.bedrooms
+    supplementedFields.push({ field: 'bedrooms', value: zillowData.bedrooms, source: 'zillow' })
+    console.log(`[ZillowMerge] Supplemented bedrooms from Zillow: ${zillowData.bedrooms}`)
+  }
+
+  // Merge bathrooms if missing
+  if (merged.bathrooms == null && zillowData.bathrooms != null) {
+    merged.bathrooms = zillowData.bathrooms
+    supplementedFields.push({ field: 'bathrooms', value: zillowData.bathrooms, source: 'zillow' })
+    console.log(`[ZillowMerge] Supplemented bathrooms from Zillow: ${zillowData.bathrooms}`)
+  }
+
+  // Merge squareFeet if missing
+  if (merged.squareFeet == null && zillowData.squareFeet != null) {
+    merged.squareFeet = zillowData.squareFeet
+    supplementedFields.push({ field: 'squareFeet', value: zillowData.squareFeet, source: 'zillow' })
+    console.log(`[ZillowMerge] Supplemented squareFeet from Zillow: ${zillowData.squareFeet}`)
+  }
+
+  // Merge yearBuilt if missing
+  if (merged.yearBuilt == null && zillowData.yearBuilt != null) {
+    merged.yearBuilt = zillowData.yearBuilt
+    supplementedFields.push({ field: 'yearBuilt', value: zillowData.yearBuilt, source: 'zillow' })
+    console.log(`[ZillowMerge] Supplemented yearBuilt from Zillow: ${zillowData.yearBuilt}`)
+  }
+
+  // For comparables, merge sale data if missing
+  if ('saleDate' in merged && 'salePrice' in merged) {
+    const comp = merged as NormalizedComparable
+
+    // Merge sale date if missing
+    if (comp.saleDate == null && zillowData.lastSaleDate != null) {
+      comp.saleDate = zillowData.lastSaleDate
+      supplementedFields.push({ field: 'saleDate', value: zillowData.lastSaleDate, source: 'zillow' })
+      console.log(`[ZillowMerge] Supplemented saleDate from Zillow: ${zillowData.lastSaleDate}`)
+    }
+
+    // Merge sale price if missing
+    if (comp.salePrice == null && zillowData.lastSalePrice != null) {
+      comp.salePrice = zillowData.lastSalePrice
+      supplementedFields.push({ field: 'salePrice', value: zillowData.lastSalePrice, source: 'zillow' })
+      console.log(`[ZillowMerge] Supplemented salePrice from Zillow: ${zillowData.lastSalePrice}`)
+
+      // Recalculate price per sqft if we have both price and sqft
+      if (comp.squareFeet && comp.squareFeet > 0) {
+        comp.pricePerSqft = Math.round(comp.salePrice / comp.squareFeet)
+      }
+    }
+  }
+
+  // For subject property, merge last sale data if missing
+  if ('lastSaleDate' in merged && 'lastSalePrice' in merged) {
+    const subject = merged as NormalizedProperty
+
+    // Merge last sale date if missing
+    if (subject.lastSaleDate == null && zillowData.lastSaleDate != null) {
+      subject.lastSaleDate = zillowData.lastSaleDate
+      supplementedFields.push({ field: 'lastSaleDate', value: zillowData.lastSaleDate, source: 'zillow' })
+      console.log(`[ZillowMerge] Supplemented lastSaleDate from Zillow: ${zillowData.lastSaleDate}`)
+    }
+
+    // Merge last sale price if missing
+    if (subject.lastSalePrice == null && zillowData.lastSalePrice != null) {
+      subject.lastSalePrice = zillowData.lastSalePrice
+      supplementedFields.push({ field: 'lastSalePrice', value: zillowData.lastSalePrice, source: 'zillow' })
+      console.log(`[ZillowMerge] Supplemented lastSalePrice from Zillow: ${zillowData.lastSalePrice}`)
+
+      // Recalculate price per sqft if we have both price and sqft
+      if (subject.squareFeet && subject.squareFeet > 0) {
+        subject.pricePerSqft = Math.round(subject.lastSalePrice / subject.squareFeet)
+      }
+    }
+  }
+
+  return { property: merged as T, supplementedFields }
+}
+
+/**
+ * Result of merging Zillow data into the entire bundle
+ */
+export interface BundleMergeResult {
+  bundle: PropertyBundle
+  subjectSupplementedFields: SupplementedField[]
+  compSupplementedFields: Map<string, SupplementedField[]>
+}
+
+/**
+ * Merge Zillow data into property bundle
+ * Supplements missing CoreLogic data with Zillow listing data
+ * Returns the merged bundle and tracks which fields were supplemented
+ */
+export function mergeZillowDataIntoBundle(
+  bundle: PropertyBundle,
+  photoBundle: PhotoBundle | null
+): BundleMergeResult {
+  const compSupplementedFields = new Map<string, SupplementedField[]>()
+
+  if (!photoBundle) {
+    return {
+      bundle,
+      subjectSupplementedFields: [],
+      compSupplementedFields,
+    }
+  }
+
+  // Merge subject property
+  const subjectResult = mergeZillowDataIntoProperty(bundle.property, photoBundle.subject)
+
+  // Merge comparables
+  const mergedComps = bundle.comparables.map((comp) => {
+    const compPhotos = photoBundle.comps[comp.id]
+    const result = mergeZillowDataIntoProperty(comp, compPhotos)
+    if (result.supplementedFields.length > 0) {
+      compSupplementedFields.set(comp.id, result.supplementedFields)
+    }
+    return result.property
+  })
+
+  return {
+    bundle: {
+      ...bundle,
+      property: subjectResult.property,
+      comparables: mergedComps,
+    },
+    subjectSupplementedFields: subjectResult.supplementedFields,
+    compSupplementedFields,
+  }
+}
 
 // ─── Date Formatting ─────────────────────────────────────────────────────────
 
@@ -138,27 +312,59 @@ export function calculateCompQualityScore(
 
 /**
  * Select best comp based on data quality when LLM selection is not available
+ *
+ * For ARV calculation, ALWAYS prioritizes after_renovation comps since
+ * ARV = After Repair Value (what property will be worth after renovation)
+ *
+ * @param comps - List of appraised comps
+ * @param subjectSqft - Subject property square footage
+ * @param subjectYearBuilt - Subject property year built
+ * @param afterRenovationCompIds - IDs of comps classified as after_renovation (optional)
  */
 export function selectBestCompFromData(
   comps: AppraisedComparable[],
   subjectSqft: number | null,
-  subjectYearBuilt: number | null
+  subjectYearBuilt: number | null,
+  afterRenovationCompIds?: string[]
 ): { bestCompId: string | null; scores: Map<string, number> } {
   if (comps.length === 0) {
     return { bestCompId: null, scores: new Map() }
   }
 
   const scores = new Map<string, number>()
-  let bestCompId: string | null = null
-  let bestScore = -1
 
+  // Calculate scores for all comps
   for (const comp of comps) {
     const score = calculateCompQualityScore(comp, subjectSqft, subjectYearBuilt)
     scores.set(comp.id, score)
+  }
 
-    if (score > bestScore) {
-      bestScore = score
-      bestCompId = comp.id
+  // For ARV, prioritize after_renovation comps
+  // Find the best after_renovation comp first
+  let bestCompId: string | null = null
+  let bestScore = -1
+
+  if (afterRenovationCompIds && afterRenovationCompIds.length > 0) {
+    // First try to find best among after_renovation comps
+    for (const comp of comps) {
+      if (afterRenovationCompIds.includes(comp.id)) {
+        const score = scores.get(comp.id) ?? 0
+        if (score > bestScore) {
+          bestScore = score
+          bestCompId = comp.id
+        }
+      }
+    }
+  }
+
+  // Fallback: if no after_renovation comps, use overall best score
+  if (bestCompId === null) {
+    for (const comp of comps) {
+      const score = scores.get(comp.id) ?? 0
+      if (score > bestScore) {
+        bestScore = score
+        bestCompId = comp.id
+      }
     }
   }
 
@@ -205,6 +411,10 @@ export interface ResponseContext {
   compClassifications?: Map<string, ClassificationResult>
   /** Weighted ARV result (if classification was performed) */
   weightedARVResult?: WeightedARVResult
+  /** Fields supplemented from Zillow for subject property */
+  subjectSupplementedFields?: SupplementedField[]
+  /** Fields supplemented from Zillow for each comp (by comp ID) */
+  compSupplementedFields?: Map<string, SupplementedField[]>
 }
 
 /**
@@ -254,7 +464,7 @@ export interface AnalysisResponse {
     } | null
     taxAssessment: number | null
     photos: string[]
-    /** Property classification (as_is, after_renovation, transitional) */
+    /** Property classification (as_is or after_renovation) */
     classification: ClassificationSummary | null
   }
   valuation: {
@@ -307,8 +517,6 @@ export interface AnalysisResponse {
     asIsCompIds: string[]
     /** IDs of comps classified as After-Renovation */
     afterRenovationCompIds: string[]
-    /** IDs of transitional comps */
-    transitionalCompIds: string[]
     items: Array<{
       id: string
       address: string
@@ -337,7 +545,7 @@ export interface AnalysisResponse {
       isEnabled: boolean
       /** Reasons why this comp was disabled (if any) */
       disableReasons: string[]
-      /** Property classification (as_is, after_renovation, transitional) */
+      /** Property classification (as_is or after_renovation) */
       classification: ClassificationSummary | null
       /** Weight contribution to ARV calculation (0-1) */
       weightInArv: number | null
@@ -376,6 +584,25 @@ export interface AnalysisResponse {
     inFloodZone: boolean
     description: string | null
   } | null
+  /** Data supplemented from Zillow when CoreLogic data was missing */
+  dataSupplemented: {
+    /** Whether any data was supplemented from Zillow */
+    hasSupplementedData: boolean
+    /** Human-readable remarks about what was supplemented */
+    remarks: string[]
+    /** Fields supplemented for subject property */
+    subject: Array<{
+      field: string
+      value: string | number
+      source: 'zillow'
+    }>
+    /** Fields supplemented for comps (by comp ID) */
+    comps: Record<string, Array<{
+      field: string
+      value: string | number
+      source: 'zillow'
+    }>>
+  }
   meta: {
     analysisId: string
     timestamp: string
@@ -612,7 +839,6 @@ export function buildAnalysisResponse(
       medianPrice: appraisalResult.medianSalePrice,
       asIsCompIds: ctx.weightedARVResult?.asIsCompIds ?? [],
       afterRenovationCompIds: ctx.weightedARVResult?.afterRenovationCompIds ?? [],
-      transitionalCompIds: ctx.weightedARVResult?.transitionalCompIds ?? [],
       items: allComps,
     },
 
@@ -637,6 +863,9 @@ export function buildAnalysisResponse(
         }
       : null,
 
+    // ═══ DATA SUPPLEMENTED ═══════════════════════════════════════════════════
+    dataSupplemented: buildDataSupplementedSection(ctx),
+
     // ═══ METADATA ═══════════════════════════════════════════════════════════
     meta: {
       analysisId,
@@ -644,4 +873,58 @@ export function buildAnalysisResponse(
       dataProvider: property.provider,
     },
   }
+}
+
+/**
+ * Build the dataSupplemented section with human-readable remarks
+ */
+function buildDataSupplementedSection(ctx: ResponseContext): AnalysisResponse['dataSupplemented'] {
+  const subjectFields = ctx.subjectSupplementedFields ?? []
+  const compFieldsMap = ctx.compSupplementedFields ?? new Map()
+
+  // Convert comp fields map to plain object
+  const compsObj: Record<string, Array<{ field: string; value: string | number; source: 'zillow' }>> = {}
+  for (const [compId, fields] of compFieldsMap) {
+    compsObj[compId] = fields
+  }
+
+  const hasSupplementedData = subjectFields.length > 0 || compFieldsMap.size > 0
+
+  // Build human-readable remarks
+  const remarks: string[] = []
+
+  if (subjectFields.length > 0) {
+    const fieldNames = subjectFields.map(f => formatFieldName(f.field)).join(', ')
+    remarks.push(`Subject property: ${fieldNames} supplemented from Zillow`)
+  }
+
+  if (compFieldsMap.size > 0) {
+    const compCount = compFieldsMap.size
+    const totalFields = Array.from(compFieldsMap.values()).reduce((sum, fields) => sum + fields.length, 0)
+    remarks.push(`${compCount} comparable${compCount > 1 ? 's' : ''}: ${totalFields} field${totalFields > 1 ? 's' : ''} supplemented from Zillow`)
+  }
+
+  return {
+    hasSupplementedData,
+    remarks,
+    subject: subjectFields,
+    comps: compsObj,
+  }
+}
+
+/**
+ * Format field name for human-readable display
+ */
+function formatFieldName(field: string): string {
+  const fieldLabels: Record<string, string> = {
+    bedrooms: 'bedrooms',
+    bathrooms: 'bathrooms',
+    squareFeet: 'square footage',
+    yearBuilt: 'year built',
+    saleDate: 'sale date',
+    salePrice: 'sale price',
+    lastSaleDate: 'last sale date',
+    lastSalePrice: 'last sale price',
+  }
+  return fieldLabels[field] ?? field
 }

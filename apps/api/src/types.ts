@@ -38,21 +38,8 @@ export interface Env {
   ANALYSIS_WORKFLOW: WorkflowBinding<AnalysisWorkflowParams>
 
   // ─── Property Data (CoreLogic) ─────────────────────────────────────────────
-  // Support multiple keys for rotation (100 calls/day each)
-  CORELOGIC_CLIENT_ID_0?: string
-  CORELOGIC_CLIENT_SECRET_0?: string
-  CORELOGIC_CLIENT_ID_1?: string
-  CORELOGIC_CLIENT_SECRET_1?: string
-  CORELOGIC_CLIENT_ID_2?: string
-  CORELOGIC_CLIENT_SECRET_2?: string
-  CORELOGIC_CLIENT_ID_3?: string
-  CORELOGIC_CLIENT_SECRET_3?: string
-  CORELOGIC_CLIENT_ID_4?: string
-  CORELOGIC_CLIENT_SECRET_4?: string
-  CORELOGIC_CLIENT_ID_5?: string
-  CORELOGIC_CLIENT_SECRET_5?: string
-  CORELOGIC_CLIENT_ID_6?: string
-  CORELOGIC_CLIENT_SECRET_6?: string
+  CORELOGIC_CLIENT_ID?: string
+  CORELOGIC_CLIENT_SECRET?: string
 
   // ─── Vision Analysis (OpenRouter LLM) ──────────────────────────────────────
   // OpenRouter provides access to multiple models via single API

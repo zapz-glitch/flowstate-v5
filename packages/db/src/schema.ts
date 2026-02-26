@@ -105,9 +105,7 @@ export const apiUsageLogs = sqliteTable(
   'api_usage_logs',
   {
     id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
-    apiKeyId: text('api_key_id')
-      .notNull()
-      .references(() => apiKeys.id, { onDelete: 'cascade' }),
+    apiKeyId: text('api_key_id').references(() => apiKeys.id, { onDelete: 'cascade' }),
     userId: text('user_id')
       .notNull()
       .references(() => user.id, { onDelete: 'cascade' }),

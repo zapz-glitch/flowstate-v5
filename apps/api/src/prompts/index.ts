@@ -200,11 +200,11 @@ You must respond with valid JSON only.`
 
 const PROPERTY_CLASSIFICATION = `You are a real estate investment analyst classifying properties as either AS-IS (needs renovation) or AFTER-RENOVATION (renovated/turnkey).
 
-Analyze the provided photos and property description to classify this property.
+Analyze the provided photos and property description to classify this property. You MUST choose one of the two classifications - there is no middle ground.
 
 RETURN THIS EXACT JSON:
 {
-  "classification": "as_is" | "after_renovation" | "transitional",
+  "classification": "as_is" | "after_renovation",
   "confidence": <0-100>,
   "photoAnalysis": {
     "conditionScore": <0-100>,
@@ -227,6 +227,8 @@ AS-IS (Investment Property - Needs Work):
 - Worn flooring (stained carpet, damaged hardwood, old linoleum)
 - Deferred maintenance visible (peeling paint, overgrown yard)
 - Keywords: "investor", "handyman", "fixer", "as-is", "potential", "estate sale"
+- Partial updates but majority still dated = AS-IS
+- Priced significantly below market average = AS-IS
 
 AFTER-RENOVATION (Retail Ready):
 - Modern kitchen (shaker cabinets, granite/quartz, stainless appliances)
@@ -234,27 +236,24 @@ AFTER-RENOVATION (Retail Ready):
 - New flooring (LVP, new hardwood, new tile)
 - Fresh paint, modern lighting, updated fixtures
 - Keywords: "renovated", "updated", "turnkey", "move-in ready", "remodeled"
+- Recently staged and clean with modern finishes = AFTER-RENOVATION
+- Priced at or above market average = AFTER-RENOVATION
 
-TRANSITIONAL (Gray Area):
-- Mix of old and new
-- Partial updates (one room done, others original)
-- Recently cleaned/staged but not renovated
-- Could go either way based on buyer
+DECISION RULE: If uncertain, lean toward AS-IS for properties showing ANY significant dated elements. Only classify as AFTER-RENOVATION when the property is clearly move-in ready with modern finishes throughout.
 
 SCORING GUIDANCE:
 
 conditionScore (0-100):
-- 0-25: Major distress, needs full gut renovation
-- 25-40: Significant work needed, dated throughout
-- 40-60: Transitional, some updates but dated areas remain
-- 60-80: Mostly updated, minor cosmetic work at most
-- 80-100: Fully renovated, turnkey condition
+- 0-25: Major distress, needs full gut renovation (AS-IS)
+- 25-50: Significant work needed, dated throughout (AS-IS)
+- 50-75: Mostly updated, minor cosmetic work at most (lean AFTER-RENOVATION)
+- 75-100: Fully renovated, turnkey condition (AFTER-RENOVATION)
 
 confidence (0-100):
 - 90-100: Clear indicators, high certainty
 - 70-89: Good indicators, reasonable certainty
-- 50-69: Mixed signals, moderate certainty
-- Below 50: Insufficient data or conflicting indicators
+- 50-69: Mixed signals, moderate certainty (make a decision anyway)
+- Below 50: Insufficient data (make best guess, note uncertainty in reasoning)
 
 Return ONLY valid JSON.`
 

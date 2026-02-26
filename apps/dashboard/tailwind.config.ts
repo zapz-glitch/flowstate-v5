@@ -30,13 +30,29 @@ const config: Config = {
         ],
       },
       fontSize: {
-        'display-1': ['4.5rem', { lineHeight: '1', letterSpacing: '-0.02em', fontWeight: '700' }],
-        'display-2': ['3.75rem', { lineHeight: '1.1', letterSpacing: '-0.02em', fontWeight: '700' }],
-        'display-3': ['3rem', { lineHeight: '1.1', letterSpacing: '-0.01em', fontWeight: '600' }],
+        // Display - for hero sections, primary numbers
+        'display-lg': ['2.75rem', { lineHeight: '1.1', letterSpacing: '-0.025em', fontWeight: '700' }],
+        'display': ['2rem', { lineHeight: '1.15', letterSpacing: '-0.02em', fontWeight: '700' }],
+        'display-sm': ['1.5rem', { lineHeight: '1.2', letterSpacing: '-0.015em', fontWeight: '600' }],
+        // Headings - for page titles, section headers
+        'heading-lg': ['1.25rem', { lineHeight: '1.3', letterSpacing: '-0.01em', fontWeight: '600' }],
+        'heading': ['1.125rem', { lineHeight: '1.4', letterSpacing: '-0.01em', fontWeight: '600' }],
+        'heading-sm': ['1rem', { lineHeight: '1.4', fontWeight: '600' }],
+        // Body - for regular content
+        'body-lg': ['0.9375rem', { lineHeight: '1.6', fontWeight: '400' }],
+        'body': ['0.875rem', { lineHeight: '1.6', fontWeight: '400' }],
+        'body-sm': ['0.8125rem', { lineHeight: '1.5', fontWeight: '400' }],
+        // Caption - for labels, metadata
+        'caption': ['0.75rem', { lineHeight: '1.4', fontWeight: '500' }],
+        'caption-sm': ['0.6875rem', { lineHeight: '1.4', fontWeight: '500' }],
       },
       colors: {
         background: 'hsl(var(--background))',
-        foreground: 'hsl(var(--foreground))',
+        foreground: {
+          DEFAULT: 'hsl(var(--foreground))',
+          secondary: 'hsl(var(--foreground-secondary))',
+          tertiary: 'hsl(var(--foreground-tertiary))',
+        },
         card: {
           DEFAULT: 'hsl(var(--card))',
           hover: 'hsl(var(--card-hover))',

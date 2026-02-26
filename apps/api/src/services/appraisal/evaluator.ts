@@ -295,15 +295,6 @@ function calculateGarageAdjustment(
   }
 }
 
-function calculateCarportAdjustment(
-  _subject: NormalizedProperty,
-  _comp: NormalizedComparable,
-  _adjustment: AppraisalAdjustment
-): AdjustmentResult {
-  // Carport data typically not available from APIs
-  return { type: 'carport', applied: false, amount: 0, reason: 'Carport data not available' }
-}
-
 const ADJUSTMENT_CALCULATORS: Record<
   AdjustmentType,
   (subject: NormalizedProperty, comp: NormalizedComparable, adjustment: AppraisalAdjustment) => AdjustmentResult
@@ -313,7 +304,6 @@ const ADJUSTMENT_CALCULATORS: Record<
   bathroom: calculateBathroomAdjustment,
   pool: calculatePoolAdjustment,
   garage: calculateGarageAdjustment,
-  carport: calculateCarportAdjustment,
 }
 
 // ─── Helper Functions ──────────────────────────────────────────────────────────

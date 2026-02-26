@@ -153,9 +153,8 @@ export interface FetchedPhotos {
  * Property classification type for investment analysis
  * - as_is: Property needs renovation (investor/fixer properties)
  * - after_renovation: Property is renovated/turnkey (retail ready)
- * - transitional: Mix of old and new, could go either way
  */
-export type PropertyClassification = 'as_is' | 'after_renovation' | 'transitional'
+export type PropertyClassification = 'as_is' | 'after_renovation'
 
 /**
  * Method used to determine classification

@@ -102,16 +102,16 @@ export default function DashboardPage() {
     stats.totalQuota > 0 ? Math.round((stats.totalUsage / stats.totalQuota) * 100) : 0
 
   return (
-    <div className="space-y-8 animate-in fade-in duration-500">
+    <div className="space-y-10 animate-in fade-in duration-500">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 className="text-2xl sm:text-3xl font-bold text-foreground tracking-tight">Dashboard</h1>
-          <p className="text-muted-foreground mt-1">Overview of your API usage and activity</p>
+      <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
+        <div className="space-y-1">
+          <h1 className="text-heading-lg text-foreground tracking-tight">Dashboard</h1>
+          <p className="text-body text-foreground-tertiary">Overview of your API usage and activity</p>
         </div>
         <Link
           href="/dashboard/api-keys?create=true"
-          className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg bg-purple-600 text-white font-medium text-sm shadow-lg shadow-purple-600/20 hover:bg-purple-700 hover:shadow-purple-600/30 transition-all duration-200"
+          className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-primary text-primary-foreground font-medium text-body shadow-lg shadow-primary/20 hover:bg-primary/90 hover:shadow-primary/30 transition-all duration-200"
         >
           <Plus className="w-4 h-4" />
           Create API Key
@@ -119,7 +119,7 @@ export default function DashboardPage() {
       </div>
 
       {/* Stats Grid */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-5">
         <StatCard
           title="API Keys"
           value={stats.apiKeysCount.toString()}
@@ -150,27 +150,27 @@ export default function DashboardPage() {
       </div>
 
       {/* Quick Start Section */}
-      <div className="rounded-xl border border-border bg-card overflow-hidden">
-        <div className="px-6 py-4 border-b border-border">
-          <h2 className="text-lg font-semibold text-foreground">Quick Start</h2>
-          <p className="text-sm text-muted-foreground mt-0.5">Get started with the Flowstate API in minutes</p>
+      <div className="rounded-2xl border border-border/60 bg-card overflow-hidden shadow-sm shadow-black/[0.02] dark:shadow-black/[0.08]">
+        <div className="px-6 py-5 border-b border-border/60">
+          <h2 className="text-heading font-semibold text-foreground">Quick Start</h2>
+          <p className="text-body-sm text-foreground-tertiary mt-1">Get started with the Flowstate API in minutes</p>
         </div>
 
         <div className="p-6">
-          <div className="grid gap-6 md:grid-cols-2 mb-6">
+          <div className="grid gap-8 md:grid-cols-2 mb-8">
             {/* Step 1 */}
             <div className="flex gap-4">
-              <div className="flex-shrink-0 w-8 h-8 rounded-lg bg-purple-600 text-white flex items-center justify-center text-sm font-bold">
+              <div className="flex-shrink-0 w-10 h-10 rounded-xl bg-primary text-primary-foreground flex items-center justify-center text-body font-bold">
                 1
               </div>
               <div>
-                <h3 className="font-medium text-foreground mb-1">Create an API Key</h3>
-                <p className="text-sm text-muted-foreground mb-3">
+                <h3 className="text-body font-semibold text-foreground mb-1.5">Create an API Key</h3>
+                <p className="text-body-sm text-foreground-tertiary mb-3">
                   Generate your first API key to authenticate requests.
                 </p>
                 <Link
                   href="/dashboard/api-keys?create=true"
-                  className="inline-flex items-center gap-1.5 text-sm font-medium text-purple-600 dark:text-purple-400 hover:text-purple-700 dark:hover:text-purple-300 transition-colors"
+                  className="inline-flex items-center gap-1.5 text-body-sm font-medium text-primary hover:text-primary/80 transition-colors"
                 >
                   Create Key
                   <ArrowRight className="w-3.5 h-3.5" />
@@ -180,17 +180,17 @@ export default function DashboardPage() {
 
             {/* Step 2 */}
             <div className="flex gap-4">
-              <div className="flex-shrink-0 w-8 h-8 rounded-lg bg-emerald-600 text-white flex items-center justify-center text-sm font-bold">
+              <div className="flex-shrink-0 w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center text-body font-bold">
                 2
               </div>
               <div>
-                <h3 className="font-medium text-foreground mb-1">Make Your First Request</h3>
-                <p className="text-sm text-muted-foreground mb-3">
+                <h3 className="text-body font-semibold text-foreground mb-1.5">Make Your First Request</h3>
+                <p className="text-body-sm text-foreground-tertiary mb-3">
                   Use your API key to analyze property valuations.
                 </p>
                 <Link
                   href="/docs"
-                  className="inline-flex items-center gap-1.5 text-sm font-medium text-purple-600 dark:text-purple-400 hover:text-purple-700 dark:hover:text-purple-300 transition-colors"
+                  className="inline-flex items-center gap-1.5 text-body-sm font-medium text-primary hover:text-primary/80 transition-colors"
                 >
                   View Documentation
                   <ArrowRight className="w-3.5 h-3.5" />
@@ -200,19 +200,19 @@ export default function DashboardPage() {
           </div>
 
           {/* Code Example */}
-          <div className="rounded-lg border border-border overflow-hidden bg-secondary/30">
-            <div className="flex items-center justify-between px-4 py-2.5 border-b border-border bg-secondary/50">
+          <div className="rounded-xl border border-border/60 overflow-hidden bg-secondary/30">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-border/60 bg-secondary/50">
               <div className="flex items-center gap-2">
                 <div className="flex gap-1.5">
                   <div className="w-3 h-3 rounded-full bg-red-400/80" />
                   <div className="w-3 h-3 rounded-full bg-yellow-400/80" />
                   <div className="w-3 h-3 rounded-full bg-green-400/80" />
                 </div>
-                <span className="text-xs text-muted-foreground font-medium ml-2">terminal</span>
+                <span className="text-caption-sm text-foreground-tertiary ml-2">terminal</span>
               </div>
               <button
                 onClick={copyCode}
-                className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                className="flex items-center gap-1.5 text-caption-sm text-foreground-tertiary hover:text-foreground transition-colors"
               >
                 {copied ? (
                   <>
@@ -227,7 +227,7 @@ export default function DashboardPage() {
                 )}
               </button>
             </div>
-            <pre className="p-4 text-sm text-foreground/90 overflow-x-auto font-mono">
+            <pre className="p-4 text-body-sm text-foreground/90 overflow-x-auto font-mono">
               <code>{`curl -X POST https://api.flowstate.homes/v1/valuation/analyze \\
   -H "Authorization: Bearer YOUR_API_KEY" \\
   -H "Content-Type: application/json" \\
@@ -270,20 +270,30 @@ function StatCard({
   const content = (
     <div
       className={cn(
-        'rounded-lg border border-border bg-card px-3 py-2.5 transition-all duration-200',
-        href && 'hover:border-border/80 hover:shadow-sm cursor-pointer'
+        'rounded-2xl border border-border/60 bg-card p-5 transition-all duration-200',
+        'shadow-sm shadow-black/[0.02] dark:shadow-black/[0.08]',
+        href && 'hover:border-border hover:shadow-md cursor-pointer group'
       )}
     >
-      <div className="flex items-center gap-2.5">
-        <div className={cn('w-8 h-8 rounded-md flex items-center justify-center flex-shrink-0', styles.bg)}>
-          <Icon className={cn('w-4 h-4', styles.icon)} />
+      <div className="flex items-start justify-between">
+        <div className="space-y-3">
+          <p className="text-caption text-foreground-tertiary">{title}</p>
+          <p className="text-display-sm font-bold text-foreground tracking-tight">{value}</p>
         </div>
-        <div className="flex-1 min-w-0">
-          <p className="text-[11px] text-muted-foreground leading-none mb-0.5">{title}</p>
-          <p className="text-lg font-semibold text-foreground leading-tight">{value}</p>
+        <div className={cn(
+          'w-10 h-10 rounded-xl flex items-center justify-center',
+          styles.bg,
+          'transition-transform duration-200 group-hover:scale-105'
+        )}>
+          <Icon className={cn('w-5 h-5', styles.icon)} />
         </div>
-        {href && <ArrowRight className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />}
       </div>
+      {href && (
+        <div className="mt-4 pt-4 border-t border-border/50 flex items-center text-caption text-primary font-medium">
+          View details
+          <ArrowRight className="w-3.5 h-3.5 ml-1.5 transition-transform group-hover:translate-x-1" />
+        </div>
+      )}
     </div>
   )
 

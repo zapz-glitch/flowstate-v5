@@ -29,16 +29,12 @@ export default async function ApiKeysPage() {
   }
 
   return (
-    <div className="space-y-8">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-neutral-900 dark:text-white">
-            API Keys
-          </h1>
-          <p className="text-neutral-600 dark:text-neutral-400 mt-1">
-            Manage your API keys for authentication
-          </p>
-        </div>
+    <div className="space-y-10 animate-in fade-in duration-500">
+      <div className="space-y-1">
+        <h1 className="text-heading-lg text-foreground tracking-tight">API Keys</h1>
+        <p className="text-body text-foreground-tertiary">
+          Manage your API keys for authentication
+        </p>
       </div>
 
       <ApiKeysList

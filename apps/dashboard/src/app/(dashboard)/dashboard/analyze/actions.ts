@@ -3,6 +3,34 @@
 import { getSession } from '@/lib/api'
 import { getCloudflareEnv } from '@/lib/cloudflare'
 
+// ─── Logging Utilities ───────────────────────────────────────────────────────
+
+const LOG_PREFIX = '[Dashboard Analyze]'
+
+function log(message: string, data?: unknown) {
+  const timestamp = new Date().toISOString()
+  if (data) {
+    console.log(`${LOG_PREFIX} ${timestamp} ${message}`, data)
+  } else {
+    console.log(`${LOG_PREFIX} ${timestamp} ${message}`)
+  }
+}
+
+function logError(message: string, error?: unknown) {
+  const timestamp = new Date().toISOString()
+  console.error(`${LOG_PREFIX} ${timestamp} ✗ ${message}`, error)
+}
+
+function logApiCall(method: string, url: string, status?: number, durationMs?: number) {
+  const timestamp = new Date().toISOString()
+  if (status !== undefined) {
+    const statusEmoji = status >= 200 && status < 300 ? '✓' : '✗'
+    console.log(`${LOG_PREFIX} ${timestamp} ← ${method} ${url} ${statusEmoji} ${status} (${durationMs}ms)`)
+  } else {
+    console.log(`${LOG_PREFIX} ${timestamp} → ${method} ${url}`)
+  }
+}
+
 // Get API URL - inlined at build time via next.config.js
 function getApiUrl(): string {
   return process.env.NEXT_PUBLIC_API_URL!
@@ -28,6 +56,8 @@ export interface AnalyzeRequest {
   }
   /** Skip cache and fetch fresh data from APIs */
   skipCache?: boolean
+  /** Appraisal preset ID to use for filters and adjustments */
+  appraisalPresetId?: string
 }
 
 export type AnalyzeResult =
@@ -241,16 +271,22 @@ export interface JobStatusResult {
  * 3. Return the token-authenticated WebSocket URL
  */
 export async function queueAnalysis(request: AnalyzeRequest): Promise<QueueAnalysisResult> {
+  log('queueAnalysis called', { address: request.address, skipCache: request.skipCache })
+
   const session = await getSession()
   if (!session?.user) {
+    logError('User not authenticated')
     return {
       success: false,
       error: 'Not authenticated. Please log in to use this feature.',
     }
   }
 
+  log(`User authenticated: ${session.user.id} (${session.user.email})`)
+
   const dashboardSecret = await getDashboardSecret()
   if (!dashboardSecret) {
+    logError('Dashboard secret not configured')
     return {
       success: false,
       error: 'Dashboard configuration error. Please contact support.',
@@ -261,24 +297,35 @@ export async function queueAnalysis(request: AnalyzeRequest): Promise<QueueAnaly
     const apiUrl = await getApiUrl()
 
     // Step 1: Queue the analysis job
-    const response = await fetch(`${apiUrl}/v1/analyze`, {
+    const analyzeUrl = `${apiUrl}/v1/analyze`
+    const requestBody = {
+      address: request.address,
+      photoAnalysis: request.photoAnalysis ?? { enabled: true, maxComps: 10, requireBetterOrEqual: true },
+      searchOptions: request.searchOptions ?? {
+        radiusMiles: 1,
+        maxComps: 10,
+        monthsBack: 12,
+      },
+      skipCache: request.skipCache,
+      appraisalPresetId: request.appraisalPresetId,
+    }
+
+    logApiCall('POST', analyzeUrl)
+    log('Request body', requestBody)
+
+    const startTime = Date.now()
+    const response = await fetch(analyzeUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'X-Dashboard-User-Id': session.user.id,
         'X-Dashboard-Secret': dashboardSecret,
       },
-      body: JSON.stringify({
-        address: request.address,
-        photoAnalysis: request.photoAnalysis ?? { enabled: true, maxComps: 10, requireBetterOrEqual: true },
-        searchOptions: request.searchOptions ?? {
-          radiusMiles: 1,
-          maxComps: 10,
-          monthsBack: 12,
-        },
-        skipCache: request.skipCache,
-      }),
+      body: JSON.stringify(requestBody),
     })
+
+    const durationMs = Date.now() - startTime
+    logApiCall('POST', analyzeUrl, response.status, durationMs)
 
     const result = await response.json() as {
       success?: boolean
@@ -294,6 +341,7 @@ export async function queueAnalysis(request: AnalyzeRequest): Promise<QueueAnaly
     }
 
     if (!response.ok || !result.success) {
+      logError('Queue analysis failed', { status: response.status, error: result.error })
       return {
         success: false,
         error: result.error || `API request failed with status ${response.status}`,
@@ -304,7 +352,10 @@ export async function queueAnalysis(request: AnalyzeRequest): Promise<QueueAnaly
     const jobId = result.data?.jobId
     const propertyKey = result.data?.propertyKey
 
+    log('Job queued successfully', { jobId, propertyKey, status: result.data?.status })
+
     if (!jobId || !propertyKey) {
+      logError('Missing jobId or propertyKey in response')
       return {
         success: false,
         error: 'No job ID or property key returned from API',
@@ -312,7 +363,11 @@ export async function queueAnalysis(request: AnalyzeRequest): Promise<QueueAnaly
     }
 
     // Step 2: Request a signed WebSocket token
-    const tokenResponse = await fetch(`${apiUrl}/v1/analyze/ws-token`, {
+    const tokenUrl = `${apiUrl}/v1/analyze/ws-token`
+    logApiCall('POST', tokenUrl)
+
+    const tokenStartTime = Date.now()
+    const tokenResponse = await fetch(tokenUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -324,6 +379,9 @@ export async function queueAnalysis(request: AnalyzeRequest): Promise<QueueAnaly
         propertyKey,
       }),
     })
+
+    const tokenDurationMs = Date.now() - tokenStartTime
+    logApiCall('POST', tokenUrl, tokenResponse.status, tokenDurationMs)
 
     const tokenResult = await tokenResponse.json() as {
       success?: boolean
@@ -337,7 +395,7 @@ export async function queueAnalysis(request: AnalyzeRequest): Promise<QueueAnaly
 
     if (!tokenResponse.ok || !tokenResult.success) {
       // Fall back to polling if token generation fails
-      console.warn('[queueAnalysis] Failed to get WS token, falling back to polling:', tokenResult.error)
+      log('WS token generation failed, falling back to polling', { error: tokenResult.error })
       return {
         success: true,
         jobId,
@@ -349,6 +407,8 @@ export async function queueAnalysis(request: AnalyzeRequest): Promise<QueueAnaly
       }
     }
 
+    log('WS token obtained successfully', { wsUrl: tokenResult.data?.wsUrl, expiresIn: tokenResult.data?.expiresIn })
+
     return {
       success: true,
       jobId,
@@ -359,6 +419,7 @@ export async function queueAnalysis(request: AnalyzeRequest): Promise<QueueAnaly
       estimatedDurationMs: result.data?.estimatedDurationMs,
     }
   } catch (error) {
+    logError('queueAnalysis exception', error)
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Failed to queue analysis',
@@ -372,6 +433,7 @@ export async function queueAnalysis(request: AnalyzeRequest): Promise<QueueAnaly
 export async function getJobStatus(jobId: string, propertyKey: string): Promise<JobStatusResult> {
   const session = await getSession()
   if (!session?.user) {
+    logError('getJobStatus: User not authenticated')
     return {
       success: false,
       error: 'Not authenticated',
@@ -380,6 +442,7 @@ export async function getJobStatus(jobId: string, propertyKey: string): Promise<
 
   const dashboardSecret = await getDashboardSecret()
   if (!dashboardSecret) {
+    logError('getJobStatus: Dashboard secret not configured')
     return {
       success: false,
       error: 'Dashboard configuration error',
@@ -391,6 +454,9 @@ export async function getJobStatus(jobId: string, propertyKey: string): Promise<
     const url = new URL(`${apiUrl}/v1/analyze/jobs/${jobId}`)
     url.searchParams.set('propertyKey', propertyKey)
 
+    logApiCall('GET', url.toString())
+    const startTime = Date.now()
+
     const response = await fetch(url.toString(), {
       headers: {
         'X-Dashboard-User-Id': session.user.id,
@@ -398,21 +464,73 @@ export async function getJobStatus(jobId: string, propertyKey: string): Promise<
       },
     })
 
+    const durationMs = Date.now() - startTime
+    logApiCall('GET', url.toString(), response.status, durationMs)
+
     const result = await response.json() as { success?: boolean; error?: string; data?: JobStatusResult['data'] }
 
     if (!response.ok) {
+      logError('getJobStatus failed', { status: response.status, error: result.error })
       return {
         success: false,
         error: result.error || `Failed to get job status`,
       }
     }
 
+    log('Job status retrieved', {
+      jobId,
+      status: result.data?.status,
+      currentStep: result.data?.currentStep,
+      progress: result.data?.progress?.percentComplete,
+    })
+
     return { success: true, data: result.data } as JobStatusResult
   } catch (error) {
+    logError('getJobStatus exception', error)
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Failed to get job status',
     }
+  }
+}
+
+// ─── Appraisal Presets ─────────────────────────────────────────────────────────
+
+export interface AppraisalPresetSummary {
+  id: string
+  name: string
+  isDefault: boolean
+}
+
+export async function getAppraisalPresets(): Promise<AppraisalPresetSummary[]> {
+  const session = await getSession()
+  if (!session?.user) {
+    return []
+  }
+
+  try {
+    const apiUrl = getApiUrl()
+    const response = await fetch(`${apiUrl}/appraisal-presets`, {
+      headers: {
+        Cookie: '', // Server-side fetch needs cookie forwarding
+      },
+      credentials: 'include',
+    })
+
+    if (!response.ok) {
+      return []
+    }
+
+    const result = (await response.json()) as {
+      presets: Array<{ id: string; name: string; isDefault: boolean }>
+    }
+    return result.presets.map((p) => ({
+      id: p.id,
+      name: p.name,
+      isDefault: p.isDefault,
+    }))
+  } catch {
+    return []
   }
 }
 

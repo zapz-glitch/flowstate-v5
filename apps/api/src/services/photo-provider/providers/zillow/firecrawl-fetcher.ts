@@ -67,6 +67,92 @@ interface ZillowExtraction {
     event: string
   }>
   error?: string
+  // Structured fields (may be extracted directly by LLM)
+  bedrooms?: number
+  bathrooms?: number
+  squareFeet?: number
+  yearBuilt?: number
+}
+
+// ─── Feature Parsing Utilities ─────────────────────────────────────────────
+
+/**
+ * Parse bedrooms from features array
+ * Handles: "3 bed", "3 beds", "3 bedroom", "3 bedrooms", "3bd", "3br"
+ */
+function parseBedroomsFromFeatures(features: string[]): number | undefined {
+  for (const feature of features) {
+    const lower = feature.toLowerCase().trim()
+    const match = lower.match(/^(\d+)\s*(?:bed|beds|bedroom|bedrooms|bd|br)/)
+    if (match) {
+      return parseInt(match[1], 10)
+    }
+  }
+  return undefined
+}
+
+/**
+ * Parse bathrooms from features array
+ * Handles: "2 bath", "2.5 bath", "2 baths", "2 bathroom", "2ba"
+ */
+function parseBathroomsFromFeatures(features: string[]): number | undefined {
+  for (const feature of features) {
+    const lower = feature.toLowerCase().trim()
+    const match = lower.match(/^(\d+(?:\.\d+)?)\s*(?:bath|baths|bathroom|bathrooms|ba)/)
+    if (match) {
+      return parseFloat(match[1])
+    }
+  }
+  return undefined
+}
+
+/**
+ * Parse square footage from features array
+ * Handles: "1,500 sqft", "1500 sq ft", "1,500 square feet"
+ */
+function parseSqftFromFeatures(features: string[]): number | undefined {
+  for (const feature of features) {
+    const lower = feature.toLowerCase().trim()
+    const match = lower.match(/^([\d,]+)\s*(?:sqft|sq\s*ft|square\s*feet)/)
+    if (match) {
+      return parseInt(match[1].replace(/,/g, ''), 10)
+    }
+  }
+  return undefined
+}
+
+/**
+ * Get most recent sale from price history
+ */
+function getLastSaleFromHistory(priceHistory?: Array<{ date: string; price: number; event: string }>): {
+  lastSaleDate?: string
+  lastSalePrice?: number
+} {
+  if (!priceHistory || priceHistory.length === 0) {
+    return {}
+  }
+
+  // Look for sold events
+  const soldEvents = priceHistory.filter(
+    (h) => h.event.toLowerCase().includes('sold') && h.price > 0
+  )
+
+  if (soldEvents.length === 0) {
+    return {}
+  }
+
+  // Sort by date descending (most recent first)
+  const sorted = soldEvents.sort((a, b) => {
+    const dateA = new Date(a.date).getTime()
+    const dateB = new Date(b.date).getTime()
+    return dateB - dateA
+  })
+
+  const lastSale = sorted[0]
+  return {
+    lastSaleDate: lastSale.date,
+    lastSalePrice: lastSale.price,
+  }
 }
 
 interface FirecrawlResponse {
@@ -219,7 +305,12 @@ Return JSON in this exact format:
   "price": 123456,
   "status": "for_sale | pending | sold | off_market",
   "features": ["array of property features like '3 bed', '2 bath', '1,500 sqft'"],
-  "daysOnMarket": 15
+  "daysOnMarket": 15,
+  "bedrooms": 3,
+  "bathrooms": 2,
+  "squareFeet": 1500,
+  "yearBuilt": 1985,
+  "priceHistory": [{"date": "2024-01-15", "price": 350000, "event": "Sold"}]
 }
 
 CRITICAL PHOTO EXTRACTION RULES - These photos will be used for property condition assessment:
@@ -252,7 +343,9 @@ CRITICAL PHOTO EXTRACTION RULES - These photos will be used for property conditi
 Other extraction rules:
 - For price: Extract numeric value only (no $ or commas)
 - For status: Look for "for sale", "pending", "sold", or "off market"
-- For features: Extract bed/bath count, square footage, lot size, year built
+- For features: Extract bed/bath count, square footage, lot size, year built as string array
+- For bedrooms/bathrooms/squareFeet/yearBuilt: Extract as NUMBERS directly (not strings)
+- For priceHistory: Extract sale/listing events with dates and prices (most important: sold events)
 
 Return ONLY the JSON object, no explanation or markdown code blocks.
 If you cannot find a field, use null. Always return valid JSON.`
@@ -440,9 +533,14 @@ ${content.html.slice(0, 50000)}
         status?: string
         features?: string[]
         daysOnMarket?: number
+        bedrooms?: number
+        bathrooms?: number
+        squareFeet?: number
+        yearBuilt?: number
+        priceHistory?: Array<{ date: string; price: number; event: string }>
       }
 
-      console.log(`[FirecrawlZillow] LLM extracted: ${parsed.photos?.length ?? 0} photos, price: ${parsed.price}, status: ${parsed.status}`)
+      console.log(`[FirecrawlZillow] LLM extracted: ${parsed.photos?.length ?? 0} photos, price: ${parsed.price}, status: ${parsed.status}, beds: ${parsed.bedrooms}, baths: ${parsed.bathrooms}`)
 
       return {
         photos: parsed.photos ?? [],
@@ -451,6 +549,11 @@ ${content.html.slice(0, 50000)}
         status: parsed.status as ZillowExtraction['status'],
         features: parsed.features,
         daysOnMarket: parsed.daysOnMarket,
+        bedrooms: parsed.bedrooms,
+        bathrooms: parsed.bathrooms,
+        squareFeet: parsed.squareFeet,
+        yearBuilt: parsed.yearBuilt,
+        priceHistory: parsed.priceHistory,
       }
     } catch (error) {
       console.error('[FirecrawlZillow] LLM parsing error:', error)
@@ -593,6 +696,18 @@ ${content.html.slice(0, 50000)}
 
       console.log(`[FirecrawlZillow] Extracted ${photos.length} photos, price: ${extracted.price}, status: ${extracted.status}${fromCache ? ' (from cache)' : ''}`)
 
+      // Get structured data - prefer LLM-extracted values, fallback to parsing features
+      const features = extracted.features ?? []
+      const bedrooms = extracted.bedrooms ?? parseBedroomsFromFeatures(features)
+      const bathrooms = extracted.bathrooms ?? parseBathroomsFromFeatures(features)
+      const squareFeet = extracted.squareFeet ?? parseSqftFromFeatures(features)
+      const yearBuilt = extracted.yearBuilt
+
+      // Get last sale from price history
+      const { lastSaleDate, lastSalePrice } = getLastSaleFromHistory(extracted.priceHistory)
+
+      console.log(`[FirecrawlZillow] Structured data: beds=${bedrooms}, baths=${bathrooms}, sqft=${squareFeet}, year=${yearBuilt}, lastSale=${lastSaleDate}`)
+
       const listing: ZillowListingData = {
         zillowUrl,
         photos,
@@ -602,6 +717,13 @@ ${content.html.slice(0, 50000)}
         daysOnMarket: extracted.daysOnMarket,
         features: extracted.features,
         priceHistory: extracted.priceHistory,
+        // Structured fields
+        bedrooms,
+        bathrooms,
+        squareFeet,
+        yearBuilt,
+        lastSaleDate,
+        lastSalePrice,
       }
 
       return {

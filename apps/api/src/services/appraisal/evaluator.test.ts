@@ -364,12 +364,11 @@ describe('Default Values', () => {
   })
 
   it('should have all default adjustments', () => {
-    expect(DEFAULT_ADJUSTMENTS.length).toBe(6)
+    expect(DEFAULT_ADJUSTMENTS.length).toBe(5)
     expect(DEFAULT_ADJUSTMENTS.map((a) => a.type)).toContain('old_comp_discount')
     expect(DEFAULT_ADJUSTMENTS.map((a) => a.type)).toContain('bedroom')
     expect(DEFAULT_ADJUSTMENTS.map((a) => a.type)).toContain('bathroom')
     expect(DEFAULT_ADJUSTMENTS.map((a) => a.type)).toContain('pool')
     expect(DEFAULT_ADJUSTMENTS.map((a) => a.type)).toContain('garage')
-    expect(DEFAULT_ADJUSTMENTS.map((a) => a.type)).toContain('carport')
   })
 })

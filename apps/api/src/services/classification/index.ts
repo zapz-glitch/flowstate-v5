@@ -1,7 +1,7 @@
 /**
  * Property Classification Service
  *
- * Classifies properties as As-Is, After-Renovation, or Transitional
+ * Classifies properties as either As-Is or After-Renovation
  * based on photos, descriptions, and price analysis.
  *
  * Used to:
@@ -152,13 +152,13 @@ class PropertyClassificationService implements ClassificationService {
       )
     }
 
-    // No data available
+    // No data available - default to as_is (conservative)
     return {
-      classification: 'transitional',
-      confidence: 0,
+      classification: 'as_is',
+      confidence: 30,
       method: 'combined',
       indicators: {},
-      reasoning: 'Insufficient data for classification - no photos, description, or price data available',
+      reasoning: 'Insufficient data for classification - defaulting to as_is',
     }
   }
 
@@ -249,6 +249,7 @@ class PropertyClassificationService implements ClassificationService {
 
   /**
    * Classify by description keywords only
+   * Defaults to as_is when uncertain
    */
   classifyByDescription(description: string): ClassificationResult {
     const analysis = analyzeDescriptionKeywords(description)
@@ -257,15 +258,17 @@ class PropertyClassificationService implements ClassificationService {
     let classification: PropertyClassification
     let confidence: number
 
-    if (analysis.score <= -30) {
+    if (analysis.score <= -20) {
       classification = 'as_is'
       confidence = Math.min(90, 50 + Math.abs(analysis.score) / 2)
-    } else if (analysis.score >= 30) {
+    } else if (analysis.score >= 40) {
+      // Higher threshold for after_renovation
       classification = 'after_renovation'
       confidence = Math.min(90, 50 + analysis.score / 2)
     } else {
-      classification = 'transitional'
-      confidence = 40 + (30 - Math.abs(analysis.score)) / 2
+      // Default to as_is when uncertain
+      classification = 'as_is'
+      confidence = 45
     }
 
     // Boost confidence if we have strong indicators
@@ -292,6 +295,7 @@ class PropertyClassificationService implements ClassificationService {
 
   /**
    * Classify by price analysis only
+   * Defaults to as_is when uncertain
    */
   classifyByPrice(
     salePrice: number,
@@ -304,18 +308,18 @@ class PropertyClassificationService implements ClassificationService {
     let classification: PropertyClassification
     let confidence: number
 
-    // Properties selling significantly below average are likely As-Is
-    if (ratio <= 0.75) {
+    // Properties selling below average are likely As-Is
+    if (ratio <= 0.85) {
       classification = 'as_is'
-      confidence = Math.min(75, 50 + (0.75 - ratio) * 100)
-    } else if (ratio >= 1.1) {
-      // Properties at or above average are likely After-Renovation
+      confidence = Math.min(80, 50 + (0.85 - ratio) * 100)
+    } else if (ratio >= 1.15) {
+      // Properties significantly above average are likely After-Renovation
       classification = 'after_renovation'
       confidence = Math.min(75, 50 + (ratio - 1.0) * 50)
     } else {
-      // Middle range is transitional
-      classification = 'transitional'
-      confidence = 40
+      // Middle range defaults to as_is (conservative)
+      classification = 'as_is'
+      confidence = 45
     }
 
     return {
@@ -326,11 +330,11 @@ class PropertyClassificationService implements ClassificationService {
         priceRatio: Math.round(ratio * 100) / 100,
       },
       reasoning: `Property price per sqft ($${Math.round(pricePerSqft)}) is ${Math.round(ratio * 100)}% of area average ($${Math.round(areaAvgPricePerSqft)}). ${
-        ratio <= 0.75
-          ? 'Significant discount suggests As-Is condition.'
-          : ratio >= 1.1
+        ratio <= 0.85
+          ? 'Below market pricing suggests As-Is condition.'
+          : ratio >= 1.15
             ? 'Premium pricing suggests updated/renovated condition.'
-            : 'Mid-range pricing, classification uncertain.'
+            : 'Mid-range pricing - defaulting to As-Is.'
       }`,
     }
   }
@@ -401,10 +405,11 @@ class PropertyClassificationService implements ClassificationService {
 
   /**
    * Normalize classification value
+   * Defaults to as_is for unrecognized values
    */
   private normalizeClassification(value: string | undefined): PropertyClassification {
     const normalized = value?.toLowerCase()
-    if (normalized === 'as_is' || normalized === 'after_renovation' || normalized === 'transitional') {
+    if (normalized === 'as_is' || normalized === 'after_renovation') {
       return normalized
     }
     // Handle alternate formats
@@ -414,7 +419,8 @@ class PropertyClassificationService implements ClassificationService {
     if (normalized === 'after-renovation' || normalized === 'afterrenovation' || normalized === 'arv' || normalized === 'renovated') {
       return 'after_renovation'
     }
-    return 'transitional'
+    // Default to as_is for any unrecognized value (including transitional)
+    return 'as_is'
   }
 
   /**

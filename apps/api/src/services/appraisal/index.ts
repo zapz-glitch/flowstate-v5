@@ -64,9 +64,9 @@ export interface FallbackOptions {
  * Weight factors for individual comp scoring
  *
  * Expert Underwriter Methodology:
- * - Comps matching subject condition (As-Is or After-Renovation) are PRIMARY
- * - Transitional comps provide supporting data
- * - Opposite-condition comps are used for spread analysis only
+ * - After-Renovation comps are used for ARV calculation
+ * - As-Is comps are used for buy price/wholesale weighted averages
+ * - Classification match is a key factor in weighting
  */
 export interface WeightFactors {
   /** Distance factor (0.3-2.0) - closer = better */
@@ -92,8 +92,8 @@ export interface CompWeightBreakdown {
   classification?: PropertyClassification
   /** Whether this comp is a primary match (same classification as subject) */
   isPrimaryMatch: boolean
-  /** Tier: 1=same classification, 2=transitional, 3=opposite */
-  tier: 1 | 2 | 3
+  /** Tier: 1=same classification, 2=opposite classification */
+  tier: 1 | 2
 }
 
 /**
@@ -128,8 +128,6 @@ export interface WeightedARVResult {
   asIsCompIds: string[]
   /** IDs of comps classified as after_renovation */
   afterRenovationCompIds: string[]
-  /** IDs of transitional comps */
-  transitionalCompIds: string[]
   /** ID of the best matching comp (highest weight in subject's tier) */
   bestCompId: string | null
   /** Investment scenarios for different strategies */
@@ -239,6 +237,22 @@ class PropertyAppraisalService implements AppraisalService {
       }
     })
 
+    // Sort comparables: subdivision matches first, then by distance
+    // This ensures comps that don't match subdivision go to the bottom
+    appraisedComps.sort((a, b) => {
+      const aSubdivisionMatch = a.evaluation.filterResults.find(f => f.type === 'subdivision_match')?.passed ?? false
+      const bSubdivisionMatch = b.evaluation.filterResults.find(f => f.type === 'subdivision_match')?.passed ?? false
+
+      // Subdivision matches come first
+      if (aSubdivisionMatch && !bSubdivisionMatch) return -1
+      if (!aSubdivisionMatch && bSubdivisionMatch) return 1
+
+      // Within the same subdivision match status, sort by distance
+      const distA = a.distanceMiles ?? 999
+      const distB = b.distanceMiles ?? 999
+      return distA - distB
+    })
+
     // Calculate ARV from enabled comparables
     const enabledComps = appraisedComps.filter((c) => c.isEnabled)
     const arv = this.calculateARV(enabledComps)
@@ -345,8 +359,17 @@ class PropertyAppraisalService implements AppraisalService {
       }
     })
 
-    // Sort all comps by distance for display
+    // Sort comparables: subdivision matches first, then by distance
+    // This ensures comps that don't match subdivision go to the bottom
     allCompsWithEvaluation.sort((a, b) => {
+      const aSubdivisionMatch = a.evaluation.filterResults.find(f => f.type === 'subdivision_match')?.passed ?? false
+      const bSubdivisionMatch = b.evaluation.filterResults.find(f => f.type === 'subdivision_match')?.passed ?? false
+
+      // Subdivision matches come first
+      if (aSubdivisionMatch && !bSubdivisionMatch) return -1
+      if (!aSubdivisionMatch && bSubdivisionMatch) return 1
+
+      // Within the same subdivision match status, sort by distance
       const distA = a.distanceMiles ?? 999
       const distB = b.distanceMiles ?? 999
       return distA - distB
@@ -421,13 +444,12 @@ class PropertyAppraisalService implements AppraisalService {
    * 5. Generate investment scenarios
    *
    * TIER SYSTEM:
-   * - Tier 1 (Primary): Comps matching subject classification (weight: 60-80%)
-   * - Tier 2 (Support): Transitional comps (weight: 15-30%)
-   * - Tier 3 (Reference): Opposite classification (weight: 5-15%, for spread analysis)
+   * - Tier 1 (Primary): Comps matching subject classification (weight: 70-90%)
+   * - Tier 2 (Support): Comps with opposite classification (weight: 10-30%)
    *
    * WEIGHTING PHILOSOPHY:
-   * - For As-Is subjects: As-Is comps = current market value
-   * - For After-Renovation subjects: ARV comps = target sale price
+   * - For ARV: After-Renovation comps weighted heavily
+   * - For Buy Price: As-Is comps provide current market value
    * - Spread analysis helps calculate renovation ROI
    */
   calculateWeightedARV(
@@ -442,16 +464,13 @@ class PropertyAppraisalService implements AppraisalService {
     // Categorize comps by classification
     const asIsCompIds: string[] = []
     const afterRenovationCompIds: string[] = []
-    const transitionalCompIds: string[] = []
 
     for (const comp of enabledComps) {
-      const classification = compClassifications.get(comp.id)?.classification
+      const classification = compClassifications.get(comp.id)?.classification ?? 'as_is'
       if (classification === 'as_is') {
         asIsCompIds.push(comp.id)
-      } else if (classification === 'after_renovation') {
-        afterRenovationCompIds.push(comp.id)
       } else {
-        transitionalCompIds.push(comp.id)
+        afterRenovationCompIds.push(comp.id)
       }
     }
 
@@ -463,7 +482,7 @@ class PropertyAppraisalService implements AppraisalService {
       if (price == null || price <= 0) continue
 
       const compClassification = compClassifications.get(comp.id)
-      const compClass = compClassification?.classification ?? 'transitional'
+      const compClass = compClassification?.classification ?? 'as_is'
 
       // Determine tier based on classification match
       const tier = this.determineCompTier(subjectClass, compClass)
@@ -509,7 +528,6 @@ class PropertyAppraisalService implements AppraisalService {
     // Calculate weighted values for each classification group
     const asIsValue = this.calculateGroupWeightedValue(weightBreakdown, 'as_is')
     const afterRenovationValue = this.calculateGroupWeightedValue(weightBreakdown, 'after_renovation')
-    const transitionalValue = this.calculateGroupWeightedValue(weightBreakdown, 'transitional')
 
     // Calculate spread
     const spread = asIsValue !== null && afterRenovationValue !== null
@@ -522,17 +540,20 @@ class PropertyAppraisalService implements AppraisalService {
       weightBreakdown,
       asIsValue,
       afterRenovationValue,
-      transitionalValue,
       this.calculateARV(enabledComps)
     )
 
-    // Find best comp (highest weight in primary tier)
-    const primaryComps = weightBreakdown.filter((c) => c.tier === 1)
-    const bestComp = primaryComps.length > 0
-      ? primaryComps.reduce((best, item) =>
+    // Find best comp for ARV - ALWAYS prioritize after_renovation comps
+    // ARV = After Repair Value, so we need renovated comps to determine target value
+    const afterRenovationComps = weightBreakdown.filter((c) =>
+      afterRenovationCompIds.includes(c.compId)
+    )
+    const bestComp = afterRenovationComps.length > 0
+      ? afterRenovationComps.reduce((best, item) =>
           item.normalizedWeight > best.normalizedWeight ? item : best
         )
-      : weightBreakdown.reduce<CompWeightBreakdown | null>(
+      : // Fallback to highest weighted comp if no after_renovation comps
+        weightBreakdown.reduce<CompWeightBreakdown | null>(
           (best, item) => (!best || item.normalizedWeight > best.normalizedWeight ? item : best),
           null
         )
@@ -555,7 +576,6 @@ class PropertyAppraisalService implements AppraisalService {
       weightBreakdown,
       asIsCompIds,
       afterRenovationCompIds,
-      transitionalCompIds,
       bestCompId: bestComp?.compId ?? null,
       scenarios,
       methodology,
@@ -566,30 +586,29 @@ class PropertyAppraisalService implements AppraisalService {
    * Determine comp tier based on classification match
    *
    * Tier 1: Same classification as subject (PRIMARY)
-   * Tier 2: Transitional (either subject or comp)
-   * Tier 3: Opposite classification (REFERENCE ONLY)
+   * Tier 2: Opposite classification (SUPPORTING)
+   *
+   * With only as_is and after_renovation:
+   * - Same classification = Tier 1
+   * - Different classification = Tier 2
    */
   private determineCompTier(
     subjectClass: PropertyClassification,
     compClass: PropertyClassification
-  ): 1 | 2 | 3 {
+  ): 1 | 2 {
     if (subjectClass === compClass) {
       return 1 // Same classification = primary match
     }
 
-    if (subjectClass === 'transitional' || compClass === 'transitional') {
-      return 2 // Transitional involved = supporting data
-    }
-
-    // Opposite classifications (as_is vs after_renovation)
-    return 3
+    // Different classification = supporting data
+    return 2
   }
 
   /**
    * Calculate weight factors for a single comp
    *
    * Expert Underwriter Weighting:
-   * - Classification match is the MOST IMPORTANT factor (0.0-2.0)
+   * - Classification match is the MOST IMPORTANT factor (0.5-2.0)
    * - Filter pass rate rewards comps meeting appraisal criteria
    * - Distance, sqft, recency are secondary but important
    */
@@ -600,24 +619,19 @@ class PropertyAppraisalService implements AppraisalService {
     compClassification: ClassificationResult | undefined
   ): WeightFactors {
     const subjectClass = subjectClassification.classification
-    const compClass = compClassification?.classification ?? 'transitional'
+    const compClass = compClassification?.classification ?? 'as_is'
 
-    // 1. CLASSIFICATION MATCH (0.0 to 2.0) - CRITICAL FACTOR
+    // 1. CLASSIFICATION MATCH (0.5 to 2.0) - CRITICAL FACTOR
     // This is the most important factor for accurate valuation
     let classificationMatch: number
     if (compClass === subjectClass) {
       // Same classification = full weight
       classificationMatch = 2.0
-    } else if (subjectClass === 'transitional') {
-      // Subject is transitional - both As-Is and ARV comps are relevant
-      classificationMatch = compClass === 'after_renovation' ? 1.3 : 1.2
-    } else if (compClass === 'transitional') {
-      // Comp is transitional - moderate relevance
-      classificationMatch = 1.0
     } else {
-      // Opposite classifications (as_is vs after_renovation)
-      // Still useful for spread analysis, but low weight for ARV
-      classificationMatch = 0.3
+      // Different classification = reduced weight
+      // after_renovation comps for as_is subject help estimate potential ARV
+      // as_is comps for after_renovation subject help validate discount
+      classificationMatch = 0.7
     }
 
     // 2. Distance factor (0.3 to 2.0) - closer is better
@@ -733,16 +747,14 @@ class PropertyAppraisalService implements AppraisalService {
    * Calculate final ARV based on subject classification and available data
    *
    * Expert Underwriter Logic:
-   * - As-Is subject → Primary value is current market (As-Is comps)
-   * - After-Renovation subject → Primary value is target ARV (After-Reno comps)
-   * - Transitional → Blend of both with heavier weight on After-Renovation
+   * - Tier 1 comps (same classification) are primary
+   * - Tier 2 comps (opposite classification) are supporting
    */
   private calculateFinalARV(
     subjectClass: PropertyClassification,
     breakdown: CompWeightBreakdown[],
     asIsValue: number | null,
     afterRenovationValue: number | null,
-    transitionalValue: number | null,
     fallbackArv: number
   ): { arv: number; methodology: string } {
     // Count comps in each tier
@@ -759,35 +771,34 @@ class PropertyAppraisalService implements AppraisalService {
       arv = Math.round(
         tier1Comps.reduce((sum, c) => sum + c.price * (c.weight / tier1Total), 0)
       )
-      methodology = `Weighted average of ${tier1Comps.length} ${subjectClass === 'as_is' ? 'As-Is' : subjectClass === 'after_renovation' ? 'After-Renovation' : 'matching'} comps (Tier 1 primary)`
+      methodology = `Weighted average of ${tier1Comps.length} ${subjectClass === 'as_is' ? 'As-Is' : 'After-Renovation'} comps (Tier 1 primary)`
     } else if (tier1Comps.length === 1 && tier2Comps.length >= 1) {
-      // One primary comp + transitional support
-      const tier1Weight = 0.6
-      const tier2Weight = 0.4
+      // One primary comp + opposite classification support
+      const tier1Weight = 0.7
+      const tier2Weight = 0.3
       const tier1Price = tier1Comps[0].price
       const tier2Total = tier2Comps.reduce((sum, c) => sum + c.weight, 0)
       const tier2Avg = tier2Comps.reduce((sum, c) => sum + c.price * (c.weight / tier2Total), 0)
       arv = Math.round(tier1Price * tier1Weight + tier2Avg * tier2Weight)
-      methodology = `Blended: 1 primary comp (60%) + ${tier2Comps.length} transitional comps (40%)`
+      methodology = `Blended: 1 primary ${subjectClass} comp (70%) + ${tier2Comps.length} supporting comps (30%)`
     } else if (tier2Comps.length >= 2) {
-      // No primary comps - use transitional
+      // No primary comps - use opposite classification comps
       const tier2Total = tier2Comps.reduce((sum, c) => sum + c.weight, 0)
       arv = Math.round(
         tier2Comps.reduce((sum, c) => sum + c.price * (c.weight / tier2Total), 0)
       )
-      methodology = `Weighted average of ${tier2Comps.length} transitional comps (no ${subjectClass} comps found)`
-    } else {
-      // Fallback to all comps weighted
+      methodology = `Weighted average of ${tier2Comps.length} ${subjectClass === 'as_is' ? 'After-Renovation' : 'As-Is'} comps (no ${subjectClass} comps found)`
+    } else if (breakdown.length > 0) {
+      // Use all available comps
       const totalWeight = breakdown.reduce((sum, c) => sum + c.weight, 0)
-      if (totalWeight > 0) {
-        arv = Math.round(
-          breakdown.reduce((sum, c) => sum + c.price * (c.weight / totalWeight), 0)
-        )
-        methodology = `Weighted average of all ${breakdown.length} comps (insufficient matching comps)`
-      } else {
-        arv = fallbackArv
-        methodology = 'Simple average (fallback - no weighted data available)'
-      }
+      arv = Math.round(
+        breakdown.reduce((sum, c) => sum + c.price * (c.weight / totalWeight), 0)
+      )
+      methodology = `Weighted average of ${breakdown.length} available comps`
+    } else {
+      // Last resort: use after_renovation value if available, otherwise fallback
+      arv = afterRenovationValue ?? asIsValue ?? fallbackArv
+      methodology = 'Fallback ARV (no comps with valid pricing)'
     }
 
     return { arv, methodology }
@@ -816,9 +827,7 @@ class PropertyAppraisalService implements AppraisalService {
         notes: `Potential spread: $${spread.toLocaleString()}. Based on ${afterRenovationCompIds.length} renovated comps. ` +
           (subjectClass === 'as_is'
             ? 'Subject is As-Is - good flip candidate.'
-            : subjectClass === 'after_renovation'
-              ? 'Subject already renovated - limited upside.'
-              : 'Subject is transitional - moderate renovation needed.')
+            : 'Subject already renovated - limited upside.')
       })
     }
 

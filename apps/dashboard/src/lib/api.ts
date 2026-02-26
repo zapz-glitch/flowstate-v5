@@ -10,14 +10,38 @@ import { cookies } from 'next/headers'
 // API URL - inlined at build time via next.config.js
 const API_URL = process.env.NEXT_PUBLIC_API_URL!
 
+// ─── Logging Utilities ───────────────────────────────────────────────────────
+
+const LOG_PREFIX = '[Dashboard API]'
+
+function logRequest(method: string, path: string, body?: unknown) {
+  const timestamp = new Date().toISOString()
+  console.log(`${LOG_PREFIX} ${timestamp} → ${method} ${path}`)
+  if (body && process.env.NODE_ENV === 'development') {
+    console.log(`${LOG_PREFIX} Request body:`, JSON.stringify(body, null, 2).slice(0, 500))
+  }
+}
+
+function logResponse(method: string, path: string, status: number, durationMs: number, error?: string) {
+  const timestamp = new Date().toISOString()
+  const statusEmoji = status >= 200 && status < 300 ? '✓' : '✗'
+  console.log(`${LOG_PREFIX} ${timestamp} ← ${method} ${path} ${statusEmoji} ${status} (${durationMs}ms)`)
+  if (error) {
+    console.error(`${LOG_PREFIX} Error: ${error}`)
+  }
+}
+
 // Helper to make authenticated API calls from server components
 async function fetchApi<T>(path: string, options: RequestInit = {}): Promise<T> {
   const cookieStore = await cookies()
   const allCookies = cookieStore.getAll()
   const cookieHeader = allCookies.map((c) => `${c.name}=${c.value}`).join('; ')
 
-  // Debug: log cookies being sent
-  console.log(`[API] ${path} - Sending ${allCookies.length} cookies:`, allCookies.map(c => c.name))
+  const method = options.method || 'GET'
+  const startTime = Date.now()
+
+  // Log request
+  logRequest(method, path, options.body ? JSON.parse(options.body as string) : undefined)
 
   const response = await fetch(`${API_URL}${path}`, {
     ...options,
@@ -29,12 +53,15 @@ async function fetchApi<T>(path: string, options: RequestInit = {}): Promise<T> 
     credentials: 'include',
   })
 
+  const durationMs = Date.now() - startTime
+
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({ error: 'Unknown error' })) as { error?: string }
-    console.log(`[API] ${path} - Error:`, response.status, errorData)
+    logResponse(method, path, response.status, durationMs, errorData.error)
     throw new Error(errorData.error || `API error: ${response.status}`)
   }
 
+  logResponse(method, path, response.status, durationMs)
   return response.json()
 }
 
@@ -148,6 +175,7 @@ export async function getUsageSummary(): Promise<UsageSummary> {
 
 export interface UsageLog {
   id: string
+  apiKeyId: string
   endpoint: string
   method: string
   statusCode: number
@@ -168,8 +196,16 @@ export interface UsageLogsResponse {
   }
 }
 
-export async function getUsageLogs(page = 1, limit = 20): Promise<UsageLogsResponse> {
-  return fetchApi<UsageLogsResponse>(`/user/usage/logs?page=${page}&limit=${limit}`)
+export async function getUsageLogs(
+  page = 1,
+  limit = 20,
+  apiKeyId?: string
+): Promise<UsageLogsResponse> {
+  const params = new URLSearchParams({ page: String(page), limit: String(limit) })
+  if (apiKeyId) {
+    params.append('apiKeyId', apiKeyId)
+  }
+  return fetchApi<UsageLogsResponse>(`/user/usage/logs?${params.toString()}`)
 }
 
 export interface UsageLogDetail extends UsageLog {
@@ -290,4 +326,44 @@ export async function getAppraisalDefaults(): Promise<AppraisalDefaults | null> 
   } catch {
     return null
   }
+}
+
+export interface CreatePresetInput {
+  name: string
+  description?: string
+  isDefault?: boolean
+  filters?: Array<{ filterType: FilterType; enabled: boolean; value: number }>
+  adjustments?: Array<{ adjustmentType: AdjustmentType; enabled: boolean; amount: number; percentage: number }>
+}
+
+export interface UpdatePresetInput {
+  name?: string
+  description?: string
+  isDefault?: boolean
+  filters?: Array<{ filterType: FilterType; enabled: boolean; value: number }>
+  adjustments?: Array<{ adjustmentType: AdjustmentType; enabled: boolean; amount: number; percentage: number }>
+}
+
+export async function createAppraisalPreset(input: CreatePresetInput): Promise<AppraisalPreset> {
+  const response = await fetchApi<{ preset: AppraisalPreset }>('/appraisal-presets', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
+  return response.preset
+}
+
+export async function updateAppraisalPreset(id: string, input: UpdatePresetInput): Promise<AppraisalPreset> {
+  const response = await fetchApi<{ preset: AppraisalPreset }>(`/appraisal-presets/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  })
+  return response.preset
+}
+
+export async function deleteAppraisalPreset(id: string): Promise<void> {
+  await fetchApi(`/appraisal-presets/${id}`, { method: 'DELETE' })
+}
+
+export async function setDefaultAppraisalPreset(id: string): Promise<void> {
+  await fetchApi(`/appraisal-presets/${id}/set-default`, { method: 'POST' })
 }

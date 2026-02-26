@@ -49,6 +49,19 @@ export interface PropertyPhotos {
   fetchedAt: string
   /** Any additional metadata from source */
   metadata?: Record<string, unknown>
+  // ─── Structured Property Data (extracted from source listing) ────────────
+  /** Number of bedrooms */
+  bedrooms?: number
+  /** Number of bathrooms */
+  bathrooms?: number
+  /** Square footage */
+  squareFeet?: number
+  /** Year built */
+  yearBuilt?: number
+  /** Most recent sale date */
+  lastSaleDate?: string
+  /** Most recent sale price */
+  lastSalePrice?: number
 }
 
 // ─── Fetch Options ──────────────────────────────────────────────────────────────

@@ -46,7 +46,9 @@ import type { ClassificationResult } from '../services/classification'
 import {
   selectBestCompFromData,
   buildAnalysisResponse,
+  mergeZillowDataIntoBundle,
   type AnalysisResponse,
+  type SupplementedField,
 } from '../services/analysis'
 
 // ─── Serialization Helpers ────────────────────────────────────────────────────
@@ -161,6 +163,14 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
       stepTimings['photo_fetch'] = Date.now() - photoStart
       console.log(`[AnalysisWorkflow] Photos fetched: subject=${!!photoBundle?.subject}, comps=${Object.keys(photoBundle?.comps ?? {}).length}`)
 
+      // Merge Zillow data into bundle to supplement missing CoreLogic data
+      // This fills in null bedrooms, bathrooms, sqft, etc. from Zillow listings
+      const mergeResult = mergeZillowDataIntoBundle(bundle, photoBundle)
+      const mergedBundle = mergeResult.bundle
+      const subjectSupplementedFields = mergeResult.subjectSupplementedFields
+      const compSupplementedFields = mergeResult.compSupplementedFields
+      console.log(`[AnalysisWorkflow] Zillow data merged: subject supplemented ${subjectSupplementedFields.length} fields, ${compSupplementedFields.size} comps supplemented`)
+
       await this.updateProgress(params.userId, params.propertyKey, 'photo_fetch', 'completed')
 
       // ═══════════════════════════════════════════════════════════════════════
@@ -177,7 +187,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
         },
         async () => {
           const result = await this.batchClassifyAll(
-            bundle,
+            mergedBundle,
             enabledComps,
             photoBundle,
             appraisalResult.avgPricePerSqft ?? 0
@@ -223,11 +233,13 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
         async () => {
           const result = await this.buildFinalResponse(
             params,
-            bundle,
+            mergedBundle,
             appraisalResult,
             photoBundle,
             subjectClassification,
-            compClassifications
+            compClassifications,
+            subjectSupplementedFields,
+            compSupplementedFields
           )
           return serialize(result)
         }
@@ -447,7 +459,9 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
     appraisalResult: AppraisalResultWithFallback,
     photoBundle: PhotoBundle | null,
     subjectClassification: ClassificationResult | undefined,
-    compClassifications: Map<string, ClassificationResult>
+    compClassifications: Map<string, ClassificationResult>,
+    subjectSupplementedFields: SupplementedField[],
+    compSupplementedFields: Map<string, SupplementedField[]>
   ): Promise<AnalysisResponse> {
     const valuationService = createValuationService()
     const appraisalService = createAppraisalService()
@@ -469,11 +483,13 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
       finalArv = weightedARVResult.arv
     }
 
-    // Data-based best comp selection
+    // Data-based best comp selection - prioritize after_renovation comps for ARV
+    const afterRenovationCompIds = weightedARVResult?.afterRenovationCompIds ?? []
     const { bestCompId, scores: dataBasedScores } = selectBestCompFromData(
       enabledComps,
       bundle.property.squareFeet,
-      bundle.property.yearBuilt
+      bundle.property.yearBuilt,
+      afterRenovationCompIds
     )
 
     // Calculate valuation
@@ -514,6 +530,8 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
         subjectClassification,
         compClassifications,
         weightedARVResult,
+        subjectSupplementedFields,
+        compSupplementedFields,
       }
     )
   }
@@ -534,10 +552,10 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
     stepName: string,
     status: 'in_progress' | 'completed' | 'failed'
   ): Promise<void> {
-    try {
-      const doId = this.getDoId(userId, propertyKey)
-      const stub = this.env.ANALYSIS_JOB.get(doId)
+    const doId = this.getDoId(userId, propertyKey)
+    const stub = this.env.ANALYSIS_JOB.get(doId)
 
+    try {
       await stub.fetch(
         new Request('http://internal/step', {
           method: 'POST',
@@ -547,6 +565,10 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
     } catch (error) {
       // Non-critical, just log
       console.warn(`[AnalysisWorkflow] Failed to update progress: ${error}`)
+    } finally {
+      // Dispose stub to prevent RPC stub disposal warnings
+      // @ts-expect-error - dispose may not be in types but exists at runtime
+      stub.dispose?.()
     }
   }
 
@@ -557,22 +579,28 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
     const doId = this.getDoId(userId, propertyKey)
     const stub = this.env.ANALYSIS_JOB.get(doId)
 
-    await stub.fetch(
-      new Request('http://internal/result', {
-        method: 'POST',
-        body: JSON.stringify({ result }),
-      })
-    )
+    try {
+      await stub.fetch(
+        new Request('http://internal/result', {
+          method: 'POST',
+          body: JSON.stringify({ result }),
+        })
+      )
+    } finally {
+      // Dispose stub to prevent RPC stub disposal warnings
+      // @ts-expect-error - dispose may not be in types but exists at runtime
+      stub.dispose?.()
+    }
   }
 
   /**
    * Store error in Durable Object
    */
   private async storeError(userId: string, propertyKey: string, errorMessage: string): Promise<void> {
-    try {
-      const doId = this.getDoId(userId, propertyKey)
-      const stub = this.env.ANALYSIS_JOB.get(doId)
+    const doId = this.getDoId(userId, propertyKey)
+    const stub = this.env.ANALYSIS_JOB.get(doId)
 
+    try {
       await stub.fetch(
         new Request('http://internal/error', {
           method: 'POST',
@@ -587,6 +615,10 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
       )
     } catch (error) {
       console.error(`[AnalysisWorkflow] Failed to store error: ${error}`)
+    } finally {
+      // Dispose stub to prevent RPC stub disposal warnings
+      // @ts-expect-error - dispose may not be in types but exists at runtime
+      stub.dispose?.()
     }
   }
 }

@@ -21,7 +21,7 @@ export interface ZillowListingData {
   status?: 'for_sale' | 'pending' | 'sold' | 'off_market'
   /** Days on market */
   daysOnMarket?: number
-  /** Property features */
+  /** Property features (raw strings like "3 bed", "2 bath") */
   features?: string[]
   /** Price history */
   priceHistory?: Array<{
@@ -29,6 +29,19 @@ export interface ZillowListingData {
     price: number
     event: string
   }>
+  // ─── Structured Property Data (parsed from features/page) ────────────────
+  /** Number of bedrooms (parsed from features) */
+  bedrooms?: number
+  /** Number of bathrooms (parsed from features) */
+  bathrooms?: number
+  /** Square footage (parsed from features) */
+  squareFeet?: number
+  /** Year built */
+  yearBuilt?: number
+  /** Most recent sale date (from price history) */
+  lastSaleDate?: string
+  /** Most recent sale price (from price history) */
+  lastSalePrice?: number
 }
 
 // ─── Property Condition (from photo analysis) ────────────────────────────────

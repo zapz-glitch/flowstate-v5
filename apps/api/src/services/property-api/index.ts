@@ -116,12 +116,10 @@ export interface PropertyApiService {
     fallbackProvider?: PropertyProvider,
   ): Promise<ComparablesSearchResponse>;
 
-  /** Get status of provider keys (for monitoring) */
+  /** Get status of provider credentials (for monitoring) */
   getKeyStatus(): {
-    total: number;
-    available: number;
-    inCooldown: number;
-    keys: Array<{ index: number; status: 'available' | 'cooldown' }>;
+    configured: boolean;
+    hasToken: boolean;
   };
 
   /**
@@ -445,10 +443,8 @@ class PropertyApi implements PropertyApiService {
   }
 
   getKeyStatus(): {
-    total: number;
-    available: number;
-    inCooldown: number;
-    keys: Array<{ index: number; status: 'available' | 'cooldown' }>;
+    configured: boolean;
+    hasToken: boolean;
   } {
     const provider = this.getProvider();
     // CoreLogic provider has this method
@@ -462,7 +458,7 @@ class PropertyApi implements PropertyApiService {
         }
       ).getKeyStatus();
     }
-    return { total: 1, available: 1, inCooldown: 0, keys: [] };
+    return { configured: false, hasToken: false };
   }
 
   /**

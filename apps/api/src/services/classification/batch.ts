@@ -53,10 +53,9 @@ export interface BatchClassificationResult {
 
 const BATCH_CLASSIFICATION_PROMPT = `You are a real estate property condition analyst. Analyze the provided properties and classify each one.
 
-For each property, determine its classification:
-- **as_is**: Distressed, needs significant work. Signs: outdated fixtures, visible damage, deferred maintenance, investor-focused keywords, priced below market
-- **after_renovation**: Recently renovated, move-in ready. Signs: modern finishes, updated kitchens/baths, premium materials, retail-ready keywords, priced at/above market
-- **transitional**: Partially updated or unclear. Signs: mixed condition, some updates but not complete, average pricing
+For each property, determine its classification (MUST be one of these two):
+- **as_is**: Needs work. Signs: outdated fixtures, visible damage, deferred maintenance, investor-focused keywords, priced below market, partial updates but mostly dated
+- **after_renovation**: Move-in ready. Signs: modern finishes, updated kitchens/baths, premium materials, retail-ready keywords, priced at/above market, turnkey condition
 
 Return a JSON array with classifications for each property in the same order provided:
 
@@ -64,7 +63,7 @@ Return a JSON array with classifications for each property in the same order pro
 [
   {
     "id": "property_id",
-    "classification": "as_is" | "after_renovation" | "transitional",
+    "classification": "as_is" | "after_renovation",
     "confidence": 0-100,
     "reasoning": "Brief explanation of classification"
   }
@@ -74,6 +73,8 @@ Return a JSON array with classifications for each property in the same order pro
 IMPORTANT:
 - Analyze EACH property independently
 - Return results in the EXACT same order as input
+- You MUST choose either "as_is" or "after_renovation" - no other values allowed
+- If uncertain, lean toward "as_is" for properties with ANY dated elements
 - Confidence should reflect certainty (photos = higher confidence)
 - Return ONLY the JSON array, no other text`
 
@@ -243,18 +244,39 @@ ${propertyDescriptions}`
     const results = new Map<string, ClassificationResult>()
 
     try {
-      // Extract JSON from response
-      const jsonMatch = response.match(/\[[\s\S]*\]/)
-      if (!jsonMatch) {
-        throw new Error('No JSON array found in response')
-      }
+      // Clean up response - remove markdown code blocks if present
+      let cleanResponse = response
+        .replace(/```json\s*/gi, '')
+        .replace(/```\s*/g, '')
+        .trim()
 
-      const parsed = JSON.parse(jsonMatch[0]) as Array<{
+      // Try parsing the cleaned response directly first (most reliable)
+      let parsed: Array<{
         id: string
         classification: string
         confidence: number
         reasoning: string
       }>
+
+      try {
+        const directParse = JSON.parse(cleanResponse)
+        if (Array.isArray(directParse)) {
+          parsed = directParse
+        } else {
+          throw new Error('Response is not an array')
+        }
+      } catch {
+        // Fallback: Extract JSON array using greedy regex
+        // Match from first [ to last ]
+        const jsonMatch = cleanResponse.match(/\[[\s\S]*\]/)
+        if (!jsonMatch) {
+          console.error('[BatchClassification] No JSON array found. Response preview:', cleanResponse.slice(0, 500))
+          throw new Error('No JSON array found in response')
+        }
+        parsed = JSON.parse(jsonMatch[0])
+      }
+
+      console.log(`[BatchClassification] Successfully parsed ${parsed.length} classifications`)
 
       // Map results back to property IDs
       for (let i = 0; i < parsed.length && i < properties.length; i++) {
@@ -278,26 +300,28 @@ ${propertyDescriptions}`
         if (!results.has(prop.id)) {
           console.warn(`[BatchClassification] Property ${prop.id} missing from LLM response, using fallback`)
           results.set(prop.id, {
-            classification: 'transitional',
+            classification: 'as_is',
             confidence: 30,
             method: 'fallback',
             indicators: {},
-            reasoning: 'Property was not classified by LLM batch',
+            reasoning: 'Property was not classified by LLM batch - defaulting to as_is',
           })
         }
       }
     } catch (error) {
-      console.error('[BatchClassification] Failed to parse response:', error)
-      console.error('[BatchClassification] Response was:', response.slice(0, 500))
+      const errorMessage = error instanceof Error ? error.message : String(error)
+      console.error('[BatchClassification] Failed to parse response:', errorMessage)
+      console.error('[BatchClassification] Raw response length:', response.length)
+      console.error('[BatchClassification] Response preview:', response.slice(0, 800))
 
-      // Return transitional for all properties on parse failure
+      // Return as_is for all properties on parse failure (conservative approach)
       for (const prop of properties) {
         results.set(prop.id, {
-          classification: 'transitional',
+          classification: 'as_is',
           confidence: 20,
           method: 'parse_error_fallback',
           indicators: {},
-          reasoning: 'Failed to parse LLM batch response',
+          reasoning: `Failed to parse LLM batch response (${errorMessage}) - defaulting to as_is`,
         })
       }
     }
@@ -307,12 +331,13 @@ ${propertyDescriptions}`
 
   /**
    * Classify property using only data (no LLM)
+   * Defaults to as_is when uncertain (conservative approach)
    */
   private classifyByDataOnly(
     prop: BatchClassificationInput,
     areaAvgPricePerSqft: number
   ): ClassificationResult {
-    let classification: PropertyClassification = 'transitional'
+    let classification: PropertyClassification = 'as_is' // Default to as_is
     let confidence = 40
     let reasoning = ''
 
@@ -320,16 +345,17 @@ ${propertyDescriptions}`
     if (prop.description && prop.description.length > 10) {
       const analysis = analyzeDescriptionKeywords(prop.description)
 
-      if (analysis.score <= -30) {
+      if (analysis.score <= -20) {
         classification = 'as_is'
         confidence = Math.min(80, 50 + Math.abs(analysis.score) / 2)
         reasoning = `Description keywords indicate As-Is: ${analysis.asIsKeywords.slice(0, 3).join(', ')}`
-      } else if (analysis.score >= 30) {
+      } else if (analysis.score >= 40) {
+        // Higher threshold for after_renovation
         classification = 'after_renovation'
         confidence = Math.min(80, 50 + analysis.score / 2)
         reasoning = `Description keywords indicate renovated: ${analysis.afterRenovationKeywords.slice(0, 3).join(', ')}`
       } else {
-        reasoning = 'Description keywords inconclusive'
+        reasoning = 'Description keywords inconclusive - defaulting to as_is'
       }
     }
 
@@ -338,29 +364,21 @@ ${propertyDescriptions}`
       const pricePerSqft = prop.salePrice / prop.squareFeet
       const ratio = pricePerSqft / areaAvgPricePerSqft
 
-      if (ratio <= 0.75) {
-        // Significantly below market
-        if (classification === 'transitional') {
-          classification = 'as_is'
-          confidence = Math.min(70, 50 + (0.75 - ratio) * 100)
-        } else if (classification === 'as_is') {
-          confidence = Math.min(90, confidence + 15)
-        }
+      if (ratio <= 0.85) {
+        // Below market - confirms as_is
+        classification = 'as_is'
+        confidence = Math.min(85, confidence + 15)
         reasoning += ` Price ${Math.round(ratio * 100)}% of market avg suggests distress.`
-      } else if (ratio >= 1.1) {
-        // At or above market
-        if (classification === 'transitional') {
-          classification = 'after_renovation'
-          confidence = Math.min(70, 50 + (ratio - 1.0) * 50)
-        } else if (classification === 'after_renovation') {
-          confidence = Math.min(90, confidence + 15)
-        }
+      } else if (ratio >= 1.15) {
+        // Significantly above market - suggests after_renovation
+        classification = 'after_renovation'
+        confidence = Math.min(80, 50 + (ratio - 1.0) * 50)
         reasoning += ` Price ${Math.round(ratio * 100)}% of market avg suggests updated.`
       }
     }
 
     if (!reasoning) {
-      reasoning = 'Insufficient data for confident classification'
+      reasoning = 'Insufficient data for confident classification - defaulting to as_is'
     }
 
     return {
@@ -374,10 +392,11 @@ ${propertyDescriptions}`
 
   /**
    * Normalize classification value
+   * Defaults to as_is for any unrecognized value
    */
   private normalizeClassification(value: string | undefined): PropertyClassification {
     const normalized = value?.toLowerCase()
-    if (normalized === 'as_is' || normalized === 'after_renovation' || normalized === 'transitional') {
+    if (normalized === 'as_is' || normalized === 'after_renovation') {
       return normalized
     }
     if (normalized === 'as-is' || normalized === 'asis') {
@@ -386,7 +405,8 @@ ${propertyDescriptions}`
     if (normalized === 'after-renovation' || normalized === 'afterrenovation' || normalized === 'arv' || normalized === 'renovated') {
       return 'after_renovation'
     }
-    return 'transitional'
+    // Default to as_is for any unrecognized value (including transitional)
+    return 'as_is'
   }
 }
 

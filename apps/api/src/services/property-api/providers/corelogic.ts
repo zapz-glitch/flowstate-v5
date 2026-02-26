@@ -25,7 +25,6 @@ import type {
 const BASE_URL = 'https://property.corelogicapi.com'
 const SPATIAL_URL = 'https://api-prod.corelogic.com'
 const TOKEN_URL = 'https://prod.corelogicapi.com/oauth/token'
-const MAX_KEYS = 9 // Support keys 0-8
 
 // ─── Date Parser ────────────────────────────────────────────────────────────────
 
@@ -146,12 +145,6 @@ function parseAddress(fullAddress: string): ParsedAddress {
 
 // ─── Internal Types ────────────────────────────────────────────────────────────
 
-interface ApiCredentials {
-  clientId: string
-  clientSecret: string
-  index: number
-}
-
 interface TokenCache {
   accessToken: string
   expiresAt: number
@@ -159,68 +152,24 @@ interface TokenCache {
 
 // ─── State (per isolate) ───────────────────────────────────────────────────────
 
-const tokenCaches: Map<number, TokenCache> = new Map()
-const failedKeys: Map<number, number> = new Map() // keyIndex -> failureTimestamp
-const FAILURE_COOLDOWN_MS = 60 * 1000 // 1 minute cooldown
-let currentKeyIndex = 0
-
-// ─── Credential Management ─────────────────────────────────────────────────────
-
-function getAvailableCredentials(env: Env): ApiCredentials[] {
-  const credentials: ApiCredentials[] = []
-
-  for (let i = 0; i < MAX_KEYS; i++) {
-    const clientId = env[`CORELOGIC_CLIENT_ID_${i}` as keyof Env] as string | undefined
-    const clientSecret = env[`CORELOGIC_CLIENT_SECRET_${i}` as keyof Env] as string | undefined
-
-    if (clientId && clientSecret) {
-      credentials.push({ clientId, clientSecret, index: i })
-    }
-  }
-
-  return credentials
-}
-
-function selectCredential(credentials: ApiCredentials[]): ApiCredentials | null {
-  if (credentials.length === 0) return null
-
-  const now = Date.now()
-
-  for (let attempt = 0; attempt < credentials.length; attempt++) {
-    const index = (currentKeyIndex + attempt) % credentials.length
-    const cred = credentials[index]
-
-    const failureTime = failedKeys.get(cred.index)
-    if (failureTime && now - failureTime < FAILURE_COOLDOWN_MS) {
-      continue
-    }
-
-    currentKeyIndex = (index + 1) % credentials.length
-    return cred
-  }
-
-  currentKeyIndex = (currentKeyIndex + 1) % credentials.length
-  return credentials[currentKeyIndex]
-}
-
-function markKeyFailed(keyIndex: number): void {
-  failedKeys.set(keyIndex, Date.now())
-  tokenCaches.delete(keyIndex)
-}
-
-function markKeySuccess(keyIndex: number): void {
-  failedKeys.delete(keyIndex)
-}
+let tokenCache: TokenCache | null = null
 
 // ─── Authentication ────────────────────────────────────────────────────────────
 
-async function getAccessToken(cred: ApiCredentials): Promise<string> {
-  const cached = tokenCaches.get(cred.index)
-  if (cached && cached.expiresAt > Date.now() + 60000) {
-    return cached.accessToken
+async function getAccessToken(env: Env): Promise<string> {
+  // Return cached token if still valid (with 60 second buffer)
+  if (tokenCache && tokenCache.expiresAt > Date.now() + 60000) {
+    return tokenCache.accessToken
   }
 
-  const credentials = btoa(`${cred.clientId}:${cred.clientSecret}`)
+  const clientId = env.CORELOGIC_CLIENT_ID
+  const clientSecret = env.CORELOGIC_CLIENT_SECRET
+
+  if (!clientId || !clientSecret) {
+    throw new Error('CoreLogic API credentials not configured (CORELOGIC_CLIENT_ID and CORELOGIC_CLIENT_SECRET)')
+  }
+
+  const credentials = btoa(`${clientId}:${clientSecret}`)
 
   const response = await fetch(`${TOKEN_URL}?grant_type=client_credentials`, {
     method: 'POST',
@@ -232,7 +181,7 @@ async function getAccessToken(cred: ApiCredentials): Promise<string> {
 
   if (!response.ok) {
     const errorBody = await response.text()
-    console.error(`CoreLogic token request failed for key ${cred.index}:`, {
+    console.error('CoreLogic token request failed:', {
       status: response.status,
       body: errorBody.substring(0, 500),
     })
@@ -241,10 +190,10 @@ async function getAccessToken(cred: ApiCredentials): Promise<string> {
 
   const data: { access_token: string; expires_in: number } = await response.json()
 
-  tokenCaches.set(cred.index, {
+  tokenCache = {
     accessToken: data.access_token,
     expiresAt: Date.now() + data.expires_in * 1000,
-  })
+  }
 
   return data.access_token
 }
@@ -259,105 +208,59 @@ async function request<T>(
     baseUrl?: string
   }
 ): Promise<T> {
-  const credentials = getAvailableCredentials(env)
+  const token = await getAccessToken(env)
+  const baseUrl = options?.baseUrl || BASE_URL
 
-  if (credentials.length === 0) {
-    throw new Error('No CoreLogic API credentials configured')
+  const url = new URL(`${baseUrl}${endpoint}`)
+  if (options?.params) {
+    for (const [key, value] of Object.entries(options.params)) {
+      if (value !== undefined) {
+        url.searchParams.append(key, String(value))
+      }
+    }
   }
 
-  let lastError: Error | null = null
-  const triedKeys = new Set<number>()
+  console.log(`CoreLogic API request: ${url.toString()}`)
 
-  for (let attempt = 0; attempt < credentials.length; attempt++) {
-    const cred = selectCredential(credentials)
-    if (!cred || triedKeys.has(cred.index)) {
-      continue
-    }
-    triedKeys.add(cred.index)
+  const response = await fetch(url.toString(), {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: 'application/json',
+    },
+  })
 
-    try {
-      const token = await getAccessToken(cred)
-      const baseUrl = options?.baseUrl || BASE_URL
+  if (response.status === 429) {
+    // Clear token cache on rate limit in case token needs refresh
+    tokenCache = null
+    throw new Error('CoreLogic API rate limited (429)')
+  }
 
-      const url = new URL(`${baseUrl}${endpoint}`)
-      if (options?.params) {
-        for (const [key, value] of Object.entries(options.params)) {
-          if (value !== undefined) {
-            url.searchParams.append(key, String(value))
-          }
-        }
-      }
+  if (response.status === 401 || response.status === 403) {
+    const errorBody = await response.text()
 
-      console.log(`CoreLogic API request: ${url.toString()} (key ${cred.index})`)
-
-      const response = await fetch(url.toString(), {
-        method: 'GET',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          Accept: 'application/json',
-        },
+    // Check if this is an entitlements error (account doesn't have access to this endpoint)
+    if (errorBody.includes('entitlements') || errorBody.includes('not have proper entitlements')) {
+      console.warn(`CoreLogic endpoint ${endpoint} not available (entitlements issue)`, {
+        status: response.status,
       })
-
-      if (response.status === 429) {
-        console.warn(`CoreLogic key ${cred.index} rate limited, rotating...`)
-        markKeyFailed(cred.index)
-        lastError = new Error(`Rate limited on key ${cred.index}`)
-        continue
-      }
-
-      if (response.status === 401 || response.status === 403) {
-        const errorBody = await response.text()
-
-        // Check if this is an entitlements error (account doesn't have access to this endpoint)
-        // This is NOT an auth failure - the key is valid, just doesn't have access to this feature
-        if (errorBody.includes('entitlements') || errorBody.includes('not have proper entitlements')) {
-          console.warn(`CoreLogic endpoint ${endpoint} not available (entitlements issue)`, {
-            status: response.status,
-            keyIndex: cred.index,
-          })
-          // Mark key as successful since it worked, just this endpoint isn't available
-          markKeySuccess(cred.index)
-          // Throw a specific error that can be caught and handled gracefully
-          throw new Error(`ENTITLEMENTS_ERROR: Account does not have access to ${endpoint}`)
-        }
-
-        console.warn(`CoreLogic key ${cred.index} auth failed (${response.status}), rotating...`, {
-          status: response.status,
-          endpoint,
-          errorBody: errorBody.substring(0, 500),
-        })
-        markKeyFailed(cred.index)
-        lastError = new Error(`Auth failed on key ${cred.index}: ${response.status} - ${errorBody.substring(0, 200)}`)
-        continue
-      }
-
-      if (!response.ok) {
-        if (response.status === 404) {
-          markKeySuccess(cred.index)
-          return { items: [], property: null } as T
-        }
-        const body = await response.text()
-        throw new Error(`CoreLogic API error: ${response.status} - ${body}`)
-      }
-
-      markKeySuccess(cred.index)
-      return await response.json()
-    } catch (error) {
-      lastError = error instanceof Error ? error : new Error(String(error))
-
-      if (
-        lastError.message.includes('Rate limited') ||
-        lastError.message.includes('Auth failed') ||
-        lastError.message.includes('auth failed')
-      ) {
-        continue
-      }
-
-      throw lastError
+      throw new Error(`ENTITLEMENTS_ERROR: Account does not have access to ${endpoint}`)
     }
+
+    // Clear token cache on auth failure
+    tokenCache = null
+    throw new Error(`CoreLogic auth failed: ${response.status} - ${errorBody.substring(0, 200)}`)
   }
 
-  throw lastError || new Error('All CoreLogic API keys exhausted')
+  if (!response.ok) {
+    if (response.status === 404) {
+      return { items: [], property: null } as T
+    }
+    const body = await response.text()
+    throw new Error(`CoreLogic API error: ${response.status} - ${body}`)
+  }
+
+  return await response.json()
 }
 
 // ─── Raw API Types ─────────────────────────────────────────────────────────────
@@ -1153,28 +1056,16 @@ class CoreLogicProvider implements PropertyProviderAdapter {
   }
 
   getKeyStatus(): {
-    total: number
-    available: number
-    inCooldown: number
-    keys: Array<{ index: number; status: 'available' | 'cooldown' }>
+    configured: boolean
+    hasToken: boolean
   } {
-    const credentials = getAvailableCredentials(this.env)
-    const now = Date.now()
-
-    const keys = credentials.map((cred) => {
-      const failureTime = failedKeys.get(cred.index)
-      const inCooldown = failureTime && now - failureTime < FAILURE_COOLDOWN_MS
-      return {
-        index: cred.index,
-        status: inCooldown ? 'cooldown' : 'available',
-      } as const
-    })
+    const clientId = this.env.CORELOGIC_CLIENT_ID
+    const clientSecret = this.env.CORELOGIC_CLIENT_SECRET
+    const configured = !!(clientId && clientSecret)
 
     return {
-      total: credentials.length,
-      available: keys.filter((k) => k.status === 'available').length,
-      inCooldown: keys.filter((k) => k.status === 'cooldown').length,
-      keys,
+      configured,
+      hasToken: tokenCache !== null && tokenCache.expiresAt > Date.now(),
     }
   }
 }

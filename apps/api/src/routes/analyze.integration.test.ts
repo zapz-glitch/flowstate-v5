@@ -8,7 +8,7 @@
  * Run with: npm run test -- src/routes/analyze.integration.test.ts
  *
  * Required environment variables (in .dev.vars):
- * - CORELOGIC_CLIENT_ID_0, CORELOGIC_CLIENT_SECRET_0 (or legacy CORELOGIC_CLIENT_ID/SECRET)
+ * - CORELOGIC_CLIENT_ID, CORELOGIC_CLIENT_SECRET
  * - GEMINI_API_KEY
  */
 
@@ -24,10 +24,8 @@ import type { AppraisedComparable } from '../services/appraisal'
 // Build env from process.env for testing
 function buildTestEnv(): Partial<Env> {
   return {
-    CORELOGIC_CLIENT_ID_0: process.env.CORELOGIC_CLIENT_ID_0,
-    CORELOGIC_CLIENT_SECRET_0: process.env.CORELOGIC_CLIENT_SECRET_0,
-    CORELOGIC_CLIENT_ID_1: process.env.CORELOGIC_CLIENT_ID_1,
-    CORELOGIC_CLIENT_SECRET_1: process.env.CORELOGIC_CLIENT_SECRET_1,
+    CORELOGIC_CLIENT_ID: process.env.CORELOGIC_CLIENT_ID,
+    CORELOGIC_CLIENT_SECRET: process.env.CORELOGIC_CLIENT_SECRET,
     OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY,
     OPENROUTER_MODEL: process.env.OPENROUTER_MODEL,
   }
@@ -35,7 +33,7 @@ function buildTestEnv(): Partial<Env> {
 
 // Check if we have required API keys
 const env = buildTestEnv()
-const hasCoreLogic = !!(env.CORELOGIC_CLIENT_ID_0 && env.CORELOGIC_CLIENT_SECRET_0)
+const hasCoreLogic = !!(env.CORELOGIC_CLIENT_ID && env.CORELOGIC_CLIENT_SECRET)
 const hasOpenRouter = !!env.OPENROUTER_API_KEY
 
 const describeIfCoreLogic = hasCoreLogic ? describe : describe.skip

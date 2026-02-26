@@ -168,6 +168,13 @@ export class ZillowPhotoProvider implements PhotoProvider {
         features: listing.features,
         priceHistory: options?.includePriceHistory !== false ? listing.priceHistory : undefined,
         fetchedAt: new Date().toISOString(),
+        // Structured property data from Zillow listing
+        bedrooms: listing.bedrooms,
+        bathrooms: listing.bathrooms,
+        squareFeet: listing.squareFeet,
+        yearBuilt: listing.yearBuilt,
+        lastSaleDate: listing.lastSaleDate,
+        lastSalePrice: listing.lastSalePrice,
       }
 
       return {

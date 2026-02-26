@@ -1,5 +1,8 @@
 import { getApiKeys, getUsageSummary, getUsageLogs } from '@/lib/api'
 import { PLAN_LIMITS } from '@flowstate-api/db'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
+import { cn } from '@/lib/utils'
 
 async function getUsageData() {
   try {
@@ -61,93 +64,99 @@ export default async function UsagePage() {
   const requestsToday = data.logs.filter((l) => l.createdAt.startsWith(today)).length
 
   return (
-    <div className="space-y-8">
-      <div>
-        <h1 className="text-2xl font-bold text-neutral-900 dark:text-white">Usage</h1>
-        <p className="text-neutral-600 dark:text-neutral-400 mt-1">
-          Monitor your API usage and requests
-        </p>
+    <div className="space-y-10 animate-in fade-in duration-500">
+      {/* Header */}
+      <div className="space-y-1">
+        <h1 className="text-heading-lg text-foreground tracking-tight">Usage</h1>
+        <p className="text-body text-foreground-tertiary">Monitor your API usage and requests</p>
       </div>
 
       {/* Account Quota Progress */}
-      <div className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-800 p-6">
-        <div className="flex items-center justify-between mb-2">
-          <h2 className="text-lg font-semibold text-neutral-900 dark:text-white">Account Quota</h2>
-          <span className="text-sm font-medium text-neutral-600 dark:text-neutral-400 capitalize">
-            {data.plan} Plan
-          </span>
-        </div>
-        <div className="flex items-baseline gap-2 mb-3">
-          <span className="text-3xl font-bold text-neutral-900 dark:text-white">
-            {data.totalUsage.toLocaleString()}
-          </span>
-          <span className="text-neutral-500">
-            / {data.accountQuota ? data.accountQuota.toLocaleString() : 'Unlimited'} requests
-          </span>
-        </div>
-        {data.accountQuota && (
-          <div className="w-full bg-neutral-200 dark:bg-neutral-700 rounded-full h-3">
-            <div
-              className={`h-3 rounded-full transition-all ${
-                quotaPercent >= 90
-                  ? 'bg-red-500'
-                  : quotaPercent >= 75
-                    ? 'bg-yellow-500'
-                    : 'bg-green-500'
-              }`}
-              style={{ width: `${quotaPercent}%` }}
-            />
+      <Card>
+        <CardContent className="p-6">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-heading font-semibold text-foreground">Account Quota</h2>
+            <Badge variant="outline" className="capitalize">
+              {data.plan} Plan
+            </Badge>
           </div>
-        )}
-        {data.accountQuota && (
-          <p className="text-sm text-neutral-500 mt-2">
-            {data.accountQuota - data.totalUsage > 0
-              ? `${(data.accountQuota - data.totalUsage).toLocaleString()} requests remaining`
-              : 'Quota exceeded'}
-          </p>
-        )}
-      </div>
+          <div className="flex items-baseline gap-2 mb-4">
+            <span className="text-display-sm font-bold text-foreground">
+              {data.totalUsage.toLocaleString()}
+            </span>
+            <span className="text-body text-foreground-tertiary">
+              / {data.accountQuota ? data.accountQuota.toLocaleString() : 'Unlimited'} requests
+            </span>
+          </div>
+          {data.accountQuota && (
+            <div className="w-full bg-secondary rounded-full h-3">
+              <div
+                className={cn(
+                  'h-3 rounded-full transition-all duration-500',
+                  quotaPercent >= 90
+                    ? 'bg-red-500'
+                    : quotaPercent >= 75
+                      ? 'bg-amber-500'
+                      : 'bg-emerald-500'
+                )}
+                style={{ width: `${quotaPercent}%` }}
+              />
+            </div>
+          )}
+          {data.accountQuota && (
+            <p className="text-body-sm text-foreground-tertiary mt-3">
+              {data.accountQuota - data.totalUsage > 0
+                ? `${(data.accountQuota - data.totalUsage).toLocaleString()} requests remaining`
+                : 'Quota exceeded'}
+            </p>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-800 p-6">
-          <p className="text-sm text-neutral-600 dark:text-neutral-400">Active Keys</p>
-          <p className="text-3xl font-bold text-neutral-900 dark:text-white mt-1">
-            {data.keys.filter((k) => k.isActive).length}
-          </p>
-          <p className="text-sm text-neutral-500 mt-1">
-            of {data.planLimits.maxApiKeys === -1 ? '∞' : data.planLimits.maxApiKeys} allowed
-          </p>
-        </div>
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-5">
+        <Card>
+          <CardContent className="p-5">
+            <p className="text-caption text-foreground-tertiary">Active Keys</p>
+            <p className="text-display-sm font-bold text-foreground mt-2">
+              {data.keys.filter((k) => k.isActive).length}
+            </p>
+            <p className="text-caption-sm text-foreground-tertiary mt-1">
+              of {data.planLimits.maxApiKeys === -1 ? '∞' : data.planLimits.maxApiKeys} allowed
+            </p>
+          </CardContent>
+        </Card>
 
-        <div className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-800 p-6">
-          <p className="text-sm text-neutral-600 dark:text-neutral-400">Requests Today</p>
-          <p className="text-3xl font-bold text-neutral-900 dark:text-white mt-1">{requestsToday}</p>
-        </div>
+        <Card>
+          <CardContent className="p-5">
+            <p className="text-caption text-foreground-tertiary">Requests Today</p>
+            <p className="text-display-sm font-bold text-foreground mt-2">{requestsToday}</p>
+          </CardContent>
+        </Card>
 
-        <div className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-800 p-6">
-          <p className="text-sm text-neutral-600 dark:text-neutral-400">Success Rate</p>
-          <p className="text-3xl font-bold text-neutral-900 dark:text-white mt-1">
-            {data.successRate}%
-          </p>
-          <p className="text-sm text-neutral-500 mt-1">2xx responses</p>
-        </div>
+        <Card>
+          <CardContent className="p-5">
+            <p className="text-caption text-foreground-tertiary">Success Rate</p>
+            <p className="text-display-sm font-bold text-foreground mt-2">{data.successRate}%</p>
+            <p className="text-caption-sm text-foreground-tertiary mt-1">2xx responses</p>
+          </CardContent>
+        </Card>
 
-        <div className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-800 p-6">
-          <p className="text-sm text-neutral-600 dark:text-neutral-400">Avg Response Time</p>
-          <p className="text-3xl font-bold text-neutral-900 dark:text-white mt-1">
-            {data.avgResponseTime}ms
-          </p>
-        </div>
+        <Card>
+          <CardContent className="p-5">
+            <p className="text-caption text-foreground-tertiary">Avg Response Time</p>
+            <p className="text-display-sm font-bold text-foreground mt-2">{data.avgResponseTime}ms</p>
+          </CardContent>
+        </Card>
       </div>
 
       {/* Per-Key Usage */}
       {data.keys.length > 0 && (
-        <div className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-800 p-6">
-          <h2 className="text-lg font-semibold text-neutral-900 dark:text-white mb-4">
-            Usage per API Key
-          </h2>
-          <div className="space-y-4">
+        <Card>
+          <CardHeader>
+            <CardTitle>Usage per API Key</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-5">
             {data.keys.map((key) => {
               const keyQuota = key.monthlyQuota || data.planLimits.monthlyRequests
               const keyPercent =
@@ -156,104 +165,107 @@ export default async function UsagePage() {
                   : Math.min(100, Math.round((key.currentUsage / keyQuota) * 100))
               return (
                 <div key={key.id}>
-                  <div className="flex items-center justify-between mb-1">
+                  <div className="flex items-center justify-between mb-2">
                     <div className="flex items-center gap-2">
-                      <span className="font-medium text-neutral-900 dark:text-white">{key.name}</span>
-                      <code className="text-xs text-neutral-500 bg-neutral-100 dark:bg-neutral-800 px-1.5 py-0.5 rounded">
+                      <span className="text-body font-medium text-foreground">{key.name}</span>
+                      <code className="text-caption-sm text-foreground-tertiary bg-secondary px-2 py-0.5 rounded-lg">
                         {key.keyPrefix}...
                       </code>
                       {!key.isActive && (
-                        <span className="text-xs text-red-500 bg-red-100 dark:bg-red-900/30 px-1.5 py-0.5 rounded">
+                        <Badge variant="outline" className="bg-red-500/10 text-red-600 border-red-500/30 text-caption-sm">
                           Disabled
-                        </span>
+                        </Badge>
                       )}
                     </div>
-                    <span className="text-sm text-neutral-600 dark:text-neutral-400">
+                    <span className="text-body-sm text-foreground-secondary">
                       {key.currentUsage.toLocaleString()}{' '}
                       {keyQuota !== -1 && `/ ${keyQuota.toLocaleString()}`}
                     </span>
                   </div>
                   {keyQuota !== -1 && (
-                    <div className="w-full bg-neutral-200 dark:bg-neutral-700 rounded-full h-2">
+                    <div className="w-full bg-secondary rounded-full h-2">
                       <div
-                        className={`h-2 rounded-full transition-all ${
+                        className={cn(
+                          'h-2 rounded-full transition-all duration-500',
                           keyPercent >= 90
                             ? 'bg-red-500'
                             : keyPercent >= 75
-                              ? 'bg-yellow-500'
-                              : 'bg-blue-500'
-                        }`}
+                              ? 'bg-amber-500'
+                              : 'bg-primary'
+                        )}
                         style={{ width: `${keyPercent}%` }}
                       />
                     </div>
                   )}
                   {key.lastUsedAt && (
-                    <p className="text-xs text-neutral-500 mt-1">
+                    <p className="text-caption-sm text-foreground-tertiary mt-1.5">
                       Last used: {new Date(key.lastUsedAt).toLocaleString()}
                     </p>
                   )}
                 </div>
               )
             })}
-          </div>
-        </div>
+          </CardContent>
+        </Card>
       )}
 
       {/* Recent requests */}
-      <div className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-800 overflow-hidden">
-        <div className="px-6 py-4 border-b border-neutral-200 dark:border-neutral-800">
-          <h2 className="text-lg font-semibold text-neutral-900 dark:text-white">Recent Requests</h2>
-        </div>
+      <Card>
+        <CardHeader className="border-b border-border/60">
+          <CardTitle>Recent Requests</CardTitle>
+        </CardHeader>
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead>
-              <tr className="border-b border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800/50">
-                <th className="text-left px-6 py-3 text-sm font-medium text-neutral-600 dark:text-neutral-400">
+              <tr className="border-b border-border/60 bg-secondary/30">
+                <th className="text-left px-6 py-3 text-caption font-medium text-foreground-tertiary">
                   Time
                 </th>
-                <th className="text-left px-6 py-3 text-sm font-medium text-neutral-600 dark:text-neutral-400">
+                <th className="text-left px-6 py-3 text-caption font-medium text-foreground-tertiary">
                   Endpoint
                 </th>
-                <th className="text-left px-6 py-3 text-sm font-medium text-neutral-600 dark:text-neutral-400">
+                <th className="text-left px-6 py-3 text-caption font-medium text-foreground-tertiary">
                   Status
                 </th>
-                <th className="text-left px-6 py-3 text-sm font-medium text-neutral-600 dark:text-neutral-400">
+                <th className="text-left px-6 py-3 text-caption font-medium text-foreground-tertiary">
                   Response Time
                 </th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-neutral-200 dark:divide-neutral-800">
+            <tbody className="divide-y divide-border/60">
               {data.logs.length === 0 ? (
                 <tr>
-                  <td colSpan={4} className="px-6 py-8 text-center text-neutral-500">
+                  <td colSpan={4} className="px-6 py-8 text-center text-body-sm text-foreground-tertiary">
                     No requests yet
                   </td>
                 </tr>
               ) : (
                 data.logs.slice(0, 20).map((log) => (
-                  <tr key={log.id}>
-                    <td className="px-6 py-4 text-sm text-neutral-600 dark:text-neutral-400">
+                  <tr key={log.id} className="hover:bg-secondary/30 transition-colors">
+                    <td className="px-6 py-4 text-body-sm text-foreground-secondary">
                       {new Date(log.createdAt).toLocaleString()}
                     </td>
                     <td className="px-6 py-4">
-                      <code className="text-sm text-neutral-600 dark:text-neutral-400 font-mono">
+                      <code className="text-body-sm text-foreground-secondary font-mono">
                         {log.endpoint}
                       </code>
                     </td>
                     <td className="px-6 py-4">
-                      <span
-                        className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+                      <Badge
+                        variant="outline"
+                        className={cn(
+                          'text-caption-sm',
                           log.statusCode >= 200 && log.statusCode < 300
-                            ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400'
+                            ? 'bg-emerald-500/10 text-emerald-600 border-emerald-500/30'
                             : log.statusCode >= 400
-                              ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400'
-                              : 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400'
-                        }`}
+                              ? 'bg-red-500/10 text-red-600 border-red-500/30'
+                              : 'bg-amber-500/10 text-amber-600 border-amber-500/30'
+                        )}
                       >
                         {log.statusCode}
-                      </span>
+                      </Badge>
                     </td>
-                    <td className="px-6 py-4 text-sm text-neutral-600 dark:text-neutral-400">
+                    <td className="px-6 py-4 text-body-sm text-foreground-secondary">
                       {log.responseTimeMs ? `${log.responseTimeMs}ms` : '-'}
                     </td>
                   </tr>
@@ -262,7 +274,7 @@ export default async function UsagePage() {
             </tbody>
           </table>
         </div>
-      </div>
+      </Card>
     </div>
   )
 }

@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "Flowstate API",
-    "description": "Property valuation and underwriting API for real estate investors. Get property data, comparables, ARV calculations, and investment recommendations.",
+    "description": "Property valuation and underwriting API for real estate investors. Get property data, comparables, ARV calculations, and investment recommendations.\n\n## Authentication\n\nThe API supports two authentication methods:\n- **Bearer Token**: For API access via `/v1/*` endpoints. Use API keys from your dashboard.\n- **Session Cookie**: For dashboard endpoints (`/user/*`, `/appraisal-presets/*`). Managed via Better Auth.\n\n## Real-time Analysis\n\nProperty analysis is async. POST to `/v1/analyze` returns a job ID immediately. Get results via:\n- **WebSocket**: `/ws/analyze/:jobId` for real-time streaming\n- **Polling**: `GET /v1/analyze/jobs/:jobId` for status checks",
     "version": "1.0.0",
     "contact": {
       "name": "Flowstate Support",
@@ -19,12 +19,67 @@
       "description": "Local Development"
     }
   ],
+  "tags": [
+    {
+      "name": "Health",
+      "description": "Health check endpoints (no auth required)"
+    },
+    {
+      "name": "Analysis",
+      "description": "Property analysis endpoints (API key required)"
+    },
+    {
+      "name": "Appraisal Presets",
+      "description": "Manage appraisal rule presets (session auth required)"
+    },
+    {
+      "name": "User",
+      "description": "User profile, API keys, and usage (session auth required)"
+    }
+  ],
   "security": [
     {
       "bearerAuth": []
     }
   ],
   "paths": {
+    "/": {
+      "get": {
+        "tags": ["Health"],
+        "summary": "API info",
+        "description": "Returns basic API information and available endpoints. No authentication required.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "API information",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "name": { "type": "string", "example": "Flowstate API" },
+                    "version": { "type": "string", "example": "1.0.0" },
+                    "docs": { "type": "string", "example": "https://docs.flowstate.homes" },
+                    "endpoints": {
+                      "type": "object",
+                      "properties": {
+                        "health": { "type": "string" },
+                        "auth": { "type": "string" },
+                        "user": { "type": "string" },
+                        "apiKeys": { "type": "string" },
+                        "usage": { "type": "string" },
+                        "appraisalPresets": { "type": "string" },
+                        "analyze": { "type": "string" }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/health": {
       "get": {
         "tags": ["Health"],
@@ -39,19 +94,9 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "status": {
-                      "type": "string",
-                      "example": "ok"
-                    },
-                    "timestamp": {
-                      "type": "string",
-                      "format": "date-time",
-                      "example": "2024-02-17T12:00:00.000Z"
-                    },
-                    "version": {
-                      "type": "string",
-                      "example": "1.0.0"
-                    }
+                    "status": { "type": "string", "example": "ok" },
+                    "timestamp": { "type": "string", "format": "date-time" },
+                    "version": { "type": "string", "example": "1.0.0" }
                   }
                 }
               }
@@ -74,14 +119,8 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "status": {
-                      "type": "string",
-                      "example": "ok"
-                    },
-                    "timestamp": {
-                      "type": "string",
-                      "format": "date-time"
-                    }
+                    "status": { "type": "string", "example": "ok" },
+                    "timestamp": { "type": "string", "format": "date-time" }
                   }
                 }
               }
@@ -91,8 +130,51 @@
             "description": "Database error",
             "content": {
               "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health/keys": {
+      "get": {
+        "tags": ["Health"],
+        "summary": "CoreLogic API key status",
+        "description": "Shows which CoreLogic API keys are available vs in cooldown. Useful for diagnosing rate limit errors. Keys go into 60-second cooldown when rate limited (HTTP 429).",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "API key status",
+            "content": {
+              "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Error"
+                  "type": "object",
+                  "properties": {
+                    "status": { "type": "string", "enum": ["ok", "degraded"] },
+                    "timestamp": { "type": "string", "format": "date-time" },
+                    "provider": { "type": "string", "example": "corelogic" },
+                    "keys": {
+                      "type": "object",
+                      "properties": {
+                        "total": { "type": "integer" },
+                        "available": { "type": "integer" },
+                        "inCooldown": { "type": "integer" },
+                        "cooldownDurationMs": { "type": "integer", "example": 60000 },
+                        "details": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "index": { "type": "integer" },
+                              "status": { "type": "string", "enum": ["available", "cooldown"] }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "message": { "type": "string" }
+                  }
                 }
               }
             }
@@ -103,15 +185,13 @@
     "/v1/analyze": {
       "post": {
         "tags": ["Analysis"],
-        "summary": "Analyze property",
-        "description": "Complete property analysis including property lookup, comparables, ARV calculation, and investment recommendations.",
+        "summary": "Start property analysis",
+        "description": "Start an async property analysis using Cloudflare Workflows. Returns immediately with a job ID and URLs for status/streaming.\n\nThe analysis includes:\n1. Property lookup and data fetching\n2. Comparable sales search\n3. Photo fetching and AI vision analysis\n4. Appraisal adjustments\n5. ARV calculation and investment metrics\n\nResults can be retrieved via WebSocket streaming or HTTP polling.",
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AnalyzeRequest"
-              },
+              "schema": { "$ref": "#/components/schemas/AnalyzeRequest" },
               "examples": {
                 "simple": {
                   "summary": "Simple address lookup",
@@ -119,14 +199,33 @@
                     "address": "123 Main St, Tampa, FL 33607"
                   }
                 },
+                "with_photos": {
+                  "summary": "Analysis with photo analysis",
+                  "value": {
+                    "address": "123 Main St, Tampa, FL 33607",
+                    "photoAnalysis": {
+                      "enabled": true,
+                      "maxComps": 10
+                    }
+                  }
+                },
                 "advanced": {
-                  "summary": "Advanced analysis with custom parameters",
+                  "summary": "Advanced analysis with all options",
                   "value": {
                     "address": "123 Main St, Tampa, FL 33607",
                     "searchOptions": {
                       "radiusMiles": 1,
                       "maxComps": 15,
                       "monthsBack": 12
+                    },
+                    "appraisalRules": {
+                      "filters": [
+                        { "type": "sale_age", "enabled": true, "value": 12 },
+                        { "type": "sqft_diff", "enabled": true, "value": 25 }
+                      ],
+                      "adjustments": [
+                        { "type": "bedroom", "enabled": true, "amount": 5000 }
+                      ]
                     },
                     "buybox": {
                       "rehabLevelIndex": 2,
@@ -137,6 +236,11 @@
                     "enrichment": {
                       "permits": true,
                       "floodZone": true
+                    },
+                    "photoAnalysis": {
+                      "enabled": true,
+                      "maxComps": 10,
+                      "requireBetterOrEqual": true
                     }
                   }
                 }
@@ -145,13 +249,11 @@
           }
         },
         "responses": {
-          "200": {
-            "description": "Analysis completed successfully",
+          "202": {
+            "description": "Analysis job queued successfully",
             "content": {
               "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AnalyzeResponse"
-                }
+                "schema": { "$ref": "#/components/schemas/QueueJobResponse" }
               }
             }
           },
@@ -159,9 +261,7 @@
             "description": "Bad request - Invalid parameters",
             "content": {
               "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
+                "schema": { "$ref": "#/components/schemas/Error" }
               }
             }
           },
@@ -169,19 +269,7 @@
             "description": "Unauthorized - Invalid or missing API key",
             "content": {
               "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Property not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
+                "schema": { "$ref": "#/components/schemas/Error" }
               }
             }
           },
@@ -189,9 +277,7 @@
             "description": "Rate limit exceeded",
             "content": {
               "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
+                "schema": { "$ref": "#/components/schemas/Error" }
               }
             }
           },
@@ -199,9 +285,109 @@
             "description": "Server error",
             "content": {
               "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/analyze/jobs/{jobId}": {
+      "get": {
+        "tags": ["Analysis"],
+        "summary": "Get job status",
+        "description": "Get the current status of an analysis job. Returns job state, progress, and result (if completed).",
+        "parameters": [
+          {
+            "name": "jobId",
+            "in": "path",
+            "required": true,
+            "description": "Job ID returned from POST /v1/analyze",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "propertyKey",
+            "in": "query",
+            "required": true,
+            "description": "Property key returned from POST /v1/analyze",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Job status",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/JobStatusResponse" }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing propertyKey parameter",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "404": {
+            "description": "Job not found",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/analyze/ws-token": {
+      "post": {
+        "tags": ["Analysis"],
+        "summary": "Generate WebSocket token",
+        "description": "Generate a short-lived signed token for WebSocket authentication. The token expires in 5 minutes and is scoped to a specific job.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["jobId", "propertyKey"],
+                "properties": {
+                  "jobId": { "type": "string", "description": "Job ID from POST /v1/analyze" },
+                  "propertyKey": { "type": "string", "description": "Property key from POST /v1/analyze" }
                 }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "WebSocket token generated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean", "example": true },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "token": { "type": "string", "description": "Signed JWT token" },
+                        "wsUrl": { "type": "string", "description": "Full WebSocket URL with token" },
+                        "expiresIn": { "type": "integer", "example": 300, "description": "Token lifetime in seconds" }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing required parameters",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
               }
             }
           }
@@ -212,15 +398,13 @@
       "get": {
         "tags": ["Analysis"],
         "summary": "Get default parameters",
-        "description": "Get default values for appraisal rules and buybox parameters.",
+        "description": "Get default values for search options, appraisal rules, buybox parameters, and enrichment settings.",
         "responses": {
           "200": {
             "description": "Default parameters",
             "content": {
               "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DefaultsResponse"
-                }
+                "schema": { "$ref": "#/components/schemas/AnalyzeDefaultsResponse" }
               }
             }
           },
@@ -228,9 +412,700 @@
             "description": "Unauthorized",
             "content": {
               "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/user": {
+      "get": {
+        "tags": ["User"],
+        "summary": "Get current user profile",
+        "description": "Get the authenticated user's profile information. Requires session authentication via cookies.",
+        "security": [{ "cookieAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "User profile",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/UserProfile" }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/user/api-keys": {
+      "get": {
+        "tags": ["User"],
+        "summary": "List API keys",
+        "description": "Get all API keys for the authenticated user. Returns key metadata (not the actual key value).",
+        "security": [{ "cookieAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "List of API keys",
+            "content": {
+              "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Error"
+                  "type": "object",
+                  "properties": {
+                    "keys": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/ApiKey" }
+                    }
+                  }
                 }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": ["User"],
+        "summary": "Create API key",
+        "description": "Create a new API key. The full key value is only returned once at creation time. Store it securely.",
+        "security": [{ "cookieAuth": [] }],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": { "type": "string", "default": "API Key", "description": "Friendly name for the key" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "API key created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": { "type": "string" },
+                    "key": { "type": "string", "description": "Full API key (only shown once)" },
+                    "name": { "type": "string" },
+                    "keyPrefix": { "type": "string" }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "403": {
+            "description": "API key limit reached for plan",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/user/api-keys/{id}": {
+      "patch": {
+        "tags": ["User"],
+        "summary": "Update API key",
+        "description": "Update an API key's name or active status.",
+        "security": [{ "cookieAuth": [] }],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": { "type": "string" },
+                  "isActive": { "type": "boolean" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "API key updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean", "example": true }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "404": {
+            "description": "API key not found",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": ["User"],
+        "summary": "Delete API key",
+        "description": "Permanently delete an API key. This cannot be undone.",
+        "security": [{ "cookieAuth": [] }],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "API key deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean", "example": true }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "404": {
+            "description": "API key not found",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/user/usage": {
+      "get": {
+        "tags": ["User"],
+        "summary": "Get usage summary",
+        "description": "Get the user's API usage summary for the current billing period.",
+        "security": [{ "cookieAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "Usage summary",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/UsageSummary" }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/user/usage/logs": {
+      "get": {
+        "tags": ["User"],
+        "summary": "Get usage logs",
+        "description": "Get paginated API usage logs.",
+        "security": [{ "cookieAuth": [] }],
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "schema": { "type": "integer", "default": 1 }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": { "type": "integer", "default": 20, "maximum": 100 }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Usage logs",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "logs": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/UsageLog" }
+                    },
+                    "pagination": { "$ref": "#/components/schemas/Pagination" }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/user/usage/logs/{id}": {
+      "get": {
+        "tags": ["User"],
+        "summary": "Get single usage log",
+        "description": "Get details of a specific API usage log entry.",
+        "security": [{ "cookieAuth": [] }],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Usage log details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "log": { "$ref": "#/components/schemas/UsageLogDetail" }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "404": {
+            "description": "Log not found",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/appraisal-presets": {
+      "get": {
+        "tags": ["Appraisal Presets"],
+        "summary": "List all presets",
+        "description": "Get all appraisal rule presets for the authenticated user.",
+        "security": [{ "cookieAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "List of presets",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "presets": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/AppraisalPreset" }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": ["Appraisal Presets"],
+        "summary": "Create a preset",
+        "description": "Create a new appraisal rule preset. If no filters or adjustments are provided, defaults are used.",
+        "security": [{ "cookieAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CreatePresetInput" },
+              "examples": {
+                "basic": {
+                  "summary": "Basic preset with defaults",
+                  "value": {
+                    "name": "My Standard Rules",
+                    "description": "My go-to appraisal rules",
+                    "isDefault": true
+                  }
+                },
+                "custom": {
+                  "summary": "Custom filters and adjustments",
+                  "value": {
+                    "name": "Tight Market Rules",
+                    "description": "Strict filters for competitive markets",
+                    "isDefault": false,
+                    "filters": [
+                      { "filterType": "sale_age", "enabled": true, "value": 6 },
+                      { "filterType": "sqft_diff", "enabled": true, "value": 15 },
+                      { "filterType": "distance", "enabled": true, "value": 0.5 }
+                    ],
+                    "adjustments": [
+                      { "adjustmentType": "bedroom", "enabled": true, "amount": 8000, "percentage": 0 },
+                      { "adjustmentType": "bathroom", "enabled": true, "amount": 6000, "percentage": 0 }
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Preset created successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "preset": { "$ref": "#/components/schemas/AppraisalPreset" }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input - name is required",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/appraisal-presets/defaults": {
+      "get": {
+        "tags": ["Appraisal Presets"],
+        "summary": "Get default filter and adjustment values",
+        "description": "Get the default filter and adjustment configurations with their labels and descriptions. No authentication required.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Default configurations",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AppraisalDefaultsResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/appraisal-presets/default": {
+      "get": {
+        "tags": ["Appraisal Presets"],
+        "summary": "Get user's default preset",
+        "description": "Get the preset marked as default for the authenticated user. Returns null if no default is set.",
+        "security": [{ "cookieAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "Default preset (or null)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "preset": {
+                      "oneOf": [
+                        { "$ref": "#/components/schemas/AppraisalPreset" },
+                        { "type": "null" }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/appraisal-presets/{id}": {
+      "get": {
+        "tags": ["Appraisal Presets"],
+        "summary": "Get a preset by ID",
+        "description": "Get a specific appraisal preset by its ID.",
+        "security": [{ "cookieAuth": [] }],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Preset ID (UUID)",
+            "schema": { "type": "string", "format": "uuid" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Preset details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "preset": { "$ref": "#/components/schemas/AppraisalPreset" }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "404": {
+            "description": "Preset not found",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": ["Appraisal Presets"],
+        "summary": "Update a preset",
+        "description": "Update an existing appraisal preset. All fields are optional. If filters or adjustments are provided, they replace the existing ones entirely.",
+        "security": [{ "cookieAuth": [] }],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Preset ID (UUID)",
+            "schema": { "type": "string", "format": "uuid" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/UpdatePresetInput" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Preset updated successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "preset": { "$ref": "#/components/schemas/AppraisalPreset" }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "404": {
+            "description": "Preset not found",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": ["Appraisal Presets"],
+        "summary": "Delete a preset",
+        "description": "Delete an appraisal preset. This also deletes all associated filters and adjustments.",
+        "security": [{ "cookieAuth": [] }],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Preset ID (UUID)",
+            "schema": { "type": "string", "format": "uuid" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Preset deleted successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean", "example": true }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "404": {
+            "description": "Preset not found",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/appraisal-presets/{id}/set-default": {
+      "post": {
+        "tags": ["Appraisal Presets"],
+        "summary": "Set a preset as default",
+        "description": "Mark a preset as the user's default. This will unset any previously default preset.",
+        "security": [{ "cookieAuth": [] }],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Preset ID (UUID)",
+            "schema": { "type": "string", "format": "uuid" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Preset set as default",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean", "example": true }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "404": {
+            "description": "Preset not found",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
               }
             }
           }
@@ -243,154 +1118,100 @@
       "bearerAuth": {
         "type": "http",
         "scheme": "bearer",
-        "description": "API key from your dashboard"
+        "description": "API key from your dashboard (e.g., `fs_abc123...`)"
+      },
+      "cookieAuth": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "better-auth.session_token",
+        "description": "Session cookie from Better Auth (used for dashboard endpoints)"
       }
     },
     "schemas": {
       "Error": {
         "type": "object",
         "properties": {
-          "success": {
-            "type": "boolean",
-            "example": false
-          },
-          "error": {
-            "type": "string",
-            "example": "Property not found"
-          },
-          "code": {
-            "type": "string",
-            "example": "NOT_FOUND"
-          }
+          "success": { "type": "boolean", "example": false },
+          "error": { "type": "string", "example": "Property not found" },
+          "code": { "type": "string", "example": "NOT_FOUND" }
         }
       },
       "AnalyzeRequest": {
         "type": "object",
+        "description": "Request body for property analysis. Provide either `address`, `streetAddress` + city/state/zip, or `propertyId`.",
         "properties": {
           "address": {
             "type": "string",
             "description": "Full property address",
             "example": "123 Main St, Tampa, FL 33607"
           },
-          "streetAddress": {
-            "type": "string",
-            "description": "Street address only"
-          },
-          "city": {
-            "type": "string",
-            "description": "City name"
-          },
-          "state": {
-            "type": "string",
-            "description": "State code (e.g., FL)"
-          },
-          "zipCode": {
-            "type": "string",
-            "description": "5-digit ZIP code"
-          },
-          "propertyId": {
-            "type": "string",
-            "description": "Property ID from a previous lookup"
-          },
+          "streetAddress": { "type": "string", "description": "Street address only" },
+          "city": { "type": "string", "description": "City name" },
+          "state": { "type": "string", "description": "State code (e.g., FL)" },
+          "zipCode": { "type": "string", "description": "5-digit ZIP code" },
+          "propertyId": { "type": "string", "description": "Property ID from a previous lookup" },
           "searchOptions": {
             "type": "object",
             "properties": {
-              "radiusMiles": {
-                "type": "number",
-                "description": "Search radius for comparables",
-                "default": 1
-              },
-              "maxComps": {
-                "type": "integer",
-                "description": "Maximum comparables to return",
-                "default": 15
-              },
-              "monthsBack": {
-                "type": "integer",
-                "description": "How far back to search for sales",
-                "default": 12
-              }
+              "radiusMiles": { "type": "number", "default": 1, "description": "Search radius for comparables" },
+              "maxComps": { "type": "integer", "default": 10, "description": "Maximum comparables to return" },
+              "monthsBack": { "type": "integer", "default": 12, "description": "How far back to search for sales" }
             }
           },
           "appraisalRules": {
             "type": "object",
+            "description": "Custom appraisal rules",
             "properties": {
               "filters": {
                 "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/AppraisalFilter"
-                }
+                "items": { "$ref": "#/components/schemas/AppraisalFilter" }
               },
               "adjustments": {
                 "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/AppraisalAdjustment"
-                }
+                "items": { "$ref": "#/components/schemas/AppraisalAdjustment" }
               }
             }
           },
           "buybox": {
             "type": "object",
             "properties": {
-              "rehabLevelIndex": {
-                "type": "integer",
-                "description": "Rehab level 0-4 (0=as-is, 4=full gut)",
-                "default": 2,
-                "minimum": 0,
-                "maximum": 4
-              },
-              "majorItems": {
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/MajorItem"
-                }
-              },
-              "additionPlay": {
-                "type": "number",
-                "description": "Additional square footage value",
-                "default": 0
-              },
-              "closingCostsPercent": {
-                "type": "number",
-                "description": "Closing costs as % of ARV",
-                "default": 10
-              },
-              "carryingCostsPercent": {
-                "type": "number",
-                "description": "Carrying costs as % of ARV",
-                "default": 5
-              },
-              "wholesaleFee": {
-                "type": "number",
-                "description": "Wholesale fee in dollars",
-                "default": 10000
-              },
-              "desiredProfit": {
-                "type": "number",
-                "description": "Desired profit in dollars"
-              }
+              "rehabLevelIndex": { "type": "integer", "minimum": 0, "maximum": 4, "default": 2, "description": "Rehab level 0-4 (0=as-is, 4=full gut)" },
+              "majorItems": { "type": "array", "items": { "$ref": "#/components/schemas/MajorItem" } },
+              "additionPlay": { "type": "number", "default": 0, "description": "Additional square footage value" },
+              "closingCostsPercent": { "type": "number", "default": 10, "description": "Closing costs as % of ARV" },
+              "carryingCostsPercent": { "type": "number", "default": 5, "description": "Carrying costs as % of ARV" },
+              "wholesaleFee": { "type": "number", "default": 10000, "description": "Wholesale fee in dollars" },
+              "desiredProfit": { "type": "number", "description": "Desired profit in dollars" }
             }
           },
           "enrichment": {
             "type": "object",
             "properties": {
-              "permits": {
-                "type": "boolean",
-                "description": "Include permit history",
-                "default": true
-              },
-              "floodZone": {
-                "type": "boolean",
-                "description": "Include flood zone data",
-                "default": true
-              },
-              "weatherRisk": {
-                "type": "boolean",
-                "description": "Include weather risk data",
-                "default": false
-              }
+              "permits": { "type": "boolean", "default": true, "description": "Include permit history" },
+              "floodZone": { "type": "boolean", "default": true, "description": "Include flood zone data" },
+              "weatherRisk": { "type": "boolean", "default": false, "description": "Include weather risk data" }
             }
-          }
+          },
+          "photoAnalysis": {
+            "type": "object",
+            "description": "Photo fetching and AI vision analysis options",
+            "properties": {
+              "enabled": { "type": "boolean", "default": true, "description": "Enable photo fetching and AI vision analysis" },
+              "provider": { "type": "string", "enum": ["zillow", "mls", "redfin"], "description": "Photo provider (auto-detected if not specified)" },
+              "maxComps": { "type": "integer", "default": 10, "description": "Max comps to fetch photos for" },
+              "requireBetterOrEqual": { "type": "boolean", "default": true, "description": "Require comps to be better than or equal to subject" }
+            }
+          },
+          "zillowContext": {
+            "type": "object",
+            "description": "Zillow URL context fetching via Gemini (provides photos, description, price history)",
+            "properties": {
+              "enabled": { "type": "boolean", "default": true, "description": "Enable Zillow context fetching" },
+              "skipCache": { "type": "boolean", "default": false, "description": "Skip cache and fetch fresh data" },
+              "maxComps": { "type": "integer", "default": 10, "description": "Max comps to fetch Zillow data for" }
+            }
+          },
+          "skipCache": { "type": "boolean", "default": false, "description": "Skip cache and fetch fresh data from APIs" }
         }
       },
       "AppraisalFilter": {
@@ -398,14 +1219,11 @@
         "properties": {
           "type": {
             "type": "string",
-            "enum": ["subdivision_match", "sale_age", "sqft_diff", "property_type", "year_built_diff", "distance"]
+            "enum": ["subdivision_match", "sale_age", "sqft_diff", "property_type", "year_built_diff", "distance"],
+            "description": "Filter type"
           },
-          "enabled": {
-            "type": "boolean"
-          },
-          "value": {
-            "type": "number"
-          }
+          "enabled": { "type": "boolean", "description": "Whether this filter is active" },
+          "value": { "type": "number", "description": "Filter threshold value" }
         }
       },
       "AppraisalAdjustment": {
@@ -413,245 +1231,60 @@
         "properties": {
           "type": {
             "type": "string",
-            "enum": ["old_comp_discount", "bedroom", "bathroom", "pool", "garage", "carport"]
+            "enum": ["old_comp_discount", "bedroom", "bathroom", "pool", "garage", "carport"],
+            "description": "Adjustment type"
           },
-          "enabled": {
-            "type": "boolean"
-          },
-          "amount": {
-            "type": "number"
-          },
-          "percentage": {
-            "type": "number"
-          }
+          "enabled": { "type": "boolean", "description": "Whether this adjustment is active" },
+          "amount": { "type": "number", "description": "Dollar amount adjustment" },
+          "percent": { "type": "number", "description": "Percentage adjustment (for old_comp_discount)" }
         }
       },
       "MajorItem": {
         "type": "object",
         "properties": {
-          "id": {
-            "type": "string"
-          },
-          "enabled": {
-            "type": "boolean"
-          },
-          "cost": {
-            "type": "number"
-          }
+          "id": { "type": "string" },
+          "enabled": { "type": "boolean" },
+          "cost": { "type": "number" }
         }
       },
-      "AnalyzeResponse": {
+      "QueueJobResponse": {
         "type": "object",
         "properties": {
-          "success": {
-            "type": "boolean",
-            "example": true
-          },
+          "success": { "type": "boolean", "example": true },
           "data": {
             "type": "object",
             "properties": {
-              "analysisId": {
-                "type": "string",
-                "example": "analysis_1708123456789_abc1234"
-              },
-              "timestamp": {
-                "type": "string",
-                "format": "date-time"
-              },
-              "provider": {
-                "type": "string",
-                "example": "corelogic"
-              },
-              "property": {
-                "$ref": "#/components/schemas/Property"
-              },
-              "enrichment": {
-                "$ref": "#/components/schemas/Enrichment"
-              },
-              "comparables": {
-                "$ref": "#/components/schemas/Comparables"
-              },
-              "valuation": {
-                "$ref": "#/components/schemas/Valuation"
-              },
-              "options": {
-                "type": "object",
-                "properties": {
-                  "rehabLevels": {
-                    "type": "array",
-                    "items": {
-                      "type": "object",
-                      "properties": {
-                        "index": { "type": "integer" },
-                        "name": { "type": "string" },
-                        "perSqft": { "type": "number" },
-                        "estimatedCost": { "type": "number" }
-                      }
-                    }
-                  },
-                  "majorItems": {
-                    "type": "array",
-                    "items": {
-                      "type": "object",
-                      "properties": {
-                        "id": { "type": "string" },
-                        "name": { "type": "string" },
-                        "defaultCost": { "type": "number" }
-                      }
-                    }
-                  }
-                }
-              }
+              "jobId": { "type": "string", "example": "job_1708123456789_abc1234" },
+              "propertyKey": { "type": "string", "description": "Property key for status lookup" },
+              "status": { "type": "string", "enum": ["queued"], "example": "queued" },
+              "streamUrl": { "type": "string", "description": "WebSocket URL for real-time updates" },
+              "pollUrl": { "type": "string", "description": "HTTP URL for polling status" },
+              "estimatedDurationMs": { "type": "integer", "example": 15000, "description": "Estimated job duration in milliseconds" }
             }
           }
         }
       },
-      "Property": {
+      "JobStatusResponse": {
         "type": "object",
         "properties": {
-          "id": { "type": "string" },
-          "address": {
+          "success": { "type": "boolean" },
+          "data": {
             "type": "object",
             "properties": {
-              "street": { "type": "string" },
-              "city": { "type": "string" },
-              "state": { "type": "string" },
-              "zipCode": { "type": "string" },
-              "county": { "type": "string" }
-            }
-          },
-          "characteristics": {
-            "type": "object",
-            "properties": {
-              "bedrooms": { "type": "integer" },
-              "bathrooms": { "type": "number" },
-              "squareFeet": { "type": "integer" },
-              "yearBuilt": { "type": "integer" },
-              "propertyType": { "type": "string" }
-            }
-          },
-          "tax": {
-            "type": "object",
-            "properties": {
-              "assessedValue": { "type": "number" },
-              "marketValue": { "type": "number" },
-              "taxAmount": { "type": "number" }
-            }
-          },
-          "lastSale": {
-            "type": "object",
-            "properties": {
-              "date": { "type": "string" },
-              "price": { "type": "number" }
+              "jobId": { "type": "string" },
+              "status": { "type": "string", "enum": ["queued", "running", "completed", "failed"] },
+              "progress": { "type": "number", "minimum": 0, "maximum": 100 },
+              "currentStep": { "type": "string" },
+              "result": { "type": "object", "description": "Analysis result (when completed)" },
+              "error": { "type": "string", "description": "Error message (when failed)" }
             }
           }
         }
       },
-      "Enrichment": {
+      "AnalyzeDefaultsResponse": {
         "type": "object",
         "properties": {
-          "permits": {
-            "type": "object",
-            "nullable": true,
-            "properties": {
-              "count": { "type": "integer" },
-              "totalJobValue": { "type": "number" },
-              "recentTypes": {
-                "type": "array",
-                "items": { "type": "string" }
-              }
-            }
-          },
-          "floodZone": {
-            "type": "object",
-            "nullable": true,
-            "properties": {
-              "zone": { "type": "string" },
-              "description": { "type": "string" },
-              "isInFloodZone": { "type": "boolean" }
-            }
-          },
-          "weatherRisk": {
-            "type": "object",
-            "nullable": true
-          }
-        }
-      },
-      "Comparables": {
-        "type": "object",
-        "properties": {
-          "summary": {
-            "type": "object",
-            "properties": {
-              "total": { "type": "integer" },
-              "enabled": { "type": "integer" },
-              "arv": { "type": "number" },
-              "avgPricePerSqft": { "type": "number" }
-            }
-          },
-          "items": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "id": { "type": "string" },
-                "address": { "type": "string" },
-                "distanceMiles": { "type": "number" },
-                "bedrooms": { "type": "integer" },
-                "bathrooms": { "type": "number" },
-                "squareFeet": { "type": "integer" },
-                "salePrice": { "type": "number" },
-                "saleDate": { "type": "string" },
-                "isEnabled": { "type": "boolean" },
-                "adjustedSalePrice": { "type": "number" }
-              }
-            }
-          }
-        }
-      },
-      "Valuation": {
-        "type": "object",
-        "properties": {
-          "arv": { "type": "number" },
-          "rehab": {
-            "type": "object",
-            "properties": {
-              "level": { "type": "string" },
-              "totalCost": { "type": "number" }
-            }
-          },
-          "buyPrice": {
-            "type": "object",
-            "properties": {
-              "amount": { "type": "number" },
-              "percentOfArv": { "type": "number" }
-            }
-          },
-          "wholesale": {
-            "type": "object",
-            "properties": {
-              "fee": { "type": "number" },
-              "price": { "type": "number" }
-            }
-          },
-          "profit": {
-            "type": "object",
-            "properties": {
-              "projected": { "type": "number" },
-              "roi": { "type": "number" }
-            }
-          },
-          "recommendation": { "type": "string" },
-          "recommendationReason": { "type": "string" }
-        }
-      },
-      "DefaultsResponse": {
-        "type": "object",
-        "properties": {
-          "success": {
-            "type": "boolean",
-            "example": true
-          },
+          "success": { "type": "boolean", "example": true },
           "data": {
             "type": "object",
             "properties": {
@@ -659,21 +1292,15 @@
                 "type": "object",
                 "properties": {
                   "radiusMiles": { "type": "number", "example": 1 },
-                  "maxComps": { "type": "integer", "example": 15 },
+                  "maxComps": { "type": "integer", "example": 10 },
                   "monthsBack": { "type": "integer", "example": 12 }
                 }
               },
               "appraisalRules": {
                 "type": "object",
                 "properties": {
-                  "filters": {
-                    "type": "array",
-                    "items": { "$ref": "#/components/schemas/AppraisalFilter" }
-                  },
-                  "adjustments": {
-                    "type": "array",
-                    "items": { "$ref": "#/components/schemas/AppraisalAdjustment" }
-                  }
+                  "filters": { "type": "array", "items": { "$ref": "#/components/schemas/AppraisalFilter" } },
+                  "adjustments": { "type": "array", "items": { "$ref": "#/components/schemas/AppraisalAdjustment" } }
                 }
               },
               "buybox": {
@@ -683,6 +1310,30 @@
                   "closingCostsPercent": { "type": "number", "example": 10 },
                   "carryingCostsPercent": { "type": "number", "example": 5 },
                   "wholesaleFee": { "type": "number", "example": 10000 }
+                }
+              },
+              "enrichment": {
+                "type": "object",
+                "properties": {
+                  "permits": { "type": "boolean", "example": true },
+                  "floodZone": { "type": "boolean", "example": true },
+                  "weatherRisk": { "type": "boolean", "example": false }
+                }
+              },
+              "photoAnalysis": {
+                "type": "object",
+                "properties": {
+                  "enabled": { "type": "boolean", "example": true },
+                  "maxComps": { "type": "integer", "example": 10 },
+                  "requireBetterOrEqual": { "type": "boolean", "example": true }
+                }
+              },
+              "zillowContext": {
+                "type": "object",
+                "properties": {
+                  "enabled": { "type": "boolean", "example": true },
+                  "skipCache": { "type": "boolean", "example": false },
+                  "maxComps": { "type": "integer", "example": 10 }
                 }
               },
               "rehabLevels": {
@@ -705,6 +1356,225 @@
                     "defaultCost": { "type": "number" }
                   }
                 }
+              }
+            }
+          }
+        }
+      },
+      "UserProfile": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string", "nullable": true },
+          "email": { "type": "string", "format": "email" },
+          "emailVerified": { "type": "boolean" },
+          "plan": { "type": "string", "enum": ["free", "pro", "enterprise"] },
+          "createdAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "ApiKey": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "keyPrefix": { "type": "string", "example": "fs_abc123..." },
+          "currentUsage": { "type": "integer" },
+          "monthlyQuota": { "type": "integer", "nullable": true },
+          "quotaResetAt": { "type": "string", "format": "date-time" },
+          "isActive": { "type": "boolean" },
+          "lastUsedAt": { "type": "string", "format": "date-time", "nullable": true },
+          "createdAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "UsageSummary": {
+        "type": "object",
+        "properties": {
+          "plan": { "type": "string", "enum": ["free", "pro", "enterprise"] },
+          "monthlyLimit": { "type": "integer", "description": "-1 for unlimited" },
+          "currentUsage": { "type": "integer" },
+          "remaining": { "type": "integer", "description": "-1 for unlimited" },
+          "resetDate": { "type": "string", "format": "date-time" }
+        }
+      },
+      "UsageLog": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "endpoint": { "type": "string" },
+          "method": { "type": "string" },
+          "statusCode": { "type": "integer" },
+          "responseTimeMs": { "type": "integer" },
+          "propertyAddress": { "type": "string", "nullable": true },
+          "propertyCity": { "type": "string", "nullable": true },
+          "propertyState": { "type": "string", "nullable": true },
+          "createdAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "UsageLogDetail": {
+        "type": "object",
+        "description": "Full usage log entry with all fields"
+      },
+      "Pagination": {
+        "type": "object",
+        "properties": {
+          "page": { "type": "integer" },
+          "limit": { "type": "integer" },
+          "total": { "type": "integer" },
+          "totalPages": { "type": "integer" }
+        }
+      },
+      "AppraisalPreset": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "userId": { "type": "string" },
+          "name": { "type": "string", "example": "My Standard Rules" },
+          "description": { "type": "string", "nullable": true },
+          "isDefault": { "type": "boolean" },
+          "createdAt": { "type": "string", "format": "date-time" },
+          "updatedAt": { "type": "string", "format": "date-time" },
+          "filters": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/PresetFilter" }
+          },
+          "adjustments": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/PresetAdjustment" }
+          }
+        }
+      },
+      "PresetFilter": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "presetId": { "type": "string", "format": "uuid" },
+          "filterType": {
+            "type": "string",
+            "enum": ["subdivision_match", "sale_age", "sqft_diff", "property_type", "year_built_diff", "distance"]
+          },
+          "enabled": { "type": "boolean" },
+          "value": { "type": "number" },
+          "createdAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "PresetAdjustment": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "presetId": { "type": "string", "format": "uuid" },
+          "adjustmentType": {
+            "type": "string",
+            "enum": ["old_comp_discount", "bedroom", "bathroom", "pool", "garage", "carport"]
+          },
+          "enabled": { "type": "boolean" },
+          "amount": { "type": "number" },
+          "percentage": { "type": "number" },
+          "createdAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "CreatePresetInput": {
+        "type": "object",
+        "required": ["name"],
+        "properties": {
+          "name": { "type": "string", "description": "Preset name (required)" },
+          "description": { "type": "string" },
+          "isDefault": { "type": "boolean", "default": false },
+          "filters": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/FilterInput" }
+          },
+          "adjustments": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/AdjustmentInput" }
+          }
+        }
+      },
+      "UpdatePresetInput": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "description": { "type": "string" },
+          "isDefault": { "type": "boolean" },
+          "filters": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/FilterInput" }
+          },
+          "adjustments": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/AdjustmentInput" }
+          }
+        }
+      },
+      "FilterInput": {
+        "type": "object",
+        "required": ["filterType", "enabled", "value"],
+        "properties": {
+          "filterType": {
+            "type": "string",
+            "enum": ["subdivision_match", "sale_age", "sqft_diff", "property_type", "year_built_diff", "distance"]
+          },
+          "enabled": { "type": "boolean" },
+          "value": { "type": "number" }
+        }
+      },
+      "AdjustmentInput": {
+        "type": "object",
+        "required": ["adjustmentType", "enabled", "amount", "percentage"],
+        "properties": {
+          "adjustmentType": {
+            "type": "string",
+            "enum": ["old_comp_discount", "bedroom", "bathroom", "pool", "garage", "carport"]
+          },
+          "enabled": { "type": "boolean" },
+          "amount": { "type": "number" },
+          "percentage": { "type": "number" }
+        }
+      },
+      "AppraisalDefaultsResponse": {
+        "type": "object",
+        "properties": {
+          "filters": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "type": { "type": "string" },
+                "enabled": { "type": "boolean" },
+                "value": { "type": "number" }
+              }
+            }
+          },
+          "adjustments": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "type": { "type": "string" },
+                "enabled": { "type": "boolean" },
+                "amount": { "type": "number" },
+                "percent": { "type": "number" }
+              }
+            }
+          },
+          "filterLabels": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "properties": {
+                "label": { "type": "string" },
+                "description": { "type": "string" },
+                "unit": { "type": "string" }
+              }
+            }
+          },
+          "adjustmentLabels": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "properties": {
+                "label": { "type": "string" },
+                "description": { "type": "string" },
+                "unavailable": { "type": "boolean" }
               }
             }
           }

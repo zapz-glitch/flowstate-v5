@@ -24,11 +24,11 @@ export interface AppraisalFilter {
 }
 
 export const DEFAULT_FILTERS: AppraisalFilter[] = [
-  { type: 'subdivision_match', enabled: true, value: 1 }, // Enabled - uses enriched comp data
-  { type: 'sale_age', enabled: true, value: 365 }, // 12 months (matches API search)
-  { type: 'sqft_diff', enabled: true, value: 500 }, // 500 sqft variance
-  { type: 'year_built_diff', enabled: true, value: 15 }, // 15 years
-  { type: 'distance', enabled: true, value: 1.0 }, // 1 mile (matches API search)
+  { type: 'subdivision_match', enabled: true, value: 1 }, // Must match subdivision
+  { type: 'sale_age', enabled: true, value: 30 }, // 30 days
+  { type: 'sqft_diff', enabled: true, value: 250 }, // 250 sqft variance
+  { type: 'year_built_diff', enabled: true, value: 10 }, // 10 years
+  { type: 'distance', enabled: true, value: 0.5 }, // 0.5 miles
 ]
 
 // ─── Filter Labels (for UI) ────────────────────────────────────────────────────
@@ -79,7 +79,6 @@ export type AdjustmentType =
   | 'bathroom'
   | 'pool'
   | 'garage'
-  | 'carport'
 
 export interface AppraisalAdjustment {
   type: AdjustmentType
@@ -96,7 +95,6 @@ export const DEFAULT_ADJUSTMENTS: AppraisalAdjustment[] = [
   { type: 'bathroom', enabled: true, amount: 10000 },
   { type: 'pool', enabled: false, amount: 10000 },
   { type: 'garage', enabled: false, amount: 10000 },
-  { type: 'carport', enabled: false, amount: 5000 },
 ]
 
 // ─── Adjustment Labels (for UI) ───────────────────────────────────────────────
@@ -127,11 +125,6 @@ export const ADJUSTMENT_LABELS: Record<AdjustmentType, {
   garage: {
     label: 'Garage Adjustment',
     description: 'Add value if subject has a garage',
-  },
-  carport: {
-    label: 'Carport Adjustment',
-    description: 'Not available - API does not provide carport data',
-    unavailable: true,
   },
 }
 
