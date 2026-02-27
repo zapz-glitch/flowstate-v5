@@ -141,9 +141,8 @@ export async function verifyWsToken(
     const payloadStr = atob(normalizedPayload + padding)
     const payload: WebSocketTokenPayload = JSON.parse(payloadStr)
 
-    // Check expiry
+    // Check expiry (silently reject expired tokens)
     if (Date.now() > payload.exp) {
-      console.error('[WS Token] Token expired')
       return null
     }
 

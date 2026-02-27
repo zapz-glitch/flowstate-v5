@@ -182,6 +182,16 @@ export interface NormalizedComparable {
   // Location details (from enrichment)
   subdivision?: string | null
 
+  // Building details (from enrichment)
+  construction?: {
+    type?: string
+    qualityCode?: string
+    roofType?: string
+    roofCover?: string
+    foundationType?: string
+    exteriorWalls?: string
+  }
+
   /** Whether this comp has been enriched with full property details */
   isEnriched?: boolean
 

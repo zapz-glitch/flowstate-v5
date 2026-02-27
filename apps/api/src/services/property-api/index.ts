@@ -665,6 +665,7 @@ class PropertyApi implements PropertyApiService {
               return {
                 ...comp,
                 subdivision: cached.subdivision ?? null,
+                construction: cached.construction,
                 isEnriched: true,
               };
             }
@@ -681,6 +682,7 @@ class PropertyApi implements PropertyApiService {
               return {
                 ...comp,
                 subdivision: result.data.subdivision ?? null,
+                construction: result.data.construction,
                 isEnriched: true,
               };
             } else {

@@ -251,8 +251,10 @@ export function useAnalysisWebSocket(
       }
     }
 
-    ws.onerror = (error) => {
-      console.error('[WebSocket] Error:', error)
+    ws.onerror = () => {
+      // WebSocket errors don't expose details for security reasons
+      // The close event that follows will have more info
+      console.error('[WebSocket] Connection error - check if the API server is running and accessible at:', wsUrlString)
       setIsConnecting(false)
     }
 

@@ -1,11 +1,10 @@
 'use client'
 
 import { cn } from '@/lib/utils'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import type { AnalysisState, StatusMessage, JobStatus } from '@/types/analysis'
 import { getStepConfig } from '@/types/analysis'
-import { ProgressStepper, ProgressBar, StepIndicator } from './ProgressStepper'
+import { ProgressStepper, ProgressBar } from './ProgressStepper'
 import { Button } from '@/components/ui/button'
 import {
   Loader2,
@@ -16,7 +15,6 @@ import {
   Wifi,
   WifiOff,
   AlertCircle,
-  StopCircle,
   RefreshCw,
 } from 'lucide-react'
 
@@ -81,32 +79,34 @@ export function RealtimeStatus({
   const failedSteps = steps.filter((s) => s.status === 'failed').length
 
   return (
-    <Card className={cn('', className)}>
-      <CardHeader className="pb-3">
+    <div className={cn('glass-progress rounded-2xl overflow-hidden', className)}>
+      <div className="px-6 py-5 border-b border-border/20">
         <div className="flex items-center justify-between">
-          <CardTitle className="text-lg flex items-center gap-2">
-            <Zap className="h-5 w-5 text-primary" />
-            Analysis Progress
-          </CardTitle>
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center">
+              <Zap className="w-4.5 h-4.5 text-primary" />
+            </div>
+            <h3 className="text-body font-semibold">Analysis Progress</h3>
+          </div>
           <div className="flex items-center gap-2">
             {/* Connection status */}
             {usePolling ? (
-              <Badge variant="outline" className="gap-1 text-blue-600 border-blue-600">
+              <Badge variant="outline" className="gap-1 text-blue-600 border-blue-600 bg-blue-50 dark:bg-blue-500/10">
                 <RefreshCw className="h-3 w-3" />
                 Polling
               </Badge>
             ) : isConnecting ? (
-              <Badge variant="outline" className="gap-1">
+              <Badge variant="outline" className="gap-1 bg-background/50">
                 <Loader2 className="h-3 w-3 animate-spin" />
                 Connecting
               </Badge>
             ) : isConnected ? (
-              <Badge variant="outline" className="gap-1 text-emerald-600 border-emerald-600">
+              <Badge variant="outline" className="gap-1 text-emerald-600 border-emerald-600 bg-emerald-50 dark:bg-emerald-500/10">
                 <Wifi className="h-3 w-3" />
                 Live
               </Badge>
             ) : (
-              <Badge variant="outline" className="gap-1 text-muted-foreground">
+              <Badge variant="outline" className="gap-1 text-muted-foreground bg-background/50">
                 <WifiOff className="h-3 w-3" />
                 Offline
               </Badge>
@@ -115,15 +115,10 @@ export function RealtimeStatus({
             {getStatusBadge(status)}
           </div>
         </div>
-      </CardHeader>
-      <CardContent className="space-y-4">
+      </div>
+      <div className="px-6 py-5 space-y-4">
         {/* Progress bar */}
         <ProgressBar steps={steps} />
-
-        {/* Current step indicator (when processing) */}
-        {status === 'processing' && currentStep && (
-          <StepIndicator steps={steps} currentStep={currentStep} />
-        )}
 
         {/* Step details */}
         <ProgressStepper steps={steps} currentStep={currentStep} />
@@ -187,8 +182,8 @@ export function RealtimeStatus({
             )}
           </div>
         )}
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   )
 }
 
@@ -204,7 +199,7 @@ interface StatCardProps {
 
 function StatCard({ label, value, subtext, icon, className }: StatCardProps) {
   return (
-    <div className={cn('p-3 rounded-lg bg-muted/50 border', className)}>
+    <div className={cn('p-3 rounded-xl glass-stat', className)}>
       <div className="flex items-center gap-2 text-muted-foreground mb-1">
         {icon}
         <span className="text-xs">{label}</span>

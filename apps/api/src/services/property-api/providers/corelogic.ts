@@ -524,11 +524,13 @@ function normalizeProperty(
   const lastSale = property?.lastSale
   const lotLegacy = property?.lot
 
-  // Buildings data - v1 structure: buildings.data.allBuildingsSummary, buildings.data.buildings[0]
+  // Buildings data - v1 structure: buildings.data.allBuildingsSummary, buildings.data.Buildings[0]
+  // Note: API schema shows "Buildings" with capital B, but may also return lowercase
   const buildingsResponse = rawData.buildings as Record<string, unknown> | undefined
   const buildingsData = buildingsResponse?.data as Record<string, unknown> | undefined
   const buildingSummary = buildingsData?.allBuildingsSummary as Record<string, unknown> | undefined
-  const buildingsArray = buildingsData?.buildings as Array<Record<string, unknown>> | undefined
+  // Try both "Buildings" (per API schema) and "buildings" (common convention)
+  const buildingsArray = (buildingsData?.Buildings || buildingsData?.buildings) as Array<Record<string, unknown>> | undefined
   const firstBuilding = buildingsArray?.[0]
   const constructionDetails = firstBuilding?.constructionDetails as Record<string, unknown> | undefined
   const structureFeatures = firstBuilding?.structureFeatures as Record<string, unknown> | undefined

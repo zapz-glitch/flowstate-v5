@@ -11,7 +11,9 @@
       "Bash(npm run typecheck:*)",
       "Bash(ls:*)",
       "Bash(grep:*)",
-      "Bash(wrangler secret put:*)"
+      "Bash(wrangler secret put:*)",
+      "Bash(npx tsx:*)",
+      "Bash(cat:*)"
     ]
   }
 }

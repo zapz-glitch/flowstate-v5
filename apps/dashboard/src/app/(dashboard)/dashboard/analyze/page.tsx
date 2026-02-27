@@ -11,6 +11,7 @@ import {
   AlertTriangle,
   ChevronDown,
   ChevronRight,
+  ChevronLeft,
   Code,
   RefreshCw,
   StopCircle,
@@ -20,10 +21,11 @@ import {
   Trash2,
   Loader2,
   Pencil,
+  X,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+// Card components not used - using glass UI divs instead
 import { Badge } from '@/components/ui/badge'
 import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
@@ -64,6 +66,7 @@ import {
   type ValuationData,
   type CompsData,
   type ClassificationSummary,
+  type RehabLevelEstimate,
 } from './actions'
 import { cn } from '@/lib/utils'
 import { useAnalysisWebSocket, useAnalysisPolling } from '@/hooks/use-analysis-websocket'
@@ -144,6 +147,139 @@ function ClassificationBadge({ classification, showConfidence = true }: { classi
         <span className="ml-1 opacity-70">({classification.confidence}%)</span>
       )}
     </Badge>
+  )
+}
+
+// ─── Photo Gallery Lightbox Component ──────────────────────────────────────────
+
+function PhotoGallery({ photos, className }: { photos: string[]; className?: string }) {
+  const [lightboxOpen, setLightboxOpen] = useState(false)
+  const [currentIndex, setCurrentIndex] = useState(0)
+
+  const openLightbox = (index: number) => {
+    setCurrentIndex(index)
+    setLightboxOpen(true)
+  }
+
+  const goToPrevious = () => {
+    setCurrentIndex((prev) => (prev === 0 ? photos.length - 1 : prev - 1))
+  }
+
+  const goToNext = () => {
+    setCurrentIndex((prev) => (prev === photos.length - 1 ? 0 : prev + 1))
+  }
+
+  // Handle keyboard navigation
+  useEffect(() => {
+    if (!lightboxOpen) return
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'ArrowLeft') goToPrevious()
+      else if (e.key === 'ArrowRight') goToNext()
+      else if (e.key === 'Escape') setLightboxOpen(false)
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [lightboxOpen, photos.length])
+
+  if (!photos || photos.length === 0) return null
+
+  return (
+    <>
+      <div className={cn('flex gap-1.5 overflow-x-auto pb-1', className)}>
+        {photos.slice(0, 6).map((photo, i) => (
+          <button
+            key={i}
+            onClick={() => openLightbox(i)}
+            className="relative group flex-shrink-0 rounded-lg overflow-hidden focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
+          >
+            <img
+              src={photo}
+              alt={`Photo ${i + 1}`}
+              className="w-20 h-14 object-cover transition-transform group-hover:scale-105"
+              onError={(e) => {
+                ;(e.target as HTMLImageElement).style.display = 'none'
+              }}
+            />
+            <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors" />
+          </button>
+        ))}
+        {photos.length > 6 && (
+          <button
+            onClick={() => openLightbox(6)}
+            className="w-20 h-14 glass-stat rounded-lg flex items-center justify-center text-caption text-foreground-tertiary flex-shrink-0 hover:bg-secondary/80 transition-colors"
+          >
+            +{photos.length - 6}
+          </button>
+        )}
+      </div>
+
+      {/* Lightbox Dialog */}
+      <Dialog open={lightboxOpen} onOpenChange={setLightboxOpen}>
+        <DialogContent className="max-w-4xl w-full p-0 bg-black/95 border-white/10 gap-0 overflow-hidden">
+          <div className="relative flex items-center justify-center min-h-[60vh]">
+            {/* Close button */}
+            <button
+              onClick={() => setLightboxOpen(false)}
+              className="absolute top-4 right-4 z-10 p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            {/* Navigation buttons */}
+            {photos.length > 1 && (
+              <>
+                <button
+                  onClick={goToPrevious}
+                  className="absolute left-4 z-10 p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors"
+                >
+                  <ChevronLeft className="w-6 h-6" />
+                </button>
+                <button
+                  onClick={goToNext}
+                  className="absolute right-4 z-10 p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors"
+                >
+                  <ChevronRight className="w-6 h-6" />
+                </button>
+              </>
+            )}
+
+            {/* Main image */}
+            <img
+              src={photos[currentIndex]}
+              alt={`Photo ${currentIndex + 1}`}
+              className="max-h-[70vh] max-w-full object-contain"
+            />
+          </div>
+
+          {/* Thumbnail strip */}
+          <div className="p-4 bg-black/80 border-t border-white/10">
+            <div className="flex gap-2 justify-center overflow-x-auto">
+              {photos.map((photo, i) => (
+                <button
+                  key={i}
+                  onClick={() => setCurrentIndex(i)}
+                  className={cn(
+                    'w-16 h-12 rounded-lg overflow-hidden flex-shrink-0 transition-all',
+                    i === currentIndex ? 'ring-2 ring-primary ring-offset-2 ring-offset-black' : 'opacity-50 hover:opacity-100'
+                  )}
+                >
+                  <img
+                    src={photo}
+                    alt={`Thumbnail ${i + 1}`}
+                    className="w-full h-full object-cover"
+                  />
+                </button>
+              ))}
+            </div>
+            <div className="text-center text-white/60 text-caption mt-2">
+              {currentIndex + 1} / {photos.length}
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
   )
 }
 
@@ -512,23 +648,27 @@ export default function AnalyzePage() {
   }
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6 playground-bg min-h-screen -m-6 p-6">
       {/* Header */}
-      <div className="space-y-1">
+      <div className="space-y-2">
         <h1 className="text-heading-lg text-foreground tracking-tight">API Playground</h1>
         <p className="text-body text-foreground-tertiary">Test the Flowstate API with real property data</p>
       </div>
 
       {/* Input Form */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Search className="w-5 h-5 text-primary" />
-            /v1/analyze
-          </CardTitle>
-          <CardDescription>Enter an address to get property details, comparables, and valuation</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
+      <div className="glass-input rounded-2xl overflow-hidden">
+        <div className="px-6 py-5 border-b border-border/30">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center">
+              <Search className="w-4.5 h-4.5 text-primary" />
+            </div>
+            <div>
+              <h2 className="text-body font-semibold">/v1/analyze</h2>
+              <p className="text-caption text-foreground-tertiary">Property details, comparables, and valuation</p>
+            </div>
+          </div>
+        </div>
+        <div className="px-6 py-5 space-y-4">
           <div className="flex gap-3">
             <Input
               type="text"
@@ -669,8 +809,8 @@ export default function AnalyzePage() {
               </Label>
             </div>
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
 
       {/* Real-time Progress */}
       {isRunning && (
@@ -705,33 +845,36 @@ export default function AnalyzePage() {
               {result.data.valuation && <ValuationCard valuation={result.data.valuation} />}
 
               {/* Comparables */}
-              {result.data.comps && <ComparablesSection comps={result.data.comps} />}
+              {result.data.comps && <ComparablesSection comps={result.data.comps} subjectSubdivision={result.data.subject?.subdivision} />}
 
               {/* Raw JSON Toggle */}
-              <Card>
-                <CardHeader className="cursor-pointer" onClick={() => setShowRawJson(!showRawJson)}>
-                  <CardTitle className="flex items-center gap-2 text-base">
-                    {showRawJson ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-                    <Code className="w-4 h-4" />
-                    Raw JSON Response
-                  </CardTitle>
-                </CardHeader>
+              <div className="glass-result rounded-2xl overflow-hidden">
+                <div
+                  className="px-6 py-4 cursor-pointer flex items-center gap-3 hover:bg-white/5 dark:hover:bg-white/[0.02] transition-colors"
+                  onClick={() => setShowRawJson(!showRawJson)}
+                >
+                  <div className="w-8 h-8 rounded-lg bg-secondary/60 flex items-center justify-center">
+                    <Code className="w-4 h-4 text-foreground-secondary" />
+                  </div>
+                  <span className="text-body font-medium flex-1">Raw JSON Response</span>
+                  {showRawJson ? <ChevronDown className="w-4 h-4 text-foreground-tertiary" /> : <ChevronRight className="w-4 h-4 text-foreground-tertiary" />}
+                </div>
                 {showRawJson && (
-                  <CardContent>
-                    <pre className="bg-zinc-950 text-zinc-100 rounded-lg p-4 overflow-auto max-h-[600px] text-xs font-mono">
+                  <div className="px-4 pb-4">
+                    <pre className="bg-zinc-950 text-zinc-100 rounded-xl p-4 overflow-auto max-h-[600px] text-xs font-mono">
                       {JSON.stringify(result.data, null, 2)}
                     </pre>
-                  </CardContent>
+                  </div>
                 )}
-              </Card>
+              </div>
             </div>
           ) : (
-            <Card className="border-red-500/20 bg-red-500/5">
-              <CardContent className="py-6">
+            <div className="glass-result rounded-2xl overflow-hidden border-red-500/20">
+              <div className="px-6 py-5">
                 <div className="text-red-500 font-medium">Error</div>
                 <div className="text-muted-foreground mt-1">{result.error}</div>
-              </CardContent>
-            </Card>
+              </div>
+            </div>
           )}
         </>
       )}
@@ -920,18 +1063,20 @@ export default function AnalyzePage() {
 
 function SubjectPropertyCard({ subject }: { subject: SubjectData }) {
   return (
-    <Card>
-      <CardHeader className="pb-4">
+    <div className="glass-result rounded-2xl overflow-hidden">
+      <div className="px-6 py-5 border-b border-border/20">
         <div className="flex items-start justify-between gap-4">
           <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 mb-1">
-              <MapPin className="w-4 h-4 text-primary flex-shrink-0" />
-              <span className="text-caption text-foreground-tertiary">Subject Property</span>
+            <div className="flex items-center gap-2 mb-1.5">
+              <div className="w-7 h-7 rounded-lg bg-primary/10 flex items-center justify-center">
+                <MapPin className="w-3.5 h-3.5 text-primary" />
+              </div>
+              <span className="text-caption text-foreground-tertiary font-medium">Subject Property</span>
             </div>
-            <CardTitle className="text-heading-sm leading-tight">{subject.address || 'Unknown Address'}</CardTitle>
-            <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+            <h3 className="text-heading-sm font-semibold leading-tight">{subject.address || 'Unknown Address'}</h3>
+            <div className="flex items-center gap-2 mt-2 flex-wrap">
               {subject.subdivision && (
-                <Badge variant="outline" className="text-caption-sm font-normal">
+                <Badge variant="outline" className="text-caption-sm font-normal bg-background/50">
                   {subject.subdivision}
                 </Badge>
               )}
@@ -944,15 +1089,16 @@ function SubjectPropertyCard({ subject }: { subject: SubjectData }) {
             <ClassificationBadge classification={subject.classification} />
           )}
         </div>
-      </CardHeader>
-      <CardContent className="pt-0">
+      </div>
+      <div className="px-6 py-5">
         {/* Property Stats - Compact Grid */}
-        <div className="grid grid-cols-3 md:grid-cols-6 gap-px bg-border/50 rounded-xl overflow-hidden">
+        <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-px bg-border/30 rounded-xl overflow-hidden">
           <StatCell label="Beds" value={subject.bedrooms ?? '-'} />
           <StatCell label="Baths" value={subject.bathrooms ?? '-'} />
           <StatCell label="Sq Ft" value={subject.squareFeet?.toLocaleString() || '-'} />
           <StatCell label="Year" value={subject.yearBuilt || '-'} />
           <StatCell label="Lot" value={subject.lotSizeAcres ? `${subject.lotSizeAcres} ac` : '-'} />
+          <StatCell label="Foundation" value={subject.foundationType || '-'} />
           <StatCell
             label="$/Sq Ft"
             value={subject.lastSale?.pricePerSqft ? `$${subject.lastSale.pricePerSqft.toFixed(0)}` : '-'}
@@ -961,7 +1107,7 @@ function SubjectPropertyCard({ subject }: { subject: SubjectData }) {
 
         {/* Last Sale Info */}
         {subject.lastSale?.price && (
-          <div className="mt-4 p-3 rounded-xl bg-secondary/50 flex items-center justify-between">
+          <div className="mt-4 p-3.5 rounded-xl glass-stat flex items-center justify-between">
             <div className="text-caption text-foreground-tertiary">Last Sale</div>
             <div className="text-right">
               <span className="text-body font-semibold">${subject.lastSale.price.toLocaleString()}</span>
@@ -975,43 +1121,26 @@ function SubjectPropertyCard({ subject }: { subject: SubjectData }) {
         {/* Subject Photos */}
         {subject.photos && subject.photos.length > 0 && (
           <div className="mt-4">
-            <div className="flex gap-2 overflow-x-auto pb-1">
-              {subject.photos.slice(0, 6).map((photo, i) => (
-                <img
-                  key={i}
-                  src={photo}
-                  alt={`Subject photo ${i + 1}`}
-                  className="w-24 h-16 object-cover rounded-lg border border-border/50 flex-shrink-0"
-                  onError={(e) => {
-                    ;(e.target as HTMLImageElement).style.display = 'none'
-                  }}
-                />
-              ))}
-              {subject.photos.length > 6 && (
-                <div className="w-24 h-16 bg-secondary rounded-lg border border-border/50 flex items-center justify-center text-caption text-foreground-tertiary flex-shrink-0">
-                  +{subject.photos.length - 6}
-                </div>
-              )}
-            </div>
+            <PhotoGallery photos={subject.photos} />
           </div>
         )}
 
         {/* Classification Reasoning */}
         {subject.classification?.reasoning && (
-          <div className="mt-4 p-3 rounded-xl bg-primary/5 border border-primary/10">
+          <div className="mt-4 p-3.5 rounded-xl glass-accent">
             <div className="text-caption font-medium text-primary mb-1">AI Classification</div>
             <div className="text-caption text-foreground-secondary leading-relaxed">{subject.classification.reasoning}</div>
           </div>
         )}
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   )
 }
 
 // Compact stat cell component
 function StatCell({ label, value }: { label: string; value: string | number }) {
   return (
-    <div className="bg-background p-3 text-center">
+    <div className="glass-stat p-3 text-center">
       <div className="text-caption-sm text-foreground-tertiary mb-0.5">{label}</div>
       <div className="text-body-sm font-medium">{value}</div>
     </div>
@@ -1022,14 +1151,14 @@ function StatCell({ label, value }: { label: string; value: string | number }) {
 
 function RiskFlagsCard({ riskFlags }: { riskFlags: string[] }) {
   return (
-    <Card className="border-amber-500/30 bg-amber-500/5">
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-amber-600">
-          <AlertTriangle className="w-5 h-5" />
-          Risk Flags
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
+    <div className="glass-result rounded-2xl overflow-hidden border-amber-500/20">
+      <div className="px-6 py-4 flex items-center gap-3">
+        <div className="w-9 h-9 rounded-xl bg-amber-500/10 flex items-center justify-center">
+          <AlertTriangle className="w-4.5 h-4.5 text-amber-600" />
+        </div>
+        <h3 className="text-body font-semibold text-amber-600">Risk Flags</h3>
+      </div>
+      <div className="px-6 pb-5">
         <div className="flex flex-wrap gap-2">
           {riskFlags.map((flag, i) => (
             <Badge key={i} variant="outline" className="bg-amber-500/10 text-amber-700 border-amber-500/30">
@@ -1037,8 +1166,8 @@ function RiskFlagsCard({ riskFlags }: { riskFlags: string[] }) {
             </Badge>
           ))}
         </div>
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   )
 }
 
@@ -1057,47 +1186,44 @@ function ValuationCard({ valuation }: { valuation: ValuationData }) {
   const recStyle = getRecommendationStyle(valuation.recommendation)
 
   return (
-    <Card className="border-primary/20 bg-primary/[0.02]">
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <DollarSign className="w-5 h-5 text-primary" />
-          Underwriter Valuation
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-8">
-          <div>
+    <div className="glass-result rounded-2xl overflow-hidden">
+      <div className="px-6 py-5 border-b border-border/20">
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center">
+            <DollarSign className="w-4.5 h-4.5 text-primary" />
+          </div>
+          <h3 className="text-body font-semibold">Underwriter Valuation</h3>
+        </div>
+      </div>
+      <div className="px-6 py-5">
+        {/* Primary Stats Grid */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-px bg-border/30 rounded-xl overflow-hidden">
+          <div className="glass-stat p-4">
             <div className="text-caption text-foreground-tertiary mb-1">ARV</div>
-            <div className="text-display-sm font-bold text-primary">${valuation.arv?.toLocaleString() || '-'}</div>
+            <div className="text-heading-sm font-bold text-primary">${valuation.arv?.toLocaleString() || '-'}</div>
             {valuation.arvPerSqft && (
               <div className="text-caption-sm text-foreground-tertiary mt-1">${valuation.arvPerSqft.toFixed(0)}/sqft</div>
             )}
-            {valuation.arvSource && (
-              <div className="text-caption-sm text-foreground-tertiary">Source: {valuation.arvSource}</div>
-            )}
           </div>
-          <div>
+          <div className="glass-stat p-4">
             <div className="text-caption text-foreground-tertiary mb-1">Max Buy Price</div>
-            <div className="text-display-sm font-bold">${valuation.buyPrice?.toLocaleString() || '-'}</div>
+            <div className="text-heading-sm font-bold">${valuation.buyPrice?.toLocaleString() || '-'}</div>
             {valuation.buyPricePercent && (
               <div className="text-caption-sm text-foreground-tertiary mt-1">{valuation.buyPricePercent}% of ARV</div>
             )}
           </div>
-          <div>
+          <div className="glass-stat p-4">
             <div className="text-caption text-foreground-tertiary mb-1">Rehab Cost</div>
-            <div className="text-heading font-semibold">${valuation.rehabCost?.toLocaleString() || '-'}</div>
+            <div className="text-heading-sm font-semibold">${valuation.rehabCost?.toLocaleString() || '-'}</div>
             {valuation.rehabLevel && (
-              <Badge variant="outline" className="mt-1.5">
+              <Badge variant="outline" className="mt-1.5 bg-background/50">
                 {valuation.rehabLevel}
               </Badge>
             )}
-            {valuation.rehabPerSqft && (
-              <div className="text-caption-sm text-foreground-tertiary mt-1">${valuation.rehabPerSqft}/sqft</div>
-            )}
           </div>
-          <div>
+          <div className="glass-stat p-4">
             <div className="text-caption text-foreground-tertiary mb-1">Projected Profit</div>
-            <div className={cn('text-heading font-semibold', (valuation.projectedProfit ?? 0) > 0 ? 'text-emerald-600' : 'text-red-600')}>
+            <div className={cn('text-heading-sm font-semibold', (valuation.projectedProfit ?? 0) > 0 ? 'text-emerald-600' : 'text-red-600')}>
               ${valuation.projectedProfit?.toLocaleString() || '-'}
             </div>
             {valuation.projectedROI && (
@@ -1106,31 +1232,101 @@ function ValuationCard({ valuation }: { valuation: ValuationData }) {
           </div>
         </div>
 
-        {/* Investment Summary Row */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-6 mt-6 pt-6 border-t border-border/50">
-          {valuation.totalCosts && (
-            <div>
-              <div className="text-caption text-foreground-tertiary mb-1">Total Costs</div>
-              <div className="text-body font-medium">${valuation.totalCosts.toLocaleString()}</div>
+        {/* Secondary Stats */}
+        {(valuation.totalCosts || valuation.totalInvestment || valuation.wholesalePrice) && (
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-px bg-border/30 rounded-xl overflow-hidden mt-4">
+            {valuation.totalCosts && (
+              <div className="glass-stat p-3">
+                <div className="text-caption-sm text-foreground-tertiary mb-0.5">Total Costs</div>
+                <div className="text-body font-medium">${valuation.totalCosts.toLocaleString()}</div>
+              </div>
+            )}
+            {valuation.totalInvestment && (
+              <div className="glass-stat p-3">
+                <div className="text-caption-sm text-foreground-tertiary mb-0.5">Total Investment</div>
+                <div className="text-body font-medium">${valuation.totalInvestment.toLocaleString()}</div>
+              </div>
+            )}
+            {valuation.wholesalePrice && (
+              <div className="glass-stat p-3">
+                <div className="text-caption-sm text-foreground-tertiary mb-0.5">Wholesale Price</div>
+                <div className="text-body font-medium">${valuation.wholesalePrice.toLocaleString()}</div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Rehab Level Options */}
+        {valuation.rehabLevelEstimates && valuation.rehabLevelEstimates.length > 0 && (
+          <div className="mt-6 pt-6 border-t border-border/30">
+            <div className="text-caption font-medium text-foreground-secondary mb-3">Rehab Level Options</div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-caption">
+                <thead>
+                  <tr className="border-b border-border/30">
+                    <th className="text-left py-2 pr-4 font-medium text-foreground-tertiary">Level</th>
+                    <th className="text-right py-2 px-3 font-medium text-foreground-tertiary">$/Sqft</th>
+                    <th className="text-right py-2 px-3 font-medium text-foreground-tertiary">Rehab Cost</th>
+                    <th className="text-right py-2 px-3 font-medium text-foreground-tertiary">Buy Price</th>
+                    <th className="text-right py-2 px-3 font-medium text-foreground-tertiary">Wholesale</th>
+                    <th className="text-right py-2 px-3 font-medium text-foreground-tertiary">Profit</th>
+                    <th className="text-right py-2 pl-3 font-medium text-foreground-tertiary">ROI</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {valuation.rehabLevelEstimates.map((level) => (
+                    <tr
+                      key={level.index}
+                      className={cn(
+                        'border-b border-border/20 transition-colors',
+                        level.isSelected && 'bg-primary/5'
+                      )}
+                    >
+                      <td className="py-2.5 pr-4">
+                        <div className="flex items-center gap-2">
+                          {level.isSelected && (
+                            <div className="w-1.5 h-1.5 rounded-full bg-primary" />
+                          )}
+                          <span className={cn('font-medium', level.isSelected && 'text-primary')}>
+                            {level.name}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="text-right py-2.5 px-3 text-foreground-secondary">
+                        ${level.perSqft}
+                      </td>
+                      <td className="text-right py-2.5 px-3 font-medium">
+                        ${level.estimatedCost.toLocaleString()}
+                      </td>
+                      <td className="text-right py-2.5 px-3 font-medium">
+                        ${level.buyPrice.toLocaleString()}
+                      </td>
+                      <td className="text-right py-2.5 px-3 text-foreground-secondary">
+                        ${level.wholesalePrice.toLocaleString()}
+                      </td>
+                      <td className={cn(
+                        'text-right py-2.5 px-3 font-medium',
+                        level.projectedProfit > 0 ? 'text-emerald-600' : 'text-red-600'
+                      )}>
+                        ${level.projectedProfit.toLocaleString()}
+                      </td>
+                      <td className={cn(
+                        'text-right py-2.5 pl-3 font-medium',
+                        level.projectedROI > 15 ? 'text-emerald-600' : level.projectedROI > 0 ? 'text-foreground' : 'text-red-600'
+                      )}>
+                        {level.projectedROI.toFixed(1)}%
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
-          )}
-          {valuation.totalInvestment && (
-            <div>
-              <div className="text-caption text-foreground-tertiary mb-1">Total Investment</div>
-              <div className="text-body font-medium">${valuation.totalInvestment.toLocaleString()}</div>
-            </div>
-          )}
-          {valuation.wholesalePrice && (
-            <div>
-              <div className="text-caption text-foreground-tertiary mb-1">Wholesale Price</div>
-              <div className="text-body font-medium">${valuation.wholesalePrice.toLocaleString()}</div>
-            </div>
-          )}
-        </div>
+          </div>
+        )}
 
         {/* Recommendation */}
         {valuation.recommendation && (
-          <div className="mt-6 pt-6 border-t border-border/50">
+          <div className="mt-6 pt-6 border-t border-border/30">
             <div className="flex items-center gap-3 flex-wrap">
               <Badge
                 variant={recStyle === 'success' ? 'default' : recStyle === 'destructive' ? 'destructive' : 'outline'}
@@ -1148,14 +1344,14 @@ function ValuationCard({ valuation }: { valuation: ValuationData }) {
             </div>
           </div>
         )}
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   )
 }
 
 // ─── Comparables Section ──────────────────────────────────────────────────────
 
-function ComparablesSection({ comps }: { comps: CompsData }) {
+function ComparablesSection({ comps, subjectSubdivision }: { comps: CompsData; subjectSubdivision?: string | null }) {
   const [expandedComps, setExpandedComps] = useState<Set<number>>(new Set())
 
   const toggleComp = (index: number) => {
@@ -1171,54 +1367,70 @@ function ComparablesSection({ comps }: { comps: CompsData }) {
   const compItems = comps.items || []
 
   return (
-    <Card>
-      <CardHeader className="pb-4">
+    <div className="glass-result rounded-2xl overflow-hidden">
+      <div className="px-6 py-5 border-b border-border/20">
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Home className="w-5 h-5 text-primary" />
-            <CardTitle className="text-base">Comparables ({comps.count || compItems.length})</CardTitle>
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center">
+              <Home className="w-4.5 h-4.5 text-primary" />
+            </div>
+            <h3 className="text-body font-semibold">Comparables ({comps.count || compItems.length})</h3>
           </div>
           <div className="flex items-center gap-3 text-caption text-foreground-tertiary">
             {comps.medianPrice && (
               <span>Median: <span className="font-medium text-foreground">${comps.medianPrice.toLocaleString()}</span></span>
             )}
             {comps.avgPricePerSqft && (
-              <Badge variant="outline" className="text-caption-sm">Avg: ${comps.avgPricePerSqft.toFixed(0)}/sqft</Badge>
+              <Badge variant="outline" className="text-caption-sm bg-background/50">Avg: ${comps.avgPricePerSqft.toFixed(0)}/sqft</Badge>
             )}
           </div>
         </div>
-      </CardHeader>
-      <CardContent className="space-y-2 pt-0">
+      </div>
+      <div className="p-4 space-y-3">
         {compItems.map((comp, index) => {
           const isExpanded = expandedComps.has(index)
 
           return (
-            <CompCard key={index} comp={comp} index={index} isExpanded={isExpanded} onToggle={() => toggleComp(index)} />
+            <CompCard key={index} comp={comp} index={index} isExpanded={isExpanded} onToggle={() => toggleComp(index)} subjectSubdivision={subjectSubdivision} />
           )
         })}
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   )
 }
 
 // ─── Individual Comp Card ─────────────────────────────────────────────────────
+
+// Helper to normalize subdivision names for comparison
+function normalizeSubdivision(sub: string | null | undefined): string {
+  if (!sub) return ''
+  return sub.toLowerCase().trim().replace(/\s+/g, ' ')
+}
 
 function CompCard({
   comp,
   index,
   isExpanded,
   onToggle,
+  subjectSubdivision,
 }: {
   comp: CompItem
   index: number
   isExpanded: boolean
   onToggle: () => void
+  subjectSubdivision?: string | null
 }) {
+  // Check subdivision match by comparing directly
+  const hasSubdivisionMatch = !!(
+    subjectSubdivision &&
+    comp.subdivision &&
+    normalizeSubdivision(subjectSubdivision) === normalizeSubdivision(comp.subdivision)
+  )
   return (
     <div
       className={cn(
-        'border rounded-2xl transition-all duration-200',
-        comp.isBestComp ? 'border-amber-500/50 bg-amber-500/5 ring-1 ring-amber-500/20' : 'border-border/60 hover:border-border'
+        'glass-comp rounded-2xl transition-all duration-200',
+        comp.isBestComp && 'border-amber-500/40 ring-1 ring-amber-500/20'
       )}
     >
       {/* Comp Header */}
@@ -1240,6 +1452,12 @@ function CompCard({
                 {comp.classification && (
                   <ClassificationBadge classification={comp.classification} showConfidence={false} />
                 )}
+                {hasSubdivisionMatch && (
+                  <Badge className="bg-emerald-500/15 text-emerald-600 border-emerald-500/30 text-caption-sm">
+                    <Check className="w-3 h-3 mr-1" />
+                    Subdivision
+                  </Badge>
+                )}
               </div>
               <div className="flex items-center gap-2 text-caption text-foreground-tertiary">
                 {comp.distanceMiles !== undefined && comp.distanceMiles !== null && (
@@ -1252,28 +1470,20 @@ function CompCard({
                   </>
                 )}
               </div>
-              {/* Badges row */}
-              {(comp.appraisalRules?.filters.some(f => f.type === 'subdivision_match' && f.passed) || comp.condition) && (
+              {/* Condition badge */}
+              {comp.condition && (
                 <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
-                  {comp.appraisalRules?.filters.some(f => f.type === 'subdivision_match' && f.passed) && (
-                    <Badge className="bg-emerald-500/15 text-emerald-600 border-emerald-500/30 text-caption-sm">
-                      <Check className="w-3 h-3 mr-1" />
-                      Subdivision Match
-                    </Badge>
-                  )}
-                  {comp.condition && (
-                    <Badge
-                      variant="outline"
-                      className={cn(
-                        'text-caption-sm',
-                        comp.condition === 'better' && 'bg-emerald-500/10 text-emerald-600 border-emerald-500/30',
-                        comp.condition === 'similar' && 'bg-blue-500/10 text-blue-600 border-blue-500/30',
-                        comp.condition === 'worse' && 'bg-red-500/10 text-red-600 border-red-500/30'
-                      )}
-                    >
-                      {comp.condition}
-                    </Badge>
-                  )}
+                  <Badge
+                    variant="outline"
+                    className={cn(
+                      'text-caption-sm',
+                      comp.condition === 'better' && 'bg-emerald-500/10 text-emerald-600 border-emerald-500/30',
+                      comp.condition === 'similar' && 'bg-blue-500/10 text-blue-600 border-blue-500/30',
+                      comp.condition === 'worse' && 'bg-red-500/10 text-red-600 border-red-500/30'
+                    )}
+                  >
+                    {comp.condition}
+                  </Badge>
                 </div>
               )}
             </div>
@@ -1299,6 +1509,7 @@ function CompCard({
           <span>{comp.bedrooms ?? '-'} bd / {comp.bathrooms ?? '-'} ba</span>
           <span>{comp.squareFeet?.toLocaleString() || '-'} sqft</span>
           <span>Built {comp.yearBuilt || '-'}</span>
+          {comp.foundationType && <span>Foundation: {comp.foundationType}</span>}
           {comp.saleDate && <span>Sold {new Date(comp.saleDate).toLocaleDateString()}</span>}
           {comp.qualityScore !== undefined && comp.qualityScore !== null && (
             <span className="text-primary font-medium">Quality: {comp.qualityScore}/100</span>
@@ -1308,7 +1519,7 @@ function CompCard({
 
       {/* Expanded Details */}
       {isExpanded && (
-        <div className="border-t border-border/40 px-5 py-4 bg-secondary/30 space-y-4">
+        <div className="border-t border-border/20 px-5 py-4 glass-stat space-y-4">
           {/* Subdivision */}
           {comp.subdivision && (
             <div>
@@ -1421,24 +1632,7 @@ function CompCard({
           {comp.photos && comp.photos.length > 0 && (
             <div>
               <div className="text-caption text-foreground-tertiary mb-2">Photos</div>
-              <div className="flex gap-2 overflow-x-auto pb-2">
-                {comp.photos.slice(0, 5).map((photo, i) => (
-                  <img
-                    key={i}
-                    src={photo}
-                    alt={`Comp photo ${i + 1}`}
-                    className="w-28 h-20 object-cover rounded-lg border border-border/50 flex-shrink-0"
-                    onError={(e) => {
-                      ;(e.target as HTMLImageElement).style.display = 'none'
-                    }}
-                  />
-                ))}
-                {comp.photos.length > 5 && (
-                  <div className="w-28 h-20 bg-secondary rounded-lg border border-border/50 flex items-center justify-center text-caption text-foreground-tertiary flex-shrink-0">
-                    +{comp.photos.length - 5} more
-                  </div>
-                )}
-              </div>
+              <PhotoGallery photos={comp.photos} />
             </div>
           )}
         </div>

@@ -137,7 +137,7 @@ export default async function LogsPage({
                       <div className="flex items-center gap-1.5">
                         <Key className="w-3 h-3 text-foreground-tertiary" />
                         <span className="text-caption text-foreground-secondary truncate max-w-[100px]">
-                          {apiKeyNames[log.apiKeyId] || log.apiKeyId.slice(0, 8)}
+                          {log.apiKeyId ? (apiKeyNames[log.apiKeyId] || log.apiKeyId.slice(0, 8)) : 'Dashboard'}
                         </span>
                       </div>
                     </td>

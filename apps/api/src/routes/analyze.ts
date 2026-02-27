@@ -23,6 +23,8 @@
  */
 
 import { Hono } from 'hono'
+import { drizzle } from 'drizzle-orm/d1'
+import { eq, and } from 'drizzle-orm'
 import type { Env } from '../types'
 import type { AuthContext } from '../middleware/auth'
 import {
@@ -30,6 +32,8 @@ import {
   DEFAULT_ADJUSTMENTS,
   type AppraisalFilter,
   type AppraisalAdjustment,
+  type FilterType,
+  type AdjustmentType,
 } from '../services/appraisal'
 import {
   REHAB_LEVELS,
@@ -39,6 +43,7 @@ import {
 import type { QueueJobResponse, JobStatusResponse } from '../durable-objects/types'
 import type { AnalysisWorkflowParams } from '../workflows/types'
 import { generateWsToken } from '../utils/ws-token'
+import { appraisalRulePreset, appraisalRuleFilter, appraisalRuleAdjustment } from '@flowstate-api/db'
 
 type Variables = { auth: AuthContext }
 
@@ -99,7 +104,10 @@ interface AnalyzeRequest {
     monthsBack?: number
   }
 
-  // Appraisal rules preset
+  // Appraisal preset ID (loads filters/adjustments from database)
+  appraisalPresetId?: string
+
+  // Appraisal rules (overrides preset if both provided)
   appraisalRules?: {
     filters?: AppraisalFilter[]
     adjustments?: AppraisalAdjustment[]
@@ -213,6 +221,52 @@ analyze.post('/', async (c) => {
       )
     }
 
+    // Load appraisal rules from preset if provided
+    let appraisalRules = body.appraisalRules
+    if (body.appraisalPresetId && !appraisalRules) {
+      const db = drizzle(c.env.DB)
+
+      // Load preset (verify ownership)
+      const [preset] = await db
+        .select()
+        .from(appraisalRulePreset)
+        .where(
+          and(
+            eq(appraisalRulePreset.id, body.appraisalPresetId),
+            eq(appraisalRulePreset.userId, auth.userId)
+          )
+        )
+        .limit(1)
+
+      if (preset) {
+        // Load filters and adjustments
+        const presetFilters = await db
+          .select()
+          .from(appraisalRuleFilter)
+          .where(eq(appraisalRuleFilter.presetId, body.appraisalPresetId))
+
+        const presetAdjustments = await db
+          .select()
+          .from(appraisalRuleAdjustment)
+          .where(eq(appraisalRuleAdjustment.presetId, body.appraisalPresetId))
+
+        appraisalRules = {
+          filters: presetFilters.map((f) => ({
+            type: f.filterType as FilterType,
+            enabled: f.enabled,
+            value: f.value,
+          })),
+          adjustments: presetAdjustments.map((a) => ({
+            type: a.adjustmentType as AdjustmentType,
+            enabled: a.enabled,
+            amount: a.amount,
+            percent: a.percentage,
+          })),
+        }
+        console.log(`[Analyze] Loaded appraisal preset: ${preset.name} (${presetFilters.length} filters, ${presetAdjustments.length} adjustments)`)
+      }
+    }
+
     // Start the workflow
     const workflowParams: AnalysisWorkflowParams = {
       jobId,
@@ -227,7 +281,7 @@ analyze.post('/', async (c) => {
       searchOptions: body.searchOptions,
       enrichment: body.enrichment,
       photoAnalysis: body.photoAnalysis ?? body.zillowContext,
-      appraisalRules: body.appraisalRules,
+      appraisalRules,
       buybox: body.buybox,
       skipCache: body.skipCache,
     }

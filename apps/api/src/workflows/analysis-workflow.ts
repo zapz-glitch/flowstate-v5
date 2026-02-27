@@ -47,6 +47,7 @@ import {
   selectBestCompFromData,
   buildAnalysisResponse,
   mergeZillowDataIntoBundle,
+  calculateAllRehabLevelEstimates,
   type AnalysisResponse,
   type SupplementedField,
 } from '../services/analysis'
@@ -500,11 +501,27 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
         ? enabledComps.reduce((sum, c) => sum + (c.squareFeet || 0), 0) / enabledComps.length
         : subjectSqft
 
+    const selectedRehabLevelIndex = buybox.rehabLevelIndex ?? 2
+
     const valuation = valuationService.calculateValuation({
       arv: finalArv,
       subjectSqft,
       compAvgSqft,
-      rehabLevelIndex: buybox.rehabLevelIndex ?? 2,
+      rehabLevelIndex: selectedRehabLevelIndex,
+      majorItems: buybox.majorItems,
+      additionPlay: buybox.additionPlay ?? 0,
+      closingCostsPercent: buybox.closingCostsPercent ?? 10,
+      carryingCostsPercent: buybox.carryingCostsPercent ?? 5,
+      wholesaleFee: buybox.wholesaleFee ?? 10000,
+      desiredProfit: buybox.desiredProfit,
+    })
+
+    // Calculate all rehab level estimates for the current ARV
+    const rehabLevelEstimates = calculateAllRehabLevelEstimates(valuationService, {
+      arv: finalArv,
+      subjectSqft,
+      compAvgSqft,
+      selectedRehabLevelIndex,
       majorItems: buybox.majorItems,
       additionPlay: buybox.additionPlay ?? 0,
       closingCostsPercent: buybox.closingCostsPercent ?? 10,
@@ -532,6 +549,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
         weightedARVResult,
         subjectSupplementedFields,
         compSupplementedFields,
+        rehabLevelEstimates,
       }
     )
   }

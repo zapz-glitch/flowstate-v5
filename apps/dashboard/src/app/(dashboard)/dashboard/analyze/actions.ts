@@ -108,8 +108,22 @@ export interface SubjectData {
   } | null
   taxAssessment?: number | null
   photos?: string[]
+  /** Foundation type (e.g., Slab, Crawl Space, Basement) */
+  foundationType?: string | null
   /** Property classification (as_is, after_renovation, transitional) */
   classification?: ClassificationSummary | null
+}
+
+export interface RehabLevelEstimate {
+  index: number
+  name: string
+  perSqft: number
+  estimatedCost: number
+  buyPrice: number
+  wholesalePrice: number
+  projectedProfit: number
+  projectedROI: number
+  isSelected: boolean
 }
 
 export interface ValuationData {
@@ -121,6 +135,8 @@ export interface ValuationData {
   rehabCost?: number
   rehabLevel?: string
   rehabPerSqft?: number
+  /** All rehab level estimates with costs calculated for the current ARV */
+  rehabLevelEstimates?: RehabLevelEstimate[]
   totalCosts?: number
   totalInvestment?: number
   projectedProfit?: number
@@ -156,6 +172,8 @@ export interface CompItem {
   photos?: string[]
   /** Subdivision name (if available) */
   subdivision?: string | null
+  /** Foundation type (e.g., Slab, Crawl Space, Basement) */
+  foundationType?: string | null
   /** Reason this comp was selected/analyzed (LLM reasoning) */
   selectionReason?: string | null
   /** Key features identified by LLM analysis */

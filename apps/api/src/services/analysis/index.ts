@@ -10,8 +10,10 @@ import type { NormalizedProperty, NormalizedComparable } from '../property-api/t
 import type { AppraisedComparable, AppraisalResultWithFallback, WeightedARVResult } from '../appraisal'
 import type { CompSelectionResult } from '../comp-selection'
 import type { PhotoBundle, PropertyPhotos } from '../photo-provider'
-import type { MajorItem } from '../valuation'
+import type { MajorItem, ValuationService } from '../valuation'
+import { REHAB_LEVELS } from '../valuation'
 import type { ClassificationResult, PropertyClassification } from '../classification'
+import { generateZillowUrl } from '../photo-provider'
 
 // Re-export for convenience
 export type { PropertyBundle } from '../property-api'
@@ -394,6 +396,21 @@ export interface ValuationResult {
 }
 
 /**
+ * Rehab level estimate with full valuation calculations
+ */
+export interface RehabLevelEstimate {
+  index: number
+  name: string
+  perSqft: number
+  estimatedCost: number
+  buyPrice: number
+  wholesalePrice: number
+  projectedProfit: number
+  projectedROI: number
+  isSelected: boolean
+}
+
+/**
  * Context required for building analysis response
  */
 export interface ResponseContext {
@@ -415,6 +432,8 @@ export interface ResponseContext {
   subjectSupplementedFields?: SupplementedField[]
   /** Fields supplemented from Zillow for each comp (by comp ID) */
   compSupplementedFields?: Map<string, SupplementedField[]>
+  /** All rehab level estimates (pre-calculated for each level) */
+  rehabLevelEstimates?: RehabLevelEstimate[]
 }
 
 /**
@@ -464,6 +483,10 @@ export interface AnalysisResponse {
     } | null
     taxAssessment: number | null
     photos: string[]
+    /** Foundation type (e.g., Slab, Crawl Space, Basement) */
+    foundationType: string | null
+    /** Zillow search URL for this property */
+    zillowUrl: string | null
     /** Property classification (as_is or after_renovation) */
     classification: ClassificationSummary | null
   }
@@ -496,6 +519,18 @@ export interface AnalysisResponse {
     rehabCost: number
     rehabLevel: string
     rehabPerSqft: number
+    /** All rehab level estimates with costs calculated for the current ARV */
+    rehabLevelEstimates: Array<{
+      index: number
+      name: string
+      perSqft: number
+      estimatedCost: number
+      buyPrice: number
+      wholesalePrice: number
+      projectedProfit: number
+      projectedROI: number
+      isSelected: boolean
+    }>
     totalCosts: number
     totalInvestment: number
     projectedProfit: number
@@ -537,6 +572,10 @@ export interface AnalysisResponse {
       photos: string[]
       /** Subdivision name (if available) */
       subdivision: string | null
+      /** Foundation type (e.g., Slab, Crawl Space, Basement) */
+      foundationType: string | null
+      /** Zillow search URL for this property */
+      zillowUrl: string | null
       /** Reason this comp was selected/analyzed (LLM reasoning) */
       selectionReason: string | null
       /** Key features identified by LLM analysis */
@@ -736,6 +775,14 @@ export function buildAnalysisResponse(
       isBestComp: isBest,
       photos: compPhotos,
       subdivision: comp.subdivision ?? null,
+      foundationType: comp.construction?.foundationType ?? null,
+      zillowUrl: generateZillowUrl({
+        propertyId: comp.id,
+        address: comp.address,
+        city: comp.city,
+        state: comp.state,
+        zipCode: comp.zipCode,
+      }),
       selectionReason,
       keyFeatures: analysis?.keyFeatures ?? null,
       isEnabled: comp.isEnabled,
@@ -797,6 +844,14 @@ export function buildAnalysisResponse(
         : null,
       taxAssessment: property.assessedValue ?? null,
       photos: subjectPhotos,
+      foundationType: property.construction?.foundationType ?? null,
+      zillowUrl: generateZillowUrl({
+        propertyId: property.id,
+        address: property.address,
+        city: property.city,
+        state: property.state,
+        zipCode: property.zipCode,
+      }),
       classification: subjectClassificationSummary,
     },
 
@@ -828,6 +883,7 @@ export function buildAnalysisResponse(
       wholesalePrice: valuation.wholesalePrice,
       recommendation: valuation.recommendation,
       recommendationReason: valuation.recommendationReason,
+      rehabLevelEstimates: ctx.rehabLevelEstimates ?? [],
     },
 
     // ═══ COMPARABLE SALES (All comps with enable/disable status) ═══════════════
@@ -927,4 +983,76 @@ function formatFieldName(field: string): string {
     lastSalePrice: 'last sale price',
   }
   return fieldLabels[field] ?? field
+}
+
+// ─── Rehab Level Estimates Calculator ─────────────────────────────────────────
+
+/**
+ * Parameters for calculating rehab level estimates
+ */
+export interface RehabEstimatesParams {
+  arv: number
+  subjectSqft: number
+  compAvgSqft?: number
+  selectedRehabLevelIndex: number
+  majorItems?: MajorItem[]
+  additionPlay?: number
+  closingCostsPercent?: number
+  carryingCostsPercent?: number
+  wholesaleFee?: number
+  desiredProfit?: number
+}
+
+/**
+ * Calculate all rehab level estimates for a given ARV.
+ * Returns an array with full valuation calculations for each of the 7 rehab levels.
+ *
+ * @param valuationService - The valuation service instance
+ * @param params - Parameters for calculation
+ * @returns Array of rehab level estimates with full valuation for each level
+ */
+export function calculateAllRehabLevelEstimates(
+  valuationService: ValuationService,
+  params: RehabEstimatesParams
+): RehabLevelEstimate[] {
+  const {
+    arv,
+    subjectSqft,
+    compAvgSqft,
+    selectedRehabLevelIndex,
+    majorItems,
+    additionPlay = 0,
+    closingCostsPercent = 10,
+    carryingCostsPercent = 5,
+    wholesaleFee = 10000,
+    desiredProfit,
+  } = params
+
+  return REHAB_LEVELS.map((name, index) => {
+    // Calculate full valuation for this rehab level
+    const valuation = valuationService.calculateValuation({
+      arv,
+      subjectSqft,
+      compAvgSqft,
+      rehabLevelIndex: index,
+      majorItems,
+      additionPlay,
+      closingCostsPercent,
+      carryingCostsPercent,
+      wholesaleFee,
+      desiredProfit,
+    })
+
+    return {
+      index,
+      name,
+      perSqft: valuation.rehabPerSqft,
+      estimatedCost: valuation.totalRehabCost,
+      buyPrice: valuation.buyPrice,
+      wholesalePrice: valuation.wholesalePrice,
+      projectedProfit: valuation.projectedProfit,
+      projectedROI: valuation.projectedROI,
+      isSelected: index === selectedRehabLevelIndex,
+    }
+  })
 }

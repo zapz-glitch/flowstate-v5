@@ -222,3 +222,232 @@ body {
 .float {
   animation: float 6s ease-in-out infinite;
 }
+
+/* ─── Apple Glass UI Playground Styles ─────────────────────────────────────────*/
+
+/* Main playground container with subtle gradient background */
+.playground-bg {
+  background: linear-gradient(
+    180deg,
+    hsl(var(--background)) 0%,
+    hsl(var(--secondary) / 0.3) 100%
+  );
+}
+
+.dark .playground-bg {
+  background:
+    radial-gradient(ellipse 80% 50% at 50% 0%, rgba(139, 92, 246, 0.08) 0%, transparent 50%),
+    linear-gradient(
+      180deg,
+      hsl(var(--background)) 0%,
+      hsl(260 15% 6%) 100%
+    );
+}
+
+/* Glass input card - elevated search bar */
+.glass-input {
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.04),
+    0 4px 12px rgba(0, 0, 0, 0.04),
+    0 16px 32px rgba(0, 0, 0, 0.04),
+    inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
+.dark .glass-input {
+  background: linear-gradient(
+    145deg,
+    rgba(38, 36, 48, 0.92) 0%,
+    rgba(28, 26, 36, 0.88) 100%
+  );
+  border: 1px solid rgba(139, 92, 246, 0.15);
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.3),
+    0 8px 24px rgba(0, 0, 0, 0.4),
+    0 24px 48px rgba(0, 0, 0, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    inset 0 0 40px rgba(139, 92, 246, 0.03);
+}
+
+/* Glass result card - for property/valuation cards */
+.glass-result {
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(20px) saturate(150%);
+  -webkit-backdrop-filter: blur(20px) saturate(150%);
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.03),
+    0 4px 8px rgba(0, 0, 0, 0.03),
+    0 12px 24px rgba(0, 0, 0, 0.05);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.dark .glass-result {
+  background: linear-gradient(
+    145deg,
+    rgba(32, 30, 42, 0.85) 0%,
+    rgba(24, 22, 32, 0.8) 100%
+  );
+  border: 1px solid rgba(139, 92, 246, 0.12);
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.25),
+    0 8px 16px rgba(0, 0, 0, 0.3),
+    0 16px 32px rgba(0, 0, 0, 0.25),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.glass-result:hover {
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.04),
+    0 8px 16px rgba(0, 0, 0, 0.06),
+    0 20px 40px rgba(0, 0, 0, 0.08);
+}
+
+.dark .glass-result:hover {
+  background: linear-gradient(
+    145deg,
+    rgba(40, 38, 52, 0.9) 0%,
+    rgba(30, 28, 40, 0.85) 100%
+  );
+  border-color: rgba(139, 92, 246, 0.2);
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.3),
+    0 12px 24px rgba(0, 0, 0, 0.35),
+    0 24px 48px rgba(0, 0, 0, 0.3),
+    0 0 40px rgba(139, 92, 246, 0.08);
+}
+
+/* Glass comp card - lighter for list items */
+.glass-comp {
+  background: rgba(255, 255, 255, 0.55);
+  backdrop-filter: blur(12px) saturate(120%);
+  -webkit-backdrop-filter: blur(12px) saturate(120%);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.dark .glass-comp {
+  background: linear-gradient(
+    145deg,
+    rgba(36, 34, 46, 0.7) 0%,
+    rgba(28, 26, 36, 0.65) 100%
+  );
+  border: 1px solid rgba(139, 92, 246, 0.08);
+}
+
+.glass-comp:hover {
+  background: rgba(255, 255, 255, 0.7);
+  border-color: rgba(255, 255, 255, 0.5);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.06);
+}
+
+.dark .glass-comp:hover {
+  background: linear-gradient(
+    145deg,
+    rgba(44, 42, 56, 0.8) 0%,
+    rgba(34, 32, 44, 0.75) 100%
+  );
+  border-color: rgba(139, 92, 246, 0.15);
+  box-shadow:
+    0 8px 24px rgba(0, 0, 0, 0.35),
+    0 0 20px rgba(139, 92, 246, 0.05);
+}
+
+/* Glass stat cell */
+.glass-stat {
+  background: rgba(255, 255, 255, 0.5);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.dark .glass-stat {
+  background: linear-gradient(
+    145deg,
+    rgba(40, 38, 52, 0.5) 0%,
+    rgba(30, 28, 40, 0.45) 100%
+  );
+  border: 1px solid rgba(139, 92, 246, 0.06);
+}
+
+/* Accent highlight card - for primary values */
+.glass-accent {
+  background: linear-gradient(
+    135deg,
+    hsl(var(--primary) / 0.08) 0%,
+    hsl(var(--accent-secondary) / 0.05) 100%
+  );
+  border: 1px solid hsl(var(--primary) / 0.15);
+}
+
+.dark .glass-accent {
+  background: linear-gradient(
+    135deg,
+    rgba(139, 92, 246, 0.15) 0%,
+    rgba(167, 139, 250, 0.1) 100%
+  );
+  border: 1px solid rgba(139, 92, 246, 0.25);
+  box-shadow: inset 0 0 30px rgba(139, 92, 246, 0.08);
+}
+
+/* Subtle inner glow for glass elements */
+.glass-glow {
+  box-shadow: inset 0 0 40px rgba(139, 92, 246, 0.05);
+}
+
+.dark .glass-glow {
+  box-shadow: inset 0 0 60px rgba(139, 92, 246, 0.08);
+}
+
+/* Progress indicator glass */
+.glass-progress {
+  background: rgba(255, 255, 255, 0.9);
+  backdrop-filter: blur(16px) saturate(150%);
+  -webkit-backdrop-filter: blur(16px) saturate(150%);
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  box-shadow:
+    0 4px 16px rgba(0, 0, 0, 0.06),
+    0 12px 32px rgba(0, 0, 0, 0.04);
+}
+
+.dark .glass-progress {
+  background: linear-gradient(
+    145deg,
+    rgba(36, 34, 48, 0.95) 0%,
+    rgba(26, 24, 36, 0.92) 100%
+  );
+  border: 1px solid rgba(139, 92, 246, 0.12);
+  box-shadow:
+    0 4px 16px rgba(0, 0, 0, 0.4),
+    0 12px 32px rgba(0, 0, 0, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+/* Shimmer loading animation */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.shimmer {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0) 0%,
+    rgba(255, 255, 255, 0.3) 50%,
+    rgba(255, 255, 255, 0) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 2s ease-in-out infinite;
+}
+
+.dark .shimmer {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0) 0%,
+    rgba(255, 255, 255, 0.08) 50%,
+    rgba(255, 255, 255, 0) 100%
+  );
+  background-size: 200% 100%;
+}

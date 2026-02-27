@@ -330,6 +330,9 @@ export class AnalysisJobDO extends DurableObject<Env> {
       },
     })
 
+    // Close all WebSocket connections - job is done
+    this.closeAllConnections(1000, 'Job completed')
+
     return new Response(JSON.stringify({ success: true }), {
       headers: { 'Content-Type': 'application/json' },
     })
@@ -375,6 +378,9 @@ export class AnalysisJobDO extends DurableObject<Env> {
         retryable: body.error.retryable,
       },
     })
+
+    // Close all WebSocket connections - job is done
+    this.closeAllConnections(1000, 'Job failed')
 
     return new Response(JSON.stringify({ success: true }), {
       headers: { 'Content-Type': 'application/json' },
@@ -569,14 +575,26 @@ export class AnalysisJobDO extends DurableObject<Env> {
     const sockets = this.ctx.getWebSockets()
     const data = JSON.stringify(message)
 
-    console.log(`[AnalysisJobDO] Broadcasting ${message.type} to ${sockets.length} clients`)
-
     for (const ws of sockets) {
       try {
         ws.send(data)
       } catch (error) {
         console.error('[AnalysisJobDO] Failed to send to socket:', error)
         // Socket might be closed, handled by close event
+      }
+    }
+  }
+
+  /**
+   * Close all WebSocket connections
+   */
+  private closeAllConnections(code: number, reason: string): void {
+    const sockets = this.ctx.getWebSockets()
+    for (const ws of sockets) {
+      try {
+        ws.close(code, reason)
+      } catch {
+        // Socket already closed
       }
     }
   }
