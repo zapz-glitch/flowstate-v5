@@ -1,12 +1,7 @@
 'use client'
 
 import { useEffect, useRef } from 'react'
-import Link from 'next/link'
 import Script from 'next/script'
-import { Logo } from '@/components/ui/Logo'
-import { ArrowLeft, Sun, Moon } from 'lucide-react'
-import { useTheme } from '@/components/theme-provider'
-import { Button } from '@/components/ui/button'
 
 declare global {
   interface Window {
@@ -285,9 +280,8 @@ const swaggerStyles = `
   .dark .swagger-ui .renderedMarkdown code { background: #18181b !important; color: #fafafa !important; }
 `
 
-export default function DocsPage() {
+export default function ApiReferencePage() {
   const initialized = useRef(false)
-  const { theme, toggleTheme } = useTheme()
 
   useEffect(() => {
     if (initialized.current) return
@@ -315,26 +309,21 @@ export default function DocsPage() {
       }
     }
 
-    // Check if already loaded
     if (typeof window.SwaggerUIBundle !== 'undefined') {
       initSwagger()
     }
 
-    // Listen for script load
     const handleLoad = () => initSwagger()
     window.addEventListener('swagger-loaded', handleLoad)
     return () => window.removeEventListener('swagger-loaded', handleLoad)
   }, [])
 
   return (
-    <div className="min-h-screen bg-background">
-      {/* Swagger UI CSS */}
+    <>
       <link
         rel="stylesheet"
         href="https://unpkg.com/swagger-ui-dist@5.11.0/swagger-ui.css"
       />
-
-      {/* Swagger UI Scripts */}
       <Script
         src="https://unpkg.com/swagger-ui-dist@5.11.0/swagger-ui-bundle.js"
         strategy="afterInteractive"
@@ -349,51 +338,11 @@ export default function DocsPage() {
           window.dispatchEvent(new Event('swagger-loaded'))
         }}
       />
-
-      {/* Theme-aware Swagger styles using .dark class selector */}
       <style dangerouslySetInnerHTML={{ __html: swaggerStyles }} />
 
-      {/* Header */}
-      <header className="fixed top-0 left-0 right-0 z-50 border-b border-border bg-background/80 backdrop-blur-xl">
-        <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-6">
-          <div className="flex items-center gap-6">
-            <Link href="/" className="flex items-center gap-2">
-              <Logo size="sm" />
-            </Link>
-            <div className="hidden sm:flex items-center gap-1 text-sm text-muted-foreground">
-              <span className="text-foreground">API Documentation</span>
-            </div>
-          </div>
-          <div className="flex items-center gap-3">
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={toggleTheme}
-              className="text-muted-foreground hover:text-foreground hover:bg-secondary"
-            >
-              {theme === 'dark' ? (
-                <Sun className="h-5 w-5" />
-              ) : (
-                <Moon className="h-5 w-5" />
-              )}
-            </Button>
-            <Link
-              href="/"
-              className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
-            >
-              <ArrowLeft className="h-4 w-4" />
-              Back to Home
-            </Link>
-          </div>
-        </div>
-      </header>
-
-      {/* Swagger UI Container */}
-      <main className="pt-16">
-        <div className="mx-auto max-w-7xl px-6 py-8">
-          <div id="swagger-ui" />
-        </div>
-      </main>
-    </div>
+      <div className="mx-auto max-w-7xl px-6 py-8">
+        <div id="swagger-ui" />
+      </div>
+    </>
   )
 }

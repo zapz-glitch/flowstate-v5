@@ -311,6 +311,31 @@ export const appraisalRuleAdjustment = sqliteTable(
 )
 
 // ==========================================
+// Process Documentation Comments
+// ==========================================
+
+export const processDocComments = sqliteTable(
+  'process_doc_comments',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    sectionId: text('section_id').notNull(),
+    parentId: text('parent_id'), // null = top-level, set = reply (1 level deep)
+    content: text('content').notNull(),
+    isDeleted: integer('is_deleted', { mode: 'boolean' }).notNull().default(false),
+    createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
+    updatedAt: text('updated_at').notNull().$defaultFn(() => new Date().toISOString()),
+  },
+  (table) => [
+    index('idx_pdc_section').on(table.sectionId),
+    index('idx_pdc_user').on(table.userId),
+    index('idx_pdc_parent').on(table.parentId),
+  ]
+)
+
+// ==========================================
 // Plan Limits
 // ==========================================
 

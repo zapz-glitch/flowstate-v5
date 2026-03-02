@@ -15,6 +15,13 @@
       "when": 1771674420536,
       "tag": "0001_brown_dragon_lord",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1772453803860,
+      "tag": "0002_military_boomerang",
+      "breakpoints": true
     }
   ]
 }

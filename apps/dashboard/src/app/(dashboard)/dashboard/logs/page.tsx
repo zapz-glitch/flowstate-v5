@@ -84,7 +84,7 @@ export default async function LogsPage({
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead>
-              <tr className="border-b border-border/60 bg-secondary/30">
+              <tr className="border-b border-border bg-secondary/30">
                 <th className="text-left px-6 py-3 text-caption font-medium text-foreground-tertiary">
                   Time
                 </th>
@@ -199,7 +199,7 @@ export default async function LogsPage({
 
         {/* Pagination */}
         {data.pagination.totalPages > 1 && (
-          <div className="flex items-center justify-between px-6 py-4 border-t border-border/60">
+          <div className="flex items-center justify-between px-6 py-4 border-t border-border">
             <p className="text-body-sm text-foreground-tertiary">
               Page {data.pagination.page} of {data.pagination.totalPages}
             </p>

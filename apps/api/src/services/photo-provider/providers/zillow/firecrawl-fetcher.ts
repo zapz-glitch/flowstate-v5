@@ -321,24 +321,30 @@ CRITICAL PHOTO EXTRACTION RULES - These photos will be used for property conditi
    - Backyard, patio, pool, garage
    - Property features (flooring, appliances, fixtures)
 
-2. EXCLUDE these types of images (NOT property photos):
-   - Agent/realtor headshots or profile photos
-   - Brokerage logos or branding
-   - Map images or satellite views
-   - Floor plan diagrams
-   - Virtual tour icons or buttons
+2. ABSOLUTELY DO NOT INCLUDE these types of images:
+   - **HUMAN PHOTOS** - Any image showing a person (agents, realtors, homeowners, etc.)
+   - **HEADSHOTS/PORTRAITS** - Professional photos of people, profile pictures
+   - Agent/realtor photos or team photos
+   - Brokerage logos or branding images
+   - Map images, satellite views, or street view images
+   - Floor plan diagrams or blueprints
+   - Virtual tour icons, buttons, or UI elements
    - "Coming soon" or placeholder images
-   - Neighborhood amenity photos (unless part of the property)
-   - Stock photos or marketing images
-   - Social media icons
-   - Any URL containing: "avatar", "logo", "icon", "profile", "agent", "broker", "map", "streetview"
+   - Stock photos or marketing images with people
+   - Social media icons or badges
+   - Any URL containing: "avatar", "logo", "icon", "profile", "agent", "broker", "map", "streetview", "team", "staff", "headshot", "portrait"
+   - Circular/rounded images (often profile photos)
+   - Small images under 200x200 pixels (typically icons or thumbnails)
 
 3. Photo URLs must contain "zillowstatic.com" or "photos.zillowstatic.com"
 
 4. Look for photo URLs in the format: https://photos.zillowstatic.com/fp/[hash]-[size].jpg
    - The [size] suffix like "uncropped_scaled_within_1536_1152.webp" or "p_f.jpg" indicates actual property photos
+   - Property photos typically have larger dimensions and landscape/rectangular aspect ratios
 
 5. Extract the FULL URL for each valid property photo
+
+IMPORTANT: When in doubt, EXCLUDE the photo. It is better to have fewer property photos than to include photos of people or agents.
 
 Other extraction rules:
 - For price: Extract numeric value only (no $ or commas)
@@ -565,36 +571,61 @@ ${content.html.slice(0, 50000)}
   }
 
   /**
-   * Check if a URL is likely a property photo (not agent/logo/icon)
+   * Check if a URL is likely a property photo (not agent/logo/icon/person)
    */
   private isPropertyPhoto(url: string): boolean {
     const lowerUrl = url.toLowerCase()
 
-    // Exclude patterns that indicate non-property images
+    // Exclude patterns that indicate non-property images (especially human/agent photos)
     const excludePatterns = [
+      // Agent/person related
       'avatar',
-      'logo',
-      'icon',
       'profile',
       'agent',
       'broker',
+      'realtor',
+      'team',
+      'staff',
+      'headshot',
+      'portrait',
+      'person',
+      'people',
+      'user',
+      'member',
+      // Branding/UI
+      'logo',
+      'icon',
+      'badge',
+      'button',
+      'social',
+      'z-logo',
+      'zillow-logo',
+      'trulia',
+      'hotpads',
+      // Maps/diagrams
       'map',
       'streetview',
       'street-view',
       'satellite',
       'floorplan',
       'floor-plan',
+      'blueprint',
+      // Placeholders
       'placeholder',
       'coming-soon',
-      'social',
-      'badge',
-      'button',
+      'comingsoon',
+      'default',
+      'no-image',
+      'noimage',
+      // Small images (often profile pics)
       'thumb',
       'thumbnail',
-      'z-logo',
-      'zillow-logo',
-      'trulia',
-      'hotpads',
+      '50x50',
+      '64x64',
+      '80x80',
+      '100x100',
+      '120x120',
+      '150x150',
     ]
 
     for (const pattern of excludePatterns) {

@@ -74,13 +74,13 @@ export default function Sidebar() {
       {/* Sidebar */}
       <div
         className={cn(
-          'fixed inset-y-0 left-0 z-40 hidden lg:flex lg:flex-col bg-card border-r border-border/60 transition-all duration-300 ease-in-out',
+          'fixed inset-y-0 left-0 z-40 hidden lg:flex lg:flex-col bg-background border-r border-border transition-all duration-300 ease-in-out',
           collapsed ? 'w-[72px]' : 'w-64'
         )}
       >
         <div className="flex flex-col h-full">
           {/* Logo & Collapse Button */}
-          <div className="flex items-center justify-between h-16 px-4 border-b border-border/60">
+          <div className="flex items-center justify-between h-16 px-4 border-b border-border">
             <Link href="/dashboard" className="flex items-center">
               {collapsed ? (
                 <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-purple-500 to-violet-600 flex items-center justify-center">
@@ -94,7 +94,7 @@ export default function Sidebar() {
               onClick={toggleCollapsed}
               className={cn(
                 'p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors',
-                collapsed && 'absolute -right-3 top-6 bg-card border border-border shadow-sm'
+                collapsed && 'absolute -right-3 top-6 bg-background border border-border shadow-sm'
               )}
               aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
             >
@@ -119,7 +119,7 @@ export default function Sidebar() {
                 collapsed ? 'justify-center px-2.5 py-2.5' : 'px-3 py-2.5',
                 isActive
                   ? 'bg-primary/10 text-primary'
-                  : 'text-foreground-secondary hover:text-foreground hover:bg-secondary/60'
+                  : 'text-foreground-secondary hover:text-foreground hover:bg-secondary'
               )
 
               if (item.external) {
@@ -155,7 +155,7 @@ export default function Sidebar() {
           </nav>
 
           {/* User Section with Dropdown */}
-          <div className="p-3 border-t border-border/60">
+          <div className="p-3 border-t border-border">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button
@@ -228,7 +228,7 @@ export default function Sidebar() {
       </div>
 
       {/* Mobile Header */}
-      <div className="lg:hidden fixed top-0 left-0 right-0 z-40 h-16 bg-card border-b border-border/60 flex items-center justify-between px-4">
+      <div className="lg:hidden fixed top-0 left-0 right-0 z-40 h-16 bg-background border-b border-border flex items-center justify-between px-4">
         <Link href="/dashboard">
           <Logo size="sm" />
         </Link>
@@ -285,7 +285,7 @@ export default function Sidebar() {
       </div>
 
       {/* Mobile Navigation Bottom Bar */}
-      <div className="lg:hidden fixed bottom-0 left-0 right-0 z-40 h-16 bg-card border-t border-border/60">
+      <div className="lg:hidden fixed bottom-0 left-0 right-0 z-40 h-16 bg-background border-t border-border">
         <nav className="flex items-center justify-around h-full px-2">
           {navigation.slice(0, 5).map((item) => {
             const isActive = pathname === item.href

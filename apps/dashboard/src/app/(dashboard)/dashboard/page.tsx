@@ -119,7 +119,7 @@ export default function DashboardPage() {
       </div>
 
       {/* Stats Grid */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-5">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
           title="API Keys"
           value={stats.apiKeysCount.toString()}
@@ -150,8 +150,8 @@ export default function DashboardPage() {
       </div>
 
       {/* Quick Start Section */}
-      <div className="rounded-2xl border border-border/60 bg-card overflow-hidden shadow-sm shadow-black/[0.02] dark:shadow-black/[0.08]">
-        <div className="px-6 py-5 border-b border-border/60">
+      <div className="rounded-2xl border border-border overflow-hidden">
+        <div className="px-6 py-5 border-b border-border">
           <h2 className="text-heading font-semibold text-foreground">Quick Start</h2>
           <p className="text-body-sm text-foreground-tertiary mt-1">Get started with the Flowstate API in minutes</p>
         </div>
@@ -200,8 +200,8 @@ export default function DashboardPage() {
           </div>
 
           {/* Code Example */}
-          <div className="rounded-xl border border-border/60 overflow-hidden bg-secondary/30">
-            <div className="flex items-center justify-between px-4 py-3 border-b border-border/60 bg-secondary/50">
+          <div className="rounded-xl border border-border overflow-hidden bg-secondary/50">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-secondary">
               <div className="flex items-center gap-2">
                 <div className="flex gap-1.5">
                   <div className="w-3 h-3 rounded-full bg-red-400/80" />
@@ -270,9 +270,8 @@ function StatCard({
   const content = (
     <div
       className={cn(
-        'rounded-2xl border border-border/60 bg-card p-5 transition-all duration-200',
-        'shadow-sm shadow-black/[0.02] dark:shadow-black/[0.08]',
-        href && 'hover:border-border hover:shadow-md cursor-pointer group'
+        'rounded-2xl border border-border p-5 transition-all duration-200',
+        href && 'hover:bg-border/20 cursor-pointer group'
       )}
     >
       <div className="flex items-start justify-between">
@@ -282,14 +281,13 @@ function StatCard({
         </div>
         <div className={cn(
           'w-10 h-10 rounded-xl flex items-center justify-center',
-          styles.bg,
-          'transition-transform duration-200 group-hover:scale-105'
+          styles.bg
         )}>
           <Icon className={cn('w-5 h-5', styles.icon)} />
         </div>
       </div>
       {href && (
-        <div className="mt-4 pt-4 border-t border-border/50 flex items-center text-caption text-primary font-medium">
+        <div className="mt-4 pt-4 border-t border-border flex items-center text-caption text-primary font-medium">
           View details
           <ArrowRight className="w-3.5 h-3.5 ml-1.5 transition-transform group-hover:translate-x-1" />
         </div>

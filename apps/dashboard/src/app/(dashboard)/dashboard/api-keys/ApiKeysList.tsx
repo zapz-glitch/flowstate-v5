@@ -218,7 +218,7 @@ export default function ApiKeysList({
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead>
-              <tr className="border-b border-border/60 bg-secondary/30">
+              <tr className="border-b border-border bg-secondary/30">
                 <th className="text-left px-6 py-3 text-caption font-medium text-foreground-tertiary">
                   Name
                 </th>

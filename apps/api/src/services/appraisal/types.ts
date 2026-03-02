@@ -3,6 +3,14 @@
  *
  * Types for comparable filtering, price adjustments, and appraisal presets.
  * Based on standard real estate appraisal methodology.
+ *
+ * Constants (DEFAULT_FILTERS, DEFAULT_ADJUSTMENTS, FILTER_LABELS, etc.)
+ * are derived from the rule definitions in filters.ts and adjustments.ts.
+ * To add a new rule:
+ *   1. Add the type to the FilterType/AdjustmentType union below
+ *   2. Add one object to the RULES array in filters.ts or adjustments.ts
+ * That's it — defaults, labels, evaluator lookup, and filtersToApiParams
+ * all update automatically from the rules.
  */
 
 import type { NormalizedProperty, NormalizedComparable } from '../property-api/types'
@@ -23,52 +31,22 @@ export interface AppraisalFilter {
   value: number
 }
 
-export const DEFAULT_FILTERS: AppraisalFilter[] = [
-  { type: 'subdivision_match', enabled: true, value: 1 }, // Must match subdivision
-  { type: 'sale_age', enabled: true, value: 30 }, // 30 days
-  { type: 'sqft_diff', enabled: true, value: 250 }, // 250 sqft variance
-  { type: 'year_built_diff', enabled: true, value: 10 }, // 10 years
-  { type: 'distance', enabled: true, value: 0.5 }, // 0.5 miles
-]
-
-// ─── Filter Labels (for UI) ────────────────────────────────────────────────────
-
-export const FILTER_LABELS: Record<FilterType, {
+/** UI metadata for a filter */
+export interface FilterLabel {
   label: string
   shortLabel: string
   unit: string
   description: string
-}> = {
-  subdivision_match: {
-    label: 'Subdivision Match',
-    shortLabel: 'Subdivision',
-    unit: '',
-    description: 'Must be in same subdivision as subject',
-  },
-  sale_age: {
-    label: 'Sale Age',
-    shortLabel: 'Sale Age',
-    unit: 'days',
-    description: 'Maximum days since comparable sold',
-  },
-  sqft_diff: {
-    label: 'Square Footage Difference',
-    shortLabel: 'SqFt Diff',
-    unit: 'sqft',
-    description: 'Maximum sqft difference from subject',
-  },
-  year_built_diff: {
-    label: 'Year Built Difference',
-    shortLabel: 'Year Diff',
-    unit: 'years',
-    description: 'Maximum year built difference from subject',
-  },
-  distance: {
-    label: 'Search Distance',
-    shortLabel: 'Distance',
-    unit: 'miles',
-    description: 'Maximum distance from subject property',
-  },
+}
+
+export interface FilterResult {
+  type: FilterType
+  passed: boolean
+  reason?: string
+  /** Actual value that was evaluated */
+  actualValue?: number | string
+  /** Threshold value */
+  threshold?: number | string
 }
 
 // ─── Adjustment Types ──────────────────────────────────────────────────────────
@@ -89,55 +67,12 @@ export interface AppraisalAdjustment {
   percent?: number
 }
 
-export const DEFAULT_ADJUSTMENTS: AppraisalAdjustment[] = [
-  { type: 'old_comp_discount', enabled: true, amount: 0, percent: 15 },
-  { type: 'bedroom', enabled: true, amount: 15000 },
-  { type: 'bathroom', enabled: true, amount: 10000 },
-  { type: 'pool', enabled: false, amount: 10000 },
-  { type: 'garage', enabled: false, amount: 10000 },
-]
-
-// ─── Adjustment Labels (for UI) ───────────────────────────────────────────────
-
-export const ADJUSTMENT_LABELS: Record<AdjustmentType, {
+/** UI metadata for an adjustment */
+export interface AdjustmentLabel {
   label: string
   description: string
   isPercentage?: boolean
   unavailable?: boolean
-}> = {
-  old_comp_discount: {
-    label: 'Old Comp Discount',
-    description: 'Discount percentage for older sales',
-    isPercentage: true,
-  },
-  bedroom: {
-    label: 'Bedroom Adjustment',
-    description: 'Dollar adjustment per bedroom difference',
-  },
-  bathroom: {
-    label: 'Bathroom Adjustment',
-    description: 'Dollar adjustment per bathroom difference',
-  },
-  pool: {
-    label: 'Pool Adjustment',
-    description: 'Add value if subject has a pool',
-  },
-  garage: {
-    label: 'Garage Adjustment',
-    description: 'Add value if subject has a garage',
-  },
-}
-
-// ─── Evaluation Results ────────────────────────────────────────────────────────
-
-export interface FilterResult {
-  type: FilterType
-  passed: boolean
-  reason?: string
-  /** Actual value that was evaluated */
-  actualValue?: number | string
-  /** Threshold value */
-  threshold?: number | string
 }
 
 export interface AdjustmentResult {
@@ -146,6 +81,8 @@ export interface AdjustmentResult {
   amount: number
   reason?: string
 }
+
+// ─── Evaluation Results ────────────────────────────────────────────────────────
 
 export interface ComparableEvaluation {
   comparableId: string
@@ -236,9 +173,11 @@ export type AppraisalResponse = AppraisalSuccessResponse | AppraisalErrorRespons
 
 // ─── API-Level Filter Params ──────────────────────────────────────────────────
 
+export type ApiFilterParamKey = 'radiusMiles' | 'monthsBack' | 'sqftVariance'
+
 /**
- * Parameters that can be sent to the CoreLogic API for pre-filtering
- * These reduce API payload before post-fetch filtering is applied
+ * Parameters that can be sent to the CoreLogic API for pre-filtering.
+ * These reduce API payload before post-fetch filtering is applied.
  */
 export interface ApiFilterParams {
   /** Search radius in miles (from distance filter) */
@@ -249,18 +188,43 @@ export interface ApiFilterParams {
   sqftVariance?: number
 }
 
+// ─── Derived Constants (from Rule Definitions) ──────────────────────────────
+
+// NOTE: These are imported lazily to avoid circular dependency.
+// filters.ts and adjustments.ts import types from this file, so we import
+// the rule arrays here only for deriving constants (not types).
+
+import { FILTER_RULES } from './filters'
+import { ADJUSTMENT_RULES } from './adjustments'
+
+/** Derived from FILTER_RULES — one entry per rule definition */
+export const DEFAULT_FILTERS: AppraisalFilter[] = FILTER_RULES.map((r) => ({
+  type: r.type as FilterType,
+  enabled: r.defaults.enabled,
+  value: r.defaults.value,
+}))
+
+/** Derived from FILTER_RULES */
+export const FILTER_LABELS = Object.fromEntries(
+  FILTER_RULES.map((r) => [r.type, r.label])
+) as Record<FilterType, FilterLabel>
+
+/** Derived from ADJUSTMENT_RULES — one entry per rule definition */
+export const DEFAULT_ADJUSTMENTS: AppraisalAdjustment[] = ADJUSTMENT_RULES.map((r) => ({
+  type: r.type as AdjustmentType,
+  enabled: r.defaults.enabled,
+  amount: r.defaults.amount,
+  percent: r.defaults.percent,
+}))
+
+/** Derived from ADJUSTMENT_RULES */
+export const ADJUSTMENT_LABELS = Object.fromEntries(
+  ADJUSTMENT_RULES.map((r) => [r.type, r.label])
+) as Record<AdjustmentType, AdjustmentLabel>
+
 /**
- * Convert appraisal filters to API-level filter parameters
- *
- * API-level filters (reduce API payload):
- * - sale_age → monthsBack (days converted to months)
- * - sqft_diff → sqftVariance
- * - distance → radiusMiles
- *
- * Post-fetch filters (applied after enrichment):
- * - subdivision_match (requires property details)
- * - property_type (strict matching)
- * - year_built_diff (not supported by API)
+ * Convert appraisal filters to API-level filter parameters.
+ * Derived from FILTER_RULES — each rule declares its own apiParam mapping.
  */
 export function filtersToApiParams(filters: AppraisalFilter[]): ApiFilterParams {
   const params: ApiFilterParams = {}
@@ -268,24 +232,11 @@ export function filtersToApiParams(filters: AppraisalFilter[]): ApiFilterParams 
   for (const filter of filters) {
     if (!filter.enabled) continue
 
-    switch (filter.type) {
-      case 'sale_age':
-        // Convert days to months (round up to include partial months)
-        params.monthsBack = Math.ceil(filter.value / 30)
-        break
-      case 'sqft_diff':
-        // Pass sqftVariance directly
-        params.sqftVariance = filter.value
-        break
-      case 'distance':
-        // Pass radiusMiles directly
-        params.radiusMiles = filter.value
-        break
-      // These filters are applied post-fetch:
-      // - subdivision_match (requires enrichment)
-      // - property_type (needs normalization)
-      // - year_built_diff (not API-supported)
-    }
+    const rule = FILTER_RULES.find((r) => r.type === filter.type)
+    if (!rule?.apiParam) continue
+
+    const value = rule.apiParamConvert ? rule.apiParamConvert(filter.value) : filter.value
+    params[rule.apiParam] = value
   }
 
   return params

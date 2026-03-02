@@ -17,6 +17,7 @@ import auth from './routes/auth'
 import user from './routes/user'
 import analyze from './routes/analyze'
 import appraisalRules from './routes/appraisal-rules'
+import comments from './routes/comments'
 import wsStream from './routes/ws-stream'
 
 // Durable Objects
@@ -76,6 +77,9 @@ app.route('/user', user)
 
 // Appraisal rules routes (session auth via Better Auth cookies)
 app.route('/appraisal-presets', appraisalRules)
+
+// Comments routes (session auth via Better Auth cookies)
+app.route('/comments', comments)
 
 // WebSocket routes (handles its own auth via signed tokens)
 // Mounted outside /v1 because browsers can't set headers on WebSocket connections

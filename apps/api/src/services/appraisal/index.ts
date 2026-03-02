@@ -20,7 +20,7 @@
  */
 
 import type { NormalizedProperty, NormalizedComparable } from '../property-api/types'
-import { evaluateComparables, evaluateComparable } from './evaluator'
+import { evaluateComparables } from './evaluator'
 import type {
   AppraisalFilter,
   AppraisalAdjustment,
@@ -43,11 +43,12 @@ export type {
   FilterType,
   AdjustmentType,
 } from './types'
-export { DEFAULT_FILTERS, DEFAULT_ADJUSTMENTS } from './types'
+export { DEFAULT_FILTERS, DEFAULT_ADJUSTMENTS, FILTER_LABELS, ADJUSTMENT_LABELS } from './types'
 export { evaluateComparable, evaluateComparables } from './evaluator'
-// Note: WeightFactors, CompWeightBreakdown, WeightedARVResult are defined below and exported from this file
-
-// Note: FallbackOptions and AppraisalResultWithFallback are exported via interface definitions below
+export { FILTER_RULES } from './filters'
+export type { FilterRuleDefinition } from './filters'
+export { ADJUSTMENT_RULES } from './adjustments'
+export type { AdjustmentRuleDefinition } from './adjustments'
 
 // ─── Fallback Options ─────────────────────────────────────────────────────────
 
@@ -215,14 +216,6 @@ class PropertyAppraisalService implements AppraisalService {
     const filters = options?.filters ?? DEFAULT_FILTERS
     const adjustments = options?.adjustments ?? DEFAULT_ADJUSTMENTS
 
-    // Evaluate all comparables
-    // Debug: Log salePrice values before evaluation
-    console.log(`[Appraisal] Input comparables salePrice values:`, comparables.map(c => ({
-      id: c.id.substring(0, 8),
-      salePrice: c.salePrice,
-      pricePerSqft: c.pricePerSqft,
-      squareFeet: c.squareFeet,
-    })))
     const evaluations = evaluateComparables(subject, comparables, filters, adjustments)
 
     // Build appraised comparables with enable/disable state based on rules
@@ -237,41 +230,11 @@ class PropertyAppraisalService implements AppraisalService {
       }
     })
 
-    // Sort comparables: subdivision matches first, then by distance
-    // This ensures comps that don't match subdivision go to the bottom
-    appraisedComps.sort((a, b) => {
-      const aSubdivisionMatch = a.evaluation.filterResults.find(f => f.type === 'subdivision_match')?.passed ?? false
-      const bSubdivisionMatch = b.evaluation.filterResults.find(f => f.type === 'subdivision_match')?.passed ?? false
+    sortBySubdivisionThenDistance(appraisedComps)
 
-      // Subdivision matches come first
-      if (aSubdivisionMatch && !bSubdivisionMatch) return -1
-      if (!aSubdivisionMatch && bSubdivisionMatch) return 1
-
-      // Within the same subdivision match status, sort by distance
-      const distA = a.distanceMiles ?? 999
-      const distB = b.distanceMiles ?? 999
-      return distA - distB
-    })
-
-    // Calculate ARV from enabled comparables
     const enabledComps = appraisedComps.filter((c) => c.isEnabled)
     const arv = this.calculateARV(enabledComps)
-
-    // Calculate statistics - use adjustedSalePrice if available, fall back to salePrice
-    const enabledPrices = enabledComps
-      .map((c) => c.adjustedSalePrice ?? c.salePrice)
-      .filter((p): p is number => p != null && p > 0)
-
-    const enabledSqfts = enabledComps
-      .map((c) => c.squareFeet)
-      .filter((s): s is number => s != null && s > 0)
-
-    const avgPricePerSqft =
-      enabledSqfts.length > 0 && arv > 0
-        ? Math.round(arv / (enabledSqfts.reduce((a, b) => a + b, 0) / enabledSqfts.length))
-        : null
-
-    const medianSalePrice = enabledPrices.length > 0 ? calculateMedian(enabledPrices) : null
+    const { avgPricePerSqft, medianSalePrice } = calculateStats(enabledComps, arv)
 
     return {
       subject,
@@ -300,7 +263,6 @@ class PropertyAppraisalService implements AppraisalService {
     const result1 = this.evaluate(subject, comparables, { filters: defaultFilters, adjustments })
 
     if (result1.enabledCount >= minComps) {
-      console.log(`Appraisal: ${result1.enabledCount} comps passed default filters`)
       return {
         ...result1,
         fallbackUsed: 'none',
@@ -314,7 +276,6 @@ class PropertyAppraisalService implements AppraisalService {
     const result2 = this.evaluate(subject, comparables, { filters: filtersWithoutSubdivision, adjustments })
 
     if (result2.enabledCount >= minComps) {
-      console.log(`Appraisal: ${result2.enabledCount} comps passed after disabling subdivision match`)
       return {
         ...result2,
         fallbackUsed: 'no_subdivision',
@@ -323,8 +284,6 @@ class PropertyAppraisalService implements AppraisalService {
     }
 
     // Step 3: Use nearest comps by distance (disable most filters, keep only basic ones)
-    console.log(`Appraisal: Only ${result2.enabledCount} comps passed. Falling back to nearest comps.`)
-
     // Sort comparables by distance
     const sortedByDistance = [...comparables].sort((a, b) => {
       const distA = a.distanceMiles ?? 999
@@ -359,40 +318,11 @@ class PropertyAppraisalService implements AppraisalService {
       }
     })
 
-    // Sort comparables: subdivision matches first, then by distance
-    // This ensures comps that don't match subdivision go to the bottom
-    allCompsWithEvaluation.sort((a, b) => {
-      const aSubdivisionMatch = a.evaluation.filterResults.find(f => f.type === 'subdivision_match')?.passed ?? false
-      const bSubdivisionMatch = b.evaluation.filterResults.find(f => f.type === 'subdivision_match')?.passed ?? false
-
-      // Subdivision matches come first
-      if (aSubdivisionMatch && !bSubdivisionMatch) return -1
-      if (!aSubdivisionMatch && bSubdivisionMatch) return 1
-
-      // Within the same subdivision match status, sort by distance
-      const distA = a.distanceMiles ?? 999
-      const distB = b.distanceMiles ?? 999
-      return distA - distB
-    })
+    sortBySubdivisionThenDistance(allCompsWithEvaluation)
 
     const enabledComps = allCompsWithEvaluation.filter((c) => c.isEnabled)
     const arv = this.calculateARV(enabledComps)
-
-    // Use adjustedSalePrice if available, fall back to salePrice
-    const enabledPrices = enabledComps
-      .map((c) => c.adjustedSalePrice ?? c.salePrice)
-      .filter((p): p is number => p != null && p > 0)
-
-    const enabledSqfts = enabledComps
-      .map((c) => c.squareFeet)
-      .filter((s): s is number => s != null && s > 0)
-
-    const avgPricePerSqft =
-      enabledSqfts.length > 0 && arv > 0
-        ? Math.round(arv / (enabledSqfts.reduce((a, b) => a + b, 0) / enabledSqfts.length))
-        : null
-
-    const medianSalePrice = enabledPrices.length > 0 ? calculateMedian(enabledPrices) : null
+    const { avgPricePerSqft, medianSalePrice } = calculateStats(enabledComps, arv)
 
     // Get the farthest enabled comp's distance for the reason message
     const farthestEnabledComp = enabledComps[enabledComps.length - 1]
@@ -864,6 +794,47 @@ class PropertyAppraisalService implements AppraisalService {
 }
 
 // ─── Helper Functions ──────────────────────────────────────────────────────────
+
+/**
+ * Sort comparables: subdivision matches first, then by distance.
+ * Mutates the array in place.
+ */
+function sortBySubdivisionThenDistance(comps: AppraisedComparable[]): void {
+  comps.sort((a, b) => {
+    const aSubMatch = a.evaluation.filterResults.find((f) => f.type === 'subdivision_match')?.passed ?? false
+    const bSubMatch = b.evaluation.filterResults.find((f) => f.type === 'subdivision_match')?.passed ?? false
+
+    if (aSubMatch && !bSubMatch) return -1
+    if (!aSubMatch && bSubMatch) return 1
+
+    return (a.distanceMiles ?? 999) - (b.distanceMiles ?? 999)
+  })
+}
+
+/**
+ * Calculate stats (avgPricePerSqft, medianSalePrice) from enabled comparables.
+ */
+function calculateStats(
+  enabledComps: AppraisedComparable[],
+  arv: number
+): { avgPricePerSqft: number | null; medianSalePrice: number | null } {
+  const enabledPrices = enabledComps
+    .map((c) => c.adjustedSalePrice ?? c.salePrice)
+    .filter((p): p is number => p != null && p > 0)
+
+  const enabledSqfts = enabledComps
+    .map((c) => c.squareFeet)
+    .filter((s): s is number => s != null && s > 0)
+
+  const avgPricePerSqft =
+    enabledSqfts.length > 0 && arv > 0
+      ? Math.round(arv / (enabledSqfts.reduce((a, b) => a + b, 0) / enabledSqfts.length))
+      : null
+
+  const medianSalePrice = enabledPrices.length > 0 ? calculateMedian(enabledPrices) : null
+
+  return { avgPricePerSqft, medianSalePrice }
+}
 
 function calculateMedian(values: number[]): number {
   if (values.length === 0) return 0

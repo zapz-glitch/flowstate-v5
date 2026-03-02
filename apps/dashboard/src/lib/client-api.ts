@@ -267,3 +267,53 @@ export async function setDefaultAppraisalPreset(id: string): Promise<void> {
 export async function deleteAppraisalPreset(id: string): Promise<void> {
   await fetchApi(`/appraisal-presets/${id}`, { method: 'DELETE' })
 }
+
+// ─── Process Documentation Comments ─────────────────────────────────────────
+
+export interface DocCommentUser {
+  id: string
+  name: string
+  email: string
+}
+
+export interface DocComment {
+  id: string
+  sectionId: string
+  content: string
+  isDeleted: boolean
+  createdAt: string
+  updatedAt: string
+  user: DocCommentUser
+  replies: DocComment[]
+}
+
+export interface CommentsResponse {
+  comments: DocComment[]
+  totalCount: number
+}
+
+export async function getComments(sectionId: string): Promise<CommentsResponse> {
+  return fetchApi<CommentsResponse>(`/comments?sectionId=${encodeURIComponent(sectionId)}`)
+}
+
+export async function createComment(data: {
+  sectionId: string
+  content: string
+  parentId?: string
+}): Promise<DocComment> {
+  return fetchApi<DocComment>('/comments', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+}
+
+export async function updateComment(id: string, content: string): Promise<void> {
+  await fetchApi(`/comments/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ content }),
+  })
+}
+
+export async function deleteComment(id: string): Promise<void> {
+  await fetchApi(`/comments/${id}`, { method: 'DELETE' })
+}
