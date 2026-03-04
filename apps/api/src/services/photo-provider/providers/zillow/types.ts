@@ -38,6 +38,10 @@ export interface ZillowListingData {
   squareFeet?: number
   /** Year built */
   yearBuilt?: number
+  /** Foundation type (e.g., Slab, Crawl Space, Basement) */
+  foundationType?: string
+  /** Monthly HOA fee in dollars */
+  hoaFee?: number
   /** Most recent sale date (from price history) */
   lastSaleDate?: string
   /** Most recent sale price (from price history) */

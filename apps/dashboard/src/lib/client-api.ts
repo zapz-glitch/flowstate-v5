@@ -317,3 +317,197 @@ export async function updateComment(id: string, content: string): Promise<void> 
 export async function deleteComment(id: string): Promise<void> {
   await fetchApi(`/comments/${id}`, { method: 'DELETE' })
 }
+
+// ─── Rehab Config ─────────────────────────────────────────────────────────────
+
+export type ArvTier = 'under501k' | '501kTo999k' | '1mTo3m' | 'over3m'
+
+export interface RehabEstimate {
+  perSqft: number
+  minProfit: number
+}
+
+export type RehabTable = Record<ArvTier, RehabEstimate[]>
+
+export const REHAB_LEVEL_NAMES = [
+  'Lipstick',
+  'Light Cosmetic',
+  'Full Cosmetic',
+  'Heavy Rehab',
+  'Down to Stud',
+  'Low Cost Market',
+  'High Cost Market',
+] as const
+
+export const ARV_TIER_LABELS: Record<ArvTier, string> = {
+  under501k: 'Under $501k',
+  '501kTo999k': '$501k – $999k',
+  '1mTo3m': '$1M – $3M',
+  over3m: 'Over $3M',
+}
+
+export const ARV_TIERS: ArvTier[] = ['under501k', '501kTo999k', '1mTo3m', 'over3m']
+
+export interface RehabConfigResponse {
+  config: RehabTable
+  isCustom: boolean
+  updatedAt?: string
+}
+
+export async function getRehabConfig(): Promise<RehabConfigResponse> {
+  return fetchApi<RehabConfigResponse>('/rehab-config')
+}
+
+export async function getRehabConfigDefaults(): Promise<{ config: RehabTable }> {
+  return fetchApi<{ config: RehabTable }>('/rehab-config/defaults')
+}
+
+export async function saveRehabConfig(config: RehabTable): Promise<RehabConfigResponse & { success: boolean }> {
+  return fetchApi('/rehab-config', {
+    method: 'PUT',
+    body: JSON.stringify({ config }),
+  })
+}
+
+export async function resetRehabConfig(): Promise<RehabConfigResponse> {
+  return fetchApi('/rehab-config', { method: 'DELETE' })
+}
+
+// ─── Deal Params ───────────────────────────────────────────────────────────────
+
+export interface DealParamsConfig {
+  closingCostsPercent: number
+  carryingCostsPercent: number
+  wholesaleFee: number
+  desiredProfit: number | null
+}
+
+export interface DealParamsResponse {
+  config: DealParamsConfig
+  isCustom: boolean
+  updatedAt?: string
+}
+
+export async function getDealParams(): Promise<DealParamsResponse> {
+  return fetchApi<DealParamsResponse>('/deal-params')
+}
+
+export async function saveDealParams(config: DealParamsConfig): Promise<DealParamsResponse> {
+  return fetchApi('/deal-params', {
+    method: 'PUT',
+    body: JSON.stringify(config),
+  })
+}
+
+export async function resetDealParams(): Promise<DealParamsResponse> {
+  return fetchApi('/deal-params', { method: 'DELETE' })
+}
+
+// ─── Location Settings ─────────────────────────────────────────────────────────
+
+export interface LocationSetting {
+  id: string
+  state?: string | null
+  city?: string | null
+  zipCode?: string | null
+  appraisalPresetId?: string | null
+  appraisalPresetName?: string | null
+  rehabConfigJson?: RehabTable | null
+  dealParamsJson?: DealParamsConfig | null
+  majorItemCostsJson?: Record<string, number> | null
+  hasRehabConfig: boolean
+  hasDealParams: boolean
+  hasMajorItemCosts: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+export interface LocationSettingInput {
+  state?: string
+  city?: string
+  zipCode?: string
+  appraisalPresetId?: string | null
+  rehabConfigJson?: RehabTable | null
+  dealParamsJson?: DealParamsConfig | null
+  majorItemCostsJson?: Record<string, number> | null
+}
+
+export async function getLocationSettings(): Promise<LocationSetting[]> {
+  const res = await fetchApi<{ settings: LocationSetting[] }>('/location-settings')
+  return res.settings
+}
+
+export async function createLocationSetting(input: LocationSettingInput): Promise<LocationSetting> {
+  const res = await fetchApi<{ setting: LocationSetting }>('/location-settings', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
+  return res.setting
+}
+
+export async function updateLocationSetting(id: string, input: Partial<LocationSettingInput>): Promise<LocationSetting> {
+  const res = await fetchApi<{ setting: LocationSetting }>(`/location-settings/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  })
+  return res.setting
+}
+
+export async function deleteLocationSetting(id: string): Promise<void> {
+  await fetchApi(`/location-settings/${id}`, { method: 'DELETE' })
+}
+
+// ─── Major Item Costs ──────────────────────────────────────────────────────────
+
+export interface MajorItemInfo {
+  id: string
+  name: string
+  defaultCost: number
+  customCost: number | null
+  effectiveCost: number
+  ageThreshold: number | null
+}
+
+export interface MajorItemCostsResponse {
+  items: MajorItemInfo[]
+  isCustom: boolean
+  updatedAt: string | null
+}
+
+export async function getMajorItemCosts(): Promise<MajorItemCostsResponse> {
+  return fetchApi<MajorItemCostsResponse>('/major-item-costs')
+}
+
+export async function saveMajorItemCosts(costs: Record<string, number | null>): Promise<MajorItemCostsResponse> {
+  return fetchApi<MajorItemCostsResponse>('/major-item-costs', {
+    method: 'PUT',
+    body: JSON.stringify({ costs }),
+  })
+}
+
+export async function resetMajorItemCosts(): Promise<MajorItemCostsResponse> {
+  const res = await fetchApi<MajorItemCostsResponse>('/major-item-costs', { method: 'DELETE' })
+  return res
+}
+
+// ─── Plan Limits ───────────────────────────────────────────────────────────────
+
+export const PLAN_LIMITS = {
+  free: {
+    monthlyRequests: 100,
+    maxApiKeys: 1,
+    features: ['property-search', 'comparables'],
+  },
+  pro: {
+    monthlyRequests: 5000,
+    maxApiKeys: 5,
+    features: ['property-search', 'comparables', 'valuation', 'underwriting', 'reports'],
+  },
+  enterprise: {
+    monthlyRequests: -1,
+    maxApiKeys: -1,
+    features: ['property-search', 'comparables', 'valuation', 'underwriting', 'reports', 'bulk'],
+  },
+} as const
+
+export type Plan = keyof typeof PLAN_LIMITS

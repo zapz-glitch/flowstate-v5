@@ -14,7 +14,7 @@ ENVIRONMENT = "production"
 binding = "DB"
 database_name = "flowstate-api-db"
 database_id = "106d2645-8ec1-4ae9-8f72-7563ba8aa93f"
-migrations_dir = "../../packages/db/migrations"
+migrations_dir = "migrations"
 
 [[kv_namespaces]]
 binding = "API_CACHE"

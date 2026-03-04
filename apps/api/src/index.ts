@@ -17,6 +17,11 @@ import auth from './routes/auth'
 import user from './routes/user'
 import analyze from './routes/analyze'
 import appraisalRules from './routes/appraisal-rules'
+import rehabConfigRoute from './routes/rehab-config'
+import rehabConfigV1 from './routes/rehab-config-v1'
+import dealParamsRoute from './routes/deal-params'
+import locationSettingsRoute from './routes/location-settings'
+import majorItemCostsRoute from './routes/major-item-costs'
 import comments from './routes/comments'
 import wsStream from './routes/ws-stream'
 
@@ -78,6 +83,18 @@ app.route('/user', user)
 // Appraisal rules routes (session auth via Better Auth cookies)
 app.route('/appraisal-presets', appraisalRules)
 
+// Rehab config routes (session auth via Better Auth cookies)
+app.route('/rehab-config', rehabConfigRoute)
+
+// Deal params routes (session auth via Better Auth cookies)
+app.route('/deal-params', dealParamsRoute)
+
+// Location settings routes (session auth via Better Auth cookies)
+app.route('/location-settings', locationSettingsRoute)
+
+// Major item costs routes (session auth via Better Auth cookies)
+app.route('/major-item-costs', majorItemCostsRoute)
+
 // Comments routes (session auth via Better Auth cookies)
 app.route('/comments', comments)
 
@@ -89,6 +106,7 @@ app.route('/ws', wsStream)
 const v1 = new Hono<{ Bindings: Env; Variables: Variables }>()
 v1.use('*', authMiddleware)
 v1.route('/analyze', analyze)
+v1.route('/rehab-config', rehabConfigV1)
 
 app.route('/v1', v1)
 

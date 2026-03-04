@@ -16,6 +16,7 @@ import {
   ChevronsUpDown,
   User,
   BookOpen,
+  Settings2,
 } from 'lucide-react'
 import { signOut } from '@/lib/auth-client'
 import { Logo } from '@/components/ui/Logo'
@@ -41,6 +42,7 @@ const navigation: Array<{
 }> = [
   { name: 'Overview', href: '/dashboard', icon: Home },
   { name: 'API Playground', href: '/dashboard/analyze', icon: Search },
+  { name: 'Evaluation Settings', href: '/dashboard/evaluation-settings', icon: Settings2 },
   { name: 'API Keys', href: '/dashboard/api-keys', icon: Key },
   { name: 'Usage', href: '/dashboard/usage', icon: BarChart3 },
   { name: 'API Logs', href: '/dashboard/logs', icon: FileText },

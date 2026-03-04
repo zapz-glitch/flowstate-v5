@@ -72,6 +72,8 @@ interface ZillowExtraction {
   bathrooms?: number
   squareFeet?: number
   yearBuilt?: number
+  foundationType?: string
+  hoaFee?: number
 }
 
 // ─── Feature Parsing Utilities ─────────────────────────────────────────────
@@ -310,6 +312,8 @@ Return JSON in this exact format:
   "bathrooms": 2,
   "squareFeet": 1500,
   "yearBuilt": 1985,
+  "foundationType": "Slab",
+  "hoaFee": 250,
   "priceHistory": [{"date": "2024-01-15", "price": 350000, "event": "Sold"}]
 }
 
@@ -351,6 +355,8 @@ Other extraction rules:
 - For status: Look for "for sale", "pending", "sold", or "off market"
 - For features: Extract bed/bath count, square footage, lot size, year built as string array
 - For bedrooms/bathrooms/squareFeet/yearBuilt: Extract as NUMBERS directly (not strings)
+- For foundationType: Extract the foundation type (e.g., "Slab", "Crawl Space", "Basement", "Pier and Beam", "Block", "Piling"). Look in "Facts and Features", "Interior Details", "Building Details", or similar sections
+- For hoaFee: Extract the monthly HOA fee as a NUMBER (no $ or commas). Look for "HOA fee", "HOA dues", "HOA" in listing facts. If listed as annual, divide by 12. If no HOA, use null
 - For priceHistory: Extract sale/listing events with dates and prices (most important: sold events)
 
 Return ONLY the JSON object, no explanation or markdown code blocks.
@@ -543,10 +549,12 @@ ${content.html.slice(0, 50000)}
         bathrooms?: number
         squareFeet?: number
         yearBuilt?: number
+        foundationType?: string
+        hoaFee?: number
         priceHistory?: Array<{ date: string; price: number; event: string }>
       }
 
-      console.log(`[FirecrawlZillow] LLM extracted: ${parsed.photos?.length ?? 0} photos, price: ${parsed.price}, status: ${parsed.status}, beds: ${parsed.bedrooms}, baths: ${parsed.bathrooms}`)
+      console.log(`[FirecrawlZillow] LLM extracted: ${parsed.photos?.length ?? 0} photos, price: ${parsed.price}, status: ${parsed.status}, beds: ${parsed.bedrooms}, baths: ${parsed.bathrooms}, foundation: ${parsed.foundationType}, hoa: ${parsed.hoaFee}`)
 
       return {
         photos: parsed.photos ?? [],
@@ -559,6 +567,8 @@ ${content.html.slice(0, 50000)}
         bathrooms: parsed.bathrooms,
         squareFeet: parsed.squareFeet,
         yearBuilt: parsed.yearBuilt,
+        foundationType: parsed.foundationType,
+        hoaFee: parsed.hoaFee,
         priceHistory: parsed.priceHistory,
       }
     } catch (error) {
@@ -733,11 +743,13 @@ ${content.html.slice(0, 50000)}
       const bathrooms = extracted.bathrooms ?? parseBathroomsFromFeatures(features)
       const squareFeet = extracted.squareFeet ?? parseSqftFromFeatures(features)
       const yearBuilt = extracted.yearBuilt
+      const foundationType = extracted.foundationType
+      const hoaFee = extracted.hoaFee
 
       // Get last sale from price history
       const { lastSaleDate, lastSalePrice } = getLastSaleFromHistory(extracted.priceHistory)
 
-      console.log(`[FirecrawlZillow] Structured data: beds=${bedrooms}, baths=${bathrooms}, sqft=${squareFeet}, year=${yearBuilt}, lastSale=${lastSaleDate}`)
+      console.log(`[FirecrawlZillow] Structured data: beds=${bedrooms}, baths=${bathrooms}, sqft=${squareFeet}, year=${yearBuilt}, foundation=${foundationType}, hoa=${hoaFee}, lastSale=${lastSaleDate}`)
 
       const listing: ZillowListingData = {
         zillowUrl,
@@ -753,6 +765,8 @@ ${content.html.slice(0, 50000)}
         bathrooms,
         squareFeet,
         yearBuilt,
+        foundationType,
+        hoaFee,
         lastSaleDate,
         lastSalePrice,
       }

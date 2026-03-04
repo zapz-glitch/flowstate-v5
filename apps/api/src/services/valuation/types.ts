@@ -119,10 +119,6 @@ export interface ValuationResult {
   projectedROI: number
   totalInvestment: number
 
-  // Recommendation
-  recommendation: 'strong-buy' | 'buy' | 'hold' | 'pass'
-  recommendationReason: string
-
   // Breakdown for UI
   breakdown: {
     label: string

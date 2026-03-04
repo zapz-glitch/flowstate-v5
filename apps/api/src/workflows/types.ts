@@ -6,7 +6,7 @@
 
 import type { AnalysisResponse } from '../services/analysis'
 import type { AppraisalFilter, AppraisalAdjustment } from '../services/appraisal'
-import type { MajorItem } from '../services/valuation'
+import type { MajorItem, ArvTier, RehabEstimate } from '../services/valuation'
 import type { ClassificationResult } from '../services/classification'
 import type { PropertyPhotos } from '../services/photo-provider'
 
@@ -52,6 +52,13 @@ export interface AnalysisWorkflowParams {
     requireBetterOrEqual?: boolean
   }
 
+  /**
+   * Whether to use LLM vision analysis for property classification.
+   * When false (default), photos are still fetched for display but classification
+   * falls back to keyword/price-only analysis (no LLM calls).
+   */
+  visionClassification?: boolean
+
   // Appraisal rules
   appraisalRules?: {
     filters?: AppraisalFilter[]
@@ -66,11 +73,17 @@ export interface AnalysisWorkflowParams {
     closingCostsPercent?: number
     carryingCostsPercent?: number
     wholesaleFee?: number
-    desiredProfit?: number
+    desiredProfit?: number | null
   }
 
   // Cache control
   skipCache?: boolean
+
+  /** Optional per-user rehab pricing table override */
+  customRehabTable?: Record<ArvTier, RehabEstimate[]>
+
+  /** Optional per-user major item cost overrides: { item_id: cost_in_dollars } */
+  customMajorItemCosts?: Record<string, number>
 }
 
 /**
@@ -110,32 +123,6 @@ export interface PropertyEnrichmentResult {
   photos: PropertyPhotos | null
   classification: ClassificationResult | null
   error?: string
-}
-
-/**
- * Batch classification request
- */
-export interface BatchClassificationRequest {
-  properties: Array<{
-    id: string
-    isSubject: boolean
-    photos?: string[]
-    description?: string
-    salePrice?: number
-    squareFeet?: number
-  }>
-  areaAvgPricePerSqft: number
-}
-
-/**
- * Batch classification result
- */
-export interface BatchClassificationResult {
-  classifications: Map<string, ClassificationResult>
-  timing: {
-    totalMs: number
-    llmCallsCount: number
-  }
 }
 
 // ─── Rate Limiting ────────────────────────────────────────────────────────────

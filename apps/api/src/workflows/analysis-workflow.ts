@@ -6,7 +6,7 @@
  * Pipeline:
  * 1. Fetch property bundle (property + comps + enrichment)
  * 2. Parallel fan-out: Fetch photos for all properties (rate-limited)
- * 3. Batch classification (1-2 LLM calls instead of 11)
+ * 3. Parallel classification (one LLM call per property, all concurrent)
  * 4. Calculate weighted ARV and build response
  *
  * Benefits over Queue-based approach:
@@ -14,7 +14,6 @@
  * - Automatic retries with backoff per step
  * - Durable execution (survives restarts)
  * - Step-level caching
- * - 10-15 seconds vs 60-120 seconds
  *
  * @see https://developers.cloudflare.com/workflows/
  */
@@ -39,12 +38,10 @@ import {
   type AppraisalResultWithFallback,
 } from '../services/appraisal'
 import { filtersToApiParams } from '../services/appraisal/types'
-import { createValuationService } from '../services/valuation'
+import { createValuationService, MAJOR_ITEMS } from '../services/valuation'
 import { createPhotoService, type PhotoBundle } from '../services/photo-provider'
-import { createBatchClassificationService } from '../services/classification/batch'
-import type { ClassificationResult } from '../services/classification'
+import { createClassificationService, type ClassificationResult } from '../services/classification'
 import {
-  selectBestCompFromData,
   buildAnalysisResponse,
   mergeZillowDataIntoBundle,
   calculateAllRehabLevelEstimates,
@@ -123,8 +120,11 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
           const result = appraisalService.evaluateWithFallback(
             bundle.property,
             bundle.comparables,
-            { filters, adjustments, minComps: 3, maxNearestComps: 5 }
+            { filters, adjustments, minComps: 3 }
           )
+          if (result.fallbackUsed === 'no_comps') {
+            throw new Error('BAD_DEAL: No comparable sales found even with relaxed criteria. Insufficient data to determine ARV.')
+          }
           return serialize(result)
         }
       )
@@ -132,7 +132,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
 
       stepTimings['appraisal'] = Date.now() - appraisalStart
       const enabledComps = appraisalResult.comparables.filter((c) => c.isEnabled)
-      console.log(`[AnalysisWorkflow] Appraisal complete: ${enabledComps.length} comps enabled`)
+      console.log(`[AnalysisWorkflow] Appraisal complete: ${enabledComps.length} comps enabled (fallback: ${appraisalResult.fallbackUsed})`)
 
       await this.updateProgress(params.userId, params.propertyKey, 'appraisal_rules', 'completed')
 
@@ -175,23 +175,23 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
       await this.updateProgress(params.userId, params.propertyKey, 'photo_fetch', 'completed')
 
       // ═══════════════════════════════════════════════════════════════════════
-      // STEP 4: Batch Classification (1-2 LLM calls instead of 11)
+      // STEP 4: Parallel Classification (one LLM call per property, concurrent)
       // ═══════════════════════════════════════════════════════════════════════
       await this.updateProgress(params.userId, params.propertyKey, 'comp_selection', 'in_progress')
       const classifyStart = Date.now()
 
       const classificationData = await step.do(
-        'batch-classification',
+        'classify-properties',
         {
           retries: { limit: 2, delay: '2 seconds', backoff: 'exponential' },
-          timeout: '2 minutes',
+          timeout: '3 minutes',
         },
         async () => {
-          const result = await this.batchClassifyAll(
+          const result = await this.classifyAllParallel(
             mergedBundle,
             enabledComps,
             photoBundle,
-            appraisalResult.avgPricePerSqft ?? 0
+            params.visionClassification ?? false
           )
           // Convert Map to plain object for serialization
           const compClassificationsObj: Record<string, ClassificationResult> = {}
@@ -201,14 +201,12 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
           return serialize({
             subjectClassification: result.subjectClassification ?? null,
             compClassifications: compClassificationsObj,
-            llmCalls: result.llmCalls,
           })
         }
       )
       const classificationResult = classificationData as {
         subjectClassification: ClassificationResult | null
         compClassifications: Record<string, ClassificationResult>
-        llmCalls: number
       }
 
       // Convert back to Map for internal use
@@ -218,7 +216,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
       const subjectClassification = classificationResult.subjectClassification ?? undefined
 
       stepTimings['classification'] = Date.now() - classifyStart
-      console.log(`[AnalysisWorkflow] Classification complete: ${compClassifications.size} comps classified in ${classificationResult.llmCalls} LLM calls`)
+      console.log(`[AnalysisWorkflow] Classification complete: ${compClassifications.size} comps classified in parallel`)
 
       await this.updateProgress(params.userId, params.propertyKey, 'comp_selection', 'completed')
 
@@ -391,64 +389,65 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
   }
 
   /**
-   * Batch classify all properties in 1-2 LLM calls
+   * Classify all properties in parallel (one LLM call per property, all concurrent)
    */
-  private async batchClassifyAll(
+  private async classifyAllParallel(
     bundle: PropertyBundle,
     enabledComps: AppraisedComparable[],
     photoBundle: PhotoBundle | null,
-    areaAvgPricePerSqft: number
+    visionClassification: boolean
   ): Promise<{
     subjectClassification: ClassificationResult | undefined
     compClassifications: Map<string, ClassificationResult>
-    llmCalls: number
   }> {
-    const classificationService = createBatchClassificationService(this.env)
+    const classificationService = createClassificationService()
 
-    // Build batch input for all properties
-    const batchInput = [
-      // Subject property
+    // Build classify input for each property
+    const allProperties = [
       {
         id: bundle.property.id,
         isSubject: true,
-        photos: photoBundle?.subject?.photos,
         description: photoBundle?.subject?.description,
-        salePrice: bundle.property.lastSalePrice ?? undefined,
-        squareFeet: bundle.property.squareFeet ?? undefined,
+        features: photoBundle?.subject?.features,
       },
-      // Enabled comps
       ...enabledComps.map((comp) => ({
         id: comp.id,
         isSubject: false,
-        photos: photoBundle?.comps[comp.id]?.photos,
         description: photoBundle?.comps[comp.id]?.description,
-        salePrice: comp.salePrice ?? undefined,
-        squareFeet: comp.squareFeet ?? undefined,
+        features: photoBundle?.comps[comp.id]?.features,
       })),
     ]
 
-    const result = await classificationService.classifyBatch(batchInput, {
-      areaAvgPricePerSqft,
-      maxPhotosPerProperty: 3,
-      maxPropertiesPerBatch: 6,
-    })
+    console.log(`[AnalysisWorkflow] Classifying ${allProperties.length} properties in parallel`)
 
-    // Extract subject and comp classifications
-    const subjectClassification = result.classifications.get(bundle.property.id)
+    // Fire all classification requests concurrently
+    const results = await Promise.allSettled(
+      allProperties.map((prop) =>
+        classificationService.classifyProperty({
+          description: prop.description,
+          features: prop.features,
+        }).then((result) => ({ id: prop.id, result }))
+      )
+    )
+
+    // Collect results
+    let subjectClassification: ClassificationResult | undefined
     const compClassifications = new Map<string, ClassificationResult>()
 
-    for (const comp of enabledComps) {
-      const classification = result.classifications.get(comp.id)
-      if (classification) {
-        compClassifications.set(comp.id, classification)
+    for (const settled of results) {
+      if (settled.status === 'fulfilled') {
+        const { id, result } = settled.value
+        if (id === bundle.property.id) {
+          subjectClassification = result
+        } else {
+          compClassifications.set(id, result)
+        }
+      } else {
+        console.warn('[AnalysisWorkflow] A classification request failed:', settled.reason)
       }
     }
 
-    return {
-      subjectClassification,
-      compClassifications,
-      llmCalls: result.timing.llmCallsCount,
-    }
+    return { subjectClassification, compClassifications }
   }
 
   /**
@@ -464,33 +463,19 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
     subjectSupplementedFields: SupplementedField[],
     compSupplementedFields: Map<string, SupplementedField[]>
   ): Promise<AnalysisResponse> {
-    const valuationService = createValuationService()
+    const valuationService = createValuationService(params.customRehabTable)
     const appraisalService = createAppraisalService()
 
     const enabledComps = appraisalResult.comparables.filter((c) => c.isEnabled)
 
-    // Calculate weighted ARV if we have classifications
-    let finalArv = appraisalResult.arv
+    // ARV comes directly from the appraisal (avg price/sqft × subject sqft)
+    const finalArv = appraisalResult.arv
     const arvSource: 'appraisal' | 'comp-selection' = 'appraisal'
-    let weightedARVResult = undefined
 
-    if (subjectClassification && compClassifications.size > 0) {
-      weightedARVResult = appraisalService.calculateWeightedARV(
-        bundle.property,
-        appraisalResult.comparables,
-        subjectClassification,
-        compClassifications
-      )
-      finalArv = weightedARVResult.arv
-    }
-
-    // Data-based best comp selection - prioritize after_renovation comps for ARV
-    const afterRenovationCompIds = weightedARVResult?.afterRenovationCompIds ?? []
-    const { bestCompId, scores: dataBasedScores } = selectBestCompFromData(
-      enabledComps,
-      bundle.property.squareFeet,
-      bundle.property.yearBuilt,
-      afterRenovationCompIds
+    // Summarize classifications for display (labels comps, computes group averages)
+    const classificationSummary = appraisalService.summarizeClassifications(
+      appraisalResult.comparables,
+      compClassifications
     )
 
     // Calculate valuation
@@ -503,17 +488,28 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
 
     const selectedRehabLevelIndex = buybox.rehabLevelIndex ?? 2
 
+    // Apply user's custom major item cost defaults (unless caller passed explicit majorItems)
+    const resolvedMajorItems = buybox.majorItems ?? (
+      params.customMajorItemCosts
+        ? MAJOR_ITEMS.map((item) => ({
+            id: item.id,
+            enabled: false,
+            cost: params.customMajorItemCosts![item.id] ?? item.defaultCost,
+          }))
+        : undefined
+    )
+
     const valuation = valuationService.calculateValuation({
       arv: finalArv,
       subjectSqft,
       compAvgSqft,
       rehabLevelIndex: selectedRehabLevelIndex,
-      majorItems: buybox.majorItems,
+      majorItems: resolvedMajorItems,
       additionPlay: buybox.additionPlay ?? 0,
       closingCostsPercent: buybox.closingCostsPercent ?? 10,
       carryingCostsPercent: buybox.carryingCostsPercent ?? 5,
       wholesaleFee: buybox.wholesaleFee ?? 10000,
-      desiredProfit: buybox.desiredProfit,
+      desiredProfit: buybox.desiredProfit ?? undefined,
     })
 
     // Calculate all rehab level estimates for the current ARV
@@ -522,12 +518,12 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
       subjectSqft,
       compAvgSqft,
       selectedRehabLevelIndex,
-      majorItems: buybox.majorItems,
+      majorItems: resolvedMajorItems,
       additionPlay: buybox.additionPlay ?? 0,
       closingCostsPercent: buybox.closingCostsPercent ?? 10,
       carryingCostsPercent: buybox.carryingCostsPercent ?? 5,
       wholesaleFee: buybox.wholesaleFee ?? 10000,
-      desiredProfit: buybox.desiredProfit,
+      desiredProfit: buybox.desiredProfit ?? undefined,
     })
 
     // Build response
@@ -540,13 +536,10 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
       {
         arvSource,
         finalArv,
-        bestCompId,
-        selectedCompIds: enabledComps.map((c) => c.id),
-        dataBasedScores,
         analysisId: params.jobId,
         subjectClassification,
         compClassifications,
-        weightedARVResult,
+        classificationSummary,
         subjectSupplementedFields,
         compSupplementedFields,
         rehabLevelEstimates,

@@ -42,9 +42,6 @@ export interface ServiceContainer {
   /** Property API service - lazily created */
   readonly propertyApi: PropertyApiService
 
-  /** Vision service - lazily created */
-  readonly vision: VisionService
-
   /** Valuation service - lazily created */
   readonly valuation: ValuationService
 

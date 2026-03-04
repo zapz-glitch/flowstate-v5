@@ -1,0 +1,1 @@
+ALTER TABLE `location_settings` ADD `major_item_costs_json` text;

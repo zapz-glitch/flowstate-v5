@@ -14,7 +14,7 @@ import {
   appraisalRulePreset,
   appraisalRuleFilter,
   appraisalRuleAdjustment,
-} from '@flowstate-api/db'
+} from '../db'
 import {
   DEFAULT_FILTERS,
   DEFAULT_ADJUSTMENTS,

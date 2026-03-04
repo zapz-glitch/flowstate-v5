@@ -1,5 +1,5 @@
 import { getApiKeys, getUsageSummary, getUsageLogs } from '@/lib/api'
-import { PLAN_LIMITS } from '@flowstate-api/db'
+import { PLAN_LIMITS } from '@/lib/client-api'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'

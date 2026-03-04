@@ -1,5 +1,5 @@
 import { getApiKeys, getUser } from '@/lib/api'
-import { PLAN_LIMITS } from '@flowstate-api/db'
+import { PLAN_LIMITS } from '@/lib/client-api'
 import ApiKeysList from './ApiKeysList'
 
 async function getApiKeysData() {

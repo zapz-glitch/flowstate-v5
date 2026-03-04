@@ -47,7 +47,7 @@ export { REHAB_LEVELS, MAJOR_ITEMS } from './types'
 
 // ─── Rehab Cost Table ──────────────────────────────────────────────────────────
 
-const REHAB_TABLE: Record<ArvTier, RehabEstimate[]> = {
+export const DEFAULT_REHAB_TABLE: Record<ArvTier, RehabEstimate[]> = {
   under501k: [
     { perSqft: 25, minProfit: 30000 },
     { perSqft: 30, minProfit: 40000 },
@@ -95,9 +95,9 @@ function getArvTierInternal(arv: number): ArvTier {
   return 'under501k'
 }
 
-function getRehabEstimate(arv: number, levelIndex: number): RehabEstimate {
+function getRehabEstimateFromTable(table: Record<ArvTier, RehabEstimate[]>, arv: number, levelIndex: number): RehabEstimate {
   const tier = getArvTierInternal(arv)
-  return REHAB_TABLE[tier][levelIndex] ?? REHAB_TABLE[tier][0]
+  return table[tier][levelIndex] ?? table[tier][0]
 }
 
 // ─── Service Interface ─────────────────────────────────────────────────────────
@@ -143,6 +143,12 @@ export interface ValuationService {
 // ─── Implementation ────────────────────────────────────────────────────────────
 
 class PropertyValuationService implements ValuationService {
+  private readonly rehabTable: Record<ArvTier, RehabEstimate[]>
+
+  constructor(customRehabTable?: Record<ArvTier, RehabEstimate[]>) {
+    this.rehabTable = customRehabTable ?? DEFAULT_REHAB_TABLE
+  }
+
   calculateValuation(params: ValuationParams): ValuationResult {
     const {
       arv,
@@ -158,7 +164,7 @@ class PropertyValuationService implements ValuationService {
     } = params
 
     const arvTier = getArvTierInternal(arv)
-    const rehabEstimate = getRehabEstimate(arv, rehabLevelIndex)
+    const rehabEstimate = getRehabEstimateFromTable(this.rehabTable, arv, rehabLevelIndex)
     const rehabLevel = REHAB_LEVELS[rehabLevelIndex]
 
     // Calculate costs
@@ -173,36 +179,22 @@ class PropertyValuationService implements ValuationService {
     const carryingCosts = Math.round(arv * (carryingCostsPercent / 100))
     const minProfit = desiredProfit ?? rehabEstimate.minProfit
 
-    // Calculate buy price
+    // Buy Price = ARV − Rehab − Closing Costs − Carrying Costs − Profit Target
     const buyPrice = arv - totalRehabCost - closingCosts - carryingCosts - minProfit
     const buyPricePercent = arv > 0 ? Math.round((buyPrice / arv) * 100) : 0
 
-    // Calculate wholesale price
+    // Wholesale Price = Buy Price − Wholesale Fee
     const wholesalePrice = buyPrice - wholesaleFee
     const wholesalePricePercent = arv > 0 ? Math.round((wholesalePrice / arv) * 100) : 0
 
-    // Calculate profit and ROI
+    // Total Investment = Buy Price + Rehab Cost
     const totalInvestment = buyPrice + totalRehabCost
+
+    // Projected Profit = ARV − Total Investment − Closing − Carrying
     const projectedProfit = arv - totalInvestment - closingCosts - carryingCosts
+
+    // ROI = (Projected Profit / Total Investment) × 100
     const projectedROI = totalInvestment > 0 ? Math.round((projectedProfit / totalInvestment) * 1000) / 10 : 0
-
-    // Determine recommendation
-    let recommendation: 'strong-buy' | 'buy' | 'hold' | 'pass'
-    let recommendationReason: string
-
-    if (projectedROI > 25 && buyPricePercent < 65) {
-      recommendation = 'strong-buy'
-      recommendationReason = `Excellent ROI (${projectedROI}%) with strong buy price (${buyPricePercent}% of ARV)`
-    } else if (projectedROI > 15 && buyPricePercent < 75) {
-      recommendation = 'buy'
-      recommendationReason = `Good ROI (${projectedROI}%) with acceptable buy price (${buyPricePercent}% of ARV)`
-    } else if (projectedROI > 8 || buyPricePercent < 80) {
-      recommendation = 'hold'
-      recommendationReason = `Moderate opportunity - consider negotiating lower price`
-    } else {
-      recommendation = 'pass'
-      recommendationReason = `Low ROI (${projectedROI}%) or high buy price (${buyPricePercent}% of ARV)`
-    }
 
     // Build breakdown
     const breakdown = [
@@ -241,8 +233,6 @@ class PropertyValuationService implements ValuationService {
       projectedProfit: Math.round(projectedProfit),
       projectedROI,
       totalInvestment: Math.round(totalInvestment),
-      recommendation,
-      recommendationReason,
       breakdown,
     }
   }
@@ -276,7 +266,7 @@ class PropertyValuationService implements ValuationService {
     estimatedCost: number
   }> {
     return REHAB_LEVELS.map((name, index) => {
-      const estimate = getRehabEstimate(arv, index)
+      const estimate = getRehabEstimateFromTable(this.rehabTable, arv, index)
       return {
         index,
         name,
@@ -301,6 +291,6 @@ class PropertyValuationService implements ValuationService {
  * Create a new valuation service instance.
  * No dependencies required - this is a pure calculation service.
  */
-export function createValuationService(): ValuationService {
-  return new PropertyValuationService()
+export function createValuationService(customRehabTable?: Record<ArvTier, RehabEstimate[]>): ValuationService {
+  return new PropertyValuationService(customRehabTable)
 }

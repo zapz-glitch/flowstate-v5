@@ -10,7 +10,7 @@ import { drizzle } from 'drizzle-orm/d1'
 import { eq, and, isNull, isNotNull, asc } from 'drizzle-orm'
 import type { Env } from '../types'
 import { createAuth } from '../lib/auth'
-import { processDocComments, user as usersTable } from '@flowstate-api/db'
+import { processDocComments, user as usersTable } from '../db'
 
 const comments = new Hono<{ Bindings: Env }>()
 

@@ -336,6 +336,106 @@ export const processDocComments = sqliteTable(
 )
 
 // ==========================================
+// Rehab Config (per-user renovation level pricing)
+// ==========================================
+
+export const rehabConfig = sqliteTable(
+  'rehab_config',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    userId: text('user_id')
+      .notNull()
+      .unique()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    // Full 4-tier x 7-level table stored as JSON
+    // Shape: Record<ArvTier, Array<{ perSqft: number; minProfit: number }>>
+    configJson: text('config_json').notNull(),
+    createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
+    updatedAt: text('updated_at').notNull().$defaultFn(() => new Date().toISOString()),
+  },
+  (table) => [index('idx_rehab_config_user_id').on(table.userId)]
+)
+
+// ==========================================
+// Deal Params (per-user valuation defaults)
+// ==========================================
+
+export const dealParams = sqliteTable(
+  'deal_params',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    userId: text('user_id')
+      .notNull()
+      .unique()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    /** Closing costs as a percentage of ARV (default: 10) */
+    closingCostsPercent: real('closing_costs_percent').notNull().default(10),
+    /** Carrying costs as a percentage of ARV (default: 5) */
+    carryingCostsPercent: real('carrying_costs_percent').notNull().default(5),
+    /** Wholesale fee in dollars (default: 10000) */
+    wholesaleFee: real('wholesale_fee').notNull().default(10000),
+    /** Desired profit override in dollars (null = use tier default from rehab table) */
+    desiredProfit: real('desired_profit'),
+    createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
+    updatedAt: text('updated_at').notNull().$defaultFn(() => new Date().toISOString()),
+  },
+  (table) => [index('idx_deal_params_user_id').on(table.userId)]
+)
+
+// ==========================================
+// Location Settings (per-location overrides)
+// ==========================================
+
+export const locationSettings = sqliteTable(
+  'location_settings',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    // Exactly one of these is non-null (enforced at app level)
+    state: text('state'),        // "FL" uppercase 2-letter
+    city: text('city'),          // normalized to lowercase for matching
+    zipCode: text('zip_code'),   // "33101"
+    // Overrides — all optional (null = don't override this setting)
+    appraisalPresetId: text('appraisal_preset_id')
+      .references(() => appraisalRulePreset.id, { onDelete: 'set null' }),
+    rehabConfigJson: text('rehab_config_json'),       // same shape as rehab_config.config_json
+    dealParamsJson: text('deal_params_json'),         // JSON of DealParamsConfig fields
+    majorItemCostsJson: text('major_item_costs_json'), // JSON of Record<MajorItemId, number>
+    createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
+    updatedAt: text('updated_at').notNull().$defaultFn(() => new Date().toISOString()),
+  },
+  (table) => [
+    index('idx_location_settings_user_id').on(table.userId),
+    index('idx_location_settings_zip').on(table.userId, table.zipCode),
+    index('idx_location_settings_city').on(table.userId, table.city),
+    index('idx_location_settings_state').on(table.userId, table.state),
+  ]
+)
+
+// ==========================================
+// Major Item Costs (per-user repair cost defaults)
+// ==========================================
+
+export const majorItemCosts = sqliteTable(
+  'major_item_costs',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    userId: text('user_id')
+      .notNull()
+      .unique()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    // JSON: Record<MajorItemId, number> — only overridden items need to be stored
+    // e.g. { "roof": 12000, "hvac": 9500 }
+    costsJson: text('costs_json').notNull(),
+    createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
+    updatedAt: text('updated_at').notNull().$defaultFn(() => new Date().toISOString()),
+  },
+  (table) => [index('idx_major_item_costs_user_id').on(table.userId)]
+)
+
+// ==========================================
 // Plan Limits
 // ==========================================
 

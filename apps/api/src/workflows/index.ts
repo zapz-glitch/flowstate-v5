@@ -12,8 +12,6 @@ export type {
   AnalysisWorkflowResult,
   PropertyFetchResult,
   PropertyEnrichmentResult,
-  BatchClassificationRequest,
-  BatchClassificationResult,
   FirecrawlRateLimitState,
   AcquireSlotResult,
   ReleaseSlotRequest,

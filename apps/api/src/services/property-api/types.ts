@@ -88,6 +88,10 @@ export interface NormalizedProperty {
   taxAmount: number | null
   taxYear?: number | null
 
+  // HOA
+  /** Monthly HOA fee in dollars (if applicable) */
+  hoaFee?: number | null
+
   // Building details
   construction?: {
     type?: string

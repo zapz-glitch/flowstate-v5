@@ -10,12 +10,14 @@
     "logs": "wrangler tail --format pretty",
     "typecheck": "tsc --noEmit",
     "test": "echo 'Tests disabled — see vitest.config.ts to re-enable'",
-    "test:watch": "echo 'Tests disabled'"
+    "test:watch": "echo 'Tests disabled'",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate:local": "wrangler d1 migrations apply flowstate-api-db --local",
+    "db:migrate:remote": "wrangler d1 migrations apply flowstate-api-db --remote"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.76.0",
     "@browserbasehq/stagehand": "^3.0.8",
-    "@flowstate-api/db": "*",
     "@google/generative-ai": "^0.24.1",
     "better-auth": "^1.4.18",
     "hono": "^4.6.0",
@@ -27,7 +29,8 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20240909.0",
+    "drizzle-kit": "^0.30.0",
     "typescript": "^5.5.0",
-    "wrangler": "^3.80.0"
+    "wrangler": "^4.70.0"
   }
 }

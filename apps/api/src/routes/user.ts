@@ -10,7 +10,7 @@ import { drizzle } from 'drizzle-orm/d1'
 import { eq, desc, and, gte, sql } from 'drizzle-orm'
 import type { Env } from '../types'
 import { createAuth } from '../lib/auth'
-import { users, apiKeys, apiUsageLogs, PLAN_LIMITS } from '@flowstate-api/db'
+import { users, apiKeys, apiUsageLogs, PLAN_LIMITS } from '../db'
 
 const user = new Hono<{ Bindings: Env }>()
 

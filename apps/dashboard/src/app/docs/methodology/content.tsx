@@ -93,37 +93,11 @@ export const METHODOLOGY_SECTIONS: MethodologySection[] = [
           <li><Badge variant="outline" className="text-xs bg-emerald-500/10 text-emerald-600 border-emerald-500/30">After-Reno</Badge> &quot;move-in ready&quot;, &quot;fully renovated&quot;, &quot;turnkey&quot;, &quot;new kitchen&quot;, &quot;stainless steel&quot;, &quot;granite&quot;, &quot;open concept&quot;, &quot;like new&quot;</li>
         </ul>
         <p>
-          Each keyword scores 15 base points, with strong indicators (e.g. &quot;investor special&quot;, &quot;turnkey&quot;)
-          receiving a +20 bonus. Confidence is boosted +15 if 3+ keywords match (max 95%).
+          Keywords are grouped into <strong className="text-foreground">strong</strong> and <strong className="text-foreground">supporting</strong> tiers.
+          A strong match on one side with no opposing strong signals yields <strong className="text-foreground">high</strong> confidence.
+          Supporting-only matches yield <strong className="text-foreground">medium</strong> confidence. No matches yields <strong className="text-foreground">low</strong> confidence (neutral).
         </p>
 
-        <p>
-          <strong className="text-foreground">3. Price Analysis</strong> — Fallback when description is
-          inconclusive (confidence &lt; 60%). Compares the property&apos;s price/sqft against the area average:
-        </p>
-        <ul className="list-disc list-inside space-y-1.5 ml-2 text-sm">
-          <li>Price/sqft ≤ 85% of area average → <strong className="text-foreground">As-Is</strong> (below market = distressed)</li>
-          <li>Price/sqft ≥ 115% of area average → <strong className="text-foreground">After-Renovation</strong> (premium = renovated)</li>
-          <li>Between 85–115% → defaults conservatively to As-Is (confidence 45%)</li>
-        </ul>
-
-        <p>
-          <strong className="text-foreground">4. Combined Result</strong> — When multiple methods are
-          available, they&apos;re weighted: primary source 70% + secondary source 30%. If both methods
-          agree, confidence is boosted +10. If they disagree, confidence is reduced −15 (min 30%).
-        </p>
-
-        <p>
-          <strong className="text-foreground">5. Default Fallback</strong> — When no data is available,
-          the system conservatively defaults to <strong className="text-foreground">As-Is</strong> with 30% confidence.
-        </p>
-
-        <h4 className="text-lg font-semibold text-foreground pt-2">Batch Classification</h4>
-        <p>
-          To optimize performance, subject + all comps are classified in 1–2 batched LLM calls
-          (instead of 11 separate calls). Properties with photos are batched separately from
-          text-only properties, with up to 6 properties per batch and 3 photos per property.
-        </p>
       </SectionProse>
     ),
   },
@@ -149,20 +123,43 @@ export const METHODOLOGY_SECTIONS: MethodologySection[] = [
           ]}
         />
 
-        <h4 className="text-lg font-semibold text-foreground pt-2">3-Step Fallback Strategy</h4>
+        <h4 className="text-lg font-semibold text-foreground pt-2">Comp Evaluation &amp; ARV Calculation</h4>
         <p>
-          If fewer than 3 comparables pass all filters, the system applies a progressive fallback
-          to ensure a valuation is always produced:
+          The system evaluates comparables in two passes, from strictest to most relaxed. ARV is computed as:
         </p>
-        <ol className="list-decimal list-inside space-y-2 ml-2">
-          <li><strong className="text-foreground">Full filters</strong> — Try with all filters enabled including subdivision match</li>
-          <li><strong className="text-foreground">Relax subdivision</strong> — If &lt; 3 comps pass, disable subdivision match and retry all comps</li>
-          <li><strong className="text-foreground">Nearest comps</strong> — If still &lt; 3 comps pass, select the 5 nearest comps by distance regardless of other filter results</li>
-        </ol>
+        <p className="text-sm font-mono bg-secondary/60 px-3 py-2 rounded">
+          avg(adjusted price/sqft of passing comps) × subject sqft = ARV
+        </p>
+
+        <h4 className="text-base font-semibold text-foreground pt-3">Pass 1 — Full Filters (including subdivision match)</h4>
+        <ul className="list-disc list-inside space-y-1.5 ml-2 text-sm">
+          <li>If <strong className="text-foreground">1 or more</strong> comps pass all filters, those comps are used for ARV.</li>
+          <li>Confidence scales with count: <strong className="text-foreground">3+ comps → 90</strong>, 2 comps → 70, 1 comp → 55.</li>
+          <li>All adjustments (bedroom, bathroom, age discount, etc.) are applied before averaging price/sqft.</li>
+        </ul>
+
+        <h4 className="text-base font-semibold text-foreground pt-3">Pass 2 — Relax Subdivision (nearest subdivision first)</h4>
         <p>
-          The response always flags which fallback level was used: <code className="text-sm px-1.5 py-0.5 rounded bg-secondary text-foreground">none</code>,{' '}
+          If Pass 1 returns zero comps, subdivision match is disabled and comps are re-evaluated with all
+          other filters still active. Results are sorted so the <strong className="text-foreground">nearest
+          subdivisions appear first</strong>.
+        </p>
+        <ul className="list-disc list-inside space-y-1.5 ml-2 text-sm">
+          <li>Confidence is reduced: <strong className="text-foreground">3+ comps → 65</strong>, 2 comps → 50, 1 comp → 40.</li>
+          <li>Sale age, sqft difference, year-built, and distance filters remain active.</li>
+        </ul>
+
+        <h4 className="text-base font-semibold text-foreground pt-3">No Comps</h4>
+        <p>
+          If both passes return zero matching comps, the result is flagged with confidence 0 and manual
+          review is recommended.
+        </p>
+
+        <p>
+          The response always includes a <code className="text-sm px-1.5 py-0.5 rounded bg-secondary text-foreground">fallbackUsed</code> field:{' '}
+          <code className="text-sm px-1.5 py-0.5 rounded bg-secondary text-foreground">none</code>,{' '}
           <code className="text-sm px-1.5 py-0.5 rounded bg-secondary text-foreground">no_subdivision</code>, or{' '}
-          <code className="text-sm px-1.5 py-0.5 rounded bg-secondary text-foreground">nearest_comps</code>.
+          <code className="text-sm px-1.5 py-0.5 rounded bg-secondary text-foreground">no_comps</code>.
         </p>
       </SectionProse>
     ),
@@ -207,115 +204,34 @@ Example:
     ),
   },
   {
-    id: 'weighted-arv',
-    title: 'Weighted ARV Calculation',
+    id: 'arv-calculation',
+    title: 'ARV Calculation',
     content: (
       <SectionProse>
         <p>
-          The Weighted After-Renovation Value (ARV) is the core output of the system. It uses an
-          expert underwriter methodology where each comparable is assigned a weight based on how
-          relevant it is to the subject property. Six multiplicative factors determine the weight —
-          meaning a single low factor can dramatically reduce a comp&apos;s influence.
+          The After-Renovation Value (ARV) is calculated by simple averaging of the enabled
+          comparables. Each enabled comp contributes an adjusted price-per-sqft value, and the
+          average is multiplied by the subject property&apos;s square footage.
         </p>
 
-        <h4 className="text-lg font-semibold text-foreground pt-2">2-Tier System</h4>
+        <CodeBlock>{`ARV = avg(adjustedPrice / sqft  for each enabled comp) × subjectSqft`}</CodeBlock>
+
         <p>
-          Comps are divided into two tiers based on how their classification matches the subject:
+          If a comp&apos;s adjusted price is not available, the original sale price is used.
+          Subject square footage is used if available; otherwise the average sqft of the enabled
+          comps is used as a fallback.
         </p>
-        <DataTable
-          headers={['Tier', 'Comp Type', 'Role']}
-          rows={[
-            ['Tier 1 (Primary)', 'Same classification as subject', 'Drives the ARV — heavily weighted'],
-            ['Tier 2 (Support)', 'Opposite classification', 'Used for spread analysis and fallback'],
-          ]}
-        />
 
-        <h4 className="text-lg font-semibold text-foreground pt-2">Weight Factors</h4>
-        <p>Each comp&apos;s weight is the product of all six factors, then normalized so all weights sum to 1.</p>
-
-        <DataTable
-          headers={['Factor', 'Range', 'Logic']}
-          rows={[
-            ['Classification Match', '0.7 – 2.0', 'Same classification as subject = 2.0×; different = 0.7×. This is the most critical factor (2.9× difference).'],
-            ['Distance', '0.3 – 2.0', '≤0.25mi = 2.0×, ≤0.5mi = 1.5×, ≤1mi = 1.0×, ≤2mi = 0.6×, >2mi = 0.3×'],
-            ['Sqft Similarity', '0.5 – 1.5', '≤5% diff = 1.5×, ≤10% = 1.3×, ≤15% = 1.1×, ≤25% = 0.8×, >25% = 0.5×'],
-            ['Recency', '0.6 – 1.4', '≤30d = 1.4×, ≤60d = 1.2×, ≤120d = 1.0×, ≤180d = 0.9×, ≤365d = 0.7×, >365d = 0.6×'],
-            ['Filter Pass Rate', '0.5 – 1.5', 'Formula: 0.5 + (passedFilters / totalFilters). 100% pass = 1.5×, 0% = 0.5×'],
-            ['Confidence', '0.8 – 1.2', 'Formula: 0.8 + (classificationConfidence / 100) × 0.4. Rewards higher-confidence classifications.'],
-          ]}
-        />
-
-        <h4 className="text-lg font-semibold text-foreground pt-2">ARV Determination (Priority Order)</h4>
-        <ol className="list-decimal list-inside space-y-2 ml-2">
-          <li><strong className="text-foreground">2+ Tier 1 comps:</strong> Weighted average of Tier 1 comps only</li>
-          <li><strong className="text-foreground">1 Tier 1 + Tier 2 comps:</strong> 70% Tier 1 price + 30% Tier 2 average (blended)</li>
-          <li><strong className="text-foreground">Only Tier 2 comps (2+):</strong> Weighted average of all Tier 2</li>
-          <li><strong className="text-foreground">Any comps available:</strong> Weighted average of all available comps</li>
-          <li><strong className="text-foreground">No valid comps:</strong> Fallback to after-renovation value, then as-is value</li>
-        </ol>
-
-        <h4 className="text-lg font-semibold text-foreground pt-2">Group-Level Values</h4>
+        <h4 className="text-lg font-semibold text-foreground pt-2">Classification Group Averages</h4>
         <p>
-          In addition to the final ARV, the system calculates separate weighted averages for each classification group:
+          After the ARV is calculated, the enabled comps are grouped by classification for display
+          purposes. These group averages are informational — they do not affect the ARV itself.
         </p>
         <ul className="list-disc list-inside space-y-1.5 ml-2">
-          <li><strong className="text-foreground">As-Is Value</strong> — Weighted average of as-is classified comps (current market value)</li>
-          <li><strong className="text-foreground">After-Renovation Value</strong> — Weighted average of after-renovation classified comps</li>
-          <li><strong className="text-foreground">Spread</strong> — After-Renovation Value − As-Is Value (profit potential)</li>
+          <li><strong className="text-foreground">As-Is Value</strong> — Simple average adjusted price of as-is comps (current market value)</li>
+          <li><strong className="text-foreground">After-Renovation Value</strong> — Simple average adjusted price of after-renovation comps</li>
+          <li><strong className="text-foreground">Spread</strong> — After-Renovation Value − As-Is Value (potential upside)</li>
         </ul>
-
-        <CodeBlock>{`Weight(comp) = classMatch × distance × sqft × recency × filterPass × confidence
-
-Normalized Weight = Weight(comp) / Sum(all weights)
-
-ARV = Σ( NormalizedWeight(i) × AdjustedPrice(i) )  for enabled comps`}</CodeBlock>
-      </SectionProse>
-    ),
-  },
-  {
-    id: 'investment-scenarios',
-    title: 'Investment Scenarios',
-    content: (
-      <SectionProse>
-        <p>
-          Three investment scenarios are generated from the weighted ARV results, each targeting
-          a different investor strategy. Scenarios are only generated when the required comp data
-          is available.
-        </p>
-
-        <h4 className="text-lg font-semibold text-foreground pt-2">1. Flip Scenario</h4>
-        <p>
-          Requires both as-is and after-renovation comp groups. The target ARV is the after-renovation
-          value — representing the property&apos;s value after a full renovation.
-        </p>
-        <ul className="list-disc list-inside space-y-1.5 ml-2">
-          <li><strong className="text-foreground">Target ARV:</strong> After-renovation weighted value</li>
-          <li><strong className="text-foreground">Confidence:</strong> min(95%, 50% + afterRenoCompCount × 15%)</li>
-          <li>Includes spread analysis showing potential profit (after-reno value − as-is value)</li>
-        </ul>
-
-        <h4 className="text-lg font-semibold text-foreground pt-2">2. Wholesale Scenario</h4>
-        <p>
-          Requires as-is comps. Represents current market value for assignment-fee deals.
-        </p>
-        <ul className="list-disc list-inside space-y-1.5 ml-2">
-          <li><strong className="text-foreground">Target ARV:</strong> As-is weighted value (current market)</li>
-          <li><strong className="text-foreground">Confidence:</strong> min(90%, 50% + asIsCompCount × 15%)</li>
-        </ul>
-
-        <h4 className="text-lg font-semibold text-foreground pt-2">3. Rental Scenario</h4>
-        <p>
-          Always generated when data exists. Assumes only cosmetic updates — not a full renovation.
-        </p>
-        <ul className="list-disc list-inside space-y-1.5 ml-2">
-          <li><strong className="text-foreground">Target ARV:</strong> As-Is Value + 40% of spread</li>
-          <li><strong className="text-foreground">Confidence:</strong> Fixed at 70%</li>
-          <li>Uses as-is comps + up to 2 after-renovation comps for reference</li>
-        </ul>
-
-        <CodeBlock>{`Flip ARV     = afterRenovationValue
-Wholesale    = asIsValue
-Rental ARV   = asIsValue + (afterRenovationValue − asIsValue) × 0.4`}</CodeBlock>
       </SectionProse>
     ),
   },
@@ -404,11 +320,11 @@ ROI              = (Projected Profit / Total Investment) × 100`}</CodeBlock>
             </div>
             <div className="flex items-center gap-3">
               <span className="w-7 h-7 rounded-md bg-primary/20 text-primary flex items-center justify-center text-xs font-bold flex-shrink-0">5</span>
-              <span><strong className="text-foreground font-sans">Batch Classification</strong> — Classify subject + all comps via vision LLM in 1–2 batched calls (1–3s)</span>
+              <span><strong className="text-foreground font-sans">Classification</strong> — Classify subject + all comps via description keyword analysis in parallel (1–3s)</span>
             </div>
             <div className="flex items-center gap-3">
               <span className="w-7 h-7 rounded-md bg-primary/20 text-primary flex items-center justify-center text-xs font-bold flex-shrink-0">6</span>
-              <span><strong className="text-foreground font-sans">Weighted ARV</strong> — Calculate 6-factor weights, normalize, compute tier-based weighted average (&lt;1s)</span>
+              <span><strong className="text-foreground font-sans">ARV</strong> — avg(adjusted price/sqft) × subject sqft, group comps by classification (&lt;1s)</span>
             </div>
             <div className="flex items-center gap-3">
               <span className="w-7 h-7 rounded-md bg-primary/20 text-primary flex items-center justify-center text-xs font-bold flex-shrink-0">7</span>

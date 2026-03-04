@@ -7,7 +7,7 @@
 
 import type { PropertyBundle } from '../property-api'
 import type { NormalizedProperty, NormalizedComparable } from '../property-api/types'
-import type { AppraisedComparable, AppraisalResultWithFallback, WeightedARVResult } from '../appraisal'
+import type { AppraisedComparable, AppraisalResultWithFallback, ClassificationSummaryResult } from '../appraisal'
 import type { CompSelectionResult } from '../comp-selection'
 import type { PhotoBundle, PropertyPhotos } from '../photo-provider'
 import type { MajorItem, ValuationService } from '../valuation'
@@ -89,6 +89,26 @@ export function mergeZillowDataIntoProperty<T extends NormalizedProperty | Norma
     merged.yearBuilt = zillowData.yearBuilt
     supplementedFields.push({ field: 'yearBuilt', value: zillowData.yearBuilt, source: 'zillow' })
     console.log(`[ZillowMerge] Supplemented yearBuilt from Zillow: ${zillowData.yearBuilt}`)
+  }
+
+  // Merge foundationType if missing
+  if (merged.construction?.foundationType == null && zillowData.foundationType != null) {
+    if (!merged.construction) {
+      merged.construction = {}
+    }
+    merged.construction.foundationType = zillowData.foundationType
+    supplementedFields.push({ field: 'foundationType', value: zillowData.foundationType, source: 'zillow' })
+    console.log(`[ZillowMerge] Supplemented foundationType from Zillow: ${zillowData.foundationType}`)
+  }
+
+  // Merge hoaFee if missing (subject properties only — NormalizedProperty has hoaFee, NormalizedComparable does not)
+  if ('lastSaleDate' in merged && 'lastSalePrice' in merged) {
+    const subject = merged as NormalizedProperty
+    if (subject.hoaFee == null && zillowData.hoaFee != null) {
+      subject.hoaFee = zillowData.hoaFee
+      supplementedFields.push({ field: 'hoaFee', value: zillowData.hoaFee, source: 'zillow' })
+      console.log(`[ZillowMerge] Supplemented hoaFee from Zillow: $${zillowData.hoaFee}/mo`)
+    }
   }
 
   // For comparables, merge sale data if missing
@@ -219,160 +239,6 @@ export function formatDate(dateStr: string | null | undefined): string | null {
   return dateStr
 }
 
-// ─── Comp Quality Scoring ────────────────────────────────────────────────────
-
-/**
- * Get the number of filters passed by a comp
- */
-export function getFilterPassCount(comp: AppraisedComparable): {
-  passed: number
-  total: number
-  passRate: number
-} {
-  if (!comp.evaluation?.filterResults) {
-    return { passed: 0, total: 0, passRate: comp.isEnabled ? 1 : 0 }
-  }
-
-  const total = comp.evaluation.filterResults.length
-  const passed = comp.evaluation.filterResults.filter((f) => f.passed).length
-
-  return {
-    passed,
-    total,
-    passRate: total > 0 ? passed / total : comp.isEnabled ? 1 : 0,
-  }
-}
-
-/**
- * Calculate a quality score for a comp based on:
- * 1. Appraisal filter pass rate (PRIMARY - 50 points)
- * 2. Data similarity to subject (SECONDARY - 50 points)
- *
- * Higher score = better comp
- *
- * Scoring breakdown:
- * - Filter pass rate: 0-50 points (more filters passed = better)
- * - Distance: 0-15 points penalty (closer is better)
- * - Square footage similarity: 0-12 points penalty
- * - Recency: 0-12 points bonus (more recent is better)
- * - Year built similarity: 0-11 points penalty
- */
-export function calculateCompQualityScore(
-  comp: AppraisedComparable,
-  subjectSqft: number | null,
-  subjectYearBuilt: number | null
-): number {
-  let score = 0
-
-  // ─── PRIMARY: Appraisal Filter Pass Rate (0-50 points) ───────────────────
-  // This is the most important factor - comps that pass more filters are better
-  const filterStats = getFilterPassCount(comp)
-  score += filterStats.passRate * 50
-
-  // ─── SECONDARY: Data Similarity (0-50 points, starts at 50) ──────────────
-  let dataScore = 50
-
-  // Distance penalty (0-15 points) - closer is better
-  if (comp.distanceMiles !== null) {
-    // 0 miles = 0 penalty, 1 mile = 15 penalty
-    const distancePenalty = Math.min(15, comp.distanceMiles * 15)
-    dataScore -= distancePenalty
-  }
-
-  // Square footage similarity (0-12 points penalty)
-  if (subjectSqft && comp.squareFeet) {
-    const sqftDiff = Math.abs(comp.squareFeet - subjectSqft)
-    const sqftPctDiff = sqftDiff / subjectSqft
-    // 0% diff = 0 penalty, 20%+ diff = 12 penalty
-    const sqftPenalty = Math.min(12, sqftPctDiff * 60)
-    dataScore -= sqftPenalty
-  }
-
-  // Recency bonus (0-12 points) - more recent is better
-  if (comp.saleDate) {
-    const saleDate = new Date(formatDate(comp.saleDate) || comp.saleDate)
-    const daysSinceSale = Math.floor((Date.now() - saleDate.getTime()) / (1000 * 60 * 60 * 24))
-    // 0 days = 12 bonus, 365 days = 0 bonus
-    const recencyBonus = Math.max(0, 12 - (daysSinceSale / 365) * 12)
-    dataScore += recencyBonus - 12 // Normalize: recent sales don't get penalized
-  } else {
-    dataScore -= 8 // No sale date = penalty
-  }
-
-  // Year built similarity (0-11 points penalty)
-  if (subjectYearBuilt && comp.yearBuilt) {
-    const yearDiff = Math.abs(comp.yearBuilt - subjectYearBuilt)
-    // 0 years diff = 0 penalty, 20+ years = 11 penalty
-    const yearPenalty = Math.min(11, yearDiff * 0.55)
-    dataScore -= yearPenalty
-  }
-
-  score += Math.max(0, dataScore)
-
-  return Math.max(0, Math.min(100, score))
-}
-
-/**
- * Select best comp based on data quality when LLM selection is not available
- *
- * For ARV calculation, ALWAYS prioritizes after_renovation comps since
- * ARV = After Repair Value (what property will be worth after renovation)
- *
- * @param comps - List of appraised comps
- * @param subjectSqft - Subject property square footage
- * @param subjectYearBuilt - Subject property year built
- * @param afterRenovationCompIds - IDs of comps classified as after_renovation (optional)
- */
-export function selectBestCompFromData(
-  comps: AppraisedComparable[],
-  subjectSqft: number | null,
-  subjectYearBuilt: number | null,
-  afterRenovationCompIds?: string[]
-): { bestCompId: string | null; scores: Map<string, number> } {
-  if (comps.length === 0) {
-    return { bestCompId: null, scores: new Map() }
-  }
-
-  const scores = new Map<string, number>()
-
-  // Calculate scores for all comps
-  for (const comp of comps) {
-    const score = calculateCompQualityScore(comp, subjectSqft, subjectYearBuilt)
-    scores.set(comp.id, score)
-  }
-
-  // For ARV, prioritize after_renovation comps
-  // Find the best after_renovation comp first
-  let bestCompId: string | null = null
-  let bestScore = -1
-
-  if (afterRenovationCompIds && afterRenovationCompIds.length > 0) {
-    // First try to find best among after_renovation comps
-    for (const comp of comps) {
-      if (afterRenovationCompIds.includes(comp.id)) {
-        const score = scores.get(comp.id) ?? 0
-        if (score > bestScore) {
-          bestScore = score
-          bestCompId = comp.id
-        }
-      }
-    }
-  }
-
-  // Fallback: if no after_renovation comps, use overall best score
-  if (bestCompId === null) {
-    for (const comp of comps) {
-      const score = scores.get(comp.id) ?? 0
-      if (score > bestScore) {
-        bestScore = score
-        bestCompId = comp.id
-      }
-    }
-  }
-
-  return { bestCompId, scores }
-}
-
 // ─── Response Building ───────────────────────────────────────────────────────
 
 /**
@@ -391,8 +257,6 @@ export interface ValuationResult {
   projectedProfit: number
   projectedROI: number
   wholesalePrice: number
-  recommendation: string
-  recommendationReason: string
 }
 
 /**
@@ -416,9 +280,6 @@ export interface RehabLevelEstimate {
 export interface ResponseContext {
   arvSource: 'appraisal' | 'comp-selection'
   finalArv: number
-  bestCompId: string | null
-  selectedCompIds: string[]
-  dataBasedScores: Map<string, number>
   zillowUrls?: Map<string, { searchUrl: string; directUrl?: string }>
   photoProvider?: string | null
   analysisId?: string
@@ -426,8 +287,8 @@ export interface ResponseContext {
   subjectClassification?: ClassificationResult
   /** Comp classifications by ID */
   compClassifications?: Map<string, ClassificationResult>
-  /** Weighted ARV result (if classification was performed) */
-  weightedARVResult?: WeightedARVResult
+  /** Classification summary (as-is vs after-renovation comp groupings and group averages) */
+  classificationSummary?: ClassificationSummaryResult
   /** Fields supplemented from Zillow for subject property */
   subjectSupplementedFields?: SupplementedField[]
   /** Fields supplemented from Zillow for each comp (by comp ID) */
@@ -485,6 +346,8 @@ export interface AnalysisResponse {
     photos: string[]
     /** Foundation type (e.g., Slab, Crawl Space, Basement) */
     foundationType: string | null
+    /** Monthly HOA fee in dollars (if applicable) */
+    hoaFee: number | null
     /** Zillow search URL for this property */
     zillowUrl: string | null
     /** Property classification (as_is or after_renovation) */
@@ -507,13 +370,6 @@ export interface AnalysisResponse {
       asIsToArv: number | null
       potentialProfit: number | null
     } | null
-    /** Investment scenarios for different strategies */
-    investmentScenarios: Array<{
-      strategy: 'flip' | 'rental' | 'wholesale'
-      targetArv: number
-      confidence: number
-      notes: string
-    }>
     buyPrice: number
     buyPricePercent: number
     rehabCost: number
@@ -536,8 +392,6 @@ export interface AnalysisResponse {
     projectedProfit: number
     projectedROI: number
     wholesalePrice: number
-    recommendation: string
-    recommendationReason: string
   }
   comps: {
     /** Total number of comps returned from API */
@@ -566,9 +420,6 @@ export interface AnalysisResponse {
       bedsBaths: string
       yearBuilt: number | null
       adjustedPrice: number | null
-      qualityScore: number | null
-      condition: string | null
-      isBestComp: boolean
       photos: string[]
       /** Subdivision name (if available) */
       subdivision: string | null
@@ -576,18 +427,12 @@ export interface AnalysisResponse {
       foundationType: string | null
       /** Zillow search URL for this property */
       zillowUrl: string | null
-      /** Reason this comp was selected/analyzed (LLM reasoning) */
-      selectionReason: string | null
-      /** Key features identified by LLM analysis */
-      keyFeatures: string[] | null
       /** Whether this comp is enabled (passed all filters) */
       isEnabled: boolean
       /** Reasons why this comp was disabled (if any) */
       disableReasons: string[]
       /** Property classification (as_is or after_renovation) */
       classification: ClassificationSummary | null
-      /** Weight contribution to ARV calculation (0-1) */
-      weightInArv: number | null
       /** Appraisal rule evaluation details */
       appraisalRules: {
         /** Whether this comp passed all filters */
@@ -665,7 +510,7 @@ export function buildAnalysisResponse(
   ctx: ResponseContext
 ): AnalysisResponse {
   const { property, enrichment } = bundle
-  const { arvSource, finalArv, bestCompId, selectedCompIds, dataBasedScores } = ctx
+  const { arvSource, finalArv } = ctx
 
   // Get subject photos
   const subjectPhotos = photoBundle?.subject?.photos.slice(0, 5) ?? []
@@ -686,37 +531,12 @@ export function buildAnalysisResponse(
   const enabledComps = appraisalResult.comparables.filter((c) => c.isEnabled)
   const disabledComps = appraisalResult.comparables.filter((c) => !c.isEnabled)
 
-  // Get best comp selection reason if this is the best comp
-  const bestCompSelectionReason = compSelectionResult?.bestComp?.selectionReason ?? null
-
-  // Return ALL comps (both enabled and disabled) with evaluation details
-  // Sort: enabled comps first (sorted by quality), then disabled comps (sorted by distance)
+  // Return ALL comps: enabled first (by distance), then disabled (by distance)
   const allComps = [
-    ...enabledComps.sort((a, b) => {
-      // Sort enabled comps by quality score (higher first) or distance (closer first)
-      const scoreA = dataBasedScores.get(a.id) ?? 0
-      const scoreB = dataBasedScores.get(b.id) ?? 0
-      if (scoreA !== scoreB) return scoreB - scoreA
-      return (a.distanceMiles ?? 999) - (b.distanceMiles ?? 999)
-    }),
-    ...disabledComps.sort((a, b) => {
-      // Sort disabled comps by distance (closer first)
-      return (a.distanceMiles ?? 999) - (b.distanceMiles ?? 999)
-    }),
+    ...enabledComps.sort((a, b) => (a.distanceMiles ?? 999) - (b.distanceMiles ?? 999)),
+    ...disabledComps.sort((a, b) => (a.distanceMiles ?? 999) - (b.distanceMiles ?? 999)),
   ].map((comp) => {
-    const analysis = compSelectionResult?.allAnalyses.find((a) => a.compId === comp.id)
     const compPhotos = photoBundle?.comps[comp.id]?.photos.slice(0, 3) ?? []
-
-    // Use LLM analysis score if available, otherwise use data-based score (only for enabled comps)
-    const qualityScore = comp.isEnabled
-      ? (analysis?.qualityScore ?? dataBasedScores.get(comp.id) ?? null)
-      : null
-
-    // For best comp, use the selection reason; for others, use the analysis reasoning
-    const isBest = comp.id === bestCompId
-    const selectionReason = isBest
-      ? bestCompSelectionReason
-      : analysis?.reasoning ?? null
 
     // Build appraisal rule details from evaluation
     const evaluation = comp.evaluation
@@ -732,7 +552,7 @@ export function buildAnalysisResponse(
             threshold: f.threshold ?? null,
           })),
           adjustments: evaluation.adjustmentResults
-            .filter((a) => a.applied) // Only show adjustments that were actually applied
+            .filter((a) => a.applied)
             .map((a) => ({
               type: a.type,
               applied: a.applied,
@@ -753,10 +573,6 @@ export function buildAnalysisResponse(
         }
       : null
 
-    // Get weight from weighted ARV result
-    const weightBreakdown = ctx.weightedARVResult?.weightBreakdown.find((w) => w.compId === comp.id)
-    const weightInArv = weightBreakdown?.normalizedWeight ?? null
-
     return {
       id: comp.id,
       address: `${comp.address}, ${comp.city}, ${comp.state}`,
@@ -770,9 +586,6 @@ export function buildAnalysisResponse(
       bedsBaths: `${comp.bedrooms ?? '-'}/${comp.bathrooms ?? '-'}`,
       yearBuilt: comp.yearBuilt,
       adjustedPrice: comp.adjustedSalePrice,
-      qualityScore: qualityScore !== null ? Math.round(qualityScore) : null,
-      condition: analysis?.comparisonToSubject ?? null,
-      isBestComp: isBest,
       photos: compPhotos,
       subdivision: comp.subdivision ?? null,
       foundationType: comp.construction?.foundationType ?? null,
@@ -783,12 +596,9 @@ export function buildAnalysisResponse(
         state: comp.state,
         zipCode: comp.zipCode,
       }),
-      selectionReason,
-      keyFeatures: analysis?.keyFeatures ?? null,
       isEnabled: comp.isEnabled,
       disableReasons: evaluation?.disableReasons ?? [],
       classification: classificationSummary,
-      weightInArv: weightInArv !== null ? Math.round(weightInArv * 1000) / 1000 : null,
       appraisalRules,
     }
   })
@@ -806,10 +616,10 @@ export function buildAnalysisResponse(
       }
     : null
 
-  // Build spread analysis (if we have both as-is and ARV values)
-  const asIsValue = ctx.weightedARVResult?.asIsValue ?? null
-  const afterRenovationValue = ctx.weightedARVResult?.afterRenovationValue ?? null
-  const spread = ctx.weightedARVResult?.spread ?? null
+  // Build spread analysis from classification summary (if we have both as-is and after-renovation values)
+  const asIsValue = ctx.classificationSummary?.asIsValue ?? null
+  const afterRenovationValue = ctx.classificationSummary?.afterRenovationValue ?? null
+  const spread = ctx.classificationSummary?.spread ?? null
   const spreadAnalysis =
     asIsValue !== null && afterRenovationValue !== null
       ? {
@@ -818,9 +628,7 @@ export function buildAnalysisResponse(
         }
       : null
 
-  // Get investment scenarios and methodology from weighted ARV result
-  const investmentScenarios = ctx.weightedARVResult?.scenarios ?? []
-  const arvMethodology = ctx.weightedARVResult?.methodology ?? 'Simple average'
+  const arvMethodology = ctx.classificationSummary?.methodology ?? `avg price/sqft of ${enabledComps.length} comp${enabledComps.length !== 1 ? 's' : ''} × subject sqft`
 
   return {
     // ═══ SUBJECT PROPERTY ═══════════════════════════════════════════════════
@@ -845,6 +653,7 @@ export function buildAnalysisResponse(
       taxAssessment: property.assessedValue ?? null,
       photos: subjectPhotos,
       foundationType: property.construction?.foundationType ?? null,
+      hoaFee: property.hoaFee ?? null,
       zillowUrl: generateZillowUrl({
         propertyId: property.id,
         address: property.address,
@@ -865,12 +674,6 @@ export function buildAnalysisResponse(
       afterRenovationValue,
       spread,
       spreadAnalysis,
-      investmentScenarios: investmentScenarios.map((s) => ({
-        strategy: s.strategy,
-        targetArv: s.targetArv,
-        confidence: s.confidence,
-        notes: s.notes,
-      })),
       buyPrice: valuation.buyPrice,
       buyPricePercent: valuation.buyPricePercent,
       rehabCost: valuation.totalRehabCost,
@@ -881,8 +684,6 @@ export function buildAnalysisResponse(
       projectedProfit: valuation.projectedProfit,
       projectedROI: valuation.projectedROI,
       wholesalePrice: valuation.wholesalePrice,
-      recommendation: valuation.recommendation,
-      recommendationReason: valuation.recommendationReason,
       rehabLevelEstimates: ctx.rehabLevelEstimates ?? [],
     },
 
@@ -893,8 +694,8 @@ export function buildAnalysisResponse(
       disabledCount: disabledComps.length,
       avgPricePerSqft: appraisalResult.avgPricePerSqft,
       medianPrice: appraisalResult.medianSalePrice,
-      asIsCompIds: ctx.weightedARVResult?.asIsCompIds ?? [],
-      afterRenovationCompIds: ctx.weightedARVResult?.afterRenovationCompIds ?? [],
+      asIsCompIds: ctx.classificationSummary?.asIsCompIds ?? [],
+      afterRenovationCompIds: ctx.classificationSummary?.afterRenovationCompIds ?? [],
       items: allComps,
     },
 

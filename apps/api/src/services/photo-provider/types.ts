@@ -58,6 +58,10 @@ export interface PropertyPhotos {
   squareFeet?: number
   /** Year built */
   yearBuilt?: number
+  /** Foundation type (e.g., Slab, Crawl Space, Basement) */
+  foundationType?: string
+  /** Monthly HOA fee in dollars */
+  hoaFee?: number
   /** Most recent sale date */
   lastSaleDate?: string
   /** Most recent sale price */
