@@ -1,9 +1,9 @@
 /**
- * WebSocket Stream Route
+ * SSE Stream Route
  *
- * Handles WebSocket connections for real-time job updates.
- * This route is mounted OUTSIDE of the /v1 auth-protected routes
- * because browsers cannot set custom headers on WebSocket connections.
+ * Handles Server-Sent Events connections for real-time job updates.
+ * Mounted OUTSIDE of the /v1 auth-protected routes because EventSource
+ * cannot set custom headers — authentication is via signed URL token.
  *
  * Security:
  * - Uses short-lived HMAC-SHA256 signed tokens (5 minute expiry)
@@ -12,8 +12,8 @@
  * - User existence verified in database
  *
  * Flow:
- * 1. Dashboard calls POST /v1/analyze/ws-token to get a signed token
- * 2. Dashboard connects to ws://host/ws/analyze/:jobId?token=xxx
+ * 1. Dashboard calls POST /v1/analyze/stream-token to get a signed token
+ * 2. Dashboard opens EventSource at /sse/analyze/:jobId?token=xxx
  * 3. This route verifies the token and forwards to the Durable Object
  */
 
@@ -21,9 +21,9 @@ import { Hono } from 'hono'
 import type { Env } from '../types'
 import { verifyWsToken } from '../utils/ws-token'
 
-const wsStream = new Hono<{ Bindings: Env }>()
+const sseStream = new Hono<{ Bindings: Env }>()
 
-// Allowed origins for WebSocket connections
+// Allowed origins for SSE connections
 const ALLOWED_ORIGINS = [
   'http://localhost:3000',
   'https://dashboard.flowstate.homes',
@@ -31,38 +31,28 @@ const ALLOWED_ORIGINS = [
 ]
 
 /**
- * GET /ws/analyze/:jobId
+ * GET /sse/analyze/:jobId
  *
- * WebSocket endpoint for real-time job updates.
- * Upgrades connection to WebSocket and streams progress events.
+ * SSE endpoint for real-time job updates.
+ * Streams progress events as Server-Sent Events.
  *
  * Authentication via signed token in query parameter:
  * - token: HMAC-SHA256 signed token containing userId, jobId, propertyKey
  *
- * Token is obtained from POST /v1/analyze/ws-token (authenticated endpoint)
+ * Token is obtained from POST /v1/analyze/stream-token (authenticated endpoint)
  */
-wsStream.get('/analyze/:jobId', async (c) => {
+sseStream.get('/analyze/:jobId', async (c) => {
   try {
     const jobIdParam = c.req.param('jobId')
-    console.log(`[WS Stream] Connection attempt for job: ${jobIdParam}`)
+    console.log(`[SSE Stream] Connection attempt for job: ${jobIdParam}`)
 
     // Validate Origin header (CSRF protection)
     const origin = c.req.header('Origin')
-    console.log(`[WS Stream] Origin header: ${origin}`)
     if (origin && !ALLOWED_ORIGINS.includes(origin)) {
-      console.error(`[WS Stream] Rejected connection from origin: ${origin}`)
+      console.error(`[SSE Stream] Rejected connection from origin: ${origin}`)
       return c.json(
         { success: false, error: 'Origin not allowed' },
         403
-      )
-    }
-
-    // Check for WebSocket upgrade
-    const upgradeHeader = c.req.header('Upgrade')
-    if (!upgradeHeader || upgradeHeader.toLowerCase() !== 'websocket') {
-      return c.json(
-        { success: false, error: 'WebSocket upgrade required' },
-        426
       )
     }
 
@@ -79,7 +69,7 @@ wsStream.get('/analyze/:jobId', async (c) => {
     // Verify signed token
     const secret = c.env.DASHBOARD_INTERNAL_SECRET
     if (!secret) {
-      console.error('[WS Stream] DASHBOARD_INTERNAL_SECRET not configured')
+      console.error('[SSE Stream] DASHBOARD_INTERNAL_SECRET not configured')
       return c.json(
         { success: false, error: 'Server configuration error' },
         500
@@ -97,14 +87,14 @@ wsStream.get('/analyze/:jobId', async (c) => {
 
     // Verify job ID matches token
     if (payload.jid !== jobIdParam) {
-      console.error(`[WS Stream] Job ID mismatch: ${payload.jid} !== ${jobIdParam}`)
+      console.error(`[SSE Stream] Job ID mismatch: ${payload.jid} !== ${jobIdParam}`)
       return c.json(
         { success: false, error: 'Token not valid for this job' },
         403
       )
     }
 
-    // Verify user still exists (token may have been issued for a deleted user)
+    // Verify user still exists
     const user = await c.env.DB.prepare(`SELECT id FROM user WHERE id = ?`)
       .bind(payload.uid)
       .first<{ id: string }>()
@@ -120,16 +110,12 @@ wsStream.get('/analyze/:jobId', async (c) => {
     const doId = c.env.ANALYSIS_JOB.idFromName(`${payload.uid}:${payload.pk}`)
     const jobDO = c.env.ANALYSIS_JOB.get(doId)
 
-    console.log(`[WS Stream] Forwarding to DO: ${payload.uid}:${payload.pk}`)
+    console.log(`[SSE Stream] Forwarding to DO: ${payload.uid}:${payload.pk}`)
 
-    // Forward the WebSocket upgrade to the DO
-    return jobDO.fetch(
-      new Request('http://internal/ws', {
-        headers: c.req.raw.headers,
-      })
-    )
+    // Forward to the DO's SSE endpoint
+    return jobDO.fetch(new Request('http://internal/sse'))
   } catch (error) {
-    console.error('[WS Stream] Error:', error)
+    console.error('[SSE Stream] Error:', error)
     return c.json(
       {
         success: false,
@@ -140,4 +126,4 @@ wsStream.get('/analyze/:jobId', async (c) => {
   }
 })
 
-export default wsStream
+export default sseStream

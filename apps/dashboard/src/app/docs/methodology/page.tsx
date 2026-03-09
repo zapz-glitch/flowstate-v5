@@ -3,7 +3,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { cn } from '@/lib/utils'
 import { METHODOLOGY_SECTIONS } from './content'
-import CommentThread from './CommentThread'
 
 export default function MethodologyPage() {
   const [activeSection, setActiveSection] = useState(METHODOLOGY_SECTIONS[0].id)
@@ -44,7 +43,7 @@ export default function MethodologyPage() {
       <div className="space-y-2">
         <h1 className="text-3xl font-bold text-foreground tracking-tight">Evaluation Methodology</h1>
         <p className="text-base text-foreground-tertiary">
-          Detailed documentation of our property analysis and valuation process. Comment on any section to share feedback.
+          Detailed documentation of our property analysis and valuation process.
         </p>
       </div>
 
@@ -106,7 +105,6 @@ export default function MethodologyPage() {
                   {section.title}
                 </h2>
                 {section.content}
-                <CommentThread sectionId={section.id} />
               </div>
             </div>
           ))}

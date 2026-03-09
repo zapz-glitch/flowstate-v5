@@ -4,6 +4,10 @@
  * Per-location overrides for appraisal preset, rehab config, deal params, and major item costs.
  * When /v1/analyze is called, the most specific matching location setting wins:
  * zip > city+state > state > user default > system default
+ *
+ * Appraisal overrides: pass `appraisalFilters` + `appraisalAdjustments` directly — the backend
+ * upserts a hidden preset (named `__loc_<id>`) and stores its ID in `appraisalPresetId`.
+ * On GET, the hidden preset's filters/adjustments are resolved and returned inline.
  */
 
 import { Hono } from 'hono'
@@ -11,7 +15,13 @@ import { drizzle } from 'drizzle-orm/d1'
 import { eq, and } from 'drizzle-orm'
 import type { Env } from '../types'
 import { createAuth } from '../lib/auth'
-import { locationSettings, appraisalRulePreset } from '../db'
+import {
+  locationSettings,
+  appraisalRulePreset,
+  appraisalRuleFilter,
+  appraisalRuleAdjustment,
+} from '../db'
+import type { FilterType, AdjustmentType } from '../services/appraisal/types'
 
 const locationSettingsRoute = new Hono<{ Bindings: Env }>()
 
@@ -26,18 +36,37 @@ async function getSession(c: any) {
   }
 }
 
+interface FilterInput {
+  filterType: FilterType
+  enabled: boolean
+  value: number
+}
+
+interface AdjustmentInput {
+  adjustmentType: AdjustmentType
+  enabled: boolean
+  amount: number
+  percentage: number
+}
+
+type SettingType = 'appraisal' | 'rehab' | 'deal' | 'major'
+const VALID_SETTING_TYPES: SettingType[] = ['appraisal', 'rehab', 'deal', 'major']
+
 interface LocationSettingInput {
+  settingType?: SettingType
+  isEnabled?: boolean
   state?: string
   city?: string
   zipCode?: string
   appraisalPresetId?: string | null
+  appraisalFilters?: FilterInput[] | null
+  appraisalAdjustments?: AdjustmentInput[] | null
   rehabConfigJson?: Record<string, unknown> | null
   dealParamsJson?: Record<string, unknown> | null
   majorItemCostsJson?: Record<string, number> | null
 }
 
 function validateInput(body: LocationSettingInput): string | null {
-  // Valid scopes: state only | city + state (state required) | zip only
   const hasState = !!body.state
   const hasCity = !!body.city
   const hasZip = !!body.zipCode
@@ -55,9 +84,139 @@ function validateInput(body: LocationSettingInput): string | null {
   return null
 }
 
+/**
+ * Upsert a hidden appraisal preset for a location override.
+ * Returns the preset ID.
+ */
+async function upsertLocationPreset(
+  db: ReturnType<typeof drizzle>,
+  userId: string,
+  locationId: string,
+  filters: FilterInput[],
+  adjustments: AdjustmentInput[]
+): Promise<string> {
+  const hiddenName = `__loc_${locationId}`
+  const now = new Date().toISOString()
+
+  // Find existing hidden preset
+  const [existing] = await db
+    .select({ id: appraisalRulePreset.id })
+    .from(appraisalRulePreset)
+    .where(and(eq(appraisalRulePreset.userId, userId), eq(appraisalRulePreset.name, hiddenName)))
+    .limit(1)
+
+  let presetId: string
+  if (existing) {
+    presetId = existing.id
+    // Replace filters and adjustments
+    await db.delete(appraisalRuleFilter).where(eq(appraisalRuleFilter.presetId, presetId))
+    await db.delete(appraisalRuleAdjustment).where(eq(appraisalRuleAdjustment.presetId, presetId))
+    await db.update(appraisalRulePreset).set({ updatedAt: now }).where(eq(appraisalRulePreset.id, presetId))
+  } else {
+    presetId = crypto.randomUUID()
+    await db.insert(appraisalRulePreset).values({
+      id: presetId,
+      userId,
+      name: hiddenName,
+      description: null,
+      isDefault: false,
+      createdAt: now,
+      updatedAt: now,
+    })
+  }
+
+  if (filters.length > 0) {
+    await db.insert(appraisalRuleFilter).values(
+      filters.map((f) => ({
+        id: crypto.randomUUID(),
+        presetId,
+        filterType: f.filterType,
+        enabled: f.enabled,
+        value: f.value,
+        createdAt: now,
+      }))
+    )
+  }
+
+  if (adjustments.length > 0) {
+    await db.insert(appraisalRuleAdjustment).values(
+      adjustments.map((a) => ({
+        id: crypto.randomUUID(),
+        presetId,
+        adjustmentType: a.adjustmentType,
+        enabled: a.enabled,
+        amount: a.amount,
+        percentage: a.percentage,
+        createdAt: now,
+      }))
+    )
+  }
+
+  return presetId
+}
+
+/**
+ * Delete hidden appraisal preset for a location (if it is a __loc_ preset).
+ */
+async function deleteLocationPreset(
+  db: ReturnType<typeof drizzle>,
+  userId: string,
+  presetId: string
+): Promise<void> {
+  const [preset] = await db
+    .select({ id: appraisalRulePreset.id, name: appraisalRulePreset.name })
+    .from(appraisalRulePreset)
+    .where(and(eq(appraisalRulePreset.id, presetId), eq(appraisalRulePreset.userId, userId)))
+    .limit(1)
+  if (preset && preset.name.startsWith('__loc_')) {
+    await db.delete(appraisalRulePreset).where(eq(appraisalRulePreset.id, presetId))
+  }
+}
+
+/**
+ * Resolve appraisal filters/adjustments for a location preset ID (if it's a hidden one).
+ * Returns null if no preset or preset is not a hidden location preset.
+ */
+async function resolveLocationAppraisalRules(
+  db: ReturnType<typeof drizzle>,
+  userId: string,
+  presetId: string | null
+): Promise<{ appraisalFilters: FilterInput[]; appraisalAdjustments: AdjustmentInput[] } | null> {
+  if (!presetId) return null
+
+  const [preset] = await db
+    .select({ id: appraisalRulePreset.id, name: appraisalRulePreset.name })
+    .from(appraisalRulePreset)
+    .where(and(eq(appraisalRulePreset.id, presetId), eq(appraisalRulePreset.userId, userId)))
+    .limit(1)
+
+  if (!preset || !preset.name.startsWith('__loc_')) return null
+
+  const [filters, adjustments] = await Promise.all([
+    db.select().from(appraisalRuleFilter).where(eq(appraisalRuleFilter.presetId, presetId)),
+    db.select().from(appraisalRuleAdjustment).where(eq(appraisalRuleAdjustment.presetId, presetId)),
+  ])
+
+  return {
+    appraisalFilters: filters.map((f) => ({
+      filterType: f.filterType as FilterType,
+      enabled: f.enabled,
+      value: f.value,
+    })),
+    appraisalAdjustments: adjustments.map((a) => ({
+      adjustmentType: a.adjustmentType as AdjustmentType,
+      enabled: a.enabled,
+      amount: a.amount,
+      percentage: a.percentage,
+    })),
+  }
+}
+
 function serializeRow(r: typeof locationSettings.$inferSelect) {
   return {
     id: r.id,
+    settingType: r.settingType as SettingType,
+    isEnabled: r.isEnabled,
     state: r.state,
     city: r.city,
     zipCode: r.zipCode,
@@ -77,30 +236,33 @@ locationSettingsRoute.get('/', async (c) => {
   const session = await getSession(c)
   if (!session?.user) return c.json({ error: 'Not authenticated' }, 401)
 
+  const typeParam = c.req.query('type') as SettingType | undefined
   const db = drizzle(c.env.DB)
+
   const rows = await db
     .select()
     .from(locationSettings)
-    .where(eq(locationSettings.userId, session.user.id))
+    .where(
+      typeParam && VALID_SETTING_TYPES.includes(typeParam)
+        ? and(eq(locationSettings.userId, session.user.id), eq(locationSettings.settingType, typeParam))
+        : eq(locationSettings.userId, session.user.id)
+    )
     .orderBy(locationSettings.createdAt)
 
-  // Resolve preset names
-  const presetIds = [...new Set(rows.map((r) => r.appraisalPresetId).filter(Boolean))] as string[]
-  const presetMap = new Map<string, string>()
-  if (presetIds.length > 0) {
-    const presets = await db
-      .select({ id: appraisalRulePreset.id, name: appraisalRulePreset.name })
-      .from(appraisalRulePreset)
-      .where(eq(appraisalRulePreset.userId, session.user.id))
-    for (const p of presets) presetMap.set(p.id, p.name)
-  }
-
-  const settings = rows.map((r) => ({
-    ...serializeRow(r),
-    appraisalPresetName: r.appraisalPresetId ? (presetMap.get(r.appraisalPresetId) ?? null) : null,
-    createdAt: r.createdAt,
-    updatedAt: r.updatedAt,
-  }))
+  // Resolve inline appraisal rules for hidden presets
+  const settings = await Promise.all(
+    rows.map(async (r) => {
+      const appraisalRules = await resolveLocationAppraisalRules(db, session.user.id, r.appraisalPresetId)
+      return {
+        ...serializeRow(r),
+        appraisalFilters: appraisalRules?.appraisalFilters ?? null,
+        appraisalAdjustments: appraisalRules?.appraisalAdjustments ?? null,
+        hasAppraisalOverride: appraisalRules !== null,
+        createdAt: r.createdAt,
+        updatedAt: r.updatedAt,
+      }
+    })
+  )
 
   return c.json({ settings })
 })
@@ -115,6 +277,10 @@ locationSettingsRoute.post('/', async (c) => {
 
   const validationError = validateInput(body)
   if (validationError) return c.json({ error: validationError }, 400)
+
+  const settingType: SettingType = body.settingType && VALID_SETTING_TYPES.includes(body.settingType)
+    ? body.settingType
+    : 'appraisal'
 
   if (body.appraisalPresetId) {
     const db = drizzle(c.env.DB)
@@ -133,6 +299,8 @@ locationSettingsRoute.post('/', async (c) => {
     .insert(locationSettings)
     .values({
       userId: session.user.id,
+      settingType,
+      isEnabled: body.isEnabled !== false,
       state: body.state?.toUpperCase() ?? null,
       city: body.city?.toLowerCase() ?? null,
       zipCode: body.zipCode ?? null,
@@ -145,7 +313,35 @@ locationSettingsRoute.post('/', async (c) => {
     })
     .returning()
 
-  return c.json({ setting: { ...serializeRow(row), createdAt: row.createdAt, updatedAt: row.updatedAt } }, 201)
+  // If appraisalFilters provided, upsert hidden preset now that we have the row ID
+  let finalRow = row
+  if (body.appraisalFilters && body.appraisalFilters.length > 0) {
+    const presetId = await upsertLocationPreset(
+      db,
+      session.user.id,
+      row.id,
+      body.appraisalFilters,
+      body.appraisalAdjustments ?? []
+    )
+    const [updated] = await db
+      .update(locationSettings)
+      .set({ appraisalPresetId: presetId, updatedAt: now })
+      .where(eq(locationSettings.id, row.id))
+      .returning()
+    finalRow = updated
+  }
+
+  const appraisalRules = await resolveLocationAppraisalRules(db, session.user.id, finalRow.appraisalPresetId)
+  return c.json({
+    setting: {
+      ...serializeRow(finalRow),
+      appraisalFilters: appraisalRules?.appraisalFilters ?? null,
+      appraisalAdjustments: appraisalRules?.appraisalAdjustments ?? null,
+      hasAppraisalOverride: appraisalRules !== null,
+      createdAt: finalRow.createdAt,
+      updatedAt: finalRow.updatedAt,
+    },
+  }, 201)
 })
 
 // ─── PATCH /location-settings/:id ─────────────────────────────────────────────
@@ -189,6 +385,7 @@ locationSettingsRoute.patch('/:id', async (c) => {
   const now = new Date().toISOString()
   const updates: Record<string, unknown> = { updatedAt: now }
 
+  if (body.isEnabled !== undefined) updates.isEnabled = body.isEnabled
   if (body.state !== undefined) updates.state = body.state?.toUpperCase() ?? null
   if (body.city !== undefined) updates.city = body.city?.toLowerCase() ?? null
   if (body.zipCode !== undefined) updates.zipCode = body.zipCode ?? null
@@ -197,11 +394,42 @@ locationSettingsRoute.patch('/:id', async (c) => {
   if (body.dealParamsJson !== undefined) updates.dealParamsJson = body.dealParamsJson ? JSON.stringify(body.dealParamsJson) : null
   if (body.majorItemCostsJson !== undefined) updates.majorItemCostsJson = body.majorItemCostsJson ? JSON.stringify(body.majorItemCostsJson) : null
 
+  // Handle inline appraisal override
+  if (body.appraisalFilters !== undefined) {
+    if (body.appraisalFilters === null) {
+      // Clear override — delete hidden preset if present
+      if (existing.appraisalPresetId) {
+        await deleteLocationPreset(db, session.user.id, existing.appraisalPresetId)
+      }
+      updates.appraisalPresetId = null
+    } else {
+      // Upsert hidden preset
+      const presetId = await upsertLocationPreset(
+        db,
+        session.user.id,
+        id,
+        body.appraisalFilters,
+        body.appraisalAdjustments ?? []
+      )
+      updates.appraisalPresetId = presetId
+    }
+  }
+
   await db.update(locationSettings).set(updates).where(eq(locationSettings.id, id))
 
   const [updated] = await db.select().from(locationSettings).where(eq(locationSettings.id, id)).limit(1)
+  const appraisalRules = await resolveLocationAppraisalRules(db, session.user.id, updated.appraisalPresetId)
 
-  return c.json({ setting: { ...serializeRow(updated), createdAt: updated.createdAt, updatedAt: updated.updatedAt } })
+  return c.json({
+    setting: {
+      ...serializeRow(updated),
+      appraisalFilters: appraisalRules?.appraisalFilters ?? null,
+      appraisalAdjustments: appraisalRules?.appraisalAdjustments ?? null,
+      hasAppraisalOverride: appraisalRules !== null,
+      createdAt: updated.createdAt,
+      updatedAt: updated.updatedAt,
+    },
+  })
 })
 
 // ─── DELETE /location-settings/:id ────────────────────────────────────────────
@@ -214,11 +442,16 @@ locationSettingsRoute.delete('/:id', async (c) => {
   const db = drizzle(c.env.DB)
 
   const [existing] = await db
-    .select({ id: locationSettings.id })
+    .select()
     .from(locationSettings)
     .where(and(eq(locationSettings.id, id), eq(locationSettings.userId, session.user.id)))
     .limit(1)
   if (!existing) return c.json({ error: 'Location setting not found' }, 404)
+
+  // Clean up hidden appraisal preset if present
+  if (existing.appraisalPresetId) {
+    await deleteLocationPreset(db, session.user.id, existing.appraisalPresetId)
+  }
 
   await db.delete(locationSettings).where(eq(locationSettings.id, id))
 

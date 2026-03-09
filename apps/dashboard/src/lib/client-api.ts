@@ -224,6 +224,12 @@ export async function getDefaultAppraisalPreset(): Promise<AppraisalPreset | nul
   return response.preset
 }
 
+/** Returns the user's single default preset, auto-creating it if it doesn't exist. */
+export async function getOrCreateDefaultPreset(): Promise<AppraisalPreset> {
+  const response = await fetchApi<{ preset: AppraisalPreset }>('/appraisal-presets/mine')
+  return response.preset
+}
+
 export async function getAppraisalDefaults(): Promise<AppraisalDefaults> {
   return fetchApi<AppraisalDefaults>('/appraisal-presets/defaults')
 }
@@ -405,13 +411,32 @@ export async function resetDealParams(): Promise<DealParamsResponse> {
 
 // ─── Location Settings ─────────────────────────────────────────────────────────
 
+export interface LocationAppraisalFilter {
+  filterType: FilterType
+  enabled: boolean
+  value: number
+}
+
+export interface LocationAppraisalAdjustment {
+  adjustmentType: AdjustmentType
+  enabled: boolean
+  amount: number
+  percentage: number
+}
+
+export type LocationSettingType = 'appraisal' | 'rehab' | 'deal' | 'major'
+
 export interface LocationSetting {
   id: string
+  settingType: LocationSettingType
+  isEnabled: boolean
   state?: string | null
   city?: string | null
   zipCode?: string | null
   appraisalPresetId?: string | null
-  appraisalPresetName?: string | null
+  appraisalFilters?: LocationAppraisalFilter[] | null
+  appraisalAdjustments?: LocationAppraisalAdjustment[] | null
+  hasAppraisalOverride: boolean
   rehabConfigJson?: RehabTable | null
   dealParamsJson?: DealParamsConfig | null
   majorItemCostsJson?: Record<string, number> | null
@@ -423,17 +448,22 @@ export interface LocationSetting {
 }
 
 export interface LocationSettingInput {
+  settingType?: LocationSettingType
+  isEnabled?: boolean
   state?: string
   city?: string
   zipCode?: string
   appraisalPresetId?: string | null
+  appraisalFilters?: LocationAppraisalFilter[] | null
+  appraisalAdjustments?: LocationAppraisalAdjustment[] | null
   rehabConfigJson?: RehabTable | null
   dealParamsJson?: DealParamsConfig | null
   majorItemCostsJson?: Record<string, number> | null
 }
 
-export async function getLocationSettings(): Promise<LocationSetting[]> {
-  const res = await fetchApi<{ settings: LocationSetting[] }>('/location-settings')
+export async function getLocationSettings(type?: LocationSettingType): Promise<LocationSetting[]> {
+  const url = type ? `/location-settings?type=${type}` : '/location-settings'
+  const res = await fetchApi<{ settings: LocationSetting[] }>(url)
   return res.settings
 }
 
@@ -488,6 +518,70 @@ export async function saveMajorItemCosts(costs: Record<string, number | null>): 
 export async function resetMajorItemCosts(): Promise<MajorItemCostsResponse> {
   const res = await fetchApi<MajorItemCostsResponse>('/major-item-costs', { method: 'DELETE' })
   return res
+}
+
+// ─── GHL Integration Settings ────────────────────────────────────────────────
+
+export interface GHLMappableField {
+  label: string
+  type: 'number' | 'string'
+}
+
+export interface GHLSettingsData {
+  locationId: string
+  isEnabled: boolean
+  fieldMappings: Record<string, string>
+  monetaryValueField: string
+  webhookUrl: string
+  webhookSecret: string
+  updatedAt: string
+  hasApiToken: boolean
+  apiTokenMasked: string | null
+}
+
+export interface GHLSettingsResponse {
+  settings: GHLSettingsData | null
+  isConfigured: boolean
+}
+
+export interface GHLFieldsResponse {
+  fields: Record<string, GHLMappableField>
+}
+
+export interface GHLTestResult {
+  success: boolean
+  error?: string
+}
+
+export interface GHLSettingsInput {
+  apiToken?: string
+  locationId?: string
+  isEnabled?: boolean
+  fieldMappings?: Record<string, string>
+  monetaryValueField?: string
+}
+
+export async function getGHLSettings(): Promise<GHLSettingsResponse> {
+  return fetchApi<GHLSettingsResponse>('/ghl-settings')
+}
+
+export async function getGHLMappableFields(): Promise<GHLFieldsResponse> {
+  return fetchApi<GHLFieldsResponse>('/ghl-settings/fields')
+}
+
+export async function saveGHLSettings(input: GHLSettingsInput): Promise<GHLSettingsResponse> {
+  return fetchApi<GHLSettingsResponse>('/ghl-settings', {
+    method: 'PUT',
+    body: JSON.stringify(input),
+  })
+}
+
+export async function deleteGHLSettings(): Promise<GHLSettingsResponse> {
+  return fetchApi<GHLSettingsResponse>('/ghl-settings', { method: 'DELETE' })
+}
+
+export async function testGHLConnection(): Promise<GHLTestResult> {
+  return fetchApi<GHLTestResult>('/ghl-settings/test', { method: 'POST' })
 }
 
 // ─── Plan Limits ───────────────────────────────────────────────────────────────

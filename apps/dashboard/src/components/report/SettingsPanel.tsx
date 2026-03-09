@@ -1,0 +1,523 @@
+'use client'
+
+import {
+  RotateCcw,
+  ChevronDown,
+  ChevronRight,
+  Info,
+  Wrench,
+  Scale,
+  DollarSign,
+  Hammer,
+  Package,
+  Filter,
+  Sliders,
+} from 'lucide-react'
+import { useState } from 'react'
+import { Switch } from '@/components/ui/switch'
+import { Input } from '@/components/ui/input'
+import { Badge } from '@/components/ui/badge'
+import { cn } from '@/lib/utils'
+import type { UseReportSettingsReturn } from '@/hooks/use-report-settings'
+import type { RecalcResult } from '@/lib/recalc'
+
+// ─── Config ──────────────────────────────────────────────────────────────────
+
+const FILTER_LABELS: Record<string, { label: string; unit: string; hint: string }> = {
+  subdivision_match: { label: 'Subdivision Match', unit: '', hint: 'Same subdivision required' },
+  sale_age: { label: 'Sale Age', unit: 'days', hint: 'Max days since sold' },
+  sqft_diff: { label: 'Sqft Difference', unit: 'sqft', hint: 'Max sqft variance' },
+  year_built_diff: { label: 'Year Built Diff', unit: 'yrs', hint: 'Max year variance' },
+  distance: { label: 'Distance', unit: 'mi', hint: 'Max miles from subject' },
+}
+
+const ADJUSTMENT_LABELS: Record<string, { label: string; isPercentage?: boolean; unavailable?: boolean }> = {
+  old_comp_discount: { label: 'Old Comp Discount', isPercentage: true },
+  bedroom: { label: 'Bedroom' },
+  bathroom: { label: 'Bathroom' },
+  pool: { label: 'Pool', unavailable: true },
+  garage: { label: 'Garage', unavailable: true },
+  carport: { label: 'Carport', unavailable: true },
+}
+
+const ARV_TIER_LABELS: Record<string, string> = {
+  under501k: 'Under $501K',
+  '501kTo999k': '$501K–$999K',
+  '1mTo3m': '$1M–$3M',
+  over3m: 'Over $3M',
+}
+
+const LEVEL_NAMES = ['Lipstick', 'Light Cosmetic', 'Full Cosmetic', 'Heavy Rehab', 'Down to Stud', 'Low Cost Market', 'High Cost Market']
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+function fmt(amount: number): string {
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  }).format(amount)
+}
+
+// ─── Section Wrapper ─────────────────────────────────────────────────────────
+
+function Section({
+  icon: Icon,
+  title,
+  badge,
+  defaultOpen = true,
+  children,
+}: {
+  icon: React.ComponentType<{ className?: string }>
+  title: string
+  badge?: React.ReactNode
+  defaultOpen?: boolean
+  children: React.ReactNode
+}) {
+  const [open, setOpen] = useState(defaultOpen)
+
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="w-full flex items-center gap-3 px-5 py-3.5 hover:bg-secondary/40 transition-colors"
+      >
+        <Icon className="w-4 h-4 text-foreground-tertiary flex-shrink-0" />
+        <span className="text-body-sm font-semibold text-foreground flex-1 text-left">{title}</span>
+        {badge && <span className="mr-1">{badge}</span>}
+        {open
+          ? <ChevronDown className="w-3.5 h-3.5 text-foreground-tertiary flex-shrink-0" />
+          : <ChevronRight className="w-3.5 h-3.5 text-foreground-tertiary flex-shrink-0" />
+        }
+      </button>
+      {open && (
+        <div className="px-5 pb-5 pt-1">
+          {children}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── Inline Row ──────────────────────────────────────────────────────────────
+
+function SettingRow({
+  label,
+  enabled,
+  onToggle,
+  disabled,
+  children,
+  badge,
+}: {
+  label: string
+  enabled: boolean
+  onToggle: (v: boolean) => void
+  disabled?: boolean
+  children?: React.ReactNode
+  badge?: React.ReactNode
+}) {
+  return (
+    <div className={cn(
+      'flex items-center gap-3 rounded-lg px-3 py-2.5 transition-colors',
+      enabled ? 'bg-secondary/40' : 'bg-transparent'
+    )}>
+      <Switch
+        checked={enabled}
+        onCheckedChange={onToggle}
+        disabled={disabled}
+        className="flex-shrink-0 scale-90"
+      />
+      <div className="flex-1 min-w-0 flex items-center justify-between gap-2">
+        <span className={cn(
+          'text-caption font-medium truncate',
+          enabled ? 'text-foreground' : 'text-foreground-tertiary'
+        )}>
+          {label}
+        </span>
+        <div className="flex items-center gap-1.5 flex-shrink-0">
+          {badge}
+          {children}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Compact Input ───────────────────────────────────────────────────────────
+
+function CompactInput({
+  value,
+  onChange,
+  disabled,
+  prefix,
+  suffix,
+  step,
+  width = 'w-16',
+  placeholder,
+}: {
+  value: number | string
+  onChange: (v: string) => void
+  disabled?: boolean
+  prefix?: string
+  suffix?: string
+  step?: number
+  width?: string
+  placeholder?: string
+}) {
+  return (
+    <div className="flex items-center gap-1">
+      {prefix && <span className="text-caption-sm text-foreground-tertiary">{prefix}</span>}
+      <Input
+        type="number"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        disabled={disabled}
+        placeholder={placeholder}
+        className={cn('h-7 text-caption px-2 text-right tabular-nums', width)}
+        step={step}
+      />
+      {suffix && <span className="text-caption-sm text-foreground-tertiary min-w-[2ch]">{suffix}</span>}
+    </div>
+  )
+}
+
+// ─── Settings Panel ──────────────────────────────────────────────────────────
+
+interface SettingsPanelProps {
+  settingsHook: UseReportSettingsReturn
+  recalcData: RecalcResult | null
+}
+
+export function SettingsPanel({ settingsHook, recalcData }: SettingsPanelProps) {
+  const {
+    settings,
+    loading,
+    updateFilter,
+    updateAdjustment,
+    updateDealParams,
+    selectRehabLevel,
+    updateRehabTableEntry,
+    updateMajorItem,
+    resetToDefaults,
+  } = settingsHook
+
+  const activeTier = recalcData?.valuation.arvTier ?? 'under501k'
+  const enabledMajorItems = settings.majorItems.filter((item) => item.enabled)
+  const majorItemsTotal = enabledMajorItems.reduce((sum, item) => sum + item.cost, 0)
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-48">
+        <div className="flex items-center gap-2 text-body-sm text-foreground-tertiary">
+          <div className="w-4 h-4 border-2 border-foreground-tertiary/30 border-t-foreground-tertiary rounded-full animate-spin" />
+          Loading settings...
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex flex-col h-full">
+      {/* Quick Stats Bar */}
+      {recalcData && (
+        <div className="px-5 py-3 border-b border-border bg-secondary/20">
+          <div className="grid grid-cols-3 gap-3">
+            <div className="text-center">
+              <div className="text-caption-sm text-foreground-tertiary">ARV</div>
+              <div className="text-caption font-bold text-primary tabular-nums">{fmt(recalcData.valuation.arv)}</div>
+            </div>
+            <div className="text-center">
+              <div className="text-caption-sm text-foreground-tertiary">Buy</div>
+              <div className="text-caption font-bold tabular-nums">{fmt(recalcData.valuation.buyPrice)}</div>
+            </div>
+            <div className="text-center">
+              <div className="text-caption-sm text-foreground-tertiary">Profit</div>
+              <div className={cn(
+                'text-caption font-bold tabular-nums',
+                recalcData.valuation.projectedProfit > 0 ? 'text-emerald-600' : 'text-red-600'
+              )}>
+                {fmt(recalcData.valuation.projectedProfit)}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Scrollable Content */}
+      <div className="flex-1 overflow-y-auto divide-y divide-border/30">
+
+        {/* ── Appraisal Rules (Filters + Adjustments) ────────────────────── */}
+        <Section icon={Scale} title="Appraisal Rules" defaultOpen={false}>
+          {/* Filters sub-group */}
+          <div className="mb-4">
+            <div className="flex items-center gap-2 mb-2">
+              <Filter className="w-3 h-3 text-foreground-tertiary" />
+              <span className="text-caption-sm font-semibold text-foreground-tertiary uppercase tracking-wider">Filters</span>
+            </div>
+            <div className="space-y-1">
+              {settings.filters.map((filter) => {
+                const meta = FILTER_LABELS[filter.type] || { label: filter.type, unit: '', hint: '' }
+                const isSubdivision = filter.type === 'subdivision_match'
+
+                return (
+                  <SettingRow
+                    key={filter.type}
+                    label={meta.label}
+                    enabled={filter.enabled}
+                    onToggle={(checked) => updateFilter(filter.type, { enabled: checked })}
+                  >
+                    {!isSubdivision && (
+                      <CompactInput
+                        value={filter.value}
+                        onChange={(v) => updateFilter(filter.type, { value: parseFloat(v) || 0 })}
+                        disabled={!filter.enabled}
+                        suffix={meta.unit}
+                        step={filter.type === 'distance' ? 0.1 : 1}
+                      />
+                    )}
+                  </SettingRow>
+                )
+              })}
+            </div>
+          </div>
+
+          {/* Adjustments sub-group */}
+          <div>
+            <div className="flex items-center gap-2 mb-2">
+              <Sliders className="w-3 h-3 text-foreground-tertiary" />
+              <span className="text-caption-sm font-semibold text-foreground-tertiary uppercase tracking-wider">Adjustments</span>
+            </div>
+            <div className="space-y-1">
+              {settings.adjustments.map((adj) => {
+                const meta = ADJUSTMENT_LABELS[adj.type] || { label: adj.type }
+
+                return (
+                  <SettingRow
+                    key={adj.type}
+                    label={meta.label}
+                    enabled={adj.enabled}
+                    onToggle={(checked) => updateAdjustment(adj.type, { enabled: checked })}
+                    disabled={meta.unavailable}
+                    badge={meta.unavailable ? (
+                      <Badge variant="outline" className="text-[10px] leading-none px-1.5 py-0.5 bg-amber-500/10 text-amber-600 border-amber-500/20 font-normal">
+                        N/A
+                      </Badge>
+                    ) : undefined}
+                  >
+                    {!meta.unavailable && (
+                      meta.isPercentage ? (
+                        <CompactInput
+                          value={adj.percent ?? 15}
+                          onChange={(v) => updateAdjustment(adj.type, { percent: parseFloat(v) || 0 })}
+                          disabled={!adj.enabled}
+                          suffix="%"
+                          step={1}
+                        />
+                      ) : (
+                        <CompactInput
+                          value={adj.amount}
+                          onChange={(v) => updateAdjustment(adj.type, { amount: parseFloat(v) || 0 })}
+                          disabled={!adj.enabled}
+                          prefix="$"
+                          step={1000}
+                          width="w-20"
+                        />
+                      )
+                    )}
+                  </SettingRow>
+                )
+              })}
+            </div>
+          </div>
+        </Section>
+
+        {/* ── Deal Parameters ─────────────────────────────────────────── */}
+        <Section icon={DollarSign} title="Deal Parameters" defaultOpen={false}>
+          <div className="space-y-3">
+            <div className="flex items-center justify-between rounded-lg bg-secondary/30 px-3 py-2.5">
+              <span className="text-caption font-medium text-foreground">Closing Costs</span>
+              <CompactInput
+                value={settings.dealParams.closingCostsPercent}
+                onChange={(v) => updateDealParams({ closingCostsPercent: parseFloat(v) || 0 })}
+                suffix="%"
+                step={0.5}
+              />
+            </div>
+            <div className="flex items-center justify-between rounded-lg bg-secondary/30 px-3 py-2.5">
+              <span className="text-caption font-medium text-foreground">Carrying Costs</span>
+              <CompactInput
+                value={settings.dealParams.carryingCostsPercent}
+                onChange={(v) => updateDealParams({ carryingCostsPercent: parseFloat(v) || 0 })}
+                suffix="%"
+                step={0.5}
+              />
+            </div>
+            <div className="flex items-center justify-between rounded-lg bg-secondary/30 px-3 py-2.5">
+              <span className="text-caption font-medium text-foreground">Wholesale Fee</span>
+              <CompactInput
+                value={settings.dealParams.wholesaleFee}
+                onChange={(v) => updateDealParams({ wholesaleFee: parseFloat(v) || 0 })}
+                prefix="$"
+                step={1000}
+                width="w-24"
+              />
+            </div>
+            <div className="flex items-center justify-between rounded-lg bg-secondary/30 px-3 py-2.5">
+              <span className="text-caption font-medium text-foreground">Desired Profit</span>
+              <CompactInput
+                value={settings.dealParams.desiredProfit ?? ''}
+                onChange={(v) => updateDealParams({ desiredProfit: v === '' ? null : parseFloat(v) || 0 })}
+                prefix="$"
+                step={5000}
+                width="w-24"
+                placeholder="Auto"
+              />
+            </div>
+            <p className="text-caption-sm text-foreground-tertiary px-1">
+              Leave desired profit empty to use the tier default.
+            </p>
+          </div>
+        </Section>
+
+        {/* ── Renovation Levels ─────────────────────────────────────── */}
+        <Section
+          icon={Hammer}
+          title="Renovation Levels"
+          badge={
+            <Badge variant="outline" className="text-[10px] leading-none px-1.5 py-0.5 font-normal">
+              {ARV_TIER_LABELS[activeTier]}
+            </Badge>
+          }
+          defaultOpen={false}
+        >
+          <p className="text-caption-sm text-foreground-tertiary mb-3">
+            Select a rehab level and customize $/sqft and min profit.
+          </p>
+          <div className="space-y-1.5">
+            {settings.rehabTable[activeTier].map((entry, index) => {
+              const isSelected = settings.rehabLevelIndex === index
+              const estimate = recalcData?.valuation.rehabLevelEstimates[index]
+              return (
+                <div
+                  key={index}
+                  onClick={() => selectRehabLevel(index)}
+                  className={cn(
+                    'rounded-lg px-3 py-2.5 transition-all cursor-pointer',
+                    isSelected
+                      ? 'bg-primary/8 ring-1 ring-primary/25'
+                      : 'bg-secondary/20 hover:bg-secondary/40'
+                  )}
+                >
+                  <div className="flex items-center justify-between mb-1.5">
+                    <div className="flex items-center gap-2">
+                      <div className={cn(
+                        'w-1.5 h-1.5 rounded-full transition-colors',
+                        isSelected ? 'bg-primary' : 'bg-foreground-tertiary/30'
+                      )} />
+                      <span className={cn('text-caption font-medium', isSelected && 'text-primary')}>
+                        {LEVEL_NAMES[index]}
+                      </span>
+                    </div>
+                    {estimate && (
+                      <span className={cn(
+                        'text-caption-sm font-medium tabular-nums',
+                        estimate.projectedProfit > 0 ? 'text-emerald-600' : 'text-red-600'
+                      )}>
+                        {fmt(estimate.projectedProfit)}
+                      </span>
+                    )}
+                  </div>
+                  {estimate && (
+                    <div className="flex items-center gap-3 ml-5 text-caption-sm tabular-nums text-foreground-tertiary mb-2">
+                      <span>Rehab {fmt(estimate.estimatedCost)}</span>
+                      <span className="opacity-40">·</span>
+                      <span>Buy {fmt(estimate.buyPrice)}</span>
+                    </div>
+                  )}
+                  <div className="flex items-center gap-4 ml-5" onClick={(e) => e.stopPropagation()}>
+                    <CompactInput
+                      value={entry.perSqft}
+                      onChange={(v) => updateRehabTableEntry(activeTier, index, { perSqft: parseFloat(v) || 0 })}
+                      prefix="$"
+                      suffix="/sqft"
+                      step={5}
+                    />
+                    <CompactInput
+                      value={entry.minProfit}
+                      onChange={(v) => updateRehabTableEntry(activeTier, index, { minProfit: parseFloat(v) || 0 })}
+                      prefix="Min $"
+                      step={5000}
+                      width="w-20"
+                    />
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </Section>
+
+        {/* ── Major Repair Items ────────────────────────────────────── */}
+        <Section
+          icon={Package}
+          title="Major Repair Items"
+          badge={majorItemsTotal > 0 ? (
+            <Badge variant="outline" className="text-[10px] leading-none px-1.5 py-0.5 bg-emerald-500/10 text-emerald-600 border-emerald-500/20 font-medium tabular-nums">
+              +{fmt(majorItemsTotal)}
+            </Badge>
+          ) : (
+            <Badge variant="outline" className="text-[10px] leading-none px-1.5 py-0.5 font-normal">
+              {settings.majorItems.length} items
+            </Badge>
+          )}
+          defaultOpen={false}
+        >
+          <p className="text-caption-sm text-foreground-tertiary mb-3">
+            Toggle items that need repair. Costs are added on top of the base rehab estimate.
+          </p>
+          <div className="space-y-1">
+            {settings.majorItems.map((item) => (
+              <SettingRow
+                key={item.id}
+                label={item.name}
+                enabled={item.enabled}
+                onToggle={(checked) => updateMajorItem(item.id, { enabled: checked })}
+              >
+                <CompactInput
+                  value={item.cost}
+                  onChange={(v) => updateMajorItem(item.id, { cost: parseFloat(v) || 0 })}
+                  disabled={!item.enabled}
+                  prefix="$"
+                  step={500}
+                  width="w-20"
+                />
+              </SettingRow>
+            ))}
+          </div>
+          {majorItemsTotal > 0 && (
+            <div className="mt-3 pt-3 border-t border-border flex items-center justify-between px-1">
+              <div className="flex items-center gap-2">
+                <Wrench className="w-3.5 h-3.5 text-foreground-tertiary" />
+                <span className="text-caption font-medium text-foreground-secondary">Total</span>
+              </div>
+              <span className="text-caption font-bold tabular-nums">{fmt(majorItemsTotal)}</span>
+            </div>
+          )}
+        </Section>
+      </div>
+
+      {/* Footer */}
+      <div className="border-t border-border p-4 bg-background/50">
+        <button
+          type="button"
+          onClick={resetToDefaults}
+          className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-body-sm font-medium text-foreground-secondary hover:text-foreground hover:bg-secondary rounded-lg transition-colors border border-border"
+        >
+          <RotateCcw className="w-3.5 h-3.5" />
+          Reset to My Defaults
+        </button>
+      </div>
+    </div>
+  )
+}

@@ -79,12 +79,12 @@ export function RealtimeStatus({
   const failedSteps = steps.filter((s) => s.status === 'failed').length
 
   return (
-    <div className={cn('glass-progress rounded-2xl overflow-hidden', className)}>
-      <div className="px-6 py-5 border-b border-border/20">
+    <div className={cn('rounded-xl overflow-hidden border border-border', className)}>
+      <div className="px-6 py-5 space-y-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center">
-              <Zap className="w-4.5 h-4.5 text-primary" />
+            <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
+              <Zap className="w-4 h-4 text-primary" />
             </div>
             <h3 className="text-body font-semibold">Analysis Progress</h3>
           </div>
@@ -115,8 +115,7 @@ export function RealtimeStatus({
             {getStatusBadge(status)}
           </div>
         </div>
-      </div>
-      <div className="px-6 py-5 space-y-4">
+
         {/* Progress bar */}
         <ProgressBar steps={steps} />
 
@@ -125,7 +124,7 @@ export function RealtimeStatus({
 
         {/* Error display */}
         {error && (
-          <div className="flex items-start gap-2 p-3 rounded-lg bg-destructive/10 border border-destructive/20">
+          <div className="flex items-start gap-2 p-3 rounded-lg bg-destructive/10">
             <AlertCircle className="h-5 w-5 text-destructive flex-shrink-0 mt-0.5" />
             <div>
               <p className="text-sm font-medium text-destructive">Analysis Failed</p>
@@ -199,7 +198,7 @@ interface StatCardProps {
 
 function StatCard({ label, value, subtext, icon, className }: StatCardProps) {
   return (
-    <div className={cn('p-3 rounded-xl glass-stat', className)}>
+    <div className={cn('p-3 rounded-xl bg-muted/40', className)}>
       <div className="flex items-center gap-2 text-muted-foreground mb-1">
         {icon}
         <span className="text-xs">{label}</span>

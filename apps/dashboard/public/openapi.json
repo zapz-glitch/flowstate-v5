@@ -186,7 +186,7 @@
       "post": {
         "tags": ["Analysis"],
         "summary": "Start property analysis",
-        "description": "Start an async property analysis using Cloudflare Workflows. Returns immediately with a job ID and URLs for status/streaming.\n\nThe analysis includes:\n1. Property lookup and data fetching\n2. Comparable sales search\n3. Photo fetching and AI vision analysis\n4. Appraisal adjustments\n5. ARV calculation and investment metrics\n\nResults can be retrieved via WebSocket streaming or HTTP polling.",
+        "description": "Start an async property analysis using Cloudflare Workflows. Returns immediately with a job ID and URLs for status/streaming.\n\nThe analysis includes:\n1. Property lookup and data fetching\n2. Comparable sales search\n3. Photo fetching and AI vision analysis\n4. Appraisal adjustments\n5. ARV calculation and investment metrics\n\nResults can be retrieved via SSE streaming or HTTP polling.",
         "requestBody": {
           "required": true,
           "content": {
@@ -341,11 +341,11 @@
         }
       }
     },
-    "/v1/analyze/ws-token": {
+    "/v1/analyze/stream-token": {
       "post": {
         "tags": ["Analysis"],
-        "summary": "Generate WebSocket token",
-        "description": "Generate a short-lived signed token for WebSocket authentication. The token expires in 5 minutes and is scoped to a specific job.",
+        "summary": "Generate stream token",
+        "description": "Generate a short-lived signed token for SSE stream authentication. The token expires in 5 minutes and is scoped to a specific job.",
         "requestBody": {
           "required": true,
           "content": {
@@ -363,7 +363,7 @@
         },
         "responses": {
           "200": {
-            "description": "WebSocket token generated",
+            "description": "Stream token generated",
             "content": {
               "application/json": {
                 "schema": {
@@ -374,7 +374,7 @@
                       "type": "object",
                       "properties": {
                         "token": { "type": "string", "description": "Signed JWT token" },
-                        "wsUrl": { "type": "string", "description": "Full WebSocket URL with token" },
+                        "streamUrl": { "type": "string", "description": "Full SSE stream URL with token" },
                         "expiresIn": { "type": "integer", "example": 300, "description": "Token lifetime in seconds" }
                       }
                     }
@@ -1257,7 +1257,7 @@
               "jobId": { "type": "string", "example": "job_1708123456789_abc1234" },
               "propertyKey": { "type": "string", "description": "Property key for status lookup" },
               "status": { "type": "string", "enum": ["queued"], "example": "queued" },
-              "streamUrl": { "type": "string", "description": "WebSocket URL for real-time updates" },
+              "streamUrl": { "type": "string", "description": "SSE URL for real-time updates" },
               "pollUrl": { "type": "string", "description": "HTTP URL for polling status" },
               "estimatedDurationMs": { "type": "integer", "example": 15000, "description": "Estimated job duration in milliseconds" }
             }

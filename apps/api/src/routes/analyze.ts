@@ -23,25 +23,17 @@
  */
 
 import { Hono } from 'hono'
-import { drizzle } from 'drizzle-orm/d1'
-import { eq, and, or, sql } from 'drizzle-orm'
 import type { Env } from '../types'
 import type { AuthContext } from '../middleware/auth'
-import {
-  type FilterType,
-  type AdjustmentType,
-} from '../services/appraisal'
 import {
   REHAB_LEVELS,
   MAJOR_ITEMS,
   type MajorItem,
-  type ArvTier,
-  type RehabEstimate,
 } from '../services/valuation'
 import type { QueueJobResponse, JobStatusResponse } from '../durable-objects/types'
 import type { AnalysisWorkflowParams } from '../workflows/types'
 import { generateWsToken } from '../utils/ws-token'
-import { appraisalRulePreset, appraisalRuleFilter, appraisalRuleAdjustment, rehabConfig, dealParams, locationSettings, majorItemCosts } from '../db'
+import { loadUserAnalysisSettings } from '../services/user-settings'
 
 type Variables = { auth: AuthContext }
 
@@ -101,10 +93,6 @@ interface AnalyzeRequest {
     maxComps?: number
     monthsBack?: number
   }
-
-  // Appraisal preset ID — loads filters/adjustments from DB.
-  // If omitted, the user's default preset is used. Falls back to system defaults.
-  appraisalPresetId?: string
 
   // Buybox parameters
   buybox?: {
@@ -214,150 +202,12 @@ analyze.post('/', async (c) => {
       )
     }
 
-    // Load appraisal rules from preset.
-    // Priority: explicit presetId in request > user's default preset > system defaults
-    let appraisalRules
-    {
-      const db = drizzle(c.env.DB)
-
-      // Resolve preset ID: explicit request param, or fall back to user's default preset
-      let resolvedPresetId = body.appraisalPresetId
-      if (!resolvedPresetId) {
-        const [defaultPreset] = await db
-          .select({ id: appraisalRulePreset.id })
-          .from(appraisalRulePreset)
-          .where(and(eq(appraisalRulePreset.userId, auth.userId), eq(appraisalRulePreset.isDefault, true)))
-          .limit(1)
-        if (defaultPreset) resolvedPresetId = defaultPreset.id
-      }
-
-      if (resolvedPresetId) {
-        const [preset] = await db
-          .select()
-          .from(appraisalRulePreset)
-          .where(and(eq(appraisalRulePreset.id, resolvedPresetId), eq(appraisalRulePreset.userId, auth.userId)))
-          .limit(1)
-
-        if (preset) {
-          const [presetFilters, presetAdjustments] = await Promise.all([
-            db.select().from(appraisalRuleFilter).where(eq(appraisalRuleFilter.presetId, preset.id)),
-            db.select().from(appraisalRuleAdjustment).where(eq(appraisalRuleAdjustment.presetId, preset.id)),
-          ])
-          appraisalRules = {
-            filters: presetFilters.map((f) => ({ type: f.filterType as FilterType, enabled: f.enabled, value: f.value })),
-            adjustments: presetAdjustments.map((a) => ({ type: a.adjustmentType as AdjustmentType, enabled: a.enabled, amount: a.amount, percent: a.percentage })),
-          }
-          console.log(`[Analyze] Loaded appraisal preset: "${preset.name}" (${presetFilters.length} filters, ${presetAdjustments.length} adjustments)${body.appraisalPresetId ? '' : ' [default]'}`)
-        }
-      }
-    }
-
-    // Load rehab config + deal params + major item costs in parallel
-    const db2 = drizzle(c.env.DB)
-    const [rehabRow, dealParamsRow, majorItemCostsRow] = await Promise.all([
-      db2.select().from(rehabConfig).where(eq(rehabConfig.userId, auth.userId)).limit(1).then((r) => r[0]),
-      db2.select().from(dealParams).where(eq(dealParams.userId, auth.userId)).limit(1).then((r) => r[0]),
-      db2.select().from(majorItemCosts).where(eq(majorItemCosts.userId, auth.userId)).limit(1).then((r) => r[0]),
-    ])
-
-    let customRehabTable: Record<ArvTier, RehabEstimate[]> | undefined
-    if (rehabRow) {
-      try {
-        customRehabTable = JSON.parse(rehabRow.configJson)
-        console.log(`[Analyze] Loaded custom rehab config for user ${auth.userId}`)
-      } catch {
-        console.warn(`[Analyze] Failed to parse rehab config for user ${auth.userId}, using defaults`)
-      }
-    }
-
-    // Merge deal params into buybox (request buybox overrides user defaults)
-    let mergedBuybox = {
-      ...(dealParamsRow ? {
-        closingCostsPercent: dealParamsRow.closingCostsPercent,
-        carryingCostsPercent: dealParamsRow.carryingCostsPercent,
-        wholesaleFee: dealParamsRow.wholesaleFee,
-        desiredProfit: dealParamsRow.desiredProfit,
-      } : {}),
-      ...body.buybox,
-    }
-    if (dealParamsRow) console.log(`[Analyze] Loaded deal params for user ${auth.userId}`)
-
-    // Load custom major item costs
-    let customMajorItemCosts: Record<string, number> | undefined
-    if (majorItemCostsRow) {
-      try {
-        customMajorItemCosts = JSON.parse(majorItemCostsRow.costsJson)
-        console.log(`[Analyze] Loaded custom major item costs for user ${auth.userId}`)
-      } catch {
-        console.warn(`[Analyze] Failed to parse major item costs for user ${auth.userId}`)
-      }
-    }
-
-    // Location-based overrides (zip > city > state)
-    // Each location setting can override appraisal preset, rehab config, and/or deal params.
-    // body.buybox explicit fields still win over location overrides.
-    {
-      const cityNorm = body.city?.toLowerCase()
-      const stateNorm = body.state?.toUpperCase()
-      const zipNorm = body.zipCode
-
-      if (cityNorm || stateNorm || zipNorm) {
-        const locRows = await db2.select().from(locationSettings)
-          .where(and(
-            eq(locationSettings.userId, auth.userId),
-            or(
-              zipNorm ? eq(locationSettings.zipCode, zipNorm) : sql`0`,
-              cityNorm ? eq(locationSettings.city, cityNorm) : sql`0`,
-              stateNorm ? eq(locationSettings.state, stateNorm) : sql`0`,
-            )
-          ))
-
-        // Priority: zip > city+state > state only
-        const locMatch =
-          locRows.find(r => r.zipCode !== null && r.zipCode === zipNorm) ??
-          locRows.find(r => r.city !== null && r.city === cityNorm && r.state === stateNorm) ??
-          locRows.find(r => r.state !== null && r.state === stateNorm && r.city === null)
-
-        if (locMatch) {
-          // Override appraisal preset
-          if (locMatch.appraisalPresetId) {
-            const [locPreset] = await db2.select().from(appraisalRulePreset)
-              .where(and(eq(appraisalRulePreset.id, locMatch.appraisalPresetId), eq(appraisalRulePreset.userId, auth.userId)))
-              .limit(1)
-            if (locPreset) {
-              const [pFilters, pAdjs] = await Promise.all([
-                db2.select().from(appraisalRuleFilter).where(eq(appraisalRuleFilter.presetId, locPreset.id)),
-                db2.select().from(appraisalRuleAdjustment).where(eq(appraisalRuleAdjustment.presetId, locPreset.id)),
-              ])
-              appraisalRules = {
-                filters: pFilters.map(f => ({ type: f.filterType as FilterType, enabled: f.enabled, value: f.value })),
-                adjustments: pAdjs.map(a => ({ type: a.adjustmentType as AdjustmentType, enabled: a.enabled, amount: a.amount, percent: a.percentage })),
-              }
-            }
-          }
-          // Override rehab config
-          if (locMatch.rehabConfigJson) {
-            try { customRehabTable = JSON.parse(locMatch.rehabConfigJson) } catch {}
-          }
-          // Override deal params (location wins over user default; explicit body.buybox still wins)
-          if (locMatch.dealParamsJson) {
-            try {
-              const locDeal = JSON.parse(locMatch.dealParamsJson)
-              mergedBuybox = { ...mergedBuybox, ...locDeal, ...body.buybox }
-            } catch {}
-          }
-          // Override major item costs (location wins over user default)
-          if (locMatch.majorItemCostsJson) {
-            try {
-              const locCosts = JSON.parse(locMatch.majorItemCostsJson)
-              // Merge: location costs override user defaults, but don't replace explicit buybox.majorItems
-              customMajorItemCosts = { ...customMajorItemCosts, ...locCosts }
-            } catch {}
-          }
-          console.log(`[Analyze] Location override applied: ${locMatch.zipCode ?? locMatch.city ?? locMatch.state}`)
-        }
-      }
-    }
+    // Load all user settings (appraisal presets, rehab config, deal params, location overrides)
+    const userSettings = await loadUserAnalysisSettings(c.env.DB, {
+      userId: auth.userId,
+      address: { city: body.city, state: body.state, zipCode: body.zipCode },
+      buyboxOverrides: body.buybox,
+    })
 
     // Start the workflow
     const workflowParams: AnalysisWorkflowParams = {
@@ -373,11 +223,11 @@ analyze.post('/', async (c) => {
       searchOptions: body.searchOptions,
       enrichment: body.enrichment,
       photoAnalysis: body.photoAnalysis ?? body.zillowContext,
-      appraisalRules,
-      buybox: mergedBuybox,
+      appraisalRules: userSettings.appraisalRules,
+      buybox: userSettings.mergedBuybox,
       skipCache: body.skipCache,
-      customRehabTable,
-      customMajorItemCosts,
+      customRehabTable: userSettings.customRehabTable,
+      customMajorItemCosts: userSettings.customMajorItemCosts,
     }
 
     const workflow = await c.env.ANALYSIS_WORKFLOW.create({
@@ -479,9 +329,9 @@ analyze.get('/jobs/:jobId', async (c) => {
 })
 
 /**
- * POST /analyze/ws-token
+ * POST /analyze/stream-token
  *
- * Generate a short-lived signed token for WebSocket authentication.
+ * Generate a short-lived signed token for SSE stream authentication.
  * This endpoint requires authentication (via auth middleware).
  *
  * The token is HMAC-SHA256 signed and contains:
@@ -495,7 +345,7 @@ analyze.get('/jobs/:jobId', async (c) => {
  * - Tokens are scoped to specific job and property
  * - Signature prevents tampering
  */
-analyze.post('/ws-token', async (c) => {
+analyze.post('/stream-token', async (c) => {
   try {
     const auth = c.get('auth')
     const body = await c.req.json<{ jobId: string; propertyKey: string }>()
@@ -509,7 +359,7 @@ analyze.post('/ws-token', async (c) => {
 
     const secret = c.env.DASHBOARD_INTERNAL_SECRET
     if (!secret) {
-      console.error('[WS Token] DASHBOARD_INTERNAL_SECRET not configured')
+      console.error('[Stream Token] DASHBOARD_INTERNAL_SECRET not configured')
       return c.json(
         { success: false, error: 'Server configuration error' },
         500
@@ -524,23 +374,22 @@ analyze.post('/ws-token', async (c) => {
       secret
     )
 
-    // Build WebSocket URL
+    // Build SSE URL
     const baseUrl = new URL(c.req.url)
-    const wsProtocol = baseUrl.protocol === 'https:' ? 'wss:' : 'ws:'
-    const wsUrl = `${wsProtocol}//${baseUrl.host}/ws/analyze/${body.jobId}?token=${encodeURIComponent(token)}`
+    const streamUrl = `${baseUrl.protocol}//${baseUrl.host}/sse/analyze/${body.jobId}?token=${encodeURIComponent(token)}`
 
-    console.log(`[WS Token] Generated WS URL: ${wsUrl}`)
+    console.log(`[Stream Token] Generated SSE URL: ${streamUrl}`)
 
     return c.json({
       success: true,
       data: {
         token,
-        wsUrl,
+        streamUrl,
         expiresIn: 300, // 5 minutes in seconds
       },
     })
   } catch (error) {
-    console.error('[WS Token] Error:', error)
+    console.error('[Stream Token] Error:', error)
     return c.json(
       {
         success: false,

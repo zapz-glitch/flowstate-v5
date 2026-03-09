@@ -295,6 +295,27 @@ export interface ResponseContext {
   compSupplementedFields?: Map<string, SupplementedField[]>
   /** All rehab level estimates (pre-calculated for each level) */
   rehabLevelEstimates?: RehabLevelEstimate[]
+  /** Applied settings snapshot for client-side recalculation initialization */
+  appliedSettings?: AppliedSettings
+}
+
+/**
+ * Snapshot of settings used during analysis.
+ * Included in the response so the client can initialize with the same settings.
+ */
+export interface AppliedSettings {
+  filters: Array<{ type: string; enabled: boolean; value: number }>
+  adjustments: Array<{ type: string; enabled: boolean; amount: number; percent?: number }>
+  dealParams: {
+    closingCostsPercent: number
+    carryingCostsPercent: number
+    wholesaleFee: number
+    desiredProfit: number | null
+  }
+  rehabLevelIndex: number
+  rehabTable: Record<string, Array<{ perSqft: number; minProfit: number }>>
+  majorItems?: Array<{ id: string; enabled: boolean; cost: number }>
+  additionPlay: number
 }
 
 /**
@@ -492,6 +513,8 @@ export interface AnalysisResponse {
     timestamp: string
     dataProvider: string | null
   }
+  /** Settings used during this analysis (for client-side recalculation initialization) */
+  appliedSettings?: AppliedSettings
 }
 
 /**
@@ -531,10 +554,19 @@ export function buildAnalysisResponse(
   const enabledComps = appraisalResult.comparables.filter((c) => c.isEnabled)
   const disabledComps = appraisalResult.comparables.filter((c) => !c.isEnabled)
 
-  // Return ALL comps: enabled first (by distance), then disabled (by distance)
+  // Sort helper: subdivision match first, then by distance
+  const bySubdivisionThenDistance = (a: AppraisedComparable, b: AppraisedComparable) => {
+    const aSubMatch = a.evaluation.filterResults.find((f) => f.type === 'subdivision_match')?.passed ?? false
+    const bSubMatch = b.evaluation.filterResults.find((f) => f.type === 'subdivision_match')?.passed ?? false
+    if (aSubMatch && !bSubMatch) return -1
+    if (!aSubMatch && bSubMatch) return 1
+    return (a.distanceMiles ?? 999) - (b.distanceMiles ?? 999)
+  }
+
+  // Return ALL comps: enabled first (subdivision match → distance), then disabled (same order)
   const allComps = [
-    ...enabledComps.sort((a, b) => (a.distanceMiles ?? 999) - (b.distanceMiles ?? 999)),
-    ...disabledComps.sort((a, b) => (a.distanceMiles ?? 999) - (b.distanceMiles ?? 999)),
+    ...enabledComps.sort(bySubdivisionThenDistance),
+    ...disabledComps.sort(bySubdivisionThenDistance),
   ].map((comp) => {
     const compPhotos = photoBundle?.comps[comp.id]?.photos.slice(0, 3) ?? []
 
@@ -729,6 +761,9 @@ export function buildAnalysisResponse(
       timestamp: new Date().toISOString(),
       dataProvider: property.provider,
     },
+
+    // ═══ APPLIED SETTINGS (for client-side recalculation) ═══════════════════
+    appliedSettings: ctx.appliedSettings,
   }
 }
 

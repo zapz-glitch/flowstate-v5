@@ -138,6 +138,11 @@ export interface ValuationService {
    * Get ARV tier for a value.
    */
   getArvTier(arv: number): ArvTier
+
+  /**
+   * Get the rehab table used by this service instance.
+   */
+  getRehabTable(): Record<ArvTier, RehabEstimate[]>
 }
 
 // ─── Implementation ────────────────────────────────────────────────────────────
@@ -282,6 +287,10 @@ class PropertyValuationService implements ValuationService {
 
   getArvTier(arv: number): ArvTier {
     return getArvTierInternal(arv)
+  }
+
+  getRehabTable(): Record<ArvTier, RehabEstimate[]> {
+    return this.rehabTable
   }
 }
 

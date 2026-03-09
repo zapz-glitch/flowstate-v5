@@ -23,7 +23,11 @@ import dealParamsRoute from './routes/deal-params'
 import locationSettingsRoute from './routes/location-settings'
 import majorItemCostsRoute from './routes/major-item-costs'
 import comments from './routes/comments'
-import wsStream from './routes/ws-stream'
+import sseStream from './routes/sse-stream'
+import reportsRoute from './routes/reports'
+import ghlSettingsRoute from './routes/ghl-settings'
+import userReportsRoute from './routes/user-reports'
+import ghlWebhook from './routes/webhooks/ghl'
 
 // Durable Objects
 export { AnalysisJobDO, RateLimitCoordinatorDO, FirecrawlRateLimiterDO } from './durable-objects'
@@ -98,9 +102,21 @@ app.route('/major-item-costs', majorItemCostsRoute)
 // Comments routes (session auth via Better Auth cookies)
 app.route('/comments', comments)
 
-// WebSocket routes (handles its own auth via signed tokens)
-// Mounted outside /v1 because browsers can't set headers on WebSocket connections
-app.route('/ws', wsStream)
+// GHL integration settings routes (session auth via Better Auth cookies)
+app.route('/ghl-settings', ghlSettingsRoute)
+
+// User reports routes (session auth via Better Auth cookies)
+app.route('/user/reports', userReportsRoute)
+
+// GHL webhook routes (self-authenticating via URL secret, no auth middleware)
+app.route('/webhooks/ghl', ghlWebhook)
+
+// SSE stream routes (handles its own auth via signed tokens)
+// Mounted outside /v1 because EventSource can't set custom headers
+app.route('/sse', sseStream)
+
+// Public reports (no auth - jobId is unguessable)
+app.route('/reports', reportsRoute)
 
 // API v1 routes (require API key auth)
 const v1 = new Hono<{ Bindings: Env; Variables: Variables }>()

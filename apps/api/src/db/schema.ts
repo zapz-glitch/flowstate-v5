@@ -160,17 +160,22 @@ export const savedReports = sqliteTable(
     propertyData: text('property_data'), // Full property response
     comparablesData: text('comparables_data'), // Comparables response
     valuationData: text('valuation_data'), // ARV, MAO, etc.
+    fullResponseJson: text('full_response_json'), // Complete AnalysisResponse JSON
     // Key metrics for quick display
     arv: real('arv'),
     asIsValue: real('as_is_value'),
     maxAllowableOffer: real('max_allowable_offer'),
     estimatedRepairs: real('estimated_repairs'),
+    // Workflow link
+    jobId: text('job_id'), // Links to workflow job
+    pdfKey: text('pdf_key'), // Reserved for future PDF support
     // Timestamps
     createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
   },
   (table) => [
     index('idx_saved_reports_user_id').on(table.userId),
     index('idx_saved_reports_created_at').on(table.createdAt),
+    index('idx_saved_reports_job_id').on(table.jobId),
   ]
 )
 
@@ -393,10 +398,14 @@ export const locationSettings = sqliteTable(
     userId: text('user_id')
       .notNull()
       .references(() => user.id, { onDelete: 'cascade' }),
+    // Which setting type this row belongs to: 'appraisal' | 'rehab' | 'deal' | 'major'
+    settingType: text('setting_type').notNull().default('appraisal'),
     // Exactly one of these is non-null (enforced at app level)
     state: text('state'),        // "FL" uppercase 2-letter
     city: text('city'),          // normalized to lowercase for matching
     zipCode: text('zip_code'),   // "33101"
+    // Whether this override is active (false = saved but disabled, true = applied during analysis)
+    isEnabled: integer('is_enabled', { mode: 'boolean' }).notNull().default(true),
     // Overrides — all optional (null = don't override this setting)
     appraisalPresetId: text('appraisal_preset_id')
       .references(() => appraisalRulePreset.id, { onDelete: 'set null' }),
@@ -433,6 +442,42 @@ export const majorItemCosts = sqliteTable(
     updatedAt: text('updated_at').notNull().$defaultFn(() => new Date().toISOString()),
   },
   (table) => [index('idx_major_item_costs_user_id').on(table.userId)]
+)
+
+// ==========================================
+// GHL Integration Settings (per-user GoHighLevel CRM config)
+// ==========================================
+
+export const ghlSettings = sqliteTable(
+  'ghl_settings',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    userId: text('user_id')
+      .notNull()
+      .unique()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    /** GHL Private Integration API token */
+    apiToken: text('api_token').notNull(),
+    /** GHL Location ID (for webhook payload validation) */
+    locationId: text('location_id').notNull(),
+    /** Whether the integration is active */
+    isEnabled: integer('is_enabled', { mode: 'boolean' }).notNull().default(true),
+    /** Auto-generated secret for webhook URL authentication */
+    webhookSecret: text('webhook_secret').notNull().$defaultFn(() => crypto.randomUUID()),
+    /**
+     * Custom field mappings: JSON of Record<AnalysisFieldKey, string>
+     * Maps analysis fields (arv, buyPrice, etc.) to GHL custom field IDs
+     */
+    fieldMappings: text('field_mappings'),
+    /** Which analysis field to use for opportunity monetaryValue (default: 'arv') */
+    monetaryValueField: text('monetary_value_field').default('arv'),
+    createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
+    updatedAt: text('updated_at').notNull().$defaultFn(() => new Date().toISOString()),
+  },
+  (table) => [
+    index('idx_ghl_settings_user_id').on(table.userId),
+    index('idx_ghl_settings_webhook_secret').on(table.webhookSecret),
+  ]
 )
 
 // ==========================================

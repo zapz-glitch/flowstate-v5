@@ -57,6 +57,34 @@
       "when": 1772640842860,
       "tag": "0007_past_harry_osborn",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1772710870638,
+      "tag": "0008_premium_silk_fever",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1772717347525,
+      "tag": "0009_free_justin_hammer",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1772827443979,
+      "tag": "0010_last_gravity",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1772974160898,
+      "tag": "0011_flawless_molecule_man",
+      "breakpoints": true
     }
   ]
 }

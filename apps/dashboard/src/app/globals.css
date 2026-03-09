@@ -37,24 +37,24 @@
     --foreground: 0 0% 96%;
     --foreground-secondary: 0 0% 70%;
     --foreground-tertiary: 0 0% 45%;
-    --card: 240 5% 7%;
-    --card-hover: 240 5% 10%;
+    --card: 240 4% 8%;
+    --card-hover: 240 4% 11%;
     --card-foreground: 0 0% 96%;
-    --popover: 240 5% 7%;
+    --popover: 240 4% 8%;
     --popover-foreground: 0 0% 96%;
     --primary: 263 70% 58%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 240 5% 10%;
+    --secondary: 240 4% 11%;
     --secondary-foreground: 0 0% 96%;
-    --muted: 240 5% 10%;
+    --muted: 240 4% 11%;
     --muted-foreground: 0 0% 45%;
     --accent: 263 70% 58%;
     --accent-secondary: 280 80% 65%;
     --accent-foreground: 0 0% 100%;
     --destructive: 0 84% 60%;
     --destructive-foreground: 0 0% 100%;
-    --border: 240 4% 12%;
-    --input: 240 5% 10%;
+    --border: 240 4% 15%;
+    --input: 240 4% 11%;
     --ring: 263 70% 58%;
   }
 
@@ -299,4 +299,134 @@ body {
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
   border: 1px solid hsl(var(--border));
+}
+
+/* ─── Print / PDF Underwriter Report ──────────────────────────────────────── */
+
+@media print {
+  /* Hide UI chrome */
+  nav,
+  aside,
+  header,
+  .no-print,
+  [data-sidebar],
+  [data-radix-popper-content-wrapper] {
+    display: none !important;
+  }
+
+  /* Page setup */
+  @page {
+    size: letter portrait;
+    margin: 18mm 16mm 18mm 16mm;
+  }
+
+  body {
+    background: #fff !important;
+    color: #111 !important;
+    font-family: Georgia, 'Times New Roman', serif;
+    font-size: 10pt;
+    line-height: 1.5;
+  }
+
+  /* Remove playground background gradient */
+  .playground-bg {
+    background: #fff !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    min-height: unset !important;
+  }
+
+  /* Strip glass effects — use clean white cards */
+  .glass-result,
+  .glass-comp,
+  .glass-stat,
+  .glass-accent,
+  .glass-input {
+    background: #fff !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    border: 1px solid #e5e7eb !important;
+    border-radius: 8px !important;
+    box-shadow: none !important;
+  }
+
+  /* Page breaks */
+  #underwriter-report > div {
+    page-break-inside: avoid;
+  }
+
+  .print-break-before {
+    page-break-before: always;
+  }
+
+  /* Result cards spacing */
+  .space-y-6 > * + * {
+    margin-top: 16pt !important;
+  }
+
+  /* Typography overrides */
+  .text-heading-sm {
+    font-size: 13pt !important;
+    font-weight: 700 !important;
+  }
+
+  .text-body {
+    font-size: 10pt !important;
+  }
+
+  .text-caption,
+  .text-caption-sm {
+    font-size: 8pt !important;
+  }
+
+  /* Stat cells */
+  .glass-stat {
+    padding: 6px 8px !important;
+  }
+
+  /* Badges */
+  .badge,
+  [class*="badge"] {
+    border: 1px solid currentColor !important;
+    background: transparent !important;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+
+  /* Colors must print */
+  .text-emerald-600,
+  .text-red-600,
+  .text-amber-600,
+  .text-primary {
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+
+  /* Hide interactive elements */
+  button.no-print {
+    display: none !important;
+  }
+
+  /* Report header */
+  .print-report-header {
+    display: block !important;
+    margin-bottom: 20pt;
+  }
+
+  /* Hide expand/collapse chevrons and raw JSON */
+  .glass-result:last-child {
+    display: none !important;
+  }
+
+  /* Footer */
+  #underwriter-report::after {
+    content: "Confidential — Prepared by Flowstate Underwriting · " attr(data-date);
+    display: block;
+    margin-top: 24pt;
+    padding-top: 8pt;
+    border-top: 1px solid #e5e7eb;
+    font-size: 7.5pt;
+    color: #9ca3af;
+    text-align: center;
+  }
 }

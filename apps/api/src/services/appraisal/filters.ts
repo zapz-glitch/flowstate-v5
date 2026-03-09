@@ -92,7 +92,7 @@ export const FILTER_RULES: FilterRuleDefinition[] = [
 
   {
     type: 'sale_age',
-    defaults: { enabled: true, value: 30 },
+    defaults: { enabled: true, value: 180 },
     label: {
       label: 'Sale Age',
       shortLabel: 'Sale Age',

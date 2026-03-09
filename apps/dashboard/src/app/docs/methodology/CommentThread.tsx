@@ -264,7 +264,7 @@ export default function CommentThread({ sectionId }: { sectionId: string }) {
   }
 
   return (
-    <div className="mt-6 pt-4 border-t border-border/60">
+    <div className="mt-6 pt-4 border-t border-border">
       <button
         onClick={handleExpand}
         className="flex items-center gap-2 text-body-sm text-foreground-tertiary hover:text-foreground transition-colors"

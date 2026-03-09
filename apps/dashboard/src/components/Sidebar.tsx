@@ -8,6 +8,7 @@ import {
   LogOut,
   Home,
   FileText,
+  ClipboardList,
   Search,
   ChevronLeft,
   ChevronRight,
@@ -17,6 +18,7 @@ import {
   User,
   BookOpen,
   Settings2,
+  Plug,
 } from 'lucide-react'
 import { signOut } from '@/lib/auth-client'
 import { Logo } from '@/components/ui/Logo'
@@ -42,7 +44,9 @@ const navigation: Array<{
 }> = [
   { name: 'Overview', href: '/dashboard', icon: Home },
   { name: 'API Playground', href: '/dashboard/analyze', icon: Search },
+  { name: 'Reports', href: '/dashboard/reports', icon: ClipboardList },
   { name: 'Evaluation Settings', href: '/dashboard/evaluation-settings', icon: Settings2 },
+  { name: 'Integrations', href: '/dashboard/integrations', icon: Plug },
   { name: 'API Keys', href: '/dashboard/api-keys', icon: Key },
   { name: 'Usage', href: '/dashboard/usage', icon: BarChart3 },
   { name: 'API Logs', href: '/dashboard/logs', icon: FileText },

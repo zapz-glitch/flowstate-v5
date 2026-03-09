@@ -21,6 +21,7 @@
 
 import type { Env } from '../../types';
 import { createCoreLogicProvider } from './providers/corelogic';
+import { createAttomProvider } from './providers/attom';
 import {
   createCacheService,
   propertyKey,
@@ -151,8 +152,12 @@ class PropertyApi implements PropertyApiService {
   constructor(env: Env, initialConfig?: Partial<PropertyApiConfig>) {
     this.env = env;
     this.cache = createCacheService(env);
+    // Allow env var to override the default provider
+    const envProvider = (env.PROPERTY_PROVIDER as PropertyProvider | undefined);
+    const activeProvider = initialConfig?.provider || envProvider || DEFAULT_PROVIDER;
+
     this.currentConfig = {
-      provider: initialConfig?.provider || DEFAULT_PROVIDER,
+      provider: activeProvider,
       propertyCacheTtl: initialConfig?.propertyCacheTtl ?? 86400, // 24 hours
       comparablesCacheTtl: initialConfig?.comparablesCacheTtl ?? 3600, // 1 hour
     };
@@ -160,8 +165,7 @@ class PropertyApi implements PropertyApiService {
     // Initialize providers
     this.providers = new Map();
     this.providers.set('corelogic', createCoreLogicProvider(env));
-    // TODO: Add ATTOM provider when implemented
-    // this.providers.set('attom', createAttomProvider(env))
+    this.providers.set('attom', createAttomProvider(env));
   }
 
   private getProvider(): PropertyProviderAdapter {

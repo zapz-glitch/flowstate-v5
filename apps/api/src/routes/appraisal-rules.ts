@@ -147,6 +147,89 @@ appraisalRules.get('/defaults', async (c) => {
   })
 })
 
+// ─── GET /appraisal-presets/mine ─────────────────────────────────────────────
+// Returns the user's single default preset, auto-creating it if it doesn't exist.
+
+appraisalRules.get('/mine', async (c) => {
+  const session = await getSession(c)
+  if (!session?.user) {
+    return c.json({ error: 'Not authenticated' }, 401)
+  }
+
+  const db = drizzle(c.env.DB)
+  const now = new Date().toISOString()
+
+  // Find or create the user's default preset
+  let [preset] = await db
+    .select()
+    .from(appraisalRulePreset)
+    .where(
+      and(
+        eq(appraisalRulePreset.userId, session.user.id),
+        eq(appraisalRulePreset.isDefault, true)
+      )
+    )
+    .limit(1)
+
+  if (!preset) {
+    // Auto-create default preset seeded from system defaults
+    const presetId = crypto.randomUUID()
+    ;[preset] = await db
+      .insert(appraisalRulePreset)
+      .values({
+        id: presetId,
+        userId: session.user.id,
+        name: 'Default',
+        description: null,
+        isDefault: true,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning()
+
+    await db.insert(appraisalRuleFilter).values(
+      DEFAULT_FILTERS.map((f) => ({
+        id: crypto.randomUUID(),
+        presetId,
+        filterType: f.type,
+        enabled: f.enabled,
+        value: f.value,
+        createdAt: now,
+      }))
+    )
+
+    await db.insert(appraisalRuleAdjustment).values(
+      DEFAULT_ADJUSTMENTS.map((a) => ({
+        id: crypto.randomUUID(),
+        presetId,
+        adjustmentType: a.type,
+        enabled: a.enabled,
+        amount: a.amount,
+        percentage: a.percent ?? 0,
+        createdAt: now,
+      }))
+    )
+  }
+
+  const filters = await db
+    .select()
+    .from(appraisalRuleFilter)
+    .where(eq(appraisalRuleFilter.presetId, preset.id))
+
+  const adjustments = await db
+    .select()
+    .from(appraisalRuleAdjustment)
+    .where(eq(appraisalRuleAdjustment.presetId, preset.id))
+
+  return c.json({
+    preset: {
+      ...preset,
+      filters: filters.map((f) => ({ ...f, filterType: f.filterType as FilterType })),
+      adjustments: adjustments.map((a) => ({ ...a, adjustmentType: a.adjustmentType as AdjustmentType })),
+    },
+  })
+})
+
 // ─── GET /appraisal-presets/default ─────────────────────────────────────────
 
 appraisalRules.get('/default', async (c) => {

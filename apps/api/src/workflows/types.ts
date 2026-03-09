@@ -84,6 +84,18 @@ export interface AnalysisWorkflowParams {
 
   /** Optional per-user major item cost overrides: { item_id: cost_in_dollars } */
   customMajorItemCosts?: Record<string, number>
+
+  /** GoHighLevel integration data (present when triggered via GHL webhook) */
+  ghl?: {
+    opportunityId: string
+    locationId: string
+    /** The user's GHL API token */
+    apiToken: string
+    /** Field mappings: { analysisFieldKey: ghlCustomFieldId } */
+    fieldMappings: Record<string, string>
+    /** Which analysis field to use for opportunity monetaryValue */
+    monetaryValueField?: string
+  }
 }
 
 /**

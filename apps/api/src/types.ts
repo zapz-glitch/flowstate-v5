@@ -37,9 +37,16 @@ export interface Env {
   // ─── Workflows ─────────────────────────────────────────────────────────────────
   ANALYSIS_WORKFLOW: WorkflowBinding<AnalysisWorkflowParams>
 
+  // ─── Property Data Provider ────────────────────────────────────────────────
+  /** Active provider: 'corelogic' | 'attom' (default: 'corelogic') */
+  PROPERTY_PROVIDER?: string
+
   // ─── Property Data (CoreLogic) ─────────────────────────────────────────────
   CORELOGIC_CLIENT_ID?: string
   CORELOGIC_CLIENT_SECRET?: string
+
+  // ─── Property Data (ATTOM) ─────────────────────────────────────────────────
+  ATTOM_API_KEY?: string
 
   // ─── Vision Analysis (OpenRouter LLM) ──────────────────────────────────────
   // OpenRouter provides access to multiple models via single API

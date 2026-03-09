@@ -939,16 +939,16 @@ class CoreLogicProvider implements PropertyProviderAdapter {
 
       const response = await request<RawComparablesResponse>(this.env, `/v2/properties/${params.propertyId}/comparables`, {
         params: {
-          searchDistance: params.radiusMiles ?? 1,
-          maxComps: params.maxComps ?? 10,
-          monthsBack: params.monthsBack ?? 12,
-          minBedrooms: params.minBeds,
-          maxBedrooms: params.maxBeds,
-          minBathrooms: params.minBaths,
-          maxBathrooms: params.maxBaths,
-          minBldgSqFt,
-          maxBldgSqFt,
-          sortBy: 'Distance',
+          // searchDistance: params.radiusMiles ?? 1,
+          maxComps: params.maxComps ?? 25,
+          // monthsBack: params.monthsBack ?? 12,
+          // minBedrooms: params.minBeds,
+          // maxBedrooms: params.maxBeds,
+          // minBathrooms: params.minBaths,
+          // maxBathrooms: params.maxBaths,
+          // minBldgSqFt,
+          // maxBldgSqFt,
+          // sortBy: 'Distance',
         },
       })
 

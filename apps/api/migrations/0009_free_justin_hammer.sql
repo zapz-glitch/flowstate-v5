@@ -1,0 +1,1 @@
+ALTER TABLE `location_settings` ADD `is_enabled` integer DEFAULT true NOT NULL;

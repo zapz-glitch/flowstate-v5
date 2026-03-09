@@ -1,8 +1,7 @@
 /**
  * AnalysisJob Durable Object
  *
- * Manages individual analysis job state and provides real-time updates via WebSocket.
- * Uses the Hibernation API for cost-efficient WebSocket connections.
+ * Manages individual analysis job state and provides real-time updates via SSE.
  */
 
 import { DurableObject } from 'cloudflare:workers'
@@ -11,24 +10,18 @@ import type {
   AnalysisJobState,
   AnalysisStep,
   StepStatus,
-  JobStatus,
   StepProgress,
   StatusMessage,
-  StatusMessageType,
-  StatusMessageData,
   InitJobRequest,
   UpdateStepRequest,
   SetResultRequest,
   SetErrorRequest,
-  JobError,
-  TOTAL_STEPS,
-  getStepNumber,
-  getStepConfig,
 } from './types'
 import { STEP_CONFIGS } from './types'
 
 export class AnalysisJobDO extends DurableObject<Env> {
   private state: AnalysisJobState | null = null
+  private sseControllers: Set<ReadableStreamDefaultController> = new Set()
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env)
@@ -70,8 +63,8 @@ export class AnalysisJobDO extends DurableObject<Env> {
           return this.handleSetError(request)
         case '/state':
           return this.handleGetState()
-        case '/ws':
-          return this.handleWebSocketUpgrade(request)
+        case '/sse':
+          return this.handleSSE()
         default:
           return new Response('Not Found', { status: 404 })
       }
@@ -330,8 +323,8 @@ export class AnalysisJobDO extends DurableObject<Env> {
       },
     })
 
-    // Close all WebSocket connections - job is done
-    this.closeAllConnections(1000, 'Job completed')
+    // Close all SSE connections - job is done
+    this.closeAllSSEConnections()
 
     return new Response(JSON.stringify({ success: true }), {
       headers: { 'Content-Type': 'application/json' },
@@ -379,8 +372,8 @@ export class AnalysisJobDO extends DurableObject<Env> {
       },
     })
 
-    // Close all WebSocket connections - job is done
-    this.closeAllConnections(1000, 'Job failed')
+    // Close all SSE connections - job is done
+    this.closeAllSSEConnections()
 
     return new Response(JSON.stringify({ success: true }), {
       headers: { 'Content-Type': 'application/json' },
@@ -434,53 +427,57 @@ export class AnalysisJobDO extends DurableObject<Env> {
   }
 
   /**
-   * Handle WebSocket upgrade request
+   * Handle SSE connection
    */
-  private handleWebSocketUpgrade(request: Request): Response {
-    console.log('[AnalysisJobDO] WebSocket upgrade requested')
+  private handleSSE(): Response {
+    console.log('[AnalysisJobDO] SSE connection requested')
 
-    // Check for upgrade header
-    const upgradeHeader = request.headers.get('Upgrade')
-    if (!upgradeHeader || upgradeHeader !== 'websocket') {
-      console.log('[AnalysisJobDO] No upgrade header, returning 426')
-      return new Response('Expected WebSocket upgrade', { status: 426 })
-    }
+    const encoder = new TextEncoder()
+    let controllerRef: ReadableStreamDefaultController | null = null
 
-    // Create WebSocket pair
-    const pair = new WebSocketPair()
-    const [client, server] = Object.values(pair)
+    const stream = new ReadableStream({
+      start: (controller) => {
+        controllerRef = controller
+        this.sseControllers.add(controller)
+        console.log('[AnalysisJobDO] SSE client connected, total:', this.sseControllers.size)
 
-    // Accept the WebSocket with hibernation
-    this.ctx.acceptWebSocket(server)
-    console.log('[AnalysisJobDO] WebSocket accepted')
+        // Send current state to new client
+        this.sendCurrentStateToSSE(controller)
 
-    // Send current state to new client
-    this.sendCurrentStateToSocket(server)
+        // Start heartbeat if not already running
+        this.startHeartbeat()
+      },
+      cancel: () => {
+        if (controllerRef) {
+          this.sseControllers.delete(controllerRef)
+          console.log('[AnalysisJobDO] SSE client disconnected, remaining:', this.sseControllers.size)
+        }
+      },
+    })
 
-    return new Response(null, {
-      status: 101,
-      webSocket: client,
+    return new Response(stream, {
+      headers: {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+        'Access-Control-Allow-Origin': '*',
+      },
     })
   }
 
   /**
-   * Send current state to a WebSocket
+   * Send current state to an SSE controller
    */
-  private async sendCurrentStateToSocket(ws: WebSocket): Promise<void> {
+  private async sendCurrentStateToSSE(controller: ReadableStreamDefaultController): Promise<void> {
     const state = await this.loadState()
-    console.log('[AnalysisJobDO] Sending current state to socket, state exists:', !!state)
-    if (!state) {
-      console.log('[AnalysisJobDO] No state found, not sending initial message')
-      return
-    }
+    console.log('[AnalysisJobDO] Sending current state via SSE, state exists:', !!state)
+    if (!state) return
 
-    // Calculate progress
     const completedSteps = state.steps.filter(
       (s) => s.status === 'completed' || s.status === 'skipped'
     ).length
     const totalSteps = STEP_CONFIGS.length
 
-    // Send current state as initial message
     const message: StatusMessage = {
       type: state.status === 'completed' ? 'job_completed' : 'job_created',
       jobId: state.jobId,
@@ -501,7 +498,7 @@ export class AnalysisJobDO extends DurableObject<Env> {
     }
 
     try {
-      ws.send(JSON.stringify(message))
+      this.sendSSEEvent(controller, message)
 
       // If in progress, send current step info
       if (state.status === 'processing' && state.currentStep) {
@@ -509,93 +506,96 @@ export class AnalysisJobDO extends DurableObject<Env> {
         const stepConfig = STEP_CONFIGS[stepIndex]
         const stepProgress = state.steps[stepIndex]
 
-        ws.send(
-          JSON.stringify({
-            type: 'step_started',
-            jobId: state.jobId,
-            timestamp: new Date().toISOString(),
-            data: {
-              step: state.currentStep,
-              stepNumber: stepIndex + 1,
-              totalSteps,
-              label: stepConfig.label,
-              message: stepProgress.message || stepConfig.description,
-            },
-          } as StatusMessage)
-        )
+        this.sendSSEEvent(controller, {
+          type: 'step_started',
+          jobId: state.jobId,
+          timestamp: new Date().toISOString(),
+          data: {
+            step: state.currentStep,
+            stepNumber: stepIndex + 1,
+            totalSteps,
+            label: stepConfig.label,
+            message: stepProgress.message || stepConfig.description,
+          },
+        } as StatusMessage)
       }
     } catch {
-      // Socket might be closed already
+      // Controller might be closed already
+      this.sseControllers.delete(controller)
     }
   }
 
   /**
-   * WebSocket message handler (Hibernation API)
+   * Format and send an SSE event to a single controller
    */
-  async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): Promise<void> {
-    // Handle client messages (e.g., ping, cancel request)
-    if (typeof message === 'string') {
-      try {
-        const parsed = JSON.parse(message)
-        if (parsed.type === 'ping') {
-          ws.send(JSON.stringify({ type: 'pong', timestamp: new Date().toISOString() }))
-        }
-        // Future: handle cancel requests
-      } catch {
-        // Ignore invalid messages
-      }
-    }
+  private sendSSEEvent(controller: ReadableStreamDefaultController, message: StatusMessage): void {
+    const encoder = new TextEncoder()
+    const data = JSON.stringify(message)
+    controller.enqueue(encoder.encode(`event: ${message.type}\ndata: ${data}\n\n`))
   }
 
   /**
-   * WebSocket close handler (Hibernation API)
-   * Must call ws.close() to complete the close handshake
-   */
-  async webSocketClose(
-    ws: WebSocket,
-    code: number,
-    reason: string,
-    wasClean: boolean
-  ): Promise<void> {
-    // Complete the WebSocket close handshake
-    ws.close(code, reason)
-  }
-
-  /**
-   * WebSocket error handler (Hibernation API)
-   */
-  async webSocketError(ws: WebSocket, error: unknown): Promise<void> {
-    console.error('[AnalysisJobDO] WebSocket error:', error)
-  }
-
-  /**
-   * Broadcast a message to all connected WebSocket clients
+   * Broadcast a message to all connected SSE clients
    */
   private broadcast(message: StatusMessage): void {
-    const sockets = this.ctx.getWebSockets()
+    const encoder = new TextEncoder()
     const data = JSON.stringify(message)
+    const ssePayload = encoder.encode(`event: ${message.type}\ndata: ${data}\n\n`)
 
-    for (const ws of sockets) {
+    for (const controller of this.sseControllers) {
       try {
-        ws.send(data)
+        controller.enqueue(ssePayload)
       } catch (error) {
-        console.error('[AnalysisJobDO] Failed to send to socket:', error)
-        // Socket might be closed, handled by close event
+        console.error('[AnalysisJobDO] Failed to send to SSE client:', error)
+        this.sseControllers.delete(controller)
       }
     }
   }
 
   /**
-   * Close all WebSocket connections
+   * Close all SSE connections
    */
-  private closeAllConnections(code: number, reason: string): void {
-    const sockets = this.ctx.getWebSockets()
-    for (const ws of sockets) {
+  private closeAllSSEConnections(): void {
+    for (const controller of this.sseControllers) {
       try {
-        ws.close(code, reason)
+        controller.close()
       } catch {
-        // Socket already closed
+        // Controller already closed
       }
+    }
+    this.sseControllers.clear()
+  }
+
+  /**
+   * Start heartbeat alarm to keep SSE connections alive
+   */
+  private async startHeartbeat(): Promise<void> {
+    const existing = await this.ctx.storage.getAlarm()
+    if (!existing) {
+      await this.ctx.storage.setAlarm(Date.now() + 15_000)
+    }
+  }
+
+  /**
+   * Alarm handler — sends SSE keepalive comment
+   */
+  async alarm(): Promise<void> {
+    if (this.sseControllers.size === 0) return
+
+    const encoder = new TextEncoder()
+    const keepalive = encoder.encode(`:keepalive\n\n`)
+
+    for (const controller of this.sseControllers) {
+      try {
+        controller.enqueue(keepalive)
+      } catch {
+        this.sseControllers.delete(controller)
+      }
+    }
+
+    // Schedule next heartbeat if still have connections
+    if (this.sseControllers.size > 0) {
+      await this.ctx.storage.setAlarm(Date.now() + 15_000)
     }
   }
 

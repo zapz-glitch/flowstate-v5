@@ -367,3 +367,42 @@ export async function deleteAppraisalPreset(id: string): Promise<void> {
 export async function setDefaultAppraisalPreset(id: string): Promise<void> {
   await fetchApi(`/appraisal-presets/${id}/set-default`, { method: 'POST' })
 }
+
+// ─── Saved Reports ──────────────────────────────────────────────────────────
+
+export interface SavedReportListItem {
+  id: string
+  jobId: string
+  propertyAddress: string
+  propertyCity: string
+  propertyState: string
+  arv: number | null
+  maxAllowableOffer: number | null
+  estimatedRepairs: number | null
+  createdAt: string
+}
+
+export interface ReportsListResponse {
+  reports: SavedReportListItem[]
+  pagination: {
+    page: number
+    limit: number
+    total: number
+    totalPages: number
+  }
+}
+
+export async function getSavedReports(
+  page = 1,
+  limit = 20
+): Promise<ReportsListResponse> {
+  return fetchApi<ReportsListResponse>(
+    `/user/reports?page=${page}&limit=${limit}`
+  )
+}
+
+export async function getSavedReport(
+  jobId: string
+): Promise<{ jobId: string; address: string; createdAt: string; analysis: unknown }> {
+  return fetchApi(`/user/reports/${jobId}`)
+}

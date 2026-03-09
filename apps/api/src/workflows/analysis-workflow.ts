@@ -30,6 +30,7 @@ import type {
 } from './types'
 
 import { createPropertyApi, type PropertyBundle } from '../services/property-api'
+import type { NormalizedComparable } from '../services/property-api/types'
 import {
   createAppraisalService,
   DEFAULT_FILTERS,
@@ -48,6 +49,8 @@ import {
   type AnalysisResponse,
   type SupplementedField,
 } from '../services/analysis'
+import { drizzle } from 'drizzle-orm/d1'
+import { savedReports } from '../db/schema'
 
 // ─── Serialization Helpers ────────────────────────────────────────────────────
 // Cloudflare Workflows require all step returns to be JSON-serializable
@@ -154,7 +157,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
           },
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           async (): Promise<any> => {
-            const result = await this.fetchPhotosParallel(bundle, enabledComps, params)
+            const result = await this.fetchPhotosParallel(bundle, bundle.comparables, params)
             return serialize(result)
           }
         )
@@ -189,7 +192,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
         async () => {
           const result = await this.classifyAllParallel(
             mergedBundle,
-            enabledComps,
+            mergedBundle.comparables,
             photoBundle,
             params.visionClassification ?? false
           )
@@ -259,6 +262,68 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
       })
 
       await this.updateProgress(params.userId, params.propertyKey, 'response_build', 'completed')
+
+      // ═══════════════════════════════════════════════════════════════════════
+      // STEP 6.5: Save to savedReports for public report access
+      // ═══════════════════════════════════════════════════════════════════════
+      try {
+        await step.do(
+          'save-report',
+          {
+            retries: { limit: 2, delay: '1 second' },
+            timeout: '10 seconds',
+          },
+          async () => {
+            const db = drizzle(this.env.DB)
+            await db.insert(savedReports).values({
+              userId: params.userId,
+              jobId: params.jobId,
+              propertyAddress: response.subject.address,
+              propertyCity: '',
+              propertyState: '',
+              propertyZip: '',
+              fullResponseJson: JSON.stringify(response),
+              arv: response.valuation.arv,
+              asIsValue: response.valuation.asIsValue ?? null,
+              maxAllowableOffer: response.valuation.buyPrice,
+              estimatedRepairs: response.valuation.rehabCost,
+            })
+            return { saved: true }
+          }
+        )
+        console.log(`[AnalysisWorkflow] Report saved to DB for job ${params.jobId}`)
+      } catch (error) {
+        // Non-fatal — report page is nice-to-have
+        console.warn(`[AnalysisWorkflow] Failed to save report (non-fatal):`, error instanceof Error ? error.message : error)
+      }
+
+      // ═══════════════════════════════════════════════════════════════════════
+      // STEP 7: Push Results to GoHighLevel (if triggered via GHL webhook)
+      // ═══════════════════════════════════════════════════════════════════════
+      if (params.ghl) {
+        const ghlStart = Date.now()
+        console.log(`[AnalysisWorkflow] Pushing results to GHL opportunity ${params.ghl.opportunityId}`)
+
+        try {
+          await step.do(
+            'push-to-ghl',
+            {
+              retries: { limit: 3, delay: '5 seconds', backoff: 'exponential' },
+              timeout: '30 seconds',
+            },
+            async () => {
+              const result = await this.pushToGHL(params.ghl!, response, params.jobId)
+              return serialize(result)
+            }
+          )
+          stepTimings['ghl_push'] = Date.now() - ghlStart
+          console.log(`[AnalysisWorkflow] GHL push completed`)
+        } catch (error) {
+          // GHL push failure is non-fatal — analysis still succeeded
+          stepTimings['ghl_push'] = Date.now() - ghlStart
+          console.warn(`[AnalysisWorkflow] GHL push failed (non-fatal):`, error instanceof Error ? error.message : error)
+        }
+      }
 
       const completedAt = new Date().toISOString()
       const durationMs = Date.now() - new Date(startedAt).getTime()
@@ -348,7 +413,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
    */
   private async fetchPhotosParallel(
     bundle: PropertyBundle,
-    enabledComps: AppraisedComparable[],
+    comps: NormalizedComparable[],
     params: AnalysisWorkflowParams
   ): Promise<PhotoBundle | null> {
     const photoService = createPhotoService(this.env)
@@ -363,7 +428,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
     }
 
     const maxComps = params.photoAnalysis?.maxComps ?? 10
-    const compsForPhotos = enabledComps.slice(0, maxComps)
+    const compsForPhotos = comps.slice(0, maxComps)
 
     // Fetch subject and all comps in parallel
     // The photo service handles rate limiting internally
@@ -393,7 +458,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
    */
   private async classifyAllParallel(
     bundle: PropertyBundle,
-    enabledComps: AppraisedComparable[],
+    comps: NormalizedComparable[],
     photoBundle: PhotoBundle | null,
     visionClassification: boolean
   ): Promise<{
@@ -410,7 +475,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
         description: photoBundle?.subject?.description,
         features: photoBundle?.subject?.features,
       },
-      ...enabledComps.map((comp) => ({
+      ...comps.map((comp) => ({
         id: comp.id,
         isSubject: false,
         description: photoBundle?.comps[comp.id]?.description,
@@ -468,15 +533,23 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
 
     const enabledComps = appraisalResult.comparables.filter((c) => c.isEnabled)
 
-    // ARV comes directly from the appraisal (avg price/sqft × subject sqft)
-    const finalArv = appraisalResult.arv
-    const arvSource: 'appraisal' | 'comp-selection' = 'appraisal'
-
     // Summarize classifications for display (labels comps, computes group averages)
     const classificationSummary = appraisalService.summarizeClassifications(
       appraisalResult.comparables,
       compClassifications
     )
+
+    // ARV: prefer after_renovation comps; fall back to all enabled comps if none exist
+    const afterRenovationComps = enabledComps.filter(
+      (c) => (compClassifications.get(c.id)?.classification ?? 'as_is') === 'after_renovation'
+    )
+    const compsForArv = afterRenovationComps.length > 0 ? afterRenovationComps : enabledComps
+    const arvSource: 'appraisal' | 'comp-selection' = 'appraisal'
+    const finalArv = afterRenovationComps.length > 0
+      ? appraisalService.calculateARV(afterRenovationComps, bundle.property.squareFeet)
+      : appraisalResult.arv
+
+    console.log(`[AnalysisWorkflow] ARV computed from ${compsForArv.length} comp(s) (${afterRenovationComps.length > 0 ? 'after_renovation only' : 'all enabled — no renovated comps found'}): $${finalArv}`)
 
     // Calculate valuation
     const buybox = params.buybox ?? {}
@@ -526,10 +599,58 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
       desiredProfit: buybox.desiredProfit ?? undefined,
     })
 
+    // If we have after_renovation comps, mark as_is enabled comps as excluded
+    // so the dashboard correctly shows them in the "Excluded from ARV" section
+    const finalAppraisalResult = afterRenovationComps.length > 0
+      ? {
+          ...appraisalResult,
+          comparables: appraisalResult.comparables.map((c) => {
+            if (!c.isEnabled) return c
+            const cls = compClassifications.get(c.id)?.classification ?? 'as_is'
+            if (cls !== 'after_renovation') {
+              return { ...c, isEnabled: false, evaluation: { ...c.evaluation, shouldDisable: true, disableReasons: [...(c.evaluation.disableReasons ?? []), 'Not a renovated comp (excluded from ARV)'] } }
+            }
+            return c
+          }),
+          enabledCount: afterRenovationComps.length,
+          disabledCount: appraisalResult.comparables.length - afterRenovationComps.length,
+          arv: finalArv,
+        }
+      : appraisalResult
+
+    // Build applied settings snapshot for client-side recalculation
+    const rules = params.appraisalRules ?? {}
+    const appliedFilters = rules.filters ?? DEFAULT_FILTERS
+    const appliedAdjustments = rules.adjustments ?? DEFAULT_ADJUSTMENTS
+
+    const appliedSettings = {
+      filters: appliedFilters.map((f) => ({
+        type: f.type,
+        enabled: f.enabled,
+        value: f.value,
+      })),
+      adjustments: appliedAdjustments.map((a) => ({
+        type: a.type,
+        enabled: a.enabled,
+        amount: a.amount,
+        percent: a.percent,
+      })),
+      dealParams: {
+        closingCostsPercent: buybox.closingCostsPercent ?? 10,
+        carryingCostsPercent: buybox.carryingCostsPercent ?? 5,
+        wholesaleFee: buybox.wholesaleFee ?? 10000,
+        desiredProfit: buybox.desiredProfit ?? null,
+      },
+      rehabLevelIndex: selectedRehabLevelIndex,
+      rehabTable: valuationService.getRehabTable(),
+      majorItems: resolvedMajorItems,
+      additionPlay: buybox.additionPlay ?? 0,
+    }
+
     // Build response
     return buildAnalysisResponse(
       bundle,
-      appraisalResult,
+      finalAppraisalResult,
       photoBundle,
       null, // No LLM comp selection in workflow (using batch classification instead)
       valuation,
@@ -543,6 +664,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
         subjectSupplementedFields,
         compSupplementedFields,
         rehabLevelEstimates,
+        appliedSettings,
       }
     )
   }
@@ -631,5 +753,35 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
       // @ts-expect-error - dispose may not be in types but exists at runtime
       stub.dispose?.()
     }
+  }
+
+  /**
+   * Push analysis results to GoHighLevel opportunity
+   */
+  private async pushToGHL(
+    ghlParams: NonNullable<AnalysisWorkflowParams['ghl']>,
+    response: AnalysisResponse,
+    jobId: string
+  ) {
+    const {
+      buildGHLCustomFields,
+      updateGHLOpportunity,
+      extractAnalysisFieldValue,
+    } = await import('../services/ghl')
+
+    const customFields = buildGHLCustomFields(response, ghlParams.fieldMappings, jobId)
+
+    let monetaryValue: number | undefined
+    if (ghlParams.monetaryValueField) {
+      const val = extractAnalysisFieldValue(response, ghlParams.monetaryValueField)
+      if (typeof val === 'number') monetaryValue = val
+    }
+
+    return updateGHLOpportunity({
+      apiToken: ghlParams.apiToken,
+      opportunityId: ghlParams.opportunityId,
+      customFields,
+      monetaryValue,
+    })
   }
 }

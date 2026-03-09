@@ -1,0 +1,1 @@
+ALTER TABLE `location_settings` ADD `setting_type` text DEFAULT 'appraisal' NOT NULL;

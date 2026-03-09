@@ -56,8 +56,6 @@ export interface AnalyzeRequest {
   }
   /** Skip cache and fetch fresh data from APIs */
   skipCache?: boolean
-  /** Appraisal preset ID to use for filters and adjustments */
-  appraisalPresetId?: string
 }
 
 export type AnalyzeResult =
@@ -77,6 +75,21 @@ export interface AnalyzeData {
     analysisId?: string
     timestamp?: string
     dataProvider?: string
+  }
+  /** Settings used during this analysis (for client-side recalculation initialization) */
+  appliedSettings?: {
+    filters: Array<{ type: string; enabled: boolean; value: number }>
+    adjustments: Array<{ type: string; enabled: boolean; amount: number; percent?: number }>
+    dealParams: {
+      closingCostsPercent: number
+      carryingCostsPercent: number
+      wholesaleFee: number
+      desiredProfit: number | null
+    }
+    rehabLevelIndex: number
+    rehabTable: Record<string, Array<{ perSqft: number; minProfit: number }>>
+    majorItems?: Array<{ id: string; enabled: boolean; cost: number }>
+    additionPlay: number
   }
 }
 
@@ -133,6 +146,8 @@ export interface ValuationData {
   buyPrice?: number
   buyPricePercent?: number
   rehabCost?: number
+  baseRehabCost?: number
+  majorItemsCost?: number
   rehabLevel?: string
   rehabPerSqft?: number
   /** All rehab level estimates with costs calculated for the current ARV */
@@ -148,6 +163,8 @@ export interface ValuationData {
 
 export interface CompsData {
   count?: number
+  enabledCount?: number
+  disabledCount?: number
   avgPricePerSqft?: number | null
   medianPrice?: number | null
   items?: CompItem[]
@@ -285,8 +302,8 @@ export interface JobStatusResult {
  *
  * Security flow:
  * 1. Queue the job via /v1/analyze (authenticated with dashboard headers)
- * 2. Request a short-lived signed WS token from /v1/analyze/ws-token
- * 3. Return the token-authenticated WebSocket URL
+ * 2. Request a short-lived signed token from /v1/analyze/stream-token
+ * 3. Return the token-authenticated SSE stream URL
  */
 export async function queueAnalysis(request: AnalyzeRequest): Promise<QueueAnalysisResult> {
   log('queueAnalysis called', { address: request.address, skipCache: request.skipCache })
@@ -325,7 +342,6 @@ export async function queueAnalysis(request: AnalyzeRequest): Promise<QueueAnaly
         monthsBack: 12,
       },
       skipCache: request.skipCache,
-      appraisalPresetId: request.appraisalPresetId,
     }
 
     logApiCall('POST', analyzeUrl)
@@ -380,8 +396,8 @@ export async function queueAnalysis(request: AnalyzeRequest): Promise<QueueAnaly
       }
     }
 
-    // Step 2: Request a signed WebSocket token
-    const tokenUrl = `${apiUrl}/v1/analyze/ws-token`
+    // Step 2: Request a signed stream token
+    const tokenUrl = `${apiUrl}/v1/analyze/stream-token`
     logApiCall('POST', tokenUrl)
 
     const tokenStartTime = Date.now()
@@ -406,32 +422,32 @@ export async function queueAnalysis(request: AnalyzeRequest): Promise<QueueAnaly
       error?: string
       data?: {
         token: string
-        wsUrl: string
+        streamUrl: string
         expiresIn: number
       }
     }
 
     if (!tokenResponse.ok || !tokenResult.success) {
       // Fall back to polling if token generation fails
-      log('WS token generation failed, falling back to polling', { error: tokenResult.error })
+      log('Stream token generation failed, falling back to polling', { error: tokenResult.error })
       return {
         success: true,
         jobId,
         status: result.data?.status,
-        streamUrl: undefined, // No WebSocket, use polling
+        streamUrl: undefined, // No SSE, use polling
         pollUrl: result.data?.pollUrl,
         propertyKey,
         estimatedDurationMs: result.data?.estimatedDurationMs,
       }
     }
 
-    log('WS token obtained successfully', { wsUrl: tokenResult.data?.wsUrl, expiresIn: tokenResult.data?.expiresIn })
+    log('Stream token obtained successfully', { streamUrl: tokenResult.data?.streamUrl, expiresIn: tokenResult.data?.expiresIn })
 
     return {
       success: true,
       jobId,
       status: result.data?.status,
-      streamUrl: tokenResult.data?.wsUrl,
+      streamUrl: tokenResult.data?.streamUrl,
       pollUrl: result.data?.pollUrl,
       propertyKey,
       estimatedDurationMs: result.data?.estimatedDurationMs,
@@ -512,43 +528,4 @@ export async function getJobStatus(jobId: string, propertyKey: string): Promise<
   }
 }
 
-// ─── Appraisal Presets ─────────────────────────────────────────────────────────
-
-export interface AppraisalPresetSummary {
-  id: string
-  name: string
-  isDefault: boolean
-}
-
-export async function getAppraisalPresets(): Promise<AppraisalPresetSummary[]> {
-  const session = await getSession()
-  if (!session?.user) {
-    return []
-  }
-
-  try {
-    const apiUrl = getApiUrl()
-    const response = await fetch(`${apiUrl}/appraisal-presets`, {
-      headers: {
-        Cookie: '', // Server-side fetch needs cookie forwarding
-      },
-      credentials: 'include',
-    })
-
-    if (!response.ok) {
-      return []
-    }
-
-    const result = (await response.json()) as {
-      presets: Array<{ id: string; name: string; isDefault: boolean }>
-    }
-    return result.presets.map((p) => ({
-      id: p.id,
-      name: p.name,
-      isDefault: p.isDefault,
-    }))
-  } catch {
-    return []
-  }
-}
 

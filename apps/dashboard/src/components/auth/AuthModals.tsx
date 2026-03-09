@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { signIn, signUp, forgetPassword } from '@/lib/auth-client'
 import { LogoIcon } from '@/components/ui/Logo'
@@ -66,6 +66,8 @@ function SignInModal({ isOpen, onClose, onForgotPassword, onSwitchToSignUp }: Si
   const router = useRouter()
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const onCloseRef = useRef(onClose)
+  onCloseRef.current = onClose
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
 
@@ -81,7 +83,7 @@ function SignInModal({ isOpen, onClose, onForgotPassword, onSwitchToSignUp }: Si
   // Handle escape key
   useEffect(() => {
     const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
+      if (e.key === 'Escape') onCloseRef.current()
     }
     if (isOpen) {
       document.addEventListener('keydown', handleEscape)
@@ -91,7 +93,7 @@ function SignInModal({ isOpen, onClose, onForgotPassword, onSwitchToSignUp }: Si
       document.removeEventListener('keydown', handleEscape)
       document.body.style.overflow = 'unset'
     }
-  }, [isOpen, onClose])
+  }, [isOpen])
 
   const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -268,6 +270,8 @@ function SignUpModal({ isOpen, onClose, onSwitchToSignIn }: SignUpModalProps) {
   const router = useRouter()
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const onCloseRef = useRef(onClose)
+  onCloseRef.current = onClose
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -287,7 +291,7 @@ function SignUpModal({ isOpen, onClose, onSwitchToSignIn }: SignUpModalProps) {
   // Handle escape key
   useEffect(() => {
     const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
+      if (e.key === 'Escape') onCloseRef.current()
     }
     if (isOpen) {
       document.addEventListener('keydown', handleEscape)
@@ -297,7 +301,7 @@ function SignUpModal({ isOpen, onClose, onSwitchToSignIn }: SignUpModalProps) {
       document.removeEventListener('keydown', handleEscape)
       document.body.style.overflow = 'unset'
     }
-  }, [isOpen, onClose])
+  }, [isOpen])
 
   const handleSignUp = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -524,6 +528,8 @@ function ForgotPasswordModal({ isOpen, onClose, onBackToSignIn }: ForgotPassword
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [email, setEmail] = useState('')
+  const onCloseRef = useRef(onClose)
+  onCloseRef.current = onClose
   const [isSuccess, setIsSuccess] = useState(false)
 
   // Reset form when modal opens/closes
@@ -538,7 +544,7 @@ function ForgotPasswordModal({ isOpen, onClose, onBackToSignIn }: ForgotPassword
   // Handle escape key
   useEffect(() => {
     const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
+      if (e.key === 'Escape') onCloseRef.current()
     }
     if (isOpen) {
       document.addEventListener('keydown', handleEscape)
@@ -548,7 +554,7 @@ function ForgotPasswordModal({ isOpen, onClose, onBackToSignIn }: ForgotPassword
       document.removeEventListener('keydown', handleEscape)
       document.body.style.overflow = 'unset'
     }
-  }, [isOpen, onClose])
+  }, [isOpen])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
