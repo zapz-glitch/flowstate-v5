@@ -379,6 +379,7 @@ export interface SavedReportListItem {
   arv: number | null
   maxAllowableOffer: number | null
   estimatedRepairs: number | null
+  isShared: boolean
   createdAt: string
 }
 

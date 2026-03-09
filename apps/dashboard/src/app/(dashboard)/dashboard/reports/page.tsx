@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import { getSavedReports } from '@/lib/api'
-import { FileText, ChevronLeft, ChevronRight } from 'lucide-react'
+import { FileText, ChevronLeft, ChevronRight, Globe, Lock } from 'lucide-react'
 import { Card } from '@/components/ui/card'
 
 const REPORTS_PER_PAGE = 20
@@ -88,6 +88,9 @@ export default async function ReportsPage({
                 <th className="text-left px-6 py-3 text-caption font-medium text-foreground-tertiary">
                   Date
                 </th>
+                <th className="text-center px-6 py-3 text-caption font-medium text-foreground-tertiary">
+                  Access
+                </th>
                 <th className="text-left px-6 py-3 text-caption font-medium text-foreground-tertiary">
                   Details
                 </th>
@@ -96,7 +99,7 @@ export default async function ReportsPage({
             <tbody className="divide-y divide-border/60">
               {data.reports.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-6 py-12 text-center">
+                  <td colSpan={8} className="px-6 py-12 text-center">
                     <FileText className="w-12 h-12 mx-auto mb-3 text-foreground-tertiary opacity-50" />
                     <p className="text-body text-foreground-secondary">No reports yet</p>
                     <p className="text-body-sm text-foreground-tertiary mt-1">
@@ -133,6 +136,17 @@ export default async function ReportsPage({
                     </td>
                     <td className="px-6 py-4 text-body-sm text-foreground-secondary whitespace-nowrap">
                       {new Date(report.createdAt).toLocaleDateString()}
+                    </td>
+                    <td className="px-6 py-4 text-center">
+                      {report.isShared ? (
+                        <span className="inline-flex items-center gap-1 text-caption text-emerald-600" title="Shared with password">
+                          <Globe className="w-3.5 h-3.5" />
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 text-caption text-foreground-tertiary" title="Private">
+                          <Lock className="w-3.5 h-3.5" />
+                        </span>
+                      )}
                     </td>
                     <td className="px-6 py-4">
                       <Link

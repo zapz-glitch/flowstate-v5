@@ -139,12 +139,13 @@ export function CompCard({
           </div>
         </div>
 
-        <div className="grid grid-cols-3 md:grid-cols-6 mt-3 rounded-xl bg-muted/40 cursor-pointer" onClick={handleToggle}>
+        <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-7 mt-3 rounded-lg bg-muted/40 cursor-pointer" onClick={handleToggle}>
           <StatCell label="Beds" value={comp.bedrooms ?? '-'} />
           <StatCell label="Baths" value={comp.bathrooms ?? '-'} />
           <StatCell label="Sq Ft" value={comp.squareFeet?.toLocaleString() || '-'} />
           <StatCell label="Year" value={comp.yearBuilt || '-'} />
           <StatCell label="Foundation" value={comp.foundationType || '-'} />
+          <StatCell label="$/Sq Ft" value={comp.pricePerSqft ? `$${comp.pricePerSqft.toFixed(0)}` : '-'} />
           <StatCell label="Sold" value={comp.saleDate ? new Date(comp.saleDate).toLocaleDateString('en-US', { month: 'short', year: 'numeric' }) : '-'} />
         </div>
       </div>

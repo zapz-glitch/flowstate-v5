@@ -87,6 +87,22 @@ export function useAnalysisEvaluation({
     }
   }, [data?.comps?.items])
 
+  // Sync comp selection when recalc re-evaluates filters (but not when user manually toggled comps)
+  useEffect(() => {
+    if (!recalcData || !data?.comps?.items) return
+    // Only auto-sync when settings changed filters, not when user manually toggled comps
+    if (compOverride?.isManual) return
+
+    const keys = new Set<string>()
+    data.comps.items.forEach((comp, i) => {
+      const ev = recalcData.compEvaluations[i]
+      if (ev?.isEnabled) {
+        keys.add(getCompKey(comp, i))
+      }
+    })
+    setCompOverride({ selectedCompKeys: keys, isManual: false })
+  }, [recalcData, data?.comps?.items]) // eslint-disable-line react-hooks/exhaustive-deps
+
   // Toggle a single comp
   const handleToggleComp = useCallback((key: string) => {
     setCompOverride((prev) => {

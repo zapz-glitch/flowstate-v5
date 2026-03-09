@@ -584,6 +584,28 @@ export async function testGHLConnection(): Promise<GHLTestResult> {
   return fetchApi<GHLTestResult>('/ghl-settings/test', { method: 'POST' })
 }
 
+// ─── Report Sharing ──────────────────────────────────────────────────────────
+
+export interface ShareSettings {
+  isShared: boolean
+  hasPassword: boolean
+  shareUrl: string
+}
+
+export async function getReportShareSettings(jobId: string): Promise<ShareSettings> {
+  return fetchApi<ShareSettings>(`/user/reports/${jobId}/share`)
+}
+
+export async function updateReportShareSettings(
+  jobId: string,
+  settings: { isShared: boolean; password?: string }
+): Promise<ShareSettings> {
+  return fetchApi<ShareSettings>(`/user/reports/${jobId}/share`, {
+    method: 'PUT',
+    body: JSON.stringify(settings),
+  })
+}
+
 // ─── Plan Limits ───────────────────────────────────────────────────────────────
 
 export const PLAN_LIMITS = {

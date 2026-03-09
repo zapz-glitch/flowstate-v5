@@ -169,6 +169,9 @@ export const savedReports = sqliteTable(
     // Workflow link
     jobId: text('job_id'), // Links to workflow job
     pdfKey: text('pdf_key'), // Reserved for future PDF support
+    // Sharing
+    isShared: integer('is_shared', { mode: 'boolean' }).notNull().default(false),
+    sharePasswordHash: text('share_password_hash'), // format: "salt:sha256hex"
     // Timestamps
     createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
   },

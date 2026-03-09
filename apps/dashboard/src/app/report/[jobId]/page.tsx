@@ -1,9 +1,11 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback, type FormEvent } from 'react'
 import Link from 'next/link'
-import { ArrowLeft, DollarSign, SlidersHorizontal } from 'lucide-react'
+import { ArrowLeft, DollarSign, SlidersHorizontal, Lock, Share2 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
+import { Card } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
 import {
   Sheet,
   SheetContent,
@@ -14,6 +16,8 @@ import {
 import { cn } from '@/lib/utils'
 import { useAnalysisEvaluation } from '@/hooks/use-analysis-evaluation'
 import { SettingsPanel } from '@/components/report/SettingsPanel'
+import { DownloadReportButton } from '@/components/report/DownloadReportButton'
+import { ShareReportDialog } from '@/components/report/ShareReportDialog'
 import {
   SubjectPropertyCard,
   ValuationCard,
@@ -45,14 +49,81 @@ interface ReportData {
   analysis: AnalysisData
 }
 
-// ─── Main Page Component ─────────────────────────────────────────────────────
+// ─── Password Gate ───────────────────────────────────────────────────────────
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL!
 
+function PasswordGate({ jobId, onSuccess }: { jobId: string; onSuccess: () => void }) {
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+
+  const handleSubmit = async (e: FormEvent) => {
+    e.preventDefault()
+    setSubmitting(true)
+    setError('')
+    try {
+      const res = await fetch(`${API_URL}/reports/${jobId}/verify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ password }),
+      })
+      const data = (await res.json()) as { success: boolean; error?: string }
+      if (data.success) {
+        onSuccess()
+      } else {
+        setError(data.error || 'Incorrect password')
+      }
+    } catch {
+      setError('Failed to verify. Please try again.')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <div className="min-h-screen bg-background flex items-center justify-center px-4">
+      <Card className="w-full max-w-sm p-6">
+        <div className="text-center mb-6">
+          <Lock className="w-10 h-10 mx-auto mb-3 text-foreground-tertiary" />
+          <h1 className="text-heading-md text-foreground">Protected Report</h1>
+          <p className="text-body-sm text-foreground-tertiary mt-1">
+            Enter the password to view this report
+          </p>
+        </div>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <Input
+            type="password"
+            placeholder="Password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            autoFocus
+          />
+          {error && <p className="text-body-sm text-red-500">{error}</p>}
+          <button
+            type="submit"
+            disabled={submitting || !password}
+            className="w-full px-4 py-2 rounded-lg bg-primary text-white text-body-sm font-medium hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {submitting ? 'Verifying...' : 'View Report'}
+          </button>
+        </form>
+      </Card>
+    </div>
+  )
+}
+
+// ─── Main Page Component ─────────────────────────────────────────────────────
+
 export default function ReportPage({ params }: { params: Promise<{ jobId: string }> }) {
   const [report, setReport] = useState<ReportData | null>(null)
-  const [error, setError] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const [requiresPassword, setRequiresPassword] = useState(false)
+  const [isOwner, setIsOwner] = useState(false)
+  const [resolvedJobId, setResolvedJobId] = useState<string | null>(null)
+  const [shareOpen, setShareOpen] = useState(false)
 
   // Cast AnalysisData to AnalyzeData for the evaluation hook (same shape)
   const analyzeData = report?.analysis as AnalyzeData | null
@@ -76,24 +147,48 @@ export default function ReportPage({ params }: { params: Promise<{ jobId: string
     stickyBarRootMargin: '-10px 0px 0px 0px',
   })
 
+  const fetchReport = useCallback((jobId: string) => {
+    setLoading(true)
+    setError(null)
+    setRequiresPassword(false)
+    fetch(`${API_URL}/reports/${jobId}`, { credentials: 'include' })
+      .then(async (res) => {
+        const result = (await res.json()) as {
+          success: boolean
+          data?: ReportData
+          isOwner?: boolean
+          requiresPassword?: boolean
+          error?: string
+        }
+        if (res.status === 401 && result.requiresPassword) {
+          setRequiresPassword(true)
+          return
+        }
+        if (res.status === 403) {
+          setError('This report is private')
+          return
+        }
+        if (!res.ok) {
+          setError('Report not found')
+          return
+        }
+        if (result.success && result.data) {
+          setReport(result.data)
+          setIsOwner(!!result.isOwner)
+        } else {
+          setError('Report not found')
+        }
+      })
+      .catch(() => setError('Failed to load report'))
+      .finally(() => setLoading(false))
+  }, [])
+
   useEffect(() => {
     params.then(({ jobId }) => {
-      fetch(`${API_URL}/reports/${jobId}`)
-        .then((res) => {
-          if (!res.ok) throw new Error('Not found')
-          return res.json() as Promise<{ success: boolean; data?: ReportData }>
-        })
-        .then((result) => {
-          if (result.success && result.data) {
-            setReport(result.data)
-          } else {
-            setError(true)
-          }
-        })
-        .catch(() => setError(true))
-        .finally(() => setLoading(false))
+      setResolvedJobId(jobId)
+      fetchReport(jobId)
     })
-  }, [params])
+  }, [params, fetchReport])
 
   if (loading) {
     return (
@@ -103,12 +198,27 @@ export default function ReportPage({ params }: { params: Promise<{ jobId: string
     )
   }
 
+  if (requiresPassword && resolvedJobId) {
+    return (
+      <PasswordGate
+        jobId={resolvedJobId}
+        onSuccess={() => fetchReport(resolvedJobId)}
+      />
+    )
+  }
+
   if (error || !report) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="text-center space-y-2">
-          <h1 className="text-heading-lg text-foreground">Report Not Found</h1>
-          <p className="text-body text-foreground-tertiary">This report may have been removed or the link is invalid.</p>
+          <h1 className="text-heading-lg text-foreground">
+            {error === 'This report is private' ? 'Private Report' : 'Report Not Found'}
+          </h1>
+          <p className="text-body text-foreground-tertiary">
+            {error === 'This report is private'
+              ? 'This report is private and cannot be accessed.'
+              : 'This report may have been removed or the link is invalid.'}
+          </p>
         </div>
       </div>
     )
@@ -138,6 +248,31 @@ export default function ReportPage({ params }: { params: Promise<{ jobId: string
                 Analyzed on {new Date(report.createdAt).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
               </p>
             </div>
+          </div>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            {isOwner && (
+              <button
+                type="button"
+                onClick={() => setShareOpen(true)}
+                className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-body-sm text-foreground-secondary hover:text-foreground hover:bg-secondary transition-colors border border-border no-print"
+              >
+                <Share2 className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Share</span>
+              </button>
+            )}
+            <DownloadReportButton
+              reportProps={{
+                address: report.address || 'Property Report',
+                date: report.createdAt,
+                reportId: report.jobId,
+                subject: analysis.subject,
+                valuation: displayValuation,
+                comps: effectiveComps,
+                riskFlags: analysis.riskFlags,
+                floodZone: analysis.floodZone,
+                isRecalculated,
+              }}
+            />
           </div>
         </div>
 
@@ -258,6 +393,15 @@ export default function ReportPage({ params }: { params: Promise<{ jobId: string
           <SettingsPanel settingsHook={settingsHook} recalcData={recalcData} />
         </SheetContent>
       </Sheet>
+
+      {/* Share Dialog */}
+      {isOwner && resolvedJobId && (
+        <ShareReportDialog
+          open={shareOpen}
+          onOpenChange={setShareOpen}
+          jobId={resolvedJobId}
+        />
+      )}
     </div>
   )
 }

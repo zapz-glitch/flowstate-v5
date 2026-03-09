@@ -219,7 +219,7 @@ export function SettingsPanel({ settingsHook, recalcData }: SettingsPanelProps) 
   }
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col flex-1 min-h-0">
       {/* Quick Stats Bar */}
       {recalcData && (
         <div className="px-5 py-3 border-b border-border bg-secondary/20">
@@ -246,7 +246,7 @@ export function SettingsPanel({ settingsHook, recalcData }: SettingsPanelProps) 
       )}
 
       {/* Scrollable Content */}
-      <div className="flex-1 overflow-y-auto divide-y divide-border/30">
+      <div className="flex-1 min-h-0 overflow-y-auto divide-y divide-border/30">
 
         {/* ── Appraisal Rules (Filters + Adjustments) ────────────────────── */}
         <Section icon={Scale} title="Appraisal Rules" defaultOpen={false}>

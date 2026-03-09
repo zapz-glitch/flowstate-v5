@@ -9,7 +9,6 @@ import {
   StopCircle,
   ChevronDown,
   ChevronRight,
-  FileDown,
   DollarSign,
   SlidersHorizontal,
 } from 'lucide-react'
@@ -41,6 +40,7 @@ import {
   RiskFloodCard,
 } from '@/components/analysis'
 import { SettingsPanel } from '@/components/report/SettingsPanel'
+import { DownloadReportButton } from '@/components/report/DownloadReportButton'
 import type { AnalysisState } from '@/types/analysis'
 
 // ─── Main Page ───────────────────────────────────────────────────────────────
@@ -189,10 +189,6 @@ export default function AnalyzePage() {
     setUsePolling(true)
   }
 
-  const handleDownloadReport = () => {
-    window.print()
-  }
-
   const isSearchCollapsed = (isRunning || !!result) && !searchExpanded
 
   return (
@@ -320,15 +316,18 @@ export default function AnalyzePage() {
                       Recalculated
                     </Badge>
                   )}
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleDownloadReport}
-                    className="flex items-center gap-2"
-                  >
-                    <FileDown className="w-4 h-4" />
-                    Download Report
-                  </Button>
+                  <DownloadReportButton
+                    reportProps={{
+                      address: address || 'Property Report',
+                      date: new Date().toISOString(),
+                      subject: result.data?.subject,
+                      valuation: displayValuation,
+                      comps: effectiveComps,
+                      riskFlags: result.data?.riskFlags,
+                      floodZone: result.data?.floodZone,
+                      isRecalculated,
+                    }}
+                  />
                 </div>
               </div>
 
