@@ -44,11 +44,11 @@ app.use('*', logger())
 app.use(
   '*',
   cors({
-    origin: [
-      'http://localhost:3000',
-      'https://dashboard.flowstate.homes',
-      'https://app.flowstate.homes',
-    ],
+    origin: (origin, c) => {
+      const allowed = ['http://localhost:3000']
+      if (c.env.DASHBOARD_URL) allowed.push(c.env.DASHBOARD_URL)
+      return allowed.includes(origin) ? origin : ''
+    },
     allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     allowHeaders: ['Content-Type', 'Authorization', 'X-Dashboard-User-Id', 'X-Dashboard-Secret'],
     exposeHeaders: ['X-Request-Id', 'X-RateLimit-Remaining', 'X-RateLimit-Limit', 'X-RateLimit-Reset'],

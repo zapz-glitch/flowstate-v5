@@ -91,7 +91,8 @@ export function createAuth(
   d1: D1Database,
   secret: string,
   baseURL?: string,
-  smtp?: SmtpConfig
+  smtp?: SmtpConfig,
+  envDashboardUrl?: string
 ) {
   const db = new Kysely({
     dialect: new D1Dialect({ database: d1 }),
@@ -100,7 +101,7 @@ export function createAuth(
   // Determine the dashboard URL for reset links
   const dashboardUrl = baseURL?.includes('localhost')
     ? 'http://localhost:3000'
-    : 'https://dashboard.flowstate.homes'
+    : (envDashboardUrl || 'https://app.flowstate.homes')
 
   return betterAuth({
     secret,
@@ -178,8 +179,7 @@ export function createAuth(
     },
     trustedOrigins: [
       'http://localhost:3000',
-      'https://dashboard.flowstate.homes',
-      'https://app.flowstate.homes',
+      ...(envDashboardUrl ? [envDashboardUrl] : ['https://app.flowstate.homes']),
     ],
     advanced: {
       // In production, use cross-subdomain cookies for .flowstate.homes

@@ -142,7 +142,7 @@ userReports.get('/:jobId/share', async (c) => {
   const url = new URL(c.req.url)
   const baseUrl = url.hostname.includes('localhost')
     ? 'http://localhost:3000'
-    : 'https://dashboard.flowstate.homes'
+    : (c.env.DASHBOARD_URL || 'https://app.flowstate.homes')
 
   return c.json({
     isShared: report.isShared,
@@ -194,7 +194,7 @@ userReports.put('/:jobId/share', async (c) => {
   const url = new URL(c.req.url)
   const baseUrl = url.hostname.includes('localhost')
     ? 'http://localhost:3000'
-    : 'https://dashboard.flowstate.homes'
+    : (c.env.DASHBOARD_URL || 'https://app.flowstate.homes')
 
   return c.json({
     isShared: body.isShared,

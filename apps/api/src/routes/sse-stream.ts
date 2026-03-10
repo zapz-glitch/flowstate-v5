@@ -23,12 +23,12 @@ import { verifyWsToken } from '../utils/ws-token'
 
 const sseStream = new Hono<{ Bindings: Env }>()
 
-// Allowed origins for SSE connections
-const ALLOWED_ORIGINS = [
-  'http://localhost:3000',
-  'https://dashboard.flowstate.homes',
-  'https://app.flowstate.homes',
-]
+/** Build allowed origins list from env */
+function getAllowedOrigins(env: Env): string[] {
+  const origins = ['http://localhost:3000']
+  if (env.DASHBOARD_URL) origins.push(env.DASHBOARD_URL)
+  return origins
+}
 
 /**
  * GET /sse/analyze/:jobId
@@ -48,7 +48,7 @@ sseStream.get('/analyze/:jobId', async (c) => {
 
     // Validate Origin header (CSRF protection)
     const origin = c.req.header('Origin')
-    if (origin && !ALLOWED_ORIGINS.includes(origin)) {
+    if (origin && !getAllowedOrigins(c.env).includes(origin)) {
       console.error(`[SSE Stream] Rejected connection from origin: ${origin}`)
       return c.json(
         { success: false, error: 'Origin not allowed' },

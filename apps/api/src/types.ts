@@ -29,6 +29,10 @@ export interface Env {
   API_CACHE: KVNamespace
   ENVIRONMENT: string
 
+  // ─── Dashboard URL ────────────────────────────────────────────────────────
+  /** Production dashboard URL (e.g. 'https://app.flowstate.homes') */
+  DASHBOARD_URL?: string
+
   // ─── Durable Objects ─────────────────────────────────────────────────────────
   ANALYSIS_JOB: DurableObjectNamespace
   RATE_LIMIT_COORDINATOR: DurableObjectNamespace

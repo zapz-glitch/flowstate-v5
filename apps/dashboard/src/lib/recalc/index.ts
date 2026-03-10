@@ -8,9 +8,12 @@
  * with the server.
  *
  * Important: The server uses a 3-pass fallback (strict → relax subdivision →
- * relax all filters). The client preserves the server's comp enabled/disabled
- * state as a floor — a comp the server enabled won't be disabled by client
- * recalc unless the user explicitly tightened a filter that the comp fails.
+ * relax all filters). The client distinguishes between "relaxing" changes
+ * (disabling a filter or raising its threshold) and "tightening" changes
+ * (enabling a new filter or lowering a threshold). When the user relaxes,
+ * server-enabled comps stay enabled. Only when the user tightens a filter
+ * do we strictly re-evaluate — this prevents ARV from dropping to 0 when
+ * the user disables a filter that the server's fallback had already relaxed.
  */
 
 import type { AnalyzeData, CompItem, SubjectData, ValuationData } from '@/app/(dashboard)/dashboard/analyze/actions'
@@ -53,6 +56,32 @@ function hasFilterChanges(data: AnalyzeData, settings: EvaluationSettings): bool
     const aa = appliedAdj.find((a) => a.type === sa.type)
     if (!aa) continue
     if (sa.enabled !== aa.enabled || sa.amount !== aa.amount || sa.percent !== aa.percent) return true
+  }
+
+  return false
+}
+
+/**
+ * Check whether any filter was strictly tightened compared to what the
+ * server used. "Tightened" means a filter that was disabled is now enabled,
+ * or a numeric threshold was lowered (stricter). Disabling a filter or
+ * increasing its threshold is considered "relaxing" — it should never cause
+ * a server-enabled comp to become disabled.
+ */
+function hasStricterFilters(data: AnalyzeData, settings: EvaluationSettings): boolean {
+  const applied = data.appliedSettings
+  if (!applied) return true
+
+  const appliedFilters = applied.filters ?? []
+  for (const sf of settings.filters) {
+    const af = appliedFilters.find((f) => f.type === sf.type)
+    if (!af) continue
+
+    // Filter was disabled on server, now enabled by user → stricter
+    if (!af.enabled && sf.enabled) return true
+
+    // Both enabled, but user lowered the threshold → stricter
+    if (af.enabled && sf.enabled && sf.value < af.value) return true
   }
 
   return false
@@ -112,12 +141,18 @@ export function recalculateReport(
       settings.adjustments.map((a) => ({ type: a.type as AdjustmentType, enabled: a.enabled, amount: a.amount, percent: a.percent }))
     )
 
-    // If user hasn't changed filters, preserve the server's isEnabled state.
-    // The server uses a 3-pass fallback that may have relaxed filters (e.g.
-    // dropping subdivision_match) to find viable comps. Strict client-side
-    // re-evaluation would disable those comps and produce ARV=0.
+    // The server uses a 3-pass fallback that may relax filters (e.g. triple
+    // thresholds, drop subdivision) to find viable comps. If the user only
+    // relaxed filters (disabled a filter or raised a threshold), server-enabled
+    // comps must stay enabled. Only use strict re-evaluation when the user
+    // tightened a filter (enabled a new one or lowered a threshold).
     const serverEnabled = comp.isEnabled !== false
-    const isEnabled = filtersChanged ? !evaluation.shouldDisable : serverEnabled
+    const stricterFilters = filtersChanged && hasStricterFilters(data, settings)
+    const isEnabled = stricterFilters
+      ? !evaluation.shouldDisable       // User tightened filters → strict re-eval
+      : filtersChanged
+        ? serverEnabled || !evaluation.shouldDisable  // User relaxed → keep server-enabled, also enable any newly passing
+        : serverEnabled                  // No changes → preserve server state
 
     return {
       isEnabled,

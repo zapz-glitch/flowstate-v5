@@ -29,7 +29,7 @@ auth.all('/*', async (c) => {
     user: c.env.SMTP_USER,
     pass: c.env.SMTP_PASS,
     from: c.env.SMTP_FROM,
-  })
+  }, c.env.DASHBOARD_URL)
 
   // Convert Hono request to standard Request
   const request = c.req.raw
