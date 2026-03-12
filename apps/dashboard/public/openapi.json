@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "Flowstate API",
-    "description": "Property valuation and underwriting API for real estate investors. Get property data, comparables, ARV calculations, and investment recommendations.\n\n## Authentication\n\nThe API supports two authentication methods:\n- **Bearer Token**: For API access via `/v1/*` endpoints. Use API keys from your dashboard.\n- **Session Cookie**: For dashboard endpoints (`/user/*`, `/appraisal-presets/*`). Managed via Better Auth.\n\n## Real-time Analysis\n\nProperty analysis is async. POST to `/v1/analyze` returns a job ID immediately. Get results via:\n- **WebSocket**: `/ws/analyze/:jobId` for real-time streaming\n- **Polling**: `GET /v1/analyze/jobs/:jobId` for status checks",
+    "description": "Property valuation and underwriting API for real estate investors. Get property data, comparables, ARV calculations, and investment recommendations.\n\n## Authentication\n\nThe API supports two authentication methods:\n- **Bearer Token**: For API access via `/v1/*` endpoints. Use API keys from your dashboard.\n- **Session Cookie**: For dashboard endpoints (`/user/*`, `/appraisal-presets/*`, `/rehab-config`, `/deal-params`, `/location-settings`, `/major-item-costs`, `/ghl-settings`). Managed via Better Auth.\n\n## Real-time Analysis\n\nProperty analysis is async. POST to `/v1/analyze` returns a job ID immediately. Get results via:\n- **SSE**: `/sse/analyze/:jobId` for real-time streaming\n- **Polling**: `GET /v1/analyze/jobs/:jobId` for status checks",
     "version": "1.0.0",
     "contact": {
       "name": "Flowstate Support",
@@ -35,6 +35,18 @@
     {
       "name": "User",
       "description": "User profile, API keys, and usage (session auth required)"
+    },
+    {
+      "name": "Evaluation Settings",
+      "description": "Manage evaluation configuration: rehab pricing, deal parameters, location overrides, major items (session auth)"
+    },
+    {
+      "name": "Reports",
+      "description": "Saved analysis reports and sharing (session auth)"
+    },
+    {
+      "name": "GHL Integration",
+      "description": "GoHighLevel CRM integration settings (session auth)"
     }
   ],
   "security": [
@@ -419,6 +431,59 @@
         }
       }
     },
+    "/sse/analyze/{jobId}": {
+      "get": {
+        "tags": ["Analysis"],
+        "summary": "SSE stream for job progress",
+        "description": "Server-Sent Events stream for real-time analysis job progress updates. Authenticate via `token` query parameter (obtained from POST /v1/analyze/stream-token). The stream emits events for each processing step and closes when the job completes or fails.",
+        "parameters": [
+          {
+            "name": "jobId",
+            "in": "path",
+            "required": true,
+            "description": "Job ID returned from POST /v1/analyze",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "token",
+            "in": "query",
+            "required": true,
+            "description": "Signed stream token from POST /v1/analyze/stream-token",
+            "schema": { "type": "string" }
+          }
+        ],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "SSE event stream. Events include: `status` (job state changes), `progress` (step updates with percentage), `result` (final analysis result), `error` (failure details).",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string",
+                  "description": "SSE event stream with data: JSON payloads"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid or expired stream token",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "404": {
+            "description": "Job not found",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          }
+        }
+      }
+    },
     "/user": {
       "get": {
         "tags": ["User"],
@@ -747,6 +812,343 @@
           },
           "404": {
             "description": "Log not found",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/user/reports": {
+      "get": {
+        "tags": ["Reports"],
+        "summary": "List saved reports",
+        "description": "Get a paginated list of the authenticated user's saved analysis reports.",
+        "security": [{ "cookieAuth": [] }],
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "description": "Page number",
+            "schema": { "type": "integer", "default": 1 }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Results per page",
+            "schema": { "type": "integer", "default": 20, "maximum": 100 }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated list of saved reports",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "reports": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "jobId": { "type": "string", "description": "Analysis job ID" },
+                          "address": { "type": "string", "description": "Property address" },
+                          "status": { "type": "string", "description": "Job status" },
+                          "arv": { "type": "number", "nullable": true, "description": "Calculated ARV" },
+                          "isShared": { "type": "boolean", "description": "Whether the report is publicly shared" },
+                          "createdAt": { "type": "string", "format": "date-time" },
+                          "updatedAt": { "type": "string", "format": "date-time" }
+                        }
+                      }
+                    },
+                    "pagination": { "$ref": "#/components/schemas/Pagination" }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/user/reports/{jobId}": {
+      "get": {
+        "tags": ["Reports"],
+        "summary": "Get full report",
+        "description": "Get the full analysis report for a specific job. Only the report owner can access this.",
+        "security": [{ "cookieAuth": [] }],
+        "parameters": [
+          {
+            "name": "jobId",
+            "in": "path",
+            "required": true,
+            "description": "Analysis job ID",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Full analysis report",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "report": {
+                      "type": "object",
+                      "description": "Full analysis result including subject, valuation, comps, and metadata"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "404": {
+            "description": "Report not found",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/user/reports/{jobId}/share": {
+      "get": {
+        "tags": ["Reports"],
+        "summary": "Get share status",
+        "description": "Get the current sharing status of a report, including whether it is shared and if a password is set.",
+        "security": [{ "cookieAuth": [] }],
+        "parameters": [
+          {
+            "name": "jobId",
+            "in": "path",
+            "required": true,
+            "description": "Analysis job ID",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Share status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "isShared": { "type": "boolean", "description": "Whether the report is publicly shared" },
+                    "hasPassword": { "type": "boolean", "description": "Whether a password is required" },
+                    "shareUrl": { "type": "string", "nullable": true, "description": "Public share URL (if shared)" }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "404": {
+            "description": "Report not found",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": ["Reports"],
+        "summary": "Enable or disable sharing",
+        "description": "Enable or disable public sharing for a report. Optionally set a password for access control.",
+        "security": [{ "cookieAuth": [] }],
+        "parameters": [
+          {
+            "name": "jobId",
+            "in": "path",
+            "required": true,
+            "description": "Analysis job ID",
+            "schema": { "type": "string" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["isShared"],
+                "properties": {
+                  "isShared": { "type": "boolean", "description": "Enable or disable sharing" },
+                  "password": { "type": "string", "nullable": true, "description": "Optional password for accessing the shared report" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Share settings updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean", "example": true },
+                    "isShared": { "type": "boolean" },
+                    "shareUrl": { "type": "string", "nullable": true }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "404": {
+            "description": "Report not found",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/reports/{jobId}": {
+      "get": {
+        "tags": ["Reports"],
+        "summary": "Get public shared report",
+        "description": "Access a publicly shared report. No authentication required if the report is shared. If a password is set, the share password cookie must be present (obtained via POST /reports/:jobId/verify). Report owners can always access their own reports via session auth.",
+        "security": [],
+        "parameters": [
+          {
+            "name": "jobId",
+            "in": "path",
+            "required": true,
+            "description": "Analysis job ID",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Shared report data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "report": {
+                      "type": "object",
+                      "description": "Full analysis result"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Password required",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "404": {
+            "description": "Report not found or not shared",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/reports/{jobId}/verify": {
+      "post": {
+        "tags": ["Reports"],
+        "summary": "Verify share password",
+        "description": "Verify a password for a password-protected shared report. On success, sets a cookie that grants access to the report.",
+        "security": [],
+        "parameters": [
+          {
+            "name": "jobId",
+            "in": "path",
+            "required": true,
+            "description": "Analysis job ID",
+            "schema": { "type": "string" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["password"],
+                "properties": {
+                  "password": { "type": "string", "description": "Share password to verify" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Password verified, access cookie set",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean", "example": true }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Incorrect password",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "404": {
+            "description": "Report not found or not shared",
             "content": {
               "application/json": {
                 "schema": { "$ref": "#/components/schemas/Error" }
@@ -1111,6 +1513,895 @@
           }
         }
       }
+    },
+    "/rehab-config/defaults": {
+      "get": {
+        "tags": ["Evaluation Settings"],
+        "summary": "Get default rehab table",
+        "description": "Get the system default rehab pricing table and tier ranges. No authentication required.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Default rehab configuration",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "config": {
+                      "type": "object",
+                      "description": "Default rehab pricing table keyed by tier name, each containing costPerSqft and minProfit"
+                    },
+                    "tierRanges": {
+                      "type": "object",
+                      "description": "Tier range definitions with min/max values"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/rehab-config": {
+      "get": {
+        "tags": ["Evaluation Settings"],
+        "summary": "Get user's rehab config",
+        "description": "Get the authenticated user's rehab pricing configuration. Returns the custom config if set, otherwise returns defaults.",
+        "security": [{ "cookieAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "User's rehab configuration",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "config": {
+                      "type": "object",
+                      "description": "Rehab pricing table keyed by tier name"
+                    },
+                    "tierRanges": {
+                      "type": "object",
+                      "description": "Tier range definitions"
+                    },
+                    "isCustom": { "type": "boolean", "description": "Whether this is a user-customized config" },
+                    "updatedAt": { "type": "string", "format": "date-time", "nullable": true }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": ["Evaluation Settings"],
+        "summary": "Update rehab config",
+        "description": "Update the authenticated user's rehab pricing configuration.",
+        "security": [{ "cookieAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["config"],
+                "properties": {
+                  "config": {
+                    "type": "object",
+                    "description": "Rehab pricing table keyed by tier name, each containing costPerSqft and minProfit"
+                  },
+                  "tierRanges": {
+                    "type": "object",
+                    "description": "Optional tier range overrides"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Rehab config updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean", "example": true },
+                    "config": { "type": "object", "description": "Updated rehab pricing table" },
+                    "tierRanges": { "type": "object", "description": "Updated tier ranges" },
+                    "isCustom": { "type": "boolean", "example": true },
+                    "updatedAt": { "type": "string", "format": "date-time" }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": ["Evaluation Settings"],
+        "summary": "Reset rehab config to defaults",
+        "description": "Delete the user's custom rehab config and reset to system defaults.",
+        "security": [{ "cookieAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "Reset to defaults",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "config": { "type": "object", "description": "Default rehab pricing table" },
+                    "isCustom": { "type": "boolean", "example": false }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/deal-params/defaults": {
+      "get": {
+        "tags": ["Evaluation Settings"],
+        "summary": "Get default deal params",
+        "description": "Get the system default deal parameters. No authentication required.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Default deal parameters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "closingCostsPercent": { "type": "number", "example": 8, "description": "Closing costs as percentage of ARV" },
+                    "carryingCostsPercent": { "type": "number", "example": 2, "description": "Carrying costs as percentage of ARV" },
+                    "wholesaleFee": { "type": "number", "example": 10000, "description": "Wholesale fee in dollars" },
+                    "desiredProfit": { "type": "number", "nullable": true, "example": null, "description": "Desired profit in dollars (null for auto-calculate)" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/deal-params": {
+      "get": {
+        "tags": ["Evaluation Settings"],
+        "summary": "Get user's deal params",
+        "description": "Get the authenticated user's deal parameters. Returns custom values if set, otherwise defaults.",
+        "security": [{ "cookieAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "User's deal parameters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "closingCostsPercent": { "type": "number", "description": "Closing costs percentage" },
+                    "carryingCostsPercent": { "type": "number", "description": "Carrying costs percentage" },
+                    "wholesaleFee": { "type": "number", "description": "Wholesale fee in dollars" },
+                    "desiredProfit": { "type": "number", "nullable": true, "description": "Desired profit in dollars" },
+                    "isCustom": { "type": "boolean", "description": "Whether these are user-customized" },
+                    "updatedAt": { "type": "string", "format": "date-time", "nullable": true }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": ["Evaluation Settings"],
+        "summary": "Update deal params",
+        "description": "Update the authenticated user's deal parameters. All fields are optional; only provided fields are updated.",
+        "security": [{ "cookieAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "closingCostsPercent": { "type": "number", "description": "Closing costs as percentage of ARV" },
+                  "carryingCostsPercent": { "type": "number", "description": "Carrying costs as percentage of ARV" },
+                  "wholesaleFee": { "type": "number", "description": "Wholesale fee in dollars" },
+                  "desiredProfit": { "type": "number", "nullable": true, "description": "Desired profit in dollars (null for auto-calculate)" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Deal params updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean", "example": true },
+                    "closingCostsPercent": { "type": "number" },
+                    "carryingCostsPercent": { "type": "number" },
+                    "wholesaleFee": { "type": "number" },
+                    "desiredProfit": { "type": "number", "nullable": true },
+                    "updatedAt": { "type": "string", "format": "date-time" }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": ["Evaluation Settings"],
+        "summary": "Reset deal params to defaults",
+        "description": "Delete the user's custom deal parameters and reset to system defaults.",
+        "security": [{ "cookieAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "Reset to defaults",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean", "example": true },
+                    "closingCostsPercent": { "type": "number", "example": 8 },
+                    "carryingCostsPercent": { "type": "number", "example": 2 },
+                    "wholesaleFee": { "type": "number", "example": 10000 },
+                    "desiredProfit": { "type": "number", "nullable": true, "example": null }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/location-settings": {
+      "get": {
+        "tags": ["Evaluation Settings"],
+        "summary": "List location overrides",
+        "description": "Get all location-based setting overrides for the authenticated user. Optionally filter by location type.",
+        "security": [{ "cookieAuth": [] }],
+        "parameters": [
+          {
+            "name": "type",
+            "in": "query",
+            "description": "Filter by location type",
+            "schema": { "type": "string", "enum": ["state", "city", "zip"] }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of location overrides",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "settings": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": { "type": "string", "description": "Location setting ID" },
+                          "state": { "type": "string", "nullable": true, "description": "State code (e.g., FL)" },
+                          "city": { "type": "string", "nullable": true, "description": "City name" },
+                          "zipCode": { "type": "string", "nullable": true, "description": "ZIP code" },
+                          "appraisalRules": { "type": "object", "nullable": true, "description": "Appraisal rule overrides" },
+                          "rehabConfigJson": { "type": "object", "nullable": true, "description": "Rehab config overrides" },
+                          "dealParamsJson": { "type": "object", "nullable": true, "description": "Deal parameter overrides" },
+                          "majorItemCostsJson": { "type": "object", "nullable": true, "description": "Major item cost overrides" },
+                          "createdAt": { "type": "string", "format": "date-time" },
+                          "updatedAt": { "type": "string", "format": "date-time" }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": ["Evaluation Settings"],
+        "summary": "Create location override",
+        "description": "Create a new location-based setting override. Provide exactly one of state, city, or zipCode to define the location scope. Override fields are all optional.",
+        "security": [{ "cookieAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "state": { "type": "string", "description": "State code (e.g., FL). Mutually exclusive with city and zipCode." },
+                  "city": { "type": "string", "description": "City name. Mutually exclusive with state and zipCode." },
+                  "zipCode": { "type": "string", "description": "ZIP code. Mutually exclusive with state and city." },
+                  "appraisalRules": { "type": "object", "description": "Appraisal rule overrides (filters and adjustments)" },
+                  "rehabConfigJson": { "type": "object", "description": "Rehab config overrides" },
+                  "dealParamsJson": { "type": "object", "description": "Deal parameter overrides" },
+                  "majorItemCostsJson": { "type": "object", "description": "Major item cost overrides" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Location override created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean", "example": true },
+                    "setting": { "type": "object", "description": "Created location setting" }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input - must provide exactly one location type",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/location-settings/{id}": {
+      "patch": {
+        "tags": ["Evaluation Settings"],
+        "summary": "Update location override",
+        "description": "Update an existing location-based setting override. Only provided fields are updated.",
+        "security": [{ "cookieAuth": [] }],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Location setting ID",
+            "schema": { "type": "string" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "appraisalRules": { "type": "object", "description": "Appraisal rule overrides" },
+                  "rehabConfigJson": { "type": "object", "description": "Rehab config overrides" },
+                  "dealParamsJson": { "type": "object", "description": "Deal parameter overrides" },
+                  "majorItemCostsJson": { "type": "object", "description": "Major item cost overrides" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Location override updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean", "example": true },
+                    "setting": { "type": "object", "description": "Updated location setting" }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "404": {
+            "description": "Location setting not found",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": ["Evaluation Settings"],
+        "summary": "Delete location override",
+        "description": "Delete a location-based setting override.",
+        "security": [{ "cookieAuth": [] }],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Location setting ID",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Location override deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean", "example": true }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "404": {
+            "description": "Location setting not found",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/major-item-costs/defaults": {
+      "get": {
+        "tags": ["Evaluation Settings"],
+        "summary": "Get default major item costs",
+        "description": "Get the system default major item costs (e.g., roof, HVAC, plumbing). No authentication required.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Default major item costs",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "description": "List of major items with default costs",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": { "type": "string", "description": "Item identifier (e.g., roof, hvac)" },
+                          "name": { "type": "string", "description": "Display name" },
+                          "defaultCost": { "type": "number", "description": "Default cost in dollars" }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/major-item-costs": {
+      "get": {
+        "tags": ["Evaluation Settings"],
+        "summary": "Get user's major item costs",
+        "description": "Get the authenticated user's custom major item costs. Returns custom values if set, otherwise defaults.",
+        "security": [{ "cookieAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "User's major item costs",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "description": "List of major items with costs",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": { "type": "string" },
+                          "name": { "type": "string" },
+                          "cost": { "type": "number" }
+                        }
+                      }
+                    },
+                    "isCustom": { "type": "boolean", "description": "Whether these are user-customized" },
+                    "updatedAt": { "type": "string", "format": "date-time", "nullable": true }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": ["Evaluation Settings"],
+        "summary": "Update major item costs",
+        "description": "Update the authenticated user's major item costs.",
+        "security": [{ "cookieAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["items"],
+                "properties": {
+                  "items": {
+                    "type": "array",
+                    "description": "Major items with custom costs",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "id": { "type": "string", "description": "Item identifier" },
+                        "cost": { "type": "number", "description": "Custom cost in dollars" }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Major item costs updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean", "example": true },
+                    "items": { "type": "array", "items": { "type": "object" } },
+                    "isCustom": { "type": "boolean", "example": true },
+                    "updatedAt": { "type": "string", "format": "date-time" }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": ["Evaluation Settings"],
+        "summary": "Reset major item costs to defaults",
+        "description": "Delete the user's custom major item costs and reset to system defaults.",
+        "security": [{ "cookieAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "Reset to defaults",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean", "example": true },
+                    "items": { "type": "array", "items": { "type": "object" } },
+                    "isCustom": { "type": "boolean", "example": false }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ghl-settings/fields": {
+      "get": {
+        "tags": ["GHL Integration"],
+        "summary": "List mappable GHL fields",
+        "description": "Get a list of all available fields that can be mapped to GoHighLevel custom fields. No authentication required.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "List of mappable fields",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "fields": {
+                      "type": "array",
+                      "description": "Available fields for GHL mapping",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": { "type": "string", "description": "Field identifier (e.g., arv, buyPrice, rehabCost)" },
+                          "label": { "type": "string", "description": "Human-readable field name" },
+                          "description": { "type": "string", "description": "What this field contains" },
+                          "type": { "type": "string", "description": "Data type (number, string, percentage)" }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ghl-settings": {
+      "get": {
+        "tags": ["GHL Integration"],
+        "summary": "Get GHL integration config",
+        "description": "Get the authenticated user's GoHighLevel integration configuration.",
+        "security": [{ "cookieAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "GHL integration settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "apiToken": { "type": "string", "description": "GHL API token (masked)" },
+                    "locationId": { "type": "string", "description": "GHL location ID" },
+                    "webhookSecret": { "type": "string", "description": "Webhook secret for incoming GHL webhooks" },
+                    "webhookUrl": { "type": "string", "description": "Full webhook URL to configure in GHL" },
+                    "fieldMappings": { "type": "object", "description": "Custom field mappings (flowstate field ID -> GHL field ID)" },
+                    "monetaryValueField": { "type": "string", "nullable": true, "description": "GHL field to use for monetary value" },
+                    "isEnabled": { "type": "boolean", "description": "Whether the integration is active" },
+                    "createdAt": { "type": "string", "format": "date-time" },
+                    "updatedAt": { "type": "string", "format": "date-time" }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "404": {
+            "description": "GHL settings not configured",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": ["GHL Integration"],
+        "summary": "Update GHL integration config",
+        "description": "Create or update the GoHighLevel integration configuration.",
+        "security": [{ "cookieAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["apiToken", "locationId"],
+                "properties": {
+                  "apiToken": { "type": "string", "description": "GHL API token" },
+                  "locationId": { "type": "string", "description": "GHL location ID" },
+                  "fieldMappings": { "type": "object", "description": "Custom field mappings (flowstate field ID -> GHL field ID)" },
+                  "monetaryValueField": { "type": "string", "description": "GHL field for monetary value" },
+                  "isEnabled": { "type": "boolean", "default": true, "description": "Whether the integration is active" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "GHL settings saved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean", "example": true },
+                    "webhookUrl": { "type": "string", "description": "Webhook URL to configure in GHL" },
+                    "webhookSecret": { "type": "string", "description": "Generated webhook secret" }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": ["GHL Integration"],
+        "summary": "Remove GHL config",
+        "description": "Delete the GoHighLevel integration configuration entirely.",
+        "security": [{ "cookieAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "GHL settings removed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean", "example": true }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ghl-settings/test": {
+      "post": {
+        "tags": ["GHL Integration"],
+        "summary": "Test GHL connection",
+        "description": "Test the GoHighLevel API connection using the configured credentials. Verifies the API token and location ID are valid.",
+        "security": [{ "cookieAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "Connection test result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean", "description": "Whether the connection was successful" },
+                    "locationName": { "type": "string", "description": "GHL location name (if successful)" },
+                    "message": { "type": "string", "description": "Status message" }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "404": {
+            "description": "GHL settings not configured",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1178,8 +2469,8 @@
               "rehabLevelIndex": { "type": "integer", "minimum": 0, "maximum": 4, "default": 2, "description": "Rehab level 0-4 (0=as-is, 4=full gut)" },
               "majorItems": { "type": "array", "items": { "$ref": "#/components/schemas/MajorItem" } },
               "additionPlay": { "type": "number", "default": 0, "description": "Additional square footage value" },
-              "closingCostsPercent": { "type": "number", "default": 10, "description": "Closing costs as % of ARV" },
-              "carryingCostsPercent": { "type": "number", "default": 5, "description": "Carrying costs as % of ARV" },
+              "closingCostsPercent": { "type": "number", "default": 8, "description": "Closing costs as % of ARV" },
+              "carryingCostsPercent": { "type": "number", "default": 2, "description": "Carrying costs as % of ARV" },
               "wholesaleFee": { "type": "number", "default": 10000, "description": "Wholesale fee in dollars" },
               "desiredProfit": { "type": "number", "description": "Desired profit in dollars" }
             }
@@ -1307,8 +2598,8 @@
                 "type": "object",
                 "properties": {
                   "rehabLevelIndex": { "type": "integer", "example": 2 },
-                  "closingCostsPercent": { "type": "number", "example": 10 },
-                  "carryingCostsPercent": { "type": "number", "example": 5 },
+                  "closingCostsPercent": { "type": "number", "example": 8 },
+                  "carryingCostsPercent": { "type": "number", "example": 2 },
                   "wholesaleFee": { "type": "number", "example": 10000 }
                 }
               },

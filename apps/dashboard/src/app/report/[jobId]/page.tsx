@@ -23,12 +23,14 @@ import {
   ValuationCard,
   ComparablesSection,
   RiskFloodCard,
+  NeighbourhoodCard,
 } from '@/components/analysis'
 import type {
   AnalyzeData,
   ValuationData,
   CompsData,
   FloodZoneData,
+  NeighbourhoodData,
 } from '@/components/analysis'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -39,6 +41,7 @@ interface AnalysisData {
   comps?: CompsData
   riskFlags?: string[] | null
   floodZone?: FloodZoneData | null
+  neighbourhood?: NeighbourhoodData | null
   meta?: { analysisId?: string; timestamp?: string; dataProvider?: string }
 }
 
@@ -270,6 +273,7 @@ export default function ReportPage({ params }: { params: Promise<{ jobId: string
                 comps: effectiveComps,
                 riskFlags: analysis.riskFlags,
                 floodZone: analysis.floodZone,
+                neighbourhood: analysis.neighbourhood,
                 isRecalculated,
               }}
             />
@@ -352,13 +356,17 @@ export default function ReportPage({ params }: { params: Promise<{ jobId: string
 
         {/* Report Content */}
         <div className="space-y-6">
+          {analysis.subject && <SubjectPropertyCard subject={analysis.subject} />}
+
           {displayValuation && (
             <div ref={valuationCardRef}>
               <ValuationCard valuation={displayValuation} isRecalculated={isRecalculated} onOpenSettings={() => setSettingsOpen(true)} />
             </div>
           )}
 
-          {analysis.subject && <SubjectPropertyCard subject={analysis.subject} />}
+          <RiskFloodCard riskFlags={analysis.riskFlags} floodZone={analysis.floodZone} />
+
+          <NeighbourhoodCard data={analysis.neighbourhood} subject={analysis.subject} comps={effectiveComps} />
 
           {effectiveComps && (
             <ComparablesSection
@@ -371,8 +379,6 @@ export default function ReportPage({ params }: { params: Promise<{ jobId: string
               onReset={handleResetComps}
             />
           )}
-
-          <RiskFloodCard riskFlags={analysis.riskFlags} floodZone={analysis.floodZone} />
         </div>
 
         {/* Footer */}

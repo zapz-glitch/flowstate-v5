@@ -528,7 +528,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
     subjectSupplementedFields: SupplementedField[],
     compSupplementedFields: Map<string, SupplementedField[]>
   ): Promise<AnalysisResponse> {
-    const valuationService = createValuationService(params.customRehabTable)
+    const valuationService = createValuationService(params.customRehabTable, params.customTierRanges)
     const appraisalService = createAppraisalService()
 
     const enabledComps = appraisalResult.comparables.filter((c) => c.isEnabled)
@@ -579,8 +579,8 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
       rehabLevelIndex: selectedRehabLevelIndex,
       majorItems: resolvedMajorItems,
       additionPlay: buybox.additionPlay ?? 0,
-      closingCostsPercent: buybox.closingCostsPercent ?? 10,
-      carryingCostsPercent: buybox.carryingCostsPercent ?? 5,
+      closingCostsPercent: buybox.closingCostsPercent ?? 8,
+      carryingCostsPercent: buybox.carryingCostsPercent ?? 2,
       wholesaleFee: buybox.wholesaleFee ?? 10000,
       desiredProfit: buybox.desiredProfit ?? undefined,
     })
@@ -593,8 +593,8 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
       selectedRehabLevelIndex,
       majorItems: resolvedMajorItems,
       additionPlay: buybox.additionPlay ?? 0,
-      closingCostsPercent: buybox.closingCostsPercent ?? 10,
-      carryingCostsPercent: buybox.carryingCostsPercent ?? 5,
+      closingCostsPercent: buybox.closingCostsPercent ?? 8,
+      carryingCostsPercent: buybox.carryingCostsPercent ?? 2,
       wholesaleFee: buybox.wholesaleFee ?? 10000,
       desiredProfit: buybox.desiredProfit ?? undefined,
     })
@@ -636,8 +636,8 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
         percent: a.percent,
       })),
       dealParams: {
-        closingCostsPercent: buybox.closingCostsPercent ?? 10,
-        carryingCostsPercent: buybox.carryingCostsPercent ?? 5,
+        closingCostsPercent: buybox.closingCostsPercent ?? 8,
+        carryingCostsPercent: buybox.carryingCostsPercent ?? 2,
         wholesaleFee: buybox.wholesaleFee ?? 10000,
         desiredProfit: buybox.desiredProfit ?? null,
       },

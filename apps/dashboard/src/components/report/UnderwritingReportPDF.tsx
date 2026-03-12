@@ -12,6 +12,7 @@ import type {
   CompsData,
   CompItem,
   FloodZoneData,
+  NeighbourhoodData,
 } from '@/components/analysis/shared-types'
 
 // ─── Props ───────────────────────────────────────────────────────────────────
@@ -25,6 +26,7 @@ export interface UnderwritingReportProps {
   comps?: CompsData
   riskFlags?: string[] | null
   floodZone?: FloodZoneData | null
+  neighbourhood?: NeighbourhoodData | null
   isRecalculated?: boolean
 }
 
@@ -60,6 +62,14 @@ const C = {
   bgLight: '#f9fafb',
   bgAccent: '#eff6ff',
   white: '#ffffff',
+}
+
+/** Color-code a crime index value for the PDF */
+function pdfCrimeColor(value: number): string {
+  if (value <= 50) return C.green
+  if (value <= 100) return C.amber
+  if (value <= 200) return '#ea580c' // orange-600
+  return C.red
 }
 
 // ─── Styles ──────────────────────────────────────────────────────────────────
@@ -328,6 +338,7 @@ export function UnderwritingReportPDF({
   comps,
   riskFlags,
   floodZone,
+  neighbourhood,
   isRecalculated,
 }: UnderwritingReportProps) {
   const formattedDate = fmtDate(date)
@@ -534,6 +545,190 @@ export function UnderwritingReportPDF({
                       {flag}
                     </Text>
                   ))}
+                </View>
+              </View>
+            )}
+          </View>
+        )}
+
+        {/* ── Neighbourhood Analysis ────────────────────────── */}
+        {neighbourhood && (neighbourhood.crime || neighbourhood.demographics || neighbourhood.schools?.nearby?.length) && (
+          <View style={s.sectionMargin}>
+            <SectionTitle>Neighbourhood Analysis</SectionTitle>
+
+            {/* Demographics */}
+            {neighbourhood.demographics && (
+              <View style={s.mt4}>
+                <Text style={{ fontSize: 8, fontFamily: 'Helvetica-Bold', marginBottom: 4 }}>Demographics</Text>
+                <View style={[s.row, { flexWrap: 'wrap', gap: 12 }]}>
+                  {neighbourhood.demographics.population != null && (
+                    <View>
+                      <Text style={{ fontSize: 7, color: C.muted }}>Population</Text>
+                      <Text style={{ fontSize: 8, fontFamily: 'Helvetica-Bold' }}>{neighbourhood.demographics.population.toLocaleString()}</Text>
+                    </View>
+                  )}
+                  {neighbourhood.demographics.medianIncome != null && (
+                    <View>
+                      <Text style={{ fontSize: 7, color: C.muted }}>Median Income</Text>
+                      <Text style={{ fontSize: 8, fontFamily: 'Helvetica-Bold' }}>{fmt(neighbourhood.demographics.medianIncome)}</Text>
+                    </View>
+                  )}
+                  {neighbourhood.demographics.medianAge != null && (
+                    <View>
+                      <Text style={{ fontSize: 7, color: C.muted }}>Median Age</Text>
+                      <Text style={{ fontSize: 8, fontFamily: 'Helvetica-Bold' }}>{neighbourhood.demographics.medianAge}</Text>
+                    </View>
+                  )}
+                  {neighbourhood.demographics.householdCount != null && (
+                    <View>
+                      <Text style={{ fontSize: 7, color: C.muted }}>Households</Text>
+                      <Text style={{ fontSize: 8, fontFamily: 'Helvetica-Bold' }}>{neighbourhood.demographics.householdCount.toLocaleString()}</Text>
+                    </View>
+                  )}
+                  {neighbourhood.demographics.medianHomeValue != null && (
+                    <View>
+                      <Text style={{ fontSize: 7, color: C.muted }}>Median Home Value</Text>
+                      <Text style={{ fontSize: 8, fontFamily: 'Helvetica-Bold' }}>{fmt(neighbourhood.demographics.medianHomeValue)}</Text>
+                    </View>
+                  )}
+                </View>
+              </View>
+            )}
+
+            {/* Crime */}
+            {neighbourhood.crime && (
+              <View style={s.mt8}>
+                <Text style={{ fontSize: 8, fontFamily: 'Helvetica-Bold', marginBottom: 4 }}>Crime</Text>
+                {/* Overall */}
+                <View style={[s.row, { gap: 12, marginBottom: 4 }]}>
+                  {neighbourhood.crime.crimeRisk && (
+                    <View>
+                      <Text style={{ fontSize: 7, color: C.muted }}>Risk Level</Text>
+                      <Text style={{
+                        fontSize: 8,
+                        fontFamily: 'Helvetica-Bold',
+                        color: neighbourhood.crime.crimeRisk.toLowerCase().includes('low') ? C.green
+                          : neighbourhood.crime.crimeRisk.toLowerCase().includes('high') ? C.red
+                          : C.amber,
+                      }}>
+                        {neighbourhood.crime.crimeRisk}
+                      </Text>
+                    </View>
+                  )}
+                  {neighbourhood.crime.crimeIndex != null && (
+                    <View>
+                      <Text style={{ fontSize: 7, color: C.muted }}>Overall Index</Text>
+                      <Text style={{ fontSize: 8, fontFamily: 'Helvetica-Bold' }}>{neighbourhood.crime.crimeIndex}</Text>
+                    </View>
+                  )}
+                </View>
+                {/* Violent Crime Breakdown */}
+                {(neighbourhood.crime.murderIndex != null || neighbourhood.crime.assaultIndex != null || neighbourhood.crime.robberyIndex != null) && (
+                  <View style={{ marginBottom: 3 }}>
+                    <Text style={{ fontSize: 7, fontFamily: 'Helvetica-Bold', color: C.muted, marginBottom: 2 }}>Violent Crime</Text>
+                    <View style={[s.row, { gap: 12 }]}>
+                      {neighbourhood.crime.murderIndex != null && (
+                        <View>
+                          <Text style={{ fontSize: 7, color: C.muted }}>Murder</Text>
+                          <Text style={{ fontSize: 8, fontFamily: 'Helvetica-Bold', color: pdfCrimeColor(neighbourhood.crime.murderIndex) }}>{neighbourhood.crime.murderIndex}</Text>
+                        </View>
+                      )}
+                      {neighbourhood.crime.assaultIndex != null && (
+                        <View>
+                          <Text style={{ fontSize: 7, color: C.muted }}>Assault</Text>
+                          <Text style={{ fontSize: 8, fontFamily: 'Helvetica-Bold', color: pdfCrimeColor(neighbourhood.crime.assaultIndex) }}>{neighbourhood.crime.assaultIndex}</Text>
+                        </View>
+                      )}
+                      {neighbourhood.crime.robberyIndex != null && (
+                        <View>
+                          <Text style={{ fontSize: 7, color: C.muted }}>Robbery</Text>
+                          <Text style={{ fontSize: 8, fontFamily: 'Helvetica-Bold', color: pdfCrimeColor(neighbourhood.crime.robberyIndex) }}>{neighbourhood.crime.robberyIndex}</Text>
+                        </View>
+                      )}
+                    </View>
+                  </View>
+                )}
+                {/* Property Crime Breakdown */}
+                {(neighbourhood.crime.burglaryIndex != null || neighbourhood.crime.larcenyIndex != null || neighbourhood.crime.motorVehicleTheftIndex != null) && (
+                  <View style={{ marginBottom: 3 }}>
+                    <Text style={{ fontSize: 7, fontFamily: 'Helvetica-Bold', color: C.muted, marginBottom: 2 }}>Property Crime</Text>
+                    <View style={[s.row, { gap: 12 }]}>
+                      {neighbourhood.crime.burglaryIndex != null && (
+                        <View>
+                          <Text style={{ fontSize: 7, color: C.muted }}>Burglary</Text>
+                          <Text style={{ fontSize: 8, fontFamily: 'Helvetica-Bold', color: pdfCrimeColor(neighbourhood.crime.burglaryIndex) }}>{neighbourhood.crime.burglaryIndex}</Text>
+                        </View>
+                      )}
+                      {neighbourhood.crime.larcenyIndex != null && (
+                        <View>
+                          <Text style={{ fontSize: 7, color: C.muted }}>Larceny</Text>
+                          <Text style={{ fontSize: 8, fontFamily: 'Helvetica-Bold', color: pdfCrimeColor(neighbourhood.crime.larcenyIndex) }}>{neighbourhood.crime.larcenyIndex}</Text>
+                        </View>
+                      )}
+                      {neighbourhood.crime.motorVehicleTheftIndex != null && (
+                        <View>
+                          <Text style={{ fontSize: 7, color: C.muted }}>Vehicle Theft</Text>
+                          <Text style={{ fontSize: 8, fontFamily: 'Helvetica-Bold', color: pdfCrimeColor(neighbourhood.crime.motorVehicleTheftIndex) }}>{neighbourhood.crime.motorVehicleTheftIndex}</Text>
+                        </View>
+                      )}
+                    </View>
+                  </View>
+                )}
+                {/* Underwriting note */}
+                {neighbourhood.crime.crimeIndex != null && neighbourhood.crime.crimeIndex > 150 && (
+                  <Text style={{ fontSize: 7, color: C.red, marginTop: 2 }}>
+                    High crime area — may affect insurance costs, rental demand, and resale value.
+                  </Text>
+                )}
+                <Text style={{ fontSize: 6, color: C.muted, marginTop: 2 }}>Index: 100 = national avg · higher = more crime</Text>
+              </View>
+            )}
+
+            {/* Schools (top 5) */}
+            {neighbourhood.schools?.nearby && neighbourhood.schools.nearby.length > 0 && (
+              <View style={s.mt8}>
+                <Text style={{ fontSize: 8, fontFamily: 'Helvetica-Bold', marginBottom: 4 }}>
+                  Nearby Schools ({neighbourhood.schools.count ?? neighbourhood.schools.nearby.length})
+                </Text>
+                {neighbourhood.schools.nearby.slice(0, 5).map((school, i) => (
+                  <View key={i} style={[s.row, { justifyContent: 'space-between', paddingVertical: 1.5 }]}>
+                    <View style={[s.row, { gap: 4, flex: 1 }]}>
+                      <Text style={{ fontSize: 7.5 }}>{school.name}</Text>
+                      {school.type && <Text style={{ fontSize: 6.5, color: C.muted }}>({school.type})</Text>}
+                    </View>
+                    <View style={[s.row, { gap: 8 }]}>
+                      {school.gradeRange && <Text style={{ fontSize: 7, color: C.muted }}>{school.gradeRange}</Text>}
+                      {school.rating != null && (
+                        <Text style={{
+                          fontSize: 7,
+                          fontFamily: 'Helvetica-Bold',
+                          color: school.rating >= 7 ? C.green : school.rating >= 4 ? C.amber : C.red,
+                        }}>
+                          {school.rating}/10
+                        </Text>
+                      )}
+                      {school.distance != null && (
+                        <Text style={{ fontSize: 7, color: C.muted }}>{school.distance.toFixed(1)} mi</Text>
+                      )}
+                    </View>
+                  </View>
+                ))}
+              </View>
+            )}
+
+            {/* POI Summary */}
+            {neighbourhood.poi?.summary && Object.keys(neighbourhood.poi.summary).length > 0 && (
+              <View style={s.mt8}>
+                <Text style={{ fontSize: 8, fontFamily: 'Helvetica-Bold', marginBottom: 4 }}>Points of Interest</Text>
+                <View style={[s.row, { flexWrap: 'wrap', gap: 4 }]}>
+                  {Object.entries(neighbourhood.poi.summary)
+                    .sort(([, a], [, b]) => b - a)
+                    .slice(0, 10)
+                    .map(([category, count]) => (
+                      <Text key={category} style={[s.badge, { borderColor: C.border, color: C.medium }]}>
+                        {category} ({count})
+                      </Text>
+                    ))}
                 </View>
               </View>
             )}

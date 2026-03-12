@@ -15,13 +15,14 @@
  *   projectedROI   = (projectedProfit / totalInvestment) × 100
  */
 
-import type { ValuationParams, ValuationResult, RehabLevelEstimate, RehabTable } from './types'
+import type { ValuationParams, ValuationResult, RehabLevelEstimate, RehabTable, TierRangeDefinition } from './types'
 import { REHAB_LEVELS } from './types'
 import { getArvTier, getRehabEstimate, DEFAULT_REHAB_TABLE } from './constants'
 
 export function calculateValuation(
   params: ValuationParams,
-  rehabTable: RehabTable = DEFAULT_REHAB_TABLE
+  rehabTable: RehabTable = DEFAULT_REHAB_TABLE,
+  tierRanges?: TierRangeDefinition[]
 ): ValuationResult {
   const {
     arv,
@@ -30,14 +31,14 @@ export function calculateValuation(
     rehabLevelIndex = 2,
     majorItems = [],
     additionPlay = 0,
-    closingCostsPercent = 10,
-    carryingCostsPercent = 5,
+    closingCostsPercent = 8,
+    carryingCostsPercent = 2,
     wholesaleFee = 10000,
     desiredProfit,
   } = params
 
-  const arvTier = getArvTier(arv)
-  const rehabEstimate = getRehabEstimate(rehabTable, arv, rehabLevelIndex)
+  const arvTier = getArvTier(arv, tierRanges)
+  const rehabEstimate = getRehabEstimate(rehabTable, arv, rehabLevelIndex, tierRanges)
   const rehabLevel = REHAB_LEVELS[rehabLevelIndex]
 
   // Calculate costs
@@ -79,7 +80,7 @@ export function calculateValuation(
     { label: 'Addition Play', amount: -additionPlay },
     { label: 'Closing Costs', amount: -closingCosts, percent: closingCostsPercent },
     { label: 'Carrying Costs', amount: -carryingCosts, percent: carryingCostsPercent },
-    { label: 'Desired Profit', amount: -minProfit },
+    { label: 'Flip Profit', amount: -minProfit },
     { label: 'Maximum Buy Price', amount: buyPrice, percent: buyPricePercent },
     { label: 'Wholesale Fee', amount: -wholesaleFee },
     { label: 'Wholesale Price', amount: wholesalePrice, percent: wholesalePricePercent },
@@ -114,17 +115,19 @@ export function calculateValuation(
 
 /**
  * Calculate all rehab level estimates for a given ARV.
- * Returns array with full valuation calculations for each of the 7 rehab levels.
+ * Returns array with full valuation calculations for each rehab level.
  */
 export function calculateAllRehabLevelEstimates(
   params: ValuationParams,
   rehabTable: RehabTable = DEFAULT_REHAB_TABLE,
-  selectedRehabLevelIndex: number = 2
+  selectedRehabLevelIndex: number = 2,
+  tierRanges?: TierRangeDefinition[]
 ): RehabLevelEstimate[] {
   return REHAB_LEVELS.map((name, index) => {
     const valuation = calculateValuation(
       { ...params, rehabLevelIndex: index },
-      rehabTable
+      rehabTable,
+      tierRanges
     )
 
     return {

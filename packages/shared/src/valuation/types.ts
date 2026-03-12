@@ -7,7 +7,21 @@
 
 // ─── ARV Tiers ─────────────────────────────────────────────────────────────────
 
-export type ArvTier = 'under501k' | '501kTo999k' | '1mTo3m' | 'over3m'
+export type ArvTier = string
+
+export interface TierRangeDefinition {
+  key: string
+  label: string
+  minValue: number | null
+  maxValue: number | null
+}
+
+export const DEFAULT_TIER_RANGES: TierRangeDefinition[] = [
+  { key: 'under501k', label: 'Under $501K', minValue: null, maxValue: 501000 },
+  { key: '501kTo999k', label: '$501K – $999K', minValue: 501000, maxValue: 1000000 },
+  { key: '1mTo3m', label: '$1M – $3M', minValue: 1000000, maxValue: 3000000 },
+  { key: 'over3m', label: 'Over $3M', minValue: 3000000, maxValue: null },
+]
 
 // ─── Rehab Levels ──────────────────────────────────────────────────────────────
 
@@ -17,8 +31,6 @@ export const REHAB_LEVELS = [
   'Full Cosmetic',
   'Heavy Rehab',
   'Down to Stud',
-  'Low Cost Market',
-  'High Cost Market',
 ] as const
 
 export type RehabLevel = (typeof REHAB_LEVELS)[number]
@@ -28,7 +40,7 @@ export interface RehabEstimate {
   minProfit: number
 }
 
-export type RehabTable = Record<ArvTier, RehabEstimate[]>
+export type RehabTable = Record<string, RehabEstimate[]>
 
 // ─── Major Items ───────────────────────────────────────────────────────────────
 
@@ -69,7 +81,7 @@ export interface ValuationParams {
   subjectSqft: number
   /** Average comp square footage (defaults to subjectSqft) */
   compAvgSqft?: number
-  /** Rehab level index (0-6) */
+  /** Rehab level index */
   rehabLevelIndex?: number
   /** Major items with costs */
   majorItems?: MajorItem[]

@@ -27,6 +27,7 @@ interface WorkflowBinding<TParams = unknown> {
 export interface Env {
   DB: D1Database
   API_CACHE: KVNamespace
+  REPORT_PHOTOS?: R2Bucket
   ENVIRONMENT: string
 
   // ─── Dashboard URL ────────────────────────────────────────────────────────

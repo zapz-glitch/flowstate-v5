@@ -30,6 +30,8 @@ import type {
   ValuationResponse,
 } from './types'
 import { REHAB_LEVELS, MAJOR_ITEMS } from './types'
+import type { TierRangeDefinition } from '@flowstate-api/shared/valuation'
+import { getArvTier, getRehabEstimate } from '@flowstate-api/shared/valuation'
 
 // Re-export types
 export type {
@@ -54,8 +56,6 @@ export const DEFAULT_REHAB_TABLE: Record<ArvTier, RehabEstimate[]> = {
     { perSqft: 35, minProfit: 40000 },
     { perSqft: 45, minProfit: 50000 },
     { perSqft: 60, minProfit: 50000 },
-    { perSqft: 40, minProfit: 30000 },
-    { perSqft: 50, minProfit: 40000 },
   ],
   '501kTo999k': [
     { perSqft: 30, minProfit: 50000 },
@@ -63,8 +63,6 @@ export const DEFAULT_REHAB_TABLE: Record<ArvTier, RehabEstimate[]> = {
     { perSqft: 45, minProfit: 60000 },
     { perSqft: 55, minProfit: 70000 },
     { perSqft: 75, minProfit: 70000 },
-    { perSqft: 50, minProfit: 60000 },
-    { perSqft: 60, minProfit: 70000 },
   ],
   '1mTo3m': [
     { perSqft: 60, minProfit: 100000 },
@@ -72,8 +70,6 @@ export const DEFAULT_REHAB_TABLE: Record<ArvTier, RehabEstimate[]> = {
     { perSqft: 70, minProfit: 100000 },
     { perSqft: 80, minProfit: 100000 },
     { perSqft: 100, minProfit: 100000 },
-    { perSqft: 75, minProfit: 100000 },
-    { perSqft: 85, minProfit: 100000 },
   ],
   over3m: [
     { perSqft: 80, minProfit: 150000 },
@@ -81,23 +77,7 @@ export const DEFAULT_REHAB_TABLE: Record<ArvTier, RehabEstimate[]> = {
     { perSqft: 100, minProfit: 150000 },
     { perSqft: 110, minProfit: 150000 },
     { perSqft: 120, minProfit: 150000 },
-    { perSqft: 105, minProfit: 150000 },
-    { perSqft: 115, minProfit: 150000 },
   ],
-}
-
-// ─── Helper Functions ──────────────────────────────────────────────────────────
-
-function getArvTierInternal(arv: number): ArvTier {
-  if (arv >= 3000000) return 'over3m'
-  if (arv >= 1000000) return '1mTo3m'
-  if (arv >= 501000) return '501kTo999k'
-  return 'under501k'
-}
-
-function getRehabEstimateFromTable(table: Record<ArvTier, RehabEstimate[]>, arv: number, levelIndex: number): RehabEstimate {
-  const tier = getArvTierInternal(arv)
-  return table[tier][levelIndex] ?? table[tier][0]
 }
 
 // ─── Service Interface ─────────────────────────────────────────────────────────
@@ -117,7 +97,7 @@ export interface ValuationService {
 
   /**
    * Get rehab level options for a given ARV and sqft.
-   * Returns all 7 rehab levels with their estimated costs.
+   * Returns all rehab levels with their estimated costs.
    */
   getRehabOptions(
     arv: number,
@@ -149,9 +129,11 @@ export interface ValuationService {
 
 class PropertyValuationService implements ValuationService {
   private readonly rehabTable: Record<ArvTier, RehabEstimate[]>
+  private readonly tierRanges?: TierRangeDefinition[]
 
-  constructor(customRehabTable?: Record<ArvTier, RehabEstimate[]>) {
+  constructor(customRehabTable?: Record<ArvTier, RehabEstimate[]>, customTierRanges?: TierRangeDefinition[]) {
     this.rehabTable = customRehabTable ?? DEFAULT_REHAB_TABLE
+    this.tierRanges = customTierRanges
   }
 
   calculateValuation(params: ValuationParams): ValuationResult {
@@ -162,14 +144,14 @@ class PropertyValuationService implements ValuationService {
       rehabLevelIndex = 2,
       majorItems = [],
       additionPlay = 0,
-      closingCostsPercent = 10,
-      carryingCostsPercent = 5,
+      closingCostsPercent = 8,
+      carryingCostsPercent = 2,
       wholesaleFee = 10000,
       desiredProfit,
     } = params
 
-    const arvTier = getArvTierInternal(arv)
-    const rehabEstimate = getRehabEstimateFromTable(this.rehabTable, arv, rehabLevelIndex)
+    const arvTier = getArvTier(arv, this.tierRanges)
+    const rehabEstimate = getRehabEstimate(this.rehabTable, arv, rehabLevelIndex, this.tierRanges)
     const rehabLevel = REHAB_LEVELS[rehabLevelIndex]
 
     // Calculate costs
@@ -209,7 +191,7 @@ class PropertyValuationService implements ValuationService {
       { label: 'Addition Play', amount: -additionPlay },
       { label: 'Closing Costs', amount: -closingCosts, percent: closingCostsPercent },
       { label: 'Carrying Costs', amount: -carryingCosts, percent: carryingCostsPercent },
-      { label: 'Desired Profit', amount: -minProfit },
+      { label: 'Flip Profit', amount: -minProfit },
       { label: 'Maximum Buy Price', amount: buyPrice, percent: buyPricePercent },
       { label: 'Wholesale Fee', amount: -wholesaleFee },
       { label: 'Wholesale Price', amount: wholesalePrice, percent: wholesalePricePercent },
@@ -271,7 +253,7 @@ class PropertyValuationService implements ValuationService {
     estimatedCost: number
   }> {
     return REHAB_LEVELS.map((name, index) => {
-      const estimate = getRehabEstimateFromTable(this.rehabTable, arv, index)
+      const estimate = getRehabEstimate(this.rehabTable, arv, index, this.tierRanges)
       return {
         index,
         name,
@@ -286,7 +268,7 @@ class PropertyValuationService implements ValuationService {
   }
 
   getArvTier(arv: number): ArvTier {
-    return getArvTierInternal(arv)
+    return getArvTier(arv, this.tierRanges)
   }
 
   getRehabTable(): Record<ArvTier, RehabEstimate[]> {
@@ -300,6 +282,9 @@ class PropertyValuationService implements ValuationService {
  * Create a new valuation service instance.
  * No dependencies required - this is a pure calculation service.
  */
-export function createValuationService(customRehabTable?: Record<ArvTier, RehabEstimate[]>): ValuationService {
-  return new PropertyValuationService(customRehabTable)
+export function createValuationService(
+  customRehabTable?: Record<ArvTier, RehabEstimate[]>,
+  customTierRanges?: TierRangeDefinition[]
+): ValuationService {
+  return new PropertyValuationService(customRehabTable, customTierRanges)
 }

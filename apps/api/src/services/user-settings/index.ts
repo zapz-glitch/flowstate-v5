@@ -25,6 +25,7 @@ import type {
   AppraisalAdjustment,
 } from '../appraisal'
 import type { ArvTier, RehabEstimate } from '../valuation'
+import type { TierRangeDefinition } from '@flowstate-api/shared/valuation'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -34,6 +35,7 @@ export interface UserAnalysisSettings {
     adjustments: AppraisalAdjustment[]
   }
   customRehabTable?: Record<ArvTier, RehabEstimate[]>
+  customTierRanges?: TierRangeDefinition[]
   mergedBuybox: Record<string, unknown>
   customMajorItemCosts?: Record<string, number>
 }
@@ -100,6 +102,7 @@ export async function loadUserAnalysisSettings(
   ])
 
   let customRehabTable: Record<ArvTier, RehabEstimate[]> | undefined
+  let customTierRanges: TierRangeDefinition[] | undefined
   if (rehabRow) {
     try {
       customRehabTable = JSON.parse(rehabRow.configJson)
@@ -107,9 +110,18 @@ export async function loadUserAnalysisSettings(
     } catch {
       console.warn(`[UserSettings] Failed to parse rehab config for user ${userId}, using defaults`)
     }
+    if (rehabRow.tierRangesJson) {
+      try {
+        customTierRanges = JSON.parse(rehabRow.tierRangesJson)
+        console.log(`[UserSettings] Loaded custom tier ranges for user ${userId}`)
+      } catch {
+        console.warn(`[UserSettings] Failed to parse tier ranges for user ${userId}, using defaults`)
+      }
+    }
   }
 
   // Merge deal params into buybox (request buybox overrides user defaults)
+  // Always provide system defaults so workflow fallbacks are never needed.
   let mergedBuybox: Record<string, unknown> = {
     ...(dealParamsRow
       ? {
@@ -118,7 +130,7 @@ export async function loadUserAnalysisSettings(
           wholesaleFee: dealParamsRow.wholesaleFee,
           desiredProfit: dealParamsRow.desiredProfit,
         }
-      : {}),
+      : { closingCostsPercent: 8, carryingCostsPercent: 2, wholesaleFee: 10000, desiredProfit: null }),
     ...buyboxOverrides,
   }
   if (dealParamsRow) console.log(`[UserSettings] Loaded deal params for user ${userId}`)
@@ -192,6 +204,12 @@ export async function loadUserAnalysisSettings(
         customRehabTable = JSON.parse(rehabMatch.rehabConfigJson)
       } catch {}
     }
+    // Override tier ranges
+    if (rehabMatch?.tierRangesJson) {
+      try {
+        customTierRanges = JSON.parse(rehabMatch.tierRangesJson)
+      } catch {}
+    }
     // Override deal params (location wins over user default; explicit buybox still wins)
     if (dealMatch?.dealParamsJson) {
       try {
@@ -221,6 +239,7 @@ export async function loadUserAnalysisSettings(
   return {
     appraisalRules,
     customRehabTable,
+    customTierRanges,
     mergedBuybox,
     customMajorItemCosts,
   }

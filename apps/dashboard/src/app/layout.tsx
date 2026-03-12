@@ -1,6 +1,7 @@
-import type { Metadata } from 'next'
+import type { Metadata, Viewport } from 'next'
 import { Inter, Source_Serif_4 } from 'next/font/google'
 import { ThemeProvider } from '@/components/theme-provider'
+import { ServiceWorkerRegistrar } from '@/components/ServiceWorkerRegistrar'
 import './globals.css'
 
 const inter = Inter({
@@ -14,9 +15,31 @@ const sourceSerif = Source_Serif_4({
   style: ['normal', 'italic'],
 })
 
+export const viewport: Viewport = {
+  themeColor: '#a855f7',
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 1,
+}
+
 export const metadata: Metadata = {
-  title: 'Flowstate API',
-  description: 'Property valuation and underwriting API for real estate investors',
+  title: 'Flowstate',
+  description: 'Property valuation and underwriting platform for real estate investors',
+  manifest: '/manifest.json',
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'black-translucent',
+    title: 'Flowstate',
+  },
+  icons: {
+    icon: [
+      { url: '/favicon-16x16.png', sizes: '16x16', type: 'image/png' },
+      { url: '/favicon-32x32.png', sizes: '32x32', type: 'image/png' },
+    ],
+    apple: [
+      { url: '/icons/apple-touch-icon.png', sizes: '180x180', type: 'image/png' },
+    ],
+  },
 }
 
 export default function RootLayout({
@@ -30,6 +53,7 @@ export default function RootLayout({
         <ThemeProvider>
           {children}
         </ThemeProvider>
+        <ServiceWorkerRegistrar />
       </body>
     </html>
   )

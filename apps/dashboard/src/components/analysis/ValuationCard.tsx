@@ -90,7 +90,7 @@ export function ValuationCard({
                 }
               />
               <div className="text-heading-sm font-bold text-primary">
-                {isRecalculated && <span className="text-amber-500">~</span>}${valuation.arv?.toLocaleString() || '-'}
+                ${valuation.arv?.toLocaleString() || '-'}
               </div>
               {valuation.arvPerSqft != null && (
                 <div className="text-caption-sm text-foreground-tertiary mt-1">${valuation.arvPerSqft.toFixed(0)}/sqft</div>
@@ -103,7 +103,7 @@ export function ValuationCard({
                   <div className="space-y-1.5">
                     <p className="font-medium">Maximum Acquisition Price</p>
                     <p className="text-foreground-tertiary">The highest price you should pay for this property to hit your profit target.</p>
-                    <p className="font-mono text-[10px] text-foreground-tertiary mt-1">= ARV - Rehab - Closing Costs - Carrying Costs - Desired Profit</p>
+                    <p className="font-mono text-[10px] text-foreground-tertiary mt-1">= ARV - Rehab - Flip Profit - Closing Costs - Carrying Costs</p>
                   </div>
                 }
               />
@@ -174,7 +174,7 @@ export function ValuationCard({
                     <div className="space-y-1.5">
                       <p className="font-medium">Wholesale Assignment Price</p>
                       <p className="text-foreground-tertiary">Price to assign the contract to another investor after deducting your wholesale fee.</p>
-                      <p className="font-mono text-[10px] text-foreground-tertiary mt-1">= Max Buy Price - Wholesale Fee</p>
+                      <p className="font-mono text-[10px] text-foreground-tertiary mt-1">= ARV - Rehab - Flip Profit - Wholesale Fee - Closing Costs - Carrying Costs</p>
                     </div>
                   }
                 />
@@ -185,23 +185,40 @@ export function ValuationCard({
             )}
           </div>
 
-          {(valuation.totalCosts != null || valuation.totalInvestment != null) && (
+          {(valuation.closingCosts != null || valuation.carryingCosts != null || valuation.totalInvestment != null) && (
             <div className="flex items-center gap-6 mt-3 text-body-sm px-1">
-              {valuation.totalCosts != null && (
+              {valuation.closingCosts != null && (
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <span className="cursor-help">
-                      <span className="text-foreground-tertiary underline decoration-dotted decoration-foreground-tertiary/40 underline-offset-2">Total Costs</span>
+                      <span className="text-foreground-tertiary underline decoration-dotted decoration-foreground-tertiary/40 underline-offset-2">Closing Cost</span>
                       <span className="text-foreground-tertiary">: </span>
-                      <span className="font-medium">${valuation.totalCosts.toLocaleString()}</span>
+                      <span className="font-medium">${valuation.closingCosts.toLocaleString()}</span>
                     </span>
                   </TooltipTrigger>
                   <TooltipContent side="top" className="max-w-xs">
                     <div className="space-y-1.5">
-                      <p className="font-medium">Total Transaction Costs</p>
-                      <p className="text-foreground-tertiary">Combined closing and carrying costs for the deal.</p>
-                      <p className="font-mono text-[10px] text-foreground-tertiary mt-1">= Closing Costs + Carrying Costs</p>
-                      <p className="font-mono text-[10px] text-foreground-tertiary">= (ARV x Closing%) + (ARV x Carrying%)</p>
+                      <p className="font-medium">Closing Costs</p>
+                      <p className="text-foreground-tertiary">Transaction costs at closing (title, escrow, commissions, etc.).</p>
+                      <p className="font-mono text-[10px] text-foreground-tertiary mt-1">= ARV x Closing%</p>
+                    </div>
+                  </TooltipContent>
+                </Tooltip>
+              )}
+              {valuation.carryingCosts != null && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="cursor-help">
+                      <span className="text-foreground-tertiary underline decoration-dotted decoration-foreground-tertiary/40 underline-offset-2">Carrying Cost</span>
+                      <span className="text-foreground-tertiary">: </span>
+                      <span className="font-medium">${valuation.carryingCosts.toLocaleString()}</span>
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="max-w-xs">
+                    <div className="space-y-1.5">
+                      <p className="font-medium">Carrying Costs</p>
+                      <p className="text-foreground-tertiary">Ongoing costs while holding the property (insurance, taxes, utilities, etc.).</p>
+                      <p className="font-mono text-[10px] text-foreground-tertiary mt-1">= ARV x Carrying%</p>
                     </div>
                   </TooltipContent>
                 </Tooltip>

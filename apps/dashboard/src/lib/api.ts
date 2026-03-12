@@ -395,11 +395,12 @@ export interface ReportsListResponse {
 
 export async function getSavedReports(
   page = 1,
-  limit = 20
+  limit = 20,
+  search = ''
 ): Promise<ReportsListResponse> {
-  return fetchApi<ReportsListResponse>(
-    `/user/reports?page=${page}&limit=${limit}`
-  )
+  const params = new URLSearchParams({ page: String(page), limit: String(limit) })
+  if (search) params.set('search', search)
+  return fetchApi<ReportsListResponse>(`/user/reports?${params.toString()}`)
 }
 
 export async function getSavedReport(

@@ -29,6 +29,7 @@ import type {
   FloodZoneResponse,
   NormalizedProperty,
   NormalizedComparable,
+  NormalizedPermit,
 } from '../types'
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
@@ -62,8 +63,10 @@ interface AttomV1Property {
     zoningType?: string
   }
   area?: {
-    subdName?: string
-    countrySecSubd?: string  // county
+    subdName?: string   // expandedprofile uses camelCase
+    subdname?: string   // detail uses lowercase
+    countrySecSubd?: string  // expandedprofile
+    countrysecsubd?: string  // detail
   }
   building?: {
     rooms?: {
@@ -221,6 +224,53 @@ interface AttomV2Response {
   }
 }
 
+// ─── ATTOM Building Permits Response Types ───────────────────────────────────
+
+interface AttomRawPermit {
+  permitNumber?: string
+  status?: string
+  effectiveDate?: string
+  issuedDate?: string
+  type?: string
+  classification?: string
+  description?: string
+  jobValue?: string | number
+  contractor?: string
+}
+
+interface AttomPermitsResponse {
+  property?: Array<{
+    building?: {
+      permits?: AttomRawPermit[]
+    }
+    [key: string]: unknown
+  }>
+  status?: { code?: number; msg?: string }
+}
+
+// ─── ATTOM AVM Response Types ────────────────────────────────────────────────
+
+interface AttomAvmProperty {
+  identifier?: { attomId?: number | string }
+  assessment?: {
+    market?: { mktttlvalue?: number }
+  }
+  avm?: {
+    amount?: {
+      value?: number
+      high?: number
+      low?: number
+      scr?: number  // confidence score
+    }
+    eventDate?: string
+  }
+}
+
+interface AttomAvmResponse {
+  property?: AttomAvmProperty[]
+  status?: { code?: number; msg?: string }
+}
+
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 
 function parseFloat_(val: string | number | undefined | null): number | null {
@@ -266,7 +316,7 @@ function normalizeProperty(p: AttomV1Property): NormalizedProperty {
     city: p.address?.locality ?? '',
     state: p.address?.countrySubd ?? '',
     zipCode: p.address?.postal1 ?? '',
-    county: p.area?.countrySecSubd,
+    county: p.area?.countrySecSubd ?? p.area?.countrysecsubd,
 
     latitude: lat,
     longitude: lng,
@@ -293,7 +343,7 @@ function normalizeProperty(p: AttomV1Property): NormalizedProperty {
     taxAmount: p.assessment?.tax?.taxAmt ?? null,
     taxYear: p.assessment?.tax?.taxYear ?? undefined,
 
-    subdivision: p.area?.subdName,
+    subdivision: p.area?.subdName ?? p.area?.subdname,
 
     construction: {
       type: p.building?.construction?.constructionType,
@@ -378,6 +428,10 @@ function normalizeComparable(item: AttomV2PropertyItem): NormalizedComparable {
 // ─── HTTP helper ────────────────────────────────────────────────────────────────
 
 async function attomFetch<T>(apiKey: string, url: string): Promise<T> {
+  // Strip API key from URL for logging
+  const logUrl = url.replace(/apikey=[^&]+/, 'apikey=***')
+  console.log(`ATTOM fetch: ${logUrl}`)
+
   const res = await fetch(url, {
     headers: {
       Accept: 'application/json',
@@ -385,15 +439,33 @@ async function attomFetch<T>(apiKey: string, url: string): Promise<T> {
     },
   })
 
+  console.log(`ATTOM response: ${res.status} ${res.statusText} for ${logUrl}`)
+
   if (res.status === 404) {
     throw new AttomNotFoundError(url)
   }
+
+  // ATTOM returns 400 with SuccessWithoutResult when no matching record exists.
+  // Parse the body and treat it as "not found" instead of a hard error.
+  if (res.status === 400) {
+    const body = await res.json().catch(() => null) as Record<string, unknown> | null
+    console.log(`ATTOM 400 body:`, JSON.stringify(body).slice(0, 500))
+    const status = body?.status as Record<string, unknown> | undefined
+    if (status?.msg === 'SuccessWithoutResult' || status?.total === 0) {
+      throw new AttomNotFoundError(url)
+    }
+    throw new Error(`ATTOM API 400: ${JSON.stringify(body).slice(0, 200)}`)
+  }
+
   if (!res.ok) {
     const text = await res.text().catch(() => '')
+    console.log(`ATTOM error body:`, text.slice(0, 500))
     throw new Error(`ATTOM API ${res.status}: ${text.slice(0, 200)}`)
   }
 
-  return res.json() as Promise<T>
+  const data = await res.json() as T
+  console.log(`ATTOM response data:`, JSON.stringify(data).slice(0, 1000))
+  return data
 }
 
 class AttomNotFoundError extends Error {
@@ -422,29 +494,33 @@ class AttomProvider implements PropertyProviderAdapter {
     }
 
     try {
-      let address1: string
-      let address2: string
-
-      if (params.streetAddress) {
-        address1 = params.streetAddress
-        address2 = [params.city, params.state, params.zipCode].filter(Boolean).join(', ')
-      } else if (params.address) {
-        // Split full address: first comma-separated part is street, rest is city/state/zip
-        const parts = params.address.split(',')
-        address1 = parts[0].trim()
-        address2 = parts.slice(1).join(',').trim()
-      } else {
+      const { address1, address2 } = this.parseAddress(params)
+      if (!address1) {
         return { success: false, error: 'Address is required', code: 'INVALID_PARAMS' }
       }
 
-      const url = `${BASE_URL}/propertyapi/v1.0.0/property/basicprofile?address1=${encodeURIComponent(address1)}&address2=${encodeURIComponent(address2)}`
-      const data = await attomFetch<AttomV1Response>(this.apiKey, url)
+      const addrQuery = `address1=${encodeURIComponent(address1)}&address2=${encodeURIComponent(address2)}`
 
-      if (!data.property || data.property.length === 0) {
+      // Fetch expanded profile and AVM in parallel
+      const [profileData, avmData] = await Promise.all([
+        attomFetch<AttomV1Response>(this.apiKey, `${BASE_URL}/propertyapi/v1.0.0/property/expandedprofile?${addrQuery}`),
+        attomFetch<AttomAvmResponse>(this.apiKey, `${BASE_URL}/propertyapi/v1.0.0/attomavm/detail?${addrQuery}`).catch(() => null),
+      ])
+
+      if (!profileData.property || profileData.property.length === 0) {
         return { success: false, error: 'Property not found', code: 'NOT_FOUND' }
       }
 
-      return { success: true, data: normalizeProperty(data.property[0]) }
+      const property = normalizeProperty(profileData.property[0])
+
+      // Merge AVM data if available
+      if (avmData?.property?.[0]?.avm?.amount) {
+        const avm = avmData.property[0].avm.amount
+        property.avmValue = avm.value ?? null
+        property.avmConfidence = avm.scr ?? null
+      }
+
+      return { success: true, data: property }
     } catch (error) {
       if (error instanceof AttomNotFoundError) {
         return { success: false, error: 'Property not found', code: 'NOT_FOUND' }
@@ -455,6 +531,24 @@ class AttomProvider implements PropertyProviderAdapter {
         code: 'API_ERROR',
       }
     }
+  }
+
+  /** Parse address params into ATTOM's address1/address2 format */
+  private parseAddress(params: PropertySearchParams): { address1: string; address2: string } {
+    if (params.streetAddress) {
+      return {
+        address1: params.streetAddress,
+        address2: [params.city, params.state, params.zipCode].filter(Boolean).join(', '),
+      }
+    }
+    if (params.address) {
+      const parts = params.address.split(',')
+      return {
+        address1: parts[0].trim(),
+        address2: parts.slice(1).join(',').trim(),
+      }
+    }
+    return { address1: '', address2: '' }
   }
 
   // ── Get property by ATTOM ID ────────────────────────────────────────────────
@@ -494,70 +588,11 @@ class AttomProvider implements PropertyProviderAdapter {
     }
 
     try {
-      const queryParams = new URLSearchParams()
-      queryParams.append('searchType', 'Radius')
-      queryParams.append('miles', String(params.radiusMiles ?? 1))
-      queryParams.append('minComps', '1')
-      queryParams.append('maxComps', String(params.maxComps ?? 50))
-
-      if (params.monthsBack) {
-        queryParams.append('saleDateRange', String(params.monthsBack))
-      }
-
-      // ATTOM uses bedroomsRange/bathroomRange as +/- tolerance around subject
-      if (params.minBeds !== undefined || params.maxBeds !== undefined) {
-        const bedsRange =
-          params.maxBeds != null && params.minBeds != null
-            ? Math.abs(params.maxBeds - params.minBeds)
-            : 2
-        queryParams.append('bedroomsRange', String(bedsRange))
-      }
-      if (params.minBaths !== undefined || params.maxBaths !== undefined) {
-        const bathsRange =
-          params.maxBaths != null && params.minBaths != null
-            ? Math.abs(params.maxBaths - params.minBaths)
-            : 1
-        queryParams.append('bathroomRange', String(bathsRange))
-      }
-      if (params.sqftVariance) {
-        queryParams.append('sqFeetRange', String(params.sqftVariance))
-      }
-
-      queryParams.append('includeFullSalesOnly', 'false')
-      queryParams.append('distressed', 'IncludeDistressed')
-
-      const url = `${BASE_URL}/property/v2/salescomparables/propid/${params.propertyId}?${queryParams.toString()}`
+      const queryStr = this.buildCompQueryParams(params)
+      const url = `${BASE_URL}/property/v2/salescomparables/propid/${params.propertyId}?${queryStr}`
       const data = await attomFetch<AttomV2Response>(this.apiKey, url)
 
-      // Check API-level error in the v2 response envelope
-      const status = data.RESPONSE_GROUP?.PRODUCT?.STATUS
-      if (status && status._Code !== 0 && status._Code !== undefined) {
-        return { success: false, error: status._Description ?? 'Comparables request failed' }
-      }
-
-      const properties =
-        data.RESPONSE_GROUP?.RESPONSE?.RESPONSE_DATA
-          ?.PROPERTY_INFORMATION_RESPONSE_ext?.SUBJECT_PROPERTY_ext?.PROPERTY ?? []
-
-      // First element = subject property, remainder = comparables
-      const subjectRaw = properties.length > 0 ? properties[0] : null
-      const comparablesRaw = properties.slice(1)
-
-      const comparables = comparablesRaw
-        .filter((item) => item.COMPARABLE_PROPERTY_ext != null)
-        .map((item) => normalizeComparable(item))
-
-      return {
-        success: true,
-        data: {
-          subject: {
-            id: params.propertyId,
-            address: subjectRaw?.['@_StreetAddress'] ?? undefined,
-          },
-          comparables,
-          count: comparables.length,
-        },
-      }
+      return this.parseV2CompsResponse(data, params.propertyId)
     } catch (error) {
       if (error instanceof AttomNotFoundError) {
         return { success: false, error: 'No comparable properties found', code: 'NOT_FOUND' }
@@ -570,12 +605,112 @@ class AttomProvider implements PropertyProviderAdapter {
     }
   }
 
-  // ── Building permits — not available in base ATTOM tier ────────────────────
+  /** Build query params shared by all v2 comps endpoints */
+  private buildCompQueryParams(params: ComparablesSearchParams): string {
+    const q = new URLSearchParams()
+    q.append('searchType', 'Radius')
+    q.append('miles', String(params.radiusMiles ?? 1))
+    q.append('minComps', '1')
+    q.append('maxComps', String(params.maxComps ?? 50))
 
-  async getBuildingPermits(propertyId: string): Promise<PermitsResponse> {
+    if (params.monthsBack) {
+      q.append('saleDateRange', String(params.monthsBack))
+    }
+
+    if (params.minBeds !== undefined || params.maxBeds !== undefined) {
+      const bedsRange =
+        params.maxBeds != null && params.minBeds != null
+          ? Math.abs(params.maxBeds - params.minBeds)
+          : 2
+      q.append('bedroomsRange', String(bedsRange))
+    }
+    if (params.minBaths !== undefined || params.maxBaths !== undefined) {
+      const bathsRange =
+        params.maxBaths != null && params.minBaths != null
+          ? Math.abs(params.maxBaths - params.minBaths)
+          : 1
+      q.append('bathroomRange', String(bathsRange))
+    }
+    if (params.sqftVariance) {
+      q.append('sqFeetRange', String(params.sqftVariance))
+    }
+
+    q.append('includeFullSalesOnly', 'false')
+    q.append('distressed', 'IncludeDistressed')
+
+    return q.toString()
+  }
+
+  /** Parse the v2 comps response envelope */
+  private parseV2CompsResponse(data: AttomV2Response, propertyId: string): ComparablesSearchResponse {
+    const status = data.RESPONSE_GROUP?.PRODUCT?.STATUS
+    if (status && status._Code !== 0 && status._Code !== undefined) {
+      return { success: false, error: status._Description ?? 'Comparables request failed' }
+    }
+
+    const properties =
+      data.RESPONSE_GROUP?.RESPONSE?.RESPONSE_DATA
+        ?.PROPERTY_INFORMATION_RESPONSE_ext?.SUBJECT_PROPERTY_ext?.PROPERTY ?? []
+
+    const subjectRaw = properties.length > 0 ? properties[0] : null
+    const comparablesRaw = properties.slice(1)
+
+    const comparables = comparablesRaw
+      .filter((item) => item.COMPARABLE_PROPERTY_ext != null)
+      .map((item) => normalizeComparable(item))
+
     return {
       success: true,
-      data: { propertyId, permits: [], count: 0 },
+      data: {
+        subject: {
+          id: propertyId,
+          address: subjectRaw?.['@_StreetAddress'] ?? undefined,
+        },
+        comparables,
+        count: comparables.length,
+      },
+    }
+  }
+
+  // ── Building permits via /property/buildingpermits (address-based) ──────────
+
+  async getBuildingPermits(propertyId: string, address?: { address1: string; address2: string }): Promise<PermitsResponse> {
+    if (!this.apiKey || !address?.address1 || !address?.address2) {
+      return { success: true, data: { propertyId, permits: [], count: 0 } }
+    }
+
+    try {
+      const url = `${BASE_URL}/propertyapi/v1.0.0/property/buildingpermits?address1=${encodeURIComponent(address.address1)}&address2=${encodeURIComponent(address.address2)}`
+      const data = await attomFetch<AttomPermitsResponse>(this.apiKey, url)
+
+      const prop = data.property?.[0]
+      const rawPermits = prop?.building?.permits ?? []
+
+      const permits: NormalizedPermit[] = rawPermits.map((p, i) => ({
+        permitId: `attom-${propertyId}-${i}`,
+        permitNumber: p.permitNumber ?? null,
+        status: p.status ?? null,
+        effectiveDate: parseAttomDate(p.effectiveDate) ?? parseAttomDate(p.issuedDate) ?? null,
+        expirationDate: null,
+        projectType: p.type ?? p.classification ?? null,
+        projectCategory: p.classification ?? null,
+        classificationTypes: p.classification ? [p.classification] : [],
+        description: p.description ?? null,
+        jobValue: parseFloat_(p.jobValue) ?? null,
+        contractorName: p.contractor ?? null,
+        areaSquareFeet: null,
+      }))
+
+      return {
+        success: true,
+        data: { propertyId, permits, count: permits.length },
+      }
+    } catch (error) {
+      if (error instanceof AttomNotFoundError) {
+        return { success: true, data: { propertyId, permits: [], count: 0 } }
+      }
+      console.log(`ATTOM: Building permits fetch failed for ${propertyId}:`, error)
+      return { success: true, data: { propertyId, permits: [], count: 0 } }
     }
   }
 

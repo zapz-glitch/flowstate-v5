@@ -274,66 +274,30 @@ export async function deleteAppraisalPreset(id: string): Promise<void> {
   await fetchApi(`/appraisal-presets/${id}`, { method: 'DELETE' })
 }
 
-// ─── Process Documentation Comments ─────────────────────────────────────────
-
-export interface DocCommentUser {
-  id: string
-  name: string
-  email: string
-}
-
-export interface DocComment {
-  id: string
-  sectionId: string
-  content: string
-  isDeleted: boolean
-  createdAt: string
-  updatedAt: string
-  user: DocCommentUser
-  replies: DocComment[]
-}
-
-export interface CommentsResponse {
-  comments: DocComment[]
-  totalCount: number
-}
-
-export async function getComments(sectionId: string): Promise<CommentsResponse> {
-  return fetchApi<CommentsResponse>(`/comments?sectionId=${encodeURIComponent(sectionId)}`)
-}
-
-export async function createComment(data: {
-  sectionId: string
-  content: string
-  parentId?: string
-}): Promise<DocComment> {
-  return fetchApi<DocComment>('/comments', {
-    method: 'POST',
-    body: JSON.stringify(data),
-  })
-}
-
-export async function updateComment(id: string, content: string): Promise<void> {
-  await fetchApi(`/comments/${id}`, {
-    method: 'PATCH',
-    body: JSON.stringify({ content }),
-  })
-}
-
-export async function deleteComment(id: string): Promise<void> {
-  await fetchApi(`/comments/${id}`, { method: 'DELETE' })
-}
-
 // ─── Rehab Config ─────────────────────────────────────────────────────────────
 
-export type ArvTier = 'under501k' | '501kTo999k' | '1mTo3m' | 'over3m'
+export type ArvTier = string
 
 export interface RehabEstimate {
   perSqft: number
   minProfit: number
 }
 
-export type RehabTable = Record<ArvTier, RehabEstimate[]>
+export type RehabTable = Record<string, RehabEstimate[]>
+
+export interface TierRangeDefinition {
+  key: string
+  label: string
+  minValue: number | null
+  maxValue: number | null
+}
+
+export const DEFAULT_TIER_RANGES: TierRangeDefinition[] = [
+  { key: 'under501k', label: 'Under $501K', minValue: null, maxValue: 501000 },
+  { key: '501kTo999k', label: '$501K – $999K', minValue: 501000, maxValue: 1000000 },
+  { key: '1mTo3m', label: '$1M – $3M', minValue: 1000000, maxValue: 3000000 },
+  { key: 'over3m', label: 'Over $3M', minValue: 3000000, maxValue: null },
+]
 
 export const REHAB_LEVEL_NAMES = [
   'Lipstick',
@@ -341,21 +305,42 @@ export const REHAB_LEVEL_NAMES = [
   'Full Cosmetic',
   'Heavy Rehab',
   'Down to Stud',
-  'Low Cost Market',
-  'High Cost Market',
 ] as const
 
-export const ARV_TIER_LABELS: Record<ArvTier, string> = {
+/** Auto-compute a tier label from its boundaries */
+export function computeTierLabel(range: TierRangeDefinition): string {
+  const fmtBoundary = (n: number): string => {
+    if (n >= 1_000_000) {
+      const m = n / 1_000_000
+      return m % 1 === 0 ? `$${m}M` : `$${m.toFixed(1)}M`
+    }
+    return `$${Math.round(n / 1000)}K`
+  }
+  if (range.minValue === null && range.maxValue !== null) return `Under ${fmtBoundary(range.maxValue)}`
+  if (range.minValue !== null && range.maxValue === null) return `Over ${fmtBoundary(range.minValue)}`
+  if (range.minValue !== null && range.maxValue !== null) return `${fmtBoundary(range.minValue)} \u2013 ${fmtBoundary(range.maxValue)}`
+  return 'All Values'
+}
+
+export function getTierLabel(key: string, tierRanges?: TierRangeDefinition[]): string {
+  const ranges = tierRanges ?? DEFAULT_TIER_RANGES
+  const range = ranges.find((t) => t.key === key)
+  if (!range) return key
+  return computeTierLabel(range)
+}
+
+export const ARV_TIER_LABELS: Record<string, string> = {
   under501k: 'Under $501k',
   '501kTo999k': '$501k – $999k',
   '1mTo3m': '$1M – $3M',
   over3m: 'Over $3M',
 }
 
-export const ARV_TIERS: ArvTier[] = ['under501k', '501kTo999k', '1mTo3m', 'over3m']
+export const ARV_TIERS: string[] = ['under501k', '501kTo999k', '1mTo3m', 'over3m']
 
 export interface RehabConfigResponse {
   config: RehabTable
+  tierRanges: TierRangeDefinition[]
   isCustom: boolean
   updatedAt?: string
 }
@@ -364,14 +349,17 @@ export async function getRehabConfig(): Promise<RehabConfigResponse> {
   return fetchApi<RehabConfigResponse>('/rehab-config')
 }
 
-export async function getRehabConfigDefaults(): Promise<{ config: RehabTable }> {
-  return fetchApi<{ config: RehabTable }>('/rehab-config/defaults')
+export async function getRehabConfigDefaults(): Promise<{ config: RehabTable; tierRanges: TierRangeDefinition[] }> {
+  return fetchApi<{ config: RehabTable; tierRanges: TierRangeDefinition[] }>('/rehab-config/defaults')
 }
 
-export async function saveRehabConfig(config: RehabTable): Promise<RehabConfigResponse & { success: boolean }> {
+export async function saveRehabConfig(
+  config: RehabTable,
+  tierRanges?: TierRangeDefinition[]
+): Promise<RehabConfigResponse & { success: boolean }> {
   return fetchApi('/rehab-config', {
     method: 'PUT',
-    body: JSON.stringify({ config }),
+    body: JSON.stringify({ config, tierRanges }),
   })
 }
 
@@ -438,9 +426,11 @@ export interface LocationSetting {
   appraisalAdjustments?: LocationAppraisalAdjustment[] | null
   hasAppraisalOverride: boolean
   rehabConfigJson?: RehabTable | null
+  tierRangesJson?: TierRangeDefinition[] | null
   dealParamsJson?: DealParamsConfig | null
   majorItemCostsJson?: Record<string, number> | null
   hasRehabConfig: boolean
+  hasTierRanges: boolean
   hasDealParams: boolean
   hasMajorItemCosts: boolean
   createdAt: string
@@ -457,6 +447,7 @@ export interface LocationSettingInput {
   appraisalFilters?: LocationAppraisalFilter[] | null
   appraisalAdjustments?: LocationAppraisalAdjustment[] | null
   rehabConfigJson?: RehabTable | null
+  tierRangesJson?: TierRangeDefinition[] | null
   dealParamsJson?: DealParamsConfig | null
   majorItemCostsJson?: Record<string, number> | null
 }
@@ -584,6 +575,14 @@ export async function testGHLConnection(): Promise<GHLTestResult> {
   return fetchApi<GHLTestResult>('/ghl-settings/test', { method: 'POST' })
 }
 
+// ─── Reports ─────────────────────────────────────────────────────────────────
+
+export async function getSavedReport(
+  jobId: string
+): Promise<{ jobId: string; address: string; createdAt: string; analysis: unknown }> {
+  return fetchApi(`/user/reports/${jobId}`)
+}
+
 // ─── Report Sharing ──────────────────────────────────────────────────────────
 
 export interface ShareSettings {
@@ -604,6 +603,79 @@ export async function updateReportShareSettings(
     method: 'PUT',
     body: JSON.stringify(settings),
   })
+}
+
+// ─── Report Photos ──────────────────────────────────────────────────────────
+
+export interface UploadedPhoto {
+  id: string
+  fileName: string
+  mimeType: string
+  sizeBytes: number
+}
+
+export interface PhotoFinding {
+  id: string
+  majorItemId: string | null
+  title: string
+  description: string
+  severity: 'low' | 'medium' | 'high' | 'critical'
+  confidence: number
+  estimatedCost?: number
+}
+
+export interface PhotoAnalysisResult {
+  findings: PhotoFinding[]
+  model: string
+  photoCount: number
+}
+
+export interface ReportPhotosResponse {
+  photos: Array<{
+    id: string
+    fileName: string
+    mimeType: string
+    sizeBytes: number
+    createdAt: string
+  }>
+  findings: PhotoFinding[] | null
+  analysisModel: string | null
+  analysisDate: string | null
+}
+
+export async function uploadReportPhotos(jobId: string, files: File[]): Promise<UploadedPhoto[]> {
+  const formData = new FormData()
+  for (const file of files) {
+    formData.append('photos', file)
+  }
+
+  const response = await fetch(`${API_URL}/user/reports/${jobId}/photos`, {
+    method: 'POST',
+    body: formData,
+    credentials: 'include',
+  })
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({ error: 'Upload failed' })) as { error?: string }
+    throw new Error(errorData.error || `Upload failed: ${response.status}`)
+  }
+
+  const data = await response.json() as { photos: UploadedPhoto[] }
+  return data.photos
+}
+
+export async function analyzeReportPhotos(jobId: string): Promise<PhotoAnalysisResult> {
+  return fetchApi<PhotoAnalysisResult>(`/user/reports/${jobId}/photos/analyze`, {
+    method: 'POST',
+  })
+}
+
+export async function getReportPhotos(jobId: string): Promise<ReportPhotosResponse> {
+  return fetchApi<ReportPhotosResponse>(`/user/reports/${jobId}/photos`)
+}
+
+export async function deleteReportPhoto(jobId: string, photoId: string): Promise<void> {
+  await fetchApi(`/user/reports/${jobId}/photos/${photoId}`, { method: 'DELETE' })
 }
 
 // ─── Plan Limits ───────────────────────────────────────────────────────────────

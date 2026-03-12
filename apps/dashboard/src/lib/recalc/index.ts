@@ -17,7 +17,7 @@
  */
 
 import type { AnalyzeData, CompItem, SubjectData, ValuationData } from '@/app/(dashboard)/dashboard/analyze/actions'
-import type { DealParamsConfig } from '@/lib/client-api'
+import type { DealParamsConfig, TierRangeDefinition } from '@/lib/client-api'
 import { getCompKey } from '@/components/analysis/format-helpers'
 import type { EvaluationSettings, RecalcResult, CompEvaluation } from './types'
 import {
@@ -114,7 +114,8 @@ export function recalculateReport(
           .filter((item) => item.enabled)
           .map((item) => ({ id: item.id as 'roof', enabled: true, cost: item.cost })),
       },
-      rehabTable
+      rehabTable,
+      settings.tierRanges
     )
 
     return {
@@ -124,7 +125,7 @@ export function recalculateReport(
       disabledCount: 0,
       avgPricePerSqft: null,
       medianPrice: null,
-      valuation: mapValuationResult(valResult, settings.rehabLevelIndex, rehabTable, settings),
+      valuation: mapValuationResult(valResult, settings.rehabLevelIndex, rehabTable, settings, settings.tierRanges),
       hasChanges: false,
     }
   }
@@ -234,7 +235,8 @@ export function recalculateReport(
       wholesaleFee: settings.dealParams.wholesaleFee,
       desiredProfit: settings.dealParams.desiredProfit ?? undefined,
     },
-    rehabTable
+    rehabTable,
+    settings.tierRanges
   )
 
   // 7. Check if values differ from original
@@ -248,7 +250,7 @@ export function recalculateReport(
     disabledCount,
     avgPricePerSqft,
     medianPrice,
-    valuation: mapValuationResult(valResult, settings.rehabLevelIndex, rehabTable, settings),
+    valuation: mapValuationResult(valResult, settings.rehabLevelIndex, rehabTable, settings, settings.tierRanges),
     hasChanges,
   }
 }
@@ -260,7 +262,8 @@ function mapValuationResult(
   v: ReturnType<typeof calculateValuation>,
   rehabLevelIndex: number,
   rehabTable: RehabTable,
-  settings: EvaluationSettings
+  settings: EvaluationSettings,
+  tierRanges?: TierRangeDefinition[]
 ) {
   const majorItems = settings.majorItems
     .map((item) => ({ id: item.id as 'roof', enabled: item.enabled, cost: item.cost }))
@@ -282,7 +285,8 @@ function mapValuationResult(
       desiredProfit: settings.dealParams.desiredProfit ?? undefined,
     },
     rehabTable,
-    rehabLevelIndex
+    rehabLevelIndex,
+    tierRanges
   )
 
   return {
@@ -296,6 +300,8 @@ function mapValuationResult(
     baseRehabCost: v.baseRehabCost,
     majorItemsCost: v.majorItemsCost,
     rehabCost: v.totalRehabCost,
+    closingCosts: v.closingCosts,
+    carryingCosts: v.carryingCosts,
     totalCosts: v.closingCosts + v.carryingCosts,
     totalInvestment: v.totalInvestment,
     projectedProfit: v.projectedProfit,
@@ -315,7 +321,8 @@ export function recalculateValuationFromComps(
   selectedCompKeys: Set<string>,
   originalValuation: ValuationData,
   dealParams: DealParamsConfig,
-  rehabTable: RehabTable = DEFAULT_REHAB_TABLE as RehabTable
+  rehabTable: RehabTable = DEFAULT_REHAB_TABLE as RehabTable,
+  tierRanges?: TierRangeDefinition[]
 ): ValuationData {
   const subjectSqft = subject.squareFeet ?? 0
   const selectedComps = allComps.filter((c, i) => selectedCompKeys.has(getCompKey(c, i)))
@@ -346,7 +353,8 @@ export function recalculateValuationFromComps(
       wholesaleFee: dealParams.wholesaleFee,
       desiredProfit: dealParams.desiredProfit ?? undefined,
     },
-    rehabTable
+    rehabTable,
+    tierRanges
   )
 
   const rehabLevelEstimates = calculateAllRehabLevelEstimates(
@@ -360,7 +368,8 @@ export function recalculateValuationFromComps(
       desiredProfit: dealParams.desiredProfit ?? undefined,
     },
     rehabTable,
-    rehabLevelIndex
+    rehabLevelIndex,
+    tierRanges
   )
 
   return {
@@ -372,6 +381,8 @@ export function recalculateValuationFromComps(
     rehabCost: val.totalRehabCost,
     wholesalePrice: val.wholesalePrice,
     totalInvestment: val.totalInvestment,
+    closingCosts: val.closingCosts,
+    carryingCosts: val.carryingCosts,
     totalCosts: val.closingCosts + val.carryingCosts,
     projectedProfit: val.projectedProfit,
     projectedROI: val.projectedROI,

@@ -12,4 +12,5 @@ export type {
   ClassificationSummary,
   RehabLevelEstimate,
   FloodZoneData,
+  NeighbourhoodData,
 } from '@/app/(dashboard)/dashboard/analyze/actions'

@@ -227,6 +227,7 @@ analyze.post('/', async (c) => {
       buybox: userSettings.mergedBuybox,
       skipCache: body.skipCache,
       customRehabTable: userSettings.customRehabTable,
+      customTierRanges: userSettings.customTierRanges,
       customMajorItemCosts: userSettings.customMajorItemCosts,
     }
 
@@ -416,8 +417,8 @@ analyze.get('/defaults', async (c) => {
       },
       buybox: {
         rehabLevelIndex: 2,
-        closingCostsPercent: 10,
-        carryingCostsPercent: 5,
+        closingCostsPercent: 8,
+        carryingCostsPercent: 2,
         wholesaleFee: 10000,
       },
       enrichment: {

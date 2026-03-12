@@ -10,6 +10,7 @@ port = 8787
 [vars]
 ENVIRONMENT = "production"
 DASHBOARD_URL = "https://app.flowstate.homes"
+PROPERTY_PROVIDER = "attom"
 
 [[d1_databases]]
 binding = "DB"
@@ -20,6 +21,10 @@ migrations_dir = "migrations"
 [[kv_namespaces]]
 binding = "API_CACHE"
 id = "076d6c5a242c4b5d9765d04b8b8755b6"
+
+[[r2_buckets]]
+binding = "REPORT_PHOTOS"
+bucket_name = "flowstate-report-photos"
 
 # ─── Durable Objects ─────────────────────────────────────────────────────────
 

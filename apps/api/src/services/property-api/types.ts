@@ -88,6 +88,12 @@ export interface NormalizedProperty {
   taxAmount: number | null
   taxYear?: number | null
 
+  // AVM (Automated Valuation Model)
+  /** Estimated property value from AVM */
+  avmValue?: number | null
+  /** AVM confidence score (0-100) */
+  avmConfidence?: number | null
+
   // HOA
   /** Monthly HOA fee in dollars (if applicable) */
   hoaFee?: number | null
@@ -312,8 +318,8 @@ export interface PropertyProviderAdapter {
   /** Get comparable properties */
   getComparables(params: ComparablesSearchParams): Promise<ComparablesSearchResponse>
 
-  /** Get building permits (optional) */
-  getBuildingPermits?(propertyId: string): Promise<PermitsResponse>
+  /** Get building permits (optional). Address fields enable providers that don't support ID-based lookup. */
+  getBuildingPermits?(propertyId: string, address?: { address1: string; address2: string }): Promise<PermitsResponse>
 
   /** Get flood zone (optional) */
   getFloodZone?(latitude: number, longitude: number): Promise<FloodZoneResponse>
@@ -396,6 +402,7 @@ export interface EnrichmentData {
   permits: PermitsEnrichment | null
   floodZone: NormalizedFloodZone | null
   weatherRisk: WeatherRisk | null
+  neighbourhood: import('../neighbourhood').NeighbourhoodData | null
 }
 
 export interface EnrichmentOptions {
@@ -405,6 +412,8 @@ export interface EnrichmentOptions {
   floodZone?: boolean
   /** Include weather/natural disaster risk (default: false) */
   weatherRisk?: boolean
+  /** Include neighbourhood analysis — community, schools, POI (default: true) */
+  neighbourhood?: boolean
 }
 
 // ─── Property Bundle ───────────────────────────────────────────────────────────

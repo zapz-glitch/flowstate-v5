@@ -14,6 +14,7 @@ import { createAuth } from '../lib/auth'
 import { rehabConfig } from '../db'
 import { DEFAULT_REHAB_TABLE } from '../services/valuation'
 import type { ArvTier, RehabEstimate } from '../services/valuation'
+import { DEFAULT_TIER_RANGES, type TierRangeDefinition } from '@flowstate-api/shared/valuation'
 
 const rehabConfigRoute = new Hono<{ Bindings: Env }>()
 
@@ -34,12 +35,11 @@ async function getSession(c: any) {
   }
 }
 
-function validateRehabTable(table: unknown): table is RehabTable {
-  const tiers: ArvTier[] = ['under501k', '501kTo999k', '1mTo3m', 'over3m']
+function validateRehabTable(table: unknown, tierKeys: string[]): table is RehabTable {
   if (typeof table !== 'object' || table === null) return false
-  for (const tier of tiers) {
+  for (const tier of tierKeys) {
     const arr = (table as Record<string, unknown>)[tier]
-    if (!Array.isArray(arr) || arr.length !== 7) return false
+    if (!Array.isArray(arr) || arr.length === 0) return false
     for (const item of arr) {
       if (typeof (item as any)?.perSqft !== 'number' || typeof (item as any)?.minProfit !== 'number') return false
     }
@@ -47,10 +47,26 @@ function validateRehabTable(table: unknown): table is RehabTable {
   return true
 }
 
+function validateTierRanges(ranges: unknown): ranges is TierRangeDefinition[] {
+  if (!Array.isArray(ranges) || ranges.length === 0) return false
+  for (const r of ranges) {
+    if (typeof r !== 'object' || r === null) return false
+    if (typeof r.key !== 'string' || !r.key) return false
+    if (typeof r.label !== 'string' || !r.label) return false
+    if (r.minValue !== null && typeof r.minValue !== 'number') return false
+    if (r.maxValue !== null && typeof r.maxValue !== 'number') return false
+  }
+  if (ranges[0].minValue !== null) return false
+  if (ranges[ranges.length - 1].maxValue !== null) return false
+  const keys = new Set(ranges.map((r: TierRangeDefinition) => r.key))
+  if (keys.size !== ranges.length) return false
+  return true
+}
+
 // ─── GET /rehab-config/defaults ──────────────────────────────────────────────
 
 rehabConfigRoute.get('/defaults', (c) => {
-  return c.json({ config: DEFAULT_REHAB_TABLE })
+  return c.json({ config: DEFAULT_REHAB_TABLE, tierRanges: DEFAULT_TIER_RANGES })
 })
 
 // ─── GET /rehab-config ────────────────────────────────────────────────────────
@@ -69,11 +85,14 @@ rehabConfigRoute.get('/', async (c) => {
     .limit(1)
 
   if (!row) {
-    return c.json({ config: DEFAULT_REHAB_TABLE, isCustom: false })
+    return c.json({ config: DEFAULT_REHAB_TABLE, tierRanges: DEFAULT_TIER_RANGES, isCustom: false })
   }
+
+  const tierRanges = row.tierRangesJson ? JSON.parse(row.tierRangesJson) : DEFAULT_TIER_RANGES
 
   return c.json({
     config: JSON.parse(row.configJson) as RehabTable,
+    tierRanges,
     isCustom: true,
     updatedAt: row.updatedAt,
   })
@@ -88,9 +107,17 @@ rehabConfigRoute.put('/', async (c) => {
   }
 
   const body = await c.req.json().catch(() => null)
-  if (!body?.config || !validateRehabTable(body.config)) {
+
+  // Determine tier keys for validation
+  const tierRanges: TierRangeDefinition[] | undefined = body?.tierRanges
+  if (tierRanges !== undefined && !validateTierRanges(tierRanges)) {
+    return c.json({ error: 'Invalid tier ranges: must be non-empty array with unique keys, first min null, last max null' }, 400)
+  }
+  const tierKeys = (tierRanges ?? DEFAULT_TIER_RANGES).map((t: TierRangeDefinition) => t.key)
+
+  if (!body?.config || !validateRehabTable(body.config, tierKeys)) {
     return c.json(
-      { error: 'Invalid rehab config: must have 4 tiers (under501k, 501kTo999k, 1mTo3m, over3m) each with 7 entries containing perSqft and minProfit' },
+      { error: `Invalid rehab config: must have tiers [${tierKeys.join(', ')}] each with at least 1 entry containing perSqft and minProfit` },
       400
     )
   }
@@ -98,6 +125,7 @@ rehabConfigRoute.put('/', async (c) => {
   const db = drizzle(c.env.DB)
   const now = new Date().toISOString()
   const configJson = JSON.stringify(body.config)
+  const tierRangesJson = tierRanges ? JSON.stringify(tierRanges) : null
 
   const [existing] = await db
     .select({ id: rehabConfig.id })
@@ -108,18 +136,19 @@ rehabConfigRoute.put('/', async (c) => {
   if (existing) {
     await db
       .update(rehabConfig)
-      .set({ configJson, updatedAt: now })
+      .set({ configJson, tierRangesJson, updatedAt: now })
       .where(eq(rehabConfig.userId, session.user.id))
   } else {
     await db.insert(rehabConfig).values({
       userId: session.user.id,
       configJson,
+      tierRangesJson,
       createdAt: now,
       updatedAt: now,
     })
   }
 
-  return c.json({ success: true, config: body.config as RehabTable, isCustom: true, updatedAt: now })
+  return c.json({ success: true, config: body.config as RehabTable, tierRanges: tierRanges ?? DEFAULT_TIER_RANGES, isCustom: true, updatedAt: now })
 })
 
 // ─── DELETE /rehab-config ─────────────────────────────────────────────────────

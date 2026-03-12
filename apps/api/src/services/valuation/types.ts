@@ -6,7 +6,7 @@
 
 // ─── ARV Tiers ─────────────────────────────────────────────────────────────────
 
-export type ArvTier = 'under501k' | '501kTo999k' | '1mTo3m' | 'over3m'
+export type ArvTier = string
 
 // ─── Rehab Levels ──────────────────────────────────────────────────────────────
 
@@ -16,8 +16,6 @@ export const REHAB_LEVELS = [
   'Full Cosmetic',
   'Heavy Rehab',
   'Down to Stud',
-  'Low Cost Market',
-  'High Cost Market',
 ] as const
 
 export type RehabLevel = (typeof REHAB_LEVELS)[number]
@@ -66,7 +64,7 @@ export interface ValuationParams {
   subjectSqft: number
   /** Average comp square footage (defaults to subjectSqft) */
   compAvgSqft?: number
-  /** Rehab level index (0-6) */
+  /** Rehab level index (0-4) */
   rehabLevelIndex?: number
   /** Major items with costs */
   majorItems?: MajorItem[]

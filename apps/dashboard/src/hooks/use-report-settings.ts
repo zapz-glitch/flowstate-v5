@@ -1,8 +1,14 @@
 /**
  * Report Settings Hook
  *
- * Initializes settings from appliedSettings (what the server actually used),
- * falling back to loading from the API if appliedSettings is not available.
+ * Always loads the user's current evaluation settings from the API
+ * (appraisal preset, rehab config, deal params, major items) so the
+ * sidebar reflects what the user has configured on the Evaluation
+ * Settings page — not what the server happened to snapshot during analysis.
+ *
+ * The server's `appliedSettings` is kept as the comparison baseline so
+ * recalculation can detect when the user's current settings differ from
+ * what was actually used for the analysis.
  *
  * Key behavior:
  * - recalcData = null when settingsChanged === false (use server values as-is)
@@ -35,8 +41,8 @@ import {
 // ─── Default Settings ───────────────────────────────────────────────────────
 
 const DEFAULT_DEAL_PARAMS: DealParamsConfig = {
-  closingCostsPercent: 10,
-  carryingCostsPercent: 5,
+  closingCostsPercent: 8,
+  carryingCostsPercent: 2,
   wholesaleFee: 10000,
   desiredProfit: null,
 }
@@ -64,6 +70,11 @@ const DEFAULT_MAJOR_ITEMS: MajorItemSetting[] = MAJOR_ITEMS_LIST.map((item) => (
   cost: item.defaultCost,
 }))
 
+/** Deterministic JSON string for change detection — strips undefined values and sorts keys */
+function normalizeForComparison(obj: unknown): string {
+  return JSON.stringify(obj, (_key, value) => (value === undefined ? null : value))
+}
+
 // ─── Hook ───────────────────────────────────────────────────────────────────
 
 export interface UseReportSettingsReturn {
@@ -86,7 +97,7 @@ export function useReportSettings(data: AnalyzeData | null): UseReportSettingsRe
   const [loading, setLoading] = useState(true)
   const [labels, setLabels] = useState<AppraisalDefaults | null>(null)
 
-  // Saved defaults (loaded from appliedSettings or API) for reset
+  // Saved defaults (loaded from API — the user's current evaluation settings) for reset
   const [savedDefaults, setSavedDefaults] = useState<EvaluationSettings | null>(null)
 
   // Current settings (mutable by user)
@@ -100,7 +111,8 @@ export function useReportSettings(data: AnalyzeData | null): UseReportSettingsRe
     additionPlay: 0,
   })
 
-  // Load settings: prefer appliedSettings from response, fallback to API
+  // Always fetch user's current settings from the API.
+  // appliedSettings is used only as the recalc comparison baseline.
   useEffect(() => {
     let cancelled = false
 
@@ -108,9 +120,25 @@ export function useReportSettings(data: AnalyzeData | null): UseReportSettingsRe
       try {
         const applied = data?.appliedSettings
 
-        if (applied) {
-          // Initialize from server's appliedSettings — exact match with what was used
-          const filters: RecalcFilter[] = applied.filters.length > 0
+        // Always load user's current settings from the API
+        const [preset, defaults, rehabResponse, dealResponse, majorItemsResponse] = await Promise.all([
+          getOrCreateDefaultPreset().catch(() => null),
+          getAppraisalDefaults().catch(() => null),
+          getRehabConfig().catch(() => null),
+          getDealParams().catch(() => null),
+          getMajorItemCosts().catch(() => null),
+        ])
+
+        if (cancelled) return
+
+        // Build filters from user's current preset
+        const filters: RecalcFilter[] = preset?.filters
+          ? preset.filters.map((f) => ({
+              type: f.filterType,
+              enabled: f.enabled,
+              value: f.value,
+            }))
+          : applied?.filters?.length
             ? applied.filters.map((f) => ({
                 type: f.type,
                 enabled: f.enabled,
@@ -118,7 +146,15 @@ export function useReportSettings(data: AnalyzeData | null): UseReportSettingsRe
               }))
             : DEFAULT_FILTERS
 
-          const adjustments: RecalcAdjustment[] = applied.adjustments.length > 0
+        // Build adjustments from user's current preset
+        const adjustments: RecalcAdjustment[] = preset?.adjustments
+          ? preset.adjustments.map((a) => ({
+              type: a.adjustmentType,
+              enabled: a.enabled,
+              amount: a.amount,
+              percent: a.percentage || undefined,
+            }))
+          : applied?.adjustments?.length
             ? applied.adjustments.map((a) => ({
                 type: a.type,
                 enabled: a.enabled,
@@ -127,11 +163,19 @@ export function useReportSettings(data: AnalyzeData | null): UseReportSettingsRe
               }))
             : DEFAULT_ADJUSTMENTS
 
-          const rehabTable = applied.rehabTable ?? DEFAULT_REHAB_TABLE
-          const dealParams = applied.dealParams ?? DEFAULT_DEAL_PARAMS
+        const rehabTable = rehabResponse?.config ?? applied?.rehabTable ?? DEFAULT_REHAB_TABLE
+        const tierRanges = rehabResponse?.tierRanges ?? applied?.tierRanges
+        const dealParams = dealResponse?.config ?? applied?.dealParams ?? DEFAULT_DEAL_PARAMS
 
-          // Build major items from appliedSettings
-          const majorItems: MajorItemSetting[] = applied.majorItems
+        // Build major items from user's current settings
+        const majorItems: MajorItemSetting[] = majorItemsResponse?.items
+          ? majorItemsResponse.items.map((item) => ({
+              id: item.id,
+              name: item.name,
+              enabled: false,
+              cost: item.effectiveCost,
+            }))
+          : applied?.majorItems
             ? applied.majorItems.map((item) => {
                 const meta = MAJOR_ITEMS_LIST.find((m) => m.id === item.id)
                 return {
@@ -143,79 +187,23 @@ export function useReportSettings(data: AnalyzeData | null): UseReportSettingsRe
               })
             : DEFAULT_MAJOR_ITEMS
 
-          const loaded: EvaluationSettings = {
-            filters,
-            adjustments,
-            dealParams,
-            rehabTable,
-            rehabLevelIndex: applied.rehabLevelIndex ?? 2,
-            majorItems,
-            additionPlay: applied.additionPlay ?? 0,
-          }
+        // Use applied rehabLevelIndex and additionPlay from the analysis as
+        // initial values since those are per-report choices, not global settings
+        const rehabLevelIndex = applied?.rehabLevelIndex ?? 2
+        const additionPlay = applied?.additionPlay ?? 0
 
-          if (!cancelled) {
-            setSettings(loaded)
-            setSavedDefaults(loaded)
-          }
+        const loaded: EvaluationSettings = {
+          filters,
+          adjustments,
+          dealParams,
+          rehabTable,
+          tierRanges,
+          rehabLevelIndex,
+          majorItems,
+          additionPlay,
+        }
 
-          // Still fetch labels for UI display (non-blocking)
-          getAppraisalDefaults().then((defaults) => {
-            if (!cancelled && defaults) setLabels(defaults)
-          }).catch(() => {})
-        } else {
-          // Fallback: load from API (old reports without appliedSettings)
-          const [preset, defaults, rehabResponse, dealResponse, majorItemsResponse] = await Promise.all([
-            getOrCreateDefaultPreset().catch(() => null),
-            getAppraisalDefaults().catch(() => null),
-            getRehabConfig().catch(() => null),
-            getDealParams().catch(() => null),
-            getMajorItemCosts().catch(() => null),
-          ])
-
-          if (cancelled) return
-
-          // Build filters from preset
-          const filters: RecalcFilter[] = preset?.filters
-            ? preset.filters.map((f) => ({
-                type: f.filterType,
-                enabled: f.enabled,
-                value: f.value,
-              }))
-            : DEFAULT_FILTERS
-
-          // Build adjustments from preset
-          const adjustments: RecalcAdjustment[] = preset?.adjustments
-            ? preset.adjustments.map((a) => ({
-                type: a.adjustmentType,
-                enabled: a.enabled,
-                amount: a.amount,
-                percent: a.percentage || undefined,
-              }))
-            : DEFAULT_ADJUSTMENTS
-
-          const rehabTable = rehabResponse?.config ?? DEFAULT_REHAB_TABLE
-          const dealParams = dealResponse?.config ?? DEFAULT_DEAL_PARAMS
-
-          // Build major items from API response
-          const majorItems: MajorItemSetting[] = majorItemsResponse?.items
-            ? majorItemsResponse.items.map((item) => ({
-                id: item.id,
-                name: item.name,
-                enabled: false,
-                cost: item.effectiveCost,
-              }))
-            : DEFAULT_MAJOR_ITEMS
-
-          const loaded: EvaluationSettings = {
-            filters,
-            adjustments,
-            dealParams,
-            rehabTable,
-            rehabLevelIndex: 2,
-            majorItems,
-            additionPlay: 0,
-          }
-
+        if (!cancelled) {
           setSettings(loaded)
           setSavedDefaults(loaded)
           if (defaults) setLabels(defaults)
@@ -231,14 +219,32 @@ export function useReportSettings(data: AnalyzeData | null): UseReportSettingsRe
     return () => { cancelled = true }
   }, [data?.appliedSettings])
 
-  // Track whether user has changed any settings from saved defaults
+  // settingsChanged = user has actively modified settings from the loaded defaults.
+  // We compare current settings against what was initially loaded (savedDefaults),
+  // NOT against the server's appliedSettings — this avoids false positives from
+  // shape/format differences between the API response and the server snapshot.
   const settingsChanged = useMemo(() => {
     if (!savedDefaults) return false
-    return JSON.stringify(settings) !== JSON.stringify(savedDefaults)
+    const currentSnapshot = normalizeForComparison({
+      filters: settings.filters,
+      adjustments: settings.adjustments,
+      dealParams: settings.dealParams,
+      rehabTable: settings.rehabTable,
+      rehabLevelIndex: settings.rehabLevelIndex,
+      additionPlay: settings.additionPlay,
+    })
+    const defaultsSnapshot = normalizeForComparison({
+      filters: savedDefaults.filters,
+      adjustments: savedDefaults.adjustments,
+      dealParams: savedDefaults.dealParams,
+      rehabTable: savedDefaults.rehabTable,
+      rehabLevelIndex: savedDefaults.rehabLevelIndex,
+      additionPlay: savedDefaults.additionPlay,
+    })
+    return currentSnapshot !== defaultsSnapshot
   }, [settings, savedDefaults])
 
-  // Only recalculate when user has changed settings
-  // When settingsChanged is false, return null so the page uses server values
+  // Only recalculate when settings differ from what the server used.
   const recalcData = useMemo(() => {
     if (!data || !settingsChanged) return null
     return recalculateReport(data, settings)

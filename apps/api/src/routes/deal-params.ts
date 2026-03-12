@@ -14,8 +14,8 @@ import { dealParams } from '../db'
 const dealParamsRoute = new Hono<{ Bindings: Env }>()
 
 export const DEAL_PARAMS_DEFAULTS = {
-  closingCostsPercent: 10,
-  carryingCostsPercent: 5,
+  closingCostsPercent: 8,
+  carryingCostsPercent: 2,
   wholesaleFee: 10000,
   desiredProfit: null as number | null,
 }

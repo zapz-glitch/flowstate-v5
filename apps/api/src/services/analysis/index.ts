@@ -348,6 +348,8 @@ export interface AnalysisResponse {
   subject: {
     address: string
     county: string | null
+    latitude: number | null
+    longitude: number | null
     bedrooms: number | null
     bathrooms: number | null
     /** @deprecated Use bedrooms and bathrooms separately */
@@ -408,6 +410,8 @@ export interface AnalysisResponse {
       projectedROI: number
       isSelected: boolean
     }>
+    closingCosts: number
+    carryingCosts: number
     totalCosts: number
     totalInvestment: number
     projectedProfit: number
@@ -430,6 +434,8 @@ export interface AnalysisResponse {
     items: Array<{
       id: string
       address: string
+      latitude: number | null
+      longitude: number | null
       salePrice: number | null
       saleDate: string | null
       squareFeet: number | null
@@ -488,6 +494,52 @@ export interface AnalysisResponse {
     zone: string | null
     inFloodZone: boolean
     description: string | null
+  } | null
+  /** Neighbourhood analysis — community, schools, POI */
+  neighbourhood: {
+    crime: {
+      crimeIndex: number | null
+      crimeRisk: string | null
+      violentCrimeIndex: number | null
+      propertyCrimeIndex: number | null
+    } | null
+    demographics: {
+      population: number | null
+      populationDensity: number | null
+      medianIncome: number | null
+      medianAge: number | null
+      householdCount: number | null
+      medianHomeValue: number | null
+    } | null
+    climate: {
+      avgHighTemp: number | null
+      avgLowTemp: number | null
+      annualRainfall: number | null
+      annualSnowfall: number | null
+      comfortIndex: number | null
+    } | null
+    schools: {
+      nearby: Array<{
+        name: string
+        type: string | null
+        gradeRange: string | null
+        rating: number | null
+        distance: number | null
+        latitude: number | null
+        longitude: number | null
+      }>
+      count: number
+    } | null
+    poi: {
+      summary: Record<string, number>
+      nearby: Array<{
+        name: string
+        category: string | null
+        distance: number | null
+        latitude: number | null
+        longitude: number | null
+      }>
+    } | null
   } | null
   /** Data supplemented from Zillow when CoreLogic data was missing */
   dataSupplemented: {
@@ -608,6 +660,8 @@ export function buildAnalysisResponse(
     return {
       id: comp.id,
       address: `${comp.address}, ${comp.city}, ${comp.state}`,
+      latitude: comp.latitude ?? null,
+      longitude: comp.longitude ?? null,
       salePrice: comp.salePrice,
       saleDate: formatDate(comp.saleDate),
       squareFeet: comp.squareFeet,
@@ -667,6 +721,8 @@ export function buildAnalysisResponse(
     subject: {
       address: `${property.address}, ${property.city}, ${property.state} ${property.zipCode}`,
       county: property.county ?? null,
+      latitude: property.latitude ?? null,
+      longitude: property.longitude ?? null,
       bedrooms: property.bedrooms ?? null,
       bathrooms: property.bathrooms ?? null,
       bedsBaths: `${property.bedrooms ?? '-'}/${property.bathrooms ?? '-'}`,
@@ -711,6 +767,8 @@ export function buildAnalysisResponse(
       rehabCost: valuation.totalRehabCost,
       rehabLevel: valuation.rehabLevel,
       rehabPerSqft: valuation.rehabPerSqft,
+      closingCosts: valuation.closingCosts,
+      carryingCosts: valuation.carryingCosts,
       totalCosts: valuation.closingCosts + valuation.carryingCosts,
       totalInvestment: valuation.totalInvestment,
       projectedProfit: valuation.projectedProfit,
@@ -749,6 +807,41 @@ export function buildAnalysisResponse(
           zone: enrichment.floodZone.floodZone,
           inFloodZone: enrichment.floodZone.isInFloodZone,
           description: enrichment.floodZone.floodZoneDescription,
+        }
+      : null,
+
+    // ═══ NEIGHBOURHOOD ═══════════════════════════════════════════════════════
+    neighbourhood: enrichment.neighbourhood
+      ? {
+          crime: enrichment.neighbourhood.community?.crime ?? null,
+          demographics: enrichment.neighbourhood.community?.demographics ?? null,
+          climate: enrichment.neighbourhood.community?.climate ?? null,
+          schools: enrichment.neighbourhood.schools
+            ? {
+                nearby: enrichment.neighbourhood.schools.nearby.map((s) => ({
+                  name: s.name,
+                  type: s.type,
+                  gradeRange: s.gradeRange,
+                  rating: s.rating,
+                  distance: s.distance,
+                  latitude: s.latitude ?? null,
+                  longitude: s.longitude ?? null,
+                })),
+                count: enrichment.neighbourhood.schools.count,
+              }
+            : null,
+          poi: enrichment.neighbourhood.poi
+            ? {
+                summary: enrichment.neighbourhood.poi.summary,
+                nearby: enrichment.neighbourhood.poi.items.slice(0, 15).map((p) => ({
+                  name: p.name,
+                  category: p.category,
+                  distance: p.distance,
+                  latitude: p.latitude ?? null,
+                  longitude: p.longitude ?? null,
+                })),
+              }
+            : null,
         }
       : null,
 
@@ -841,7 +934,7 @@ export interface RehabEstimatesParams {
 
 /**
  * Calculate all rehab level estimates for a given ARV.
- * Returns an array with full valuation calculations for each of the 7 rehab levels.
+ * Returns an array with full valuation calculations for each rehab level.
  *
  * @param valuationService - The valuation service instance
  * @param params - Parameters for calculation
@@ -858,8 +951,8 @@ export function calculateAllRehabLevelEstimates(
     selectedRehabLevelIndex,
     majorItems,
     additionPlay = 0,
-    closingCostsPercent = 10,
-    carryingCostsPercent = 5,
+    closingCostsPercent = 8,
+    carryingCostsPercent = 2,
     wholesaleFee = 10000,
     desiredProfit,
   } = params

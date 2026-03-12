@@ -71,6 +71,7 @@ export interface AnalyzeData {
   riskFlags?: string[] | null
   permits?: PermitsData | null
   floodZone?: FloodZoneData | null
+  neighbourhood?: NeighbourhoodData | null
   meta?: {
     analysisId?: string
     timestamp?: string
@@ -88,6 +89,7 @@ export interface AnalyzeData {
     }
     rehabLevelIndex: number
     rehabTable: Record<string, Array<{ perSqft: number; minProfit: number }>>
+    tierRanges?: Array<{ key: string; label: string; minValue: number | null; maxValue: number | null }>
     majorItems?: Array<{ id: string; enabled: boolean; cost: number }>
     additionPlay: number
   }
@@ -104,6 +106,8 @@ export interface ClassificationSummary {
 export interface SubjectData {
   address?: string
   county?: string | null
+  latitude?: number | null
+  longitude?: number | null
   bedrooms?: number | null
   bathrooms?: number | null
   /** @deprecated Use bedrooms and bathrooms separately */
@@ -152,6 +156,8 @@ export interface ValuationData {
   rehabPerSqft?: number
   /** All rehab level estimates with costs calculated for the current ARV */
   rehabLevelEstimates?: RehabLevelEstimate[]
+  closingCosts?: number
+  carryingCosts?: number
   totalCosts?: number
   totalInvestment?: number
   projectedProfit?: number
@@ -172,6 +178,8 @@ export interface CompsData {
 
 export interface CompItem {
   address?: string
+  latitude?: number | null
+  longitude?: number | null
   salePrice?: number | null
   saleDate?: string | null
   squareFeet?: number | null
@@ -237,6 +245,58 @@ export interface FloodZoneData {
   zone?: string | null
   inFloodZone?: boolean
   description?: string | null
+}
+
+export interface NeighbourhoodData {
+  crime?: {
+    crimeIndex?: number | null
+    crimeRisk?: string | null
+    murderIndex?: number | null
+    assaultIndex?: number | null
+    robberyIndex?: number | null
+    burglaryIndex?: number | null
+    larcenyIndex?: number | null
+    motorVehicleTheftIndex?: number | null
+    violentCrimeIndex?: number | null
+    propertyCrimeIndex?: number | null
+  } | null
+  demographics?: {
+    population?: number | null
+    populationDensity?: number | null
+    medianIncome?: number | null
+    medianAge?: number | null
+    householdCount?: number | null
+    medianHomeValue?: number | null
+  } | null
+  climate?: {
+    avgHighTemp?: number | null
+    avgLowTemp?: number | null
+    annualRainfall?: number | null
+    annualSnowfall?: number | null
+    comfortIndex?: number | null
+  } | null
+  schools?: {
+    nearby?: Array<{
+      name: string
+      type?: string | null
+      gradeRange?: string | null
+      rating?: number | null
+      distance?: number | null
+      latitude?: number | null
+      longitude?: number | null
+    }>
+    count?: number
+  } | null
+  poi?: {
+    summary?: Record<string, number>
+    nearby?: Array<{
+      name: string
+      category?: string | null
+      distance?: number | null
+      latitude?: number | null
+      longitude?: number | null
+    }>
+  } | null
 }
 
 // Legacy types for backward compatibility (deprecated)

@@ -18,15 +18,14 @@ import user from './routes/user'
 import analyze from './routes/analyze'
 import appraisalRules from './routes/appraisal-rules'
 import rehabConfigRoute from './routes/rehab-config'
-import rehabConfigV1 from './routes/rehab-config-v1'
 import dealParamsRoute from './routes/deal-params'
 import locationSettingsRoute from './routes/location-settings'
 import majorItemCostsRoute from './routes/major-item-costs'
-import comments from './routes/comments'
 import sseStream from './routes/sse-stream'
 import reportsRoute from './routes/reports'
 import ghlSettingsRoute from './routes/ghl-settings'
 import userReportsRoute from './routes/user-reports'
+import reportPhotosRoute from './routes/report-photos'
 import ghlWebhook from './routes/webhooks/ghl'
 
 // Durable Objects
@@ -99,14 +98,14 @@ app.route('/location-settings', locationSettingsRoute)
 // Major item costs routes (session auth via Better Auth cookies)
 app.route('/major-item-costs', majorItemCostsRoute)
 
-// Comments routes (session auth via Better Auth cookies)
-app.route('/comments', comments)
-
 // GHL integration settings routes (session auth via Better Auth cookies)
 app.route('/ghl-settings', ghlSettingsRoute)
 
 // User reports routes (session auth via Better Auth cookies)
 app.route('/user/reports', userReportsRoute)
+
+// Report photos routes (session auth via Better Auth cookies)
+app.route('/user/reports', reportPhotosRoute)
 
 // GHL webhook routes (self-authenticating via URL secret, no auth middleware)
 app.route('/webhooks/ghl', ghlWebhook)
@@ -122,7 +121,6 @@ app.route('/reports', reportsRoute)
 const v1 = new Hono<{ Bindings: Env; Variables: Variables }>()
 v1.use('*', authMiddleware)
 v1.route('/analyze', analyze)
-v1.route('/rehab-config', rehabConfigV1)
 
 app.route('/v1', v1)
 

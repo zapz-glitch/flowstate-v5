@@ -7,6 +7,7 @@
 import type { AnalysisResponse } from '../services/analysis'
 import type { AppraisalFilter, AppraisalAdjustment } from '../services/appraisal'
 import type { MajorItem, ArvTier, RehabEstimate } from '../services/valuation'
+import type { TierRangeDefinition } from '@flowstate-api/shared/valuation'
 import type { ClassificationResult } from '../services/classification'
 import type { PropertyPhotos } from '../services/photo-provider'
 
@@ -81,6 +82,9 @@ export interface AnalysisWorkflowParams {
 
   /** Optional per-user rehab pricing table override */
   customRehabTable?: Record<ArvTier, RehabEstimate[]>
+
+  /** Optional per-user tier range definitions override */
+  customTierRanges?: TierRangeDefinition[]
 
   /** Optional per-user major item cost overrides: { item_id: cost_in_dollars } */
   customMajorItemCosts?: Record<string, number>

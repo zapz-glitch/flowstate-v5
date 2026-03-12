@@ -7,7 +7,7 @@
 
 import { Hono } from 'hono'
 import { drizzle } from 'drizzle-orm/d1'
-import { eq, desc, sql } from 'drizzle-orm'
+import { eq, desc, sql, like, or, and } from 'drizzle-orm'
 import type { Env } from '../types'
 import { createAuth } from '../lib/auth'
 import { savedReports } from '../db/schema'
@@ -35,8 +35,22 @@ userReports.get('/', async (c) => {
   const page = Math.max(1, parseInt(c.req.query('page') || '1', 10))
   const limit = Math.min(100, Math.max(1, parseInt(c.req.query('limit') || '20', 10)))
   const offset = (page - 1) * limit
+  const search = c.req.query('search')?.trim() || ''
 
   const db = drizzle(c.env.DB)
+
+  // Build where clause with optional search filter
+  const baseCondition = eq(savedReports.userId, session.user.id)
+  const whereCondition = search
+    ? and(
+        baseCondition,
+        or(
+          like(savedReports.propertyAddress, `%${search}%`),
+          like(savedReports.propertyCity, `%${search}%`),
+          like(savedReports.propertyState, `%${search}%`)
+        )
+      )
+    : baseCondition
 
   const [reports, countResult] = await Promise.all([
     db
@@ -53,14 +67,14 @@ userReports.get('/', async (c) => {
         createdAt: savedReports.createdAt,
       })
       .from(savedReports)
-      .where(eq(savedReports.userId, session.user.id))
+      .where(whereCondition)
       .orderBy(desc(savedReports.createdAt))
       .limit(limit)
       .offset(offset),
     db
       .select({ count: sql<number>`count(*)` })
       .from(savedReports)
-      .where(eq(savedReports.userId, session.user.id))
+      .where(whereCondition)
       .then((r) => r[0]),
   ])
 

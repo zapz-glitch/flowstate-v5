@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { MapPin } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import type { SubjectData } from './shared-types'
@@ -5,7 +6,15 @@ import { StatCell } from './StatCell'
 import { ClassificationBadge } from './ClassificationBadge'
 import { PhotoGallery } from './PhotoGallery'
 
-export function SubjectPropertyCard({ subject }: { subject: SubjectData }) {
+interface SubjectPropertyCardProps {
+  subject: SubjectData
+  /** Optional inline content rendered inside the photo gallery row (e.g. upload tiles) */
+  children?: ReactNode
+  /** Optional content rendered below the photo row (e.g. AI findings) */
+  footer?: ReactNode
+}
+
+export function SubjectPropertyCard({ subject, children, footer }: SubjectPropertyCardProps) {
   return (
     <div className="rounded-xl overflow-hidden border border-border">
       <div className="px-6 py-5">
@@ -32,17 +41,13 @@ export function SubjectPropertyCard({ subject }: { subject: SubjectData }) {
           )}
         </div>
 
-        <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-7 mt-4 rounded-lg bg-muted/40">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 mt-4 rounded-lg bg-muted/40">
           <StatCell label="Beds" value={subject.bedrooms ?? '-'} />
           <StatCell label="Baths" value={subject.bathrooms ?? '-'} />
           <StatCell label="Sq Ft" value={subject.squareFeet?.toLocaleString() || '-'} />
           <StatCell label="Year" value={subject.yearBuilt || '-'} />
           <StatCell label="Lot" value={subject.lotSizeAcres ? `${subject.lotSizeAcres} ac` : '-'} />
           <StatCell label="Foundation" value={subject.foundationType || '-'} />
-          <StatCell
-            label="$/Sq Ft"
-            value={subject.lastSale?.pricePerSqft ? `$${subject.lastSale.pricePerSqft.toFixed(0)}` : '-'}
-          />
         </div>
 
         {subject.lastSale?.price && (
@@ -57,9 +62,17 @@ export function SubjectPropertyCard({ subject }: { subject: SubjectData }) {
           </div>
         )}
 
-        {subject.photos && subject.photos.length > 0 && (
+        {((subject.photos && subject.photos.length > 0) || children) && (
           <div className="mt-4">
-            <PhotoGallery photos={subject.photos} />
+            <PhotoGallery photos={subject.photos || []}>
+              {children}
+            </PhotoGallery>
+          </div>
+        )}
+
+        {footer && (
+          <div className="mt-4">
+            {footer}
           </div>
         )}
 

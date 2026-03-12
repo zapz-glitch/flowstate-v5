@@ -35,6 +35,8 @@ export const CACHE_TTL = {
   ZILLOW_DATA: 24 * 60 * 60,
   // OAuth tokens - cache until expiry minus buffer
   OAUTH_TOKEN: 50 * 60, // 50 minutes (tokens last 60 min)
+  // Neighbourhood data - cache for 7 days (community/school/POI data rarely changes)
+  NEIGHBOURHOOD: 7 * 24 * 60 * 60,
 } as const
 
 // Cache key prefixes
@@ -46,6 +48,7 @@ export const CACHE_PREFIX = {
   VISION: 'vision:',
   ZILLOW: 'zillow:',
   OAUTH: 'oauth:',
+  NEIGHBOURHOOD: 'nbhd:',
 } as const
 
 /**
@@ -99,30 +102,39 @@ export function createCacheService(env: Env): CacheService {
 /**
  * Generate a cache key for property data
  */
-export function propertyKey(clip: string): string {
-  return `${CACHE_PREFIX.PROPERTY}${clip}`
+export function propertyKey(clip: string, provider?: string): string {
+  return provider
+    ? `${CACHE_PREFIX.PROPERTY}${provider}:${clip}`
+    : `${CACHE_PREFIX.PROPERTY}${clip}`
 }
 
 /**
  * Generate a cache key for comparables
  */
-export function comparablesKey(clip: string, radius?: number, months?: number): string {
+export function comparablesKey(clip: string, radius?: number, months?: number, provider?: string): string {
+  const prefix = provider
+    ? `${CACHE_PREFIX.COMPARABLES}${provider}:`
+    : CACHE_PREFIX.COMPARABLES
   const suffix = radius || months ? `:r${radius || 1}:m${months || 12}` : ''
-  return `${CACHE_PREFIX.COMPARABLES}${clip}${suffix}`
+  return `${prefix}${clip}${suffix}`
 }
 
 /**
  * Generate a cache key for flood zone
  */
-export function floodZoneKey(clip: string): string {
-  return `${CACHE_PREFIX.FLOOD}${clip}`
+export function floodZoneKey(clip: string, provider?: string): string {
+  return provider
+    ? `${CACHE_PREFIX.FLOOD}${provider}:${clip}`
+    : `${CACHE_PREFIX.FLOOD}${clip}`
 }
 
 /**
  * Generate a cache key for permits
  */
-export function permitsKey(clip: string): string {
-  return `${CACHE_PREFIX.PERMITS}${clip}`
+export function permitsKey(clip: string, provider?: string): string {
+  return provider
+    ? `${CACHE_PREFIX.PERMITS}${provider}:${clip}`
+    : `${CACHE_PREFIX.PERMITS}${clip}`
 }
 
 /**
@@ -154,4 +166,12 @@ export function zillowKey(address: string): string {
  */
 export function oauthKey(clientId: string): string {
   return `${CACHE_PREFIX.OAUTH}${clientId}`
+}
+
+/**
+ * Generate a cache key for neighbourhood data
+ * Uses lat/lng rounded to 3 decimal places (~100m precision, neighbourhood-level)
+ */
+export function neighbourhoodKey(latitude: number, longitude: number): string {
+  return `${CACHE_PREFIX.NEIGHBOURHOOD}${latitude.toFixed(3)},${longitude.toFixed(3)}`
 }

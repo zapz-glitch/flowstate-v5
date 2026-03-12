@@ -1,22 +1,105 @@
 'use client'
 
+import { useState, useEffect, useRef } from 'react'
 import { cn } from '@/lib/utils'
-import { Badge } from '@/components/ui/badge'
-import type { AnalysisState, StatusMessage, JobStatus } from '@/types/analysis'
+import type { AnalysisState, AnalysisStep, StatusMessage } from '@/types/analysis'
 import { getStepConfig } from '@/types/analysis'
-import { ProgressStepper, ProgressBar } from './ProgressStepper'
 import { Button } from '@/components/ui/button'
 import {
-  Loader2,
   CheckCircle2,
   XCircle,
-  Clock,
-  Zap,
-  Wifi,
-  WifiOff,
   AlertCircle,
   RefreshCw,
+  Clock,
+  Loader2,
 } from 'lucide-react'
+
+function TypingDots() {
+  return (
+    <span className="inline-flex items-center gap-[2px] ml-0.5">
+      <span className="w-1 h-1 rounded-full bg-current animate-[bounce_1.4s_ease-in-out_0s_infinite]" />
+      <span className="w-1 h-1 rounded-full bg-current animate-[bounce_1.4s_ease-in-out_0.2s_infinite]" />
+      <span className="w-1 h-1 rounded-full bg-current animate-[bounce_1.4s_ease-in-out_0.4s_infinite]" />
+    </span>
+  )
+}
+
+const STEP_MESSAGES: Record<string, string[]> = {
+  property_fetch: [
+    'Pulling property records',
+    'Looking up tax assessments',
+    'Finding comparable sales nearby',
+    'Gathering neighborhood data',
+    'Checking nearby schools',
+    'Scanning points of interest',
+    'Checking recent transactions',
+  ],
+  appraisal_rules: [
+    'Filtering comps by distance',
+    'Checking square footage ranges',
+    'Applying price adjustments',
+    'Evaluating subdivision matches',
+    'Scoring comp quality',
+  ],
+  photo_fetch: [
+    'Downloading property photos',
+    'Gathering street view imagery',
+    'Collecting listing photos',
+  ],
+  comp_selection: [
+    'Classifying property condition',
+    'Analyzing renovation signals',
+    'Reviewing MLS remarks',
+    'Comparing to similar properties',
+    'Evaluating market positioning',
+  ],
+  valuation: [
+    'Weighting comparable sales',
+    'Calculating after-repair value',
+    'Running investment scenarios',
+    'Estimating rehab costs',
+    'Computing profit projections',
+  ],
+  response_build: [
+    'Assembling final report',
+    'Wrapping things up',
+    'Almost there',
+  ],
+}
+
+const QUEUED_MESSAGES = [
+  'Starting analysis',
+  'Warming up',
+  'Preparing your report',
+]
+
+function useRotatingText(step: AnalysisStep | null, isActive: boolean) {
+  const [index, setIndex] = useState(0)
+  const stepRef = useRef(step)
+
+  // Reset index when step changes
+  useEffect(() => {
+    if (step !== stepRef.current) {
+      stepRef.current = step
+      setIndex(0)
+    }
+  }, [step])
+
+  useEffect(() => {
+    if (!isActive) return
+    const interval = setInterval(() => {
+      const messages = step ? STEP_MESSAGES[step] : QUEUED_MESSAGES
+      if (messages) {
+        setIndex((i) => (i + 1) % messages.length)
+      }
+    }, 3000)
+    return () => clearInterval(interval)
+  }, [step, isActive])
+
+  if (!isActive) return null
+  const messages = step ? STEP_MESSAGES[step] : QUEUED_MESSAGES
+  return messages?.[index] ?? null
+}
 
 interface RealtimeStatusProps {
   state: AnalysisState
@@ -35,176 +118,89 @@ export function RealtimeStatus({
   onSwitchToPolling,
   usePolling,
 }: RealtimeStatusProps) {
-  const { status, currentStep, steps, totalDurationMs, error, isConnected, messages } = state
+  const { status, currentStep, steps, totalDurationMs, error, isConnected } = state
 
-  const getStatusBadge = (status: JobStatus | null) => {
-    switch (status) {
-      case 'queued':
-        return (
-          <Badge variant="secondary" className="gap-1">
-            <Clock className="h-3 w-3" />
-            Queued
-          </Badge>
-        )
-      case 'processing':
-        return (
-          <Badge variant="default" className="gap-1 bg-primary">
-            <Loader2 className="h-3 w-3 animate-spin" />
-            Processing
-          </Badge>
-        )
-      case 'completed':
-        return (
-          <Badge variant="default" className="gap-1 bg-emerald-500">
-            <CheckCircle2 className="h-3 w-3" />
-            Completed
-          </Badge>
-        )
-      case 'failed':
-        return (
-          <Badge variant="destructive" className="gap-1">
-            <XCircle className="h-3 w-3" />
-            Failed
-          </Badge>
-        )
-      default:
-        return null
-    }
-  }
+  const completed = steps.filter((s) => s.status === 'completed' || s.status === 'skipped').length
+  const inProgress = steps.filter((s) => s.status === 'in_progress').length
+  const total = steps.length
+  const percent = Math.round(((completed + inProgress * 0.5) / total) * 100)
 
-  // Calculate stats
-  const completedSteps = steps.filter((s) => s.status === 'completed').length
-  const skippedSteps = steps.filter((s) => s.status === 'skipped').length
-  const cacheHits = steps.filter((s) => s.fromCache).length
-  const failedSteps = steps.filter((s) => s.status === 'failed').length
+  const isActive = status === 'processing' || status === 'queued'
+  const rotatingText = useRotatingText(currentStep, isActive)
+
+  const statusText = status === 'completed'
+    ? 'Analysis complete'
+    : status === 'failed'
+      ? 'Analysis failed'
+      : rotatingText ?? 'Processing'
 
   return (
     <div className={cn('rounded-xl overflow-hidden border border-border', className)}>
       <div className="px-6 py-5 space-y-4">
+        {/* Status text */}
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
-              <Zap className="w-4 h-4 text-primary" />
-            </div>
-            <h3 className="text-body font-semibold">Analysis Progress</h3>
+          <div className="flex items-center gap-2.5">
+            {status === 'completed' ? (
+              <CheckCircle2 className="h-4.5 w-4.5 text-emerald-500 flex-shrink-0" />
+            ) : status === 'failed' ? (
+              <XCircle className="h-4.5 w-4.5 text-destructive flex-shrink-0" />
+            ) : null}
+            <span
+              key={statusText}
+              className={cn(
+                'text-sm font-medium animate-in fade-in slide-in-from-bottom-1 duration-300',
+                isActive && 'text-foreground',
+                status === 'completed' && 'text-emerald-600',
+                status === 'failed' && 'text-destructive',
+              )}
+            >
+              {statusText}
+              {isActive && <TypingDots />}
+            </span>
           </div>
-          <div className="flex items-center gap-2">
-            {/* Connection status */}
-            {usePolling ? (
-              <Badge variant="outline" className="gap-1 text-blue-600 border-blue-600 bg-blue-50 dark:bg-blue-500/10">
-                <RefreshCw className="h-3 w-3" />
-                Polling
-              </Badge>
-            ) : isConnecting ? (
-              <Badge variant="outline" className="gap-1 bg-background/50">
-                <Loader2 className="h-3 w-3 animate-spin" />
-                Connecting
-              </Badge>
-            ) : isConnected ? (
-              <Badge variant="outline" className="gap-1 text-emerald-600 border-emerald-600 bg-emerald-50 dark:bg-emerald-500/10">
-                <Wifi className="h-3 w-3" />
-                Live
-              </Badge>
-            ) : (
-              <Badge variant="outline" className="gap-1 text-muted-foreground bg-background/50">
-                <WifiOff className="h-3 w-3" />
-                Offline
-              </Badge>
-            )}
-            {/* Job status */}
-            {getStatusBadge(status)}
-          </div>
+          {status === 'completed' && totalDurationMs != null && (
+            <span className="text-xs text-muted-foreground tabular-nums">
+              {totalDurationMs < 1000
+                ? `${totalDurationMs}ms`
+                : `${(totalDurationMs / 1000).toFixed(1)}s`}
+            </span>
+          )}
         </div>
 
         {/* Progress bar */}
-        <ProgressBar steps={steps} />
-
-        {/* Step details */}
-        <ProgressStepper steps={steps} currentStep={currentStep} />
+        {(status === 'processing' || status === 'queued') && (
+          <div className="h-1.5 bg-muted rounded-full overflow-hidden relative">
+            <div
+              className="absolute inset-y-0 left-0 bg-primary rounded-full transition-all duration-700 ease-out"
+              style={{ width: `${percent}%` }}
+            />
+            {inProgress > 0 && (
+              <div
+                className="absolute inset-y-0 bg-primary/30 rounded-full transition-all duration-700 ease-out overflow-hidden"
+                style={{ left: `${Math.round((completed / total) * 100)}%`, width: `${Math.round((1 / total) * 100)}%` }}
+              >
+                <div className="absolute inset-0 bg-gradient-to-r from-transparent via-primary/50 to-transparent animate-shimmer" />
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Error display */}
         {error && (
           <div className="flex items-start gap-2 p-3 rounded-lg bg-destructive/10">
             <AlertCircle className="h-5 w-5 text-destructive flex-shrink-0 mt-0.5" />
-            <div>
-              <p className="text-sm font-medium text-destructive">Analysis Failed</p>
-              <p className="text-xs text-destructive/80 mt-0.5">{error}</p>
-            </div>
+            <p className="text-sm text-destructive/80">{error}</p>
           </div>
         )}
 
-        {/* Actions (when processing) */}
-        {status === 'processing' && (onCancel || onSwitchToPolling) && (
-          <div className="flex items-center gap-2 pt-2">
-            {!isConnected && !usePolling && onSwitchToPolling && (
-              <Button variant="outline" size="sm" onClick={onSwitchToPolling}>
-                <RefreshCw className="h-3 w-3 mr-1" />
-                Switch to Polling
-              </Button>
-            )}
-          </div>
-        )}
-
-        {/* Summary stats (when completed) */}
-        {status === 'completed' && (
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2">
-            <StatCard
-              label="Total Time"
-              value={
-                totalDurationMs
-                  ? totalDurationMs < 1000
-                    ? `${totalDurationMs}ms`
-                    : `${(totalDurationMs / 1000).toFixed(1)}s`
-                  : '-'
-              }
-              icon={<Clock className="h-4 w-4" />}
-            />
-            <StatCard
-              label="Steps"
-              value={`${completedSteps}/${steps.length}`}
-              subtext={skippedSteps > 0 ? `${skippedSteps} skipped` : undefined}
-              icon={<CheckCircle2 className="h-4 w-4" />}
-            />
-            <StatCard
-              label="Cache Hits"
-              value={cacheHits.toString()}
-              className={cacheHits > 0 ? 'text-blue-600' : ''}
-              icon={<Zap className="h-4 w-4" />}
-            />
-            {failedSteps > 0 && (
-              <StatCard
-                label="Failed"
-                value={failedSteps.toString()}
-                className="text-destructive"
-                icon={<XCircle className="h-4 w-4" />}
-              />
-            )}
-          </div>
+        {/* Switch to polling fallback */}
+        {status === 'processing' && !isConnected && !usePolling && onSwitchToPolling && (
+          <Button variant="outline" size="sm" onClick={onSwitchToPolling}>
+            <RefreshCw className="h-3 w-3 mr-1" />
+            Switch to Polling
+          </Button>
         )}
       </div>
-    </div>
-  )
-}
-
-// ─── Stat Card ────────────────────────────────────────────────────────────────
-
-interface StatCardProps {
-  label: string
-  value: string
-  subtext?: string
-  icon?: React.ReactNode
-  className?: string
-}
-
-function StatCard({ label, value, subtext, icon, className }: StatCardProps) {
-  return (
-    <div className={cn('p-3 rounded-xl bg-muted/40', className)}>
-      <div className="flex items-center gap-2 text-muted-foreground mb-1">
-        {icon}
-        <span className="text-xs">{label}</span>
-      </div>
-      <p className="text-lg font-semibold">{value}</p>
-      {subtext && <p className="text-xs text-muted-foreground">{subtext}</p>}
     </div>
   )
 }

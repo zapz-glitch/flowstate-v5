@@ -10,6 +10,9 @@ export { ComparablesSection } from './ComparablesSection'
 export type { ComparablesSectionProps } from './ComparablesSection'
 export { FloodZoneCard } from './FloodZoneCard'
 export { RiskFloodCard } from './RiskFloodCard'
+export { NeighbourhoodCard } from './NeighbourhoodCard'
+export { PhotoUpload } from './PhotoUpload'
+export { PhotoAnalysisFindings } from './PhotoAnalysisFindings'
 export { formatCurrency, formatFilterType, formatAdjustmentType, getCompKey, normalizeSubdivision } from './format-helpers'
 export type {
   AnalyzeData,
@@ -20,4 +23,5 @@ export type {
   ClassificationSummary,
   RehabLevelEstimate,
   FloodZoneData,
+  NeighbourhoodData,
 } from './shared-types'

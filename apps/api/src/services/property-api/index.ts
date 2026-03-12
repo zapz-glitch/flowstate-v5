@@ -28,9 +28,11 @@ import {
   comparablesKey,
   floodZoneKey,
   permitsKey,
+  neighbourhoodKey,
   CACHE_TTL,
   type CacheService,
 } from '../cache';
+import { createNeighbourhoodService, type NeighbourhoodData } from '../neighbourhood';
 import type {
   PropertyProvider,
   PropertyProviderAdapter,
@@ -102,7 +104,7 @@ export interface PropertyApiService {
     params: ComparablesSearchParams,
   ): Promise<ComparablesSearchResponse>;
   /** Get building permits */
-  getBuildingPermits(propertyId: string): Promise<PermitsResponse>;
+  getBuildingPermits(propertyId: string, address?: { address1: string; address2: string }): Promise<PermitsResponse>;
   /** Get flood zone data */
   getFloodZone(latitude: number, longitude: number): Promise<FloodZoneResponse>;
 
@@ -224,7 +226,7 @@ class PropertyApi implements PropertyApiService {
     }
 
     // Check cache first (unless skipCache is set)
-    const cacheKey = propertyKey(propertyId);
+    const cacheKey = propertyKey(propertyId, provider.name);
     if (!this._skipCache) {
       const cached = await this.cache.get<NormalizedProperty>(cacheKey);
       if (cached) {
@@ -261,6 +263,7 @@ class PropertyApi implements PropertyApiService {
       params.propertyId,
       params.radiusMiles,
       params.monthsBack,
+      provider.name,
     );
     if (!this._skipCache) {
       const cached = await this.cache.get<ComparablesResult['data']>(cacheKey);
@@ -293,7 +296,7 @@ class PropertyApi implements PropertyApiService {
     return result;
   }
 
-  async getBuildingPermits(propertyId: string): Promise<PermitsResponse> {
+  async getBuildingPermits(propertyId: string, address?: { address1: string; address2: string }): Promise<PermitsResponse> {
     const provider = this.getProvider();
 
     if (!provider.getBuildingPermits) {
@@ -305,7 +308,7 @@ class PropertyApi implements PropertyApiService {
     }
 
     // Check cache first (unless skipCache is set)
-    const cacheKey = permitsKey(propertyId);
+    const cacheKey = permitsKey(propertyId, provider.name);
     if (!this._skipCache) {
       const cached = await this.cache.get<PermitsResult['data']>(cacheKey);
       if (cached) {
@@ -320,7 +323,7 @@ class PropertyApi implements PropertyApiService {
       provider: provider.name,
       propertyId,
     });
-    const result = await provider.getBuildingPermits(propertyId);
+    const result = await provider.getBuildingPermits(propertyId, address);
 
     // Cache successful results
     if (result.success && result.data) {
@@ -346,7 +349,7 @@ class PropertyApi implements PropertyApiService {
 
     // Use coordinates as cache key (rounded to 5 decimal places for ~1m precision)
     const coordKey = `${latitude.toFixed(5)},${longitude.toFixed(5)}`;
-    const cacheKey = floodZoneKey(coordKey);
+    const cacheKey = floodZoneKey(coordKey, provider.name);
     if (!this._skipCache) {
       const cached = await this.cache.get<NormalizedFloodZone>(cacheKey);
       if (cached) {
@@ -515,25 +518,32 @@ class PropertyApi implements PropertyApiService {
       floodZone: true,
     };
 
-    const [compsResult, permitsResult, floodResult] = await Promise.all([
+    // Build address strings for providers that need them (e.g. ATTOM permits)
+    const address1 = property.address || params.streetAddress || ''
+    const address2 = [property.city || params.city, property.state || params.state, property.zipCode || params.zipCode].filter(Boolean).join(', ')
+
+    const [compsResult, permitsResult, floodResult, neighbourhoodResult] = await Promise.all([
       // Get comparables
       this.getComparables({
         propertyId: property.id,
         radiusMiles: compParams.radiusMiles ?? 1,
         maxComps: compParams.maxComps ?? 10,
         monthsBack: compParams.monthsBack ?? 12,
-        // Pass sqftVariance and subjectSqft for API-level filtering
         sqftVariance: compParams.sqftVariance,
         subjectSqft: property.squareFeet ?? undefined,
         subjectPropertyType: property.propertyType ?? undefined,
       }),
-      // Get permits (if enabled)
+      // Get permits (if enabled) — pass address for ATTOM
       enrichOpts.permits !== false
-        ? this.getBuildingPermits(property.id)
+        ? this.getBuildingPermits(property.id, { address1, address2 })
         : Promise.resolve(null),
       // Get flood zone (if enabled and coordinates exist)
       enrichOpts.floodZone !== false && property.latitude && property.longitude
         ? this.getFloodZone(property.latitude, property.longitude)
+        : Promise.resolve(null),
+      // Get neighbourhood data (community, schools, POI)
+      enrichOpts.neighbourhood !== false && property.latitude && property.longitude
+        ? this.fetchNeighbourhood(property.latitude, property.longitude, address1)
         : Promise.resolve(null),
     ]);
 
@@ -589,6 +599,7 @@ class PropertyApi implements PropertyApiService {
       permits,
       floodZone,
       weatherRisk,
+      neighbourhood: neighbourhoodResult ?? null,
     };
 
     // ─── Step 5: Build and return PropertyBundle ───────────────────────────────
@@ -624,6 +635,7 @@ class PropertyApi implements PropertyApiService {
       hasPermits: !!bundle.enrichment.permits,
       hasFloodZone: !!bundle.enrichment.floodZone,
       hasWeatherRisk: !!bundle.enrichment.weatherRisk,
+      hasNeighbourhood: !!bundle.enrichment.neighbourhood,
     });
 
     // Reset skipCache flag after bundle fetch
@@ -658,31 +670,10 @@ class PropertyApi implements PropertyApiService {
       const batchResults = await Promise.all(
         batch.map(async (comp) => {
           try {
-            // Check cache first
-            const cacheKey = propertyKey(comp.id);
-            const cached = await this.cache.get<NormalizedProperty>(cacheKey);
-
-            if (cached) {
-              console.log(`PropertyAPI: Cache HIT for comp enrichment`, {
-                compId: comp.id,
-              });
-              return {
-                ...comp,
-                subdivision: cached.subdivision ?? null,
-                construction: cached.construction,
-                isEnriched: true,
-              };
-            }
-
-            // Fetch property details
+            // getPropertyById respects _skipCache flag and uses provider-scoped cache
             const result = await this.getPropertyById(comp.id);
 
             if (result.success) {
-              // Cache the full property data
-              await this.cache.set(cacheKey, result.data, {
-                ttl: CACHE_TTL.PROPERTY_DETAILS,
-              });
-
               return {
                 ...comp,
                 subdivision: result.data.subdivision ?? null,
@@ -787,6 +778,46 @@ class PropertyApi implements PropertyApiService {
       riskLevel,
       factors,
     };
+  }
+
+  /**
+   * Fetch neighbourhood data (community, schools, POI) with caching
+   */
+  private async fetchNeighbourhood(
+    latitude: number,
+    longitude: number,
+    address?: string,
+  ): Promise<NeighbourhoodData | null> {
+    // Check cache first
+    const cacheKey = neighbourhoodKey(latitude, longitude);
+    if (!this._skipCache) {
+      const cached = await this.cache.get<NeighbourhoodData>(cacheKey);
+      if (cached) {
+        console.log('PropertyAPI: Cache HIT for neighbourhood', { latitude, longitude });
+        return cached;
+      }
+    }
+
+    console.log('PropertyAPI: Fetching neighbourhood data', { latitude, longitude });
+
+    try {
+      const apiKey = this.env.ATTOM_API_KEY ?? '';
+      if (!apiKey) {
+        console.log('PropertyAPI: No ATTOM API key for neighbourhood data');
+        return null;
+      }
+
+      const service = createNeighbourhoodService(apiKey);
+      const result = await service.getNeighbourhoodData(latitude, longitude, address);
+
+      // Cache the result
+      await this.cache.set(cacheKey, result, { ttl: CACHE_TTL.NEIGHBOURHOOD });
+
+      return result;
+    } catch (error) {
+      console.log('PropertyAPI: Neighbourhood fetch failed:', error instanceof Error ? error.message : error);
+      return null;
+    }
   }
 }
 

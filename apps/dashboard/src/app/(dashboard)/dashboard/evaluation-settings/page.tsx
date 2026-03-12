@@ -69,6 +69,8 @@ import {
   ARV_TIERS,
   ARV_TIER_LABELS,
   REHAB_LEVEL_NAMES,
+  DEFAULT_TIER_RANGES,
+  computeTierLabel,
   type AppraisalPreset,
   type AppraisalDefaults,
   type FilterType,
@@ -81,6 +83,7 @@ import {
   type LocationSetting,
   type LocationSettingInput,
   type MajorItemInfo,
+  type TierRangeDefinition,
 } from '@/lib/client-api'
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1092,12 +1095,125 @@ function AppraisalRulesTab() {
 // RENOVATION LEVELS TAB
 // ═══════════════════════════════════════════════════════════════════════════════
 
+/** Format a dollar value for display: $500K, $1M, $1.5M, etc. */
+function fmtBound(n: number): string {
+  if (n >= 1_000_000) {
+    const m = n / 1_000_000
+    return m % 1 === 0 ? `$${m}M` : `$${m.toFixed(1)}M`
+  }
+  if (n >= 1000) return `$${Math.round(n / 1000)}K`
+  return `$${n}`
+}
+
+/** Editable boundary pill shown between tier cards in the range bar */
+function BoundaryPill({
+  value,
+  minAllowed,
+  onChange,
+  onRemoveNext,
+}: {
+  value: number
+  minAllowed: number
+  onChange: (v: number) => void
+  onRemoveNext?: () => void
+}) {
+  const [draft, setDraft] = useState(value.toLocaleString())
+  const [focused, setFocused] = useState(false)
+
+  useEffect(() => {
+    if (!focused) setDraft(value.toLocaleString())
+  }, [value, focused])
+
+  const commit = () => {
+    setFocused(false)
+    const raw = draft.replace(/[,$\s]/g, '')
+    const v = parseInt(raw, 10)
+    if (!isNaN(v) && v > minAllowed) {
+      onChange(v)
+    } else {
+      setDraft(value.toLocaleString())
+    }
+  }
+
+  return (
+    <div className="flex flex-col items-center gap-0.5 relative group">
+      <div className="relative">
+        <span className="absolute left-1.5 top-1/2 -translate-y-1/2 text-muted-foreground/60 text-[9px] pointer-events-none select-none">$</span>
+        <Input
+          type="text"
+          inputMode="numeric"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onFocus={(e) => { setFocused(true); setDraft(String(value)); e.target.select() }}
+          onBlur={commit}
+          onKeyDown={(e) => { if (e.key === 'Enter') { e.currentTarget.blur() } }}
+          className="h-7 w-[100px] text-[11px] pl-4 pr-1.5 text-center tabular-nums rounded-full border-primary/30 bg-background hover:border-primary/60 focus:border-primary shadow-sm"
+        />
+      </div>
+      {onRemoveNext && (
+        <button
+          onClick={onRemoveNext}
+          className="absolute -top-1.5 -right-1.5 hidden group-hover:flex items-center justify-center w-4 h-4 rounded-full bg-destructive text-destructive-foreground hover:bg-destructive/90"
+          title="Remove this boundary (merge tiers)"
+        >
+          <span className="text-[9px] leading-none font-bold">&times;</span>
+        </button>
+      )}
+    </div>
+  )
+}
+
+/** Compact range bar: shows tier breakpoints as editable pills.
+ *  Wraps naturally when there are many tiers. */
+function TierRangeBar({
+  tierRanges,
+  onBoundaryChange,
+  onRemoveBoundary,
+}: {
+  tierRanges: TierRangeDefinition[]
+  onBoundaryChange: (index: number, value: number) => void
+  onRemoveBoundary?: (boundaryIndex: number) => void
+}) {
+  const boundaries = tierRanges
+    .slice(0, -1)
+    .map((t, idx) => ({ value: t.maxValue!, minAllowed: t.minValue ?? 0, idx }))
+    .filter((b) => b.value !== null)
+
+  if (boundaries.length === 0) return null
+
+  return (
+    <div className="border rounded-lg bg-muted/20 px-4 py-3">
+      <div className="flex items-center gap-1 mb-2">
+        <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Tier breakpoints</span>
+        <span className="text-[10px] text-muted-foreground/50">— edit values to adjust tier ranges</span>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-[10px] text-muted-foreground/60">$0</span>
+        {boundaries.map((b, i) => (
+          <React.Fragment key={b.idx}>
+            <div className="w-4 h-px bg-border" />
+            <BoundaryPill
+              value={b.value}
+              minAllowed={b.minAllowed}
+              onChange={(v) => onBoundaryChange(b.idx, v)}
+              onRemoveNext={tierRanges.length > 1 && onRemoveBoundary ? () => onRemoveBoundary(b.idx) : undefined}
+            />
+            {i < boundaries.length - 1 && <div className="w-4 h-px bg-border" />}
+          </React.Fragment>
+        ))}
+        <div className="w-4 h-px bg-border" />
+        <span className="text-[10px] text-muted-foreground/60">&infin;</span>
+      </div>
+    </div>
+  )
+}
+
 function TierCard({
-  tier,
+  range,
   estimates,
   onUpdate,
 }: {
-  tier: ArvTier
+  range: TierRangeDefinition
   estimates: Array<{ perSqft: number; minProfit: number }>
   onUpdate: (levelIndex: number, field: 'perSqft' | 'minProfit', value: number) => void
 }) {
@@ -1106,7 +1222,7 @@ function TierCard({
       <CardContent className="p-0">
         <div className="px-3 pt-3 pb-2 border-b border-border">
           <CardTitle className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
-            {ARV_TIER_LABELS[tier]}
+            {computeTierLabel(range)}
           </CardTitle>
         </div>
         <div className="grid grid-cols-[1fr_60px_80px] text-[9px] font-medium text-muted-foreground/60 uppercase tracking-wider px-3 py-1 border-b border-border">
@@ -1165,11 +1281,15 @@ function RenovationLevelsTab() {
   const [error, setError] = useState<string | null>(null)
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
 
+  // Tier ranges state
+  const [tierRanges, setTierRanges] = useState<TierRangeDefinition[]>(DEFAULT_TIER_RANGES)
+  const [originalTierRanges, setOriginalTierRanges] = useState<TierRangeDefinition[]>(DEFAULT_TIER_RANGES)
+
   // Location overrides
   const [locSettings, setLocSettings] = useState<LocationSetting[]>([])
   const [locExpandedId, setLocExpandedId] = useState<string | null>(null)
   const [locEditStates, setLocEditStates] = useState<Record<string, {
-    rehabTable: RehabTable; saving: boolean; error: string | null
+    rehabTable: RehabTable; tierRanges: TierRangeDefinition[]; saving: boolean; error: string | null
   }>>({})
   const [addLocOpen, setAddLocOpen] = useState(false)
   const [addStateCode, setAddStateCode] = useState('')
@@ -1178,10 +1298,13 @@ function RenovationLevelsTab() {
   const [addLocError, setAddLocError] = useState<string | null>(null)
   const [addLocSaving, setAddLocSaving] = useState(false)
 
-  const fallbackRehabTable = useCallback(() => ARV_TIERS.reduce((acc, tier) => {
+  // Derived tier keys from current tierRanges
+  const tierKeys = tierRanges.map((t) => t.key)
+
+  const fallbackRehabTable = useCallback(() => tierKeys.reduce((acc, tier) => {
     acc[tier] = REHAB_LEVEL_NAMES.map(() => ({ perSqft: 25, minProfit: 30000 }))
     return acc
-  }, {} as RehabTable), [])
+  }, {} as RehabTable), [tierKeys])
 
   useEffect(() => {
     setLoading(true)
@@ -1191,19 +1314,102 @@ function RenovationLevelsTab() {
         setOriginal(structuredClone(res.config))
         setIsCustom(res.isCustom)
         setUpdatedAt(res.updatedAt)
+        const ranges = res.tierRanges ?? DEFAULT_TIER_RANGES
+        setTierRanges(structuredClone(ranges))
+        setOriginalTierRanges(structuredClone(ranges))
         setLocSettings(settingsData)
       })
       .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load config'))
       .finally(() => setLoading(false))
   }, [])
 
-  const isDirty = table !== null && original !== null && JSON.stringify(table) !== JSON.stringify(original)
+  const isDirty = (table !== null && original !== null && JSON.stringify(table) !== JSON.stringify(original))
+    || JSON.stringify(tierRanges) !== JSON.stringify(originalTierRanges)
 
-  const handleUpdate = useCallback((tier: ArvTier, levelIndex: number, field: 'perSqft' | 'minProfit', value: number) => {
+  const handleUpdate = useCallback((tier: string, levelIndex: number, field: 'perSqft' | 'minProfit', value: number) => {
     setTable((prev) => {
       if (!prev) return prev
-      const next = { ...prev, [tier]: [...prev[tier]] }
+      const next = { ...prev, [tier]: [...(prev[tier] ?? [])] }
       next[tier][levelIndex] = { ...next[tier][levelIndex], [field]: value }
+      return next
+    })
+  }, [])
+
+  // Tier boundary editing — updates upper bound and cascades to keep all ranges contiguous and valid
+  const handleBoundaryChange = useCallback((index: number, newMaxValue: number) => {
+    setTierRanges((prev) => {
+      const next = structuredClone(prev)
+      next[index].maxValue = newMaxValue
+
+      // Cascade forward: each subsequent tier's min follows the previous tier's max.
+      // If a tier's max ends up <= its new min, push its max up too.
+      for (let i = index + 1; i < next.length; i++) {
+        next[i].minValue = next[i - 1].maxValue
+        // If this tier has an upper bound that's now <= its lower bound, push it up
+        if (next[i].maxValue !== null && next[i].minValue !== null && next[i].maxValue! <= next[i].minValue!) {
+          next[i].maxValue = next[i].minValue! + 1000
+        }
+      }
+
+      // Recompute all labels
+      next.forEach((t) => { t.label = computeTierLabel(t) })
+      return next
+    })
+  }, [])
+
+  const handleAddTier = useCallback(() => {
+    setTierRanges((prev) => {
+      const next = structuredClone(prev)
+      const lastIdx = next.length - 1
+      const lastTier = next[lastIdx]
+      const splitPoint = (lastTier.minValue ?? 0) + 500000
+
+      // Give the current last tier an upper bound
+      lastTier.maxValue = splitPoint
+      lastTier.label = computeTierLabel(lastTier)
+
+      // Create new last tier (no upper bound)
+      const newTier: TierRangeDefinition = {
+        key: `tier_${Date.now()}`,
+        label: '',
+        minValue: splitPoint,
+        maxValue: null,
+      }
+      newTier.label = computeTierLabel(newTier)
+      next.push(newTier)
+
+      // Initialize pricing for the new tier
+      setTable((prevTable) => {
+        if (!prevTable) return prevTable
+        return {
+          ...prevTable,
+          [newTier.key]: REHAB_LEVEL_NAMES.map(() => ({ perSqft: 25, minProfit: 30000 })),
+        }
+      })
+      return next
+    })
+  }, [])
+
+  // Remove a boundary between tier[boundaryIndex] and tier[boundaryIndex+1],
+  // merging them by dropping the right tier and extending the left tier's range
+  const handleRemoveBoundary = useCallback((boundaryIndex: number) => {
+    setTierRanges((prev) => {
+      if (prev.length <= 1) return prev
+      const next = structuredClone(prev)
+      const removedIdx = boundaryIndex + 1
+      const removed = next[removedIdx]
+      // Extend the left tier to cover the removed tier's range
+      next[boundaryIndex].maxValue = removed.maxValue
+      next.splice(removedIdx, 1)
+      // Recompute all labels
+      next.forEach((t) => { t.label = computeTierLabel(t) })
+      // Remove the right tier's pricing from the rehab table
+      setTable((prevTable) => {
+        if (!prevTable) return prevTable
+        const t = { ...prevTable }
+        delete t[removed.key]
+        return t
+      })
       return next
     })
   }, [])
@@ -1212,9 +1418,15 @@ function RenovationLevelsTab() {
     if (!table || !isDirty) return
     setSaving(true); setError(null); setSuccessMessage(null)
     try {
-      const res = await saveRehabConfig(table)
+      // Auto-compute labels before save
+      const rangesWithLabels = tierRanges.map((t) => ({ ...t, label: computeTierLabel(t) }))
+      const tierRangesToSave = JSON.stringify(rangesWithLabels) !== JSON.stringify(DEFAULT_TIER_RANGES) ? rangesWithLabels : undefined
+      const res = await saveRehabConfig(table, tierRangesToSave)
       setOriginal(structuredClone(res.config))
       setTable(structuredClone(res.config))
+      const ranges = res.tierRanges ?? DEFAULT_TIER_RANGES
+      setTierRanges(structuredClone(ranges))
+      setOriginalTierRanges(structuredClone(ranges))
       setIsCustom(true); setUpdatedAt(res.updatedAt)
       setSuccessMessage('Renovation pricing saved successfully.')
     } catch (e) {
@@ -1225,11 +1437,14 @@ function RenovationLevelsTab() {
   }
 
   const handleReset = async () => {
-    if (!confirm('Reset all renovation pricing to system defaults? This cannot be undone.')) return
+    if (!confirm('Reset all renovation pricing and tier ranges to system defaults? This cannot be undone.')) return
     setSaving(true); setError(null); setSuccessMessage(null)
     try {
       const res = await resetRehabConfig()
       setTable(structuredClone(res.config)); setOriginal(structuredClone(res.config))
+      const ranges = res.tierRanges ?? DEFAULT_TIER_RANGES
+      setTierRanges(structuredClone(ranges))
+      setOriginalTierRanges(structuredClone(ranges))
       setIsCustom(false); setUpdatedAt(undefined)
       setSuccessMessage('Reset to system defaults.')
     } catch (e) {
@@ -1242,26 +1457,78 @@ function RenovationLevelsTab() {
   // ── Location override helpers ──
   function getLocEditState(id: string, s: LocationSetting) {
     if (locEditStates[id]) return locEditStates[id]
+    const hasCustomTiers = s.hasTierRanges && Array.isArray(s.tierRangesJson) && s.tierRangesJson.length > 0
+    const locTiers = hasCustomTiers ? structuredClone(s.tierRangesJson!) : structuredClone(tierRanges)
     const seedTable = s.rehabConfigJson ?? structuredClone(table ?? fallbackRehabTable())
-    return { rehabTable: seedTable, saving: false, error: null }
+    return { rehabTable: seedTable, tierRanges: locTiers, saving: false, error: null }
   }
 
   function patchLocEditState(id: string, s: LocationSetting, patch: Partial<ReturnType<typeof getLocEditState>>) {
     setLocEditStates(prev => ({ ...prev, [id]: { ...getLocEditState(id, s), ...patch } }))
   }
 
-  function updateLocRehabValue(id: string, s: LocationSetting, tier: ArvTier, idx: number, field: 'perSqft' | 'minProfit', value: number) {
+  function updateLocRehabValue(id: string, s: LocationSetting, tier: string, idx: number, field: 'perSqft' | 'minProfit', value: number) {
     const es = getLocEditState(id, s)
     const next = JSON.parse(JSON.stringify(es.rehabTable)) as RehabTable
+    if (!next[tier]) next[tier] = REHAB_LEVEL_NAMES.map(() => ({ perSqft: 25, minProfit: 30000 }))
     next[tier][idx] = { ...next[tier][idx], [field]: value }
     patchLocEditState(id, s, { rehabTable: next })
+  }
+
+  function handleLocBoundaryChange(id: string, s: LocationSetting, index: number, newMaxValue: number) {
+    const es = getLocEditState(id, s)
+    const next = structuredClone(es.tierRanges)
+    next[index].maxValue = newMaxValue
+    for (let i = index + 1; i < next.length; i++) {
+      next[i].minValue = next[i - 1].maxValue
+      if (next[i].maxValue !== null && next[i].minValue !== null && next[i].maxValue! <= next[i].minValue!) {
+        next[i].maxValue = next[i].minValue! + 1000
+      }
+    }
+    next.forEach((t) => { t.label = computeTierLabel(t) })
+    patchLocEditState(id, s, { tierRanges: next })
+  }
+
+  function handleLocAddTier(id: string, s: LocationSetting) {
+    const es = getLocEditState(id, s)
+    const next = structuredClone(es.tierRanges)
+    const lastIdx = next.length - 1
+    const lastTier = next[lastIdx]
+    const splitPoint = (lastTier.minValue ?? 0) + 500000
+    lastTier.maxValue = splitPoint
+    lastTier.label = computeTierLabel(lastTier)
+    const newTier: TierRangeDefinition = { key: `loc_tier_${Date.now()}`, label: '', minValue: splitPoint, maxValue: null }
+    newTier.label = computeTierLabel(newTier)
+    next.push(newTier)
+    const rt = structuredClone(es.rehabTable)
+    rt[newTier.key] = REHAB_LEVEL_NAMES.map(() => ({ perSqft: 25, minProfit: 30000 }))
+    patchLocEditState(id, s, { tierRanges: next, rehabTable: rt })
+  }
+
+  function handleLocRemoveBoundary(id: string, s: LocationSetting, boundaryIndex: number) {
+    const es = getLocEditState(id, s)
+    if (es.tierRanges.length <= 1) return
+    const next = structuredClone(es.tierRanges)
+    const removedIdx = boundaryIndex + 1
+    const removed = next[removedIdx]
+    next[boundaryIndex].maxValue = removed.maxValue
+    next.splice(removedIdx, 1)
+    next.forEach((t) => { t.label = computeTierLabel(t) })
+    const rt = structuredClone(es.rehabTable)
+    delete rt[removed.key]
+    patchLocEditState(id, s, { tierRanges: next, rehabTable: rt })
   }
 
   async function handleSaveLocOverride(s: LocationSetting) {
     const es = getLocEditState(s.id, s)
     patchLocEditState(s.id, s, { saving: true, error: null })
     try {
-      const updated = await updateLocationSetting(s.id, { rehabConfigJson: es.rehabTable })
+      const input: Partial<LocationSettingInput> = { rehabConfigJson: es.rehabTable }
+      // Save tier ranges — if they differ from global, store them; otherwise clear to inherit
+      const rangesWithLabels = es.tierRanges.map(t => ({ ...t, label: computeTierLabel(t) }))
+      const isCustomTiers = JSON.stringify(rangesWithLabels) !== JSON.stringify(tierRanges)
+      input.tierRangesJson = isCustomTiers ? rangesWithLabels : null
+      const updated = await updateLocationSetting(s.id, input)
       setLocSettings(prev => prev.map(x => x.id === s.id ? updated : x))
       setLocEditStates(prev => { const n = { ...prev }; delete n[s.id]; return n })
       setLocExpandedId(null)
@@ -1339,18 +1606,30 @@ function RenovationLevelsTab() {
 
       {!loading && table && (
         <>
-          <div className="space-y-3">
-            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
-              {ARV_TIERS.map((tier) => (
-                <TierCard
-                  key={tier}
-                  tier={tier}
-                  estimates={table[tier]}
-                  onUpdate={(levelIndex, field, value) => handleUpdate(tier, levelIndex, field, value)}
-                />
+          <div className="space-y-4">
+            {/* Range bar — shows tier segments with editable boundary pills between them */}
+            <TierRangeBar
+              tierRanges={tierRanges}
+              onBoundaryChange={handleBoundaryChange}
+              onRemoveBoundary={tierRanges.length > 1 ? handleRemoveBoundary : undefined}
+            />
+
+            {/* Pricing cards */}
+            <div className="flex flex-wrap gap-3">
+              {tierRanges.map((range) => (
+                <div key={range.key} className="w-full sm:w-[calc(50%-0.375rem)] lg:w-[calc(25%-0.5625rem)] min-w-[220px]">
+                  <TierCard
+                    range={range}
+                    estimates={table[range.key] ?? REHAB_LEVEL_NAMES.map(() => ({ perSqft: 25, minProfit: 30000 }))}
+                    onUpdate={(levelIndex, field, value) => handleUpdate(range.key, levelIndex, field, value)}
+                  />
+                </div>
               ))}
             </div>
-            <div className="pt-2 border-t border-border">
+            <div className="flex items-center justify-between">
+              <Button variant="outline" size="sm" onClick={handleAddTier} className="gap-1.5 text-xs">
+                <Plus className="w-3.5 h-3.5" />Add Tier
+              </Button>
               <div className="flex flex-wrap gap-6 text-xs text-muted-foreground">
                 <div className="flex items-center gap-2">
                   <span className="font-medium text-foreground">$/sqft</span>
@@ -1403,7 +1682,11 @@ function RenovationLevelsTab() {
                         <div className="flex-1 min-w-0">
                           <span className="text-sm font-semibold text-foreground">{getLocLabel(s)}</span>
                           <p className="text-[11px] text-muted-foreground mt-0.5">
-                            {s.hasRehabConfig ? (s.isEnabled ? 'Custom rehab pricing active' : 'Rehab override saved (disabled)') : 'No override — using default pricing'}
+                            {s.hasRehabConfig
+                              ? (s.isEnabled
+                                ? `Custom rehab pricing active${s.hasTierRanges ? ' · custom tiers' : ''}`
+                                : 'Rehab override saved (disabled)')
+                              : 'No override — using default pricing'}
                           </p>
                         </div>
                         {s.hasRehabConfig && (
@@ -1433,12 +1716,29 @@ function RenovationLevelsTab() {
                               className="data-[state=checked]:bg-green-600"
                             />
                           </div>
-                          <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
-                            {ARV_TIERS.map(tier => (
-                              <Card key={tier} className="border-border">
+
+                          {/* Tier range bar — always shown, editable */}
+                          <div className="space-y-2">
+                            <TierRangeBar
+                              tierRanges={es.tierRanges}
+                              onBoundaryChange={(idx, val) => handleLocBoundaryChange(s.id, s, idx, val)}
+                              onRemoveBoundary={es.tierRanges.length > 1 ? (bIdx) => handleLocRemoveBoundary(s.id, s, bIdx) : undefined}
+                            />
+                            <div className="flex justify-end">
+                              <Button variant="outline" size="sm" className="gap-1 text-[10px] h-6 px-2" onClick={() => handleLocAddTier(s.id, s)}>
+                                <Plus className="w-3 h-3" />Add Tier
+                              </Button>
+                            </div>
+                          </div>
+
+                          {/* Pricing cards — use location's own tier ranges */}
+                          <div className="flex flex-wrap gap-3">
+                            {es.tierRanges.map(range => (
+                              <div key={range.key} className="w-full sm:w-[calc(50%-0.375rem)] lg:w-[calc(25%-0.5625rem)] min-w-[220px]">
+                              <Card className="border-border">
                                 <CardContent className="p-0">
                                   <div className="px-3 pt-3 pb-2 border-b border-border">
-                                    <CardTitle className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">{ARV_TIER_LABELS[tier]}</CardTitle>
+                                    <CardTitle className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">{computeTierLabel(range)}</CardTitle>
                                   </div>
                                   <div className="grid grid-cols-[1fr_60px_80px] text-[9px] font-medium text-muted-foreground/60 uppercase tracking-wider px-3 py-1 border-b border-border">
                                     <span>Level</span><span className="text-right">$/sqft</span><span className="text-right">Min $</span>
@@ -1450,15 +1750,15 @@ function RenovationLevelsTab() {
                                         <div className="relative">
                                           <span className="absolute left-1.5 top-1/2 -translate-y-1/2 text-muted-foreground/60 text-[9px] pointer-events-none select-none">$</span>
                                           <Input type="number" min={0} step={1}
-                                            value={es.rehabTable[tier]?.[idx]?.perSqft ?? 0}
-                                            onChange={e => { const v = parseInt(e.target.value, 10); if (!isNaN(v) && v >= 0) updateLocRehabValue(s.id, s, tier, idx, 'perSqft', v) }}
+                                            value={es.rehabTable[range.key]?.[idx]?.perSqft ?? 0}
+                                            onChange={e => { const v = parseInt(e.target.value, 10); if (!isNaN(v) && v >= 0) updateLocRehabValue(s.id, s, range.key, idx, 'perSqft', v) }}
                                             className="h-6 text-[11px] pl-4 pr-1 text-right tabular-nums rounded-sm border-border bg-muted/30 focus:bg-background" />
                                         </div>
                                         <div className="relative">
                                           <span className="absolute left-1.5 top-1/2 -translate-y-1/2 text-muted-foreground/60 text-[9px] pointer-events-none select-none">$</span>
                                           <Input type="number" min={0} step={1000}
-                                            value={es.rehabTable[tier]?.[idx]?.minProfit ?? 0}
-                                            onChange={e => { const v = parseInt(e.target.value, 10); if (!isNaN(v) && v >= 0) updateLocRehabValue(s.id, s, tier, idx, 'minProfit', v) }}
+                                            value={es.rehabTable[range.key]?.[idx]?.minProfit ?? 0}
+                                            onChange={e => { const v = parseInt(e.target.value, 10); if (!isNaN(v) && v >= 0) updateLocRehabValue(s.id, s, range.key, idx, 'minProfit', v) }}
                                             className="h-6 text-[11px] pl-4 pr-1 text-right tabular-nums rounded-sm border-border bg-muted/30 focus:bg-background" />
                                         </div>
                                       </div>
@@ -1466,6 +1766,7 @@ function RenovationLevelsTab() {
                                   </div>
                                 </CardContent>
                               </Card>
+                              </div>
                             ))}
                           </div>
                           <div className="flex items-center justify-between pt-1">
@@ -1549,8 +1850,8 @@ function RenovationLevelsTab() {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 const DEAL_PARAMS_DEFAULTS_UI: DealParamsConfig = {
-  closingCostsPercent: 10,
-  carryingCostsPercent: 5,
+  closingCostsPercent: 8,
+  carryingCostsPercent: 2,
   wholesaleFee: 10000,
   desiredProfit: null,
 }
@@ -1892,8 +2193,8 @@ function DealParamsTab() {
             <div className="rounded-xl border border-border bg-card overflow-hidden">
               <div className="px-4 py-3 border-b border-border bg-muted/20 flex items-center justify-between gap-3">
                 <div>
-                  <p className="text-xs font-semibold text-foreground">Profit Target</p>
-                  <p className="text-[11px] text-muted-foreground mt-0.5">Minimum profit deducted from the MAO</p>
+                  <p className="text-xs font-semibold text-foreground">Flip Profit</p>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">Minimum flip profit deducted from the MAO</p>
                 </div>
                 <div className="flex items-center gap-2 flex-shrink-0">
                   <span className="text-[10px] text-muted-foreground select-none">Use tier default</span>
@@ -1938,7 +2239,7 @@ function DealParamsTab() {
               <FormulaRow label={`− Closing (${config.closingCostsPercent}%)`} value={`−${fmt$(closingDeduct)}`} variant="deduct" />
               <FormulaRow label={`− Carrying (${config.carryingCostsPercent}%)`} value={`−${fmt$(carryingDeduct)}`} variant="deduct" />
               <FormulaRow
-                label={config.desiredProfit === null ? `− Profit (tier default)` : `− Profit target`}
+                label={config.desiredProfit === null ? `− Flip Profit (tier default)` : `− Flip Profit`}
                 value={`−${fmt$(profitDeduct)}`}
                 variant="deduct"
                 dimmed={config.desiredProfit === null}
@@ -2035,7 +2336,7 @@ function DealParamsTab() {
                             { label: 'Closing Cost', field: 'closingCostsPercent' as const, max: 100 as number | undefined, step: 0.5, suffix: '%' as string | undefined, prefix: undefined as string | undefined, placeholder: undefined as string | undefined },
                             { label: 'Carrying Cost', field: 'carryingCostsPercent' as const, max: 100 as number | undefined, step: 0.5, suffix: '%' as string | undefined, prefix: undefined as string | undefined, placeholder: undefined as string | undefined },
                             { label: 'Wholesale Fee', field: 'wholesaleFee' as const, step: 500, prefix: '$' as string | undefined, max: undefined as number | undefined, suffix: undefined as string | undefined, placeholder: undefined as string | undefined },
-                            { label: 'Min Profit', field: 'desiredProfit' as const, step: 1000, prefix: '$' as string | undefined, placeholder: 'Tier default' as string | undefined, max: undefined as number | undefined, suffix: undefined as string | undefined },
+                            { label: 'Flip Profit', field: 'desiredProfit' as const, step: 1000, prefix: '$' as string | undefined, placeholder: 'Tier default' as string | undefined, max: undefined as number | undefined, suffix: undefined as string | undefined },
                           ]).map(({ label, field, max, step, prefix, suffix, placeholder }) => (
                             <div key={field} className="space-y-1.5">
                               <label className="text-xs font-medium text-muted-foreground">{label}</label>

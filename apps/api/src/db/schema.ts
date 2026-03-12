@@ -355,9 +355,12 @@ export const rehabConfig = sqliteTable(
       .notNull()
       .unique()
       .references(() => user.id, { onDelete: 'cascade' }),
-    // Full 4-tier x 7-level table stored as JSON
-    // Shape: Record<ArvTier, Array<{ perSqft: number; minProfit: number }>>
+    // Rehab pricing table stored as JSON
+    // Shape: Record<string, Array<{ perSqft: number; minProfit: number }>>
     configJson: text('config_json').notNull(),
+    // Custom tier range definitions stored as JSON (null = use defaults)
+    // Shape: Array<{ key: string; label: string; minValue: number | null; maxValue: number | null }>
+    tierRangesJson: text('tier_ranges_json'),
     createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
     updatedAt: text('updated_at').notNull().$defaultFn(() => new Date().toISOString()),
   },
@@ -376,10 +379,10 @@ export const dealParams = sqliteTable(
       .notNull()
       .unique()
       .references(() => user.id, { onDelete: 'cascade' }),
-    /** Closing costs as a percentage of ARV (default: 10) */
-    closingCostsPercent: real('closing_costs_percent').notNull().default(10),
-    /** Carrying costs as a percentage of ARV (default: 5) */
-    carryingCostsPercent: real('carrying_costs_percent').notNull().default(5),
+    /** Closing costs as a percentage of buy price (default: 8) */
+    closingCostsPercent: real('closing_costs_percent').notNull().default(8),
+    /** Carrying costs as a percentage of buy price (default: 2) */
+    carryingCostsPercent: real('carrying_costs_percent').notNull().default(2),
     /** Wholesale fee in dollars (default: 10000) */
     wholesaleFee: real('wholesale_fee').notNull().default(10000),
     /** Desired profit override in dollars (null = use tier default from rehab table) */
@@ -413,6 +416,7 @@ export const locationSettings = sqliteTable(
     appraisalPresetId: text('appraisal_preset_id')
       .references(() => appraisalRulePreset.id, { onDelete: 'set null' }),
     rehabConfigJson: text('rehab_config_json'),       // same shape as rehab_config.config_json
+    tierRangesJson: text('tier_ranges_json'),         // custom tier range definitions (null = inherit from user global)
     dealParamsJson: text('deal_params_json'),         // JSON of DealParamsConfig fields
     majorItemCostsJson: text('major_item_costs_json'), // JSON of Record<MajorItemId, number>
     createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
@@ -480,6 +484,46 @@ export const ghlSettings = sqliteTable(
   (table) => [
     index('idx_ghl_settings_user_id').on(table.userId),
     index('idx_ghl_settings_webhook_secret').on(table.webhookSecret),
+  ]
+)
+
+// ==========================================
+// Report Photos (user-uploaded property photos)
+// ==========================================
+
+export const reportPhotos = sqliteTable(
+  'report_photos',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    userId: text('user_id').notNull().references(() => user.id, { onDelete: 'cascade' }),
+    jobId: text('job_id').notNull(),
+    r2Key: text('r2_key').notNull(),
+    fileName: text('file_name').notNull(),
+    mimeType: text('mime_type').notNull(),
+    sizeBytes: integer('size_bytes').notNull(),
+    createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
+  },
+  (table) => [
+    index('idx_report_photos_user_job').on(table.userId, table.jobId),
+  ]
+)
+
+// ==========================================
+// Photo Analysis Results (AI analysis of uploaded photos)
+// ==========================================
+
+export const photoAnalysisResults = sqliteTable(
+  'photo_analysis_results',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    userId: text('user_id').notNull().references(() => user.id, { onDelete: 'cascade' }),
+    jobId: text('job_id').notNull(),
+    findingsJson: text('findings_json').notNull(),
+    model: text('model'),
+    createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
+  },
+  (table) => [
+    index('idx_photo_analysis_user_job').on(table.userId, table.jobId),
   ]
 )
 

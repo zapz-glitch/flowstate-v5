@@ -62,6 +62,7 @@ interface LocationSettingInput {
   appraisalFilters?: FilterInput[] | null
   appraisalAdjustments?: AdjustmentInput[] | null
   rehabConfigJson?: Record<string, unknown> | null
+  tierRangesJson?: unknown[] | null
   dealParamsJson?: Record<string, unknown> | null
   majorItemCostsJson?: Record<string, number> | null
 }
@@ -222,9 +223,11 @@ function serializeRow(r: typeof locationSettings.$inferSelect) {
     zipCode: r.zipCode,
     appraisalPresetId: r.appraisalPresetId,
     rehabConfigJson: r.rehabConfigJson ? JSON.parse(r.rehabConfigJson) : null,
+    tierRangesJson: r.tierRangesJson ? JSON.parse(r.tierRangesJson) : null,
     dealParamsJson: r.dealParamsJson ? JSON.parse(r.dealParamsJson) : null,
     majorItemCostsJson: r.majorItemCostsJson ? JSON.parse(r.majorItemCostsJson) : null,
     hasRehabConfig: r.rehabConfigJson !== null,
+    hasTierRanges: r.tierRangesJson !== null,
     hasDealParams: r.dealParamsJson !== null,
     hasMajorItemCosts: r.majorItemCostsJson !== null,
   }
@@ -306,6 +309,7 @@ locationSettingsRoute.post('/', async (c) => {
       zipCode: body.zipCode ?? null,
       appraisalPresetId: body.appraisalPresetId ?? null,
       rehabConfigJson: body.rehabConfigJson ? JSON.stringify(body.rehabConfigJson) : null,
+      tierRangesJson: body.tierRangesJson ? JSON.stringify(body.tierRangesJson) : null,
       dealParamsJson: body.dealParamsJson ? JSON.stringify(body.dealParamsJson) : null,
       majorItemCostsJson: body.majorItemCostsJson ? JSON.stringify(body.majorItemCostsJson) : null,
       createdAt: now,
@@ -391,6 +395,7 @@ locationSettingsRoute.patch('/:id', async (c) => {
   if (body.zipCode !== undefined) updates.zipCode = body.zipCode ?? null
   if (body.appraisalPresetId !== undefined) updates.appraisalPresetId = body.appraisalPresetId ?? null
   if (body.rehabConfigJson !== undefined) updates.rehabConfigJson = body.rehabConfigJson ? JSON.stringify(body.rehabConfigJson) : null
+  if (body.tierRangesJson !== undefined) updates.tierRangesJson = body.tierRangesJson ? JSON.stringify(body.tierRangesJson) : null
   if (body.dealParamsJson !== undefined) updates.dealParamsJson = body.dealParamsJson ? JSON.stringify(body.dealParamsJson) : null
   if (body.majorItemCostsJson !== undefined) updates.majorItemCostsJson = body.majorItemCostsJson ? JSON.stringify(body.majorItemCostsJson) : null
 

@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useCallback, useEffect, useRef } from 'react'
+import { useRouter } from 'next/navigation'
 import {
   Search,
   Play,
@@ -38,6 +39,7 @@ import {
   ValuationCard,
   ComparablesSection,
   RiskFloodCard,
+  NeighbourhoodCard,
 } from '@/components/analysis'
 import { SettingsPanel } from '@/components/report/SettingsPanel'
 import { DownloadReportButton } from '@/components/report/DownloadReportButton'
@@ -46,6 +48,7 @@ import type { AnalysisState } from '@/types/analysis'
 // ─── Main Page ───────────────────────────────────────────────────────────────
 
 export default function AnalyzePage() {
+  const router = useRouter()
   const [address, setAddress] = useState('')
   const [isRunning, setIsRunning] = useState(false)
   const [skipCache, setSkipCache] = useState(false)
@@ -83,20 +86,18 @@ export default function AnalyzePage() {
     stickyBarRootMargin: '-60px 0px 0px 0px',
   })
 
-  // Handle real-time completion
+  // Handle real-time completion — redirect to report page
   const handleRealtimeComplete = useCallback(async (completionData: unknown) => {
     if (jobId && propertyKey) {
       const statusResult = await getJobStatus(jobId, propertyKey)
       if (statusResult.success && statusResult.data?.result) {
-        setResult({
-          success: true,
-          data: statusResult.data.result,
-          timing: { durationMs: statusResult.data.totalDurationMs || 0 },
-        })
+        setIsRunning(false)
+        router.push(`/dashboard/reports/${jobId}`)
+        return
       }
     }
     setIsRunning(false)
-  }, [jobId, propertyKey])
+  }, [jobId, propertyKey, router])
 
   // Handle real-time error
   const handleRealtimeError = useCallback((error: string) => {
@@ -325,6 +326,7 @@ export default function AnalyzePage() {
                       comps: effectiveComps,
                       riskFlags: result.data?.riskFlags,
                       floodZone: result.data?.floodZone,
+                      neighbourhood: result.data?.neighbourhood,
                       isRecalculated,
                     }}
                   />
@@ -430,6 +432,9 @@ export default function AnalyzePage() {
                   </div>
                 </div>
 
+                {/* Subject Property */}
+                {result.data.subject && <SubjectPropertyCard subject={result.data.subject} />}
+
                 {/* Valuation Summary (full card) */}
                 {displayValuation && (
                   <div ref={valuationCardRef}>
@@ -437,8 +442,11 @@ export default function AnalyzePage() {
                   </div>
                 )}
 
-                {/* Subject Property */}
-                {result.data.subject && <SubjectPropertyCard subject={result.data.subject} />}
+                {/* Risk Flags & Flood Zone */}
+                <RiskFloodCard riskFlags={result.data.riskFlags} floodZone={result.data.floodZone} />
+
+                {/* Neighbourhood Analysis */}
+                <NeighbourhoodCard data={result.data.neighbourhood} subject={result.data.subject} comps={effectiveComps} />
 
                 {/* Comparables */}
                 {effectiveComps && (
@@ -452,9 +460,6 @@ export default function AnalyzePage() {
                     onReset={handleResetComps}
                   />
                 )}
-
-                {/* Risk Flags & Flood Zone */}
-                <RiskFloodCard riskFlags={result.data.riskFlags} floodZone={result.data.floodZone} />
               </div>
 
               {/* Raw JSON Toggle */}

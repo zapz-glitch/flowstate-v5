@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { Home, SlidersHorizontal, RotateCcw } from 'lucide-react'
+import { Home, SlidersHorizontal, RotateCcw, ChevronDown } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import type { CompsData, CompItem } from './shared-types'
 import { getCompKey } from './format-helpers'
@@ -32,6 +32,7 @@ export function ComparablesSection({
   onReset,
 }: ComparablesSectionProps) {
   const [expandedComps, setExpandedComps] = useState<Set<string>>(new Set())
+  const [excludedOpen, setExcludedOpen] = useState(false)
   const compItems = comps.items || []
 
   const hasInteractiveSelection = !!selectedCompKeys
@@ -202,43 +203,52 @@ export function ComparablesSection({
 
         {excludedComps.length > 0 && (
           <div className="space-y-3">
-            <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setExcludedOpen((v) => !v)}
+              className="flex items-center gap-2 w-full group"
+            >
               <span className="text-caption font-semibold text-foreground-tertiary uppercase tracking-wider">Excluded from ARV</span>
               <div className="flex-1 h-px bg-border/40" />
               <span className="text-caption text-foreground-tertiary">{excludedComps.length} comp{excludedComps.length !== 1 ? 's' : ''}</span>
               {hasInteractiveSelection && (
                 <span className="text-caption-sm text-foreground-tertiary italic">· check to include</span>
               )}
-            </div>
-            {hasInteractiveSelection
-              ? compItems.map((comp, i) => {
-                  const key = getCompKey(comp, i)
-                  if (selectedCompKeys!.has(key)) return null
-                  return (
-                    <CompCard
-                      key={key}
-                      comp={comp}
-                      index={i}
-                      isExpanded={expandedComps.has(key)}
-                      onToggle={() => toggleExpand(key)}
-                      subjectSubdivision={subjectSubdivision}
-                      isSelectedForArv={false}
-                      onToggleArv={() => onToggleComp?.(key)}
-                    />
-                  )
-                })
-              : excludedComps.map((comp) => {
-                  const originalIndex = compItems.indexOf(comp)
-                  return (
-                    <CompCard
-                      key={comp.address || originalIndex}
-                      comp={comp}
-                      index={originalIndex}
-                      subjectSubdivision={subjectSubdivision}
-                    />
-                  )
-                })
-            }
+              <ChevronDown className={`w-3.5 h-3.5 text-foreground-tertiary transition-transform ${excludedOpen ? 'rotate-180' : ''}`} />
+            </button>
+            {excludedOpen && (
+              <div className="space-y-3">
+                {hasInteractiveSelection
+                  ? compItems.map((comp, i) => {
+                      const key = getCompKey(comp, i)
+                      if (selectedCompKeys!.has(key)) return null
+                      return (
+                        <CompCard
+                          key={key}
+                          comp={comp}
+                          index={i}
+                          isExpanded={expandedComps.has(key)}
+                          onToggle={() => toggleExpand(key)}
+                          subjectSubdivision={subjectSubdivision}
+                          isSelectedForArv={false}
+                          onToggleArv={() => onToggleComp?.(key)}
+                        />
+                      )
+                    })
+                  : excludedComps.map((comp) => {
+                      const originalIndex = compItems.indexOf(comp)
+                      return (
+                        <CompCard
+                          key={comp.address || originalIndex}
+                          comp={comp}
+                          index={originalIndex}
+                          subjectSubdivision={subjectSubdivision}
+                        />
+                      )
+                    })
+                }
+              </div>
+            )}
           </div>
         )}
       </div>

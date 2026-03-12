@@ -14,6 +14,7 @@ export type {
   RehabTable,
   RehabLevelEstimate,
   MajorItemId,
+  TierRangeDefinition,
 } from '@flowstate-api/shared'
 
 export {
@@ -21,7 +22,7 @@ export {
   REHAB_LEVELS,
 } from '@flowstate-api/shared'
 
-import type { DealParamsConfig } from '../client-api'
+import type { DealParamsConfig, TierRangeDefinition } from '../client-api'
 
 // ─── Aliases for backward compatibility ──────────────────────────────────────
 
@@ -82,6 +83,8 @@ export interface RecalcValuationResult {
   baseRehabCost: number
   majorItemsCost: number
   rehabCost: number
+  closingCosts: number
+  carryingCosts: number
   totalCosts: number
   totalInvestment: number
   projectedProfit: number
@@ -107,6 +110,7 @@ export interface EvaluationSettings {
   adjustments: RecalcAdjustment[]
   dealParams: DealParamsConfig
   rehabTable: Record<string, Array<{ perSqft: number; minProfit: number }>>
+  tierRanges?: TierRangeDefinition[]
   rehabLevelIndex: number
   majorItems: MajorItemSetting[]
   additionPlay?: number

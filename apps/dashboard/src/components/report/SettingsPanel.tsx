@@ -20,6 +20,7 @@ import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 import type { UseReportSettingsReturn } from '@/hooks/use-report-settings'
 import type { RecalcResult } from '@/lib/recalc'
+import { getTierLabel } from '@/lib/client-api'
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 
@@ -47,7 +48,7 @@ const ARV_TIER_LABELS: Record<string, string> = {
   over3m: 'Over $3M',
 }
 
-const LEVEL_NAMES = ['Lipstick', 'Light Cosmetic', 'Full Cosmetic', 'Heavy Rehab', 'Down to Stud', 'Low Cost Market', 'High Cost Market']
+const LEVEL_NAMES = ['Lipstick', 'Light Cosmetic', 'Full Cosmetic', 'Heavy Rehab', 'Down to Stud']
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -365,7 +366,7 @@ export function SettingsPanel({ settingsHook, recalcData }: SettingsPanelProps) 
               />
             </div>
             <div className="flex items-center justify-between rounded-lg bg-secondary/30 px-3 py-2.5">
-              <span className="text-caption font-medium text-foreground">Desired Profit</span>
+              <span className="text-caption font-medium text-foreground">Flip Profit</span>
               <CompactInput
                 value={settings.dealParams.desiredProfit ?? ''}
                 onChange={(v) => updateDealParams({ desiredProfit: v === '' ? null : parseFloat(v) || 0 })}
@@ -376,7 +377,7 @@ export function SettingsPanel({ settingsHook, recalcData }: SettingsPanelProps) 
               />
             </div>
             <p className="text-caption-sm text-foreground-tertiary px-1">
-              Leave desired profit empty to use the tier default.
+              Leave flip profit empty to use the tier default.
             </p>
           </div>
         </Section>
@@ -387,7 +388,7 @@ export function SettingsPanel({ settingsHook, recalcData }: SettingsPanelProps) 
           title="Renovation Levels"
           badge={
             <Badge variant="outline" className="text-[10px] leading-none px-1.5 py-0.5 font-normal">
-              {ARV_TIER_LABELS[activeTier]}
+              {getTierLabel(activeTier, settings.tierRanges)}
             </Badge>
           }
           defaultOpen={false}
@@ -396,7 +397,7 @@ export function SettingsPanel({ settingsHook, recalcData }: SettingsPanelProps) 
             Select a rehab level and customize $/sqft and min profit.
           </p>
           <div className="space-y-1.5">
-            {settings.rehabTable[activeTier].map((entry, index) => {
+            {(settings.rehabTable[activeTier] ?? []).map((entry, index) => {
               const isSelected = settings.rehabLevelIndex === index
               const estimate = recalcData?.valuation.rehabLevelEstimates[index]
               return (

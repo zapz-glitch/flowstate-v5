@@ -250,7 +250,7 @@ ARV          = avg(per-comp ARV) across up to 3 selected comps`}</CodeBlock>
 
         <h4 className="text-lg font-semibold text-foreground pt-2">Rehab Level Selection</h4>
         <p>
-          There are 7 rehab levels covering the full spectrum from light cosmetic touch-ups to complete
+          There are 5 rehab levels covering the full spectrum from light cosmetic touch-ups to complete
           gut renovations. Select the level that matches the subject property&apos;s condition. Per-sqft
           rates and minimum profit targets are fully configurable in{' '}
           <strong className="text-foreground">Evaluation Settings → Renovation Levels</strong>.
@@ -263,8 +263,6 @@ ARV          = avg(per-comp ARV) across up to 3 selected comps`}</CodeBlock>
             ['2', 'Full Cosmetic', '$35/sqft, $40k min', '$45/sqft, $60k min', '$70/sqft, $100k min', '$100/sqft, $150k min'],
             ['3', 'Heavy Rehab', '$45/sqft, $50k min', '$55/sqft, $70k min', '$80/sqft, $100k min', '$110/sqft, $150k min'],
             ['4', 'Down to Stud', '$60/sqft, $50k min', '$75/sqft, $70k min', '$100/sqft, $100k min', '$120/sqft, $150k min'],
-            ['5', 'Low Cost Market', '$40/sqft, $30k min', '$50/sqft, $60k min', '$75/sqft, $100k min', '$105/sqft, $150k min'],
-            ['6', 'High Cost Market', '$50/sqft, $40k min', '$60/sqft, $70k min', '$85/sqft, $100k min', '$115/sqft, $150k min'],
           ]}
         />
 
@@ -309,15 +307,15 @@ ARV          = avg(per-comp ARV) across up to 3 selected comps`}</CodeBlock>
         <DataTable
           headers={['Parameter', 'Default', 'Description']}
           rows={[
-            ['Closing Costs', '10%', 'Percentage of ARV for transaction costs (agent fees, title, taxes)'],
-            ['Carrying Costs', '5%', 'Percentage of ARV for holding costs during renovation (insurance, utilities, loan interest)'],
+            ['Closing Costs', '8%', 'Percentage of ARV for transaction costs (agent fees, title, taxes)'],
+            ['Carrying Costs', '2%', 'Percentage of ARV for holding costs during renovation (insurance, utilities, loan interest)'],
             ['Wholesale Fee', '$10,000', 'Deducted from buy price to calculate the assignable wholesale price'],
-            ['Min Profit Override', 'Tier default', 'Override the minimum profit target from the rehab tier table; blank uses tier default'],
+            ['Flip Profit Override', 'Tier default', 'Override the flip profit target from the rehab tier table; blank uses tier default'],
           ]}
         />
 
         <h4 className="text-lg font-semibold text-foreground pt-2">Investment Metrics</h4>
-        <CodeBlock>{`Buy Price        = ARV − Rehab − (ARV × Closing%) − (ARV × Carrying%) − Profit Target
+        <CodeBlock>{`Buy Price        = ARV − Rehab − (ARV × Closing%) − (ARV × Carrying%) − Flip Profit
 Wholesale Price  = Buy Price − Wholesale Fee
 Total Investment = Buy Price + Total Rehab Cost
 Projected Profit = ARV − Total Investment − (ARV × Closing%) − (ARV × Carrying%)
@@ -357,7 +355,7 @@ ROI              = (Projected Profit / Total Investment) × 100`}</CodeBlock>
 
         <h4 className="text-lg font-semibold text-foreground pt-2">Renovation Levels</h4>
         <p>
-          The rehab pricing table has 7 levels × 4 ARV tiers = 28 cells. Each cell stores a
+          The rehab pricing table has 5 levels × 4 ARV tiers = 20 cells. Each cell stores a
           per-sqft cost and a minimum profit target. Customize every cell to match your market&apos;s
           actual labor and material costs. Changes take effect on the next analysis. Reset to system
           defaults at any time without affecting other settings.
@@ -441,7 +439,7 @@ ROI              = (Projected Profit / Total Investment) × 100`}</CodeBlock>
             </div>
             <div className="flex items-center gap-3">
               <span className="w-7 h-7 rounded-md bg-primary/20 text-primary flex items-center justify-center text-xs font-bold flex-shrink-0">3</span>
-              <span><strong className="text-foreground font-sans">Property Bundle</strong> — Fetch subject + up to 10 comps + enrichment data from CoreLogic API (2–10s)</span>
+              <span><strong className="text-foreground font-sans">Property Bundle</strong> — Fetch subject + up to 10 comps + enrichment data from property data provider (ATTOM/CoreLogic) (2–10s)</span>
             </div>
             <div className="flex items-center gap-3">
               <span className="w-7 h-7 rounded-md bg-primary/20 text-primary flex items-center justify-center text-xs font-bold flex-shrink-0">4</span>
