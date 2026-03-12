@@ -205,6 +205,8 @@ analyze.post('/', async (c) => {
         500
       )
     }
+    // Consume response body to properly dispose RPC result
+    await initResponse.text()
 
     // Load all user settings (appraisal presets, rehab config, deal params, location overrides)
     const userSettings = await loadUserAnalysisSettings(c.env.DB, {
@@ -309,7 +311,7 @@ analyze.post('/', async (c) => {
     }
 
     // Broadcast step_data to DO so SSE late-joiners get it
-    await jobDO.fetch(
+    const stepDataResponse = await jobDO.fetch(
       new Request('http://internal/step-data', {
         method: 'POST',
         body: JSON.stringify({
@@ -318,6 +320,8 @@ analyze.post('/', async (c) => {
         }),
       })
     )
+    // Consume response body to properly dispose RPC result
+    await stepDataResponse.text()
 
     // Start the workflow with preloaded bundle (skips Step 1)
     const workflowParams: AnalysisWorkflowParams = {
@@ -416,6 +420,7 @@ analyze.get('/jobs/:jobId', async (c) => {
     const stateResponse = await jobDO.fetch(new Request('http://internal/state'))
 
     if (!stateResponse.ok) {
+      await stateResponse.text() // Consume body to dispose RPC result
       if (stateResponse.status === 404) {
         return c.json({ success: false, error: 'Job not found' }, 404)
       }

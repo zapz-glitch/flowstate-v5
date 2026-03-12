@@ -14,6 +14,7 @@ export { NeighbourhoodCard } from './NeighbourhoodCard'
 export { PhotoUpload } from './PhotoUpload'
 export { PhotoAnalysisFindings } from './PhotoAnalysisFindings'
 export { formatCurrency, formatFilterType, formatAdjustmentType, getCompKey, normalizeSubdivision } from './format-helpers'
+export { ApiCallStatsCard } from './ApiCallStatsCard'
 export type {
   AnalyzeData,
   SubjectData,
@@ -24,4 +25,6 @@ export type {
   RehabLevelEstimate,
   FloodZoneData,
   NeighbourhoodData,
+  ApiCallStats,
+  VisionAnalysis,
 } from './shared-types'

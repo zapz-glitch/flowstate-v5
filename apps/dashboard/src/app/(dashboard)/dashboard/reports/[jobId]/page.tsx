@@ -22,6 +22,7 @@ import {
   ValuationCard,
   ComparablesSection,
   RiskFloodCard,
+  ApiCallStatsCard,
 } from '@/components/analysis'
 import type { AnalyzeData } from '@/components/analysis'
 // TODO: re-enable photo upload feature
@@ -251,6 +252,10 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
             onToggleComp={handleToggleComp}
             onReset={handleResetComps}
           />
+        )}
+
+        {analysis.apiCallStats && (
+          <ApiCallStatsCard stats={analysis.apiCallStats} />
         )}
       </div>
 

@@ -46,6 +46,25 @@ export interface ZillowListingData {
   lastSaleDate?: string
   /** Most recent sale price (from price history) */
   lastSalePrice?: number
+  // ─── Home Details (from Facts & Features section) ─────────────────────────
+  /** Detailed home features extracted from Zillow Facts & Features */
+  homeDetails?: {
+    parking?: string
+    heating?: string
+    cooling?: string
+    appliances?: string[]
+    flooring?: string
+    exteriorFeatures?: string[]
+    roof?: string
+    construction?: string
+    lotSize?: string
+    stories?: number
+    pool?: boolean
+    waterfront?: boolean
+    view?: string
+  }
+  /** What's Special highlights from Zillow listing */
+  whatsSpecial?: string[]
 }
 
 // ─── Property Condition (from photo analysis) ────────────────────────────────

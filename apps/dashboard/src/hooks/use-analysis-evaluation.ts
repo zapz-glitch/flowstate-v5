@@ -126,15 +126,16 @@ export function useAnalysisEvaluation({
     }
   }, [data?.comps?.items])
 
-  // Build display valuation: merge recalcData, then apply manual comp override
+  // Build display valuation: always use recalcData, then apply manual comp override
   const displayValuation = useMemo((): ValuationData | undefined => {
-    let base = data?.valuation
-    if (!base) return undefined
+    if (!data?.valuation) return undefined
 
+    // Start from recalcData (always available once data loads) or original
+    let base: ValuationData
     if (recalcData) {
       const v = recalcData.valuation
       base = {
-        ...base,
+        ...data.valuation,
         arv: v.arv,
         arvPerSqft: v.arvPerSqft,
         buyPrice: v.buyPrice,
@@ -149,23 +150,27 @@ export function useAnalysisEvaluation({
         projectedProfit: v.projectedProfit,
         projectedROI: v.projectedROI,
         wholesalePrice: v.wholesalePrice,
+        closingCosts: v.closingCosts,
+        carryingCosts: v.carryingCosts,
         rehabLevelEstimates: v.rehabLevelEstimates,
       }
+    } else {
+      base = data.valuation
     }
 
-    // If comp override is manual, recalculate on top using user's deal params
-    if (compOverride?.isManual && data?.comps?.items && data?.subject && base) {
+    // If comp override is manual, recalculate on top using user's full settings
+    if (compOverride?.isManual && data?.comps?.items && data?.subject) {
       return recalculateValuationFromComps(
         data.comps.items,
         data.subject,
         compOverride.selectedCompKeys,
         base,
-        settingsHook.settings.dealParams
+        settingsHook.settings
       )
     }
 
     return base
-  }, [data, recalcData, compOverride, settingsHook.settings.dealParams])
+  }, [data, recalcData, compOverride, settingsHook.settings])
 
   // Build display comps: map recalcData comp evaluations onto original items
   const displayComps = useMemo((): CompsData | undefined => {

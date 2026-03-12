@@ -319,6 +319,8 @@ ghlWebhook.post('/:webhookSecret', async (c) => {
       const error = (await initResponse.json()) as { error?: string }
       return c.json({ success: false, error: error.error || 'Failed to initialize job' }, 500)
     }
+    // Consume response body to properly dispose RPC result
+    await initResponse.text()
 
     // Load user's analysis settings
     const userSettings = await loadUserAnalysisSettings(c.env.DB, {

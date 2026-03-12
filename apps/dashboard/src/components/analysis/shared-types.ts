@@ -13,4 +13,6 @@ export type {
   RehabLevelEstimate,
   FloodZoneData,
   NeighbourhoodData,
+  ApiCallStats,
+  VisionAnalysis,
 } from '@/app/(dashboard)/dashboard/analyze/actions'

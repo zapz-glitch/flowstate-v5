@@ -329,7 +329,7 @@ export function recalculateValuationFromComps(
   subject: SubjectData,
   selectedCompKeys: Set<string>,
   originalValuation: ValuationData,
-  dealParams: DealParamsConfig,
+  settings: EvaluationSettings,
   rehabTable: RehabTable = DEFAULT_REHAB_TABLE as RehabTable,
   tierRanges?: TierRangeDefinition[]
 ): ValuationData {
@@ -349,7 +349,10 @@ export function recalculateValuationFromComps(
   const compAvgSqft = arvComps.length > 0 ? getCompAvgSqft(arvComps) : subjectSqft
 
   const selectedLevel = originalValuation.rehabLevelEstimates?.find((l) => l.isSelected)
-  const rehabLevelIndex = selectedLevel?.index ?? 2
+  const rehabLevelIndex = selectedLevel?.index ?? settings.rehabLevelIndex ?? 2
+  const majorItems = settings.majorItems
+    .map((item) => ({ id: item.id as 'roof', enabled: item.enabled, cost: item.cost }))
+  const { dealParams } = settings
 
   const val = calculateValuation(
     {
@@ -357,6 +360,8 @@ export function recalculateValuationFromComps(
       subjectSqft,
       compAvgSqft,
       rehabLevelIndex,
+      majorItems,
+      additionPlay: settings.additionPlay ?? 0,
       closingCostsPercent: dealParams.closingCostsPercent,
       carryingCostsPercent: dealParams.carryingCostsPercent,
       wholesaleFee: dealParams.wholesaleFee,
@@ -371,6 +376,8 @@ export function recalculateValuationFromComps(
       arv: newArv,
       subjectSqft,
       compAvgSqft,
+      majorItems,
+      additionPlay: settings.additionPlay ?? 0,
       closingCostsPercent: dealParams.closingCostsPercent,
       carryingCostsPercent: dealParams.carryingCostsPercent,
       wholesaleFee: dealParams.wholesaleFee,
@@ -388,6 +395,8 @@ export function recalculateValuationFromComps(
     buyPrice: val.buyPrice,
     buyPricePercent: val.buyPricePercent,
     rehabCost: val.totalRehabCost,
+    baseRehabCost: val.baseRehabCost,
+    majorItemsCost: val.majorItemsCost,
     wholesalePrice: val.wholesalePrice,
     totalInvestment: val.totalInvestment,
     closingCosts: val.closingCosts,

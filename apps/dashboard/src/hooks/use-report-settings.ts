@@ -1,21 +1,17 @@
 /**
  * Report Settings Hook
  *
- * Always loads the user's current evaluation settings from the API
- * (appraisal preset, rehab config, deal params, major items) so the
- * sidebar reflects what the user has configured on the Evaluation
- * Settings page — not what the server happened to snapshot during analysis.
+ * Loads the user's current evaluation settings from the API and provides
+ * real-time recalculation as settings change.
  *
- * The server's `appliedSettings` is kept as the comparison baseline so
- * recalculation can detect when the user's current settings differ from
- * what was actually used for the analysis.
- *
- * Key behavior:
- * - recalcData = null when settingsChanged === false (use server values as-is)
- * - recalcData != null when user changes settings (recalculated values)
+ * Key design decisions:
+ * - Always recalculates using current settings (no gating on "changed")
+ * - settingsChanged is only used for UI badges ("Recalculated")
+ * - recalcData is always available once data + settings are loaded
+ * - Uses useMemo for synchronous, glitch-free updates on every change
  */
 
-import { useState, useEffect, useMemo, useCallback } from 'react'
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import type { AnalyzeData } from '@/app/(dashboard)/dashboard/analyze/actions'
 import {
   getOrCreateDefaultPreset,
@@ -70,11 +66,6 @@ const DEFAULT_MAJOR_ITEMS: MajorItemSetting[] = MAJOR_ITEMS_LIST.map((item) => (
   cost: item.defaultCost,
 }))
 
-/** Deterministic JSON string for change detection — strips undefined values and sorts keys */
-function normalizeForComparison(obj: unknown): string {
-  return JSON.stringify(obj, (_key, value) => (value === undefined ? null : value))
-}
-
 // ─── Hook ───────────────────────────────────────────────────────────────────
 
 export interface UseReportSettingsReturn {
@@ -97,8 +88,8 @@ export function useReportSettings(data: AnalyzeData | null): UseReportSettingsRe
   const [loading, setLoading] = useState(true)
   const [labels, setLabels] = useState<AppraisalDefaults | null>(null)
 
-  // Saved defaults (loaded from API — the user's current evaluation settings) for reset
-  const [savedDefaults, setSavedDefaults] = useState<EvaluationSettings | null>(null)
+  // Snapshot of loaded defaults for reset + change detection
+  const savedDefaultsRef = useRef<string | null>(null)
 
   // Current settings (mutable by user)
   const [settings, setSettings] = useState<EvaluationSettings>({
@@ -111,8 +102,10 @@ export function useReportSettings(data: AnalyzeData | null): UseReportSettingsRe
     additionPlay: 0,
   })
 
-  // Always fetch user's current settings from the API.
-  // appliedSettings is used only as the recalc comparison baseline.
+  // Keep a ref to the loaded defaults object for reset
+  const savedDefaultsObjRef = useRef<EvaluationSettings | null>(null)
+
+  // Fetch user's current settings from the API on mount
   useEffect(() => {
     let cancelled = false
 
@@ -120,7 +113,6 @@ export function useReportSettings(data: AnalyzeData | null): UseReportSettingsRe
       try {
         const applied = data?.appliedSettings
 
-        // Always load user's current settings from the API
         const [preset, defaults, rehabResponse, dealResponse, majorItemsResponse] = await Promise.all([
           getOrCreateDefaultPreset().catch(() => null),
           getAppraisalDefaults().catch(() => null),
@@ -187,8 +179,7 @@ export function useReportSettings(data: AnalyzeData | null): UseReportSettingsRe
               })
             : DEFAULT_MAJOR_ITEMS
 
-        // Use applied rehabLevelIndex and additionPlay from the analysis as
-        // initial values since those are per-report choices, not global settings
+        // Use applied rehabLevelIndex and additionPlay from the analysis
         const rehabLevelIndex = applied?.rehabLevelIndex ?? 2
         const additionPlay = applied?.additionPlay ?? 0
 
@@ -205,7 +196,9 @@ export function useReportSettings(data: AnalyzeData | null): UseReportSettingsRe
 
         if (!cancelled) {
           setSettings(loaded)
-          setSavedDefaults(loaded)
+          savedDefaultsObjRef.current = loaded
+          // Store serialized snapshot once for cheap change detection
+          savedDefaultsRef.current = JSON.stringify(loaded, (_k, v) => v === undefined ? null : v)
           if (defaults) setLabels(defaults)
         }
       } catch {
@@ -219,36 +212,21 @@ export function useReportSettings(data: AnalyzeData | null): UseReportSettingsRe
     return () => { cancelled = true }
   }, [data?.appliedSettings])
 
-  // settingsChanged = user has actively modified settings from the loaded defaults.
-  // We compare current settings against what was initially loaded (savedDefaults),
-  // NOT against the server's appliedSettings — this avoids false positives from
-  // shape/format differences between the API response and the server snapshot.
+  // Detect whether user changed settings from loaded defaults.
+  // Compares current settings JSON against the snapshot taken at load time.
+  // Only used for the "Recalculated" badge — does NOT gate computation.
   const settingsChanged = useMemo(() => {
-    if (!savedDefaults) return false
-    const currentSnapshot = normalizeForComparison({
-      filters: settings.filters,
-      adjustments: settings.adjustments,
-      dealParams: settings.dealParams,
-      rehabTable: settings.rehabTable,
-      rehabLevelIndex: settings.rehabLevelIndex,
-      additionPlay: settings.additionPlay,
-    })
-    const defaultsSnapshot = normalizeForComparison({
-      filters: savedDefaults.filters,
-      adjustments: savedDefaults.adjustments,
-      dealParams: savedDefaults.dealParams,
-      rehabTable: savedDefaults.rehabTable,
-      rehabLevelIndex: savedDefaults.rehabLevelIndex,
-      additionPlay: savedDefaults.additionPlay,
-    })
-    return currentSnapshot !== defaultsSnapshot
-  }, [settings, savedDefaults])
+    if (!savedDefaultsRef.current) return false
+    return JSON.stringify(settings, (_k, v) => v === undefined ? null : v) !== savedDefaultsRef.current
+  }, [settings])
 
-  // Only recalculate when settings differ from what the server used.
+  // Always recalculate — pure math over ~10 comps, fast enough for useMemo.
+  // This runs synchronously during render, so clicks update the UI in the
+  // same frame with zero async delay or missed clicks.
   const recalcData = useMemo(() => {
-    if (!data || !settingsChanged) return null
+    if (!data) return null
     return recalculateReport(data, settings)
-  }, [data, settings, settingsChanged])
+  }, [data, settings])
 
   // Updaters
   const updateFilter = useCallback((type: string, updates: Partial<RecalcFilter>) => {
@@ -302,10 +280,10 @@ export function useReportSettings(data: AnalyzeData | null): UseReportSettingsRe
   }, [])
 
   const resetToDefaults = useCallback(() => {
-    if (savedDefaults) {
-      setSettings(savedDefaults)
+    if (savedDefaultsObjRef.current) {
+      setSettings(savedDefaultsObjRef.current)
     }
-  }, [savedDefaults])
+  }, [])
 
   return {
     settings,

@@ -64,6 +64,25 @@ export type AnalyzeResult =
 
 // ─── API Response Types (Simplified Underwriter Format) ──────────────────────
 
+/** API call statistics tracked during analysis */
+export interface ApiCallStats {
+  corelogic: { total: number; endpoints: { endpoint: string; count: number }[] }
+  firecrawl: { total: number; cached: number }
+  llm: { total: number; breakdown: { purpose: string; count: number }[] }
+  totalExternalCalls: number
+}
+
+/** Vision analysis result for subject property */
+export interface VisionAnalysis {
+  overallCondition: string
+  confidence: number
+  exterior: { condition: string; notes: string[] }
+  interior?: { condition: string; notes: string[] }
+  features: Record<string, string | undefined>
+  estimatedRehabNeeds: string
+  summary: string
+}
+
 export interface AnalyzeData {
   subject?: SubjectData
   valuation?: ValuationData
@@ -77,6 +96,10 @@ export interface AnalyzeData {
     timestamp?: string
     dataProvider?: string
   }
+  /** API call statistics from the analysis workflow */
+  apiCallStats?: ApiCallStats | null
+  /** Vision analysis of subject property photos */
+  visionAnalysis?: VisionAnalysis | null
   /** Settings used during this analysis (for client-side recalculation initialization) */
   appliedSettings?: {
     filters: Array<{ type: string; enabled: boolean; value: number }>

@@ -74,6 +74,24 @@ interface ZillowExtraction {
   yearBuilt?: number
   foundationType?: string
   hoaFee?: number
+  // Home details from Facts & Features section
+  homeDetails?: {
+    parking?: string
+    heating?: string
+    cooling?: string
+    appliances?: string[]
+    flooring?: string
+    exteriorFeatures?: string[]
+    roof?: string
+    construction?: string
+    lotSize?: string
+    stories?: number
+    pool?: boolean
+    waterfront?: boolean
+    view?: string
+  }
+  // What's Special highlights
+  whatsSpecial?: string[]
 }
 
 // ─── Feature Parsing Utilities ─────────────────────────────────────────────
@@ -163,10 +181,13 @@ interface FirecrawlResponse {
     html?: string
     markdown?: string
     content?: string
+    url?: string // Final URL after redirects
     metadata?: {
       title?: string
       description?: string
       ogImage?: string
+      sourceURL?: string
+      url?: string
     }
   }
   error?: string
@@ -314,7 +335,23 @@ Return JSON in this exact format:
   "yearBuilt": 1985,
   "foundationType": "Slab",
   "hoaFee": 250,
-  "priceHistory": [{"date": "2024-01-15", "price": 350000, "event": "Sold"}]
+  "priceHistory": [{"date": "2024-01-15", "price": 350000, "event": "Sold"}],
+  "homeDetails": {
+    "parking": "2-car garage",
+    "heating": "Central",
+    "cooling": "Central Air",
+    "appliances": ["Dishwasher", "Microwave", "Oven"],
+    "flooring": "Hardwood, Tile",
+    "exteriorFeatures": ["Pool", "Patio", "Fenced Yard"],
+    "roof": "Composition",
+    "construction": "Brick, Frame",
+    "lotSize": "0.25 acres",
+    "stories": 2,
+    "pool": true,
+    "waterfront": false,
+    "view": "Mountain"
+  },
+  "whatsSpecial": ["Recently renovated kitchen", "Pool with spa"]
 }
 
 CRITICAL PHOTO EXTRACTION RULES - These photos will be used for property condition assessment:
@@ -358,6 +395,8 @@ Other extraction rules:
 - For foundationType: Extract the foundation type (e.g., "Slab", "Crawl Space", "Basement", "Pier and Beam", "Block", "Piling"). Look in "Facts and Features", "Interior Details", "Building Details", or similar sections
 - For hoaFee: Extract the monthly HOA fee as a NUMBER (no $ or commas). Look for "HOA fee", "HOA dues", "HOA" in listing facts. If listed as annual, divide by 12. If no HOA, use null
 - For priceHistory: Extract sale/listing events with dates and prices (most important: sold events)
+- For homeDetails: Extract from Zillow's "Facts and Features", "Interior Details", "Home Details", "Property Details", "Building Details" sections. Include parking/garage, heating/cooling, appliances, flooring, exterior features, roof type, construction materials, lot size, stories, pool, waterfront, and view. Use null for missing fields.
+- For whatsSpecial: Extract from Zillow's "What's Special" section — an array of highlight strings. If the section doesn't exist, use null.
 
 Return ONLY the JSON object, no explanation or markdown code blocks.
 If you cannot find a field, use null. Always return valid JSON.`
@@ -473,8 +512,54 @@ export class FirecrawlZillowFetcher {
    * Fetch content from Zillow using Firecrawl
    * Returns both HTML and markdown for LLM processing
    */
-  private async fetchWithFirecrawl(url: string): Promise<{ html: string; markdown: string }> {
+  /**
+   * Extract a homedetails URL from Zillow search results page content.
+   * When the /homes/..._rb/ URL lands on search results instead of a property page,
+   * we can find the actual property URL in the HTML.
+   */
+  private extractHomedetailsUrl(html: string, markdown: string): string | null {
+    // Look for homedetails URLs in the content
+    // Format: /homedetails/[address]/[zpid]_zpid/
+    const patterns = [
+      /https:\/\/www\.zillow\.com\/homedetails\/[^"'\s<>]+_zpid\//gi,
+      /\/homedetails\/[^"'\s<>]+_zpid\//gi,
+    ]
+
+    for (const pattern of patterns) {
+      const content = html + markdown
+      const matches = content.match(pattern)
+      if (matches && matches.length > 0) {
+        // Take the first homedetails URL found (usually the most relevant)
+        let url = matches[0]
+        if (url.startsWith('/')) {
+          url = `https://www.zillow.com${url}`
+        }
+        return url
+      }
+    }
+
+    return null
+  }
+
+  /**
+   * Detect if the content is a PerimeterX captcha/blocked page rather than real content.
+   */
+  private isBlockedPage(html: string, markdown: string): boolean {
+    const combined = html + markdown
+    return (
+      combined.includes('px-captcha') ||
+      combined.includes('PerimeterX') ||
+      combined.includes('Press & Hold') ||
+      combined.includes('Access to this page has been denied') ||
+      (html.length < 5000 && html.includes('_pxAppId'))
+    )
+  }
+
+  private async fetchWithFirecrawl(url: string, depth = 0): Promise<{ html: string; markdown: string }> {
     this.firecrawlCallCount++
+
+    // Use stealth proxy for Zillow — PerimeterX blocks basic proxies.
+    // Stealth costs 5 credits/request but is needed for Zillow's anti-bot.
     const response = await fetch('https://api.firecrawl.dev/v1/scrape', {
       method: 'POST',
       headers: {
@@ -485,7 +570,9 @@ export class FirecrawlZillowFetcher {
         url,
         formats: ['html', 'markdown'],
         onlyMainContent: false,
-        waitFor: 2000, // Wait for JS to load
+        waitFor: 5000,
+        // Stealth proxy bypasses PerimeterX anti-bot protection on Zillow
+        proxy: 'stealth',
       }),
     })
 
@@ -504,10 +591,68 @@ export class FirecrawlZillowFetcher {
       throw new Error('No content returned from Firecrawl')
     }
 
-    return {
-      html: data.data.html || '',
-      markdown: data.data.markdown || '',
+    const html = data.data.html || ''
+    const markdown = data.data.markdown || ''
+    const finalUrl = data.data.url || data.data.metadata?.url || data.data.metadata?.sourceURL
+
+    console.log(`[FirecrawlZillow] Fetched ${url} → html: ${html.length} chars, markdown: ${markdown.length} chars, finalUrl: ${finalUrl || 'unknown'}`)
+
+    // Check if we got blocked by PerimeterX despite stealth proxy
+    if (this.isBlockedPage(html, markdown)) {
+      console.warn(`[FirecrawlZillow] Blocked by anti-bot for: ${url} (even with stealth proxy)`)
+      // Return what we have — the LLM will extract nothing and it'll be marked as failed
+      return { html, markdown }
     }
+
+    // Detect redirect with empty/small content — re-fetch the final URL directly.
+    // This happens when /homes/..._rb/ redirects to /homedetails/.../_zpid/
+    // and the redirect eats the waitFor time, leaving the new page unrendered.
+    const contentTooSmall = html.length < 5000 && markdown.length < 500
+    const wasRedirected = finalUrl && finalUrl !== url && /\/homedetails\//.test(finalUrl)
+
+    if (contentTooSmall && wasRedirected && depth < 1) {
+      const properFullUrl = this.buildFullHomedetailsUrl(finalUrl, url)
+      console.log(`[FirecrawlZillow] Redirect produced empty content (${html.length} chars). Re-fetching: ${properFullUrl}`)
+      return this.fetchWithFirecrawl(properFullUrl, depth + 1)
+    }
+
+    // If content is still too small and no photos, try extracting a property URL
+    const hasPropertyPhotos = /photos\.zillowstatic\.com\/fp\//.test(html)
+    if (contentTooSmall && !hasPropertyPhotos && depth < 1) {
+      const propertyUrl = this.extractHomedetailsUrl(html, markdown)
+      if (propertyUrl) {
+        console.log(`[FirecrawlZillow] Found property URL in sparse content: ${propertyUrl}, re-fetching...`)
+        return this.fetchWithFirecrawl(propertyUrl, depth + 1)
+      }
+      console.warn(`[FirecrawlZillow] Very little content returned and no property photos for: ${url}`)
+    }
+
+    return { html, markdown }
+  }
+
+  /**
+   * Build a full homedetails URL with address slug from a zpid-only URL.
+   * Zillow prefers URLs like /homedetails/Address-City-ST-Zip/12345_zpid/
+   * over bare /homedetails/12345_zpid/ which may trigger bot detection.
+   */
+  private buildFullHomedetailsUrl(zpidUrl: string, originalUrl: string): string {
+    // Extract zpid from the URL
+    const zpidMatch = zpidUrl.match(/\/(\d+_zpid)\/?/)
+    if (!zpidMatch) return zpidUrl
+
+    const zpid = zpidMatch[1]
+
+    // Try to build address slug from the original /homes/ URL
+    const homesMatch = originalUrl.match(/\/homes\/([^_]+)_rb/)
+    if (homesMatch) {
+      const addressSlug = homesMatch[1]
+        .split('-')
+        .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+        .join('-')
+      return `https://www.zillow.com/homedetails/${addressSlug}/${zpid}/`
+    }
+
+    return zpidUrl
   }
 
   /**
@@ -521,12 +666,13 @@ export class FirecrawlZillowFetcher {
     })
 
     // Use markdown for context (cleaner), but include HTML for photo URL extraction
+    // Larger limits to capture Facts & Features, What's Special, Home Details sections
     const combinedContent = `
 ## Markdown Content:
-${content.markdown.slice(0, 30000)}
+${content.markdown.slice(0, 60000)}
 
-## HTML (for photo URLs):
-${content.html.slice(0, 50000)}
+## HTML (for photo URLs and structured data):
+${content.html.slice(0, 80000)}
 `
 
     try {
@@ -568,9 +714,11 @@ ${content.html.slice(0, 50000)}
         foundationType?: string
         hoaFee?: number
         priceHistory?: Array<{ date: string; price: number; event: string }>
+        homeDetails?: ZillowExtraction['homeDetails']
+        whatsSpecial?: string[]
       }
 
-      console.log(`[FirecrawlZillow] LLM extracted: ${parsed.photos?.length ?? 0} photos, price: ${parsed.price}, status: ${parsed.status}, beds: ${parsed.bedrooms}, baths: ${parsed.bathrooms}, foundation: ${parsed.foundationType}, hoa: ${parsed.hoaFee}`)
+      console.log(`[FirecrawlZillow] LLM extracted: ${parsed.photos?.length ?? 0} photos, price: ${parsed.price}, status: ${parsed.status}, beds: ${parsed.bedrooms}, baths: ${parsed.bathrooms}, foundation: ${parsed.foundationType}, hoa: ${parsed.hoaFee}, homeDetails: ${parsed.homeDetails ? 'yes' : 'no'}, whatsSpecial: ${parsed.whatsSpecial?.length ?? 0}`)
 
       return {
         photos: parsed.photos ?? [],
@@ -586,6 +734,8 @@ ${content.html.slice(0, 50000)}
         foundationType: parsed.foundationType,
         hoaFee: parsed.hoaFee,
         priceHistory: parsed.priceHistory,
+        homeDetails: parsed.homeDetails,
+        whatsSpecial: parsed.whatsSpecial,
       }
     } catch (error) {
       console.error('[FirecrawlZillow] LLM parsing error:', error)
@@ -786,6 +936,8 @@ ${content.html.slice(0, 50000)}
         hoaFee,
         lastSaleDate,
         lastSalePrice,
+        homeDetails: extracted.homeDetails,
+        whatsSpecial: extracted.whatsSpecial,
       }
 
       return {

@@ -1010,19 +1010,16 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
     const stub = this.env.ANALYSIS_JOB.get(doId)
 
     try {
-      await stub.fetch(
+      const resp = await stub.fetch(
         new Request('http://internal/step', {
           method: 'POST',
           body: JSON.stringify({ step: stepName, status }),
         })
       )
+      await resp.text() // Consume body to dispose RPC result
     } catch (error) {
       // Non-critical, just log
       console.warn(`[AnalysisWorkflow] Failed to update progress: ${error}`)
-    } finally {
-      // Dispose stub to prevent RPC stub disposal warnings
-      // @ts-expect-error - dispose may not be in types but exists at runtime
-      stub.dispose?.()
     }
   }
 
@@ -1039,18 +1036,16 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
     const stub = this.env.ANALYSIS_JOB.get(doId)
 
     try {
-      await stub.fetch(
+      const resp = await stub.fetch(
         new Request('http://internal/step-data', {
           method: 'POST',
           body: JSON.stringify({ step, data }),
         })
       )
+      await resp.text() // Consume body to dispose RPC result
     } catch (error) {
       // Non-critical — progressive rendering is a nice-to-have
       console.warn(`[AnalysisWorkflow] Failed to broadcast step data for ${step}: ${error}`)
-    } finally {
-      // @ts-expect-error - dispose may not be in types but exists at runtime
-      stub.dispose?.()
     }
   }
 
@@ -1062,18 +1057,16 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
     const stub = this.env.ANALYSIS_JOB.get(doId)
 
     try {
-      await stub.fetch(
+      const resp = await stub.fetch(
         new Request('http://internal/partial-result', {
           method: 'POST',
           body: JSON.stringify({ result }),
         })
       )
+      await resp.text() // Consume body to dispose RPC result
     } catch (error) {
       // Non-critical — result will still be available via polling
       console.warn(`[AnalysisWorkflow] Failed to broadcast partial result: ${error}`)
-    } finally {
-      // @ts-expect-error - dispose may not be in types but exists at runtime
-      stub.dispose?.()
     }
   }
 
@@ -1085,16 +1078,15 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
     const stub = this.env.ANALYSIS_JOB.get(doId)
 
     try {
-      await stub.fetch(
+      const resp = await stub.fetch(
         new Request('http://internal/result', {
           method: 'POST',
           body: JSON.stringify({ result }),
         })
       )
-    } finally {
-      // Dispose stub to prevent RPC stub disposal warnings
-      // @ts-expect-error - dispose may not be in types but exists at runtime
-      stub.dispose?.()
+      await resp.text() // Consume body to dispose RPC result
+    } catch (error) {
+      console.error(`[AnalysisWorkflow] Failed to store result: ${error}`)
     }
   }
 
@@ -1106,7 +1098,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
     const stub = this.env.ANALYSIS_JOB.get(doId)
 
     try {
-      await stub.fetch(
+      const resp = await stub.fetch(
         new Request('http://internal/error', {
           method: 'POST',
           body: JSON.stringify({
@@ -1118,12 +1110,9 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
           }),
         })
       )
+      await resp.text() // Consume body to dispose RPC result
     } catch (error) {
       console.error(`[AnalysisWorkflow] Failed to store error: ${error}`)
-    } finally {
-      // Dispose stub to prevent RPC stub disposal warnings
-      // @ts-expect-error - dispose may not be in types but exists at runtime
-      stub.dispose?.()
     }
   }
 

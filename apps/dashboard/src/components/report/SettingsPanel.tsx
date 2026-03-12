@@ -204,7 +204,7 @@ export function SettingsPanel({ settingsHook, recalcData }: SettingsPanelProps) 
     resetToDefaults,
   } = settingsHook
 
-  const activeTier = recalcData?.valuation.arvTier ?? 'under501k'
+  const activeTier = recalcData?.valuation.arvTier ?? settingsHook.settings.tierRanges?.[0]?.key ?? 'under501k'
   const enabledMajorItems = settings.majorItems.filter((item) => item.enabled)
   const majorItemsTotal = enabledMajorItems.reduce((sum, item) => sum + item.cost, 0)
 
@@ -385,45 +385,30 @@ export function SettingsPanel({ settingsHook, recalcData }: SettingsPanelProps) 
           <div className="space-y-1.5">
             {(settings.rehabTable[activeTier] ?? []).map((entry, index) => {
               const isSelected = settings.rehabLevelIndex === index
-              const estimate = recalcData?.valuation.rehabLevelEstimates[index]
               return (
                 <div
                   key={index}
-                  onClick={() => selectRehabLevel(index)}
                   className={cn(
-                    'rounded-lg px-3 py-2.5 transition-all cursor-pointer',
+                    'rounded-lg px-3 py-2.5 transition-all',
                     isSelected
                       ? 'bg-primary/8 ring-1 ring-primary/25'
                       : 'bg-secondary/20 hover:bg-secondary/40'
                   )}
                 >
-                  <div className="flex items-center justify-between mb-1.5">
-                    <div className="flex items-center gap-2">
-                      <div className={cn(
-                        'w-1.5 h-1.5 rounded-full transition-colors',
-                        isSelected ? 'bg-primary' : 'bg-foreground-tertiary/30'
-                      )} />
-                      <span className={cn('text-caption font-medium', isSelected && 'text-primary')}>
-                        {LEVEL_NAMES[index]}
-                      </span>
-                    </div>
-                    {estimate && (
-                      <span className={cn(
-                        'text-caption-sm font-medium tabular-nums',
-                        estimate.projectedProfit > 0 ? 'text-emerald-600' : 'text-red-600'
-                      )}>
-                        {fmt(estimate.projectedProfit)}
-                      </span>
-                    )}
-                  </div>
-                  {estimate && (
-                    <div className="flex items-center gap-3 ml-5 text-caption-sm tabular-nums text-foreground-tertiary mb-2">
-                      <span>Rehab {fmt(estimate.estimatedCost)}</span>
-                      <span className="opacity-40">·</span>
-                      <span>Buy {fmt(estimate.buyPrice)}</span>
-                    </div>
-                  )}
-                  <div className="flex items-center gap-4 ml-5" onClick={(e) => e.stopPropagation()}>
+                  <button
+                    type="button"
+                    onClick={() => selectRehabLevel(index)}
+                    className="flex items-center gap-2 mb-2 w-full cursor-pointer"
+                  >
+                    <div className={cn(
+                      'w-1.5 h-1.5 rounded-full transition-colors',
+                      isSelected ? 'bg-primary' : 'bg-foreground-tertiary/30'
+                    )} />
+                    <span className={cn('text-caption font-medium', isSelected && 'text-primary')}>
+                      {LEVEL_NAMES[index]}
+                    </span>
+                  </button>
+                  <div className="flex items-center gap-4 ml-5">
                     <CompactInput
                       value={entry.perSqft}
                       onChange={(v) => updateRehabTableEntry(activeTier, index, { perSqft: parseFloat(v) || 0 })}
