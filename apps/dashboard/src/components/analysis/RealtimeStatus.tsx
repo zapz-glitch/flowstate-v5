@@ -1,6 +1,5 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
 import { cn } from '@/lib/utils'
 import type { AnalysisState, AnalysisStep, StatusMessage } from '@/types/analysis'
 import { getStepConfig } from '@/types/analysis'
@@ -13,6 +12,7 @@ import {
   Clock,
   Loader2,
 } from 'lucide-react'
+import { ProgressStepper } from './ProgressStepper'
 
 function TypingDots() {
   return (
@@ -24,81 +24,10 @@ function TypingDots() {
   )
 }
 
-const STEP_MESSAGES: Record<string, string[]> = {
-  property_fetch: [
-    'Pulling property records',
-    'Looking up tax assessments',
-    'Finding comparable sales nearby',
-    'Gathering neighborhood data',
-    'Checking nearby schools',
-    'Scanning points of interest',
-    'Checking recent transactions',
-  ],
-  appraisal_rules: [
-    'Filtering comps by distance',
-    'Checking square footage ranges',
-    'Applying price adjustments',
-    'Evaluating subdivision matches',
-    'Scoring comp quality',
-  ],
-  photo_fetch: [
-    'Downloading property photos',
-    'Gathering street view imagery',
-    'Collecting listing photos',
-  ],
-  comp_selection: [
-    'Classifying property condition',
-    'Analyzing renovation signals',
-    'Reviewing MLS remarks',
-    'Comparing to similar properties',
-    'Evaluating market positioning',
-  ],
-  valuation: [
-    'Weighting comparable sales',
-    'Calculating after-repair value',
-    'Running investment scenarios',
-    'Estimating rehab costs',
-    'Computing profit projections',
-  ],
-  response_build: [
-    'Assembling final report',
-    'Wrapping things up',
-    'Almost there',
-  ],
-}
-
-const QUEUED_MESSAGES = [
-  'Starting analysis',
-  'Warming up',
-  'Preparing your report',
-]
-
-function useRotatingText(step: AnalysisStep | null, isActive: boolean) {
-  const [index, setIndex] = useState(0)
-  const stepRef = useRef(step)
-
-  // Reset index when step changes
-  useEffect(() => {
-    if (step !== stepRef.current) {
-      stepRef.current = step
-      setIndex(0)
-    }
-  }, [step])
-
-  useEffect(() => {
-    if (!isActive) return
-    const interval = setInterval(() => {
-      const messages = step ? STEP_MESSAGES[step] : QUEUED_MESSAGES
-      if (messages) {
-        setIndex((i) => (i + 1) % messages.length)
-      }
-    }, 3000)
-    return () => clearInterval(interval)
-  }, [step, isActive])
-
-  if (!isActive) return null
-  const messages = step ? STEP_MESSAGES[step] : QUEUED_MESSAGES
-  return messages?.[index] ?? null
+function getStatusLabel(step: AnalysisStep | null): string {
+  if (!step) return 'Starting analysis'
+  const config = getStepConfig(step)
+  return config?.label ?? 'Processing'
 }
 
 interface RealtimeStatusProps {
@@ -126,13 +55,12 @@ export function RealtimeStatus({
   const percent = Math.round(((completed + inProgress * 0.5) / total) * 100)
 
   const isActive = status === 'processing' || status === 'queued'
-  const rotatingText = useRotatingText(currentStep, isActive)
 
   const statusText = status === 'completed'
     ? 'Analysis complete'
     : status === 'failed'
       ? 'Analysis failed'
-      : rotatingText ?? 'Processing'
+      : getStatusLabel(currentStep)
 
   return (
     <div className={cn('rounded-xl overflow-hidden border border-border', className)}>
@@ -183,6 +111,11 @@ export function RealtimeStatus({
               </div>
             )}
           </div>
+        )}
+
+        {/* Step-by-step progress */}
+        {total > 0 && (
+          <ProgressStepper steps={steps} currentStep={currentStep} />
         )}
 
         {/* Error display */}

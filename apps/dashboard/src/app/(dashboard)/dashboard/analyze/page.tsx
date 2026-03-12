@@ -39,7 +39,6 @@ import {
   ValuationCard,
   ComparablesSection,
   RiskFloodCard,
-  NeighbourhoodCard,
 } from '@/components/analysis'
 import { SettingsPanel } from '@/components/report/SettingsPanel'
 import { DownloadReportButton } from '@/components/report/DownloadReportButton'
@@ -326,7 +325,7 @@ export default function AnalyzePage() {
                       comps: effectiveComps,
                       riskFlags: result.data?.riskFlags,
                       floodZone: result.data?.floodZone,
-                      neighbourhood: result.data?.neighbourhood,
+                      // neighbourhood: result.data?.neighbourhood, // TODO: re-enable when neighbourhood data source is available
                       isRecalculated,
                     }}
                   />
@@ -445,8 +444,8 @@ export default function AnalyzePage() {
                 {/* Risk Flags & Flood Zone */}
                 <RiskFloodCard riskFlags={result.data.riskFlags} floodZone={result.data.floodZone} />
 
-                {/* Neighbourhood Analysis */}
-                <NeighbourhoodCard data={result.data.neighbourhood} subject={result.data.subject} comps={effectiveComps} />
+                {/* TODO: re-enable when neighbourhood data source is available */}
+                {/* <NeighbourhoodCard data={result.data.neighbourhood} subject={result.data.subject} comps={effectiveComps} /> */}
 
                 {/* Comparables */}
                 {effectiveComps && (

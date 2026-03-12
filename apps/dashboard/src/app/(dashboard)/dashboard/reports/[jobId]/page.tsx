@@ -12,7 +12,7 @@ import {
   SheetDescription,
 } from '@/components/ui/sheet'
 import { cn } from '@/lib/utils'
-import { getSavedReport, getReportPhotos, analyzeReportPhotos, type PhotoFinding } from '@/lib/client-api'
+import { getSavedReport } from '@/lib/client-api'
 import { useAnalysisEvaluation } from '@/hooks/use-analysis-evaluation'
 import { SettingsPanel } from '@/components/report/SettingsPanel'
 import { DownloadReportButton } from '@/components/report/DownloadReportButton'
@@ -22,11 +22,11 @@ import {
   ValuationCard,
   ComparablesSection,
   RiskFloodCard,
-  NeighbourhoodCard,
 } from '@/components/analysis'
 import type { AnalyzeData } from '@/components/analysis'
-import { PhotoUpload } from '@/components/analysis/PhotoUpload'
-import { PhotoAnalysisFindings } from '@/components/analysis/PhotoAnalysisFindings'
+// TODO: re-enable photo upload feature
+// import { PhotoUpload } from '@/components/analysis/PhotoUpload'
+// import { PhotoAnalysisFindings } from '@/components/analysis/PhotoAnalysisFindings'
 
 // ─── Main Page ──────────────────────────────────────────────────────────────
 
@@ -42,11 +42,6 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [shareOpen, setShareOpen] = useState(false)
-  const [photos, setPhotos] = useState<Array<{ id: string; fileName: string; mimeType: string; sizeBytes: number }>>([])
-  const [findings, setFindings] = useState<PhotoFinding[] | null>(null)
-  const [analysisModel, setAnalysisModel] = useState<string | null>(null)
-  const [analyzing, setAnalyzing] = useState(false)
-  const [appliedItems, setAppliedItems] = useState<Set<string>>(new Set())
 
   const analyzeData = report?.analysis ?? null
 
@@ -86,42 +81,9 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
     }
   }, [jobId])
 
-  // Fetch existing photos + findings
-  const fetchPhotos = useCallback(async () => {
-    try {
-      const data = await getReportPhotos(jobId)
-      setPhotos(data.photos)
-      if (data.findings) {
-        setFindings(data.findings)
-        setAnalysisModel(data.analysisModel)
-      }
-    } catch {
-      // Photos are optional — silently ignore errors
-    }
-  }, [jobId])
-
   useEffect(() => {
     fetchReport()
-    fetchPhotos()
-  }, [fetchReport, fetchPhotos])
-
-  const handleAnalyze = useCallback(async () => {
-    try {
-      setAnalyzing(true)
-      const result = await analyzeReportPhotos(jobId)
-      setFindings(result.findings)
-      setAnalysisModel(result.model)
-    } catch {
-      // Could show error toast but keep it simple
-    } finally {
-      setAnalyzing(false)
-    }
-  }, [jobId])
-
-  const handleApplyItem = useCallback((majorItemId: string) => {
-    settingsHook.updateMajorItem(majorItemId, { enabled: true })
-    setAppliedItems((prev) => new Set([...prev, majorItemId]))
-  }, [settingsHook])
+  }, [fetchReport])
 
   if (loading) {
     return (
@@ -152,48 +114,40 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
   return (
     <div className="max-w-6xl mx-auto space-y-6">
       {/* Header */}
-      <div className="space-y-3">
-        <div className="flex items-center justify-between gap-2">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-3 min-w-0">
           <Link href="/dashboard/reports" className="p-2 rounded-lg hover:bg-secondary transition-colors flex-shrink-0">
             <ArrowLeft className="w-5 h-5 text-foreground-tertiary" />
           </Link>
-          <div className="flex items-center gap-2 flex-shrink-0">
-            <button
-              type="button"
-              onClick={() => setShareOpen(true)}
-              className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-body-sm text-foreground-secondary hover:text-foreground hover:bg-secondary transition-colors border border-border no-print"
-            >
-              <Share2 className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Share</span>
-            </button>
-            <DownloadReportButton
-              reportProps={{
-                address: report.address || 'Property Report',
-                date: report.createdAt,
-                reportId: report.jobId,
-                subject: analysis.subject,
-                valuation: displayValuation,
-                comps: effectiveComps,
-                riskFlags: analysis.riskFlags,
-                floodZone: analysis.floodZone,
-                neighbourhood: analysis.neighbourhood,
-                isRecalculated,
-              }}
-            />
+          <div className="flex items-center gap-2 text-body-sm text-foreground-tertiary">
+            <span>Analyzed on {new Date(report.createdAt).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</span>
+            <span className="text-foreground-tertiary/40">·</span>
+            <span className="font-mono text-caption">{report.jobId.slice(0, 8)}</span>
           </div>
         </div>
-        <div className="space-y-1">
-          <div className="flex items-center gap-3 flex-wrap">
-            <h1 className="text-heading-lg text-foreground tracking-tight break-words">{report.address || 'Property Report'}</h1>
-            {isRecalculated && (
-              <Badge variant="outline" className="bg-blue-500/10 text-blue-600 border-blue-500/30 text-caption-sm">
-                Recalculated
-              </Badge>
-            )}
-          </div>
-          <p className="text-body-sm text-foreground-tertiary">
-            Analyzed on {new Date(report.createdAt).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
-          </p>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <button
+            type="button"
+            onClick={() => setShareOpen(true)}
+            className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-body-sm text-foreground-secondary hover:text-foreground hover:bg-secondary transition-colors border border-border no-print"
+          >
+            <Share2 className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Share</span>
+          </button>
+          <DownloadReportButton
+            reportProps={{
+              address: report.address || 'Property Report',
+              date: report.createdAt,
+              reportId: report.jobId,
+              subject: analysis.subject,
+              valuation: displayValuation,
+              comps: effectiveComps,
+              riskFlags: analysis.riskFlags,
+              floodZone: analysis.floodZone,
+              // neighbourhood: analysis.neighbourhood, // TODO: re-enable when neighbourhood data source is available
+              isRecalculated,
+            }}
+          />
         </div>
       </div>
 
@@ -274,25 +228,7 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
       {/* Report Content */}
       <div className="space-y-6">
         {analysis.subject && (
-          <SubjectPropertyCard
-            subject={analysis.subject}
-            footer={findings ? (
-              <PhotoAnalysisFindings
-                findings={findings}
-                analysisModel={analysisModel}
-                appliedItems={appliedItems}
-                onApplyItem={handleApplyItem}
-              />
-            ) : undefined}
-          >
-            <PhotoUpload
-              jobId={jobId}
-              photos={photos}
-              onPhotosChange={setPhotos}
-              analyzing={analyzing}
-              onAnalyze={handleAnalyze}
-            />
-          </SubjectPropertyCard>
+          <SubjectPropertyCard subject={analysis.subject} />
         )}
 
         {displayValuation && (
@@ -303,7 +239,8 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
 
         <RiskFloodCard riskFlags={analysis.riskFlags} floodZone={analysis.floodZone} />
 
-        <NeighbourhoodCard data={analysis.neighbourhood} subject={analysis.subject} comps={effectiveComps} />
+        {/* TODO: re-enable when neighbourhood data source is available */}
+        {/* <NeighbourhoodCard data={analysis.neighbourhood} subject={analysis.subject} comps={effectiveComps} /> */}
 
         {effectiveComps && (
           <ComparablesSection

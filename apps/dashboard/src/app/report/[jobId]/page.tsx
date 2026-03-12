@@ -23,7 +23,6 @@ import {
   ValuationCard,
   ComparablesSection,
   RiskFloodCard,
-  NeighbourhoodCard,
 } from '@/components/analysis'
 import type {
   AnalyzeData,
@@ -273,7 +272,7 @@ export default function ReportPage({ params }: { params: Promise<{ jobId: string
                 comps: effectiveComps,
                 riskFlags: analysis.riskFlags,
                 floodZone: analysis.floodZone,
-                neighbourhood: analysis.neighbourhood,
+                // neighbourhood: analysis.neighbourhood, // TODO: re-enable when neighbourhood data source is available
                 isRecalculated,
               }}
             />
@@ -366,7 +365,8 @@ export default function ReportPage({ params }: { params: Promise<{ jobId: string
 
           <RiskFloodCard riskFlags={analysis.riskFlags} floodZone={analysis.floodZone} />
 
-          <NeighbourhoodCard data={analysis.neighbourhood} subject={analysis.subject} comps={effectiveComps} />
+          {/* TODO: re-enable when neighbourhood data source is available */}
+          {/* <NeighbourhoodCard data={analysis.neighbourhood} subject={analysis.subject} comps={effectiveComps} /> */}
 
           {effectiveComps && (
             <ComparablesSection
