@@ -2,7 +2,6 @@
 
 import { cn } from '@/lib/utils'
 import type { AnalysisState, AnalysisStep, StatusMessage } from '@/types/analysis'
-import { getStepConfig } from '@/types/analysis'
 import { Button } from '@/components/ui/button'
 import {
   CheckCircle2,
@@ -12,7 +11,6 @@ import {
   Clock,
   Loader2,
 } from 'lucide-react'
-import { ProgressStepper } from './ProgressStepper'
 
 function TypingDots() {
   return (
@@ -24,10 +22,18 @@ function TypingDots() {
   )
 }
 
+const FRIENDLY_LABELS: Record<AnalysisStep, string> = {
+  property_fetch: 'Analyzing subject property',
+  appraisal_rules: 'Evaluating comparable sales',
+  photo_fetch: 'Fetching property photos',
+  comp_selection: 'Classifying properties',
+  valuation: 'Calculating valuation',
+  response_build: 'Finalizing results',
+}
+
 function getStatusLabel(step: AnalysisStep | null): string {
   if (!step) return 'Starting analysis'
-  const config = getStepConfig(step)
-  return config?.label ?? 'Processing'
+  return FRIENDLY_LABELS[step] ?? 'Processing'
 }
 
 interface RealtimeStatusProps {
@@ -113,11 +119,6 @@ export function RealtimeStatus({
           </div>
         )}
 
-        {/* Step-by-step progress */}
-        {total > 0 && (
-          <ProgressStepper steps={steps} currentStep={currentStep} />
-        )}
-
         {/* Error display */}
         {error && (
           <div className="flex items-start gap-2 p-3 rounded-lg bg-destructive/10">
@@ -146,11 +147,7 @@ interface CompactStatusProps {
 }
 
 export function CompactStatus({ state, className }: CompactStatusProps) {
-  const { status, currentStep, steps } = state
-  const currentConfig = currentStep ? getStepConfig(currentStep) : null
-  const completedCount = steps.filter(
-    (s) => s.status === 'completed' || s.status === 'skipped'
-  ).length
+  const { status, currentStep } = state
 
   if (!status || status === 'queued') {
     return (
@@ -163,14 +160,9 @@ export function CompactStatus({ state, className }: CompactStatusProps) {
 
   if (status === 'processing') {
     return (
-      <div className={cn('flex items-center gap-3', className)}>
-        <div className="flex items-center gap-2">
-          <Loader2 className="h-4 w-4 animate-spin text-primary" />
-          <span className="text-sm font-medium">{currentConfig?.label || 'Processing'}</span>
-        </div>
-        <span className="text-xs text-muted-foreground">
-          Step {completedCount + 1}/{steps.length}
-        </span>
+      <div className={cn('flex items-center gap-2', className)}>
+        <Loader2 className="h-4 w-4 animate-spin text-primary" />
+        <span className="text-sm font-medium">{getStatusLabel(currentStep)}</span>
       </div>
     )
   }

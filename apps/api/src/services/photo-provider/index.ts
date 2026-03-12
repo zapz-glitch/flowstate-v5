@@ -119,6 +119,9 @@ export interface PhotoService {
     comps: PropertyIdentifier[],
     options?: PhotoFetchOptions & { maxComps?: number }
   ): Promise<PhotoBundle>
+
+  /** Get call statistics for the current session */
+  getCallStats(): { firecrawlCalls: number; llmCalls: number; cacheHits: number }
 }
 
 class MultiPhotoService implements PhotoService {
@@ -252,6 +255,14 @@ class MultiPhotoService implements PhotoService {
       provider: this.getProviderName() ?? 'none',
       fetchedAt: new Date().toISOString(),
     }
+  }
+
+  getCallStats(): { firecrawlCalls: number; llmCalls: number; cacheHits: number } {
+    const zillow = this.providers.get('zillow')
+    if (zillow && 'getCallStats' in zillow && typeof zillow.getCallStats === 'function') {
+      return (zillow as { getCallStats: () => { firecrawlCalls: number; llmCalls: number; cacheHits: number } }).getCallStats()
+    }
+    return { firecrawlCalls: 0, llmCalls: 0, cacheHits: 0 }
   }
 }
 

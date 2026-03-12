@@ -14,5 +14,5 @@ export type {
 export { evaluateFilter } from './filters'
 export { calculateAdjustment } from './adjustments'
 export { evaluateComparable } from './evaluator'
-export { calculateARV, pickBestComps, getCompAvgSqft, MAX_COMPS_FOR_ARV } from './arv'
+export { calculateARV, pickBestComps, getCompAvgSqft } from './arv'
 export type { ArvCompLike } from './arv'

@@ -30,59 +30,82 @@ export function Hero({ onGetStartedClick }: HeroProps) {
 
   const commands = [
     {
-      text: 'curl -X POST api.flowstate.homes/v1/analyze -d \'{"address": "123 Main St, Tampa, FL"}\'',
+      text: 'curl -X POST api.flowstate.homes/v1/analyze -H "Authorization: Bearer fs_k..." -d \'{"address": "123 Main St, Tampa, FL 33607"}\'',
       response: [
         '{ "success": true, "data": {',
-        '    "arv": 892000,',
-        '    "buyPrice": 623000,',
-        '    "recommendation": "buy",',
-        '    "comparables": 8',
+        '    "jobId": "job_17081234_abc",',
+        '    "status": "queued",',
+        '    "propertyBundle": {',
+        '      "subject": {',
+        '        "address": "123 Main St, Tampa, FL",',
+        '        "bedrooms": 3, "bathrooms": 2,',
+        '        "squareFeet": 1850,',
+        '        "yearBuilt": 1995',
+        '      }',
+        '    },',
+        '    "streamUrl": "/sse/analyze/job_..."',
         '  }',
         '}',
       ],
-      successMsg: 'Analysis complete - 127ms'
+      successMsg: 'Job queued — streaming results via SSE'
     },
     {
-      text: 'curl -X POST api.flowstate.homes/v1/analyze -d \'{"address": "456 Oak Ave, Miami", "compFilters": {"radius": 0.5, "maxAge": 90}}\'',
+      text: 'curl -X POST api.flowstate.homes/v1/analyze -H "Authorization: Bearer fs_k..." -d \'{"address": "456 Oak Ave, Miami, FL", "searchOptions": {"radiusMiles": 0.5, "monthsBack": 6}}\'',
       response: [
         '{ "success": true, "data": {',
-        '    "arv": 1250000,',
-        '    "buyPrice": 875000,',
-        '    "recommendation": "buy",',
-        '    "comparables": 5,',
-        '    "filters": { "radius": "0.5mi", "age": "90d" }',
+        '    "jobId": "job_17089876_xyz",',
+        '    "status": "queued",',
+        '    "propertyBundle": {',
+        '      "subject": {',
+        '        "address": "456 Oak Ave, Miami, FL",',
+        '        "bedrooms": 4, "bathrooms": 3,',
+        '        "squareFeet": 2400,',
+        '        "yearBuilt": 2003',
+        '      }',
+        '    },',
+        '    "streamUrl": "/sse/analyze/job_..."',
         '  }',
         '}',
       ],
-      successMsg: 'Analysis complete - 89ms'
+      successMsg: 'Job queued — custom search radius 0.5mi'
     },
     {
-      text: 'curl -X POST api.flowstate.homes/v1/analyze -d \'{"address": "789 Palm Dr, Orlando", "appraisalRules": {"arvMultiplier": 0.7}}\'',
+      text: 'curl -X POST api.flowstate.homes/v1/analyze -H "Authorization: Bearer fs_k..." -d \'{"address": "789 Palm Dr, Orlando, FL", "buybox": {"rehabLevelIndex": 3, "closingCostsPercent": 8}}\'',
       response: [
         '{ "success": true, "data": {',
-        '    "arv": 485000,',
-        '    "buyPrice": 339500,',
-        '    "recommendation": "buy",',
-        '    "comparables": 6,',
-        '    "rules": { "arvMultiplier": 0.7 }',
+        '    "jobId": "job_17085555_def",',
+        '    "status": "queued",',
+        '    "propertyBundle": {',
+        '      "subject": {',
+        '        "address": "789 Palm Dr, Orlando, FL",',
+        '        "bedrooms": 3, "bathrooms": 2,',
+        '        "squareFeet": 1650,',
+        '        "yearBuilt": 1988',
+        '      }',
+        '    },',
+        '    "streamUrl": "/sse/analyze/job_..."',
         '  }',
         '}',
       ],
-      successMsg: 'Analysis complete - 156ms'
+      successMsg: 'Job queued — rehab level 3, 8% closing'
     },
     {
-      text: 'curl -X POST api.flowstate.homes/v1/analyze -d \'{"address": "321 Beach Rd, Clearwater", "compFilters": {"minSqft": 1500, "samePool": true}}\'',
+      text: 'curl api.flowstate.homes/v1/analyze/jobs/job_17081234_abc',
       response: [
         '{ "success": true, "data": {',
-        '    "arv": 725000,',
-        '    "buyPrice": 507500,',
-        '    "recommendation": "buy",',
-        '    "comparables": 4,',
-        '    "filters": { "minSqft": 1500, "pool": true }',
+        '    "status": "completed",',
+        '    "result": {',
+        '      "arv": 485000,',
+        '      "buyPrice": 339500,',
+        '      "rehabCost": 42750,',
+        '      "recommendation": "Strong Buy",',
+        '      "roi": 28.4,',
+        '      "compsUsed": 3',
+        '    }',
         '  }',
         '}',
       ],
-      successMsg: 'Analysis complete - 112ms'
+      successMsg: 'Analysis complete — Strong Buy, 28.4% ROI'
     }
   ]
 

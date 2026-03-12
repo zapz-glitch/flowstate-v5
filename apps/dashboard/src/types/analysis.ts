@@ -110,6 +110,8 @@ export type StatusMessageType =
   | 'job_completed'
   | 'job_failed'
   | 'cache_hit'
+  | 'result_ready'
+  | 'step_data'
 
 export interface StatusMessage {
   type: StatusMessageType
@@ -129,6 +131,8 @@ export type StatusMessageData =
   | JobCompletedData
   | JobFailedData
   | CacheHitData
+  | ResultReadyData
+  | StepDataData
 
 export interface JobCreatedData {
   propertyKey: string
@@ -197,6 +201,17 @@ export interface CacheHitData {
   message: string
 }
 
+export interface ResultReadyData {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  result: any
+}
+
+export interface StepDataData {
+  step: AnalysisStep
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  data: Record<string, any>
+}
+
 // ─── API Response Types ───────────────────────────────────────────────────────
 
 export interface QueueJobResponse {
@@ -247,6 +262,9 @@ export interface AnalysisState {
   messages: StatusMessage[]
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   result: any | null
+  /** Accumulated partial result from step_data events (progressive rendering) */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  partialResult: Record<string, any> | null
   error: string | null
   isConnected: boolean
   totalDurationMs: number | null
@@ -262,6 +280,7 @@ export const initialAnalysisState: AnalysisState = {
   })),
   messages: [],
   result: null,
+  partialResult: null,
   error: null,
   isConnected: false,
   totalDurationMs: null,

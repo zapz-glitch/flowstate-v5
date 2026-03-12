@@ -171,6 +171,8 @@ async function getAccessToken(env: Env): Promise<string> {
 
   const credentials = btoa(`${clientId}:${clientSecret}`)
 
+  _callLog.push({ endpoint: '/oauth/token', timestamp: Date.now() })
+
   const response = await fetch(`${TOKEN_URL}?grant_type=client_credentials`, {
     method: 'POST',
     headers: {
@@ -198,6 +200,34 @@ async function getAccessToken(env: Env): Promise<string> {
   return data.access_token
 }
 
+// ─── API Call Tracking ────────────────────────────────────────────────────────
+
+/** Tracks CoreLogic API calls per analysis run */
+let _callLog: { endpoint: string; timestamp: number }[] = []
+
+/** Reset the call log (call at the start of each analysis) */
+export function resetCoreLogicCallLog(): void {
+  _callLog = []
+}
+
+/** Get the call log for the current analysis */
+export function getCoreLogicCallLog(): { endpoint: string; count: number }[] {
+  const counts = new Map<string, number>()
+  for (const entry of _callLog) {
+    // Normalize endpoint: strip query params and property IDs
+    const normalized = entry.endpoint
+      .replace(/\/[0-9]+\//g, '/{id}/')
+      .replace(/\/[0-9]+$/, '/{id}')
+    counts.set(normalized, (counts.get(normalized) ?? 0) + 1)
+  }
+  return Array.from(counts.entries()).map(([endpoint, count]) => ({ endpoint, count }))
+}
+
+/** Get total CoreLogic call count */
+export function getCoreLogicCallCount(): number {
+  return _callLog.length
+}
+
 // ─── API Request ───────────────────────────────────────────────────────────────
 
 async function request<T>(
@@ -219,6 +249,9 @@ async function request<T>(
       }
     }
   }
+
+  // Track the API call
+  _callLog.push({ endpoint, timestamp: Date.now() })
 
   console.log(`CoreLogic API request: ${url.toString()}`)
 

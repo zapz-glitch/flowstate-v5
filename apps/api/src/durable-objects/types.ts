@@ -131,6 +131,9 @@ export interface AnalysisJobState {
   result: AnalysisResponse | null
   error: JobError | null
 
+  // Progressive step data (accumulated for late-connecting clients)
+  stepData: Record<string, unknown> | null
+
   // Cache info
   cacheHits: string[]
   cacheMisses: string[]
@@ -239,6 +242,8 @@ export type StatusMessageType =
   | 'job_completed'
   | 'job_failed'
   | 'cache_hit'
+  | 'result_ready'
+  | 'step_data'
 
 export interface StatusMessage {
   type: StatusMessageType
@@ -258,6 +263,8 @@ export type StatusMessageData =
   | JobCompletedData
   | JobFailedData
   | CacheHitData
+  | ResultReadyData
+  | StepDataData
 
 export interface JobCreatedData {
   propertyKey: string
@@ -326,6 +333,15 @@ export interface CacheHitData {
   message: string
 }
 
+export interface ResultReadyData {
+  result: AnalysisResponse
+}
+
+export interface StepDataData {
+  step: AnalysisStep
+  data: Record<string, unknown>
+}
+
 // ─── Rate Limit Coordinator Types ─────────────────────────────────────────────
 
 export interface KeyState {
@@ -368,6 +384,9 @@ export interface QueueJobResponse {
     streamUrl: string
     pollUrl: string
     estimatedDurationMs?: number
+    /** Pre-fetched property data for immediate rendering */
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    propertyBundle?: Record<string, any>
   }
 }
 

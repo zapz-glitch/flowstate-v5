@@ -18,6 +18,7 @@ import type {
   SetErrorRequest,
 } from './types'
 import { STEP_CONFIGS } from './types'
+import { deepMergePartial } from './merge-utils'
 
 export class AnalysisJobDO extends DurableObject<Env> {
   private state: AnalysisJobState | null = null
@@ -61,6 +62,10 @@ export class AnalysisJobDO extends DurableObject<Env> {
           return this.handleSetResult(request)
         case '/error':
           return this.handleSetError(request)
+        case '/partial-result':
+          return this.handlePartialResult(request)
+        case '/step-data':
+          return this.handleStepData(request)
         case '/state':
           return this.handleGetState()
         case '/sse':
@@ -106,6 +111,7 @@ export class AnalysisJobDO extends DurableObject<Env> {
       totalDurationMs: null,
       result: null,
       error: null,
+      stepData: null,
       cacheHits: [],
       cacheMisses: [],
     }
@@ -278,6 +284,70 @@ export class AnalysisJobDO extends DurableObject<Env> {
   }
 
   /**
+   * Broadcast the analysis result to SSE clients before storing it
+   * This allows the dashboard to render results immediately without waiting for storage
+   */
+  private async handlePartialResult(request: Request): Promise<Response> {
+    const body = await request.json() as SetResultRequest
+    const state = await this.loadState()
+
+    if (!state) {
+      return new Response(JSON.stringify({ error: 'Job not found' }), {
+        status: 404,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }
+
+    // Broadcast the result to all connected SSE clients
+    this.broadcast({
+      type: 'result_ready',
+      jobId: state.jobId,
+      timestamp: new Date().toISOString(),
+      data: {
+        result: body.result,
+      },
+    })
+
+    return new Response(JSON.stringify({ success: true }), {
+      headers: { 'Content-Type': 'application/json' },
+    })
+  }
+
+  /**
+   * Broadcast partial step data to SSE clients and accumulate for late-connecting clients
+   */
+  private async handleStepData(request: Request): Promise<Response> {
+    const body = await request.json() as { step: AnalysisStep; data: Record<string, unknown> }
+    const state = await this.loadState()
+
+    if (!state) {
+      return new Response(JSON.stringify({ error: 'Job not found' }), {
+        status: 404,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }
+
+    // Accumulate step data for late-connecting clients
+    state.stepData = deepMergePartial(state.stepData ?? {}, body.data)
+    await this.saveState()
+
+    // Broadcast to connected SSE clients
+    this.broadcast({
+      type: 'step_data',
+      jobId: state.jobId,
+      timestamp: new Date().toISOString(),
+      data: {
+        step: body.step,
+        data: body.data,
+      },
+    })
+
+    return new Response(JSON.stringify({ success: true }), {
+      headers: { 'Content-Type': 'application/json' },
+    })
+  }
+
+  /**
    * Set the final result
    */
   private async handleSetResult(request: Request): Promise<Response> {
@@ -418,6 +488,7 @@ export class AnalysisJobDO extends DurableObject<Env> {
         totalDurationMs: state.totalDurationMs,
         ...(state.status === 'completed' && state.result && { result: state.result }),
         ...(state.status === 'failed' && state.error && { error: state.error }),
+        ...(state.stepData && { stepData: state.stepData }),
       },
     }
 
@@ -516,6 +587,19 @@ export class AnalysisJobDO extends DurableObject<Env> {
             totalSteps,
             label: stepConfig.label,
             message: stepProgress.message || stepConfig.description,
+          },
+        } as StatusMessage)
+      }
+
+      // Send accumulated step data for progressive rendering (catch-up for late-connecting clients)
+      if (state.stepData && state.status !== 'completed') {
+        this.sendSSEEvent(controller, {
+          type: 'step_data',
+          jobId: state.jobId,
+          timestamp: new Date().toISOString(),
+          data: {
+            step: 'property_fetch' as AnalysisStep,
+            data: state.stepData,
           },
         } as StatusMessage)
       }

@@ -72,7 +72,19 @@ export function CompCard({
             </div>
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 flex-wrap mb-1">
-                <span className="text-body font-medium">{comp.address || 'Unknown Address'}</span>
+                {comp.address ? (
+                  <a
+                    href={`https://www.zillow.com/homes/${encodeURIComponent(comp.address)}_rb/`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-body font-medium hover:text-primary hover:underline transition-colors"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {comp.address}
+                  </a>
+                ) : (
+                  <span className="text-body font-medium">Unknown Address</span>
+                )}
                 {comp.isBestComp && (
                   <Badge className="bg-amber-500/15 text-amber-600 border-amber-500/30 text-caption-sm">
                     <Star className="w-3 h-3 mr-1" />Best

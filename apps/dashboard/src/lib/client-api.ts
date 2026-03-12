@@ -85,6 +85,7 @@ export async function getUsageSummary(): Promise<UsageSummary> {
 
 export interface UsageLog {
   id: string
+  apiKeyId: string
   endpoint: string
   method: string
   statusCode: number
@@ -105,8 +106,10 @@ export interface UsageLogsResponse {
   }
 }
 
-export async function getUsageLogs(page = 1, limit = 20): Promise<UsageLogsResponse> {
-  return fetchApi<UsageLogsResponse>(`/user/usage/logs?page=${page}&limit=${limit}`)
+export async function getUsageLogs(page = 1, limit = 20, apiKeyId?: string): Promise<UsageLogsResponse> {
+  const params = new URLSearchParams({ page: String(page), limit: String(limit) })
+  if (apiKeyId) params.set('apiKeyId', apiKeyId)
+  return fetchApi<UsageLogsResponse>(`/user/usage/logs?${params}`)
 }
 
 export interface UsageLogDetail extends UsageLog {

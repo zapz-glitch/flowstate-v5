@@ -4,10 +4,8 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
   Key,
-  BarChart3,
   LogOut,
   Home,
-  FileText,
   ClipboardList,
   Search,
   ChevronLeft,
@@ -16,9 +14,7 @@ import {
   Moon,
   ChevronsUpDown,
   User,
-  BookOpen,
   Settings2,
-  Plug,
 } from 'lucide-react'
 import { signOut } from '@/lib/auth-client'
 import { Logo } from '@/components/ui/Logo'
@@ -26,6 +22,7 @@ import { cn } from '@/lib/utils'
 import { useUser } from '@/components/auth/UserProvider'
 import { useTheme } from '@/components/theme-provider'
 import { useSidebar } from '@/components/SidebarProvider'
+import { useAnalysis } from '@/hooks/use-analysis'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import {
   DropdownMenu,
@@ -46,11 +43,7 @@ const navigation: Array<{
   { name: 'API Playground', href: '/dashboard/analyze', icon: Search },
   { name: 'Reports', href: '/dashboard/reports', icon: ClipboardList },
   { name: 'Evaluation Settings', href: '/dashboard/evaluation-settings', icon: Settings2 },
-  { name: 'Integrations', href: '/dashboard/integrations', icon: Plug },
-  { name: 'API Keys', href: '/dashboard/api-keys', icon: Key },
-  { name: 'Usage', href: '/dashboard/usage', icon: BarChart3 },
-  { name: 'API Logs', href: '/dashboard/logs', icon: FileText },
-  { name: 'API Docs', href: '/docs', icon: BookOpen, external: true },
+  { name: 'API Hub', href: '/dashboard/api-hub', icon: Key },
 ]
 
 export default function Sidebar() {
@@ -58,6 +51,9 @@ export default function Sidebar() {
   const { user } = useUser()
   const { theme, toggleTheme } = useTheme()
   const { collapsed, toggleCollapsed } = useSidebar()
+  const { activeAnalysis, analysisState } = useAnalysis()
+
+  const isAnalysisRunning = activeAnalysis !== null && analysisState.status !== 'completed' && analysisState.status !== 'failed'
 
   const handleSignOut = async () => {
     await signOut()
@@ -144,17 +140,25 @@ export default function Sidebar() {
                 )
               }
 
+              const showAnalysisIndicator = isAnalysisRunning && item.href === '/dashboard/analyze'
+
               return (
                 <Link
                   key={item.name}
                   href={item.href}
-                  className={linkClasses}
+                  className={cn(linkClasses, 'relative')}
                   title={collapsed ? item.name : undefined}
                 >
                   <item.icon
                     className={cn('w-[18px] h-[18px] flex-shrink-0', isActive && 'text-primary')}
                   />
                   {!collapsed && <span>{item.name}</span>}
+                  {showAnalysisIndicator && (
+                    <span className={cn('relative flex h-1.5 w-1.5 ml-auto', collapsed && 'absolute top-1.5 right-1.5')}>
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                      <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500" />
+                    </span>
+                  )}
                 </Link>
               )
             })}
@@ -295,12 +299,13 @@ export default function Sidebar() {
         <nav className="flex items-center justify-around h-full px-2">
           {navigation.slice(0, 5).map((item) => {
             const isActive = pathname === item.href
+            const showMobileIndicator = isAnalysisRunning && item.href === '/dashboard/analyze'
             return (
               <Link
                 key={item.name}
                 href={item.href}
                 className={cn(
-                  'flex flex-col items-center justify-center gap-0.5 px-2 py-1.5 rounded-lg transition-colors',
+                  'relative flex flex-col items-center justify-center gap-0.5 px-2 py-1.5 rounded-lg transition-colors',
                   isActive
                     ? 'text-primary'
                     : 'text-foreground-tertiary hover:text-foreground'
@@ -308,6 +313,12 @@ export default function Sidebar() {
               >
                 <item.icon className="w-[18px] h-[18px]" />
                 <span className="text-caption-sm">{item.name.split(' ')[0]}</span>
+                {showMobileIndicator && (
+                  <span className="absolute top-1.5 right-1.5 flex h-1.5 w-1.5">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                    <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500" />
+                  </span>
+                )}
               </Link>
             )
           })}

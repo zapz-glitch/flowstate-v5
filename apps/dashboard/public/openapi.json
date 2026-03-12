@@ -1045,6 +1045,255 @@
         }
       }
     },
+    "/user/reports/{jobId}/photos": {
+      "get": {
+        "tags": ["Reports"],
+        "summary": "List report photos",
+        "description": "Get all uploaded photos and the latest AI analysis findings for a report.",
+        "security": [{ "cookieAuth": [] }],
+        "parameters": [
+          {
+            "name": "jobId",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Photos and analysis findings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "photos": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": { "type": "string" },
+                          "fileName": { "type": "string" },
+                          "mimeType": { "type": "string" },
+                          "sizeBytes": { "type": "integer" },
+                          "createdAt": { "type": "string" }
+                        }
+                      }
+                    },
+                    "findings": { "type": "object", "nullable": true },
+                    "analysisModel": { "type": "string", "nullable": true },
+                    "analysisDate": { "type": "string", "nullable": true }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": ["Reports"],
+        "summary": "Upload report photos",
+        "description": "Upload property photos to a report. Accepts JPEG, PNG, and WebP files up to 10MB each, maximum 20 files per request.",
+        "security": [{ "cookieAuth": [] }],
+        "parameters": [
+          {
+            "name": "jobId",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "photos": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "binary"
+                    },
+                    "description": "Photo files (JPEG, PNG, or WebP, max 10MB each)"
+                  }
+                },
+                "required": ["photos"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Uploaded photos",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "photos": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": { "type": "string" },
+                          "fileName": { "type": "string" },
+                          "mimeType": { "type": "string" },
+                          "sizeBytes": { "type": "integer" }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "No files provided, too many files, or invalid file type/size",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "404": {
+            "description": "Report not found",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/user/reports/{jobId}/photos/analyze": {
+      "post": {
+        "tags": ["Reports"],
+        "summary": "Analyze report photos with AI",
+        "description": "Run AI analysis on all uploaded photos for a report. Returns condition findings, repair estimates, and observations.",
+        "security": [{ "cookieAuth": [] }],
+        "parameters": [
+          {
+            "name": "jobId",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "AI analysis findings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "findings": { "type": "object", "description": "AI-generated condition findings" },
+                    "model": { "type": "string", "description": "AI model used for analysis" },
+                    "photoCount": { "type": "integer", "description": "Number of photos analyzed" }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "No photos to analyze",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "404": {
+            "description": "Report not found",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/user/reports/{jobId}/photos/{photoId}": {
+      "delete": {
+        "tags": ["Reports"],
+        "summary": "Delete a report photo",
+        "description": "Delete a specific photo from a report. Removes from both storage and database.",
+        "security": [{ "cookieAuth": [] }],
+        "parameters": [
+          {
+            "name": "jobId",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "photoId",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Photo deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          },
+          "404": {
+            "description": "Photo not found",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
+          }
+        }
+      }
+    },
     "/reports/{jobId}": {
       "get": {
         "tags": ["Reports"],
@@ -1276,6 +1525,37 @@
             "content": {
               "application/json": {
                 "schema": { "$ref": "#/components/schemas/AppraisalDefaultsResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/appraisal-presets/mine": {
+      "get": {
+        "tags": ["Appraisal Presets"],
+        "summary": "Get or create user's default preset",
+        "description": "Returns the authenticated user's default appraisal preset. If no preset exists, auto-creates one seeded with system default filters and adjustments.",
+        "security": [{ "cookieAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "User's default preset with filters and adjustments",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "preset": { "$ref": "#/components/schemas/AppraisalPreset" }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
               }
             }
           }

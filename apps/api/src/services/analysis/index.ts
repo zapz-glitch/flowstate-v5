@@ -297,6 +297,18 @@ export interface ResponseContext {
   rehabLevelEstimates?: RehabLevelEstimate[]
   /** Applied settings snapshot for client-side recalculation initialization */
   appliedSettings?: AppliedSettings
+  /** Vision analysis of subject property condition (from photo AI analysis) */
+  visionAnalysis?: {
+    overallCondition: string
+    confidence: number
+    estimatedRehabNeeds: string
+    summary: string
+    exterior?: { condition: string; notes: string[] }
+    interior?: { condition: string; notes: string[] }
+    features?: Record<string, string | undefined>
+  }
+  /** External API call statistics */
+  apiCallStats?: ApiCallStats
 }
 
 /**
@@ -567,6 +579,37 @@ export interface AnalysisResponse {
   }
   /** Settings used during this analysis (for client-side recalculation initialization) */
   appliedSettings?: AppliedSettings
+  /** AI vision analysis of subject property condition */
+  visionAnalysis?: {
+    overallCondition: string
+    confidence: number
+    estimatedRehabNeeds: string
+    summary: string
+    exterior?: { condition: string; notes: string[] }
+    interior?: { condition: string; notes: string[] }
+    features?: Record<string, string | undefined>
+  } | null
+  /** External API call statistics for this analysis */
+  apiCallStats?: ApiCallStats | null
+}
+
+/**
+ * External API call statistics for a single analysis run
+ */
+export interface ApiCallStats {
+  corelogic: {
+    total: number
+    endpoints: { endpoint: string; count: number }[]
+  }
+  firecrawl: {
+    total: number
+    cached: number
+  }
+  llm: {
+    total: number
+    breakdown: { purpose: string; count: number }[]
+  }
+  totalExternalCalls: number
 }
 
 /**
@@ -615,12 +658,20 @@ export function buildAnalysisResponse(
     return (a.distanceMiles ?? 999) - (b.distanceMiles ?? 999)
   }
 
+  // Build lookup from merged bundle comps (has Zillow-supplemented data like bedrooms)
+  const mergedCompLookup = new Map(
+    bundle.comparables.map((c) => [c.id, c])
+  )
+
   // Return ALL comps: enabled first (subdivision match → distance), then disabled (same order)
   const allComps = [
     ...enabledComps.sort(bySubdivisionThenDistance),
     ...disabledComps.sort(bySubdivisionThenDistance),
   ].map((comp) => {
     const compPhotos = photoBundle?.comps[comp.id]?.photos.slice(0, 3) ?? []
+
+    // Use merged comp data for fields that may have been supplemented from Zillow
+    const merged = mergedCompLookup.get(comp.id)
 
     // Build appraisal rule details from evaluation
     const evaluation = comp.evaluation
@@ -657,6 +708,12 @@ export function buildAnalysisResponse(
         }
       : null
 
+    // Prefer merged (Zillow-supplemented) values for fields that CoreLogic may be missing
+    const bedrooms = merged?.bedrooms ?? comp.bedrooms ?? null
+    const bathrooms = merged?.bathrooms ?? comp.bathrooms ?? null
+    const squareFeet = merged?.squareFeet ?? comp.squareFeet
+    const yearBuilt = merged?.yearBuilt ?? comp.yearBuilt
+
     return {
       id: comp.id,
       address: `${comp.address}, ${comp.city}, ${comp.state}`,
@@ -664,13 +721,15 @@ export function buildAnalysisResponse(
       longitude: comp.longitude ?? null,
       salePrice: comp.salePrice,
       saleDate: formatDate(comp.saleDate),
-      squareFeet: comp.squareFeet,
-      pricePerSqft: comp.pricePerSqft,
+      squareFeet,
+      pricePerSqft: squareFeet && squareFeet > 0 && (comp.adjustedSalePrice ?? comp.salePrice) != null
+        ? Math.round((comp.adjustedSalePrice ?? comp.salePrice)! / squareFeet)
+        : comp.pricePerSqft,
       distanceMiles: comp.distanceMiles,
-      bedrooms: comp.bedrooms ?? null,
-      bathrooms: comp.bathrooms ?? null,
-      bedsBaths: `${comp.bedrooms ?? '-'}/${comp.bathrooms ?? '-'}`,
-      yearBuilt: comp.yearBuilt,
+      bedrooms,
+      bathrooms,
+      bedsBaths: `${bedrooms ?? '-'}/${bathrooms ?? '-'}`,
+      yearBuilt,
       adjustedPrice: comp.adjustedSalePrice,
       photos: compPhotos,
       subdivision: comp.subdivision ?? null,
@@ -857,6 +916,12 @@ export function buildAnalysisResponse(
 
     // ═══ APPLIED SETTINGS (for client-side recalculation) ═══════════════════
     appliedSettings: ctx.appliedSettings,
+
+    // ═══ VISION ANALYSIS (AI photo condition assessment) ═══════════════════
+    visionAnalysis: ctx.visionAnalysis ?? null,
+
+    // ═══ API CALL STATISTICS ═══════════════════════════════════════════════
+    apiCallStats: ctx.apiCallStats ?? null,
   }
 }
 

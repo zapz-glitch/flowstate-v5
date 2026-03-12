@@ -384,12 +384,26 @@ export class FirecrawlZillowFetcher {
   private cache?: KVNamespace
   private cacheTtl: number
 
+  /** Tracks number of Firecrawl API calls (scrapes) */
+  firecrawlCallCount = 0
+  /** Tracks number of cache hits */
+  cacheHitCount = 0
+  /** Tracks number of LLM calls (for parsing scraped content) */
+  llmCallCount = 0
+
   constructor(config: FirecrawlZillowFetcherConfig) {
     this.apiKey = config.apiKey
     this.openrouterApiKey = config.openrouterApiKey
     this.openrouterModel = config.openrouterModel ?? 'google/gemini-2.0-flash-001'
     this.cache = config.cache
     this.cacheTtl = config.cacheTtl ?? DEFAULT_CACHE_TTL
+  }
+
+  /** Reset call counters for a new analysis run */
+  resetCallCounters(): void {
+    this.firecrawlCallCount = 0
+    this.cacheHitCount = 0
+    this.llmCallCount = 0
   }
 
   /**
@@ -460,6 +474,7 @@ export class FirecrawlZillowFetcher {
    * Returns both HTML and markdown for LLM processing
    */
   private async fetchWithFirecrawl(url: string): Promise<{ html: string; markdown: string }> {
+    this.firecrawlCallCount++
     const response = await fetch('https://api.firecrawl.dev/v1/scrape', {
       method: 'POST',
       headers: {
@@ -516,6 +531,7 @@ ${content.html.slice(0, 50000)}
 
     try {
       console.log('[FirecrawlZillow] Parsing content with LLM...')
+      this.llmCallCount++
 
       const result = await llm.execute({
         prompt: `${EXTRACTION_PROMPT}\n\nContent to analyze:\n${combinedContent}`,
@@ -708,6 +724,7 @@ ${content.html.slice(0, 50000)}
         if (cached) {
           extracted = cached
           fromCache = true
+          this.cacheHitCount++
         } else {
           // Fetch content using Firecrawl
           const content = await this.fetchWithFirecrawl(zillowUrl)

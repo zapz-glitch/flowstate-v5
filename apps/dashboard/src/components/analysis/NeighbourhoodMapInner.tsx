@@ -57,51 +57,36 @@ export default function NeighbourhoodMapInner({ markers }: NeighbourhoodMapInner
     if (!mapRef.current) {
       mapRef.current = new maplibregl.Map({
         container: containerRef.current,
-        style: 'https://tiles.openfreemap.org/styles/liberty',
+        style: {
+          version: 8,
+          sources: {
+            'esri-satellite': {
+              type: 'raster',
+              tiles: [
+                'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+              ],
+              tileSize: 256,
+              attribution: '&copy; Esri',
+              maxzoom: 19,
+            },
+          },
+          layers: [
+            {
+              id: 'satellite',
+              type: 'raster',
+              source: 'esri-satellite',
+              minzoom: 0,
+              maxzoom: 19,
+            },
+          ],
+        },
         center: [markers[0].lng, markers[0].lat],
         zoom: 13,
-        pitch: 45,
-        bearing: -10,
       })
 
       mapRef.current.addControl(new maplibregl.NavigationControl(), 'top-right')
       mapRef.current.scrollZoom.disable()
 
-      mapRef.current.on('load', () => {
-        const map = mapRef.current!
-        const layers = map.getStyle().layers
-        let labelLayerId: string | undefined
-        if (layers) {
-          for (const layer of layers) {
-            if (layer.type === 'symbol' && (layer.layout as Record<string, unknown>)?.['text-field']) {
-              labelLayerId = layer.id
-              break
-            }
-          }
-        }
-
-        if (map.getSource('openmaptiles') || map.getSource('maptiler_planet') || map.getSource('openfreemap')) {
-          const sourceId = map.getSource('openmaptiles') ? 'openmaptiles' : map.getSource('maptiler_planet') ? 'maptiler_planet' : 'openfreemap'
-          if (!map.getLayer('3d-buildings')) {
-            map.addLayer(
-              {
-                id: '3d-buildings',
-                source: sourceId,
-                'source-layer': 'building',
-                type: 'fill-extrusion',
-                minzoom: 14,
-                paint: {
-                  'fill-extrusion-color': '#aaa',
-                  'fill-extrusion-height': ['get', 'render_height'],
-                  'fill-extrusion-base': ['get', 'render_min_height'],
-                  'fill-extrusion-opacity': 0.5,
-                },
-              },
-              labelLayerId,
-            )
-          }
-        }
-      })
     }
 
     const map = mapRef.current
@@ -171,8 +156,6 @@ export default function NeighbourhoodMapInner({ markers }: NeighbourhoodMapInner
       map.fitBounds(bounds, {
         padding: 60,
         maxZoom: 15,
-        pitch: 45,
-        bearing: -10,
       })
     }
   }, [markers])

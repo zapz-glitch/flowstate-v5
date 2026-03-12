@@ -30,7 +30,7 @@ function getClassificationLabel(type: string) {
 
 export function ClassificationBadge({
   classification,
-  showConfidence = true,
+  showConfidence = false,
 }: {
   classification: ClassificationSummary | null | undefined
   showConfidence?: boolean

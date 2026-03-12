@@ -1,15 +1,19 @@
 'use client'
 
 import { useState } from 'react'
-import { Home, SlidersHorizontal, RotateCcw, ChevronDown } from 'lucide-react'
+import { Home, SlidersHorizontal, RotateCcw, ChevronDown, MapPin } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
-import type { CompsData, CompItem } from './shared-types'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import type { CompsData, CompItem, SubjectData } from './shared-types'
 import { getCompKey } from './format-helpers'
 import { CompCard } from './CompCard'
+import { NeighbourhoodMap } from './NeighbourhoodMap'
 
 export interface ComparablesSectionProps {
   comps: CompsData
   subjectSubdivision?: string | null
+  /** Subject property data for map display */
+  subject?: SubjectData | null
   /** If provided, enables interactive comp selection mode */
   selectedCompKeys?: Set<string>
   /** Whether selection has been manually changed */
@@ -25,6 +29,7 @@ export interface ComparablesSectionProps {
 export function ComparablesSection({
   comps,
   subjectSubdivision,
+  subject,
   selectedCompKeys,
   isManual = false,
   recalculatedArv,
@@ -33,6 +38,7 @@ export function ComparablesSection({
 }: ComparablesSectionProps) {
   const [expandedComps, setExpandedComps] = useState<Set<string>>(new Set())
   const [excludedOpen, setExcludedOpen] = useState(false)
+  const [mapOpen, setMapOpen] = useState(false)
   const compItems = comps.items || []
 
   const hasInteractiveSelection = !!selectedCompKeys
@@ -80,6 +86,16 @@ export function ComparablesSection({
               <Badge variant="outline" className="text-caption-sm bg-background/50 hidden md:flex">
                 Avg: ${comps.avgPricePerSqft.toFixed(0)}/sqft
               </Badge>
+            )}
+            {subject?.latitude && subject?.longitude && (
+              <button
+                type="button"
+                onClick={() => setMapOpen(true)}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-caption text-foreground-secondary hover:text-foreground hover:bg-secondary transition-colors border border-border no-print"
+              >
+                <MapPin className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Map</span>
+              </button>
             )}
           </div>
         </div>
@@ -252,6 +268,18 @@ export function ComparablesSection({
           </div>
         )}
       </div>
+
+      {/* Map Dialog */}
+      <Dialog open={mapOpen} onOpenChange={setMapOpen}>
+        <DialogContent className="max-w-4xl p-0 overflow-hidden">
+          <DialogHeader className="px-5 pt-5 pb-3">
+            <DialogTitle className="text-body font-semibold">Subject & Comparables Map</DialogTitle>
+          </DialogHeader>
+          <div className="px-5 pb-5">
+            <NeighbourhoodMap subject={subject} comps={comps} />
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

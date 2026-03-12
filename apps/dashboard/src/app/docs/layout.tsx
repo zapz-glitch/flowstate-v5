@@ -12,7 +12,6 @@ import { cn } from '@/lib/utils'
 
 const tabs = [
   { name: 'API Reference', href: '/docs' },
-  { name: 'Methodology', href: '/docs/methodology' },
 ]
 
 export default function DocsLayout({ children }: { children: React.ReactNode }) {
@@ -21,10 +20,10 @@ export default function DocsLayout({ children }: { children: React.ReactNode }) 
   const session = useSession()
   const { theme, toggleTheme } = useTheme()
 
-  // Redirect unauthenticated users to login
+  // Redirect unauthenticated users to landing page with sign-in modal
   useEffect(() => {
     if (!session.isPending && !session.data?.user) {
-      router.replace('/')
+      router.replace('/?signin=true')
     }
   }, [session.isPending, session.data, router])
 

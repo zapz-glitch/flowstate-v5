@@ -3,17 +3,14 @@
  *
  * Calculates After Repair Value from comparable sales.
  *
- * ARV Formula (per comp):
- *   adjustedPrice  = salePrice ± appraisal rule adjustments
+ * ARV Formula:
+ *   adjustedPrice   = salePrice ± appraisal rule adjustments
  *   netPricePerSqft = adjustedPrice / comp.squareFeet
  *   compARV         = netPricePerSqft × subject.squareFeet
- *   ARV             = avg(compARV) across up to MAX_COMPS_FOR_ARV best-matching comps
+ *   ARV             = avg(compARV) across all enabled comps
  */
 
 import type { FilterResult } from './types'
-
-/** Maximum comps used for ARV calculation */
-export const MAX_COMPS_FOR_ARV = 3
 
 /** Minimal comp shape needed for ARV calculation and best-comp picking */
 export interface ArvCompLike {

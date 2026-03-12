@@ -42,13 +42,22 @@ import { filtersToApiParams } from '../services/appraisal/types'
 import { createValuationService, MAJOR_ITEMS } from '../services/valuation'
 import { createPhotoService, type PhotoBundle } from '../services/photo-provider'
 import { createClassificationService, type ClassificationResult } from '../services/classification'
+import { createVisionService, type PropertyConditionAnalysis } from '../services/vision'
 import {
   buildAnalysisResponse,
   mergeZillowDataIntoBundle,
   calculateAllRehabLevelEstimates,
   type AnalysisResponse,
   type SupplementedField,
+  type ApiCallStats,
 } from '../services/analysis'
+import {
+  resetCoreLogicCallLog,
+  getCoreLogicCallLog,
+  getCoreLogicCallCount,
+} from '../services/property-api/providers/corelogic'
+import { generateZillowUrl } from '../services/photo-provider'
+import type { AnalysisStep } from '../durable-objects/types'
 import { drizzle } from 'drizzle-orm/d1'
 import { savedReports } from '../db/schema'
 
@@ -58,6 +67,21 @@ import { savedReports } from '../db/schema'
 
 function serialize<T>(data: T): T {
   return JSON.parse(JSON.stringify(data))
+}
+
+/**
+ * Map vision estimatedRehabNeeds to rehab level index (0-4).
+ * Rehab levels: 0=Lipstick, 1=Light Cosmetic, 2=Full Cosmetic, 3=Heavy Rehab, 4=Down to Stud
+ */
+function mapRehabNeedsToIndex(needs: string): number {
+  switch (needs) {
+    case 'none': return 0        // Lipstick
+    case 'cosmetic': return 1    // Light Cosmetic
+    case 'moderate': return 2    // Full Cosmetic
+    case 'significant': return 3 // Heavy Rehab
+    case 'full_renovation': return 4 // Down to Stud
+    default: return 2            // Default to Full Cosmetic
+  }
 }
 
 // ─── Workflow Definition ──────────────────────────────────────────────────────
@@ -76,33 +100,106 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
 
     console.log(`[AnalysisWorkflow] Starting job ${params.jobId}`)
 
+    // Reset API call tracking for this analysis run
+    resetCoreLogicCallLog()
+
     try {
       // ═══════════════════════════════════════════════════════════════════════
-      // STEP 1: Fetch Property Bundle
+      // STEP 1: Fetch Property Bundle (skipped when preloaded from endpoint)
       // ═══════════════════════════════════════════════════════════════════════
-      await this.updateProgress(params.userId, params.propertyKey, 'property_fetch', 'in_progress')
-      const bundleStart = Date.now()
+      let bundle: PropertyBundle
 
-      const bundleData = await step.do(
-        'fetch-property-bundle',
+      if (params.preloadedPropertyBundle) {
+        // Property already fetched by the POST /analyze endpoint — skip Step 1
+        bundle = params.preloadedPropertyBundle
+        console.log(`[AnalysisWorkflow] Using preloaded property bundle (${bundle.comparables.length} comps)`)
+        await this.updateProgress(params.userId, params.propertyKey, 'property_fetch', 'completed')
+      } else {
+        // Original Step 1 logic (backward compat for API key users, GHL webhooks, etc.)
+        await this.updateProgress(params.userId, params.propertyKey, 'property_fetch', 'in_progress')
+        const bundleStart = Date.now()
+
+        const bundleData = await step.do(
+          'fetch-property-bundle',
+          {
+            retries: { limit: 3, delay: '5 seconds', backoff: 'exponential' },
+            timeout: '2 minutes',
+          },
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          async (): Promise<any> => {
+            const result = await this.fetchPropertyBundle(params)
+            // Ensure serializable via JSON round-trip
+            return serialize(result)
+          }
+        )
+        // Cast back to proper type after serialization
+        bundle = bundleData as PropertyBundle
+
+        stepTimings['property_fetch'] = Date.now() - bundleStart
+        console.log(`[AnalysisWorkflow] Property bundle fetched: ${bundle.comparables.length} comps`)
+
+        await this.updateProgress(params.userId, params.propertyKey, 'property_fetch', 'completed')
+
+        // Broadcast subject property data for progressive rendering
         {
-          retries: { limit: 3, delay: '5 seconds', backoff: 'exponential' },
-          timeout: '2 minutes',
-        },
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        async (): Promise<any> => {
-          const result = await this.fetchPropertyBundle(params)
-          // Ensure serializable via JSON round-trip
-          return serialize(result)
+          const { property, enrichment } = bundle
+          const riskFlags: string[] = []
+          if (enrichment.floodZone?.isInFloodZone) riskFlags.push(`Flood Zone: ${enrichment.floodZone.floodZone}`)
+          if (property.transaction?.isForeclosure) riskFlags.push('Foreclosure')
+          if (property.transaction?.isShortSale) riskFlags.push('Short Sale')
+          if (property.yearBuilt && property.yearBuilt < 1978) riskFlags.push('Pre-1978 (Lead Paint)')
+          if (enrichment.permits?.items.some((p) => p.jobValue && p.jobValue > 50000)) riskFlags.push('Major Permits (>$50K)')
+
+          await this.broadcastStepData(params.userId, params.propertyKey, 'property_fetch', serialize({
+            subject: {
+              address: `${property.address}, ${property.city}, ${property.state} ${property.zipCode}`,
+              county: property.county ?? null,
+              latitude: property.latitude ?? null,
+              longitude: property.longitude ?? null,
+              bedrooms: property.bedrooms ?? null,
+              bathrooms: property.bathrooms ?? null,
+              squareFeet: property.squareFeet ?? null,
+              lotSizeAcres: property.lotSizeAcres ?? null,
+              yearBuilt: property.yearBuilt ?? null,
+              propertyType: property.propertyType ?? null,
+              subdivision: property.subdivision ?? null,
+              lastSale: property.lastSalePrice ? {
+                price: property.lastSalePrice,
+                date: property.lastSaleDate ?? null,
+                pricePerSqft: property.pricePerSqft ?? null,
+              } : null,
+              taxAssessment: property.assessedValue ?? null,
+              foundationType: property.construction?.foundationType ?? null,
+              hoaFee: property.hoaFee ?? null,
+              zillowUrl: generateZillowUrl({
+                propertyId: property.id,
+                address: property.address,
+                city: property.city,
+                state: property.state,
+                zipCode: property.zipCode,
+              }),
+              photos: [],
+              classification: null,
+            },
+            riskFlags: riskFlags.length > 0 ? riskFlags : null,
+            floodZone: enrichment.floodZone ? {
+              zone: enrichment.floodZone.floodZone,
+              inFloodZone: enrichment.floodZone.isInFloodZone,
+              description: enrichment.floodZone.floodZoneDescription,
+            } : null,
+            permits: enrichment.permits ? {
+              count: enrichment.permits.count,
+              totalValue: enrichment.permits.totalJobValue ?? null,
+              recentTypes: (enrichment.permits.recentPermitTypes ?? []).slice(0, 5),
+            } : null,
+            meta: {
+              analysisId: params.jobId,
+              timestamp: new Date().toISOString(),
+              dataProvider: property.provider,
+            },
+          }))
         }
-      )
-      // Cast back to proper type after serialization
-      const bundle = bundleData as PropertyBundle
-
-      stepTimings['property_fetch'] = Date.now() - bundleStart
-      console.log(`[AnalysisWorkflow] Property bundle fetched: ${bundle.comparables.length} comps`)
-
-      await this.updateProgress(params.userId, params.propertyKey, 'property_fetch', 'completed')
+      }
 
       // ═══════════════════════════════════════════════════════════════════════
       // STEP 2: Apply Appraisal Rules
@@ -139,6 +236,76 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
 
       await this.updateProgress(params.userId, params.propertyKey, 'appraisal_rules', 'completed')
 
+      // Broadcast comp data with appraisal results for progressive rendering
+      {
+        const disabledComps = appraisalResult.comparables.filter((c) => !c.isEnabled)
+        const bySubdivisionThenDistance = (a: AppraisedComparable, b: AppraisedComparable) => {
+          const aSubMatch = a.evaluation.filterResults.find((f) => f.type === 'subdivision_match')?.passed ?? false
+          const bSubMatch = b.evaluation.filterResults.find((f) => f.type === 'subdivision_match')?.passed ?? false
+          if (aSubMatch && !bSubMatch) return -1
+          if (!aSubMatch && bSubMatch) return 1
+          return (a.distanceMiles ?? 999) - (b.distanceMiles ?? 999)
+        }
+        const sortedComps = [
+          ...enabledComps.sort(bySubdivisionThenDistance),
+          ...disabledComps.sort(bySubdivisionThenDistance),
+        ]
+
+        await this.broadcastStepData(params.userId, params.propertyKey, 'appraisal_rules', serialize({
+          comps: {
+            total: appraisalResult.comparables.length,
+            enabledCount: enabledComps.length,
+            disabledCount: disabledComps.length,
+            avgPricePerSqft: appraisalResult.avgPricePerSqft,
+            medianPrice: appraisalResult.medianSalePrice,
+            items: sortedComps.map((comp) => {
+              const evaluation = comp.evaluation
+              return {
+                id: comp.id,
+                address: `${comp.address}, ${comp.city}, ${comp.state}`,
+                latitude: comp.latitude ?? null,
+                longitude: comp.longitude ?? null,
+                salePrice: comp.salePrice,
+                saleDate: comp.saleDate ? new Date(comp.saleDate).toISOString().split('T')[0] : null,
+                squareFeet: comp.squareFeet,
+                pricePerSqft: comp.squareFeet && comp.squareFeet > 0 && (comp.adjustedSalePrice ?? comp.salePrice) != null
+                  ? Math.round((comp.adjustedSalePrice ?? comp.salePrice)! / comp.squareFeet)
+                  : comp.pricePerSqft,
+                distanceMiles: comp.distanceMiles,
+                bedrooms: comp.bedrooms ?? null,
+                bathrooms: comp.bathrooms ?? null,
+                yearBuilt: comp.yearBuilt,
+                adjustedPrice: comp.adjustedSalePrice,
+                photos: [],
+                subdivision: comp.subdivision ?? null,
+                foundationType: comp.construction?.foundationType ?? null,
+                zillowUrl: generateZillowUrl({
+                  propertyId: comp.id,
+                  address: comp.address,
+                  city: comp.city,
+                  state: comp.state,
+                  zipCode: comp.zipCode,
+                }),
+                isEnabled: comp.isEnabled,
+                disableReasons: evaluation?.disableReasons ?? [],
+                classification: null,
+                appraisalRules: evaluation ? {
+                  passedFilters: !evaluation.shouldDisable,
+                  totalAdjustment: evaluation.totalAdjustment,
+                  filters: evaluation.filterResults.map((f) => ({
+                    type: f.type, passed: f.passed, reason: f.reason,
+                    actualValue: f.actualValue ?? null, threshold: f.threshold ?? null,
+                  })),
+                  adjustments: evaluation.adjustmentResults.filter((a) => a.applied).map((a) => ({
+                    type: a.type, applied: a.applied, amount: a.amount, reason: a.reason,
+                  })),
+                } : null,
+              }
+            }),
+          },
+        }))
+      }
+
       // ═══════════════════════════════════════════════════════════════════════
       // STEP 3: Parallel Photo Fetch (Fan-Out)
       // ═══════════════════════════════════════════════════════════════════════
@@ -147,6 +314,8 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
       let photoBundle: PhotoBundle | null = null
 
       const shouldFetchPhotos = params.photoAnalysis?.enabled !== false
+
+      let photoCallStats = { firecrawlCalls: 0, llmCalls: 0, cacheHits: 0 }
 
       if (shouldFetchPhotos) {
         const photoData = await step.do(
@@ -161,7 +330,9 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
             return serialize(result)
           }
         )
-        photoBundle = photoData as PhotoBundle | null
+        const photoResult = photoData as { photoBundle: PhotoBundle | null; photoCallStats: { firecrawlCalls: number; llmCalls: number; cacheHits: number } }
+        photoBundle = photoResult.photoBundle
+        photoCallStats = photoResult.photoCallStats
       }
 
       stepTimings['photo_fetch'] = Date.now() - photoStart
@@ -176,6 +347,37 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
       console.log(`[AnalysisWorkflow] Zillow data merged: subject supplemented ${subjectSupplementedFields.length} fields, ${compSupplementedFields.size} comps supplemented`)
 
       await this.updateProgress(params.userId, params.propertyKey, 'photo_fetch', 'completed')
+
+      // Broadcast photos and supplemented data for progressive rendering
+      {
+        const subjectPhotos = photoBundle?.subject?.photos.slice(0, 5) ?? []
+        // Build comp updates: photos + any Zillow-supplemented fields
+        const mergedCompMap = new Map(mergedBundle.comparables.map((c) => [c.id, c]))
+        const compPhotoItems = appraisalResult.comparables.map((comp) => {
+          const merged = mergedCompMap.get(comp.id)
+          const item: Record<string, unknown> = {
+            id: comp.id,
+            photos: photoBundle?.comps[comp.id]?.photos.slice(0, 3) ?? [],
+          }
+          // Include supplemented fields if they differ from original
+          if (merged && merged.bedrooms !== comp.bedrooms) item.bedrooms = merged.bedrooms
+          if (merged && merged.bathrooms !== comp.bathrooms) item.bathrooms = merged.bathrooms
+          if (merged && merged.squareFeet !== comp.squareFeet) item.squareFeet = merged.squareFeet
+          if (merged && merged.yearBuilt !== comp.yearBuilt) item.yearBuilt = merged.yearBuilt
+          return item
+        })
+        // Also send updated subject fields if supplemented from Zillow
+        const subjectUpdate: Record<string, unknown> = { photos: subjectPhotos }
+        if (mergedBundle.property.bedrooms !== bundle.property.bedrooms) subjectUpdate.bedrooms = mergedBundle.property.bedrooms
+        if (mergedBundle.property.bathrooms !== bundle.property.bathrooms) subjectUpdate.bathrooms = mergedBundle.property.bathrooms
+        if (mergedBundle.property.squareFeet !== bundle.property.squareFeet) subjectUpdate.squareFeet = mergedBundle.property.squareFeet
+        if (mergedBundle.property.yearBuilt !== bundle.property.yearBuilt) subjectUpdate.yearBuilt = mergedBundle.property.yearBuilt
+
+        await this.broadcastStepData(params.userId, params.propertyKey, 'photo_fetch', serialize({
+          subject: subjectUpdate,
+          comps: { items: compPhotoItems },
+        }))
+      }
 
       // ═══════════════════════════════════════════════════════════════════════
       // STEP 4: Parallel Classification (one LLM call per property, concurrent)
@@ -223,11 +425,112 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
 
       await this.updateProgress(params.userId, params.propertyKey, 'comp_selection', 'completed')
 
+      // Broadcast classification data for progressive rendering
+      {
+        const subjectCls = subjectClassification ? {
+          type: subjectClassification.classification,
+          confidence: subjectClassification.confidence,
+          reasoning: subjectClassification.reasoning,
+          method: subjectClassification.method,
+        } : null
+
+        const compClsItems = appraisalResult.comparables.map((comp) => {
+          const cls = compClassifications.get(comp.id)
+          return {
+            id: comp.id,
+            classification: cls ? {
+              type: cls.classification,
+              confidence: cls.confidence,
+              reasoning: cls.reasoning,
+              method: cls.method,
+            } : null,
+          }
+        })
+
+        await this.broadcastStepData(params.userId, params.propertyKey, 'comp_selection', serialize({
+          subject: { classification: subjectCls },
+          comps: { items: compClsItems },
+        }))
+      }
+
+      // ═══════════════════════════════════════════════════════════════════════
+      // STEP 4.5: Vision Analysis of Subject Property (determine rehab level)
+      // ═══════════════════════════════════════════════════════════════════════
+      let visionAnalysis: PropertyConditionAnalysis | null = null
+
+      if (params.visionClassification && photoBundle?.subject?.photos?.length) {
+        const visionStart = Date.now()
+        console.log(`[AnalysisWorkflow] Running vision analysis on ${photoBundle.subject.photos.length} subject photos`)
+
+        try {
+          const visionData = await step.do(
+            'vision-analysis',
+            {
+              retries: { limit: 2, delay: '3 seconds', backoff: 'exponential' },
+              timeout: '1 minute',
+            },
+            async () => {
+              const visionService = createVisionService(this.env)
+              if (!visionService.isAvailable()) {
+                console.log('[AnalysisWorkflow] Vision service not available (no OPENROUTER_API_KEY)')
+                return serialize({ success: false, data: null })
+              }
+
+              const result = await visionService.analyzePropertyCondition(
+                photoBundle!.subject!.photos.slice(0, 10),
+                {
+                  address: `${mergedBundle.property.address}, ${mergedBundle.property.city}, ${mergedBundle.property.state}`,
+                  squareFeet: mergedBundle.property.squareFeet ?? undefined,
+                  yearBuilt: mergedBundle.property.yearBuilt ?? undefined,
+                }
+              )
+              return serialize(result)
+            }
+          )
+
+          const visionResult = visionData as { success: boolean; data: PropertyConditionAnalysis | null }
+          if (visionResult.success && visionResult.data) {
+            visionAnalysis = visionResult.data
+            console.log(`[AnalysisWorkflow] Vision analysis complete: condition=${visionAnalysis.overallCondition}, rehabNeeds=${visionAnalysis.estimatedRehabNeeds}`)
+          }
+
+          stepTimings['vision_analysis'] = Date.now() - visionStart
+        } catch (error) {
+          // Vision analysis failure is non-fatal
+          console.warn(`[AnalysisWorkflow] Vision analysis failed (non-fatal):`, error instanceof Error ? error.message : error)
+        }
+      }
+
       // ═══════════════════════════════════════════════════════════════════════
       // STEP 5: Calculate ARV and Build Response
       // ═══════════════════════════════════════════════════════════════════════
       await this.updateProgress(params.userId, params.propertyKey, 'valuation', 'in_progress')
       const arvStart = Date.now()
+
+      // Build API call statistics
+      const corelogicEndpoints = getCoreLogicCallLog()
+      const corelogicTotal = getCoreLogicCallCount()
+      const visionLlmCalls = visionAnalysis ? 1 : 0
+      const apiCallStats: ApiCallStats = {
+        corelogic: {
+          total: corelogicTotal,
+          endpoints: corelogicEndpoints,
+        },
+        firecrawl: {
+          total: photoCallStats.firecrawlCalls,
+          cached: photoCallStats.cacheHits,
+        },
+        llm: {
+          total: photoCallStats.llmCalls + visionLlmCalls,
+          breakdown: [
+            ...(photoCallStats.llmCalls > 0 ? [{ purpose: 'zillow_parsing', count: photoCallStats.llmCalls }] : []),
+            ...(visionLlmCalls > 0 ? [{ purpose: 'vision_analysis', count: visionLlmCalls }] : []),
+          ],
+        },
+        totalExternalCalls: corelogicTotal + photoCallStats.firecrawlCalls + photoCallStats.llmCalls + visionLlmCalls,
+      }
+
+      console.log(`[AnalysisWorkflow] API call stats: CoreLogic=${corelogicTotal}, Firecrawl=${photoCallStats.firecrawlCalls} (${photoCallStats.cacheHits} cached), LLM=${photoCallStats.llmCalls + visionLlmCalls}`)
 
       const responseData = await step.do(
         'build-response',
@@ -241,7 +544,9 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
             subjectClassification,
             compClassifications,
             subjectSupplementedFields,
-            compSupplementedFields
+            compSupplementedFields,
+            visionAnalysis,
+            apiCallStats
           )
           return serialize(result)
         }
@@ -251,6 +556,10 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
       stepTimings['arv_calculation'] = Date.now() - arvStart
 
       await this.updateProgress(params.userId, params.propertyKey, 'valuation', 'completed')
+
+      // Broadcast result to SSE clients immediately (before storing)
+      // This allows the dashboard to render results while storage completes
+      await this.broadcastPartialResult(params.userId, params.propertyKey, response)
 
       // ═══════════════════════════════════════════════════════════════════════
       // STEP 6: Store Result in Durable Object
@@ -279,9 +588,9 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
               userId: params.userId,
               jobId: params.jobId,
               propertyAddress: response.subject.address,
-              propertyCity: '',
-              propertyState: '',
-              propertyZip: '',
+              propertyCity: params.city || '',
+              propertyState: params.state || '',
+              propertyZip: params.zipCode || '',
               fullResponseJson: JSON.stringify(response),
               arv: response.valuation.arv,
               asIsValue: response.valuation.asIsValue ?? null,
@@ -415,15 +724,18 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
     bundle: PropertyBundle,
     comps: NormalizedComparable[],
     params: AnalysisWorkflowParams
-  ): Promise<PhotoBundle | null> {
+  ): Promise<{ photoBundle: PhotoBundle | null; photoCallStats: { firecrawlCalls: number; llmCalls: number; cacheHits: number } }> {
     const photoService = createPhotoService(this.env)
 
     if (!photoService.isAvailable()) {
       return {
-        subject: null,
-        comps: {},
-        provider: 'none',
-        fetchedAt: new Date().toISOString(),
+        photoBundle: {
+          subject: null,
+          comps: {},
+          provider: 'none',
+          fetchedAt: new Date().toISOString(),
+        },
+        photoCallStats: { firecrawlCalls: 0, llmCalls: 0, cacheHits: 0 },
       }
     }
 
@@ -450,7 +762,10 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
       { maxComps }
     )
 
-    return photoBundle
+    return {
+      photoBundle,
+      photoCallStats: photoService.getCallStats(),
+    }
   }
 
   /**
@@ -526,7 +841,9 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
     subjectClassification: ClassificationResult | undefined,
     compClassifications: Map<string, ClassificationResult>,
     subjectSupplementedFields: SupplementedField[],
-    compSupplementedFields: Map<string, SupplementedField[]>
+    compSupplementedFields: Map<string, SupplementedField[]>,
+    visionAnalysis?: PropertyConditionAnalysis | null,
+    apiCallStats?: ApiCallStats
   ): Promise<AnalysisResponse> {
     const valuationService = createValuationService(params.customRehabTable, params.customTierRanges)
     const appraisalService = createAppraisalService()
@@ -559,7 +876,9 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
         ? enabledComps.reduce((sum, c) => sum + (c.squareFeet || 0), 0) / enabledComps.length
         : subjectSqft
 
-    const selectedRehabLevelIndex = buybox.rehabLevelIndex ?? 2
+    // Use vision-detected rehab level if available and user hasn't explicitly set one
+    const visionRehabLevelIndex = visionAnalysis ? mapRehabNeedsToIndex(visionAnalysis.estimatedRehabNeeds) : null
+    const selectedRehabLevelIndex = buybox.rehabLevelIndex ?? visionRehabLevelIndex ?? 2
 
     // Apply user's custom major item cost defaults (unless caller passed explicit majorItems)
     const resolvedMajorItems = buybox.majorItems ?? (
@@ -665,6 +984,8 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
         compSupplementedFields,
         rehabLevelEstimates,
         appliedSettings,
+        visionAnalysis: visionAnalysis ?? undefined,
+        apiCallStats,
       }
     )
   }
@@ -700,6 +1021,57 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
       console.warn(`[AnalysisWorkflow] Failed to update progress: ${error}`)
     } finally {
       // Dispose stub to prevent RPC stub disposal warnings
+      // @ts-expect-error - dispose may not be in types but exists at runtime
+      stub.dispose?.()
+    }
+  }
+
+  /**
+   * Broadcast step data fragment to SSE clients for progressive rendering
+   */
+  private async broadcastStepData(
+    userId: string,
+    propertyKey: string,
+    step: AnalysisStep,
+    data: Record<string, unknown>
+  ): Promise<void> {
+    const doId = this.getDoId(userId, propertyKey)
+    const stub = this.env.ANALYSIS_JOB.get(doId)
+
+    try {
+      await stub.fetch(
+        new Request('http://internal/step-data', {
+          method: 'POST',
+          body: JSON.stringify({ step, data }),
+        })
+      )
+    } catch (error) {
+      // Non-critical — progressive rendering is a nice-to-have
+      console.warn(`[AnalysisWorkflow] Failed to broadcast step data for ${step}: ${error}`)
+    } finally {
+      // @ts-expect-error - dispose may not be in types but exists at runtime
+      stub.dispose?.()
+    }
+  }
+
+  /**
+   * Broadcast partial result to SSE clients via Durable Object
+   */
+  private async broadcastPartialResult(userId: string, propertyKey: string, result: AnalysisResponse): Promise<void> {
+    const doId = this.getDoId(userId, propertyKey)
+    const stub = this.env.ANALYSIS_JOB.get(doId)
+
+    try {
+      await stub.fetch(
+        new Request('http://internal/partial-result', {
+          method: 'POST',
+          body: JSON.stringify({ result }),
+        })
+      )
+    } catch (error) {
+      // Non-critical — result will still be available via polling
+      console.warn(`[AnalysisWorkflow] Failed to broadcast partial result: ${error}`)
+    } finally {
       // @ts-expect-error - dispose may not be in types but exists at runtime
       stub.dispose?.()
     }

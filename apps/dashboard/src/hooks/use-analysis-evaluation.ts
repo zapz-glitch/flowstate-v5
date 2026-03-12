@@ -222,7 +222,11 @@ export function useAnalysisEvaluation({
     const el = valuationCardRef.current
     if (!el) return
     const observer = new IntersectionObserver(
-      ([entry]) => setShowStickyBar(!entry.isIntersecting),
+      ([entry]) => {
+        // Only show sticky bar when the card has truly scrolled out of view
+        // (not just on initial load when it may be near the top edge)
+        setShowStickyBar(!entry.isIntersecting && entry.boundingClientRect.bottom < 100)
+      },
       { threshold: 0, rootMargin: stickyBarRootMargin }
     )
     observer.observe(el)

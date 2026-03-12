@@ -1841,6 +1841,7 @@ function RenovationLevelsTab() {
           </Dialog>
         </>
       )}
+
     </div>
   )
 }
@@ -2086,7 +2087,7 @@ function DealParamsTab() {
   const tierMinProfit = 25000 // illustrative tier default
   const closingDeduct = arv * (config.closingCostsPercent / 100)
   const carryingDeduct = arv * (config.carryingCostsPercent / 100)
-  const profitDeduct = config.desiredProfit !== null ? config.desiredProfit : tierMinProfit
+  const profitDeduct = tierMinProfit
   const mao = arv - rehabCost - closingDeduct - carryingDeduct - profitDeduct - config.wholesaleFee
 
   const statusBadge = isDirty
@@ -2189,42 +2190,6 @@ function DealParamsTab() {
               </div>
             </div>
 
-            {/* Desired profit */}
-            <div className="rounded-xl border border-border bg-card overflow-hidden">
-              <div className="px-4 py-3 border-b border-border bg-muted/20 flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-xs font-semibold text-foreground">Flip Profit</p>
-                  <p className="text-[11px] text-muted-foreground mt-0.5">Minimum flip profit deducted from the MAO</p>
-                </div>
-                <div className="flex items-center gap-2 flex-shrink-0">
-                  <span className="text-[10px] text-muted-foreground select-none">Use tier default</span>
-                  <Switch
-                    checked={config.desiredProfit === null}
-                    onCheckedChange={(v) => set('desiredProfit', v ? null : 25000)}
-                    className="data-[state=checked]:bg-primary/70 scale-90"
-                  />
-                </div>
-              </div>
-              <div className="px-4 py-3">
-                {config.desiredProfit === null ? (
-                  <div className="flex items-center gap-2.5 text-[11px] text-muted-foreground">
-                    <div className="w-1.5 h-1.5 rounded-full bg-primary/40 flex-shrink-0" />
-                    Pulled from the <span className="font-medium text-foreground">Renovation Levels</span> table per rehab tier — toggle off to set a global override.
-                  </div>
-                ) : (
-                  <div className="flex items-center justify-between gap-4">
-                    <p className="text-[11px] text-muted-foreground">Fixed profit target across all tiers</p>
-                    <NumericInput
-                      value={config.desiredProfit}
-                      onChange={(v) => set('desiredProfit', v)}
-                      min={0} step={1000}
-                      prefix="$"
-                      className="w-32"
-                    />
-                  </div>
-                )}
-              </div>
-            </div>
           </div>
 
           {/* ── Right: live MAO preview ── */}
@@ -2239,10 +2204,9 @@ function DealParamsTab() {
               <FormulaRow label={`− Closing (${config.closingCostsPercent}%)`} value={`−${fmt$(closingDeduct)}`} variant="deduct" />
               <FormulaRow label={`− Carrying (${config.carryingCostsPercent}%)`} value={`−${fmt$(carryingDeduct)}`} variant="deduct" />
               <FormulaRow
-                label={config.desiredProfit === null ? `− Flip Profit (tier default)` : `− Flip Profit`}
+                label="− Flip Profit (from rehab level)"
                 value={`−${fmt$(profitDeduct)}`}
                 variant="deduct"
-                dimmed={config.desiredProfit === null}
               />
               <FormulaRow label="− Wholesale fee" value={`−${fmt$(config.wholesaleFee)}`} variant="deduct" />
               <div className="border-t border-border mt-2 pt-2">
@@ -2331,12 +2295,11 @@ function DealParamsTab() {
                             className="data-[state=checked]:bg-purple-500"
                           />
                         </div>
-                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                           {([
                             { label: 'Closing Cost', field: 'closingCostsPercent' as const, max: 100 as number | undefined, step: 0.5, suffix: '%' as string | undefined, prefix: undefined as string | undefined, placeholder: undefined as string | undefined },
                             { label: 'Carrying Cost', field: 'carryingCostsPercent' as const, max: 100 as number | undefined, step: 0.5, suffix: '%' as string | undefined, prefix: undefined as string | undefined, placeholder: undefined as string | undefined },
                             { label: 'Wholesale Fee', field: 'wholesaleFee' as const, step: 500, prefix: '$' as string | undefined, max: undefined as number | undefined, suffix: undefined as string | undefined, placeholder: undefined as string | undefined },
-                            { label: 'Flip Profit', field: 'desiredProfit' as const, step: 1000, prefix: '$' as string | undefined, placeholder: 'Tier default' as string | undefined, max: undefined as number | undefined, suffix: undefined as string | undefined },
                           ]).map(({ label, field, max, step, prefix, suffix, placeholder }) => (
                             <div key={field} className="space-y-1.5">
                               <label className="text-xs font-medium text-muted-foreground">{label}</label>
@@ -2344,7 +2307,7 @@ function DealParamsTab() {
                                 {prefix && <span className="text-sm text-muted-foreground pl-3 select-none">{prefix}</span>}
                                 <Input
                                   type="number" min={0} max={max} step={step}
-                                  value={field === 'desiredProfit' ? (es.dealParams[field] ?? '') : es.dealParams[field]}
+                                  value={es.dealParams[field] ?? ''}
                                   placeholder={placeholder}
                                   onChange={e => {
                                     const raw = e.target.value
@@ -2992,7 +2955,7 @@ export default function EvaluationSettingsPage() {
             <DollarSign className="w-3.5 h-3.5" />
             Deal Parameters
           </TabsTrigger>
-          <TabsTrigger value="major-item-costs" className="gap-1.5 text-xs">
+          <TabsTrigger value="major-items" className="gap-1.5 text-xs">
             <Wrench className="w-3.5 h-3.5" />
             Major Items
           </TabsTrigger>
@@ -3010,10 +2973,9 @@ export default function EvaluationSettingsPage() {
           <DealParamsTab />
         </TabsContent>
 
-        <TabsContent value="major-item-costs" className="mt-5">
+        <TabsContent value="major-items" className="mt-5">
           <MajorItemCostsTab />
         </TabsContent>
-
       </Tabs>
     </div>
   )

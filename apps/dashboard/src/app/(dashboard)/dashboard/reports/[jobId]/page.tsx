@@ -119,11 +119,9 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
           <Link href="/dashboard/reports" className="p-2 rounded-lg hover:bg-secondary transition-colors flex-shrink-0">
             <ArrowLeft className="w-5 h-5 text-foreground-tertiary" />
           </Link>
-          <div className="flex items-center gap-2 text-body-sm text-foreground-tertiary">
-            <span>Analyzed on {new Date(report.createdAt).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</span>
-            <span className="text-foreground-tertiary/40">·</span>
-            <span className="font-mono text-caption">{report.jobId.slice(0, 8)}</span>
-          </div>
+          <span className="text-body-sm text-foreground-tertiary">
+            Analyzed on {new Date(report.createdAt).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
+          </span>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
           <button
@@ -245,6 +243,7 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
         {effectiveComps && (
           <ComparablesSection
             comps={effectiveComps}
+            subject={analysis.subject}
             subjectSubdivision={analysis.subject?.subdivision}
             selectedCompKeys={compOverride?.selectedCompKeys}
             isManual={compOverride?.isManual ?? false}

@@ -3,6 +3,7 @@
 import Sidebar from '@/components/Sidebar'
 import { UserProvider } from '@/components/auth/UserProvider'
 import { SidebarProvider, useSidebar } from '@/components/SidebarProvider'
+import { AnalysisBridge } from '@/components/AnalysisBridge'
 import { cn } from '@/lib/utils'
 
 function DashboardContent({ children }: { children: React.ReactNode }) {
@@ -34,6 +35,7 @@ export default function DashboardLayout({
   return (
     <UserProvider requireAuth>
       <SidebarProvider>
+        <AnalysisBridge />
         <DashboardContent>{children}</DashboardContent>
       </SidebarProvider>
     </UserProvider>

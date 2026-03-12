@@ -31,7 +31,6 @@ export {
   calculateARV,
   pickBestComps,
   getCompAvgSqft,
-  MAX_COMPS_FOR_ARV,
 } from './appraisal/index'
 
 export type {

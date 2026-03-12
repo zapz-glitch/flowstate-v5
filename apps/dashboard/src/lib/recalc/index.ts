@@ -196,8 +196,17 @@ export function recalculateReport(
   let medianPrice: number | null = null
 
   if (enabledCount > 0) {
-    if (compAvgSqft > 0 && arv > 0) {
-      avgPricePerSqft = Math.round(arv / compAvgSqft)
+    // Average $/sqft across enabled comps (each comp's adjustedPrice / compSqft)
+    const enabledCompPricesPerSqft = arvComps
+      .filter((c) => c.isEnabled)
+      .map((c) => {
+        const price = c.adjustedPrice ?? c.salePrice
+        const sqft = c.squareFeet
+        return price != null && price > 0 && sqft != null && sqft > 0 ? price / sqft : null
+      })
+      .filter((v): v is number => v != null)
+    if (enabledCompPricesPerSqft.length > 0) {
+      avgPricePerSqft = Math.round(enabledCompPricesPerSqft.reduce((a, b) => a + b, 0) / enabledCompPricesPerSqft.length)
     }
 
     const enabledIndices: number[] = []

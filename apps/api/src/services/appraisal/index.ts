@@ -47,8 +47,8 @@ export type { AdjustmentRuleDefinition } from './adjustments'
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
 
-/** Maximum comps used for ARV calculation */
-const MAX_COMPS_FOR_ARV = 3
+/** Maximum comps picked during fallback passes (best-matching by filter score) */
+const MAX_FALLBACK_COMPS = 5
 
 // ─── Fallback Options ─────────────────────────────────────────────────────────
 
@@ -83,7 +83,7 @@ export interface ClassificationSummaryResult {
 export interface AppraisalService {
   /**
    * Evaluate comparables against a subject property using appraisal rules.
-   * Returns up to MAX_COMPS_FOR_ARV (3) enabled comps — the best-matching ones.
+   * All comps that pass filters are enabled. Users can enable/disable freely.
    */
   evaluate(
     subject: NormalizedProperty,
@@ -185,18 +185,7 @@ class PropertyAppraisalService implements AppraisalService {
 
     sortBySubdivisionThenDistance(appraisedComps)
 
-    // Cap enabled comps at MAX_COMPS_FOR_ARV — keep best-matching ones
-    const allEnabled = appraisedComps.filter((c) => c.isEnabled)
-    const cappedEnabled = pickBestComps(allEnabled, MAX_COMPS_FOR_ARV)
-
-    // Disable comps that weren't picked
-    const pickedIds = new Set(cappedEnabled.map((c) => c.id))
-    for (const comp of appraisedComps) {
-      if (comp.isEnabled && !pickedIds.has(comp.id)) {
-        comp.isEnabled = false
-      }
-    }
-
+    // All comps that pass filters stay enabled — users can enable/disable freely
     const enabledComps = appraisedComps.filter((c) => c.isEnabled)
     const arv = this.calculateARV(enabledComps, subject.squareFeet)
     const { avgPricePerSqft, medianSalePrice } = calculateStats(enabledComps, arv)
@@ -243,7 +232,7 @@ class PropertyAppraisalService implements AppraisalService {
       f.type === 'subdivision_match' ? { ...f, enabled: false } : f
     )
     const result2 = this.evaluateRaw(subject, comparables, filtersNoSubdivision, adjustments)
-    const pass2Picked = pickBestCompsByRuleMatch(result2, MAX_COMPS_FOR_ARV, defaultFilters)
+    const pass2Picked = pickBestCompsByRuleMatch(result2, MAX_FALLBACK_COMPS, defaultFilters)
 
     if (pass2Picked.length >= 1) {
       const pickedResult = buildResultFromPicked(
@@ -276,7 +265,7 @@ class PropertyAppraisalService implements AppraisalService {
       return f
     })
     const result3 = this.evaluateRaw(subject, comparables, relaxedFilters, adjustments)
-    const pass3Picked = pickBestCompsByRuleMatch(result3, MAX_COMPS_FOR_ARV, relaxedFilters)
+    const pass3Picked = pickBestCompsByRuleMatch(result3, MAX_FALLBACK_COMPS, relaxedFilters)
 
     if (pass3Picked.length >= 1) {
       const pickedResult = buildResultFromPicked(
@@ -337,7 +326,7 @@ class PropertyAppraisalService implements AppraisalService {
   }
 
   /**
-   * Evaluate all comps against filters/adjustments WITHOUT capping at MAX_COMPS_FOR_ARV.
+   * Evaluate all comps against filters/adjustments WITHOUT capping at MAX_FALLBACK_COMPS.
    * Returns the raw appraised comp array — used by fallback passes before picking best comps.
    */
   evaluateRaw(
@@ -546,14 +535,18 @@ function calculateStats(
     .map((c) => c.adjustedSalePrice ?? c.salePrice)
     .filter((p): p is number => p != null && p > 0)
 
-  const enabledSqfts = enabledComps
-    .map((c) => c.squareFeet)
-    .filter((s): s is number => s != null && s > 0)
+  // Average $/sqft across enabled comps (each comp's adjustedPrice / compSqft)
+  const compPricesPerSqft = enabledComps
+    .map((c) => {
+      const price = c.adjustedSalePrice ?? c.salePrice
+      const sqft = c.squareFeet
+      return price != null && price > 0 && sqft != null && sqft > 0 ? price / sqft : null
+    })
+    .filter((v): v is number => v != null)
 
-  const avgPricePerSqft =
-    enabledSqfts.length > 0 && arv > 0
-      ? Math.round(arv / (enabledSqfts.reduce((a, b) => a + b, 0) / enabledSqfts.length))
-      : null
+  const avgPricePerSqft = compPricesPerSqft.length > 0
+    ? Math.round(compPricesPerSqft.reduce((a, b) => a + b, 0) / compPricesPerSqft.length)
+    : null
 
   const medianSalePrice = enabledPrices.length > 0 ? calculateMedian(enabledPrices) : null
 

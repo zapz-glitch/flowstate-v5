@@ -1,64 +1,124 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
+import { Suspense, useState, useEffect, useCallback } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { useSession, signIn, signUp, forgetPassword } from '@/lib/auth-client'
 import { LogoIcon } from '@/components/ui/Logo'
-import { useTheme } from '@/components/theme-provider'
-import { Loader2, ArrowLeft, CheckCircle, Sun, Moon } from 'lucide-react'
+import { Loader2, ArrowLeft, CheckCircle, X } from 'lucide-react'
+import { Navbar } from '@/components/landing/Navbar'
+import { Hero } from '@/components/landing/Hero'
+import { Features } from '@/components/landing/Features'
+import { Pricing } from '@/components/landing/Pricing'
+import { Footer } from '@/components/landing/Footer'
 
 type AuthView = 'signin' | 'signup' | 'forgot-password'
 
-export default function LoginPage() {
+export default function HomePage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-background" />}>
+      <HomePageContent />
+    </Suspense>
+  )
+}
+
+function HomePageContent() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const session = useSession()
-  const { theme, toggleTheme } = useTheme()
-  const [view, setView] = useState<AuthView>('signin')
+  const [showAuthModal, setShowAuthModal] = useState(false)
+  const [authView, setAuthView] = useState<AuthView>('signin')
 
-  // Redirect authenticated users to dashboard
+  const isSignedIn = !session.isPending && !!session.data?.user
+
+  // Auto-open sign-in modal when redirected with ?signin=true
   useEffect(() => {
-    if (!session.isPending && session.data?.user) {
-      router.replace('/dashboard')
+    if (searchParams.get('signin') === 'true' && !isSignedIn) {
+      setAuthView('signin')
+      setShowAuthModal(true)
     }
-  }, [session.isPending, session.data, router])
+  }, [searchParams, isSignedIn])
 
-  // Show loading while checking session
-  if (session.isPending || session.data?.user) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <Loader2 className="w-8 h-8 animate-spin text-purple-500" />
-      </div>
-    )
-  }
+  const openSignIn = useCallback(() => {
+    if (isSignedIn) {
+      router.push('/dashboard')
+    } else {
+      setAuthView('signin')
+      setShowAuthModal(true)
+    }
+  }, [isSignedIn, router])
+
+  const openSignUp = useCallback(() => {
+    if (isSignedIn) {
+      router.push('/dashboard')
+    } else {
+      setAuthView('signup')
+      setShowAuthModal(true)
+    }
+  }, [isSignedIn, router])
+
+  // Close modal on Escape key
+  useEffect(() => {
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setShowAuthModal(false)
+    }
+    if (showAuthModal) {
+      document.addEventListener('keydown', handleEscape)
+      document.body.style.overflow = 'hidden'
+    }
+    return () => {
+      document.removeEventListener('keydown', handleEscape)
+      document.body.style.overflow = ''
+    }
+  }, [showAuthModal])
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background p-4">
-      {/* Theme toggle */}
-      <button
-        onClick={toggleTheme}
-        className="fixed top-4 right-4 p-2 rounded-full hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors"
-      >
-        {theme === 'dark' ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
-      </button>
+    <div className="min-h-screen bg-background">
+      <Navbar
+        onSignInClick={openSignIn}
+        onSignUpClick={openSignUp}
+        isSignedIn={isSignedIn}
+      />
+      <Hero onGetStartedClick={openSignUp} />
+      <Features />
+      {/* <Pricing onSignUpClick={openSignUp} /> */}
+      <Footer />
 
-      <div className="w-full max-w-md">
-        {view === 'signin' && (
-          <SignInForm
-            onForgotPassword={() => setView('forgot-password')}
-            onSwitchToSignUp={() => setView('signup')}
-          />
-        )}
-        {view === 'signup' && (
-          <SignUpForm
-            onSwitchToSignIn={() => setView('signin')}
-          />
-        )}
-        {view === 'forgot-password' && (
-          <ForgotPasswordForm
-            onBackToSignIn={() => setView('signin')}
-          />
-        )}
-      </div>
+      {/* Auth Modal Overlay */}
+      {showAuthModal && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setShowAuthModal(false)
+          }}
+        >
+          <div className="relative w-full max-w-md animate-in fade-in zoom-in-95 duration-200">
+            {/* Close button */}
+            <button
+              onClick={() => setShowAuthModal(false)}
+              className="absolute -top-2 -right-2 z-10 p-1.5 rounded-full bg-secondary border border-border text-muted-foreground hover:text-foreground hover:bg-secondary/80 transition-colors"
+            >
+              <X className="h-4 w-4" />
+            </button>
+
+            {authView === 'signin' && (
+              <SignInForm
+                onForgotPassword={() => setAuthView('forgot-password')}
+                onSwitchToSignUp={() => setAuthView('signup')}
+              />
+            )}
+            {authView === 'signup' && (
+              <SignUpForm
+                onSwitchToSignIn={() => setAuthView('signin')}
+              />
+            )}
+            {authView === 'forgot-password' && (
+              <ForgotPasswordForm
+                onBackToSignIn={() => setAuthView('signin')}
+              />
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

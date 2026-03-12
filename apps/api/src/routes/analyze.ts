@@ -34,6 +34,10 @@ import type { QueueJobResponse, JobStatusResponse } from '../durable-objects/typ
 import type { AnalysisWorkflowParams } from '../workflows/types'
 import { generateWsToken } from '../utils/ws-token'
 import { loadUserAnalysisSettings } from '../services/user-settings'
+import { createPropertyApi } from '../services/property-api'
+import { DEFAULT_FILTERS } from '../services/appraisal'
+import { filtersToApiParams } from '../services/appraisal/types'
+import { generateZillowUrl } from '../services/photo-provider'
 
 type Variables = { auth: AuthContext }
 
@@ -209,16 +213,122 @@ analyze.post('/', async (c) => {
       buyboxOverrides: body.buybox,
     })
 
-    // Start the workflow
+    // ─── Fetch property bundle synchronously ─────────────────────────────────
+    // This eliminates Cloudflare Workflow Step 1 overhead (~1-2s checkpoint latency)
+    // and lets us return property data immediately in the HTTP response.
+    const propertyApi = createPropertyApi(c.env)
+    const filters = userSettings.appraisalRules?.filters ?? DEFAULT_FILTERS
+    const apiFilterParams = filtersToApiParams(filters)
+
+    const bundleResult = await propertyApi.getPropertyBundle({
+      address: body.address,
+      streetAddress: body.streetAddress,
+      city: body.city,
+      state: body.state,
+      zipCode: body.zipCode,
+      propertyId: body.propertyId,
+      comparables: {
+        radiusMiles: body.searchOptions?.radiusMiles ?? apiFilterParams.radiusMiles ?? 1,
+        maxComps: body.searchOptions?.maxComps ?? 10,
+        monthsBack: body.searchOptions?.monthsBack ?? apiFilterParams.monthsBack ?? 12,
+        sqftVariance: apiFilterParams.sqftVariance,
+      },
+      enrichment: {
+        permits: body.enrichment?.permits ?? true,
+        floodZone: body.enrichment?.floodZone ?? true,
+        weatherRisk: body.enrichment?.weatherRisk ?? false,
+      },
+      skipCache: body.skipCache,
+    })
+
+    if (!bundleResult.success) {
+      return c.json(
+        { success: false, error: bundleResult.error || 'Failed to fetch property data' },
+        400
+      )
+    }
+
+    const bundle = bundleResult.data
+    const { property, enrichment } = bundle
+
+    // Build the rendered step_data shape (same as workflow's broadcastStepData for property_fetch)
+    const riskFlags: string[] = []
+    if (enrichment.floodZone?.isInFloodZone) riskFlags.push(`Flood Zone: ${enrichment.floodZone.floodZone}`)
+    if (property.transaction?.isForeclosure) riskFlags.push('Foreclosure')
+    if (property.transaction?.isShortSale) riskFlags.push('Short Sale')
+    if (property.yearBuilt && property.yearBuilt < 1978) riskFlags.push('Pre-1978 (Lead Paint)')
+    if (enrichment.permits?.items.some((p) => p.jobValue && p.jobValue > 50000)) riskFlags.push('Major Permits (>$50K)')
+
+    const propertyBundleResponse = {
+      subject: {
+        address: `${property.address}, ${property.city}, ${property.state} ${property.zipCode}`,
+        county: property.county ?? null,
+        latitude: property.latitude ?? null,
+        longitude: property.longitude ?? null,
+        bedrooms: property.bedrooms ?? null,
+        bathrooms: property.bathrooms ?? null,
+        squareFeet: property.squareFeet ?? null,
+        lotSizeAcres: property.lotSizeAcres ?? null,
+        yearBuilt: property.yearBuilt ?? null,
+        propertyType: property.propertyType ?? null,
+        subdivision: property.subdivision ?? null,
+        lastSale: property.lastSalePrice ? {
+          price: property.lastSalePrice,
+          date: property.lastSaleDate ?? null,
+          pricePerSqft: property.pricePerSqft ?? null,
+        } : null,
+        taxAssessment: property.assessedValue ?? null,
+        foundationType: property.construction?.foundationType ?? null,
+        hoaFee: property.hoaFee ?? null,
+        zillowUrl: generateZillowUrl({
+          propertyId: property.id,
+          address: property.address,
+          city: property.city,
+          state: property.state,
+          zipCode: property.zipCode,
+        }),
+        photos: [],
+        classification: null,
+      },
+      riskFlags: riskFlags.length > 0 ? riskFlags : null,
+      floodZone: enrichment.floodZone ? {
+        zone: enrichment.floodZone.floodZone,
+        inFloodZone: enrichment.floodZone.isInFloodZone,
+        description: enrichment.floodZone.floodZoneDescription,
+      } : null,
+      permits: enrichment.permits ? {
+        count: enrichment.permits.count,
+        totalValue: enrichment.permits.totalJobValue ?? null,
+        recentTypes: (enrichment.permits.recentPermitTypes ?? []).slice(0, 5),
+      } : null,
+      meta: {
+        analysisId: jobId,
+        timestamp: new Date().toISOString(),
+        dataProvider: property.provider,
+      },
+    }
+
+    // Broadcast step_data to DO so SSE late-joiners get it
+    await jobDO.fetch(
+      new Request('http://internal/step-data', {
+        method: 'POST',
+        body: JSON.stringify({
+          step: 'property_fetch',
+          data: propertyBundleResponse,
+        }),
+      })
+    )
+
+    // Start the workflow with preloaded bundle (skips Step 1)
     const workflowParams: AnalysisWorkflowParams = {
       jobId,
       userId: auth.userId,
       propertyKey,
       address: body.address,
       streetAddress: body.streetAddress,
-      city: body.city,
-      state: body.state,
-      zipCode: body.zipCode,
+      city: body.city || property.city,
+      state: body.state || property.state,
+      zipCode: body.zipCode || property.zipCode,
       propertyId: body.propertyId,
       searchOptions: body.searchOptions,
       enrichment: body.enrichment,
@@ -229,6 +339,8 @@ analyze.post('/', async (c) => {
       customRehabTable: userSettings.customRehabTable,
       customTierRanges: userSettings.customTierRanges,
       customMajorItemCosts: userSettings.customMajorItemCosts,
+      preloadedPropertyBundle: bundle,
+      visionClassification: true,
     }
 
     const workflow = await c.env.ANALYSIS_WORKFLOW.create({
@@ -236,7 +348,7 @@ analyze.post('/', async (c) => {
       params: workflowParams,
     })
 
-    console.log(`[Analyze] Job ${jobId} started via Workflow (instance: ${workflow.id})`)
+    console.log(`[Analyze] Job ${jobId} started via Workflow (instance: ${workflow.id}, property preloaded)`)
 
     // Build response URLs
     const baseUrl = new URL(c.req.url).origin
@@ -248,11 +360,12 @@ analyze.post('/', async (c) => {
         status: 'queued',
         streamUrl: `${baseUrl}/v1/analyze/jobs/${jobId}/stream`,
         pollUrl: `${baseUrl}/v1/analyze/jobs/${jobId}`,
-        estimatedDurationMs: body.photoAnalysis?.enabled !== false ? 15000 : 8000,
+        estimatedDurationMs: body.photoAnalysis?.enabled !== false ? 12000 : 6000,
+        propertyBundle: propertyBundleResponse,
       },
     }
 
-    return c.json(response, 202)
+    return c.json(response, 200)
   } catch (error) {
     console.error('[Analyze] Error starting job:', error)
     return c.json(

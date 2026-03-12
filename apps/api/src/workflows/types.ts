@@ -10,6 +10,7 @@ import type { MajorItem, ArvTier, RehabEstimate } from '../services/valuation'
 import type { TierRangeDefinition } from '@flowstate-api/shared/valuation'
 import type { ClassificationResult } from '../services/classification'
 import type { PropertyPhotos } from '../services/photo-provider'
+import type { PropertyBundle } from '../services/property-api/types'
 
 // ─── Workflow Input/Output ────────────────────────────────────────────────────
 
@@ -88,6 +89,9 @@ export interface AnalysisWorkflowParams {
 
   /** Optional per-user major item cost overrides: { item_id: cost_in_dollars } */
   customMajorItemCosts?: Record<string, number>
+
+  /** Pre-fetched property bundle from endpoint (skips workflow Step 1) */
+  preloadedPropertyBundle?: PropertyBundle
 
   /** GoHighLevel integration data (present when triggered via GHL webhook) */
   ghl?: {

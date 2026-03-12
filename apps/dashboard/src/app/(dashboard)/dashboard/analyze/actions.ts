@@ -318,6 +318,9 @@ export interface QueueAnalysisResult {
   propertyKey?: string
   estimatedDurationMs?: number
   error?: string
+  /** Pre-fetched property data for immediate rendering */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  propertyBundle?: Record<string, any>
 }
 
 export interface JobStatusResult {
@@ -431,6 +434,8 @@ export async function queueAnalysis(request: AnalyzeRequest): Promise<QueueAnaly
         streamUrl: string
         pollUrl: string
         estimatedDurationMs?: number
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        propertyBundle?: Record<string, any>
       }
     }
 
@@ -498,6 +503,7 @@ export async function queueAnalysis(request: AnalyzeRequest): Promise<QueueAnaly
         pollUrl: result.data?.pollUrl,
         propertyKey,
         estimatedDurationMs: result.data?.estimatedDurationMs,
+        propertyBundle: result.data?.propertyBundle,
       }
     }
 
@@ -511,6 +517,7 @@ export async function queueAnalysis(request: AnalyzeRequest): Promise<QueueAnaly
       pollUrl: result.data?.pollUrl,
       propertyKey,
       estimatedDurationMs: result.data?.estimatedDurationMs,
+      propertyBundle: result.data?.propertyBundle,
     }
   } catch (error) {
     logError('queueAnalysis exception', error)

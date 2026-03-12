@@ -371,6 +371,7 @@ export default function ReportPage({ params }: { params: Promise<{ jobId: string
           {effectiveComps && (
             <ComparablesSection
               comps={effectiveComps}
+              subject={analysis.subject}
               subjectSubdivision={analysis.subject?.subdivision}
               selectedCompKeys={compOverride?.selectedCompKeys}
               isManual={compOverride?.isManual ?? false}

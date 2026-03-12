@@ -13,9 +13,12 @@ import type {
   StepSkippedData,
   JobCompletedData,
   JobFailedData,
+  ResultReadyData,
+  StepDataData,
   StepStatus,
 } from '@/types/analysis'
 import { initialAnalysisState, STEP_CONFIGS } from '@/types/analysis'
+import { deepMergePartial } from '@/lib/merge-utils'
 
 interface UseAnalysisSSEOptions {
   /** SSE URL to connect to (includes signed token) */
@@ -52,6 +55,8 @@ const EVENT_TYPES = [
   'step_failed',
   'step_skipped',
   'cache_hit',
+  'result_ready',
+  'step_data',
   'job_completed',
   'job_failed',
 ] as const
@@ -169,6 +174,24 @@ export function useAnalysisSSE(
 
         case 'cache_hit': {
           // Informational, already handled in step_completed
+          break
+        }
+
+        case 'result_ready': {
+          const data = message.data as ResultReadyData
+          setState((prev) => ({
+            ...prev,
+            result: data.result,
+          }))
+          break
+        }
+
+        case 'step_data': {
+          const data = message.data as StepDataData
+          setState((prev) => ({
+            ...prev,
+            partialResult: deepMergePartial(prev.partialResult ?? {}, data.data),
+          }))
           break
         }
 
@@ -390,6 +413,8 @@ export function useAnalysisPolling(options: UseAnalysisPollingOptions) {
           steps?: StepProgress[]
           totalDurationMs?: number | null
           result?: unknown
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          stepData?: Record<string, any>
           error?: { message: string }
         }
       }
@@ -404,6 +429,9 @@ export function useAnalysisPolling(options: UseAnalysisPollingOptions) {
           steps: jobData.steps || prev.steps,
           totalDurationMs: jobData.totalDurationMs ?? null,
           result: jobData.result || prev.result,
+          partialResult: jobData.stepData
+            ? deepMergePartial(prev.partialResult ?? {}, jobData.stepData)
+            : prev.partialResult,
           error: jobData.error?.message || null,
         }))
 

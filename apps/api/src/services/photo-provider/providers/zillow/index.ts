@@ -232,6 +232,18 @@ export class ZillowPhotoProvider implements PhotoProvider {
       },
     }
   }
+
+  getCallStats(): { firecrawlCalls: number; llmCalls: number; cacheHits: number } {
+    const fetcher = this.getFetcher()
+    if (fetcher && fetcher instanceof FirecrawlZillowFetcher) {
+      return {
+        firecrawlCalls: fetcher.firecrawlCallCount,
+        llmCalls: fetcher.llmCallCount,
+        cacheHits: fetcher.cacheHitCount,
+      }
+    }
+    return { firecrawlCalls: 0, llmCalls: 0, cacheHits: 0 }
+  }
 }
 
 /**

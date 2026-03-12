@@ -20,11 +20,21 @@ export function SubjectPropertyCard({ subject, children, footer }: SubjectProper
       <div className="px-6 py-5">
         <div>
           <div className="flex items-center gap-2 flex-wrap">
-            <Badge variant="outline" className="text-caption-sm font-normal gap-1">
+            <Badge variant="outline" className="text-caption-sm font-normal p-1">
               <MapPin className="w-3 h-3" />
-              Subject
             </Badge>
-            <h3 className="text-heading-sm font-semibold leading-tight">{subject.address || 'Unknown Address'}</h3>
+            {subject.address ? (
+              <a
+                href={`https://www.zillow.com/homes/${encodeURIComponent(subject.address)}_rb/`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-heading-sm font-semibold leading-tight hover:text-primary hover:underline transition-colors"
+              >
+                {subject.address}
+              </a>
+            ) : (
+              <h3 className="text-heading-sm font-semibold leading-tight">Unknown Address</h3>
+            )}
             {subject.classification && (
               <ClassificationBadge classification={subject.classification} />
             )}

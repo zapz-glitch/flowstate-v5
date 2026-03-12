@@ -365,20 +365,6 @@ export function SettingsPanel({ settingsHook, recalcData }: SettingsPanelProps) 
                 width="w-24"
               />
             </div>
-            <div className="flex items-center justify-between rounded-lg bg-secondary/30 px-3 py-2.5">
-              <span className="text-caption font-medium text-foreground">Flip Profit</span>
-              <CompactInput
-                value={settings.dealParams.desiredProfit ?? ''}
-                onChange={(v) => updateDealParams({ desiredProfit: v === '' ? null : parseFloat(v) || 0 })}
-                prefix="$"
-                step={5000}
-                width="w-24"
-                placeholder="Auto"
-              />
-            </div>
-            <p className="text-caption-sm text-foreground-tertiary px-1">
-              Leave flip profit empty to use the tier default.
-            </p>
           </div>
         </Section>
 
@@ -457,55 +443,40 @@ export function SettingsPanel({ settingsHook, recalcData }: SettingsPanelProps) 
               )
             })}
           </div>
+
+          {/* Major Repair Items (inline) */}
+          <div className="mt-4 pt-4 border-t border-border/50">
+            <div className="flex items-center gap-2 mb-2">
+              <Package className="w-3 h-3 text-foreground-tertiary" />
+              <span className="text-caption-sm font-semibold text-foreground-tertiary uppercase tracking-wider">Major Items</span>
+              {majorItemsTotal > 0 && (
+                <Badge variant="outline" className="text-[10px] leading-none px-1.5 py-0.5 bg-emerald-500/10 text-emerald-600 border-emerald-500/20 font-medium tabular-nums ml-auto">
+                  +{fmt(majorItemsTotal)}
+                </Badge>
+              )}
+            </div>
+            <div className="space-y-1">
+              {settings.majorItems.map((item) => (
+                <SettingRow
+                  key={item.id}
+                  label={item.name}
+                  enabled={item.enabled}
+                  onToggle={(checked) => updateMajorItem(item.id, { enabled: checked })}
+                >
+                  <CompactInput
+                    value={item.cost}
+                    onChange={(v) => updateMajorItem(item.id, { cost: parseFloat(v) || 0 })}
+                    disabled={!item.enabled}
+                    prefix="$"
+                    step={500}
+                    width="w-20"
+                  />
+                </SettingRow>
+              ))}
+            </div>
+          </div>
         </Section>
 
-        {/* ── Major Repair Items ────────────────────────────────────── */}
-        <Section
-          icon={Package}
-          title="Major Repair Items"
-          badge={majorItemsTotal > 0 ? (
-            <Badge variant="outline" className="text-[10px] leading-none px-1.5 py-0.5 bg-emerald-500/10 text-emerald-600 border-emerald-500/20 font-medium tabular-nums">
-              +{fmt(majorItemsTotal)}
-            </Badge>
-          ) : (
-            <Badge variant="outline" className="text-[10px] leading-none px-1.5 py-0.5 font-normal">
-              {settings.majorItems.length} items
-            </Badge>
-          )}
-          defaultOpen={false}
-        >
-          <p className="text-caption-sm text-foreground-tertiary mb-3">
-            Toggle items that need repair. Costs are added on top of the base rehab estimate.
-          </p>
-          <div className="space-y-1">
-            {settings.majorItems.map((item) => (
-              <SettingRow
-                key={item.id}
-                label={item.name}
-                enabled={item.enabled}
-                onToggle={(checked) => updateMajorItem(item.id, { enabled: checked })}
-              >
-                <CompactInput
-                  value={item.cost}
-                  onChange={(v) => updateMajorItem(item.id, { cost: parseFloat(v) || 0 })}
-                  disabled={!item.enabled}
-                  prefix="$"
-                  step={500}
-                  width="w-20"
-                />
-              </SettingRow>
-            ))}
-          </div>
-          {majorItemsTotal > 0 && (
-            <div className="mt-3 pt-3 border-t border-border flex items-center justify-between px-1">
-              <div className="flex items-center gap-2">
-                <Wrench className="w-3.5 h-3.5 text-foreground-tertiary" />
-                <span className="text-caption font-medium text-foreground-secondary">Total</span>
-              </div>
-              <span className="text-caption font-bold tabular-nums">{fmt(majorItemsTotal)}</span>
-            </div>
-          )}
-        </Section>
       </div>
 
       {/* Footer */}
