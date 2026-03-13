@@ -508,8 +508,15 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
       const arvStart = Date.now()
 
       // Build API call statistics
-      const corelogicEndpoints = getCoreLogicCallLog()
-      const corelogicTotal = getCoreLogicCallCount()
+      // Merge preloaded stats (from route handler) with any calls made during workflow
+      const workflowEndpoints = getCoreLogicCallLog()
+      const workflowTotal = getCoreLogicCallCount()
+      const preloaded = params.preloadedApiCallStats?.corelogic
+      const corelogicTotal = (preloaded?.total ?? 0) + workflowTotal
+      const corelogicEndpoints = [
+        ...(preloaded?.endpoints ?? []),
+        ...workflowEndpoints,
+      ]
       const visionLlmCalls = visionAnalysis ? 1 : 0
       const apiCallStats: ApiCallStats = {
         corelogic: {

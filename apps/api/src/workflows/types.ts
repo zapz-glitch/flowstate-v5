@@ -93,6 +93,14 @@ export interface AnalysisWorkflowParams {
   /** Pre-fetched property bundle from endpoint (skips workflow Step 1) */
   preloadedPropertyBundle?: PropertyBundle
 
+  /** API call stats from route handler (CoreLogic calls happen before workflow starts) */
+  preloadedApiCallStats?: {
+    corelogic: {
+      total: number
+      endpoints: { endpoint: string; count: number }[]
+    }
+  }
+
   /** GoHighLevel integration data (present when triggered via GHL webhook) */
   ghl?: {
     opportunityId: string

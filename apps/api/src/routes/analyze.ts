@@ -35,6 +35,7 @@ import type { AnalysisWorkflowParams } from '../workflows/types'
 import { generateWsToken } from '../utils/ws-token'
 import { loadUserAnalysisSettings } from '../services/user-settings'
 import { createPropertyApi } from '../services/property-api'
+import { getCoreLogicCallLog, getCoreLogicCallCount, resetCoreLogicCallLog } from '../services/property-api/providers/corelogic'
 import { DEFAULT_FILTERS } from '../services/appraisal'
 import { filtersToApiParams } from '../services/appraisal/types'
 import { generateZillowUrl } from '../services/photo-provider'
@@ -218,6 +219,7 @@ analyze.post('/', async (c) => {
     // ─── Fetch property bundle synchronously ─────────────────────────────────
     // This eliminates Cloudflare Workflow Step 1 overhead (~1-2s checkpoint latency)
     // and lets us return property data immediately in the HTTP response.
+    resetCoreLogicCallLog()
     const propertyApi = createPropertyApi(c.env)
     const filters = userSettings.appraisalRules?.filters ?? DEFAULT_FILTERS
     const apiFilterParams = filtersToApiParams(filters)
@@ -252,6 +254,14 @@ analyze.post('/', async (c) => {
 
     const bundle = bundleResult.data
     const { property, enrichment } = bundle
+
+    // Capture CoreLogic API call stats before handing off to workflow (separate isolate)
+    const preloadedApiCallStats = {
+      corelogic: {
+        total: getCoreLogicCallCount(),
+        endpoints: getCoreLogicCallLog(),
+      },
+    }
 
     // Build the rendered step_data shape (same as workflow's broadcastStepData for property_fetch)
     const riskFlags: string[] = []
@@ -344,6 +354,7 @@ analyze.post('/', async (c) => {
       customTierRanges: userSettings.customTierRanges,
       customMajorItemCosts: userSettings.customMajorItemCosts,
       preloadedPropertyBundle: bundle,
+      preloadedApiCallStats,
       visionClassification: true,
     }
 
