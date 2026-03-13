@@ -978,7 +978,6 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
       bundle,
       finalAppraisalResult,
       photoBundle,
-      null, // No LLM comp selection in workflow (using batch classification instead)
       valuation,
       {
         arvSource,

@@ -8,7 +8,6 @@
 import type { PropertyBundle } from '../property-api'
 import type { NormalizedProperty, NormalizedComparable } from '../property-api/types'
 import type { AppraisedComparable, AppraisalResultWithFallback, ClassificationSummaryResult } from '../appraisal'
-import type { CompSelectionResult } from '../comp-selection'
 import type { PhotoBundle, PropertyPhotos } from '../photo-provider'
 import type { MajorItem, ValuationService } from '../valuation'
 import { REHAB_LEVELS } from '../valuation'
@@ -18,7 +17,6 @@ import { generateZillowUrl } from '../photo-provider'
 // Re-export for convenience
 export type { PropertyBundle } from '../property-api'
 export type { AppraisedComparable, AppraisalResultWithFallback } from '../appraisal'
-export type { CompSelectionResult } from '../comp-selection'
 export type { PhotoBundle, PropertyPhotos } from '../photo-provider'
 
 // ─── Zillow Data Merge Utility ────────────────────────────────────────────────
@@ -623,7 +621,6 @@ export function buildAnalysisResponse(
   bundle: PropertyBundle,
   appraisalResult: AppraisalResultWithFallback,
   photoBundle: PhotoBundle | null,
-  compSelectionResult: CompSelectionResult | null,
   valuation: ValuationResult,
   ctx: ResponseContext
 ): AnalysisResponse {

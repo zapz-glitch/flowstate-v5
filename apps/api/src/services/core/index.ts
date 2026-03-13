@@ -4,7 +4,6 @@
  * Provides foundational infrastructure for the modular architecture:
  * - Universal provider interfaces
  * - Observability (logging, metrics, token tracking)
- * - Dependency injection container
  */
 
 // Types and utilities
@@ -62,13 +61,3 @@ export {
   toTokenUsageRecords,
 } from './observability'
 
-// Container
-export type {
-  ServiceContainer,
-  ContainerConfig,
-} from './container'
-
-export {
-  createServiceContainer,
-  createContainerFromContext,
-} from './container'

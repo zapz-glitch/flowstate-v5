@@ -36,8 +36,6 @@ export interface Env {
 
   // ─── Durable Objects ─────────────────────────────────────────────────────────
   ANALYSIS_JOB: DurableObjectNamespace
-  RATE_LIMIT_COORDINATOR: DurableObjectNamespace
-  FIRECRAWL_RATE_LIMITER: DurableObjectNamespace
 
   // ─── Workflows ─────────────────────────────────────────────────────────────────
   ANALYSIS_WORKFLOW: WorkflowBinding<AnalysisWorkflowParams>

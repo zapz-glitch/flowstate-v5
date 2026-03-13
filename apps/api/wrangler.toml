@@ -32,21 +32,9 @@ bucket_name = "flowstate-report-photos"
 name = "ANALYSIS_JOB"
 class_name = "AnalysisJobDO"
 
-[[durable_objects.bindings]]
-name = "RATE_LIMIT_COORDINATOR"
-class_name = "RateLimitCoordinatorDO"
-
-[[durable_objects.bindings]]
-name = "FIRECRAWL_RATE_LIMITER"
-class_name = "FirecrawlRateLimiterDO"
-
 [[migrations]]
 tag = "v1"
-new_sqlite_classes = ["AnalysisJobDO", "RateLimitCoordinatorDO"]
-
-[[migrations]]
-tag = "v2"
-new_sqlite_classes = ["FirecrawlRateLimiterDO"]
+new_sqlite_classes = ["AnalysisJobDO"]
 
 # ─── Workflows ─────────────────────────────────────────────────────────────────
 

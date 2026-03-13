@@ -153,40 +153,6 @@ export interface PropertyEnrichmentResult {
   error?: string
 }
 
-// ─── Rate Limiting ────────────────────────────────────────────────────────────
-
-/**
- * Firecrawl rate limit state
- */
-export interface FirecrawlRateLimitState {
-  /** Current active requests */
-  activeRequests: number
-  /** Maximum concurrent requests (50 for Firecrawl) */
-  maxConcurrent: number
-  /** Queue of waiting requests */
-  waitingCount: number
-  /** Timestamp of last request */
-  lastRequestAt: string | null
-}
-
-/**
- * Acquire slot result
- */
-export interface AcquireSlotResult {
-  success: boolean
-  slotId?: string
-  waitMs?: number
-  error?: string
-}
-
-/**
- * Release slot request
- */
-export interface ReleaseSlotRequest {
-  slotId: string
-  success: boolean
-}
-
 // ─── Progress Tracking ────────────────────────────────────────────────────────
 
 /**

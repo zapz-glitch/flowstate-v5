@@ -5,8 +5,6 @@
  */
 
 export { AnalysisJobDO } from './analysis-job'
-export { RateLimitCoordinatorDO } from './rate-limit-coordinator'
-export { FirecrawlRateLimiterDO } from './firecrawl-rate-limiter'
 
 // Re-export types
 export type {
@@ -39,13 +37,6 @@ export type {
   JobCompletedData,
   JobFailedData,
   CacheHitData,
-
-  // Rate limit types
-  KeyState,
-  DailyUsage,
-  RateLimitState,
-  AcquireKeyResult,
-  ReleaseKeyResult,
 
   // API response types
   QueueJobResponse,

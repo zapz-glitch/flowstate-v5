@@ -29,7 +29,7 @@ import reportPhotosRoute from './routes/report-photos'
 import ghlWebhook from './routes/webhooks/ghl'
 
 // Durable Objects
-export { AnalysisJobDO, RateLimitCoordinatorDO, FirecrawlRateLimiterDO } from './durable-objects'
+export { AnalysisJobDO } from './durable-objects'
 
 // Workflows
 export { AnalysisWorkflow } from './workflows'
