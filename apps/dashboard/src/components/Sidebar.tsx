@@ -15,6 +15,7 @@ import {
   ChevronsUpDown,
   User,
   Settings2,
+  ShieldCheck,
 } from 'lucide-react'
 import { signOut } from '@/lib/auth-client'
 import { Logo } from '@/components/ui/Logo'
@@ -33,7 +34,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 
-const navigation: Array<{
+const baseNavigation: Array<{
   name: string
   href: string
   icon: typeof Home
@@ -46,6 +47,15 @@ const navigation: Array<{
   { name: 'API Hub', href: '/dashboard/api-hub', icon: Key },
 ]
 
+const adminNavigation: Array<{
+  name: string
+  href: string
+  icon: typeof Home
+  external?: boolean
+}> = [
+  { name: 'Admin Panel', href: '/dashboard/admin', icon: ShieldCheck },
+]
+
 export default function Sidebar() {
   const pathname = usePathname()
   const { user } = useUser()
@@ -54,6 +64,10 @@ export default function Sidebar() {
   const { activeAnalysis, analysisState } = useAnalysis()
 
   const isAnalysisRunning = activeAnalysis !== null && analysisState.status !== 'completed' && analysisState.status !== 'failed'
+
+  const navigation = user?.role === 'admin'
+    ? [...baseNavigation, ...adminNavigation]
+    : baseNavigation
 
   const handleSignOut = async () => {
     await signOut()

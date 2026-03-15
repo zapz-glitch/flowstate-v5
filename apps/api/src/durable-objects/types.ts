@@ -42,7 +42,6 @@ export interface AnalyzeRequest {
     closingCostsPercent?: number
     carryingCostsPercent?: number
     wholesaleFee?: number
-    desiredProfit?: number
   }
 
   // Enrichment options

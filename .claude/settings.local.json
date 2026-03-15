@@ -13,7 +13,12 @@
       "Bash(grep:*)",
       "Bash(wrangler secret put:*)",
       "Bash(npx tsx:*)",
-      "Bash(cat:*)"
+      "Bash(cat:*)",
+      "Read(//Users/yalamber/.nvm/versions/node/**)",
+      "Bash(export PATH=\"/Users/yalamber/.nvm/versions/node/v22.12.0/bin:$PATH\")",
+      "Bash(export PATH=\"/Users/yalamber/.nvm/versions/node/v22.12.0/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH\")",
+      "Bash(source $HOME/.nvm/nvm.sh)",
+      "Bash(npm run:*)"
     ]
   }
 }

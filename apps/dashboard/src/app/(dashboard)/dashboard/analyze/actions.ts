@@ -66,9 +66,9 @@ export type AnalyzeResult =
 
 /** API call statistics tracked during analysis */
 export interface ApiCallStats {
-  corelogic: { total: number; endpoints: { endpoint: string; count: number }[] }
+  corelogic: { total: number; cached: number; endpoints: { endpoint: string; calls: number; cached: number }[] }
   firecrawl: { total: number; cached: number }
-  llm: { total: number; breakdown: { purpose: string; count: number }[] }
+  llm: { total: number; cached: number; breakdown: { purpose: string; count: number }[] }
   totalExternalCalls: number
 }
 
@@ -108,7 +108,6 @@ export interface AnalyzeData {
       closingCostsPercent: number
       carryingCostsPercent: number
       wholesaleFee: number
-      desiredProfit: number | null
     }
     rehabLevelIndex: number
     rehabTable: Record<string, Array<{ perSqft: number; minProfit: number }>>

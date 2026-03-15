@@ -8,7 +8,7 @@
  *   adjustedPrice  = salePrice ± appraisal rule adjustments
  *   netPricePerSqft = adjustedPrice / comp.squareFeet
  *   compARV         = netPricePerSqft × subject.squareFeet
- *   ARV             = avg(compARV) across up to 3 best-matching comps
+ *   ARV             = avg(compARV) across all passing comps
  *
  * This is a data-only service - it does not fetch data, only processes it.
  * Use PropertyApi.getPropertyBundle() to fetch data, then pass to this service.
@@ -47,8 +47,8 @@ export type { AdjustmentRuleDefinition } from './adjustments'
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
 
-/** Maximum comps picked during fallback passes (best-matching by filter score) */
-const MAX_FALLBACK_COMPS = 5
+/** Maximum comps picked during fallback passes — no cap, use all that pass */
+const MAX_FALLBACK_COMPS = Infinity
 
 // ─── Fallback Options ─────────────────────────────────────────────────────────
 

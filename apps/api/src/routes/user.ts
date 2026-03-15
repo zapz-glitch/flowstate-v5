@@ -9,32 +9,10 @@ import { Hono } from 'hono'
 import { drizzle } from 'drizzle-orm/d1'
 import { eq, desc, and, gte, sql } from 'drizzle-orm'
 import type { Env } from '../types'
-import { createAuth } from '../lib/auth'
+import { getSession } from '../lib/session'
 import { users, apiKeys, apiUsageLogs, PLAN_LIMITS } from '../db'
 
 const user = new Hono<{ Bindings: Env }>()
-
-// Helper to get session from request
-async function getSession(c: any) {
-  // Build baseURL from request
-  const url = new URL(c.req.url)
-  const baseURL = `${url.protocol}//${url.host}/auth`
-
-  const auth = createAuth(c.env.DB, c.env.BETTER_AUTH_SECRET, baseURL)
-
-  try {
-    // Debug: log cookies being received
-    const cookieHeader = c.req.raw.headers.get('cookie')
-    console.log('Cookie header:', cookieHeader)
-
-    const session = await auth.api.getSession({ headers: c.req.raw.headers })
-    console.log('Session result:', session ? 'found' : 'not found', session?.user?.email)
-    return session
-  } catch (error) {
-    console.error('Error getting session:', error)
-    return null
-  }
-}
 
 // Generate secure random API key
 function generateApiKey(): string {
@@ -79,6 +57,7 @@ user.get('/', async (c) => {
     email: userData.email,
     emailVerified: userData.emailVerified,
     plan: userData.plan,
+    role: userData.role,
     createdAt: userData.createdAt,
   })
 })

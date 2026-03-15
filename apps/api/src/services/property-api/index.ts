@@ -78,6 +78,59 @@ export type {
   WeatherRisk,
 } from './types';
 
+// ─── Call Stats Tracking ────────────────────────────────────────────────────────
+
+export interface PropertyApiCallStats {
+  /** Total API calls made (not from cache) */
+  total: number
+  /** Total cache hits (no API call made) */
+  cached: number
+  /** Per-endpoint breakdown: calls + cache hits */
+  endpoints: { endpoint: string; calls: number; cached: number }[]
+}
+
+class CallStatsTracker {
+  private _entries: { endpoint: string; type: 'call' | 'cache_hit' }[] = []
+
+  logCall(endpoint: string): void {
+    this._entries.push({ endpoint, type: 'call' })
+  }
+
+  logCacheHit(endpoint: string): void {
+    this._entries.push({ endpoint, type: 'cache_hit' })
+  }
+
+  reset(): void {
+    this._entries = []
+  }
+
+  getStats(): PropertyApiCallStats {
+    const endpointMap = new Map<string, { calls: number; cached: number }>()
+
+    for (const entry of this._entries) {
+      const existing = endpointMap.get(entry.endpoint) ?? { calls: 0, cached: 0 }
+      if (entry.type === 'call') {
+        existing.calls++
+      } else {
+        existing.cached++
+      }
+      endpointMap.set(entry.endpoint, existing)
+    }
+
+    let totalCalls = 0
+    let totalCached = 0
+    const endpoints: { endpoint: string; calls: number; cached: number }[] = []
+
+    for (const [endpoint, stats] of endpointMap) {
+      totalCalls += stats.calls
+      totalCached += stats.cached
+      endpoints.push({ endpoint, ...stats })
+    }
+
+    return { total: totalCalls, cached: totalCached, endpoints }
+  }
+}
+
 // ─── Configuration ─────────────────────────────────────────────────────────────
 
 const DEFAULT_PROVIDER: PropertyProvider = 'corelogic';
@@ -142,6 +195,12 @@ export interface PropertyApiService {
     comparables: NormalizedComparable[],
     options?: { concurrency?: number },
   ): Promise<NormalizedComparable[]>;
+
+  /** Get call statistics for the current session (calls + cache hits per endpoint) */
+  getCallStats(): PropertyApiCallStats;
+
+  /** Reset call statistics (call at the start of each analysis) */
+  resetCallStats(): void;
 }
 
 class PropertyApi implements PropertyApiService {
@@ -150,6 +209,7 @@ class PropertyApi implements PropertyApiService {
   private env: Env;
   private cache: CacheService;
   private _skipCache: boolean = false;
+  private _stats = new CallStatsTracker();
 
   constructor(env: Env, initialConfig?: Partial<PropertyApiConfig>) {
     this.env = env;
@@ -203,6 +263,14 @@ class PropertyApi implements PropertyApiService {
     console.log('PropertyAPI: Configuration updated', this.currentConfig);
   }
 
+  getCallStats(): PropertyApiCallStats {
+    return this._stats.getStats()
+  }
+
+  resetCallStats(): void {
+    this._stats.reset()
+  }
+
   async searchProperty(
     params: PropertySearchParams,
   ): Promise<PropertySearchResponse> {
@@ -211,6 +279,7 @@ class PropertyApi implements PropertyApiService {
       provider: provider.name,
       address: params.address,
     });
+    this._stats.logCall('property-search');
     return provider.searchProperty(params);
   }
 
@@ -231,6 +300,7 @@ class PropertyApi implements PropertyApiService {
       const cached = await this.cache.get<NormalizedProperty>(cacheKey);
       if (cached) {
         console.log('PropertyAPI: Cache HIT for property', { propertyId });
+        this._stats.logCacheHit('property-detail');
         return { success: true, data: cached };
       }
     } else {
@@ -241,6 +311,7 @@ class PropertyApi implements PropertyApiService {
       provider: provider.name,
       propertyId,
     });
+    this._stats.logCall('property-detail');
     const result = await provider.getPropertyById(propertyId);
 
     // Cache successful results
@@ -271,6 +342,7 @@ class PropertyApi implements PropertyApiService {
         console.log('PropertyAPI: Cache HIT for comparables', {
           propertyId: params.propertyId,
         });
+        this._stats.logCacheHit('comparables');
         return { success: true, data: cached };
       }
     } else {
@@ -284,6 +356,7 @@ class PropertyApi implements PropertyApiService {
       propertyId: params.propertyId,
       radiusMiles: params.radiusMiles,
     });
+    this._stats.logCall('comparables');
     const result = await provider.getComparables(params);
 
     // Cache successful results
@@ -313,6 +386,7 @@ class PropertyApi implements PropertyApiService {
       const cached = await this.cache.get<PermitsResult['data']>(cacheKey);
       if (cached) {
         console.log('PropertyAPI: Cache HIT for permits', { propertyId });
+        this._stats.logCacheHit('permits');
         return { success: true, data: cached };
       }
     } else {
@@ -323,6 +397,7 @@ class PropertyApi implements PropertyApiService {
       provider: provider.name,
       propertyId,
     });
+    this._stats.logCall('permits');
     const result = await provider.getBuildingPermits(propertyId, address);
 
     // Cache successful results
@@ -357,6 +432,7 @@ class PropertyApi implements PropertyApiService {
           latitude,
           longitude,
         });
+        this._stats.logCacheHit('flood-zone');
         return { success: true, data: cached };
       }
     } else {
@@ -371,6 +447,7 @@ class PropertyApi implements PropertyApiService {
       latitude,
       longitude,
     });
+    this._stats.logCall('flood-zone');
     const result = await provider.getFloodZone(latitude, longitude);
 
     // Cache successful results
@@ -560,7 +637,7 @@ class PropertyApi implements PropertyApiService {
     const enrichedComparables = await this.enrichComparables(
       compsResult.data.comparables,
       {
-        concurrency: 5,
+        concurrency: 10,
       },
     );
 
@@ -655,7 +732,7 @@ class PropertyApi implements PropertyApiService {
     comparables: NormalizedComparable[],
     options?: { concurrency?: number },
   ): Promise<NormalizedComparable[]> {
-    const concurrency = options?.concurrency ?? 5;
+    const concurrency = options?.concurrency ?? 10;
 
     console.log(
       `PropertyAPI: Enriching ${comparables.length} comparables with concurrency ${concurrency}`,

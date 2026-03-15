@@ -14,7 +14,7 @@ import { Hono } from 'hono'
 import { drizzle } from 'drizzle-orm/d1'
 import { eq, and } from 'drizzle-orm'
 import type { Env } from '../types'
-import { createAuth } from '../lib/auth'
+import { getSession } from '../lib/session'
 import {
   locationSettings,
   appraisalRulePreset,
@@ -22,19 +22,9 @@ import {
   appraisalRuleAdjustment,
 } from '../db'
 import type { FilterType, AdjustmentType } from '../services/appraisal/types'
+import { invalidateUserSettingsCache } from '../services/user-settings'
 
 const locationSettingsRoute = new Hono<{ Bindings: Env }>()
-
-async function getSession(c: any) {
-  const url = new URL(c.req.url)
-  const baseURL = `${url.protocol}//${url.host}/auth`
-  const auth = createAuth(c.env.DB, c.env.BETTER_AUTH_SECRET, baseURL)
-  try {
-    return await auth.api.getSession({ headers: c.req.raw.headers })
-  } catch {
-    return null
-  }
-}
 
 interface FilterInput {
   filterType: FilterType
@@ -335,6 +325,9 @@ locationSettingsRoute.post('/', async (c) => {
     finalRow = updated
   }
 
+  // Invalidate cached user settings
+  await invalidateUserSettingsCache(c.env.API_CACHE, session.user.id)
+
   const appraisalRules = await resolveLocationAppraisalRules(db, session.user.id, finalRow.appraisalPresetId)
   return c.json({
     setting: {
@@ -422,6 +415,9 @@ locationSettingsRoute.patch('/:id', async (c) => {
 
   await db.update(locationSettings).set(updates).where(eq(locationSettings.id, id))
 
+  // Invalidate cached user settings
+  await invalidateUserSettingsCache(c.env.API_CACHE, session.user.id)
+
   const [updated] = await db.select().from(locationSettings).where(eq(locationSettings.id, id)).limit(1)
   const appraisalRules = await resolveLocationAppraisalRules(db, session.user.id, updated.appraisalPresetId)
 
@@ -459,6 +455,9 @@ locationSettingsRoute.delete('/:id', async (c) => {
   }
 
   await db.delete(locationSettings).where(eq(locationSettings.id, id))
+
+  // Invalidate cached user settings
+  await invalidateUserSettingsCache(c.env.API_CACHE, session.user.id)
 
   return c.json({ success: true })
 })

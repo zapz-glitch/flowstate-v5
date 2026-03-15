@@ -15,6 +15,7 @@ export const user = sqliteTable('user', {
   updatedAt: text('updatedAt').notNull().$defaultFn(() => new Date().toISOString()),
   // Custom fields
   plan: text('plan').notNull().default('free'),
+  role: text('role').notNull().default('user'), // 'user' | 'admin'
 })
 
 // Alias for backwards compatibility
@@ -385,8 +386,6 @@ export const dealParams = sqliteTable(
     carryingCostsPercent: real('carrying_costs_percent').notNull().default(2),
     /** Wholesale fee in dollars (default: 10000) */
     wholesaleFee: real('wholesale_fee').notNull().default(10000),
-    /** Desired profit override in dollars (null = use tier default from rehab table) */
-    desiredProfit: real('desired_profit'),
     createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
     updatedAt: text('updated_at').notNull().$defaultFn(() => new Date().toISOString()),
   },
@@ -524,6 +523,24 @@ export const photoAnalysisResults = sqliteTable(
   },
   (table) => [
     index('idx_photo_analysis_user_job').on(table.userId, table.jobId),
+  ]
+)
+
+// ==========================================
+// Waitlist
+// ==========================================
+
+export const waitlist = sqliteTable(
+  'waitlist',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    email: text('email').notNull().unique(),
+    firstName: text('first_name').notNull(),
+    lastName: text('last_name').notNull(),
+    createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
+  },
+  (table) => [
+    index('idx_waitlist_email').on(table.email),
   ]
 )
 

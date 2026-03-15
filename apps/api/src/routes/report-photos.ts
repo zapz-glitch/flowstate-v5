@@ -8,7 +8,7 @@ import { Hono } from 'hono'
 import { drizzle } from 'drizzle-orm/d1'
 import { eq, and, desc } from 'drizzle-orm'
 import type { Env } from '../types'
-import { createAuth } from '../lib/auth'
+import { getSession } from '../lib/session'
 import { reportPhotos, photoAnalysisResults, savedReports } from '../db/schema'
 import { analyzePropertyPhotos } from '../services/photo-analysis'
 import { detectMimeType } from '../services/llm/image-utils'
@@ -18,17 +18,6 @@ const reportPhotosRoute = new Hono<{ Bindings: Env }>()
 const ALLOWED_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp'])
 const MAX_FILE_SIZE = 10 * 1024 * 1024 // 10MB
 const MAX_FILES = 20
-
-async function getSession(c: any) {
-  const url = new URL(c.req.url)
-  const baseURL = `${url.protocol}//${url.host}/auth`
-  const auth = createAuth(c.env.DB, c.env.BETTER_AUTH_SECRET, baseURL)
-  try {
-    return await auth.api.getSession({ headers: c.req.raw.headers })
-  } catch {
-    return null
-  }
-}
 
 async function verifyReportOwnership(c: any, jobId: string, userId: string): Promise<boolean> {
   const db = drizzle(c.env.DB)

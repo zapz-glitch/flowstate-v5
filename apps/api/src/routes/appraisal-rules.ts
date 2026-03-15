@@ -9,7 +9,7 @@ import { Hono } from 'hono'
 import { drizzle } from 'drizzle-orm/d1'
 import { eq, and, desc } from 'drizzle-orm'
 import type { Env } from '../types'
-import { createAuth } from '../lib/auth'
+import { getSession } from '../lib/session'
 import {
   appraisalRulePreset,
   appraisalRuleFilter,
@@ -23,6 +23,7 @@ import {
   type FilterType,
   type AdjustmentType,
 } from '../services/appraisal/types'
+import { invalidateUserSettingsCache } from '../services/user-settings'
 
 const appraisalRules = new Hono<{ Bindings: Env }>()
 
@@ -58,20 +59,6 @@ interface UpdatePresetInput {
 }
 
 // ─── Helper Functions ─────────────────────────────────────────────────────────
-
-async function getSession(c: any) {
-  const url = new URL(c.req.url)
-  const baseURL = `${url.protocol}//${url.host}/auth`
-  const auth = createAuth(c.env.DB, c.env.BETTER_AUTH_SECRET, baseURL)
-
-  try {
-    const session = await auth.api.getSession({ headers: c.req.raw.headers })
-    return session
-  } catch (error) {
-    console.error('Error getting session:', error)
-    return null
-  }
-}
 
 function convertToAppraisalFilter(filter: FilterInput) {
   return {
@@ -412,6 +399,9 @@ appraisalRules.post('/', async (c) => {
     )
   }
 
+  // Invalidate cached user settings
+  await invalidateUserSettingsCache(c.env.API_CACHE, session.user.id)
+
   // Fetch created preset with rules
   const filters = await db
     .select()
@@ -528,6 +518,9 @@ appraisalRules.patch('/:id', async (c) => {
     }
   }
 
+  // Invalidate cached user settings
+  await invalidateUserSettingsCache(c.env.API_CACHE, session.user.id)
+
   // Fetch updated preset with rules
   const filters = await db
     .select()
@@ -595,6 +588,9 @@ appraisalRules.post('/:id/set-default', async (c) => {
     .set({ isDefault: true, updatedAt: now })
     .where(eq(appraisalRulePreset.id, presetId))
 
+  // Invalidate cached user settings
+  await invalidateUserSettingsCache(c.env.API_CACHE, session.user.id)
+
   return c.json({ success: true })
 })
 
@@ -622,6 +618,9 @@ appraisalRules.delete('/:id', async (c) => {
   if (result.length === 0) {
     return c.json({ error: 'Preset not found' }, 404)
   }
+
+  // Invalidate cached user settings
+  await invalidateUserSettingsCache(c.env.API_CACHE, session.user.id)
 
   return c.json({ success: true })
 })

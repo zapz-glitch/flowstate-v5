@@ -40,7 +40,6 @@ const DEFAULT_DEAL_PARAMS: DealParamsConfig = {
   closingCostsPercent: 8,
   carryingCostsPercent: 2,
   wholesaleFee: 10000,
-  desiredProfit: null,
 }
 
 const DEFAULT_FILTERS: RecalcFilter[] = [

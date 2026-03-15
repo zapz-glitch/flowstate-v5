@@ -109,7 +109,6 @@ export function recalculateReport(
         closingCostsPercent: settings.dealParams.closingCostsPercent,
         carryingCostsPercent: settings.dealParams.carryingCostsPercent,
         wholesaleFee: settings.dealParams.wholesaleFee,
-        desiredProfit: settings.dealParams.desiredProfit ?? undefined,
         majorItems: settings.majorItems
           .filter((item) => item.enabled)
           .map((item) => ({ id: item.id as 'roof', enabled: true, cost: item.cost })),
@@ -242,7 +241,6 @@ export function recalculateReport(
       closingCostsPercent: settings.dealParams.closingCostsPercent,
       carryingCostsPercent: settings.dealParams.carryingCostsPercent,
       wholesaleFee: settings.dealParams.wholesaleFee,
-      desiredProfit: settings.dealParams.desiredProfit ?? undefined,
     },
     rehabTable,
     settings.tierRanges
@@ -291,7 +289,6 @@ function mapValuationResult(
       closingCostsPercent: settings.dealParams.closingCostsPercent,
       carryingCostsPercent: settings.dealParams.carryingCostsPercent,
       wholesaleFee: settings.dealParams.wholesaleFee,
-      desiredProfit: settings.dealParams.desiredProfit ?? undefined,
     },
     rehabTable,
     rehabLevelIndex,
@@ -365,7 +362,6 @@ export function recalculateValuationFromComps(
       closingCostsPercent: dealParams.closingCostsPercent,
       carryingCostsPercent: dealParams.carryingCostsPercent,
       wholesaleFee: dealParams.wholesaleFee,
-      desiredProfit: dealParams.desiredProfit ?? undefined,
     },
     rehabTable,
     tierRanges
@@ -381,7 +377,6 @@ export function recalculateValuationFromComps(
       closingCostsPercent: dealParams.closingCostsPercent,
       carryingCostsPercent: dealParams.carryingCostsPercent,
       wholesaleFee: dealParams.wholesaleFee,
-      desiredProfit: dealParams.desiredProfit ?? undefined,
     },
     rehabTable,
     rehabLevelIndex,

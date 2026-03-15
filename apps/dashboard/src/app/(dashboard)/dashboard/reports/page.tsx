@@ -4,6 +4,7 @@ import { getSavedReports } from '@/lib/api'
 import { FileText, ChevronLeft, ChevronRight, Globe, Lock } from 'lucide-react'
 import { Card } from '@/components/ui/card'
 import { ReportSearchInput } from './search-input'
+import { DeleteReportButton } from './delete-report-button'
 
 const REPORTS_PER_PAGE = 20
 
@@ -114,6 +115,7 @@ export default async function ReportsPage({
                       ) : (
                         <Lock className="w-3.5 h-3.5 text-foreground-tertiary" />
                       )}
+                      <DeleteReportButton jobId={report.jobId} address={report.propertyAddress} />
                       <ChevronRight className="w-4 h-4 text-foreground-tertiary" />
                     </div>
                   </div>
@@ -172,6 +174,8 @@ export default async function ReportsPage({
                     <th className="text-left px-6 py-3 text-caption font-medium text-foreground-tertiary">
                       Details
                     </th>
+                    <th className="text-center px-4 py-3 text-caption font-medium text-foreground-tertiary">
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border/60">
@@ -222,6 +226,9 @@ export default async function ReportsPage({
                         >
                           View
                         </Link>
+                      </td>
+                      <td className="px-4 py-4 text-center">
+                        <DeleteReportButton jobId={report.jobId} address={report.propertyAddress} />
                       </td>
                     </tr>
                   ))}

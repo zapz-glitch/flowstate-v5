@@ -26,6 +26,7 @@ import type {
 } from '../appraisal'
 import type { ArvTier, RehabEstimate } from '../valuation'
 import type { TierRangeDefinition } from '@flowstate-api/shared/valuation'
+import { CACHE_TTL, userSettingsKey } from '../cache'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -59,9 +60,32 @@ export interface LoadSettingsOptions {
  */
 export async function loadUserAnalysisSettings(
   d1: D1Database,
-  opts: LoadSettingsOptions
+  opts: LoadSettingsOptions,
+  kvCache?: KVNamespace
 ): Promise<UserAnalysisSettings> {
   const { userId, address, buyboxOverrides } = opts
+
+  // Check KV cache first (key includes address hash for location-specific settings)
+  if (kvCache) {
+    const addressHash = address
+      ? [address.city, address.state, address.zipCode].filter(Boolean).join('-').toLowerCase()
+      : ''
+    const cacheKey = userSettingsKey(userId, addressHash)
+    try {
+      const cached = await kvCache.get<UserAnalysisSettings>(cacheKey, 'json')
+      if (cached) {
+        console.log(`[UserSettings] Cache HIT for user ${userId}`)
+        // Re-apply buybox overrides on top of cached settings (per-request, not cached)
+        if (buyboxOverrides) {
+          cached.mergedBuybox = { ...cached.mergedBuybox, ...buyboxOverrides }
+        }
+        return cached
+      }
+    } catch (e) {
+      console.warn(`[UserSettings] Cache read error:`, e)
+    }
+  }
+
   const db = drizzle(d1)
 
   // Load appraisal rules from user's default preset
@@ -128,9 +152,8 @@ export async function loadUserAnalysisSettings(
           closingCostsPercent: dealParamsRow.closingCostsPercent,
           carryingCostsPercent: dealParamsRow.carryingCostsPercent,
           wholesaleFee: dealParamsRow.wholesaleFee,
-          desiredProfit: dealParamsRow.desiredProfit,
         }
-      : { closingCostsPercent: 8, carryingCostsPercent: 2, wholesaleFee: 10000, desiredProfit: null }),
+      : { closingCostsPercent: 8, carryingCostsPercent: 2, wholesaleFee: 10000 }),
     ...buyboxOverrides,
   }
   if (dealParamsRow) console.log(`[UserSettings] Loaded deal params for user ${userId}`)
@@ -158,6 +181,7 @@ export async function loadUserAnalysisSettings(
       .where(
         and(
           eq(locationSettings.userId, userId),
+          eq(locationSettings.isEnabled, true),
           or(
             zipNorm ? eq(locationSettings.zipCode, zipNorm) : sql`0`,
             cityNorm ? eq(locationSettings.city, cityNorm) : sql`0`,
@@ -236,11 +260,51 @@ export async function loadUserAnalysisSettings(
     }
   }
 
-  return {
+  const result: UserAnalysisSettings = {
     appraisalRules,
     customRehabTable,
     customTierRanges,
     mergedBuybox,
     customMajorItemCosts,
+  }
+
+  // Cache the result (without per-request buyboxOverrides — those are applied on read)
+  if (kvCache) {
+    const addressHash = address
+      ? [address.city, address.state, address.zipCode].filter(Boolean).join('-').toLowerCase()
+      : ''
+    const cacheKey = userSettingsKey(userId, addressHash)
+    try {
+      // Store base settings without request-specific buybox overrides
+      const toCache = buyboxOverrides
+        ? { ...result, mergedBuybox: (() => { const base = { ...result.mergedBuybox }; for (const key of Object.keys(buyboxOverrides)) delete base[key]; return base })() }
+        : result
+      await kvCache.put(cacheKey, JSON.stringify(toCache), { expirationTtl: CACHE_TTL.USER_SETTINGS })
+      console.log(`[UserSettings] Cache MISS - cached for user ${userId}`)
+    } catch (e) {
+      console.warn(`[UserSettings] Cache write error:`, e)
+    }
+  }
+
+  return result
+}
+
+/**
+ * Invalidate all cached settings for a user.
+ * Call this after any settings mutation (appraisal, rehab, deal, major, location).
+ */
+export async function invalidateUserSettingsCache(
+  kvCache: KVNamespace,
+  userId: string
+): Promise<void> {
+  try {
+    const prefix = `user-settings:${userId}`
+    const listed = await kvCache.list({ prefix })
+    if (listed.keys.length > 0) {
+      await Promise.all(listed.keys.map((k) => kvCache.delete(k.name)))
+      console.log(`[UserSettings] Invalidated ${listed.keys.length} cache entries for user ${userId}`)
+    }
+  } catch (e) {
+    console.warn(`[UserSettings] Cache invalidation error:`, e)
   }
 }

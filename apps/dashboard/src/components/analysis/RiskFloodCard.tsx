@@ -1,18 +1,35 @@
-import { AlertTriangle, Droplets } from 'lucide-react'
+import { AlertTriangle, Droplets, FileCheck } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 import type { FloodZoneData } from './shared-types'
 
+interface PermitsData {
+  count?: number
+  totalValue?: number
+  recentTypes?: string[]
+}
+
 interface RiskFloodCardProps {
   riskFlags?: string[] | null
   floodZone?: FloodZoneData | null
+  permits?: PermitsData | null
 }
 
-export function RiskFloodCard({ riskFlags, floodZone }: RiskFloodCardProps) {
+function formatCurrency(amount: number): string {
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  }).format(amount)
+}
+
+export function RiskFloodCard({ riskFlags, floodZone, permits }: RiskFloodCardProps) {
   const hasRiskFlags = riskFlags && riskFlags.length > 0
   const hasFloodZone = !!floodZone
+  const hasPermits = permits && (permits.count || permits.recentTypes?.length)
 
-  if (!hasRiskFlags && !hasFloodZone) return null
+  if (!hasRiskFlags && !hasFloodZone && !hasPermits) return null
 
   return (
     <div className="rounded-xl overflow-hidden border border-border px-6 py-4 space-y-4">
@@ -35,7 +52,39 @@ export function RiskFloodCard({ riskFlags, floodZone }: RiskFloodCardProps) {
         </div>
       )}
 
-      {hasRiskFlags && hasFloodZone && <div className="border-t border-border" />}
+      {hasPermits && hasFloodZone && <div className="border-t border-border" />}
+
+      {hasPermits && (
+        <div>
+          <div className="flex items-center gap-2.5 mb-2">
+            <FileCheck className="w-4 h-4 text-violet-600" />
+            <span className="text-body-sm font-medium">Building Permits</span>
+          </div>
+          <div className="flex items-center gap-4 text-body-sm">
+            {permits.count != null && (
+              <span>
+                Permits: <span className="font-medium">{permits.count}</span>
+              </span>
+            )}
+            {permits.totalValue != null && permits.totalValue > 0 && (
+              <span>
+                Total Value: <span className="font-medium">{formatCurrency(permits.totalValue)}</span>
+              </span>
+            )}
+          </div>
+          {permits.recentTypes && permits.recentTypes.length > 0 && (
+            <div className="flex flex-wrap gap-2 mt-2">
+              {permits.recentTypes.map((type, i) => (
+                <Badge key={i} variant="outline" className="bg-violet-500/10 text-violet-700 border-violet-500/30">
+                  {type}
+                </Badge>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {hasRiskFlags && (hasFloodZone || hasPermits) && <div className="border-t border-border" />}
 
       {hasRiskFlags && (
         <div>

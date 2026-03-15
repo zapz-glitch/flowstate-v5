@@ -307,6 +307,8 @@ export interface ResponseContext {
   }
   /** External API call statistics */
   apiCallStats?: ApiCallStats
+  /** LLM-selected best matching comp */
+  bestMatch?: { compId: string; reasoning: string }
 }
 
 /**
@@ -320,7 +322,6 @@ export interface AppliedSettings {
     closingCostsPercent: number
     carryingCostsPercent: number
     wholesaleFee: number
-    desiredProfit: number | null
   }
   rehabLevelIndex: number
   rehabTable: Record<string, Array<{ perSqft: number; minProfit: number }>>
@@ -338,7 +339,6 @@ export interface BuyboxParams {
   closingCostsPercent?: number
   carryingCostsPercent?: number
   wholesaleFee?: number
-  desiredProfit?: number
 }
 
 /**
@@ -441,6 +441,8 @@ export interface AnalysisResponse {
     asIsCompIds: string[]
     /** IDs of comps classified as After-Renovation */
     afterRenovationCompIds: string[]
+    /** Best match comp selected by LLM or rule-based scoring */
+    bestMatch?: { compId: string; reasoning: string }
     items: Array<{
       id: string
       address: string
@@ -470,6 +472,8 @@ export interface AnalysisResponse {
       disableReasons: string[]
       /** Property classification (as_is or after_renovation) */
       classification: ClassificationSummary | null
+      /** Whether this comp is the LLM/rule-selected best match */
+      isBestMatch?: boolean
       /** Appraisal rule evaluation details */
       appraisalRules: {
         /** Whether this comp passed all filters */
@@ -597,7 +601,8 @@ export interface AnalysisResponse {
 export interface ApiCallStats {
   corelogic: {
     total: number
-    endpoints: { endpoint: string; count: number }[]
+    cached: number
+    endpoints: { endpoint: string; calls: number; cached: number }[]
   }
   firecrawl: {
     total: number
@@ -605,6 +610,7 @@ export interface ApiCallStats {
   }
   llm: {
     total: number
+    cached: number
     breakdown: { purpose: string; count: number }[]
   }
   totalExternalCalls: number
@@ -741,6 +747,7 @@ export function buildAnalysisResponse(
       isEnabled: comp.isEnabled,
       disableReasons: evaluation?.disableReasons ?? [],
       classification: classificationSummary,
+      isBestMatch: ctx.bestMatch?.compId === comp.id,
       appraisalRules,
     }
   })
@@ -842,6 +849,7 @@ export function buildAnalysisResponse(
       medianPrice: appraisalResult.medianSalePrice,
       asIsCompIds: ctx.classificationSummary?.asIsCompIds ?? [],
       afterRenovationCompIds: ctx.classificationSummary?.afterRenovationCompIds ?? [],
+      bestMatch: ctx.bestMatch ?? undefined,
       items: allComps,
     },
 
@@ -991,7 +999,6 @@ export interface RehabEstimatesParams {
   closingCostsPercent?: number
   carryingCostsPercent?: number
   wholesaleFee?: number
-  desiredProfit?: number
 }
 
 /**
@@ -1016,7 +1023,6 @@ export function calculateAllRehabLevelEstimates(
     closingCostsPercent = 8,
     carryingCostsPercent = 2,
     wholesaleFee = 10000,
-    desiredProfit,
   } = params
 
   return REHAB_LEVELS.map((name, index) => {
@@ -1031,7 +1037,6 @@ export function calculateAllRehabLevelEstimates(
       closingCostsPercent,
       carryingCostsPercent,
       wholesaleFee,
-      desiredProfit,
     })
 
     return {

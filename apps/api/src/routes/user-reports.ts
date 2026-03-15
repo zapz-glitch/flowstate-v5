@@ -9,22 +9,11 @@ import { Hono } from 'hono'
 import { drizzle } from 'drizzle-orm/d1'
 import { eq, desc, sql, like, or, and } from 'drizzle-orm'
 import type { Env } from '../types'
-import { createAuth } from '../lib/auth'
+import { getSession } from '../lib/session'
 import { savedReports } from '../db/schema'
 import { hashSharePassword } from '../lib/share-token'
 
 const userReports = new Hono<{ Bindings: Env }>()
-
-async function getSession(c: any) {
-  const url = new URL(c.req.url)
-  const baseURL = `${url.protocol}//${url.host}/auth`
-  const auth = createAuth(c.env.DB, c.env.BETTER_AUTH_SECRET, baseURL)
-  try {
-    return await auth.api.getSession({ headers: c.req.raw.headers })
-  } catch {
-    return null
-  }
-}
 
 // ─── GET /user/reports ────────────────────────────────────────────────────────
 
@@ -215,6 +204,31 @@ userReports.put('/:jobId/share', async (c) => {
     hasPassword: !!updateData.sharePasswordHash,
     shareUrl: `${baseUrl}/report/${jobId}`,
   })
+})
+
+// ─── DELETE /user/reports/:jobId ─────────────────────────────────────────────
+
+userReports.delete('/:jobId', async (c) => {
+  const session = await getSession(c)
+  if (!session?.user) return c.json({ error: 'Not authenticated' }, 401)
+
+  const jobId = c.req.param('jobId')
+  const db = drizzle(c.env.DB)
+
+  const report = await db
+    .select({ id: savedReports.id, userId: savedReports.userId })
+    .from(savedReports)
+    .where(eq(savedReports.jobId, jobId))
+    .limit(1)
+    .then((rows) => rows[0] ?? null)
+
+  if (!report || report.userId !== session.user.id) {
+    return c.json({ error: 'Report not found' }, 404)
+  }
+
+  await db.delete(savedReports).where(eq(savedReports.id, report.id))
+
+  return c.json({ success: true })
 })
 
 export default userReports

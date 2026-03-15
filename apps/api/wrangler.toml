@@ -33,7 +33,7 @@ name = "ANALYSIS_JOB"
 class_name = "AnalysisJobDO"
 
 [[migrations]]
-tag = "v1"
+tag = "v3"
 new_sqlite_classes = ["AnalysisJobDO"]
 
 # ─── Workflows ─────────────────────────────────────────────────────────────────

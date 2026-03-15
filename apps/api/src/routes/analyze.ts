@@ -35,10 +35,10 @@ import type { AnalysisWorkflowParams } from '../workflows/types'
 import { generateWsToken } from '../utils/ws-token'
 import { loadUserAnalysisSettings } from '../services/user-settings'
 import { createPropertyApi } from '../services/property-api'
-import { getCoreLogicCallLog, getCoreLogicCallCount, resetCoreLogicCallLog } from '../services/property-api/providers/corelogic'
 import { DEFAULT_FILTERS } from '../services/appraisal'
 import { filtersToApiParams } from '../services/appraisal/types'
-import { generateZillowUrl } from '../services/photo-provider'
+import { generateZillowUrl, createPhotoService } from '../services/photo-provider'
+import type { PropertyIdentifier } from '../services/photo-provider'
 
 type Variables = { auth: AuthContext }
 
@@ -107,7 +107,6 @@ interface AnalyzeRequest {
     closingCostsPercent?: number
     carryingCostsPercent?: number
     wholesaleFee?: number
-    desiredProfit?: number
   }
 
   // Enrichment options
@@ -214,13 +213,13 @@ analyze.post('/', async (c) => {
       userId: auth.userId,
       address: { city: body.city, state: body.state, zipCode: body.zipCode },
       buyboxOverrides: body.buybox,
-    })
+    }, c.env.API_CACHE)
 
     // ─── Fetch property bundle synchronously ─────────────────────────────────
     // This eliminates Cloudflare Workflow Step 1 overhead (~1-2s checkpoint latency)
     // and lets us return property data immediately in the HTTP response.
-    resetCoreLogicCallLog()
     const propertyApi = createPropertyApi(c.env)
+    propertyApi.resetCallStats()
     const filters = userSettings.appraisalRules?.filters ?? DEFAULT_FILTERS
     const apiFilterParams = filtersToApiParams(filters)
 
@@ -241,6 +240,7 @@ analyze.post('/', async (c) => {
         permits: body.enrichment?.permits ?? true,
         floodZone: body.enrichment?.floodZone ?? true,
         weatherRisk: body.enrichment?.weatherRisk ?? false,
+        neighbourhood: false,
       },
       skipCache: body.skipCache,
     })
@@ -255,11 +255,13 @@ analyze.post('/', async (c) => {
     const bundle = bundleResult.data
     const { property, enrichment } = bundle
 
-    // Capture CoreLogic API call stats before handing off to workflow (separate isolate)
+    // Capture property API call stats before handing off to workflow (separate isolate)
+    const propertyCallStats = propertyApi.getCallStats()
     const preloadedApiCallStats = {
       corelogic: {
-        total: getCoreLogicCallCount(),
-        endpoints: getCoreLogicCallLog(),
+        total: propertyCallStats.total,
+        cached: propertyCallStats.cached,
+        endpoints: propertyCallStats.endpoints,
       },
     }
 
@@ -569,6 +571,86 @@ analyze.get('/defaults', async (c) => {
       majorItems: MAJOR_ITEMS,
     },
   })
+})
+
+// ─── Lazy Photo Loading ───────────────────────────────────────────────────────
+
+/**
+ * POST /analyze/comp-photos
+ *
+ * Fetch photos + descriptions for comps on demand.
+ * Used when a user enables a previously-disabled comp that didn't have photos fetched.
+ * Limited to 5 comps per request.
+ */
+analyze.post('/comp-photos', async (c) => {
+  try {
+    const auth = c.get('auth')
+    const body = await c.req.json<{
+      comps: Array<{
+        propertyId: string
+        address: string
+        city?: string
+        state?: string
+        zipCode?: string
+      }>
+    }>()
+
+    if (!body.comps || !Array.isArray(body.comps) || body.comps.length === 0) {
+      return c.json({ success: false, error: 'comps array is required' }, 400)
+    }
+
+    if (body.comps.length > 5) {
+      return c.json({ success: false, error: 'Maximum 5 comps per request' }, 400)
+    }
+
+    const photoService = createPhotoService(c.env)
+    if (!photoService.isAvailable()) {
+      return c.json({ success: false, error: 'Photo provider not available' }, 503)
+    }
+
+    const properties: PropertyIdentifier[] = body.comps.map((comp) => ({
+      propertyId: comp.propertyId,
+      address: comp.address,
+      city: comp.city ?? '',
+      state: comp.state ?? '',
+      zipCode: comp.zipCode ?? '',
+    }))
+
+    const bulkResult = await photoService.fetchBulkPhotos(properties)
+
+    const data: Record<string, {
+      photos: string[]
+      description?: string
+      features?: string[]
+      sourceUrl?: string
+    }> = {}
+
+    for (const [propertyId, photos] of bulkResult.results) {
+      data[propertyId] = {
+        photos: photos.photos,
+        description: photos.description,
+        features: photos.features,
+        sourceUrl: photos.sourceUrl,
+      }
+    }
+
+    console.log(`[Analyze] Lazy photo fetch for user ${auth.userId}: ${bulkResult.results.size}/${body.comps.length} successful`)
+
+    return c.json({
+      success: true,
+      data,
+      summary: bulkResult.summary,
+    })
+  } catch (error) {
+    console.error('[Analyze Comp Photos] Error:', error)
+    return c.json(
+      {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to fetch comp photos',
+      },
+      500
+    )
+  }
 })
 
 export default analyze

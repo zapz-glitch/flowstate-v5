@@ -248,7 +248,7 @@ class PropertyVisionService implements VisionService {
       const cached = await cache.get<PropertyConditionAnalysis>(cacheKey)
       if (cached) {
         console.log('VisionService: Cache HIT for vision analysis', { address: propertyContext.address })
-        return { success: true, data: cached }
+        return { success: true, data: cached, cached: true }
       }
 
       console.log('VisionService: Cache MISS, running vision analysis', { address: propertyContext.address })

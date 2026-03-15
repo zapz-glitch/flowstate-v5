@@ -4,12 +4,15 @@ import { createContext, useContext, useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useSession } from '@/lib/auth-client'
 import { Loader2 } from 'lucide-react'
+import { getImpersonatedUserId } from './ImpersonationProvider'
 
 export interface User {
   id: string
   name: string
   email: string
   emailVerified: boolean
+  role?: string // 'user' | 'admin'
+  plan?: string
   createdAt: Date
   updatedAt: Date
 }
@@ -37,10 +40,13 @@ interface UserProviderProps {
   requireAuth?: boolean
 }
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL!
+
 export function UserProvider({ children, requireAuth = true }: UserProviderProps) {
   const router = useRouter()
   const session = useSession()
   const [isChecking, setIsChecking] = useState(true)
+  const [enrichedUser, setEnrichedUser] = useState<User | null>(null)
 
   useEffect(() => {
     // Wait for session to load
@@ -53,6 +59,35 @@ export function UserProvider({ children, requireAuth = true }: UserProviderProps
       router.replace('/')
     }
   }, [session.isPending, session.data, router, requireAuth])
+
+  // Fetch full user profile (includes role) once session is available
+  useEffect(() => {
+    if (!session.data?.user) {
+      setEnrichedUser(null)
+      return
+    }
+
+    const sessionUser = session.data.user as User
+    // Set session user immediately so UI isn't blocked
+    setEnrichedUser(sessionUser)
+
+    // Fetch full profile with role (include impersonation header if active)
+    const impersonateId = getImpersonatedUserId()
+    const headers: Record<string, string> = impersonateId
+      ? { 'X-Impersonate-User-Id': impersonateId }
+      : {}
+
+    fetch(`${API_URL}/user`, { credentials: 'include', headers })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data) {
+          setEnrichedUser({ ...sessionUser, ...data })
+        }
+      })
+      .catch(() => {
+        // Keep session user on failure
+      })
+  }, [session.data?.user?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Show loading while checking
   if (isChecking || session.isPending) {
@@ -71,10 +106,8 @@ export function UserProvider({ children, requireAuth = true }: UserProviderProps
     return null
   }
 
-  const user = session.data?.user as User | null
-
   return (
-    <UserContext.Provider value={{ user, isLoading: false }}>
+    <UserContext.Provider value={{ user: enrichedUser, isLoading: false }}>
       {children}
     </UserContext.Provider>
   )

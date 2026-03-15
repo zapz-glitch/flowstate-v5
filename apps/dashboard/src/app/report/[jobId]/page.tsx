@@ -39,6 +39,7 @@ interface AnalysisData {
   valuation?: ValuationData
   comps?: CompsData
   riskFlags?: string[] | null
+  permits?: { count?: number; totalValue?: number; recentTypes?: string[] } | null
   floodZone?: FloodZoneData | null
   neighbourhood?: NeighbourhoodData | null
   meta?: { analysisId?: string; timestamp?: string; dataProvider?: string }
@@ -363,7 +364,7 @@ export default function ReportPage({ params }: { params: Promise<{ jobId: string
             </div>
           )}
 
-          <RiskFloodCard riskFlags={analysis.riskFlags} floodZone={analysis.floodZone} />
+          <RiskFloodCard riskFlags={analysis.riskFlags} floodZone={analysis.floodZone} permits={analysis.permits} />
 
           {/* TODO: re-enable when neighbourhood data source is available */}
           {/* <NeighbourhoodCard data={analysis.neighbourhood} subject={analysis.subject} comps={effectiveComps} /> */}

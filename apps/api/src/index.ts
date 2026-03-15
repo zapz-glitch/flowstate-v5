@@ -26,6 +26,8 @@ import reportsRoute from './routes/reports'
 import ghlSettingsRoute from './routes/ghl-settings'
 import userReportsRoute from './routes/user-reports'
 import reportPhotosRoute from './routes/report-photos'
+import waitlistRoute from './routes/waitlist'
+import adminRoute from './routes/admin'
 import ghlWebhook from './routes/webhooks/ghl'
 
 // Durable Objects
@@ -49,7 +51,7 @@ app.use(
       return allowed.includes(origin) ? origin : ''
     },
     allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-    allowHeaders: ['Content-Type', 'Authorization', 'X-Dashboard-User-Id', 'X-Dashboard-Secret'],
+    allowHeaders: ['Content-Type', 'Authorization', 'X-Dashboard-User-Id', 'X-Dashboard-Secret', 'X-Impersonate-User-Id'],
     exposeHeaders: ['X-Request-Id', 'X-RateLimit-Remaining', 'X-RateLimit-Limit', 'X-RateLimit-Reset'],
     credentials: true,
     maxAge: 86400,
@@ -106,6 +108,12 @@ app.route('/user/reports', userReportsRoute)
 
 // Report photos routes (session auth via Better Auth cookies)
 app.route('/user/reports', reportPhotosRoute)
+
+// Waitlist routes (no auth)
+app.route('/waitlist', waitlistRoute)
+
+// Admin routes (session auth + admin role check inside routes)
+app.route('/admin', adminRoute)
 
 // GHL webhook routes (self-authenticating via URL secret, no auth middleware)
 app.route('/webhooks/ghl', ghlWebhook)

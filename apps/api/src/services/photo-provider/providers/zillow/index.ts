@@ -201,7 +201,7 @@ export class ZillowPhotoProvider implements PhotoProvider {
     const errors: PhotoFetchError[] = []
 
     // Fetch all in parallel (with concurrency limit for rate limiting)
-    const CONCURRENCY = 3
+    const CONCURRENCY = 5
     for (let i = 0; i < properties.length; i += CONCURRENCY) {
       const batch = properties.slice(i, i + CONCURRENCY)
       const batchPromises = batch.map(async (property) => {

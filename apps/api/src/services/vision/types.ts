@@ -110,6 +110,8 @@ export interface VisionAnalysisRequest {
 export interface VisionAnalysisResult {
   success: true
   data: PropertyConditionAnalysis
+  /** Whether this result was served from cache (no LLM call made) */
+  cached?: boolean
 }
 
 export interface VisionAnalysisError {

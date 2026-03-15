@@ -1854,7 +1854,6 @@ const DEAL_PARAMS_DEFAULTS_UI: DealParamsConfig = {
   closingCostsPercent: 8,
   carryingCostsPercent: 2,
   wholesaleFee: 10000,
-  desiredProfit: null,
 }
 
 // Sample ARV used in the live preview

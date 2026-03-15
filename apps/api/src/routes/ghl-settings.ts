@@ -9,22 +9,11 @@ import { Hono } from 'hono'
 import { drizzle } from 'drizzle-orm/d1'
 import { eq } from 'drizzle-orm'
 import type { Env } from '../types'
-import { createAuth } from '../lib/auth'
+import { getSession } from '../lib/session'
 import { ghlSettings } from '../db'
 import { GHL_MAPPABLE_FIELDS, testGHLConnection } from '../services/ghl'
 
 const ghlSettingsRoute = new Hono<{ Bindings: Env }>()
-
-async function getSession(c: any) {
-  const url = new URL(c.req.url)
-  const baseURL = `${url.protocol}//${url.host}/auth`
-  const auth = createAuth(c.env.DB, c.env.BETTER_AUTH_SECRET, baseURL)
-  try {
-    return await auth.api.getSession({ headers: c.req.raw.headers })
-  } catch {
-    return null
-  }
-}
 
 // ─── GET /ghl-settings/fields ────────────────────────────────────────────────
 

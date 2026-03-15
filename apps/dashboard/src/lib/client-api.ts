@@ -4,14 +4,23 @@
  * For use in client components. Uses the browser's fetch with credentials.
  */
 
+import { getImpersonatedUserId } from '@/components/auth/ImpersonationProvider'
+
 // API URL - inlined at build time via next.config.js
 const API_URL = process.env.NEXT_PUBLIC_API_URL!
 
 async function fetchApi<T>(path: string, options: RequestInit = {}): Promise<T> {
+  // Inject impersonation header if admin is impersonating a user
+  const impersonateId = getImpersonatedUserId()
+  const impersonateHeaders: Record<string, string> = impersonateId
+    ? { 'X-Impersonate-User-Id': impersonateId }
+    : {}
+
   const response = await fetch(`${API_URL}${path}`, {
     ...options,
     headers: {
       'Content-Type': 'application/json',
+      ...impersonateHeaders,
       ...options.headers,
     },
     credentials: 'include',
@@ -376,7 +385,6 @@ export interface DealParamsConfig {
   closingCostsPercent: number
   carryingCostsPercent: number
   wholesaleFee: number
-  desiredProfit: number | null
 }
 
 export interface DealParamsResponse {
@@ -681,6 +689,10 @@ export async function deleteReportPhoto(jobId: string, photoId: string): Promise
   await fetchApi(`/user/reports/${jobId}/photos/${photoId}`, { method: 'DELETE' })
 }
 
+export async function deleteReport(jobId: string): Promise<void> {
+  await fetchApi(`/user/reports/${jobId}`, { method: 'DELETE' })
+}
+
 // ─── Plan Limits ───────────────────────────────────────────────────────────────
 
 export const PLAN_LIMITS = {
@@ -702,3 +714,38 @@ export const PLAN_LIMITS = {
 } as const
 
 export type Plan = keyof typeof PLAN_LIMITS
+
+// ─── Lazy Comp Photos ─────────────────────────────────────────────────────────
+
+export interface CompPhotoRequest {
+  propertyId: string
+  address: string
+  city?: string
+  state?: string
+  zipCode?: string
+}
+
+export interface CompPhotoData {
+  photos: string[]
+  description?: string
+  features?: string[]
+  sourceUrl?: string
+}
+
+export interface CompPhotoResponse {
+  success: boolean
+  data: Record<string, CompPhotoData>
+  summary: {
+    total: number
+    successful: number
+    failed: number
+    totalPhotos: number
+  }
+}
+
+export async function fetchCompPhotos(comps: CompPhotoRequest[]): Promise<CompPhotoResponse> {
+  return fetchApi<CompPhotoResponse>('/v1/analyze/comp-photos', {
+    method: 'POST',
+    body: JSON.stringify({ comps }),
+  })
+}

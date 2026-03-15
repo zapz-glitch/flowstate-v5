@@ -34,7 +34,6 @@ export function calculateValuation(
     closingCostsPercent = 8,
     carryingCostsPercent = 2,
     wholesaleFee = 10000,
-    desiredProfit,
   } = params
 
   const arvTier = getArvTier(arv, tierRanges)
@@ -51,7 +50,7 @@ export function calculateValuation(
 
   const closingCosts = Math.round(arv * (closingCostsPercent / 100))
   const carryingCosts = Math.round(arv * (carryingCostsPercent / 100))
-  const minProfit = desiredProfit ?? rehabEstimate.minProfit
+  const minProfit = rehabEstimate.minProfit
 
   // Buy Price = ARV − Rehab − Closing Costs − Carrying Costs − Profit Target
   const buyPrice = arv - totalRehabCost - closingCosts - carryingCosts - minProfit
@@ -105,7 +104,6 @@ export function calculateValuation(
     wholesaleFee,
     wholesalePrice: Math.round(wholesalePrice),
     wholesalePricePercent,
-    desiredProfit: minProfit,
     projectedProfit: Math.round(projectedProfit),
     projectedROI,
     totalInvestment: Math.round(totalInvestment),

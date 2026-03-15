@@ -75,7 +75,6 @@ export interface AnalysisWorkflowParams {
     closingCostsPercent?: number
     carryingCostsPercent?: number
     wholesaleFee?: number
-    desiredProfit?: number | null
   }
 
   // Cache control
@@ -93,11 +92,12 @@ export interface AnalysisWorkflowParams {
   /** Pre-fetched property bundle from endpoint (skips workflow Step 1) */
   preloadedPropertyBundle?: PropertyBundle
 
-  /** API call stats from route handler (CoreLogic calls happen before workflow starts) */
+  /** API call stats from route handler (property API calls happen before workflow starts) */
   preloadedApiCallStats?: {
     corelogic: {
       total: number
-      endpoints: { endpoint: string; count: number }[]
+      cached: number
+      endpoints: { endpoint: string; calls: number; cached: number }[]
     }
   }
 

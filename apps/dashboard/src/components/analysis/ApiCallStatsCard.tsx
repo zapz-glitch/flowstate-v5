@@ -31,14 +31,22 @@ export function ApiCallStatsCard({ stats }: ApiCallStatsCardProps) {
               <span className="text-caption font-medium text-foreground-secondary">CoreLogic</span>
               <span className="ml-auto text-body-sm font-semibold tabular-nums">{stats.corelogic.total}</span>
             </div>
-            {stats.corelogic.endpoints.length > 0 && (
+            {(stats.corelogic.endpoints.length > 0 || stats.corelogic.cached > 0) && (
               <div className="space-y-1">
                 {stats.corelogic.endpoints.map((ep) => (
                   <div key={ep.endpoint} className="flex items-center justify-between text-caption-sm">
                     <span className="text-foreground-tertiary truncate mr-2">{ep.endpoint}</span>
-                    <span className="text-foreground-secondary tabular-nums flex-shrink-0">{ep.count}</span>
+                    <span className="text-foreground-secondary tabular-nums flex-shrink-0">
+                      {ep.calls}{ep.cached > 0 && <span className="text-foreground-tertiary ml-1">(+{ep.cached} cached)</span>}
+                    </span>
                   </div>
                 ))}
+                {stats.corelogic.cached > 0 && (
+                  <div className="flex items-center justify-between text-caption-sm pt-1 border-t border-border/50">
+                    <span className="text-foreground-tertiary">Cache hits</span>
+                    <span className="text-foreground-secondary tabular-nums">{stats.corelogic.cached}</span>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -69,7 +77,7 @@ export function ApiCallStatsCard({ stats }: ApiCallStatsCardProps) {
               <span className="text-caption font-medium text-foreground-secondary">LLM</span>
               <span className="ml-auto text-body-sm font-semibold tabular-nums">{stats.llm.total}</span>
             </div>
-            {stats.llm.breakdown.length > 0 ? (
+            {stats.llm.breakdown.length > 0 || stats.llm.cached > 0 ? (
               <div className="space-y-1">
                 {stats.llm.breakdown.map((item) => (
                   <div key={item.purpose} className="flex items-center justify-between text-caption-sm">
@@ -77,6 +85,12 @@ export function ApiCallStatsCard({ stats }: ApiCallStatsCardProps) {
                     <span className="text-foreground-secondary tabular-nums">{item.count}</span>
                   </div>
                 ))}
+                {stats.llm.cached > 0 && (
+                  <div className="flex items-center justify-between text-caption-sm">
+                    <span className="text-foreground-tertiary">Cache hits</span>
+                    <span className="text-foreground-secondary tabular-nums">{stats.llm.cached}</span>
+                  </div>
+                )}
               </div>
             ) : (
               <div className="text-caption-sm text-foreground-tertiary">No LLM calls</div>

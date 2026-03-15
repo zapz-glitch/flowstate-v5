@@ -1,8 +1,6 @@
 'use client'
 
-import { ArrowRight, MapPin, Terminal, Copy, Check } from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
+import { Terminal, Copy, Check, Loader2, CheckCircle } from 'lucide-react'
 import { useState, useEffect, useCallback } from 'react'
 
 interface HeroProps {
@@ -15,13 +13,49 @@ interface TerminalLine {
   color?: string
 }
 
-export function Hero({ onGetStartedClick }: HeroProps) {
+export function Hero({ onGetStartedClick: _onGetStartedClick }: HeroProps) {
   const [copied, setCopied] = useState(false)
   const [lines, setLines] = useState<TerminalLine[]>([])
   const [currentText, setCurrentText] = useState('')
   const [isTyping, setIsTyping] = useState(false)
   const [showCursor, setShowCursor] = useState(true)
   const [commandIndex, setCommandIndex] = useState(0)
+
+  // Waitlist form state
+  const [firstName, setFirstName] = useState('')
+  const [lastName, setLastName] = useState('')
+  const [email, setEmail] = useState('')
+  const [waitlistLoading, setWaitlistLoading] = useState(false)
+  const [waitlistError, setWaitlistError] = useState<string | null>(null)
+  const [waitlistSuccess, setWaitlistSuccess] = useState<string | null>(null)
+
+  const handleWaitlistSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setWaitlistLoading(true)
+    setWaitlistError(null)
+
+    try {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8787'
+      const res = await fetch(`${apiUrl}/waitlist`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, firstName, lastName }),
+      })
+      const data = await res.json() as { success?: boolean; error?: string; message?: string }
+      if (!res.ok || !data.success) {
+        setWaitlistError(data.error || 'Something went wrong. Please try again.')
+        return
+      }
+      setWaitlistSuccess(data.message || 'You\'ve been added to the waitlist!')
+      setFirstName('')
+      setLastName('')
+      setEmail('')
+    } catch {
+      setWaitlistError('Unable to connect. Please try again later.')
+    } finally {
+      setWaitlistLoading(false)
+    }
+  }
 
   const curlCommand = `curl -X POST https://api.flowstate.homes/v1/analyze \\
   -H "Authorization: Bearer YOUR_API_KEY" \\
@@ -218,24 +252,61 @@ export function Hero({ onGetStartedClick }: HeroProps) {
               Get instant property valuations, comparable sales, and investment analysis powered by AI.
             </p>
 
-            {/* Search input like agent site */}
-            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3 p-2 sm:pl-5 bg-secondary/50 border border-border rounded-xl max-w-md mx-auto lg:mx-0">
-              <div className="flex items-center gap-3 flex-1 px-3 sm:px-0">
-                <MapPin className="h-5 w-5 text-muted-foreground flex-shrink-0" />
-                <Input
-                  type="text"
-                  placeholder="Enter a property address..."
-                  className="flex-1 bg-transparent border-0 text-foreground placeholder:text-muted-foreground text-[15px] focus-visible:ring-0 shadow-none"
-                />
-              </div>
-              <Button
-                onClick={onGetStartedClick}
-                variant="secondary"
-                className="bg-secondary hover:bg-secondary/80 text-foreground w-full sm:w-auto"
-              >
-                Analyze
-                <ArrowRight className="h-4 w-4" />
-              </Button>
+            {/* Waitlist form */}
+            <div className="max-w-md mx-auto lg:mx-0">
+              {waitlistSuccess ? (
+                <div className="flex items-center gap-3">
+                  <CheckCircle className="w-5 h-5 text-green-500 flex-shrink-0" />
+                  <p className="text-foreground font-medium text-sm">{waitlistSuccess}</p>
+                </div>
+              ) : (
+                <form onSubmit={handleWaitlistSubmit} className="space-y-2.5">
+                  {waitlistError && (
+                    <p className="text-sm text-red-600 dark:text-red-400">{waitlistError}</p>
+                  )}
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={firstName}
+                      onChange={(e) => setFirstName(e.target.value)}
+                      required
+                      placeholder="First name"
+                      className="flex-1 min-w-0 px-3.5 py-2.5 bg-secondary/50 border border-border rounded-xl text-foreground placeholder:text-muted-foreground text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500/50 transition-colors"
+                    />
+                    <input
+                      type="text"
+                      value={lastName}
+                      onChange={(e) => setLastName(e.target.value)}
+                      required
+                      placeholder="Last name"
+                      className="flex-1 min-w-0 px-3.5 py-2.5 bg-secondary/50 border border-border rounded-xl text-foreground placeholder:text-muted-foreground text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500/50 transition-colors"
+                    />
+                  </div>
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    required
+                    placeholder="you@example.com"
+                    className="w-full px-3.5 py-2.5 bg-secondary/50 border border-border rounded-xl text-foreground placeholder:text-muted-foreground text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500/50 transition-colors"
+                  />
+                  <button
+                    type="submit"
+                    disabled={waitlistLoading}
+                    className="w-full py-2.5 px-4 bg-gradient-to-r from-purple-500 to-violet-600 text-white font-medium rounded-xl hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2 shadow-lg shadow-purple-500/25"
+                  >
+                    {waitlistLoading ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span>Joining...</span>
+                      </>
+                    ) : (
+                      <span>Get Early Access</span>
+                    )}
+                  </button>
+                  <p className="text-xs text-muted-foreground/50">No spam. Unsubscribe anytime.</p>
+                </form>
+              )}
             </div>
           </div>
 

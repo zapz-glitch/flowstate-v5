@@ -322,11 +322,11 @@ ghlWebhook.post('/:webhookSecret', async (c) => {
     // Consume response body to properly dispose RPC result
     await initResponse.text()
 
-    // Load user's analysis settings
+    // Load user's analysis settings (with KV caching)
     const userSettings = await loadUserAnalysisSettings(c.env.DB, {
       userId,
       address: { city, state, zipCode },
-    })
+    }, c.env.API_CACHE)
 
     // Build workflow params
     const workflowParams: AnalysisWorkflowParams = {

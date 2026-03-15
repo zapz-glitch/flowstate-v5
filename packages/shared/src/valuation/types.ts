@@ -93,8 +93,6 @@ export interface ValuationParams {
   carryingCostsPercent?: number
   /** Wholesale fee amount (default: $10,000) */
   wholesaleFee?: number
-  /** Override minimum profit (uses tier default if not provided) */
-  desiredProfit?: number
 }
 
 // ─── Valuation Result ──────────────────────────────────────────────────────────
@@ -129,7 +127,6 @@ export interface ValuationResult {
   wholesalePricePercent: number
 
   // Profit & ROI
-  desiredProfit: number
   projectedProfit: number
   projectedROI: number
   totalInvestment: number

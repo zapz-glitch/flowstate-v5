@@ -171,8 +171,6 @@ async function getAccessToken(env: Env): Promise<string> {
 
   const credentials = btoa(`${clientId}:${clientSecret}`)
 
-  _callLog.push({ endpoint: '/oauth/token', timestamp: Date.now() })
-
   const response = await fetch(`${TOKEN_URL}?grant_type=client_credentials`, {
     method: 'POST',
     headers: {

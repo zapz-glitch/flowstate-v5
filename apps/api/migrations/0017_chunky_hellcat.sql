@@ -1,0 +1,1 @@
+ALTER TABLE `deal_params` DROP COLUMN `desired_profit`;

@@ -10,24 +10,14 @@ import { Hono } from 'hono'
 import { drizzle } from 'drizzle-orm/d1'
 import { eq } from 'drizzle-orm'
 import type { Env } from '../types'
-import { createAuth } from '../lib/auth'
+import { getSession } from '../lib/session'
 import { majorItemCosts } from '../db'
 import { MAJOR_ITEMS } from '../services/valuation'
+import { invalidateUserSettingsCache } from '../services/user-settings'
 
 const majorItemCostsRoute = new Hono<{ Bindings: Env }>()
 
 export type MajorItemCostsMap = Partial<Record<string, number>>
-
-async function getSession(c: any) {
-  const url = new URL(c.req.url)
-  const baseURL = `${url.protocol}//${url.host}/auth`
-  const auth = createAuth(c.env.DB, c.env.BETTER_AUTH_SECRET, baseURL)
-  try {
-    return await auth.api.getSession({ headers: c.req.raw.headers })
-  } catch {
-    return null
-  }
-}
 
 /** Build the full list merging user overrides on top of system defaults */
 function buildItemList(customCosts: MajorItemCostsMap) {
@@ -95,6 +85,9 @@ majorItemCostsRoute.put('/', async (c) => {
     await db.insert(majorItemCosts).values({ userId: session.user.id, costsJson, createdAt: now, updatedAt: now })
   }
 
+  // Invalidate cached user settings
+  await invalidateUserSettingsCache(c.env.API_CACHE, session.user.id)
+
   return c.json({ items: buildItemList(sanitized), isCustom: true, updatedAt: now })
 })
 
@@ -106,6 +99,9 @@ majorItemCostsRoute.delete('/', async (c) => {
 
   const db = drizzle(c.env.DB)
   await db.delete(majorItemCosts).where(eq(majorItemCosts.userId, session.user.id))
+
+  // Invalidate cached user settings
+  await invalidateUserSettingsCache(c.env.API_CACHE, session.user.id)
 
   return c.json({ items: buildItemList({}), isCustom: false })
 })

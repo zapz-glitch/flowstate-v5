@@ -10,9 +10,10 @@ import { Hono } from 'hono'
 import { drizzle } from 'drizzle-orm/d1'
 import { eq } from 'drizzle-orm'
 import type { Env } from '../types'
-import { createAuth } from '../lib/auth'
+import { getSession } from '../lib/session'
 import { rehabConfig } from '../db'
 import { DEFAULT_REHAB_TABLE } from '../services/valuation'
+import { invalidateUserSettingsCache } from '../services/user-settings'
 import type { ArvTier, RehabEstimate } from '../services/valuation'
 import { DEFAULT_TIER_RANGES, type TierRangeDefinition } from '@flowstate-api/shared/valuation'
 
@@ -23,17 +24,6 @@ const rehabConfigRoute = new Hono<{ Bindings: Env }>()
 type RehabTable = Record<ArvTier, RehabEstimate[]>
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-async function getSession(c: any) {
-  const url = new URL(c.req.url)
-  const baseURL = `${url.protocol}//${url.host}/auth`
-  const auth = createAuth(c.env.DB, c.env.BETTER_AUTH_SECRET, baseURL)
-  try {
-    return await auth.api.getSession({ headers: c.req.raw.headers })
-  } catch {
-    return null
-  }
-}
 
 function validateRehabTable(table: unknown, tierKeys: string[]): table is RehabTable {
   if (typeof table !== 'object' || table === null) return false
@@ -148,6 +138,9 @@ rehabConfigRoute.put('/', async (c) => {
     })
   }
 
+  // Invalidate cached user settings
+  await invalidateUserSettingsCache(c.env.API_CACHE, session.user.id)
+
   return c.json({ success: true, config: body.config as RehabTable, tierRanges: tierRanges ?? DEFAULT_TIER_RANGES, isCustom: true, updatedAt: now })
 })
 
@@ -161,6 +154,9 @@ rehabConfigRoute.delete('/', async (c) => {
 
   const db = drizzle(c.env.DB)
   await db.delete(rehabConfig).where(eq(rehabConfig.userId, session.user.id))
+
+  // Invalidate cached user settings
+  await invalidateUserSettingsCache(c.env.API_CACHE, session.user.id)
 
   return c.json({ config: DEFAULT_REHAB_TABLE, isCustom: false })
 })

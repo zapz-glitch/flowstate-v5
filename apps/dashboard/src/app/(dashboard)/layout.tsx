@@ -2,15 +2,18 @@
 
 import Sidebar from '@/components/Sidebar'
 import { UserProvider } from '@/components/auth/UserProvider'
+import { ImpersonationProvider } from '@/components/auth/ImpersonationProvider'
 import { SidebarProvider, useSidebar } from '@/components/SidebarProvider'
+import { useImpersonation } from '@/components/auth/ImpersonationProvider'
 import { AnalysisBridge } from '@/components/AnalysisBridge'
 import { cn } from '@/lib/utils'
 
 function DashboardContent({ children }: { children: React.ReactNode }) {
   const { collapsed } = useSidebar()
+  const { isImpersonating } = useImpersonation()
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className={cn('min-h-screen bg-background', isImpersonating && 'pt-10')}>
       <Sidebar />
       <main
         className={cn(
@@ -34,10 +37,12 @@ export default function DashboardLayout({
 }) {
   return (
     <UserProvider requireAuth>
-      <SidebarProvider>
-        <AnalysisBridge />
-        <DashboardContent>{children}</DashboardContent>
-      </SidebarProvider>
+      <ImpersonationProvider>
+        <SidebarProvider>
+          <AnalysisBridge />
+          <DashboardContent>{children}</DashboardContent>
+        </SidebarProvider>
+      </ImpersonationProvider>
     </UserProvider>
   )
 }

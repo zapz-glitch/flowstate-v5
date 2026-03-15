@@ -474,8 +474,8 @@ export default function AnalyzePage() {
             ) : null}
 
             {/* Risk Flags & Flood Zone — available after Step 1 */}
-            {(displayData?.riskFlags || displayData?.floodZone) ? (
-              <RiskFloodCard riskFlags={displayData.riskFlags} floodZone={displayData.floodZone} />
+            {(displayData?.riskFlags || displayData?.floodZone || displayData?.permits) ? (
+              <RiskFloodCard riskFlags={displayData.riskFlags} floodZone={displayData.floodZone} permits={displayData.permits} />
             ) : isRunning && !displayData?.riskFlags ? (
               <RiskFloodSkeleton />
             ) : null}
