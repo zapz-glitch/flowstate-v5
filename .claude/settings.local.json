@@ -18,7 +18,11 @@
       "Bash(export PATH=\"/Users/yalamber/.nvm/versions/node/v22.12.0/bin:$PATH\")",
       "Bash(export PATH=\"/Users/yalamber/.nvm/versions/node/v22.12.0/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH\")",
       "Bash(source $HOME/.nvm/nvm.sh)",
-      "Bash(npm run:*)"
+      "Bash(npm run:*)",
+      "Bash(source ~/.zshrc)",
+      "WebFetch(domain:www.npmjs.com)",
+      "WebFetch(domain:developers.cloudflare.com)",
+      "WebSearch"
     ]
   }
 }

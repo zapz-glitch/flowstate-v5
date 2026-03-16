@@ -487,46 +487,6 @@ export const ghlSettings = sqliteTable(
 )
 
 // ==========================================
-// Report Photos (user-uploaded property photos)
-// ==========================================
-
-export const reportPhotos = sqliteTable(
-  'report_photos',
-  {
-    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
-    userId: text('user_id').notNull().references(() => user.id, { onDelete: 'cascade' }),
-    jobId: text('job_id').notNull(),
-    r2Key: text('r2_key').notNull(),
-    fileName: text('file_name').notNull(),
-    mimeType: text('mime_type').notNull(),
-    sizeBytes: integer('size_bytes').notNull(),
-    createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
-  },
-  (table) => [
-    index('idx_report_photos_user_job').on(table.userId, table.jobId),
-  ]
-)
-
-// ==========================================
-// Photo Analysis Results (AI analysis of uploaded photos)
-// ==========================================
-
-export const photoAnalysisResults = sqliteTable(
-  'photo_analysis_results',
-  {
-    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
-    userId: text('user_id').notNull().references(() => user.id, { onDelete: 'cascade' }),
-    jobId: text('job_id').notNull(),
-    findingsJson: text('findings_json').notNull(),
-    model: text('model'),
-    createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
-  },
-  (table) => [
-    index('idx_photo_analysis_user_job').on(table.userId, table.jobId),
-  ]
-)
-
-// ==========================================
 // Waitlist
 // ==========================================
 

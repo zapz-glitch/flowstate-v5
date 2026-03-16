@@ -9,36 +9,24 @@ import type { AnalyzeData } from '@/app/(dashboard)/dashboard/analyze/actions'
 
 export interface ActiveAnalysis {
   jobId: string
-  propertyKey: string
-  streamUrl: string
   address: string
 }
 
 export interface AnalysisActions {
-  startAnalysis: (params: ActiveAnalysis) => void
   clearAnalysis: () => void
   cancelAnalysis: () => void
-  switchToPolling: () => void
-  seedPartialData: (data: Record<string, unknown>) => void
 }
 
 const noopActions: AnalysisActions = {
-  startAnalysis: () => { throw new Error('AnalysisBridge not mounted') },
   clearAnalysis: () => { throw new Error('AnalysisBridge not mounted') },
   cancelAnalysis: () => { throw new Error('AnalysisBridge not mounted') },
-  switchToPolling: () => { throw new Error('AnalysisBridge not mounted') },
-  seedPartialData: () => { throw new Error('AnalysisBridge not mounted') },
 }
 
 // ─── Primitive Atoms ────────────────────────────────────────────────────────
 
 export const activeAnalysisAtom = atom<ActiveAnalysis | null>(null)
-export const streamUrlAtom = atom<string | null>(null)
-export const propertyKeyAtom = atom<string | null>(null)
-export const usePollingAtom = atom<boolean>(false)
 export const analysisResultAtom = atom<AnalyzeData | null>(null)
 export const analysisStateAtom = atom<AnalysisState>(initialAnalysisState)
-export const isConnectingAtom = atom<boolean>(false)
 export const analysisActionsAtom = atom<AnalysisActions>(noopActions)
 
 // ─── Derived Atoms (read-only) ──────────────────────────────────────────────

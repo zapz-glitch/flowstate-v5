@@ -12,11 +12,8 @@ export type JobStatus = 'queued' | 'processing' | 'completed' | 'failed' | 'canc
 export type AnalysisStep =
   | 'property_fetch'
   | 'appraisal_rules'
-  | 'photo_fetch'
-  | 'comp_selection'
   | 'valuation'
   | 'response_build'
-  | 'vision_analysis'
 
 export type StepStatus = 'pending' | 'in_progress' | 'completed' | 'failed' | 'skipped'
 
@@ -40,24 +37,10 @@ export const STEP_CONFIGS: StepConfig[] = [
   },
   {
     step: 'appraisal_rules',
-    label: 'Applying Rules',
-    description: 'Filters & price adjustments',
+    label: 'Evaluating Comps',
+    description: 'Appraisal rules, price classification & valuation',
     icon: '📋',
     required: true,
-  },
-  {
-    step: 'photo_fetch',
-    label: 'Fetching Photos',
-    description: 'Property images for analysis',
-    icon: '📷',
-    required: false,
-  },
-  {
-    step: 'comp_selection',
-    label: 'AI Analysis',
-    description: 'Classifying property conditions',
-    icon: '🤖',
-    required: false,
   },
   {
     step: 'valuation',
@@ -211,46 +194,6 @@ export interface StepDataData {
   step: AnalysisStep
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   data: Record<string, any>
-}
-
-// ─── API Response Types ───────────────────────────────────────────────────────
-
-export interface QueueJobResponse {
-  success: true
-  data: {
-    jobId: string
-    status: JobStatus
-    streamUrl: string
-    pollUrl: string
-    estimatedDurationMs?: number
-  }
-}
-
-export interface JobStatusResponse {
-  success: true
-  data: {
-    jobId: string
-    status: JobStatus
-    currentStep: AnalysisStep | null
-    progress: {
-      completedSteps: number
-      totalSteps: number
-      percentComplete: number
-    }
-    steps: StepProgress[]
-    createdAt: string
-    startedAt: string | null
-    completedAt: string | null
-    totalDurationMs: number | null
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    result?: any
-    error?: {
-      code: string
-      message: string
-      step?: AnalysisStep
-      retryable: boolean
-    }
-  }
 }
 
 // ─── Hook State ───────────────────────────────────────────────────────────────

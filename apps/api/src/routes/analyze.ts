@@ -30,15 +30,15 @@ import {
   MAJOR_ITEMS,
   type MajorItem,
 } from '../services/valuation'
-import type { QueueJobResponse, JobStatusResponse } from '../durable-objects/types'
-import type { AnalysisWorkflowParams } from '../workflows/types'
-import { generateWsToken } from '../utils/ws-token'
 import { loadUserAnalysisSettings } from '../services/user-settings'
 import { createPropertyApi } from '../services/property-api'
 import { DEFAULT_FILTERS } from '../services/appraisal'
 import { filtersToApiParams } from '../services/appraisal/types'
-import { generateZillowUrl, createPhotoService } from '../services/photo-provider'
+import { createPhotoService } from '../services/photo-provider'
 import type { PropertyIdentifier } from '../services/photo-provider'
+import { performAnalysis } from '../services/evaluation'
+import { drizzle } from 'drizzle-orm/d1'
+import { savedReports } from '../db/schema'
 
 type Variables = { auth: AuthContext }
 
@@ -51,34 +51,6 @@ const analyze = new Hono<{ Bindings: Env; Variables: Variables }>()
  */
 function generateJobId(): string {
   return `job_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`
-}
-
-/**
- * Normalize property key for DO identification
- */
-function normalizePropertyKey(request: AnalyzeRequest): string {
-  if (request.propertyId) {
-    return `pid:${request.propertyId}`
-  }
-
-  // Create a hash of the address components
-  const addressParts = [
-    request.address || request.streetAddress || '',
-    request.city || '',
-    request.state || '',
-    request.zipCode || '',
-  ]
-    .map((s) => s.toLowerCase().trim())
-    .join('|')
-
-  // Use a simple hash for the key
-  let hash = 0
-  for (let i = 0; i < addressParts.length; i++) {
-    const char = addressParts.charCodeAt(i)
-    hash = (hash << 5) - hash + char
-    hash = hash & hash // Convert to 32bit integer
-  }
-  return `addr:${Math.abs(hash).toString(36)}`
 }
 
 // ─── Request Types ─────────────────────────────────────────────────────────────
@@ -116,41 +88,8 @@ interface AnalyzeRequest {
     weatherRisk?: boolean
   }
 
-  // Photo analysis options
-  photoAnalysis?: {
-    /** Enable photo fetching and AI vision analysis */
-    enabled?: boolean
-    /** Photo provider to use (auto-detected if not specified) */
-    provider?: 'zillow' | 'mls' | 'redfin'
-    /** Max comps to fetch photos for (default: 10) */
-    maxComps?: number
-    /** Require comps to be better than or equal to subject (default: true) */
-    requireBetterOrEqual?: boolean
-  }
-
-  /**
-   * Zillow URL Context options (via Gemini URL Context tool)
-   *
-   * When enabled, fetches property data from Zillow using Gemini's URL context
-   * capability. This provides photos, description, price history, and features.
-   *
-   * Note: This uses Gemini for web page understanding, NOT for vision analysis.
-   * Vision analysis (photo comparison) uses OpenRouter.
-   */
-  zillowContext?: {
-    /** Enable Zillow URL context fetching via Gemini */
-    enabled?: boolean
-    /** Skip cache and fetch fresh data from Gemini */
-    skipCache?: boolean
-    /** Max comps to fetch Zillow data for (default: 10) */
-    maxComps?: number
-  }
-
   /** Skip cache and fetch fresh data from APIs */
   skipCache?: boolean
-
-  /** Enable AI vision analysis of subject property photos (runs in background after results) */
-  visionClassification?: boolean
 }
 
 // ─── Main Endpoint ─────────────────────────────────────────────────────────────
@@ -180,53 +119,19 @@ analyze.post('/', async (c) => {
       )
     }
 
-    // Generate job ID and property key
     const jobId = generateJobId()
-    const propertyKey = normalizePropertyKey(body)
 
-    // Get or create the AnalysisJob DO
-    const doId = c.env.ANALYSIS_JOB.idFromName(`${auth.userId}:${propertyKey}`)
-    const jobDO = c.env.ANALYSIS_JOB.get(doId)
-
-    const doInitStart = Date.now()
-    // Initialize job state in DO
-    const initResponse = await jobDO.fetch(
-      new Request('http://internal/init', {
-        method: 'POST',
-        body: JSON.stringify({
-          jobId,
-          userId: auth.userId,
-          apiKeyId: auth.apiKeyId,
-          propertyKey,
-          request: body,
-        }),
-      })
-    )
-
-    if (!initResponse.ok) {
-      const error = await initResponse.json() as { error?: string }
-      return c.json(
-        { success: false, error: error.error || 'Failed to initialize job' },
-        500
-      )
-    }
-    // Consume response body to properly dispose RPC result
-    await initResponse.text()
-    console.log(`[Analyze][Timing] DO init: ${Date.now() - doInitStart}ms`)
-
-    // Load all user settings (appraisal presets, rehab config, deal params, location overrides)
+    // ─── 1. Load user settings ───────────────────────────────────────────────
     const settingsStart = Date.now()
     const userSettings = await loadUserAnalysisSettings(c.env.DB, {
       userId: auth.userId,
       address: { city: body.city, state: body.state, zipCode: body.zipCode },
       buyboxOverrides: body.buybox,
     }, c.env.API_CACHE)
-    console.log(`[Analyze][Timing] User settings load: ${Date.now() - settingsStart}ms`)
+    console.log(`[Analyze][Timing] User settings: ${Date.now() - settingsStart}ms`)
 
-    // ─── Fetch property bundle synchronously ─────────────────────────────────
+    // ─── 2. Fetch property bundle from CoreLogic ─────────────────────────────
     const bundleFetchStart = Date.now()
-    // This eliminates Cloudflare Workflow Step 1 overhead (~1-2s checkpoint latency)
-    // and lets us return property data immediately in the HTTP response.
     const propertyApi = createPropertyApi(c.env)
     propertyApi.resetCallStats()
     const filters = userSettings.appraisalRules?.filters ?? DEFAULT_FILTERS
@@ -254,7 +159,7 @@ analyze.post('/', async (c) => {
       skipCache: body.skipCache,
     })
 
-    console.log(`[Analyze][Timing] Property bundle fetch: ${Date.now() - bundleFetchStart}ms`)
+    console.log(`[Analyze][Timing] CoreLogic fetch: ${Date.now() - bundleFetchStart}ms`)
 
     if (!bundleResult.success) {
       return c.json(
@@ -264,287 +169,73 @@ analyze.post('/', async (c) => {
     }
 
     const bundle = bundleResult.data
-    const { property, enrichment } = bundle
 
-    // Capture property API call stats before handing off to workflow (separate isolate)
+    // ─── 3. Evaluate: appraisal + price classification + valuation ───────────
+    const evalStart = Date.now()
     const propertyCallStats = propertyApi.getCallStats()
-    const preloadedApiCallStats = {
-      corelogic: {
-        total: propertyCallStats.total,
-        cached: propertyCallStats.cached,
-        endpoints: propertyCallStats.endpoints,
-      },
-    }
 
-    // Build the rendered step_data shape (same as workflow's broadcastStepData for property_fetch)
-    const riskFlags: string[] = []
-    if (enrichment.floodZone?.isInFloodZone) riskFlags.push(`Flood Zone: ${enrichment.floodZone.floodZone}`)
-    if (property.transaction?.isForeclosure) riskFlags.push('Foreclosure')
-    if (property.transaction?.isShortSale) riskFlags.push('Short Sale')
-    if (property.yearBuilt && property.yearBuilt < 1978) riskFlags.push('Pre-1978 (Lead Paint)')
-    if (enrichment.permits?.items.some((p) => p.jobValue && p.jobValue > 50000)) riskFlags.push('Major Permits (>$50K)')
-
-    const propertyBundleResponse = {
-      subject: {
-        address: `${property.address}, ${property.city}, ${property.state} ${property.zipCode}`,
-        county: property.county ?? null,
-        latitude: property.latitude ?? null,
-        longitude: property.longitude ?? null,
-        bedrooms: property.bedrooms ?? null,
-        bathrooms: property.bathrooms ?? null,
-        squareFeet: property.squareFeet ?? null,
-        lotSizeAcres: property.lotSizeAcres ?? null,
-        yearBuilt: property.yearBuilt ?? null,
-        propertyType: property.propertyType ?? null,
-        subdivision: property.subdivision ?? null,
-        lastSale: property.lastSalePrice ? {
-          price: property.lastSalePrice,
-          date: property.lastSaleDate ?? null,
-          pricePerSqft: property.pricePerSqft ?? null,
-        } : null,
-        taxAssessment: property.assessedValue ?? null,
-        foundationType: property.construction?.foundationType ?? null,
-        hoaFee: property.hoaFee ?? null,
-        zillowUrl: generateZillowUrl({
-          propertyId: property.id,
-          address: property.address,
-          city: property.city,
-          state: property.state,
-          zipCode: property.zipCode,
-        }),
-        photos: [],
-        classification: null,
-      },
-      riskFlags: riskFlags.length > 0 ? riskFlags : null,
-      floodZone: enrichment.floodZone ? {
-        zone: enrichment.floodZone.floodZone,
-        inFloodZone: enrichment.floodZone.isInFloodZone,
-        description: enrichment.floodZone.floodZoneDescription,
-      } : null,
-      permits: enrichment.permits ? {
-        count: enrichment.permits.count,
-        totalValue: enrichment.permits.totalJobValue ?? null,
-        recentTypes: (enrichment.permits.recentPermitTypes ?? []).slice(0, 5),
-      } : null,
-      meta: {
-        analysisId: jobId,
-        timestamp: new Date().toISOString(),
-        dataProvider: property.provider,
-      },
-    }
-
-    // Broadcast step_data to DO so SSE late-joiners get it
-    const stepDataBroadcastStart = Date.now()
-    const stepDataResponse = await jobDO.fetch(
-      new Request('http://internal/step-data', {
-        method: 'POST',
-        body: JSON.stringify({
-          step: 'property_fetch',
-          data: propertyBundleResponse,
-        }),
-      })
-    )
-    // Consume response body to properly dispose RPC result
-    await stepDataResponse.text()
-
-    console.log(`[Analyze][Timing] Step data broadcast: ${Date.now() - stepDataBroadcastStart}ms`)
-
-    // Start the workflow with preloaded bundle (skips Step 1)
-    const workflowCreateStart = Date.now()
-    const workflowParams: AnalysisWorkflowParams = {
+    const { response: analysisResult } = performAnalysis({
       jobId,
-      userId: auth.userId,
-      propertyKey,
-      address: body.address,
-      streetAddress: body.streetAddress,
-      city: body.city || property.city,
-      state: body.state || property.state,
-      zipCode: body.zipCode || property.zipCode,
-      propertyId: body.propertyId,
-      searchOptions: body.searchOptions,
-      enrichment: body.enrichment,
-      photoAnalysis: body.photoAnalysis ?? body.zillowContext,
+      bundle,
       appraisalRules: userSettings.appraisalRules,
       buybox: userSettings.mergedBuybox,
-      skipCache: body.skipCache,
       customRehabTable: userSettings.customRehabTable,
       customTierRanges: userSettings.customTierRanges,
       customMajorItemCosts: userSettings.customMajorItemCosts,
-      preloadedPropertyBundle: bundle,
-      preloadedApiCallStats,
-      visionClassification: body.visionClassification ?? false, // Off by default — runs in background when enabled
-    }
-
-    const workflow = await c.env.ANALYSIS_WORKFLOW.create({
-      id: jobId,
-      params: workflowParams,
+      apiCallStats: {
+        corelogic: {
+          total: propertyCallStats.total,
+          cached: propertyCallStats.cached,
+          endpoints: propertyCallStats.endpoints,
+        },
+        firecrawl: { total: 0, cached: 0 },
+        llm: { total: 0, cached: 0, breakdown: [] },
+        totalExternalCalls: propertyCallStats.total,
+      },
     })
 
-    console.log(`[Analyze][Timing] Workflow create: ${Date.now() - workflowCreateStart}ms`)
-    console.log(`[Analyze][Timing] Total route handler: ${Date.now() - routeStart}ms`)
-    console.log(`[Analyze] Job ${jobId} started via Workflow (instance: ${workflow.id}, property preloaded)`)
+    console.log(`[Analyze][Timing] Evaluation: ${Date.now() - evalStart}ms`)
 
-    // Build response URLs
-    const baseUrl = new URL(c.req.url).origin
-    const response: QueueJobResponse = {
-      success: true,
-      data: {
-        jobId,
-        propertyKey,
-        status: 'queued',
-        streamUrl: `${baseUrl}/v1/analyze/jobs/${jobId}/stream`,
-        pollUrl: `${baseUrl}/v1/analyze/jobs/${jobId}`,
-        estimatedDurationMs: body.photoAnalysis?.enabled !== false ? 12000 : 6000,
-        propertyBundle: propertyBundleResponse,
-      },
-    }
-
-    return c.json(response, 200)
-  } catch (error) {
-    console.error('[Analyze] Error starting job:', error)
-    return c.json(
-      {
-        success: false,
-        error: error instanceof Error ? error.message : 'Failed to start analysis job',
-      },
-      500
-    )
-  }
-})
-
-/**
- * GET /analyze/jobs/:jobId
- *
- * Get the current status of an analysis job.
- * Returns job state, progress, and result (if completed).
- */
-analyze.get('/jobs/:jobId', async (c) => {
-  try {
-    const jobId = c.req.param('jobId')
-    const auth = c.get('auth')
-
-    // Parse job ID to get property key
-    // Job IDs contain timestamp and random suffix, we need to find the DO
-    // For now, we'll search through possible DOs or require the property key
-
-    // Get all job DOs for this user (this is a simplified approach)
-    // In production, you might want to store job ID -> DO name mapping in KV
-
-    // Try to find the job by iterating or use a stored mapping
-    // For simplicity, we'll return a not found for now if we can't locate it
-    // A better approach would be to store jobId -> propertyKey mapping in KV
-
-    // Check if jobId includes property key hint (could be passed as query param)
-    const propertyKey = c.req.query('propertyKey')
-
-    if (!propertyKey) {
-      return c.json(
-        { success: false, error: 'propertyKey query parameter required to locate job' },
-        400
-      )
-    }
-
-    const doId = c.env.ANALYSIS_JOB.idFromName(`${auth.userId}:${propertyKey}`)
-    const jobDO = c.env.ANALYSIS_JOB.get(doId)
-
-    const stateResponse = await jobDO.fetch(new Request('http://internal/state'))
-
-    if (!stateResponse.ok) {
-      await stateResponse.text() // Consume body to dispose RPC result
-      if (stateResponse.status === 404) {
-        return c.json({ success: false, error: 'Job not found' }, 404)
+    // ─── 4. Save report to DB (background, non-blocking) ────────────────────
+    c.executionCtx.waitUntil((async () => {
+      try {
+        const db = drizzle(c.env.DB)
+        await db.insert(savedReports).values({
+          userId: auth.userId,
+          jobId,
+          propertyAddress: analysisResult.subject.address,
+          propertyCity: body.city || bundle.property.city || '',
+          propertyState: body.state || bundle.property.state || '',
+          propertyZip: body.zipCode || bundle.property.zipCode || '',
+          fullResponseJson: JSON.stringify(analysisResult),
+          arv: analysisResult.valuation.arv,
+          asIsValue: analysisResult.valuation.asIsValue ?? null,
+          maxAllowableOffer: analysisResult.valuation.buyPrice,
+          estimatedRepairs: analysisResult.valuation.rehabCost,
+        })
+        console.log(`[Analyze] Report saved for job ${jobId}`)
+      } catch (error) {
+        console.warn(`[Analyze] Failed to save report (non-fatal):`, error instanceof Error ? error.message : error)
       }
-      return c.json({ success: false, error: 'Failed to get job status' }, 500)
-    }
+    })())
 
-    const state = await stateResponse.json() as JobStatusResponse
-
-    // Verify job ID matches
-    if (state.data.jobId !== jobId) {
-      return c.json({ success: false, error: 'Job not found' }, 404)
-    }
-
-    return c.json(state)
-  } catch (error) {
-    console.error('[Analyze Job Status] Error:', error)
-    return c.json(
-      {
-        success: false,
-        error: error instanceof Error ? error.message : 'Failed to get job status',
-      },
-      500
-    )
-  }
-})
-
-/**
- * POST /analyze/stream-token
- *
- * Generate a short-lived signed token for SSE stream authentication.
- * This endpoint requires authentication (via auth middleware).
- *
- * The token is HMAC-SHA256 signed and contains:
- * - userId: The authenticated user's ID
- * - jobId: The job to connect to
- * - propertyKey: The property key for DO lookup
- * - exp: Expiry timestamp (5 minutes from now)
- *
- * Security:
- * - Tokens expire after 5 minutes
- * - Tokens are scoped to specific job and property
- * - Signature prevents tampering
- */
-analyze.post('/stream-token', async (c) => {
-  try {
-    const auth = c.get('auth')
-    const body = await c.req.json<{ jobId: string; propertyKey: string }>()
-
-    if (!body.jobId || !body.propertyKey) {
-      return c.json(
-        { success: false, error: 'jobId and propertyKey are required' },
-        400
-      )
-    }
-
-    const secret = c.env.DASHBOARD_INTERNAL_SECRET
-    if (!secret) {
-      console.error('[Stream Token] DASHBOARD_INTERNAL_SECRET not configured')
-      return c.json(
-        { success: false, error: 'Server configuration error' },
-        500
-      )
-    }
-
-    // Generate signed token
-    const token = await generateWsToken(
-      auth.userId,
-      body.jobId,
-      body.propertyKey,
-      secret
-    )
-
-    // Build SSE URL
-    const baseUrl = new URL(c.req.url)
-    const streamUrl = `${baseUrl.protocol}//${baseUrl.host}/sse/analyze/${body.jobId}?token=${encodeURIComponent(token)}`
-
-    console.log(`[Stream Token] Generated SSE URL: ${streamUrl}`)
+    console.log(`[Analyze][Timing] Total: ${Date.now() - routeStart}ms`)
+    console.log(`[Analyze] Job ${jobId} completed synchronously (${bundle.comparables.length} comps)`)
 
     return c.json({
       success: true,
       data: {
-        token,
-        streamUrl,
-        expiresIn: 300, // 5 minutes in seconds
+        jobId,
+        result: analysisResult,
       },
     })
   } catch (error) {
-    console.error('[Stream Token] Error:', error)
+    console.error('[Analyze] Error:', error)
+    const message = error instanceof Error ? error.message : 'Failed to analyze property'
+    const isBadDeal = message.startsWith('BAD_DEAL:')
     return c.json(
-      {
-        success: false,
-        error: error instanceof Error ? error.message : 'Failed to generate token',
-      },
-      500
+      { success: false, error: isBadDeal ? message.replace('BAD_DEAL: ', '') : message },
+      isBadDeal ? 400 : 500
     )
   }
 })
@@ -573,16 +264,6 @@ analyze.get('/defaults', async (c) => {
         permits: true,
         floodZone: true,
         weatherRisk: false,
-      },
-      photoAnalysis: {
-        enabled: true,
-        maxComps: 5,
-        requireBetterOrEqual: true,
-      },
-      zillowContext: {
-        enabled: true,
-        skipCache: false,
-        maxComps: 5,
       },
       rehabLevels: REHAB_LEVELS.map((name, index) => ({ index, name })),
       majorItems: MAJOR_ITEMS,

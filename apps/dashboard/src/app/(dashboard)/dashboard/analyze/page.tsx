@@ -1,6 +1,9 @@
 'use client'
 
 import { useState, useCallback, useEffect, useRef } from 'react'
+import { useSetAtom } from 'jotai'
+import { activeAnalysisAtom, analysisResultAtom, analysisStateAtom } from '@/atoms/analysis'
+import { initialAnalysisState } from '@/types/analysis'
 import Link from 'next/link'
 import {
   Search,
@@ -13,7 +16,6 @@ import {
   DollarSign,
   SlidersHorizontal,
   ExternalLink,
-  Eye,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -27,7 +29,7 @@ import {
   SheetTitle,
   SheetDescription,
 } from '@/components/ui/sheet'
-import { queueAnalysis, type CompsData } from './actions'
+import { queueAnalysis, type CompsData, type AnalyzeData } from './actions'
 import { cn } from '@/lib/utils'
 import { useAnalysis } from '@/hooks/use-analysis'
 import { useAnalysisEvaluation } from '@/hooks/use-analysis-evaluation'
@@ -53,11 +55,8 @@ import { DownloadReportButton } from '@/components/report/DownloadReportButton'
 const FRIENDLY_LABELS: Record<AnalysisStep, string> = {
   property_fetch: 'Analyzing subject property',
   appraisal_rules: 'Evaluating comparable sales',
-  photo_fetch: 'Fetching property photos',
-  comp_selection: 'Classifying properties',
   valuation: 'Calculating valuation',
   response_build: 'Finalizing results',
-  vision_analysis: 'AI vision analysis',
 }
 
 function getStatusLabel(step: AnalysisStep | null): string {
@@ -107,22 +106,20 @@ function TypewriterText({ text, typeSpeed = 30 }: { text: string; typeSpeed?: nu
 export default function AnalyzePage() {
   const [address, setAddress] = useState('')
   const [skipCache, setSkipCache] = useState(false)
-  const [visionEnabled, setVisionEnabled] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [showRawJson, setShowRawJson] = useState(false)
   const [searchExpanded, setSearchExpanded] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [durationMs, setDurationMs] = useState<number | null>(null)
 
-  // Global analysis context — SSE connection persists across navigation
+  // Global analysis context
   const {
     activeAnalysis,
     analysisState,
     analysisResult,
     displayData,
-    startAnalysis,
     clearAnalysis,
     cancelAnalysis,
-    seedPartialData,
   } = useAnalysis()
 
   const isRunning = isSubmitting || (activeAnalysis !== null && analysisState.status !== 'completed' && analysisState.status !== 'failed')
@@ -149,44 +146,40 @@ export default function AnalyzePage() {
   })
 
   // Analysis handler
+  const setActiveAnalysis = useSetAtom(activeAnalysisAtom)
+  const setAnalysisResult = useSetAtom(analysisResultAtom)
+  const setAnalysisState = useSetAtom(analysisStateAtom)
+
   const handleAnalyze = useCallback(async () => {
     if (!address.trim()) return
 
-    // Clear previous analysis data before starting a new one
     clearAnalysis()
     setError(null)
+    setDurationMs(null)
     setIsSubmitting(true)
 
+    const t0 = Date.now()
     try {
       const response = await queueAnalysis({
         address: address.trim(),
-        photoAnalysis: { enabled: true, maxComps: 10, requireBetterOrEqual: true },
         searchOptions: { radiusMiles: 1, maxComps: 10, monthsBack: 12 },
         skipCache,
-        visionClassification: visionEnabled,
       })
 
-      if (response.success && response.streamUrl && response.propertyKey && response.jobId) {
-        startAnalysis({
-          jobId: response.jobId,
-          propertyKey: response.propertyKey,
-          streamUrl: response.streamUrl,
-          address: address.trim(),
-        })
-
-        // Seed partial data from the HTTP response for instant rendering
-        if (response.propertyBundle) {
-          seedPartialData(response.propertyBundle)
-        }
+      if (response.success && response.result) {
+        setDurationMs(Date.now() - t0)
+        setActiveAnalysis({ jobId: response.jobId ?? '', address: address.trim() })
+        setAnalysisResult(response.result as AnalyzeData)
+        setAnalysisState({ ...initialAnalysisState, jobId: response.jobId ?? null, status: 'completed' })
       } else {
-        setError(response.error || 'Failed to queue analysis')
+        setError(response.error || 'Analysis failed')
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to start analysis')
     } finally {
       setIsSubmitting(false)
     }
-  }, [address, skipCache, visionEnabled, clearAnalysis, startAnalysis, seedPartialData])
+  }, [address, skipCache, clearAnalysis, setActiveAnalysis, setAnalysisResult, setAnalysisState])
 
   const handleCancel = useCallback(() => {
     cancelAnalysis()
@@ -300,13 +293,6 @@ export default function AnalyzePage() {
                   Skip cache
                 </Label>
               </div>
-              <div className="flex items-center gap-2">
-                <Switch id="vision-analysis" checked={visionEnabled} onCheckedChange={setVisionEnabled} />
-                <Label htmlFor="vision-analysis" className="flex items-center gap-1.5 text-body-sm text-foreground-tertiary cursor-pointer">
-                  <Eye className="w-3.5 h-3.5" />
-                  AI Vision Analysis
-                </Label>
-              </div>
             </div>
           </div>
         </div>
@@ -329,8 +315,8 @@ export default function AnalyzePage() {
           {hasResult && (
             <div className="flex items-center justify-between no-print">
               <div className="flex items-center gap-3">
-                {analysisState.totalDurationMs && (
-                  <div className="text-caption text-foreground-tertiary">Completed in {analysisState.totalDurationMs}ms</div>
+                {durationMs != null && (
+                  <div className="text-caption text-foreground-tertiary">Completed in {(durationMs / 1000).toFixed(1)}s</div>
                 )}
                 {activeAnalysis?.jobId && (
                   <Link

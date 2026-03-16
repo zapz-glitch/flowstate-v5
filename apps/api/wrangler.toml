@@ -22,26 +22,10 @@ migrations_dir = "migrations"
 binding = "API_CACHE"
 id = "076d6c5a242c4b5d9765d04b8b8755b6"
 
-[[r2_buckets]]
-binding = "REPORT_PHOTOS"
-bucket_name = "flowstate-report-photos"
-
-# ─── Durable Objects ─────────────────────────────────────────────────────────
-
-[[durable_objects.bindings]]
-name = "ANALYSIS_JOB"
-class_name = "AnalysisJobDO"
-
+# Delete Durable Object classes removed in refactor (v4)
 [[migrations]]
-tag = "v3"
-new_sqlite_classes = ["AnalysisJobDO"]
-
-# ─── Workflows ─────────────────────────────────────────────────────────────────
-
-[[workflows]]
-name = "analysis-workflow"
-binding = "ANALYSIS_WORKFLOW"
-class_name = "AnalysisWorkflow"
+tag = "v4"
+deleted_classes = ["AnalysisJobDO"]
 
 [observability]
 enabled = true

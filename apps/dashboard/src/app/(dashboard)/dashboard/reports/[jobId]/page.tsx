@@ -26,9 +26,6 @@ import {
   VisionAnalysisButton,
 } from '@/components/analysis'
 import type { AnalyzeData } from '@/components/analysis'
-// TODO: re-enable photo upload feature
-// import { PhotoUpload } from '@/components/analysis/PhotoUpload'
-// import { PhotoAnalysisFindings } from '@/components/analysis/PhotoAnalysisFindings'
 
 // ─── Main Page ──────────────────────────────────────────────────────────────
 

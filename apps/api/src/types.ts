@@ -2,43 +2,14 @@
  * API Types
  */
 
-import type { AnalysisWorkflowParams } from './workflows/types'
-
-// ─── Workflow Binding Type ────────────────────────────────────────────────────
-// Cloudflare Workflows binding interface
-interface WorkflowInstance {
-  id: string
-  pause(): Promise<void>
-  resume(): Promise<void>
-  terminate(): Promise<void>
-  restart(): Promise<void>
-  status(): Promise<{
-    status: 'queued' | 'running' | 'paused' | 'complete' | 'errored' | 'terminated' | 'unknown'
-    error?: string
-    output?: unknown
-  }>
-}
-
-interface WorkflowBinding<TParams = unknown> {
-  create(options: { id?: string; params: TParams }): Promise<WorkflowInstance>
-  get(id: string): Promise<WorkflowInstance>
-}
-
 export interface Env {
   DB: D1Database
   API_CACHE: KVNamespace
-  REPORT_PHOTOS?: R2Bucket
   ENVIRONMENT: string
 
   // ─── Dashboard URL ────────────────────────────────────────────────────────
   /** Production dashboard URL (e.g. 'https://app.flowstate.homes') */
   DASHBOARD_URL?: string
-
-  // ─── Durable Objects ─────────────────────────────────────────────────────────
-  ANALYSIS_JOB: DurableObjectNamespace
-
-  // ─── Workflows ─────────────────────────────────────────────────────────────────
-  ANALYSIS_WORKFLOW: WorkflowBinding<AnalysisWorkflowParams>
 
   // ─── Property Data Provider ────────────────────────────────────────────────
   /** Active provider: 'corelogic' | 'attom' (default: 'corelogic') */

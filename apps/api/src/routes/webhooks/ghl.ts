@@ -2,32 +2,39 @@
  * GoHighLevel Webhook Endpoint
  *
  * Receives webhooks from GHL workflows to trigger property analysis.
- * Authenticated via URL-based webhook secret + optional X-API-Key header.
+ * Authenticated via URL-based webhook secret + X-API-Key header.
  *
  * Flow:
- * 1. GHL workflow sends POST /webhooks/ghl/:webhookSecret with X-API-Key header
- * 2. Look up user by webhookSecret in ghl_settings table
- * 3. Verify X-API-Key matches one of the user's Flowstate API keys
- * 4. Parse property address from GHL payload
- * 5. Load user's analysis settings
- * 6. Start analysis workflow with GHL params for result push-back
- * 7. Return 202 Accepted with jobId
+ * 1. Validate webhook secret + API key
+ * 2. Fetch opportunity details from GHL to extract property address
+ * 3. Fetch property bundle from CoreLogic
+ * 4. Run evaluation (appraisal + price classification + valuation)
+ * 5. Push results back to GHL opportunity (inline, 3 retries)
+ * 6. Save report to DB (background via waitUntil)
+ * 7. Return 200 with jobId and result
  */
 
 import { Hono } from 'hono'
 import { drizzle } from 'drizzle-orm/d1'
 import { eq, and } from 'drizzle-orm'
 import type { Env } from '../../types'
-import { ghlSettings, apiKeys } from '../../db'
+import { ghlSettings, apiKeys, savedReports } from '../../db'
 import { loadUserAnalysisSettings } from '../../services/user-settings'
-import type { AnalysisWorkflowParams } from '../../workflows/types'
+import { createPropertyApi } from '../../services/property-api'
+import { DEFAULT_FILTERS } from '../../services/appraisal'
+import { filtersToApiParams } from '../../services/appraisal/types'
+import { performAnalysis } from '../../services/evaluation'
+import {
+  buildGHLCustomFields,
+  updateGHLOpportunity,
+  extractAnalysisFieldValue,
+} from '../../services/ghl'
 
 const ghlWebhook = new Hono<{ Bindings: Env }>()
 
 // ─── GHL Webhook Payload ─────────────────────────────────────────────────────
 
 interface GHLWebhookPayload {
-  // Contact standard fields
   first_name?: string
   last_name?: string
   full_name?: string
@@ -38,16 +45,12 @@ interface GHLWebhookPayload {
   state?: string
   postal_code?: string
   full_address?: string
-
-  // Opportunity fields (root level when triggered by pipeline/opportunity events)
-  id?: string // Opportunity ID
+  id?: string
   opportunity_name?: string
   status?: string
   lead_value?: string | number
   pipeline_id?: string
   pipeline_name?: string
-
-  // Location (nested object)
   location?: {
     id?: string
     name?: string
@@ -57,8 +60,6 @@ interface GHLWebhookPayload {
     postalCode?: string
     fullAddress?: string
   }
-
-  // Allow any other custom fields from GHL
   [key: string]: unknown
 }
 
@@ -68,18 +69,12 @@ function generateJobId(): string {
   return `job_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`
 }
 
-/**
- * Parse a full address string like "123 Main St, Dallas, TX 75201"
- * into street, city, state, zip components.
- */
 function parseAddress(fullAddress: string): { street: string; city: string; state: string; zip: string } {
   const parts = fullAddress.split(',').map((p) => p.trim())
 
   if (parts.length >= 3) {
-    // "123 Main St, Dallas, TX 75201"
     const street = parts[0]
     const city = parts[1]
-    // Last part might be "TX 75201" or "TX" + "75201"
     const stateZip = parts.slice(2).join(' ').trim()
     const stateZipMatch = stateZip.match(/^([A-Z]{2})\s*(\d{5}(?:-\d{4})?)?$/)
     if (stateZipMatch) {
@@ -89,7 +84,6 @@ function parseAddress(fullAddress: string): { street: string; city: string; stat
   }
 
   if (parts.length === 2) {
-    // "123 Main St, Dallas TX 75201"
     const street = parts[0]
     const rest = parts[1]
     const match = rest.match(/^(.+?)\s+([A-Z]{2})\s*(\d{5}(?:-\d{4})?)?$/)
@@ -99,22 +93,7 @@ function parseAddress(fullAddress: string): { street: string; city: string; stat
     return { street, city: rest, state: '', zip: '' }
   }
 
-  // Single string — use as full address, let the analysis pipeline handle it
   return { street: fullAddress, city: '', state: '', zip: '' }
-}
-
-function normalizePropertyKey(address: string, city: string, state: string, zipCode: string): string {
-  const addressParts = [address, city, state, zipCode]
-    .map((s) => s.toLowerCase().trim())
-    .join('|')
-
-  let hash = 0
-  for (let i = 0; i < addressParts.length; i++) {
-    const char = addressParts.charCodeAt(i)
-    hash = (hash << 5) - hash + char
-    hash = hash & hash
-  }
-  return `addr:${Math.abs(hash).toString(36)}`
 }
 
 // ─── GHL API Helpers ─────────────────────────────────────────────────────────
@@ -130,9 +109,6 @@ interface GHLOpportunityData {
   [key: string]: unknown
 }
 
-/**
- * Fetch full opportunity details from GHL API (includes custom fields)
- */
 async function fetchOpportunityDetails(
   apiToken: string,
   opportunityId: string
@@ -159,10 +135,6 @@ async function fetchOpportunityDetails(
   }
 }
 
-/**
- * Extract property address from opportunity custom fields.
- * Matches by field ID if provided, otherwise takes the first non-empty string field.
- */
 function extractPropertyAddress(
   opportunity: GHLOpportunityData,
   propertyFieldId?: string
@@ -170,13 +142,10 @@ function extractPropertyAddress(
   if (!opportunity.customFields) return null
 
   for (const field of opportunity.customFields) {
-    // If a specific field ID is configured, match on it
     if (propertyFieldId && field.id === propertyFieldId) {
       const val = typeof field.fieldValue === 'string' ? field.fieldValue.trim() : ''
       if (val) return val
     }
-
-    // Otherwise, take the first field that looks like an address
     if (!propertyFieldId && typeof field.fieldValue === 'string') {
       const val = field.fieldValue.trim()
       if (val) return val
@@ -190,11 +159,12 @@ function extractPropertyAddress(
 
 ghlWebhook.post('/:webhookSecret', async (c) => {
   const webhookSecret = c.req.param('webhookSecret')
+  const routeStart = Date.now()
 
   try {
     const db = drizzle(c.env.DB)
 
-    // Look up user by webhook secret
+    // ── 1. Look up user by webhook secret ────────────────────────────────────
     const [settings] = await db
       .select()
       .from(ghlSettings)
@@ -209,13 +179,12 @@ ghlWebhook.post('/:webhookSecret', async (c) => {
       return c.json({ success: false, error: 'Integration disabled' }, 403)
     }
 
-    // Verify API key header
+    // ── 2. Verify API key header ──────────────────────────────────────────────
     const apiKey = c.req.header('X-API-Key')
     if (!apiKey) {
       return c.json({ success: false, error: 'Missing X-API-Key header' }, 401)
     }
 
-    // Hash and verify against user's API keys
     const encoder = new TextEncoder()
     const hashBuffer = await crypto.subtle.digest('SHA-256', encoder.encode(apiKey))
     const keyHash = Array.from(new Uint8Array(hashBuffer))
@@ -225,13 +194,7 @@ ghlWebhook.post('/:webhookSecret', async (c) => {
     const apiKeyRow = await db
       .select({ id: apiKeys.id })
       .from(apiKeys)
-      .where(
-        and(
-          eq(apiKeys.keyHash, keyHash),
-          eq(apiKeys.userId, settings.userId),
-          eq(apiKeys.isActive, true)
-        )
-      )
+      .where(and(eq(apiKeys.keyHash, keyHash), eq(apiKeys.userId, settings.userId), eq(apiKeys.isActive, true)))
       .limit(1)
       .then((r) => r[0])
 
@@ -239,36 +202,27 @@ ghlWebhook.post('/:webhookSecret', async (c) => {
       return c.json({ success: false, error: 'Invalid API key' }, 401)
     }
 
-    // Parse GHL webhook payload
+    // ── 3. Parse GHL webhook payload ──────────────────────────────────────────
     const body = await c.req.json<GHLWebhookPayload>().catch(() => ({} as GHLWebhookPayload))
-
-    // Log full payload for observability
     console.log(`[GHL Webhook] Received payload:`, JSON.stringify(body))
 
-    // Validate opportunity ID (GHL sends it as `id` at root level)
     const opportunityId = body.id
     if (!opportunityId) {
-      return c.json({ success: false, error: 'Opportunity ID (id) is required. Ensure workflow has an opportunity trigger.' }, 400)
+      return c.json({ success: false, error: 'Opportunity ID (id) is required in payload.' }, 400)
     }
 
-    // Validate location.id matches (defense-in-depth)
     const payloadLocationId = body.location?.id
     if (payloadLocationId && payloadLocationId !== settings.locationId) {
       console.warn(`[GHL Webhook] Location mismatch: payload=${payloadLocationId} settings=${settings.locationId}`)
       return c.json({ success: false, error: 'Location mismatch' }, 403)
     }
 
-    // Parse field mappings early (needed for property address extraction)
     let fieldMappings: Record<string, string> = {}
     if (settings.fieldMappings) {
-      try {
-        fieldMappings = JSON.parse(settings.fieldMappings)
-      } catch {}
+      try { fieldMappings = JSON.parse(settings.fieldMappings) } catch {}
     }
 
-    // Fetch opportunity details from GHL API to get custom fields
-    // The standard webhook payload doesn't include opportunity custom fields,
-    // so we need to fetch them via API using the opportunity ID.
+    // ── 4. Fetch opportunity details to get property address ──────────────────
     const opportunityData = await fetchOpportunityDetails(settings.apiToken, opportunityId)
     if (!opportunityData) {
       return c.json({ success: false, error: 'Failed to fetch opportunity details from GHL' }, 502)
@@ -276,112 +230,169 @@ ghlWebhook.post('/:webhookSecret', async (c) => {
 
     console.log(`[GHL Webhook] Opportunity custom fields:`, JSON.stringify(opportunityData.customFields ?? []))
 
-    // Extract property address from opportunity custom fields
-    // Look for a custom field named "property_details" (or similar)
-    // Use the propertyAddress field ID from field mappings if configured
     const propertyFieldId = fieldMappings['propertyAddress'] || undefined
     const propertyAddress = extractPropertyAddress(opportunityData, propertyFieldId)
     if (!propertyAddress) {
       return c.json(
-        { success: false, error: 'Property address not found. Add a "property_details" custom field on the opportunity, or set the contact full_address.' },
+        { success: false, error: 'Property address not found in opportunity custom fields.' },
         400
       )
     }
 
-    const fullAddress = propertyAddress.trim()
-    const parsed = parseAddress(fullAddress)
-    const streetAddress = parsed.street
-    const city = parsed.city
-    const state = parsed.state
-    const zipCode = parsed.zip
-
+    const parsed = parseAddress(propertyAddress.trim())
+    const { street: streetAddress, city, state, zip: zipCode } = parsed
+    const fullAddress = `${streetAddress}, ${city}, ${state} ${zipCode}`.trim()
     const jobId = generateJobId()
-    const propertyKey = normalizePropertyKey(streetAddress, city, state, zipCode)
     const userId = settings.userId
 
-    // Initialize job state in Durable Object
-    const doId = c.env.ANALYSIS_JOB.idFromName(`${userId}:${propertyKey}`)
-    const jobDO = c.env.ANALYSIS_JOB.get(doId)
+    console.log(`[GHL Webhook] Job ${jobId} — analyzing: ${fullAddress}`)
 
-    const initResponse = await jobDO.fetch(
-      new Request('http://internal/init', {
-        method: 'POST',
-        body: JSON.stringify({
-          jobId,
-          userId,
-          propertyKey,
-          request: { address: streetAddress, city, state, zipCode, source: 'ghl_webhook' },
-        }),
-      })
-    )
-
-    if (!initResponse.ok) {
-      const error = (await initResponse.json()) as { error?: string }
-      return c.json({ success: false, error: error.error || 'Failed to initialize job' }, 500)
-    }
-    // Consume response body to properly dispose RPC result
-    await initResponse.text()
-
-    // Load user's analysis settings (with KV caching)
+    // ── 5. Load user settings ─────────────────────────────────────────────────
     const userSettings = await loadUserAnalysisSettings(c.env.DB, {
       userId,
       address: { city, state, zipCode },
     }, c.env.API_CACHE)
 
-    // Build workflow params
-    const workflowParams: AnalysisWorkflowParams = {
-      jobId,
-      userId,
-      propertyKey,
-      address: fullAddress || `${streetAddress}, ${city}, ${state} ${zipCode}`.trim(),
+    // ── 6. Fetch property bundle from CoreLogic ───────────────────────────────
+    const bundleFetchStart = Date.now()
+    const propertyApi = createPropertyApi(c.env)
+    propertyApi.resetCallStats()
+    const filters = userSettings.appraisalRules?.filters ?? DEFAULT_FILTERS
+    const apiFilterParams = filtersToApiParams(filters)
+
+    const bundleResult = await propertyApi.getPropertyBundle({
+      address: fullAddress,
       streetAddress,
       city,
       state,
       zipCode,
+      comparables: {
+        radiusMiles: apiFilterParams.radiusMiles ?? 1,
+        maxComps: 10,
+        monthsBack: apiFilterParams.monthsBack ?? 12,
+        sqftVariance: apiFilterParams.sqftVariance,
+      },
+      enrichment: {
+        permits: true,
+        floodZone: true,
+        weatherRisk: false,
+        neighbourhood: false,
+      },
+    })
+
+    console.log(`[GHL Webhook][Timing] CoreLogic fetch: ${Date.now() - bundleFetchStart}ms`)
+
+    if (!bundleResult.success) {
+      return c.json(
+        { success: false, error: bundleResult.error || 'Failed to fetch property data' },
+        400
+      )
+    }
+
+    // ── 7. Evaluate: appraisal + price classification + valuation ─────────────
+    const evalStart = Date.now()
+    const propertyCallStats = propertyApi.getCallStats()
+
+    const { response: analysisResult } = performAnalysis({
+      jobId,
+      bundle: bundleResult.data,
       appraisalRules: userSettings.appraisalRules,
       buybox: userSettings.mergedBuybox,
       customRehabTable: userSettings.customRehabTable,
+      customTierRanges: userSettings.customTierRanges,
       customMajorItemCosts: userSettings.customMajorItemCosts,
-      // GHL-specific params for Step 7 push-back
-      ghl: {
-        opportunityId,
-        locationId: settings.locationId,
-        apiToken: settings.apiToken,
-        fieldMappings,
-        monetaryValueField: settings.monetaryValueField ?? 'arv',
+      apiCallStats: {
+        corelogic: {
+          total: propertyCallStats.total,
+          cached: propertyCallStats.cached,
+          endpoints: propertyCallStats.endpoints,
+        },
+        firecrawl: { total: 0, cached: 0 },
+        llm: { total: 0, cached: 0, breakdown: [] },
+        totalExternalCalls: propertyCallStats.total,
       },
-    }
-
-    // Start the workflow
-    const workflow = await c.env.ANALYSIS_WORKFLOW.create({
-      id: jobId,
-      params: workflowParams,
     })
 
-    console.log(`[GHL Webhook] Job ${jobId} started for opportunity ${opportunityId} (workflow: ${workflow.id})`)
+    console.log(`[GHL Webhook][Timing] Evaluation: ${Date.now() - evalStart}ms`)
 
-    const baseUrl = new URL(c.req.url).origin
-    return c.json(
-      {
-        success: true,
-        data: {
+    // ── 8. Push results to GHL opportunity (inline, up to 3 attempts) ─────────
+    const ghlStart = Date.now()
+    let ghlSuccess = false
+    let ghlError: string | undefined
+
+    const customFields = buildGHLCustomFields(analysisResult, fieldMappings, jobId)
+    let monetaryValue: number | undefined
+    const monetaryField = settings.monetaryValueField ?? 'arv'
+    const monetaryVal = extractAnalysisFieldValue(analysisResult, monetaryField)
+    if (typeof monetaryVal === 'number') monetaryValue = monetaryVal
+
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      const result = await updateGHLOpportunity({
+        apiToken: settings.apiToken,
+        opportunityId,
+        customFields,
+        monetaryValue,
+      })
+
+      if (result.success) {
+        ghlSuccess = true
+        console.log(`[GHL Webhook][Timing] GHL push: ${Date.now() - ghlStart}ms (attempt ${attempt})`)
+        break
+      }
+
+      ghlError = result.error
+      console.warn(`[GHL Webhook] GHL push attempt ${attempt}/3 failed: ${result.error}`)
+    }
+
+    if (!ghlSuccess) {
+      // Return 5xx so GHL retries the webhook if configured
+      console.error(`[GHL Webhook] GHL push failed after 3 attempts: ${ghlError}`)
+      return c.json({ success: false, error: `Failed to update GHL opportunity: ${ghlError}` }, 502)
+    }
+
+    // ── 9. Save report to DB (background, non-blocking) ───────────────────────
+    c.executionCtx.waitUntil((async () => {
+      try {
+        const reportDb = drizzle(c.env.DB)
+        await reportDb.insert(savedReports).values({
+          userId,
           jobId,
-          propertyKey,
-          opportunityId,
-          status: 'queued',
-          pollUrl: `${baseUrl}/v1/analyze/jobs/${jobId}?propertyKey=${encodeURIComponent(propertyKey)}`,
-        },
+          propertyAddress: analysisResult.subject.address,
+          propertyCity: city,
+          propertyState: state,
+          propertyZip: zipCode,
+          fullResponseJson: JSON.stringify(analysisResult),
+          arv: analysisResult.valuation.arv,
+          asIsValue: analysisResult.valuation.asIsValue ?? null,
+          maxAllowableOffer: analysisResult.valuation.buyPrice,
+          estimatedRepairs: analysisResult.valuation.rehabCost,
+        })
+        console.log(`[GHL Webhook] Report saved for job ${jobId}`)
+      } catch (error) {
+        console.warn(`[GHL Webhook] Failed to save report (non-fatal):`, error instanceof Error ? error.message : error)
+      }
+    })())
+
+    console.log(`[GHL Webhook][Timing] Total: ${Date.now() - routeStart}ms`)
+
+    return c.json({
+      success: true,
+      data: {
+        jobId,
+        opportunityId,
+        address: fullAddress,
+        arv: analysisResult.valuation.arv,
+        buyPrice: analysisResult.valuation.buyPrice,
+        projectedROI: analysisResult.valuation.projectedROI,
       },
-      202
-    )
+    })
   } catch (error) {
     console.error('[GHL Webhook] Error:', error)
+    const message = error instanceof Error ? error.message : 'Internal error'
+    const isBadDeal = message.startsWith('BAD_DEAL:')
     return c.json(
-      {
-        success: false,
-        error: error instanceof Error ? error.message : 'Internal error',
-      },
-      500
+      { success: false, error: isBadDeal ? message.replace('BAD_DEAL: ', '') : message },
+      isBadDeal ? 400 : 500
     )
   }
 })

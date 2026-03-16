@@ -336,15 +336,10 @@ export type EnrichmentData = {
 export interface QueueAnalysisResult {
   success: boolean
   jobId?: string
-  status?: string
-  streamUrl?: string
-  pollUrl?: string
-  propertyKey?: string
-  estimatedDurationMs?: number
   error?: string
-  /** Pre-fetched property data for immediate rendering */
+  /** Full analysis result (synchronous response) */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  propertyBundle?: Record<string, any>
+  result?: Record<string, any>
 }
 
 export interface JobStatusResult {
@@ -418,18 +413,15 @@ export async function queueAnalysis(request: AnalyzeRequest): Promise<QueueAnaly
   try {
     const apiUrl = await getApiUrl()
 
-    // Step 1: Queue the analysis job
     const analyzeUrl = `${apiUrl}/v1/analyze`
     const requestBody = {
       address: request.address,
-      photoAnalysis: request.photoAnalysis ?? { enabled: true, maxComps: 5, requireBetterOrEqual: true },
       searchOptions: request.searchOptions ?? {
         radiusMiles: 1,
         maxComps: 10,
         monthsBack: 12,
       },
       skipCache: request.skipCache,
-      visionClassification: request.visionClassification ?? false,
     }
 
     logApiCall('POST', analyzeUrl)
@@ -449,106 +441,39 @@ export async function queueAnalysis(request: AnalyzeRequest): Promise<QueueAnaly
     const durationMs = Date.now() - startTime
     logApiCall('POST', analyzeUrl, response.status, durationMs)
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const result = await response.json() as {
       success?: boolean
       error?: string
       data?: {
         jobId: string
-        propertyKey: string
-        status: string
-        streamUrl: string
-        pollUrl: string
-        estimatedDurationMs?: number
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        propertyBundle?: Record<string, any>
+        result: Record<string, any>
       }
     }
 
     if (!response.ok || !result.success) {
-      logError('Queue analysis failed', { status: response.status, error: result.error })
+      logError('Analysis failed', { status: response.status, error: result.error })
       return {
         success: false,
         error: result.error || `API request failed with status ${response.status}`,
       }
     }
 
-    // Use property key from API response (ensures consistency with queue processor)
     const jobId = result.data?.jobId
-    const propertyKey = result.data?.propertyKey
 
-    log('Job queued successfully', { jobId, propertyKey, status: result.data?.status })
-
-    if (!jobId || !propertyKey) {
-      logError('Missing jobId or propertyKey in response')
-      return {
-        success: false,
-        error: 'No job ID or property key returned from API',
-      }
-    }
-
-    // Step 2: Request a signed stream token
-    const tokenUrl = `${apiUrl}/v1/analyze/stream-token`
-    logApiCall('POST', tokenUrl)
-
-    const tokenStartTime = Date.now()
-    const tokenResponse = await fetch(tokenUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Dashboard-User-Id': session.user.id,
-        'X-Dashboard-Secret': dashboardSecret,
-      },
-      body: JSON.stringify({
-        jobId,
-        propertyKey,
-      }),
-    })
-
-    const tokenDurationMs = Date.now() - tokenStartTime
-    logApiCall('POST', tokenUrl, tokenResponse.status, tokenDurationMs)
-
-    const tokenResult = await tokenResponse.json() as {
-      success?: boolean
-      error?: string
-      data?: {
-        token: string
-        streamUrl: string
-        expiresIn: number
-      }
-    }
-
-    if (!tokenResponse.ok || !tokenResult.success) {
-      // Fall back to polling if token generation fails
-      log('Stream token generation failed, falling back to polling', { error: tokenResult.error })
-      return {
-        success: true,
-        jobId,
-        status: result.data?.status,
-        streamUrl: undefined, // No SSE, use polling
-        pollUrl: result.data?.pollUrl,
-        propertyKey,
-        estimatedDurationMs: result.data?.estimatedDurationMs,
-        propertyBundle: result.data?.propertyBundle,
-      }
-    }
-
-    log('Stream token obtained successfully', { streamUrl: tokenResult.data?.streamUrl, expiresIn: tokenResult.data?.expiresIn })
+    log('Analysis complete', { jobId, durationMs })
 
     return {
       success: true,
       jobId,
-      status: result.data?.status,
-      streamUrl: tokenResult.data?.streamUrl,
-      pollUrl: result.data?.pollUrl,
-      propertyKey,
-      estimatedDurationMs: result.data?.estimatedDurationMs,
-      propertyBundle: result.data?.propertyBundle,
+      result: result.data?.result,
     }
   } catch (error) {
     logError('queueAnalysis exception', error)
     return {
       success: false,
-      error: error instanceof Error ? error.message : 'Failed to queue analysis',
+      error: error instanceof Error ? error.message : 'Failed to analyze property',
     }
   }
 }

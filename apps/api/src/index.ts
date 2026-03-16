@@ -21,21 +21,13 @@ import rehabConfigRoute from './routes/rehab-config'
 import dealParamsRoute from './routes/deal-params'
 import locationSettingsRoute from './routes/location-settings'
 import majorItemCostsRoute from './routes/major-item-costs'
-import sseStream from './routes/sse-stream'
 import reportsRoute from './routes/reports'
 import ghlSettingsRoute from './routes/ghl-settings'
 import userReportsRoute from './routes/user-reports'
-import reportPhotosRoute from './routes/report-photos'
 import waitlistRoute from './routes/waitlist'
 import adminRoute from './routes/admin'
 import visionRoute from './routes/vision'
 import ghlWebhook from './routes/webhooks/ghl'
-
-// Durable Objects
-export { AnalysisJobDO } from './durable-objects'
-
-// Workflows
-export { AnalysisWorkflow } from './workflows'
 
 type Variables = { auth: AuthContext }
 
@@ -107,9 +99,6 @@ app.route('/ghl-settings', ghlSettingsRoute)
 // User reports routes (session auth via Better Auth cookies)
 app.route('/user/reports', userReportsRoute)
 
-// Report photos routes (session auth via Better Auth cookies)
-app.route('/user/reports', reportPhotosRoute)
-
 // Waitlist routes (no auth)
 app.route('/waitlist', waitlistRoute)
 
@@ -121,10 +110,6 @@ app.route('/vision', visionRoute)
 
 // GHL webhook routes (self-authenticating via URL secret, no auth middleware)
 app.route('/webhooks/ghl', ghlWebhook)
-
-// SSE stream routes (handles its own auth via signed tokens)
-// Mounted outside /v1 because EventSource can't set custom headers
-app.route('/sse', sseStream)
 
 // Public reports (no auth - jobId is unguessable)
 app.route('/reports', reportsRoute)
