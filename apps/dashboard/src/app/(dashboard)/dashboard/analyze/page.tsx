@@ -13,6 +13,7 @@ import {
   DollarSign,
   SlidersHorizontal,
   ExternalLink,
+  Eye,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -36,6 +37,7 @@ import {
   ValuationCard,
   ComparablesSection,
   RiskFloodCard,
+  VisionAnalysisButton,
 } from '@/components/analysis'
 import {
   SubjectPropertySkeleton,
@@ -55,6 +57,7 @@ const FRIENDLY_LABELS: Record<AnalysisStep, string> = {
   comp_selection: 'Classifying properties',
   valuation: 'Calculating valuation',
   response_build: 'Finalizing results',
+  vision_analysis: 'AI vision analysis',
 }
 
 function getStatusLabel(step: AnalysisStep | null): string {
@@ -104,6 +107,7 @@ function TypewriterText({ text, typeSpeed = 30 }: { text: string; typeSpeed?: nu
 export default function AnalyzePage() {
   const [address, setAddress] = useState('')
   const [skipCache, setSkipCache] = useState(false)
+  const [visionEnabled, setVisionEnabled] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [showRawJson, setShowRawJson] = useState(false)
   const [searchExpanded, setSearchExpanded] = useState(false)
@@ -159,6 +163,7 @@ export default function AnalyzePage() {
         photoAnalysis: { enabled: true, maxComps: 10, requireBetterOrEqual: true },
         searchOptions: { radiusMiles: 1, maxComps: 10, monthsBack: 12 },
         skipCache,
+        visionClassification: visionEnabled,
       })
 
       if (response.success && response.streamUrl && response.propertyKey && response.jobId) {
@@ -181,7 +186,7 @@ export default function AnalyzePage() {
     } finally {
       setIsSubmitting(false)
     }
-  }, [address, skipCache, clearAnalysis, startAnalysis, seedPartialData])
+  }, [address, skipCache, visionEnabled, clearAnalysis, startAnalysis, seedPartialData])
 
   const handleCancel = useCallback(() => {
     cancelAnalysis()
@@ -293,6 +298,13 @@ export default function AnalyzePage() {
                 <Label htmlFor="skip-cache" className="flex items-center gap-1.5 text-body-sm text-foreground-tertiary cursor-pointer">
                   <RefreshCw className="w-3.5 h-3.5" />
                   Skip cache
+                </Label>
+              </div>
+              <div className="flex items-center gap-2">
+                <Switch id="vision-analysis" checked={visionEnabled} onCheckedChange={setVisionEnabled} />
+                <Label htmlFor="vision-analysis" className="flex items-center gap-1.5 text-body-sm text-foreground-tertiary cursor-pointer">
+                  <Eye className="w-3.5 h-3.5" />
+                  AI Vision Analysis
                 </Label>
               </div>
             </div>
@@ -459,7 +471,20 @@ export default function AnalyzePage() {
 
             {/* Subject Property — available after Step 1 (property_fetch) */}
             {displayData?.subject ? (
-              <SubjectPropertyCard subject={displayData.subject} />
+              <SubjectPropertyCard
+                subject={displayData.subject}
+                footer={displayData.subject.photos?.length ? (
+                  <VisionAnalysisButton
+                    photoUrls={displayData.subject.photos}
+                    propertyContext={{
+                      address: displayData.subject.address,
+                      squareFeet: displayData.subject.squareFeet ?? undefined,
+                      yearBuilt: displayData.subject.yearBuilt ?? undefined,
+                    }}
+                    existingAnalysis={displayData.visionAnalysis}
+                  />
+                ) : undefined}
+              />
             ) : isRunning && !displayData?.subject ? (
               <SubjectPropertySkeleton />
             ) : null}

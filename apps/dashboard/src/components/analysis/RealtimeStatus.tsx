@@ -29,6 +29,7 @@ const FRIENDLY_LABELS: Record<AnalysisStep, string> = {
   comp_selection: 'Classifying properties',
   valuation: 'Calculating valuation',
   response_build: 'Finalizing results',
+  vision_analysis: 'AI vision analysis',
 }
 
 function getStatusLabel(step: AnalysisStep | null): string {

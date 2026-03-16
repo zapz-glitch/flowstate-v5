@@ -75,6 +75,16 @@ export async function loadUserAnalysisSettings(
       const cached = await kvCache.get<UserAnalysisSettings>(cacheKey, 'json')
       if (cached) {
         console.log(`[UserSettings] Cache HIT for user ${userId}`)
+        // Sanitize cached mergedBuybox — strip any non-numeric or unknown keys
+        // (prevents stale cached values like desiredProfit from leaking through)
+        if (cached.mergedBuybox) {
+          const validKeys = new Set(['closingCostsPercent', 'carryingCostsPercent', 'wholesaleFee', 'rehabLevelIndex', 'majorItems', 'additionPlay'])
+          for (const key of Object.keys(cached.mergedBuybox)) {
+            if (!validKeys.has(key)) {
+              delete cached.mergedBuybox[key]
+            }
+          }
+        }
         // Re-apply buybox overrides on top of cached settings (per-request, not cached)
         if (buyboxOverrides) {
           cached.mergedBuybox = { ...cached.mergedBuybox, ...buyboxOverrides }
@@ -146,14 +156,16 @@ export async function loadUserAnalysisSettings(
 
   // Merge deal params into buybox (request buybox overrides user defaults)
   // Always provide system defaults so workflow fallbacks are never needed.
+  // Only include known numeric deal param fields — prevent stale cached keys from leaking through.
+  const baseDeal = dealParamsRow
+    ? {
+        closingCostsPercent: dealParamsRow.closingCostsPercent,
+        carryingCostsPercent: dealParamsRow.carryingCostsPercent,
+        wholesaleFee: dealParamsRow.wholesaleFee,
+      }
+    : { closingCostsPercent: 8, carryingCostsPercent: 2, wholesaleFee: 10000 }
   let mergedBuybox: Record<string, unknown> = {
-    ...(dealParamsRow
-      ? {
-          closingCostsPercent: dealParamsRow.closingCostsPercent,
-          carryingCostsPercent: dealParamsRow.carryingCostsPercent,
-          wholesaleFee: dealParamsRow.wholesaleFee,
-        }
-      : { closingCostsPercent: 8, carryingCostsPercent: 2, wholesaleFee: 10000 }),
+    ...baseDeal,
     ...buyboxOverrides,
   }
   if (dealParamsRow) console.log(`[UserSettings] Loaded deal params for user ${userId}`)

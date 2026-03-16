@@ -17,10 +17,14 @@ export interface ZillowListingData {
   description?: string
   /** Listed/sold price */
   price?: number
+  /** Price per square foot */
+  pricePerSqft?: number
   /** Property status */
   status?: 'for_sale' | 'pending' | 'sold' | 'off_market'
   /** Days on market */
   daysOnMarket?: number
+  /** Original list date */
+  listDate?: string
   /** Property features (raw strings like "3 bed", "2 bath") */
   features?: string[]
   /** Price history */
@@ -29,40 +33,56 @@ export interface ZillowListingData {
     price: number
     event: string
   }>
-  // ─── Structured Property Data (parsed from features/page) ────────────────
-  /** Number of bedrooms (parsed from features) */
+
+  // ─── Property Details ─────────────────────────────────────────────────────
   bedrooms?: number
-  /** Number of bathrooms (parsed from features) */
   bathrooms?: number
-  /** Square footage (parsed from features) */
   squareFeet?: number
-  /** Year built */
+  lotSize?: string
+  lotSizeAcres?: number
   yearBuilt?: number
-  /** Foundation type (e.g., Slab, Crawl Space, Basement) */
+  propertyType?: string
+  style?: string
+  stories?: number
+
+  // ─── Construction & Systems ───────────────────────────────────────────────
   foundationType?: string
-  /** Monthly HOA fee in dollars */
+  roof?: string
+  construction?: string
+  heating?: string
+  cooling?: string
+
+  // ─── Parking ──────────────────────────────────────────────────────────────
+  parking?: string
+  garageSpaces?: number
+
+  // ─── Financial ────────────────────────────────────────────────────────────
   hoaFee?: number
-  /** Most recent sale date (from price history) */
+  taxAmount?: number
+  estimatedMonthlyPayment?: number
   lastSaleDate?: string
-  /** Most recent sale price (from price history) */
   lastSalePrice?: number
-  // ─── Home Details (from Facts & Features section) ─────────────────────────
-  /** Detailed home features extracted from Zillow Facts & Features */
-  homeDetails?: {
-    parking?: string
-    heating?: string
-    cooling?: string
-    appliances?: string[]
-    flooring?: string
-    exteriorFeatures?: string[]
-    roof?: string
-    construction?: string
-    lotSize?: string
-    stories?: number
-    pool?: boolean
-    waterfront?: boolean
-    view?: string
+
+  // ─── Amenities ────────────────────────────────────────────────────────────
+  appliances?: string[]
+  flooring?: string[]
+  exteriorFeatures?: string[]
+  pool?: boolean
+  waterfront?: boolean
+  view?: string
+
+  // ─── Location ─────────────────────────────────────────────────────────────
+  neighborhood?: string
+  walkScore?: number
+  transitScore?: number
+
+  // ─── Agent ────────────────────────────────────────────────────────────────
+  agent?: {
+    name?: string
+    phone?: string
+    brokerage?: string
   }
+
   /** What's Special highlights from Zillow listing */
   whatsSpecial?: string[]
 }
@@ -135,4 +155,6 @@ export interface ZillowFetchOptions {
   maxPhotos?: number
   /** Skip cache and fetch fresh data from Gemini URL context */
   skipCache?: boolean
+  /** Skip JSON extraction (faster, HTML-only — use for comps where we only need photos + description) */
+  skipJsonExtraction?: boolean
 }

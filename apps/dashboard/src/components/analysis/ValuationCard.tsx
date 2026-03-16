@@ -11,6 +11,11 @@ import {
 import { cn } from '@/lib/utils'
 import type { ValuationData } from './shared-types'
 
+function safeFmt(value: number | null | undefined): string {
+  if (value == null || Number.isNaN(value)) return '-'
+  return value.toLocaleString()
+}
+
 function MetricLabel({ label, tooltip }: { label: string; tooltip: React.ReactNode }) {
   return (
     <Tooltip>
@@ -90,7 +95,7 @@ export function ValuationCard({
                 }
               />
               <div className="text-heading-sm font-bold text-primary">
-                ${valuation.arv?.toLocaleString() || '-'}
+                ${safeFmt(valuation.arv)}
               </div>
               {valuation.arvPerSqft != null && (
                 <div className="text-caption-sm text-foreground-tertiary mt-1">${valuation.arvPerSqft.toFixed(0)}/sqft</div>
@@ -107,7 +112,7 @@ export function ValuationCard({
                   </div>
                 }
               />
-              <div className="text-heading-sm font-bold">${valuation.buyPrice?.toLocaleString() || '-'}</div>
+              <div className="text-heading-sm font-bold">${safeFmt(valuation.buyPrice)}</div>
               {valuation.buyPricePercent != null && valuation.buyPricePercent !== 0 && (
                 <div className="text-caption-sm text-foreground-tertiary mt-1">{valuation.buyPricePercent}% of ARV</div>
               )}
@@ -123,7 +128,7 @@ export function ValuationCard({
                   </div>
                 }
               />
-              <div className="text-heading-sm font-semibold">${valuation.rehabCost?.toLocaleString() || '-'}</div>
+              <div className="text-heading-sm font-semibold">${safeFmt(valuation.rehabCost)}</div>
               {valuation.rehabLevel && (
                 <Badge variant="outline" className="mt-1.5">
                   {valuation.rehabLevel}
@@ -131,7 +136,7 @@ export function ValuationCard({
               )}
               {(valuation.majorItemsCost ?? 0) > 0 && (
                 <div className="text-caption-sm text-foreground-tertiary mt-1">
-                  Base: ${valuation.baseRehabCost?.toLocaleString()} + Items: ${valuation.majorItemsCost?.toLocaleString()}
+                  Base: ${safeFmt(valuation.baseRehabCost)} + Items: ${safeFmt(valuation.majorItemsCost)}
                 </div>
               )}
             </div>
@@ -147,7 +152,7 @@ export function ValuationCard({
                 }
               />
               <div className={cn('text-heading-sm font-semibold', (valuation.projectedProfit ?? 0) > 0 ? 'text-emerald-600' : 'text-red-600')}>
-                ${valuation.projectedProfit?.toLocaleString() || '-'}
+                ${safeFmt(valuation.projectedProfit)}
               </div>
               {valuation.projectedROI != null && valuation.projectedROI !== 0 && (
                 <Tooltip>
@@ -178,8 +183,8 @@ export function ValuationCard({
                     </div>
                   }
                 />
-                <div className={cn('text-heading-sm font-semibold', valuation.wholesalePrice >= 0 ? '' : 'text-red-600')}>
-                  ${valuation.wholesalePrice.toLocaleString()}
+                <div className={cn('text-heading-sm font-semibold', (valuation.wholesalePrice ?? 0) >= 0 ? '' : 'text-red-600')}>
+                  ${safeFmt(valuation.wholesalePrice)}
                 </div>
               </div>
             )}
@@ -193,7 +198,7 @@ export function ValuationCard({
                     <span className="cursor-help">
                       <span className="text-foreground-tertiary underline decoration-dotted decoration-foreground-tertiary/40 underline-offset-2">Closing Cost</span>
                       <span className="text-foreground-tertiary">: </span>
-                      <span className="font-medium">${valuation.closingCosts.toLocaleString()}</span>
+                      <span className="font-medium">${safeFmt(valuation.closingCosts)}</span>
                     </span>
                   </TooltipTrigger>
                   <TooltipContent side="top" className="max-w-xs">
@@ -211,7 +216,7 @@ export function ValuationCard({
                     <span className="cursor-help">
                       <span className="text-foreground-tertiary underline decoration-dotted decoration-foreground-tertiary/40 underline-offset-2">Carrying Cost</span>
                       <span className="text-foreground-tertiary">: </span>
-                      <span className="font-medium">${valuation.carryingCosts.toLocaleString()}</span>
+                      <span className="font-medium">${safeFmt(valuation.carryingCosts)}</span>
                     </span>
                   </TooltipTrigger>
                   <TooltipContent side="top" className="max-w-xs">
@@ -229,7 +234,7 @@ export function ValuationCard({
                     <span className="cursor-help">
                       <span className="text-foreground-tertiary underline decoration-dotted decoration-foreground-tertiary/40 underline-offset-2">Total Investment</span>
                       <span className="text-foreground-tertiary">: </span>
-                      <span className="font-medium">${valuation.totalInvestment.toLocaleString()}</span>
+                      <span className="font-medium">${safeFmt(valuation.totalInvestment)}</span>
                     </span>
                   </TooltipTrigger>
                   <TooltipContent side="top" className="max-w-xs">

@@ -234,19 +234,25 @@ class MultiPhotoService implements PhotoService {
     comps: PropertyIdentifier[],
     options?: PhotoFetchOptions & { maxComps?: number }
   ): Promise<PhotoBundle> {
-    const maxComps = options?.maxComps ?? 10
+    // Fetch subject with full JSON extraction (rich structured data),
+    // and comps with skipJsonExtraction (HTML-only — faster, gets photos + description for classification)
+    const maxComps = options?.maxComps ?? 5
     const compsToFetch = comps.slice(0, maxComps)
 
-    // Fetch subject and comps in parallel
-    const [subjectResult, compsResult] = await Promise.all([
+    // All fetches in parallel — subject gets full extraction, comps get HTML-only
+    const [subjectResult, ...compResults] = await Promise.all([
       this.fetchPhotos(subject, options),
-      this.fetchBulkPhotos(compsToFetch, options),
+      ...compsToFetch.map((comp) =>
+        this.fetchPhotos(comp, { ...options, skipJsonExtraction: true })
+      ),
     ])
 
-    // Build photo bundle
     const compPhotos: Record<string, PropertyPhotos> = {}
-    for (const [propertyId, photos] of compsResult.results) {
-      compPhotos[propertyId] = photos
+    for (let i = 0; i < compsToFetch.length; i++) {
+      const result = compResults[i]
+      if (result.success) {
+        compPhotos[compsToFetch[i].propertyId] = result.data
+      }
     }
 
     return {

@@ -56,6 +56,8 @@ export interface AnalyzeRequest {
   }
   /** Skip cache and fetch fresh data from APIs */
   skipCache?: boolean
+  /** Enable AI vision analysis of subject property photos (runs in background) */
+  visionClassification?: boolean
 }
 
 export type AnalyzeResult =
@@ -420,13 +422,14 @@ export async function queueAnalysis(request: AnalyzeRequest): Promise<QueueAnaly
     const analyzeUrl = `${apiUrl}/v1/analyze`
     const requestBody = {
       address: request.address,
-      photoAnalysis: request.photoAnalysis ?? { enabled: true, maxComps: 10, requireBetterOrEqual: true },
+      photoAnalysis: request.photoAnalysis ?? { enabled: true, maxComps: 5, requireBetterOrEqual: true },
       searchOptions: request.searchOptions ?? {
         radiusMiles: 1,
         maxComps: 10,
         monthsBack: 12,
       },
       skipCache: request.skipCache,
+      visionClassification: request.visionClassification ?? false,
     }
 
     logApiCall('POST', analyzeUrl)

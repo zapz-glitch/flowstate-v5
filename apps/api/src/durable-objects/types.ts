@@ -88,6 +88,7 @@ export type AnalysisStep =
   | 'comp_selection'
   | 'valuation'
   | 'response_build'
+  | 'vision_analysis'
 
 export type StepStatus = 'pending' | 'in_progress' | 'completed' | 'failed' | 'skipped'
 

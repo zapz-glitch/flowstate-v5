@@ -52,7 +52,8 @@ const LEVEL_NAMES = ['Lipstick', 'Light Cosmetic', 'Full Cosmetic', 'Heavy Rehab
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function fmt(amount: number): string {
+function fmt(amount: number | null | undefined): string {
+  if (amount == null || Number.isNaN(amount)) return '$-'
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
     currency: 'USD',

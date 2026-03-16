@@ -163,7 +163,7 @@ class PropertyValuationService implements ValuationService {
 
     const closingCosts = Math.round(arv * (closingCostsPercent / 100))
     const carryingCosts = Math.round(arv * (carryingCostsPercent / 100))
-    const minProfit = rehabEstimate.minProfit
+    const minProfit = typeof rehabEstimate.minProfit === 'number' ? rehabEstimate.minProfit : 0
 
     // Buy Price = ARV − Rehab − Closing Costs − Carrying Costs − Profit Target
     const buyPrice = arv - totalRehabCost - closingCosts - carryingCosts - minProfit

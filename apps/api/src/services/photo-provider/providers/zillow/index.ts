@@ -43,41 +43,27 @@ export type ZillowFetcher = FirecrawlZillowFetcher | GeminiZillowFetcher
 
 /**
  * Check if Zillow fetching is available (for Workers)
- * Requires both Firecrawl (scraping) and OpenRouter (LLM parsing)
+ * Requires Firecrawl API key. OpenRouter is optional (fallback for LLM parsing).
  */
 export function isZillowFetcherAvailable(env: Env): boolean {
-  // Firecrawl + OpenRouter is the primary provider
-  if (env.FIRECRAWL_API_KEY && env.OPENROUTER_API_KEY) return true
-  // Gemini is disabled - Zillow blocks URL context requests
-  // if (env.GEMINI_API_KEY) return true
+  if (env.FIRECRAWL_API_KEY) return true
   return false
 }
 
 /**
  * Create a Zillow fetcher from environment (for Workers)
- * Uses Firecrawl for scraping + OpenRouter LLM for parsing
+ * Uses Firecrawl v2 JSON extraction (primary) + OpenRouter LLM (fallback)
  */
 export function createZillowFetcher(env: Env): ZillowFetcher | null {
-  // Firecrawl + OpenRouter (scrapes HTML, LLM parses it)
-  if (env.FIRECRAWL_API_KEY && env.OPENROUTER_API_KEY) {
+  if (env.FIRECRAWL_API_KEY) {
     return createFirecrawlZillowFetcher({
       apiKey: env.FIRECRAWL_API_KEY,
-      openrouterApiKey: env.OPENROUTER_API_KEY,
+      openrouterApiKey: env.OPENROUTER_API_KEY,  // Optional fallback
       openrouterModel: env.OPENROUTER_MODEL,
       cache: env.API_CACHE,
       cacheTtl: 24 * 60 * 60,
     })
   }
-
-  // Fallback to Gemini (currently blocked by Zillow)
-  // if (env.GEMINI_API_KEY) {
-  //   return createGeminiZillowFetcher({
-  //     apiKey: env.GEMINI_API_KEY,
-  //     model: 'gemini-3-flash-preview',
-  //     cache: env.API_CACHE,
-  //     cacheTtl: 24 * 60 * 60,
-  //   })
-  // }
 
   return null
 }
@@ -89,8 +75,7 @@ export const createZillowFetcherFromEnv = createZillowFetcher
  * Get the provider name being used
  */
 export function getZillowFetcherProvider(env: Env): string | null {
-  if (env.FIRECRAWL_API_KEY && env.OPENROUTER_API_KEY) return 'firecrawl+openrouter'
-  // if (env.GEMINI_API_KEY) return 'gemini-url-context'
+  if (env.FIRECRAWL_API_KEY) return env.OPENROUTER_API_KEY ? 'firecrawl-json+openrouter-fallback' : 'firecrawl-json'
   return null
 }
 
@@ -143,6 +128,7 @@ export class ZillowPhotoProvider implements PhotoProvider {
     try {
       const result = await fetcher.fetchListing(this.toZillowIdentifier(property), {
         skipCache: options?.skipCache,
+        skipJsonExtraction: options?.skipJsonExtraction,
       })
 
       if (!result.listing) {
@@ -177,6 +163,18 @@ export class ZillowPhotoProvider implements PhotoProvider {
         hoaFee: listing.hoaFee,
         lastSaleDate: listing.lastSaleDate,
         lastSalePrice: listing.lastSalePrice,
+        // Rich property data for classification
+        whatsSpecial: listing.whatsSpecial,
+        roof: listing.roof,
+        construction: listing.construction,
+        heating: listing.heating,
+        cooling: listing.cooling,
+        flooring: listing.flooring,
+        appliances: listing.appliances,
+        exteriorFeatures: listing.exteriorFeatures,
+        parking: listing.parking,
+        pool: listing.pool,
+        propertyType: listing.propertyType,
       }
 
       return {

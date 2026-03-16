@@ -148,6 +148,9 @@ interface AnalyzeRequest {
 
   /** Skip cache and fetch fresh data from APIs */
   skipCache?: boolean
+
+  /** Enable AI vision analysis of subject property photos (runs in background after results) */
+  visionClassification?: boolean
 }
 
 // ─── Main Endpoint ─────────────────────────────────────────────────────────────
@@ -165,6 +168,7 @@ interface AnalyzeRequest {
  */
 analyze.post('/', async (c) => {
   try {
+    const routeStart = Date.now()
     const body = await c.req.json<AnalyzeRequest>()
     const auth = c.get('auth')
 
@@ -184,6 +188,7 @@ analyze.post('/', async (c) => {
     const doId = c.env.ANALYSIS_JOB.idFromName(`${auth.userId}:${propertyKey}`)
     const jobDO = c.env.ANALYSIS_JOB.get(doId)
 
+    const doInitStart = Date.now()
     // Initialize job state in DO
     const initResponse = await jobDO.fetch(
       new Request('http://internal/init', {
@@ -207,15 +212,19 @@ analyze.post('/', async (c) => {
     }
     // Consume response body to properly dispose RPC result
     await initResponse.text()
+    console.log(`[Analyze][Timing] DO init: ${Date.now() - doInitStart}ms`)
 
     // Load all user settings (appraisal presets, rehab config, deal params, location overrides)
+    const settingsStart = Date.now()
     const userSettings = await loadUserAnalysisSettings(c.env.DB, {
       userId: auth.userId,
       address: { city: body.city, state: body.state, zipCode: body.zipCode },
       buyboxOverrides: body.buybox,
     }, c.env.API_CACHE)
+    console.log(`[Analyze][Timing] User settings load: ${Date.now() - settingsStart}ms`)
 
     // ─── Fetch property bundle synchronously ─────────────────────────────────
+    const bundleFetchStart = Date.now()
     // This eliminates Cloudflare Workflow Step 1 overhead (~1-2s checkpoint latency)
     // and lets us return property data immediately in the HTTP response.
     const propertyApi = createPropertyApi(c.env)
@@ -244,6 +253,8 @@ analyze.post('/', async (c) => {
       },
       skipCache: body.skipCache,
     })
+
+    console.log(`[Analyze][Timing] Property bundle fetch: ${Date.now() - bundleFetchStart}ms`)
 
     if (!bundleResult.success) {
       return c.json(
@@ -323,6 +334,7 @@ analyze.post('/', async (c) => {
     }
 
     // Broadcast step_data to DO so SSE late-joiners get it
+    const stepDataBroadcastStart = Date.now()
     const stepDataResponse = await jobDO.fetch(
       new Request('http://internal/step-data', {
         method: 'POST',
@@ -335,7 +347,10 @@ analyze.post('/', async (c) => {
     // Consume response body to properly dispose RPC result
     await stepDataResponse.text()
 
+    console.log(`[Analyze][Timing] Step data broadcast: ${Date.now() - stepDataBroadcastStart}ms`)
+
     // Start the workflow with preloaded bundle (skips Step 1)
+    const workflowCreateStart = Date.now()
     const workflowParams: AnalysisWorkflowParams = {
       jobId,
       userId: auth.userId,
@@ -357,7 +372,7 @@ analyze.post('/', async (c) => {
       customMajorItemCosts: userSettings.customMajorItemCosts,
       preloadedPropertyBundle: bundle,
       preloadedApiCallStats,
-      visionClassification: true,
+      visionClassification: body.visionClassification ?? false, // Off by default — runs in background when enabled
     }
 
     const workflow = await c.env.ANALYSIS_WORKFLOW.create({
@@ -365,6 +380,8 @@ analyze.post('/', async (c) => {
       params: workflowParams,
     })
 
+    console.log(`[Analyze][Timing] Workflow create: ${Date.now() - workflowCreateStart}ms`)
+    console.log(`[Analyze][Timing] Total route handler: ${Date.now() - routeStart}ms`)
     console.log(`[Analyze] Job ${jobId} started via Workflow (instance: ${workflow.id}, property preloaded)`)
 
     // Build response URLs
@@ -558,14 +575,14 @@ analyze.get('/defaults', async (c) => {
         weatherRisk: false,
       },
       photoAnalysis: {
-        enabled: true, // Now enabled by default since workflows are fast
-        maxComps: 10,
+        enabled: true,
+        maxComps: 5,
         requireBetterOrEqual: true,
       },
       zillowContext: {
         enabled: true,
         skipCache: false,
-        maxComps: 10,
+        maxComps: 5,
       },
       rehabLevels: REHAB_LEVELS.map((name, index) => ({ index, name })),
       majorItems: MAJOR_ITEMS,

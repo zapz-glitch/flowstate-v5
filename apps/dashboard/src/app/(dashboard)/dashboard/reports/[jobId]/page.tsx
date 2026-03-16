@@ -23,6 +23,7 @@ import {
   ComparablesSection,
   RiskFloodCard,
   ApiCallStatsCard,
+  VisionAnalysisButton,
 } from '@/components/analysis'
 import type { AnalyzeData } from '@/components/analysis'
 // TODO: re-enable photo upload feature
@@ -227,7 +228,20 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
       {/* Report Content */}
       <div className="space-y-6">
         {analysis.subject && (
-          <SubjectPropertyCard subject={analysis.subject} />
+          <SubjectPropertyCard
+            subject={analysis.subject}
+            footer={analysis.subject.photos?.length ? (
+              <VisionAnalysisButton
+                photoUrls={analysis.subject.photos}
+                propertyContext={{
+                  address: analysis.subject.address,
+                  squareFeet: analysis.subject.squareFeet ?? undefined,
+                  yearBuilt: analysis.subject.yearBuilt ?? undefined,
+                }}
+                existingAnalysis={analysis.visionAnalysis}
+              />
+            ) : undefined}
+          />
         )}
 
         {displayValuation && (

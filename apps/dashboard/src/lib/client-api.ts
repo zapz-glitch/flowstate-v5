@@ -749,3 +749,36 @@ export async function fetchCompPhotos(comps: CompPhotoRequest[]): Promise<CompPh
     body: JSON.stringify({ comps }),
   })
 }
+
+// ─── Vision Analysis ─────────────────────────────────────────────────────────
+
+export interface VisionAnalysisResult {
+  overallCondition: string
+  confidence: number
+  exterior: { condition: string; notes: string[] }
+  interior?: { condition: string; notes: string[] }
+  features?: Record<string, string | undefined>
+  estimatedRehabNeeds: string
+  summary: string
+}
+
+export interface VisionAnalysisResponse {
+  success: boolean
+  data: VisionAnalysisResult
+  cached: boolean
+  durationMs: number
+}
+
+export async function runVisionAnalysis(params: {
+  photoUrls: string[]
+  propertyContext?: {
+    address?: string
+    squareFeet?: number
+    yearBuilt?: number
+  }
+}): Promise<VisionAnalysisResponse> {
+  return fetchApi<VisionAnalysisResponse>('/vision/analyze', {
+    method: 'POST',
+    body: JSON.stringify(params),
+  })
+}

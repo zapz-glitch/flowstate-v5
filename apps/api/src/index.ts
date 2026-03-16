@@ -28,6 +28,7 @@ import userReportsRoute from './routes/user-reports'
 import reportPhotosRoute from './routes/report-photos'
 import waitlistRoute from './routes/waitlist'
 import adminRoute from './routes/admin'
+import visionRoute from './routes/vision'
 import ghlWebhook from './routes/webhooks/ghl'
 
 // Durable Objects
@@ -114,6 +115,9 @@ app.route('/waitlist', waitlistRoute)
 
 // Admin routes (session auth + admin role check inside routes)
 app.route('/admin', adminRoute)
+
+// Vision analysis routes (session auth via Better Auth cookies)
+app.route('/vision', visionRoute)
 
 // GHL webhook routes (self-authenticating via URL secret, no auth middleware)
 app.route('/webhooks/ghl', ghlWebhook)

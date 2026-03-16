@@ -66,6 +66,29 @@ export interface PropertyPhotos {
   lastSaleDate?: string
   /** Most recent sale price */
   lastSalePrice?: number
+  // ─── Rich Property Data (from Zillow structured extraction) ─────────────
+  /** What's Special highlights from listing */
+  whatsSpecial?: string[]
+  /** Roof type */
+  roof?: string
+  /** Construction materials */
+  construction?: string
+  /** Heating system */
+  heating?: string
+  /** Cooling system */
+  cooling?: string
+  /** Flooring types */
+  flooring?: string[]
+  /** Appliances included */
+  appliances?: string[]
+  /** Exterior features */
+  exteriorFeatures?: string[]
+  /** Parking description */
+  parking?: string
+  /** Pool present */
+  pool?: boolean
+  /** Property type (e.g., SingleFamily) */
+  propertyType?: string
 }
 
 // ─── Fetch Options ──────────────────────────────────────────────────────────────
@@ -81,6 +104,8 @@ export interface PhotoFetchOptions {
   timeout?: number
   /** Skip cache and fetch fresh data (for providers that support caching) */
   skipCache?: boolean
+  /** Skip JSON extraction for faster scraping (HTML-only, used for comp properties) */
+  skipJsonExtraction?: boolean
 }
 
 // ─── Provider Interface ─────────────────────────────────────────────────────────

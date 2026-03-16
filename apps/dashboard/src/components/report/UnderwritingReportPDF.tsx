@@ -33,12 +33,12 @@ export interface UnderwritingReportProps {
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function fmt(n?: number | null): string {
-  if (n == null) return '-'
+  if (n == null || Number.isNaN(n)) return '-'
   return '$' + n.toLocaleString('en-US')
 }
 
 function fmtPct(n?: number | null, decimals = 1): string {
-  if (n == null) return '-'
+  if (n == null || Number.isNaN(n)) return '-'
   return n.toFixed(decimals) + '%'
 }
 

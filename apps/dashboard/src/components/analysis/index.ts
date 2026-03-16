@@ -15,6 +15,7 @@ export { PhotoUpload } from './PhotoUpload'
 export { PhotoAnalysisFindings } from './PhotoAnalysisFindings'
 export { formatCurrency, formatFilterType, formatAdjustmentType, getCompKey, normalizeSubdivision } from './format-helpers'
 export { ApiCallStatsCard } from './ApiCallStatsCard'
+export { VisionAnalysisButton } from './VisionAnalysisButton'
 export type {
   AnalyzeData,
   SubjectData,
