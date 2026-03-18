@@ -309,6 +309,12 @@ export interface ResponseContext {
   apiCallStats?: ApiCallStats
   /** LLM-selected best matching comp */
   bestMatch?: { compId: string; reasoning: string }
+  /** Group B result (as-is market intelligence) */
+  groupBResult?: import('../evaluation').GroupBResult | null
+  /** Set of Group A comp IDs (for compGroup tagging) */
+  groupACompIds?: Set<string>
+  /** Set of Group B comp IDs (for compGroup tagging) */
+  groupBCompIds?: Set<string>
 }
 
 /**
@@ -379,6 +385,10 @@ export interface AnalysisResponse {
     photos: string[]
     /** Foundation type (e.g., Slab, Crawl Space, Basement) */
     foundationType: string | null
+    /** Building style (e.g., Colonial, Cape Cod, Bungalow, Ranch) */
+    buildingStyle: string | null
+    /** Story type description (e.g., Split Foyer, Tri Level, 2 Story) */
+    storiesType: string | null
     /** Monthly HOA fee in dollars (if applicable) */
     hoaFee: number | null
     /** Zillow search URL for this property */
@@ -402,6 +412,15 @@ export interface AnalysisResponse {
     spreadAnalysis: {
       asIsToArv: number | null
       potentialProfit: number | null
+    } | null
+    /** Group B: As-Is market intelligence (display only, does NOT affect valuation) */
+    asIsMarketIntel: {
+      asIsMarketPrice: number | null
+      avgPricePerSqft: number | null
+      compCount: number
+      compIds: string[]
+      thresholdPercent: number
+      priceCeiling: number
     } | null
     buyPrice: number
     buyPricePercent: number
@@ -458,16 +477,23 @@ export interface AnalysisResponse {
       /** @deprecated Use bedrooms and bathrooms separately */
       bedsBaths: string
       yearBuilt: number | null
+      lotSizeAcres: number | null
       adjustedPrice: number | null
       photos: string[]
       /** Subdivision name (if available) */
       subdivision: string | null
       /** Foundation type (e.g., Slab, Crawl Space, Basement) */
       foundationType: string | null
+      /** Building style (e.g., Colonial, Cape Cod, Bungalow, Ranch) */
+      buildingStyle: string | null
+      /** Story type description (e.g., Split Foyer, Tri Level, 2 Story) */
+      storiesType: string | null
       /** Zillow search URL for this property */
       zillowUrl: string | null
       /** Whether this comp is enabled (passed all filters) */
       isEnabled: boolean
+      /** Which comp group: 'arv' (Group A, drives valuation), 'as_is' (Group B, market intel), or null */
+      compGroup: 'arv' | 'as_is' | null
       /** Reasons why this comp was disabled (if any) */
       disableReasons: string[]
       /** Property classification (as_is or after_renovation) */
@@ -604,15 +630,6 @@ export interface ApiCallStats {
     cached: number
     endpoints: { endpoint: string; calls: number; cached: number }[]
   }
-  firecrawl: {
-    total: number
-    cached: number
-  }
-  llm: {
-    total: number
-    cached: number
-    breakdown: { purpose: string; count: number }[]
-  }
   totalExternalCalls: number
 }
 
@@ -733,10 +750,13 @@ export function buildAnalysisResponse(
       bathrooms,
       bedsBaths: `${bedrooms ?? '-'}/${bathrooms ?? '-'}`,
       yearBuilt,
+      lotSizeAcres: comp.lotSizeAcres ?? null,
       adjustedPrice: comp.adjustedSalePrice,
       photos: compPhotos,
       subdivision: comp.subdivision ?? null,
       foundationType: comp.construction?.foundationType ?? null,
+      buildingStyle: comp.construction?.buildingStyle ?? null,
+      storiesType: comp.construction?.storiesType ?? null,
       zillowUrl: generateZillowUrl({
         propertyId: comp.id,
         address: comp.address,
@@ -745,6 +765,9 @@ export function buildAnalysisResponse(
         zipCode: comp.zipCode,
       }),
       isEnabled: comp.isEnabled,
+      compGroup: ctx.groupACompIds?.has(comp.id) ? 'arv' as const
+        : ctx.groupBCompIds?.has(comp.id) ? 'as_is' as const
+        : null,
       disableReasons: evaluation?.disableReasons ?? [],
       classification: classificationSummary,
       isBestMatch: ctx.bestMatch?.compId === comp.id,
@@ -804,6 +827,8 @@ export function buildAnalysisResponse(
       taxAssessment: property.assessedValue ?? null,
       photos: subjectPhotos,
       foundationType: property.construction?.foundationType ?? null,
+      buildingStyle: property.construction?.buildingStyle ?? null,
+      storiesType: property.construction?.storiesType ?? null,
       hoaFee: property.hoaFee ?? null,
       zillowUrl: generateZillowUrl({
         propertyId: property.id,
@@ -838,6 +863,14 @@ export function buildAnalysisResponse(
       projectedROI: valuation.projectedROI,
       wholesalePrice: valuation.wholesalePrice,
       rehabLevelEstimates: ctx.rehabLevelEstimates ?? [],
+      asIsMarketIntel: ctx.groupBResult ? {
+        asIsMarketPrice: ctx.groupBResult.asIsMarketPrice,
+        avgPricePerSqft: ctx.groupBResult.avgPricePerSqft,
+        compCount: ctx.groupBResult.count,
+        compIds: ctx.groupBResult.compIds,
+        thresholdPercent: ctx.groupBResult.thresholdPercent,
+        priceCeiling: ctx.groupBResult.priceCeiling,
+      } : null,
     },
 
     // ═══ COMPARABLE SALES (All comps with enable/disable status) ═══════════════

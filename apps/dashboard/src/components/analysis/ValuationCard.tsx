@@ -268,6 +268,29 @@ export function ValuationCard({
               </div>
             </div>
           )}
+
+          {valuation.asIsMarketIntel?.asIsMarketPrice != null && valuation.arv != null && (
+            <div className="mt-5 pt-5 border-t border-border">
+              <div className="text-caption font-medium text-foreground-secondary mb-3">Market Intelligence</div>
+              <div className="grid grid-cols-3 gap-4">
+                <div>
+                  <div className="text-caption-sm text-foreground-tertiary">As-Is Market Price</div>
+                  <div className="text-body-sm font-semibold text-blue-600">${valuation.asIsMarketIntel.asIsMarketPrice?.toLocaleString()}</div>
+                  <div className="text-caption-sm text-foreground-tertiary">{valuation.asIsMarketIntel.compCount} comp{valuation.asIsMarketIntel.compCount !== 1 ? 's' : ''}</div>
+                </div>
+                <div>
+                  <div className="text-caption-sm text-foreground-tertiary">ARV to As-Is Spread</div>
+                  <div className="text-body-sm font-semibold">${((valuation.arv ?? 0) - (valuation.asIsMarketIntel.asIsMarketPrice ?? 0)).toLocaleString()}</div>
+                  <div className="text-caption-sm text-foreground-tertiary">renovation upside</div>
+                </div>
+                <div>
+                  <div className="text-caption-sm text-foreground-tertiary">As-Is $/sqft</div>
+                  <div className="text-body-sm font-semibold">${valuation.asIsMarketIntel.avgPricePerSqft?.toLocaleString() ?? '-'}/sqft</div>
+                  <div className="text-caption-sm text-foreground-tertiary">&le;{valuation.asIsMarketIntel.thresholdPercent}% of ARV</div>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </TooltipProvider>

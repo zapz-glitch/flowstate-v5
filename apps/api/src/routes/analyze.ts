@@ -37,6 +37,7 @@ import { filtersToApiParams } from '../services/appraisal/types'
 import { createPhotoService } from '../services/photo-provider'
 import type { PropertyIdentifier } from '../services/photo-provider'
 import { performAnalysis } from '../services/evaluation'
+import { generateSseToken } from '../utils/sse-token'
 import { drizzle } from 'drizzle-orm/d1'
 import { savedReports } from '../db/schema'
 
@@ -90,6 +91,17 @@ interface AnalyzeRequest {
 
   /** Skip cache and fetch fresh data from APIs */
   skipCache?: boolean
+
+  /** Market data enrichment: scrape public listing data via Firecrawl */
+  marketData?: {
+    enabled?: boolean
+  }
+
+  /** LLM-based comp analysis options */
+  llmAnalysis?: {
+    enabled?: boolean
+    includePhotos?: boolean
+  }
 }
 
 // ─── Main Endpoint ─────────────────────────────────────────────────────────────
@@ -182,21 +194,25 @@ analyze.post('/', async (c) => {
       customRehabTable: userSettings.customRehabTable,
       customTierRanges: userSettings.customTierRanges,
       customMajorItemCosts: userSettings.customMajorItemCosts,
+      arvThreshold: userSettings.arvThreshold,
       apiCallStats: {
         corelogic: {
           total: propertyCallStats.total,
           cached: propertyCallStats.cached,
           endpoints: propertyCallStats.endpoints,
         },
-        firecrawl: { total: 0, cached: 0 },
-        llm: { total: 0, cached: 0, breakdown: [] },
         totalExternalCalls: propertyCallStats.total,
       },
     })
 
     console.log(`[Analyze][Timing] Evaluation: ${Date.now() - evalStart}ms`)
 
-    // ─── 4. Save report to DB (background, non-blocking) ────────────────────
+    // ─── 4. Check if async enrichment is requested ─────────────────────────
+    const llmEnabled = body.llmAnalysis?.enabled === true
+    const marketDataEnabled = body.marketData?.enabled === true
+    const hasEnrichment = llmEnabled || marketDataEnabled
+
+    // ─── 5. Save report to DB (background, non-blocking) ────────────────────
     c.executionCtx.waitUntil((async () => {
       try {
         const db = drizzle(c.env.DB)
@@ -219,14 +235,56 @@ analyze.post('/', async (c) => {
       }
     })())
 
+    // ─── 6. Start background enrichment if enabled ───────────────────────────
+    let enrichmentInfo: { streamUrl: string; token: string; pending: string[] } | undefined
+
+    if (hasEnrichment) {
+      const pending: string[] = []
+      if (marketDataEnabled) pending.push('market_data')
+      if (llmEnabled) pending.push('llm')
+
+      // Generate SSE auth token
+      const sseSecret = c.env.BETTER_AUTH_SECRET || ''
+      const token = await generateSseToken(sseSecret, jobId, auth.userId)
+      const apiBaseUrl = c.req.url.replace(/\/v1\/analyze.*/, '')
+      const streamUrl = `${apiBaseUrl}/sse/analyze/${jobId}`
+
+      enrichmentInfo = { streamUrl, token, pending }
+
+      // Start enrichment inside the DO (persistent execution context — no waitUntil)
+      const doId = c.env.ANALYSIS_JOB.idFromName(jobId)
+      const stub = c.env.ANALYSIS_JOB.get(doId)
+      const startResp = await stub.fetch('http://internal/start', {
+        method: 'POST',
+        body: JSON.stringify({
+          jobId,
+          userId: auth.userId,
+          pending,
+          bundle,
+          evalParams: {
+            appraisalRules: userSettings.appraisalRules,
+            buybox: userSettings.mergedBuybox,
+            customRehabTable: userSettings.customRehabTable,
+            customTierRanges: userSettings.customTierRanges,
+            customMajorItemCosts: userSettings.customMajorItemCosts,
+            arvThreshold: userSettings.arvThreshold,
+          },
+          analysisResult,
+          llmOptions: { includePhotos: body.llmAnalysis?.includePhotos },
+        }),
+      })
+      await startResp.text() // consume response
+    }
+
     console.log(`[Analyze][Timing] Total: ${Date.now() - routeStart}ms`)
-    console.log(`[Analyze] Job ${jobId} completed synchronously (${bundle.comparables.length} comps)`)
+    console.log(`[Analyze] Job ${jobId} completed (${bundle.comparables.length} comps, enrichment: ${hasEnrichment ? 'pending' : 'none'})`)
 
     return c.json({
       success: true,
       data: {
         jobId,
         result: analysisResult,
+        ...(enrichmentInfo ? { enrichment: enrichmentInfo } : {}),
       },
     })
   } catch (error) {

@@ -102,6 +102,10 @@ export interface NormalizedProperty {
   construction?: {
     type?: string
     qualityCode?: string
+    /** Building style (e.g. Colonial, Cape Cod, Bungalow, Ranch) */
+    buildingStyle?: string
+    /** Story type description (e.g. Split Foyer, Tri Level, 2 Story) */
+    storiesType?: string
     roofType?: string
     roofCover?: string
     foundationType?: string
@@ -196,6 +200,8 @@ export interface NormalizedComparable {
   construction?: {
     type?: string
     qualityCode?: string
+    buildingStyle?: string
+    storiesType?: string
     roofType?: string
     roofCover?: string
     foundationType?: string

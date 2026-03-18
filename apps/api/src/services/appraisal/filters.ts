@@ -91,6 +91,39 @@ export const FILTER_RULES: FilterRuleDefinition[] = [
   },
 
   {
+    type: 'building_style_match',
+    defaults: { enabled: true, value: 1 },
+    label: {
+      label: 'Building Style Match',
+      shortLabel: 'Style',
+      unit: '',
+      description: 'Must match subject building style (e.g. Ranch, Colonial)',
+    },
+    apiParam: null,
+    evaluate(subject, comp, _filter) {
+      const subjectStyle = subject.construction?.buildingStyle?.toLowerCase().trim()
+      const compStyle = comp.construction?.buildingStyle?.toLowerCase().trim()
+
+      if (!subjectStyle || !compStyle) {
+        return {
+          type: 'building_style_match',
+          passed: true,
+          reason: 'Building style data not available',
+        }
+      }
+
+      const passed = subjectStyle === compStyle
+      return {
+        type: 'building_style_match',
+        passed,
+        reason: passed ? undefined : `Style mismatch: "${compStyle}" vs subject "${subjectStyle}"`,
+        actualValue: compStyle,
+        threshold: subjectStyle,
+      }
+    },
+  },
+
+  {
     type: 'sale_age',
     defaults: { enabled: true, value: 180 },
     label: {
@@ -234,4 +267,5 @@ export const FILTER_RULES: FilterRuleDefinition[] = [
       }
     },
   },
+
 ]

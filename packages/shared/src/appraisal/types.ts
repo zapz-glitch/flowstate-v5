@@ -9,6 +9,7 @@
 
 export type FilterType =
   | 'subdivision_match'
+  | 'building_style_match'
   | 'sale_age'
   | 'sqft_diff'
   | 'property_type'
@@ -68,6 +69,9 @@ export interface PropertyLike {
   bathrooms?: number | null
   yearBuilt?: number | null
   subdivision?: string | null
+  construction?: {
+    buildingStyle?: string | null
+  } | null
   features?: {
     poolType?: string[] | null
     garageType?: string[] | null

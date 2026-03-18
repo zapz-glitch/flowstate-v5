@@ -5,6 +5,7 @@
 export interface Env {
   DB: D1Database
   API_CACHE: KVNamespace
+  ANALYSIS_JOB: DurableObjectNamespace
   ENVIRONMENT: string
 
   // ─── Dashboard URL ────────────────────────────────────────────────────────

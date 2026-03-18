@@ -55,6 +55,7 @@ interface LocationSettingInput {
   tierRangesJson?: unknown[] | null
   dealParamsJson?: Record<string, unknown> | null
   majorItemCostsJson?: Record<string, number> | null
+  arvThresholdJson?: { percent: number; enabled: boolean } | null
 }
 
 function validateInput(body: LocationSettingInput): string | null {
@@ -216,10 +217,12 @@ function serializeRow(r: typeof locationSettings.$inferSelect) {
     tierRangesJson: r.tierRangesJson ? JSON.parse(r.tierRangesJson) : null,
     dealParamsJson: r.dealParamsJson ? JSON.parse(r.dealParamsJson) : null,
     majorItemCostsJson: r.majorItemCostsJson ? JSON.parse(r.majorItemCostsJson) : null,
+    arvThresholdJson: r.arvThresholdJson ? JSON.parse(r.arvThresholdJson) : null,
     hasRehabConfig: r.rehabConfigJson !== null,
     hasTierRanges: r.tierRangesJson !== null,
     hasDealParams: r.dealParamsJson !== null,
     hasMajorItemCosts: r.majorItemCostsJson !== null,
+    hasArvThreshold: r.arvThresholdJson !== null,
   }
 }
 
@@ -302,6 +305,7 @@ locationSettingsRoute.post('/', async (c) => {
       tierRangesJson: body.tierRangesJson ? JSON.stringify(body.tierRangesJson) : null,
       dealParamsJson: body.dealParamsJson ? JSON.stringify(body.dealParamsJson) : null,
       majorItemCostsJson: body.majorItemCostsJson ? JSON.stringify(body.majorItemCostsJson) : null,
+      arvThresholdJson: body.arvThresholdJson ? JSON.stringify(body.arvThresholdJson) : null,
       createdAt: now,
       updatedAt: now,
     })
@@ -391,6 +395,7 @@ locationSettingsRoute.patch('/:id', async (c) => {
   if (body.tierRangesJson !== undefined) updates.tierRangesJson = body.tierRangesJson ? JSON.stringify(body.tierRangesJson) : null
   if (body.dealParamsJson !== undefined) updates.dealParamsJson = body.dealParamsJson ? JSON.stringify(body.dealParamsJson) : null
   if (body.majorItemCostsJson !== undefined) updates.majorItemCostsJson = body.majorItemCostsJson ? JSON.stringify(body.majorItemCostsJson) : null
+  if (body.arvThresholdJson !== undefined) updates.arvThresholdJson = body.arvThresholdJson ? JSON.stringify(body.arvThresholdJson) : null
 
   // Handle inline appraisal override
   if (body.appraisalFilters !== undefined) {

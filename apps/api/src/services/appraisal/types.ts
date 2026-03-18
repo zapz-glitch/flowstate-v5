@@ -19,6 +19,7 @@ import type { NormalizedProperty, NormalizedComparable } from '../property-api/t
 
 export type FilterType =
   | 'subdivision_match'
+  | 'building_style_match'
   | 'sale_age'
   | 'sqft_diff'
   | 'year_built_diff'

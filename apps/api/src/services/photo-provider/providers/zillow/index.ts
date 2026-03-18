@@ -160,6 +160,8 @@ export class ZillowPhotoProvider implements PhotoProvider {
         squareFeet: listing.squareFeet,
         yearBuilt: listing.yearBuilt,
         foundationType: listing.foundationType,
+        style: listing.style,
+        stories: listing.stories,
         hoaFee: listing.hoaFee,
         lastSaleDate: listing.lastSaleDate,
         lastSalePrice: listing.lastSalePrice,

@@ -22,10 +22,13 @@ migrations_dir = "migrations"
 binding = "API_CACHE"
 id = "076d6c5a242c4b5d9765d04b8b8755b6"
 
-# Delete Durable Object classes removed in refactor (v4)
+[[durable_objects.bindings]]
+name = "ANALYSIS_JOB"
+class_name = "AnalysisJobDO"
+
 [[migrations]]
-tag = "v4"
-deleted_classes = ["AnalysisJobDO"]
+tag = "v5"
+new_classes = ["AnalysisJobDO"]
 
 [observability]
 enabled = true

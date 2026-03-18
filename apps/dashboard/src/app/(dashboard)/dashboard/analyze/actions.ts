@@ -56,8 +56,15 @@ export interface AnalyzeRequest {
   }
   /** Skip cache and fetch fresh data from APIs */
   skipCache?: boolean
-  /** Enable AI vision analysis of subject property photos (runs in background) */
-  visionClassification?: boolean
+  /** Zillow enrichment: scrape property data from Zillow */
+  marketData?: {
+    enabled?: boolean
+  }
+  /** LLM-based comp analysis options */
+  llmAnalysis?: {
+    enabled?: boolean
+    includePhotos?: boolean
+  }
 }
 
 export type AnalyzeResult =
@@ -69,8 +76,6 @@ export type AnalyzeResult =
 /** API call statistics tracked during analysis */
 export interface ApiCallStats {
   corelogic: { total: number; cached: number; endpoints: { endpoint: string; calls: number; cached: number }[] }
-  firecrawl: { total: number; cached: number }
-  llm: { total: number; cached: number; breakdown: { purpose: string; count: number }[] }
   totalExternalCalls: number
 }
 
@@ -151,6 +156,8 @@ export interface SubjectData {
   photos?: string[]
   /** Foundation type (e.g., Slab, Crawl Space, Basement) */
   foundationType?: string | null
+  /** Building style (e.g., Colonial, Cape Cod, Ranch) */
+  buildingStyle?: string | null
   /** Property classification (as_is, after_renovation, transitional) */
   classification?: ClassificationSummary | null
 }
@@ -189,6 +196,15 @@ export interface ValuationData {
   wholesalePrice?: number
   recommendation?: string
   recommendationReason?: string
+  /** As-Is market intelligence from Group B comps (display only) */
+  asIsMarketIntel?: {
+    asIsMarketPrice?: number | null
+    avgPricePerSqft?: number | null
+    compCount?: number
+    compIds?: string[]
+    thresholdPercent?: number
+    priceCeiling?: number
+  } | null
 }
 
 export interface CompsData {
@@ -214,6 +230,7 @@ export interface CompItem {
   /** @deprecated Use bedrooms and bathrooms separately */
   bedsBaths?: string
   yearBuilt?: number | null
+  lotSizeAcres?: number | null
   adjustedPrice?: number | null
   qualityScore?: number | null
   condition?: string | null
@@ -223,12 +240,16 @@ export interface CompItem {
   subdivision?: string | null
   /** Foundation type (e.g., Slab, Crawl Space, Basement) */
   foundationType?: string | null
+  /** Building style (e.g., Colonial, Cape Cod, Ranch) */
+  buildingStyle?: string | null
   /** Reason this comp was selected/analyzed (LLM reasoning) */
   selectionReason?: string | null
   /** Key features identified by LLM analysis */
   keyFeatures?: string[] | null
   /** Whether this comp is enabled (passed all filters) */
   isEnabled?: boolean
+  /** Which comp group: 'arv' (Group A, drives valuation), 'as_is' (Group B, market intel), or null */
+  compGroup?: 'arv' | 'as_is' | null
   /** Reasons why this comp was disabled (if any) */
   disableReasons?: string[]
   /** Property classification (as_is, after_renovation, transitional) */
@@ -340,6 +361,12 @@ export interface QueueAnalysisResult {
   /** Full analysis result (synchronous response) */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   result?: Record<string, any>
+  /** SSE enrichment stream info (when Zillow/LLM enrichment is pending) */
+  enrichment?: {
+    streamUrl: string
+    token: string
+    pending: string[]
+  }
 }
 
 export interface JobStatusResult {
@@ -422,6 +449,8 @@ export async function queueAnalysis(request: AnalyzeRequest): Promise<QueueAnaly
         monthsBack: 12,
       },
       skipCache: request.skipCache,
+      marketData: request.marketData,
+      llmAnalysis: request.llmAnalysis,
     }
 
     logApiCall('POST', analyzeUrl)
@@ -449,6 +478,7 @@ export async function queueAnalysis(request: AnalyzeRequest): Promise<QueueAnaly
         jobId: string
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         result: Record<string, any>
+        enrichment?: { streamUrl: string; token: string; pending: string[] }
       }
     }
 
@@ -468,6 +498,7 @@ export async function queueAnalysis(request: AnalyzeRequest): Promise<QueueAnaly
       success: true,
       jobId,
       result: result.data?.result,
+      enrichment: result.data?.enrichment,
     }
   } catch (error) {
     logError('queueAnalysis exception', error)

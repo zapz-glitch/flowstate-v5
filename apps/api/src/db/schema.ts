@@ -393,6 +393,26 @@ export const dealParams = sqliteTable(
 )
 
 // ==========================================
+// ARV Threshold (per-user ARV comp threshold)
+// ==========================================
+
+export const arvThreshold = sqliteTable(
+  'arv_threshold',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    userId: text('user_id')
+      .notNull()
+      .unique()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    /** Top % of comps by sale price used for ARV calculation (default: 10) */
+    percent: real('percent').notNull().default(10),
+    createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
+    updatedAt: text('updated_at').notNull().$defaultFn(() => new Date().toISOString()),
+  },
+  (table) => [index('idx_arv_threshold_user_id').on(table.userId)]
+)
+
+// ==========================================
 // Location Settings (per-location overrides)
 // ==========================================
 
@@ -418,6 +438,7 @@ export const locationSettings = sqliteTable(
     tierRangesJson: text('tier_ranges_json'),         // custom tier range definitions (null = inherit from user global)
     dealParamsJson: text('deal_params_json'),         // JSON of DealParamsConfig fields
     majorItemCostsJson: text('major_item_costs_json'), // JSON of Record<MajorItemId, number>
+    arvThresholdJson: text('arv_threshold_json'),     // JSON of { percent: number, enabled: boolean }
     createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
     updatedAt: text('updated_at').notNull().$defaultFn(() => new Date().toISOString()),
   },

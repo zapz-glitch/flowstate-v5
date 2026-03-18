@@ -27,6 +27,9 @@ import userReportsRoute from './routes/user-reports'
 import waitlistRoute from './routes/waitlist'
 import adminRoute from './routes/admin'
 import visionRoute from './routes/vision'
+import arvThresholdRoute from './routes/arv-threshold'
+import typeaheadRoute from './routes/typeahead'
+import sseStream from './routes/sse-stream'
 import ghlWebhook from './routes/webhooks/ghl'
 
 type Variables = { auth: AuthContext }
@@ -105,8 +108,17 @@ app.route('/waitlist', waitlistRoute)
 // Admin routes (session auth + admin role check inside routes)
 app.route('/admin', adminRoute)
 
+// ARV threshold routes (session auth via Better Auth cookies)
+app.route('/arv-threshold', arvThresholdRoute)
+
+// Address typeahead routes (session auth via Better Auth cookies)
+app.route('/typeahead', typeaheadRoute)
+
 // Vision analysis routes (session auth via Better Auth cookies)
 app.route('/vision', visionRoute)
+
+// SSE stream routes (token-authenticated)
+app.route('/sse', sseStream)
 
 // GHL webhook routes (self-authenticating via URL secret, no auth middleware)
 app.route('/webhooks/ghl', ghlWebhook)
@@ -145,6 +157,9 @@ app.onError((err, c) => {
     500
   )
 })
+
+// Export Durable Object classes
+export { AnalysisJobDO } from './durable-objects'
 
 // Export worker
 export default {

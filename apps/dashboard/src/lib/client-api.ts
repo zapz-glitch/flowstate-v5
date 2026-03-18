@@ -34,6 +34,52 @@ async function fetchApi<T>(path: string, options: RequestInit = {}): Promise<T> 
   return response.json()
 }
 
+// ─── Address Typeahead ───────────────────────────────────────────────────────
+
+export interface TypeaheadResult {
+  clip: string
+  address: string
+  addressLine1: string
+  city: string
+  state: string
+  zip: string
+}
+
+export async function searchTypeahead(input: string): Promise<TypeaheadResult[]> {
+  if (input.length < 3) return []
+  const response = await fetchApi<{ results: TypeaheadResult[] }>(
+    `/typeahead?input=${encodeURIComponent(input)}`
+  )
+  return response.results ?? []
+}
+
+// ─── ARV Threshold ──────────────────────────────────────────────────────────
+
+export interface ArvThresholdConfig {
+  percent: number
+}
+
+export interface ArvThresholdResponse {
+  config: ArvThresholdConfig
+  isCustom: boolean
+  updatedAt?: string
+}
+
+export async function getArvThreshold(): Promise<ArvThresholdResponse> {
+  return fetchApi<ArvThresholdResponse>('/arv-threshold')
+}
+
+export async function saveArvThreshold(config: ArvThresholdConfig): Promise<ArvThresholdResponse> {
+  return fetchApi('/arv-threshold', {
+    method: 'PUT',
+    body: JSON.stringify(config),
+  })
+}
+
+export async function resetArvThreshold(): Promise<ArvThresholdResponse> {
+  return fetchApi('/arv-threshold', { method: 'DELETE' })
+}
+
 // ─── API Keys ────────────────────────────────────────────────────────────────
 
 export interface ApiKey {
@@ -155,6 +201,7 @@ export async function getUser(): Promise<User> {
 
 export type FilterType =
   | 'subdivision_match'
+  | 'building_style_match'
   | 'sale_age'
   | 'sqft_diff'
   | 'property_type'
@@ -423,7 +470,7 @@ export interface LocationAppraisalAdjustment {
   percentage: number
 }
 
-export type LocationSettingType = 'appraisal' | 'rehab' | 'deal' | 'major'
+export type LocationSettingType = 'appraisal' | 'rehab' | 'deal' | 'major' | 'arv_threshold'
 
 export interface LocationSetting {
   id: string
@@ -440,10 +487,12 @@ export interface LocationSetting {
   tierRangesJson?: TierRangeDefinition[] | null
   dealParamsJson?: DealParamsConfig | null
   majorItemCostsJson?: Record<string, number> | null
+  arvThresholdJson?: ArvThresholdConfig | null
   hasRehabConfig: boolean
   hasTierRanges: boolean
   hasDealParams: boolean
   hasMajorItemCosts: boolean
+  hasArvThreshold: boolean
   createdAt: string
   updatedAt: string
 }
@@ -461,6 +510,7 @@ export interface LocationSettingInput {
   tierRangesJson?: TierRangeDefinition[] | null
   dealParamsJson?: DealParamsConfig | null
   majorItemCostsJson?: Record<string, number> | null
+  arvThresholdJson?: ArvThresholdConfig | null
 }
 
 export async function getLocationSettings(type?: LocationSettingType): Promise<LocationSetting[]> {

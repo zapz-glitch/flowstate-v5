@@ -22,7 +22,9 @@
       "Bash(source ~/.zshrc)",
       "WebFetch(domain:www.npmjs.com)",
       "WebFetch(domain:developers.cloudflare.com)",
-      "WebSearch"
+      "WebSearch",
+      "Bash(npx turbo:*)",
+      "Bash(wc -l /Users/yalamber/Projects/flowstate/flowstate-api/apps/dashboard/src/app/\\\\\\(dashboard\\\\\\)/dashboard/analyze/actions.ts)"
     ]
   }
 }

@@ -401,7 +401,7 @@ export function UnderwritingReportPDF({
           <StatBox label="Baths" value={subject?.bathrooms ?? '-'} />
           <StatBox label="Sq Ft" value={subject?.squareFeet?.toLocaleString() ?? '-'} />
           <StatBox label="Year Built" value={subject?.yearBuilt ?? '-'} />
-          <StatBox label="Lot" value={subject?.lotSizeAcres ? `${subject.lotSizeAcres} ac` : '-'} />
+          <StatBox label="Lot" value={subject?.lotSizeAcres ? `${Number(subject.lotSizeAcres).toFixed(3)} ac` : '-'} />
           <StatBox label="Foundation" value={subject?.foundationType ?? '-'} />
         </View>
 

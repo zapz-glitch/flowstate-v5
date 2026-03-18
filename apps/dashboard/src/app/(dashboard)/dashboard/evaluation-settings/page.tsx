@@ -22,6 +22,7 @@ import {
   ChevronDown,
   Wrench,
   AlertCircle,
+  TrendingUp,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -84,6 +85,10 @@ import {
   type LocationSettingInput,
   type MajorItemInfo,
   type TierRangeDefinition,
+  type ArvThresholdConfig,
+  getArvThreshold,
+  saveArvThreshold,
+  resetArvThreshold,
 } from '@/lib/client-api'
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -130,7 +135,7 @@ function RulesTable({
   headers,
   children,
 }: {
-  accent: 'blue' | 'emerald'
+  accent: 'blue' | 'emerald' | 'amber'
   headers: string[]
   children: React.ReactNode
 }) {
@@ -405,7 +410,7 @@ function PresetFormDialog({
               <RulesTable accent="blue" headers={['Rule', 'Threshold', 'Active']}>
                 {filters.map((f, idx) => {
                   const labelInfo = defaults.filterLabels[f.filterType]
-                  const isBoolean = f.filterType === 'subdivision_match' || f.filterType === 'property_type'
+                  const isBoolean = f.filterType === 'subdivision_match' || f.filterType === 'building_style_match' || f.filterType === 'property_type'
                   return (
                     <FilterRow
                       key={f.filterType}
@@ -559,7 +564,7 @@ function PresetCard({ preset, onEdit, onDelete, onSetDefault }: {
             </div>
             <div className="flex flex-wrap gap-1.5">
               {preset.filters.map((f) => {
-                const isBoolean = f.filterType === 'subdivision_match' || f.filterType === 'property_type'
+                const isBoolean = f.filterType === 'subdivision_match' || f.filterType === 'building_style_match' || f.filterType === 'property_type'
                 const unit = FILTER_UNIT[f.filterType]
                 return <FilterChip key={f.filterType} label={FILTER_SHORT[f.filterType] ?? f.filterType} value={isBoolean ? '' : `≤ ${f.value}${unit ? ` ${unit}` : ''}`} enabled={f.enabled} />
               })}
@@ -802,7 +807,7 @@ function AppraisalRulesTab() {
             <RulesTable accent="blue" headers={['Rule', 'Threshold', 'Active']}>
               {filters.map((f, idx) => {
                 const labelInfo = defaults.filterLabels[f.filterType]
-                const isBoolean = f.filterType === 'subdivision_match' || f.filterType === 'property_type'
+                const isBoolean = f.filterType === 'subdivision_match' || f.filterType === 'building_style_match' || f.filterType === 'property_type'
                 return (
                   <FilterRow
                     key={f.filterType}
@@ -941,7 +946,7 @@ function AppraisalRulesTab() {
                             <RulesTable accent="blue" headers={['Rule', 'Threshold', 'Active']}>
                               {es.filters.map((f, idx) => {
                                 const labelInfo = defaults.filterLabels[f.filterType]
-                                const isBoolean = f.filterType === 'subdivision_match' || f.filterType === 'property_type'
+                                const isBoolean = f.filterType === 'subdivision_match' || f.filterType === 'building_style_match' || f.filterType === 'property_type'
                                 return (
                                   <FilterRow
                                     key={f.filterType}
@@ -2923,6 +2928,346 @@ function MajorItemCostsTab() {
 // PAGE
 // ═══════════════════════════════════════════════════════════════════════════════
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// ARV COMP THRESHOLD TAB
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const ARV_THRESHOLD_DEFAULTS_UI: ArvThresholdConfig = { percent: 10 }
+
+function ArvThresholdTab() {
+  const [config, setConfig] = useState<ArvThresholdConfig>(ARV_THRESHOLD_DEFAULTS_UI)
+  const [original, setOriginal] = useState<ArvThresholdConfig>(ARV_THRESHOLD_DEFAULTS_UI)
+  const [isCustom, setIsCustom] = useState(false)
+  const [updatedAt, setUpdatedAt] = useState<string | undefined>()
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [successMessage, setSuccessMessage] = useState<string | null>(null)
+
+  // Location overrides
+  const [locSettings, setLocSettings] = useState<LocationSetting[]>([])
+  const [locExpandedId, setLocExpandedId] = useState<string | null>(null)
+  const [locEditStates, setLocEditStates] = useState<Record<string, {
+    arvThreshold: ArvThresholdConfig; saving: boolean; error: string | null
+  }>>({})
+  const [addLocOpen, setAddLocOpen] = useState(false)
+  const [addStateCode, setAddStateCode] = useState('')
+  const [addSubScope, setAddSubScope] = useState<'state' | 'city' | 'zip'>('state')
+  const [addLocValue, setAddLocValue] = useState('')
+  const [addLocError, setAddLocError] = useState<string | null>(null)
+  const [addLocSaving, setAddLocSaving] = useState(false)
+
+  useEffect(() => {
+    setLoading(true)
+    Promise.all([getArvThreshold(), getLocationSettings('arv_threshold')])
+      .then(([res, settingsData]) => {
+        setConfig(res.config); setOriginal(res.config)
+        setIsCustom(res.isCustom); setUpdatedAt(res.updatedAt)
+        setLocSettings(settingsData)
+      })
+      .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load'))
+      .finally(() => setLoading(false))
+  }, [])
+
+  const isDirty = JSON.stringify(config) !== JSON.stringify(original)
+
+  const handleSave = async () => {
+    if (!isDirty) return
+    setSaving(true); setError(null); setSuccessMessage(null)
+    try {
+      const res = await saveArvThreshold(config)
+      setConfig(res.config); setOriginal(res.config)
+      setIsCustom(true); setUpdatedAt(res.updatedAt)
+      setSuccessMessage('ARV threshold saved.')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Save failed')
+    } finally { setSaving(false) }
+  }
+
+  const handleReset = async () => {
+    if (!confirm('Reset ARV comp threshold to system default (10%)?')) return
+    setSaving(true); setError(null); setSuccessMessage(null)
+    try {
+      const res = await resetArvThreshold()
+      setConfig(res.config); setOriginal(res.config)
+      setIsCustom(false); setUpdatedAt(undefined)
+      setSuccessMessage('Reset to default.')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Reset failed')
+    } finally { setSaving(false) }
+  }
+
+  // Location override helpers
+  function getLocEditState(id: string, s: LocationSetting) {
+    if (locEditStates[id]) return locEditStates[id]
+    return { arvThreshold: s.arvThresholdJson ?? { ...config }, saving: false, error: null }
+  }
+
+  function patchLocEditState(id: string, s: LocationSetting, patch: Partial<ReturnType<typeof getLocEditState>>) {
+    setLocEditStates(prev => ({ ...prev, [id]: { ...getLocEditState(id, s), ...patch } }))
+  }
+
+  async function handleSaveLocOverride(s: LocationSetting) {
+    const es = getLocEditState(s.id, s)
+    patchLocEditState(s.id, s, { saving: true, error: null })
+    try {
+      const updated = await updateLocationSetting(s.id, { arvThresholdJson: es.arvThreshold })
+      setLocSettings(prev => prev.map(x => x.id === s.id ? updated : x))
+      setLocEditStates(prev => { const n = { ...prev }; delete n[s.id]; return n })
+      setLocExpandedId(null)
+    } catch (e) {
+      patchLocEditState(s.id, s, { error: e instanceof Error ? e.message : 'Failed to save', saving: false })
+    }
+  }
+
+  async function handleDeleteLoc(id: string) {
+    if (!confirm('Delete this location override?')) return
+    await deleteLocationSetting(id)
+    setLocSettings(prev => prev.filter(s => s.id !== id))
+    setLocExpandedId(null)
+  }
+
+  async function handleAddLoc() {
+    if (!addStateCode) { setAddLocError('Please select a state'); return }
+    if (addSubScope === 'city' && !addLocValue.trim()) { setAddLocError('City name is required'); return }
+    if (addSubScope === 'zip' && !/^\d{5}$/.test(addLocValue.trim())) { setAddLocError('Enter a valid 5-digit zip code'); return }
+    setAddLocSaving(true)
+    try {
+      const input: LocationSettingInput = { settingType: 'arv_threshold', state: addStateCode }
+      if (addSubScope === 'city') input.city = addLocValue.trim()
+      else if (addSubScope === 'zip') { input.zipCode = addLocValue.trim(); delete input.state }
+      const created = await createLocationSetting(input)
+      setLocSettings(prev => [...prev, created])
+      setAddLocOpen(false); setLocExpandedId(created.id)
+    } catch (e) {
+      setAddLocError(e instanceof Error ? e.message : 'Failed to create')
+    } finally { setAddLocSaving(false) }
+  }
+
+  function getLocLabel(s: LocationSetting): string {
+    if (s.zipCode) return s.zipCode
+    if (s.city && s.state) return `${s.city.charAt(0).toUpperCase() + s.city.slice(1)}, ${s.state}`
+    return s.state ?? '—'
+  }
+
+  const statusBadge = isDirty
+    ? <Badge variant="outline" className="border-amber-500 text-amber-600 dark:text-amber-400 text-xs">Unsaved changes</Badge>
+    : isCustom
+      ? <Badge variant="outline" className="border-green-500 text-green-600 dark:text-green-400 text-xs">
+          Custom{updatedAt && <span className="ml-1 opacity-70">· {new Date(updatedAt).toLocaleDateString()}</span>}
+        </Badge>
+      : <Badge variant="outline" className="text-xs text-muted-foreground">System default</Badge>
+
+  return (
+    <div className="space-y-5">
+      {/* Toolbar */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <p className="text-sm text-muted-foreground">
+          Top percentage of comps by sale price used for ARV calculation. Higher values include more comps.
+        </p>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          {!loading && statusBadge}
+          <Button variant="outline" size="sm" onClick={handleReset} disabled={saving || loading || (!isCustom && !isDirty)} className="gap-1.5">
+            {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
+            Reset
+          </Button>
+          <Button size="sm" onClick={handleSave} disabled={!isDirty || saving || loading} className="gap-1.5">
+            {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+            Save
+          </Button>
+        </div>
+      </div>
+
+      {error && <div className="px-4 py-3 rounded-lg bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800 text-sm text-red-700 dark:text-red-400">{error}</div>}
+      {successMessage && !error && <div className="px-4 py-3 rounded-lg bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800 text-sm text-green-700 dark:text-green-400">{successMessage}</div>}
+
+      {loading && <div className="flex items-center justify-center py-16"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>}
+
+      {!loading && (
+        <div className="space-y-5">
+          {/* Default threshold */}
+          <div className="rounded-xl border border-border bg-card overflow-hidden">
+            <div className="px-4 py-3 border-b border-border bg-muted/20">
+              <p className="text-xs font-semibold text-foreground">Default Threshold</p>
+              <p className="text-[11px] text-muted-foreground mt-0.5">Applied to all analyses unless a location override matches</p>
+            </div>
+            <div className="divide-y divide-border/30">
+              <div className="grid grid-cols-[1fr_auto] items-center gap-4 px-4 py-3">
+                <div>
+                  <p className="text-sm font-medium text-foreground">Top Comp Percentile</p>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">Comps in the top {config.percent}% by sale price are used for ARV</p>
+                </div>
+                <NumericInput
+                  value={config.percent}
+                  onChange={(v) => setConfig(prev => ({ ...prev, percent: v ?? 10 }))}
+                  min={1} max={100} step={5}
+                  suffix="%"
+                  className="w-24"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* How it works */}
+          <div className="rounded-xl border border-border bg-card overflow-hidden">
+            <div className="px-4 py-3 border-b border-border bg-muted/20">
+              <p className="text-xs font-semibold text-foreground">How It Works</p>
+            </div>
+            <div className="px-4 py-3 text-[11px] text-muted-foreground space-y-1.5">
+              <p>1. Comps are sorted by sale price (highest first)</p>
+              <p>2. Top {config.percent}% are classified as &quot;after renovation&quot; comps</p>
+              <p>3. Appraisal rules (filters &amp; adjustments) are applied to this subset</p>
+              <p>4. If not enough pass, the threshold widens by 1.5x (up to 3 attempts)</p>
+              <p>5. Final fallback uses all comps with standard rules</p>
+            </div>
+          </div>
+
+          {/* ══ Location Overrides section ══ */}
+          <div className="pt-2">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="flex-1 h-px bg-border" />
+              <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground px-1">Location Overrides</span>
+              <div className="flex-1 h-px bg-border" />
+            </div>
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-xs text-muted-foreground">Override the ARV threshold for specific markets. Most specific match wins: Zip &rsaquo; City &rsaquo; State.</p>
+              <Button size="sm" variant="outline" onClick={() => { setAddStateCode(''); setAddSubScope('state'); setAddLocValue(''); setAddLocError(null); setAddLocOpen(true) }} className="gap-1.5 flex-shrink-0">
+                <Plus className="w-3.5 h-3.5" />Add Market
+              </Button>
+            </div>
+
+            {locSettings.length === 0 ? (
+              <div className="border border-dashed rounded-lg py-10 flex flex-col items-center justify-center gap-2 text-center">
+                <MapPin className="w-5 h-5 text-muted-foreground/40" />
+                <p className="text-sm text-muted-foreground">No location overrides yet</p>
+                <p className="text-xs text-muted-foreground/60">Add a state, city, or zip to use a different ARV threshold for that market.</p>
+              </div>
+            ) : (
+              <div className="border rounded-lg divide-y overflow-hidden">
+                {locSettings.map((s) => {
+                  const expanded = locExpandedId === s.id
+                  const es = getLocEditState(s.id, s)
+                  return (
+                    <div key={s.id}>
+                      <div
+                        className={`flex items-center gap-3 px-4 py-3 cursor-pointer select-none transition-colors hover:bg-muted/40 ${expanded ? 'bg-muted/30' : ''}`}
+                        onClick={() => setLocExpandedId(expanded ? null : s.id)}
+                      >
+                        <div className={`flex-shrink-0 p-1.5 rounded-md ${expanded ? 'bg-primary/15' : 'bg-muted'}`}>
+                          {s.zipCode ? <Hash className={`w-3.5 h-3.5 ${expanded ? 'text-primary' : 'text-muted-foreground'}`} /> :
+                           s.city ? <Building2 className={`w-3.5 h-3.5 ${expanded ? 'text-primary' : 'text-muted-foreground'}`} /> :
+                           <MapIcon className={`w-3.5 h-3.5 ${expanded ? 'text-primary' : 'text-muted-foreground'}`} />}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <span className="text-sm font-semibold text-foreground">{getLocLabel(s)}</span>
+                          <p className="text-[11px] text-muted-foreground mt-0.5">
+                            {s.hasArvThreshold
+                              ? `Top ${(s.arvThresholdJson as ArvThresholdConfig).percent}% of comps by sale price`
+                              : `Using default (${config.percent}%)`}
+                          </p>
+                        </div>
+                        {s.hasArvThreshold && (
+                          <Badge variant="outline" className="text-[10px] px-2 py-0 border-purple-500/30 text-purple-500 flex-shrink-0">
+                            {(s.arvThresholdJson as ArvThresholdConfig).percent}%
+                          </Badge>
+                        )}
+                        <ChevronDown className={`w-4 h-4 text-muted-foreground flex-shrink-0 transition-transform ${expanded ? 'rotate-180' : ''}`} />
+                      </div>
+
+                      {expanded && (
+                        <div className="border-t bg-card space-y-3">
+                          {es.error && <div className="mx-4 mt-3 text-xs text-destructive bg-destructive/10 px-3 py-2 rounded-md">{es.error}</div>}
+                          <div className="divide-y divide-border/30">
+                            <div className="grid grid-cols-[1fr_auto] items-center gap-4 px-4 py-3">
+                              <div>
+                                <p className="text-sm font-medium text-foreground">Top Comp Percentile</p>
+                                <p className="text-[11px] text-muted-foreground mt-0.5">Comps in the top {es.arvThreshold.percent}% by sale price are used for ARV</p>
+                              </div>
+                              <NumericInput
+                                value={es.arvThreshold.percent}
+                                onChange={(v) => patchLocEditState(s.id, s, { arvThreshold: { ...es.arvThreshold, percent: v ?? 10 } })}
+                                min={1} max={100} step={5}
+                                suffix="%"
+                                className="w-24"
+                              />
+                            </div>
+                          </div>
+                          <div className="flex items-center justify-between px-4 pb-3">
+                            <Button size="sm" variant="ghost" className="gap-1.5 text-muted-foreground h-7 px-2 text-xs" onClick={() => handleDeleteLoc(s.id)}>
+                              <Trash2 className="w-3 h-3" />Delete Market
+                            </Button>
+                            <div className="flex items-center gap-2">
+                              <Button size="sm" variant="outline" className="h-7 px-3 text-xs"
+                                onClick={() => { setLocEditStates(prev => { const n = { ...prev }; delete n[s.id]; return n }); setLocExpandedId(null) }}>
+                                Cancel
+                              </Button>
+                              <Button size="sm" className="h-7 px-3 gap-1.5 text-xs" disabled={es.saving} onClick={() => handleSaveLocOverride(s)}>
+                                {es.saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+                                Save Override
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Add Location Dialog */}
+          <Dialog open={addLocOpen} onOpenChange={setAddLocOpen}>
+            <DialogContent className="max-w-sm">
+              <DialogHeader><DialogTitle>Add Market Override</DialogTitle></DialogHeader>
+              <div className="space-y-4 py-1">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-foreground">State</label>
+                  <select value={addStateCode} onChange={e => { setAddStateCode(e.target.value); setAddSubScope('state'); setAddLocValue(''); setAddLocError(null) }}
+                    className={`w-full h-9 text-sm rounded-md border bg-background px-2 ${addLocError && !addStateCode ? 'border-destructive' : 'border-input'}`} autoFocus>
+                    <option value="">— Select a state —</option>
+                    {US_STATES.map(st => <option key={st.code} value={st.code}>{st.name} ({st.code})</option>)}
+                  </select>
+                </div>
+                {addStateCode && (
+                  <div className="space-y-3">
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-semibold text-foreground">Narrow to</label>
+                      <div className="grid grid-cols-3 gap-2">
+                        {([{ scope: 'state' as const, label: 'Entire State', desc: 'All cities' }, { scope: 'city' as const, label: 'City', desc: 'Specific city' }, { scope: 'zip' as const, label: 'Zip Code', desc: 'Single zip' }]).map(({ scope, label, desc }) => (
+                          <button key={scope} onClick={() => { setAddSubScope(scope); setAddLocValue(''); setAddLocError(null) }}
+                            className={`py-2 px-1 text-xs rounded-lg border font-medium transition-colors flex flex-col items-center gap-0.5 ${addSubScope === scope ? 'bg-primary text-primary-foreground border-primary' : 'bg-background text-muted-foreground border-border hover:border-foreground/30'}`}>
+                            <span>{label}</span>
+                            <span className={`text-[10px] font-normal ${addSubScope === scope ? 'text-primary-foreground/70' : 'text-muted-foreground/60'}`}>{desc}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    {addSubScope === 'city' && (
+                      <Input placeholder="e.g. Miami" value={addLocValue} onChange={e => { setAddLocValue(e.target.value); setAddLocError(null) }} onKeyDown={e => e.key === 'Enter' && handleAddLoc()} className="h-9" autoFocus />
+                    )}
+                    {addSubScope === 'zip' && (
+                      <Input placeholder="e.g. 33101" value={addLocValue} onChange={e => { setAddLocValue(e.target.value); setAddLocError(null) }} onKeyDown={e => e.key === 'Enter' && handleAddLoc()} className="h-9" autoFocus />
+                    )}
+                  </div>
+                )}
+                {addLocError && <p className="text-xs text-destructive">{addLocError}</p>}
+              </div>
+              <DialogFooter>
+                <Button variant="outline" size="sm" onClick={() => setAddLocOpen(false)}>Cancel</Button>
+                <Button size="sm" onClick={handleAddLoc} disabled={addLocSaving || !addStateCode} className="gap-1.5">
+                  {addLocSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+                  Add &amp; Configure
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function EvaluationSettingsPage() {
   return (
     <div className="space-y-6">
@@ -2940,8 +3285,12 @@ export default function EvaluationSettingsPage() {
       </div>
 
       {/* Tabs */}
-      <Tabs defaultValue="appraisal-rules">
+      <Tabs defaultValue="arv-threshold">
         <TabsList className="h-9">
+          <TabsTrigger value="arv-threshold" className="gap-1.5 text-xs">
+            <TrendingUp className="w-3.5 h-3.5" />
+            ARV Threshold
+          </TabsTrigger>
           <TabsTrigger value="appraisal-rules" className="gap-1.5 text-xs">
             <SlidersHorizontal className="w-3.5 h-3.5" />
             Appraisal Rules
@@ -2959,6 +3308,10 @@ export default function EvaluationSettingsPage() {
             Major Items
           </TabsTrigger>
         </TabsList>
+
+        <TabsContent value="arv-threshold" className="mt-5">
+          <ArvThresholdTab />
+        </TabsContent>
 
         <TabsContent value="appraisal-rules" className="mt-5">
           <AppraisalRulesTab />

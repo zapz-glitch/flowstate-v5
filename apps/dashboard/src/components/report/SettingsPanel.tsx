@@ -26,6 +26,7 @@ import { getTierLabel } from '@/lib/client-api'
 
 const FILTER_LABELS: Record<string, { label: string; unit: string; hint: string }> = {
   subdivision_match: { label: 'Subdivision Match', unit: '', hint: 'Same subdivision required' },
+  building_style_match: { label: 'Building Style', unit: '', hint: 'Same building style required' },
   sale_age: { label: 'Sale Age', unit: 'days', hint: 'Max days since sold' },
   sqft_diff: { label: 'Sqft Difference', unit: 'sqft', hint: 'Max sqft variance' },
   year_built_diff: { label: 'Year Built Diff', unit: 'yrs', hint: 'Max year variance' },
@@ -261,7 +262,7 @@ export function SettingsPanel({ settingsHook, recalcData }: SettingsPanelProps) 
             <div className="space-y-1">
               {settings.filters.map((filter) => {
                 const meta = FILTER_LABELS[filter.type] || { label: filter.type, unit: '', hint: '' }
-                const isSubdivision = filter.type === 'subdivision_match'
+                const isSubdivision = filter.type === 'subdivision_match' || filter.type === 'building_style_match'
 
                 return (
                   <SettingRow

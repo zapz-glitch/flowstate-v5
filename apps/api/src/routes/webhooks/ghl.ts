@@ -301,14 +301,13 @@ ghlWebhook.post('/:webhookSecret', async (c) => {
       customRehabTable: userSettings.customRehabTable,
       customTierRanges: userSettings.customTierRanges,
       customMajorItemCosts: userSettings.customMajorItemCosts,
+      arvThreshold: userSettings.arvThreshold,
       apiCallStats: {
         corelogic: {
           total: propertyCallStats.total,
           cached: propertyCallStats.cached,
           endpoints: propertyCallStats.endpoints,
         },
-        firecrawl: { total: 0, cached: 0 },
-        llm: { total: 0, cached: 0, breakdown: [] },
         totalExternalCalls: propertyCallStats.total,
       },
     })

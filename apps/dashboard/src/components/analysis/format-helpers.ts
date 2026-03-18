@@ -1,5 +1,6 @@
 export const FILTER_TYPE_LABELS: Record<string, string> = {
   subdivision_match: 'Subdivision Match',
+  building_style_match: 'Building Style',
   sale_age: 'Sale Age',
   sqft_diff: 'Sqft Difference',
   year_built_diff: 'Year Built Diff',

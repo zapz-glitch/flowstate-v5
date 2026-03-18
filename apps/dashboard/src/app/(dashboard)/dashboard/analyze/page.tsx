@@ -16,9 +16,12 @@ import {
   DollarSign,
   SlidersHorizontal,
   ExternalLink,
+  Sparkles,
+  Globe,
+  Loader2,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
+import { AddressAutocomplete } from '@/components/AddressAutocomplete'
 import { Badge } from '@/components/ui/badge'
 import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
@@ -47,6 +50,7 @@ import {
   ComparablesSkeleton,
   RiskFloodSkeleton,
 } from '@/components/analysis/AnalysisSkeletons'
+import { useEnrichmentSSE, type EnrichmentEvent } from '@/hooks/use-enrichment-sse'
 import { SettingsPanel } from '@/components/report/SettingsPanel'
 import { DownloadReportButton } from '@/components/report/DownloadReportButton'
 
@@ -106,11 +110,16 @@ function TypewriterText({ text, typeSpeed = 30 }: { text: string; typeSpeed?: nu
 export default function AnalyzePage() {
   const [address, setAddress] = useState('')
   const [skipCache, setSkipCache] = useState(false)
+  const [llmAnalysis] = useState(false)
+  const [marketData, setMarketData] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [showRawJson, setShowRawJson] = useState(false)
   const [searchExpanded, setSearchExpanded] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [durationMs, setDurationMs] = useState<number | null>(null)
+  const [enrichmentStreamUrl, setEnrichmentStreamUrl] = useState<string | null>(null)
+  const [enrichmentToken, setEnrichmentToken] = useState<string | null>(null)
+  const [enrichmentStatus, setEnrichmentStatus] = useState<string | null>(null)
 
   // Global analysis context
   const {
@@ -125,6 +134,78 @@ export default function AnalyzePage() {
   const isRunning = isSubmitting || (activeAnalysis !== null && analysisState.status !== 'completed' && analysisState.status !== 'failed')
   const hasResult = analysisResult !== null
   const hasPartialData = displayData !== null
+
+  // Atom setters (needed by enrichment handler and handleAnalyze)
+  const setActiveAnalysis = useSetAtom(activeAnalysisAtom)
+  const setAnalysisResult = useSetAtom(analysisResultAtom)
+  const setAnalysisState = useSetAtom(analysisStateAtom)
+
+  // SSE enrichment handler
+  const handleEnrichmentEvent = useCallback((event: EnrichmentEvent) => {
+    if (event.event === 'market_data_started' || event.event === 'llm_started') {
+      setEnrichmentStatus(event.data.message || 'Processing...')
+    } else if (event.event === 'llm_complete') {
+      // If LLM produced an updated result with comp selection, replace entirely
+      if (event.data.updatedResult) {
+        setAnalysisResult(event.data.updatedResult as AnalyzeData)
+        const selectedCount = event.data.llmAnalysis?.selectedForArv?.length ?? 0
+        setEnrichmentStatus(`AI selected ${selectedCount} comps for ARV`)
+        setTimeout(() => setEnrichmentStatus(null), 3000)
+      } else if (event.data.rankings) {
+        // Just enrich with reasoning (no selection change)
+        setAnalysisResult((prev) => {
+          if (!prev) return prev
+          type Ranking = { compId: string; reasoning: string; score: number; keyFeatures: string[] }
+          const rankings = event.data.rankings as Ranking[]
+          const rankingMap = new Map(rankings.map((r) => [r.compId, r]))
+          const updatedComps = { ...prev.comps }
+          if (updatedComps.items) {
+            updatedComps.items = updatedComps.items.map((comp) => {
+              const match = rankingMap.get(comp.address || '')
+              if (!match) return comp
+              return { ...comp, selectionReason: match.reasoning, qualityScore: match.score, keyFeatures: match.keyFeatures }
+            })
+          }
+          return { ...prev, comps: updatedComps } as AnalyzeData
+        })
+        setEnrichmentStatus(null)
+      } else {
+        setEnrichmentStatus(null)
+      }
+    } else if (event.event === 'market_data_complete') {
+      // If re-evaluation produced an updated result, replace the current one
+      if (event.data.updatedResult) {
+        setAnalysisResult(event.data.updatedResult as AnalyzeData)
+        setEnrichmentStatus('Market data applied — result updated')
+        setTimeout(() => setEnrichmentStatus(null), 3000)
+      } else {
+        setEnrichmentStatus(null)
+      }
+    } else if (event.event === 'enrichment_done') {
+      setEnrichmentStatus(null)
+      setEnrichmentStreamUrl(null)
+      setEnrichmentToken(null)
+    } else if (event.event === 'error') {
+      setEnrichmentStatus(`Error: ${event.data.message || 'Unknown error'}`)
+      setTimeout(() => setEnrichmentStatus(null), 5000)
+    }
+  }, [setAnalysisResult])
+
+  const { status: sseStatus } = useEnrichmentSSE({
+    streamUrl: enrichmentStreamUrl,
+    token: enrichmentToken,
+    onEvent: handleEnrichmentEvent,
+  })
+
+  // Clear enrichment status if SSE connection fails or completes without events
+  useEffect(() => {
+    if (sseStatus === 'error') {
+      setEnrichmentStatus('SSE connection failed — enrichment may still be processing')
+      setTimeout(() => setEnrichmentStatus(null), 5000)
+    } else if (sseStatus === 'done' && enrichmentStatus === 'Starting enrichment...') {
+      setEnrichmentStatus(null)
+    }
+  }, [sseStatus, enrichmentStatus])
 
   // Unified evaluation hook: settings, comp override, display data, sticky bar
   const {
@@ -146,16 +227,15 @@ export default function AnalyzePage() {
   })
 
   // Analysis handler
-  const setActiveAnalysis = useSetAtom(activeAnalysisAtom)
-  const setAnalysisResult = useSetAtom(analysisResultAtom)
-  const setAnalysisState = useSetAtom(analysisStateAtom)
-
   const handleAnalyze = useCallback(async () => {
     if (!address.trim()) return
 
     clearAnalysis()
     setError(null)
     setDurationMs(null)
+    setEnrichmentStreamUrl(null)
+    setEnrichmentToken(null)
+    setEnrichmentStatus(null)
     setIsSubmitting(true)
 
     const t0 = Date.now()
@@ -164,6 +244,8 @@ export default function AnalyzePage() {
         address: address.trim(),
         searchOptions: { radiusMiles: 1, maxComps: 10, monthsBack: 12 },
         skipCache,
+        marketData: marketData ? { enabled: true } : undefined,
+        llmAnalysis: llmAnalysis ? { enabled: true } : undefined,
       })
 
       if (response.success && response.result) {
@@ -171,6 +253,13 @@ export default function AnalyzePage() {
         setActiveAnalysis({ jobId: response.jobId ?? '', address: address.trim() })
         setAnalysisResult(response.result as AnalyzeData)
         setAnalysisState({ ...initialAnalysisState, jobId: response.jobId ?? null, status: 'completed' })
+
+        // Connect SSE if enrichment is pending
+        if (response.enrichment) {
+          setEnrichmentStreamUrl(response.enrichment.streamUrl)
+          setEnrichmentToken(response.enrichment.token)
+          setEnrichmentStatus('Starting enrichment...')
+        }
       } else {
         setError(response.error || 'Analysis failed')
       }
@@ -179,7 +268,7 @@ export default function AnalyzePage() {
     } finally {
       setIsSubmitting(false)
     }
-  }, [address, skipCache, clearAnalysis, setActiveAnalysis, setAnalysisResult, setAnalysisState])
+  }, [address, skipCache, marketData, llmAnalysis, clearAnalysis, setActiveAnalysis, setAnalysisResult, setAnalysisState])
 
   const handleCancel = useCallback(() => {
     cancelAnalysis()
@@ -236,8 +325,8 @@ export default function AnalyzePage() {
           </div>
         </div>
       ) : (
-        <div className="border border-border rounded-xl overflow-hidden">
-          <div className="px-6 py-5 border-b border-border">
+        <div className="relative z-20 border border-border rounded-xl">
+          <div className="px-6 py-5 border-b border-border rounded-t-xl">
             <div className="flex items-center gap-3">
               <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center">
                 <Search className="w-4.5 h-4.5 text-primary" />
@@ -259,19 +348,18 @@ export default function AnalyzePage() {
           </div>
           <div className="px-6 py-5 space-y-4">
             <div className="flex gap-3">
-              <Input
-                type="text"
-                placeholder="123 Main St, Tampa, FL 33607"
+              <AddressAutocomplete
                 value={address}
-                onChange={(e) => setAddress(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !isRunning) {
+                onChange={setAddress}
+                onSubmit={() => {
+                  if (!isRunning && address.trim()) {
                     handleAnalyze()
                     setSearchExpanded(false)
                   }
                 }}
                 className="flex-1"
                 autoFocus={searchExpanded}
+                disabled={isRunning}
               />
               {isRunning ? (
                 <Button variant="destructive" onClick={handleCancel}>
@@ -291,6 +379,13 @@ export default function AnalyzePage() {
                 <Label htmlFor="skip-cache" className="flex items-center gap-1.5 text-body-sm text-foreground-tertiary cursor-pointer">
                   <RefreshCw className="w-3.5 h-3.5" />
                   Skip cache
+                </Label>
+              </div>
+              <div className="flex items-center gap-2">
+                <Switch id="market-data" checked={marketData} onCheckedChange={setMarketData} />
+                <Label htmlFor="market-data" className="flex items-center gap-1.5 text-body-sm text-foreground-tertiary cursor-pointer">
+                  <Globe className="w-3.5 h-3.5" />
+                  Market Data
                 </Label>
               </div>
             </div>
@@ -317,6 +412,13 @@ export default function AnalyzePage() {
               <div className="flex items-center gap-3">
                 {durationMs != null && (
                   <div className="text-caption text-foreground-tertiary">Completed in {(durationMs / 1000).toFixed(1)}s</div>
+                )}
+                {enrichmentStatus && (
+                  <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-primary/10 text-caption text-primary">
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                    <Sparkles className="w-3 h-3" />
+                    {enrichmentStatus}
+                  </div>
                 )}
                 {activeAnalysis?.jobId && (
                   <Link

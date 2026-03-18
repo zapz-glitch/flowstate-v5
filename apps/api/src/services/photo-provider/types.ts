@@ -60,6 +60,10 @@ export interface PropertyPhotos {
   yearBuilt?: number
   /** Foundation type (e.g., Slab, Crawl Space, Basement) */
   foundationType?: string
+  /** Architectural style (e.g., Ranch, Colonial, Contemporary) */
+  style?: string
+  /** Number of stories */
+  stories?: number
   /** Monthly HOA fee in dollars */
   hoaFee?: number
   /** Most recent sale date */

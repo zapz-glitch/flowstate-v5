@@ -204,16 +204,56 @@ export function useAnalysisEvaluation({
       }
     })
 
+    // When user manually selects comps, recompute stats from selected comps
+    let { avgPricePerSqft, medianPrice, enabledCount, disabledCount } = recalcData
+    if (compOverride?.isManual) {
+      const compsItems = data.comps?.items || []
+      const selected = items.filter((_, i) => compOverride.selectedCompKeys.has(getCompKey(compsItems[i], i)))
+      enabledCount = selected.length
+      disabledCount = items.length - enabledCount
+
+      if (selected.length > 0) {
+        // Avg $/sqft from selected comps
+        const ppsqft = selected
+          .map((c) => {
+            const price = c.adjustedPrice ?? c.salePrice
+            const sqft = c.squareFeet
+            return price != null && price > 0 && sqft != null && sqft > 0 ? price / sqft : null
+          })
+          .filter((v): v is number => v != null)
+        avgPricePerSqft = ppsqft.length > 0
+          ? Math.round(ppsqft.reduce((a, b) => a + b, 0) / ppsqft.length)
+          : null
+
+        // Median sale price from selected comps
+        const prices = selected
+          .map((c) => c.salePrice)
+          .filter((p): p is number => p != null)
+          .sort((a, b) => a - b)
+        if (prices.length > 0) {
+          const mid = Math.floor(prices.length / 2)
+          medianPrice = prices.length % 2 !== 0
+            ? prices[mid]
+            : Math.round((prices[mid - 1] + prices[mid]) / 2)
+        } else {
+          medianPrice = null
+        }
+      } else {
+        avgPricePerSqft = null
+        medianPrice = null
+      }
+    }
+
     return {
       ...data.comps,
       count: items.length,
-      enabledCount: recalcData.enabledCount,
-      disabledCount: recalcData.disabledCount,
-      avgPricePerSqft: recalcData.avgPricePerSqft,
-      medianPrice: recalcData.medianPrice,
+      enabledCount,
+      disabledCount,
+      avgPricePerSqft,
+      medianPrice,
       items,
     }
-  }, [recalcData, data?.comps])
+  }, [recalcData, data?.comps, compOverride])
 
   const isRecalculated = settingsChanged || (compOverride?.isManual ?? false)
   const effectiveComps = displayComps ?? data?.comps

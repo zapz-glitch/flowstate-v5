@@ -1,10 +1,10 @@
 'use client'
 
 import { useState } from 'react'
-import { Star, ChevronDown, ChevronRight, Check } from 'lucide-react'
+import { Star, ChevronDown, ChevronRight, Check, X } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
-import type { CompItem } from './shared-types'
+import type { CompItem, SubjectData } from './shared-types'
 import { StatCell } from './StatCell'
 import { ClassificationBadge } from './ClassificationBadge'
 import { PhotoGallery } from './PhotoGallery'
@@ -13,20 +13,18 @@ import { formatFilterType, formatAdjustmentType, formatCurrency, normalizeSubdiv
 export interface CompCardProps {
   comp: CompItem
   index: number
+  subject?: SubjectData | null
   subjectSubdivision?: string | null
-  /** Controlled expand state — if provided, component is controlled */
   isExpanded?: boolean
-  /** Called when expand toggled — required if isExpanded is provided */
   onToggle?: () => void
-  /** Whether this comp is selected for ARV — if provided, shows checkbox */
   isSelectedForArv?: boolean
-  /** Called when ARV toggle clicked — required if isSelectedForArv is provided */
   onToggleArv?: () => void
 }
 
 export function CompCard({
   comp,
   index,
+  subject: _subject,
   subjectSubdivision,
   isExpanded: controlledExpanded,
   onToggle: controlledOnToggle,
@@ -35,17 +33,14 @@ export function CompCard({
 }: CompCardProps) {
   const [internalExpanded, setInternalExpanded] = useState(false)
 
-  // Support both controlled and uncontrolled expand
   const isControlled = controlledExpanded !== undefined
   const isExpanded = isControlled ? controlledExpanded : internalExpanded
   const handleToggle = isControlled
     ? () => controlledOnToggle?.()
     : () => setInternalExpanded((p) => !p)
 
-  // If no ARV selection props, fall back to isEnabled
   const hasArvSelection = isSelectedForArv !== undefined
   const isEnabled = hasArvSelection ? isSelectedForArv : comp.isEnabled !== false
-  const apiDisabled = comp.isEnabled === false
 
   const hasSubdivisionMatch = !!(
     subjectSubdivision &&
@@ -90,15 +85,20 @@ export function CompCard({
                     <Star className="w-3 h-3 mr-1" />Best
                   </Badge>
                 )}
-                {comp.classification && <ClassificationBadge classification={comp.classification} showConfidence={false} />}
-                {hasSubdivisionMatch && (
+                {hasSubdivisionMatch ? (
                   <Badge className="bg-emerald-500/15 text-emerald-600 border-emerald-500/30 text-caption-sm">
                     <Check className="w-3 h-3 mr-1" />Subdivision
                   </Badge>
-                )}
+                ) : subjectSubdivision && comp.subdivision ? (
+                  <Badge variant="outline" className="bg-red-500/5 text-red-500 border-red-500/20 text-caption-sm">
+                    <X className="w-3 h-3 mr-1" />Subdivision
+                  </Badge>
+                ) : null}
               </div>
               <div className="flex items-center gap-2 text-caption text-foreground-tertiary">
-                {comp.distanceMiles != null && <span>{comp.distanceMiles.toFixed(2)} mi away</span>}
+                {comp.distanceMiles != null && (
+                  <span>{comp.distanceMiles.toFixed(2)} mi away</span>
+                )}
                 {comp.subdivision && (
                   <>
                     <span className="text-border">·</span>
@@ -106,20 +106,16 @@ export function CompCard({
                   </>
                 )}
               </div>
-              {apiDisabled && comp.disableReasons && comp.disableReasons.length > 0 && (
-                <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
-                  {comp.disableReasons.map((reason, i) => (
-                    <Badge key={i} variant="outline" className="text-caption-sm bg-red-500/5 text-red-600 border-red-500/20">
-                      {reason}
-                    </Badge>
-                  ))}
-                </div>
-              )}
             </div>
           </div>
 
           <div className="flex items-start gap-3 flex-shrink-0">
             <div className="text-right cursor-pointer" onClick={handleToggle}>
+              {comp.saleDate && (
+                <div className="text-caption-sm text-foreground-tertiary">
+                  {new Date(comp.saleDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                </div>
+              )}
               <div className="text-heading-sm font-bold">${comp.salePrice?.toLocaleString() || '-'}</div>
               {comp.pricePerSqft && (
                 <div className="text-caption text-foreground-tertiary">${comp.pricePerSqft.toFixed(0)}/sqft</div>
@@ -151,15 +147,16 @@ export function CompCard({
           </div>
         </div>
 
-        <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-7 mt-3 rounded-lg bg-muted/40 cursor-pointer" onClick={handleToggle}>
+        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 mt-3 rounded-lg bg-muted/40 cursor-pointer" onClick={handleToggle}>
           <StatCell label="Beds" value={comp.bedrooms ?? '-'} />
           <StatCell label="Baths" value={comp.bathrooms ?? '-'} />
           <StatCell label="Sq Ft" value={comp.squareFeet?.toLocaleString() || '-'} />
           <StatCell label="Year" value={comp.yearBuilt || '-'} />
+          <StatCell label="Lot" value={comp.lotSizeAcres ? `${Number(comp.lotSizeAcres).toFixed(3)} ac` : '-'} />
           <StatCell label="Foundation" value={comp.foundationType || '-'} />
-          <StatCell label="$/Sq Ft" value={comp.pricePerSqft ? `$${comp.pricePerSqft.toFixed(0)}` : '-'} />
-          <StatCell label="Sold" value={comp.saleDate ? new Date(comp.saleDate).toLocaleDateString('en-US', { month: 'short', year: 'numeric' }) : '-'} />
+          <StatCell label="House Style" value={comp.buildingStyle || '-'} />
         </div>
+
       </div>
 
       {isExpanded && (
@@ -177,15 +174,6 @@ export function CompCard({
                   ARV Weight: {(comp.weightInArv * 100).toFixed(1)}%
                 </div>
               )}
-            </div>
-          )}
-
-          {comp.selectionReason && (
-            <div>
-              <div className="text-caption text-foreground-tertiary mb-1">
-                {comp.isBestComp ? 'Why Best Comp' : 'Analysis'}
-              </div>
-              <div className="text-body-sm text-foreground-secondary">{comp.selectionReason}</div>
             </div>
           )}
 

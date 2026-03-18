@@ -684,10 +684,12 @@ export class FirecrawlZillowFetcher {
         url,
         formats,
         onlyMainContent: false,
-        waitFor: 1000,
-        timeout: 12000, // 12s max for scraping (default is 30s)
-        // Stealth proxy bypasses PerimeterX anti-bot protection on Zillow
+        waitFor: 3000,
+        timeout: 30000,
         proxy: 'stealth',
+        actions: [
+          { type: 'wait', milliseconds: 2000 },
+        ],
       }),
     })
 

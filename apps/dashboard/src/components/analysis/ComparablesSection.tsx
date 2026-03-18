@@ -54,9 +54,12 @@ export function ComparablesSection({
   const arvComps = hasInteractiveSelection
     ? compItems.filter((_c, i) => selectedCompKeys!.has(getCompKey(_c, i)))
     : compItems.filter((c) => c.isEnabled !== false)
+  const asIsComps = hasInteractiveSelection
+    ? [] // in interactive mode, no separate as-is group
+    : compItems.filter((c) => c.isEnabled === false && c.compGroup === 'as_is')
   const excludedComps = hasInteractiveSelection
     ? compItems.filter((_c, i) => !selectedCompKeys!.has(getCompKey(_c, i)))
-    : compItems.filter((c) => c.isEnabled === false)
+    : compItems.filter((c) => c.isEnabled === false && c.compGroup !== 'as_is')
 
   const selectedCount = arvComps.length
 
@@ -196,6 +199,7 @@ export function ComparablesSection({
                       index={i}
                       isExpanded={expandedComps.has(key)}
                       onToggle={() => toggleExpand(key)}
+                      subject={subject}
                       subjectSubdivision={subjectSubdivision}
                       isSelectedForArv={true}
                       onToggleArv={() => onToggleComp?.(key)}
@@ -209,11 +213,34 @@ export function ComparablesSection({
                       key={comp.address || originalIndex}
                       comp={comp}
                       index={originalIndex}
+                      subject={subject}
                       subjectSubdivision={subjectSubdivision}
                     />
                   )
                 })
             }
+          </div>
+        )}
+
+        {asIsComps.length > 0 && (
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <span className="text-caption font-semibold text-blue-600 uppercase tracking-wider">As-Is Market Comps</span>
+              <div className="flex-1 h-px bg-blue-500/20" />
+              <span className="text-caption text-foreground-tertiary">{asIsComps.length} comp{asIsComps.length !== 1 ? 's' : ''}</span>
+            </div>
+            {asIsComps.map((comp) => {
+              const originalIndex = compItems.indexOf(comp)
+              return (
+                <CompCard
+                  key={comp.address || originalIndex}
+                  comp={comp}
+                  index={originalIndex}
+                  subject={subject}
+                  subjectSubdivision={subjectSubdivision}
+                />
+              )
+            })}
           </div>
         )}
 
@@ -224,7 +251,7 @@ export function ComparablesSection({
               onClick={() => setExcludedOpen((v) => !v)}
               className="flex items-center gap-2 w-full group"
             >
-              <span className="text-caption font-semibold text-foreground-tertiary uppercase tracking-wider">Excluded from ARV</span>
+              <span className="text-caption font-semibold text-foreground-tertiary uppercase tracking-wider">Excluded</span>
               <div className="flex-1 h-px bg-border/40" />
               <span className="text-caption text-foreground-tertiary">{excludedComps.length} comp{excludedComps.length !== 1 ? 's' : ''}</span>
               {hasInteractiveSelection && (
@@ -245,7 +272,8 @@ export function ComparablesSection({
                           index={i}
                           isExpanded={expandedComps.has(key)}
                           onToggle={() => toggleExpand(key)}
-                          subjectSubdivision={subjectSubdivision}
+                          subject={subject}
+                      subjectSubdivision={subjectSubdivision}
                           isSelectedForArv={false}
                           onToggleArv={() => onToggleComp?.(key)}
                         />
@@ -258,7 +286,8 @@ export function ComparablesSection({
                           key={comp.address || originalIndex}
                           comp={comp}
                           index={originalIndex}
-                          subjectSubdivision={subjectSubdivision}
+                          subject={subject}
+                      subjectSubdivision={subjectSubdivision}
                         />
                       )
                     })

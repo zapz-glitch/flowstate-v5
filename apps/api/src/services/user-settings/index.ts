@@ -17,6 +17,7 @@ import {
   dealParams,
   locationSettings,
   majorItemCosts,
+  arvThreshold as arvThresholdTable,
 } from '../../db'
 import type {
   FilterType,
@@ -30,6 +31,10 @@ import { CACHE_TTL, userSettingsKey } from '../cache'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
+export interface ArvThresholdConfig {
+  percent: number
+}
+
 export interface UserAnalysisSettings {
   appraisalRules?: {
     filters: AppraisalFilter[]
@@ -39,6 +44,7 @@ export interface UserAnalysisSettings {
   customTierRanges?: TierRangeDefinition[]
   mergedBuybox: Record<string, unknown>
   customMajorItemCosts?: Record<string, number>
+  arvThreshold: ArvThresholdConfig
 }
 
 export interface LoadSettingsOptions {
@@ -128,11 +134,12 @@ export async function loadUserAnalysisSettings(
     }
   }
 
-  // Load rehab config + deal params + major item costs in parallel
-  const [rehabRow, dealParamsRow, majorItemCostsRow] = await Promise.all([
+  // Load rehab config + deal params + major item costs + arv threshold in parallel
+  const [rehabRow, dealParamsRow, majorItemCostsRow, arvThresholdRow] = await Promise.all([
     db.select().from(rehabConfig).where(eq(rehabConfig.userId, userId)).limit(1).then((r) => r[0]),
     db.select().from(dealParams).where(eq(dealParams.userId, userId)).limit(1).then((r) => r[0]),
     db.select().from(majorItemCosts).where(eq(majorItemCosts.userId, userId)).limit(1).then((r) => r[0]),
+    db.select().from(arvThresholdTable).where(eq(arvThresholdTable.userId, userId)).limit(1).then((r) => r[0]),
   ])
 
   let customRehabTable: Record<ArvTier, RehabEstimate[]> | undefined
@@ -181,6 +188,11 @@ export async function loadUserAnalysisSettings(
     }
   }
 
+  // ARV threshold
+  let arvThresholdConfig: ArvThresholdConfig = arvThresholdRow
+    ? { percent: arvThresholdRow.percent }
+    : { percent: 10 }
+
   // Location-based overrides (zip > city > state)
   const cityNorm = address?.city?.toLowerCase()
   const stateNorm = address?.state?.toUpperCase()
@@ -215,6 +227,7 @@ export async function loadUserAnalysisSettings(
     const rehabMatch = bestMatch('rehab')
     const dealMatch = bestMatch('deal')
     const majorMatch = bestMatch('major')
+    const arvMatch = bestMatch('arv_threshold')
 
     // Override appraisal preset
     if (appraisalMatch?.appraisalPresetId) {
@@ -260,12 +273,20 @@ export async function loadUserAnalysisSettings(
         customMajorItemCosts = { ...customMajorItemCosts, ...locCosts }
       } catch {}
     }
+    // Override ARV threshold
+    if (arvMatch?.arvThresholdJson) {
+      try {
+        const locArv = JSON.parse(arvMatch.arvThresholdJson) as Partial<ArvThresholdConfig>
+        arvThresholdConfig = { ...arvThresholdConfig, ...locArv }
+      } catch {}
+    }
 
     const appliedTypes = [
       appraisalMatch && 'appraisal',
       rehabMatch && 'rehab',
       dealMatch && 'deal',
       majorMatch && 'major',
+      arvMatch && 'arv_threshold',
     ].filter(Boolean)
     if (appliedTypes.length > 0) {
       console.log(`[UserSettings] Location overrides applied (${appliedTypes.join(', ')}): ${zipNorm ?? cityNorm ?? stateNorm}`)
@@ -278,6 +299,7 @@ export async function loadUserAnalysisSettings(
     customTierRanges,
     mergedBuybox,
     customMajorItemCosts,
+    arvThreshold: arvThresholdConfig,
   }
 
   // Cache the result (without per-request buyboxOverrides — those are applied on read)

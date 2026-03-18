@@ -566,6 +566,7 @@ function normalizeProperty(
   const constructionDetails = firstBuilding?.constructionDetails as Record<string, unknown> | undefined
   const structureFeatures = firstBuilding?.structureFeatures as Record<string, unknown> | undefined
   const structureExterior = firstBuilding?.structureExterior as Record<string, unknown> | undefined
+  const structureVerticalProfile = firstBuilding?.structureVerticalProfile as Record<string, unknown> | undefined
 
   // Site location data - v1 structure: siteLocation.data.locationLegal, landUseAndZoningCodes
   const siteLocationResponse = rawData.siteLocation as Record<string, unknown> | undefined
@@ -675,6 +676,8 @@ function normalizeProperty(
     // Building details
     construction: {
       type: (constructionDetails?.constructionTypeCode as string) || building?.constructionType,
+      buildingStyle: (constructionDetails?.buildingStyleTypeCode as string) || undefined,
+      storiesType: (structureVerticalProfile?.storiesTypeCode as string) || undefined,
       roofType: ((structureExterior?.roof as Record<string, unknown>)?.typeCode as string) || building?.roofType,
       roofCover: ((structureExterior?.roof as Record<string, unknown>)?.coverTypeCode as string) || undefined,
       foundationType: (constructionDetails?.foundationTypeCode as string) || building?.foundation,
@@ -1101,6 +1104,28 @@ class CoreLogicProvider implements PropertyProviderAdapter {
       hasToken: tokenCache !== null && tokenCache.expiresAt > Date.now(),
     }
   }
+}
+
+// ─── Typeahead (standalone, not part of provider interface) ─────────────────────
+
+export interface TypeaheadResult {
+  clip: string
+  address: string
+  addressLine1: string
+  city: string
+  state: string
+  zip: string
+}
+
+/**
+ * Address typeahead search via CoreLogic /v2/properties/typeahead.
+ * Returns up to 10 matching addresses for the given partial input.
+ */
+export async function corelogicTypeahead(env: Env, input: string): Promise<TypeaheadResult[]> {
+  const response = await request<{ results?: TypeaheadResult[] }>(env, '/v2/properties/typeahead', {
+    params: { input },
+  })
+  return response.results ?? []
 }
 
 // ─── Factory Function ──────────────────────────────────────────────────────────
