@@ -178,13 +178,12 @@ function selectBestMatch(
 // ─── Group A: Smart Comp Selection ──────────────────────────────────────────
 
 /**
- * Select Group A comps (top percentile by sale price) with smart relaxation.
+ * Select Group A comps (top percentile by sale price) with strict filter matching.
  *
- * Relaxation order within each percentile attempt:
- *   Pass 1: ALL filters (subdivision + building style + numeric)
- *   Pass 2: Relax boolean filters only (disable subdivision_match + building_style_match)
- * Then widen percentile by 1.5x and repeat (up to 3 attempts).
- * Final fallback: all comps with standard 3-pass system.
+ * 1. Classify comps by sale price (top X%)
+ * 2. Apply ALL appraisal filters strictly
+ * 3. If no comps pass, analyze which filters failed most and throw an error
+ *    with specific advice on which filters to change
  */
 function selectGroupAComps(
   subject: NormalizedProperty,
@@ -200,55 +199,46 @@ function selectGroupAComps(
   groupACompIds: Set<string>
 } {
   const MAX_ATTEMPTS = 3
-  const BOOLEAN_FILTER_TYPES = new Set(['subdivision_match', 'building_style_match'])
-
-  // Filters without boolean matchers (for relaxation pass 2)
-  const numericOnlyFilters = filters.map((f) =>
-    BOOLEAN_FILTER_TYPES.has(f.type) ? { ...f, enabled: false } : f
-  )
-
   let currentThreshold = baseThreshold
   let compClassifications: Map<string, ClassificationResult> = new Map()
-  let groupACompIds = new Set<string>()
 
   for (let attempt = 0; attempt < MAX_ATTEMPTS && currentThreshold <= 100; attempt++) {
     compClassifications = classifyCompsByPrice(allComparables, currentThreshold)
-    groupACompIds = new Set<string>()
+    const groupAIds = new Set<string>()
     for (const [id, cls] of compClassifications) {
-      if (cls.classification === 'after_renovation') groupACompIds.add(id)
+      if (cls.classification === 'after_renovation') groupAIds.add(id)
     }
-    const candidateComps = allComparables.filter((c) => groupACompIds.has(c.id))
+    const candidateComps = allComparables.filter((c) => groupAIds.has(c.id))
 
     if (candidateComps.length > 0) {
-      // Pass 1: Full filters (including subdivision + building style)
-      const fullResult = appraisalService.evaluateWithFallback(
-        subject, candidateComps, { filters, adjustments, minComps: 1 }
-      )
-      if (fullResult.fallbackUsed !== 'no_comps') {
+      // Strict evaluation — ALL enabled filters must pass
+      const result = appraisalService.evaluate(subject, candidateComps, { filters, adjustments })
+      const enabledComps = result.comparables.filter((c) => c.isEnabled)
+
+      console.log(`[Evaluate] Attempt ${attempt + 1} at ${currentThreshold}%: ${candidateComps.length} candidates, ${enabledComps.length} passed all filters`)
+      if (enabledComps.length === 0) {
+        // Log which filters failed for each candidate
+        for (const comp of result.comparables) {
+          const failed = comp.evaluation.filterResults.filter((f) => !f.passed)
+          if (failed.length > 0) {
+            console.log(`[Evaluate]   ${comp.address}: failed ${failed.map((f) => f.type).join(', ')}`)
+          }
+        }
+      }
+
+      if (enabledComps.length > 0) {
         if (currentThreshold !== baseThreshold) {
           console.log(`[Evaluate] Group A threshold widened: ${baseThreshold}% → ${currentThreshold}%`)
         }
         // Evaluate ALL comps for display context
         const allResult = appraisalService.evaluate(subject, allComparables, { filters, adjustments })
-        const enabledIds = new Set(fullResult.comparables.filter((c) => c.isEnabled).map((c) => c.id))
+        const enabledIds = new Set(enabledComps.map((c) => c.id))
         return {
-          appraisalResult: buildGroupAResult(allResult, fullResult, enabledIds, groupACompIds, allComparables),
-          arvCompsSource: 'group_a',
-          compClassifications,
-          groupACompIds: enabledIds,
-        }
-      }
-
-      // Pass 2: Relax boolean filters only (keep numeric strict)
-      const relaxedResult = appraisalService.evaluateWithFallback(
-        subject, candidateComps, { filters: numericOnlyFilters, adjustments, minComps: 1 }
-      )
-      if (relaxedResult.fallbackUsed !== 'no_comps') {
-        console.log(`[Evaluate] Group A: relaxed boolean filters at ${currentThreshold}%`)
-        const allResult = appraisalService.evaluate(subject, allComparables, { filters, adjustments })
-        const enabledIds = new Set(relaxedResult.comparables.filter((c) => c.isEnabled).map((c) => c.id))
-        return {
-          appraisalResult: buildGroupAResult(allResult, relaxedResult, enabledIds, groupACompIds, allComparables),
+          appraisalResult: buildGroupAResult(allResult, {
+            ...result,
+            fallbackUsed: 'none',
+            confidence: enabledComps.length >= 3 ? 90 : enabledComps.length >= 2 ? 70 : 55,
+          }, enabledIds, groupAIds, allComparables),
           arvCompsSource: 'group_a',
           compClassifications,
           groupACompIds: enabledIds,
@@ -262,18 +252,140 @@ function selectGroupAComps(
     currentThreshold = Math.min(nextThreshold, 100)
   }
 
-  // Final fallback: all comps with standard 3-pass
-  console.log(`[Evaluate] Group A: falling back to all comps`)
-  const fallbackResult = appraisalService.evaluateWithFallback(
-    subject, allComparables, { filters, adjustments, minComps: 3 }
-  )
-  const enabledIds = new Set(fallbackResult.comparables.filter((c) => c.isEnabled).map((c) => c.id))
-  return {
-    appraisalResult: fallbackResult,
-    arvCompsSource: 'all_comps',
-    compClassifications,
-    groupACompIds: enabledIds,
+  // No comps passed strict filters — find the minimum filter changes needed
+  // Evaluate ALL comps (100% threshold) to find the closest match across the entire pool
+  const allResult = appraisalService.evaluate(subject, allComparables, { filters, adjustments })
+  console.log(`[Evaluate] No comps passed. Analyzing ${allComparables.length} comps for suggestions...`)
+
+  // For each comp, determine what minimum filter changes would make it pass
+  const BOOLEAN_FILTERS = new Set(['subdivision_match', 'building_style_match'])
+  const compFixAnalysis: Array<{
+    compId: string
+    address: string
+    passedCount: number
+    failedCount: number
+    totalFilters: number
+    fixes: Array<{ type: string; action: 'disable' | 'increase'; currentValue: number; suggestedValue: number; actualValue: number | string }>
+  }> = []
+
+  for (const comp of allResult.comparables) {
+    const fixes: typeof compFixAnalysis[0]['fixes'] = []
+    let passedCount = 0
+
+    for (const fr of comp.evaluation.filterResults) {
+      if (fr.passed) {
+        passedCount++
+        continue
+      }
+      // This filter failed — what's the minimum change?
+      if (BOOLEAN_FILTERS.has(fr.type)) {
+        fixes.push({ type: fr.type, action: 'disable', currentValue: 1, suggestedValue: 0, actualValue: fr.actualValue ?? '' as number | string })
+      } else {
+        // For numeric filters, suggest the actual value + small buffer
+        const actual = typeof fr.actualValue === 'number' ? fr.actualValue : 0
+        const threshold = typeof fr.threshold === 'number' ? fr.threshold : 0
+        // Suggest value that would pass: actual value + 10% buffer, rounded up
+        const suggested = Math.ceil(actual * 1.1)
+        fixes.push({ type: fr.type, action: 'increase', currentValue: threshold, suggestedValue: suggested, actualValue: actual })
+      }
+    }
+
+    compFixAnalysis.push({
+      compId: comp.id,
+      address: `${comp.address}, ${comp.city}`,
+      passedCount,
+      failedCount: fixes.length,
+      totalFilters: comp.evaluation.filterResults.length,
+      fixes,
+    })
   }
+
+  // Sort comps by sale price descending for ranking
+  const sortedByPrice = [...allComparables]
+    .filter((c) => c.salePrice != null && c.salePrice > 0)
+    .sort((a, b) => b.salePrice! - a.salePrice!)
+  const priceRankMap = new Map(sortedByPrice.map((c, i) => [c.id, i]))
+
+  // Score each comp: prioritize fewest fixes AND higher price rank (prefer top-priced comps)
+  // A comp at position 0 (highest price) with 1 fix is better than position 9 (lowest price) with 0 fixes
+  for (const comp of compFixAnalysis) {
+    const priceRank = priceRankMap.get(comp.compId) ?? sortedByPrice.length
+    const pricePercentile = ((priceRank + 1) / sortedByPrice.length) * 100
+    // Penalty: each 10% deeper in price ranking = equivalent to 1 extra fix
+    ;(comp as typeof comp & { sortScore: number }).sortScore = comp.failedCount + (pricePercentile / 30)
+  }
+
+  // Sort by combined score (fewest fixes + highest price)
+  compFixAnalysis.sort((a, b) => {
+    const scoreA = (a as typeof a & { sortScore: number }).sortScore
+    const scoreB = (b as typeof b & { sortScore: number }).sortScore
+    return scoreA - scoreB
+  })
+
+  const bestMatch = compFixAnalysis[0]
+
+  // Calculate what ARV threshold would include the best matching comp
+  const bestMatchIndex = priceRankMap.get(bestMatch?.compId ?? '') ?? -1
+  // Threshold = position percentage + buffer, capped at 50% (don't suggest more than half)
+  const rawThreshold = bestMatchIndex >= 0
+    ? Math.ceil(((bestMatchIndex + 1) / sortedByPrice.length) * 100) + 5
+    : baseThreshold
+  const suggestedArvThreshold = Math.min(50, Math.max(rawThreshold, baseThreshold))
+
+  if (bestMatch) {
+    console.log(`[Evaluate] Best match: ${bestMatch.address} (${bestMatch.passedCount}/${bestMatch.totalFilters} passed, ${bestMatch.failedCount} fixes needed)`)
+    console.log(`[Evaluate]   Price rank: ${bestMatchIndex + 1}/${sortedByPrice.length} → suggested threshold: ${suggestedArvThreshold}% (raw: ${rawThreshold}%)`)
+    console.log(`[Evaluate]   Fixes: ${bestMatch.fixes.map((f) => `${f.type}: ${f.action === 'disable' ? 'disable' : `${f.currentValue}→${f.suggestedValue}`}`).join(', ')}`)
+  }
+
+  // Build suggested filters: start from current filters, apply minimum fixes
+  const suggestedFilters = filters.map((f) => {
+    const fix = bestMatch?.fixes.find((fx) => fx.type === f.type)
+    if (!fix) return f
+    if (fix.action === 'disable') return { ...f, enabled: false }
+    return { ...f, value: fix.suggestedValue }
+  })
+
+  // Build human-readable advice
+  const FILTER_LABELS: Record<string, string> = {
+    subdivision_match: 'Subdivision Match',
+    building_style_match: 'Building Style Match',
+    sale_age: 'Sale Age',
+    sqft_diff: 'Square Footage Difference',
+    year_built_diff: 'Year Built Difference',
+    distance: 'Distance',
+  }
+
+  const advice: string[] = []
+  if (bestMatch) {
+    for (const fix of bestMatch.fixes) {
+      const label = FILTER_LABELS[fix.type] || fix.type
+      if (fix.action === 'disable') {
+        advice.push(`Disable "${label}" (no match available)`)
+      } else {
+        advice.push(`"${label}": ${fix.currentValue} → ${fix.suggestedValue} (comp has ${fix.actualValue})`)
+      }
+    }
+  }
+
+  // Add ARV threshold suggestion if needed
+  if (suggestedArvThreshold > baseThreshold) {
+    advice.unshift(`ARV Threshold: ${baseThreshold}% → ${suggestedArvThreshold}% (to include this comp in the candidate pool)`)
+  }
+
+  const adviceText = advice.length > 0
+    ? `\n\nTo match the closest comp (${bestMatch.address}, ${bestMatch.passedCount}/${bestMatch.totalFilters} filters passed), change ${advice.length} setting${advice.length > 1 ? 's' : ''}:\n${advice.map((a, i) => `${i + 1}. ${a}`).join('\n')}`
+    : ''
+
+  // Include suggested filters + threshold in the error for the dashboard
+  const error = new Error(
+    `BAD_DEAL: No comparable sales passed all appraisal filters. ` +
+    `${allComparables.length} comps were evaluated but none matched all criteria.${adviceText}`
+  )
+  ;(error as Error & { suggestedFilters?: unknown[]; suggestedArvThreshold?: number }).suggestedFilters = suggestedFilters
+  ;(error as Error & { suggestedArvThreshold?: number }).suggestedArvThreshold = suggestedArvThreshold
+
+  throw error
 }
 
 /** Build the final Group A appraisal result with proper enable/disable reasons for all comps */
@@ -316,9 +428,8 @@ function buildGroupAResult(
 // ─── Group B: As-Is Market Intelligence ─────────────────────────────────────
 
 /**
- * Select Group B comps: sale price ≤ X% of ARV, not in Group A.
- * Single-pass evaluation (no fallback) — informational only.
- * Returns sqft-scaled average price as the as-is market price.
+ * Select Group B comps: sale price ≤ 70% of ARV = As-Is market price.
+ * These are properties selling "as-is" — used for market intelligence only.
  */
 function selectGroupBComps(
   subject: NormalizedProperty,
@@ -333,7 +444,7 @@ function selectGroupBComps(
   const priceCeiling = arv * thresholdPercent / 100
   const subjectSqft = subject.squareFeet || 0
 
-  // Filter: below price ceiling AND not in Group A
+  // Comps with sale price ≤ 70% of ARV AND not in Group A
   const candidates = allComparables.filter((c) =>
     c.salePrice != null && c.salePrice > 0 && c.salePrice <= priceCeiling && !groupACompIds.has(c.id)
   )
@@ -352,10 +463,11 @@ function selectGroupBComps(
     const avgPrice = rawPrices.length > 0 ? Math.round(rawPrices.reduce((a, b) => a + b, 0) / rawPrices.length) : null
     const avgPsf = rawPrices.length > 0 && subjectSqft > 0 ? Math.round((avgPrice ?? 0) / subjectSqft) : null
 
+    const avgPsf2 = avgPrice != null && subjectSqft > 0 ? Math.round(avgPrice / subjectSqft) : null
     return {
       compIds: candidates.map((c) => c.id),
       asIsMarketPrice: avgPrice,
-      avgPricePerSqft: avgPsf,
+      avgPricePerSqft: avgPsf2,
       count: candidates.length,
       thresholdPercent,
       arvUsed: arv,
@@ -393,7 +505,7 @@ function selectGroupBComps(
  * Returns the complete analysis response ready to send to the client.
  *
  * Pipeline:
- * 1. Group A: Select top-percentile comps by sale price with smart relaxation
+ * 1. Group A: Select top-percentile comps by sale price with strict filter matching
  * 2. Calculate ARV from Group A comps
  * 3. Group B: Select as-is comps (≤70% of ARV) — market intelligence only
  * 4. Calculate valuation (ARV, rehab, buy price, profit, ROI)
@@ -417,13 +529,13 @@ export function performAnalysis(params: EvaluationParams): EvaluationResult {
 
   const finalAppraisalResult = groupA.appraisalResult
   const compClassifications = groupA.compClassifications
-
-  if (finalAppraisalResult.fallbackUsed === 'no_comps') {
-    throw new Error('BAD_DEAL: No comparable sales found even with relaxed criteria. Insufficient data to determine ARV.')
-  }
+  // Note: selectGroupAComps throws BAD_DEAL error with filter advice if no comps pass
 
   // ── 2. Calculate ARV from Group A ──────────────────────────────────────────
   const enabledComps = finalAppraisalResult.comparables.filter((c) => c.isEnabled)
+  if (enabledComps.length === 0) {
+    throw new Error('BAD_DEAL: No comparable sales were selected for ARV calculation. Try adjusting your appraisal filters or increasing the ARV threshold.')
+  }
   const finalArv = finalAppraisalResult.arv
 
   // ── 3. Group B: As-is market intelligence ──────────────────────────────────

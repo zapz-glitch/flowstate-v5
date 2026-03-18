@@ -156,7 +156,7 @@ export function AddressAutocomplete({
       />
 
       {isOpen && results.length > 0 && (
-        <div className="absolute z-50 top-full left-0 right-0 mt-1 rounded-lg border border-border bg-popover shadow-lg overflow-hidden">
+        <div className="absolute z-50 top-full left-0 right-0 mt-1 rounded-lg border border-border bg-background shadow-xl overflow-hidden">
           <ul role="listbox" className="py-1 max-h-[280px] overflow-y-auto">
             {results.map((result, index) => (
               <li

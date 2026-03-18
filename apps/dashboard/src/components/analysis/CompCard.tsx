@@ -8,6 +8,7 @@ import type { CompItem, SubjectData } from './shared-types'
 import { StatCell } from './StatCell'
 import { ClassificationBadge } from './ClassificationBadge'
 import { PhotoGallery } from './PhotoGallery'
+import { AddressDisplay } from './AddressDisplay'
 import { formatFilterType, formatAdjustmentType, formatCurrency, normalizeSubdivision } from './format-helpers'
 
 export interface CompCardProps {
@@ -68,15 +69,7 @@ export function CompCard({
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 flex-wrap mb-1">
                 {comp.address ? (
-                  <a
-                    href={`https://www.zillow.com/homes/${encodeURIComponent(comp.address)}_rb/`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-body font-medium hover:text-primary hover:underline transition-colors"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    {comp.address}
-                  </a>
+                  <AddressDisplay address={comp.address} className="text-body font-medium" />
                 ) : (
                   <span className="text-body font-medium">Unknown Address</span>
                 )}

@@ -65,6 +65,13 @@ export interface AnalyzeRequest {
     enabled?: boolean
     includePhotos?: boolean
   }
+  /** Override ARV comp threshold for this request */
+  arvThresholdPercent?: number
+  /** Override appraisal rules for this request */
+  appraisalOverrides?: {
+    filters?: Array<{ type: string; enabled: boolean; value: number }>
+    adjustments?: Array<{ type: string; enabled: boolean; amount: number; percent?: number }>
+  }
 }
 
 export type AnalyzeResult =
@@ -361,6 +368,10 @@ export interface QueueAnalysisResult {
   /** Full analysis result (synchronous response) */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   result?: Record<string, any>
+  /** Suggested filter values when no comps match (from API error) */
+  suggestedFilters?: Array<{ type: string; enabled: boolean; value: number }>
+  /** Suggested ARV threshold when no comps match */
+  suggestedArvThreshold?: number
   /** SSE enrichment stream info (when Zillow/LLM enrichment is pending) */
   enrichment?: {
     streamUrl: string
@@ -451,6 +462,8 @@ export async function queueAnalysis(request: AnalyzeRequest): Promise<QueueAnaly
       skipCache: request.skipCache,
       marketData: request.marketData,
       llmAnalysis: request.llmAnalysis,
+      arvThresholdPercent: request.arvThresholdPercent,
+      appraisalOverrides: request.appraisalOverrides,
     }
 
     logApiCall('POST', analyzeUrl)
@@ -487,6 +500,8 @@ export async function queueAnalysis(request: AnalyzeRequest): Promise<QueueAnaly
       return {
         success: false,
         error: result.error || `API request failed with status ${response.status}`,
+        suggestedFilters: (result as { suggestedFilters?: Array<{ type: string; enabled: boolean; value: number }> }).suggestedFilters,
+        suggestedArvThreshold: (result as { suggestedArvThreshold?: number }).suggestedArvThreshold,
       }
     }
 

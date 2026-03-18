@@ -5,6 +5,7 @@ import type { SubjectData } from './shared-types'
 import { StatCell } from './StatCell'
 import { ClassificationBadge } from './ClassificationBadge'
 import { PhotoGallery } from './PhotoGallery'
+import { AddressDisplay } from './AddressDisplay'
 
 interface SubjectPropertyCardProps {
   subject: SubjectData
@@ -24,14 +25,7 @@ export function SubjectPropertyCard({ subject, children, footer }: SubjectProper
               <MapPin className="w-3 h-3" />
             </Badge>
             {subject.address ? (
-              <a
-                href={`https://www.zillow.com/homes/${encodeURIComponent(subject.address)}_rb/`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-heading-sm font-semibold leading-tight hover:text-primary hover:underline transition-colors"
-              >
-                {subject.address}
-              </a>
+              <AddressDisplay address={subject.address} className="text-heading-sm font-semibold leading-tight" />
             ) : (
               <h3 className="text-heading-sm font-semibold leading-tight">Unknown Address</h3>
             )}

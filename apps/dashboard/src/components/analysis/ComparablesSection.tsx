@@ -54,14 +54,28 @@ export function ComparablesSection({
   const arvComps = hasInteractiveSelection
     ? compItems.filter((_c, i) => selectedCompKeys!.has(getCompKey(_c, i)))
     : compItems.filter((c) => c.isEnabled !== false)
-  const asIsComps = hasInteractiveSelection
-    ? [] // in interactive mode, no separate as-is group
-    : compItems.filter((c) => c.isEnabled === false && c.compGroup === 'as_is')
   const excludedComps = hasInteractiveSelection
     ? compItems.filter((_c, i) => !selectedCompKeys!.has(getCompKey(_c, i)))
-    : compItems.filter((c) => c.isEnabled === false && c.compGroup !== 'as_is')
+    : compItems.filter((c) => c.isEnabled === false)
 
   const selectedCount = arvComps.length
+
+  // Calculate median and avg from SELECTED comps only
+  const selectedPrices = arvComps
+    .map((c) => c.adjustedPrice ?? c.salePrice)
+    .filter((p): p is number => p != null && p > 0)
+    .sort((a, b) => a - b)
+  const selectedMedian = selectedPrices.length > 0
+    ? selectedPrices.length % 2 === 0
+      ? Math.round((selectedPrices[selectedPrices.length / 2 - 1] + selectedPrices[selectedPrices.length / 2]) / 2)
+      : selectedPrices[Math.floor(selectedPrices.length / 2)]
+    : null
+  const selectedPsfs = arvComps
+    .filter((c) => c.pricePerSqft != null && c.pricePerSqft > 0)
+    .map((c) => c.pricePerSqft!)
+  const selectedAvgPsf = selectedPsfs.length > 0
+    ? Math.round(selectedPsfs.reduce((s, p) => s + p, 0) / selectedPsfs.length)
+    : null
 
   return (
     <div>
@@ -80,14 +94,14 @@ export function ComparablesSection({
             </div>
           </div>
           <div className="flex items-center gap-3">
-            {comps.medianPrice && (
+            {selectedMedian != null && (
               <span className="text-caption text-foreground-tertiary hidden md:block">
-                Median: <span className="font-medium text-foreground">${comps.medianPrice.toLocaleString()}</span>
+                Median: <span className="font-medium text-foreground">${selectedMedian.toLocaleString()}</span>
               </span>
             )}
-            {comps.avgPricePerSqft && (
+            {selectedAvgPsf != null && (
               <Badge variant="outline" className="text-caption-sm bg-background/50 hidden md:flex">
-                Avg: ${comps.avgPricePerSqft.toFixed(0)}/sqft
+                Avg: ${selectedAvgPsf}/sqft
               </Badge>
             )}
             {subject?.latitude && subject?.longitude && (
@@ -219,28 +233,6 @@ export function ComparablesSection({
                   )
                 })
             }
-          </div>
-        )}
-
-        {asIsComps.length > 0 && (
-          <div className="space-y-3">
-            <div className="flex items-center gap-2">
-              <span className="text-caption font-semibold text-blue-600 uppercase tracking-wider">As-Is Market Comps</span>
-              <div className="flex-1 h-px bg-blue-500/20" />
-              <span className="text-caption text-foreground-tertiary">{asIsComps.length} comp{asIsComps.length !== 1 ? 's' : ''}</span>
-            </div>
-            {asIsComps.map((comp) => {
-              const originalIndex = compItems.indexOf(comp)
-              return (
-                <CompCard
-                  key={comp.address || originalIndex}
-                  comp={comp}
-                  index={originalIndex}
-                  subject={subject}
-                  subjectSubdivision={subjectSubdivision}
-                />
-              )
-            })}
           </div>
         )}
 

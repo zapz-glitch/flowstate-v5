@@ -247,7 +247,7 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
           </div>
         )}
 
-        <RiskFloodCard riskFlags={analysis.riskFlags} floodZone={analysis.floodZone} permits={analysis.permits} />
+        <RiskFloodCard riskFlags={analysis.riskFlags} floodZone={analysis.floodZone} permits={analysis.permits} asIsMarketIntel={analysis.valuation?.asIsMarketIntel} />
 
         {/* TODO: re-enable when neighbourhood data source is available */}
         {/* <NeighbourhoodCard data={analysis.neighbourhood} subject={analysis.subject} comps={effectiveComps} /> */}

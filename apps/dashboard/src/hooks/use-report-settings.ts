@@ -122,35 +122,36 @@ export function useReportSettings(data: AnalyzeData | null): UseReportSettingsRe
 
         if (cancelled) return
 
-        // Build filters from user's current preset
-        const filters: RecalcFilter[] = preset?.filters
-          ? preset.filters.map((f) => ({
-              type: f.filterType,
+        // Build filters — prefer appliedSettings (reflects what was actually used, including overrides)
+        // Fall back to preset, then system defaults
+        const filters: RecalcFilter[] = applied?.filters?.length
+          ? applied.filters.map((f) => ({
+              type: f.type,
               enabled: f.enabled,
               value: f.value,
             }))
-          : applied?.filters?.length
-            ? applied.filters.map((f) => ({
-                type: f.type,
+          : preset?.filters
+            ? preset.filters.map((f) => ({
+                type: f.filterType,
                 enabled: f.enabled,
                 value: f.value,
               }))
             : DEFAULT_FILTERS
 
-        // Build adjustments from user's current preset
-        const adjustments: RecalcAdjustment[] = preset?.adjustments
-          ? preset.adjustments.map((a) => ({
-              type: a.adjustmentType,
+        // Build adjustments — prefer appliedSettings, fall back to preset
+        const adjustments: RecalcAdjustment[] = applied?.adjustments?.length
+          ? applied.adjustments.map((a) => ({
+              type: a.type,
               enabled: a.enabled,
               amount: a.amount,
-              percent: a.percentage || undefined,
+              percent: a.percent,
             }))
-          : applied?.adjustments?.length
-            ? applied.adjustments.map((a) => ({
-                type: a.type,
+          : preset?.adjustments
+            ? preset.adjustments.map((a) => ({
+                type: a.adjustmentType,
                 enabled: a.enabled,
                 amount: a.amount,
-                percent: a.percent,
+                percent: a.percentage || undefined,
               }))
             : DEFAULT_ADJUSTMENTS
 

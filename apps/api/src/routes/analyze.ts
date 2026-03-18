@@ -92,6 +92,15 @@ interface AnalyzeRequest {
   /** Skip cache and fetch fresh data from APIs */
   skipCache?: boolean
 
+  /** Override ARV comp threshold for this request (top % of comps by sale price) */
+  arvThresholdPercent?: number
+
+  /** Override appraisal rules for this request */
+  appraisalOverrides?: {
+    filters?: Array<{ type: string; enabled: boolean; value: number }>
+    adjustments?: Array<{ type: string; enabled: boolean; amount: number; percent?: number }>
+  }
+
   /** Market data enrichment: scrape public listing data via Firecrawl */
   marketData?: {
     enabled?: boolean
@@ -186,15 +195,40 @@ analyze.post('/', async (c) => {
     const evalStart = Date.now()
     const propertyCallStats = propertyApi.getCallStats()
 
+    // Apply appraisal rule overrides from request (playground inline editing)
+    let appraisalRules = userSettings.appraisalRules
+    if (body.appraisalOverrides) {
+      console.log(`[Analyze] Applying appraisal overrides: ${body.appraisalOverrides.filters?.length ?? 0} filters, ${body.appraisalOverrides.adjustments?.length ?? 0} adjustments`)
+      const overrideFilters = body.appraisalOverrides.filters?.map((f) => ({
+        type: f.type as import('../services/appraisal').FilterType,
+        enabled: f.enabled,
+        value: f.value,
+      }))
+      const overrideAdjustments = body.appraisalOverrides.adjustments?.map((a) => ({
+        type: a.type as import('../services/appraisal').AdjustmentType,
+        enabled: a.enabled,
+        amount: a.amount,
+        percent: a.percent,
+      }))
+      appraisalRules = {
+        filters: overrideFilters ?? appraisalRules?.filters ?? [],
+        adjustments: overrideAdjustments ?? appraisalRules?.adjustments ?? [],
+      }
+    }
+
     const { response: analysisResult } = performAnalysis({
       jobId,
       bundle,
-      appraisalRules: userSettings.appraisalRules,
+      appraisalRules,
       buybox: userSettings.mergedBuybox,
       customRehabTable: userSettings.customRehabTable,
       customTierRanges: userSettings.customTierRanges,
       customMajorItemCosts: userSettings.customMajorItemCosts,
-      arvThreshold: userSettings.arvThreshold,
+      arvThreshold: (() => {
+        const t = body.arvThresholdPercent ? { percent: body.arvThresholdPercent } : userSettings.arvThreshold
+        console.log(`[Analyze] ARV threshold: ${t.percent}%`)
+        return t
+      })(),
       apiCallStats: {
         corelogic: {
           total: propertyCallStats.total,
@@ -291,8 +325,17 @@ analyze.post('/', async (c) => {
     console.error('[Analyze] Error:', error)
     const message = error instanceof Error ? error.message : 'Failed to analyze property'
     const isBadDeal = message.startsWith('BAD_DEAL:')
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const suggestedFilters = (error as any)?.suggestedFilters
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const suggestedArvThreshold = (error as any)?.suggestedArvThreshold
     return c.json(
-      { success: false, error: isBadDeal ? message.replace('BAD_DEAL: ', '') : message },
+      {
+        success: false,
+        error: isBadDeal ? message.replace('BAD_DEAL: ', '') : message,
+        ...(suggestedFilters ? { suggestedFilters } : {}),
+        ...(suggestedArvThreshold ? { suggestedArvThreshold } : {}),
+      },
       isBadDeal ? 400 : 500
     )
   }

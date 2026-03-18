@@ -51,6 +51,7 @@ import {
   RiskFloodSkeleton,
 } from '@/components/analysis/AnalysisSkeletons'
 import { useEnrichmentSSE, type EnrichmentEvent } from '@/hooks/use-enrichment-sse'
+import { AppraisalFilterEditor, type FilterState, type AdjustmentState } from '@/components/analysis/AppraisalFilterEditor'
 import { SettingsPanel } from '@/components/report/SettingsPanel'
 import { DownloadReportButton } from '@/components/report/DownloadReportButton'
 
@@ -112,7 +113,14 @@ export default function AnalyzePage() {
   const [skipCache, setSkipCache] = useState(false)
   const [llmAnalysis] = useState(false)
   const [marketData, setMarketData] = useState(false)
+  const [arvThreshold, setArvThreshold] = useState(10)
   const [error, setError] = useState<string | null>(null)
+  const [suggestedFilters, setSuggestedFilters] = useState<FilterState[] | null>(null)
+  const [suggestedArvThreshold, setSuggestedArvThreshold] = useState<number | null>(null)
+  const [pendingRetry, setPendingRetry] = useState(false)
+  const [appraisalFilters, setAppraisalFilters] = useState<FilterState[]>([])
+  const [appraisalAdjustments, setAppraisalAdjustments] = useState<AdjustmentState[]>([])
+
   const [showRawJson, setShowRawJson] = useState(false)
   const [searchExpanded, setSearchExpanded] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -240,12 +248,24 @@ export default function AnalyzePage() {
 
     const t0 = Date.now()
     try {
+      const overrides = appraisalFilters.length > 0 ? {
+        filters: appraisalFilters,
+        adjustments: appraisalAdjustments,
+      } : undefined
+      if (overrides) {
+        console.log('[Analyze] Sending appraisal overrides:', overrides.filters?.length, 'filters,', overrides.adjustments?.length, 'adjustments')
+        console.log('[Analyze] Filter states:', overrides.filters?.map(f => `${f.type}:${f.enabled}:${f.value}`).join(', '))
+      }
+      console.log('[Analyze] ARV threshold:', arvThreshold, '%')
+
       const response = await queueAnalysis({
         address: address.trim(),
         searchOptions: { radiusMiles: 1, maxComps: 10, monthsBack: 12 },
         skipCache,
         marketData: marketData ? { enabled: true } : undefined,
         llmAnalysis: llmAnalysis ? { enabled: true } : undefined,
+        arvThresholdPercent: arvThreshold,
+        appraisalOverrides: overrides,
       })
 
       if (response.success && response.result) {
@@ -262,13 +282,28 @@ export default function AnalyzePage() {
         }
       } else {
         setError(response.error || 'Analysis failed')
+        if (response.suggestedFilters) {
+          setSuggestedFilters(response.suggestedFilters as FilterState[])
+        }
+        if (response.suggestedArvThreshold) {
+          // Store suggested threshold — applied when user clicks "Apply Suggestions"
+          setSuggestedArvThreshold(response.suggestedArvThreshold)
+        }
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to start analysis')
     } finally {
       setIsSubmitting(false)
     }
-  }, [address, skipCache, marketData, llmAnalysis, clearAnalysis, setActiveAnalysis, setAnalysisResult, setAnalysisState])
+  }, [address, skipCache, marketData, llmAnalysis, arvThreshold, appraisalFilters, appraisalAdjustments, clearAnalysis, setActiveAnalysis, setAnalysisResult, setAnalysisState])
+
+  // Auto-retry after "Apply & Retry" updates the filter state
+  useEffect(() => {
+    if (pendingRetry) {
+      setPendingRetry(false)
+      handleAnalyze()
+    }
+  }, [pendingRetry, handleAnalyze])
 
   const handleCancel = useCallback(() => {
     cancelAnalysis()
@@ -393,15 +428,63 @@ export default function AnalyzePage() {
         </div>
       )}
 
-      {/* Error */}
-      {(error || analysisState.status === 'failed') && (
-        <div className="rounded-xl overflow-hidden border border-red-500/20">
-          <div className="px-6 py-5">
-            <div className="text-red-500 font-medium">Error</div>
-            <div className="text-muted-foreground mt-1">{error || analysisState.error || 'Analysis failed'}</div>
+      {/* Error — filter match failure shows editor, other errors show simple message */}
+      {(error || analysisState.status === 'failed') && (() => {
+        const errorMsg = error || analysisState.error || 'Analysis failed'
+        const isFilterError = errorMsg.includes('appraisal filters') || errorMsg.includes('Suggested changes')
+
+        if (isFilterError) {
+          return (
+            <div className="rounded-xl border border-red-500/20 overflow-hidden">
+              <div className="px-6 py-5 space-y-4">
+                <AppraisalFilterEditor
+                  filters={appraisalFilters}
+                  adjustments={appraisalAdjustments}
+                  onFiltersChange={setAppraisalFilters}
+                  onAdjustmentsChange={setAppraisalAdjustments}
+                  arvThreshold={arvThreshold}
+                  onArvThresholdChange={setArvThreshold}
+                  errorMessage={errorMsg}
+                  suggestedFilters={suggestedFilters}
+                  compact
+                />
+                <div className="flex items-center gap-2">
+                  {suggestedFilters && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        setAppraisalFilters(suggestedFilters)
+                        if (suggestedArvThreshold) setArvThreshold(suggestedArvThreshold)
+                        setSuggestedFilters(null)
+                        setSuggestedArvThreshold(null)
+                        setError(null)
+                        setPendingRetry(true)
+                      }}
+                      className="gap-1.5 border-amber-500/30 text-amber-600 hover:bg-amber-500/10"
+                    >
+                      Apply &amp; Retry
+                    </Button>
+                  )}
+                  <Button size="sm" variant="outline" onClick={() => { setError(null); setSuggestedFilters(null); handleAnalyze() }} className="gap-1.5">
+                    <Play className="w-3.5 h-3.5" />
+                    Retry
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )
+        }
+
+        return (
+          <div className="rounded-xl overflow-hidden border border-red-500/20">
+            <div className="px-6 py-5">
+              <div className="text-red-500 font-medium">Error</div>
+              <div className="text-muted-foreground mt-1">{errorMsg}</div>
+            </div>
           </div>
-        </div>
-      )}
+        )
+      })()}
 
       {/* Progressive Results — render components as data arrives via step_data events */}
       {(isRunning || hasResult || hasPartialData) && (
@@ -578,33 +661,37 @@ export default function AnalyzePage() {
             ) : null}
 
             {/* Valuation Summary — only from final result (Step 5) */}
-            {hasResult && displayValuation ? (
+            {hasResult && (appraisalFilters.length > 0 ? analysisResult?.valuation : displayValuation) ? (
               <div ref={valuationCardRef}>
-                <ValuationCard valuation={displayValuation} isRecalculated={isRecalculated} onOpenSettings={() => setSettingsOpen(true)} />
+                <ValuationCard
+                  valuation={appraisalFilters.length > 0 ? (analysisResult?.valuation as import('./actions').ValuationData) : displayValuation!}
+                  isRecalculated={appraisalFilters.length > 0 ? false : isRecalculated}
+                  onOpenSettings={() => setSettingsOpen(true)}
+                />
               </div>
             ) : isRunning ? (
               <ValuationSkeleton />
             ) : null}
 
             {/* Risk Flags & Flood Zone — available after Step 1 */}
-            {(displayData?.riskFlags || displayData?.floodZone || displayData?.permits) ? (
-              <RiskFloodCard riskFlags={displayData.riskFlags} floodZone={displayData.floodZone} permits={displayData.permits} />
+            {(displayData?.riskFlags || displayData?.floodZone || displayData?.permits || analysisResult?.valuation?.asIsMarketIntel) ? (
+              <RiskFloodCard riskFlags={displayData?.riskFlags} floodZone={displayData?.floodZone} permits={displayData?.permits} asIsMarketIntel={analysisResult?.valuation?.asIsMarketIntel} />
             ) : isRunning && !displayData?.riskFlags ? (
               <RiskFloodSkeleton />
             ) : null}
 
             {/* Comparables — available after Step 2, enriched with photos (Step 3) and classifications (Step 4) */}
             {hasResult ? (
-              effectiveComps && (
+              (appraisalFilters.length > 0 ? analysisResult?.comps : effectiveComps) && (
                 <ComparablesSection
-                  comps={effectiveComps}
+                  comps={appraisalFilters.length > 0 ? (analysisResult?.comps as import('./actions').CompsData) : effectiveComps!}
                   subject={displayData?.subject}
                   subjectSubdivision={displayData?.subject?.subdivision}
-                  selectedCompKeys={compOverride?.selectedCompKeys}
-                  isManual={compOverride?.isManual ?? false}
-                  recalculatedArv={isRecalculated ? displayValuation?.arv : undefined}
-                  onToggleComp={handleToggleComp}
-                  onReset={handleResetComps}
+                  selectedCompKeys={appraisalFilters.length > 0 ? undefined : compOverride?.selectedCompKeys}
+                  isManual={appraisalFilters.length > 0 ? false : (compOverride?.isManual ?? false)}
+                  recalculatedArv={appraisalFilters.length > 0 ? undefined : (isRecalculated ? displayValuation?.arv : undefined)}
+                  onToggleComp={appraisalFilters.length > 0 ? undefined : handleToggleComp}
+                  onReset={appraisalFilters.length > 0 ? undefined : handleResetComps}
                 />
               )
             ) : displayData && displayData.comps && displayData.comps.items && displayData.comps.items.length > 0 ? (
@@ -633,9 +720,23 @@ export default function AnalyzePage() {
               </div>
               {showRawJson && (
                 <div className="px-4 pb-4">
-                  <pre className="bg-zinc-950 text-zinc-100 rounded-xl p-4 overflow-auto max-h-[600px] text-xs font-mono">
-                    {JSON.stringify(analysisResult, null, 2)}
-                  </pre>
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        navigator.clipboard.writeText(JSON.stringify(analysisResult, null, 2))
+                        const btn = e.currentTarget
+                        btn.textContent = 'Copied!'
+                        setTimeout(() => { btn.textContent = 'Copy JSON' }, 2000)
+                      }}
+                      className="absolute top-3 right-3 z-10 px-2.5 py-1 rounded-md bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs transition-colors border border-zinc-700"
+                    >
+                      Copy JSON
+                    </button>
+                    <pre className="bg-zinc-950 text-zinc-100 rounded-xl p-4 pt-10 overflow-auto max-h-[600px] text-xs font-mono">
+                      {JSON.stringify(analysisResult, null, 2)}
+                    </pre>
+                  </div>
                 </div>
               )}
             </div>
@@ -644,7 +745,14 @@ export default function AnalyzePage() {
       )}
 
       {/* Evaluation Settings Sheet */}
-      <Sheet open={settingsOpen} onOpenChange={setSettingsOpen}>
+      <Sheet open={settingsOpen} onOpenChange={(open) => {
+        setSettingsOpen(open)
+        // When opening settings panel, clear overrides so recalc engine takes over
+        if (open && appraisalFilters.length > 0) {
+          setAppraisalFilters([])
+          setAppraisalAdjustments([])
+        }
+      }}>
         <SheetContent side="right" className="w-[400px] sm:max-w-[400px] p-0 flex flex-col">
           <SheetHeader className="px-5 pt-5 pb-3 border-b border-border">
             <SheetTitle className="text-body font-semibold">Evaluation Settings</SheetTitle>
