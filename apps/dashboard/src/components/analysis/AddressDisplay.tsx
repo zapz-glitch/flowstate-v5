@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { Copy, Check, ExternalLink } from 'lucide-react'
+import { Copy, Check } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 interface AddressDisplayProps {
@@ -32,16 +32,6 @@ export function AddressDisplay({ address, className }: AddressDisplayProps) {
         onClick={(e) => e.stopPropagation()}
       >
         {address}
-      </a>
-      <a
-        href={zillowUrl}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="text-foreground-tertiary hover:text-primary transition-colors flex-shrink-0"
-        title="View on Zillow"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <ExternalLink className="w-3 h-3" />
       </a>
       <button
         type="button"

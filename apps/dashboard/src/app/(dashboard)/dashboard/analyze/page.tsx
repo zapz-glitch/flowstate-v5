@@ -44,6 +44,7 @@ import {
   ComparablesSection,
   RiskFloodCard,
   VisionAnalysisButton,
+  NeighbourhoodMap,
 } from '@/components/analysis'
 import {
   SubjectPropertySkeleton,
@@ -315,12 +316,6 @@ export default function AnalyzePage() {
     cancelAnalysis()
   }, [cancelAnalysis])
 
-  const handleNewAnalysis = useCallback(() => {
-    clearAnalysis()
-    setSearchExpanded(true)
-    setShowRawJson(false)
-  }, [clearAnalysis])
-
   const isSearchCollapsed = (isRunning || hasResult || hasPartialData) && !searchExpanded
 
   return (
@@ -434,6 +429,16 @@ export default function AnalyzePage() {
         </div>
       )}
 
+      {/* Inline Map — shows subject + comps after results arrive */}
+      {displayData?.subject?.latitude && displayData?.subject?.longitude && (
+        <div className="rounded-xl border border-border overflow-hidden no-print">
+          <NeighbourhoodMap
+            subject={displayData.subject}
+            comps={hasResult ? (effectiveComps ?? analysisResult?.comps) : displayData.comps}
+          />
+        </div>
+      )}
+
       {/* Error — filter match failure shows editor, other errors show simple message */}
       {(error || analysisState.status === 'failed') && (() => {
         const errorMsg = error || analysisState.error || 'Analysis failed'
@@ -509,26 +514,21 @@ export default function AnalyzePage() {
                     {enrichmentStatus}
                   </div>
                 )}
-                {activeAnalysis?.jobId && (
-                  <Link
-                    href={`/dashboard/reports/${activeAnalysis.jobId}`}
-                    className="flex items-center gap-1.5 text-caption text-primary hover:underline"
-                  >
-                    View Full Report
-                    <ExternalLink className="w-3 h-3" />
-                  </Link>
-                )}
-              </div>
-              <div className="flex items-center gap-2 ml-auto">
                 {isRecalculated && (
                   <Badge variant="outline" className="bg-blue-500/10 text-blue-600 border-blue-500/30 text-caption-sm">
                     Recalculated
                   </Badge>
                 )}
-                <Button variant="outline" size="sm" onClick={handleNewAnalysis}>
-                  <Search className="w-3.5 h-3.5 mr-1.5" />
-                  New Analysis
-                </Button>
+              </div>
+              <div className="flex items-center gap-2 ml-auto">
+                {activeAnalysis?.jobId && (
+                  <Button variant="outline" size="sm" asChild>
+                    <Link href={`/dashboard/reports/${activeAnalysis.jobId}`}>
+                      <ExternalLink className="w-3.5 h-3.5 mr-1.5" />
+                      View Full Report
+                    </Link>
+                  </Button>
+                )}
                 <DownloadReportButton
                   reportProps={{
                     address: activeAnalysis?.address || 'Property Report',
