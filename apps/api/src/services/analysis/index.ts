@@ -421,6 +421,7 @@ export interface AnalysisResponse {
       compIds: string[]
       thresholdPercent: number
       priceCeiling: number
+      noDataReason?: string
     } | null
     buyPrice: number
     buyPricePercent: number
@@ -870,6 +871,7 @@ export function buildAnalysisResponse(
         compIds: ctx.groupBResult.compIds,
         thresholdPercent: ctx.groupBResult.thresholdPercent,
         priceCeiling: ctx.groupBResult.priceCeiling,
+        noDataReason: ctx.groupBResult.noDataReason,
       } : null,
     },
 

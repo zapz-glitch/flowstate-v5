@@ -15,7 +15,7 @@ import { invalidateUserSettingsCache } from '../services/user-settings'
 const arvThresholdRoute = new Hono<{ Bindings: Env }>()
 
 export const ARV_THRESHOLD_DEFAULTS = {
-  percent: 10,
+  percent: 15,
 }
 
 export type ArvThresholdConfig = typeof ARV_THRESHOLD_DEFAULTS

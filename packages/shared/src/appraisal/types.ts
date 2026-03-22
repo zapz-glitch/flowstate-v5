@@ -16,6 +16,9 @@ export type FilterType =
   | 'year_built_diff'
   | 'distance'
 
+/** Whether a filter is required (hard) or preferred (soft) */
+export type FilterPriority = 'hard' | 'soft'
+
 export interface AppraisalFilter {
   type: FilterType
   enabled: boolean

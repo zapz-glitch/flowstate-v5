@@ -87,9 +87,9 @@ export interface ValuationParams {
   majorItems?: MajorItem[]
   /** Addition play (extra budget for improvements) */
   additionPlay?: number
-  /** Closing costs percentage (default: 10%) */
+  /** Closing costs percentage (default: 8%) */
   closingCostsPercent?: number
-  /** Carrying costs percentage (default: 5%) */
+  /** Carrying costs percentage (default: 2%) */
   carryingCostsPercent?: number
   /** Wholesale fee amount (default: $10,000) */
   wholesaleFee?: number

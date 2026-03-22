@@ -15,6 +15,7 @@ interface AsIsMarketIntel {
   compCount?: number
   thresholdPercent?: number
   priceCeiling?: number
+  noDataReason?: string
 }
 
 interface RiskFloodCardProps {
@@ -38,8 +39,9 @@ export function RiskFloodCard({ riskFlags, floodZone, permits, asIsMarketIntel }
   const hasFloodZone = !!floodZone
   const hasPermits = permits && (permits.count || permits.recentTypes?.length)
   const hasMarketIntel = asIsMarketIntel?.asIsMarketPrice != null
+  const hasMarketIntelSection = hasMarketIntel || !!asIsMarketIntel?.noDataReason
 
-  if (!hasRiskFlags && !hasFloodZone && !hasPermits && !hasMarketIntel) return null
+  if (!hasRiskFlags && !hasFloodZone && !hasPermits && !hasMarketIntelSection) return null
 
   return (
     <div className="rounded-xl overflow-hidden border border-border px-6 py-4 space-y-4">
@@ -112,23 +114,29 @@ export function RiskFloodCard({ riskFlags, floodZone, permits, asIsMarketIntel }
         </div>
       )}
 
-      {hasMarketIntel && (hasRiskFlags || hasFloodZone || hasPermits) && <div className="border-t border-border" />}
+      {hasMarketIntelSection && (hasRiskFlags || hasFloodZone || hasPermits) && <div className="border-t border-border" />}
 
-      {hasMarketIntel && (
+      {hasMarketIntelSection && (
         <div>
           <div className="flex items-center gap-2.5 mb-2">
             <TrendingDown className="w-4 h-4 text-blue-600" />
             <span className="text-body-sm font-medium">Market Intelligence</span>
           </div>
-          <div className="flex items-center gap-4 text-body-sm">
-            <span>
-              As-Is Market Price:{' '}
-              <span className="font-semibold text-blue-600">{formatCurrency(asIsMarketIntel!.asIsMarketPrice!)}</span>
-            </span>
-            <span className="text-foreground-tertiary">
-              {asIsMarketIntel!.compCount} comp{asIsMarketIntel!.compCount !== 1 ? 's' : ''} &le;{asIsMarketIntel!.thresholdPercent}% of ARV
-            </span>
-          </div>
+          {hasMarketIntel ? (
+            <div className="flex items-center gap-4 text-body-sm">
+              <span>
+                As-Is Market Price:{' '}
+                <span className="font-semibold text-blue-600">{formatCurrency(asIsMarketIntel!.asIsMarketPrice!)}</span>
+              </span>
+              <span className="text-foreground-tertiary">
+                {asIsMarketIntel!.compCount} comp{asIsMarketIntel!.compCount !== 1 ? 's' : ''} &le;{asIsMarketIntel!.thresholdPercent}% of ARV
+              </span>
+            </div>
+          ) : (
+            <p className="text-body-sm text-muted-foreground">
+              {asIsMarketIntel!.noDataReason}
+            </p>
+          )}
         </div>
       )}
     </div>

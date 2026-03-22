@@ -33,6 +33,7 @@ import {
   SheetDescription,
 } from '@/components/ui/sheet'
 import { queueAnalysis, type CompsData, type AnalyzeData } from './actions'
+import { getArvThreshold } from '@/lib/client-api'
 import { cn } from '@/lib/utils'
 import { useAnalysis } from '@/hooks/use-analysis'
 import { useAnalysisEvaluation } from '@/hooks/use-analysis-evaluation'
@@ -111,9 +112,8 @@ function TypewriterText({ text, typeSpeed = 30 }: { text: string; typeSpeed?: nu
 export default function AnalyzePage() {
   const [address, setAddress] = useState('')
   const [skipCache, setSkipCache] = useState(false)
-  const [llmAnalysis] = useState(false)
   const [marketData, setMarketData] = useState(false)
-  const [arvThreshold, setArvThreshold] = useState(10)
+  const [arvThreshold, setArvThreshold] = useState(15)
   const [error, setError] = useState<string | null>(null)
   const [suggestedFilters, setSuggestedFilters] = useState<FilterState[] | null>(null)
   const [suggestedArvThreshold, setSuggestedArvThreshold] = useState<number | null>(null)
@@ -138,6 +138,13 @@ export default function AnalyzePage() {
     clearAnalysis,
     cancelAnalysis,
   } = useAnalysis()
+
+  // Load user's saved ARV threshold on mount
+  useEffect(() => {
+    getArvThreshold().then((res) => {
+      setArvThreshold(res.config.percent)
+    }).catch(() => {}) // fall back to default
+  }, [])
 
   const isRunning = isSubmitting || (activeAnalysis !== null && analysisState.status !== 'completed' && analysisState.status !== 'failed')
   const hasResult = analysisResult !== null
@@ -260,10 +267,9 @@ export default function AnalyzePage() {
 
       const response = await queueAnalysis({
         address: address.trim(),
-        searchOptions: { radiusMiles: 1, maxComps: 10, monthsBack: 12 },
+        searchOptions: { radiusMiles: 1, maxComps: 15, monthsBack: 12 },
         skipCache,
         marketData: marketData ? { enabled: true } : undefined,
-        llmAnalysis: llmAnalysis ? { enabled: true } : undefined,
         arvThresholdPercent: arvThreshold,
         appraisalOverrides: overrides,
       })
@@ -295,7 +301,7 @@ export default function AnalyzePage() {
     } finally {
       setIsSubmitting(false)
     }
-  }, [address, skipCache, marketData, llmAnalysis, arvThreshold, appraisalFilters, appraisalAdjustments, clearAnalysis, setActiveAnalysis, setAnalysisResult, setAnalysisState])
+  }, [address, skipCache, marketData, arvThreshold, appraisalFilters, appraisalAdjustments, clearAnalysis, setActiveAnalysis, setAnalysisResult, setAnalysisState])
 
   // Auto-retry after "Apply & Retry" updates the filter state
   useEffect(() => {
@@ -661,11 +667,11 @@ export default function AnalyzePage() {
             ) : null}
 
             {/* Valuation Summary — only from final result (Step 5) */}
-            {hasResult && (appraisalFilters.length > 0 ? analysisResult?.valuation : displayValuation) ? (
+            {hasResult && displayValuation ? (
               <div ref={valuationCardRef}>
                 <ValuationCard
-                  valuation={appraisalFilters.length > 0 ? (analysisResult?.valuation as import('./actions').ValuationData) : displayValuation!}
-                  isRecalculated={appraisalFilters.length > 0 ? false : isRecalculated}
+                  valuation={displayValuation}
+                  isRecalculated={isRecalculated}
                   onOpenSettings={() => setSettingsOpen(true)}
                 />
               </div>
@@ -674,7 +680,7 @@ export default function AnalyzePage() {
             ) : null}
 
             {/* Risk Flags & Flood Zone — available after Step 1 */}
-            {(displayData?.riskFlags || displayData?.floodZone || displayData?.permits || analysisResult?.valuation?.asIsMarketIntel) ? (
+            {(displayData?.riskFlags || displayData?.floodZone || displayData?.permits || analysisResult?.valuation?.asIsMarketIntel?.asIsMarketPrice != null || analysisResult?.valuation?.asIsMarketIntel?.noDataReason) ? (
               <RiskFloodCard riskFlags={displayData?.riskFlags} floodZone={displayData?.floodZone} permits={displayData?.permits} asIsMarketIntel={analysisResult?.valuation?.asIsMarketIntel} />
             ) : isRunning && !displayData?.riskFlags ? (
               <RiskFloodSkeleton />
@@ -687,11 +693,11 @@ export default function AnalyzePage() {
                   comps={appraisalFilters.length > 0 ? (analysisResult?.comps as import('./actions').CompsData) : effectiveComps!}
                   subject={displayData?.subject}
                   subjectSubdivision={displayData?.subject?.subdivision}
-                  selectedCompKeys={appraisalFilters.length > 0 ? undefined : compOverride?.selectedCompKeys}
-                  isManual={appraisalFilters.length > 0 ? false : (compOverride?.isManual ?? false)}
-                  recalculatedArv={appraisalFilters.length > 0 ? undefined : (isRecalculated ? displayValuation?.arv : undefined)}
-                  onToggleComp={appraisalFilters.length > 0 ? undefined : handleToggleComp}
-                  onReset={appraisalFilters.length > 0 ? undefined : handleResetComps}
+                  selectedCompKeys={compOverride?.selectedCompKeys}
+                  isManual={compOverride?.isManual ?? false}
+                  recalculatedArv={isRecalculated ? displayValuation?.arv : undefined}
+                  onToggleComp={handleToggleComp}
+                  onReset={handleResetComps}
                 />
               )
             ) : displayData && displayData.comps && displayData.comps.items && displayData.comps.items.length > 0 ? (

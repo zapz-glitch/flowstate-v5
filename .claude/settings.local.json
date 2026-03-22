@@ -24,7 +24,11 @@
       "WebFetch(domain:developers.cloudflare.com)",
       "WebSearch",
       "Bash(npx turbo:*)",
-      "Bash(wc -l /Users/yalamber/Projects/flowstate/flowstate-api/apps/dashboard/src/app/\\\\\\(dashboard\\\\\\)/dashboard/analyze/actions.ts)"
+      "Bash(wc -l /Users/yalamber/Projects/flowstate/flowstate-api/apps/dashboard/src/app/\\\\\\(dashboard\\\\\\)/dashboard/analyze/actions.ts)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" https://api.flowstate.homes/health)",
+      "Bash(npx wrangler:*)",
+      "Bash(bash test-addresses.sh)",
+      "Read(//private/tmp/flowstate-test-results/**)"
     ]
   }
 }

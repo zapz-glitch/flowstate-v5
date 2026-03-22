@@ -44,11 +44,6 @@ async function getDashboardSecret(): Promise<string> {
 
 export interface AnalyzeRequest {
   address: string
-  photoAnalysis?: {
-    enabled?: boolean
-    maxComps?: number
-    requireBetterOrEqual?: boolean
-  }
   searchOptions?: {
     radiusMiles?: number
     maxComps?: number
@@ -211,6 +206,7 @@ export interface ValuationData {
     compIds?: string[]
     thresholdPercent?: number
     priceCeiling?: number
+    noDataReason?: string
   } | null
 }
 
@@ -380,50 +376,9 @@ export interface QueueAnalysisResult {
   }
 }
 
-export interface JobStatusResult {
-  success: boolean
-  data?: {
-    jobId: string
-    status: string
-    currentStep: string | null
-    progress: {
-      completedSteps: number
-      totalSteps: number
-      percentComplete: number
-    }
-    steps: Array<{
-      step: string
-      status: string
-      startedAt?: string
-      completedAt?: string
-      durationMs?: number
-      message?: string
-      error?: string
-      fromCache?: boolean
-    }>
-    createdAt: string
-    startedAt: string | null
-    completedAt: string | null
-    totalDurationMs: number | null
-    result?: AnalyzeData
-    error?: {
-      code: string
-      message: string
-      step?: string
-      retryable: boolean
-    }
-  }
-  error?: string
-}
-
 /**
- * Queue a property analysis job
- * Returns job ID and URLs for streaming/polling
- *
- * Security flow:
- * 1. Queue the job via /v1/analyze (authenticated with dashboard headers)
- * 2. Request a short-lived signed token from /v1/analyze/stream-token
- * 3. Return the token-authenticated SSE stream URL
+ * Submit a property analysis request.
+ * Returns result immediately + optional SSE enrichment stream info.
  */
 export async function queueAnalysis(request: AnalyzeRequest): Promise<QueueAnalysisResult> {
   log('queueAnalysis called', { address: request.address, skipCache: request.skipCache })
@@ -456,12 +411,11 @@ export async function queueAnalysis(request: AnalyzeRequest): Promise<QueueAnaly
       address: request.address,
       searchOptions: request.searchOptions ?? {
         radiusMiles: 1,
-        maxComps: 10,
+        maxComps: 15,
         monthsBack: 12,
       },
       skipCache: request.skipCache,
       marketData: request.marketData,
-      llmAnalysis: request.llmAnalysis,
       arvThresholdPercent: request.arvThresholdPercent,
       appraisalOverrides: request.appraisalOverrides,
     }
@@ -520,73 +474,6 @@ export async function queueAnalysis(request: AnalyzeRequest): Promise<QueueAnaly
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Failed to analyze property',
-    }
-  }
-}
-
-/**
- * Get job status via polling
- */
-export async function getJobStatus(jobId: string, propertyKey: string): Promise<JobStatusResult> {
-  const session = await getSession()
-  if (!session?.user) {
-    logError('getJobStatus: User not authenticated')
-    return {
-      success: false,
-      error: 'Not authenticated',
-    }
-  }
-
-  const dashboardSecret = await getDashboardSecret()
-  if (!dashboardSecret) {
-    logError('getJobStatus: Dashboard secret not configured')
-    return {
-      success: false,
-      error: 'Dashboard configuration error',
-    }
-  }
-
-  try {
-    const apiUrl = await getApiUrl()
-    const url = new URL(`${apiUrl}/v1/analyze/jobs/${jobId}`)
-    url.searchParams.set('propertyKey', propertyKey)
-
-    logApiCall('GET', url.toString())
-    const startTime = Date.now()
-
-    const response = await fetch(url.toString(), {
-      headers: {
-        'X-Dashboard-User-Id': session.user.id,
-        'X-Dashboard-Secret': dashboardSecret,
-      },
-    })
-
-    const durationMs = Date.now() - startTime
-    logApiCall('GET', url.toString(), response.status, durationMs)
-
-    const result = await response.json() as { success?: boolean; error?: string; data?: JobStatusResult['data'] }
-
-    if (!response.ok) {
-      logError('getJobStatus failed', { status: response.status, error: result.error })
-      return {
-        success: false,
-        error: result.error || `Failed to get job status`,
-      }
-    }
-
-    log('Job status retrieved', {
-      jobId,
-      status: result.data?.status,
-      currentStep: result.data?.currentStep,
-      progress: result.data?.progress?.percentComplete,
-    })
-
-    return { success: true, data: result.data } as JobStatusResult
-  } catch (error) {
-    logError('getJobStatus exception', error)
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : 'Failed to get job status',
     }
   }
 }

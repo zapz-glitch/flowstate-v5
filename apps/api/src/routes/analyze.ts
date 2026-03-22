@@ -1,25 +1,15 @@
 /**
  * Property Analysis Route
  *
- * Async endpoint for complete property analysis using Cloudflare Workflows.
+ * Synchronous endpoint: CoreLogic fetch → evaluation → JSON response.
+ * Optional async enrichment via Durable Objects (Market Data + LLM).
  *
- * Analysis Flow (via AnalysisWorkflow):
- * 1. PropertyApi.getPropertyBundle() - fetches property, comps, enrichment
- * 2. AppraisalService.evaluate() - applies filters & adjustments to comps
- * 3. PhotoProvider.fetchPhotoBundle() - fetches photos in parallel (rate-limited)
- * 4. ClassificationService.classifyProperty() - classifies all properties in parallel
- * 5. ValuationService.calculate() - computes weighted ARV and investment metrics
- *
- * Architecture Benefits (vs Queue-based):
- * - True parallel execution with fan-out
- * - Automatic retries with backoff per step
- * - Durable execution (survives restarts)
- * - Step-level caching
- * - 10-15 seconds vs 60-120 seconds
- *
- * Real-time Updates:
- * - WebSocket streaming via /ws/analyze/:jobId
- * - HTTP polling via GET /analyze/jobs/:jobId
+ * Flow:
+ * 1. Load user settings (appraisal rules, deal params, rehab config)
+ * 2. Fetch property bundle from CoreLogic (property + comps + enrichment)
+ * 3. performAnalysis() — Group A comp selection, ARV, Group B as-is intel
+ * 4. Return JSON immediately
+ * 5. (Optional) Start DO-based enrichment: Zillow scraping + LLM analysis via SSE
  */
 
 import { Hono } from 'hono'
@@ -38,6 +28,7 @@ import { createPhotoService } from '../services/photo-provider'
 import type { PropertyIdentifier } from '../services/photo-provider'
 import { performAnalysis } from '../services/evaluation'
 import { generateSseToken } from '../utils/sse-token'
+import { AnalysisError } from '../utils/analysis-error'
 import { drizzle } from 'drizzle-orm/d1'
 import { savedReports } from '../db/schema'
 
@@ -167,7 +158,7 @@ analyze.post('/', async (c) => {
       propertyId: body.propertyId,
       comparables: {
         radiusMiles: body.searchOptions?.radiusMiles ?? apiFilterParams.radiusMiles ?? 1,
-        maxComps: body.searchOptions?.maxComps ?? 10,
+        maxComps: body.searchOptions?.maxComps ?? 15,
         monthsBack: body.searchOptions?.monthsBack ?? apiFilterParams.monthsBack ?? 12,
         sqftVariance: apiFilterParams.sqftVariance,
       },
@@ -216,7 +207,13 @@ analyze.post('/', async (c) => {
       }
     }
 
-    const { response: analysisResult } = performAnalysis({
+    const arvThreshold = (() => {
+      const t = body.arvThresholdPercent ? { percent: body.arvThresholdPercent } : userSettings.arvThreshold
+      console.log(`[Analyze] ARV threshold: ${t.percent}%`)
+      return t
+    })()
+
+    const evalParams = {
       jobId,
       bundle,
       appraisalRules,
@@ -224,11 +221,7 @@ analyze.post('/', async (c) => {
       customRehabTable: userSettings.customRehabTable,
       customTierRanges: userSettings.customTierRanges,
       customMajorItemCosts: userSettings.customMajorItemCosts,
-      arvThreshold: (() => {
-        const t = body.arvThresholdPercent ? { percent: body.arvThresholdPercent } : userSettings.arvThreshold
-        console.log(`[Analyze] ARV threshold: ${t.percent}%`)
-        return t
-      })(),
+      arvThreshold,
       apiCallStats: {
         corelogic: {
           total: propertyCallStats.total,
@@ -237,7 +230,62 @@ analyze.post('/', async (c) => {
         },
         totalExternalCalls: propertyCallStats.total,
       },
-    })
+    }
+
+    let analysisResult: Awaited<ReturnType<typeof performAnalysis>>['response']
+    try {
+      analysisResult = performAnalysis(evalParams).response
+    } catch (firstError) {
+      // Fallback: if no comps passed hard filters, refetch with wider params
+      if (firstError instanceof AnalysisError && !body.appraisalOverrides) {
+        const widerMaxComps = 20
+        const widerRadius = 1
+        console.log(`[Analyze] No comps passed — retrying with ${widerMaxComps} comps, ${widerRadius}mi radius`)
+
+        const widerResult = await propertyApi.getPropertyBundle({
+          address: body.address,
+          streetAddress: body.streetAddress,
+          city: body.city,
+          state: body.state,
+          zipCode: body.zipCode,
+          propertyId: body.propertyId,
+          comparables: {
+            radiusMiles: widerRadius,
+            maxComps: widerMaxComps,
+            monthsBack: body.searchOptions?.monthsBack ?? apiFilterParams.monthsBack ?? 12,
+            sqftVariance: apiFilterParams.sqftVariance,
+          },
+          enrichment: {
+            permits: body.enrichment?.permits ?? true,
+            floodZone: body.enrichment?.floodZone ?? true,
+            weatherRisk: body.enrichment?.weatherRisk ?? false,
+            neighbourhood: false,
+          },
+          skipCache: body.skipCache,
+        })
+
+        if (widerResult.success) {
+          const widerCallStats = propertyApi.getCallStats()
+          console.log(`[Analyze] Wider fetch returned ${widerResult.data.comparables.length} comps`)
+          analysisResult = performAnalysis({
+            ...evalParams,
+            bundle: widerResult.data,
+            apiCallStats: {
+              corelogic: {
+                total: widerCallStats.total,
+                cached: widerCallStats.cached,
+                endpoints: widerCallStats.endpoints,
+              },
+              totalExternalCalls: widerCallStats.total,
+            },
+          }).response
+        } else {
+          throw firstError // wider fetch failed, throw original error
+        }
+      } else {
+        throw firstError // appraisal overrides active or non-AnalysisError
+      }
+    }
 
     console.log(`[Analyze][Timing] Evaluation: ${Date.now() - evalStart}ms`)
 
@@ -323,21 +371,21 @@ analyze.post('/', async (c) => {
     })
   } catch (error) {
     console.error('[Analyze] Error:', error)
+
+    if (error instanceof AnalysisError) {
+      return c.json(
+        {
+          success: false,
+          error: error.message.replace('BAD_DEAL: ', ''),
+          ...(error.suggestedFilters ? { suggestedFilters: error.suggestedFilters } : {}),
+          ...(error.suggestedArvThreshold ? { suggestedArvThreshold: error.suggestedArvThreshold } : {}),
+        },
+        400,
+      )
+    }
+
     const message = error instanceof Error ? error.message : 'Failed to analyze property'
-    const isBadDeal = message.startsWith('BAD_DEAL:')
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const suggestedFilters = (error as any)?.suggestedFilters
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const suggestedArvThreshold = (error as any)?.suggestedArvThreshold
-    return c.json(
-      {
-        success: false,
-        error: isBadDeal ? message.replace('BAD_DEAL: ', '') : message,
-        ...(suggestedFilters ? { suggestedFilters } : {}),
-        ...(suggestedArvThreshold ? { suggestedArvThreshold } : {}),
-      },
-      isBadDeal ? 400 : 500
-    )
+    return c.json({ success: false, error: message }, 500)
   }
 })
 
@@ -352,7 +400,7 @@ analyze.get('/defaults', async (c) => {
     data: {
       searchOptions: {
         radiusMiles: 1,
-        maxComps: 10,
+        maxComps: 15,
         monthsBack: 12,
       },
       buybox: {

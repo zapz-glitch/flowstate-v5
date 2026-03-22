@@ -2932,7 +2932,7 @@ function MajorItemCostsTab() {
 // ARV COMP THRESHOLD TAB
 // ═══════════════════════════════════════════════════════════════════════════════
 
-const ARV_THRESHOLD_DEFAULTS_UI: ArvThresholdConfig = { percent: 10 }
+const ARV_THRESHOLD_DEFAULTS_UI: ArvThresholdConfig = { percent: 15 }
 
 function ArvThresholdTab() {
   const [config, setConfig] = useState<ArvThresholdConfig>(ARV_THRESHOLD_DEFAULTS_UI)
@@ -3185,7 +3185,7 @@ function ArvThresholdTab() {
                               </div>
                               <NumericInput
                                 value={es.arvThreshold.percent}
-                                onChange={(v) => patchLocEditState(s.id, s, { arvThreshold: { ...es.arvThreshold, percent: v ?? 10 } })}
+                                onChange={(v) => patchLocEditState(s.id, s, { arvThreshold: { ...es.arvThreshold, percent: v ?? 15 } })}
                                 min={1} max={100} step={5}
                                 suffix="%"
                                 className="w-24"

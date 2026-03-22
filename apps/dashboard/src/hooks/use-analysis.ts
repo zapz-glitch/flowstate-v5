@@ -5,7 +5,6 @@ import {
   activeAnalysisAtom,
   analysisStateAtom,
   analysisResultAtom,
-  partialResultAtom,
   displayDataAtom,
   analysisActionsAtom,
 } from '@/atoms/analysis'
@@ -18,7 +17,6 @@ export function useAnalysis() {
   const activeAnalysis = useAtomValue(activeAnalysisAtom)
   const analysisState = useAtomValue(analysisStateAtom)
   const analysisResult = useAtomValue(analysisResultAtom)
-  const partialResult = useAtomValue(partialResultAtom)
   const displayData = useAtomValue(displayDataAtom)
   const actions = useAtomValue(analysisActionsAtom)
 
@@ -26,7 +24,6 @@ export function useAnalysis() {
     activeAnalysis,
     analysisState,
     analysisResult,
-    partialResult,
     displayData,
     ...actions,
   }

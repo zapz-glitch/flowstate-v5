@@ -191,7 +191,7 @@ export async function loadUserAnalysisSettings(
   // ARV threshold
   let arvThresholdConfig: ArvThresholdConfig = arvThresholdRow
     ? { percent: arvThresholdRow.percent }
-    : { percent: 10 }
+    : { percent: 15 }
 
   // Location-based overrides (zip > city > state)
   const cityNorm = address?.city?.toLowerCase()

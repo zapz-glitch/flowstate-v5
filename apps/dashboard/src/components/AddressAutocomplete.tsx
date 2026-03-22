@@ -160,7 +160,7 @@ export function AddressAutocomplete({
           <ul role="listbox" className="py-1 max-h-[280px] overflow-y-auto">
             {results.map((result, index) => (
               <li
-                key={result.clip || index}
+                key={`${result.clip}-${index}`}
                 role="option"
                 aria-selected={index === activeIndex}
                 className={cn(

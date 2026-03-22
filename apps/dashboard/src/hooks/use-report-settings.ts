@@ -160,11 +160,15 @@ export function useReportSettings(data: AnalyzeData | null): UseReportSettingsRe
         const dealParams = dealResponse?.config ?? applied?.dealParams ?? DEFAULT_DEAL_PARAMS
 
         // Build major items from user's current settings
+        // Merge costs from user's saved config with enabled state from appliedSettings
+        const appliedMajorItemMap = new Map(
+          (applied?.majorItems ?? []).map((m) => [m.id, m])
+        )
         const majorItems: MajorItemSetting[] = majorItemsResponse?.items
           ? majorItemsResponse.items.map((item) => ({
               id: item.id,
               name: item.name,
-              enabled: false,
+              enabled: appliedMajorItemMap.get(item.id)?.enabled ?? false,
               cost: item.effectiveCost,
             }))
           : applied?.majorItems

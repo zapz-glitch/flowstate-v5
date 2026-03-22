@@ -13,12 +13,15 @@
 
 import type { NormalizedProperty, NormalizedComparable } from '../property-api/types'
 import type { AppraisalFilter, FilterResult, FilterLabel, FilterType, ApiFilterParamKey } from './types'
+import type { FilterPriority } from '@flowstate-api/shared/appraisal'
 
 // ─── Rule Definition Interface ───────────────────────────────────────────────
 
 export interface FilterRuleDefinition {
   /** Must match a value in FilterType union */
   type: FilterType
+  /** Whether this filter is required (hard) or preferred (soft) */
+  priority: FilterPriority
   /** Default configuration when no preset is specified */
   defaults: {
     enabled: boolean
@@ -57,6 +60,7 @@ function normalizeSubdivision(value: string | null | undefined): string | null {
 export const FILTER_RULES: FilterRuleDefinition[] = [
   {
     type: 'subdivision_match',
+    priority: 'soft',
     defaults: { enabled: true, value: 1 },
     label: {
       label: 'Subdivision Match',
@@ -92,6 +96,7 @@ export const FILTER_RULES: FilterRuleDefinition[] = [
 
   {
     type: 'building_style_match',
+    priority: 'soft',
     defaults: { enabled: true, value: 1 },
     label: {
       label: 'Building Style Match',
@@ -125,6 +130,7 @@ export const FILTER_RULES: FilterRuleDefinition[] = [
 
   {
     type: 'sale_age',
+    priority: 'hard',
     defaults: { enabled: true, value: 180 },
     label: {
       label: 'Sale Age',
@@ -168,6 +174,7 @@ export const FILTER_RULES: FilterRuleDefinition[] = [
 
   {
     type: 'sqft_diff',
+    priority: 'hard',
     defaults: { enabled: true, value: 250 },
     label: {
       label: 'Square Footage Difference',
@@ -208,6 +215,7 @@ export const FILTER_RULES: FilterRuleDefinition[] = [
 
   {
     type: 'year_built_diff',
+    priority: 'soft',
     defaults: { enabled: true, value: 10 },
     label: {
       label: 'Year Built Difference',
@@ -240,6 +248,7 @@ export const FILTER_RULES: FilterRuleDefinition[] = [
 
   {
     type: 'distance',
+    priority: 'soft',
     defaults: { enabled: true, value: 0.5 },
     label: {
       label: 'Search Distance',

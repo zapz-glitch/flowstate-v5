@@ -52,6 +52,8 @@ export interface MajorItemSetting {
 
 export interface CompEvaluation {
   isEnabled: boolean
+  /** Comp quality score based on soft filter matches (higher = better) */
+  compScore: number
   disableReasons: string[]
   filterResults: Array<{
     type: string

@@ -154,7 +154,7 @@ class PropertyValuationService implements ValuationService {
     const rehabLevel = REHAB_LEVELS[rehabLevelIndex]
 
     // Calculate costs
-    const pricePerSqft = compAvgSqft > 0 ? Math.round(arv / compAvgSqft) : 0
+    const pricePerSqft = subjectSqft > 0 ? Math.round(arv / subjectSqft) : (compAvgSqft > 0 ? Math.round(arv / compAvgSqft) : 0)
     const baseRehabCost = (subjectSqft || compAvgSqft) * rehabEstimate.perSqft
     const majorItemsCost = majorItems
       .filter((item) => item.enabled)

@@ -31,10 +31,16 @@ export {
   calculateARV,
   pickBestComps,
   getCompAvgSqft,
+  scoreComp,
+  passesHardFilters,
+  isHardFilter,
+  HARD_FILTER_TYPES,
+  SOFT_FILTER_SCORES,
 } from './appraisal/index'
 
 export type {
   FilterType,
+  FilterPriority,
   AdjustmentType,
   AppraisalFilter,
   AppraisalAdjustment,

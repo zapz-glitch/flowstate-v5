@@ -7,13 +7,9 @@
  * Uses @flowstate-api/shared for all calculations — single source of truth
  * with the server.
  *
- * Important: The server uses a 3-pass fallback (strict → relax subdivision →
- * relax all filters). The client distinguishes between "relaxing" changes
- * (disabling a filter or raising its threshold) and "tightening" changes
- * (enabling a new filter or lowering a threshold). When the user relaxes,
- * server-enabled comps stay enabled. Only when the user tightens a filter
- * do we strictly re-evaluate — this prevents ARV from dropping to 0 when
- * the user disables a filter that the server's fallback had already relaxed.
+ * Hard filters (sqft_diff, sale_age) must pass — comp is rejected if failed.
+ * Soft filters (subdivision, style, distance, year_built) add score but don't reject.
+ * When user changes filter settings, comps are re-evaluated with hard/soft scoring.
  */
 
 import type { AnalyzeData, CompItem, SubjectData, ValuationData } from '@/app/(dashboard)/dashboard/analyze/actions'
@@ -32,6 +28,8 @@ import {
   type FilterType,
   type AdjustmentType,
   type RehabTable,
+  passesHardFilters,
+  scoreComp,
 } from '@flowstate-api/shared'
 
 /**
@@ -62,32 +60,6 @@ function hasFilterChanges(data: AnalyzeData, settings: EvaluationSettings): bool
 }
 
 /**
- * Check whether any filter was strictly tightened compared to what the
- * server used. "Tightened" means a filter that was disabled is now enabled,
- * or a numeric threshold was lowered (stricter). Disabling a filter or
- * increasing its threshold is considered "relaxing" — it should never cause
- * a server-enabled comp to become disabled.
- */
-function hasStricterFilters(data: AnalyzeData, settings: EvaluationSettings): boolean {
-  const applied = data.appliedSettings
-  if (!applied) return true
-
-  const appliedFilters = applied.filters ?? []
-  for (const sf of settings.filters) {
-    const af = appliedFilters.find((f) => f.type === sf.type)
-    if (!af) continue
-
-    // Filter was disabled on server, now enabled by user → stricter
-    if (!af.enabled && sf.enabled) return true
-
-    // Both enabled, but user lowered the threshold → stricter
-    if (af.enabled && sf.enabled && sf.value < af.value) return true
-  }
-
-  return false
-}
-
-/**
  * Recalculate a report with new evaluation settings.
  * All logic is pure and synchronous — safe for useMemo.
  */
@@ -110,8 +82,7 @@ export function recalculateReport(
         carryingCostsPercent: settings.dealParams.carryingCostsPercent,
         wholesaleFee: settings.dealParams.wholesaleFee,
         majorItems: settings.majorItems
-          .filter((item) => item.enabled)
-          .map((item) => ({ id: item.id as 'roof', enabled: true, cost: item.cost })),
+          .map((item) => ({ id: item.id as 'roof', enabled: item.enabled, cost: item.cost })),
       },
       rehabTable,
       settings.tierRanges
@@ -124,7 +95,7 @@ export function recalculateReport(
       disabledCount: 0,
       avgPricePerSqft: null,
       medianPrice: null,
-      valuation: mapValuationResult(valResult, settings.rehabLevelIndex, rehabTable, settings, settings.tierRanges),
+      valuation: mapValuationResult(valResult, settings.rehabLevelIndex, rehabTable, settings, settings.tierRanges, subject?.squareFeet ?? 0),
       hasChanges: false,
     }
   }
@@ -141,21 +112,20 @@ export function recalculateReport(
       settings.adjustments.map((a) => ({ type: a.type as AdjustmentType, enabled: a.enabled, amount: a.amount, percent: a.percent }))
     )
 
-    // The server uses a 3-pass fallback that may relax filters (e.g. triple
-    // thresholds, drop subdivision) to find viable comps. If the user only
-    // relaxed filters (disabled a filter or raised a threshold), server-enabled
-    // comps must stay enabled. Only use strict re-evaluation when the user
-    // tightened a filter (enabled a new one or lowered a threshold).
+    // Hard/soft filter scoring: comp must pass hard filters (sqft, sale_age),
+    // soft filters (subdivision, style, distance, year) add score but don't reject.
     const serverEnabled = comp.isEnabled !== false
-    const stricterFilters = filtersChanged && hasStricterFilters(data, settings)
-    const isEnabled = stricterFilters
-      ? !evaluation.shouldDisable       // User tightened filters → strict re-eval
-      : filtersChanged
-        ? serverEnabled || !evaluation.shouldDisable  // User relaxed → keep server-enabled, also enable any newly passing
-        : serverEnabled                  // No changes → preserve server state
+    const passesHard = passesHardFilters(evaluation.filterResults)
+    const compScore = passesHard ? scoreComp(evaluation.filterResults, comp.distanceMiles) : 0
+
+    // If user changed filters: re-evaluate. Otherwise: preserve server state.
+    const isEnabled = filtersChanged
+      ? passesHard  // Re-evaluate: enabled if passes hard filters
+      : serverEnabled  // No changes: preserve server selection
 
     return {
       isEnabled,
+      compScore,
       disableReasons: evaluation.disableReasons,
       filterResults: evaluation.filterResults,
       adjustmentResults: evaluation.adjustmentResults,
@@ -257,7 +227,7 @@ export function recalculateReport(
     disabledCount,
     avgPricePerSqft,
     medianPrice,
-    valuation: mapValuationResult(valResult, settings.rehabLevelIndex, rehabTable, settings, settings.tierRanges),
+    valuation: mapValuationResult(valResult, settings.rehabLevelIndex, rehabTable, settings, settings.tierRanges, subject.squareFeet ?? 0, compAvgSqft),
     hasChanges,
   }
 }
@@ -270,20 +240,22 @@ function mapValuationResult(
   rehabLevelIndex: number,
   rehabTable: RehabTable,
   settings: EvaluationSettings,
-  tierRanges?: TierRangeDefinition[]
+  tierRanges?: TierRangeDefinition[],
+  subjectSqft?: number,
+  compAvgSqft?: number,
 ) {
   const majorItems = settings.majorItems
     .map((item) => ({ id: item.id as 'roof', enabled: item.enabled, cost: item.cost }))
 
-  // Derive subjectSqft and compAvgSqft from valuation result
-  const subjectSqft = v.baseRehabCost > 0 && v.rehabPerSqft > 0 ? Math.round(v.baseRehabCost / v.rehabPerSqft) : 0
-  const compAvgSqft = v.pricePerSqft > 0 ? Math.round(v.arv / v.pricePerSqft) : subjectSqft
+  // Use actual sqft values passed in, fall back to deriving from result only if not provided
+  const resolvedSubjectSqft = subjectSqft ?? (v.baseRehabCost > 0 && v.rehabPerSqft > 0 ? Math.round(v.baseRehabCost / v.rehabPerSqft) : 0)
+  const resolvedCompAvgSqft = compAvgSqft ?? (v.pricePerSqft > 0 ? Math.round(v.arv / v.pricePerSqft) : resolvedSubjectSqft)
 
   const rehabLevelEstimates = calculateAllRehabLevelEstimates(
     {
       arv: v.arv,
-      subjectSqft,
-      compAvgSqft,
+      subjectSqft: resolvedSubjectSqft,
+      compAvgSqft: resolvedCompAvgSqft,
       majorItems,
       additionPlay: settings.additionPlay ?? 0,
       closingCostsPercent: settings.dealParams.closingCostsPercent,
