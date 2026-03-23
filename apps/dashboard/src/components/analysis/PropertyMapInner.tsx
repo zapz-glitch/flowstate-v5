@@ -3,7 +3,7 @@
 import { useEffect, useRef } from 'react'
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
-import type { MapMarker } from './NeighbourhoodMap'
+import type { MapMarker } from './PropertyMap'
 
 // ─── Marker Config ──────────────────────────────────────────────────────────
 
@@ -17,9 +17,11 @@ const MARKER_CONFIG: Record<MapMarker['type'], { color: string; label: string }>
 
 // ─── Popup HTML ─────────────────────────────────────────────────────────────
 
-function buildPopupHTML(m: MapMarker): string {
+function buildPopupHTML(m: MapMarker, hasToggle: boolean): string {
   const config = MARKER_CONFIG[m.type]
   const details = m.details ?? []
+  const isProperty = m.type === 'subject' || m.type === 'comp-enabled' || m.type === 'comp-disabled'
+  const isComp = m.type === 'comp-enabled' || m.type === 'comp-disabled'
 
   const rows = details
     .map(([k, v]) => {
@@ -31,25 +33,54 @@ function buildPopupHTML(m: MapMarker): string {
     })
     .join('')
 
+  // Zillow link on address for properties
+  const zillowUrl = isProperty ? `https://www.zillow.com/homes/${encodeURIComponent(m.label)}_rb/` : ''
+  const labelHtml = isProperty
+    ? `<a href="${zillowUrl}" target="_blank" rel="noopener noreferrer" style="font-weight:600;font-size:12px;color:#111827;text-decoration:none;border-bottom:1px dashed #9ca3af;" onmouseover="this.style.color='#3b82f6';this.style.borderBottomColor='#3b82f6'" onmouseout="this.style.color='#111827';this.style.borderBottomColor='#9ca3af'">${m.label}</a>`
+    : `<div style="font-weight:600;font-size:12px;color:#111827;">${m.label}</div>`
+
+  // Toggle switch for comps
+  const isEnabled = m.type === 'comp-enabled'
+  const toggleHtml = isComp && hasToggle && m.compKey
+    ? `<div style="border-top:1px solid #e5e7eb;padding-top:5px;margin-top:3px;display:flex;align-items:center;justify-content:space-between;">
+        <span style="font-size:10px;font-weight:500;color:${isEnabled ? '#16a34a' : '#6b7280'};">${isEnabled ? 'Included in ARV' : 'Excluded from ARV'}</span>
+        <div data-comp-key="${m.compKey}" data-action="toggle" style="
+          width:28px;height:16px;border-radius:8px;cursor:pointer;position:relative;
+          background:${isEnabled ? '#10b981' : '#d1d5db'};transition:background 0.2s;
+        "><div style="
+          width:12px;height:12px;border-radius:50%;background:white;
+          position:absolute;top:2px;${isEnabled ? 'right:2px' : 'left:2px'};
+          box-shadow:0 1px 2px rgba(0,0,0,0.2);
+        "></div></div>
+      </div>`
+    : ''
+
   return `
-    <div style="font-family:system-ui,-apple-system,sans-serif;font-size:11px;min-width:140px;max-width:220px;line-height:1.4;">
+    <div style="font-family:system-ui,-apple-system,sans-serif;font-size:11px;min-width:160px;max-width:240px;line-height:1.4;">
       <div style="font-size:9px;font-weight:600;color:${config.color};text-transform:uppercase;letter-spacing:0.5px;margin-bottom:2px;">${config.label}</div>
-      <div style="font-weight:600;font-size:12px;color:#111827;margin-bottom:3px;">${m.label}</div>
+      <div style="margin-bottom:3px;">${labelHtml}</div>
       ${rows ? `<div style="border-top:1px solid #e5e7eb;padding-top:3px;display:flex;flex-direction:column;gap:1px;">${rows}</div>` : ''}
+      ${toggleHtml}
     </div>
   `
 }
 
 // ─── Component ──────────────────────────────────────────────────────────────
 
-interface NeighbourhoodMapInnerProps {
+interface PropertyMapInnerProps {
   markers: MapMarker[]
+  onToggleComp?: (key: string) => void
 }
 
-export default function NeighbourhoodMapInner({ markers }: NeighbourhoodMapInnerProps) {
+export default function PropertyMapInner({ markers, onToggleComp }: PropertyMapInnerProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<maplibregl.Map | null>(null)
   const markersRef = useRef<maplibregl.Marker[]>([])
+  const onToggleCompRef = useRef(onToggleComp)
+  onToggleCompRef.current = onToggleComp
+
+  // Track which comp popup to re-open after markers rebuild (e.g. after toggle)
+  const reopenCompKeyRef = useRef<string | null>(null)
 
   useEffect(() => {
     if (!containerRef.current || markers.length === 0) return
@@ -86,16 +117,18 @@ export default function NeighbourhoodMapInner({ markers }: NeighbourhoodMapInner
 
       mapRef.current.addControl(new maplibregl.NavigationControl(), 'top-right')
       mapRef.current.scrollZoom.disable()
-
     }
 
     const map = mapRef.current
+    const keyToReopen = reopenCompKeyRef.current
+    reopenCompKeyRef.current = null
 
     for (const m of markersRef.current) m.remove()
     markersRef.current = []
 
     let compIndex = 0
     const bounds = new maplibregl.LngLatBounds()
+    const hasToggle = !!onToggleCompRef.current
 
     // Render non-subject markers first, then subject last so it appears on top
     const sortedMarkers = [...markers].sort((a, b) => {
@@ -112,9 +145,25 @@ export default function NeighbourhoodMapInner({ markers }: NeighbourhoodMapInner
       const popup = new maplibregl.Popup({
         offset: 25,
         closeButton: false,
-        maxWidth: '240px',
+        maxWidth: '260px',
         className: 'flowstate-popup',
-      }).setHTML(buildPopupHTML(m))
+      }).setHTML(buildPopupHTML(m, hasToggle))
+
+      // Wire up toggle switch click after popup opens
+      if (isComp && hasToggle && m.compKey) {
+        const compKey = m.compKey
+        popup.on('open', () => {
+          const el = popup.getElement()?.querySelector('[data-action="toggle"]') as HTMLElement | null
+          if (el) {
+            el.addEventListener('click', (e) => {
+              e.stopPropagation()
+              // Store the key so we re-open this popup after markers rebuild
+              reopenCompKeyRef.current = compKey
+              onToggleCompRef.current?.(compKey)
+            })
+          }
+        })
+      }
 
       // Use maplibre's default marker with color — properly anchored, no drift
       const markerOptions: maplibregl.MarkerOptions = {
@@ -150,9 +199,14 @@ export default function NeighbourhoodMapInner({ markers }: NeighbourhoodMapInner
 
       markersRef.current.push(marker)
       bounds.extend([m.lng, m.lat])
+
+      // Re-open popup if this comp was just toggled
+      if (keyToReopen && m.compKey === keyToReopen) {
+        marker.togglePopup()
+      }
     }
 
-    if (!bounds.isEmpty()) {
+    if (!bounds.isEmpty() && !keyToReopen) {
       map.fitBounds(bounds, {
         padding: 60,
         maxZoom: 15,
@@ -174,7 +228,7 @@ export default function NeighbourhoodMapInner({ markers }: NeighbourhoodMapInner
   const types = new Set(markers.map((m) => m.type))
 
   return (
-    <div className="space-y-2">
+    <div>
       <style>{`
         .flowstate-popup .maplibregl-popup-content {
           border-radius: 8px;
@@ -186,9 +240,9 @@ export default function NeighbourhoodMapInner({ markers }: NeighbourhoodMapInner
           border-top-color: white;
         }
       `}</style>
-      <div ref={containerRef} className="w-full h-[400px] rounded-lg overflow-hidden border border-border" />
+      <div ref={containerRef} className="w-full h-[400px]" />
       {/* Legend */}
-      <div className="flex flex-wrap gap-x-4 gap-y-2 px-1">
+      <div className="flex flex-wrap gap-x-4 gap-y-2 px-3 py-2 border-t border-border bg-background/50">
         {(['subject', 'comp-enabled', 'comp-disabled', 'school', 'poi'] as const)
           .filter((t) => types.has(t))
           .map((t) => {

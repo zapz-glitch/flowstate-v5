@@ -44,7 +44,7 @@ import {
   ComparablesSection,
   RiskFloodCard,
   VisionAnalysisButton,
-  NeighbourhoodMap,
+  PropertyMap,
 } from '@/components/analysis'
 import {
   SubjectPropertySkeleton,
@@ -432,9 +432,11 @@ export default function AnalyzePage() {
       {/* Inline Map — shows subject + comps after results arrive */}
       {displayData?.subject?.latitude && displayData?.subject?.longitude && (
         <div className="rounded-xl border border-border overflow-hidden no-print">
-          <NeighbourhoodMap
+          <PropertyMap
             subject={displayData.subject}
             comps={hasResult ? (effectiveComps ?? analysisResult?.comps) : displayData.comps}
+            selectedCompKeys={compOverride?.selectedCompKeys}
+            onToggleComp={handleToggleComp}
           />
         </div>
       )}

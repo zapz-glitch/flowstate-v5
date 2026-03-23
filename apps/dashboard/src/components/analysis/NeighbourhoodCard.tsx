@@ -8,7 +8,7 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 import type { NeighbourhoodData, SubjectData, CompsData } from './shared-types'
-import { NeighbourhoodMap } from './NeighbourhoodMap'
+import { PropertyMap } from './PropertyMap'
 
 interface NeighbourhoodCardProps {
   data?: NeighbourhoodData | null
@@ -118,7 +118,7 @@ export function NeighbourhoodCard({ data, subject, comps }: NeighbourhoodCardPro
 
       {/* Map */}
       {hasMap && (
-        <NeighbourhoodMap subject={subject} comps={comps} neighbourhood={data} />
+        <PropertyMap subject={subject} comps={comps} neighbourhood={data} />
       )}
 
       {/* Demographics */}

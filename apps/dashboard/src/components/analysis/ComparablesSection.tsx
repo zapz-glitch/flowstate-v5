@@ -7,7 +7,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import type { CompsData, CompItem, SubjectData } from './shared-types'
 import { getCompKey } from './format-helpers'
 import { CompCard } from './CompCard'
-import { NeighbourhoodMap } from './NeighbourhoodMap'
+import { PropertyMap } from './PropertyMap'
 
 export interface ComparablesSectionProps {
   comps: CompsData
@@ -297,7 +297,7 @@ export function ComparablesSection({
             <DialogTitle className="text-body font-semibold">Subject & Comparables Map</DialogTitle>
           </DialogHeader>
           <div className="px-5 pb-5">
-            <NeighbourhoodMap subject={subject} comps={comps} />
+            <PropertyMap subject={subject} comps={comps} selectedCompKeys={selectedCompKeys} onToggleComp={onToggleComp} />
           </div>
         </DialogContent>
       </Dialog>

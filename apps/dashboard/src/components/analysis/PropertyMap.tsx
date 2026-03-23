@@ -4,8 +4,7 @@ import { useMemo } from 'react'
 import dynamic from 'next/dynamic'
 import type { SubjectData, CompItem, NeighbourhoodData } from './shared-types'
 
-// Dynamically import the map internals (Leaflet requires browser APIs)
-const MapInner = dynamic(() => import('./NeighbourhoodMapInner'), {
+const MapInner = dynamic(() => import('./PropertyMapInner'), {
   ssr: false,
   loading: () => (
     <div className="w-full h-[400px] rounded-lg bg-secondary/30 flex items-center justify-center text-foreground-tertiary text-body-sm">
@@ -21,15 +20,21 @@ export interface MapMarker {
   label: string
   /** Key-value pairs shown in the popup */
   details?: [string, string][]
+  /** Comp key for toggling ARV selection (comp markers only) */
+  compKey?: string
 }
 
-interface NeighbourhoodMapProps {
+interface PropertyMapProps {
   subject?: SubjectData | null
   comps?: { items?: CompItem[] } | null
   neighbourhood?: NeighbourhoodData | null
+  /** Manual comp selection keys — when provided, overrides comp.isEnabled */
+  selectedCompKeys?: Set<string>
+  /** Called when a comp's enable/disable toggle is clicked in the popup */
+  onToggleComp?: (key: string) => void
 }
 
-export function NeighbourhoodMap({ subject, comps, neighbourhood }: NeighbourhoodMapProps) {
+export function PropertyMap({ subject, comps, neighbourhood, selectedCompKeys, onToggleComp }: PropertyMapProps) {
   const markers = useMemo(() => {
     const m: MapMarker[] = []
 
@@ -54,9 +59,12 @@ export function NeighbourhoodMap({ subject, comps, neighbourhood }: Neighbourhoo
 
     // Comps
     if (comps?.items) {
-      for (const comp of comps.items) {
+      for (let i = 0; i < comps.items.length; i++) {
+        const comp = comps.items[i]
         if (comp.latitude && comp.longitude) {
-          const enabled = comp.isEnabled !== false
+          const compKey = comp.address || `comp-${i}`
+          // Use selectedCompKeys if provided, otherwise fall back to comp.isEnabled
+          const enabled = selectedCompKeys ? selectedCompKeys.has(compKey) : comp.isEnabled !== false
           const details: [string, string][] = []
           if (comp.salePrice != null) details.push(['Price', `$${comp.salePrice.toLocaleString()}`])
           if (comp.squareFeet != null) {
@@ -72,6 +80,7 @@ export function NeighbourhoodMap({ subject, comps, neighbourhood }: Neighbourhoo
             type: enabled ? 'comp-enabled' : 'comp-disabled',
             label: comp.address ?? 'Comparable',
             details,
+            compKey,
           })
         }
       }
@@ -116,10 +125,10 @@ export function NeighbourhoodMap({ subject, comps, neighbourhood }: Neighbourhoo
     }
 
     return m
-  }, [subject, comps, neighbourhood])
+  }, [subject, comps, neighbourhood, selectedCompKeys])
 
   // Need at least the subject marker to render the map
   if (markers.length === 0) return null
 
-  return <MapInner markers={markers} />
+  return <MapInner markers={markers} onToggleComp={onToggleComp} />
 }

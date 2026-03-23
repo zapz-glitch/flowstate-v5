@@ -24,6 +24,7 @@ import {
   RiskFloodCard,
   ApiCallStatsCard,
   VisionAnalysisButton,
+  PropertyMap,
 } from '@/components/analysis'
 import type { AnalyzeData } from '@/components/analysis'
 
@@ -219,6 +220,13 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Inline Map — subject + comps */}
+      {analysis.subject?.latitude && analysis.subject?.longitude && (
+        <div className="rounded-xl border border-border overflow-hidden no-print">
+          <PropertyMap subject={analysis.subject} comps={effectiveComps} selectedCompKeys={compOverride?.selectedCompKeys} onToggleComp={handleToggleComp} />
         </div>
       )}
 

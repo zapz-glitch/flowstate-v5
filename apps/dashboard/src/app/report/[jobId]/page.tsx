@@ -23,6 +23,7 @@ import {
   ValuationCard,
   ComparablesSection,
   RiskFloodCard,
+  PropertyMap,
 } from '@/components/analysis'
 import type {
   AnalyzeData,
@@ -351,6 +352,13 @@ export default function ReportPage({ params }: { params: Promise<{ jobId: string
                 </button>
               </div>
             </div>
+          </div>
+        )}
+
+        {/* Inline Map — subject + comps */}
+        {analysis.subject?.latitude && analysis.subject?.longitude && (
+          <div className="rounded-xl border border-border overflow-hidden no-print">
+            <PropertyMap subject={analysis.subject} comps={effectiveComps} selectedCompKeys={compOverride?.selectedCompKeys} onToggleComp={handleToggleComp} />
           </div>
         )}
 
