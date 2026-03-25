@@ -165,13 +165,32 @@ export default function PropertyMapInner({ markers, onToggleComp }: PropertyMapI
         })
       }
 
-      // Use maplibre's default marker with color — properly anchored, no drift
       const markerOptions: maplibregl.MarkerOptions = {
         color: config.color,
-        scale: m.type === 'subject' ? 1.2 : 0.85,
+        scale: 0.85,
       }
 
-      // For comps, use a numbered custom element
+      // Subject property: home icon marker
+      if (m.type === 'subject') {
+        const el = document.createElement('div')
+        el.className = 'flowstate-subject-marker'
+        el.style.cssText = `
+          width: 36px; height: 36px;
+          background: ${config.color};
+          border: 3px solid white;
+          border-radius: 50%;
+          display: flex; align-items: center; justify-content: center;
+          cursor: pointer;
+          box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+        `
+        // SVG home icon (lucide-style)
+        el.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"/><path d="M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>`
+        markerOptions.element = el
+        delete markerOptions.color
+        delete markerOptions.scale
+      }
+
+      // Comps: numbered custom element
       if (isComp && idx != null) {
         const el = document.createElement('div')
         el.className = 'flowstate-comp-marker'
@@ -250,7 +269,23 @@ export default function PropertyMapInner({ markers, onToggleComp }: PropertyMapI
             const isComp = t === 'comp-enabled' || t === 'comp-disabled'
             return (
               <div key={t} className="flex items-center gap-1.5 text-xs text-foreground-secondary">
-                {isComp ? (
+                {t === 'subject' ? (
+                  <span
+                    className="inline-flex items-center justify-center shrink-0 rounded-full"
+                    style={{
+                      width: 18,
+                      height: 18,
+                      background: cfg.color,
+                      border: '1.5px solid white',
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
+                    }}
+                  >
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8" />
+                      <path d="M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+                    </svg>
+                  </span>
+                ) : isComp ? (
                   <span
                     className="inline-flex items-center justify-center shrink-0 rounded-full text-white font-bold"
                     style={{

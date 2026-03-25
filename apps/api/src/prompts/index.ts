@@ -261,30 +261,51 @@ Return ONLY valid JSON.`
 
 const GEMINI_ZILLOW_EXTRACTION = `You are extracting property listing data from a Zillow page for real estate underwriting analysis. Return ONLY valid JSON (no markdown, no explanations).
 
-Extract and return this JSON structure:
-{
-  "photos": ["url1", "url2", ...],
-  "description": "property description text",
-  "price": 500000,
-  "status": "for_sale" | "pending" | "sold" | "off_market",
-  "daysOnMarket": 30,
-  "features": ["feature1", "feature2", ...],
-  "priceHistory": [
-    {"date": "2024-01-15", "price": 500000, "event": "Listed"}
-  ]
-}
+Extract ALL available fields as a flat JSON object:
 
-PHOTO EXTRACTION REQUIREMENTS:
-- Extract ALL property photo URLs from zillowstatic.com or photos.zillowstatic.com
+PROPERTY PHOTOS:
+- "photos": Array of property photo URLs from zillowstatic.com only
+- EXCLUDE agent photos, logos, icons, maps, floor plans, street view images
 - Convert thumbnail URLs to high resolution by replacing /p_e/, /p_d/, /p_c/ with /p_f/
-- Skip logos, icons, and agent photos
-- Return actual image URLs, not placeholder text
-- Photos are critical for condition assessment - capture all available
+
+LISTING DATA (numbers as raw values, no $ or commas):
+- "description", "price", "pricePerSqft", "status" (for_sale|pending|sold|off_market)
+- "daysOnMarket", "listDate" (YYYY-MM-DD)
+
+PROPERTY DETAILS:
+- "bedrooms", "bathrooms" (use decimals for half baths), "squareFeet"
+- "lotSize" (with units), "lotSizeAcres", "yearBuilt"
+- "propertyType" (single-family|condo|townhouse|multi-family|land|other)
+- "style" (architectural style: Ranch, Colonial, Cape Cod, etc.), "stories"
+
+CONSTRUCTION & SYSTEMS:
+- "foundationType" (Slab, Crawl Space, Basement, Pier and Beam, etc.)
+- "roof", "construction" (materials: Brick, Frame, Stucco, etc.)
+- "heating", "cooling"
+- "parking", "garageSpaces"
+
+FINANCIAL:
+- "hoaFee" (monthly), "taxAmount" (annual), "estimatedMonthlyPayment"
+
+FEATURES:
+- "features" (flat array of all features), "appliances" (array)
+- "flooring" (array), "exteriorFeatures" (array)
+- "pool" (boolean), "waterfront" (boolean), "view"
+
+HISTORY & LOCATION:
+- "priceHistory" (array of {date, price, event} — especially sold events)
+- "neighborhood", "walkScore", "transitScore"
+
+AGENT:
+- "agent": {"name", "phone", "brokerage"}
+
+OTHER:
+- "whatsSpecial" (array from "What's Special" section)
 
 If the page shows a CAPTCHA, error page, or no listing found, return:
 {"photos": [], "error": "reason"}
 
-Return ONLY the JSON object, nothing else.`
+Use null for missing fields. Return ONLY the JSON object, nothing else.`
 
 // ─── Export ──────────────────────────────────────────────────────────────────
 

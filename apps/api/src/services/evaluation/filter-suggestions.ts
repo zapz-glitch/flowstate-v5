@@ -9,7 +9,7 @@
 import type { NormalizedComparable } from '../property-api/types'
 import type { AppraisalFilter, AppraisedComparable } from '../appraisal'
 import { AnalysisError } from '../../utils/analysis-error'
-import { HARD_FILTER_TYPES } from '@flowstate-api/shared/appraisal'
+import { HARD_FILTER_TYPES, HARD_FILTER_RELAXATION_ORDER } from '@flowstate-api/shared/appraisal'
 
 const FILTER_LABELS: Record<string, string> = {
   subdivision_match: 'Subdivision Match',
@@ -73,8 +73,12 @@ function analyzeCompFilterFailures(comparables: AppraisedComparable[]): CompFixA
 }
 
 /**
- * Score and sort comps by fewest fixes needed + highest price rank.
- * Higher-priced comps with fewer fixes score better.
+ * Score and sort comps by fix priority.
+ *
+ * Prefers comps that:
+ * 1. Only fail low-priority filters (sale_age) over high-priority (sqft_diff, building_style_match)
+ * 2. Need fewer total fixes
+ * 3. Have higher sale price
  */
 function rankByFixPriority(
   analysis: CompFixAnalysis[],
@@ -88,7 +92,14 @@ function rankByFixPriority(
   for (const comp of analysis) {
     const priceRank = priceRankMap.get(comp.compId) ?? sortedByPrice.length
     const pricePercentile = ((priceRank + 1) / sortedByPrice.length) * 100
-    comp.sortScore = comp.failedCount + (pricePercentile / 30)
+
+    // Penalize comps that fail high-priority filters (sqft_diff=2, building_style=3)
+    // Prefer comps that only fail low-priority filters (sale_age=1)
+    const maxFixPriority = comp.fixes.reduce(
+      (max, f) => Math.max(max, HARD_FILTER_RELAXATION_ORDER[f.type] ?? 1), 0
+    )
+
+    comp.sortScore = (maxFixPriority * 10) + comp.failedCount + (pricePercentile / 30)
   }
 
   analysis.sort((a, b) => a.sortScore - b.sortScore)
@@ -113,9 +124,62 @@ function calculateSuggestedThreshold(
   return Math.min(50, Math.max(rawThreshold, baseThreshold))
 }
 
+export interface FilterSuggestionResult {
+  suggestedFilters: AppraisalFilter[]
+  suggestedArvThreshold: number
+  bestMatchAddress: string | null
+  adviceText: string
+}
+
+/**
+ * Analyze comps and return suggested filter changes (non-throwing).
+ * Returns null if no suggestions can be made.
+ */
+export function getFilterSuggestions(
+  comparables: AppraisedComparable[],
+  allComparables: NormalizedComparable[],
+  filters: AppraisalFilter[],
+  baseThreshold: number,
+): FilterSuggestionResult | null {
+  const analysis = analyzeCompFilterFailures(comparables)
+  const ranked = rankByFixPriority(analysis, allComparables)
+  const bestMatch = ranked[0]
+
+  if (!bestMatch || bestMatch.fixes.length === 0) return null
+
+  const suggestedArvThreshold = calculateSuggestedThreshold(bestMatch.compId, allComparables, baseThreshold)
+
+  const suggestedFilters = filters.map((f) => {
+    const fix = bestMatch.fixes.find((fx) => fx.type === f.type)
+    if (!fix) return f
+    if (fix.action === 'disable') return { ...f, enabled: false }
+    return { ...f, value: fix.suggestedValue }
+  })
+
+  const advice: string[] = []
+  if (suggestedArvThreshold > baseThreshold) {
+    advice.push(`ARV Threshold: ${baseThreshold}% → ${suggestedArvThreshold}%`)
+  }
+  for (const fix of bestMatch.fixes) {
+    const label = FILTER_LABELS[fix.type] || fix.type
+    if (fix.action === 'disable') {
+      advice.push(`Disable "${label}"`)
+    } else {
+      advice.push(`"${label}": ${fix.currentValue} → ${fix.suggestedValue}`)
+    }
+  }
+
+  return {
+    suggestedFilters,
+    suggestedArvThreshold,
+    bestMatchAddress: bestMatch.address,
+    adviceText: advice.join(', '),
+  }
+}
+
 /**
  * Build the complete filter suggestion error with advice and suggested values.
- * Throws an AnalysisError with suggestedFilters and suggestedArvThreshold.
+ * Delegates to getFilterSuggestions() then throws an AnalysisError.
  */
 export function throwFilterSuggestionError(
   comparables: AppraisedComparable[],
@@ -125,51 +189,24 @@ export function throwFilterSuggestionError(
 ): never {
   console.log(`[Evaluate] No comps passed. Analyzing ${allComparables.length} comps for suggestions...`)
 
-  const analysis = analyzeCompFilterFailures(comparables)
-  const ranked = rankByFixPriority(analysis, allComparables)
-  const bestMatch = ranked[0]
+  const suggestion = getFilterSuggestions(comparables, allComparables, filters, baseThreshold)
 
-  const suggestedArvThreshold = bestMatch
-    ? calculateSuggestedThreshold(bestMatch.compId, allComparables, baseThreshold)
-    : baseThreshold
+  if (suggestion) {
+    console.log(`[Evaluate] Best match: ${suggestion.bestMatchAddress}`)
+    console.log(`[Evaluate]   ${suggestion.adviceText}`)
 
-  if (bestMatch) {
-    console.log(`[Evaluate] Best match: ${bestMatch.address} (${bestMatch.passedCount}/${bestMatch.totalFilters} passed, ${bestMatch.failedCount} fixes needed)`)
-    console.log(`[Evaluate]   Suggested threshold: ${suggestedArvThreshold}%`)
-    console.log(`[Evaluate]   Fixes: ${bestMatch.fixes.map((f) => `${f.type}: ${f.action === 'disable' ? 'disable' : `${f.currentValue}→${f.suggestedValue}`}`).join(', ')}`)
+    // Build verbose advice text for the error message
+    const adviceText = `\n\nSuggested changes: ${suggestion.adviceText}`
+
+    throw new AnalysisError(
+      `No comparable sales passed the required filters (Square Footage, Sale Age). ` +
+      `${allComparables.length} comps were evaluated but none met the hard filter criteria.${adviceText}`,
+      { suggestedFilters: suggestion.suggestedFilters, suggestedArvThreshold: suggestion.suggestedArvThreshold },
+    )
   }
-
-  // Build suggested filter values
-  const suggestedFilters = filters.map((f) => {
-    const fix = bestMatch?.fixes.find((fx) => fx.type === f.type)
-    if (!fix) return f
-    if (fix.action === 'disable') return { ...f, enabled: false }
-    return { ...f, value: fix.suggestedValue }
-  })
-
-  // Build advice text
-  const advice: string[] = []
-  if (suggestedArvThreshold > baseThreshold) {
-    advice.push(`ARV Threshold: ${baseThreshold}% → ${suggestedArvThreshold}% (to include this comp in the candidate pool)`)
-  }
-  if (bestMatch) {
-    for (const fix of bestMatch.fixes) {
-      const label = FILTER_LABELS[fix.type] || fix.type
-      if (fix.action === 'disable') {
-        advice.push(`Disable "${label}" (no match available)`)
-      } else {
-        advice.push(`"${label}": ${fix.currentValue} → ${fix.suggestedValue} (comp has ${fix.actualValue})`)
-      }
-    }
-  }
-
-  const adviceText = advice.length > 0 && bestMatch
-    ? `\n\nTo match the closest comp (${bestMatch.address}, ${bestMatch.passedCount}/${bestMatch.totalFilters} filters passed), change ${advice.length} setting${advice.length > 1 ? 's' : ''}:\n${advice.map((a, i) => `${i + 1}. ${a}`).join('\n')}`
-    : ''
 
   throw new AnalysisError(
     `No comparable sales passed the required filters (Square Footage, Sale Age). ` +
-    `${allComparables.length} comps were evaluated but none met the hard filter criteria.${adviceText}`,
-    { suggestedFilters, suggestedArvThreshold },
+    `${allComparables.length} comps were evaluated but none met the hard filter criteria.`,
   )
 }

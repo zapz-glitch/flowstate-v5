@@ -189,15 +189,34 @@ export class AnalysisJobDO {
             ...config.evalParams,
           })
 
+          // Inject photos from Zillow into the re-evaluated result
+          const updatedResponse = reEvalResult.response as unknown as Record<string, unknown>
+          // Subject photos
+          const subjectEnriched = enrichedData[config.bundle.property.id]
+          if (subjectEnriched?.photos?.length && updatedResponse.subject) {
+            (updatedResponse.subject as Record<string, unknown>).photos = subjectEnriched.photos.slice(0, 10)
+          }
+          // Comp photos
+          if (updatedResponse.comps && (updatedResponse.comps as Record<string, unknown>).items) {
+            const items = (updatedResponse.comps as Record<string, unknown>).items as Array<Record<string, unknown>>
+            for (const comp of items) {
+              const compEnriched = enrichedData[comp.id as string]
+              if (compEnriched?.photos?.length) {
+                comp.photos = compEnriched.photos.slice(0, 5)
+              }
+            }
+          }
+
           // Update analysisResult for LLM step
-          config.analysisResult = reEvalResult.response as unknown as Record<string, unknown>
+          config.analysisResult = updatedResponse
 
           console.log(`[AnalysisJobDO] ✓ Re-evaluation complete in ${Date.now() - reEvalStart}ms`)
+          console.log(`[AnalysisJobDO] Photos injected: subject=${subjectEnriched?.photos?.length ?? 0}, comps=${Object.values(enrichedData).filter((d: Record<string, unknown>) => (d.photos as string[])?.length > 0).length}`)
 
           await this.pushEvent('market_data_complete', {
             enrichedData,
             summary: bulkResult.summary,
-            updatedResult: reEvalResult.response,
+            updatedResult: updatedResponse,
           })
         } else {
           await this.pushEvent('market_data_complete', { enrichedData: {}, skipped: true, reason: 'Firecrawl not configured' })

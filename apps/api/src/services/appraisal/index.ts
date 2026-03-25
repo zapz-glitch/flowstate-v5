@@ -145,7 +145,7 @@ export interface AppraisalService {
 
 export interface AppraisalResultWithFallback extends AppraisalResult {
   /** Indicates which fallback strategy was used, if any */
-  fallbackUsed: 'none' | 'no_subdivision' | 'relaxed_filters' | 'no_comps'
+  fallbackUsed: 'none' | 'no_subdivision' | 'relaxed_filters' | 'relaxed_all' | 'no_comps'
   /** Message explaining the fallback */
   fallbackReason?: string
   /**

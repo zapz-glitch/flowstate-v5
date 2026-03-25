@@ -9,17 +9,20 @@ import type { AppraisalFilter } from '../services/appraisal'
 export class AnalysisError extends Error {
   readonly suggestedFilters?: AppraisalFilter[]
   readonly suggestedArvThreshold?: number
+  readonly code?: string
 
   constructor(
     message: string,
     options?: {
       suggestedFilters?: AppraisalFilter[]
       suggestedArvThreshold?: number
+      code?: string
     },
   ) {
     super(`BAD_DEAL: ${message}`)
     this.name = 'AnalysisError'
     this.suggestedFilters = options?.suggestedFilters
     this.suggestedArvThreshold = options?.suggestedArvThreshold
+    this.code = options?.code
   }
 }

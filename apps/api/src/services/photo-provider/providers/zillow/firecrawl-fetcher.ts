@@ -263,14 +263,27 @@ function parseZillowHtml(html: string): ZillowExtraction {
       /https:\/\/[^"'\s]*zillowstatic\.com[^"'\s]*\.(?:jpg|jpeg|png|webp)/gi,
     ]
 
+    // Non-property URL patterns to exclude
+    const excludeSubstrings = [
+      'z-logo', 'icon', 'avatar', 'logo', 'badge',
+      'profile', 'agent', 'broker', 'headshot', 'portrait',
+      'map', 'streetview', 'street-view', 'satellite',
+      'floorplan', 'floor-plan', 'placeholder',
+      '/h_n/', '/h_l/', '/h_g/', '/isr', '/mgn/',
+      'profilephotos', 'thumb', 'thumbnail',
+    ]
+
     const seenPhotos = new Set<string>()
     for (const pattern of photoPatterns) {
       const matches = html.match(pattern) || []
       for (const match of matches) {
-        // Skip logos and icons
-        if (match.includes('z-logo') || match.includes('icon') || match.includes('avatar')) {
-          continue
-        }
+        const lower = match.toLowerCase()
+        // Skip non-property images
+        if (excludeSubstrings.some((s) => lower.includes(s))) continue
+        // Must be from photos.zillowstatic.com with /fp/ or /p_X/ paths
+        if (!lower.includes('photos.zillowstatic.com')) continue
+        if (!lower.includes('/fp/') && !/\/p_[a-z]\//.test(lower)) continue
+
         // Normalize to full resolution
         const normalized = match
           .replace(/\/p_[a-z]\//, '/p_f/')
@@ -973,7 +986,7 @@ ${content.html.slice(0, 80000)}
       'default',
       'no-image',
       'noimage',
-      // Small images (often profile pics)
+      // Small images (often profile pics) — dimension indicators
       'thumb',
       'thumbnail',
       '50x50',
@@ -982,6 +995,12 @@ ${content.html.slice(0, 80000)}
       '100x100',
       '120x120',
       '150x150',
+      // Zillow headshot/profile photo paths
+      '/h_n/',
+      '/h_l/',
+      '/h_g/',
+      'profilephotos',
+      'profile_photos',
     ]
 
     for (const pattern of excludePatterns) {
@@ -995,9 +1014,25 @@ ${content.html.slice(0, 80000)}
       return false
     }
 
-    // Prefer URLs that look like property photos (fp/ path indicates full photos)
-    // These typically have format: photos.zillowstatic.com/fp/[hash]-[size].jpg
-    const isFullPhoto = lowerUrl.includes('/fp/') || lowerUrl.includes('/p/')
+    // Must be from photos.zillowstatic.com (not other subdomains like profilephotos)
+    if (!lowerUrl.includes('photos.zillowstatic.com')) {
+      return false
+    }
+
+    // Property photos use /fp/ or /p_X/ paths
+    // Agent photos use different paths like /ISr..., /mgn/...
+    const isFullPhoto = lowerUrl.includes('/fp/') || /\/p_[a-z]\//.test(lowerUrl)
+
+    // Additional check: property listing photos have a specific hash pattern
+    // e.g. photos.zillowstatic.com/fp/abc123def-p_f.jpg
+    // Agent photos often have different patterns like /ISr... or /mgn/
+    if (!isFullPhoto) {
+      // Check for common non-property paths on zillowstatic
+      const nonPropertyPaths = ['/isr', '/mgn/', '/s_v/', '/static/']
+      for (const np of nonPropertyPaths) {
+        if (lowerUrl.includes(np)) return false
+      }
+    }
 
     return isFullPhoto
   }

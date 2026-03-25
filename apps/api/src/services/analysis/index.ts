@@ -634,6 +634,73 @@ export interface ApiCallStats {
   totalExternalCalls: number
 }
 
+// ─── Location Risk Detection ─────────────────────────────────────────────────
+
+/** Keywords indicating proximity to busy roads */
+const BUSY_ROAD_KEYWORDS = [
+  'busy road', 'busy street', 'main road', 'main street frontage',
+  'high traffic', 'heavy traffic', 'arterial', 'highway',
+  'major intersection', 'busy intersection', 'thoroughfare',
+  'road noise', 'traffic noise', 'fronts highway', 'fronts main',
+]
+
+/** Keywords indicating commercial adjacency */
+const COMMERCIAL_KEYWORDS = [
+  'commercial', 'strip mall', 'shopping center', 'shopping plaza',
+  'industrial', 'warehouse', 'mixed use', 'mixed-use',
+  'commercial zone', 'commercial district', 'business district',
+  'retail', 'office building', 'gas station', 'auto repair',
+  'adjacent to commercial', 'next to commercial', 'near commercial',
+  'backs to commercial', 'commercial property',
+]
+
+/** Zoning codes that indicate commercial or mixed-use */
+const COMMERCIAL_ZONING_PREFIXES = [
+  'c-', 'c1', 'c2', 'c3', 'c4', 'c5',
+  'b-', 'b1', 'b2', 'b3',
+  'mu', 'm-u', 'mx',
+  'i-', 'i1', 'i2',
+  'cb', 'cc', 'cn', 'cg',
+]
+
+/**
+ * Detect location-based risks from property zoning and characteristics.
+ * Returns an array of risk flag strings.
+ */
+function detectLocationRisks(property: NormalizedProperty): string[] {
+  const risks: string[] = []
+  const zoning = property.zoning?.toLowerCase() ?? ''
+  const zoningDesc = property.zoningDescription?.toLowerCase() ?? ''
+
+  // Check zoning for commercial/mixed-use/industrial
+  const isCommercialZoning = COMMERCIAL_ZONING_PREFIXES.some(
+    (prefix) => zoning.startsWith(prefix) || zoningDesc.includes(prefix)
+  )
+  if (isCommercialZoning) {
+    const label = property.zoningDescription || property.zoning || 'Commercial'
+    risks.push(`Zoning: ${label} (commercial/mixed-use area)`)
+  }
+
+  // Check zoning description for busy road / commercial keywords
+  const combinedText = `${zoningDesc} ${property.zoningDescription ?? ''} ${property.subdivision ?? ''}`.toLowerCase()
+  for (const kw of BUSY_ROAD_KEYWORDS) {
+    if (combinedText.includes(kw)) {
+      risks.push(`Location: Near busy road (${kw})`)
+      break
+    }
+  }
+  if (!isCommercialZoning) {
+    for (const kw of COMMERCIAL_KEYWORDS) {
+      if (combinedText.includes(kw)) {
+        risks.push(`Location: Near commercial property (${kw})`)
+        break
+      }
+    }
+  }
+
+  return risks
+}
+
 /**
  * Build streamlined underwriter-focused response
  * Returns only essential data for investment decisions
@@ -665,6 +732,10 @@ export function buildAnalysisResponse(
   if (enrichment.permits?.items.some((p) => p.jobValue && p.jobValue > 50000)) {
     riskFlags.push('Major Permits (>$50K)')
   }
+
+  // Location risk detection — zoning, busy road, commercial adjacency
+  const zoningRisks = detectLocationRisks(property)
+  riskFlags.push(...zoningRisks)
 
   // Get enabled and disabled comp counts
   const enabledComps = appraisalResult.comparables.filter((c) => c.isEnabled)

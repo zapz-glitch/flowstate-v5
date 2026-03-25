@@ -27,8 +27,7 @@ import {
 } from '../analysis'
 import { generateZillowUrl } from '../photo-provider'
 import { AnalysisError } from '../../utils/analysis-error'
-import { throwFilterSuggestionError } from './filter-suggestions'
-import { passesHardFilters, scoreComp, HARD_FILTER_TYPES, calculateARV, type ArvCompLike } from '@flowstate-api/shared/appraisal'
+import { scoreComp, calculateARV, getFiltersAtStep, MAX_RELAXATION_STEPS, type ArvCompLike } from '@flowstate-api/shared/appraisal'
 
 function formatUsd(amount: number): string {
   return `$${Math.round(amount).toLocaleString()}`
@@ -186,14 +185,86 @@ function selectBestMatch(
 
 // ─── Group A: Smart Comp Selection ──────────────────────────────────────────
 
+type GroupAResult = {
+  appraisalResult: AppraisalResultWithFallback
+  arvCompsSource: 'group_a' | 'all_comps'
+  compClassifications: Map<string, ClassificationResult>
+  groupACompIds: Set<string>
+}
+
+const MAX_SELECTED = 5
+
+/** Minimum score threshold — comps below this are too dissimilar */
+const MIN_COMP_SCORE = 120
+
 /**
- * Select Group A comps using hard/soft filter scoring.
+ * Score, select top comps, build ARV, and return the final Group A result.
+ */
+function finalizeGroupASelection(
+  candidates: AppraisedComparable[],
+  allComparables: NormalizedComparable[],
+  groupAIds: Set<string>,
+  classifications: Map<string, ClassificationResult>,
+  subject: NormalizedProperty,
+  appraisalService: ReturnType<typeof createAppraisalService>,
+  filters: AppraisalFilter[],
+  adjustments: AppraisalAdjustment[],
+  fallbackUsed: 'none' | 'relaxed_filters' | 'relaxed_all',
+): GroupAResult {
+  const scored = candidates
+    .filter((c) => c.salePrice != null && c.salePrice > 0)
+    .map((c) => ({ comp: c, score: scoreComp(c.evaluation.filterResults, c.distanceMiles) }))
+    .sort((a, b) => b.score - a.score)
+
+  const selected = scored.slice(0, MAX_SELECTED)
+  const enabledIds = new Set(selected.map((s) => s.comp.id))
+
+  console.log(`[Evaluate] Selected ${selected.length} comps: ${selected.map((s) => `${s.comp.address}(${s.score})`).join(', ')}`)
+
+  const arvComps: ArvCompLike[] = selected.map((s) => ({
+    isEnabled: true,
+    adjustedPrice: s.comp.adjustedSalePrice ?? s.comp.salePrice ?? null,
+    salePrice: s.comp.salePrice ?? null,
+    squareFeet: s.comp.squareFeet ?? null,
+    distanceMiles: s.comp.distanceMiles ?? null,
+    filterResults: s.comp.evaluation.filterResults.map((f) => ({
+      type: f.type, passed: f.passed, reason: f.reason, actualValue: f.actualValue, threshold: f.threshold,
+    })),
+  }))
+  const selectedArv = calculateARV(arvComps, subject.squareFeet)
+  console.log(`[Evaluate] ARV from ${selected.length} comps: $${selectedArv.toLocaleString()}`)
+
+  const allResult = appraisalService.evaluate(subject, allComparables, { filters, adjustments })
+  const confidence = fallbackUsed === 'none'
+    ? (selected.length >= 3 ? 90 : selected.length >= 2 ? 70 : 55)
+    : fallbackUsed === 'relaxed_filters'
+      ? (selected.length >= 3 ? 60 : selected.length >= 2 ? 45 : 30)
+      : (selected.length >= 3 ? 30 : selected.length >= 2 ? 20 : 10)
+
+  return {
+    appraisalResult: buildGroupAResult(allResult, {
+      ...allResult, fallbackUsed, confidence,
+    }, enabledIds, groupAIds, allComparables, selectedArv),
+    arvCompsSource: fallbackUsed === 'relaxed_all' ? 'all_comps' : 'group_a',
+    compClassifications: classifications,
+    groupACompIds: enabledIds,
+  }
+}
+
+/**
+ * Select Group A comps using step-based filter relaxation.
  *
- * 1. Classify comps by sale price (top X%)
- * 2. Apply HARD filters (sqft_diff, sale_age) — reject comps that fail
- * 3. Score remaining comps by SOFT filter matches (subdivision, style, distance, year)
- * 4. Select top 3-5 highest-scoring comps for ARV
- * 5. If 0 pass hard filters, widen threshold and retry (up to 3 attempts)
+ * Algorithm:
+ * 1. Classify comps by sale price (top X%) as "after_renovation"
+ * 2. Evaluate all candidates and score by filter matches
+ * 3. If top-scoring comps meet minimum threshold → select them
+ * 4. If not, relax filters one step and retry:
+ *    - sqft_diff:      250 → 500 → 750 → 1000
+ *    - year_built_diff:  10 →  15 →  20 →   25
+ *    - sale_age:        180 → 270 → 360 →  540
+ *    - distance:        0.5 → 1.0 → 1.5 →  2.0
+ * 5. Also widens ARV threshold (15% → 22% → 34% → 50% → 100%)
+ * 6. If all steps exhausted, picks best available comps with low confidence
  */
 function selectGroupAComps(
   subject: NormalizedProperty,
@@ -202,103 +273,82 @@ function selectGroupAComps(
   appraisalService: ReturnType<typeof createAppraisalService>,
   filters: AppraisalFilter[],
   adjustments: AppraisalAdjustment[],
-): {
-  appraisalResult: AppraisalResultWithFallback
-  arvCompsSource: 'group_a' | 'all_comps'
-  compClassifications: Map<string, ClassificationResult>
-  groupACompIds: Set<string>
-} {
-  const MAX_ATTEMPTS = 3
-  const MAX_SELECTED = 5
-  let currentThreshold = baseThreshold
-  let compClassifications: Map<string, ClassificationResult> = new Map()
+): GroupAResult {
 
-  for (let attempt = 0; attempt < MAX_ATTEMPTS && currentThreshold <= 100; attempt++) {
-    compClassifications = classifyCompsByPrice(allComparables, currentThreshold)
+  // Try each relaxation step (0 = default tightest, 3 = loosest)
+  for (let step = 0; step < MAX_RELAXATION_STEPS; step++) {
+    const stepFilters = step === 0 ? filters : getFiltersAtStep(filters, step) as AppraisalFilter[]
+
+    // Also widen ARV threshold at each step
+    const stepThreshold = Math.min(
+      Math.ceil(baseThreshold * Math.pow(1.5, step)),
+      100,
+    )
+
+    const classifications = classifyCompsByPrice(allComparables, stepThreshold)
     const groupAIds = new Set<string>()
-    for (const [id, cls] of compClassifications) {
+    for (const [id, cls] of classifications) {
       if (cls.classification === 'after_renovation') groupAIds.add(id)
     }
     const candidateComps = allComparables.filter((c) => groupAIds.has(c.id))
 
-    if (candidateComps.length > 0) {
-      // Evaluate all candidates against all filters (for display context)
-      const result = appraisalService.evaluate(subject, candidateComps, { filters, adjustments })
-
-      // Filter by HARD filters only — comps must pass sqft_diff and sale_age
-      const hardPassing = result.comparables.filter((c) => passesHardFilters(c.evaluation.filterResults))
-
-      console.log(`[Evaluate] Attempt ${attempt + 1} at ${currentThreshold}%: ${candidateComps.length} candidates, ${hardPassing.length} passed hard filters`)
-
-      if (hardPassing.length > 0) {
-        // Score by soft filter matches and select top N
-        const scored = hardPassing.map((c) => ({
-          comp: c,
-          score: scoreComp(c.evaluation.filterResults, c.distanceMiles),
-        })).sort((a, b) => b.score - a.score)
-
-        const selected = scored.slice(0, MAX_SELECTED)
-        const enabledIds = new Set(selected.map((s) => s.comp.id))
-
-        console.log(`[Evaluate] Selected ${selected.length} comps by score: ${selected.map((s) => `${s.comp.address}(${s.score})`).join(', ')}`)
-
-        if (currentThreshold !== baseThreshold) {
-          console.log(`[Evaluate] Group A threshold widened: ${baseThreshold}% → ${currentThreshold}%`)
-        }
-
-        // Calculate ARV from selected comps (not from appraisal service's all-or-nothing logic)
-        const arvComps: ArvCompLike[] = selected.map((s) => ({
-          isEnabled: true,
-          adjustedPrice: s.comp.adjustedSalePrice ?? s.comp.salePrice ?? null,
-          salePrice: s.comp.salePrice ?? null,
-          squareFeet: s.comp.squareFeet ?? null,
-          distanceMiles: s.comp.distanceMiles ?? null,
-          filterResults: s.comp.evaluation.filterResults.map((f) => ({
-            type: f.type,
-            passed: f.passed,
-            reason: f.reason,
-            actualValue: f.actualValue,
-            threshold: f.threshold,
-          })),
-        }))
-        const selectedArv = calculateARV(arvComps, subject.squareFeet)
-        console.log(`[Evaluate] ARV from ${selected.length} selected comps: $${selectedArv.toLocaleString()}`)
-
-        // Evaluate ALL comps for display context
-        const allResult = appraisalService.evaluate(subject, allComparables, { filters, adjustments })
-
-        // Mark selected comps as enabled, rest as disabled with reasons
-        const confidence = selected.length >= 3 ? 90 : selected.length >= 2 ? 70 : 55
-        return {
-          appraisalResult: buildGroupAResult(allResult, {
-            ...result,
-            fallbackUsed: 'none',
-            confidence,
-          }, enabledIds, groupAIds, allComparables, selectedArv),
-          arvCompsSource: 'group_a',
-          compClassifications,
-          groupACompIds: enabledIds,
-        }
-      } else {
-        // Log hard filter failures
-        for (const comp of result.comparables) {
-          const hardFailed = comp.evaluation.filterResults.filter((f) => HARD_FILTER_TYPES.has(f.type) && !f.passed)
-          if (hardFailed.length > 0) {
-            console.log(`[Evaluate]   ${comp.address}: hard filter failed — ${hardFailed.map((f) => f.reason || f.type).join(', ')}`)
-          }
-        }
-      }
+    if (candidateComps.length === 0) {
+      console.log(`[Evaluate] Step ${step} at ${stepThreshold}%: 0 candidates`)
+      continue
     }
 
-    // Widen by 1.5x for next attempt
-    const nextThreshold = Math.ceil(currentThreshold * 1.5)
-    if (nextThreshold === currentThreshold) break
-    currentThreshold = Math.min(nextThreshold, 100)
+    const result = appraisalService.evaluate(subject, candidateComps, { filters: stepFilters, adjustments })
+
+    // Score all evaluated comps
+    const scored = result.comparables
+      .filter((c) => c.salePrice != null && c.salePrice > 0)
+      .map((c) => ({ comp: c, score: scoreComp(c.evaluation.filterResults, c.distanceMiles) }))
+      .sort((a, b) => b.score - a.score)
+
+    const topScore = scored[0]?.score ?? 0
+    const qualifyingCount = scored.filter((s) => s.score >= MIN_COMP_SCORE).length
+
+    console.log(`[Evaluate] Step ${step} at ${stepThreshold}%: ${candidateComps.length} candidates, top score ${topScore}, ${qualifyingCount} qualifying`)
+
+    if (qualifyingCount > 0 && topScore >= MIN_COMP_SCORE) {
+      const qualifying = scored.filter((s) => s.score >= MIN_COMP_SCORE)
+      const fallbackUsed = step === 0 ? 'none' as const : 'relaxed_filters' as const
+      if (step > 0) {
+        console.log(`[Evaluate] Relaxation step ${step}: filters relaxed to find ${qualifyingCount} comps`)
+      }
+      return finalizeGroupASelection(
+        qualifying.map((s) => s.comp), allComparables, groupAIds, classifications,
+        subject, appraisalService, stepFilters, adjustments, fallbackUsed,
+      )
+    }
   }
 
-  // No comps passed hard filters — throw error with suggestions
-  const allResult = appraisalService.evaluate(subject, allComparables, { filters, adjustments })
-  throwFilterSuggestionError(allResult.comparables, allComparables, filters, baseThreshold)
+  // All steps exhausted — pick best available from ALL comps regardless of threshold
+  console.log(`[Evaluate] All relaxation steps exhausted. Selecting best available comps.`)
+
+  const allClassifications = classifyCompsByPrice(allComparables, 100)
+  const allGroupAIds = new Set(allComparables.map((c) => c.id))
+  const looseFilters = getFiltersAtStep(filters, MAX_RELAXATION_STEPS - 1) as AppraisalFilter[]
+  const allResult = appraisalService.evaluate(subject, allComparables, { filters: looseFilters, adjustments })
+
+  const scored = allResult.comparables
+    .filter((c) => c.salePrice != null && c.salePrice > 0)
+    .map((c) => ({ comp: c, score: scoreComp(c.evaluation.filterResults, c.distanceMiles) }))
+    .sort((a, b) => b.score - a.score)
+
+  if (scored.length === 0) {
+    throw new AnalysisError(
+      `No comparable sales available for analysis. ${allComparables.length} comps were found but none had valid sale price data.`,
+      { code: 'INSUFFICIENT_COMPARABLES' },
+    )
+  }
+
+  console.log(`[Evaluate] Best-available fallback: ${scored.slice(0, MAX_SELECTED).map((s) => `${s.comp.address}(${s.score})`).join(', ')}`)
+
+  return finalizeGroupASelection(
+    scored.map((s) => s.comp), allComparables, allGroupAIds, allClassifications,
+    subject, appraisalService, looseFilters, adjustments, 'relaxed_all',
+  )
 }
 
 /** Build the final Group A appraisal result with proper enable/disable reasons for all comps */

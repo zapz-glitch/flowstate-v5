@@ -59,14 +59,53 @@ interface ZillowExtraction {
   photos: string[]
   description?: string
   price?: number
+  pricePerSqft?: number
   status?: 'for_sale' | 'pending' | 'sold' | 'off_market'
   daysOnMarket?: number
+  listDate?: string
   features?: string[]
   priceHistory?: Array<{
     date: string
     price: number
     event: string
   }>
+  // Property details
+  bedrooms?: number
+  bathrooms?: number
+  squareFeet?: number
+  lotSize?: string
+  lotSizeAcres?: number
+  yearBuilt?: number
+  propertyType?: string
+  style?: string
+  stories?: number
+  // Construction & systems
+  foundationType?: string
+  roof?: string
+  construction?: string
+  heating?: string
+  cooling?: string
+  parking?: string
+  garageSpaces?: number
+  // Financial
+  hoaFee?: number
+  taxAmount?: number
+  estimatedMonthlyPayment?: number
+  // Features
+  appliances?: string[]
+  flooring?: string[]
+  exteriorFeatures?: string[]
+  pool?: boolean
+  waterfront?: boolean
+  view?: string
+  // Location
+  neighborhood?: string
+  walkScore?: number
+  transitScore?: number
+  // Agent
+  agent?: { name?: string; phone?: string; brokerage?: string }
+  // Other
+  whatsSpecial?: string[]
   /** Error message if extraction failed */
   error?: string
 }
@@ -368,10 +407,48 @@ export class GeminiZillowFetcher {
         photos,
         description: extracted.description,
         price: extracted.price,
+        pricePerSqft: extracted.pricePerSqft,
         status: extracted.status,
         daysOnMarket: extracted.daysOnMarket,
+        listDate: extracted.listDate,
         features: extracted.features,
         priceHistory: extracted.priceHistory,
+        // Property details
+        bedrooms: extracted.bedrooms,
+        bathrooms: extracted.bathrooms,
+        squareFeet: extracted.squareFeet,
+        lotSize: extracted.lotSize,
+        lotSizeAcres: extracted.lotSizeAcres,
+        yearBuilt: extracted.yearBuilt,
+        propertyType: extracted.propertyType,
+        style: extracted.style,
+        stories: extracted.stories,
+        // Construction & systems
+        foundationType: extracted.foundationType,
+        roof: extracted.roof,
+        construction: extracted.construction,
+        heating: extracted.heating,
+        cooling: extracted.cooling,
+        parking: extracted.parking,
+        garageSpaces: extracted.garageSpaces,
+        // Financial
+        hoaFee: extracted.hoaFee,
+        taxAmount: extracted.taxAmount,
+        estimatedMonthlyPayment: extracted.estimatedMonthlyPayment,
+        // Features
+        appliances: extracted.appliances,
+        flooring: extracted.flooring,
+        exteriorFeatures: extracted.exteriorFeatures,
+        pool: extracted.pool,
+        waterfront: extracted.waterfront,
+        view: extracted.view,
+        // Location
+        neighborhood: extracted.neighborhood,
+        walkScore: extracted.walkScore,
+        transitScore: extracted.transitScore,
+        // Agent & other
+        agent: extracted.agent,
+        whatsSpecial: extracted.whatsSpecial,
       }
 
       return {

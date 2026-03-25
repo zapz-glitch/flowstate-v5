@@ -289,10 +289,11 @@ analyze.post('/', async (c) => {
 
     console.log(`[Analyze][Timing] Evaluation: ${Date.now() - evalStart}ms`)
 
-    // ─── 4. Check if async enrichment is requested ─────────────────────────
+    // ─── 4. Always enrich with photos; optionally with LLM/market data ─────
     const llmEnabled = body.llmAnalysis?.enabled === true
     const marketDataEnabled = body.marketData?.enabled === true
-    const hasEnrichment = llmEnabled || marketDataEnabled
+    // Always fetch photos in background (market_data enrichment handles photo fetching)
+    const hasEnrichment = true
 
     // ─── 5. Save report to DB (background, non-blocking) ────────────────────
     c.executionCtx.waitUntil((async () => {
@@ -321,8 +322,7 @@ analyze.post('/', async (c) => {
     let enrichmentInfo: { streamUrl: string; token: string; pending: string[] } | undefined
 
     if (hasEnrichment) {
-      const pending: string[] = []
-      if (marketDataEnabled) pending.push('market_data')
+      const pending: string[] = ['market_data']  // Always fetch photos via market_data
       if (llmEnabled) pending.push('llm')
 
       // Generate SSE auth token
@@ -377,6 +377,7 @@ analyze.post('/', async (c) => {
         {
           success: false,
           error: error.message.replace('BAD_DEAL: ', ''),
+          ...(error.code ? { code: error.code } : {}),
           ...(error.suggestedFilters ? { suggestedFilters: error.suggestedFilters } : {}),
           ...(error.suggestedArvThreshold ? { suggestedArvThreshold: error.suggestedArvThreshold } : {}),
         },
