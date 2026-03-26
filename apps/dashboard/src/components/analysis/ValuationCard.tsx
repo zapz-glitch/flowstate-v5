@@ -82,8 +82,8 @@ export function ValuationCard({
             </div>
           </div>
 
-          <div className="grid grid-cols-2 md:grid-cols-5 rounded-xl bg-muted/40 [&>div]:border-r [&>div]:border-border/50 [&>div:last-child]:border-r-0">
-            <div className="p-4">
+          <div className="flex flex-wrap rounded-xl bg-muted/40 [&>div]:border-r [&>div]:border-border/50 [&>div:last-child]:border-r-0">
+            <div className="p-4 min-w-[140px] flex-1">
               <MetricLabel
                 label="ARV"
                 tooltip={
@@ -101,7 +101,7 @@ export function ValuationCard({
                 <div className="text-caption-sm text-foreground-tertiary mt-1">${valuation.arvPerSqft.toFixed(0)}/sqft</div>
               )}
             </div>
-            <div className="p-4">
+            <div className="p-4 min-w-[140px] flex-1">
               <MetricLabel
                 label="Max Buy Price"
                 tooltip={
@@ -117,7 +117,7 @@ export function ValuationCard({
                 <div className="text-caption-sm text-foreground-tertiary mt-1">{valuation.buyPricePercent}% of ARV</div>
               )}
             </div>
-            <div className="p-4">
+            <div className="p-4 min-w-[140px] flex-1">
               <MetricLabel
                 label="Rehab Cost"
                 tooltip={
@@ -140,7 +140,7 @@ export function ValuationCard({
                 </div>
               )}
             </div>
-            <div className="p-4">
+            <div className="p-4 min-w-[140px] flex-1">
               <MetricLabel
                 label="Projected Profit"
                 tooltip={
@@ -191,7 +191,7 @@ export function ValuationCard({
           </div>
 
           {(valuation.closingCosts != null || valuation.carryingCosts != null || valuation.totalInvestment != null) && (
-            <div className="flex items-center gap-6 mt-3 text-body-sm px-1">
+            <div className="flex items-center flex-wrap gap-x-6 gap-y-1 mt-3 text-body-sm px-1">
               {valuation.closingCosts != null && (
                 <Tooltip>
                   <TooltipTrigger asChild>
