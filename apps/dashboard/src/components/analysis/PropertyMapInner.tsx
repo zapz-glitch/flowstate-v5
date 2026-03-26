@@ -71,13 +71,21 @@ export default function PropertyMapInner({ markers, onToggleComp, onMarkerClick,
   onMarkerClickRef.current = onMarkerClick
 
   // Resize observer — keeps map in sync when container size changes (panel resize)
+  // Debounced resize — avoids blinking during panel drag
   useEffect(() => {
     if (!containerRef.current) return
+    let rafId: number | null = null
     const observer = new ResizeObserver(() => {
-      mapRef.current?.resize()
+      if (rafId) cancelAnimationFrame(rafId)
+      rafId = requestAnimationFrame(() => {
+        mapRef.current?.resize()
+      })
     })
     observer.observe(containerRef.current)
-    return () => observer.disconnect()
+    return () => {
+      observer.disconnect()
+      if (rafId) cancelAnimationFrame(rafId)
+    }
   }, [])
 
   useEffect(() => {
