@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { Copy, Check, PersonStanding } from 'lucide-react'
+import { Copy, Check } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 interface AddressDisplayProps {
@@ -38,11 +38,10 @@ export function AddressDisplay({ address, className }: AddressDisplayProps) {
         href={streetViewUrl}
         target="_blank"
         rel="noopener noreferrer"
-        className="text-foreground-tertiary hover:text-blue-500 transition-colors flex-shrink-0"
-        title="Google Street View"
+        className="text-caption-sm text-foreground-tertiary hover:text-blue-500 transition-colors flex-shrink-0"
         onClick={(e) => e.stopPropagation()}
       >
-        <PersonStanding className="w-3.5 h-3.5" />
+        Street View
       </a>
       <button
         type="button"
