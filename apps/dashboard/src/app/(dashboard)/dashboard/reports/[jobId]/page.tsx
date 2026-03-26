@@ -111,9 +111,12 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
 
   const { analysis } = report
 
+  const hasMapData = !!(analysis.subject?.latitude && analysis.subject?.longitude)
+
   return (
-    <div className="max-w-6xl mx-auto space-y-6">
+    <div className={cn(hasMapData ? '-m-4 sm:-m-6 lg:-m-8' : 'max-w-[1600px] mx-auto space-y-6')}>
       {/* Header */}
+      <div className={cn(hasMapData && 'px-4 sm:px-6 lg:px-8 pt-4 sm:pt-6 lg:pt-8 space-y-6')}>
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-3 min-w-0">
           <Link href="/dashboard/reports" className="p-2 rounded-lg hover:bg-secondary transition-colors flex-shrink-0">
@@ -223,65 +226,71 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
         </div>
       )}
 
-      {/* Inline Map — subject + comps */}
-      {analysis.subject?.latitude && analysis.subject?.longitude && (
-        <div className="rounded-xl border border-border overflow-hidden no-print">
-          <PropertyMap subject={analysis.subject} comps={effectiveComps} subjectSubdivision={analysis.subject?.subdivision} selectedCompKeys={compOverride?.selectedCompKeys} onToggleComp={handleToggleComp} />
-        </div>
-      )}
+      </div>{/* end header wrapper */}
 
-      {/* Report Content */}
-      <div className="space-y-6">
-        {analysis.subject && (
-          <SubjectPropertyCard
-            subject={analysis.subject}
-            footer={analysis.subject.photos?.length ? (
-              <VisionAnalysisButton
-                photoUrls={analysis.subject.photos}
-                propertyContext={{
-                  address: analysis.subject.address,
-                  squareFeet: analysis.subject.squareFeet ?? undefined,
-                  yearBuilt: analysis.subject.yearBuilt ?? undefined,
-                }}
-                existingAnalysis={analysis.visionAnalysis}
-              />
-            ) : undefined}
-          />
-        )}
-
-        {displayValuation && (
-          <div ref={valuationCardRef}>
-            <ValuationCard valuation={displayValuation} isRecalculated={isRecalculated} onOpenSettings={() => setSettingsOpen(true)} />
+      {/* Two-column layout: Map (left, sticky) + Content (right, scrollable) */}
+      <div className="flex flex-col xl:flex-row">
+        {/* Left column: Sticky Map — edge-to-edge */}
+        {hasMapData && (
+          <div className="xl:w-[50%] xl:flex-shrink-0 no-print">
+            <div className="xl:sticky xl:top-0 xl:h-screen overflow-hidden">
+              <PropertyMap subject={analysis.subject} comps={effectiveComps} subjectSubdivision={analysis.subject?.subdivision} selectedCompKeys={compOverride?.selectedCompKeys} onToggleComp={handleToggleComp} />
+            </div>
           </div>
         )}
 
-        <RiskFloodCard riskFlags={analysis.riskFlags} floodZone={analysis.floodZone} permits={analysis.permits} asIsMarketIntel={analysis.valuation?.asIsMarketIntel} />
+        {/* Right column: All content cards */}
+        <div className={cn('flex-1 min-w-0', hasMapData && 'border-l border-border')}>
+          <div className="space-y-6 p-4 sm:p-6">
+          {analysis.subject && (
+            <SubjectPropertyCard
+              subject={analysis.subject}
+              footer={analysis.subject.photos?.length ? (
+                <VisionAnalysisButton
+                  photoUrls={analysis.subject.photos}
+                  propertyContext={{
+                    address: analysis.subject.address,
+                    squareFeet: analysis.subject.squareFeet ?? undefined,
+                    yearBuilt: analysis.subject.yearBuilt ?? undefined,
+                  }}
+                  existingAnalysis={analysis.visionAnalysis}
+                />
+              ) : undefined}
+            />
+          )}
 
-        {/* TODO: re-enable when neighbourhood data source is available */}
-        {/* <NeighbourhoodCard data={analysis.neighbourhood} subject={analysis.subject} comps={effectiveComps} /> */}
+          {displayValuation && (
+            <div ref={valuationCardRef}>
+              <ValuationCard valuation={displayValuation} isRecalculated={isRecalculated} onOpenSettings={() => setSettingsOpen(true)} />
+            </div>
+          )}
 
-        {effectiveComps && (
-          <ComparablesSection
-            comps={effectiveComps}
-            subject={analysis.subject}
-            subjectSubdivision={analysis.subject?.subdivision}
-            selectedCompKeys={compOverride?.selectedCompKeys}
-            isManual={compOverride?.isManual ?? false}
-            recalculatedArv={isRecalculated ? displayValuation?.arv : undefined}
-            onToggleComp={handleToggleComp}
-            onReset={handleResetComps}
-          />
-        )}
+          <RiskFloodCard riskFlags={analysis.riskFlags} floodZone={analysis.floodZone} permits={analysis.permits} asIsMarketIntel={analysis.valuation?.asIsMarketIntel} />
 
-        {analysis.apiCallStats && (
-          <ApiCallStatsCard stats={analysis.apiCallStats} />
-        )}
-      </div>
+          {effectiveComps && (
+            <ComparablesSection
+              comps={effectiveComps}
+              subject={analysis.subject}
+              subjectSubdivision={analysis.subject?.subdivision}
+              selectedCompKeys={compOverride?.selectedCompKeys}
+              isManual={compOverride?.isManual ?? false}
+              recalculatedArv={isRecalculated ? displayValuation?.arv : undefined}
+              onToggleComp={handleToggleComp}
+              onReset={handleResetComps}
+            />
+          )}
 
-      {/* Footer */}
-      <div className="pt-6 border-t border-border text-center">
-        <p className="text-caption text-foreground-tertiary">Generated by Flowstate</p>
-      </div>
+          {analysis.apiCallStats && (
+            <ApiCallStatsCard stats={analysis.apiCallStats} />
+          )}
+
+          {/* Footer */}
+          <div className="pt-6 border-t border-border text-center">
+            <p className="text-caption text-foreground-tertiary">Generated by Flowstate</p>
+          </div>
+          </div>{/* end inner content padding */}
+        </div>{/* end right column */}
+      </div>{/* end two-column flex */}
 
       {/* Evaluation Settings Sheet */}
       <Sheet open={settingsOpen} onOpenChange={setSettingsOpen}>

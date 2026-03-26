@@ -22,9 +22,11 @@ interface PropertyMapInnerProps {
   onToggleComp?: (key: string) => void
   /** Called when a marker is clicked — opens detail modal in parent */
   onMarkerClick?: (markerType: 'subject' | 'comp', compKey?: string) => void
+  /** CompKey or 'subject' of the currently selected/active marker */
+  activeMarkerKey?: string | null
 }
 
-export default function PropertyMapInner({ markers, onToggleComp, onMarkerClick }: PropertyMapInnerProps) {
+export default function PropertyMapInner({ markers, onToggleComp, onMarkerClick, activeMarkerKey }: PropertyMapInnerProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<maplibregl.Map | null>(null)
   const markersRef = useRef<maplibregl.Marker[]>([])
@@ -96,17 +98,19 @@ export default function PropertyMapInner({ markers, onToggleComp, onMarkerClick 
       }
 
       // Subject property: home icon marker
+      const isActiveSubject = m.type === 'subject' && activeMarkerKey === 'subject'
       if (m.type === 'subject') {
         const el = document.createElement('div')
         el.className = 'flowstate-subject-marker'
         el.style.cssText = `
-          width: 36px; height: 36px;
-          background: ${config.color};
+          width: ${isActiveSubject ? '44px' : '36px'}; height: ${isActiveSubject ? '44px' : '36px'};
+          background: ${isActiveSubject ? '#f59e0b' : config.color};
           border: 3px solid white;
           border-radius: 50%;
           display: flex; align-items: center; justify-content: center;
           cursor: pointer;
-          box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+          box-shadow: ${isActiveSubject ? '0 0 0 3px rgba(245,158,11,0.4), 0 2px 8px rgba(0,0,0,0.4)' : '0 2px 8px rgba(0,0,0,0.4)'};
+          transition: all 0.2s ease;
         `
         el.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"/><path d="M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>`
         el.addEventListener('click', () => {
@@ -120,19 +124,22 @@ export default function PropertyMapInner({ markers, onToggleComp, onMarkerClick 
       // Comps: numbered custom element
       if (isComp && idx != null) {
         const compKey = m.compKey
+        const isActive = activeMarkerKey != null && compKey === activeMarkerKey
         const el = document.createElement('div')
         el.className = 'flowstate-comp-marker'
         el.style.cssText = `
-          width: 26px; height: 26px;
-          background: ${config.color};
-          border: 2.5px solid white;
+          width: ${isActive ? '34px' : '26px'}; height: ${isActive ? '34px' : '26px'};
+          background: ${isActive ? '#f59e0b' : config.color};
+          border: ${isActive ? '3px' : '2.5px'} solid white;
           border-radius: 50%;
           display: flex; align-items: center; justify-content: center;
-          color: white; font-weight: 800; font-size: 12px;
+          color: white; font-weight: 800; font-size: ${isActive ? '14px' : '12px'};
           font-family: system-ui, -apple-system, sans-serif;
           cursor: pointer;
-          box-shadow: 0 2px 6px rgba(0,0,0,0.35);
+          box-shadow: ${isActive ? '0 0 0 3px rgba(245,158,11,0.4), 0 2px 6px rgba(0,0,0,0.35)' : '0 2px 6px rgba(0,0,0,0.35)'};
           text-shadow: 0 1px 2px rgba(0,0,0,0.3);
+          transition: all 0.2s ease;
+          z-index: ${isActive ? '10' : '1'};
         `
         el.textContent = String(idx)
         el.addEventListener('click', () => {
@@ -156,7 +163,7 @@ export default function PropertyMapInner({ markers, onToggleComp, onMarkerClick 
         maxZoom: 15,
       })
     }
-  }, [markers])
+  }, [markers, activeMarkerKey])
 
   useEffect(() => {
     return () => {
@@ -172,17 +179,17 @@ export default function PropertyMapInner({ markers, onToggleComp, onMarkerClick 
   const types = new Set(markers.map((m) => m.type))
 
   return (
-    <div>
-      <div ref={containerRef} className="w-full h-[400px]" />
-      {/* Legend */}
-      <div className="flex flex-wrap gap-x-4 gap-y-2 px-3 py-2 border-t border-border bg-background/50">
+    <div className="relative h-full flex flex-col">
+      <div ref={containerRef} className="w-full flex-1 min-h-[350px]" />
+      {/* Legend — overlays bottom of map */}
+      <div className="absolute bottom-0 left-0 right-0 flex flex-wrap gap-x-4 gap-y-1 px-3 py-2 bg-black/60 backdrop-blur-sm">
         {(['subject', 'comp-enabled', 'comp-disabled', 'school', 'poi'] as const)
           .filter((t) => types.has(t))
           .map((t) => {
             const cfg = MARKER_CONFIG[t]
             const isComp = t === 'comp-enabled' || t === 'comp-disabled'
             return (
-              <div key={t} className="flex items-center gap-1.5 text-xs text-foreground-secondary">
+              <div key={t} className="flex items-center gap-1.5 text-xs text-white/80">
                 {t === 'subject' ? (
                   <span
                     className="inline-flex items-center justify-center shrink-0 rounded-full"
@@ -224,7 +231,7 @@ export default function PropertyMapInner({ markers, onToggleComp, onMarkerClick 
                     <circle cx="13.5" cy="13.5" r="5" fill="white" />
                   </svg>
                 )}
-                <span className="font-medium">{cfg.label}</span>
+                <span className="font-medium text-white/90">{cfg.label}</span>
               </div>
             )
           })}

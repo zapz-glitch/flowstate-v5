@@ -318,9 +318,13 @@ export default function AnalyzePage() {
 
   const isSearchCollapsed = (isRunning || hasResult || hasPartialData) && !searchExpanded
 
+  const hasMapData = !!(displayData?.subject?.latitude && displayData?.subject?.longitude)
+  const showTwoColumn = (isRunning || hasResult || hasPartialData) && hasMapData
+
   return (
-    <div className="space-y-6 playground-bg min-h-screen -m-6 p-6">
-      {/* Header */}
+    <div className={cn('playground-bg min-h-screen -m-4 sm:-m-6 lg:-m-8', showTwoColumn ? 'p-0' : 'p-4 sm:p-6 lg:p-8 space-y-6')}>
+      {/* Header + Search — padded when in two-column mode */}
+      <div className={cn(showTwoColumn && 'px-4 sm:px-6 lg:px-8 pt-4 sm:pt-6 lg:pt-8 space-y-6')}>
       <div className="flex items-center justify-between">
         <div className="space-y-2">
           <h1 className="text-heading-lg text-foreground tracking-tight">API Playground</h1>
@@ -429,19 +433,6 @@ export default function AnalyzePage() {
         </div>
       )}
 
-      {/* Inline Map — shows subject + comps after results arrive */}
-      {displayData?.subject?.latitude && displayData?.subject?.longitude && (
-        <div className="rounded-xl border border-border overflow-hidden no-print">
-          <PropertyMap
-            subject={displayData.subject}
-            comps={hasResult ? (effectiveComps ?? analysisResult?.comps) : displayData.comps}
-            subjectSubdivision={displayData.subject?.subdivision}
-            selectedCompKeys={compOverride?.selectedCompKeys}
-            onToggleComp={handleToggleComp}
-          />
-        </div>
-      )}
-
       {/* Error — filter match failure shows editor, other errors show simple message */}
       {(error || analysisState.status === 'failed') && (() => {
         const errorMsg = error || analysisState.error || 'Analysis failed'
@@ -499,13 +490,14 @@ export default function AnalyzePage() {
           </div>
         )
       })()}
+      </div>{/* end padded header+search wrapper */}
 
-      {/* Progressive Results — render components as data arrives via step_data events */}
+      {/* Progressive Results — two-column layout: map left (sticky), content right (scrollable) */}
       {(isRunning || hasResult || hasPartialData) && (
-        <div className="space-y-6">
+        <div className={cn(showTwoColumn ? '' : 'space-y-6')}>
           {/* Toolbar: only shown after final result */}
           {hasResult && (
-            <div className="flex items-center justify-between no-print">
+            <div className={cn('flex items-center justify-between no-print', showTwoColumn && 'px-4 sm:px-6 lg:px-8 py-3')}>
               <div className="flex items-center gap-3">
                 {durationMs != null && (
                   <div className="text-caption text-foreground-tertiary">Completed in {(durationMs / 1000).toFixed(1)}s</div>
@@ -548,7 +540,7 @@ export default function AnalyzePage() {
             </div>
           )}
 
-          {/* Sticky Valuation Summary Bar — only after final result, visible when full card scrolls out */}
+          {/* Sticky Valuation Summary Bar — full width above columns */}
           {hasResult && displayValuation && showStickyBar && (
             <div className="sticky top-0 z-10 no-print">
               <div className={cn(
@@ -622,134 +614,154 @@ export default function AnalyzePage() {
             </div>
           )}
 
-          {/* Progressive Report Content */}
-          <div id="underwriter-report" data-date={new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })} className="space-y-6">
-            {/* Print-only report header — only when final result */}
-            {hasResult && (
-              <div className="hidden print:block print-report-header">
-                <div className="flex items-start justify-between pb-4 border-b-2 border-gray-800 mb-6">
-                  <div>
-                    <div className="text-xs font-semibold uppercase tracking-widest text-gray-500 mb-1">Underwriting Report</div>
-                    <h1 className="text-2xl font-bold text-gray-900">{analysisResult.subject?.address || 'Property Analysis'}</h1>
-                    {analysisResult.subject?.county && (
-                      <div className="text-sm text-gray-500 mt-0.5">{analysisResult.subject.county} County</div>
-                    )}
-                  </div>
-                  <div className="text-right">
-                    <div className="text-xs text-gray-400 mb-1">Prepared by Flowstate</div>
-                    <div className="text-xs text-gray-400">{new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</div>
-                    {analysisResult.subject?.classification && (
-                      <div className="mt-2 inline-block px-3 py-1 border border-gray-300 rounded text-xs font-medium">
-                        {analysisResult.subject.classification.type === 'as_is' ? 'As-Is' : analysisResult.subject.classification.type === 'after_renovation' ? 'Renovated' : 'Transitional'}
-                        {' · '}{analysisResult.subject.classification.confidence}% confidence
-                      </div>
-                    )}
-                  </div>
+          {/* Two-column layout: Map (left, sticky) + Content (right, scrollable) */}
+          <div className={cn('flex flex-col xl:flex-row', !showTwoColumn && 'gap-6')}>
+            {/* Left column: Sticky Map — edge-to-edge, no border */}
+            {hasMapData && (
+              <div className="xl:w-[50%] xl:flex-shrink-0 no-print">
+                <div className="xl:sticky xl:top-0 xl:h-screen overflow-hidden">
+                  <PropertyMap
+                    subject={displayData!.subject!}
+                    comps={hasResult ? (effectiveComps ?? analysisResult?.comps) : displayData!.comps}
+                    subjectSubdivision={displayData!.subject?.subdivision}
+                    selectedCompKeys={compOverride?.selectedCompKeys}
+                    onToggleComp={handleToggleComp}
+                  />
                 </div>
               </div>
             )}
 
-            {/* Subject Property — available after Step 1 (property_fetch) */}
-            {displayData?.subject ? (
-              <SubjectPropertyCard
-                subject={displayData.subject}
-                footer={displayData.subject.photos?.length ? (
-                  <VisionAnalysisButton
-                    photoUrls={displayData.subject.photos}
-                    propertyContext={{
-                      address: displayData.subject.address,
-                      squareFeet: displayData.subject.squareFeet ?? undefined,
-                      yearBuilt: displayData.subject.yearBuilt ?? undefined,
-                    }}
-                    existingAnalysis={displayData.visionAnalysis}
-                  />
-                ) : undefined}
-              />
-            ) : isRunning && !displayData?.subject ? (
-              <SubjectPropertySkeleton />
-            ) : null}
-
-            {/* Valuation Summary — only from final result (Step 5) */}
-            {hasResult && displayValuation ? (
-              <div ref={valuationCardRef}>
-                <ValuationCard
-                  valuation={displayValuation}
-                  isRecalculated={isRecalculated}
-                  onOpenSettings={() => setSettingsOpen(true)}
-                />
-              </div>
-            ) : isRunning ? (
-              <ValuationSkeleton />
-            ) : null}
-
-            {/* Risk Flags & Flood Zone — available after Step 1 */}
-            {(displayData?.riskFlags || displayData?.floodZone || displayData?.permits || analysisResult?.valuation?.asIsMarketIntel?.asIsMarketPrice != null || analysisResult?.valuation?.asIsMarketIntel?.noDataReason) ? (
-              <RiskFloodCard riskFlags={displayData?.riskFlags} floodZone={displayData?.floodZone} permits={displayData?.permits} asIsMarketIntel={analysisResult?.valuation?.asIsMarketIntel} />
-            ) : isRunning && !displayData?.riskFlags ? (
-              <RiskFloodSkeleton />
-            ) : null}
-
-            {/* Comparables — available after Step 2, enriched with photos (Step 3) and classifications (Step 4) */}
-            {hasResult ? (
-              (appraisalFilters.length > 0 ? analysisResult?.comps : effectiveComps) && (
-                <ComparablesSection
-                  comps={appraisalFilters.length > 0 ? (analysisResult?.comps as import('./actions').CompsData) : effectiveComps!}
-                  subject={displayData?.subject}
-                  subjectSubdivision={displayData?.subject?.subdivision}
-                  selectedCompKeys={compOverride?.selectedCompKeys}
-                  isManual={compOverride?.isManual ?? false}
-                  recalculatedArv={isRecalculated ? displayValuation?.arv : undefined}
-                  onToggleComp={handleToggleComp}
-                  onReset={handleResetComps}
-                />
-              )
-            ) : displayData && displayData.comps && displayData.comps.items && displayData.comps.items.length > 0 ? (
-              <ComparablesSection
-                comps={displayData.comps as CompsData}
-                subject={displayData.subject!}
-                subjectSubdivision={displayData.subject?.subdivision}
-              />
-            ) : isRunning ? (
-              <ComparablesSkeleton />
-            ) : null}
-          </div>
-
-          {/* Raw JSON Toggle — only after final result */}
-          {hasResult && (
-            <div className="border border-border rounded-xl overflow-hidden no-print">
-              <div
-                className="px-6 py-4 cursor-pointer flex items-center gap-3 hover:bg-white/5 dark:hover:bg-white/[0.02] transition-colors"
-                onClick={() => setShowRawJson(!showRawJson)}
-              >
-                <div className="w-8 h-8 rounded-lg bg-secondary/60 flex items-center justify-center">
-                  <Code className="w-4 h-4 text-foreground-secondary" />
-                </div>
-                <span className="text-body font-medium flex-1">Raw JSON Response</span>
-                {showRawJson ? <ChevronDown className="w-4 h-4 text-foreground-tertiary" /> : <ChevronRight className="w-4 h-4 text-foreground-tertiary" />}
-              </div>
-              {showRawJson && (
-                <div className="px-4 pb-4">
-                  <div className="relative">
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        navigator.clipboard.writeText(JSON.stringify(analysisResult, null, 2))
-                        const btn = e.currentTarget
-                        btn.textContent = 'Copied!'
-                        setTimeout(() => { btn.textContent = 'Copy JSON' }, 2000)
-                      }}
-                      className="absolute top-3 right-3 z-10 px-2.5 py-1 rounded-md bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs transition-colors border border-zinc-700"
-                    >
-                      Copy JSON
-                    </button>
-                    <pre className="bg-zinc-950 text-zinc-100 rounded-xl p-4 pt-10 overflow-auto max-h-[600px] text-xs font-mono">
-                      {JSON.stringify(analysisResult, null, 2)}
-                    </pre>
+            {/* Right column: All content cards */}
+            <div className={cn('flex-1 min-w-0', showTwoColumn && 'border-l border-border')}>
+              <div id="underwriter-report" data-date={new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })} className={cn('space-y-6', showTwoColumn && 'p-4 sm:p-6')}>
+                {/* Print-only report header — only when final result */}
+                {hasResult && (
+                  <div className="hidden print:block print-report-header">
+                    <div className="flex items-start justify-between pb-4 border-b-2 border-gray-800 mb-6">
+                      <div>
+                        <div className="text-xs font-semibold uppercase tracking-widest text-gray-500 mb-1">Underwriting Report</div>
+                        <h1 className="text-2xl font-bold text-gray-900">{analysisResult.subject?.address || 'Property Analysis'}</h1>
+                        {analysisResult.subject?.county && (
+                          <div className="text-sm text-gray-500 mt-0.5">{analysisResult.subject.county} County</div>
+                        )}
+                      </div>
+                      <div className="text-right">
+                        <div className="text-xs text-gray-400 mb-1">Prepared by Flowstate</div>
+                        <div className="text-xs text-gray-400">{new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</div>
+                        {analysisResult.subject?.classification && (
+                          <div className="mt-2 inline-block px-3 py-1 border border-gray-300 rounded text-xs font-medium">
+                            {analysisResult.subject.classification.type === 'as_is' ? 'As-Is' : analysisResult.subject.classification.type === 'after_renovation' ? 'Renovated' : 'Transitional'}
+                            {' · '}{analysisResult.subject.classification.confidence}% confidence
+                          </div>
+                        )}
+                      </div>
+                    </div>
                   </div>
+                )}
+
+                {/* Subject Property — available after Step 1 (property_fetch) */}
+                {displayData?.subject ? (
+                  <SubjectPropertyCard
+                    subject={displayData.subject}
+                    footer={displayData.subject.photos?.length ? (
+                      <VisionAnalysisButton
+                        photoUrls={displayData.subject.photos}
+                        propertyContext={{
+                          address: displayData.subject.address,
+                          squareFeet: displayData.subject.squareFeet ?? undefined,
+                          yearBuilt: displayData.subject.yearBuilt ?? undefined,
+                        }}
+                        existingAnalysis={displayData.visionAnalysis}
+                      />
+                    ) : undefined}
+                  />
+                ) : isRunning && !displayData?.subject ? (
+                  <SubjectPropertySkeleton />
+                ) : null}
+
+                {/* Valuation Summary — only from final result (Step 5) */}
+                {hasResult && displayValuation ? (
+                  <div ref={valuationCardRef}>
+                    <ValuationCard
+                      valuation={displayValuation}
+                      isRecalculated={isRecalculated}
+                      onOpenSettings={() => setSettingsOpen(true)}
+                    />
+                  </div>
+                ) : isRunning ? (
+                  <ValuationSkeleton />
+                ) : null}
+
+                {/* Risk Flags & Flood Zone — available after Step 1 */}
+                {(displayData?.riskFlags || displayData?.floodZone || displayData?.permits || analysisResult?.valuation?.asIsMarketIntel?.asIsMarketPrice != null || analysisResult?.valuation?.asIsMarketIntel?.noDataReason) ? (
+                  <RiskFloodCard riskFlags={displayData?.riskFlags} floodZone={displayData?.floodZone} permits={displayData?.permits} asIsMarketIntel={analysisResult?.valuation?.asIsMarketIntel} />
+                ) : isRunning && !displayData?.riskFlags ? (
+                  <RiskFloodSkeleton />
+                ) : null}
+
+                {/* Comparables — available after Step 2, enriched with photos (Step 3) and classifications (Step 4) */}
+                {hasResult ? (
+                  (appraisalFilters.length > 0 ? analysisResult?.comps : effectiveComps) && (
+                    <ComparablesSection
+                      comps={appraisalFilters.length > 0 ? (analysisResult?.comps as import('./actions').CompsData) : effectiveComps!}
+                      subject={displayData?.subject}
+                      subjectSubdivision={displayData?.subject?.subdivision}
+                      selectedCompKeys={compOverride?.selectedCompKeys}
+                      isManual={compOverride?.isManual ?? false}
+                      recalculatedArv={isRecalculated ? displayValuation?.arv : undefined}
+                      onToggleComp={handleToggleComp}
+                      onReset={handleResetComps}
+                    />
+                  )
+                ) : displayData && displayData.comps && displayData.comps.items && displayData.comps.items.length > 0 ? (
+                  <ComparablesSection
+                    comps={displayData.comps as CompsData}
+                    subject={displayData.subject!}
+                    subjectSubdivision={displayData.subject?.subdivision}
+                  />
+                ) : isRunning ? (
+                  <ComparablesSkeleton />
+                ) : null}
+              </div>
+
+              {/* Raw JSON Toggle — only after final result */}
+              {hasResult && (
+                <div className="border border-border rounded-xl overflow-hidden no-print">
+                  <div
+                    className="px-6 py-4 cursor-pointer flex items-center gap-3 hover:bg-white/5 dark:hover:bg-white/[0.02] transition-colors"
+                    onClick={() => setShowRawJson(!showRawJson)}
+                  >
+                    <div className="w-8 h-8 rounded-lg bg-secondary/60 flex items-center justify-center">
+                      <Code className="w-4 h-4 text-foreground-secondary" />
+                    </div>
+                    <span className="text-body font-medium flex-1">Raw JSON Response</span>
+                    {showRawJson ? <ChevronDown className="w-4 h-4 text-foreground-tertiary" /> : <ChevronRight className="w-4 h-4 text-foreground-tertiary" />}
+                  </div>
+                  {showRawJson && (
+                    <div className="px-4 pb-4">
+                      <div className="relative">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            navigator.clipboard.writeText(JSON.stringify(analysisResult, null, 2))
+                            const btn = e.currentTarget
+                            btn.textContent = 'Copied!'
+                            setTimeout(() => { btn.textContent = 'Copy JSON' }, 2000)
+                          }}
+                          className="absolute top-3 right-3 z-10 px-2.5 py-1 rounded-md bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs transition-colors border border-zinc-700"
+                        >
+                          Copy JSON
+                        </button>
+                        <pre className="bg-zinc-950 text-zinc-100 rounded-xl p-4 pt-10 overflow-auto max-h-[600px] text-xs font-mono">
+                          {JSON.stringify(analysisResult, null, 2)}
+                        </pre>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
-            </div>
-          )}
+            </div>{/* end right column */}
+          </div>{/* end two-column flex */}
         </div>
       )}
 

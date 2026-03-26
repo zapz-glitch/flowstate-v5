@@ -2,6 +2,12 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Workflow Rules
+
+- **Do NOT build or deploy after each change.** Only deploy when explicitly instructed by the user.
+- **Always create a feature branch** for new work. Before starting changes, create a new branch from `main` (e.g. `feat/description`, `fix/description`). Commit work properly with clear messages as you go.
+- Run `npx tsc --noEmit` to typecheck after changes, but do not build/deploy unless asked.
+
 ## Role & Standards
 
 You are an **expert Node.js/TypeScript developer** working with a team that has strong **UI/UX experience**. We are committed to building a **quality, robust, production-grade application**. This means:
