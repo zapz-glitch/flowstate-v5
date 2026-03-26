@@ -2,7 +2,8 @@
 
 import { useState, useEffect } from 'react'
 import { ChevronLeft, ChevronRight, X } from 'lucide-react'
-import { Dialog, DialogContent } from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
+import * as VisuallyHidden from '@radix-ui/react-visually-hidden'
 import { cn } from '@/lib/utils'
 
 export function PhotoGallery({ photos, className, children }: { photos: string[]; className?: string; children?: React.ReactNode }) {
@@ -64,6 +65,7 @@ export function PhotoGallery({ photos, className, children }: { photos: string[]
 
       {hasPhotos && <Dialog open={lightboxOpen} onOpenChange={setLightboxOpen}>
         <DialogContent className="max-w-4xl w-full p-0 bg-black/95 border-white/10 gap-0 overflow-hidden">
+          <VisuallyHidden.Root><DialogTitle>Property Photos</DialogTitle></VisuallyHidden.Root>
           <div className="relative flex items-center justify-center min-h-[60vh]">
             <button onClick={() => setLightboxOpen(false)} className="absolute top-4 right-4 z-10 p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors">
               <X className="w-5 h-5" />

@@ -36,9 +36,13 @@ export function CompCard({
 
   const isControlled = controlledExpanded !== undefined
   const isExpanded = isControlled ? controlledExpanded : internalExpanded
-  const handleToggle = isControlled
-    ? () => controlledOnToggle?.()
-    : () => setInternalExpanded((p) => !p)
+  // When permanently expanded (no onToggle callback), disable collapsing
+  const isAlwaysExpanded = isControlled && !controlledOnToggle
+  const handleToggle = isAlwaysExpanded
+    ? undefined
+    : isControlled
+      ? () => controlledOnToggle?.()
+      : () => setInternalExpanded((p) => !p)
 
   const hasArvSelection = isSelectedForArv !== undefined
   const isEnabled = hasArvSelection ? isSelectedForArv : comp.isEnabled !== false
@@ -59,7 +63,7 @@ export function CompCard({
     >
       <div className="p-4 md:p-5">
         <div className="flex items-start justify-between gap-4">
-          <div className="flex items-start gap-3 flex-1 min-w-0 cursor-pointer" onClick={handleToggle}>
+          <div className={cn('flex items-start gap-3 flex-1 min-w-0', !isAlwaysExpanded && 'cursor-pointer')} onClick={handleToggle}>
             <div className={cn(
               'mt-0.5 w-7 h-7 rounded-lg flex items-center justify-center text-caption font-semibold flex-shrink-0',
               isEnabled ? 'bg-emerald-500/15 text-emerald-700' : 'bg-muted text-foreground-tertiary'
@@ -103,7 +107,7 @@ export function CompCard({
           </div>
 
           <div className="flex items-start gap-3 flex-shrink-0">
-            <div className="text-right cursor-pointer" onClick={handleToggle}>
+            <div className={cn('text-right', !isAlwaysExpanded && 'cursor-pointer')} onClick={handleToggle}>
               {comp.saleDate && (
                 <div className="text-caption-sm text-foreground-tertiary">
                   {new Date(comp.saleDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
@@ -134,13 +138,15 @@ export function CompCard({
               </button>
             )}
 
-            <div className="text-foreground-tertiary mt-0.5 cursor-pointer" onClick={handleToggle}>
-              {isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-            </div>
+            {!isAlwaysExpanded && (
+              <div className="text-foreground-tertiary mt-0.5 cursor-pointer" onClick={handleToggle}>
+                {isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+              </div>
+            )}
           </div>
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 mt-3 rounded-lg bg-muted/40 cursor-pointer" onClick={handleToggle}>
+        <div className={cn('grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 mt-3 rounded-lg bg-muted/40', !isAlwaysExpanded && 'cursor-pointer')} onClick={handleToggle}>
           <StatCell label="Beds" value={comp.bedrooms ?? '-'} />
           <StatCell label="Baths" value={comp.bathrooms ?? '-'} />
           <StatCell label="Sq Ft" value={comp.squareFeet?.toLocaleString() || '-'} />

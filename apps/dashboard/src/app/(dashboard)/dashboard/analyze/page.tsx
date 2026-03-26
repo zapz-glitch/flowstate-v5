@@ -435,6 +435,7 @@ export default function AnalyzePage() {
           <PropertyMap
             subject={displayData.subject}
             comps={hasResult ? (effectiveComps ?? analysisResult?.comps) : displayData.comps}
+            subjectSubdivision={displayData.subject?.subdivision}
             selectedCompKeys={compOverride?.selectedCompKeys}
             onToggleComp={handleToggleComp}
           />

@@ -297,7 +297,7 @@ export function ComparablesSection({
             <DialogTitle className="text-body font-semibold">Subject & Comparables Map</DialogTitle>
           </DialogHeader>
           <div className="px-5 pb-5">
-            <PropertyMap subject={subject} comps={comps} selectedCompKeys={selectedCompKeys} onToggleComp={onToggleComp} />
+            <PropertyMap subject={subject} comps={comps} subjectSubdivision={subjectSubdivision} selectedCompKeys={selectedCompKeys} onToggleComp={onToggleComp} />
           </div>
         </DialogContent>
       </Dialog>

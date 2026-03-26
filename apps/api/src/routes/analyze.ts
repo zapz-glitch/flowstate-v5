@@ -29,6 +29,7 @@ import type { PropertyIdentifier } from '../services/photo-provider'
 import { performAnalysis } from '../services/evaluation'
 import { generateSseToken } from '../utils/sse-token'
 import { AnalysisError } from '../utils/analysis-error'
+import { detectOsmLocationRisks } from '../services/location-risk'
 import { drizzle } from 'drizzle-orm/d1'
 import { savedReports } from '../db/schema'
 
@@ -232,6 +233,11 @@ analyze.post('/', async (c) => {
       },
     }
 
+    // Start OSM location risk query in parallel with evaluation (non-blocking)
+    const osmPromise = bundle.property.latitude && bundle.property.longitude
+      ? detectOsmLocationRisks(bundle.property.latitude, bundle.property.longitude)
+      : Promise.resolve(null)
+
     let analysisResult: Awaited<ReturnType<typeof performAnalysis>>['response']
     try {
       analysisResult = performAnalysis(evalParams).response
@@ -288,6 +294,21 @@ analyze.post('/', async (c) => {
     }
 
     console.log(`[Analyze][Timing] Evaluation: ${Date.now() - evalStart}ms`)
+
+    // ─── Inject OSM location risks into response ────────────────────────────
+    try {
+      const osmResult = await osmPromise
+      if (osmResult && osmResult.riskFlags.length > 0) {
+        console.log(`[Analyze] OSM location risks: ${osmResult.riskFlags.join(', ')} (${osmResult.durationMs}ms)`)
+        const existingFlags = analysisResult.riskFlags ?? []
+        analysisResult = {
+          ...analysisResult,
+          riskFlags: [...existingFlags, ...osmResult.riskFlags],
+        }
+      }
+    } catch {
+      // Non-fatal — OSM query failure doesn't block analysis
+    }
 
     // ─── 4. Always enrich with photos; optionally with LLM/market data ─────
     const llmEnabled = body.llmAnalysis?.enabled === true

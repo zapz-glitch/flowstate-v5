@@ -358,7 +358,7 @@ export default function ReportPage({ params }: { params: Promise<{ jobId: string
         {/* Inline Map — subject + comps */}
         {analysis.subject?.latitude && analysis.subject?.longitude && (
           <div className="rounded-xl border border-border overflow-hidden no-print">
-            <PropertyMap subject={analysis.subject} comps={effectiveComps} selectedCompKeys={compOverride?.selectedCompKeys} onToggleComp={handleToggleComp} />
+            <PropertyMap subject={analysis.subject} comps={effectiveComps} subjectSubdivision={analysis.subject?.subdivision} selectedCompKeys={compOverride?.selectedCompKeys} onToggleComp={handleToggleComp} />
           </div>
         )}
 

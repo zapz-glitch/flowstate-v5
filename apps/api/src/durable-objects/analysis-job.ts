@@ -15,6 +15,7 @@
 import { analyzeComps, type CompEvalContext } from '../services/comp-analysis'
 import { performAnalysis, type EvaluationParams } from '../services/evaluation'
 import { createPhotoService } from '../services/photo-provider'
+import { detectOsmLocationRisks } from '../services/location-risk'
 import type { PropertyIdentifier, PropertyPhotos } from '../services/photo-provider'
 import type { Env } from '../types'
 import type { NormalizedProperty, NormalizedComparable } from '../services/property-api/types'
@@ -205,6 +206,21 @@ export class AnalysisJobDO {
                 comp.photos = compEnriched.photos.slice(0, 5)
               }
             }
+          }
+
+          // Inject OSM location risks (major roads, railroad, commercial)
+          try {
+            const prop = config.bundle.property
+            if (prop.latitude && prop.longitude) {
+              const osmResult = await detectOsmLocationRisks(prop.latitude, prop.longitude)
+              if (osmResult.riskFlags.length > 0) {
+                const existingFlags = (updatedResponse.riskFlags as string[] | null) ?? []
+                updatedResponse.riskFlags = [...existingFlags, ...osmResult.riskFlags]
+                console.log(`[AnalysisJobDO] OSM risks: ${osmResult.riskFlags.join(', ')} (${osmResult.durationMs}ms)`)
+              }
+            }
+          } catch {
+            // Non-fatal
           }
 
           // Update analysisResult for LLM step

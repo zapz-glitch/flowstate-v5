@@ -1,7 +1,10 @@
 'use client'
 
-import { useMemo } from 'react'
+import { useMemo, useState, useCallback } from 'react'
 import dynamic from 'next/dynamic'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { SubjectPropertyCard } from './SubjectPropertyCard'
+import { CompCard } from './CompCard'
 import type { SubjectData, CompItem, NeighbourhoodData } from './shared-types'
 
 const MapInner = dynamic(() => import('./PropertyMapInner'), {
@@ -28,13 +31,17 @@ interface PropertyMapProps {
   subject?: SubjectData | null
   comps?: { items?: CompItem[] } | null
   neighbourhood?: NeighbourhoodData | null
+  subjectSubdivision?: string | null
   /** Manual comp selection keys — when provided, overrides comp.isEnabled */
   selectedCompKeys?: Set<string>
-  /** Called when a comp's enable/disable toggle is clicked in the popup */
+  /** Called when a comp's enable/disable toggle is clicked */
   onToggleComp?: (key: string) => void
 }
 
-export function PropertyMap({ subject, comps, neighbourhood, selectedCompKeys, onToggleComp }: PropertyMapProps) {
+export function PropertyMap({ subject, comps, neighbourhood, subjectSubdivision, selectedCompKeys, onToggleComp }: PropertyMapProps) {
+  const [modalOpen, setModalOpen] = useState(false)
+  const [selectedMarker, setSelectedMarker] = useState<{ type: 'subject' | 'comp'; compKey?: string } | null>(null)
+
   const markers = useMemo(() => {
     const m: MapMarker[] = []
 
@@ -63,7 +70,6 @@ export function PropertyMap({ subject, comps, neighbourhood, selectedCompKeys, o
         const comp = comps.items[i]
         if (comp.latitude && comp.longitude) {
           const compKey = comp.address || `comp-${i}`
-          // Use selectedCompKeys if provided, otherwise fall back to comp.isEnabled
           const enabled = selectedCompKeys ? selectedCompKeys.has(compKey) : comp.isEnabled !== false
           const details: [string, string][] = []
           if (comp.salePrice != null) details.push(['Price', `$${comp.salePrice.toLocaleString()}`])
@@ -127,8 +133,64 @@ export function PropertyMap({ subject, comps, neighbourhood, selectedCompKeys, o
     return m
   }, [subject, comps, neighbourhood, selectedCompKeys])
 
+  const handleMarkerClick = useCallback((markerType: 'subject' | 'comp', compKey?: string) => {
+    setSelectedMarker({ type: markerType, compKey })
+    setModalOpen(true)
+  }, [])
+
+  // Find the selected comp for the modal
+  const selectedComp = useMemo(() => {
+    if (!selectedMarker || selectedMarker.type !== 'comp' || !comps?.items) return null
+    const idx = comps.items.findIndex((c, i) => (c.address || `comp-${i}`) === selectedMarker.compKey)
+    if (idx === -1) return null
+    return { comp: comps.items[idx], index: idx }
+  }, [selectedMarker, comps?.items])
+
+  const isSelectedForArv = selectedComp && selectedCompKeys
+    ? selectedCompKeys.has(selectedMarker!.compKey!)
+    : undefined
+
   // Need at least the subject marker to render the map
   if (markers.length === 0) return null
 
-  return <MapInner markers={markers} onToggleComp={onToggleComp} />
+  return (
+    <>
+      <MapInner
+        markers={markers}
+        onToggleComp={onToggleComp}
+        onMarkerClick={handleMarkerClick}
+      />
+
+      {/* Detail Modal */}
+      <Dialog open={modalOpen} onOpenChange={setModalOpen}>
+        <DialogContent className="max-w-3xl w-[calc(100vw-2rem)] max-h-[calc(100vh-2rem)] flex flex-col p-0">
+          <DialogHeader className="px-5 pt-5 pb-3 border-b border-border flex-shrink-0">
+            <DialogTitle className="text-body font-semibold">
+              {selectedMarker?.type === 'subject' ? 'Subject Property' : 'Comparable Property'}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="px-5 pb-5 pt-3 overflow-y-auto flex-1 min-h-0">
+            {selectedMarker?.type === 'subject' && subject && (
+              <SubjectPropertyCard subject={subject} />
+            )}
+            {selectedMarker?.type === 'comp' && selectedComp && (
+              <CompCard
+                comp={selectedComp.comp}
+                index={selectedComp.index}
+                subject={subject}
+                subjectSubdivision={subjectSubdivision}
+                isExpanded={true}
+                isSelectedForArv={isSelectedForArv}
+                onToggleArv={
+                  onToggleComp && selectedMarker.compKey
+                    ? () => onToggleComp(selectedMarker.compKey!)
+                    : undefined
+                }
+              />
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
+  )
 }

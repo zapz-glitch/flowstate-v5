@@ -28,7 +28,9 @@
       "Bash(curl -s -o /dev/null -w \"%{http_code}\" https://api.flowstate.homes/health)",
       "Bash(npx wrangler:*)",
       "Bash(bash test-addresses.sh)",
-      "Read(//private/tmp/flowstate-test-results/**)"
+      "Read(//private/tmp/flowstate-test-results/**)",
+      "Bash(xargs basename:*)",
+      "Bash(grep \"NeighbourhoodData\" /Users/yalamber/Projects/flowstate/flowstate-api/apps/dashboard/src/app/\\\\\\(dashboard\\\\\\)/dashboard/analyze/page.tsx /Users/yalamber/Projects/flowstate/flowstate-api/apps/dashboard/src/app/\\\\\\(dashboard\\\\\\)/dashboard/reports/[jobId]/page.tsx /Users/yalamber/Projects/flowstate/flowstate-api/apps/dashboard/src/app/report/[jobId]/page.tsx)"
     ]
   }
 }

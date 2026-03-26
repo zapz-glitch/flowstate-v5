@@ -255,40 +255,80 @@ function parseZillowHtml(html: string): ZillowExtraction {
   let status: ZillowExtraction['status'] | undefined
 
   try {
-    // Extract photos from various Zillow image patterns
-    // Pattern 1: zillowstatic.com URLs in img tags or data attributes
-    const photoPatterns = [
-      /https:\/\/photos\.zillowstatic\.com\/fp\/[a-f0-9]+-[a-z_]+\.jpg/gi,
-      /https:\/\/photos\.zillowstatic\.com\/[^"'\s]+/gi,
-      /https:\/\/[^"'\s]*zillowstatic\.com[^"'\s]*\.(?:jpg|jpeg|png|webp)/gi,
-    ]
-
-    // Non-property URL patterns to exclude
-    const excludeSubstrings = [
-      'z-logo', 'icon', 'avatar', 'logo', 'badge',
-      'profile', 'agent', 'broker', 'headshot', 'portrait',
-      'map', 'streetview', 'street-view', 'satellite',
-      'floorplan', 'floor-plan', 'placeholder',
-      '/h_n/', '/h_l/', '/h_g/', '/isr', '/mgn/',
-      'profilephotos', 'thumb', 'thumbnail',
-    ]
-
+    // ── Photo extraction: property gallery only ──
+    // Strategy: isolate the photo gallery section of the page using multiple
+    // detection methods (resilient to Zillow UI/class name changes), then extract
+    // photo URLs only from that section. Falls back to full-page with strict filtering.
     const seenPhotos = new Set<string>()
-    for (const pattern of photoPatterns) {
-      const matches = html.match(pattern) || []
-      for (const match of matches) {
-        const lower = match.toLowerCase()
-        // Skip non-property images
-        if (excludeSubstrings.some((s) => lower.includes(s))) continue
-        // Must be from photos.zillowstatic.com with /fp/ or /p_X/ paths
-        if (!lower.includes('photos.zillowstatic.com')) continue
-        if (!lower.includes('/fp/') && !/\/p_[a-z]\//.test(lower)) continue
 
-        // Normalize to full resolution
+    // Multiple gallery detection patterns — if Zillow renames classes, others still work
+    const galleryPatterns = [
+      // Known class names
+      /<div[^>]*class="[^"]*hollywood-gallery[^"]*"[^>]*>([\s\S]*?)(?:<\/div>\s*<div[^>]*class="[^"]*(?:ds-data-col|summary-container|detail-page))/i,
+      // data-testid attributes (common React pattern, more stable than class names)
+      /<div[^>]*data-testid="[^"]*(?:photo|gallery|media|carousel|hollywood)[^"]*"[^>]*>([\s\S]*?)(?:<\/div>\s*<div[^>]*(?:class|data-testid)="[^"]*(?:summary|detail|home-main|price|bed))/i,
+      // aria-label on gallery containers
+      /<(?:div|section|ul)[^>]*aria-label="[^"]*(?:photo|gallery|image|picture)[^"]*"[^>]*>([\s\S]*?)(?:<\/(?:div|section|ul)>)/i,
+      // Structural: first large block with multiple zillowstatic /fp/ photos (the gallery is always first)
+      // Match the first HTML section that contains 3+ property photo URLs before the price/details section
+    ]
+
+    let galleryHtml = ''
+    for (const pattern of galleryPatterns) {
+      const match = html.match(pattern)
+      if (match?.[1]) {
+        // Verify this section actually contains property photos
+        const photoCount = (match[1].match(/photos\.zillowstatic\.com\/fp\//gi) || []).length
+        if (photoCount >= 2) {
+          galleryHtml = match[1]
+          break
+        }
+      }
+    }
+
+    // Structural fallback: if no named gallery found, take the HTML before the
+    // first property details section (price, beds, baths) — the gallery is always above it
+    if (!galleryHtml) {
+      const detailsSplit = html.match(/([\s\S]*?)(?:<span[^>]*data-testid="[^"]*price|<span[^>]*class="[^"]*price|"homeStatus"|"listingPrice"|<div[^>]*class="[^"]*summary-container)/i)
+      if (detailsSplit?.[1]) {
+        const photoCount = (detailsSplit[1].match(/photos\.zillowstatic\.com\/fp\//gi) || []).length
+        if (photoCount >= 2) {
+          galleryHtml = detailsSplit[1]
+        }
+      }
+    }
+
+    const photoUrlPattern = /https:\/\/photos\.zillowstatic\.com\/fp\/[a-f0-9]+-[^"'\s)]+\.(?:jpg|jpeg|webp)/gi
+
+    if (galleryHtml) {
+      const matches = galleryHtml.match(photoUrlPattern) || []
+      for (const match of matches) {
         const normalized = match
           .replace(/\/p_[a-z]\//, '/p_f/')
+          .replace(/-(?:p_[a-z]|cc_ft_\d+|uncropped_scaled_within_\d+_\d+)/, '-p_f')
           .replace(/\?.*$/, '')
+        if (!seenPhotos.has(normalized)) {
+          seenPhotos.add(normalized)
+          photos.push(normalized)
+        }
+      }
+      console.log(`[FirecrawlZillow] Gallery extraction: ${photos.length} photos`)
+    }
 
+    // Final fallback: full page with strict suffix and content filtering
+    if (photos.length === 0) {
+      console.log(`[FirecrawlZillow] No gallery section found, using full-page extraction with strict filtering`)
+      const matches = html.match(photoUrlPattern) || []
+      // Suffixes that indicate non-property images (agent headshots, etc.)
+      const excludeSuffixes = ['-h_n', '-h_l', '-h_g', '-h_s', '-h_x']
+      const excludeSubstrings = ['profile', 'agent', 'avatar', 'broker', 'headshot', 'portrait', 'logo']
+      for (const match of matches) {
+        const lower = match.toLowerCase()
+        if (excludeSuffixes.some((s) => lower.includes(s))) continue
+        if (excludeSubstrings.some((s) => lower.includes(s))) continue
+        // Only include full-res photo URLs
+        if (!lower.includes('-p_f') && !lower.includes('-cc_ft_') && !lower.includes('-uncropped_scaled_within_')) continue
+        const normalized = match.replace(/\/p_[a-z]\//, '/p_f/').replace(/\?.*$/, '')
         if (!seenPhotos.has(normalized)) {
           seenPhotos.add(normalized)
           photos.push(normalized)
@@ -371,10 +411,13 @@ const EXTRACTION_PROMPT = `You are a real estate data extraction assistant. Extr
 
 Extract all available fields as a flat JSON object:
 
-PROPERTY PHOTOS:
-- "photos": Array of property photo URLs from zillowstatic.com only
-- EXCLUDE agent photos, logos, icons, maps, floor plans, street view images
-- Only include actual property interior/exterior photos
+PROPERTY PHOTOS (CRITICAL — only from the photo gallery at the top of the listing):
+- "photos": Array of property listing photo URLs from photos.zillowstatic.com/fp/ ONLY
+- These are the interior/exterior property photos shown in the main photo carousel/gallery
+- NEVER include agent/realtor headshots, profile pictures, brokerage logos, or team photos
+- NEVER include maps, street view, floor plans, or satellite images
+- Agent photos typically have URLs ending in -h_l.jpg, -h_n.jpg, -h_g.jpg — EXCLUDE these
+- If unsure whether an image is a property photo or agent photo, EXCLUDE it
 
 LISTING DATA (all numbers as raw values, no $ or commas):
 - "description", "price", "pricePerSqft", "status" (for_sale|pending|sold|off_market)
@@ -995,10 +1038,10 @@ ${content.html.slice(0, 80000)}
       '100x100',
       '120x120',
       '150x150',
-      // Zillow headshot/profile photo paths
-      '/h_n/',
-      '/h_l/',
-      '/h_g/',
+      // Zillow headshot/profile photo paths (both /h_l/ and -h_l. formats)
+      '/h_n/', '/h_l/', '/h_g/',
+      '-h_n.', '-h_l.', '-h_g.',
+      '-h_n-', '-h_l-', '-h_g-',
       'profilephotos',
       'profile_photos',
     ]

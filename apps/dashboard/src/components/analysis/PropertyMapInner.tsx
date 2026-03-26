@@ -15,72 +15,23 @@ const MARKER_CONFIG: Record<MapMarker['type'], { color: string; label: string }>
   poi: { color: '#f59e0b', label: 'POI' },
 }
 
-// ─── Popup HTML ─────────────────────────────────────────────────────────────
-
-function buildPopupHTML(m: MapMarker, hasToggle: boolean): string {
-  const config = MARKER_CONFIG[m.type]
-  const details = m.details ?? []
-  const isProperty = m.type === 'subject' || m.type === 'comp-enabled' || m.type === 'comp-disabled'
-  const isComp = m.type === 'comp-enabled' || m.type === 'comp-disabled'
-
-  const rows = details
-    .map(([k, v]) => {
-      const isExcluded = k === 'Excluded'
-      return `<div style="display:flex;justify-content:space-between;gap:8px;${isExcluded ? 'color:#ef4444;' : ''}">
-        <span style="color:#6b7280;">${k}</span>
-        <span style="font-weight:600;color:#111827;${isExcluded ? 'color:#ef4444;' : ''}">${v}</span>
-      </div>`
-    })
-    .join('')
-
-  // Zillow link on address for properties
-  const zillowUrl = isProperty ? `https://www.zillow.com/homes/${encodeURIComponent(m.label)}_rb/` : ''
-  const labelHtml = isProperty
-    ? `<a href="${zillowUrl}" target="_blank" rel="noopener noreferrer" style="font-weight:600;font-size:12px;color:#111827;text-decoration:none;border-bottom:1px dashed #9ca3af;" onmouseover="this.style.color='#3b82f6';this.style.borderBottomColor='#3b82f6'" onmouseout="this.style.color='#111827';this.style.borderBottomColor='#9ca3af'">${m.label}</a>`
-    : `<div style="font-weight:600;font-size:12px;color:#111827;">${m.label}</div>`
-
-  // Toggle switch for comps
-  const isEnabled = m.type === 'comp-enabled'
-  const toggleHtml = isComp && hasToggle && m.compKey
-    ? `<div style="border-top:1px solid #e5e7eb;padding-top:5px;margin-top:3px;display:flex;align-items:center;justify-content:space-between;">
-        <span style="font-size:10px;font-weight:500;color:${isEnabled ? '#16a34a' : '#6b7280'};">${isEnabled ? 'Included in ARV' : 'Excluded from ARV'}</span>
-        <div data-comp-key="${m.compKey}" data-action="toggle" style="
-          width:28px;height:16px;border-radius:8px;cursor:pointer;position:relative;
-          background:${isEnabled ? '#10b981' : '#d1d5db'};transition:background 0.2s;
-        "><div style="
-          width:12px;height:12px;border-radius:50%;background:white;
-          position:absolute;top:2px;${isEnabled ? 'right:2px' : 'left:2px'};
-          box-shadow:0 1px 2px rgba(0,0,0,0.2);
-        "></div></div>
-      </div>`
-    : ''
-
-  return `
-    <div style="font-family:system-ui,-apple-system,sans-serif;font-size:11px;min-width:160px;max-width:240px;line-height:1.4;">
-      <div style="font-size:9px;font-weight:600;color:${config.color};text-transform:uppercase;letter-spacing:0.5px;margin-bottom:2px;">${config.label}</div>
-      <div style="margin-bottom:3px;">${labelHtml}</div>
-      ${rows ? `<div style="border-top:1px solid #e5e7eb;padding-top:3px;display:flex;flex-direction:column;gap:1px;">${rows}</div>` : ''}
-      ${toggleHtml}
-    </div>
-  `
-}
-
 // ─── Component ──────────────────────────────────────────────────────────────
 
 interface PropertyMapInnerProps {
   markers: MapMarker[]
   onToggleComp?: (key: string) => void
+  /** Called when a marker is clicked — opens detail modal in parent */
+  onMarkerClick?: (markerType: 'subject' | 'comp', compKey?: string) => void
 }
 
-export default function PropertyMapInner({ markers, onToggleComp }: PropertyMapInnerProps) {
+export default function PropertyMapInner({ markers, onToggleComp, onMarkerClick }: PropertyMapInnerProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<maplibregl.Map | null>(null)
   const markersRef = useRef<maplibregl.Marker[]>([])
   const onToggleCompRef = useRef(onToggleComp)
   onToggleCompRef.current = onToggleComp
-
-  // Track which comp popup to re-open after markers rebuild (e.g. after toggle)
-  const reopenCompKeyRef = useRef<string | null>(null)
+  const onMarkerClickRef = useRef(onMarkerClick)
+  onMarkerClickRef.current = onMarkerClick
 
   useEffect(() => {
     if (!containerRef.current || markers.length === 0) return
@@ -120,15 +71,12 @@ export default function PropertyMapInner({ markers, onToggleComp }: PropertyMapI
     }
 
     const map = mapRef.current
-    const keyToReopen = reopenCompKeyRef.current
-    reopenCompKeyRef.current = null
 
     for (const m of markersRef.current) m.remove()
     markersRef.current = []
 
     let compIndex = 0
     const bounds = new maplibregl.LngLatBounds()
-    const hasToggle = !!onToggleCompRef.current
 
     // Render non-subject markers first, then subject last so it appears on top
     const sortedMarkers = [...markers].sort((a, b) => {
@@ -141,29 +89,6 @@ export default function PropertyMapInner({ markers, onToggleComp }: PropertyMapI
       const config = MARKER_CONFIG[m.type]
       const isComp = m.type === 'comp-enabled' || m.type === 'comp-disabled'
       const idx = isComp ? ++compIndex : undefined
-
-      const popup = new maplibregl.Popup({
-        offset: 25,
-        closeButton: false,
-        maxWidth: '260px',
-        className: 'flowstate-popup',
-      }).setHTML(buildPopupHTML(m, hasToggle))
-
-      // Wire up toggle switch click after popup opens
-      if (isComp && hasToggle && m.compKey) {
-        const compKey = m.compKey
-        popup.on('open', () => {
-          const el = popup.getElement()?.querySelector('[data-action="toggle"]') as HTMLElement | null
-          if (el) {
-            el.addEventListener('click', (e) => {
-              e.stopPropagation()
-              // Store the key so we re-open this popup after markers rebuild
-              reopenCompKeyRef.current = compKey
-              onToggleCompRef.current?.(compKey)
-            })
-          }
-        })
-      }
 
       const markerOptions: maplibregl.MarkerOptions = {
         color: config.color,
@@ -183,8 +108,10 @@ export default function PropertyMapInner({ markers, onToggleComp }: PropertyMapI
           cursor: pointer;
           box-shadow: 0 2px 8px rgba(0,0,0,0.4);
         `
-        // SVG home icon (lucide-style)
         el.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"/><path d="M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>`
+        el.addEventListener('click', () => {
+          onMarkerClickRef.current?.('subject')
+        })
         markerOptions.element = el
         delete markerOptions.color
         delete markerOptions.scale
@@ -192,6 +119,7 @@ export default function PropertyMapInner({ markers, onToggleComp }: PropertyMapI
 
       // Comps: numbered custom element
       if (isComp && idx != null) {
+        const compKey = m.compKey
         const el = document.createElement('div')
         el.className = 'flowstate-comp-marker'
         el.style.cssText = `
@@ -207,25 +135,22 @@ export default function PropertyMapInner({ markers, onToggleComp }: PropertyMapI
           text-shadow: 0 1px 2px rgba(0,0,0,0.3);
         `
         el.textContent = String(idx)
+        el.addEventListener('click', () => {
+          if (compKey) onMarkerClickRef.current?.('comp', compKey)
+        })
         markerOptions.element = el
         delete markerOptions.scale
       }
 
       const marker = new maplibregl.Marker(markerOptions)
         .setLngLat([m.lng, m.lat])
-        .setPopup(popup)
         .addTo(map)
 
       markersRef.current.push(marker)
       bounds.extend([m.lng, m.lat])
-
-      // Re-open popup if this comp was just toggled
-      if (keyToReopen && m.compKey === keyToReopen) {
-        marker.togglePopup()
-      }
     }
 
-    if (!bounds.isEmpty() && !keyToReopen) {
+    if (!bounds.isEmpty()) {
       map.fitBounds(bounds, {
         padding: 60,
         maxZoom: 15,
@@ -248,17 +173,6 @@ export default function PropertyMapInner({ markers, onToggleComp }: PropertyMapI
 
   return (
     <div>
-      <style>{`
-        .flowstate-popup .maplibregl-popup-content {
-          border-radius: 8px;
-          padding: 8px 10px;
-          box-shadow: 0 2px 8px rgba(0,0,0,0.15);
-          border: none;
-        }
-        .flowstate-popup .maplibregl-popup-tip {
-          border-top-color: white;
-        }
-      `}</style>
       <div ref={containerRef} className="w-full h-[400px]" />
       {/* Legend */}
       <div className="flex flex-wrap gap-x-4 gap-y-2 px-3 py-2 border-t border-border bg-background/50">

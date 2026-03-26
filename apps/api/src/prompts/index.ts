@@ -263,10 +263,14 @@ const GEMINI_ZILLOW_EXTRACTION = `You are extracting property listing data from 
 
 Extract ALL available fields as a flat JSON object:
 
-PROPERTY PHOTOS:
-- "photos": Array of property photo URLs from zillowstatic.com only
-- EXCLUDE agent photos, logos, icons, maps, floor plans, street view images
+PROPERTY PHOTOS (CRITICAL — only from the photo gallery at the top of the listing):
+- "photos": Array of property listing photo URLs from photos.zillowstatic.com/fp/ ONLY
+- These are the interior/exterior property photos shown in the main photo carousel/gallery
+- NEVER include agent/realtor headshots, profile pictures, brokerage logos, or team photos
+- NEVER include maps, street view, floor plans, or satellite images
+- Agent photos typically have URLs ending in -h_l.jpg, -h_n.jpg, -h_g.jpg — EXCLUDE these
 - Convert thumbnail URLs to high resolution by replacing /p_e/, /p_d/, /p_c/ with /p_f/
+- If unsure whether an image is a property photo or agent photo, EXCLUDE it
 
 LISTING DATA (numbers as raw values, no $ or commas):
 - "description", "price", "pricePerSqft", "status" (for_sale|pending|sold|off_market)
