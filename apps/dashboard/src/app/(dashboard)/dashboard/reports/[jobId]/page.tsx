@@ -55,7 +55,6 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
     effectiveComps,
     isRecalculated,
     valuationCardRef,
-    showStickyBar,
     settingsOpen,
     setSettingsOpen,
   } = useAnalysisEvaluation({
@@ -200,7 +199,7 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
                     <span className="text-body-sm font-bold text-primary tabular-nums">${displayValuation.arv?.toLocaleString() || '-'}</span>
                   </div>
                   <div className="flex items-baseline gap-1">
-                    <span className="text-caption-sm text-foreground-tertiary">Max Buy</span>
+                    <span className="text-caption-sm text-foreground-tertiary">Max Buy Price</span>
                     <span className="text-body-sm font-semibold tabular-nums">${displayValuation.buyPrice?.toLocaleString() || '-'}</span>
                   </div>
                   <div className="flex items-baseline gap-1">

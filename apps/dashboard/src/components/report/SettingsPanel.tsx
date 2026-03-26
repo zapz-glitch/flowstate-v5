@@ -232,7 +232,7 @@ export function SettingsPanel({ settingsHook, recalcData }: SettingsPanelProps) 
               <div className="text-caption font-bold text-primary tabular-nums">{fmt(recalcData.valuation.arv)}</div>
             </div>
             <div className="text-center">
-              <div className="text-caption-sm text-foreground-tertiary">Max Buy</div>
+              <div className="text-caption-sm text-foreground-tertiary">Max Buy Price</div>
               <div className="text-caption font-bold tabular-nums">{fmt(recalcData.valuation.buyPrice)}</div>
             </div>
             <div className="text-center">
