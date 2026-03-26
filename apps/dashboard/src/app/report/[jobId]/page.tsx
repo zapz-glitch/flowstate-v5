@@ -353,18 +353,14 @@ export default function ReportPage({ params }: { params: Promise<{ jobId: string
         )}
 
         {/* Two-column resizable layout */}
+        {hasMapData ? (
         <ResizablePanelGroup orientation="horizontal" id="public-report-panels" className="flex-1">
-          {hasMapData && (
-            <>
-            <ResizablePanel id="map" defaultSize={42} minSize={25} maxSize={55} className="no-print">
-              <div className="sticky top-10 h-[calc(100vh-2.5rem)] overflow-hidden">
-                <PropertyMap subject={analysis.subject} comps={effectiveComps} subjectSubdivision={analysis.subject?.subdivision} selectedCompKeys={compOverride?.selectedCompKeys} onToggleComp={handleToggleComp} onMarkerSelect={handleMarkerSelect} activeMarkerKey={activeMarkerKey} />
-              </div>
-            </ResizablePanel>
-            <ResizableHandle withHandle />
-            </>
-          )}
-
+          <ResizablePanel id="map" defaultSize={42} minSize={25} maxSize={55} className="no-print">
+            <div className="sticky top-10 h-[calc(100vh-2.5rem)] overflow-hidden">
+              <PropertyMap subject={analysis.subject} comps={effectiveComps} subjectSubdivision={analysis.subject?.subdivision} selectedCompKeys={compOverride?.selectedCompKeys} onToggleComp={handleToggleComp} onMarkerSelect={handleMarkerSelect} activeMarkerKey={activeMarkerKey} />
+            </div>
+          </ResizablePanel>
+          <ResizableHandle withHandle />
           <ResizablePanel id="content" defaultSize={58} minSize={45}>
             <div className="space-y-6 p-4 sm:p-6">
               {analysis.subject && <SubjectPropertyCard subject={analysis.subject} />}
@@ -397,6 +393,20 @@ export default function ReportPage({ params }: { params: Promise<{ jobId: string
             </div>{/* end inner padding */}
           </ResizablePanel>
         </ResizablePanelGroup>
+        ) : (
+        <div className="flex-1 space-y-6 p-4 sm:p-6 max-w-5xl mx-auto">
+          {analysis.subject && <SubjectPropertyCard subject={analysis.subject} />}
+          {displayValuation && (
+            <div ref={valuationCardRef}>
+              <ValuationCard valuation={displayValuation} isRecalculated={isRecalculated} onOpenSettings={() => setSettingsOpen(true)} />
+            </div>
+          )}
+          <RiskFloodCard riskFlags={analysis.riskFlags} floodZone={analysis.floodZone} permits={analysis.permits} />
+          {effectiveComps && (
+            <ComparablesSection comps={effectiveComps} subject={analysis.subject} subjectSubdivision={analysis.subject?.subdivision} selectedCompKeys={compOverride?.selectedCompKeys} isManual={compOverride?.isManual ?? false} recalculatedArv={isRecalculated ? displayValuation?.arv : undefined} onToggleComp={handleToggleComp} onReset={handleResetComps} />
+          )}
+        </div>
+        )}
       </div>
 
       {/* Evaluation Settings Sheet */}
