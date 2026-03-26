@@ -21,12 +21,10 @@ const HOME_SVG = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" st
 function createHomeMarkerEl(
   color: string,
   size: number,
-  opts?: { number?: number; isActive?: boolean }
+  isActive = false,
 ): HTMLDivElement {
   const el = document.createElement('div')
-  const isActive = opts?.isActive ?? false
-  const activeColor = '#f59e0b'
-  const bg = isActive ? activeColor : color
+  const bg = isActive ? '#f59e0b' : color
 
   el.style.cssText = `
     width: ${size}px; height: ${size}px;
@@ -35,20 +33,9 @@ function createHomeMarkerEl(
     border-radius: 50%;
     display: flex; align-items: center; justify-content: center;
     cursor: pointer;
-    box-shadow: ${isActive ? `0 0 0 3px rgba(245,158,11,0.4), 0 2px 8px rgba(0,0,0,0.4)` : `0 2px 6px rgba(0,0,0,0.35)`};
+    box-shadow: ${isActive ? '0 0 0 3px rgba(245,158,11,0.4), 0 2px 8px rgba(0,0,0,0.4)' : '0 2px 6px rgba(0,0,0,0.35)'};
   `
-
-  if (opts?.number != null) {
-    // Show number over a small home icon background
-    el.innerHTML = `
-      <div style="position:relative;display:flex;align-items:center;justify-content:center;">
-        <span style="color:white;font-weight:800;font-size:${size > 30 ? '13px' : '11px'};font-family:system-ui,-apple-system,sans-serif;text-shadow:0 1px 2px rgba(0,0,0,0.3);line-height:1;">${opts.number}</span>
-      </div>
-    `
-  } else {
-    el.innerHTML = HOME_SVG
-  }
-
+  el.innerHTML = HOME_SVG
   return el
 }
 
@@ -130,7 +117,6 @@ export default function PropertyMapInner({ markers, onToggleComp, onMarkerClick,
     for (const m of markersRef.current) m.remove()
     markersRef.current = []
 
-    let compIndex = 0
     const bounds = new maplibregl.LngLatBounds()
 
     // Render non-subject markers first, then subject last so it appears on top
@@ -143,23 +129,21 @@ export default function PropertyMapInner({ markers, onToggleComp, onMarkerClick,
     for (const m of sortedMarkers) {
       const config = MARKER_CONFIG[m.type]
       const isComp = m.type === 'comp-enabled' || m.type === 'comp-disabled'
-      const idx = isComp ? ++compIndex : undefined
 
       let el: HTMLDivElement
 
       if (m.type === 'subject') {
         const isActive = activeMarkerKey === 'subject'
-        el = createHomeMarkerEl(config.color, isActive ? 44 : 38, { isActive })
+        el = createHomeMarkerEl(config.color, isActive ? 40 : 34, isActive)
         el.addEventListener('click', () => onMarkerClickRef.current?.('subject'))
-      } else if (isComp && idx != null) {
+      } else if (isComp) {
         const isActive = activeMarkerKey != null && m.compKey === activeMarkerKey
-        el = createHomeMarkerEl(config.color, isActive ? 34 : 28, { number: idx, isActive })
+        el = createHomeMarkerEl(config.color, isActive ? 34 : 28, isActive)
         const compKey = m.compKey
         el.addEventListener('click', () => {
           if (compKey) onMarkerClickRef.current?.('comp', compKey)
         })
       } else {
-        // School / POI — small pin
         el = createHomeMarkerEl(config.color, 24)
       }
 
@@ -213,9 +197,7 @@ export default function PropertyMapInner({ markers, onToggleComp, onMarkerClick,
                     boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
                   }}
                   dangerouslySetInnerHTML={{
-                    __html: t === 'subject'
-                      ? `<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"/><path d="M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>`
-                      : `<span style="color:white;font-weight:bold;font-size:9px">#</span>`
+                    __html: `<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"/><path d="M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>`
                   }}
                 />
                 <span className="font-medium text-white/90">{cfg.label}</span>
