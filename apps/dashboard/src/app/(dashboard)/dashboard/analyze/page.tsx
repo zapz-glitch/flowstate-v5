@@ -616,8 +616,8 @@ export default function AnalyzePage() {
 
           {/* Two-column resizable layout: Map (left) + Content (right) */}
           {hasMapData ? (
-          <ResizablePanelGroup orientation="horizontal" id="analyze-panels" defaultLayout={{ map: 42, content: 58 }} className="flex-1 no-print-group">
-            <ResizablePanel id="map" minSize={25} maxSize={55} className="no-print">
+          <ResizablePanelGroup orientation="horizontal" id="analyze-panels" className="flex-1 no-print-group">
+            <ResizablePanel id="map" defaultSize={42} minSize={25} maxSize={55} className="no-print">
               <div className="sticky top-10 h-[calc(100vh-2.5rem)] overflow-hidden">
                 <PropertyMap
                   subject={displayData!.subject!}
@@ -631,7 +631,7 @@ export default function AnalyzePage() {
               </div>
             </ResizablePanel>
             <ResizableHandle withHandle />
-            <ResizablePanel id="content" minSize={45}>
+            <ResizablePanel id="content" defaultSize={58} minSize={45}>
             <div className="min-w-0">
               <div id="underwriter-report" data-date={new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })} className={cn('space-y-6', showTwoColumn && 'p-4 sm:p-6')}>
                 {/* Print-only report header — only when final result */}
