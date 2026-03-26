@@ -252,18 +252,18 @@ function finalizeGroupASelection(
 }
 
 /**
- * Select Group A comps using step-based filter relaxation.
+ * Select Group A comps: appraisal-first, then price preference.
  *
  * Algorithm:
- * 1. Classify comps by sale price (top X%) as "after_renovation"
- * 2. Evaluate all candidates and score by filter matches
- * 3. If top-scoring comps meet minimum threshold → select them
- * 4. If not, relax filters one step and retry:
+ * 1. Evaluate ALL comps against appraisal filters and score them
+ * 2. Select top-scoring comps that meet minimum score threshold
+ * 3. Among qualifying comps, prefer higher-priced (after-renovation)
+ * 4. If not enough qualify, relax filters one step and retry:
  *    - sqft_diff:      250 → 500 → 750 → 1000
  *    - year_built_diff:  10 →  15 →  20 →   25
  *    - sale_age:        180 → 270 → 360 →  540
  *    - distance:        0.5 → 1.0 → 1.5 →  2.0
- * 5. Also widens ARV threshold (15% → 22% → 34% → 50% → 100%)
+ * 5. Price classification applied AFTER filter selection for display
  * 6. If all steps exhausted, picks best available comps with low confidence
  */
 function selectGroupAComps(
@@ -275,66 +275,69 @@ function selectGroupAComps(
   adjustments: AppraisalAdjustment[],
 ): GroupAResult {
 
-  // Try each relaxation step (0 = default tightest, 3 = loosest)
+  // Step 1: Evaluate ALL comps against appraisal filters first, then select best
   for (let step = 0; step < MAX_RELAXATION_STEPS; step++) {
     const stepFilters = step === 0 ? filters : getFiltersAtStep(filters, step) as AppraisalFilter[]
 
-    // Also widen ARV threshold at each step
-    const stepThreshold = Math.min(
-      Math.ceil(baseThreshold * Math.pow(1.5, step)),
-      100,
-    )
+    // Evaluate ALL comps (no price gate)
+    const result = appraisalService.evaluate(subject, allComparables, { filters: stepFilters, adjustments })
 
-    const classifications = classifyCompsByPrice(allComparables, stepThreshold)
-    const groupAIds = new Set<string>()
-    for (const [id, cls] of classifications) {
-      if (cls.classification === 'after_renovation') groupAIds.add(id)
-    }
-    const candidateComps = allComparables.filter((c) => groupAIds.has(c.id))
-
-    if (candidateComps.length === 0) {
-      console.log(`[Evaluate] Step ${step} at ${stepThreshold}%: 0 candidates`)
-      continue
-    }
-
-    const result = appraisalService.evaluate(subject, candidateComps, { filters: stepFilters, adjustments })
-
-    // Score all evaluated comps
+    // Score all comps by filter match quality
     const scored = result.comparables
       .filter((c) => c.salePrice != null && c.salePrice > 0)
-      .map((c) => ({ comp: c, score: scoreComp(c.evaluation.filterResults, c.distanceMiles) }))
-      .sort((a, b) => b.score - a.score)
+      .map((c) => ({
+        comp: c,
+        score: scoreComp(c.evaluation.filterResults, c.distanceMiles),
+      }))
 
-    const topScore = scored[0]?.score ?? 0
     const qualifyingCount = scored.filter((s) => s.score >= MIN_COMP_SCORE).length
+    const topScore = scored[0]?.score ?? 0
 
-    console.log(`[Evaluate] Step ${step} at ${stepThreshold}%: ${candidateComps.length} candidates, top score ${topScore}, ${qualifyingCount} qualifying`)
+    console.log(`[Evaluate] Step ${step}: ${allComparables.length} comps evaluated, top score ${topScore}, ${qualifyingCount} qualifying (>=${MIN_COMP_SCORE})`)
 
-    if (qualifyingCount > 0 && topScore >= MIN_COMP_SCORE) {
-      const qualifying = scored.filter((s) => s.score >= MIN_COMP_SCORE)
-      const fallbackUsed = step === 0 ? 'none' as const : 'relaxed_filters' as const
-      if (step > 0) {
-        console.log(`[Evaluate] Relaxation step ${step}: filters relaxed to find ${qualifyingCount} comps`)
-      }
-      return finalizeGroupASelection(
-        qualifying.map((s) => s.comp), allComparables, groupAIds, classifications,
-        subject, appraisalService, stepFilters, adjustments, fallbackUsed,
-      )
+    if (qualifyingCount === 0) continue
+
+    // Step 2: Among qualifying comps, sort by score first, then prefer higher price (after-renovation)
+    const qualifying = scored
+      .filter((s) => s.score >= MIN_COMP_SCORE)
+      .sort((a, b) => {
+        // Primary: higher score = better filter match
+        if (b.score !== a.score) return b.score - a.score
+        // Secondary: higher sale price = more likely after-renovation
+        return (b.comp.salePrice ?? 0) - (a.comp.salePrice ?? 0)
+      })
+
+    // Step 3: Classify by price for display purposes (not selection)
+    const stepThreshold = Math.min(Math.ceil(baseThreshold * Math.pow(1.5, step)), 100)
+    const classifications = classifyCompsByPrice(allComparables, stepThreshold)
+    const groupAIds = new Set(qualifying.map((s) => s.comp.id))
+
+    const fallbackUsed = step === 0 ? 'none' as const : 'relaxed_filters' as const
+    if (step > 0) {
+      console.log(`[Evaluate] Relaxation step ${step}: filters relaxed to find ${qualifyingCount} comps`)
     }
+
+    return finalizeGroupASelection(
+      qualifying.map((s) => s.comp), allComparables, groupAIds, classifications,
+      subject, appraisalService, stepFilters, adjustments, fallbackUsed,
+    )
   }
 
-  // All steps exhausted — pick best available from ALL comps regardless of threshold
+  // All steps exhausted — pick best available with loosest filters
   console.log(`[Evaluate] All relaxation steps exhausted. Selecting best available comps.`)
 
-  const allClassifications = classifyCompsByPrice(allComparables, 100)
-  const allGroupAIds = new Set(allComparables.map((c) => c.id))
   const looseFilters = getFiltersAtStep(filters, MAX_RELAXATION_STEPS - 1) as AppraisalFilter[]
   const allResult = appraisalService.evaluate(subject, allComparables, { filters: looseFilters, adjustments })
+  const allClassifications = classifyCompsByPrice(allComparables, 100)
+  const allGroupAIds = new Set(allComparables.map((c) => c.id))
 
   const scored = allResult.comparables
     .filter((c) => c.salePrice != null && c.salePrice > 0)
     .map((c) => ({ comp: c, score: scoreComp(c.evaluation.filterResults, c.distanceMiles) }))
-    .sort((a, b) => b.score - a.score)
+    .sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score
+      return (b.comp.salePrice ?? 0) - (a.comp.salePrice ?? 0)
+    })
 
   if (scored.length === 0) {
     throw new AnalysisError(
