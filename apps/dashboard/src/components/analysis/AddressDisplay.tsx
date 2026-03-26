@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { Copy, Check } from 'lucide-react'
+import { Copy, Check, PersonStanding } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 interface AddressDisplayProps {
@@ -21,6 +21,7 @@ export function AddressDisplay({ address, className }: AddressDisplayProps) {
   }
 
   const zillowUrl = `https://www.zillow.com/homes/${encodeURIComponent(address)}_rb/`
+  const streetViewUrl = `https://www.google.com/maps/@?api=1&map_action=pano&query=${encodeURIComponent(address)}`
 
   return (
     <span className={cn('inline-flex items-center gap-1.5', className)}>
@@ -32,6 +33,16 @@ export function AddressDisplay({ address, className }: AddressDisplayProps) {
         onClick={(e) => e.stopPropagation()}
       >
         {address}
+      </a>
+      <a
+        href={streetViewUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-foreground-tertiary hover:text-blue-500 transition-colors flex-shrink-0"
+        title="Google Street View"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <PersonStanding className="w-3.5 h-3.5" />
       </a>
       <button
         type="button"
