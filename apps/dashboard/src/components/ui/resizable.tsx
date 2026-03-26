@@ -82,14 +82,14 @@ export function ResizableLayout({ left, right, className }: ResizableLayoutProps
         {left}
       </div>
 
-      {/* Drag handle */}
+      {/* Drag handle — full height of map, grip centered */}
       <div
-        className="flex-shrink-0 w-2 cursor-col-resize bg-border/40 hover:bg-primary/20 active:bg-primary/40 transition-colors flex items-center justify-center group"
+        className="flex-shrink-0 w-2 cursor-col-resize bg-border/40 hover:bg-primary/20 active:bg-primary/40 transition-colors group sticky top-10 self-start h-[calc(100vh-2.5rem)] flex items-center justify-center"
         onMouseDown={onMouseDown}
         onTouchStart={() => { dragging.current = true }}
       >
-        <div className="h-8 w-3.5 rounded-sm border bg-muted shadow-sm flex items-center justify-center opacity-60 group-hover:opacity-100 transition-opacity">
-          <GripVertical className="h-3 w-3 text-foreground-tertiary" />
+        <div className="h-10 w-3.5 rounded-sm border bg-muted shadow-sm flex items-center justify-center opacity-50 group-hover:opacity-100 transition-opacity">
+          <GripVertical className="h-4 w-4 text-foreground-tertiary" />
         </div>
       </div>
 
