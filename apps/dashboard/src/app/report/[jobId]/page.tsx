@@ -194,6 +194,23 @@ export default function ReportPage({ params }: { params: Promise<{ jobId: string
     })
   }, [params, fetchReport])
 
+  // Map marker → scroll to card (must be before early returns)
+  const [activeMarkerKey, setActiveMarkerKey] = useState<string | null>(null)
+  const handleMarkerSelect = useCallback((type: 'subject' | 'comp', compKey?: string) => {
+    const key = type === 'subject' ? 'subject' : compKey
+    if (!key) return
+    setActiveMarkerKey(key)
+    const el = document.querySelector(`[data-card-key="${key}"]`)
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      el.classList.add('ring-2', 'ring-primary', 'ring-offset-2', 'ring-offset-background')
+      setTimeout(() => {
+        el.classList.remove('ring-2', 'ring-primary', 'ring-offset-2', 'ring-offset-background')
+        setActiveMarkerKey(null)
+      }, 2000)
+    }
+  }, [])
+
   if (loading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
@@ -231,23 +248,6 @@ export default function ReportPage({ params }: { params: Promise<{ jobId: string
   const { analysis } = report
 
   const hasMapData = !!(analysis.subject?.latitude && analysis.subject?.longitude)
-
-  // Map marker → scroll to card
-  const [activeMarkerKey, setActiveMarkerKey] = useState<string | null>(null)
-  const handleMarkerSelect = useCallback((type: 'subject' | 'comp', compKey?: string) => {
-    const key = type === 'subject' ? 'subject' : compKey
-    if (!key) return
-    setActiveMarkerKey(key)
-    const el = document.querySelector(`[data-card-key="${key}"]`)
-    if (el) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'center' })
-      el.classList.add('ring-2', 'ring-primary', 'ring-offset-2', 'ring-offset-background')
-      setTimeout(() => {
-        el.classList.remove('ring-2', 'ring-primary', 'ring-offset-2', 'ring-offset-background')
-        setActiveMarkerKey(null)
-      }, 2000)
-    }
-  }, [])
 
   return (
     <div className="min-h-screen playground-bg">

@@ -85,6 +85,23 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
     fetchReport()
   }, [fetchReport])
 
+  // Map marker → scroll to card (must be before early returns)
+  const [activeMarkerKey, setActiveMarkerKey] = useState<string | null>(null)
+  const handleMarkerSelect = useCallback((type: 'subject' | 'comp', compKey?: string) => {
+    const key = type === 'subject' ? 'subject' : compKey
+    if (!key) return
+    setActiveMarkerKey(key)
+    const el = document.querySelector(`[data-card-key="${key}"]`)
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      el.classList.add('ring-2', 'ring-primary', 'ring-offset-2', 'ring-offset-background')
+      setTimeout(() => {
+        el.classList.remove('ring-2', 'ring-primary', 'ring-offset-2', 'ring-offset-background')
+        setActiveMarkerKey(null)
+      }, 2000)
+    }
+  }, [])
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-32">
@@ -112,23 +129,6 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
   const { analysis } = report
 
   const hasMapData = !!(analysis.subject?.latitude && analysis.subject?.longitude)
-
-  // Map marker → scroll to card
-  const [activeMarkerKey, setActiveMarkerKey] = useState<string | null>(null)
-  const handleMarkerSelect = useCallback((type: 'subject' | 'comp', compKey?: string) => {
-    const key = type === 'subject' ? 'subject' : compKey
-    if (!key) return
-    setActiveMarkerKey(key)
-    const el = document.querySelector(`[data-card-key="${key}"]`)
-    if (el) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'center' })
-      el.classList.add('ring-2', 'ring-primary', 'ring-offset-2', 'ring-offset-background')
-      setTimeout(() => {
-        el.classList.remove('ring-2', 'ring-primary', 'ring-offset-2', 'ring-offset-background')
-        setActiveMarkerKey(null)
-      }, 2000)
-    }
-  }, [])
 
   return (
     <div className={cn(hasMapData ? '-m-4 sm:-m-6 lg:-m-8' : 'max-w-[1600px] mx-auto space-y-6')}>
