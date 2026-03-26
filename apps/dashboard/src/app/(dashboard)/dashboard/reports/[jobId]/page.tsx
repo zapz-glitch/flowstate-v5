@@ -154,7 +154,7 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
           {displayValuation && (
             <div className="hidden sm:flex items-center gap-3 lg:gap-4 flex-1 min-w-0 text-caption-sm tabular-nums">
               <span className="text-foreground-tertiary">ARV <span className="font-bold text-primary">${displayValuation.arv?.toLocaleString() || '-'}</span></span>
-              <span className="text-foreground-tertiary">Buy <span className="font-semibold text-foreground">${displayValuation.buyPrice?.toLocaleString() || '-'}</span></span>
+              <span className="text-foreground-tertiary">Max Buy Price <span className="font-semibold text-foreground">${displayValuation.buyPrice?.toLocaleString() || '-'}</span></span>
               <span className="text-foreground-tertiary">Profit <span className={cn('font-semibold', (displayValuation.projectedProfit ?? 0) > 0 ? 'text-emerald-600' : 'text-red-600')}>${displayValuation.projectedProfit?.toLocaleString() || '-'}</span></span>
               <span className="text-foreground-tertiary hidden lg:inline">ROI <span className={cn('font-semibold', (displayValuation.projectedROI ?? 0) > 15 ? 'text-emerald-600' : (displayValuation.projectedROI ?? 0) > 0 ? 'text-foreground' : 'text-red-600')}>{displayValuation.projectedROI?.toFixed(1) || '-'}%</span></span>
               {displayValuation.recommendation && (
