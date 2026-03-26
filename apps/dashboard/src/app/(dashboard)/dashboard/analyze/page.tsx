@@ -46,6 +46,7 @@ import {
   VisionAnalysisButton,
   PropertyMap,
 } from '@/components/analysis'
+import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable'
 import {
   SubjectPropertySkeleton,
   ValuationSkeleton,
@@ -613,27 +614,25 @@ export default function AnalyzePage() {
             </div>
           )}
 
-          {/* Two-column layout: Map (left, sticky) + Content (right, scrollable) */}
-          <div className={cn('flex flex-col xl:flex-row flex-1', !showTwoColumn && 'gap-6')}>
-            {/* Left column: Sticky Map — 1/3 width */}
-            {hasMapData && (
-              <div className="xl:w-[38%] xl:flex-shrink-0 no-print">
-                <div className="xl:sticky xl:top-10 xl:h-[calc(100vh-2.5rem)] overflow-hidden">
-                  <PropertyMap
-                    subject={displayData!.subject!}
-                    comps={hasResult ? (effectiveComps ?? analysisResult?.comps) : displayData!.comps}
-                    subjectSubdivision={displayData!.subject?.subdivision}
-                    selectedCompKeys={compOverride?.selectedCompKeys}
-                    onToggleComp={handleToggleComp}
-                    onMarkerSelect={handleMarkerSelect}
-                    activeMarkerKey={activeMarkerKey}
-                  />
-                </div>
+          {/* Two-column resizable layout: Map (left) + Content (right) */}
+          {hasMapData ? (
+          <ResizablePanelGroup orientation="horizontal" id="analyze-panels" className="flex-1 no-print-group">
+            <ResizablePanel id="map" defaultSize={38} minSize={25} maxSize={55} className="no-print">
+              <div className="sticky top-10 h-[calc(100vh-2.5rem)] overflow-hidden">
+                <PropertyMap
+                  subject={displayData!.subject!}
+                  comps={hasResult ? (effectiveComps ?? analysisResult?.comps) : displayData!.comps}
+                  subjectSubdivision={displayData!.subject?.subdivision}
+                  selectedCompKeys={compOverride?.selectedCompKeys}
+                  onToggleComp={handleToggleComp}
+                  onMarkerSelect={handleMarkerSelect}
+                  activeMarkerKey={activeMarkerKey}
+                />
               </div>
-            )}
-
-            {/* Right column: All content cards */}
-            <div className={cn('flex-1 min-w-0', showTwoColumn && 'border-l border-border')}>
+            </ResizablePanel>
+            <ResizableHandle withHandle />
+            <ResizablePanel id="content" defaultSize={62} minSize={45}>
+            <div className="min-w-0">
               <div id="underwriter-report" data-date={new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })} className={cn('space-y-6', showTwoColumn && 'p-4 sm:p-6')}>
                 {/* Print-only report header — only when final result */}
                 {hasResult && (
@@ -761,8 +760,16 @@ export default function AnalyzePage() {
                   )}
                 </div>
               )}
-            </div>{/* end right column */}
-          </div>{/* end two-column flex */}
+            </div>{/* end right inner */}
+            </ResizablePanel>
+          </ResizablePanelGroup>
+          ) : (
+          <div className="flex-1 min-w-0">
+              <div id="underwriter-report-fallback" className="space-y-6 p-4 sm:p-6">
+                {/* Single column fallback when no map data — content rendered by parent */}
+              </div>
+          </div>
+          )}
         </div>
       )}
 
