@@ -156,7 +156,6 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
               <span className="text-foreground-tertiary">ARV <span className="font-bold text-primary">${displayValuation.arv?.toLocaleString() || '-'}</span></span>
               <span className="text-foreground-tertiary">Max Buy Price <span className="font-semibold text-foreground">${displayValuation.buyPrice?.toLocaleString() || '-'}</span></span>
               <span className="text-foreground-tertiary">Profit <span className={cn('font-semibold', (displayValuation.projectedProfit ?? 0) > 0 ? 'text-emerald-600' : 'text-red-600')}>${displayValuation.projectedProfit?.toLocaleString() || '-'}</span></span>
-              <span className="text-foreground-tertiary hidden lg:inline">ROI <span className={cn('font-semibold', (displayValuation.projectedROI ?? 0) > 15 ? 'text-emerald-600' : (displayValuation.projectedROI ?? 0) > 0 ? 'text-foreground' : 'text-red-600')}>{displayValuation.projectedROI?.toFixed(1) || '-'}%</span></span>
               {displayValuation.recommendation && (
                 <Badge variant="outline" className={cn(
                   'text-[10px] px-1.5 py-0',

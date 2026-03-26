@@ -335,14 +335,6 @@ export default function ReportPage({ params }: { params: Promise<{ jobId: string
                     ${displayValuation.projectedProfit?.toLocaleString() || '-'}
                   </span>
                 </div>
-                {displayValuation.projectedROI != null && (
-                  <div className="flex items-baseline gap-1">
-                    <span className="text-caption-sm text-foreground-tertiary">ROI</span>
-                    <span className={cn('text-body-sm font-semibold tabular-nums', displayValuation.projectedROI > 15 ? 'text-emerald-600' : displayValuation.projectedROI > 0 ? 'text-foreground' : 'text-red-600')}>
-                      {displayValuation.projectedROI.toFixed(1)}%
-                    </span>
-                  </div>
-                )}
               </div>
               {displayValuation.recommendation && (
                 <Badge variant="outline" className={cn(
