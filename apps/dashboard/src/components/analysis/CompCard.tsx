@@ -149,7 +149,7 @@ export function CompCard({
           </div>
         </div>
 
-        <div className={cn('grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 mt-3 rounded-lg bg-muted/40', !isAlwaysExpanded && 'cursor-pointer')} onClick={handleToggle}>
+        <div className={cn('flex flex-wrap mt-3 rounded-lg bg-muted/40', !isAlwaysExpanded && 'cursor-pointer')} onClick={handleToggle}>
           <StatCell label="Beds" value={comp.bedrooms ?? '-'} />
           <StatCell label="Baths" value={comp.bathrooms ?? '-'} />
           <StatCell label="Sq Ft" value={comp.squareFeet?.toLocaleString() || '-'} />

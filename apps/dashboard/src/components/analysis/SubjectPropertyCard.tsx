@@ -45,7 +45,7 @@ export function SubjectPropertyCard({ subject, children, footer }: SubjectProper
           )}
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 mt-4 rounded-lg bg-muted/40">
+        <div className="flex flex-wrap mt-4 rounded-lg bg-muted/40">
           <StatCell label="Beds" value={subject.bedrooms ?? '-'} />
           <StatCell label="Baths" value={subject.bathrooms ?? '-'} />
           <StatCell label="Sq Ft" value={subject.squareFeet?.toLocaleString() || '-'} />
