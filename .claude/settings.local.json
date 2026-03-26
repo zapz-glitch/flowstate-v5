@@ -30,7 +30,14 @@
       "Bash(bash test-addresses.sh)",
       "Read(//private/tmp/flowstate-test-results/**)",
       "Bash(xargs basename:*)",
-      "Bash(grep \"NeighbourhoodData\" /Users/yalamber/Projects/flowstate/flowstate-api/apps/dashboard/src/app/\\\\\\(dashboard\\\\\\)/dashboard/analyze/page.tsx /Users/yalamber/Projects/flowstate/flowstate-api/apps/dashboard/src/app/\\\\\\(dashboard\\\\\\)/dashboard/reports/[jobId]/page.tsx /Users/yalamber/Projects/flowstate/flowstate-api/apps/dashboard/src/app/report/[jobId]/page.tsx)"
+      "Bash(grep \"NeighbourhoodData\" /Users/yalamber/Projects/flowstate/flowstate-api/apps/dashboard/src/app/\\\\\\(dashboard\\\\\\)/dashboard/analyze/page.tsx /Users/yalamber/Projects/flowstate/flowstate-api/apps/dashboard/src/app/\\\\\\(dashboard\\\\\\)/dashboard/reports/[jobId]/page.tsx /Users/yalamber/Projects/flowstate/flowstate-api/apps/dashboard/src/app/report/[jobId]/page.tsx)",
+      "Bash(git checkout:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(node -e \"const r = require\\(''react-resizable-panels''\\); console.log\\(Object.keys\\(r\\)\\)\")",
+      "Bash(node -e \"const r = require\\(''''react-resizable-panels''''\\); const g = new r.Group\\({}\\); console.log\\(typeof r.Group\\)\")",
+      "Bash(python3 -c \"import sys,json;d=json.load\\(sys.stdin\\);print\\(''''version:'''', d.get\\(''''version''''\\)\\);print\\(''''types:'''', d.get\\(''''types'''',''''none''''\\)\\)\")",
+      "Bash(npm install:*)"
     ]
   }
 }
