@@ -2,10 +2,6 @@
 
 import { useMemo, useState, useCallback } from 'react'
 import dynamic from 'next/dynamic'
-import { X } from 'lucide-react'
-import { cn } from '@/lib/utils'
-import { SubjectPropertyCard } from './SubjectPropertyCard'
-import { CompCard } from './CompCard'
 import type { SubjectData, CompItem, NeighbourhoodData } from './shared-types'
 
 const MapInner = dynamic(() => import('./PropertyMapInner'), {
@@ -37,12 +33,13 @@ interface PropertyMapProps {
   selectedCompKeys?: Set<string>
   /** Called when a comp's enable/disable toggle is clicked */
   onToggleComp?: (key: string) => void
+  /** Called when a marker is clicked — parent scrolls to the corresponding card */
+  onMarkerSelect?: (type: 'subject' | 'comp', compKey?: string) => void
+  /** Currently highlighted marker key ('subject' or a comp key) */
+  activeMarkerKey?: string | null
 }
 
-export function PropertyMap({ subject, comps, neighbourhood, subjectSubdivision, selectedCompKeys, onToggleComp }: PropertyMapProps) {
-  const [modalOpen, setModalOpen] = useState(false)
-  const [selectedMarker, setSelectedMarker] = useState<{ type: 'subject' | 'comp'; compKey?: string } | null>(null)
-
+export function PropertyMap({ subject, comps, neighbourhood, selectedCompKeys, onToggleComp, onMarkerSelect, activeMarkerKey }: PropertyMapProps) {
   const markers = useMemo(() => {
     const m: MapMarker[] = []
 
@@ -135,94 +132,17 @@ export function PropertyMap({ subject, comps, neighbourhood, subjectSubdivision,
   }, [subject, comps, neighbourhood, selectedCompKeys])
 
   const handleMarkerClick = useCallback((markerType: 'subject' | 'comp', compKey?: string) => {
-    setSelectedMarker({ type: markerType, compKey })
-    setModalOpen(true)
-  }, [])
+    onMarkerSelect?.(markerType, compKey)
+  }, [onMarkerSelect])
 
-  // Find the selected comp for the modal
-  const selectedComp = useMemo(() => {
-    if (!selectedMarker || selectedMarker.type !== 'comp' || !comps?.items) return null
-    const idx = comps.items.findIndex((c, i) => (c.address || `comp-${i}`) === selectedMarker.compKey)
-    if (idx === -1) return null
-    return { comp: comps.items[idx], index: idx }
-  }, [selectedMarker, comps?.items])
-
-  const isSelectedForArv = selectedComp && selectedCompKeys
-    ? selectedCompKeys.has(selectedMarker!.compKey!)
-    : undefined
-
-  // Need at least the subject marker to render the map
   if (markers.length === 0) return null
-
-  const activeMarkerKey = selectedMarker?.type === 'subject' ? 'subject' : selectedMarker?.compKey ?? null
-
-  // Normal: inline map. Expanded: fullscreen split view (map left, details right).
-  if (modalOpen && selectedMarker) {
-    return (
-      <>
-        {/* Fullscreen split overlay */}
-        <div className="fixed inset-0 z-50 bg-background flex flex-col">
-          {/* Top bar */}
-          <div className="flex items-center justify-between px-4 py-2.5 border-b border-border flex-shrink-0 bg-background">
-            <span className="text-body-sm font-semibold">
-              {selectedMarker.type === 'subject' ? 'Subject Property' : 'Comparable Property'}
-            </span>
-            <button
-              type="button"
-              onClick={() => setModalOpen(false)}
-              className="p-1.5 rounded-lg text-foreground-tertiary hover:text-foreground hover:bg-secondary transition-colors"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-
-          {/* Split: map + details */}
-          <div className="flex flex-col lg:flex-row flex-1 min-h-0 overflow-hidden">
-            {/* Map — takes remaining space */}
-            <div className="flex-1 min-h-[200px] lg:min-h-0">
-              <MapInner
-                markers={markers}
-                onToggleComp={onToggleComp}
-                onMarkerClick={handleMarkerClick}
-                activeMarkerKey={activeMarkerKey}
-              />
-            </div>
-
-            {/* Detail panel */}
-            <div className="w-full lg:w-[520px] lg:flex-shrink-0 border-t lg:border-t-0 lg:border-l border-border bg-background overflow-y-auto">
-              <div className="p-4">
-                {selectedMarker.type === 'subject' && subject && (
-                  <SubjectPropertyCard subject={subject} />
-                )}
-                {selectedMarker.type === 'comp' && selectedComp && (
-                  <CompCard
-                    comp={selectedComp.comp}
-                    index={selectedComp.index}
-                    subject={subject}
-                    subjectSubdivision={subjectSubdivision}
-                    isExpanded={true}
-                    isSelectedForArv={isSelectedForArv}
-                    onToggleArv={
-                      onToggleComp && selectedMarker.compKey
-                        ? () => onToggleComp(selectedMarker.compKey!)
-                        : undefined
-                    }
-                  />
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-
-      </>
-    )
-  }
 
   return (
     <MapInner
       markers={markers}
       onToggleComp={onToggleComp}
       onMarkerClick={handleMarkerClick}
+      activeMarkerKey={activeMarkerKey}
     />
   )
 }

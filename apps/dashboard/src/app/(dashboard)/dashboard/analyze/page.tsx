@@ -242,6 +242,25 @@ export default function AnalyzePage() {
     stickyBarRootMargin: '-60px 0px 0px 0px',
   })
 
+  // Map marker → scroll to card in right column
+  const [activeMarkerKey, setActiveMarkerKey] = useState<string | null>(null)
+  const handleMarkerSelect = useCallback((type: 'subject' | 'comp', compKey?: string) => {
+    const key = type === 'subject' ? 'subject' : compKey
+    if (!key) return
+    setActiveMarkerKey(key)
+    // Scroll the card into view
+    const el = document.querySelector(`[data-card-key="${key}"]`)
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      // Brief highlight animation
+      el.classList.add('ring-2', 'ring-primary', 'ring-offset-2', 'ring-offset-background')
+      setTimeout(() => {
+        el.classList.remove('ring-2', 'ring-primary', 'ring-offset-2', 'ring-offset-background')
+        setActiveMarkerKey(null)
+      }, 2000)
+    }
+  }, [])
+
   // Analysis handler
   const handleAnalyze = useCallback(async () => {
     if (!address.trim()) return
@@ -626,6 +645,8 @@ export default function AnalyzePage() {
                     subjectSubdivision={displayData!.subject?.subdivision}
                     selectedCompKeys={compOverride?.selectedCompKeys}
                     onToggleComp={handleToggleComp}
+                    onMarkerSelect={handleMarkerSelect}
+                    activeMarkerKey={activeMarkerKey}
                   />
                 </div>
               </div>

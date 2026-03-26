@@ -53,10 +53,13 @@ export function CompCard({
     normalizeSubdivision(subjectSubdivision) === normalizeSubdivision(comp.subdivision)
   )
 
+  const cardKey = comp.address || `comp-${index}`
+
   return (
     <div
+      data-card-key={cardKey}
       className={cn(
-        'rounded-xl transition-all duration-200 border border-border',
+        'rounded-xl transition-all duration-300 border border-border',
         comp.isBestComp && isEnabled && 'border-amber-500/40 ring-1 ring-amber-500/20',
         isEnabled ? 'border-l-2 border-l-emerald-500/50' : 'opacity-70'
       )}

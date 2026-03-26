@@ -113,6 +113,23 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
 
   const hasMapData = !!(analysis.subject?.latitude && analysis.subject?.longitude)
 
+  // Map marker → scroll to card
+  const [activeMarkerKey, setActiveMarkerKey] = useState<string | null>(null)
+  const handleMarkerSelect = useCallback((type: 'subject' | 'comp', compKey?: string) => {
+    const key = type === 'subject' ? 'subject' : compKey
+    if (!key) return
+    setActiveMarkerKey(key)
+    const el = document.querySelector(`[data-card-key="${key}"]`)
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      el.classList.add('ring-2', 'ring-primary', 'ring-offset-2', 'ring-offset-background')
+      setTimeout(() => {
+        el.classList.remove('ring-2', 'ring-primary', 'ring-offset-2', 'ring-offset-background')
+        setActiveMarkerKey(null)
+      }, 2000)
+    }
+  }, [])
+
   return (
     <div className={cn(hasMapData ? '-m-4 sm:-m-6 lg:-m-8' : 'max-w-[1600px] mx-auto space-y-6')}>
       {/* Header */}
@@ -234,7 +251,7 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
         {hasMapData && (
           <div className="xl:w-[50%] xl:flex-shrink-0 no-print">
             <div className="xl:sticky xl:top-0 xl:h-screen overflow-hidden">
-              <PropertyMap subject={analysis.subject} comps={effectiveComps} subjectSubdivision={analysis.subject?.subdivision} selectedCompKeys={compOverride?.selectedCompKeys} onToggleComp={handleToggleComp} />
+              <PropertyMap subject={analysis.subject} comps={effectiveComps} subjectSubdivision={analysis.subject?.subdivision} selectedCompKeys={compOverride?.selectedCompKeys} onToggleComp={handleToggleComp} onMarkerSelect={handleMarkerSelect} activeMarkerKey={activeMarkerKey} />
             </div>
           </div>
         )}

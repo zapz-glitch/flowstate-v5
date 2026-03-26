@@ -17,7 +17,7 @@ interface SubjectPropertyCardProps {
 
 export function SubjectPropertyCard({ subject, children, footer }: SubjectPropertyCardProps) {
   return (
-    <div className="rounded-xl overflow-hidden border border-border">
+    <div data-card-key="subject" className="rounded-xl overflow-hidden border border-border transition-all duration-300">
       <div className="px-6 py-5">
         <div>
           <div className="flex items-center gap-2 flex-wrap">
