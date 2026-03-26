@@ -12,7 +12,7 @@ import {
   SheetDescription,
 } from '@/components/ui/sheet'
 import { cn } from '@/lib/utils'
-import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable'
+import { Group as ResizableGroup, Panel as ResizablePanel, Separator as ResizableSeparator } from 'react-resizable-panels'
 import { getSavedReport } from '@/lib/client-api'
 import { useAnalysisEvaluation } from '@/hooks/use-analysis-evaluation'
 import { SettingsPanel } from '@/components/report/SettingsPanel'
@@ -131,7 +131,7 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
   const hasMapData = !!(analysis.subject?.latitude && analysis.subject?.longitude)
 
   return (
-    <div className={cn(hasMapData ? '-m-4 sm:-m-6 lg:-m-8' : 'max-w-[1600px] mx-auto space-y-6')}>
+    <div className={cn(hasMapData ? '-m-4 sm:-m-6 lg:-m-8 min-h-screen flex flex-col' : 'max-w-[1600px] mx-auto space-y-6')}>
       {/* Unified sticky toolbar — address, metrics, actions in one row */}
       <div className="sticky top-0 z-20 no-print border-b border-border bg-background/95 backdrop-blur-xl">
         <div className="px-3 sm:px-5 py-2 flex items-center gap-2 sm:gap-4">
@@ -188,13 +188,15 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
 
       {/* Two-column resizable layout */}
       {hasMapData ? (
-      <ResizablePanelGroup orientation="horizontal" id="report-panels" className="flex-1">
+      <ResizableGroup orientation="horizontal" id="report-panels" style={{ display: 'flex', height: '100%' }}>
         <ResizablePanel id="map" defaultSize={42} minSize={25} maxSize={55} className="no-print">
           <div className="sticky top-10 h-[calc(100vh-2.5rem)] overflow-hidden">
             <PropertyMap subject={analysis.subject} comps={effectiveComps} subjectSubdivision={analysis.subject?.subdivision} selectedCompKeys={compOverride?.selectedCompKeys} onToggleComp={handleToggleComp} onMarkerSelect={handleMarkerSelect} activeMarkerKey={activeMarkerKey} />
           </div>
         </ResizablePanel>
-        <ResizableHandle withHandle />
+        <ResizableSeparator style={{ width: 8, cursor: 'col-resize', background: 'var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ width: 14, height: 32, borderRadius: 4, border: '1px solid var(--border)', background: 'var(--muted)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>⋮</div>
+        </ResizableSeparator>
         <ResizablePanel id="content" defaultSize={58} minSize={45}>
           <div className="space-y-6 p-4 sm:p-6">
           {analysis.subject && (
@@ -245,7 +247,7 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
           </div>
           </div>{/* end inner content padding */}
         </ResizablePanel>
-      </ResizablePanelGroup>
+      </ResizableGroup>
       ) : (
       <div className="flex-1">
         <div className="space-y-6 p-4 sm:p-6 max-w-5xl mx-auto">
