@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Home, SlidersHorizontal, RotateCcw, ChevronDown } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import type { CompsData, CompItem, SubjectData } from './shared-types'
@@ -22,6 +22,8 @@ export interface ComparablesSectionProps {
   onToggleComp?: (key: string) => void
   /** Called when reset button is clicked */
   onReset?: () => void
+  /** When set, auto-expands excluded section and highlights this comp key */
+  highlightedCompKey?: string | null
 }
 
 export function ComparablesSection({
@@ -33,9 +35,22 @@ export function ComparablesSection({
   recalculatedArv,
   onToggleComp,
   onReset,
+  highlightedCompKey,
 }: ComparablesSectionProps) {
   const [expandedComps, setExpandedComps] = useState<Set<string>>(new Set())
   const [excludedOpen, setExcludedOpen] = useState(false)
+
+  // Auto-expand excluded section when a highlighted comp is in it
+  useEffect(() => {
+    if (!highlightedCompKey) return
+    const compItems = comps.items || []
+    const isExcluded = selectedCompKeys
+      ? !selectedCompKeys.has(highlightedCompKey)
+      : compItems.some((c, i) => getCompKey(c, i) === highlightedCompKey && c.isEnabled === false)
+    if (isExcluded && !excludedOpen) {
+      setExcludedOpen(true)
+    }
+  }, [highlightedCompKey, comps.items, selectedCompKeys, excludedOpen])
   const compItems = comps.items || []
 
   const hasInteractiveSelection = !!selectedCompKeys

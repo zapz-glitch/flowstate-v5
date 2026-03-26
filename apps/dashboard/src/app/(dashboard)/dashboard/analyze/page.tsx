@@ -244,22 +244,28 @@ export default function AnalyzePage() {
 
   // Map marker → scroll to card in right column
   const [activeMarkerKey, setActiveMarkerKey] = useState<string | null>(null)
-  const handleMarkerSelect = useCallback((type: 'subject' | 'comp', compKey?: string) => {
-    const key = type === 'subject' ? 'subject' : compKey
-    if (!key) return
-    setActiveMarkerKey(key)
-    // Scroll the card into view
+  const scrollAndHighlight = useCallback((key: string) => {
     const el = document.querySelector(`[data-card-key="${key}"]`)
     if (el) {
       el.scrollIntoView({ behavior: 'smooth', block: 'center' })
-      // Brief highlight animation
       el.classList.add('ring-2', 'ring-primary', 'ring-offset-2', 'ring-offset-background')
       setTimeout(() => {
         el.classList.remove('ring-2', 'ring-primary', 'ring-offset-2', 'ring-offset-background')
         setActiveMarkerKey(null)
       }, 2000)
+      return true
     }
+    return false
   }, [])
+  const handleMarkerSelect = useCallback((type: 'subject' | 'comp', compKey?: string) => {
+    const key = type === 'subject' ? 'subject' : compKey
+    if (!key) return
+    setActiveMarkerKey(key)
+    // Try immediately, retry after 150ms if excluded section needs to expand
+    if (!scrollAndHighlight(key)) {
+      setTimeout(() => scrollAndHighlight(key), 150)
+    }
+  }, [scrollAndHighlight])
 
   // Analysis handler
   const handleAnalyze = useCallback(async () => {
@@ -710,6 +716,7 @@ export default function AnalyzePage() {
                       recalculatedArv={isRecalculated ? displayValuation?.arv : undefined}
                       onToggleComp={handleToggleComp}
                       onReset={handleResetComps}
+                      highlightedCompKey={activeMarkerKey}
                     />
                   )
                 ) : displayData && displayData.comps && displayData.comps.items && displayData.comps.items.length > 0 ? (

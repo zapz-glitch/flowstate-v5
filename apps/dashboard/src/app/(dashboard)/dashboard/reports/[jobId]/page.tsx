@@ -87,10 +87,7 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
 
   // Map marker → scroll to card (must be before early returns)
   const [activeMarkerKey, setActiveMarkerKey] = useState<string | null>(null)
-  const handleMarkerSelect = useCallback((type: 'subject' | 'comp', compKey?: string) => {
-    const key = type === 'subject' ? 'subject' : compKey
-    if (!key) return
-    setActiveMarkerKey(key)
+  const scrollAndHighlight = useCallback((key: string) => {
     const el = document.querySelector(`[data-card-key="${key}"]`)
     if (el) {
       el.scrollIntoView({ behavior: 'smooth', block: 'center' })
@@ -99,8 +96,18 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
         el.classList.remove('ring-2', 'ring-primary', 'ring-offset-2', 'ring-offset-background')
         setActiveMarkerKey(null)
       }, 2000)
+      return true
     }
+    return false
   }, [])
+  const handleMarkerSelect = useCallback((type: 'subject' | 'comp', compKey?: string) => {
+    const key = type === 'subject' ? 'subject' : compKey
+    if (!key) return
+    setActiveMarkerKey(key)
+    if (!scrollAndHighlight(key)) {
+      setTimeout(() => scrollAndHighlight(key), 150)
+    }
+  }, [scrollAndHighlight])
 
   if (loading) {
     return (
@@ -231,6 +238,7 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
                 recalculatedArv={isRecalculated ? displayValuation?.arv : undefined}
                 onToggleComp={handleToggleComp}
                 onReset={handleResetComps}
+                highlightedCompKey={activeMarkerKey}
               />
             )}
 
