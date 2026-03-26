@@ -560,12 +560,65 @@ export default function AnalyzePage() {
 
 
 
+          {/* Full-width sticky valuation bar — spans across map and content */}
+          {hasResult && displayValuation && (
+            <div className="sticky top-0 z-20 no-print border-b border-border bg-background/95 backdrop-blur-xl">
+              <div className="px-4 sm:px-6 py-2.5 flex items-center gap-3 sm:gap-5 flex-wrap">
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <DollarSign className="w-4 h-4 text-primary" />
+                  {isRecalculated && (
+                    <Badge className="bg-amber-500/15 text-amber-700 border-amber-500/30 text-[10px] px-1.5 py-0">Recalculated</Badge>
+                  )}
+                </div>
+                <div className="flex items-center gap-4 sm:gap-5 flex-1 min-w-0 flex-wrap">
+                  <div className="flex items-baseline gap-1">
+                    <span className="text-caption-sm text-foreground-tertiary">ARV</span>
+                    <span className="text-body-sm font-bold text-primary tabular-nums">${displayValuation.arv?.toLocaleString() || '-'}</span>
+                  </div>
+                  <div className="flex items-baseline gap-1">
+                    <span className="text-caption-sm text-foreground-tertiary">Max Buy Price</span>
+                    <span className="text-body-sm font-semibold tabular-nums">${displayValuation.buyPrice?.toLocaleString() || '-'}</span>
+                  </div>
+                  <div className="flex items-baseline gap-1">
+                    <span className="text-caption-sm text-foreground-tertiary">Rehab</span>
+                    <span className="text-body-sm font-medium tabular-nums">${displayValuation.rehabCost?.toLocaleString() || '-'}</span>
+                  </div>
+                  <div className="flex items-baseline gap-1">
+                    <span className="text-caption-sm text-foreground-tertiary">Profit</span>
+                    <span className={cn('text-body-sm font-semibold tabular-nums', (displayValuation.projectedProfit ?? 0) > 0 ? 'text-emerald-600' : 'text-red-600')}>
+                      ${displayValuation.projectedProfit?.toLocaleString() || '-'}
+                    </span>
+                  </div>
+                  {displayValuation.projectedROI != null && (
+                    <div className="flex items-baseline gap-1">
+                      <span className="text-caption-sm text-foreground-tertiary">ROI</span>
+                      <span className={cn('text-body-sm font-semibold tabular-nums', displayValuation.projectedROI > 15 ? 'text-emerald-600' : displayValuation.projectedROI > 0 ? 'text-foreground' : 'text-red-600')}>
+                        {displayValuation.projectedROI.toFixed(1)}%
+                      </span>
+                    </div>
+                  )}
+                </div>
+                {displayValuation.recommendation && (
+                  <Badge variant="outline" className={cn(
+                    'text-[10px] px-2 py-0 flex-shrink-0',
+                    displayValuation.recommendation.toUpperCase().includes('PURSUE') && 'bg-emerald-500/10 text-emerald-700 border-emerald-500/30',
+                    displayValuation.recommendation.toUpperCase().includes('PASS') && 'bg-red-500/10 text-red-700 border-red-500/30',
+                    displayValuation.recommendation.toUpperCase().includes('REVIEW') && 'bg-amber-500/10 text-amber-700 border-amber-500/30',
+                  )}>{displayValuation.recommendation}</Badge>
+                )}
+                <button type="button" onClick={() => setSettingsOpen(true)} className="p-1.5 rounded-lg text-foreground-tertiary hover:text-foreground hover:bg-secondary transition-colors flex-shrink-0" title="Evaluation Settings">
+                  <SlidersHorizontal className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Two-column layout: Map (left, sticky) + Content (right, scrollable) */}
-          <div className={cn('flex flex-col xl:flex-row', !showTwoColumn && 'gap-6')}>
-            {/* Left column: Sticky Map — edge-to-edge, no border */}
+          <div className={cn('flex flex-col xl:flex-row flex-1', !showTwoColumn && 'gap-6')}>
+            {/* Left column: Sticky Map — 1/3 width */}
             {hasMapData && (
-              <div className="xl:w-[40%] xl:flex-shrink-0 no-print">
-                <div className="xl:sticky xl:top-0 xl:h-screen overflow-hidden">
+              <div className="xl:w-1/3 xl:flex-shrink-0 no-print">
+                <div className="xl:sticky xl:top-10 xl:h-[calc(100vh-2.5rem)] overflow-hidden">
                   <PropertyMap
                     subject={displayData!.subject!}
                     comps={hasResult ? (effectiveComps ?? analysisResult?.comps) : displayData!.comps}
@@ -581,59 +634,6 @@ export default function AnalyzePage() {
 
             {/* Right column: All content cards */}
             <div className={cn('flex-1 min-w-0', showTwoColumn && 'border-l border-border')}>
-              {/* Sticky valuation summary — always visible at top of content column */}
-              {hasResult && displayValuation && (
-                <div className="sticky top-0 z-10 no-print border-b border-border bg-background/95 backdrop-blur-xl">
-                  <div className="px-4 sm:px-6 py-2.5 flex items-center gap-3 sm:gap-5 flex-wrap">
-                    <div className="flex items-center gap-2 flex-shrink-0">
-                      <DollarSign className="w-4 h-4 text-primary" />
-                      {isRecalculated && (
-                        <Badge className="bg-amber-500/15 text-amber-700 border-amber-500/30 text-[10px] px-1.5 py-0">Recalculated</Badge>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-4 sm:gap-5 flex-1 min-w-0 flex-wrap">
-                      <div className="flex items-baseline gap-1">
-                        <span className="text-caption-sm text-foreground-tertiary">ARV</span>
-                        <span className="text-body-sm font-bold text-primary tabular-nums">${displayValuation.arv?.toLocaleString() || '-'}</span>
-                      </div>
-                      <div className="flex items-baseline gap-1">
-                        <span className="text-caption-sm text-foreground-tertiary">Max Buy Price</span>
-                        <span className="text-body-sm font-semibold tabular-nums">${displayValuation.buyPrice?.toLocaleString() || '-'}</span>
-                      </div>
-                      <div className="flex items-baseline gap-1">
-                        <span className="text-caption-sm text-foreground-tertiary">Rehab</span>
-                        <span className="text-body-sm font-medium tabular-nums">${displayValuation.rehabCost?.toLocaleString() || '-'}</span>
-                      </div>
-                      <div className="flex items-baseline gap-1">
-                        <span className="text-caption-sm text-foreground-tertiary">Profit</span>
-                        <span className={cn('text-body-sm font-semibold tabular-nums', (displayValuation.projectedProfit ?? 0) > 0 ? 'text-emerald-600' : 'text-red-600')}>
-                          ${displayValuation.projectedProfit?.toLocaleString() || '-'}
-                        </span>
-                      </div>
-                      {displayValuation.projectedROI != null && (
-                        <div className="flex items-baseline gap-1">
-                          <span className="text-caption-sm text-foreground-tertiary">ROI</span>
-                          <span className={cn('text-body-sm font-semibold tabular-nums', displayValuation.projectedROI > 15 ? 'text-emerald-600' : displayValuation.projectedROI > 0 ? 'text-foreground' : 'text-red-600')}>
-                            {displayValuation.projectedROI.toFixed(1)}%
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                    {displayValuation.recommendation && (
-                      <Badge variant="outline" className={cn(
-                        'text-[10px] px-2 py-0 flex-shrink-0',
-                        displayValuation.recommendation.toUpperCase().includes('PURSUE') && 'bg-emerald-500/10 text-emerald-700 border-emerald-500/30',
-                        displayValuation.recommendation.toUpperCase().includes('PASS') && 'bg-red-500/10 text-red-700 border-red-500/30',
-                        displayValuation.recommendation.toUpperCase().includes('REVIEW') && 'bg-amber-500/10 text-amber-700 border-amber-500/30',
-                      )}>{displayValuation.recommendation}</Badge>
-                    )}
-                    <button type="button" onClick={() => setSettingsOpen(true)} className="p-1.5 rounded-lg text-foreground-tertiary hover:text-foreground hover:bg-secondary transition-colors flex-shrink-0" title="Evaluation Settings">
-                      <SlidersHorizontal className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                </div>
-              )}
-
               <div id="underwriter-report" data-date={new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })} className={cn('space-y-6', showTwoColumn && 'p-4 sm:p-6')}>
                 {/* Print-only report header — only when final result */}
                 {hasResult && (
