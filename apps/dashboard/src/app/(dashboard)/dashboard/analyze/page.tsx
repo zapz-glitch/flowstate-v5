@@ -617,7 +617,7 @@ export default function AnalyzePage() {
           <div className={cn('flex flex-col xl:flex-row flex-1', !showTwoColumn && 'gap-6')}>
             {/* Left column: Sticky Map — 1/3 width */}
             {hasMapData && (
-              <div className="xl:w-1/3 xl:flex-shrink-0 no-print">
+              <div className="xl:w-[38%] xl:flex-shrink-0 no-print">
                 <div className="xl:sticky xl:top-10 xl:h-[calc(100vh-2.5rem)] overflow-hidden">
                   <PropertyMap
                     subject={displayData!.subject!}

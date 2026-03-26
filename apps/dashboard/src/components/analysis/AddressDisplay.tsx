@@ -25,9 +25,17 @@ export function AddressDisplay({ address, className }: AddressDisplayProps) {
 
   return (
     <span className={cn('inline-flex flex-col gap-1', className)}>
-      {/* Address + copy */}
+      {/* Address (Zillow link) + copy */}
       <span className="inline-flex items-center gap-1.5">
-        <span>{address}</span>
+        <a
+          href={zillowUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="hover:text-primary hover:underline transition-colors"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {address}
+        </a>
         <button
           type="button"
           onClick={handleCopy}
@@ -37,27 +45,16 @@ export function AddressDisplay({ address, className }: AddressDisplayProps) {
           {copied ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}
         </button>
       </span>
-      {/* External links */}
-      <span className="inline-flex items-center gap-2">
-        <a
-          href={zillowUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-500 hover:bg-blue-500/20 transition-colors"
-          onClick={(e) => e.stopPropagation()}
-        >
-          Zillow
-        </a>
-        <a
-          href={streetViewUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20 transition-colors"
-          onClick={(e) => e.stopPropagation()}
-        >
-          Street View
-        </a>
-      </span>
+      {/* Street View link */}
+      <a
+        href={streetViewUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-500 hover:bg-blue-500/20 transition-colors w-fit"
+        onClick={(e) => e.stopPropagation()}
+      >
+        Street View
+      </a>
     </span>
   )
 }
