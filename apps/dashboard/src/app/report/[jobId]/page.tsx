@@ -353,10 +353,10 @@ export default function ReportPage({ params }: { params: Promise<{ jobId: string
         )}
 
         {/* Two-column resizable layout */}
-        <ResizablePanelGroup orientation="horizontal" id="public-report-panels" className="flex-1">
+        <ResizablePanelGroup orientation="horizontal" id="public-report-panels" defaultLayout={hasMapData ? { map: 42, content: 58 } : { content: 100 }} className="flex-1">
           {hasMapData && (
             <>
-            <ResizablePanel id="map" defaultSize={38} minSize={25} maxSize={55} className="no-print">
+            <ResizablePanel id="map" minSize={25} maxSize={55} className="no-print">
               <div className="sticky top-10 h-[calc(100vh-2.5rem)] overflow-hidden">
                 <PropertyMap subject={analysis.subject} comps={effectiveComps} subjectSubdivision={analysis.subject?.subdivision} selectedCompKeys={compOverride?.selectedCompKeys} onToggleComp={handleToggleComp} onMarkerSelect={handleMarkerSelect} activeMarkerKey={activeMarkerKey} />
               </div>
@@ -365,7 +365,7 @@ export default function ReportPage({ params }: { params: Promise<{ jobId: string
             </>
           )}
 
-          <ResizablePanel id="content" defaultSize={hasMapData ? 62 : 100} minSize={45}>
+          <ResizablePanel id="content" minSize={45}>
             <div className="space-y-6 p-4 sm:p-6">
               {analysis.subject && <SubjectPropertyCard subject={analysis.subject} />}
 
