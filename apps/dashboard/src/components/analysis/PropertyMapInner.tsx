@@ -10,9 +10,46 @@ import type { MapMarker } from './PropertyMap'
 const MARKER_CONFIG: Record<MapMarker['type'], { color: string; label: string }> = {
   subject: { color: '#3b82f6', label: 'Subject Property' },
   'comp-enabled': { color: '#10b981', label: 'Comp (included)' },
-  'comp-disabled': { color: '#9ca3af', label: 'Comp (excluded)' },
+  'comp-disabled': { color: '#6b7280', label: 'Comp (excluded)' },
   school: { color: '#8b5cf6', label: 'School' },
   poi: { color: '#f59e0b', label: 'POI' },
+}
+
+// SVG home icon path (lucide Home)
+const HOME_SVG = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"/><path d="M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>`
+
+function createHomeMarkerEl(
+  color: string,
+  size: number,
+  opts?: { number?: number; isActive?: boolean }
+): HTMLDivElement {
+  const el = document.createElement('div')
+  const isActive = opts?.isActive ?? false
+  const activeColor = '#f59e0b'
+  const bg = isActive ? activeColor : color
+
+  el.style.cssText = `
+    width: ${size}px; height: ${size}px;
+    background: ${bg};
+    border: ${size > 30 ? '3px' : '2.5px'} solid white;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+    box-shadow: ${isActive ? `0 0 0 3px rgba(245,158,11,0.4), 0 2px 8px rgba(0,0,0,0.4)` : `0 2px 6px rgba(0,0,0,0.35)`};
+  `
+
+  if (opts?.number != null) {
+    // Show number over a small home icon background
+    el.innerHTML = `
+      <div style="position:relative;display:flex;align-items:center;justify-content:center;">
+        <span style="color:white;font-weight:800;font-size:${size > 30 ? '13px' : '11px'};font-family:system-ui,-apple-system,sans-serif;text-shadow:0 1px 2px rgba(0,0,0,0.3);line-height:1;">${opts.number}</span>
+      </div>
+    `
+  } else {
+    el.innerHTML = HOME_SVG
+  }
+
+  return el
 }
 
 // ─── Component ──────────────────────────────────────────────────────────────
@@ -20,9 +57,7 @@ const MARKER_CONFIG: Record<MapMarker['type'], { color: string; label: string }>
 interface PropertyMapInnerProps {
   markers: MapMarker[]
   onToggleComp?: (key: string) => void
-  /** Called when a marker is clicked — opens detail modal in parent */
   onMarkerClick?: (markerType: 'subject' | 'comp', compKey?: string) => void
-  /** CompKey or 'subject' of the currently selected/active marker */
   activeMarkerKey?: string | null
 }
 
@@ -34,6 +69,16 @@ export default function PropertyMapInner({ markers, onToggleComp, onMarkerClick,
   onToggleCompRef.current = onToggleComp
   const onMarkerClickRef = useRef(onMarkerClick)
   onMarkerClickRef.current = onMarkerClick
+
+  // Resize observer — keeps map in sync when container size changes (panel resize)
+  useEffect(() => {
+    if (!containerRef.current) return
+    const observer = new ResizeObserver(() => {
+      mapRef.current?.resize()
+    })
+    observer.observe(containerRef.current)
+    return () => observer.disconnect()
+  }, [])
 
   useEffect(() => {
     if (!containerRef.current || markers.length === 0) return
@@ -92,64 +137,25 @@ export default function PropertyMapInner({ markers, onToggleComp, onMarkerClick,
       const isComp = m.type === 'comp-enabled' || m.type === 'comp-disabled'
       const idx = isComp ? ++compIndex : undefined
 
-      const markerOptions: maplibregl.MarkerOptions = {
-        color: config.color,
-        scale: 0.85,
-      }
+      let el: HTMLDivElement
 
-      // Subject property: home icon marker
-      const isActiveSubject = m.type === 'subject' && activeMarkerKey === 'subject'
       if (m.type === 'subject') {
-        const el = document.createElement('div')
-        el.className = 'flowstate-subject-marker'
-        el.style.cssText = `
-          width: ${isActiveSubject ? '44px' : '36px'}; height: ${isActiveSubject ? '44px' : '36px'};
-          background: ${isActiveSubject ? '#f59e0b' : config.color};
-          border: 3px solid white;
-          border-radius: 50%;
-          display: flex; align-items: center; justify-content: center;
-          cursor: pointer;
-          box-shadow: ${isActiveSubject ? '0 0 0 3px rgba(245,158,11,0.4), 0 2px 8px rgba(0,0,0,0.4)' : '0 2px 8px rgba(0,0,0,0.4)'};
-          transition: all 0.2s ease;
-        `
-        el.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"/><path d="M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>`
-        el.addEventListener('click', () => {
-          onMarkerClickRef.current?.('subject')
-        })
-        markerOptions.element = el
-        delete markerOptions.color
-        delete markerOptions.scale
-      }
-
-      // Comps: numbered custom element
-      if (isComp && idx != null) {
+        const isActive = activeMarkerKey === 'subject'
+        el = createHomeMarkerEl(config.color, isActive ? 44 : 38, { isActive })
+        el.addEventListener('click', () => onMarkerClickRef.current?.('subject'))
+      } else if (isComp && idx != null) {
+        const isActive = activeMarkerKey != null && m.compKey === activeMarkerKey
+        el = createHomeMarkerEl(config.color, isActive ? 34 : 28, { number: idx, isActive })
         const compKey = m.compKey
-        const isActive = activeMarkerKey != null && compKey === activeMarkerKey
-        const el = document.createElement('div')
-        el.className = 'flowstate-comp-marker'
-        el.style.cssText = `
-          width: ${isActive ? '34px' : '26px'}; height: ${isActive ? '34px' : '26px'};
-          background: ${isActive ? '#f59e0b' : config.color};
-          border: ${isActive ? '3px' : '2.5px'} solid white;
-          border-radius: 50%;
-          display: flex; align-items: center; justify-content: center;
-          color: white; font-weight: 800; font-size: ${isActive ? '14px' : '12px'};
-          font-family: system-ui, -apple-system, sans-serif;
-          cursor: pointer;
-          box-shadow: ${isActive ? '0 0 0 3px rgba(245,158,11,0.4), 0 2px 6px rgba(0,0,0,0.35)' : '0 2px 6px rgba(0,0,0,0.35)'};
-          text-shadow: 0 1px 2px rgba(0,0,0,0.3);
-          transition: all 0.2s ease;
-          z-index: ${isActive ? '10' : '1'};
-        `
-        el.textContent = String(idx)
         el.addEventListener('click', () => {
           if (compKey) onMarkerClickRef.current?.('comp', compKey)
         })
-        markerOptions.element = el
-        delete markerOptions.scale
+      } else {
+        // School / POI — small pin
+        el = createHomeMarkerEl(config.color, 24)
       }
 
-      const marker = new maplibregl.Marker(markerOptions)
+      const marker = new maplibregl.Marker({ element: el })
         .setLngLat([m.lng, m.lat])
         .addTo(map)
 
@@ -183,54 +189,27 @@ export default function PropertyMapInner({ markers, onToggleComp, onMarkerClick,
       <div ref={containerRef} className="w-full flex-1 min-h-[350px]" />
       {/* Legend — overlays bottom of map */}
       <div className="absolute bottom-0 left-0 right-0 flex flex-wrap gap-x-4 gap-y-1 px-3 py-2 bg-black/60 backdrop-blur-sm">
-        {(['subject', 'comp-enabled', 'comp-disabled', 'school', 'poi'] as const)
+        {(['subject', 'comp-enabled', 'comp-disabled'] as const)
           .filter((t) => types.has(t))
           .map((t) => {
             const cfg = MARKER_CONFIG[t]
-            const isComp = t === 'comp-enabled' || t === 'comp-disabled'
             return (
               <div key={t} className="flex items-center gap-1.5 text-xs text-white/80">
-                {t === 'subject' ? (
-                  <span
-                    className="inline-flex items-center justify-center shrink-0 rounded-full"
-                    style={{
-                      width: 18,
-                      height: 18,
-                      background: cfg.color,
-                      border: '1.5px solid white',
-                      boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
-                    }}
-                  >
-                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8" />
-                      <path d="M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
-                    </svg>
-                  </span>
-                ) : isComp ? (
-                  <span
-                    className="inline-flex items-center justify-center shrink-0 rounded-full text-white font-bold"
-                    style={{
-                      width: 16,
-                      height: 16,
-                      fontSize: 9,
-                      background: cfg.color,
-                      border: '1.5px solid white',
-                      boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
-                    }}
-                  >
-                    #
-                  </span>
-                ) : (
-                  <svg width="14" height="20" viewBox="0 0 27 41.5" style={{ flexShrink: 0 }}>
-                    <path
-                      d="M13.5 0C6.044 0 0 6.044 0 13.5 0 24.82 13.5 41.5 13.5 41.5S27 24.82 27 13.5C27 6.044 20.956 0 13.5 0z"
-                      fill={cfg.color}
-                      stroke="white"
-                      strokeWidth="1.5"
-                    />
-                    <circle cx="13.5" cy="13.5" r="5" fill="white" />
-                  </svg>
-                )}
+                <span
+                  className="inline-flex items-center justify-center shrink-0 rounded-full"
+                  style={{
+                    width: t === 'subject' ? 18 : 16,
+                    height: t === 'subject' ? 18 : 16,
+                    background: cfg.color,
+                    border: '1.5px solid white',
+                    boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
+                  }}
+                  dangerouslySetInnerHTML={{
+                    __html: t === 'subject'
+                      ? `<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"/><path d="M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>`
+                      : `<span style="color:white;font-weight:bold;font-size:9px">#</span>`
+                  }}
+                />
                 <span className="font-medium text-white/90">{cfg.label}</span>
               </div>
             )
