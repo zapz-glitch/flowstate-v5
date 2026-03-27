@@ -60,9 +60,9 @@ export function DealSummaryHero({ subject, valuation, isRecalculated, onOpenSett
   const hasRisks = (riskFlags && riskFlags.length > 0) || floodZone?.inFloodZone
 
   return (
-    <div className={cn('rounded-xl border overflow-hidden', rec.ring, rec.glow)}>
+    <div className={cn('rounded-xl border border-border/60 overflow-hidden bg-background/80 backdrop-blur-sm', rec.ring, rec.glow)}>
       {/* Recommendation + ROI — THE VERDICT */}
-      <div className={cn('px-5 py-4', rec.bg)}>
+      <div className={cn('px-5 py-3.5', rec.bg)}>
         <div className="flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <span className={cn('text-xl sm:text-2xl font-black tracking-tight', rec.text)}>
@@ -91,7 +91,7 @@ export function DealSummaryHero({ subject, valuation, isRecalculated, onOpenSett
       </div>
 
       {/* Property identity — one compact line */}
-      <div className="px-5 py-3 border-b border-border/50">
+      <div className="px-5 py-3 border-b border-border/30">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <AddressDisplay
@@ -117,21 +117,21 @@ export function DealSummaryHero({ subject, valuation, isRecalculated, onOpenSett
 
       {/* Key financials — 4 columns */}
       <div className="grid grid-cols-2 sm:grid-cols-4">
-        <div className="px-4 py-3 border-r border-b sm:border-b-0 border-border/50">
+        <div className="px-4 py-3 border-r border-b sm:border-b-0 border-border/30">
           <div className="text-caption-sm text-foreground-tertiary">ARV</div>
           <div className="text-heading-sm font-bold text-primary tabular-nums">${fmt(valuation.arv)}</div>
           {valuation.arvPerSqft != null && (
             <div className="text-caption-sm text-foreground-tertiary">${valuation.arvPerSqft.toFixed(0)}/sqft</div>
           )}
         </div>
-        <div className="px-4 py-3 border-b sm:border-b-0 sm:border-r border-border/50">
+        <div className="px-4 py-3 border-b sm:border-b-0 sm:border-r border-border/30">
           <div className="text-caption-sm text-foreground-tertiary">Max Buy Price</div>
           <div className="text-heading-sm font-bold tabular-nums">${fmt(valuation.buyPrice)}</div>
           {valuation.buyPricePercent != null && valuation.buyPricePercent > 0 && (
             <div className="text-caption-sm text-foreground-tertiary">{valuation.buyPricePercent}% of ARV</div>
           )}
         </div>
-        <div className="px-4 py-3 border-r border-border/50">
+        <div className="px-4 py-3 border-r border-border/30">
           <div className="text-caption-sm text-foreground-tertiary">Rehab Cost</div>
           <div className="text-heading-sm font-semibold tabular-nums">${fmt(valuation.rehabCost)}</div>
           {valuation.rehabLevel && (
@@ -151,7 +151,7 @@ export function DealSummaryHero({ subject, valuation, isRecalculated, onOpenSett
 
       {/* Risk flags — inline badges */}
       {hasRisks && (
-        <div className="px-5 py-2.5 border-t border-border/50 flex items-center gap-2 flex-wrap">
+        <div className="px-5 py-2.5 border-t border-border/30 flex items-center gap-2 flex-wrap">
           {floodZone?.inFloodZone && (
             <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-red-500/15 text-red-500 border border-red-500/20">
               Flood Zone: {floodZone.zone || 'Yes'}

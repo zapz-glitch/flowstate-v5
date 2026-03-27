@@ -185,7 +185,10 @@ body {
 }
 
 .dark .playground-bg {
-  background: hsl(var(--background));
+  background:
+    radial-gradient(circle, hsl(var(--border) / 0.3) 1px, transparent 1px),
+    hsl(var(--background));
+  background-size: 24px 24px;
 }
 
 /* Glass input — only used in playground search bar */
