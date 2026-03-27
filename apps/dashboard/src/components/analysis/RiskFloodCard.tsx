@@ -32,7 +32,7 @@ export function RiskFloodCard({ riskFlags, floodZone, permits }: RiskFloodCardPr
   if (!hasRiskFlags && !hasFloodZone && !hasPermits) return null
 
   return (
-    <div className="rounded-xl overflow-hidden border border-border px-6 py-4 space-y-4">
+    <div className="overflow-hidden border border-border px-6 py-4 space-y-4">
       {hasFloodZone && (
         <div>
           <div className="flex items-center gap-2.5 mb-2">

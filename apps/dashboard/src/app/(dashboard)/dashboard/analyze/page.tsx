@@ -354,7 +354,7 @@ export default function AnalyzePage() {
       {/* Input Form — collapses to compact bar once running/results shown, click to expand */}
       {isSearchCollapsed ? (
         <div
-          className="border border-border/60 rounded-xl overflow-hidden cursor-pointer hover:border-primary/30 transition-all bg-background/80 backdrop-blur-sm shadow-sm"
+          className="border border-border/60 overflow-hidden cursor-pointer hover:border-primary/30 transition-all bg-background/80 backdrop-blur-sm shadow-sm"
           onClick={() => setSearchExpanded(true)}
         >
           <div className="px-4 py-3 flex items-center gap-3">
@@ -402,8 +402,8 @@ export default function AnalyzePage() {
           </div>
         </div>
       ) : (
-        <div className="relative z-20 border border-border/60 rounded-xl bg-background/80 backdrop-blur-sm shadow-sm">
-          <div className="px-6 py-5 border-b border-border rounded-t-xl">
+        <div className="relative z-20 border border-border/60 bg-background/80 backdrop-blur-sm shadow-sm">
+          <div className="px-6 py-5 border-b border-border">
             <div className="flex items-center gap-3">
               <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center">
                 <Search className="w-4.5 h-4.5 text-primary" />
@@ -477,7 +477,7 @@ export default function AnalyzePage() {
 
         if (isFilterError) {
           return (
-            <div className="rounded-xl border border-red-500/20 overflow-hidden">
+            <div className="border border-red-500/20 overflow-hidden">
               <div className="px-6 py-5 space-y-4">
                 <AppraisalFilterEditor
                   filters={appraisalFilters}
@@ -519,7 +519,7 @@ export default function AnalyzePage() {
         }
 
         return (
-          <div className="rounded-xl overflow-hidden border border-red-500/20">
+          <div className="overflow-hidden border border-red-500/20">
             <div className="px-6 py-5">
               <div className="text-red-500 font-medium">Error</div>
               <div className="text-muted-foreground mt-1">{errorMsg}</div>
@@ -536,7 +536,7 @@ export default function AnalyzePage() {
           <ResizableLayout
             className="flex-1 min-h-0 ml-4 sm:ml-6"
             left={
-              <div className="sticky top-0 h-screen overflow-hidden rounded-tl-xl">
+              <div className="sticky top-0 h-screen overflow-hidden">
                 <PropertyMap
                   subject={displayData!.subject!}
                   comps={hasResult ? (effectiveComps ?? analysisResult?.comps) : displayData!.comps}
@@ -586,7 +586,7 @@ export default function AnalyzePage() {
 
                 {/* 2. SUBJECT PHOTOS — compact row */}
                 {hasResult && displayData?.subject?.photos && displayData.subject.photos.length > 0 && (
-                  <div className="rounded-xl border border-border px-4 py-3">
+                  <div className="border border-border px-4 py-3">
                     <div className="flex items-center justify-between mb-2">
                       <span className="text-caption font-medium text-foreground-secondary">Property Photos</span>
                       <VisionAnalysisButton
@@ -645,7 +645,7 @@ export default function AnalyzePage() {
 
               {/* Raw JSON Toggle — only after final result */}
               {hasResult && (
-                <div className="border border-border rounded-xl overflow-hidden no-print">
+                <div className="border border-border overflow-hidden no-print">
                   <div
                     className="px-6 py-4 cursor-pointer flex items-center gap-3 hover:bg-white/5 dark:hover:bg-white/[0.02] transition-colors"
                     onClick={() => setShowRawJson(!showRawJson)}
@@ -671,7 +671,7 @@ export default function AnalyzePage() {
                         >
                           Copy JSON
                         </button>
-                        <pre className="bg-zinc-950 text-zinc-100 rounded-xl p-4 pt-10 overflow-auto max-h-[600px] text-xs font-mono">
+                        <pre className="bg-zinc-950 text-zinc-100 p-4 pt-10 overflow-auto max-h-[600px] text-xs font-mono">
                           {JSON.stringify(analysisResult, null, 2)}
                         </pre>
                       </div>

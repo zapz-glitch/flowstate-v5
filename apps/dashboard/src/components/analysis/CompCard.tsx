@@ -59,7 +59,7 @@ export function CompCard({
     <div
       data-card-key={cardKey}
       className={cn(
-        'rounded-xl transition-all duration-300 border border-border',
+        'transition-all duration-300 border border-border',
         comp.isBestComp && isEnabled && 'border-amber-500/40 ring-1 ring-amber-500/20',
         isEnabled ? 'border-l-2 border-l-emerald-500/50' : 'opacity-70'
       )}
@@ -149,7 +149,7 @@ export function CompCard({
           </div>
         </div>
 
-        <div className={cn('flex flex-wrap mt-3 rounded-lg bg-muted/40', !isAlwaysExpanded && 'cursor-pointer')} onClick={handleToggle}>
+        <div className={cn('flex flex-wrap mt-3 bg-muted/40', !isAlwaysExpanded && 'cursor-pointer')} onClick={handleToggle}>
           <StatCell label="Beds" value={comp.bedrooms ?? '-'} />
           <StatCell label="Baths" value={comp.bathrooms ?? '-'} />
           <StatCell label="Sq Ft" value={comp.squareFeet?.toLocaleString() || '-'} />

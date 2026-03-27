@@ -60,7 +60,7 @@ export function DealSummaryHero({ subject, valuation, isRecalculated, onOpenSett
   const hasRisks = (riskFlags && riskFlags.length > 0) || floodZone?.inFloodZone
 
   return (
-    <div className={cn('rounded-xl border border-border/60 overflow-hidden bg-background/80 backdrop-blur-sm', rec.ring, rec.glow)}>
+    <div className={cn('border border-border/60 overflow-hidden bg-background/80 backdrop-blur-sm', rec.ring, rec.glow)}>
       {/* Property identity */}
       <div className="px-5 py-3 border-b border-border/30">
         <div className="flex items-start justify-between gap-3">

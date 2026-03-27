@@ -53,7 +53,7 @@ export function ValuationCard({
 
   return (
     <TooltipProvider delayDuration={200}>
-      <div className={cn('rounded-xl overflow-hidden border border-border', isRecalculated && 'ring-1 ring-amber-500/30')}>
+      <div className={cn('overflow-hidden border border-border', isRecalculated && 'ring-1 ring-amber-500/30')}>
         <div className="px-6 py-5">
           <div className="flex items-center justify-between gap-3 mb-5">
             <div className="flex items-center gap-3">
@@ -82,7 +82,7 @@ export function ValuationCard({
             </div>
           </div>
 
-          <div className="flex flex-wrap rounded-xl bg-muted/40 [&>div]:border-r [&>div]:border-border/50 [&>div:last-child]:border-r-0">
+          <div className="flex flex-wrap bg-muted/40 [&>div]:border-r [&>div]:border-border/50 [&>div:last-child]:border-r-0">
             <div className="p-3 min-w-[120px] flex-1">
               <MetricLabel
                 label="ARV"
