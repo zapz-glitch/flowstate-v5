@@ -13,13 +13,10 @@ import {
   StopCircle,
   ChevronDown,
   ChevronRight,
-  Sparkles,
   Globe,
-  Loader2,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { AddressAutocomplete } from '@/components/AddressAutocomplete'
-import { Badge } from '@/components/ui/badge'
 import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
 import {
@@ -346,15 +343,13 @@ export default function AnalyzePage() {
   const showTwoColumn = (isRunning || hasResult || hasPartialData) && hasMapData
 
   return (
-    <div className={cn('playground-bg min-h-screen -m-4 sm:-m-6 lg:-m-8', showTwoColumn ? 'p-0' : 'p-4 sm:p-6 lg:p-8 space-y-6')}>
-      {/* Header + Search — padded when in two-column mode */}
-      <div className={cn(showTwoColumn && 'px-4 sm:px-6 lg:px-8 pt-4 sm:pt-6 lg:pt-8 space-y-6')}>
-      {!hasResult && !isRunning && (
-        <div className="flex items-center justify-between">
-          <div className="space-y-2">
-            <h1 className="text-heading-lg text-foreground tracking-tight">API Playground</h1>
-            <p className="text-body text-foreground-tertiary">Test the Flowstate API with real property data</p>
-          </div>
+    <div className={cn('playground-bg min-h-screen -m-4 sm:-m-6 lg:-m-8', showTwoColumn ? 'flex flex-col' : 'p-4 sm:p-6 lg:p-8 space-y-6')}>
+      {/* Search bar + controls */}
+      <div className={cn(showTwoColumn ? 'px-4 sm:px-6 py-3 space-y-3 flex-shrink-0' : 'space-y-6')}>
+      {!hasResult && !isRunning && !hasPartialData && (
+        <div>
+          <h1 className="text-heading-lg text-foreground tracking-tight">API Playground</h1>
+          <p className="text-body text-foreground-tertiary mt-1">Test the Flowstate API with real property data</p>
         </div>
       )}
 
@@ -384,9 +379,27 @@ export default function AnalyzePage() {
                 Cancel
               </Button>
             ) : (
-              <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); setSearchExpanded(true) }}>
-                <ChevronDown className="w-3.5 h-3.5" />
-              </Button>
+              <div className="flex items-center gap-1.5">
+                {hasResult && (
+                  <div onClick={(e) => e.stopPropagation()} className="no-print">
+                    <DownloadReportButton
+                      reportProps={{
+                        address: activeAnalysis?.address || 'Property Report',
+                        date: new Date().toISOString(),
+                        subject: analysisResult?.subject,
+                        valuation: displayValuation,
+                        comps: effectiveComps,
+                        riskFlags: analysisResult?.riskFlags,
+                        floodZone: analysisResult?.floodZone,
+                        isRecalculated,
+                      }}
+                    />
+                  </div>
+                )}
+                <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); setSearchExpanded(true) }}>
+                  <ChevronDown className="w-3.5 h-3.5" />
+                </Button>
+              </div>
             )}
           </div>
         </div>
@@ -516,43 +529,16 @@ export default function AnalyzePage() {
           </div>
         )
       })()}
-      </div>{/* end padded header+search wrapper */}
+      </div>{/* end search wrapper */}
 
-      {/* Progressive Results — two-column layout: map left (sticky), content right (scrollable) */}
+      {/* Two-column resizable layout — starts immediately below search */}
       {(isRunning || hasResult || hasPartialData) && (
-        <div className={cn(showTwoColumn ? '' : 'space-y-6')}>
-          {/* Toolbar: compact, after final result */}
-          {hasResult && (
-            <div className={cn('flex items-center justify-end gap-2 no-print', showTwoColumn && 'px-4 sm:px-6 lg:px-8 py-2')}>
-              {enrichmentStatus && (
-                <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-primary/10 text-caption text-primary mr-auto">
-                  <Loader2 className="w-3 h-3 animate-spin" />
-                  <Sparkles className="w-3 h-3" />
-                  {enrichmentStatus}
-                </div>
-              )}
-              <DownloadReportButton
-                reportProps={{
-                  address: activeAnalysis?.address || 'Property Report',
-                  date: new Date().toISOString(),
-                  subject: analysisResult?.subject,
-                  valuation: displayValuation,
-                  comps: effectiveComps,
-                  riskFlags: analysisResult?.riskFlags,
-                  floodZone: analysisResult?.floodZone,
-                  isRecalculated,
-                }}
-              />
-            </div>
-          )}
-
-
-
-          {/* Two-column resizable layout: Map (left) + Content (right) */}
+        <>
           {hasMapData ? (
           <ResizableLayout
+            className="flex-1 min-h-0"
             left={
-              <div className="sticky top-10 h-[calc(100vh-2.5rem)] overflow-hidden">
+              <div className="sticky top-0 h-screen overflow-hidden">
                 <PropertyMap
                   subject={displayData!.subject!}
                   comps={hasResult ? (effectiveComps ?? analysisResult?.comps) : displayData!.comps}
@@ -705,7 +691,7 @@ export default function AnalyzePage() {
               </div>
           </div>
           )}
-        </div>
+        </>
       )}
 
       {/* Evaluation Settings Sheet */}

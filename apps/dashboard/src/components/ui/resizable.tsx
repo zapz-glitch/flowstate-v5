@@ -99,7 +99,7 @@ export function ResizableLayout({ left, right, className }: ResizableLayoutProps
 
       {/* Drag handle */}
       <div
-        className="flex-shrink-0 w-2 cursor-col-resize bg-border/40 hover:bg-primary/20 active:bg-primary/40 transition-colors group sticky top-10 self-start h-[calc(100vh-2.5rem)] flex items-center justify-center z-10"
+        className="flex-shrink-0 w-1.5 cursor-col-resize bg-border/30 hover:bg-primary/20 active:bg-primary/40 transition-colors group sticky top-0 self-start h-screen flex items-center justify-center z-10"
         onMouseDown={startDrag}
         onTouchStart={() => startDrag()}
       >
