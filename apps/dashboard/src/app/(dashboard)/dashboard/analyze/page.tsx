@@ -349,12 +349,14 @@ export default function AnalyzePage() {
     <div className={cn('playground-bg min-h-screen -m-4 sm:-m-6 lg:-m-8', showTwoColumn ? 'p-0' : 'p-4 sm:p-6 lg:p-8 space-y-6')}>
       {/* Header + Search — padded when in two-column mode */}
       <div className={cn(showTwoColumn && 'px-4 sm:px-6 lg:px-8 pt-4 sm:pt-6 lg:pt-8 space-y-6')}>
-      <div className="flex items-center justify-between">
-        <div className="space-y-2">
-          <h1 className="text-heading-lg text-foreground tracking-tight">API Playground</h1>
-          <p className="text-body text-foreground-tertiary">Test the Flowstate API with real property data</p>
+      {!hasResult && !isRunning && (
+        <div className="flex items-center justify-between">
+          <div className="space-y-2">
+            <h1 className="text-heading-lg text-foreground tracking-tight">API Playground</h1>
+            <p className="text-body text-foreground-tertiary">Test the Flowstate API with real property data</p>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Input Form — collapses to compact bar once running/results shown, click to expand */}
       {isSearchCollapsed ? (
@@ -519,40 +521,28 @@ export default function AnalyzePage() {
       {/* Progressive Results — two-column layout: map left (sticky), content right (scrollable) */}
       {(isRunning || hasResult || hasPartialData) && (
         <div className={cn(showTwoColumn ? '' : 'space-y-6')}>
-          {/* Toolbar: only shown after final result */}
+          {/* Toolbar: compact, after final result */}
           {hasResult && (
-            <div className={cn('flex items-center justify-between no-print', showTwoColumn && 'px-4 sm:px-6 lg:px-8 py-3')}>
-              <div className="flex items-center gap-3">
-                {durationMs != null && (
-                  <div className="text-caption text-foreground-tertiary">Completed in {(durationMs / 1000).toFixed(1)}s</div>
-                )}
-                {enrichmentStatus && (
-                  <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-primary/10 text-caption text-primary">
-                    <Loader2 className="w-3 h-3 animate-spin" />
-                    <Sparkles className="w-3 h-3" />
-                    {enrichmentStatus}
-                  </div>
-                )}
-                {isRecalculated && (
-                  <Badge variant="outline" className="bg-blue-500/10 text-blue-600 border-blue-500/30 text-caption-sm">
-                    Recalculated
-                  </Badge>
-                )}
-              </div>
-              <div className="flex items-center gap-2 ml-auto">
-                <DownloadReportButton
-                  reportProps={{
-                    address: activeAnalysis?.address || 'Property Report',
-                    date: new Date().toISOString(),
-                    subject: analysisResult?.subject,
-                    valuation: displayValuation,
-                    comps: effectiveComps,
-                    riskFlags: analysisResult?.riskFlags,
-                    floodZone: analysisResult?.floodZone,
-                    isRecalculated,
-                  }}
-                />
-              </div>
+            <div className={cn('flex items-center justify-end gap-2 no-print', showTwoColumn && 'px-4 sm:px-6 lg:px-8 py-2')}>
+              {enrichmentStatus && (
+                <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-primary/10 text-caption text-primary mr-auto">
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                  <Sparkles className="w-3 h-3" />
+                  {enrichmentStatus}
+                </div>
+              )}
+              <DownloadReportButton
+                reportProps={{
+                  address: activeAnalysis?.address || 'Property Report',
+                  date: new Date().toISOString(),
+                  subject: analysisResult?.subject,
+                  valuation: displayValuation,
+                  comps: effectiveComps,
+                  riskFlags: analysisResult?.riskFlags,
+                  floodZone: analysisResult?.floodZone,
+                  isRecalculated,
+                }}
+              />
             </div>
           )}
 

@@ -9,9 +9,11 @@ interface AddressDisplayProps {
   latitude?: number | null
   longitude?: number | null
   className?: string
+  /** Show Street View link (default: true) */
+  showStreetView?: boolean
 }
 
-export function AddressDisplay({ address, latitude, longitude, className }: AddressDisplayProps) {
+export function AddressDisplay({ address, latitude, longitude, className, showStreetView = true }: AddressDisplayProps) {
   const [copied, setCopied] = useState(false)
 
   const handleCopy = (e: React.MouseEvent) => {
@@ -52,15 +54,17 @@ export function AddressDisplay({ address, latitude, longitude, className }: Addr
         </button>
       </span>
       {/* Street View link */}
-      <a
-        href={streetViewUrl}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-500 hover:bg-blue-500/20 transition-colors w-fit"
-        onClick={(e) => e.stopPropagation()}
-      >
-        Street View
-      </a>
+      {showStreetView && (
+        <a
+          href={streetViewUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-500 hover:bg-blue-500/20 transition-colors w-fit"
+          onClick={(e) => e.stopPropagation()}
+        >
+          Street View
+        </a>
+      )}
     </span>
   )
 }

@@ -20,20 +20,43 @@ function fmt(v: number | null | undefined): string {
   return v.toLocaleString()
 }
 
-function getRecommendationConfig(rec?: string): { label: string; bg: string; text: string; ring: string; glow: string } {
-  if (!rec) return { label: 'Analyzing', bg: 'bg-muted', text: 'text-foreground', ring: 'ring-border', glow: '' }
-  const upper = rec.toUpperCase()
-  if (upper.includes('PURSUE') || upper.includes('BUY'))
-    return { label: rec, bg: 'bg-emerald-500/15', text: 'text-emerald-400', ring: 'ring-emerald-500/30', glow: 'shadow-emerald-500/10 shadow-lg' }
-  if (upper.includes('PASS') || upper.includes('AVOID'))
-    return { label: rec, bg: 'bg-red-500/15', text: 'text-red-400', ring: 'ring-red-500/30', glow: 'shadow-red-500/10 shadow-lg' }
-  if (upper.includes('REVIEW') || upper.includes('CAUTION'))
-    return { label: rec, bg: 'bg-amber-500/15', text: 'text-amber-400', ring: 'ring-amber-500/30', glow: 'shadow-amber-500/10 shadow-lg' }
-  return { label: rec, bg: 'bg-muted', text: 'text-foreground', ring: 'ring-border', glow: '' }
+/** Derive recommendation from ROI if the API doesn't provide one */
+function deriveRecommendation(rec: string | undefined | null, roi: number | undefined | null): string {
+  if (rec) return rec
+  if (roi == null) return ''
+  if (roi >= 30) return 'Strong Buy'
+  if (roi >= 15) return 'Buy'
+  if (roi >= 5) return 'Hold'
+  return 'Pass'
+}
+
+/** Human-readable label for API recommendation codes */
+function formatRecommendation(rec: string): string {
+  const map: Record<string, string> = {
+    'strong-buy': 'Strong Buy',
+    'buy': 'Buy',
+    'hold': 'Hold',
+    'pass': 'Pass',
+  }
+  return map[rec.toLowerCase()] || rec
+}
+
+function getRecommendationConfig(rec: string): { label: string; bg: string; text: string; ring: string; glow: string } {
+  if (!rec) return { label: '', bg: 'bg-muted', text: 'text-foreground', ring: 'ring-border', glow: '' }
+  const label = formatRecommendation(rec)
+  const lower = rec.toLowerCase()
+  if (lower.includes('strong') || lower === 'buy')
+    return { label, bg: 'bg-emerald-500/15', text: 'text-emerald-400', ring: 'ring-emerald-500/30', glow: 'shadow-emerald-500/10 shadow-lg' }
+  if (lower === 'pass' || lower.includes('avoid'))
+    return { label, bg: 'bg-red-500/15', text: 'text-red-400', ring: 'ring-red-500/30', glow: 'shadow-red-500/10 shadow-lg' }
+  if (lower === 'hold' || lower.includes('review') || lower.includes('caution'))
+    return { label, bg: 'bg-amber-500/15', text: 'text-amber-400', ring: 'ring-amber-500/30', glow: 'shadow-amber-500/10 shadow-lg' }
+  return { label, bg: 'bg-primary/10', text: 'text-primary', ring: 'ring-primary/30', glow: '' }
 }
 
 export function DealSummaryHero({ subject, valuation, isRecalculated, onOpenSettings, riskFlags, floodZone }: DealSummaryHeroProps) {
-  const rec = getRecommendationConfig(valuation.recommendation)
+  const recommendation = deriveRecommendation(valuation.recommendation, valuation.projectedROI)
+  const rec = getRecommendationConfig(recommendation)
   const hasRisks = (riskFlags && riskFlags.length > 0) || floodZone?.inFloodZone
 
   return (
