@@ -4,7 +4,7 @@ import { useState, useCallback, useEffect, useRef } from 'react'
 import { useSetAtom } from 'jotai'
 import { activeAnalysisAtom, analysisResultAtom, analysisStateAtom } from '@/atoms/analysis'
 import { initialAnalysisState } from '@/types/analysis'
-import Link from 'next/link'
+// import Link from 'next/link'
 import {
   Search,
   Play,
@@ -15,7 +15,6 @@ import {
   ChevronRight,
   DollarSign,
   SlidersHorizontal,
-  ExternalLink,
   Sparkles,
   Globe,
   Loader2,
@@ -542,14 +541,6 @@ export default function AnalyzePage() {
                 )}
               </div>
               <div className="flex items-center gap-2 ml-auto">
-                {activeAnalysis?.jobId && (
-                  <Button variant="outline" size="sm" asChild>
-                    <Link href={`/dashboard/reports/${activeAnalysis.jobId}`}>
-                      <ExternalLink className="w-3.5 h-3.5 mr-1.5" />
-                      View Full Report
-                    </Link>
-                  </Button>
-                )}
                 <DownloadReportButton
                   reportProps={{
                     address: activeAnalysis?.address || 'Property Report',
