@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Home, SlidersHorizontal, RotateCcw, ChevronDown } from 'lucide-react'
+import { SlidersHorizontal, RotateCcw, ChevronDown } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import type { CompsData, CompItem, SubjectData } from './shared-types'
 import { getCompKey } from './format-helpers'
@@ -93,10 +93,7 @@ export function ComparablesSection({
     <div>
       <div className="mb-4">
         <div className="flex items-start justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
-              <Home className="w-4 h-4 text-primary" />
-            </div>
+          <div>
             <div>
               <h3 className="text-body font-semibold">Comparables ({comps.count || compItems.length})</h3>
               <p className="text-caption text-foreground-tertiary mt-0.5">
