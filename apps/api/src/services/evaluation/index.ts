@@ -192,7 +192,8 @@ type GroupAResult = {
   groupACompIds: Set<string>
 }
 
-const MAX_SELECTED = 5
+/** Standard appraisal practice: 3 best comps for ARV */
+const MAX_SELECTED = 3
 
 /** Minimum score threshold — comps below this are too dissimilar */
 const MIN_COMP_SCORE = 120

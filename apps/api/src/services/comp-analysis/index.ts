@@ -38,7 +38,7 @@ Only comps that are physically comparable to the subject should be considered. E
 6. LOT SIZE — Should be in the same general range.
 
 PHASE 2 — AMONG PHYSICALLY SIMILAR COMPS, select for ARV quality:
-From comps that pass Phase 1, pick the best 3-5 for ARV using:
+From comps that pass Phase 1, pick the best 3 for ARV using:
 
 1. SALE RECENCY — Prefer most recent sales (last 6 months ideal)
 2. PROXIMITY — Closer to subject = more relevant market data
@@ -125,7 +125,7 @@ COMPARABLE SALES (${comparables.length} total):${compLines}
 
 YOUR TASK:
 1. First, identify which comps are PHYSICALLY SIMILAR to the subject (Phase 1)
-2. From those, select the best 3-5 for ARV calculation (Phase 2)
+2. From those, select the best 3 for ARV calculation (Phase 2)
 3. Rank ALL comps
 
 Return JSON:
@@ -223,7 +223,7 @@ export async function analyzeComps(
     // Extract selectedForArv — validate that all IDs are valid comp IDs
     const selectedForArv: string[] = Array.isArray(parsed.selectedForArv)
       ? parsed.selectedForArv.filter((id): id is string => typeof id === 'string' && validCompIds.has(id))
-      : rankings.filter((r) => r.score >= 70).map((r) => r.compId).slice(0, 5)
+      : rankings.filter((r) => r.score >= 70).map((r) => r.compId).slice(0, 3)
 
     const latencyMs = Date.now() - startTime
 
