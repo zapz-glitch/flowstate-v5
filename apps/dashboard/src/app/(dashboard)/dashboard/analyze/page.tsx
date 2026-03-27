@@ -548,7 +548,7 @@ export default function AnalyzePage() {
             }
             right={
             <div className="min-w-0">
-              <div id="underwriter-report" data-date={new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })} className={cn('[&>*+*]:mt-5', showTwoColumn && 'px-4 sm:px-5 pb-4 sm:pb-5')}>
+              <div id="underwriter-report" data-date={new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })} className={cn('[&>*+*]:mt-4', showTwoColumn && 'pr-4 sm:pr-5 pb-4 sm:pb-5')}>
                 {/* Print-only report header */}
                 {hasResult && (
                   <div className="hidden print:block print-report-header">
