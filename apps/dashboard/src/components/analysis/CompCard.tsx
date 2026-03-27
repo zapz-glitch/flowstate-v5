@@ -85,7 +85,11 @@ export function CompCard({
           <div className="flex items-center gap-2 flex-shrink-0">
             <div className="text-right">
               <div className="text-body-sm font-bold tabular-nums">${comp.salePrice?.toLocaleString() || '-'}</div>
-              {comp.pricePerSqft && <div className="text-[10px] text-foreground-tertiary">${comp.pricePerSqft.toFixed(0)}/sqft</div>}
+              <div className="text-[10px] text-foreground-tertiary">
+                {comp.pricePerSqft ? `$${comp.pricePerSqft.toFixed(0)}/sqft` : ''}
+                {comp.pricePerSqft && comp.saleDate ? ' · ' : ''}
+                {comp.saleDate ? new Date(comp.saleDate).toLocaleDateString('en-US', { month: 'short', year: 'numeric' }) : ''}
+              </div>
             </div>
             {hasArvSelection && onToggleArv && (
               <button
@@ -111,7 +115,6 @@ export function CompCard({
         {/* Row 2: Meta — distance, date, subdivision, adjusted price */}
         <div className="flex items-center gap-2 mt-1 text-[10px] text-foreground-tertiary flex-wrap pl-8">
           {comp.distanceMiles != null && <span>{comp.distanceMiles.toFixed(2)} mi</span>}
-          {comp.saleDate && <><span className="text-border">·</span><span>{new Date(comp.saleDate).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}</span></>}
           {comp.subdivision && <><span className="text-border">·</span><span>{comp.subdivision}</span></>}
           {comp.adjustedPrice && comp.salePrice !== comp.adjustedPrice && (
             <><span className="text-border">·</span><span className="text-emerald-600">Adj: ${comp.adjustedPrice.toLocaleString()}</span></>
