@@ -354,7 +354,7 @@ export default function AnalyzePage() {
       {/* Input Form — collapses to compact bar once running/results shown, click to expand */}
       {isSearchCollapsed ? (
         <div
-          className="border border-border/60 overflow-hidden cursor-pointer hover:border-primary/30 transition-all bg-background/80 backdrop-blur-sm shadow-sm"
+          className="border border-border/60 overflow-hidden cursor-pointer hover:border-primary/30 transition-all bg-background/80 backdrop-blur-sm shadow-sm corner-accents corner-accents-bottom"
           onClick={() => setSearchExpanded(true)}
         >
           <div className="px-4 py-3 flex items-center gap-3">
@@ -402,7 +402,7 @@ export default function AnalyzePage() {
           </div>
         </div>
       ) : (
-        <div className="relative z-20 border border-border/60 bg-background/80 backdrop-blur-sm shadow-sm">
+        <div className="relative z-20 border border-border/60 bg-background/80 backdrop-blur-sm shadow-sm corner-accents corner-accents-bottom">
           <div className="px-6 py-5 border-b border-border">
             <div className="flex items-center gap-3">
               <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center">

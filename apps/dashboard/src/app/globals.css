@@ -191,6 +191,51 @@ body {
   background-size: 24px 24px;
 }
 
+/* Corner accents — decorative diamonds at card border intersections (Firecrawl-style) */
+.corner-accents {
+  position: relative;
+}
+.corner-accents::before,
+.corner-accents::after {
+  content: '';
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  background: hsl(var(--border) / 0.6);
+  clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%);
+  z-index: 1;
+}
+.corner-accents::before {
+  top: -4px;
+  left: -4px;
+}
+.corner-accents::after {
+  top: -4px;
+  right: -4px;
+}
+/* Bottom corners via a child pseudo-element wrapper */
+.corner-accents-bottom {
+  position: relative;
+}
+.corner-accents-bottom::before,
+.corner-accents-bottom::after {
+  content: '';
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  background: hsl(var(--border) / 0.6);
+  clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%);
+  z-index: 1;
+}
+.corner-accents-bottom::before {
+  bottom: -4px;
+  left: -4px;
+}
+.corner-accents-bottom::after {
+  bottom: -4px;
+  right: -4px;
+}
+
 /* Glass input — only used in playground search bar */
 .glass-input {
   background: rgba(255, 255, 255, 0.92);
