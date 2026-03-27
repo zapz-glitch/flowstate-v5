@@ -61,36 +61,7 @@ export function DealSummaryHero({ subject, valuation, isRecalculated, onOpenSett
 
   return (
     <div className={cn('rounded-xl border border-border/60 overflow-hidden bg-background/80 backdrop-blur-sm', rec.ring, rec.glow)}>
-      {/* Recommendation + ROI — THE VERDICT */}
-      <div className={cn('px-5 py-3.5', rec.bg)}>
-        <div className="flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <span className={cn('text-xl sm:text-2xl font-black tracking-tight', rec.text)}>
-              {rec.label}
-            </span>
-            {valuation.projectedROI != null && (
-              <span className={cn('text-lg sm:text-xl font-bold tabular-nums', rec.text)}>
-                {valuation.projectedROI.toFixed(1)}% ROI
-              </span>
-            )}
-            {isRecalculated && (
-              <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-500">Recalculated</span>
-            )}
-          </div>
-          {onOpenSettings && (
-            <button
-              type="button"
-              onClick={onOpenSettings}
-              className="p-2 rounded-lg text-foreground-tertiary hover:text-foreground hover:bg-background/50 transition-colors no-print"
-              title="Evaluation Settings"
-            >
-              <SlidersHorizontal className="w-4 h-4" />
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Property identity — one compact line */}
+      {/* Property identity */}
       <div className="px-5 py-3 border-b border-border/30">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
@@ -109,9 +80,21 @@ export function DealSummaryHero({ subject, valuation, isRecalculated, onOpenSett
               {subject.subdivision && <><span className="text-border">·</span><span className="truncate max-w-[150px]">{subject.subdivision}</span></>}
             </div>
           </div>
-          {subject.classification && (
-            <ClassificationBadge classification={subject.classification} />
-          )}
+          <div className="flex items-center gap-2 flex-shrink-0">
+            {subject.classification && (
+              <ClassificationBadge classification={subject.classification} />
+            )}
+            {onOpenSettings && (
+              <button
+                type="button"
+                onClick={onOpenSettings}
+                className="p-1.5 rounded-lg text-foreground-tertiary hover:text-foreground hover:bg-secondary transition-colors no-print"
+                title="Evaluation Settings"
+              >
+                <SlidersHorizontal className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
