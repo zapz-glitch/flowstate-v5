@@ -13,8 +13,6 @@ import {
   StopCircle,
   ChevronDown,
   ChevronRight,
-  DollarSign,
-  SlidersHorizontal,
   Sparkles,
   Globe,
   Loader2,
@@ -44,6 +42,8 @@ import {
   RiskFloodCard,
   VisionAnalysisButton,
   PropertyMap,
+  DealSummaryHero,
+  PhotoGallery,
 } from '@/components/analysis'
 import { ResizableLayout } from '@/components/ui/resizable'
 import {
@@ -234,7 +234,6 @@ export default function AnalyzePage() {
     effectiveComps,
     isRecalculated,
     valuationCardRef,
-    showStickyBar,
     settingsOpen,
     setSettingsOpen,
   } = useAnalysisEvaluation({
@@ -577,61 +576,45 @@ export default function AnalyzePage() {
             }
             right={
             <div className="min-w-0">
-              {/* Sticky valuation bar — appears when ValuationCard scrolls out of view */}
-              {hasResult && displayValuation && (
-                <div className="sticky top-0 z-10 no-print border-b border-border bg-background/95 backdrop-blur-xl">
-                  <div className="px-4 sm:px-6 py-2 flex items-center gap-3 sm:gap-4 flex-wrap">
-                    <DollarSign className="w-3.5 h-3.5 text-primary flex-shrink-0" />
-                    <div className="flex items-center gap-3 sm:gap-4 flex-1 min-w-0 flex-wrap text-caption-sm tabular-nums">
-                      <span className="text-foreground-tertiary">ARV <span className="font-bold text-primary">${displayValuation.arv?.toLocaleString() || '-'}</span></span>
-                      <span className="text-foreground-tertiary">Max Buy <span className="font-semibold text-foreground">${displayValuation.buyPrice?.toLocaleString() || '-'}</span></span>
-                      <span className="text-foreground-tertiary">Profit <span className={cn('font-semibold', (displayValuation.projectedProfit ?? 0) > 0 ? 'text-emerald-600' : 'text-red-600')}>${displayValuation.projectedProfit?.toLocaleString() || '-'}</span></span>
-                    </div>
-                    {displayValuation.recommendation && (
-                      <Badge variant="outline" className={cn(
-                        'text-[10px] px-1.5 py-0 flex-shrink-0',
-                        displayValuation.recommendation.toUpperCase().includes('PURSUE') && 'bg-emerald-500/10 text-emerald-700 border-emerald-500/30',
-                        displayValuation.recommendation.toUpperCase().includes('PASS') && 'bg-red-500/10 text-red-700 border-red-500/30',
-                        displayValuation.recommendation.toUpperCase().includes('REVIEW') && 'bg-amber-500/10 text-amber-700 border-amber-500/30',
-                      )}>{displayValuation.recommendation}</Badge>
-                    )}
-                    <button type="button" onClick={() => setSettingsOpen(true)} className="p-1 rounded-lg text-foreground-tertiary hover:text-foreground hover:bg-secondary transition-colors flex-shrink-0" title="Evaluation Settings">
-                      <SlidersHorizontal className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                </div>
-              )}
-              <div id="underwriter-report" data-date={new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })} className={cn('space-y-6', showTwoColumn && 'p-4 sm:p-6')}>
-                {/* Print-only report header — only when final result */}
+              <div id="underwriter-report" data-date={new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })} className={cn('space-y-5', showTwoColumn && 'p-4 sm:p-5')}>
+                {/* Print-only report header */}
                 {hasResult && (
                   <div className="hidden print:block print-report-header">
                     <div className="flex items-start justify-between pb-4 border-b-2 border-gray-800 mb-6">
                       <div>
                         <div className="text-xs font-semibold uppercase tracking-widest text-gray-500 mb-1">Underwriting Report</div>
                         <h1 className="text-2xl font-bold text-gray-900">{analysisResult.subject?.address || 'Property Analysis'}</h1>
-                        {analysisResult.subject?.county && (
-                          <div className="text-sm text-gray-500 mt-0.5">{analysisResult.subject.county} County</div>
-                        )}
                       </div>
                       <div className="text-right">
-                        <div className="text-xs text-gray-400 mb-1">Prepared by Flowstate</div>
                         <div className="text-xs text-gray-400">{new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</div>
-                        {analysisResult.subject?.classification && (
-                          <div className="mt-2 inline-block px-3 py-1 border border-gray-300 rounded text-xs font-medium">
-                            {analysisResult.subject.classification.type === 'as_is' ? 'As-Is' : analysisResult.subject.classification.type === 'after_renovation' ? 'Renovated' : 'Transitional'}
-                            {' · '}{analysisResult.subject.classification.confidence}% confidence
-                          </div>
-                        )}
                       </div>
                     </div>
                   </div>
                 )}
 
-                {/* Subject Property — available after Step 1 (property_fetch) */}
-                {displayData?.subject ? (
-                  <SubjectPropertyCard
-                    subject={displayData.subject}
-                    footer={displayData.subject.photos?.length ? (
+                {/* 1. DEAL VERDICT — the first thing the user sees */}
+                {hasResult && displayData?.subject && displayValuation ? (
+                  <div ref={valuationCardRef}>
+                    <DealSummaryHero
+                      subject={displayData.subject}
+                      valuation={displayValuation}
+                      isRecalculated={isRecalculated}
+                      onOpenSettings={() => setSettingsOpen(true)}
+                      riskFlags={displayData.riskFlags}
+                      floodZone={displayData.floodZone}
+                    />
+                  </div>
+                ) : displayData?.subject ? (
+                  <SubjectPropertyCard subject={displayData.subject} />
+                ) : isRunning ? (
+                  <SubjectPropertySkeleton />
+                ) : null}
+
+                {/* 2. SUBJECT PHOTOS — compact row */}
+                {hasResult && displayData?.subject?.photos && displayData.subject.photos.length > 0 && (
+                  <div className="rounded-xl border border-border px-4 py-3">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-caption font-medium text-foreground-secondary">Property Photos</span>
                       <VisionAnalysisButton
                         photoUrls={displayData.subject.photos}
                         propertyContext={{
@@ -641,33 +624,12 @@ export default function AnalyzePage() {
                         }}
                         existingAnalysis={displayData.visionAnalysis}
                       />
-                    ) : undefined}
-                  />
-                ) : isRunning && !displayData?.subject ? (
-                  <SubjectPropertySkeleton />
-                ) : null}
-
-                {/* Valuation Summary — only from final result (Step 5) */}
-                {hasResult && displayValuation ? (
-                  <div ref={valuationCardRef}>
-                    <ValuationCard
-                      valuation={displayValuation}
-                      isRecalculated={isRecalculated}
-                      onOpenSettings={() => setSettingsOpen(true)}
-                    />
+                    </div>
+                    <PhotoGallery photos={displayData.subject.photos} />
                   </div>
-                ) : isRunning ? (
-                  <ValuationSkeleton />
-                ) : null}
+                )}
 
-                {/* Risk Flags & Flood Zone — available after Step 1 */}
-                {(displayData?.riskFlags || displayData?.floodZone || displayData?.permits) ? (
-                  <RiskFloodCard riskFlags={displayData?.riskFlags} floodZone={displayData?.floodZone} permits={displayData?.permits} />
-                ) : isRunning && !displayData?.riskFlags ? (
-                  <RiskFloodSkeleton />
-                ) : null}
-
-                {/* Comparables — available after Step 2, enriched with photos (Step 3) and classifications (Step 4) */}
+                {/* 3. COMPARABLES — the evidence supporting the verdict */}
                 {hasResult ? (
                   (appraisalFilters.length > 0 ? analysisResult?.comps : effectiveComps) && (
                     <ComparablesSection
@@ -691,6 +653,20 @@ export default function AnalyzePage() {
                 ) : isRunning ? (
                   <ComparablesSkeleton />
                 ) : null}
+
+                {/* 4. DETAILED VALUATION — full breakdown for power users */}
+                {hasResult && displayValuation && (
+                  <ValuationCard
+                    valuation={displayValuation}
+                    isRecalculated={isRecalculated}
+                    onOpenSettings={() => setSettingsOpen(true)}
+                  />
+                )}
+
+                {/* 5. RISK & FLOOD details */}
+                {(displayData?.riskFlags || displayData?.floodZone || displayData?.permits) && (
+                  <RiskFloodCard riskFlags={displayData?.riskFlags} floodZone={displayData?.floodZone} permits={displayData?.permits} />
+                )}
               </div>
 
               {/* Raw JSON Toggle — only after final result */}
