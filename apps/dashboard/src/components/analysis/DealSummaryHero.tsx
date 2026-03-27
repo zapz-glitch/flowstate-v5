@@ -71,14 +71,9 @@ export function DealSummaryHero({ subject, valuation, isRecalculated, onOpenSett
               longitude={subject.longitude}
               className="text-body-sm font-semibold"
             />
-            <div className="flex items-center gap-2 mt-1 text-caption text-foreground-tertiary flex-wrap">
-              {subject.bedrooms != null && <span>{subject.bedrooms}bd/{subject.bathrooms ?? '-'}ba</span>}
-              {subject.squareFeet != null && <><span className="text-border">·</span><span>{subject.squareFeet.toLocaleString()} sqft</span></>}
-              {subject.yearBuilt != null && <><span className="text-border">·</span><span>{subject.yearBuilt}</span></>}
-              {subject.foundationType && <><span className="text-border">·</span><span>{subject.foundationType}</span></>}
-              {subject.buildingStyle && <><span className="text-border">·</span><span>{subject.buildingStyle}</span></>}
-              {subject.subdivision && <><span className="text-border">·</span><span className="truncate max-w-[150px]">{subject.subdivision}</span></>}
-            </div>
+            {subject.subdivision && (
+              <div className="text-caption text-foreground-tertiary mt-1">{subject.subdivision}</div>
+            )}
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
             {subject.classification && (
@@ -95,6 +90,38 @@ export function DealSummaryHero({ subject, valuation, isRecalculated, onOpenSett
               </button>
             )}
           </div>
+        </div>
+      </div>
+
+      {/* Property stats — matching comp card style */}
+      <div className="flex flex-wrap border-b border-border/30 bg-muted/40">
+        <div className="py-2 px-2 text-center border-r border-border/50 min-w-[70px] flex-1">
+          <div className="text-caption-sm text-foreground-tertiary">Beds</div>
+          <div className="text-body-sm font-medium mt-0.5">{subject.bedrooms ?? '-'}</div>
+        </div>
+        <div className="py-2 px-2 text-center border-r border-border/50 min-w-[70px] flex-1">
+          <div className="text-caption-sm text-foreground-tertiary">Baths</div>
+          <div className="text-body-sm font-medium mt-0.5">{subject.bathrooms ?? '-'}</div>
+        </div>
+        <div className="py-2 px-2 text-center border-r border-border/50 min-w-[70px] flex-1">
+          <div className="text-caption-sm text-foreground-tertiary">Sq Ft</div>
+          <div className="text-body-sm font-medium mt-0.5">{subject.squareFeet?.toLocaleString() || '-'}</div>
+        </div>
+        <div className="py-2 px-2 text-center border-r border-border/50 min-w-[70px] flex-1">
+          <div className="text-caption-sm text-foreground-tertiary">Year</div>
+          <div className="text-body-sm font-medium mt-0.5">{subject.yearBuilt || '-'}</div>
+        </div>
+        <div className="py-2 px-2 text-center border-r border-border/50 min-w-[70px] flex-1">
+          <div className="text-caption-sm text-foreground-tertiary">Lot</div>
+          <div className="text-body-sm font-medium mt-0.5">{subject.lotSizeAcres ? `${Number(subject.lotSizeAcres).toFixed(3)} ac` : '-'}</div>
+        </div>
+        <div className="py-2 px-2 text-center border-r border-border/50 min-w-[70px] flex-1">
+          <div className="text-caption-sm text-foreground-tertiary">Foundation</div>
+          <div className="text-body-sm font-medium mt-0.5">{subject.foundationType || '-'}</div>
+        </div>
+        <div className="py-2 px-2 text-center min-w-[70px] flex-1">
+          <div className="text-caption-sm text-foreground-tertiary">Style</div>
+          <div className="text-body-sm font-medium mt-0.5">{subject.buildingStyle || '-'}</div>
         </div>
       </div>
 
