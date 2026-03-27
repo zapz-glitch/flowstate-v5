@@ -6,10 +6,12 @@ import { cn } from '@/lib/utils'
 
 interface AddressDisplayProps {
   address: string
+  latitude?: number | null
+  longitude?: number | null
   className?: string
 }
 
-export function AddressDisplay({ address, className }: AddressDisplayProps) {
+export function AddressDisplay({ address, latitude, longitude, className }: AddressDisplayProps) {
   const [copied, setCopied] = useState(false)
 
   const handleCopy = (e: React.MouseEvent) => {
@@ -21,7 +23,11 @@ export function AddressDisplay({ address, className }: AddressDisplayProps) {
   }
 
   const zillowUrl = `https://www.zillow.com/homes/${encodeURIComponent(address)}_rb/`
-  const streetViewUrl = `https://www.google.com/maps/search/${encodeURIComponent(address)}/@?entry=ttu&layer=c`
+
+  // Google Street View URL — use coordinates if available for precise location
+  const streetViewUrl = latitude && longitude
+    ? `https://www.google.com/maps/@${latitude},${longitude},3a,75y,0h,90t/data=!3m4!1e1!3m2!1s!2e0?entry=ttu`
+    : `https://www.google.com/maps/search/${encodeURIComponent(address)}/@?entry=ttu&layer=c`
 
   return (
     <span className={cn('inline-flex flex-col gap-1', className)}>

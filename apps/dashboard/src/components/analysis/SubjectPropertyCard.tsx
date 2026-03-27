@@ -25,7 +25,7 @@ export function SubjectPropertyCard({ subject, children, footer }: SubjectProper
               <MapPin className="w-3 h-3" />
             </Badge>
             {subject.address ? (
-              <AddressDisplay address={subject.address} className="text-heading-sm font-semibold leading-tight" />
+              <AddressDisplay address={subject.address} latitude={subject.latitude} longitude={subject.longitude} className="text-heading-sm font-semibold leading-tight" />
             ) : (
               <h3 className="text-heading-sm font-semibold leading-tight">Unknown Address</h3>
             )}
