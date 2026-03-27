@@ -548,21 +548,7 @@ export default function AnalyzePage() {
             }
             right={
             <div className="min-w-0">
-              <div id="underwriter-report" data-date={new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })} className={cn('[&>*+*]:mt-4', showTwoColumn && 'px-4 sm:px-5 pb-4 sm:pb-5')}>
-                {/* Print-only report header */}
-                {hasResult && (
-                  <div className="hidden print:block print-report-header">
-                    <div className="flex items-start justify-between pb-4 border-b-2 border-gray-800 mb-6">
-                      <div>
-                        <div className="text-xs font-semibold uppercase tracking-widest text-gray-500 mb-1">Underwriting Report</div>
-                        <h1 className="text-2xl font-bold text-gray-900">{analysisResult.subject?.address || 'Property Analysis'}</h1>
-                      </div>
-                      <div className="text-right">
-                        <div className="text-xs text-gray-400">{new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</div>
-                      </div>
-                    </div>
-                  </div>
-                )}
+              <div id="underwriter-report" data-date={new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })} className={cn('flex flex-col gap-4', showTwoColumn && 'px-4 sm:px-5 pb-4 sm:pb-5')}>
 
                 {/* 1. DEAL VERDICT — the first thing the user sees */}
                 {hasResult && displayData?.subject && displayValuation ? (
