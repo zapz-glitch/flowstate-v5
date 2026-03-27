@@ -110,7 +110,7 @@ export function ResizableLayout({ left, right, className }: ResizableLayoutProps
 
       {/* Right panel */}
       <div
-        className="flex-1 min-w-0 overflow-auto"
+        className="flex-1 min-w-0"
         style={{ pointerEvents: isDragging ? "none" : undefined }}
       >
         {right}
