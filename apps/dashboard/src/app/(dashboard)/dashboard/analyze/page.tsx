@@ -587,7 +587,7 @@ export default function AnalyzePage() {
             right={
             <div className="min-w-0">
               {/* Sticky valuation bar — appears when ValuationCard scrolls out of view */}
-              {hasResult && displayValuation && showStickyBar && (
+              {hasResult && displayValuation && (
                 <div className="sticky top-0 z-10 no-print border-b border-border bg-background/95 backdrop-blur-xl">
                   <div className="px-4 sm:px-6 py-2 flex items-center gap-3 sm:gap-4 flex-wrap">
                     <DollarSign className="w-3.5 h-3.5 text-primary flex-shrink-0" />
