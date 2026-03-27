@@ -117,8 +117,9 @@ export function DealSummaryHero({ subject, valuation, isRecalculated, onOpenSett
               <span className={cn('text-xs font-bold px-2.5 py-1 rounded', rec.badge)}>{rec.label}</span>
             )}
             {onOpenSettings && (
-              <button type="button" onClick={onOpenSettings} className="p-1.5 rounded-lg text-foreground-tertiary hover:text-foreground hover:bg-secondary transition-colors no-print" title="Evaluation Settings">
-                <SlidersHorizontal className="w-3.5 h-3.5" />
+              <button type="button" onClick={onOpenSettings} className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-caption text-foreground-tertiary hover:text-foreground hover:bg-secondary transition-colors border border-border no-print">
+                <SlidersHorizontal className="w-3 h-3" />
+                Evaluation Settings
               </button>
             )}
           </div>
