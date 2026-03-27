@@ -1,9 +1,10 @@
 /**
  * LLM Comp Analysis Service
  *
- * Uses AI to analyze and rank comparable sales for underwriting evaluation.
- * Runs as a post-process enrichment step — rule-based selection is authoritative,
- * LLM adds reasoning, quality scores, and key features.
+ * Uses AI to select the best comparable sales for ARV calculation.
+ * Two-phase approach matching real appraisal methodology:
+ *   Phase 1: Filter by physical similarity (appraisal rules)
+ *   Phase 2: Among qualifying comps, select highest-value for ARV
  *
  * Graceful degradation: returns null if LLM is unavailable or fails.
  */
@@ -22,23 +23,34 @@ export type { CompAnalysisOptions, CompAnalysisResult, CompRanking, CompEvalCont
 
 // ─── Prompt Builder ─────────────────────────────────────────────────────────
 
-const SYSTEM_PROMPT = `You are an expert real estate underwriter selecting the best comparable sales (comps) to determine the After Repair Value (ARV) of an investment property.
+const SYSTEM_PROMPT = `You are a licensed real estate appraiser performing a comparable sales analysis to determine the After Repair Value (ARV) of an investment property.
 
-Your task:
-1. Evaluate each comp's relevance to the subject property
-2. SELECT the best 3-5 comps for ARV calculation — these should be the most similar properties that an appraiser would use
+You MUST follow the standard appraisal methodology used by banks and FHA/VA appraisers:
 
-Selection criteria (in priority order):
-- Same subdivision or immediate neighborhood
-- Same building style/house type (Ranch vs Ranch, not Ranch vs Two-Story)
-- Similar square footage (within 20% of subject)
-- Similar age/year built (within 10 years)
-- Recent sale date (prefer last 6 months)
-- Close distance (prefer under 0.5 miles)
-- Minimal price adjustments needed
-- Foundation and construction similarity
+PHASE 1 — PHYSICAL SIMILARITY (mandatory, non-negotiable):
+Only comps that are physically comparable to the subject should be considered. Evaluate in this strict order:
 
-If a comp matches most criteria but fails one (e.g. slightly outside distance), it can still be selected if it's the best available.
+1. SQUARE FOOTAGE — Must be within reasonable range of subject. A 2,000 sqft subject cannot use a 900 sqft comp. This is the #1 disqualifier.
+2. BUILDING STYLE — Same style is strongly preferred (Ranch vs Ranch, not Ranch vs Two-Story). Different styles have different $/sqft.
+3. FOUNDATION TYPE — Same foundation preferred (Slab vs Slab, not Slab vs Basement). Foundation differences significantly affect value.
+4. BEDROOM/BATHROOM COUNT — Should be similar. 2bd/1ba is not comparable to 4bd/3ba.
+5. YEAR BUILT — Within ~15 years. A 1960 home is not comparable to a 2010 build.
+6. LOT SIZE — Should be in the same general range.
+
+PHASE 2 — AMONG PHYSICALLY SIMILAR COMPS, select for ARV quality:
+From comps that pass Phase 1, pick the best 3-5 for ARV using:
+
+1. SALE RECENCY — Prefer most recent sales (last 6 months ideal)
+2. PROXIMITY — Closer to subject = more relevant market data
+3. SUBDIVISION MATCH — Same subdivision is a strong indicator of market value
+4. SALE PRICE LEVEL — For ARV, prefer comps that represent post-renovation value (higher $/sqft indicates renovated condition)
+5. MINIMAL ADJUSTMENTS — Comps needing fewer adjustments are more reliable
+
+CRITICAL RULES:
+- NEVER select a comp just because it has a high sale price if it fails physical similarity
+- A nearby 900 sqft comp selling for $300K does NOT support ARV for a 2,000 sqft subject
+- Physical match FIRST, then value level among matches
+- If fewer than 3 comps pass Phase 1, note this — do NOT pad with dissimilar comps
 
 IMPORTANT: Respond ONLY with valid JSON. No markdown, no code fences, no explanation outside the JSON.`
 
@@ -73,12 +85,20 @@ function buildPrompt(
   const compLines = comparables.map((comp, i) => {
     const ctx = evalMap.get(comp.id)
     const filterSummary = ctx?.filterResults
-      .map((f) => `${f.type}: ${f.passed ? 'PASS' : 'FAIL'}${f.reason ? ` (${f.reason})` : ''}`)
+      .map((f: Record<string, unknown>) => `${f.type}: ${f.passed ? 'PASS' : 'FAIL'}${f.reason ? ` (${f.reason})` : ''}`)
       .join(', ') ?? 'not evaluated'
     const adjSummary = ctx?.adjustmentResults
-      .filter((a) => a.applied)
-      .map((a) => `${a.type}: ${a.amount >= 0 ? '+' : ''}$${a.amount.toLocaleString()}`)
+      .filter((a: Record<string, unknown>) => a.applied)
+      .map((a: Record<string, unknown>) => `${a.type}: ${(a.amount as number) >= 0 ? '+' : ''}$${(a.amount as number).toLocaleString()}`)
       .join(', ') || 'none'
+
+    // Calculate sqft difference for clarity
+    const sqftDiff = subject.squareFeet && comp.squareFeet
+      ? Math.abs(comp.squareFeet - subject.squareFeet)
+      : null
+    const sqftPct = subject.squareFeet && comp.squareFeet
+      ? Math.round((sqftDiff! / subject.squareFeet) * 100)
+      : null
 
     return `
 Comp ${i + 1} [ID: ${comp.id}]:
@@ -87,15 +107,14 @@ Comp ${i + 1} [ID: ${comp.id}]:
   $/SqFt: $${comp.pricePerSqft ?? 'unknown'}
   Distance: ${comp.distanceMiles?.toFixed(2) ?? 'unknown'} miles
   Beds/Baths: ${comp.bedrooms ?? '-'}/${comp.bathrooms ?? '-'}
-  SqFt: ${comp.squareFeet?.toLocaleString() ?? 'unknown'}
-  Year Built: ${comp.yearBuilt ?? 'unknown'}
+  SqFt: ${comp.squareFeet?.toLocaleString() ?? 'unknown'}${sqftDiff != null ? ` (${sqftDiff > 0 ? '+' : ''}${(comp.squareFeet! - subject.squareFeet!).toLocaleString()} sqft, ${sqftPct}% diff)` : ''}
+  Year Built: ${comp.yearBuilt ?? 'unknown'}${subject.yearBuilt && comp.yearBuilt ? ` (${Math.abs(comp.yearBuilt - subject.yearBuilt)} yr diff)` : ''}
   Lot: ${comp.lotSizeAcres ? `${comp.lotSizeAcres} acres` : 'unknown'}
-  Subdivision: ${comp.subdivision ?? 'none'}
-  Foundation: ${comp.construction?.foundationType ?? 'unknown'}
-  Building Style: ${comp.construction?.buildingStyle ?? 'unknown'}
-  Status: ${ctx?.isEnabled ? 'ENABLED for ARV' : 'EXCLUDED'} (Group: ${ctx?.compGroup ?? 'none'})
-  Filters: ${filterSummary}
-  Adjustments: ${adjSummary}
+  Subdivision: ${comp.subdivision ?? 'none'}${subject.subdivision && comp.subdivision && subject.subdivision.toLowerCase() === comp.subdivision.toLowerCase() ? ' ✓ MATCH' : ''}
+  Foundation: ${comp.construction?.foundationType ?? 'unknown'}${subject.construction?.foundationType && comp.construction?.foundationType && subject.construction.foundationType.toLowerCase() === comp.construction.foundationType.toLowerCase() ? ' ✓ MATCH' : ''}
+  Building Style: ${comp.construction?.buildingStyle ?? 'unknown'}${subject.construction?.buildingStyle && comp.construction?.buildingStyle && subject.construction.buildingStyle.toLowerCase() === comp.construction.buildingStyle.toLowerCase() ? ' ✓ MATCH' : ''}
+  Appraisal Filter Results: ${filterSummary}
+  Price Adjustments: ${adjSummary}
   Adjusted Price: ${ctx?.adjustedPrice ? `$${ctx.adjustedPrice.toLocaleString()}` : 'N/A'}`
   }).join('\n')
 
@@ -104,33 +123,34 @@ Comp ${i + 1} [ID: ${comp.id}]:
 
 COMPARABLE SALES (${comparables.length} total):${compLines}
 
-Select the best 3-5 comps for ARV calculation and rank ALL comps. Return JSON:
+YOUR TASK:
+1. First, identify which comps are PHYSICALLY SIMILAR to the subject (Phase 1)
+2. From those, select the best 3-5 for ARV calculation (Phase 2)
+3. Rank ALL comps
+
+Return JSON:
 {
   "selectedForArv": ["compId1", "compId2", "compId3"],
   "rankings": [
     {
       "compId": "the comp ID string",
       "score": 0-100,
-      "reasoning": "1-3 sentence analysis of why this comp is/isn't selected for ARV",
-      "keyFeatures": ["feature1", "feature2"],
+      "reasoning": "Explain physical similarity assessment AND why selected/rejected for ARV",
+      "keyFeatures": ["matching features or key differences"],
       "confidenceLevel": "high" | "medium" | "low"
     }
   ],
-  "summary": "1-2 sentence explanation of your comp selection strategy and market context"
+  "summary": "1-2 sentence market analysis and comp selection rationale"
 }
 
-RULES:
-- selectedForArv: list the comp IDs of your best 3-5 picks (minimum 3, maximum 5)
-- Include ALL comps in rankings (both selected and rejected)
-- Selected comps should score 60+
-- Explain WHY each comp was selected or rejected in the reasoning
+SCORING:
+85-100: Excellent physical match + good ARV indicator → SELECTED
+70-84: Good physical match, usable for ARV → SELECTED
+50-69: Partial match, some differences → may be selected if best available
+30-49: Significant physical differences → NOT selected
+0-29: Poor match, not comparable → NOT selected
 
-SCORING GUIDE:
-80-100: Excellent match — selected for ARV (same subdivision/style, similar size/age, recent sale)
-60-79: Good match — selected for ARV (close proximity, reasonable differences)
-40-59: Fair — NOT selected (notable differences but could be backup)
-20-39: Weak — NOT selected (significant differences)
-0-19: Poor — NOT selected (not useful for ARV)`
+REMEMBER: Physical similarity is non-negotiable. A comp that fails sqft, style, or foundation match should score below 50 regardless of its sale price or proximity.`
 }
 
 // ─── Main Service ───────────────────────────────────────────────────────────
@@ -162,7 +182,7 @@ export async function analyzeComps(
     const result = await provider.execute({
       prompt,
       systemPrompt: SYSTEM_PROMPT,
-      temperature: options?.temperature ?? 0.3,
+      temperature: options?.temperature ?? 0.2,
       maxTokens: options?.maxTokens ?? 2048,
     })
 
@@ -203,11 +223,19 @@ export async function analyzeComps(
     // Extract selectedForArv — validate that all IDs are valid comp IDs
     const selectedForArv: string[] = Array.isArray(parsed.selectedForArv)
       ? parsed.selectedForArv.filter((id): id is string => typeof id === 'string' && validCompIds.has(id))
-      : rankings.filter((r) => r.score >= 60).map((r) => r.compId).slice(0, 5) // fallback: top scored
+      : rankings.filter((r) => r.score >= 70).map((r) => r.compId).slice(0, 5)
 
     const latencyMs = Date.now() - startTime
 
     console.log(`[CompAnalysis] Analyzed ${rankings.length} comps, selected ${selectedForArv.length} for ARV in ${latencyMs}ms (${result.usage?.totalTokens ?? '?'} tokens)`)
+    if (rankings.length > 0) {
+      const selected = rankings.filter((r) => selectedForArv.includes(r.compId))
+      const rejected = rankings.filter((r) => !selectedForArv.includes(r.compId))
+      console.log(`[CompAnalysis] Selected: ${selected.map((r) => `${r.compId.slice(0, 20)}(${r.score})`).join(', ')}`)
+      if (rejected.length > 0) {
+        console.log(`[CompAnalysis] Rejected: ${rejected.map((r) => `${r.compId.slice(0, 20)}(${r.score})`).join(', ')}`)
+      }
+    }
 
     return {
       rankings,
