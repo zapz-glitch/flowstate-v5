@@ -295,6 +295,55 @@ analyze.post('/', async (c) => {
 
     console.log(`[Analyze][Timing] Evaluation: ${Date.now() - evalStart}ms`)
 
+    // ─── LLM comp refinement — AI selects final comps ────────────────────────
+    try {
+      const { analyzeComps, mergeLLMIntoResponse } = await import('../services/comp-analysis')
+      const compItems = analysisResult.comps?.items ?? []
+      if (compItems.length > 0 && c.env.OPENROUTER_API_KEY) {
+        const llmStart = Date.now()
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const evalContexts = compItems.map((comp: any) => ({
+          compId: comp.id as string,
+          isEnabled: comp.isEnabled as boolean,
+          compGroup: (comp.compGroup ?? null) as 'arv' | 'as_is' | null,
+          filterResults: comp.appraisalRules?.filters ?? [],
+          adjustmentResults: comp.appraisalRules?.adjustments ?? [],
+          adjustedPrice: (comp.adjustedPrice ?? null) as number | null,
+        }))
+
+        const llmResult = await analyzeComps(
+          bundle.property, bundle.comparables, evalContexts, c.env
+        )
+
+        if (llmResult && llmResult.selectedForArv.length >= 3) {
+          const selectedSet = new Set(llmResult.selectedForArv)
+          const rankingMap = new Map(llmResult.rankings.map((r) => [r.compId, r]))
+          // Update comp enable/disable based on LLM selection
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const updatedItems = compItems.map((comp: any) => ({
+            ...comp,
+            isEnabled: selectedSet.has(comp.id),
+            selectionReason: rankingMap.get(comp.id)?.reasoning ?? null,
+            qualityScore: rankingMap.get(comp.id)?.score ?? null,
+            keyFeatures: rankingMap.get(comp.id)?.keyFeatures ?? null,
+          }))
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          analysisResult = { ...analysisResult, comps: { ...analysisResult.comps, items: updatedItems } } as any
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          analysisResult = mergeLLMIntoResponse(analysisResult as any, llmResult) as typeof analysisResult
+          console.log(`[Analyze] LLM refined comp selection: ${llmResult.selectedForArv.length} comps selected in ${Date.now() - llmStart}ms`)
+        } else if (llmResult) {
+          // LLM returned result but not enough selections — just enrich without overriding
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          analysisResult = mergeLLMIntoResponse(analysisResult as any, llmResult) as typeof analysisResult
+          console.log(`[Analyze] LLM enriched (no override, ${llmResult.selectedForArv.length} < 3 selections) in ${Date.now() - llmStart}ms`)
+        }
+      }
+    } catch (llmError) {
+      // Non-fatal — LLM failure doesn't block analysis
+      console.warn('[Analyze] LLM comp refinement error:', llmError instanceof Error ? llmError.message : llmError)
+    }
+
     // ─── Inject OSM location risks into response ────────────────────────────
     try {
       const osmResult = await osmPromise
