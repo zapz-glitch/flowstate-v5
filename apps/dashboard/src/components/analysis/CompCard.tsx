@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { Star, ChevronDown, ChevronRight, Check, X } from 'lucide-react'
+import { ChevronRight, Check } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 import type { CompItem, SubjectData } from './shared-types'
@@ -64,101 +64,71 @@ export function CompCard({
         isEnabled ? 'border-l-2 border-l-emerald-500/50' : 'opacity-70'
       )}
     >
-      <div className="p-4 md:p-5">
-        <div className="flex items-start justify-between gap-4">
-          <div className={cn('flex items-start gap-3 flex-1 min-w-0', !isAlwaysExpanded && 'cursor-pointer')} onClick={handleToggle}>
+      <div className="px-4 py-3">
+        {/* Row 1: Address + Price */}
+        <div className={cn('flex items-center justify-between gap-3', !isAlwaysExpanded && 'cursor-pointer')} onClick={handleToggle}>
+          <div className="flex items-center gap-2.5 flex-1 min-w-0">
             <div className={cn(
-              'mt-0.5 w-7 h-7 rounded-lg flex items-center justify-center text-caption font-semibold flex-shrink-0',
-              isEnabled ? 'bg-emerald-500/15 text-emerald-700' : 'bg-muted text-foreground-tertiary'
+              'w-6 h-6 rounded flex items-center justify-center text-[11px] font-bold flex-shrink-0',
+              isEnabled ? 'bg-emerald-500/15 text-emerald-600' : 'bg-muted text-foreground-tertiary'
             )}>
               {index + 1}
             </div>
             <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2 flex-wrap mb-1">
-                {comp.address ? (
-                  <AddressDisplay address={comp.address} latitude={comp.latitude} longitude={comp.longitude} className="text-body font-medium" />
-                ) : (
-                  <span className="text-body font-medium">Unknown Address</span>
-                )}
-                {comp.isBestComp && (
-                  <Badge className="bg-amber-500/15 text-amber-600 border-amber-500/30 text-caption-sm">
-                    <Star className="w-3 h-3 mr-1" />Best
-                  </Badge>
-                )}
-                {hasSubdivisionMatch ? (
-                  <Badge className="bg-emerald-500/15 text-emerald-600 border-emerald-500/30 text-caption-sm">
-                    <Check className="w-3 h-3 mr-1" />Subdivision
-                  </Badge>
-                ) : subjectSubdivision && comp.subdivision ? (
-                  <Badge variant="outline" className="bg-red-500/5 text-red-500 border-red-500/20 text-caption-sm">
-                    <X className="w-3 h-3 mr-1" />Subdivision
-                  </Badge>
-                ) : null}
-              </div>
-              <div className="flex items-center gap-2 text-caption text-foreground-tertiary">
-                {comp.distanceMiles != null && (
-                  <span>{comp.distanceMiles.toFixed(2)} mi away</span>
-                )}
-                {comp.subdivision && (
-                  <>
-                    <span className="text-border">·</span>
-                    <span>{comp.subdivision}</span>
-                  </>
-                )}
-              </div>
+              {comp.address ? (
+                <AddressDisplay address={comp.address} latitude={comp.latitude} longitude={comp.longitude} className="text-body-sm font-medium" showStreetView={false} />
+              ) : (
+                <span className="text-body-sm font-medium">Unknown Address</span>
+              )}
             </div>
           </div>
-
-          <div className="flex items-start gap-3 flex-shrink-0">
-            <div className={cn('text-right', !isAlwaysExpanded && 'cursor-pointer')} onClick={handleToggle}>
-              {comp.saleDate && (
-                <div className="text-caption-sm text-foreground-tertiary">
-                  {new Date(comp.saleDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                </div>
-              )}
-              <div className="text-heading-sm font-bold">${comp.salePrice?.toLocaleString() || '-'}</div>
-              {comp.pricePerSqft && (
-                <div className="text-caption text-foreground-tertiary">${comp.pricePerSqft.toFixed(0)}/sqft</div>
-              )}
-              {comp.adjustedPrice && comp.salePrice !== comp.adjustedPrice && (
-                <div className="text-caption text-emerald-600">Adj: ${comp.adjustedPrice.toLocaleString()}</div>
-              )}
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <div className="text-right">
+              <div className="text-body-sm font-bold tabular-nums">${comp.salePrice?.toLocaleString() || '-'}</div>
+              {comp.pricePerSqft && <div className="text-[10px] text-foreground-tertiary">${comp.pricePerSqft.toFixed(0)}/sqft</div>}
             </div>
-
             {hasArvSelection && onToggleArv && (
               <button
                 type="button"
                 onClick={(e) => { e.stopPropagation(); onToggleArv() }}
-                title={isSelectedForArv ? 'Remove from ARV calculation' : 'Add to ARV calculation'}
+                title={isSelectedForArv ? 'Remove from ARV' : 'Add to ARV'}
                 className={cn(
-                  'mt-0.5 w-6 h-6 rounded border-2 flex items-center justify-center flex-shrink-0 transition-all',
+                  'w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 transition-all',
                   isSelectedForArv
                     ? 'bg-emerald-500 border-emerald-500 text-white'
-                    : 'border-foreground/25 bg-foreground/8 text-foreground/30 hover:border-emerald-500 hover:bg-emerald-500/15 hover:text-emerald-500'
+                    : 'border-foreground/25 bg-foreground/8 text-foreground/30 hover:border-emerald-500'
                 )}
               >
-                <Check className="w-3.5 h-3.5" />
+                <Check className="w-3 h-3" />
               </button>
             )}
-
             {!isAlwaysExpanded && (
-              <div className="text-foreground-tertiary mt-0.5 cursor-pointer" onClick={handleToggle}>
-                {isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-              </div>
+              <ChevronRight className={cn('w-3.5 h-3.5 text-foreground-tertiary transition-transform', isExpanded && 'rotate-90')} />
             )}
           </div>
         </div>
 
-        <div className={cn('flex flex-wrap mt-3 bg-muted/40', !isAlwaysExpanded && 'cursor-pointer')} onClick={handleToggle}>
-          <StatCell label="Beds" value={comp.bedrooms ?? '-'} />
-          <StatCell label="Baths" value={comp.bathrooms ?? '-'} />
-          <StatCell label="Sq Ft" value={comp.squareFeet?.toLocaleString() || '-'} />
-          <StatCell label="Year" value={comp.yearBuilt || '-'} />
-          <StatCell label="Lot" value={comp.lotSizeAcres ? `${Number(comp.lotSizeAcres).toFixed(3)} ac` : '-'} />
-          <StatCell label="Foundation" value={comp.foundationType || '-'} />
-          <StatCell label="House Style" value={comp.buildingStyle || '-'} />
+        {/* Row 2: Meta — distance, date, subdivision, adjusted price */}
+        <div className="flex items-center gap-2 mt-1 text-[10px] text-foreground-tertiary flex-wrap pl-8">
+          {comp.distanceMiles != null && <span>{comp.distanceMiles.toFixed(2)} mi</span>}
+          {comp.saleDate && <><span className="text-border">·</span><span>{new Date(comp.saleDate).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}</span></>}
+          {comp.subdivision && <><span className="text-border">·</span><span>{comp.subdivision}</span></>}
+          {comp.adjustedPrice && comp.salePrice !== comp.adjustedPrice && (
+            <><span className="text-border">·</span><span className="text-emerald-600">Adj: ${comp.adjustedPrice.toLocaleString()}</span></>
+          )}
+          {hasSubdivisionMatch && <span className="text-emerald-500">✓ Subdivision</span>}
         </div>
+      </div>
 
+      {/* Stats grid */}
+      <div className={cn('flex flex-wrap bg-muted/40 border-t border-border/30', !isAlwaysExpanded && 'cursor-pointer')} onClick={handleToggle}>
+        <StatCell label="Beds" value={comp.bedrooms ?? '-'} />
+        <StatCell label="Baths" value={comp.bathrooms ?? '-'} />
+        <StatCell label="Sq Ft" value={comp.squareFeet?.toLocaleString() || '-'} />
+        <StatCell label="Year" value={comp.yearBuilt || '-'} />
+        <StatCell label="Lot" value={comp.lotSizeAcres ? `${Number(comp.lotSizeAcres).toFixed(3)} ac` : '-'} />
+        <StatCell label="Foundation" value={comp.foundationType || '-'} />
+        <StatCell label="House Style" value={comp.buildingStyle || '-'} />
       </div>
 
       {isExpanded && (
