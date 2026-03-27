@@ -74,11 +74,6 @@ export function DealSummaryHero({ subject, valuation, isRecalculated, onOpenSett
               {rec.label}
             </span>
           )}
-          {valuation.projectedROI != null && (
-            <span className={cn('text-sm font-bold tabular-nums', rec.text)}>
-              {valuation.projectedROI.toFixed(1)}%
-            </span>
-          )}
           {subject.classification && <ClassificationBadge classification={subject.classification} />}
           {onOpenSettings && (
             <button type="button" onClick={onOpenSettings} className="p-1.5 rounded-lg text-foreground-tertiary hover:text-foreground hover:bg-secondary transition-colors no-print" title="Evaluation Settings">
