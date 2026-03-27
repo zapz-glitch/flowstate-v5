@@ -616,7 +616,7 @@ export default function AnalyzePage() {
 
               {/* Raw JSON Toggle — only after final result */}
               {hasResult && (
-                <div className="border border-border overflow-hidden no-print">
+                <div className="border border-border overflow-hidden no-print min-w-0">
                   <div
                     className="px-6 py-4 cursor-pointer flex items-center gap-3 hover:bg-white/5 dark:hover:bg-white/[0.02] transition-colors"
                     onClick={() => setShowRawJson(!showRawJson)}
