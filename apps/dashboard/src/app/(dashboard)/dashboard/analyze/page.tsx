@@ -45,9 +45,7 @@ import {
 import { ResizableLayout } from '@/components/ui/resizable'
 import {
   SubjectPropertySkeleton,
-  ValuationSkeleton,
   ComparablesSkeleton,
-  RiskFloodSkeleton,
 } from '@/components/analysis/AnalysisSkeletons'
 import { useEnrichmentSSE, type EnrichmentEvent } from '@/hooks/use-enrichment-sse'
 import { AppraisalFilterEditor, type FilterState, type AdjustmentState } from '@/components/analysis/AppraisalFilterEditor'
@@ -552,7 +550,7 @@ export default function AnalyzePage() {
             }
             right={
             <div className="min-w-0">
-              <div id="underwriter-report" data-date={new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })} className={cn('space-y-5', showTwoColumn && 'px-4 sm:px-5 pb-4 sm:pb-5')}>
+              <div id="underwriter-report" data-date={new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })} className={cn('[&>*+*]:mt-5', showTwoColumn && 'px-4 sm:px-5 pb-4 sm:pb-5')}>
                 {/* Print-only report header */}
                 {hasResult && (
                   <div className="hidden print:block print-report-header">
