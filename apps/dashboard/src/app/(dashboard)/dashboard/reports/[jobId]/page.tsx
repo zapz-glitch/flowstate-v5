@@ -225,7 +225,7 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
               </div>
             )}
 
-            <RiskFloodCard riskFlags={analysis.riskFlags} floodZone={analysis.floodZone} permits={analysis.permits} asIsMarketIntel={analysis.valuation?.asIsMarketIntel} />
+            <RiskFloodCard riskFlags={analysis.riskFlags} floodZone={analysis.floodZone} permits={analysis.permits}  />
 
             {effectiveComps && (
               <ComparablesSection
@@ -263,7 +263,7 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
               <ValuationCard valuation={displayValuation} isRecalculated={isRecalculated} onOpenSettings={() => setSettingsOpen(true)} />
             </div>
           )}
-          <RiskFloodCard riskFlags={analysis.riskFlags} floodZone={analysis.floodZone} permits={analysis.permits} asIsMarketIntel={analysis.valuation?.asIsMarketIntel} />
+          <RiskFloodCard riskFlags={analysis.riskFlags} floodZone={analysis.floodZone} permits={analysis.permits}  />
           {effectiveComps && (
             <ComparablesSection comps={effectiveComps} subject={analysis.subject} subjectSubdivision={analysis.subject?.subdivision} selectedCompKeys={compOverride?.selectedCompKeys} isManual={compOverride?.isManual ?? false} recalculatedArv={isRecalculated ? displayValuation?.arv : undefined} onToggleComp={handleToggleComp} onReset={handleResetComps} />
           )}

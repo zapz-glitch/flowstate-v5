@@ -690,8 +690,8 @@ export default function AnalyzePage() {
                 ) : null}
 
                 {/* Risk Flags & Flood Zone — available after Step 1 */}
-                {(displayData?.riskFlags || displayData?.floodZone || displayData?.permits || analysisResult?.valuation?.asIsMarketIntel?.asIsMarketPrice != null || analysisResult?.valuation?.asIsMarketIntel?.noDataReason) ? (
-                  <RiskFloodCard riskFlags={displayData?.riskFlags} floodZone={displayData?.floodZone} permits={displayData?.permits} asIsMarketIntel={analysisResult?.valuation?.asIsMarketIntel} />
+                {(displayData?.riskFlags || displayData?.floodZone || displayData?.permits) ? (
+                  <RiskFloodCard riskFlags={displayData?.riskFlags} floodZone={displayData?.floodZone} permits={displayData?.permits} />
                 ) : isRunning && !displayData?.riskFlags ? (
                   <RiskFloodSkeleton />
                 ) : null}

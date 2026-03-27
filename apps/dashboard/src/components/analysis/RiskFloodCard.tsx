@@ -1,4 +1,4 @@
-import { AlertTriangle, Droplets, FileCheck, TrendingDown } from 'lucide-react'
+import { AlertTriangle, Droplets, FileCheck } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 import type { FloodZoneData } from './shared-types'
@@ -9,20 +9,10 @@ interface PermitsData {
   recentTypes?: string[]
 }
 
-interface AsIsMarketIntel {
-  asIsMarketPrice?: number | null
-  avgPricePerSqft?: number | null
-  compCount?: number
-  thresholdPercent?: number
-  priceCeiling?: number
-  noDataReason?: string
-}
-
 interface RiskFloodCardProps {
   riskFlags?: string[] | null
   floodZone?: FloodZoneData | null
   permits?: PermitsData | null
-  asIsMarketIntel?: AsIsMarketIntel | null
 }
 
 function formatCurrency(amount: number): string {
@@ -34,14 +24,12 @@ function formatCurrency(amount: number): string {
   }).format(amount)
 }
 
-export function RiskFloodCard({ riskFlags, floodZone, permits, asIsMarketIntel }: RiskFloodCardProps) {
+export function RiskFloodCard({ riskFlags, floodZone, permits }: RiskFloodCardProps) {
   const hasRiskFlags = riskFlags && riskFlags.length > 0
   const hasFloodZone = !!floodZone
   const hasPermits = permits && (permits.count || permits.recentTypes?.length)
-  const hasMarketIntel = asIsMarketIntel?.asIsMarketPrice != null
-  const hasMarketIntelSection = hasMarketIntel || !!asIsMarketIntel?.noDataReason
 
-  if (!hasRiskFlags && !hasFloodZone && !hasPermits && !hasMarketIntelSection) return null
+  if (!hasRiskFlags && !hasFloodZone && !hasPermits) return null
 
   return (
     <div className="rounded-xl overflow-hidden border border-border px-6 py-4 space-y-4">
@@ -111,32 +99,6 @@ export function RiskFloodCard({ riskFlags, floodZone, permits, asIsMarketIntel }
               </Badge>
             ))}
           </div>
-        </div>
-      )}
-
-      {hasMarketIntelSection && (hasRiskFlags || hasFloodZone || hasPermits) && <div className="border-t border-border" />}
-
-      {hasMarketIntelSection && (
-        <div>
-          <div className="flex items-center gap-2.5 mb-2">
-            <TrendingDown className="w-4 h-4 text-blue-600" />
-            <span className="text-body-sm font-medium">Market Intelligence</span>
-          </div>
-          {hasMarketIntel ? (
-            <div className="flex items-center gap-4 text-body-sm">
-              <span>
-                As-Is Market Price:{' '}
-                <span className="font-semibold text-blue-600">{formatCurrency(asIsMarketIntel!.asIsMarketPrice!)}</span>
-              </span>
-              <span className="text-foreground-tertiary">
-                {asIsMarketIntel!.compCount} comp{asIsMarketIntel!.compCount !== 1 ? 's' : ''} &le;{asIsMarketIntel!.thresholdPercent}% of ARV
-              </span>
-            </div>
-          ) : (
-            <p className="text-body-sm text-muted-foreground">
-              {asIsMarketIntel!.noDataReason}
-            </p>
-          )}
         </div>
       )}
     </div>
