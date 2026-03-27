@@ -34,9 +34,7 @@ import { useAnalysisEvaluation } from '@/hooks/use-analysis-evaluation'
 import type { AnalysisStep } from '@/types/analysis'
 import {
   SubjectPropertyCard,
-  ValuationCard,
   ComparablesSection,
-  RiskFloodCard,
   VisionAnalysisButton,
   PropertyMap,
   DealSummaryHero,
@@ -628,19 +626,6 @@ export default function AnalyzePage() {
                   <ComparablesSkeleton />
                 ) : null}
 
-                {/* 4. DETAILED VALUATION — full breakdown for power users */}
-                {hasResult && displayValuation && (
-                  <ValuationCard
-                    valuation={displayValuation}
-                    isRecalculated={isRecalculated}
-                    onOpenSettings={() => setSettingsOpen(true)}
-                  />
-                )}
-
-                {/* 5. RISK & FLOOD details */}
-                {(displayData?.riskFlags || displayData?.floodZone || displayData?.permits) && (
-                  <RiskFloodCard riskFlags={displayData?.riskFlags} floodZone={displayData?.floodZone} permits={displayData?.permits} />
-                )}
               </div>
 
               {/* Raw JSON Toggle — only after final result */}

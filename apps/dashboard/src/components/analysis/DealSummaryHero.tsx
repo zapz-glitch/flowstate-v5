@@ -132,6 +132,32 @@ export function DealSummaryHero({ subject, valuation, isRecalculated, onOpenSett
         </div>
       </div>
 
+      {/* Secondary metrics — costs & returns */}
+      {(valuation.closingCosts != null || valuation.carryingCosts != null || valuation.totalInvestment != null || valuation.projectedROI != null) && (
+        <div className="px-5 py-2 border-t border-border/30 flex items-center gap-4 sm:gap-6 flex-wrap text-caption tabular-nums">
+          {valuation.projectedROI != null && (
+            <span>
+              <span className="text-foreground-tertiary">ROI </span>
+              <span className={cn('font-semibold', valuation.projectedROI > 15 ? 'text-emerald-500' : valuation.projectedROI > 0 ? 'text-foreground' : 'text-red-500')}>
+                {valuation.projectedROI.toFixed(1)}%
+              </span>
+            </span>
+          )}
+          {valuation.closingCosts != null && (
+            <span><span className="text-foreground-tertiary">Closing </span><span className="font-medium">${fmt(valuation.closingCosts)}</span></span>
+          )}
+          {valuation.carryingCosts != null && (
+            <span><span className="text-foreground-tertiary">Carrying </span><span className="font-medium">${fmt(valuation.carryingCosts)}</span></span>
+          )}
+          {valuation.totalInvestment != null && (
+            <span><span className="text-foreground-tertiary">Total Investment </span><span className="font-medium">${fmt(valuation.totalInvestment)}</span></span>
+          )}
+          {valuation.wholesalePrice != null && (
+            <span><span className="text-foreground-tertiary">Wholesale </span><span className="font-medium">${fmt(valuation.wholesalePrice)}</span></span>
+          )}
+        </div>
+      )}
+
       {/* Risk flags — inline badges */}
       {hasRisks && (
         <div className="px-5 py-2.5 border-t border-border/30 flex items-center gap-2 flex-wrap">
