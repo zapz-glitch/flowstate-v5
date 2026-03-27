@@ -39,6 +39,7 @@ import {
   PropertyMap,
   DealSummaryHero,
   PhotoGallery,
+  RiskFloodCard,
 } from '@/components/analysis'
 import { ResizableLayout } from '@/components/ui/resizable'
 import {
@@ -587,7 +588,12 @@ export default function AnalyzePage() {
                   </div>
                 )}
 
-                {/* 3. COMPARABLES — the evidence supporting the verdict */}
+                {/* 3. RISK & FLOOD — between property details and comps */}
+                {(displayData?.riskFlags || displayData?.floodZone || displayData?.permits) && (
+                  <RiskFloodCard riskFlags={displayData?.riskFlags} floodZone={displayData?.floodZone} permits={displayData?.permits} />
+                )}
+
+                {/* 4. COMPARABLES — the evidence supporting the verdict */}
                 {hasResult ? (
                   (appraisalFilters.length > 0 ? analysisResult?.comps : effectiveComps) && (
                     <ComparablesSection
