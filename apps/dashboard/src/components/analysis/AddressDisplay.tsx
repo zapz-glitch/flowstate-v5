@@ -21,7 +21,7 @@ export function AddressDisplay({ address, className }: AddressDisplayProps) {
   }
 
   const zillowUrl = `https://www.zillow.com/homes/${encodeURIComponent(address)}_rb/`
-  const streetViewUrl = `https://www.google.com/maps/@?api=1&map_action=pano&query=${encodeURIComponent(address)}`
+  const streetViewUrl = `https://www.google.com/maps/search/${encodeURIComponent(address)}/@?entry=ttu&layer=c`
 
   return (
     <span className={cn('inline-flex flex-col gap-1', className)}>
