@@ -315,7 +315,7 @@ analyze.post('/', async (c) => {
           bundle.property, bundle.comparables, evalContexts, c.env
         )
 
-        if (llmResult && llmResult.selectedForArv.length >= 3) {
+        if (llmResult && llmResult.selectedForArv.length >= 1) {
           const selectedSet = new Set(llmResult.selectedForArv)
           const rankingMap = new Map(llmResult.rankings.map((r) => [r.compId, r]))
           // Update comp enable/disable based on LLM selection
@@ -336,7 +336,7 @@ analyze.post('/', async (c) => {
           // LLM returned result but not enough selections — just enrich without overriding
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           analysisResult = mergeLLMIntoResponse(analysisResult as any, llmResult) as typeof analysisResult
-          console.log(`[Analyze] LLM enriched (no override, ${llmResult.selectedForArv.length} < 3 selections) in ${Date.now() - llmStart}ms`)
+          console.log(`[Analyze] LLM enriched (no selections) in ${Date.now() - llmStart}ms`)
         }
       }
     } catch (llmError) {

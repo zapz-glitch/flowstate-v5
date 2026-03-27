@@ -38,7 +38,7 @@ Only comps that are physically comparable to the subject should be considered. E
 6. LOT SIZE — Should be in the same general range.
 
 PHASE 2 — AMONG PHYSICALLY SIMILAR COMPS, select for ARV quality:
-From comps that pass Phase 1, pick the best 3 for ARV using:
+From comps that pass Phase 1, select ONLY the ones that truly support an ARV estimate:
 
 1. SALE RECENCY — Prefer most recent sales (last 6 months ideal)
 2. PROXIMITY — Closer to subject = more relevant market data
@@ -47,10 +47,12 @@ From comps that pass Phase 1, pick the best 3 for ARV using:
 5. MINIMAL ADJUSTMENTS — Comps needing fewer adjustments are more reliable
 
 CRITICAL RULES:
+- Select ONLY comps that genuinely match. If only 1 comp is truly comparable, select 1. If 5 are excellent matches, select 5.
+- Do NOT force a specific count. Quality over quantity.
 - NEVER select a comp just because it has a high sale price if it fails physical similarity
 - A nearby 900 sqft comp selling for $300K does NOT support ARV for a 2,000 sqft subject
 - Physical match FIRST, then value level among matches
-- If fewer than 3 comps pass Phase 1, note this — do NOT pad with dissimilar comps
+- Do NOT pad with dissimilar comps to reach a target count
 
 IMPORTANT: Respond ONLY with valid JSON. No markdown, no code fences, no explanation outside the JSON.`
 
@@ -125,12 +127,12 @@ COMPARABLE SALES (${comparables.length} total):${compLines}
 
 YOUR TASK:
 1. First, identify which comps are PHYSICALLY SIMILAR to the subject (Phase 1)
-2. From those, select the best 3 for ARV calculation (Phase 2)
+2. From those, select ONLY the ones that truly support ARV (Phase 2) — could be 1, 2, 3, or more
 3. Rank ALL comps
 
 Return JSON:
 {
-  "selectedForArv": ["compId1", "compId2", "compId3"],
+  "selectedForArv": ["compId1", "compId2"],
   "rankings": [
     {
       "compId": "the comp ID string",
@@ -150,7 +152,10 @@ SCORING:
 30-49: Significant physical differences → NOT selected
 0-29: Poor match, not comparable → NOT selected
 
-REMEMBER: Physical similarity is non-negotiable. A comp that fails sqft, style, or foundation match should score below 50 regardless of its sale price or proximity.`
+REMEMBER:
+- Physical similarity is non-negotiable. A comp that fails sqft, style, or foundation match should score below 50 regardless of sale price.
+- Only include comps in selectedForArv that you would defend in front of an underwriter. Quality over quantity.
+- It is perfectly acceptable to select just 1 or 2 comps if those are the only true matches.`
 }
 
 // ─── Main Service ───────────────────────────────────────────────────────────
@@ -223,7 +228,7 @@ export async function analyzeComps(
     // Extract selectedForArv — validate that all IDs are valid comp IDs
     const selectedForArv: string[] = Array.isArray(parsed.selectedForArv)
       ? parsed.selectedForArv.filter((id): id is string => typeof id === 'string' && validCompIds.has(id))
-      : rankings.filter((r) => r.score >= 70).map((r) => r.compId).slice(0, 3)
+      : rankings.filter((r) => r.score >= 70).map((r) => r.compId)
 
     const latencyMs = Date.now() - startTime
 

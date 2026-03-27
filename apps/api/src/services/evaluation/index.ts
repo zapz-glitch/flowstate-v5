@@ -192,10 +192,7 @@ type GroupAResult = {
   groupACompIds: Set<string>
 }
 
-/** Standard appraisal practice: 3 best comps for ARV */
-const MAX_SELECTED = 3
-
-/** Minimum score threshold — comps below this are too dissimilar */
+/** Minimum score threshold — comps below this are too dissimilar to use for ARV */
 const MIN_COMP_SCORE = 120
 
 /**
@@ -215,12 +212,16 @@ function finalizeGroupASelection(
   const scored = candidates
     .filter((c) => c.salePrice != null && c.salePrice > 0)
     .map((c) => ({ comp: c, score: scoreComp(c.evaluation.filterResults, c.distanceMiles) }))
-    .sort((a, b) => b.score - a.score)
+    .sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score
+      return (b.comp.salePrice ?? 0) - (a.comp.salePrice ?? 0)
+    })
 
-  const selected = scored.slice(0, MAX_SELECTED)
+  // Only select comps that meet the minimum quality threshold — no fixed count
+  const selected = scored.filter((s) => s.score >= MIN_COMP_SCORE)
   const enabledIds = new Set(selected.map((s) => s.comp.id))
 
-  console.log(`[Evaluate] Selected ${selected.length} comps: ${selected.map((s) => `${s.comp.address}(${s.score})`).join(', ')}`)
+  console.log(`[Evaluate] ${scored.length} scored, ${selected.length} meet threshold (>=${MIN_COMP_SCORE}): ${selected.map((s) => `${s.comp.address}(${s.score})`).join(', ')}`)
 
   const arvComps: ArvCompLike[] = selected.map((s) => ({
     isEnabled: true,
@@ -347,7 +348,7 @@ function selectGroupAComps(
     )
   }
 
-  console.log(`[Evaluate] Best-available fallback: ${scored.slice(0, MAX_SELECTED).map((s) => `${s.comp.address}(${s.score})`).join(', ')}`)
+  console.log(`[Evaluate] Best-available fallback: ${scored.slice(0, 5).map((s) => `${s.comp.address}(${s.score})`).join(', ')}`)
 
   return finalizeGroupASelection(
     scored.map((s) => s.comp), allComparables, allGroupAIds, allClassifications,
