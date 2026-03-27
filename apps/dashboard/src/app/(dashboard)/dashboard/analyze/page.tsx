@@ -612,8 +612,6 @@ export default function AnalyzePage() {
                   <ComparablesSkeleton />
                 ) : null}
 
-              </div>
-
               {/* Raw JSON Toggle — only after final result */}
               {hasResult && (
                 <div className="border border-border overflow-hidden no-print min-w-0">
@@ -650,6 +648,7 @@ export default function AnalyzePage() {
                   )}
                 </div>
               )}
+              </div>{/* end underwriter-report */}
             </div>
             }
           />
