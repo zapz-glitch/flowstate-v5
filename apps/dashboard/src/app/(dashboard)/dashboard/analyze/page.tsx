@@ -345,7 +345,7 @@ export default function AnalyzePage() {
   return (
     <div className={cn('playground-bg min-h-screen -m-4 sm:-m-6 lg:-m-8', showTwoColumn ? 'flex flex-col' : 'p-4 sm:p-6 lg:p-8 space-y-6')}>
       {/* Search bar + controls */}
-      <div className={cn(showTwoColumn ? 'px-4 sm:px-6 py-3 space-y-3 flex-shrink-0' : 'space-y-6')}>
+      <div className={cn(showTwoColumn ? 'px-4 sm:px-6 pt-3 pb-1 space-y-3 flex-shrink-0' : 'space-y-6')}>
       {!hasResult && !isRunning && !hasPartialData && (
         <div>
           <h1 className="text-heading-lg text-foreground tracking-tight">API Playground</h1>
@@ -552,7 +552,7 @@ export default function AnalyzePage() {
             }
             right={
             <div className="min-w-0">
-              <div id="underwriter-report" data-date={new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })} className={cn('space-y-5', showTwoColumn && 'p-4 sm:p-5')}>
+              <div id="underwriter-report" data-date={new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })} className={cn('space-y-5', showTwoColumn && 'px-4 sm:px-5 pb-4 sm:pb-5')}>
                 {/* Print-only report header */}
                 {hasResult && (
                   <div className="hidden print:block print-report-header">
