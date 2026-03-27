@@ -4,6 +4,7 @@ import { SlidersHorizontal } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { SubjectData, ValuationData } from './shared-types'
 import { AddressDisplay } from './AddressDisplay'
+import { StatCell } from './StatCell'
 
 interface DealSummaryHeroProps {
   subject: SubjectData
@@ -50,17 +51,6 @@ export function DealSummaryHero({ subject, valuation, isRecalculated, onOpenSett
   const recommendation = deriveRecommendation(valuation.recommendation, valuation.projectedROI)
   const rec = getRecConfig(recommendation)
   const hasRisks = (riskFlags && riskFlags.length > 0) || floodZone?.inFloodZone
-
-  // Build compact property details string
-  const details = [
-    subject.bedrooms != null ? `${subject.bedrooms}bd` : null,
-    subject.bathrooms != null ? `${subject.bathrooms}ba` : null,
-    subject.squareFeet != null ? `${subject.squareFeet.toLocaleString()} sqft` : null,
-    subject.yearBuilt ? String(subject.yearBuilt) : null,
-    subject.lotSizeAcres ? `${Number(subject.lotSizeAcres).toFixed(3)} ac` : null,
-    subject.foundationType || null,
-    subject.buildingStyle || null,
-  ].filter(Boolean)
 
   return (
     <div className={cn('border border-border/60 overflow-hidden bg-background/80 backdrop-blur-sm corner-accents corner-accents-bottom', rec.ring, rec.glow)}>
@@ -113,26 +103,16 @@ export function DealSummaryHero({ subject, valuation, isRecalculated, onOpenSett
         </div>
       </div>
 
-      {/* Layer 3: Property details — compact inline, lower visual weight */}
-      {details.length > 0 && (
-        <div className="px-4 py-2 border-t border-border/30 flex items-center gap-1.5 flex-wrap text-caption text-foreground-tertiary">
-          {details.map((d, i) => (
-            <span key={i} className="flex items-center gap-1.5">
-              {i > 0 && <span className="text-border">·</span>}
-              <span>{d}</span>
-            </span>
-          ))}
-          {subject.subdivision && (
-            <span className="flex items-center gap-1.5">
-              <span className="text-border">·</span>
-              <span className="truncate max-w-[180px]">{subject.subdivision}</span>
-            </span>
-          )}
-          {isRecalculated && (
-            <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-500 ml-1">Recalculated</span>
-          )}
-        </div>
-      )}
+      {/* Layer 3: Property details — same grid as comp cards for easy comparison */}
+      <div className="flex flex-wrap border-t border-border/30 bg-muted/40">
+        <StatCell label="Beds" value={subject.bedrooms ?? '-'} />
+        <StatCell label="Baths" value={subject.bathrooms ?? '-'} />
+        <StatCell label="Sq Ft" value={subject.squareFeet?.toLocaleString() || '-'} />
+        <StatCell label="Year" value={subject.yearBuilt || '-'} />
+        <StatCell label="Lot" value={subject.lotSizeAcres ? `${Number(subject.lotSizeAcres).toFixed(3)} ac` : '-'} />
+        <StatCell label="Foundation" value={subject.foundationType || '-'} />
+        <StatCell label="House Style" value={subject.buildingStyle || '-'} />
+      </div>
 
       {/* Layer 4: Secondary costs — smallest text, muted */}
       {(valuation.closingCosts != null || valuation.wholesalePrice != null) && (
