@@ -50,7 +50,7 @@ function getRecConfig(rec: string) {
 export function DealSummaryHero({ subject, valuation, isRecalculated, onOpenSettings, riskFlags, floodZone }: DealSummaryHeroProps) {
   const recommendation = deriveRecommendation(valuation.recommendation, valuation.projectedROI)
   const rec = getRecConfig(recommendation)
-  const hasRisks = (riskFlags && riskFlags.length > 0) || floodZone?.inFloodZone
+  const hasRisks = (riskFlags && riskFlags.length > 0) || floodZone
 
   return (
     <div className="flex flex-col gap-4">
@@ -84,10 +84,16 @@ export function DealSummaryHero({ subject, valuation, isRecalculated, onOpenSett
         {/* Risk flags + flood zone — inline badges */}
         {hasRisks && (
           <div className="px-4 py-2 border-t border-border/30 flex items-center gap-2 flex-wrap">
-            {floodZone?.inFloodZone && (
-              <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-red-500/15 text-red-500 border border-red-500/20">
-                Flood Zone{floodZone.zone ? `: ${floodZone.zone}` : ''}
-              </span>
+            {floodZone && (
+              floodZone.inFloodZone ? (
+                <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-red-500/15 text-red-500 border border-red-500/20">
+                  Flood Zone{floodZone.zone ? `: ${floodZone.zone}` : ''}
+                </span>
+              ) : (
+                <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-500 border border-emerald-500/20">
+                  Flood Zone: No
+                </span>
+              )
             )}
             {riskFlags?.map((flag, i) => (
               <span key={i} className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-500 border border-amber-500/20">
