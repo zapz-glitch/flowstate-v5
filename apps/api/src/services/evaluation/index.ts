@@ -192,8 +192,8 @@ type GroupAResult = {
   groupACompIds: Set<string>
 }
 
-/** Minimum score threshold — comps below this are too dissimilar to use for ARV */
-const MIN_COMP_SCORE = 120
+/** Minimum percentage of enabled filters a comp must pass to be selected for ARV */
+const MIN_FILTER_PASS_RATE = 0.7 // 70% of filters must pass
 
 /**
  * Score, select top comps, build ARV, and return the final Group A result.
@@ -209,19 +209,42 @@ function finalizeGroupASelection(
   adjustments: AppraisalAdjustment[],
   fallbackUsed: 'none' | 'relaxed_filters' | 'relaxed_all',
 ): GroupAResult {
+  // Calculate filter pass rate for each comp
+  const enabledFilterCount = filters.filter((f) => f.enabled).length || 1
   const scored = candidates
     .filter((c) => c.salePrice != null && c.salePrice > 0)
-    .map((c) => ({ comp: c, score: scoreComp(c.evaluation.filterResults, c.distanceMiles) }))
+    .map((c) => {
+      const passedCount = c.evaluation.filterResults.filter((f) => f.passed).length
+      const passRate = passedCount / enabledFilterCount
+      return {
+        comp: c,
+        score: scoreComp(c.evaluation.filterResults, c.distanceMiles),
+        passRate,
+        passedCount,
+      }
+    })
     .sort((a, b) => {
+      // Primary: more filters passed
+      if (b.passedCount !== a.passedCount) return b.passedCount - a.passedCount
+      // Secondary: higher score
       if (b.score !== a.score) return b.score - a.score
+      // Tertiary: higher sale price
       return (b.comp.salePrice ?? 0) - (a.comp.salePrice ?? 0)
     })
 
-  // Only select comps that meet the minimum quality threshold — no fixed count
-  const selected = scored.filter((s) => s.score >= MIN_COMP_SCORE)
+  // Select comps that pass ALL filters first, then fall back to MOST filters
+  let selected = scored.filter((s) => s.passRate >= 1.0) // all filters pass
+  if (selected.length === 0) {
+    selected = scored.filter((s) => s.passRate >= MIN_FILTER_PASS_RATE) // 70%+ filters pass
+  }
+  if (selected.length === 0 && scored.length > 0) {
+    // Last resort: take the best available (highest pass count)
+    const bestPassCount = scored[0].passedCount
+    selected = scored.filter((s) => s.passedCount === bestPassCount)
+  }
   const enabledIds = new Set(selected.map((s) => s.comp.id))
 
-  console.log(`[Evaluate] ${scored.length} scored, ${selected.length} meet threshold (>=${MIN_COMP_SCORE}): ${selected.map((s) => `${s.comp.address}(${s.score})`).join(', ')}`)
+  console.log(`[Evaluate] ${scored.length} scored, ${selected.length} selected (pass rates: ${scored.slice(0, 5).map((s) => `${s.comp.address?.split(',')[0]}(${s.passedCount}/${enabledFilterCount}=${Math.round(s.passRate * 100)}%)`).join(', ')})`)
 
   const arvComps: ArvCompLike[] = selected.map((s) => ({
     isEnabled: true,
@@ -284,30 +307,38 @@ function selectGroupAComps(
     // Evaluate ALL comps (no price gate)
     const result = appraisalService.evaluate(subject, allComparables, { filters: stepFilters, adjustments })
 
-    // Score all comps by filter match quality
+    // Score and calculate filter pass rate for each comp
+    const enabledFilterCount = stepFilters.filter((f) => f.enabled).length || 1
     const scored = result.comparables
       .filter((c) => c.salePrice != null && c.salePrice > 0)
-      .map((c) => ({
-        comp: c,
-        score: scoreComp(c.evaluation.filterResults, c.distanceMiles),
-      }))
-
-    const qualifyingCount = scored.filter((s) => s.score >= MIN_COMP_SCORE).length
-    const topScore = scored[0]?.score ?? 0
-
-    console.log(`[Evaluate] Step ${step}: ${allComparables.length} comps evaluated, top score ${topScore}, ${qualifyingCount} qualifying (>=${MIN_COMP_SCORE})`)
-
-    if (qualifyingCount === 0) continue
-
-    // Step 2: Among qualifying comps, sort by score first, then prefer higher price (after-renovation)
-    const qualifying = scored
-      .filter((s) => s.score >= MIN_COMP_SCORE)
-      .sort((a, b) => {
-        // Primary: higher score = better filter match
-        if (b.score !== a.score) return b.score - a.score
-        // Secondary: higher sale price = more likely after-renovation
-        return (b.comp.salePrice ?? 0) - (a.comp.salePrice ?? 0)
+      .map((c) => {
+        const passedCount = c.evaluation.filterResults.filter((f) => f.passed).length
+        const passRate = passedCount / enabledFilterCount
+        return {
+          comp: c,
+          score: scoreComp(c.evaluation.filterResults, c.distanceMiles),
+          passRate,
+          passedCount,
+        }
       })
+
+    // Check for comps passing all filters, then 70%+
+    const allPassCount = scored.filter((s) => s.passRate >= 1.0).length
+    const mostPassCount = scored.filter((s) => s.passRate >= MIN_FILTER_PASS_RATE).length
+
+    console.log(`[Evaluate] Step ${step}: ${allComparables.length} comps, ${allPassCount} pass all filters, ${mostPassCount} pass 70%+`)
+
+    if (mostPassCount === 0) continue
+
+    // Select comps that match all filters first, fall back to 70%+
+    const qualifying = (allPassCount > 0
+      ? scored.filter((s) => s.passRate >= 1.0)
+      : scored.filter((s) => s.passRate >= MIN_FILTER_PASS_RATE)
+    ).sort((a, b) => {
+      if (b.passedCount !== a.passedCount) return b.passedCount - a.passedCount
+      if (b.score !== a.score) return b.score - a.score
+      return (b.comp.salePrice ?? 0) - (a.comp.salePrice ?? 0)
+    })
 
     // Step 3: Classify by price for display purposes (not selection)
     const stepThreshold = Math.min(Math.ceil(baseThreshold * Math.pow(1.5, step)), 100)
@@ -316,7 +347,7 @@ function selectGroupAComps(
 
     const fallbackUsed = step === 0 ? 'none' as const : 'relaxed_filters' as const
     if (step > 0) {
-      console.log(`[Evaluate] Relaxation step ${step}: filters relaxed to find ${qualifyingCount} comps`)
+      console.log(`[Evaluate] Relaxation step ${step}: filters relaxed to find ${qualifying.length} comps`)
     }
 
     return finalizeGroupASelection(
