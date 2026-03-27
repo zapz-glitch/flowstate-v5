@@ -63,8 +63,8 @@ export function DealSummaryHero({ subject, valuation, isRecalculated, onOpenSett
     <div className={cn('border border-border/60 overflow-hidden bg-background/80 backdrop-blur-sm corner-accents corner-accents-bottom', rec.ring, rec.glow)}>
       {/* Property identity */}
       <div className="px-5 py-3 border-b border-border/30">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0 flex-wrap">
             <AddressDisplay
               address={subject.address || 'Unknown Address'}
               latitude={subject.latitude}
@@ -72,7 +72,7 @@ export function DealSummaryHero({ subject, valuation, isRecalculated, onOpenSett
               className="text-body-sm font-semibold"
             />
             {subject.subdivision && (
-              <div className="text-caption text-foreground-tertiary mt-1">{subject.subdivision}</div>
+              <span className="text-caption text-foreground-tertiary">·  {subject.subdivision}</span>
             )}
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
