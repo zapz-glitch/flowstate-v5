@@ -56,6 +56,7 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
     effectiveComps,
     isRecalculated,
     valuationCardRef,
+    showStickyBar,
     settingsOpen,
     setSettingsOpen,
   } = useAnalysisEvaluation({
@@ -139,36 +140,16 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
 
   return (
     <div className={cn(hasMapData ? '-m-4 sm:-m-6 lg:-m-8 min-h-screen flex flex-col' : 'max-w-[1600px] mx-auto space-y-6')}>
-      {/* Unified sticky toolbar — address, metrics, actions in one row */}
+      {/* Header toolbar — address + actions only */}
       <div className="sticky top-0 z-20 no-print border-b border-border bg-background/95 backdrop-blur-xl">
         <div className="px-3 sm:px-5 py-2 flex items-center gap-2 sm:gap-4">
-          {/* Back + Address */}
           <Link href="/dashboard/reports" className="p-1 rounded-lg hover:bg-secondary transition-colors flex-shrink-0">
             <ArrowLeft className="w-4 h-4 text-foreground-tertiary" />
           </Link>
-          <span className="text-body-sm font-medium truncate min-w-0 max-w-[200px] xl:max-w-[260px]" title={report.address || undefined}>
+          <span className="text-body-sm font-medium truncate flex-1 min-w-0" title={report.address || undefined}>
             {report.address || 'Property Report'}
           </span>
-
-          {/* Valuation metrics — center, scrollable on small screens */}
-          {displayValuation && (
-            <div className="hidden sm:flex items-center gap-3 lg:gap-4 flex-1 min-w-0 text-caption-sm tabular-nums">
-              <span className="text-foreground-tertiary">ARV <span className="font-bold text-primary">${displayValuation.arv?.toLocaleString() || '-'}</span></span>
-              <span className="text-foreground-tertiary">Max Buy Price <span className="font-semibold text-foreground">${displayValuation.buyPrice?.toLocaleString() || '-'}</span></span>
-              <span className="text-foreground-tertiary">Profit <span className={cn('font-semibold', (displayValuation.projectedProfit ?? 0) > 0 ? 'text-emerald-600' : 'text-red-600')}>${displayValuation.projectedProfit?.toLocaleString() || '-'}</span></span>
-              {displayValuation.recommendation && (
-                <Badge variant="outline" className={cn(
-                  'text-[10px] px-1.5 py-0',
-                  displayValuation.recommendation.toUpperCase().includes('PURSUE') && 'bg-emerald-500/10 text-emerald-700 border-emerald-500/30',
-                  displayValuation.recommendation.toUpperCase().includes('PASS') && 'bg-red-500/10 text-red-700 border-red-500/30',
-                  displayValuation.recommendation.toUpperCase().includes('REVIEW') && 'bg-amber-500/10 text-amber-700 border-amber-500/30',
-                )}>{displayValuation.recommendation}</Badge>
-              )}
-            </div>
-          )}
-
-          {/* Actions — right side */}
-          <div className="flex items-center gap-1.5 ml-auto flex-shrink-0">
+          <div className="flex items-center gap-1.5 flex-shrink-0">
             <button type="button" onClick={() => setSettingsOpen(true)} className="p-1.5 rounded-lg text-foreground-tertiary hover:text-foreground hover:bg-secondary transition-colors" title="Evaluation Settings">
               <SlidersHorizontal className="w-3.5 h-3.5" />
             </button>
@@ -201,6 +182,31 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
           </div>
         }
         right={
+          <>
+          {/* Sticky valuation bar — appears when ValuationCard scrolls out */}
+          {displayValuation && showStickyBar && (
+            <div className="sticky top-0 z-10 no-print border-b border-border bg-background/95 backdrop-blur-xl">
+              <div className="px-4 sm:px-6 py-2 flex items-center gap-3 sm:gap-4 flex-wrap">
+                <DollarSign className="w-3.5 h-3.5 text-primary flex-shrink-0" />
+                <div className="flex items-center gap-3 sm:gap-4 flex-1 min-w-0 flex-wrap text-caption-sm tabular-nums">
+                  <span className="text-foreground-tertiary">ARV <span className="font-bold text-primary">${displayValuation.arv?.toLocaleString() || '-'}</span></span>
+                  <span className="text-foreground-tertiary">Max Buy <span className="font-semibold text-foreground">${displayValuation.buyPrice?.toLocaleString() || '-'}</span></span>
+                  <span className="text-foreground-tertiary">Profit <span className={cn('font-semibold', (displayValuation.projectedProfit ?? 0) > 0 ? 'text-emerald-600' : 'text-red-600')}>${displayValuation.projectedProfit?.toLocaleString() || '-'}</span></span>
+                </div>
+                {displayValuation.recommendation && (
+                  <Badge variant="outline" className={cn(
+                    'text-[10px] px-1.5 py-0 flex-shrink-0',
+                    displayValuation.recommendation.toUpperCase().includes('PURSUE') && 'bg-emerald-500/10 text-emerald-700 border-emerald-500/30',
+                    displayValuation.recommendation.toUpperCase().includes('PASS') && 'bg-red-500/10 text-red-700 border-red-500/30',
+                    displayValuation.recommendation.toUpperCase().includes('REVIEW') && 'bg-amber-500/10 text-amber-700 border-amber-500/30',
+                  )}>{displayValuation.recommendation}</Badge>
+                )}
+                <button type="button" onClick={() => setSettingsOpen(true)} className="p-1 rounded-lg text-foreground-tertiary hover:text-foreground hover:bg-secondary transition-colors flex-shrink-0" title="Evaluation Settings">
+                  <SlidersHorizontal className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+          )}
           <div className="space-y-6 p-4 sm:p-6">
             {analysis.subject && (
               <SubjectPropertyCard
@@ -250,6 +256,7 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
               <p className="text-caption text-foreground-tertiary">Generated by Flowstate</p>
             </div>
           </div>
+          </>
         }
       />
       ) : (

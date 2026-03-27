@@ -144,6 +144,7 @@ export default function ReportPage({ params }: { params: Promise<{ jobId: string
     effectiveComps,
     isRecalculated,
     valuationCardRef,
+    showStickyBar,
     settingsOpen,
     setSettingsOpen,
   } = useAnalysisEvaluation({
@@ -310,47 +311,6 @@ export default function ReportPage({ params }: { params: Promise<{ jobId: string
 
         </div>{/* end header wrapper */}
 
-        {/* Full-width sticky valuation bar */}
-        {displayValuation && (
-          <div className="sticky top-0 z-20 no-print border-b border-border bg-background/95 backdrop-blur-xl">
-            <div className="px-4 sm:px-6 py-2.5 flex items-center gap-3 sm:gap-5 flex-wrap">
-              <div className="flex items-center gap-2 flex-shrink-0">
-                <DollarSign className="w-4 h-4 text-primary" />
-                {isRecalculated && (
-                  <Badge className="bg-amber-500/15 text-amber-700 border-amber-500/30 text-[10px] px-1.5 py-0">Recalculated</Badge>
-                )}
-              </div>
-              <div className="flex items-center gap-4 sm:gap-5 flex-1 min-w-0 flex-wrap">
-                <div className="flex items-baseline gap-1">
-                  <span className="text-caption-sm text-foreground-tertiary">ARV</span>
-                  <span className="text-body-sm font-bold text-primary tabular-nums">${displayValuation.arv?.toLocaleString() || '-'}</span>
-                </div>
-                <div className="flex items-baseline gap-1">
-                  <span className="text-caption-sm text-foreground-tertiary">Max Buy Price</span>
-                  <span className="text-body-sm font-semibold tabular-nums">${displayValuation.buyPrice?.toLocaleString() || '-'}</span>
-                </div>
-                <div className="flex items-baseline gap-1">
-                  <span className="text-caption-sm text-foreground-tertiary">Profit</span>
-                  <span className={cn('text-body-sm font-semibold tabular-nums', (displayValuation.projectedProfit ?? 0) > 0 ? 'text-emerald-600' : 'text-red-600')}>
-                    ${displayValuation.projectedProfit?.toLocaleString() || '-'}
-                  </span>
-                </div>
-              </div>
-              {displayValuation.recommendation && (
-                <Badge variant="outline" className={cn(
-                  'text-[10px] px-2 py-0 flex-shrink-0',
-                  displayValuation.recommendation.toUpperCase().includes('PURSUE') && 'bg-emerald-500/10 text-emerald-700 border-emerald-500/30',
-                  displayValuation.recommendation.toUpperCase().includes('PASS') && 'bg-red-500/10 text-red-700 border-red-500/30',
-                  displayValuation.recommendation.toUpperCase().includes('REVIEW') && 'bg-amber-500/10 text-amber-700 border-amber-500/30',
-                )}>{displayValuation.recommendation}</Badge>
-              )}
-              <button type="button" onClick={() => setSettingsOpen(true)} className="p-1.5 rounded-lg text-foreground-tertiary hover:text-foreground hover:bg-secondary transition-colors flex-shrink-0" title="Evaluation Settings">
-                <SlidersHorizontal className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          </div>
-        )}
-
         {/* Two-column resizable layout */}
         {hasMapData ? (
         <ResizableLayout
@@ -360,6 +320,31 @@ export default function ReportPage({ params }: { params: Promise<{ jobId: string
             </div>
           }
           right={
+            <>
+            {/* Sticky valuation bar — appears when ValuationCard scrolls out */}
+            {displayValuation && showStickyBar && (
+              <div className="sticky top-0 z-10 no-print border-b border-border bg-background/95 backdrop-blur-xl">
+                <div className="px-4 sm:px-6 py-2 flex items-center gap-3 sm:gap-4 flex-wrap">
+                  <DollarSign className="w-3.5 h-3.5 text-primary flex-shrink-0" />
+                  <div className="flex items-center gap-3 sm:gap-4 flex-1 min-w-0 flex-wrap text-caption-sm tabular-nums">
+                    <span className="text-foreground-tertiary">ARV <span className="font-bold text-primary">${displayValuation.arv?.toLocaleString() || '-'}</span></span>
+                    <span className="text-foreground-tertiary">Max Buy <span className="font-semibold text-foreground">${displayValuation.buyPrice?.toLocaleString() || '-'}</span></span>
+                    <span className="text-foreground-tertiary">Profit <span className={cn('font-semibold', (displayValuation.projectedProfit ?? 0) > 0 ? 'text-emerald-600' : 'text-red-600')}>${displayValuation.projectedProfit?.toLocaleString() || '-'}</span></span>
+                  </div>
+                  {displayValuation.recommendation && (
+                    <Badge variant="outline" className={cn(
+                      'text-[10px] px-1.5 py-0 flex-shrink-0',
+                      displayValuation.recommendation.toUpperCase().includes('PURSUE') && 'bg-emerald-500/10 text-emerald-700 border-emerald-500/30',
+                      displayValuation.recommendation.toUpperCase().includes('PASS') && 'bg-red-500/10 text-red-700 border-red-500/30',
+                      displayValuation.recommendation.toUpperCase().includes('REVIEW') && 'bg-amber-500/10 text-amber-700 border-amber-500/30',
+                    )}>{displayValuation.recommendation}</Badge>
+                  )}
+                  <button type="button" onClick={() => setSettingsOpen(true)} className="p-1 rounded-lg text-foreground-tertiary hover:text-foreground hover:bg-secondary transition-colors flex-shrink-0" title="Evaluation Settings">
+                    <SlidersHorizontal className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            )}
             <div className="space-y-6 p-4 sm:p-6">
               {analysis.subject && <SubjectPropertyCard subject={analysis.subject} />}
 
@@ -390,6 +375,7 @@ export default function ReportPage({ params }: { params: Promise<{ jobId: string
                 <p className="text-caption text-foreground-tertiary">Generated by Flowstate</p>
               </div>
             </div>
+            </>
           }
         />
         ) : (
