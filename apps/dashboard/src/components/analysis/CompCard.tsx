@@ -76,7 +76,7 @@ export function CompCard({
             </div>
             <div className="flex-1 min-w-0">
               {comp.address ? (
-                <AddressDisplay address={comp.address} latitude={comp.latitude} longitude={comp.longitude} className="text-body-sm font-medium" showStreetView={false} />
+                <AddressDisplay address={comp.address} latitude={comp.latitude} longitude={comp.longitude} className="text-body-sm font-medium" />
               ) : (
                 <span className="text-body-sm font-medium">Unknown Address</span>
               )}
