@@ -177,7 +177,7 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
         }
         right={
           <div className="min-w-0">
-            <div className="flex flex-col gap-4 px-4 sm:px-5 pb-4 sm:pb-5">
+            <div className="flex flex-col gap-4 px-4 lg:pl-4 lg:pr-0 pb-4">
               {/* Deal Summary — same as playground */}
               {analysis.subject && displayValuation && (
                 <div ref={valuationCardRef}>
