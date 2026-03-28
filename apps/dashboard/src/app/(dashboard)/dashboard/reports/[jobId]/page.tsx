@@ -169,7 +169,7 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
       {/* Two-column resizable layout */}
       {hasMapData ? (
       <ResizableLayout
-        className="mt-3 ml-4 sm:ml-6"
+        className="flex-1 mt-3 ml-4 sm:ml-6"
         left={
           <div className="sticky top-0 h-screen overflow-hidden">
             <PropertyMap subject={analysis.subject} comps={effectiveComps} subjectSubdivision={analysis.subject?.subdivision} selectedCompKeys={compOverride?.selectedCompKeys} onToggleComp={handleToggleComp} onMarkerSelect={handleMarkerSelect} activeMarkerKey={activeMarkerKey} />
