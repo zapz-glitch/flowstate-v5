@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, use } from 'react'
 import Link from 'next/link'
-import { ArrowLeft, SlidersHorizontal, Share2 } from 'lucide-react'
+import { ArrowLeft, Share2 } from 'lucide-react'
 import {
   Sheet,
   SheetContent,
@@ -171,7 +171,7 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
       <ResizableLayout
         className="flex-1 mt-3 ml-4 sm:ml-6"
         left={
-          <div className="sticky top-0 h-screen overflow-hidden">
+          <div className="sticky top-0 h-[calc(100vh-3.5rem)] overflow-hidden">
             <PropertyMap subject={analysis.subject} comps={effectiveComps} subjectSubdivision={analysis.subject?.subdivision} selectedCompKeys={compOverride?.selectedCompKeys} onToggleComp={handleToggleComp} onMarkerSelect={handleMarkerSelect} activeMarkerKey={activeMarkerKey} />
           </div>
         }
