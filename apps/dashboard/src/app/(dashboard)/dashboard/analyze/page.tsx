@@ -560,6 +560,7 @@ export default function AnalyzePage() {
                       onOpenSettings={() => setSettingsOpen(true)}
                       riskFlags={displayData.riskFlags}
                       floodZone={displayData.floodZone}
+                      jobId={activeAnalysis?.jobId}
                     />
                   </div>
                 ) : displayData?.subject ? (

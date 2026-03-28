@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import { SlidersHorizontal } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { SubjectData, ValuationData } from './shared-types'
@@ -13,6 +14,8 @@ interface DealSummaryHeroProps {
   onOpenSettings?: () => void
   riskFlags?: string[] | null
   floodZone?: { zone?: string | null; inFloodZone?: boolean | null } | null
+  /** Job ID for linking to the full report */
+  jobId?: string | null
 }
 
 function fmt(v: number | null | undefined): string {
@@ -47,7 +50,7 @@ function getRecConfig(rec: string) {
   return { label, badge: 'bg-primary text-white', ring: 'ring-primary/30', glow: '' }
 }
 
-export function DealSummaryHero({ subject, valuation, isRecalculated, onOpenSettings, riskFlags, floodZone }: DealSummaryHeroProps) {
+export function DealSummaryHero({ subject, valuation, isRecalculated, onOpenSettings, riskFlags, floodZone, jobId }: DealSummaryHeroProps) {
   const recommendation = deriveRecommendation(valuation.recommendation, valuation.projectedROI)
   const rec = getRecConfig(recommendation)
   const hasRisks = (riskFlags && riskFlags.length > 0) || floodZone
@@ -57,14 +60,21 @@ export function DealSummaryHero({ subject, valuation, isRecalculated, onOpenSett
 
       {/* Card 1: Subject Property */}
       <div className="border border-border/60 overflow-hidden bg-background/80 backdrop-blur-sm corner-accents corner-accents-bottom">
-        {/* Address + Street View */}
+        {/* Address + Report link */}
         <div className="px-4 py-2.5">
-          <AddressDisplay
+          <div className="flex items-center justify-between gap-3">
+            <AddressDisplay
             address={subject.address || 'Unknown Address'}
             latitude={subject.latitude}
             longitude={subject.longitude}
             className="text-body-sm font-semibold"
           />
+            {jobId && (
+              <Link href={`/dashboard/reports/${jobId}`} className="text-caption text-primary hover:underline flex-shrink-0 no-print">
+                View Report
+              </Link>
+            )}
+          </div>
           {subject.subdivision && (
             <div className="text-caption text-foreground-tertiary mt-0.5">{subject.subdivision}</div>
           )}
