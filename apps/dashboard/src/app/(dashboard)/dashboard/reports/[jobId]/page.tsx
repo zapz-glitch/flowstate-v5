@@ -135,7 +135,7 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
   const hasMapData = !!(analysis.subject?.latitude && analysis.subject?.longitude)
 
   return (
-    <div className={cn(hasMapData ? '-m-4 sm:-m-6 lg:-m-8 min-h-screen flex flex-col' : 'max-w-[1600px] mx-auto space-y-6')}>
+    <div className={cn(hasMapData ? '-m-4 sm:-m-6 lg:-m-8 h-[100dvh] flex flex-col overflow-hidden' : 'max-w-[1600px] mx-auto space-y-6')}>
       {/* Header toolbar — address + actions only */}
       <div className="sticky top-0 z-20 no-print border-b border-border bg-background/95 backdrop-blur-xl">
         <div className="px-3 sm:px-5 py-2 flex items-center gap-2 sm:gap-4">
@@ -169,9 +169,9 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
       {/* Two-column resizable layout */}
       {hasMapData ? (
       <ResizableLayout
-        className="flex-1 mt-3 ml-4 sm:ml-6"
+        className="flex-1 min-h-0 mt-3 ml-4 sm:ml-6"
         left={
-          <div className="sticky top-0 h-[calc(100vh-3.5rem)] overflow-hidden">
+          <div className="sticky top-0 h-[calc(100dvh-3.5rem)] overflow-hidden">
             <PropertyMap subject={analysis.subject} comps={effectiveComps} subjectSubdivision={analysis.subject?.subdivision} selectedCompKeys={compOverride?.selectedCompKeys} onToggleComp={handleToggleComp} onMarkerSelect={handleMarkerSelect} activeMarkerKey={activeMarkerKey} />
           </div>
         }
