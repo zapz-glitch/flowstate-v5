@@ -339,7 +339,7 @@ export default function AnalyzePage() {
   const showTwoColumn = (isRunning || hasResult || hasPartialData) && hasMapData
 
   return (
-    <div className={cn('playground-bg min-h-screen -m-4 sm:-m-6 lg:-m-8', showTwoColumn ? 'flex flex-col' : 'p-4 sm:p-6 lg:p-8 space-y-6')}>
+    <div className={cn('playground-bg -m-4 sm:-m-6 lg:-m-8', showTwoColumn ? 'h-[100dvh] flex flex-col overflow-hidden' : 'min-h-screen p-4 sm:p-6 lg:p-8 space-y-6')}>
       {/* Search bar + controls */}
       <div className={cn(showTwoColumn ? 'px-4 sm:px-6 pt-3 pb-1 space-y-3 flex-shrink-0' : 'space-y-6')}>
       {!hasResult && !isRunning && !hasPartialData && (
@@ -534,7 +534,7 @@ export default function AnalyzePage() {
           <ResizableLayout
             className="flex-1 min-h-0 mx-4 sm:mx-6 mt-3"
             left={
-              <div className="sticky top-0 h-screen overflow-hidden">
+              <div className="h-full overflow-hidden">
                 <PropertyMap
                   subject={displayData!.subject!}
                   comps={hasResult ? (effectiveComps ?? analysisResult?.comps) : displayData!.comps}
