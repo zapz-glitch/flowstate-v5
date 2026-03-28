@@ -532,7 +532,7 @@ export default function AnalyzePage() {
         <>
           {hasMapData ? (
           <ResizableLayout
-            className="flex-1 min-h-0 ml-4 sm:ml-6 mt-3"
+            className="flex-1 min-h-0 mx-4 sm:mx-6 mt-3"
             left={
               <div className="sticky top-0 h-screen overflow-hidden">
                 <PropertyMap
