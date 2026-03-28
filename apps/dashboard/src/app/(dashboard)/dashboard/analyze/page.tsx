@@ -548,7 +548,7 @@ export default function AnalyzePage() {
             }
             right={
             <div className="min-w-0">
-              <div id="underwriter-report" data-date={new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })} className={cn('flex flex-col gap-4', showTwoColumn && 'pb-4 sm:pb-5')}>
+              <div id="underwriter-report" data-date={new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })} className={cn('flex flex-col gap-4', showTwoColumn && 'pl-4 sm:pl-5 pb-4 sm:pb-5')}>
 
                 {/* 1. DEAL VERDICT — the first thing the user sees */}
                 {hasResult && displayData?.subject && displayValuation ? (
