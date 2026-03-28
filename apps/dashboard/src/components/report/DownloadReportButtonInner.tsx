@@ -47,7 +47,7 @@ export default function DownloadReportButtonInner({
       ) : (
         <Download className="w-3.5 h-3.5" />
       )}
-      <span className="hidden sm:inline">{generating ? 'Generating...' : 'Download PDF'}</span>
+      <span className="hidden sm:inline">{generating ? 'Generating...' : 'Download Report'}</span>
     </button>
   )
 }

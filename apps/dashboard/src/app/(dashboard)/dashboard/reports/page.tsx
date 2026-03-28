@@ -60,7 +60,7 @@ export default async function ReportsPage({
       <div className="space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-2">
           <div className="space-y-1">
-            <h1 className="text-heading-lg text-foreground tracking-tight">Reports</h1>
+            <h1 className="text-heading-lg text-foreground tracking-tight">Property Reports</h1>
             <p className="text-body text-foreground-tertiary">
               View your saved property analysis reports
             </p>

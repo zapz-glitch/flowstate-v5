@@ -42,7 +42,7 @@ const baseNavigation: Array<{
 }> = [
   { name: 'Overview', href: '/dashboard', icon: Home },
   { name: 'API Playground', href: '/dashboard/analyze', icon: Search },
-  { name: 'Reports', href: '/dashboard/reports', icon: ClipboardList },
+  { name: 'Property Reports', href: '/dashboard/reports', icon: ClipboardList },
   { name: 'Evaluation Settings', href: '/dashboard/evaluation-settings', icon: Settings2 },
   { name: 'API Hub', href: '/dashboard/api-hub', icon: Key },
 ]
