@@ -21,7 +21,6 @@ export function ResizableLayout({ left, right, className }: ResizableLayoutProps
   const containerRef = useRef<HTMLDivElement>(null)
   const draggingRef = useRef(false)
 
-  // Load persisted width
   useEffect(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY)
@@ -32,7 +31,6 @@ export function ResizableLayout({ left, right, className }: ResizableLayoutProps
     } catch { /* ignore */ }
   }, [])
 
-  // Save on change
   useEffect(() => {
     try { localStorage.setItem(STORAGE_KEY, String(Math.round(leftPct))) } catch { /* ignore */ }
   }, [leftPct])
@@ -79,27 +77,26 @@ export function ResizableLayout({ left, right, className }: ResizableLayoutProps
     }
   }, [stopDrag])
 
+  // Set CSS variable for left panel width so Tailwind can use it
+  const containerStyle = { '--left-pct': `${leftPct}%` } as React.CSSProperties
+
   return (
-    <div ref={containerRef} className={cn("flex flex-1 min-h-0 relative", className)}>
-      {/* Invisible overlay during drag — prevents map canvas from stealing mouse events */}
+    <div ref={containerRef} style={containerStyle} className={cn("flex flex-col lg:flex-row flex-1 min-h-0 relative", className)}>
       {isDragging && (
         <div className="fixed inset-0 z-50" style={{ cursor: "col-resize" }} />
       )}
 
-      {/* Left panel */}
+      {/* Left panel: full-width fixed height on mobile, percentage width on desktop */}
       <div
-        className="flex-shrink-0 no-print"
-        style={{
-          width: `${leftPct}%`,
-          pointerEvents: isDragging ? "none" : undefined,
-        }}
+        className="no-print h-[280px] sm:h-[350px] lg:h-auto lg:flex-shrink-0 lg:w-[var(--left-pct)]"
+        style={{ pointerEvents: isDragging ? "none" : undefined }}
       >
         {left}
       </div>
 
-      {/* Drag handle */}
+      {/* Drag handle — desktop only */}
       <div
-        className="flex-shrink-0 w-1.5 cursor-col-resize bg-border/30 hover:bg-primary/20 active:bg-primary/40 transition-colors group flex items-center justify-center z-10"
+        className="hidden lg:flex flex-shrink-0 w-1.5 cursor-col-resize bg-border/30 hover:bg-primary/20 active:bg-primary/40 transition-colors group items-center justify-center z-10"
         onMouseDown={startDrag}
         onTouchStart={() => startDrag()}
       >
@@ -110,7 +107,7 @@ export function ResizableLayout({ left, right, className }: ResizableLayoutProps
 
       {/* Right panel */}
       <div
-        className="flex-1 min-w-0 overflow-y-auto"
+        className="flex-1 min-w-0 overflow-y-auto min-h-0"
         style={{ pointerEvents: isDragging ? "none" : undefined }}
       >
         {right}

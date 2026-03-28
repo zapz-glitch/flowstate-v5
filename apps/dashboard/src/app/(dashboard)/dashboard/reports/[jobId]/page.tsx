@@ -135,7 +135,7 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
   const hasMapData = !!(analysis.subject?.latitude && analysis.subject?.longitude)
 
   return (
-    <div className={cn(hasMapData ? '-m-4 sm:-m-6 lg:-m-8 h-[100dvh] flex flex-col overflow-hidden' : 'max-w-[1600px] mx-auto space-y-6')}>
+    <div className={cn(hasMapData ? '-m-4 sm:-m-6 lg:-m-8 min-h-screen lg:h-[100dvh] flex flex-col lg:overflow-hidden' : 'max-w-[1600px] mx-auto space-y-6')}>
       {/* Header toolbar — address + actions only */}
       <div className="sticky top-0 z-20 no-print border-b border-border bg-background/95 backdrop-blur-xl">
         <div className="px-3 sm:px-5 py-2 flex items-center gap-2 sm:gap-4">

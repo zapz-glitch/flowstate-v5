@@ -339,7 +339,7 @@ export default function AnalyzePage() {
   const showTwoColumn = (isRunning || hasResult || hasPartialData) && hasMapData
 
   return (
-    <div className={cn('playground-bg -m-4 sm:-m-6 lg:-m-8', showTwoColumn ? 'h-[100dvh] flex flex-col overflow-hidden' : 'min-h-screen p-4 sm:p-6 lg:p-8 space-y-6')}>
+    <div className={cn('playground-bg -m-4 sm:-m-6 lg:-m-8', showTwoColumn ? 'min-h-screen lg:h-[100dvh] flex flex-col lg:overflow-hidden' : 'min-h-screen p-4 sm:p-6 lg:p-8 space-y-6')}>
       {/* Search bar + controls */}
       <div className={cn(showTwoColumn ? 'px-4 sm:px-6 pt-3 pb-1 space-y-3 flex-shrink-0' : 'space-y-6')}>
       {!hasResult && !isRunning && !hasPartialData && (
