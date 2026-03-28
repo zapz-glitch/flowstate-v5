@@ -87,6 +87,9 @@ interface AnalyzeRequest {
   /** Override ARV comp threshold for this request (top % of comps by sale price) */
   arvThresholdPercent?: number
 
+  /** Override as-is threshold (% of ARV below which comps are classified as-is) — default 70 */
+  asIsThresholdPercent?: number
+
   /** Override appraisal rules for this request */
   appraisalOverrides?: {
     filters?: Array<{ type: string; enabled: boolean; value: number }>
@@ -223,6 +226,7 @@ analyze.post('/', async (c) => {
       customTierRanges: userSettings.customTierRanges,
       customMajorItemCosts: userSettings.customMajorItemCosts,
       arvThreshold,
+      asIsThresholdPercent: body.asIsThresholdPercent,
       apiCallStats: {
         corelogic: {
           total: propertyCallStats.total,

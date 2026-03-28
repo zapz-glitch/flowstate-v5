@@ -62,6 +62,8 @@ export interface AnalyzeRequest {
   }
   /** Override ARV comp threshold for this request */
   arvThresholdPercent?: number
+  /** Override as-is threshold (% of ARV) for this request — default 70 */
+  asIsThresholdPercent?: number
   /** Override appraisal rules for this request */
   appraisalOverrides?: {
     filters?: Array<{ type: string; enabled: boolean; value: number }>
@@ -417,6 +419,7 @@ export async function queueAnalysis(request: AnalyzeRequest): Promise<QueueAnaly
       skipCache: request.skipCache,
       marketData: request.marketData,
       arvThresholdPercent: request.arvThresholdPercent,
+      asIsThresholdPercent: request.asIsThresholdPercent,
       appraisalOverrides: request.appraisalOverrides,
     }
 

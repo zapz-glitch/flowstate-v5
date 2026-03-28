@@ -108,6 +108,7 @@ export default function AnalyzePage() {
   const [skipCache, setSkipCache] = useState(false)
   const [marketData, setMarketData] = useState(false)
   const [arvThreshold, setArvThreshold] = useState(15)
+  const [asIsThreshold, setAsIsThreshold] = useState(70)
   const [error, setError] = useState<string | null>(null)
   const [suggestedFilters, setSuggestedFilters] = useState<FilterState[] | null>(null)
   const [suggestedArvThreshold, setSuggestedArvThreshold] = useState<number | null>(null)
@@ -289,6 +290,7 @@ export default function AnalyzePage() {
         skipCache,
         marketData: marketData ? { enabled: true } : undefined,
         arvThresholdPercent: arvThreshold,
+        asIsThresholdPercent: asIsThreshold,
         appraisalOverrides: overrides,
       })
 
