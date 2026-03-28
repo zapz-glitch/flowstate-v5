@@ -2,8 +2,7 @@
 
 import { useState, useEffect, useCallback, use } from 'react'
 import Link from 'next/link'
-import { ArrowLeft, DollarSign, SlidersHorizontal, Share2 } from 'lucide-react'
-import { Badge } from '@/components/ui/badge'
+import { ArrowLeft, SlidersHorizontal, Share2 } from 'lucide-react'
 import {
   Sheet,
   SheetContent,
@@ -19,13 +18,11 @@ import { SettingsPanel } from '@/components/report/SettingsPanel'
 import { DownloadReportButton } from '@/components/report/DownloadReportButton'
 import { ShareReportDialog } from '@/components/report/ShareReportDialog'
 import {
-  SubjectPropertyCard,
-  ValuationCard,
   ComparablesSection,
-  RiskFloodCard,
-  ApiCallStatsCard,
-  VisionAnalysisButton,
   PropertyMap,
+  DealSummaryHero,
+  PhotoGallery,
+  VisionAnalysisButton,
 } from '@/components/analysis'
 import type { AnalyzeData } from '@/components/analysis'
 
@@ -56,7 +53,6 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
     effectiveComps,
     isRecalculated,
     valuationCardRef,
-    showStickyBar,
     settingsOpen,
     setSettingsOpen,
   } = useAnalysisEvaluation({
@@ -176,101 +172,82 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
       {/* Two-column resizable layout */}
       {hasMapData ? (
       <ResizableLayout
+        className="mt-3 ml-4 sm:ml-6"
         left={
-          <div className="sticky top-10 h-[calc(100vh-2.5rem)] overflow-hidden">
+          <div className="sticky top-0 h-screen overflow-hidden">
             <PropertyMap subject={analysis.subject} comps={effectiveComps} subjectSubdivision={analysis.subject?.subdivision} selectedCompKeys={compOverride?.selectedCompKeys} onToggleComp={handleToggleComp} onMarkerSelect={handleMarkerSelect} activeMarkerKey={activeMarkerKey} />
           </div>
         }
         right={
-          <>
-          {/* Sticky valuation bar — appears when ValuationCard scrolls out */}
-          {displayValuation && (
-            <div className="sticky top-0 z-10 no-print border-b border-border bg-background/95 backdrop-blur-xl">
-              <div className="px-4 sm:px-6 py-2 flex items-center gap-3 sm:gap-4 flex-wrap">
-                <DollarSign className="w-3.5 h-3.5 text-primary flex-shrink-0" />
-                <div className="flex items-center gap-3 sm:gap-4 flex-1 min-w-0 flex-wrap text-caption-sm tabular-nums">
-                  <span className="text-foreground-tertiary">ARV <span className="font-bold text-primary">${displayValuation.arv?.toLocaleString() || '-'}</span></span>
-                  <span className="text-foreground-tertiary">Max Buy <span className="font-semibold text-foreground">${displayValuation.buyPrice?.toLocaleString() || '-'}</span></span>
-                  <span className="text-foreground-tertiary">Profit <span className={cn('font-semibold', (displayValuation.projectedProfit ?? 0) > 0 ? 'text-emerald-600' : 'text-red-600')}>${displayValuation.projectedProfit?.toLocaleString() || '-'}</span></span>
-                </div>
-                {displayValuation.recommendation && (
-                  <Badge variant="outline" className={cn(
-                    'text-[10px] px-1.5 py-0 flex-shrink-0',
-                    displayValuation.recommendation.toUpperCase().includes('PURSUE') && 'bg-emerald-500/10 text-emerald-700 border-emerald-500/30',
-                    displayValuation.recommendation.toUpperCase().includes('PASS') && 'bg-red-500/10 text-red-700 border-red-500/30',
-                    displayValuation.recommendation.toUpperCase().includes('REVIEW') && 'bg-amber-500/10 text-amber-700 border-amber-500/30',
-                  )}>{displayValuation.recommendation}</Badge>
-                )}
-                <button type="button" onClick={() => setSettingsOpen(true)} className="p-1 rounded-lg text-foreground-tertiary hover:text-foreground hover:bg-secondary transition-colors flex-shrink-0" title="Evaluation Settings">
-                  <SlidersHorizontal className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            </div>
-          )}
-          <div className="space-y-6 p-4 sm:p-6">
-            {analysis.subject && (
-              <SubjectPropertyCard
-                subject={analysis.subject}
-                footer={analysis.subject.photos?.length ? (
-                  <VisionAnalysisButton
-                    photoUrls={analysis.subject.photos}
-                    propertyContext={{
-                      address: analysis.subject.address,
-                      squareFeet: analysis.subject.squareFeet ?? undefined,
-                      yearBuilt: analysis.subject.yearBuilt ?? undefined,
-                    }}
-                    existingAnalysis={analysis.visionAnalysis}
+          <div className="min-w-0">
+            <div className="flex flex-col gap-4 px-4 sm:px-5 pb-4 sm:pb-5">
+              {/* Deal Summary — same as playground */}
+              {analysis.subject && displayValuation && (
+                <div ref={valuationCardRef}>
+                  <DealSummaryHero
+                    subject={analysis.subject}
+                    valuation={displayValuation}
+                    isRecalculated={isRecalculated}
+                    onOpenSettings={() => setSettingsOpen(true)}
+                    riskFlags={analysis.riskFlags}
+                    floodZone={analysis.floodZone}
+                    jobId={null}
                   />
-                ) : undefined}
-              />
-            )}
+                </div>
+              )}
 
-            {displayValuation && (
-              <div ref={valuationCardRef}>
-                <ValuationCard valuation={displayValuation} isRecalculated={isRecalculated} onOpenSettings={() => setSettingsOpen(true)} />
-              </div>
-            )}
+              {/* Photos */}
+              {analysis.subject?.photos && analysis.subject.photos.length > 0 && (
+                <div className="border border-border px-4 py-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-caption font-medium text-foreground-secondary">Property Photos</span>
+                    <VisionAnalysisButton
+                      photoUrls={analysis.subject.photos}
+                      propertyContext={{
+                        address: analysis.subject.address,
+                        squareFeet: analysis.subject.squareFeet ?? undefined,
+                        yearBuilt: analysis.subject.yearBuilt ?? undefined,
+                      }}
+                      existingAnalysis={analysis.visionAnalysis}
+                    />
+                  </div>
+                  <PhotoGallery photos={analysis.subject.photos} />
+                </div>
+              )}
 
-            <RiskFloodCard riskFlags={analysis.riskFlags} floodZone={analysis.floodZone} permits={analysis.permits}  />
+              {/* Comparables */}
+              {effectiveComps && (
+                <ComparablesSection
+                  comps={effectiveComps}
+                  subject={analysis.subject}
+                  subjectSubdivision={analysis.subject?.subdivision}
+                  selectedCompKeys={compOverride?.selectedCompKeys}
+                  isManual={compOverride?.isManual ?? false}
+                  recalculatedArv={isRecalculated ? displayValuation?.arv : undefined}
+                  onToggleComp={handleToggleComp}
+                  onReset={handleResetComps}
+                  highlightedCompKey={activeMarkerKey}
+                />
+              )}
 
-            {effectiveComps && (
-              <ComparablesSection
-                comps={effectiveComps}
-                subject={analysis.subject}
-                subjectSubdivision={analysis.subject?.subdivision}
-                selectedCompKeys={compOverride?.selectedCompKeys}
-                isManual={compOverride?.isManual ?? false}
-                recalculatedArv={isRecalculated ? displayValuation?.arv : undefined}
-                onToggleComp={handleToggleComp}
-                onReset={handleResetComps}
-                highlightedCompKey={activeMarkerKey}
-              />
-            )}
-
-            {analysis.apiCallStats && (
-              <ApiCallStatsCard stats={analysis.apiCallStats} />
-            )}
-
-            {/* Footer */}
-            <div className="pt-6 border-t border-border text-center">
-              <p className="text-caption text-foreground-tertiary">Generated by Flowstate</p>
             </div>
           </div>
-          </>
         }
       />
       ) : (
       <div className="flex-1">
-        <div className="space-y-6 p-4 sm:p-6 max-w-5xl mx-auto">
-          {analysis.subject && (
-            <SubjectPropertyCard subject={analysis.subject} />
+        <div className="flex flex-col gap-4 p-4 sm:p-6 max-w-5xl mx-auto">
+          {analysis.subject && displayValuation && (
+            <DealSummaryHero
+              subject={analysis.subject}
+              valuation={displayValuation}
+              isRecalculated={isRecalculated}
+              onOpenSettings={() => setSettingsOpen(true)}
+              riskFlags={analysis.riskFlags}
+              floodZone={analysis.floodZone}
+              jobId={null}
+            />
           )}
-          {displayValuation && (
-            <div ref={valuationCardRef}>
-              <ValuationCard valuation={displayValuation} isRecalculated={isRecalculated} onOpenSettings={() => setSettingsOpen(true)} />
-            </div>
-          )}
-          <RiskFloodCard riskFlags={analysis.riskFlags} floodZone={analysis.floodZone} permits={analysis.permits}  />
           {effectiveComps && (
             <ComparablesSection comps={effectiveComps} subject={analysis.subject} subjectSubdivision={analysis.subject?.subdivision} selectedCompKeys={compOverride?.selectedCompKeys} isManual={compOverride?.isManual ?? false} recalculatedArv={isRecalculated ? displayValuation?.arv : undefined} onToggleComp={handleToggleComp} onReset={handleResetComps} />
           )}
