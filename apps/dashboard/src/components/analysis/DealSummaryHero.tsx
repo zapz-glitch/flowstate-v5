@@ -123,9 +123,6 @@ export function DealSummaryHero({ subject, valuation, isRecalculated, onOpenSett
             {isRecalculated && (
               <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-500">Recalculated</span>
             )}
-            {rec.label && (
-              <span className={cn('text-xs font-bold px-2.5 py-1 rounded', rec.badge)}>{rec.label}</span>
-            )}
             {onOpenSettings && (
               <button type="button" onClick={onOpenSettings} className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-caption text-foreground-tertiary hover:text-foreground hover:bg-secondary transition-colors border border-border no-print">
                 <SlidersHorizontal className="w-3 h-3" />
