@@ -146,9 +146,6 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
             {report.address || 'Property Report'}
           </span>
           <div className="flex items-center gap-1.5 flex-shrink-0">
-            <button type="button" onClick={() => setSettingsOpen(true)} className="p-1.5 rounded-lg text-foreground-tertiary hover:text-foreground hover:bg-secondary transition-colors" title="Evaluation Settings">
-              <SlidersHorizontal className="w-3.5 h-3.5" />
-            </button>
             <button type="button" onClick={() => setShareOpen(true)} className="p-1.5 rounded-lg text-foreground-tertiary hover:text-foreground hover:bg-secondary transition-colors" title="Share">
               <Share2 className="w-3.5 h-3.5" />
             </button>
