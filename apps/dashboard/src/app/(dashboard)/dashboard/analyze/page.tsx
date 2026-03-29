@@ -4,7 +4,6 @@ import { useState, useCallback, useEffect, useRef } from 'react'
 import { useSetAtom } from 'jotai'
 import { activeAnalysisAtom, analysisResultAtom, analysisStateAtom } from '@/atoms/analysis'
 import { initialAnalysisState } from '@/types/analysis'
-// import Link from 'next/link'
 import {
   Search,
   Play,
@@ -13,7 +12,7 @@ import {
   StopCircle,
   ChevronDown,
   ChevronRight,
-  Globe,
+  Loader2,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { AddressAutocomplete } from '@/components/AddressAutocomplete'
@@ -43,12 +42,23 @@ import {
 import { ResizableLayout } from '@/components/ui/resizable'
 import {
   SubjectPropertySkeleton,
+  ValuationSkeleton,
   ComparablesSkeleton,
 } from '@/components/analysis/AnalysisSkeletons'
 import { useEnrichmentSSE, type EnrichmentEvent } from '@/hooks/use-enrichment-sse'
 import { AppraisalFilterEditor, type FilterState, type AdjustmentState } from '@/components/analysis/AppraisalFilterEditor'
 import { SettingsPanel } from '@/components/report/SettingsPanel'
 import { DownloadReportButton } from '@/components/report/DownloadReportButton'
+
+// ─── Analysis Phases ────────────────────────────────────────────────────────
+//
+//  idle      → nothing happening
+//  fetching  → API call in flight (show all skeletons)
+//  enriching → API returned result, Zillow scraping in progress
+//              (show subject + comps without selection, skeleton for valuation)
+//  complete  → everything done (full evaluation: valuation + comp selection)
+//
+type AnalysisPhase = 'idle' | 'fetching' | 'enriching' | 'complete'
 
 // ─── Status Labels ───────────────────────────────────────────────────────────
 
@@ -104,11 +114,13 @@ function TypewriterText({ text, typeSpeed = 30 }: { text: string; typeSpeed?: nu
 // ─── Main Page ───────────────────────────────────────────────────────────────
 
 export default function AnalyzePage() {
+  // Search & options
   const [address, setAddress] = useState('')
   const [skipCache, setSkipCache] = useState(false)
-  const [marketData, setMarketData] = useState(false)
   const [arvThreshold, setArvThreshold] = useState(15)
   const [asIsThreshold, setAsIsThreshold] = useState(70)
+
+  // Error & retry
   const [error, setError] = useState<string | null>(null)
   const [suggestedFilters, setSuggestedFilters] = useState<FilterState[] | null>(null)
   const [suggestedArvThreshold, setSuggestedArvThreshold] = useState<number | null>(null)
@@ -116,15 +128,21 @@ export default function AnalyzePage() {
   const [appraisalFilters, setAppraisalFilters] = useState<FilterState[]>([])
   const [appraisalAdjustments, setAppraisalAdjustments] = useState<AdjustmentState[]>([])
 
+  // UI state
   const [showRawJson, setShowRawJson] = useState(false)
   const [searchExpanded, setSearchExpanded] = useState(false)
-  const [isSubmitting, setIsSubmitting] = useState(false)
   const [durationMs, setDurationMs] = useState<number | null>(null)
+
+  // Phase-based state machine
+  const [phase, setPhase] = useState<AnalysisPhase>('idle')
   const [enrichmentStreamUrl, setEnrichmentStreamUrl] = useState<string | null>(null)
   const [enrichmentToken, setEnrichmentToken] = useState<string | null>(null)
   const [enrichmentStatus, setEnrichmentStatus] = useState<string | null>(null)
+  // Raw CoreLogic data — shown immediately while evaluation runs in background
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [partialData, setPartialData] = useState<Record<string, any> | null>(null)
 
-  // Global analysis context
+  // Global analysis context (Jotai)
   const {
     activeAnalysis,
     analysisState,
@@ -138,66 +156,92 @@ export default function AnalyzePage() {
   useEffect(() => {
     getArvThreshold().then((res) => {
       setArvThreshold(res.config.percent)
-    }).catch(() => {}) // fall back to default
+    }).catch(() => {})
   }, [])
 
-  const isRunning = isSubmitting || (activeAnalysis !== null && analysisState.status !== 'completed' && analysisState.status !== 'failed')
+  // Derived state
+  const isFetching = phase === 'fetching'
+  const isEnriching = phase === 'enriching'
+  const isComplete = phase === 'complete'
+  const isActive = phase !== 'idle'
   const hasResult = analysisResult !== null
-  const hasPartialData = displayData !== null
+  // Best available data for rendering: full result > partial CoreLogic data
+  const renderData = displayData ?? partialData
 
-  // Atom setters (needed by enrichment handler and handleAnalyze)
+  // Atom setters
   const setActiveAnalysis = useSetAtom(activeAnalysisAtom)
   const setAnalysisResult = useSetAtom(analysisResultAtom)
   const setAnalysisState = useSetAtom(analysisStateAtom)
 
-  // SSE enrichment handler
+  // ─── SSE Event Handler ────────────────────────────────────────────────────
+
   const handleEnrichmentEvent = useCallback((event: EnrichmentEvent) => {
-    if (event.event === 'market_data_started' || event.event === 'llm_started') {
-      setEnrichmentStatus(event.data.message || 'Processing...')
-    } else if (event.event === 'llm_complete') {
-      // If LLM produced an updated result with comp selection, replace entirely
-      if (event.data.updatedResult) {
-        setAnalysisResult(event.data.updatedResult as AnalyzeData)
-        const selectedCount = event.data.llmAnalysis?.selectedForArv?.length ?? 0
-        setEnrichmentStatus(`AI selected ${selectedCount} comps for ARV`)
-        setTimeout(() => setEnrichmentStatus(null), 3000)
-      } else if (event.data.rankings) {
-        // Just enrich with reasoning (no selection change)
-        setAnalysisResult((prev) => {
-          if (!prev) return prev
-          type Ranking = { compId: string; reasoning: string; score: number; keyFeatures: string[] }
-          const rankings = event.data.rankings as Ranking[]
-          const rankingMap = new Map(rankings.map((r) => [r.compId, r]))
-          const updatedComps = { ...prev.comps }
-          if (updatedComps.items) {
-            updatedComps.items = updatedComps.items.map((comp) => {
-              const match = rankingMap.get(comp.address || '')
-              if (!match) return comp
-              return { ...comp, selectionReason: match.reasoning, qualityScore: match.score, keyFeatures: match.keyFeatures }
-            })
-          }
-          return { ...prev, comps: updatedComps } as AnalyzeData
-        })
+    const { event: eventType, data } = event
+
+    switch (eventType) {
+      case 'evaluation_started':
+        setEnrichmentStatus(data.message || 'Evaluating comparables...')
+        break
+
+      case 'evaluation_complete':
+        // Full analysis result with appraisal rules, valuation, classification
+        if (data.updatedResult) {
+          setAnalysisResult(data.updatedResult as AnalyzeData)
+        }
+        setEnrichmentStatus('Scraping market data...')
+        break
+
+      case 'market_data_started':
+        setEnrichmentStatus(data.message || 'Fetching market data...')
+        break
+
+      case 'market_data_complete':
+        if (data.updatedResult) {
+          setAnalysisResult(data.updatedResult as AnalyzeData)
+        }
+        setEnrichmentStatus('Finalizing...')
+        break
+
+      case 'llm_started':
+        setEnrichmentStatus(data.message || 'AI analyzing comparables...')
+        break
+
+      case 'llm_complete':
+        if (data.updatedResult) {
+          setAnalysisResult(data.updatedResult as AnalyzeData)
+        } else if (data.rankings) {
+          setAnalysisResult((prev) => {
+            if (!prev) return prev
+            type Ranking = { compId: string; reasoning: string; score: number; keyFeatures: string[] }
+            const rankings = data.rankings as Ranking[]
+            const rankingMap = new Map(rankings.map((r) => [r.compId, r]))
+            const updatedComps = { ...prev.comps }
+            if (updatedComps.items) {
+              updatedComps.items = updatedComps.items.map((comp) => {
+                const match = rankingMap.get(comp.address || '')
+                if (!match) return comp
+                return { ...comp, selectionReason: match.reasoning, qualityScore: match.score, keyFeatures: match.keyFeatures }
+              })
+            }
+            return { ...prev, comps: updatedComps } as AnalyzeData
+          })
+        }
+        break
+
+      case 'enrichment_done':
+        setPhase('complete')
         setEnrichmentStatus(null)
-      } else {
-        setEnrichmentStatus(null)
-      }
-    } else if (event.event === 'market_data_complete') {
-      // If re-evaluation produced an updated result, replace the current one
-      if (event.data.updatedResult) {
-        setAnalysisResult(event.data.updatedResult as AnalyzeData)
-        setEnrichmentStatus('Market data applied — result updated')
-        setTimeout(() => setEnrichmentStatus(null), 3000)
-      } else {
-        setEnrichmentStatus(null)
-      }
-    } else if (event.event === 'enrichment_done') {
-      setEnrichmentStatus(null)
-      setEnrichmentStreamUrl(null)
-      setEnrichmentToken(null)
-    } else if (event.event === 'error') {
-      setEnrichmentStatus(`Error: ${event.data.message || 'Unknown error'}`)
-      setTimeout(() => setEnrichmentStatus(null), 5000)
+        setEnrichmentStreamUrl(null)
+        setEnrichmentToken(null)
+        break
+
+      case 'error':
+        setEnrichmentStatus(`Error: ${data.message || 'Unknown error'}`)
+        setTimeout(() => {
+          setPhase('complete')
+          setEnrichmentStatus(null)
+        }, 3000)
+        break
     }
   }, [setAnalysisResult])
 
@@ -207,17 +251,20 @@ export default function AnalyzePage() {
     onEvent: handleEnrichmentEvent,
   })
 
-  // Clear enrichment status if SSE connection fails or completes without events
+  // Handle SSE connection failures
   useEffect(() => {
+    if (phase !== 'enriching') return
     if (sseStatus === 'error') {
-      setEnrichmentStatus('SSE connection failed — enrichment may still be processing')
-      setTimeout(() => setEnrichmentStatus(null), 5000)
-    } else if (sseStatus === 'done' && enrichmentStatus === 'Starting enrichment...') {
+      setPhase('complete')
+      setEnrichmentStatus(null)
+    } else if (sseStatus === 'done' && enrichmentStatus === 'Scraping market data...') {
+      setPhase('complete')
       setEnrichmentStatus(null)
     }
-  }, [sseStatus, enrichmentStatus])
+  }, [sseStatus, enrichmentStatus, phase])
 
-  // Unified evaluation hook: settings, comp override, display data, sticky bar
+  // ─── Evaluation Hook ─────────────────────────────────────────────────────
+
   const {
     settingsHook,
     recalcData,
@@ -235,7 +282,8 @@ export default function AnalyzePage() {
     stickyBarRootMargin: '-60px 0px 0px 0px',
   })
 
-  // Map marker → scroll to card in right column
+  // ─── Map Interaction ─────────────────────────────────────────────────────
+
   const [activeMarkerKey, setActiveMarkerKey] = useState<string | null>(null)
   const scrollAndHighlight = useCallback((key: string) => {
     const el = document.querySelector(`[data-card-key="${key}"]`)
@@ -254,23 +302,25 @@ export default function AnalyzePage() {
     const key = type === 'subject' ? 'subject' : compKey
     if (!key) return
     setActiveMarkerKey(key)
-    // Try immediately, retry after 150ms if excluded section needs to expand
     if (!scrollAndHighlight(key)) {
       setTimeout(() => scrollAndHighlight(key), 150)
     }
   }, [scrollAndHighlight])
 
-  // Analysis handler
+  // ─── Analysis Handler ────────────────────────────────────────────────────
+
   const handleAnalyze = useCallback(async () => {
     if (!address.trim()) return
 
+    // Reset everything
     clearAnalysis()
     setError(null)
     setDurationMs(null)
     setEnrichmentStreamUrl(null)
     setEnrichmentToken(null)
     setEnrichmentStatus(null)
-    setIsSubmitting(true)
+    setPartialData(null)
+    setPhase('fetching')
 
     const t0 = Date.now()
     try {
@@ -278,52 +328,62 @@ export default function AnalyzePage() {
         filters: appraisalFilters,
         adjustments: appraisalAdjustments,
       } : undefined
-      if (overrides) {
-        console.log('[Analyze] Sending appraisal overrides:', overrides.filters?.length, 'filters,', overrides.adjustments?.length, 'adjustments')
-        console.log('[Analyze] Filter states:', overrides.filters?.map(f => `${f.type}:${f.enabled}:${f.value}`).join(', '))
-      }
-      console.log('[Analyze] ARV threshold:', arvThreshold, '%')
 
       const response = await queueAnalysis({
         address: address.trim(),
         searchOptions: { radiusMiles: 1, maxComps: 15, monthsBack: 12 },
         skipCache,
-        marketData: marketData ? { enabled: true } : undefined,
+        marketData: { enabled: true },
         arvThresholdPercent: arvThreshold,
         asIsThresholdPercent: asIsThreshold,
         appraisalOverrides: overrides,
       })
 
-      if (response.success && response.result) {
+      // New flow: API returns partialResult (raw CoreLogic data) + SSE for evaluation/enrichment
+      // Legacy flow: API returns full result (for backward compatibility)
+      const initialData = response.partialResult ?? response.result
+
+      if (response.success && initialData) {
         setDurationMs(Date.now() - t0)
         setActiveAnalysis({ jobId: response.jobId ?? '', address: address.trim() })
-        setAnalysisResult(response.result as AnalyzeData)
-        setAnalysisState({ ...initialAnalysisState, jobId: response.jobId ?? null, status: 'completed' })
 
-        // Connect SSE if enrichment is pending
+        if (response.partialResult) {
+          // New flow: show raw subject + comps immediately, evaluation runs in DO via SSE
+          setPartialData(response.partialResult)
+          setAnalysisState({ ...initialAnalysisState, jobId: response.jobId ?? null, status: 'completed' })
+          setPhase('enriching')
+          setEnrichmentStatus('Evaluating comparables...')
+        } else {
+          // Legacy flow: full result returned synchronously
+          setAnalysisResult(response.result as AnalyzeData)
+          setAnalysisState({ ...initialAnalysisState, jobId: response.jobId ?? null, status: 'completed' })
+        }
+
         if (response.enrichment) {
+          if (!response.partialResult) setPhase('enriching')
           setEnrichmentStreamUrl(response.enrichment.streamUrl)
           setEnrichmentToken(response.enrichment.token)
-          setEnrichmentStatus('Starting enrichment...')
+          if (!response.partialResult) setEnrichmentStatus('Scraping market data...')
+        } else if (!response.partialResult) {
+          setPhase('complete')
         }
-      } else {
+      } else if (!response.success) {
+        setPhase('idle')
         setError(response.error || 'Analysis failed')
         if (response.suggestedFilters) {
           setSuggestedFilters(response.suggestedFilters as FilterState[])
         }
         if (response.suggestedArvThreshold) {
-          // Store suggested threshold — applied when user clicks "Apply Suggestions"
           setSuggestedArvThreshold(response.suggestedArvThreshold)
         }
       }
     } catch (err) {
+      setPhase('idle')
       setError(err instanceof Error ? err.message : 'Failed to start analysis')
-    } finally {
-      setIsSubmitting(false)
     }
-  }, [address, skipCache, marketData, arvThreshold, appraisalFilters, appraisalAdjustments, clearAnalysis, setActiveAnalysis, setAnalysisResult, setAnalysisState])
+  }, [address, skipCache, arvThreshold, asIsThreshold, appraisalFilters, appraisalAdjustments, clearAnalysis, setActiveAnalysis, setAnalysisResult, setAnalysisState])
 
-  // Auto-retry after "Apply & Retry" updates the filter state
+  // Auto-retry after "Apply & Retry"
   useEffect(() => {
     if (pendingRetry) {
       setPendingRetry(false)
@@ -332,26 +392,30 @@ export default function AnalyzePage() {
   }, [pendingRetry, handleAnalyze])
 
   const handleCancel = useCallback(() => {
+    setPhase('idle')
     cancelAnalysis()
   }, [cancelAnalysis])
 
-  const isSearchCollapsed = (isRunning || hasResult || hasPartialData) && !searchExpanded
+  // ─── Layout Flags ────────────────────────────────────────────────────────
 
-  const hasMapData = !!(displayData?.subject?.latitude && displayData?.subject?.longitude)
-  const showTwoColumn = (isRunning || hasResult || hasPartialData) && hasMapData
+  const isSearchCollapsed = isActive && !searchExpanded
+  const hasMapData = !!(renderData?.subject?.latitude && renderData?.subject?.longitude)
+  const showTwoColumn = isActive && hasMapData
+
+  // ─── Render ──────────────────────────────────────────────────────────────
 
   return (
     <div className={cn('playground-bg -m-4 sm:-m-6 lg:-m-8', showTwoColumn ? 'min-h-screen lg:h-[100dvh] flex flex-col lg:overflow-hidden' : 'min-h-screen p-4 sm:p-6 lg:p-8 space-y-6')}>
       {/* Search bar + controls */}
       <div className={cn(showTwoColumn ? 'px-4 sm:px-6 pt-3 pb-1 space-y-3 flex-shrink-0' : 'space-y-6')}>
-      {!hasResult && !isRunning && !hasPartialData && (
+      {phase === 'idle' && !error && (
         <div>
           <h1 className="text-heading-lg text-foreground tracking-tight">API Playground</h1>
           <p className="text-body text-foreground-tertiary mt-1">Test the Flowstate API with real property data</p>
         </div>
       )}
 
-      {/* Input Form — collapses to compact bar once running/results shown, click to expand */}
+      {/* Input Form — collapses to compact bar once active */}
       {isSearchCollapsed ? (
         <div
           className="border border-border/60 overflow-hidden cursor-pointer hover:border-primary/30 transition-all bg-background/80 backdrop-blur-sm shadow-sm corner-accents corner-accents-bottom"
@@ -365,20 +429,26 @@ export default function AnalyzePage() {
               <div className="text-body-sm text-foreground-secondary truncate">
                 {activeAnalysis?.address || address || 'Search an address...'}
               </div>
-              {isRunning && (
+              {isFetching && (
                 <div className="text-xs text-primary mt-0.5" key={analysisState.currentStep}>
                   <TypewriterText text={getStatusLabel(analysisState.currentStep)} />
                 </div>
               )}
+              {isEnriching && (
+                <div className="text-xs text-primary mt-0.5 flex items-center gap-1.5">
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                  {enrichmentStatus || 'Enriching with market data...'}
+                </div>
+              )}
             </div>
-            {isRunning ? (
+            {isFetching ? (
               <Button variant="destructive" size="sm" onClick={(e) => { e.stopPropagation(); handleCancel() }}>
                 <StopCircle className="w-3.5 h-3.5 mr-1.5" />
                 Cancel
               </Button>
             ) : (
               <div className="flex items-center gap-1.5">
-                {hasResult && (
+                {isComplete && hasResult && (
                   <div onClick={(e) => e.stopPropagation()} className="no-print">
                     <DownloadReportButton
                       reportProps={{
@@ -412,7 +482,7 @@ export default function AnalyzePage() {
                 <h2 className="text-body font-semibold">/v1/analyze</h2>
                 <p className="text-caption text-foreground-tertiary">Property details, comparables, and valuation</p>
               </div>
-              {(isRunning || hasResult || hasPartialData) && (
+              {isActive && (
                 <button
                   type="button"
                   onClick={() => setSearchExpanded(false)}
@@ -429,22 +499,22 @@ export default function AnalyzePage() {
                 value={address}
                 onChange={setAddress}
                 onSubmit={() => {
-                  if (!isRunning && address.trim()) {
+                  if (!isFetching && address.trim()) {
                     handleAnalyze()
                     setSearchExpanded(false)
                   }
                 }}
                 className="flex-1"
                 autoFocus={searchExpanded}
-                disabled={isRunning}
+                disabled={isFetching}
               />
-              {isRunning ? (
+              {isFetching ? (
                 <Button variant="destructive" onClick={handleCancel}>
                   <StopCircle className="w-4 h-4 mr-2" />
                   Cancel
                 </Button>
               ) : (
-                <Button onClick={() => { handleAnalyze(); setSearchExpanded(false) }} disabled={isRunning || !address.trim()}>
+                <Button onClick={() => { handleAnalyze(); setSearchExpanded(false) }} disabled={isFetching || !address.trim()}>
                   <Play className="w-4 h-4 mr-2" />
                   Run
                 </Button>
@@ -458,19 +528,12 @@ export default function AnalyzePage() {
                   Skip cache
                 </Label>
               </div>
-              <div className="flex items-center gap-2">
-                <Switch id="market-data" checked={marketData} onCheckedChange={setMarketData} />
-                <Label htmlFor="market-data" className="flex items-center gap-1.5 text-body-sm text-foreground-tertiary cursor-pointer">
-                  <Globe className="w-3.5 h-3.5" />
-                  Market Data
-                </Label>
-              </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* Error — filter match failure shows editor, other errors show simple message */}
+      {/* Error display */}
       {(error || analysisState.status === 'failed') && (() => {
         const errorMsg = error || analysisState.error || 'Analysis failed'
         const isFilterError = errorMsg.includes('appraisal filters') || errorMsg.includes('Suggested changes')
@@ -529,8 +592,8 @@ export default function AnalyzePage() {
       })()}
       </div>{/* end search wrapper */}
 
-      {/* Two-column resizable layout — starts immediately below search */}
-      {(isRunning || hasResult || hasPartialData) && (
+      {/* Two-column resizable layout */}
+      {isActive && (
         <>
           {hasMapData ? (
           <ResizableLayout
@@ -538,11 +601,11 @@ export default function AnalyzePage() {
             left={
               <div className="h-full overflow-hidden">
                 <PropertyMap
-                  subject={displayData!.subject!}
-                  comps={hasResult ? (effectiveComps ?? analysisResult?.comps) : displayData!.comps}
-                  subjectSubdivision={displayData!.subject?.subdivision}
-                  selectedCompKeys={compOverride?.selectedCompKeys}
-                  onToggleComp={handleToggleComp}
+                  subject={renderData!.subject!}
+                  comps={isComplete ? (effectiveComps ?? analysisResult?.comps) : (hasResult ? analysisResult?.comps : renderData!.comps)}
+                  subjectSubdivision={renderData!.subject?.subdivision}
+                  selectedCompKeys={isComplete ? compOverride?.selectedCompKeys : undefined}
+                  onToggleComp={isComplete ? handleToggleComp : undefined}
                   onMarkerSelect={handleMarkerSelect}
                   activeMarkerKey={activeMarkerKey}
                 />
@@ -552,114 +615,164 @@ export default function AnalyzePage() {
             <div className="min-w-0">
               <div id="underwriter-report" data-date={new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })} className={cn('flex flex-col gap-4', showTwoColumn && 'lg:pl-4 pb-4')}>
 
-                {/* 1. DEAL VERDICT — the first thing the user sees */}
-                {hasResult && displayData?.subject && displayValuation ? (
-                  <div ref={valuationCardRef}>
-                    <DealSummaryHero
-                      subject={displayData.subject}
-                      valuation={displayValuation}
-                      isRecalculated={isRecalculated}
-                      onOpenSettings={() => setSettingsOpen(true)}
-                      riskFlags={displayData.riskFlags}
-                      floodZone={displayData.floodZone}
-                      jobId={activeAnalysis?.jobId}
-                    />
-                  </div>
-                ) : displayData?.subject ? (
-                  <SubjectPropertyCard subject={displayData.subject} />
-                ) : isRunning ? (
-                  <SubjectPropertySkeleton />
-                ) : null}
-
-                {/* 2. SUBJECT PHOTOS — compact row */}
-                {hasResult && displayData?.subject?.photos && displayData.subject.photos.length > 0 && (
-                  <div className="border border-border px-4 py-3">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-caption font-medium text-foreground-secondary">Property Photos</span>
-                      <VisionAnalysisButton
-                        photoUrls={displayData.subject.photos}
-                        propertyContext={{
-                          address: displayData.subject.address,
-                          squareFeet: displayData.subject.squareFeet ?? undefined,
-                          yearBuilt: displayData.subject.yearBuilt ?? undefined,
-                        }}
-                        existingAnalysis={displayData.visionAnalysis}
-                      />
-                    </div>
-                    <PhotoGallery photos={displayData.subject.photos} />
-                  </div>
+                {/* ── PHASE: FETCHING — all skeletons ── */}
+                {isFetching && (
+                  <>
+                    <SubjectPropertySkeleton />
+                    <ComparablesSkeleton />
+                  </>
                 )}
 
-                {/* 3. COMPARABLES — the evidence supporting the verdict */}
-                {hasResult ? (
-                  (appraisalFilters.length > 0 ? analysisResult?.comps : effectiveComps) && (
-                    <ComparablesSection
-                      comps={appraisalFilters.length > 0 ? (analysisResult?.comps as import('./actions').CompsData) : effectiveComps!}
-                      subject={displayData?.subject}
-                      subjectSubdivision={displayData?.subject?.subdivision}
-                      selectedCompKeys={compOverride?.selectedCompKeys}
-                      isManual={compOverride?.isManual ?? false}
-                      recalculatedArv={isRecalculated ? displayValuation?.arv : undefined}
-                      onToggleComp={handleToggleComp}
-                      onReset={handleResetComps}
-                      highlightedCompKey={activeMarkerKey}
-                    />
-                  )
-                ) : displayData && displayData.comps && displayData.comps.items && displayData.comps.items.length > 0 ? (
-                  <ComparablesSection
-                    comps={displayData.comps as CompsData}
-                    subject={displayData.subject!}
-                    subjectSubdivision={displayData.subject?.subdivision}
-                  />
-                ) : isRunning ? (
-                  <ComparablesSkeleton />
-                ) : null}
+                {/* ── PHASE: ENRICHING — data shown progressively, valuation skeleton ── */}
+                {isEnriching && (
+                  <>
+                    {/* Subject property — from CoreLogic or enriched */}
+                    {renderData?.subject ? (
+                      <SubjectPropertyCard subject={renderData.subject} />
+                    ) : (
+                      <SubjectPropertySkeleton />
+                    )}
 
-              {/* Raw JSON Toggle — only after final result */}
-              {hasResult && (
-                <div className="border border-border overflow-hidden no-print min-w-0">
-                  <div
-                    className="px-6 py-4 cursor-pointer flex items-center gap-3 hover:bg-white/5 dark:hover:bg-white/[0.02] transition-colors"
-                    onClick={() => setShowRawJson(!showRawJson)}
-                  >
-                    <div className="w-8 h-8 rounded-lg bg-secondary/60 flex items-center justify-center">
-                      <Code className="w-4 h-4 text-foreground-secondary" />
-                    </div>
-                    <span className="text-body font-medium flex-1">Raw JSON Response</span>
-                    {showRawJson ? <ChevronDown className="w-4 h-4 text-foreground-tertiary" /> : <ChevronRight className="w-4 h-4 text-foreground-tertiary" />}
-                  </div>
-                  {showRawJson && (
-                    <div className="px-4 pb-4">
-                      <div className="relative">
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            navigator.clipboard.writeText(JSON.stringify(analysisResult, null, 2))
-                            const btn = e.currentTarget
-                            btn.textContent = 'Copied!'
-                            setTimeout(() => { btn.textContent = 'Copy JSON' }, 2000)
-                          }}
-                          className="absolute top-3 right-3 z-10 px-2.5 py-1 rounded-md bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs transition-colors border border-zinc-700"
-                        >
-                          Copy JSON
-                        </button>
-                        <pre className="bg-zinc-950 text-zinc-100 p-4 pt-10 overflow-auto max-h-[600px] text-xs font-mono">
-                          {JSON.stringify(analysisResult, null, 2)}
-                        </pre>
+                    {/* Photos — show as they arrive from Zillow */}
+                    {renderData?.subject?.photos && renderData.subject.photos.length > 0 && (
+                      <div className="border border-border px-4 py-3">
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-caption font-medium text-foreground-secondary">Property Photos</span>
+                        </div>
+                        <PhotoGallery photos={renderData.subject.photos} />
                       </div>
+                    )}
+
+                    {/* Enrichment status */}
+                    {enrichmentStatus && (
+                      <div className="border border-primary/20 bg-primary/5 px-4 py-3 flex items-center gap-3">
+                        <Loader2 className="w-4 h-4 text-primary animate-spin flex-shrink-0" />
+                        <span className="text-body-sm text-foreground-secondary">{enrichmentStatus}</span>
+                      </div>
+                    )}
+
+                    {/* Comps — expanded with analysis animation */}
+                    {renderData?.comps?.items?.length > 0 ? (
+                      <ComparablesSection
+                        comps={renderData.comps as CompsData}
+                        subject={renderData.subject}
+                        subjectSubdivision={renderData.subject?.subdivision}
+                        isAnalyzing
+                      />
+                    ) : (
+                      <ComparablesSkeleton />
+                    )}
+
+                    {/* Valuation skeleton — waiting for enrichment */}
+                    <ValuationSkeleton />
+                  </>
+                )}
+
+                {/* ── PHASE: COMPLETE — full evaluation ── */}
+                {isComplete && hasResult && (
+                  <>
+                    {/* Deal summary / valuation */}
+                    {renderData?.subject && displayValuation ? (
+                      <div ref={valuationCardRef}>
+                        <DealSummaryHero
+                          subject={renderData.subject}
+                          valuation={displayValuation}
+                          isRecalculated={isRecalculated}
+                          onOpenSettings={() => setSettingsOpen(true)}
+                          riskFlags={renderData.riskFlags}
+                          floodZone={renderData.floodZone}
+                          jobId={activeAnalysis?.jobId}
+                        />
+                      </div>
+                    ) : (
+                      <ValuationSkeleton />
+                    )}
+
+                    {/* Photos */}
+                    {renderData?.subject?.photos && renderData.subject.photos.length > 0 && (
+                      <div className="border border-border px-4 py-3">
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-caption font-medium text-foreground-secondary">Property Photos</span>
+                          <VisionAnalysisButton
+                            photoUrls={renderData.subject.photos}
+                            propertyContext={{
+                              address: renderData.subject.address,
+                              squareFeet: renderData.subject.squareFeet ?? undefined,
+                              yearBuilt: renderData.subject.yearBuilt ?? undefined,
+                            }}
+                            existingAnalysis={renderData.visionAnalysis}
+                          />
+                        </div>
+                        <PhotoGallery photos={renderData.subject.photos} />
+                      </div>
+                    )}
+
+                    {/* Comps with full selection + evaluation */}
+                    {(appraisalFilters.length > 0 ? analysisResult?.comps : effectiveComps) && (
+                      <ComparablesSection
+                        comps={appraisalFilters.length > 0 ? (analysisResult?.comps as CompsData) : effectiveComps!}
+                        subject={renderData?.subject}
+                        subjectSubdivision={renderData?.subject?.subdivision}
+                        selectedCompKeys={compOverride?.selectedCompKeys}
+                        isManual={compOverride?.isManual ?? false}
+                        recalculatedArv={isRecalculated ? displayValuation?.arv : undefined}
+                        onToggleComp={handleToggleComp}
+                        onReset={handleResetComps}
+                        highlightedCompKey={activeMarkerKey}
+                      />
+                    )}
+
+                    {/* Raw JSON */}
+                    <div className="border border-border overflow-hidden no-print min-w-0">
+                      <div
+                        className="px-6 py-4 cursor-pointer flex items-center gap-3 hover:bg-white/5 dark:hover:bg-white/[0.02] transition-colors"
+                        onClick={() => setShowRawJson(!showRawJson)}
+                      >
+                        <div className="w-8 h-8 rounded-lg bg-secondary/60 flex items-center justify-center">
+                          <Code className="w-4 h-4 text-foreground-secondary" />
+                        </div>
+                        <span className="text-body font-medium flex-1">Raw JSON Response</span>
+                        {showRawJson ? <ChevronDown className="w-4 h-4 text-foreground-tertiary" /> : <ChevronRight className="w-4 h-4 text-foreground-tertiary" />}
+                      </div>
+                      {showRawJson && (
+                        <div className="px-4 pb-4">
+                          <div className="relative">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                navigator.clipboard.writeText(JSON.stringify(analysisResult, null, 2))
+                                const btn = e.currentTarget
+                                btn.textContent = 'Copied!'
+                                setTimeout(() => { btn.textContent = 'Copy JSON' }, 2000)
+                              }}
+                              className="absolute top-3 right-3 z-10 px-2.5 py-1 rounded-md bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs transition-colors border border-zinc-700"
+                            >
+                              Copy JSON
+                            </button>
+                            <pre className="bg-zinc-950 text-zinc-100 p-4 pt-10 overflow-auto max-h-[600px] text-xs font-mono">
+                              {JSON.stringify(analysisResult, null, 2)}
+                            </pre>
+                          </div>
+                        </div>
+                      )}
                     </div>
-                  )}
-                </div>
-              )}
+                  </>
+                )}
+
               </div>{/* end underwriter-report */}
             </div>
             }
           />
-          ) : (
-          <div className="flex-1 min-w-0">
-              <div id="underwriter-report-fallback" className="space-y-6 p-4 sm:p-6">
-                {/* Single column fallback when no map data — content rendered by parent */}
-              </div>
+          ) : isActive && (
+          <div className="flex-1 min-w-0 p-4 sm:p-6">
+            <div className="flex flex-col gap-4">
+              {isFetching && (
+                <>
+                  <SubjectPropertySkeleton />
+                  <ComparablesSkeleton />
+                </>
+              )}
+            </div>
           </div>
           )}
         </>
@@ -668,7 +781,6 @@ export default function AnalyzePage() {
       {/* Evaluation Settings Sheet */}
       <Sheet open={settingsOpen} onOpenChange={(open) => {
         setSettingsOpen(open)
-        // When opening settings panel, clear overrides so recalc engine takes over
         if (open && appraisalFilters.length > 0) {
           setAppraisalFilters([])
           setAppraisalAdjustments([])

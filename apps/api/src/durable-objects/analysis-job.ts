@@ -19,6 +19,8 @@ import { detectOsmLocationRisks } from '../services/location-risk'
 import type { PropertyIdentifier, PropertyPhotos } from '../services/photo-provider'
 import type { Env } from '../types'
 import type { NormalizedProperty, NormalizedComparable } from '../services/property-api/types'
+import { drizzle } from 'drizzle-orm/d1'
+import { savedReports } from '../db/schema'
 
 interface JobState {
   jobId: string
@@ -107,6 +109,77 @@ export class AnalysisJobDO {
     // Brief delay to let SSE clients connect before broadcasting
     await new Promise((r) => setTimeout(r, 1000))
     console.log(`[AnalysisJobDO] ── Enrichment started (pending: ${config.pending.join(', ')}) ──`)
+
+    // Step 0: Run evaluation (appraisal rules + classification + valuation + OSM)
+    if (config.pending.includes('evaluation')) {
+      const evalStart = Date.now()
+      try {
+        await this.pushEvent('evaluation_started', { message: 'Evaluating comparables...' })
+
+        const evalResult = performAnalysis({
+          jobId: config.jobId,
+          bundle: config.bundle,
+          ...config.evalParams,
+        })
+
+        const updatedResponse = evalResult.response as unknown as Record<string, unknown>
+
+        // Inject OSM location risks
+        try {
+          const prop = config.bundle.property
+          if (prop.latitude && prop.longitude) {
+            const osmResult = await detectOsmLocationRisks(prop.latitude, prop.longitude)
+            if (osmResult.riskFlags.length > 0) {
+              const existingFlags = (updatedResponse.riskFlags as string[] | null) ?? []
+              updatedResponse.riskFlags = [...existingFlags, ...osmResult.riskFlags]
+            }
+          }
+        } catch {
+          // Non-fatal
+        }
+
+        // If LLM will run, disable all comp selections — LLM decides final selection
+        if (config.pending.includes('llm')) {
+          const comps = updatedResponse.comps as Record<string, unknown> | undefined
+          if (comps?.items && Array.isArray(comps.items)) {
+            comps.items = comps.items.map((c: Record<string, unknown>) => ({ ...c, isEnabled: false }))
+            comps.enabledCount = 0
+            comps.disabledCount = (comps.items as unknown[]).length
+          }
+        }
+
+        config.analysisResult = updatedResponse
+        await this.pushEvent('evaluation_complete', { updatedResult: updatedResponse })
+        console.log(`[AnalysisJobDO] ✓ Evaluation complete in ${Date.now() - evalStart}ms`)
+
+        // Save report to DB
+        try {
+          const db = drizzle(this.env.DB)
+          const result = updatedResponse as Record<string, unknown>
+          const subject = result.subject as Record<string, unknown>
+          const valuation = result.valuation as Record<string, unknown>
+          await db.insert(savedReports).values({
+            userId: config.userId,
+            jobId: config.jobId,
+            propertyAddress: (subject.address as string) || '',
+            propertyCity: (config.bundle.property.city) || '',
+            propertyState: (config.bundle.property.state) || '',
+            propertyZip: (config.bundle.property.zipCode) || '',
+            fullResponseJson: JSON.stringify(updatedResponse),
+            arv: (valuation.arv as number) || 0,
+            asIsValue: (valuation.asIsValue as number) ?? null,
+            maxAllowableOffer: (valuation.buyPrice as number) || 0,
+            estimatedRepairs: (valuation.rehabCost as number) || 0,
+          })
+          console.log(`[AnalysisJobDO] Report saved for job ${config.jobId}`)
+        } catch (dbError) {
+          console.warn(`[AnalysisJobDO] Failed to save report:`, dbError instanceof Error ? dbError.message : dbError)
+        }
+      } catch (error) {
+        console.warn('[AnalysisJobDO] Evaluation error:', error instanceof Error ? error.message : error)
+        await this.pushEvent('error', { step: 'evaluation', message: error instanceof Error ? error.message : 'Evaluation failed' })
+      }
+    }
 
     // Step A: Market data enrichment
     if (config.pending.includes('market_data')) {
@@ -221,6 +294,16 @@ export class AnalysisJobDO {
             }
           } catch {
             // Non-fatal
+          }
+
+          // If LLM will run, disable all comp selections — LLM decides final selection
+          if (config.pending.includes('llm')) {
+            const comps = updatedResponse.comps as Record<string, unknown> | undefined
+            if (comps?.items && Array.isArray(comps.items)) {
+              comps.items = comps.items.map((c: Record<string, unknown>) => ({ ...c, isEnabled: false }))
+              comps.enabledCount = 0
+              comps.disabledCount = (comps.items as unknown[]).length
+            }
           }
 
           // Update analysisResult for LLM step

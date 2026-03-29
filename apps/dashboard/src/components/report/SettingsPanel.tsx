@@ -12,6 +12,7 @@ import {
   Package,
   Filter,
   Sliders,
+  Navigation,
 } from 'lucide-react'
 import { useState } from 'react'
 import { Switch } from '@/components/ui/switch'
@@ -28,7 +29,7 @@ const FILTER_LABELS: Record<string, { label: string; unit: string; hint: string 
   subdivision_match: { label: 'Subdivision Match', unit: '', hint: 'Same subdivision required' },
   building_style_match: { label: 'Building Style', unit: '', hint: 'Same building style required' },
   sale_age: { label: 'Sale Age', unit: 'days', hint: 'Max days since sold' },
-  sqft_diff: { label: 'Sqft Difference', unit: 'sqft', hint: 'Max sqft variance' },
+  sqft_diff: { label: 'Sqft Difference', unit: '%', hint: 'Max ±% sqft variance' },
   year_built_diff: { label: 'Year Built Diff', unit: 'yrs', hint: 'Max year variance' },
   distance: { label: 'Distance', unit: 'mi', hint: 'Max miles from subject' },
 }
@@ -203,6 +204,7 @@ export function SettingsPanel({ settingsHook, recalcData }: SettingsPanelProps) 
     selectRehabLevel,
     updateRehabTableEntry,
     updateMajorItem,
+    updateProximityAdjustments,
     resetToDefaults,
   } = settingsHook
 
@@ -277,7 +279,7 @@ export function SettingsPanel({ settingsHook, recalcData }: SettingsPanelProps) 
                         onChange={(v) => updateFilter(filter.type, { value: parseFloat(v) || 0 })}
                         disabled={!filter.enabled}
                         suffix={meta.unit}
-                        step={filter.type === 'distance' ? 0.1 : 1}
+                        step={filter.type === 'distance' ? 0.1 : filter.type === 'sqft_diff' ? 5 : 1}
                       />
                     )}
                   </SettingRow>
@@ -367,6 +369,43 @@ export function SettingsPanel({ settingsHook, recalcData }: SettingsPanelProps) 
                 width="w-24"
               />
             </div>
+            <div className="flex items-center justify-between rounded-lg bg-secondary/30 px-3 py-2.5">
+              <div>
+                <span className="text-caption font-medium text-foreground">As-Is Threshold</span>
+                <div className="text-[10px] text-foreground-tertiary">Comps below this % of ARV = as-is</div>
+              </div>
+              <CompactInput
+                value={settings.dealParams.asIsThresholdPercent ?? 70}
+                onChange={(v) => updateDealParams({ asIsThresholdPercent: parseFloat(v) || 70 })}
+                suffix="%"
+                step={5}
+              />
+            </div>
+          </div>
+        </Section>
+
+        {/* ── Proximity Adjustment ──────────────────────────────────── */}
+        <Section icon={Navigation} title="Proximity Adjustment" defaultOpen={false}>
+          <div className="space-y-2">
+            <div className="text-[10px] text-foreground-tertiary mb-2">
+              Apply a deduction if the property is near traffic or commercial areas.
+            </div>
+            {(['siding', 'backing', 'fronting'] as const).map((pos) => {
+              const label = pos === 'siding' ? 'Siding (beside)' : pos === 'backing' ? 'Backing (behind)' : 'Fronting (in front)'
+              const isEnabled = settings.proximityAdjustments?.[pos] ?? false
+              return (
+                <div key={pos} className="flex items-center justify-between rounded-lg bg-secondary/30 px-3 py-2.5">
+                  <span className="text-caption font-medium text-foreground">{label}</span>
+                  <Switch
+                    checked={isEnabled}
+                    onCheckedChange={(checked) => {
+                      const current = settings.proximityAdjustments ?? { siding: false, backing: false, fronting: false }
+                      updateProximityAdjustments({ ...current, [pos]: checked })
+                    }}
+                  />
+                </div>
+              )
+            })}
           </div>
         </Section>
 

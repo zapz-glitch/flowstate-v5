@@ -31,11 +31,12 @@ PHASE 1 — PHYSICAL SIMILARITY (mandatory, non-negotiable):
 Only comps that are physically comparable to the subject should be considered. Evaluate in this strict order:
 
 1. SQUARE FOOTAGE — Must be within reasonable range of subject. A 2,000 sqft subject cannot use a 900 sqft comp. This is the #1 disqualifier.
-2. BUILDING STYLE — Same style is strongly preferred (Ranch vs Ranch, not Ranch vs Two-Story). Different styles have different $/sqft.
-3. FOUNDATION TYPE — Same foundation preferred (Slab vs Slab, not Slab vs Basement). Foundation differences significantly affect value.
-4. BEDROOM/BATHROOM COUNT — Should be similar. 2bd/1ba is not comparable to 4bd/3ba.
-5. YEAR BUILT — Within ~15 years. A 1960 home is not comparable to a 2010 build.
-6. LOT SIZE — Should be in the same general range.
+2. BUILDING STYLE — Same style is strongly preferred (Ranch vs Ranch, not Ranch vs Two-Story). Different styles have fundamentally different $/sqft and buyer appeal.
+3. CONSTRUCTION TYPE — Same construction preferred (Frame vs Frame, not Frame vs Concrete Block). Construction type affects rehab costs and value.
+4. FOUNDATION TYPE — Same foundation preferred (Slab vs Slab, not Slab vs Basement). Foundation differences significantly affect value.
+5. BEDROOM/BATHROOM COUNT — Should be similar. 2bd/1ba is not comparable to 4bd/3ba.
+6. YEAR BUILT — Within ~15 years. A 1960 home is not comparable to a 2010 build.
+7. LOT SIZE — Should be in the same general range.
 
 PHASE 2 — AMONG PHYSICALLY SIMILAR COMPS, select for ARV quality:
 From comps that pass Phase 1, select ONLY the ones that truly support an ARV estimate:
@@ -115,6 +116,9 @@ Comp ${i + 1} [ID: ${comp.id}]:
   Subdivision: ${comp.subdivision ?? 'none'}${subject.subdivision && comp.subdivision && subject.subdivision.toLowerCase() === comp.subdivision.toLowerCase() ? ' ✓ MATCH' : ''}
   Foundation: ${comp.construction?.foundationType ?? 'unknown'}${subject.construction?.foundationType && comp.construction?.foundationType && subject.construction.foundationType.toLowerCase() === comp.construction.foundationType.toLowerCase() ? ' ✓ MATCH' : ''}
   Building Style: ${comp.construction?.buildingStyle ?? 'unknown'}${subject.construction?.buildingStyle && comp.construction?.buildingStyle && subject.construction.buildingStyle.toLowerCase() === comp.construction.buildingStyle.toLowerCase() ? ' ✓ MATCH' : ''}
+  Construction: ${comp.construction?.type ?? 'unknown'}${subject.construction?.type && comp.construction?.type && subject.construction.type.toLowerCase() === comp.construction.type.toLowerCase() ? ' ✓ MATCH' : ''}
+  Exterior Walls: ${comp.construction?.exteriorWalls ?? 'unknown'}
+  Roof: ${comp.construction?.roofType ?? 'unknown'}
   Appraisal Filter Results: ${filterSummary}
   Price Adjustments: ${adjSummary}
   Adjusted Price: ${ctx?.adjustedPrice ? `$${ctx.adjustedPrice.toLocaleString()}` : 'N/A'}`
@@ -153,7 +157,7 @@ SCORING:
 0-29: Poor match, not comparable → NOT selected
 
 REMEMBER:
-- Physical similarity is non-negotiable. A comp that fails sqft, style, or foundation match should score below 50 regardless of sale price.
+- Physical similarity is non-negotiable. A comp that fails sqft, building style, construction type, or foundation match should score below 50 regardless of sale price.
 - Only include comps in selectedForArv that you would defend in front of an underwriter. Quality over quantity.
 - It is perfectly acceptable to select just 1 or 2 comps if those are the only true matches.`
 }
@@ -188,7 +192,7 @@ export async function analyzeComps(
       prompt,
       systemPrompt: SYSTEM_PROMPT,
       temperature: options?.temperature ?? 0.2,
-      maxTokens: options?.maxTokens ?? 2048,
+      maxTokens: options?.maxTokens ?? 4096,
     })
 
     if (!result.success || !result.data?.content) {
@@ -202,7 +206,33 @@ export async function analyzeComps(
       jsonStr = jsonStr.replace(/^```(?:json)?\s*/, '').replace(/\s*```$/, '')
     }
 
-    const parsed = JSON.parse(jsonStr) as { rankings?: unknown[]; selectedForArv?: unknown[]; summary?: string }
+    let parsed: { rankings?: unknown[]; selectedForArv?: unknown[]; summary?: string }
+    try {
+      parsed = JSON.parse(jsonStr)
+    } catch {
+      // LLM response may be truncated (hit token limit) — try to repair
+      console.warn('[CompAnalysis] JSON parse failed, attempting repair...')
+      try {
+        // Close any open strings, arrays, objects
+        let repaired = jsonStr
+        // Count unmatched quotes — if odd, close the string
+        const quoteCount = (repaired.match(/(?<!\\)"/g) || []).length
+        if (quoteCount % 2 !== 0) repaired += '"'
+        // Close unclosed brackets/braces
+        const opens = (repaired.match(/[{[]/g) || []).length
+        const closes = (repaired.match(/[}\]]/g) || []).length
+        for (let i = 0; i < opens - closes; i++) {
+          // Determine which to close by finding the last unmatched opener
+          const lastOpen = Math.max(repaired.lastIndexOf('{'), repaired.lastIndexOf('['))
+          repaired += repaired[lastOpen] === '{' ? '}' : ']'
+        }
+        parsed = JSON.parse(repaired)
+        console.log('[CompAnalysis] JSON repair successful')
+      } catch {
+        console.warn('[CompAnalysis] JSON repair failed, skipping LLM analysis')
+        return null
+      }
+    }
 
     if (!parsed.rankings || !Array.isArray(parsed.rankings)) {
       console.warn('[CompAnalysis] Invalid LLM response structure')

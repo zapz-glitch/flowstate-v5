@@ -19,6 +19,20 @@ import type {
   NormalizedPermit,
   NormalizedFloodZone,
 } from '../types'
+import {
+  lookupCode,
+  BUILDING_STYLE,
+  CONSTRUCTION_TYPE,
+  FOUNDATION_TYPE,
+  ROOF_TYPE,
+  ROOF_COVER,
+  EXTERIOR_WALLS,
+  GARAGE_TYPE,
+  HEATING_TYPE,
+  COOLING_TYPE,
+  POOL_TYPE,
+  BUILDING_QUALITY,
+} from './corelogic-codes'
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
 
@@ -673,22 +687,23 @@ function normalizeProperty(
     taxAmount: (taxAmountObj?.totalTaxAmount as number) || tax?.taxAmount || null,
     taxYear: (taxAmountObj?.billedYear as number) || (assessedValueObj?.taxAssessedYear as number) || tax?.taxYear,
 
-    // Building details
+    // Building details — resolve CoreLogic type codes to human-readable labels
     construction: {
-      type: (constructionDetails?.constructionTypeCode as string) || building?.constructionType,
-      buildingStyle: (constructionDetails?.buildingStyleTypeCode as string) || undefined,
+      type: lookupCode(CONSTRUCTION_TYPE, constructionDetails?.constructionTypeCode as string) || building?.constructionType,
+      qualityCode: lookupCode(BUILDING_QUALITY, constructionDetails?.buildingQualityTypeCode as string) || undefined,
+      buildingStyle: lookupCode(BUILDING_STYLE, constructionDetails?.buildingStyleTypeCode as string) || undefined,
       storiesType: (structureVerticalProfile?.storiesTypeCode as string) || undefined,
-      roofType: ((structureExterior?.roof as Record<string, unknown>)?.typeCode as string) || building?.roofType,
-      roofCover: ((structureExterior?.roof as Record<string, unknown>)?.coverTypeCode as string) || undefined,
-      foundationType: (constructionDetails?.foundationTypeCode as string) || building?.foundation,
-      exteriorWalls: ((structureExterior?.walls as Record<string, unknown>)?.typeCode as string) || undefined,
+      roofType: lookupCode(ROOF_TYPE, (structureExterior?.roof as Record<string, unknown>)?.typeCode as string) || building?.roofType,
+      roofCover: lookupCode(ROOF_COVER, (structureExterior?.roof as Record<string, unknown>)?.coverTypeCode as string) || undefined,
+      foundationType: lookupCode(FOUNDATION_TYPE, constructionDetails?.foundationTypeCode as string) || building?.foundation,
+      exteriorWalls: lookupCode(EXTERIOR_WALLS, (structureExterior?.walls as Record<string, unknown>)?.typeCode as string) || undefined,
     },
     features: {
-      heating: ((structureFeatures?.heating as Record<string, unknown>)?.typeCode as string) || building?.heating,
-      cooling: ((structureFeatures?.airConditioning as Record<string, unknown>)?.typeCode as string) || building?.cooling,
+      heating: lookupCode(HEATING_TYPE, (structureFeatures?.heating as Record<string, unknown>)?.typeCode as string) || building?.heating,
+      cooling: lookupCode(COOLING_TYPE, (structureFeatures?.airConditioning as Record<string, unknown>)?.typeCode as string) || building?.cooling,
       fireplacesCount: ((structureFeatures?.firePlaces as Record<string, unknown>)?.count as number) || (buildingSummary?.fireplacesCount as number) || building?.fireplaces,
-      poolType: ((structureExterior?.pool as Record<string, unknown>)?.typeCode as string) || building?.poolType,
-      garageType: ((structureExterior?.parking as Record<string, unknown>)?.garageTypeCode as string) || building?.garageType,
+      poolType: lookupCode(POOL_TYPE, (structureExterior?.pool as Record<string, unknown>)?.typeCode as string) || building?.poolType,
+      garageType: lookupCode(GARAGE_TYPE, (structureExterior?.parking as Record<string, unknown>)?.garageTypeCode as string) || building?.garageType,
       garageSquareFeet: ((structureExterior?.parking as Record<string, unknown>)?.garageAreaSquareFeet as number) || building?.garageSquareFeet,
       parkingSpaces: ((structureExterior?.parking as Record<string, unknown>)?.parkingSpacesCount as number) || building?.parkingSpaces,
     },
@@ -960,15 +975,16 @@ class CoreLogicProvider implements PropertyProviderAdapter {
 
   async getComparables(params: ComparablesSearchParams): Promise<ComparablesSearchResponse> {
     try {
-      // Calculate min/max sqft if sqftVariance and subjectSqft are provided
+      // Calculate min/max sqft if sqftVariance (percentage) and subjectSqft are provided
       // Using minBldgSqFt/maxBldgSqFt instead of bldgSqFtVariance because
       // the variance param doesn't work correctly in CoreLogic API
       let minBldgSqFt: number | undefined
       let maxBldgSqFt: number | undefined
       if (params.sqftVariance && params.subjectSqft) {
-        minBldgSqFt = Math.max(0, params.subjectSqft - params.sqftVariance)
-        maxBldgSqFt = params.subjectSqft + params.sqftVariance
-        console.log(`CoreLogic: Using sqft range ${minBldgSqFt}-${maxBldgSqFt} (subject: ${params.subjectSqft}, variance: ${params.sqftVariance})`)
+        const absoluteVariance = Math.round(params.subjectSqft * (params.sqftVariance / 100))
+        minBldgSqFt = Math.max(0, params.subjectSqft - absoluteVariance)
+        maxBldgSqFt = params.subjectSqft + absoluteVariance
+        console.log(`CoreLogic: Using sqft range ${minBldgSqFt}-${maxBldgSqFt} (subject: ${params.subjectSqft}, ±${params.sqftVariance}%)`)
       }
 
       const response = await request<RawComparablesResponse>(this.env, `/v2/properties/${params.propertyId}/comparables`, {

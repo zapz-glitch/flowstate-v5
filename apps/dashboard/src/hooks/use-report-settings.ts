@@ -32,6 +32,7 @@ import {
   type RecalcFilter,
   type RecalcAdjustment,
   type MajorItemSetting,
+  type ProximityToggles,
 } from '@/lib/recalc'
 
 // ─── Default Settings ───────────────────────────────────────────────────────
@@ -40,12 +41,13 @@ const DEFAULT_DEAL_PARAMS: DealParamsConfig = {
   closingCostsPercent: 8,
   carryingCostsPercent: 2,
   wholesaleFee: 10000,
+  asIsThresholdPercent: 70,
 }
 
 const DEFAULT_FILTERS: RecalcFilter[] = [
   { type: 'subdivision_match', enabled: true, value: 1 },
   { type: 'sale_age', enabled: true, value: 180 },
-  { type: 'sqft_diff', enabled: true, value: 250 },
+  { type: 'sqft_diff', enabled: true, value: 20 },
   { type: 'year_built_diff', enabled: true, value: 10 },
   { type: 'distance', enabled: true, value: 0.5 },
 ]
@@ -80,6 +82,7 @@ export interface UseReportSettingsReturn {
   selectRehabLevel: (index: number) => void
   updateRehabTableEntry: (tier: string, levelIndex: number, updates: Partial<RehabEstimate>) => void
   updateMajorItem: (id: string, updates: Partial<MajorItemSetting>) => void
+  updateProximityAdjustments: (toggles: ProximityToggles) => void
   resetToDefaults: () => void
 }
 
@@ -283,6 +286,13 @@ export function useReportSettings(data: AnalyzeData | null): UseReportSettingsRe
     }))
   }, [])
 
+  const updateProximityAdjustments = useCallback((toggles: ProximityToggles) => {
+    setSettings((prev) => ({
+      ...prev,
+      proximityAdjustments: toggles,
+    }))
+  }, [])
+
   const resetToDefaults = useCallback(() => {
     if (savedDefaultsObjRef.current) {
       setSettings(savedDefaultsObjRef.current)
@@ -301,6 +311,7 @@ export function useReportSettings(data: AnalyzeData | null): UseReportSettingsRe
     selectRehabLevel,
     updateRehabTableEntry,
     updateMajorItem,
+    updateProximityAdjustments,
     resetToDefaults,
   }
 }

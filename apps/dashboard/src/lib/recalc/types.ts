@@ -107,6 +107,12 @@ export interface RecalcValuationResult {
 
 // ─── Evaluation Settings (combined user settings) ───────────────────────────
 
+export interface ProximityToggles {
+  siding: boolean
+  backing: boolean
+  fronting: boolean
+}
+
 export interface EvaluationSettings {
   filters: RecalcFilter[]
   adjustments: RecalcAdjustment[]
@@ -116,6 +122,7 @@ export interface EvaluationSettings {
   rehabLevelIndex: number
   majorItems: MajorItemSetting[]
   additionPlay?: number
+  proximityAdjustments?: ProximityToggles
 }
 
 // ─── Recalc Result (full output from recalculateReport) ─────────────────────

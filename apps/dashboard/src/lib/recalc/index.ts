@@ -376,6 +376,6 @@ export function recalculateValuationFromComps(
 }
 
 // Re-export everything needed by consumers
-export type { EvaluationSettings, RecalcResult, RecalcFilter, RecalcAdjustment, CompEvaluation, MajorItemSetting } from './types'
+export type { EvaluationSettings, RecalcResult, RecalcFilter, RecalcAdjustment, CompEvaluation, MajorItemSetting, ProximityToggles } from './types'
 export { MAJOR_ITEMS_LIST } from './types'
 export { DEFAULT_REHAB_TABLE, getArvTier } from '@flowstate-api/shared'

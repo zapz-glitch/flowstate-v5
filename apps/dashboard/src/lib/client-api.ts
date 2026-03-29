@@ -57,6 +57,7 @@ export async function searchTypeahead(input: string): Promise<TypeaheadResult[]>
 
 export interface ArvThresholdConfig {
   percent: number
+  asIsThresholdPercent?: number
 }
 
 export interface ArvThresholdResponse {
@@ -432,6 +433,7 @@ export interface DealParamsConfig {
   closingCostsPercent: number
   carryingCostsPercent: number
   wholesaleFee: number
+  asIsThresholdPercent?: number
 }
 
 export interface DealParamsResponse {
@@ -444,7 +446,7 @@ export async function getDealParams(): Promise<DealParamsResponse> {
   return fetchApi<DealParamsResponse>('/deal-params')
 }
 
-export async function saveDealParams(config: DealParamsConfig): Promise<DealParamsResponse> {
+export async function saveDealParams(config: Partial<DealParamsConfig>): Promise<DealParamsResponse> {
   return fetchApi('/deal-params', {
     method: 'PUT',
     body: JSON.stringify(config),
@@ -453,6 +455,48 @@ export async function saveDealParams(config: DealParamsConfig): Promise<DealPara
 
 export async function resetDealParams(): Promise<DealParamsResponse> {
   return fetchApi('/deal-params', { method: 'DELETE' })
+}
+
+// ─── Proximity Adjustment Config ─────────────────────────────────────────────
+
+export interface ProximityPosition {
+  flat: number
+  percent: number
+}
+
+export interface ProximityConfig {
+  arvThreshold: number
+  siding: ProximityPosition
+  backing: ProximityPosition
+  fronting: ProximityPosition
+}
+
+export interface ProximityConfigResponse {
+  config: ProximityConfig
+  isCustom: boolean
+  updatedAt?: string
+}
+
+export const PROXIMITY_DEFAULTS: ProximityConfig = {
+  arvThreshold: 500000,
+  siding:   { flat: 10000, percent: 10 },
+  backing:  { flat: 10000, percent: 15 },
+  fronting: { flat: 10000, percent: 20 },
+}
+
+export async function getProximityConfig(): Promise<ProximityConfigResponse> {
+  return fetchApi<ProximityConfigResponse>('/proximity-config')
+}
+
+export async function saveProximityConfig(config: Partial<ProximityConfig>): Promise<ProximityConfigResponse> {
+  return fetchApi('/proximity-config', {
+    method: 'PUT',
+    body: JSON.stringify(config),
+  })
+}
+
+export async function resetProximityConfig(): Promise<ProximityConfigResponse> {
+  return fetchApi('/proximity-config', { method: 'DELETE' })
 }
 
 // ─── Location Settings ─────────────────────────────────────────────────────────
@@ -470,7 +514,7 @@ export interface LocationAppraisalAdjustment {
   percentage: number
 }
 
-export type LocationSettingType = 'appraisal' | 'rehab' | 'deal' | 'major' | 'arv_threshold'
+export type LocationSettingType = 'appraisal' | 'rehab' | 'deal' | 'major' | 'arv_threshold' | 'proximity'
 
 export interface LocationSetting {
   id: string
@@ -488,11 +532,13 @@ export interface LocationSetting {
   dealParamsJson?: DealParamsConfig | null
   majorItemCostsJson?: Record<string, number> | null
   arvThresholdJson?: ArvThresholdConfig | null
+  proximityConfigJson?: ProximityConfig | null
   hasRehabConfig: boolean
   hasTierRanges: boolean
   hasDealParams: boolean
   hasMajorItemCosts: boolean
   hasArvThreshold: boolean
+  hasProximityConfig: boolean
   createdAt: string
   updatedAt: string
 }
@@ -511,6 +557,7 @@ export interface LocationSettingInput {
   dealParamsJson?: DealParamsConfig | null
   majorItemCostsJson?: Record<string, number> | null
   arvThresholdJson?: ArvThresholdConfig | null
+  proximityConfigJson?: ProximityConfig | null
 }
 
 export async function getLocationSettings(type?: LocationSettingType): Promise<LocationSetting[]> {

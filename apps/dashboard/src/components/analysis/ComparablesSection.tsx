@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { SlidersHorizontal, RotateCcw, ChevronDown } from 'lucide-react'
+import { SlidersHorizontal, RotateCcw, ChevronDown, Loader2 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import type { CompsData, CompItem, SubjectData } from './shared-types'
 import { getCompKey } from './format-helpers'
@@ -24,6 +24,8 @@ export interface ComparablesSectionProps {
   onReset?: () => void
   /** When set, auto-expands excluded section and highlights this comp key */
   highlightedCompKey?: string | null
+  /** When true, shows all comps expanded with analysis-in-progress animation */
+  isAnalyzing?: boolean
 }
 
 export function ComparablesSection({
@@ -36,6 +38,7 @@ export function ComparablesSection({
   onToggleComp,
   onReset,
   highlightedCompKey,
+  isAnalyzing = false,
 }: ComparablesSectionProps) {
   const [expandedComps, setExpandedComps] = useState<Set<string>>(new Set())
   const [excludedOpen, setExcludedOpen] = useState(false)
@@ -192,8 +195,36 @@ export function ComparablesSection({
         )}
       </div>
 
+      {/* Analyzing mode — all comps expanded with animation */}
+      {isAnalyzing && (
+        <div className="space-y-3 print:hidden">
+          <div className="flex items-center gap-2">
+            <Loader2 className="w-3.5 h-3.5 text-primary animate-spin" />
+            <span className="text-caption font-semibold text-primary uppercase tracking-wider">Analyzing comparables</span>
+            <div className="flex-1 h-px bg-primary/20" />
+            <span className="text-caption text-foreground-tertiary">{compItems.length} comp{compItems.length !== 1 ? 's' : ''}</span>
+          </div>
+          {compItems.map((comp, i) => {
+            const key = getCompKey(comp, i)
+            return (
+              <div key={key} className="relative">
+                <div className="absolute inset-0 rounded-xl bg-gradient-to-r from-primary/5 via-primary/10 to-primary/5 animate-pulse pointer-events-none z-10" />
+                <CompCard
+                  comp={comp}
+                  index={i}
+                  isExpanded={true}
+                  onToggle={() => {}}
+                  subject={subject}
+                  subjectSubdivision={subjectSubdivision}
+                />
+              </div>
+            )
+          })}
+        </div>
+      )}
+
       {/* Interactive comp cards */}
-      <div className="space-y-3 print:hidden">
+      {!isAnalyzing && <div className="space-y-3 print:hidden">
         {arvComps.length > 0 && (
           <div className="space-y-3">
             <div className="flex items-center gap-2">
@@ -287,7 +318,7 @@ export function ComparablesSection({
             )}
           </div>
         )}
-      </div>
+      </div>}
 
     </div>
   )

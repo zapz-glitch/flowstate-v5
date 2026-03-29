@@ -127,6 +127,13 @@
       "when": 1773486130958,
       "tag": "0017_chunky_hellcat",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1774857600000,
+      "tag": "0018_arv_threshold",
+      "breakpoints": true
     }
   ]
 }

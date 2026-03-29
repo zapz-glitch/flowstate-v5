@@ -13,6 +13,29 @@ import type { MajorItem, ValuationService } from '../valuation'
 import { REHAB_LEVELS } from '../valuation'
 import type { ClassificationResult, PropertyClassification } from '../classification'
 import { generateZillowUrl } from '../photo-provider'
+import {
+  lookupCode,
+  BUILDING_STYLE,
+  CONSTRUCTION_TYPE,
+  FOUNDATION_TYPE,
+  ROOF_TYPE,
+  EXTERIOR_WALLS,
+  BUILDING_QUALITY,
+} from '../property-api/providers/corelogic-codes'
+
+/** Resolve construction codes to labels (safety net for cached data with raw codes) */
+function resolveConstruction(c?: { type?: string; qualityCode?: string; buildingStyle?: string; foundationType?: string; roofType?: string; exteriorWalls?: string; storiesType?: string; roofCover?: string }) {
+  if (!c) return { foundationType: null as string | null, buildingStyle: null as string | null, storiesType: null as string | null, constructionType: null as string | null, qualityCode: null as string | null, roofType: null as string | null, exteriorWalls: null as string | null }
+  return {
+    foundationType: lookupCode(FOUNDATION_TYPE, c.foundationType) ?? null,
+    buildingStyle: lookupCode(BUILDING_STYLE, c.buildingStyle) ?? null,
+    storiesType: c.storiesType ?? null,
+    constructionType: lookupCode(CONSTRUCTION_TYPE, c.type) ?? null,
+    qualityCode: lookupCode(BUILDING_QUALITY, c.qualityCode) ?? null,
+    roofType: lookupCode(ROOF_TYPE, c.roofType) ?? null,
+    exteriorWalls: lookupCode(EXTERIOR_WALLS, c.exteriorWalls) ?? null,
+  }
+}
 
 // Re-export for convenience
 export type { PropertyBundle } from '../property-api'
@@ -826,9 +849,7 @@ export function buildAnalysisResponse(
       adjustedPrice: comp.adjustedSalePrice,
       photos: compPhotos,
       subdivision: comp.subdivision ?? null,
-      foundationType: comp.construction?.foundationType ?? null,
-      buildingStyle: comp.construction?.buildingStyle ?? null,
-      storiesType: comp.construction?.storiesType ?? null,
+      ...resolveConstruction(comp.construction),
       zillowUrl: generateZillowUrl({
         propertyId: comp.id,
         address: comp.address,
@@ -898,9 +919,7 @@ export function buildAnalysisResponse(
         : null,
       taxAssessment: property.assessedValue ?? null,
       photos: subjectPhotos,
-      foundationType: property.construction?.foundationType ?? null,
-      buildingStyle: property.construction?.buildingStyle ?? null,
-      storiesType: property.construction?.storiesType ?? null,
+      ...resolveConstruction(property.construction),
       hoaFee: property.hoaFee ?? null,
       zillowUrl: generateZillowUrl({
         propertyId: property.id,

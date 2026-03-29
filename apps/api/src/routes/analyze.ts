@@ -26,12 +26,44 @@ import { DEFAULT_FILTERS } from '../services/appraisal'
 import { filtersToApiParams } from '../services/appraisal/types'
 import { createPhotoService } from '../services/photo-provider'
 import type { PropertyIdentifier } from '../services/photo-provider'
-import { performAnalysis } from '../services/evaluation'
 import { generateSseToken } from '../utils/sse-token'
+import {
+  lookupCode,
+  BUILDING_STYLE,
+  CONSTRUCTION_TYPE,
+  FOUNDATION_TYPE,
+  ROOF_TYPE,
+  ROOF_COVER,
+  EXTERIOR_WALLS,
+  BUILDING_QUALITY,
+  HEATING_TYPE,
+  COOLING_TYPE,
+  POOL_TYPE,
+  GARAGE_TYPE,
+} from '../services/property-api/providers/corelogic-codes'
+
+/** Resolve any raw CoreLogic codes to labels in construction/features (handles cached data) */
+function resolvePropertyCodes(construction?: Record<string, unknown>, features?: Record<string, unknown>) {
+  const c = construction ? {
+    ...construction,
+    type: lookupCode(CONSTRUCTION_TYPE, construction.type as string) ?? construction.type,
+    qualityCode: lookupCode(BUILDING_QUALITY, construction.qualityCode as string) ?? construction.qualityCode,
+    buildingStyle: lookupCode(BUILDING_STYLE, construction.buildingStyle as string) ?? construction.buildingStyle,
+    foundationType: lookupCode(FOUNDATION_TYPE, construction.foundationType as string) ?? construction.foundationType,
+    roofType: lookupCode(ROOF_TYPE, construction.roofType as string) ?? construction.roofType,
+    roofCover: lookupCode(ROOF_COVER, construction.roofCover as string) ?? construction.roofCover,
+    exteriorWalls: lookupCode(EXTERIOR_WALLS, construction.exteriorWalls as string) ?? construction.exteriorWalls,
+  } : undefined
+  const f = features ? {
+    ...features,
+    heating: lookupCode(HEATING_TYPE, features.heating as string) ?? features.heating,
+    cooling: lookupCode(COOLING_TYPE, features.cooling as string) ?? features.cooling,
+    poolType: lookupCode(POOL_TYPE, features.poolType as string) ?? features.poolType,
+    garageType: lookupCode(GARAGE_TYPE, features.garageType as string) ?? features.garageType,
+  } : undefined
+  return { construction: c, features: f }
+}
 import { AnalysisError } from '../utils/analysis-error'
-import { detectOsmLocationRisks } from '../services/location-risk'
-import { drizzle } from 'drizzle-orm/d1'
-import { savedReports } from '../db/schema'
 
 type Variables = { auth: AuthContext }
 
@@ -186,14 +218,15 @@ analyze.post('/', async (c) => {
 
     const bundle = bundleResult.data
 
-    // ─── 3. Evaluate: appraisal + price classification + valuation ───────────
-    const evalStart = Date.now()
+    // ─── 3. Build partial result from raw CoreLogic data ───────────────────
+    // Return subject + comps immediately so the dashboard can display them
+    // while evaluation + enrichment run in the background (DO)
     const propertyCallStats = propertyApi.getCallStats()
+    const { property, comparables } = bundle
 
     // Apply appraisal rule overrides from request (playground inline editing)
     let appraisalRules = userSettings.appraisalRules
     if (body.appraisalOverrides) {
-      console.log(`[Analyze] Applying appraisal overrides: ${body.appraisalOverrides.filters?.length ?? 0} filters, ${body.appraisalOverrides.adjustments?.length ?? 0} adjustments`)
       const overrideFilters = body.appraisalOverrides.filters?.map((f) => ({
         type: f.type as import('../services/appraisal').FilterType,
         enabled: f.enabled,
@@ -211,22 +244,18 @@ analyze.post('/', async (c) => {
       }
     }
 
-    const arvThreshold = (() => {
-      const t = body.arvThresholdPercent ? { percent: body.arvThresholdPercent } : userSettings.arvThreshold
-      console.log(`[Analyze] ARV threshold: ${t.percent}%`)
-      return t
-    })()
+    const arvThreshold = body.arvThresholdPercent
+      ? { percent: body.arvThresholdPercent }
+      : userSettings.arvThreshold
 
     const evalParams = {
-      jobId,
-      bundle,
       appraisalRules,
       buybox: userSettings.mergedBuybox,
       customRehabTable: userSettings.customRehabTable,
       customTierRanges: userSettings.customTierRanges,
       customMajorItemCosts: userSettings.customMajorItemCosts,
       arvThreshold,
-      asIsThresholdPercent: body.asIsThresholdPercent,
+      asIsThresholdPercent: body.asIsThresholdPercent ?? userSettings.asIsThresholdPercent,
       apiCallStats: {
         corelogic: {
           total: propertyCallStats.total,
@@ -237,210 +266,94 @@ analyze.post('/', async (c) => {
       },
     }
 
-    // Start OSM location risk query in parallel with evaluation (non-blocking)
-    const osmPromise = bundle.property.latitude && bundle.property.longitude
-      ? detectOsmLocationRisks(bundle.property.latitude, bundle.property.longitude)
-      : Promise.resolve(null)
-
-    let analysisResult: Awaited<ReturnType<typeof performAnalysis>>['response']
-    try {
-      analysisResult = performAnalysis(evalParams).response
-    } catch (firstError) {
-      // Fallback: if no comps passed hard filters, refetch with wider params
-      if (firstError instanceof AnalysisError && !body.appraisalOverrides) {
-        const widerMaxComps = 20
-        const widerRadius = 1
-        console.log(`[Analyze] No comps passed — retrying with ${widerMaxComps} comps, ${widerRadius}mi radius`)
-
-        const widerResult = await propertyApi.getPropertyBundle({
-          address: body.address,
-          streetAddress: body.streetAddress,
-          city: body.city,
-          state: body.state,
-          zipCode: body.zipCode,
-          propertyId: body.propertyId,
-          comparables: {
-            radiusMiles: widerRadius,
-            maxComps: widerMaxComps,
-            monthsBack: body.searchOptions?.monthsBack ?? apiFilterParams.monthsBack ?? 12,
-            sqftVariance: apiFilterParams.sqftVariance,
-          },
-          enrichment: {
-            permits: body.enrichment?.permits ?? true,
-            floodZone: body.enrichment?.floodZone ?? true,
-            weatherRisk: body.enrichment?.weatherRisk ?? false,
-            neighbourhood: false,
-          },
-          skipCache: body.skipCache,
-        })
-
-        if (widerResult.success) {
-          const widerCallStats = propertyApi.getCallStats()
-          console.log(`[Analyze] Wider fetch returned ${widerResult.data.comparables.length} comps`)
-          analysisResult = performAnalysis({
-            ...evalParams,
-            bundle: widerResult.data,
-            apiCallStats: {
-              corelogic: {
-                total: widerCallStats.total,
-                cached: widerCallStats.cached,
-                endpoints: widerCallStats.endpoints,
-              },
-              totalExternalCalls: widerCallStats.total,
-            },
-          }).response
-        } else {
-          throw firstError // wider fetch failed, throw original error
-        }
-      } else {
-        throw firstError // appraisal overrides active or non-AnalysisError
-      }
+    // Build raw partial result — just property data, no evaluation
+    const partialResult = {
+      subject: {
+        id: property.id,
+        address: property.address,
+        city: property.city,
+        state: property.state,
+        zipCode: property.zipCode,
+        latitude: property.latitude,
+        longitude: property.longitude,
+        squareFeet: property.squareFeet,
+        bedrooms: property.bedrooms,
+        bathrooms: property.bathrooms,
+        yearBuilt: property.yearBuilt,
+        lotSizeAcres: property.lotSizeAcres,
+        propertyType: property.propertyType,
+        stories: property.stories,
+        lastSalePrice: property.lastSalePrice,
+        lastSaleDate: property.lastSaleDate,
+        assessedValue: property.assessedValue,
+        marketValue: property.marketValue,
+        subdivision: property.subdivision,
+        ...resolvePropertyCodes(property.construction as Record<string, unknown>, property.features as Record<string, unknown>),
+        zoning: property.zoning,
+      },
+      comps: {
+        items: comparables.map((comp) => ({
+          id: comp.id,
+          address: comp.address,
+          city: comp.city,
+          state: comp.state,
+          zipCode: comp.zipCode,
+          latitude: comp.latitude,
+          longitude: comp.longitude,
+          salePrice: comp.salePrice,
+          saleDate: comp.saleDate,
+          squareFeet: comp.squareFeet,
+          bedrooms: comp.bedrooms,
+          bathrooms: comp.bathrooms,
+          yearBuilt: comp.yearBuilt,
+          lotSizeAcres: comp.lotSizeAcres,
+          propertyType: comp.propertyType,
+          distanceMiles: comp.distanceMiles,
+          subdivision: comp.subdivision,
+          ...resolvePropertyCodes(comp.construction as Record<string, unknown>),
+          pricePerSqft: comp.squareFeet && comp.salePrice ? Math.round(comp.salePrice / comp.squareFeet) : null,
+          isEnabled: false,
+        })),
+        totalCount: comparables.length,
+        enabledCount: 0,
+        disabledCount: comparables.length,
+      },
     }
 
-    console.log(`[Analyze][Timing] Evaluation: ${Date.now() - evalStart}ms`)
+    // ─── 4. Start background processing: evaluation + enrichment in DO ────
+    const pending: string[] = ['evaluation', 'market_data']
+    if (c.env.OPENROUTER_API_KEY) pending.push('llm')
 
-    // ─── LLM comp refinement — AI selects final comps ────────────────────────
-    try {
-      const { analyzeComps, mergeLLMIntoResponse } = await import('../services/comp-analysis')
-      const compItems = analysisResult.comps?.items ?? []
-      if (compItems.length > 0 && c.env.OPENROUTER_API_KEY) {
-        const llmStart = Date.now()
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const evalContexts = compItems.map((comp: any) => ({
-          compId: comp.id as string,
-          isEnabled: comp.isEnabled as boolean,
-          compGroup: (comp.compGroup ?? null) as 'arv' | 'as_is' | null,
-          filterResults: comp.appraisalRules?.filters ?? [],
-          adjustmentResults: comp.appraisalRules?.adjustments ?? [],
-          adjustedPrice: (comp.adjustedPrice ?? null) as number | null,
-        }))
+    const sseSecret = c.env.BETTER_AUTH_SECRET || ''
+    const token = await generateSseToken(sseSecret, jobId, auth.userId)
+    const apiBaseUrl = c.req.url.replace(/\/v1\/analyze.*/, '')
+    const streamUrl = `${apiBaseUrl}/sse/analyze/${jobId}`
 
-        const llmResult = await analyzeComps(
-          bundle.property, bundle.comparables, evalContexts, c.env
-        )
-
-        if (llmResult && llmResult.selectedForArv.length >= 1) {
-          const selectedSet = new Set(llmResult.selectedForArv)
-          const rankingMap = new Map(llmResult.rankings.map((r) => [r.compId, r]))
-          // Update comp enable/disable based on LLM selection
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const updatedItems = compItems.map((comp: any) => ({
-            ...comp,
-            isEnabled: selectedSet.has(comp.id),
-            selectionReason: rankingMap.get(comp.id)?.reasoning ?? null,
-            qualityScore: rankingMap.get(comp.id)?.score ?? null,
-            keyFeatures: rankingMap.get(comp.id)?.keyFeatures ?? null,
-          }))
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          analysisResult = { ...analysisResult, comps: { ...analysisResult.comps, items: updatedItems } } as any
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          analysisResult = mergeLLMIntoResponse(analysisResult as any, llmResult) as typeof analysisResult
-          console.log(`[Analyze] LLM refined comp selection: ${llmResult.selectedForArv.length} comps selected in ${Date.now() - llmStart}ms`)
-        } else if (llmResult) {
-          // LLM returned result but not enough selections — just enrich without overriding
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          analysisResult = mergeLLMIntoResponse(analysisResult as any, llmResult) as typeof analysisResult
-          console.log(`[Analyze] LLM enriched (no selections) in ${Date.now() - llmStart}ms`)
-        }
-      }
-    } catch (llmError) {
-      // Non-fatal — LLM failure doesn't block analysis
-      console.warn('[Analyze] LLM comp refinement error:', llmError instanceof Error ? llmError.message : llmError)
-    }
-
-    // ─── Inject OSM location risks into response ────────────────────────────
-    try {
-      const osmResult = await osmPromise
-      if (osmResult && osmResult.riskFlags.length > 0) {
-        console.log(`[Analyze] OSM location risks: ${osmResult.riskFlags.join(', ')} (${osmResult.durationMs}ms)`)
-        const existingFlags = analysisResult.riskFlags ?? []
-        analysisResult = {
-          ...analysisResult,
-          riskFlags: [...existingFlags, ...osmResult.riskFlags],
-        }
-      }
-    } catch {
-      // Non-fatal — OSM query failure doesn't block analysis
-    }
-
-    // ─── 4. Always enrich with photos; optionally with LLM/market data ─────
-    const llmEnabled = body.llmAnalysis?.enabled === true
-    const marketDataEnabled = body.marketData?.enabled === true
-    // Always fetch photos in background (market_data enrichment handles photo fetching)
-    const hasEnrichment = true
-
-    // ─── 5. Save report to DB (background, non-blocking) ────────────────────
-    c.executionCtx.waitUntil((async () => {
-      try {
-        const db = drizzle(c.env.DB)
-        await db.insert(savedReports).values({
-          userId: auth.userId,
-          jobId,
-          propertyAddress: analysisResult.subject.address,
-          propertyCity: body.city || bundle.property.city || '',
-          propertyState: body.state || bundle.property.state || '',
-          propertyZip: body.zipCode || bundle.property.zipCode || '',
-          fullResponseJson: JSON.stringify(analysisResult),
-          arv: analysisResult.valuation.arv,
-          asIsValue: analysisResult.valuation.asIsValue ?? null,
-          maxAllowableOffer: analysisResult.valuation.buyPrice,
-          estimatedRepairs: analysisResult.valuation.rehabCost,
-        })
-        console.log(`[Analyze] Report saved for job ${jobId}`)
-      } catch (error) {
-        console.warn(`[Analyze] Failed to save report (non-fatal):`, error instanceof Error ? error.message : error)
-      }
-    })())
-
-    // ─── 6. Start background enrichment if enabled ───────────────────────────
-    let enrichmentInfo: { streamUrl: string; token: string; pending: string[] } | undefined
-
-    if (hasEnrichment) {
-      const pending: string[] = ['market_data']  // Always fetch photos via market_data
-      if (llmEnabled) pending.push('llm')
-
-      // Generate SSE auth token
-      const sseSecret = c.env.BETTER_AUTH_SECRET || ''
-      const token = await generateSseToken(sseSecret, jobId, auth.userId)
-      const apiBaseUrl = c.req.url.replace(/\/v1\/analyze.*/, '')
-      const streamUrl = `${apiBaseUrl}/sse/analyze/${jobId}`
-
-      enrichmentInfo = { streamUrl, token, pending }
-
-      // Start enrichment inside the DO (persistent execution context — no waitUntil)
-      const doId = c.env.ANALYSIS_JOB.idFromName(jobId)
-      const stub = c.env.ANALYSIS_JOB.get(doId)
-      const startResp = await stub.fetch('http://internal/start', {
-        method: 'POST',
-        body: JSON.stringify({
-          jobId,
-          userId: auth.userId,
-          pending,
-          bundle,
-          evalParams: {
-            appraisalRules: userSettings.appraisalRules,
-            buybox: userSettings.mergedBuybox,
-            customRehabTable: userSettings.customRehabTable,
-            customTierRanges: userSettings.customTierRanges,
-            customMajorItemCosts: userSettings.customMajorItemCosts,
-            arvThreshold: userSettings.arvThreshold,
-          },
-          analysisResult,
-          llmOptions: { includePhotos: body.llmAnalysis?.includePhotos },
-        }),
-      })
-      await startResp.text() // consume response
-    }
+    const doId = c.env.ANALYSIS_JOB.idFromName(jobId)
+    const stub = c.env.ANALYSIS_JOB.get(doId)
+    const startResp = await stub.fetch('http://internal/start', {
+      method: 'POST',
+      body: JSON.stringify({
+        jobId,
+        userId: auth.userId,
+        pending,
+        bundle,
+        evalParams,
+        analysisResult: partialResult,
+        llmOptions: { includePhotos: body.llmAnalysis?.includePhotos },
+      }),
+    })
+    await startResp.text()
 
     console.log(`[Analyze][Timing] Total: ${Date.now() - routeStart}ms`)
-    console.log(`[Analyze] Job ${jobId} completed (${bundle.comparables.length} comps, enrichment: ${hasEnrichment ? 'pending' : 'none'})`)
+    console.log(`[Analyze] Job ${jobId} — ${comparables.length} comps, processing in DO (${pending.join(', ')})`)
 
     return c.json({
       success: true,
       data: {
         jobId,
-        result: analysisResult,
-        ...(enrichmentInfo ? { enrichment: enrichmentInfo } : {}),
+        partialResult,
+        enrichment: { streamUrl, token, pending },
       },
     })
   } catch (error) {

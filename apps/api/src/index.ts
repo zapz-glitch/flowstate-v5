@@ -28,6 +28,7 @@ import waitlistRoute from './routes/waitlist'
 import adminRoute from './routes/admin'
 import visionRoute from './routes/vision'
 import arvThresholdRoute from './routes/arv-threshold'
+import proximityConfigRoute from './routes/proximity-config'
 import typeaheadRoute from './routes/typeahead'
 import sseStream from './routes/sse-stream'
 import ghlWebhook from './routes/webhooks/ghl'
@@ -95,6 +96,9 @@ app.route('/location-settings', locationSettingsRoute)
 
 // Major item costs routes (session auth via Better Auth cookies)
 app.route('/major-item-costs', majorItemCostsRoute)
+
+// Proximity adjustment config routes (session auth via Better Auth cookies)
+app.route('/proximity-config', proximityConfigRoute)
 
 // GHL integration settings routes (session auth via Better Auth cookies)
 app.route('/ghl-settings', ghlSettingsRoute)

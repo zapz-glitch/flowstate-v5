@@ -363,14 +363,17 @@ export interface QueueAnalysisResult {
   success: boolean
   jobId?: string
   error?: string
-  /** Full analysis result (synchronous response) */
+  /** Full analysis result (synchronous response — legacy) */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   result?: Record<string, any>
+  /** Partial result: raw subject + comps from CoreLogic (no evaluation yet) */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  partialResult?: Record<string, any>
   /** Suggested filter values when no comps match (from API error) */
   suggestedFilters?: Array<{ type: string; enabled: boolean; value: number }>
   /** Suggested ARV threshold when no comps match */
   suggestedArvThreshold?: number
-  /** SSE enrichment stream info (when Zillow/LLM enrichment is pending) */
+  /** SSE enrichment stream info (evaluation + Zillow + LLM) */
   enrichment?: {
     streamUrl: string
     token: string
@@ -447,7 +450,9 @@ export async function queueAnalysis(request: AnalyzeRequest): Promise<QueueAnaly
       data?: {
         jobId: string
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        result: Record<string, any>
+        result?: Record<string, any>
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        partialResult?: Record<string, any>
         enrichment?: { streamUrl: string; token: string; pending: string[] }
       }
     }
@@ -464,12 +469,13 @@ export async function queueAnalysis(request: AnalyzeRequest): Promise<QueueAnaly
 
     const jobId = result.data?.jobId
 
-    log('Analysis complete', { jobId, durationMs })
+    log('Analysis started', { jobId, durationMs, hasPartialResult: !!result.data?.partialResult })
 
     return {
       success: true,
       jobId,
       result: result.data?.result,
+      partialResult: result.data?.partialResult,
       enrichment: result.data?.enrichment,
     }
   } catch (error) {

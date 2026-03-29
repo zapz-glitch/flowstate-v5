@@ -56,6 +56,7 @@ interface LocationSettingInput {
   dealParamsJson?: Record<string, unknown> | null
   majorItemCostsJson?: Record<string, number> | null
   arvThresholdJson?: { percent: number; enabled: boolean } | null
+  proximityConfigJson?: Record<string, unknown> | null
 }
 
 function validateInput(body: LocationSettingInput): string | null {
@@ -218,11 +219,13 @@ function serializeRow(r: typeof locationSettings.$inferSelect) {
     dealParamsJson: r.dealParamsJson ? JSON.parse(r.dealParamsJson) : null,
     majorItemCostsJson: r.majorItemCostsJson ? JSON.parse(r.majorItemCostsJson) : null,
     arvThresholdJson: r.arvThresholdJson ? JSON.parse(r.arvThresholdJson) : null,
+    proximityConfigJson: r.proximityConfigJson ? JSON.parse(r.proximityConfigJson) : null,
     hasRehabConfig: r.rehabConfigJson !== null,
     hasTierRanges: r.tierRangesJson !== null,
     hasDealParams: r.dealParamsJson !== null,
     hasMajorItemCosts: r.majorItemCostsJson !== null,
     hasArvThreshold: r.arvThresholdJson !== null,
+    hasProximityConfig: r.proximityConfigJson !== null,
   }
 }
 
@@ -306,6 +309,7 @@ locationSettingsRoute.post('/', async (c) => {
       dealParamsJson: body.dealParamsJson ? JSON.stringify(body.dealParamsJson) : null,
       majorItemCostsJson: body.majorItemCostsJson ? JSON.stringify(body.majorItemCostsJson) : null,
       arvThresholdJson: body.arvThresholdJson ? JSON.stringify(body.arvThresholdJson) : null,
+      proximityConfigJson: body.proximityConfigJson ? JSON.stringify(body.proximityConfigJson) : null,
       createdAt: now,
       updatedAt: now,
     })
@@ -396,6 +400,7 @@ locationSettingsRoute.patch('/:id', async (c) => {
   if (body.dealParamsJson !== undefined) updates.dealParamsJson = body.dealParamsJson ? JSON.stringify(body.dealParamsJson) : null
   if (body.majorItemCostsJson !== undefined) updates.majorItemCostsJson = body.majorItemCostsJson ? JSON.stringify(body.majorItemCostsJson) : null
   if (body.arvThresholdJson !== undefined) updates.arvThresholdJson = body.arvThresholdJson ? JSON.stringify(body.arvThresholdJson) : null
+  if (body.proximityConfigJson !== undefined) updates.proximityConfigJson = body.proximityConfigJson ? JSON.stringify(body.proximityConfigJson) : null
 
   // Handle inline appraisal override
   if (body.appraisalFilters !== undefined) {

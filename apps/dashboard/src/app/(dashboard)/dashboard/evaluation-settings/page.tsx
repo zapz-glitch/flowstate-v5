@@ -23,6 +23,10 @@ import {
   Wrench,
   AlertCircle,
   TrendingUp,
+  Navigation,
+  ArrowRight,
+  ArrowLeft,
+  ArrowUp,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -89,6 +93,12 @@ import {
   getArvThreshold,
   saveArvThreshold,
   resetArvThreshold,
+  getProximityConfig,
+  saveProximityConfig,
+  resetProximityConfig,
+  PROXIMITY_DEFAULTS,
+  type ProximityConfig,
+  type ProximityPosition,
 } from '@/lib/client-api'
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -485,7 +495,7 @@ const FILTER_SHORT: Record<string, string> = {
   subdivision_match: 'Subdivision', sale_age: 'Sale Age', sqft_diff: 'Sqft Diff',
   property_type: 'Prop. Type', year_built_diff: 'Year Built', distance: 'Distance',
 }
-const FILTER_UNIT: Record<string, string> = { sale_age: 'days', sqft_diff: 'sqft', year_built_diff: 'yrs', distance: 'mi' }
+const FILTER_UNIT: Record<string, string> = { sale_age: 'days', sqft_diff: '%', year_built_diff: 'yrs', distance: 'mi' }
 const ADJUSTMENT_SHORT: Record<string, string> = {
   old_comp_discount: 'Comp Discount', bedroom: 'Bedroom', bathroom: 'Bathroom',
   pool: 'Pool', garage: 'Garage', carport: 'Carport',
@@ -630,6 +640,7 @@ function AppraisalRulesTab() {
   const [locEditStates, setLocEditStates] = useState<Record<string, {
     filters: FormFilterState[]
     adjustments: FormAdjustmentState[]
+    proximity: ProximityConfig
     saving: boolean
     error: string | null
   }>>({})
@@ -640,14 +651,19 @@ function AppraisalRulesTab() {
   const [addLocError, setAddLocError] = useState<string | null>(null)
   const [addLocSaving, setAddLocSaving] = useState(false)
 
+  // Proximity config state (saved together with appraisal rules)
+  const [proximityConfig, setProximityConfig] = useState<ProximityConfig>(PROXIMITY_DEFAULTS)
+  const [proximityOriginal, setProximityOriginal] = useState<ProximityConfig>(PROXIMITY_DEFAULTS)
+
   const load = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
-      const [presetData, defaultsData, settingsData] = await Promise.all([
+      const [presetData, defaultsData, settingsData, proxRes] = await Promise.all([
         getOrCreateDefaultPreset(),
         getAppraisalDefaults(),
         getLocationSettings('appraisal'),
+        getProximityConfig().catch(() => ({ config: PROXIMITY_DEFAULTS, isCustom: false })),
       ])
       setDefaults(defaultsData)
       setPreset(presetData)
@@ -656,6 +672,8 @@ function AppraisalRulesTab() {
       setAdjustments(a)
       setDirty(false)
       setLocSettings(settingsData)
+      setProximityConfig(proxRes.config)
+      setProximityOriginal(proxRes.config)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load')
     } finally {
@@ -674,16 +692,27 @@ function AppraisalRulesTab() {
     setDirty(true)
   }
 
+  const updateProximity = (c: ProximityConfig) => {
+    setProximityConfig(c)
+    setDirty(true)
+  }
+
+  const proximityDirty = JSON.stringify(proximityConfig) !== JSON.stringify(proximityOriginal)
+
   const handleSave = async () => {
     if (!preset) return
     setSaving(true)
     setError(null)
     try {
-      const saved = await updateAppraisalPreset(preset.id, {
-        filters: filters.map((f) => ({ filterType: f.filterType, enabled: f.enabled, value: f.value })),
-        adjustments: adjustments.map((a) => ({ adjustmentType: a.adjustmentType, enabled: a.enabled, amount: a.amount, percentage: a.percentage })),
-      })
+      const [saved] = await Promise.all([
+        updateAppraisalPreset(preset.id, {
+          filters: filters.map((f) => ({ filterType: f.filterType, enabled: f.enabled, value: f.value })),
+          adjustments: adjustments.map((a) => ({ adjustmentType: a.adjustmentType, enabled: a.enabled, amount: a.amount, percentage: a.percentage })),
+        }),
+        proximityDirty ? saveProximityConfig(proximityConfig) : Promise.resolve(null),
+      ])
       setPreset(saved)
+      setProximityOriginal(proximityConfig)
       setDirty(false)
       setSuccessMessage('Appraisal rules saved.')
       setTimeout(() => setSuccessMessage(null), 3000)
@@ -699,6 +728,7 @@ function AppraisalRulesTab() {
     const { filters: f, adjustments: a } = buildDefaultFormState(defaults)
     setFilters(f)
     setAdjustments(a)
+    setProximityConfig(PROXIMITY_DEFAULTS)
     setDirty(true)
   }
 
@@ -717,7 +747,8 @@ function AppraisalRulesTab() {
       seedFilters = f
       seedAdjustments = a
     }
-    return { filters: seedFilters, adjustments: seedAdjustments, saving: false, error: null }
+    const seedProximity = (s.proximityConfigJson as ProximityConfig | null) ?? proximityConfig
+    return { filters: seedFilters, adjustments: seedAdjustments, proximity: seedProximity, saving: false, error: null }
   }
 
   function patchLocEditState(id: string, s: LocationSetting, patch: Partial<typeof locEditStates[string]>) {
@@ -734,6 +765,7 @@ function AppraisalRulesTab() {
       const updated = await updateLocationSetting(s.id, {
         appraisalFilters: es.filters.map((f) => ({ filterType: f.filterType, enabled: f.enabled, value: f.value })),
         appraisalAdjustments: es.adjustments.map((a) => ({ adjustmentType: a.adjustmentType, enabled: a.enabled, amount: a.amount, percentage: a.percentage })),
+        proximityConfigJson: es.proximity,
       })
       setLocSettings((prev) => prev.map((x) => x.id === s.id ? updated : x))
       setLocEditStates((prev) => { const n = { ...prev }; delete n[s.id]; return n })
@@ -856,9 +888,19 @@ function AppraisalRulesTab() {
             </RulesTable>
           </div>
 
+          {/* ── Proximity Adjustments ── */}
+          <div className="space-y-2 pt-2">
+            <div className="flex items-center gap-2">
+              <span className="inline-block w-2 h-2 rounded-full bg-red-500" />
+              <span className="text-xs font-semibold text-foreground">Proximity Adjustments</span>
+              <span className="text-[10px] text-muted-foreground">— deductions for traffic or commercial exposure</span>
+            </div>
+            <ProximitySection config={proximityConfig} onChange={updateProximity} />
+          </div>
+
           {/* ── Save / Reset ── */}
           <div className="flex items-center gap-2 pt-1">
-            <Button size="sm" onClick={handleSave} disabled={saving || !dirty} className="gap-1.5">
+            <Button size="sm" onClick={handleSave} disabled={saving || (!dirty && !proximityDirty)} className="gap-1.5">
               {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
               Save Changes
             </Button>
@@ -866,7 +908,7 @@ function AppraisalRulesTab() {
               <RotateCcw className="w-3.5 h-3.5" />
               Reset to Defaults
             </Button>
-            {dirty && <span className="text-xs text-amber-600 dark:text-amber-400">Unsaved changes</span>}
+            {(dirty || proximityDirty) && <span className="text-xs text-amber-600 dark:text-amber-400">Unsaved changes</span>}
           </div>
 
           {/* ══ Location Overrides section ══════════════════════════════════════ */}
@@ -909,7 +951,11 @@ function AppraisalRulesTab() {
                         <div className="flex-1 min-w-0">
                           <span className="text-sm font-semibold text-foreground">{getLocLabel(s)}</span>
                           <p className="text-[11px] text-muted-foreground mt-0.5">
-                            {s.hasAppraisalOverride ? (s.isEnabled ? 'Custom appraisal rules active' : 'Appraisal override saved (disabled)') : 'No override — using default rules'}
+                            {s.hasAppraisalOverride || s.hasProximityConfig
+                              ? (s.isEnabled
+                                ? `Custom ${[s.hasAppraisalOverride && 'appraisal', s.hasProximityConfig && 'proximity'].filter(Boolean).join(' + ')} rules active`
+                                : 'Override saved (disabled)')
+                              : 'No override — using default rules'}
                           </p>
                         </div>
                         {s.hasAppraisalOverride && (
@@ -991,6 +1037,17 @@ function AppraisalRulesTab() {
                                 )
                               })}
                             </RulesTable>
+                          </div>
+
+                          <div className="space-y-2">
+                            <div className="flex items-center gap-2">
+                              <span className="inline-block w-2 h-2 rounded-full bg-red-500" />
+                              <span className="text-xs font-semibold text-foreground">Proximity Adjustments</span>
+                            </div>
+                            <ProximitySection
+                              config={es.proximity}
+                              onChange={(c) => patchLocEditState(s.id, s, { proximity: c })}
+                            />
                           </div>
 
                           <div className="flex items-center justify-between pt-1">
@@ -2194,6 +2251,7 @@ function DealParamsTab() {
               </div>
             </div>
 
+
           </div>
 
           {/* ── Right: live MAO preview ── */}
@@ -2937,6 +2995,8 @@ const ARV_THRESHOLD_DEFAULTS_UI: ArvThresholdConfig = { percent: 15 }
 function ArvThresholdTab() {
   const [config, setConfig] = useState<ArvThresholdConfig>(ARV_THRESHOLD_DEFAULTS_UI)
   const [original, setOriginal] = useState<ArvThresholdConfig>(ARV_THRESHOLD_DEFAULTS_UI)
+  const [asIsThreshold, setAsIsThreshold] = useState(70)
+  const [originalAsIs, setOriginalAsIs] = useState(70)
   const [isCustom, setIsCustom] = useState(false)
   const [updatedAt, setUpdatedAt] = useState<string | undefined>()
   const [loading, setLoading] = useState(true)
@@ -2959,39 +3019,46 @@ function ArvThresholdTab() {
 
   useEffect(() => {
     setLoading(true)
-    Promise.all([getArvThreshold(), getLocationSettings('arv_threshold')])
-      .then(([res, settingsData]) => {
+    Promise.all([getArvThreshold(), getLocationSettings('arv_threshold'), getDealParams()])
+      .then(([res, settingsData, dealRes]) => {
         setConfig(res.config); setOriginal(res.config)
         setIsCustom(res.isCustom); setUpdatedAt(res.updatedAt)
         setLocSettings(settingsData)
+        const asIs = dealRes.config.asIsThresholdPercent ?? 70
+        setAsIsThreshold(asIs); setOriginalAsIs(asIs)
       })
       .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load'))
       .finally(() => setLoading(false))
   }, [])
 
-  const isDirty = JSON.stringify(config) !== JSON.stringify(original)
+  const isDirty = JSON.stringify(config) !== JSON.stringify(original) || asIsThreshold !== originalAsIs
 
   const handleSave = async () => {
     if (!isDirty) return
     setSaving(true); setError(null); setSuccessMessage(null)
     try {
-      const res = await saveArvThreshold(config)
+      const [res] = await Promise.all([
+        saveArvThreshold(config),
+        asIsThreshold !== originalAsIs ? saveDealParams({ asIsThresholdPercent: asIsThreshold }) : Promise.resolve(null),
+      ])
       setConfig(res.config); setOriginal(res.config)
       setIsCustom(true); setUpdatedAt(res.updatedAt)
-      setSuccessMessage('ARV threshold saved.')
+      setOriginalAsIs(asIsThreshold)
+      setSuccessMessage('Thresholds saved.')
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Save failed')
     } finally { setSaving(false) }
   }
 
   const handleReset = async () => {
-    if (!confirm('Reset ARV comp threshold to system default (10%)?')) return
+    if (!confirm('Reset thresholds to system defaults?')) return
     setSaving(true); setError(null); setSuccessMessage(null)
     try {
       const res = await resetArvThreshold()
       setConfig(res.config); setOriginal(res.config)
       setIsCustom(false); setUpdatedAt(undefined)
-      setSuccessMessage('Reset to default.')
+      setAsIsThreshold(70); setOriginalAsIs(70)
+      setSuccessMessage('Reset to defaults.')
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Reset failed')
     } finally { setSaving(false) }
@@ -3000,7 +3067,7 @@ function ArvThresholdTab() {
   // Location override helpers
   function getLocEditState(id: string, s: LocationSetting) {
     if (locEditStates[id]) return locEditStates[id]
-    return { arvThreshold: s.arvThresholdJson ?? { ...config }, saving: false, error: null }
+    return { arvThreshold: s.arvThresholdJson ?? { ...config, asIsThresholdPercent: asIsThreshold }, saving: false, error: null }
   }
 
   function patchLocEditState(id: string, s: LocationSetting, patch: Partial<ReturnType<typeof getLocEditState>>) {
@@ -3063,7 +3130,7 @@ function ArvThresholdTab() {
       {/* Toolbar */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <p className="text-sm text-muted-foreground">
-          Top percentage of comps by sale price used for ARV calculation. Higher values include more comps.
+          Thresholds that control how comps are classified for ARV and as-is valuation.
         </p>
         <div className="flex items-center gap-2 flex-shrink-0">
           {!loading && statusBadge}
@@ -3085,22 +3152,35 @@ function ArvThresholdTab() {
 
       {!loading && (
         <div className="space-y-5">
-          {/* Default threshold */}
+          {/* Threshold settings */}
           <div className="rounded-xl border border-border bg-card overflow-hidden">
             <div className="px-4 py-3 border-b border-border bg-muted/20">
-              <p className="text-xs font-semibold text-foreground">Default Threshold</p>
-              <p className="text-[11px] text-muted-foreground mt-0.5">Applied to all analyses unless a location override matches</p>
+              <p className="text-xs font-semibold text-foreground">Comp Classification Thresholds</p>
+              <p className="text-[11px] text-muted-foreground mt-0.5">Control how comps are split into after-renovation and as-is groups</p>
             </div>
             <div className="divide-y divide-border/30">
               <div className="grid grid-cols-[1fr_auto] items-center gap-4 px-4 py-3">
                 <div>
-                  <p className="text-sm font-medium text-foreground">Top Comp Percentile</p>
+                  <p className="text-sm font-medium text-foreground">ARV Comp Percentile</p>
                   <p className="text-[11px] text-muted-foreground mt-0.5">Comps in the top {config.percent}% by sale price are used for ARV</p>
                 </div>
                 <NumericInput
                   value={config.percent}
                   onChange={(v) => setConfig(prev => ({ ...prev, percent: v ?? 10 }))}
                   min={1} max={100} step={5}
+                  suffix="%"
+                  className="w-24"
+                />
+              </div>
+              <div className="grid grid-cols-[1fr_auto] items-center gap-4 px-4 py-3">
+                <div>
+                  <p className="text-sm font-medium text-foreground">As-Is Threshold</p>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">Comps priced below {asIsThreshold}% of ARV are classified as-is</p>
+                </div>
+                <NumericInput
+                  value={asIsThreshold}
+                  onChange={(v) => setAsIsThreshold(v ?? 70)}
+                  min={0} max={100} step={5}
                   suffix="%"
                   className="w-24"
                 />
@@ -3116,9 +3196,10 @@ function ArvThresholdTab() {
             <div className="px-4 py-3 text-[11px] text-muted-foreground space-y-1.5">
               <p>1. Comps are sorted by sale price (highest first)</p>
               <p>2. Top {config.percent}% are classified as &quot;after renovation&quot; comps</p>
-              <p>3. Appraisal rules (filters &amp; adjustments) are applied to this subset</p>
-              <p>4. If not enough pass, the threshold widens by 1.5x (up to 3 attempts)</p>
-              <p>5. Final fallback uses all comps with standard rules</p>
+              <p>3. Comps priced below {asIsThreshold}% of ARV are classified as &quot;as-is&quot;</p>
+              <p>4. Appraisal rules (filters &amp; adjustments) are applied to each group</p>
+              <p>5. If not enough pass, the threshold widens by 1.5x (up to 3 attempts)</p>
+              <p>6. Final fallback uses all comps with standard rules</p>
             </div>
           </div>
 
@@ -3162,13 +3243,13 @@ function ArvThresholdTab() {
                           <span className="text-sm font-semibold text-foreground">{getLocLabel(s)}</span>
                           <p className="text-[11px] text-muted-foreground mt-0.5">
                             {s.hasArvThreshold
-                              ? `Top ${(s.arvThresholdJson as ArvThresholdConfig).percent}% of comps by sale price`
-                              : `Using default (${config.percent}%)`}
+                              ? `ARV ${(s.arvThresholdJson as ArvThresholdConfig).percent}% · As-Is ${(s.arvThresholdJson as ArvThresholdConfig).asIsThresholdPercent ?? asIsThreshold}%`
+                              : `Using defaults (ARV ${config.percent}% · As-Is ${asIsThreshold}%)`}
                           </p>
                         </div>
                         {s.hasArvThreshold && (
                           <Badge variant="outline" className="text-[10px] px-2 py-0 border-purple-500/30 text-purple-500 flex-shrink-0">
-                            {(s.arvThresholdJson as ArvThresholdConfig).percent}%
+                            {(s.arvThresholdJson as ArvThresholdConfig).percent}% / {(s.arvThresholdJson as ArvThresholdConfig).asIsThresholdPercent ?? asIsThreshold}%
                           </Badge>
                         )}
                         <ChevronDown className={`w-4 h-4 text-muted-foreground flex-shrink-0 transition-transform ${expanded ? 'rotate-180' : ''}`} />
@@ -3180,13 +3261,26 @@ function ArvThresholdTab() {
                           <div className="divide-y divide-border/30">
                             <div className="grid grid-cols-[1fr_auto] items-center gap-4 px-4 py-3">
                               <div>
-                                <p className="text-sm font-medium text-foreground">Top Comp Percentile</p>
+                                <p className="text-sm font-medium text-foreground">ARV Comp Percentile</p>
                                 <p className="text-[11px] text-muted-foreground mt-0.5">Comps in the top {es.arvThreshold.percent}% by sale price are used for ARV</p>
                               </div>
                               <NumericInput
                                 value={es.arvThreshold.percent}
                                 onChange={(v) => patchLocEditState(s.id, s, { arvThreshold: { ...es.arvThreshold, percent: v ?? 15 } })}
                                 min={1} max={100} step={5}
+                                suffix="%"
+                                className="w-24"
+                              />
+                            </div>
+                            <div className="grid grid-cols-[1fr_auto] items-center gap-4 px-4 py-3">
+                              <div>
+                                <p className="text-sm font-medium text-foreground">As-Is Threshold</p>
+                                <p className="text-[11px] text-muted-foreground mt-0.5">Comps below {es.arvThreshold.asIsThresholdPercent ?? asIsThreshold}% of ARV = as-is</p>
+                              </div>
+                              <NumericInput
+                                value={es.arvThreshold.asIsThresholdPercent ?? asIsThreshold}
+                                onChange={(v) => patchLocEditState(s.id, s, { arvThreshold: { ...es.arvThreshold, asIsThresholdPercent: v ?? 70 } })}
+                                min={0} max={100} step={5}
                                 suffix="%"
                                 className="w-24"
                               />
@@ -3268,6 +3362,103 @@ function ArvThresholdTab() {
   )
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// PROXIMITY ADJUSTMENTS — controlled section (no own save/load)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const POSITIONS = [
+  { key: 'siding' as const, label: 'Siding', description: 'Property sits beside a road, rail, or commercial zone', impact: 'Lowest', Icon: ArrowRight, color: 'text-yellow-500', bg: 'bg-yellow-500/10', border: 'border-yellow-500/20' },
+  { key: 'backing' as const, label: 'Backing', description: 'Property\'s backyard faces the feature', impact: 'Medium', Icon: ArrowUp, color: 'text-orange-500', bg: 'bg-orange-500/10', border: 'border-orange-500/20' },
+  { key: 'fronting' as const, label: 'Fronting', description: 'Property\'s front door faces the feature directly', impact: 'Highest', Icon: ArrowLeft, color: 'text-red-500', bg: 'bg-red-500/10', border: 'border-red-500/20' },
+]
+
+function ProximitySection({ config, onChange }: { config: ProximityConfig; onChange: (c: ProximityConfig) => void }) {
+  const updatePosition = (key: 'siding' | 'backing' | 'fronting', field: keyof ProximityPosition, value: number) => {
+    onChange({ ...config, [key]: { ...config[key], [field]: value } })
+  }
+
+  const sampleArvLow = 350000
+  const sampleArvHigh = 650000
+
+  return (
+    <div className="space-y-3">
+      {/* Pricing tier cutoff */}
+      <div className="rounded-xl border border-border bg-card overflow-hidden">
+        <div className="px-4 py-3 flex items-center justify-between gap-4">
+          <div>
+            <p className="text-xs font-semibold text-foreground">Pricing Tier Cutoff</p>
+            <p className="text-[11px] text-muted-foreground mt-0.5">Below: flat dollar &middot; Above: percentage of ARV</p>
+          </div>
+          <NumericInput value={config.arvThreshold} onChange={(v) => onChange({ ...config, arvThreshold: v })} min={0} step={50000} prefix="$" className="w-36" />
+        </div>
+      </div>
+
+      {/* Position cards */}
+      {POSITIONS.map(({ key, label, description, impact, Icon, color, bg, border }) => (
+        <div key={key} className={`rounded-xl border ${border} bg-card overflow-hidden`}>
+          <div className="px-4 py-3 flex items-center gap-3">
+            <div className={`w-8 h-8 rounded-lg ${bg} flex items-center justify-center flex-shrink-0`}><Icon className={`w-4 h-4 ${color}`} /></div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2">
+                <p className="text-sm font-semibold text-foreground">{label}</p>
+                <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${border} ${color}`}>{impact} impact</Badge>
+              </div>
+              <p className="text-[11px] text-muted-foreground mt-0.5">{description}</p>
+            </div>
+          </div>
+          <div className="px-4 pb-3 grid grid-cols-2 gap-3">
+            <div className="rounded-lg bg-muted/30 p-3 space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Flat Amount</span>
+                <span className="text-[10px] text-muted-foreground/60">ARV &lt; {fmt$(config.arvThreshold)}</span>
+              </div>
+              <NumericInput value={config[key].flat} onChange={(v) => updatePosition(key, 'flat', v)} min={0} step={1000} prefix="$" className="w-full" />
+            </div>
+            <div className="rounded-lg bg-muted/30 p-3 space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Percentage</span>
+                <span className="text-[10px] text-muted-foreground/60">ARV &ge; {fmt$(config.arvThreshold)}</span>
+              </div>
+              <NumericInput value={config[key].percent} onChange={(v) => updatePosition(key, 'percent', v)} min={0} max={100} step={1} suffix="%" className="w-full" />
+            </div>
+          </div>
+        </div>
+      ))}
+
+      {/* Preview */}
+      <div className="rounded-xl border border-border bg-card overflow-hidden">
+        <div className="px-4 py-3 border-b border-border bg-muted/20">
+          <p className="text-xs font-semibold text-foreground">Deduction Preview</p>
+        </div>
+        <div className="grid grid-cols-2 divide-x divide-border/30">
+          <div className="px-4 py-3">
+            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-2">ARV {fmt$(sampleArvLow)} <span className="font-normal">(flat)</span></p>
+            <div className="space-y-1">
+              {POSITIONS.map(({ key, label, color }) => (
+                <div key={key} className="flex items-center justify-between text-xs">
+                  <span className="text-muted-foreground">{label}</span>
+                  <span className={`font-medium tabular-nums ${color}`}>&minus;{fmt$(config[key].flat)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="px-4 py-3">
+            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-2">ARV {fmt$(sampleArvHigh)} <span className="font-normal">(%)</span></p>
+            <div className="space-y-1">
+              {POSITIONS.map(({ key, label, color }) => (
+                <div key={key} className="flex items-center justify-between text-xs">
+                  <span className="text-muted-foreground">{label} ({config[key].percent}%)</span>
+                  <span className={`font-medium tabular-nums ${color}`}>&minus;{fmt$(Math.round(sampleArvHigh * config[key].percent / 100))}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function EvaluationSettingsPage() {
   return (
     <div className="space-y-6">
@@ -3285,11 +3476,11 @@ export default function EvaluationSettingsPage() {
       </div>
 
       {/* Tabs */}
-      <Tabs defaultValue="arv-threshold">
+      <Tabs defaultValue="thresholds">
         <TabsList className="h-9">
-          <TabsTrigger value="arv-threshold" className="gap-1.5 text-xs">
+          <TabsTrigger value="thresholds" className="gap-1.5 text-xs">
             <TrendingUp className="w-3.5 h-3.5" />
-            ARV Threshold
+            Thresholds
           </TabsTrigger>
           <TabsTrigger value="appraisal-rules" className="gap-1.5 text-xs">
             <SlidersHorizontal className="w-3.5 h-3.5" />
@@ -3309,7 +3500,7 @@ export default function EvaluationSettingsPage() {
           </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="arv-threshold" className="mt-5">
+        <TabsContent value="thresholds" className="mt-5">
           <ArvThresholdTab />
         </TabsContent>
 
@@ -3328,6 +3519,7 @@ export default function EvaluationSettingsPage() {
         <TabsContent value="major-items" className="mt-5">
           <MajorItemCostsTab />
         </TabsContent>
+
       </Tabs>
     </div>
   )

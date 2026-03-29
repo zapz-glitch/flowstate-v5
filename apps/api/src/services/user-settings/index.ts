@@ -33,6 +33,7 @@ import { CACHE_TTL, userSettingsKey } from '../cache'
 
 export interface ArvThresholdConfig {
   percent: number
+  asIsThresholdPercent?: number
 }
 
 export interface UserAnalysisSettings {
@@ -45,6 +46,7 @@ export interface UserAnalysisSettings {
   mergedBuybox: Record<string, unknown>
   customMajorItemCosts?: Record<string, number>
   arvThreshold: ArvThresholdConfig
+  asIsThresholdPercent?: number
 }
 
 export interface LoadSettingsOptions {
@@ -300,6 +302,7 @@ export async function loadUserAnalysisSettings(
     mergedBuybox,
     customMajorItemCosts,
     arvThreshold: arvThresholdConfig,
+    asIsThresholdPercent: arvThresholdConfig.asIsThresholdPercent ?? dealParamsRow?.asIsThresholdPercent ?? undefined,
   }
 
   // Cache the result (without per-request buyboxOverrides — those are applied on read)

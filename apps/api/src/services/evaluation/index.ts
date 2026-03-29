@@ -284,7 +284,7 @@ function finalizeGroupASelection(
  * 2. Select top-scoring comps that meet minimum score threshold
  * 3. Among qualifying comps, prefer higher-priced (after-renovation)
  * 4. If not enough qualify, relax filters one step and retry:
- *    - sqft_diff:      250 → 500 → 750 → 1000
+ *    - sqft_diff:       20 →  30 →  40 →   50  (±% of subject sqft)
  *    - year_built_diff:  10 →  15 →  20 →   25
  *    - sale_age:        180 → 270 → 360 →  540
  *    - distance:        0.5 → 1.0 → 1.5 →  2.0

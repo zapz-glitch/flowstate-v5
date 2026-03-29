@@ -175,12 +175,12 @@ export const FILTER_RULES: FilterRuleDefinition[] = [
   {
     type: 'sqft_diff',
     priority: 'hard',
-    defaults: { enabled: true, value: 250 },
+    defaults: { enabled: true, value: 20 },
     label: {
       label: 'Square Footage Difference',
       shortLabel: 'SqFt Diff',
-      unit: 'sqft',
-      description: 'Maximum sqft difference from subject',
+      unit: '%',
+      description: 'Maximum sqft difference from subject (±%)',
     },
     apiParam: 'sqftVariance',
     evaluate(subject, comp, filter) {
@@ -200,14 +200,14 @@ export const FILTER_RULES: FilterRuleDefinition[] = [
         }
       }
 
-      const diff = Math.abs(comp.squareFeet - subject.squareFeet)
-      const passed = diff <= filter.value
+      const pctDiff = Math.abs(comp.squareFeet - subject.squareFeet) / subject.squareFeet * 100
+      const passed = pctDiff <= filter.value
 
       return {
         type: 'sqft_diff',
         passed,
-        reason: passed ? undefined : `Sqft difference too large: ${diff} sqft (max: ${filter.value})`,
-        actualValue: diff,
+        reason: passed ? undefined : `Sqft difference too large: ${Math.round(pctDiff)}% (max: ±${filter.value}%)`,
+        actualValue: Math.round(pctDiff),
         threshold: filter.value,
       }
     },

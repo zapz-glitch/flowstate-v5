@@ -386,6 +386,8 @@ export const dealParams = sqliteTable(
     carryingCostsPercent: real('carrying_costs_percent').notNull().default(2),
     /** Wholesale fee in dollars (default: 10000) */
     wholesaleFee: real('wholesale_fee').notNull().default(10000),
+    /** As-is threshold as a percentage of ARV (default: 70) — comps below this are classified as-is */
+    asIsThresholdPercent: real('as_is_threshold_percent').notNull().default(70),
     createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
     updatedAt: text('updated_at').notNull().$defaultFn(() => new Date().toISOString()),
   },
@@ -410,6 +412,26 @@ export const arvThreshold = sqliteTable(
     updatedAt: text('updated_at').notNull().$defaultFn(() => new Date().toISOString()),
   },
   (table) => [index('idx_arv_threshold_user_id').on(table.userId)]
+)
+
+// ==========================================
+// Proximity Adjustments (traffic/commercial deductions)
+// ==========================================
+
+export const proximityConfig = sqliteTable(
+  'proximity_config',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    userId: text('user_id')
+      .notNull()
+      .unique()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    /** JSON: ProximityConfig — siding/backing/fronting amounts + ARV threshold */
+    configJson: text('config_json').notNull(),
+    createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
+    updatedAt: text('updated_at').notNull().$defaultFn(() => new Date().toISOString()),
+  },
+  (table) => [index('idx_proximity_config_user_id').on(table.userId)]
 )
 
 // ==========================================
@@ -438,7 +460,8 @@ export const locationSettings = sqliteTable(
     tierRangesJson: text('tier_ranges_json'),         // custom tier range definitions (null = inherit from user global)
     dealParamsJson: text('deal_params_json'),         // JSON of DealParamsConfig fields
     majorItemCostsJson: text('major_item_costs_json'), // JSON of Record<MajorItemId, number>
-    arvThresholdJson: text('arv_threshold_json'),     // JSON of { percent: number, enabled: boolean }
+    arvThresholdJson: text('arv_threshold_json'),     // JSON of { percent: number, asIsThresholdPercent?: number }
+    proximityConfigJson: text('proximity_config_json'), // JSON of ProximityConfig
     createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
     updatedAt: text('updated_at').notNull().$defaultFn(() => new Date().toISOString()),
   },

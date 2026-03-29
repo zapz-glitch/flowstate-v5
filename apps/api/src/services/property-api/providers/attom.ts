@@ -631,7 +631,10 @@ class AttomProvider implements PropertyProviderAdapter {
           : 1
       q.append('bathroomRange', String(bathsRange))
     }
-    if (params.sqftVariance) {
+    if (params.sqftVariance && params.subjectSqft) {
+      const absoluteVariance = Math.round(params.subjectSqft * (params.sqftVariance / 100))
+      q.append('sqFeetRange', String(absoluteVariance))
+    } else if (params.sqftVariance) {
       q.append('sqFeetRange', String(params.sqftVariance))
     }
 
