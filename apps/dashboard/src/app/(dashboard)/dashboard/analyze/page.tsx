@@ -13,6 +13,8 @@ import {
   ChevronDown,
   ChevronRight,
   Loader2,
+  BrainCircuit,
+  Navigation,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { AddressAutocomplete } from '@/components/AddressAutocomplete'
@@ -26,13 +28,19 @@ import {
   SheetDescription,
 } from '@/components/ui/sheet'
 import { queueAnalysis, type CompsData, type AnalyzeData } from './actions'
-import { getArvThreshold } from '@/lib/client-api'
+import { getArvThreshold, getReportsByProperty, type ExistingReport } from '@/lib/client-api'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
 import { useAnalysis } from '@/hooks/use-analysis'
 import { useAnalysisEvaluation } from '@/hooks/use-analysis-evaluation'
 import type { AnalysisStep } from '@/types/analysis'
 import {
-  SubjectPropertyCard,
   ComparablesSection,
   VisionAnalysisButton,
   PropertyMap,
@@ -49,16 +57,18 @@ import { useEnrichmentSSE, type EnrichmentEvent } from '@/hooks/use-enrichment-s
 import { AppraisalFilterEditor, type FilterState, type AdjustmentState } from '@/components/analysis/AppraisalFilterEditor'
 import { SettingsPanel } from '@/components/report/SettingsPanel'
 import { DownloadReportButton } from '@/components/report/DownloadReportButton'
+import { CompComparisonDialog } from '@/components/analysis/CompComparisonDialog'
+import { getCompKey } from '@/components/analysis/format-helpers'
+import type { CompItem } from './actions'
 
 // ─── Analysis Phases ────────────────────────────────────────────────────────
 //
-//  idle      → nothing happening
-//  fetching  → API call in flight (show all skeletons)
-//  enriching → API returned result, Zillow scraping in progress
-//              (show subject + comps without selection, skeleton for valuation)
-//  complete  → everything done (full evaluation: valuation + comp selection)
+//  idle     → nothing happening
+//  fetching → API call in flight (show all skeletons)
+//  ready    → API returned full result (valuation shown immediately)
+//             Zillow photos + optional AI analysis may still be running in background
 //
-type AnalysisPhase = 'idle' | 'fetching' | 'enriching' | 'complete'
+type AnalysisPhase = 'idle' | 'fetching' | 'ready'
 
 // ─── Status Labels ───────────────────────────────────────────────────────────
 
@@ -128,6 +138,11 @@ export default function AnalyzePage() {
   const [appraisalFilters, setAppraisalFilters] = useState<FilterState[]>([])
   const [appraisalAdjustments, setAppraisalAdjustments] = useState<AdjustmentState[]>([])
 
+  // Existing reports dialog
+  const [existingReports, setExistingReports] = useState<ExistingReport[]>([])
+  const [showExistingDialog, setShowExistingDialog] = useState(false)
+  const [pendingAnalyze, setPendingAnalyze] = useState(false)
+
   // UI state
   const [showRawJson, setShowRawJson] = useState(false)
   const [searchExpanded, setSearchExpanded] = useState(false)
@@ -135,12 +150,10 @@ export default function AnalyzePage() {
 
   // Phase-based state machine
   const [phase, setPhase] = useState<AnalysisPhase>('idle')
+  const [aiAnalysis, setAiAnalysis] = useState(false)
+  const [aiAnalyzing, setAiAnalyzing] = useState(false)
   const [enrichmentStreamUrl, setEnrichmentStreamUrl] = useState<string | null>(null)
   const [enrichmentToken, setEnrichmentToken] = useState<string | null>(null)
-  const [enrichmentStatus, setEnrichmentStatus] = useState<string | null>(null)
-  // Raw CoreLogic data — shown immediately while evaluation runs in background
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const [partialData, setPartialData] = useState<Record<string, any> | null>(null)
 
   // Global analysis context (Jotai)
   const {
@@ -161,12 +174,10 @@ export default function AnalyzePage() {
 
   // Derived state
   const isFetching = phase === 'fetching'
-  const isEnriching = phase === 'enriching'
-  const isComplete = phase === 'complete'
+  const isReady = phase === 'ready'
   const isActive = phase !== 'idle'
   const hasResult = analysisResult !== null
-  // Best available data for rendering: full result > partial CoreLogic data
-  const renderData = displayData ?? partialData
+  const renderData = displayData
 
   // Atom setters
   const setActiveAnalysis = useSetAtom(activeAnalysisAtom)
@@ -179,34 +190,24 @@ export default function AnalyzePage() {
     const { event: eventType, data } = event
 
     switch (eventType) {
-      case 'evaluation_started':
-        setEnrichmentStatus(data.message || 'Evaluating comparables...')
-        break
-
-      case 'evaluation_complete':
-        // Full analysis result with appraisal rules, valuation, classification
-        if (data.updatedResult) {
-          setAnalysisResult(data.updatedResult as AnalyzeData)
-        }
-        setEnrichmentStatus('Scraping market data...')
-        break
-
       case 'market_data_started':
-        setEnrichmentStatus(data.message || 'Fetching market data...')
+        // enrichment status removed('Fetching photos...')
         break
 
       case 'market_data_complete':
         if (data.updatedResult) {
           setAnalysisResult(data.updatedResult as AnalyzeData)
         }
-        setEnrichmentStatus('Finalizing...')
+        // enrichment status removed(null)
         break
 
       case 'llm_started':
-        setEnrichmentStatus(data.message || 'AI analyzing comparables...')
+        setAiAnalyzing(true)
+        // enrichment status removed('AI analyzing comparables...')
         break
 
       case 'llm_complete':
+        setAiAnalyzing(false)
         if (data.updatedResult) {
           setAnalysisResult(data.updatedResult as AnalyzeData)
         } else if (data.rankings) {
@@ -226,21 +227,19 @@ export default function AnalyzePage() {
             return { ...prev, comps: updatedComps } as AnalyzeData
           })
         }
+        // enrichment status removed(null)
         break
 
       case 'enrichment_done':
-        setPhase('complete')
-        setEnrichmentStatus(null)
+        setAiAnalyzing(false)
+        // enrichment status removed(null)
         setEnrichmentStreamUrl(null)
         setEnrichmentToken(null)
         break
 
       case 'error':
-        setEnrichmentStatus(`Error: ${data.message || 'Unknown error'}`)
-        setTimeout(() => {
-          setPhase('complete')
-          setEnrichmentStatus(null)
-        }, 3000)
+        setAiAnalyzing(false)
+        // enrichment status removed(null)
         break
     }
   }, [setAnalysisResult])
@@ -253,15 +252,10 @@ export default function AnalyzePage() {
 
   // Handle SSE connection failures
   useEffect(() => {
-    if (phase !== 'enriching') return
-    if (sseStatus === 'error') {
-      setPhase('complete')
-      setEnrichmentStatus(null)
-    } else if (sseStatus === 'done' && enrichmentStatus === 'Scraping market data...') {
-      setPhase('complete')
-      setEnrichmentStatus(null)
+    if (sseStatus === 'error' || sseStatus === 'done') {
+      setAiAnalyzing(false)
     }
-  }, [sseStatus, enrichmentStatus, phase])
+  }, [sseStatus])
 
   // ─── Evaluation Hook ─────────────────────────────────────────────────────
 
@@ -282,9 +276,12 @@ export default function AnalyzePage() {
     stickyBarRootMargin: '-60px 0px 0px 0px',
   })
 
-  // ─── Map Interaction ─────────────────────────────────────────────────────
+  // ─── Map Interaction + Comparison Dialog ────────────────────────────────
 
   const [activeMarkerKey, setActiveMarkerKey] = useState<string | null>(null)
+  const [comparisonComp, setComparisonComp] = useState<CompItem | null>(null)
+  const [comparisonOpen, setComparisonOpen] = useState(false)
+
   const scrollAndHighlight = useCallback((key: string) => {
     const el = document.querySelector(`[data-card-key="${key}"]`)
     if (el) {
@@ -298,28 +295,38 @@ export default function AnalyzePage() {
     }
     return false
   }, [])
+
   const handleMarkerSelect = useCallback((type: 'subject' | 'comp', compKey?: string) => {
     const key = type === 'subject' ? 'subject' : compKey
     if (!key) return
     setActiveMarkerKey(key)
+
+    // Open comparison dialog for comp clicks
+    if (type === 'comp' && compKey) {
+      const compItems = (analysisResult?.comps?.items ?? renderData?.comps?.items ?? []) as CompItem[]
+      const comp = compItems.find((c, i) => getCompKey(c, i) === compKey)
+      if (comp) {
+        setComparisonComp(comp)
+        setComparisonOpen(true)
+        return
+      }
+    }
+
     if (!scrollAndHighlight(key)) {
       setTimeout(() => scrollAndHighlight(key), 150)
     }
-  }, [scrollAndHighlight])
+  }, [scrollAndHighlight, analysisResult, renderData])
 
   // ─── Analysis Handler ────────────────────────────────────────────────────
 
-  const handleAnalyze = useCallback(async () => {
-    if (!address.trim()) return
-
-    // Reset everything
+  // Core analysis runner
+  const runAnalysis = useCallback(async () => {
     clearAnalysis()
     setError(null)
     setDurationMs(null)
     setEnrichmentStreamUrl(null)
     setEnrichmentToken(null)
-    setEnrichmentStatus(null)
-    setPartialData(null)
+    setAiAnalyzing(false)
     setPhase('fetching')
 
     const t0 = Date.now()
@@ -337,37 +344,22 @@ export default function AnalyzePage() {
         arvThresholdPercent: arvThreshold,
         asIsThresholdPercent: asIsThreshold,
         appraisalOverrides: overrides,
+        llmAnalysis: aiAnalysis ? { enabled: true } : undefined,
       })
 
-      // New flow: API returns partialResult (raw CoreLogic data) + SSE for evaluation/enrichment
-      // Legacy flow: API returns full result (for backward compatibility)
-      const initialData = response.partialResult ?? response.result
-
-      if (response.success && initialData) {
+      if (response.success && response.result) {
         setDurationMs(Date.now() - t0)
         setActiveAnalysis({ jobId: response.jobId ?? '', address: address.trim() })
-
-        if (response.partialResult) {
-          // New flow: show raw subject + comps immediately, evaluation runs in DO via SSE
-          setPartialData(response.partialResult)
-          setAnalysisState({ ...initialAnalysisState, jobId: response.jobId ?? null, status: 'completed' })
-          setPhase('enriching')
-          setEnrichmentStatus('Evaluating comparables...')
-        } else {
-          // Legacy flow: full result returned synchronously
-          setAnalysisResult(response.result as AnalyzeData)
-          setAnalysisState({ ...initialAnalysisState, jobId: response.jobId ?? null, status: 'completed' })
-        }
+        setAnalysisResult(response.result as AnalyzeData)
+        setAnalysisState({ ...initialAnalysisState, jobId: response.jobId ?? null, status: 'completed' })
+        setPhase('ready')
 
         if (response.enrichment) {
-          if (!response.partialResult) setPhase('enriching')
           setEnrichmentStreamUrl(response.enrichment.streamUrl)
           setEnrichmentToken(response.enrichment.token)
-          if (!response.partialResult) setEnrichmentStatus('Scraping market data...')
-        } else if (!response.partialResult) {
-          setPhase('complete')
+          if (aiAnalysis) setAiAnalyzing(true)
         }
-      } else if (!response.success) {
+      } else {
         setPhase('idle')
         setError(response.error || 'Analysis failed')
         if (response.suggestedFilters) {
@@ -381,7 +373,25 @@ export default function AnalyzePage() {
       setPhase('idle')
       setError(err instanceof Error ? err.message : 'Failed to start analysis')
     }
-  }, [address, skipCache, arvThreshold, asIsThreshold, appraisalFilters, appraisalAdjustments, clearAnalysis, setActiveAnalysis, setAnalysisResult, setAnalysisState])
+  }, [address, skipCache, aiAnalysis, arvThreshold, asIsThreshold, appraisalFilters, appraisalAdjustments, clearAnalysis, setActiveAnalysis, setAnalysisResult, setAnalysisState])
+
+  // Entry point — checks for existing reports first
+  const handleAnalyze = useCallback(async () => {
+    if (!address.trim()) return
+
+    try {
+      const { reports } = await getReportsByProperty({ address: address.trim() })
+      if (reports.length > 0) {
+        setExistingReports(reports)
+        setShowExistingDialog(true)
+        return
+      }
+    } catch {
+      // Lookup failed — proceed with analysis
+    }
+
+    runAnalysis()
+  }, [address, runAnalysis])
 
   // Auto-retry after "Apply & Retry"
   useEffect(() => {
@@ -395,6 +405,46 @@ export default function AnalyzePage() {
     setPhase('idle')
     cancelAnalysis()
   }, [cancelAnalysis])
+
+  // Run AI analysis on existing result — re-calls API with llmAnalysis enabled
+  const handleRunAiAnalysis = useCallback(async () => {
+    if (!address.trim() || aiAnalyzing) return
+    setAiAnalyzing(true)
+
+    try {
+      const overrides = appraisalFilters.length > 0 ? {
+        filters: appraisalFilters,
+        adjustments: appraisalAdjustments,
+      } : undefined
+
+      const response = await queueAnalysis({
+        address: address.trim(),
+        searchOptions: { radiusMiles: 1, maxComps: 15, monthsBack: 12 },
+        skipCache: false,
+        marketData: { enabled: true },
+        arvThresholdPercent: arvThreshold,
+        asIsThresholdPercent: asIsThreshold,
+        appraisalOverrides: overrides,
+        llmAnalysis: { enabled: true },
+      })
+
+      if (response.success && response.result) {
+        // Update result with fresh evaluation (keeps current display while AI runs)
+        setAnalysisResult(response.result as AnalyzeData)
+        setActiveAnalysis({ jobId: response.jobId ?? '', address: address.trim() })
+        setAnalysisState({ ...initialAnalysisState, jobId: response.jobId ?? null, status: 'completed' })
+
+        if (response.enrichment) {
+          setEnrichmentStreamUrl(response.enrichment.streamUrl)
+          setEnrichmentToken(response.enrichment.token)
+        }
+      } else {
+        setAiAnalyzing(false)
+      }
+    } catch {
+      setAiAnalyzing(false)
+    }
+  }, [address, arvThreshold, asIsThreshold, appraisalFilters, appraisalAdjustments, aiAnalyzing, setAnalysisResult, setActiveAnalysis, setAnalysisState])
 
   // ─── Layout Flags ────────────────────────────────────────────────────────
 
@@ -434,10 +484,10 @@ export default function AnalyzePage() {
                   <TypewriterText text={getStatusLabel(analysisState.currentStep)} />
                 </div>
               )}
-              {isEnriching && (
+              {aiAnalyzing && (
                 <div className="text-xs text-primary mt-0.5 flex items-center gap-1.5">
                   <Loader2 className="w-3 h-3 animate-spin" />
-                  {enrichmentStatus || 'Enriching with market data...'}
+                  AI analyzing comps...
                 </div>
               )}
             </div>
@@ -448,7 +498,7 @@ export default function AnalyzePage() {
               </Button>
             ) : (
               <div className="flex items-center gap-1.5">
-                {isComplete && hasResult && (
+                {isReady && hasResult && (
                   <div onClick={(e) => e.stopPropagation()} className="no-print">
                     <DownloadReportButton
                       reportProps={{
@@ -528,6 +578,13 @@ export default function AnalyzePage() {
                   Skip cache
                 </Label>
               </div>
+              <div className="flex items-center gap-2">
+                <Switch id="ai-analysis" checked={aiAnalysis} onCheckedChange={setAiAnalysis} />
+                <Label htmlFor="ai-analysis" className="flex items-center gap-1.5 text-body-sm text-foreground-tertiary cursor-pointer">
+                  <BrainCircuit className="w-3.5 h-3.5" />
+                  AI Analysis
+                </Label>
+              </div>
             </div>
           </div>
         </div>
@@ -602,10 +659,10 @@ export default function AnalyzePage() {
               <div className="h-full overflow-hidden">
                 <PropertyMap
                   subject={renderData!.subject!}
-                  comps={isComplete ? (effectiveComps ?? analysisResult?.comps) : (hasResult ? analysisResult?.comps : renderData!.comps)}
+                  comps={isReady ? (effectiveComps ?? analysisResult?.comps) : (hasResult ? analysisResult?.comps : renderData!.comps)}
                   subjectSubdivision={renderData!.subject?.subdivision}
-                  selectedCompKeys={isComplete ? compOverride?.selectedCompKeys : undefined}
-                  onToggleComp={isComplete ? handleToggleComp : undefined}
+                  selectedCompKeys={isReady ? compOverride?.selectedCompKeys : undefined}
+                  onToggleComp={isReady ? handleToggleComp : undefined}
                   onMarkerSelect={handleMarkerSelect}
                   activeMarkerKey={activeMarkerKey}
                 />
@@ -623,53 +680,8 @@ export default function AnalyzePage() {
                   </>
                 )}
 
-                {/* ── PHASE: ENRICHING — data shown progressively, valuation skeleton ── */}
-                {isEnriching && (
-                  <>
-                    {/* Subject property — from CoreLogic or enriched */}
-                    {renderData?.subject ? (
-                      <SubjectPropertyCard subject={renderData.subject} />
-                    ) : (
-                      <SubjectPropertySkeleton />
-                    )}
-
-                    {/* Photos — show as they arrive from Zillow */}
-                    {renderData?.subject?.photos && renderData.subject.photos.length > 0 && (
-                      <div className="border border-border px-4 py-3">
-                        <div className="flex items-center justify-between mb-2">
-                          <span className="text-caption font-medium text-foreground-secondary">Property Photos</span>
-                        </div>
-                        <PhotoGallery photos={renderData.subject.photos} />
-                      </div>
-                    )}
-
-                    {/* Enrichment status */}
-                    {enrichmentStatus && (
-                      <div className="border border-primary/20 bg-primary/5 px-4 py-3 flex items-center gap-3">
-                        <Loader2 className="w-4 h-4 text-primary animate-spin flex-shrink-0" />
-                        <span className="text-body-sm text-foreground-secondary">{enrichmentStatus}</span>
-                      </div>
-                    )}
-
-                    {/* Comps — expanded with analysis animation */}
-                    {renderData?.comps?.items?.length > 0 ? (
-                      <ComparablesSection
-                        comps={renderData.comps as CompsData}
-                        subject={renderData.subject}
-                        subjectSubdivision={renderData.subject?.subdivision}
-                        isAnalyzing
-                      />
-                    ) : (
-                      <ComparablesSkeleton />
-                    )}
-
-                    {/* Valuation skeleton — waiting for enrichment */}
-                    <ValuationSkeleton />
-                  </>
-                )}
-
-                {/* ── PHASE: COMPLETE — full evaluation ── */}
-                {isComplete && hasResult && (
+                {/* ── PHASE: READY — valuation shown immediately ── */}
+                {isReady && hasResult && (
                   <>
                     {/* Deal summary / valuation */}
                     {renderData?.subject && displayValuation ? (
@@ -686,6 +698,42 @@ export default function AnalyzePage() {
                       </div>
                     ) : (
                       <ValuationSkeleton />
+                    )}
+
+                    {/* Proximity Adjustments */}
+                    {hasResult && displayValuation && (
+                      <div className="border border-border overflow-hidden no-print">
+                        <div className="px-4 py-2.5 flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <Navigation className="w-3.5 h-3.5 text-foreground-tertiary" />
+                            <span className="text-caption font-medium text-foreground-secondary">Proximity Adjustment</span>
+                            {recalcData && recalcData.valuation.proximityDeduction > 0 && (
+                              <span className="text-[10px] font-medium text-red-500 tabular-nums">
+                                −${recalcData.valuation.proximityDeduction.toLocaleString()}
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-3">
+                            {(['siding', 'backing', 'fronting'] as const).map((pos) => {
+                              const label = pos === 'siding' ? 'Side' : pos === 'backing' ? 'Back' : 'Front'
+                              const isOn = settingsHook.settings.proximityAdjustments?.[pos] ?? false
+                              return (
+                                <label key={pos} className="flex items-center gap-1.5 cursor-pointer">
+                                  <Switch
+                                    checked={isOn}
+                                    onCheckedChange={(checked) => {
+                                      const current = settingsHook.settings.proximityAdjustments ?? { siding: false, backing: false, fronting: false }
+                                      settingsHook.updateProximityAdjustments({ ...current, [pos]: checked })
+                                    }}
+                                    className="scale-75"
+                                  />
+                                  <span className={`text-[11px] ${isOn ? 'text-foreground font-medium' : 'text-foreground-tertiary'}`}>{label}</span>
+                                </label>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      </div>
                     )}
 
                     {/* Photos */}
@@ -707,7 +755,15 @@ export default function AnalyzePage() {
                       </div>
                     )}
 
-                    {/* Comps with full selection + evaluation */}
+                    {/* AI analysis in progress banner */}
+                    {aiAnalyzing && (
+                      <div className="border border-primary/20 bg-primary/5 px-4 py-3 flex items-center gap-3">
+                        <Loader2 className="w-4 h-4 text-primary animate-spin flex-shrink-0" />
+                        <span className="text-body-sm text-foreground-secondary">AI analysis in progress — comp selection may update</span>
+                      </div>
+                    )}
+
+                    {/* Comps with selection + evaluation */}
                     {(appraisalFilters.length > 0 ? analysisResult?.comps : effectiveComps) && (
                       <ComparablesSection
                         comps={appraisalFilters.length > 0 ? (analysisResult?.comps as CompsData) : effectiveComps!}
@@ -719,6 +775,8 @@ export default function AnalyzePage() {
                         onToggleComp={handleToggleComp}
                         onReset={handleResetComps}
                         highlightedCompKey={activeMarkerKey}
+                        isAnalyzing={aiAnalyzing}
+                        onRunAiAnalysis={!aiAnalyzing ? handleRunAiAnalysis : undefined}
                       />
                     )}
 
@@ -796,6 +854,64 @@ export default function AnalyzePage() {
           <SettingsPanel settingsHook={settingsHook} recalcData={recalcData} />
         </SheetContent>
       </Sheet>
+
+      {/* Subject vs Comp comparison dialog */}
+      <CompComparisonDialog
+        open={comparisonOpen}
+        onOpenChange={setComparisonOpen}
+        subject={renderData?.subject ?? null}
+        comp={comparisonComp}
+        isSelected={comparisonComp && compOverride?.selectedCompKeys
+          ? compOverride.selectedCompKeys.has(comparisonComp.address || '')
+          : comparisonComp?.isEnabled !== false}
+        onToggleSelection={isReady && comparisonComp ? () => {
+          const key = comparisonComp.address || ''
+          handleToggleComp(key)
+        } : undefined}
+      />
+
+      {/* Existing Reports Dialog */}
+      <Dialog open={showExistingDialog} onOpenChange={setShowExistingDialog}>
+        <DialogContent className="max-w-md p-0 gap-0">
+          <DialogHeader className="px-5 pt-5 pb-3 border-b border-border">
+            <DialogTitle className="text-body font-semibold">Existing Reports Found</DialogTitle>
+          </DialogHeader>
+          <div className="p-4 space-y-3">
+            <p className="text-caption text-foreground-tertiary">
+              {existingReports.length} report{existingReports.length !== 1 ? 's' : ''} already exist for this address. Open an existing report or create a new analysis.
+            </p>
+            <div className="space-y-2 max-h-[300px] overflow-y-auto">
+              {existingReports.map((r) => (
+                <a
+                  key={r.id}
+                  href={`/dashboard/reports/${r.jobId}`}
+                  className="block border border-border px-4 py-3 hover:bg-muted/40 transition-colors"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-medium text-foreground truncate">{r.propertyAddress}</span>
+                    <span className="text-[10px] text-foreground-tertiary flex-shrink-0 ml-2">
+                      {new Date(r.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-3 mt-1 text-[10px] text-foreground-tertiary">
+                    {r.arv != null && <span>ARV: ${r.arv.toLocaleString()}</span>}
+                    {r.maxAllowableOffer != null && <span>MAO: ${r.maxAllowableOffer.toLocaleString()}</span>}
+                    {r.estimatedRepairs != null && <span>Rehab: ${r.estimatedRepairs.toLocaleString()}</span>}
+                  </div>
+                </a>
+              ))}
+            </div>
+          </div>
+          <DialogFooter className="px-5 pb-4 pt-2 border-t border-border">
+            <Button variant="outline" size="sm" onClick={() => setShowExistingDialog(false)}>
+              Cancel
+            </Button>
+            <Button size="sm" onClick={() => { setShowExistingDialog(false); runAnalysis() }}>
+              New Analysis
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

@@ -691,6 +691,58 @@ export async function getSavedReport(
   return fetchApi(`/user/reports/${jobId}`)
 }
 
+export interface ExistingReport {
+  id: string
+  jobId: string
+  propertyAddress: string
+  propertyClip: string | null
+  arv: number | null
+  maxAllowableOffer: number | null
+  estimatedRepairs: number | null
+  createdAt: string
+}
+
+export async function getReportsByProperty(opts: { clip?: string; address?: string }): Promise<{ reports: ExistingReport[] }> {
+  const params = new URLSearchParams()
+  if (opts.clip) params.set('clip', opts.clip)
+  else if (opts.address) params.set('address', opts.address)
+  return fetchApi(`/user/reports/by-property?${params.toString()}`)
+}
+
+export interface ReportHistoryEntry {
+  id: string
+  action: string
+  description: string
+  changes: unknown
+  createdAt: string
+}
+
+export async function getReportHistory(jobId: string): Promise<{ history: ReportHistoryEntry[] }> {
+  return fetchApi(`/user/reports/${jobId}/history`)
+}
+
+export async function addReportHistory(jobId: string, action: string, description: string, changes?: unknown): Promise<void> {
+  await fetchApi(`/user/reports/${jobId}/history`, {
+    method: 'POST',
+    body: JSON.stringify({ action, description, changes }),
+  })
+}
+
+export async function updateSavedReport(jobId: string, opts: {
+  fullResponseJson?: string
+  arv?: number
+  maxAllowableOffer?: number
+  estimatedRepairs?: number
+  historyAction?: string
+  historyDescription?: string
+  historyChanges?: unknown
+}): Promise<void> {
+  await fetchApi(`/user/reports/${jobId}`, {
+    method: 'PUT',
+    body: JSON.stringify(opts),
+  })
+}
+
 // ─── Report Sharing ──────────────────────────────────────────────────────────
 
 export interface ShareSettings {

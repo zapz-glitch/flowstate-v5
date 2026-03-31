@@ -15,7 +15,8 @@
 import type { AnalyzeData, CompItem, SubjectData, ValuationData } from '@/app/(dashboard)/dashboard/analyze/actions'
 import type { DealParamsConfig, TierRangeDefinition } from '@/lib/client-api'
 import { getCompKey } from '@/components/analysis/format-helpers'
-import type { EvaluationSettings, RecalcResult, CompEvaluation } from './types'
+import type { EvaluationSettings, RecalcResult, CompEvaluation, RecalcValuationResult } from './types'
+import { PROXIMITY_DEFAULTS, type ProximityConfig } from '../client-api'
 import {
   evaluateComparable,
   calculateARV,
@@ -267,26 +268,71 @@ function mapValuationResult(
     tierRanges
   )
 
+  // Calculate proximity deduction from toggles — reduces ARV
+  const proximityDeduction = calculateProximityDeduction(v.arv, settings)
+  const adjustedArv = v.arv - proximityDeduction
+
+  // Recalculate everything from adjusted ARV
+  const adjustedClosing = adjustedArv * (settings.dealParams.closingCostsPercent / 100)
+  const adjustedCarrying = adjustedArv * (settings.dealParams.carryingCostsPercent / 100)
+  const adjustedBuyPrice = adjustedArv - v.totalRehabCost - adjustedClosing - adjustedCarrying - v.projectedProfit
+  const adjustedWholesalePrice = adjustedBuyPrice - settings.dealParams.wholesaleFee
+  const adjustedTotalInvestment = adjustedBuyPrice + v.totalRehabCost
+  const adjustedProfit = adjustedArv - adjustedTotalInvestment - adjustedClosing - adjustedCarrying
+  const adjustedROI = adjustedTotalInvestment > 0 ? (adjustedProfit / adjustedTotalInvestment) * 100 : 0
+
+  // Also adjust rehab level estimates from adjusted ARV
+  const adjustedEstimates = rehabLevelEstimates.map((est) => {
+    const estBuyPrice = adjustedArv - est.estimatedCost - adjustedClosing - adjustedCarrying - v.projectedProfit
+    return {
+      ...est,
+      buyPrice: estBuyPrice,
+      wholesalePrice: estBuyPrice - settings.dealParams.wholesaleFee,
+    }
+  })
+
   return {
-    arv: v.arv,
+    arv: adjustedArv,
     arvTier: v.arvTier,
-    arvPerSqft: v.pricePerSqft,
-    buyPrice: v.buyPrice,
-    buyPricePercent: v.buyPricePercent,
+    arvPerSqft: resolvedSubjectSqft > 0 ? Math.round(adjustedArv / resolvedSubjectSqft) : v.pricePerSqft,
+    buyPrice: adjustedBuyPrice,
+    buyPricePercent: adjustedArv > 0 ? Math.round((adjustedBuyPrice / adjustedArv) * 100) : 0,
     rehabLevel: v.rehabLevel,
     rehabPerSqft: v.rehabPerSqft,
     baseRehabCost: v.baseRehabCost,
     majorItemsCost: v.majorItemsCost,
     rehabCost: v.totalRehabCost,
-    closingCosts: v.closingCosts,
-    carryingCosts: v.carryingCosts,
-    totalCosts: v.closingCosts + v.carryingCosts,
-    totalInvestment: v.totalInvestment,
-    projectedProfit: v.projectedProfit,
-    projectedROI: v.projectedROI,
-    wholesalePrice: v.wholesalePrice,
-    rehabLevelEstimates,
+    closingCosts: adjustedClosing,
+    carryingCosts: adjustedCarrying,
+    proximityDeduction,
+    totalCosts: adjustedClosing + adjustedCarrying,
+    totalInvestment: adjustedTotalInvestment,
+    projectedProfit: adjustedProfit,
+    projectedROI: adjustedROI,
+    wholesalePrice: adjustedWholesalePrice,
+    rehabLevelEstimates: adjustedEstimates,
+  } satisfies RecalcValuationResult
+}
+
+/**
+ * Calculate total proximity deduction based on enabled toggles and ARV tier.
+ */
+function calculateProximityDeduction(arv: number, settings: EvaluationSettings): number {
+  const toggles = settings.proximityAdjustments
+  if (!toggles) return 0
+
+  const config = settings.proximityConfig ?? PROXIMITY_DEFAULTS
+  const usePercent = arv >= config.arvThreshold
+  let total = 0
+
+  for (const pos of ['siding', 'backing', 'fronting'] as const) {
+    if (!toggles[pos]) continue
+    total += usePercent
+      ? Math.round(arv * config[pos].percent / 100)
+      : config[pos].flat
   }
+
+  return total
 }
 
 /**

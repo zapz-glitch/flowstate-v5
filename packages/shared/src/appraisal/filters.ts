@@ -140,7 +140,11 @@ const evaluators: Record<FilterType, FilterEvaluator> = {
       }
     }
 
-    const diff = Math.abs(comp.yearBuilt - subject.yearBuilt)
+    // Properties built 1940 and older are all treated as equivalent era
+    const PRE_WAR_CUTOFF = 1940
+    const effectiveSubject = Math.max(subject.yearBuilt, PRE_WAR_CUTOFF)
+    const effectiveComp = Math.max(comp.yearBuilt, PRE_WAR_CUTOFF)
+    const diff = Math.abs(effectiveComp - effectiveSubject)
     const passed = diff <= filter.value
 
     return {

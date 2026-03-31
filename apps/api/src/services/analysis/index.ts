@@ -385,6 +385,8 @@ export interface ClassificationSummary {
  */
 export interface AnalysisResponse {
   subject: {
+    /** CoreLogic CLIP ID */
+    id: string
     address: string
     county: string | null
     latitude: number | null
@@ -898,6 +900,7 @@ export function buildAnalysisResponse(
   return {
     // ═══ SUBJECT PROPERTY ═══════════════════════════════════════════════════
     subject: {
+      id: property.id,
       address: `${property.address}, ${property.city}, ${property.state} ${property.zipCode}`,
       county: property.county ?? null,
       latitude: property.latitude ?? null,

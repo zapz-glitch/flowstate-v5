@@ -180,6 +180,34 @@ export const savedReports = sqliteTable(
     index('idx_saved_reports_user_id').on(table.userId),
     index('idx_saved_reports_created_at').on(table.createdAt),
     index('idx_saved_reports_job_id').on(table.jobId),
+    index('idx_saved_reports_address').on(table.userId, table.propertyAddress),
+  ]
+)
+
+// ==========================================
+// Report History (modification tracking)
+// ==========================================
+
+export const reportHistory = sqliteTable(
+  'report_history',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    reportId: text('report_id')
+      .notNull()
+      .references(() => savedReports.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    /** Type of modification */
+    action: text('action').notNull(), // 'created' | 'comp_selection' | 'settings_change' | 'ai_analysis' | 'reanalyzed'
+    /** Human-readable description */
+    description: text('description').notNull(),
+    /** Snapshot of changes (JSON) — e.g. which comps changed, what settings updated */
+    changesJson: text('changes_json'),
+    createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
+  },
+  (table) => [
+    index('idx_report_history_report_id').on(table.reportId),
   ]
 )
 

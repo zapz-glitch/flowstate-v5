@@ -19,9 +19,12 @@ import {
   getRehabConfig,
   getDealParams,
   getMajorItemCosts,
+  getProximityConfig,
+  PROXIMITY_DEFAULTS,
   type AppraisalDefaults,
   type DealParamsConfig,
   type RehabEstimate,
+  type ProximityConfig,
 } from '@/lib/client-api'
 import {
   recalculateReport,
@@ -115,12 +118,13 @@ export function useReportSettings(data: AnalyzeData | null): UseReportSettingsRe
       try {
         const applied = data?.appliedSettings
 
-        const [preset, defaults, rehabResponse, dealResponse, majorItemsResponse] = await Promise.all([
+        const [preset, defaults, rehabResponse, dealResponse, majorItemsResponse, proximityResponse] = await Promise.all([
           getOrCreateDefaultPreset().catch(() => null),
           getAppraisalDefaults().catch(() => null),
           getRehabConfig().catch(() => null),
           getDealParams().catch(() => null),
           getMajorItemCosts().catch(() => null),
+          getProximityConfig().catch(() => null),
         ])
 
         if (cancelled) return
@@ -190,6 +194,8 @@ export function useReportSettings(data: AnalyzeData | null): UseReportSettingsRe
         const rehabLevelIndex = applied?.rehabLevelIndex ?? 2
         const additionPlay = applied?.additionPlay ?? 0
 
+        const proximityConfig = proximityResponse?.config ?? PROXIMITY_DEFAULTS
+
         const loaded: EvaluationSettings = {
           filters,
           adjustments,
@@ -199,6 +205,7 @@ export function useReportSettings(data: AnalyzeData | null): UseReportSettingsRe
           rehabLevelIndex,
           majorItems,
           additionPlay,
+          proximityConfig,
         }
 
         if (!cancelled) {

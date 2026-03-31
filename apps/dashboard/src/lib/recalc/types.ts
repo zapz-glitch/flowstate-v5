@@ -22,7 +22,7 @@ export {
   REHAB_LEVELS,
 } from '@flowstate-api/shared'
 
-import type { DealParamsConfig, TierRangeDefinition } from '../client-api'
+import type { DealParamsConfig, TierRangeDefinition, ProximityConfig } from '../client-api'
 
 // ─── Aliases for backward compatibility ──────────────────────────────────────
 
@@ -91,6 +91,7 @@ export interface RecalcValuationResult {
   totalInvestment: number
   projectedProfit: number
   projectedROI: number
+  proximityDeduction: number
   wholesalePrice: number
   rehabLevelEstimates: Array<{
     index: number
@@ -123,6 +124,7 @@ export interface EvaluationSettings {
   majorItems: MajorItemSetting[]
   additionPlay?: number
   proximityAdjustments?: ProximityToggles
+  proximityConfig?: ProximityConfig
 }
 
 // ─── Recalc Result (full output from recalculateReport) ─────────────────────

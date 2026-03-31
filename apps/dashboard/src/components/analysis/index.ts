@@ -16,6 +16,7 @@ export { DealSummaryHero } from './DealSummaryHero'
 export { formatCurrency, formatFilterType, formatAdjustmentType, getCompKey, normalizeSubdivision } from './format-helpers'
 export { ApiCallStatsCard } from './ApiCallStatsCard'
 export { VisionAnalysisButton } from './VisionAnalysisButton'
+export { StreetViewImage, getStreetViewUrl } from './StreetViewImage'
 export type {
   AnalyzeData,
   SubjectData,

@@ -2,8 +2,9 @@
 
 import { useState, useEffect, useCallback, type FormEvent } from 'react'
 import Link from 'next/link'
-import { ArrowLeft, DollarSign, SlidersHorizontal, Lock, Share2 } from 'lucide-react'
+import { ArrowLeft, DollarSign, SlidersHorizontal, Lock, Share2, Navigation } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
+import { Switch } from '@/components/ui/switch'
 import { ResizableLayout } from '@/components/ui/resizable'
 import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -30,9 +31,12 @@ import type {
   AnalyzeData,
   ValuationData,
   CompsData,
+  CompItem,
   FloodZoneData,
   NeighbourhoodData,
 } from '@/components/analysis'
+import { CompComparisonDialog } from '@/components/analysis/CompComparisonDialog'
+import { getCompKey } from '@/components/analysis/format-helpers'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -195,8 +199,11 @@ export default function ReportPage({ params }: { params: Promise<{ jobId: string
     })
   }, [params, fetchReport])
 
-  // Map marker → scroll to card (must be before early returns)
+  // Map marker → scroll to card + comparison dialog
   const [activeMarkerKey, setActiveMarkerKey] = useState<string | null>(null)
+  const [comparisonComp, setComparisonComp] = useState<CompItem | null>(null)
+  const [comparisonOpen, setComparisonOpen] = useState(false)
+
   const scrollAndHighlight = useCallback((key: string) => {
     const el = document.querySelector(`[data-card-key="${key}"]`)
     if (el) {
@@ -214,10 +221,21 @@ export default function ReportPage({ params }: { params: Promise<{ jobId: string
     const key = type === 'subject' ? 'subject' : compKey
     if (!key) return
     setActiveMarkerKey(key)
+
+    if (type === 'comp' && compKey && report) {
+      const compItems = (report.analysis?.comps?.items ?? []) as CompItem[]
+      const comp = compItems.find((c, i) => getCompKey(c, i) === compKey)
+      if (comp) {
+        setComparisonComp(comp)
+        setComparisonOpen(true)
+        return
+      }
+    }
+
     if (!scrollAndHighlight(key)) {
       setTimeout(() => scrollAndHighlight(key), 150)
     }
-  }, [scrollAndHighlight])
+  }, [scrollAndHighlight, report])
 
   if (loading) {
     return (
@@ -354,6 +372,42 @@ export default function ReportPage({ params }: { params: Promise<{ jobId: string
                 </div>
               )}
 
+              {/* Proximity Adjustments */}
+              {displayValuation && (
+                <div className="border border-border overflow-hidden no-print">
+                  <div className="px-4 py-2.5 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Navigation className="w-3.5 h-3.5 text-foreground-tertiary" />
+                      <span className="text-caption font-medium text-foreground-secondary">Proximity Adjustment</span>
+                      {recalcData && recalcData.valuation.proximityDeduction > 0 && (
+                        <span className="text-[10px] font-medium text-red-500 tabular-nums">
+                          −${recalcData.valuation.proximityDeduction.toLocaleString()}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-3">
+                      {(['siding', 'backing', 'fronting'] as const).map((pos) => {
+                        const label = pos === 'siding' ? 'Side' : pos === 'backing' ? 'Back' : 'Front'
+                        const isOn = settingsHook.settings.proximityAdjustments?.[pos] ?? false
+                        return (
+                          <label key={pos} className="flex items-center gap-1.5 cursor-pointer">
+                            <Switch
+                              checked={isOn}
+                              onCheckedChange={(checked) => {
+                                const current = settingsHook.settings.proximityAdjustments ?? { siding: false, backing: false, fronting: false }
+                                settingsHook.updateProximityAdjustments({ ...current, [pos]: checked })
+                              }}
+                              className="scale-75"
+                            />
+                            <span className={`text-[11px] ${isOn ? 'text-foreground font-medium' : 'text-foreground-tertiary'}`}>{label}</span>
+                          </label>
+                        )
+                      })}
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <RiskFloodCard riskFlags={analysis.riskFlags} floodZone={analysis.floodZone} permits={analysis.permits} />
 
               {effectiveComps && (
@@ -386,6 +440,41 @@ export default function ReportPage({ params }: { params: Promise<{ jobId: string
               <ValuationCard valuation={displayValuation} isRecalculated={isRecalculated} onOpenSettings={() => setSettingsOpen(true)} />
             </div>
           )}
+          {/* Proximity Adjustments */}
+          {displayValuation && (
+            <div className="border border-border overflow-hidden no-print">
+              <div className="px-4 py-2.5 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Navigation className="w-3.5 h-3.5 text-foreground-tertiary" />
+                  <span className="text-caption font-medium text-foreground-secondary">Proximity Adjustment</span>
+                  {recalcData && recalcData.valuation.proximityDeduction > 0 && (
+                    <span className="text-[10px] font-medium text-red-500 tabular-nums">
+                      −${recalcData.valuation.proximityDeduction.toLocaleString()}
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-3">
+                  {(['siding', 'backing', 'fronting'] as const).map((pos) => {
+                    const label = pos === 'siding' ? 'Side' : pos === 'backing' ? 'Back' : 'Front'
+                    const isOn = settingsHook.settings.proximityAdjustments?.[pos] ?? false
+                    return (
+                      <label key={pos} className="flex items-center gap-1.5 cursor-pointer">
+                        <Switch
+                          checked={isOn}
+                          onCheckedChange={(checked) => {
+                            const current = settingsHook.settings.proximityAdjustments ?? { siding: false, backing: false, fronting: false }
+                            settingsHook.updateProximityAdjustments({ ...current, [pos]: checked })
+                          }}
+                          className="scale-75"
+                        />
+                        <span className={`text-[11px] ${isOn ? 'text-foreground font-medium' : 'text-foreground-tertiary'}`}>{label}</span>
+                      </label>
+                    )
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
           <RiskFloodCard riskFlags={analysis.riskFlags} floodZone={analysis.floodZone} permits={analysis.permits} />
           {effectiveComps && (
             <ComparablesSection comps={effectiveComps} subject={analysis.subject} subjectSubdivision={analysis.subject?.subdivision} selectedCompKeys={compOverride?.selectedCompKeys} isManual={compOverride?.isManual ?? false} recalculatedArv={isRecalculated ? displayValuation?.arv : undefined} onToggleComp={handleToggleComp} onReset={handleResetComps} />
@@ -415,6 +504,21 @@ export default function ReportPage({ params }: { params: Promise<{ jobId: string
           jobId={resolvedJobId}
         />
       )}
+
+      {/* Subject vs Comp comparison dialog */}
+      <CompComparisonDialog
+        open={comparisonOpen}
+        onOpenChange={setComparisonOpen}
+        subject={report?.analysis?.subject ?? null}
+        comp={comparisonComp}
+        isSelected={comparisonComp && compOverride?.selectedCompKeys
+          ? compOverride.selectedCompKeys.has(comparisonComp.address || '')
+          : comparisonComp?.isEnabled !== false}
+        onToggleSelection={comparisonComp ? () => {
+          const key = comparisonComp.address || ''
+          handleToggleComp(key)
+        } : undefined}
+      />
     </div>
   )
 }

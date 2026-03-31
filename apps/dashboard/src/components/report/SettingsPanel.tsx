@@ -385,7 +385,18 @@ export function SettingsPanel({ settingsHook, recalcData }: SettingsPanelProps) 
         </Section>
 
         {/* ── Proximity Adjustment ──────────────────────────────────── */}
-        <Section icon={Navigation} title="Proximity Adjustment" defaultOpen={false}>
+        <Section
+          icon={Navigation}
+          title="Proximity Adjustment"
+          defaultOpen={false}
+          badge={
+            recalcData && recalcData.valuation.proximityDeduction > 0
+              ? <Badge variant="outline" className="text-[10px] leading-none px-1.5 py-0.5 font-normal text-red-500 border-red-500/30">
+                  −{fmt(recalcData.valuation.proximityDeduction)}
+                </Badge>
+              : undefined
+          }
+        >
           <div className="space-y-2">
             <div className="text-[10px] text-foreground-tertiary mb-2">
               Apply a deduction if the property is near traffic or commercial areas.
@@ -393,9 +404,19 @@ export function SettingsPanel({ settingsHook, recalcData }: SettingsPanelProps) 
             {(['siding', 'backing', 'fronting'] as const).map((pos) => {
               const label = pos === 'siding' ? 'Siding (beside)' : pos === 'backing' ? 'Backing (behind)' : 'Fronting (in front)'
               const isEnabled = settings.proximityAdjustments?.[pos] ?? false
+              const config = settings.proximityConfig
+              const arv = recalcData?.valuation.arv ?? 0
+              const deduction = config
+                ? (arv >= config.arvThreshold ? Math.round(arv * config[pos].percent / 100) : config[pos].flat)
+                : 0
               return (
                 <div key={pos} className="flex items-center justify-between rounded-lg bg-secondary/30 px-3 py-2.5">
-                  <span className="text-caption font-medium text-foreground">{label}</span>
+                  <div>
+                    <span className="text-caption font-medium text-foreground">{label}</span>
+                    {isEnabled && deduction > 0 && (
+                      <div className="text-[10px] text-red-500 tabular-nums">−${deduction.toLocaleString()}</div>
+                    )}
+                  </div>
                   <Switch
                     checked={isEnabled}
                     onCheckedChange={(checked) => {

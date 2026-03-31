@@ -1,7 +1,8 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { SlidersHorizontal, RotateCcw, ChevronDown, Loader2 } from 'lucide-react'
+import { SlidersHorizontal, RotateCcw, ChevronDown, Loader2, BrainCircuit } from 'lucide-react'
+import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import type { CompsData, CompItem, SubjectData } from './shared-types'
 import { getCompKey } from './format-helpers'
@@ -26,6 +27,8 @@ export interface ComparablesSectionProps {
   highlightedCompKey?: string | null
   /** When true, shows all comps expanded with analysis-in-progress animation */
   isAnalyzing?: boolean
+  /** Called when user clicks "Run AI Analysis" button — triggers LLM comp selection */
+  onRunAiAnalysis?: () => void
 }
 
 export function ComparablesSection({
@@ -39,6 +42,7 @@ export function ComparablesSection({
   onReset,
   highlightedCompKey,
   isAnalyzing = false,
+  onRunAiAnalysis,
 }: ComparablesSectionProps) {
   const [expandedComps, setExpandedComps] = useState<Set<string>>(new Set())
   const [excludedOpen, setExcludedOpen] = useState(false)
@@ -114,6 +118,23 @@ export function ComparablesSection({
             {selectedAvgPsf != null && (
               <Badge variant="outline" className="text-caption-sm bg-background/50 hidden md:flex">
                 Avg: ${selectedAvgPsf}/sqft
+              </Badge>
+            )}
+            {onRunAiAnalysis && !isAnalyzing && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={onRunAiAnalysis}
+                className="gap-1.5 text-xs no-print"
+              >
+                <BrainCircuit className="w-3.5 h-3.5" />
+                AI Analysis
+              </Button>
+            )}
+            {isAnalyzing && (
+              <Badge variant="outline" className="text-[10px] gap-1 border-primary/30 text-primary no-print">
+                <Loader2 className="w-3 h-3 animate-spin" />
+                AI analyzing...
               </Badge>
             )}
           </div>

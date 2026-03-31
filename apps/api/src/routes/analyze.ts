@@ -26,43 +26,11 @@ import { DEFAULT_FILTERS } from '../services/appraisal'
 import { filtersToApiParams } from '../services/appraisal/types'
 import { createPhotoService } from '../services/photo-provider'
 import type { PropertyIdentifier } from '../services/photo-provider'
+import { performAnalysis } from '../services/evaluation'
+import { detectOsmLocationRisks } from '../services/location-risk'
 import { generateSseToken } from '../utils/sse-token'
-import {
-  lookupCode,
-  BUILDING_STYLE,
-  CONSTRUCTION_TYPE,
-  FOUNDATION_TYPE,
-  ROOF_TYPE,
-  ROOF_COVER,
-  EXTERIOR_WALLS,
-  BUILDING_QUALITY,
-  HEATING_TYPE,
-  COOLING_TYPE,
-  POOL_TYPE,
-  GARAGE_TYPE,
-} from '../services/property-api/providers/corelogic-codes'
-
-/** Resolve any raw CoreLogic codes to labels in construction/features (handles cached data) */
-function resolvePropertyCodes(construction?: Record<string, unknown>, features?: Record<string, unknown>) {
-  const c = construction ? {
-    ...construction,
-    type: lookupCode(CONSTRUCTION_TYPE, construction.type as string) ?? construction.type,
-    qualityCode: lookupCode(BUILDING_QUALITY, construction.qualityCode as string) ?? construction.qualityCode,
-    buildingStyle: lookupCode(BUILDING_STYLE, construction.buildingStyle as string) ?? construction.buildingStyle,
-    foundationType: lookupCode(FOUNDATION_TYPE, construction.foundationType as string) ?? construction.foundationType,
-    roofType: lookupCode(ROOF_TYPE, construction.roofType as string) ?? construction.roofType,
-    roofCover: lookupCode(ROOF_COVER, construction.roofCover as string) ?? construction.roofCover,
-    exteriorWalls: lookupCode(EXTERIOR_WALLS, construction.exteriorWalls as string) ?? construction.exteriorWalls,
-  } : undefined
-  const f = features ? {
-    ...features,
-    heating: lookupCode(HEATING_TYPE, features.heating as string) ?? features.heating,
-    cooling: lookupCode(COOLING_TYPE, features.cooling as string) ?? features.cooling,
-    poolType: lookupCode(POOL_TYPE, features.poolType as string) ?? features.poolType,
-    garageType: lookupCode(GARAGE_TYPE, features.garageType as string) ?? features.garageType,
-  } : undefined
-  return { construction: c, features: f }
-}
+import { drizzle } from 'drizzle-orm/d1'
+import { savedReports } from '../db/schema'
 import { AnalysisError } from '../utils/analysis-error'
 
 type Variables = { auth: AuthContext }
@@ -218,11 +186,9 @@ analyze.post('/', async (c) => {
 
     const bundle = bundleResult.data
 
-    // ─── 3. Build partial result from raw CoreLogic data ───────────────────
-    // Return subject + comps immediately so the dashboard can display them
-    // while evaluation + enrichment run in the background (DO)
+    // ─── 3. Evaluate: appraisal + price classification + valuation ───────────
+    const evalStart = Date.now()
     const propertyCallStats = propertyApi.getCallStats()
-    const { property, comparables } = bundle
 
     // Apply appraisal rule overrides from request (playground inline editing)
     let appraisalRules = userSettings.appraisalRules
@@ -249,6 +215,8 @@ analyze.post('/', async (c) => {
       : userSettings.arvThreshold
 
     const evalParams = {
+      jobId,
+      bundle,
       appraisalRules,
       buybox: userSettings.mergedBuybox,
       customRehabTable: userSettings.customRehabTable,
@@ -266,63 +234,51 @@ analyze.post('/', async (c) => {
       },
     }
 
-    // Build raw partial result — just property data, no evaluation
-    const partialResult = {
-      subject: {
-        id: property.id,
-        address: property.address,
-        city: property.city,
-        state: property.state,
-        zipCode: property.zipCode,
-        latitude: property.latitude,
-        longitude: property.longitude,
-        squareFeet: property.squareFeet,
-        bedrooms: property.bedrooms,
-        bathrooms: property.bathrooms,
-        yearBuilt: property.yearBuilt,
-        lotSizeAcres: property.lotSizeAcres,
-        propertyType: property.propertyType,
-        stories: property.stories,
-        lastSalePrice: property.lastSalePrice,
-        lastSaleDate: property.lastSaleDate,
-        assessedValue: property.assessedValue,
-        marketValue: property.marketValue,
-        subdivision: property.subdivision,
-        ...resolvePropertyCodes(property.construction as Record<string, unknown>, property.features as Record<string, unknown>),
-        zoning: property.zoning,
-      },
-      comps: {
-        items: comparables.map((comp) => ({
-          id: comp.id,
-          address: comp.address,
-          city: comp.city,
-          state: comp.state,
-          zipCode: comp.zipCode,
-          latitude: comp.latitude,
-          longitude: comp.longitude,
-          salePrice: comp.salePrice,
-          saleDate: comp.saleDate,
-          squareFeet: comp.squareFeet,
-          bedrooms: comp.bedrooms,
-          bathrooms: comp.bathrooms,
-          yearBuilt: comp.yearBuilt,
-          lotSizeAcres: comp.lotSizeAcres,
-          propertyType: comp.propertyType,
-          distanceMiles: comp.distanceMiles,
-          subdivision: comp.subdivision,
-          ...resolvePropertyCodes(comp.construction as Record<string, unknown>),
-          pricePerSqft: comp.squareFeet && comp.salePrice ? Math.round(comp.salePrice / comp.squareFeet) : null,
-          isEnabled: false,
-        })),
-        totalCount: comparables.length,
-        enabledCount: 0,
-        disabledCount: comparables.length,
-      },
+    // Run evaluation synchronously — fast, pure CPU computation
+    let analysisResult = performAnalysis(evalParams).response
+
+    // Inject OSM location risks (parallel, non-blocking)
+    try {
+      if (bundle.property.latitude && bundle.property.longitude) {
+        const osmResult = await detectOsmLocationRisks(bundle.property.latitude, bundle.property.longitude)
+        if (osmResult.riskFlags.length > 0) {
+          const existingFlags = analysisResult.riskFlags ?? []
+          analysisResult = { ...analysisResult, riskFlags: [...existingFlags, ...osmResult.riskFlags] }
+        }
+      }
+    } catch {
+      // Non-fatal
     }
 
-    // ─── 4. Start background processing: evaluation + enrichment in DO ────
-    const pending: string[] = ['evaluation', 'market_data']
-    if (c.env.OPENROUTER_API_KEY) pending.push('llm')
+    console.log(`[Analyze][Timing] Evaluation: ${Date.now() - evalStart}ms`)
+
+    // ─── 4. Save report to DB (background, non-blocking) ────────────────────
+    c.executionCtx.waitUntil((async () => {
+      try {
+        const db = drizzle(c.env.DB)
+        await db.insert(savedReports).values({
+          userId: auth.userId,
+          jobId,
+          propertyAddress: analysisResult.subject.address,
+          propertyCity: body.city || bundle.property.city || '',
+          propertyState: body.state || bundle.property.state || '',
+          propertyZip: body.zipCode || bundle.property.zipCode || '',
+          propertyClip: bundle.property.id || null,
+          fullResponseJson: JSON.stringify(analysisResult),
+          arv: analysisResult.valuation.arv,
+          asIsValue: analysisResult.valuation.asIsValue ?? null,
+          maxAllowableOffer: analysisResult.valuation.buyPrice,
+          estimatedRepairs: analysisResult.valuation.rehabCost,
+        })
+      } catch (error) {
+        console.warn(`[Analyze] Failed to save report:`, error instanceof Error ? error.message : error)
+      }
+    })())
+
+    // ─── 5. Start background enrichment: Zillow photos + optional LLM ──────
+    const llmEnabled = body.llmAnalysis?.enabled === true
+    const pending: string[] = ['market_data']
+    if (llmEnabled && c.env.OPENROUTER_API_KEY) pending.push('llm')
 
     const sseSecret = c.env.BETTER_AUTH_SECRET || ''
     const token = await generateSseToken(sseSecret, jobId, auth.userId)
@@ -338,21 +294,29 @@ analyze.post('/', async (c) => {
         userId: auth.userId,
         pending,
         bundle,
-        evalParams,
-        analysisResult: partialResult,
+        evalParams: {
+          appraisalRules,
+          buybox: userSettings.mergedBuybox,
+          customRehabTable: userSettings.customRehabTable,
+          customTierRanges: userSettings.customTierRanges,
+          customMajorItemCosts: userSettings.customMajorItemCosts,
+          arvThreshold,
+          asIsThresholdPercent: body.asIsThresholdPercent ?? userSettings.asIsThresholdPercent,
+        },
+        analysisResult,
         llmOptions: { includePhotos: body.llmAnalysis?.includePhotos },
       }),
     })
     await startResp.text()
 
     console.log(`[Analyze][Timing] Total: ${Date.now() - routeStart}ms`)
-    console.log(`[Analyze] Job ${jobId} — ${comparables.length} comps, processing in DO (${pending.join(', ')})`)
+    console.log(`[Analyze] Job ${jobId} — ${bundle.comparables.length} comps, enrichment: ${pending.join(', ')}`)
 
     return c.json({
       success: true,
       data: {
         jobId,
-        partialResult,
+        result: analysisResult,
         enrichment: { streamUrl, token, pending },
       },
     })

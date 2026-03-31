@@ -18,16 +18,19 @@ import type { FilterType, FilterResult, AppraisalFilter } from './types'
 
 /** Score awarded when a filter passes. Higher = more important match. */
 export const FILTER_SCORES: Partial<Record<FilterType, number>> = {
+  sqft_diff: 60,
   building_style_match: 50,
-  sqft_diff: 45,
   subdivision_match: 40,
   sale_age: 30,
-  year_built_diff: 20,
+  year_built_diff: 30,
   distance: 20,
 }
 
 /** Bonus points for very close distance (< 0.25 miles) */
 const CLOSE_DISTANCE_BONUS = 10
+
+/** Bonus points for very close sqft match (within 10%) */
+const CLOSE_SQFT_BONUS = 15
 
 /** Base score for all comps */
 const BASE_SCORE = 100
@@ -97,6 +100,12 @@ export function scoreComp(
     if (result.passed && points > 0) {
       score += points
     }
+  }
+
+  // Bonus for very close sqft match (within 10%)
+  const sqftResult = filterResults.find(r => r.type === 'sqft_diff')
+  if (sqftResult?.passed && sqftResult.actualValue != null && Number(sqftResult.actualValue) <= 10) {
+    score += CLOSE_SQFT_BONUS
   }
 
   // Bonus for very close proximity

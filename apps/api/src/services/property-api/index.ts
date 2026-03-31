@@ -57,6 +57,30 @@ import type {
   PermitsEnrichment,
   WeatherRisk,
 } from './types';
+import {
+  lookupCode,
+  BUILDING_STYLE,
+  CONSTRUCTION_TYPE,
+  FOUNDATION_TYPE,
+  ROOF_TYPE,
+  ROOF_COVER,
+  EXTERIOR_WALLS,
+  BUILDING_QUALITY,
+} from './providers/corelogic-codes';
+
+/** Resolve raw CoreLogic codes to labels in construction data (handles KV-cached entries) */
+function resolveConstructionCodes(c: NonNullable<NormalizedProperty['construction']>): NonNullable<NormalizedProperty['construction']> {
+  return {
+    ...c,
+    type: lookupCode(CONSTRUCTION_TYPE, c.type) ?? c.type,
+    qualityCode: lookupCode(BUILDING_QUALITY, c.qualityCode) ?? c.qualityCode,
+    buildingStyle: lookupCode(BUILDING_STYLE, c.buildingStyle) ?? c.buildingStyle,
+    foundationType: lookupCode(FOUNDATION_TYPE, c.foundationType) ?? c.foundationType,
+    roofType: lookupCode(ROOF_TYPE, c.roofType) ?? c.roofType,
+    roofCover: lookupCode(ROOF_COVER, c.roofCover) ?? c.roofCover,
+    exteriorWalls: lookupCode(EXTERIOR_WALLS, c.exteriorWalls) ?? c.exteriorWalls,
+  };
+}
 
 // Re-export types for convenience
 export type {
@@ -751,10 +775,14 @@ class PropertyApi implements PropertyApiService {
             const result = await this.getPropertyById(comp.id);
 
             if (result.success) {
+              // Resolve any raw CoreLogic codes in cached construction data
+              const construction = result.data.construction
+                ? this.resolveConstructionCodes(result.data.construction)
+                : undefined;
               return {
                 ...comp,
                 subdivision: result.data.subdivision ?? null,
-                construction: result.data.construction,
+                construction,
                 isEnriched: true,
               };
             } else {
@@ -794,6 +822,13 @@ class PropertyApi implements PropertyApiService {
     );
 
     return enriched;
+  }
+
+  /**
+   * Resolve raw CoreLogic codes to labels in construction data (handles KV-cached entries).
+   */
+  private resolveConstructionCodes(c: NonNullable<NormalizedProperty['construction']>): NonNullable<NormalizedProperty['construction']> {
+    return resolveConstructionCodes(c);
   }
 
   /**

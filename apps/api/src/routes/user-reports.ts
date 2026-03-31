@@ -10,7 +10,7 @@ import { drizzle } from 'drizzle-orm/d1'
 import { eq, desc, sql, like, or, and } from 'drizzle-orm'
 import type { Env } from '../types'
 import { getSession } from '../lib/session'
-import { savedReports } from '../db/schema'
+import { savedReports, reportHistory } from '../db/schema'
 import { hashSharePassword } from '../lib/share-token'
 
 const userReports = new Hono<{ Bindings: Env }>()
@@ -74,6 +74,163 @@ userReports.get('/', async (c) => {
     reports,
     pagination: { page, limit, total, totalPages },
   })
+})
+
+// ─── GET /user/reports/by-property ───────────────────────────────────────────
+
+userReports.get('/by-property', async (c) => {
+  const session = await getSession(c)
+  if (!session?.user) return c.json({ error: 'Not authenticated' }, 401)
+
+  const clip = c.req.query('clip')?.trim()
+  const address = c.req.query('address')?.trim()
+  if (!clip && !address) return c.json({ error: 'clip or address query parameter required' }, 400)
+
+  const db = drizzle(c.env.DB)
+
+  // Prefer CLIP match (exact), fall back to address (fuzzy)
+  const condition = clip
+    ? and(eq(savedReports.userId, session.user.id), eq(savedReports.propertyClip, clip))
+    : and(eq(savedReports.userId, session.user.id), like(savedReports.propertyAddress, `%${address!.toUpperCase()}%`))
+
+  const reports = await db.select({
+    id: savedReports.id,
+    jobId: savedReports.jobId,
+    propertyAddress: savedReports.propertyAddress,
+    propertyClip: savedReports.propertyClip,
+    arv: savedReports.arv,
+    maxAllowableOffer: savedReports.maxAllowableOffer,
+    estimatedRepairs: savedReports.estimatedRepairs,
+    createdAt: savedReports.createdAt,
+  })
+    .from(savedReports)
+    .where(condition)
+    .orderBy(desc(savedReports.createdAt))
+    .limit(10)
+
+  return c.json({ reports })
+})
+
+// ─── GET /user/reports/:jobId/history ───────────────────────────────────────
+
+userReports.get('/:jobId/history', async (c) => {
+  const session = await getSession(c)
+  if (!session?.user) return c.json({ error: 'Not authenticated' }, 401)
+
+  const jobId = c.req.param('jobId')
+  const db = drizzle(c.env.DB)
+
+  // Find the report
+  const [report] = await db.select({ id: savedReports.id })
+    .from(savedReports)
+    .where(and(eq(savedReports.jobId, jobId), eq(savedReports.userId, session.user.id)))
+    .limit(1)
+
+  if (!report) return c.json({ error: 'Report not found' }, 404)
+
+  const history = await db.select()
+    .from(reportHistory)
+    .where(eq(reportHistory.reportId, report.id))
+    .orderBy(desc(reportHistory.createdAt))
+    .limit(50)
+
+  return c.json({
+    history: history.map((h) => ({
+      id: h.id,
+      action: h.action,
+      description: h.description,
+      changes: h.changesJson ? JSON.parse(h.changesJson) : null,
+      createdAt: h.createdAt,
+    })),
+  })
+})
+
+// ─── POST /user/reports/:jobId/history ──────────────────────────────────────
+
+userReports.post('/:jobId/history', async (c) => {
+  const session = await getSession(c)
+  if (!session?.user) return c.json({ error: 'Not authenticated' }, 401)
+
+  const jobId = c.req.param('jobId')
+  const body = await c.req.json().catch(() => ({})) as {
+    action?: string
+    description?: string
+    changes?: unknown
+  }
+
+  if (!body.action || !body.description) {
+    return c.json({ error: 'action and description required' }, 400)
+  }
+
+  const db = drizzle(c.env.DB)
+
+  const [report] = await db.select({ id: savedReports.id })
+    .from(savedReports)
+    .where(and(eq(savedReports.jobId, jobId), eq(savedReports.userId, session.user.id)))
+    .limit(1)
+
+  if (!report) return c.json({ error: 'Report not found' }, 404)
+
+  const [entry] = await db.insert(reportHistory).values({
+    reportId: report.id,
+    userId: session.user.id,
+    action: body.action,
+    description: body.description,
+    changesJson: body.changes ? JSON.stringify(body.changes) : null,
+  }).returning()
+
+  return c.json({ entry })
+})
+
+// ─── PUT /user/reports/:jobId ────────────────────────────────────────────────
+
+userReports.put('/:jobId', async (c) => {
+  const session = await getSession(c)
+  if (!session?.user) return c.json({ error: 'Not authenticated' }, 401)
+
+  const jobId = c.req.param('jobId')
+  const body = await c.req.json().catch(() => ({})) as {
+    fullResponseJson?: string
+    arv?: number
+    maxAllowableOffer?: number
+    estimatedRepairs?: number
+    historyAction?: string
+    historyDescription?: string
+    historyChanges?: unknown
+  }
+
+  const db = drizzle(c.env.DB)
+
+  const [report] = await db.select({ id: savedReports.id })
+    .from(savedReports)
+    .where(and(eq(savedReports.jobId, jobId), eq(savedReports.userId, session.user.id)))
+    .limit(1)
+
+  if (!report) return c.json({ error: 'Report not found' }, 404)
+
+  // Update report data
+  const updates: Record<string, unknown> = {}
+  if (body.fullResponseJson !== undefined) updates.fullResponseJson = body.fullResponseJson
+  if (body.arv !== undefined) updates.arv = body.arv
+  if (body.maxAllowableOffer !== undefined) updates.maxAllowableOffer = body.maxAllowableOffer
+  if (body.estimatedRepairs !== undefined) updates.estimatedRepairs = body.estimatedRepairs
+
+  if (Object.keys(updates).length > 0) {
+    await db.update(savedReports).set(updates).where(eq(savedReports.id, report.id))
+  }
+
+  // Log history entry
+  if (body.historyAction && body.historyDescription) {
+    await db.insert(reportHistory).values({
+      reportId: report.id,
+      userId: session.user.id,
+      action: body.historyAction,
+      description: body.historyDescription,
+      changesJson: body.historyChanges ? JSON.stringify(body.historyChanges) : null,
+    })
+  }
+
+  return c.json({ success: true })
 })
 
 // ─── GET /user/reports/:jobId ─────────────────────────────────────────────────

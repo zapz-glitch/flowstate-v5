@@ -6,6 +6,7 @@ import { StatCell } from './StatCell'
 import { ClassificationBadge } from './ClassificationBadge'
 import { PhotoGallery } from './PhotoGallery'
 import { AddressDisplay } from './AddressDisplay'
+import { StreetViewImage } from './StreetViewImage'
 
 interface SubjectPropertyCardProps {
   subject: SubjectData
@@ -67,13 +68,22 @@ export function SubjectPropertyCard({ subject, children, footer }: SubjectProper
           </div>
         )}
 
-        {((subject.photos && subject.photos.length > 0) || children) && (
-          <div className="mt-4">
+        {/* Street View + Photos */}
+        <div className="mt-4 space-y-2">
+          <StreetViewImage
+            address={subject.address}
+            latitude={subject.latitude}
+            longitude={subject.longitude}
+            width={640}
+            height={360}
+            className="w-full h-auto max-h-[240px] object-cover bg-muted"
+          />
+          {((subject.photos && subject.photos.length > 0) || children) && (
             <PhotoGallery photos={subject.photos || []}>
               {children}
             </PhotoGallery>
-          </div>
-        )}
+          )}
+        </div>
 
         {footer && (
           <div className="mt-4">

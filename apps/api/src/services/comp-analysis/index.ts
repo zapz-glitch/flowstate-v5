@@ -124,15 +124,23 @@ Comp ${i + 1} [ID: ${comp.id}]:
   Adjusted Price: ${ctx?.adjustedPrice ? `$${ctx.adjustedPrice.toLocaleString()}` : 'N/A'}`
   }).join('\n')
 
+  // Identify algorithm-selected comps
+  const algoSelectedIds = evalContexts.filter(e => e.isEnabled).map(e => e.compId)
+  const algoSelectedNote = algoSelectedIds.length > 0
+    ? `\nALGORITHM PRE-SELECTION: The appraisal rules algorithm selected these ${algoSelectedIds.length} comp(s): ${algoSelectedIds.join(', ')}. Validate or override this selection based on your analysis.`
+    : '\nALGORITHM PRE-SELECTION: No comps passed all appraisal filters. Use your judgment to select the best available matches.'
+
   return `SUBJECT PROPERTY:
   ${subjectInfo}
 
 COMPARABLE SALES (${comparables.length} total):${compLines}
+${algoSelectedNote}
 
 YOUR TASK:
 1. First, identify which comps are PHYSICALLY SIMILAR to the subject (Phase 1)
-2. From those, select ONLY the ones that truly support ARV (Phase 2) — could be 1, 2, 3, or more
-3. Rank ALL comps
+2. From those, select ONLY the best matches that support an ARV (After Repair Value) estimate
+3. ARV comps should represent what the subject would sell for AFTER full renovation — prefer comps with higher $/sqft that indicate renovated/updated condition
+4. Rank ALL comps
 
 Return JSON:
 {
@@ -150,7 +158,7 @@ Return JSON:
 }
 
 SCORING:
-85-100: Excellent physical match + good ARV indicator → SELECTED
+85-100: Excellent physical match + strong ARV indicator (high $/sqft, recent, nearby) → SELECTED
 70-84: Good physical match, usable for ARV → SELECTED
 50-69: Partial match, some differences → may be selected if best available
 30-49: Significant physical differences → NOT selected
@@ -159,7 +167,9 @@ SCORING:
 REMEMBER:
 - Physical similarity is non-negotiable. A comp that fails sqft, building style, construction type, or foundation match should score below 50 regardless of sale price.
 - Only include comps in selectedForArv that you would defend in front of an underwriter. Quality over quantity.
-- It is perfectly acceptable to select just 1 or 2 comps if those are the only true matches.`
+- It is perfectly acceptable to select just 1 or 2 comps if those are the only true matches.
+- Prefer comps with higher $/sqft among physically similar matches — they better represent ARV (post-renovation value).
+- Do NOT select comps that are clearly distressed sales or as-is deals for ARV.`
 }
 
 // ─── Main Service ───────────────────────────────────────────────────────────

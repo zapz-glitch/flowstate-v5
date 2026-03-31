@@ -331,7 +331,7 @@ function selectGroupAComps(
     if (mostPassCount === 0) continue
 
     // Select comps that match all filters first, fall back to 70%+
-    const qualifying = (allPassCount > 0
+    const filterQualifying = (allPassCount > 0
       ? scored.filter((s) => s.passRate >= 1.0)
       : scored.filter((s) => s.passRate >= MIN_FILTER_PASS_RATE)
     ).sort((a, b) => {
@@ -340,9 +340,25 @@ function selectGroupAComps(
       return (b.comp.salePrice ?? 0) - (a.comp.salePrice ?? 0)
     })
 
-    // Step 3: Classify by price for display purposes (not selection)
+    // Apply ARV threshold: only select comps in the top X% by sale price
+    // This ensures we use higher-priced comps that represent after-renovation value
     const stepThreshold = Math.min(Math.ceil(baseThreshold * Math.pow(1.5, step)), 100)
     const classifications = classifyCompsByPrice(allComparables, stepThreshold)
+    const topPriceIds = new Set(
+      [...classifications.entries()]
+        .filter(([, c]) => c.classification === 'after_renovation')
+        .map(([id]) => id)
+    )
+
+    // Prefer comps that pass filters AND are in the top price percentile
+    const topPriceQualifying = filterQualifying.filter((s) => topPriceIds.has(s.comp.id))
+    // Fall back to all qualifying comps if none are in the top percentile
+    const qualifying = topPriceQualifying.length > 0 ? topPriceQualifying : filterQualifying
+
+    if (topPriceQualifying.length > 0 && topPriceQualifying.length < filterQualifying.length) {
+      console.log(`[Evaluate] ARV threshold ${stepThreshold}%: ${topPriceQualifying.length}/${filterQualifying.length} qualifying comps in top price percentile`)
+    }
+
     const groupAIds = new Set(qualifying.map((s) => s.comp.id))
 
     const fallbackUsed = step === 0 ? 'none' as const : 'relaxed_filters' as const

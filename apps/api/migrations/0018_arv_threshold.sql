@@ -29,3 +29,19 @@ CREATE UNIQUE INDEX `proximity_config_user_id_unique` ON `proximity_config` (`us
 CREATE INDEX `idx_proximity_config_user_id` ON `proximity_config` (`user_id`);
 --> statement-breakpoint
 ALTER TABLE `location_settings` ADD `proximity_config_json` text;
+--> statement-breakpoint
+CREATE TABLE `report_history` (
+	`id` text PRIMARY KEY NOT NULL,
+	`report_id` text NOT NULL,
+	`user_id` text NOT NULL,
+	`action` text NOT NULL,
+	`description` text NOT NULL,
+	`changes_json` text,
+	`created_at` text NOT NULL,
+	FOREIGN KEY (`report_id`) REFERENCES `saved_reports`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE cascade
+);
+--> statement-breakpoint
+CREATE INDEX `idx_report_history_report_id` ON `report_history` (`report_id`);
+--> statement-breakpoint
+CREATE INDEX `idx_saved_reports_address` ON `saved_reports` (`user_id`, `property_address`);

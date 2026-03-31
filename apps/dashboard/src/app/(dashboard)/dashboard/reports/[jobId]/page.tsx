@@ -1,8 +1,16 @@
 'use client'
 
-import { useState, useEffect, useCallback, use } from 'react'
+import { useState, useEffect, useCallback, useRef, use } from 'react'
 import Link from 'next/link'
-import { ArrowLeft, Share2 } from 'lucide-react'
+import { ArrowLeft, Share2, Navigation, RefreshCw, AlertTriangle, History, Clock } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from '@/components/ui/dialog'
 import {
   Sheet,
   SheetContent,
@@ -10,7 +18,9 @@ import {
   SheetTitle,
   SheetDescription,
 } from '@/components/ui/sheet'
+import { Switch } from '@/components/ui/switch'
 import { cn } from '@/lib/utils'
+import { updateSavedReport, getReportHistory, type ReportHistoryEntry } from '@/lib/client-api'
 import { ResizableLayout } from '@/components/ui/resizable'
 import { getSavedReport } from '@/lib/client-api'
 import { useAnalysisEvaluation } from '@/hooks/use-analysis-evaluation'
@@ -24,7 +34,10 @@ import {
   PhotoGallery,
   VisionAnalysisButton,
 } from '@/components/analysis'
-import type { AnalyzeData } from '@/components/analysis'
+import type { AnalyzeData, CompItem } from '@/components/analysis'
+import { queueAnalysis, type AnalyzeData as ActionAnalyzeData } from '@/app/(dashboard)/dashboard/analyze/actions'
+import { CompComparisonDialog } from '@/components/analysis/CompComparisonDialog'
+import { getCompKey } from '@/components/analysis/format-helpers'
 
 // ─── Main Page ──────────────────────────────────────────────────────────────
 
@@ -40,6 +53,17 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [shareOpen, setShareOpen] = useState(false)
+  const [refreshOpen, setRefreshOpen] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
+  const [aiAnalyzing, setAiAnalyzing] = useState(false)
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const [historyEntries, setHistoryEntries] = useState<ReportHistoryEntry[]>([])
+  const [historyLoading, setHistoryLoading] = useState(false)
+  const [refreshResult, setRefreshResult] = useState<{
+    type: 'success' | 'no_change' | 'error'
+    message: string
+    changes?: string[]
+  } | null>(null)
 
   const analyzeData = report?.analysis ?? null
 
@@ -59,6 +83,98 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
     data: analyzeData,
     stickyBarRootMargin: '-60px 0px 0px 0px',
   })
+
+  // ─── History loading ────────────────────────────────────────────────────
+  const loadHistory = useCallback(async () => {
+    setHistoryLoading(true)
+    try {
+      const { history } = await getReportHistory(jobId)
+      setHistoryEntries(history)
+    } catch {
+      // Failed to load history
+    } finally {
+      setHistoryLoading(false)
+    }
+  }, [jobId])
+
+  useEffect(() => {
+    if (historyOpen) loadHistory()
+  }, [historyOpen, loadHistory])
+
+  // ─── Auto-save on evaluation/comp changes ──────────────────────────────
+  const [autoSaveStatus, setAutoSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle')
+  const saveTimerRef = useRef<NodeJS.Timeout | null>(null)
+  const lastSavedRef = useRef<string | null>(null)
+  const initialLoadRef = useRef(true)
+
+  useEffect(() => {
+    // Skip on initial load and when no data
+    if (!report || !displayValuation || !recalcData) return
+    if (initialLoadRef.current) {
+      // Capture initial state fingerprint
+      initialLoadRef.current = false
+      lastSavedRef.current = JSON.stringify({
+        arv: displayValuation.arv,
+        buyPrice: displayValuation.buyPrice,
+        comps: compOverride?.selectedCompKeys ? Array.from(compOverride.selectedCompKeys).sort() : null,
+        settingsChanged: settingsHook.settingsChanged,
+      })
+      return
+    }
+
+    const fingerprint = JSON.stringify({
+      arv: displayValuation.arv,
+      buyPrice: displayValuation.buyPrice,
+      comps: compOverride?.selectedCompKeys ? Array.from(compOverride.selectedCompKeys).sort() : null,
+      settingsChanged: settingsHook.settingsChanged,
+    })
+
+    // No change from last save
+    if (fingerprint === lastSavedRef.current) return
+
+    // Debounce: wait 2s after last change before saving
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+    saveTimerRef.current = setTimeout(async () => {
+      setAutoSaveStatus('saving')
+
+      // Build change description
+      const changes: string[] = []
+      if (compOverride?.isManual) changes.push('Comp selection changed')
+      if (settingsHook.settingsChanged) changes.push('Evaluation settings adjusted')
+      if (recalcData.valuation.proximityDeduction > 0) changes.push('Proximity adjustment applied')
+
+      const description = changes.length > 0
+        ? changes.join(', ')
+        : 'Evaluation updated'
+
+      try {
+        await updateSavedReport(jobId, {
+          arv: displayValuation.arv,
+          maxAllowableOffer: displayValuation.buyPrice,
+          estimatedRepairs: displayValuation.rehabCost,
+          historyAction: 'evaluation_update',
+          historyDescription: description,
+          historyChanges: {
+            arv: displayValuation.arv,
+            buyPrice: displayValuation.buyPrice,
+            rehabCost: displayValuation.rehabCost,
+            selectedComps: compOverride?.selectedCompKeys ? Array.from(compOverride.selectedCompKeys) : null,
+            proximityDeduction: recalcData.valuation.proximityDeduction,
+          },
+        })
+        lastSavedRef.current = fingerprint
+        setAutoSaveStatus('saved')
+        setTimeout(() => setAutoSaveStatus('idle'), 2000)
+        if (historyOpen) loadHistory()
+      } catch {
+        setAutoSaveStatus('idle')
+      }
+    }, 2000)
+
+    return () => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+    }
+  }, [displayValuation, compOverride, recalcData, settingsHook.settingsChanged, report, jobId])
 
   const fetchReport = useCallback(async () => {
     try {
@@ -82,8 +198,109 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
     fetchReport()
   }, [fetchReport])
 
-  // Map marker → scroll to card (must be before early returns)
+  const handleRefresh = useCallback(async () => {
+    if (!report?.address) return
+    setRefreshing(true)
+    setRefreshOpen(false)
+    setRefreshResult(null)
+
+    const oldAnalysis = report.analysis
+    try {
+      const response = await queueAnalysis({
+        address: report.address,
+        searchOptions: { radiusMiles: 1, maxComps: 15, monthsBack: 12 },
+        skipCache: true,
+        marketData: { enabled: true },
+      })
+      if (response.success && response.result) {
+        const newAnalysis = response.result as AnalyzeData
+
+        // Compare old vs new
+        const changes: string[] = []
+        const oldArv = oldAnalysis.valuation?.arv
+        const newArv = newAnalysis.valuation?.arv
+        if (oldArv && newArv && oldArv !== newArv) {
+          const diff = newArv - oldArv
+          changes.push(`ARV: $${oldArv.toLocaleString()} → $${newArv.toLocaleString()} (${diff > 0 ? '+' : ''}$${diff.toLocaleString()})`)
+        }
+
+        const oldBuy = oldAnalysis.valuation?.buyPrice
+        const newBuy = newAnalysis.valuation?.buyPrice
+        if (oldBuy && newBuy && oldBuy !== newBuy) {
+          const diff = newBuy - oldBuy
+          changes.push(`Buy Price: $${oldBuy.toLocaleString()} → $${newBuy.toLocaleString()} (${diff > 0 ? '+' : ''}$${diff.toLocaleString()})`)
+        }
+
+        const oldComps = oldAnalysis.comps?.enabledCount ?? oldAnalysis.comps?.items?.filter((c: { isEnabled?: boolean }) => c.isEnabled !== false).length ?? 0
+        const newComps = newAnalysis.comps?.enabledCount ?? newAnalysis.comps?.items?.filter((c: { isEnabled?: boolean }) => c.isEnabled !== false).length ?? 0
+        if (oldComps !== newComps) {
+          changes.push(`Selected comps: ${oldComps} → ${newComps}`)
+        }
+
+        const oldTotal = oldAnalysis.comps?.count ?? oldAnalysis.comps?.items?.length ?? 0
+        const newTotal = newAnalysis.comps?.count ?? newAnalysis.comps?.items?.length ?? 0
+        if (oldTotal !== newTotal) {
+          changes.push(`Total comps: ${oldTotal} → ${newTotal}`)
+        }
+
+        setReport({
+          jobId: response.jobId ?? jobId,
+          address: report.address,
+          createdAt: new Date().toISOString(),
+          analysis: newAnalysis,
+        })
+
+        if (changes.length > 0) {
+          setRefreshResult({ type: 'success', message: 'Data refreshed with changes', changes })
+        } else {
+          setRefreshResult({ type: 'no_change', message: 'Data refreshed — no significant changes detected' })
+        }
+
+        // Auto-dismiss after 10 seconds
+        setTimeout(() => setRefreshResult(null), 10000)
+      } else {
+        setRefreshResult({ type: 'error', message: response.error || 'Refresh failed' })
+        setTimeout(() => setRefreshResult(null), 5000)
+      }
+    } catch (err) {
+      setRefreshResult({ type: 'error', message: err instanceof Error ? err.message : 'Refresh failed' })
+      setTimeout(() => setRefreshResult(null), 5000)
+    } finally {
+      setRefreshing(false)
+    }
+  }, [report, jobId])
+
+  const handleRunAiAnalysis = useCallback(async () => {
+    if (!report?.address || aiAnalyzing) return
+    setAiAnalyzing(true)
+    try {
+      const response = await queueAnalysis({
+        address: report.address,
+        searchOptions: { radiusMiles: 1, maxComps: 15, monthsBack: 12 },
+        skipCache: false,
+        marketData: { enabled: true },
+        llmAnalysis: { enabled: true },
+      })
+      if (response.success && response.result) {
+        setReport({
+          jobId: response.jobId ?? jobId,
+          address: report.address,
+          createdAt: report.createdAt,
+          analysis: response.result as AnalyzeData,
+        })
+      }
+    } catch {
+      // AI analysis failed — keep existing data
+    } finally {
+      setAiAnalyzing(false)
+    }
+  }, [report, jobId, aiAnalyzing])
+
+  // Map marker → scroll to card + comparison dialog
   const [activeMarkerKey, setActiveMarkerKey] = useState<string | null>(null)
+  const [comparisonComp, setComparisonComp] = useState<CompItem | null>(null)
+  const [comparisonOpen, setComparisonOpen] = useState(false)
+
   const scrollAndHighlight = useCallback((key: string) => {
     const el = document.querySelector(`[data-card-key="${key}"]`)
     if (el) {
@@ -101,10 +318,21 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
     const key = type === 'subject' ? 'subject' : compKey
     if (!key) return
     setActiveMarkerKey(key)
+
+    if (type === 'comp' && compKey && analyzeData) {
+      const compItems = (analyzeData.comps?.items ?? []) as CompItem[]
+      const comp = compItems.find((c, i) => getCompKey(c, i) === compKey)
+      if (comp) {
+        setComparisonComp(comp)
+        setComparisonOpen(true)
+        return
+      }
+    }
+
     if (!scrollAndHighlight(key)) {
       setTimeout(() => scrollAndHighlight(key), 150)
     }
-  }, [scrollAndHighlight])
+  }, [scrollAndHighlight, analyzeData])
 
   if (loading) {
     return (
@@ -145,7 +373,18 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
           <span className="text-body-sm font-medium truncate flex-1 min-w-0" title={report.address || undefined}>
             {report.address || 'Property Report'}
           </span>
+          {autoSaveStatus === 'saving' && (
+            <span className="text-[10px] text-foreground-tertiary flex items-center gap-1 flex-shrink-0">
+              <RefreshCw className="w-3 h-3 animate-spin" /> Saving...
+            </span>
+          )}
+          {autoSaveStatus === 'saved' && (
+            <span className="text-[10px] text-emerald-500 flex-shrink-0">Saved</span>
+          )}
           <div className="flex items-center gap-1.5 flex-shrink-0">
+            <button type="button" onClick={() => setHistoryOpen(true)} className="p-1.5 rounded-lg text-foreground-tertiary hover:text-foreground hover:bg-secondary transition-colors" title="History">
+              <History className="w-3.5 h-3.5" />
+            </button>
             <button type="button" onClick={() => setShareOpen(true)} className="p-1.5 rounded-lg text-foreground-tertiary hover:text-foreground hover:bg-secondary transition-colors" title="Share">
               <Share2 className="w-3.5 h-3.5" />
             </button>
@@ -162,9 +401,41 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
                 isRecalculated,
               }}
             />
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setRefreshOpen(true)}
+              disabled={refreshing}
+              className="gap-1.5"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin' : ''}`} />
+              {refreshing ? 'Refreshing...' : 'Refresh'}
+            </Button>
           </div>
         </div>
       </div>
+
+      {/* Refresh result banner */}
+      {refreshResult && (
+        <div className={cn(
+          'mx-4 sm:mx-6 mt-2 px-4 py-3 border text-sm flex items-start justify-between gap-3 no-print',
+          refreshResult.type === 'success' && 'border-emerald-500/20 bg-emerald-500/5 text-emerald-700 dark:text-emerald-400',
+          refreshResult.type === 'no_change' && 'border-blue-500/20 bg-blue-500/5 text-blue-700 dark:text-blue-400',
+          refreshResult.type === 'error' && 'border-red-500/20 bg-red-500/5 text-red-700 dark:text-red-400',
+        )}>
+          <div>
+            <div className="font-medium text-xs">{refreshResult.message}</div>
+            {refreshResult.changes && refreshResult.changes.length > 0 && (
+              <ul className="mt-1 space-y-0.5 text-[11px] opacity-80">
+                {refreshResult.changes.map((c, i) => <li key={i}>{c}</li>)}
+              </ul>
+            )}
+          </div>
+          <button type="button" onClick={() => setRefreshResult(null)} className="text-xs opacity-60 hover:opacity-100 flex-shrink-0 mt-0.5">
+            Dismiss
+          </button>
+        </div>
+      )}
 
       {/* Two-column resizable layout */}
       {hasMapData ? (
@@ -190,6 +461,42 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
                     floodZone={analysis.floodZone}
                     jobId={null}
                   />
+                </div>
+              )}
+
+              {/* Proximity Adjustments */}
+              {displayValuation && (
+                <div className="border border-border overflow-hidden no-print">
+                  <div className="px-4 py-2.5 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Navigation className="w-3.5 h-3.5 text-foreground-tertiary" />
+                      <span className="text-caption font-medium text-foreground-secondary">Proximity Adjustment</span>
+                      {recalcData && recalcData.valuation.proximityDeduction > 0 && (
+                        <span className="text-[10px] font-medium text-red-500 tabular-nums">
+                          −${recalcData.valuation.proximityDeduction.toLocaleString()}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-3">
+                      {(['siding', 'backing', 'fronting'] as const).map((pos) => {
+                        const label = pos === 'siding' ? 'Side' : pos === 'backing' ? 'Back' : 'Front'
+                        const isOn = settingsHook.settings.proximityAdjustments?.[pos] ?? false
+                        return (
+                          <label key={pos} className="flex items-center gap-1.5 cursor-pointer">
+                            <Switch
+                              checked={isOn}
+                              onCheckedChange={(checked) => {
+                                const current = settingsHook.settings.proximityAdjustments ?? { siding: false, backing: false, fronting: false }
+                                settingsHook.updateProximityAdjustments({ ...current, [pos]: checked })
+                              }}
+                              className="scale-75"
+                            />
+                            <span className={`text-[11px] ${isOn ? 'text-foreground font-medium' : 'text-foreground-tertiary'}`}>{label}</span>
+                          </label>
+                        )
+                      })}
+                    </div>
+                  </div>
                 </div>
               )}
 
@@ -224,6 +531,8 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
                   onToggleComp={handleToggleComp}
                   onReset={handleResetComps}
                   highlightedCompKey={activeMarkerKey}
+                  isAnalyzing={aiAnalyzing}
+                  onRunAiAnalysis={!aiAnalyzing ? handleRunAiAnalysis : undefined}
                 />
               )}
 
@@ -245,8 +554,43 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
               jobId={null}
             />
           )}
+          {/* Proximity Adjustments */}
+          {displayValuation && (
+            <div className="border border-border overflow-hidden no-print">
+              <div className="px-4 py-2.5 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Navigation className="w-3.5 h-3.5 text-foreground-tertiary" />
+                  <span className="text-caption font-medium text-foreground-secondary">Proximity Adjustment</span>
+                  {recalcData && recalcData.valuation.proximityDeduction > 0 && (
+                    <span className="text-[10px] font-medium text-red-500 tabular-nums">
+                      −${recalcData.valuation.proximityDeduction.toLocaleString()}
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-3">
+                  {(['siding', 'backing', 'fronting'] as const).map((pos) => {
+                    const label = pos === 'siding' ? 'Side' : pos === 'backing' ? 'Back' : 'Front'
+                    const isOn = settingsHook.settings.proximityAdjustments?.[pos] ?? false
+                    return (
+                      <label key={pos} className="flex items-center gap-1.5 cursor-pointer">
+                        <Switch
+                          checked={isOn}
+                          onCheckedChange={(checked) => {
+                            const current = settingsHook.settings.proximityAdjustments ?? { siding: false, backing: false, fronting: false }
+                            settingsHook.updateProximityAdjustments({ ...current, [pos]: checked })
+                          }}
+                          className="scale-75"
+                        />
+                        <span className={`text-[11px] ${isOn ? 'text-foreground font-medium' : 'text-foreground-tertiary'}`}>{label}</span>
+                      </label>
+                    )
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
           {effectiveComps && (
-            <ComparablesSection comps={effectiveComps} subject={analysis.subject} subjectSubdivision={analysis.subject?.subdivision} selectedCompKeys={compOverride?.selectedCompKeys} isManual={compOverride?.isManual ?? false} recalculatedArv={isRecalculated ? displayValuation?.arv : undefined} onToggleComp={handleToggleComp} onReset={handleResetComps} />
+            <ComparablesSection comps={effectiveComps} subject={analysis.subject} subjectSubdivision={analysis.subject?.subdivision} selectedCompKeys={compOverride?.selectedCompKeys} isManual={compOverride?.isManual ?? false} recalculatedArv={isRecalculated ? displayValuation?.arv : undefined} onToggleComp={handleToggleComp} onReset={handleResetComps} isAnalyzing={aiAnalyzing} onRunAiAnalysis={!aiAnalyzing ? handleRunAiAnalysis : undefined} />
           )}
         </div>
       </div>
@@ -265,12 +609,136 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
         </SheetContent>
       </Sheet>
 
+      {/* History Sidebar */}
+      <Sheet open={historyOpen} onOpenChange={setHistoryOpen}>
+        <SheetContent side="right" className="w-full sm:w-[380px] sm:max-w-[380px] p-0 flex flex-col">
+          <SheetHeader className="px-5 pt-5 pb-3 border-b border-border">
+            <SheetTitle className="text-body font-semibold flex items-center gap-2">
+              <History className="w-4 h-4" /> Change History
+            </SheetTitle>
+            <SheetDescription className="text-caption text-foreground-tertiary">
+              All modifications to this report
+            </SheetDescription>
+          </SheetHeader>
+          <div className="flex-1 overflow-y-auto">
+            {historyLoading ? (
+              <div className="flex items-center justify-center py-16">
+                <RefreshCw className="w-5 h-5 animate-spin text-muted-foreground" />
+              </div>
+            ) : historyEntries.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-16 text-center px-5">
+                <Clock className="w-8 h-8 text-muted-foreground/30 mb-3" />
+                <p className="text-sm text-muted-foreground">No changes recorded yet</p>
+                <p className="text-xs text-muted-foreground/60 mt-1">Changes to comp selection, settings, and AI analysis will appear here.</p>
+              </div>
+            ) : (
+              <div className="relative">
+                {/* Timeline line */}
+                <div className="absolute left-[23px] top-0 bottom-0 w-px bg-border" />
+
+                {historyEntries.map((entry, i) => {
+                  const isFirst = i === 0
+                  const changes = entry.changes as Record<string, unknown> | null
+                  const actionColor = entry.action === 'evaluation_update' ? 'bg-emerald-500'
+                    : entry.action === 'ai_analysis' ? 'bg-primary'
+                    : entry.action === 'reanalyzed' ? 'bg-amber-500'
+                    : entry.action === 'created' ? 'bg-blue-500'
+                    : 'bg-muted-foreground'
+
+                  return (
+                    <div key={entry.id} className={`relative pl-12 pr-5 py-3 ${isFirst ? 'bg-muted/20' : ''}`}>
+                      {/* Timeline dot */}
+                      <div className={`absolute left-[19px] top-4 w-[9px] h-[9px] rounded-full border-2 border-background ${actionColor}`} />
+
+                      <div className="text-xs font-medium text-foreground">{entry.description}</div>
+                      <div className="text-[10px] text-foreground-tertiary mt-0.5">
+                        {new Date(entry.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                        {' · '}
+                        {new Date(entry.createdAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+                      </div>
+
+                      {/* Change details */}
+                      {!!changes && (
+                        <div className="mt-1.5 space-y-0.5 text-[10px] text-foreground-tertiary">
+                          {changes.arv != null && (
+                            <div>ARV: <span className="text-foreground tabular-nums">${Number(changes.arv).toLocaleString()}</span></div>
+                          )}
+                          {changes.buyPrice != null && (
+                            <div>Buy: <span className="text-foreground tabular-nums">${Number(changes.buyPrice).toLocaleString()}</span></div>
+                          )}
+                          {changes.proximityDeduction != null && Number(changes.proximityDeduction) > 0 && (
+                            <div>Proximity: <span className="text-red-500 tabular-nums">−${Number(changes.proximityDeduction).toLocaleString()}</span></div>
+                          )}
+                          {!!changes.selectedComps && Array.isArray(changes.selectedComps) && (
+                            <div>Comps: <span className="text-foreground">{(changes.selectedComps as string[]).length} selected</span></div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        </SheetContent>
+      </Sheet>
+
       {/* Share Dialog */}
       <ShareReportDialog
         open={shareOpen}
         onOpenChange={setShareOpen}
         jobId={jobId}
       />
+
+      {/* Subject vs Comp comparison dialog */}
+      <CompComparisonDialog
+        open={comparisonOpen}
+        onOpenChange={setComparisonOpen}
+        subject={analyzeData?.subject ?? null}
+        comp={comparisonComp}
+        isSelected={comparisonComp && compOverride?.selectedCompKeys
+          ? compOverride.selectedCompKeys.has(comparisonComp.address || '')
+          : comparisonComp?.isEnabled !== false}
+        onToggleSelection={comparisonComp ? () => {
+          const key = comparisonComp.address || ''
+          handleToggleComp(key)
+        } : undefined}
+      />
+
+      {/* Refresh Confirmation Dialog */}
+      <Dialog open={refreshOpen} onOpenChange={setRefreshOpen}>
+        <DialogContent className="max-w-sm p-0 gap-0">
+          <DialogHeader className="px-5 pt-5 pb-3">
+            <DialogTitle className="text-body font-semibold flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-amber-500" />
+              Refresh Report Data
+            </DialogTitle>
+          </DialogHeader>
+          <div className="px-5 pb-4 space-y-3">
+            <p className="text-caption text-foreground-secondary">
+              This will fetch fresh property and comparable sales data from CoreLogic. The new analysis may produce different results than the current report.
+            </p>
+            <div className="rounded-lg bg-amber-500/5 border border-amber-500/20 px-3 py-2.5 text-[11px] text-amber-600 dark:text-amber-400 space-y-1">
+              <p>What changes:</p>
+              <ul className="list-disc pl-4 space-y-0.5">
+                <li>New comparable sales may be available</li>
+                <li>Sale prices and dates will be updated</li>
+                <li>ARV and valuation may differ from previous analysis</li>
+                <li>Comp selection will be re-evaluated</li>
+              </ul>
+            </div>
+          </div>
+          <DialogFooter className="px-5 pb-4 pt-0">
+            <Button variant="outline" size="sm" onClick={() => setRefreshOpen(false)}>
+              Cancel
+            </Button>
+            <Button size="sm" onClick={handleRefresh} className="gap-1.5">
+              <RefreshCw className="w-3.5 h-3.5" />
+              Refresh Data
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

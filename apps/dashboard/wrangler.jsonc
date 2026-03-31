@@ -12,7 +12,8 @@
   },
   // Environment Variables
   "vars": {
-    "NEXT_PUBLIC_API_URL": "https://api.flowstate.homes"
+    "NEXT_PUBLIC_API_URL": "https://api.flowstate.homes",
+    "NEXT_PUBLIC_GOOGLE_MAP_KEY": "AIzaSyD1mztBbiP93zRqPiUiV0Upk7uM435EQDU"
   },
   // Observability
   "observability": {
