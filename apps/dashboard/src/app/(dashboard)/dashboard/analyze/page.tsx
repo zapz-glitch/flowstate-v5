@@ -14,7 +14,6 @@ import {
   ChevronRight,
   Loader2,
   BrainCircuit,
-  Navigation,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { AddressAutocomplete } from '@/components/AddressAutocomplete'
@@ -36,23 +35,14 @@ import {
   DialogTitle,
   DialogFooter,
 } from '@/components/ui/dialog'
+// cn is used in the outer wrapper
 import { cn } from '@/lib/utils'
 import { useAnalysis } from '@/hooks/use-analysis'
 import { useAnalysisEvaluation } from '@/hooks/use-analysis-evaluation'
 import type { AnalysisStep } from '@/types/analysis'
 import {
-  ComparablesSection,
-  VisionAnalysisButton,
-  PropertyMap,
-  DealSummaryHero,
-  PhotoGallery,
+  AnalysisPageLayout,
 } from '@/components/analysis'
-import { ResizableLayout } from '@/components/ui/resizable'
-import {
-  SubjectPropertySkeleton,
-  ValuationSkeleton,
-  ComparablesSkeleton,
-} from '@/components/analysis/AnalysisSkeletons'
 import { useEnrichmentSSE, type EnrichmentEvent } from '@/hooks/use-enrichment-sse'
 import { AppraisalFilterEditor, type FilterState, type AdjustmentState } from '@/components/analysis/AppraisalFilterEditor'
 import { SettingsPanel } from '@/components/report/SettingsPanel'
@@ -649,191 +639,70 @@ export default function AnalyzePage() {
       })()}
       </div>{/* end search wrapper */}
 
-      {/* Two-column resizable layout */}
+      {/* Analysis layout — map + valuation on left, comps on right */}
       {isActive && (
-        <>
-          {hasMapData ? (
-          <ResizableLayout
-            className="flex-1 min-h-0 mx-4 sm:mx-6 mt-3"
-            left={
-              <div className="h-full overflow-hidden">
-                <PropertyMap
-                  subject={renderData!.subject!}
-                  comps={isReady ? (effectiveComps ?? analysisResult?.comps) : (hasResult ? analysisResult?.comps : renderData!.comps)}
-                  subjectSubdivision={renderData!.subject?.subdivision}
-                  selectedCompKeys={isReady ? compOverride?.selectedCompKeys : undefined}
-                  onToggleComp={isReady ? handleToggleComp : undefined}
-                  onMarkerSelect={handleMarkerSelect}
-                  activeMarkerKey={activeMarkerKey}
-                />
-              </div>
-            }
-            right={
-            <div className="min-w-0">
-              <div id="underwriter-report" data-date={new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })} className={cn('flex flex-col gap-4', showTwoColumn && 'lg:pl-4 pb-4')}>
-
-                {/* ── PHASE: FETCHING — all skeletons ── */}
-                {isFetching && (
-                  <>
-                    <SubjectPropertySkeleton />
-                    <ComparablesSkeleton />
-                  </>
-                )}
-
-                {/* ── PHASE: READY — valuation shown immediately ── */}
-                {isReady && hasResult && (
-                  <>
-                    {/* Deal summary / valuation */}
-                    {renderData?.subject && displayValuation ? (
-                      <div ref={valuationCardRef}>
-                        <DealSummaryHero
-                          subject={renderData.subject}
-                          valuation={displayValuation}
-                          isRecalculated={isRecalculated}
-                          onOpenSettings={() => setSettingsOpen(true)}
-                          riskFlags={renderData.riskFlags}
-                          floodZone={renderData.floodZone}
-                          jobId={activeAnalysis?.jobId}
-                        />
-                      </div>
-                    ) : (
-                      <ValuationSkeleton />
-                    )}
-
-                    {/* Proximity Adjustments */}
-                    {hasResult && displayValuation && (
-                      <div className="border border-border overflow-hidden no-print">
-                        <div className="px-4 py-2.5 flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <Navigation className="w-3.5 h-3.5 text-foreground-tertiary" />
-                            <span className="text-caption font-medium text-foreground-secondary">Proximity Adjustment</span>
-                            {recalcData && recalcData.valuation.proximityDeduction > 0 && (
-                              <span className="text-[10px] font-medium text-red-500 tabular-nums">
-                                −${recalcData.valuation.proximityDeduction.toLocaleString()}
-                              </span>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-3">
-                            {(['siding', 'backing', 'fronting'] as const).map((pos) => {
-                              const label = pos === 'siding' ? 'Side' : pos === 'backing' ? 'Back' : 'Front'
-                              const isOn = settingsHook.settings.proximityAdjustments?.[pos] ?? false
-                              return (
-                                <label key={pos} className="flex items-center gap-1.5 cursor-pointer">
-                                  <Switch
-                                    checked={isOn}
-                                    onCheckedChange={(checked) => {
-                                      const current = settingsHook.settings.proximityAdjustments ?? { siding: false, backing: false, fronting: false }
-                                      settingsHook.updateProximityAdjustments({ ...current, [pos]: checked })
-                                    }}
-                                    className="scale-75"
-                                  />
-                                  <span className={`text-[11px] ${isOn ? 'text-foreground font-medium' : 'text-foreground-tertiary'}`}>{label}</span>
-                                </label>
-                              )
-                            })}
-                          </div>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Photos */}
-                    {renderData?.subject?.photos && renderData.subject.photos.length > 0 && (
-                      <div className="border border-border px-4 py-3">
-                        <div className="flex items-center justify-between mb-2">
-                          <span className="text-caption font-medium text-foreground-secondary">Property Photos</span>
-                          <VisionAnalysisButton
-                            photoUrls={renderData.subject.photos}
-                            propertyContext={{
-                              address: renderData.subject.address,
-                              squareFeet: renderData.subject.squareFeet ?? undefined,
-                              yearBuilt: renderData.subject.yearBuilt ?? undefined,
-                            }}
-                            existingAnalysis={renderData.visionAnalysis}
-                          />
-                        </div>
-                        <PhotoGallery photos={renderData.subject.photos} />
-                      </div>
-                    )}
-
-                    {/* AI analysis in progress banner */}
-                    {aiAnalyzing && (
-                      <div className="border border-primary/20 bg-primary/5 px-4 py-3 flex items-center gap-3">
-                        <Loader2 className="w-4 h-4 text-primary animate-spin flex-shrink-0" />
-                        <span className="text-body-sm text-foreground-secondary">AI analysis in progress — comp selection may update</span>
-                      </div>
-                    )}
-
-                    {/* Comps with selection + evaluation */}
-                    {(appraisalFilters.length > 0 ? analysisResult?.comps : effectiveComps) && (
-                      <ComparablesSection
-                        comps={appraisalFilters.length > 0 ? (analysisResult?.comps as CompsData) : effectiveComps!}
-                        subject={renderData?.subject}
-                        subjectSubdivision={renderData?.subject?.subdivision}
-                        selectedCompKeys={compOverride?.selectedCompKeys}
-                        isManual={compOverride?.isManual ?? false}
-                        recalculatedArv={isRecalculated ? displayValuation?.arv : undefined}
-                        onToggleComp={handleToggleComp}
-                        onReset={handleResetComps}
-                        highlightedCompKey={activeMarkerKey}
-                        isAnalyzing={aiAnalyzing}
-                        onRunAiAnalysis={!aiAnalyzing ? handleRunAiAnalysis : undefined}
-                      />
-                    )}
-
-                    {/* Raw JSON */}
-                    <div className="border border-border overflow-hidden no-print min-w-0">
-                      <div
-                        className="px-6 py-4 cursor-pointer flex items-center gap-3 hover:bg-white/5 dark:hover:bg-white/[0.02] transition-colors"
-                        onClick={() => setShowRawJson(!showRawJson)}
+        <AnalysisPageLayout
+          subject={renderData?.subject}
+          comps={isReady ? (appraisalFilters.length > 0 ? (analysisResult?.comps as CompsData) : effectiveComps) : null}
+          mapComps={isReady ? (effectiveComps ?? analysisResult?.comps) : (hasResult ? analysisResult?.comps : renderData?.comps)}
+          valuation={isReady ? displayValuation : undefined}
+          isRecalculated={isRecalculated}
+          selectedCompKeys={compOverride?.selectedCompKeys}
+          isManual={compOverride?.isManual ?? false}
+          onToggleComp={handleToggleComp}
+          onResetComps={handleResetComps}
+          onMarkerSelect={handleMarkerSelect}
+          activeMarkerKey={activeMarkerKey}
+          settingsHook={settingsHook}
+          recalcData={recalcData}
+          onOpenSettings={() => setSettingsOpen(true)}
+          aiAnalyzing={aiAnalyzing}
+          onRunAiAnalysis={!aiAnalyzing ? handleRunAiAnalysis : undefined}
+          onCompClick={(comp) => { setComparisonComp(comp as CompItem); setComparisonOpen(true) }}
+          riskFlags={renderData?.riskFlags}
+          floodZone={renderData?.floodZone}
+          visionAnalysis={renderData?.visionAnalysis}
+          jobId={activeAnalysis?.jobId}
+          valuationCardRef={valuationCardRef}
+          loading={isFetching}
+          footer={
+            isReady && hasResult ? (
+              <div className="border border-border overflow-hidden no-print min-w-0">
+                <div
+                  className="px-6 py-4 cursor-pointer flex items-center gap-3 hover:bg-white/5 dark:hover:bg-white/[0.02] transition-colors"
+                  onClick={() => setShowRawJson(!showRawJson)}
+                >
+                  <div className="w-8 h-8 rounded-lg bg-secondary/60 flex items-center justify-center">
+                    <Code className="w-4 h-4 text-foreground-secondary" />
+                  </div>
+                  <span className="text-body font-medium flex-1">Raw JSON Response</span>
+                  {showRawJson ? <ChevronDown className="w-4 h-4 text-foreground-tertiary" /> : <ChevronRight className="w-4 h-4 text-foreground-tertiary" />}
+                </div>
+                {showRawJson && (
+                  <div className="px-4 pb-4">
+                    <div className="relative">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          navigator.clipboard.writeText(JSON.stringify(analysisResult, null, 2))
+                          const btn = e.currentTarget
+                          btn.textContent = 'Copied!'
+                          setTimeout(() => { btn.textContent = 'Copy JSON' }, 2000)
+                        }}
+                        className="absolute top-3 right-3 z-10 px-2.5 py-1 rounded-md bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs transition-colors border border-zinc-700"
                       >
-                        <div className="w-8 h-8 rounded-lg bg-secondary/60 flex items-center justify-center">
-                          <Code className="w-4 h-4 text-foreground-secondary" />
-                        </div>
-                        <span className="text-body font-medium flex-1">Raw JSON Response</span>
-                        {showRawJson ? <ChevronDown className="w-4 h-4 text-foreground-tertiary" /> : <ChevronRight className="w-4 h-4 text-foreground-tertiary" />}
-                      </div>
-                      {showRawJson && (
-                        <div className="px-4 pb-4">
-                          <div className="relative">
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                navigator.clipboard.writeText(JSON.stringify(analysisResult, null, 2))
-                                const btn = e.currentTarget
-                                btn.textContent = 'Copied!'
-                                setTimeout(() => { btn.textContent = 'Copy JSON' }, 2000)
-                              }}
-                              className="absolute top-3 right-3 z-10 px-2.5 py-1 rounded-md bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs transition-colors border border-zinc-700"
-                            >
-                              Copy JSON
-                            </button>
-                            <pre className="bg-zinc-950 text-zinc-100 p-4 pt-10 overflow-auto max-h-[600px] text-xs font-mono">
-                              {JSON.stringify(analysisResult, null, 2)}
-                            </pre>
-                          </div>
-                        </div>
-                      )}
+                        Copy JSON
+                      </button>
+                      <pre className="bg-zinc-950 text-zinc-100 p-4 pt-10 overflow-auto max-h-[600px] text-xs font-mono">
+                        {JSON.stringify(analysisResult, null, 2)}
+                      </pre>
                     </div>
-                  </>
+                  </div>
                 )}
-
-              </div>{/* end underwriter-report */}
-            </div>
-            }
-          />
-          ) : isActive && (
-          <div className="flex-1 min-w-0 p-4 sm:p-6">
-            <div className="flex flex-col gap-4">
-              {isFetching && (
-                <>
-                  <SubjectPropertySkeleton />
-                  <ComparablesSkeleton />
-                </>
-              )}
-            </div>
-          </div>
-          )}
-        </>
+              </div>
+            ) : undefined
+          }
+        />
       )}
 
       {/* Evaluation Settings Sheet */}

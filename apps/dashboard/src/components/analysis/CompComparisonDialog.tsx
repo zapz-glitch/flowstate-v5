@@ -12,6 +12,7 @@ import type { SubjectData, CompItem } from './shared-types'
 import { StatCell } from './StatCell'
 import { AddressDisplay } from './AddressDisplay'
 import { formatFilterType, formatCurrency } from './format-helpers'
+import { StreetViewImage } from './StreetViewImage'
 
 interface CompComparisonDialogProps {
   open: boolean
@@ -111,6 +112,15 @@ export function CompComparisonDialog({ open, onOpenChange, subject, comp, isSele
                 </div>
               )}
             </div>
+            {/* Street View */}
+            <StreetViewImage
+              address={subject.address}
+              latitude={subject.latitude}
+              longitude={subject.longitude}
+              width={640}
+              height={200}
+              className="w-full h-32 object-cover border-t border-border/30"
+            />
             {/* Stats — responsive grid */}
             <div className="grid grid-cols-4 sm:grid-cols-7 bg-muted/40 border-t border-border/30">
               <StatCell label="Beds" value={subject.bedrooms ?? '-'} />
@@ -177,6 +187,15 @@ export function CompComparisonDialog({ open, onOpenChange, subject, comp, isSele
               </div>
             </div>
 
+            {/* Street View */}
+            <StreetViewImage
+              address={comp.address}
+              latitude={comp.latitude}
+              longitude={comp.longitude}
+              width={640}
+              height={200}
+              className="w-full h-32 object-cover border-t border-border/30"
+            />
             {/* Stats grid — responsive + diff highlights */}
             <div className="grid grid-cols-4 sm:grid-cols-7 bg-muted/40 border-t border-border/30">
               <DiffStatCell label="Beds" subjectValue={subject.bedrooms ?? '-'} compValue={comp.bedrooms ?? '-'} />

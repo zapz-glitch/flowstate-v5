@@ -5,7 +5,7 @@ import { GripVertical } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 const STORAGE_KEY = "flowstate-panel-width"
-const DEFAULT_PCT = 42
+const DEFAULT_PCT = 50
 const MIN_PCT = 25
 const MAX_PCT = 55
 

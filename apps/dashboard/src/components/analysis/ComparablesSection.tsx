@@ -1,12 +1,14 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { SlidersHorizontal, RotateCcw, ChevronDown, Loader2, BrainCircuit } from 'lucide-react'
+import { useState, useEffect, useMemo } from 'react'
+import { SlidersHorizontal, RotateCcw, Loader2, BrainCircuit, LayoutGrid, List, ArrowUpDown } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { cn } from '@/lib/utils'
 import type { CompsData, CompItem, SubjectData } from './shared-types'
 import { getCompKey } from './format-helpers'
 import { CompCard } from './CompCard'
+import { CompGridCard } from './CompGridCard'
 
 export interface ComparablesSectionProps {
   comps: CompsData
@@ -29,6 +31,19 @@ export interface ComparablesSectionProps {
   isAnalyzing?: boolean
   /** Called when user clicks "Run AI Analysis" button — triggers LLM comp selection */
   onRunAiAnalysis?: () => void
+  /** Called when a comp card is clicked (for comparison dialog) */
+  onCompClick?: (comp: CompItem) => void
+  /** Called when a comp card is hovered (for map marker sync) */
+  onCompHover?: (key: string | null) => void
+}
+
+type SortOption = 'default' | 'distance' | 'price' | 'psf'
+
+const SORT_LABELS: Record<SortOption, string> = {
+  default: 'Default',
+  distance: 'Distance',
+  price: 'Price',
+  psf: '$/Sqft',
 }
 
 export function ComparablesSection({
@@ -43,9 +58,13 @@ export function ComparablesSection({
   highlightedCompKey,
   isAnalyzing = false,
   onRunAiAnalysis,
+  onCompClick,
+  onCompHover,
 }: ComparablesSectionProps) {
   const [expandedComps, setExpandedComps] = useState<Set<string>>(new Set())
   const [excludedOpen, setExcludedOpen] = useState(false)
+  const [layout, setLayout] = useState<'grid' | 'list'>('grid')
+  const [sortBy, setSortBy] = useState<SortOption>('default')
 
   // Auto-expand excluded section when a highlighted comp is in it
   useEffect(() => {
@@ -59,6 +78,25 @@ export function ComparablesSection({
     }
   }, [highlightedCompKey, comps.items, selectedCompKeys, excludedOpen])
   const compItems = comps.items || []
+
+  // Sorted items preserving original index for stable keys & map marker numbering
+  const sortedItems = useMemo(() => {
+    const indexed = compItems.map((comp, i) => ({ comp, originalIndex: i }))
+    if (sortBy === 'default') return indexed
+    const sorted = [...indexed]
+    switch (sortBy) {
+      case 'distance':
+        sorted.sort((a, b) => (a.comp.distanceMiles ?? 999) - (b.comp.distanceMiles ?? 999))
+        break
+      case 'price':
+        sorted.sort((a, b) => (a.comp.salePrice ?? 0) - (b.comp.salePrice ?? 0))
+        break
+      case 'psf':
+        sorted.sort((a, b) => (a.comp.pricePerSqft ?? 0) - (b.comp.pricePerSqft ?? 0))
+        break
+    }
+    return sorted
+  }, [compItems, sortBy])
 
   const hasInteractiveSelection = !!selectedCompKeys
 
@@ -79,74 +117,101 @@ export function ComparablesSection({
 
   const selectedCount = arvComps.length
 
-  // Calculate median and avg from SELECTED comps only
+  // Stats from selected comps
   const selectedPrices = arvComps
     .map((c) => c.adjustedPrice ?? c.salePrice)
     .filter((p): p is number => p != null && p > 0)
     .sort((a, b) => a - b)
-  const selectedMedian = selectedPrices.length > 0
-    ? selectedPrices.length % 2 === 0
-      ? Math.round((selectedPrices[selectedPrices.length / 2 - 1] + selectedPrices[selectedPrices.length / 2]) / 2)
-      : selectedPrices[Math.floor(selectedPrices.length / 2)]
-    : null
-  const selectedPsfs = arvComps
-    .filter((c) => c.pricePerSqft != null && c.pricePerSqft > 0)
-    .map((c) => c.pricePerSqft!)
-  const selectedAvgPsf = selectedPsfs.length > 0
-    ? Math.round(selectedPsfs.reduce((s, p) => s + p, 0) / selectedPsfs.length)
-    : null
+  const priceMin = selectedPrices.length > 0 ? selectedPrices[0] : null
+  const priceMax = selectedPrices.length > 0 ? selectedPrices[selectedPrices.length - 1] : null
+  const avgPsf = (() => {
+    const psfs = arvComps.filter((c) => c.pricePerSqft != null && c.pricePerSqft > 0).map((c) => c.pricePerSqft!)
+    return psfs.length > 0 ? Math.round(psfs.reduce((s, p) => s + p, 0) / psfs.length) : null
+  })()
 
   return (
     <div>
-      <div className="mb-4">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <div>
-              <h3 className="text-body font-semibold">Comparables ({comps.count || compItems.length})</h3>
-              <p className="text-caption text-foreground-tertiary mt-0.5">
-                {selectedCount} selected for ARV
-                {excludedComps.length > 0 && ` · ${excludedComps.length} excluded`}
-              </p>
-            </div>
+      <div className="mb-4 space-y-2">
+        {/* Row 1: Title + stats + actions */}
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <h3 className="text-body font-semibold">Comparables</h3>
+            <span className="text-[10px] text-foreground-tertiary tabular-nums">
+              {selectedCount} selected
+              {excludedComps.length > 0 && ` · ${excludedComps.length} excluded`}
+              {avgPsf != null && ` · $${avgPsf}/sf avg`}
+              {priceMin != null && priceMax != null && priceMin !== priceMax && (
+                <span className="hidden sm:inline"> · ${(priceMin / 1000).toFixed(0)}k–${(priceMax / 1000).toFixed(0)}k</span>
+              )}
+            </span>
           </div>
-          <div className="flex items-center gap-3">
-            {selectedMedian != null && (
-              <span className="text-caption text-foreground-tertiary hidden md:block">
-                Median: <span className="font-medium text-foreground">${selectedMedian.toLocaleString()}</span>
-              </span>
-            )}
-            {selectedAvgPsf != null && (
-              <Badge variant="outline" className="text-caption-sm bg-background/50 hidden md:flex">
-                Avg: ${selectedAvgPsf}/sqft
-              </Badge>
-            )}
+          <div className="flex items-center gap-2">
             {onRunAiAnalysis && !isAnalyzing && (
               <Button
                 size="sm"
                 variant="outline"
                 onClick={onRunAiAnalysis}
-                className="gap-1.5 text-xs no-print"
+                className="gap-1.5 text-xs h-7 no-print"
               >
                 <BrainCircuit className="w-3.5 h-3.5" />
-                AI Analysis
+                <span className="hidden sm:inline">AI</span>
               </Button>
             )}
             {isAnalyzing && (
               <Badge variant="outline" className="text-[10px] gap-1 border-primary/30 text-primary no-print">
                 <Loader2 className="w-3 h-3 animate-spin" />
-                AI analyzing...
+                Analyzing
               </Badge>
             )}
+            {/* Grid/List toggle */}
+            <div className="flex items-center border border-border rounded overflow-hidden no-print">
+              <button
+                type="button"
+                onClick={() => setLayout('grid')}
+                className={cn('p-1.5 transition-colors', layout === 'grid' ? 'bg-primary/10 text-primary' : 'text-foreground-tertiary hover:text-foreground')}
+                title="Grid view"
+              >
+                <LayoutGrid className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setLayout('list')}
+                className={cn('p-1.5 transition-colors', layout === 'list' ? 'bg-primary/10 text-primary' : 'text-foreground-tertiary hover:text-foreground')}
+                title="List view"
+              >
+                <List className="w-3.5 h-3.5" />
+              </button>
+            </div>
           </div>
+        </div>
+
+        {/* Row 2: Sort controls */}
+        <div className="flex items-center gap-1 no-print">
+          <ArrowUpDown className="w-3 h-3 text-foreground-tertiary mr-0.5" />
+          {(['default', 'distance', 'price', 'psf'] as const).map((opt) => (
+            <button
+              key={opt}
+              type="button"
+              onClick={() => setSortBy(opt)}
+              className={cn(
+                'text-[10px] px-2 py-0.5 rounded transition-colors',
+                sortBy === opt
+                  ? 'bg-primary/15 text-primary font-medium'
+                  : 'text-foreground-tertiary hover:text-foreground hover:bg-secondary'
+              )}
+            >
+              {SORT_LABELS[opt]}
+            </button>
+          ))}
         </div>
 
         {/* Manual mode banner */}
         {isManual && (
-          <div className="mt-3 px-3.5 py-2.5 rounded-xl bg-amber-500/8 border border-amber-500/20 flex items-center justify-between gap-3 no-print">
+          <div className="px-3 py-2 bg-amber-500/8 border border-amber-500/20 flex items-center justify-between gap-3 no-print">
             <div className="flex items-center gap-2">
               <SlidersHorizontal className="w-3.5 h-3.5 text-amber-600 flex-shrink-0" />
               <span className="text-caption text-amber-700 dark:text-amber-400">
-                Manual selection · {selectedCount} comp{selectedCount !== 1 ? 's' : ''} · ARV: <span className="font-semibold">~${recalculatedArv?.toLocaleString() ?? '—'}</span>
+                Manual · {selectedCount} comp{selectedCount !== 1 ? 's' : ''} · ARV: <span className="font-semibold tabular-nums">~${recalculatedArv?.toLocaleString() ?? '—'}</span>
               </span>
             </div>
             {onReset && (
@@ -216,130 +281,54 @@ export function ComparablesSection({
         )}
       </div>
 
-      {/* Analyzing mode — all comps expanded with animation */}
-      {isAnalyzing && (
-        <div className="space-y-3 print:hidden">
-          <div className="flex items-center gap-2">
-            <Loader2 className="w-3.5 h-3.5 text-primary animate-spin" />
-            <span className="text-caption font-semibold text-primary uppercase tracking-wider">Analyzing comparables</span>
-            <div className="flex-1 h-px bg-primary/20" />
-            <span className="text-caption text-foreground-tertiary">{compItems.length} comp{compItems.length !== 1 ? 's' : ''}</span>
-          </div>
-          {compItems.map((comp, i) => {
-            const key = getCompKey(comp, i)
-            return (
-              <div key={key} className="relative">
-                <div className="absolute inset-0 rounded-xl bg-gradient-to-r from-primary/5 via-primary/10 to-primary/5 animate-pulse pointer-events-none z-10" />
-                <CompCard
+      {/* All comps — grid or list */}
+      <div className="print:hidden">
+        {layout === 'grid' ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {sortedItems.map(({ comp, originalIndex }) => {
+              const key = getCompKey(comp, originalIndex)
+              const isSelected = hasInteractiveSelection
+                ? selectedCompKeys!.has(key)
+                : comp.isEnabled !== false
+              return (
+                <CompGridCard
+                  key={key}
                   comp={comp}
-                  index={i}
-                  isExpanded={true}
-                  onToggle={() => {}}
+                  index={originalIndex}
+                  subject={subject}
+                  isSelectedForArv={isSelected}
+                  onToggleArv={onToggleComp ? () => onToggleComp(key) : undefined}
+                  onClick={() => onCompClick?.(comp)}
+                  onHover={onCompHover ? (hovering) => onCompHover(hovering ? key : null) : undefined}
+                  isHighlighted={highlightedCompKey === key}
+                />
+              )
+            })}
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {sortedItems.map(({ comp, originalIndex }) => {
+              const key = getCompKey(comp, originalIndex)
+              const isSelected = hasInteractiveSelection
+                ? selectedCompKeys!.has(key)
+                : comp.isEnabled !== false
+              return (
+                <CompCard
+                  key={key}
+                  comp={comp}
+                  index={originalIndex}
+                  isExpanded={expandedComps.has(key)}
+                  onToggle={() => toggleExpand(key)}
                   subject={subject}
                   subjectSubdivision={subjectSubdivision}
+                  isSelectedForArv={isSelected}
+                  onToggleArv={onToggleComp ? () => onToggleComp(key) : undefined}
                 />
-              </div>
-            )
-          })}
-        </div>
-      )}
-
-      {/* Interactive comp cards */}
-      {!isAnalyzing && <div className="space-y-3 print:hidden">
-        {arvComps.length > 0 && (
-          <div className="space-y-3">
-            <div className="flex items-center gap-2">
-              <span className="text-caption font-semibold text-emerald-600 uppercase tracking-wider">Selected for ARV</span>
-              <div className="flex-1 h-px bg-emerald-500/20" />
-              <span className="text-caption text-foreground-tertiary">{arvComps.length} comp{arvComps.length !== 1 ? 's' : ''}</span>
-            </div>
-            {hasInteractiveSelection
-              ? compItems.map((comp, i) => {
-                  const key = getCompKey(comp, i)
-                  if (!selectedCompKeys!.has(key)) return null
-                  return (
-                    <CompCard
-                      key={key}
-                      comp={comp}
-                      index={i}
-                      isExpanded={expandedComps.has(key)}
-                      onToggle={() => toggleExpand(key)}
-                      subject={subject}
-                      subjectSubdivision={subjectSubdivision}
-                      isSelectedForArv={true}
-                      onToggleArv={() => onToggleComp?.(key)}
-                    />
-                  )
-                })
-              : arvComps.map((comp) => {
-                  const originalIndex = compItems.indexOf(comp)
-                  return (
-                    <CompCard
-                      key={comp.address || originalIndex}
-                      comp={comp}
-                      index={originalIndex}
-                      subject={subject}
-                      subjectSubdivision={subjectSubdivision}
-                    />
-                  )
-                })
-            }
+              )
+            })}
           </div>
         )}
-
-        {excludedComps.length > 0 && (
-          <div className="space-y-3">
-            <button
-              type="button"
-              onClick={() => setExcludedOpen((v) => !v)}
-              className="flex items-center gap-2 w-full group"
-            >
-              <span className="text-caption font-semibold text-foreground-tertiary uppercase tracking-wider">Excluded</span>
-              <div className="flex-1 h-px bg-border/40" />
-              <span className="text-caption text-foreground-tertiary">{excludedComps.length} comp{excludedComps.length !== 1 ? 's' : ''}</span>
-              {hasInteractiveSelection && (
-                <span className="text-caption-sm text-foreground-tertiary italic">· check to include</span>
-              )}
-              <ChevronDown className={`w-3.5 h-3.5 text-foreground-tertiary transition-transform ${excludedOpen ? 'rotate-180' : ''}`} />
-            </button>
-            {excludedOpen && (
-              <div className="space-y-3">
-                {hasInteractiveSelection
-                  ? compItems.map((comp, i) => {
-                      const key = getCompKey(comp, i)
-                      if (selectedCompKeys!.has(key)) return null
-                      return (
-                        <CompCard
-                          key={key}
-                          comp={comp}
-                          index={i}
-                          isExpanded={expandedComps.has(key)}
-                          onToggle={() => toggleExpand(key)}
-                          subject={subject}
-                      subjectSubdivision={subjectSubdivision}
-                          isSelectedForArv={false}
-                          onToggleArv={() => onToggleComp?.(key)}
-                        />
-                      )
-                    })
-                  : excludedComps.map((comp) => {
-                      const originalIndex = compItems.indexOf(comp)
-                      return (
-                        <CompCard
-                          key={comp.address || originalIndex}
-                          comp={comp}
-                          index={originalIndex}
-                          subject={subject}
-                      subjectSubdivision={subjectSubdivision}
-                        />
-                      )
-                    })
-                }
-              </div>
-            )}
-          </div>
-        )}
-      </div>}
+      </div>
 
     </div>
   )

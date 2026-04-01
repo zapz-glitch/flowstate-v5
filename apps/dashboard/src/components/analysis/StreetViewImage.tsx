@@ -22,9 +22,7 @@ export function StreetViewImage({
 }: StreetViewImageProps) {
   const [error, setError] = useState(false)
   const key = process.env.NEXT_PUBLIC_GOOGLE_MAP_KEY
-  if (!key || error) {
-    return null
-  }
+  if (!key || error) return null
 
   const location = latitude && longitude
     ? `${latitude},${longitude}`

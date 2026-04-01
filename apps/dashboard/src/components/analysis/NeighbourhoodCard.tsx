@@ -118,7 +118,7 @@ export function NeighbourhoodCard({ data, subject, comps }: NeighbourhoodCardPro
 
       {/* Map */}
       {hasMap && (
-        <PropertyMap subject={subject} comps={comps} neighbourhood={data} />
+        <PropertyMap subject={subject} comps={comps} />
       )}
 
       {/* Demographics */}

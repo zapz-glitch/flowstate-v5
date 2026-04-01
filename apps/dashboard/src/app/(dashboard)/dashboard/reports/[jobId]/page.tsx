@@ -1,8 +1,8 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef, use } from 'react'
+import { useState, useEffect, useCallback, useRef, use, useLayoutEffect } from 'react'
 import Link from 'next/link'
-import { ArrowLeft, Share2, Navigation, RefreshCw, AlertTriangle, History, Clock } from 'lucide-react'
+import { ArrowLeft, Share2, RefreshCw, AlertTriangle, History, Clock } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -18,31 +18,36 @@ import {
   SheetTitle,
   SheetDescription,
 } from '@/components/ui/sheet'
-import { Switch } from '@/components/ui/switch'
 import { cn } from '@/lib/utils'
 import { updateSavedReport, getReportHistory, type ReportHistoryEntry } from '@/lib/client-api'
-import { ResizableLayout } from '@/components/ui/resizable'
 import { getSavedReport } from '@/lib/client-api'
 import { useAnalysisEvaluation } from '@/hooks/use-analysis-evaluation'
 import { SettingsPanel } from '@/components/report/SettingsPanel'
 import { DownloadReportButton } from '@/components/report/DownloadReportButton'
 import { ShareReportDialog } from '@/components/report/ShareReportDialog'
-import {
-  ComparablesSection,
-  PropertyMap,
-  DealSummaryHero,
-  PhotoGallery,
-  VisionAnalysisButton,
-} from '@/components/analysis'
+import { AnalysisPageLayout } from '@/components/analysis'
 import type { AnalyzeData, CompItem } from '@/components/analysis'
 import { queueAnalysis, type AnalyzeData as ActionAnalyzeData } from '@/app/(dashboard)/dashboard/analyze/actions'
 import { CompComparisonDialog } from '@/components/analysis/CompComparisonDialog'
 import { getCompKey } from '@/components/analysis/format-helpers'
+import { useSidebar } from '@/components/SidebarProvider'
 
 // ─── Main Page ──────────────────────────────────────────────────────────────
 
 export default function DashboardReportPage({ params }: { params: Promise<{ jobId: string }> }) {
   const { jobId } = use(params)
+
+  // Collapse sidebar on mount, restore on unmount
+  const { collapsed: sidebarCollapsed, setCollapsed: setSidebarCollapsed } = useSidebar()
+  const prevCollapsedRef = useRef(sidebarCollapsed)
+  useEffect(() => {
+    prevCollapsedRef.current = sidebarCollapsed
+    if (!sidebarCollapsed) setSidebarCollapsed(true)
+    return () => {
+      if (!prevCollapsedRef.current) setSidebarCollapsed(false)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const [report, setReport] = useState<{
     jobId: string
@@ -108,19 +113,8 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
   const initialLoadRef = useRef(true)
 
   useEffect(() => {
-    // Skip on initial load and when no data
+    // Skip when no data
     if (!report || !displayValuation || !recalcData) return
-    if (initialLoadRef.current) {
-      // Capture initial state fingerprint
-      initialLoadRef.current = false
-      lastSavedRef.current = JSON.stringify({
-        arv: displayValuation.arv,
-        buyPrice: displayValuation.buyPrice,
-        comps: compOverride?.selectedCompKeys ? Array.from(compOverride.selectedCompKeys).sort() : null,
-        settingsChanged: settingsHook.settingsChanged,
-      })
-      return
-    }
 
     const fingerprint = JSON.stringify({
       arv: displayValuation.arv,
@@ -128,6 +122,17 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
       comps: compOverride?.selectedCompKeys ? Array.from(compOverride.selectedCompKeys).sort() : null,
       settingsChanged: settingsHook.settingsChanged,
     })
+
+    // On initial load (and when settings are still loading/changing),
+    // just capture the fingerprint without saving
+    if (initialLoadRef.current) {
+      lastSavedRef.current = fingerprint
+      // Only clear the flag once settings have stabilized (not in a "changed" state from async loading)
+      if (!settingsHook.settingsChanged) {
+        initialLoadRef.current = false
+      }
+      return
+    }
 
     // No change from last save
     if (fingerprint === lastSavedRef.current) return
@@ -148,7 +153,24 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
         : 'Evaluation updated'
 
       try {
+        // Patch fullResponseJson with updated comp selection so it persists on reload
+        let updatedJson: string | undefined
+        if (compOverride?.selectedCompKeys && report?.analysis) {
+          const patched = { ...report.analysis }
+          if (patched.comps?.items) {
+            patched.comps = {
+              ...patched.comps,
+              items: patched.comps.items.map((comp: CompItem, i: number) => {
+                const key = comp.address || `comp-${i}`
+                return { ...comp, isEnabled: compOverride.selectedCompKeys!.has(key) }
+              }),
+            }
+          }
+          updatedJson = JSON.stringify(patched)
+        }
+
         await updateSavedReport(jobId, {
+          ...(updatedJson ? { fullResponseJson: updatedJson } : {}),
           arv: displayValuation.arv,
           maxAllowableOffer: displayValuation.buyPrice,
           estimatedRepairs: displayValuation.rehabCost,
@@ -437,164 +459,29 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
         </div>
       )}
 
-      {/* Two-column resizable layout */}
-      {hasMapData ? (
-      <ResizableLayout
-        className="flex-1 min-h-0 mt-3 mx-4 sm:mx-6"
-        left={
-          <div className="sticky top-0 h-[calc(100dvh-3.5rem)] overflow-hidden">
-            <PropertyMap subject={analysis.subject} comps={effectiveComps} subjectSubdivision={analysis.subject?.subdivision} selectedCompKeys={compOverride?.selectedCompKeys} onToggleComp={handleToggleComp} onMarkerSelect={handleMarkerSelect} activeMarkerKey={activeMarkerKey} />
-          </div>
-        }
-        right={
-          <div className="min-w-0">
-            <div className="flex flex-col gap-4 lg:pl-4 pb-4">
-              {/* Deal Summary — same as playground */}
-              {analysis.subject && displayValuation && (
-                <div ref={valuationCardRef}>
-                  <DealSummaryHero
-                    subject={analysis.subject}
-                    valuation={displayValuation}
-                    isRecalculated={isRecalculated}
-                    onOpenSettings={() => setSettingsOpen(true)}
-                    riskFlags={analysis.riskFlags}
-                    floodZone={analysis.floodZone}
-                    jobId={null}
-                  />
-                </div>
-              )}
-
-              {/* Proximity Adjustments */}
-              {displayValuation && (
-                <div className="border border-border overflow-hidden no-print">
-                  <div className="px-4 py-2.5 flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <Navigation className="w-3.5 h-3.5 text-foreground-tertiary" />
-                      <span className="text-caption font-medium text-foreground-secondary">Proximity Adjustment</span>
-                      {recalcData && recalcData.valuation.proximityDeduction > 0 && (
-                        <span className="text-[10px] font-medium text-red-500 tabular-nums">
-                          −${recalcData.valuation.proximityDeduction.toLocaleString()}
-                        </span>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-3">
-                      {(['siding', 'backing', 'fronting'] as const).map((pos) => {
-                        const label = pos === 'siding' ? 'Side' : pos === 'backing' ? 'Back' : 'Front'
-                        const isOn = settingsHook.settings.proximityAdjustments?.[pos] ?? false
-                        return (
-                          <label key={pos} className="flex items-center gap-1.5 cursor-pointer">
-                            <Switch
-                              checked={isOn}
-                              onCheckedChange={(checked) => {
-                                const current = settingsHook.settings.proximityAdjustments ?? { siding: false, backing: false, fronting: false }
-                                settingsHook.updateProximityAdjustments({ ...current, [pos]: checked })
-                              }}
-                              className="scale-75"
-                            />
-                            <span className={`text-[11px] ${isOn ? 'text-foreground font-medium' : 'text-foreground-tertiary'}`}>{label}</span>
-                          </label>
-                        )
-                      })}
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Photos */}
-              {analysis.subject?.photos && analysis.subject.photos.length > 0 && (
-                <div className="border border-border px-4 py-3">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-caption font-medium text-foreground-secondary">Property Photos</span>
-                    <VisionAnalysisButton
-                      photoUrls={analysis.subject.photos}
-                      propertyContext={{
-                        address: analysis.subject.address,
-                        squareFeet: analysis.subject.squareFeet ?? undefined,
-                        yearBuilt: analysis.subject.yearBuilt ?? undefined,
-                      }}
-                      existingAnalysis={analysis.visionAnalysis}
-                    />
-                  </div>
-                  <PhotoGallery photos={analysis.subject.photos} />
-                </div>
-              )}
-
-              {/* Comparables */}
-              {effectiveComps && (
-                <ComparablesSection
-                  comps={effectiveComps}
-                  subject={analysis.subject}
-                  subjectSubdivision={analysis.subject?.subdivision}
-                  selectedCompKeys={compOverride?.selectedCompKeys}
-                  isManual={compOverride?.isManual ?? false}
-                  recalculatedArv={isRecalculated ? displayValuation?.arv : undefined}
-                  onToggleComp={handleToggleComp}
-                  onReset={handleResetComps}
-                  highlightedCompKey={activeMarkerKey}
-                  isAnalyzing={aiAnalyzing}
-                  onRunAiAnalysis={!aiAnalyzing ? handleRunAiAnalysis : undefined}
-                />
-              )}
-
-            </div>
-          </div>
-        }
+      {/* Analysis layout — same component as playground */}
+      <AnalysisPageLayout
+        subject={analysis.subject}
+        comps={effectiveComps}
+        valuation={displayValuation}
+        isRecalculated={isRecalculated}
+        selectedCompKeys={compOverride?.selectedCompKeys}
+        isManual={compOverride?.isManual ?? false}
+        onToggleComp={handleToggleComp}
+        onResetComps={handleResetComps}
+        onMarkerSelect={handleMarkerSelect}
+        activeMarkerKey={activeMarkerKey}
+        settingsHook={settingsHook}
+        recalcData={recalcData}
+        onOpenSettings={() => setSettingsOpen(true)}
+        aiAnalyzing={aiAnalyzing}
+        onRunAiAnalysis={!aiAnalyzing ? handleRunAiAnalysis : undefined}
+        onCompClick={(comp) => { setComparisonComp(comp as CompItem); setComparisonOpen(true) }}
+        riskFlags={analysis.riskFlags}
+        floodZone={analysis.floodZone}
+        visionAnalysis={analysis.visionAnalysis}
+        valuationCardRef={valuationCardRef}
       />
-      ) : (
-      <div className="flex-1">
-        <div className="flex flex-col gap-4 p-4 sm:p-6 max-w-5xl mx-auto">
-          {analysis.subject && displayValuation && (
-            <DealSummaryHero
-              subject={analysis.subject}
-              valuation={displayValuation}
-              isRecalculated={isRecalculated}
-              onOpenSettings={() => setSettingsOpen(true)}
-              riskFlags={analysis.riskFlags}
-              floodZone={analysis.floodZone}
-              jobId={null}
-            />
-          )}
-          {/* Proximity Adjustments */}
-          {displayValuation && (
-            <div className="border border-border overflow-hidden no-print">
-              <div className="px-4 py-2.5 flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Navigation className="w-3.5 h-3.5 text-foreground-tertiary" />
-                  <span className="text-caption font-medium text-foreground-secondary">Proximity Adjustment</span>
-                  {recalcData && recalcData.valuation.proximityDeduction > 0 && (
-                    <span className="text-[10px] font-medium text-red-500 tabular-nums">
-                      −${recalcData.valuation.proximityDeduction.toLocaleString()}
-                    </span>
-                  )}
-                </div>
-                <div className="flex items-center gap-3">
-                  {(['siding', 'backing', 'fronting'] as const).map((pos) => {
-                    const label = pos === 'siding' ? 'Side' : pos === 'backing' ? 'Back' : 'Front'
-                    const isOn = settingsHook.settings.proximityAdjustments?.[pos] ?? false
-                    return (
-                      <label key={pos} className="flex items-center gap-1.5 cursor-pointer">
-                        <Switch
-                          checked={isOn}
-                          onCheckedChange={(checked) => {
-                            const current = settingsHook.settings.proximityAdjustments ?? { siding: false, backing: false, fronting: false }
-                            settingsHook.updateProximityAdjustments({ ...current, [pos]: checked })
-                          }}
-                          className="scale-75"
-                        />
-                        <span className={`text-[11px] ${isOn ? 'text-foreground font-medium' : 'text-foreground-tertiary'}`}>{label}</span>
-                      </label>
-                    )
-                  })}
-                </div>
-              </div>
-            </div>
-          )}
-          {effectiveComps && (
-            <ComparablesSection comps={effectiveComps} subject={analysis.subject} subjectSubdivision={analysis.subject?.subdivision} selectedCompKeys={compOverride?.selectedCompKeys} isManual={compOverride?.isManual ?? false} recalculatedArv={isRecalculated ? displayValuation?.arv : undefined} onToggleComp={handleToggleComp} onReset={handleResetComps} isAnalyzing={aiAnalyzing} onRunAiAnalysis={!aiAnalyzing ? handleRunAiAnalysis : undefined} />
-          )}
-        </div>
-      </div>
-      )}
 
       {/* Evaluation Settings Sheet */}
       <Sheet open={settingsOpen} onOpenChange={setSettingsOpen}>
