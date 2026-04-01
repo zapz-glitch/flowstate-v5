@@ -73,7 +73,7 @@ export function CompGridCard({
         isHighlighted && 'ring-2 ring-primary/50 shadow-lg shadow-primary/5',
       )}
     >
-      {/* Image */}
+      {/* Image with price overlay */}
       <div className="relative h-28 bg-muted/30 overflow-hidden">
         <StreetViewImage
           address={comp.address}
@@ -90,10 +90,10 @@ export function CompGridCard({
         )}>
           {index + 1}
         </div>
-        {/* Bottom: distance + date */}
+        {/* Bottom: price + date */}
         <div className="absolute bottom-0 left-0 right-0 px-2 py-1.5 bg-gradient-to-t from-black/70 to-transparent flex items-end justify-between">
-          <span className="text-[9px] text-white/80 font-medium tabular-nums">
-            {comp.distanceMiles != null ? `${comp.distanceMiles.toFixed(2)} mi` : ''}
+          <span className="text-sm font-bold text-white tabular-nums">
+            ${comp.salePrice?.toLocaleString() || '-'}
           </span>
           <span className="text-[9px] text-white/80 font-medium">
             {comp.saleDate ? new Date(comp.saleDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : ''}
@@ -119,29 +119,22 @@ export function CompGridCard({
 
       {/* Body */}
       <div className="px-3 py-2.5">
-        {/* Price row: sale price + adjusted/$/sf */}
+        {/* Address line with $/sf right-aligned */}
         <div className="flex items-baseline justify-between gap-2">
-          <div className="flex items-baseline gap-1.5">
-            <span className="text-sm font-bold tabular-nums">${comp.salePrice?.toLocaleString() || '-'}</span>
-            {comp.adjustedPrice != null && comp.adjustedPrice !== comp.salePrice && (
-              <span className="text-[10px] font-medium text-emerald-500 tabular-nums">adj ${comp.adjustedPrice.toLocaleString()}</span>
-            )}
+          <div className="text-[11px] text-foreground-secondary truncate" title={comp.address || undefined}>
+            {comp.address || 'Unknown'}
           </div>
           {comp.pricePerSqft && (
-            <span className="text-[10px] text-foreground-tertiary tabular-nums">${comp.pricePerSqft.toFixed(0)}/sf</span>
+            <span className="text-[10px] text-foreground-tertiary tabular-nums flex-shrink-0">${comp.pricePerSqft.toFixed(0)}/sf</span>
           )}
         </div>
-
-        {/* Address + subdivision */}
-        <div className="text-[11px] text-foreground-secondary truncate mt-0.5" title={comp.address || undefined}>
-          {comp.address || 'Unknown'}
-        </div>
+        {/* Subdivision pill */}
         {comp.subdivision && (() => {
           const isMatch = !!(subject?.subdivision && normalizeSubdivision(comp.subdivision) === normalizeSubdivision(subject.subdivision))
           const hasSubject = !!subject?.subdivision
           return (
             <div className={cn(
-              'inline-flex items-center gap-1 mt-1 px-1.5 py-0.5 rounded-full text-[9px] font-medium truncate max-w-full',
+              'inline-flex items-center gap-1 mt-0.5 px-1.5 py-0.5 rounded-full text-[9px] font-medium truncate max-w-full',
               hasSubject
                 ? isMatch
                   ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20'
@@ -156,6 +149,15 @@ export function CompGridCard({
             </div>
           )
         })()}
+        {/* Adj price + distance */}
+        <div className="flex items-baseline justify-between mt-0.5">
+          {comp.distanceMiles != null ? (
+            <span className="text-[9px] text-foreground-tertiary tabular-nums">{comp.distanceMiles.toFixed(2)} mi away</span>
+          ) : <span />}
+          {comp.adjustedPrice != null && comp.adjustedPrice !== comp.salePrice && (
+            <span className="text-[10px] font-medium text-emerald-500 tabular-nums">Adj ${comp.adjustedPrice.toLocaleString()}</span>
+          )}
+        </div>
 
         {/* Stats grid — 2 columns */}
         <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 mt-2">

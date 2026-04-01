@@ -22,7 +22,7 @@ export function DealSummaryHero({ valuation, isRecalculated, onOpenSettings }: D
       {/* Header: title + recommendation + settings */}
       <div className="px-3 py-1.5 border-b border-border/30 flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <span className="text-[10px] font-semibold text-foreground-tertiary uppercase tracking-wider">Deal Summary</span>
+          <span className="text-[10px] font-semibold text-foreground-tertiary uppercase tracking-wider">Valuation</span>
           {isRecalculated && (
             <span className="text-[8px] font-medium px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-500">Recalculated</span>
           )}

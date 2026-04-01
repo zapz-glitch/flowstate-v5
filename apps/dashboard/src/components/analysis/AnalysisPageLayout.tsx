@@ -189,7 +189,7 @@ export function AnalysisPageLayout({
       }
       right={
         <div className="min-w-0">
-          <div className={cn('flex flex-col gap-4 lg:pl-4 pb-4')}>
+          <div className={cn('flex flex-col gap-4 lg:pl-4 pt-2 pb-4')}>
             {loading ? (
               <>
                 <SubjectPropertySkeleton />
