@@ -543,7 +543,7 @@ export default function AnalyzePage() {
                 <Switch id="ai-analysis" checked={aiAnalysis} onCheckedChange={setAiAnalysis} />
                 <Label htmlFor="ai-analysis" className="flex items-center gap-1.5 text-body-sm text-foreground-tertiary cursor-pointer">
                   <BrainCircuit className="w-3.5 h-3.5" />
-                  AI Analysis
+                  AI Comp Selection
                 </Label>
               </div>
             </div>

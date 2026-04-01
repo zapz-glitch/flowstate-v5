@@ -29,7 +29,7 @@ export interface ComparablesSectionProps {
   highlightedCompKey?: string | null
   /** When true, shows all comps expanded with analysis-in-progress animation */
   isAnalyzing?: boolean
-  /** Called when user clicks "Run AI Analysis" button — triggers LLM comp selection */
+  /** Called when user clicks "AI Comp Selection" button — triggers LLM comp selection */
   onRunAiAnalysis?: () => void
   /** Called when a comp card is clicked (for comparison dialog) */
   onCompClick?: (comp: CompItem) => void
@@ -154,7 +154,7 @@ export function ComparablesSection({
                 className="gap-1.5 text-xs h-7 no-print"
               >
                 <BrainCircuit className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">AI Analysis</span>
+                <span className="hidden sm:inline">AI Comp Selection</span>
               </Button>
             )}
             {isAnalyzing && (

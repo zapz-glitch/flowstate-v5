@@ -12,7 +12,7 @@ interface SubjectGridCardProps {
 
 export function SubjectGridCard({ subject }: SubjectGridCardProps) {
   return (
-    <div data-card-key="subject" className="border border-primary/30 rounded-lg overflow-hidden bg-primary/[0.02]">
+    <div data-card-key="subject" className="border border-primary/30 rounded-sm overflow-hidden bg-primary/[0.02]">
       {/* Body: Image left + Details right */}
       <div className="flex flex-col sm:flex-row">
         {/* Image with subject badge overlay */}

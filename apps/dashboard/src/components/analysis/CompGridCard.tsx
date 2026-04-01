@@ -49,7 +49,7 @@ export function CompGridCard({
       onMouseEnter={() => onHover?.(true)}
       onMouseLeave={() => onHover?.(false)}
       className={cn(
-        'border border-border rounded-lg overflow-hidden transition-all duration-200 cursor-pointer group',
+        'border border-border rounded-sm overflow-hidden transition-all duration-200 cursor-pointer group',
         isEnabled ? 'hover:border-foreground/20' : 'opacity-50 hover:opacity-70',
         comp.isBestComp && isEnabled && 'ring-1 ring-amber-500/30',
         isHighlighted && 'ring-2 ring-primary/50 shadow-lg shadow-primary/5',

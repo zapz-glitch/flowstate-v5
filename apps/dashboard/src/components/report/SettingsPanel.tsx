@@ -338,6 +338,27 @@ export function SettingsPanel({ settingsHook, recalcData }: SettingsPanelProps) 
           </div>
         </Section>
 
+        {/* ── Thresholds ───────────────────────────────────────────────── */}
+        <Section icon={Sliders} title="Thresholds" defaultOpen={false}>
+          <div className="space-y-3">
+            <div className="flex items-center justify-between rounded-lg bg-secondary/30 px-3 py-2.5">
+              <div>
+                <span className="text-caption font-medium text-foreground">As-Is Threshold</span>
+                <div className="text-[10px] text-foreground-tertiary">Comps below this % of ARV = as-is</div>
+              </div>
+              <CompactInput
+                value={settings.dealParams.asIsThresholdPercent ?? 70}
+                onChange={(v) => updateDealParams({ asIsThresholdPercent: parseFloat(v) || 70 })}
+                suffix="%"
+                step={5}
+              />
+            </div>
+            <div className="text-[10px] text-foreground-tertiary px-1">
+              ARV threshold is configured in <span className="font-medium text-foreground-secondary">Evaluation Settings</span> page.
+            </div>
+          </div>
+        </Section>
+
         {/* ── Deal Parameters ─────────────────────────────────────────── */}
         <Section icon={DollarSign} title="Deal Parameters" defaultOpen={false}>
           <div className="space-y-3">
@@ -367,18 +388,6 @@ export function SettingsPanel({ settingsHook, recalcData }: SettingsPanelProps) 
                 prefix="$"
                 step={1000}
                 width="w-24"
-              />
-            </div>
-            <div className="flex items-center justify-between rounded-lg bg-secondary/30 px-3 py-2.5">
-              <div>
-                <span className="text-caption font-medium text-foreground">As-Is Threshold</span>
-                <div className="text-[10px] text-foreground-tertiary">Comps below this % of ARV = as-is</div>
-              </div>
-              <CompactInput
-                value={settings.dealParams.asIsThresholdPercent ?? 70}
-                onChange={(v) => updateDealParams({ asIsThresholdPercent: parseFloat(v) || 70 })}
-                suffix="%"
-                step={5}
               />
             </div>
           </div>
