@@ -11,8 +11,6 @@ import {
   ComparablesSkeleton,
 } from './AnalysisSkeletons'
 import type { SubjectData, ValuationData, CompsData, CompItem } from './shared-types'
-import type { UseReportSettingsReturn } from '@/hooks/use-report-settings'
-import type { RecalcResult } from '@/lib/recalc'
 
 export interface AnalysisPageLayoutProps {
   // Data
@@ -31,13 +29,10 @@ export interface AnalysisPageLayoutProps {
   isManual?: boolean
 
   // Settings
-  settingsHook: UseReportSettingsReturn
-  recalcData: RecalcResult | null
   onOpenSettings: () => void
 
   // AI
   aiAnalyzing?: boolean
-  onRunAiAnalysis?: () => void
 
   // Risk
   riskFlags?: string[] | null
@@ -70,11 +65,8 @@ export function AnalysisPageLayout({
   onMarkerSelect,
   activeMarkerKey,
   isManual = false,
-  settingsHook,
-  recalcData,
   onOpenSettings,
   aiAnalyzing = false,
-  onRunAiAnalysis,
   riskFlags,
   floodZone,
   visionAnalysis,
@@ -106,7 +98,6 @@ export function AnalysisPageLayout({
     onResetComps,
     onOpenSettings,
     aiAnalyzing,
-    onRunAiAnalysis,
     onCompClick,
     onCompHover: handleCompHover,
     visionAnalysis,
@@ -134,7 +125,7 @@ export function AnalysisPageLayout({
             activeMarkerKey={mapActiveKey}
           />
           <MapLegend />
-          <MapOverlay riskFlags={riskFlags} floodZone={floodZone} recalcData={recalcData} settingsHook={settingsHook} />
+          <MapOverlay riskFlags={riskFlags} floodZone={floodZone} />
         </div>
       }
       right={

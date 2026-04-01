@@ -417,6 +417,8 @@ export default function ReportPage({ params }: { params: Promise<{ jobId: string
                   subjectSubdivision={analysis.subject?.subdivision}
                   selectedCompKeys={compOverride?.selectedCompKeys}
                   isManual={compOverride?.isManual ?? false}
+                  arv={displayValuation?.arv}
+                  arvThresholdPercent={displayValuation?.asIsMarketIntel?.thresholdPercent}
                   recalculatedArv={isRecalculated ? displayValuation?.arv : undefined}
                   onToggleComp={handleToggleComp}
                   onReset={handleResetComps}
@@ -477,7 +479,7 @@ export default function ReportPage({ params }: { params: Promise<{ jobId: string
           )}
           <RiskFloodCard riskFlags={analysis.riskFlags} floodZone={analysis.floodZone} permits={analysis.permits} />
           {effectiveComps && (
-            <ComparablesSection comps={effectiveComps} subject={analysis.subject} subjectSubdivision={analysis.subject?.subdivision} selectedCompKeys={compOverride?.selectedCompKeys} isManual={compOverride?.isManual ?? false} recalculatedArv={isRecalculated ? displayValuation?.arv : undefined} onToggleComp={handleToggleComp} onReset={handleResetComps} />
+            <ComparablesSection comps={effectiveComps} subject={analysis.subject} subjectSubdivision={analysis.subject?.subdivision} selectedCompKeys={compOverride?.selectedCompKeys} isManual={compOverride?.isManual ?? false} arv={displayValuation?.arv} arvThresholdPercent={displayValuation?.asIsMarketIntel?.thresholdPercent} recalculatedArv={isRecalculated ? displayValuation?.arv : undefined} onToggleComp={handleToggleComp} onReset={handleResetComps} />
           )}
         </div>
         )}
@@ -518,6 +520,7 @@ export default function ReportPage({ params }: { params: Promise<{ jobId: string
           const key = comparisonComp.address || ''
           handleToggleComp(key)
         } : undefined}
+        arv={displayValuation?.arv}
       />
     </div>
   )

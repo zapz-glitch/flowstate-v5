@@ -13,7 +13,6 @@ import {
   ChevronDown,
   ChevronRight,
   Loader2,
-  BrainCircuit,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { AddressAutocomplete } from '@/components/AddressAutocomplete'
@@ -27,7 +26,7 @@ import {
   SheetDescription,
 } from '@/components/ui/sheet'
 import { queueAnalysis, type CompsData, type AnalyzeData } from './actions'
-import { getArvThreshold, getReportsByProperty, type ExistingReport } from '@/lib/client-api'
+import { getArvThreshold, getReportsByProperty, updateSavedReport, type ExistingReport } from '@/lib/client-api'
 import {
   Dialog,
   DialogContent,
@@ -139,7 +138,6 @@ export default function AnalyzePage() {
 
   // Phase-based state machine
   const [phase, setPhase] = useState<AnalysisPhase>('idle')
-  const [aiAnalysis, setAiAnalysis] = useState(false)
   const [aiAnalyzing, setAiAnalyzing] = useState(false)
   const [enrichmentStreamUrl, setEnrichmentStreamUrl] = useState<string | null>(null)
   const [enrichmentToken, setEnrichmentToken] = useState<string | null>(null)
@@ -265,6 +263,75 @@ export default function AnalyzePage() {
     stickyBarRootMargin: '-60px 0px 0px 0px',
   })
 
+  // ─── Auto-save on evaluation/comp changes ──────────────────────────────
+  const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null)
+  const lastSavedFingerprintRef = useRef<string | null>(null)
+  const autoSaveInitialRef = useRef(true)
+
+  useEffect(() => {
+    if (!isReady || !activeAnalysis?.jobId || !displayValuation || !recalcData) return
+
+    const fingerprint = JSON.stringify({
+      arv: displayValuation.arv,
+      buyPrice: displayValuation.buyPrice,
+      rehabCost: displayValuation.rehabCost,
+      comps: compOverride?.selectedCompKeys ? Array.from(compOverride.selectedCompKeys).sort() : null,
+      settings: JSON.stringify(settingsHook.settings),
+    })
+
+    if (autoSaveInitialRef.current) {
+      lastSavedFingerprintRef.current = fingerprint
+      if (!settingsHook.settingsChanged) autoSaveInitialRef.current = false
+      return
+    }
+
+    if (fingerprint === lastSavedFingerprintRef.current) return
+
+    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current)
+    autoSaveTimerRef.current = setTimeout(async () => {
+      try {
+        let updatedJson: string | undefined
+        if (compOverride?.selectedCompKeys && analysisResult) {
+          const patched = { ...analysisResult }
+          if (patched.comps?.items) {
+            patched.comps = {
+              ...patched.comps,
+              items: patched.comps.items.map((c: { address?: string; isEnabled?: boolean }, i: number) => {
+                const key = c.address || `comp-${i}`
+                return { ...c, isEnabled: compOverride.selectedCompKeys!.has(key) }
+              }),
+            }
+          }
+          updatedJson = JSON.stringify(patched)
+        }
+
+        await updateSavedReport(activeAnalysis.jobId, {
+          ...(updatedJson ? { fullResponseJson: updatedJson } : {}),
+          arv: displayValuation.arv,
+          maxAllowableOffer: displayValuation.buyPrice,
+          estimatedRepairs: displayValuation.rehabCost,
+          historyAction: 'evaluation_update',
+          historyDescription: 'Evaluation updated from playground',
+        })
+        lastSavedFingerprintRef.current = fingerprint
+      } catch {
+        // Silent fail — non-critical
+      }
+    }, 2000)
+
+    return () => {
+      if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current)
+    }
+  }, [isReady, activeAnalysis?.jobId, displayValuation, compOverride, recalcData, settingsHook.settings, settingsHook.settingsChanged, analysisResult])
+
+  // Reset auto-save state when starting a new analysis
+  useEffect(() => {
+    if (phase === 'fetching') {
+      autoSaveInitialRef.current = true
+      lastSavedFingerprintRef.current = null
+    }
+  }, [phase])
+
   // ─── Map Interaction + Comparison Dialog ────────────────────────────────
 
   const {
@@ -305,7 +372,7 @@ export default function AnalyzePage() {
         arvThresholdPercent: arvThreshold,
         asIsThresholdPercent: asIsThreshold,
         appraisalOverrides: overrides,
-        llmAnalysis: aiAnalysis ? { enabled: true } : undefined,
+        llmAnalysis: { enabled: true },
       })
 
       if (response.success && response.result) {
@@ -318,7 +385,7 @@ export default function AnalyzePage() {
         if (response.enrichment) {
           setEnrichmentStreamUrl(response.enrichment.streamUrl)
           setEnrichmentToken(response.enrichment.token)
-          if (aiAnalysis) setAiAnalyzing(true)
+          setAiAnalyzing(true)
         }
       } else {
         setPhase('idle')
@@ -334,7 +401,7 @@ export default function AnalyzePage() {
       setPhase('idle')
       setError(err instanceof Error ? err.message : 'Failed to start analysis')
     }
-  }, [address, skipCache, aiAnalysis, arvThreshold, asIsThreshold, appraisalFilters, appraisalAdjustments, clearAnalysis, setActiveAnalysis, setAnalysisResult, setAnalysisState])
+  }, [address, skipCache, arvThreshold, asIsThreshold, appraisalFilters, appraisalAdjustments, clearAnalysis, setActiveAnalysis, setAnalysisResult, setAnalysisState])
 
   // Entry point — checks for existing reports first
   const handleAnalyze = useCallback(async () => {
@@ -366,46 +433,6 @@ export default function AnalyzePage() {
     setPhase('idle')
     cancelAnalysis()
   }, [cancelAnalysis])
-
-  // Run AI analysis on existing result — re-calls API with llmAnalysis enabled
-  const handleRunAiAnalysis = useCallback(async () => {
-    if (!address.trim() || aiAnalyzing) return
-    setAiAnalyzing(true)
-
-    try {
-      const overrides = appraisalFilters.length > 0 ? {
-        filters: appraisalFilters,
-        adjustments: appraisalAdjustments,
-      } : undefined
-
-      const response = await queueAnalysis({
-        address: address.trim(),
-        searchOptions: { radiusMiles: 1, maxComps: 15, monthsBack: 12 },
-        skipCache: false,
-        marketData: { enabled: true },
-        arvThresholdPercent: arvThreshold,
-        asIsThresholdPercent: asIsThreshold,
-        appraisalOverrides: overrides,
-        llmAnalysis: { enabled: true },
-      })
-
-      if (response.success && response.result) {
-        // Update result with fresh evaluation (keeps current display while AI runs)
-        setAnalysisResult(response.result as AnalyzeData)
-        setActiveAnalysis({ jobId: response.jobId ?? '', address: address.trim() })
-        setAnalysisState({ ...initialAnalysisState, jobId: response.jobId ?? null, status: 'completed' })
-
-        if (response.enrichment) {
-          setEnrichmentStreamUrl(response.enrichment.streamUrl)
-          setEnrichmentToken(response.enrichment.token)
-        }
-      } else {
-        setAiAnalyzing(false)
-      }
-    } catch {
-      setAiAnalyzing(false)
-    }
-  }, [address, arvThreshold, asIsThreshold, appraisalFilters, appraisalAdjustments, aiAnalyzing, setAnalysisResult, setActiveAnalysis, setAnalysisState])
 
   // ─── Layout Flags ────────────────────────────────────────────────────────
 
@@ -539,13 +566,6 @@ export default function AnalyzePage() {
                   Skip cache
                 </Label>
               </div>
-              <div className="flex items-center gap-2">
-                <Switch id="ai-analysis" checked={aiAnalysis} onCheckedChange={setAiAnalysis} />
-                <Label htmlFor="ai-analysis" className="flex items-center gap-1.5 text-body-sm text-foreground-tertiary cursor-pointer">
-                  <BrainCircuit className="w-3.5 h-3.5" />
-                  AI Comp Selection
-                </Label>
-              </div>
             </div>
           </div>
         </div>
@@ -624,11 +644,8 @@ export default function AnalyzePage() {
           onResetComps={handleResetComps}
           onMarkerSelect={handleMarkerSelect}
           activeMarkerKey={activeMarkerKey}
-          settingsHook={settingsHook}
-          recalcData={recalcData}
           onOpenSettings={() => setSettingsOpen(true)}
           aiAnalyzing={aiAnalyzing}
-          onRunAiAnalysis={!aiAnalyzing ? handleRunAiAnalysis : undefined}
           onCompClick={(comp) => { setComparisonComp(comp as CompItem); setComparisonOpen(true) }}
           riskFlags={renderData?.riskFlags}
           floodZone={renderData?.floodZone}
@@ -708,6 +725,8 @@ export default function AnalyzePage() {
           const key = comparisonComp.address || ''
           handleToggleComp(key)
         } : undefined}
+        arv={displayValuation?.arv}
+        proximityConfig={settingsHook.settings.proximityConfig}
       />
 
       {/* Existing Reports Dialog */}

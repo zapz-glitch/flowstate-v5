@@ -20,6 +20,7 @@ import {
   getDealParams,
   getMajorItemCosts,
   getProximityConfig,
+  getArvThreshold,
   PROXIMITY_DEFAULTS,
   type AppraisalDefaults,
   type DealParamsConfig,
@@ -118,13 +119,14 @@ export function useReportSettings(data: AnalyzeData | null): UseReportSettingsRe
       try {
         const applied = data?.appliedSettings
 
-        const [preset, defaults, rehabResponse, dealResponse, majorItemsResponse, proximityResponse] = await Promise.all([
+        const [preset, defaults, rehabResponse, dealResponse, majorItemsResponse, proximityResponse, arvThresholdResponse] = await Promise.all([
           getOrCreateDefaultPreset().catch(() => null),
           getAppraisalDefaults().catch(() => null),
           getRehabConfig().catch(() => null),
           getDealParams().catch(() => null),
           getMajorItemCosts().catch(() => null),
           getProximityConfig().catch(() => null),
+          getArvThreshold().catch(() => null),
         ])
 
         if (cancelled) return
@@ -164,7 +166,11 @@ export function useReportSettings(data: AnalyzeData | null): UseReportSettingsRe
 
         const rehabTable = rehabResponse?.config ?? applied?.rehabTable ?? DEFAULT_REHAB_TABLE
         const tierRanges = rehabResponse?.tierRanges ?? applied?.tierRanges
-        const dealParams = dealResponse?.config ?? applied?.dealParams ?? DEFAULT_DEAL_PARAMS
+        const baseDealParams = dealResponse?.config ?? applied?.dealParams ?? DEFAULT_DEAL_PARAMS
+        const dealParams = {
+          ...baseDealParams,
+          arvThresholdPercent: arvThresholdResponse?.config?.percent ?? 15,
+        }
 
         // Build major items from user's current settings
         // Merge costs from user's saved config with enabled state from appliedSettings

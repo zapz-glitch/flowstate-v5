@@ -61,7 +61,6 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
   const [shareOpen, setShareOpen] = useState(false)
   const [refreshOpen, setRefreshOpen] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
-  const [aiAnalyzing, setAiAnalyzing] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [historyEntries, setHistoryEntries] = useState<ReportHistoryEntry[]>([])
   const [historyLoading, setHistoryLoading] = useState(false)
@@ -120,8 +119,12 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
     const fingerprint = JSON.stringify({
       arv: displayValuation.arv,
       buyPrice: displayValuation.buyPrice,
+      rehabCost: displayValuation.rehabCost,
+      rehabLevel: displayValuation.rehabLevel,
+      projectedROI: displayValuation.projectedROI,
+      proximityDeduction: recalcData.valuation.proximityDeduction,
       comps: compOverride?.selectedCompKeys ? Array.from(compOverride.selectedCompKeys).sort() : null,
-      settingsChanged: settingsHook.settingsChanged,
+      settings: JSON.stringify(settingsHook.settings),
     })
 
     // On initial load (and when settings are still loading/changing),
@@ -154,19 +157,39 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
         : 'Evaluation updated'
 
       try {
-        // Patch fullResponseJson with updated comp selection so it persists on reload
+        // Patch fullResponseJson with updated settings so they persist on reload
         let updatedJson: string | undefined
-        if (compOverride?.selectedCompKeys && report?.analysis) {
-          const patched = { ...report.analysis }
-          if (patched.comps?.items) {
+        if (report?.analysis) {
+          const patched = { ...report.analysis } as Record<string, unknown>
+
+          // Patch comp selection
+          if (compOverride?.selectedCompKeys && (patched.comps as { items?: CompItem[] })?.items) {
+            const comps = patched.comps as { items: CompItem[]; [k: string]: unknown }
             patched.comps = {
-              ...patched.comps,
-              items: patched.comps.items.map((comp: CompItem, i: number) => {
+              ...comps,
+              items: comps.items.map((comp: CompItem, i: number) => {
                 const key = comp.address || `comp-${i}`
                 return { ...comp, isEnabled: compOverride.selectedCompKeys!.has(key) }
               }),
             }
           }
+
+          // Patch appliedSettings with current evaluation settings
+          const currentSettings = settingsHook.settings
+          patched.appliedSettings = {
+            ...((patched.appliedSettings as Record<string, unknown>) ?? {}),
+            rehabLevelIndex: currentSettings.rehabLevelIndex,
+            additionPlay: currentSettings.additionPlay ?? 0,
+            filters: currentSettings.filters.map((f) => ({ type: f.type, enabled: f.enabled, value: f.value })),
+            adjustments: currentSettings.adjustments.map((a) => ({ type: a.type, enabled: a.enabled, amount: a.amount, percent: a.percent })),
+            dealParams: {
+              closingCostsPercent: currentSettings.dealParams.closingCostsPercent,
+              carryingCostsPercent: currentSettings.dealParams.carryingCostsPercent,
+              wholesaleFee: currentSettings.dealParams.wholesaleFee,
+            },
+            majorItems: currentSettings.majorItems.map((m) => ({ id: m.id, enabled: m.enabled, cost: m.cost })),
+          }
+
           updatedJson = JSON.stringify(patched)
         }
 
@@ -197,7 +220,7 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
     return () => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
     }
-  }, [displayValuation, compOverride, recalcData, settingsHook.settingsChanged, report, jobId])
+  }, [displayValuation, compOverride, recalcData, settingsHook.settings, report, jobId])
 
   const fetchReport = useCallback(async () => {
     try {
@@ -234,6 +257,7 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
         searchOptions: { radiusMiles: 1, maxComps: 15, monthsBack: 12 },
         skipCache: true,
         marketData: { enabled: true },
+        llmAnalysis: { enabled: true },
       })
       if (response.success && response.result) {
         const newAnalysis = response.result as AnalyzeData
@@ -292,32 +316,6 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
       setRefreshing(false)
     }
   }, [report, jobId])
-
-  const handleRunAiAnalysis = useCallback(async () => {
-    if (!report?.address || aiAnalyzing) return
-    setAiAnalyzing(true)
-    try {
-      const response = await queueAnalysis({
-        address: report.address,
-        searchOptions: { radiusMiles: 1, maxComps: 15, monthsBack: 12 },
-        skipCache: false,
-        marketData: { enabled: true },
-        llmAnalysis: { enabled: true },
-      })
-      if (response.success && response.result) {
-        setReport({
-          jobId: response.jobId ?? jobId,
-          address: report.address,
-          createdAt: report.createdAt,
-          analysis: response.result as AnalyzeData,
-        })
-      }
-    } catch {
-      // AI analysis failed — keep existing data
-    } finally {
-      setAiAnalyzing(false)
-    }
-  }, [report, jobId, aiAnalyzing])
 
   // Map marker → scroll to card + comparison dialog
   const {
@@ -446,11 +444,7 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
         onResetComps={handleResetComps}
         onMarkerSelect={handleMarkerSelect}
         activeMarkerKey={activeMarkerKey}
-        settingsHook={settingsHook}
-        recalcData={recalcData}
         onOpenSettings={() => setSettingsOpen(true)}
-        aiAnalyzing={aiAnalyzing}
-        onRunAiAnalysis={!aiAnalyzing ? handleRunAiAnalysis : undefined}
         onCompClick={(comp) => { setComparisonComp(comp as CompItem); setComparisonOpen(true) }}
         riskFlags={analysis.riskFlags}
         floodZone={analysis.floodZone}
@@ -508,6 +502,8 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
           const key = comparisonComp.address || ''
           handleToggleComp(key)
         } : undefined}
+        arv={displayValuation?.arv}
+        proximityConfig={settingsHook.settings.proximityConfig}
       />
 
       {/* Refresh Confirmation Dialog */}

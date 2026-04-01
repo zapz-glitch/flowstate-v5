@@ -27,7 +27,6 @@ export interface AnalysisResultLayoutProps {
 
   // AI
   aiAnalyzing?: boolean
-  onRunAiAnalysis?: () => void
 
   // Map interaction
   highlightedCompKey?: string | null
@@ -59,7 +58,6 @@ export function AnalysisResultLayout({
   onResetComps,
   onOpenSettings,
   aiAnalyzing = false,
-  onRunAiAnalysis,
   highlightedCompKey,
   onCompClick,
   onCompHover,
@@ -99,12 +97,13 @@ export function AnalysisResultLayout({
           subjectSubdivision={subject?.subdivision}
           selectedCompKeys={selectedCompKeys}
           isManual={isManual}
+          arv={valuation?.arv}
+          arvThresholdPercent={valuation?.asIsMarketIntel?.thresholdPercent}
           recalculatedArv={isRecalculated ? valuation?.arv : undefined}
           onToggleComp={onToggleComp}
           onReset={onResetComps}
           highlightedCompKey={highlightedCompKey}
           isAnalyzing={aiAnalyzing}
-          onRunAiAnalysis={!aiAnalyzing ? onRunAiAnalysis : undefined}
           onCompClick={onCompClick}
           onCompHover={onCompHover}
         />

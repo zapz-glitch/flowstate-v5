@@ -1,8 +1,7 @@
 'use client'
 
 import { useState, useEffect, useMemo } from 'react'
-import { SlidersHorizontal, RotateCcw, Loader2, BrainCircuit, LayoutGrid, List, ArrowUpDown } from 'lucide-react'
-import { Button } from '@/components/ui/button'
+import { SlidersHorizontal, RotateCcw, Loader2, LayoutGrid, List, ArrowUpDown } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 import type { CompsData, CompItem, SubjectData } from './shared-types'
@@ -19,6 +18,10 @@ export interface ComparablesSectionProps {
   selectedCompKeys?: Set<string>
   /** Whether selection has been manually changed */
   isManual?: boolean
+  /** ARV value for displaying % of ARV on comp cards */
+  arv?: number | null
+  /** ARV threshold percent for top/bottom classification on comp cards */
+  arvThresholdPercent?: number | null
   /** Recalculated ARV to display in manual mode banner */
   recalculatedArv?: number
   /** Called when a comp's ARV toggle is clicked */
@@ -29,8 +32,6 @@ export interface ComparablesSectionProps {
   highlightedCompKey?: string | null
   /** When true, shows all comps expanded with analysis-in-progress animation */
   isAnalyzing?: boolean
-  /** Called when user clicks "AI Comp Selection" button — triggers LLM comp selection */
-  onRunAiAnalysis?: () => void
   /** Called when a comp card is clicked (for comparison dialog) */
   onCompClick?: (comp: CompItem) => void
   /** Called when a comp card is hovered (for map marker sync) */
@@ -52,12 +53,13 @@ export function ComparablesSection({
   subject,
   selectedCompKeys,
   isManual = false,
+  arv,
+  arvThresholdPercent,
   recalculatedArv,
   onToggleComp,
   onReset,
   highlightedCompKey,
   isAnalyzing = false,
-  onRunAiAnalysis,
   onCompClick,
   onCompHover,
 }: ComparablesSectionProps) {
@@ -146,17 +148,6 @@ export function ComparablesSection({
             </span>
           </div>
           <div className="flex items-center gap-2">
-            {onRunAiAnalysis && !isAnalyzing && (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={onRunAiAnalysis}
-                className="gap-1.5 text-xs h-7 no-print"
-              >
-                <BrainCircuit className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">AI Comp Selection</span>
-              </Button>
-            )}
             {isAnalyzing && (
               <Badge variant="outline" className="text-[10px] gap-1 border-primary/30 text-primary no-print">
                 <Loader2 className="w-3 h-3 animate-spin" />
@@ -296,6 +287,8 @@ export function ComparablesSection({
                   comp={comp}
                   index={originalIndex}
                   subject={subject}
+                  arv={recalculatedArv ?? arv}
+                  arvThresholdPercent={arvThresholdPercent}
                   isSelectedForArv={isSelected}
                   onToggleArv={onToggleComp ? () => onToggleComp(key) : undefined}
                   onClick={() => onCompClick?.(comp)}

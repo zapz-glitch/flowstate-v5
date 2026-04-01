@@ -10,6 +10,8 @@ export interface CompGridCardProps {
   comp: CompItem
   index: number
   subject?: SubjectData | null
+  arv?: number | null
+  arvThresholdPercent?: number | null
   isSelectedForArv?: boolean
   onToggleArv?: () => void
   onClick?: () => void
@@ -22,6 +24,8 @@ export function CompGridCard({
   comp,
   index,
   subject,
+  arv,
+  arvThresholdPercent,
   isSelectedForArv,
   onToggleArv,
   onClick,
@@ -30,6 +34,8 @@ export function CompGridCard({
 }: CompGridCardProps) {
   const hasArvSelection = isSelectedForArv !== undefined
   const isEnabled = hasArvSelection ? isSelectedForArv : comp.isEnabled !== false
+  const arvPercent = comp.salePrice && arv ? Math.round((comp.salePrice / arv) * 100) : null
+  const isAboveThreshold = arvPercent != null && arvThresholdPercent != null && arvPercent > arvThresholdPercent
   const cardKey = comp.address || `comp-${index}`
 
   const sqftDelta = comp.squareFeet != null && subject?.squareFeet != null
@@ -106,9 +112,19 @@ export function CompGridCard({
           <div className="text-[11px] text-foreground-secondary truncate" title={comp.address || undefined}>
             {comp.address || 'Unknown'}
           </div>
-          {comp.pricePerSqft && (
-            <span className="text-[10px] text-foreground-tertiary tabular-nums flex-shrink-0">${comp.pricePerSqft.toFixed(0)}/sf</span>
-          )}
+          <span className="flex items-center gap-1.5 flex-shrink-0">
+            {arvPercent != null && arvThresholdPercent != null && (
+              <span className={cn(
+                'text-[10px] font-medium tabular-nums',
+                isAboveThreshold ? 'text-emerald-500' : 'text-amber-500'
+              )}>
+                {isAboveThreshold ? `Top ${100 - arvThresholdPercent}%` : `Below ${arvThresholdPercent}%`}
+              </span>
+            )}
+            {comp.pricePerSqft && (
+              <span className="text-[10px] text-foreground-tertiary tabular-nums">${comp.pricePerSqft.toFixed(0)}/sf</span>
+            )}
+          </span>
         </div>
         {/* Subdivision pill */}
         {comp.subdivision && (() => {

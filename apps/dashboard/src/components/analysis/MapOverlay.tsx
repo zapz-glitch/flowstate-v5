@@ -1,16 +1,10 @@
 'use client'
 
-import { Navigation, Droplets, AlertTriangle, ShieldCheck } from 'lucide-react'
-import { Switch } from '@/components/ui/switch'
-import { cn } from '@/lib/utils'
-import type { UseReportSettingsReturn } from '@/hooks/use-report-settings'
-import type { RecalcResult } from '@/lib/recalc'
+import { Droplets, AlertTriangle, ShieldCheck } from 'lucide-react'
 
 interface MapOverlayProps {
   riskFlags?: string[] | null
   floodZone?: { zone?: string | null; inFloodZone?: boolean | null } | null
-  recalcData: RecalcResult | null
-  settingsHook: UseReportSettingsReturn
 }
 
 const LEGEND_ITEMS = [
@@ -32,10 +26,10 @@ export function MapLegend() {
   )
 }
 
-export function MapOverlay({ riskFlags, floodZone, recalcData, settingsHook }: MapOverlayProps) {
+export function MapOverlay({ riskFlags, floodZone }: MapOverlayProps) {
   const hasRiskFlags = !!(riskFlags?.length || floodZone)
 
-  if (!hasRiskFlags && !recalcData) return null
+  if (!hasRiskFlags) return null
 
   return (
     <div className="absolute bottom-0 left-0 right-0 z-10 bg-black/60 backdrop-blur-sm no-print">
@@ -63,37 +57,6 @@ export function MapOverlay({ riskFlags, floodZone, recalcData, settingsHook }: M
           ))}
         </div>
       )}
-      {/* Proximity row */}
-      <div className="px-4 py-2 flex items-center justify-between gap-3">
-        <div className="flex items-center gap-1.5">
-          <Navigation className="w-3.5 h-3.5 text-white/60" />
-          <span className="text-xs font-medium text-white/70">Traffic / Commercial Adjustments</span>
-          {recalcData && recalcData.valuation.proximityDeduction > 0 && (
-            <span className="text-xs font-medium text-red-400 tabular-nums">
-              −${recalcData.valuation.proximityDeduction.toLocaleString()}
-            </span>
-          )}
-        </div>
-        <div className="flex items-center gap-3">
-          {(['siding', 'backing', 'fronting'] as const).map((pos) => {
-            const label = pos === 'siding' ? 'Side' : pos === 'backing' ? 'Back' : 'Front'
-            const isOn = settingsHook.settings.proximityAdjustments?.[pos] ?? false
-            return (
-              <label key={pos} className="flex items-center gap-1.5 cursor-pointer">
-                <Switch
-                  checked={isOn}
-                  onCheckedChange={(checked) => {
-                    const current = settingsHook.settings.proximityAdjustments ?? { siding: false, backing: false, fronting: false }
-                    settingsHook.updateProximityAdjustments({ ...current, [pos]: checked })
-                  }}
-                  className="scale-90"
-                />
-                <span className={cn('text-xs', isOn ? 'text-white font-medium' : 'text-white/50')}>{label}</span>
-              </label>
-            )
-          })}
-        </div>
-      </div>
     </div>
   )
 }

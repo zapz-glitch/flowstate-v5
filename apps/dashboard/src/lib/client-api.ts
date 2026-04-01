@@ -434,6 +434,7 @@ export interface DealParamsConfig {
   carryingCostsPercent: number
   wholesaleFee: number
   asIsThresholdPercent?: number
+  arvThresholdPercent?: number
 }
 
 export interface DealParamsResponse {
