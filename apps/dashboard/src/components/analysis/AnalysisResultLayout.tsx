@@ -7,8 +7,6 @@ import { DealSummaryHero } from './DealSummaryHero'
 import { SubjectGridCard } from './SubjectGridCard'
 import { PhotoGallery } from './PhotoGallery'
 import { VisionAnalysisButton } from './VisionAnalysisButton'
-import type { UseReportSettingsReturn } from '@/hooks/use-report-settings'
-import type { RecalcResult } from '@/lib/recalc'
 
 // ─── Analysis Result Layout ──────────────────────────────────────────────────
 
@@ -25,8 +23,6 @@ export interface AnalysisResultLayoutProps {
   onResetComps: () => void
 
   // Settings
-  settingsHook: UseReportSettingsReturn
-  recalcData: RecalcResult | null
   onOpenSettings: () => void
 
   // AI
@@ -42,19 +38,11 @@ export interface AnalysisResultLayoutProps {
   // Map-list hover sync
   onCompHover?: (key: string | null) => void
 
-  // Risk flags
-  riskFlags?: string[] | null
-  floodZone?: { zone?: string | null; inFloodZone?: boolean | null } | null
+  // Vision analysis
   visionAnalysis?: unknown
-
-  // Report link
-  jobId?: string | null
 
   // Valuation card ref for sticky/intersection observer
   valuationCardRef?: React.RefObject<HTMLDivElement | null>
-
-  /** Hide valuation section (when rendered elsewhere, e.g. left panel) */
-  hideValuation?: boolean
 
   // Optional footer (e.g. Raw JSON toggle)
   footer?: React.ReactNode
@@ -69,19 +57,13 @@ export function AnalysisResultLayout({
   isManual = false,
   onToggleComp,
   onResetComps,
-  settingsHook,
-  recalcData,
   onOpenSettings,
   aiAnalyzing = false,
   onRunAiAnalysis,
   highlightedCompKey,
   onCompClick,
   onCompHover,
-  riskFlags,
-  floodZone,
   visionAnalysis,
-  jobId,
-  hideValuation = false,
   valuationCardRef,
   footer,
 }: AnalysisResultLayoutProps) {

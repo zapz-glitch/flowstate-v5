@@ -154,7 +154,7 @@ export function ComparablesSection({
                 className="gap-1.5 text-xs h-7 no-print"
               >
                 <BrainCircuit className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">AI</span>
+                <span className="hidden sm:inline">AI Analysis</span>
               </Button>
             )}
             {isAnalyzing && (
@@ -319,7 +319,6 @@ export function ComparablesSection({
                   index={originalIndex}
                   isExpanded={expandedComps.has(key)}
                   onToggle={() => toggleExpand(key)}
-                  subject={subject}
                   subjectSubdivision={subjectSubdivision}
                   isSelectedForArv={isSelected}
                   onToggleArv={onToggleComp ? () => onToggleComp(key) : undefined}

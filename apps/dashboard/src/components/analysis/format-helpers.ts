@@ -41,3 +41,37 @@ export function normalizeSubdivision(sub: string | null | undefined): string {
 export function getCompKey(comp: { address?: string }, index: number): string {
   return comp.address || `comp-${index}`
 }
+
+/** Format a number with commas, returning '-' for null/NaN */
+export function fmtNumber(v: number | null | undefined): string {
+  if (v == null || Number.isNaN(v)) return '-'
+  return v.toLocaleString()
+}
+
+/** Format a date string as "Mar 15, 2024" */
+export function formatShortDate(date: string | null | undefined): string {
+  if (!date) return '-'
+  return new Date(date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+}
+
+/** Format a numeric delta as "+1,200" or "-300" */
+export function fmtDelta(diff: number): string {
+  return diff > 0 ? `+${diff.toLocaleString()}` : diff.toLocaleString()
+}
+
+/** Sqft match quality color class: green (≤10%), neutral (≤20%), red (>20%) */
+export function sqftMatchColor(compSf: number, subSf: number): string {
+  const pct = Math.abs(compSf - subSf) / subSf
+  if (pct <= 0.10) return 'text-emerald-500'
+  if (pct <= 0.20) return 'text-foreground-tertiary'
+  return 'text-red-400'
+}
+
+/** Year-built match quality color class */
+export function yearMatchColor(compYr: number, subYr: number): string {
+  if (compYr <= 1940 && subYr <= 1940) return 'text-emerald-500'
+  const diff = Math.abs(compYr - subYr)
+  if (diff <= 5) return 'text-emerald-500'
+  if (diff <= 10) return 'text-foreground-tertiary'
+  return 'text-red-400'
+}

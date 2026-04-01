@@ -89,7 +89,7 @@ function MapMarkers({
         map,
         position: { lat: m.lat, lng: m.lng },
         icon: {
-          url: markerIcon(color, size, isDisabled ? undefined : isComp ? String(idx) : undefined, m.type === 'subject'),
+          url: markerIcon(color, size, isComp ? String(idx) : undefined, m.type === 'subject'),
           scaledSize: new gm.Size(size, size),
           anchor: new gm.Point(size / 2, size / 2),
         },
@@ -114,7 +114,6 @@ function MapMarkers({
 
 interface PropertyMapInnerProps {
   markers: MapMarker[]
-  onToggleComp?: (key: string) => void
   onMarkerClick?: (type: 'subject' | 'comp', compKey?: string) => void
   activeMarkerKey?: string | null
 }

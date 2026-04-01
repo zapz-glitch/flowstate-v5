@@ -1,8 +1,8 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef, use, useLayoutEffect } from 'react'
+import { useState, useEffect, useCallback, useRef, use } from 'react'
 import Link from 'next/link'
-import { ArrowLeft, Share2, RefreshCw, AlertTriangle, History, Clock } from 'lucide-react'
+import { ArrowLeft, Share2, RefreshCw, AlertTriangle, History } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -25,11 +25,12 @@ import { useAnalysisEvaluation } from '@/hooks/use-analysis-evaluation'
 import { SettingsPanel } from '@/components/report/SettingsPanel'
 import { DownloadReportButton } from '@/components/report/DownloadReportButton'
 import { ShareReportDialog } from '@/components/report/ShareReportDialog'
+import { ReportHistoryTimeline } from '@/components/report/ReportHistoryTimeline'
 import { AnalysisPageLayout } from '@/components/analysis'
 import type { AnalyzeData, CompItem } from '@/components/analysis'
 import { queueAnalysis, type AnalyzeData as ActionAnalyzeData } from '@/app/(dashboard)/dashboard/analyze/actions'
 import { CompComparisonDialog } from '@/components/analysis/CompComparisonDialog'
-import { getCompKey } from '@/components/analysis/format-helpers'
+import { useMapInteraction } from '@/hooks/use-map-interaction'
 import { useSidebar } from '@/components/SidebarProvider'
 
 // ─── Main Page ──────────────────────────────────────────────────────────────
@@ -319,42 +320,16 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
   }, [report, jobId, aiAnalyzing])
 
   // Map marker → scroll to card + comparison dialog
-  const [activeMarkerKey, setActiveMarkerKey] = useState<string | null>(null)
-  const [comparisonComp, setComparisonComp] = useState<CompItem | null>(null)
-  const [comparisonOpen, setComparisonOpen] = useState(false)
-
-  const scrollAndHighlight = useCallback((key: string) => {
-    const el = document.querySelector(`[data-card-key="${key}"]`)
-    if (el) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'center' })
-      el.classList.add('ring-2', 'ring-primary', 'ring-offset-2', 'ring-offset-background')
-      setTimeout(() => {
-        el.classList.remove('ring-2', 'ring-primary', 'ring-offset-2', 'ring-offset-background')
-        setActiveMarkerKey(null)
-      }, 2000)
-      return true
-    }
-    return false
-  }, [])
-  const handleMarkerSelect = useCallback((type: 'subject' | 'comp', compKey?: string) => {
-    const key = type === 'subject' ? 'subject' : compKey
-    if (!key) return
-    setActiveMarkerKey(key)
-
-    if (type === 'comp' && compKey && analyzeData) {
-      const compItems = (analyzeData.comps?.items ?? []) as CompItem[]
-      const comp = compItems.find((c, i) => getCompKey(c, i) === compKey)
-      if (comp) {
-        setComparisonComp(comp)
-        setComparisonOpen(true)
-        return
-      }
-    }
-
-    if (!scrollAndHighlight(key)) {
-      setTimeout(() => scrollAndHighlight(key), 150)
-    }
-  }, [scrollAndHighlight, analyzeData])
+  const {
+    activeMarkerKey,
+    comparisonComp,
+    setComparisonComp,
+    comparisonOpen,
+    setComparisonOpen,
+    handleMarkerSelect,
+  } = useMapInteraction(() =>
+    (analyzeData?.comps?.items ?? []) as CompItem[]
+  )
 
   if (loading) {
     return (
@@ -508,64 +483,7 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
             </SheetDescription>
           </SheetHeader>
           <div className="flex-1 overflow-y-auto">
-            {historyLoading ? (
-              <div className="flex items-center justify-center py-16">
-                <RefreshCw className="w-5 h-5 animate-spin text-muted-foreground" />
-              </div>
-            ) : historyEntries.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-16 text-center px-5">
-                <Clock className="w-8 h-8 text-muted-foreground/30 mb-3" />
-                <p className="text-sm text-muted-foreground">No changes recorded yet</p>
-                <p className="text-xs text-muted-foreground/60 mt-1">Changes to comp selection, settings, and AI analysis will appear here.</p>
-              </div>
-            ) : (
-              <div className="relative">
-                {/* Timeline line */}
-                <div className="absolute left-[23px] top-0 bottom-0 w-px bg-border" />
-
-                {historyEntries.map((entry, i) => {
-                  const isFirst = i === 0
-                  const changes = entry.changes as Record<string, unknown> | null
-                  const actionColor = entry.action === 'evaluation_update' ? 'bg-emerald-500'
-                    : entry.action === 'ai_analysis' ? 'bg-primary'
-                    : entry.action === 'reanalyzed' ? 'bg-amber-500'
-                    : entry.action === 'created' ? 'bg-blue-500'
-                    : 'bg-muted-foreground'
-
-                  return (
-                    <div key={entry.id} className={`relative pl-12 pr-5 py-3 ${isFirst ? 'bg-muted/20' : ''}`}>
-                      {/* Timeline dot */}
-                      <div className={`absolute left-[19px] top-4 w-[9px] h-[9px] rounded-full border-2 border-background ${actionColor}`} />
-
-                      <div className="text-xs font-medium text-foreground">{entry.description}</div>
-                      <div className="text-[10px] text-foreground-tertiary mt-0.5">
-                        {new Date(entry.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                        {' · '}
-                        {new Date(entry.createdAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
-                      </div>
-
-                      {/* Change details */}
-                      {!!changes && (
-                        <div className="mt-1.5 space-y-0.5 text-[10px] text-foreground-tertiary">
-                          {changes.arv != null && (
-                            <div>ARV: <span className="text-foreground tabular-nums">${Number(changes.arv).toLocaleString()}</span></div>
-                          )}
-                          {changes.buyPrice != null && (
-                            <div>Buy: <span className="text-foreground tabular-nums">${Number(changes.buyPrice).toLocaleString()}</span></div>
-                          )}
-                          {changes.proximityDeduction != null && Number(changes.proximityDeduction) > 0 && (
-                            <div>Proximity: <span className="text-red-500 tabular-nums">−${Number(changes.proximityDeduction).toLocaleString()}</span></div>
-                          )}
-                          {!!changes.selectedComps && Array.isArray(changes.selectedComps) && (
-                            <div>Comps: <span className="text-foreground">{(changes.selectedComps as string[]).length} selected</span></div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  )
-                })}
-              </div>
-            )}
+            <ReportHistoryTimeline entries={historyEntries} loading={historyLoading} />
           </div>
         </SheetContent>
       </Sheet>

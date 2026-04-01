@@ -334,7 +334,7 @@ export default function ReportPage({ params }: { params: Promise<{ jobId: string
         <ResizableLayout
           left={
             <div className="sticky top-10 h-[calc(100vh-2.5rem)] overflow-hidden">
-              <PropertyMap subject={analysis.subject} comps={effectiveComps} subjectSubdivision={analysis.subject?.subdivision} selectedCompKeys={compOverride?.selectedCompKeys} onToggleComp={handleToggleComp} onMarkerSelect={handleMarkerSelect} activeMarkerKey={activeMarkerKey} />
+              <PropertyMap subject={analysis.subject} comps={effectiveComps} selectedCompKeys={compOverride?.selectedCompKeys} onMarkerSelect={handleMarkerSelect} activeMarkerKey={activeMarkerKey} />
             </div>
           }
           right={

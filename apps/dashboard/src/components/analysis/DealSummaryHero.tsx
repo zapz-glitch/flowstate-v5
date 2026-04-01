@@ -3,6 +3,7 @@
 import { SlidersHorizontal } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { ValuationData } from './shared-types'
+import { fmtNumber as fmt } from './format-helpers'
 
 interface DealSummaryHeroProps {
   valuation: ValuationData
@@ -10,15 +11,10 @@ interface DealSummaryHeroProps {
   onOpenSettings?: () => void
 }
 
-function fmt(v: number | null | undefined): string {
-  if (v == null || Number.isNaN(v)) return '-'
-  return v.toLocaleString()
-}
-
 export function DealSummaryHero({ valuation, isRecalculated, onOpenSettings }: DealSummaryHeroProps) {
 
   return (
-    <div className="border border-border bg-background/95 backdrop-blur-sm">
+    <div className="border border-border rounded-lg bg-background/95 backdrop-blur-sm">
       {/* Header: title + recommendation + settings */}
       <div className="px-3 py-1.5 border-b border-border/30 flex items-center justify-between">
         <div className="flex items-center gap-2">

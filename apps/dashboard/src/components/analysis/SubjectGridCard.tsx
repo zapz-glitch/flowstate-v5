@@ -4,6 +4,7 @@ import { MapPin } from 'lucide-react'
 import type { SubjectData } from './shared-types'
 import { StreetViewImage } from './StreetViewImage'
 import { AddressDisplay } from './AddressDisplay'
+import { formatShortDate } from './format-helpers'
 
 interface SubjectGridCardProps {
   subject: SubjectData
@@ -11,7 +12,7 @@ interface SubjectGridCardProps {
 
 export function SubjectGridCard({ subject }: SubjectGridCardProps) {
   return (
-    <div data-card-key="subject" className="border border-primary/30 overflow-hidden bg-primary/[0.02]">
+    <div data-card-key="subject" className="border border-primary/30 rounded-lg overflow-hidden bg-primary/[0.02]">
       {/* Body: Image left + Details right */}
       <div className="flex flex-col sm:flex-row">
         {/* Image with subject badge overlay */}
@@ -51,9 +52,7 @@ export function SubjectGridCard({ subject }: SubjectGridCardProps) {
                   <div className="text-sm font-bold tabular-nums">${subject.lastSale.price.toLocaleString()}</div>
                   <div className="text-[9px] text-foreground-tertiary tabular-nums">
                     {subject.lastSale.pricePerSqft ? `$${subject.lastSale.pricePerSqft.toFixed(0)}/sf · ` : ''}
-                    {subject.lastSale.date
-                      ? new Date(subject.lastSale.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-                      : 'Last Sale'}
+                    {subject.lastSale.date ? formatShortDate(subject.lastSale.date) : 'Last Sale'}
                   </div>
                 </div>
               )}

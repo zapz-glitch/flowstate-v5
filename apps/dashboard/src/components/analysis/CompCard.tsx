@@ -4,18 +4,17 @@ import { useState } from 'react'
 import { ChevronRight, Check } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
-import type { CompItem, SubjectData } from './shared-types'
+import type { CompItem } from './shared-types'
 import { StatCell } from './StatCell'
 import { ClassificationBadge } from './ClassificationBadge'
 import { PhotoGallery } from './PhotoGallery'
 import { AddressDisplay } from './AddressDisplay'
-import { formatFilterType, formatAdjustmentType, formatCurrency, normalizeSubdivision } from './format-helpers'
+import { formatFilterType, formatAdjustmentType, formatCurrency, normalizeSubdivision, getCompKey } from './format-helpers'
 import { StreetViewImage } from './StreetViewImage'
 
 export interface CompCardProps {
   comp: CompItem
   index: number
-  subject?: SubjectData | null
   subjectSubdivision?: string | null
   isExpanded?: boolean
   onToggle?: () => void
@@ -26,7 +25,6 @@ export interface CompCardProps {
 export function CompCard({
   comp,
   index,
-  subject: _subject,
   subjectSubdivision,
   isExpanded: controlledExpanded,
   onToggle: controlledOnToggle,
@@ -54,13 +52,13 @@ export function CompCard({
     normalizeSubdivision(subjectSubdivision) === normalizeSubdivision(comp.subdivision)
   )
 
-  const cardKey = comp.address || `comp-${index}`
+  const cardKey = getCompKey(comp, index)
 
   return (
     <div
       data-card-key={cardKey}
       className={cn(
-        'transition-all duration-300 border border-border',
+        'transition-all duration-300 border border-border rounded-lg',
         comp.isBestComp && isEnabled && 'border-amber-500/40 ring-1 ring-amber-500/20',
         isEnabled ? 'border-l-2 border-l-emerald-500/50' : 'opacity-70'
       )}

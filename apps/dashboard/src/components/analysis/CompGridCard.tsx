@@ -4,7 +4,7 @@ import { Check, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { CompItem, SubjectData } from './shared-types'
 import { StreetViewImage } from './StreetViewImage'
-import { normalizeSubdivision } from './format-helpers'
+import { normalizeSubdivision, sqftMatchColor, yearMatchColor, fmtDelta, formatShortDate } from './format-helpers'
 
 export interface CompGridCardProps {
   comp: CompItem
@@ -17,24 +17,6 @@ export interface CompGridCardProps {
   isHighlighted?: boolean
 }
 
-function sqftMatchColor(compSf: number, subSf: number): string {
-  const pct = Math.abs(compSf - subSf) / subSf
-  if (pct <= 0.10) return 'text-emerald-500'
-  if (pct <= 0.20) return 'text-foreground-tertiary'
-  return 'text-red-400'
-}
-
-function yearMatchColor(compYr: number, subYr: number): string {
-  if (compYr <= 1940 && subYr <= 1940) return 'text-emerald-500'
-  const diff = Math.abs(compYr - subYr)
-  if (diff <= 5) return 'text-emerald-500'
-  if (diff <= 10) return 'text-foreground-tertiary'
-  return 'text-red-400'
-}
-
-function fmtDelta(diff: number): string {
-  return diff > 0 ? `+${diff.toLocaleString()}` : diff.toLocaleString()
-}
 
 export function CompGridCard({
   comp,
@@ -67,7 +49,7 @@ export function CompGridCard({
       onMouseEnter={() => onHover?.(true)}
       onMouseLeave={() => onHover?.(false)}
       className={cn(
-        'border border-border overflow-hidden transition-all duration-200 cursor-pointer group',
+        'border border-border rounded-lg overflow-hidden transition-all duration-200 cursor-pointer group',
         isEnabled ? 'hover:border-foreground/20' : 'opacity-50 hover:opacity-70',
         comp.isBestComp && isEnabled && 'ring-1 ring-amber-500/30',
         isHighlighted && 'ring-2 ring-primary/50 shadow-lg shadow-primary/5',
@@ -96,7 +78,7 @@ export function CompGridCard({
             ${comp.salePrice?.toLocaleString() || '-'}
           </span>
           <span className="text-[9px] text-white/80 font-medium">
-            {comp.saleDate ? new Date(comp.saleDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : ''}
+            {comp.saleDate ? formatShortDate(comp.saleDate) : ''}
           </span>
         </div>
         {/* ARV checkbox */}

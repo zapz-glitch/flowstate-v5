@@ -48,7 +48,7 @@ import { AppraisalFilterEditor, type FilterState, type AdjustmentState } from '@
 import { SettingsPanel } from '@/components/report/SettingsPanel'
 import { DownloadReportButton } from '@/components/report/DownloadReportButton'
 import { CompComparisonDialog } from '@/components/analysis/CompComparisonDialog'
-import { getCompKey } from '@/components/analysis/format-helpers'
+import { useMapInteraction } from '@/hooks/use-map-interaction'
 import type { CompItem } from './actions'
 
 // ─── Analysis Phases ────────────────────────────────────────────────────────
@@ -131,7 +131,6 @@ export default function AnalyzePage() {
   // Existing reports dialog
   const [existingReports, setExistingReports] = useState<ExistingReport[]>([])
   const [showExistingDialog, setShowExistingDialog] = useState(false)
-  const [pendingAnalyze, setPendingAnalyze] = useState(false)
 
   // UI state
   const [showRawJson, setShowRawJson] = useState(false)
@@ -268,44 +267,16 @@ export default function AnalyzePage() {
 
   // ─── Map Interaction + Comparison Dialog ────────────────────────────────
 
-  const [activeMarkerKey, setActiveMarkerKey] = useState<string | null>(null)
-  const [comparisonComp, setComparisonComp] = useState<CompItem | null>(null)
-  const [comparisonOpen, setComparisonOpen] = useState(false)
-
-  const scrollAndHighlight = useCallback((key: string) => {
-    const el = document.querySelector(`[data-card-key="${key}"]`)
-    if (el) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'center' })
-      el.classList.add('ring-2', 'ring-primary', 'ring-offset-2', 'ring-offset-background')
-      setTimeout(() => {
-        el.classList.remove('ring-2', 'ring-primary', 'ring-offset-2', 'ring-offset-background')
-        setActiveMarkerKey(null)
-      }, 2000)
-      return true
-    }
-    return false
-  }, [])
-
-  const handleMarkerSelect = useCallback((type: 'subject' | 'comp', compKey?: string) => {
-    const key = type === 'subject' ? 'subject' : compKey
-    if (!key) return
-    setActiveMarkerKey(key)
-
-    // Open comparison dialog for comp clicks
-    if (type === 'comp' && compKey) {
-      const compItems = (analysisResult?.comps?.items ?? renderData?.comps?.items ?? []) as CompItem[]
-      const comp = compItems.find((c, i) => getCompKey(c, i) === compKey)
-      if (comp) {
-        setComparisonComp(comp)
-        setComparisonOpen(true)
-        return
-      }
-    }
-
-    if (!scrollAndHighlight(key)) {
-      setTimeout(() => scrollAndHighlight(key), 150)
-    }
-  }, [scrollAndHighlight, analysisResult, renderData])
+  const {
+    activeMarkerKey,
+    comparisonComp,
+    setComparisonComp,
+    comparisonOpen,
+    setComparisonOpen,
+    handleMarkerSelect,
+  } = useMapInteraction(() =>
+    (analysisResult?.comps?.items ?? renderData?.comps?.items ?? []) as CompItem[]
+  )
 
   // ─── Analysis Handler ────────────────────────────────────────────────────
 
