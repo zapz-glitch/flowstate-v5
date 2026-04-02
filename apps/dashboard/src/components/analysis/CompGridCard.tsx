@@ -10,8 +10,6 @@ export interface CompGridCardProps {
   comp: CompItem
   index: number
   subject?: SubjectData | null
-  arv?: number | null
-  arvThresholdPercent?: number | null
   isSelectedForArv?: boolean
   onToggleArv?: () => void
   onClick?: () => void
@@ -24,8 +22,6 @@ export function CompGridCard({
   comp,
   index,
   subject,
-  arv,
-  arvThresholdPercent,
   isSelectedForArv,
   onToggleArv,
   onClick,
@@ -34,8 +30,6 @@ export function CompGridCard({
 }: CompGridCardProps) {
   const hasArvSelection = isSelectedForArv !== undefined
   const isEnabled = hasArvSelection ? isSelectedForArv : comp.isEnabled !== false
-  const arvPercent = comp.salePrice && arv ? Math.round((comp.salePrice / arv) * 100) : null
-  const isAboveThreshold = arvPercent != null && arvThresholdPercent != null && arvPercent > arvThresholdPercent
   const cardKey = comp.address || `comp-${index}`
 
   const sqftDelta = comp.squareFeet != null && subject?.squareFeet != null
@@ -71,12 +65,19 @@ export function CompGridCard({
           height={200}
           className="w-full h-full object-cover"
         />
-        {/* Index */}
-        <div className={cn(
-          'absolute top-2 left-2 w-6 h-6 rounded-sm flex items-center justify-center text-[11px] font-bold',
-          isEnabled ? 'bg-emerald-500 text-white' : 'bg-neutral-600 text-white/70'
-        )}>
-          {index + 1}
+        {/* Index + Investor badge */}
+        <div className="absolute top-2 left-2 flex items-center gap-1">
+          <div className={cn(
+            'w-6 h-6 rounded-sm flex items-center justify-center text-[11px] font-bold',
+            isEnabled ? 'bg-emerald-500 text-white' : 'bg-neutral-600 text-white/70'
+          )}>
+            {index + 1}
+          </div>
+          {comp.isInvestorPurchase && (
+            <span className="px-1.5 py-0.5 rounded-sm bg-blue-500/90 text-[9px] font-semibold text-white">
+              Investor
+            </span>
+          )}
         </div>
         {/* Bottom: price + date */}
         <div className="absolute bottom-0 left-0 right-0 px-2 py-1.5 bg-gradient-to-t from-black/70 to-transparent flex items-end justify-between">
@@ -113,12 +114,12 @@ export function CompGridCard({
             {comp.address || 'Unknown'}
           </div>
           <span className="flex items-center gap-1.5 flex-shrink-0">
-            {arvPercent != null && arvThresholdPercent != null && (
+            {comp.pricePercentile != null && (
               <span className={cn(
                 'text-[10px] font-medium tabular-nums',
-                isAboveThreshold ? 'text-emerald-500' : 'text-amber-500'
+                comp.compGroup === 'arv' ? 'text-emerald-500' : comp.compGroup === 'as_is' ? 'text-amber-500' : 'text-foreground-tertiary'
               )}>
-                {isAboveThreshold ? `Top ${100 - arvThresholdPercent}%` : `Below ${arvThresholdPercent}%`}
+                Top {comp.pricePercentile}%
               </span>
             )}
             {comp.pricePerSqft && (

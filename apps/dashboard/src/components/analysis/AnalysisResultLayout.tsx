@@ -1,70 +1,50 @@
 'use client'
 
 import { Loader2 } from 'lucide-react'
-import type { SubjectData, ValuationData, CompsData, CompItem } from './shared-types'
+import { useEvaluation } from '@/hooks/use-evaluation'
 import { ComparablesSection } from './ComparablesSection'
 import { DealSummaryHero } from './DealSummaryHero'
+import { InvestorPurchaseCard } from './InvestorPurchaseCard'
 import { SubjectGridCard } from './SubjectGridCard'
 import { PhotoGallery } from './PhotoGallery'
 import { VisionAnalysisButton } from './VisionAnalysisButton'
+import type { VisionAnalysis } from './shared-types'
 
 // ─── Analysis Result Layout ──────────────────────────────────────────────────
 
 export interface AnalysisResultLayoutProps {
-  subject: SubjectData | null | undefined
-  comps: CompsData | null | undefined
-  valuation: ValuationData | undefined
-  isRecalculated: boolean
-
-  // Comp selection
-  selectedCompKeys?: Set<string>
-  isManual?: boolean
-  onToggleComp: (key: string) => void
-  onResetComps: () => void
-
-  // Settings
-  onOpenSettings: () => void
-
-  // AI
-  aiAnalyzing?: boolean
-
-  // Map interaction
-  highlightedCompKey?: string | null
-
-  // Comparison dialog
-  onCompClick?: (comp: CompItem) => void
-
-  // Map-list hover sync
+  /** Map-list hover sync (local to map view, not in atoms) */
   onCompHover?: (key: string | null) => void
-
-  // Vision analysis
+  /** Vision analysis data */
   visionAnalysis?: unknown
-
-  // Valuation card ref for sticky/intersection observer
+  /** Valuation card ref for sticky/intersection observer */
   valuationCardRef?: React.RefObject<HTMLDivElement | null>
-
-  // Optional footer (e.g. Raw JSON toggle)
+  /** Optional footer (e.g. Raw JSON toggle) */
   footer?: React.ReactNode
 }
 
 export function AnalysisResultLayout({
-  subject,
-  comps,
-  valuation,
-  isRecalculated,
-  selectedCompKeys,
-  isManual = false,
-  onToggleComp,
-  onResetComps,
-  onOpenSettings,
-  aiAnalyzing = false,
-  highlightedCompKey,
-  onCompClick,
   onCompHover,
   visionAnalysis,
   valuationCardRef,
   footer,
 }: AnalysisResultLayoutProps) {
+  const {
+    subject,
+    displayValuation: valuation,
+    displayComps: comps,
+    isRecalculated,
+    compOverride,
+    aiAnalyzing,
+    onToggleComp,
+    onResetComps,
+    onOpenSettings,
+    onCompClick,
+  } = useEvaluation()
+
+  const selectedCompKeys = compOverride?.selectedCompKeys
+  const isManual = compOverride?.isManual ?? false
+
   return (
     <>
       {/* Subject property */}
@@ -79,6 +59,11 @@ export function AnalysisResultLayout({
             onOpenSettings={onOpenSettings}
           />
         </div>
+      )}
+
+      {/* Investor purchase intelligence */}
+      {valuation?.investorPurchaseIntel && (
+        <InvestorPurchaseCard data={valuation.investorPurchaseIntel} />
       )}
 
       {/* AI analysis banner */}
@@ -97,12 +82,10 @@ export function AnalysisResultLayout({
           subjectSubdivision={subject?.subdivision}
           selectedCompKeys={selectedCompKeys}
           isManual={isManual}
-          arv={valuation?.arv}
-          arvThresholdPercent={valuation?.asIsMarketIntel?.thresholdPercent}
           recalculatedArv={isRecalculated ? valuation?.arv : undefined}
           onToggleComp={onToggleComp}
           onReset={onResetComps}
-          highlightedCompKey={highlightedCompKey}
+          highlightedCompKey={null}
           isAnalyzing={aiAnalyzing}
           onCompClick={onCompClick}
           onCompHover={onCompHover}
@@ -121,7 +104,7 @@ export function AnalysisResultLayout({
                 squareFeet: subject.squareFeet ?? undefined,
                 yearBuilt: subject.yearBuilt ?? undefined,
               }}
-              existingAnalysis={visionAnalysis as import('./shared-types').VisionAnalysis | null | undefined}
+              existingAnalysis={visionAnalysis as VisionAnalysis | null | undefined}
             />
           </div>
           <PhotoGallery photos={subject.photos} />

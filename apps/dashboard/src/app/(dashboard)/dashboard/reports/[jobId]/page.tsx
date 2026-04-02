@@ -19,10 +19,11 @@ import {
   SheetDescription,
 } from '@/components/ui/sheet'
 import { cn } from '@/lib/utils'
-import { updateSavedReport, getReportHistory, type ReportHistoryEntry } from '@/lib/client-api'
+import { getReportHistory, type ReportHistoryEntry } from '@/lib/client-api'
+import { useAutoSave } from '@/hooks/use-auto-save'
 import { getSavedReport } from '@/lib/client-api'
 import { useAnalysisEvaluation } from '@/hooks/use-analysis-evaluation'
-import { SettingsPanel } from '@/components/report/SettingsPanel'
+import { EvaluationSettingsSheet } from '@/components/report/EvaluationSettingsSheet'
 import { DownloadReportButton } from '@/components/report/DownloadReportButton'
 import { ShareReportDialog } from '@/components/report/ShareReportDialog'
 import { ReportHistoryTimeline } from '@/components/report/ReportHistoryTimeline'
@@ -31,6 +32,7 @@ import type { AnalyzeData, CompItem } from '@/components/analysis'
 import { queueAnalysis, type AnalyzeData as ActionAnalyzeData } from '@/app/(dashboard)/dashboard/analyze/actions'
 import { CompComparisonDialog } from '@/components/analysis/CompComparisonDialog'
 import { useMapInteraction } from '@/hooks/use-map-interaction'
+import { useEvaluationSync } from '@/hooks/use-evaluation-sync'
 import { useSidebar } from '@/components/SidebarProvider'
 
 // ─── Main Page ──────────────────────────────────────────────────────────────
@@ -107,120 +109,15 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
   }, [historyOpen, loadHistory])
 
   // ─── Auto-save on evaluation/comp changes ──────────────────────────────
-  const [autoSaveStatus, setAutoSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle')
-  const saveTimerRef = useRef<NodeJS.Timeout | null>(null)
-  const lastSavedRef = useRef<string | null>(null)
-  const initialLoadRef = useRef(true)
-
-  useEffect(() => {
-    // Skip when no data
-    if (!report || !displayValuation || !recalcData) return
-
-    const fingerprint = JSON.stringify({
-      arv: displayValuation.arv,
-      buyPrice: displayValuation.buyPrice,
-      rehabCost: displayValuation.rehabCost,
-      rehabLevel: displayValuation.rehabLevel,
-      projectedROI: displayValuation.projectedROI,
-      proximityDeduction: recalcData.valuation.proximityDeduction,
-      comps: compOverride?.selectedCompKeys ? Array.from(compOverride.selectedCompKeys).sort() : null,
-      settings: JSON.stringify(settingsHook.settings),
-    })
-
-    // On initial load (and when settings are still loading/changing),
-    // just capture the fingerprint without saving
-    if (initialLoadRef.current) {
-      lastSavedRef.current = fingerprint
-      // Only clear the flag once settings have stabilized (not in a "changed" state from async loading)
-      if (!settingsHook.settingsChanged) {
-        initialLoadRef.current = false
-      }
-      return
-    }
-
-    // No change from last save
-    if (fingerprint === lastSavedRef.current) return
-
-    // Debounce: wait 2s after last change before saving
-    if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
-    saveTimerRef.current = setTimeout(async () => {
-      setAutoSaveStatus('saving')
-
-      // Build change description
-      const changes: string[] = []
-      if (compOverride?.isManual) changes.push('Comp selection changed')
-      if (settingsHook.settingsChanged) changes.push('Evaluation settings adjusted')
-      if (recalcData.valuation.proximityDeduction > 0) changes.push('Proximity adjustment applied')
-
-      const description = changes.length > 0
-        ? changes.join(', ')
-        : 'Evaluation updated'
-
-      try {
-        // Patch fullResponseJson with updated settings so they persist on reload
-        let updatedJson: string | undefined
-        if (report?.analysis) {
-          const patched = { ...report.analysis } as Record<string, unknown>
-
-          // Patch comp selection
-          if (compOverride?.selectedCompKeys && (patched.comps as { items?: CompItem[] })?.items) {
-            const comps = patched.comps as { items: CompItem[]; [k: string]: unknown }
-            patched.comps = {
-              ...comps,
-              items: comps.items.map((comp: CompItem, i: number) => {
-                const key = comp.address || `comp-${i}`
-                return { ...comp, isEnabled: compOverride.selectedCompKeys!.has(key) }
-              }),
-            }
-          }
-
-          // Patch appliedSettings with current evaluation settings
-          const currentSettings = settingsHook.settings
-          patched.appliedSettings = {
-            ...((patched.appliedSettings as Record<string, unknown>) ?? {}),
-            rehabLevelIndex: currentSettings.rehabLevelIndex,
-            additionPlay: currentSettings.additionPlay ?? 0,
-            filters: currentSettings.filters.map((f) => ({ type: f.type, enabled: f.enabled, value: f.value })),
-            adjustments: currentSettings.adjustments.map((a) => ({ type: a.type, enabled: a.enabled, amount: a.amount, percent: a.percent })),
-            dealParams: {
-              closingCostsPercent: currentSettings.dealParams.closingCostsPercent,
-              carryingCostsPercent: currentSettings.dealParams.carryingCostsPercent,
-              wholesaleFee: currentSettings.dealParams.wholesaleFee,
-            },
-            majorItems: currentSettings.majorItems.map((m) => ({ id: m.id, enabled: m.enabled, cost: m.cost })),
-          }
-
-          updatedJson = JSON.stringify(patched)
-        }
-
-        await updateSavedReport(jobId, {
-          ...(updatedJson ? { fullResponseJson: updatedJson } : {}),
-          arv: displayValuation.arv,
-          maxAllowableOffer: displayValuation.buyPrice,
-          estimatedRepairs: displayValuation.rehabCost,
-          historyAction: 'evaluation_update',
-          historyDescription: description,
-          historyChanges: {
-            arv: displayValuation.arv,
-            buyPrice: displayValuation.buyPrice,
-            rehabCost: displayValuation.rehabCost,
-            selectedComps: compOverride?.selectedCompKeys ? Array.from(compOverride.selectedCompKeys) : null,
-            proximityDeduction: recalcData.valuation.proximityDeduction,
-          },
-        })
-        lastSavedRef.current = fingerprint
-        setAutoSaveStatus('saved')
-        setTimeout(() => setAutoSaveStatus('idle'), 2000)
-        if (historyOpen) loadHistory()
-      } catch {
-        setAutoSaveStatus('idle')
-      }
-    }, 2000)
-
-    return () => {
-      if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
-    }
-  }, [displayValuation, compOverride, recalcData, settingsHook.settings, report, jobId])
+  const { autoSaveStatus } = useAutoSave({
+    jobId,
+    analysisData: report?.analysis,
+    displayValuation,
+    recalcData,
+    compOverride,
+    settingsHook,
+    onSaved: historyOpen ? loadHistory : undefined,
+  })
 
   const fetchReport = useCallback(async () => {
     try {
@@ -329,6 +226,16 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
     (analyzeData?.comps?.items ?? []) as CompItem[]
   )
 
+  // ─── Sync evaluation state to Jotai atoms ────────────────────────────────
+  useEvaluationSync({
+    evaluation: { isRecalculated, recalcData, compOverride, handleToggleComp, handleResetComps },
+    subject: analyzeData?.subject,
+    displayValuation,
+    effectiveComps,
+    onOpenSettings: () => setSettingsOpen(true),
+    onCompClick: (comp) => { setComparisonComp(comp as CompItem); setComparisonOpen(true) },
+  })
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-32">
@@ -434,18 +341,8 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
 
       {/* Analysis layout — same component as playground */}
       <AnalysisPageLayout
-        subject={analysis.subject}
-        comps={effectiveComps}
-        valuation={displayValuation}
-        isRecalculated={isRecalculated}
-        selectedCompKeys={compOverride?.selectedCompKeys}
-        isManual={compOverride?.isManual ?? false}
-        onToggleComp={handleToggleComp}
-        onResetComps={handleResetComps}
         onMarkerSelect={handleMarkerSelect}
         activeMarkerKey={activeMarkerKey}
-        onOpenSettings={() => setSettingsOpen(true)}
-        onCompClick={(comp) => { setComparisonComp(comp as CompItem); setComparisonOpen(true) }}
         riskFlags={analysis.riskFlags}
         floodZone={analysis.floodZone}
         visionAnalysis={analysis.visionAnalysis}
@@ -453,17 +350,12 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
       />
 
       {/* Evaluation Settings Sheet */}
-      <Sheet open={settingsOpen} onOpenChange={setSettingsOpen}>
-        <SheetContent side="right" className="w-full sm:w-[400px] sm:max-w-[400px] p-0 flex flex-col">
-          <SheetHeader className="px-5 pt-5 pb-3 border-b border-border">
-            <SheetTitle className="text-body font-semibold">Evaluation Settings</SheetTitle>
-            <SheetDescription className="text-caption text-foreground-tertiary">
-              Adjust filters, adjustments, and deal parameters to see real-time recalculation.
-            </SheetDescription>
-          </SheetHeader>
-          <SettingsPanel settingsHook={settingsHook} recalcData={recalcData} />
-        </SheetContent>
-      </Sheet>
+      <EvaluationSettingsSheet
+        open={settingsOpen}
+        onOpenChange={setSettingsOpen}
+        settingsHook={settingsHook}
+        recalcData={recalcData}
+      />
 
       {/* History Sidebar */}
       <Sheet open={historyOpen} onOpenChange={setHistoryOpen}>

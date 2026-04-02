@@ -783,6 +783,10 @@ class PropertyApi implements PropertyApiService {
                 ...comp,
                 subdivision: result.data.subdivision ?? null,
                 construction,
+                transaction: result.data.transaction ? {
+                  buyerNames: result.data.transaction.buyerNames,
+                  buyerIsCorporate: result.data.transaction.buyerIsCorporate,
+                } : undefined,
                 isEnriched: true,
               };
             } else {

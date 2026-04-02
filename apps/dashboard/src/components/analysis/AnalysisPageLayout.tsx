@@ -2,6 +2,7 @@
 
 import { useState, useCallback, type ReactNode } from 'react'
 import { cn } from '@/lib/utils'
+import { useEvaluation } from '@/hooks/use-evaluation'
 import { ResizableLayout } from '@/components/ui/resizable'
 import { MapLegend, MapOverlay } from './MapOverlay'
 import { PropertyMap } from './PropertyMap'
@@ -10,41 +11,21 @@ import {
   SubjectPropertySkeleton,
   ComparablesSkeleton,
 } from './AnalysisSkeletons'
-import type { SubjectData, ValuationData, CompsData, CompItem } from './shared-types'
+import type { CompsData } from './shared-types'
 
 export interface AnalysisPageLayoutProps {
-  // Data
-  subject: SubjectData | null | undefined
-  comps: CompsData | null | undefined
-  valuation: ValuationData | undefined
-  isRecalculated: boolean
-
-  // Map
+  // Map-specific (not in atoms — only used when map is visible)
   mapComps?: CompsData | null | undefined
-  selectedCompKeys?: Set<string>
-  onToggleComp: (key: string) => void
-  onResetComps: () => void
   onMarkerSelect: (type: 'subject' | 'comp', compKey?: string) => void
   activeMarkerKey?: string | null
-  isManual?: boolean
 
-  // Settings
-  onOpenSettings: () => void
-
-  // AI
-  aiAnalyzing?: boolean
-
-  // Risk
+  // Risk (map overlay only)
   riskFlags?: string[] | null
   floodZone?: { zone?: string | null; inFloodZone?: boolean | null } | null
+
+  // Pass-through to AnalysisResultLayout
   visionAnalysis?: unknown
-
-  // Report
-  jobId?: string | null
   valuationCardRef?: React.RefObject<HTMLDivElement | null>
-
-  // Comparison dialog
-  onCompClick?: (comp: CompItem) => void
 
   // Loading state
   loading?: boolean
@@ -54,28 +35,18 @@ export interface AnalysisPageLayoutProps {
 }
 
 export function AnalysisPageLayout({
-  subject,
-  comps,
-  valuation,
-  isRecalculated,
   mapComps,
-  selectedCompKeys,
-  onToggleComp,
-  onResetComps,
   onMarkerSelect,
   activeMarkerKey,
-  isManual = false,
-  onOpenSettings,
-  aiAnalyzing = false,
   riskFlags,
   floodZone,
   visionAnalysis,
-  jobId,
   valuationCardRef,
-  onCompClick,
   loading = false,
   footer,
 }: AnalysisPageLayoutProps) {
+  const { subject, displayComps: comps, compOverride } = useEvaluation()
+  const selectedCompKeys = compOverride?.selectedCompKeys
   const hasMapData = !!(subject?.latitude && subject?.longitude)
 
   // ─── Hover state for map↔list sync ──────────────────────────────────
@@ -83,22 +54,9 @@ export function AnalysisPageLayout({
   const handleCompHover = useCallback((key: string | null) => {
     setHoveredCompKey(key)
   }, [])
-  // Merge: hover takes priority (transient), then click (persistent)
   const mapActiveKey = hoveredCompKey ?? activeMarkerKey ?? null
 
-  // Shared props for AnalysisResultLayout (used in both map and no-map branches)
   const resultProps = {
-    subject,
-    comps,
-    valuation,
-    isRecalculated,
-    selectedCompKeys,
-    isManual,
-    onToggleComp,
-    onResetComps,
-    onOpenSettings,
-    aiAnalyzing,
-    onCompClick,
     onCompHover: handleCompHover,
     visionAnalysis,
     valuationCardRef,
@@ -132,7 +90,7 @@ export function AnalysisPageLayout({
         <div className="min-w-0">
           <div className={cn('flex flex-col gap-4 lg:pl-4 pt-2 pb-4')}>
             {loading ? loadingSkeleton : (
-              <AnalysisResultLayout {...resultProps} highlightedCompKey={activeMarkerKey} />
+              <AnalysisResultLayout {...resultProps} />
             )}
           </div>
         </div>

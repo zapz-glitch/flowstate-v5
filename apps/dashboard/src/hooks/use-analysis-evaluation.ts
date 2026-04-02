@@ -10,7 +10,7 @@
  * Used by both the analyze page and the report page.
  */
 
-import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
+import { useState, useEffect, useMemo, useCallback, useRef, type MutableRefObject } from 'react'
 import type {
   AnalyzeData,
   ValuationData,
@@ -70,6 +70,8 @@ export function useAnalysisEvaluation({
 
   // Comp override state
   const [compOverride, setCompOverride] = useState<OverrideState | null>(null)
+  // Ref tracks isManual to avoid stale closures in the sync effect
+  const isManualRef = useRef(false)
 
   // Compose useReportSettings
   const settingsHook = useReportSettings(data)
@@ -83,6 +85,7 @@ export function useAnalysisEvaluation({
           .filter((c) => c.isEnabled !== false)
           .map((c, i) => getCompKey(c, i))
       )
+      isManualRef.current = false
       setCompOverride({ selectedCompKeys: keys, isManual: false })
     }
   }, [data?.comps?.items])
@@ -90,8 +93,7 @@ export function useAnalysisEvaluation({
   // Sync comp selection when recalc re-evaluates filters (but not when user manually toggled comps)
   useEffect(() => {
     if (!recalcData || !data?.comps?.items) return
-    // Only auto-sync when settings changed filters, not when user manually toggled comps
-    if (compOverride?.isManual) return
+    if (isManualRef.current) return
 
     const keys = new Set<string>()
     data.comps.items.forEach((comp, i) => {
@@ -101,10 +103,11 @@ export function useAnalysisEvaluation({
       }
     })
     setCompOverride({ selectedCompKeys: keys, isManual: false })
-  }, [recalcData, data?.comps?.items]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [recalcData, data?.comps?.items])
 
   // Toggle a single comp
   const handleToggleComp = useCallback((key: string) => {
+    isManualRef.current = true
     setCompOverride((prev) => {
       if (!prev) return prev
       const next = new Set(prev.selectedCompKeys)
@@ -116,6 +119,7 @@ export function useAnalysisEvaluation({
 
   // Reset to original enabled comps
   const handleResetComps = useCallback(() => {
+    isManualRef.current = false
     if (data?.comps?.items) {
       const keys = new Set(
         data.comps.items
@@ -182,6 +186,8 @@ export function useAnalysisEvaluation({
       return {
         ...comp,
         isEnabled: ev.isEnabled,
+        compGroup: ev.compGroup,
+        pricePercentile: ev.pricePercentile,
         disableReasons: ev.disableReasons,
         adjustedPrice: ev.adjustedPrice,
         appraisalRules: {

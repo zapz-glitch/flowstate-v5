@@ -54,6 +54,10 @@ export interface CompEvaluation {
   isEnabled: boolean
   /** Comp quality score based on soft filter matches (higher = better) */
   compScore: number
+  /** Comp group based on threshold: 'arv' (above threshold), 'as_is' (below threshold), or null */
+  compGroup: 'arv' | 'as_is' | null
+  /** Price percentile among all comps (100 = highest price, 1 = lowest) */
+  pricePercentile: number | null
   disableReasons: string[]
   filterResults: Array<{
     type: string
@@ -125,6 +129,8 @@ export interface EvaluationSettings {
   additionPlay?: number
   proximityAdjustments?: ProximityToggles
   proximityConfig?: ProximityConfig
+  /** As-is threshold: comps with salePrice ≤ X% of ARV are "below threshold" (default 70) */
+  asIsThresholdPercent?: number
 }
 
 // ─── Recalc Result (full output from recalculateReport) ─────────────────────

@@ -421,6 +421,10 @@ function normalizeComparable(item: AttomV2PropertyItem): NormalizedComparable {
       type: undefined,  // not available in v2 comps
     },
 
+    transaction: sales?.['@BuyerUnparsedName_ext'] ? {
+      buyerNames: [sales['@BuyerUnparsedName_ext']],
+    } : undefined,
+
     raw: item,
   }
 }

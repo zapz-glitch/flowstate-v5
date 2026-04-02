@@ -46,6 +46,7 @@ const DEFAULT_DEAL_PARAMS: DealParamsConfig = {
   carryingCostsPercent: 2,
   wholesaleFee: 10000,
   asIsThresholdPercent: 70,
+  arvThresholdPercent: 15,
 }
 
 const DEFAULT_FILTERS: RecalcFilter[] = [
@@ -86,6 +87,7 @@ export interface UseReportSettingsReturn {
   selectRehabLevel: (index: number) => void
   updateRehabTableEntry: (tier: string, levelIndex: number, updates: Partial<RehabEstimate>) => void
   updateMajorItem: (id: string, updates: Partial<MajorItemSetting>) => void
+  updateAsIsThreshold: (percent: number) => void
   updateProximityAdjustments: (toggles: ProximityToggles) => void
   resetToDefaults: () => void
 }
@@ -169,7 +171,7 @@ export function useReportSettings(data: AnalyzeData | null): UseReportSettingsRe
         const baseDealParams = dealResponse?.config ?? applied?.dealParams ?? DEFAULT_DEAL_PARAMS
         const dealParams = {
           ...baseDealParams,
-          arvThresholdPercent: arvThresholdResponse?.config?.percent ?? 15,
+          arvThresholdPercent: applied?.arvThresholdPercent ?? arvThresholdResponse?.config?.percent ?? 15,
         }
 
         // Build major items from user's current settings
@@ -212,6 +214,7 @@ export function useReportSettings(data: AnalyzeData | null): UseReportSettingsRe
           majorItems,
           additionPlay,
           proximityConfig,
+          asIsThresholdPercent: applied?.asIsThresholdPercent ?? (dealParams as DealParamsConfig).asIsThresholdPercent ?? arvThresholdResponse?.config?.asIsThresholdPercent ?? 70,
         }
 
         if (!cancelled) {
@@ -244,9 +247,9 @@ export function useReportSettings(data: AnalyzeData | null): UseReportSettingsRe
   // This runs synchronously during render, so clicks update the UI in the
   // same frame with zero async delay or missed clicks.
   const recalcData = useMemo(() => {
-    if (!data) return null
+    if (!data || loading) return null
     return recalculateReport(data, settings)
-  }, [data, settings])
+  }, [data, settings, loading])
 
   // Updaters
   const updateFilter = useCallback((type: string, updates: Partial<RecalcFilter>) => {
@@ -299,6 +302,13 @@ export function useReportSettings(data: AnalyzeData | null): UseReportSettingsRe
     }))
   }, [])
 
+  const updateAsIsThreshold = useCallback((percent: number) => {
+    setSettings((prev) => ({
+      ...prev,
+      asIsThresholdPercent: percent,
+    }))
+  }, [])
+
   const updateProximityAdjustments = useCallback((toggles: ProximityToggles) => {
     setSettings((prev) => ({
       ...prev,
@@ -324,6 +334,7 @@ export function useReportSettings(data: AnalyzeData | null): UseReportSettingsRe
     selectRehabLevel,
     updateRehabTableEntry,
     updateMajorItem,
+    updateAsIsThreshold,
     updateProximityAdjustments,
     resetToDefaults,
   }

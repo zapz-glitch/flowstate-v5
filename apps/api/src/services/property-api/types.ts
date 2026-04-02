@@ -208,6 +208,12 @@ export interface NormalizedComparable {
     exteriorWalls?: string
   }
 
+  // Transaction details (from enrichment)
+  transaction?: {
+    buyerNames?: string[]
+    buyerIsCorporate?: boolean
+  }
+
   /** Whether this comp has been enriched with full property details */
   isEnriched?: boolean
 

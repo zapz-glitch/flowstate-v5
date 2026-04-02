@@ -203,6 +203,7 @@ export function SettingsPanel({ settingsHook, recalcData }: SettingsPanelProps) 
     selectRehabLevel,
     updateRehabTableEntry,
     updateMajorItem,
+    updateAsIsThreshold,
     resetToDefaults,
   } = settingsHook
 
@@ -337,6 +338,35 @@ export function SettingsPanel({ settingsHook, recalcData }: SettingsPanelProps) 
         </Section>
 
         {/* ── Thresholds ───────────────────────────────────────────────── */}
+        <Section icon={Sliders} title="Comp Thresholds" defaultOpen={false}>
+          <div className="space-y-3">
+            <div className="flex items-center justify-between rounded-lg bg-secondary/30 px-3 py-2.5">
+              <div>
+                <span className="text-caption font-medium text-foreground">ARV Threshold</span>
+                <div className="text-[10px] text-foreground-tertiary">Top % of comps by sale price for ARV</div>
+              </div>
+              <CompactInput
+                value={settings.dealParams.arvThresholdPercent ?? 15}
+                onChange={(v) => updateDealParams({ arvThresholdPercent: parseFloat(v) || 15 })}
+                suffix="%"
+                step={5}
+              />
+            </div>
+            <div className="flex items-center justify-between rounded-lg bg-secondary/30 px-3 py-2.5">
+              <div>
+                <span className="text-caption font-medium text-foreground">As-Is Threshold</span>
+                <div className="text-[10px] text-foreground-tertiary">Comps below this % of ARV = as-is</div>
+              </div>
+              <CompactInput
+                value={settings.asIsThresholdPercent ?? 70}
+                onChange={(v) => updateAsIsThreshold(parseFloat(v) || 70)}
+                suffix="%"
+                step={5}
+              />
+            </div>
+          </div>
+        </Section>
+
         {/* ── Deal Parameters ─────────────────────────────────────────── */}
         <Section icon={DollarSign} title="Deal Parameters" defaultOpen={false}>
           <div className="space-y-3">

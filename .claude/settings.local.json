@@ -40,7 +40,8 @@
       "Bash(npm install:*)",
       "Bash(grep \"from ''@/components/analysis''\" \"apps/dashboard/src/app/\\(dashboard\\)/dashboard/reports/[jobId]/page.tsx\")",
       "Bash(grep \"from ''@/components/analysis''\" apps/dashboard/src/app/'\\(dashboard\\)'/dashboard/analyze/page.tsx)",
-      "Bash(grep \"from ''@/components/analysis\" /Users/yalamber/Projects/flowstate/flowstate-api/apps/dashboard/src/app/\\\\\\(dashboard\\\\\\)/dashboard/analyze/page.tsx)"
+      "Bash(grep \"from ''@/components/analysis\" /Users/yalamber/Projects/flowstate/flowstate-api/apps/dashboard/src/app/\\\\\\(dashboard\\\\\\)/dashboard/analyze/page.tsx)",
+      "Bash(wc -l /Users/yalamber/Projects/flowstate/flowstate-api/apps/dashboard/src/app/\\\\\\(dashboard\\\\\\)/dashboard/analyze/page.tsx /Users/yalamber/Projects/flowstate/flowstate-api/apps/dashboard/src/app/\\\\\\(dashboard\\\\\\)/dashboard/reports/[jobId]/page.tsx /Users/yalamber/Projects/flowstate/flowstate-api/apps/dashboard/src/app/report/[jobId]/page.tsx)"
     ]
   }
 }

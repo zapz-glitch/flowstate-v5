@@ -18,22 +18,11 @@ import { Button } from '@/components/ui/button'
 import { AddressAutocomplete } from '@/components/AddressAutocomplete'
 import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-  SheetDescription,
-} from '@/components/ui/sheet'
-import { queueAnalysis, type CompsData, type AnalyzeData } from './actions'
-import { getArvThreshold, getReportsByProperty, updateSavedReport, type ExistingReport } from '@/lib/client-api'
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from '@/components/ui/dialog'
+import { EvaluationSettingsSheet } from '@/components/report/EvaluationSettingsSheet'
+import { queueAnalysis, type AnalyzeData } from './actions'
+import { getArvThreshold, getReportsByProperty, type ExistingReport } from '@/lib/client-api'
+import { useAutoSave } from '@/hooks/use-auto-save'
+import { ExistingReportsDialog } from './ExistingReportsDialog'
 // cn is used in the outer wrapper
 import { cn } from '@/lib/utils'
 import { useAnalysis } from '@/hooks/use-analysis'
@@ -44,10 +33,10 @@ import {
 } from '@/components/analysis'
 import { useEnrichmentSSE, type EnrichmentEvent } from '@/hooks/use-enrichment-sse'
 import { AppraisalFilterEditor, type FilterState, type AdjustmentState } from '@/components/analysis/AppraisalFilterEditor'
-import { SettingsPanel } from '@/components/report/SettingsPanel'
 import { DownloadReportButton } from '@/components/report/DownloadReportButton'
 import { CompComparisonDialog } from '@/components/analysis/CompComparisonDialog'
 import { useMapInteraction } from '@/hooks/use-map-interaction'
+import { useEvaluationSync } from '@/hooks/use-evaluation-sync'
 import type { CompItem } from './actions'
 
 // ─── Analysis Phases ────────────────────────────────────────────────────────
@@ -264,73 +253,19 @@ export default function AnalyzePage() {
   })
 
   // ─── Auto-save on evaluation/comp changes ──────────────────────────────
-  const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null)
-  const lastSavedFingerprintRef = useRef<string | null>(null)
-  const autoSaveInitialRef = useRef(true)
-
-  useEffect(() => {
-    if (!isReady || !activeAnalysis?.jobId || !displayValuation || !recalcData) return
-
-    const fingerprint = JSON.stringify({
-      arv: displayValuation.arv,
-      buyPrice: displayValuation.buyPrice,
-      rehabCost: displayValuation.rehabCost,
-      comps: compOverride?.selectedCompKeys ? Array.from(compOverride.selectedCompKeys).sort() : null,
-      settings: JSON.stringify(settingsHook.settings),
-    })
-
-    if (autoSaveInitialRef.current) {
-      lastSavedFingerprintRef.current = fingerprint
-      if (!settingsHook.settingsChanged) autoSaveInitialRef.current = false
-      return
-    }
-
-    if (fingerprint === lastSavedFingerprintRef.current) return
-
-    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current)
-    autoSaveTimerRef.current = setTimeout(async () => {
-      try {
-        let updatedJson: string | undefined
-        if (compOverride?.selectedCompKeys && analysisResult) {
-          const patched = { ...analysisResult }
-          if (patched.comps?.items) {
-            patched.comps = {
-              ...patched.comps,
-              items: patched.comps.items.map((c: { address?: string; isEnabled?: boolean }, i: number) => {
-                const key = c.address || `comp-${i}`
-                return { ...c, isEnabled: compOverride.selectedCompKeys!.has(key) }
-              }),
-            }
-          }
-          updatedJson = JSON.stringify(patched)
-        }
-
-        await updateSavedReport(activeAnalysis.jobId, {
-          ...(updatedJson ? { fullResponseJson: updatedJson } : {}),
-          arv: displayValuation.arv,
-          maxAllowableOffer: displayValuation.buyPrice,
-          estimatedRepairs: displayValuation.rehabCost,
-          historyAction: 'evaluation_update',
-          historyDescription: 'Evaluation updated from playground',
-        })
-        lastSavedFingerprintRef.current = fingerprint
-      } catch {
-        // Silent fail — non-critical
-      }
-    }, 2000)
-
-    return () => {
-      if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current)
-    }
-  }, [isReady, activeAnalysis?.jobId, displayValuation, compOverride, recalcData, settingsHook.settings, settingsHook.settingsChanged, analysisResult])
+  const { resetAutoSave } = useAutoSave({
+    jobId: isReady ? activeAnalysis?.jobId : null,
+    analysisData: analysisResult,
+    displayValuation,
+    recalcData,
+    compOverride,
+    settingsHook,
+  })
 
   // Reset auto-save state when starting a new analysis
   useEffect(() => {
-    if (phase === 'fetching') {
-      autoSaveInitialRef.current = true
-      lastSavedFingerprintRef.current = null
-    }
-  }, [phase])
+    if (phase === 'fetching') resetAutoSave()
+  }, [phase, resetAutoSave])
 
   // ─── Map Interaction + Comparison Dialog ────────────────────────────────
 
@@ -344,6 +279,17 @@ export default function AnalyzePage() {
   } = useMapInteraction(() =>
     (analysisResult?.comps?.items ?? renderData?.comps?.items ?? []) as CompItem[]
   )
+
+  // ─── Sync evaluation state to Jotai atoms ────────────────────────────────
+  useEvaluationSync({
+    evaluation: { isRecalculated, recalcData, compOverride, handleToggleComp, handleResetComps },
+    subject: renderData?.subject,
+    displayValuation: isReady ? displayValuation : undefined,
+    effectiveComps: isReady ? effectiveComps : undefined,
+    aiAnalyzing,
+    onOpenSettings: () => setSettingsOpen(true),
+    onCompClick: (comp) => { setComparisonComp(comp as CompItem); setComparisonOpen(true) },
+  })
 
   // ─── Analysis Handler ────────────────────────────────────────────────────
 
@@ -633,24 +579,12 @@ export default function AnalyzePage() {
       {/* Analysis layout — map + valuation on left, comps on right */}
       {isActive && (
         <AnalysisPageLayout
-          subject={renderData?.subject}
-          comps={isReady ? (appraisalFilters.length > 0 ? (analysisResult?.comps as CompsData) : effectiveComps) : null}
           mapComps={isReady ? (effectiveComps ?? analysisResult?.comps) : (hasResult ? analysisResult?.comps : renderData?.comps)}
-          valuation={isReady ? displayValuation : undefined}
-          isRecalculated={isRecalculated}
-          selectedCompKeys={compOverride?.selectedCompKeys}
-          isManual={compOverride?.isManual ?? false}
-          onToggleComp={handleToggleComp}
-          onResetComps={handleResetComps}
           onMarkerSelect={handleMarkerSelect}
           activeMarkerKey={activeMarkerKey}
-          onOpenSettings={() => setSettingsOpen(true)}
-          aiAnalyzing={aiAnalyzing}
-          onCompClick={(comp) => { setComparisonComp(comp as CompItem); setComparisonOpen(true) }}
           riskFlags={renderData?.riskFlags}
           floodZone={renderData?.floodZone}
           visionAnalysis={renderData?.visionAnalysis}
-          jobId={activeAnalysis?.jobId}
           valuationCardRef={valuationCardRef}
           loading={isFetching}
           footer={
@@ -694,23 +628,18 @@ export default function AnalyzePage() {
       )}
 
       {/* Evaluation Settings Sheet */}
-      <Sheet open={settingsOpen} onOpenChange={(open) => {
-        setSettingsOpen(open)
-        if (open && appraisalFilters.length > 0) {
-          setAppraisalFilters([])
-          setAppraisalAdjustments([])
-        }
-      }}>
-        <SheetContent side="right" className="w-[400px] sm:max-w-[400px] p-0 flex flex-col">
-          <SheetHeader className="px-5 pt-5 pb-3 border-b border-border">
-            <SheetTitle className="text-body font-semibold">Evaluation Settings</SheetTitle>
-            <SheetDescription className="text-caption text-foreground-tertiary">
-              Adjust filters, adjustments, and deal parameters to see real-time recalculation.
-            </SheetDescription>
-          </SheetHeader>
-          <SettingsPanel settingsHook={settingsHook} recalcData={recalcData} />
-        </SheetContent>
-      </Sheet>
+      <EvaluationSettingsSheet
+        open={settingsOpen}
+        onOpenChange={(open) => {
+          setSettingsOpen(open)
+          if (open && appraisalFilters.length > 0) {
+            setAppraisalFilters([])
+            setAppraisalAdjustments([])
+          }
+        }}
+        settingsHook={settingsHook}
+        recalcData={recalcData}
+      />
 
       {/* Subject vs Comp comparison dialog */}
       <CompComparisonDialog
@@ -730,47 +659,12 @@ export default function AnalyzePage() {
       />
 
       {/* Existing Reports Dialog */}
-      <Dialog open={showExistingDialog} onOpenChange={setShowExistingDialog}>
-        <DialogContent className="max-w-md p-0 gap-0">
-          <DialogHeader className="px-5 pt-5 pb-3 border-b border-border">
-            <DialogTitle className="text-body font-semibold">Existing Reports Found</DialogTitle>
-          </DialogHeader>
-          <div className="p-4 space-y-3">
-            <p className="text-caption text-foreground-tertiary">
-              {existingReports.length} report{existingReports.length !== 1 ? 's' : ''} already exist for this address. Open an existing report or create a new analysis.
-            </p>
-            <div className="space-y-2 max-h-[300px] overflow-y-auto">
-              {existingReports.map((r) => (
-                <a
-                  key={r.id}
-                  href={`/dashboard/reports/${r.jobId}`}
-                  className="block border border-border px-4 py-3 hover:bg-muted/40 transition-colors"
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-medium text-foreground truncate">{r.propertyAddress}</span>
-                    <span className="text-[10px] text-foreground-tertiary flex-shrink-0 ml-2">
-                      {new Date(r.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-3 mt-1 text-[10px] text-foreground-tertiary">
-                    {r.arv != null && <span>ARV: ${r.arv.toLocaleString()}</span>}
-                    {r.maxAllowableOffer != null && <span>MAO: ${r.maxAllowableOffer.toLocaleString()}</span>}
-                    {r.estimatedRepairs != null && <span>Rehab: ${r.estimatedRepairs.toLocaleString()}</span>}
-                  </div>
-                </a>
-              ))}
-            </div>
-          </div>
-          <DialogFooter className="px-5 pb-4 pt-2 border-t border-border">
-            <Button variant="outline" size="sm" onClick={() => setShowExistingDialog(false)}>
-              Cancel
-            </Button>
-            <Button size="sm" onClick={() => { setShowExistingDialog(false); runAnalysis() }}>
-              New Analysis
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <ExistingReportsDialog
+        open={showExistingDialog}
+        onOpenChange={setShowExistingDialog}
+        reports={existingReports}
+        onNewAnalysis={runAnalysis}
+      />
     </div>
   )
 }

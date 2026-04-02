@@ -127,6 +127,8 @@ export function recalculateReport(
     return {
       isEnabled,
       compScore,
+      compGroup: null as 'arv' | 'as_is' | null, // computed after ARV is known
+      pricePercentile: null as number | null, // computed after all comps scored
       disableReasons: evaluation.disableReasons,
       filterResults: evaluation.filterResults,
       adjustmentResults: evaluation.adjustmentResults,
@@ -157,6 +159,46 @@ export function recalculateReport(
 
   // 4. Calculate ARV using shared function
   const arv = calculateARV(arvComps, subject.squareFeet)
+
+  // 4b. Classify comps into groups:
+  //   1. Among ALL comps, find top arvThresholdPercent% by sale price
+  //   2. Comps that pass filters AND are in top price percentile = 'arv'
+  //   3. Remaining comps with salePrice ≤ ARV × asIsThreshold% = 'as_is'
+  const arvThresholdPct = settings.dealParams.arvThresholdPercent ?? 15
+  const asIsThreshold = settings.asIsThresholdPercent ?? settings.dealParams.asIsThresholdPercent ?? 70
+  const priceCeiling = arv * asIsThreshold / 100
+
+  // Find top percentile by sale price (mirrors server classifyCompsByPrice)
+  const withPrice = comps
+    .map((c, i) => ({ i, price: c.salePrice ?? 0 }))
+    .filter((c) => c.price > 0)
+    .sort((a, b) => b.price - a.price)
+  const topCount = Math.max(1, Math.ceil(withPrice.length * arvThresholdPct / 100))
+  const topPriceIndices = new Set(withPrice.slice(0, topCount).map((c) => c.i))
+
+  // Build a rank map: comp index → rank position (0 = highest price)
+  const rankMap = new Map<number, number>()
+  withPrice.forEach((c, rank) => rankMap.set(c.i, rank))
+
+  compEvaluations.forEach((ev, i) => {
+    const salePrice = comps[i].salePrice ?? 0
+    const passesFilters = ev.isEnabled
+    const inTopPrice = topPriceIndices.has(i)
+
+    if (passesFilters && inTopPrice) {
+      ev.compGroup = 'arv'
+    } else if (salePrice > 0 && salePrice <= priceCeiling) {
+      ev.compGroup = 'as_is'
+    } else {
+      ev.compGroup = null
+    }
+
+    // Compute price percentile (Top X%): rank 0 out of N = Top 1/N %
+    const rank = rankMap.get(i)
+    if (rank != null && withPrice.length > 0) {
+      ev.pricePercentile = Math.max(1, Math.round(((rank + 1) / withPrice.length) * 100))
+    }
+  })
 
   // 5. Calculate compAvgSqft for valuation (fallback to compAvgSqft when subjectSqft=0)
   const compAvgSqft = getCompAvgSqft(arvComps)
@@ -345,9 +387,9 @@ export function recalculateValuationFromComps(
   selectedCompKeys: Set<string>,
   originalValuation: ValuationData,
   settings: EvaluationSettings,
-  rehabTable: RehabTable = DEFAULT_REHAB_TABLE as RehabTable,
-  tierRanges?: TierRangeDefinition[]
 ): ValuationData {
+  const rehabTable = (settings.rehabTable ?? DEFAULT_REHAB_TABLE) as RehabTable
+  const tierRanges = settings.tierRanges
   const subjectSqft = subject.squareFeet ?? 0
   const selectedComps = allComps.filter((c, i) => selectedCompKeys.has(getCompKey(c, i)))
 

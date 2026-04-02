@@ -284,7 +284,7 @@ export function CompComparisonDialog({ open, onOpenChange, subject, comp, isSele
                   ))}
                   {/* Proximity — Traffic / Commercial */}
                   <div className="px-3 sm:px-4 py-1.5 bg-muted/20 border-t border-border">
-                    <span className="text-[9px] font-semibold text-foreground-tertiary uppercase tracking-wider">Traffic / Commercial Adjustments</span>
+                    <span className="text-[9px] font-semibold text-foreground-tertiary uppercase tracking-wider">Traffic / Commercial (what-if)</span>
                   </div>
                   {(['siding', 'backing', 'fronting'] as const).map((pos) => {
                     const label = pos === 'siding' ? 'Siding (beside)' : pos === 'backing' ? 'Backing (behind)' : 'Fronting (in front)'

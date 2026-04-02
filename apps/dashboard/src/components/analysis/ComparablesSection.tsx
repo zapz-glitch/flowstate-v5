@@ -18,10 +18,6 @@ export interface ComparablesSectionProps {
   selectedCompKeys?: Set<string>
   /** Whether selection has been manually changed */
   isManual?: boolean
-  /** ARV value for displaying % of ARV on comp cards */
-  arv?: number | null
-  /** ARV threshold percent for top/bottom classification on comp cards */
-  arvThresholdPercent?: number | null
   /** Recalculated ARV to display in manual mode banner */
   recalculatedArv?: number
   /** Called when a comp's ARV toggle is clicked */
@@ -53,8 +49,6 @@ export function ComparablesSection({
   subject,
   selectedCompKeys,
   isManual = false,
-  arv,
-  arvThresholdPercent,
   recalculatedArv,
   onToggleComp,
   onReset,
@@ -287,8 +281,6 @@ export function ComparablesSection({
                   comp={comp}
                   index={originalIndex}
                   subject={subject}
-                  arv={recalculatedArv ?? arv}
-                  arvThresholdPercent={arvThresholdPercent}
                   isSelectedForArv={isSelected}
                   onToggleArv={onToggleComp ? () => onToggleComp(key) : undefined}
                   onClick={() => onCompClick?.(comp)}
