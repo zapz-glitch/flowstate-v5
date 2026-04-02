@@ -79,6 +79,7 @@ export interface PropertyLike {
     poolType?: string[] | null
     garageType?: string[] | null
     garageSquareFeet?: number | null
+    carportType?: string | null
   } | null
 }
 

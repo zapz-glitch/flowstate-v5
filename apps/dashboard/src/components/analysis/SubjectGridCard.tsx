@@ -88,6 +88,18 @@ export function SubjectGridCard({ subject }: SubjectGridCardProps) {
                   <span className="font-medium truncate ml-2">{subject.foundationType}</span>
                 </div>
               )}
+              <div className="flex items-center justify-between text-[11px]">
+                <span className="text-foreground-tertiary">Pool</span>
+                <span className="font-medium">{subject.pool ? 'Yes' : '-'}</span>
+              </div>
+              <div className="flex items-center justify-between text-[11px]">
+                <span className="text-foreground-tertiary">Garage</span>
+                <span className="font-medium">{subject.garage ? 'Yes' : '-'}</span>
+              </div>
+              <div className="flex items-center justify-between text-[11px]">
+                <span className="text-foreground-tertiary">Carport</span>
+                <span className="font-medium">{subject.carport ? 'Yes' : '-'}</span>
+              </div>
             </div>
           </div>
         </div>

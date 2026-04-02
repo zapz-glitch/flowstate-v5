@@ -421,6 +421,14 @@ export interface AnalysisResponse {
     buildingStyle: string | null
     /** Story type description (e.g., Split Foyer, Tri Level, 2 Story) */
     storiesType: string | null
+    /** Pool type (e.g., In Ground, Above Ground) */
+    pool: string | null
+    /** Garage type (e.g., Attached, Detached) */
+    garage: string | null
+    /** Garage square footage */
+    garageSquareFeet: number | null
+    /** Carport type */
+    carport: string | null
     /** Monthly HOA fee in dollars (if applicable) */
     hoaFee: number | null
     /** Zillow search URL for this property */
@@ -530,6 +538,14 @@ export interface AnalysisResponse {
       buildingStyle: string | null
       /** Story type description (e.g., Split Foyer, Tri Level, 2 Story) */
       storiesType: string | null
+      /** Pool type */
+      pool: string | null
+      /** Garage type */
+      garage: string | null
+      /** Garage square footage */
+      garageSquareFeet: number | null
+      /** Carport type */
+      carport: string | null
       /** Zillow search URL for this property */
       zillowUrl: string | null
       /** Whether this comp is enabled (passed all filters) */
@@ -868,6 +884,10 @@ export function buildAnalysisResponse(
       photos: compPhotos,
       subdivision: comp.subdivision ?? null,
       ...resolveConstruction(comp.construction),
+      pool: merged?.features?.poolType ?? null,
+      garage: merged?.features?.garageType ?? null,
+      garageSquareFeet: merged?.features?.garageSquareFeet ?? null,
+      carport: merged?.features?.carportType ?? null,
       zillowUrl: generateZillowUrl({
         propertyId: comp.id,
         address: comp.address,
@@ -940,6 +960,10 @@ export function buildAnalysisResponse(
       taxAssessment: property.assessedValue ?? null,
       photos: subjectPhotos,
       ...resolveConstruction(property.construction),
+      pool: property.features?.poolType ?? null,
+      garage: property.features?.garageType ?? null,
+      garageSquareFeet: property.features?.garageSquareFeet ?? null,
+      carport: property.features?.carportType ?? null,
       hoaFee: property.hoaFee ?? null,
       zillowUrl: generateZillowUrl({
         propertyId: property.id,

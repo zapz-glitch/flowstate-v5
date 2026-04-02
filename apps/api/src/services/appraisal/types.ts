@@ -58,6 +58,7 @@ export type AdjustmentType =
   | 'bathroom'
   | 'pool'
   | 'garage'
+  | 'carport'
 
 export interface AppraisalAdjustment {
   type: AdjustmentType

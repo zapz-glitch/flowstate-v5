@@ -63,6 +63,7 @@ const DEFAULT_ADJUSTMENTS: RecalcAdjustment[] = [
   { type: 'bathroom', enabled: true, amount: 10000 },
   { type: 'pool', enabled: false, amount: 10000 },
   { type: 'garage', enabled: false, amount: 10000 },
+  { type: 'carport', enabled: false, amount: 5000 },
 ]
 
 const DEFAULT_MAJOR_ITEMS: MajorItemSetting[] = MAJOR_ITEMS_LIST.map((item) => ({
@@ -149,8 +150,8 @@ export function useReportSettings(data: AnalyzeData | null): UseReportSettingsRe
               }))
             : DEFAULT_FILTERS
 
-        // Build adjustments — prefer appliedSettings, fall back to preset
-        const adjustments: RecalcAdjustment[] = applied?.adjustments?.length
+        // Build adjustments — prefer appliedSettings, fall back to preset, merge missing defaults
+        const baseAdjustments: RecalcAdjustment[] = applied?.adjustments?.length
           ? applied.adjustments.map((a) => ({
               type: a.type,
               enabled: a.enabled,
@@ -165,6 +166,12 @@ export function useReportSettings(data: AnalyzeData | null): UseReportSettingsRe
                 percent: a.percentage || undefined,
               }))
             : DEFAULT_ADJUSTMENTS
+        // Ensure all default adjustment types exist (e.g. carport added later)
+        const existingTypes = new Set(baseAdjustments.map((a) => a.type))
+        const adjustments = [
+          ...baseAdjustments,
+          ...DEFAULT_ADJUSTMENTS.filter((d) => !existingTypes.has(d.type)),
+        ]
 
         const rehabTable = rehabResponse?.config ?? applied?.rehabTable ?? DEFAULT_REHAB_TABLE
         const tierRanges = rehabResponse?.tierRanges ?? applied?.tierRanges

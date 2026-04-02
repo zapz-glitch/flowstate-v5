@@ -12,7 +12,7 @@ import { Badge } from '@/components/ui/badge'
 import { Switch } from '@/components/ui/switch'
 import type { SubjectData, CompItem } from './shared-types'
 import { AddressDisplay } from './AddressDisplay'
-import { formatFilterType, formatCurrency } from './format-helpers'
+import { formatFilterType, formatCurrency, normalizeSubdivision } from './format-helpers'
 import { StreetViewImage } from './StreetViewImage'
 import type { ProximityConfig } from '@/lib/client-api'
 import { PROXIMITY_DEFAULTS } from '@/lib/client-api'
@@ -28,26 +28,13 @@ interface CompComparisonDialogProps {
   proximityConfig?: ProximityConfig | null
 }
 
-// ─── Diff helper: highlight mismatches ───────────────────────────────────────
+// ─── Stat cell ──────────────────────────────────────────────────────────────
 
-function DiffStatCell({ label, value, compareValue, compareLabel = 'subj' }: {
-  label: string
-  value: string | number
-  compareValue: string | number
-  compareLabel?: string
-}) {
-  const valStr = String(value || '—')
-  const cmpStr = String(compareValue || '—')
-  const isMatch = valStr === cmpStr
-  const showHighlight = !isMatch && valStr !== '—' && cmpStr !== '—'
-
+function StatCell({ label, value }: { label: string; value: string | number }) {
   return (
-    <div className={`py-2 px-1.5 sm:px-2 text-center border-r border-border/50 last:border-r-0 overflow-hidden ${showHighlight ? 'bg-amber-500/5' : ''}`}>
+    <div className="py-2 px-1.5 sm:px-2 text-center border-r border-border/50 last:border-r-0 overflow-hidden">
       <div className="text-caption-sm text-foreground-tertiary truncate">{label}</div>
       <div className="text-[11px] sm:text-body-sm font-medium mt-0.5 tabular-nums truncate">{value || '—'}</div>
-      {!isMatch && valStr !== '—' && cmpStr !== '—' && (
-        <div className="text-[8px] sm:text-[9px] text-foreground-tertiary mt-0.5 truncate">{compareLabel}: {compareValue}</div>
-      )}
     </div>
   )
 }
@@ -114,45 +101,63 @@ export function CompComparisonDialog({ open, onOpenChange, subject, comp, isSele
                 </div>
                 <div className="mt-1">
                   {subject.address ? (
-                    <AddressDisplay address={subject.address} latitude={subject.latitude} longitude={subject.longitude} className="text-xs sm:text-sm font-semibold" />
+                    <AddressDisplay address={subject.address} latitude={subject.latitude} longitude={subject.longitude} className="text-xs sm:text-sm font-semibold" showStreetView={false} />
                   ) : (
                     <span className="text-xs sm:text-sm font-semibold">Unknown Address</span>
                   )}
                 </div>
-                {subject.subdivision && (
-                  <div className="text-[10px] text-foreground-tertiary mt-1">
-                    <span className="text-foreground-tertiary/60">Subdivision:</span> {subject.subdivision}
-                  </div>
-                )}
+                <div className="flex items-center gap-2 mt-1 text-[10px] text-foreground-tertiary flex-wrap">
+                  {subject.address && (
+                    <a
+                      href={subject.latitude && subject.longitude
+                        ? `https://www.google.com/maps/@${subject.latitude},${subject.longitude},3a,75y,0h,90t/data=!3m4!1e1!3m2!1s!2e0?entry=ttu`
+                        : `https://www.google.com/maps/search/${encodeURIComponent(subject.address)}/@?entry=ttu&layer=c`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-500 hover:bg-blue-500/20 transition-colors"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      Street View
+                    </a>
+                  )}
+                  {subject.subdivision && <span>{subject.subdivision}</span>}
+                </div>
+              </div>
+              <div className="relative h-32 bg-muted/30 overflow-hidden border-t border-border/30">
+                <StreetViewImage
+                  address={subject.address}
+                  latitude={subject.latitude}
+                  longitude={subject.longitude}
+                  width={640}
+                  height={200}
+                  className="w-full h-full object-cover"
+                />
                 {subject.lastSale?.price && (
-                  <div className="mt-2 flex items-center gap-2 flex-wrap">
-                    <span className="text-sm font-bold tabular-nums">${subject.lastSale.price.toLocaleString()}</span>
-                    <span className="text-[10px] text-foreground-tertiary">
-                      {subject.lastSale.pricePerSqft ? `$${subject.lastSale.pricePerSqft.toFixed(0)}/sqft` : ''}
+                  <div className="absolute bottom-0 left-0 right-0 px-3 py-1.5 bg-gradient-to-t from-black/70 to-transparent flex items-end justify-between">
+                    <span className="text-sm font-bold text-white tabular-nums">${subject.lastSale.price.toLocaleString()}</span>
+                    <span className="text-[9px] text-white/80 font-medium">
+                      {subject.lastSale.pricePerSqft ? `$${subject.lastSale.pricePerSqft.toFixed(0)}/sf` : ''}
                       {subject.lastSale.pricePerSqft && subject.lastSale.date ? ' · ' : ''}
                       {subject.lastSale.date ?? ''}
                     </span>
                   </div>
                 )}
               </div>
-              <StreetViewImage
-                address={subject.address}
-                latitude={subject.latitude}
-                longitude={subject.longitude}
-                width={640}
-                height={200}
-                className="w-full h-32 object-cover border-t border-border/30"
-              />
               <div className="grid grid-cols-4 bg-muted/40 border-t border-border/30">
-                <DiffStatCell label="Beds" value={subject.bedrooms ?? '-'} compareValue={comp.bedrooms ?? '-'} compareLabel="comp" />
-                <DiffStatCell label="Baths" value={subject.bathrooms ?? '-'} compareValue={comp.bathrooms ?? '-'} compareLabel="comp" />
-                <DiffStatCell label="Sq Ft" value={fmt(subject.squareFeet)} compareValue={fmt(comp.squareFeet)} compareLabel="comp" />
-                <DiffStatCell label="Year" value={subject.yearBuilt || '-'} compareValue={comp.yearBuilt || '-'} compareLabel="comp" />
+                <StatCell label="Beds" value={subject.bedrooms ?? '-'} />
+                <StatCell label="Baths" value={subject.bathrooms ?? '-'} />
+                <StatCell label="Sq Ft" value={fmt(subject.squareFeet)} />
+                <StatCell label="Year" value={subject.yearBuilt || '-'} />
               </div>
               <div className="grid grid-cols-3 bg-muted/40 border-t border-border/30">
-                <DiffStatCell label="Lot" value={subject.lotSizeAcres ? `${Number(subject.lotSizeAcres).toFixed(2)} ac` : '-'} compareValue={comp.lotSizeAcres ? `${Number(comp.lotSizeAcres).toFixed(2)} ac` : '-'} compareLabel="comp" />
-                <DiffStatCell label="Foundation" value={subject.foundationType || '-'} compareValue={comp.foundationType || '-'} compareLabel="comp" />
-                <DiffStatCell label="Style" value={subject.buildingStyle || '-'} compareValue={comp.buildingStyle || '-'} compareLabel="comp" />
+                <StatCell label="Lot" value={subject.lotSizeAcres ? `${Number(subject.lotSizeAcres).toFixed(2)} ac` : '-'} />
+                <StatCell label="Style" value={subject.buildingStyle || '-'} />
+                <StatCell label="Foundation" value={subject.foundationType || '-'} />
+              </div>
+              <div className="grid grid-cols-3 bg-muted/40 border-t border-border/30">
+                <StatCell label="Pool" value={subject.pool ? 'Yes' : '-'} />
+                <StatCell label="Garage" value={subject.garage ? 'Yes' : '-'} />
+                <StatCell label="Carport" value={subject.carport ? 'Yes' : '-'} />
               </div>
             </div>
 
@@ -188,45 +193,75 @@ export function CompComparisonDialog({ open, onOpenChange, subject, comp, isSele
                 </div>
                 <div className="mt-1">
                   {comp.address ? (
-                    <AddressDisplay address={comp.address} latitude={comp.latitude} longitude={comp.longitude} className="text-xs sm:text-sm font-semibold" />
+                    <AddressDisplay address={comp.address} latitude={comp.latitude} longitude={comp.longitude} className="text-xs sm:text-sm font-semibold" showStreetView={false} />
                   ) : (
                     <span className="text-xs sm:text-sm font-semibold">Unknown Address</span>
                   )}
                 </div>
                 <div className="flex items-center gap-2 mt-1 text-[10px] text-foreground-tertiary flex-wrap">
+                  {comp.address && (
+                    <a
+                      href={comp.latitude && comp.longitude
+                        ? `https://www.google.com/maps/@${comp.latitude},${comp.longitude},3a,75y,0h,90t/data=!3m4!1e1!3m2!1s!2e0?entry=ttu`
+                        : `https://www.google.com/maps/search/${encodeURIComponent(comp.address)}/@?entry=ttu&layer=c`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-500 hover:bg-blue-500/20 transition-colors"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      Street View
+                    </a>
+                  )}
                   {comp.distanceMiles != null && <span>{comp.distanceMiles.toFixed(2)} mi from subject</span>}
-                  {comp.subdivision && <><span className="text-border">·</span><span>{comp.subdivision}</span></>}
+                  {comp.subdivision && (() => {
+                    const isMatch = !!(subject.subdivision && normalizeSubdivision(comp.subdivision) === normalizeSubdivision(subject.subdivision))
+                    return (
+                      <span className={`inline-flex items-center gap-1 ${isMatch ? 'text-emerald-500' : 'text-red-400'}`}>
+                        {isMatch ? <Check className="w-2.5 h-2.5" /> : <X className="w-2.5 h-2.5" />}
+                        {comp.subdivision}
+                      </span>
+                    )
+                  })()}
                 </div>
-                <div className="mt-2 flex items-center gap-2 flex-wrap">
-                  <span className="text-sm font-bold tabular-nums">${comp.salePrice?.toLocaleString() || '-'}</span>
-                  <span className="text-[10px] text-foreground-tertiary">
-                    {comp.pricePerSqft ? `$${comp.pricePerSqft.toFixed(0)}/sqft` : ''}
+              </div>
+              <div className="relative h-32 bg-muted/30 overflow-hidden border-t border-border/30">
+                <StreetViewImage
+                  address={comp.address}
+                  latitude={comp.latitude}
+                  longitude={comp.longitude}
+                  width={640}
+                  height={200}
+                  className="w-full h-full object-cover"
+                />
+                <div className="absolute bottom-0 left-0 right-0 px-3 py-1.5 bg-gradient-to-t from-black/70 to-transparent flex items-end justify-between">
+                  <div>
+                    <span className="text-sm font-bold text-white tabular-nums">${comp.salePrice?.toLocaleString() || '-'}</span>
+                    {(comp.adjustedPrice != null && comp.adjustedPrice !== comp.salePrice || proximityDeduction > 0) && (
+                      <span className="ml-2 text-[10px] text-emerald-400 font-medium">Adj: ${finalPrice.toLocaleString()}</span>
+                    )}
+                  </div>
+                  <span className="text-[9px] text-white/80 font-medium">
+                    {comp.pricePerSqft ? `$${comp.pricePerSqft.toFixed(0)}/sf` : ''}
                     {comp.pricePerSqft && comp.saleDate ? ' · ' : ''}
                     {comp.saleDate ? new Date(comp.saleDate).toLocaleDateString('en-US', { month: 'short', year: 'numeric' }) : ''}
                   </span>
-                  {(comp.adjustedPrice != null && comp.adjustedPrice !== comp.salePrice || proximityDeduction > 0) && (
-                    <span className="text-[10px] text-emerald-600 font-medium">Adj: ${finalPrice.toLocaleString()}</span>
-                  )}
                 </div>
               </div>
-              <StreetViewImage
-                address={comp.address}
-                latitude={comp.latitude}
-                longitude={comp.longitude}
-                width={640}
-                height={200}
-                className="w-full h-32 object-cover border-t border-border/30"
-              />
               <div className="grid grid-cols-4 bg-muted/40 border-t border-border/30">
-                <DiffStatCell label="Beds" value={comp.bedrooms ?? '-'} compareValue={subject.bedrooms ?? '-'} />
-                <DiffStatCell label="Baths" value={comp.bathrooms ?? '-'} compareValue={subject.bathrooms ?? '-'} />
-                <DiffStatCell label="Sq Ft" value={fmt(comp.squareFeet)} compareValue={fmt(subject.squareFeet)} />
-                <DiffStatCell label="Year" value={comp.yearBuilt || '-'} compareValue={subject.yearBuilt || '-'} />
+                <StatCell label="Beds" value={comp.bedrooms ?? '-'} />
+                <StatCell label="Baths" value={comp.bathrooms ?? '-'} />
+                <StatCell label="Sq Ft" value={fmt(comp.squareFeet)} />
+                <StatCell label="Year" value={comp.yearBuilt || '-'} />
               </div>
               <div className="grid grid-cols-3 bg-muted/40 border-t border-border/30">
-                <DiffStatCell label="Lot" value={comp.lotSizeAcres ? `${Number(comp.lotSizeAcres).toFixed(2)} ac` : '-'} compareValue={subject.lotSizeAcres ? `${Number(subject.lotSizeAcres).toFixed(2)} ac` : '-'} />
-                <DiffStatCell label="Foundation" value={comp.foundationType || '-'} compareValue={subject.foundationType || '-'} />
-                <DiffStatCell label="Style" value={comp.buildingStyle || '-'} compareValue={subject.buildingStyle || '-'} />
+                <StatCell label="Lot" value={comp.lotSizeAcres ? `${Number(comp.lotSizeAcres).toFixed(2)} ac` : '-'} />
+                <StatCell label="Style" value={comp.buildingStyle || '-'} />
+                <StatCell label="Foundation" value={comp.foundationType || '-'} />
+              </div>
+              <div className="grid grid-cols-3 bg-muted/40 border-t border-border/30">
+                <StatCell label="Pool" value={comp.pool ? 'Yes' : '-'} />
+                <StatCell label="Garage" value={comp.garage ? 'Yes' : '-'} />
+                <StatCell label="Carport" value={comp.carport ? 'Yes' : '-'} />
               </div>
             </div>
 

@@ -174,4 +174,27 @@ export const ADJUSTMENT_RULES: AdjustmentRuleDefinition[] = [
       }
     },
   },
+
+  {
+    type: 'carport',
+    defaults: { enabled: false, amount: 5000 },
+    label: {
+      label: 'Carport Adjustment',
+      description: 'Add value if subject has a carport',
+    },
+    calculate(subject, _comp, adjustment) {
+      const hasCarport = subject.features?.carportType != null
+
+      if (!hasCarport) {
+        return { type: 'carport', applied: false, amount: 0, reason: 'Subject has no carport' }
+      }
+
+      return {
+        type: 'carport',
+        applied: true,
+        amount: adjustment.amount,
+        reason: `Subject has carport (+$${adjustment.amount.toLocaleString()})`,
+      }
+    },
+  },
 ]

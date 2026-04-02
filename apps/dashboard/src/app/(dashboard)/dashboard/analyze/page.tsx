@@ -184,6 +184,7 @@ export default function AnalyzePage() {
 
       case 'llm_complete':
         setAiAnalyzing(false)
+        setPhase('ready')
         if (data.updatedResult) {
           setAnalysisResult(data.updatedResult as AnalyzeData)
         } else if (data.rankings) {
@@ -203,19 +204,18 @@ export default function AnalyzePage() {
             return { ...prev, comps: updatedComps } as AnalyzeData
           })
         }
-        // enrichment status removed(null)
         break
 
       case 'enrichment_done':
         setAiAnalyzing(false)
-        // enrichment status removed(null)
+        setPhase('ready')
         setEnrichmentStreamUrl(null)
         setEnrichmentToken(null)
         break
 
       case 'error':
         setAiAnalyzing(false)
-        // enrichment status removed(null)
+        setPhase('ready')
         break
     }
   }, [setAnalysisResult])
@@ -226,10 +226,11 @@ export default function AnalyzePage() {
     onEvent: handleEnrichmentEvent,
   })
 
-  // Handle SSE connection failures
+  // Handle SSE connection failures — show results even if SSE fails
   useEffect(() => {
     if (sseStatus === 'error' || sseStatus === 'done') {
       setAiAnalyzing(false)
+      setPhase((prev) => prev === 'fetching' ? 'ready' : prev)
     }
   }, [sseStatus])
 
@@ -326,12 +327,14 @@ export default function AnalyzePage() {
         setActiveAnalysis({ jobId: response.jobId ?? '', address: address.trim() })
         setAnalysisResult(response.result as AnalyzeData)
         setAnalysisState({ ...initialAnalysisState, jobId: response.jobId ?? null, status: 'completed' })
-        setPhase('ready')
 
         if (response.enrichment) {
+          // AI analysis pending — keep fetching state until SSE completes
           setEnrichmentStreamUrl(response.enrichment.streamUrl)
           setEnrichmentToken(response.enrichment.token)
           setAiAnalyzing(true)
+        } else {
+          setPhase('ready')
         }
       } else {
         setPhase('idle')
@@ -413,7 +416,7 @@ export default function AnalyzePage() {
               <div className="text-body-sm text-foreground-secondary truncate">
                 {activeAnalysis?.address || address || 'Search an address...'}
               </div>
-              {isFetching && (
+              {isFetching && !aiAnalyzing && (
                 <div className="text-xs text-primary mt-0.5" key={analysisState.currentStep}>
                   <TypewriterText text={getStatusLabel(analysisState.currentStep)} />
                 </div>
@@ -421,7 +424,7 @@ export default function AnalyzePage() {
               {aiAnalyzing && (
                 <div className="text-xs text-primary mt-0.5 flex items-center gap-1.5">
                   <Loader2 className="w-3 h-3 animate-spin" />
-                  AI analyzing comps...
+                  AI selecting best comps...
                 </div>
               )}
             </div>

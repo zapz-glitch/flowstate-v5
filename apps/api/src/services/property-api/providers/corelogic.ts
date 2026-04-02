@@ -702,10 +702,12 @@ function normalizeProperty(
       heating: lookupCode(HEATING_TYPE, (structureFeatures?.heating as Record<string, unknown>)?.typeCode as string) || building?.heating,
       cooling: lookupCode(COOLING_TYPE, (structureFeatures?.airConditioning as Record<string, unknown>)?.typeCode as string) || building?.cooling,
       fireplacesCount: ((structureFeatures?.firePlaces as Record<string, unknown>)?.count as number) || (buildingSummary?.fireplacesCount as number) || building?.fireplaces,
-      poolType: lookupCode(POOL_TYPE, (structureExterior?.pool as Record<string, unknown>)?.typeCode as string) || building?.poolType,
-      garageType: lookupCode(GARAGE_TYPE, (structureExterior?.parking as Record<string, unknown>)?.garageTypeCode as string) || building?.garageType,
-      garageSquareFeet: ((structureExterior?.parking as Record<string, unknown>)?.garageAreaSquareFeet as number) || building?.garageSquareFeet,
+      poolType: lookupCode(POOL_TYPE, (structureExterior?.pool as Record<string, unknown>)?.typeCode as string) || ((structureExterior?.pool as Record<string, unknown>)?.typeCode ? 'Yes' : undefined) || (building?.poolType ? 'Yes' : undefined),
+      garageType: lookupCode(GARAGE_TYPE, (structureExterior?.parking as Record<string, unknown>)?.garageTypeCode as string) || ((structureExterior?.parking as Record<string, unknown>)?.garageTypeCode ? 'Yes' : undefined) || (building?.garageType ? 'Yes' : undefined),
+      garageSquareFeet: ((structureExterior?.parking as Record<string, unknown>)?.primaryAreaSquareFeet as number) || ((structureExterior?.parking as Record<string, unknown>)?.garageAreaSquareFeet as number) || building?.garageSquareFeet,
       parkingSpaces: ((structureExterior?.parking as Record<string, unknown>)?.parkingSpacesCount as number) || building?.parkingSpaces,
+      carportType: ((structureExterior?.parking as Record<string, unknown>)?.carportAreaSquareFeet as number) ? 'Yes' : undefined,
+      carportSpaces: undefined,
     },
 
     // Ownership

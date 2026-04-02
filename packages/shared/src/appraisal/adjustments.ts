@@ -112,12 +112,18 @@ const calculators: Record<AdjustmentType, AdjustmentCalculator> = {
     }
   },
 
-  carport(_subject, _comp, _adjustment) {
+  carport(subject, _comp, adjustment) {
+    const hasCarport = subject.features?.carportType != null
+
+    if (!hasCarport) {
+      return { type: 'carport', applied: false, amount: 0, reason: 'Subject has no carport' }
+    }
+
     return {
       type: 'carport',
-      applied: false,
-      amount: 0,
-      reason: 'Carport adjustment not implemented',
+      applied: true,
+      amount: adjustment.amount,
+      reason: `Subject has carport (+$${adjustment.amount.toLocaleString()})`,
     }
   },
 }

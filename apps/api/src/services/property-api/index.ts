@@ -787,6 +787,12 @@ class PropertyApi implements PropertyApiService {
                   buyerNames: result.data.transaction.buyerNames,
                   buyerIsCorporate: result.data.transaction.buyerIsCorporate,
                 } : undefined,
+                features: result.data.features ? {
+                  poolType: result.data.features.poolType,
+                  garageType: result.data.features.garageType,
+                  garageSquareFeet: result.data.features.garageSquareFeet,
+                  carportType: result.data.features.carportType,
+                } : undefined,
                 isEnriched: true,
               };
             } else {

@@ -37,9 +37,9 @@ const ADJUSTMENT_LABELS: Record<string, { label: string; isPercentage?: boolean;
   old_comp_discount: { label: 'Old Comp Discount', isPercentage: true },
   bedroom: { label: 'Bedroom' },
   bathroom: { label: 'Bathroom' },
-  pool: { label: 'Pool', unavailable: true },
-  garage: { label: 'Garage', unavailable: true },
-  carport: { label: 'Carport', unavailable: true },
+  pool: { label: 'Pool' },
+  garage: { label: 'Garage' },
+  carport: { label: 'Carport' },
 }
 
 const ARV_TIER_LABELS: Record<string, string> = {

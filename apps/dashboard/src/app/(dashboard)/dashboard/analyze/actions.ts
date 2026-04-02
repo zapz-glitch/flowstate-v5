@@ -164,6 +164,14 @@ export interface SubjectData {
   foundationType?: string | null
   /** Building style (e.g., Colonial, Cape Cod, Ranch) */
   buildingStyle?: string | null
+  /** Pool type */
+  pool?: string | null
+  /** Garage type */
+  garage?: string | null
+  /** Garage square footage */
+  garageSquareFeet?: number | null
+  /** Carport type */
+  carport?: string | null
   /** Property classification (as_is, after_renovation, transitional) */
   classification?: ClassificationSummary | null
 }
@@ -258,6 +266,14 @@ export interface CompItem {
   foundationType?: string | null
   /** Building style (e.g., Colonial, Cape Cod, Ranch) */
   buildingStyle?: string | null
+  /** Pool type */
+  pool?: string | null
+  /** Garage type */
+  garage?: string | null
+  /** Garage square footage */
+  garageSquareFeet?: number | null
+  /** Carport type */
+  carport?: string | null
   /** Reason this comp was selected/analyzed (LLM reasoning) */
   selectionReason?: string | null
   /** Key features identified by LLM analysis */

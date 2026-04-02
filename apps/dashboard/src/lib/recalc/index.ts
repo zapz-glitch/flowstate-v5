@@ -37,24 +37,16 @@ import {
  * Check whether the user has changed any filter or adjustment settings
  * compared to what the server used.
  */
+/** Check if appraisal FILTERS changed (not adjustments — adjustments only affect price, not comp selection) */
 function hasFilterChanges(data: AnalyzeData, settings: EvaluationSettings): boolean {
   const applied = data.appliedSettings
   if (!applied) return true // No appliedSettings → always re-evaluate
 
-  // Check filters
   const appliedFilters = applied.filters ?? []
   for (const sf of settings.filters) {
     const af = appliedFilters.find((f) => f.type === sf.type)
     if (!af) continue
     if (sf.enabled !== af.enabled || sf.value !== af.value) return true
-  }
-
-  // Check adjustments
-  const appliedAdj = applied.adjustments ?? []
-  for (const sa of settings.adjustments) {
-    const aa = appliedAdj.find((a) => a.type === sa.type)
-    if (!aa) continue
-    if (sa.enabled !== aa.enabled || sa.amount !== aa.amount || sa.percent !== aa.percent) return true
   }
 
   return false
@@ -104,11 +96,30 @@ export function recalculateReport(
   // Determine if user changed filters/adjustments vs server's appliedSettings
   const filtersChanged = hasFilterChanges(data, settings)
 
+  // Map flat fields to the shape the shared evaluator expects
+  const subjectWithFeatures = {
+    ...subject,
+    construction: {
+      buildingStyle: subject.buildingStyle ?? null,
+    },
+    features: {
+      poolType: subject.pool ? [subject.pool] : null,
+      garageType: subject.garage ? [subject.garage] : null,
+      garageSquareFeet: subject.garageSquareFeet ?? null,
+      carportType: subject.carport ?? null,
+    },
+  }
+
   // 1. Evaluate all comps with shared evaluator
   const compEvaluations: CompEvaluation[] = comps.map((comp) => {
+    // Map flat buildingStyle to construction shape for the shared evaluator
+    const compWithConstruction = {
+      ...comp,
+      construction: { buildingStyle: comp.buildingStyle ?? null },
+    }
     const evaluation = evaluateComparable(
-      subject,
-      comp,
+      subjectWithFeatures,
+      compWithConstruction,
       settings.filters.map((f) => ({ type: f.type as FilterType, enabled: f.enabled, value: f.value })),
       settings.adjustments.map((a) => ({ type: a.type as AdjustmentType, enabled: a.enabled, amount: a.amount, percent: a.percent }))
     )
@@ -168,24 +179,22 @@ export function recalculateReport(
   const asIsThreshold = settings.asIsThresholdPercent ?? settings.dealParams.asIsThresholdPercent ?? 70
   const priceCeiling = arv * asIsThreshold / 100
 
-  // Find top percentile by sale price (mirrors server classifyCompsByPrice)
-  const withPrice = comps
+  // Rank ALL comps by sale price for percentile display
+  const allWithPrice = comps
     .map((c, i) => ({ i, price: c.salePrice ?? 0 }))
     .filter((c) => c.price > 0)
     .sort((a, b) => b.price - a.price)
-  const topCount = Math.max(1, Math.ceil(withPrice.length * arvThresholdPct / 100))
-  const topPriceIndices = new Set(withPrice.slice(0, topCount).map((c) => c.i))
 
-  // Build a rank map: comp index → rank position (0 = highest price)
+  const topCount = Math.max(1, Math.ceil(allWithPrice.length * arvThresholdPct / 100))
+  const topPriceIndices = new Set(allWithPrice.slice(0, topCount).map((c) => c.i))
+
   const rankMap = new Map<number, number>()
-  withPrice.forEach((c, rank) => rankMap.set(c.i, rank))
+  allWithPrice.forEach((c, rank) => rankMap.set(c.i, rank))
 
   compEvaluations.forEach((ev, i) => {
     const salePrice = comps[i].salePrice ?? 0
-    const passesFilters = ev.isEnabled
-    const inTopPrice = topPriceIndices.has(i)
 
-    if (passesFilters && inTopPrice) {
+    if (ev.isEnabled && topPriceIndices.has(i)) {
       ev.compGroup = 'arv'
     } else if (salePrice > 0 && salePrice <= priceCeiling) {
       ev.compGroup = 'as_is'
@@ -193,10 +202,12 @@ export function recalculateReport(
       ev.compGroup = null
     }
 
-    // Compute price percentile (Top X%): rank 0 out of N = Top 1/N %
+    // Percentile among ALL comps by sale price
     const rank = rankMap.get(i)
-    if (rank != null && withPrice.length > 0) {
-      ev.pricePercentile = Math.max(1, Math.round(((rank + 1) / withPrice.length) * 100))
+    if (rank != null && allWithPrice.length > 0) {
+      ev.pricePercentile = allWithPrice.length === 1
+        ? 1
+        : Math.max(1, Math.round((rank / (allWithPrice.length - 1)) * 100))
     }
   })
 

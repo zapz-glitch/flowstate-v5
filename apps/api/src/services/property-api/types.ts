@@ -214,6 +214,14 @@ export interface NormalizedComparable {
     buyerIsCorporate?: boolean
   }
 
+  // Property features (from enrichment)
+  features?: {
+    poolType?: string
+    garageType?: string
+    garageSquareFeet?: number
+    carportType?: string
+  }
+
   /** Whether this comp has been enriched with full property details */
   isEnriched?: boolean
 

@@ -127,34 +127,33 @@ export function CompGridCard({
             )}
           </span>
         </div>
-        {/* Subdivision pill */}
-        {comp.subdivision && (() => {
-          const isMatch = !!(subject?.subdivision && normalizeSubdivision(comp.subdivision) === normalizeSubdivision(subject.subdivision))
-          const hasSubject = !!subject?.subdivision
-          return (
-            <div className={cn(
-              'inline-flex items-center gap-1 mt-0.5 px-1.5 py-0.5 rounded-full text-[9px] font-medium truncate max-w-full',
-              hasSubject
-                ? isMatch
-                  ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20'
-                  : 'bg-red-500/10 text-red-400 border border-red-500/20'
-                : 'bg-muted text-foreground-tertiary'
-            )}>
-              {hasSubject && (isMatch
-                ? <Check className="w-2.5 h-2.5 flex-shrink-0" />
-                : <X className="w-2.5 h-2.5 flex-shrink-0" />
-              )}
-              <span className="truncate">{comp.subdivision}</span>
-            </div>
-          )
-        })()}
-        {/* Adj price + distance */}
-        <div className="flex items-baseline justify-between mt-0.5">
-          {comp.distanceMiles != null ? (
-            <span className="text-[9px] text-foreground-tertiary tabular-nums">{comp.distanceMiles.toFixed(2)} mi away</span>
-          ) : <span />}
+        {/* Distance + Subdivision + Adj price */}
+        <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+          {comp.distanceMiles != null && (
+            <span className="text-[9px] text-foreground-tertiary tabular-nums">{comp.distanceMiles.toFixed(2)} mi</span>
+          )}
+          {comp.subdivision && (() => {
+            const isMatch = !!(subject?.subdivision && normalizeSubdivision(comp.subdivision) === normalizeSubdivision(subject.subdivision))
+            const hasSubject = !!subject?.subdivision
+            return (
+              <span className={cn(
+                'inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[9px] font-medium truncate max-w-[60%]',
+                hasSubject
+                  ? isMatch
+                    ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20'
+                    : 'bg-red-500/10 text-red-400 border border-red-500/20'
+                  : 'bg-muted text-foreground-tertiary'
+              )}>
+                {hasSubject && (isMatch
+                  ? <Check className="w-2.5 h-2.5 flex-shrink-0" />
+                  : <X className="w-2.5 h-2.5 flex-shrink-0" />
+                )}
+                <span className="truncate">{comp.subdivision}</span>
+              </span>
+            )
+          })()}
           {comp.adjustedPrice != null && comp.adjustedPrice !== comp.salePrice && (
-            <span className="text-[10px] font-medium text-emerald-500 tabular-nums">Adj ${comp.adjustedPrice.toLocaleString()}</span>
+            <span className="text-[10px] font-medium text-emerald-500 tabular-nums ml-auto">Adj ${comp.adjustedPrice.toLocaleString()}</span>
           )}
         </div>
 
@@ -181,6 +180,18 @@ export function CompGridCard({
           <div className="flex items-center justify-between text-[11px]">
             <span className="text-foreground-tertiary">Style</span>
             <span className="font-medium truncate ml-2">{comp.buildingStyle || '-'}</span>
+          </div>
+          <div className="flex items-center justify-between text-[11px]">
+            <span className="text-foreground-tertiary">Pool</span>
+            <span className="font-medium">{comp.pool ? 'Yes' : '-'}</span>
+          </div>
+          <div className="flex items-center justify-between text-[11px]">
+            <span className="text-foreground-tertiary">Garage</span>
+            <span className="font-medium">{comp.garage ? 'Yes' : '-'}</span>
+          </div>
+          <div className="flex items-center justify-between text-[11px]">
+            <span className="text-foreground-tertiary">Carport</span>
+            <span className="font-medium">{comp.carport ? 'Yes' : '-'}</span>
           </div>
         </div>
       </div>
