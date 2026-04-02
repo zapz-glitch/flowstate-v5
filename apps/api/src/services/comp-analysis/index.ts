@@ -1,12 +1,14 @@
 /**
  * LLM Comp Analysis Service
  *
- * Uses AI to select the best comparable sales for ARV calculation.
- * Two-phase approach matching real appraisal methodology:
- *   Phase 1: Filter by physical similarity (appraisal rules)
- *   Phase 2: Among qualifying comps, select highest-value for ARV
+ * AI-first comparable selection. The LLM is the PRIMARY comp selection authority.
+ * It receives all property data, user preferences, market context, and evaluation
+ * results to make an informed selection decision.
  *
- * Graceful degradation: returns null if LLM is unavailable or fails.
+ * The deterministic appraisal rules still run as advisory data (filter pass/fail,
+ * adjustments) and as fallback when the LLM is unavailable.
+ *
+ * ALL valuation math remains deterministic — the AI only selects WHICH comps to use.
  */
 
 import type { NormalizedProperty, NormalizedComparable } from '../property-api/types'
@@ -17,171 +19,278 @@ import type {
   CompAnalysisResult,
   CompRanking,
   CompEvalContext,
+  CompAnalysisContext,
 } from './types'
 
-export type { CompAnalysisOptions, CompAnalysisResult, CompRanking, CompEvalContext }
+export type { CompAnalysisOptions, CompAnalysisResult, CompRanking, CompEvalContext, CompAnalysisContext }
+
+// ─── System Prompt ──────────────────────────────────────────────────────────
+
+const SYSTEM_PROMPT = `You are a licensed real estate appraiser and investment analyst performing a comparable sales analysis. Your job is to select the best comparable sales (comps) for determining the After Repair Value (ARV) of an investment property.
+
+## YOUR ROLE
+You are the PRIMARY decision-maker for comp selection. The system has pre-evaluated comps using rule-based filters — treat those results as advisory input, not final decisions. You may override any filter result based on your professional judgment.
+
+## COMP SELECTION METHODOLOGY
+
+### Phase 1: Physical Similarity Assessment (MANDATORY)
+Every comp MUST be physically comparable to the subject. Evaluate strictly:
+
+1. **SQUARE FOOTAGE** — #1 disqualifier. Must be within reasonable range. A 2,000 sqft subject cannot use a 900 sqft comp.
+2. **BUILDING STYLE** — Same style strongly preferred (Ranch vs Ranch). Different styles have different $/sqft and buyer appeal. However, similar styles in the same era (e.g., Conventional vs Ranch for 1950s homes) may be acceptable.
+3. **CONSTRUCTION TYPE** — Same construction preferred (Frame vs Frame).
+4. **FOUNDATION TYPE** — Same foundation preferred.
+5. **BEDROOM/BATHROOM COUNT** — Should be similar. 2bd/1ba is not comparable to 4bd/3ba.
+6. **YEAR BUILT** — Within ~15 years for older homes, tighter for newer.
+7. **LOT SIZE** — Should be in the same general range.
+
+### Phase 2: ARV Quality Selection
+From physically similar comps, select for After Repair Value quality:
+
+1. **SALE RECENCY** — Last 6 months ideal, up to 12 months acceptable
+2. **PROXIMITY** — Closer = more relevant market data
+3. **SUBDIVISION MATCH** — Same subdivision is a strong market indicator
+4. **PRICE LEVEL** — For ARV, prefer comps with higher $/sqft (indicates renovated condition)
+5. **MINIMAL ADJUSTMENTS** — Fewer adjustments = more reliable comp
+
+### Red Flags — EXCLUDE from ARV selection:
+- Foreclosure sales (distressed pricing)
+- Short sales (below market)
+- Interfamily transfers (non-arm's-length)
+- Cash purchases by LLCs at deep discounts (investor acquisitions, not market value)
+- Properties with significantly different condition indicators
+
+## CRITICAL RULES
+- Physical similarity is NON-NEGOTIABLE. A comp failing sqft, style, or construction match should score below 50.
+- Select ONLY genuinely comparable properties. 1 excellent comp > 5 mediocre ones.
+- NEVER select a comp just for its high price if it fails physical similarity.
+- Consider the USER'S PREFERENCES — they've set specific filter thresholds and parameters. Respect their intent.
+- For as-is comps: identify comps that represent current (un-renovated) market value.
+
+## OUTPUT FORMAT
+Respond ONLY with valid JSON. No markdown, no code fences, no explanation outside the JSON.`
 
 // ─── Prompt Builder ─────────────────────────────────────────────────────────
 
-const SYSTEM_PROMPT = `You are a licensed real estate appraiser performing a comparable sales analysis to determine the After Repair Value (ARV) of an investment property.
-
-You MUST follow the standard appraisal methodology used by banks and FHA/VA appraisers:
-
-PHASE 1 — PHYSICAL SIMILARITY (mandatory, non-negotiable):
-Only comps that are physically comparable to the subject should be considered. Evaluate in this strict order:
-
-1. SQUARE FOOTAGE — Must be within reasonable range of subject. A 2,000 sqft subject cannot use a 900 sqft comp. This is the #1 disqualifier.
-2. BUILDING STYLE — Same style is strongly preferred (Ranch vs Ranch, not Ranch vs Two-Story). Different styles have fundamentally different $/sqft and buyer appeal.
-3. CONSTRUCTION TYPE — Same construction preferred (Frame vs Frame, not Frame vs Concrete Block). Construction type affects rehab costs and value.
-4. FOUNDATION TYPE — Same foundation preferred (Slab vs Slab, not Slab vs Basement). Foundation differences significantly affect value.
-5. BEDROOM/BATHROOM COUNT — Should be similar. 2bd/1ba is not comparable to 4bd/3ba.
-6. YEAR BUILT — Within ~15 years. A 1960 home is not comparable to a 2010 build.
-7. LOT SIZE — Should be in the same general range.
-
-PHASE 2 — AMONG PHYSICALLY SIMILAR COMPS, select for ARV quality:
-From comps that pass Phase 1, select ONLY the ones that truly support an ARV estimate:
-
-1. SALE RECENCY — Prefer most recent sales (last 6 months ideal)
-2. PROXIMITY — Closer to subject = more relevant market data
-3. SUBDIVISION MATCH — Same subdivision is a strong indicator of market value
-4. SALE PRICE LEVEL — For ARV, prefer comps that represent post-renovation value (higher $/sqft indicates renovated condition)
-5. MINIMAL ADJUSTMENTS — Comps needing fewer adjustments are more reliable
-
-CRITICAL RULES:
-- Select ONLY comps that genuinely match. If only 1 comp is truly comparable, select 1. If 5 are excellent matches, select 5.
-- Do NOT force a specific count. Quality over quantity.
-- NEVER select a comp just because it has a high sale price if it fails physical similarity
-- A nearby 900 sqft comp selling for $300K does NOT support ARV for a 2,000 sqft subject
-- Physical match FIRST, then value level among matches
-- Do NOT pad with dissimilar comps to reach a target count
-
-IMPORTANT: Respond ONLY with valid JSON. No markdown, no code fences, no explanation outside the JSON.`
-
-function buildPrompt(
-  subject: NormalizedProperty,
-  comparables: NormalizedComparable[],
-  evalContexts: CompEvalContext[],
-): string {
+function buildMegaPrompt(ctx: CompAnalysisContext): string {
+  const { bundle, evalContexts } = ctx
+  const subject = bundle.property
+  const comparables = bundle.comparables
   const evalMap = new Map(evalContexts.map((e) => [e.compId, e]))
 
-  const subjectInfo = [
+  // ── Subject Property ──────────────────────────────────────────────
+  const subjectLines = [
     `Address: ${subject.address}, ${subject.city}, ${subject.state} ${subject.zipCode}`,
+    `County: ${subject.county ?? 'unknown'}`,
     `Beds/Baths: ${subject.bedrooms ?? '-'}/${subject.bathrooms ?? '-'}`,
     `SqFt: ${subject.squareFeet?.toLocaleString() ?? 'unknown'}`,
     `Year Built: ${subject.yearBuilt ?? 'unknown'}`,
-    `Lot: ${subject.lotSizeAcres ? `${subject.lotSizeAcres} acres` : 'unknown'}`,
+    `Lot: ${subject.lotSizeAcres ? `${subject.lotSizeAcres.toFixed(3)} acres` : 'unknown'}`,
     `Property Type: ${subject.propertyType ?? 'unknown'}`,
     `Subdivision: ${subject.subdivision ?? 'none'}`,
-    `Foundation: ${subject.construction?.foundationType ?? 'unknown'}`,
+    // Construction
     `Building Style: ${subject.construction?.buildingStyle ?? 'unknown'}`,
-    `Stories: ${subject.stories ?? 'unknown'}`,
-    subject.construction?.roofType ? `Roof: ${subject.construction.roofType}` : null,
-    subject.construction?.exteriorWalls ? `Exterior: ${subject.construction.exteriorWalls}` : null,
+    `Construction Type: ${subject.construction?.type ?? 'unknown'}`,
+    `Foundation: ${subject.construction?.foundationType ?? 'unknown'}`,
+    `Quality: ${subject.construction?.qualityCode ?? 'unknown'}`,
+    `Roof: ${subject.construction?.roofType ?? 'unknown'}`,
+    `Exterior Walls: ${subject.construction?.exteriorWalls ?? 'unknown'}`,
+    `Stories: ${subject.stories ?? subject.construction?.storiesType ?? 'unknown'}`,
+    // Features
     subject.features?.heating ? `Heating: ${subject.features.heating}` : null,
     subject.features?.cooling ? `Cooling: ${subject.features.cooling}` : null,
-    subject.features?.poolType ? `Pool: ${subject.features.poolType}` : null,
-    subject.features?.garageType ? `Garage: ${subject.features.garageType}` : null,
+    subject.features?.poolType ? `Pool: Yes (${subject.features.poolType})` : `Pool: No`,
+    subject.features?.garageType ? `Garage: Yes (${subject.features.garageType})` : `Garage: No`,
+    subject.features?.carportType ? `Carport: Yes` : `Carport: No`,
+    subject.features?.fireplacesCount ? `Fireplaces: ${subject.features.fireplacesCount}` : null,
+    // Financials
     subject.lastSalePrice ? `Last Sale: $${subject.lastSalePrice.toLocaleString()} (${subject.lastSaleDate ?? 'unknown'})` : null,
     subject.assessedValue ? `Tax Assessment: $${subject.assessedValue.toLocaleString()}` : null,
+    subject.marketValue ? `Market Value: $${subject.marketValue.toLocaleString()}` : null,
+    subject.avmValue ? `AVM Estimate: $${subject.avmValue.toLocaleString()} (confidence: ${subject.avmConfidence ?? 'unknown'})` : null,
+    // Ownership
+    subject.ownership?.ownerOccupied != null ? `Owner Occupied: ${subject.ownership.ownerOccupied ? 'Yes' : 'No (absentee)'}` : null,
   ].filter(Boolean).join('\n  ')
 
+  // ── User Preferences ──────────────────────────────────────────────
+  const filterLines = ctx.filters
+    .map((f) => `  ${f.type}: ${f.enabled ? `enabled (threshold: ${f.value})` : 'disabled'}`)
+    .join('\n')
+  const adjLines = ctx.adjustments
+    .map((a) => `  ${a.type}: ${a.enabled ? `enabled ($${a.amount.toLocaleString()}${a.percent ? `, ${a.percent}%` : ''})` : 'disabled'}`)
+    .join('\n')
+  const rehabLevels = ['Lipstick', 'Light Cosmetic', 'Full Cosmetic', 'Heavy Rehab', 'Down to Stud']
+
+  const userPrefs = `USER'S EVALUATION PREFERENCES:
+  ARV Threshold: Top ${ctx.arvThresholdPercent}% of comps by sale price
+  As-Is Threshold: ${ctx.asIsThresholdPercent}% of ARV
+  Rehab Level: ${rehabLevels[ctx.rehabLevelIndex] ?? 'Full Cosmetic'} (level ${ctx.rehabLevelIndex})
+  Deal Params: ${ctx.dealParams.closingCostsPercent}% closing, ${ctx.dealParams.carryingCostsPercent}% carrying, $${ctx.dealParams.wholesaleFee.toLocaleString()} wholesale fee
+
+  Appraisal Filters (user's thresholds):
+${filterLines}
+
+  Price Adjustments (user's amounts):
+${adjLines}`
+
+  // ── Market Context ────────────────────────────────────────────────
+  const marketLines: string[] = []
+
+  // Flood zone
+  const flood = bundle.enrichment?.floodZone
+  if (flood) {
+    marketLines.push(flood.isInFloodZone
+      ? `⚠ FLOOD ZONE: ${flood.floodZone ?? 'Yes'} — ${flood.floodZoneDescription ?? ''}`
+      : `Flood Zone: No`)
+  }
+
+  // Risk flags
+  if (ctx.riskFlags?.length) {
+    marketLines.push(`⚠ LOCATION RISKS: ${ctx.riskFlags.join(', ')}`)
+  }
+
+  // Permits
+  const permits = bundle.enrichment?.permits
+  if (permits && permits.count > 0) {
+    marketLines.push(`Recent Permits: ${permits.count} permits, total value $${(permits.totalJobValue ?? 0).toLocaleString()}`)
+    if (permits.recentPermitTypes?.length) {
+      marketLines.push(`  Permit Types: ${permits.recentPermitTypes.join(', ')}`)
+    }
+  }
+
+  // Neighbourhood
+  const community = bundle.enrichment?.neighbourhood?.community
+  if (community) {
+    if (community.demographics?.medianIncome) marketLines.push(`Median Income: $${community.demographics.medianIncome.toLocaleString()}`)
+    if (community.demographics?.medianHomeValue) marketLines.push(`Median Home Value: $${community.demographics.medianHomeValue.toLocaleString()}`)
+    if (community.crime?.crimeRisk) marketLines.push(`Crime Risk: ${community.crime.crimeRisk}`)
+  }
+
+  const marketContext = marketLines.length > 0
+    ? `\nMARKET CONTEXT:\n  ${marketLines.join('\n  ')}`
+    : ''
+
+  // ── Comparable Sales ──────────────────────────────────────────────
   const compLines = comparables.map((comp, i) => {
     const ctx = evalMap.get(comp.id)
-    const filterSummary = ctx?.filterResults
-      .map((f: Record<string, unknown>) => `${f.type}: ${f.passed ? 'PASS' : 'FAIL'}${f.reason ? ` (${f.reason})` : ''}`)
-      .join(', ') ?? 'not evaluated'
-    const adjSummary = ctx?.adjustmentResults
-      .filter((a: Record<string, unknown>) => a.applied)
-      .map((a: Record<string, unknown>) => `${a.type}: ${(a.amount as number) >= 0 ? '+' : ''}$${(a.amount as number).toLocaleString()}`)
-      .join(', ') || 'none'
 
-    // Calculate sqft difference for clarity
+    // Calculate differences from subject
     const sqftDiff = subject.squareFeet && comp.squareFeet
-      ? Math.abs(comp.squareFeet - subject.squareFeet)
+      ? Math.round(((comp.squareFeet - subject.squareFeet) / subject.squareFeet) * 100)
       : null
-    const sqftPct = subject.squareFeet && comp.squareFeet
-      ? Math.round((sqftDiff! / subject.squareFeet) * 100)
+    const yearDiff = subject.yearBuilt && comp.yearBuilt
+      ? Math.abs(comp.yearBuilt - subject.yearBuilt)
       : null
+    const subdivMatch = subject.subdivision && comp.subdivision
+      && subject.subdivision.toLowerCase() === comp.subdivision.toLowerCase()
+    const styleMatch = subject.construction?.buildingStyle && comp.construction?.buildingStyle
+      && subject.construction.buildingStyle.toLowerCase() === comp.construction.buildingStyle.toLowerCase()
+    const foundationMatch = subject.construction?.foundationType && comp.construction?.foundationType
+      && subject.construction.foundationType.toLowerCase() === comp.construction.foundationType.toLowerCase()
+    const constructionMatch = subject.construction?.type && comp.construction?.type
+      && subject.construction.type.toLowerCase() === comp.construction.type.toLowerCase()
 
-    return `
-Comp ${i + 1} [ID: ${comp.id}]:
-  Address: ${comp.address}, ${comp.city}, ${comp.state}
-  Sale Price: $${comp.salePrice?.toLocaleString() ?? 'unknown'} on ${comp.saleDate ?? 'unknown'}
-  $/SqFt: $${comp.pricePerSqft ?? 'unknown'}
-  Distance: ${comp.distanceMiles?.toFixed(2) ?? 'unknown'} miles
-  Beds/Baths: ${comp.bedrooms ?? '-'}/${comp.bathrooms ?? '-'}
-  SqFt: ${comp.squareFeet?.toLocaleString() ?? 'unknown'}${sqftDiff != null ? ` (${sqftDiff > 0 ? '+' : ''}${(comp.squareFeet! - subject.squareFeet!).toLocaleString()} sqft, ${sqftPct}% diff)` : ''}
-  Year Built: ${comp.yearBuilt ?? 'unknown'}${subject.yearBuilt && comp.yearBuilt ? ` (${Math.abs(comp.yearBuilt - subject.yearBuilt)} yr diff)` : ''}
-  Lot: ${comp.lotSizeAcres ? `${comp.lotSizeAcres} acres` : 'unknown'}
-  Subdivision: ${comp.subdivision ?? 'none'}${subject.subdivision && comp.subdivision && subject.subdivision.toLowerCase() === comp.subdivision.toLowerCase() ? ' ✓ MATCH' : ''}
-  Foundation: ${comp.construction?.foundationType ?? 'unknown'}${subject.construction?.foundationType && comp.construction?.foundationType && subject.construction.foundationType.toLowerCase() === comp.construction.foundationType.toLowerCase() ? ' ✓ MATCH' : ''}
-  Building Style: ${comp.construction?.buildingStyle ?? 'unknown'}${subject.construction?.buildingStyle && comp.construction?.buildingStyle && subject.construction.buildingStyle.toLowerCase() === comp.construction.buildingStyle.toLowerCase() ? ' ✓ MATCH' : ''}
-  Construction: ${comp.construction?.type ?? 'unknown'}${subject.construction?.type && comp.construction?.type && subject.construction.type.toLowerCase() === comp.construction.type.toLowerCase() ? ' ✓ MATCH' : ''}
-  Exterior Walls: ${comp.construction?.exteriorWalls ?? 'unknown'}
-  Roof: ${comp.construction?.roofType ?? 'unknown'}
-  Appraisal Filter Results: ${filterSummary}
-  Price Adjustments: ${adjSummary}
-  Adjusted Price: ${ctx?.adjustedPrice ? `$${ctx.adjustedPrice.toLocaleString()}` : 'N/A'}`
-  }).join('\n')
+    // Filter summary
+    const filterSummary = ctx?.filterResults
+      .map((f) => `${f.type}: ${f.passed ? 'PASS' : 'FAIL'}${f.reason ? ` (${f.reason})` : ''}`)
+      .join('; ') ?? 'not evaluated'
 
-  // Identify algorithm-selected comps
-  const algoSelectedIds = evalContexts.filter(e => e.isEnabled).map(e => e.compId)
-  const algoSelectedNote = algoSelectedIds.length > 0
-    ? `\nALGORITHM PRE-SELECTION: The appraisal rules algorithm selected these ${algoSelectedIds.length} comp(s): ${algoSelectedIds.join(', ')}. Validate or override this selection based on your analysis.`
-    : '\nALGORITHM PRE-SELECTION: No comps passed all appraisal filters. Use your judgment to select the best available matches.'
+    // Adjustment summary
+    const adjSummary = ctx?.adjustmentResults
+      .filter((a) => a.applied)
+      .map((a) => `${a.type}: ${a.amount >= 0 ? '+' : ''}$${a.amount.toLocaleString()}`)
+      .join('; ') || 'none'
 
+    // Transaction flags
+    const txFlags: string[] = []
+    if (comp.transaction?.buyerIsCorporate) txFlags.push('CORPORATE BUYER')
+    if (comp.transaction?.buyerNames?.some((n) => /llc|inc|corp|trust|properties|holdings/i.test(n))) txFlags.push('ENTITY BUYER')
+
+    const lines = [
+      `Comp ${i + 1} [ID: ${comp.id}]:`,
+      `  Address: ${comp.address}, ${comp.city}, ${comp.state}`,
+      `  Sale: $${comp.salePrice?.toLocaleString() ?? '?'} on ${comp.saleDate ?? '?'} ($${comp.pricePerSqft ?? '?'}/sf)`,
+      `  Distance: ${comp.distanceMiles?.toFixed(2) ?? '?'} mi`,
+      `  Beds/Baths: ${comp.bedrooms ?? '-'}/${comp.bathrooms ?? '-'}`,
+      `  SqFt: ${comp.squareFeet?.toLocaleString() ?? '?'}${sqftDiff != null ? ` (${sqftDiff > 0 ? '+' : ''}${sqftDiff}% vs subject)` : ''}`,
+      `  Year Built: ${comp.yearBuilt ?? '?'}${yearDiff != null ? ` (${yearDiff}yr diff)` : ''}`,
+      `  Lot: ${comp.lotSizeAcres ? `${comp.lotSizeAcres.toFixed(3)} ac` : '?'}`,
+      `  Subdivision: ${comp.subdivision ?? 'none'}${subdivMatch ? ' ✓ MATCH' : ''}`,
+      `  Style: ${comp.construction?.buildingStyle ?? '?'}${styleMatch ? ' ✓ MATCH' : ''}`,
+      `  Construction: ${comp.construction?.type ?? '?'}${constructionMatch ? ' ✓ MATCH' : ''}`,
+      `  Foundation: ${comp.construction?.foundationType ?? '?'}${foundationMatch ? ' ✓ MATCH' : ''}`,
+      `  Quality: ${comp.construction?.qualityCode ?? '?'}`,
+      comp.features?.poolType ? `  Pool: Yes` : null,
+      comp.features?.garageType ? `  Garage: Yes` : null,
+      comp.features?.carportType ? `  Carport: Yes` : null,
+      txFlags.length > 0 ? `  ⚠ Transaction: ${txFlags.join(', ')}` : null,
+      `  Rule Filters: ${filterSummary}`,
+      `  Adjustments: ${adjSummary}`,
+      ctx?.adjustedPrice ? `  Adjusted Price: $${ctx.adjustedPrice.toLocaleString()}` : null,
+    ]
+
+    return lines.filter(Boolean).join('\n')
+  }).join('\n\n')
+
+  // ── Algorithm pre-selection note ──────────────────────────────────
+  const algoSelectedIds = evalContexts.filter((e) => e.isEnabled).map((e) => e.compId)
+  const algoNote = algoSelectedIds.length > 0
+    ? `\nALGORITHM PRE-SELECTION: Rule-based filters selected ${algoSelectedIds.length} comp(s): ${algoSelectedIds.join(', ')}. Validate or override based on your analysis.`
+    : '\nALGORITHM PRE-SELECTION: No comps passed all rule-based filters. Use your professional judgment to select the best available matches.'
+
+  // ── Task ──────────────────────────────────────────────────────────
   return `SUBJECT PROPERTY:
-  ${subjectInfo}
+  ${subjectLines}
 
-COMPARABLE SALES (${comparables.length} total):${compLines}
-${algoSelectedNote}
+${userPrefs}
+${marketContext}
+
+COMPARABLE SALES (${comparables.length} total):
+
+${compLines}
+${algoNote}
 
 YOUR TASK:
-1. First, identify which comps are PHYSICALLY SIMILAR to the subject (Phase 1)
-2. From those, select ONLY the best matches that support an ARV (After Repair Value) estimate
-3. ARV comps should represent what the subject would sell for AFTER full renovation — prefer comps with higher $/sqft that indicate renovated/updated condition
-4. Rank ALL comps
+1. Evaluate each comp for physical similarity to the subject (Phase 1)
+2. Select comps that best support an After Repair Value (ARV) estimate (Phase 2)
+3. Identify comps suitable for as-is market value (lower-priced, un-renovated)
+4. Score and rank ALL comps with reasoning
 
 Return JSON:
 {
   "selectedForArv": ["compId1", "compId2"],
+  "asIsComps": ["compId3"],
   "rankings": [
     {
-      "compId": "the comp ID string",
+      "compId": "string",
       "score": 0-100,
-      "reasoning": "Explain physical similarity assessment AND why selected/rejected for ARV",
-      "keyFeatures": ["matching features or key differences"],
+      "reasoning": "Physical similarity assessment + ARV/as-is classification reasoning",
+      "keyFeatures": ["matching features", "key differences"],
       "confidenceLevel": "high" | "medium" | "low"
     }
   ],
-  "summary": "1-2 sentence market analysis and comp selection rationale"
+  "arvEstimate": 450000,
+  "confidenceLevel": "high" | "medium" | "low",
+  "summary": "1-3 sentence market analysis"
 }
 
-SCORING:
-85-100: Excellent physical match + strong ARV indicator (high $/sqft, recent, nearby) → SELECTED
-70-84: Good physical match, usable for ARV → SELECTED
-50-69: Partial match, some differences → may be selected if best available
-30-49: Significant physical differences → NOT selected
-0-29: Poor match, not comparable → NOT selected
-
-REMEMBER:
-- Physical similarity is non-negotiable. A comp that fails sqft, building style, construction type, or foundation match should score below 50 regardless of sale price.
-- Only include comps in selectedForArv that you would defend in front of an underwriter. Quality over quantity.
-- It is perfectly acceptable to select just 1 or 2 comps if those are the only true matches.
-- Prefer comps with higher $/sqft among physically similar matches — they better represent ARV (post-renovation value).
-- Do NOT select comps that are clearly distressed sales or as-is deals for ARV.`
+SCORING GUIDE:
+85-100: Excellent physical match + strong ARV indicator → SELECTED for ARV
+70-84: Good physical match, usable for ARV → SELECTED for ARV
+50-69: Partial match or as-is indicator → consider for as-is classification
+30-49: Significant differences → NOT selected
+0-29: Poor match → NOT selected`
 }
 
 // ─── Main Service ───────────────────────────────────────────────────────────
 
 /**
- * Analyze comps using LLM for quality scoring and reasoning.
- * Returns null if LLM is unavailable or the call fails.
+ * Analyze comps using LLM for selection, scoring, and reasoning.
+ * The LLM is the PRIMARY selection authority.
+ * Returns null if LLM is unavailable or the call fails (fallback to rule-based).
  */
 export async function analyzeComps(
-  subject: NormalizedProperty,
-  comparables: NormalizedComparable[],
-  evalContexts: CompEvalContext[],
+  ctx: CompAnalysisContext,
   env: Env,
   options?: CompAnalysisOptions,
 ): Promise<CompAnalysisResult | null> {
@@ -191,12 +300,12 @@ export async function analyzeComps(
     return null
   }
 
-  if (comparables.length === 0) return null
+  if (ctx.bundle.comparables.length === 0) return null
 
   const startTime = Date.now()
 
   try {
-    const prompt = buildPrompt(subject, comparables, evalContexts)
+    const prompt = buildMegaPrompt(ctx)
 
     const result = await provider.execute({
       prompt,
@@ -216,23 +325,25 @@ export async function analyzeComps(
       jsonStr = jsonStr.replace(/^```(?:json)?\s*/, '').replace(/\s*```$/, '')
     }
 
-    let parsed: { rankings?: unknown[]; selectedForArv?: unknown[]; summary?: string }
+    let parsed: {
+      rankings?: unknown[]
+      selectedForArv?: unknown[]
+      asIsComps?: unknown[]
+      summary?: string
+      arvEstimate?: number
+      confidenceLevel?: string
+    }
     try {
       parsed = JSON.parse(jsonStr)
     } catch {
-      // LLM response may be truncated (hit token limit) — try to repair
       console.warn('[CompAnalysis] JSON parse failed, attempting repair...')
       try {
-        // Close any open strings, arrays, objects
         let repaired = jsonStr
-        // Count unmatched quotes — if odd, close the string
         const quoteCount = (repaired.match(/(?<!\\)"/g) || []).length
         if (quoteCount % 2 !== 0) repaired += '"'
-        // Close unclosed brackets/braces
         const opens = (repaired.match(/[{[]/g) || []).length
         const closes = (repaired.match(/[}\]]/g) || []).length
         for (let i = 0; i < opens - closes; i++) {
-          // Determine which to close by finding the last unmatched opener
           const lastOpen = Math.max(repaired.lastIndexOf('{'), repaired.lastIndexOf('['))
           repaired += repaired[lastOpen] === '{' ? '}' : ']'
         }
@@ -250,7 +361,7 @@ export async function analyzeComps(
     }
 
     // Validate and normalize rankings
-    const validCompIds = new Set(comparables.map((c) => c.id))
+    const validCompIds = new Set(ctx.bundle.comparables.map((c) => c.id))
     const rankings: CompRanking[] = parsed.rankings
       .filter((r: unknown): r is Record<string, unknown> =>
         typeof r === 'object' && r !== null && typeof (r as Record<string, unknown>).compId === 'string'
@@ -265,18 +376,26 @@ export async function analyzeComps(
         confidenceLevel: (['high', 'medium', 'low'] as const).includes(r.confidenceLevel as 'high') ? r.confidenceLevel as 'high' | 'medium' | 'low' : 'medium',
       }))
 
-    // Extract selectedForArv — validate that all IDs are valid comp IDs
+    // Extract selectedForArv
     const selectedForArv: string[] = Array.isArray(parsed.selectedForArv)
       ? parsed.selectedForArv.filter((id): id is string => typeof id === 'string' && validCompIds.has(id))
       : rankings.filter((r) => r.score >= 70).map((r) => r.compId)
 
+    // Extract asIsComps
+    const asIsComps: string[] = Array.isArray(parsed.asIsComps)
+      ? parsed.asIsComps.filter((id): id is string => typeof id === 'string' && validCompIds.has(id))
+      : []
+
     const latencyMs = Date.now() - startTime
 
-    console.log(`[CompAnalysis] Analyzed ${rankings.length} comps, selected ${selectedForArv.length} for ARV in ${latencyMs}ms (${result.usage?.totalTokens ?? '?'} tokens)`)
+    console.log(`[CompAnalysis] Analyzed ${rankings.length} comps, selected ${selectedForArv.length} for ARV, ${asIsComps.length} as-is in ${latencyMs}ms (${result.usage?.totalTokens ?? '?'} tokens)`)
     if (rankings.length > 0) {
       const selected = rankings.filter((r) => selectedForArv.includes(r.compId))
-      const rejected = rankings.filter((r) => !selectedForArv.includes(r.compId))
-      console.log(`[CompAnalysis] Selected: ${selected.map((r) => `${r.compId.slice(0, 20)}(${r.score})`).join(', ')}`)
+      const rejected = rankings.filter((r) => !selectedForArv.includes(r.compId) && !asIsComps.includes(r.compId))
+      console.log(`[CompAnalysis] ARV: ${selected.map((r) => `${r.compId.slice(0, 20)}(${r.score})`).join(', ')}`)
+      if (asIsComps.length > 0) {
+        console.log(`[CompAnalysis] As-Is: ${asIsComps.join(', ')}`)
+      }
       if (rejected.length > 0) {
         console.log(`[CompAnalysis] Rejected: ${rejected.map((r) => `${r.compId.slice(0, 20)}(${r.score})`).join(', ')}`)
       }
@@ -285,7 +404,12 @@ export async function analyzeComps(
     return {
       rankings,
       selectedForArv,
+      asIsComps,
       summary: typeof parsed.summary === 'string' ? parsed.summary : '',
+      arvEstimate: typeof parsed.arvEstimate === 'number' ? parsed.arvEstimate : undefined,
+      confidenceLevel: (['high', 'medium', 'low'] as const).includes(parsed.confidenceLevel as 'high')
+        ? parsed.confidenceLevel as 'high' | 'medium' | 'low'
+        : undefined,
       model: env.OPENROUTER_MODEL || 'google/gemini-2.0-flash-001',
       latencyMs,
       tokenUsage: result.usage ? {
@@ -317,7 +441,6 @@ export function mergeLLMIntoResponse(
 
   const rankingMap = new Map(llmResult.rankings.map((r) => [r.compId, r]))
 
-  // Enrich each comp item
   if (response.comps?.items && Array.isArray(response.comps.items)) {
     response.comps.items = response.comps.items.map((comp: Record<string, unknown>) => {
       const ranking = rankingMap.get(comp.id as string)
@@ -333,13 +456,14 @@ export function mergeLLMIntoResponse(
     })
   }
 
-  // Add LLM metadata to response
   response.llmAnalysis = {
     model: llmResult.model,
     latencyMs: llmResult.latencyMs,
     tokenUsage: llmResult.tokenUsage,
     compCount: llmResult.rankings.length,
     summary: llmResult.summary,
+    arvEstimate: llmResult.arvEstimate,
+    confidenceLevel: llmResult.confidenceLevel,
   }
 
   return response

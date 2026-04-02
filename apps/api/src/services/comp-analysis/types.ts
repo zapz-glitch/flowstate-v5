@@ -1,16 +1,21 @@
 /**
  * LLM Comp Analysis Types
  *
- * Types for AI-powered comparable analysis that enriches
- * rule-based comp selection with reasoning and quality scores.
+ * Types for AI-powered comparable analysis.
+ * The LLM is the primary comp selection authority — it receives all property data,
+ * user settings, and market context to make the selection decision.
  */
+
+import type { PropertyBundle } from '../property-api/types'
+import type { AppraisalFilter, AppraisalAdjustment } from '../appraisal'
+import type { RehabTable, TierRangeDefinition } from '@flowstate-api/shared/valuation'
 
 export interface CompAnalysisOptions {
   /** Include property photos in analysis (default: false) */
   includePhotos?: boolean
-  /** Max tokens for LLM response (default: 2048) */
+  /** Max tokens for LLM response (default: 4096) */
   maxTokens?: number
-  /** Temperature for LLM (default: 0.3 — low for structured output) */
+  /** Temperature for LLM (default: 0.2 — low for structured output) */
   temperature?: number
 }
 
@@ -31,10 +36,16 @@ export interface CompRanking {
 export interface CompAnalysisResult {
   /** Per-comp rankings with reasoning */
   rankings: CompRanking[]
-  /** Comp IDs selected by LLM for ARV calculation (best 3-5 comps) */
+  /** Comp IDs selected by LLM for ARV calculation */
   selectedForArv: string[]
+  /** Comp IDs classified as as-is market comps */
+  asIsComps?: string[]
   /** Overall market analysis summary */
   summary: string
+  /** AI's estimated ARV (for cross-validation with calculated ARV) */
+  arvEstimate?: number
+  /** Overall confidence in the selection */
+  confidenceLevel?: 'high' | 'medium' | 'low'
   /** Model used for analysis */
   model: string
   /** Time taken for LLM call */
@@ -63,4 +74,36 @@ export interface CompEvalContext {
     amount: number
   }>
   adjustedPrice: number | null
+}
+
+/** Rich context for AI comp selection — includes all available data */
+export interface CompAnalysisContext {
+  /** Full property bundle (subject + comps + enrichment data) */
+  bundle: PropertyBundle
+  /** Deterministic evaluation results (advisory, not final) */
+  evalContexts: CompEvalContext[]
+  /** Analysis result from deterministic pipeline (for reference data) */
+  analysisResult: Record<string, unknown>
+  /** User's appraisal filter preferences */
+  filters: AppraisalFilter[]
+  /** User's adjustment preferences */
+  adjustments: AppraisalAdjustment[]
+  /** User's deal parameters */
+  dealParams: {
+    closingCostsPercent: number
+    carryingCostsPercent: number
+    wholesaleFee: number
+  }
+  /** Selected rehab level index (0-4) */
+  rehabLevelIndex: number
+  /** Custom rehab table (if user has one) */
+  rehabTable?: RehabTable
+  /** Custom tier ranges */
+  tierRanges?: TierRangeDefinition[]
+  /** ARV threshold percent (top X% by price) */
+  arvThresholdPercent: number
+  /** As-is threshold percent (comps below X% of ARV) */
+  asIsThresholdPercent: number
+  /** Location risk flags from OSM analysis */
+  riskFlags?: string[]
 }

@@ -341,8 +341,29 @@ export class AnalysisJobDO {
           adjustedPrice: (comp.adjustedPrice as number) ?? null,
         }))
 
+        // Build rich context for AI comp selection
+        const evalParams = config.evalParams
+        const compAnalysisCtx: import('../services/comp-analysis/types').CompAnalysisContext = {
+          bundle: config.bundle,
+          evalContexts,
+          analysisResult: config.analysisResult,
+          filters: evalParams.appraisalRules?.filters ?? [],
+          adjustments: evalParams.appraisalRules?.adjustments ?? [],
+          dealParams: {
+            closingCostsPercent: evalParams.buybox?.closingCostsPercent ?? 8,
+            carryingCostsPercent: evalParams.buybox?.carryingCostsPercent ?? 2,
+            wholesaleFee: evalParams.buybox?.wholesaleFee ?? 10000,
+          },
+          rehabLevelIndex: evalParams.buybox?.rehabLevelIndex ?? 2,
+          rehabTable: evalParams.customRehabTable,
+          tierRanges: evalParams.customTierRanges,
+          arvThresholdPercent: evalParams.arvThreshold?.percent ?? 15,
+          asIsThresholdPercent: evalParams.asIsThresholdPercent ?? 70,
+          riskFlags: (config.analysisResult.riskFlags as string[]) ?? [],
+        }
+
         const llmResult = await analyzeComps(
-          config.bundle.property, config.bundle.comparables, evalContexts,
+          compAnalysisCtx,
           this.env, { includePhotos: config.llmOptions?.includePhotos },
         )
 
@@ -351,16 +372,18 @@ export class AnalysisJobDO {
 
           // Apply LLM's comp selection: update isEnabled on all comps
           const selectedSet = new Set(llmResult.selectedForArv)
+          const asIsSet = new Set(llmResult.asIsComps ?? [])
           const currentResult = config.analysisResult
           if (currentResult.comps?.items && Array.isArray(currentResult.comps.items)) {
             currentResult.comps.items = currentResult.comps.items.map((comp: Record<string, unknown>) => {
               const compId = comp.id as string
               const ranking = llmResult.rankings.find((r) => r.compId === compId)
               const isSelected = selectedSet.has(compId)
+              const isAsIs = asIsSet.has(compId)
               return {
                 ...comp,
                 isEnabled: isSelected,
-                compGroup: isSelected ? 'arv' : (comp.compGroup === 'as_is' ? 'as_is' : null),
+                compGroup: isSelected ? 'arv' : isAsIs ? 'as_is' : null,
                 selectionReason: ranking?.reasoning || null,
                 qualityScore: ranking?.score ?? null,
                 keyFeatures: ranking?.keyFeatures?.length ? ranking.keyFeatures : null,
