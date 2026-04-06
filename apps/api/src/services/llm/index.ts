@@ -88,20 +88,45 @@ export function createLLMProvider(config: LLMProviderConfig): LLMProvider {
 interface LLMEnv {
   OPENROUTER_API_KEY?: string
   OPENROUTER_MODEL?: string
+  COMP_SELECTION_MODEL?: string
+  MARKET_SEARCH_MODEL?: string
+}
+
+/** Task-specific model presets */
+export type LLMTask = 'default' | 'comp_selection' | 'market_search' | 'vision'
+
+/** Default models per task — can be overridden via env vars */
+const TASK_MODELS: Record<LLMTask, string> = {
+  default: 'google/gemini-2.0-flash-001',
+  comp_selection: 'google/gemini-3-flash-preview',
+  market_search: 'google/gemini-3-flash-preview',
+  vision: 'google/gemini-2.0-flash-001',
 }
 
 /**
- * Create an LLM provider from environment variables
- * Uses OpenRouter as the single LLM provider
+ * Create an LLM provider from environment variables.
+ * Optionally specify a task to use the appropriate model.
  */
-export function createLLMProviderFromEnv(env: LLMEnv): LLMProvider | null {
+export function createLLMProviderFromEnv(env: LLMEnv, task?: LLMTask): LLMProvider | null {
   if (!env.OPENROUTER_API_KEY) {
     return null
   }
 
+  let model: string
+  switch (task) {
+    case 'comp_selection':
+      model = env.COMP_SELECTION_MODEL || env.OPENROUTER_MODEL || TASK_MODELS.comp_selection
+      break
+    case 'market_search':
+      model = env.MARKET_SEARCH_MODEL || env.OPENROUTER_MODEL || TASK_MODELS.market_search
+      break
+    default:
+      model = env.OPENROUTER_MODEL || TASK_MODELS.default
+  }
+
   return createOpenRouterProvider({
     apiKey: env.OPENROUTER_API_KEY,
-    model: env.OPENROUTER_MODEL || 'google/gemini-2.0-flash-001',
+    model,
   })
 }
 

@@ -59,6 +59,12 @@ export interface AnalyzeRequest {
   llmAnalysis?: {
     enabled?: boolean
     includePhotos?: boolean
+    /** Override model for comp selection */
+    compSelectionModel?: string
+    /** Override model for market context search */
+    marketSearchModel?: string
+    /** Enable reasoning/thinking mode */
+    reasoning?: boolean
   }
   /** Override ARV comp threshold for this request */
   arvThresholdPercent?: number

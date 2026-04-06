@@ -26,7 +26,7 @@ import ghlSettingsRoute from './routes/ghl-settings'
 import userReportsRoute from './routes/user-reports'
 import waitlistRoute from './routes/waitlist'
 import adminRoute from './routes/admin'
-import visionRoute from './routes/vision'
+// Vision analysis removed
 import arvThresholdRoute from './routes/arv-threshold'
 import proximityConfigRoute from './routes/proximity-config'
 import typeaheadRoute from './routes/typeahead'
@@ -117,9 +117,6 @@ app.route('/arv-threshold', arvThresholdRoute)
 
 // Address typeahead routes (session auth via Better Auth cookies)
 app.route('/typeahead', typeaheadRoute)
-
-// Vision analysis routes (session auth via Better Auth cookies)
-app.route('/vision', visionRoute)
 
 // SSE stream routes (token-authenticated)
 app.route('/sse', sseStream)

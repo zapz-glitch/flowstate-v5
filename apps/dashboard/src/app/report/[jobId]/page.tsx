@@ -274,7 +274,7 @@ export default function ReportPage({ params }: { params: Promise<{ jobId: string
         activeMarkerKey={activeMarkerKey}
         riskFlags={analysis.riskFlags}
         floodZone={analysis.floodZone}
-        visionAnalysis={analysis.visionAnalysis}
+
         valuationCardRef={valuationCardRef}
         footer={
           <div className="pt-6 border-t border-border text-center">

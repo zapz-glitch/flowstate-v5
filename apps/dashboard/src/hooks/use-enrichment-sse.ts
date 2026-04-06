@@ -16,9 +16,11 @@ export interface UseEnrichmentSSEOptions {
 
 const EVENT_TYPES = [
   'connected',
-  'market_data_started',
-  'market_data_progress',
-  'market_data_complete',
+  'property_fetch',
+  'subject_found',
+  'comps_found',
+  'evaluation_started',
+  'evaluation_complete',
   'llm_started',
   'llm_complete',
   'enrichment_done',

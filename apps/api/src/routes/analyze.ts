@@ -21,16 +21,7 @@ import {
   type MajorItem,
 } from '../services/valuation'
 import { loadUserAnalysisSettings } from '../services/user-settings'
-import { createPropertyApi } from '../services/property-api'
-import { DEFAULT_FILTERS } from '../services/appraisal'
-import { filtersToApiParams } from '../services/appraisal/types'
-import { createPhotoService } from '../services/photo-provider'
-import type { PropertyIdentifier } from '../services/photo-provider'
-import { performAnalysis } from '../services/evaluation'
-import { detectOsmLocationRisks } from '../services/location-risk'
 import { generateSseToken } from '../utils/sse-token'
-import { drizzle } from 'drizzle-orm/d1'
-import { savedReports } from '../db/schema'
 import { AnalysisError } from '../utils/analysis-error'
 
 type Variables = { auth: AuthContext }
@@ -105,7 +96,23 @@ interface AnalyzeRequest {
   llmAnalysis?: {
     enabled?: boolean
     includePhotos?: boolean
+    /** Override model for comp selection */
+    compSelectionModel?: string
+    /** Override model for market context search */
+    marketSearchModel?: string
   }
+}
+
+const ALLOWED_MODELS = new Set([
+  'google/gemini-3-flash-preview',
+  'google/gemini-2.5-flash',
+  'x-ai/grok-4.1-fast',
+])
+
+function validateModel(model: string | undefined): string | undefined {
+  if (!model) return undefined
+  if (!ALLOWED_MODELS.has(model)) return undefined
+  return model
 }
 
 // ─── Main Endpoint ─────────────────────────────────────────────────────────────
@@ -146,51 +153,10 @@ analyze.post('/', async (c) => {
     }, c.env.API_CACHE)
     console.log(`[Analyze][Timing] User settings: ${Date.now() - settingsStart}ms`)
 
-    // ─── 2. Fetch property bundle from CoreLogic ─────────────────────────────
-    const bundleFetchStart = Date.now()
-    const propertyApi = createPropertyApi(c.env)
-    propertyApi.resetCallStats()
-    const filters = userSettings.appraisalRules?.filters ?? DEFAULT_FILTERS
-    const apiFilterParams = filtersToApiParams(filters)
+    // ─── 2. Start streaming analysis in DO ────────────────────────────────────
+    // Everything runs in the Durable Object and streams results via SSE.
+    // The route returns immediately with jobId + SSE token.
 
-    const bundleResult = await propertyApi.getPropertyBundle({
-      address: body.address,
-      streetAddress: body.streetAddress,
-      city: body.city,
-      state: body.state,
-      zipCode: body.zipCode,
-      propertyId: body.propertyId,
-      comparables: {
-        radiusMiles: body.searchOptions?.radiusMiles ?? apiFilterParams.radiusMiles ?? 1,
-        maxComps: body.searchOptions?.maxComps ?? 15,
-        monthsBack: body.searchOptions?.monthsBack ?? apiFilterParams.monthsBack ?? 12,
-        sqftVariance: apiFilterParams.sqftVariance,
-      },
-      enrichment: {
-        permits: body.enrichment?.permits ?? true,
-        floodZone: body.enrichment?.floodZone ?? true,
-        weatherRisk: body.enrichment?.weatherRisk ?? false,
-        neighbourhood: false,
-      },
-      skipCache: body.skipCache,
-    })
-
-    console.log(`[Analyze][Timing] CoreLogic fetch: ${Date.now() - bundleFetchStart}ms`)
-
-    if (!bundleResult.success) {
-      return c.json(
-        { success: false, error: bundleResult.error || 'Failed to fetch property data' },
-        400
-      )
-    }
-
-    const bundle = bundleResult.data
-
-    // ─── 3. Evaluate: appraisal + price classification + valuation ───────────
-    const evalStart = Date.now()
-    const propertyCallStats = propertyApi.getCallStats()
-
-    // Apply appraisal rule overrides from request (playground inline editing)
     let appraisalRules = userSettings.appraisalRules
     if (body.appraisalOverrides) {
       const overrideFilters = body.appraisalOverrides.filters?.map((f) => ({
@@ -214,72 +180,6 @@ analyze.post('/', async (c) => {
       ? { percent: body.arvThresholdPercent }
       : userSettings.arvThreshold
 
-    const evalParams = {
-      jobId,
-      bundle,
-      appraisalRules,
-      buybox: userSettings.mergedBuybox,
-      customRehabTable: userSettings.customRehabTable,
-      customTierRanges: userSettings.customTierRanges,
-      customMajorItemCosts: userSettings.customMajorItemCosts,
-      arvThreshold,
-      asIsThresholdPercent: body.asIsThresholdPercent ?? userSettings.asIsThresholdPercent,
-      apiCallStats: {
-        corelogic: {
-          total: propertyCallStats.total,
-          cached: propertyCallStats.cached,
-          endpoints: propertyCallStats.endpoints,
-        },
-        totalExternalCalls: propertyCallStats.total,
-      },
-    }
-
-    // Run evaluation synchronously — fast, pure CPU computation
-    let analysisResult = performAnalysis(evalParams).response
-
-    // Inject OSM location risks (parallel, non-blocking)
-    try {
-      if (bundle.property.latitude && bundle.property.longitude) {
-        const osmResult = await detectOsmLocationRisks(bundle.property.latitude, bundle.property.longitude)
-        if (osmResult.riskFlags.length > 0) {
-          const existingFlags = analysisResult.riskFlags ?? []
-          analysisResult = { ...analysisResult, riskFlags: [...existingFlags, ...osmResult.riskFlags] }
-        }
-      }
-    } catch {
-      // Non-fatal
-    }
-
-    console.log(`[Analyze][Timing] Evaluation: ${Date.now() - evalStart}ms`)
-
-    // ─── 4. Save report to DB (background, non-blocking) ────────────────────
-    c.executionCtx.waitUntil((async () => {
-      try {
-        const db = drizzle(c.env.DB)
-        await db.insert(savedReports).values({
-          userId: auth.userId,
-          jobId,
-          propertyAddress: analysisResult.subject.address,
-          propertyCity: body.city || bundle.property.city || '',
-          propertyState: body.state || bundle.property.state || '',
-          propertyZip: body.zipCode || bundle.property.zipCode || '',
-          propertyClip: bundle.property.id || null,
-          fullResponseJson: JSON.stringify(analysisResult),
-          arv: analysisResult.valuation.arv,
-          asIsValue: analysisResult.valuation.asIsValue ?? null,
-          maxAllowableOffer: analysisResult.valuation.buyPrice,
-          estimatedRepairs: analysisResult.valuation.rehabCost,
-        })
-      } catch (error) {
-        console.warn(`[Analyze] Failed to save report:`, error instanceof Error ? error.message : error)
-      }
-    })())
-
-    // ─── 5. Start background enrichment: Zillow photos + optional LLM ──────
-    const llmEnabled = body.llmAnalysis?.enabled === true
-    const pending: string[] = ['market_data']
-    if (llmEnabled && c.env.OPENROUTER_API_KEY) pending.push('llm')
-
     const sseSecret = c.env.BETTER_AUTH_SECRET || ''
     const token = await generateSseToken(sseSecret, jobId, auth.userId)
     const apiBaseUrl = c.req.url.replace(/\/v1\/analyze.*/, '')
@@ -287,13 +187,22 @@ analyze.post('/', async (c) => {
 
     const doId = c.env.ANALYSIS_JOB.idFromName(jobId)
     const stub = c.env.ANALYSIS_JOB.get(doId)
-    const startResp = await stub.fetch('http://internal/start', {
+    const startResp = await stub.fetch('http://internal/start-streaming', {
       method: 'POST',
       body: JSON.stringify({
         jobId,
         userId: auth.userId,
-        pending,
-        bundle,
+        search: {
+          address: body.address,
+          streetAddress: body.streetAddress,
+          city: body.city,
+          state: body.state,
+          zipCode: body.zipCode,
+          propertyId: body.propertyId,
+        },
+        searchOptions: body.searchOptions ?? {},
+        enrichment: body.enrichment,
+        skipCache: body.skipCache,
         evalParams: {
           appraisalRules,
           buybox: userSettings.mergedBuybox,
@@ -303,21 +212,25 @@ analyze.post('/', async (c) => {
           arvThreshold,
           asIsThresholdPercent: body.asIsThresholdPercent ?? userSettings.asIsThresholdPercent,
         },
-        analysisResult,
-        llmOptions: { includePhotos: body.llmAnalysis?.includePhotos },
+        llmEnabled: body.llmAnalysis?.enabled === true && !!c.env.OPENROUTER_API_KEY,
+        llmOptions: {
+          includePhotos: body.llmAnalysis?.includePhotos,
+          compSelectionModel: validateModel(body.llmAnalysis?.compSelectionModel),
+          marketSearchModel: validateModel(body.llmAnalysis?.marketSearchModel),
+        },
       }),
     })
     await startResp.text()
 
-    console.log(`[Analyze][Timing] Total: ${Date.now() - routeStart}ms`)
-    console.log(`[Analyze] Job ${jobId} — ${bundle.comparables.length} comps, enrichment: ${pending.join(', ')}`)
+    console.log(`[Analyze][Timing] Route returned in ${Date.now() - routeStart}ms (streaming via DO)`)
 
     return c.json({
       success: true,
       data: {
         jobId,
-        result: analysisResult,
-        enrichment: { streamUrl, token, pending },
+        // No result — it streams via SSE
+        result: null,
+        enrichment: { streamUrl, token, pending: ['property_fetch', 'evaluation', 'llm'] },
       },
     })
   } catch (error) {
@@ -381,75 +294,9 @@ analyze.get('/defaults', async (c) => {
  * Used when a user enables a previously-disabled comp that didn't have photos fetched.
  * Limited to 5 comps per request.
  */
+// Photo endpoint disabled — Firecrawl removed
 analyze.post('/comp-photos', async (c) => {
-  try {
-    const auth = c.get('auth')
-    const body = await c.req.json<{
-      comps: Array<{
-        propertyId: string
-        address: string
-        city?: string
-        state?: string
-        zipCode?: string
-      }>
-    }>()
-
-    if (!body.comps || !Array.isArray(body.comps) || body.comps.length === 0) {
-      return c.json({ success: false, error: 'comps array is required' }, 400)
-    }
-
-    if (body.comps.length > 5) {
-      return c.json({ success: false, error: 'Maximum 5 comps per request' }, 400)
-    }
-
-    const photoService = createPhotoService(c.env)
-    if (!photoService.isAvailable()) {
-      return c.json({ success: false, error: 'Photo provider not available' }, 503)
-    }
-
-    const properties: PropertyIdentifier[] = body.comps.map((comp) => ({
-      propertyId: comp.propertyId,
-      address: comp.address,
-      city: comp.city ?? '',
-      state: comp.state ?? '',
-      zipCode: comp.zipCode ?? '',
-    }))
-
-    const bulkResult = await photoService.fetchBulkPhotos(properties)
-
-    const data: Record<string, {
-      photos: string[]
-      description?: string
-      features?: string[]
-      sourceUrl?: string
-    }> = {}
-
-    for (const [propertyId, photos] of bulkResult.results) {
-      data[propertyId] = {
-        photos: photos.photos,
-        description: photos.description,
-        features: photos.features,
-        sourceUrl: photos.sourceUrl,
-      }
-    }
-
-    console.log(`[Analyze] Lazy photo fetch for user ${auth.userId}: ${bulkResult.results.size}/${body.comps.length} successful`)
-
-    return c.json({
-      success: true,
-      data,
-      summary: bulkResult.summary,
-    })
-  } catch (error) {
-    console.error('[Analyze Comp Photos] Error:', error)
-    return c.json(
-      {
-        success: false,
-        error: error instanceof Error ? error.message : 'Failed to fetch comp photos',
-      },
-      500
-    )
-  }
+  return c.json({ success: false, error: 'Photo provider not available' }, 503)
 })
 
 export default analyze

@@ -25,6 +25,7 @@ interface SyncOptions {
   displayValuation?: ValuationData
   effectiveComps?: CompsData
   aiAnalyzing?: boolean
+  isStreaming?: boolean
   onOpenSettings: () => void
   onCompClick?: (comp: CompItem) => void
 }
@@ -35,6 +36,7 @@ export function useEvaluationSync({
   displayValuation,
   effectiveComps,
   aiAnalyzing = false,
+  isStreaming = false,
   onOpenSettings,
   onCompClick,
 }: SyncOptions) {
@@ -49,6 +51,7 @@ export function useEvaluationSync({
       recalcData: evaluation.recalcData,
       compOverride: evaluation.compOverride,
       aiAnalyzing,
+      isStreaming,
       callbacks: {
         onToggleComp: evaluation.handleToggleComp,
         onResetComps: evaluation.handleResetComps,
@@ -60,6 +63,6 @@ export function useEvaluationSync({
     subject, displayValuation, effectiveComps,
     evaluation.isRecalculated, evaluation.recalcData, evaluation.compOverride,
     evaluation.handleToggleComp, evaluation.handleResetComps,
-    aiAnalyzing, onOpenSettings, onCompClick, setState,
+    aiAnalyzing, isStreaming, onOpenSettings, onCompClick, setState,
   ])
 }

@@ -21,7 +21,6 @@ export { DealSummaryHero } from './DealSummaryHero'
 export { MapLegend, MapOverlay } from './MapOverlay'
 export { formatCurrency, formatFilterType, formatAdjustmentType, getCompKey, normalizeSubdivision, fmtNumber, formatShortDate, fmtDelta, sqftMatchColor, yearMatchColor } from './format-helpers'
 export { ApiCallStatsCard } from './ApiCallStatsCard'
-export { VisionAnalysisButton } from './VisionAnalysisButton'
 export { StreetViewImage, getStreetViewUrl } from './StreetViewImage'
 export type {
   AnalyzeData,
@@ -34,5 +33,4 @@ export type {
   FloodZoneData,
   NeighbourhoodData,
   ApiCallStats,
-  VisionAnalysis,
 } from './shared-types'

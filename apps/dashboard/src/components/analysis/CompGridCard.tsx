@@ -29,7 +29,7 @@ export function CompGridCard({
   isHighlighted,
 }: CompGridCardProps) {
   const hasArvSelection = isSelectedForArv !== undefined
-  const isEnabled = hasArvSelection ? isSelectedForArv : comp.isEnabled !== false
+  const isEnabled = hasArvSelection ? isSelectedForArv : comp.isEnabled === true
   const cardKey = comp.address || `comp-${index}`
 
   const sqftDelta = comp.squareFeet != null && subject?.squareFeet != null

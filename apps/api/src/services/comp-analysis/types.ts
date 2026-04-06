@@ -9,6 +9,7 @@
 import type { PropertyBundle } from '../property-api/types'
 import type { AppraisalFilter, AppraisalAdjustment } from '../appraisal'
 import type { RehabTable, TierRangeDefinition } from '@flowstate-api/shared/valuation'
+import type { MarketContext } from '../market-context'
 
 export interface CompAnalysisOptions {
   /** Include property photos in analysis (default: false) */
@@ -17,6 +18,8 @@ export interface CompAnalysisOptions {
   maxTokens?: number
   /** Temperature for LLM (default: 0.2 — low for structured output) */
   temperature?: number
+  /** Enable reasoning/thinking mode */
+  reasoning?: boolean
 }
 
 export interface CompRanking {
@@ -46,6 +49,8 @@ export interface CompAnalysisResult {
   arvEstimate?: number
   /** Overall confidence in the selection */
   confidenceLevel?: 'high' | 'medium' | 'low'
+  /** AI reasoning/thinking content (when reasoning mode is enabled) */
+  reasoning?: string
   /** Model used for analysis */
   model: string
   /** Time taken for LLM call */
@@ -106,4 +111,6 @@ export interface CompAnalysisContext {
   asIsThresholdPercent: number
   /** Location risk flags from OSM analysis */
   riskFlags?: string[]
+  /** Market context from web search (if available) */
+  marketContext?: MarketContext | null
 }

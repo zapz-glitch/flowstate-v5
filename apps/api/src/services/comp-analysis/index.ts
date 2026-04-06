@@ -166,7 +166,20 @@ ${adjLines}`
     if (community.crime?.crimeRisk) marketLines.push(`Crime Risk: ${community.crime.crimeRisk}`)
   }
 
-  const marketContext = marketLines.length > 0
+  // Web search market context (real-time market intelligence)
+  const mc = ctx.marketContext
+  if (mc) {
+    if (mc.marketTrends.summary) marketLines.push(`Market Trend: ${mc.marketTrends.summary}`)
+    if (mc.marketTrends.medianPriceDirection) marketLines.push(`Price Direction: ${mc.marketTrends.medianPriceDirection}${mc.marketTrends.yoyPriceChange ? ` (${mc.marketTrends.yoyPriceChange} YoY)` : ''}`)
+    if (mc.marketTrends.avgDaysOnMarket) marketLines.push(`Avg Days on Market: ${mc.marketTrends.avgDaysOnMarket}`)
+    if (mc.marketTrends.inventoryLevel) marketLines.push(`Inventory: ${mc.marketTrends.inventoryLevel}`)
+    if (mc.recentSales.notableSales) marketLines.push(`Recent Sales: ${mc.recentSales.notableSales}`)
+    if (mc.recentSales.foreclosureActivity) marketLines.push(`Foreclosures: ${mc.recentSales.foreclosureActivity}`)
+    if (mc.neighborhoodFactors.recentDevelopment) marketLines.push(`Development: ${mc.neighborhoodFactors.recentDevelopment}`)
+    if (mc.investorSentiment) marketLines.push(`Investor Sentiment: ${mc.investorSentiment}`)
+  }
+
+  const marketContextStr = marketLines.length > 0
     ? `\nMARKET CONTEXT:\n  ${marketLines.join('\n  ')}`
     : ''
 
@@ -243,7 +256,7 @@ ${adjLines}`
   ${subjectLines}
 
 ${userPrefs}
-${marketContext}
+${marketContextStr}
 
 COMPARABLE SALES (${comparables.length} total):
 
@@ -292,9 +305,11 @@ SCORING GUIDE:
 export async function analyzeComps(
   ctx: CompAnalysisContext,
   env: Env,
-  options?: CompAnalysisOptions,
+  options?: CompAnalysisOptions & { modelOverride?: string },
 ): Promise<CompAnalysisResult | null> {
-  const provider = createLLMProviderFromEnv(env)
+  const provider = options?.modelOverride
+    ? createLLMProviderFromEnv({ ...env, COMP_SELECTION_MODEL: options.modelOverride }, 'comp_selection')
+    : createLLMProviderFromEnv(env, 'comp_selection')
   if (!provider) {
     console.log('[CompAnalysis] LLM provider not available (no OPENROUTER_API_KEY)')
     return null
@@ -312,6 +327,7 @@ export async function analyzeComps(
       systemPrompt: SYSTEM_PROMPT,
       temperature: options?.temperature ?? 0.2,
       maxTokens: options?.maxTokens ?? 4096,
+      reasoning: options?.reasoning ? { enabled: true, effort: 'medium' } : undefined,
     })
 
     if (!result.success || !result.data?.content) {
@@ -410,7 +426,8 @@ export async function analyzeComps(
       confidenceLevel: (['high', 'medium', 'low'] as const).includes(parsed.confidenceLevel as 'high')
         ? parsed.confidenceLevel as 'high' | 'medium' | 'low'
         : undefined,
-      model: env.OPENROUTER_MODEL || 'google/gemini-2.0-flash-001',
+      reasoning: result.data.reasoning || undefined,
+      model: env.COMP_SELECTION_MODEL || env.OPENROUTER_MODEL || 'google/gemini-3-flash-preview',
       latencyMs,
       tokenUsage: result.usage ? {
         prompt: result.usage.promptTokens ?? 0,

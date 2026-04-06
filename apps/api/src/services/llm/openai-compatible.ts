@@ -99,17 +99,39 @@ export abstract class OpenAICompatibleProvider extends BaseLLMProvider {
   protected async doExecute(request: LLMRequest): Promise<ProviderResult<LLMResponse>> {
     const messages = this.buildMessages(request)
 
+    // Build request body
+    const body: Record<string, unknown> = {
+      model: this.model,
+      messages,
+      max_tokens: request.maxTokens ?? this.maxTokens,
+      temperature: request.temperature,
+    }
+
+    // Add web search tool if configured
+    if (request.webSearch) {
+      const params: Record<string, unknown> = {}
+      if (request.webSearch.engine) params.engine = request.webSearch.engine
+      if (request.webSearch.maxResults) params.max_results = request.webSearch.maxResults
+      if (request.webSearch.searchContextSize) params.search_context_size = request.webSearch.searchContextSize
+      if (request.webSearch.allowedDomains) params.allowed_domains = request.webSearch.allowedDomains
+      if (request.webSearch.excludedDomains) params.excluded_domains = request.webSearch.excludedDomains
+      if (request.webSearch.userLocation) params.user_location = request.webSearch.userLocation
+      body.tools = [{ type: 'openrouter:web_search', ...(Object.keys(params).length > 0 ? { parameters: params } : {}) }]
+    }
+
+    // Add reasoning if configured
+    if (request.reasoning?.enabled) {
+      body.reasoning = {
+        effort: request.reasoning.effort ?? 'medium',
+      }
+    }
+
     const fetchOptions = this.createFetchOptions(
       'POST',
       {
         Authorization: `Bearer ${this.apiKey}`,
       },
-      {
-        model: this.model,
-        messages,
-        max_tokens: request.maxTokens ?? this.maxTokens,
-        temperature: request.temperature,
-      }
+      body
     )
 
     const response = await fetch(this.baseUrl, fetchOptions)
@@ -138,6 +160,7 @@ export abstract class OpenAICompatibleProvider extends BaseLLMProvider {
       {
         content: text,
         finishReason: data.choices?.[0]?.finish_reason,
+        reasoning: data.choices?.[0]?.message?.reasoning || undefined,
       },
       { usage }
     )

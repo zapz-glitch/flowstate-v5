@@ -407,10 +407,10 @@ function selectGroupAComps(
     })
 
   if (scored.length === 0) {
-    throw new AnalysisError(
-      `No comparable sales available for analysis. ${allComparables.length} comps were found but none had valid sale price data.`,
-      { code: 'INSUFFICIENT_COMPARABLES' },
-    )
+    const reason = allComparables.length === 0
+      ? 'No comparable sales were found in this area. Try expanding the search radius or date range.'
+      : `${allComparables.length} comparable${allComparables.length === 1 ? ' was' : 's were'} found but none had valid sale price data. The comps in this area may not have recent recorded sales.`
+    throw new AnalysisError(reason, { code: 'INSUFFICIENT_COMPARABLES' })
   }
 
   console.log(`[Evaluate] Best-available fallback: ${scored.slice(0, 5).map((s) => `${s.comp.address}(${s.score})`).join(', ')}`)

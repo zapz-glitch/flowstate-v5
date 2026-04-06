@@ -56,6 +56,8 @@ export interface OpenAIResponse {
     message: {
       content: string
       role: string
+      /** Reasoning content (OpenRouter reasoning mode) */
+      reasoning?: string
     }
     finish_reason?: string
   }>

@@ -254,7 +254,9 @@ export function useReportSettings(data: AnalyzeData | null): UseReportSettingsRe
   // This runs synchronously during render, so clicks update the UI in the
   // same frame with zero async delay or missed clicks.
   const recalcData = useMemo(() => {
-    if (!data || loading) return null
+    // Don't recalc until we have full evaluation data (valuation exists)
+    // This prevents recalc from running on partial streaming data (subject + comps only)
+    if (!data || loading || !data.valuation) return null
     return recalculateReport(data, settings)
   }, [data, settings, loading])
 

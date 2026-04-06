@@ -31,6 +31,7 @@ import type { AnalysisStep } from '@/types/analysis'
 import {
   AnalysisPageLayout,
 } from '@/components/analysis'
+import { AnalysisPageSkeleton } from '@/components/analysis/AnalysisSkeletons'
 import { useEnrichmentSSE, type EnrichmentEvent } from '@/hooks/use-enrichment-sse'
 import { AppraisalFilterEditor, type FilterState, type AdjustmentState } from '@/components/analysis/AppraisalFilterEditor'
 import { DownloadReportButton } from '@/components/report/DownloadReportButton'
@@ -107,6 +108,9 @@ export default function AnalyzePage() {
   const [skipCache, setSkipCache] = useState(false)
   const [arvThreshold, setArvThreshold] = useState(15)
   const [asIsThreshold, setAsIsThreshold] = useState(70)
+  const [compModel, setCompModel] = useState('')
+  const [marketModel, setMarketModel] = useState('')
+  const [showAdvanced, setShowAdvanced] = useState(false)
 
   // Error & retry
   const [error, setError] = useState<string | null>(null)
@@ -128,6 +132,7 @@ export default function AnalyzePage() {
   // Phase-based state machine
   const [phase, setPhase] = useState<AnalysisPhase>('idle')
   const [aiAnalyzing, setAiAnalyzing] = useState(false)
+  const [streamingStep, setStreamingStep] = useState<'idle' | 'searching' | 'subject' | 'comps' | 'evaluating' | 'done'>('idle')
   const [enrichmentStreamUrl, setEnrichmentStreamUrl] = useState<string | null>(null)
   const [enrichmentToken, setEnrichmentToken] = useState<string | null>(null)
 
@@ -166,25 +171,61 @@ export default function AnalyzePage() {
     const { event: eventType, data } = event
 
     switch (eventType) {
-      case 'market_data_started':
-        // enrichment status removed('Fetching photos...')
+      case 'property_fetch':
+        setStreamingStep('searching')
         break
 
-      case 'market_data_complete':
+      case 'subject_found':
+        // Subject property found — show map marker + subject card immediately
+        setStreamingStep('subject')
+        if (data.subject) {
+          setAnalysisResult((prev) => ({
+            ...(prev ?? {}),
+            subject: data.subject,
+          } as AnalyzeData))
+          setPhase('ready')
+        }
+        break
+
+      case 'comps_found':
+        // Comps found — show map markers + basic comp cards
+        setStreamingStep('comps')
+        if (data.comps) {
+          setAnalysisResult((prev) => ({
+            ...(prev ?? {}),
+            comps: {
+              count: data.compCount,
+              enabledCount: 0,
+              disabledCount: data.compCount,
+              items: data.comps.map((c: Record<string, unknown>) => ({
+                ...c,
+                isEnabled: false,
+              })),
+            },
+          } as AnalyzeData))
+        }
+        break
+
+      case 'evaluation_started':
+        setStreamingStep('evaluating')
+        break
+
+      case 'evaluation_complete':
+        // Full evaluation result — show valuation + filtered comps
+        setStreamingStep('done')
         if (data.updatedResult) {
           setAnalysisResult(data.updatedResult as AnalyzeData)
+          setAnalysisState((prev) => ({ ...prev, status: 'completed' }))
+          setAiAnalyzing(true) // LLM step follows
         }
-        // enrichment status removed(null)
         break
 
       case 'llm_started':
         setAiAnalyzing(true)
-        // enrichment status removed('AI analyzing comparables...')
         break
 
       case 'llm_complete':
         setAiAnalyzing(false)
-        setPhase('ready')
         if (data.updatedResult) {
           setAnalysisResult(data.updatedResult as AnalyzeData)
         } else if (data.rankings) {
@@ -208,17 +249,29 @@ export default function AnalyzePage() {
 
       case 'enrichment_done':
         setAiAnalyzing(false)
-        setPhase('ready')
         setEnrichmentStreamUrl(null)
         setEnrichmentToken(null)
+        // If we never got evaluation_complete (error path), show ready anyway
+        setPhase((prev) => prev === 'fetching' ? 'ready' : prev)
         break
 
       case 'error':
         setAiAnalyzing(false)
-        setPhase('ready')
+        setStreamingStep('done')
+        if (data.message) {
+          setError(data.message as string)
+          if (data.suggestedFilters) {
+            setSuggestedFilters(data.suggestedFilters as FilterState[])
+          }
+          if (data.suggestedArvThreshold) {
+            setSuggestedArvThreshold(data.suggestedArvThreshold as number)
+          }
+        }
+        // Keep showing whatever we have (subject/comps), don't hide the UI
+        setPhase((prev) => prev === 'fetching' ? 'ready' : prev)
         break
     }
-  }, [setAnalysisResult])
+  }, [setAnalysisResult, setAnalysisState])
 
   const { status: sseStatus } = useEnrichmentSSE({
     streamUrl: enrichmentStreamUrl,
@@ -288,6 +341,7 @@ export default function AnalyzePage() {
     displayValuation: isReady ? displayValuation : undefined,
     effectiveComps: isReady ? effectiveComps : undefined,
     aiAnalyzing,
+    isStreaming: streamingStep !== 'idle' && streamingStep !== 'done',
     onOpenSettings: () => setSettingsOpen(true),
     onCompClick: (comp) => { setComparisonComp(comp as CompItem); setComparisonOpen(true) },
   })
@@ -302,6 +356,7 @@ export default function AnalyzePage() {
     setEnrichmentStreamUrl(null)
     setEnrichmentToken(null)
     setAiAnalyzing(false)
+    setStreamingStep('idle')
     setPhase('fetching')
 
     const t0 = Date.now()
@@ -319,23 +374,31 @@ export default function AnalyzePage() {
         arvThresholdPercent: arvThreshold,
         asIsThresholdPercent: asIsThreshold,
         appraisalOverrides: overrides,
-        llmAnalysis: { enabled: true },
+        llmAnalysis: {
+          enabled: true,
+          compSelectionModel: compModel || undefined,
+          marketSearchModel: marketModel || undefined,
+        },
       })
 
-      if (response.success && response.result) {
-        setDurationMs(Date.now() - t0)
+      if (response.success) {
         setActiveAnalysis({ jobId: response.jobId ?? '', address: address.trim() })
-        setAnalysisResult(response.result as AnalyzeData)
-        setAnalysisState({ ...initialAnalysisState, jobId: response.jobId ?? null, status: 'completed' })
+        setAnalysisState({ ...initialAnalysisState, jobId: response.jobId ?? null, status: 'processing' })
 
+        // Result streams via SSE — connect immediately
         if (response.enrichment) {
-          // AI analysis pending — keep fetching state until SSE completes
           setEnrichmentStreamUrl(response.enrichment.streamUrl)
           setEnrichmentToken(response.enrichment.token)
-          setAiAnalyzing(true)
-        } else {
-          setPhase('ready')
         }
+
+        // If route returned a sync result (legacy/fallback), show it immediately
+        if (response.result) {
+          setDurationMs(Date.now() - t0)
+          setAnalysisResult(response.result as AnalyzeData)
+          setPhase('ready')
+          if (response.enrichment) setAiAnalyzing(true)
+        }
+        // Otherwise phase stays 'fetching' — SSE events will update it
       } else {
         setPhase('idle')
         setError(response.error || 'Analysis failed')
@@ -416,12 +479,19 @@ export default function AnalyzePage() {
               <div className="text-body-sm text-foreground-secondary truncate">
                 {activeAnalysis?.address || address || 'Search an address...'}
               </div>
-              {isFetching && !aiAnalyzing && (
-                <div className="text-xs text-primary mt-0.5" key={analysisState.currentStep}>
-                  <TypewriterText text={getStatusLabel(analysisState.currentStep)} />
+              {streamingStep !== 'idle' && streamingStep !== 'done' && !error && (
+                <div className="text-xs text-primary mt-0.5 flex items-center gap-1.5">
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                  {streamingStep === 'searching' && 'Searching property...'}
+                  {streamingStep === 'subject' && 'Loading comparables...'}
+                  {streamingStep === 'comps' && 'Enriching comp details...'}
+                  {streamingStep === 'evaluating' && 'Evaluating comparables...'}
                 </div>
               )}
-              {aiAnalyzing && (
+              {error && (
+                <div className="text-xs text-red-500 mt-0.5 truncate">{error}</div>
+              )}
+              {aiAnalyzing && streamingStep === 'done' && !error && (
                 <div className="text-xs text-primary mt-0.5 flex items-center gap-1.5">
                   <Loader2 className="w-3 h-3 animate-spin" />
                   AI selecting best comps...
@@ -507,15 +577,49 @@ export default function AnalyzePage() {
                 </Button>
               )}
             </div>
-            <div className="flex items-center gap-6 flex-wrap">
-              <div className="flex items-center gap-2">
-                <Switch id="skip-cache" checked={skipCache} onCheckedChange={setSkipCache} />
-                <Label htmlFor="skip-cache" className="flex items-center gap-1.5 text-body-sm text-foreground-tertiary cursor-pointer">
-                  <RefreshCw className="w-3.5 h-3.5" />
-                  Skip cache
-                </Label>
-              </div>
-            </div>
+            <button
+              type="button"
+              onClick={() => setShowAdvanced((v) => !v)}
+              className="text-[11px] text-foreground-tertiary hover:text-foreground transition-colors flex items-center gap-1"
+            >
+              Advanced
+              <ChevronDown className={cn('w-3 h-3 transition-transform', showAdvanced && 'rotate-180')} />
+            </button>
+            {showAdvanced && (
+              <div className="flex items-center gap-4 flex-wrap pt-2 border-t border-border/30">
+                <div className="flex items-center gap-2">
+                  <Switch id="skip-cache" checked={skipCache} onCheckedChange={setSkipCache} />
+                  <Label htmlFor="skip-cache" className="flex items-center gap-1.5 text-[11px] text-foreground-tertiary cursor-pointer">
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    Skip cache
+                  </Label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <label className="text-[11px] text-foreground-tertiary whitespace-nowrap">Comp Selection</label>
+                  <select
+                    value={compModel}
+                    onChange={(e) => setCompModel(e.target.value)}
+                    className="h-7 text-[11px] px-2 rounded border border-border bg-background text-foreground"
+                  >
+                    <option value="">Gemini 3 Flash</option>
+                    <option value="google/gemini-2.5-flash">Gemini 2.5 Flash</option>
+                    <option value="x-ai/grok-4.1-fast">Grok 4.1 Fast</option>
+                  </select>
+                </div>
+                <div className="flex items-center gap-2">
+                  <label className="text-[11px] text-foreground-tertiary whitespace-nowrap">Market Research</label>
+                  <select
+                    value={marketModel}
+                    onChange={(e) => setMarketModel(e.target.value)}
+                    className="h-7 text-[11px] px-2 rounded border border-border bg-background text-foreground"
+                  >
+                    <option value="">Gemini 3 Flash</option>
+                    <option value="google/gemini-2.5-flash">Gemini 2.5 Flash</option>
+                    <option value="x-ai/grok-4.1-fast">Grok 4.1 Fast</option>
+                  </select>
+                </div>
+                </div>
+            )}
           </div>
         </div>
       )}
@@ -579,17 +683,19 @@ export default function AnalyzePage() {
       })()}
       </div>{/* end search wrapper */}
 
+      {/* Loading skeleton — two-column layout matching the final result */}
+      {isFetching && <AnalysisPageSkeleton />}
+
       {/* Analysis layout — map + valuation on left, comps on right */}
-      {isActive && (
+      {isReady && (
         <AnalysisPageLayout
-          mapComps={isReady ? (effectiveComps ?? analysisResult?.comps) : (hasResult ? analysisResult?.comps : renderData?.comps)}
+          mapComps={effectiveComps ?? analysisResult?.comps}
           onMarkerSelect={handleMarkerSelect}
           activeMarkerKey={activeMarkerKey}
           riskFlags={renderData?.riskFlags}
           floodZone={renderData?.floodZone}
-          visionAnalysis={renderData?.visionAnalysis}
+
           valuationCardRef={valuationCardRef}
-          loading={isFetching}
           footer={
             isReady && hasResult ? (
               <div className="border border-border overflow-hidden no-print min-w-0">

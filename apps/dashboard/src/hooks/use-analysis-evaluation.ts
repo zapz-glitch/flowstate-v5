@@ -82,7 +82,7 @@ export function useAnalysisEvaluation({
     if (data?.comps?.items) {
       const keys = new Set(
         data.comps.items
-          .filter((c) => c.isEnabled !== false)
+          .filter((c) => c.isEnabled === true)
           .map((c, i) => getCompKey(c, i))
       )
       isManualRef.current = false
@@ -91,9 +91,17 @@ export function useAnalysisEvaluation({
   }, [data?.comps?.items])
 
   // Sync comp selection when recalc re-evaluates filters (but not when user manually toggled comps)
+  // Skip if all comps are disabled (LLM pending — server set isEnabled: false on all)
   useEffect(() => {
     if (!recalcData || !data?.comps?.items) return
     if (isManualRef.current) return
+
+    // If server disabled all comps (LLM pending), respect that — don't override with recalc
+    const allDisabled = data.comps.items.every((c) => c.isEnabled !== true)
+    if (allDisabled) {
+      setCompOverride({ selectedCompKeys: new Set(), isManual: false })
+      return
+    }
 
     const keys = new Set<string>()
     data.comps.items.forEach((comp, i) => {
@@ -123,7 +131,7 @@ export function useAnalysisEvaluation({
     if (data?.comps?.items) {
       const keys = new Set(
         data.comps.items
-          .filter((c) => c.isEnabled !== false)
+          .filter((c) => c.isEnabled === true)
           .map((c, i) => getCompKey(c, i))
       )
       setCompOverride({ selectedCompKeys: keys, isManual: false })

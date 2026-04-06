@@ -94,6 +94,27 @@ export interface ImageInput {
 /**
  * LLM request for vision or text completion
  */
+/** OpenRouter web search tool configuration */
+export interface WebSearchConfig {
+  /** Search engine: auto | exa | native | parallel */
+  engine?: 'auto' | 'exa' | 'native' | 'parallel'
+  /** Max results per search (1-25, default 5) */
+  maxResults?: number
+  /** Content extraction depth: low | medium | high */
+  searchContextSize?: 'low' | 'medium' | 'high'
+  /** Restrict to specific domains */
+  allowedDomains?: string[]
+  /** Exclude specific domains */
+  excludedDomains?: string[]
+  /** Geo-bias for search results */
+  userLocation?: {
+    type: 'approximate'
+    city?: string
+    region?: string
+    country?: string
+  }
+}
+
 export interface LLMRequest {
   /** Main prompt/instruction */
   prompt: string
@@ -107,6 +128,14 @@ export interface LLMRequest {
   maxTokens?: number
   /** Temperature for response randomness (0-1) */
   temperature?: number
+  /** Enable OpenRouter web search tool */
+  webSearch?: WebSearchConfig
+  /** Enable reasoning/thinking mode */
+  reasoning?: {
+    enabled: boolean
+    /** Reasoning effort: xhigh, high, medium, low, minimal */
+    effort?: 'xhigh' | 'high' | 'medium' | 'low' | 'minimal'
+  }
 }
 
 /**
@@ -117,6 +146,8 @@ export interface LLMResponse {
   content: string
   /** Finish reason if provided by model */
   finishReason?: string
+  /** Reasoning/thinking content (when reasoning mode is enabled) */
+  reasoning?: string
 }
 
 /**

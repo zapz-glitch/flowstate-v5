@@ -26,7 +26,11 @@ export interface Env {
   // ─── Vision Analysis (OpenRouter LLM) ──────────────────────────────────────
   // OpenRouter provides access to multiple models via single API
   OPENROUTER_API_KEY?: string
-  OPENROUTER_MODEL?: string // e.g., 'google/gemini-2.0-flash-001', 'anthropic/claude-3.5-sonnet'
+  OPENROUTER_MODEL?: string // Default model for general LLM tasks
+  /** Model for comp selection — stronger reasoning (e.g., 'anthropic/claude-sonnet-4', 'google/gemini-2.5-pro-preview') */
+  COMP_SELECTION_MODEL?: string
+  /** Model for market context web search — fast/cheap (e.g., 'google/gemini-2.0-flash-001') */
+  MARKET_SEARCH_MODEL?: string
 
   // ─── Google AI (Gemini) ──────────────────────────────────────────────────────
   // Direct Google AI API key for Gemini URL context and Zillow data fetching

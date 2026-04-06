@@ -28,6 +28,7 @@ export function useEvaluation() {
 
     // UI state
     aiAnalyzing: state.aiAnalyzing,
+    isStreaming: state.isStreaming,
 
     // Callbacks
     onToggleComp: state.callbacks.onToggleComp,

@@ -47,6 +47,8 @@ export interface EvaluationState {
 
   // UI state
   aiAnalyzing: boolean
+  /** Whether the streaming pipeline is still running (property fetch → evaluation → LLM) */
+  isStreaming: boolean
 
   // Callbacks
   callbacks: EvaluationCallbacks
@@ -67,5 +69,6 @@ export const evaluationStateAtom = atom<EvaluationState>({
   recalcData: null,
   compOverride: null,
   aiAnalyzing: false,
+  isStreaming: false,
   callbacks: defaultCallbacks,
 })

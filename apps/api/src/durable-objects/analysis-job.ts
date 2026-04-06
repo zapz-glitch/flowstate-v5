@@ -13,10 +13,12 @@
  */
 
 import { analyzeComps, type CompEvalContext } from '../services/comp-analysis'
+import { fetchMarketContext, type MarketContext } from '../services/market-context'
 import { performAnalysis, type EvaluationParams } from '../services/evaluation'
-import { createPhotoService } from '../services/photo-provider'
 import { detectOsmLocationRisks } from '../services/location-risk'
-import type { PropertyIdentifier, PropertyPhotos } from '../services/photo-provider'
+import { createPropertyApi } from '../services/property-api'
+import { DEFAULT_FILTERS, type AppraisalFilter } from '../services/appraisal'
+import { filtersToApiParams } from '../services/appraisal/types'
 import type { Env } from '../types'
 import type { NormalizedProperty, NormalizedComparable } from '../services/property-api/types'
 import { drizzle } from 'drizzle-orm/d1'
@@ -41,7 +43,49 @@ export interface StartEnrichmentRequest {
   evalParams: Omit<EvaluationParams, 'jobId' | 'bundle'>
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   analysisResult: Record<string, any>
-  llmOptions?: { includePhotos?: boolean }
+  llmOptions?: {
+    includePhotos?: boolean
+    compSelectionModel?: string
+    marketSearchModel?: string
+    reasoning?: boolean
+  }
+}
+
+/** Request type for the streaming analysis flow (everything runs in the DO) */
+export interface StartStreamingRequest {
+  jobId: string
+  userId: string
+  /** Address search params */
+  search: {
+    address?: string
+    streetAddress?: string
+    city?: string
+    state?: string
+    zipCode?: string
+    propertyId?: string
+  }
+  /** Comp search options */
+  searchOptions: {
+    radiusMiles?: number
+    maxComps?: number
+    monthsBack?: number
+  }
+  /** Enrichment options */
+  enrichment?: {
+    permits?: boolean
+    floodZone?: boolean
+  }
+  skipCache?: boolean
+  /** Evaluation params (user settings, thresholds, etc.) */
+  evalParams: Omit<EvaluationParams, 'jobId' | 'bundle'>
+  /** Whether to run LLM comp selection */
+  llmEnabled: boolean
+  llmOptions?: {
+    includePhotos?: boolean
+    compSelectionModel?: string
+    marketSearchModel?: string
+    reasoning?: boolean
+  }
 }
 
 export class AnalysisJobDO {
@@ -60,6 +104,9 @@ export class AnalysisJobDO {
     const url = new URL(request.url)
     const path = url.pathname
 
+    if (request.method === 'POST' && path === '/start-streaming') {
+      return this.handleStartStreaming(request)
+    }
     if (request.method === 'POST' && path === '/start') {
       return this.handleStart(request)
     }
@@ -76,7 +123,349 @@ export class AnalysisJobDO {
     return new Response('Not found', { status: 404 })
   }
 
-  // ─── Start Enrichment ─────────────────────────────────────────────────────
+  // ─── Start Streaming Analysis (full pipeline in DO) ────────────────────────
+
+  private async handleStartStreaming(request: Request): Promise<Response> {
+    const body = await request.json() as StartStreamingRequest
+
+    const pending = ['property_fetch', 'evaluation']
+    if (body.llmEnabled) pending.push('llm')
+
+    this.jobState = {
+      jobId: body.jobId,
+      userId: body.userId,
+      status: 'processing',
+      pending,
+      events: [],
+      createdAt: Date.now(),
+    }
+    await this.state.storage.put('jobState', this.jobState)
+
+    this.runStreamingAnalysis(body).catch((err) => {
+      console.error('[AnalysisJobDO] Streaming analysis fatal error:', err)
+      this.pushEvent('error', { step: 'fatal', message: err instanceof Error ? err.message : 'Unknown error' })
+      this.pushEvent('enrichment_done', { totalDurationMs: Date.now() - (this.jobState?.createdAt ?? Date.now()) })
+    })
+
+    return new Response('OK', { status: 200 })
+  }
+
+  private async runStreamingAnalysis(config: StartStreamingRequest): Promise<void> {
+    const startTime = Date.now()
+    await new Promise((r) => setTimeout(r, 300)) // Let SSE clients connect
+    console.log(`[AnalysisJobDO] ── Streaming analysis started ──`)
+
+    const propertyApi = createPropertyApi(this.env)
+    const filters = (config.evalParams.appraisalRules?.filters ?? DEFAULT_FILTERS) as AppraisalFilter[]
+    const apiFilterParams = filtersToApiParams(filters)
+
+    // ── Step 1: Search subject property ─────────────────────────────────────
+    await this.pushEvent('property_fetch', { message: 'Searching property...' })
+
+    const searchResult = await propertyApi.searchProperty({
+      address: config.search.address,
+      streetAddress: config.search.streetAddress,
+      city: config.search.city,
+      state: config.search.state,
+      zipCode: config.search.zipCode,
+    })
+
+    if (!searchResult.success) {
+      await this.pushEvent('error', { step: 'property_fetch', message: ('error' in searchResult ? searchResult.error : null) || 'Property not found' })
+      await this.pushEvent('enrichment_done', { totalDurationMs: Date.now() - startTime })
+      return
+    }
+
+    const property = searchResult.data
+    console.log(`[AnalysisJobDO] ✓ Subject found: ${property.address} in ${Date.now() - startTime}ms`)
+
+    // Stream subject immediately → dashboard shows map marker + subject card
+    await this.pushEvent('subject_found', {
+      subject: {
+        id: property.id,
+        address: `${property.address}, ${property.city}, ${property.state} ${property.zipCode}`,
+        county: property.county,
+        latitude: property.latitude,
+        longitude: property.longitude,
+        bedrooms: property.bedrooms,
+        bathrooms: property.bathrooms,
+        squareFeet: property.squareFeet,
+        yearBuilt: property.yearBuilt,
+        subdivision: property.subdivision,
+        lotSizeAcres: property.lotSizeAcres,
+        propertyType: property.propertyType,
+        lastSale: property.lastSalePrice ? {
+          price: property.lastSalePrice,
+          date: property.lastSaleDate,
+          pricePerSqft: property.pricePerSqft,
+        } : null,
+        buildingStyle: property.construction?.buildingStyle ?? null,
+        foundationType: property.construction?.foundationType ?? null,
+        pool: property.features?.poolType ?? null,
+        garage: property.features?.garageType ?? null,
+        carport: property.features?.carportType ?? null,
+      },
+    })
+
+    // ── Step 2: Fetch comps + permits + flood in parallel ────────────────────
+    await this.pushEvent('property_fetch', { message: 'Fetching comparables...' })
+    const compsStart = Date.now()
+
+    const [compsResult, permitsResult, floodResult] = await Promise.all([
+      propertyApi.getComparables({
+        propertyId: property.id,
+        radiusMiles: config.searchOptions.radiusMiles ?? apiFilterParams.radiusMiles ?? 1,
+        maxComps: config.searchOptions.maxComps ?? 15,
+        monthsBack: config.searchOptions.monthsBack ?? apiFilterParams.monthsBack ?? 12,
+        sqftVariance: apiFilterParams.sqftVariance,
+        subjectSqft: property.squareFeet ?? undefined,
+        subjectPropertyType: property.propertyType ?? undefined,
+      }),
+      (config.enrichment?.permits !== false)
+        ? propertyApi.getBuildingPermits(property.id, { address1: property.address, address2: `${property.city}, ${property.state} ${property.zipCode}` }).catch(() => null)
+        : Promise.resolve(null),
+      (config.enrichment?.floodZone !== false && property.latitude && property.longitude)
+        ? propertyApi.getFloodZone(property.latitude, property.longitude).catch(() => null)
+        : Promise.resolve(null),
+    ])
+
+    if (!compsResult.success) {
+      await this.pushEvent('error', { step: 'comps_fetch', message: ('error' in compsResult ? compsResult.error : null) || 'Failed to fetch comparables' })
+      await this.pushEvent('enrichment_done', { totalDurationMs: Date.now() - startTime })
+      return
+    }
+
+    const rawComps = compsResult.data.comparables
+    console.log(`[AnalysisJobDO] ✓ ${rawComps.length} comps found in ${Date.now() - compsStart}ms`)
+
+    // Stream comps immediately → dashboard shows map markers + basic comp cards
+    await this.pushEvent('comps_found', {
+      compCount: rawComps.length,
+      comps: rawComps.map((c) => ({
+        id: c.id,
+        address: `${c.address}, ${c.city}, ${c.state}`,
+        latitude: c.latitude,
+        longitude: c.longitude,
+        salePrice: c.salePrice,
+        saleDate: c.saleDate,
+        squareFeet: c.squareFeet,
+        bedrooms: c.bedrooms,
+        bathrooms: c.bathrooms,
+        yearBuilt: c.yearBuilt,
+        distanceMiles: c.distanceMiles,
+        pricePerSqft: c.pricePerSqft,
+      })),
+    })
+
+    // ── Step 3: Enrich comps + fetch market context (parallel) ────────────────
+    await this.pushEvent('property_fetch', { message: 'Enriching comparable details...' })
+    const enrichStart = Date.now()
+
+    // Run comp enrichment and market context search in parallel
+    const [enrichedComps, marketContext] = await Promise.all([
+      propertyApi.enrichComparables(rawComps, { concurrency: 10 }),
+      config.llmEnabled
+        ? fetchMarketContext({
+            address: property.address,
+            city: property.city,
+            state: property.state,
+            zipCode: property.zipCode,
+            propertyType: property.propertyType,
+            subdivision: property.subdivision,
+          }, this.env, config.llmOptions?.marketSearchModel).catch((err) => {
+            console.warn('[AnalysisJobDO] Market context error:', err instanceof Error ? err.message : err)
+            return null
+          })
+        : Promise.resolve(null),
+    ]) as [typeof rawComps, MarketContext | null]
+
+    console.log(`[AnalysisJobDO] ✓ Comps enriched in ${Date.now() - enrichStart}ms${marketContext ? `, market context fetched` : ''}`)
+
+    // Build the full property bundle
+    const permitsData = permitsResult && 'success' in permitsResult && permitsResult.success ? permitsResult.data : null
+    const permits = permitsData ? {
+      items: permitsData.permits,
+      count: permitsData.count,
+      totalJobValue: permitsData.permits.reduce((sum: number, p: { jobValue?: number | null }) => sum + (p.jobValue ?? 0), 0),
+      recentPermitTypes: [...new Set(permitsData.permits.map((p: { projectType?: string | null }) => p.projectType).filter(Boolean) as string[])],
+    } : null
+
+    const floodData = floodResult && 'success' in floodResult && floodResult.success ? floodResult.data : null
+
+    const bundle: import('../services/property-api/types').PropertyBundle = {
+      property,
+      comparables: enrichedComps,
+      metadata: {
+        fetchedAt: new Date().toISOString(),
+        provider: property.provider,
+        searchParams: config.search as import('../services/property-api/types').PropertySearchParams,
+        comparablesParams: { propertyId: property.id, radiusMiles: config.searchOptions.radiusMiles ?? 1, maxComps: config.searchOptions.maxComps ?? 15, monthsBack: config.searchOptions.monthsBack ?? 12 },
+        enrichmentOptions: { permits: config.enrichment?.permits ?? true, floodZone: config.enrichment?.floodZone ?? true, weatherRisk: false, neighbourhood: false },
+      },
+      enrichment: {
+        permits,
+        floodZone: floodData ?? null,
+        weatherRisk: null,
+        neighbourhood: null,
+      },
+    }
+
+    // ── Step 4: Run evaluation (appraisal rules + valuation) ────────────────
+    const evalStart = Date.now()
+    await this.pushEvent('evaluation_started', { message: 'Evaluating comparables...' })
+
+    const propertyCallStats = propertyApi.getCallStats()
+    const evalParams = {
+      ...config.evalParams,
+      apiCallStats: {
+        corelogic: { total: propertyCallStats.total, cached: propertyCallStats.cached, endpoints: propertyCallStats.endpoints },
+        totalExternalCalls: propertyCallStats.total,
+      },
+    }
+
+    let evalResult
+    try {
+      evalResult = performAnalysis({ jobId: config.jobId, bundle, ...evalParams })
+    } catch (evalError) {
+      const msg = evalError instanceof Error ? evalError.message : 'Evaluation failed'
+      const code = (evalError as { code?: string })?.code
+      const suggestedFilters = (evalError as { suggestedFilters?: unknown })?.suggestedFilters
+      const suggestedArvThreshold = (evalError as { suggestedArvThreshold?: number })?.suggestedArvThreshold
+      console.warn(`[AnalysisJobDO] Evaluation error (${code}): ${msg}`)
+      await this.pushEvent('error', {
+        step: 'evaluation',
+        message: msg,
+        code,
+        suggestedFilters,
+        suggestedArvThreshold,
+      })
+      await this.pushEvent('enrichment_done', { totalDurationMs: Date.now() - startTime })
+      return
+    }
+
+    let analysisResult = evalResult.response as unknown as Record<string, unknown>
+
+    // Inject OSM location risks
+    try {
+      if (property.latitude && property.longitude) {
+        const osmResult = await detectOsmLocationRisks(property.latitude, property.longitude)
+        if (osmResult.riskFlags.length > 0) {
+          const existingFlags = (analysisResult.riskFlags as string[] | null) ?? []
+          analysisResult.riskFlags = [...existingFlags, ...osmResult.riskFlags]
+        }
+      }
+    } catch { /* Non-fatal */ }
+
+    // If LLM will run, disable all comp selections — LLM decides final selection
+    if (config.llmEnabled) {
+      const comps = analysisResult.comps as Record<string, unknown> | undefined
+      if (comps?.items && Array.isArray(comps.items)) {
+        comps.items = comps.items.map((c: Record<string, unknown>) => ({ ...c, isEnabled: false }))
+        comps.enabledCount = 0
+        comps.disabledCount = (comps.items as unknown[]).length
+      }
+    }
+
+    console.log(`[AnalysisJobDO] ✓ Evaluation complete in ${Date.now() - evalStart}ms`)
+
+    // Stream full evaluation result → dashboard shows valuation + filtered comps
+    await this.pushEvent('evaluation_complete', { updatedResult: analysisResult })
+
+    // Save report to DB
+    try {
+      const db = drizzle(this.env.DB)
+      const subj = analysisResult.subject as Record<string, unknown>
+      const val = analysisResult.valuation as Record<string, unknown>
+      await db.insert(savedReports).values({
+        userId: config.userId,
+        jobId: config.jobId,
+        propertyAddress: (subj.address as string) || '',
+        propertyCity: property.city || '',
+        propertyState: property.state || '',
+        propertyZip: property.zipCode || '',
+        fullResponseJson: JSON.stringify(analysisResult),
+        arv: (val.arv as number) || 0,
+        asIsValue: (val.asIsValue as number) ?? null,
+        maxAllowableOffer: (val.buyPrice as number) || 0,
+        estimatedRepairs: (val.rehabCost as number) || 0,
+      })
+    } catch (dbError) {
+      console.warn(`[AnalysisJobDO] Failed to save report:`, dbError instanceof Error ? dbError.message : dbError)
+    }
+
+    // ── Step 5: LLM comp selection ──────────────────────────────────────────
+    if (config.llmEnabled) {
+      const llmStart = Date.now()
+      try {
+        await this.pushEvent('llm_started', { message: 'AI selecting best comps...', compCount: enrichedComps.length })
+
+        const evalContexts: CompEvalContext[] = ((analysisResult.comps as Record<string, unknown>)?.items as Array<Record<string, unknown>> ?? []).map((comp: Record<string, unknown>) => ({
+          compId: comp.id as string,
+          isEnabled: comp.isEnabled as boolean,
+          compGroup: (comp.compGroup as 'arv' | 'as_is' | null) ?? null,
+          filterResults: ((comp.appraisalRules as Record<string, unknown>)?.filters as Array<{ type: string; passed: boolean; reason?: string }>) ?? [],
+          adjustmentResults: ((comp.appraisalRules as Record<string, unknown>)?.adjustments as Array<{ type: string; applied: boolean; amount: number }>) ?? [],
+          adjustedPrice: (comp.adjustedPrice as number) ?? null,
+        }))
+
+        const compAnalysisCtx: import('../services/comp-analysis/types').CompAnalysisContext = {
+          bundle,
+          evalContexts,
+          analysisResult,
+          filters: evalParams.appraisalRules?.filters ?? [],
+          adjustments: evalParams.appraisalRules?.adjustments ?? [],
+          dealParams: {
+            closingCostsPercent: evalParams.buybox?.closingCostsPercent ?? 8,
+            carryingCostsPercent: evalParams.buybox?.carryingCostsPercent ?? 2,
+            wholesaleFee: evalParams.buybox?.wholesaleFee ?? 10000,
+          },
+          rehabLevelIndex: evalParams.buybox?.rehabLevelIndex ?? 2,
+          rehabTable: evalParams.customRehabTable,
+          tierRanges: evalParams.customTierRanges,
+          arvThresholdPercent: evalParams.arvThreshold?.percent ?? 15,
+          asIsThresholdPercent: evalParams.asIsThresholdPercent ?? 70,
+          riskFlags: (analysisResult.riskFlags as string[]) ?? [],
+          marketContext,
+        }
+
+        const llmResult = await analyzeComps(compAnalysisCtx, this.env, { includePhotos: config.llmOptions?.includePhotos, modelOverride: config.llmOptions?.compSelectionModel, reasoning: config.llmOptions?.reasoning })
+
+        if (llmResult && llmResult.selectedForArv.length > 0) {
+          const selectedSet = new Set(llmResult.selectedForArv)
+          const asIsSet = new Set(llmResult.asIsComps ?? [])
+          const comps = analysisResult.comps as Record<string, unknown>
+          if (comps?.items && Array.isArray(comps.items)) {
+            comps.items = (comps.items as Array<Record<string, unknown>>).map((comp) => {
+              const compId = comp.id as string
+              const ranking = llmResult.rankings.find((r) => r.compId === compId)
+              const isSelected = selectedSet.has(compId)
+              const isAsIs = asIsSet.has(compId)
+              return { ...comp, isEnabled: isSelected, compGroup: isSelected ? 'arv' : isAsIs ? 'as_is' : null, selectionReason: ranking?.reasoning || null, qualityScore: ranking?.score ?? null, keyFeatures: ranking?.keyFeatures?.length ? ranking.keyFeatures : null, disableReasons: isSelected ? [] : [ranking?.reasoning || 'Not selected by AI analysis'] }
+            })
+            comps.enabledCount = (comps.items as Array<Record<string, unknown>>).filter((c) => c.isEnabled).length
+            comps.disabledCount = (comps.items as unknown[]).length - (comps.enabledCount as number)
+          }
+
+          await this.pushEvent('llm_complete', {
+            llmAnalysis: { model: llmResult.model, latencyMs: llmResult.latencyMs, tokenUsage: llmResult.tokenUsage, compCount: llmResult.rankings.length, summary: llmResult.summary, selectedForArv: llmResult.selectedForArv, reasoning: llmResult.reasoning },
+            rankings: llmResult.rankings,
+            updatedResult: analysisResult,
+          })
+          console.log(`[AnalysisJobDO] ✓ LLM: ${llmResult.selectedForArv.length} comps selected in ${Date.now() - llmStart}ms${llmResult.reasoning ? ' (with reasoning)' : ''}`)
+        } else {
+          await this.pushEvent('llm_complete', { llmAnalysis: null, rankings: [], skipped: true, reason: llmResult ? 'No comps selected' : 'LLM not available' })
+        }
+      } catch (error) {
+        console.warn('[AnalysisJobDO] LLM error:', error instanceof Error ? error.message : error)
+        await this.pushEvent('error', { step: 'llm', message: error instanceof Error ? error.message : 'LLM analysis failed' })
+      }
+    }
+
+    await this.pushEvent('enrichment_done', { totalDurationMs: Date.now() - startTime })
+    console.log(`[AnalysisJobDO] ── Streaming analysis complete in ${Date.now() - startTime}ms ──`)
+  }
+
+  // ─── Start Enrichment (legacy — used when route returns result synchronously) ─
 
   private async handleStart(request: Request): Promise<Response> {
     const body = await request.json() as StartEnrichmentRequest
@@ -181,151 +570,8 @@ export class AnalysisJobDO {
       }
     }
 
-    // Step A: Market data enrichment
-    if (config.pending.includes('market_data')) {
-      const stepStart = Date.now()
-      try {
-        await this.pushEvent('market_data_started', { message: 'Fetching market data...' })
-        const photoService = createPhotoService(this.env)
-        if (photoService.isAvailable()) {
-          const properties: PropertyIdentifier[] = [
-            { propertyId: config.bundle.property.id, address: config.bundle.property.address, city: config.bundle.property.city, state: config.bundle.property.state, zipCode: config.bundle.property.zipCode },
-            ...config.bundle.comparables.map((comp) => ({
-              propertyId: comp.id, address: comp.address, city: comp.city, state: comp.state, zipCode: comp.zipCode,
-            })),
-          ]
-          const bulkResult = await photoService.fetchBulkPhotos(properties)
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const enrichedData: Record<string, Record<string, any>> = {}
-          for (const [propId, data] of bulkResult.results) {
-            enrichedData[propId] = {
-              photos: data.photos,
-              description: data.description,
-              features: data.features,
-              sourceUrl: data.sourceUrl,
-              status: data.status,
-              // Property details from public listing
-              bedrooms: data.bedrooms,
-              bathrooms: data.bathrooms,
-              squareFeet: data.squareFeet,
-              yearBuilt: data.yearBuilt,
-              foundationType: data.foundationType,
-              style: data.style,
-              stories: data.stories,
-              hoaFee: data.hoaFee,
-              lastSaleDate: data.lastSaleDate,
-              lastSalePrice: data.lastSalePrice,
-              // Construction & features
-              roof: data.roof,
-              construction: data.construction,
-              heating: data.heating,
-              cooling: data.cooling,
-              flooring: data.flooring,
-              parking: data.parking,
-              pool: data.pool,
-              propertyType: data.propertyType,
-              whatsSpecial: data.whatsSpecial,
-              exteriorFeatures: data.exteriorFeatures,
-              appliances: data.appliances,
-            }
-            console.log(`[AnalysisJobDO] Market data for ${data.sourceUrl || propId}:`)
-            console.log(`  Property: beds=${data.bedrooms || '-'} baths=${data.bathrooms || '-'} sqft=${data.squareFeet || '-'} year=${data.yearBuilt || '-'} type=${data.propertyType || '-'}`)
-            console.log(`  Construction: foundation=${data.foundationType || '-'} roof=${data.roof || '-'} construction=${data.construction || '-'} style=${data.style || '-'} stories=${data.stories || '-'}`)
-            console.log(`  Systems: heating=${data.heating || '-'} cooling=${data.cooling || '-'}`)
-            console.log(`  Features: flooring=${data.flooring || '-'} parking=${data.parking || '-'} pool=${data.pool || '-'}`)
-            console.log(`  Media: photos=${data.photos?.length || 0} description=${data.description ? 'yes' : 'no'} whatsSpecial=${data.whatsSpecial?.length || 0} items`)
-            console.log(`  Sale: price=$${data.lastSalePrice?.toLocaleString() || '-'} date=${data.lastSaleDate || '-'} status=${data.status || '-'} hoa=$${data.hoaFee || 0}/mo`)
-          }
-          console.log(`[AnalysisJobDO] ✓ Market data: ${bulkResult.results.size}/${properties.length} scraped in ${Date.now() - stepStart}ms`)
-
-          // ── Merge enriched data into bundle and re-evaluate ──
-          const reEvalStart = Date.now()
-          console.log(`[AnalysisJobDO] Re-evaluating with enriched data...`)
-
-          // Merge into subject property
-          const subjectData = enrichedData[config.bundle.property.id]
-          if (subjectData) {
-            this.mergeMarketDataIntoProperty(config.bundle.property, subjectData)
-          }
-
-          // Merge into comparables
-          for (const comp of config.bundle.comparables) {
-            const compData = enrichedData[comp.id]
-            if (compData) {
-              this.mergeMarketDataIntoComparable(comp, compData)
-            }
-          }
-
-          // Re-run evaluation with enriched data
-          const reEvalResult = performAnalysis({
-            jobId: config.jobId,
-            bundle: config.bundle,
-            ...config.evalParams,
-          })
-
-          // Inject photos from Zillow into the re-evaluated result
-          const updatedResponse = reEvalResult.response as unknown as Record<string, unknown>
-          // Subject photos
-          const subjectEnriched = enrichedData[config.bundle.property.id]
-          if (subjectEnriched?.photos?.length && updatedResponse.subject) {
-            (updatedResponse.subject as Record<string, unknown>).photos = subjectEnriched.photos.slice(0, 10)
-          }
-          // Comp photos
-          if (updatedResponse.comps && (updatedResponse.comps as Record<string, unknown>).items) {
-            const items = (updatedResponse.comps as Record<string, unknown>).items as Array<Record<string, unknown>>
-            for (const comp of items) {
-              const compEnriched = enrichedData[comp.id as string]
-              if (compEnriched?.photos?.length) {
-                comp.photos = compEnriched.photos.slice(0, 5)
-              }
-            }
-          }
-
-          // Inject OSM location risks (major roads, railroad, commercial)
-          try {
-            const prop = config.bundle.property
-            if (prop.latitude && prop.longitude) {
-              const osmResult = await detectOsmLocationRisks(prop.latitude, prop.longitude)
-              if (osmResult.riskFlags.length > 0) {
-                const existingFlags = (updatedResponse.riskFlags as string[] | null) ?? []
-                updatedResponse.riskFlags = [...existingFlags, ...osmResult.riskFlags]
-                console.log(`[AnalysisJobDO] OSM risks: ${osmResult.riskFlags.join(', ')} (${osmResult.durationMs}ms)`)
-              }
-            }
-          } catch {
-            // Non-fatal
-          }
-
-          // If LLM will run, disable all comp selections — LLM decides final selection
-          if (config.pending.includes('llm')) {
-            const comps = updatedResponse.comps as Record<string, unknown> | undefined
-            if (comps?.items && Array.isArray(comps.items)) {
-              comps.items = comps.items.map((c: Record<string, unknown>) => ({ ...c, isEnabled: false }))
-              comps.enabledCount = 0
-              comps.disabledCount = (comps.items as unknown[]).length
-            }
-          }
-
-          // Update analysisResult for LLM step
-          config.analysisResult = updatedResponse
-
-          console.log(`[AnalysisJobDO] ✓ Re-evaluation complete in ${Date.now() - reEvalStart}ms`)
-          console.log(`[AnalysisJobDO] Photos injected: subject=${subjectEnriched?.photos?.length ?? 0}, comps=${Object.values(enrichedData).filter((d: Record<string, unknown>) => (d.photos as string[])?.length > 0).length}`)
-
-          await this.pushEvent('market_data_complete', {
-            enrichedData,
-            summary: bulkResult.summary,
-            updatedResult: updatedResponse,
-          })
-        } else {
-          await this.pushEvent('market_data_complete', { enrichedData: {}, skipped: true, reason: 'Firecrawl not configured' })
-        }
-      } catch (error) {
-        console.warn('[AnalysisJobDO] Market data error:', error instanceof Error ? error.message : error)
-        await this.pushEvent('error', { step: 'market_data', message: error instanceof Error ? error.message : 'Market data enrichment failed' })
-      }
-    }
-
+    // Note: market_data step (Firecrawl/Zillow scraping) has been removed.
+    // Property details are now sourced from CoreLogic enrichment.
     // Step B: LLM comp analysis (uses enriched data if market data ran first)
     if (config.pending.includes('llm')) {
       const llmStart = Date.now()
@@ -360,6 +606,7 @@ export class AnalysisJobDO {
           arvThresholdPercent: evalParams.arvThreshold?.percent ?? 15,
           asIsThresholdPercent: evalParams.asIsThresholdPercent ?? 70,
           riskFlags: (config.analysisResult.riskFlags as string[]) ?? [],
+          marketContext: null, // Legacy path — no market context
         }
 
         const llmResult = await analyzeComps(
@@ -508,59 +755,6 @@ export class AnalysisJobDO {
    * Only overwrites null/undefined fields — CoreLogic data takes priority.
    */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private mergeMarketDataIntoProperty(property: NormalizedProperty, data: Record<string, any>): void {
-    // Construction details
-    if (!property.construction) property.construction = {}
-    if (!property.construction.foundationType && data.foundationType) {
-      property.construction.foundationType = data.foundationType
-    }
-    if (!property.construction.buildingStyle && data.style) {
-      property.construction.buildingStyle = data.style
-    }
-    if (!property.construction.roofType && data.roof) {
-      property.construction.roofType = data.roof
-    }
-    if (!property.construction.exteriorWalls && data.construction) {
-      property.construction.exteriorWalls = data.construction
-    }
-
-    // Features
-    if (!property.features) property.features = {}
-    if (!property.features.heating && data.heating) {
-      property.features.heating = data.heating
-    }
-    if (!property.features.cooling && data.cooling) {
-      property.features.cooling = data.cooling
-    }
-    if (!property.features.poolType && data.pool) {
-      property.features.poolType = String(data.pool)
-    }
-
-    // Basic details (only if missing from CoreLogic)
-    if (!property.stories && data.stories) property.stories = data.stories
-    if (!property.hoaFee && data.hoaFee) property.hoaFee = data.hoaFee
-  }
-
-  /**
-   * Merge market data into a comparable, filling in missing fields.
-   */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private mergeMarketDataIntoComparable(comp: NormalizedComparable, data: Record<string, any>): void {
-    if (!comp.construction) comp.construction = {}
-    if (!comp.construction.foundationType && data.foundationType) {
-      comp.construction.foundationType = data.foundationType
-    }
-    if (!comp.construction.buildingStyle && data.style) {
-      comp.construction.buildingStyle = data.style
-    }
-    if (!comp.construction.roofType && data.roof) {
-      comp.construction.roofType = data.roof
-    }
-    if (!comp.construction.exteriorWalls && data.construction) {
-      comp.construction.exteriorWalls = data.construction
-    }
-  }
-
   // ─── Broadcast ────────────────────────────────────────────────────────────
 
   private broadcast(event: string, data: unknown): void {

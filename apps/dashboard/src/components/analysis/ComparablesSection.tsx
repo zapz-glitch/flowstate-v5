@@ -106,10 +106,12 @@ export function ComparablesSection({
   // Group comps based on selection mode
   const arvComps = hasInteractiveSelection
     ? compItems.filter((_c, i) => selectedCompKeys!.has(getCompKey(_c, i)))
-    : compItems.filter((c) => c.isEnabled !== false)
+    : compItems.filter((c) => c.isEnabled === true)
   const excludedComps = hasInteractiveSelection
     ? compItems.filter((_c, i) => !selectedCompKeys!.has(getCompKey(_c, i)))
-    : compItems.filter((c) => c.isEnabled === false)
+    : compItems.filter((c) => c.isEnabled !== true)
+  // If no comps are selected (e.g. streaming, before evaluation), show all in main section
+  const showAllFlat = arvComps.length === 0 && excludedComps.length > 0
 
   const selectedCount = arvComps.length
 
@@ -272,9 +274,10 @@ export function ComparablesSection({
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {sortedItems.map(({ comp, originalIndex }) => {
               const key = getCompKey(comp, originalIndex)
-              const isSelected = hasInteractiveSelection
-                ? selectedCompKeys!.has(key)
-                : comp.isEnabled !== false
+              const isSelected = isAnalyzing ? false
+                : hasInteractiveSelection
+                  ? selectedCompKeys!.has(key)
+                  : comp.isEnabled === true
               return (
                 <CompGridCard
                   key={key}
@@ -282,7 +285,7 @@ export function ComparablesSection({
                   index={originalIndex}
                   subject={subject}
                   isSelectedForArv={isSelected}
-                  onToggleArv={onToggleComp ? () => onToggleComp(key) : undefined}
+                  onToggleArv={!isAnalyzing && onToggleComp ? () => onToggleComp(key) : undefined}
                   onClick={() => onCompClick?.(comp)}
                   onHover={onCompHover ? (hovering) => onCompHover(hovering ? key : null) : undefined}
                   isHighlighted={highlightedCompKey === key}
@@ -294,9 +297,10 @@ export function ComparablesSection({
           <div className="space-y-3">
             {sortedItems.map(({ comp, originalIndex }) => {
               const key = getCompKey(comp, originalIndex)
-              const isSelected = hasInteractiveSelection
-                ? selectedCompKeys!.has(key)
-                : comp.isEnabled !== false
+              const isSelected = isAnalyzing ? false
+                : hasInteractiveSelection
+                  ? selectedCompKeys!.has(key)
+                  : comp.isEnabled === true
               return (
                 <CompCard
                   key={key}

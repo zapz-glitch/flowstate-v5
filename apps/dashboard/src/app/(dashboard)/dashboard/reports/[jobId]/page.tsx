@@ -345,7 +345,7 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
         activeMarkerKey={activeMarkerKey}
         riskFlags={analysis.riskFlags}
         floodZone={analysis.floodZone}
-        visionAnalysis={analysis.visionAnalysis}
+
         valuationCardRef={valuationCardRef}
       />
 

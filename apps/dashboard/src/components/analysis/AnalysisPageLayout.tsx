@@ -24,7 +24,6 @@ export interface AnalysisPageLayoutProps {
   floodZone?: { zone?: string | null; inFloodZone?: boolean | null } | null
 
   // Pass-through to AnalysisResultLayout
-  visionAnalysis?: unknown
   valuationCardRef?: React.RefObject<HTMLDivElement | null>
 
   // Loading state
@@ -40,7 +39,6 @@ export function AnalysisPageLayout({
   activeMarkerKey,
   riskFlags,
   floodZone,
-  visionAnalysis,
   valuationCardRef,
   loading = false,
   footer,
@@ -58,7 +56,6 @@ export function AnalysisPageLayout({
 
   const resultProps = {
     onCompHover: handleCompHover,
-    visionAnalysis,
     valuationCardRef,
     footer,
   }

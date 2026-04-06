@@ -1,22 +1,19 @@
 'use client'
 
 import { Loader2 } from 'lucide-react'
+import { Skeleton } from '@/components/ui/skeleton'
 import { useEvaluation } from '@/hooks/use-evaluation'
 import { ComparablesSection } from './ComparablesSection'
 import { DealSummaryHero } from './DealSummaryHero'
 import { InvestorPurchaseCard } from './InvestorPurchaseCard'
 import { SubjectGridCard } from './SubjectGridCard'
 import { PhotoGallery } from './PhotoGallery'
-import { VisionAnalysisButton } from './VisionAnalysisButton'
-import type { VisionAnalysis } from './shared-types'
 
 // ─── Analysis Result Layout ──────────────────────────────────────────────────
 
 export interface AnalysisResultLayoutProps {
   /** Map-list hover sync (local to map view, not in atoms) */
   onCompHover?: (key: string | null) => void
-  /** Vision analysis data */
-  visionAnalysis?: unknown
   /** Valuation card ref for sticky/intersection observer */
   valuationCardRef?: React.RefObject<HTMLDivElement | null>
   /** Optional footer (e.g. Raw JSON toggle) */
@@ -25,7 +22,6 @@ export interface AnalysisResultLayoutProps {
 
 export function AnalysisResultLayout({
   onCompHover,
-  visionAnalysis,
   valuationCardRef,
   footer,
 }: AnalysisResultLayoutProps) {
@@ -36,6 +32,7 @@ export function AnalysisResultLayout({
     isRecalculated,
     compOverride,
     aiAnalyzing,
+    isStreaming,
     onToggleComp,
     onResetComps,
     onOpenSettings,
@@ -51,7 +48,7 @@ export function AnalysisResultLayout({
       {subject && <SubjectGridCard subject={subject} />}
 
       {/* Valuation panel — sticky so it's always visible while scrolling comps */}
-      {valuation && (
+      {valuation ? (
         <div ref={valuationCardRef as React.RefObject<HTMLDivElement>} className="sticky top-0 z-10">
           <DealSummaryHero
             valuation={valuation}
@@ -59,7 +56,23 @@ export function AnalysisResultLayout({
             onOpenSettings={onOpenSettings}
           />
         </div>
-      )}
+      ) : subject && isStreaming ? (
+        /* Valuation loading skeleton — only while streaming */
+        <div className="border border-border rounded-sm">
+          <div className="px-3 py-1.5 border-b border-border/30 flex items-center gap-2">
+            <Loader2 className="w-3 h-3 text-primary animate-spin" />
+            <span className="text-[10px] text-foreground-tertiary">Evaluating comparables...</span>
+          </div>
+          <div className="grid grid-cols-4">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="px-3 py-2.5 border-r border-border/20 last:border-r-0">
+                <Skeleton className="h-2.5 w-10 mb-1.5" />
+                <Skeleton className="h-5 w-16" />
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
 
       {/* Investor purchase intelligence */}
       {valuation?.investorPurchaseIntel && (
@@ -75,7 +88,7 @@ export function AnalysisResultLayout({
       )}
 
       {/* Properties grid (subject + comps) */}
-      {comps && (
+      {comps ? (
         <ComparablesSection
           comps={comps}
           subject={subject}
@@ -90,22 +103,39 @@ export function AnalysisResultLayout({
           onCompClick={onCompClick}
           onCompHover={onCompHover}
         />
-      )}
+      ) : subject && isStreaming ? (
+        /* Comps loading skeleton — only while streaming */
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <Loader2 className="w-3 h-3 text-primary animate-spin" />
+            <span className="text-caption text-foreground-tertiary">Loading comparables...</span>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="border border-border rounded-sm overflow-hidden">
+                <Skeleton className="h-28 w-full rounded-none" />
+                <div className="px-3 py-2.5 space-y-2">
+                  <Skeleton className="h-3 w-3/4" />
+                  <div className="grid grid-cols-2 gap-1">
+                    {Array.from({ length: 4 }).map((_, j) => (
+                      <div key={j} className="flex justify-between">
+                        <Skeleton className="h-2.5 w-10" />
+                        <Skeleton className="h-2.5 w-8" />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
 
       {/* Photos */}
       {subject?.photos && subject.photos.length > 0 && (
         <div className="border border-border px-4 py-3">
           <div className="flex items-center justify-between mb-2">
             <span className="text-caption font-medium text-foreground-secondary">Property Photos</span>
-            <VisionAnalysisButton
-              photoUrls={subject.photos}
-              propertyContext={{
-                address: subject.address,
-                squareFeet: subject.squareFeet ?? undefined,
-                yearBuilt: subject.yearBuilt ?? undefined,
-              }}
-              existingAnalysis={visionAnalysis as VisionAnalysis | null | undefined}
-            />
           </div>
           <PhotoGallery photos={subject.photos} />
         </div>
