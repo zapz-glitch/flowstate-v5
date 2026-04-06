@@ -32,7 +32,6 @@ import {
   AnalysisPageLayout,
 } from '@/components/analysis'
 import { AnalysisPageSkeleton } from '@/components/analysis/AnalysisSkeletons'
-import { MarketContextCard } from '@/components/analysis/MarketContextCard'
 import { useEnrichmentSSE, type EnrichmentEvent } from '@/hooks/use-enrichment-sse'
 import { AppraisalFilterEditor, type FilterState, type AdjustmentState } from '@/components/analysis/AppraisalFilterEditor'
 import { DownloadReportButton } from '@/components/report/DownloadReportButton'
@@ -334,6 +333,7 @@ export default function AnalyzePage() {
     effectiveComps: isReady ? effectiveComps : undefined,
     aiAnalyzing,
     isStreaming: streamingStep !== 'idle' && streamingStep !== 'done',
+    marketContext,
     onOpenSettings: () => setSettingsOpen(true),
     onCompClick: (comp) => { setComparisonComp(comp as CompItem); setComparisonOpen(true) },
   })
@@ -691,8 +691,6 @@ export default function AnalyzePage() {
           valuationCardRef={valuationCardRef}
           footer={
             isReady && hasResult ? (
-              <>
-              {marketContext && <MarketContextCard data={marketContext} />}
               <div className="border border-border overflow-hidden no-print min-w-0">
                 <div
                   className="px-6 py-4 cursor-pointer flex items-center gap-3 hover:bg-white/5 dark:hover:bg-white/[0.02] transition-colors"
@@ -726,7 +724,6 @@ export default function AnalyzePage() {
                   </div>
                 )}
               </div>
-              </>
             ) : undefined
           }
         />

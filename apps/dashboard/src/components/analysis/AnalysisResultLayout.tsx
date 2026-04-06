@@ -1,11 +1,13 @@
 'use client'
 
-import { Loader2 } from 'lucide-react'
+import { useState } from 'react'
+import { Loader2, ChevronDown, ChevronRight, TrendingUp } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useEvaluation } from '@/hooks/use-evaluation'
 import { ComparablesSection } from './ComparablesSection'
 import { DealSummaryHero } from './DealSummaryHero'
 import { InvestorPurchaseCard } from './InvestorPurchaseCard'
+import { MarketContextCard } from './MarketContextCard'
 import { SubjectGridCard } from './SubjectGridCard'
 import { PhotoGallery } from './PhotoGallery'
 
@@ -31,6 +33,7 @@ export function AnalysisResultLayout({
     displayComps: comps,
     isRecalculated,
     compOverride,
+    marketContext,
     aiAnalyzing,
     isStreaming,
     onToggleComp,
@@ -41,6 +44,7 @@ export function AnalysisResultLayout({
 
   const selectedCompKeys = compOverride?.selectedCompKeys
   const isManual = compOverride?.isManual ?? false
+  const [marketOpen, setMarketOpen] = useState(false)
 
   return (
     <>
@@ -77,6 +81,29 @@ export function AnalysisResultLayout({
       {/* Investor purchase intelligence */}
       {valuation?.investorPurchaseIntel && (
         <InvestorPurchaseCard data={valuation.investorPurchaseIntel} />
+      )}
+
+      {/* Market Research — collapsed by default */}
+      {marketContext && (
+        <div className="border border-border rounded-sm overflow-hidden">
+          <button
+            type="button"
+            onClick={() => setMarketOpen(!marketOpen)}
+            className="w-full px-4 py-2.5 flex items-center gap-2 hover:bg-secondary/30 transition-colors"
+          >
+            <TrendingUp className="w-3.5 h-3.5 text-blue-500 flex-shrink-0" />
+            <span className="text-[10px] font-semibold text-foreground-tertiary uppercase tracking-wider flex-1 text-left">Market Research</span>
+            {marketOpen
+              ? <ChevronDown className="w-3.5 h-3.5 text-foreground-tertiary" />
+              : <ChevronRight className="w-3.5 h-3.5 text-foreground-tertiary" />
+            }
+          </button>
+          {marketOpen && (
+            <div className="border-t border-border/30">
+              <MarketContextCard data={marketContext} />
+            </div>
+          )}
+        </div>
       )}
 
       {/* AI analysis banner */}

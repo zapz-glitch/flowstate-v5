@@ -26,6 +26,9 @@ export function useEvaluation() {
     // Comp selection
     compOverride: state.compOverride,
 
+    // Market research
+    marketContext: state.marketContext,
+
     // UI state
     aiAnalyzing: state.aiAnalyzing,
     isStreaming: state.isStreaming,

@@ -75,6 +75,8 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
   const [refreshStreamUrl, setRefreshStreamUrl] = useState<string | null>(null)
   const [refreshToken, setRefreshToken] = useState<string | null>(null)
   const [aiAnalyzing, setAiAnalyzing] = useState(false)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [marketContext, setMarketContext] = useState<Record<string, any> | null>(null)
 
   const analyzeData = report?.analysis ?? null
 
@@ -180,6 +182,9 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
           setTimeout(() => setRefreshResult(null), 5000)
         }
         break
+      case 'market_context':
+        if (data.marketContext) setMarketContext(data.marketContext as Record<string, unknown>)
+        break
       case 'enrichment_done':
         setAiAnalyzing(false)
         setRefreshing(false)
@@ -266,6 +271,7 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
     displayValuation,
     effectiveComps,
     aiAnalyzing,
+    marketContext,
     onOpenSettings: () => setSettingsOpen(true),
     onCompClick: (comp) => { setComparisonComp(comp as CompItem); setComparisonOpen(true) },
   })

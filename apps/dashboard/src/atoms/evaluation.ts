@@ -45,6 +45,10 @@ export interface EvaluationState {
   // Comp selection
   compOverride: CompOverrideState | null
 
+  // Market research (from web search, arrives independently)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  marketContext: Record<string, any> | null
+
   // UI state
   aiAnalyzing: boolean
   /** Whether the streaming pipeline is still running (property fetch → evaluation → LLM) */
@@ -68,6 +72,7 @@ export const evaluationStateAtom = atom<EvaluationState>({
   isRecalculated: false,
   recalcData: null,
   compOverride: null,
+  marketContext: null,
   aiAnalyzing: false,
   isStreaming: false,
   callbacks: defaultCallbacks,

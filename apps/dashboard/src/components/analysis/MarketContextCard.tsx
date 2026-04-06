@@ -47,15 +47,7 @@ export function MarketContextCard({ data }: MarketContextCardProps) {
     : 'text-foreground-tertiary'
 
   return (
-    <div className="border border-border rounded-sm overflow-hidden">
-      <div className="px-4 py-2.5 border-b border-border/30 flex items-center gap-2">
-        <TrendingUp className="w-3.5 h-3.5 text-blue-500" />
-        <span className="text-[10px] font-semibold text-foreground-tertiary uppercase tracking-wider">Market Research</span>
-        {data.model && (
-          <span className="text-[9px] text-foreground-tertiary/50 ml-auto">{data.model.split('/').pop()}</span>
-        )}
-      </div>
-
+    <div>
       <div className="px-4 py-3 space-y-3">
         {/* Summary */}
         {trends?.summary && (
