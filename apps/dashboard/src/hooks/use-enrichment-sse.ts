@@ -23,6 +23,7 @@ const EVENT_TYPES = [
   'evaluation_complete',
   'llm_started',
   'llm_complete',
+  'market_context',
   'enrichment_done',
   'error',
 ]

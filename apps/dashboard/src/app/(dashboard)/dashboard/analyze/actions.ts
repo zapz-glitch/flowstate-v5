@@ -44,6 +44,8 @@ async function getDashboardSecret(): Promise<string> {
 
 export interface AnalyzeRequest {
   address: string
+  /** Existing job ID — when set, updates existing report instead of creating new */
+  existingJobId?: string
   searchOptions?: {
     radiusMiles?: number
     maxComps?: number
@@ -451,6 +453,7 @@ export async function queueAnalysis(request: AnalyzeRequest): Promise<QueueAnaly
     const analyzeUrl = `${apiUrl}/v1/analyze`
     const requestBody = {
       address: request.address,
+      existingJobId: request.existingJobId,
       searchOptions: request.searchOptions ?? {
         radiusMiles: 1,
         maxComps: 15,
@@ -458,6 +461,7 @@ export async function queueAnalysis(request: AnalyzeRequest): Promise<QueueAnaly
       },
       skipCache: request.skipCache,
       marketData: request.marketData,
+      llmAnalysis: request.llmAnalysis,
       arvThresholdPercent: request.arvThresholdPercent,
       asIsThresholdPercent: request.asIsThresholdPercent,
       appraisalOverrides: request.appraisalOverrides,

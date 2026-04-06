@@ -10,7 +10,7 @@
  * Used by both the analyze page and the report page.
  */
 
-import { useState, useEffect, useMemo, useCallback, useRef, type MutableRefObject } from 'react'
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import type {
   AnalyzeData,
   ValuationData,
@@ -91,17 +91,9 @@ export function useAnalysisEvaluation({
   }, [data?.comps?.items])
 
   // Sync comp selection when recalc re-evaluates filters (but not when user manually toggled comps)
-  // Skip if all comps are disabled (LLM pending — server set isEnabled: false on all)
   useEffect(() => {
     if (!recalcData || !data?.comps?.items) return
     if (isManualRef.current) return
-
-    // If server disabled all comps (LLM pending), respect that — don't override with recalc
-    const allDisabled = data.comps.items.every((c) => c.isEnabled !== true)
-    if (allDisabled) {
-      setCompOverride({ selectedCompKeys: new Set(), isManual: false })
-      return
-    }
 
     const keys = new Set<string>()
     data.comps.items.forEach((comp, i) => {

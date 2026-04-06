@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef, use } from 'react'
 import Link from 'next/link'
-import { ArrowLeft, Share2, RefreshCw, AlertTriangle, History } from 'lucide-react'
+import { ArrowLeft, Share2, RefreshCw, AlertTriangle, History, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -33,6 +33,7 @@ import { queueAnalysis, type AnalyzeData as ActionAnalyzeData } from '@/app/(das
 import { CompComparisonDialog } from '@/components/analysis/CompComparisonDialog'
 import { useMapInteraction } from '@/hooks/use-map-interaction'
 import { useEvaluationSync } from '@/hooks/use-evaluation-sync'
+import { useEnrichmentSSE, type EnrichmentEvent } from '@/hooks/use-enrichment-sse'
 import { useSidebar } from '@/components/SidebarProvider'
 
 // ─── Main Page ──────────────────────────────────────────────────────────────
@@ -71,6 +72,9 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
     message: string
     changes?: string[]
   } | null>(null)
+  const [refreshStreamUrl, setRefreshStreamUrl] = useState<string | null>(null)
+  const [refreshToken, setRefreshToken] = useState<string | null>(null)
+  const [aiAnalyzing, setAiAnalyzing] = useState(false)
 
   const analyzeData = report?.analysis ?? null
 
@@ -141,75 +145,104 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
     fetchReport()
   }, [fetchReport])
 
+  // SSE handler for refresh streaming
+  const handleRefreshEvent = useCallback((event: EnrichmentEvent) => {
+    const { event: eventType, data } = event
+    switch (eventType) {
+      case 'subject_found':
+      case 'comps_found':
+        // Intermediate streaming events — refresh spinner stays
+        break
+      case 'evaluation_complete':
+        if (data.updatedResult && report) {
+          setReport({
+            jobId: data.updatedResult.meta?.analysisId ?? jobId,
+            address: report.address,
+            createdAt: new Date().toISOString(),
+            analysis: data.updatedResult as AnalyzeData,
+          })
+          setRefreshing(false)
+          setRefreshResult({ type: 'success', message: 'Data refreshed — evaluation complete' })
+          setTimeout(() => setRefreshResult(null), 10000)
+        }
+        break
+      case 'llm_started':
+        setAiAnalyzing(true)
+        break
+      case 'llm_complete':
+        setAiAnalyzing(false)
+        if (data.updatedResult && report) {
+          setReport((prev) => prev ? {
+            ...prev,
+            analysis: data.updatedResult as AnalyzeData,
+          } : prev)
+          setRefreshResult({ type: 'success', message: 'AI comp selection updated' })
+          setTimeout(() => setRefreshResult(null), 5000)
+        }
+        break
+      case 'enrichment_done':
+        setAiAnalyzing(false)
+        setRefreshing(false)
+        setRefreshStreamUrl(null)
+        setRefreshToken(null)
+        break
+      case 'error':
+        setAiAnalyzing(false)
+        if (data.message) {
+          setRefreshResult({ type: 'error', message: data.message as string })
+          setTimeout(() => setRefreshResult(null), 5000)
+        }
+        setRefreshing(false)
+        break
+    }
+  }, [report, jobId])
+
+  useEnrichmentSSE({
+    streamUrl: refreshStreamUrl,
+    token: refreshToken,
+    onEvent: handleRefreshEvent,
+  })
+
   const handleRefresh = useCallback(async () => {
     if (!report?.address) return
     setRefreshing(true)
     setRefreshOpen(false)
     setRefreshResult(null)
 
-    const oldAnalysis = report.analysis
     try {
       const response = await queueAnalysis({
         address: report.address,
+        existingJobId: jobId,
         searchOptions: { radiusMiles: 1, maxComps: 15, monthsBack: 12 },
         skipCache: true,
-        marketData: { enabled: true },
         llmAnalysis: { enabled: true },
       })
-      if (response.success && response.result) {
-        const newAnalysis = response.result as AnalyzeData
-
-        // Compare old vs new
-        const changes: string[] = []
-        const oldArv = oldAnalysis.valuation?.arv
-        const newArv = newAnalysis.valuation?.arv
-        if (oldArv && newArv && oldArv !== newArv) {
-          const diff = newArv - oldArv
-          changes.push(`ARV: $${oldArv.toLocaleString()} → $${newArv.toLocaleString()} (${diff > 0 ? '+' : ''}$${diff.toLocaleString()})`)
+      if (response.success) {
+        // Connect to SSE for streaming updates
+        if (response.enrichment) {
+          setRefreshStreamUrl(response.enrichment.streamUrl)
+          setRefreshToken(response.enrichment.token)
         }
-
-        const oldBuy = oldAnalysis.valuation?.buyPrice
-        const newBuy = newAnalysis.valuation?.buyPrice
-        if (oldBuy && newBuy && oldBuy !== newBuy) {
-          const diff = newBuy - oldBuy
-          changes.push(`Buy Price: $${oldBuy.toLocaleString()} → $${newBuy.toLocaleString()} (${diff > 0 ? '+' : ''}$${diff.toLocaleString()})`)
+        // If sync result returned (legacy), apply directly
+        if (response.result) {
+          setReport({
+            jobId: response.jobId ?? jobId,
+            address: report.address,
+            createdAt: new Date().toISOString(),
+            analysis: response.result as AnalyzeData,
+          })
+          setRefreshing(false)
+          setRefreshResult({ type: 'success', message: 'Data refreshed' })
+          setTimeout(() => setRefreshResult(null), 10000)
         }
-
-        const oldComps = oldAnalysis.comps?.enabledCount ?? oldAnalysis.comps?.items?.filter((c: { isEnabled?: boolean }) => c.isEnabled !== false).length ?? 0
-        const newComps = newAnalysis.comps?.enabledCount ?? newAnalysis.comps?.items?.filter((c: { isEnabled?: boolean }) => c.isEnabled !== false).length ?? 0
-        if (oldComps !== newComps) {
-          changes.push(`Selected comps: ${oldComps} → ${newComps}`)
-        }
-
-        const oldTotal = oldAnalysis.comps?.count ?? oldAnalysis.comps?.items?.length ?? 0
-        const newTotal = newAnalysis.comps?.count ?? newAnalysis.comps?.items?.length ?? 0
-        if (oldTotal !== newTotal) {
-          changes.push(`Total comps: ${oldTotal} → ${newTotal}`)
-        }
-
-        setReport({
-          jobId: response.jobId ?? jobId,
-          address: report.address,
-          createdAt: new Date().toISOString(),
-          analysis: newAnalysis,
-        })
-
-        if (changes.length > 0) {
-          setRefreshResult({ type: 'success', message: 'Data refreshed with changes', changes })
-        } else {
-          setRefreshResult({ type: 'no_change', message: 'Data refreshed — no significant changes detected' })
-        }
-
-        // Auto-dismiss after 10 seconds
-        setTimeout(() => setRefreshResult(null), 10000)
       } else {
         setRefreshResult({ type: 'error', message: response.error || 'Refresh failed' })
         setTimeout(() => setRefreshResult(null), 5000)
+        setRefreshing(false)
       }
     } catch (err) {
       setRefreshResult({ type: 'error', message: err instanceof Error ? err.message : 'Refresh failed' })
       setTimeout(() => setRefreshResult(null), 5000)
-    } finally {
       setRefreshing(false)
     }
   }, [report, jobId])
@@ -232,6 +265,7 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
     subject: analyzeData?.subject,
     displayValuation,
     effectiveComps,
+    aiAnalyzing,
     onOpenSettings: () => setSettingsOpen(true),
     onCompClick: (comp) => { setComparisonComp(comp as CompItem); setComparisonOpen(true) },
   })
@@ -339,15 +373,27 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
         </div>
       )}
 
+      {/* Refresh/AI status pill */}
+      {(refreshing || aiAnalyzing) && (
+        <div className="flex justify-center py-1.5 flex-shrink-0 no-print">
+          <div className="flex items-center gap-2 px-4 py-1.5 rounded-full bg-background/90 border border-border shadow-sm">
+            <Loader2 className="w-3.5 h-3.5 text-primary animate-spin" />
+            <span className="text-xs font-medium text-foreground-secondary">
+              {refreshing ? 'Refreshing data...' : 'AI selecting comps...'}
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* Analysis layout — same component as playground */}
       <AnalysisPageLayout
-        onMarkerSelect={handleMarkerSelect}
-        activeMarkerKey={activeMarkerKey}
-        riskFlags={analysis.riskFlags}
-        floodZone={analysis.floodZone}
+          onMarkerSelect={handleMarkerSelect}
+          activeMarkerKey={activeMarkerKey}
+          riskFlags={analysis.riskFlags}
+          floodZone={analysis.floodZone}
 
-        valuationCardRef={valuationCardRef}
-      />
+          valuationCardRef={valuationCardRef}
+        />
 
       {/* Evaluation Settings Sheet */}
       <EvaluationSettingsSheet

@@ -32,6 +32,7 @@ import {
   AnalysisPageLayout,
 } from '@/components/analysis'
 import { AnalysisPageSkeleton } from '@/components/analysis/AnalysisSkeletons'
+import { MarketContextCard } from '@/components/analysis/MarketContextCard'
 import { useEnrichmentSSE, type EnrichmentEvent } from '@/hooks/use-enrichment-sse'
 import { AppraisalFilterEditor, type FilterState, type AdjustmentState } from '@/components/analysis/AppraisalFilterEditor'
 import { DownloadReportButton } from '@/components/report/DownloadReportButton'
@@ -111,6 +112,8 @@ export default function AnalyzePage() {
   const [compModel, setCompModel] = useState('')
   const [marketModel, setMarketModel] = useState('')
   const [showAdvanced, setShowAdvanced] = useState(false)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [marketContext, setMarketContext] = useState<Record<string, any> | null>(null)
 
   // Error & retry
   const [error, setError] = useState<string | null>(null)
@@ -211,12 +214,13 @@ export default function AnalyzePage() {
         break
 
       case 'evaluation_complete':
-        // Full evaluation result — show valuation + filtered comps
+        // Full evaluation result — show valuation + filtered comps immediately
         setStreamingStep('done')
         if (data.updatedResult) {
           setAnalysisResult(data.updatedResult as AnalyzeData)
           setAnalysisState((prev) => ({ ...prev, status: 'completed' }))
-          setAiAnalyzing(true) // LLM step follows
+          // Don't set aiAnalyzing here — let comps show with rule-based selection
+          // AI analyzing will be set when llm_started fires
         }
         break
 
@@ -228,23 +232,11 @@ export default function AnalyzePage() {
         setAiAnalyzing(false)
         if (data.updatedResult) {
           setAnalysisResult(data.updatedResult as AnalyzeData)
-        } else if (data.rankings) {
-          setAnalysisResult((prev) => {
-            if (!prev) return prev
-            type Ranking = { compId: string; reasoning: string; score: number; keyFeatures: string[] }
-            const rankings = data.rankings as Ranking[]
-            const rankingMap = new Map(rankings.map((r) => [r.compId, r]))
-            const updatedComps = { ...prev.comps }
-            if (updatedComps.items) {
-              updatedComps.items = updatedComps.items.map((comp) => {
-                const match = rankingMap.get(comp.address || '')
-                if (!match) return comp
-                return { ...comp, selectionReason: match.reasoning, qualityScore: match.score, keyFeatures: match.keyFeatures }
-              })
-            }
-            return { ...prev, comps: updatedComps } as AnalyzeData
-          })
         }
+        break
+
+      case 'market_context':
+        if (data.marketContext) setMarketContext(data.marketContext as Record<string, unknown>)
         break
 
       case 'enrichment_done':
@@ -356,6 +348,7 @@ export default function AnalyzePage() {
     setEnrichmentStreamUrl(null)
     setEnrichmentToken(null)
     setAiAnalyzing(false)
+    setMarketContext(null)
     setStreamingStep('idle')
     setPhase('fetching')
 
@@ -698,6 +691,8 @@ export default function AnalyzePage() {
           valuationCardRef={valuationCardRef}
           footer={
             isReady && hasResult ? (
+              <>
+              {marketContext && <MarketContextCard data={marketContext} />}
               <div className="border border-border overflow-hidden no-print min-w-0">
                 <div
                   className="px-6 py-4 cursor-pointer flex items-center gap-3 hover:bg-white/5 dark:hover:bg-white/[0.02] transition-colors"
@@ -731,6 +726,7 @@ export default function AnalyzePage() {
                   </div>
                 )}
               </div>
+              </>
             ) : undefined
           }
         />

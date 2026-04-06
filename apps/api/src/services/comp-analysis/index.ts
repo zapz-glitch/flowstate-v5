@@ -166,19 +166,6 @@ ${adjLines}`
     if (community.crime?.crimeRisk) marketLines.push(`Crime Risk: ${community.crime.crimeRisk}`)
   }
 
-  // Web search market context (real-time market intelligence)
-  const mc = ctx.marketContext
-  if (mc) {
-    if (mc.marketTrends.summary) marketLines.push(`Market Trend: ${mc.marketTrends.summary}`)
-    if (mc.marketTrends.medianPriceDirection) marketLines.push(`Price Direction: ${mc.marketTrends.medianPriceDirection}${mc.marketTrends.yoyPriceChange ? ` (${mc.marketTrends.yoyPriceChange} YoY)` : ''}`)
-    if (mc.marketTrends.avgDaysOnMarket) marketLines.push(`Avg Days on Market: ${mc.marketTrends.avgDaysOnMarket}`)
-    if (mc.marketTrends.inventoryLevel) marketLines.push(`Inventory: ${mc.marketTrends.inventoryLevel}`)
-    if (mc.recentSales.notableSales) marketLines.push(`Recent Sales: ${mc.recentSales.notableSales}`)
-    if (mc.recentSales.foreclosureActivity) marketLines.push(`Foreclosures: ${mc.recentSales.foreclosureActivity}`)
-    if (mc.neighborhoodFactors.recentDevelopment) marketLines.push(`Development: ${mc.neighborhoodFactors.recentDevelopment}`)
-    if (mc.investorSentiment) marketLines.push(`Investor Sentiment: ${mc.investorSentiment}`)
-  }
-
   const marketContextStr = marketLines.length > 0
     ? `\nMARKET CONTEXT:\n  ${marketLines.join('\n  ')}`
     : ''

@@ -22,6 +22,7 @@ import { filtersToApiParams } from '../services/appraisal/types'
 import type { Env } from '../types'
 import type { NormalizedProperty, NormalizedComparable } from '../services/property-api/types'
 import { drizzle } from 'drizzle-orm/d1'
+import { eq } from 'drizzle-orm'
 import { savedReports } from '../db/schema'
 
 interface JobState {
@@ -80,6 +81,8 @@ export interface StartStreamingRequest {
   evalParams: Omit<EvaluationParams, 'jobId' | 'bundle'>
   /** Whether to run LLM comp selection */
   llmEnabled: boolean
+  /** Whether this is updating an existing report (refresh) */
+  isRefresh?: boolean
   llmOptions?: {
     includePhotos?: boolean
     compSelectionModel?: string
@@ -257,29 +260,36 @@ export class AnalysisJobDO {
       })),
     })
 
-    // ── Step 3: Enrich comps + fetch market context (parallel) ────────────────
+    // ── Step 3: Enrich comps ───────────────────────────────────────────────────
     await this.pushEvent('property_fetch', { message: 'Enriching comparable details...' })
     const enrichStart = Date.now()
 
-    // Run comp enrichment and market context search in parallel
-    const [enrichedComps, marketContext] = await Promise.all([
-      propertyApi.enrichComparables(rawComps, { concurrency: 10 }),
-      config.llmEnabled
-        ? fetchMarketContext({
-            address: property.address,
-            city: property.city,
-            state: property.state,
-            zipCode: property.zipCode,
-            propertyType: property.propertyType,
-            subdivision: property.subdivision,
-          }, this.env, config.llmOptions?.marketSearchModel).catch((err) => {
-            console.warn('[AnalysisJobDO] Market context error:', err instanceof Error ? err.message : err)
-            return null
-          })
-        : Promise.resolve(null),
-    ]) as [typeof rawComps, MarketContext | null]
+    const enrichedComps = await propertyApi.enrichComparables(rawComps, { concurrency: 10 })
 
-    console.log(`[AnalysisJobDO] ✓ Comps enriched in ${Date.now() - enrichStart}ms${marketContext ? `, market context fetched` : ''}`)
+    // Market context search runs in parallel — doesn't block evaluation or LLM
+    // but we track the promise so we can await it before enrichment_done
+    let marketContextPromise: Promise<void> = Promise.resolve()
+    if (config.llmEnabled) {
+      marketContextPromise = fetchMarketContext({
+        address: property.address,
+        city: property.city,
+        state: property.state,
+        zipCode: property.zipCode,
+        propertyType: property.propertyType,
+        subdivision: property.subdivision,
+      }, this.env, config.llmOptions?.marketSearchModel)
+        .then((mc) => {
+          if (mc) {
+            this.pushEvent('market_context', { marketContext: mc })
+            console.log(`[AnalysisJobDO] ✓ Market context fetched in ${mc.latencyMs}ms`)
+          }
+        })
+        .catch((err) => {
+          console.warn('[AnalysisJobDO] Market context error:', err instanceof Error ? err.message : err)
+        })
+    }
+
+    console.log(`[AnalysisJobDO] ✓ Comps enriched in ${Date.now() - enrichStart}ms`)
 
     // Build the full property bundle
     const permitsData = permitsResult && 'success' in permitsResult && permitsResult.success ? permitsResult.data : null
@@ -356,39 +366,45 @@ export class AnalysisJobDO {
       }
     } catch { /* Non-fatal */ }
 
-    // If LLM will run, disable all comp selections — LLM decides final selection
-    if (config.llmEnabled) {
-      const comps = analysisResult.comps as Record<string, unknown> | undefined
-      if (comps?.items && Array.isArray(comps.items)) {
-        comps.items = comps.items.map((c: Record<string, unknown>) => ({ ...c, isEnabled: false }))
-        comps.enabledCount = 0
-        comps.disabledCount = (comps.items as unknown[]).length
-      }
-    }
+    // Rule-based comp selection stays intact — AI will override later if enabled
 
     console.log(`[AnalysisJobDO] ✓ Evaluation complete in ${Date.now() - evalStart}ms`)
 
     // Stream full evaluation result → dashboard shows valuation + filtered comps
     await this.pushEvent('evaluation_complete', { updatedResult: analysisResult })
 
-    // Save report to DB
+    // Save/update report in DB
     try {
       const db = drizzle(this.env.DB)
       const subj = analysisResult.subject as Record<string, unknown>
       const val = analysisResult.valuation as Record<string, unknown>
-      await db.insert(savedReports).values({
-        userId: config.userId,
-        jobId: config.jobId,
-        propertyAddress: (subj.address as string) || '',
-        propertyCity: property.city || '',
-        propertyState: property.state || '',
-        propertyZip: property.zipCode || '',
+      const reportData = {
         fullResponseJson: JSON.stringify(analysisResult),
         arv: (val.arv as number) || 0,
         asIsValue: (val.asIsValue as number) ?? null,
         maxAllowableOffer: (val.buyPrice as number) || 0,
         estimatedRepairs: (val.rehabCost as number) || 0,
-      })
+      }
+
+      if (config.isRefresh) {
+        // Update existing report
+        await db.update(savedReports)
+          .set(reportData)
+          .where(eq(savedReports.jobId, config.jobId))
+        console.log(`[AnalysisJobDO] Report updated for job ${config.jobId}`)
+      } else {
+        // Insert new report
+        await db.insert(savedReports).values({
+          userId: config.userId,
+          jobId: config.jobId,
+          propertyAddress: (subj.address as string) || '',
+          propertyCity: property.city || '',
+          propertyState: property.state || '',
+          propertyZip: property.zipCode || '',
+          ...reportData,
+        })
+        console.log(`[AnalysisJobDO] Report saved for job ${config.jobId}`)
+      }
     } catch (dbError) {
       console.warn(`[AnalysisJobDO] Failed to save report:`, dbError instanceof Error ? dbError.message : dbError)
     }
@@ -425,7 +441,6 @@ export class AnalysisJobDO {
           arvThresholdPercent: evalParams.arvThreshold?.percent ?? 15,
           asIsThresholdPercent: evalParams.asIsThresholdPercent ?? 70,
           riskFlags: (analysisResult.riskFlags as string[]) ?? [],
-          marketContext,
         }
 
         const llmResult = await analyzeComps(compAnalysisCtx, this.env, { includePhotos: config.llmOptions?.includePhotos, modelOverride: config.llmOptions?.compSelectionModel, reasoning: config.llmOptions?.reasoning })
@@ -461,6 +476,8 @@ export class AnalysisJobDO {
       }
     }
 
+    // Wait for market context before closing SSE (so client receives it)
+    await marketContextPromise
     await this.pushEvent('enrichment_done', { totalDurationMs: Date.now() - startTime })
     console.log(`[AnalysisJobDO] ── Streaming analysis complete in ${Date.now() - startTime}ms ──`)
   }

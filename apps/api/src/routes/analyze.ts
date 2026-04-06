@@ -40,6 +40,8 @@ function generateJobId(): string {
 // ─── Request Types ─────────────────────────────────────────────────────────────
 
 interface AnalyzeRequest {
+  /** Existing job ID — when set, updates existing report instead of creating new */
+  existingJobId?: string
   // Property identification (one of these required)
   address?: string
   streetAddress?: string
@@ -142,7 +144,7 @@ analyze.post('/', async (c) => {
       )
     }
 
-    const jobId = generateJobId()
+    const jobId = body.existingJobId || generateJobId()
 
     // ─── 1. Load user settings ───────────────────────────────────────────────
     const settingsStart = Date.now()
@@ -213,6 +215,7 @@ analyze.post('/', async (c) => {
           asIsThresholdPercent: body.asIsThresholdPercent ?? userSettings.asIsThresholdPercent,
         },
         llmEnabled: body.llmAnalysis?.enabled === true && !!c.env.OPENROUTER_API_KEY,
+        isRefresh: !!body.existingJobId,
         llmOptions: {
           includePhotos: body.llmAnalysis?.includePhotos,
           compSelectionModel: validateModel(body.llmAnalysis?.compSelectionModel),
