@@ -1,7 +1,8 @@
 'use client'
 
 import { useState, useEffect, useMemo } from 'react'
-import { SlidersHorizontal, RotateCcw, Loader2, LayoutGrid, List, ArrowUpDown } from 'lucide-react'
+import { SlidersHorizontal, RotateCcw, Loader2, LayoutGrid, List, ArrowUpDown, RefreshCw } from 'lucide-react'
+import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 import type { CompsData, CompItem, SubjectData } from './shared-types'
@@ -28,6 +29,8 @@ export interface ComparablesSectionProps {
   highlightedCompKey?: string | null
   /** When true, shows all comps expanded with analysis-in-progress animation */
   isAnalyzing?: boolean
+  /** Called to trigger AI comp selection */
+  onRunAiAnalysis?: () => void
   /** Called when a comp card is clicked (for comparison dialog) */
   onCompClick?: (comp: CompItem) => void
   /** Called when a comp card is hovered (for map marker sync) */
@@ -54,6 +57,7 @@ export function ComparablesSection({
   onReset,
   highlightedCompKey,
   isAnalyzing = false,
+  onRunAiAnalysis,
   onCompClick,
   onCompHover,
 }: ComparablesSectionProps) {
@@ -144,10 +148,21 @@ export function ComparablesSection({
             </span>
           </div>
           <div className="flex items-center gap-2">
+            {onRunAiAnalysis && !isAnalyzing && (
+              <Button
+                size="icon"
+                variant="outline"
+                onClick={onRunAiAnalysis}
+                className="h-7 w-7 no-print"
+                title="AI Comp Selection"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+              </Button>
+            )}
             {isAnalyzing && (
               <Badge variant="outline" className="text-[10px] gap-1 border-primary/30 text-primary no-print">
                 <Loader2 className="w-3 h-3 animate-spin" />
-                Analyzing
+                AI Analyzing
               </Badge>
             )}
             {/* Grid/List toggle */}
@@ -274,10 +289,9 @@ export function ComparablesSection({
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {sortedItems.map(({ comp, originalIndex }) => {
               const key = getCompKey(comp, originalIndex)
-              const isSelected = isAnalyzing ? false
-                : hasInteractiveSelection
-                  ? selectedCompKeys!.has(key)
-                  : comp.isEnabled === true
+              const isSelected = hasInteractiveSelection
+                ? selectedCompKeys!.has(key)
+                : comp.isEnabled === true
               return (
                 <CompGridCard
                   key={key}
@@ -285,7 +299,7 @@ export function ComparablesSection({
                   index={originalIndex}
                   subject={subject}
                   isSelectedForArv={isSelected}
-                  onToggleArv={!isAnalyzing && onToggleComp ? () => onToggleComp(key) : undefined}
+                  onToggleArv={onToggleComp ? () => onToggleComp(key) : undefined}
                   onClick={() => onCompClick?.(comp)}
                   onHover={onCompHover ? (hovering) => onCompHover(hovering ? key : null) : undefined}
                   isHighlighted={highlightedCompKey === key}
@@ -297,10 +311,9 @@ export function ComparablesSection({
           <div className="space-y-3">
             {sortedItems.map(({ comp, originalIndex }) => {
               const key = getCompKey(comp, originalIndex)
-              const isSelected = isAnalyzing ? false
-                : hasInteractiveSelection
-                  ? selectedCompKeys!.has(key)
-                  : comp.isEnabled === true
+              const isSelected = hasInteractiveSelection
+                ? selectedCompKeys!.has(key)
+                : comp.isEnabled === true
               return (
                 <CompCard
                   key={key}

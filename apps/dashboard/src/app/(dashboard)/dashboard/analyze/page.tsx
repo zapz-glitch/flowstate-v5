@@ -110,9 +110,12 @@ export default function AnalyzePage() {
   const [asIsThreshold, setAsIsThreshold] = useState(70)
   const [compModel, setCompModel] = useState('')
   const [marketModel, setMarketModel] = useState('')
+  const [aiEnabled, setAiEnabled] = useState(false)
+  const [aiOnlyMode, setAiOnlyMode] = useState(false) // true when "AI Selection" button clicked (skip evaluation_complete)
   const [showAdvanced, setShowAdvanced] = useState(false)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [marketContext, setMarketContext] = useState<Record<string, any> | null>(null)
+  const [aiReport, setAiReport] = useState<{ summary: string; selected: number; total: number; model: string } | null>(null)
 
   // Error & retry
   const [error, setError] = useState<string | null>(null)
@@ -174,11 +177,11 @@ export default function AnalyzePage() {
 
     switch (eventType) {
       case 'property_fetch':
-        setStreamingStep('searching')
+        if (!aiOnlyMode) setStreamingStep('searching')
         break
 
       case 'subject_found':
-        // Subject property found — show map marker + subject card immediately
+        if (aiOnlyMode) break // Skip — keep existing result
         setStreamingStep('subject')
         if (data.subject) {
           setAnalysisResult((prev) => ({
@@ -190,7 +193,7 @@ export default function AnalyzePage() {
         break
 
       case 'comps_found':
-        // Comps found — show map markers + basic comp cards
+        if (aiOnlyMode) break // Skip — keep existing result
         setStreamingStep('comps')
         if (data.comps) {
           setAnalysisResult((prev) => ({
@@ -209,17 +212,15 @@ export default function AnalyzePage() {
         break
 
       case 'evaluation_started':
-        setStreamingStep('evaluating')
+        if (!aiOnlyMode) setStreamingStep('evaluating')
         break
 
       case 'evaluation_complete':
-        // Full evaluation result — show valuation + filtered comps immediately
+        if (aiOnlyMode) break // Skip — keep existing evaluation, wait for LLM
         setStreamingStep('done')
         if (data.updatedResult) {
           setAnalysisResult(data.updatedResult as AnalyzeData)
           setAnalysisState((prev) => ({ ...prev, status: 'completed' }))
-          // Don't set aiAnalyzing here — let comps show with rule-based selection
-          // AI analyzing will be set when llm_started fires
         }
         break
 
@@ -229,13 +230,37 @@ export default function AnalyzePage() {
 
       case 'llm_complete':
         setAiAnalyzing(false)
+        setAiOnlyMode(false)
         if (data.updatedResult) {
-          setAnalysisResult(data.updatedResult as AnalyzeData)
+          // Only merge comp selection from AI — let client-side recalc derive valuation
+          const updated = data.updatedResult as AnalyzeData
+          setAnalysisResult((prev) => {
+            if (!prev) return updated
+            return {
+              ...prev,
+              comps: updated.comps, // AI-updated comp selection (isEnabled, compGroup, etc.)
+            }
+          })
+        }
+        if (data.llmAnalysis) {
+          const la = data.llmAnalysis as { summary?: string; selectedForArv?: string[]; compCount?: number; model?: string }
+          setAiReport({
+            summary: la.summary || 'AI comp selection complete',
+            selected: la.selectedForArv?.length ?? 0,
+            total: la.compCount ?? 0,
+            model: la.model?.split('/').pop() ?? '',
+          })
         }
         break
 
       case 'market_context':
         if (data.marketContext) setMarketContext(data.marketContext as Record<string, unknown>)
+        break
+
+      case 'risk_flags_updated':
+        if (data.riskFlags) {
+          setAnalysisResult((prev) => prev ? { ...prev, riskFlags: data.riskFlags as string[] } : prev)
+        }
         break
 
       case 'enrichment_done':
@@ -248,6 +273,7 @@ export default function AnalyzePage() {
 
       case 'error':
         setAiAnalyzing(false)
+        setAiOnlyMode(false)
         setStreamingStep('done')
         if (data.message) {
           setError(data.message as string)
@@ -295,6 +321,7 @@ export default function AnalyzePage() {
   } = useAnalysisEvaluation({
     data: analysisResult ?? null,
     stickyBarRootMargin: '-60px 0px 0px 0px',
+    aiAnalyzing,
   })
 
   // ─── Auto-save on evaluation/comp changes ──────────────────────────────
@@ -326,6 +353,33 @@ export default function AnalyzePage() {
   )
 
   // ─── Sync evaluation state to Jotai atoms ────────────────────────────────
+  // Run AI analysis on existing result (when AI was initially disabled)
+  const handleRunAiAnalysis = useCallback(async () => {
+    if (!address.trim() || aiAnalyzing) return
+    setAiAnalyzing(true)
+    setAiOnlyMode(true)
+    try {
+      const response = await queueAnalysis({
+        address: address.trim(),
+        searchOptions: { radiusMiles: 1, maxComps: 15, monthsBack: 12 },
+        skipCache: false,
+        llmAnalysis: {
+          enabled: true,
+          compSelectionModel: compModel || undefined,
+          marketSearchModel: marketModel || undefined,
+        },
+      })
+      if (response.success && response.enrichment) {
+        setEnrichmentStreamUrl(response.enrichment.streamUrl)
+        setEnrichmentToken(response.enrichment.token)
+      } else {
+        setAiAnalyzing(false)
+      }
+    } catch {
+      setAiAnalyzing(false)
+    }
+  }, [address, aiAnalyzing, compModel, marketModel])
+
   useEvaluationSync({
     evaluation: { isRecalculated, recalcData, compOverride, handleToggleComp, handleResetComps },
     subject: renderData?.subject,
@@ -334,8 +388,10 @@ export default function AnalyzePage() {
     aiAnalyzing,
     isStreaming: streamingStep !== 'idle' && streamingStep !== 'done',
     marketContext,
+    aiReport,
     onOpenSettings: () => setSettingsOpen(true),
     onCompClick: (comp) => { setComparisonComp(comp as CompItem); setComparisonOpen(true) },
+    onRunAiAnalysis: handleRunAiAnalysis,
   })
 
   // ─── Analysis Handler ────────────────────────────────────────────────────
@@ -349,6 +405,8 @@ export default function AnalyzePage() {
     setEnrichmentToken(null)
     setAiAnalyzing(false)
     setMarketContext(null)
+    setAiReport(null)
+    setAiOnlyMode(false)
     setStreamingStep('idle')
     setPhase('fetching')
 
@@ -367,11 +425,11 @@ export default function AnalyzePage() {
         arvThresholdPercent: arvThreshold,
         asIsThresholdPercent: asIsThreshold,
         appraisalOverrides: overrides,
-        llmAnalysis: {
+        llmAnalysis: aiEnabled ? {
           enabled: true,
           compSelectionModel: compModel || undefined,
           marketSearchModel: marketModel || undefined,
-        },
+        } : undefined,
       })
 
       if (response.success) {
@@ -588,29 +646,39 @@ export default function AnalyzePage() {
                   </Label>
                 </div>
                 <div className="flex items-center gap-2">
-                  <label className="text-[11px] text-foreground-tertiary whitespace-nowrap">Comp Selection</label>
-                  <select
-                    value={compModel}
-                    onChange={(e) => setCompModel(e.target.value)}
-                    className="h-7 text-[11px] px-2 rounded border border-border bg-background text-foreground"
-                  >
-                    <option value="">Gemini 3 Flash</option>
-                    <option value="google/gemini-2.5-flash">Gemini 2.5 Flash</option>
-                    <option value="x-ai/grok-4.1-fast">Grok 4.1 Fast</option>
-                  </select>
+                  <Switch id="ai-enabled" checked={aiEnabled} onCheckedChange={setAiEnabled} />
+                  <Label htmlFor="ai-enabled" className="text-[11px] text-foreground-tertiary cursor-pointer">
+                    AI Analysis
+                  </Label>
                 </div>
-                <div className="flex items-center gap-2">
-                  <label className="text-[11px] text-foreground-tertiary whitespace-nowrap">Market Research</label>
-                  <select
-                    value={marketModel}
-                    onChange={(e) => setMarketModel(e.target.value)}
-                    className="h-7 text-[11px] px-2 rounded border border-border bg-background text-foreground"
-                  >
-                    <option value="">Gemini 3 Flash</option>
-                    <option value="google/gemini-2.5-flash">Gemini 2.5 Flash</option>
-                    <option value="x-ai/grok-4.1-fast">Grok 4.1 Fast</option>
-                  </select>
-                </div>
+                {aiEnabled && (
+                  <>
+                    <div className="flex items-center gap-2">
+                      <label className="text-[11px] text-foreground-tertiary whitespace-nowrap">Comp Selection</label>
+                      <select
+                        value={compModel}
+                        onChange={(e) => setCompModel(e.target.value)}
+                        className="h-7 text-[11px] px-2 rounded border border-border bg-background text-foreground"
+                      >
+                        <option value="">Gemini 3 Flash</option>
+                        <option value="google/gemini-2.5-flash">Gemini 2.5 Flash</option>
+                        <option value="x-ai/grok-4.1-fast">Grok 4.1 Fast</option>
+                      </select>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <label className="text-[11px] text-foreground-tertiary whitespace-nowrap">Market Research</label>
+                      <select
+                        value={marketModel}
+                        onChange={(e) => setMarketModel(e.target.value)}
+                        className="h-7 text-[11px] px-2 rounded border border-border bg-background text-foreground"
+                      >
+                        <option value="">Gemini 3 Flash</option>
+                        <option value="google/gemini-2.5-flash">Gemini 2.5 Flash</option>
+                        <option value="x-ai/grok-4.1-fast">Grok 4.1 Fast</option>
+                      </select>
+                    </div>
+                  </>
+                )}
                 </div>
             )}
           </div>

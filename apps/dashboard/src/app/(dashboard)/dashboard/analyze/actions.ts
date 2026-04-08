@@ -228,15 +228,6 @@ export interface ValuationData {
     priceCeiling?: number
     noDataReason?: string
   } | null
-  /** Investor purchase intelligence — LLC/Corp purchases among as-is comps (display only) */
-  investorPurchaseIntel?: {
-    avgInvestorPrice?: number | null
-    avgPricePerSqft?: number | null
-    compCount?: number
-    compIds?: string[]
-    groupBCompCount?: number
-    noDataReason?: string
-  } | null
 }
 
 export interface CompsData {
@@ -290,8 +281,6 @@ export interface CompItem {
   isEnabled?: boolean
   /** Which comp group: 'arv' (Group A, drives valuation), 'as_is' (Group B, market intel), or null */
   compGroup?: 'arv' | 'as_is' | null
-  /** Whether this comp was an investor/LLC purchase */
-  isInvestorPurchase?: boolean
   /** Price percentile among all comps (1 = highest, 100 = lowest) */
   pricePercentile?: number | null
   /** Reasons why this comp was disabled (if any) */

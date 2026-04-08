@@ -28,6 +28,7 @@ export function useEvaluation() {
 
     // Market research
     marketContext: state.marketContext,
+    aiReport: state.aiReport,
 
     // UI state
     aiAnalyzing: state.aiAnalyzing,
@@ -38,5 +39,6 @@ export function useEvaluation() {
     onResetComps: state.callbacks.onResetComps,
     onOpenSettings: state.callbacks.onOpenSettings,
     onCompClick: state.callbacks.onCompClick,
+    onRunAiAnalysis: state.callbacks.onRunAiAnalysis,
   }
 }

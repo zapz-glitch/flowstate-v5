@@ -28,8 +28,10 @@ interface SyncOptions {
   isStreaming?: boolean
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   marketContext?: Record<string, any> | null
+  aiReport?: { summary: string; selected: number; total: number; model: string } | null
   onOpenSettings: () => void
   onCompClick?: (comp: CompItem) => void
+  onRunAiAnalysis?: () => void
 }
 
 export function useEvaluationSync({
@@ -40,8 +42,10 @@ export function useEvaluationSync({
   aiAnalyzing = false,
   isStreaming = false,
   marketContext = null,
+  aiReport = null,
   onOpenSettings,
   onCompClick,
+  onRunAiAnalysis,
 }: SyncOptions) {
   const setState = useSetAtom(evaluationStateAtom)
 
@@ -54,6 +58,7 @@ export function useEvaluationSync({
       recalcData: evaluation.recalcData,
       compOverride: evaluation.compOverride,
       marketContext,
+      aiReport,
       aiAnalyzing,
       isStreaming,
       callbacks: {
@@ -61,12 +66,13 @@ export function useEvaluationSync({
         onResetComps: evaluation.handleResetComps,
         onOpenSettings,
         onCompClick,
+        onRunAiAnalysis,
       },
     })
   }, [
     subject, displayValuation, effectiveComps,
     evaluation.isRecalculated, evaluation.recalcData, evaluation.compOverride,
     evaluation.handleToggleComp, evaluation.handleResetComps,
-    aiAnalyzing, isStreaming, marketContext, onOpenSettings, onCompClick, setState,
+    aiAnalyzing, isStreaming, marketContext, aiReport, onOpenSettings, onCompClick, onRunAiAnalysis, setState,
   ])
 }

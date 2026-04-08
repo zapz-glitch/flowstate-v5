@@ -30,6 +30,7 @@ export interface EvaluationCallbacks {
   onResetComps: () => void
   onOpenSettings: () => void
   onCompClick?: (comp: CompItem) => void
+  onRunAiAnalysis?: () => void
 }
 
 // ─── Consolidated State ────────────────────────────────────────────────────
@@ -48,6 +49,9 @@ export interface EvaluationState {
   // Market research (from web search, arrives independently)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   marketContext: Record<string, any> | null
+
+  // AI analysis report
+  aiReport: { summary: string; selected: number; total: number; model: string } | null
 
   // UI state
   aiAnalyzing: boolean
@@ -73,6 +77,7 @@ export const evaluationStateAtom = atom<EvaluationState>({
   recalcData: null,
   compOverride: null,
   marketContext: null,
+  aiReport: null,
   aiAnalyzing: false,
   isStreaming: false,
   callbacks: defaultCallbacks,

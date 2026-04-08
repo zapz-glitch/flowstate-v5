@@ -355,23 +355,26 @@ export class AnalysisJobDO {
 
     let analysisResult = evalResult.response as unknown as Record<string, unknown>
 
-    // Inject OSM location risks
-    try {
-      if (property.latitude && property.longitude) {
-        const osmResult = await detectOsmLocationRisks(property.latitude, property.longitude)
-        if (osmResult.riskFlags.length > 0) {
-          const existingFlags = (analysisResult.riskFlags as string[] | null) ?? []
-          analysisResult.riskFlags = [...existingFlags, ...osmResult.riskFlags]
-        }
-      }
-    } catch { /* Non-fatal */ }
-
     // Rule-based comp selection stays intact — AI will override later if enabled
 
     console.log(`[AnalysisJobDO] ✓ Evaluation complete in ${Date.now() - evalStart}ms`)
 
-    // Stream full evaluation result → dashboard shows valuation + filtered comps
+    // Stream full evaluation result → dashboard shows valuation + filtered comps immediately
     await this.pushEvent('evaluation_complete', { updatedResult: analysisResult })
+
+    // OSM location risks — fire-and-forget, push update when ready
+    const osmPromise = (async () => {
+      try {
+        if (property.latitude && property.longitude) {
+          const osmResult = await detectOsmLocationRisks(property.latitude, property.longitude)
+          if (osmResult.riskFlags.length > 0) {
+            const existingFlags = (analysisResult.riskFlags as string[] | null) ?? []
+            analysisResult.riskFlags = [...existingFlags, ...osmResult.riskFlags]
+            await this.pushEvent('risk_flags_updated', { riskFlags: analysisResult.riskFlags })
+          }
+        }
+      } catch { /* Non-fatal */ }
+    })()
 
     // Save/update report in DB
     try {
@@ -476,8 +479,8 @@ export class AnalysisJobDO {
       }
     }
 
-    // Wait for market context before closing SSE (so client receives it)
-    await marketContextPromise
+    // Wait for parallel tasks before closing SSE (so client receives them)
+    await Promise.all([marketContextPromise, osmPromise])
     await this.pushEvent('enrichment_done', { totalDurationMs: Date.now() - startTime })
     console.log(`[AnalysisJobDO] ── Streaming analysis complete in ${Date.now() - startTime}ms ──`)
   }
@@ -511,6 +514,7 @@ export class AnalysisJobDO {
 
   private async runEnrichment(config: StartEnrichmentRequest): Promise<void> {
     const startTime = Date.now()
+    let osmPromise: Promise<void> = Promise.resolve()
 
     // Brief delay to let SSE clients connect before broadcasting
     await new Promise((r) => setTimeout(r, 1000))
@@ -530,20 +534,6 @@ export class AnalysisJobDO {
 
         const updatedResponse = evalResult.response as unknown as Record<string, unknown>
 
-        // Inject OSM location risks
-        try {
-          const prop = config.bundle.property
-          if (prop.latitude && prop.longitude) {
-            const osmResult = await detectOsmLocationRisks(prop.latitude, prop.longitude)
-            if (osmResult.riskFlags.length > 0) {
-              const existingFlags = (updatedResponse.riskFlags as string[] | null) ?? []
-              updatedResponse.riskFlags = [...existingFlags, ...osmResult.riskFlags]
-            }
-          }
-        } catch {
-          // Non-fatal
-        }
-
         // If LLM will run, disable all comp selections — LLM decides final selection
         if (config.pending.includes('llm')) {
           const comps = updatedResponse.comps as Record<string, unknown> | undefined
@@ -557,6 +547,21 @@ export class AnalysisJobDO {
         config.analysisResult = updatedResponse
         await this.pushEvent('evaluation_complete', { updatedResult: updatedResponse })
         console.log(`[AnalysisJobDO] ✓ Evaluation complete in ${Date.now() - evalStart}ms`)
+
+        // OSM location risks — fire-and-forget, push update when ready
+        osmPromise = (async () => {
+          try {
+            const prop = config.bundle.property
+            if (prop.latitude && prop.longitude) {
+              const osmResult = await detectOsmLocationRisks(prop.latitude, prop.longitude)
+              if (osmResult.riskFlags.length > 0) {
+                const existingFlags = (updatedResponse.riskFlags as string[] | null) ?? []
+                updatedResponse.riskFlags = [...existingFlags, ...osmResult.riskFlags]
+                await this.pushEvent('risk_flags_updated', { riskFlags: updatedResponse.riskFlags })
+              }
+            }
+          } catch { /* Non-fatal */ }
+        })()
 
         // Save report to DB
         try {
@@ -692,6 +697,8 @@ export class AnalysisJobDO {
       }
     }
 
+    // Wait for OSM risk flags if still running
+    await osmPromise
     const totalMs = Date.now() - startTime
     await this.pushEvent('enrichment_done', { totalDurationMs: totalMs })
     console.log(`[AnalysisJobDO] ── Enrichment complete in ${(totalMs / 1000).toFixed(1)}s ──`)

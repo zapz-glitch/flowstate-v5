@@ -13,7 +13,6 @@ import type { MajorItem, ValuationService } from '../valuation'
 import { REHAB_LEVELS } from '../valuation'
 import type { ClassificationResult, PropertyClassification } from '../classification'
 import { generateZillowUrl } from '../photo-provider'
-import { isInvestorPurchase } from '../evaluation/investor-detection'
 import {
   lookupCode,
   BUILDING_STYLE,
@@ -339,8 +338,6 @@ export interface ResponseContext {
   groupACompIds?: Set<string>
   /** Set of Group B comp IDs (for compGroup tagging) */
   groupBCompIds?: Set<string>
-  /** Investor purchase intelligence (subset of Group B) */
-  investorPurchaseResult?: import('../evaluation').InvestorPurchaseResult | null
 }
 
 /**
@@ -461,15 +458,6 @@ export interface AnalysisResponse {
       compIds: string[]
       thresholdPercent: number
       priceCeiling: number
-      noDataReason?: string
-    } | null
-    /** Investor purchase intelligence — LLC/Corp purchases among Group B comps (display only) */
-    investorPurchaseIntel: {
-      avgInvestorPrice: number | null
-      avgPricePerSqft: number | null
-      compCount: number
-      compIds: string[]
-      groupBCompCount: number
       noDataReason?: string
     } | null
     buyPrice: number
@@ -899,7 +887,6 @@ export function buildAnalysisResponse(
       compGroup: ctx.groupACompIds?.has(comp.id) ? 'arv' as const
         : ctx.groupBCompIds?.has(comp.id) ? 'as_is' as const
         : null,
-      isInvestorPurchase: merged?.transaction ? isInvestorPurchase(merged).isInvestor : false,
       disableReasons: evaluation?.disableReasons ?? [],
       classification: classificationSummary,
       isBestMatch: ctx.bestMatch?.compId === comp.id,
@@ -1006,14 +993,6 @@ export function buildAnalysisResponse(
         thresholdPercent: ctx.groupBResult.thresholdPercent,
         priceCeiling: ctx.groupBResult.priceCeiling,
         noDataReason: ctx.groupBResult.noDataReason,
-      } : null,
-      investorPurchaseIntel: ctx.investorPurchaseResult ? {
-        avgInvestorPrice: ctx.investorPurchaseResult.avgInvestorPrice,
-        avgPricePerSqft: ctx.investorPurchaseResult.avgPricePerSqft,
-        compCount: ctx.investorPurchaseResult.count,
-        compIds: ctx.investorPurchaseResult.compIds,
-        groupBCompCount: ctx.investorPurchaseResult.groupBCount,
-        noDataReason: ctx.investorPurchaseResult.noDataReason,
       } : null,
     },
 

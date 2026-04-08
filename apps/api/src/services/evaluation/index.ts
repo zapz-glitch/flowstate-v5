@@ -27,7 +27,7 @@ import {
 } from '../analysis'
 import { generateZillowUrl } from '../photo-provider'
 import { AnalysisError } from '../../utils/analysis-error'
-import { isInvestorPurchase } from './investor-detection'
+
 import { scoreComp, calculateARV, getFiltersAtStep, MAX_RELAXATION_STEPS, type ArvCompLike } from '@flowstate-api/shared/appraisal'
 
 function formatUsd(amount: number): string {
@@ -81,29 +81,12 @@ export interface GroupBResult {
   noDataReason?: string
 }
 
-export interface InvestorPurchaseResult {
-  /** Comp IDs identified as investor purchases */
-  compIds: string[]
-  /** Average investor purchase price (sqft-scaled to subject) */
-  avgInvestorPrice: number | null
-  /** Average $/sqft across investor purchase comps */
-  avgPricePerSqft: number | null
-  /** Number of investor purchase comps found */
-  count: number
-  /** Total Group B comp count */
-  groupBCount: number
-  /** Reason when no investor comps found */
-  noDataReason?: string
-}
-
 export interface EvaluationResult {
   response: AnalysisResponse
   appraisalResult: AppraisalResultWithFallback
   compClassifications: Map<string, ClassificationResult>
   /** Group B as-is market intelligence (display only) */
   groupB: GroupBResult | null
-  /** Investor purchase intelligence (subset of Group B, display only) */
-  investorPurchases: InvestorPurchaseResult | null
 }
 
 // ─── Price Classification ────────────────────────────────────────────────────
@@ -549,51 +532,6 @@ function selectGroupBComps(
   }
 }
 
-// ─── Investor Purchase Intelligence ─────────────────────────────────────────
-
-function selectInvestorPurchaseComps(
-  subject: NormalizedProperty,
-  groupBCompIds: string[],
-  allComparables: NormalizedComparable[],
-): InvestorPurchaseResult {
-  const subjectSqft = subject.squareFeet || 0
-  const groupBComps = allComparables.filter((c) => groupBCompIds.includes(c.id))
-  const investorComps = groupBComps.filter((c) => isInvestorPurchase(c).isInvestor)
-
-  if (investorComps.length === 0) {
-    const hasTransactionData = groupBComps.some((c) => c.transaction != null)
-    return {
-      compIds: [],
-      avgInvestorPrice: null,
-      avgPricePerSqft: null,
-      count: 0,
-      groupBCount: groupBComps.length,
-      noDataReason: hasTransactionData
-        ? 'No investor/LLC purchases found among as-is comps'
-        : 'Buyer data not available for as-is comps',
-    }
-  }
-
-  const scaledPrices = investorComps
-    .filter((c) => c.salePrice != null && c.squareFeet && c.squareFeet > 0)
-    .map((c) => (c.salePrice! / c.squareFeet!) * subjectSqft)
-
-  const avgInvestorPrice = scaledPrices.length > 0
-    ? Math.round(scaledPrices.reduce((a, b) => a + b, 0) / scaledPrices.length)
-    : null
-  const avgPricePerSqft = avgInvestorPrice != null && subjectSqft > 0
-    ? Math.round(avgInvestorPrice / subjectSqft)
-    : null
-
-  return {
-    compIds: investorComps.map((c) => c.id),
-    avgInvestorPrice,
-    avgPricePerSqft,
-    count: investorComps.length,
-    groupBCount: groupBComps.length,
-  }
-}
-
 // ─── Main Evaluation ─────────────────────────────────────────────────────────
 
 /**
@@ -643,15 +581,6 @@ export function performAnalysis(params: EvaluationParams): EvaluationResult {
 
   if (groupBResult) {
     console.log(`[Evaluate] Group B: ${groupBResult.count} as-is comps (≤$${groupBResult.priceCeiling.toLocaleString()}, ${asIsThresholdPercent}% of ARV)`)
-  }
-
-  // ── 3b. Investor Purchase Intelligence ────────────────────────────────────
-  const investorPurchaseResult = groupBResult && groupBResult.compIds.length > 0
-    ? selectInvestorPurchaseComps(bundle.property, groupBResult.compIds, allComparables)
-    : null
-
-  if (investorPurchaseResult) {
-    console.log(`[Evaluate] Investor purchases: ${investorPurchaseResult.count}/${investorPurchaseResult.groupBCount} Group B comps`)
   }
 
   // Classification summary
@@ -756,7 +685,6 @@ export function performAnalysis(params: EvaluationParams): EvaluationResult {
       apiCallStats: params.apiCallStats,
       bestMatch,
       groupBResult,
-      investorPurchaseResult,
       groupACompIds: groupA.groupACompIds,
       groupBCompIds,
     }
@@ -767,6 +695,5 @@ export function performAnalysis(params: EvaluationParams): EvaluationResult {
     appraisalResult: finalAppraisalResult,
     compClassifications,
     groupB: groupBResult,
-    investorPurchases: investorPurchaseResult,
   }
 }

@@ -73,11 +73,6 @@ export function CompGridCard({
           )}>
             {index + 1}
           </div>
-          {comp.isInvestorPurchase && (
-            <span className="px-1.5 py-0.5 rounded-sm bg-blue-500/90 text-[9px] font-semibold text-white">
-              Investor
-            </span>
-          )}
         </div>
         {/* Bottom: price + date */}
         <div className="absolute bottom-0 left-0 right-0 px-2 py-1.5 bg-gradient-to-t from-black/70 to-transparent flex items-end justify-between">

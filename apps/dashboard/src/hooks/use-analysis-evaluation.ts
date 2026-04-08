@@ -32,6 +32,8 @@ export interface UseAnalysisEvaluationInput {
   data: AnalyzeData | null
   /** IntersectionObserver rootMargin for sticky bar (default: '-60px 0px 0px 0px') */
   stickyBarRootMargin?: string
+  /** When true, freeze displayValuation until AI analysis completes */
+  aiAnalyzing?: boolean
 }
 
 export interface UseAnalysisEvaluationReturn {
@@ -64,6 +66,7 @@ export interface UseAnalysisEvaluationReturn {
 export function useAnalysisEvaluation({
   data,
   stickyBarRootMargin = '-60px 0px 0px 0px',
+  aiAnalyzing = false,
 }: UseAnalysisEvaluationInput): UseAnalysisEvaluationReturn {
   // Settings panel open/close
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -90,10 +93,17 @@ export function useAnalysisEvaluation({
     }
   }, [data?.comps?.items])
 
-  // Sync comp selection when recalc re-evaluates filters (but not when user manually toggled comps)
+  // Sync comp selection when user changes evaluation settings (recalc produces new filter results)
+  // Skip when: manual selection active, or when data just changed (init effect handles that)
+  const prevDataRef = useRef(data?.comps?.items)
   useEffect(() => {
     if (!recalcData || !data?.comps?.items) return
     if (isManualRef.current) return
+    // If data items ref changed, the init effect already handled it — skip
+    if (prevDataRef.current !== data.comps.items) {
+      prevDataRef.current = data.comps.items
+      return
+    }
 
     const keys = new Set<string>()
     data.comps.items.forEach((comp, i) => {
@@ -130,8 +140,12 @@ export function useAnalysisEvaluation({
     }
   }, [data?.comps?.items])
 
+  // Freeze valuation ref: snapshot the valuation when AI analysis starts
+  const frozenValuationRef = useRef<ValuationData | undefined>(undefined)
+  const wasAiAnalyzingRef = useRef(false)
+
   // Build display valuation: always use recalcData, then apply manual comp override
-  const displayValuation = useMemo((): ValuationData | undefined => {
+  const computedValuation = useMemo((): ValuationData | undefined => {
     if (!data?.valuation) return undefined
 
     // Start from recalcData (always available once data loads) or original
@@ -175,6 +189,20 @@ export function useAnalysisEvaluation({
 
     return base
   }, [data, recalcData, compOverride, settingsHook.settings])
+
+  // Freeze valuation during AI analysis — show last known valuation until AI completes
+  // When AI starts: snapshot current valuation. When AI ends: release to show new valuation.
+  if (aiAnalyzing && !wasAiAnalyzingRef.current) {
+    // AI just started — freeze current valuation
+    frozenValuationRef.current = computedValuation
+  }
+  if (!aiAnalyzing && wasAiAnalyzingRef.current) {
+    // AI just finished — clear frozen value
+    frozenValuationRef.current = undefined
+  }
+  wasAiAnalyzingRef.current = aiAnalyzing
+
+  const displayValuation = aiAnalyzing ? (frozenValuationRef.current ?? computedValuation) : computedValuation
 
   // Build display comps: map recalcData comp evaluations onto original items
   const displayComps = useMemo((): CompsData | undefined => {

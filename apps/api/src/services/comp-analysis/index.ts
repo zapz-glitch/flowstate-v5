@@ -44,13 +44,22 @@ Every comp MUST be physically comparable to the subject. Evaluate strictly:
 6. **YEAR BUILT** — Within ~15 years for older homes, tighter for newer.
 7. **LOT SIZE** — Should be in the same general range.
 
-### Phase 2: ARV Quality Selection
-From physically similar comps, select for After Repair Value quality:
+### Phase 2: ARV vs As-Is Classification
+Classification is based on PRICE RANKING after appraisal filters:
+
+1. **ARV Comps**: Comps that PASS the appraisal filters AND fall within the top N% by sale price (the ARV threshold is provided per-analysis). These represent the highest-value, most comparable sales — the best indicators of After Repair Value.
+2. **As-Is Comps**: Remaining comps with sale price ≤ ARV × as-is threshold%. These represent current un-renovated market value.
+3. **Excluded**: Comps that fail physical similarity or have red flags.
+
+The algorithm already classifies each comp — you should validate and refine these classifications using your judgment. If you disagree with a classification, explain why in your reasoning.
+
+### Phase 3: Quality Validation
+For comps classified as ARV, validate quality:
 
 1. **SALE RECENCY** — Last 6 months ideal, up to 12 months acceptable
 2. **PROXIMITY** — Closer = more relevant market data
 3. **SUBDIVISION MATCH** — Same subdivision is a strong market indicator
-4. **PRICE LEVEL** — For ARV, prefer comps with higher $/sqft (indicates renovated condition)
+4. **PRICE LEVEL** — Higher $/sqft among physically similar comps indicates renovated condition
 5. **MINIMAL ADJUSTMENTS** — Fewer adjustments = more reliable comp
 
 ### Red Flags — EXCLUDE from ARV selection:
@@ -65,7 +74,8 @@ From physically similar comps, select for After Repair Value quality:
 - Select ONLY genuinely comparable properties. 1 excellent comp > 5 mediocre ones.
 - NEVER select a comp just for its high price if it fails physical similarity.
 - Consider the USER'S PREFERENCES — they've set specific filter thresholds and parameters. Respect their intent.
-- For as-is comps: identify comps that represent current (un-renovated) market value.
+- ARV classification is primarily driven by price ranking within the top threshold percentage AFTER passing appraisal filters. Use this as your baseline, then apply professional judgment.
+- For as-is comps: these are comps priced at or below the as-is threshold percentage of ARV.
 
 ## OUTPUT FORMAT
 Respond ONLY with valid JSON. No markdown, no code fences, no explanation outside the JSON.`
@@ -206,8 +216,14 @@ ${adjLines}`
     if (comp.transaction?.buyerIsCorporate) txFlags.push('CORPORATE BUYER')
     if (comp.transaction?.buyerNames?.some((n) => /llc|inc|corp|trust|properties|holdings/i.test(n))) txFlags.push('ENTITY BUYER')
 
+    // Algorithm classification
+    const algoClass = ctx?.compGroup === 'arv' ? '→ ARV (top price tier, passed filters)'
+      : ctx?.compGroup === 'as_is' ? '→ AS-IS (below ARV threshold)'
+      : ctx?.isEnabled ? '→ ENABLED (passed filters)'
+      : '→ EXCLUDED (failed filters)'
+
     const lines = [
-      `Comp ${i + 1} [ID: ${comp.id}]:`,
+      `Comp ${i + 1}:`,
       `  Address: ${comp.address}, ${comp.city}, ${comp.state}`,
       `  Sale: $${comp.salePrice?.toLocaleString() ?? '?'} on ${comp.saleDate ?? '?'} ($${comp.pricePerSqft ?? '?'}/sf)`,
       `  Distance: ${comp.distanceMiles?.toFixed(2) ?? '?'} mi`,
@@ -227,16 +243,25 @@ ${adjLines}`
       `  Rule Filters: ${filterSummary}`,
       `  Adjustments: ${adjSummary}`,
       ctx?.adjustedPrice ? `  Adjusted Price: $${ctx.adjustedPrice.toLocaleString()}` : null,
+      `  Algorithm Classification: ${algoClass}`,
     ]
 
     return lines.filter(Boolean).join('\n')
   }).join('\n\n')
 
   // ── Algorithm pre-selection note ──────────────────────────────────
-  const algoSelectedIds = evalContexts.filter((e) => e.isEnabled).map((e) => e.compId)
-  const algoNote = algoSelectedIds.length > 0
-    ? `\nALGORITHM PRE-SELECTION: Rule-based filters selected ${algoSelectedIds.length} comp(s): ${algoSelectedIds.join(', ')}. Validate or override based on your analysis.`
-    : '\nALGORITHM PRE-SELECTION: No comps passed all rule-based filters. Use your professional judgment to select the best available matches.'
+  const idToIdx = new Map(comparables.map((c, i) => [c.id, i + 1]))
+  const compNum = (id: string) => `Comp ${idToIdx.get(id) ?? '?'}`
+  const arvComps = evalContexts.filter((e) => e.compGroup === 'arv')
+  const asIsAlgoComps = evalContexts.filter((e) => e.compGroup === 'as_is')
+  const enabledComps = evalContexts.filter((e) => e.isEnabled)
+  const algoNote = [
+    `\nALGORITHM CLASSIFICATION (ARV threshold: top ${ctx.arvThresholdPercent}%, As-Is threshold: ${ctx.asIsThresholdPercent}% of ARV):`,
+    `  ${enabledComps.length} comp(s) passed appraisal filters`,
+    `  ${arvComps.length} classified as ARV (top ${ctx.arvThresholdPercent}% by price among filtered): ${arvComps.map((e) => compNum(e.compId)).join(', ') || 'none'}`,
+    `  ${asIsAlgoComps.length} classified as As-Is (sale price ≤ ${ctx.asIsThresholdPercent}% of ARV): ${asIsAlgoComps.map((e) => compNum(e.compId)).join(', ') || 'none'}`,
+    `Validate or override these classifications based on your professional judgment.`,
+  ].join('\n')
 
   // ── Task ──────────────────────────────────────────────────────────
   return `SUBJECT PROPERTY:
@@ -252,32 +277,35 @@ ${algoNote}
 
 YOUR TASK:
 1. Evaluate each comp for physical similarity to the subject (Phase 1)
-2. Select comps that best support an After Repair Value (ARV) estimate (Phase 2)
-3. Identify comps suitable for as-is market value (lower-priced, un-renovated)
-4. Score and rank ALL comps with reasoning
+2. Validate the algorithm's ARV/As-Is classification (Phase 2):
+   - ARV comps = passed filters AND in top ${ctx.arvThresholdPercent}% by sale price
+   - As-Is comps = sale price ≤ ${ctx.asIsThresholdPercent}% of ARV
+   - Override if you find red flags or physical similarity issues the algorithm missed
+3. Score and rank ALL comps with reasoning
+
+IMPORTANT: Use comp NUMBERS (1, 2, 3...) not IDs in your response.
 
 Return JSON:
 {
-  "selectedForArv": ["compId1", "compId2"],
-  "asIsComps": ["compId3"],
+  "selectedForArv": [1, 2],
+  "asIsComps": [3],
   "rankings": [
     {
-      "compId": "string",
+      "compNumber": 1,
       "score": 0-100,
-      "reasoning": "Physical similarity assessment + ARV/as-is classification reasoning",
+      "reasoning": "Physical similarity + classification reasoning",
       "keyFeatures": ["matching features", "key differences"],
       "confidenceLevel": "high" | "medium" | "low"
     }
   ],
-  "arvEstimate": 450000,
   "confidenceLevel": "high" | "medium" | "low",
-  "summary": "1-3 sentence market analysis"
+  "summary": "1-3 sentence analysis referencing comps by number (e.g. Comp 1, Comp 2)"
 }
 
 SCORING GUIDE:
-85-100: Excellent physical match + strong ARV indicator → SELECTED for ARV
-70-84: Good physical match, usable for ARV → SELECTED for ARV
-50-69: Partial match or as-is indicator → consider for as-is classification
+85-100: Excellent physical match + in top price tier → ARV comp
+70-84: Good physical match, passes filters → ARV comp
+50-69: Partial match or below ARV threshold → As-Is comp
 30-49: Significant differences → NOT selected
 0-29: Poor match → NOT selected`
 }
@@ -363,30 +391,45 @@ export async function analyzeComps(
       return null
     }
 
-    // Validate and normalize rankings
+    // Map comp numbers (1-based) back to comp IDs
+    const numToId = (n: unknown): string | null => {
+      const num = typeof n === 'number' ? n : typeof n === 'string' ? parseInt(n, 10) : NaN
+      if (isNaN(num) || num < 1 || num > ctx.bundle.comparables.length) return null
+      return ctx.bundle.comparables[num - 1].id
+    }
     const validCompIds = new Set(ctx.bundle.comparables.map((c) => c.id))
+
+    // Validate and normalize rankings — accept both compNumber (new) and compId (legacy)
     const rankings: CompRanking[] = parsed.rankings
       .filter((r: unknown): r is Record<string, unknown> =>
-        typeof r === 'object' && r !== null && typeof (r as Record<string, unknown>).compId === 'string'
+        typeof r === 'object' && r !== null && ((r as Record<string, unknown>).compNumber != null || typeof (r as Record<string, unknown>).compId === 'string')
       )
-      .filter((r) => validCompIds.has(r.compId as string))
-      .map((r) => ({
-        compId: r.compId as string,
-        score: Math.max(0, Math.min(100, typeof r.score === 'number' ? r.score : 50)),
-        reasoning: typeof r.reasoning === 'string' ? r.reasoning : '',
-        keyFeatures: Array.isArray(r.keyFeatures) ? r.keyFeatures.filter((f): f is string => typeof f === 'string') : [],
-        condition: typeof r.condition === 'string' ? r.condition : undefined,
-        confidenceLevel: (['high', 'medium', 'low'] as const).includes(r.confidenceLevel as 'high') ? r.confidenceLevel as 'high' | 'medium' | 'low' : 'medium',
-      }))
+      .reduce<CompRanking[]>((acc, r) => {
+        const id = numToId(r.compNumber) ?? (typeof r.compId === 'string' && validCompIds.has(r.compId) ? r.compId : null)
+        if (!id) return acc
+        acc.push({
+          compId: id,
+          score: Math.max(0, Math.min(100, typeof r.score === 'number' ? r.score : 50)),
+          reasoning: typeof r.reasoning === 'string' ? r.reasoning : '',
+          keyFeatures: Array.isArray(r.keyFeatures) ? r.keyFeatures.filter((f): f is string => typeof f === 'string') : [],
+          condition: typeof r.condition === 'string' ? r.condition : undefined,
+          confidenceLevel: (['high', 'medium', 'low'] as const).includes(r.confidenceLevel as 'high') ? r.confidenceLevel as 'high' | 'medium' | 'low' : 'medium',
+        })
+        return acc
+      }, [])
 
-    // Extract selectedForArv
+    // Extract selectedForArv — accept numbers or IDs
     const selectedForArv: string[] = Array.isArray(parsed.selectedForArv)
-      ? parsed.selectedForArv.filter((id): id is string => typeof id === 'string' && validCompIds.has(id))
+      ? parsed.selectedForArv
+          .map((v) => numToId(v) ?? (typeof v === 'string' && validCompIds.has(v) ? v : null))
+          .filter((id): id is string => id != null)
       : rankings.filter((r) => r.score >= 70).map((r) => r.compId)
 
-    // Extract asIsComps
+    // Extract asIsComps — accept numbers or IDs
     const asIsComps: string[] = Array.isArray(parsed.asIsComps)
-      ? parsed.asIsComps.filter((id): id is string => typeof id === 'string' && validCompIds.has(id))
+      ? parsed.asIsComps
+          .map((v) => numToId(v) ?? (typeof v === 'string' && validCompIds.has(v) ? v : null))
+          .filter((id): id is string => id != null)
       : []
 
     const latencyMs = Date.now() - startTime
@@ -395,20 +438,23 @@ export async function analyzeComps(
     if (rankings.length > 0) {
       const selected = rankings.filter((r) => selectedForArv.includes(r.compId))
       const rejected = rankings.filter((r) => !selectedForArv.includes(r.compId) && !asIsComps.includes(r.compId))
-      console.log(`[CompAnalysis] ARV: ${selected.map((r) => `${r.compId.slice(0, 20)}(${r.score})`).join(', ')}`)
+      console.log(`[CompAnalysis] ARV: ${selected.map((r) => `Comp ${ctx.bundle.comparables.findIndex((c) => c.id === r.compId) + 1}(${r.score})`).join(', ')}`)
       if (asIsComps.length > 0) {
-        console.log(`[CompAnalysis] As-Is: ${asIsComps.join(', ')}`)
+        console.log(`[CompAnalysis] As-Is: ${asIsComps.map((id) => `Comp ${ctx.bundle.comparables.findIndex((c) => c.id === id) + 1}`).join(', ')}`)
       }
       if (rejected.length > 0) {
-        console.log(`[CompAnalysis] Rejected: ${rejected.map((r) => `${r.compId.slice(0, 20)}(${r.score})`).join(', ')}`)
+        console.log(`[CompAnalysis] Rejected: ${rejected.map((r) => `Comp ${ctx.bundle.comparables.findIndex((c) => c.id === r.compId) + 1}(${r.score})`).join(', ')}`)
       }
     }
+
+    // Summary already uses comp numbers from the LLM
+    const summaryText = typeof parsed.summary === 'string' ? parsed.summary : ''
 
     return {
       rankings,
       selectedForArv,
       asIsComps,
-      summary: typeof parsed.summary === 'string' ? parsed.summary : '',
+      summary: summaryText,
       arvEstimate: typeof parsed.arvEstimate === 'number' ? parsed.arvEstimate : undefined,
       confidenceLevel: (['high', 'medium', 'low'] as const).includes(parsed.confidenceLevel as 'high')
         ? parsed.confidenceLevel as 'high' | 'medium' | 'low'

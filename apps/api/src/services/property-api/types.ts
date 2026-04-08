@@ -145,7 +145,6 @@ export interface NormalizedProperty {
     isShortSale?: boolean
     isForeclosure?: boolean
     isInterfamilyTransfer?: boolean
-    isInvestorPurchase?: boolean
     saleDocumentType?: string
     ownershipTransferPercent?: number
   }

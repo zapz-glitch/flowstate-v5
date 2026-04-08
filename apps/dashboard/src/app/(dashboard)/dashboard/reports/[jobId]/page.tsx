@@ -77,6 +77,7 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
   const [aiAnalyzing, setAiAnalyzing] = useState(false)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [marketContext, setMarketContext] = useState<Record<string, any> | null>(null)
+  const [aiReport, setAiReport] = useState<{ summary: string; selected: number; total: number; model: string } | null>(null)
 
   const analyzeData = report?.analysis ?? null
 
@@ -95,6 +96,7 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
   } = useAnalysisEvaluation({
     data: analyzeData,
     stickyBarRootMargin: '-60px 0px 0px 0px',
+    aiAnalyzing,
   })
 
   // ─── History loading ────────────────────────────────────────────────────
@@ -174,16 +176,38 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
       case 'llm_complete':
         setAiAnalyzing(false)
         if (data.updatedResult && report) {
-          setReport((prev) => prev ? {
-            ...prev,
-            analysis: data.updatedResult as AnalyzeData,
-          } : prev)
+          // Only merge comp selection from AI — let client-side recalc derive valuation
+          const updated = data.updatedResult as AnalyzeData
+          setReport((prev) => {
+            if (!prev) return prev
+            return {
+              ...prev,
+              analysis: {
+                ...prev.analysis,
+                comps: updated.comps,
+              },
+            }
+          })
           setRefreshResult({ type: 'success', message: 'AI comp selection updated' })
           setTimeout(() => setRefreshResult(null), 5000)
+        }
+        if (data.llmAnalysis) {
+          const la = data.llmAnalysis as { summary?: string; selectedForArv?: string[]; compCount?: number; model?: string }
+          setAiReport({
+            summary: la.summary || 'AI comp selection complete',
+            selected: la.selectedForArv?.length ?? 0,
+            total: la.compCount ?? 0,
+            model: la.model?.split('/').pop() ?? '',
+          })
         }
         break
       case 'market_context':
         if (data.marketContext) setMarketContext(data.marketContext as Record<string, unknown>)
+        break
+      case 'risk_flags_updated':
+        if (data.riskFlags) {
+          setReport((prev) => prev ? { ...prev, analysis: { ...prev.analysis, riskFlags: data.riskFlags as string[] } } : prev)
+        }
         break
       case 'enrichment_done':
         setAiAnalyzing(false)
@@ -264,6 +288,29 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
     (analyzeData?.comps?.items ?? []) as CompItem[]
   )
 
+  // Run AI analysis on existing report
+  const handleRunAiAnalysis = useCallback(async () => {
+    if (!report?.address || aiAnalyzing) return
+    setAiAnalyzing(true)
+    try {
+      const response = await queueAnalysis({
+        address: report.address,
+        existingJobId: jobId,
+        searchOptions: { radiusMiles: 1, maxComps: 15, monthsBack: 12 },
+        skipCache: false,
+        llmAnalysis: { enabled: true },
+      })
+      if (response.success && response.enrichment) {
+        setRefreshStreamUrl(response.enrichment.streamUrl)
+        setRefreshToken(response.enrichment.token)
+      } else {
+        setAiAnalyzing(false)
+      }
+    } catch {
+      setAiAnalyzing(false)
+    }
+  }, [report, jobId, aiAnalyzing])
+
   // ─── Sync evaluation state to Jotai atoms ────────────────────────────────
   useEvaluationSync({
     evaluation: { isRecalculated, recalcData, compOverride, handleToggleComp, handleResetComps },
@@ -272,8 +319,10 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
     effectiveComps,
     aiAnalyzing,
     marketContext,
+    aiReport,
     onOpenSettings: () => setSettingsOpen(true),
     onCompClick: (comp) => { setComparisonComp(comp as CompItem); setComparisonOpen(true) },
+    onRunAiAnalysis: handleRunAiAnalysis,
   })
 
   if (loading) {
