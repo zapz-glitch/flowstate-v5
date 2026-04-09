@@ -40,5 +40,6 @@ export function useEvaluation() {
     onOpenSettings: state.callbacks.onOpenSettings,
     onCompClick: state.callbacks.onCompClick,
     onRunAiAnalysis: state.callbacks.onRunAiAnalysis,
+    onUndoAiSelection: state.callbacks.onUndoAiSelection,
   }
 }

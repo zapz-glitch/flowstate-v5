@@ -827,34 +827,52 @@ export async function fetchCompPhotos(comps: CompPhotoRequest[]): Promise<CompPh
   })
 }
 
-// ─── Vision Analysis ─────────────────────────────────────────────────────────
 
-export interface VisionAnalysisResult {
-  overallCondition: string
-  confidence: number
-  exterior: { condition: string; notes: string[] }
-  interior?: { condition: string; notes: string[] }
-  features?: Record<string, string | undefined>
-  estimatedRehabNeeds: string
-  summary: string
-}
 
-export interface VisionAnalysisResponse {
+// ─── Comp Selection (LLM-only) ──────────────────────────────────────────────
+
+export interface CompSelectionResult {
   success: boolean
-  data: VisionAnalysisResult
-  cached: boolean
-  durationMs: number
+  error?: string
+  updatedComps?: {
+    items: Array<Record<string, unknown>>
+    count?: number
+    enabledCount?: number
+    disabledCount?: number
+  }
+  llmAnalysis?: {
+    model: string
+    latencyMs: number
+    tokenUsage?: { prompt: number; completion: number; estimatedCostUsd: number }
+    compCount: number
+    summary: string
+    selectedForArv: string[]
+    confidenceLevel?: string
+  }
+  rankings?: Array<{
+    compId: string
+    score: number
+    reasoning: string
+    keyFeatures: string[]
+    confidenceLevel: string
+  }>
+  latencyMs?: number
 }
 
-export async function runVisionAnalysis(params: {
-  photoUrls: string[]
-  propertyContext?: {
-    address?: string
-    squareFeet?: number
-    yearBuilt?: number
+export async function runCompSelection(params: {
+  subject: Record<string, unknown>
+  comps: { items: Array<Record<string, unknown>>; count?: number; enabledCount?: number; disabledCount?: number }
+  riskFlags?: string[]
+  settings?: {
+    filters?: Array<{ type: string; enabled: boolean; value: number }>
+    adjustments?: Array<{ type: string; enabled: boolean; amount: number; percent?: number }>
+    dealParams?: { closingCostsPercent: number; carryingCostsPercent: number; wholesaleFee: number }
+    rehabLevelIndex?: number
+    arvThresholdPercent?: number
+    asIsThresholdPercent?: number
   }
-}): Promise<VisionAnalysisResponse> {
-  return fetchApi<VisionAnalysisResponse>('/vision/analyze', {
+}): Promise<CompSelectionResult> {
+  return fetchApi<CompSelectionResult>('/comp-selection/analyze', {
     method: 'POST',
     body: JSON.stringify(params),
   })

@@ -32,11 +32,11 @@ sseStream.get('/analyze/:jobId', async (c) => {
     })
   }
 
-  // CORS
+  // CORS — match global pattern (localhost + *.flowstate.homes)
   const origin = c.req.header('Origin') || ''
-  const allowed = ['http://localhost:3000']
-  if (c.env.DASHBOARD_URL) allowed.push(c.env.DASHBOARD_URL)
-  const allowedOrigin = allowed.includes(origin) ? origin : allowed[0]
+  const allowedOrigin = origin === 'http://localhost:3000' ? origin
+    : /^https:\/\/([\w-]+\.)?flowstate\.homes$/.test(origin) ? origin
+    : 'http://localhost:3000'
 
   const doId = c.env.ANALYSIS_JOB.idFromName(jobId)
   const stub = c.env.ANALYSIS_JOB.get(doId)
@@ -128,11 +128,11 @@ sseStream.get('/batch/:batchId', async (c) => {
     })
   }
 
-  // CORS
+  // CORS — match global pattern (localhost + *.flowstate.homes)
   const origin = c.req.header('Origin') || ''
-  const allowed = ['http://localhost:3000']
-  if (c.env.DASHBOARD_URL) allowed.push(c.env.DASHBOARD_URL)
-  const allowedOrigin = allowed.includes(origin) ? origin : allowed[0]
+  const allowedOrigin = origin === 'http://localhost:3000' ? origin
+    : /^https:\/\/([\w-]+\.)?flowstate\.homes$/.test(origin) ? origin
+    : 'http://localhost:3000'
 
   const doId = c.env.BATCH_JOB.idFromName(batchId)
   const stub = c.env.BATCH_JOB.get(doId)

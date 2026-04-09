@@ -12,21 +12,21 @@
  * 5. (Optional) Start DO-based enrichment: Zillow scraping + LLM analysis via SSE
  */
 
-import { Hono } from 'hono'
-import type { Env } from '../types'
-import type { AuthContext } from '../middleware/auth'
+import { Hono } from 'hono';
+import type { Env } from '../types';
+import type { AuthContext } from '../middleware/auth';
 import {
   REHAB_LEVELS,
   MAJOR_ITEMS,
   type MajorItem,
-} from '../services/valuation'
-import { loadUserAnalysisSettings } from '../services/user-settings'
-import { generateSseToken } from '../utils/sse-token'
-import { AnalysisError } from '../utils/analysis-error'
+} from '../services/valuation';
+import { loadUserAnalysisSettings } from '../services/user-settings';
+import { generateSseToken } from '../utils/sse-token';
+import { AnalysisError } from '../utils/analysis-error';
 
-type Variables = { auth: AuthContext }
+type Variables = { auth: AuthContext };
 
-const analyze = new Hono<{ Bindings: Env; Variables: Variables }>()
+const analyze = new Hono<{ Bindings: Env; Variables: Variables }>();
 
 // ─── Helper Functions ─────────────────────────────────────────────────────────
 
@@ -34,87 +34,91 @@ const analyze = new Hono<{ Bindings: Env; Variables: Variables }>()
  * Generate a unique job ID
  */
 function generateJobId(): string {
-  return `job_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`
+  return `job_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
 }
 
 // ─── Request Types ─────────────────────────────────────────────────────────────
 
 interface AnalyzeRequest {
   /** Existing job ID — when set, updates existing report instead of creating new */
-  existingJobId?: string
+  existingJobId?: string;
   // Property identification (one of these required)
-  address?: string
-  streetAddress?: string
-  city?: string
-  state?: string
-  zipCode?: string
-  propertyId?: string
+  address?: string;
+  streetAddress?: string;
+  city?: string;
+  state?: string;
+  zipCode?: string;
+  propertyId?: string;
 
   // Comparable search options
   searchOptions?: {
-    radiusMiles?: number
-    maxComps?: number
-    monthsBack?: number
-  }
+    radiusMiles?: number;
+    maxComps?: number;
+    monthsBack?: number;
+  };
 
   // Buybox parameters
   buybox?: {
-    rehabLevelIndex?: number
-    majorItems?: MajorItem[]
-    additionPlay?: number
-    closingCostsPercent?: number
-    carryingCostsPercent?: number
-    wholesaleFee?: number
-  }
+    rehabLevelIndex?: number;
+    majorItems?: MajorItem[];
+    additionPlay?: number;
+    closingCostsPercent?: number;
+    carryingCostsPercent?: number;
+    wholesaleFee?: number;
+  };
 
   // Enrichment options
   enrichment?: {
-    permits?: boolean
-    floodZone?: boolean
-    weatherRisk?: boolean
-  }
+    permits?: boolean;
+    floodZone?: boolean;
+    weatherRisk?: boolean;
+  };
 
   /** Skip cache and fetch fresh data from APIs */
-  skipCache?: boolean
+  skipCache?: boolean;
 
   /** Override ARV comp threshold for this request (top % of comps by sale price) */
-  arvThresholdPercent?: number
+  arvThresholdPercent?: number;
 
   /** Override as-is threshold (% of ARV below which comps are classified as-is) — default 70 */
-  asIsThresholdPercent?: number
+  asIsThresholdPercent?: number;
 
   /** Override appraisal rules for this request */
   appraisalOverrides?: {
-    filters?: Array<{ type: string; enabled: boolean; value: number }>
-    adjustments?: Array<{ type: string; enabled: boolean; amount: number; percent?: number }>
-  }
+    filters?: Array<{ type: string; enabled: boolean; value: number }>;
+    adjustments?: Array<{
+      type: string;
+      enabled: boolean;
+      amount: number;
+      percent?: number;
+    }>;
+  };
 
   /** Market data enrichment: scrape public listing data via Firecrawl */
   marketData?: {
-    enabled?: boolean
-  }
+    enabled?: boolean;
+  };
 
   /** LLM-based comp analysis options */
   llmAnalysis?: {
-    enabled?: boolean
-    includePhotos?: boolean
+    enabled?: boolean;
+    includePhotos?: boolean;
     /** Override model for comp selection */
-    compSelectionModel?: string
+    compSelectionModel?: string;
     /** Override model for market context search */
-    marketSearchModel?: string
-  }
+    marketSearchModel?: string;
+  };
 }
 
 const ALLOWED_MODELS = new Set([
   'google/gemini-3-flash-preview',
   'google/gemini-2.5-flash',
-  'x-ai/grok-4.1-fast',
-])
+]);
 
 function validateModel(model: string | undefined): string | undefined {
-  if (!model) return undefined
-  if (!ALLOWED_MODELS.has(model)) return undefined
-  return model
+  if (!model) return undefined;
+  if (!ALLOWED_MODELS.has(model)) return undefined;
+  return model;
 }
 
 // ─── Main Endpoint ─────────────────────────────────────────────────────────────
@@ -132,63 +136,74 @@ function validateModel(model: string | undefined): string | undefined {
  */
 analyze.post('/', async (c) => {
   try {
-    const routeStart = Date.now()
-    const body = await c.req.json<AnalyzeRequest>()
-    const auth = c.get('auth')
+    const routeStart = Date.now();
+    const body = await c.req.json<AnalyzeRequest>();
+    const auth = c.get('auth');
 
     // Validate input
     if (!body.address && !body.streetAddress && !body.propertyId) {
       return c.json(
-        { success: false, error: 'address, streetAddress, or propertyId is required' },
-        400
-      )
+        {
+          success: false,
+          error: 'address, streetAddress, or propertyId is required',
+        },
+        400,
+      );
     }
 
-    const jobId = body.existingJobId || generateJobId()
+    const jobId = body.existingJobId || generateJobId();
 
     // ─── 1. Load user settings ───────────────────────────────────────────────
-    const settingsStart = Date.now()
-    const userSettings = await loadUserAnalysisSettings(c.env.DB, {
-      userId: auth.userId,
-      address: { city: body.city, state: body.state, zipCode: body.zipCode },
-      buyboxOverrides: body.buybox,
-    }, c.env.API_CACHE)
-    console.log(`[Analyze][Timing] User settings: ${Date.now() - settingsStart}ms`)
+    const settingsStart = Date.now();
+    const userSettings = await loadUserAnalysisSettings(
+      c.env.DB,
+      {
+        userId: auth.userId,
+        address: { city: body.city, state: body.state, zipCode: body.zipCode },
+        buyboxOverrides: body.buybox,
+      },
+      c.env.API_CACHE,
+    );
+    console.log(
+      `[Analyze][Timing] User settings: ${Date.now() - settingsStart}ms`,
+    );
 
     // ─── 2. Start streaming analysis in DO ────────────────────────────────────
     // Everything runs in the Durable Object and streams results via SSE.
     // The route returns immediately with jobId + SSE token.
 
-    let appraisalRules = userSettings.appraisalRules
+    let appraisalRules = userSettings.appraisalRules;
     if (body.appraisalOverrides) {
       const overrideFilters = body.appraisalOverrides.filters?.map((f) => ({
         type: f.type as import('../services/appraisal').FilterType,
         enabled: f.enabled,
         value: f.value,
-      }))
-      const overrideAdjustments = body.appraisalOverrides.adjustments?.map((a) => ({
-        type: a.type as import('../services/appraisal').AdjustmentType,
-        enabled: a.enabled,
-        amount: a.amount,
-        percent: a.percent,
-      }))
+      }));
+      const overrideAdjustments = body.appraisalOverrides.adjustments?.map(
+        (a) => ({
+          type: a.type as import('../services/appraisal').AdjustmentType,
+          enabled: a.enabled,
+          amount: a.amount,
+          percent: a.percent,
+        }),
+      );
       appraisalRules = {
         filters: overrideFilters ?? appraisalRules?.filters ?? [],
         adjustments: overrideAdjustments ?? appraisalRules?.adjustments ?? [],
-      }
+      };
     }
 
     const arvThreshold = body.arvThresholdPercent
       ? { percent: body.arvThresholdPercent }
-      : userSettings.arvThreshold
+      : userSettings.arvThreshold;
 
-    const sseSecret = c.env.BETTER_AUTH_SECRET || ''
-    const token = await generateSseToken(sseSecret, jobId, auth.userId)
-    const apiBaseUrl = c.req.url.replace(/\/v1\/analyze.*/, '')
-    const streamUrl = `${apiBaseUrl}/sse/analyze/${jobId}`
+    const sseSecret = c.env.BETTER_AUTH_SECRET || '';
+    const token = await generateSseToken(sseSecret, jobId, auth.userId);
+    const apiBaseUrl = c.req.url.replace(/\/v1\/analyze.*/, '');
+    const streamUrl = `${apiBaseUrl}/sse/analyze/${jobId}`;
 
-    const doId = c.env.ANALYSIS_JOB.idFromName(jobId)
-    const stub = c.env.ANALYSIS_JOB.get(doId)
+    const doId = c.env.ANALYSIS_JOB.idFromName(jobId);
+    const stub = c.env.ANALYSIS_JOB.get(doId);
     const startResp = await stub.fetch('http://internal/start-streaming', {
       method: 'POST',
       body: JSON.stringify({
@@ -212,20 +227,26 @@ analyze.post('/', async (c) => {
           customTierRanges: userSettings.customTierRanges,
           customMajorItemCosts: userSettings.customMajorItemCosts,
           arvThreshold,
-          asIsThresholdPercent: body.asIsThresholdPercent ?? userSettings.asIsThresholdPercent,
+          asIsThresholdPercent:
+            body.asIsThresholdPercent ?? userSettings.asIsThresholdPercent,
         },
-        llmEnabled: body.llmAnalysis?.enabled === true && !!c.env.OPENROUTER_API_KEY,
+        llmEnabled:
+          body.llmAnalysis?.enabled === true && !!c.env.OPENROUTER_API_KEY,
         isRefresh: !!body.existingJobId,
         llmOptions: {
           includePhotos: body.llmAnalysis?.includePhotos,
-          compSelectionModel: validateModel(body.llmAnalysis?.compSelectionModel),
+          compSelectionModel: validateModel(
+            body.llmAnalysis?.compSelectionModel,
+          ),
           marketSearchModel: validateModel(body.llmAnalysis?.marketSearchModel),
         },
       }),
-    })
-    await startResp.text()
+    });
+    await startResp.text();
 
-    console.log(`[Analyze][Timing] Route returned in ${Date.now() - routeStart}ms (streaming via DO)`)
+    console.log(
+      `[Analyze][Timing] Route returned in ${Date.now() - routeStart}ms (streaming via DO)`,
+    );
 
     return c.json({
       success: true,
@@ -233,11 +254,15 @@ analyze.post('/', async (c) => {
         jobId,
         // No result — it streams via SSE
         result: null,
-        enrichment: { streamUrl, token, pending: ['property_fetch', 'evaluation', 'llm'] },
+        enrichment: {
+          streamUrl,
+          token,
+          pending: ['property_fetch', 'evaluation', 'llm'],
+        },
       },
-    })
+    });
   } catch (error) {
-    console.error('[Analyze] Error:', error)
+    console.error('[Analyze] Error:', error);
 
     if (error instanceof AnalysisError) {
       return c.json(
@@ -245,17 +270,22 @@ analyze.post('/', async (c) => {
           success: false,
           error: error.message.replace('BAD_DEAL: ', ''),
           ...(error.code ? { code: error.code } : {}),
-          ...(error.suggestedFilters ? { suggestedFilters: error.suggestedFilters } : {}),
-          ...(error.suggestedArvThreshold ? { suggestedArvThreshold: error.suggestedArvThreshold } : {}),
+          ...(error.suggestedFilters
+            ? { suggestedFilters: error.suggestedFilters }
+            : {}),
+          ...(error.suggestedArvThreshold
+            ? { suggestedArvThreshold: error.suggestedArvThreshold }
+            : {}),
         },
         400,
-      )
+      );
     }
 
-    const message = error instanceof Error ? error.message : 'Failed to analyze property'
-    return c.json({ success: false, error: message }, 500)
+    const message =
+      error instanceof Error ? error.message : 'Failed to analyze property';
+    return c.json({ success: false, error: message }, 500);
   }
-})
+});
 
 /**
  * GET /analyze/defaults
@@ -285,8 +315,8 @@ analyze.get('/defaults', async (c) => {
       rehabLevels: REHAB_LEVELS.map((name, index) => ({ index, name })),
       majorItems: MAJOR_ITEMS,
     },
-  })
-})
+  });
+});
 
 // ─── Lazy Photo Loading ───────────────────────────────────────────────────────
 
@@ -299,7 +329,7 @@ analyze.get('/defaults', async (c) => {
  */
 // Photo endpoint disabled — Firecrawl removed
 analyze.post('/comp-photos', async (c) => {
-  return c.json({ success: false, error: 'Photo provider not available' }, 503)
-})
+  return c.json({ success: false, error: 'Photo provider not available' }, 503);
+});
 
-export default analyze
+export default analyze;

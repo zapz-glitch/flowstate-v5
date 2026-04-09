@@ -60,13 +60,6 @@ export interface AnalyzeRequest {
   /** LLM-based comp analysis options */
   llmAnalysis?: {
     enabled?: boolean
-    includePhotos?: boolean
-    /** Override model for comp selection */
-    compSelectionModel?: string
-    /** Override model for market context search */
-    marketSearchModel?: string
-    /** Enable reasoning/thinking mode */
-    reasoning?: boolean
   }
   /** Override ARV comp threshold for this request */
   arvThresholdPercent?: number
@@ -91,17 +84,6 @@ export interface ApiCallStats {
   totalExternalCalls: number
 }
 
-/** Vision analysis result for subject property */
-export interface VisionAnalysis {
-  overallCondition: string
-  confidence: number
-  exterior: { condition: string; notes: string[] }
-  interior?: { condition: string; notes: string[] }
-  features: Record<string, string | undefined>
-  estimatedRehabNeeds: string
-  summary: string
-}
-
 export interface AnalyzeData {
   subject?: SubjectData
   valuation?: ValuationData
@@ -117,8 +99,6 @@ export interface AnalyzeData {
   }
   /** API call statistics from the analysis workflow */
   apiCallStats?: ApiCallStats | null
-  /** Vision analysis of subject property photos */
-  visionAnalysis?: VisionAnalysis | null
   /** Settings used during this analysis (for client-side recalculation initialization) */
   appliedSettings?: {
     filters: Array<{ type: string; enabled: boolean; value: number }>

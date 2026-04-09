@@ -18,6 +18,13 @@ interface CompOverride {
   isManual: boolean
 }
 
+export interface AiReportData {
+  summary: string
+  selected: number
+  total: number
+  model: string
+}
+
 interface AutoSaveOptions {
   jobId: string | null | undefined
   analysisData: unknown | null
@@ -25,6 +32,10 @@ interface AutoSaveOptions {
   recalcData: RecalcResult | null
   compOverride: CompOverride | null
   settingsHook: UseReportSettingsReturn
+  /** AI analysis report to persist with the saved report */
+  aiReport?: AiReportData | null
+  /** Original math-based comps before AI override (for undo) */
+  preAiComps?: unknown | null
   /** Called after successful save (e.g. to reload history) */
   onSaved?: () => void
 }
@@ -36,6 +47,8 @@ export function useAutoSave({
   recalcData,
   compOverride,
   settingsHook,
+  aiReport,
+  preAiComps,
   onSaved,
 }: AutoSaveOptions) {
   const [status, setStatus] = useState<'idle' | 'saving' | 'saved'>('idle')
@@ -57,6 +70,7 @@ export function useAutoSave({
       proximityDeduction: recalcData.valuation.proximityDeduction,
       comps: compOverride?.selectedCompKeys ? Array.from(compOverride.selectedCompKeys).sort() : null,
       settings: JSON.stringify(settingsHook.settings),
+      aiReport: aiReport ? JSON.stringify(aiReport) : null,
     })
 
     // On initial load, capture fingerprint without saving
@@ -117,6 +131,15 @@ export function useAutoSave({
             asIsThresholdPercent: s.asIsThresholdPercent,
           }
 
+          // Persist AI analysis report and pre-AI comps for undo
+          if (aiReport) {
+            patched.aiReport = aiReport
+            if (preAiComps) patched.preAiComps = preAiComps
+          } else {
+            delete patched.aiReport
+            delete patched.preAiComps
+          }
+
           updatedJson = JSON.stringify(patched)
         }
 
@@ -147,7 +170,7 @@ export function useAutoSave({
     return () => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
     }
-  }, [jobId, analysisData, displayValuation, compOverride, recalcData, settingsHook.settings, settingsHook.settingsChanged])
+  }, [jobId, analysisData, displayValuation, compOverride, recalcData, settingsHook.settings, settingsHook.settingsChanged, aiReport])
 
   // Reset on new analysis
   const reset = () => {

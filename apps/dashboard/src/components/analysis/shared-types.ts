@@ -14,5 +14,4 @@ export type {
   FloodZoneData,
   NeighbourhoodData,
   ApiCallStats,
-  VisionAnalysis,
 } from '@/app/(dashboard)/dashboard/analyze/actions'

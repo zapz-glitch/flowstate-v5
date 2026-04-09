@@ -28,7 +28,6 @@ import {
   ArrowRight,
   ArrowLeft,
   ArrowUp,
-  BrainCircuit,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -3462,134 +3461,12 @@ function ProximitySection({ config, onChange }: { config: ProximityConfig; onCha
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// AI SETTINGS TAB
-// ═══════════════════════════════════════════════════════════════════════════════
-
-const AI_SETTINGS_KEY = 'flowstate:ai-settings'
-
-interface AiSettings {
-  enabled: boolean
-  compSelectionModel: string
-  marketSearchModel: string
-}
-
-const DEFAULT_AI_SETTINGS: AiSettings = {
-  enabled: false,
-  compSelectionModel: '',
-  marketSearchModel: '',
-}
-
-function loadAiSettings(): AiSettings {
-  if (typeof window === 'undefined') return DEFAULT_AI_SETTINGS
-  try {
-    const stored = localStorage.getItem(AI_SETTINGS_KEY)
-    if (stored) return { ...DEFAULT_AI_SETTINGS, ...JSON.parse(stored) }
-  } catch { /* ignore */ }
-  return DEFAULT_AI_SETTINGS
-}
-
-function saveAiSettingsToStorage(settings: AiSettings) {
-  if (typeof window === 'undefined') return
-  localStorage.setItem(AI_SETTINGS_KEY, JSON.stringify(settings))
-}
-
-const AI_MODELS = [
-  { value: '', label: 'Grok 4.1 Flash (default)' },
-  { value: 'google/gemini-3-flash-preview', label: 'Gemini 3 Flash' },
-  { value: 'google/gemini-2.5-flash', label: 'Gemini 2.5 Flash' },
-]
-
-function AiSettingsTab() {
-  const [settings, setSettings] = useState<AiSettings>(DEFAULT_AI_SETTINGS)
-  const [loaded, setLoaded] = useState(false)
-
-  useEffect(() => {
-    setSettings(loadAiSettings())
-    setLoaded(true)
-  }, [])
-
-  const update = useCallback((partial: Partial<AiSettings>) => {
-    setSettings((prev) => {
-      const next = { ...prev, ...partial }
-      saveAiSettingsToStorage(next)
-      return next
-    })
-  }, [])
-
-  if (!loaded) return null
-
-  return (
-    <div className="space-y-6">
-      <Card className="rounded-sm">
-        <CardContent className="p-5 space-y-5">
-          <div>
-            <CardTitle className="text-sm font-semibold">AI Comp Selection</CardTitle>
-            <p className="text-xs text-muted-foreground mt-1">
-              When enabled, AI will analyze all comparables and select the best comps for ARV calculation.
-              It can override rule-based filters when it finds high-value comps that marginally failed a threshold.
-            </p>
-          </div>
-
-          <div className="flex items-center justify-between py-3 px-4 rounded-sm border border-border bg-muted/30">
-            <div>
-              <div className="text-sm font-medium">Enable AI Analysis</div>
-              <div className="text-xs text-muted-foreground mt-0.5">Run AI comp selection automatically on new analyses</div>
-            </div>
-            <Switch checked={settings.enabled} onCheckedChange={(enabled) => update({ enabled })} />
-          </div>
-
-          <div className="space-y-4">
-            <div>
-              <label className="text-xs font-medium text-foreground">Comp Selection Model</label>
-              <p className="text-[11px] text-muted-foreground mb-1.5">LLM model used to evaluate and select comparables</p>
-              <select
-                value={settings.compSelectionModel}
-                onChange={(e) => update({ compSelectionModel: e.target.value })}
-                className="w-full h-9 text-sm px-3 rounded-sm border border-border bg-background text-foreground"
-              >
-                {AI_MODELS.map((m) => (
-                  <option key={m.value} value={m.value}>{m.label}</option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="text-xs font-medium text-foreground">Market Research Model</label>
-              <p className="text-[11px] text-muted-foreground mb-1.5">LLM model used for market context web search</p>
-              <select
-                value={settings.marketSearchModel}
-                onChange={(e) => update({ marketSearchModel: e.target.value })}
-                className="w-full h-9 text-sm px-3 rounded-sm border border-border bg-background text-foreground"
-              >
-                {AI_MODELS.map((m) => (
-                  <option key={m.value} value={m.value}>{m.label}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          <div className="pt-3 border-t border-border">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => update(DEFAULT_AI_SETTINGS)}
-              className="gap-1.5"
-            >
-              <RotateCcw className="w-3.5 h-3.5" />
-              Reset to Defaults
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-    </div>
-  )
-}
 
 export default function EvaluationSettingsPage() {
   const searchParams = useSearchParams()
   const defaultTab = useMemo(() => {
     const tab = searchParams.get('tab')
-    const validTabs = ['thresholds', 'appraisal-rules', 'renovation-levels', 'deal-params', 'major-items', 'ai-settings']
+    const validTabs = ['thresholds', 'appraisal-rules', 'renovation-levels', 'deal-params', 'major-items']
     return tab && validTabs.includes(tab) ? tab : 'thresholds'
   }, [searchParams])
 
@@ -3631,10 +3508,6 @@ export default function EvaluationSettingsPage() {
             <Wrench className="w-3.5 h-3.5" />
             Major Items
           </TabsTrigger>
-          <TabsTrigger value="ai-settings" className="gap-1.5 text-xs">
-            <BrainCircuit className="w-3.5 h-3.5" />
-            AI Settings
-          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="thresholds" className="mt-5">
@@ -3657,9 +3530,6 @@ export default function EvaluationSettingsPage() {
           <MajorItemCostsTab />
         </TabsContent>
 
-        <TabsContent value="ai-settings" className="mt-5">
-          <AiSettingsTab />
-        </TabsContent>
 
       </Tabs>
     </div>

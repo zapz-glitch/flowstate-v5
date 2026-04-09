@@ -93,14 +93,13 @@ interface LLMEnv {
 }
 
 /** Task-specific model presets */
-export type LLMTask = 'default' | 'comp_selection' | 'market_search' | 'vision'
+export type LLMTask = 'default' | 'comp_selection' | 'market_search'
 
 /** Default models per task — can be overridden via env vars */
 const TASK_MODELS: Record<LLMTask, string> = {
-  default: 'google/gemini-2.0-flash-001',
-  comp_selection: 'x-ai/grok-4.1-fast',
-  market_search: 'x-ai/grok-4.1-fast',
-  vision: 'google/gemini-2.0-flash-001',
+  default: 'google/gemini-2.5-flash',
+  comp_selection: 'google/gemini-2.5-flash',
+  market_search: 'google/gemini-2.5-flash',
 }
 
 /**

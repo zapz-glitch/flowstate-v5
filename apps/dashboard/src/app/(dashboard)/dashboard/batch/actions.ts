@@ -6,6 +6,7 @@ export interface BatchResult {
   address: string
   index: number
   status: 'pending' | 'processing' | 'completed' | 'failed'
+  stepLabel?: string
   jobId?: string
   error?: string
   arv?: number
@@ -96,6 +97,47 @@ export async function getBatchStatus(batchId: string): Promise<BatchJob | null> 
     return await response.json() as BatchJob
   } catch {
     return null
+  }
+}
+
+export async function getBatchStreamToken(batchId: string): Promise<{ streamUrl: string; token: string } | null> {
+  try {
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL!
+    const { cookies } = await import('next/headers')
+    const cookieStore = await cookies()
+    const cookieHeader = cookieStore.getAll().map((c) => `${c.name}=${c.value}`).join('; ')
+
+    const response = await fetch(`${apiUrl}/batch/${batchId}/stream-token`, {
+      method: 'POST',
+      headers: { 'Cookie': cookieHeader },
+    })
+
+    if (!response.ok) return null
+    return await response.json() as { streamUrl: string; token: string }
+  } catch {
+    return null
+  }
+}
+
+export async function retryFailedAddresses(batchId: string): Promise<{ success: boolean; streamUrl?: string; token?: string; error?: string }> {
+  try {
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL!
+    const { cookies } = await import('next/headers')
+    const cookieStore = await cookies()
+    const cookieHeader = cookieStore.getAll().map((c) => `${c.name}=${c.value}`).join('; ')
+
+    const response = await fetch(`${apiUrl}/batch/${batchId}/retry-failed`, {
+      method: 'POST',
+      headers: { 'Cookie': cookieHeader },
+    })
+
+    if (!response.ok) {
+      const data = await response.json() as { error?: string }
+      return { success: false, error: data.error || 'Retry failed' }
+    }
+    return await response.json() as { success: boolean; streamUrl?: string; token?: string }
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : 'Retry failed' }
   }
 }
 

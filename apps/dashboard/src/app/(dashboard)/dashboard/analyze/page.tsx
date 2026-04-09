@@ -20,7 +20,7 @@ import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
 import { EvaluationSettingsSheet } from '@/components/report/EvaluationSettingsSheet'
 import { queueAnalysis, type AnalyzeData } from './actions'
-import { getArvThreshold, getReportsByProperty, type ExistingReport } from '@/lib/client-api'
+import { getArvThreshold, getReportsByProperty, runCompSelection, type ExistingReport } from '@/lib/client-api'
 import { useAutoSave } from '@/hooks/use-auto-save'
 import { ExistingReportsDialog } from './ExistingReportsDialog'
 // cn is used in the outer wrapper
@@ -109,26 +109,17 @@ export default function AnalyzePage() {
   const [arvThreshold, setArvThreshold] = useState(15)
   const [asIsThreshold, setAsIsThreshold] = useState(70)
   const [aiOnlyMode, setAiOnlyMode] = useState(false) // true when "AI Selection" button clicked (skip evaluation_complete)
+  const aiOnlyModeRef = useRef(false)
   const [showAdvanced, setShowAdvanced] = useState(false)
 
-  // AI settings from evaluation settings page (localStorage)
+  // AI comp selection toggle (per-session, not persisted)
   const [aiEnabled, setAiEnabled] = useState(false)
-  const [compModel, setCompModel] = useState('')
-  const [marketModel, setMarketModel] = useState('')
-  useEffect(() => {
-    try {
-      const stored = localStorage.getItem('flowstate:ai-settings')
-      if (stored) {
-        const parsed = JSON.parse(stored)
-        if (typeof parsed.enabled === 'boolean') setAiEnabled(parsed.enabled)
-        if (typeof parsed.compSelectionModel === 'string') setCompModel(parsed.compSelectionModel)
-        if (typeof parsed.marketSearchModel === 'string') setMarketModel(parsed.marketSearchModel)
-      }
-    } catch { /* ignore */ }
-  }, [])
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [marketContext, setMarketContext] = useState<Record<string, any> | null>(null)
   const [aiReport, setAiReport] = useState<{ summary: string; selected: number; total: number; model: string } | null>(null)
+  const [aiAnalysisDone, setAiAnalysisDone] = useState(false)
+  // Snapshot of comps before AI overwrites them — used to restore on undo
+  const preAiCompsRef = useRef<unknown>(null)
 
   // Error & retry
   const [error, setError] = useState<string | null>(null)
@@ -187,14 +178,15 @@ export default function AnalyzePage() {
 
   const handleEnrichmentEvent = useCallback((event: EnrichmentEvent) => {
     const { event: eventType, data } = event
+    const isAiOnly = aiOnlyModeRef.current
 
     switch (eventType) {
       case 'property_fetch':
-        if (!aiOnlyMode) setStreamingStep('searching')
+        if (!isAiOnly) setStreamingStep('searching')
         break
 
       case 'subject_found':
-        if (aiOnlyMode) break // Skip — keep existing result
+        if (isAiOnly) break // Skip — keep existing result
         setStreamingStep('subject')
         if (data.subject) {
           setAnalysisResult((prev) => ({
@@ -206,7 +198,7 @@ export default function AnalyzePage() {
         break
 
       case 'comps_found':
-        if (aiOnlyMode) break // Skip — keep existing result
+        if (isAiOnly) break // Skip — keep existing result
         setStreamingStep('comps')
         if (data.comps) {
           setAnalysisResult((prev) => ({
@@ -225,11 +217,11 @@ export default function AnalyzePage() {
         break
 
       case 'evaluation_started':
-        if (!aiOnlyMode) setStreamingStep('evaluating')
+        if (!isAiOnly) setStreamingStep('evaluating')
         break
 
       case 'evaluation_complete':
-        if (aiOnlyMode) break // Skip — keep existing evaluation, wait for LLM
+        if (isAiOnly) break // Skip — keep existing evaluation, wait for LLM
         setStreamingStep('done')
         if (data.updatedResult) {
           setAnalysisResult(data.updatedResult as AnalyzeData)
@@ -244,11 +236,16 @@ export default function AnalyzePage() {
       case 'llm_complete':
         setAiAnalyzing(false)
         setAiOnlyMode(false)
+        aiOnlyModeRef.current = false
+        setAiAnalysisDone(true)
         if (data.updatedResult) {
-          // Only merge comp selection from AI — let client-side recalc derive valuation
-          const updated = data.updatedResult as AnalyzeData
+          // Snapshot current comps before AI overwrites them (for undo)
           setAnalysisResult((prev) => {
-            if (!prev) return updated
+            if (!prev) return data.updatedResult as AnalyzeData
+            if (!preAiCompsRef.current && prev.comps) {
+              preAiCompsRef.current = prev.comps
+            }
+            const updated = data.updatedResult as AnalyzeData
             return {
               ...prev,
               comps: updated.comps, // AI-updated comp selection (isEnabled, compGroup, etc.)
@@ -287,6 +284,7 @@ export default function AnalyzePage() {
       case 'error':
         setAiAnalyzing(false)
         setAiOnlyMode(false)
+        aiOnlyModeRef.current = false
         setStreamingStep('done')
         if (data.message) {
           setError(data.message as string)
@@ -345,6 +343,8 @@ export default function AnalyzePage() {
     recalcData,
     compOverride,
     settingsHook,
+    aiReport,
+    preAiComps: preAiCompsRef.current,
   })
 
   // Reset auto-save state when starting a new analysis
@@ -366,32 +366,70 @@ export default function AnalyzePage() {
   )
 
   // ─── Sync evaluation state to Jotai atoms ────────────────────────────────
-  // Run AI analysis on existing result (when AI was initially disabled)
+  // Run AI comp selection on existing result — lightweight LLM-only call
   const handleRunAiAnalysis = useCallback(async () => {
-    if (!address.trim() || aiAnalyzing) return
+    if (!analysisResult?.subject || !analysisResult?.comps?.items?.length || aiAnalyzing) return
     setAiAnalyzing(true)
-    setAiOnlyMode(true)
     try {
-      const response = await queueAnalysis({
-        address: address.trim(),
-        searchOptions: { radiusMiles: 1, maxComps: 15, monthsBack: 12 },
-        skipCache: false,
-        llmAnalysis: {
-          enabled: true,
-          compSelectionModel: compModel || undefined,
-          marketSearchModel: marketModel || undefined,
+      // Snapshot current comps before AI overwrites them (for undo)
+      if (!preAiCompsRef.current && analysisResult.comps) {
+        preAiCompsRef.current = analysisResult.comps
+      }
+      const s = settingsHook.settings
+      const response = await runCompSelection({
+        subject: analysisResult.subject as Record<string, unknown>,
+        comps: analysisResult.comps as { items: Array<Record<string, unknown>> },
+        riskFlags: (analysisResult as Record<string, unknown>).riskFlags as string[] | undefined,
+        settings: {
+          filters: s.filters.map((f) => ({ type: f.type, enabled: f.enabled, value: f.value })),
+          adjustments: s.adjustments.map((a) => ({ type: a.type, enabled: a.enabled, amount: a.amount, percent: a.percent })),
+          dealParams: {
+            closingCostsPercent: s.dealParams.closingCostsPercent,
+            carryingCostsPercent: s.dealParams.carryingCostsPercent,
+            wholesaleFee: s.dealParams.wholesaleFee,
+          },
+          rehabLevelIndex: s.rehabLevelIndex,
+          arvThresholdPercent: s.dealParams.arvThresholdPercent,
+          asIsThresholdPercent: s.asIsThresholdPercent,
         },
       })
-      if (response.success && response.enrichment) {
-        setEnrichmentStreamUrl(response.enrichment.streamUrl)
-        setEnrichmentToken(response.enrichment.token)
-      } else {
-        setAiAnalyzing(false)
+      if (response.success && response.updatedComps) {
+        setAnalysisResult((prev) => {
+          if (!prev) return prev
+          return { ...prev, comps: response.updatedComps as typeof prev.comps }
+        })
+        setAiAnalysisDone(true)
+        if (response.llmAnalysis) {
+          setAiReport({
+            summary: response.llmAnalysis.summary || 'AI comp selection complete',
+            selected: response.llmAnalysis.selectedForArv?.length ?? 0,
+            total: response.llmAnalysis.compCount ?? 0,
+            model: response.llmAnalysis.model?.split('/').pop() ?? '',
+          })
+        }
+        handleResetComps() // Sync comp override with new isEnabled flags
       }
     } catch {
+      // Restore snapshot on error
+      preAiCompsRef.current = null
+    } finally {
       setAiAnalyzing(false)
     }
-  }, [address, aiAnalyzing, compModel, marketModel])
+  }, [analysisResult, aiAnalyzing, settingsHook.settings, handleResetComps, setAnalysisResult])
+
+  const handleUndoAiSelection = useCallback(() => {
+    // Restore original math-based comp selection
+    if (preAiCompsRef.current) {
+      setAnalysisResult((prev) => {
+        if (!prev) return prev
+        return { ...prev, comps: preAiCompsRef.current as typeof prev.comps }
+      })
+      preAiCompsRef.current = null
+    }
+    handleResetComps()
+    setAiReport(null)
+    setAiAnalysisDone(false)
+  }, [handleResetComps, setAnalysisResult])
 
   useEvaluationSync({
     evaluation: { isRecalculated, recalcData, compOverride, handleToggleComp, handleResetComps },
@@ -405,6 +443,7 @@ export default function AnalyzePage() {
     onOpenSettings: () => setSettingsOpen(true),
     onCompClick: (comp) => { setComparisonComp(comp as CompItem); setComparisonOpen(true) },
     onRunAiAnalysis: handleRunAiAnalysis,
+    onUndoAiSelection: aiAnalysisDone ? handleUndoAiSelection : undefined,
   })
 
   // ─── Analysis Handler ────────────────────────────────────────────────────
@@ -419,7 +458,9 @@ export default function AnalyzePage() {
     setAiAnalyzing(false)
     setMarketContext(null)
     setAiReport(null)
+    setAiAnalysisDone(false)
     setAiOnlyMode(false)
+    aiOnlyModeRef.current = false
     setStreamingStep('idle')
     setPhase('fetching')
 
@@ -438,11 +479,7 @@ export default function AnalyzePage() {
         arvThresholdPercent: arvThreshold,
         asIsThresholdPercent: asIsThreshold,
         appraisalOverrides: overrides,
-        llmAnalysis: aiEnabled ? {
-          enabled: true,
-          compSelectionModel: compModel || undefined,
-          marketSearchModel: marketModel || undefined,
-        } : undefined,
+        llmAnalysis: aiEnabled ? { enabled: true } : undefined,
       })
 
       if (response.success) {
@@ -658,9 +695,12 @@ export default function AnalyzePage() {
                     Skip cache
                   </Label>
                 </div>
-                <span className="text-[10px] text-foreground-tertiary">
-                  AI: {aiEnabled ? 'On' : 'Off'} · <a href="/dashboard/evaluation-settings?tab=ai-settings" className="text-primary hover:underline">Configure</a>
-                </span>
+                <div className="flex items-center gap-2">
+                  <Switch id="ai-enabled" checked={aiEnabled} onCheckedChange={setAiEnabled} />
+                  <Label htmlFor="ai-enabled" className="text-[11px] text-foreground-tertiary cursor-pointer">
+                    AI Selection
+                  </Label>
+                </div>
               </div>
             )}
           </div>

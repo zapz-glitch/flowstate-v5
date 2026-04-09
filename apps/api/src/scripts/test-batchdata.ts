@@ -36,13 +36,17 @@ const HEADERS = {
 }
 
 async function lookupProperty(street: string, city: string, state: string, zip: string) {
-  const resp = await fetch(`${BASE_URL}/property/lookup`, {
+  const resp = await fetch(`${BASE_URL}/property/lookup/all-attributes`, {
     method: 'POST',
     headers: HEADERS,
     body: JSON.stringify({
       requests: [{
         address: { street, city, state, zip },
       }],
+      options: {
+        skipTrace: false,
+        datasets: ['basic', 'image', 'listing', 'permit', 'valuation']
+      }
     }),
   })
 
@@ -90,7 +94,7 @@ async function searchComps(street: string, city: string, state: string, zip: str
         useYearBuilt: true,
         minYearBuilt: 1950,
         maxYearBuilt: 2025,
-        take: 15,
+        take: 1,
       },
     }),
   })
@@ -113,11 +117,11 @@ async function main() {
 
   try {
     const result = await lookupProperty(addr.street, addr.city, addr.state, addr.zip)
-
     const results = (result as { results?: { properties?: unknown[] } }).results
     const properties = (results as { properties?: unknown[] })?.properties
     const property = (properties as Record<string, unknown>[])?.[0] as Record<string, unknown> | undefined
-
+    console.log(property);
+    console.log(JSON.stringify(result));
     if (!property) {
       console.log('Response keys:', Object.keys(result))
       console.log('Raw response (first 500 chars):', JSON.stringify(result).slice(0, 500))
@@ -145,7 +149,7 @@ async function main() {
   } catch (e) {
     console.error('Lookup Error:', (e as Error).message)
   }
-
+  return;
   // ── Test 2: Comparable Search ────────────────────────────────────────────
   console.log(`\n${'='.repeat(70)}`)
   console.log(`COMP SEARCH: ${addr.street}, ${addr.city}, ${addr.state} ${addr.zip}`)

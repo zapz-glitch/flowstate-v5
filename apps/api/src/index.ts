@@ -31,6 +31,7 @@ import adminRoute from './routes/admin'
 import arvThresholdRoute from './routes/arv-threshold'
 import proximityConfigRoute from './routes/proximity-config'
 import typeaheadRoute from './routes/typeahead'
+import compSelectionRoute from './routes/comp-selection'
 import sseStream from './routes/sse-stream'
 import ghlWebhook from './routes/webhooks/ghl'
 
@@ -43,10 +44,12 @@ app.use('*', logger())
 app.use(
   '*',
   cors({
-    origin: (origin, c) => {
-      const allowed = ['http://localhost:3000']
-      if (c.env.DASHBOARD_URL) allowed.push(c.env.DASHBOARD_URL)
-      return allowed.includes(origin) ? origin : ''
+    origin: (origin) => {
+      if (!origin) return ''
+      // Allow localhost, any *.flowstate.homes subdomain, and flowstate.homes itself
+      if (origin === 'http://localhost:3000') return origin
+      if (/^https:\/\/([\w-]+\.)?flowstate\.homes$/.test(origin)) return origin
+      return ''
     },
     allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     allowHeaders: ['Content-Type', 'Authorization', 'X-Dashboard-User-Id', 'X-Dashboard-Secret', 'X-Impersonate-User-Id'],
@@ -121,6 +124,9 @@ app.route('/arv-threshold', arvThresholdRoute)
 
 // Address typeahead routes (session auth via Better Auth cookies)
 app.route('/typeahead', typeaheadRoute)
+
+// Comp selection (session-authenticated, LLM-only)
+app.route('/comp-selection', compSelectionRoute)
 
 // SSE stream routes (token-authenticated)
 app.route('/sse', sseStream)

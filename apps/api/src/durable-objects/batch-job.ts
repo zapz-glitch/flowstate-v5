@@ -73,6 +73,9 @@ export class BatchJobDO {
     if (request.method === 'POST' && path === '/start') {
       return this.handleStart(request)
     }
+    if (request.method === 'POST' && path === '/retry-failed') {
+      return this.handleRetryFailed(request)
+    }
     if (request.method === 'GET' && path === '/sse') {
       return this.handleSSE(request)
     }
@@ -115,6 +118,119 @@ export class BatchJobDO {
     return new Response('OK', { status: 200 })
   }
 
+  // ─── Retry Failed Addresses ─────────────────────────────────────────────
+
+  private async handleRetryFailed(request: Request): Promise<Response> {
+    const body = await request.json() as { userId: string }
+
+    if (!this.batchState) {
+      this.batchState = await this.state.storage.get<BatchState>('batchState') ?? null
+    }
+    if (!this.batchState) {
+      return new Response('No batch state', { status: 400 })
+    }
+
+    const failedIndices = this.batchState.results
+      .map((r, i) => r.status === 'failed' ? i : -1)
+      .filter((i) => i >= 0)
+
+    if (failedIndices.length === 0) {
+      return new Response('No failed addresses', { status: 400 })
+    }
+
+    // Reset failed results to pending
+    for (const i of failedIndices) {
+      this.batchState.results[i] = { ...this.batchState.results[i], status: 'pending', error: undefined }
+    }
+    this.batchState.status = 'processing'
+    this.batchState.failedCount = 0
+    await this.state.storage.put('batchState', this.batchState)
+
+    // Run retry in background
+    this.retryFailed(body.userId, failedIndices).catch((err) => {
+      console.error('[BatchJobDO] Retry fatal error:', err)
+      this.pushEvent('batch_error', { message: err instanceof Error ? err.message : 'Retry failed' })
+    })
+
+    return new Response('OK', { status: 200 })
+  }
+
+  private async retryFailed(userId: string, indices: number[]): Promise<void> {
+    if (!this.batchState) return
+
+    let userSettings
+    try {
+      userSettings = await loadUserAnalysisSettings(this.env.DB, { userId })
+    } catch {
+      await this.pushEvent('batch_error', { message: 'Failed to load user settings' })
+      return
+    }
+
+    const heartbeat = setInterval(() => {
+      this.broadcast('heartbeat', { timestamp: Date.now() })
+    }, 15000)
+
+    for (const i of indices) {
+      if (!this.batchState) break
+      const address = this.batchState.addresses[i]
+
+      this.batchState.currentIndex = i
+      this.batchState.results[i].status = 'processing'
+      await this.state.storage.put('batchState', this.batchState)
+      await this.pushEvent('address_started', { index: i, total: this.batchState.totalAddresses, address })
+
+      try {
+        const config: StartBatchRequest = {
+          batchId: this.batchState.batchId,
+          userId,
+          addresses: this.batchState.addresses,
+        }
+        const result = await this.processOneAddress(address, config, userSettings)
+        this.batchState.results[i] = {
+          ...this.batchState.results[i],
+          status: 'completed',
+          jobId: result.jobId,
+          arv: result.arv,
+          buyPrice: result.buyPrice,
+          rehabCost: result.rehabCost,
+          recommendation: result.recommendation,
+          error: undefined,
+        }
+        this.batchState.completedCount++
+        await this.pushEvent('address_completed', {
+          index: i, total: this.batchState.totalAddresses, address,
+          jobId: result.jobId, arv: result.arv, buyPrice: result.buyPrice, recommendation: result.recommendation,
+        })
+      } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : 'Retry failed'
+        this.batchState.results[i] = { ...this.batchState.results[i], status: 'failed', error: errorMsg }
+        this.batchState.failedCount++
+        await this.pushEvent('address_failed', { index: i, total: this.batchState.totalAddresses, address, error: errorMsg })
+      }
+
+      await this.state.storage.put('batchState', this.batchState)
+      await this.updateDbProgress()
+
+      if (i < indices[indices.length - 1]) {
+        await new Promise((r) => setTimeout(r, 2000))
+      }
+    }
+
+    clearInterval(heartbeat)
+
+    if (this.batchState) {
+      this.batchState.status = 'completed'
+      await this.state.storage.put('batchState', this.batchState)
+    }
+    await this.updateDbStatus('completed')
+    await this.pushEvent('batch_completed', {
+      totalAddresses: this.batchState?.totalAddresses ?? 0,
+      completedCount: this.batchState?.completedCount ?? 0,
+      failedCount: this.batchState?.failedCount ?? 0,
+      results: this.batchState?.results ?? [],
+    })
+  }
+
   // ─── Sequential Processing ──────────────────────────────────────────────
 
   private async processBatch(config: StartBatchRequest): Promise<void> {
@@ -129,6 +245,11 @@ export class BatchJobDO {
       await this.updateDbStatus('failed')
       return
     }
+
+    // Heartbeat keeps SSE connections alive through proxies/CDNs
+    const heartbeat = setInterval(() => {
+      this.broadcast('heartbeat', { timestamp: Date.now() })
+    }, 15000)
 
     await this.pushEvent('batch_started', {
       totalAddresses: config.addresses.length,
@@ -198,6 +319,9 @@ export class BatchJobDO {
       }
     }
 
+    // Clean up heartbeat
+    clearInterval(heartbeat)
+
     // Mark complete
     if (this.batchState) {
       this.batchState.status = 'completed'
@@ -255,19 +379,56 @@ export class BatchJobDO {
     })
     await startResp.text()
 
-    // Poll for completion (timeout 90s per address)
-    const timeout = Date.now() + 90_000
+    // Poll for completion (3 min timeout per address)
+    const timeout = Date.now() + 180_000
+    let lastStep = ''
+    const index = this.batchState?.currentIndex ?? 0
     while (Date.now() < timeout) {
       await new Promise((r) => setTimeout(r, 2000))
 
-      const stateResp = await stub.fetch('http://internal/state')
-      const state = await stateResp.json() as { status: string; events?: Array<{ event: string; data: unknown }> }
+      let state: { status: string; events?: Array<{ event: string; data: unknown }> }
+      try {
+        const stateResp = await stub.fetch('http://internal/state')
+        state = await stateResp.json()
+      } catch (err) {
+        console.warn(`[BatchJobDO] Failed to poll child DO state for ${address}:`, err)
+        continue // Retry on next poll cycle
+      }
 
-      if (state.status === 'complete') {
-        // Extract key metrics from the last evaluation_complete event
+      // Broadcast sub-step progress to batch SSE clients
+      if (state.events?.length) {
+        const stepEvents = ['property_fetch', 'subject_found', 'comps_found', 'evaluation_started', 'evaluation_complete']
+        const latestStep = state.events.findLast((e) => stepEvents.includes(e.event))
+        if (latestStep && latestStep.event !== lastStep) {
+          lastStep = latestStep.event
+          const stepLabel = latestStep.event === 'property_fetch' ? 'Searching property...'
+            : latestStep.event === 'subject_found' ? 'Property found'
+            : latestStep.event === 'comps_found' ? 'Comps found'
+            : latestStep.event === 'evaluation_started' ? 'Evaluating...'
+            : latestStep.event === 'evaluation_complete' ? 'Evaluation complete'
+            : latestStep.event
+          await this.pushEvent('address_progress', { index, address, step: latestStep.event, stepLabel })
+        }
+      }
+
+      if (state.status === 'complete' || state.status === 'error') {
+        // Check for errors — AnalysisJobDO sets status to 'complete' even after errors
+        // (because enrichment_done always fires), so check events for error indicators
+        const errorEvent = state.events?.findLast((e) => e.event === 'error')
         const evalEvent = state.events?.findLast((e) => e.event === 'evaluation_complete')
+
+        if (errorEvent && !evalEvent) {
+          // Error occurred and no evaluation completed — this is a failure
+          const errorMsg = (errorEvent.data as { message?: string })?.message || 'Analysis error'
+          throw new Error(errorMsg)
+        }
+
+        if (!evalEvent) {
+          throw new Error('Analysis completed but no evaluation data found')
+        }
+
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const result = (evalEvent?.data as any)?.updatedResult
+        const result = (evalEvent.data as any)?.updatedResult
         return {
           jobId,
           arv: result?.valuation?.arv,
@@ -276,15 +437,9 @@ export class BatchJobDO {
           recommendation: result?.valuation?.recommendation,
         }
       }
-
-      if (state.status === 'error') {
-        const errorEvent = state.events?.findLast((e) => e.event === 'error')
-        const errorMsg = (errorEvent?.data as { message?: string })?.message || 'Analysis error'
-        throw new Error(errorMsg)
-      }
     }
 
-    throw new Error('Analysis timed out after 90 seconds')
+    throw new Error('Analysis timed out after 180 seconds')
   }
 
   // ─── DB Updates ──────────────────────────────────────────────────────────

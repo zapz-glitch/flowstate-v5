@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useMemo } from 'react'
-import { SlidersHorizontal, RotateCcw, Loader2, LayoutGrid, List, ArrowUpDown, RefreshCw } from 'lucide-react'
+import { SlidersHorizontal, RotateCcw, Loader2, LayoutGrid, List, ArrowUpDown, Undo2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
@@ -31,6 +31,8 @@ export interface ComparablesSectionProps {
   isAnalyzing?: boolean
   /** Called to trigger AI comp selection */
   onRunAiAnalysis?: () => void
+  /** Called to undo AI comp selection — only passed when AI analysis has been done */
+  onUndoAiSelection?: () => void
   /** Called when a comp card is clicked (for comparison dialog) */
   onCompClick?: (comp: CompItem) => void
   /** Called when a comp card is hovered (for map marker sync) */
@@ -58,6 +60,7 @@ export function ComparablesSection({
   highlightedCompKey,
   isAnalyzing = false,
   onRunAiAnalysis,
+  onUndoAiSelection,
   onCompClick,
   onCompHover,
 }: ComparablesSectionProps) {
@@ -148,23 +151,31 @@ export function ComparablesSection({
             </span>
           </div>
           <div className="flex items-center gap-2">
-            {onRunAiAnalysis && !isAnalyzing && (
-              <Button
-                size="icon"
-                variant="outline"
-                onClick={onRunAiAnalysis}
-                className="h-7 w-7 no-print"
-                title="AI Comp Selection"
-              >
-                <RefreshCw className="w-3.5 h-3.5" />
-              </Button>
-            )}
-            {isAnalyzing && (
+            {isAnalyzing ? (
               <Badge variant="outline" className="text-[10px] gap-1 border-primary/30 text-primary no-print">
                 <Loader2 className="w-3 h-3 animate-spin" />
                 AI Analyzing
               </Badge>
-            )}
+            ) : onUndoAiSelection ? (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={onUndoAiSelection}
+                className="h-7 px-2 text-[10px] no-print"
+              >
+                <Undo2 className="w-3 h-3" />
+                Undo AI
+              </Button>
+            ) : onRunAiAnalysis ? (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={onRunAiAnalysis}
+                className="h-7 px-2 text-[10px] no-print"
+              >
+                AI Analysis
+              </Button>
+            ) : null}
             {/* Grid/List toggle */}
             <div className="flex items-center border border-border rounded overflow-hidden no-print">
               <button

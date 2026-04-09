@@ -31,6 +31,7 @@ export interface EvaluationCallbacks {
   onOpenSettings: () => void
   onCompClick?: (comp: CompItem) => void
   onRunAiAnalysis?: () => void
+  onUndoAiSelection?: () => void
 }
 
 // ─── Consolidated State ────────────────────────────────────────────────────

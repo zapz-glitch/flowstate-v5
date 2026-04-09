@@ -360,10 +360,46 @@ export async function analyzeComps(
       return null
     }
 
-    // Parse JSON from response (strip markdown fences if present)
+    // Parse JSON from response — handle markdown fences, thinking content, etc.
     let jsonStr = result.data.content.trim()
-    if (jsonStr.startsWith('```')) {
-      jsonStr = jsonStr.replace(/^```(?:json)?\s*/, '').replace(/\s*```$/, '')
+
+    // Strip markdown fences (handle both closed and unclosed fences)
+    if (jsonStr.includes('```')) {
+      const fenceMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/)
+      if (fenceMatch) {
+        jsonStr = fenceMatch[1].trim()
+      } else {
+        // Unclosed fence — strip the opening fence and take the rest
+        jsonStr = jsonStr.replace(/^```(?:json)?\s*/, '').trim()
+      }
+    }
+
+    // If response doesn't start with { or [, try to find the JSON object
+    if (!jsonStr.startsWith('{') && !jsonStr.startsWith('[')) {
+      const jsonStart = jsonStr.indexOf('{')
+      if (jsonStart !== -1) {
+        jsonStr = jsonStr.slice(jsonStart)
+      }
+    }
+
+    // Trim any trailing text after the JSON
+    if (jsonStr.startsWith('{')) {
+      let depth = 0
+      let inString = false
+      let escape = false
+      let endIdx = -1
+      for (let i = 0; i < jsonStr.length; i++) {
+        const ch = jsonStr[i]
+        if (escape) { escape = false; continue }
+        if (ch === '\\') { escape = true; continue }
+        if (ch === '"') { inString = !inString; continue }
+        if (inString) continue
+        if (ch === '{') depth++
+        else if (ch === '}') { depth--; if (depth === 0) { endIdx = i; break } }
+      }
+      if (endIdx !== -1 && endIdx < jsonStr.length - 1) {
+        jsonStr = jsonStr.slice(0, endIdx + 1)
+      }
     }
 
     let parsed: {
@@ -392,6 +428,7 @@ export async function analyzeComps(
         console.log('[CompAnalysis] JSON repair successful')
       } catch {
         console.warn('[CompAnalysis] JSON repair failed, skipping LLM analysis')
+        console.warn('[CompAnalysis] Raw response (first 500 chars):', result.data.content.slice(0, 500))
         return null
       }
     }
@@ -470,7 +507,7 @@ export async function analyzeComps(
         ? parsed.confidenceLevel as 'high' | 'medium' | 'low'
         : undefined,
       reasoning: result.data.reasoning || undefined,
-      model: env.COMP_SELECTION_MODEL || env.OPENROUTER_MODEL || 'x-ai/grok-4.1-fast',
+      model: provider.model || 'unknown',
       latencyMs,
       tokenUsage: result.usage ? {
         prompt: result.usage.promptTokens ?? 0,

@@ -2,8 +2,7 @@
  * Property Classification Types
  *
  * Classification is now price-based (top X% by price/sqft = after_renovation).
- * Types are re-exported from vision/types for backward compatibility with
- * appraisal and analysis services that reference ClassificationResult.
+ * Types are exported from ./types.ts for use by appraisal and analysis services.
  */
 
 export type {
@@ -12,4 +11,4 @@ export type {
   ClassificationIndicators,
   PhotoAnalysisResult,
   DescriptionAnalysisResult,
-} from '../vision/types'
+} from './types'

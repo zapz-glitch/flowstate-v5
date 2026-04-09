@@ -5,7 +5,7 @@ import { Upload, FileText, Loader2, Check, X, Download, ExternalLink } from 'luc
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
-import { submitBatchAnalysis, type BatchResult } from './actions'
+import { submitBatchAnalysis, getBatchStatus, getBatchJobs, retryFailedAddresses, getBatchStreamToken, type BatchResult } from './actions'
 
 type Phase = 'upload' | 'processing' | 'complete'
 
@@ -18,12 +18,126 @@ export default function BatchPage() {
   // Processing state
   const [batchId, setBatchId] = useState<string | null>(null)
   const [results, setResults] = useState<BatchResult[]>([])
-  const [currentIndex, setCurrentIndex] = useState(0)
   const [completedCount, setCompletedCount] = useState(0)
   const [failedCount, setFailedCount] = useState(0)
 
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const pollingRef = useRef<NodeJS.Timeout | null>(null)
   const eventSourceRef = useRef<EventSource | null>(null)
+
+  // ─── Polling — reliable progress mechanism ───────────────────────────────
+
+  const stopPolling = useCallback(() => {
+    if (pollingRef.current) {
+      clearInterval(pollingRef.current)
+      pollingRef.current = null
+    }
+    eventSourceRef.current?.close()
+    eventSourceRef.current = null
+  }, [])
+
+  const startPolling = useCallback((id: string) => {
+    stopPolling()
+    const poll = async () => {
+      try {
+        const job = await getBatchStatus(id)
+        if (!job) return
+        if (job.results?.length) setResults(job.results)
+        setCompletedCount(job.completedCount)
+        setFailedCount(job.failedCount)
+        if (job.status === 'completed' || job.status === 'failed') {
+          setPhase('complete')
+          stopPolling()
+        }
+      } catch { /* ignore */ }
+    }
+    // Poll immediately, then every 3 seconds
+    poll()
+    pollingRef.current = setInterval(poll, 3000)
+
+    // Also try SSE for real-time updates (non-critical — polling is the fallback)
+    getBatchStreamToken(id).then((tokenResult) => {
+      if (!tokenResult) return
+      try {
+        const es = new EventSource(`${tokenResult.streamUrl}?token=${tokenResult.token}`)
+        eventSourceRef.current = es
+
+        es.addEventListener('batch_state', (e) => {
+          const data = JSON.parse(e.data)
+          if (data.results) setResults(data.results)
+          setCompletedCount(data.completedCount ?? 0)
+          setFailedCount(data.failedCount ?? 0)
+        })
+        es.addEventListener('address_started', (e) => {
+          const data = JSON.parse(e.data)
+          setResults((prev) => prev.map((r, i) => i === data.index ? { ...r, status: 'processing' } : r))
+        })
+        es.addEventListener('address_completed', (e) => {
+          const data = JSON.parse(e.data)
+          setResults((prev) => prev.map((r, i) => i === data.index ? { ...r, status: 'completed', jobId: data.jobId } : r))
+          setCompletedCount((c) => c + 1)
+        })
+        es.addEventListener('address_failed', (e) => {
+          const data = JSON.parse(e.data)
+          setResults((prev) => prev.map((r, i) => i === data.index ? { ...r, status: 'failed', error: data.error } : r))
+          setFailedCount((c) => c + 1)
+        })
+        es.addEventListener('batch_completed', (e) => {
+          const data = JSON.parse(e.data)
+          if (data.results) setResults(data.results)
+          setCompletedCount(data.completedCount ?? 0)
+          setFailedCount(data.failedCount ?? 0)
+          setPhase('complete')
+          stopPolling()
+        })
+        es.addEventListener('batch_done', () => { setPhase('complete'); stopPolling() })
+        es.onerror = () => { es.close(); eventSourceRef.current = null } // Silent — polling continues
+      } catch { /* SSE failed — polling continues */ }
+    }).catch(() => { /* ignore */ })
+  }, [stopPolling])
+
+  // ─── Resume active batch on page load ────────────────────────────────────
+
+  useEffect(() => {
+    let cancelled = false
+    async function resumeBatch() {
+      try {
+        const jobs = await getBatchJobs()
+        const active = jobs.find((j) => j.status === 'processing')
+        const recent = active ?? jobs[0]
+        if (!recent || cancelled) return
+
+        setBatchId(recent.id)
+
+        if (recent.status === 'processing') {
+          setPhase('processing')
+          // Load current state from DB then start polling
+          const job = await getBatchStatus(recent.id)
+          if (job && !cancelled) {
+            if (job.results?.length) setResults(job.results)
+            setCompletedCount(job.completedCount)
+            setFailedCount(job.failedCount)
+            startPolling(recent.id)
+          }
+        } else if (recent.status === 'completed' || recent.status === 'failed') {
+          const job = await getBatchStatus(recent.id)
+          if (job && !cancelled) {
+            setResults(job.results ?? [])
+            setCompletedCount(job.completedCount)
+            setFailedCount(job.failedCount)
+            setPhase('complete')
+          }
+        }
+      } catch { /* show upload phase */ }
+    }
+    resumeBatch()
+    return () => { cancelled = true; stopPolling() }
+  }, [startPolling, stopPolling])
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => stopPolling()
+  }, [stopPolling])
 
   // ─── CSV Parsing ──────────────────────────────────────────────────────────
 
@@ -34,19 +148,37 @@ export default function BatchPage() {
     // Check if first line is a header
     const firstLine = lines[0].toLowerCase()
     const hasHeader = firstLine.includes('address') || firstLine.includes('street') || firstLine.includes('property')
+    const headerLine = hasHeader ? lines[0] : null
     const dataLines = hasHeader ? lines.slice(1) : lines
 
-    // Try to find address column — if CSV has commas forming columns, take the full line as address
-    // (addresses themselves contain commas like "123 Main St, Tampa, FL 33629")
+    // Detect multi-column CSV: header must have many columns (>3)
+    const headerCols = headerLine?.split(',').map((c) => c.replace(/^["']|["']$/g, '').trim().toLowerCase()) ?? []
+    const isMultiColumn = headerCols.length > 3
+
+    let addressColIndex = -1
+    if (isMultiColumn) {
+      addressColIndex = headerCols.findIndex((c) => c === 'address' || c === 'full address' || c === 'property address' || c === 'street address')
+    }
+
     const parsed: string[] = []
     for (const line of dataLines) {
-      const trimmed = line.replace(/^["']|["']$/g, '').trim()
-      if (trimmed.length > 5) { // minimum reasonable address length
-        parsed.push(trimmed)
+      let address: string
+      if (isMultiColumn && addressColIndex >= 0) {
+        const cols = line.split(',').map((c) => c.replace(/^["']|["']$/g, '').trim())
+        address = cols[addressColIndex] || ''
+      } else if (isMultiColumn) {
+        continue
+      } else {
+        // Simple format: one full address per line (commas are part of the address)
+        address = line.replace(/^["']|["']$/g, '').trim()
+      }
+
+      if (address.length > 5) {
+        parsed.push(address)
       }
     }
 
-    return [...new Set(parsed)] // deduplicate
+    return [...new Set(parsed)]
   }, [])
 
   const handleFileSelect = useCallback((file: File) => {
@@ -87,6 +219,8 @@ export default function BatchPage() {
     setError(null)
     setPhase('processing')
     setResults(addresses.map((address, i) => ({ address, index: i, status: 'pending' })))
+    setCompletedCount(0)
+    setFailedCount(0)
 
     const result = await submitBatchAnalysis(addresses)
     if (!result.success || !result.batchId) {
@@ -96,96 +230,19 @@ export default function BatchPage() {
     }
 
     setBatchId(result.batchId)
-
-    // Connect SSE
-    if (result.streamUrl && result.token) {
-      const es = new EventSource(`${result.streamUrl}?token=${result.token}`)
-      eventSourceRef.current = es
-
-      es.addEventListener('batch_state', (e) => {
-        const data = JSON.parse(e.data)
-        if (data.results) setResults(data.results)
-        setCompletedCount(data.completedCount ?? 0)
-        setFailedCount(data.failedCount ?? 0)
-        setCurrentIndex(data.currentIndex ?? 0)
-      })
-
-      es.addEventListener('address_started', (e) => {
-        const data = JSON.parse(e.data)
-        setCurrentIndex(data.index)
-        setResults((prev) => prev.map((r, i) =>
-          i === data.index ? { ...r, status: 'processing' } : r
-        ))
-      })
-
-      es.addEventListener('address_completed', (e) => {
-        const data = JSON.parse(e.data)
-        setResults((prev) => prev.map((r, i) =>
-          i === data.index ? {
-            ...r,
-            status: 'completed',
-            jobId: data.jobId,
-            arv: data.arv,
-            buyPrice: data.buyPrice,
-            recommendation: data.recommendation,
-          } : r
-        ))
-        setCompletedCount((c) => c + 1)
-      })
-
-      es.addEventListener('address_failed', (e) => {
-        const data = JSON.parse(e.data)
-        setResults((prev) => prev.map((r, i) =>
-          i === data.index ? { ...r, status: 'failed', error: data.error } : r
-        ))
-        setFailedCount((c) => c + 1)
-      })
-
-      es.addEventListener('batch_completed', (e) => {
-        const data = JSON.parse(e.data)
-        if (data.results) setResults(data.results)
-        setCompletedCount(data.completedCount ?? 0)
-        setFailedCount(data.failedCount ?? 0)
-        setPhase('complete')
-        es.close()
-      })
-
-      es.addEventListener('batch_done', () => {
-        setPhase('complete')
-        es.close()
-      })
-
-      es.addEventListener('batch_error', (e) => {
-        const data = JSON.parse(e.data)
-        setError(data.message || 'Batch processing error')
-        es.close()
-      })
-
-      es.onerror = () => {
-        // SSE disconnected — switch to polling fallback
-        es.close()
-      }
-    }
-  }, [addresses])
-
-  // Cleanup SSE on unmount
-  useEffect(() => {
-    return () => { eventSourceRef.current?.close() }
-  }, [])
+    startPolling(result.batchId)
+  }, [addresses, startPolling])
 
   // ─── CSV Export ───────────────────────────────────────────────────────────
 
   const handleExportCSV = useCallback(() => {
-    const header = 'Address,Status,ARV,Buy Price,Rehab Cost,Recommendation,Report Link'
+    const header = 'Address,Status,Error,Report Link'
     const rows = results.map((r) => {
-      const reportUrl = r.jobId ? `${window.location.origin}/dashboard/reports/${r.jobId}` : ''
+      const reportUrl = r.jobId && r.status === 'completed' ? `${window.location.origin}/dashboard/reports/${r.jobId}` : ''
       return [
         `"${r.address}"`,
         r.status,
-        r.arv ? `$${r.arv.toLocaleString()}` : '',
-        r.buyPrice ? `$${r.buyPrice.toLocaleString()}` : '',
-        r.rehabCost ? `$${r.rehabCost.toLocaleString()}` : '',
-        r.recommendation || '',
+        r.error ? `"${r.error}"` : '',
         reportUrl,
       ].join(',')
     })
@@ -200,25 +257,41 @@ export default function BatchPage() {
     URL.revokeObjectURL(url)
   }, [results])
 
+  // ─── Retry Failed ─────────────────────────────────────────────────────────
+
+  const handleRetryFailed = useCallback(async () => {
+    if (!batchId || failedCount === 0) return
+    setPhase('processing')
+    setError(null)
+    const result = await retryFailedAddresses(batchId)
+    if (!result.success) {
+      setError(result.error || 'Retry failed')
+      setPhase('complete')
+      return
+    }
+    startPolling(batchId)
+  }, [batchId, failedCount, startPolling])
+
   // ─── Reset ────────────────────────────────────────────────────────────────
 
   const handleReset = useCallback(() => {
+    stopPolling()
     setPhase('upload')
     setAddresses([])
     setFileName(null)
     setError(null)
     setBatchId(null)
     setResults([])
-    setCurrentIndex(0)
     setCompletedCount(0)
     setFailedCount(0)
-    eventSourceRef.current?.close()
-  }, [])
+  }, [stopPolling])
 
   // ─── Progress calculation ─────────────────────────────────────────────────
 
   const totalDone = completedCount + failedCount
-  const progressPercent = addresses.length > 0 ? Math.round((totalDone / addresses.length) * 100) : 0
+  const totalAddresses = results.length > 0 ? results.length : addresses.length
+  const progressPercent = totalAddresses > 0 ? Math.round((totalDone / totalAddresses) * 100) : 0
+  const currentIndex = results.findIndex((r) => r.status === 'processing')
 
   return (
     <div className="space-y-6">
@@ -252,7 +325,7 @@ export default function BatchPage() {
               Drag & drop a CSV file, or click to browse
             </p>
             <p className="text-xs text-foreground-tertiary mt-1">
-              One address per line. Max 50 addresses. No AI analysis.
+              One address per line. Max 50 addresses.
             </p>
             <div className="mt-3 text-left inline-block bg-muted/50 border border-border/50 rounded-sm px-4 py-2.5">
               <p className="text-[10px] font-medium text-foreground-tertiary uppercase tracking-wider mb-1.5">Sample CSV format</p>
@@ -298,7 +371,7 @@ export default function BatchPage() {
         </div>
       )}
 
-      {/* Phase: Processing */}
+      {/* Phase: Processing / Complete */}
       {(phase === 'processing' || phase === 'complete') && (
         <div className="space-y-4">
           {/* Progress bar */}
@@ -309,7 +382,9 @@ export default function BatchPage() {
                   {phase === 'processing' && <Loader2 className="w-4 h-4 animate-spin text-primary" />}
                   {phase === 'complete' && <Check className="w-4 h-4 text-emerald-500" />}
                   <span className="text-sm font-medium">
-                    {phase === 'processing' ? `Processing ${currentIndex + 1} of ${addresses.length}...` : 'Batch Complete'}
+                    {phase === 'processing'
+                      ? currentIndex >= 0 ? `Processing ${currentIndex + 1} of ${totalAddresses}...` : `Processing...`
+                      : 'Batch Complete'}
                   </span>
                 </div>
                 <div className="flex items-center gap-3">
@@ -328,7 +403,7 @@ export default function BatchPage() {
                 />
               </div>
               <div className="text-[10px] text-foreground-tertiary mt-1 text-right">
-                {totalDone}/{addresses.length} ({progressPercent}%)
+                {totalDone}/{totalAddresses} ({progressPercent}%)
               </div>
             </CardContent>
           </Card>
@@ -340,6 +415,11 @@ export default function BatchPage() {
                 <Download className="w-3.5 h-3.5" />
                 Export CSV
               </Button>
+              {failedCount > 0 && (
+                <Button size="sm" variant="outline" onClick={handleRetryFailed} className="gap-1.5">
+                  Retry Failed ({failedCount})
+                </Button>
+              )}
               <Button size="sm" variant="outline" onClick={handleReset} className="gap-1.5">
                 New Batch
               </Button>
@@ -355,9 +435,7 @@ export default function BatchPage() {
                     <tr>
                       <th className="text-left px-3 py-2 font-medium text-foreground-tertiary w-8">#</th>
                       <th className="text-left px-3 py-2 font-medium text-foreground-tertiary">Address</th>
-                      <th className="text-left px-3 py-2 font-medium text-foreground-tertiary w-20">Status</th>
-                      <th className="text-right px-3 py-2 font-medium text-foreground-tertiary w-24">ARV</th>
-                      <th className="text-right px-3 py-2 font-medium text-foreground-tertiary w-24">Buy Price</th>
+                      <th className="text-left px-3 py-2 font-medium text-foreground-tertiary">Status</th>
                       <th className="text-center px-3 py-2 font-medium text-foreground-tertiary w-20">Report</th>
                     </tr>
                   </thead>
@@ -376,7 +454,7 @@ export default function BatchPage() {
                           {r.status === 'pending' && <span className="text-foreground-tertiary">Pending</span>}
                           {r.status === 'processing' && (
                             <span className="inline-flex items-center gap-1 text-primary">
-                              <Loader2 className="w-3 h-3 animate-spin" /> Running
+                              <Loader2 className="w-3 h-3 animate-spin" /> Processing
                             </span>
                           )}
                           {r.status === 'completed' && (
@@ -385,19 +463,13 @@ export default function BatchPage() {
                             </span>
                           )}
                           {r.status === 'failed' && (
-                            <span className="inline-flex items-center gap-1 text-red-500" title={r.error}>
-                              <X className="w-3 h-3" /> Failed
+                            <span className="inline-flex items-center gap-1 text-red-500">
+                              <X className="w-3 h-3" /> {r.error || 'Failed'}
                             </span>
                           )}
                         </td>
-                        <td className="px-3 py-2 text-right tabular-nums">
-                          {r.arv ? `$${r.arv.toLocaleString()}` : '-'}
-                        </td>
-                        <td className="px-3 py-2 text-right tabular-nums">
-                          {r.buyPrice ? `$${r.buyPrice.toLocaleString()}` : '-'}
-                        </td>
                         <td className="px-3 py-2 text-center">
-                          {r.jobId ? (
+                          {r.jobId && r.status === 'completed' ? (
                             <a
                               href={`/dashboard/reports/${r.jobId}`}
                               target="_blank"

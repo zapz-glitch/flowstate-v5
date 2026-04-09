@@ -41,6 +41,7 @@ export function AnalysisResultLayout({
     onOpenSettings,
     onCompClick,
     onRunAiAnalysis,
+    onUndoAiSelection,
   } = useEvaluation()
 
   const selectedCompKeys = compOverride?.selectedCompKeys
@@ -115,12 +116,14 @@ export function AnalysisResultLayout({
         <div className="border border-emerald-500/20 bg-emerald-500/5 px-4 py-3 rounded-sm">
           <div className="flex items-center gap-2 mb-1">
             <BrainCircuit className="w-3.5 h-3.5 text-emerald-500 flex-shrink-0" />
-            <span className="text-[10px] font-semibold text-emerald-600 uppercase tracking-wider">AI Comp Selection</span>
+            <span className="text-[10px] font-semibold text-emerald-600 uppercase tracking-wider">AI Analysis</span>
             <span className="text-[9px] text-foreground-tertiary ml-auto">{aiReport.model}</span>
           </div>
           <p className="text-body-sm text-foreground-secondary">{aiReport.summary}</p>
-          <div className="text-[10px] text-foreground-tertiary mt-1">
-            {aiReport.selected} of {aiReport.total} comps selected for ARV
+          <div className="mt-2">
+            <span className="text-[10px] text-foreground-tertiary">
+              {aiReport.selected} of {aiReport.total} comps selected for ARV
+            </span>
           </div>
         </div>
       )}
@@ -139,6 +142,7 @@ export function AnalysisResultLayout({
           highlightedCompKey={null}
           isAnalyzing={aiAnalyzing}
           onRunAiAnalysis={onRunAiAnalysis}
+          onUndoAiSelection={onUndoAiSelection}
           onCompClick={onCompClick}
           onCompHover={onCompHover}
         />

@@ -112,6 +112,74 @@ batch.get('/', async (c) => {
   return c.json({ jobs })
 })
 
+// ─── POST /batch/:id/stream-token — Get SSE token for reconnection ────────
+
+batch.post('/:id/stream-token', async (c) => {
+  const session = await getSession(c)
+  if (!session?.user) {
+    return c.json({ error: 'Not authenticated' }, 401)
+  }
+
+  const batchId = c.req.param('id')
+  const db = drizzle(c.env.DB)
+  const [job] = await db.select()
+    .from(batchJobs)
+    .where(eq(batchJobs.id, batchId))
+    .limit(1)
+
+  if (!job || job.userId !== session.user.id) {
+    return c.json({ error: 'Not found' }, 404)
+  }
+
+  const sseSecret = c.env.BETTER_AUTH_SECRET || ''
+  const token = await generateSseToken(sseSecret, batchId, session.user.id)
+  const apiBaseUrl = c.req.url.replace(/\/batch\/.*/, '')
+  const streamUrl = `${apiBaseUrl}/sse/batch/${batchId}`
+
+  return c.json({ streamUrl, token })
+})
+
+// ─── POST /batch/:id/retry-failed — Retry failed addresses ────────────────
+
+batch.post('/:id/retry-failed', async (c) => {
+  const session = await getSession(c)
+  if (!session?.user) {
+    return c.json({ error: 'Not authenticated' }, 401)
+  }
+
+  const batchId = c.req.param('id')
+  const db = drizzle(c.env.DB)
+  const [job] = await db.select()
+    .from(batchJobs)
+    .where(eq(batchJobs.id, batchId))
+    .limit(1)
+
+  if (!job || job.userId !== session.user.id) {
+    return c.json({ error: 'Not found' }, 404)
+  }
+
+  // Update DB status back to processing
+  await db.update(batchJobs)
+    .set({ status: 'processing', updatedAt: new Date().toISOString() })
+    .where(eq(batchJobs.id, batchId))
+
+  const doId = c.env.BATCH_JOB.idFromName(batchId)
+  const stub = c.env.BATCH_JOB.get(doId)
+  const resp = await stub.fetch('http://internal/retry-failed', {
+    method: 'POST',
+    body: JSON.stringify({ userId: session.user.id }),
+  })
+  await resp.text()
+
+  // Generate SSE token for streaming retry progress
+  const sseSecret = c.env.BETTER_AUTH_SECRET || ''
+  const token = await generateSseToken(sseSecret, batchId, session.user.id)
+  const apiBaseUrl = c.req.url.replace(/\/batch\/.*/, '')
+  const streamUrl = `${apiBaseUrl}/sse/batch/${batchId}`
+
+  return c.json({ success: true, streamUrl, token })
+})
+
 // ─── GET /batch/:id — Get batch status + results ──────────────────────────
 
 batch.get('/:id', async (c) => {

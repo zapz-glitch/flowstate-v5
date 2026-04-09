@@ -21,7 +21,7 @@ import {
 import { cn } from '@/lib/utils'
 import { getReportHistory, type ReportHistoryEntry } from '@/lib/client-api'
 import { useAutoSave } from '@/hooks/use-auto-save'
-import { getSavedReport } from '@/lib/client-api'
+import { getSavedReport, runCompSelection } from '@/lib/client-api'
 import { useAnalysisEvaluation } from '@/hooks/use-analysis-evaluation'
 import { EvaluationSettingsSheet } from '@/components/report/EvaluationSettingsSheet'
 import { DownloadReportButton } from '@/components/report/DownloadReportButton'
@@ -78,6 +78,8 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [marketContext, setMarketContext] = useState<Record<string, any> | null>(null)
   const [aiReport, setAiReport] = useState<{ summary: string; selected: number; total: number; model: string } | null>(null)
+  const [aiAnalysisDone, setAiAnalysisDone] = useState(false)
+  const preAiCompsRef = useRef<unknown>(null)
 
   const analyzeData = report?.analysis ?? null
 
@@ -124,6 +126,8 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
     recalcData,
     compOverride,
     settingsHook,
+    aiReport,
+    preAiComps: preAiCompsRef.current,
     onSaved: historyOpen ? loadHistory : undefined,
   })
 
@@ -132,12 +136,24 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
       setLoading(true)
       setError(null)
       const data = await getSavedReport(jobId)
+      const analysis = data.analysis as AnalyzeData & {
+        aiReport?: { summary: string; selected: number; total: number; model: string }
+        preAiComps?: unknown
+      }
       setReport({
         jobId: data.jobId,
         address: data.address,
         createdAt: data.createdAt,
-        analysis: data.analysis as AnalyzeData,
+        analysis,
       })
+      // Restore persisted AI analysis report and pre-AI comps for undo
+      if (analysis.aiReport) {
+        setAiReport(analysis.aiReport)
+        setAiAnalysisDone(true)
+        if (analysis.preAiComps) {
+          preAiCompsRef.current = analysis.preAiComps
+        }
+      }
     } catch {
       setError('Report not found')
     } finally {
@@ -175,7 +191,12 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
         break
       case 'llm_complete':
         setAiAnalyzing(false)
+        setAiAnalysisDone(true)
         if (data.updatedResult && report) {
+          // Snapshot current comps before AI overwrites them (for undo)
+          if (!preAiCompsRef.current && report.analysis?.comps) {
+            preAiCompsRef.current = report.analysis.comps
+          }
           // Only merge comp selection from AI — let client-side recalc derive valuation
           const updated = data.updatedResult as AnalyzeData
           setReport((prev) => {
@@ -288,28 +309,70 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
     (analyzeData?.comps?.items ?? []) as CompItem[]
   )
 
-  // Run AI analysis on existing report
+  // Run AI comp selection on existing report — lightweight LLM-only call
   const handleRunAiAnalysis = useCallback(async () => {
-    if (!report?.address || aiAnalyzing) return
+    const analysis = report?.analysis
+    if (!analysis?.subject || !analysis?.comps?.items?.length || aiAnalyzing) return
     setAiAnalyzing(true)
     try {
-      const response = await queueAnalysis({
-        address: report.address,
-        existingJobId: jobId,
-        searchOptions: { radiusMiles: 1, maxComps: 15, monthsBack: 12 },
-        skipCache: false,
-        llmAnalysis: { enabled: true },
+      // Snapshot current comps before AI overwrites them (for undo)
+      if (!preAiCompsRef.current && analysis.comps) {
+        preAiCompsRef.current = analysis.comps
+      }
+      const s = settingsHook.settings
+      const response = await runCompSelection({
+        subject: analysis.subject as Record<string, unknown>,
+        comps: analysis.comps as { items: Array<Record<string, unknown>> },
+        riskFlags: (analysis as Record<string, unknown>).riskFlags as string[] | undefined,
+        settings: {
+          filters: s.filters.map((f) => ({ type: f.type, enabled: f.enabled, value: f.value })),
+          adjustments: s.adjustments.map((a) => ({ type: a.type, enabled: a.enabled, amount: a.amount, percent: a.percent })),
+          dealParams: {
+            closingCostsPercent: s.dealParams.closingCostsPercent,
+            carryingCostsPercent: s.dealParams.carryingCostsPercent,
+            wholesaleFee: s.dealParams.wholesaleFee,
+          },
+          rehabLevelIndex: s.rehabLevelIndex,
+          arvThresholdPercent: s.dealParams.arvThresholdPercent,
+          asIsThresholdPercent: s.asIsThresholdPercent,
+        },
       })
-      if (response.success && response.enrichment) {
-        setRefreshStreamUrl(response.enrichment.streamUrl)
-        setRefreshToken(response.enrichment.token)
-      } else {
-        setAiAnalyzing(false)
+      if (response.success && response.updatedComps) {
+        setReport((prev) => {
+          if (!prev) return prev
+          return { ...prev, analysis: { ...prev.analysis, comps: response.updatedComps as typeof prev.analysis.comps } }
+        })
+        setAiAnalysisDone(true)
+        if (response.llmAnalysis) {
+          setAiReport({
+            summary: response.llmAnalysis.summary || 'AI comp selection complete',
+            selected: response.llmAnalysis.selectedForArv?.length ?? 0,
+            total: response.llmAnalysis.compCount ?? 0,
+            model: response.llmAnalysis.model?.split('/').pop() ?? '',
+          })
+        }
+        handleResetComps()
       }
     } catch {
+      preAiCompsRef.current = null
+    } finally {
       setAiAnalyzing(false)
     }
-  }, [report, jobId, aiAnalyzing])
+  }, [report, aiAnalyzing, settingsHook.settings, handleResetComps])
+
+  const handleUndoAiSelection = useCallback(() => {
+    // Restore original math-based comp selection
+    if (preAiCompsRef.current) {
+      setReport((prev) => {
+        if (!prev) return prev
+        return { ...prev, analysis: { ...prev.analysis, comps: preAiCompsRef.current as typeof prev.analysis.comps } }
+      })
+      preAiCompsRef.current = null
+    }
+    handleResetComps()
+    setAiReport(null)
+    setAiAnalysisDone(false)
+  }, [handleResetComps])
 
   // ─── Sync evaluation state to Jotai atoms ────────────────────────────────
   useEvaluationSync({
@@ -323,6 +386,7 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
     onOpenSettings: () => setSettingsOpen(true),
     onCompClick: (comp) => { setComparisonComp(comp as CompItem); setComparisonOpen(true) },
     onRunAiAnalysis: handleRunAiAnalysis,
+    onUndoAiSelection: aiAnalysisDone ? handleUndoAiSelection : undefined,
   })
 
   if (loading) {
