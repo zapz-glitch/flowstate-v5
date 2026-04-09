@@ -241,8 +241,12 @@ export interface CompsData {
 
 export interface CompItem {
   address?: string
+  city?: string | null
+  state?: string | null
+  zipCode?: string | null
   latitude?: number | null
   longitude?: number | null
+  zillowUrl?: string | null
   salePrice?: number | null
   saleDate?: string | null
   squareFeet?: number | null
@@ -273,6 +277,16 @@ export interface CompItem {
   garageSquareFeet?: number | null
   /** Carport type */
   carport?: string | null
+  /** Construction type (e.g., Frame, Masonry) */
+  constructionType?: string | null
+  /** Roof type */
+  roofType?: string | null
+  /** Exterior walls */
+  exteriorWalls?: string | null
+  /** Number of stories */
+  storiesType?: string | null
+  /** Building quality code */
+  qualityCode?: string | null
   /** Reason this comp was selected/analyzed (LLM reasoning) */
   selectionReason?: string | null
   /** Key features identified by LLM analysis */

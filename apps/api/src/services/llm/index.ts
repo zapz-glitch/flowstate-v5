@@ -98,8 +98,8 @@ export type LLMTask = 'default' | 'comp_selection' | 'market_search' | 'vision'
 /** Default models per task — can be overridden via env vars */
 const TASK_MODELS: Record<LLMTask, string> = {
   default: 'google/gemini-2.0-flash-001',
-  comp_selection: 'google/gemini-3-flash-preview',
-  market_search: 'google/gemini-3-flash-preview',
+  comp_selection: 'x-ai/grok-4.1-fast',
+  market_search: 'x-ai/grok-4.1-fast',
   vision: 'google/gemini-2.0-flash-001',
 }
 

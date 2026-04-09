@@ -88,7 +88,8 @@
       "Bash(curl -s -L \"https://openrouter.ai/docs/guides/features/server-tools\")",
       "WebFetch(domain:openrouter.ai)",
       "Read(//Users/yalamber/Projects/flowstate/**)",
-      "Bash(echo \"EXIT: $?\")"
+      "Bash(echo \"EXIT: $?\")",
+      "Bash(curl -s --max-time 15 -X POST \"https://api.batchdata.com/api/v1/property/search\" -H \"Content-Type: application/json\" -H \"Authorization: Bearer Xqie3PTubveU2xBuBz9cxF1ffCtfXetfvQirSd4m\" -d '{\"searchCriteria\":{\"compAddress\":{\"street\":\"4207 W EMPEDRADO ST\",\"city\":\"TAMPA\",\"state\":\"FL\",\"zip\":\"33629\"}},\"options\":{\"useDistance\":true,\"distanceMiles\":1,\"take\":5}}')"
     ]
   }
 }

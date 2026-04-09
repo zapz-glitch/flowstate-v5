@@ -108,11 +108,24 @@ export default function AnalyzePage() {
   const [skipCache, setSkipCache] = useState(false)
   const [arvThreshold, setArvThreshold] = useState(15)
   const [asIsThreshold, setAsIsThreshold] = useState(70)
-  const [compModel, setCompModel] = useState('')
-  const [marketModel, setMarketModel] = useState('')
-  const [aiEnabled, setAiEnabled] = useState(false)
   const [aiOnlyMode, setAiOnlyMode] = useState(false) // true when "AI Selection" button clicked (skip evaluation_complete)
   const [showAdvanced, setShowAdvanced] = useState(false)
+
+  // AI settings from evaluation settings page (localStorage)
+  const [aiEnabled, setAiEnabled] = useState(false)
+  const [compModel, setCompModel] = useState('')
+  const [marketModel, setMarketModel] = useState('')
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem('flowstate:ai-settings')
+      if (stored) {
+        const parsed = JSON.parse(stored)
+        if (typeof parsed.enabled === 'boolean') setAiEnabled(parsed.enabled)
+        if (typeof parsed.compSelectionModel === 'string') setCompModel(parsed.compSelectionModel)
+        if (typeof parsed.marketSearchModel === 'string') setMarketModel(parsed.marketSearchModel)
+      }
+    } catch { /* ignore */ }
+  }, [])
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [marketContext, setMarketContext] = useState<Record<string, any> | null>(null)
   const [aiReport, setAiReport] = useState<{ summary: string; selected: number; total: number; model: string } | null>(null)
@@ -645,41 +658,10 @@ export default function AnalyzePage() {
                     Skip cache
                   </Label>
                 </div>
-                <div className="flex items-center gap-2">
-                  <Switch id="ai-enabled" checked={aiEnabled} onCheckedChange={setAiEnabled} />
-                  <Label htmlFor="ai-enabled" className="text-[11px] text-foreground-tertiary cursor-pointer">
-                    AI Analysis
-                  </Label>
-                </div>
-                {aiEnabled && (
-                  <>
-                    <div className="flex items-center gap-2">
-                      <label className="text-[11px] text-foreground-tertiary whitespace-nowrap">Comp Selection</label>
-                      <select
-                        value={compModel}
-                        onChange={(e) => setCompModel(e.target.value)}
-                        className="h-7 text-[11px] px-2 rounded border border-border bg-background text-foreground"
-                      >
-                        <option value="">Gemini 3 Flash</option>
-                        <option value="google/gemini-2.5-flash">Gemini 2.5 Flash</option>
-                        <option value="x-ai/grok-4.1-fast">Grok 4.1 Fast</option>
-                      </select>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <label className="text-[11px] text-foreground-tertiary whitespace-nowrap">Market Research</label>
-                      <select
-                        value={marketModel}
-                        onChange={(e) => setMarketModel(e.target.value)}
-                        className="h-7 text-[11px] px-2 rounded border border-border bg-background text-foreground"
-                      >
-                        <option value="">Gemini 3 Flash</option>
-                        <option value="google/gemini-2.5-flash">Gemini 2.5 Flash</option>
-                        <option value="x-ai/grok-4.1-fast">Grok 4.1 Fast</option>
-                      </select>
-                    </div>
-                  </>
-                )}
-                </div>
+                <span className="text-[10px] text-foreground-tertiary">
+                  AI: {aiEnabled ? 'On' : 'Off'} · <a href="/dashboard/evaluation-settings?tab=ai-settings" className="text-primary hover:underline">Configure</a>
+                </span>
+              </div>
             )}
           </div>
         </div>

@@ -1,0 +1,119 @@
+'use server'
+
+import { getSession } from '@/lib/api'
+
+export interface BatchResult {
+  address: string
+  index: number
+  status: 'pending' | 'processing' | 'completed' | 'failed'
+  jobId?: string
+  error?: string
+  arv?: number
+  buyPrice?: number
+  rehabCost?: number
+  recommendation?: string
+}
+
+export interface BatchJob {
+  id: string
+  status: string
+  totalAddresses: number
+  completedCount: number
+  failedCount: number
+  results: BatchResult[]
+  createdAt: string
+  updatedAt?: string
+}
+
+export interface SubmitBatchResult {
+  success: boolean
+  batchId?: string
+  totalAddresses?: number
+  streamUrl?: string
+  token?: string
+  error?: string
+}
+
+export async function submitBatchAnalysis(addresses: string[]): Promise<SubmitBatchResult> {
+  try {
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL!
+    const session = await getSession()
+    if (!session?.user) {
+      return { success: false, error: 'Not authenticated' }
+    }
+
+    // Use cookie-based auth (forwarded from the session)
+    const { cookies } = await import('next/headers')
+    const cookieStore = await cookies()
+    const cookieHeader = cookieStore.getAll().map((c) => `${c.name}=${c.value}`).join('; ')
+
+    const response = await fetch(`${apiUrl}/batch/analyze`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Cookie': cookieHeader,
+      },
+      body: JSON.stringify({ addresses }),
+    })
+
+    const result = await response.json() as {
+      success?: boolean
+      batchId?: string
+      totalAddresses?: number
+      streamUrl?: string
+      token?: string
+      error?: string
+    }
+
+    if (!response.ok || !result.success) {
+      return { success: false, error: result.error || 'Failed to start batch' }
+    }
+
+    return {
+      success: true,
+      batchId: result.batchId,
+      totalAddresses: result.totalAddresses,
+      streamUrl: result.streamUrl,
+      token: result.token,
+    }
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : 'Unknown error' }
+  }
+}
+
+export async function getBatchStatus(batchId: string): Promise<BatchJob | null> {
+  try {
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL!
+    const { cookies } = await import('next/headers')
+    const cookieStore = await cookies()
+    const cookieHeader = cookieStore.getAll().map((c) => `${c.name}=${c.value}`).join('; ')
+
+    const response = await fetch(`${apiUrl}/batch/${batchId}`, {
+      headers: { 'Cookie': cookieHeader },
+    })
+
+    if (!response.ok) return null
+    return await response.json() as BatchJob
+  } catch {
+    return null
+  }
+}
+
+export async function getBatchJobs(): Promise<Array<{ id: string; status: string; totalAddresses: number; completedCount: number; failedCount: number; createdAt: string }>> {
+  try {
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL!
+    const { cookies } = await import('next/headers')
+    const cookieStore = await cookies()
+    const cookieHeader = cookieStore.getAll().map((c) => `${c.name}=${c.value}`).join('; ')
+
+    const response = await fetch(`${apiUrl}/batch`, {
+      headers: { 'Cookie': cookieHeader },
+    })
+
+    if (!response.ok) return []
+    const data = await response.json() as { jobs: Array<{ id: string; status: string; totalAddresses: number; completedCount: number; failedCount: number; createdAt: string }> }
+    return data.jobs ?? []
+  } catch {
+    return []
+  }
+}

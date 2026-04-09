@@ -26,9 +26,17 @@ id = "076d6c5a242c4b5d9765d04b8b8755b6"
 name = "ANALYSIS_JOB"
 class_name = "AnalysisJobDO"
 
+[[durable_objects.bindings]]
+name = "BATCH_JOB"
+class_name = "BatchJobDO"
+
 [[migrations]]
 tag = "v5"
 new_classes = ["AnalysisJobDO"]
+
+[[migrations]]
+tag = "v6"
+new_classes = ["BatchJobDO"]
 
 [observability]
 enabled = true

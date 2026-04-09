@@ -22,6 +22,7 @@ import dealParamsRoute from './routes/deal-params'
 import locationSettingsRoute from './routes/location-settings'
 import majorItemCostsRoute from './routes/major-item-costs'
 import reportsRoute from './routes/reports'
+import batchRoute from './routes/batch'
 import ghlSettingsRoute from './routes/ghl-settings'
 import userReportsRoute from './routes/user-reports'
 import waitlistRoute from './routes/waitlist'
@@ -100,6 +101,9 @@ app.route('/major-item-costs', majorItemCostsRoute)
 // Proximity adjustment config routes (session auth via Better Auth cookies)
 app.route('/proximity-config', proximityConfigRoute)
 
+// Batch analysis routes (session auth via Better Auth cookies)
+app.route('/batch', batchRoute)
+
 // GHL integration settings routes (session auth via Better Auth cookies)
 app.route('/ghl-settings', ghlSettingsRoute)
 
@@ -160,7 +164,7 @@ app.onError((err, c) => {
 })
 
 // Export Durable Object classes
-export { AnalysisJobDO } from './durable-objects'
+export { AnalysisJobDO, BatchJobDO } from './durable-objects'
 
 // Export worker
 export default {

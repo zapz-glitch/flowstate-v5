@@ -106,4 +106,51 @@ sseStream.get('/analyze/:jobId', async (c) => {
   })
 })
 
+// ─── Batch SSE Stream ─────────────────────────────────────────────────────
+
+sseStream.get('/batch/:batchId', async (c) => {
+  const batchId = c.req.param('batchId')
+  const token = c.req.query('token')
+
+  if (!token) {
+    return new Response(JSON.stringify({ error: 'Missing token' }), {
+      status: 401,
+      headers: { 'Content-Type': 'application/json' },
+    })
+  }
+
+  const secret = c.env.BETTER_AUTH_SECRET || ''
+  const payload = await verifySseToken(secret, token)
+  if (!payload || payload.jobId !== batchId) {
+    return new Response(JSON.stringify({ error: 'Invalid token' }), {
+      status: 401,
+      headers: { 'Content-Type': 'application/json' },
+    })
+  }
+
+  // CORS
+  const origin = c.req.header('Origin') || ''
+  const allowed = ['http://localhost:3000']
+  if (c.env.DASHBOARD_URL) allowed.push(c.env.DASHBOARD_URL)
+  const allowedOrigin = allowed.includes(origin) ? origin : allowed[0]
+
+  const doId = c.env.BATCH_JOB.idFromName(batchId)
+  const stub = c.env.BATCH_JOB.get(doId)
+
+  // Proxy SSE from the BatchJobDO
+  const doResp = await stub.fetch('http://internal/sse', {
+    signal: c.req.raw.signal,
+  })
+
+  return new Response(doResp.body, {
+    headers: {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      'Access-Control-Allow-Origin': allowedOrigin,
+      'Access-Control-Allow-Credentials': 'true',
+    },
+  })
+})
+
 export default sseStream

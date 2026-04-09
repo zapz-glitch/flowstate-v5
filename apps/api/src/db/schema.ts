@@ -599,3 +599,31 @@ export const PLAN_LIMITS = {
 } as const
 
 export type Plan = keyof typeof PLAN_LIMITS
+
+// ==========================================
+// Batch Jobs (CSV mass import)
+// ==========================================
+
+export const batchJobs = sqliteTable(
+  'batch_jobs',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    status: text('status').notNull().default('pending'), // pending | processing | completed | failed
+    totalAddresses: integer('total_addresses').notNull(),
+    completedCount: integer('completed_count').notNull().default(0),
+    failedCount: integer('failed_count').notNull().default(0),
+    // JSON arrays
+    addressesJson: text('addresses_json').notNull(), // string[] of input addresses
+    resultsJson: text('results_json'), // Array<{ address, jobId?, status, error?, arv?, buyPrice? }>
+    // Timestamps
+    createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
+    updatedAt: text('updated_at').notNull().$defaultFn(() => new Date().toISOString()),
+  },
+  (table) => [
+    index('idx_batch_jobs_user_id').on(table.userId),
+    index('idx_batch_jobs_created_at').on(table.createdAt),
+  ]
+)

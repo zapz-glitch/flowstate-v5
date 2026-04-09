@@ -16,6 +16,7 @@ import {
   User,
   Settings2,
   ShieldCheck,
+  Upload,
 } from 'lucide-react'
 import { signOut } from '@/lib/auth-client'
 import { Logo } from '@/components/ui/Logo'
@@ -42,6 +43,7 @@ const baseNavigation: Array<{
 }> = [
   { name: 'Overview', href: '/dashboard', icon: Home },
   { name: 'API Playground', href: '/dashboard/analyze', icon: Search },
+  { name: 'Batch Import', href: '/dashboard/batch', icon: Upload },
   { name: 'Property Reports', href: '/dashboard/reports', icon: ClipboardList },
   { name: 'Evaluation Settings', href: '/dashboard/evaluation-settings', icon: Settings2 },
   { name: 'API Hub', href: '/dashboard/api-hub', icon: Key },

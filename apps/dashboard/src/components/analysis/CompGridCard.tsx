@@ -42,31 +42,54 @@ export function CompGridCard({
   const yearColor = yearDelta != null && subject?.yearBuilt != null
     ? yearMatchColor(comp.yearBuilt!, subject.yearBuilt) : null
 
+  // Build external links
+  const streetViewUrl = comp.latitude && comp.longitude
+    ? `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${comp.latitude},${comp.longitude}`
+    : comp.address
+      ? `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${encodeURIComponent(comp.address + (comp.city ? `, ${comp.city}` : '') + (comp.state ? `, ${comp.state}` : ''))}`
+      : null
+
+  const zillowUrl = comp.zillowUrl || (comp.address
+    ? `https://www.zillow.com/homes/${encodeURIComponent(comp.address + (comp.city ? ` ${comp.city}` : '') + (comp.state ? ` ${comp.state}` : '') + (comp.zipCode ? ` ${comp.zipCode}` : ''))}_rb/`
+    : null)
+
   return (
     <div
       data-card-key={cardKey}
-      onClick={onClick}
       onMouseEnter={() => onHover?.(true)}
       onMouseLeave={() => onHover?.(false)}
       className={cn(
-        'border border-border rounded-sm overflow-hidden transition-all duration-200 cursor-pointer group',
+        'border border-border rounded-sm overflow-hidden transition-all duration-200 group',
         isEnabled ? 'hover:border-foreground/20' : 'opacity-50 hover:opacity-70',
         comp.isBestComp && isEnabled && 'ring-1 ring-amber-500/30',
         isHighlighted && 'ring-2 ring-primary/50 shadow-lg shadow-primary/5',
       )}
     >
-      {/* Image with price overlay */}
+      {/* Image with price overlay — clicks to Street View */}
       <div className="relative h-28 bg-muted/30 overflow-hidden">
-        <StreetViewImage
-          address={comp.address}
-          latitude={comp.latitude}
-          longitude={comp.longitude}
-          width={400}
-          height={200}
-          className="w-full h-full object-cover"
-        />
-        {/* Index + Investor badge */}
-        <div className="absolute top-2 left-2 flex items-center gap-1">
+        {streetViewUrl ? (
+          <a href={streetViewUrl} target="_blank" rel="noopener noreferrer" className="block w-full h-full">
+            <StreetViewImage
+              address={comp.address}
+              latitude={comp.latitude}
+              longitude={comp.longitude}
+              width={400}
+              height={200}
+              className="w-full h-full object-cover"
+            />
+          </a>
+        ) : (
+          <StreetViewImage
+            address={comp.address}
+            latitude={comp.latitude}
+            longitude={comp.longitude}
+            width={400}
+            height={200}
+            className="w-full h-full object-cover"
+          />
+        )}
+        {/* Index badge */}
+        <div className="absolute top-2 left-2 flex items-center gap-1 pointer-events-none">
           <div className={cn(
             'w-6 h-6 rounded-sm flex items-center justify-center text-[11px] font-bold',
             isEnabled ? 'bg-emerald-500 text-white' : 'bg-neutral-600 text-white/70'
@@ -75,7 +98,7 @@ export function CompGridCard({
           </div>
         </div>
         {/* Bottom: price + date */}
-        <div className="absolute bottom-0 left-0 right-0 px-2 py-1.5 bg-gradient-to-t from-black/70 to-transparent flex items-end justify-between">
+        <div className="absolute bottom-0 left-0 right-0 px-2 py-1.5 bg-gradient-to-t from-black/70 to-transparent flex items-end justify-between pointer-events-none">
           <span className="text-sm font-bold text-white tabular-nums">
             ${comp.salePrice?.toLocaleString() || '-'}
           </span>
@@ -101,13 +124,26 @@ export function CompGridCard({
         )}
       </div>
 
-      {/* Body */}
-      <div className="px-3 py-2.5">
+      {/* Body — bottom section clicks to open detail modal */}
+      <div className="px-3 py-2.5 cursor-pointer" onClick={onClick}>
         {/* Address line with $/sf right-aligned */}
         <div className="flex items-baseline justify-between gap-2">
-          <div className="text-[11px] text-foreground-secondary truncate" title={comp.address || undefined}>
-            {comp.address || 'Unknown'}
-          </div>
+          {zillowUrl ? (
+            <a
+              href={zillowUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => e.stopPropagation()}
+              className="text-[11px] text-foreground-secondary truncate hover:text-primary hover:underline"
+              title={comp.address || undefined}
+            >
+              {comp.address || 'Unknown'}
+            </a>
+          ) : (
+            <div className="text-[11px] text-foreground-secondary truncate" title={comp.address || undefined}>
+              {comp.address || 'Unknown'}
+            </div>
+          )}
           <span className="flex items-center gap-1.5 flex-shrink-0">
             {comp.pricePercentile != null && (
               <span className={cn(

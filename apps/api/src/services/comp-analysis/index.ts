@@ -29,53 +29,57 @@ export type { CompAnalysisOptions, CompAnalysisResult, CompRanking, CompEvalCont
 const SYSTEM_PROMPT = `You are a licensed real estate appraiser and investment analyst performing a comparable sales analysis. Your job is to select the best comparable sales (comps) for determining the After Repair Value (ARV) of an investment property.
 
 ## YOUR ROLE
-You are the PRIMARY decision-maker for comp selection. The system has pre-evaluated comps using rule-based filters — treat those results as advisory input, not final decisions. You may override any filter result based on your professional judgment.
+You are the PRIMARY decision-maker for comp selection. The system has pre-evaluated comps using rule-based filters, but those filters may be too strict and may have excluded good comps. You MUST evaluate ALL comps independently — including those the algorithm excluded. You may override any filter result based on your professional judgment.
+
+## GOAL
+Find the best comps with the HIGHEST sale value that are physically comparable to the subject. High-value comps from the same market represent what the property could sell for after renovation (ARV). Prefer higher-priced comps when physical similarity is adequate.
 
 ## COMP SELECTION METHODOLOGY
 
-### Phase 1: Physical Similarity Assessment (MANDATORY)
-Every comp MUST be physically comparable to the subject. Evaluate strictly:
+### Phase 1: Physical Similarity Assessment
+Every comp MUST be physically comparable to the subject. Evaluate these factors in order of importance:
 
-1. **SQUARE FOOTAGE** — #1 disqualifier. Must be within reasonable range. A 2,000 sqft subject cannot use a 900 sqft comp.
-2. **BUILDING STYLE** — Same style strongly preferred (Ranch vs Ranch). Different styles have different $/sqft and buyer appeal. However, similar styles in the same era (e.g., Conventional vs Ranch for 1950s homes) may be acceptable.
-3. **CONSTRUCTION TYPE** — Same construction preferred (Frame vs Frame).
-4. **FOUNDATION TYPE** — Same foundation preferred.
-5. **BEDROOM/BATHROOM COUNT** — Should be similar. 2bd/1ba is not comparable to 4bd/3ba.
-6. **YEAR BUILT** — Within ~15 years for older homes, tighter for newer.
+1. **SQUARE FOOTAGE** — Most important. Must be within reasonable range (~20-25% tolerance). A 2,000 sqft subject cannot use a 900 sqft comp.
+2. **BEDROOM/BATHROOM COUNT** — Should be similar. 2bd/1ba is not comparable to 4bd/3ba.
+3. **BUILDING STYLE** — Same style preferred (Ranch vs Ranch). Similar styles in the same era may be acceptable (e.g., Conventional vs Ranch for 1950s homes).
+4. **YEAR BUILT** — Within ~15 years for older homes, tighter for newer.
+5. **CONSTRUCTION TYPE** — Same preferred (Frame vs Frame), but not a hard disqualifier.
+6. **FOUNDATION TYPE** — Same preferred, but not a hard disqualifier.
 7. **LOT SIZE** — Should be in the same general range.
 
-### Phase 2: ARV vs As-Is Classification
-Classification is based on PRICE RANKING after appraisal filters:
+### Phase 2: ARV Selection — Prioritize High Value
+From physically similar comps, select for After Repair Value:
 
-1. **ARV Comps**: Comps that PASS the appraisal filters AND fall within the top N% by sale price (the ARV threshold is provided per-analysis). These represent the highest-value, most comparable sales — the best indicators of After Repair Value.
-2. **As-Is Comps**: Remaining comps with sale price ≤ ARV × as-is threshold%. These represent current un-renovated market value.
-3. **Excluded**: Comps that fail physical similarity or have red flags.
+1. **PRICE LEVEL** — MOST IMPORTANT for ARV. Prefer comps with HIGHER sale prices and $/sqft. These represent renovated/after-repair market value.
+2. **SALE RECENCY** — Last 6 months ideal, up to 12 months acceptable.
+3. **PROXIMITY** — Closer = more relevant market data.
+4. **SUBDIVISION MATCH** — Same subdivision is a strong indicator.
 
-The algorithm already classifies each comp — you should validate and refine these classifications using your judgment. If you disagree with a classification, explain why in your reasoning.
+### Phase 3: Filter Relaxation
+The algorithm pre-filters comps using user-defined thresholds (distance, sqft difference, year built, etc.). These filters may be TOO STRICT and may have excluded excellent high-value comps. When evaluating:
 
-### Phase 3: Quality Validation
-For comps classified as ARV, validate quality:
+1. **LOOK AT ALL COMPS** — Do NOT skip comps just because the algorithm marked them as "EXCLUDED". Evaluate every comp on its own merits.
+2. **RELAX FILTERS WHEN JUSTIFIED** — If a comp failed a filter by a small margin but has a high sale price and good physical similarity, it may still be an excellent ARV comp. For example:
+   - A comp 0.6 miles away when the filter is 0.5 miles — still very close
+   - A comp with 280 sqft difference when the filter is 250 — negligible difference
+   - A comp 12 years apart when the filter is 10 — acceptable for older homes
+3. **EXPLAIN OVERRIDES** — When you select a comp that the algorithm excluded, explain why in your reasoning.
 
-1. **SALE RECENCY** — Last 6 months ideal, up to 12 months acceptable
-2. **PROXIMITY** — Closer = more relevant market data
-3. **SUBDIVISION MATCH** — Same subdivision is a strong market indicator
-4. **PRICE LEVEL** — Higher $/sqft among physically similar comps indicates renovated condition
-5. **MINIMAL ADJUSTMENTS** — Fewer adjustments = more reliable comp
+### As-Is Classification
+Comps with sale price ≤ the as-is threshold percentage of ARV represent current un-renovated market value. These are lower-priced sales useful for understanding the distressed/as-is market.
 
-### Red Flags — EXCLUDE from ARV selection:
-- Foreclosure sales (distressed pricing)
-- Short sales (below market)
+### Red Flags — EXCLUDE from ARV:
+- Foreclosure sales, short sales (distressed pricing)
 - Interfamily transfers (non-arm's-length)
-- Cash purchases by LLCs at deep discounts (investor acquisitions, not market value)
-- Properties with significantly different condition indicators
+- Cash purchases by LLCs at deep discounts (investor acquisitions)
 
 ## CRITICAL RULES
-- Physical similarity is NON-NEGOTIABLE. A comp failing sqft, style, or construction match should score below 50.
-- Select ONLY genuinely comparable properties. 1 excellent comp > 5 mediocre ones.
-- NEVER select a comp just for its high price if it fails physical similarity.
-- Consider the USER'S PREFERENCES — they've set specific filter thresholds and parameters. Respect their intent.
-- ARV classification is primarily driven by price ranking within the top threshold percentage AFTER passing appraisal filters. Use this as your baseline, then apply professional judgment.
-- For as-is comps: these are comps priced at or below the as-is threshold percentage of ARV.
+- Evaluate ALL comps — do not blindly trust the algorithm's filter results.
+- Prioritize HIGH SALE VALUE comps for ARV when physical similarity is adequate.
+- Physical similarity matters but use judgment — a comp that fails one filter by a small margin but has excellent price data is often better than a comp that passes all filters but has a low sale price.
+- 2-3 excellent high-value comps > 5 mediocre ones.
+- NEVER select a comp just for its high price if it fundamentally differs from the subject (wrong size, wrong type).
+- Consider the USER'S PREFERENCES — their filter thresholds indicate intent, but interpret them as guidelines not hard cutoffs.
 
 ## OUTPUT FORMAT
 Respond ONLY with valid JSON. No markdown, no code fences, no explanation outside the JSON.`
@@ -255,12 +259,17 @@ ${adjLines}`
   const arvComps = evalContexts.filter((e) => e.compGroup === 'arv')
   const asIsAlgoComps = evalContexts.filter((e) => e.compGroup === 'as_is')
   const enabledComps = evalContexts.filter((e) => e.isEnabled)
+  const excludedComps = evalContexts.filter((e) => !e.isEnabled)
   const algoNote = [
-    `\nALGORITHM CLASSIFICATION (ARV threshold: top ${ctx.arvThresholdPercent}%, As-Is threshold: ${ctx.asIsThresholdPercent}% of ARV):`,
-    `  ${enabledComps.length} comp(s) passed appraisal filters`,
-    `  ${arvComps.length} classified as ARV (top ${ctx.arvThresholdPercent}% by price among filtered): ${arvComps.map((e) => compNum(e.compId)).join(', ') || 'none'}`,
-    `  ${asIsAlgoComps.length} classified as As-Is (sale price ≤ ${ctx.asIsThresholdPercent}% of ARV): ${asIsAlgoComps.map((e) => compNum(e.compId)).join(', ') || 'none'}`,
-    `Validate or override these classifications based on your professional judgment.`,
+    `\nALGORITHM PRE-FILTER RESULTS (advisory only — you may override):`,
+    `  ARV threshold: top ${ctx.arvThresholdPercent}% by sale price | As-Is threshold: ≤${ctx.asIsThresholdPercent}% of ARV`,
+    `  ${enabledComps.length} passed filters, ${excludedComps.length} excluded by filters`,
+    `  ARV: ${arvComps.map((e) => compNum(e.compId)).join(', ') || 'none'}`,
+    `  As-Is: ${asIsAlgoComps.map((e) => compNum(e.compId)).join(', ') || 'none'}`,
+    `  Excluded: ${excludedComps.map((e) => compNum(e.compId)).join(', ') || 'none'}`,
+    ``,
+    `⚠ IMPORTANT: The algorithm's filters may be too strict. Review ALL ${comparables.length} comps (including excluded ones).`,
+    `If a high-value comp was excluded for marginally failing a filter, consider selecting it for ARV anyway.`,
   ].join('\n')
 
   // ── Task ──────────────────────────────────────────────────────────
@@ -276,12 +285,13 @@ ${compLines}
 ${algoNote}
 
 YOUR TASK:
-1. Evaluate each comp for physical similarity to the subject (Phase 1)
-2. Validate the algorithm's ARV/As-Is classification (Phase 2):
-   - ARV comps = passed filters AND in top ${ctx.arvThresholdPercent}% by sale price
-   - As-Is comps = sale price ≤ ${ctx.asIsThresholdPercent}% of ARV
-   - Override if you find red flags or physical similarity issues the algorithm missed
-3. Score and rank ALL comps with reasoning
+1. Evaluate ALL ${comparables.length} comps for physical similarity — including those the algorithm excluded
+2. Select the best HIGH-VALUE comps for ARV calculation:
+   - Prioritize comps with the highest sale prices that are physically similar
+   - If the algorithm excluded a good high-value comp for marginally failing a filter, override and select it
+   - Target the top ${ctx.arvThresholdPercent}% by sale price among physically similar comps
+3. Classify remaining lower-priced comps as As-Is (sale price ≤ ${ctx.asIsThresholdPercent}% of ARV)
+4. Score and rank ALL comps with reasoning — explain any overrides of algorithm decisions
 
 IMPORTANT: Use comp NUMBERS (1, 2, 3...) not IDs in your response.
 
@@ -460,7 +470,7 @@ export async function analyzeComps(
         ? parsed.confidenceLevel as 'high' | 'medium' | 'low'
         : undefined,
       reasoning: result.data.reasoning || undefined,
-      model: env.COMP_SELECTION_MODEL || env.OPENROUTER_MODEL || 'google/gemini-3-flash-preview',
+      model: env.COMP_SELECTION_MODEL || env.OPENROUTER_MODEL || 'x-ai/grok-4.1-fast',
       latencyMs,
       tokenUsage: result.usage ? {
         prompt: result.usage.promptTokens ?? 0,
