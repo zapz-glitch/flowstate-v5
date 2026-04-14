@@ -199,6 +199,11 @@ batch.get('/:id', async (c) => {
     return c.json({ error: 'Not found' }, 404)
   }
 
+  // Detect stuck batch: processing but no updates for 3+ minutes
+  const STUCK_THRESHOLD_MS = 3 * 60 * 1000
+  const updatedAtMs = new Date(job.updatedAt).getTime()
+  const isStuck = job.status === 'processing' && (Date.now() - updatedAtMs) > STUCK_THRESHOLD_MS
+
   return c.json({
     id: job.id,
     status: job.status,
@@ -208,7 +213,64 @@ batch.get('/:id', async (c) => {
     results: job.resultsJson ? JSON.parse(job.resultsJson) : [],
     createdAt: job.createdAt,
     updatedAt: job.updatedAt,
+    isStuck,
   })
+})
+
+// ─── POST /batch/:id/recover — Force-complete a stuck batch ──────────────
+
+batch.post('/:id/recover', async (c) => {
+  const session = await getSession(c)
+  if (!session?.user) {
+    return c.json({ error: 'Not authenticated' }, 401)
+  }
+
+  const batchId = c.req.param('id')
+  const db = drizzle(c.env.DB)
+  const [job] = await db.select()
+    .from(batchJobs)
+    .where(eq(batchJobs.id, batchId))
+    .limit(1)
+
+  if (!job || job.userId !== session.user.id) {
+    return c.json({ error: 'Not found' }, 404)
+  }
+
+  // Parse existing results and mark any pending/processing as failed
+  const results = job.resultsJson ? JSON.parse(job.resultsJson) as Array<{
+    address: string
+    index: number
+    status: string
+    error?: string
+  }> : []
+
+  let newFailed = 0
+  const recovered = results.map((r) => {
+    if (r.status === 'pending' || r.status === 'processing') {
+      newFailed++
+      return { ...r, status: 'failed', error: r.error || 'Batch timed out' }
+    }
+    return r
+  })
+
+  await db.update(batchJobs)
+    .set({
+      status: 'completed',
+      failedCount: job.failedCount + newFailed,
+      resultsJson: JSON.stringify(recovered),
+      updatedAt: new Date().toISOString(),
+    })
+    .where(eq(batchJobs.id, batchId))
+
+  // Also reset the DO state so it doesn't try to continue
+  try {
+    const doId = c.env.BATCH_JOB.idFromName(batchId)
+    const stub = c.env.BATCH_JOB.get(doId)
+    const resp = await stub.fetch('http://internal/mark-completed', { method: 'POST' })
+    await resp.text()
+  } catch { /* best effort */ }
+
+  return c.json({ success: true, recoveredCount: newFailed })
 })
 
 export default batch

@@ -5,7 +5,7 @@ import { Upload, FileText, Loader2, Check, X, Download, ExternalLink } from 'luc
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
-import { submitBatchAnalysis, getBatchStatus, getBatchJobs, retryFailedAddresses, getBatchStreamToken, type BatchResult } from './actions'
+import { submitBatchAnalysis, getBatchStatus, getBatchJobs, retryFailedAddresses, recoverStuckBatch, getBatchStreamToken, type BatchResult } from './actions'
 
 type Phase = 'upload' | 'processing' | 'complete'
 
@@ -20,6 +20,7 @@ export default function BatchPage() {
   const [results, setResults] = useState<BatchResult[]>([])
   const [completedCount, setCompletedCount] = useState(0)
   const [failedCount, setFailedCount] = useState(0)
+  const [isStuck, setIsStuck] = useState(false)
 
   const fileInputRef = useRef<HTMLInputElement>(null)
   const pollingRef = useRef<NodeJS.Timeout | null>(null)
@@ -45,8 +46,10 @@ export default function BatchPage() {
         if (job.results?.length) setResults(job.results)
         setCompletedCount(job.completedCount)
         setFailedCount(job.failedCount)
+        setIsStuck(job.isStuck ?? false)
         if (job.status === 'completed' || job.status === 'failed') {
           setPhase('complete')
+          setIsStuck(false)
           stopPolling()
         }
       } catch { /* ignore */ }
@@ -257,6 +260,27 @@ export default function BatchPage() {
     URL.revokeObjectURL(url)
   }, [results])
 
+  // ─── Recover Stuck Batch ─────────────────────────────────────────────────
+
+  const handleRecover = useCallback(async () => {
+    if (!batchId) return
+    const result = await recoverStuckBatch(batchId)
+    if (!result.success) {
+      setError(result.error || 'Recovery failed')
+      return
+    }
+    // Refresh from DB
+    const job = await getBatchStatus(batchId)
+    if (job) {
+      setResults(job.results ?? [])
+      setCompletedCount(job.completedCount)
+      setFailedCount(job.failedCount)
+      setPhase('complete')
+      setIsStuck(false)
+      stopPolling()
+    }
+  }, [batchId, stopPolling])
+
   // ─── Retry Failed ─────────────────────────────────────────────────────────
 
   const handleRetryFailed = useCallback(async () => {
@@ -284,6 +308,7 @@ export default function BatchPage() {
     setResults([])
     setCompletedCount(0)
     setFailedCount(0)
+    setIsStuck(false)
   }, [stopPolling])
 
   // ─── Progress calculation ─────────────────────────────────────────────────
@@ -407,6 +432,21 @@ export default function BatchPage() {
               </div>
             </CardContent>
           </Card>
+
+          {/* Stuck batch warning */}
+          {isStuck && phase === 'processing' && (
+            <div className="border border-amber-500/30 bg-amber-500/5 px-4 py-3 rounded-sm flex items-center justify-between gap-3">
+              <div className="flex-1">
+                <div className="text-sm font-medium text-amber-500">Batch appears stuck</div>
+                <div className="text-xs text-foreground-tertiary mt-0.5">
+                  No progress for 3+ minutes. You can force-complete to mark remaining addresses as failed.
+                </div>
+              </div>
+              <Button size="sm" variant="outline" onClick={handleRecover}>
+                Force Complete
+              </Button>
+            </div>
+          )}
 
           {/* Actions */}
           {phase === 'complete' && (

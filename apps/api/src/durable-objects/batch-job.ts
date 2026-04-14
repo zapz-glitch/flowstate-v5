@@ -76,6 +76,9 @@ export class BatchJobDO {
     if (request.method === 'POST' && path === '/retry-failed') {
       return this.handleRetryFailed(request)
     }
+    if (request.method === 'POST' && path === '/mark-completed') {
+      return this.handleMarkCompleted()
+    }
     if (request.method === 'GET' && path === '/sse') {
       return this.handleSSE(request)
     }
@@ -115,6 +118,33 @@ export class BatchJobDO {
       this.pushEvent('batch_error', { message: err instanceof Error ? err.message : 'Unknown error' })
     })
 
+    return new Response('OK', { status: 200 })
+  }
+
+  // ─── Mark Completed (for stuck batch recovery) ──────────────────────────
+
+  private async handleMarkCompleted(): Promise<Response> {
+    if (!this.batchState) {
+      this.batchState = await this.state.storage.get<BatchState>('batchState') ?? null
+    }
+    if (this.batchState) {
+      // Mark any pending/processing as failed
+      this.batchState.results = this.batchState.results.map((r) => {
+        if (r.status === 'pending' || r.status === 'processing') {
+          this.batchState!.failedCount++
+          return { ...r, status: 'failed' as const, error: r.error || 'Batch timed out' }
+        }
+        return r
+      })
+      this.batchState.status = 'completed'
+      await this.state.storage.put('batchState', this.batchState)
+      await this.pushEvent('batch_completed', {
+        totalAddresses: this.batchState.totalAddresses,
+        completedCount: this.batchState.completedCount,
+        failedCount: this.batchState.failedCount,
+        results: this.batchState.results,
+      })
+    }
     return new Response('OK', { status: 200 })
   }
 

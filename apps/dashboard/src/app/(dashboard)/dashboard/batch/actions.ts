@@ -24,6 +24,7 @@ export interface BatchJob {
   results: BatchResult[]
   createdAt: string
   updatedAt?: string
+  isStuck?: boolean
 }
 
 export interface SubmitBatchResult {
@@ -116,6 +117,28 @@ export async function getBatchStreamToken(batchId: string): Promise<{ streamUrl:
     return await response.json() as { streamUrl: string; token: string }
   } catch {
     return null
+  }
+}
+
+export async function recoverStuckBatch(batchId: string): Promise<{ success: boolean; recoveredCount?: number; error?: string }> {
+  try {
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL!
+    const { cookies } = await import('next/headers')
+    const cookieStore = await cookies()
+    const cookieHeader = cookieStore.getAll().map((c) => `${c.name}=${c.value}`).join('; ')
+
+    const response = await fetch(`${apiUrl}/batch/${batchId}/recover`, {
+      method: 'POST',
+      headers: { 'Cookie': cookieHeader },
+    })
+
+    if (!response.ok) {
+      const data = await response.json() as { error?: string }
+      return { success: false, error: data.error || 'Recovery failed' }
+    }
+    return await response.json() as { success: boolean; recoveredCount?: number }
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : 'Recovery failed' }
   }
 }
 
