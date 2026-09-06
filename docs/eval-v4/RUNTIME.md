@@ -66,8 +66,10 @@ deploys, migrates production data, or sends external provider calls.
   addition to `postgres (service_healthy)`, so the API only starts after a
   successful migration. Candidate CI repeats the same contract: migrate
   from the built image against an isolated PostgreSQL service, verify
-  revision `0002_v4_repair` plus the four `v4_*` tables, then start the API
-  image and poll `/health/ready`.
+  revision `0002_v4_repair` plus the five `v4_*` tables
+  (`v4_settings_snapshots`, `v4_batches`, `v4_evaluations`,
+  `v4_evaluation_results`, `v4_result_snapshot_backfill`), then start the
+  API image and poll `/health/ready`.
 
 ## Environment contract
 
@@ -93,8 +95,13 @@ deploys, migrates production data, or sends external provider calls.
 - `GET /health/db` reports PostgreSQL connectivity (`ok` or `unavailable`).
 - `GET /health/ready` (alias `GET /ready`) reports `ready` only when the
   database probe succeeds AND the schema probe confirms Alembic revision
-  `0002_v4_repair` with all four `v4_*` persistence tables present. An
-  unmigrated database returns HTTP 503 `not_ready`.
+  `0002_v4_repair` with all five `v4_*` persistence tables present
+  (`v4_settings_snapshots`, `v4_batches`, `v4_evaluations`,
+  `v4_evaluation_results`, `v4_result_snapshot_backfill`, the last an
+  auditable record of 0002 null/mismatched result-snapshot backfills). An
+  unmigrated database returns HTTP 503 `not_ready`; removing any one of
+  the five tables also returns 503 `not_ready` (covered per-table in
+  `test_health.py`).
 - Compose `api` has a `healthcheck` against `/health/ready`, and
   `depends_on: postgres (service_healthy)` plus `migrate
   (service_completed_successfully)` so the API starts after postgres
@@ -157,6 +164,11 @@ it performs no deployment and no provider API calls.
 ## What this runtime does not do
 
 - No persistence-dependent worker supervision or provider limiter (V4-103B).
-- No durable queue, lease, retry, or recovery semantics (V4-102/V4-104).
+- V4-102 queue/lease/retry/recovery primitives are integrated in this
+  branch (lease claim/heartbeat/recovery, bounded retries, result
+  identity/versioning, `v4_result_snapshot_backfill` audit), but they are
+  not connected to V4-104 authenticated endpoints/supervised workers:
+  there is no authenticated batch/evaluate API surface and no supervised
+  worker consuming the queue yet.
 - No TypeScript bridge or dashboard adapter (V4-201/V4-202).
 - No deployment and no production wiring (stays in `deploy.yml` on `main`).

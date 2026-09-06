@@ -20,6 +20,7 @@ REQUIRED_TABLES = frozenset(
         "v4_batches",
         "v4_evaluations",
         "v4_evaluation_results",
+        "v4_result_snapshot_backfill",
     }
 )
 
