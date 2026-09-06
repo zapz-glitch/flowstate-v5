@@ -727,10 +727,11 @@ def commit_result(
 
     Snapshot binding: the durable snapshot is derived from the locked
     evaluation's batch, never from caller control. A caller-supplied
-    snapshot_id must exactly equal the batch snapshot, and a result
-    payload carrying settings_snapshot_id/settings_content_hash must
-    match the durable snapshot id and content hash; mismatches raise
-    IdempotencyConflict before any replay, fencing, or insert decision.
+    snapshot_id must exactly equal the batch snapshot, and the result
+    payload must carry both settings_snapshot_id and
+    settings_content_hash matching the durable snapshot id and content
+    hash; missing or mismatched binding raises IdempotencyConflict
+    before any replay, fencing, or insert decision.
     """
     _check_tenant(tenant_id)
     row = _lock_evaluation_row(
@@ -762,18 +763,32 @@ def commit_result(
         raise KeyError(f"snapshot {durable_snapshot_id} not found for tenant")
     normalized_claims = result_payload if isinstance(result_payload, dict) else {}
     claimed_snapshot_id = normalized_claims.get("settings_snapshot_id")
-    if claimed_snapshot_id is not None and str(claimed_snapshot_id) != str(
-        durable_snapshot_id
+    if (
+        claimed_snapshot_id is None
+        or (isinstance(claimed_snapshot_id, str) and not claimed_snapshot_id.strip())
     ):
+        raise IdempotencyConflict(
+            "result payload must carry settings_snapshot_id",
+            existing_hash=str(durable_snapshot_id),
+            new_hash=str(claimed_snapshot_id),
+        )
+    if str(claimed_snapshot_id) != str(durable_snapshot_id):
         raise IdempotencyConflict(
             "result payload snapshot id must equal the batch snapshot",
             existing_hash=str(durable_snapshot_id),
             new_hash=str(claimed_snapshot_id),
         )
     claimed_content_hash = normalized_claims.get("settings_content_hash")
-    if claimed_content_hash is not None and str(claimed_content_hash) != str(
-        snapshot.content_hash
+    if (
+        claimed_content_hash is None
+        or (isinstance(claimed_content_hash, str) and not claimed_content_hash.strip())
     ):
+        raise IdempotencyConflict(
+            "result payload must carry settings_content_hash",
+            existing_hash=str(snapshot.content_hash),
+            new_hash=str(claimed_content_hash),
+        )
+    if str(claimed_content_hash) != str(snapshot.content_hash):
         raise IdempotencyConflict(
             "result payload snapshot hash must match the durable snapshot",
             existing_hash=str(snapshot.content_hash),
