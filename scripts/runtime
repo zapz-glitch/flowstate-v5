@@ -1,0 +1,315 @@
+#!/bin/sh
+# flowstate V4 developer runtime helper (development-only, POSIX sh).
+#
+# Usage: ./scripts/runtime status|health|logs|test|up|down
+#
+#   status  show all V4 Compose-project containers (running + stopped), API/dashboard reachability, ports
+#   health  probe FastAPI /health, /health/db, /health/ready + dashboard; every check is PASS or FAIL
+#   logs    follow V4 API/worker service logs (Ctrl+C only ends following)
+#   test    run the real V4 Python test suite (services/eval-engine)
+#   up      build + start only the isolated V4 dev Compose project
+#   down    stop only the isolated V4 dev Compose project
+#
+# Isolation: every Docker operation is scoped with
+#   docker compose --project-name flowstate-v4-dev -f compose.dev.yaml ...
+# or the equivalent com.docker.compose.project label filter, so unrelated
+# and production containers are never listed, started, or stopped.
+# Ports default to V4_API_PORT=8004 / V4_DASHBOARD_PORT=3004 (loopback-bound
+# in compose.dev.yaml) and can be overridden via the environment.
+#
+# The script resolves the repository root from its own path, so it works
+# from any cwd: ./scripts/runtime, /path/to/repo/scripts/runtime, etc.
+
+set -u
+
+PROJECT="flowstate-v4-dev"
+
+# Resolve the repository root from this script's own location (no cwd dependence).
+SCRIPT_PATH="$0"
+case "$SCRIPT_PATH" in
+  */*) SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$SCRIPT_PATH")" && pwd) ;;
+  *) SCRIPT_DIR=$(pwd) ;;
+esac
+REPO_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
+COMPOSE_FILE="$REPO_ROOT/compose.dev.yaml"
+ENGINE_DIR="$REPO_ROOT/services/eval-engine"
+
+V4_API_PORT="${V4_API_PORT:-8004}"
+V4_DASHBOARD_PORT="${V4_DASHBOARD_PORT:-3004}"
+API_BASE="http://127.0.0.1:${V4_API_PORT}"
+DASHBOARD_BASE="http://127.0.0.1:${V4_DASHBOARD_PORT}"
+
+usage() {
+  cat <<'EOF'
+Usage: runtime <command>
+
+Commands:
+  status    Show V4 project containers, API/dashboard reachability, and ports
+  health    Probe /health, /health/db, /health/ready and the dashboard (PASS/FAIL)
+  logs      Follow V4 API/worker service logs (Ctrl+C only ends following)
+  test      Run the V4 Python test suite (services/eval-engine)
+  up        Build and start the isolated V4 dev Compose project
+  down      Stop the isolated V4 dev Compose project only
+
+Environment overrides: V4_API_PORT (default 8004), V4_DASHBOARD_PORT (default 3004)
+EOF
+}
+
+die() {
+  echo "runtime: $*" >&2
+  exit 1
+}
+
+need_cmd() {
+  command -v "$1" >/dev/null 2>&1 || die "required command not found: $1"
+}
+
+need_docker() {
+  need_cmd docker
+  docker compose version >/dev/null 2>&1 || die "'docker compose' plugin not available"
+}
+
+# Scoped compose invocation: always pins project name + dev compose file so
+# production or unrelated projects can never be affected.
+compose() {
+  docker compose --project-name "$PROJECT" -f "$COMPOSE_FILE" "$@"
+}
+
+# Probe a URL: print "<http-code> <body-file>" line. Uses curl when present,
+# otherwise a small python3 urllib script written to a temp file (avoids
+# heredoc-in-substitution, which dash rejects).
+api_probe() {
+  url="$1"
+  body_file=$(mktemp) || die "cannot create temp file"
+  if command -v curl >/dev/null 2>&1; then
+    code=$(curl -s -o "$body_file" -w '%{http_code}' --max-time 5 --connect-timeout 3 "$url" 2>/dev/null) || code="000"
+    printf '%s %s\n' "$code" "$body_file"
+  elif command -v python3 >/dev/null 2>&1; then
+    probe_file=$(mktemp) || die "cannot create temp file"
+    printf '%s\n' \
+      'import sys, urllib.request' \
+      'try:' \
+      '    r = urllib.request.urlopen(sys.argv[1], timeout=5)' \
+      '    open(sys.argv[2], "w").write(r.read().decode())' \
+      '    print(r.status)' \
+      'except Exception as e:' \
+      '    c = getattr(e, "code", "000")' \
+      '    try:' \
+      '        open(sys.argv[2], "w").write(e.read().decode())' \
+      '    except Exception:' \
+      '        pass' \
+      '    print(c)' > "$probe_file"
+    code=$(python3 "$probe_file" "$url" "$body_file" 2>/dev/null) || code="000"
+    rm -f "$probe_file"
+    printf '%s %s\n' "$code" "$body_file"
+  else
+    rm -f "$body_file"
+    die "health requires curl or python3"
+  fi
+}
+
+# Simple HTTP code probe for status output (000 when unreachable).
+http_code() {
+  url="$1"
+  probe=$(api_probe "$url")
+  code=${probe%% *}
+  rm -f "${probe#* }"
+  printf '%s' "$code"
+}
+
+cmd_status() {
+  need_docker
+  [ -f "$COMPOSE_FILE" ] || die "compose file not found: $COMPOSE_FILE"
+  echo "V4 runtime status (project: $PROJECT)"
+  echo ""
+  echo "Compose services (from $COMPOSE_FILE):"
+  compose config --services 2>/dev/null || die "failed to read compose config"
+  echo ""
+  echo "V4 containers (all states, label com.docker.compose.project=$PROJECT only):"
+  containers=$(docker ps -a --filter "label=com.docker.compose.project=$PROJECT" --format '{{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}' 2>/dev/null) || die "failed to list containers"
+  if [ -z "$containers" ]; then
+    echo "  (none)"
+  else
+    printf '%s\n' "$containers" | while IFS= read -r line; do echo "  $line"; done
+  fi
+  echo ""
+  echo "Endpoints:"
+  api_code=$(http_code "$API_BASE/health")
+  if [ "$api_code" = "200" ]; then
+    echo "  API       $API_BASE/health -> HTTP 200 (up, host port $V4_API_PORT)"
+  else
+    echo "  API       $API_BASE/health -> HTTP $api_code (down, host port $V4_API_PORT)"
+  fi
+  dash_code=$(http_code "$DASHBOARD_BASE/")
+  case "$dash_code" in
+    2*|3*) echo "  Dashboard $DASHBOARD_BASE/ -> HTTP $dash_code (up, host port $V4_DASHBOARD_PORT)" ;;
+    *) echo "  Dashboard $DASHBOARD_BASE/ -> HTTP $dash_code (down, host port $V4_DASHBOARD_PORT)" ;;
+  esac
+  echo ""
+  echo "Ports: API $V4_API_PORT (container 8004), dashboard $V4_DASHBOARD_PORT (container 3000), all on 127.0.0.1; postgres internal-only"
+}
+
+cmd_health() {
+  fails=0
+
+  check_api() {
+    # $1 = path. Every required endpoint is PASS (HTTP 200) or FAIL
+    # (anything else, including 404/503/unreachable); the service-reported
+    # JSON "status" is surfaced verbatim on the same line.
+    path="$1"
+    probe=$(api_probe "$API_BASE$path")
+    code=${probe%% *}
+    body_file=${probe#* }
+    body_status=""
+    case "$code" in
+      2*|4*|5*)
+        body_status=$(tr -d '\n' < "$body_file" | sed -n 's/.*"status"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
+        ;;
+    esac
+    rm -f "$body_file"
+    if [ "$code" = "200" ]; then
+      echo "PASS  API $path (HTTP 200, status=${body_status:-unknown})"
+    elif [ "$code" = "000" ]; then
+      echo "FAIL  API $path (unreachable at $API_BASE$path)"
+      fails=$((fails + 1))
+    elif [ "$code" = "503" ]; then
+      echo "FAIL  API $path (HTTP 503, status=${body_status:-unknown} — dependency not ready)"
+      fails=$((fails + 1))
+    else
+      echo "FAIL  API $path (HTTP $code${body_status:+, status=$body_status})"
+      fails=$((fails + 1))
+    fi
+  }
+
+  echo "V4 health checks (API: $API_BASE, dashboard: $DASHBOARD_BASE)"
+  check_api "/health"
+  check_api "/health/db"
+  check_api "/health/ready"
+
+  dash_code=$(http_code "$DASHBOARD_BASE/")
+  case "$dash_code" in
+    2*|3*) echo "PASS  dashboard $DASHBOARD_BASE/ (HTTP $dash_code)" ;;
+    000) echo "FAIL  dashboard $DASHBOARD_BASE/ (unreachable)"; fails=$((fails + 1)) ;;
+    *) echo "FAIL  dashboard $DASHBOARD_BASE/ (HTTP $dash_code)"; fails=$((fails + 1)) ;;
+  esac
+
+  if [ "$fails" -ne 0 ]; then
+    echo "health: $fails check(s) FAILED"
+    return 1
+  fi
+  echo "health: all required checks PASSED"
+  return 0
+}
+
+cmd_logs() {
+  need_docker
+  [ -f "$COMPOSE_FILE" ] || die "compose file not found: $COMPOSE_FILE"
+  defined=$(compose config --services 2>/dev/null) || die "failed to read compose config"
+  if [ "$#" -gt 0 ]; then
+    # Explicit service names requested: validate against the compose file.
+    for want in "$@"; do
+      printf '%s\n' "$defined" | grep -qx "$want" || die "unknown service '$want' (defined: $(printf '%s' "$defined" | tr '\n' ' '))"
+    done
+    targets="$*"
+  else
+    # Follow existing V4 API/worker services only; never invent a worker.
+    targets=$(printf '%s\n' "$defined" | grep -Ei 'api|engine|eval|worker' || true)
+    if [ -z "$targets" ]; then
+      die "no API/worker services defined in $COMPOSE_FILE"
+    fi
+  fi
+  # Run in the foreground so Ctrl+C ends only the log follow and returns
+  # to the caller's shell; nothing is stopped.
+  # shellcheck disable=SC2086 (word splitting of targets is intended)
+  compose logs -f --tail=100 $targets
+}
+
+cmd_test() {
+  # Prefer an existing host .venv only if it can actually run the suite
+  # (pytest + engine imports). Otherwise run the current mounted sources in
+  # a one-off isolated container from the V4 API image: same Compose
+  # project isolation, no postgres/dashboard started, read-only source
+  # mounts plus env flags that keep pytest from writing root-owned
+  # __pycache__/.pytest_cache into the checkout.
+  [ -d "$ENGINE_DIR" ] || die "engine directory not found: $ENGINE_DIR"
+  # A host .venv counts only if it imports pytest AND the engine from the
+  # engine dir (so cwd-dependent imports resolve the same as the real run).
+  if [ -x "$ENGINE_DIR/.venv/bin/python" ]; then
+    if ( cd "$ENGINE_DIR" && PYTHONPATH=src "$ENGINE_DIR/.venv/bin/python" \
+           -c "import pytest; import eval_engine.main" ) 2>/dev/null; then
+      cd "$ENGINE_DIR" || die "cannot cd to $ENGINE_DIR"
+      PYTHONPATH=src "$ENGINE_DIR/.venv/bin/python" -m pytest tests -q
+      return $?
+    fi
+    echo "runtime: host .venv cannot run the suite; using isolated container" >&2
+  fi
+  need_docker
+  [ -f "$COMPOSE_FILE" ] || die "compose file not found: $COMPOSE_FILE"
+  # (Re)build so the image matches current sources, then run the CURRENT
+  # checkout read-only over the image copy: catches uncommitted test edits
+  # without baking them into the image.
+  compose build api >&2 || die "failed to build V4 API image"
+  compose run --rm --no-deps --no-TTY \
+    --read-only \
+    -v "$ENGINE_DIR/src:/app/src:ro" \
+    -v "$ENGINE_DIR/tests:/app/tests:ro" \
+    -e PYTHONPATH=/app/src \
+    -e PYTHONDONTWRITEBYTECODE=1 \
+    -e PYTEST_ADDOPTS="-p no:cacheprovider" \
+    api python -m pytest tests -q
+}
+
+cmd_up() {
+  need_docker
+  [ -f "$COMPOSE_FILE" ] || die "compose file not found: $COMPOSE_FILE"
+  compose up -d --build
+  attempts=0
+  api_ok=0
+  dash_ok=0
+  while [ "$attempts" -lt 45 ]; do
+    if [ "$api_ok" -eq 0 ] && [ "$(http_code "$API_BASE/health/ready")" = "200" ]; then
+      api_ok=1
+    fi
+    if [ "$dash_ok" -eq 0 ]; then
+      case "$(http_code "$DASHBOARD_BASE/")" in
+        2*|3*) dash_ok=1 ;;
+      esac
+    fi
+    if [ "$api_ok" -eq 1 ] && [ "$dash_ok" -eq 1 ]; then
+      echo "V4 dev services started: API readiness PASS, dashboard reachable."
+      return 0
+    fi
+    attempts=$((attempts + 1))
+    sleep 2
+  done
+  echo "runtime: started but verification failed within 90 seconds (api_ready=$api_ok dashboard=$dash_ok)" >&2
+  echo "V4 services left running for './scripts/runtime logs'; unrelated projects untouched." >&2
+  compose ps >&2 || true
+  return 1
+}
+
+cmd_down() {
+  need_docker
+  [ -f "$COMPOSE_FILE" ] || die "compose file not found: $COMPOSE_FILE"
+  # Scoped to --project-name above: only V4 dev containers stop.
+  compose down
+  echo "V4 dev project '$PROJECT' stopped (unrelated containers untouched)."
+}
+
+if [ "$#" -lt 1 ]; then
+  usage >&2
+  exit 2
+fi
+
+cmd="$1"
+shift
+case "$cmd" in
+  status) cmd_status ;;
+  health) cmd_health ;;
+  logs) cmd_logs "$@" ;;
+  test) cmd_test "$@" ;;
+  up) cmd_up "$@" ;;
+  down) cmd_down "$@" ;;
+  -h|--help|help) usage; exit 0 ;;
+  *) echo "runtime: unknown command '$cmd'" >&2; usage >&2; exit 2 ;;
+esac

@@ -7,6 +7,10 @@ dist/
 .next/
 .open-next/
 out/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
 
 # Turbo
 .turbo/
@@ -17,8 +21,11 @@ out/
 
 # Environment
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
+
+# Local agent permissions and command history
+.claude/settings.local.json
 
 # IDE
 .idea/
@@ -36,3 +43,4 @@ npm-debug.log*
 
 # Testing
 coverage/
+.data/

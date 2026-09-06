@@ -1,0 +1,98 @@
+# Development-only runtime for the V4 evaluation candidate.
+#
+# Isolated Compose project "flowstate-v4-dev" (see `name:` below). All host
+# ports are loopback-bound so this never touches the shared LAN and stays
+# clear of occupied ports (3000/8000/...).
+#
+# - API 8004 matches services/eval-engine/Dockerfile (EXPOSE/CMD).
+# - PostgreSQL is reachable only on the internal candidate network.
+# - Dashboard 3004 (host) -> 3000 (container, `next dev` default).
+# - The legacy TS API (localhost:8787) is intentionally NOT included: the V4
+#   TS bridge is not implemented, so the dashboard keeps its repo-configured
+#   API URL and the health check only asserts the dashboard responds.
+#
+# Managed via ./scripts/runtime (up|down|status|health|logs). Do not point
+# production tooling at this file.
+
+name: flowstate-v4-dev
+
+services:
+  api:
+    build:
+      context: ./services/eval-engine
+      dockerfile: Dockerfile
+    image: flowstate-v4-dev-api:local
+    pull_policy: build
+    ports:
+      - "127.0.0.1:${V4_API_PORT:-8004}:8004"
+    environment:
+      PORT: "8004"
+      TS_API_BASE: "http://127.0.0.1:8787"
+      DATABASE_URL: "postgresql+psycopg://flowstate_v4:flowstate_v4_dev@postgres:5432/flowstate_v4"
+      V4_INTERNAL_API_TOKEN: "candidate-local-only"
+      V4_EXTERNAL_CALLS_ENABLED: "false"
+      V4_TEST_PROFILE: "false"
+    restart: "no"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8004/health/ready')",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - frontend
+      - backend
+
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: "flowstate_v4"
+      POSTGRES_USER: "flowstate_v4"
+      POSTGRES_PASSWORD: "flowstate_v4_dev"
+    volumes:
+      - v4-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U flowstate_v4 -d flowstate_v4"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - backend
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: apps/dashboard/Dockerfile.dev
+    image: flowstate-v4-dev-dashboard:local
+    ports:
+      - "127.0.0.1:${V4_DASHBOARD_PORT:-3004}:3000"
+    environment:
+      PORT: "3000"
+      HOSTNAME: "0.0.0.0"
+      NEXT_TELEMETRY_DISABLED: "1"
+    volumes:
+      - v4-dashboard-next:/app/apps/dashboard/.next
+    restart: "no"
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - frontend
+
+volumes:
+  v4-postgres-data:
+  v4-dashboard-next:
+
+networks:
+  frontend:
+  backend:
+    internal: true
