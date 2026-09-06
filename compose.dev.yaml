@@ -48,8 +48,26 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     networks:
       - frontend
+      - backend
+
+  migrate:
+    build:
+      context: ./services/eval-engine
+      dockerfile: Dockerfile
+    image: flowstate-v4-dev-api:local
+    pull_policy: build
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      DATABASE_URL: "postgresql+psycopg://flowstate_v4:flowstate_v4_dev@postgres:5432/flowstate_v4"
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
       - backend
 
   postgres:

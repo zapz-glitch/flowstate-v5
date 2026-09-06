@@ -7,8 +7,9 @@ deploys, migrates production data, or sends external provider calls.
 ## Scope
 
 - Compose project name: `flowstate-v4-dev` (declared in `compose.dev.yaml`).
-- Services: `api` (FastAPI eval engine), `postgres` (isolated PostgreSQL 17),
-  `dashboard` (Next.js dev server).
+- Services: `api` (FastAPI eval engine), `migrate` (one-shot `alembic
+  upgrade head` from the built API image), `postgres` (isolated
+  PostgreSQL 17), `dashboard` (Next.js dev server).
 - Volumes: `v4-postgres-data`, `v4-dashboard-next`. Both are prefixed by the
   project name, so they do not collide with other projects.
 - Networks: `frontend` (dashboard plus API) and `backend` (API plus
@@ -34,7 +35,9 @@ deploys, migrates production data, or sends external provider calls.
   `services/eval-engine/.dockerignore` (consumed for this build) excludes
   all `.env*` (except `.env.example` via negation), `*.dev.vars*`, VCS and
   editor state, caches, `.venv`, and logs, while preserving the Dockerfile
-  `COPY` sources (`requirements.txt`, `src/`).
+  `COPY` sources (`requirements.txt`, `alembic.ini`, `alembic/`, `src/`).
+  The image therefore ships the exact migration tree the one-shot
+  `migrate` service and CI run with `alembic upgrade head`.
 - The dashboard Compose service uses the repository root as its build
   context, so Docker consumes the ROOT `.dockerignore` for that build (not
   `apps/dashboard/.dockerignore`, which is advisory only). The root
@@ -54,13 +57,17 @@ deploys, migrates production data, or sends external provider calls.
   `.env.example` are confirmed PRESENT. Verified locally 2026-09-06 with
   throwaway `busybox` context-dump builds; sentinels removed afterwards.
 - Migration note for the orchestrator: `services/eval-engine/alembic/` and
-  `alembic.ini` do not exist on this branch yet (V4-102 not integrated).
-  The engine `.dockerignore` deliberately does NOT exclude `alembic.ini` or
-  `alembic/`, so they pass through automatically once V4-102 lands. Adding
-  a `COPY alembic/` line to the Dockerfile and any migration service wiring
-  is an integration follow-up after V4-102, not part of this package; no
-  placeholder migration files were added to avoid conflicting with the
-  database owner's work.
+  `alembic.ini` are integrated on this branch (V4-102 landed). The engine
+  `.dockerignore` deliberately does NOT exclude `alembic.ini` or
+  `alembic/`, so they enter the image via the Dockerfile `COPY` lines and
+  the one-shot `migrate` service runs `alembic upgrade head` from the
+  built image before the API starts.
+- Compose `api` depends on `migrate (service_completed_successfully)` in
+  addition to `postgres (service_healthy)`, so the API only starts after a
+  successful migration. Candidate CI repeats the same contract: migrate
+  from the built image against an isolated PostgreSQL service, verify
+  revision `0002_v4_repair` plus the four `v4_*` tables, then start the API
+  image and poll `/health/ready`.
 
 ## Environment contract
 
@@ -85,10 +92,13 @@ deploys, migrates production data, or sends external provider calls.
 - `GET /health` reports process liveness.
 - `GET /health/db` reports PostgreSQL connectivity (`ok` or `unavailable`).
 - `GET /health/ready` (alias `GET /ready`) reports `ready` only when the
-  database probe succeeds.
+  database probe succeeds AND the schema probe confirms Alembic revision
+  `0002_v4_repair` with all four `v4_*` persistence tables present. An
+  unmigrated database returns HTTP 503 `not_ready`.
 - Compose `api` has a `healthcheck` against `/health/ready`, and
-  `depends_on: postgres (service_healthy)` so the API starts after postgres
-  is reachable. The dashboard waits on API health.
+  `depends_on: postgres (service_healthy)` plus `migrate
+  (service_completed_successfully)` so the API starts after postgres
+  is reachable and migrations have applied. The dashboard waits on API health.
 - API and postgres services use `restart: "no"`: Compose never restarts
   them automatically. This avoids crash loops locally; it is not a
   production availability posture.
@@ -105,15 +115,17 @@ Unrelated and production containers are never listed, started, or stopped.
 ./scripts/runtime status  # show only V4 project containers plus API/dashboard reachability
 ./scripts/runtime health  # probe /health, /health/db, /health/ready and the dashboard (PASS/FAIL)
 ./scripts/runtime logs    # follow API/worker service logs only
-./scripts/runtime test    # run the V4 Python suite (host .venv when usable, else read-only container with tmpfs)
+./scripts/runtime test    # run the V4 Python suite (host .venv when usable, else temporary host venv from the hashed lock)
 ./scripts/runtime down    # stop only the V4 dev project; fails honestly if compose fails or containers remain
 ```
 
 `down` propagates `compose down` failures and then verifies no
 `flowstate-v4-dev` containers remain; it exits nonzero with the leftover
-names if any survive. `test` runs the one-off container with a read-only
-root filesystem plus tmpfs at `/tmp` and the non-root home cache, so pytest
-cache writes never touch the checkout or the image.
+names if any survive. `test` prefers an existing usable host `.venv` and
+otherwise creates a temporary host venv from the hashed lock (removed on
+exit): no Docker socket is mounted into any app container. The DB-backed
+tests start their isolated PostgreSQL containers through the host Docker
+CLI directly.
 
 ## Rollback rehearsal
 

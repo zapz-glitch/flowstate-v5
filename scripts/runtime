@@ -226,9 +226,11 @@ cmd_logs() {
 
 cmd_test() {
   # Prefer an existing host .venv only if it can actually run the suite
-  # (pytest + engine imports). Otherwise run the current mounted sources in
-  # a one-off isolated container from the V4 API image: same Compose
-  # project isolation, no postgres/dashboard started.
+  # (pytest + engine imports). Otherwise build a temporary host venv from
+  # the authoritative hashed lock and run the suite on the host: the
+  # DB-backed tests start their isolated PostgreSQL containers through the
+  # host Docker CLI directly, so no Docker socket is ever mounted into an
+  # app container and no test code runs inside the API image.
   [ -d "$ENGINE_DIR" ] || die "engine directory not found: $ENGINE_DIR"
   # A host .venv counts only if it imports pytest AND the engine from the
   # engine dir (so cwd-dependent imports resolve the same as the real run).
@@ -239,28 +241,24 @@ cmd_test() {
       PYTHONPATH=src "$ENGINE_DIR/.venv/bin/python" -m pytest tests -q
       return $?
     fi
-    echo "runtime: host .venv cannot run the suite; using isolated container" >&2
+    echo "runtime: host .venv cannot run the suite; using temporary host venv" >&2
   fi
+  need_cmd python3
   need_docker
-  [ -f "$COMPOSE_FILE" ] || die "compose file not found: $COMPOSE_FILE"
-  # (Re)build so the image matches current sources, then run the CURRENT
-  # checkout read-only over the image copy: catches uncommitted test edits
-  # without baking them into the image. `compose run` has no --read-only /
-  # --tmpfs flags, so the one-off container runs via `docker run` against
-  # the Compose-built image (same project-scoped image name, no postgres or
-  # dashboard started, no host ports). The container filesystem is
-  # read-only; tmpfs mounts keep pytest/pip cache writes off the checkout
-  # and off the image layers.
-  compose build api >&2 || die "failed to build V4 API image"
-  docker run --rm --read-only \
-    --tmpfs /tmp \
-    --tmpfs /home/flowstate/.cache \
-    -v "$ENGINE_DIR/src:/app/src:ro" \
-    -v "$ENGINE_DIR/tests:/app/tests:ro" \
-    -e PYTHONPATH=/app/src \
-    -e PYTHONDONTWRITEBYTECODE=1 \
-    -e PYTEST_ADDOPTS="-p no:cacheprovider" \
-    flowstate-v4-dev-api:local python -m pytest tests -q
+  [ -f "$ENGINE_DIR/requirements.txt" ] || die "hashed lock not found: $ENGINE_DIR/requirements.txt"
+  TMPVENV=$(mktemp -d "${TMPDIR:-/tmp}/v4-test-venv.XXXXXX") || die "cannot create temp venv dir"
+  # Simplest safe cleanup: always remove the temporary venv on exit, even
+  # when the suite fails or the run is interrupted.
+  # shellcheck disable=SC2064 (immediate expansion is intended: trap the concrete path)
+  trap "rm -rf \"$TMPVENV\"" EXIT INT TERM
+  python3 -m venv "$TMPVENV" || die "failed to create temporary host venv"
+  "$TMPVENV/bin/pip" install --require-hashes -r "$ENGINE_DIR/requirements.txt" || die "failed to install hashed lock into temporary venv"
+  cd "$ENGINE_DIR" || die "cannot cd to $ENGINE_DIR"
+  PYTHONPATH=src "$TMPVENV/bin/python" -m pytest tests -q
+  rc=$?
+  rm -rf "$TMPVENV"
+  trap - EXIT INT TERM
+  return $rc
 }
 
 cmd_up() {

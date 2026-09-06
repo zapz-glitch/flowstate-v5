@@ -11,6 +11,8 @@ WORKDIR /app
 # tampering or drift fails the build.
 COPY requirements.txt .
 RUN pip install --no-cache-dir --require-hashes -r requirements.txt
+COPY --chown=flowstate:flowstate alembic.ini ./
+COPY --chown=flowstate:flowstate alembic/ ./alembic/
 COPY --chown=flowstate:flowstate src/ ./src/
 
 USER flowstate
