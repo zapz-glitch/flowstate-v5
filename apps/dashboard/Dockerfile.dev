@@ -2,9 +2,12 @@
 #
 # Baked `npm ci` + `next dev` on port 3000. Repo code is copied at build
 # time, so re-run `./scripts/runtime up` (which builds) after changing
-# dashboard code. The dashboard keeps its repo-configured API URL
-# (apps/dashboard/.env.development): the V4 TS bridge is not implemented, so
-# no API-URL rewiring is done here.
+# dashboard code. Dashboard `.env*` files are EXCLUDED from the build context
+# by the root .dockerignore, so public build-time values are injected via
+# Compose environment (NEXT_PUBLIC_API_URL in compose.dev.yaml). Map embeds
+# show a "not configured" placeholder when NEXT_PUBLIC_GOOGLE_MAP_KEY is
+# unset. The V4 TS bridge is not implemented, so no API-URL rewiring is done
+# here beyond that Compose injection.
 
 FROM node:20-slim@sha256:2cf067cfed83d5ea958367df9f966191a942351a2df77d6f0193e162b5febfc0
 

@@ -1,0 +1,12 @@
+# Human-editable direct inputs for the V4 eval-engine lock.
+# NOT installed directly. Edit this file, regenerate requirements.txt
+# (the AUTHORITATIVE hashed lock) with:
+#   pip-compile --generate-hashes --resolver=backtracking --strip-extras requirements.in
+alembic==1.19.2
+fastapi==0.141.1
+uvicorn[standard]==0.52.4
+pydantic==2.13.5
+pytest==9.1.1
+httpx==0.28.1
+sqlalchemy==2.0.52
+psycopg[binary]==3.3.5

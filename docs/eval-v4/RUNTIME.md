@@ -21,8 +21,10 @@ deploys, migrates production data, or sends external provider calls.
 - Base images are pinned by immutable digest
   (`python:3.12-slim@sha256:7838...`, `node:20-slim@sha256:2cf0...`,
   `postgres:17-alpine@sha256:18cf...`; full digests in the Dockerfiles and
-  `compose.dev.yaml`). Python dependencies are exactly pinned in
-  `services/eval-engine/requirements.txt`, including `alembic==1.19.2` so
+  `compose.dev.yaml`). Python dependencies are fully hashed in
+  `services/eval-engine/requirements.txt` (authoritative lock generated on
+  Python 3.12/Linux; direct inputs in `requirements.in`), installed with
+  `--require-hashes` in Docker and CI, including `alembic==1.19.2` so
   candidate CI installs the migration tool V4-102 will use.
 
 ## Deterministic images and build context
