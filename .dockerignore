@@ -1,0 +1,51 @@
+# Effective build-context ignore for the V4 dashboard dev image.
+#
+# The dashboard Compose service uses the repository root as its build
+# context (see compose.dev.yaml), so THIS file is the one Docker consumes
+# for that build. It is a narrow denylist: secrets-shaped and generated
+# files are excluded while every COPY source in
+# apps/dashboard/Dockerfile.dev stays available (package.json,
+# package-lock.json, turbo.json, packages/shared, apps/dashboard).
+#
+# Required sources preserved: package.json, package-lock.json, turbo.json,
+# packages/shared/**, apps/dashboard/** (except the exclusions below).
+
+# Secrets-shaped files: never enter the dashboard build context.
+.env
+.env.*
+!.env.example
+*.dev.vars
+*.dev.vars.*
+apps/dashboard/.env.development
+apps/dashboard/.env.production
+
+# VCS and editor state.
+.git
+.gitignore
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Dependencies, build outputs, caches, logs.
+node_modules/
+.next/
+.open-next/
+out/
+dist/
+.turbo/
+.wrangler/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+coverage/
+.data/
+*.log
+npm-debug.log*
+
+# TypeScript incremental state (rebuilt inside the image).
+**/*.tsbuildinfo
+*.tsbuildinfo

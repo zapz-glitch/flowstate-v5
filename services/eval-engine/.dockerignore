@@ -1,13 +1,33 @@
-# Candidate-only build context for the V4 eval-engine image.
+# Consumed build-context ignore for the V4 eval-engine image.
 #
-# Compose builds this service with context ./services/eval-engine, so this
-# file is consumed and keeps the image build deterministic: only
-# requirements.txt and src/ affect the image layers.
+# Compose builds this service with context ./services/eval-engine, so THIS
+# file is the one Docker consumes for the API build. Narrow denylist:
+# secrets-shaped and generated files are excluded while the Dockerfile COPY
+# sources stay available (requirements.txt, src/; alembic.ini and alembic/
+# pass through once V4-102 lands and are NOT excluded here).
 
+# Secrets-shaped files: never enter the API build context.
+.env
+.env.*
+!.env.example
+*.dev.vars
+*.dev.vars.*
+
+# VCS and editor state.
+.git
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Caches, virtualenvs, test/build outputs, logs.
 __pycache__/
 *.py[cod]
 .pytest_cache/
 .mypy_cache/
 .venv/
+coverage/
 *.log
-.git
+npm-debug.log*

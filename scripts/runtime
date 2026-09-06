@@ -228,9 +228,7 @@ cmd_test() {
   # Prefer an existing host .venv only if it can actually run the suite
   # (pytest + engine imports). Otherwise run the current mounted sources in
   # a one-off isolated container from the V4 API image: same Compose
-  # project isolation, no postgres/dashboard started, read-only source
-  # mounts plus env flags that keep pytest from writing root-owned
-  # __pycache__/.pytest_cache into the checkout.
+  # project isolation, no postgres/dashboard started.
   [ -d "$ENGINE_DIR" ] || die "engine directory not found: $ENGINE_DIR"
   # A host .venv counts only if it imports pytest AND the engine from the
   # engine dir (so cwd-dependent imports resolve the same as the real run).
@@ -247,15 +245,22 @@ cmd_test() {
   [ -f "$COMPOSE_FILE" ] || die "compose file not found: $COMPOSE_FILE"
   # (Re)build so the image matches current sources, then run the CURRENT
   # checkout read-only over the image copy: catches uncommitted test edits
-  # without baking them into the image.
+  # without baking them into the image. `compose run` has no --read-only /
+  # --tmpfs flags, so the one-off container runs via `docker run` against
+  # the Compose-built image (same project-scoped image name, no postgres or
+  # dashboard started, no host ports). The container filesystem is
+  # read-only; tmpfs mounts keep pytest/pip cache writes off the checkout
+  # and off the image layers.
   compose build api >&2 || die "failed to build V4 API image"
-  compose run --rm --no-deps --no-TTY \
+  docker run --rm --read-only \
+    --tmpfs /tmp \
+    --tmpfs /home/flowstate/.cache \
     -v "$ENGINE_DIR/src:/app/src:ro" \
     -v "$ENGINE_DIR/tests:/app/tests:ro" \
     -e PYTHONPATH=/app/src \
     -e PYTHONDONTWRITEBYTECODE=1 \
     -e PYTEST_ADDOPTS="-p no:cacheprovider" \
-    api python -m pytest tests -q
+    flowstate-v4-dev-api:local python -m pytest tests -q
 }
 
 cmd_up() {
@@ -291,7 +296,14 @@ cmd_down() {
   need_docker
   [ -f "$COMPOSE_FILE" ] || die "compose file not found: $COMPOSE_FILE"
   # Scoped to --project-name above: only V4 dev containers stop.
-  compose down
+  # Propagate compose failures instead of reporting success.
+  compose down || die "failed to stop V4 dev project '$PROJECT'"
+  leftover=$(docker ps -a --filter "label=com.docker.compose.project=$PROJECT" --format '{{.Names}}' 2>/dev/null) || die "failed to verify container removal"
+  if [ -n "$leftover" ]; then
+    echo "runtime: down FAILED: V4 containers remain:" >&2
+    printf '%s\n' "$leftover" | while IFS= read -r line; do echo "  $line" >&2; done
+    return 1
+  fi
   echo "V4 dev project '$PROJECT' stopped (unrelated containers untouched)."
 }
 
