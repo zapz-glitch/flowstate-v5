@@ -1,12 +1,15 @@
 # V4 Durable Evaluation API
 
-Candidate/test durable HTTP surface for the V4 evaluation engine. No live
-provider calls exist anywhere in this path (no OpenAI/Firecrawl).
+Durable candidate HTTP surface. POST persists and returns 202 QUEUED;
+it never evaluates inline. A worker boundary (V4-103B; tests use the
+explicit helper) processes committed jobs independently, so client
+disconnect never cancels accepted work. No live provider calls exist
+anywhere in this path (no OpenAI/Firecrawl).
 
 ## Auth: service-to-service credentials
 
-Tenant/user are derived from the credential, never from the body. One
-baseline token env exists; the secure record format is:
+Tenant and user are derived from the credential, never from the body.
+One baseline token env exists; the secure record format is:
 
 `V4_API_CREDENTIALS`: JSON array of credential records:
 
@@ -35,24 +38,27 @@ Rules:
   (defaults `default`/`service`).
 - Startup rejects a missing candidate auth outside `V4_TEST_PROFILE=true`.
 
-Requests use `Authorization: Bearer <token>`. Failures are machine typed
-(`AUTH_MISSING`/`AUTH_INVALID`, 401) without DB/auth detail.
+Requests use `Authorization: Bearer <token>`. Every submit and read
+filters both credential-derived tenant and `requested_by_user_id`;
+cross-tenant and cross-user access return indistinguishable 404.
 
 ## Endpoints
 
-- `POST /v1/evaluations` (202): accepts 1..50 fully typed property
-  requests plus one validated immutable settings snapshot. Requires
-  tenant-scoped `Idempotency-Key`. Auth and validation complete before
-  any transaction; snapshot, batch, and evaluations persist
-  transactionally. Same key plus same payload returns the same IDs
-  (`reused`); same key plus different payload returns 409
-  `IDEMPOTENCY_CONFLICT`. Accepted jobs survive client disconnect and
-  are polled via GET.
-- `GET /v1/evaluations/{id}`: tenant scoped (404 on cross-tenant),
-  returns execution/result status, progress, result payload, errors, and
-  incomplete sections.
-- `GET /v1/evaluation-batches/{id}`: tenant scoped (404 on
-  cross-tenant), returns batch progress plus per-evaluation IDs/status.
+- `POST /v1/evaluations` (202): authenticates, validates the full body
+  in memory (1..50 fully typed property requests plus one immutable
+  settings snapshot; both `preloaded` and `provider_pending` evidence
+  modes), then persists snapshot, batch, and all jobs in one short
+  transaction and returns initial QUEUED ids immediately. The durable
+  payload and checkpoint carry `evidence_mode` plus acquisition inputs,
+  and the mode is part of the idempotency identity. Same scope plus
+  same payload returns the same IDs (`reused`); same scope plus
+  different payload returns 409 `IDEMPOTENCY_CONFLICT`. No claims,
+  evaluation, or result commits happen in the handler.
+- `GET /v1/evaluations/{id}`: owner scoped (404 on cross-tenant or
+  cross-user), returns execution/result status, progress, result
+  payload, errors, and incomplete sections.
+- `GET /v1/evaluation-batches/{id}`: owner scoped (404 on cross-tenant
+  or cross-user), returns batch progress plus per-evaluation IDs/status.
 - `POST /evaluate`: test-only (`V4_TEST_PROFILE=true`), never part of
   candidate routing.
 
@@ -60,18 +66,19 @@ Status mapping is explicit: execution `queued/claimed/running` map to
 `QUEUED/RUNNING`; persistence `VALUED` maps to API `COMPLETED`; all
 other durable result statuses pass through unchanged.
 
-## Evidence mode
+## Durable ownership
 
-Submission carries `candidate_evidence_mode`:
+`requested_by_user_id` is stored on batches, evaluations, and results
+(additive Alembic `0003_v4_owner` with owner-scoped idempotency uniques
+and composite indexes; legacy tenant-only uniques replaced at head).
+Per-property execution isolation (retries, fencing across properties)
+is a V4-103B requirement, not an API claim.
 
-- `preloaded`: caller-supplied subject/comps evidence is evaluated inline
-  after commit (candidate/test path).
-- `provider_pending`: typed provider port exists
-  (`api/providers.py`, subject/comps/permits acquisition plus
-  checkpoint) but has no live implementation; items queue as pending.
+## Errors
 
+Machine-typed JSON: `AUTH_MISSING`/`AUTH_INVALID` (401),
+`MALFORMED_JSON` (400), `INVALID_SHAPE`/`VALIDATION_ERROR` (422),
+`IDEMPOTENCY_CONFLICT`/`LEASE_CONFLICT`/`DOMAIN_ERROR` (409),
+`NOT_FOUND` (404), `INTERNAL_ERROR` (500). No DB or auth details leak.
 Result payloads carry `settings_snapshot_id` plus
-`settings_content_hash` bound to the durable snapshot; mismatches fail
-before writes. Errors are machine typed (`VALIDATION_ERROR`,
-`IDEMPOTENCY_CONFLICT`, `NOT_FOUND`, `PROVIDER_PENDING`) without
-exposing DB or auth internals.
+`settings_content_hash` bound to the durable snapshot.

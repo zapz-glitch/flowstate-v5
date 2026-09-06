@@ -62,44 +62,62 @@ def test_validation_before_transaction_no_writes(session):
         before = probe.execute(select(Batch)).scalars().all()
     assert before == []
     with pytest.raises(ApiFailure) as exc:
-        submit_batch(session, tenant_id="t-app", batch_key="bad", body={"evaluations": [], "settings": {}})
+        submit_batch(
+            session, tenant_id="t-app", requested_by_user_id="u-app",
+            batch_key="bad", body={"evaluations": [], "settings": {}},
+        )
     assert exc.value.code == "VALIDATION_ERROR"
     session.rollback()
     with maker() as probe:
         assert probe.execute(select(Batch)).scalars().all() == []
 
 
-def test_fully_typed_requests_accepted(session):
+def test_fully_typed_requests_persist_queued(session):
     body = api_cases._body(2, key_prefix=f"app-{uuid.uuid4().hex[:6]}")
-    batch, created, summaries = submit_batch(session, tenant_id="t-app", batch_key=f"k-{uuid.uuid4().hex[:8]}", body=body)
+    batch, created, summaries = submit_batch(
+        session, tenant_id="t-app", requested_by_user_id="u-app",
+        batch_key=f"k-{uuid.uuid4().hex[:8]}", body=body,
+    )
     session.commit()
     assert created and len(summaries) == 2
-    assert all(s["status"] == "COMPLETED" for s in summaries)
+    assert all(s["status"] == "QUEUED" for s in summaries)
+    assert str(batch.status) == "pending"
 
 
-def test_result_snapshot_refs_validated(session):
-    from eval_engine.persistence import repositories as repo
-
-    body = api_cases._body(1, key_prefix=f"ref-{uuid.uuid4().hex[:6]}")
-    batch, _, summaries = submit_batch(session, tenant_id="t-ref", batch_key=f"k-{uuid.uuid4().hex[:8]}", body=body)
+def test_provider_pending_persists_with_evidence_mode(session):
+    body = api_cases._body(1, key_prefix=f"ppm-{uuid.uuid4().hex[:6]}", mode="provider_pending")
+    batch, created, summaries = submit_batch(
+        session, tenant_id="t-ppm", requested_by_user_id="u-ppm",
+        batch_key=f"k-{uuid.uuid4().hex[:8]}", body=body,
+    )
     session.commit()
+    assert created and summaries[0]["status"] == "QUEUED"
     maker = sessionmaker(bind=session.bind)
     with maker() as probe:
-        from eval_engine.persistence.models import EvaluationResult
+        from eval_engine.persistence.models import Evaluation
 
-        rows = probe.execute(
-            select(EvaluationResult).where(EvaluationResult.tenant_id == "t-ref")
-        ).scalars().all()
-        assert rows
-        probe.expire_all()
-        batch_id = batch.id
-        snap_id = probe.execute(
-            select(Batch.snapshot_id).where(Batch.id == batch_id)
+        row = probe.execute(
+            select(Evaluation).where(Evaluation.batch_id == batch.id)
         ).scalar_one()
-        for row in rows:
-            assert row.snapshot_id == snap_id
-            assert row.status in ("VALUED", "REVIEW_REQUIRED", "INSUFFICIENT_COMPS", "INSUFFICIENT_INVESTOR_DATA", "INCOMPLETE", "FAILED")
-            assert row.result_payload["settings_snapshot_id"] == str(batch.snapshot_id)
+        assert row.checkpoint["evidence_mode"] == "provider_pending"
+        assert row.input_payload["evidence_mode"] == "provider_pending"
+        assert row.input_payload["acquisition"]["subject"]
+
+
+def test_owner_scoping_no_cross_user_reuse(session):
+    body = api_cases._body(1, key_prefix="own-0")
+    first, created, _ = submit_batch(
+        session, tenant_id="t-own", requested_by_user_id="u-1",
+        batch_key="shared-key", body=body,
+    )
+    session.commit()
+    assert created
+    second, created_again, _ = submit_batch(
+        session, tenant_id="t-own", requested_by_user_id="u-2",
+        batch_key="shared-key", body=body,
+    )
+    session.commit()
+    assert created_again and second.id != first.id
 
 
 def test_status_mapping_explicit():

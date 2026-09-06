@@ -1,23 +1,32 @@
-"""Durable application service: validate, persist, evaluate inline."""
+"""Durable application service: validate in memory, persist, return 202.
+
+POST never claims, evaluates, or commits results. It authenticates,
+validates the full body in memory (1..50 typed property requests plus one
+immutable settings snapshot, both evidence modes), then persists the
+snapshot, batch, and all jobs in one short transaction and returns 202
+with initial QUEUED ids. Processing happens only past the worker
+boundary (V4-103B); tests use the explicit test helper, never the
+request path.
+"""
 
 from __future__ import annotations
-
-import uuid
-from datetime import datetime, timezone
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..contracts import EvaluationRequestV4, SubjectPropertyV4
+from ..contracts import EvaluationRequestV4
 from ..contracts.comps import CompCandidateV4
-from ..contracts.settings import snapshot_store_parts, to_persistence_status
-from ..domain.evaluate import evaluate_v4
+from ..contracts.deal import (
+    AdditionalRenovationItemV4,
+    MajorItemEvidenceV4,
+)
+from ..contracts.settings import snapshot_store_parts
+from ..contracts.subject import SubjectPropertyV4
 from ..persistence import repositories as repo
-from ..persistence.models import Evaluation, EvaluationResult, SettingsSnapshot
+from ..persistence.models import Evaluation, EvaluationResult
 from ..api.errors import ApiFailure
-from ..api.providers import NoLiveProvider
 
-_CANDIDATE_TEST_MODES = {"preloaded", "provider_pending"}
+_EVIDENCE_MODES = ("preloaded", "provider_pending")
 
 _EXECUTION_TO_API = {
     "queued": "QUEUED",
@@ -44,55 +53,16 @@ def execution_status(execution: str, result_status: str | None) -> str:
     return _EXECUTION_TO_API.get(execution, execution)
 
 
-def _require_mode(mode: str) -> None:
-    if mode not in _CANDIDATE_TEST_MODES:
-        raise ApiFailure("VALIDATION_ERROR", "candidate_evidence_mode must be preloaded or provider_pending", status_code=422)
-
-
-def _typed_property_request(
-    item: dict, settings, evidence_mode: str
-) -> EvaluationRequestV4:
-    if evidence_mode == "provider_pending":
-        raise ApiFailure("PROVIDER_PENDING", "provider evidence is pending; no live provider configured", status_code=202)
-    try:
-        subject = SubjectPropertyV4(**item.get("subject", {}))
-        comps = [CompCandidateV4(**raw) for raw in item.get("comps", [])]
-        return EvaluationRequestV4(
-            subject=subject,
-            comps=comps,
-            renovation_level=item.get("renovation_level", ""),
-            settings=settings,
-            major_item_evidence=item.get("major_item_evidence", []),
-            additional_items=item.get("additional_items", []),
-            evaluation_date=item.get("evaluation_date"),
-        )
-    except Exception as exc:
-        raise ApiFailure("VALIDATION_ERROR", "invalid property evaluation request", status_code=422) from exc
-
-
-def _bind_snapshot_refs(payload: dict, snapshot: SettingsSnapshot) -> dict:
-    bound = dict(payload)
-    bound["settings_snapshot_id"] = str(snapshot.id)
-    bound["settings_content_hash"] = str(snapshot.content_hash)
-    return bound
-
-
-def submit_batch(
-    session: Session,
-    *,
-    tenant_id: str,
-    batch_key: str,
-    body: dict,
-) -> tuple[object, bool, list[dict]]:
-    from pydantic import ValidationError
-
+def _validate_property_shapes(body: dict) -> tuple[list[dict], dict, str]:
     from ..api.schemas import BatchSubmitRequest
 
     try:
         request = BatchSubmitRequest(**body)
-    except ValidationError as exc:
+    except Exception as exc:
         raise ApiFailure("VALIDATION_ERROR", "batch must contain 1 to 50 property requests", status_code=422) from exc
-    _require_mode(request.candidate_evidence_mode)
+    mode = request.candidate_evidence_mode
+    if mode not in _EVIDENCE_MODES:
+        raise ApiFailure("VALIDATION_ERROR", "candidate_evidence_mode must be preloaded or provider_pending", status_code=422)
     keys = [str(item.idempotency_key).strip() for item in request.evaluations]
     if any(not key for key in keys) or len(set(keys)) != len(keys):
         raise ApiFailure("VALIDATION_ERROR", "each property requires a unique idempotency key", status_code=422)
@@ -100,37 +70,72 @@ def submit_batch(
         snapshot_in = request.settings.validated_for_durable_use()
     except ValueError as exc:
         raise ApiFailure("VALIDATION_ERROR", "invalid settings snapshot", status_code=422) from exc
-    version, content, source = snapshot_store_parts(snapshot_in)
+    typed_items: list[dict] = []
+    for item in request.evaluations:
+        try:
+            subject = SubjectPropertyV4(**item.subject)
+            comps = [CompCandidateV4(**raw) for raw in item.comps]
+            EvaluationRequestV4(
+                subject=subject,
+                comps=comps,
+                renovation_level=item.renovation_level,
+                settings=snapshot_in,
+                major_item_evidence=list(item.major_item_evidence),
+                additional_items=list(item.additional_items),
+                evaluation_date=item.evaluation_date,
+            )
+        except Exception as exc:
+            raise ApiFailure("VALIDATION_ERROR", "invalid property evaluation request", status_code=422) from exc
+        typed_items.append(
+            {
+                "idempotency_key": str(item.idempotency_key),
+                "payload": {
+                    "subject": dict(item.subject),
+                    "comps": list(item.comps),
+                    "renovation_level": item.renovation_level,
+                    "major_item_evidence": [entry.model_dump(mode="json") for entry in item.major_item_evidence],
+                    "additional_items": [entry.model_dump(mode="json") for entry in item.additional_items],
+                    "evaluation_date": item.evaluation_date,
+                    "evidence_mode": mode,
+                    "acquisition": {"subject": dict(item.subject), "comps": list(item.comps)},
+                },
+                "checkpoint": {"evidence_mode": mode, "stage": "queued"},
+            }
+        )
+    meta = {
+        "settings": request.settings.model_dump(mode="json"),
+        "count": len(typed_items),
+        "evidence_mode": mode,
+    }
+    return typed_items, meta, mode
+
+
+def submit_batch(
+    session: Session,
+    *,
+    tenant_id: str,
+    requested_by_user_id: str,
+    batch_key: str,
+    body: dict,
+) -> tuple[object, bool, list[dict]]:
+    if not requested_by_user_id or not requested_by_user_id.strip():
+        raise ApiFailure("VALIDATION_ERROR", "requesting user is required", status_code=422)
+    items, meta, _ = _validate_property_shapes(body)
+    from ..api.schemas import BatchSubmitRequest
+
+    request = BatchSubmitRequest(**body)
+    version, content, source = snapshot_store_parts(request.settings.validated_for_durable_use())
     snapshot = repo.store_settings_snapshot(
         session, tenant_id=tenant_id, snapshot_version=version, content=content, source=source
     )
     session.flush()
-    items: list[dict] = []
-    for item in request.evaluations:
-        typed = _typed_property_request(
-            {
-                "subject": item.subject,
-                "comps": item.comps,
-                "renovation_level": item.renovation_level,
-                "major_item_evidence": [entry.model_dump(mode="json") for entry in item.major_item_evidence],
-                "additional_items": [entry.model_dump(mode="json") for entry in item.additional_items],
-                "evaluation_date": item.evaluation_date,
-            },
-            snapshot_in,
-            request.candidate_evidence_mode,
-        )
-        items.append(
-            {
-                "idempotency_key": str(item.idempotency_key),
-                "payload": typed.model_dump(mode="json"),
-            }
-        )
     try:
         batch, created = repo.create_batch_with_evaluations(
             session,
             tenant_id=tenant_id,
+            requested_by_user_id=requested_by_user_id,
             idempotency_key=batch_key,
-            request_payload={"settings": request.settings.model_dump(mode="json"), "count": len(items)},
+            request_payload=meta,
             items=items,
             snapshot_id=snapshot.id,
         )
@@ -141,132 +146,248 @@ def submit_batch(
     session.flush()
     rows = (
         session.execute(
-            select(Evaluation).where(Evaluation.batch_id == batch.id, Evaluation.tenant_id == tenant_id)
+            select(Evaluation).where(
+                Evaluation.batch_id == batch.id,
+                Evaluation.tenant_id == tenant_id,
+                Evaluation.requested_by_user_id == requested_by_user_id,
+            )
         )
         .scalars()
         .all()
     )
     by_key = {row.idempotency_key: row for row in rows}
     summaries: list[dict] = []
-    for item in request.evaluations:
-        row = by_key[str(item.idempotency_key)]
+    for entry in items:
+        row = by_key[entry["idempotency_key"]]
         summaries.append(
             {
                 "evaluation_id": str(row.id),
-                "idempotency_key": str(item.idempotency_key),
-                "status": execution_status(row.status, row.result_status),
+                "idempotency_key": entry["idempotency_key"],
+                "status": "QUEUED",
                 "created_or_reused": "created" if created else "reused",
             }
         )
-    if created:
-        _evaluate_inline(session, tenant_id=tenant_id, batch=batch, snapshot=snapshot)
-        session.flush()
-        refreshed = (
-            session.execute(
-                select(Evaluation).where(Evaluation.batch_id == batch.id, Evaluation.tenant_id == tenant_id)
-            )
-            .scalars()
-            .all()
-        )
-        by_key = {row.idempotency_key: row for row in refreshed}
-        for summary in summaries:
-            row = by_key[summary["idempotency_key"]]
-            summary["status"] = execution_status(row.status, row.result_status)
-        session.refresh(batch)
     return batch, created, summaries
 
 
-def _evaluate_inline(session: Session, *, tenant_id: str, batch, snapshot: SettingsSnapshot) -> None:
-    provider = NoLiveProvider()
-    _ = provider
-    rows = (
-        session.execute(
-            select(Evaluation).where(Evaluation.batch_id == batch.id, Evaluation.tenant_id == tenant_id)
-        )
-        .scalars()
-        .all()
-    )
-    for row in rows:
-        claim = _claim_for_inline(session, tenant_id=tenant_id, evaluation_id=row.id)
-        if claim is None:
-            continue
-        try:
-            typed = EvaluationRequestV4(**(row.input_payload or {}))
-        except Exception:
-            repo.fail_evaluation(
-                session, tenant_id=tenant_id, evaluation_id=row.id,
-                lease_owner=claim.lease_owner, lease_token=claim.lease_token,
-                lease_generation=claim.lease_generation,
-                error_code="validation_error", error_detail="invalid stored request",
-                result_status="INCOMPLETE",
+def _claim_owned_evaluation(
+    session: Session, *, tenant_id: str, requested_by_user_id: str,
+    evaluation_id: str | None = None,
+):
+    """Claim one queued job owned by this tenant/user.
+
+    The shared queue primitive claims globally per tenant; the worker
+    boundary leases a specific owned row (or the oldest owned row), so
+    one user's worker can never consume another user's job.
+    """
+    from sqlalchemy import text as _text
+
+    if evaluation_id is not None:
+        row = session.execute(
+            select(Evaluation).where(
+                Evaluation.id == evaluation_id,
+                Evaluation.tenant_id == tenant_id,
+                Evaluation.requested_by_user_id == requested_by_user_id,
+                Evaluation.status == "queued",
             )
-            continue
-        typed = typed.model_copy(update={"settings": typed.settings.model_copy(update={
-            "snapshot_id": str(snapshot.id), "content_hash": str(snapshot.content_hash)})})
-        result = evaluate_v4(typed)
-        bound = _bind_snapshot_refs(result.model_dump(mode="json"), snapshot)
-        repo.commit_result(
-            session, tenant_id=tenant_id, evaluation_id=row.id,
-            lease_owner=claim.lease_owner, lease_token=claim.lease_token,
-            lease_generation=claim.lease_generation,
-            methodology_version="evaluation-v4", snapshot_id=snapshot.id,
-            status=to_persistence_status(result.status), result_payload=bound,
-        )
-
-
-def _claim_for_inline(session: Session, *, tenant_id: str, evaluation_id: uuid.UUID):
-    from sqlalchemy import text
-    row = session.execute(
-        select(Evaluation).where(Evaluation.id == evaluation_id, Evaluation.tenant_id == tenant_id)
-    ).scalar_one()
-    if row.status != "queued":
+            .with_for_update()
+        ).scalar_one_or_none()
+    else:
+        row = session.execute(
+            select(Evaluation).where(
+                Evaluation.tenant_id == tenant_id,
+                Evaluation.requested_by_user_id == requested_by_user_id,
+                Evaluation.status == "queued",
+            )
+            .order_by(Evaluation.created_at, Evaluation.id)
+            .with_for_update(skip_locked=True)
+            .limit(1)
+        ).scalar_one_or_none()
+    if row is None:
         return None
-    token = uuid.uuid4()
-    now = datetime.now(timezone.utc)
+    import uuid as _uuid
+    from datetime import datetime as _dt, timezone as _tz
+
+    now = _dt.now(_tz.utc)
+    token = _uuid.uuid4()
     updated = session.execute(
-        text(
-            "UPDATE v4_evaluations SET status='claimed', lease_owner='api-inline', "
+        _text(
+            "UPDATE v4_evaluations SET status='claimed', lease_owner=:owner, "
             "lease_token=:token, lease_generation=lease_generation+1, "
             "lease_expires_at=:exp, last_heartbeat_at=:now, attempts=attempts+1, "
-            "updated_at=:now WHERE id=:id AND tenant_id=:tenant AND status='queued'"
+            "updated_at=:now WHERE id=:id AND tenant_id=:tenant "
+            "AND requested_by_user_id=:user AND status='queued'"
         ),
-        {"token": token, "exp": now + repo.LEASE_TTL, "now": now, "id": evaluation_id, "tenant": tenant_id},
+        {"owner": f"worker:{requested_by_user_id}", "token": token, "exp": now + repo.LEASE_TTL,
+         "now": now, "id": row.id, "tenant": tenant_id, "user": requested_by_user_id},
     )
     session.flush()
     if not updated.rowcount:
         return None
-    session.expire(row)
-    fresh = session.execute(
-        select(Evaluation)
-        .where(Evaluation.id == evaluation_id, Evaluation.tenant_id == tenant_id)
-        .execution_options(populate_existing=True)
+    session.expire_all()
+    target = session.execute(
+        select(Evaluation).where(Evaluation.id == row.id)
     ).scalar_one()
     return repo.Claim(
-        evaluation_id=fresh.id, tenant_id=tenant_id, lease_owner="api-inline",
-        lease_token=fresh.lease_token, lease_generation=int(fresh.lease_generation),
-        attempts=int(fresh.attempts),
+        evaluation_id=target.id, tenant_id=tenant_id, lease_owner=f"worker:{requested_by_user_id}",
+        lease_token=target.lease_token, lease_generation=int(target.lease_generation),
+        attempts=int(target.attempts),
+    ), target
+
+
+def process_queued_evaluations(
+    session: Session, *, tenant_id: str, requested_by_user_id: str, batch_id: object
+) -> int:
+    """Test/worker-boundary helper: process queued jobs past commit.
+
+    Lives outside the request path so disconnect tests prove committed
+    jobs are processed independently. Uses the durable domain evaluator;
+    V4-103B owns per-property execution isolation and retries.
+    """
+    from ..contracts.settings import to_persistence_status
+    from ..domain.evaluate import evaluate_v4
+
+    session.expire_all()
+    targets = (
+        session.execute(
+            select(Evaluation.id).where(
+                Evaluation.batch_id == batch_id,
+                Evaluation.tenant_id == tenant_id,
+                Evaluation.requested_by_user_id == requested_by_user_id,
+                Evaluation.status == "queued",
+            )
+            .order_by(Evaluation.created_at, Evaluation.id)
+        )
+        .scalars()
+        .all()
     )
+    owner_seen: set[str] = set()
+    ordered_ids: list[str] = []
+    for candidate in targets:
+        text_id = str(candidate)
+        if text_id not in owner_seen:
+            owner_seen.add(text_id)
+            ordered_ids.append(text_id)
+    session.expire_all()
+    processed = 0
+    for eval_id in ordered_ids:
+        try:
+            live = session.execute(
+                select(Evaluation).where(
+                    Evaluation.id == eval_id,
+                    Evaluation.tenant_id == tenant_id,
+                    Evaluation.requested_by_user_id == requested_by_user_id,
+                )
+            ).scalar_one_or_none()
+        except Exception:
+            session.rollback()
+            continue
+        if live is None or live.status != "queued" or str(live.batch_id) != str(batch_id):
+            continue
+        claimed = _claim_owned_evaluation(
+            session, tenant_id=tenant_id, requested_by_user_id=requested_by_user_id,
+            evaluation_id=eval_id,
+        )
+        if claimed is None:
+            session.rollback()
+            continue
+        claim, target = claimed
+        if str(target.batch_id) != str(batch_id):
+            session.rollback()
+            continue
+        stored = dict(target.input_payload or {})
+        subject = SubjectPropertyV4(**stored.get("subject", {}))
+        comps = [CompCandidateV4(**raw) for raw in stored.get("comps", [])]
+        from ..persistence.models import Batch as BatchModel
+        from ..persistence.models import SettingsSnapshot as SnapshotModel
+
+        batch_row = session.execute(
+            select(BatchModel).where(BatchModel.id == target.batch_id)
+        ).scalar_one()
+        snap = session.execute(
+            select(SnapshotModel).where(SnapshotModel.id == batch_row.snapshot_id)
+        ).scalar_one()
+        import json as _json
+
+        envelope = {
+            "version": snap.snapshot_version,
+            "content": snap.content,
+            "source": snap.source,
+        }
+        settings_dict = dict(envelope["content"])
+        settings_dict["snapshot_id"] = str(snap.id)
+        settings_dict["content_hash"] = str(snap.content_hash)
+        settings_dict["schema_version"] = envelope["version"]
+        settings_dict["source_timestamps"] = dict((envelope["source"] or {}).get("source_timestamps", {}))
+        from ..contracts.settings import SettingsSnapshotV4
+
+        settings = SettingsSnapshotV4(**settings_dict)
+        typed = EvaluationRequestV4(
+            subject=subject,
+            comps=comps,
+            renovation_level=stored.get("renovation_level", ""),
+            settings=settings,
+            major_item_evidence=[MajorItemEvidenceV4(**raw) for raw in stored.get("major_item_evidence", [])],
+            additional_items=[AdditionalRenovationItemV4(**raw) for raw in stored.get("additional_items", [])],
+            evaluation_date=stored.get("evaluation_date"),
+        )
+        result = evaluate_v4(typed)
+        bound = dict(result.model_dump(mode="json"))
+        bound["settings_snapshot_id"] = str(snap.id)
+        bound["settings_content_hash"] = str(snap.content_hash)
+        try:
+            repo.commit_result(
+                session, tenant_id=tenant_id, evaluation_id=target.id,
+                lease_owner=claim.lease_owner, lease_token=claim.lease_token,
+                lease_generation=claim.lease_generation,
+                methodology_version="evaluation-v4", snapshot_id=snap.id,
+                status=to_persistence_status(result.status), result_payload=bound,
+            )
+        except Exception:
+            session.rollback()
+            continue
+        try:
+            session.commit()
+        except Exception:
+            session.rollback()
+            continue
+        processed += 1
+    return processed
 
 
-def read_evaluation(session: Session, *, tenant_id: str, evaluation_id: str) -> dict:
+def read_evaluation(
+    session: Session, *, tenant_id: str, requested_by_user_id: str, evaluation_id: str
+) -> dict:
+    import uuid as _uuid
+
     try:
-        parsed = uuid.UUID(str(evaluation_id))
+        parsed = _uuid.UUID(str(evaluation_id))
     except ValueError as exc:
         raise ApiFailure("NOT_FOUND", "evaluation not found", status_code=404) from exc
     try:
-        row = repo.get_evaluation(session, tenant_id=tenant_id, evaluation_id=parsed)
+        row = repo.get_evaluation(
+            session, tenant_id=tenant_id, requested_by_user_id=requested_by_user_id,
+            evaluation_id=parsed,
+        )
     except KeyError as exc:
         raise ApiFailure("NOT_FOUND", "evaluation not found", status_code=404) from exc
     latest = (
         session.execute(
             select(EvaluationResult)
-            .where(EvaluationResult.evaluation_id == row.id, EvaluationResult.tenant_id == tenant_id)
+            .where(
+                EvaluationResult.evaluation_id == row.id,
+                EvaluationResult.tenant_id == tenant_id,
+                EvaluationResult.requested_by_user_id == requested_by_user_id,
+            )
             .order_by(EvaluationResult.version.desc())
             .limit(1)
         )
         .scalars()
         .first()
     )
+    payload_result = dict(latest.result_payload) if latest is not None else None
+    if payload_result is not None and row.requested_by_user_id != requested_by_user_id:
+        raise ApiFailure("NOT_FOUND", "evaluation not found", status_code=404)
     status = execution_status(row.status, row.result_status)
     progress = "complete" if row.status == "succeeded" else ("failed" if row.status in ("failed", "dead") else "incomplete")
     return {
@@ -280,24 +401,35 @@ def read_evaluation(session: Session, *, tenant_id: str, evaluation_id: str) -> 
         "error_detail": "" if row.status == "succeeded" else (row.error_detail or ""),
         "retriable": bool(row.retriable),
         "progress": progress,
-        "result": dict(latest.result_payload) if latest is not None else None,
+        "result": payload_result,
         "errors": [],
-        "incomplete_sections": list((latest.result_payload or {}).get("incomplete_sections", [])) if latest else [],
+        "incomplete_sections": list((payload_result or {}).get("incomplete_sections", [])) if payload_result else [],
     }
 
 
-def read_batch(session: Session, *, tenant_id: str, batch_id: str) -> dict:
+def read_batch(
+    session: Session, *, tenant_id: str, requested_by_user_id: str, batch_id: str
+) -> dict:
+    import uuid as _uuid
+
     try:
-        parsed = uuid.UUID(str(batch_id))
+        parsed = _uuid.UUID(str(batch_id))
     except ValueError as exc:
         raise ApiFailure("NOT_FOUND", "batch not found", status_code=404) from exc
     try:
-        progress = repo.get_batch_progress(session, tenant_id=tenant_id, batch_id=parsed)
+        progress = repo.get_batch_progress(
+            session, tenant_id=tenant_id, requested_by_user_id=requested_by_user_id,
+            batch_id=parsed,
+        )
     except KeyError as exc:
         raise ApiFailure("NOT_FOUND", "batch not found", status_code=404) from exc
     rows = (
         session.execute(
-            select(Evaluation).where(Evaluation.batch_id == parsed, Evaluation.tenant_id == tenant_id)
+            select(Evaluation).where(
+                Evaluation.batch_id == parsed,
+                Evaluation.tenant_id == tenant_id,
+                Evaluation.requested_by_user_id == requested_by_user_id,
+            )
         )
         .scalars()
         .all()
@@ -321,4 +453,10 @@ def read_batch(session: Session, *, tenant_id: str, batch_id: str) -> dict:
     }
 
 
-__all__ = ["execution_status", "read_batch", "read_evaluation", "submit_batch"]
+__all__ = [
+    "execution_status",
+    "process_queued_evaluations",
+    "read_batch",
+    "read_evaluation",
+    "submit_batch",
+]

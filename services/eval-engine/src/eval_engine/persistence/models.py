@@ -62,7 +62,7 @@ class SettingsSnapshot(Base):
 
 
 class Batch(Base):
-    """Tenant-scoped batch of 1-50 property evaluations."""
+    """Tenant- and user-scoped batch of 1-50 property evaluations."""
 
     __tablename__ = "v4_batches"
 
@@ -70,6 +70,9 @@ class Batch(Base):
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     tenant_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    requested_by_user_id: Mapped[str] = mapped_column(
+        String(128), nullable=False, server_default=""
+    )
     idempotency_key: Mapped[str] = mapped_column(String(256), nullable=False)
     request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
@@ -90,7 +93,8 @@ class Batch(Base):
 
     __table_args__ = (
         UniqueConstraint(
-            "tenant_id", "idempotency_key", name="uq_v4_batch_tenant_idem"
+            "tenant_id", "requested_by_user_id", "idempotency_key",
+            name="uq_v4_batch_owner_idem",
         ),
         UniqueConstraint("tenant_id", "id", name="uq_v4_batch_tenant_id"),
         ForeignKeyConstraint(
@@ -131,6 +135,7 @@ class Batch(Base):
         ),
         Index("ix_v4_batch_tenant", "tenant_id"),
         Index("ix_v4_batch_tenant_status", "tenant_id", "status"),
+        Index("ix_v4_batch_owner", "tenant_id", "requested_by_user_id"),
     )
 
     snapshot: Mapped[SettingsSnapshot] = relationship(lazy="select")
@@ -150,6 +155,9 @@ class Evaluation(Base):
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     tenant_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    requested_by_user_id: Mapped[str] = mapped_column(
+        String(128), nullable=False, server_default=""
+    )
     batch_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), nullable=False
     )
@@ -189,8 +197,10 @@ class Evaluation(Base):
 
     __table_args__ = (
         UniqueConstraint(
-            "tenant_id", "idempotency_key", name="uq_v4_eval_tenant_idem"
+            "tenant_id", "requested_by_user_id", "idempotency_key",
+            name="uq_v4_eval_owner_idem",
         ),
+
         UniqueConstraint("tenant_id", "id", name="uq_v4_eval_tenant_id"),
         ForeignKeyConstraint(
             ["tenant_id", "batch_id"],
@@ -231,6 +241,7 @@ class Evaluation(Base):
             name="ck_v4_eval_result_status",
         ),
         Index("ix_v4_eval_tenant", "tenant_id"),
+        Index("ix_v4_eval_owner", "tenant_id", "requested_by_user_id"),
         Index("ix_v4_eval_batch", "batch_id"),
         Index(
             "ix_v4_eval_claim_scan",
@@ -261,6 +272,7 @@ class EvaluationResult(Base):
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     tenant_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    requested_by_user_id: Mapped[str] = mapped_column(String(128), nullable=False)
     evaluation_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), nullable=False
     )
@@ -308,6 +320,7 @@ class EvaluationResult(Base):
         ),
         Index("ix_v4_result_eval", "evaluation_id"),
         Index("ix_v4_result_tenant", "tenant_id"),
+        Index("ix_v4_result_owner", "tenant_id", "requested_by_user_id"),
     )
 
     evaluation: Mapped[Evaluation] = relationship(back_populates="results")

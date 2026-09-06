@@ -125,6 +125,22 @@ def test_alembic_up_and_down_on_isolated_database():
             uq["name"] for uq in insp.get_unique_constraints("v4_evaluation_results")
         }
         assert "uq_v4_result_identity" in result_uq
+        batch_uq = {uq["name"] for uq in insp.get_unique_constraints("v4_batches")}
+        assert "uq_v4_batch_owner_idem" in batch_uq
+        eval_uq = {uq["name"] for uq in insp.get_unique_constraints("v4_evaluations")}
+        assert "uq_v4_eval_owner_idem" in eval_uq
+        for table, column in (
+            ("v4_batches", "requested_by_user_id"),
+            ("v4_evaluations", "requested_by_user_id"),
+            ("v4_evaluation_results", "requested_by_user_id"),
+        ):
+            cols = {c["name"] for c in insp.get_columns(table)}
+            assert column in cols
+        owner_indexes = {idx["name"] for idx in insp.get_indexes("v4_batches")}
+        assert "ix_v4_batch_owner" in owner_indexes
+        with engine.begin() as conn:
+            rev = conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
+            assert rev == "0003_v4_owner"
         batch_ck = {
             ck["name"] for ck in insp.get_check_constraints("v4_batches")
         }

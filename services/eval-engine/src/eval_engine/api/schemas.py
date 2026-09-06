@@ -21,10 +21,14 @@ class ApiError(BaseModel):
         "AUTH_MISSING",
         "AUTH_INVALID",
         "AUTH_EXPIRED",
+        "MALFORMED_JSON",
+        "INVALID_SHAPE",
         "VALIDATION_ERROR",
         "IDEMPOTENCY_CONFLICT",
         "NOT_FOUND",
         "PROVIDER_PENDING",
+        "LEASE_CONFLICT",
+        "DOMAIN_ERROR",
         "INTERNAL_ERROR",
     ]
     message: str = ""
