@@ -1,0 +1,78 @@
+name: evaluation-v4-candidate
+
+# Candidate-only CI for the V4 evaluation runtime. This workflow builds and
+# checks the candidate; it never deploys, never touches production config,
+# never calls external providers, and never publishes images. Production
+# deploys stay in .github/workflows/deploy.yml (main only).
+
+on:
+  push:
+    branches:
+      - v4/runtime-ci
+  pull_request:
+    paths:
+      - compose.dev.yaml
+      - .dockerignore
+      - package.json
+      - package-lock.json
+      - turbo.json
+      - scripts/runtime
+      - scripts/secret-scan
+      - services/eval-engine/**
+      - apps/dashboard/**
+      - packages/shared/**
+      - docs/eval-v4/RUNTIME.md
+      - .github/workflows/evaluation-v4-candidate.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  candidate-checks:
+    name: candidate checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout # actions/checkout v4.2.2
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      - name: Set up Python # actions/setup-python v5.6.0
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.12"
+
+      - name: Install engine dependencies (authoritative hashed lock, includes Alembic for post-V4-102 migrations)
+        working-directory: services/eval-engine
+        run: pip install --require-hashes -r requirements.txt
+
+      - name: Verify Alembic available (post-V4-102 migration readiness)
+        working-directory: services/eval-engine
+        run: python -c "import alembic; print('alembic', alembic.__version__)"
+
+      - name: Run V4 Python tests
+        working-directory: services/eval-engine
+        run: PYTHONPATH=src python -m pytest tests -q
+
+      - name: Secret scan (tracked and untracked files)
+        run: ./scripts/secret-scan
+
+      - name: Build-context sentinel check (env/tsbuildinfo/logs excluded, sources preserved)
+        run: |
+          set -eu
+          printf 'PROBE\n' > .env.sentinel-probe
+          printf 'PROBE\n' > probe-sentinel.log
+          printf 'PROBE\n' > services/eval-engine/.env.sentinel-probe
+          printf 'PROBE\n' > services/eval-engine/probe-sentinel.log
+          printf 'PROBE\n' > apps/dashboard/tsconfig.probe.tsbuildinfo
+          trap 'rm -f .env.sentinel-probe probe-sentinel.log services/eval-engine/.env.sentinel-probe services/eval-engine/probe-sentinel.log apps/dashboard/tsconfig.probe.tsbuildinfo' EXIT
+          printf 'FROM busybox\nCOPY . /ctx\nRUN test ! -e /ctx/.env.sentinel-probe && test ! -e /ctx/probe-sentinel.log && test ! -e /ctx/apps/dashboard/tsconfig.probe.tsbuildinfo && test -f /ctx/package.json && test -d /ctx/apps/dashboard/src && test -d /ctx/packages/shared && echo "ROOT CONTEXT SENTINEL PASS"\n' > /tmp/root-sentinel.Dockerfile
+          docker build --no-cache -f /tmp/root-sentinel.Dockerfile . --progress=plain 2>&1 | grep -q "ROOT CONTEXT SENTINEL PASS"
+          printf 'FROM busybox\nCOPY . /ctx\nRUN test ! -e /ctx/.env.sentinel-probe && test ! -e /ctx/probe-sentinel.log && test -f /ctx/.env.example && test -f /ctx/requirements.txt && test -d /ctx/src && echo "ENGINE CONTEXT SENTINEL PASS"\n' > /tmp/engine-sentinel.Dockerfile
+          docker build --no-cache -f /tmp/engine-sentinel.Dockerfile services/eval-engine --progress=plain 2>&1 | grep -q "ENGINE CONTEXT SENTINEL PASS"
+
+      - name: Validate isolated Compose config
+        run: docker compose --project-name flowstate-v4-dev -f compose.dev.yaml config
+
+      - name: Build candidate images (no push, no deploy)
+        run: docker compose --project-name flowstate-v4-dev -f compose.dev.yaml build

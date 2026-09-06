@@ -53,7 +53,7 @@ services:
       - backend
 
   postgres:
-    image: postgres:17-alpine
+    image: postgres:17-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73
     environment:
       POSTGRES_DB: "flowstate_v4"
       POSTGRES_USER: "flowstate_v4"
@@ -79,6 +79,7 @@ services:
       PORT: "3000"
       HOSTNAME: "0.0.0.0"
       NEXT_TELEMETRY_DISABLED: "1"
+      NEXT_PUBLIC_API_URL: "http://localhost:8787"
     volumes:
       - v4-dashboard-next:/app/apps/dashboard/.next
     restart: "no"

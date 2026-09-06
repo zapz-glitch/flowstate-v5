@@ -1,0 +1,24 @@
+# Advisory notes for a hypothetical apps/dashboard build context.
+#
+# The dashboard Compose service currently uses the repository root as its
+# build context, so Docker consumes the ROOT .dockerignore for that build,
+# NOT this file. This file is advisory only: it records the intended
+# exclusions if the dashboard context is ever narrowed to apps/dashboard.
+# Deterministic context today comes from the root .dockerignore denylist
+# plus the narrow COPY list in apps/dashboard/Dockerfile.dev (root package
+# files, packages/shared, apps/dashboard only).
+
+node_modules/
+.next/
+out/
+dist/
+.open-next/
+.turbo/
+.wrangler/
+*.log
+npm-debug.log*
+*.tsbuildinfo
+.env
+.env.*
+*.dev.vars
+.git
