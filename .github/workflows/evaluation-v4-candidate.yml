@@ -9,6 +9,8 @@ on:
   push:
     branches:
       - v4/runtime-ci
+      - v4/integration-runtime
+      - v4/python-fast-eval
   pull_request:
     paths:
       - compose.dev.yaml
@@ -33,6 +35,20 @@ jobs:
     name: candidate checks
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: v4test
+          POSTGRES_PASSWORD: v4testpw
+          POSTGRES_DB: v4test
+        options: >-
+          --health-cmd "pg_isready -U v4test -d v4test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+        ports:
+          - 55440:5432
     steps:
       - name: Checkout # actions/checkout v4.2.2
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -42,6 +58,12 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
       - name: Install engine dependencies (authoritative hashed lock, includes Alembic for post-V4-102 migrations)
         working-directory: services/eval-engine
         run: pip install --require-hashes -r requirements.txt
@@ -49,6 +71,12 @@ jobs:
       - name: Verify Alembic available (post-V4-102 migration readiness)
         working-directory: services/eval-engine
         run: python -c "import alembic; print('alembic', alembic.__version__)"
+
+      - name: Install JS dependencies (locked)
+        run: npm ci
+
+      - name: Typecheck workspaces
+        run: npm run typecheck
 
       - name: Run V4 Python tests
         working-directory: services/eval-engine
@@ -76,3 +104,53 @@ jobs:
 
       - name: Build candidate images (no push, no deploy)
         run: docker compose --project-name flowstate-v4-dev -f compose.dev.yaml build
+
+      - name: Migrate isolated PG from the built image
+        run: |
+          set -eu
+          docker run --rm --network host \
+            -e DATABASE_URL="postgresql+psycopg://v4test:v4testpw@127.0.0.1:55440/v4test" \
+            flowstate-v4-dev-api:local alembic upgrade head
+
+      - name: Verify revision and required tables
+        working-directory: services/eval-engine
+        env:
+          DATABASE_URL: postgresql+psycopg://v4test:v4testpw@127.0.0.1:55440/v4test
+        run: |
+          python - <<'PY'
+          import os
+          from sqlalchemy import create_engine, inspect, text
+          url = os.environ["DATABASE_URL"]
+          engine = create_engine(url)
+          with engine.connect() as conn:
+              revision = conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
+              assert revision == "0002_v4_repair", revision
+          tables = set(inspect(engine).get_table_names())
+          required = {"v4_settings_snapshots", "v4_batches", "v4_evaluations", "v4_evaluation_results"}
+          missing = sorted(required - tables)
+          assert not missing, f"missing tables: {missing}"
+          print(f"revision {revision}; required tables present")
+          PY
+
+      - name: Start API and verify readiness
+        run: |
+          set -eu
+          docker run -d --rm --name v4-ci-api --network host \
+            -e PORT=8004 \
+            -e DATABASE_URL="postgresql+psycopg://v4test:v4testpw@127.0.0.1:55440/v4test" \
+            -e V4_INTERNAL_API_TOKEN=candidate-local-only \
+            -e V4_EXTERNAL_CALLS_ENABLED=false \
+            -e V4_TEST_PROFILE=false \
+            flowstate-v4-dev-api:local \
+            uvicorn eval_engine.main:app --host 127.0.0.1 --port 8004 --app-dir src
+          trap 'docker rm -f v4-ci-api >/dev/null 2>&1 || true' EXIT
+          for _ in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8004/health/ready | grep -q '"ready":true'; then
+              curl -fsS http://127.0.0.1:8004/health/ready
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "API readiness check failed" >&2
+          docker logs v4-ci-api >&2 || true
+          exit 1
