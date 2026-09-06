@@ -606,14 +606,15 @@ def test_tenant_isolation(session: Session):
     )
     session.commit()
     assert batch_a.id != batch_b.id
-    progress = get_batch_progress(session, tenant_id="tenant-a", batch_id=batch_a.id)
+    progress = get_batch_progress(session, tenant_id="tenant-a", requested_by_user_id="u-legacy", batch_id=batch_a.id)
     assert progress["tenant_id"] == "tenant-a"
     with pytest.raises(KeyError):
-        get_batch_progress(session, tenant_id="tenant-b", batch_id=batch_a.id)
+        get_batch_progress(session, tenant_id="tenant-b", requested_by_user_id="u-legacy", batch_id=batch_a.id)
     with pytest.raises(KeyError):
         get_evaluation(
             session,
             tenant_id="tenant-b",
+            requested_by_user_id="u-legacy",
             evaluation_id=batch_a.evaluations[0].id,
         )
 
@@ -811,10 +812,11 @@ def test_result_commit_identity_versioning_and_statuses(
     fresh = claim_next_evaluation(session, tenant_id="t-result", lease_owner="w-9")
     session.commit()
     assert fresh is None
-    progress = get_batch_progress(session, tenant_id="t-result", batch_id=batch.id)
+    progress = get_batch_progress(session, tenant_id="t-result", requested_by_user_id="u-legacy", batch_id=batch.id)
     assert progress["succeeded"] == 1
     row = get_evaluation(
-        session, tenant_id="t-result", evaluation_id=claim.evaluation_id
+        session, tenant_id="t-result", requested_by_user_id="u-legacy",
+        evaluation_id=claim.evaluation_id
     )
     assert row.result_status == "VALUED"
 
@@ -1048,7 +1050,7 @@ def test_per_property_failure_and_batch_counts(session: Session):
         ),
     )
     session.commit()
-    progress = get_batch_progress(session, tenant_id="t-counts", batch_id=batch.id)
+    progress = get_batch_progress(session, tenant_id="t-counts", requested_by_user_id="u-legacy", batch_id=batch.id)
     assert progress["total"] == 3
     assert progress["succeeded"] == 2
     assert progress["failed"] == 0
@@ -1153,7 +1155,7 @@ def test_counter_serialization_under_threads(maker):
     for thread in threads:
         thread.join()
     sess = maker()
-    progress = get_batch_progress(sess, tenant_id="t-ser", batch_id=batch_id)
+    progress = get_batch_progress(sess, tenant_id="t-ser", requested_by_user_id="u-legacy", batch_id=batch_id)
     sess.close()
     assert progress["total"] == 4
     assert progress["succeeded"] == 4

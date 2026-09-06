@@ -66,11 +66,30 @@ Status mapping is explicit: execution `queued/claimed/running` map to
 `QUEUED/RUNNING`; persistence `VALUED` maps to API `COMPLETED`; all
 other durable result statuses pass through unchanged.
 
-## Durable ownership
+## Durable ownership and migration preflight
 
 `requested_by_user_id` is stored on batches, evaluations, and results
-(additive Alembic `0003_v4_owner` with owner-scoped idempotency uniques
-and composite indexes; legacy tenant-only uniques replaced at head).
+(Alembic `0003_v4_owner`). Migration procedure:
+
+1. The upgrade adds nullable owner columns and immediately preflights:
+   any existing batch, evaluation, or result row whose owner is null or
+   blank aborts the upgrade transactionally with an actionable
+   `V4 0003 preflight` error naming table and row count. No rows are
+   changed and no constraints are dropped.
+2. Assign every pre-ownership row an explicit owner matching the
+   submitting credential, then re-run the upgrade. There is no silent
+   sentinel backfill and no env/config mapping input.
+3. On a clean database (or after explicit assignment) the upgrade
+   proceeds: columns become non-null with `length(trim(owner)) > 0`
+   checks, owner composite uniques and owner-bound FKs land
+   (evaluation references the same batch owner; result references the
+   same evaluation owner; snapshot tenant binding unchanged), and direct
+   SQL with a mismatched or empty owner fails.
+4. Downgrade preflights owner-scoped duplicate keys before recreating
+   tenant-only uniques: legitimate cross-user same-key rows raise a
+   deliberate actionable error with category and count (no values) and
+   the database stays at 0003.
+
 Per-property execution isolation (retries, fencing across properties)
 is a V4-103B requirement, not an API claim.
 

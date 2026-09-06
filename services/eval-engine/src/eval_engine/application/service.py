@@ -174,65 +174,11 @@ def _claim_owned_evaluation(
     session: Session, *, tenant_id: str, requested_by_user_id: str,
     evaluation_id: str | None = None,
 ):
-    """Claim one queued job owned by this tenant/user.
-
-    The shared queue primitive claims globally per tenant; the worker
-    boundary leases a specific owned row (or the oldest owned row), so
-    one user's worker can never consume another user's job.
-    """
-    from sqlalchemy import text as _text
-
-    if evaluation_id is not None:
-        row = session.execute(
-            select(Evaluation).where(
-                Evaluation.id == evaluation_id,
-                Evaluation.tenant_id == tenant_id,
-                Evaluation.requested_by_user_id == requested_by_user_id,
-                Evaluation.status == "queued",
-            )
-            .with_for_update()
-        ).scalar_one_or_none()
-    else:
-        row = session.execute(
-            select(Evaluation).where(
-                Evaluation.tenant_id == tenant_id,
-                Evaluation.requested_by_user_id == requested_by_user_id,
-                Evaluation.status == "queued",
-            )
-            .order_by(Evaluation.created_at, Evaluation.id)
-            .with_for_update(skip_locked=True)
-            .limit(1)
-        ).scalar_one_or_none()
-    if row is None:
-        return None
-    import uuid as _uuid
-    from datetime import datetime as _dt, timezone as _tz
-
-    now = _dt.now(_tz.utc)
-    token = _uuid.uuid4()
-    updated = session.execute(
-        _text(
-            "UPDATE v4_evaluations SET status='claimed', lease_owner=:owner, "
-            "lease_token=:token, lease_generation=lease_generation+1, "
-            "lease_expires_at=:exp, last_heartbeat_at=:now, attempts=attempts+1, "
-            "updated_at=:now WHERE id=:id AND tenant_id=:tenant "
-            "AND requested_by_user_id=:user AND status='queued'"
-        ),
-        {"owner": f"worker:{requested_by_user_id}", "token": token, "exp": now + repo.LEASE_TTL,
-         "now": now, "id": row.id, "tenant": tenant_id, "user": requested_by_user_id},
+    """Test-boundary lease via the separately named trusted queue method."""
+    return repo.claim_owned_evaluation_trusted_queue(
+        session, tenant_id=tenant_id, requested_by_user_id=requested_by_user_id,
+        evaluation_id=evaluation_id,
     )
-    session.flush()
-    if not updated.rowcount:
-        return None
-    session.expire_all()
-    target = session.execute(
-        select(Evaluation).where(Evaluation.id == row.id)
-    ).scalar_one()
-    return repo.Claim(
-        evaluation_id=target.id, tenant_id=tenant_id, lease_owner=f"worker:{requested_by_user_id}",
-        lease_token=target.lease_token, lease_generation=int(target.lease_generation),
-        attempts=int(target.attempts),
-    ), target
 
 
 def process_queued_evaluations(
