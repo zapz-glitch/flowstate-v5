@@ -35,6 +35,35 @@ values use decimal strings in JSON. Dates use ISO 8601. Enumerations are
 explicit and unknown values fail validation rather than silently mapping to a
 default.
 
+## Settings snapshot identity (IC-1)
+
+One canonical envelope/hash is shared by the typed domain, persisted
+canonicalization, and the result:
+
+- `SettingsSnapshotV4.canonical_payload()` returns the envelope
+  `{version, content, source}`. Generated identifiers (`snapshot_id`,
+  `content_hash`) are excluded. `version` is the schema/snapshot version,
+  `content` carries values (filters, adjustments, transaction rule, tiers,
+  deal, major items), and `source` carries provenance/timestamps
+  (`source_timestamps`; per-rule `source`/`precedence`/`version` live
+  inside `content` and are hashed verbatim).
+- `SettingsSnapshotV4.compute_content_hash()` hashes that envelope with
+  the single shared `canonical_hash` in `contracts/base.py` (exact
+  context-independent Decimal normalization, Unicode NFC, stable key
+  order, SHA-256 over compact sorted-key JSON). The persistence layer
+  re-exports the same implementation; there is exactly one.
+- `snapshot_store_parts(snapshot)` splits the envelope into
+  `(version, content, source)` for `store_settings_snapshot`, so the
+  persistence identity input is exactly the envelope the domain hashes,
+  and the serialized stored JSON re-hashes identically.
+- Equivalent Decimal spellings (`12.50`/`12.5`/`1.25E+1`), key order, and
+  Unicode NFC forms hash identically; material provenance differences
+  (timestamps, per-rule source/precedence/version) hash differently.
+- Domain `COMPLETED` maps to persistence `VALUED` via
+  `to_persistence_status` (`DOMAIN_TO_PERSISTENCE_STATUS`); all other
+  durable statuses are spelled identically. Cross-layer proof lives in
+  `services/eval-engine/tests/test_integration_contracts.py`.
+
 ## Existing TypeScript touchpoints
 
 - `apps/api/src/services/property-api/`

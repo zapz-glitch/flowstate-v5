@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 from decimal import Decimal
-from hashlib import sha256
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from .base import DecimalString
+from .base import DecimalString, canonical_hash
 from .filters import AppraisalFilterV4, CompAdjustmentRuleV4, TransactionRuleV4
 
 
@@ -85,6 +84,69 @@ class MajorItemRuleV4(BaseModel):
     version: str = Field(default="", max_length=32)
 
 
+# V4-104 domain -> persistence status mapping. The typed domain uses
+# COMPLETED for a fully valued result; the durable result contract uses
+# VALUED. All other durable statuses are spelled identically in both
+# layers, so only COMPLETED needs translation.
+DOMAIN_TO_PERSISTENCE_STATUS: dict[str, str] = {
+    "COMPLETED": "VALUED",
+    "REVIEW_REQUIRED": "REVIEW_REQUIRED",
+    "INSUFFICIENT_COMPS": "INSUFFICIENT_COMPS",
+    "INSUFFICIENT_INVESTOR_DATA": "INSUFFICIENT_INVESTOR_DATA",
+    "INCOMPLETE": "INCOMPLETE",
+    "FAILED": "FAILED",
+}
+
+
+def to_persistence_status(domain_status: str) -> str:
+    """Map a typed domain result status to the durable result status."""
+    try:
+        return DOMAIN_TO_PERSISTENCE_STATUS[domain_status]
+    except KeyError as exc:
+        raise ValueError(f"unknown domain status {domain_status!r}") from exc
+
+
+def settings_envelope(snapshot: SettingsSnapshotV4) -> dict:
+    """Build the one canonical settings snapshot envelope.
+
+    The envelope is the single hashed identity shared by the typed
+    domain, persisted canonicalization, and the result
+    ``settings_content_hash``. Generated identifiers (``snapshot_id``,
+    ``content_hash``) are excluded. Everything material is included:
+
+    - ``version``: the schema/snapshot version (``schema_version``),
+    - ``content``: values (filters, adjustments, transaction rule, tiers,
+      deal, major items),
+    - ``source``: provenance/source/timestamps (``source_timestamps``
+      plus per-rule ``source``/``precedence``/``version`` fields, which
+      already live inside the content rules and are therefore preserved
+      verbatim in ``content`` rather than duplicated).
+    """
+    payload = snapshot.model_dump(mode="python")
+    payload.pop("snapshot_id", None)
+    payload.pop("content_hash", None)
+    version = payload.pop("schema_version", "evaluation-v4")
+    source_timestamps = payload.pop("source_timestamps", {})
+    return {
+        "version": version,
+        "content": payload,
+        "source": {"source_timestamps": source_timestamps},
+    }
+
+
+def snapshot_store_parts(snapshot: SettingsSnapshotV4) -> tuple[str, dict, dict]:
+    """Split a snapshot into persistence store parts.
+
+    Returns ``(version, content, source)`` suitable for
+    ``store_settings_snapshot`` so the persistence identity input
+    (``{"version", "content", "source"}``) is exactly the envelope that
+    the domain hashes. Stored JSON is the canonicalized form of those
+    same parts, so ``hash(stored) == hash(input)``.
+    """
+    envelope = settings_envelope(snapshot)
+    return envelope["version"], envelope["content"], envelope["source"]
+
+
 class SettingsSnapshotV4(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="forbid")
 
@@ -100,12 +162,10 @@ class SettingsSnapshotV4(BaseModel):
     major_items: list[MajorItemRuleV4] = Field(default_factory=list)
 
     def canonical_payload(self) -> dict:
-        return self.model_dump(mode="json", exclude={"content_hash"})
+        return settings_envelope(self)
 
     def compute_content_hash(self) -> str:
-        import json
-
-        return sha256(json.dumps(self.canonical_payload(), sort_keys=True).encode()).hexdigest()
+        return canonical_hash(settings_envelope(self))
 
     def validated_for_durable_use(self) -> SettingsSnapshotV4:
         if not self.snapshot_id.strip():
@@ -173,10 +233,14 @@ def tier_boundary_problems(tiers: list[RenovationTierV4]) -> list[str]:
 
 
 __all__ = [
+    "DOMAIN_TO_PERSISTENCE_STATUS",
     "DealSettingsV4",
     "MajorItemRuleV4",
     "RenovationTierCellV4",
     "RenovationTierV4",
     "SettingsSnapshotV4",
+    "settings_envelope",
+    "snapshot_store_parts",
     "tier_boundary_problems",
+    "to_persistence_status",
 ]
