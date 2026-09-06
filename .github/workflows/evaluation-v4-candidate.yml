@@ -37,7 +37,7 @@ jobs:
     timeout-minutes: 20
     services:
       postgres:
-        image: postgres:16-alpine
+        image: postgres:17-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73
         env:
           POSTGRES_USER: v4test
           POSTGRES_PASSWORD: v4testpw
@@ -58,8 +58,8 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
+      - name: Set up Node.js # actions/setup-node v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: "20"
           cache: npm
@@ -126,7 +126,7 @@ jobs:
               revision = conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
               assert revision == "0002_v4_repair", revision
           tables = set(inspect(engine).get_table_names())
-          required = {"v4_settings_snapshots", "v4_batches", "v4_evaluations", "v4_evaluation_results"}
+          required = {"v4_settings_snapshots", "v4_batches", "v4_evaluations", "v4_evaluation_results", "v4_result_snapshot_backfill"}
           missing = sorted(required - tables)
           assert not missing, f"missing tables: {missing}"
           print(f"revision {revision}; required tables present")

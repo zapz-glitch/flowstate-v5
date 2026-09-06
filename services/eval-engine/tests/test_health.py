@@ -55,8 +55,80 @@ def test_readiness_contract_constants():
             "v4_batches",
             "v4_evaluations",
             "v4_evaluation_results",
+            "v4_result_snapshot_backfill",
         }
     )
+
+
+@pytest.mark.parametrize(
+    "missing_table",
+    sorted(
+        [
+            "v4_settings_snapshots",
+            "v4_batches",
+            "v4_evaluations",
+            "v4_evaluation_results",
+            "v4_result_snapshot_backfill",
+        ]
+    ),
+)
+def test_readiness_fails_when_any_required_table_missing(
+    monkeypatch, missing_table
+):
+    """IR-1: removing any one of the five head tables is not-ready."""
+    from eval_engine import health as health_module
+
+    expected = health_module.EXPECTED_ALEMBIC_REVISION
+    present = set(health_module.REQUIRED_TABLES) - {missing_table}
+    assert missing_table in health_module.REQUIRED_TABLES
+
+    class _FakeConnection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def execute(self, *args, **kwargs):
+            class _Scalar:
+                def scalar(self):
+                    return expected
+
+            return _Scalar()
+
+    class _FakeEngine:
+        def connect(self):
+            return _FakeConnection()
+
+        def dispose(self):
+            return None
+
+    monkeypatch.setattr(
+        health_module, "create_engine", lambda *args, **kwargs: _FakeEngine()
+    )
+    monkeypatch.setattr(
+        health_module,
+        "inspect",
+        lambda connection: type(
+            "_Insp", (), {"get_table_names": lambda self: list(present)}
+        )(),
+    )
+    # Database probe is out of scope here: force it ok so the schema
+    # gate is the decided factor.
+    monkeypatch.setattr(
+        health_module,
+        "check_database",
+        lambda url=None: health_module.DatabaseCheck(True, "postgresql", "ok"),
+    )
+
+    schema = health_module.check_schema("postgresql+psycopg://fake/db")
+    assert not schema.ok
+    assert missing_table in schema.detail
+
+    ready, checks = health_module.check_readiness("postgresql+psycopg://fake/db")
+    assert not ready
+    assert checks["database"] == "ok"
+    assert missing_table in checks["schema"]
 
 
 def test_readiness_unmigrated_database_is_not_ready(monkeypatch):
