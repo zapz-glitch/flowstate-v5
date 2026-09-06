@@ -91,6 +91,39 @@ def test_full_request_rejects_numeric_decimals():
         EvaluationRequestV4.model_validate(payload)
 
 
+def test_full_date_validation_rejects_slices_and_bad_dates():
+    from eval_engine.contracts.dates import parse_full_date
+
+    assert str(parse_full_date("2026-09-01")) == "2026-09-01"
+    assert str(parse_full_date("2026/09/01")) == "2026-09-01"
+    for bad in ("2026-13-01", "2026-02-30", "06/01/2026", "2026-9-1", "2026-09-01T", "", 20260901, True):
+        with pytest.raises((ValidationError, ValueError)):
+            parse_full_date(bad)
+    with pytest.raises(ValidationError):
+        CompCandidateV4(comp_id="c1", sale_date="06/01/2026")
+    with pytest.raises(ValidationError):
+        EvaluationRequestV4.model_validate(
+            {
+                "subject": {"address": "x"},
+                "comps": [],
+                "renovation_level": "light_cosmetic",
+                "settings": {"tiers": []},
+                "evaluation_date": "2026-02-30",
+            }
+        )
+
+
+def test_snapshot_hash_validated_and_id_required():
+    snapshot = SettingsSnapshotV4(snapshot_id="s1")
+    stamped = snapshot.validated_for_durable_use()
+    assert stamped.content_hash == snapshot.compute_content_hash()
+    tampered = stamped.model_copy(update={"content_hash": "0" * 64})
+    with pytest.raises(ValueError):
+        tampered.validated_for_durable_use()
+    with pytest.raises(ValueError):
+        SettingsSnapshotV4(snapshot_id="").validated_for_durable_use()
+
+
 def test_openapi_compatible_json_schema_generation():
     schema = EvaluationRequestV4.model_json_schema()
     assert schema["title"] == "EvaluationRequestV4"

@@ -2,14 +2,10 @@
 
 from __future__ import annotations
 
-from datetime import date
-
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
-from typing import Annotated
+from pydantic import BaseModel, ConfigDict, Field
 
 from .base import DecimalString
-
-DateString = Annotated[date, BeforeValidator(lambda v: v if isinstance(v, date) else date.fromisoformat(str(v).strip()[:10]))]
+from .dates import OptionalStrictDate
 
 
 class CompCandidateV4(BaseModel):
@@ -19,7 +15,7 @@ class CompCandidateV4(BaseModel):
     provider_property_id: str = Field(default="", max_length=128)
     address: str = Field(default="", max_length=256)
     verified_sale_price: DecimalString | None = None
-    sale_date: DateString | None = None
+    sale_date: OptionalStrictDate = None
     sqft: DecimalString | None = None
     beds: DecimalString | None = None
     baths: DecimalString | None = None
@@ -34,4 +30,4 @@ class CompCandidateV4(BaseModel):
     subdivision: str = Field(default="", max_length=128)
 
 
-__all__ = ["CompCandidateV4", "DateString"]
+__all__ = ["CompCandidateV4"]

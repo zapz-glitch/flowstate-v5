@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 from .contracts import (
     AdditionalRenovationItemV4,
     AdjustmentLedgerEntryV4,
+    AdjustmentOutcomeV4,
     AppraisalFilterV4,
     ArvResultV4,
     CompAdjustmentRuleV4,

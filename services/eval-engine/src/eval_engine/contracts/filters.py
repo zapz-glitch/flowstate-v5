@@ -54,20 +54,31 @@ class CompAdjustmentRuleV4(BaseModel):
     signed_amount: DecimalString = Decimal("0")
     per_unit_amount: DecimalString | None = None
     unit: str = Field(default="", max_length=32)
-    applies_to: Literal["comp", "subject"] = "comp"
+    applies_to: Literal["comp", "subject", "both"] = "comp"
+    subject_evidence_field: str = Field(default="", max_length=64)
+    comp_evidence_field: str = Field(default="", max_length=64)
     source: str = Field(default="", max_length=64)
     precedence: str = Field(default="", max_length=64)
     version: str = Field(default="", max_length=32)
     evidence_field: str = Field(default="", max_length=64)
+
+    @property
+    def resolved_subject_field(self) -> str:
+        return self.subject_evidence_field or self.evidence_field
+
+    @property
+    def resolved_comp_field(self) -> str:
+        return self.comp_evidence_field or self.evidence_field
 
 
 class TransactionRuleV4(BaseModel):
     """Explicit configured transaction eligibility.
 
     No prohibited code lists are invented here. The snapshot carries the
-    operator-configured allowed/denied transaction codes and types; empty
-    means no configured restriction beyond intrinsic validity (verified
-    sale price present and positive, sale evidence not contradicted).
+    operator-configured allowed/denied transaction codes and types. When a
+    transaction field is marked required, unknown values fail instead of
+    passing silently. Empty with no required fields means no configured
+    restriction beyond intrinsic validity.
     """
 
     model_config = ConfigDict(populate_by_name=True, extra="forbid")
@@ -79,6 +90,8 @@ class TransactionRuleV4(BaseModel):
     allowed_types: list[str] = Field(default_factory=list, max_length=256)
     denied_types: list[str] = Field(default_factory=list, max_length=256)
     require_sale_flag: bool = False
+    require_known_code: bool = False
+    require_known_type: bool = False
     source: str = Field(default="", max_length=64)
     precedence: str = Field(default="", max_length=64)
     version: str = Field(default="", max_length=32)

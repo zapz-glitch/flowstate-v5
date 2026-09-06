@@ -2,9 +2,11 @@
 
 from .base import DECIMAL_PATTERN, DecimalString, parse_decimal_string, serialize_decimal
 from .comps import CompCandidateV4
+from .dates import OptionalStrictDate, StrictDate, parse_full_date, parse_optional_full_date
 from .deal import (
     AdditionalRenovationItemV4,
     AdjustmentLedgerEntryV4,
+    AdjustmentOutcomeV4,
     ArvResultV4,
     ArvStatus,
     CompDecisionV4,
@@ -17,6 +19,7 @@ from .deal import (
     InvestorStatus,
     IsoDate,
     MajorItemEvidenceV4,
+    OptionalIsoDate,
     RenovationItemResultV4,
     RenovationResultV4,
     RuleOutcomeV4,
@@ -42,6 +45,7 @@ __all__ = [
     "AdditionalRenovationItemV4",
     "AdjustmentKind",
     "AdjustmentLedgerEntryV4",
+    "AdjustmentOutcomeV4",
     "AppraisalFilterV4",
     "ArvResultV4",
     "ArvStatus",
@@ -62,6 +66,8 @@ __all__ = [
     "IsoDate",
     "MajorItemEvidenceV4",
     "MajorItemRuleV4",
+    "OptionalIsoDate",
+    "OptionalStrictDate",
     "RenovationItemResultV4",
     "RenovationResultV4",
     "RenovationTierCellV4",
@@ -70,7 +76,10 @@ __all__ = [
     "SectionStatus",
     "SettingsSnapshotV4",
     "SubjectPropertyV4",
+    "StrictDate",
     "TransactionRuleV4",
     "parse_decimal_string",
+    "parse_full_date",
+    "parse_optional_full_date",
     "serialize_decimal",
 ]

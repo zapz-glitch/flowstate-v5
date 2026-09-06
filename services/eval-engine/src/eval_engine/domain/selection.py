@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import date
 from decimal import Decimal
 
 from ..contracts.comps import CompCandidateV4
@@ -92,12 +91,13 @@ def select_arv_comps(
     ordered = sort_for_arv(valid)
     decisions: list[CompDecisionV4] = []
     for item in invalid:
+        outcomes = [item.tx_outcome] if item.tx_outcome is not None else []
         decisions.append(
             CompDecisionV4(
                 comp_id=item.comp.comp_id,
                 evidence_ref=item.comp.evidence_ref,
                 arv_status="REJECTED",
-                rule_outcomes=[],
+                rule_outcomes=[o for o in outcomes if o is not None],
                 rejection_reasons=list(item.reasons),
                 duplicate_of=item.duplicate_of,
             )
@@ -106,16 +106,20 @@ def select_arv_comps(
     stop_after = 3
     for item in ordered:
         if len(accepted) >= stop_after:
+            tx_outcomes = [item.tx_outcome] if item.tx_outcome is not None else []
             decisions.append(
                 CompDecisionV4(
                     comp_id=item.comp.comp_id,
                     evidence_ref=item.comp.evidence_ref,
                     arv_status="NOT_EXAMINED_FOR_ARV",
+                    rule_outcomes=[o for o in tx_outcomes if o is not None],
                     duplicate_of=item.duplicate_of,
                 )
             )
             continue
         outcomes = [apply_filter(rule, subject, item.comp, evaluation_date) for rule in filters]
+        if item.tx_outcome is not None:
+            outcomes = [item.tx_outcome, *outcomes]
         failures = [o for o in outcomes if not o.passed]
         limitations = [o.limitation for o in outcomes if o.limitation]
         if not isinstance(item.comp.verified_sale_price, Decimal):

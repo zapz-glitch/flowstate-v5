@@ -2,18 +2,19 @@
 
 from __future__ import annotations
 
-from datetime import date
 from decimal import Decimal
-from typing import Annotated, Literal
+from typing import Literal
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from .base import DecimalString
 from .comps import CompCandidateV4
+from .dates import OptionalStrictDate, StrictDate
 from .settings import SettingsSnapshotV4
 from .subject import SubjectPropertyV4
 
-IsoDate = Annotated[date, BeforeValidator(lambda v: v if isinstance(v, date) else date.fromisoformat(str(v).strip()[:10]))]
+IsoDate = StrictDate
+OptionalIsoDate = OptionalStrictDate
 
 ArvStatus = Literal["ACCEPTED", "REJECTED", "NOT_EXAMINED_FOR_ARV"]
 InvestorStatus = Literal["ACCEPTED", "REJECTED", "INSUFFICIENT_EVIDENCE"]
@@ -42,7 +43,7 @@ class MajorItemEvidenceV4(BaseModel):
 
     system_id: str = Field(min_length=1, max_length=64)
     supported_age_years: DecimalString | None = None
-    evidence_date: IsoDate | None = None
+    evidence_date: OptionalIsoDate = None
     permit_scope: str = Field(default="", max_length=256)
     completion_evidence: str = Field(default="", max_length=256)
     source: str = Field(default="", max_length=64)
@@ -67,7 +68,7 @@ class AdjustmentLedgerEntryV4(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="forbid")
 
     entry_id: str
-    stage: Literal["comp", "subject", "investor_comp", "major_item"] = "comp"
+    stage: Literal["comp", "subject", "investor_comp", "investor_subject", "major_item"] = "comp"
     target_id: str
     rule_id: str
     signed_amount: DecimalString
@@ -75,6 +76,17 @@ class AdjustmentLedgerEntryV4(BaseModel):
     evidence: str = ""
     input_value: str = ""
     duplicate_key: str = ""
+
+
+class AdjustmentOutcomeV4(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+
+    rule_id: str
+    kind: str = ""
+    stage: str = ""
+    outcome: Literal["applied", "skipped", "no_difference"] = "skipped"
+    reason: str = ""
+    signed_amount: DecimalString | None = None
 
 
 class CompDecisionV4(BaseModel):
@@ -111,6 +123,7 @@ class ArvResultV4(BaseModel):
     exact_value: str = ""
     limitations: list[str] = Field(default_factory=list)
     skipped_adjustments: list[str] = Field(default_factory=list)
+    adjustment_outcomes: list[AdjustmentOutcomeV4] = Field(default_factory=list)
 
 
 class RenovationItemResultV4(BaseModel):
@@ -195,13 +208,14 @@ class EvaluationRequestV4(BaseModel):
     settings: SettingsSnapshotV4
     major_item_evidence: list[MajorItemEvidenceV4] = Field(default_factory=list)
     additional_items: list[AdditionalRenovationItemV4] = Field(default_factory=list)
-    evaluation_date: IsoDate | None = None
+    evaluation_date: OptionalIsoDate = None
 
 
 class EvaluationResultV4(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="forbid")
 
     methodology_version: Literal["evaluation-v4"] = "evaluation-v4"
+    settings_schema_version: Literal["evaluation-v4"] = "evaluation-v4"
     status: EvalStatus
     settings_snapshot_id: str = ""
     settings_content_hash: str = ""
@@ -218,6 +232,7 @@ class EvaluationResultV4(BaseModel):
 __all__ = [
     "AdditionalRenovationItemV4",
     "AdjustmentLedgerEntryV4",
+    "AdjustmentOutcomeV4",
     "ArvResultV4",
     "ArvStatus",
     "CompDecisionV4",
@@ -230,6 +245,7 @@ __all__ = [
     "InvestorStatus",
     "IsoDate",
     "MajorItemEvidenceV4",
+    "OptionalIsoDate",
     "RenovationItemResultV4",
     "RenovationResultV4",
     "RuleOutcomeV4",

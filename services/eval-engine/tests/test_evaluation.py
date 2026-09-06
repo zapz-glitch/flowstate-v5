@@ -198,17 +198,99 @@ def test_permutation_invariant_duplicate_of_fallback():
     }
 
 
-def test_address_fallback_duplicate_without_provider_id():
+def test_explicit_duplicate_of_links_respected_and_bad_links_rejected():
     comps = [
-        make_comp("c1", "600000", address="Same Address"),
-        make_comp("c2", "590000", address="same address"),
-        make_comp("c3", "500000"),
-        make_comp("c4", "400000"),
+        make_comp("c2", "500000", duplicate_of="c1"),
+        make_comp("c1", "600000"),
+        make_comp("c3", "400000"),
+        make_comp("c4", "300000"),
     ]
     result = evaluate_v4(make_request(comps=comps))
     by_id = {d.comp_id: d for d in result.decisions}
     assert by_id["c2"].arv_status == "REJECTED"
     assert by_id["c2"].duplicate_of == "c1"
+    bad = [
+        make_comp("c1", "600000"),
+        make_comp("c-self", "500000", duplicate_of="c-self"),
+        make_comp("c3", "400000"),
+    ]
+    bad_result = evaluate_v4(make_request(comps=bad))
+    assert bad_result.decisions[[d.comp_id for d in bad_result.decisions].index("c-self")].arv_status == "REJECTED"
+    missing = [
+        make_comp("c1", "600000"),
+        make_comp("c-ghost", "500000", duplicate_of="nope"),
+        make_comp("c3", "400000"),
+    ]
+    missing_result = evaluate_v4(make_request(comps=missing))
+    assert "missing target" in " ".join(
+        missing_result.decisions[[d.comp_id for d in missing_result.decisions].index("c-ghost")].rejection_reasons
+    )
+
+
+def test_transitive_equivalence_and_cycle_survivor_deterministic():
+    group = [
+        make_comp("c1", "500000", provider_property_id="P1", evidence_ref="tx-a"),
+        make_comp("c2", "600000", provider_property_id="P1", evidence_ref="tx-b"),
+        make_comp("c3", "550000", provider_property_id="P1", evidence_ref="tx-b"),
+        make_comp("c4", "400000"),
+        make_comp("c5", "300000"),
+    ]
+    first = evaluate_v4(make_request(comps=group))
+    swapped = evaluate_v4(make_request(comps=list(reversed(group))))
+    first_map = sorted((d.comp_id, d.duplicate_of, d.arv_status) for d in first.decisions)
+    swapped_map = sorted((d.comp_id, d.duplicate_of, d.arv_status) for d in swapped.decisions)
+    assert first_map == swapped_map
+    cyclic = [
+        make_comp("c1", "600000", duplicate_of="c2"),
+        make_comp("c2", "590000", duplicate_of="c1"),
+        make_comp("c3", "500000"),
+        make_comp("c4", "400000"),
+        make_comp("c5", "300000"),
+    ]
+    cyclic_result = evaluate_v4(make_request(comps=cyclic))
+    by_id = {d.comp_id: d for d in cyclic_result.decisions}
+    assert by_id["c1"].arv_status == "ACCEPTED"
+    assert by_id["c2"].arv_status == "REJECTED"
+
+
+def test_transitive_address_chain_collapses_permutation_invariant():
+    group = [
+        make_comp("c1", "500000", address="  123 Main St  "),
+        make_comp("c2", "510000", address="123 main st"),
+        make_comp("c3", "520000", address="123   Main ST"),
+        make_comp("c4", "400000"),
+        make_comp("c5", "300000"),
+    ]
+    first = evaluate_v4(make_request(comps=group))
+    swapped = evaluate_v4(make_request(comps=list(reversed(group))))
+    assert sorted((d.comp_id, d.duplicate_of) for d in first.decisions) == sorted(
+        (d.comp_id, d.duplicate_of) for d in swapped.decisions
+    )
+
+
+def test_insufficient_result_preserves_accepted_ids():
+    comps = [make_comp("c1", "400000"), make_comp("c2", "300000")]
+    result = evaluate_v4(make_request(comps=comps))
+    assert result.status == "INSUFFICIENT_COMPS"
+    assert result.arv.accepted_comp_ids == ["c1", "c2"]
+
+
+def test_result_carries_snapshot_schema_versions_and_hash():
+    comps = [make_comp("c1", "600000"), make_comp("c2", "590000"), make_comp("c3", "580000")]
+    result = evaluate_v4(make_request(comps=comps))
+    assert result.settings_schema_version == "evaluation-v4"
+    assert result.settings_snapshot_id == "s1"
+    assert result.settings_content_hash == make_settings().compute_content_hash()
+
+
+def test_tampered_snapshot_hash_fails_durable_contract():
+    comps = [make_comp("c1", "600000"), make_comp("c2", "590000"), make_comp("c3", "580000")]
+    settings = make_settings()
+    stamped = settings.model_copy(update={"content_hash": settings.compute_content_hash()})
+    tampered = stamped.model_copy(update={"content_hash": "f" * 64})
+    result = evaluate_v4(make_request(comps=comps, settings=tampered))
+    assert result.status == "FAILED"
+    assert result.errors and result.errors[0].code == "INVALID_SNAPSHOT"
 
 
 def test_early_stop_marks_remaining_not_examined():
@@ -231,8 +313,9 @@ def test_rejected_comp_records_reasons_and_rule_outcomes():
     by_id = {d.comp_id: d for d in result.decisions}
     assert by_id["c2"].arv_status == "REJECTED"
     assert by_id["c2"].rejection_reasons
-    assert by_id["c2"].rule_outcomes and by_id["c2"].rule_outcomes[0].passed is False
-    assert by_id["c1"].rule_outcomes and by_id["c1"].rule_outcomes[0].passed is True
+    assert any(o.rule_id == "dist" and o.passed is False for o in by_id["c2"].rule_outcomes)
+    assert any(o.rule_id == "transaction_eligibility" for o in by_id["c2"].rule_outcomes)
+    assert any(o.rule_id == "dist" and o.passed is True for o in by_id["c1"].rule_outcomes)
     assert by_id["c4"].arv_status == "ACCEPTED"
 
 
@@ -248,8 +331,23 @@ def test_configured_transaction_rule_without_invented_lists():
     by_id = {d.comp_id: d for d in result.decisions}
     assert by_id["c2"].arv_status == "REJECTED"
     assert "tx" in " ".join(by_id["c2"].rejection_reasons)
+    assert any(o.kind == "transaction" for o in by_id["c1"].rule_outcomes)
     default_result = evaluate_v4(make_request(comps=comps))
     assert default_result.arv.accepted_comp_ids[:3] == ["c1", "c2", "c3"]
+
+
+def test_required_transaction_fields_reject_unknown_with_outcome():
+    tx = TransactionRuleV4(rule_id="tx-req", allowed_codes=["ARMS"], require_known_code=True)
+    comps = [
+        make_comp("c1", "600000", transaction_code="ARMS"),
+        make_comp("c2", "590000", transaction_code="MYSTERY"),
+        make_comp("c3", "580000", transaction_code="ARMS"),
+        make_comp("c4", "570000", transaction_code="ARMS"),
+    ]
+    result = evaluate_v4(make_request(comps=comps, settings=make_settings(tx=tx)))
+    by_id = {d.comp_id: d for d in result.decisions}
+    assert by_id["c2"].arv_status == "REJECTED"
+    assert any(o.kind == "transaction" and not o.passed for o in by_id["c2"].rule_outcomes)
 
 
 def test_unknown_required_evidence_fails_rule():
@@ -277,7 +375,7 @@ def test_missing_calc_field_rejects_comp_but_continues_first_three():
     result = evaluate_v4(make_request(comps=comps))
     by_id = {d.comp_id: d for d in result.decisions}
     assert by_id["c-bad"].arv_status == "REJECTED"
-    assert result.arv.status == "FAILED" or result.arv.accepted_comp_ids[:3] == ["c-top", "c2", "c3"]
+    assert result.arv.accepted_comp_ids[:3] == ["c-top", "c2", "c3"]
 
 
 def test_boundary_fixtures():
@@ -296,8 +394,12 @@ def test_boundary_fixtures():
 
 
 def test_strict_tier_order_endpoints_and_cells():
+    from eval_engine.domain.renovation import tier_inclusivity
+
     tiers = make_tiers()
     assert validate_tiers(tiers) == []
+    assert tier_inclusivity(tiers[0]) == "[0..500000)"
+    assert tier_inclusivity(tiers[2]) == "[1000000..3000000]"
     assert validate_tiers(list(reversed(tiers)))
     bad = make_tiers()
     bad[0] = RenovationTierV4(tier_key="under500k", lower_inclusive="0", upper_exclusive="501000", cells=bad[0].cells)
@@ -308,6 +410,11 @@ def test_strict_tier_order_endpoints_and_cells():
         cells=incomplete[1].cells[:4],
     )
     assert validate_tiers(incomplete)
+    flipped = make_tiers()
+    flipped[1] = RenovationTierV4(
+        tier_key="500k_to_under1m", lower_inclusive="500000", upper_inclusive="1000000", cells=flipped[1].cells,
+    )
+    assert validate_tiers(flipped)
 
 
 def test_adjustment_signs_and_no_double_count():
@@ -350,6 +457,27 @@ def test_duplicate_rule_instance_applies_once_per_target():
     ]
     result = evaluate_v4(EvaluationRequestV4(subject=subject, comps=comps, renovation_level="light_cosmetic", settings=make_settings(adjustments=adjustments), evaluation_date="2026-09-01"))
     assert len([e for e in result.ledger if e.rule_id == "feat"]) == 3
+
+
+def test_feature_proximity_require_typed_evidence_and_record_outcomes():
+    subject = SubjectPropertyV4(address="s", sqft="2000")
+    comps = [make_comp("c1", "500000"), make_comp("c2", "500000"), make_comp("c3", "500000")]
+    flat = [CompAdjustmentRuleV4(rule_id="pool", kind="feature", signed_amount="8000", applies_to="comp")]
+    flat_result = evaluate_v4(EvaluationRequestV4(subject=subject, comps=comps, renovation_level="light_cosmetic", settings=make_settings(adjustments=flat), evaluation_date="2026-09-01"))
+    assert flat_result.arv.final_arv == Decimal("508000")
+    assert any(o.outcome == "applied" for o in flat_result.arv.adjustment_outcomes)
+    typed = [CompAdjustmentRuleV4(rule_id="pool", kind="feature", per_unit_amount="8000", signed_amount="0", applies_to="comp", subject_evidence_field="beds", comp_evidence_field="beds")]
+    typed_result = evaluate_v4(EvaluationRequestV4(subject=SubjectPropertyV4(address="s", sqft="2000", beds="3"), comps=[make_comp("c1", "500000", beds="2"), make_comp("c2", "500000", beds="2"), make_comp("c3", "500000", beds="2")], renovation_level="light_cosmetic", settings=make_settings(adjustments=typed), evaluation_date="2026-09-01"))
+    assert typed_result.arv.final_arv == Decimal("508000")
+    missing = [CompAdjustmentRuleV4(rule_id="pool", kind="feature", per_unit_amount="8000", signed_amount="0", applies_to="comp", subject_evidence_field="beds", comp_evidence_field="beds")]
+    missing_result = evaluate_v4(EvaluationRequestV4(subject=subject, comps=comps, renovation_level="light_cosmetic", settings=make_settings(adjustments=missing), evaluation_date="2026-09-01"))
+    assert missing_result.status == "REVIEW_REQUIRED"
+    assert missing_result.arv.status == "PRELIMINARY"
+    assert any(o.outcome == "skipped" for o in missing_result.arv.adjustment_outcomes)
+    assert any(o.outcome == "no_difference" or o.outcome == "applied" for o in typed_result.arv.adjustment_outcomes)
+    zero = [CompAdjustmentRuleV4(rule_id="bed", kind="bedroom", per_unit_amount="15000", signed_amount="0", applies_to="comp")]
+    zero_result = evaluate_v4(EvaluationRequestV4(subject=SubjectPropertyV4(address="s", sqft="2000", beds="3"), comps=[make_comp("c1", "500000", beds="3"), make_comp("c2", "500000", beds="3"), make_comp("c3", "500000", beds="3")], renovation_level="light_cosmetic", settings=make_settings(adjustments=zero), evaluation_date="2026-09-01"))
+    assert any(o.outcome == "no_difference" for o in zero_result.arv.adjustment_outcomes)
 
 
 def test_major_item_age_equal_below_above_with_scope_gate():
@@ -398,6 +526,61 @@ def test_major_item_conflict_reconciliation_and_panel_rewiring_dedupe():
     result = evaluate_v4(make_request(comps=comps, settings=make_settings(major=rules), major_item_evidence=evidence))
     assert any("conflicting" in limit or "conflict" in limit for limit in result.renovation.limitations)
     assert sum(1 for item in result.renovation.items if item.included) <= 1
+
+
+def test_major_item_canonical_aliases_and_manual_categories():
+    from eval_engine.domain.renovation import canonical_level, canonical_system
+
+    assert canonical_system("Re-Wire") == "rewiring"
+    assert canonical_system("ELECTRICAL PANEL") == "electrical_panel"
+    assert canonical_system("replumb") == "plumbing"
+    assert canonical_level("Down to Stud") == "full_gut"
+    rules = [MajorItemRuleV4(system_id="appliance_package", age_threshold_years="10", replacement_cost="4000", inclusion_category="operator_additional")]
+    evidence = [permitted_evidence("appliance_package", "12")]
+    comps = [make_comp("c1", "600000"), make_comp("c2", "590000"), make_comp("c3", "580000")]
+    result = evaluate_v4(make_request(comps=comps, settings=make_settings(major=rules), major_item_evidence=evidence))
+    assert result.renovation.items[0].included is False
+    assert any("explicit operator" in limit for limit in result.renovation.limitations)
+
+
+def test_major_item_base_overlap_uses_tier_cell_systems():
+    tiers = make_tiers()
+    tiers[1].cells[1] = RenovationTierCellV4(
+        renovation_level="light_cosmetic", rehab_rate_per_sqft="100", flip_profit="50000",
+        included_systems=["roof"],
+    )
+    rules = [MajorItemRuleV4(system_id="roof", age_threshold_years="20", replacement_cost="12000")]
+    evidence = [permitted_evidence("roof", "40")]
+    comps = [make_comp("c1", "600000"), make_comp("c2", "590000"), make_comp("c3", "580000")]
+    result = evaluate_v4(make_request(comps=comps, settings=make_settings(tiers=tiers, major=rules), major_item_evidence=evidence))
+    assert result.renovation.items[0].included is False
+    assert any("base rehab overlap" in limit for limit in result.renovation.limitations)
+
+
+def test_major_item_overlap_only_among_triggering_candidates():
+    rules = [
+        MajorItemRuleV4(system_id="electrical_panel", age_threshold_years="20", replacement_cost="3000"),
+        MajorItemRuleV4(system_id="rewiring", age_threshold_years="20", replacement_cost="9000"),
+    ]
+    evidence = [permitted_evidence("rewiring", "40")]
+    comps = [make_comp("c1", "600000"), make_comp("c2", "590000"), make_comp("c3", "580000")]
+    result = evaluate_v4(make_request(comps=comps, settings=make_settings(major=rules), major_item_evidence=evidence))
+    by_system = {i.system_id: i for i in result.renovation.items}
+    assert by_system["rewiring"].included is True
+    assert by_system["electrical_panel"].included is False
+
+
+def test_major_item_all_additional_items_included_with_reasons():
+    comps = [make_comp("c1", "600000"), make_comp("c2", "590000"), make_comp("c3", "580000")]
+    additional = [
+        AdditionalRenovationItemV4(item_id="deck", cost="5000"),
+        AdditionalRenovationItemV4(item_id="fence", cost="2000", dedup_group="shared"),
+        AdditionalRenovationItemV4(item_id="fence-dupe", cost="2000", dedup_group="shared"),
+    ]
+    result = evaluate_v4(make_request(comps=comps, additional_items=additional))
+    assert result.renovation.additional_total == Decimal("7000")
+    assert any("deck: included" in limit for limit in result.renovation.limitations)
+    assert any("duplicate" in limit for limit in result.renovation.limitations)
 
 
 def test_rounding_exact_ceiling_and_display():
@@ -475,6 +658,39 @@ def test_investor_applies_property_filters():
     comps += [make_comp(f"high{i}", str(600000 + i * 1000), distance_miles="50") for i in range(5)]
     result = evaluate_v4(make_request(comps=comps, settings=make_settings(filters=filters)))
     assert result.investor.status == "INSUFFICIENT_INVESTOR_DATA"
+
+
+def test_investor_appends_ledger_and_applies_subject_once():
+    comps = [make_comp(f"low{i}", str(200000 + i * 1000)) for i in range(4)] + [make_comp(f"high{i}", str(600000 + i * 1000)) for i in range(4)]
+    adjustments = [CompAdjustmentRuleV4(rule_id="pool", kind="feature", signed_amount="1000", applies_to="comp")]
+    result = evaluate_v4(make_request(comps=comps, settings=make_settings(adjustments=adjustments)))
+    assert result.investor.status == "COHORT_FOUND"
+    assert any(e.stage == "investor_comp" for e in result.ledger)
+
+
+def test_investor_subject_adjustment_applied_once():
+    comps = [make_comp(f"low{i}", str(200000 + i * 1000)) for i in range(4)] + [make_comp(f"high{i}", str(600000 + i * 1000)) for i in range(4)]
+    adjustments = [CompAdjustmentRuleV4(rule_id="subj", kind="feature", signed_amount="5000", applies_to="subject")]
+    result = evaluate_v4(make_request(comps=comps, settings=make_settings(adjustments=adjustments)))
+    assert result.investor.status == "COHORT_FOUND"
+    assert len([e for e in result.ledger if e.stage == "investor_subject"]) == 1
+    assert len([e for e in result.ledger if e.stage == "subject"]) == 1
+
+
+def test_investor_rejects_tail_and_skew():
+    tail = [make_comp(f"c{i}", str(300000 + i * 1000)) for i in range(8)] + [make_comp("tail", "900000")]
+    assert evaluate_v4(make_request(comps=tail)).investor.status == "INSUFFICIENT_INVESTOR_DATA"
+    skew = [make_comp(f"c{i}", "300000") for i in range(7)] + [make_comp("high", "900000")]
+    assert evaluate_v4(make_request(comps=skew)).investor.status == "INSUFFICIENT_INVESTOR_DATA"
+
+
+def test_investor_marks_filter_exclusions_rejected_with_reasons():
+    filters = [AppraisalFilterV4(rule_id="dist", kind="max_distance_miles", value="1")]
+    comps = [make_comp(f"low{i}", str(200000 + i * 1000), distance_miles="0.5") for i in range(4)]
+    comps += [make_comp(f"high{i}", str(600000 + i * 1000), distance_miles="50") for i in range(5)]
+    result = evaluate_v4(make_request(comps=comps, settings=make_settings(filters=filters)))
+    by_id = {d.comp_id: d for d in result.decisions}
+    assert any(d.investor_status == "REJECTED" and any("filter exclusion" in r for r in d.rejection_reasons) for d in by_id.values())
 
 
 def test_investor_does_not_fail_supported_arv():
