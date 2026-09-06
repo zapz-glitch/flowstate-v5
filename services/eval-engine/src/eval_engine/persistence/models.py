@@ -114,6 +114,21 @@ class Batch(Base):
             "status IN ('pending','running','succeeded','partial','failed')",
             name="ck_v4_batch_status",
         ),
+        # Batch `running` means at least one property reached a terminal
+        # execution state while at least one property is still non-terminal.
+        # The status is always exactly derived from the counters.
+        CheckConstraint(
+            "(status = 'pending' AND succeeded_count = 0 AND failed_count = 0)"
+            " OR (status = 'running' AND (succeeded_count > 0 OR failed_count > 0)"
+            " AND succeeded_count + failed_count < total_count)"
+            " OR (status = 'succeeded' AND failed_count = 0"
+            " AND succeeded_count = total_count)"
+            " OR (status = 'failed' AND succeeded_count = 0"
+            " AND failed_count = total_count)"
+            " OR (status = 'partial' AND succeeded_count > 0 AND failed_count > 0"
+            " AND succeeded_count + failed_count = total_count)",
+            name="ck_v4_batch_status_counts",
+        ),
         Index("ix_v4_batch_tenant", "tenant_id"),
         Index("ix_v4_batch_tenant_status", "tenant_id", "status"),
     )
@@ -191,6 +206,23 @@ class Evaluation(Base):
         CheckConstraint(
             "status IN ('queued','claimed','running','succeeded','failed','dead')",
             name="ck_v4_eval_status",
+        ),
+        # `running` means the lease holder started execution: requires an
+        # active lease (owner/token/expiry) and at least one attempt.
+        CheckConstraint(
+            "status <> 'running' OR (lease_owner IS NOT NULL"
+            " AND lease_token IS NOT NULL AND lease_expires_at IS NOT NULL"
+            " AND attempts > 0)",
+            name="ck_v4_eval_running_lease",
+        ),
+        # Terminal execution states release the lease so one active lease
+        # can consume at most one terminal result.
+        CheckConstraint(
+            "status NOT IN ('queued','claimed','running','succeeded','failed','dead')"
+            " OR status IN ('queued','claimed','running')"
+            " OR (lease_owner IS NULL AND lease_token IS NULL"
+            " AND lease_expires_at IS NULL)",
+            name="ck_v4_eval_terminal_no_lease",
         ),
         CheckConstraint(
             "result_status IS NULL OR result_status IN "
@@ -279,3 +311,23 @@ class EvaluationResult(Base):
     )
 
     evaluation: Mapped[Evaluation] = relationship(back_populates="results")
+
+
+class ResultSnapshotBackfill(Base):
+    """Auditable record of 0002 backfilled null/mismatched result snapshots."""
+
+    __tablename__ = "v4_result_snapshot_backfill"
+
+    result_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True
+    )
+    evaluation_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False
+    )
+    tenant_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    snapshot_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False
+    )
+    backfilled_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )

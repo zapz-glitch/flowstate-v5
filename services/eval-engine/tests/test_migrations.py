@@ -130,6 +130,12 @@ def test_alembic_up_and_down_on_isolated_database():
         }
         assert "ck_v4_batch_total_range" in batch_ck
         assert "ck_v4_batch_counts_sum" in batch_ck
+        assert "ck_v4_batch_status_counts" in batch_ck
+        eval_ck = {
+            ck["name"] for ck in insp.get_check_constraints("v4_evaluations")
+        }
+        assert "ck_v4_eval_running_lease" in eval_ck
+        assert "ck_v4_eval_terminal_no_lease" in eval_ck
         with engine.begin() as conn:
             trig = conn.execute(
                 text(
@@ -139,6 +145,14 @@ def test_alembic_up_and_down_on_isolated_database():
             ).scalar()
             assert trig == 1
         engine.dispose()
+        command.downgrade(_config(url), "0001_v4_initial")
+        _seed_populated_0001(url)
+        command.upgrade(_config(url), "head")
+        _assert_populated_head(url, expect_backfilled=1)
+        command.downgrade(_config(url), "0001_v4_initial")
+        _assert_populated_0001(url)
+        command.upgrade(_config(url), "head")
+        _assert_populated_head(url, expect_backfilled=0)
         command.downgrade(_config(url), "base")
         remaining = set(inspect(create_engine(url)).get_table_names())
         assert EXPECTED_TABLES.isdisjoint(remaining)
@@ -153,6 +167,120 @@ def test_alembic_up_and_down_on_isolated_database():
         with maint.connect() as conn:
             conn.execute(text(f'DROP DATABASE IF EXISTS "{db_name}" WITH (FORCE)'))
         maint.dispose()
+
+
+def _seed_populated_0001(url: str) -> dict:
+    engine = create_engine(url, isolation_level="AUTOCOMMIT")
+    tenant = "t-mig"
+    snap = uuid.uuid4()
+    batch_done = uuid.uuid4()
+    batch_open = uuid.uuid4()
+    eval_done = uuid.uuid4()
+    eval_open = uuid.uuid4()
+    res_ok = uuid.uuid4()
+    res_null_snap = uuid.uuid4()
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO v4_settings_snapshots "
+                "(id, tenant_id, snapshot_version, content_hash, content, "
+                " source, created_at) VALUES (:id, :t, 'v1', :h, "
+                " '{\"a\": 1}', '{\"a\": \"sys\"}', now())"
+            ),
+            {"id": snap, "t": tenant, "h": f"h-{uuid.uuid4().hex[:8]}"},
+        )
+        conn.execute(
+            text(
+                "INSERT INTO v4_batches (id, tenant_id, idempotency_key, "
+                " request_hash, status, total_count, succeeded_count, "
+                " failed_count, snapshot_id, created_at, updated_at) "
+                "VALUES (:id, :t, 'b-done', 'h1', 'pending', 1, 0, 0, "
+                " :snap, now(), now()), (:id2, :t, 'b-open', 'h2', "
+                " 'pending', 1, 0, 0, :snap, now(), now())"
+            ),
+            {"id": batch_done, "id2": batch_open, "t": tenant, "snap": snap},
+        )
+        conn.execute(
+            text(
+                "INSERT INTO v4_evaluations (id, tenant_id, batch_id, "
+                " idempotency_key, request_hash, status, attempts, "
+                " max_attempts, created_at, updated_at) "
+                "VALUES (:e1, :t, :b1, 'e-done', 'h', 'succeeded', 1, 5, "
+                " now(), now()), (:e2, :t, :b2, 'e-open', 'h', 'queued', "
+                " 0, 5, now(), now())"
+            ),
+            {"e1": eval_done, "e2": eval_open, "t": tenant,
+             "b1": batch_done, "b2": batch_open},
+        )
+        conn.execute(
+            text(
+                "INSERT INTO v4_evaluation_results (id, tenant_id, "
+                " evaluation_id, version, methodology_version, snapshot_id, "
+                " status, result_payload, result_hash, created_at) "
+                "VALUES (:r1, :t, :e1, 1, 'm', :snap, 'succeeded', "
+                " CAST(:p1 AS jsonb), :h1, now())"
+            ),
+            {"r1": res_ok, "t": tenant, "e1": eval_done, "snap": snap,
+             "p1": '{"v": 1}', "h1": f"h-{uuid.uuid4().hex[:8]}"},
+        )
+        conn.execute(
+            text(
+                "INSERT INTO v4_evaluation_results (id, tenant_id, "
+                " evaluation_id, version, methodology_version, snapshot_id, "
+                " status, result_payload, result_hash, created_at) "
+                "VALUES (:r2, :t, :e1, 2, 'm', NULL, "
+                " 'incomplete', CAST(:p2 AS jsonb), :h2, now())"
+            ),
+            {"r2": res_null_snap, "t": tenant, "e1": eval_done,
+             "p2": '{"v": 2}', "h2": f"h-{uuid.uuid4().hex[:8]}"},
+        )
+    engine.dispose()
+    return {
+        "tenant": tenant, "snapshot": snap, "batch_done": batch_done,
+        "batch_open": batch_open, "eval_done": eval_done,
+        "eval_open": eval_open, "res_ok": res_ok,
+        "res_null_snap": res_null_snap,
+    }
+
+
+def _assert_populated_head(url: str, expect_backfilled: int = 1) -> None:
+    engine = create_engine(url)
+    with engine.begin() as conn:
+        statuses = {
+            row[0]: row[1] for row in conn.execute(
+                text("SELECT id, status FROM v4_evaluation_results")
+            ).fetchall()
+        }
+        assert set(statuses.values()) == {"VALUED", "INCOMPLETE"}
+        nulls = conn.execute(
+            text("SELECT count(*) FROM v4_evaluation_results "
+                 "WHERE snapshot_id IS NULL")
+        ).scalar()
+        assert nulls == 0
+        backfilled = conn.execute(
+            text("SELECT count(*) FROM v4_result_snapshot_backfill")
+        ).scalar()
+        assert backfilled == expect_backfilled
+        eval_status = {
+            row[0]: (row[1], row[2]) for row in conn.execute(
+                text("SELECT id, status, result_status FROM v4_evaluations")
+            ).fetchall()
+        }
+        done = [row for row in eval_status.values() if row[0] == "succeeded"]
+        assert done and all(outcome == "VALUED" for _, outcome in done)
+    engine.dispose()
+
+
+def _assert_populated_0001(url: str) -> None:
+    engine = create_engine(url)
+    with engine.begin() as conn:
+        statuses = {
+            row[1] for row in conn.execute(
+                text("SELECT id, status FROM v4_evaluation_results")
+            ).fetchall()
+        }
+        assert statuses == {"succeeded", "incomplete"}
+    engine.dispose()
 
 
 def test_alembic_env_rejects_non_postgresql():

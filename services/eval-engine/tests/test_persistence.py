@@ -30,7 +30,7 @@ from eval_engine.persistence.db import (
     normalize_postgresql_url,
     require_postgresql_url,
 )
-from eval_engine.persistence.models import Base, Evaluation
+from eval_engine.persistence.models import Base, Evaluation, EvaluationResult
 from eval_engine.persistence.repositories import (
     IdempotencyConflict,
     LeaseMismatch,
@@ -585,29 +585,40 @@ def test_stale_worker_cannot_mutate(session: Session):
     assert heartbeat_lease(
         session, tenant_id="t-fence", evaluation_id=claim.evaluation_id,
         lease_owner="w-1", lease_token=claim.lease_token,
+        lease_generation=claim.lease_generation,
     )
     assert not heartbeat_lease(
         session, tenant_id="t-fence", evaluation_id=claim.evaluation_id,
         lease_owner="impostor", lease_token=claim.lease_token,
+        lease_generation=claim.lease_generation,
     )
     assert not heartbeat_lease(
         session, tenant_id="t-fence", evaluation_id=claim.evaluation_id,
         lease_owner="w-1", lease_token=uuid.uuid4(),
+        lease_generation=claim.lease_generation,
+    )
+    assert not heartbeat_lease(
+        session, tenant_id="t-fence", evaluation_id=claim.evaluation_id,
+        lease_owner="w-1", lease_token=claim.lease_token,
+        lease_generation=claim.lease_generation + 1,
     )
     assert not mark_running(
         session, tenant_id="t-fence", evaluation_id=claim.evaluation_id,
         lease_owner="w-1", lease_token=uuid.uuid4(),
+        lease_generation=claim.lease_generation,
     )
     with pytest.raises(LeaseMismatch):
         save_checkpoint(
             session, tenant_id="t-fence", evaluation_id=claim.evaluation_id,
-            lease_owner="w-1", lease_token=uuid.uuid4(), checkpoint={"s": 1},
+            lease_owner="w-1", lease_token=uuid.uuid4(),
+            lease_generation=claim.lease_generation, checkpoint={"s": 1},
         )
     session.rollback()
     with pytest.raises(LeaseMismatch):
         fail_evaluation(
             session, tenant_id="t-fence", evaluation_id=claim.evaluation_id,
             lease_owner="w-1", lease_token=uuid.uuid4(),
+            lease_generation=claim.lease_generation,
             error_code="transient",
         )
     session.rollback()
@@ -617,6 +628,7 @@ def test_stale_worker_cannot_mutate(session: Session):
     assert not heartbeat_lease(
         session, tenant_id="t-fence", evaluation_id=claim.evaluation_id,
         lease_owner="w-1", lease_token=claim.lease_token,
+        lease_generation=claim.lease_generation,
         now=datetime.now(timezone.utc) + timedelta(hours=2),
     )
     assert batch.id is not None
@@ -648,7 +660,7 @@ def test_lease_expiry_recovery(session: Session):
 
 
 def test_result_commit_identity_versioning_and_statuses(
-    session: Session, snapshot
+    session: Session,
 ):
     batch = _make_batch(
         session, "t-result", "batch-result", n=1, prefix="res"
@@ -659,6 +671,7 @@ def test_result_commit_identity_versioning_and_statuses(
     first, created = commit_result(
         session, tenant_id="t-result", evaluation_id=claim.evaluation_id,
         lease_owner="w-1", lease_token=claim.lease_token,
+        lease_generation=claim.lease_generation,
         methodology_version="evaluation-v4", snapshot_id=batch.snapshot_id,
         status="VALUED", result_payload={"value": "100000"},
     )
@@ -676,7 +689,7 @@ def test_result_commit_identity_versioning_and_statuses(
 
 
 def test_result_reevaluation_new_version_and_status_change(
-    session: Session, snapshot
+    session: Session,
 ):
     batch = _make_batch(
         session, "t-reval", "batch-reval", n=1, prefix="rv"
@@ -686,6 +699,7 @@ def test_result_reevaluation_new_version_and_status_change(
     first, _ = commit_result(
         session, tenant_id="t-reval", evaluation_id=claim.evaluation_id,
         lease_owner="w-1", lease_token=claim.lease_token,
+        lease_generation=claim.lease_generation,
         methodology_version="evaluation-v4", snapshot_id=batch.snapshot_id,
         status="VALUED", result_payload={"value": "100000"},
     )
@@ -704,6 +718,7 @@ def test_result_reevaluation_new_version_and_status_change(
     second, created = commit_result(
         session, tenant_id="t-reval", evaluation_id=claim3.evaluation_id,
         lease_owner="w-2", lease_token=claim3.lease_token,
+        lease_generation=claim3.lease_generation,
         methodology_version="evaluation-v4", snapshot_id=batch.snapshot_id,
         status="REVIEW_REQUIRED", result_payload={"value": "100000"},
     )
@@ -735,19 +750,26 @@ def test_result_race_identical_and_different(maker):
 
     first_claim = claim_for("w-first")
     assert first_claim is not None
+    snap_id = batch.snapshot_id
+    barrier = threading.Barrier(4)
     results: list = []
 
     def commit_same():
         sess = maker()
         try:
+            barrier.wait(timeout=10)
             record, created = commit_result(
                 sess, tenant_id="t-rrace", evaluation_id=eval_id,
                 lease_owner="w-first", lease_token=first_claim.lease_token,
-                methodology_version="evaluation-v4", snapshot_id=batch.snapshot_id,
+                lease_generation=first_claim.lease_generation,
+                methodology_version="evaluation-v4", snapshot_id=snap_id,
                 status="VALUED", result_payload={"value": "7"},
             )
             sess.commit()
             results.append((str(record.id), record.version, created))
+        except LeaseMismatch as exc:
+            sess.rollback()
+            results.append(("fenced", "LeaseMismatch", str(exc)[:100]))
         except Exception as exc:
             sess.rollback()
             results.append(("err", type(exc).__name__, str(exc)[:100]))
@@ -759,10 +781,11 @@ def test_result_race_identical_and_different(maker):
         thread.start()
     for thread in threads:
         thread.join()
-    ok = [entry for entry in results if entry[0] != "err"]
-    assert len(ok) == 4
-    assert len({entry[0] for entry in ok}) == 1
-    assert {entry[1] for entry in ok} == {1}
+    winners = [entry for entry in results if entry[0] not in ("err", "fenced")]
+    fenced = [entry for entry in results if entry[0] == "fenced"]
+    assert len(winners) == 1 and winners[0][1] == 1 and winners[0][2] is True
+    assert len(fenced) == 3
+    assert not [entry for entry in results if entry[0] == "err"]
 
     sess = maker()
     row = sess.get(Evaluation, eval_id)
@@ -776,7 +799,8 @@ def test_result_race_identical_and_different(maker):
     record, created = commit_result(
         sess, tenant_id="t-rrace", evaluation_id=eval_id,
         lease_owner="w-second", lease_token=second_claim.lease_token,
-        methodology_version="evaluation-v4", snapshot_id=batch.snapshot_id,
+        lease_generation=second_claim.lease_generation,
+        methodology_version="evaluation-v4", snapshot_id=snap_id,
         status="INSUFFICIENT_COMPS", result_payload={"value": "7"},
     )
     sess.commit()
@@ -799,12 +823,14 @@ def test_per_property_failure_and_batch_counts(session: Session):
     commit_result(
         session, tenant_id="t-counts", evaluation_id=claims[0].evaluation_id,
         lease_owner="w-1", lease_token=claims[0].lease_token,
+        lease_generation=claims[0].lease_generation,
         methodology_version="evaluation-v4", snapshot_id=batch.snapshot_id,
         status="VALUED", result_payload={"value": "1"},
     )
     commit_result(
         session, tenant_id="t-counts", evaluation_id=claims[1].evaluation_id,
         lease_owner="w-1", lease_token=claims[1].lease_token,
+        lease_generation=claims[1].lease_generation,
         methodology_version="evaluation-v4", snapshot_id=batch.snapshot_id,
         status="INSUFFICIENT_COMPS", result_payload={"error": "thin-market"},
     )
@@ -826,6 +852,7 @@ def test_non_retriable_terminal_failure(session: Session):
     status = fail_evaluation(
         session, tenant_id="t-nr", evaluation_id=claim.evaluation_id,
         lease_owner="w-1", lease_token=claim.lease_token,
+        lease_generation=claim.lease_generation,
         error_code="invalid_evidence", error_detail="no verified price",
         result_status="INCOMPLETE",
     )
@@ -850,6 +877,7 @@ def test_bounded_retry_scheduling_and_dead(session: Session):
     status = fail_evaluation(
         session, tenant_id="t-retry", evaluation_id=claim.evaluation_id,
         lease_owner="w-1", lease_token=claim.lease_token,
+        lease_generation=claim.lease_generation,
         error_code="transient", error_detail="boom",
     )
     session.commit()
@@ -882,6 +910,7 @@ def test_counter_serialization_under_threads(maker):
             commit_result(
                 sess, tenant_id="t-ser", evaluation_id=claim.evaluation_id,
                 lease_owner="w-1", lease_token=claim.lease_token,
+        lease_generation=claim.lease_generation,
                 methodology_version="evaluation-v4", snapshot_id=batch.snapshot_id,
                 status=status, result_payload={"v": status},
             )
@@ -917,3 +946,198 @@ def test_postgresql_only_guard():
         require_postgresql_url("sqlite:///:memory:")
     with pytest.raises(NonPostgreSQLError):
         require_postgresql_url("postgresql+psycopg2://u:p@127.0.0.1/db")
+
+
+def test_lease_reassignment_pauses_stale_commit(maker):
+    sess = maker()
+    batch = _make_batch(
+        sess, "t-pause", f"pz-{uuid.uuid4().hex[:8]}", n=1, prefix="pz",
+    )
+    eval_id = sess.execute(
+        select(Evaluation.id).where(
+            Evaluation.tenant_id == "t-pause", Evaluation.batch_id == batch.id
+        )
+    ).scalar_one()
+    snap_id = batch.snapshot_id
+    sess.close()
+
+    sess = maker()
+    stale = claim_next_evaluation(sess, tenant_id="t-pause", lease_owner="w-old")
+    sess.commit()
+    sess.close()
+    assert stale is not None
+
+    ready = threading.Event()
+    go = threading.Event()
+    outcome: list = []
+
+    def stale_commit():
+        sess = maker()
+        try:
+            sess.execute(
+                select(Evaluation.id).where(Evaluation.id == eval_id).with_for_update()
+            ).scalar_one()
+            ready.set()
+            if not go.wait(timeout=10):
+                outcome.append("raw:gate-timeout")
+                return
+            commit_result(
+                sess, tenant_id="t-pause", evaluation_id=eval_id,
+                lease_owner="w-old", lease_token=stale.lease_token,
+                lease_generation=stale.lease_generation,
+                methodology_version="evaluation-v4", snapshot_id=snap_id,
+                status="VALUED", result_payload={"value": "1"},
+            )
+            sess.commit()
+            outcome.append("committed")
+        except LeaseMismatch:
+            sess.rollback()
+            outcome.append("fenced")
+        except Exception as exc:
+            sess.rollback()
+            outcome.append(f"raw:{type(exc).__name__}")
+        finally:
+            sess.close()
+
+    thread = threading.Thread(target=stale_commit, daemon=True)
+    thread.start()
+    assert ready.wait(timeout=10)
+    go.set()
+    thread.join(timeout=20)
+    sess = maker()
+    row = sess.get(Evaluation, eval_id)
+    row.status = "queued"
+    row.lease_owner = "w-new"
+    row.lease_token = uuid.uuid4()
+    row.lease_generation = int(row.lease_generation) + 1
+    row.lease_expires_at = datetime.now(timezone.utc) + timedelta(minutes=5)
+    row.next_attempt_at = datetime.now(timezone.utc)
+    sess.commit()
+    fresh = sess.execute(
+        select(Evaluation).where(Evaluation.id == eval_id)
+    ).scalar_one()
+    fresh_gen = int(fresh.lease_generation)
+    sess.close()
+    sess = maker()
+    try:
+        commit_result(
+            sess, tenant_id="t-pause", evaluation_id=eval_id,
+            lease_owner="w-old", lease_token=stale.lease_token,
+            lease_generation=stale.lease_generation,
+            methodology_version="evaluation-v4", snapshot_id=snap_id,
+            status="VALUED", result_payload={"value": "1"},
+        )
+        sess.commit()
+        outcome.append("committed-after-reassign")
+    except LeaseMismatch:
+        sess.rollback()
+        outcome.append("fenced-after-reassign")
+    except Exception as exc:
+        sess.rollback()
+        outcome.append(f"raw:{type(exc).__name__}")
+    finally:
+        sess.close()
+    assert outcome[0] == "committed"
+    assert outcome[1] == "fenced-after-reassign"
+    assert fresh_gen == stale.lease_generation + 1
+
+
+def test_simultaneous_different_result_single_terminal(maker):
+    sess = maker()
+    batch = _make_batch(
+        sess, "t-sdr", f"sdr-{uuid.uuid4().hex[:8]}", n=1, prefix="sd",
+    )
+    eval_id = sess.execute(
+        select(Evaluation.id).where(
+            Evaluation.tenant_id == "t-sdr", Evaluation.batch_id == batch.id
+        )
+    ).scalar_one()
+    snap_id = batch.snapshot_id
+    sess.close()
+    sess = maker()
+    claim = claim_next_evaluation(sess, tenant_id="t-sdr", lease_owner="w-1")
+    sess.commit()
+    sess.close()
+    assert claim is not None
+    barrier = threading.Barrier(2)
+    outcomes: list = []
+
+    def commit_as(status: str):
+        sess = maker()
+        try:
+            barrier.wait(timeout=10)
+            record, created = commit_result(
+                sess, tenant_id="t-sdr", evaluation_id=eval_id,
+                lease_owner="w-1", lease_token=claim.lease_token,
+                lease_generation=claim.lease_generation,
+                methodology_version="evaluation-v4", snapshot_id=snap_id,
+                status=status, result_payload={"value": status},
+            )
+            sess.commit()
+            outcomes.append((status, record.version, created))
+        except LeaseMismatch:
+            sess.rollback()
+            outcomes.append((status, "fenced", False))
+        except Exception as exc:
+            sess.rollback()
+            outcomes.append((status, f"raw:{type(exc).__name__}", False))
+        finally:
+            sess.close()
+
+    threads = [
+        threading.Thread(target=commit_as, args=("VALUED",)),
+        threading.Thread(target=commit_as, args=("REVIEW_REQUIRED",)),
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert len(outcomes) == 2
+    assert not [entry for entry in outcomes if str(entry[1]).startswith("raw")]
+    created = [entry for entry in outcomes if entry[2] is True]
+    assert len(created) == 1
+    sess = maker()
+    row = sess.get(Evaluation, eval_id)
+    assert row is not None and row.status == "succeeded"
+    assert row.lease_owner is None and row.lease_token is None
+    versions = sess.execute(
+        select(EvaluationResult.version).where(
+            EvaluationResult.evaluation_id == eval_id
+        ).order_by(EvaluationResult.version)
+    ).scalars().all()
+    sess.close()
+    assert versions == [1]
+
+
+def test_batch_status_counts_check_rejects_mismatch(session: Session):
+    batch = _make_batch(session, "t-ck", "ck-1", n=2, prefix="ck")
+    with pytest.raises(Exception):
+        session.execute(
+            text("UPDATE v4_batches SET status = 'succeeded' "
+                 "WHERE id = :id AND tenant_id = :t"),
+            {"id": batch.id, "t": "t-ck"},
+        )
+    session.rollback()
+    with pytest.raises(Exception):
+        session.execute(
+            text("UPDATE v4_batches SET succeeded_count = 99 "
+                 "WHERE id = :id AND tenant_id = :t"),
+            {"id": batch.id, "t": "t-ck"},
+        )
+    session.rollback()
+
+
+def test_running_requires_active_lease_direct_sql(session: Session):
+    batch = _make_batch(session, "t-run", "run-1", n=1, prefix="rn")
+    eval_id = session.execute(
+        select(Evaluation.id).where(
+            Evaluation.tenant_id == "t-run", Evaluation.batch_id == batch.id
+        )
+    ).scalar_one()
+    with pytest.raises(Exception):
+        session.execute(
+            text("UPDATE v4_evaluations SET status = 'running' "
+                 "WHERE id = :id AND tenant_id = :t"),
+            {"id": eval_id, "t": "t-run"},
+        )
+    session.rollback()

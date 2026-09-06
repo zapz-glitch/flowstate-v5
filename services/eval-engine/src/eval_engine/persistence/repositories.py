@@ -29,6 +29,14 @@ class LeaseMismatch(Exception):
     pass
 
 
+def _valid_lease_generation(value: object) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise LeaseMismatch("lease_generation is required")
+    if value < 0:
+        raise LeaseMismatch("lease_generation is required")
+    return value
+
+
 MAX_ATTEMPTS_DEFAULT = 5
 LEASE_TTL = timedelta(minutes=5)
 RETRY_BASE_DELAY = timedelta(seconds=30)
@@ -311,6 +319,44 @@ def claim_next_evaluation(
     )
 
 
+def _lock_evaluation_row(
+    session: Session, *, tenant_id: str, evaluation_id: uuid.UUID
+) -> Evaluation:
+    row = session.execute(
+        select(Evaluation)
+        .where(
+            Evaluation.id == evaluation_id,
+            Evaluation.tenant_id == tenant_id,
+        )
+        .with_for_update()
+    ).scalar_one_or_none()
+    if row is None:
+        raise KeyError(str(evaluation_id))
+    return row
+
+
+def _check_locked_lease(
+    row: Evaluation,
+    *,
+    evaluation_id: uuid.UUID,
+    lease_owner: str,
+    lease_token: uuid.UUID,
+    lease_generation: int,
+    now: datetime,
+    allowed: set[str],
+) -> None:
+    expected_generation = _valid_lease_generation(lease_generation)
+    if (
+        row.status not in allowed
+        or row.lease_owner != lease_owner
+        or row.lease_token != lease_token
+        or int(row.lease_generation) != expected_generation
+        or row.lease_expires_at is None
+        or row.lease_expires_at <= now
+    ):
+        raise LeaseMismatch(f"stale or foreign lease for {evaluation_id}")
+
+
 def _require_active_lease(
     session: Session,
     *,
@@ -318,26 +364,55 @@ def _require_active_lease(
     evaluation_id: uuid.UUID,
     lease_owner: str,
     lease_token: uuid.UUID,
+    lease_generation: int,
     now: datetime,
     allowed: set[str],
 ) -> Evaluation:
-    row = session.execute(
-        select(Evaluation).where(
-            Evaluation.id == evaluation_id,
-            Evaluation.tenant_id == tenant_id,
-        )
-    ).scalar_one_or_none()
-    if row is None:
-        raise KeyError(str(evaluation_id))
-    if (
-        row.status not in allowed
-        or row.lease_owner != lease_owner
-        or row.lease_token != lease_token
-        or row.lease_expires_at is None
-        or row.lease_expires_at <= now
-    ):
-        raise LeaseMismatch(f"stale or foreign lease for {evaluation_id}")
+    row = _lock_evaluation_row(
+        session, tenant_id=tenant_id, evaluation_id=evaluation_id
+    )
+    _check_locked_lease(
+        row,
+        evaluation_id=evaluation_id,
+        lease_owner=lease_owner,
+        lease_token=lease_token,
+        lease_generation=lease_generation,
+        now=now,
+        allowed=allowed,
+    )
     return row
+
+
+def _cas_evaluation_lease(
+    session: Session,
+    *,
+    tenant_id: str,
+    evaluation_id: uuid.UUID,
+    lease_owner: str,
+    lease_token: uuid.UUID,
+    lease_generation: int,
+    now: datetime,
+    expect_status: set[str],
+    mutate,
+) -> bool:
+    row = _lock_evaluation_row(
+        session, tenant_id=tenant_id, evaluation_id=evaluation_id
+    )
+    try:
+        _check_locked_lease(
+            row,
+            evaluation_id=evaluation_id,
+            lease_owner=lease_owner,
+            lease_token=lease_token,
+            lease_generation=lease_generation,
+            now=now,
+            allowed=expect_status,
+        )
+    except LeaseMismatch:
+        return False
+    mutate(row, now)
+    session.flush()
+    return True
 
 
 def heartbeat_lease(
@@ -347,40 +422,32 @@ def heartbeat_lease(
     evaluation_id: uuid.UUID,
     lease_owner: str,
     lease_token: uuid.UUID,
+    lease_generation: int,
     lease_ttl: timedelta = LEASE_TTL,
     now: datetime | None = None,
 ) -> bool:
     current = now or _utcnow()
+
+    def _touch(row: Evaluation, at: datetime) -> None:
+        row.lease_expires_at = at + lease_ttl
+        row.last_heartbeat_at = at
+        row.updated_at = at
+
     try:
-        _require_active_lease(
-            session,
-            tenant_id=tenant_id,
-            evaluation_id=evaluation_id,
-            lease_owner=lease_owner,
-            lease_token=lease_token,
-            now=current,
-            allowed={"claimed", "running"},
-        )
-    except (KeyError, LeaseMismatch):
+        _valid_lease_generation(lease_generation)
+    except LeaseMismatch:
         return False
-    result = session.execute(
-        update(Evaluation)
-        .where(
-            Evaluation.id == evaluation_id,
-            Evaluation.tenant_id == tenant_id,
-            Evaluation.lease_owner == lease_owner,
-            Evaluation.lease_token == lease_token,
-            Evaluation.status.in_(["claimed", "running"]),
-            Evaluation.lease_expires_at > current,
-        )
-        .values(
-            lease_expires_at=current + lease_ttl,
-            last_heartbeat_at=current,
-            updated_at=current,
-        )
+    return _cas_evaluation_lease(
+        session,
+        tenant_id=tenant_id,
+        evaluation_id=evaluation_id,
+        lease_owner=lease_owner,
+        lease_token=lease_token,
+        lease_generation=lease_generation,
+        now=current,
+        expect_status={"claimed", "running"},
+        mutate=_touch,
     )
-    session.flush()
-    return result.rowcount == 1
 
 
 def mark_running(
@@ -390,35 +457,30 @@ def mark_running(
     evaluation_id: uuid.UUID,
     lease_owner: str,
     lease_token: uuid.UUID,
+    lease_generation: int,
     now: datetime | None = None,
 ) -> bool:
     current = now or _utcnow()
+
+    def _start(row: Evaluation, at: datetime) -> None:
+        row.status = "running"
+        row.updated_at = at
+
     try:
-        _require_active_lease(
-            session,
-            tenant_id=tenant_id,
-            evaluation_id=evaluation_id,
-            lease_owner=lease_owner,
-            lease_token=lease_token,
-            now=current,
-            allowed={"claimed"},
-        )
-    except (KeyError, LeaseMismatch):
+        _valid_lease_generation(lease_generation)
+    except LeaseMismatch:
         return False
-    result = session.execute(
-        update(Evaluation)
-        .where(
-            Evaluation.id == evaluation_id,
-            Evaluation.tenant_id == tenant_id,
-            Evaluation.lease_owner == lease_owner,
-            Evaluation.lease_token == lease_token,
-            Evaluation.status == "claimed",
-            Evaluation.lease_expires_at > current,
-        )
-        .values(status="running", updated_at=current)
+    return _cas_evaluation_lease(
+        session,
+        tenant_id=tenant_id,
+        evaluation_id=evaluation_id,
+        lease_owner=lease_owner,
+        lease_token=lease_token,
+        lease_generation=lease_generation,
+        now=current,
+        expect_status={"claimed"},
+        mutate=_start,
     )
-    session.flush()
-    return result.rowcount == 1
 
 
 def recover_stale_leases(
@@ -484,6 +546,7 @@ def fail_evaluation(
     evaluation_id: uuid.UUID,
     lease_owner: str,
     lease_token: uuid.UUID,
+    lease_generation: int,
     error_code: str,
     error_detail: str = "",
     retriable: bool | None = None,
@@ -498,6 +561,7 @@ def fail_evaluation(
         evaluation_id=evaluation_id,
         lease_owner=lease_owner,
         lease_token=lease_token,
+        lease_generation=lease_generation,
         now=current,
         allowed={"claimed", "running"},
     )
@@ -555,6 +619,7 @@ def commit_result(
     evaluation_id: uuid.UUID,
     lease_owner: str,
     lease_token: uuid.UUID,
+    lease_generation: int,
     methodology_version: str,
     snapshot_id: uuid.UUID,
     status: str,
@@ -563,10 +628,12 @@ def commit_result(
 ) -> tuple[EvaluationResult, bool]:
     """Concurrency-safe idempotent versioned result commit.
 
-    Identity covers methodology plus snapshot plus status plus payload.
-    Identical concurrent commits converge on one row (returns
-    (row, False)); a new identity allocates version N plus 1 under a row
-    lock. Requires the active lease token.
+    The evaluation row is locked before the lease is validated, and the
+    lock is held through version allocation and the terminal transition,
+    so one active lease can consume at most one terminal result. Identity
+    covers methodology plus snapshot plus status plus payload. Identical
+    concurrent commits converge on one row (returns (row, False)); a new
+    identity allocates version N plus 1.
     """
     _check_tenant(tenant_id)
     current = now or _utcnow()
@@ -576,6 +643,7 @@ def commit_result(
         evaluation_id=evaluation_id,
         lease_owner=lease_owner,
         lease_token=lease_token,
+        lease_generation=lease_generation,
         now=current,
         allowed={"claimed", "running"},
     )
@@ -589,10 +657,6 @@ def commit_result(
         raise KeyError(f"snapshot {snapshot_id} not found for tenant")
     result_hash = _result_identity(
         methodology_version, snapshot_id, status, result_payload
-    )
-    session.execute(
-        text("SELECT id FROM v4_evaluations WHERE id = :id FOR UPDATE"),
-        {"id": evaluation_id},
     )
     same = session.execute(
         select(EvaluationResult).where(
@@ -624,18 +688,9 @@ def commit_result(
     )
     session.add(record)
     try:
-        session.flush()
+        with session.begin_nested():
+            session.flush()
     except IntegrityError:
-        session.rollback()
-        row = _require_active_lease(
-            session,
-            tenant_id=tenant_id,
-            evaluation_id=evaluation_id,
-            lease_owner=lease_owner,
-            lease_token=lease_token,
-            now=current,
-            allowed={"claimed", "running"},
-        )
         same = session.execute(
             select(EvaluationResult).where(
                 EvaluationResult.evaluation_id == evaluation_id,
@@ -668,6 +723,7 @@ def save_checkpoint(
     evaluation_id: uuid.UUID,
     lease_owner: str,
     lease_token: uuid.UUID,
+    lease_generation: int,
     checkpoint: dict,
     now: datetime | None = None,
 ) -> None:
@@ -678,6 +734,7 @@ def save_checkpoint(
         evaluation_id=evaluation_id,
         lease_owner=lease_owner,
         lease_token=lease_token,
+        lease_generation=lease_generation,
         now=current,
         allowed={"claimed", "running"},
     )

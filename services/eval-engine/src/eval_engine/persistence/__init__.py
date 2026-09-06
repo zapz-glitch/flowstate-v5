@@ -8,7 +8,14 @@ from .db import (
     require_postgresql_url,
     verify_postgresql_only,
 )
-from .models import Base, Batch, Evaluation, EvaluationResult, SettingsSnapshot
+from .models import (
+    Base,
+    Batch,
+    Evaluation,
+    EvaluationResult,
+    ResultSnapshotBackfill,
+    SettingsSnapshot,
+)
 from .repositories import (
     Claim,
     IdempotencyConflict,
@@ -26,6 +33,7 @@ __all__ = [
     "Batch",
     "Evaluation",
     "EvaluationResult",
+    "ResultSnapshotBackfill",
     "SettingsSnapshot",
     "Claim",
     "IdempotencyConflict",
