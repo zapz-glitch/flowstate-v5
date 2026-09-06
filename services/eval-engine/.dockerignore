@@ -1,0 +1,13 @@
+# Candidate-only build context for the V4 eval-engine image.
+#
+# Compose builds this service with context ./services/eval-engine, so this
+# file is consumed and keeps the image build deterministic: only
+# requirements.txt and src/ affect the image layers.
+
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.venv/
+*.log
+.git

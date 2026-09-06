@@ -1,0 +1,16 @@
+# Candidate-only notes for the V4 dashboard dev image.
+#
+# Compose currently builds the dashboard with context set to the repository
+# root (see compose.dev.yaml), and Docker only reads a .dockerignore from
+# the context root. This file is therefore NOT consumed by the current
+# build; it records the intended exclusions if the context is ever narrowed
+# to apps/dashboard. Deterministic context today comes from the narrow COPY
+# list in apps/dashboard/Dockerfile.dev (package files, packages/shared,
+# apps/dashboard only).
+
+node_modules/
+.next/
+out/
+dist/
+*.log
+.git

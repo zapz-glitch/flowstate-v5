@@ -1,0 +1,50 @@
+name: evaluation-v4-candidate
+
+# Candidate-only CI for the V4 evaluation runtime. This workflow builds and
+# checks the candidate; it never deploys, never touches production config,
+# and never publishes images. Production deploys stay in
+# .github/workflows/deploy.yml (main only).
+
+on:
+  push:
+    branches:
+      - v4/runtime-ci
+  pull_request:
+    paths:
+      - compose.dev.yaml
+      - scripts/runtime
+      - scripts/secret-scan
+      - services/eval-engine/**
+      - apps/dashboard/Dockerfile.dev
+      - .github/workflows/evaluation-v4-candidate.yml
+  workflow_dispatch:
+
+jobs:
+  candidate-checks:
+    name: candidate checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install engine dependencies
+        working-directory: services/eval-engine
+        run: pip install -r requirements.txt
+
+      - name: Run V4 Python tests
+        working-directory: services/eval-engine
+        run: PYTHONPATH=src python -m pytest tests -q
+
+      - name: Secret scan (tracked and untracked files)
+        run: ./scripts/secret-scan
+
+      - name: Validate isolated Compose config
+        run: docker compose --project-name flowstate-v4-dev -f compose.dev.yaml config
+
+      - name: Build candidate images (no push, no deploy)
+        run: docker compose --project-name flowstate-v4-dev -f compose.dev.yaml build

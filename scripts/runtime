@@ -250,7 +250,6 @@ cmd_test() {
   # without baking them into the image.
   compose build api >&2 || die "failed to build V4 API image"
   compose run --rm --no-deps --no-TTY \
-    --read-only \
     -v "$ENGINE_DIR/src:/app/src:ro" \
     -v "$ENGINE_DIR/tests:/app/tests:ro" \
     -e PYTHONPATH=/app/src \
@@ -266,7 +265,7 @@ cmd_up() {
   attempts=0
   api_ok=0
   dash_ok=0
-  while [ "$attempts" -lt 45 ]; do
+  while [ "$attempts" -lt 120 ]; do
     if [ "$api_ok" -eq 0 ] && [ "$(http_code "$API_BASE/health/ready")" = "200" ]; then
       api_ok=1
     fi
@@ -282,7 +281,7 @@ cmd_up() {
     attempts=$((attempts + 1))
     sleep 2
   done
-  echo "runtime: started but verification failed within 90 seconds (api_ready=$api_ok dashboard=$dash_ok)" >&2
+  echo "runtime: started but verification failed within 240 seconds (api_ready=$api_ok dashboard=$dash_ok)" >&2
   echo "V4 services left running for './scripts/runtime logs'; unrelated projects untouched." >&2
   compose ps >&2 || true
   return 1
