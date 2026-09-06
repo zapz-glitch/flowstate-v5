@@ -48,7 +48,7 @@ def test_startup_accepts_internal_token(monkeypatch):
 def test_readiness_contract_constants():
     from eval_engine.health import EXPECTED_ALEMBIC_REVISION, REQUIRED_TABLES
 
-    assert EXPECTED_ALEMBIC_REVISION == "0003_v4_owner"
+    assert EXPECTED_ALEMBIC_REVISION == "0004_v4_provider_limiter"
     assert REQUIRED_TABLES == frozenset(
         {
             "v4_settings_snapshots",
@@ -56,6 +56,8 @@ def test_readiness_contract_constants():
             "v4_evaluations",
             "v4_evaluation_results",
             "v4_result_snapshot_backfill",
+            "v4_cotality_leases",
+            "v4_cotality_calls",
         }
     )
 
@@ -69,13 +71,15 @@ def test_readiness_contract_constants():
             "v4_evaluations",
             "v4_evaluation_results",
             "v4_result_snapshot_backfill",
+            "v4_cotality_leases",
+            "v4_cotality_calls",
         ]
     ),
 )
 def test_readiness_fails_when_any_required_table_missing(
     monkeypatch, missing_table
 ):
-    """IR-1: removing any one of the five head tables is not-ready."""
+    """IR-1: removing any one of the seven head tables is not-ready."""
     from eval_engine import health as health_module
 
     expected = health_module.EXPECTED_ALEMBIC_REVISION

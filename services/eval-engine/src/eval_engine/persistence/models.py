@@ -341,6 +341,72 @@ class EvaluationResult(Base):
     evaluation: Mapped[Evaluation] = relationship(back_populates="results")
 
 
+class CotalityLease(Base):
+    """One active provider lease for the shared Cotality limiter.
+
+    Concurrency (max 4) is enforced by the limiter transaction under a
+    PostgreSQL advisory lock; expired leases are reclaimed before every
+    check so a crashed worker cannot pin a slot. Postgres only.
+    """
+
+    __tablename__ = "v4_cotality_leases"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    provider: Mapped[str] = mapped_column(String(64), nullable=False, default="cotality")
+    owner: Mapped[str] = mapped_column(String(128), nullable=False)
+    lease_token: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False, default=uuid.uuid4
+    )
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
+
+    __table_args__ = (
+        UniqueConstraint("provider", "lease_token", name="uq_v4_cotality_lease_token"),
+        CheckConstraint(
+            "length(trim(owner)) > 0", name="ck_v4_cotality_lease_owner_nonempty"
+        ),
+        Index("ix_v4_cotality_lease_expiry", "provider", "expires_at"),
+    )
+
+
+class CotalityCall(Base):
+    """One provider attempt row for the sliding RPM window.
+
+    Exactly one row is inserted per attempt (including retries) inside
+    the rate-check transaction; the window counts rows in the trailing
+    60 seconds with no burst allowance beyond the 40-call budget.
+    Postgres only.
+    """
+
+    __tablename__ = "v4_cotality_calls"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    provider: Mapped[str] = mapped_column(String(64), nullable=False, default="cotality")
+    owner: Mapped[str] = mapped_column(String(128), nullable=False)
+    evaluation_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
+    attempt: Mapped[int] = mapped_column(BigInteger, nullable=False, default=1)
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
+
+    __table_args__ = (
+        CheckConstraint("attempt >= 1", name="ck_v4_cotality_call_attempt_pos"),
+        CheckConstraint(
+            "length(trim(owner)) > 0", name="ck_v4_cotality_call_owner_nonempty"
+        ),
+        Index("ix_v4_cotality_call_window", "provider", "started_at"),
+        Index("ix_v4_cotality_call_eval", "evaluation_id"),
+    )
+
+
 class ResultSnapshotBackfill(Base):
     """Auditable record of 0002 backfilled null/mismatched result snapshots."""
 

@@ -23,8 +23,24 @@ def test_compose_migrate_uses_built_image_and_api_waits():
     assert "migrate:" in body
     assert 'command: ["alembic", "upgrade", "head"]' in body
     # Migrate reuses the API image so CI/runtime migrate exactly what ships.
-    assert body.count("image: flowstate-v4-dev-api:local") >= 2
+    assert body.count("image: flowstate-v4-dev-api:local") >= 3
     assert "service_completed_successfully" in body
+
+
+def test_compose_worker_supervised_and_candidate_safe():
+    body = _read(os.path.join(REPO_ROOT, "compose.dev.yaml"))
+    assert "\n  worker:" in body
+    assert "eval_engine.worker.main" in body
+    assert "migrate:\n        condition: service_completed_successfully" in body
+    assert 'V4_EXTERNAL_CALLS_ENABLED: "false"' in body
+    assert "COTALITY_CONCURRENCY" in body
+    assert "COTALITY_RPM" in body
+    assert "backend" in body
+
+
+def test_dockerfile_supports_worker_command():
+    body = _read(os.path.join(ENGINE_DIR, "Dockerfile"))
+    assert "PYTHONPATH=/app/src" in body
 
 
 def test_runtime_test_fallback_has_no_docker_socket_mount():

@@ -24,6 +24,8 @@ EXPECTED_TABLES = {
     "v4_batches",
     "v4_evaluations",
     "v4_evaluation_results",
+    "v4_cotality_leases",
+    "v4_cotality_calls",
 }
 
 
@@ -152,7 +154,27 @@ def test_alembic_up_and_down_on_isolated_database():
         assert "ix_v4_batch_owner" in owner_indexes
         with engine.begin() as conn:
             rev = conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
-            assert rev == "0003_v4_owner"
+            assert rev == "0004_v4_provider_limiter"
+        for table in ("v4_cotality_leases", "v4_cotality_calls"):
+            assert table in tables
+        lease_uq = {uq["name"] for uq in insp.get_unique_constraints("v4_cotality_leases")}
+        assert "uq_v4_cotality_lease_token" in lease_uq
+        lease_ck = {ck["name"] for ck in insp.get_check_constraints("v4_cotality_leases")}
+        assert "ck_v4_cotality_lease_owner_nonempty" in lease_ck
+        call_ck = {ck["name"] for ck in insp.get_check_constraints("v4_cotality_calls")}
+        assert "ck_v4_cotality_call_attempt_pos" in call_ck
+        lease_ix = {ix["name"] for ix in insp.get_indexes("v4_cotality_leases")}
+        assert "ix_v4_cotality_lease_expiry" in lease_ix
+        call_ix = {ix["name"] for ix in insp.get_indexes("v4_cotality_calls")}
+        assert "ix_v4_cotality_call_window" in call_ix
+        command.downgrade(_config(url), "0003_v4_owner")
+        head_tables = set(inspect(create_engine(url)).get_table_names())
+        assert "v4_cotality_leases" not in head_tables
+        assert "v4_cotality_calls" not in head_tables
+        command.upgrade(_config(url), "head")
+        with create_engine(url).begin() as conn:
+            rev = conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
+            assert rev == "0004_v4_provider_limiter"
         batch_ck = {
             ck["name"] for ck in insp.get_check_constraints("v4_batches")
         }
@@ -176,7 +198,7 @@ def test_alembic_up_and_down_on_isolated_database():
         command.downgrade(_config(url), "0002_v4_repair")
         _seed_populated_0002(url)
         with pytest.raises(Exception, match="0003 preflight"):
-            command.upgrade(_config(url), "head")
+            command.upgrade(_config(url), "0004_v4_provider_limiter")
         _assert_still_at_0002(url)
         command.downgrade(_config(url), "base")
         command.upgrade(_config(url), "0002_v4_repair")
@@ -198,7 +220,7 @@ def test_alembic_up_and_down_on_isolated_database():
         command.upgrade(_config(url), "0002_v4_repair")
         _assert_populated_0002_head(url)
         with pytest.raises(Exception, match="0003 preflight"):
-            command.upgrade(_config(url), "head")
+            command.upgrade(_config(url), "0004_v4_provider_limiter")
         _assert_still_at_0002(url)
         command.downgrade(_config(url), "0001_v4_initial")
         _assert_populated_0001(url)
@@ -388,7 +410,7 @@ def _assert_clean_head(url: str) -> None:
     engine = create_engine(url)
     with engine.begin() as conn:
         rev = conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
-        assert rev == "0003_v4_owner"
+        assert rev == "0004_v4_provider_limiter"
     engine.dispose()
 
 
@@ -559,7 +581,7 @@ def _assert_cross_user_same_key_roundtrip(url: str) -> None:
     engine = create_engine(url)
     with engine.begin() as conn:
         rev = conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
-        assert rev == "0003_v4_owner"
+        assert rev == "0004_v4_provider_limiter"
     engine.dispose()
 
 
@@ -596,7 +618,7 @@ def _assert_downgrade_preflight_legitimate_cross_user(url: str) -> None:
         _command.downgrade(_config(url), "0002_v4_repair")
     with engine.begin() as conn:
         rev = conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
-        assert rev == "0003_v4_owner"
+        assert rev == "0004_v4_provider_limiter"
     engine.dispose()
 
 

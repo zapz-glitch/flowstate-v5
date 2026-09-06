@@ -24,6 +24,7 @@ on:
       - apps/dashboard/**
       - packages/shared/**
       - docs/eval-v4/RUNTIME.md
+      - docs/eval-v4/WORKER_RUNTIME.md
       - .github/workflows/evaluation-v4-candidate.yml
   workflow_dispatch:
 
@@ -124,9 +125,9 @@ jobs:
           engine = create_engine(url)
           with engine.connect() as conn:
               revision = conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
-              assert revision == "0003_v4_owner", revision
+              assert revision == "0004_v4_provider_limiter", revision
           tables = set(inspect(engine).get_table_names())
-          required = {"v4_settings_snapshots", "v4_batches", "v4_evaluations", "v4_evaluation_results", "v4_result_snapshot_backfill"}
+          required = {"v4_settings_snapshots", "v4_batches", "v4_evaluations", "v4_evaluation_results", "v4_result_snapshot_backfill", "v4_cotality_leases", "v4_cotality_calls"}
           missing = sorted(required - tables)
           assert not missing, f"missing tables: {missing}"
           print(f"revision {revision}; required tables present")
@@ -143,14 +144,23 @@ jobs:
             -e V4_TEST_PROFILE=false \
             flowstate-v4-dev-api:local \
             uvicorn eval_engine.main:app --host 127.0.0.1 --port 8004 --app-dir src
-          trap 'docker rm -f v4-ci-api >/dev/null 2>&1 || true' EXIT
+          trap 'docker rm -f v4-ci-api v4-ci-worker >/dev/null 2>&1 || true' EXIT
           for _ in $(seq 1 60); do
             if curl -fsS http://127.0.0.1:8004/health/ready | grep -q '"ready":true'; then
               curl -fsS http://127.0.0.1:8004/health/ready
-              exit 0
+              break
             fi
             sleep 2
           done
-          echo "API readiness check failed" >&2
-          docker logs v4-ci-api >&2 || true
-          exit 1
+          curl -fsS http://127.0.0.1:8004/health/ready | grep -q '"ready":true'
+          docker run -d --rm --name v4-ci-worker --network host \
+            -e DATABASE_URL="postgresql+psycopg://v4test:v4testpw@127.0.0.1:55440/v4test" \
+            -e V4_WORKER_TENANT=default \
+            -e V4_WORKER_OWNER=worker:ci \
+            -e V4_EXTERNAL_CALLS_ENABLED=false \
+            flowstate-v4-dev-api:local \
+            python -m eval_engine.worker.main --max-jobs 0
+          sleep 5
+          docker logs v4-ci-worker 2>&1 | head -n 20
+          docker rm -f v4-ci-worker v4-ci-api >/dev/null 2>&1 || true
+          trap - EXIT

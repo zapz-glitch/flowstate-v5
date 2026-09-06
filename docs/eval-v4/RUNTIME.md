@@ -8,7 +8,9 @@ deploys, migrates production data, or sends external provider calls.
 
 - Compose project name: `flowstate-v4-dev` (declared in `compose.dev.yaml`).
 - Services: `api` (FastAPI eval engine), `migrate` (one-shot `alembic
-  upgrade head` from the built API image), `postgres` (isolated
+  upgrade head` from the built API image), `worker` (supervised queue
+  consumer from the same built image, `python -m
+  eval_engine.worker.main`), `postgres` (isolated
   PostgreSQL 17), `dashboard` (Next.js dev server).
 - Volumes: `v4-postgres-data`, `v4-dashboard-next`. Both are prefixed by the
   project name, so they do not collide with other projects.
@@ -64,11 +66,15 @@ deploys, migrates production data, or sends external provider calls.
   built image before the API starts.
 - Compose `api` depends on `migrate (service_completed_successfully)` in
   addition to `postgres (service_healthy)`, so the API only starts after a
-  successful migration. Candidate CI repeats the same contract: migrate
+  successful migration. The `worker` service has the same two
+  dependencies (`restart: unless-stopped`, candidate-safe: fenced commits
+  plus stale-lease recovery on restart) and shares the built API image.
+  Candidate CI repeats the same contract: migrate
   from the built image against an isolated PostgreSQL service, verify
-  revision `0003_v4_owner` plus the five `v4_*` tables
+  revision `0004_v4_provider_limiter` plus the seven `v4_*` tables
   (`v4_settings_snapshots`, `v4_batches`, `v4_evaluations`,
-  `v4_evaluation_results`, `v4_result_snapshot_backfill`), then start the
+  `v4_evaluation_results`, `v4_result_snapshot_backfill`,
+  `v4_cotality_leases`, `v4_cotality_calls`), then start the
   API image and poll `/health/ready`.
 
 ## Environment contract
@@ -95,12 +101,14 @@ deploys, migrates production data, or sends external provider calls.
 - `GET /health/db` reports PostgreSQL connectivity (`ok` or `unavailable`).
 - `GET /health/ready` (alias `GET /ready`) reports `ready` only when the
   database probe succeeds AND the schema probe confirms Alembic revision
-  `0003_v4_owner` with all five `v4_*` persistence tables present
+  `0004_v4_provider_limiter` with all seven `v4_*` persistence tables present
   (`v4_settings_snapshots`, `v4_batches`, `v4_evaluations`,
   `v4_evaluation_results`, `v4_result_snapshot_backfill`, the last an
-  auditable record of 0002 null/mismatched result-snapshot backfills). An
+  auditable record of 0002 null/mismatched result-snapshot backfills,
+  plus `v4_cotality_leases`/`v4_cotality_calls` for the V4-103B shared
+  limiter). An
   unmigrated database returns HTTP 503 `not_ready`; removing any one of
-  the five tables also returns 503 `not_ready` (covered per-table in
+  the seven tables also returns 503 `not_ready` (covered per-table in
   `test_health.py`).
 - Compose `api` has a `healthcheck` against `/health/ready`, and
   `depends_on: postgres (service_healthy)` plus `migrate
@@ -121,7 +129,7 @@ Unrelated and production containers are never listed, started, or stopped.
 ./scripts/runtime up      # build and start the isolated project, wait for API readiness + dashboard
 ./scripts/runtime status  # show only V4 project containers plus API/dashboard reachability
 ./scripts/runtime health  # probe /health, /health/db, /health/ready and the dashboard (PASS/FAIL)
-./scripts/runtime logs    # follow API/worker service logs only
+./scripts/runtime logs    # follow API + worker service logs only
 ./scripts/runtime test    # run the V4 Python suite (host .venv when usable, else temporary host venv from the hashed lock)
 ./scripts/runtime down    # stop only the V4 dev project; fails honestly if compose fails or containers remain
 ```
@@ -163,9 +171,10 @@ it performs no deployment and no provider API calls.
 
 ## What this runtime does not do
 
-- No persistence-dependent worker supervision or provider limiter (V4-103B).
 - V4-102 queue, lease, retry, recovery, result-versioning, and audit
   primitives are integrated. V4-104 provides authenticated owner-scoped batch
-  submission and polling. A supervised worker does not consume the queue yet.
+  submission and polling. V4-103B provides the supervised worker
+  (`worker` service, `python -m eval_engine.worker.main`) plus the shared
+  PostgreSQL Cotality limiter; see `docs/eval-v4/WORKER_RUNTIME.md`.
 - No TypeScript bridge or dashboard adapter (V4-201/V4-202).
 - No deployment and no production wiring (stays in `deploy.yml` on `main`).
