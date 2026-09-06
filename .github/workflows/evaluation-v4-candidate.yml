@@ -124,7 +124,7 @@ jobs:
           engine = create_engine(url)
           with engine.connect() as conn:
               revision = conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
-              assert revision == "0002_v4_repair", revision
+              assert revision == "0003_v4_owner", revision
           tables = set(inspect(engine).get_table_names())
           required = {"v4_settings_snapshots", "v4_batches", "v4_evaluations", "v4_evaluation_results", "v4_result_snapshot_backfill"}
           missing = sorted(required - tables)
