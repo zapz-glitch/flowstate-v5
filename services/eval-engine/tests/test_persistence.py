@@ -19,7 +19,7 @@ from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
 
 import pytest
-from sqlalchemy import create_engine, select, text
+from sqlalchemy import create_engine, func, select, text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -34,6 +34,7 @@ from eval_engine.persistence.models import Base, Evaluation, EvaluationResult
 from eval_engine.persistence.repositories import (
     IdempotencyConflict,
     LeaseMismatch,
+    TerminalReplay,
     claim_next_evaluation,
     commit_result,
     create_batch_with_evaluations,
@@ -767,9 +768,9 @@ def test_result_race_identical_and_different(maker):
             )
             sess.commit()
             results.append((str(record.id), record.version, created))
-        except LeaseMismatch as exc:
+        except (LeaseMismatch, TerminalReplay) as exc:
             sess.rollback()
-            results.append(("fenced", "LeaseMismatch", str(exc)[:100]))
+            results.append(("fenced", type(exc).__name__, str(exc)[:100]))
         except Exception as exc:
             sess.rollback()
             results.append(("err", type(exc).__name__, str(exc)[:100]))
@@ -783,9 +784,57 @@ def test_result_race_identical_and_different(maker):
         thread.join()
     winners = [entry for entry in results if entry[0] not in ("err", "fenced")]
     fenced = [entry for entry in results if entry[0] == "fenced"]
-    assert len(winners) == 1 and winners[0][1] == 1 and winners[0][2] is True
-    assert len(fenced) == 3
     assert not [entry for entry in results if entry[0] == "err"]
+    assert not fenced
+    assert len(winners) == 4
+    assert {entry[0] for entry in winners} == {winners[0][0]}
+    assert all(entry[1] == 1 for entry in winners)
+    assert sum(1 for entry in winners if entry[2] is True) == 1
+    assert sum(1 for entry in winners if entry[2] is False) == 3
+    # Exact replay of the committed terminal identity is idempotent and
+    # changes neither state nor timestamps.
+    sess = maker()
+    before = sess.execute(
+        select(Evaluation).where(Evaluation.id == eval_id)
+    ).scalar_one()
+    before_updated = before.updated_at
+    sess.close()
+    sess = maker()
+    record, created = commit_result(
+        sess, tenant_id="t-rrace", evaluation_id=eval_id,
+        lease_owner="stale-owner",
+        lease_token=uuid.uuid4(),
+        lease_generation=0,
+        methodology_version="evaluation-v4", snapshot_id=snap_id,
+        status="VALUED", result_payload={"value": "7"},
+    )
+    sess.commit()
+    assert created is False and record.version == 1
+    after = sess.execute(
+        select(Evaluation).where(Evaluation.id == eval_id)
+    ).scalar_one()
+    assert after.updated_at == before_updated and after.status == "succeeded"
+    sess.close()
+    # A different identity on the terminal row is fenced, even with a
+    # fabricated lease.
+    sess = maker()
+    with sess.no_autoflush:
+        try:
+            commit_result(
+                sess, tenant_id="t-rrace", evaluation_id=eval_id,
+                lease_owner="stale-owner",
+                lease_token=uuid.uuid4(),
+                lease_generation=0,
+                methodology_version="evaluation-v4", snapshot_id=snap_id,
+                status="REVIEW_REQUIRED", result_payload={"value": "7"},
+            )
+        except TerminalReplay as exc:
+            assert exc.existing_version == 1
+        else:
+            raise AssertionError("different terminal identity must be fenced")
+        finally:
+            sess.rollback()
+    sess.close()
 
     sess = maker()
     row = sess.get(Evaluation, eval_id)
@@ -1075,7 +1124,7 @@ def test_simultaneous_different_result_single_terminal(maker):
             )
             sess.commit()
             outcomes.append((status, record.version, created))
-        except LeaseMismatch:
+        except (LeaseMismatch, TerminalReplay):
             sess.rollback()
             outcomes.append((status, "fenced", False))
         except Exception as exc:
@@ -1141,3 +1190,218 @@ def test_running_requires_active_lease_direct_sql(session: Session):
             {"id": eval_id, "t": "t-run"},
         )
     session.rollback()
+
+
+def test_terminal_replay_exact_idempotent_and_different_fenced(session: Session):
+    batch = _make_batch(
+        session, "t-replay", f"replay-{uuid.uuid4().hex[:8]}", n=1,
+        prefix="rp",
+    )
+    claim = claim_next_evaluation(session, tenant_id="t-replay", lease_owner="w-1")
+    session.commit()
+    assert claim is not None
+    first, created = commit_result(
+        session, tenant_id="t-replay", evaluation_id=claim.evaluation_id,
+        lease_owner="w-1", lease_token=claim.lease_token,
+        lease_generation=claim.lease_generation,
+        methodology_version="evaluation-v4", snapshot_id=batch.snapshot_id,
+        status="VALUED", result_payload={"value": "42"},
+    )
+    session.commit()
+    assert created and first.version == 1
+    before = session.execute(
+        select(Evaluation).where(Evaluation.id == claim.evaluation_id)
+    ).scalar_one()
+    before_updated = before.updated_at
+    # Exact terminal replay with a fabricated lease stays idempotent and
+    # touches neither status nor timestamps.
+    same, created = commit_result(
+        session, tenant_id="t-replay", evaluation_id=claim.evaluation_id,
+        lease_owner="anyone", lease_token=uuid.uuid4(),
+        lease_generation=0,
+        methodology_version="evaluation-v4", snapshot_id=batch.snapshot_id,
+        status="VALUED", result_payload={"value": "42"},
+    )
+    session.commit()
+    assert created is False and same.id == first.id and same.version == 1
+    after = session.execute(
+        select(Evaluation).where(Evaluation.id == claim.evaluation_id)
+    ).scalar_one()
+    assert after.status == "succeeded" and after.updated_at == before_updated
+    # A different identity on the terminal row is fenced.
+    with pytest.raises(TerminalReplay) as excinfo:
+        commit_result(
+            session, tenant_id="t-replay", evaluation_id=claim.evaluation_id,
+            lease_owner="anyone", lease_token=uuid.uuid4(),
+            lease_generation=0,
+            methodology_version="evaluation-v4",
+            snapshot_id=batch.snapshot_id,
+            status="REVIEW_REQUIRED", result_payload={"value": "42"},
+        )
+    session.rollback()
+    assert excinfo.value.existing_version == 1
+    assert batch.id is not None
+
+
+def test_active_fresh_lease_historical_reuse_completes(session: Session):
+    batch = _make_batch(
+        session, "t-hist", f"hist-{uuid.uuid4().hex[:8]}", n=1,
+        prefix="hi",
+    )
+    claim = claim_next_evaluation(session, tenant_id="t-hist", lease_owner="w-1")
+    session.commit()
+    assert claim is not None
+    payload = {"value": "7"}
+    first, created = commit_result(
+        session, tenant_id="t-hist", evaluation_id=claim.evaluation_id,
+        lease_owner="w-1", lease_token=claim.lease_token,
+        lease_generation=claim.lease_generation,
+        methodology_version="evaluation-v4", snapshot_id=batch.snapshot_id,
+        status="VALUED", result_payload=dict(payload),
+    )
+    session.commit()
+    assert created and first.version == 1
+    # Requeue a new execution around the committed row (fresh lease) and
+    # reuse the historical identity: completes the current execution
+    # atomically without allocating a new version.
+    row = session.get(Evaluation, claim.evaluation_id)
+    row.status = "running"
+    row.lease_owner = "w-2"
+    row.lease_token = uuid.uuid4()
+    row.lease_generation = int(row.lease_generation) + 1
+    row.lease_expires_at = datetime.now(timezone.utc) + timedelta(minutes=5)
+    row.next_attempt_at = datetime.now(timezone.utc)
+    session.commit()
+    fresh = session.execute(
+        select(Evaluation).where(Evaluation.id == claim.evaluation_id)
+    ).scalar_one()
+    fresh_owner, fresh_token, fresh_gen = (
+        fresh.lease_owner, fresh.lease_token, int(fresh.lease_generation),
+    )
+    same, created = commit_result(
+        session, tenant_id="t-hist", evaluation_id=claim.evaluation_id,
+        lease_owner=fresh_owner, lease_token=fresh_token,
+        lease_generation=fresh_gen,
+        methodology_version="evaluation-v4", snapshot_id=batch.snapshot_id,
+        status="VALUED", result_payload=dict(payload),
+    )
+    session.commit()
+    assert created is False and same.id == first.id and same.version == 1
+    done = session.execute(
+        select(Evaluation).where(Evaluation.id == claim.evaluation_id)
+    ).scalar_one()
+    assert done.status == "succeeded" and done.lease_owner is None
+    versions = session.execute(
+        select(EvaluationResult.version).where(
+            EvaluationResult.evaluation_id == claim.evaluation_id
+        ).order_by(EvaluationResult.version)
+    ).scalars().all()
+    assert versions == [1]
+
+
+def test_locked_row_refresh_sees_reassigned_lease(session: Session, maker):
+    batch = _make_batch(
+        session, "t-pop", f"pop-{uuid.uuid4().hex[:8]}", n=1,
+        prefix="pp",
+    )
+    claim = claim_next_evaluation(session, tenant_id="t-pop", lease_owner="w-1")
+    session.commit()
+    assert claim is not None
+    eval_id = claim.evaluation_id
+    # Load a stale identity-map copy in this session first: without
+    # populate_existing the locked read would validate this stale copy.
+    stale = session.execute(
+        select(Evaluation).where(Evaluation.id == eval_id)
+    ).scalar_one()
+    assert stale.lease_token == claim.lease_token
+    # Reassign the lease out of band in a second session.
+    other = maker()
+    row = other.execute(
+        select(Evaluation).where(Evaluation.id == eval_id)
+    ).scalar_one()
+    row.lease_owner = "w-2"
+    row.lease_token = uuid.uuid4()
+    row.lease_generation = int(row.lease_generation) + 1
+    row.lease_expires_at = datetime.now(timezone.utc) + timedelta(minutes=5)
+    other.commit()
+    other.close()
+    # The stale-session commit must be fenced by the refreshed locked read.
+    with pytest.raises(LeaseMismatch):
+        commit_result(
+            session, tenant_id="t-pop", evaluation_id=eval_id,
+            lease_owner="w-1", lease_token=claim.lease_token,
+            lease_generation=claim.lease_generation,
+            methodology_version="evaluation-v4", snapshot_id=batch.snapshot_id,
+            status="VALUED", result_payload={"value": "1"},
+        )
+    session.rollback()
+
+
+def test_canonical_decimal_independent_of_context_and_form(session: Session):
+    import decimal
+    from decimal import Decimal
+
+    from eval_engine.persistence.db import canonical_hash, canonical_json
+
+    assert canonical_json(Decimal("12.50")) == "12.5"
+    assert canonical_json(Decimal("1.25E+1")) == "12.5"
+    assert canonical_json({"rate": Decimal("12.50")}) == {"rate": "12.5"}
+    assert canonical_hash({"rate": Decimal("12.50")}) == canonical_hash(
+        {"rate": Decimal("12.5")}
+    )
+    # A constrained localcontext (precision=2) must not change identity.
+    with decimal.localcontext() as ctx:
+        ctx.prec = 2
+        assert canonical_json(Decimal("12.50")) == "12.5"
+        assert canonical_hash({"rate": Decimal("12.50")}) == canonical_hash(
+            {"rate": Decimal("1.25E+1")}
+        )
+    committed = store_settings_snapshot(
+        session, tenant_id="t-dec", snapshot_version="v1",
+        content={"rate": Decimal("12.50")}, source={"a": 1},
+    )
+    session.commit()
+    again = store_settings_snapshot(
+        session, tenant_id="t-dec", snapshot_version="v1",
+        content={"rate": Decimal("1.25E+1")}, source={"a": 1},
+    )
+    session.commit()
+    assert again.id == committed.id
+    assert committed.content == {"rate": "12.5"}
+    with pytest.raises(TypeError):
+        canonical_json(Decimal("NaN"))
+
+
+def test_snapshot_race_preserves_outer_transaction(session: Session):
+    import uuid as _uuid
+
+    snap = store_settings_snapshot(
+        session, tenant_id="t-save", snapshot_version="v1",
+        content={"k": "v"}, source={"s": 1},
+    )
+    session.commit()
+    batch = _make_batch(
+        session, "t-save", f"save-{_uuid.uuid4().hex[:8]}", n=1,
+        prefix="sv", snapshot=snap,
+    )
+    claim = claim_next_evaluation(session, tenant_id="t-save", lease_owner="w-1")
+    session.commit()
+    assert claim is not None
+    # Start outer transactional work, then hit the snapshot identity race;
+    # the savepoint-scoped flush must preserve the outer work.
+    row = session.execute(
+        select(Evaluation).where(Evaluation.id == claim.evaluation_id)
+    ).scalar_one()
+    marker = {"checkpoint": "outer-work"}
+    row.checkpoint = dict(marker)
+    raced = store_settings_snapshot(
+        session, tenant_id="t-save", snapshot_version="v1",
+        content={"k": "v"}, source={"s": 1},
+    )
+    assert raced.id == snap.id
+    session.flush()
+    assert session.execute(
+        select(Evaluation.checkpoint).where(Evaluation.id == claim.evaluation_id)
+    ).scalar_one() == marker
+    session.rollback()
+    assert batch.id is not None

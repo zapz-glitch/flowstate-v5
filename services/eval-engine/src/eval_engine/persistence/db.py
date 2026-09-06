@@ -48,14 +48,43 @@ def create_postgresql_engine(url: str | None = None, **kwargs) -> Engine:
     return create_engine(target, **options)
 
 
+def _canonical_decimal(value: Decimal) -> str:
+    """Render a Decimal textually without consulting the decimal context.
+
+    Built purely from ``as_tuple`` so the output is identical under any
+    active ``localcontext`` precision. Trailing zeros are stripped, so
+    Decimal("12.50"), Decimal("12.5"), and Decimal("1.25E+1") all render
+    as "12.5" and hash identically. Non-finite values are rejected.
+    """
+    if not value.is_finite():
+        raise TypeError("non-finite decimals cannot be content-addressed")
+    sign, digits, exponent = value.as_tuple()
+    raw = "".join(str(digit) for digit in digits)
+    stripped = raw.rstrip("0")
+    if not stripped:
+        return "0"
+    shift = exponent + (len(raw) - len(stripped))
+    if shift >= 0:
+        out = stripped + "0" * shift
+    elif len(stripped) > -shift:
+        cut = len(stripped) + shift
+        out = stripped[:cut] + "." + stripped[cut:]
+    else:
+        out = "0." + "0" * (-shift - len(stripped)) + stripped
+    if sign:
+        out = "-" + out
+    return out
+
+
 def canonical_json(value: object) -> object:
     """Normalize a value into deterministic JSON-native form.
 
     Strict: mapping keys must be strings, floats must be finite, Decimals
-    are normalized so 12.50 and 12.5 hash identically, datetimes use
+    use textual context-independent canonicalization so equal values hash
+    identically regardless of precision or trailing zeros, datetimes use
     ISO 8601, sets/bytes/arbitrary objects are rejected instead of being
-    silently coerced. Two payloads with the same meaning always produce
-    the same hash; two different payloads do not collide by accident.
+    silently coerced. The stored normalized form re-hashes identically, so
+    hash(payload) always equals hash(stored form).
     """
     if value is None or isinstance(value, (bool, int, str)):
         return value
@@ -64,7 +93,7 @@ def canonical_json(value: object) -> object:
             raise TypeError("non-finite floats cannot be content-addressed")
         return value
     if isinstance(value, Decimal):
-        return format(value.normalize(), "f")
+        return _canonical_decimal(value)
     if isinstance(value, (datetime, date, time)):
         return value.isoformat()
     if isinstance(value, dict):

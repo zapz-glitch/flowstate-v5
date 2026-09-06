@@ -7,8 +7,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
-from decimal import Decimal
+from datetime import datetime, timedelta
 
 from sqlalchemy import func, select, text, update
 from sqlalchemy.exc import IntegrityError
@@ -27,6 +26,14 @@ class IdempotencyConflict(Exception):
 
 class LeaseMismatch(Exception):
     pass
+
+
+class TerminalReplay(Exception):
+    """A different terminal identity was already committed for this lease."""
+
+    def __init__(self, message: str, *, existing_version: int):
+        super().__init__(message)
+        self.existing_version = existing_version
 
 
 def _valid_lease_generation(value: object) -> int:
@@ -131,9 +138,9 @@ def store_settings_snapshot(
     )
     session.add(row)
     try:
-        session.flush()
+        with session.begin_nested():
+            session.flush()
     except IntegrityError:
-        session.rollback()
         return session.execute(
             select(SettingsSnapshot).where(
                 SettingsSnapshot.tenant_id == tenant_id,
@@ -322,14 +329,23 @@ def claim_next_evaluation(
 def _lock_evaluation_row(
     session: Session, *, tenant_id: str, evaluation_id: uuid.UUID
 ) -> Evaluation:
-    row = session.execute(
-        select(Evaluation)
-        .where(
-            Evaluation.id == evaluation_id,
-            Evaluation.tenant_id == tenant_id,
-        )
-        .with_for_update()
-    ).scalar_one_or_none()
+    """Lock one tenant evaluation row for the duration of the mutation.
+
+    populate_existing refreshes the identity-map copy so validation sees
+    the current database state, no_autoflush keeps pending changes out of
+    the locked read, and defaulting `now` after the lock prevents
+    expiry races between timestamp capture and validation.
+    """
+    with session.no_autoflush:
+        row = session.execute(
+            select(Evaluation)
+            .where(
+                Evaluation.id == evaluation_id,
+                Evaluation.tenant_id == tenant_id,
+            )
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        ).scalar_one_or_none()
     if row is None:
         raise KeyError(str(evaluation_id))
     return row
@@ -365,19 +381,20 @@ def _require_active_lease(
     lease_owner: str,
     lease_token: uuid.UUID,
     lease_generation: int,
-    now: datetime,
+    now: datetime | None = None,
     allowed: set[str],
 ) -> Evaluation:
     row = _lock_evaluation_row(
         session, tenant_id=tenant_id, evaluation_id=evaluation_id
     )
+    current = now or _utcnow()
     _check_locked_lease(
         row,
         evaluation_id=evaluation_id,
         lease_owner=lease_owner,
         lease_token=lease_token,
         lease_generation=lease_generation,
-        now=now,
+        now=current,
         allowed=allowed,
     )
     return row
@@ -391,13 +408,14 @@ def _cas_evaluation_lease(
     lease_owner: str,
     lease_token: uuid.UUID,
     lease_generation: int,
-    now: datetime,
+    now: datetime | None = None,
     expect_status: set[str],
     mutate,
 ) -> bool:
     row = _lock_evaluation_row(
         session, tenant_id=tenant_id, evaluation_id=evaluation_id
     )
+    current = now or _utcnow()
     try:
         _check_locked_lease(
             row,
@@ -405,12 +423,12 @@ def _cas_evaluation_lease(
             lease_owner=lease_owner,
             lease_token=lease_token,
             lease_generation=lease_generation,
-            now=now,
+            now=current,
             allowed=expect_status,
         )
     except LeaseMismatch:
         return False
-    mutate(row, now)
+    mutate(row, current)
     session.flush()
     return True
 
@@ -426,8 +444,6 @@ def heartbeat_lease(
     lease_ttl: timedelta = LEASE_TTL,
     now: datetime | None = None,
 ) -> bool:
-    current = now or _utcnow()
-
     def _touch(row: Evaluation, at: datetime) -> None:
         row.lease_expires_at = at + lease_ttl
         row.last_heartbeat_at = at
@@ -444,7 +460,7 @@ def heartbeat_lease(
         lease_owner=lease_owner,
         lease_token=lease_token,
         lease_generation=lease_generation,
-        now=current,
+        now=now,
         expect_status={"claimed", "running"},
         mutate=_touch,
     )
@@ -460,8 +476,6 @@ def mark_running(
     lease_generation: int,
     now: datetime | None = None,
 ) -> bool:
-    current = now or _utcnow()
-
     def _start(row: Evaluation, at: datetime) -> None:
         row.status = "running"
         row.updated_at = at
@@ -477,7 +491,7 @@ def mark_running(
         lease_owner=lease_owner,
         lease_token=lease_token,
         lease_generation=lease_generation,
-        now=current,
+        now=now,
         expect_status={"claimed"},
         mutate=_start,
     )
@@ -554,7 +568,6 @@ def fail_evaluation(
     now: datetime | None = None,
 ) -> str:
     """Record a fenced terminal or retryable failure for the lease holder."""
-    current = now or _utcnow()
     row = _require_active_lease(
         session,
         tenant_id=tenant_id,
@@ -562,9 +575,10 @@ def fail_evaluation(
         lease_owner=lease_owner,
         lease_token=lease_token,
         lease_generation=lease_generation,
-        now=current,
+        now=now,
         allowed={"claimed", "running"},
     )
+    current = now or _utcnow()
     if retriable is None:
         if error_code in _NON_RETRIABLE_CODES:
             retriable = False
@@ -628,25 +642,28 @@ def commit_result(
 ) -> tuple[EvaluationResult, bool]:
     """Concurrency-safe idempotent versioned result commit.
 
-    The evaluation row is locked before the lease is validated, and the
-    lock is held through version allocation and the terminal transition,
-    so one active lease can consume at most one terminal result. Identity
-    covers methodology plus snapshot plus status plus payload. Identical
-    concurrent commits converge on one row (returns (row, False)); a new
-    identity allocates version N plus 1.
+    Locking: the evaluation row is locked before `now` defaults and before
+    lease validation, and the lock is held through version allocation and
+    the terminal transition, so one active lease consumes at most one
+    terminal result. One evaluation completion per transaction: the batch
+    counter refresh locks the batch row deterministically after the
+    evaluation lock (eval then batch), so concurrent completions serialize
+    instead of deadlocking.
+
+    Replay control: the result identity is context-independent (exact
+    canonical payload). If the evaluation already succeeded and the
+    presented identity equals the current terminal identity, the existing
+    row returns with (row, False) and no state or timestamp changes. A
+    different identity on a terminal row raises TerminalReplay. An active
+    lease is required for new identities, historical identities, and
+    successful reuse, and reuse completes the current execution atomically.
+    Tenant lookup stays tenant scoped; tenant auth itself is external.
     """
     _check_tenant(tenant_id)
-    current = now or _utcnow()
-    row = _require_active_lease(
-        session,
-        tenant_id=tenant_id,
-        evaluation_id=evaluation_id,
-        lease_owner=lease_owner,
-        lease_token=lease_token,
-        lease_generation=lease_generation,
-        now=current,
-        allowed={"claimed", "running"},
+    row = _lock_evaluation_row(
+        session, tenant_id=tenant_id, evaluation_id=evaluation_id
     )
+    current = now or _utcnow()
     snapshot = session.execute(
         select(SettingsSnapshot).where(
             SettingsSnapshot.id == snapshot_id,
@@ -668,7 +685,41 @@ def commit_result(
             EvaluationResult.result_hash == result_hash,
         )
     ).scalar_one_or_none()
+    if row.status == "succeeded":
+        if same is None:
+            existing_version = (
+                session.execute(
+                    select(func.max(EvaluationResult.version)).where(
+                        EvaluationResult.evaluation_id == evaluation_id,
+                        EvaluationResult.tenant_id == tenant_id,
+                    )
+                ).scalar()
+                or 0
+            )
+            raise TerminalReplay(
+                f"evaluation {evaluation_id} already has a terminal result",
+                existing_version=int(existing_version),
+            )
+        return same, False
+    _check_locked_lease(
+        row,
+        evaluation_id=evaluation_id,
+        lease_owner=lease_owner,
+        lease_token=lease_token,
+        lease_generation=lease_generation,
+        now=current,
+        allowed={"claimed", "running"},
+    )
     if same is not None:
+        row.status = "succeeded"
+        row.result_status = status
+        row.lease_owner = None
+        row.lease_token = None
+        row.lease_expires_at = None
+        row.error_code = None
+        row.updated_at = current
+        session.flush()
+        _refresh_batch_counts(session, tenant_id, row.batch_id)
         return same, False
     latest_version = session.execute(
         select(func.max(EvaluationResult.version)).where(
@@ -687,23 +738,7 @@ def commit_result(
         result_hash=result_hash,
     )
     session.add(record)
-    try:
-        with session.begin_nested():
-            session.flush()
-    except IntegrityError:
-        same = session.execute(
-            select(EvaluationResult).where(
-                EvaluationResult.evaluation_id == evaluation_id,
-                EvaluationResult.tenant_id == tenant_id,
-                EvaluationResult.methodology_version == methodology_version,
-                EvaluationResult.snapshot_id == snapshot_id,
-                EvaluationResult.status == status,
-                EvaluationResult.result_hash == result_hash,
-            )
-        ).scalar_one_or_none()
-        if same is None:
-            raise
-        return same, False
+    session.flush()
     row.status = "succeeded"
     row.result_status = status
     row.lease_owner = None
@@ -727,7 +762,6 @@ def save_checkpoint(
     checkpoint: dict,
     now: datetime | None = None,
 ) -> None:
-    current = now or _utcnow()
     row = _require_active_lease(
         session,
         tenant_id=tenant_id,
@@ -735,9 +769,10 @@ def save_checkpoint(
         lease_owner=lease_owner,
         lease_token=lease_token,
         lease_generation=lease_generation,
-        now=current,
+        now=now,
         allowed={"claimed", "running"},
     )
+    current = now or _utcnow()
     row.checkpoint = canonical_json(checkpoint)
     row.updated_at = current
     session.flush()
@@ -746,16 +781,28 @@ def save_checkpoint(
 def _refresh_batch_counts(
     session: Session, tenant_id: str, batch_id: uuid.UUID
 ) -> None:
-    """Serialize terminal counter refresh under a batch row lock."""
-    batch = session.execute(
-        select(Batch).where(Batch.id == batch_id, Batch.tenant_id == tenant_id)
-    ).scalar_one_or_none()
+    """Serialize terminal counter refresh under deterministic locks.
+
+    One evaluation completion per transaction: callers hold the evaluation
+    row lock, then this helper takes the batch row lock (eval then batch
+    ordering everywhere), so concurrent completions serialize on the batch
+    row instead of deadlocking.
+    """
+    session.execute(
+        text(
+            "SELECT id FROM v4_batches "
+            "WHERE id = :id AND tenant_id = :tenant FOR UPDATE"
+        ),
+        {"id": batch_id, "tenant": tenant_id},
+    )
+    with session.no_autoflush:
+        batch = session.execute(
+            select(Batch)
+            .where(Batch.id == batch_id, Batch.tenant_id == tenant_id)
+            .execution_options(populate_existing=True)
+        ).scalar_one_or_none()
     if batch is None:
         raise KeyError(str(batch_id))
-    session.execute(
-        text("SELECT id FROM v4_batches WHERE id = :id FOR UPDATE"),
-        {"id": batch_id},
-    )
     succeeded = (
         session.execute(
             select(func.count())
@@ -846,16 +893,6 @@ def get_evaluation(
     if row is None:
         raise KeyError(str(evaluation_id))
     return row
-
-
-def _decimal_to_str(value: object) -> object:
-    if isinstance(value, Decimal):
-        return format(value, "f")
-    if isinstance(value, dict):
-        return {key: _decimal_to_str(item) for key, item in value.items()}
-    if isinstance(value, list):
-        return [_decimal_to_str(item) for item in value]
-    return value
 
 
 class IdempotencyStore:
