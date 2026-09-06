@@ -30,7 +30,12 @@ from eval_engine.persistence.db import (
     normalize_postgresql_url,
     require_postgresql_url,
 )
-from eval_engine.persistence.models import Base, Evaluation, EvaluationResult
+from eval_engine.persistence.models import (
+    Base,
+    Batch,
+    Evaluation,
+    EvaluationResult,
+)
 from eval_engine.persistence.repositories import (
     IdempotencyConflict,
     LeaseMismatch,
@@ -369,13 +374,62 @@ def test_batch_idempotency_same_key_same_payload_reuses(session: Session):
         request_payload=payload, items=_items(2), snapshot_id=snap.id,
     )
     session.commit()
-    assert created is True or created is False
+    assert created is True
+    persisted = session.execute(
+        select(func.count()).select_from(Evaluation).where(
+            Evaluation.tenant_id == "t-idem", Evaluation.batch_id == first.id
+        )
+    ).scalar()
+    assert persisted == 2
     second, reused = create_batch_with_evaluations(
         session, tenant_id="t-idem", idempotency_key="batch-1",
         request_payload=payload, items=_items(2), snapshot_id=snap.id,
     )
     session.commit()
     assert second.id == first.id
+    assert reused is False
+
+
+def test_batch_rejects_duplicate_property_keys(session: Session):
+    snap = _tenant_snapshot(session, "t-dupe")
+    items = [
+        {"idempotency_key": "same-prop", "payload": {"address": "1 Main St"}},
+        {"idempotency_key": "same-prop", "payload": {"address": "2 Main St"}},
+    ]
+    with pytest.raises(ValueError, match="duplicate property idempotency key"):
+        create_batch_with_evaluations(
+            session, tenant_id="t-dupe", idempotency_key="batch-dupe",
+            request_payload={"run": "dupe"}, items=items,
+            snapshot_id=snap.id,
+        )
+    session.rollback()
+    absent = session.execute(
+        select(func.count()).select_from(Batch).where(
+            Batch.tenant_id == "t-dupe",
+            Batch.idempotency_key == "batch-dupe",
+        )
+    ).scalar()
+    assert absent == 0
+
+
+def test_batch_rejects_property_key_owned_by_other_batch(session: Session):
+    snap = _tenant_snapshot(session, "t-xbatch")
+    first, created = create_batch_with_evaluations(
+        session, tenant_id="t-xbatch", idempotency_key="batch-first",
+        request_payload={"run": "first"},
+        items=[{"idempotency_key": "shared-prop", "payload": {"n": 1}}],
+        snapshot_id=snap.id,
+    )
+    session.commit()
+    assert created is True and first.id is not None
+    with pytest.raises(IdempotencyConflict):
+        create_batch_with_evaluations(
+            session, tenant_id="t-xbatch", idempotency_key="batch-second",
+            request_payload={"run": "second"},
+            items=[{"idempotency_key": "shared-prop", "payload": {"n": 1}}],
+            snapshot_id=snap.id,
+        )
+    session.rollback()
 
 
 def test_batch_idempotency_same_key_different_payload_conflicts(
@@ -1190,6 +1244,106 @@ def test_running_requires_active_lease_direct_sql(session: Session):
             {"id": eval_id, "t": "t-run"},
         )
     session.rollback()
+
+
+def test_commit_result_rejects_wrong_snapshot_same_tenant(session: Session):
+    batch = _make_batch(
+        session, "t-wsnap", f"wsnap-{uuid.uuid4().hex[:8]}", n=1,
+        prefix="ws",
+    )
+    other = store_settings_snapshot(
+        session, tenant_id="t-wsnap", snapshot_version="v1",
+        content={"rate": "99"}, source={"rate": "override"},
+    )
+    session.commit()
+    assert other.id != batch.snapshot_id
+    claim = claim_next_evaluation(session, tenant_id="t-wsnap", lease_owner="w-1")
+    session.commit()
+    assert claim is not None
+    with pytest.raises(IdempotencyConflict):
+        commit_result(
+            session, tenant_id="t-wsnap", evaluation_id=claim.evaluation_id,
+            lease_owner="w-1", lease_token=claim.lease_token,
+            lease_generation=claim.lease_generation,
+            methodology_version="evaluation-v4", snapshot_id=other.id,
+            status="VALUED", result_payload={"value": "1"},
+        )
+    session.rollback()
+    row = session.execute(
+        select(Evaluation).where(Evaluation.id == claim.evaluation_id)
+    ).scalar_one()
+    assert row.status in {"claimed", "running", "queued"}
+    assert session.execute(
+        select(func.count()).select_from(EvaluationResult).where(
+            EvaluationResult.evaluation_id == claim.evaluation_id
+        )
+    ).scalar() == 0
+
+
+def test_commit_result_rejects_payload_snapshot_mismatch(session: Session):
+    batch = _make_batch(
+        session, "t-wpay", f"wpay-{uuid.uuid4().hex[:8]}", n=1,
+        prefix="wp",
+    )
+    durable = session.execute(
+        select(Evaluation).where(
+            Evaluation.tenant_id == "t-wpay", Evaluation.batch_id == batch.id
+        )
+    ).scalar_one()
+    assert durable.id is not None
+    claim = claim_next_evaluation(session, tenant_id="t-wpay", lease_owner="w-1")
+    session.commit()
+    assert claim is not None
+    with pytest.raises(IdempotencyConflict):
+        commit_result(
+            session, tenant_id="t-wpay", evaluation_id=claim.evaluation_id,
+            lease_owner="w-1", lease_token=claim.lease_token,
+            lease_generation=claim.lease_generation,
+            methodology_version="evaluation-v4", snapshot_id=batch.snapshot_id,
+            status="VALUED", result_payload={
+                "value": "1",
+                "settings_snapshot_id": str(uuid.uuid4()),
+            },
+        )
+    session.rollback()
+    with pytest.raises(IdempotencyConflict):
+        commit_result(
+            session, tenant_id="t-wpay", evaluation_id=claim.evaluation_id,
+            lease_owner="w-1", lease_token=claim.lease_token,
+            lease_generation=claim.lease_generation,
+            methodology_version="evaluation-v4", snapshot_id=batch.snapshot_id,
+            status="VALUED", result_payload={
+                "value": "1",
+                "settings_snapshot_id": str(batch.snapshot_id),
+                "settings_content_hash": "bogus-hash",
+            },
+        )
+    session.rollback()
+
+
+def test_batch_replay_requested_count_must_equal_persisted(session: Session):
+    snap = _tenant_snapshot(session, "t-rcount")
+    first, created = create_batch_with_evaluations(
+        session, tenant_id="t-rcount", idempotency_key="batch-rcount",
+        request_payload={"run": "a"}, items=_items(2, prefix="rc"),
+        snapshot_id=snap.id,
+    )
+    session.commit()
+    assert created is True
+    with pytest.raises(IdempotencyConflict):
+        create_batch_with_evaluations(
+            session, tenant_id="t-rcount", idempotency_key="batch-rcount",
+            request_payload={"run": "a"}, items=_items(1, prefix="rc"),
+            snapshot_id=snap.id,
+        )
+    session.rollback()
+    replayed, created = create_batch_with_evaluations(
+        session, tenant_id="t-rcount", idempotency_key="batch-rcount",
+        request_payload={"run": "a"}, items=_items(2, prefix="rc"),
+        snapshot_id=snap.id,
+    )
+    session.commit()
+    assert replayed.id == first.id and created is False
 
 
 def test_terminal_replay_exact_idempotent_and_different_fenced(session: Session):

@@ -165,12 +165,34 @@ def create_batch_with_evaluations(
     authoritative hash returns (existing, True); same key with a different
     hash raises IdempotencyConflict (reuse/conflict, never raw
     IntegrityError). snapshot_id is required (non-null FK).
+
+    Duplicate property keys inside one request are rejected before any
+    batch insert. The batch creation flag comes from INSERT ... RETURNING
+    atomic evidence (inserted row means created True, conflict means
+    replay with created False). Exact replay returns created False;
+    conflicting reuse raises IdempotencyConflict; the requested item
+    count must equal the persisted evaluation count for the batch.
     """
     _check_tenant(tenant_id)
     if snapshot_id is None:
         raise ValueError("snapshot_id is required")
     if not 1 <= len(items) <= 50:
         raise ValueError("batch must contain 1 to 50 property requests")
+    # Intra-request duplicate property keys are a caller error: reject
+    # before any batch insert so no partial batch can persist.
+    seen_keys: set[str] = set()
+    for raw in items:
+        try:
+            dup_key = str(raw["idempotency_key"])
+        except (KeyError, TypeError) as exc:
+            raise ValueError("each item requires an idempotency_key") from exc
+        if not dup_key.strip():
+            raise ValueError("each item requires an idempotency_key")
+        if dup_key in seen_keys:
+            raise ValueError(
+                f"duplicate property idempotency key: {dup_key}"
+            )
+        seen_keys.add(dup_key)
     snapshot = session.execute(
         select(SettingsSnapshot).where(
             SettingsSnapshot.id == snapshot_id,
@@ -179,9 +201,14 @@ def create_batch_with_evaluations(
     ).scalar_one_or_none()
     if snapshot is None:
         raise KeyError(f"snapshot {snapshot_id} not found for tenant")
+    normalized_items = [_normalize_item(item) for item in list(items)]
+    row_hashes = {
+        entry["idempotency_key"]: canonical_hash(entry["payload"])
+        for entry in normalized_items
+    }
     request_hash = _batch_request_hash(list(items), snapshot_id, request_payload)
     with session.begin_nested():
-        session.execute(
+        inserted_id = session.execute(
             text(
                 "INSERT INTO v4_batches "
                 "(id, tenant_id, idempotency_key, request_hash, status, "
@@ -189,7 +216,8 @@ def create_batch_with_evaluations(
                 " created_at, updated_at) "
                 "VALUES (:id, :tenant, :key, :hash, 'pending', "
                 " :total, 0, 0, :snap, now(), now()) "
-                "ON CONFLICT (tenant_id, idempotency_key) DO NOTHING"
+                "ON CONFLICT (tenant_id, idempotency_key) DO NOTHING "
+                "RETURNING id"
             ),
             {
                 "id": uuid.uuid4(),
@@ -199,7 +227,8 @@ def create_batch_with_evaluations(
                 "total": len(items),
                 "snap": snapshot_id,
             },
-        )
+        ).scalar_one_or_none()
+    created_now = inserted_id is not None
     batch = session.execute(
         select(Batch).where(
             Batch.tenant_id == tenant_id,
@@ -218,7 +247,44 @@ def create_batch_with_evaluations(
             existing_hash=str(batch.snapshot_id),
             new_hash=str(snapshot_id),
         )
-    created_now = batch.total_count == len(items) and batch.succeeded_count == 0
+    if not created_now:
+        # Exact replay must see requested count equal persisted count.
+        # Skip the check while a concurrent same-key creator is still
+        # inside its evaluation-insert window (persisted == 0): the
+        # row-level ON CONFLICT plus the per-evaluation ownership check
+        # below still fence cross-batch reuse deterministically.
+        # Refresh first: this session's snapshot may predate the winning
+        # creator's evaluation inserts (READ COMMITTED).
+        session.execute(
+            text(
+                "SELECT 1 FROM v4_evaluations "
+                "WHERE tenant_id = :tenant AND batch_id = :batch LIMIT 1"
+            ),
+            {"tenant": tenant_id, "batch": batch.id},
+        )
+        with session.no_autoflush:
+            session.execute(
+                select(Evaluation)
+                .where(
+                    Evaluation.batch_id == batch.id,
+                    Evaluation.tenant_id == tenant_id,
+                )
+                .execution_options(populate_existing=True)
+            ).scalars().all()
+        persisted_total = session.execute(
+            select(func.count())
+            .select_from(Evaluation)
+            .where(
+                Evaluation.batch_id == batch.id,
+                Evaluation.tenant_id == tenant_id,
+            )
+        ).scalar() or 0
+        if persisted_total and persisted_total != len(items):
+            raise IdempotencyConflict(
+                "idempotency key replayed with different item count",
+                existing_hash=batch.request_hash,
+                new_hash=request_hash,
+            )
     for item in items:
         normalized = _normalize_item(item)
         row_hash = canonical_hash(normalized["payload"])
@@ -658,29 +724,70 @@ def commit_result(
     lease is required for new identities, historical identities, and
     successful reuse, and reuse completes the current execution atomically.
     Tenant lookup stays tenant scoped; tenant auth itself is external.
+
+    Snapshot binding: the durable snapshot is derived from the locked
+    evaluation's batch, never from caller control. A caller-supplied
+    snapshot_id must exactly equal the batch snapshot, and a result
+    payload carrying settings_snapshot_id/settings_content_hash must
+    match the durable snapshot id and content hash; mismatches raise
+    IdempotencyConflict before any replay, fencing, or insert decision.
     """
     _check_tenant(tenant_id)
     row = _lock_evaluation_row(
         session, tenant_id=tenant_id, evaluation_id=evaluation_id
     )
     current = now or _utcnow()
+    bound_batch = session.execute(
+        select(Batch).where(
+            Batch.id == row.batch_id,
+            Batch.tenant_id == tenant_id,
+        )
+    ).scalar_one_or_none()
+    if bound_batch is None:
+        raise KeyError(f"batch {row.batch_id} not found for tenant")
+    durable_snapshot_id = bound_batch.snapshot_id
+    if snapshot_id != durable_snapshot_id:
+        raise IdempotencyConflict(
+            "result snapshot must equal the evaluation batch snapshot",
+            existing_hash=str(durable_snapshot_id),
+            new_hash=str(snapshot_id),
+        )
     snapshot = session.execute(
         select(SettingsSnapshot).where(
-            SettingsSnapshot.id == snapshot_id,
+            SettingsSnapshot.id == durable_snapshot_id,
             SettingsSnapshot.tenant_id == tenant_id,
         )
     ).scalar_one_or_none()
     if snapshot is None:
-        raise KeyError(f"snapshot {snapshot_id} not found for tenant")
+        raise KeyError(f"snapshot {durable_snapshot_id} not found for tenant")
+    normalized_claims = result_payload if isinstance(result_payload, dict) else {}
+    claimed_snapshot_id = normalized_claims.get("settings_snapshot_id")
+    if claimed_snapshot_id is not None and str(claimed_snapshot_id) != str(
+        durable_snapshot_id
+    ):
+        raise IdempotencyConflict(
+            "result payload snapshot id must equal the batch snapshot",
+            existing_hash=str(durable_snapshot_id),
+            new_hash=str(claimed_snapshot_id),
+        )
+    claimed_content_hash = normalized_claims.get("settings_content_hash")
+    if claimed_content_hash is not None and str(claimed_content_hash) != str(
+        snapshot.content_hash
+    ):
+        raise IdempotencyConflict(
+            "result payload snapshot hash must match the durable snapshot",
+            existing_hash=str(snapshot.content_hash),
+            new_hash=str(claimed_content_hash),
+        )
     result_hash = _result_identity(
-        methodology_version, snapshot_id, status, result_payload
+        methodology_version, durable_snapshot_id, status, result_payload
     )
     same = session.execute(
         select(EvaluationResult).where(
             EvaluationResult.evaluation_id == evaluation_id,
             EvaluationResult.tenant_id == tenant_id,
             EvaluationResult.methodology_version == methodology_version,
-            EvaluationResult.snapshot_id == snapshot_id,
+            EvaluationResult.snapshot_id == durable_snapshot_id,
             EvaluationResult.status == status,
             EvaluationResult.result_hash == result_hash,
         )
@@ -732,7 +839,7 @@ def commit_result(
         evaluation_id=evaluation_id,
         version=latest_version + 1,
         methodology_version=methodology_version,
-        snapshot_id=snapshot_id,
+        snapshot_id=durable_snapshot_id,
         status=status,
         result_payload=canonical_json(result_payload),
         result_hash=result_hash,
