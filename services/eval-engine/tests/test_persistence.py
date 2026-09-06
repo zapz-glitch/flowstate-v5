@@ -35,6 +35,7 @@ from eval_engine.persistence.models import (
     Batch,
     Evaluation,
     EvaluationResult,
+    SettingsSnapshot,
 )
 from eval_engine.persistence.repositories import (
     IdempotencyConflict,
@@ -219,6 +220,19 @@ def _tenant_snapshot(session: Session, tenant: str):
     )
     session.commit()
     return row
+
+
+def _bound_payload(session: Session, tenant: str, snapshot_id, extra: dict) -> dict:
+    snap = session.execute(
+        select(SettingsSnapshot).where(
+            SettingsSnapshot.id == snapshot_id,
+            SettingsSnapshot.tenant_id == tenant,
+        )
+    ).scalar_one()
+    payload = dict(extra)
+    payload["settings_snapshot_id"] = str(snapshot_id)
+    payload["settings_content_hash"] = str(snap.content_hash)
+    return payload
 
 
 def _make_batch(session: Session, tenant: str, key: str, n: int = 1,
@@ -728,7 +742,10 @@ def test_result_commit_identity_versioning_and_statuses(
         lease_owner="w-1", lease_token=claim.lease_token,
         lease_generation=claim.lease_generation,
         methodology_version="evaluation-v4", snapshot_id=batch.snapshot_id,
-        status="VALUED", result_payload={"value": "100000"},
+        status="VALUED",
+        result_payload=_bound_payload(
+            session, "t-result", batch.snapshot_id, {"value": "100000"}
+        ),
     )
     session.commit()
     assert created and first.version == 1
@@ -756,7 +773,10 @@ def test_result_reevaluation_new_version_and_status_change(
         lease_owner="w-1", lease_token=claim.lease_token,
         lease_generation=claim.lease_generation,
         methodology_version="evaluation-v4", snapshot_id=batch.snapshot_id,
-        status="VALUED", result_payload={"value": "100000"},
+        status="VALUED",
+        result_payload=_bound_payload(
+            session, "t-reval", batch.snapshot_id, {"value": "100000"}
+        ),
     )
     session.commit()
     assert first.version == 1
@@ -775,7 +795,10 @@ def test_result_reevaluation_new_version_and_status_change(
         lease_owner="w-2", lease_token=claim3.lease_token,
         lease_generation=claim3.lease_generation,
         methodology_version="evaluation-v4", snapshot_id=batch.snapshot_id,
-        status="REVIEW_REQUIRED", result_payload={"value": "100000"},
+        status="REVIEW_REQUIRED",
+        result_payload=_bound_payload(
+            session, "t-reval", batch.snapshot_id, {"value": "100000"}
+        ),
     )
     session.commit()
     assert created and second.version == 2
@@ -794,6 +817,11 @@ def test_result_race_identical_and_different(maker):
         )
     ).scalar_one()
     triplet = (batch.snapshot_id, batch.id)
+    snap_hash = str(sess.execute(
+        select(SettingsSnapshot.content_hash).where(
+            SettingsSnapshot.id == batch.snapshot_id
+        )
+    ).scalar_one())
     sess.close()
 
     def claim_for(owner: str):
@@ -818,7 +846,11 @@ def test_result_race_identical_and_different(maker):
                 lease_owner="w-first", lease_token=first_claim.lease_token,
                 lease_generation=first_claim.lease_generation,
                 methodology_version="evaluation-v4", snapshot_id=snap_id,
-                status="VALUED", result_payload={"value": "7"},
+                status="VALUED", result_payload={
+                    "value": "7",
+                    "settings_snapshot_id": str(snap_id),
+                    "settings_content_hash": snap_hash,
+                },
             )
             sess.commit()
             results.append((str(record.id), record.version, created))
@@ -860,7 +892,11 @@ def test_result_race_identical_and_different(maker):
         lease_token=uuid.uuid4(),
         lease_generation=0,
         methodology_version="evaluation-v4", snapshot_id=snap_id,
-        status="VALUED", result_payload={"value": "7"},
+        status="VALUED", result_payload={
+            "value": "7",
+            "settings_snapshot_id": str(snap_id),
+            "settings_content_hash": snap_hash,
+        },
     )
     sess.commit()
     assert created is False and record.version == 1
@@ -880,7 +916,11 @@ def test_result_race_identical_and_different(maker):
                 lease_token=uuid.uuid4(),
                 lease_generation=0,
                 methodology_version="evaluation-v4", snapshot_id=snap_id,
-                status="REVIEW_REQUIRED", result_payload={"value": "7"},
+                status="REVIEW_REQUIRED", result_payload={
+                    "value": "7",
+                    "settings_snapshot_id": str(snap_id),
+                    "settings_content_hash": snap_hash,
+                },
             )
         except TerminalReplay as exc:
             assert exc.existing_version == 1
@@ -904,7 +944,11 @@ def test_result_race_identical_and_different(maker):
         lease_owner="w-second", lease_token=second_claim.lease_token,
         lease_generation=second_claim.lease_generation,
         methodology_version="evaluation-v4", snapshot_id=snap_id,
-        status="INSUFFICIENT_COMPS", result_payload={"value": "7"},
+        status="INSUFFICIENT_COMPS", result_payload={
+            "value": "7",
+            "settings_snapshot_id": str(snap_id),
+            "settings_content_hash": snap_hash,
+        },
     )
     sess.commit()
     sess.close()
@@ -928,14 +972,21 @@ def test_per_property_failure_and_batch_counts(session: Session):
         lease_owner="w-1", lease_token=claims[0].lease_token,
         lease_generation=claims[0].lease_generation,
         methodology_version="evaluation-v4", snapshot_id=batch.snapshot_id,
-        status="VALUED", result_payload={"value": "1"},
+        status="VALUED",
+        result_payload=_bound_payload(
+            session, "t-counts", batch.snapshot_id, {"value": "1"}
+        ),
     )
     commit_result(
         session, tenant_id="t-counts", evaluation_id=claims[1].evaluation_id,
         lease_owner="w-1", lease_token=claims[1].lease_token,
         lease_generation=claims[1].lease_generation,
         methodology_version="evaluation-v4", snapshot_id=batch.snapshot_id,
-        status="INSUFFICIENT_COMPS", result_payload={"error": "thin-market"},
+        status="INSUFFICIENT_COMPS",
+        result_payload=_bound_payload(
+            session, "t-counts", batch.snapshot_id,
+            {"error": "thin-market"},
+        ),
     )
     session.commit()
     progress = get_batch_progress(session, tenant_id="t-counts", batch_id=batch.id)
@@ -997,6 +1048,11 @@ def test_counter_serialization_under_threads(maker):
         snapshot_id=_tenant_snapshot(sess, "t-ser").id,
     )
     batch_id = batch.id
+    snap_hash = str(sess.execute(
+        select(SettingsSnapshot.content_hash).where(
+            SettingsSnapshot.id == batch.snapshot_id
+        )
+    ).scalar_one())
     sess.commit()
     sess.close()
     claims = []
@@ -1015,7 +1071,11 @@ def test_counter_serialization_under_threads(maker):
                 lease_owner="w-1", lease_token=claim.lease_token,
         lease_generation=claim.lease_generation,
                 methodology_version="evaluation-v4", snapshot_id=batch.snapshot_id,
-                status=status, result_payload={"v": status},
+                status=status, result_payload={
+                    "v": status,
+                    "settings_snapshot_id": str(batch.snapshot_id),
+                    "settings_content_hash": snap_hash,
+                },
             )
             sess.commit()
         finally:
@@ -1062,6 +1122,11 @@ def test_lease_reassignment_pauses_stale_commit(maker):
         )
     ).scalar_one()
     snap_id = batch.snapshot_id
+    snap_hash = str(sess.execute(
+        select(SettingsSnapshot.content_hash).where(
+            SettingsSnapshot.id == snap_id
+        )
+    ).scalar_one())
     sess.close()
 
     sess = maker()
@@ -1089,7 +1154,11 @@ def test_lease_reassignment_pauses_stale_commit(maker):
                 lease_owner="w-old", lease_token=stale.lease_token,
                 lease_generation=stale.lease_generation,
                 methodology_version="evaluation-v4", snapshot_id=snap_id,
-                status="VALUED", result_payload={"value": "1"},
+                status="VALUED", result_payload={
+                    "value": "1",
+                    "settings_snapshot_id": str(snap_id),
+                    "settings_content_hash": snap_hash,
+                },
             )
             sess.commit()
             outcome.append("committed")
@@ -1128,7 +1197,11 @@ def test_lease_reassignment_pauses_stale_commit(maker):
             lease_owner="w-old", lease_token=stale.lease_token,
             lease_generation=stale.lease_generation,
             methodology_version="evaluation-v4", snapshot_id=snap_id,
-            status="VALUED", result_payload={"value": "1"},
+            status="VALUED", result_payload={
+                "value": "1",
+                "settings_snapshot_id": str(snap_id),
+                "settings_content_hash": snap_hash,
+            },
         )
         sess.commit()
         outcome.append("committed-after-reassign")
@@ -1156,6 +1229,11 @@ def test_simultaneous_different_result_single_terminal(maker):
         )
     ).scalar_one()
     snap_id = batch.snapshot_id
+    snap_hash = str(sess.execute(
+        select(SettingsSnapshot.content_hash).where(
+            SettingsSnapshot.id == snap_id
+        )
+    ).scalar_one())
     sess.close()
     sess = maker()
     claim = claim_next_evaluation(sess, tenant_id="t-sdr", lease_owner="w-1")
@@ -1174,7 +1252,11 @@ def test_simultaneous_different_result_single_terminal(maker):
                 lease_owner="w-1", lease_token=claim.lease_token,
                 lease_generation=claim.lease_generation,
                 methodology_version="evaluation-v4", snapshot_id=snap_id,
-                status=status, result_payload={"value": status},
+                status=status, result_payload={
+                    "value": status,
+                    "settings_snapshot_id": str(snap_id),
+                    "settings_content_hash": snap_hash,
+                },
             )
             sess.commit()
             outcomes.append((status, record.version, created))
@@ -1266,7 +1348,10 @@ def test_commit_result_rejects_wrong_snapshot_same_tenant(session: Session):
             lease_owner="w-1", lease_token=claim.lease_token,
             lease_generation=claim.lease_generation,
             methodology_version="evaluation-v4", snapshot_id=other.id,
-            status="VALUED", result_payload={"value": "1"},
+            status="VALUED",
+            result_payload=_bound_payload(
+                session, "t-wsnap", batch.snapshot_id, {"value": "1"}
+            ),
         )
     session.rollback()
     row = session.execute(
@@ -1294,6 +1379,7 @@ def test_commit_result_rejects_payload_snapshot_mismatch(session: Session):
     claim = claim_next_evaluation(session, tenant_id="t-wpay", lease_owner="w-1")
     session.commit()
     assert claim is not None
+    bound = _bound_payload(session, "t-wpay", batch.snapshot_id, {"value": "1"})
     with pytest.raises(IdempotencyConflict):
         commit_result(
             session, tenant_id="t-wpay", evaluation_id=claim.evaluation_id,
@@ -1303,6 +1389,7 @@ def test_commit_result_rejects_payload_snapshot_mismatch(session: Session):
             status="VALUED", result_payload={
                 "value": "1",
                 "settings_snapshot_id": str(uuid.uuid4()),
+                "settings_content_hash": bound["settings_content_hash"],
             },
         )
     session.rollback()
@@ -1319,6 +1406,52 @@ def test_commit_result_rejects_payload_snapshot_mismatch(session: Session):
             },
         )
     session.rollback()
+
+
+def test_commit_result_rejects_missing_snapshot_binding(session: Session):
+    batch = _make_batch(
+        session, "t-nbind", f"nbind-{uuid.uuid4().hex[:8]}", n=1,
+        prefix="nb",
+    )
+    claim = claim_next_evaluation(session, tenant_id="t-nbind", lease_owner="w-1")
+    session.commit()
+    assert claim is not None
+    bound = _bound_payload(session, "t-nbind", batch.snapshot_id, {"value": "1"})
+    cases = [
+        {"value": "1"},
+        {k: v for k, v in bound.items() if k != "settings_snapshot_id"},
+        {k: v for k, v in bound.items() if k != "settings_content_hash"},
+        {**bound, "settings_snapshot_id": ""},
+        {**bound, "settings_content_hash": ""},
+    ]
+    for payload in cases:
+        with pytest.raises(IdempotencyConflict):
+            commit_result(
+                session, tenant_id="t-nbind", evaluation_id=claim.evaluation_id,
+                lease_owner="w-1", lease_token=claim.lease_token,
+                lease_generation=claim.lease_generation,
+                methodology_version="evaluation-v4", snapshot_id=batch.snapshot_id,
+                status="VALUED", result_payload=dict(payload),
+            )
+        session.rollback()
+    assert session.execute(
+        select(func.count()).select_from(EvaluationResult).where(
+            EvaluationResult.evaluation_id == claim.evaluation_id
+        )
+    ).scalar() == 0
+    row = session.execute(
+        select(Evaluation).where(Evaluation.id == claim.evaluation_id)
+    ).scalar_one()
+    assert row.status in {"claimed", "running", "queued"}
+    record, created = commit_result(
+        session, tenant_id="t-nbind", evaluation_id=claim.evaluation_id,
+        lease_owner="w-1", lease_token=claim.lease_token,
+        lease_generation=claim.lease_generation,
+        methodology_version="evaluation-v4", snapshot_id=batch.snapshot_id,
+        status="VALUED", result_payload=dict(bound),
+    )
+    session.commit()
+    assert created and record.version == 1
 
 
 def test_batch_replay_requested_count_must_equal_persisted(session: Session):
@@ -1359,7 +1492,10 @@ def test_terminal_replay_exact_idempotent_and_different_fenced(session: Session)
         lease_owner="w-1", lease_token=claim.lease_token,
         lease_generation=claim.lease_generation,
         methodology_version="evaluation-v4", snapshot_id=batch.snapshot_id,
-        status="VALUED", result_payload={"value": "42"},
+        status="VALUED",
+        result_payload=_bound_payload(
+            session, "t-replay", batch.snapshot_id, {"value": "42"}
+        ),
     )
     session.commit()
     assert created and first.version == 1
@@ -1374,7 +1510,10 @@ def test_terminal_replay_exact_idempotent_and_different_fenced(session: Session)
         lease_owner="anyone", lease_token=uuid.uuid4(),
         lease_generation=0,
         methodology_version="evaluation-v4", snapshot_id=batch.snapshot_id,
-        status="VALUED", result_payload={"value": "42"},
+        status="VALUED",
+        result_payload=_bound_payload(
+            session, "t-replay", batch.snapshot_id, {"value": "42"}
+        ),
     )
     session.commit()
     assert created is False and same.id == first.id and same.version == 1
@@ -1390,7 +1529,10 @@ def test_terminal_replay_exact_idempotent_and_different_fenced(session: Session)
             lease_generation=0,
             methodology_version="evaluation-v4",
             snapshot_id=batch.snapshot_id,
-            status="REVIEW_REQUIRED", result_payload={"value": "42"},
+            status="REVIEW_REQUIRED",
+            result_payload=_bound_payload(
+                session, "t-replay", batch.snapshot_id, {"value": "42"}
+            ),
         )
     session.rollback()
     assert excinfo.value.existing_version == 1
@@ -1405,7 +1547,16 @@ def test_active_fresh_lease_historical_reuse_completes(session: Session):
     claim = claim_next_evaluation(session, tenant_id="t-hist", lease_owner="w-1")
     session.commit()
     assert claim is not None
-    payload = {"value": "7"}
+    snap_hash = str(session.execute(
+        select(SettingsSnapshot.content_hash).where(
+            SettingsSnapshot.id == batch.snapshot_id
+        )
+    ).scalar_one())
+    payload = {
+        "value": "7",
+        "settings_snapshot_id": str(batch.snapshot_id),
+        "settings_content_hash": snap_hash,
+    }
     first, created = commit_result(
         session, tenant_id="t-hist", evaluation_id=claim.evaluation_id,
         lease_owner="w-1", lease_token=claim.lease_token,
@@ -1486,7 +1637,10 @@ def test_locked_row_refresh_sees_reassigned_lease(session: Session, maker):
             lease_owner="w-1", lease_token=claim.lease_token,
             lease_generation=claim.lease_generation,
             methodology_version="evaluation-v4", snapshot_id=batch.snapshot_id,
-            status="VALUED", result_payload={"value": "1"},
+            status="VALUED",
+            result_payload=_bound_payload(
+                session, "t-pop", batch.snapshot_id, {"value": "1"}
+            ),
         )
     session.rollback()
 
