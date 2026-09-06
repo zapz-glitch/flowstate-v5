@@ -48,7 +48,7 @@ def test_startup_accepts_internal_token(monkeypatch):
 def test_readiness_contract_constants():
     from eval_engine.health import EXPECTED_ALEMBIC_REVISION, REQUIRED_TABLES
 
-    assert EXPECTED_ALEMBIC_REVISION == "0002_v4_repair"
+    assert EXPECTED_ALEMBIC_REVISION == "0003_v4_owner"
     assert REQUIRED_TABLES == frozenset(
         {
             "v4_settings_snapshots",

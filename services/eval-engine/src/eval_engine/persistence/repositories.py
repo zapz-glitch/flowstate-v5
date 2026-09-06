@@ -102,6 +102,12 @@ def _check_tenant(tenant_id: str) -> None:
         raise ValueError("tenant_id is required")
 
 
+def _check_owner(tenant_id: str, user_id: str) -> None:
+    _check_tenant(tenant_id)
+    if not user_id or not user_id.strip():
+        raise ValueError("requested_by_user_id is required")
+
+
 def store_settings_snapshot(
     session: Session,
     *,
@@ -154,6 +160,7 @@ def create_batch_with_evaluations(
     session: Session,
     *,
     tenant_id: str,
+    requested_by_user_id: str,
     idempotency_key: str,
     request_payload: dict,
     items: list[dict],
@@ -161,8 +168,10 @@ def create_batch_with_evaluations(
 ) -> tuple[Batch, bool]:
     """Create a batch plus one evaluation row per property.
 
-    Uses ON CONFLICT for concurrency-safe idempotency: same key plus same
-    authoritative hash returns (existing, True); same key with a different
+    Owner-scoped idempotency: the authoritative scope is (tenant, user,
+    key); legacy (tenant, key) rows stay visible only to their own owner so
+    no cross-user reuse or disclosure can occur. Same scope plus same
+    authoritative hash returns (existing, True); same scope with a different
     hash raises IdempotencyConflict (reuse/conflict, never raw
     IntegrityError). snapshot_id is required (non-null FK).
 
@@ -173,7 +182,7 @@ def create_batch_with_evaluations(
     conflicting reuse raises IdempotencyConflict; the requested item
     count must equal the persisted evaluation count for the batch.
     """
-    _check_tenant(tenant_id)
+    _check_owner(tenant_id, requested_by_user_id)
     if snapshot_id is None:
         raise ValueError("snapshot_id is required")
     if not 1 <= len(items) <= 50:
@@ -211,17 +220,19 @@ def create_batch_with_evaluations(
         inserted_id = session.execute(
             text(
                 "INSERT INTO v4_batches "
-                "(id, tenant_id, idempotency_key, request_hash, status, "
+                "(id, tenant_id, requested_by_user_id, idempotency_key, "
+                " request_hash, status, "
                 " total_count, succeeded_count, failed_count, snapshot_id, "
                 " created_at, updated_at) "
-                "VALUES (:id, :tenant, :key, :hash, 'pending', "
+                "VALUES (:id, :tenant, :owner, :key, :hash, 'pending', "
                 " :total, 0, 0, :snap, now(), now()) "
-                "ON CONFLICT (tenant_id, idempotency_key) DO NOTHING "
+                "ON CONFLICT (tenant_id, requested_by_user_id, idempotency_key) DO NOTHING "
                 "RETURNING id"
             ),
             {
                 "id": uuid.uuid4(),
                 "tenant": tenant_id,
+                "owner": requested_by_user_id,
                 "key": idempotency_key,
                 "hash": request_hash,
                 "total": len(items),
@@ -232,9 +243,16 @@ def create_batch_with_evaluations(
     batch = session.execute(
         select(Batch).where(
             Batch.tenant_id == tenant_id,
+            Batch.requested_by_user_id == requested_by_user_id,
             Batch.idempotency_key == idempotency_key,
         )
-    ).scalar_one()
+    ).scalar_one_or_none()
+    if batch is None:
+        raise IdempotencyConflict(
+            "idempotency key owned by another user",
+            existing_hash="",
+            new_hash=request_hash,
+        )
     if batch.request_hash != request_hash:
         raise IdempotencyConflict(
             "idempotency key reused with different payload",
@@ -292,31 +310,42 @@ def create_batch_with_evaluations(
             session.execute(
                 text(
                     "INSERT INTO v4_evaluations "
-                    "(id, tenant_id, batch_id, idempotency_key, request_hash, "
+                    "(id, tenant_id, requested_by_user_id, batch_id, idempotency_key, "
+                    " request_hash, checkpoint, "
                     " status, attempts, max_attempts, lease_generation, "
                     " next_attempt_at, input_payload, retriable, "
                     " created_at, updated_at) "
-                    "VALUES (:id, :tenant, :batch, :key, :hash, 'queued', "
+                    "VALUES (:id, :tenant, :owner, :batch, :key, :hash, "
+                    " CAST(:checkpoint AS jsonb), 'queued', "
                     " 0, :maxa, 0, now(), "
                     " CAST(:payload AS jsonb), true, now(), now()) "
-                    "ON CONFLICT (tenant_id, idempotency_key) DO NOTHING"
+                    "ON CONFLICT (tenant_id, requested_by_user_id, idempotency_key) DO NOTHING"
                 ),
                 {
                     "id": uuid.uuid4(),
                     "tenant": tenant_id,
+                    "owner": requested_by_user_id,
                     "batch": batch.id,
                     "key": normalized["idempotency_key"],
                     "hash": row_hash,
                     "maxa": normalized["max_attempts"],
+                    "checkpoint": __import__("json").dumps(item.get("checkpoint") or {}),
                     "payload": __import__("json").dumps(normalized["payload"]),
                 },
             )
         dupe = session.execute(
             select(Evaluation).where(
                 Evaluation.tenant_id == tenant_id,
+                Evaluation.requested_by_user_id == requested_by_user_id,
                 Evaluation.idempotency_key == normalized["idempotency_key"],
             )
-        ).scalar_one()
+        ).scalar_one_or_none()
+        if dupe is None:
+            raise IdempotencyConflict(
+                f"evaluation idempotency key owned by another user: {normalized['idempotency_key']}",
+                existing_hash="",
+                new_hash=row_hash,
+            )
         if dupe.request_hash != row_hash:
             raise IdempotencyConflict(
                 f"evaluation idempotency key reused: {normalized['idempotency_key']}",
@@ -851,6 +880,7 @@ def commit_result(
     ).scalar() or 0
     record = EvaluationResult(
         tenant_id=tenant_id,
+        requested_by_user_id=row.requested_by_user_id,
         evaluation_id=evaluation_id,
         version=latest_version + 1,
         methodology_version=methodology_version,
@@ -982,13 +1012,16 @@ def _refresh_batch_counts(
 
 
 def get_batch_progress(
-    session: Session, *, tenant_id: str, batch_id: uuid.UUID
+    session: Session, *, tenant_id: str, batch_id: uuid.UUID,
+    requested_by_user_id: str,
 ) -> dict:
-    _check_tenant(tenant_id)
+    _check_owner(tenant_id, requested_by_user_id)
     batch = session.execute(
         select(Batch).where(Batch.id == batch_id, Batch.tenant_id == tenant_id)
     ).scalar_one_or_none()
     if batch is None:
+        raise KeyError(str(batch_id))
+    if batch.requested_by_user_id != requested_by_user_id:
         raise KeyError(str(batch_id))
     _refresh_batch_counts(session, tenant_id, batch_id)
     session.refresh(batch)
@@ -1003,9 +1036,10 @@ def get_batch_progress(
 
 
 def get_evaluation(
-    session: Session, *, tenant_id: str, evaluation_id: uuid.UUID
+    session: Session, *, tenant_id: str, evaluation_id: uuid.UUID,
+    requested_by_user_id: str,
 ) -> Evaluation:
-    _check_tenant(tenant_id)
+    _check_owner(tenant_id, requested_by_user_id)
     row = session.execute(
         select(Evaluation).where(
             Evaluation.id == evaluation_id,
@@ -1014,11 +1048,77 @@ def get_evaluation(
     ).scalar_one_or_none()
     if row is None:
         raise KeyError(str(evaluation_id))
+    if row.requested_by_user_id != requested_by_user_id:
+        raise KeyError(str(evaluation_id))
     return row
 
 
+def claim_owned_evaluation_trusted_queue(
+    session: Session, *, tenant_id: str, requested_by_user_id: str,
+    evaluation_id: str | uuid.UUID | None = None,
+):
+    """Separately named trusted queue claim for future worker use.
+
+    Contract: leases exactly one queued row owned by (tenant, user),
+    oldest first when no id is given; returns None when no owned queued
+    row exists. Never leases another owner's row. Reserved for the
+    supervised worker lane; the API request path must not call it.
+    """
+    from .models import Evaluation as _Evaluation
+
+    _check_owner(tenant_id, requested_by_user_id)
+    query = select(_Evaluation).where(
+        _Evaluation.tenant_id == tenant_id,
+        _Evaluation.requested_by_user_id == requested_by_user_id,
+        _Evaluation.status == "queued",
+    )
+    if evaluation_id is not None:
+        row = session.execute(
+            query.where(_Evaluation.id == evaluation_id).with_for_update()
+        ).scalar_one_or_none()
+    else:
+        row = session.execute(
+            query.order_by(_Evaluation.created_at, _Evaluation.id)
+            .with_for_update(skip_locked=True)
+            .limit(1)
+        ).scalar_one_or_none()
+    if row is None:
+        return None
+    import uuid as _uuid
+    from datetime import datetime as _dt, timezone as _tz
+
+    now = _dt.now(_tz.utc)
+    token = _uuid.uuid4()
+    updated = session.execute(
+        text(
+            "UPDATE v4_evaluations SET status='claimed', lease_owner=:owner, "
+            "lease_token=:token, lease_generation=lease_generation+1, "
+            "lease_expires_at=:exp, last_heartbeat_at=:now, attempts=attempts+1, "
+            "updated_at=:now WHERE id=:id AND tenant_id=:tenant "
+            "AND requested_by_user_id=:user AND status='queued'"
+        ),
+        {"owner": f"worker:{requested_by_user_id}", "token": token,
+         "exp": now + LEASE_TTL, "now": now, "id": row.id,
+         "tenant": tenant_id, "user": requested_by_user_id},
+    )
+    session.flush()
+    if not updated.rowcount:
+        return None
+    session.expire_all()
+    target = session.execute(
+        select(_Evaluation).where(_Evaluation.id == row.id)
+    ).scalar_one()
+    return Claim(
+        evaluation_id=target.id, tenant_id=tenant_id,
+        lease_owner=f"worker:{requested_by_user_id}",
+        lease_token=target.lease_token,
+        lease_generation=int(target.lease_generation),
+        attempts=int(target.attempts),
+    ), target
+
+
 class IdempotencyStore:
-    """Tenant-scoped idempotency helper backed by PostgreSQL rows."""
+    """Owner-scoped idempotency helper backed by PostgreSQL rows."""
 
     def __init__(self, session: Session):
         self._session = session
@@ -1027,12 +1127,13 @@ class IdempotencyStore:
         self,
         *,
         tenant_id: str,
+        requested_by_user_id: str,
         idempotency_key: str,
         request_payload: dict,
         items: list[dict] | None = None,
         snapshot_id: uuid.UUID | None = None,
     ) -> tuple[str, bool]:
-        _check_tenant(tenant_id)
+        _check_owner(tenant_id, requested_by_user_id)
         if items is not None and snapshot_id is not None:
             request_hash = _batch_request_hash(list(items), snapshot_id, request_payload)
         else:
@@ -1040,6 +1141,7 @@ class IdempotencyStore:
         existing = self._session.execute(
             select(Batch).where(
                 Batch.tenant_id == tenant_id,
+                Batch.requested_by_user_id == requested_by_user_id,
                 Batch.idempotency_key == idempotency_key,
             )
         ).scalar_one_or_none()
@@ -1054,13 +1156,15 @@ class IdempotencyStore:
         return existing.request_hash, True
 
     def record_evaluation_conflict(
-        self, *, tenant_id: str, idempotency_key: str, request_payload: dict
+        self, *, tenant_id: str, requested_by_user_id: str,
+        idempotency_key: str, request_payload: dict
     ) -> None:
-        _check_tenant(tenant_id)
+        _check_owner(tenant_id, requested_by_user_id)
         request_hash = canonical_hash(canonical_json(request_payload))
         existing = self._session.execute(
             select(Evaluation).where(
                 Evaluation.tenant_id == tenant_id,
+                Evaluation.requested_by_user_id == requested_by_user_id,
                 Evaluation.idempotency_key == idempotency_key,
             )
         ).scalar_one_or_none()

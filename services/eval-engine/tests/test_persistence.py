@@ -236,12 +236,13 @@ def _bound_payload(session: Session, tenant: str, snapshot_id, extra: dict) -> d
 
 
 def _make_batch(session: Session, tenant: str, key: str, n: int = 1,
-                prefix: str = "p", snapshot=None, payload=None):
+                prefix: str = "p", snapshot=None, payload=None, user: str = "u-legacy"):
     if snapshot is None or snapshot.tenant_id != tenant:
         snapshot = _tenant_snapshot(session, tenant)
     batch, _ = create_batch_with_evaluations(
         session,
         tenant_id=tenant,
+        requested_by_user_id=user,
         idempotency_key=key,
         request_payload=payload or {"run": key},
         items=_items(n, prefix=prefix),
@@ -249,6 +250,48 @@ def _make_batch(session: Session, tenant: str, key: str, n: int = 1,
     )
     session.commit()
     return batch
+
+
+def test_owner_scoped_idempotency_no_cross_user_reuse(session: Session):
+    tenant = f"t-owner-{uuid.uuid4().hex[:6]}"
+    snap = _tenant_snapshot(session, tenant)
+    first, created = create_batch_with_evaluations(
+        session, tenant_id=tenant,
+        requested_by_user_id="u-1",
+        idempotency_key="shared-key",
+        request_payload={"run": "owner"},
+        items=_items(1, prefix="own"),
+        snapshot_id=snap.id,
+    )
+    session.commit()
+    assert created
+    second, created_again = create_batch_with_evaluations(
+        session, tenant_id=tenant,
+        requested_by_user_id="u-2",
+        idempotency_key="shared-key",
+        request_payload={"run": "owner"},
+        items=_items(1, prefix="own"),
+        snapshot_id=snap.id,
+    )
+    session.commit()
+    assert created_again and second.id != first.id
+    replayed, created_replay = create_batch_with_evaluations(
+        session, tenant_id=tenant,
+        requested_by_user_id="u-1",
+        idempotency_key="shared-key",
+        request_payload={"run": "owner"},
+        items=_items(1, prefix="own"),
+        snapshot_id=snap.id,
+    )
+    session.commit()
+    assert replayed.id == first.id and created_replay is False
+    with pytest.raises(KeyError):
+        get_batch_progress(session, tenant_id=tenant, requested_by_user_id="u-2", batch_id=first.id)
+    with pytest.raises(KeyError):
+        get_evaluation(
+            session, tenant_id=tenant, requested_by_user_id="u-2",
+            evaluation_id=first.evaluations[0].id,
+        )
 
 
 def test_url_normalization_rejects_non_psycopg3():
@@ -357,6 +400,7 @@ def test_batch_requires_snapshot_and_range(session: Session):
         create_batch_with_evaluations(
             session,
             tenant_id="t-req",
+                requested_by_user_id="u-legacy",
             idempotency_key="no-snap",
             request_payload={},
             items=_items(1),
@@ -369,12 +413,14 @@ def test_batch_requires_snapshot_and_range(session: Session):
     session.commit()
     with pytest.raises(ValueError):
         create_batch_with_evaluations(
-            session, tenant_id="t-req", idempotency_key="empty",
+            session, tenant_id="t-req",
+                requested_by_user_id="u-legacy", idempotency_key="empty",
             request_payload={}, items=[], snapshot_id=snap.id,
         )
     with pytest.raises(ValueError):
         create_batch_with_evaluations(
-            session, tenant_id="t-req", idempotency_key="big",
+            session, tenant_id="t-req",
+                requested_by_user_id="u-legacy", idempotency_key="big",
             request_payload={}, items=_items(51, prefix="big"),
             snapshot_id=snap.id,
         )
@@ -384,7 +430,8 @@ def test_batch_idempotency_same_key_same_payload_reuses(session: Session):
     payload = {"run": "a", "props": 2}
     snap = _tenant_snapshot(session, "t-idem")
     first, created = create_batch_with_evaluations(
-        session, tenant_id="t-idem", idempotency_key="batch-1",
+        session, tenant_id="t-idem",
+                requested_by_user_id="u-legacy", idempotency_key="batch-1",
         request_payload=payload, items=_items(2), snapshot_id=snap.id,
     )
     session.commit()
@@ -396,7 +443,8 @@ def test_batch_idempotency_same_key_same_payload_reuses(session: Session):
     ).scalar()
     assert persisted == 2
     second, reused = create_batch_with_evaluations(
-        session, tenant_id="t-idem", idempotency_key="batch-1",
+        session, tenant_id="t-idem",
+                requested_by_user_id="u-legacy", idempotency_key="batch-1",
         request_payload=payload, items=_items(2), snapshot_id=snap.id,
     )
     session.commit()
@@ -412,7 +460,8 @@ def test_batch_rejects_duplicate_property_keys(session: Session):
     ]
     with pytest.raises(ValueError, match="duplicate property idempotency key"):
         create_batch_with_evaluations(
-            session, tenant_id="t-dupe", idempotency_key="batch-dupe",
+            session, tenant_id="t-dupe",
+                requested_by_user_id="u-legacy", idempotency_key="batch-dupe",
             request_payload={"run": "dupe"}, items=items,
             snapshot_id=snap.id,
         )
@@ -429,7 +478,8 @@ def test_batch_rejects_duplicate_property_keys(session: Session):
 def test_batch_rejects_property_key_owned_by_other_batch(session: Session):
     snap = _tenant_snapshot(session, "t-xbatch")
     first, created = create_batch_with_evaluations(
-        session, tenant_id="t-xbatch", idempotency_key="batch-first",
+        session, tenant_id="t-xbatch",
+                requested_by_user_id="u-legacy", idempotency_key="batch-first",
         request_payload={"run": "first"},
         items=[{"idempotency_key": "shared-prop", "payload": {"n": 1}}],
         snapshot_id=snap.id,
@@ -438,7 +488,8 @@ def test_batch_rejects_property_key_owned_by_other_batch(session: Session):
     assert created is True and first.id is not None
     with pytest.raises(IdempotencyConflict):
         create_batch_with_evaluations(
-            session, tenant_id="t-xbatch", idempotency_key="batch-second",
+            session, tenant_id="t-xbatch",
+                requested_by_user_id="u-legacy", idempotency_key="batch-second",
             request_payload={"run": "second"},
             items=[{"idempotency_key": "shared-prop", "payload": {"n": 1}}],
             snapshot_id=snap.id,
@@ -451,13 +502,15 @@ def test_batch_idempotency_same_key_different_payload_conflicts(
 ):
     snap = _tenant_snapshot(session, "t-conf")
     create_batch_with_evaluations(
-        session, tenant_id="t-conf", idempotency_key="batch-c",
+        session, tenant_id="t-conf",
+                requested_by_user_id="u-legacy", idempotency_key="batch-c",
         request_payload={"run": "a"}, items=_items(1), snapshot_id=snap.id,
     )
     session.commit()
     with pytest.raises(IdempotencyConflict):
         create_batch_with_evaluations(
-            session, tenant_id="t-conf", idempotency_key="batch-c",
+            session, tenant_id="t-conf",
+                requested_by_user_id="u-legacy", idempotency_key="batch-c",
             request_payload={"run": "b"}, items=_items(1), snapshot_id=snap.id,
         )
     session.rollback()
@@ -471,21 +524,24 @@ def test_batch_hash_covers_items_and_snapshot(session: Session):
     )
     session.commit()
     create_batch_with_evaluations(
-        session, tenant_id="t-hash", idempotency_key="batch-h",
+        session, tenant_id="t-hash",
+                requested_by_user_id="u-legacy", idempotency_key="batch-h",
         request_payload={"run": "h"}, items=_items(1, prefix="h1"),
         snapshot_id=snap.id,
     )
     session.commit()
     with pytest.raises(IdempotencyConflict):
         create_batch_with_evaluations(
-            session, tenant_id="t-hash", idempotency_key="batch-h",
+            session, tenant_id="t-hash",
+                requested_by_user_id="u-legacy", idempotency_key="batch-h",
             request_payload={"run": "h"}, items=_items(1, prefix="h2"),
             snapshot_id=snap.id,
         )
     session.rollback()
     with pytest.raises(IdempotencyConflict):
         create_batch_with_evaluations(
-            session, tenant_id="t-hash", idempotency_key="batch-h",
+            session, tenant_id="t-hash",
+                requested_by_user_id="u-legacy", idempotency_key="batch-h",
             request_payload={"run": "h"}, items=_items(1, prefix="h1"),
             snapshot_id=other.id,
         )
@@ -503,7 +559,8 @@ def test_idempotency_race_same_key_concurrent(maker):
         sess = maker()
         try:
             batch, _ = create_batch_with_evaluations(
-                sess, tenant_id="t-race", idempotency_key=key,
+                sess, tenant_id="t-race",
+                requested_by_user_id="u-legacy", idempotency_key=key,
                 request_payload={"run": "race"}, items=_items(1, prefix="rc"),
                 snapshot_id=race_snap_id,
             )
@@ -536,25 +593,28 @@ def test_tenant_isolation(session: Session):
     session.commit()
     snap_a = _tenant_snapshot(session, "tenant-a")
     batch_a, _ = create_batch_with_evaluations(
-        session, tenant_id="tenant-a", idempotency_key="shared-key",
+        session, tenant_id="tenant-a",
+                requested_by_user_id="u-legacy", idempotency_key="shared-key",
         request_payload=payload, items=_items(1, prefix="a"),
         snapshot_id=snap_a.id,
     )
     batch_b, _ = create_batch_with_evaluations(
-        session, tenant_id="tenant-b", idempotency_key="shared-key",
+        session, tenant_id="tenant-b",
+                requested_by_user_id="u-legacy", idempotency_key="shared-key",
         request_payload=payload, items=_items(1, prefix="b"),
         snapshot_id=other.id,
     )
     session.commit()
     assert batch_a.id != batch_b.id
-    progress = get_batch_progress(session, tenant_id="tenant-a", batch_id=batch_a.id)
+    progress = get_batch_progress(session, tenant_id="tenant-a", requested_by_user_id="u-legacy", batch_id=batch_a.id)
     assert progress["tenant_id"] == "tenant-a"
     with pytest.raises(KeyError):
-        get_batch_progress(session, tenant_id="tenant-b", batch_id=batch_a.id)
+        get_batch_progress(session, tenant_id="tenant-b", requested_by_user_id="u-legacy", batch_id=batch_a.id)
     with pytest.raises(KeyError):
         get_evaluation(
             session,
             tenant_id="tenant-b",
+            requested_by_user_id="u-legacy",
             evaluation_id=batch_a.evaluations[0].id,
         )
 
@@ -752,10 +812,11 @@ def test_result_commit_identity_versioning_and_statuses(
     fresh = claim_next_evaluation(session, tenant_id="t-result", lease_owner="w-9")
     session.commit()
     assert fresh is None
-    progress = get_batch_progress(session, tenant_id="t-result", batch_id=batch.id)
+    progress = get_batch_progress(session, tenant_id="t-result", requested_by_user_id="u-legacy", batch_id=batch.id)
     assert progress["succeeded"] == 1
     row = get_evaluation(
-        session, tenant_id="t-result", evaluation_id=claim.evaluation_id
+        session, tenant_id="t-result", requested_by_user_id="u-legacy",
+        evaluation_id=claim.evaluation_id
     )
     assert row.result_status == "VALUED"
 
@@ -989,7 +1050,7 @@ def test_per_property_failure_and_batch_counts(session: Session):
         ),
     )
     session.commit()
-    progress = get_batch_progress(session, tenant_id="t-counts", batch_id=batch.id)
+    progress = get_batch_progress(session, tenant_id="t-counts", requested_by_user_id="u-legacy", batch_id=batch.id)
     assert progress["total"] == 3
     assert progress["succeeded"] == 2
     assert progress["failed"] == 0
@@ -1019,7 +1080,8 @@ def test_non_retriable_terminal_failure(session: Session):
 
 def test_bounded_retry_scheduling_and_dead(session: Session):
     sess_batch, _ = create_batch_with_evaluations(
-        session, tenant_id="t-retry", idempotency_key="batch-retry",
+        session, tenant_id="t-retry",
+                requested_by_user_id="u-legacy", idempotency_key="batch-retry",
         request_payload={"run": "retry"},
         items=[{"idempotency_key": "r-0", "payload": {"a": 1}, "max_attempts": 1}],
         snapshot_id=_tenant_snapshot(session, "t-retry").id,
@@ -1043,7 +1105,8 @@ def test_bounded_retry_scheduling_and_dead(session: Session):
 def test_counter_serialization_under_threads(maker):
     sess = maker()
     batch, _ = create_batch_with_evaluations(
-        sess, tenant_id="t-ser", idempotency_key=f"ser-{uuid.uuid4().hex[:8]}",
+        sess, tenant_id="t-ser",
+                requested_by_user_id="u-legacy", idempotency_key=f"ser-{uuid.uuid4().hex[:8]}",
         request_payload={"run": "ser"}, items=_items(4, prefix="sz"),
         snapshot_id=_tenant_snapshot(sess, "t-ser").id,
     )
@@ -1092,7 +1155,7 @@ def test_counter_serialization_under_threads(maker):
     for thread in threads:
         thread.join()
     sess = maker()
-    progress = get_batch_progress(sess, tenant_id="t-ser", batch_id=batch_id)
+    progress = get_batch_progress(sess, tenant_id="t-ser", requested_by_user_id="u-legacy", batch_id=batch_id)
     sess.close()
     assert progress["total"] == 4
     assert progress["succeeded"] == 4
@@ -1457,7 +1520,8 @@ def test_commit_result_rejects_missing_snapshot_binding(session: Session):
 def test_batch_replay_requested_count_must_equal_persisted(session: Session):
     snap = _tenant_snapshot(session, "t-rcount")
     first, created = create_batch_with_evaluations(
-        session, tenant_id="t-rcount", idempotency_key="batch-rcount",
+        session, tenant_id="t-rcount",
+                requested_by_user_id="u-legacy", idempotency_key="batch-rcount",
         request_payload={"run": "a"}, items=_items(2, prefix="rc"),
         snapshot_id=snap.id,
     )
@@ -1465,13 +1529,15 @@ def test_batch_replay_requested_count_must_equal_persisted(session: Session):
     assert created is True
     with pytest.raises(IdempotencyConflict):
         create_batch_with_evaluations(
-            session, tenant_id="t-rcount", idempotency_key="batch-rcount",
+            session, tenant_id="t-rcount",
+                requested_by_user_id="u-legacy", idempotency_key="batch-rcount",
             request_payload={"run": "a"}, items=_items(1, prefix="rc"),
             snapshot_id=snap.id,
         )
     session.rollback()
     replayed, created = create_batch_with_evaluations(
-        session, tenant_id="t-rcount", idempotency_key="batch-rcount",
+        session, tenant_id="t-rcount",
+                requested_by_user_id="u-legacy", idempotency_key="batch-rcount",
         request_payload={"run": "a"}, items=_items(2, prefix="rc"),
         snapshot_id=snap.id,
     )
