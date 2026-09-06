@@ -110,8 +110,35 @@ def test_alembic_up_and_down_on_isolated_database():
     os.environ["DATABASE_URL"] = url
     try:
         command.upgrade(_config(url), "head")
-        tables = set(inspect(create_engine(url)).get_table_names())
+        engine = create_engine(url)
+        tables = set(inspect(engine).get_table_names())
         assert EXPECTED_TABLES.issubset(tables)
+        insp = inspect(engine)
+        eval_fks = {fk["name"] for fk in insp.get_foreign_keys("v4_evaluations")}
+        assert "fk_v4_eval_tenant_batch" in eval_fks
+        result_fks = {
+            fk["name"] for fk in insp.get_foreign_keys("v4_evaluation_results")
+        }
+        assert "fk_v4_result_tenant_eval" in result_fks
+        assert "fk_v4_result_tenant_snapshot" in result_fks
+        result_uq = {
+            uq["name"] for uq in insp.get_unique_constraints("v4_evaluation_results")
+        }
+        assert "uq_v4_result_identity" in result_uq
+        batch_ck = {
+            ck["name"] for ck in insp.get_check_constraints("v4_batches")
+        }
+        assert "ck_v4_batch_total_range" in batch_ck
+        assert "ck_v4_batch_counts_sum" in batch_ck
+        with engine.begin() as conn:
+            trig = conn.execute(
+                text(
+                    "SELECT count(*) FROM pg_trigger "
+                    "WHERE tgname = 'trg_v4_snapshot_no_update'"
+                )
+            ).scalar()
+            assert trig == 1
+        engine.dispose()
         command.downgrade(_config(url), "base")
         remaining = set(inspect(create_engine(url)).get_table_names())
         assert EXPECTED_TABLES.isdisjoint(remaining)

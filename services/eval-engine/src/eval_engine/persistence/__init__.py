@@ -1,10 +1,24 @@
 """V4 isolated PostgreSQL persistence package."""
+from .db import (
+    NonPostgreSQLError,
+    canonical_hash,
+    canonical_json,
+    create_postgresql_engine,
+    normalize_postgresql_url,
+    require_postgresql_url,
+    verify_postgresql_only,
+)
 from .models import Base, Batch, Evaluation, EvaluationResult, SettingsSnapshot
 from .repositories import (
+    Claim,
     IdempotencyConflict,
-    create_batch_with_evaluations,
-    get_batch_progress,
     IdempotencyStore,
+    LeaseMismatch,
+    commit_result,
+    create_batch_with_evaluations,
+    fail_evaluation,
+    get_batch_progress,
+    get_evaluation,
 )
 
 __all__ = [
@@ -13,8 +27,20 @@ __all__ = [
     "Evaluation",
     "EvaluationResult",
     "SettingsSnapshot",
+    "Claim",
     "IdempotencyConflict",
     "IdempotencyStore",
+    "LeaseMismatch",
+    "NonPostgreSQLError",
+    "canonical_hash",
+    "canonical_json",
+    "commit_result",
     "create_batch_with_evaluations",
+    "create_postgresql_engine",
+    "fail_evaluation",
     "get_batch_progress",
+    "get_evaluation",
+    "normalize_postgresql_url",
+    "require_postgresql_url",
+    "verify_postgresql_only",
 ]
