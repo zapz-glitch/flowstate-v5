@@ -5,6 +5,7 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 
 from .contracts import (
+    AdditionalItemResultV4,
     AdditionalRenovationItemV4,
     AdjustmentLedgerEntryV4,
     AdjustmentOutcomeV4,
@@ -13,6 +14,7 @@ from .contracts import (
     CompAdjustmentRuleV4,
     CompCandidateV4,
     CompDecisionV4,
+    DATE_PATTERN,
     DealResultV4,
     DealSettingsV4,
     DecimalString,
@@ -32,7 +34,9 @@ from .contracts import (
     SubjectPropertyV4,
     TransactionRuleV4,
     parse_decimal_string,
+    parse_full_date,
     serialize_decimal,
+    tier_boundary_problems,
 )
 
 
@@ -83,14 +87,17 @@ class HealthResponse(BaseModel):
 
 
 __all__ = [
+    "AdditionalItemResultV4",
     "AdditionalRenovationItemV4",
     "AdjustmentLedgerEntryV4",
+    "AdjustmentOutcomeV4",
     "AppraisalFilterV4",
     "ArvResultV4",
     "CompAdjustmentRuleV4",
     "CompCandidateV4",
     "CompDecisionV4",
     "Comparable",
+    "DATE_PATTERN",
     "DealResultV4",
     "DealSettingsV4",
     "DecisionStep",
@@ -115,5 +122,7 @@ __all__ = [
     "SubjectPropertyV4",
     "TransactionRuleV4",
     "parse_decimal_string",
+    "parse_full_date",
     "serialize_decimal",
+    "tier_boundary_problems",
 ]

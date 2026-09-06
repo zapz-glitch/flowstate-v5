@@ -2,8 +2,9 @@
 
 from .base import DECIMAL_PATTERN, DecimalString, parse_decimal_string, serialize_decimal
 from .comps import CompCandidateV4
-from .dates import OptionalStrictDate, StrictDate, parse_full_date, parse_optional_full_date
+from .dates import DATE_PATTERN, OptionalStrictDate, StrictDate, parse_full_date, parse_optional_full_date
 from .deal import (
+    AdditionalItemResultV4,
     AdditionalRenovationItemV4,
     AdjustmentLedgerEntryV4,
     AdjustmentOutcomeV4,
@@ -30,6 +31,12 @@ from .filters import (
     AppraisalFilterV4,
     CompAdjustmentRuleV4,
     FilterKind,
+    SKIPPED_APPLIES_TO,
+    SKIPPED_DUPLICATE,
+    SKIPPED_NO_POLICY,
+    SKIPPED_UNKNOWN_AMOUNT,
+    SKIPPED_UNKNOWN_EVIDENCE,
+    SKIPPED_UNSUPPORTED,
     TransactionRuleV4,
 )
 from .settings import (
@@ -38,10 +45,12 @@ from .settings import (
     RenovationTierCellV4,
     RenovationTierV4,
     SettingsSnapshotV4,
+    tier_boundary_problems,
 )
 from .subject import SubjectPropertyV4
 
 __all__ = [
+    "AdditionalItemResultV4",
     "AdditionalRenovationItemV4",
     "AdjustmentKind",
     "AdjustmentLedgerEntryV4",
@@ -52,6 +61,7 @@ __all__ = [
     "CompAdjustmentRuleV4",
     "CompCandidateV4",
     "CompDecisionV4",
+    "DATE_PATTERN",
     "DECIMAL_PATTERN",
     "DealResultV4",
     "DealSettingsV4",
@@ -75,6 +85,12 @@ __all__ = [
     "RuleOutcomeV4",
     "SectionStatus",
     "SettingsSnapshotV4",
+    "SKIPPED_APPLIES_TO",
+    "SKIPPED_DUPLICATE",
+    "SKIPPED_NO_POLICY",
+    "SKIPPED_UNKNOWN_AMOUNT",
+    "SKIPPED_UNKNOWN_EVIDENCE",
+    "SKIPPED_UNSUPPORTED",
     "SubjectPropertyV4",
     "StrictDate",
     "TransactionRuleV4",
@@ -82,4 +98,5 @@ __all__ = [
     "parse_full_date",
     "parse_optional_full_date",
     "serialize_decimal",
+    "tier_boundary_problems",
 ]

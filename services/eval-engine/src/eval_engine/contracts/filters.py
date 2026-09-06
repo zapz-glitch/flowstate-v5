@@ -27,6 +27,13 @@ AdjustmentKind = Literal[
     "sale_age",
 ]
 
+SKIPPED_APPLIES_TO = "SKIPPED_APPLIES_TO"
+SKIPPED_DUPLICATE = "SKIPPED_DUPLICATE"
+SKIPPED_UNKNOWN_EVIDENCE = "SKIPPED_UNKNOWN_EVIDENCE"
+SKIPPED_UNKNOWN_AMOUNT = "SKIPPED_UNKNOWN_AMOUNT"
+SKIPPED_NO_POLICY = "SKIPPED_NO_POLICY"
+SKIPPED_UNSUPPORTED = "SKIPPED_UNSUPPORTED"
+
 RuleSource = Literal["request_override", "zip", "city_state", "state", "user_default", "system_default", ""]
 RulePrecedence = Literal["request_override", "zip", "city_state", "state", "user_default", "system_default", ""]
 
@@ -74,24 +81,26 @@ class CompAdjustmentRuleV4(BaseModel):
 class TransactionRuleV4(BaseModel):
     """Explicit configured transaction eligibility.
 
-    No prohibited code lists are invented here. The snapshot carries the
-    operator-configured allowed/denied transaction codes and types. When a
-    transaction field is marked required, unknown values fail instead of
-    passing silently. Empty with no required fields means no configured
-    restriction beyond intrinsic validity.
+    Presence and membership are separate. Unknown codes/types only fail
+    when ``require_known_code``/``require_known_type`` is set; otherwise an
+    optional ``unknown_code_limitation``/``unknown_type_limitation`` records
+    the evidence gap without failing. Denial always wins over allowance.
+    ``is_sale=True`` is required; intrinsic ``is_sale=False`` always fails.
     """
 
     model_config = ConfigDict(populate_by_name=True, extra="forbid")
 
     rule_id: str = Field(default="transaction_eligibility", max_length=128)
     enabled: bool = True
+    require_sale_flag: bool = True
     allowed_codes: list[str] = Field(default_factory=list, max_length=256)
     denied_codes: list[str] = Field(default_factory=list, max_length=256)
     allowed_types: list[str] = Field(default_factory=list, max_length=256)
     denied_types: list[str] = Field(default_factory=list, max_length=256)
-    require_sale_flag: bool = False
     require_known_code: bool = False
     require_known_type: bool = False
+    unknown_code_limitation: str = Field(default="unknown transaction code", max_length=256)
+    unknown_type_limitation: str = Field(default="unknown transaction type", max_length=256)
     source: str = Field(default="", max_length=64)
     precedence: str = Field(default="", max_length=64)
     version: str = Field(default="", max_length=32)
@@ -104,5 +113,11 @@ __all__ = [
     "FilterKind",
     "RulePrecedence",
     "RuleSource",
+    "SKIPPED_APPLIES_TO",
+    "SKIPPED_DUPLICATE",
+    "SKIPPED_NO_POLICY",
+    "SKIPPED_UNKNOWN_AMOUNT",
+    "SKIPPED_UNKNOWN_EVIDENCE",
+    "SKIPPED_UNSUPPORTED",
     "TransactionRuleV4",
 ]

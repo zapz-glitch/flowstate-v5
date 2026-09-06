@@ -95,8 +95,7 @@ def test_full_date_validation_rejects_slices_and_bad_dates():
     from eval_engine.contracts.dates import parse_full_date
 
     assert str(parse_full_date("2026-09-01")) == "2026-09-01"
-    assert str(parse_full_date("2026/09/01")) == "2026-09-01"
-    for bad in ("2026-13-01", "2026-02-30", "06/01/2026", "2026-9-1", "2026-09-01T", "", 20260901, True):
+    for bad in ("2026/09/01", "20260901", "2026-13-01", "2026-02-30", "06/01/2026", "2026-9-1", "2026-09-01T", "", 20260901, True):
         with pytest.raises((ValidationError, ValueError)):
             parse_full_date(bad)
     with pytest.raises(ValidationError):
@@ -114,7 +113,28 @@ def test_full_date_validation_rejects_slices_and_bad_dates():
 
 
 def test_snapshot_hash_validated_and_id_required():
-    snapshot = SettingsSnapshotV4(snapshot_id="s1")
+    from eval_engine.contracts.settings import RenovationTierCellV4, RenovationTierV4
+
+    levels = ["lipstick", "light_cosmetic", "full_cosmetic", "heavy_rehab", "full_gut"]
+    tiers = [
+        RenovationTierV4(
+            tier_key="under500k", lower_inclusive="0", upper_exclusive="500000",
+            cells=[RenovationTierCellV4(renovation_level=lv, rehab_rate_per_sqft="100", flip_profit="50000") for lv in levels],
+        ),
+        RenovationTierV4(
+            tier_key="500k_to_under1m", lower_inclusive="500000", upper_exclusive="1000000",
+            cells=[RenovationTierCellV4(renovation_level=lv, rehab_rate_per_sqft="100", flip_profit="50000") for lv in levels],
+        ),
+        RenovationTierV4(
+            tier_key="1m_to_3m", lower_inclusive="1000000", upper_inclusive="3000000",
+            cells=[RenovationTierCellV4(renovation_level=lv, rehab_rate_per_sqft="100", flip_profit="50000") for lv in levels],
+        ),
+        RenovationTierV4(
+            tier_key="over3m", lower_exclusive="3000000",
+            cells=[RenovationTierCellV4(renovation_level=lv, rehab_rate_per_sqft="100", flip_profit="50000") for lv in levels],
+        ),
+    ]
+    snapshot = SettingsSnapshotV4(snapshot_id="s1", tiers=tiers)
     stamped = snapshot.validated_for_durable_use()
     assert stamped.content_hash == snapshot.compute_content_hash()
     tampered = stamped.model_copy(update={"content_hash": "0" * 64})
@@ -144,7 +164,7 @@ def test_comp_candidate_defaults_and_status_fields():
 
 
 def test_settings_snapshot_hash_and_provenance():
-    snapshot = SettingsSnapshotV4(snapshot_id="s1")
+    snapshot = SettingsSnapshotV4(snapshot_id="s1", tiers=SettingsSnapshotV4(snapshot_id="s1").tiers)
     digest = snapshot.compute_content_hash()
     assert len(digest) == 64
     assert snapshot.schema_version == "evaluation-v4"

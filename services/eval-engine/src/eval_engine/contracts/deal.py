@@ -64,6 +64,21 @@ class AdditionalRenovationItemV4(BaseModel):
     dedup_group: str = Field(default="", max_length=128)
 
 
+class AdditionalItemResultV4(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+
+    item_id: str
+    included: bool = False
+    requested_cost: DecimalString | None = None
+    applied_cost: DecimalString | None = None
+    provenance: str = ""
+    source: str = ""
+    dedup_group: str = ""
+    winning_item_id: str = ""
+    reason: str = ""
+    ledger_entry_id: str = ""
+
+
 class AdjustmentLedgerEntryV4(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="forbid")
 
@@ -130,11 +145,13 @@ class RenovationItemResultV4(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="forbid", validate_default=True)
 
     system_id: str
+    canonical_system_id: str = ""
     provenance: str
     supported_age: DecimalString | None = None
     threshold: DecimalString | None = None
     included: bool = False
     signed_cost: DecimalString = Decimal("0")
+    overlap_group: str = ""
     dedup_group: str = ""
     evidence_summary: str = ""
     ledger_entry_id: str = ""
@@ -153,6 +170,7 @@ class RenovationResultV4(BaseModel):
     preliminary: bool = False
     limitations: list[str] = Field(default_factory=list)
     items: list[RenovationItemResultV4] = Field(default_factory=list)
+    additional_items: list[AdditionalItemResultV4] = Field(default_factory=list)
 
 
 class DealResultV4(BaseModel):
@@ -230,6 +248,7 @@ class EvaluationResultV4(BaseModel):
 
 
 __all__ = [
+    "AdditionalItemResultV4",
     "AdditionalRenovationItemV4",
     "AdjustmentLedgerEntryV4",
     "AdjustmentOutcomeV4",

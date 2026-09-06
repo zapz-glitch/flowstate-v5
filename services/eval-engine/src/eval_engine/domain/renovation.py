@@ -1,16 +1,25 @@
-"""Renovation tier mapping, explicit boundary semantics, and major items."""
+"""Renovation tier mapping, explicit boundary semantics, and major items.
+
+Canonical identity is independent of overlap groups: ``canonical_system``
+maps aliases to one key. Auto-first precedence resolves competing auto
+claims for one canonical system deterministically; base-covered systems go
+to a reserve result instead of being dropped. Overlap groups cover only
+triggering candidates. Panel/rewiring share electrical coverage; nonagents
+never reserve groups.
+"""
 
 from __future__ import annotations
 
 from decimal import Decimal
 
 from ..contracts.deal import (
+    AdditionalItemResultV4,
     AdditionalRenovationItemV4,
     AdjustmentLedgerEntryV4,
     MajorItemEvidenceV4,
     RenovationItemResultV4,
 )
-from ..contracts.settings import MajorItemRuleV4, RenovationTierV4
+from ..contracts.settings import MajorItemRuleV4, RenovationTierV4, tier_boundary_problems
 
 CANONICAL_TIERS = ("under500k", "500k_to_under1m", "1m_to_3m", "over3m")
 CANONICAL_LEVELS = (
@@ -20,12 +29,6 @@ CANONICAL_LEVELS = (
     "heavy_rehab",
     "full_gut",
 )
-EXPECTED_ENDPOINTS: dict[str, tuple[str, str | None, str | None]] = {
-    "under500k": ("0", None, "500000"),
-    "500k_to_under1m": ("500000", None, "1000000"),
-    "1m_to_3m": ("1000000", "3000000", None),
-    "over3m": ("3000000", None, None),
-}
 INITIAL_AUTO_SYSTEMS = {
     "roof",
     "hvac",
@@ -85,48 +88,19 @@ def overlap_group(system: str, dedup_group: str) -> str:
 
 
 def tier_inclusivity(tier: RenovationTierV4) -> str:
+    lower = f"[{tier.lower_inclusive}" if tier.lower_inclusive is not None else f"({tier.lower_exclusive}"
     if tier.upper_inclusive is not None:
-        return f"[{tier.lower_inclusive}..{tier.upper_inclusive}]"
+        return f"{lower}..{tier.upper_inclusive}]"
     if tier.upper_exclusive is not None:
-        return f"[{tier.lower_inclusive}..{tier.upper_exclusive})"
-    return f"({tier.lower_inclusive}..open)"
+        return f"{lower}..{tier.upper_exclusive})"
+    return f"{lower}..open)"
 
 
 def validate_tiers(tiers: list[RenovationTierV4]) -> list[str]:
-    errors: list[str] = []
+    errors = tier_boundary_problems(tiers)
     if len(tiers) != 4:
-        errors.append(f"expected 4 tiers, got {len(tiers)}")
         return errors
-    keys = [t.tier_key for t in tiers]
-    if keys != list(CANONICAL_TIERS):
-        errors.append(f"tiers must be ordered {list(CANONICAL_TIERS)}, got {keys}")
-    if len(set(keys)) != len(keys):
-        errors.append("duplicate tier keys")
     for tier in tiers:
-        expected = EXPECTED_ENDPOINTS.get(tier.tier_key)
-        if expected is None:
-            errors.append(f"unknown tier key {tier.tier_key}")
-            continue
-        lower, upper_incl, upper_excl = expected
-        if tier.lower_inclusive != Decimal(lower):
-            errors.append(f"{tier.tier_key}: lower_inclusive must be {lower}")
-        if not tier.lower_inclusive_flag:
-            errors.append(f"{tier.tier_key}: lower bound must be inclusive")
-        if upper_incl is None and tier.upper_inclusive is not None:
-            errors.append(f"{tier.tier_key}: upper_inclusive must be absent")
-        if upper_incl is not None and tier.upper_inclusive != Decimal(upper_incl):
-            errors.append(f"{tier.tier_key}: upper_inclusive must be {upper_incl}")
-        if upper_excl is None and tier.upper_exclusive is not None:
-            errors.append(f"{tier.tier_key}: upper_exclusive must be absent")
-        if upper_excl is not None and tier.upper_exclusive != Decimal(upper_excl):
-            errors.append(f"{tier.tier_key}: upper_exclusive must be {upper_excl}")
-        if tier.upper_bound_inclusive is not None:
-            declared = "inclusive" if tier.upper_inclusive is not None else ("exclusive" if tier.upper_exclusive is not None else "open")
-            want = "inclusive" if tier.upper_bound_inclusive else "exclusive"
-            if tier.tier_key != "over3m" and declared != want:
-                errors.append(f"{tier.tier_key}: upper_bound_inclusive={tier.upper_bound_inclusive} conflicts with {declared} bound")
-        if tier.upper_inclusive is not None and tier.upper_exclusive is not None:
-            errors.append(f"{tier.tier_key}: only one upper bound allowed")
         levels = [canonical_level(c.renovation_level) for c in tier.cells]
         if len(levels) != 5 or sorted(levels) != sorted(CANONICAL_LEVELS):
             errors.append(f"tier {tier.tier_key} must define all five renovation levels once")
@@ -136,16 +110,6 @@ def validate_tiers(tiers: list[RenovationTierV4]) -> list[str]:
             for raw in cell.included_systems:
                 if canonical_system(raw) == "":
                     errors.append(f"{tier.tier_key}: empty included system")
-    ordered = {t.tier_key: t for t in tiers}
-    try:
-        if ordered["under500k"].upper_exclusive != ordered["500k_to_under1m"].lower_inclusive:
-            errors.append("gap/overlap at 500000")
-        if ordered["500k_to_under1m"].upper_exclusive != ordered["1m_to_3m"].lower_inclusive:
-            errors.append("gap/overlap at 1000000")
-        if ordered["1m_to_3m"].upper_inclusive != ordered["over3m"].lower_inclusive:
-            errors.append("gap/overlap at 3000000")
-    except KeyError:
-        errors.append("missing canonical tier for continuity check")
     return errors
 
 
@@ -206,7 +170,7 @@ def evaluate_major_items(
     additional: list[AdditionalRenovationItemV4],
     ledger: list[AdjustmentLedgerEntryV4] | None = None,
     tier_cell_systems: list[str] | None = None,
-) -> tuple[list[RenovationItemResultV4], Decimal, Decimal, list[str]]:
+) -> tuple[list[RenovationItemResultV4], Decimal, Decimal, list[str], list[AdditionalItemResultV4]]:
     limitations: list[str] = []
     items: list[RenovationItemResultV4] = []
     auto_total = Decimal(0)
@@ -214,9 +178,8 @@ def evaluate_major_items(
     for record in evidence:
         grouped.setdefault(canonical_system(record.system_id), []).append(record)
     cell_systems = {canonical_system(s) for s in (tier_cell_systems or [])}
-    seen_groups: set[str] = set()
-    candidates: list[tuple[MajorItemRuleV4, str, MajorItemEvidenceV4 | None, str, str]] = []
-    ordered_rules = sorted(rules, key=lambda r: canonical_system(r.system_id))
+    candidates: list[tuple[MajorItemRuleV4, str, str, MajorItemEvidenceV4 | None, str, str]] = []
+    ordered_rules = sorted(rules, key=lambda r: (canonical_system(r.system_id), r.system_id))
     for rule in ordered_rules:
         system = canonical_system(rule.system_id)
         records = grouped.get(system, [])
@@ -235,9 +198,9 @@ def evaluate_major_items(
                 ]
                 if part
             )
-        candidates.append((rule, system, chosen, explicit_group, summary))
+        candidates.append((rule, rule.system_id, system, chosen, explicit_group, summary))
     triggering: set[str] = set()
-    for rule, system, chosen, explicit_group, _ in candidates:
+    for rule, _raw, system, chosen, _group, _summary in candidates:
         if not rule.enabled or system not in INITIAL_AUTO_SYSTEMS:
             continue
         if chosen is None or chosen.supported_age_years is None:
@@ -246,65 +209,65 @@ def evaluate_major_items(
             triggering.add(system)
         elif chosen.supported_age_years > rule.age_threshold_years and chosen.permit_scope and chosen.completion_evidence:
             triggering.add(system)
-    overlap_choice: dict[str, str] = {}
+    winner_by_group: dict[str, str] = {}
     for system in sorted(triggering):
-        rule = next(r for r, s, *_ in candidates if s == system)
-        _ = rule
-        chosen = next(c for r, s, c, *_ in candidates if s == system)
-        explicit = next(g for r, s, _, g, _ in candidates if s == system)
-        overlap_choice[system] = overlap_group(system, explicit) if explicit else overlap_group(system, "")
-        _ = chosen
-    for rule, system, chosen, explicit_group, summary in candidates:
+        member_rules = [(rule, raw, chosen, explicit) for rule, raw, sys, chosen, explicit, _ in candidates if sys == system]
+        member_rules.sort(key=lambda t: (0 if t[0].inclusion_category == "initial_auto" else 1, t[1]))
+        winner = member_rules[0]
+        explicit = winner[3].dedup_group.strip() if winner[2] and winner[2].dedup_group else winner[3]
+        group = overlap_group(system, explicit)
+        winner_by_group[group] = system
+    reserved_groups: set[str] = set()
+    for rule, raw_id, system, chosen, explicit_group, summary in candidates:
         provenance = "manual" if chosen and chosen.provenance == "manual" else "auto"
         group = overlap_group(system, explicit_group)
-        if system in triggering and group == ELECTRICAL_GROUP:
-            group = overlap_choice.get(system, group)
-        if system in triggering and cell_systems and system in cell_systems:
-            limitations.append(f"{system}: base rehab overlap; suppressed in favor of tier cell")
-            items.append(
-                RenovationItemResultV4(
-                    system_id=system, provenance=provenance,
-                    supported_age=chosen.supported_age_years if chosen else None,
-                    threshold=rule.age_threshold_years, included=False,
-                    signed_cost=Decimal(0), dedup_group=group,
-                    evidence_summary=(summary + "; base overlap" if summary else "base overlap"),
-                )
-            )
-            triggering.discard(system)
-            continue
-        if system in triggering and group in seen_groups:
-            limitations.append(f"{system}: duplicate overlap group {group}")
-            items.append(
-                RenovationItemResultV4(
-                    system_id=system, provenance=provenance,
-                    supported_age=chosen.supported_age_years if chosen else None,
-                    threshold=rule.age_threshold_years, included=False,
-                    signed_cost=Decimal(0), dedup_group=group,
-                    evidence_summary=summary or "duplicate overlap suppressed",
-                )
-            )
-            continue
-        if group in seen_groups and (system in triggering or (chosen and chosen.supported_age_years is not None)):
-            limitations.append(f"{system}: duplicate overlap group {group}")
-            items.append(
-                RenovationItemResultV4(
-                    system_id=system, provenance=provenance,
-                    supported_age=chosen.supported_age_years if chosen else None,
-                    threshold=rule.age_threshold_years, included=False,
-                    signed_cost=Decimal(0), dedup_group=group,
-                    evidence_summary=summary or "duplicate overlap suppressed",
-                )
-            )
-            continue
         if system in triggering:
-            seen_groups.add(group)
+            winner = winner_by_group.get(group)
+            if winner is not None and winner != system:
+                limitations.append(f"{system}: covered by {winner} in {group}; reserve")
+                items.append(
+                    RenovationItemResultV4(
+                        system_id=raw_id, canonical_system_id=system, provenance=provenance,
+                        supported_age=chosen.supported_age_years if chosen else None,
+                        threshold=rule.age_threshold_years, included=False,
+                        signed_cost=Decimal(0), overlap_group=group, dedup_group=group,
+                        evidence_summary=(summary + f"; covered by {winner}" if summary else f"covered by {winner}"),
+                    )
+                )
+                continue
+            if system in cell_systems:
+                limitations.append(f"{system}: base rehab overlap; base-covered reserve")
+                reserved_groups.add(group)
+                items.append(
+                    RenovationItemResultV4(
+                        system_id=raw_id, canonical_system_id=system, provenance=provenance,
+                        supported_age=chosen.supported_age_years if chosen else None,
+                        threshold=rule.age_threshold_years, included=False,
+                        signed_cost=Decimal(0), overlap_group=group, dedup_group=group,
+                        evidence_summary=(summary + "; base-covered reserve" if summary else "base-covered reserve"),
+                    )
+                )
+                continue
+            if group in reserved_groups:
+                limitations.append(f"{system}: duplicate overlap group {group}")
+                items.append(
+                    RenovationItemResultV4(
+                        system_id=raw_id, canonical_system_id=system, provenance=provenance,
+                        supported_age=chosen.supported_age_years if chosen else None,
+                        threshold=rule.age_threshold_years, included=False,
+                        signed_cost=Decimal(0), overlap_group=group, dedup_group=group,
+                        evidence_summary=summary or "duplicate overlap suppressed",
+                    )
+                )
+                continue
+            reserved_groups.add(group)
         if not rule.enabled:
             items.append(
                 RenovationItemResultV4(
-                    system_id=system, provenance=provenance,
+                    system_id=raw_id, canonical_system_id=system, provenance=provenance,
                     supported_age=chosen.supported_age_years if chosen else None,
                     threshold=rule.age_threshold_years, included=False,
-                    signed_cost=Decimal(0), dedup_group=group, evidence_summary=summary,
+                    signed_cost=Decimal(0), overlap_group=group, dedup_group=group, evidence_summary=summary,
                 )
             )
             continue
@@ -312,10 +275,10 @@ def evaluate_major_items(
             limitations.append(f"{system}: available only as explicit operator item")
             items.append(
                 RenovationItemResultV4(
-                    system_id=system, provenance=provenance,
+                    system_id=raw_id, canonical_system_id=system, provenance=provenance,
                     supported_age=chosen.supported_age_years if chosen else None,
                     threshold=rule.age_threshold_years, included=False,
-                    signed_cost=Decimal(0), dedup_group=group, evidence_summary=summary,
+                    signed_cost=Decimal(0), overlap_group=group, dedup_group=group, evidence_summary=summary,
                 )
             )
             continue
@@ -323,10 +286,10 @@ def evaluate_major_items(
             limitations.append(f"{system}: unknown or conflicting evidence")
             items.append(
                 RenovationItemResultV4(
-                    system_id=system, provenance="auto",
+                    system_id=raw_id, canonical_system_id=system, provenance="auto",
                     supported_age=chosen.supported_age_years if chosen else None,
                     threshold=rule.age_threshold_years, included=False,
-                    signed_cost=Decimal(0), dedup_group=group,
+                    signed_cost=Decimal(0), overlap_group=group, dedup_group=group,
                     evidence_summary=summary or "no usable age evidence",
                 )
             )
@@ -335,10 +298,10 @@ def evaluate_major_items(
             if system not in triggering:
                 items.append(
                     RenovationItemResultV4(
-                        system_id=system, provenance="manual",
+                        system_id=raw_id, canonical_system_id=system, provenance="manual",
                         supported_age=chosen.supported_age_years,
                         threshold=rule.age_threshold_years, included=False,
-                        signed_cost=Decimal(0), dedup_group=group,
+                        signed_cost=Decimal(0), overlap_group=group, dedup_group=group,
                         evidence_summary=summary or "operator override",
                     )
                 )
@@ -357,10 +320,10 @@ def evaluate_major_items(
                 )
             items.append(
                 RenovationItemResultV4(
-                    system_id=system, provenance="manual",
+                    system_id=raw_id, canonical_system_id=system, provenance="manual",
                     supported_age=chosen.supported_age_years,
                     threshold=rule.age_threshold_years, included=True,
-                    signed_cost=chosen.manual_cost, dedup_group=group,
+                    signed_cost=chosen.manual_cost, overlap_group=group, dedup_group=group,
                     evidence_summary=summary or "operator override", ledger_entry_id=entry_id,
                 )
             )
@@ -382,56 +345,122 @@ def evaluate_major_items(
                 )
             items.append(
                 RenovationItemResultV4(
-                    system_id=system, provenance="auto",
+                    system_id=raw_id, canonical_system_id=system, provenance="auto",
                     supported_age=chosen.supported_age_years,
                     threshold=rule.age_threshold_years, included=True,
-                    signed_cost=rule.replacement_cost, dedup_group=group,
+                    signed_cost=rule.replacement_cost, overlap_group=group, dedup_group=group,
                     evidence_summary=summary, ledger_entry_id=entry_id,
                 )
             )
         else:
             items.append(
                 RenovationItemResultV4(
-                    system_id=system, provenance="auto",
+                    system_id=raw_id, canonical_system_id=system, provenance="auto",
                     supported_age=chosen.supported_age_years,
                     threshold=rule.age_threshold_years, included=False,
-                    signed_cost=Decimal(0), dedup_group=group,
+                    signed_cost=Decimal(0), overlap_group=group, dedup_group=group,
                     evidence_summary=summary or "age or scope below replacement bar",
                 )
             )
     extra_total = Decimal(0)
-    reasons: list[str] = []
-    for extra in sorted(additional, key=lambda e: (e.dedup_group or "", e.item_id)):
+    additional_results: list[AdditionalItemResultV4] = []
+    by_group: dict[str, list[AdditionalRenovationItemV4]] = {}
+    for extra in additional:
         group = (extra.dedup_group or f"manual:{extra.item_id}").strip()
-        if group in seen_groups:
-            limitations.append(f"{extra.item_id}: duplicate additional group {group}; excluded")
-            reasons.append(f"{extra.item_id}: duplicate of {group}")
+        by_group.setdefault(group, []).append(extra)
+    if reserved_groups:
+        pass
+    for group in sorted(by_group):
+        members = sorted(by_group[group], key=lambda e: e.item_id)
+        if group in reserved_groups:
+            for member in members:
+                additional_results.append(
+                    AdditionalItemResultV4(
+                        item_id=member.item_id, included=False,
+                        requested_cost=member.cost, applied_cost=Decimal(0),
+                        provenance=member.provenance, source=member.source,
+                        dedup_group=group, winning_item_id="",
+                        reason=f"explicit conflict: group {group} already covered",
+                    )
+                )
+            limitations.append(f"additional group {group}: explicit conflict with covered major group")
             continue
-        seen_groups.add(group)
-        extra_total += extra.cost
-        reasons.append(f"{extra.item_id}: included {extra.cost}")
+        if len(members) > 1:
+            costs = {str(m.cost) for m in members}
+            if len(costs) > 1:
+                for member in members:
+                    additional_results.append(
+                        AdditionalItemResultV4(
+                            item_id=member.item_id, included=False,
+                            requested_cost=member.cost, applied_cost=Decimal(0),
+                            provenance=member.provenance, source=member.source,
+                            dedup_group=group, winning_item_id="",
+                            reason=f"explicit conflict: duplicate additional group {group} with differing costs",
+                        )
+                    )
+                limitations.append(f"additional group {group}: explicit conflict; differing costs")
+                continue
+            winner = members[0]
+            extra_total += winner.cost
+            entry_id = ""
+            if ledger is not None:
+                entry_id = f"major:{winner.item_id}:{group}:{len(ledger) + 1}"
+                ledger.append(
+                    AdjustmentLedgerEntryV4(
+                        entry_id=entry_id, stage="major_item",
+                        target_id=f"additional:{winner.item_id}",
+                        rule_id=f"additional:{winner.item_id}",
+                        signed_amount=winner.cost, unit="usd",
+                        evidence=f"operator additional item {winner.item_id}",
+                        input_value=format(winner.cost, "f"), duplicate_key=f"major:{group}",
+                    )
+                )
+            for member in members:
+                additional_results.append(
+                    AdditionalItemResultV4(
+                        item_id=member.item_id, included=member.item_id == winner.item_id,
+                        requested_cost=member.cost,
+                        applied_cost=winner.cost if member.item_id == winner.item_id else Decimal(0),
+                        provenance=member.provenance, source=member.source,
+                        dedup_group=group, winning_item_id=winner.item_id,
+                        reason="included" if member.item_id == winner.item_id else f"duplicate of {winner.item_id}",
+                        ledger_entry_id=entry_id if member.item_id == winner.item_id else "",
+                    )
+                )
+            reserved_groups.add(group)
+            continue
+        member = members[0]
+        extra_total += member.cost
+        entry_id = ""
         if ledger is not None:
-            entry_id = f"major:{extra.item_id}:{group}:{len(ledger) + 1}"
+            entry_id = f"major:{member.item_id}:{group}:{len(ledger) + 1}"
             ledger.append(
                 AdjustmentLedgerEntryV4(
                     entry_id=entry_id, stage="major_item",
-                    target_id=f"additional:{extra.item_id}",
-                    rule_id=f"additional:{extra.item_id}",
-                    signed_amount=extra.cost, unit="usd",
-                    evidence=f"operator additional item {extra.item_id}",
-                    input_value=format(extra.cost, "f"), duplicate_key=f"major:{group}",
+                    target_id=f"additional:{member.item_id}",
+                    rule_id=f"additional:{member.item_id}",
+                    signed_amount=member.cost, unit="usd",
+                    evidence=f"operator additional item {member.item_id}",
+                    input_value=format(member.cost, "f"), duplicate_key=f"major:{group}",
                 )
             )
-    if reasons:
-        limitations.append("additional items: " + "; ".join(reasons))
-    return items, auto_total, extra_total, limitations
+        additional_results.append(
+            AdditionalItemResultV4(
+                item_id=member.item_id, included=True,
+                requested_cost=member.cost, applied_cost=member.cost,
+                provenance=member.provenance, source=member.source,
+                dedup_group=group, winning_item_id=member.item_id,
+                reason="included", ledger_entry_id=entry_id,
+            )
+        )
+        reserved_groups.add(group)
+    return items, auto_total, extra_total, limitations, additional_results
 
 
 __all__ = [
     "CANONICAL_LEVELS",
     "CANONICAL_TIERS",
     "ELECTRICAL_GROUP",
-    "EXPECTED_ENDPOINTS",
     "INITIAL_AUTO_SYSTEMS",
     "canonical_level",
     "canonical_system",

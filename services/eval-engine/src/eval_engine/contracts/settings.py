@@ -12,6 +12,15 @@ from .base import DecimalString
 from .filters import AppraisalFilterV4, CompAdjustmentRuleV4, TransactionRuleV4
 
 
+_CANONICAL_TIER_ORDER = ("under500k", "500k_to_under1m", "1m_to_3m", "over3m")
+_CANONICAL_ENDPOINTS: dict[str, tuple[str | None, str | None, str | None, str | None]] = {
+    "under500k": ("0", None, None, "500000"),
+    "500k_to_under1m": ("500000", None, None, "1000000"),
+    "1m_to_3m": ("1000000", None, "3000000", None),
+    "over3m": (None, "3000000", None, None),
+}
+
+
 class RenovationTierCellV4(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="forbid")
 
@@ -38,11 +47,10 @@ class RenovationTierV4(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="forbid")
 
     tier_key: str = Field(min_length=1, max_length=64)
-    lower_inclusive: DecimalString
-    lower_inclusive_flag: bool = True
+    lower_inclusive: DecimalString | None = None
+    lower_exclusive: DecimalString | None = None
     upper_inclusive: DecimalString | None = None
     upper_exclusive: DecimalString | None = None
-    upper_bound_inclusive: bool | None = None
     cells: list[RenovationTierCellV4] = Field(default_factory=list)
     source: str = Field(default="", max_length=64)
     precedence: str = Field(default="", max_length=64)
@@ -102,6 +110,9 @@ class SettingsSnapshotV4(BaseModel):
     def validated_for_durable_use(self) -> SettingsSnapshotV4:
         if not self.snapshot_id.strip():
             raise ValueError("settings snapshot_id is required at the durable contract boundary")
+        tier_problems = tier_boundary_problems(self.tiers)
+        if tier_problems:
+            raise ValueError("invalid tier boundaries: " + "; ".join(tier_problems))
         expected = self.compute_content_hash()
         if self.content_hash and self.content_hash != expected:
             raise ValueError("supplied settings content_hash does not match canonical payload")
@@ -110,10 +121,62 @@ class SettingsSnapshotV4(BaseModel):
         return self
 
 
+def tier_boundary_problems(tiers: list[RenovationTierV4]) -> list[str]:
+    errors: list[str] = []
+    if len(tiers) != 4:
+        return [f"expected 4 tiers, got {len(tiers)}"]
+    keys = [t.tier_key for t in tiers]
+    if keys != list(_CANONICAL_TIER_ORDER):
+        errors.append(f"tiers must be ordered {list(_CANONICAL_TIER_ORDER)}, got {keys}")
+    for tier in tiers:
+        expected = _CANONICAL_ENDPOINTS.get(tier.tier_key)
+        if expected is None:
+            errors.append(f"unknown tier key {tier.tier_key}")
+            continue
+        lower_incl, lower_excl, upper_incl, upper_excl = expected
+        lowers = [v for v in (tier.lower_inclusive, tier.lower_exclusive) if v is not None]
+        uppers = [v for v in (tier.upper_inclusive, tier.upper_exclusive) if v is not None]
+        if len(lowers) != 1:
+            errors.append(f"{tier.tier_key}: exactly one lower bound required")
+        if tier.tier_key == "over3m":
+            if len(uppers) != 0:
+                errors.append(f"{tier.tier_key}: must be open-ended (no upper bound)")
+        elif len(uppers) != 1:
+            errors.append(f"{tier.tier_key}: exactly one upper bound required")
+        if lower_incl is not None and tier.lower_inclusive != Decimal(lower_incl):
+            errors.append(f"{tier.tier_key}: lower_inclusive must be {lower_incl}")
+        if lower_excl is not None and tier.lower_exclusive != Decimal(lower_excl):
+            errors.append(f"{tier.tier_key}: lower_exclusive must be {lower_excl}")
+        if lower_incl is None and tier.lower_inclusive is not None:
+            errors.append(f"{tier.tier_key}: lower_inclusive must be absent")
+        if lower_excl is None and tier.lower_exclusive is not None:
+            errors.append(f"{tier.tier_key}: lower_exclusive must be absent")
+        if upper_incl is not None and tier.upper_inclusive != Decimal(upper_incl):
+            errors.append(f"{tier.tier_key}: upper_inclusive must be {upper_incl}")
+        if upper_excl is not None and tier.upper_exclusive != Decimal(upper_excl):
+            errors.append(f"{tier.tier_key}: upper_exclusive must be {upper_excl}")
+        if upper_incl is None and tier.upper_inclusive is not None:
+            errors.append(f"{tier.tier_key}: upper_inclusive must be absent")
+        if upper_excl is None and tier.upper_exclusive is not None:
+            errors.append(f"{tier.tier_key}: upper_exclusive must be absent")
+    ordered = {t.tier_key: t for t in tiers}
+    try:
+        if ordered["under500k"].upper_exclusive != ordered["500k_to_under1m"].lower_inclusive:
+            errors.append("gap/overlap at 500000")
+        if ordered["500k_to_under1m"].upper_exclusive != ordered["1m_to_3m"].lower_inclusive:
+            errors.append("gap/overlap at 1000000")
+        if ordered["1m_to_3m"].upper_inclusive != ordered["over3m"].lower_exclusive:
+            errors.append("gap/overlap at 3000000")
+    except KeyError:
+        errors.append("missing canonical tier for continuity check")
+    return errors
+
+
 __all__ = [
     "DealSettingsV4",
     "MajorItemRuleV4",
     "RenovationTierCellV4",
     "RenovationTierV4",
     "SettingsSnapshotV4",
+    "tier_boundary_problems",
 ]

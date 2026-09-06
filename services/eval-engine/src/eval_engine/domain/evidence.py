@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
-from ..contracts.dates import parse_full_date
-
 
 def norm_text(value: object) -> str:
     if value is None:
@@ -20,20 +18,11 @@ def norm_lower(value: object) -> str:
 
 
 def parse_iso_date(value: object) -> date | None:
-    if value is None:
-        return None
     if isinstance(value, datetime):
-        return value.date()
+        return None
     if isinstance(value, date):
         return value
-    if isinstance(value, bool):
-        return None
-    if not isinstance(value, str):
-        return None
-    try:
-        return parse_full_date(value)
-    except ValueError:
-        return None
+    return None
 
 
 def coerce_date(value: object) -> date | None:

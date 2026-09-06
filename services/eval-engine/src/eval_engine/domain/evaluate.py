@@ -162,7 +162,16 @@ def evaluate_v4(request: EvaluationRequestV4) -> EvaluationResultV4:
     subj_total, _ = apply_subject_adjustments(
         subject, settings.adjustments, ledger, seen, calc_limitations, adjustment_outcomes, stage="subject",
     )
-    missing_evidence = [o for o in adjustment_outcomes if o.outcome == "skipped" and "unknown" in o.reason]
+    missing_evidence = [
+        o for o in adjustment_outcomes
+        if o.outcome == "skipped" and o.reason.startswith("SKIPPED_UNKNOWN_EVIDENCE")
+    ]
+    no_policy = [
+        o for o in adjustment_outcomes
+        if o.outcome == "skipped" and o.reason.startswith("SKIPPED_NO_POLICY")
+    ]
+    for outcome in no_policy:
+        calc_limitations.append(f"{outcome.rule_id}: investor limitation; no policy adjustment")
     final_arv = base_arv + subj_total
     arv_status = "COMPLETED"
     status = "COMPLETED"
@@ -206,7 +215,7 @@ def evaluate_v4(request: EvaluationRequestV4) -> EvaluationResultV4:
                 preliminary=True, limitations=["unknown renovation level"],
             )
         else:
-            items, auto_total, extra_total, major_limits = evaluate_major_items(
+            items, auto_total, extra_total, major_limits, additional_results = evaluate_major_items(
                 settings.major_items, request.major_item_evidence,
                 request.additional_items, ledger, list(cell.included_systems),
             )
@@ -221,6 +230,7 @@ def evaluate_v4(request: EvaluationRequestV4) -> EvaluationResultV4:
                 base_rehab=base_rehab, major_items_total=auto_total,
                 additional_total=extra_total, total_rehab=total_rehab,
                 preliminary=preliminary, limitations=major_limits, items=items,
+                additional_items=additional_results,
             )
             deal_result = evaluate_deal(
                 final_arv, total_rehab, settings.deal, cell.flip_profit,

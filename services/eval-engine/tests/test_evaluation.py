@@ -73,7 +73,7 @@ def make_tiers(rate="100", profit="50000"):
         ),
         RenovationTierV4(
             tier_key="over3m",
-            lower_inclusive="3000000",
+            lower_exclusive="3000000",
             cells=[
                 RenovationTierCellV4(
                     renovation_level=level,
@@ -101,6 +101,7 @@ def make_settings(filters=None, adjustments=None, tiers=None, deal=None, major=N
 
 def make_comp(comp_id, price, sqft="2000", sale_date="2026-06-01", **kwargs):
     kwargs.setdefault("evidence_ref", f"ev-{comp_id}")
+    kwargs.setdefault("is_sale", True)
     return CompCandidateV4(
         comp_id=comp_id,
         verified_sale_price=price,
@@ -249,8 +250,9 @@ def test_transitive_equivalence_and_cycle_survivor_deterministic():
     ]
     cyclic_result = evaluate_v4(make_request(comps=cyclic))
     by_id = {d.comp_id: d for d in cyclic_result.decisions}
-    assert by_id["c1"].arv_status == "ACCEPTED"
+    assert by_id["c1"].arv_status == "REJECTED"
     assert by_id["c2"].arv_status == "REJECTED"
+    assert "same-transaction conflict" in " ".join(by_id["c1"].rejection_reasons)
 
 
 def test_transitive_address_chain_collapses_permutation_invariant():
@@ -429,9 +431,9 @@ def test_adjustment_signs_and_no_double_count():
 
 
 def test_subject_adjustment_applies_once_with_stage_semantics():
-    subject = SubjectPropertyV4(address="s", sqft="2000")
-    comps = [make_comp("c1", "500000"), make_comp("c2", "500000"), make_comp("c3", "500000")]
-    adjustments = [CompAdjustmentRuleV4(rule_id="subj", kind="feature", signed_amount="7000", applies_to="subject")]
+    subject = SubjectPropertyV4(address="s", sqft="2000", beds="3")
+    comps = [make_comp("c1", "500000", beds="2"), make_comp("c2", "500000", beds="2"), make_comp("c3", "500000", beds="2")]
+    adjustments = [CompAdjustmentRuleV4(rule_id="subj", kind="bedroom", signed_amount="7000", per_unit_amount="7000", applies_to="subject")]
     result = evaluate_v4(EvaluationRequestV4(subject=subject, comps=comps, renovation_level="light_cosmetic", settings=make_settings(adjustments=adjustments), evaluation_date="2026-09-01"))
     subject_entries = [e for e in result.ledger if e.stage == "subject"]
     assert len(subject_entries) == 1
@@ -452,8 +454,8 @@ def test_duplicate_rule_instance_applies_once_per_target():
     subject = SubjectPropertyV4(address="s", sqft="2000", beds="3")
     comps = [make_comp("c1", "400000", beds="3"), make_comp("c2", "390000", beds="3"), make_comp("c3", "380000", beds="3")]
     adjustments = [
-        CompAdjustmentRuleV4(rule_id="feat", kind="feature", signed_amount="5000", applies_to="comp"),
-        CompAdjustmentRuleV4(rule_id="feat", kind="feature", signed_amount="5000", applies_to="comp"),
+        CompAdjustmentRuleV4(rule_id="feat", kind="bedroom", signed_amount="5000", per_unit_amount="5000", applies_to="comp"),
+        CompAdjustmentRuleV4(rule_id="feat", kind="bedroom", signed_amount="5000", per_unit_amount="5000", applies_to="comp"),
     ]
     result = evaluate_v4(EvaluationRequestV4(subject=subject, comps=comps, renovation_level="light_cosmetic", settings=make_settings(adjustments=adjustments), evaluation_date="2026-09-01"))
     assert len([e for e in result.ledger if e.rule_id == "feat"]) == 3
@@ -464,8 +466,10 @@ def test_feature_proximity_require_typed_evidence_and_record_outcomes():
     comps = [make_comp("c1", "500000"), make_comp("c2", "500000"), make_comp("c3", "500000")]
     flat = [CompAdjustmentRuleV4(rule_id="pool", kind="feature", signed_amount="8000", applies_to="comp")]
     flat_result = evaluate_v4(EvaluationRequestV4(subject=subject, comps=comps, renovation_level="light_cosmetic", settings=make_settings(adjustments=flat), evaluation_date="2026-09-01"))
-    assert flat_result.arv.final_arv == Decimal("508000")
-    assert any(o.outcome == "applied" for o in flat_result.arv.adjustment_outcomes)
+    assert flat_result.arv.final_arv == Decimal("500000")
+    assert flat_result.status == "REVIEW_REQUIRED"
+    assert flat_result.arv.status == "PRELIMINARY"
+    assert any(o.outcome == "skipped" and o.reason.startswith("SKIPPED_UNKNOWN_EVIDENCE") for o in flat_result.arv.adjustment_outcomes)
     typed = [CompAdjustmentRuleV4(rule_id="pool", kind="feature", per_unit_amount="8000", signed_amount="0", applies_to="comp", subject_evidence_field="beds", comp_evidence_field="beds")]
     typed_result = evaluate_v4(EvaluationRequestV4(subject=SubjectPropertyV4(address="s", sqft="2000", beds="3"), comps=[make_comp("c1", "500000", beds="2"), make_comp("c2", "500000", beds="2"), make_comp("c3", "500000", beds="2")], renovation_level="light_cosmetic", settings=make_settings(adjustments=typed), evaluation_date="2026-09-01"))
     assert typed_result.arv.final_arv == Decimal("508000")
@@ -579,8 +583,9 @@ def test_major_item_all_additional_items_included_with_reasons():
     ]
     result = evaluate_v4(make_request(comps=comps, additional_items=additional))
     assert result.renovation.additional_total == Decimal("7000")
-    assert any("deck: included" in limit for limit in result.renovation.limitations)
-    assert any("duplicate" in limit for limit in result.renovation.limitations)
+    assert result.renovation.additional_items and len(result.renovation.additional_items) == 3
+    assert any(i.item_id == "deck" and i.included for i in result.renovation.additional_items)
+    assert any("duplicate of" in (i.reason or "") for i in result.renovation.additional_items)
 
 
 def test_rounding_exact_ceiling_and_display():
@@ -661,8 +666,13 @@ def test_investor_applies_property_filters():
 
 
 def test_investor_appends_ledger_and_applies_subject_once():
-    comps = [make_comp(f"low{i}", str(200000 + i * 1000)) for i in range(4)] + [make_comp(f"high{i}", str(600000 + i * 1000)) for i in range(4)]
-    adjustments = [CompAdjustmentRuleV4(rule_id="pool", kind="feature", signed_amount="1000", applies_to="comp")]
+    subject_sqft = "2000"
+    from eval_engine.contracts import SubjectPropertyV4 as _SP
+    _subject = _SP(address="1 Main St", sqft=subject_sqft)
+    low = [make_comp(f"low{i}", str(200000 + i * 1000), sqft="2000") for i in range(4)]
+    high = [make_comp(f"high{i}", str(600000 + i * 1000), sqft="2000") for i in range(4)]
+    comps = low + high
+    adjustments = [CompAdjustmentRuleV4(rule_id="pool", kind="sqft", signed_amount="10", per_unit_amount="10", applies_to="both")]
     result = evaluate_v4(make_request(comps=comps, settings=make_settings(adjustments=adjustments)))
     assert result.investor.status == "COHORT_FOUND"
     assert any(e.stage == "investor_comp" for e in result.ledger)
@@ -670,7 +680,7 @@ def test_investor_appends_ledger_and_applies_subject_once():
 
 def test_investor_subject_adjustment_applied_once():
     comps = [make_comp(f"low{i}", str(200000 + i * 1000)) for i in range(4)] + [make_comp(f"high{i}", str(600000 + i * 1000)) for i in range(4)]
-    adjustments = [CompAdjustmentRuleV4(rule_id="subj", kind="feature", signed_amount="5000", applies_to="subject")]
+    adjustments = [CompAdjustmentRuleV4(rule_id="subj", kind="sqft", signed_amount="5000", per_unit_amount="5", applies_to="both")]
     result = evaluate_v4(make_request(comps=comps, settings=make_settings(adjustments=adjustments)))
     assert result.investor.status == "COHORT_FOUND"
     assert len([e for e in result.ledger if e.stage == "investor_subject"]) == 1

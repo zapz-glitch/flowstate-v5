@@ -1,4 +1,4 @@
-"""Evidence-driven signed adjustments with typed outcomes."""
+"""Evidence-driven signed adjustments with typed calculation semantics."""
 
 from __future__ import annotations
 
@@ -6,12 +6,22 @@ from decimal import Decimal
 
 from ..contracts.comps import CompCandidateV4
 from ..contracts.deal import AdjustmentLedgerEntryV4, AdjustmentOutcomeV4
-from ..contracts.filters import CompAdjustmentRuleV4
+from ..contracts.filters import (
+    CompAdjustmentRuleV4,
+    SKIPPED_APPLIES_TO,
+    SKIPPED_DUPLICATE,
+    SKIPPED_NO_POLICY,
+    SKIPPED_UNKNOWN_AMOUNT,
+    SKIPPED_UNKNOWN_EVIDENCE,
+    SKIPPED_UNSUPPORTED,
+)
 from ..contracts.subject import SubjectPropertyV4
 from .evidence import norm_text
 
 _NUMERIC_FIELDS = {"beds", "baths", "sqft", "lot_sqft", "distance_miles"}
 _TEXT_FIELDS = {"subdivision", "property_type", "address"}
+
+_SUBJECT_ONLY_PREDICATES = {"feature", "proximity"}
 
 
 def _numeric_evidence(holder: object, field: str) -> tuple[Decimal | None, str]:
@@ -31,6 +41,7 @@ def _typed_difference(
     rule: CompAdjustmentRuleV4,
     subject: SubjectPropertyV4,
     comp: CompCandidateV4,
+    stage: str,
 ) -> tuple[Decimal | None, str, str]:
     kind = rule.kind
     if kind == "bedroom":
@@ -60,14 +71,16 @@ def _typed_difference(
     if kind in {"feature", "proximity"}:
         subject_field = rule.resolved_subject_field
         comp_field = rule.resolved_comp_field
-        if not subject_field and not comp_field:
-            return Decimal(0), "flat", "flat"
-        subject_value, subject_note = _numeric_evidence(subject, subject_field) if subject_field else (Decimal(0), "")
-        comp_value, comp_note = _numeric_evidence(comp, comp_field) if comp_field else (Decimal(0), "")
+        if not subject_field or not comp_field:
+            return None, "feature/proximity requires subject_evidence_field and comp_evidence_field", f"{subject_field}/{comp_field}"
+        subject_value, subject_note = _numeric_evidence(subject, subject_field)
+        comp_value, comp_note = _numeric_evidence(comp, comp_field)
         if subject_value is None:
             return None, subject_note or "unknown subject evidence", f"{subject_field}/{comp_field}"
         if comp_value is None:
             return None, comp_note or "unknown comp evidence", f"{subject_field}/{comp_field}"
+        if stage in {"subject", "investor_subject"}:
+            return subject_value, f"{subject_field}", f"subject.{subject_field}"
         return subject_value - comp_value, f"{subject_field}/{comp_field}", f"subject.{subject_field}-comp.{comp_field}"
     return None, f"unsupported per-unit kind {kind}", ""
 
@@ -77,7 +90,7 @@ def comp_difference(
     subject: SubjectPropertyV4,
     comp: CompCandidateV4,
 ) -> tuple[Decimal | None, str]:
-    diff, label, _ = _typed_difference(rule, subject, comp)
+    diff, label, _ = _typed_difference(rule, subject, comp, "comp")
     return diff, label
 
 
@@ -85,25 +98,24 @@ def signed_adjustment(
     rule: CompAdjustmentRuleV4,
     subject: SubjectPropertyV4,
     comp: CompCandidateV4,
+    stage: str = "comp",
 ) -> tuple[Decimal | None, str, str, str]:
     if not rule.enabled:
-        return Decimal(0), "disabled rule contributes zero", "0", "skipped_disabled"
+        return Decimal(0), "disabled rule contributes zero", "0", SKIPPED_APPLIES_TO
     kind = rule.kind
     if kind in {"bedroom", "bathroom", "sqft", "feature", "proximity"}:
-        diff, label, provenance = _typed_difference(rule, subject, comp)
+        diff, label, provenance = _typed_difference(rule, subject, comp, stage)
         if diff is None:
-            return None, label, "", "skipped_unknown_evidence"
+            return None, label, "", SKIPPED_UNKNOWN_EVIDENCE
         per_unit = rule.per_unit_amount if rule.per_unit_amount is not None else rule.signed_amount
         if per_unit is None:
-            return None, "unknown per-unit amount", "", "skipped_unknown_amount"
-        if kind in {"feature", "proximity"} and label == "flat":
-            return rule.signed_amount, f"configured signed amount {rule.signed_amount}", "", "applied"
+            return None, "unknown per-unit amount", "", SKIPPED_UNKNOWN_AMOUNT
         if diff == 0:
             return Decimal(0), f"{kind} no difference ({label}; {provenance})", "0", "no_difference"
         return per_unit * diff, f"{kind} diff {diff} x {per_unit} ({label}; {provenance})", str(diff), "applied"
     if kind == "sale_age":
-        return None, "sale_age adjustments require explicit evidence-driven policy", "", "skipped_no_policy"
-    return None, f"unsupported adjustment kind {kind}", "", "skipped_unsupported"
+        return None, "sale_age adjustments require explicit evidence-driven policy", "", SKIPPED_NO_POLICY
+    return None, f"unsupported adjustment kind {kind}", "", SKIPPED_UNSUPPORTED
 
 
 def _record(
@@ -131,6 +143,16 @@ def _record(
     )
 
 
+def _applies(rule: CompAdjustmentRuleV4, stage: str) -> bool:
+    if stage in {"comp", "investor_comp"}:
+        return rule.applies_to in {"comp", "both"}
+    if stage in {"subject", "investor_subject"}:
+        if rule.kind in _SUBJECT_ONLY_PREDICATES:
+            return rule.applies_to == "subject" and bool(rule.resolved_subject_field)
+        return rule.applies_to in {"subject", "both"}
+    return False
+
+
 def apply_comp_adjustments(
     subject: SubjectPropertyV4,
     comp: CompCandidateV4,
@@ -148,24 +170,24 @@ def apply_comp_adjustments(
     for rule in rules:
         if not rule.enabled:
             continue
-        if rule.applies_to not in {"comp", "both"}:
-            skipped.append(f"{rule.rule_id}: skipped (applies_to={rule.applies_to})")
+        if not _applies(rule, stage):
+            skipped.append(f"{rule.rule_id}: {SKIPPED_APPLIES_TO} (applies_to={rule.applies_to})")
             if outcomes is not None:
-                outcomes.append(AdjustmentOutcomeV4(rule_id=rule.rule_id, kind=rule.kind, stage=stage, outcome="skipped", reason=f"applies_to={rule.applies_to}"))
+                outcomes.append(AdjustmentOutcomeV4(rule_id=rule.rule_id, kind=rule.kind, stage=stage, outcome="skipped", reason=f"{SKIPPED_APPLIES_TO} (applies_to={rule.applies_to})"))
             continue
         key = f"{stage}:{comp.comp_id}:{rule.rule_id}"
         if key in seen_keys:
-            skipped.append(f"{rule.rule_id}: duplicate application prevented")
+            skipped.append(f"{rule.rule_id}: {SKIPPED_DUPLICATE}")
             if outcomes is not None:
-                outcomes.append(AdjustmentOutcomeV4(rule_id=rule.rule_id, kind=rule.kind, stage=stage, outcome="skipped", reason="duplicate application prevented"))
+                outcomes.append(AdjustmentOutcomeV4(rule_id=rule.rule_id, kind=rule.kind, stage=stage, outcome="skipped", reason=SKIPPED_DUPLICATE))
             continue
-        amount, evidence, input_value, status = signed_adjustment(rule, subject, comp)
+        amount, evidence, input_value, status = signed_adjustment(rule, subject, comp, stage)
         if amount is None:
-            skipped.append(f"{rule.rule_id}: {evidence}")
+            skipped.append(f"{rule.rule_id}: {status}: {evidence}")
             if limitations is not None:
-                limitations.append(f"{comp.comp_id}:{rule.rule_id}: {evidence}")
+                limitations.append(f"{comp.comp_id}:{rule.rule_id}: {status}: {evidence}")
             if outcomes is not None:
-                outcomes.append(AdjustmentOutcomeV4(rule_id=rule.rule_id, kind=rule.kind, stage=stage, outcome="skipped", reason=evidence))
+                outcomes.append(AdjustmentOutcomeV4(rule_id=rule.rule_id, kind=rule.kind, stage=stage, outcome="skipped", reason=f"{status}: {evidence}"))
             continue
         seen_keys.add(key)
         total += amount
@@ -189,22 +211,39 @@ def apply_subject_adjustments(
     limitations: list[str] | None = None,
     outcomes: list[AdjustmentOutcomeV4] | None = None,
     stage: str = "subject",
+    comp: CompCandidateV4 | None = None,
 ) -> tuple[Decimal, list[str]]:
     if stage not in {"subject", "investor_subject"}:
         raise ValueError("subject adjustments support subject stages only")
     owned = set() if seen_keys is None else seen_keys
     total = Decimal(0)
     skipped: list[str] = []
+    probe = comp if comp is not None else CompCandidateV4(comp_id="subject-probe")
     for rule in rules:
         if not rule.enabled:
             continue
-        if rule.applies_to not in {"subject", "both"}:
+        if not _applies(rule, stage):
             continue
         key = f"{stage}:subject:{rule.rule_id}"
         if key in owned:
-            skipped.append(f"{rule.rule_id}: duplicate subject application prevented")
+            skipped.append(f"{rule.rule_id}: {SKIPPED_DUPLICATE}")
             if outcomes is not None:
-                outcomes.append(AdjustmentOutcomeV4(rule_id=rule.rule_id, kind=rule.kind, stage=stage, outcome="skipped", reason="duplicate subject application prevented"))
+                outcomes.append(AdjustmentOutcomeV4(rule_id=rule.rule_id, kind=rule.kind, stage=stage, outcome="skipped", reason=SKIPPED_DUPLICATE))
+            continue
+        if rule.kind in _SUBJECT_ONLY_PREDICATES:
+            amount, evidence, input_value, status = signed_adjustment(rule, subject, probe, stage)
+            if amount is None:
+                skipped.append(f"{rule.rule_id}: {status}: {evidence}")
+                if limitations is not None:
+                    limitations.append(f"subject:{rule.rule_id}: {status}: {evidence}")
+                if outcomes is not None:
+                    outcomes.append(AdjustmentOutcomeV4(rule_id=rule.rule_id, kind=rule.kind, stage=stage, outcome="skipped", reason=f"{status}: {evidence}"))
+                continue
+            owned.add(key)
+            total += amount
+            _record(ledger, stage, "subject", rule, amount, evidence, input_value, key)
+            if outcomes is not None:
+                outcomes.append(AdjustmentOutcomeV4(rule_id=rule.rule_id, kind=rule.kind, stage=stage, outcome="applied" if status == "applied" else "no_difference", reason=evidence, signed_amount=amount))
             continue
         owned.add(key)
         total += rule.signed_amount

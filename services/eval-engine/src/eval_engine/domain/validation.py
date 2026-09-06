@@ -1,17 +1,12 @@
 """Intrinsic evidence validation, transitive dedupe, and sort order.
 
-Dedupe model: every comp starts in a singleton set. The following links
-union sets deterministically (permutation invariant):
-
-- explicit ``duplicate_of`` (validated: target must exist, no self link,
-  no missing target, no cycle that prevents a deterministic survivor);
-- shared transaction reference (``evidence_ref``);
-- shared physical property (``provider_property_id`` preferred, else
-  normalized ``address``).
-
-Each equivalence class keeps exactly one survivor: highest verified sale
-price wins, then newest sale date, then provider ID, address, comp ID.
-Every other member is rejected with its deterministic survivor.
+Dedupe unions explicit ``duplicate_of`` links, shared transaction refs,
+provider-qualified property IDs, and nonempty normalized addresses. Denial
+is structural: an intrinsically invalid record (missing/non-positive
+price, ``is_sale=False``, bad self/missing duplicate link) never survives
+as a separate valid transaction. Within each class the eligible
+representative wins; a same-transaction conflict where explicit links
+disagree is recorded.
 """
 
 from __future__ import annotations
@@ -51,33 +46,49 @@ def check_transaction_rule(comp: CompCandidateV4, rule: TransactionRuleV4 | None
         return RuleOutcomeV4(rule_id=rule.rule_id, kind="transaction", passed=True, reason="disabled")
     code = _norm_code(comp.transaction_code)
     tx_type = _norm_code(comp.transaction_type)
-    if rule.denied_codes and code and code in _norm_code_list(rule.denied_codes):
+    if rule.require_sale_flag and comp.is_sale is not True:
+        return RuleOutcomeV4(rule_id=rule.rule_id, kind="transaction", passed=False, reason="sale flag required (is_sale=true)")
+    if code and code in _norm_code_list(rule.denied_codes):
         return RuleOutcomeV4(rule_id=rule.rule_id, kind="transaction", passed=False, reason=f"transaction code denied by {rule.rule_id}: {comp.transaction_code}")
+    if tx_type and tx_type in _norm_code_list(rule.denied_types):
+        return RuleOutcomeV4(rule_id=rule.rule_id, kind="transaction", passed=False, reason=f"transaction type denied by {rule.rule_id}: {comp.transaction_type}")
     if rule.allowed_codes and code and code not in _norm_code_list(rule.allowed_codes):
         return RuleOutcomeV4(rule_id=rule.rule_id, kind="transaction", passed=False, reason=f"transaction code not allowed by {rule.rule_id}: {comp.transaction_code}")
-    if rule.denied_types and tx_type and tx_type in _norm_code_list(rule.denied_types):
-        return RuleOutcomeV4(rule_id=rule.rule_id, kind="transaction", passed=False, reason=f"transaction type denied by {rule.rule_id}: {comp.transaction_type}")
     if rule.allowed_types and tx_type and tx_type not in _norm_code_list(rule.allowed_types):
         return RuleOutcomeV4(rule_id=rule.rule_id, kind="transaction", passed=False, reason=f"transaction type not allowed by {rule.rule_id}: {comp.transaction_type}")
-    if rule.require_sale_flag and comp.is_sale is False:
-        return RuleOutcomeV4(rule_id=rule.rule_id, kind="transaction", passed=False, reason="non-sale transaction (sale flag required)")
     if rule.require_known_code and code and code not in _norm_code_list(rule.allowed_codes):
         return RuleOutcomeV4(rule_id=rule.rule_id, kind="transaction", passed=False, reason=f"{rule.rule_id}: unknown transaction code {comp.transaction_code!r}", limitation="unknown transaction evidence")
     if rule.require_known_type and tx_type and tx_type not in _norm_code_list(rule.allowed_types):
         return RuleOutcomeV4(rule_id=rule.rule_id, kind="transaction", passed=False, reason=f"{rule.rule_id}: unknown transaction type {comp.transaction_type!r}", limitation="unknown transaction evidence")
-    if not rule.allowed_codes and not rule.denied_codes and not rule.allowed_types and not rule.denied_types:
-        return RuleOutcomeV4(rule_id=rule.rule_id, kind="transaction", passed=True, reason="no configured transaction restriction")
-    return RuleOutcomeV4(rule_id=rule.rule_id, kind="transaction", passed=True, reason="transaction evidence accepted")
+    limitations: list[str] = []
+    if code and not (rule.allowed_codes or rule.denied_codes) and rule.unknown_code_limitation:
+        limitations.append(rule.unknown_code_limitation)
+    if tx_type and not (rule.allowed_types or rule.denied_types) and rule.unknown_type_limitation:
+        limitations.append(rule.unknown_type_limitation)
+    return RuleOutcomeV4(
+        rule_id=rule.rule_id, kind="transaction", passed=True,
+        reason="transaction evidence accepted",
+        limitation="; ".join(limitations),
+    )
 
 
-def _physical_key(comp: CompCandidateV4) -> str:
+def _norm_address(value: str) -> str:
+    return " ".join(norm_lower(value).split())
+
+
+def _provider_key(comp: CompCandidateV4) -> str:
     provider = norm_lower(comp.provider_property_id)
-    address = " ".join(norm_lower(comp.address).split())
+    return f"provider:{provider}" if provider else ""
+
+
+def _address_key(comp: CompCandidateV4) -> str:
+    address = _norm_address(comp.address)
+    if not address:
+        return ""
+    provider = norm_lower(comp.provider_property_id)
     if provider:
-        return f"provider:{provider}"
-    if address:
-        return f"address:{address}"
-    return ""
+        return f"provider:{provider}|address:{address}"
+    return f"address:{address}"
 
 
 def _tx_key(comp: CompCandidateV4) -> str:
@@ -117,6 +128,15 @@ def _survivor_key(item: ValidatedComp) -> tuple:
     )
 
 
+def _intrinsically_eligible(item: ValidatedComp) -> bool:
+    price = item.comp.verified_sale_price
+    if price is None or not isinstance(price, Decimal) or price <= 0:
+        return False
+    if item.comp.is_sale is False:
+        return False
+    return True
+
+
 def validate_intrinsic(
     comps: list[CompCandidateV4],
     transaction_rule: TransactionRuleV4 | None = None,
@@ -145,26 +165,18 @@ def validate_intrinsic(
                 item.reasons.append(f"invalid duplicate_of missing target {comp.duplicate_of}")
             else:
                 _union(parents, norm_text(comp.comp_id), target)
-    by_tx: dict[str, str] = {}
-    for item in sorted(items, key=lambda i: norm_text(i.comp.comp_id).lower()):
-        key = _tx_key(item.comp)
-        if not key:
-            continue
-        prior = by_tx.get(key)
-        if prior is None:
-            by_tx[key] = norm_text(item.comp.comp_id)
-        else:
-            _union(parents, prior, norm_text(item.comp.comp_id))
-    by_physical: dict[str, str] = {}
-    for item in sorted(items, key=lambda i: norm_text(i.comp.comp_id).lower()):
-        key = _physical_key(item.comp)
-        if not key:
-            continue
-        prior = by_physical.get(key)
-        if prior is None:
-            by_physical[key] = norm_text(item.comp.comp_id)
-        else:
-            _union(parents, prior, norm_text(item.comp.comp_id))
+    for key_name, key_fn in (("tx", _tx_key), ("provider", _provider_key), ("address", _address_key)):
+        _ = key_name
+        seen: dict[str, str] = {}
+        for item in sorted(items, key=lambda i: norm_text(i.comp.comp_id).lower()):
+            key = key_fn(item.comp)
+            if not key:
+                continue
+            prior = seen.get(key)
+            if prior is None:
+                seen[key] = norm_text(item.comp.comp_id)
+            else:
+                _union(parents, prior, norm_text(item.comp.comp_id))
     groups: dict[str, list[ValidatedComp]] = {}
     for item in items:
         root = _find(parents, norm_text(item.comp.comp_id))
@@ -173,13 +185,26 @@ def validate_intrinsic(
         _ = root
         if len(members) == 1:
             continue
-        ordered = sorted(members, key=_survivor_key)
+        tx_refs = {_tx_key(m.comp) for m in members if _tx_key(m.comp)}
+        if len(tx_refs) > 1:
+            explicit = [m for m in members if norm_text(m.comp.duplicate_of)]
+            if explicit:
+                for member in members:
+                    member.reasons.append(
+                        f"same-transaction conflict: {len(tx_refs)} distinct evidence refs with explicit duplicate links"
+                    )
+                    member.survivor = False
+                continue
+        eligible = [m for m in members if _intrinsically_eligible(m) and not m.reasons]
+        pool = eligible or [m for m in members if _intrinsically_eligible(m)] or members
+        ordered = sorted(pool, key=_survivor_key)
         survivor = ordered[0]
-        for loser in ordered[1:]:
+        for loser in members:
+            if loser is survivor:
+                continue
             loser.survivor = False
             loser.duplicate_of = loser.duplicate_of or survivor.comp.comp_id
-            if loser.comp.comp_id != survivor.comp.comp_id:
-                loser.reasons.append(f"duplicate evidence of {survivor.comp.comp_id}")
+            loser.reasons.append(f"duplicate evidence of {survivor.comp.comp_id}")
     valid = [i for i in items if not i.reasons and i.survivor]
     invalid = [i for i in items if i.reasons or not i.survivor]
     for item in invalid:
