@@ -1,10 +1,43 @@
-"""Request/response contracts for the V4 evaluation engine.
+"""V4 evaluation contracts: legacy aliases plus typed Decimal V4 models."""
 
-These mirror the data the existing TS pipeline already produces
-(comps, subject facts) so the Python engine can be fed without
-changing any existing producer code.
-"""
+from __future__ import annotations
+
 from pydantic import BaseModel, Field
+
+from .contracts import (
+    AdditionalItemResultV4,
+    AdditionalRenovationItemV4,
+    AdjustmentLedgerEntryV4,
+    AdjustmentOutcomeV4,
+    AppraisalFilterV4,
+    ArvResultV4,
+    CompAdjustmentRuleV4,
+    CompCandidateV4,
+    CompDecisionV4,
+    DATE_PATTERN,
+    DealResultV4,
+    DealSettingsV4,
+    DecimalString,
+    EvalErrorV4,
+    EvaluationRequestV4,
+    EvaluationResultV4,
+    InvestorCohortResultV4,
+    MajorItemEvidenceV4,
+    MajorItemRuleV4,
+    RenovationItemResultV4,
+    RenovationResultV4,
+    RenovationTierCellV4,
+    RenovationTierV4,
+    RuleOutcomeV4,
+    SectionStatus,
+    SettingsSnapshotV4,
+    SubjectPropertyV4,
+    TransactionRuleV4,
+    parse_decimal_string,
+    parse_full_date,
+    serialize_decimal,
+    tier_boundary_problems,
+)
 
 
 class SubjectProperty(BaseModel):
@@ -51,3 +84,45 @@ class EvaluateResponse(BaseModel):
 class HealthResponse(BaseModel):
     status: str = "ok"
     service: str = "eval-engine-v4"
+
+
+__all__ = [
+    "AdditionalItemResultV4",
+    "AdditionalRenovationItemV4",
+    "AdjustmentLedgerEntryV4",
+    "AdjustmentOutcomeV4",
+    "AppraisalFilterV4",
+    "ArvResultV4",
+    "CompAdjustmentRuleV4",
+    "CompCandidateV4",
+    "CompDecisionV4",
+    "Comparable",
+    "DATE_PATTERN",
+    "DealResultV4",
+    "DealSettingsV4",
+    "DecisionStep",
+    "DecimalString",
+    "EvalErrorV4",
+    "EvaluateRequest",
+    "EvaluateRequestV4",
+    "EvaluateResponse",
+    "EvaluationResultV4",
+    "HealthResponse",
+    "InvestorCohortResultV4",
+    "MajorItemEvidenceV4",
+    "MajorItemRuleV4",
+    "RenovationItemResultV4",
+    "RenovationResultV4",
+    "RenovationTierCellV4",
+    "RenovationTierV4",
+    "RuleOutcomeV4",
+    "SectionStatus",
+    "SettingsSnapshotV4",
+    "SubjectProperty",
+    "SubjectPropertyV4",
+    "TransactionRuleV4",
+    "parse_decimal_string",
+    "parse_full_date",
+    "serialize_decimal",
+    "tier_boundary_problems",
+]
