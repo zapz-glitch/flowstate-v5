@@ -1,6 +1,6 @@
 """Typed V4 contract exports."""
 
-from .base import DecimalString, parse_decimal_string, serialize_decimal
+from .base import DECIMAL_PATTERN, DecimalString, parse_decimal_string, serialize_decimal
 from .comps import CompCandidateV4
 from .deal import (
     AdditionalRenovationItemV4,
@@ -9,20 +9,25 @@ from .deal import (
     ArvStatus,
     CompDecisionV4,
     DealResultV4,
+    EvalErrorV4,
     EvalStatus,
     EvaluationRequestV4,
     EvaluationResultV4,
     InvestorCohortResultV4,
     InvestorStatus,
+    IsoDate,
     MajorItemEvidenceV4,
     RenovationItemResultV4,
     RenovationResultV4,
+    RuleOutcomeV4,
+    SectionStatus,
 )
 from .filters import (
     AdjustmentKind,
     AppraisalFilterV4,
     CompAdjustmentRuleV4,
     FilterKind,
+    TransactionRuleV4,
 )
 from .settings import (
     DealSettingsV4,
@@ -43,23 +48,29 @@ __all__ = [
     "CompAdjustmentRuleV4",
     "CompCandidateV4",
     "CompDecisionV4",
+    "DECIMAL_PATTERN",
     "DealResultV4",
     "DealSettingsV4",
     "DecimalString",
+    "EvalErrorV4",
     "EvalStatus",
     "EvaluationRequestV4",
     "EvaluationResultV4",
     "FilterKind",
     "InvestorCohortResultV4",
     "InvestorStatus",
+    "IsoDate",
     "MajorItemEvidenceV4",
     "MajorItemRuleV4",
     "RenovationItemResultV4",
     "RenovationResultV4",
     "RenovationTierCellV4",
     "RenovationTierV4",
+    "RuleOutcomeV4",
+    "SectionStatus",
     "SettingsSnapshotV4",
     "SubjectPropertyV4",
+    "TransactionRuleV4",
     "parse_decimal_string",
     "serialize_decimal",
 ]

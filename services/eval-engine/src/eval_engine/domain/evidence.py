@@ -6,15 +6,25 @@ from datetime import date, datetime
 
 
 def norm_text(value: object) -> str:
-    return str(value or "").strip()
+    if value is None:
+        return ""
+    if isinstance(value, date) and not isinstance(value, datetime):
+        return value.isoformat()
+    return str(value).strip()
 
 
 def norm_lower(value: object) -> str:
     return norm_text(value).lower()
 
 
-def parse_iso_date(value: str) -> date | None:
-    text = norm_text(value)
+def parse_iso_date(value: object) -> date | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    text = str(value).strip()
     if not text:
         return None
     try:
@@ -29,7 +39,11 @@ def parse_iso_date(value: str) -> date | None:
     return None
 
 
-def sale_age_days(sale_date: str, evaluation_date: str) -> int | None:
+def coerce_date(value: object) -> date | None:
+    return parse_iso_date(value)
+
+
+def sale_age_days(sale_date: object, evaluation_date: object) -> int | None:
     sale = parse_iso_date(sale_date)
     if sale is None:
         return None
@@ -37,4 +51,4 @@ def sale_age_days(sale_date: str, evaluation_date: str) -> int | None:
     return (anchor - sale).days
 
 
-__all__ = ["norm_lower", "norm_text", "parse_iso_date", "sale_age_days"]
+__all__ = ["coerce_date", "norm_lower", "norm_text", "parse_iso_date", "sale_age_days"]

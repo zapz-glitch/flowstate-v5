@@ -1,4 +1,4 @@
-"""Appraisal filter and adjustment rule contracts."""
+"""Appraisal filter, adjustment, and transaction rule contracts."""
 
 from __future__ import annotations
 
@@ -27,31 +27,69 @@ AdjustmentKind = Literal[
     "sale_age",
 ]
 
+RuleSource = Literal["request_override", "zip", "city_state", "state", "user_default", "system_default", ""]
+RulePrecedence = Literal["request_override", "zip", "city_state", "state", "user_default", "system_default", ""]
+
 
 class AppraisalFilterV4(BaseModel):
-    model_config = ConfigDict(populate_by_name=True, validate_default=True)
+    model_config = ConfigDict(populate_by_name=True, extra="forbid", validate_default=True)
 
-    rule_id: str
+    rule_id: str = Field(min_length=1, max_length=128)
     kind: FilterKind
     enabled: bool = True
     value: DecimalString | None = None
-    text_value: str = ""
-    source: str = ""
-    precedence: str = ""
+    text_value: str = Field(default="", max_length=256)
+    source: str = Field(default="", max_length=64)
+    precedence: str = Field(default="", max_length=64)
+    unit: str = Field(default="", max_length=32)
+    version: str = Field(default="", max_length=32)
 
 
 class CompAdjustmentRuleV4(BaseModel):
-    model_config = ConfigDict(populate_by_name=True, validate_default=True)
+    model_config = ConfigDict(populate_by_name=True, extra="forbid", validate_default=True)
 
-    rule_id: str
+    rule_id: str = Field(min_length=1, max_length=128)
     kind: AdjustmentKind
     enabled: bool = True
     signed_amount: DecimalString = Decimal("0")
     per_unit_amount: DecimalString | None = None
-    unit: str = ""
+    unit: str = Field(default="", max_length=32)
     applies_to: Literal["comp", "subject"] = "comp"
-    source: str = ""
-    precedence: str = ""
+    source: str = Field(default="", max_length=64)
+    precedence: str = Field(default="", max_length=64)
+    version: str = Field(default="", max_length=32)
+    evidence_field: str = Field(default="", max_length=64)
 
 
-__all__ = ["AdjustmentKind", "AppraisalFilterV4", "CompAdjustmentRuleV4", "FilterKind"]
+class TransactionRuleV4(BaseModel):
+    """Explicit configured transaction eligibility.
+
+    No prohibited code lists are invented here. The snapshot carries the
+    operator-configured allowed/denied transaction codes and types; empty
+    means no configured restriction beyond intrinsic validity (verified
+    sale price present and positive, sale evidence not contradicted).
+    """
+
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+
+    rule_id: str = Field(default="transaction_eligibility", max_length=128)
+    enabled: bool = True
+    allowed_codes: list[str] = Field(default_factory=list, max_length=256)
+    denied_codes: list[str] = Field(default_factory=list, max_length=256)
+    allowed_types: list[str] = Field(default_factory=list, max_length=256)
+    denied_types: list[str] = Field(default_factory=list, max_length=256)
+    require_sale_flag: bool = False
+    source: str = Field(default="", max_length=64)
+    precedence: str = Field(default="", max_length=64)
+    version: str = Field(default="", max_length=32)
+
+
+__all__ = [
+    "AdjustmentKind",
+    "AppraisalFilterV4",
+    "CompAdjustmentRuleV4",
+    "FilterKind",
+    "RulePrecedence",
+    "RuleSource",
+    "TransactionRuleV4",
+]

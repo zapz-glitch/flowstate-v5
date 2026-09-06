@@ -1,4 +1,4 @@
-"""Deal math and display rounding."""
+"""Deal math with exact values and configured display rounding."""
 
 from __future__ import annotations
 
@@ -6,14 +6,6 @@ from decimal import Decimal, ROUND_HALF_UP
 
 from ..contracts.deal import DealResultV4
 from ..contracts.settings import DealSettingsV4
-
-
-def _percent(value: Decimal) -> Decimal:
-    return value / Decimal(100)
-
-
-def quantize_money(value: Decimal) -> Decimal:
-    return value.quantize(Decimal("0.01"))
 
 
 def round_display(value: Decimal, increment: Decimal, mode: str) -> Decimal:
@@ -30,13 +22,16 @@ def evaluate_deal(
     total_rehab: Decimal,
     deal: DealSettingsV4,
     flip_profit: Decimal,
+    preliminary: bool = False,
+    limitations: list[str] | None = None,
 ) -> DealResultV4:
-    closing = (final_arv * _percent(deal.closing_cost_percent)).quantize(Decimal("0.01"))
-    carrying = (final_arv * _percent(deal.carrying_cost_percent)).quantize(Decimal("0.01"))
+    closing = final_arv * (deal.closing_cost_percent / Decimal(100))
+    carrying = final_arv * (deal.carrying_cost_percent / Decimal(100))
     investor_ceiling = final_arv - total_rehab - closing - carrying - flip_profit
     seller_ceiling = investor_ceiling - deal.wholesale_fee
     displayed = round_display(seller_ceiling, deal.rounding_increment, deal.rounding_mode)
     return DealResultV4(
+        status="PRELIMINARY" if preliminary else "COMPLETED",
         closing_costs=closing,
         carrying_costs=carrying,
         flip_profit=flip_profit,
@@ -45,8 +40,12 @@ def evaluate_deal(
         wholesale_fee=deal.wholesale_fee,
         displayed_mao=displayed,
         display_rounding_difference=displayed - seller_ceiling,
+        initial_offer_value=None,
         initial_offer_status="INCOMPLETE",
+        initial_offer_reason="no Initial Offer rule mapped; field incomplete by policy",
+        preliminary=preliminary,
+        limitations=list(limitations or []),
     )
 
 
-__all__ = ["evaluate_deal", "quantize_money", "round_display"]
+__all__ = ["evaluate_deal", "round_display"]

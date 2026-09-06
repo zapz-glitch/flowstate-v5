@@ -2,29 +2,45 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+from datetime import date
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .base import DecimalString
 
 
 class SubjectPropertyV4(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
 
-    address: str = ""
-    city: str = ""
-    state: str = ""
-    zip_code: str = Field(default="", alias="zip")
-    property_type: str = ""
+    subject_id: str = Field(default="", min_length=0, max_length=128)
+    address: str = Field(default="", min_length=0, max_length=256)
+    city: str = Field(default="", max_length=128)
+    state: str = Field(default="", max_length=64)
+    zip_code: str = Field(default="", alias="zip", max_length=32)
+    property_type: str = Field(default="", max_length=64)
     beds: DecimalString | None = None
     baths: DecimalString | None = None
     sqft: DecimalString | None = None
     lot_sqft: DecimalString | None = None
-    year_built: int | None = None
+    year_built: int | None = Field(default=None, ge=1600, le=2100)
     property_age_years: DecimalString | None = None
-    subdivision: str = ""
+    subdivision: str = Field(default="", max_length=128)
 
-    def model_dump_json_v4(self) -> dict:
-        return self.model_dump(mode="json", by_alias=True)
+    @field_validator("subject_id", "address", mode="after")
+    @classmethod
+    def _strip_ids(cls, value: str) -> str:
+        return value.strip()
+
+    @field_validator("beds", "baths", "sqft", "lot_sqft", "property_age_years", mode="after")
+    @classmethod
+    def _non_negative(cls, value: object) -> object:
+        from decimal import Decimal as _Decimal
+
+        if value is not None and isinstance(value, _Decimal) and value < 0:
+            raise ValueError("measurement must be non-negative")
+        return value
 
 
-__all__ = ["SubjectPropertyV4"]
+IsoDate = date
+
+__all__ = ["IsoDate", "SubjectPropertyV4"]
