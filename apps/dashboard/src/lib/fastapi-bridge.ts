@@ -112,7 +112,7 @@ export async function submitEvaluationBatch(
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
-      throw new Error(errorData.error || `API error: ${response.status}`);
+      throw new Error((errorData as { error?: string }).error || `API error: ${response.status}`);
     }
 
     return response.json();
@@ -143,7 +143,7 @@ export async function getEvaluationStatus(
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
-      throw new Error(errorData.error || `API error: ${response.status}`);
+      throw new Error((errorData as { error?: string }).error || `API error: ${response.status}`);
     }
 
     return response.json();
@@ -174,7 +174,7 @@ export async function getBatchDetails(
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
-      throw new Error(errorData.error || `API error: ${response.status}`);
+      throw new Error((errorData as { error?: string }).error || `API error: ${response.status}`);
     }
 
     return response.json();
