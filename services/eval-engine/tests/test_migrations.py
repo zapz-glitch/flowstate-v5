@@ -1,18 +1,23 @@
-"""Alembic migration up/down verification on isolated PostgreSQL only."""
+"""Alembic migration up/down verification on isolated PostgreSQL only.
+
+Uses the shared session ``isolated_pg`` cold-start fixture from
+``tests/conftest.py`` for container lifecycle: the migration suite
+creates no containers itself and never issues an unconditional
+``docker rm``. All per-test databases are unique and dropped with
+``(FORCE)``. Container ownership is tracked by the harness (label
+``flowstate.v4.harness=isolated-pg``); only harness-created
+containers are ever removed.
+"""
 from __future__ import annotations
 
 import os
-import shutil
-import socket
-import subprocess
-import time
 import uuid
-from urllib.parse import urlparse
 
 import pytest
 from alembic.config import Config
 from sqlalchemy import create_engine, inspect, text
-from sqlalchemy.exc import OperationalError
+
+from tests.conftest import _guard_maintenance_url as _shared_guard
 
 ALEMBIC_INI = os.path.join(os.path.dirname(__file__), "..", "alembic.ini")
 MAINT_URL = os.environ.get(
@@ -34,61 +39,7 @@ TEST_PORT = 55440
 
 
 def _guard(url: str) -> None:
-    parsed = urlparse(url)
-    host = (parsed.hostname or "").lower()
-    port = parsed.port or 5432
-    if "neon.tech" in url or "neon" in host:
-        raise RuntimeError("migration tests must not run against Neon")
-    tail = url.lower().split("@")[-1]
-    if "prod" in tail:
-        raise RuntimeError("migration tests must not run against production")
-    if host not in {"127.0.0.1", "localhost"} or port != TEST_PORT:
-        raise RuntimeError(
-            "migration tests run only against the isolated container "
-            f"127.0.0.1:{TEST_PORT}"
-        )
-
-
-def _ensure_container() -> None:
-    if shutil.which("docker") is None:
-        raise RuntimeError("docker is required for isolated migration tests")
-    sock = socket.socket()
-    sock.settimeout(1)
-    try:
-        sock.connect(("127.0.0.1", TEST_PORT))
-        sock.close()
-        return
-    except OSError:
-        pass
-    finally:
-        try:
-            sock.close()
-        except OSError:
-            pass
-    subprocess.run(["docker", "rm", "-f", TEST_CONTAINER], capture_output=True)
-    proc = subprocess.run(
-        [
-            "docker", "run", "-d", "--name", TEST_CONTAINER,
-            "-e", "POSTGRES_USER=v4test",
-            "-e", "POSTGRES_PASSWORD=v4testpw",
-            "-e", "POSTGRES_DB=v4test",
-            "-p", f"127.0.0.1:{TEST_PORT}:5432",
-            "postgres:16-alpine",
-        ],
-        capture_output=True,
-        text=True,
-    )
-    if proc.returncode != 0:
-        raise RuntimeError(f"could not start isolated PG: {proc.stderr[-500:]}")
-    engine = create_engine(MAINT_URL, connect_args={"connect_timeout": 2})
-    for _ in range(60):
-        try:
-            with engine.connect() as conn:
-                conn.execute(text("SELECT 1"))
-            break
-        except OperationalError:
-            time.sleep(1)
-    engine.dispose()
+    _shared_guard(url)
 
 
 def _config(url: str) -> Config:
@@ -98,10 +49,9 @@ def _config(url: str) -> Config:
     return cfg
 
 
-def test_alembic_up_and_down_on_isolated_database():
+def test_alembic_up_and_down_on_isolated_database(isolated_pg):
     from alembic import command
 
-    _ensure_container()
     _guard(MAINT_URL)
     db_name = f"v4mig_{uuid.uuid4().hex[:12]}"
     maint = create_engine(MAINT_URL, isolation_level="AUTOCOMMIT")

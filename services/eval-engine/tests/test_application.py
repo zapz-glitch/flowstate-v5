@@ -19,7 +19,7 @@ MAINT_URL = api_cases.MAINT_URL
 
 
 @pytest.fixture(scope="module")
-def app_engine():
+def app_engine(isolated_pg):
     maint = create_engine(MAINT_URL, isolation_level="AUTOCOMMIT")
     db_name = f"v4app_{uuid.uuid4().hex[:12]}"
     with maint.connect() as conn:

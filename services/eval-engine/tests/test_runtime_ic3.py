@@ -36,6 +36,44 @@ def test_compose_worker_supervised_and_candidate_safe():
     assert "COTALITY_CONCURRENCY" in body
     assert "COTALITY_RPM" in body
     assert "backend" in body
+    # Sol finding: the worker consumes one durable owner scope
+    # (tenant + requesting user); compose must set an explicit local
+    # user so there is no cross-owner ambiguity in dev.
+    assert "V4_WORKER_USER" in body
+    assert "V4_WORKER_TENANT" in body
+    assert "V4_WORKER_OWNER" in body
+
+
+def test_runtime_health_requires_worker_running():
+    body = _read(os.path.join(REPO_ROOT, "scripts", "runtime"))
+    assert "absent/stopped" in body
+    assert "expected running" in body
+
+
+def test_ci_worker_smoke_is_genuine_not_max_jobs_zero():
+    import re
+
+    wf = _read(
+        os.path.join(
+            REPO_ROOT, ".github", "workflows", "evaluation-v4-candidate.yml"
+        )
+    )
+    assert "--max-jobs 0" not in wf.replace(
+        "--max-jobs 0 would", "--max-jobs-zero-would"
+    ).replace("--max-jobs 0/negative", "--max-jobs-zero-negative")
+    assert "V4_WORKER_USER" in wf
+    # Genuine smoke: submit a known stub batch, run the worker, verify
+    # a persisted terminal result, fail reliably on error. Both
+    # `python - <<'PY'` heredoc invocations MUST carry `docker run -i`
+    # (stdin): without -i the script is silently dropped and the step
+    # passes vacuously.
+    assert re.search(r"submit_batch|_body\(|evaluations", wf)
+    assert "succeeded" in wf
+    assert wf.count("docker run --rm -i --network host") >= 2
+    assert "python - <<'PY'" in wf
+    # Failure must not be masked by `logs | head` pipelines.
+    assert "logs v4-ci-worker 2>&1 | head" not in wf
+    assert "set -o pipefail" in wf or "set -eu" in wf
 
 
 def test_dockerfile_supports_worker_command():

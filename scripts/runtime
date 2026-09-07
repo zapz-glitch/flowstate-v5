@@ -200,13 +200,19 @@ cmd_health() {
   esac
 
   worker_state=$(docker ps --filter "label=com.docker.compose.project=$PROJECT" --filter "label=com.docker.compose.service=worker" --format '{{.Status}}' 2>/dev/null || true)
-  if [ -n "$worker_state" ]; then
-    case "$worker_state" in
-      *Up*) echo "PASS  worker service (status: $worker_state)" ;;
-      *) echo "FAIL  worker service (status: $worker_state)"; fails=$((fails + 1)) ;;
-    esac
+  worker_defined=$(compose config --services 2>/dev/null | grep -qx "worker" && echo yes || echo no)
+  if [ "$worker_defined" = "yes" ]; then
+    if [ -n "$worker_state" ]; then
+      case "$worker_state" in
+        *Up*) echo "PASS  worker service (status: $worker_state)" ;;
+        *) echo "FAIL  worker service (status: $worker_state — expected running)"; fails=$((fails + 1)) ;;
+      esac
+    else
+      echo "FAIL  worker service (defined in compose.dev.yaml but absent/stopped — expected running)"
+      fails=$((fails + 1))
+    fi
   else
-    echo "PASS  worker service (not running; queue idle is acceptable locally)"
+    echo "PASS  worker service (not defined; nothing expected)"
   fi
 
   if [ "$fails" -ne 0 ]; then

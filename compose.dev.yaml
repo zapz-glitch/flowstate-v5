@@ -81,6 +81,8 @@ services:
       DATABASE_URL: "postgresql+psycopg://flowstate_v4:flowstate_v4_dev@postgres:5432/flowstate_v4"
       V4_WORKER_TENANT: "${V4_WORKER_TENANT:-default}"
       V4_WORKER_OWNER: "${V4_WORKER_OWNER:-worker:service}"
+      V4_WORKER_USER: "${V4_WORKER_USER:-local-dev-user}"
+      V4_WORKER_ALLOW_DEFAULT_USER: "true"
       V4_EXTERNAL_CALLS_ENABLED: "false"
       COTALITY_CONCURRENCY: "${COTALITY_CONCURRENCY:-4}"
       COTALITY_RPM: "${COTALITY_RPM:-40}"

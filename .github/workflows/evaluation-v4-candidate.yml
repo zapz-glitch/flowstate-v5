@@ -135,7 +135,7 @@ jobs:
 
       - name: Start API and verify readiness
         run: |
-          set -eu
+          set -euo pipefail
           docker run -d --rm --name v4-ci-api --network host \
             -e PORT=8004 \
             -e DATABASE_URL="postgresql+psycopg://v4test:v4testpw@127.0.0.1:55440/v4test" \
@@ -144,7 +144,7 @@ jobs:
             -e V4_TEST_PROFILE=false \
             flowstate-v4-dev-api:local \
             uvicorn eval_engine.main:app --host 127.0.0.1 --port 8004 --app-dir src
-          trap 'docker rm -f v4-ci-api v4-ci-worker >/dev/null 2>&1 || true' EXIT
+          trap 'docker rm -f v4-ci-worker v4-ci-api >/dev/null 2>&1 || true' EXIT
           for _ in $(seq 1 60); do
             if curl -fsS http://127.0.0.1:8004/health/ready | grep -q '"ready":true'; then
               curl -fsS http://127.0.0.1:8004/health/ready
@@ -153,14 +153,102 @@ jobs:
             sleep 2
           done
           curl -fsS http://127.0.0.1:8004/health/ready | grep -q '"ready":true'
-          docker run -d --rm --name v4-ci-worker --network host \
+
+      - name: Worker smoke processes a known stubbed batch (tenant+user)
+        run: |
+          set -euo pipefail
+          # --max-jobs N means: process at most N claimed evaluations per
+          # run. Product main.py clamps N<1 to 1
+          # (worker._config.max_jobs = max(1, int(args.max_jobs))), so a
+          # bare --max-jobs 0/negative invocation would silently become a
+          # 1-job run detached from any submitted batch and must never be
+          # used as a smoke signal. This step submits one known
+          # preloaded stub evaluation, runs the real worker binary with
+          # --max-jobs 1, and verifies a persisted terminal 1/1 result.
+          #
+          # `docker run` needs `-i` so the `python - <<'PY'` heredoc on
+          # stdin actually reaches the container; without `-i` the
+          # script is silently dropped and the step passes vacuously.
+          trap 'docker rm -f v4-ci-worker v4-ci-api >/dev/null 2>&1 || true' EXIT
+          SUBMIT_OUT=$(docker run --rm -i --network host \
             -e DATABASE_URL="postgresql+psycopg://v4test:v4testpw@127.0.0.1:55440/v4test" \
-            -e V4_WORKER_TENANT=default \
+            flowstate-v4-dev-api:local \
+            python - <<'PY'
+          import uuid
+          from sqlalchemy import create_engine
+          from sqlalchemy.orm import sessionmaker
+          from eval_engine.application.service import submit_batch
+          from eval_engine.contracts.settings import (
+              RenovationTierCellV4,
+              RenovationTierV4,
+              SettingsSnapshotV4,
+          )
+          levels = ["lipstick", "light_cosmetic", "full_cosmetic", "heavy_rehab", "full_gut"]
+          def cells():
+              return [RenovationTierCellV4(renovation_level=lv, rehab_rate_per_sqft="100", flip_profit="50000") for lv in levels]
+          tiers = [
+              RenovationTierV4(tier_key="under500k", lower_inclusive="0", upper_exclusive="500000", cells=cells()),
+              RenovationTierV4(tier_key="500k_to_under1m", lower_inclusive="500000", upper_exclusive="1000000", cells=cells()),
+              RenovationTierV4(tier_key="1m_to_3m", lower_inclusive="1000000", upper_inclusive="3000000", cells=cells()),
+              RenovationTierV4(tier_key="over3m", lower_exclusive="3000000", cells=cells()),
+          ]
+          settings = SettingsSnapshotV4(snapshot_id="snap-1", tiers=[], deal={}, transaction_rule={})
+          payload = settings.model_dump(mode="json")
+          payload["tiers"] = [t.model_dump(mode="json") for t in tiers]
+          def comps():
+              return [{"comp_id": f"c{k}", "verified_sale_price": str(600000 - k * 10000),
+                       "sale_date": "2026-06-01", "sqft": "2000",
+                       "evidence_ref": f"ev-{k}", "is_sale": True} for k in range(1, 4)]
+          body = {"settings": payload, "candidate_evidence_mode": "preloaded",
+                  "evaluations": [{"idempotency_key": "ci-smoke-0",
+                                    "subject": {"address": "1 Main St", "city": "Austin", "state": "TX", "sqft": "2000"},
+                                    "comps": comps(), "renovation_level": "light_cosmetic",
+                                    "evaluation_date": "2026-09-01"}]}
+          mk = sessionmaker(bind=create_engine("postgresql+psycopg://v4test:v4testpw@127.0.0.1:55440/v4test"))
+          with mk() as s:
+              batch, created, summaries = submit_batch(
+                  s, tenant_id="ci-smoke", requested_by_user_id="ci-user",
+                  batch_key="ci-smoke-batch-001", body=body)
+              s.commit()
+              assert created and len(summaries) == 1
+              print(str(batch.id))
+          PY
+          )
+          echo "submitted batch ${SUBMIT_OUT}"
+          test -n "${SUBMIT_OUT}"
+          case "${SUBMIT_OUT}" in
+            *"-"*"-"*"-"*"-"*) : ;;
+            *) echo "worker smoke FAILED: submission did not print a batch id" >&2; exit 1 ;;
+          esac
+          docker run --rm --name v4-ci-worker --network host \
+            -e DATABASE_URL="postgresql+psycopg://v4test:v4testpw@127.0.0.1:55440/v4test" \
+            -e V4_WORKER_TENANT=ci-smoke \
             -e V4_WORKER_OWNER=worker:ci \
+            -e V4_WORKER_USER=ci-user \
             -e V4_EXTERNAL_CALLS_ENABLED=false \
             flowstate-v4-dev-api:local \
-            python -m eval_engine.worker.main --max-jobs 0
-          sleep 5
-          docker logs v4-ci-worker 2>&1 | head -n 20
-          docker rm -f v4-ci-worker v4-ci-api >/dev/null 2>&1 || true
+            python -m eval_engine.worker.main --max-jobs 1
+          docker run --rm -i --network host \
+            -e DATABASE_URL="postgresql+psycopg://v4test:v4testpw@127.0.0.1:55440/v4test" \
+            -e EXPECTED_BATCH="${SUBMIT_OUT}" \
+            flowstate-v4-dev-api:local \
+            python - <<'PY'
+          import os
+          from sqlalchemy import create_engine, text
+          url = "postgresql+psycopg://v4test:v4testpw@127.0.0.1:55440/v4test"
+          engine = create_engine(url)
+          with engine.connect() as conn:
+              row = conn.execute(
+                  text("SELECT status, total_count, succeeded_count FROM v4_batches WHERE id = :bid"),
+                  {"bid": os.environ["EXPECTED_BATCH"]},
+              ).one()
+              assert tuple(row) == ("succeeded", 1, 1), tuple(row)
+              evals = conn.execute(
+                  text("SELECT status, count(*) FROM v4_evaluations WHERE batch_id = :bid GROUP BY status"),
+                  {"bid": os.environ["EXPECTED_BATCH"]},
+              ).all()
+              assert [(r[0], r[1]) for r in evals] == [("succeeded", 1)], evals
+              print(f"worker smoke PASS: batch {os.environ['EXPECTED_BATCH']} succeeded 1/1")
+          PY
+          docker rm -f v4-ci-api >/dev/null 2>&1 || true
           trap - EXIT

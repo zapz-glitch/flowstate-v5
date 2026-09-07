@@ -13,8 +13,11 @@ from .limiter import (
 )
 from .runner import (
     JITTER_FRACTION,
+    ClaimRetryExhausted,
+    RunOutcome,
     Worker,
     WorkerConfig,
+    WorkerConfigError,
     WorkerStats,
     classify_failure,
     claim_next_fair,
@@ -25,6 +28,9 @@ from .service import build_limiter, build_session_factory, build_worker, build_w
 
 __all__ = [
     "JITTER_FRACTION",
+    "ClaimRetryExhausted",
+    "RunOutcome",
+    "WorkerConfigError",
     "LEASE_TTL",
     "MAX_ACTIVE_LEASES",
     "PROVIDER",
