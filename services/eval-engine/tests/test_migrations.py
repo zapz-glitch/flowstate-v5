@@ -1,18 +1,23 @@
-"""Alembic migration up/down verification on isolated PostgreSQL only."""
+"""Alembic migration up/down verification on isolated PostgreSQL only.
+
+Uses the shared session ``isolated_pg`` cold-start fixture from
+``tests/conftest.py`` for container lifecycle: the migration suite
+creates no containers itself and never issues an unconditional
+``docker rm``. All per-test databases are unique and dropped with
+``(FORCE)``. Container ownership is tracked by the harness (label
+``flowstate.v4.harness=isolated-pg``); only harness-created
+containers are ever removed.
+"""
 from __future__ import annotations
 
 import os
-import shutil
-import socket
-import subprocess
-import time
 import uuid
-from urllib.parse import urlparse
 
 import pytest
 from alembic.config import Config
 from sqlalchemy import create_engine, inspect, text
-from sqlalchemy.exc import OperationalError
+
+from tests.conftest import _guard_maintenance_url as _shared_guard
 
 ALEMBIC_INI = os.path.join(os.path.dirname(__file__), "..", "alembic.ini")
 MAINT_URL = os.environ.get(
@@ -24,6 +29,8 @@ EXPECTED_TABLES = {
     "v4_batches",
     "v4_evaluations",
     "v4_evaluation_results",
+    "v4_cotality_leases",
+    "v4_cotality_calls",
 }
 
 
@@ -32,61 +39,7 @@ TEST_PORT = 55440
 
 
 def _guard(url: str) -> None:
-    parsed = urlparse(url)
-    host = (parsed.hostname or "").lower()
-    port = parsed.port or 5432
-    if "neon.tech" in url or "neon" in host:
-        raise RuntimeError("migration tests must not run against Neon")
-    tail = url.lower().split("@")[-1]
-    if "prod" in tail:
-        raise RuntimeError("migration tests must not run against production")
-    if host not in {"127.0.0.1", "localhost"} or port != TEST_PORT:
-        raise RuntimeError(
-            "migration tests run only against the isolated container "
-            f"127.0.0.1:{TEST_PORT}"
-        )
-
-
-def _ensure_container() -> None:
-    if shutil.which("docker") is None:
-        raise RuntimeError("docker is required for isolated migration tests")
-    sock = socket.socket()
-    sock.settimeout(1)
-    try:
-        sock.connect(("127.0.0.1", TEST_PORT))
-        sock.close()
-        return
-    except OSError:
-        pass
-    finally:
-        try:
-            sock.close()
-        except OSError:
-            pass
-    subprocess.run(["docker", "rm", "-f", TEST_CONTAINER], capture_output=True)
-    proc = subprocess.run(
-        [
-            "docker", "run", "-d", "--name", TEST_CONTAINER,
-            "-e", "POSTGRES_USER=v4test",
-            "-e", "POSTGRES_PASSWORD=v4testpw",
-            "-e", "POSTGRES_DB=v4test",
-            "-p", f"127.0.0.1:{TEST_PORT}:5432",
-            "postgres:16-alpine",
-        ],
-        capture_output=True,
-        text=True,
-    )
-    if proc.returncode != 0:
-        raise RuntimeError(f"could not start isolated PG: {proc.stderr[-500:]}")
-    engine = create_engine(MAINT_URL, connect_args={"connect_timeout": 2})
-    for _ in range(60):
-        try:
-            with engine.connect() as conn:
-                conn.execute(text("SELECT 1"))
-            break
-        except OperationalError:
-            time.sleep(1)
-    engine.dispose()
+    _shared_guard(url)
 
 
 def _config(url: str) -> Config:
@@ -96,10 +49,9 @@ def _config(url: str) -> Config:
     return cfg
 
 
-def test_alembic_up_and_down_on_isolated_database():
+def test_alembic_up_and_down_on_isolated_database(isolated_pg):
     from alembic import command
 
-    _ensure_container()
     _guard(MAINT_URL)
     db_name = f"v4mig_{uuid.uuid4().hex[:12]}"
     maint = create_engine(MAINT_URL, isolation_level="AUTOCOMMIT")
@@ -152,7 +104,27 @@ def test_alembic_up_and_down_on_isolated_database():
         assert "ix_v4_batch_owner" in owner_indexes
         with engine.begin() as conn:
             rev = conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
-            assert rev == "0003_v4_owner"
+            assert rev == "0004_v4_provider_limiter"
+        for table in ("v4_cotality_leases", "v4_cotality_calls"):
+            assert table in tables
+        lease_uq = {uq["name"] for uq in insp.get_unique_constraints("v4_cotality_leases")}
+        assert "uq_v4_cotality_lease_token" in lease_uq
+        lease_ck = {ck["name"] for ck in insp.get_check_constraints("v4_cotality_leases")}
+        assert "ck_v4_cotality_lease_owner_nonempty" in lease_ck
+        call_ck = {ck["name"] for ck in insp.get_check_constraints("v4_cotality_calls")}
+        assert "ck_v4_cotality_call_attempt_pos" in call_ck
+        lease_ix = {ix["name"] for ix in insp.get_indexes("v4_cotality_leases")}
+        assert "ix_v4_cotality_lease_expiry" in lease_ix
+        call_ix = {ix["name"] for ix in insp.get_indexes("v4_cotality_calls")}
+        assert "ix_v4_cotality_call_window" in call_ix
+        command.downgrade(_config(url), "0003_v4_owner")
+        head_tables = set(inspect(create_engine(url)).get_table_names())
+        assert "v4_cotality_leases" not in head_tables
+        assert "v4_cotality_calls" not in head_tables
+        command.upgrade(_config(url), "head")
+        with create_engine(url).begin() as conn:
+            rev = conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
+            assert rev == "0004_v4_provider_limiter"
         batch_ck = {
             ck["name"] for ck in insp.get_check_constraints("v4_batches")
         }
@@ -176,7 +148,7 @@ def test_alembic_up_and_down_on_isolated_database():
         command.downgrade(_config(url), "0002_v4_repair")
         _seed_populated_0002(url)
         with pytest.raises(Exception, match="0003 preflight"):
-            command.upgrade(_config(url), "head")
+            command.upgrade(_config(url), "0004_v4_provider_limiter")
         _assert_still_at_0002(url)
         command.downgrade(_config(url), "base")
         command.upgrade(_config(url), "0002_v4_repair")
@@ -198,7 +170,7 @@ def test_alembic_up_and_down_on_isolated_database():
         command.upgrade(_config(url), "0002_v4_repair")
         _assert_populated_0002_head(url)
         with pytest.raises(Exception, match="0003 preflight"):
-            command.upgrade(_config(url), "head")
+            command.upgrade(_config(url), "0004_v4_provider_limiter")
         _assert_still_at_0002(url)
         command.downgrade(_config(url), "0001_v4_initial")
         _assert_populated_0001(url)
@@ -388,7 +360,7 @@ def _assert_clean_head(url: str) -> None:
     engine = create_engine(url)
     with engine.begin() as conn:
         rev = conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
-        assert rev == "0003_v4_owner"
+        assert rev == "0004_v4_provider_limiter"
     engine.dispose()
 
 
@@ -559,7 +531,7 @@ def _assert_cross_user_same_key_roundtrip(url: str) -> None:
     engine = create_engine(url)
     with engine.begin() as conn:
         rev = conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
-        assert rev == "0003_v4_owner"
+        assert rev == "0004_v4_provider_limiter"
     engine.dispose()
 
 
@@ -596,7 +568,7 @@ def _assert_downgrade_preflight_legitimate_cross_user(url: str) -> None:
         _command.downgrade(_config(url), "0002_v4_repair")
     with engine.begin() as conn:
         rev = conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
-        assert rev == "0003_v4_owner"
+        assert rev == "0004_v4_provider_limiter"
     engine.dispose()
 
 

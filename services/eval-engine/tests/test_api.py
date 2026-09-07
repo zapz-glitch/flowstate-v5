@@ -117,7 +117,7 @@ def _body(n: int, *, key_prefix: str = "prop", mode: str = "preloaded") -> dict:
 
 
 @pytest.fixture(scope="module")
-def api_engine():
+def api_engine(isolated_pg):
     from urllib.parse import urlparse
 
     parsed = urlparse(MAINT_URL)

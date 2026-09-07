@@ -48,7 +48,7 @@ def test_startup_accepts_internal_token(monkeypatch):
 def test_readiness_contract_constants():
     from eval_engine.health import EXPECTED_ALEMBIC_REVISION, REQUIRED_TABLES
 
-    assert EXPECTED_ALEMBIC_REVISION == "0003_v4_owner"
+    assert EXPECTED_ALEMBIC_REVISION == "0004_v4_provider_limiter"
     assert REQUIRED_TABLES == frozenset(
         {
             "v4_settings_snapshots",
@@ -56,6 +56,8 @@ def test_readiness_contract_constants():
             "v4_evaluations",
             "v4_evaluation_results",
             "v4_result_snapshot_backfill",
+            "v4_cotality_leases",
+            "v4_cotality_calls",
         }
     )
 
@@ -69,13 +71,15 @@ def test_readiness_contract_constants():
             "v4_evaluations",
             "v4_evaluation_results",
             "v4_result_snapshot_backfill",
+            "v4_cotality_leases",
+            "v4_cotality_calls",
         ]
     ),
 )
 def test_readiness_fails_when_any_required_table_missing(
     monkeypatch, missing_table
 ):
-    """IR-1: removing any one of the five head tables is not-ready."""
+    """IR-1: removing any one of the seven head tables is not-ready."""
     from eval_engine import health as health_module
 
     expected = health_module.EXPECTED_ALEMBIC_REVISION
@@ -148,6 +152,10 @@ def test_readiness_unmigrated_database_is_not_ready(monkeypatch):
 
     container = "v4-health-pg-ic3"
     port = 55441
+    created_by_this_test = False
+    # Same ownership discipline as tests/conftest.py: label-gated so a
+    # same-name container we do not own is never deleted silently.
+    health_label = "flowstate.v4.harness=health-pg-ic3"
     maint_url = f"postgresql+psycopg://v4test:v4testpw@127.0.0.1:{port}/v4test"
     if shutil.which("docker") is None:
         pytest.skip("docker is required for the unmigrated readiness test")
@@ -161,10 +169,26 @@ def test_readiness_unmigrated_database_is_not_ready(monkeypatch):
     finally:
         sock.close()
     if not reachable:
-        subprocess.run(["docker", "rm", "-f", container], capture_output=True)
+        existing = subprocess.run(
+            ["docker", "inspect", "--format", "{{.Name}}", container],
+            capture_output=True, text=True,
+        )
+        if existing.returncode == 0:
+            label = subprocess.run(
+                ["docker", "inspect", "--format",
+                 '{{index .Config.Labels "flowstate.v4.harness"}}', container],
+                capture_output=True, text=True,
+            )
+            if (label.stdout or "").strip() != "health-pg-ic3":
+                pytest.fail(
+                    f"container name {container!r} already exists and is "
+                    "not harness-owned; refusing to remove it"
+                )
+            subprocess.run(["docker", "rm", "-f", container], capture_output=True)
         proc = subprocess.run(
             [
                 "docker", "run", "-d", "--name", container,
+                "--label", health_label,
                 "-e", "POSTGRES_USER=v4test",
                 "-e", "POSTGRES_PASSWORD=v4testpw",
                 "-e", "POSTGRES_DB=v4test",
@@ -176,6 +200,7 @@ def test_readiness_unmigrated_database_is_not_ready(monkeypatch):
         )
         if proc.returncode != 0:
             pytest.skip("could not start isolated PG for readiness test")
+        created_by_this_test = True
         maint = create_engine(maint_url, connect_args={"connect_timeout": 2})
         for _ in range(60):
             try:
@@ -208,3 +233,28 @@ def test_readiness_unmigrated_database_is_not_ready(monkeypatch):
         with maint.connect() as conn:
             conn.execute(text(f'DROP DATABASE IF EXISTS "{db_name}" WITH (FORCE)'))
         maint.dispose()
+        # Guaranteed teardown of ONLY a container this test created
+        # (label-verified); a pre-existing container on 55441 is never
+        # removed. Cleanup errors are printed (never hidden) and raised.
+        if created_by_this_test:
+            label = subprocess.run(
+                ["docker", "inspect", "--format",
+                 '{{index .Config.Labels "flowstate.v4.harness"}}', container],
+                capture_output=True, text=True,
+            )
+            if (label.stdout or "").strip() != "health-pg-ic3":
+                raise RuntimeError(
+                    f"harness ownership lost for {container}: refusing removal"
+                )
+            subprocess.run(
+                ["docker", "rm", "-f", container], capture_output=True
+            )
+            gone = subprocess.run(
+                ["docker", "inspect", "--format", "{{.Name}}", container],
+                capture_output=True, text=True,
+            )
+            if gone.returncode == 0:
+                raise RuntimeError(
+                    f"harness-created container {container} still exists "
+                    "after teardown"
+                )

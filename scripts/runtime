@@ -147,6 +147,12 @@ cmd_status() {
   esac
   echo ""
   echo "Ports: API $V4_API_PORT (container 8004), dashboard $V4_DASHBOARD_PORT (container 3000), all on 127.0.0.1; postgres internal-only"
+  worker_state=$(docker ps --filter "label=com.docker.compose.project=$PROJECT" --filter "label=com.docker.compose.service=worker" --format '{{.Names}} {{.Status}}' 2>/dev/null || true)
+  if [ -n "$worker_state" ]; then
+    echo "Worker: $worker_state"
+  else
+    echo "Worker: (not running)"
+  fi
 }
 
 cmd_health() {
@@ -193,6 +199,22 @@ cmd_health() {
     *) echo "FAIL  dashboard $DASHBOARD_BASE/ (HTTP $dash_code)"; fails=$((fails + 1)) ;;
   esac
 
+  worker_state=$(docker ps --filter "label=com.docker.compose.project=$PROJECT" --filter "label=com.docker.compose.service=worker" --format '{{.Status}}' 2>/dev/null || true)
+  worker_defined=$(compose config --services 2>/dev/null | grep -qx "worker" && echo yes || echo no)
+  if [ "$worker_defined" = "yes" ]; then
+    if [ -n "$worker_state" ]; then
+      case "$worker_state" in
+        *Up*) echo "PASS  worker service (status: $worker_state)" ;;
+        *) echo "FAIL  worker service (status: $worker_state — expected running)"; fails=$((fails + 1)) ;;
+      esac
+    else
+      echo "FAIL  worker service (defined in compose.dev.yaml but absent/stopped — expected running)"
+      fails=$((fails + 1))
+    fi
+  else
+    echo "PASS  worker service (not defined; nothing expected)"
+  fi
+
   if [ "$fails" -ne 0 ]; then
     echo "health: $fails check(s) FAILED"
     return 1
@@ -212,7 +234,8 @@ cmd_logs() {
     done
     targets="$*"
   else
-    # Follow existing V4 API/worker services only; never invent a worker.
+    # Follow V4 API + worker services; the supervised worker is a real
+    # Compose service (V4-103B) and is included without breaking safety.
     targets=$(printf '%s\n' "$defined" | grep -Ei 'api|engine|eval|worker' || true)
     if [ -z "$targets" ]; then
       die "no API/worker services defined in $COMPOSE_FILE"

@@ -11,6 +11,8 @@ from .db import (
 from .models import (
     Base,
     Batch,
+    CotalityCall,
+    CotalityLease,
     Evaluation,
     EvaluationResult,
     ResultSnapshotBackfill,
@@ -33,6 +35,8 @@ from .repositories import (
 __all__ = [
     "Base",
     "Batch",
+    "CotalityCall",
+    "CotalityLease",
     "Evaluation",
     "EvaluationResult",
     "ResultSnapshotBackfill",

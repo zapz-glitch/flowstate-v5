@@ -13,7 +13,7 @@ from sqlalchemy.exc import SQLAlchemyError
 # reports ready only when the database is at this revision AND the
 # persistence tables exist. Kept as module constants so tests and the
 # readiness probe assert the same contract.
-EXPECTED_ALEMBIC_REVISION = "0003_v4_owner"
+EXPECTED_ALEMBIC_REVISION = "0004_v4_provider_limiter"
 REQUIRED_TABLES = frozenset(
     {
         "v4_settings_snapshots",
@@ -21,6 +21,8 @@ REQUIRED_TABLES = frozenset(
         "v4_evaluations",
         "v4_evaluation_results",
         "v4_result_snapshot_backfill",
+        "v4_cotality_leases",
+        "v4_cotality_calls",
     }
 )
 

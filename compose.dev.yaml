@@ -70,6 +70,34 @@ services:
     networks:
       - backend
 
+  worker:
+    build:
+      context: ./services/eval-engine
+      dockerfile: Dockerfile
+    image: flowstate-v4-dev-api:local
+    pull_policy: build
+    command: ["python", "-m", "eval_engine.worker.main"]
+    environment:
+      DATABASE_URL: "postgresql+psycopg://flowstate_v4:flowstate_v4_dev@postgres:5432/flowstate_v4"
+      V4_WORKER_TENANT: "${V4_WORKER_TENANT:-default}"
+      V4_WORKER_OWNER: "${V4_WORKER_OWNER:-worker:service}"
+      V4_WORKER_USER: "${V4_WORKER_USER:-local-dev-user}"
+      V4_WORKER_ALLOW_DEFAULT_USER: "true"
+      V4_EXTERNAL_CALLS_ENABLED: "false"
+      COTALITY_CONCURRENCY: "${COTALITY_CONCURRENCY:-4}"
+      COTALITY_RPM: "${COTALITY_RPM:-40}"
+      V4_WORKER_LEASE_SECONDS: "${V4_WORKER_LEASE_SECONDS:-300}"
+      V4_WORKER_HEARTBEAT_SECONDS: "${V4_WORKER_HEARTBEAT_SECONDS:-30}"
+      V4_WORKER_POLL_SECONDS: "${V4_WORKER_POLL_SECONDS:-1}"
+    restart: "unless-stopped"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - backend
+
   postgres:
     image: postgres:17-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73
     environment:

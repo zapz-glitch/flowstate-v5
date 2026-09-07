@@ -1,26 +1,23 @@
 """Isolated PostgreSQL persistence tests for V4 (no SQLite fallback).
 
-Uses a distinct temporary database per session on the isolated test
-container (v4-persist-pg-102, 127.0.0.1:55440). Never touches production
-or Neon integration stores. Set V4_TEST_DATABASE_URL to override the
+Uses the shared session ``isolated_pg`` cold-start fixture from
+``tests/conftest.py`` for container lifecycle (never touches production
+or Neon integration stores). Set V4_TEST_DATABASE_URL to override the
 maintenance URL; the harness always creates and drops a unique database.
+Container ownership is tracked by the harness (label
+``flowstate.v4.harness=isolated-pg``); only harness-created containers
+are ever removed.
 """
 from __future__ import annotations
 
 import json
 import os
-import shutil
-import socket
-import subprocess
 import threading
-import time
 import uuid
 from datetime import datetime, timedelta, timezone
-from urllib.parse import urlparse
 
 import pytest
 from sqlalchemy import create_engine, func, select, text
-from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
 from eval_engine.persistence import repositories as repo
@@ -63,70 +60,9 @@ TEST_PORT = 55440
 
 
 def _guard_maintenance_url(url: str) -> None:
-    parsed = urlparse(url)
-    host = (parsed.hostname or "").lower()
-    port = parsed.port or 5432
-    if "neon.tech" in url or "neon" in host:
-        raise RuntimeError("refusing test URL pointing at Neon")
-    tail = url.lower().split("@")[-1]
-    if "prod" in tail:
-        raise RuntimeError("refusing test URL that looks like production")
-    if host not in {"127.0.0.1", "localhost"} or port != TEST_PORT:
-        raise RuntimeError(
-            "tests run only against the isolated container "
-            f"127.0.0.1:{TEST_PORT}"
-        )
+    from tests.conftest import _guard_maintenance_url as _shared_guard
 
-
-def _port_open(port: int) -> bool:
-    sock = socket.socket()
-    sock.settimeout(1)
-    try:
-        sock.connect(("127.0.0.1", port))
-        return True
-    except OSError:
-        return False
-    finally:
-        sock.close()
-
-
-def _ensure_test_container() -> None:
-    if shutil.which("docker") is None:
-        raise RuntimeError("docker is required for isolated persistence tests")
-    if _port_open(TEST_PORT):
-        return
-    subprocess.run(
-        ["docker", "rm", "-f", TEST_CONTAINER],
-        capture_output=True,
-        check=False,
-    )
-    proc = subprocess.run(
-        [
-            "docker", "run", "-d", "--name", TEST_CONTAINER,
-            "-e", "POSTGRES_USER=v4test",
-            "-e", "POSTGRES_PASSWORD=v4testpw",
-            "-e", "POSTGRES_DB=v4test",
-            "-p", f"127.0.0.1:{TEST_PORT}:5432",
-            "postgres:16-alpine",
-        ],
-        capture_output=True,
-        text=True,
-    )
-    if proc.returncode != 0:
-        raise RuntimeError(f"could not start isolated PG: {proc.stderr[-500:]}")
-    for _ in range(30):
-        if _port_open(TEST_PORT):
-            break
-        time.sleep(1)
-    engine = create_engine(MAINT_URL, connect_args={"connect_timeout": 2})
-    for _ in range(30):
-        try:
-            with engine.connect() as conn:
-                conn.execute(text("SELECT 1"))
-            break
-        except OperationalError:
-            time.sleep(1)
-    engine.dispose()
+    _shared_guard(url)
 
 
 def _maintenance_engine():
@@ -157,8 +93,7 @@ def _apply_schema(engine, url: str | None = None) -> None:
 
 
 @pytest.fixture(scope="module")
-def test_engine():
-    _ensure_test_container()
+def test_engine(isolated_pg):
     _guard_maintenance_url(MAINT_URL)
     require_postgresql_url(MAINT_URL)
     db_name = f"v4test_{uuid.uuid4().hex[:12]}"

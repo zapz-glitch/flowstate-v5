@@ -596,19 +596,32 @@ def recover_stale_leases(
     session: Session,
     *,
     tenant_id: str,
+    requested_by_user_id: str | None = None,
     now: datetime | None = None,
 ) -> int:
-    """Return expired claimed/running leases to queued with bounded retry."""
+    """Return expired claimed/running leases to queued with bounded retry.
+
+    Scoped to the tenant always, and additionally to
+    ``requested_by_user_id`` when supplied: one owner's recovery never
+    touches another owner's leases. Callers that need a DB-authoritative
+    clock should read ``SELECT now()`` and pass it as ``now``.
+    """
     _check_tenant(tenant_id)
+    owner = (requested_by_user_id or "").strip()
+    if requested_by_user_id is not None and not owner:
+        raise ValueError("requested_by_user_id must not be blank when supplied")
     current = now or _utcnow()
+    predicates = [
+        Evaluation.tenant_id == tenant_id,
+        Evaluation.status.in_(["claimed", "running"]),
+        Evaluation.lease_expires_at.is_not(None),
+        Evaluation.lease_expires_at <= current,
+    ]
+    if owner:
+        predicates.append(Evaluation.requested_by_user_id == owner)
     result = session.execute(
         update(Evaluation)
-        .where(
-            Evaluation.tenant_id == tenant_id,
-            Evaluation.status.in_(["claimed", "running"]),
-            Evaluation.lease_expires_at.is_not(None),
-            Evaluation.lease_expires_at <= current,
-        )
+        .where(*predicates)
         .values(
             status="queued",
             lease_owner=None,
@@ -621,19 +634,27 @@ def recover_stale_leases(
     session.flush()
     count = result.rowcount or 0
     if count:
-        _apply_retry_schedule(session, current=current, tenant_id=tenant_id)
+        _apply_retry_schedule(
+            session, current=current, tenant_id=tenant_id,
+            requested_by_user_id=owner or None,
+        )
     return count
 
 
 def _apply_retry_schedule(
-    session: Session, *, current: datetime, tenant_id: str
+    session: Session, *, current: datetime, tenant_id: str,
+    requested_by_user_id: str | None = None,
 ) -> None:
+    predicates = [
+        Evaluation.tenant_id == tenant_id,
+        Evaluation.status == "queued",
+        Evaluation.error_code == "lease_expired",
+    ]
+    owner = (requested_by_user_id or "").strip()
+    if owner:
+        predicates.append(Evaluation.requested_by_user_id == owner)
     rows = session.execute(
-        select(Evaluation).where(
-            Evaluation.tenant_id == tenant_id,
-            Evaluation.status == "queued",
-            Evaluation.error_code == "lease_expired",
-        )
+        select(Evaluation).where(*predicates)
     ).scalars()
     for row in rows:
         attempts = int(row.attempts)
