@@ -54,6 +54,22 @@ services:
       - frontend
       - backend
 
+  api-worker:
+    build:
+      context: ./apps/api
+    image: flowstate-v4-dev-api-worker:local
+    pull_policy: always
+    command: ["wrangler", "dev"]
+    environment:
+      BETTER_AUTH_SECRET: "test-secret"
+      # D1 binding is defined in wrangler.toml; wrangler dev will use local DB if available
+    ports:
+      - "127.0.0.1:${V4_API_PORT:-8787}:8787"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - frontend
   migrate:
     build:
       context: ./services/eval-engine
@@ -126,12 +142,15 @@ services:
       HOSTNAME: "0.0.0.0"
       NEXT_TELEMETRY_DISABLED: "1"
       NEXT_PUBLIC_API_URL: "http://localhost:8787"
+      NEXT_PUBLIC_FASTAPI_URL: "http://localhost:8004"
     volumes:
       - v4-dashboard-next:/app/apps/dashboard/.next
     restart: "no"
     depends_on:
       api:
         condition: service_healthy
+      api-worker:
+        condition: service_started
     networks:
       - frontend
 

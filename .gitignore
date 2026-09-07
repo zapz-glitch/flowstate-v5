@@ -44,3 +44,4 @@ npm-debug.log*
 # Testing
 coverage/
 .data/
+.dev.vars.*
