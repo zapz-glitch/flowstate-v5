@@ -8,6 +8,8 @@ name: evaluation-v4-candidate
 on:
   push:
     branches:
+      - v4-python
+      - feature/v4-python-eval-swap
       - v4/runtime-ci
       - v4/integration-runtime
       - v4/python-fast-eval
@@ -21,6 +23,7 @@ on:
       - scripts/runtime
       - scripts/secret-scan
       - services/eval-engine/**
+      - apps/api/**
       - apps/dashboard/**
       - packages/shared/**
       - docs/eval-v4/RUNTIME.md

@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from ..api.providers import EvidenceProvider
 from ..persistence.db import require_postgresql_url
 from .limiter import LimiterConfig, ProviderLimiter
-from .runner import Worker, WorkerConfig
+from .runner import Worker, WorkerConfig, WorkerConfigError
 
 
 def _env_int(name: str, default: int) -> int:
@@ -71,6 +71,10 @@ def build_worker_config(
     )
     user = (requested_by_user_id or "").strip() or _required_env("V4_WORKER_USER")
     external = os.environ.get("V4_EXTERNAL_CALLS_ENABLED", "false").lower() == "true"
+    if external and provider is None:
+        raise WorkerConfigError(
+            "V4_EXTERNAL_CALLS_ENABLED requires a configured evidence provider"
+        )
     return WorkerConfig(
         tenant_id=tenant,
         lease_owner=owner,
