@@ -18,7 +18,7 @@ production-like candidate testing. Preserve main and all UI code.
 
 ## Active
 
-- V5-06: final independent QA and SOL review of the preparatory package.
+- None while the required client scope and credential-access inputs are pending.
 
 ## Queued
 
@@ -42,6 +42,12 @@ production-like candidate testing. Preserve main and all UI code.
 - Final workspace typechecks and dashboard production build passed with the
   updated dependencies. Generated dashboard files restored; no dashboard source
   changes in this package. Python pip check passed.
+- Independent QA at code revision 77a6e9a498c511381de40206fa32134c36e4fe35:
+  210 passed, 27 warnings, 58.86 seconds. SOL VERIFIED this preparatory package
+  only. Final API Wrangler dry-run bundle and existing secret scan passed.
+- Verified main remains 16f879a and dashboard diff from merged baseline is empty.
+- Removed the owned disposable PostgreSQL test container and its test volume
+  after QA. Recreate isolated test storage for the next suite run.
 
 ## Findings and blockers
 
@@ -56,7 +62,7 @@ production-like candidate testing. Preserve main and all UI code.
 - Full Compose has missing API-worker Dockerfile, port variable collision,
   container-loopback URL, and project isolation issues. No application runtime
   or browser regression claim is supported.
-- SOL review: preparatory guard/CI changes eligible for QA; evaluator
+- SOL review: preparatory package VERIFIED at 77a6e9a; evaluator
   replacement CHANGES_REQUIRED. The old evaluator remains active.
 
 ## Definition of done

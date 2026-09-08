@@ -36,6 +36,9 @@ changing application behavior.
 
 ## Verification
 
+- Final independent QA and SOL review verified the preparatory code at
+  `77a6e9a498c511381de40206fa32134c36e4fe35`: 210 tests passed with 27 warnings
+  in 58.86 seconds. This does not approve the evaluator replacement.
 - Existing Python suite: 207 passed, 27 deprecation warnings.
 - New worker configuration tests: 3 passed.
 - Tests used isolated PostgreSQL 16.15 at loopback port 55440, including
@@ -57,6 +60,9 @@ changing application behavior.
 - `npm test` in the API is a disabled placeholder. It is not test evidence.
 - No live provider calls, application end-to-end evaluation, browser regression,
   secret rotation, production deployment, or replacement cutover was verified.
+- Final typechecks, production build, API Wrangler dry-run bundle, and existing
+  secret scan passed. The dedicated test container and volume were removed
+  after independent QA; no production storage was used.
 
 ## Runtime findings
 
