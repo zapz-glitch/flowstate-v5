@@ -135,7 +135,8 @@ def test_readiness_fails_when_any_required_table_missing(
     assert missing_table in checks["schema"]
 
 
-def test_readiness_unmigrated_database_is_not_ready(monkeypatch):
+@pytest.mark.parametrize("bare_url", [False, True])
+def test_readiness_unmigrated_database_is_not_ready(monkeypatch, bare_url):
     """Negative readiness path: empty PG (no alembic_version) is 503."""
     from eval_engine import health as health_module
 
@@ -216,7 +217,7 @@ def test_readiness_unmigrated_database_is_not_ready(monkeypatch):
         with maint.connect() as conn:
             conn.execute(text(f'CREATE DATABASE "{db_name}"'))
         url = maint_url.rsplit("/", 1)[0] + f"/{db_name}"
-        monkeypatch.setenv("DATABASE_URL", url)
+        monkeypatch.setenv("DATABASE_URL", url.replace("postgresql+psycopg://", "postgresql://") if bare_url else url)
         schema = health_module.check_schema()
         assert not schema.ok
         assert "not migrated" in schema.detail

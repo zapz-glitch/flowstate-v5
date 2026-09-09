@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 from pydantic import BaseModel, Field
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.exc import SQLAlchemyError
+from .persistence.db import normalize_postgresql_url
 
 # Single-head migration contract for the V4 candidate runtime. Readiness
 # reports ready only when the database is at this revision AND the
@@ -62,7 +63,7 @@ def check_database(url: str | None = None) -> DatabaseCheck:
         return DatabaseCheck(False, scheme or "unknown", "V4 requires PostgreSQL")
 
     engine = create_engine(
-        target,
+        normalize_postgresql_url(target),
         pool_pre_ping=True,
         connect_args={"connect_timeout": 3},
     )
@@ -96,7 +97,7 @@ def check_schema(url: str | None = None) -> DatabaseCheck:
         return DatabaseCheck(False, scheme or "unknown", "V4 requires PostgreSQL")
 
     engine = create_engine(
-        target,
+        normalize_postgresql_url(target),
         pool_pre_ping=True,
         connect_args={"connect_timeout": 3},
     )
