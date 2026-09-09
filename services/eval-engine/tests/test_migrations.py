@@ -58,7 +58,8 @@ def test_database_major_version_matches_staging(isolated_pg):
         engine.dispose()
 
 
-def test_alembic_up_and_down_on_isolated_database(isolated_pg):
+@pytest.mark.parametrize("bare_url", [False, True])
+def test_alembic_up_and_down_on_isolated_database(isolated_pg, bare_url):
     from alembic import command
 
     _guard(MAINT_URL)
@@ -68,7 +69,7 @@ def test_alembic_up_and_down_on_isolated_database(isolated_pg):
         conn.execute(text(f'CREATE DATABASE "{db_name}"'))
     url = MAINT_URL.rsplit("/", 1)[0] + f"/{db_name}"
     old = os.environ.get("DATABASE_URL")
-    os.environ["DATABASE_URL"] = url
+    os.environ["DATABASE_URL"] = url.replace("postgresql+psycopg://", "postgresql://") if bare_url else url
     try:
         command.upgrade(_config(url), "head")
         engine = create_engine(url)

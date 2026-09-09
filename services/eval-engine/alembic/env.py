@@ -12,6 +12,7 @@ from sqlalchemy import create_engine
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from eval_engine.persistence.models import Base  # noqa: E402
+from eval_engine.persistence.db import normalize_postgresql_url
 
 config = context.config
 if config.config_file_name is not None:
@@ -27,7 +28,7 @@ def _database_url() -> str:
     scheme = urlparse(url).scheme.lower()
     if scheme not in {"postgresql", "postgresql+psycopg"}:
         raise RuntimeError(f"V4 migrations require PostgreSQL, got {scheme!r}")
-    return url
+    return normalize_postgresql_url(url)
 
 
 def run_migrations_offline() -> None:
