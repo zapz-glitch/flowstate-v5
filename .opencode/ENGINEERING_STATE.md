@@ -2,6 +2,17 @@
 
 ## Current objective
 
+Owner requested saving and pausing work; fix the remaining errors in a later
+session. Do not merge, deploy, or continue remediation during this pause.
+Implementation through e6879d2 is committed and pushed on v4-python. Staging
+remains running; no services or paid resources were stopped by this handoff.
+Owner mentioned a few errors but has not provided their specific symptoms here.
+Resume by collecting those symptoms and checking candidate CI run34414562541
+(last observed in progress), then address durable state hydration/restart recovery
+and the remaining failure/restore/rollback gates. Keep owner acceptance open.
+Generated dashboard next-env.d.ts, tsconfig.tsbuildinfo, AGENTS.md and CLAUDE.md
+remain preserved locally and unstaged. Credentials remain ignored, not in Git.
+
 Staging app connection and initial browser acceptance pass COMPLETE (agent tests,
 not owner approval). Login persists after reload; production API not called.
 Heritage job_1788994136273_ef2zqvpq:374k ARV/247k buy,1comp,9permits/6assets.
@@ -572,6 +583,18 @@ the checklist and approval evidence. Main, production and provider keys unchange
 - Main remains at its baseline; all changes reside on the V4 candidate.
 
 ## Last handoff
+
+PAUSED at owner request. All implementation is saved on v4-python through
+e6879d2; this handoff records the deferred work. Next session should first ask
+which app errors the owner observed, check the latest CI outcome, and resume
+the recorded readiness tasks. Do not infer approval to merge from this pause.
+No new tests were run during the save-only turn; previous evidence remains above.
+Main/production untouched; staging left running. Local generated files preserved.
+
+Candidate connection/fix committed and pushed as e6879d2. New CI run34414562541
+is in progress; do not claim it passed yet. Remote main verified unchanged at
+16f879adcd6b93a7daad815ea6efdde56c874b91. Latest code/config matches the staging
+deployment tested above; Render Python source remains9ba02f3 (unchanged backend).
 
 Staging app is live and agent-tested at https://staging.flowstate.homes. Login
 credentials in ignored0600 .data/local-candidate/staging-login.json. Browser
