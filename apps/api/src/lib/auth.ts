@@ -11,6 +11,7 @@
 import { betterAuth } from 'better-auth'
 import { Kysely } from 'kysely'
 import { D1Dialect } from 'kysely-d1'
+import { stagingAuthProfile } from './staging-auth'
 
 interface SmtpConfig {
   host?: string
@@ -99,9 +100,10 @@ export function createAuth(
   })
 
   // Determine the dashboard URL for reset links
-  const dashboardUrl = baseURL?.includes('localhost')
+  const staging = stagingAuthProfile(baseURL)
+  const dashboardUrl = envDashboardUrl || staging?.dashboardUrl || (baseURL?.includes('localhost')
     ? 'http://localhost:3000'
-    : (envDashboardUrl || 'https://app.flowstate.homes')
+    : 'https://app.flowstate.homes')
 
   return betterAuth({
     secret,
@@ -177,11 +179,14 @@ export function createAuth(
         maxAge: 60 * 5, // 5 minutes
       },
     },
-    trustedOrigins: [
-      'http://localhost:3000',
-      ...(envDashboardUrl ? [envDashboardUrl] : ['https://app.flowstate.homes']),
-    ],
+    trustedOrigins: envDashboardUrl
+      ? [envDashboardUrl]
+      : [dashboardUrl],
     advanced: {
+      // D1 rejects the Kysely pragma-table join used by runtime introspection.
+      // Schema compatibility is checked by migrations and local auth probes.
+      database: { validateSchema: false },
+      ...(staging ? { cookiePrefix: staging.cookiePrefix } : {}),
       // In production, use cross-subdomain cookies for .flowstate.homes
       // In development, use standard cookies with SameSite=Lax
       ...(baseURL?.includes('localhost')
@@ -196,7 +201,7 @@ export function createAuth(
         : {
             crossSubDomainCookies: {
               enabled: true,
-              domain: '.flowstate.homes',
+              domain: staging?.cookieDomain ?? '.flowstate.homes',
             },
           }),
     },

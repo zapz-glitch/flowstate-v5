@@ -10,7 +10,8 @@ WORKDIR /app
 # requirements.txt is the AUTHORITATIVE hashed lock (see requirements.in for
 # human-editable direct inputs). Installed with --require-hashes so any
 # tampering or drift fails the build.
-COPY requirements.txt .
+COPY bootstrap-requirements.txt requirements.txt ./
+RUN python -m pip install --no-cache-dir --only-binary=:all: --require-hashes -r bootstrap-requirements.txt
 RUN pip install --no-cache-dir --require-hashes -r requirements.txt
 COPY --chown=flowstate:flowstate alembic.ini ./
 COPY --chown=flowstate:flowstate alembic/ ./alembic/

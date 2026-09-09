@@ -49,6 +49,15 @@ def _config(url: str) -> Config:
     return cfg
 
 
+def test_database_major_version_matches_staging(isolated_pg):
+    engine = create_engine(MAINT_URL)
+    try:
+        with engine.connect() as conn:
+            assert int(conn.execute(text("SHOW server_version_num")).scalar()) // 10000 == 17
+    finally:
+        engine.dispose()
+
+
 def test_alembic_up_and_down_on_isolated_database(isolated_pg):
     from alembic import command
 

@@ -14,7 +14,10 @@
 
 import { analyzeComps, type CompEvalContext } from '../services/comp-analysis'
 import { fetchMarketContext, type MarketContext } from '../services/market-context'
-import { performAnalysis, type EvaluationParams } from '../services/evaluation'
+import { type EvaluationParams } from '../services/evaluation'
+import { evaluateConfigured } from '../services/evaluation/python'
+import { mergeComparablePools } from '../services/property-api/comparable-pool'
+import { verifyPropertyIdentity } from '../services/property-api/property-identity'
 import { detectOsmLocationRisks } from '../services/location-risk'
 import { createPropertyApi } from '../services/property-api'
 import { DEFAULT_FILTERS, type AppraisalFilter } from '../services/appraisal'
@@ -165,7 +168,9 @@ export class AnalysisJobDO {
     // ── Step 1: Search subject property ─────────────────────────────────────
     await this.pushEvent('property_fetch', { message: 'Searching property...' })
 
-    const searchResult = await propertyApi.searchProperty({
+    const searchResult = this.env.EVALUATION_ENGINE === 'python-v4' && config.search.propertyId
+      ? await propertyApi.getPropertyById(config.search.propertyId)
+      : await propertyApi.searchProperty({
       address: config.search.address,
       streetAddress: config.search.streetAddress,
       city: config.search.city,
@@ -180,6 +185,14 @@ export class AnalysisJobDO {
     }
 
     const property = searchResult.data
+    if (this.env.EVALUATION_ENGINE === 'python-v4') {
+      const identity = verifyPropertyIdentity(config.search, property, config.search.propertyId)
+      if (!identity.matched) {
+        await this.pushEvent('error', { step: 'property_fetch', message: identity.reason })
+        await this.pushEvent('enrichment_done', { totalDurationMs: Date.now() - startTime })
+        return
+      }
+    }
     console.log(`[AnalysisJobDO] ✓ Subject found: ${property.address} in ${Date.now() - startTime}ms`)
 
     // Stream subject immediately → dashboard shows map marker + subject card
@@ -214,31 +227,37 @@ export class AnalysisJobDO {
     await this.pushEvent('property_fetch', { message: 'Fetching comparables...' })
     const compsStart = Date.now()
 
-    const [compsResult, permitsResult, floodResult] = await Promise.all([
-      propertyApi.getComparables({
+    const comparablesParams = {
         propertyId: property.id,
         radiusMiles: config.searchOptions.radiusMiles ?? apiFilterParams.radiusMiles ?? 1,
-        maxComps: config.searchOptions.maxComps ?? 15,
-        monthsBack: config.searchOptions.monthsBack ?? apiFilterParams.monthsBack ?? 12,
+        maxComps: this.env.EVALUATION_ENGINE === 'python-v4' ? 50 : config.searchOptions.maxComps ?? 15,
+        monthsBack: this.env.EVALUATION_ENGINE === 'python-v4' ? 12 : config.searchOptions.monthsBack ?? apiFilterParams.monthsBack ?? 12,
         sqftVariance: apiFilterParams.sqftVariance,
         subjectSqft: property.squareFeet ?? undefined,
         subjectPropertyType: property.propertyType ?? undefined,
-      }),
+    }
+    const defaultComparablesParams = { propertyId: property.id, providerDefaults: true, maxComps: 50 }
+    const [compsResult, permitsResult, floodResult, nearbyResult] = await Promise.all([
+      propertyApi.getComparables(comparablesParams),
       (config.enrichment?.permits !== false)
         ? propertyApi.getBuildingPermits(property.id, { address1: property.address, address2: `${property.city}, ${property.state} ${property.zipCode}` }).catch(() => null)
         : Promise.resolve(null),
       (config.enrichment?.floodZone !== false && property.latitude && property.longitude)
         ? propertyApi.getFloodZone(property.latitude, property.longitude).catch(() => null)
         : Promise.resolve(null),
+      this.env.EVALUATION_ENGINE === 'python-v4' ? propertyApi.getComparables(defaultComparablesParams) : Promise.resolve(null),
     ])
 
-    if (!compsResult.success) {
+    if (!compsResult.success && !nearbyResult?.success) {
       await this.pushEvent('error', { step: 'comps_fetch', message: ('error' in compsResult ? compsResult.error : null) || 'Failed to fetch comparables' })
       await this.pushEvent('enrichment_done', { totalDurationMs: Date.now() - startTime })
       return
     }
 
-    const rawComps = compsResult.data.comparables
+    const pools = this.env.EVALUATION_ENGINE === 'python-v4'
+      ? mergeComparablePools(nearbyResult?.success ? nearbyResult.data.comparables : [], compsResult.success ? compsResult.data.comparables : [])
+      : { comparables: compsResult.success ? compsResult.data.comparables : [], conflictIds: [] }
+    const rawComps = pools.comparables
     console.log(`[AnalysisJobDO] ✓ ${rawComps.length} comps found in ${Date.now() - compsStart}ms`)
 
     // Stream comps immediately → dashboard shows map markers + basic comp cards
@@ -301,6 +320,15 @@ export class AnalysisJobDO {
     } : null
 
     const floodData = floodResult && 'success' in floodResult && floodResult.success ? floodResult.data : null
+    const evidenceLimitations: string[] = []
+    if (this.env.EVALUATION_ENGINE === 'python-v4' && (!nearbyResult?.success || !compsResult.success)) evidenceLimitations.push('One provider comparable pool was unavailable; evaluation uses the surviving pool and coverage may be incomplete')
+    for (const id of pools.conflictIds) evidenceLimitations.push(`${id}: Provider comparable pools disagree on the same sale date; price is quarantined from evaluation`)
+    if (!permitsData) evidenceLimitations.push(config.enrichment?.permits === false
+      ? 'Subject permits were not requested; system replacement evidence is unknown'
+      : 'Subject permit lookup failed or is unavailable; this does not mean no permits exist')
+    if (!floodData) evidenceLimitations.push(config.enrichment?.floodZone === false
+      ? 'Subject flood zone was not requested; flood risk is unknown'
+      : 'Subject flood-zone evidence is unavailable; this does not mean the property is outside a flood zone')
 
     const bundle: import('../services/property-api/types').PropertyBundle = {
       property,
@@ -309,10 +337,11 @@ export class AnalysisJobDO {
         fetchedAt: new Date().toISOString(),
         provider: property.provider,
         searchParams: config.search as import('../services/property-api/types').PropertySearchParams,
-        comparablesParams: { propertyId: property.id, radiusMiles: config.searchOptions.radiusMiles ?? 1, maxComps: config.searchOptions.maxComps ?? 15, monthsBack: config.searchOptions.monthsBack ?? 12 },
+        comparablesParams: { ...comparablesParams, ...(this.env.EVALUATION_ENGINE === 'python-v4' ? { additionalNearbyPool: defaultComparablesParams } : {}) },
         enrichmentOptions: { permits: config.enrichment?.permits ?? true, floodZone: config.enrichment?.floodZone ?? true, weatherRisk: false, neighbourhood: false },
       },
       enrichment: {
+        evidenceLimitations,
         permits,
         floodZone: floodData ?? null,
         weatherRisk: null,
@@ -335,7 +364,7 @@ export class AnalysisJobDO {
 
     let evalResult
     try {
-      evalResult = performAnalysis({ jobId: config.jobId, bundle, ...evalParams })
+      evalResult = await evaluateConfigured({ jobId: config.jobId, bundle, ...evalParams, userId: config.userId }, this.env)
     } catch (evalError) {
       const msg = evalError instanceof Error ? evalError.message : 'Evaluation failed'
       const code = (evalError as { code?: string })?.code
@@ -348,6 +377,9 @@ export class AnalysisJobDO {
         code,
         suggestedFilters,
         suggestedArvThreshold,
+        pythonEvaluation: (evalError as { pythonEvaluation?: unknown })?.pythonEvaluation,
+        evidenceRefresh: (evalError as { evidenceRefresh?: unknown })?.evidenceRefresh,
+        physicalEvidence: (evalError as { physicalEvidence?: unknown })?.physicalEvidence,
       })
       await this.pushEvent('enrichment_done', { totalDurationMs: Date.now() - startTime })
       return
@@ -358,9 +390,6 @@ export class AnalysisJobDO {
     // Rule-based comp selection stays intact — AI will override later if enabled
 
     console.log(`[AnalysisJobDO] ✓ Evaluation complete in ${Date.now() - evalStart}ms`)
-
-    // Stream full evaluation result → dashboard shows valuation + filtered comps immediately
-    await this.pushEvent('evaluation_complete', { updatedResult: analysisResult })
 
     // OSM location risks — fire-and-forget, push update when ready
     const osmPromise = (async () => {
@@ -380,13 +409,13 @@ export class AnalysisJobDO {
     try {
       const db = drizzle(this.env.DB)
       const subj = analysisResult.subject as Record<string, unknown>
-      const val = analysisResult.valuation as Record<string, unknown>
+      const val = analysisResult.valuation as Record<string, unknown> | null
       const reportData = {
         fullResponseJson: JSON.stringify(analysisResult),
-        arv: (val.arv as number) || 0,
-        asIsValue: (val.asIsValue as number) ?? null,
-        maxAllowableOffer: (val.buyPrice as number) || 0,
-        estimatedRepairs: (val.rehabCost as number) || 0,
+        arv: (val?.arv as number) ?? null,
+        asIsValue: (val?.asIsValue as number) ?? null,
+        maxAllowableOffer: (val?.buyPrice as number) ?? null,
+        estimatedRepairs: (val?.rehabCost as number) ?? null,
       }
 
       if (config.isRefresh) {
@@ -410,10 +439,16 @@ export class AnalysisJobDO {
       }
     } catch (dbError) {
       console.warn(`[AnalysisJobDO] Failed to save report:`, dbError instanceof Error ? dbError.message : dbError)
+      await this.pushEvent('error', { step: 'persistence', message: 'The evaluation could not be saved. Retry the analysis; no saved report is available for this run.' })
+      await this.pushEvent('enrichment_done', { totalDurationMs: Date.now() - startTime })
+      return
     }
 
+    // Private image access checks the saved report owner before serving any bytes.
+    await this.pushEvent('evaluation_complete', { updatedResult: analysisResult })
+
     // ── Step 5: LLM comp selection ──────────────────────────────────────────
-    if (config.llmEnabled) {
+    if (config.llmEnabled && analysisResult.evaluationEngine !== 'python-v4') {
       const llmStart = Date.now()
       try {
         await this.pushEvent('llm_started', { message: 'AI selecting best comps...', compCount: enrichedComps.length })
@@ -526,16 +561,17 @@ export class AnalysisJobDO {
       try {
         await this.pushEvent('evaluation_started', { message: 'Evaluating comparables...' })
 
-        const evalResult = performAnalysis({
+        const evalResult = await evaluateConfigured({
           jobId: config.jobId,
           bundle: config.bundle,
           ...config.evalParams,
-        })
+          userId: config.userId,
+        }, this.env)
 
         const updatedResponse = evalResult.response as unknown as Record<string, unknown>
 
         // If LLM will run, disable all comp selections — LLM decides final selection
-        if (config.pending.includes('llm')) {
+        if (config.pending.includes('llm') && updatedResponse.evaluationEngine !== 'python-v4') {
           const comps = updatedResponse.comps as Record<string, unknown> | undefined
           if (comps?.items && Array.isArray(comps.items)) {
             comps.items = comps.items.map((c: Record<string, unknown>) => ({ ...c, isEnabled: false }))
@@ -545,7 +581,6 @@ export class AnalysisJobDO {
         }
 
         config.analysisResult = updatedResponse
-        await this.pushEvent('evaluation_complete', { updatedResult: updatedResponse })
         console.log(`[AnalysisJobDO] ✓ Evaluation complete in ${Date.now() - evalStart}ms`)
 
         // OSM location risks — fire-and-forget, push update when ready
@@ -568,7 +603,7 @@ export class AnalysisJobDO {
           const db = drizzle(this.env.DB)
           const result = updatedResponse as Record<string, unknown>
           const subject = result.subject as Record<string, unknown>
-          const valuation = result.valuation as Record<string, unknown>
+          const valuation = result.valuation as Record<string, unknown> | null
           await db.insert(savedReports).values({
             userId: config.userId,
             jobId: config.jobId,
@@ -577,25 +612,27 @@ export class AnalysisJobDO {
             propertyState: (config.bundle.property.state) || '',
             propertyZip: (config.bundle.property.zipCode) || '',
             fullResponseJson: JSON.stringify(updatedResponse),
-            arv: (valuation.arv as number) || 0,
-            asIsValue: (valuation.asIsValue as number) ?? null,
-            maxAllowableOffer: (valuation.buyPrice as number) || 0,
-            estimatedRepairs: (valuation.rehabCost as number) || 0,
+            arv: (valuation?.arv as number) ?? null,
+            asIsValue: (valuation?.asIsValue as number) ?? null,
+            maxAllowableOffer: (valuation?.buyPrice as number) ?? null,
+            estimatedRepairs: (valuation?.rehabCost as number) ?? null,
           })
           console.log(`[AnalysisJobDO] Report saved for job ${config.jobId}`)
         } catch (dbError) {
           console.warn(`[AnalysisJobDO] Failed to save report:`, dbError instanceof Error ? dbError.message : dbError)
+          throw new Error('The evaluation could not be saved. Retry the analysis.')
         }
+        await this.pushEvent('evaluation_complete', { updatedResult: updatedResponse })
       } catch (error) {
         console.warn('[AnalysisJobDO] Evaluation error:', error instanceof Error ? error.message : error)
-        await this.pushEvent('error', { step: 'evaluation', message: error instanceof Error ? error.message : 'Evaluation failed' })
+        await this.pushEvent('error', { step: 'evaluation', message: error instanceof Error ? error.message : 'Evaluation failed', pythonEvaluation: (error as { pythonEvaluation?: unknown })?.pythonEvaluation })
       }
     }
 
     // Note: market_data step (Firecrawl/Zillow scraping) has been removed.
     // Property details are now sourced from CoreLogic enrichment.
     // Step B: LLM comp analysis (uses enriched data if market data ran first)
-    if (config.pending.includes('llm')) {
+    if (config.pending.includes('llm') && config.analysisResult.evaluationEngine !== 'python-v4') {
       const llmStart = Date.now()
       try {
         await this.pushEvent('llm_started', { message: 'AI analyzing comparables...', compCount: config.bundle.comparables.length })

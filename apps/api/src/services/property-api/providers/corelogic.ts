@@ -106,11 +106,16 @@ function parseAddress(fullAddress: string): ParsedAddress {
     ? cleaned.replace(/,?\s*\d{5}(?:-\d{4})?\s*$/, '').trim()
     : cleaned
 
-  // Extract state (2 letter code) - exclude common street suffixes
+  // Distinguish Connecticut from a Court suffix using a separate locality.
   const streetSuffixes = ['ST', 'AVE', 'BLVD', 'DR', 'RD', 'LN', 'WAY', 'CT', 'PL', 'CIR', 'TER', 'PKY', 'HWY']
+  const allSuffixes = [...streetSuffixes, 'STREET', 'AVENUE', 'BOULEVARD', 'DRIVE', 'ROAD', 'LANE', 'COURT', 'PLACE', 'CIRCLE', 'TERRACE', 'PARKWAY', 'HIGHWAY']
   const stateMatch = withoutZip.match(/[,\s]+([A-Z]{2})$/i)
   const potentialState = stateMatch?.[1]?.toUpperCase()
-  const state = potentialState && !streetSuffixes.includes(potentialState) ? potentialState : undefined
+  const beforeState = stateMatch ? withoutZip.slice(0, stateMatch.index).trim() : ''
+  const localityParts = beforeState.split(',').map(part => part.trim()).filter(Boolean)
+  const precedingWords = beforeState.split(/\s+/)
+  const hasSeparateLocality = localityParts.length >= 2 || precedingWords.some((word, index) => index > 1 && index < precedingWords.length - 1 && allSuffixes.includes(word.toUpperCase()))
+  const state = potentialState && (!streetSuffixes.includes(potentialState) || (potentialState === 'CT' && hasSeparateLocality)) ? potentialState : undefined
   const withoutState = state
     ? withoutZip.replace(/[,\s]+[A-Z]{2}$/i, '').trim()
     : withoutZip
@@ -130,7 +135,6 @@ function parseAddress(fullAddress: string): ParsedAddress {
   // Try to extract city from space-separated words after street suffix
   if ((state || zipCode) && parts.length === 1) {
     const words = parts[0].split(' ')
-    const allSuffixes = [...streetSuffixes, 'STREET', 'AVENUE', 'BOULEVARD', 'DRIVE', 'ROAD', 'LANE', 'COURT', 'PLACE', 'CIRCLE', 'TERRACE', 'PARKWAY', 'HIGHWAY']
 
     let splitIndex = -1
     for (let i = 0; i < words.length; i++) {
@@ -167,6 +171,7 @@ interface TokenCache {
 // ─── State (per isolate) ───────────────────────────────────────────────────────
 
 let tokenCache: TokenCache | null = null
+const rateLimitedUntil = new Map<string, number>()
 
 // ─── Authentication ────────────────────────────────────────────────────────────
 
@@ -187,6 +192,8 @@ async function getAccessToken(env: Env): Promise<string> {
 
   const response = await fetch(`${TOKEN_URL}?grant_type=client_credentials`, {
     method: 'POST',
+    signal: AbortSignal.timeout(10000),
+    redirect: 'manual',
     headers: {
       'Content-Type': 'application/x-www-form-urlencoded',
       Authorization: `Basic ${credentials}`,
@@ -248,8 +255,11 @@ async function request<T>(
   options?: {
     params?: Record<string, string | number | boolean | undefined>
     baseUrl?: string
+    strictNotFound?: boolean
   }
 ): Promise<T> {
+  const providerKey = env.CORELOGIC_CLIENT_ID ?? ''
+  if ((rateLimitedUntil.get(providerKey) ?? 0) > Date.now()) throw new Error('CoreLogic API rate limited; waiting for provider retry window')
   const token = await getAccessToken(env)
   const baseUrl = options?.baseUrl || BASE_URL
 
@@ -269,6 +279,8 @@ async function request<T>(
 
   const response = await fetch(url.toString(), {
     method: 'GET',
+    signal: AbortSignal.timeout(20000),
+    redirect: 'manual',
     headers: {
       Authorization: `Bearer ${token}`,
       Accept: 'application/json',
@@ -276,8 +288,10 @@ async function request<T>(
   })
 
   if (response.status === 429) {
-    // Clear token cache on rate limit in case token needs refresh
-    tokenCache = null
+    const retry = response.headers.get('Retry-After')
+    const seconds = retry && /^\d+$/.test(retry) ? Number(retry) : NaN
+    const retryAt = Number.isFinite(seconds) ? Date.now() + seconds * 1000 : retry ? Date.parse(retry) : NaN
+    rateLimitedUntil.set(providerKey, Math.max(Date.now() + 1000, Number.isFinite(retryAt) ? retryAt : Date.now() + 60000))
     throw new Error('CoreLogic API rate limited (429)')
   }
 
@@ -298,7 +312,7 @@ async function request<T>(
   }
 
   if (!response.ok) {
-    if (response.status === 404) {
+    if (response.status === 404 && !options?.strictNotFound) {
       return { items: [], property: null } as T
     }
     const body = await response.text()
@@ -521,9 +535,7 @@ interface RawPermit {
   areaSquareFeet?: number
 }
 
-interface RawPermitsResponse {
-  permits?: RawPermit[]
-}
+interface RawPermitsResponse { items?: Record<string, unknown>[] }
 
 interface RawFloodZoneResponse {
   floodHazardZone?: string
@@ -800,7 +812,7 @@ function normalizeComparable(raw: RawComparableProperty): NormalizedComparable {
   }
 }
 
-function normalizePermit(raw: RawPermit): NormalizedPermit {
+export function normalizePermit(raw: RawPermit): NormalizedPermit {
   return {
     permitId: raw.permitId || '',
     permitNumber: raw.permitNumber || null,
@@ -815,6 +827,34 @@ function normalizePermit(raw: RawPermit): NormalizedPermit {
     contractorName: raw.contractorName || null,
     areaSquareFeet: raw.areaSquareFeet || null,
   }
+}
+
+export function normalizeBuildingPermits(response: RawPermitsResponse): NormalizedPermit[] {
+  if (!Array.isArray(response.items)) throw new Error('INVALID_RESPONSE: Building permits items are missing')
+  const record = (value: unknown): Record<string, unknown> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
+  const string = (value: unknown): string | undefined => typeof value === 'string' ? value : undefined
+  const number = (value: unknown): number | undefined => typeof value === 'number' && Number.isFinite(value) ? value : undefined
+  return response.items.map(item => {
+    const permit = record(item.permit), project = record(item.project)
+    if (!Object.keys(permit).length) throw new Error('INVALID_RESPONSE: Building permit record is missing')
+    const statuses = Array.isArray(permit.buildingPermitStatus) ? permit.buildingPermitStatus.map(record) : []
+    const statusHistory = statuses.map(status => ({ status: string(status.status) ?? null, effectiveDate: parseCoreLogicDate(string(status.effectiveDate)) }))
+    const latest = [...statusHistory].filter(status => status.effectiveDate).sort((a, b) => b.effectiveDate!.localeCompare(a.effectiveDate!))[0]
+    const classifications = Array.isArray(project.buildingPermitClassifications) ? project.buildingPermitClassifications.map(record) : []
+    const contractors = Array.isArray(item.contractors) ? item.contractors.map(record) : []
+    return { ...normalizePermit({ permitId: string(permit.id), permitNumber: string(permit.number), status: latest?.status ?? string(permit.mostRecentStatusSource), effectiveDate: latest?.effectiveDate ?? undefined,
+      expirationDate: string(permit.expirationDate), projectType: string(project.type), projectCategory: string(project.subType),
+      classificationTypes: classifications.map(value => string(value.projectType)).filter((value): value is string => Boolean(value)),
+      description: string(project.description), jobValue: number(project.jobValue), areaSquareFeet: number(permit.areaSquareFeet),
+      contractorName: contractors.map(value => string(value.businessName)).filter(Boolean).join('; ') }),
+      statusHistory, source: 'corelogic:building-permits', raw: item }
+  })
+}
+
+function evidenceError(error: unknown, operation: string): { success: false; code: string; error: string } {
+  const message = error instanceof Error ? error.message : ''
+  const code = message.includes('ENTITLEMENTS_ERROR') ? 'ENTITLEMENTS_ERROR' : message.includes('INVALID_RESPONSE') ? 'INVALID_RESPONSE' : message.includes('404') ? 'NOT_FOUND' : 'API_ERROR'
+  return { success: false, code, error: `CoreLogic ${operation} unavailable (${code}); evidence is unknown` }
 }
 
 function normalizeFloodZone(raw: RawFloodZoneResponse): NormalizedFloodZone {
@@ -848,7 +888,7 @@ function getFloodZoneDescription(zone: string | null): string | null {
     V: 'High Risk - Coastal flooding with wave action',
     VE: 'High Risk - Coastal with base flood elevations',
     B: 'Moderate Risk - 500-year flood zone',
-    X: 'Minimal Risk - Outside 500-year flood zone',
+    X: 'Outside the Special Flood Hazard Area; moderate/minimal risk subdivision not provided',
     C: 'Minimal Risk - Outside 500-year flood zone',
     D: 'Undetermined Risk - No analysis performed',
   }
@@ -977,9 +1017,6 @@ class CoreLogicProvider implements PropertyProviderAdapter {
 
   async getComparables(params: ComparablesSearchParams): Promise<ComparablesSearchResponse> {
     try {
-      // Calculate min/max sqft if sqftVariance (percentage) and subjectSqft are provided
-      // Using minBldgSqFt/maxBldgSqFt instead of bldgSqFtVariance because
-      // the variance param doesn't work correctly in CoreLogic API
       let minBldgSqFt: number | undefined
       let maxBldgSqFt: number | undefined
       if (params.sqftVariance && params.subjectSqft) {
@@ -991,16 +1028,18 @@ class CoreLogicProvider implements PropertyProviderAdapter {
 
       const response = await request<RawComparablesResponse>(this.env, `/v2/properties/${params.propertyId}/comparables`, {
         params: {
-          // searchDistance: params.radiusMiles ?? 1,
           maxComps: params.maxComps ?? 25,
-          // monthsBack: params.monthsBack ?? 12,
-          // minBedrooms: params.minBeds,
-          // maxBedrooms: params.maxBeds,
-          // minBathrooms: params.minBaths,
-          // maxBathrooms: params.maxBaths,
-          // minBldgSqFt,
-          // maxBldgSqFt,
-          // sortBy: 'Distance',
+          ...(params.providerDefaults ? {} : {
+          searchDistance: params.radiusMiles ?? 0.5,
+          monthsBack: params.monthsBack ?? 12,
+          minBeds: params.minBeds,
+          maxBeds: params.maxBeds,
+          minBaths: params.minBaths,
+          maxBaths: params.maxBaths,
+          minBldgSqFt,
+          maxBldgSqFt,
+          sortBy: 'Sale_Date',
+          }),
         },
       })
 
@@ -1040,9 +1079,9 @@ class CoreLogicProvider implements PropertyProviderAdapter {
 
   async getBuildingPermits(propertyId: string): Promise<PermitsResponse> {
     try {
-      const response = await request<RawPermitsResponse>(this.env, `/v2/properties/${propertyId}/permits`)
+      const response = await request<RawPermitsResponse>(this.env, `/v2/properties/${propertyId}/building-permits`, { strictNotFound: true })
 
-      const permits = (response.permits || []).map(normalizePermit)
+      const permits = normalizeBuildingPermits(response)
 
       return {
         success: true,
@@ -1053,24 +1092,7 @@ class CoreLogicProvider implements PropertyProviderAdapter {
         },
       }
     } catch (error) {
-      // Handle entitlements error gracefully - permits are optional
-      if (error instanceof Error && error.message.includes('ENTITLEMENTS_ERROR')) {
-        console.log('Permits not available for this account, returning empty permits')
-        return {
-          success: true,
-          data: {
-            propertyId,
-            permits: [],
-            count: 0,
-          },
-        }
-      }
-
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Permits lookup failed',
-        code: 'API_ERROR',
-      }
+      return evidenceError(error, 'building permits')
     }
   }
 
@@ -1078,6 +1100,7 @@ class CoreLogicProvider implements PropertyProviderAdapter {
     try {
       const response = await request<RawFloodZoneResponse>(this.env, '/spatial-api/flood-zone-determination', {
         baseUrl: SPATIAL_URL,
+        strictNotFound: true,
         params: {
           latitude,
           longitude,
@@ -1085,27 +1108,15 @@ class CoreLogicProvider implements PropertyProviderAdapter {
         },
       })
 
+      const rawZone = response.floodZone ?? response.floodHazardZone
+      const zone = typeof rawZone === 'string' ? rawZone.trim().toUpperCase() : ''
+      if (!/^(A|AE|AH|AO|AR|A99|A(?:[1-9]|[12][0-9]|30)|V|VE|V(?:[1-9]|[12][0-9]|30)|B|C|X)$/.test(zone)) throw new Error('INVALID_RESPONSE: Flood zone is missing or undetermined')
       return {
         success: true,
-        data: normalizeFloodZone(response),
+        data: normalizeFloodZone({ ...response, floodZone: zone }),
       }
     } catch (error) {
-      // Flood zone is optional, return empty response on failure
-      return {
-        success: true,
-        data: {
-          floodZone: null,
-          floodZoneDescription: null,
-          isInFloodZone: false,
-          isNearFloodZone: false,
-          communityName: null,
-          communityNumber: null,
-          firmMapNumber: null,
-          mapPanel: null,
-          mapDate: null,
-          participationStatus: null,
-        },
-      }
+      return evidenceError(error, 'flood zone')
     }
   }
 

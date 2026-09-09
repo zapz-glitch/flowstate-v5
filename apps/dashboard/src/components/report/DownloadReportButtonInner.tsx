@@ -19,7 +19,32 @@ export default function DownloadReportButtonInner({
   const handleDownload = useCallback(async () => {
     setGenerating(true)
     try {
-      const blob = await pdf(<UnderwritingReportPDF {...reportProps} />).toBlob()
+      let unavailable = 0
+      let count = 0
+      const image = async (photos?: string[]) => {
+        const url = photos?.[0]
+        if (!url || !/^\/user\/reports\/[a-zA-Z0-9_-]+\/assets\/[a-f0-9-]{36}$/.test(url)) return []
+        if (++count > 20) { unavailable++; return [] }
+        try {
+          const response = await fetch(url, { credentials: 'include', redirect: 'error', signal: AbortSignal.timeout(15000) })
+          if (!response.ok) throw new Error('Private image unavailable')
+          const bytes = await response.blob()
+          if (bytes.size > 5 * 1024 * 1024 || !['image/jpeg', 'image/png'].includes(bytes.type)) throw new Error('Image format unavailable for PDF')
+          const encoded = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader()
+            reader.onload = () => resolve(String(reader.result))
+            reader.onerror = reject
+            reader.readAsDataURL(bytes)
+          })
+          return [encoded]
+        } catch { unavailable++; return [] }
+      }
+      const subject = reportProps.subject ? { ...reportProps.subject, photos: await image(reportProps.subject.photos) } : undefined
+      const items = []
+      for (const comp of reportProps.comps?.items ?? []) items.push({ ...comp, photos: comp.isEnabled ? await image(comp.photos) : [] })
+      const prepared = { ...reportProps, subject, comps: reportProps.comps ? { ...reportProps.comps, items } : undefined,
+        riskFlags: [...(reportProps.riskFlags ?? []), ...(unavailable ? [`${unavailable} private report image(s) unavailable during PDF export`] : [])] }
+      const blob = await pdf(<UnderwritingReportPDF {...prepared} />).toBlob()
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url

@@ -345,10 +345,42 @@ def test_disconnect_commit_visibility_then_worker_processes(client, api_engine):
     for item in created.json()["evaluations"]:
         got = client.get(f"/v1/evaluations/{item['evaluation_id']}", headers=_auth(TOKEN_A1))
         payload = got.json()
-        assert payload["status"] == "COMPLETED"
+        assert payload["status"] == "REVIEW_REQUIRED"
         assert payload["result"] is not None
+        assert payload["result"]["arv"]["status"] == "PRELIMINARY"
+        assert payload["result"]["arv"]["accepted_comp_ids"] == ["c1"]
+        assert payload["result"]["arv"]["final_arv"] == "590000"
         assert payload["result"]["settings_snapshot_id"]
         assert payload["result"]["settings_content_hash"]
+
+
+@pytest.mark.parametrize("selection,expected_ids,expected_arv", [
+    (["c2"], ["c2"], "580000"),
+    (None, ["c1"], "590000"),
+])
+def test_durable_manual_selection_and_reset(client, api_engine, selection, expected_ids, expected_arv):
+    key = f"manual-{uuid.uuid4().hex}"
+    body = _body(1, key_prefix=key)
+    body["evaluations"][0]["selected_comp_ids"] = selection
+    created = _post(client, TOKEN_A1, body, key)
+    assert created.status_code == 202, created.text
+    batch = created.json()
+    assert _process(api_engine, TENANT_A, USER_A1, batch["batch_id"]) == 1
+    response = client.get(f"/v1/evaluations/{batch['evaluations'][0]['evaluation_id']}", headers=_auth(TOKEN_A1))
+    assert response.status_code == 200
+    arv = response.json()["result"]["arv"]
+    assert arv["accepted_comp_ids"] == expected_ids
+    assert arv["final_arv"] == expected_arv
+
+
+@pytest.mark.parametrize("selection", [[], ["c1", "c1"], [" "]])
+def test_durable_invalid_selection_has_no_writes(client, api_engine, selection):
+    before = _count_batches(api_engine)
+    key = f"invalid-manual-{uuid.uuid4().hex}"
+    body = _body(1, key_prefix=key)
+    body["evaluations"][0]["selected_comp_ids"] = selection
+    assert _post(client, TOKEN_A1, body, key).status_code == 422
+    assert _count_batches(api_engine) == before
 
 
 def test_no_provider_calls_in_request_path(client, monkeypatch):
@@ -364,3 +396,59 @@ def test_no_provider_calls_in_request_path(client, monkeypatch):
     resp = _post(client, TOKEN_A1, _body(1, key_prefix=f"np-{key}"), key)
     assert resp.status_code == 202
     assert resp.json()["evaluations"][0]["status"] == "QUEUED"
+
+
+def test_typescript_hosted_adapter_with_real_http_worker(api_engine, monkeypatch):
+    import pathlib
+    import socket
+    import subprocess
+    import threading
+    import time
+    import uvicorn
+    from datetime import timedelta
+    from eval_engine.worker import Worker, WorkerConfig
+
+    token = "synthetic-http-integration-credential-0001"
+    tenant, user = f"http-{uuid.uuid4().hex}", "http-user"
+    monkeypatch.setenv("V4_API_CREDENTIALS", json.dumps([
+        {"tenant_id": tenant, "user_id": user, "token_sha256": _h(token)},
+    ]))
+    monkeypatch.setenv("V4_TEST_PROFILE", "false")
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    port = listener.getsockname()[1]
+    server = uvicorn.Server(uvicorn.Config(app, log_level="error", lifespan="off"))
+    server_thread = threading.Thread(target=server.run, kwargs={"sockets": [listener]}, daemon=True)
+    worker = Worker(sessionmaker(bind=api_engine, expire_on_commit=False), WorkerConfig(
+        tenant_id=tenant, requested_by_user_id=user, lease_owner="http-worker",
+        poll_interval=timedelta(seconds=0.02), external_calls_enabled=False,
+    ))
+    worker_thread = threading.Thread(target=worker.run, daemon=True)
+    server_thread.start()
+    worker_thread.start()
+    try:
+        deadline = time.monotonic() + 5
+        while not server.started and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert server.started
+        body = _body(1)
+        evidence = dict(body["evaluations"][0])
+        evidence.pop("idempotency_key")
+        evidence["subject"]["year_built"] = 2000
+        for comp in evidence["comps"]:
+            comp["year_built"] = 2000
+        evidence.update(settings=body["settings"], methodology_version="evaluation-v4")
+        root = pathlib.Path(__file__).resolve().parents[3]
+        run = subprocess.run(["node", "--import", "tsx", "apps/api/tests/python-hosted-http.ts"],
+            cwd=root, input=json.dumps({"localOrigin": f"http://127.0.0.1:{port}",
+                "token": token, "tenant": tenant, "user": user, "request": evidence}),
+            text=True, capture_output=True, timeout=45)
+        assert run.returncode == 0, run.stdout + run.stderr
+    finally:
+        worker.request_stop()
+        server.should_exit = True
+        worker_thread.join(timeout=10)
+        server_thread.join(timeout=10)
+        listener.close()
+        assert not worker_thread.is_alive()
+        assert not server_thread.is_alive()

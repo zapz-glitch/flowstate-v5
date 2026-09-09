@@ -123,6 +123,7 @@ function buildEvalContexts(items: Array<Record<string, unknown>>): CompEvalConte
 app.post('/analyze', async (c) => {
   const session = await getSession(c)
   if (!session?.user) return c.json({ error: 'Not authenticated' }, 401)
+  if (c.env.EVALUATION_ENGINE === 'python-v4') return c.json({ error: 'Python V4 selects comparables on the server. Run a new analysis to apply its rules.' }, 409)
 
   const body = await c.req.json<CompSelectionRequest>()
 

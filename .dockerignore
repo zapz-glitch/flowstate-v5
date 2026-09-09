@@ -18,6 +18,20 @@
 *.dev.vars.*
 apps/dashboard/.env.development
 apps/dashboard/.env.production
+**/.env
+**/.env.*
+**/.dev.vars
+**/.dev.vars.*
+**/*.dev.vars
+**/*.dev.vars.*
+**/*.env
+!**/.env.example
+**/.data/
+**/.wrangler/
+**/node_modules/
+**/.next/
+**/.open-next/
+**/.venv/
 
 # VCS and editor state.
 .git

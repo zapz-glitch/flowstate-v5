@@ -9,6 +9,7 @@ import { DealSummaryHero } from './DealSummaryHero'
 import { MarketContextCard } from './MarketContextCard'
 import { SubjectGridCard } from './SubjectGridCard'
 import { PhotoGallery } from './PhotoGallery'
+import { InvestorAnalysisSummary } from './InvestorAnalysisSummary'
 
 // ─── Analysis Result Layout ──────────────────────────────────────────────────
 
@@ -51,7 +52,7 @@ export function AnalysisResultLayout({
   return (
     <>
       {/* Subject property */}
-      {subject && <SubjectGridCard subject={subject} />}
+      {subject && <SubjectGridCard subject={subject} isLoading={isStreaming} />}
 
       {/* Valuation panel — sticky so it's always visible while scrolling comps */}
       {valuation ? (
@@ -79,6 +80,8 @@ export function AnalysisResultLayout({
           </div>
         </div>
       ) : null}
+
+      <InvestorAnalysisSummary analysis={valuation?.investorAnalysis} />
 
       {/* Market Research — collapsed by default */}
       {marketContext && (

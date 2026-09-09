@@ -1,6 +1,9 @@
 import React from 'react'
+import { formatRuleMatch, formatComparisonDetails } from '@/components/analysis/rule-match'
+import { formatHeadlineMoney } from '@/components/analysis/headline-money'
 import {
   Document,
+  Image,
   Page,
   Text,
   View,
@@ -376,6 +379,7 @@ export function UnderwritingReportPDF({
 
         {/* ── Subject Property ─────────────────────────────── */}
         <SectionTitle>Subject Property</SectionTitle>
+        {subject?.photos?.[0]?.startsWith('data:image/') && <Image src={subject.photos[0]} style={{ width: 180, height: 110, objectFit: 'contain', marginBottom: 8 }} />}
 
         <Text style={{ fontSize: 13, fontFamily: 'Helvetica-Bold', marginBottom: 4 }}>
           {address}
@@ -428,18 +432,19 @@ export function UnderwritingReportPDF({
         {/* ── Valuation Summary ────────────────────────────── */}
         <View style={s.sectionMargin}>
           <SectionTitle>Valuation Summary</SectionTitle>
+          {!valuation && <Text style={s.tableCell}>Valuation unavailable. Review the report limitations before using these comparables.</Text>}
         </View>
 
         <View style={s.valGrid}>
           <ValuationCell
             label="After Repair Value (ARV)"
-            value={fmt(valuation?.arv)}
+            value={`$${formatHeadlineMoney(valuation?.arv, valuation?.displayedArv, valuation?.displayRounding)}`}
             sub={valuation?.arvPerSqft != null ? `${fmt(valuation.arvPerSqft)}/sqft` : undefined}
             color={C.primary}
           />
           <ValuationCell
             label="Max Buy Price"
-            value={fmt(valuation?.buyPrice)}
+            value={`$${formatHeadlineMoney(valuation?.buyPrice, valuation?.displayedBuyPrice, valuation?.displayRounding)}`}
             sub={valuation?.buyPricePercent ? `${valuation.buyPricePercent}% of ARV` : undefined}
           />
           <ValuationCell
@@ -468,7 +473,7 @@ export function UnderwritingReportPDF({
         {valuation?.wholesalePrice != null && (
           <View style={[s.infoRow, s.mt8]}>
             <Text style={s.infoLabel}>Wholesale Price</Text>
-            <Text style={s.infoValue}>{fmt(valuation.wholesalePrice)}</Text>
+            <Text style={s.infoValue}>${formatHeadlineMoney(valuation.wholesalePrice, valuation.displayedWholesalePrice, valuation.displayRounding)}</Text>
           </View>
         )}
 
@@ -516,6 +521,20 @@ export function UnderwritingReportPDF({
                 <Text style={[s.tableCell, { width: '14%', textAlign: 'right' }]}>{fmtPct(est.projectedROI)}</Text>
               </View>
             ))}
+          </View>
+        )}
+
+        {valuation?.investorAnalysis && (
+          <View style={s.sectionMargin}>
+            <SectionTitle>As-is / investor analysis</SectionTitle>
+            <Text style={s.tableCell}>{valuation.investorAnalysis.methodLabel}</Text>
+            <Text style={s.tableCell}>
+              {valuation.investorAnalysis.value != null && Number.isFinite(valuation.investorAnalysis.value)
+                ? `${fmt(valuation.investorAnalysis.value)} estimated as-is value`
+                : 'As-is value not available'}
+            </Text>
+            <Text style={s.tableCell}>{valuation.investorAnalysis.status.replaceAll('_', ' ')} · {valuation.investorAnalysis.sampleCount} investor cohort comparables</Text>
+            {valuation.investorAnalysis.limitations.map((limitation, index) => <Text key={index} style={s.tableCell}>{limitation}</Text>)}
           </View>
         )}
 
@@ -593,7 +612,12 @@ export function UnderwritingReportPDF({
           {enabledComps.map((comp, i) => (
             <View key={i} style={[s.tableRow, i % 2 === 1 ? s.tableRowAlt : {}]} wrap={false}>
               <Text style={[s.tableCell, { width: '4%', color: C.muted }]}>{i + 1}</Text>
-              <Text style={[s.tableCellBold, { width: '26%' }]}>{comp.address ?? '-'}</Text>
+              <Text style={[s.tableCellBold, { width: '26%' }]}>
+                {comp.address ?? '-'}
+                {formatRuleMatch(comp) ? `\n${formatRuleMatch(comp)}` : ''}
+                {comp.priorityRank != null ? `\nMatch rank #${comp.priorityRank}` : ''}
+                {formatComparisonDetails(comp).map(detail => `\n${detail}`).join('')}
+              </Text>
               <Text style={[s.tableCell, { width: '12%', textAlign: 'right' }]}>{fmt(comp.salePrice)}</Text>
               <Text style={[s.tableCell, { width: '12%', textAlign: 'right', color: C.green }]}>
                 {comp.adjustedPrice ? fmt(comp.adjustedPrice) : '-'}
@@ -617,6 +641,13 @@ export function UnderwritingReportPDF({
             </View>
           ))}
 
+          {enabledComps.filter(comp => comp.photos?.[0]?.startsWith('data:image/')).map((comp, index) => (
+            <View key={`photo-${index}`} style={{ marginTop: 8 }} wrap={false}>
+              <Text style={s.tableCell}>{comp.address}</Text>
+              <Image src={comp.photos![0]} style={{ width: 180, height: 110, objectFit: 'contain' }} />
+            </View>
+          ))}
+
           {/* Excluded comps */}
           {excludedComps.length > 0 && (
             <View style={s.sectionMargin}>
@@ -625,7 +656,12 @@ export function UnderwritingReportPDF({
               </Text>
               {excludedComps.map((comp, i) => (
                 <View key={i} style={[s.tableRow, i % 2 === 1 ? s.tableRowAlt : {}]} wrap={false}>
-                  <Text style={[s.tableCell, { width: '40%', color: C.muted }]}>{comp.address ?? '-'}</Text>
+                  <Text style={[s.tableCell, { width: '40%', color: C.muted }]}>
+                    {comp.address ?? '-'}
+                    {formatRuleMatch(comp) ? `\n${formatRuleMatch(comp)}` : ''}
+                    {comp.priorityRank != null ? `\nMatch rank #${comp.priorityRank}` : ''}
+                    {formatComparisonDetails(comp).map(detail => `\n${detail}`).join('')}
+                  </Text>
                   <Text style={[s.tableCell, { width: '20%', textAlign: 'right', color: C.muted }]}>{fmt(comp.salePrice)}</Text>
                   <Text style={[s.tableCell, { width: '40%', color: C.light }]}>
                     {comp.disableReasons?.join(', ') || 'Excluded'}

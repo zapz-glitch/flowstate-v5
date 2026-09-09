@@ -151,7 +151,8 @@ analyze.post('/', async (c) => {
       );
     }
 
-    const jobId = body.existingJobId || generateJobId();
+    const isRefresh = c.env.EVALUATION_ENGINE !== 'python-v4' && !!body.existingJobId;
+    const jobId = isRefresh ? body.existingJobId! : generateJobId();
 
     // ─── 1. Load user settings ───────────────────────────────────────────────
     const settingsStart = Date.now();
@@ -231,8 +232,8 @@ analyze.post('/', async (c) => {
             body.asIsThresholdPercent ?? userSettings.asIsThresholdPercent,
         },
         llmEnabled:
-          body.llmAnalysis?.enabled === true && !!c.env.OPENROUTER_API_KEY,
-        isRefresh: !!body.existingJobId,
+          c.env.EVALUATION_ENGINE !== 'python-v4' && body.llmAnalysis?.enabled === true && !!c.env.OPENROUTER_API_KEY,
+        isRefresh,
         llmOptions: {
           includePhotos: body.llmAnalysis?.includePhotos,
           compSelectionModel: validateModel(

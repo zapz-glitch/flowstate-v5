@@ -5,12 +5,14 @@ import type { SubjectData } from './shared-types'
 import { StreetViewImage } from './StreetViewImage'
 import { AddressDisplay } from './AddressDisplay'
 import { formatShortDate } from './format-helpers'
+import { PropertyPermits } from './PropertyPermits'
 
 interface SubjectGridCardProps {
   subject: SubjectData
+  isLoading?: boolean
 }
 
-export function SubjectGridCard({ subject }: SubjectGridCardProps) {
+export function SubjectGridCard({ subject, isLoading }: SubjectGridCardProps) {
   return (
     <div data-card-key="subject" className="border border-primary/30 rounded-sm overflow-hidden bg-primary/[0.02]">
       {/* Body: Image left + Details right */}
@@ -18,6 +20,7 @@ export function SubjectGridCard({ subject }: SubjectGridCardProps) {
         {/* Image with subject badge overlay */}
         <div className="relative w-full sm:w-56 h-28 sm:h-auto flex-shrink-0 bg-muted/30 overflow-hidden">
           <StreetViewImage
+            photos={subject.photos}
             address={subject.address}
             latitude={subject.latitude}
             longitude={subject.longitude}
@@ -101,6 +104,7 @@ export function SubjectGridCard({ subject }: SubjectGridCardProps) {
                 <span className="font-medium">{subject.carport ? 'Yes' : '-'}</span>
               </div>
             </div>
+            <PropertyPermits permits={subject.permits} loading={isLoading} />
           </div>
         </div>
       </div>

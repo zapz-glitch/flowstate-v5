@@ -21,6 +21,7 @@ export interface PropertySearchParams {
 }
 
 export interface ComparablesSearchParams {
+  providerDefaults?: boolean
   /** Property ID (CLIP for CoreLogic, ATTOM ID for ATTOM) */
   propertyId: string
   /** Search radius in miles (default: 1) */
@@ -231,6 +232,9 @@ export interface NormalizedComparable {
 // ─── Normalized Permit ──────────────────────────────────────────────────────
 
 export interface NormalizedPermit {
+  statusHistory?: { status: string | null; effectiveDate: string | null }[]
+  source?: string
+  raw?: unknown
   permitId: string
   permitNumber: string | null
   status: string | null
@@ -418,6 +422,7 @@ export interface PermitsEnrichment {
 }
 
 export interface EnrichmentData {
+  evidenceLimitations?: string[]
   permits: PermitsEnrichment | null
   floodZone: NormalizedFloodZone | null
   weatherRisk: WeatherRisk | null

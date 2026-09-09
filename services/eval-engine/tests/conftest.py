@@ -56,7 +56,7 @@ DEFAULT_MAINT_URL = (
     "postgresql+psycopg://v4test:v4testpw@127.0.0.1:55440/v4test"
 )
 TEST_CONTAINER = "v4-persist-pg-102"
-TEST_IMAGE = "postgres:16-alpine"
+TEST_IMAGE = "postgres:17-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73"
 # Ownership label applied at `docker run` so teardown can prove a
 # same-name container is really harness-owned before removing it.
 HARNESS_LABEL = "flowstate.v4.harness"

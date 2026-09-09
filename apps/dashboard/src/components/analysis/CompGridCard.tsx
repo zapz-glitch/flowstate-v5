@@ -4,6 +4,7 @@ import { Check, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { CompItem, SubjectData } from './shared-types'
 import { StreetViewImage } from './StreetViewImage'
+import { RuleMatchDetails } from './RuleMatchDetails'
 import { normalizeSubdivision, sqftMatchColor, yearMatchColor, fmtDelta, formatShortDate } from './format-helpers'
 
 export interface CompGridCardProps {
@@ -70,6 +71,7 @@ export function CompGridCard({
         {streetViewUrl ? (
           <a href={streetViewUrl} target="_blank" rel="noopener noreferrer" className="block w-full h-full">
             <StreetViewImage
+              photos={comp.photos}
               address={comp.address}
               latitude={comp.latitude}
               longitude={comp.longitude}
@@ -80,6 +82,7 @@ export function CompGridCard({
           </a>
         ) : (
           <StreetViewImage
+            photos={comp.photos}
             address={comp.address}
             latitude={comp.latitude}
             longitude={comp.longitude}
@@ -112,14 +115,19 @@ export function CompGridCard({
             type="button"
             onClick={(e) => { e.stopPropagation(); onToggleArv() }}
             title={isSelectedForArv ? 'Remove from ARV' : 'Add to ARV'}
-            className={cn(
-              'absolute top-2 right-2 w-5 h-5 rounded-sm border-2 flex items-center justify-center transition-all',
+            aria-label={comp.selectionPending ? 'Updating ARV selection' : isSelectedForArv ? 'Remove from ARV' : 'Add to ARV'}
+            aria-pressed={isSelectedForArv}
+            disabled={comp.selectionPending}
+            className="absolute top-0 right-0 w-11 h-11 flex items-center justify-center disabled:cursor-wait"
+          >
+            <span className={cn(
+              'w-5 h-5 rounded-sm border-2 flex items-center justify-center transition-all',
               isSelectedForArv
                 ? 'bg-emerald-500 border-emerald-500 text-white'
                 : 'border-white/50 bg-black/30 text-white/50 hover:border-emerald-400'
-            )}
-          >
-            <Check className="w-3 h-3" />
+            )}>
+              <Check className="w-3 h-3" />
+            </span>
           </button>
         )}
       </div>
@@ -187,6 +195,8 @@ export function CompGridCard({
             <span className="text-[10px] font-medium text-emerald-500 tabular-nums ml-auto">Adj ${comp.adjustedPrice.toLocaleString()}</span>
           )}
         </div>
+
+        <RuleMatchDetails comp={comp} />
 
         {/* Stats grid — 2 columns */}
         <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 mt-2">

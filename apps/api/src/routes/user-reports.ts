@@ -12,8 +12,54 @@ import type { Env } from '../types'
 import { getSession } from '../lib/session'
 import { savedReports, reportHistory } from '../db/schema'
 import { hashSharePassword } from '../lib/share-token'
+import { bodyLimit } from 'hono/body-limit'
+import { recalculatePythonReport } from '../services/evaluation/python'
+import { deleteReportAssets } from '../services/report-assets'
 
 const userReports = new Hono<{ Bindings: Env }>()
+
+userReports.post('/:jobId/comps', bodyLimit({ maxSize: 20000 }), async (c) => {
+  const session = await getSession(c)
+  if (!session?.user) return c.json({ error: 'Not authenticated' }, 401)
+  const origin = c.req.header('Origin')
+  if (!c.env.DASHBOARD_URL || origin !== new URL(c.env.DASHBOARD_URL).origin) return c.json({ error: 'Untrusted origin' }, 403)
+  if (!c.req.header('Content-Type')?.toLowerCase().startsWith('application/json')) return c.json({ error: 'JSON request required' }, 415)
+  const body = await c.req.json().catch(() => null)
+  if (!body || typeof body !== 'object' || Array.isArray(body) ||
+      Object.keys(body).some(key => !['selectedCompIds', 'expectedRevision'].includes(key)) ||
+      !Number.isSafeInteger(body.expectedRevision) || body.expectedRevision < 0 ||
+      !(body.selectedCompIds === null || (Array.isArray(body.selectedCompIds) && body.selectedCompIds.length > 0 && body.selectedCompIds.length <= 500 &&
+        body.selectedCompIds.every((id: unknown) => typeof id === 'string' && id.length > 0 && id.length <= 128) && new Set(body.selectedCompIds).size === body.selectedCompIds.length))) {
+    return c.json({ error: 'Provide at least one unique comparable ID (or null to reset) and the current revision' }, 400)
+  }
+  const jobId = c.req.param('jobId')
+  const db = drizzle(c.env.DB)
+  const [report] = await db.select().from(savedReports)
+    .where(and(eq(savedReports.jobId, jobId), eq(savedReports.userId, session.user.id))).limit(1)
+  if (!report) return c.json({ error: 'Report not found' }, 404)
+  let saved
+  try { saved = JSON.parse(report.fullResponseJson ?? '{}') } catch { return c.json({ error: 'Report data is corrupted' }, 409) }
+  if ((saved.evaluationRevision ?? 0) !== body.expectedRevision) return c.json({ error: 'This report changed. Reload it before editing comparables.' }, 409)
+  let analysis
+  try {
+    analysis = await recalculatePythonReport(saved, jobId, body.selectedCompIds, c.env, session.user.id)
+  } catch (error) {
+    if ((error as { status?: number }).status === 409) return c.json({ error: (error as Error).message }, 409)
+    if ((error as { status?: number }).status === 422) return c.json({ error: (error as Error).message }, 422)
+    return c.json({ error: 'Python could not recalculate this selection. The saved report was not changed.' }, 502)
+  }
+  const nextJson = JSON.stringify(analysis)
+  const changes = JSON.stringify({ actor: session.user.id, before: saved, after: analysis })
+  const description = body.selectedCompIds === null ? 'Restored Python automatic comparable selection' : `Python recalculated ${body.selectedCompIds.length} operator-selected comparables`
+  const results = await c.env.DB.batch([
+    c.env.DB.prepare('INSERT INTO report_history (id, report_id, user_id, action, description, changes_json, created_at) SELECT ?, id, user_id, ?, ?, ?, ? FROM saved_reports WHERE id = ? AND user_id = ? AND full_response_json = ?')
+      .bind(crypto.randomUUID(), 'python_comp_selection', description, changes, new Date().toISOString(), report.id, session.user.id, report.fullResponseJson),
+    c.env.DB.prepare('UPDATE saved_reports SET full_response_json = ?, valuation_data = ?, comparables_data = ?, arv = ?, as_is_value = ?, max_allowable_offer = ?, estimated_repairs = ? WHERE id = ? AND user_id = ? AND full_response_json = ?')
+      .bind(nextJson, JSON.stringify(analysis.valuation), JSON.stringify(analysis.comps), analysis.valuation?.arv ?? null, analysis.valuation?.asIsValue ?? null, analysis.valuation?.buyPrice ?? null, analysis.valuation?.rehabCost ?? null, report.id, session.user.id, report.fullResponseJson),
+  ])
+  if (results[1].meta.changes !== 1) return c.json({ error: 'This report changed. Reload it before editing comparables.' }, 409)
+  return c.json({ analysis })
+})
 
 // ─── GET /user/reports ────────────────────────────────────────────────────────
 
@@ -128,6 +174,7 @@ userReports.get('/:jobId/history', async (c) => {
 
   if (!report) return c.json({ error: 'Report not found' }, 404)
 
+
   const history = await db.select()
     .from(reportHistory)
     .where(eq(reportHistory.reportId, report.id))
@@ -161,6 +208,7 @@ userReports.post('/:jobId/history', async (c) => {
   if (!body.action || !body.description) {
     return c.json({ error: 'action and description required' }, 400)
   }
+  if (body.action.startsWith('python_')) return c.json({ error: 'Reserved server history action' }, 400)
 
   const db = drizzle(c.env.DB)
 
@@ -198,15 +246,27 @@ userReports.put('/:jobId', async (c) => {
     historyDescription?: string
     historyChanges?: unknown
   }
+  if (body.historyAction?.startsWith('python_')) return c.json({ error: 'Reserved server history action' }, 400)
 
   const db = drizzle(c.env.DB)
 
-  const [report] = await db.select({ id: savedReports.id })
+  const [report] = await db.select({ id: savedReports.id, fullResponseJson: savedReports.fullResponseJson })
     .from(savedReports)
     .where(and(eq(savedReports.jobId, jobId), eq(savedReports.userId, session.user.id)))
     .limit(1)
 
   if (!report) return c.json({ error: 'Report not found' }, 404)
+  if (JSON.parse(report.fullResponseJson || '{}').evaluationEngine === 'python-v4') {
+    return c.json({ error: 'Python V4 reports are server-authored. Run a new analysis to change valuation inputs.' }, 409)
+  }
+  if (body.fullResponseJson !== undefined) {
+    try {
+      const incoming = JSON.parse(body.fullResponseJson)
+      if (incoming?.evaluationEngine === 'python-v4' || incoming?.pythonRequest || incoming?.pythonRequestSignature) {
+        return c.json({ error: 'Python evaluation snapshots can only be created by the server' }, 400)
+      }
+    } catch { return c.json({ error: 'Invalid report JSON' }, 400) }
+  }
 
   // Update report data
   const updates: Record<string, unknown> = {}
@@ -373,7 +433,7 @@ userReports.delete('/:jobId', async (c) => {
   const db = drizzle(c.env.DB)
 
   const report = await db
-    .select({ id: savedReports.id, userId: savedReports.userId })
+    .select({ id: savedReports.id, userId: savedReports.userId, fullResponseJson: savedReports.fullResponseJson })
     .from(savedReports)
     .where(eq(savedReports.jobId, jobId))
     .limit(1)
@@ -383,7 +443,13 @@ userReports.delete('/:jobId', async (c) => {
     return c.json({ error: 'Report not found' }, 404)
   }
 
-  await db.delete(savedReports).where(eq(savedReports.id, report.id))
+  try {
+    const saved = JSON.parse(report.fullResponseJson ?? '{}')
+    await deleteReportAssets(c.env, jobId, Array.isArray(saved.reportAssets) && saved.reportAssets.length > 0)
+  } catch {
+    return c.json({ error: 'Report cleanup incomplete. The report was retained; retry deletion.', retriable: true }, 503)
+  }
+  await db.delete(savedReports).where(and(eq(savedReports.id, report.id), eq(savedReports.userId, session.user.id)))
 
   return c.json({ success: true })
 })

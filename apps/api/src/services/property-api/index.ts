@@ -359,6 +359,7 @@ class PropertyApi implements PropertyApiService {
       params.radiusMiles,
       params.monthsBack,
       provider.name,
+      { ...params },
     );
     if (!this._skipCache) {
       const cached = await this.cache.get<ComparablesResult['data']>(cacheKey);
@@ -669,8 +670,7 @@ class PropertyApi implements PropertyApiService {
     let permits: PermitsEnrichment | null = null;
     if (
       permitsResult &&
-      permitsResult.success &&
-      permitsResult.data.permits.length > 0
+      permitsResult.success
     ) {
       const permitItems = permitsResult.data.permits;
       permits = {
@@ -697,6 +697,10 @@ class PropertyApi implements PropertyApiService {
       : null;
 
     const enrichment: EnrichmentData = {
+      evidenceLimitations: [
+        ...(permitsResult && !permitsResult.success ? [`Building permit evidence unavailable (${permitsResult.code ?? 'API_ERROR'}); permit history is unknown`] : []),
+        ...(floodResult && !floodResult.success ? [`Flood zone evidence unavailable (${floodResult.code ?? 'API_ERROR'}); flood risk is unknown`] : []),
+      ],
       permits,
       floodZone,
       weatherRisk,
@@ -781,6 +785,10 @@ class PropertyApi implements PropertyApiService {
                 : undefined;
               return {
                 ...comp,
+                raw: {
+                  ...(comp.raw && typeof comp.raw === 'object' ? comp.raw : {}),
+                  enrichment: result.data.raw,
+                },
                 subdivision: result.data.subdivision ?? null,
                 construction,
                 transaction: result.data.transaction ? {

@@ -11,6 +11,7 @@ import { PhotoGallery } from './PhotoGallery'
 import { AddressDisplay } from './AddressDisplay'
 import { formatFilterType, formatAdjustmentType, formatCurrency, normalizeSubdivision, getCompKey } from './format-helpers'
 import { StreetViewImage } from './StreetViewImage'
+import { RuleMatchDetails } from './RuleMatchDetails'
 
 export interface CompCardProps {
   comp: CompItem
@@ -95,14 +96,19 @@ export function CompCard({
                 type="button"
                 onClick={(e) => { e.stopPropagation(); onToggleArv() }}
                 title={isSelectedForArv ? 'Remove from ARV' : 'Add to ARV'}
-                className={cn(
-                  'w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 transition-all',
+                aria-label={comp.selectionPending ? 'Updating ARV selection' : isSelectedForArv ? 'Remove from ARV' : 'Add to ARV'}
+                aria-pressed={isSelectedForArv}
+                disabled={comp.selectionPending}
+                className="w-11 h-11 flex items-center justify-center flex-shrink-0 disabled:cursor-wait"
+              >
+                <span className={cn(
+                  'w-5 h-5 rounded border-2 flex items-center justify-center transition-all',
                   isSelectedForArv
                     ? 'bg-emerald-500 border-emerald-500 text-white'
                     : 'border-foreground/25 bg-foreground/8 text-foreground/30 hover:border-emerald-500'
-                )}
-              >
-                <Check className="w-3 h-3" />
+                )}>
+                  <Check className="w-3 h-3" />
+                </span>
               </button>
             )}
             {!isAlwaysExpanded && (
@@ -120,6 +126,7 @@ export function CompCard({
           )}
           {hasSubdivisionMatch && <span className="text-emerald-500">✓ Subdivision</span>}
         </div>
+        <RuleMatchDetails comp={comp} />
       </div>
 
       {/* Stats grid */}

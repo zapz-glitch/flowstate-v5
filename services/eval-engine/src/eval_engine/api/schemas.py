@@ -42,6 +42,7 @@ class PropertyEvaluationRequest(BaseModel):
     idempotency_key: str = Field(min_length=1, max_length=256)
     subject: dict[str, Any]
     comps: list[dict[str, Any]] = Field(default_factory=list)
+    selected_comp_ids: list[str] | None = Field(default=None, min_length=1, max_length=500)
     renovation_level: str = Field(default="", max_length=64)
     major_item_evidence: list[MajorItemEvidenceV4] = Field(default_factory=list)
     additional_items: list[AdditionalRenovationItemV4] = Field(default_factory=list)
@@ -80,6 +81,7 @@ class EvaluationReadResponse(BaseModel):
     evaluation_id: str
     batch_id: str
     tenant_id: str
+    requested_by_user_id: str
     status: str
     result_status: str | None = None
     attempts: int = 0

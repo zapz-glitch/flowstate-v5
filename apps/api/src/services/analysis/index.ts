@@ -434,6 +434,18 @@ export interface AnalysisResponse {
     classification: ClassificationSummary | null
   }
   valuation: {
+    displayedArv?: number
+    displayedBuyPrice?: number
+    displayedWholesalePrice?: number
+    displayRounding?: { increment: 500 | 1000; mode: 'half_up' }
+    investorAnalysis?: {
+      status: string
+      methodLabel: string
+      sampleCount: number
+      eligibleCount: number
+      value: number | null
+      limitations: string[]
+    }
     arv: number
     arvSource: 'appraisal' | 'comp-selection'
     /** Methodology used to calculate ARV */
@@ -538,6 +550,13 @@ export interface AnalysisResponse {
       zillowUrl: string | null
       /** Whether this comp is enabled (passed all filters) */
       isEnabled: boolean
+      matchPercent?: number | null
+      matchRuleCount?: number
+      matchRuleTotal?: number
+      matchReasons?: string[]
+      selectionReason?: string
+      priorityRank?: number | null
+      rankingDetails?: string[]
       /** Which comp group: 'arv' (Group A, drives valuation), 'as_is' (Group B, market intel), or null */
       compGroup: 'arv' | 'as_is' | null
       /** Reasons why this comp was disabled (if any) */

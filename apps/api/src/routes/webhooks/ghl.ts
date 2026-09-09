@@ -23,7 +23,7 @@ import { loadUserAnalysisSettings } from '../../services/user-settings'
 import { createPropertyApi } from '../../services/property-api'
 import { DEFAULT_FILTERS } from '../../services/appraisal'
 import { filtersToApiParams } from '../../services/appraisal/types'
-import { performAnalysis } from '../../services/evaluation'
+import { evaluateConfigured } from '../../services/evaluation/python'
 import {
   buildGHLCustomFields,
   updateGHLOpportunity,
@@ -293,8 +293,9 @@ ghlWebhook.post('/:webhookSecret', async (c) => {
     const evalStart = Date.now()
     const propertyCallStats = propertyApi.getCallStats()
 
-    const { response: analysisResult } = performAnalysis({
+    const { response: analysisResult } = await evaluateConfigured({
       jobId,
+      userId,
       bundle: bundleResult.data,
       appraisalRules: userSettings.appraisalRules,
       buybox: userSettings.mergedBuybox,
@@ -310,7 +311,7 @@ ghlWebhook.post('/:webhookSecret', async (c) => {
         },
         totalExternalCalls: propertyCallStats.total,
       },
-    })
+    }, c.env)
 
     console.log(`[GHL Webhook][Timing] Evaluation: ${Date.now() - evalStart}ms`)
 

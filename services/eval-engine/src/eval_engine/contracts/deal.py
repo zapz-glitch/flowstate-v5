@@ -5,7 +5,7 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .base import DecimalString
 from .comps import CompCandidateV4
@@ -115,6 +115,18 @@ class CompDecisionV4(BaseModel):
     rejection_reasons: list[str] = Field(default_factory=list)
     limitations: list[str] = Field(default_factory=list)
     duplicate_of: str = ""
+    match_percent: DecimalString | None = None
+    matched_rule_count: int = 0
+    total_rule_count: int = 0
+    mismatch_reasons: list[str] = Field(default_factory=list)
+    selection_reason: str = ""
+    priority_rank: int | None = None
+    ranking_details: list[str] = Field(default_factory=list)
+    arv_cohort: Literal["unclassified", "upper_half", "lower_half", "not_qualified", "price_review"] = "unclassified"
+    arv_weight: DecimalString | None = None
+    rule_weight: DecimalString | None = None
+    recency_weight: DecimalString | None = None
+    condition_classification: Literal["A", "B", "excluded"] | None = None
 
 
 class EvalErrorV4(BaseModel):
@@ -126,6 +138,20 @@ class EvalErrorV4(BaseModel):
     retriable: bool = False
 
 
+class ArvStageTraceV4(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    stage_id: str
+    sale_age_days: int
+    year_built_diff: int
+    qualified_comp_ids: list[str] = Field(default_factory=list)
+    upper_half_comp_ids: list[str] = Field(default_factory=list)
+    condition_excluded_comp_ids: list[str] = Field(default_factory=list)
+    selected_comp_ids: list[str] = Field(default_factory=list)
+    price_review_comp_ids: list[str] = Field(default_factory=list)
+    cutoff_price: DecimalString | None = None
+
+
 class ArvResultV4(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="forbid")
 
@@ -135,10 +161,18 @@ class ArvResultV4(BaseModel):
     base_arv: DecimalString | None = None
     subject_adjustment_total: DecimalString | None = None
     final_arv: DecimalString | None = None
+    displayed_arv: DecimalString | None = None
+    display_rounding_difference: DecimalString | None = None
     exact_value: str = ""
     limitations: list[str] = Field(default_factory=list)
     skipped_adjustments: list[str] = Field(default_factory=list)
     adjustment_outcomes: list[AdjustmentOutcomeV4] = Field(default_factory=list)
+    selection_policy: str = "legacy_physical_v1"
+    qualified_comp_count: int | None = None
+    upper_half_cutoff_price: DecimalString | None = None
+    comp_weights: dict[str, DecimalString] = Field(default_factory=dict)
+    stage_trace: list[ArvStageTraceV4] = Field(default_factory=list)
+    selected_stage: str | None = None
 
 
 class RenovationItemResultV4(BaseModel):
@@ -181,6 +215,8 @@ class DealResultV4(BaseModel):
     carrying_costs: DecimalString | None = None
     flip_profit: DecimalString | None = None
     investor_purchase_ceiling_exact: DecimalString | None = None
+    displayed_buy_price: DecimalString | None = None
+    buy_price_rounding_difference: DecimalString | None = None
     seller_contract_ceiling_exact: DecimalString | None = None
     wholesale_fee: DecimalString | None = None
     displayed_mao: DecimalString | None = None
@@ -222,11 +258,19 @@ class EvaluationRequestV4(BaseModel):
     methodology_version: Literal["evaluation-v4"] = "evaluation-v4"
     subject: SubjectPropertyV4
     comps: list[CompCandidateV4] = Field(default_factory=list)
+    selected_comp_ids: list[str] | None = Field(default=None, min_length=1, max_length=500)
     renovation_level: str = Field(default="", max_length=64)
     settings: SettingsSnapshotV4
     major_item_evidence: list[MajorItemEvidenceV4] = Field(default_factory=list)
     additional_items: list[AdditionalRenovationItemV4] = Field(default_factory=list)
     evaluation_date: OptionalIsoDate = None
+
+    @field_validator("selected_comp_ids")
+    @classmethod
+    def validate_selected_ids(cls, value: list[str] | None) -> list[str] | None:
+        if value is not None and (len(set(value)) != len(value) or any(not item.strip() for item in value)):
+            raise ValueError("manual comparable IDs must be distinct and nonempty")
+        return value
 
 
 class EvaluationResultV4(BaseModel):

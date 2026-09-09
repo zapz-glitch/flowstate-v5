@@ -318,6 +318,7 @@ export default function AnalyzePage() {
   // ─── Evaluation Hook ─────────────────────────────────────────────────────
 
   const {
+    authoritativeData,
     settingsHook,
     recalcData,
     compOverride,
@@ -362,7 +363,7 @@ export default function AnalyzePage() {
     setComparisonOpen,
     handleMarkerSelect,
   } = useMapInteraction(() =>
-    (analysisResult?.comps?.items ?? renderData?.comps?.items ?? []) as CompItem[]
+    (effectiveComps?.items ?? renderData?.comps?.items ?? []) as CompItem[]
   )
 
   // ─── Sync evaluation state to Jotai atoms ────────────────────────────────
@@ -612,11 +613,11 @@ export default function AnalyzePage() {
                       reportProps={{
                         address: activeAnalysis?.address || 'Property Report',
                         date: new Date().toISOString(),
-                        subject: analysisResult?.subject,
+                        subject: authoritativeData?.subject,
                         valuation: displayValuation,
                         comps: effectiveComps,
-                        riskFlags: analysisResult?.riskFlags,
-                        floodZone: analysisResult?.floodZone,
+                        riskFlags: authoritativeData?.riskFlags,
+                        floodZone: authoritativeData?.floodZone,
                         isRecalculated,
                       }}
                     />
@@ -775,8 +776,8 @@ export default function AnalyzePage() {
           mapComps={effectiveComps ?? analysisResult?.comps}
           onMarkerSelect={handleMarkerSelect}
           activeMarkerKey={activeMarkerKey}
-          riskFlags={renderData?.riskFlags}
-          floodZone={renderData?.floodZone}
+          riskFlags={authoritativeData?.riskFlags ?? renderData?.riskFlags}
+          floodZone={authoritativeData?.floodZone ?? renderData?.floodZone}
 
           valuationCardRef={valuationCardRef}
           footer={
@@ -798,7 +799,7 @@ export default function AnalyzePage() {
                       <button
                         type="button"
                         onClick={(e) => {
-                          navigator.clipboard.writeText(JSON.stringify(analysisResult, null, 2))
+                          navigator.clipboard.writeText(JSON.stringify(authoritativeData, null, 2))
                           const btn = e.currentTarget
                           btn.textContent = 'Copied!'
                           setTimeout(() => { btn.textContent = 'Copy JSON' }, 2000)
@@ -808,7 +809,7 @@ export default function AnalyzePage() {
                         Copy JSON
                       </button>
                       <pre className="bg-zinc-950 text-zinc-100 p-4 pt-10 overflow-auto max-h-[600px] text-xs font-mono">
-                        {JSON.stringify(analysisResult, null, 2)}
+                        {JSON.stringify(authoritativeData, null, 2)}
                       </pre>
                     </div>
                   </div>
@@ -838,7 +839,7 @@ export default function AnalyzePage() {
         open={comparisonOpen}
         onOpenChange={setComparisonOpen}
         subject={renderData?.subject ?? null}
-        comp={comparisonComp}
+        comp={comparisonComp ? effectiveComps?.items?.find(comp => comp.address === comparisonComp.address) ?? comparisonComp : null}
         isSelected={comparisonComp && compOverride?.selectedCompKeys
           ? compOverride.selectedCompKeys.has(comparisonComp.address || '')
           : comparisonComp?.isEnabled !== false}

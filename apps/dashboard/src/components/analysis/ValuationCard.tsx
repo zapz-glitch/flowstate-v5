@@ -10,11 +10,8 @@ import {
 } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import type { ValuationData } from './shared-types'
-
-function safeFmt(value: number | null | undefined): string {
-  if (value == null || Number.isNaN(value)) return '-'
-  return value.toLocaleString()
-}
+import { formatHeadlineMoney } from './headline-money'
+import { formatValuationNumber as safeFmt } from './valuation-number'
 
 function MetricLabel({ label, tooltip }: { label: string; tooltip: React.ReactNode }) {
   return (
@@ -95,7 +92,7 @@ export function ValuationCard({
                 }
               />
               <div className="text-heading-sm font-bold text-primary">
-                ${safeFmt(valuation.arv)}
+                ${formatHeadlineMoney(valuation.arv, valuation.displayedArv, valuation.displayRounding)}
               </div>
               {valuation.arvPerSqft != null && (
                 <div className="text-caption-sm text-foreground-tertiary mt-1">${valuation.arvPerSqft.toFixed(0)}/sqft</div>
@@ -112,9 +109,9 @@ export function ValuationCard({
                   </div>
                 }
               />
-              <div className="text-heading-sm font-bold">${safeFmt(valuation.buyPrice)}</div>
+              <div className="text-heading-sm font-bold">${formatHeadlineMoney(valuation.buyPrice, valuation.displayedBuyPrice, valuation.displayRounding)}</div>
               {valuation.buyPricePercent != null && valuation.buyPricePercent !== 0 && (
-                <div className="text-caption-sm text-foreground-tertiary mt-1">{valuation.buyPricePercent}% of ARV</div>
+                <div className="text-caption-sm text-foreground-tertiary mt-1">{safeFmt(valuation.buyPricePercent)}% of ARV</div>
               )}
             </div>
             <div className="p-3 min-w-[120px] flex-1">
@@ -158,7 +155,7 @@ export function ValuationCard({
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <div className="text-caption-sm text-foreground-tertiary mt-1 underline decoration-dotted decoration-foreground-tertiary/40 underline-offset-2 cursor-help w-fit">
-                      {valuation.projectedROI.toFixed(1)}% ROI
+                      {safeFmt(valuation.projectedROI)}% ROI
                     </div>
                   </TooltipTrigger>
                   <TooltipContent side="top" className="max-w-xs">
@@ -184,7 +181,7 @@ export function ValuationCard({
                   }
                 />
                 <div className={cn('text-heading-sm font-semibold', (valuation.wholesalePrice ?? 0) >= 0 ? '' : 'text-red-600')}>
-                  ${safeFmt(valuation.wholesalePrice)}
+                  ${formatHeadlineMoney(valuation.wholesalePrice, valuation.displayedWholesalePrice, valuation.displayRounding)}
                 </div>
               </div>
             )}

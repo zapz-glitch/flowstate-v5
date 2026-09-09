@@ -84,6 +84,7 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
   const analyzeData = report?.analysis ?? null
 
   const {
+    authoritativeData,
     settingsHook,
     recalcData,
     compOverride,
@@ -306,7 +307,7 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
     setComparisonOpen,
     handleMarkerSelect,
   } = useMapInteraction(() =>
-    (analyzeData?.comps?.items ?? []) as CompItem[]
+    (effectiveComps?.items ?? []) as CompItem[]
   )
 
   // Run AI comp selection on existing report — lightweight LLM-only call
@@ -413,7 +414,7 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
     )
   }
 
-  const { analysis } = report
+  const analysis = authoritativeData ?? report.analysis
 
   const hasMapData = !!(analysis.subject?.latitude && analysis.subject?.longitude)
 
@@ -551,7 +552,7 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
         open={comparisonOpen}
         onOpenChange={setComparisonOpen}
         subject={analyzeData?.subject ?? null}
-        comp={comparisonComp}
+        comp={comparisonComp ? effectiveComps?.items?.find(comp => comp.address === comparisonComp.address) ?? comparisonComp : null}
         isSelected={comparisonComp && compOverride?.selectedCompKeys
           ? compOverride.selectedCompKeys.has(comparisonComp.address || '')
           : comparisonComp?.isEnabled !== false}

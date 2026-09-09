@@ -29,7 +29,7 @@ typeahead.get('/', async (c) => {
     return c.json({ results })
   } catch (error) {
     console.error('[Typeahead] Error:', error instanceof Error ? error.message : error)
-    return c.json({ results: [] })
+    return c.json({ error: 'Address provider unavailable. Retry the search shortly.' }, 502)
   }
 })
 

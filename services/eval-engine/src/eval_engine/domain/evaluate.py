@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from fractions import Fraction
 
 from ..contracts.deal import (
     AdjustmentLedgerEntryV4,
@@ -16,10 +17,12 @@ from ..contracts.deal import (
     RenovationResultV4,
 )
 from .adjustments import adjusted_ppsf, apply_comp_adjustments, apply_subject_adjustments, mean
-from .deal import evaluate_deal
+from .deal import evaluate_deal, round_display
+from .evidence import sale_age_days
 from .investor import evaluate_investor_cohort
 from .renovation import evaluate_major_items, find_cell, map_tier, validate_tiers
 from .selection import select_arv_comps
+from .stage_selection import select_staged_arv_comps
 
 
 def _result(
@@ -69,9 +72,30 @@ def evaluate_v4(request: EvaluationRequestV4) -> EvaluationResultV4:
     snapshot_id = settings.snapshot_id
     snapshot_hash = settings.content_hash or settings.compute_content_hash()
     tier_errors = validate_tiers(settings.tiers)
-    accepted, decisions, _ = select_arv_comps(
-        subject, request.comps, settings.filters, request.evaluation_date, settings.transaction_rule,
-    )
+    stage_trace = []
+    selected_stage = None
+    if settings.arv_selection_policy == "provider_authoritative_upper_half_v2":
+        accepted, decisions, _, stage_trace, selected_stage = select_staged_arv_comps(
+            subject, request.comps, settings.filters, request.evaluation_date, settings.transaction_rule,
+            request.selected_comp_ids,
+        )
+    else:
+        accepted, decisions, _ = select_arv_comps(
+            subject, request.comps, settings.filters, request.evaluation_date, settings.transaction_rule,
+            request.selected_comp_ids,
+            settings.arv_selection_policy,
+        )
+    experimental = settings.arv_selection_policy in {"upper_half_rule_weighted_v1", "provider_authoritative_upper_half_v2"}
+    cohort_ids = {d.comp_id for d in decisions if d.arv_cohort in {"upper_half", "lower_half"}}
+    upper_ids = {d.comp_id for d in decisions if d.arv_cohort == "upper_half"}
+    upper_prices = [c.verified_sale_price for c in request.comps if c.comp_id in upper_ids]
+    selection_metadata = {
+        "selection_policy": settings.arv_selection_policy,
+        "qualified_comp_count": len(cohort_ids) if experimental else None,
+        "upper_half_cutoff_price": min(upper_prices) if upper_prices else None,
+        "stage_trace": stage_trace,
+        "selected_stage": selected_stage if accepted else None,
+    }
     adjustment_outcomes: list[AdjustmentOutcomeV4] = []
     ledger: list[AdjustmentLedgerEntryV4] = []
     seen: set[str] = set()
@@ -84,7 +108,7 @@ def evaluate_v4(request: EvaluationRequestV4) -> EvaluationResultV4:
             arv=ArvResultV4(status="FAILED", limitations=tier_errors),
             investor=InvestorCohortResultV4(status="INSUFFICIENT_INVESTOR_DATA", limitations=tier_errors),
         )
-    if len(accepted) < 3:
+    if not accepted:
         investor = evaluate_investor_cohort(
             subject, request.comps, settings.adjustments, request.evaluation_date,
             settings.filters, settings.transaction_rule, decisions, ledger,
@@ -96,7 +120,8 @@ def evaluate_v4(request: EvaluationRequestV4) -> EvaluationResultV4:
             incomplete=["arv", "renovation", "deal"],
             arv=ArvResultV4(
                 status="INSUFFICIENT_DATA", accepted_comp_ids=preserved,
-                limitations=["fewer than three accepted comps"],
+                limitations=["no accepted verified comps"],
+                **selection_metadata,
             ),
             investor=investor,
         )
@@ -120,7 +145,7 @@ def evaluate_v4(request: EvaluationRequestV4) -> EvaluationResultV4:
                 bad.rejection_reasons.append("missing comp sqft for ARV math")
             continue
         usable.append(item)
-    if len(usable) < 3:
+    if not usable:
         investor = evaluate_investor_cohort(
             subject, request.comps, settings.adjustments, request.evaluation_date,
             settings.filters, settings.transaction_rule, decisions, ledger,
@@ -132,7 +157,8 @@ def evaluate_v4(request: EvaluationRequestV4) -> EvaluationResultV4:
             incomplete=["arv", "renovation", "deal"],
             arv=ArvResultV4(
                 status="INSUFFICIENT_DATA", accepted_comp_ids=preserved,
-                limitations=["fewer than three calculable comps"],
+                limitations=["no calculable verified comps"],
+                **selection_metadata,
             ),
             investor=investor,
         )
@@ -151,7 +177,26 @@ def evaluate_v4(request: EvaluationRequestV4) -> EvaluationResultV4:
                 arv=ArvResultV4(status="FAILED"),
             )
         ppsfs.append(value)
-    avg_ppsf = mean(ppsfs)
+    comp_weights: dict[str, Decimal] = {}
+    if experimental:
+        by_id = {decision.comp_id: decision for decision in decisions}
+        raw_weights = []
+        for item in usable:
+            decision = by_id[item.comp.comp_id]
+            decision.rule_weight = max(decision.match_percent or Decimal(0), Decimal(1)) / Decimal(100)
+            age = sale_age_days(item.comp.sale_date, request.evaluation_date)
+            decision.recency_weight = Decimal(180) / (Decimal(180) + Decimal(age))
+            raw_weights.append(Fraction(decision.rule_weight) * Fraction(180, 180 + age))
+        weight_total = sum(raw_weights, Fraction(0))
+        weighted_ppsf = sum((Fraction(value) * weight for value, weight in zip(ppsfs, raw_weights)), Fraction(0)) / weight_total
+        avg_ppsf = Decimal(weighted_ppsf.numerator) / Decimal(weighted_ppsf.denominator)
+        for item, weight in zip(usable, raw_weights):
+            fraction = weight / weight_total
+            normalized = Decimal(fraction.numerator) / Decimal(fraction.denominator)
+            comp_weights[item.comp.comp_id] = normalized
+            by_id[item.comp.comp_id].arv_weight = normalized
+    else:
+        avg_ppsf = mean(ppsfs)
     if not isinstance(subject.sqft, Decimal) or subject.sqft <= 0:
         return _result(
             request, snapshot_id, snapshot_hash, "FAILED", decisions, ledger,
@@ -173,8 +218,33 @@ def evaluate_v4(request: EvaluationRequestV4) -> EvaluationResultV4:
     for outcome in no_policy:
         calc_limitations.append(f"{outcome.rule_id}: investor limitation; no policy adjustment")
     final_arv = base_arv + subj_total
+    displayed_arv = round_display(final_arv, settings.deal.rounding_increment, settings.deal.rounding_mode)
     arv_status = "COMPLETED"
     status = "COMPLETED"
+    if experimental:
+        arv_status = "PRELIMINARY"
+        status = "REVIEW_REQUIRED"
+        calc_limitations.append("experimental upper-half sale-price classification; adjusted PPSF weighted by rule match times 180/(180+sale age in days); price is not verified condition")
+        if any(d.arv_cohort == "price_review" for d in decisions):
+            calc_limitations.append("one or more sale prices require review and were excluded from automatic ARV")
+    if request.selected_comp_ids is not None:
+        arv_status = "PRELIMINARY"
+        status = "REVIEW_REQUIRED"
+        calc_limitations.append("operator-selected ARV comparables; " + ("rule-match-weighted" if experimental else "arithmetic mean of") + " adjusted PPSF; review required")
+    selected_ids = {item.comp.comp_id for item in usable}
+    selected_decisions = [d for d in decisions if d.comp_id in selected_ids]
+    if any(d.match_percent is None or d.match_percent < 100 for d in selected_decisions):
+        arv_status = "PRELIMINARY"
+        status = "REVIEW_REQUIRED"
+        calc_limitations.append("selected physical reference has a rule match below 100% or is unscored; review subject-rule mismatches")
+        for decision in selected_decisions:
+            calc_limitations.extend(f"{decision.comp_id}: {reason}" for reason in decision.mismatch_reasons)
+    if len(usable) < 3:
+        arv_status = "PRELIMINARY"
+        status = "REVIEW_REQUIRED"
+        calc_limitations.append(
+            f"limited comparable evidence: {len(usable)} qualifying verified comp(s); valuation is preliminary"
+        )
     if missing_evidence:
         arv_status = "PRELIMINARY"
         status = "REVIEW_REQUIRED"
@@ -186,10 +256,14 @@ def evaluate_v4(request: EvaluationRequestV4) -> EvaluationResultV4:
         base_arv=base_arv,
         subject_adjustment_total=subj_total,
         final_arv=final_arv,
+        displayed_arv=displayed_arv,
+        display_rounding_difference=displayed_arv - final_arv,
         exact_value=format(final_arv, "f"),
         limitations=list(calc_limitations),
         skipped_adjustments=list(skipped_notes),
         adjustment_outcomes=list(adjustment_outcomes),
+        comp_weights=comp_weights,
+        **selection_metadata,
     )
     tier = map_tier(final_arv, settings.tiers)
     renovation: RenovationResultV4 | None = None

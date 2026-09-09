@@ -735,6 +735,7 @@ class Worker:
                     AdditionalRenovationItemV4(**raw) for raw in stored.get("additional_items", [])
                 ],
                 evaluation_date=stored.get("evaluation_date"),
+                selected_comp_ids=stored.get("selected_comp_ids"),
             ),
             snap,
         )

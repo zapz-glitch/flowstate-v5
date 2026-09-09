@@ -4,13 +4,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "wrangler dev",
+    "dev": "wrangler dev --config wrangler.local.toml --local",
     "deploy": "wrangler deploy",
     "tail": "wrangler tail",
     "logs": "wrangler tail --format pretty",
     "typecheck": "tsc --noEmit",
-    "test": "echo 'Tests disabled — see vitest.config.ts to re-enable'",
-    "test:watch": "echo 'Tests disabled'",
+    "test": "node ../../scripts/run-regression-tests.mjs api",
     "db:generate": "drizzle-kit generate",
     "db:migrate:local": "wrangler d1 migrations apply flowstate-api-db --local",
     "db:migrate:remote": "wrangler d1 migrations apply flowstate-api-db --remote"
@@ -29,7 +28,7 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20240909.0",
-    "drizzle-kit": "^0.30.0",
+    "drizzle-kit": "0.31.10",
     "typescript": "^5.5.0",
     "wrangler": "^4.70.0"
   }

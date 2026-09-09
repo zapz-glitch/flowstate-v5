@@ -118,6 +118,31 @@ def _worker(maker, tenant, owner="w-1", user=None, **kwargs):
     return Worker(maker, WorkerConfig(**params))
 
 
+@pytest.mark.parametrize("selection,expected_ids,expected_arv", [
+    (["c2"], ["c2"], "580000"),
+    (None, ["c1"], "590000"),
+])
+def test_supervised_worker_preserves_manual_selection(maker, selection, expected_ids, expected_arv):
+    from eval_engine.application.service import read_evaluation
+
+    tenant = f"manual-{uuid.uuid4().hex}"
+    user = "staging-user"
+    key = uuid.uuid4().hex
+    body = api_cases._body(1, key_prefix=key)
+    body["evaluations"][0]["selected_comp_ids"] = selection
+    with maker() as session:
+        _, _, summaries = submit_batch(session, tenant_id=tenant,
+            requested_by_user_id=user, batch_key=key, body=body)
+        session.commit()
+    stats = _worker(maker, tenant, user=user, max_jobs=1).run()
+    assert stats.succeeded == 1
+    with maker() as session:
+        result = read_evaluation(session, tenant_id=tenant,
+            requested_by_user_id=user, evaluation_id=summaries[0]["evaluation_id"])
+    assert result["result"]["arv"]["accepted_comp_ids"] == expected_ids
+    assert result["result"]["arv"]["final_arv"] == expected_arv
+
+
 def owner_user(tenant):
     return f"u-{tenant[-6:]}" if len(tenant) > 6 else f"u-{tenant}"
 

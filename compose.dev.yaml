@@ -7,9 +7,6 @@
 # - API 8004 matches services/eval-engine/Dockerfile (EXPOSE/CMD).
 # - PostgreSQL is reachable only on the internal candidate network.
 # - Dashboard 3004 (host) -> 3000 (container, `next dev` default).
-# - The legacy TS API (localhost:8787) is intentionally NOT included: the V4
-#   TS bridge is not implemented, so the dashboard keeps its repo-configured
-#   API URL and the health check only asserts the dashboard responds.
 #
 # Managed via ./scripts/runtime (up|down|status|health|logs). Do not point
 # production tooling at this file.
@@ -56,15 +53,14 @@ services:
 
   api-worker:
     build:
-      context: ./apps/api
+      context: .
+      dockerfile: apps/api/Dockerfile.dev
     image: flowstate-v4-dev-api-worker:local
-    pull_policy: always
-    command: ["wrangler", "dev"]
+    pull_policy: build
     environment:
       BETTER_AUTH_SECRET: "test-secret"
-      # D1 binding is defined in wrangler.toml; wrangler dev will use local DB if available
     ports:
-      - "127.0.0.1:${V4_API_PORT:-8787}:8787"
+      - "127.0.0.1:${V4_TS_API_PORT:-8787}:8787"
     depends_on:
       postgres:
         condition: service_healthy
@@ -141,8 +137,8 @@ services:
       PORT: "3000"
       HOSTNAME: "0.0.0.0"
       NEXT_TELEMETRY_DISABLED: "1"
-      NEXT_PUBLIC_API_URL: "http://localhost:8787"
-      NEXT_PUBLIC_FASTAPI_URL: "http://localhost:8004"
+      NEXT_PUBLIC_API_URL: "http://localhost:${V4_TS_API_PORT:-8787}"
+      NEXT_PUBLIC_FASTAPI_URL: "http://localhost:${V4_API_PORT:-8004}"
     volumes:
       - v4-dashboard-next:/app/apps/dashboard/.next
     restart: "no"

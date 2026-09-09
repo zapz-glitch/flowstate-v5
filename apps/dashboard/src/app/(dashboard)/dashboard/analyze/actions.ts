@@ -85,6 +85,9 @@ export interface ApiCallStats {
 }
 
 export interface AnalyzeData {
+  evaluationRevision?: number
+  manualCompSelection?: string[] | null
+  evaluationEngine?: 'python-v4' | 'typescript'
   subject?: SubjectData
   valuation?: ValuationData
   comps?: CompsData
@@ -127,6 +130,18 @@ export interface ClassificationSummary {
 }
 
 export interface SubjectData {
+  permits?: {
+    status: 'available' | 'empty' | 'unavailable'
+    items: Array<{
+      permitId: string
+      permitNumber: string | null
+      projectType: string | null
+      description: string | null
+      status: string | null
+      effectiveDate: string | null
+      jobValue: number | null
+    }>
+  }
   address?: string
   county?: string | null
   latitude?: number | null
@@ -177,6 +192,10 @@ export interface RehabLevelEstimate {
 }
 
 export interface ValuationData {
+  displayedArv?: number
+  displayedBuyPrice?: number
+  displayedWholesalePrice?: number
+  displayRounding?: { increment: 500 | 1000; mode: 'half_up' }
   arv?: number
   arvSource?: string
   arvPerSqft?: number
@@ -198,6 +217,14 @@ export interface ValuationData {
   wholesalePrice?: number
   recommendation?: string
   recommendationReason?: string
+  investorAnalysis?: {
+    status: string
+    methodLabel: string
+    sampleCount: number
+    eligibleCount?: number
+    value: number | null
+    limitations: string[]
+  } | null
   /** As-Is market intelligence from Group B comps (display only) */
   asIsMarketIntel?: {
     asIsMarketPrice?: number | null
@@ -220,6 +247,14 @@ export interface CompsData {
 }
 
 export interface CompItem {
+  id?: string
+  selectionPending?: boolean
+  priorityRank?: number | null
+  rankingDetails?: string[]
+  matchPercent?: number | null
+  matchRuleCount?: number
+  matchRuleTotal?: number
+  matchReasons?: string[]
   address?: string
   city?: string | null
   state?: string | null
@@ -510,5 +545,3 @@ export async function queueAnalysis(request: AnalyzeRequest): Promise<QueueAnaly
     }
   }
 }
-
-

@@ -18,6 +18,8 @@ class SubjectPropertyV4(BaseModel):
     state: str = Field(default="", max_length=64)
     zip_code: str = Field(default="", alias="zip", max_length=32)
     property_type: str = Field(default="", max_length=64)
+    building_style: str = Field(default="", max_length=128)
+    garage_spaces: int | None = Field(default=None, ge=0, le=100)
     beds: DecimalString | None = None
     baths: DecimalString | None = None
     sqft: DecimalString | None = None

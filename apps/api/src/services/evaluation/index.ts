@@ -38,6 +38,7 @@ function formatUsd(amount: number): string {
 
 export interface EvaluationParams {
   jobId: string
+  userId?: string
   bundle: PropertyBundle
   appraisalRules?: {
     filters?: AppraisalFilter[]

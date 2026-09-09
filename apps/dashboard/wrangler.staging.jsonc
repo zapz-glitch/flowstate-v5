@@ -1,0 +1,11 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "flowstate-v4-staging-dashboard",
+  "compatibility_date": "2025-04-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "main": ".open-next/worker.js",
+  "workers_dev": false,
+  "routes": [{ "pattern": "staging.flowstate.homes", "custom_domain": true }],
+  "assets": { "directory": ".open-next/assets", "binding": "ASSETS" },
+  "vars": { "NEXT_PUBLIC_API_URL": "https://api.staging.flowstate.homes" }
+}

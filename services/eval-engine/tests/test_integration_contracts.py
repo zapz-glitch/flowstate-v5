@@ -209,7 +209,7 @@ def test_result_settings_content_hash_matches_domain_and_store_identity():
         evaluation_date="2026-09-01",
     )
     result = evaluate_v4(request)
-    assert result.status == "COMPLETED"
+    assert result.status == "REVIEW_REQUIRED"
     assert result.settings_content_hash == expected
     version, content, source = snapshot_store_parts(settings)
     assert (

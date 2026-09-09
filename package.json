@@ -10,20 +10,28 @@
     "dev": "turbo dev",
     "build": "turbo build",
     "deploy": "turbo deploy",
-    "lint": "turbo lint",
+    "lint": "eslint apps/api/src apps/dashboard/src packages/shared/src",
+    "test": "npm run test -w @flowstate-api/api && npm run test -w @flowstate-api/dashboard",
+    "security:audit": "npm audit --audit-level=moderate",
     "typecheck": "turbo typecheck",
     "db:generate": "turbo db:generate",
     "db:migrate:local": "turbo db:migrate:local",
     "db:migrate:remote": "turbo db:migrate:remote"
   },
   "devDependencies": {
+    "eslint": "10.10.0",
+    "eslint-plugin-react-hooks": "7.1.1",
+    "typescript-eslint": "8.70.0",
+    "tsx": "4.23.13",
+    "esbuild": "0.28.2",
     "turbo": "^2.8.20",
     "typescript": "^5.5.0"
   },
   "packageManager": "npm@10.2.0",
   "overrides": {
     "vite": "8.2.2",
-    "esbuild@0.27.4": "0.28.2"
+    "esbuild": "$esbuild",
+    "sharp": "0.35.4"
   },
   "dependencies": {
     "@vis.gl/react-google-maps": "^1.8.1",

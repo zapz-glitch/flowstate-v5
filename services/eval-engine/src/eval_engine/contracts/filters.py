@@ -15,6 +15,7 @@ FilterKind = Literal[
     "max_year_built_diff",
     "max_distance_miles",
     "property_type_match",
+    "building_style_match",
     "subdivision_match",
 ]
 

@@ -5,9 +5,19 @@
 export interface Env {
   DB: D1Database
   API_CACHE: KVNamespace
+  REPORT_ASSETS?: R2Bucket
   ANALYSIS_JOB: DurableObjectNamespace
   BATCH_JOB: DurableObjectNamespace
   ENVIRONMENT: string
+  EVALUATION_ENGINE?: string
+  V4_LOCAL_BRIDGE_URL?: string
+  V4_LOCAL_BRIDGE_TOKEN?: string
+  V4_HOSTED_API_URL?: string
+  V4_HOSTED_USER_CREDENTIALS?: string
+  V4_STAGING_ASSETS_ENABLED?: string
+  V4_SNAPSHOT_ACTIVE_KEY_ID?: string
+  V4_SNAPSHOT_KEYS?: string
+  V4_SNAPSHOT_LEGACY_KEYS?: string
 
   // ─── Dashboard URL ────────────────────────────────────────────────────────
   /** Production dashboard URL (e.g. 'https://app.flowstate.homes') */
@@ -27,6 +37,7 @@ export interface Env {
   // ─── Vision Analysis (OpenRouter LLM) ──────────────────────────────────────
   // OpenRouter provides access to multiple models via single API
   OPENROUTER_API_KEY?: string
+  OPENAI_API_KEY?: string
   OPENROUTER_MODEL?: string // Default model for general LLM tasks
   /** Model for comp selection — stronger reasoning (e.g., 'anthropic/claude-sonnet-4', 'google/gemini-2.5-pro-preview') */
   COMP_SELECTION_MODEL?: string

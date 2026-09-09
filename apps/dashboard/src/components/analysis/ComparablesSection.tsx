@@ -9,6 +9,7 @@ import type { CompsData, CompItem, SubjectData } from './shared-types'
 import { getCompKey } from './format-helpers'
 import { CompCard } from './CompCard'
 import { CompGridCard } from './CompGridCard'
+import { RuleMatchDetails } from './RuleMatchDetails'
 
 export interface ComparablesSectionProps {
   comps: CompsData
@@ -241,6 +242,12 @@ export function ComparablesSection({
         )}
       </div>
 
+      {comps.items?.some(comp => comp.priorityRank != null) && (
+        <p className="mb-3 text-[11px] text-foreground">
+          Priority order: subdivision, year built, square footage, lot size, physical style. Rule match reports enabled-rule results separately from this ranking.
+        </p>
+      )}
+
       {/* Print-only compact comp table */}
       <div className="hidden print:block px-6 py-4">
         {arvComps.length > 0 && (
@@ -262,7 +269,7 @@ export function ComparablesSection({
                 {arvComps.map((comp, i) => (
                   <tr key={i} className="border-b border-gray-100">
                     <td className="py-1.5 pr-4 text-gray-400">{i + 1}</td>
-                    <td className="py-1.5 pr-4 font-medium">{comp.address}</td>
+                    <td className="py-1.5 pr-4 font-medium">{comp.address}<RuleMatchDetails comp={comp} /></td>
                     <td className="text-right py-1.5 px-2">${comp.salePrice?.toLocaleString() || '-'}</td>
                     <td className="text-right py-1.5 px-2 text-emerald-700">{comp.adjustedPrice ? `$${comp.adjustedPrice.toLocaleString()}` : '-'}</td>
                     <td className="text-right py-1.5 px-2">{comp.squareFeet?.toLocaleString() || '-'}</td>
@@ -281,7 +288,7 @@ export function ComparablesSection({
               <tbody>
                 {excludedComps.map((comp, i) => (
                   <tr key={i} className="border-b border-gray-100 text-gray-400">
-                    <td className="py-1 pr-4">{comp.address}</td>
+                    <td className="py-1 pr-4">{comp.address}<RuleMatchDetails comp={comp} /></td>
                     <td className="text-right py-1 px-2">${comp.salePrice?.toLocaleString() || '-'}</td>
                     <td className="text-right py-1 pl-2">
                       {comp.disableReasons?.join(', ') || 'Manually excluded'}

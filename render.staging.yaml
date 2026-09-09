@@ -1,0 +1,60 @@
+services:
+  - type: web
+    name: flowstate-v4-staging-python
+    runtime: docker
+    branch: v4-python
+    region: virginia
+    plan: 0.5c-512mb
+    autoDeployTrigger: "off"
+    dockerfilePath: ./services/eval-engine/Dockerfile
+    dockerContext: ./services/eval-engine
+    preDeployCommand: alembic upgrade head
+    healthCheckPath: /health/ready
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: flowstate-v4-staging-postgres
+          property: connectionString
+      - key: V4_API_CREDENTIALS
+        sync: false
+      - key: V4_TEST_PROFILE
+        value: "false"
+      - key: V4_EXTERNAL_CALLS_ENABLED
+        value: "false"
+  - type: worker
+    name: flowstate-v4-staging-worker
+    runtime: docker
+    branch: v4-python
+    region: virginia
+    plan: 0.5c-512mb
+    autoDeployTrigger: "off"
+    dockerfilePath: ./services/eval-engine/Dockerfile
+    dockerContext: ./services/eval-engine
+    dockerCommand: python -m eval_engine.worker.main
+    maxShutdownDelaySeconds: 300
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: flowstate-v4-staging-postgres
+          property: connectionString
+      - key: V4_WORKER_TENANT
+        value: flowstate-v4-staging
+      - key: V4_WORKER_OWNER
+        value: staging-worker
+      - key: V4_WORKER_USER
+        sync: false
+      - key: V4_WORKER_ALLOW_DEFAULT_USER
+        value: "false"
+      - key: V4_TEST_PROFILE
+        value: "false"
+      - key: V4_EXTERNAL_CALLS_ENABLED
+        value: "false"
+databases:
+  - name: flowstate-v4-staging-postgres
+    region: virginia
+    plan: 0.1c-256mb
+    postgresMajorVersion: "17"
+    diskSizeGB: 5
+    databaseName: flowstate_v4_staging
+    user: flowstate_v4_staging
+    ipAllowList: []

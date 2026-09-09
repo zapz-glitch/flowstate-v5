@@ -193,7 +193,7 @@ def test_readiness_unmigrated_database_is_not_ready(monkeypatch):
                 "-e", "POSTGRES_PASSWORD=v4testpw",
                 "-e", "POSTGRES_DB=v4test",
                 "-p", f"127.0.0.1:{port}:5432",
-                "postgres:16-alpine",
+                "postgres:17-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73",
             ],
             capture_output=True,
             text=True,

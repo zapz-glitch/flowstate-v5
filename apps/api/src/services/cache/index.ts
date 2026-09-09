@@ -114,12 +114,13 @@ export function propertyKey(clip: string, provider?: string): string {
 /**
  * Generate a cache key for comparables
  */
-export function comparablesKey(clip: string, radius?: number, months?: number, provider?: string): string {
+export function comparablesKey(clip: string, radius?: number, months?: number, provider?: string, parameters: Record<string, unknown> = {}): string {
   const prefix = provider
     ? `${CACHE_PREFIX.COMPARABLES}${provider}:`
     : CACHE_PREFIX.COMPARABLES
-  const suffix = radius || months ? `:r${radius || 1}:m${months || 12}` : ''
-  return `${prefix}${clip}${suffix}`
+  const effective = { ...parameters, radiusMiles: radius ?? null, monthsBack: months ?? null }
+  const entries = Object.entries(effective).filter(([, value]) => value !== undefined).sort(([a], [b]) => a.localeCompare(b))
+  return `${prefix}search-v3:${clip}:${JSON.stringify(entries)}`
 }
 
 /**
@@ -127,8 +128,8 @@ export function comparablesKey(clip: string, radius?: number, months?: number, p
  */
 export function floodZoneKey(clip: string, provider?: string): string {
   return provider
-    ? `${CACHE_PREFIX.FLOOD}${provider}:${clip}`
-    : `${CACHE_PREFIX.FLOOD}${clip}`
+    ? `${CACHE_PREFIX.FLOOD}evidence-v2:${provider}:${clip}`
+    : `${CACHE_PREFIX.FLOOD}evidence-v2:${clip}`
 }
 
 /**
@@ -136,8 +137,8 @@ export function floodZoneKey(clip: string, provider?: string): string {
  */
 export function permitsKey(clip: string, provider?: string): string {
   return provider
-    ? `${CACHE_PREFIX.PERMITS}${provider}:${clip}`
-    : `${CACHE_PREFIX.PERMITS}${clip}`
+    ? `${CACHE_PREFIX.PERMITS}evidence-v2:${provider}:${clip}`
+    : `${CACHE_PREFIX.PERMITS}evidence-v2:${clip}`
 }
 
 /**

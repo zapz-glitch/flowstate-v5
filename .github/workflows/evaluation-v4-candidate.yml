@@ -14,21 +14,6 @@ on:
       - v4/integration-runtime
       - v4/python-fast-eval
   pull_request:
-    paths:
-      - compose.dev.yaml
-      - .dockerignore
-      - package.json
-      - package-lock.json
-      - turbo.json
-      - scripts/runtime
-      - scripts/secret-scan
-      - services/eval-engine/**
-      - apps/api/**
-      - apps/dashboard/**
-      - packages/shared/**
-      - docs/eval-v4/RUNTIME.md
-      - docs/eval-v4/WORKER_RUNTIME.md
-      - .github/workflows/evaluation-v4-candidate.yml
   workflow_dispatch:
 
 permissions:
@@ -38,7 +23,7 @@ jobs:
   candidate-checks:
     name: candidate checks
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 40
     services:
       postgres:
         image: postgres:17-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73
@@ -65,12 +50,14 @@ jobs:
       - name: Set up Node.js # actions/setup-node v4
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
-          node-version: "20"
+          node-version: "22"
           cache: npm
 
       - name: Install engine dependencies (authoritative hashed lock, includes Alembic for post-V4-102 migrations)
         working-directory: services/eval-engine
-        run: pip install --require-hashes -r requirements.txt
+        run: |
+          python -m pip install --only-binary=:all: --require-hashes -r bootstrap-requirements.txt
+          python -m pip install --require-hashes -r requirements.txt
 
       - name: Verify Alembic available (post-V4-102 migration readiness)
         working-directory: services/eval-engine
@@ -81,6 +68,33 @@ jobs:
 
       - name: Typecheck workspaces
         run: npm run typecheck
+
+      - name: Lint application sources
+        run: npm run lint
+
+      - name: Application regression and security tests
+        env:
+          PYTHON: python
+        run: npm test
+
+      - name: Audit locked JavaScript dependencies
+        run: npm run security:audit
+
+      - name: Build production-mode dashboard
+        env:
+          NODE_ENV: production
+          NEXT_TELEMETRY_DISABLED: "1"
+        run: npm run build:production -w @flowstate-api/dashboard
+
+      - name: Build Cloudflare dashboard artifact (no deployment)
+        env:
+          NODE_ENV: production
+          NEXT_TELEMETRY_DISABLED: "1"
+        run: npm run build:cloudflare -w @flowstate-api/dashboard -- --skipNextBuild
+
+      - name: Bundle production API configuration (no deployment)
+        working-directory: apps/api
+        run: npx --no-install wrangler deploy --dry-run --outdir /tmp/flowstate-api-production
 
       - name: Run V4 Python tests
         working-directory: services/eval-engine

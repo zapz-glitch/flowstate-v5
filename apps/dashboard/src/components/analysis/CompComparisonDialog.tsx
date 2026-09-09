@@ -15,6 +15,7 @@ import type { SubjectData, CompItem } from './shared-types'
 import { AddressDisplay } from './AddressDisplay'
 import { formatFilterType, formatCurrency, normalizeSubdivision } from './format-helpers'
 import { StreetViewImage } from './StreetViewImage'
+import { RuleMatchDetails } from './RuleMatchDetails'
 import type { ProximityConfig } from '@/lib/client-api'
 import { PROXIMITY_DEFAULTS } from '@/lib/client-api'
 
@@ -111,6 +112,7 @@ export function CompComparisonDialog({ open, onOpenChange, subject, comp, isSele
               )}
             </div>
           </div>
+          <RuleMatchDetails comp={comp} />
         </DialogHeader>
 
         <div className="space-y-0">
@@ -130,8 +132,11 @@ export function CompComparisonDialog({ open, onOpenChange, subject, comp, isSele
               {onToggleSelection && (
                 <button
                   type="button"
-                  onClick={onToggleSelection}
+                  onClick={event => { event.stopPropagation(); onToggleSelection() }}
                   title={isSelected ? 'Remove from ARV' : 'Add to ARV'}
+                  aria-label={comp.selectionPending ? 'Updating ARV selection' : isSelected ? 'Remove from ARV' : 'Add to ARV'}
+                  aria-pressed={isSelected}
+                  disabled={comp.selectionPending}
                   className={`w-6 h-6 rounded border-2 flex items-center justify-center flex-shrink-0 transition-all ${
                     isSelected
                       ? 'bg-emerald-500 border-emerald-500 text-white'

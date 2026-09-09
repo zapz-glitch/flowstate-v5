@@ -90,7 +90,7 @@ def make_settings(filters=None, adjustments=None, tiers=None, deal=None, major=N
     return SettingsSnapshotV4(
         snapshot_id="s1",
         content_hash="",
-        filters=filters or [],
+        filters=filters if filters is not None else [AppraisalFilterV4(rule_id="sale_age", kind="max_sale_age_days", value="10000")],
         adjustments=adjustments or [],
         transaction_rule=tx or TransactionRuleV4(),
         tiers=tiers if tiers is not None else make_tiers(),
@@ -144,25 +144,230 @@ def test_exact_decimal_arv_fixture():
     request = make_request(comps=comps)
     result = evaluate_v4(request)
     p1 = Decimal(600000) / Decimal(2000)
-    p2 = Decimal(550000) / Decimal(2200)
-    p3 = Decimal(500000) / Decimal(2500)
-    expected_avg = (p1 + p2 + p3) / Decimal(3)
+    expected_avg = p1
     expected_arv = expected_avg * Decimal(2000)
-    assert result.status == "COMPLETED"
+    assert result.status == "REVIEW_REQUIRED"
     assert result.arv.average_adjusted_ppsf == expected_avg
     assert result.arv.final_arv == expected_arv
-    assert result.arv.accepted_comp_ids == ["c1", "c2", "c3"]
+    assert result.arv.accepted_comp_ids == ["c1"]
     assert result.methodology_version == "evaluation-v4"
     assert result.settings_snapshot_id == "s1"
     assert len(result.settings_content_hash) == 64
 
 
-def test_fewer_than_three_returns_insufficient_comps():
-    comps = [make_comp("c1", "400000"), make_comp("c2", "300000")]
+def test_manual_add_and_remove_comps_recalculates_exact_python_arv():
+    request = make_request(comps=[make_comp("high", "600000"), make_comp("low", "400000")])
+    assert evaluate_v4(request).arv.accepted_comp_ids == ["high"]
+    request.selected_comp_ids = ["low", "high"]
+    result = evaluate_v4(request)
+    assert result.arv.accepted_comp_ids == ["high", "low"]
+    assert result.arv.final_arv == Decimal("500000")
+    assert result.arv.average_adjusted_ppsf == Decimal("250")
+    assert result.status == "REVIEW_REQUIRED"
+    assert result.deal.preliminary is True
+    assert all("operator" in d.selection_reason for d in result.decisions)
+    assert sorted(d.priority_rank for d in result.decisions) == [1, 2]
+    request.selected_comp_ids = ["low"]
+    assert evaluate_v4(request).arv.final_arv == Decimal("400000")
+
+
+@pytest.mark.parametrize("selected", [[], ["high", "high"], [""], [" "]])
+def test_manual_selection_contract_rejects_empty_or_duplicate_ids(selected):
+    data = make_request(comps=[make_comp("high", "600000")]).model_dump(mode="json")
+    data["selected_comp_ids"] = selected
+    with pytest.raises(ValidationError):
+        EvaluationRequestV4.model_validate(data)
+
+
+@pytest.mark.parametrize("selected", [["unknown"], ["invalid"], ["valid", "invalid"]])
+def test_manual_selection_cannot_bypass_verified_sale_gates(selected):
+    request = make_request(comps=[make_comp("valid", "600000"), make_comp("invalid", None)])
+    request.selected_comp_ids = selected
+    with pytest.raises(ValueError, match="ineligible comparable IDs"):
+        evaluate_v4(request)
+
+
+@pytest.mark.parametrize("count, expected_arv", [(1, "400000"), (2, "400000")])
+def test_one_or_two_verified_comps_return_preliminary_valuation(count, expected_arv):
+    comps = [make_comp("c1", "400000"), make_comp("c2", "300000")][:count]
     result = evaluate_v4(make_request(comps=comps))
-    assert result.status == "INSUFFICIENT_COMPS"
-    assert result.arv.status == "INSUFFICIENT_DATA"
+    assert result.status == "REVIEW_REQUIRED"
+    assert result.arv.status == "PRELIMINARY"
+    assert result.arv.final_arv == Decimal(expected_arv)
+    assert result.renovation.preliminary is True
+    assert result.deal.preliminary is True
+    assert result.deal.status == "PRELIMINARY"
+    assert any("1 qualifying verified" in note for note in result.arv.limitations)
     assert "arv" in result.incomplete_sections
+
+
+def test_zero_valid_sales_still_returns_insufficient():
+    filters = [AppraisalFilterV4(rule_id="distance", kind="max_distance_miles", value="1")]
+    comps = [make_comp("outside", None, distance_miles="2")]
+    result = evaluate_v4(make_request(comps=comps, settings=make_settings(filters=filters)))
+    assert result.status == "INSUFFICIENT_COMPS"
+    assert result.arv.final_arv is None
+    assert result.deal is None
+
+
+def style_request(comps, subject_style="Conventional"):
+    request = make_request(comps=comps, settings=make_settings(filters=[
+        AppraisalFilterV4(rule_id="building_style_match", kind="building_style_match"),
+    ]))
+    request.subject.building_style = subject_style
+    return request
+
+
+def test_building_style_keeps_only_verified_subject_style_match():
+    comps = [
+        make_comp("ranch", "900000", building_style="Ranch"),
+        make_comp("missing", "800000"),
+        make_comp("conventional", "400000", building_style="  CONVENTIONAL  "),
+    ]
+    result = evaluate_v4(style_request(comps))
+    assert result.status == "REVIEW_REQUIRED"
+    assert result.arv.accepted_comp_ids == ["conventional"]
+    assert result.arv.final_arv == Decimal("400000")
+    decisions = {d.comp_id: d for d in result.decisions}
+    assert decisions["ranch"].arv_status == "REJECTED"
+    assert "Ranch != Conventional" in ";".join(decisions["ranch"].mismatch_reasons)
+    assert "unknown comp building style" in ";".join(decisions["missing"].mismatch_reasons)
+
+
+@pytest.mark.parametrize("unknown", ["", "unknown", "N/A", "Not Available", "-", "  "])
+def test_unknown_building_styles_never_match_each_other(unknown):
+    result = evaluate_v4(style_request([make_comp("unknown", "400000", building_style=unknown)], unknown))
+    assert result.status == "REVIEW_REQUIRED"
+    assert result.decisions[0].match_percent == Decimal(0)
+    assert result.arv.final_arv == Decimal("400000")
+
+
+@pytest.mark.parametrize("style", ["Ranch", "unknown", "n/a", "not available", "-"])
+def test_all_missing_or_mismatched_styles_return_zero_match_preliminary(style):
+    result = evaluate_v4(style_request([make_comp("wrong", "900000", building_style=style)]))
+    assert result.status == "REVIEW_REQUIRED"
+    assert result.arv.accepted_comp_ids == ["wrong"]
+    assert result.decisions[0].match_percent == Decimal(0)
+    assert result.decisions[0].mismatch_reasons
+    assert result.deal.preliminary is True
+
+
+def test_building_style_normalizes_internal_whitespace_only():
+    result = evaluate_v4(style_request([
+        make_comp("matching", "400000", building_style="  split   LEVEL  "),
+    ], "Split Level"))
+    assert result.arv.accepted_comp_ids == ["matching"]
+
+
+def test_best_partial_match_uses_style_tiebreak_and_reports_every_mismatch():
+    filters = [
+        AppraisalFilterV4(rule_id="style", kind="building_style_match"),
+        AppraisalFilterV4(rule_id="distance", kind="max_distance_miles", value="1"),
+        AppraisalFilterV4(rule_id="disabled", kind="subdivision_match", enabled=False),
+    ]
+    comps = [
+        make_comp("expensive_ranch", "900000", building_style="Ranch", distance_miles="0.5"),
+        make_comp("matching_style", "400000", building_style="Conventional", distance_miles="2"),
+        make_comp("unknown", "800000", distance_miles=None),
+    ]
+    request = make_request(comps=comps, settings=make_settings(filters=filters))
+    request.subject.building_style = "Conventional"
+    result = evaluate_v4(request)
+    assert result.arv.accepted_comp_ids == ["matching_style"]
+    assert result.status == "REVIEW_REQUIRED"
+    assert result.deal.preliminary
+    decisions = {d.comp_id: d for d in result.decisions}
+    assert decisions["matching_style"].match_percent == Decimal(50)
+    assert decisions["expensive_ranch"].match_percent == Decimal(50)
+    assert decisions["unknown"].match_percent == Decimal(0)
+    assert all(d.total_rule_count == 2 for d in result.decisions)
+    assert decisions["matching_style"].matched_rule_count == 1
+    assert decisions["matching_style"].mismatch_reasons
+    assert decisions["matching_style"].investor_status == "REJECTED"
+
+
+def test_no_enabled_rules_are_unscored_and_select_only_one():
+    result = evaluate_v4(make_request(
+        comps=[make_comp("high", "600000"), make_comp("low", "400000")],
+        settings=make_settings(filters=[]),
+    ))
+    assert result.status == "REVIEW_REQUIRED"
+    assert result.arv.accepted_comp_ids == ["high"]
+    assert all(d.match_percent is None and d.total_rule_count == 0 for d in result.decisions)
+
+
+def physical_request(comps):
+    request = style_request(comps)
+    request.subject.subdivision = "Oak Park"
+    request.subject.year_built = 1980
+    request.subject.lot_sqft = Decimal("10000")
+    return request
+
+
+def test_subdivision_priority_beats_higher_score_price_and_geographic_closeness():
+    result = evaluate_v4(physical_request([
+        make_comp("local", "400000", subdivision="  OAK PARK ", year_built=1970,
+                  sqft="2500", lot_sqft="12000", building_style="Ranch", distance_miles="2"),
+        make_comp("other", "900000", subdivision="Other", year_built=1980,
+                  sqft="2000", lot_sqft="10000", building_style="Conventional", distance_miles="0.1"),
+    ]))
+    assert result.arv.accepted_comp_ids == ["local"]
+    decisions = {d.comp_id: d for d in result.decisions}
+    assert decisions["local"].priority_rank == 1
+    assert decisions["local"].match_percent == Decimal(0)
+    assert decisions["other"].match_percent == Decimal(100)
+    assert decisions["other"].priority_rank == 2
+    assert decisions["local"].ranking_details[0] == "subdivision: match"
+
+
+@pytest.mark.parametrize("better, worse", [
+    ({"year_built": 1981, "sqft": "2500"}, {"year_built": 1985, "sqft": "2000"}),
+    ({"sqft": "2050", "lot_sqft": "20000"}, {"sqft": "2200", "lot_sqft": "10000"}),
+    ({"lot_sqft": "11000", "building_style": "Ranch"}, {"lot_sqft": "15000", "building_style": "Conventional"}),
+    ({"lot_sqft": "11000"}, {"lot_sqft": None}),
+    ({"building_style": "Conventional"}, {"building_style": "Ranch"}),
+])
+def test_physical_priorities_are_lexicographic_with_unknown_lot_last(better, worse):
+    base = {"subdivision": "Oak Park", "year_built": 1980, "sqft": "2000", "lot_sqft": "10000", "building_style": "Conventional"}
+    result = evaluate_v4(physical_request([
+        make_comp("better", "400000", **(base | better)),
+        make_comp("worse", "900000", **(base | worse)),
+    ]))
+    assert result.arv.accepted_comp_ids == ["better"]
+    decisions = {d.comp_id: d for d in result.decisions}
+    assert decisions["better"].priority_rank == 1
+    assert decisions["worse"].priority_rank == 2
+    if worse.get("lot_sqft", "known") is None:
+        assert "relative lot-area difference: unknown" in decisions["worse"].ranking_details
+
+
+@pytest.mark.parametrize("changes", [
+    {"verified_sale_price": None}, {"sqft": None}, {"sqft": "0"},
+    {"sale_date": None}, {"sale_date": "2027-01-01"}, {"is_sale": False}, {"is_sale": None},
+])
+def test_match_score_never_overrides_hard_sale_exclusions(changes):
+    evidence = make_comp("invalid", "900000", building_style="Conventional").model_dump(mode="json")
+    evidence.update(changes)
+    result = evaluate_v4(style_request([CompCandidateV4.model_validate(evidence)]))
+    assert result.status == "INSUFFICIENT_COMPS"
+    assert result.arv.final_arv is None
+    assert result.decisions[0].match_percent == Decimal(100)
+    assert result.decisions[0].arv_status == "REJECTED"
+    assert result.decisions[0].rejection_reasons
+
+
+def test_single_comp_ranking_does_not_accept_unverified_evidence():
+    filters = [AppraisalFilterV4(rule_id="distance", kind="max_distance_miles", value="1")]
+    comps = [
+        make_comp("outside", "900000", distance_miles="2"),
+        make_comp("unknown_price", None, distance_miles="0.1"),
+        make_comp("qualifying", "400000", distance_miles="0.5"),
+    ]
+    result = evaluate_v4(make_request(comps=comps, settings=make_settings(filters=filters)))
+    assert result.status == "REVIEW_REQUIRED"
+    assert result.arv.accepted_comp_ids == ["outside"]
+    assert result.arv.final_arv == Decimal("900000")
+    assert all(d.arv_status == "REJECTED" for d in result.decisions if d.comp_id != "outside")
 
 
 def test_tie_break_is_deterministic():
@@ -174,10 +379,11 @@ def test_tie_break_is_deterministic():
     ]
     result = evaluate_v4(make_request(comps=comps))
     assert result.arv.accepted_comp_ids[0] == "c-top"
-    assert result.arv.accepted_comp_ids[1] == "c-a"
-    assert result.arv.accepted_comp_ids[2] == "c-b"
+    ranks = {d.comp_id: d.priority_rank for d in result.decisions}
+    assert ranks["c-a"] == 2
+    assert ranks["c-b"] == 3
     statuses = {d.comp_id: d.arv_status for d in result.decisions}
-    assert statuses["c-low"] == "NOT_EXAMINED_FOR_ARV"
+    assert statuses["c-low"] == "REJECTED"
 
 
 def test_permutation_invariant_duplicate_of_fallback():
@@ -270,11 +476,11 @@ def test_transitive_address_chain_collapses_permutation_invariant():
     )
 
 
-def test_insufficient_result_preserves_accepted_ids():
+def test_limited_result_preserves_accepted_ids():
     comps = [make_comp("c1", "400000"), make_comp("c2", "300000")]
     result = evaluate_v4(make_request(comps=comps))
-    assert result.status == "INSUFFICIENT_COMPS"
-    assert result.arv.accepted_comp_ids == ["c1", "c2"]
+    assert result.status == "REVIEW_REQUIRED"
+    assert result.arv.accepted_comp_ids == ["c1"]
 
 
 def test_result_carries_snapshot_schema_versions_and_hash():
@@ -295,12 +501,13 @@ def test_tampered_snapshot_hash_fails_durable_contract():
     assert result.errors and result.errors[0].code == "INVALID_SNAPSHOT"
 
 
-def test_early_stop_marks_remaining_not_examined():
+def test_every_comp_is_scored_and_ranked_with_one_reference():
     comps = [make_comp(f"c{i}", str(500000 - i * 10000)) for i in range(6)]
     result = evaluate_v4(make_request(comps=comps))
     statuses = {d.comp_id: d.arv_status for d in result.decisions}
-    assert list(statuses.values()).count("ACCEPTED") == 3
-    assert list(statuses.values()).count("NOT_EXAMINED_FOR_ARV") == 3
+    assert list(statuses.values()).count("ACCEPTED") == 1
+    assert list(statuses.values()).count("REJECTED") == 5
+    assert all(d.match_percent == Decimal(100) and d.total_rule_count == 1 for d in result.decisions)
 
 
 def test_rejected_comp_records_reasons_and_rule_outcomes():
@@ -318,7 +525,7 @@ def test_rejected_comp_records_reasons_and_rule_outcomes():
     assert any(o.rule_id == "dist" and o.passed is False for o in by_id["c2"].rule_outcomes)
     assert any(o.rule_id == "transaction_eligibility" for o in by_id["c2"].rule_outcomes)
     assert any(o.rule_id == "dist" and o.passed is True for o in by_id["c1"].rule_outcomes)
-    assert by_id["c4"].arv_status == "ACCEPTED"
+    assert by_id["c4"].arv_status == "REJECTED"
 
 
 def test_configured_transaction_rule_without_invented_lists():
@@ -335,7 +542,7 @@ def test_configured_transaction_rule_without_invented_lists():
     assert "tx" in " ".join(by_id["c2"].rejection_reasons)
     assert any(o.kind == "transaction" for o in by_id["c1"].rule_outcomes)
     default_result = evaluate_v4(make_request(comps=comps))
-    assert default_result.arv.accepted_comp_ids[:3] == ["c1", "c2", "c3"]
+    assert default_result.arv.accepted_comp_ids == ["c1"]
 
 
 def test_required_transaction_fields_reject_unknown_with_outcome():
@@ -377,7 +584,7 @@ def test_missing_calc_field_rejects_comp_but_continues_first_three():
     result = evaluate_v4(make_request(comps=comps))
     by_id = {d.comp_id: d for d in result.decisions}
     assert by_id["c-bad"].arv_status == "REJECTED"
-    assert result.arv.accepted_comp_ids[:3] == ["c-top", "c2", "c3"]
+    assert result.arv.accepted_comp_ids == ["c-top"]
 
 
 def test_boundary_fixtures():
@@ -427,7 +634,7 @@ def test_adjustment_signs_and_no_double_count():
     assert result.arv.final_arv == Decimal("515000") * Decimal(2000) / Decimal(2000)
     keys = [e.duplicate_key for e in result.ledger]
     assert len(keys) == len(set(keys))
-    assert len([e for e in result.ledger if e.stage == "comp"]) == 3
+    assert len([e for e in result.ledger if e.stage == "comp"]) == 1
 
 
 def test_subject_adjustment_applies_once_with_stage_semantics():
@@ -458,7 +665,7 @@ def test_duplicate_rule_instance_applies_once_per_target():
         CompAdjustmentRuleV4(rule_id="feat", kind="bedroom", signed_amount="5000", per_unit_amount="5000", applies_to="comp"),
     ]
     result = evaluate_v4(EvaluationRequestV4(subject=subject, comps=comps, renovation_level="light_cosmetic", settings=make_settings(adjustments=adjustments), evaluation_date="2026-09-01"))
-    assert len([e for e in result.ledger if e.rule_id == "feat"]) == 3
+    assert len([e for e in result.ledger if e.rule_id == "feat"]) == 1
 
 
 def test_feature_proximity_require_typed_evidence_and_record_outcomes():
@@ -510,7 +717,7 @@ def test_major_item_missing_scope_stays_visible_and_preliminary():
     evidence = [MajorItemEvidenceV4(system_id="roof", supported_age_years="40", source="owner")]
     comps = [make_comp("c1", "600000"), make_comp("c2", "590000"), make_comp("c3", "580000")]
     result = evaluate_v4(make_request(comps=comps, settings=make_settings(major=rules), major_item_evidence=evidence))
-    assert result.arv.status == "COMPLETED"
+    assert result.arv.status == "PRELIMINARY"
     assert result.renovation.preliminary is True
     assert result.renovation.items[0].included is False
     assert "deal" in result.incomplete_sections
@@ -592,6 +799,28 @@ def test_rounding_exact_ceiling_and_display():
     assert round_display(Decimal("123456"), Decimal("1000"), "half_up") == Decimal("123000")
     assert round_display(Decimal("123500"), Decimal("1000"), "half_up") == Decimal("124000")
     assert round_display(Decimal("123250"), Decimal("500"), "half_up") == Decimal("123500")
+
+
+@pytest.mark.parametrize("increment, expected_arv, expected_buy", [
+    ("1000", "500000", "200000"), ("500", "500500", "200500"),
+])
+def test_arv_and_buy_display_rounding_never_changes_exact_math(increment, expected_arv, expected_buy):
+    settings = make_settings(deal=DealSettingsV4(
+        closing_cost_percent="8", carrying_cost_percent="2", wholesale_fee="10000",
+        rounding_increment=increment,
+    ))
+    result = evaluate_v4(make_request(comps=[make_comp("one", "500499.99")], settings=settings))
+    assert result.arv.final_arv == Decimal("500499.99")
+    assert result.arv.displayed_arv == Decimal(expected_arv)
+    assert result.arv.display_rounding_difference == Decimal(expected_arv) - Decimal("500499.99")
+    assert result.deal.closing_costs == Decimal("40039.9992")
+    assert result.deal.investor_purchase_ceiling_exact == Decimal("200449.991")
+    assert result.deal.displayed_buy_price == Decimal(expected_buy)
+    assert result.deal.buy_price_rounding_difference == result.deal.displayed_buy_price - result.deal.investor_purchase_ceiling_exact
+    assert result.deal.seller_contract_ceiling_exact == Decimal("190449.991")
+
+
+def test_initial_offer_stays_incomplete_with_displayed_mao():
     comps = [make_comp("c1", "600000"), make_comp("c2", "600000"), make_comp("c3", "600000")]
     result = evaluate_v4(make_request(comps=comps))
     assert result.deal.initial_offer_status == "INCOMPLETE"
@@ -600,6 +829,17 @@ def test_rounding_exact_ceiling_and_display():
     assert result.deal.seller_contract_ceiling_exact is not None
     assert result.deal.displayed_mao is not None
     assert result.deal.displayed_mao - result.deal.seller_contract_ceiling_exact == result.deal.display_rounding_difference
+
+
+@pytest.mark.parametrize("increment, exact, displayed", [
+    ("1000", "123499.99", "123000"), ("1000", "123500", "124000"),
+    ("500", "123249.99", "123000"), ("500", "123250", "123500"),
+])
+def test_buy_headline_half_up_boundaries_preserve_exact_ceiling(increment, exact, displayed):
+    result = evaluate_deal(Decimal(exact), Decimal(0), DealSettingsV4(rounding_increment=increment), Decimal(0))
+    assert result.investor_purchase_ceiling_exact == Decimal(exact)
+    assert result.displayed_buy_price == Decimal(displayed)
+    assert result.buy_price_rounding_difference == Decimal(displayed) - Decimal(exact)
 
 
 def test_exact_deal_math_is_unquantized():
@@ -654,7 +894,7 @@ def test_investor_small_sample_returns_insufficient():
     comps = [make_comp("c1", "300000"), make_comp("c2", "310000")]
     result = evaluate_v4(make_request(comps=comps))
     assert result.investor.status == "INSUFFICIENT_INVESTOR_DATA"
-    assert result.status == "INSUFFICIENT_COMPS"
+    assert result.status == "REVIEW_REQUIRED"
 
 
 def test_investor_applies_property_filters():
@@ -706,5 +946,5 @@ def test_investor_marks_filter_exclusions_rejected_with_reasons():
 def test_investor_does_not_fail_supported_arv():
     comps = [make_comp("c1", "600000"), make_comp("c2", "590000"), make_comp("c3", "580000")]
     result = evaluate_v4(make_request(comps=comps))
-    assert result.arv.status == "COMPLETED"
+    assert result.arv.status == "PRELIMINARY"
     assert result.investor.status == "INSUFFICIENT_INVESTOR_DATA"

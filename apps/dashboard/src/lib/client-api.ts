@@ -5,6 +5,7 @@
  */
 
 import { getImpersonatedUserId } from '@/components/auth/ImpersonationProvider'
+import type { AnalyzeData } from '@/app/(dashboard)/dashboard/analyze/actions'
 
 // API URL - inlined at build time via next.config.js
 const API_URL = process.env.NEXT_PUBLIC_API_URL!
@@ -742,6 +743,14 @@ export async function updateSavedReport(jobId: string, opts: {
     method: 'PUT',
     body: JSON.stringify(opts),
   })
+}
+
+export async function recalculateReportComps(jobId: string, selectedCompIds: string[] | null, expectedRevision: number): Promise<AnalyzeData> {
+  const result = await fetchApi<{ analysis: AnalyzeData }>(`/user/reports/${encodeURIComponent(jobId)}/comps`, {
+    method: 'POST',
+    body: JSON.stringify({ selectedCompIds, expectedRevision }),
+  })
+  return result.analysis
 }
 
 // ─── Report Sharing ──────────────────────────────────────────────────────────

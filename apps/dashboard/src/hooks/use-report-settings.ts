@@ -12,6 +12,7 @@
  */
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
+import { toast } from 'sonner'
 import type { AnalyzeData } from '@/app/(dashboard)/dashboard/analyze/actions'
 import {
   getOrCreateDefaultPreset,
@@ -94,6 +95,7 @@ export interface UseReportSettingsReturn {
 }
 
 export function useReportSettings(data: AnalyzeData | null): UseReportSettingsReturn {
+  const pythonAuthoritative = data?.evaluationEngine === 'python-v4'
   const [loading, setLoading] = useState(true)
   const [labels, setLabels] = useState<AppraisalDefaults | null>(null)
 
@@ -256,9 +258,9 @@ export function useReportSettings(data: AnalyzeData | null): UseReportSettingsRe
   const recalcData = useMemo(() => {
     // Don't recalc until we have full evaluation data (valuation exists)
     // This prevents recalc from running on partial streaming data (subject + comps only)
-    if (!data || loading || !data.valuation) return null
+    if (!data || loading || !data.valuation || pythonAuthoritative) return null
     return recalculateReport(data, settings)
-  }, [data, settings, loading])
+  }, [data, settings, loading, pythonAuthoritative])
 
   // Updaters
   const updateFilter = useCallback((type: string, updates: Partial<RecalcFilter>) => {
@@ -331,20 +333,24 @@ export function useReportSettings(data: AnalyzeData | null): UseReportSettingsRe
     }
   }, [])
 
+  const requireServerEvaluation = useCallback(() => {
+    toast.info('Python V4 results are fixed for this run. Change evaluation settings and run Analyze again.')
+  }, [])
+
   return {
     settings,
     labels,
     loading,
     recalcData,
     settingsChanged,
-    updateFilter,
-    updateAdjustment,
-    updateDealParams,
-    selectRehabLevel,
-    updateRehabTableEntry,
-    updateMajorItem,
-    updateAsIsThreshold,
-    updateProximityAdjustments,
+    updateFilter: pythonAuthoritative ? requireServerEvaluation : updateFilter,
+    updateAdjustment: pythonAuthoritative ? requireServerEvaluation : updateAdjustment,
+    updateDealParams: pythonAuthoritative ? requireServerEvaluation : updateDealParams,
+    selectRehabLevel: pythonAuthoritative ? requireServerEvaluation : selectRehabLevel,
+    updateRehabTableEntry: pythonAuthoritative ? requireServerEvaluation : updateRehabTableEntry,
+    updateMajorItem: pythonAuthoritative ? requireServerEvaluation : updateMajorItem,
+    updateAsIsThreshold: pythonAuthoritative ? requireServerEvaluation : updateAsIsThreshold,
+    updateProximityAdjustments: pythonAuthoritative ? requireServerEvaluation : updateProximityAdjustments,
     resetToDefaults,
   }
 }

@@ -59,6 +59,7 @@ export function useAutoSave({
   onSavedRef.current = onSaved
 
   useEffect(() => {
+    if ((analysisData as { evaluationEngine?: string } | null)?.evaluationEngine === 'python-v4') return
     if (!jobId || !analysisData || !displayValuation || !recalcData) return
 
     const fingerprint = JSON.stringify({

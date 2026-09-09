@@ -4,6 +4,15 @@ Date: 2026-09-08. Candidate branch: `v4-python`.
 
 ## Decision
 
+Local testing update, 2026-09-08: the candidate now uses an authenticated
+loopback Python bridge after existing CoreLogic evidence retrieval. The browser
+preserves tagged Python results, and the saved report retains the full Python
+result and settings snapshot. Owner-approved minimum-one-comp behavior is active.
+Live browser and saved-report verification passed with two qualifying comps.
+See `.opencode/ENGINEERING_STATE.md` for evidence and local startup details.
+The findings below describe the earlier production replacement review; they
+do not describe the current local bridge. Production cutover remains unapproved.
+
 Keep the existing evaluator active until the application integration passes.
 The Python foundation passes its tests, but it cannot yet replace the current
 application evaluation path. SOL returned CHANGES_REQUIRED for replacement.

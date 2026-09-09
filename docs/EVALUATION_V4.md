@@ -2,6 +2,198 @@
 
 Status: methodology source for the V4 candidate.
 
+## Experimental upper-half policy, September 8, 2026
+
+Owner authorized implementation and three ordered address tests. This section
+supersedes the earlier automatic single-reference policy for new local reports.
+It does not constitute owner app approval or production readiness.
+
+- New signed snapshots use `upper_half_rule_weighted_v1`. Existing snapshots
+  without that setting retain legacy selection and arithmetic on recalculation.
+- Validate sales and apply configured subdivision, year, size and distance gates
+  before classifying prices. Unknown style stays preliminary; a known mismatch
+  requires high-confidence visual physical similarity. Missing photos do not
+  prevent numerical evaluation. Garage capacity, when known for the subject,
+  adds a preference check rather than a hard exclusion.
+- Sort qualified recorded sale prices descending. Retain `ceil(count / 2)` and
+  all equal-price ties at the cutoff. Lower-half sales are inferred lower-market
+  references, not proof of as-is condition. Do not force additional ARV comps.
+- Each selected adjusted PPSF receives raw weight
+  `max(rule_match_fraction, 0.01) * 180 / (180 + sale_age_days)`. Normalize these
+  weights and multiply the weighted PPSF by subject sqft. Apply existing subject
+  adjustments afterward. Recent upper-half sales rank before older ones; recency
+  never rescues a physically disqualified sale. The 0.01 floor supports explicit
+  manual selections with zero known rule matches and requires review.
+- With at least four physically qualified sales, quarantine a sale PPSF above
+  three times their median from automatic ARV pending price review. This is an
+  experimental plausibility check, not proof that the transaction is invalid.
+- Keep the configured180-day window pending owner choice on a sparse-market
+  12-month fallback. No cross-subdivision or size relaxation is implied.
+- Refresh available Zillow evidence before final price classification. Exact
+  property identity, completed-sale date and price must be established together.
+  Asking price never substitutes for sold price. Store original evidence and
+  resolved provenance internally; UI/PDF use resolved values only. Conflicts
+  remain explicit and must not be silently overwritten.
+- All computations remain in Python. Vision contributes constrained physical
+  observations only, not prices or independent comparable selection.
+
+N03/N04: implementation under test, owner approval pending. N01/N05 historical
+retrieval expansion remains pending. N07/N08 permit-system ages and hazards
+remain incomplete. Keep the checklist below open until owner app approval.
+
+Local acceptance evidence: Heritage Cove returned zero qualified sales under
+the180-day limit. Piedmont report `job_1788912849879_0m36c2vk` selected two tied
+upper-half sales with recency weights, displayed ARV317000 andBuy198000; Zillow
+was unavailable before local credential reload. Final Magnolia report
+`job_1788913320994_25fyexz6` selected one comp, displayed ARV384000 andBuy246000,
+and persisted corroborated Zillow sales. PDF uses resolved50,300 subject sale,
+not old345,000; the large price change is flagged for transaction-scope review.
+Vision parsing is repaired, but available front-exterior evidence remains
+unverified. Lot-size tolerance/weighting and historical fallback remain decisions,
+not completed rules. No owner acceptance inferred from these tests.
+
+## Next implementation tasks: awaiting owner app approval
+
+Updated 2026-09-08. The owner resumed implementation after requesting that these
+tasks remain in this Markdown file until they have been demonstrated in the
+application and explicitly approved by the owner. Automated tests, agent QA,
+and code completion alone do not close a task. Keep completed entries and
+their approval evidence as history rather than deleting them.
+
+The directives below supersede conflicting single-reference selection and
+unweighted-average language later in this document as future requirements.
+They are not a claim that the running application implements them. Before
+resuming implementation, reconcile the executable policy and affected sections
+below with the owner's decisions on the unresolved details.
+
+Task states: Pending implementation -> In progress -> Ready for owner app test
+-> Owner approved. Record the tested report/address, code revision, verification,
+approval date, and the owner's explicit acceptance for each approved task.
+
+- [ ] V4-N09: Simplify comparable diagnostics for users. Show whole match
+  percentages, plain-language year/style/subdivision comparisons, and size/lot
+  differences as whole percentages instead of raw ratios. Keep exact evidence in
+  backend output; never round an incomplete match to100%. Unknown evidence stays
+  explicit. Status: Ready for owner app test; owner approval: pending.
+- [ ] V4-N10: Use the top-right comparable checkbox to add/remove it from ARV.
+  Recalculate in Python from the signed saved evidence/settings, retaining hard
+  verified-sale gates and mismatch warnings. Manual selection uses the current
+  snapshot's policy: legacy arithmetic mean or experimental rule/recency-weighted
+  adjusted PPSF. Manual choices remain explicit overrides requiring review.
+  Reject empty selection, invalid evidence and stale edits; show pending/error
+  feedback. Persist selection, valuation and audit history atomically; Reset
+  restores automatic selection. Older unsigned reports require New Analysis.
+  Status: Ready for owner app test; owner approval: pending.
+
+- [ ] V4-N01: Prefer older sales within the subject subdivision before selecting
+  sales from another subdivision. Expand the sale-date search first, retaining
+  physical comparability and verified-sale gates. Show the search stages and
+  sale-age limitations. Agree on maximum lookback before implementation.
+  App acceptance: an older physically comparable same-subdivision sale is used
+  ahead of a recent different-subdivision sale. Status: Pending implementation;
+  owner approval: pending.
+- [ ] V4-N02: Treat subdivision, year built, and square footage as jointly
+  important comparability requirements. Do not let an exact year match override
+  an unacceptable size difference. Retain lot size and physical-style evidence.
+  Agree on tolerances and how joint importance affects ranking; do not invent
+  numeric weights. App acceptance: inspect smaller, similar-size, and larger
+  candidates and their adjusted PPSF contributions against the subject.
+  Status: Pending implementation; owner approval: pending.
+- [ ] V4-N03: Classify the highest recorded sales that match the appraisal rules
+  as ARV pricing references, and the lower matched sales as inferred as-is pricing
+  references. Rule adherence alone does not establish ARV eligibility or actual
+  renovation condition. Price alone does not prove condition or buyer identity.
+  Agree on upper/lower cohort cutoffs, ties, and sparse-sample behavior. App
+  acceptance: report clearly separates ARV, inferred as-is, and unclassified
+  references with the selection evidence. Status: Pending implementation;
+  owner approval: pending.
+- [ ] V4-N04: Consider all comparably qualified ARV references rather than
+  automatically limiting the result to one. Resolve the owner's requested
+  rule-match-weighted ARV average, including equal-score inclusion, weighting
+  formula, cohort limits, and zero/unknown scores. Keep the minimum of one usable
+  verified reference when evidence is sparse, with preliminary status. Never
+  blend lower as-is references into ARV solely because they have the same score.
+  App acceptance: selected comps, normalized weights, adjusted PPSF, and final
+  calculation can be reconciled in the report. Status: Pending implementation;
+  owner approval: pending.
+- [ ] V4-N05: If no usable comps return, expand retrieval parameters in visible,
+  bounded stages, starting with time within the subdivision. Preserve hard sale
+  evidence gates and report exhausted searches honestly. Confirm provider support
+  and search limits; ensure cache keys include all effective search parameters.
+  App acceptance: an initially empty search retrieves actual additional evidence,
+  and a truly exhausted search reports insufficient evidence without inventing a
+  valuation. Status: Pending implementation; owner approval: pending.
+- [ ] V4-N06: Display valuation and buy-price headlines rounded to nearest
+  $1,000 with no cents, consistent with the existing rounding section; retain
+  explicit $500 support. The latest phrase "nearest thousandth" was queried;
+  nearest $1,000 is the documented baseline, pending owner confirmation in app.
+  Keep exact Python financial values for formulas, tier selection, and ceiling
+  validation. Use the investor ceiling for Buy, not seller/wholesale MAO.
+  App acceptance: dashboard, saved report and PDF agree, including halfway cases.
+  Status: Ready for owner app test. Python/API/dashboard tests, saved-report
+  browser verification and PDF download passed; owner approval: pending.
+- [ ] V4-N07: Retrieve and preserve actual subject permit evidence and wire
+  supported system replacement scope/completion into Python major-item evidence.
+  Correct the documented endpoint and nested response mapping. Distinguish no
+  records from permission errors or unavailable data; never infer system age
+  from property age or an absent permit. App acceptance: real permit records,
+  provenance, and resulting included/skipped major items are inspectable; provider
+  failure stays visible. Status: In progress, provider endpoint/error corrections;
+  Python system-age mapping still pending; owner approval: pending.
+- [ ] V4-N08: Retrieve API flood-zone and available hazard evidence for both
+  subject and comps. Preserve source, timestamp, and unknown/error status; do not
+  present failed retrieval as no flood risk. Agree on any hazard matching or price
+  adjustment policy before applying it to valuation. App acceptance: subject and
+  comp evidence is visible and unavailable data is clearly distinguished from a
+  known negative result. Status: In progress, unknown/error handling corrections;
+  comparable hazard retrieval still pending; owner approval: pending.
+
+### Inspection findings for the next session
+
+- N09/N10 integrated app check: report `job_1788906780962_obnjsk2b`, top-right
+  add2 comps yields displayedARV613000/Buy434000. Reload, reset toautomatic,
+  re-add and PDF pass; finalrevision4. Unknown IDs422,empty400,stale409,extra
+  client money400,badOrigin403,anonymous401; competing requests200/409 with
+  exactly1 history record. Python137 tests pass,1 skipped; adapter/signature,
+  dashboard hooks/readability tests and workspace typechecks pass. Task remains
+  unchecked until owner tests and approves it. Exact evidence/settings preserved.
+- Resumed verification2026-09-08: V4-N06 report
+  `job_1788905670125_a2ufpf92` shows ARV686000, Buy500000, Wholesale490000.
+  Exact values remain685890.5165767155 and499701.46491904394 for ARV/Buy.
+  Login/typeahead/new evaluation/reopen pass; PDF downloads25892 bytes;390px
+  viewport has390px content width and no page exceptions. PDF content callsites
+  tested; full extracted PDF text was not separately compared.
+- Verification:128 Python tests pass,1 skipped;13 dashboard targeted tests,
+  both workspace typechecks, TS request/response and provider fixture tests pass.
+  Independent rounding QA/SOL found no scoped blocker. None is owner acceptance.
+- V4-N07 partial delivery: corrected endpoint now returns5 real subject permits
+  for4207 W EMPEDRADO ST. Status history, source and raw record are retained in
+  provider data. Verified system-age mapping into Python still pending.
+- V4-N08 partial delivery: failure/unknown handling fixed and old bad cache entries
+  bypassed via versioned keys. This report has flood:null with visible unknown
+  warning. Current spatial endpoint has no supporting local official schema;
+  valid flood service/entitlement and subject/comp hazard retrieval remain pending.
+
+Historical inspection findings before the above corrections:
+
+- CoreLogic comparable retrieval currently sends only `maxComps`; date, distance,
+  and area query parameters are commented out. Changing evaluation tolerances
+  alone will not retrieve older evidence. Existing cache keys omit `maxComps`.
+- The local official schema documents `/v2/properties/{clip}/building-permits`.
+  The current client uses `/v2/properties/{id}/permits` and expects flat records,
+  while the documented response uses `items[].permit`, `project`, and contractors.
+- Permit entitlement errors currently become successful empty data. Flood lookup
+  errors become a successful unknown zone with `isInFloodZone: false`. These
+  results can be cached; correct error semantics and invalidate affected caches.
+- Comparables currently receive property-detail enrichment, not flood/hazard
+  enrichment. The documented climate-risk comprehensive endpoint has no client
+  implementation. Python requests currently send no major-item permit evidence.
+- No new live provider calls or entitlement verification were performed for this
+  inspection. The findings are code/schema observations, not proof of coverage.
+- At the previous pause, partial unverified rounding changes existed in Python contracts/math
+  and dashboard formatting. Integration and bounded verification are now complete
+  as recorded above; owner approval is still pending.
+
 Sections that restate the owner's directive are product requirements. Items
 explicitly labeled as engineering choices define deterministic implementation
 details where the directive requires a choice but does not prescribe one.
@@ -83,27 +275,44 @@ invent additional prohibited code lists.
 
 ## ARV comparable selection
 
-The normal ARV sequence is deterministic:
+Owner clarifications on 2026-09-08 supersede the earlier highest-sale-price,
+first-three, all-filters-required selection. Return the closest available
+reference and a comparative report even when no candidate matches every rule.
 
-1. Resolve the subject.
-2. Retrieve the candidate comparable universe.
-3. Validate and deduplicate sale evidence.
-4. Sort by verified sale price descending.
-5. Apply the documented equal-price tie-breaker.
-6. Starting with the highest price, apply every enabled Appraisal Rule.
-7. Accept a passing distinct property or record its rejection reasons.
-8. Stop ARV examination immediately after three valid properties are accepted.
+1. Resolve the subject; retrieve and deduplicate the candidate sale evidence.
+2. Keep verified positive price, positive area, a real nonfuture sale date,
+   sale status and configured transaction eligibility as hard evidence gates.
+3. Evaluate every enabled subject-matching rule for every candidate. Unknown
+   evidence does not satisfy a rule; preserve every mismatch and unknown field.
+4. Rank eligible candidates by subdivision match first, then smallest year-built
+   difference, smallest relative square-footage difference, smallest relative
+   lot-area difference, then physical-style match. Compare this ordered sequence
+   directly rather than inventing numerical weights. Known evidence ranks ahead
+   of unknown evidence within each criterion.
+5. Select the single highest-ranked reference. Minimum one means a valid sale
+   may support a preliminary evaluation despite matching-rule gaps. Do not select
+   a fabricated, duplicate, non-sale or uncalculable record to satisfy the minimum.
+6. Return rank, comparison details, rule-match percentage, selected/not-selected
+   status, mismatches, valuation and limitations in the saved and exported report.
 
-Do not rank by PPSF, add a percentile gate, require clustering, ask an LLM to
-select comps, or relax a rule to force three comps. Candidates below the early
-stop are `NOT_EXAMINED_FOR_ARV`, not rejected. Fewer than three accepted comps
-produces `INSUFFICIENT_COMPS` with the accepted evidence and reasons preserved.
-Do not call these comps vision verified or assign unsupported accuracy claims.
+Rule-match percentage is enabled rules satisfied divided by enabled rules
+evaluated, multiplied by100. Disabled rules are excluded; unknowns count as unmet.
+Zero enabled rules means unscored, not100%. Display100% only when every enabled
+rule is satisfied; never round a partial match up to100%. This score measures
+configured rule adherence, not probability of valuation accuracy. It does not
+override the owner's ordered ranking priorities. Lot area affects ranking;
+no unapproved lot-size tolerance is invented for the rule denominator.
 
-Engineering choice: equal verified sale prices sort by normalized sale date
-descending, stable provider property ID ascending, then normalized address
-ascending. This choice is deterministic and does not alter the owner's
-sale-price priority.
+Building-style matching remains an enabled assessed rule. Normalize case and
+whitespace only; Ranch does not become Conventional. A style mismatch reduces
+rule adherence and is disclosed, but no longer prevents best-available selection.
+The report must retain preliminary/REVIEW_REQUIRED status for limited evidence
+and partial matches. Zero usable sales returns insufficient evidence; never
+invent an ARV. Do not call references vision verified or infer renovation
+condition from selection alone.
+
+Engineering tie-breaker after all owner priorities: verified sale price
+descending, sale date descending, stable provider ID, address, then comp ID.
 
 ## ARV calculation
 
@@ -136,7 +345,7 @@ amount, units, evidence, input, and calculation stage.
 ## Investor acquisition analysis
 
 Investor analysis is separate from ARV and examines the complete eligible
-comparable universe even after ARV reaches its early stop. It identifies a
+comparable universe. It identifies a
 defensible local lower-price or lower-PPSF cohort within comparable housing
 stock.
 
@@ -344,6 +553,98 @@ Evaluation and section statuses are explicit:
 An evaluation can complete with a supported ARV and a preliminary renovation
 or MAO section. Errors and limitations belong to the affected property or
 section and do not erase valid independent work.
+
+## Provider-authoritative local candidate, September 8, 2026
+
+This owner-approved implementation policy supersedes conflicting historical
+candidate proposals in this file. It applies to new local V4 reports with
+`provider_authoritative_upper_half_v2`. Old signed reports retain their original
+inputs, settings, policy and hash. Engineering verification is not owner app approval.
+
+### Repeatable evaluation sequence
+
+1. Select the exact provider address and property ID, including unit, city, state
+   and ZIP. Resolve ambiguity before requesting an evaluation.
+2. Keep primary-provider property characteristics authoritative. Listing sites
+   and vision cannot fill or replace square footage, year built, lot, subdivision,
+   style, property type, beds, baths or garage details. Missing data stays unknown.
+3. Retrieve the provider comparable pool with documented query parameters.
+   The local job combines a provider-default nearby pool of up to 50 sales with
+   a 12-month pool of up to 50 sales using configured distance and size bounds.
+   Deduplicate by provider ID before enrichment, with at most 100 unique records.
+   Prefer the newer valid sale pair on overlapping records; quarantine same-date
+   price conflicts and retain both original records. Python applies all physical
+   gates to both pools. Cache keys include every search parameter. Record
+   requested coverage and returned count; this is not a claim of complete market coverage.
+4. Validate completed-sale prices, dates, transaction flags and duplicate IDs.
+   Reject invalid evidence. Quarantine the existing extreme PPSF anomaly case
+   before dividing the qualified pool by price.
+5. For physically relevant candidates, check Zillow, then Redfin, then Realtor.com.
+   Stop at usable completed-sale evidence. Match exact identity and corroborate
+   price/date against a literal sale-history row or block. Apply a newer sold price
+   and date together. Same-date conflicts try the next source; unresolved conflicts
+   keep provider evidence with a warning. If all listing sources fail, use provider
+   evidence. Ignore asking prices, pending prices and estimates.
+6. Capture property photos with source provenance. If photos are absent, request
+   a screenshot of the identity-checked property page. A screenshot is not a verified
+   front exterior; blocked pages, maps and unrelated images are not condition evidence.
+   Preserve accepted bytes in private report storage, with source and capture time.
+7. Try these eligibility stages in order, moving on only when zero usable automatic
+   ARV references survive: 180 days with year built +/-10; 365 days with +/-10;
+   365 days with +/-15. Preserve subdivision, square-footage, distance, property-type
+   and known-style gates. Lot differences remain visible without a new lot threshold.
+8. At each stage, sort qualified recorded sale prices high to low. Keep the upper
+   `ceil(count / 2)` sales and all cutoff-price ties. The lower half cannot enter
+   automatic ARV just because its physical rules match.
+9. Classify supported sale-relevant renovation imagery as A, visible renovation
+   evidence. Otherwise label eligible references B, price-inferred ARV. Clear,
+   high-confidence unfinished/distressed evidence tied to that sale excludes the
+   comp after the upper-half cutoff. Do not backfill from the lower half in that
+   stage. Undated images cannot exclude a comp or establish renovation at sale.
+   Current listing adapters do not establish image-to-sale dates, so their image
+   observations remain informational and price inference remains available.
+10. Use every surviving ARV reference without forcing a target count. One is valid
+    but preliminary. Raw weight is `match_fraction * 180 / (180 + sale_age_days)`;
+    normalize weights, average adjusted price per square foot, multiply by subject
+    square footage and apply subject adjustments. Python uses Decimal arithmetic.
+    Preserve exact values; round ARV, buy and wholesale headlines to the nearest
+    $1,000. Existing rehab, cost and investor-policy limitations remain explicit.
+11. Save the decision trace, attempted stages, source audit, resolved sold values,
+    frozen signed request, weights, exact math and report assets. If all stages fail,
+    save an `INSUFFICIENT_COMPS` report with `valuation: null`, not a zero-dollar
+    estimate. Manual recalculation reuses the frozen snapshot without provider calls.
+    It remains an explicit operator override and requires review.
+
+### Bounded operation and known limits
+
+Listing refresh has a 90-second budget and three concurrent properties. Condition
+observation has a 45-second budget and three concurrent calls. Report assets have
+a 30-second total capture budget, at most 20 images per report and four per property,
+with selected comps prioritized. Each image is limited to 5 MB. Source failures
+remain visible and do not silently invoke the old evaluator. Calls are recorded.
+The owner discarded the 50-evaluations-per-minute target; no live throughput or
+production-capacity claim is made by these changes. Production worker coordination,
+permit-system-age mapping and comparable hazards remain separate unfinished work.
+
+### Owner app approval checklist
+
+- [ ] V4-P06: approve subject permit records / Permits - NA and whole-number
+  valuation display in the app. Verified locally on Magnolia report
+  job_1788967256552_z1q9ikuo: nine provider records persisted and rendered,
+  no valuation decimals, exact Python math unchanged. NA distinguishes unavailable
+  lookup from an empty response; old reports need a new evaluation for details.
+- [ ] V4-P05: implement and approve zero-comp fallback to older sales and 1-mile,
+  then 1.5-mile coverage. Maximum historical age pending owner choice (24 or
+  36 months). Keep physical matching and upper-half ARV rules; stop expansion
+  once eligible references exist. Preserve V2 snapshots with a new policy version.
+- [ ] V4-P01: approve staged upper-half selection and recent-sale weighting in the app.
+- [ ] V4-P02: approve provider characteristic authority and completed-sale refresh audit.
+- [ ] V4-P03: approve private photos/screenshots and saved insufficient-evidence reports.
+- [ ] V4-P04: approve the five requested address reports and their PDF outputs.
+
+Do not remove these entries after automated tests. Record the owner's response,
+date, report ID and revision before marking any entry approved. Earlier N01-N10
+approval gates remain open unless the owner explicitly closes them.
 
 ## Verification standard
 

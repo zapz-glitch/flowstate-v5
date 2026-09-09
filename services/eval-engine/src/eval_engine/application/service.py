@@ -83,6 +83,7 @@ def _validate_property_shapes(body: dict) -> tuple[list[dict], dict, str]:
                 major_item_evidence=list(item.major_item_evidence),
                 additional_items=list(item.additional_items),
                 evaluation_date=item.evaluation_date,
+                selected_comp_ids=item.selected_comp_ids,
             )
         except Exception as exc:
             raise ApiFailure("VALIDATION_ERROR", "invalid property evaluation request", status_code=422) from exc
@@ -96,6 +97,7 @@ def _validate_property_shapes(body: dict) -> tuple[list[dict], dict, str]:
                     "major_item_evidence": [entry.model_dump(mode="json") for entry in item.major_item_evidence],
                     "additional_items": [entry.model_dump(mode="json") for entry in item.additional_items],
                     "evaluation_date": item.evaluation_date,
+                    **({"selected_comp_ids": item.selected_comp_ids} if item.selected_comp_ids is not None else {}),
                     "evidence_mode": mode,
                     "acquisition": {"subject": dict(item.subject), "comps": list(item.comps)},
                 },
@@ -276,6 +278,7 @@ def process_queued_evaluations(
             major_item_evidence=[MajorItemEvidenceV4(**raw) for raw in stored.get("major_item_evidence", [])],
             additional_items=[AdditionalRenovationItemV4(**raw) for raw in stored.get("additional_items", [])],
             evaluation_date=stored.get("evaluation_date"),
+            selected_comp_ids=stored.get("selected_comp_ids"),
         )
         result = evaluate_v4(typed)
         bound = dict(result.model_dump(mode="json"))
@@ -340,6 +343,7 @@ def read_evaluation(
         "evaluation_id": str(row.id),
         "batch_id": str(row.batch_id),
         "tenant_id": row.tenant_id,
+        "requested_by_user_id": row.requested_by_user_id,
         "status": status,
         "result_status": row.result_status,
         "attempts": int(row.attempts),

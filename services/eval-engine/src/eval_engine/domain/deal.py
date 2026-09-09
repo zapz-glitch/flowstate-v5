@@ -30,12 +30,15 @@ def evaluate_deal(
     investor_ceiling = final_arv - total_rehab - closing - carrying - flip_profit
     seller_ceiling = investor_ceiling - deal.wholesale_fee
     displayed = round_display(seller_ceiling, deal.rounding_increment, deal.rounding_mode)
+    displayed_buy = round_display(investor_ceiling, deal.rounding_increment, deal.rounding_mode)
     return DealResultV4(
         status="PRELIMINARY" if preliminary else "COMPLETED",
         closing_costs=closing,
         carrying_costs=carrying,
         flip_profit=flip_profit,
         investor_purchase_ceiling_exact=investor_ceiling,
+        displayed_buy_price=displayed_buy,
+        buy_price_rounding_difference=displayed_buy - investor_ceiling,
         seller_contract_ceiling_exact=seller_ceiling,
         wholesale_fee=deal.wholesale_fee,
         displayed_mao=displayed,

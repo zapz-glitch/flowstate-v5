@@ -25,6 +25,7 @@ import reportsRoute from './routes/reports'
 import batchRoute from './routes/batch'
 import ghlSettingsRoute from './routes/ghl-settings'
 import userReportsRoute from './routes/user-reports'
+import reportAssetsRoute from './routes/report-assets'
 import waitlistRoute from './routes/waitlist'
 import adminRoute from './routes/admin'
 // Vision analysis removed
@@ -44,8 +45,9 @@ app.use('*', logger())
 app.use(
   '*',
   cors({
-    origin: (origin) => {
+    origin: (origin, c) => {
       if (!origin) return ''
+      if (c.env.DASHBOARD_URL) return origin === c.env.DASHBOARD_URL ? origin : ''
       // Allow localhost, any *.flowstate.homes subdomain, and flowstate.homes itself
       if (origin === 'http://localhost:3000') return origin
       if (/^https:\/\/([\w-]+\.)?flowstate\.homes$/.test(origin)) return origin
@@ -112,6 +114,7 @@ app.route('/ghl-settings', ghlSettingsRoute)
 
 // User reports routes (session auth via Better Auth cookies)
 app.route('/user/reports', userReportsRoute)
+app.route('/user/reports', reportAssetsRoute)
 
 // Waitlist routes (no auth)
 app.route('/waitlist', waitlistRoute)

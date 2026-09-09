@@ -1,0 +1,23 @@
+import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+
+const production = readFileSync(new URL('../wrangler.toml', import.meta.url), 'utf8')
+const local = readFileSync(new URL('../wrangler.local.toml', import.meta.url), 'utf8')
+assert.match(production, /^ENVIRONMENT = "production"$/m)
+assert.match(production, /^DASHBOARD_URL = "https:\/\/app\.flowstate\.homes"$/m)
+assert.doesNotMatch(production, /localhost|127\.0\.0\.1|flowstate-v4-local-report-assets|V4_LOCAL_BRIDGE/)
+assert.doesNotMatch(production, /^EVALUATION_ENGINE\s*=\s*"python-v4"/m)
+assert.match(local, /^ENVIRONMENT = "development"$/m)
+assert.match(local, /^bucket_name = "flowstate-v4-local-report-assets"$/m)
+const staging = readFileSync(new URL('../wrangler.staging.example.toml', import.meta.url), 'utf8')
+assert.match(staging, /^ENVIRONMENT = "staging"$/m)
+assert.match(staging, /^workers_dev = false$/m)
+assert.match(staging, /^bucket_name = "flowstate-v4-staging-report-assets"$/m)
+assert.match(staging, /REPLACE_WITH_NEW_STAGING_D1_ID/)
+assert.match(staging, /REPLACE_WITH_NEW_STAGING_KV_ID/)
+for (const match of production.matchAll(/^(?:database_id|id) = "([^"]+)"/gm)) assert(!staging.includes(match[1]))
+const dashboard = JSON.parse(readFileSync(new URL('../../dashboard/wrangler.staging.jsonc', import.meta.url), 'utf8'))
+assert.equal(dashboard.name, 'flowstate-v4-staging-dashboard')
+assert.equal(dashboard.vars.NEXT_PUBLIC_API_URL, 'https://api.staging.flowstate.homes')
+assert.equal(dashboard.workers_dev, false)
+console.log('Deployment isolation: production defaults stay production; Python local bindings are separate')

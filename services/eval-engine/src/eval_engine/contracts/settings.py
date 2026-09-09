@@ -123,6 +123,9 @@ def settings_envelope(snapshot: SettingsSnapshotV4) -> dict:
       verbatim in ``content`` rather than duplicated).
     """
     payload = snapshot.model_dump(mode="python")
+    # Old signed snapshots must retain their pre-experiment content identity.
+    if payload.get("arv_selection_policy") == "legacy_physical_v1":
+        payload.pop("arv_selection_policy")
     payload.pop("snapshot_id", None)
     payload.pop("content_hash", None)
     version = payload.pop("schema_version", "evaluation-v4")
@@ -160,6 +163,7 @@ class SettingsSnapshotV4(BaseModel):
     tiers: list[RenovationTierV4] = Field(default_factory=list)
     deal: DealSettingsV4 = Field(default_factory=DealSettingsV4)
     major_items: list[MajorItemRuleV4] = Field(default_factory=list)
+    arv_selection_policy: Literal["legacy_physical_v1", "upper_half_rule_weighted_v1", "provider_authoritative_upper_half_v2"] = "legacy_physical_v1"
 
     def canonical_payload(self) -> dict:
         return settings_envelope(self)

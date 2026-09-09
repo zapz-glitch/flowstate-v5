@@ -6,10 +6,9 @@
 # by the root .dockerignore, so public build-time values are injected via
 # Compose environment (NEXT_PUBLIC_API_URL in compose.dev.yaml). Map embeds
 # show a "not configured" placeholder when NEXT_PUBLIC_GOOGLE_MAP_KEY is
-# unset. The V4 TS bridge is not implemented, so no API-URL rewiring is done
-# here beyond that Compose injection.
+# unset.
 
-FROM node:20-slim@sha256:2cf067cfed83d5ea958367df9f966191a942351a2df77d6f0193e162b5febfc0
+FROM node:22-slim@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5
 
 WORKDIR /app
 
@@ -17,8 +16,10 @@ ENV NEXT_TELEMETRY_DISABLED=1
 
 COPY package.json package-lock.json turbo.json ./
 COPY packages/shared ./packages/shared
+COPY apps/api ./apps/api
 COPY apps/dashboard ./apps/dashboard
 
+RUN node -e 'const fs=require("fs"); for(const p of [".data", "apps/api/.dev.vars", "apps/dashboard/.env.production", "apps/dashboard/.env.development"]) if(fs.existsSync(p)) throw Error("Local credentials entered build context");'
 RUN npm ci
 
 ENV PORT=3000 HOSTNAME=0.0.0.0

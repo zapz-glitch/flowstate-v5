@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from .api.deps import configured_credentials
+from .api.deps import configured_credentials, require_principal
 from .api.errors import ApiFailure
 from .api.routes import router as v1_router
 from .decision_tree import evaluate
@@ -42,10 +42,32 @@ app = FastAPI(
 )
 
 
+MAX_REQUEST_BODY_BYTES = 2 * 1024 * 1024
+
+
 @app.middleware("http")
 async def _buffer_json_body(request: Request, call_next):
     if request.url.path.startswith("/v1/") and request.method == "POST":
-        request.state.raw_body = await request.body()
+        try:
+            require_principal(request)
+        except ApiFailure as exc:
+            return await _api_failure_handler(request, exc)
+        length = request.headers.get("content-length")
+        if length is not None:
+            if not length.isascii() or not length.isdigit():
+                return _typed("INVALID_CONTENT_LENGTH", "invalid content length", 400)
+            significant_length = length.lstrip("0") or "0"
+            if len(significant_length) > 10 or int(significant_length) > MAX_REQUEST_BODY_BYTES:
+                return _typed("PAYLOAD_TOO_LARGE", "request body exceeds 2 MiB", 413)
+        buffered = bytearray()
+        async for chunk in request.stream():
+            if len(buffered) + len(chunk) > MAX_REQUEST_BODY_BYTES:
+                return _typed("PAYLOAD_TOO_LARGE", "request body exceeds 2 MiB", 413)
+            buffered.extend(chunk)
+        raw_body = bytes(buffered)
+        request.state.raw_body = raw_body
+        # Starlette's cached request replays these exact bytes to the route.
+        request._body = raw_body
     return await call_next(request)
 
 

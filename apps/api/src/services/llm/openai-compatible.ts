@@ -105,6 +105,7 @@ export abstract class OpenAICompatibleProvider extends BaseLLMProvider {
       messages,
       max_tokens: request.maxTokens ?? this.maxTokens,
       temperature: request.temperature,
+      ...(request.responseFormat === 'json' ? { response_format: { type: 'json_object' } } : {}),
     }
 
     // Add web search tool if configured

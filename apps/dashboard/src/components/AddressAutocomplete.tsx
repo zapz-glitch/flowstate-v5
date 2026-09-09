@@ -1,5 +1,7 @@
 'use client'
 
+import { toast } from 'sonner'
+
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { MapPin } from 'lucide-react'
 import { Input } from '@/components/ui/input'
@@ -52,6 +54,7 @@ export function AddressAutocomplete({
     } catch {
       setResults([])
       setIsOpen(false)
+      toast.error('Address provider unavailable. Retry the search shortly.')
     } finally {
       setIsLoading(false)
     }

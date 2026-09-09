@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { ImageOff } from 'lucide-react'
 
 interface StreetViewImageProps {
+  photos?: string[]
   address?: string
   latitude?: number | null
   longitude?: number | null
@@ -13,6 +14,7 @@ interface StreetViewImageProps {
 }
 
 export function StreetViewImage({
+  photos,
   address,
   latitude,
   longitude,
@@ -21,6 +23,9 @@ export function StreetViewImage({
   className,
 }: StreetViewImageProps) {
   const [error, setError] = useState(false)
+  const [failedPhotos, setFailedPhotos] = useState<string[]>([])
+  const photo = photos?.find(url => /^\/user\/reports\/[a-zA-Z0-9_-]+\/assets\/[a-f0-9-]{36}$/.test(url) && !failedPhotos.includes(url))
+  if (photo) return <img src={photo} alt={address ? `Saved property photo: ${address}` : 'Saved property photo'} className={className ?? 'w-full h-auto'} loading="lazy" onError={() => setFailedPhotos(previous => [...previous, photo])} />
   const key = process.env.NEXT_PUBLIC_GOOGLE_MAP_KEY
   if (!key || error) return null
 
