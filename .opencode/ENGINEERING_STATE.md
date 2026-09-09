@@ -2,6 +2,89 @@
 
 ## Current objective
 
+Staging app connection and initial browser acceptance pass COMPLETE (agent tests,
+not owner approval). Login persists after reload; production API not called.
+Heritage job_1788994136273_ef2zqvpq:374k ARV/247k buy,1comp,9permits/6assets.
+Piedmont job_1788994233197_armyzrcs:317k/198k,2comps,2permits/3assets;
+browser manual selection314k then reset restores exact original ARV,revision2.
+Magnolia job_1788994366613_45jvwspt:384k/246k,1comp,9permits/6assets.
+All saved reports explicitly python-v4/upper_half_v2, REVIEW_REQUIRED/preliminary.
+Heritage/Piedmont PDF downloads pass; owner image200/unauth401, edit unauth401,
+wrong origin403, stale revision409.21 API/4 dashboard regressions/API types pass
+after Cloudflare manual-redirect fix; redirect301/302/303/307/308 never followed.
+Three temporary staging tail processes stopped; no runtime services stopped.
+Next: owner app approval and remaining durable job-state hydration/restart,
+failure/restore/rollback checks. Main and production unchanged. Credentials only
+in ignored0600 staging-login.json; do not copy them into state or Git.
+
+First real-address staging run exposed Cloudflare Fetch rejecting redirect:error
+in hosted adapter. Changed to manual; all redirect301/302/303/307/308 responses
+are rejected without another request. Hosted tests/typecheck pass. Staging API
+redeployed06165426-6113-4523-81c8-77c50dcf2e17; Heritage retry running.
+Initial failed job job_1788989033751_pam30prw loaded correct provider subject/comps
+but never saved. Sanitized tail confirmed redirect option error, not appraisal
+rule failure. Old-job SSE reconnect after isolate loss returned no history:
+AnalysisJobDO.handleGetState reads memory only despite persisted jobState. Record
+durable state hydration/restart recovery as a remaining readiness task, not proven.
+TLS/account mapping gates are resolved. No production/main changes.
+
+Staging TLS recovered without bypass or production DNS changes. Real signup/login
+passed for userV7yMtWoR4tAHQo1b9D71Nb9KEb90bdXP; browser login persists on reload,
+staging cookie domain/prefix verified and no production API calls observed.
+Dashboard deployedab63b044-ec93-4b9b-8186-3b849633bed8 at staging.flowstate.homes;
+clean Next/OpenNext build passes (staging origin baked in), gzip1278KiB.
+Render API/worker redeployed9ba02f3 with real user mapping; canary credential removed,
+worker switched to that user (no extra paid worker). Deploys dep-dagsrv142hec73euqs10
+and dep-dagsrv9t0dsc73flbqi0 both live. Cloudflare per-user transport secret installed.
+Secrets/login/browser session files remain ignored0600 in .data/local-candidate.
+Browser real-address Heritage evaluation underway using staging-eval.mjs helper.
+Old certificate-blocked notes below are resolved; app acceptance still pending.
+
+Cloudflare staging app execution active: created D1 flowstate-v4-staging-app
+13de78d5-6d02-452a-9101-82cfff4299ed, KV1846bfcab8444b198a38a5fd068f8550,
+private R2 flowstate-v4-staging-report-assets. All23 D1 migrations applied remotely
+to this new staging DB only. API deployed3482cabb-1310-4c71-a8a3-af1b2430a140.
+Free plan required new_sqlite_classes; adjusted new staging namespaces only.
+Fresh auth/internal/snapshot secrets stored ignored0600; provider test credentials
+copied to staging without rotating source keys. Dashboard secrets configured.
+API custom domain attached with cert827feed1-f1fa-423d-bf92-d8945e68e3ba, but TLS
+handshake currently fails; no HTTPS bypass. Certificate-pack read denied by OAuth.
+Staging signup/user mapping/browser evaluation still pending TLS readiness.
+Clean build /tmp/flowstate-staging-build.qmMcuV uses9ba02f3 without tracked env files,
+explicit NEXT_PUBLIC_API_URL=https://api.staging.flowstate.homes. npm ci audit0,
+Next production build passes; OpenNext artifact build running. Localdev unchanged.
+Helper /tmp/flowstate-staging-app.mjs manages protected secrets/login initialization.
+
+Latest milestone: Render API and worker LIVE at9ba02f3. Worker ID
+srv-dagsn3uk1f9s73dpllfg, deploy dep-dagsn46k1f9s73dplp20. API deploy
+dep-dagslrhclf7s73f0b97g live; HTTPS readiness database/schema ok.
+Full final local Python353pass;21 API/4 dashboard regressions, types/lint passed.
+Hosted synthetic HTTPS canary passed exact local ARV parity and same tenant/user:
+automatic550000 comps3/2 (cc4799fc-4ff4-4487-abfa-a2830c49dba0),
+manual450000 comps3/0 (c81aaa55-dc95-4c5b-8f55-69ff3c075aa6),
+reset550000 (9fe4f520-ce79-4944-bb54-a51545f5b619),
+insufficient null (07bf29b7-c0fd-4f2c-80c5-6354e133ec67).
+All replay IDs reused; unauthenticated401 and nonexistent evaluation404 verified.
+Initial canary422 corrected required Idempotency-Key header in test helper only.
+No live provider calls. Cloudflare staging resources/login/browser/real addresses
+remain pending. Production/main unchanged (remote main16f879a verified).
+CI3932229 and exact deployed9ba02f3 run34405245843 both succeeded.
+
+Hosted staging milestone: candidate changes committed/pushed to v4-python only.
+Latest candidate9ba02f3; main remote still16f879a. Render API srv-dagsi5uk1f9s73dp1s40
+created, autoDeploy off, URL https://flowstate-v4-staging-python.onrender.com.
+Database available and migration completed. Found bare PostgreSQL URL selecting
+psycopg2 in Alembic and health probes; both now normalize through existing psycopg3
+helper.19 migration/health tests pass including both URL forms; full suite rerunning.
+Deploy dep-dagslrhclf7s73f0b97g queued for9ba02f3; superseded unhealthy deployment
+dep-dagsjabl550s73e9sok0 canceled explicitly to unblock it. Worker not yet created.
+Canary credentials stored Git-ignored0600; synthetic identity only, not app login.
+Initial GitHub CI failed because Next standalone output was missing;3932229 adds
+output:standalone. Its CI passed the Cloudflare artifact step and is running Python.
+Runtime helpers /tmp/flowstate-render-stage.mjs and /tmp/flowstate-render-canary.py
+retain safe provisioning/status and exact parity smoke checks for continuation.
+Generated dashboard next-env.d.ts/tsbuildinfo/AGENTS.md/CLAUDE.md left unstaged.
+
 Staging backend deployment active: PostgreSQL is available; public allowlist remains
 empty. Full current Python suite351pass (27 warnings), typechecks/lint pass.
 API regression retry uses the verified Python virtualenv after the default
@@ -489,6 +572,32 @@ the checklist and approval evidence. Main, production and provider keys unchange
 - Main remains at its baseline; all changes reside on the V4 candidate.
 
 ## Last handoff
+
+Staging app is live and agent-tested at https://staging.flowstate.homes. Login
+credentials in ignored0600 .data/local-candidate/staging-login.json. Browser
+Heritage/Piedmont/Magnolia reports pass; IDs/values in latest objective and
+docs/eval-v4/STAGING_SETUP.md. Manual/reset, PDFs, permit records and private
+photos verified; maps deferred. All reports remain preliminary/review-required.
+Cloudflare redirect incompatibility fixed with manual/no-follow regression tests.
+Real D1 user now maps to Render API/worker; canary credential removed. No main
+merge, production write or production-key rotation. Owner approval is not implied.
+Resume with durable job-state hydration/restart recovery, remaining failure/restore
+checks and owner testing. Preserve generated dashboard files left unstaged.
+
+Previous handoff:
+
+Staging backend provisioned and verified: private PostgreSQL17, Python API and
+owner-scoped worker are live at9ba02f3. Hosted synthetic canary passes exact math,
+upper-half multiple comps, manual/reset, insufficient, replay and auth rejection.
+Fixes committed/pushed on v4-python only: migration/health URL normalization and
+Next standalone CI output.353 local Python tests and exact candidate CI
+run34405245843 pass. Continue isolated Cloudflare D1/KV/R2/dashboard/API provisioning
+and genuine staging-user mapping before real-address/browser acceptance.
+Canary identity is NOT an application login. Do not mark owner approval complete.
+Helpers and resource IDs are in docs/eval-v4/STAGING_SETUP.md. Generated dashboard
+files remain unstaged; preserve them. No main merge or production change.
+
+Previous handoff:
 
 Retry succeeded: staging PostgreSQL dpg-dagsfppt0dsc73fjgbo0-a now exists,
 status creating on follow-up GET. Version17/5GB/Virginia/private allowlist verified.

@@ -1,6 +1,63 @@
 # V4 staging setup
 
-Status: local preparation only; not deployed or approved for live evaluation.
+Status: staging app deployed; production release and owner acceptance pending.
+Staging app is now deployed and agent-tested; owner acceptance is still required.
+Dashboard: https://staging.flowstate.homes (versionab63b044-ec93-4b9b-8186-3b849633bed8).
+API: https://api.staging.flowstate.homes (version06165426-6113-4523-81c8-77c50dcf2e17).
+Separate D1:13de78d5-6d02-452a-9101-82cfff4299ed; all23 migrations applied.
+Separate KV:1846bfcab8444b198a38a5fd068f8550; R2:flowstate-v4-staging-report-assets.
+New staging Durable Objects use SQLite namespaces compatible with the free plan.
+Custom-domain TLS initially failed during activation, then recovered without bypass.
+Actual browser login survives reload; no production API traffic was observed.
+Real staging userV7yMtWoR4tAHQo1b9D71Nb9KEb90bdXP now owns the Render queue scope;
+synthetic canary credential was removed. Login/password are in the ignored0600 file
+`.data/local-candidate/staging-login.json`. Do not print or commit credentials.
+
+### Hosted app verification
+
+| Property | Saved job | Displayed ARV | Buy price | Selected comps |
+| --- | --- | ---: | ---: | ---: |
+| 3 Heritage Cove Ct | job_1788994136273_ef2zqvpq | $374,000 | $247,000 | 1 |
+| 4648 Piedmont Ct | job_1788994233197_armyzrcs | $317,000 | $198,000 | 2 |
+| 16049 Magnolia Hill St | job_1788994366613_45jvwspt | $384,000 | $246,000 | 1 |
+
+All saved reports explicitly use python-v4/provider_authoritative_upper_half_v2
+and remain REVIEW_REQUIRED/preliminary, including honest missing-style/hazard
+limitations. Heritage has9 permit records/6 assets; Piedmont2 permits/3 assets.
+Magnolia has9 permit records/6 assets. Heritage/Piedmont PDFs downloaded.
+Piedmont browser Remove from ARV recalculated
+to314000; Reset restored original exact ARV and saved revision2. Asset owner200
+versus unauthenticated401; comp edits reject missing auth401, wrong Origin403,
+stale revision409. No owner approval has been inferred from these automated tests.
+
+The hosted adapter needed a Cloudflare compatibility fix: redirect:error is not
+supported at the edge. It now uses manual and rejects non-success responses;
+tests prove301/302/303/307/308 are not followed.21 API/4 dashboard regressions and
+API types pass. No legacy evaluation fallback or appraisal rule changes were made.
+Remaining readiness work: durable job-state hydration/restart recovery (the DO
+persists jobState but /state reads memory only), failure/restore/rollback checks,
+and owner browser acceptance. Maps remain unconfigured as previously deferred.
+
+PostgreSQL `dpg-dagsfppt0dsc73fjgbo0-a` is available (17, Virginia,5GB,
+0.1c-256mb, public allowlist empty). Python API `srv-dagsi5uk1f9s73dp1s40`
+has been created at https://flowstate-v4-staging-python.onrender.com.
+API and worker are live at candidate `9ba02f3`. Worker ID:
+`srv-dagsn3uk1f9s73dpllfg`. HTTPS readiness returns database/schema ok.
+Initial deployment exposed bare PostgreSQL URL handling in Alembic and health;
+both now normalize to psycopg3. Full final local Python suite353pass.
+Hosted synthetic canary passed exact ARV parity with local Python: automatic
+550000 using comps3/2, manual450000 using3/0, reset550000, insufficient null.
+All four submissions replay the original evaluation IDs. Missing authentication
+returns401; unknown evaluation404; returned tenant/user match canary credentials.
+These are synthetic backend tests, not real-address/browser/app acceptance.
+GitHub candidate CI run34405245843 passed for the exact deployed commit9ba02f3,
+including application regressions, types/lint, dependency audit, Next/OpenNext
+builds, API dry-run and Python checks. No production workflow was triggered.
+Initial transport identity is `staging-infrastructure-canary`, deliberately not
+an app account. Add real staging D1-user credentials before app testing.
+Provisioning helper: `/tmp/flowstate-render-stage.mjs`; canary helper:
+`/tmp/flowstate-render-canary.py`. Local canary credential is Git-ignored and0600
+at `.data/local-candidate/render-staging-canary.json`; never print or commit it.
 Hosted transport now passes local HTTP integration against the real durable
 Python API, PostgreSQL and supervised worker. Full Python suite:350pass. Hosted
 TLS, real Render restart behavior, DNS and browser staging login remain unverified.
@@ -106,5 +163,5 @@ From the repository root:
 docker build -t flowstate-v4-staging-check:local services/eval-engine
 ```
 
-No service account, paid resource, production migration or key rotation has
-been performed by preparing these files.
+The owner approved the paid staging foundation. Only staging resources have
+been created; production migrations and production key rotation are out of scope.

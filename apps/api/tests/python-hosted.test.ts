@@ -14,9 +14,10 @@ let calls = 0
 let mode = 'ok'
 globalThis.fetch = async (url, options) => {
   calls++
-  assert.equal(options?.redirect, 'error')
+  assert.equal(options?.redirect, 'manual')
   assert.equal((options?.headers as Record<string, string>).Authorization, 'Bearer synthetic-test-token-not-a-secret-0001')
   if (mode === 'unauthorized') return Response.json({}, { status: 401 })
+  if (mode.startsWith('redirect-')) return new Response(null, { status: Number(mode.slice(9)), headers: { Location: 'https://untrusted.example/collect' } })
   if (options?.method === 'POST') {
     const body = JSON.parse(String(options.body))
     assert.equal(body.candidate_evidence_mode, 'preloaded')
@@ -44,6 +45,12 @@ try {
   for (const url of ['http://localhost:8788', 'https://evil.example', 'https://x.onrender.com/extra', 'https://user:pass@x.onrender.com', 'https://x.onrender.com?token=bad']) await assert.rejects(evaluateHostedPython(request, { ...env, V4_HOSTED_API_URL: url }, context))
   assert.equal(calls, before)
   for (mode of ['unauthorized', 'bad-id', 'wrong-batch', 'wrong-tenant', 'wrong-user', 'failed', 'invalid-result']) await assert.rejects(evaluateHostedPython(request, env, context))
+  for (const status of [301, 302, 303, 307, 308]) {
+    mode = `redirect-${status}`
+    const beforeRedirect = calls
+    await assert.rejects(evaluateHostedPython(request, env, context), /submission failed/)
+    assert.equal(calls, beforeRedirect + 1)
+  }
   mode = 'pending'
   const timeout = AbortSignal.timeout
   AbortSignal.timeout = () => timeout(10)

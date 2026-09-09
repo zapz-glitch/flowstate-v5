@@ -1,4 +1,5 @@
 name = "flowstate-v4-staging-api"
+account_id = "52e4db30ec50dcb20a46c30a0a8da3d4"
 main = "src/index.ts"
 compatibility_date = "2024-09-09"
 compatibility_flags = ["nodejs_compat"]
@@ -19,12 +20,12 @@ V4_STAGING_ASSETS_ENABLED = "true"
 [[d1_databases]]
 binding = "DB"
 database_name = "flowstate-v4-staging-app"
-database_id = "REPLACE_WITH_NEW_STAGING_D1_ID"
+database_id = "13de78d5-6d02-452a-9101-82cfff4299ed"
 migrations_dir = "migrations"
 
 [[kv_namespaces]]
 binding = "API_CACHE"
-id = "REPLACE_WITH_NEW_STAGING_KV_ID"
+id = "1846bfcab8444b198a38a5fd068f8550"
 
 [[r2_buckets]]
 binding = "REPORT_ASSETS"

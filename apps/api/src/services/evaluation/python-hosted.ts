@@ -23,7 +23,7 @@ export async function evaluateHostedPython(request: PythonRequest, env: Env, con
   const signal = AbortSignal.timeout(20000)
   const send = async (path: string, body?: unknown): Promise<Record<string, unknown>> => {
     const response = await fetch(new URL(path, url), {
-      method: body === undefined ? 'GET' : 'POST', redirect: 'error', signal,
+      method: body === undefined ? 'GET' : 'POST', redirect: 'manual', signal,
       headers: { Authorization: `Bearer ${credential.token}`, Accept: 'application/json', ...(body === undefined ? {} : { 'Content-Type': 'application/json', 'Idempotency-Key': key }) },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     })
