@@ -8,8 +8,7 @@ interface LogoProps {
   size?: 'sm' | 'md' | 'lg'
 }
 
-// Flow mark: a continuous lemniscate whose lobes peak into house roofs —
-// infinity + flow + homes in a single stroke
+// Flow mark: house outline whose base dissolves into a wave — home + flow
 function FlowGlyph({ className }: { className?: string }) {
   return (
     <svg
@@ -21,7 +20,7 @@ function FlowGlyph({ className }: { className?: string }) {
       strokeLinecap="round"
       strokeLinejoin="round"
     >
-      <path d="M12 12 L6.9 5.3 L3 10.3 C1.7 12.5 3.6 15.5 6.4 15.9 C9.1 16.3 11 14.2 12 12 C13 14.2 14.9 16.3 17.6 15.9 C20.4 15.5 22.3 12.5 21 10.3 L17.1 5.3 Z" />
+      <path d="M4.5 17.5 V10.8 L12 4.5 L19.5 10.8 V17.5 M4.5 17.5 C7 17.5 8 15.5 10.5 15.5 C13 15.5 14 17.5 16.5 17.5 C17.8 17.5 19 17 19.5 16.3" />
     </svg>
   )
 }
