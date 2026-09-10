@@ -113,31 +113,31 @@
     --ring: 0 0% 32%;
   }
 
-  /* LED / bright indoor — limestone: natural warm mineral surface,
-     soft on the eyes under bright light; warm ink text keeps high
-     contrast without cold-gray-on-warm mismatch */
+  /* LED / bright indoor — warm paper: off-white surface cuts glare,
+     warm-tinted grays/blacks keep the palette cohesive (not cold gray
+     text on warm paper) */
   html.light[data-preset="led"] {
-    --background: 45 14% 87%;
-    --foreground: 35 10% 12%;
-    --foreground-secondary: 38 7% 28%;
-    --foreground-tertiary: 38 6% 43%;
-    --card: 45 14% 92%;
-    --card-hover: 43 10% 88%;
-    --card-foreground: 35 10% 12%;
-    --popover: 45 14% 92%;
-    --popover-foreground: 35 10% 12%;
-    --primary: 35 11% 11%;
-    --primary-foreground: 45 14% 93%;
-    --secondary: 43 10% 83%;
-    --secondary-foreground: 35 10% 12%;
-    --muted: 43 10% 83%;
-    --muted-foreground: 38 7% 40%;
-    --accent: 43 9% 80%;
-    --accent-secondary: 38 6% 48%;
-    --accent-foreground: 35 10% 12%;
-    --border: 43 9% 76%;
-    --input: 43 8% 70%;
-    --ring: 38 7% 44%;
+    --background: 40 12% 92%;
+    --foreground: 35 9% 12%;
+    --foreground-secondary: 38 6% 30%;
+    --foreground-tertiary: 38 5% 45%;
+    --card: 40 12% 96%;
+    --card-hover: 40 8% 92%;
+    --card-foreground: 35 9% 12%;
+    --popover: 40 12% 96%;
+    --popover-foreground: 35 9% 12%;
+    --primary: 35 10% 11%;
+    --primary-foreground: 40 12% 95%;
+    --secondary: 40 7% 88%;
+    --secondary-foreground: 35 9% 12%;
+    --muted: 40 7% 88%;
+    --muted-foreground: 38 6% 42%;
+    --accent: 40 6% 85%;
+    --accent-secondary: 38 5% 50%;
+    --accent-foreground: 35 9% 12%;
+    --border: 40 7% 80%;
+    --input: 40 6% 74%;
+    --ring: 38 6% 44%;
   }
 
   * {
