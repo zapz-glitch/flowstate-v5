@@ -8,7 +8,8 @@ interface LogoProps {
   size?: 'sm' | 'md' | 'lg'
 }
 
-// Flow mark: three laminar streamlines — reads as "flow"
+// Flow mark: a continuous lemniscate whose lobes peak into house roofs —
+// infinity + flow + homes in a single stroke
 function FlowGlyph({ className }: { className?: string }) {
   return (
     <svg
@@ -16,12 +17,11 @@ function FlowGlyph({ className }: { className?: string }) {
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth="2"
+      strokeWidth="1.9"
       strokeLinecap="round"
+      strokeLinejoin="round"
     >
-      <path d="M3 7.5c2.7-2 5.3-2 8 0s5.3 2 8 0" />
-      <path d="M3 12c2.7-2 5.3-2 8 0s5.3 2 8 0" />
-      <path d="M3 16.5c2.7-2 5.3-2 8 0s5.3 2 8 0" />
+      <path d="M12 12 L6.9 5.3 L3 10.3 C1.7 12.5 3.6 15.5 6.4 15.9 C9.1 16.3 11 14.2 12 12 C13 14.2 14.9 16.3 17.6 15.9 C20.4 15.5 22.3 12.5 21 10.3 L17.1 5.3 Z" />
     </svg>
   )
 }
