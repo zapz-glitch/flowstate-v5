@@ -587,7 +587,14 @@ export async function performAnalysis(
 function mapRenovationToVision(
   assessment: RenovationAssessment | null
 ): NonNullable<ResponseContext['visionAnalysis']> | undefined {
-  if (!assessment || assessment.renovationLevel == null) return undefined
+  if (!assessment) return undefined
+
+  const interiorParts = [
+    assessment.kitchenCondition !== 'NA' && `kitchen: ${assessment.kitchenCondition}`,
+    assessment.bathroomCondition !== 'NA' && `bath: ${assessment.bathroomCondition}`,
+    assessment.flooringCondition !== 'NA' && `flooring: ${assessment.flooringCondition}`,
+    assessment.wallCeilingCondition !== 'NA' && `walls: ${assessment.wallCeilingCondition}`,
+  ].filter(Boolean) as string[]
 
   return {
     overallCondition: assessment.renovationLevel,
@@ -595,16 +602,11 @@ function mapRenovationToVision(
     estimatedRehabNeeds: assessment.majorObservations.join('; ') || 'See report',
     summary: `Renovation level ${assessment.renovationLevel} at ${assessment.confidence ?? '?'}% confidence from ${assessment.photosExamined} photos`,
     interior: {
-      condition: [
-        assessment.kitchenCondition && `kitchen: ${assessment.kitchenCondition}`,
-        assessment.bathroomCondition && `bath: ${assessment.bathroomCondition}`,
-        assessment.flooringCondition && `flooring: ${assessment.flooringCondition}`,
-        assessment.wallCeilingCondition && `walls: ${assessment.wallCeilingCondition}`,
-      ].filter(Boolean).join('; ') || 'unknown',
+      condition: interiorParts.length ? interiorParts.join('; ') : 'NA',
       notes: assessment.evidenceForClassification,
     },
     exterior: {
-      condition: assessment.exteriorCondition ?? 'unknown',
+      condition: assessment.exteriorCondition,
       notes: [...assessment.visibleMajorSystemConcerns, ...assessment.structuralConcerns],
     },
   }

@@ -115,15 +115,17 @@ export interface RenovationAssessment {
   status: 'ok' | 'insufficient_photo_evidence' | 'needs_review' | 'unavailable'
   /** REHAB_LEVELS index (0-4) when status resolves to a level */
   renovationLevelIndex: number | null
-  renovationLevel: string | null
+  /** Level name, or 'NA' when the interior condition cannot be verified */
+  renovationLevel: string
   confidence: number | null
   photosExamined: number
   majorObservations: string[]
-  kitchenCondition: string | null
-  bathroomCondition: string | null
-  flooringCondition: string | null
-  wallCeilingCondition: string | null
-  exteriorCondition: string | null
+  /** 'NA' when the condition cannot be verified from photo evidence */
+  kitchenCondition: string
+  bathroomCondition: string
+  flooringCondition: string
+  wallCeilingCondition: string
+  exteriorCondition: string
   visibleMajorSystemConcerns: string[]
   structuralConcerns: string[]
   evidenceForClassification: string[]
@@ -188,18 +190,20 @@ export async function assessRenovationFromPhotos(
   propertyContext?: { address?: string; squareFeet?: number | null; yearBuilt?: number | null },
   providerOverride?: { name: string; model: string; execute: (req: any) => Promise<any> }
 ): Promise<RenovationAssessment> {
+  // Interior condition is 'NA' whenever it cannot be verified — never null,
+  // never invented
   const base: RenovationAssessment = {
     status: 'unavailable',
     renovationLevelIndex: null,
-    renovationLevel: null,
+    renovationLevel: 'NA',
     confidence: null,
     photosExamined: 0,
     majorObservations: [],
-    kitchenCondition: null,
-    bathroomCondition: null,
-    flooringCondition: null,
-    wallCeilingCondition: null,
-    exteriorCondition: null,
+    kitchenCondition: 'NA',
+    bathroomCondition: 'NA',
+    flooringCondition: 'NA',
+    wallCeilingCondition: 'NA',
+    exteriorCondition: 'NA',
     visibleMajorSystemConcerns: [],
     structuralConcerns: [],
     evidenceForClassification: [],
@@ -292,7 +296,7 @@ export async function assessRenovationFromPhotos(
       ? Math.min(100, Math.max(0, parsed.confidence))
       : null
 
-  const str = (v: unknown): string | null => (typeof v === 'string' ? v : null)
+  const str = (v: unknown): string => (typeof v === 'string' && v.trim() ? v : 'NA')
   const list = (v: unknown): string[] =>
     Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []
 
@@ -304,7 +308,7 @@ export async function assessRenovationFromPhotos(
           ? 'needs_review'
           : 'ok',
     renovationLevelIndex: levelIndex,
-    renovationLevel: levelIndex !== null ? REHAB_LEVELS[levelIndex] : null,
+    renovationLevel: levelIndex !== null ? REHAB_LEVELS[levelIndex] : 'NA',
     confidence,
     photosExamined: photos.length,
     majorObservations: list(parsed.major_observations),
