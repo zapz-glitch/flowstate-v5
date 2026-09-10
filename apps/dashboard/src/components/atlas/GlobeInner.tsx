@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import maplibregl from 'maplibre-gl'
 import type { FeatureCollection, Point } from 'geojson'
@@ -19,9 +19,18 @@ export default function GlobeInner({ points }: GlobeInnerProps) {
   const router = useRouter()
   const routerRef = useRef(router)
   routerRef.current = router
+  const [supported] = useState(() => {
+    if (typeof window === 'undefined') return true
+    try {
+      const canvas = document.createElement('canvas')
+      return !!(canvas.getContext('webgl2') || canvas.getContext('webgl'))
+    } catch {
+      return false
+    }
+  })
 
   useEffect(() => {
-    if (!containerRef.current) return
+    if (!containerRef.current || !supported) return
 
     const map = new maplibregl.Map({
       container: containerRef.current,
@@ -119,7 +128,32 @@ export default function GlobeInner({ points }: GlobeInnerProps) {
     })
 
     return () => map.remove()
-  }, [points])
+  }, [points, supported])
+
+  if (!supported) {
+    // No WebGL (headless/sandboxed browsers) — degrade to a property index
+    return (
+      <div className="absolute inset-0 overflow-y-auto p-6 bg-background">
+        <p className="mono-label mb-4">WebGL unavailable — showing index</p>
+        <div className="space-y-px max-w-2xl">
+          {points.map((p) => (
+            <button
+              key={p.jobId ?? p.propertyAddress}
+              onClick={() => p.jobId && router.push(`/dashboard/reports/${p.jobId}`)}
+              className="w-full flex items-baseline justify-between gap-4 px-3 py-2.5 text-left border border-border/50 hover:bg-secondary/40 transition-colors"
+            >
+              <span className="text-xs text-foreground truncate">
+                {p.propertyAddress}, {p.propertyCity}, {p.propertyState}
+              </span>
+              <span className="mono-label flex-shrink-0">
+                {p.arv != null ? `ARV $${Math.round(p.arv).toLocaleString()}` : ''}
+              </span>
+            </button>
+          ))}
+        </div>
+      </div>
+    )
+  }
 
   return <div ref={containerRef} className="absolute inset-0" />
 }
