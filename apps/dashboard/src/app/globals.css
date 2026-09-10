@@ -60,6 +60,84 @@
     --ring: 40 4% 58%;
   }
 
+  /* Environment presets — palettes tuned per lighting condition.
+     Applied via data-preset on <html>; night = default .dark above. */
+
+  /* Dawn — cool slate dark: blue-enriched cool tone aids morning alertness */
+  html.dark[data-preset="dawn"] {
+    --background: 225 7% 10%;
+    --foreground: 220 6% 85%;
+    --foreground-secondary: 220 5% 66%;
+    --foreground-tertiary: 220 5% 48%;
+    --card: 225 7% 12.5%;
+    --card-hover: 225 6% 15%;
+    --card-foreground: 220 6% 85%;
+    --popover: 225 7% 12.5%;
+    --popover-foreground: 220 6% 85%;
+    --primary: 220 6% 88%;
+    --primary-foreground: 225 8% 10%;
+    --secondary: 225 5% 15%;
+    --secondary-foreground: 220 6% 85%;
+    --muted: 225 5% 15%;
+    --muted-foreground: 220 5% 58%;
+    --accent: 225 5% 21%;
+    --accent-secondary: 220 5% 46%;
+    --accent-foreground: 220 6% 88%;
+    --border: 225 5% 20%;
+    --input: 225 5% 23%;
+    --ring: 220 5% 58%;
+  }
+
+  /* Outdoor — maximum-contrast light: survives direct-sun glare */
+  html.light[data-preset="outdoor"] {
+    --background: 0 0% 100%;
+    --foreground: 0 0% 4%;
+    --foreground-secondary: 0 0% 22%;
+    --foreground-tertiary: 0 0% 38%;
+    --card: 0 0% 100%;
+    --card-hover: 0 0% 95%;
+    --card-foreground: 0 0% 4%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 4%;
+    --primary: 0 0% 5%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 0 0% 90%;
+    --secondary-foreground: 0 0% 5%;
+    --muted: 0 0% 90%;
+    --muted-foreground: 0 0% 34%;
+    --accent: 0 0% 85%;
+    --accent-secondary: 0 0% 48%;
+    --accent-foreground: 0 0% 5%;
+    --border: 0 0% 76%;
+    --input: 0 0% 68%;
+    --ring: 0 0% 32%;
+  }
+
+  /* LED / bright indoor — paper light: off-white cuts overhead-glare */
+  html.light[data-preset="led"] {
+    --background: 40 9% 93%;
+    --foreground: 0 0% 10%;
+    --foreground-secondary: 0 0% 28%;
+    --foreground-tertiary: 0 0% 44%;
+    --card: 40 9% 96%;
+    --card-hover: 40 6% 92%;
+    --card-foreground: 0 0% 10%;
+    --popover: 40 9% 96%;
+    --popover-foreground: 0 0% 10%;
+    --primary: 0 0% 8%;
+    --primary-foreground: 40 9% 96%;
+    --secondary: 40 5% 88%;
+    --secondary-foreground: 0 0% 10%;
+    --muted: 40 5% 88%;
+    --muted-foreground: 40 4% 40%;
+    --accent: 40 4% 84%;
+    --accent-secondary: 40 4% 52%;
+    --accent-foreground: 0 0% 10%;
+    --border: 40 4% 82%;
+    --input: 40 4% 76%;
+    --ring: 40 4% 42%;
+  }
+
   * {
     @apply border-border;
   }

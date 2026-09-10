@@ -67,7 +67,7 @@ export function Navbar({ onSignInClick, isSignedIn }: NavbarProps) {
               onClick={toggleTheme}
               className="text-muted-foreground hover:text-foreground hover:bg-secondary"
             >
-              {theme === 'dark' ? (
+              {theme === 'night' || theme === 'dawn' ? (
                 <Sun className="h-5 w-5" />
               ) : (
                 <Moon className="h-5 w-5" />

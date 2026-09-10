@@ -12,6 +12,9 @@ import {
   ChevronRight,
   Sun,
   Moon,
+  Sunrise,
+  Lightbulb,
+  Check,
   ChevronsUpDown,
   User,
   Settings2,
@@ -60,10 +63,17 @@ const adminNavigation: Array<{
   { name: 'Admin Panel', href: '/dashboard/admin', icon: ShieldCheck },
 ]
 
+const THEME_PRESETS = [
+  { id: 'night', label: 'Night', icon: Moon },
+  { id: 'dawn', label: 'Early morning', icon: Sunrise },
+  { id: 'outdoor', label: 'Outdoor', icon: Sun },
+  { id: 'led', label: 'Bright indoor', icon: Lightbulb },
+] as const
+
 export default function Sidebar() {
   const pathname = usePathname()
   const { user } = useUser()
-  const { theme, toggleTheme } = useTheme()
+  const { theme, setTheme } = useTheme()
   const { collapsed, toggleCollapsed } = useSidebar()
   const { activeAnalysis, analysisState } = useAnalysis()
 
@@ -222,19 +232,15 @@ export default function Sidebar() {
                     Account Settings
                   </Link>
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={toggleTheme}>
-                  {theme === 'dark' ? (
-                    <>
-                      <Sun className="mr-2 h-4 w-4" />
-                      Light Mode
-                    </>
-                  ) : (
-                    <>
-                      <Moon className="mr-2 h-4 w-4" />
-                      Dark Mode
-                    </>
-                  )}
-                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuLabel className="mono-label !text-[10px]">Environment</DropdownMenuLabel>
+                {THEME_PRESETS.map((p) => (
+                  <DropdownMenuItem key={p.id} onClick={() => setTheme(p.id)} className="cursor-pointer">
+                    <p.icon className="mr-2 h-4 w-4" />
+                    {p.label}
+                    {theme === p.id && <Check className="ml-auto h-3.5 w-3.5" />}
+                  </DropdownMenuItem>
+                ))}
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
                   onClick={handleSignOut}
@@ -281,19 +287,14 @@ export default function Sidebar() {
               </DropdownMenuItem>
             ))}
             <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={toggleTheme}>
-              {theme === 'dark' ? (
-                <>
-                  <Sun className="mr-2 h-4 w-4" />
-                  Light Mode
-                </>
-              ) : (
-                <>
-                  <Moon className="mr-2 h-4 w-4" />
-                  Dark Mode
-                </>
-              )}
-            </DropdownMenuItem>
+            <DropdownMenuLabel className="mono-label !text-[10px]">Environment</DropdownMenuLabel>
+            {THEME_PRESETS.map((p) => (
+              <DropdownMenuItem key={p.id} onClick={() => setTheme(p.id)} className="cursor-pointer">
+                <p.icon className="mr-2 h-4 w-4" />
+                {p.label}
+                {theme === p.id && <Check className="ml-auto h-3.5 w-3.5" />}
+              </DropdownMenuItem>
+            ))}
             <DropdownMenuSeparator />
             <DropdownMenuItem
               onClick={handleSignOut}
