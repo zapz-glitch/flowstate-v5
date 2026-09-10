@@ -278,6 +278,8 @@ export interface ValuationResult {
   projectedProfit: number
   projectedROI: number
   wholesalePrice: number
+  recommendation?: 'strong-buy' | 'buy' | 'hold' | 'pass'
+  recommendationReason?: string
 }
 
 /**

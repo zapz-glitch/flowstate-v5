@@ -82,7 +82,7 @@ import { createListingPhotoProvider } from './providers/listing-provider'
 export type PhotoProviderType = 'zillow' | 'mls' | 'redfin' | 'realtor' | 'manual'
 
 /** Subject-photo fallback order: Zillow → Redfin → Realtor.com → none */
-const SUBJECT_FALLBACK_ORDER: PhotoProviderType[] = ['zillow', 'redfin', 'realtor']
+const SUBJECT_FALLBACK_ORDER: PhotoProviderType[] = ['redfin', 'zillow', 'realtor']
 
 interface PhotoProviderConfig {
   /** Preferred provider (defaults to first available) */
