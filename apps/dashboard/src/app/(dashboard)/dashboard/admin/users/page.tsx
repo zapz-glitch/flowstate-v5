@@ -14,7 +14,7 @@ import { Search, ChevronLeft, ChevronRight, Crown, Shield } from 'lucide-react'
 
 const PLAN_COLORS: Record<string, string> = {
   free: 'bg-zinc-500/10 text-zinc-400 border-zinc-500/20',
-  pro: 'bg-purple-500/10 text-purple-400 border-purple-500/20',
+  pro: 'bg-secondary text-foreground border-border',
   enterprise: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
 }
 
@@ -86,7 +86,7 @@ export default function AdminUsersPage() {
             placeholder="Search by name or email..."
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 rounded-lg border border-border bg-background text-body-sm focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+            className="w-full pl-10 pr-4 py-2 rounded-lg border border-border bg-background text-body-sm focus:outline-none focus:ring-1 focus:ring-ring"
           />
         </div>
         <select
@@ -95,7 +95,7 @@ export default function AdminUsersPage() {
             setPlanFilter(e.target.value)
             setPage(1)
           }}
-          className="px-4 py-2 rounded-lg border border-border bg-background text-body-sm focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+          className="px-4 py-2 rounded-lg border border-border bg-background text-body-sm focus:outline-none focus:ring-1 focus:ring-ring"
         >
           <option value="">All Plans</option>
           <option value="free">Free</option>
@@ -131,7 +131,7 @@ export default function AdminUsersPage() {
               {loading ? (
                 <tr>
                   <td colSpan={5} className="px-4 py-12 text-center text-foreground-secondary">
-                    <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-purple-500 mx-auto" />
+                    <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-foreground mx-auto" />
                   </td>
                 </tr>
               ) : users.length === 0 ? (
@@ -145,7 +145,7 @@ export default function AdminUsersPage() {
                   <tr key={u.id} className="border-b border-border last:border-0 hover:bg-secondary/20 transition-colors">
                     <td className="px-4 py-3">
                       <Link href={`/dashboard/admin/users/${u.id}`} className="block">
-                        <p className="text-body-sm font-medium text-foreground hover:text-purple-400 transition-colors">
+                        <p className="text-body-sm font-medium text-foreground hover:text-foreground-secondary transition-colors">
                           {u.name}
                         </p>
                         <p className="text-caption text-foreground-tertiary">{u.email}</p>
@@ -180,7 +180,7 @@ export default function AdminUsersPage() {
                     <td className="px-4 py-3 text-right">
                       <Link
                         href={`/dashboard/admin/users/${u.id}`}
-                        className="text-caption text-purple-400 hover:text-purple-300 font-medium transition-colors"
+                        className="text-caption text-foreground-secondary hover:text-foreground font-medium transition-colors"
                       >
                         View Details
                       </Link>

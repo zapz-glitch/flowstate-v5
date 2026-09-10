@@ -29,7 +29,7 @@ import {
 
 const PLAN_COLORS: Record<string, string> = {
   free: 'bg-zinc-500/10 text-zinc-400 border-zinc-500/20',
-  pro: 'bg-purple-500/10 text-purple-400 border-purple-500/20',
+  pro: 'bg-secondary text-foreground border-border',
   enterprise: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
 }
 
@@ -126,7 +126,7 @@ export default function AdminUserDetailPage() {
   if (loading || !detail) {
     return (
       <div className="flex items-center justify-center py-20">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-500" />
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-foreground" />
       </div>
     )
   }
@@ -174,7 +174,7 @@ export default function AdminUserDetailPage() {
             value={targetUser.plan}
             onChange={(e) => handleUpdateUser({ plan: e.target.value })}
             disabled={saving}
-            className={`text-body-sm font-medium px-3 py-1.5 rounded-lg border ${PLAN_COLORS[targetUser.plan] || PLAN_COLORS.free} bg-transparent cursor-pointer focus:outline-none focus:ring-2 focus:ring-purple-500/50 disabled:opacity-50`}
+            className={`text-body-sm font-medium px-3 py-1.5 rounded-lg border ${PLAN_COLORS[targetUser.plan] || PLAN_COLORS.free} bg-transparent cursor-pointer focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50`}
           >
             <option value="free">Free</option>
             <option value="pro">Pro</option>
@@ -187,7 +187,7 @@ export default function AdminUserDetailPage() {
             value={targetUser.role}
             onChange={(e) => handleUpdateUser({ role: e.target.value })}
             disabled={saving}
-            className="text-body-sm px-3 py-1.5 rounded-lg border border-border bg-transparent cursor-pointer focus:outline-none focus:ring-2 focus:ring-purple-500/50 disabled:opacity-50"
+            className="text-body-sm px-3 py-1.5 rounded-lg border border-border bg-transparent cursor-pointer focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
           >
             <option value="user">User</option>
             <option value="admin">Admin</option>
@@ -247,7 +247,7 @@ export default function AdminUserDetailPage() {
               onClick={() => setActiveTab(tab.id)}
               className={`flex items-center gap-2 px-4 py-2.5 text-body-sm font-medium border-b-2 transition-colors ${
                 activeTab === tab.id
-                  ? 'border-purple-500 text-purple-400'
+                  ? 'border-foreground text-foreground'
                   : 'border-transparent text-foreground-secondary hover:text-foreground'
               }`}
             >

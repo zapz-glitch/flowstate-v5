@@ -32,7 +32,7 @@ export default function AdminOverviewPage() {
   if (loading || !stats) {
     return (
       <div className="flex items-center justify-center py-20">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-500" />
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-foreground" />
       </div>
     )
   }
@@ -40,7 +40,7 @@ export default function AdminOverviewPage() {
   const statCards = [
     { label: 'Total Users', value: stats.totalUsers, icon: Users, color: 'text-blue-500' },
     { label: 'Monthly Requests', value: stats.monthlyRequests, icon: Activity, color: 'text-green-500' },
-    { label: 'Total Reports', value: stats.totalReports, icon: FileText, color: 'text-purple-500' },
+    { label: 'Total Reports', value: stats.totalReports, icon: FileText, color: 'text-foreground' },
     {
       label: 'Pro Users',
       value: (stats.planBreakdown.pro || 0) + (stats.planBreakdown.enterprise || 0),
@@ -60,7 +60,7 @@ export default function AdminOverviewPage() {
         </div>
         <Link
           href="/dashboard/admin/users"
-          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-purple-500/10 text-purple-400 hover:bg-purple-500/20 text-body-sm font-medium transition-colors"
+          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-secondary text-foreground hover:bg-accent text-body-sm font-medium transition-colors"
         >
           Manage Users
           <ArrowRight className="w-4 h-4" />
@@ -92,10 +92,10 @@ export default function AdminOverviewPage() {
               <div
                 className={`w-3 h-3 rounded-full ${
                   plan === 'free'
-                    ? 'bg-zinc-400'
+                    ? 'bg-muted-foreground/40'
                     : plan === 'pro'
-                      ? 'bg-purple-500'
-                      : 'bg-amber-500'
+                      ? 'bg-foreground'
+                      : 'bg-foreground/50'
                 }`}
               />
               <div>
@@ -123,7 +123,7 @@ export default function AdminOverviewPage() {
                 title={`${day.date}: ${day.count} requests, ${day.unique_users} users`}
               >
                 <div
-                  className="bg-purple-500/80 hover:bg-purple-500 rounded-t transition-colors w-full"
+                  className="bg-foreground/50 hover:bg-foreground/80 rounded-t transition-colors w-full"
                   style={{ height: `${Math.max((day.count / maxCount) * 100, 2)}%` }}
                 />
               </div>

@@ -163,7 +163,7 @@ export function CompComparisonDialog({ open, onOpenChange, subject, comp, isSele
               )}
               {zillowUrl && (
                 <a href={zillowUrl} target="_blank" rel="noopener noreferrer"
-                  className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-purple-500/10 text-purple-500 hover:bg-purple-500/20 transition-colors inline-flex items-center gap-1">
+                  className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-secondary text-foreground-secondary hover:bg-accent transition-colors inline-flex items-center gap-1">
                   Zillow <ExternalLink className="w-2.5 h-2.5" />
                 </a>
               )}

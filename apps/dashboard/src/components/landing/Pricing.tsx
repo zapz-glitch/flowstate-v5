@@ -64,8 +64,8 @@ export function Pricing({ onSignUpClick }: PricingProps) {
       <div className="max-w-5xl mx-auto px-6">
         {/* Header */}
         <div className="text-center mb-12">
-          <h2 className="text-4xl font-serif font-normal text-foreground mb-4">
-            <span className="italic">Simple,</span> transparent pricing
+          <h2 className="text-3xl sm:text-4xl font-sans font-medium tracking-[-0.02em] text-foreground mb-4">
+            Simple, transparent pricing
           </h2>
           <p className="text-lg text-muted-foreground max-w-xl mx-auto">
             Start free and scale as you grow. No hidden fees.
@@ -77,15 +77,15 @@ export function Pricing({ onSignUpClick }: PricingProps) {
           {plans.map((plan) => (
             <div
               key={plan.name}
-              className={`relative rounded-2xl p-8 flex flex-col ${
+              className={`relative rounded-lg p-8 flex flex-col ${
                 plan.popular
-                  ? 'bg-gradient-to-br from-purple-500/20 via-card to-violet-500/20 border border-purple-500/30'
+                  ? 'bg-card border border-foreground/30'
                   : 'bg-card border border-border'
               }`}
             >
               {plan.popular && (
                 <div className="absolute -top-3 left-1/2 -translate-x-1/2">
-                  <span className="bg-gradient-to-r from-purple-500 to-violet-500 text-white text-xs font-semibold px-3 py-1 rounded-full">
+                  <span className="bg-foreground text-background mono-label px-3 py-1.5 rounded-full">
                     Most Popular
                   </span>
                 </div>
@@ -107,7 +107,7 @@ export function Pricing({ onSignUpClick }: PricingProps) {
               <ul className="space-y-3 flex-grow">
                 {plan.features.map((feature) => (
                   <li key={feature} className="flex items-start gap-3 text-sm text-card-foreground">
-                    <Check className="h-4 w-4 text-purple-400 flex-shrink-0 mt-0.5" />
+                    <Check className="h-4 w-4 text-foreground-secondary flex-shrink-0 mt-0.5" />
                     <span>{feature}</span>
                   </li>
                 ))}

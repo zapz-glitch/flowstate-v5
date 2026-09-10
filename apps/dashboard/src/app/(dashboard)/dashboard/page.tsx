@@ -70,7 +70,7 @@ export default function DashboardPage() {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
         <div className="flex flex-col items-center gap-3">
-          <Loader2 className="w-8 h-8 animate-spin text-purple-500" />
+          <Loader2 className="w-8 h-8 animate-spin text-foreground" />
           <p className="text-sm text-muted-foreground">Loading dashboard...</p>
         </div>
       </div>
@@ -136,7 +136,7 @@ export default function DashboardPage() {
           value={`${activeKeys}/${planLimits.maxApiKeys === -1 ? '\u221e' : planLimits.maxApiKeys}`}
           subtitle="active"
           icon={Key}
-          color="purple"
+          color="neutral"
           href="/dashboard/api-hub"
         />
         <StatCard
@@ -200,7 +200,7 @@ export default function DashboardPage() {
             {/* Steps */}
             <div className="space-y-4">
               <div className="flex gap-3">
-                <div className="flex-shrink-0 w-7 h-7 rounded-lg bg-purple-500/10 text-purple-500 flex items-center justify-center text-xs font-bold">1</div>
+                <div className="flex-shrink-0 w-7 h-7 rounded-md bg-secondary text-foreground flex items-center justify-center text-xs font-bold">1</div>
                 <div className="flex-1 min-w-0">
                   <p className="text-body-sm font-medium text-foreground">Create an API key</p>
                   <Link href="/dashboard/api-hub" className="text-caption text-primary hover:underline inline-flex items-center gap-1 mt-0.5">
@@ -353,11 +353,11 @@ function StatCard({
   value: string
   subtitle?: string
   icon: React.ElementType
-  color: 'purple' | 'emerald' | 'blue' | 'amber' | 'red' | 'slate'
+  color: 'neutral' | 'emerald' | 'blue' | 'amber' | 'red' | 'slate'
   href?: string
 }) {
   const colorStyles = {
-    purple: { bg: 'bg-purple-500/10', icon: 'text-purple-500' },
+    neutral: { bg: 'bg-secondary', icon: 'text-foreground' },
     emerald: { bg: 'bg-emerald-500/10', icon: 'text-emerald-500' },
     blue: { bg: 'bg-blue-500/10', icon: 'text-blue-500' },
     amber: { bg: 'bg-amber-500/10', icon: 'text-amber-500' },

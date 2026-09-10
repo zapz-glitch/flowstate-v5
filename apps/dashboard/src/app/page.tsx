@@ -159,13 +159,13 @@ function SignInForm({
   }
 
   return (
-    <div className="rounded-2xl border border-border bg-card">
+    <div className="rounded-lg border border-border bg-card">
       <div>
         <div className="p-6 pb-4">
           <div className="flex items-center gap-3 mb-4">
             <LogoIcon className="w-10 h-10" />
             <span className="text-xl font-semibold text-foreground">
-              <span className="text-purple-500 dark:text-purple-400">api</span>.flowstate
+              <span className="text-foreground-tertiary">api</span>.flowstate
             </span>
           </div>
 
@@ -191,7 +191,7 @@ function SignInForm({
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
-                className="w-full px-4 py-2.5 bg-secondary border border-border rounded-xl text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500/50 transition-colors"
+                className="w-full px-4 py-2.5 bg-secondary border border-border rounded-md text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring focus:border-ring transition-colors"
                 placeholder="you@example.com"
               />
             </div>
@@ -207,7 +207,7 @@ function SignInForm({
                 onChange={(e) => setPassword(e.target.value)}
                 required
                 minLength={8}
-                className="w-full px-4 py-2.5 bg-secondary border border-border rounded-xl text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500/50 transition-colors"
+                className="w-full px-4 py-2.5 bg-secondary border border-border rounded-md text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring focus:border-ring transition-colors"
                 placeholder="••••••••"
               />
             </div>
@@ -216,7 +216,7 @@ function SignInForm({
               <button
                 type="button"
                 onClick={onForgotPassword}
-                className="text-sm text-purple-600 dark:text-purple-400 hover:underline"
+                className="text-sm text-foreground underline underline-offset-4 hover:text-foreground-secondary"
               >
                 Forgot password?
               </button>
@@ -225,7 +225,7 @@ function SignInForm({
             <button
               type="submit"
               disabled={isLoading}
-              className="w-full py-2.5 px-4 bg-gradient-to-r from-purple-500 to-violet-600 text-white font-medium rounded-xl hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-3 shadow-lg shadow-purple-500/25"
+              className="w-full py-2.5 px-4 bg-foreground text-background font-medium rounded-full hover:bg-foreground/85 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-3"
             >
               {isLoading ? (
                 <>
@@ -243,7 +243,7 @@ function SignInForm({
             <button
               type="button"
               onClick={onSwitchToSignUp}
-              className="text-purple-600 dark:text-purple-400 hover:underline font-medium"
+              className="text-foreground underline underline-offset-4 hover:text-foreground-secondary font-medium"
             >
               Sign up
             </button>
@@ -298,13 +298,13 @@ function SignUpForm({ onSwitchToSignIn }: { onSwitchToSignIn: () => void }) {
   }
 
   return (
-    <div className="rounded-2xl border border-border bg-card">
+    <div className="rounded-lg border border-border bg-card">
       <div>
         <div className="p-6 pb-4">
           <div className="flex items-center gap-3 mb-4">
             <LogoIcon className="w-10 h-10" />
             <span className="text-xl font-semibold text-foreground">
-              <span className="text-purple-500 dark:text-purple-400">api</span>.flowstate
+              <span className="text-foreground-tertiary">api</span>.flowstate
             </span>
           </div>
 
@@ -330,7 +330,7 @@ function SignUpForm({ onSwitchToSignIn }: { onSwitchToSignIn: () => void }) {
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 required
-                className="w-full px-4 py-2.5 bg-secondary border border-border rounded-xl text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500/50 transition-colors"
+                className="w-full px-4 py-2.5 bg-secondary border border-border rounded-md text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring focus:border-ring transition-colors"
                 placeholder="John Doe"
               />
             </div>
@@ -345,7 +345,7 @@ function SignUpForm({ onSwitchToSignIn }: { onSwitchToSignIn: () => void }) {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
-                className="w-full px-4 py-2.5 bg-secondary border border-border rounded-xl text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500/50 transition-colors"
+                className="w-full px-4 py-2.5 bg-secondary border border-border rounded-md text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring focus:border-ring transition-colors"
                 placeholder="you@example.com"
               />
             </div>
@@ -361,7 +361,7 @@ function SignUpForm({ onSwitchToSignIn }: { onSwitchToSignIn: () => void }) {
                 onChange={(e) => setPassword(e.target.value)}
                 required
                 minLength={8}
-                className="w-full px-4 py-2.5 bg-secondary border border-border rounded-xl text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500/50 transition-colors"
+                className="w-full px-4 py-2.5 bg-secondary border border-border rounded-md text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring focus:border-ring transition-colors"
                 placeholder="••••••••"
               />
               <p className="text-xs text-muted-foreground mt-1.5">Must be at least 8 characters</p>
@@ -378,7 +378,7 @@ function SignUpForm({ onSwitchToSignIn }: { onSwitchToSignIn: () => void }) {
                 onChange={(e) => setConfirmPassword(e.target.value)}
                 required
                 minLength={8}
-                className="w-full px-4 py-2.5 bg-secondary border border-border rounded-xl text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500/50 transition-colors"
+                className="w-full px-4 py-2.5 bg-secondary border border-border rounded-md text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring focus:border-ring transition-colors"
                 placeholder="••••••••"
               />
             </div>
@@ -386,7 +386,7 @@ function SignUpForm({ onSwitchToSignIn }: { onSwitchToSignIn: () => void }) {
             <button
               type="submit"
               disabled={isLoading}
-              className="w-full py-2.5 px-4 bg-gradient-to-r from-purple-500 to-violet-600 text-white font-medium rounded-xl hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-3 shadow-lg shadow-purple-500/25"
+              className="w-full py-2.5 px-4 bg-foreground text-background font-medium rounded-full hover:bg-foreground/85 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-3"
             >
               {isLoading ? (
                 <>
@@ -404,7 +404,7 @@ function SignUpForm({ onSwitchToSignIn }: { onSwitchToSignIn: () => void }) {
             <button
               type="button"
               onClick={onSwitchToSignIn}
-              className="text-purple-600 dark:text-purple-400 hover:underline font-medium"
+              className="text-foreground underline underline-offset-4 hover:text-foreground-secondary font-medium"
             >
               Sign in
             </button>
@@ -447,13 +447,13 @@ function ForgotPasswordForm({ onBackToSignIn }: { onBackToSignIn: () => void }) 
   }
 
   return (
-    <div className="rounded-2xl border border-border bg-card">
+    <div className="rounded-lg border border-border bg-card">
       <div>
         <div className="p-6 pb-4">
           <div className="flex items-center gap-3 mb-4">
             <LogoIcon className="w-10 h-10" />
             <span className="text-xl font-semibold text-foreground">
-              <span className="text-purple-500 dark:text-purple-400">api</span>.flowstate
+              <span className="text-foreground-tertiary">api</span>.flowstate
             </span>
           </div>
 
@@ -482,7 +482,7 @@ function ForgotPasswordForm({ onBackToSignIn }: { onBackToSignIn: () => void }) 
               <button
                 type="button"
                 onClick={onBackToSignIn}
-                className="inline-flex items-center gap-2 text-purple-600 dark:text-purple-400 hover:underline font-medium"
+                className="inline-flex items-center gap-2 text-foreground underline underline-offset-4 hover:text-foreground-secondary font-medium"
               >
                 <ArrowLeft className="w-4 h-4" />
                 Back to sign in
@@ -507,7 +507,7 @@ function ForgotPasswordForm({ onBackToSignIn }: { onBackToSignIn: () => void }) 
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     required
-                    className="w-full px-4 py-2.5 bg-secondary border border-border rounded-xl text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500/50 transition-colors"
+                    className="w-full px-4 py-2.5 bg-secondary border border-border rounded-md text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring focus:border-ring transition-colors"
                     placeholder="you@example.com"
                   />
                 </div>
@@ -515,7 +515,7 @@ function ForgotPasswordForm({ onBackToSignIn }: { onBackToSignIn: () => void }) 
                 <button
                   type="submit"
                   disabled={isLoading}
-                  className="w-full py-2.5 px-4 bg-gradient-to-r from-purple-500 to-violet-600 text-white font-medium rounded-xl hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-3 shadow-lg shadow-purple-500/25"
+                  className="w-full py-2.5 px-4 bg-foreground text-background font-medium rounded-full hover:bg-foreground/85 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-3"
                 >
                   {isLoading ? (
                     <>
@@ -532,7 +532,7 @@ function ForgotPasswordForm({ onBackToSignIn }: { onBackToSignIn: () => void }) 
                 <button
                   type="button"
                   onClick={onBackToSignIn}
-                  className="inline-flex items-center gap-1 text-purple-600 dark:text-purple-400 hover:underline font-medium"
+                  className="inline-flex items-center gap-1 text-foreground underline underline-offset-4 hover:text-foreground-secondary font-medium"
                 >
                   <ArrowLeft className="w-4 h-4" />
                   Back to sign in

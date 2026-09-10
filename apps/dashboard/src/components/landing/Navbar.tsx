@@ -74,9 +74,8 @@ export function Navbar({ onSignInClick, isSignedIn }: NavbarProps) {
               )}
             </Button>
             <Button
-              variant="outline"
               onClick={onSignInClick}
-              className="border-border text-foreground hover:bg-secondary"
+              className="bg-foreground text-background hover:bg-foreground/85 rounded-full h-9 px-5"
             >
               {isSignedIn ? 'Dashboard' : 'Sign in'}
             </Button>
@@ -115,9 +114,8 @@ export function Navbar({ onSignInClick, isSignedIn }: NavbarProps) {
               </Link>
               <div className="pt-4">
                 <Button
-                  variant="outline"
                   onClick={() => { onSignInClick(); setIsMobileMenuOpen(false) }}
-                  className="w-full border-border text-foreground hover:bg-secondary"
+                  className="w-full bg-foreground text-background hover:bg-foreground/85 rounded-full"
                 >
                   {isSignedIn ? 'Dashboard' : 'Sign in'}
                 </Button>

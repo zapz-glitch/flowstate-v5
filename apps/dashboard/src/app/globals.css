@@ -3,59 +3,59 @@
 @tailwind utilities;
 
 @layer base {
-  /* Light mode (default) */
+  /* Light mode (default) — monochrome, inverted-contrast actions */
   :root {
     --background: 0 0% 100%;
-    --foreground: 0 0% 9%;
-    --foreground-secondary: 0 0% 25%;
-    --foreground-tertiary: 0 0% 45%;
-    --card: 0 0% 99%;
-    --card-hover: 0 0% 96%;
-    --card-foreground: 0 0% 9%;
-    --popover: 0 0% 98%;
-    --popover-foreground: 0 0% 9%;
-    --primary: 263 70% 50%;
-    --primary-foreground: 0 0% 100%;
-    --secondary: 0 0% 96%;
+    --foreground: 0 0% 7%;
+    --foreground-secondary: 0 0% 30%;
+    --foreground-tertiary: 0 0% 48%;
+    --card: 0 0% 100%;
+    --card-hover: 0 0% 97%;
+    --card-foreground: 0 0% 7%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 7%;
+    --primary: 0 0% 9%;
+    --primary-foreground: 0 0% 98%;
+    --secondary: 0 0% 94%;
     --secondary-foreground: 0 0% 9%;
-    --muted: 0 0% 96%;
-    --muted-foreground: 0 0% 50%;
-    --accent: 263 70% 50%;
-    --accent-secondary: 280 80% 60%;
-    --accent-foreground: 0 0% 100%;
-    --destructive: 0 84% 60%;
+    --muted: 0 0% 94%;
+    --muted-foreground: 0 0% 45%;
+    --accent: 0 0% 90%;
+    --accent-secondary: 0 0% 60%;
+    --accent-foreground: 0 0% 9%;
+    --destructive: 0 72% 51%;
     --destructive-foreground: 0 0% 100%;
-    --border: 0 0% 90%;
-    --input: 0 0% 90%;
-    --ring: 263 70% 50%;
-    --radius: 0.75rem;
+    --border: 0 0% 89%;
+    --input: 0 0% 85%;
+    --ring: 0 0% 45%;
+    --radius: 0.375rem;
   }
 
-  /* Dark mode — deep, Firecrawl-style surfaces */
+  /* Dark mode — near-black monochrome surfaces, hairline borders */
   .dark {
-    --background: 240 6% 4%;
+    --background: 0 0% 4%;
     --foreground: 0 0% 96%;
-    --foreground-secondary: 0 0% 70%;
-    --foreground-tertiary: 0 0% 45%;
-    --card: 240 4% 8%;
-    --card-hover: 240 4% 11%;
+    --foreground-secondary: 0 0% 66%;
+    --foreground-tertiary: 0 0% 42%;
+    --card: 0 0% 6%;
+    --card-hover: 0 0% 9%;
     --card-foreground: 0 0% 96%;
-    --popover: 240 4% 8%;
+    --popover: 0 0% 6%;
     --popover-foreground: 0 0% 96%;
-    --primary: 263 70% 58%;
-    --primary-foreground: 0 0% 100%;
-    --secondary: 240 4% 11%;
+    --primary: 0 0% 98%;
+    --primary-foreground: 0 0% 6%;
+    --secondary: 0 0% 10%;
     --secondary-foreground: 0 0% 96%;
-    --muted: 240 4% 11%;
-    --muted-foreground: 0 0% 45%;
-    --accent: 263 70% 58%;
-    --accent-secondary: 280 80% 65%;
-    --accent-foreground: 0 0% 100%;
-    --destructive: 0 84% 60%;
+    --muted: 0 0% 10%;
+    --muted-foreground: 0 0% 52%;
+    --accent: 0 0% 16%;
+    --accent-secondary: 0 0% 40%;
+    --accent-foreground: 0 0% 98%;
+    --destructive: 0 72% 55%;
     --destructive-foreground: 0 0% 100%;
-    --border: 240 4% 15%;
-    --input: 240 4% 11%;
-    --ring: 263 70% 58%;
+    --border: 0 0% 15%;
+    --input: 0 0% 18%;
+    --ring: 0 0% 55%;
   }
 
   * {
@@ -104,19 +104,19 @@ body {
 
 /* Selection */
 ::selection {
-  background: hsl(var(--accent) / 0.3);
+  background: hsl(var(--foreground) / 0.18);
   color: hsl(var(--foreground));
 }
 
 /* Focus styles */
 :focus-visible {
-  outline: 2px solid hsl(var(--accent));
+  outline: 2px solid hsl(var(--ring));
   outline-offset: 2px;
 }
 
-/* Gradient text */
+/* Gradient text — subtle monochrome fade */
 .gradient-text {
-  background: linear-gradient(135deg, hsl(263 70% 55%) 0%, hsl(290 80% 65%) 100%);
+  background: linear-gradient(135deg, hsl(var(--foreground)) 0%, hsl(var(--foreground-tertiary)) 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -138,7 +138,7 @@ body {
   inset: 0;
   border-radius: inherit;
   padding: 1px;
-  background: linear-gradient(135deg, hsl(263 70% 55%), hsl(290 80% 65%), hsl(263 70% 55%));
+  background: linear-gradient(135deg, hsl(var(--foreground) / 0.5), hsl(var(--foreground) / 0.15), hsl(var(--foreground) / 0.5));
   background-size: 200% 200%;
   animation: gradient-shift 3s ease infinite;
   -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
@@ -172,6 +172,16 @@ body {
     rgba(255, 255, 255, 0) 100%
   );
   background-size: 200% 100%;
+}
+
+/* Mono micro-label — uppercase engineering-index eyebrow text */
+.mono-label {
+  font-family: var(--font-mono), ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: hsl(var(--muted-foreground));
 }
 
 /* ─── Playground-specific styles (analysis page) ─────────────────────────────*/

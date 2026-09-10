@@ -101,8 +101,8 @@ export default function Sidebar() {
           <div className="flex items-center justify-between h-16 px-4 border-b border-border">
             <Link href="/dashboard" className="flex items-center">
               {collapsed ? (
-                <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-purple-500 to-violet-600 flex items-center justify-center">
-                  <span className="text-white font-bold text-sm">F</span>
+                <div className="w-8 h-8 rounded-md bg-foreground flex items-center justify-center">
+                  <span className="text-background font-bold text-sm">F</span>
                 </div>
               ) : (
                 <Logo size="sm" />
@@ -191,7 +191,7 @@ export default function Sidebar() {
                   )}
                 >
                   <Avatar className="h-9 w-9 flex-shrink-0">
-                    <AvatarFallback className="bg-gradient-to-br from-purple-500 to-violet-600 text-white text-body-sm font-medium">
+                    <AvatarFallback className="bg-secondary border border-border text-foreground text-body-sm font-medium">
                       {initials}
                     </AvatarFallback>
                   </Avatar>
@@ -262,7 +262,7 @@ export default function Sidebar() {
           <DropdownMenuTrigger asChild>
             <button className="p-1">
               <Avatar className="h-8 w-8">
-                <AvatarFallback className="bg-gradient-to-br from-purple-500 to-violet-600 text-white text-xs font-medium">
+                <AvatarFallback className="bg-secondary border border-border text-foreground text-xs font-medium">
                   {initials}
                 </AvatarFallback>
               </Avatar>

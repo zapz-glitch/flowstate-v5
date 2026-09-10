@@ -69,7 +69,7 @@ function TerminalLine({
     error: 'text-red-600 dark:text-red-400',
     success: 'text-emerald-600 dark:text-emerald-400',
     info: 'text-blue-600 dark:text-blue-400',
-    step: 'text-purple-600 dark:text-purple-400',
+    step: 'text-foreground-secondary',
   }
 
   const defaultPrefixes = {
@@ -95,7 +95,7 @@ function TerminalLine({
         type === 'error' && 'text-red-600 dark:text-red-400',
         type === 'success' && 'text-emerald-600 dark:text-emerald-400',
         type === 'info' && 'text-blue-600 dark:text-blue-400',
-        type === 'step' && 'text-purple-600 dark:text-purple-400',
+        type === 'step' && 'text-foreground-secondary',
         type === 'output' && 'text-foreground dark:text-zinc-300',
         type === 'command' && 'text-foreground dark:text-zinc-100'
       )}>
@@ -143,7 +143,7 @@ function TerminalJson({ data, animate = false, delay = 0, collapsed = false }: T
         {lines.length > 5 && (
           <button
             onClick={() => setIsExpanded(true)}
-            className="mt-2 text-xs text-purple-600 dark:text-purple-400 hover:text-purple-700 dark:hover:text-purple-300 transition-colors"
+            className="mt-2 text-xs text-foreground-secondary hover:text-foreground transition-colors"
           >
             Show all ({lines.length} lines)
           </button>
@@ -160,7 +160,7 @@ function TerminalJson({ data, animate = false, delay = 0, collapsed = false }: T
       {collapsed && isExpanded && (
         <button
           onClick={() => setIsExpanded(false)}
-          className="mt-2 text-xs text-purple-600 dark:text-purple-400 hover:text-purple-700 dark:hover:text-purple-300 transition-colors"
+          className="mt-2 text-xs text-foreground-secondary hover:text-foreground transition-colors"
         >
           Collapse
         </button>
@@ -218,7 +218,7 @@ function highlightJson(json: string): React.ReactNode {
         if (closeIndex !== -1) {
           const content = withValues.slice(i + 1, closeIndex)
           const colorClass = {
-            key: 'text-purple-600 dark:text-purple-400',
+            key: 'text-foreground',
             string: 'text-green-600 dark:text-green-400',
             number: 'text-blue-600 dark:text-blue-400',
             bool: 'text-yellow-600 dark:text-yellow-400',
@@ -257,7 +257,7 @@ function TerminalSpinner({ text = 'Loading...' }: TerminalSpinnerProps) {
   }, [])
 
   return (
-    <div className="flex items-center gap-2 text-purple-400">
+    <div className="flex items-center gap-2 text-foreground-secondary">
       <span className="animate-spin">⠋</span>
       <span>{text}{dots}</span>
     </div>
@@ -279,7 +279,7 @@ function TerminalProgress({ label, progress, total = 100 }: TerminalProgressProp
   return (
     <div className="flex items-center gap-3 text-sm">
       <span className="text-muted-foreground min-w-[120px]">{label}</span>
-      <span className="text-purple-600 dark:text-purple-400 font-mono">[{bar}]</span>
+      <span className="text-foreground font-mono">[{bar}]</span>
       <span className="text-muted-foreground/70">{percentage}%</span>
     </div>
   )

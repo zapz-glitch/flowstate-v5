@@ -2332,7 +2332,7 @@ function DealParamsTab() {
                         </p>
                       </div>
                       {s.hasDealParams && (
-                        <span className={`w-2 h-2 rounded-full flex-shrink-0 ${s.isEnabled ? 'bg-purple-500' : 'bg-gray-400'}`} title={s.isEnabled ? 'Deal params override active' : 'Deal params override saved (disabled)'} />
+                        <span className={`w-2 h-2 rounded-full flex-shrink-0 ${s.isEnabled ? 'bg-foreground' : 'bg-muted-foreground/40'}`} title={s.isEnabled ? 'Deal params override active' : 'Deal params override saved (disabled)'} />
                       )}
                       <ChevronDown className={`w-4 h-4 text-muted-foreground flex-shrink-0 transition-transform ${expanded ? 'rotate-180' : ''}`} />
                     </div>
@@ -2355,7 +2355,7 @@ function DealParamsTab() {
                               const updated = await updateLocationSetting(s.id, { isEnabled: v })
                               setLocSettings(prev => prev.map(x => x.id === s.id ? updated : x))
                             }}
-                            className="data-[state=checked]:bg-purple-500"
+                            className="data-[state=checked]:bg-foreground"
                           />
                         </div>
                         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
@@ -3249,7 +3249,7 @@ function ArvThresholdTab() {
                           </p>
                         </div>
                         {s.hasArvThreshold && (
-                          <Badge variant="outline" className="text-[10px] px-2 py-0 border-purple-500/30 text-purple-500 flex-shrink-0">
+                          <Badge variant="outline" className="text-[10px] px-2 py-0 border-border text-foreground-secondary flex-shrink-0">
                             {(s.arvThresholdJson as ArvThresholdConfig).percent}% / {(s.arvThresholdJson as ArvThresholdConfig).asIsThresholdPercent ?? asIsThreshold}%
                           </Badge>
                         )}
