@@ -146,6 +146,7 @@ export const FOUNDATION_TYPE: Record<string, string> = {
   'RS0': 'Raised',
   'CNT': 'Continuous Footing',
   'CN0': 'Continuous Footing',
+  'CNF': 'Continuous Footing',
   'MDS': 'Mud Sill',
   'MD0': 'Mud Sill',
   'FLT': 'Floating',
