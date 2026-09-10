@@ -157,6 +157,37 @@ userReports.get('/by-property', async (c) => {
   return c.json({ reports })
 })
 
+// ─── GET /user/reports/map-points ────────────────────────────────────────────
+// Lightweight geocoded index of saved reports for the portfolio globe.
+// Coordinates are extracted from the stored analysis JSON — no migration needed.
+
+userReports.get('/map-points', async (c) => {
+  const session = await getSession(c)
+  if (!session?.user) return c.json({ error: 'Not authenticated' }, 401)
+
+  const db = drizzle(c.env.DB)
+  const rows = await db
+    .select({
+      jobId: savedReports.jobId,
+      propertyAddress: savedReports.propertyAddress,
+      propertyCity: savedReports.propertyCity,
+      propertyState: savedReports.propertyState,
+      arv: savedReports.arv,
+      maxAllowableOffer: savedReports.maxAllowableOffer,
+      createdAt: savedReports.createdAt,
+      latitude: sql<number | null>`json_extract(${savedReports.fullResponseJson}, '$.subject.latitude')`,
+      longitude: sql<number | null>`json_extract(${savedReports.fullResponseJson}, '$.subject.longitude')`,
+    })
+    .from(savedReports)
+    .where(eq(savedReports.userId, session.user.id))
+    .orderBy(desc(savedReports.createdAt))
+    .limit(500)
+
+  return c.json({
+    points: rows.filter((r) => r.latitude != null && r.longitude != null),
+  })
+})
+
 // ─── GET /user/reports/:jobId/history ───────────────────────────────────────
 
 userReports.get('/:jobId/history', async (c) => {

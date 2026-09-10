@@ -488,3 +488,17 @@ body {
     text-align: center;
   }
 }
+
+/* Atlas globe popups (MapLibre) */
+.atlas-popup-wrap .maplibregl-popup-content {
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
+  border-radius: 6px;
+  padding: 10px 12px;
+  color: hsl(var(--foreground));
+  box-shadow: 0 4px 16px rgb(0 0 0 / 0.4);
+  cursor: pointer;
+}
+.atlas-popup-wrap .maplibregl-popup-tip {
+  display: none;
+}

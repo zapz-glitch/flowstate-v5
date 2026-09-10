@@ -20,7 +20,7 @@ import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
 import { EvaluationSettingsSheet } from '@/components/report/EvaluationSettingsSheet'
 import { queueAnalysis, type AnalyzeData } from './actions'
-import { getArvThreshold, getReportsByProperty, runCompSelection, type ExistingReport } from '@/lib/client-api'
+import { getArvThreshold, getReportsByProperty, getSavedReport, runCompSelection, type ExistingReport } from '@/lib/client-api'
 import { useAutoSave } from '@/hooks/use-auto-save'
 import { ExistingReportsDialog } from './ExistingReportsDialog'
 // cn is used in the outer wrapper
@@ -48,6 +48,9 @@ import type { CompItem } from './actions'
 //             Zillow photos + optional AI analysis may still be running in background
 //
 type AnalysisPhase = 'idle' | 'fetching' | 'ready'
+
+// Last searched property — restored when returning to Property Search
+const LAST_ANALYSIS_KEY = 'flowstate:last-analysis'
 
 // ─── Status Labels ───────────────────────────────────────────────────────────
 
@@ -173,6 +176,31 @@ export default function AnalyzePage() {
   const setActiveAnalysis = useSetAtom(activeAnalysisAtom)
   const setAnalysisResult = useSetAtom(analysisResultAtom)
   const setAnalysisState = useSetAtom(analysisStateAtom)
+
+  // Restore the last searched property when the page mounts with no
+  // in-flight analysis — the saved report carries the full AnalyzeData JSON.
+  const restoredRef = useRef(false)
+  useEffect(() => {
+    if (restoredRef.current || analysisResult || activeAnalysis) return
+    restoredRef.current = true
+    let last: { jobId?: string; address?: string } | null = null
+    try { last = JSON.parse(localStorage.getItem(LAST_ANALYSIS_KEY) || 'null') } catch { /* ignore */ }
+    if (!last?.jobId) return
+    setPhase('fetching')
+    getSavedReport(last.jobId).then((res) => {
+      if (res?.analysis) {
+        setAnalysisResult(res.analysis as AnalyzeData)
+        setActiveAnalysis({ jobId: res.jobId ?? last.jobId!, address: res.address || last.address || '' })
+        setAddress(res.address || last.address || '')
+        setPhase('ready')
+      } else {
+        setPhase('idle')
+      }
+    }).catch(() => {
+      try { localStorage.removeItem(LAST_ANALYSIS_KEY) } catch { /* ignore */ }
+      setPhase('idle')
+    })
+  }, [analysisResult, activeAnalysis, setAnalysisResult, setActiveAnalysis])
 
   // ─── SSE Event Handler ────────────────────────────────────────────────────
 
@@ -486,6 +514,9 @@ export default function AnalyzePage() {
       if (response.success) {
         setActiveAnalysis({ jobId: response.jobId ?? '', address: address.trim() })
         setAnalysisState({ ...initialAnalysisState, jobId: response.jobId ?? null, status: 'processing' })
+        try {
+          localStorage.setItem(LAST_ANALYSIS_KEY, JSON.stringify({ jobId: response.jobId ?? '', address: address.trim() }))
+        } catch { /* ignore */ }
 
         // Result streams via SSE — connect immediately
         if (response.enrichment) {
@@ -562,8 +593,8 @@ export default function AnalyzePage() {
       <div className={cn(showTwoColumn ? 'px-4 sm:px-6 pt-3 pb-1 space-y-3 flex-shrink-0' : 'space-y-6')}>
       {phase === 'idle' && !error && (
         <div>
-          <h1 className="text-heading-lg text-foreground tracking-tight">API Playground</h1>
-          <p className="text-body text-foreground-tertiary mt-1">Test the Flowstate API with real property data</p>
+          <h1 className="text-heading-lg text-foreground tracking-tight">Property Search</h1>
+          <p className="text-body text-foreground-tertiary mt-1">Search an address. Underwrite the deal.</p>
         </div>
       )}
 

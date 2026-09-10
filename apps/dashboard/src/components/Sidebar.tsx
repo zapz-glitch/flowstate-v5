@@ -17,6 +17,7 @@ import {
   Settings2,
   ShieldCheck,
   Upload,
+  Globe2,
 } from 'lucide-react'
 import { signOut } from '@/lib/auth-client'
 import { Logo } from '@/components/ui/Logo'
@@ -42,7 +43,8 @@ const baseNavigation: Array<{
   external?: boolean
 }> = [
   { name: 'Overview', href: '/dashboard', icon: Home },
-  { name: 'API Playground', href: '/dashboard/analyze', icon: Search },
+  { name: 'Property Search', href: '/dashboard/analyze', icon: Search },
+  { name: 'Atlas', href: '/dashboard/atlas', icon: Globe2 },
   { name: 'Batch Import', href: '/dashboard/batch', icon: Upload },
   { name: 'Property Reports', href: '/dashboard/reports', icon: ClipboardList },
   { name: 'Evaluation Settings', href: '/dashboard/evaluation-settings', icon: Settings2 },
