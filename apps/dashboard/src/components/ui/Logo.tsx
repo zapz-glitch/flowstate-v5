@@ -8,7 +8,8 @@ interface LogoProps {
   size?: 'sm' | 'md' | 'lg'
 }
 
-// Flow mark: house outline whose base dissolves into a wave — home + flow
+// Flow mark: infinity loop carrying two network nodes — deal flow,
+// distribution network, and the flywheel in a single stroke
 function FlowGlyph({ className }: { className?: string }) {
   return (
     <svg
@@ -16,11 +17,13 @@ function FlowGlyph({ className }: { className?: string }) {
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth="1.9"
+      strokeWidth="1.8"
       strokeLinecap="round"
       strokeLinejoin="round"
     >
-      <path d="M4.5 17.5 V10.8 L12 4.5 L19.5 10.8 V17.5 M4.5 17.5 C7 17.5 8 15.5 10.5 15.5 C13 15.5 14 17.5 16.5 17.5 C17.8 17.5 19 17 19.5 16.3" />
+      <path d="M12 12 C9.5 9.5 7.5 8 5.8 8 C3.6 8 2.2 9.8 2.2 12 C2.2 14.2 3.6 16 5.8 16 C7.5 16 9.5 14.5 12 12 C14.5 14.5 16.5 16 18.2 16 C20.4 16 21.8 14.2 21.8 12 C21.8 9.8 20.4 8 18.2 8 C16.5 8 14.5 9.5 12 12 Z" />
+      <circle cx="6.6" cy="12" r="1.35" fill="currentColor" stroke="none" />
+      <circle cx="17.4" cy="12" r="1.35" fill="currentColor" stroke="none" />
     </svg>
   )
 }
