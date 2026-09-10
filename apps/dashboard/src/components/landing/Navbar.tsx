@@ -39,8 +39,8 @@ export function Navbar({ onSignInClick, isSignedIn }: NavbarProps) {
       <div className="max-w-6xl mx-auto px-6">
         <div className="flex items-center justify-between">
           {/* Logo */}
-          <Link href="/" className="flex items-center gap-2.5">
-            <Logo size="md" />
+          <Link href="/" className="flex items-center">
+            <Logo size="md" showText={false} />
           </Link>
 
           {/* Desktop Navigation */}

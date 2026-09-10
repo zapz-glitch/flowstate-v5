@@ -1,25 +1,39 @@
 'use client'
 
 import { Terminal, Copy, Check, Loader2, CheckCircle } from 'lucide-react'
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 
 interface HeroProps {
   onGetStartedClick: () => void
 }
 
 interface TerminalLine {
-  type: 'command' | 'output' | 'success' | 'loading'
+  id: number
+  type: 'command' | 'output' | 'success' | 'spacer'
   content: string
   color?: string
 }
 
+// Keep a rolling window so the terminal scrolls like a real one instead of
+// clearing abruptly between commands.
+const MAX_LINES = 22
+
 export function Hero({ onGetStartedClick: _onGetStartedClick }: HeroProps) {
   const [copied, setCopied] = useState(false)
   const [lines, setLines] = useState<TerminalLine[]>([])
+  const lineId = useRef(0)
   const [currentText, setCurrentText] = useState('')
   const [isTyping, setIsTyping] = useState(false)
+  const [isFetching, setIsFetching] = useState(false)
   const [showCursor, setShowCursor] = useState(true)
   const [commandIndex, setCommandIndex] = useState(0)
+
+  const appendLines = useCallback((newLines: Omit<TerminalLine, 'id'>[]) => {
+    setLines(prev => [
+      ...prev,
+      ...newLines.map(l => ({ ...l, id: lineId.current++ })),
+    ].slice(-MAX_LINES))
+  }, [])
 
   // Waitlist form state
   const [firstName, setFirstName] = useState('')
@@ -167,21 +181,21 @@ export function Hero({ onGetStartedClick: _onGetStartedClick }: HeroProps) {
   // Add output lines one by one
   const showOutput = useCallback((outputLines: string[], index: number, onComplete: () => void) => {
     if (index < outputLines.length) {
-      setLines(prev => [...prev, { type: 'output', content: outputLines[index] }])
-      setTimeout(() => showOutput(outputLines, index + 1, onComplete), 60)
+      appendLines([{ type: 'output', content: outputLines[index] }])
+      setTimeout(() => showOutput(outputLines, index + 1, onComplete), 70)
     } else {
       onComplete()
     }
-  }, [])
+  }, [appendLines])
 
   // Main animation loop
   useEffect(() => {
     const runAnimation = async () => {
       const command = commands[commandIndex]
 
-      // Clear and start fresh
-      setLines([])
+      // Separate runs with a blank line instead of clearing the buffer
       setCurrentText('')
+      appendLines([{ type: 'spacer', content: '' }])
       setIsTyping(true)
 
       // Wait a moment before starting
@@ -193,19 +207,17 @@ export function Hero({ onGetStartedClick: _onGetStartedClick }: HeroProps) {
       })
 
       // Add the command to lines
-      setLines([{ type: 'command', content: command.text }])
+      appendLines([{ type: 'command', content: command.text }])
       setCurrentText('')
       setIsTyping(false)
 
-      // Show loading
+      // Show loading (rendered below the list, no array mutation)
       await new Promise(resolve => setTimeout(resolve, 300))
-      setLines(prev => [...prev, { type: 'loading', content: 'Fetching...' }])
+      setIsFetching(true)
 
       // Wait for "response"
-      await new Promise(resolve => setTimeout(resolve, 600))
-
-      // Remove loading and show response
-      setLines(prev => prev.filter(l => l.type !== 'loading'))
+      await new Promise(resolve => setTimeout(resolve, 700))
+      setIsFetching(false)
 
       await new Promise<void>(resolve => {
         showOutput(command.response, 0, resolve)
@@ -213,7 +225,7 @@ export function Hero({ onGetStartedClick: _onGetStartedClick }: HeroProps) {
 
       // Show success message
       await new Promise(resolve => setTimeout(resolve, 200))
-      setLines(prev => [...prev, { type: 'success', content: command.successMsg }])
+      appendLines([{ type: 'success', content: command.successMsg }])
 
       // Wait before next command
       await new Promise(resolve => setTimeout(resolve, 3000))
@@ -343,15 +355,16 @@ export function Hero({ onGetStartedClick: _onGetStartedClick }: HeroProps) {
                 </button>
               </div>
 
-              {/* Terminal content */}
-              <div className="p-3 sm:p-4 font-mono text-xs sm:text-sm min-h-[200px] sm:min-h-[300px] max-h-[250px] sm:max-h-[300px] overflow-hidden">
+              {/* Terminal content — fixed height, bottom-anchored like a real terminal */}
+              <div className="p-3 sm:p-4 font-mono text-xs sm:text-sm h-[280px] sm:h-[320px] overflow-hidden flex flex-col justify-end">
                 {/* Previous lines */}
                 <div className="space-y-1">
-                  {lines.map((line, index) => (
+                  {lines.map((line) => (
                     <div
-                      key={index}
-                      className="animate-in fade-in slide-in-from-bottom-1 duration-150"
+                      key={line.id}
+                      className="animate-fade-in"
                     >
+                      {line.type === 'spacer' && <div className="h-3" />}
                       {line.type === 'command' && (
                         <div className="flex items-start gap-2">
                           <span className="text-green-500 dark:text-green-400 select-none">$</span>
@@ -371,16 +384,6 @@ export function Hero({ onGetStartedClick: _onGetStartedClick }: HeroProps) {
                           )}
                         </div>
                       )}
-                      {line.type === 'loading' && (
-                        <div className="flex items-center gap-2 ml-4 text-muted-foreground">
-                          <div className="flex gap-1">
-                            <span className="w-1.5 h-1.5 rounded-full bg-foreground/50 animate-bounce" style={{ animationDelay: '0ms' }} />
-                            <span className="w-1.5 h-1.5 rounded-full bg-foreground/50 animate-bounce" style={{ animationDelay: '150ms' }} />
-                            <span className="w-1.5 h-1.5 rounded-full bg-foreground/50 animate-bounce" style={{ animationDelay: '300ms' }} />
-                          </div>
-                          <span className="text-xs">{line.content}</span>
-                        </div>
-                      )}
                       {line.type === 'success' && (
                         <div className="flex items-center gap-2 ml-4 text-green-500 dark:text-green-400 text-xs mt-2">
                           <Check className="h-3.5 w-3.5" />
@@ -390,6 +393,18 @@ export function Hero({ onGetStartedClick: _onGetStartedClick }: HeroProps) {
                     </div>
                   ))}
                 </div>
+
+                {/* Fetching indicator — separate element, never mutates the lines array */}
+                {isFetching && (
+                  <div className="flex items-center gap-2 ml-4 mt-1 text-muted-foreground animate-fade-in">
+                    <div className="flex gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-foreground/50 animate-bounce" style={{ animationDelay: '0ms' }} />
+                      <span className="w-1.5 h-1.5 rounded-full bg-foreground/50 animate-bounce" style={{ animationDelay: '150ms' }} />
+                      <span className="w-1.5 h-1.5 rounded-full bg-foreground/50 animate-bounce" style={{ animationDelay: '300ms' }} />
+                    </div>
+                    <span className="text-xs">Fetching...</span>
+                  </div>
+                )}
 
                 {/* Current typing line */}
                 {isTyping && (
@@ -407,7 +422,7 @@ export function Hero({ onGetStartedClick: _onGetStartedClick }: HeroProps) {
                 )}
 
                 {/* Waiting cursor when not typing */}
-                {!isTyping && lines.length === 0 && (
+                {!isTyping && !isFetching && lines.length === 0 && (
                   <div className="flex items-start gap-2">
                     <span className="text-green-500 dark:text-green-400 select-none">$</span>
                     <span

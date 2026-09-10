@@ -8,6 +8,24 @@ interface LogoProps {
   size?: 'sm' | 'md' | 'lg'
 }
 
+// Flow mark: three laminar streamlines — reads as "flow"
+function FlowGlyph({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+    >
+      <path d="M3 7.5c2.7-2 5.3-2 8 0s5.3 2 8 0" />
+      <path d="M3 12c2.7-2 5.3-2 8 0s5.3 2 8 0" />
+      <path d="M3 16.5c2.7-2 5.3-2 8 0s5.3 2 8 0" />
+    </svg>
+  )
+}
+
 export function Logo({ className, showText = true, size = 'md' }: LogoProps) {
   const sizes = {
     sm: { icon: 'w-7 h-7', text: 'text-base', svg: 'w-4 h-4' },
@@ -17,18 +35,16 @@ export function Logo({ className, showText = true, size = 'md' }: LogoProps) {
 
   return (
     <div className={cn('flex items-center gap-2.5', className)}>
-      {/* Flowstate Icon - inverted monochrome mark */}
+      {/* Flowstate mark - inverted monochrome */}
       <div className={cn(
         'rounded-md bg-foreground flex items-center justify-center',
         sizes[size].icon
       )}>
-        <svg className={cn('text-background', sizes[size].svg)} fill="currentColor" viewBox="0 0 24 24">
-          <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
-        </svg>
+        <FlowGlyph className={cn('text-background', sizes[size].svg)} />
       </div>
       {showText && (
         <span className={cn('font-semibold tracking-tight text-foreground', sizes[size].text)}>
-          <span className="text-foreground-tertiary">api</span>.flowstate
+          flowstate
         </span>
       )}
     </div>
@@ -41,9 +57,7 @@ export function LogoIcon({ className }: { className?: string }) {
       'w-8 h-8 rounded-md bg-foreground flex items-center justify-center',
       className
     )}>
-      <svg className="w-5 h-5 text-background" fill="currentColor" viewBox="0 0 24 24">
-        <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
-      </svg>
+      <FlowGlyph className="w-5 h-5 text-background" />
     </div>
   )
 }

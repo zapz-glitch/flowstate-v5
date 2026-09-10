@@ -165,7 +165,7 @@ function SignInForm({
           <div className="flex items-center gap-3 mb-4">
             <LogoIcon className="w-10 h-10" />
             <span className="text-xl font-semibold text-foreground">
-              <span className="text-foreground-tertiary">api</span>.flowstate
+              flowstate
             </span>
           </div>
 
@@ -304,7 +304,7 @@ function SignUpForm({ onSwitchToSignIn }: { onSwitchToSignIn: () => void }) {
           <div className="flex items-center gap-3 mb-4">
             <LogoIcon className="w-10 h-10" />
             <span className="text-xl font-semibold text-foreground">
-              <span className="text-foreground-tertiary">api</span>.flowstate
+              flowstate
             </span>
           </div>
 
@@ -453,7 +453,7 @@ function ForgotPasswordForm({ onBackToSignIn }: { onBackToSignIn: () => void }) 
           <div className="flex items-center gap-3 mb-4">
             <LogoIcon className="w-10 h-10" />
             <span className="text-xl font-semibold text-foreground">
-              <span className="text-foreground-tertiary">api</span>.flowstate
+              flowstate
             </span>
           </div>
 
