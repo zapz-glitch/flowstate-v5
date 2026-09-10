@@ -2,6 +2,35 @@
 
 ## Current objective
 
+Sept 10: owner requested a Devin.ai-style visual redesign of the dashboard.
+Implemented on new branch feat/devin-theme (off v4-python HEAD): monochrome
+design tokens in globals.css (near-black surfaces, hairline borders, inverted
+white-on-black primary actions, neutral ring/selection, radius 0.375rem),
+mono font stack + .mono-label utility, numbered-index feature grid, and a full
+sweep removing all purple/violet utility classes across landing, auth, admin,
+and analysis UI. Dashboard typecheck passes. layout.tsx themeColor change is
+left uncommitted because that file carries the paused font-vendoring work.
+Earlier pause state below still applies; staging untouched.
+
+Follow-ups on feat/devin-theme (all committed, dashboard+api typecheck clean):
+- Navbar shows icon only; wordmark reads "flowstate"; hero terminal reworked
+  to rolling-buffer + stable line ids (flicker fix).
+- Brand mark is the house-with-flowing-wave glyph (owner-selected at 9e7016a,
+  reverted back to it at 44afe8c after trying lemniscate/infinity variants).
+  All favicons/PWA/maskable/touch icons regenerated from it.
+- "API Playground" renamed to "Property Search" (sidebar + heading).
+- Property Search now restores the last searched property on mount via
+  localStorage jobId + GET /user/reports/:jobId.
+- New GET /user/reports/map-points (session auth) extracting subject lat/lng
+  from fullResponseJson via json_extract — no schema change.
+- New /dashboard/atlas page (nav "Atlas"): MapLibre GL v5 globe projection
+  over Esri World Imagery satellite tiles, saved reports as white markers,
+  click popup → report page. maplibre-gl@^5.24 added.
+- apps/dashboard/public/logo-preview.html is committed dev tooling for owner
+  logo review — remove before shipping this branch.
+Next: owner visual review of Atlas + Property Search persistence; decide
+whether semantic status colors (emerald/amber/blue/red) stay or go fully mono.
+
 Owner requested saving and pausing work; fix the remaining errors in a later
 session. Do not merge, deploy, or continue remediation during this pause.
 Implementation through e6879d2 is committed and pushed on v4-python. Staging
@@ -799,3 +828,35 @@ Local login/artifacts: ignored .data/local-candidate; scripts in
 /tmp/flowstate-v5-browser.xRhny7. Tests and runtime changes remain uncommitted;
 tsconfig.tsbuildinfo is a generated typecheck artifact, not an intended source edit.
 Main unchanged, no push/deployment. Maps/Firecrawl credentials deferred by user.
+
+## Localhost verification 2026-09-10 (agent session, not owner approval)
+
+- API (wrangler dev --local, :8787): /health 200, /health/db 200 (local D1),
+  /health/keys 200 configured:true. CoreLogic live token check: HTTP 200,
+  access token issued (1 auth-only call, no data retrieval).
+- Dashboard (next dev --webpack -p 3004, :3004): homepage HTTP 200 (~26KB).
+  Turbopack mode fails in sandboxed shells (cannot spawn worker processes);
+  use --webpack there. Normal terminals can use plain `next dev`.
+- Login: `node scripts/local-candidate.mjs account` passed (signup/login/
+  session) for email in ignored0600 .data/local-candidate/login.json.
+- Sandbox caveats (agent shell only): os.networkInterfaces() blocked (used a
+  /tmp loopback shim for wrangler), no docker access (compose.dev.yaml not
+  runnable here), each shell call is its own net namespace (servers must be
+  started and probed within one process lifetime).
+- Remaining gap: Python V4 bridge (:8788, EVALUATION_ENGINE=python-v4) has no
+  venv here (system python lacks uvicorn; requirements.txt is 972 lines), so
+  end-to-end analysis runs still need `enable-python` + a provisioned venv.
+  API auth/health and dashboard rendering do not need it.
+
+## Localhost offline fix 2026-09-10 (agent session, not owner approval)
+
+- Root cause of user's "localhost offline": dashboard used next/font/google
+  (Inter + Source Serif 4), which fatally fetches fonts.googleapis.com at
+  startup; user's terminal had no external DNS (EAI_AGAIN). A stale
+  .next/dev/lock from a dead dev server also blocked restarts on :3004.
+- Fix (uncommitted): vendored 3 variable woff2 files
+  (apps/dashboard/src/app/fonts/) and switched layout.tsx to next/font/local
+  with identical --font-inter/--font-serif variables. No visual change.
+- Verified in egress-blocked sandbox with fresh log: homepage HTTP 200
+  (~27KB), zero fonts.googleapis.com fetches, dashboard typecheck clean.
+  Removed the stale .next/dev/lock afterward.

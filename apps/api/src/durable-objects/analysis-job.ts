@@ -26,7 +26,7 @@ import type { Env } from '../types'
 import type { NormalizedProperty, NormalizedComparable } from '../services/property-api/types'
 import { drizzle } from 'drizzle-orm/d1'
 import { eq } from 'drizzle-orm'
-import { savedReports } from '../db/schema'
+import { savedReports, reportHistory } from '../db/schema'
 
 interface JobState {
   jobId: string
@@ -418,15 +418,30 @@ export class AnalysisJobDO {
         estimatedRepairs: (val?.rehabCost as number) ?? null,
       }
 
+      const historyChanges = JSON.stringify({
+        arv: reportData.arv,
+        buyPrice: reportData.maxAllowableOffer,
+        rehabCost: reportData.estimatedRepairs,
+      })
       if (config.isRefresh) {
         // Update existing report
-        await db.update(savedReports)
+        const [updated] = await db.update(savedReports)
           .set(reportData)
           .where(eq(savedReports.jobId, config.jobId))
+          .returning({ id: savedReports.id })
+        if (updated) {
+          await db.insert(reportHistory).values({
+            reportId: updated.id,
+            userId: config.userId,
+            action: 'reanalyzed',
+            description: 'Report reanalyzed with fresh property data',
+            changesJson: historyChanges,
+          })
+        }
         console.log(`[AnalysisJobDO] Report updated for job ${config.jobId}`)
       } else {
         // Insert new report
-        await db.insert(savedReports).values({
+        const [inserted] = await db.insert(savedReports).values({
           userId: config.userId,
           jobId: config.jobId,
           propertyAddress: (subj.address as string) || '',
@@ -434,6 +449,13 @@ export class AnalysisJobDO {
           propertyState: property.state || '',
           propertyZip: property.zipCode || '',
           ...reportData,
+        }).returning({ id: savedReports.id })
+        await db.insert(reportHistory).values({
+          reportId: inserted.id,
+          userId: config.userId,
+          action: 'created',
+          description: 'Report created',
+          changesJson: historyChanges,
         })
         console.log(`[AnalysisJobDO] Report saved for job ${config.jobId}`)
       }
@@ -604,7 +626,7 @@ export class AnalysisJobDO {
           const result = updatedResponse as Record<string, unknown>
           const subject = result.subject as Record<string, unknown>
           const valuation = result.valuation as Record<string, unknown> | null
-          await db.insert(savedReports).values({
+          const [inserted] = await db.insert(savedReports).values({
             userId: config.userId,
             jobId: config.jobId,
             propertyAddress: (subject.address as string) || '',
@@ -616,6 +638,17 @@ export class AnalysisJobDO {
             asIsValue: (valuation?.asIsValue as number) ?? null,
             maxAllowableOffer: (valuation?.buyPrice as number) ?? null,
             estimatedRepairs: (valuation?.rehabCost as number) ?? null,
+          }).returning({ id: savedReports.id })
+          await db.insert(reportHistory).values({
+            reportId: inserted.id,
+            userId: config.userId,
+            action: 'created',
+            description: 'Report created',
+            changesJson: JSON.stringify({
+              arv: (valuation?.arv as number) ?? null,
+              buyPrice: (valuation?.buyPrice as number) ?? null,
+              rehabCost: (valuation?.rehabCost as number) ?? null,
+            }),
           })
           console.log(`[AnalysisJobDO] Report saved for job ${config.jobId}`)
         } catch (dbError) {

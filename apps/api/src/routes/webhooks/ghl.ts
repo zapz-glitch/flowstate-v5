@@ -18,7 +18,7 @@ import { Hono } from 'hono'
 import { drizzle } from 'drizzle-orm/d1'
 import { eq, and } from 'drizzle-orm'
 import type { Env } from '../../types'
-import { ghlSettings, apiKeys, savedReports } from '../../db'
+import { ghlSettings, apiKeys, savedReports, reportHistory } from '../../db'
 import { loadUserAnalysisSettings } from '../../services/user-settings'
 import { createPropertyApi } from '../../services/property-api'
 import { DEFAULT_FILTERS } from '../../services/appraisal'
@@ -354,7 +354,7 @@ ghlWebhook.post('/:webhookSecret', async (c) => {
     c.executionCtx.waitUntil((async () => {
       try {
         const reportDb = drizzle(c.env.DB)
-        await reportDb.insert(savedReports).values({
+        const [inserted] = await reportDb.insert(savedReports).values({
           userId,
           jobId,
           propertyAddress: analysisResult.subject.address,
@@ -366,6 +366,17 @@ ghlWebhook.post('/:webhookSecret', async (c) => {
           asIsValue: analysisResult.valuation.asIsValue ?? null,
           maxAllowableOffer: analysisResult.valuation.buyPrice,
           estimatedRepairs: analysisResult.valuation.rehabCost,
+        }).returning({ id: savedReports.id })
+        await reportDb.insert(reportHistory).values({
+          reportId: inserted.id,
+          userId,
+          action: 'created',
+          description: 'Report created from GHL webhook',
+          changesJson: JSON.stringify({
+            arv: analysisResult.valuation.arv,
+            buyPrice: analysisResult.valuation.buyPrice,
+            rehabCost: analysisResult.valuation.rehabCost,
+          }),
         })
         console.log(`[GHL Webhook] Report saved for job ${jobId}`)
       } catch (error) {
