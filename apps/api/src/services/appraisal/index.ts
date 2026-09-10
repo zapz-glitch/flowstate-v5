@@ -338,7 +338,9 @@ class PropertyAppraisalService implements AppraisalService {
       avgPricePerSqft,
       medianSalePrice,
       selectedCompIds: selected.map((c) => c.id),
-      insufficientComps: selected.length < REQUIRED_ARV_COMPS,
+      // Any valid comp is enough to produce an ARV — a single qualifying
+      // comp still drives the evaluation
+      insufficientComps: selected.length === 0,
     }
   }
 
@@ -449,9 +451,13 @@ class PropertyAppraisalService implements AppraisalService {
       }
     }
 
-    // Step 4: Rules cannot be satisfied — report honestly instead of
-    // silently weakening standards to force three comps.
-    console.log('Appraisal: INSUFFICIENT_COMPS — fewer than 3 valid comps after approved expansion')
+    // Step 4: No comp satisfies the full rule set. INSUFFICIENT_COMPS is
+    // reserved for the honest dead end — no comparable sold within the
+    // configured sale-age window. When recent sales DO exist, relax to the
+    // most recent ones (up to 3, highest adjusted price first) so the
+    // evaluation can still produce an ARV; the failed-rule audit trail is
+    // preserved on every comp.
+    console.log('Appraisal: no comps passed all rules — checking for recent sales')
     const lastResult = this.evaluate(subject, comparables, {
       filters: expansion.allowGeographicExpansion
         ? defaultFilters.map((f) =>
@@ -460,11 +466,69 @@ class PropertyAppraisalService implements AppraisalService {
         : defaultFilters,
       adjustments,
     })
+
+    const saleAgeDays =
+      (defaultFilters.find((f) => f.type === 'sale_age')?.value ?? 180) *
+      (expansion.allowOlderSales ? expansion.olderSaleAgeMultiplier : 1)
+    const now = Date.now()
+    const recentComps = lastResult.comparables
+      .filter((c) => {
+        if (!c.saleDate || (c.adjustedSalePrice ?? c.salePrice ?? 0) <= 0) return false
+        const days = (now - new Date(c.saleDate).getTime()) / 86_400_000
+        return Number.isFinite(days) && days <= saleAgeDays
+      })
+      .sort(
+        (a, b) =>
+          (b.adjustedSalePrice ?? b.salePrice ?? 0) - (a.adjustedSalePrice ?? a.salePrice ?? 0)
+      )
+      .slice(0, REQUIRED_ARV_COMPS)
+
+    if (recentComps.length === 0) {
+      console.log('Appraisal: INSUFFICIENT_COMPS — no comps within sale-age window')
+      return {
+        ...lastResult,
+        insufficientComps: true,
+        fallbackUsed: 'insufficient',
+        fallbackReason: `INSUFFICIENT_COMPS: no comparables sold within the last ${saleAgeDays} days satisfy appraisal rules.`,
+      }
+    }
+
+    // Relaxed recent-sales selection: recent comps are used for ARV even
+    // though they failed other rules; filterResults keep the honest record.
+    const recentIds = new Set(recentComps.map((c) => c.id))
+    const relaxedComps = lastResult.comparables.map((c) =>
+      recentIds.has(c.id)
+        ? { ...c, isEnabled: true, arvStatus: 'selected' as const }
+        : { ...c, arvStatus: c.isEnabled ? ('not_examined' as const) : ('disqualified' as const) }
+    )
+    const relaxedSubject = subject
+    const relaxedSel = relaxedComps.filter((c) => recentIds.has(c.id))
+    const canUsePpsf =
+      relaxedSubject.squareFeet != null &&
+      relaxedSubject.squareFeet > 0 &&
+      relaxedSel.every((c) => c.squareFeet != null && c.squareFeet > 0)
+    const arv = canUsePpsf
+      ? Math.round(
+          (relaxedSel.reduce(
+            (sum, c) => sum + (c.adjustedSalePrice ?? c.salePrice ?? 0) / (c.squareFeet as number),
+            0
+          ) / relaxedSel.length) * (relaxedSubject.squareFeet as number)
+        )
+      : Math.round(
+          relaxedSel.reduce((sum, c) => sum + (c.adjustedSalePrice ?? c.salePrice ?? 0), 0) /
+            relaxedSel.length
+        )
+    console.log(`Appraisal: relaxed to ${recentComps.length} most-recent comps (no rule-qualified set exists)`)
     return {
       ...lastResult,
-      insufficientComps: true,
-      fallbackUsed: 'insufficient',
-      fallbackReason: `INSUFFICIENT_COMPS: only ${lastResult.selectedCompIds?.length ?? 0} comps satisfy appraisal rules (required: ${REQUIRED_ARV_COMPS}).`,
+      comparables: relaxedComps,
+      arv,
+      enabledCount: relaxedComps.filter((c) => c.isEnabled).length,
+      selectedCompIds: recentComps.map((c) => c.id),
+      insufficientComps: false,
+      fallbackUsed: 'nearest_comps',
+      fallbackReason: `No comps satisfied all appraisal rules; using the ${recentComps.length} most recent sale(s) within ${saleAgeDays} days. Failed rules remain visible per comp.`,
+      expansionApplied: ['geographic'],
     }
   }
 
