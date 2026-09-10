@@ -71,6 +71,8 @@ export interface NormalizedProperty {
   squareFeet: number | null
   lotSizeAcres: number | null
   lotSizeSquareFeet?: number | null
+  /** Below-grade/basement finished area — valued at a discounted $/sqft */
+  basementSquareFeet?: number | null
   yearBuilt: number | null
   effectiveYearBuilt?: number | null
   propertyType: string | null
@@ -185,6 +187,9 @@ export interface NormalizedComparable {
   bathrooms: number | null
   squareFeet: number | null
   lotSizeAcres: number | null
+  lotSizeSquareFeet?: number | null
+  /** Below-grade/basement finished area — valued at a discounted $/sqft */
+  basementSquareFeet?: number | null
   yearBuilt: number | null
   propertyType: string | null
 
@@ -195,6 +200,11 @@ export interface NormalizedComparable {
 
   // Location details (from enrichment)
   subdivision?: string | null
+
+  /** True when the comp sits across a major road from the subject (not_verified when unknown) */
+  crossesMajorRoad?: boolean
+  /** Site/influence quality flag from provider (e.g. traffic influence) */
+  siteInfluence?: string | null
 
   // Building details (from enrichment)
   construction?: {
@@ -212,7 +222,14 @@ export interface NormalizedComparable {
   transaction?: {
     buyerNames?: string[]
     buyerIsCorporate?: boolean
+    isCashPurchase?: boolean
+    isShortSale?: boolean
+    isForeclosure?: boolean
+    isInterfamilyTransfer?: boolean
+    isInvestorPurchase?: boolean
   }
+
+  // Property characteristics (extended, populated by enrichment)
 
   // Property features (from enrichment)
   features?: {

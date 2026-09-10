@@ -147,6 +147,7 @@ class PropertyValuationService implements ValuationService {
       closingCostsPercent = 8,
       carryingCostsPercent = 2,
       wholesaleFee = 10000,
+      desiredProfit,
     } = params
 
     const arvTier = getArvTier(arv, this.tierRanges)
@@ -163,7 +164,7 @@ class PropertyValuationService implements ValuationService {
 
     const closingCosts = Math.round(arv * (closingCostsPercent / 100))
     const carryingCosts = Math.round(arv * (carryingCostsPercent / 100))
-    const minProfit = typeof rehabEstimate.minProfit === 'number' ? rehabEstimate.minProfit : 0
+    const minProfit = desiredProfit ?? (typeof rehabEstimate.minProfit === 'number' ? rehabEstimate.minProfit : 0)
 
     // Buy Price = ARV − Rehab − Closing Costs − Carrying Costs − Profit Target
     const buyPrice = arv - totalRehabCost - closingCosts - carryingCosts - minProfit
@@ -181,6 +182,23 @@ class PropertyValuationService implements ValuationService {
 
     // ROI = (Projected Profit / Total Investment) × 100
     const projectedROI = totalInvestment > 0 ? Math.round((projectedProfit / totalInvestment) * 1000) / 10 : 0
+
+    // Determine recommendation
+    let recommendation: 'strong-buy' | 'buy' | 'hold' | 'pass'
+    let recommendationReason: string
+    if (projectedROI >= 25 && buyPricePercent <= 70) {
+      recommendation = 'strong-buy'
+      recommendationReason = `Excellent ROI (${projectedROI}%) with strong buy price (${buyPricePercent}% of ARV)`
+    } else if (projectedROI >= 15 && buyPricePercent <= 75) {
+      recommendation = 'buy'
+      recommendationReason = `Good ROI (${projectedROI}%) with acceptable buy price (${buyPricePercent}% of ARV)`
+    } else if (projectedROI >= 10) {
+      recommendation = 'hold'
+      recommendationReason = `Moderate opportunity - consider negotiating lower price`
+    } else {
+      recommendation = 'pass'
+      recommendationReason = `Low ROI (${projectedROI}%) or high buy price (${buyPricePercent}% of ARV)`
+    }
 
     // Build breakdown
     const breakdown = [
@@ -218,6 +236,9 @@ class PropertyValuationService implements ValuationService {
       projectedProfit: Math.round(projectedProfit),
       projectedROI,
       totalInvestment: Math.round(totalInvestment),
+      desiredProfit: minProfit,
+      recommendation,
+      recommendationReason,
       breakdown,
     }
   }

@@ -15,9 +15,7 @@
 import { analyzeComps, type CompEvalContext } from '../services/comp-analysis'
 import { fetchMarketContext, type MarketContext } from '../services/market-context'
 import { type EvaluationParams } from '../services/evaluation'
-import { evaluateConfigured } from '../services/evaluation/python'
-import { mergeComparablePools } from '../services/property-api/comparable-pool'
-import { verifyPropertyIdentity } from '../services/property-api/property-identity'
+import { performAnalysis } from '../services/evaluation'
 import { detectOsmLocationRisks } from '../services/location-risk'
 import { createPropertyApi } from '../services/property-api'
 import { DEFAULT_FILTERS, type AppraisalFilter } from '../services/appraisal'
@@ -168,9 +166,7 @@ export class AnalysisJobDO {
     // ── Step 1: Search subject property ─────────────────────────────────────
     await this.pushEvent('property_fetch', { message: 'Searching property...' })
 
-    const searchResult = this.env.EVALUATION_ENGINE === 'python-v4' && config.search.propertyId
-      ? await propertyApi.getPropertyById(config.search.propertyId)
-      : await propertyApi.searchProperty({
+    const searchResult = await propertyApi.searchProperty({
       address: config.search.address,
       streetAddress: config.search.streetAddress,
       city: config.search.city,
@@ -185,14 +181,6 @@ export class AnalysisJobDO {
     }
 
     const property = searchResult.data
-    if (this.env.EVALUATION_ENGINE === 'python-v4') {
-      const identity = verifyPropertyIdentity(config.search, property, config.search.propertyId)
-      if (!identity.matched) {
-        await this.pushEvent('error', { step: 'property_fetch', message: identity.reason })
-        await this.pushEvent('enrichment_done', { totalDurationMs: Date.now() - startTime })
-        return
-      }
-    }
     console.log(`[AnalysisJobDO] ✓ Subject found: ${property.address} in ${Date.now() - startTime}ms`)
 
     // Stream subject immediately → dashboard shows map marker + subject card
@@ -230,14 +218,13 @@ export class AnalysisJobDO {
     const comparablesParams = {
         propertyId: property.id,
         radiusMiles: config.searchOptions.radiusMiles ?? apiFilterParams.radiusMiles ?? 1,
-        maxComps: this.env.EVALUATION_ENGINE === 'python-v4' ? 50 : config.searchOptions.maxComps ?? 15,
-        monthsBack: this.env.EVALUATION_ENGINE === 'python-v4' ? 12 : config.searchOptions.monthsBack ?? apiFilterParams.monthsBack ?? 12,
+        maxComps: config.searchOptions.maxComps ?? 15,
+        monthsBack: config.searchOptions.monthsBack ?? apiFilterParams.monthsBack ?? 12,
         sqftVariance: apiFilterParams.sqftVariance,
         subjectSqft: property.squareFeet ?? undefined,
         subjectPropertyType: property.propertyType ?? undefined,
     }
-    const defaultComparablesParams = { propertyId: property.id, providerDefaults: true, maxComps: 50 }
-    const [compsResult, permitsResult, floodResult, nearbyResult] = await Promise.all([
+    const [compsResult, permitsResult, floodResult] = await Promise.all([
       propertyApi.getComparables(comparablesParams),
       (config.enrichment?.permits !== false)
         ? propertyApi.getBuildingPermits(property.id, { address1: property.address, address2: `${property.city}, ${property.state} ${property.zipCode}` }).catch(() => null)
@@ -245,18 +232,15 @@ export class AnalysisJobDO {
       (config.enrichment?.floodZone !== false && property.latitude && property.longitude)
         ? propertyApi.getFloodZone(property.latitude, property.longitude).catch(() => null)
         : Promise.resolve(null),
-      this.env.EVALUATION_ENGINE === 'python-v4' ? propertyApi.getComparables(defaultComparablesParams) : Promise.resolve(null),
     ])
 
-    if (!compsResult.success && !nearbyResult?.success) {
+    if (!compsResult.success) {
       await this.pushEvent('error', { step: 'comps_fetch', message: ('error' in compsResult ? compsResult.error : null) || 'Failed to fetch comparables' })
       await this.pushEvent('enrichment_done', { totalDurationMs: Date.now() - startTime })
       return
     }
 
-    const pools = this.env.EVALUATION_ENGINE === 'python-v4'
-      ? mergeComparablePools(nearbyResult?.success ? nearbyResult.data.comparables : [], compsResult.success ? compsResult.data.comparables : [])
-      : { comparables: compsResult.success ? compsResult.data.comparables : [], conflictIds: [] }
+    const pools = { comparables: compsResult.success ? compsResult.data.comparables : [], conflictIds: [] as string[] }
     const rawComps = pools.comparables
     console.log(`[AnalysisJobDO] ✓ ${rawComps.length} comps found in ${Date.now() - compsStart}ms`)
 
@@ -321,7 +305,6 @@ export class AnalysisJobDO {
 
     const floodData = floodResult && 'success' in floodResult && floodResult.success ? floodResult.data : null
     const evidenceLimitations: string[] = []
-    if (this.env.EVALUATION_ENGINE === 'python-v4' && (!nearbyResult?.success || !compsResult.success)) evidenceLimitations.push('One provider comparable pool was unavailable; evaluation uses the surviving pool and coverage may be incomplete')
     for (const id of pools.conflictIds) evidenceLimitations.push(`${id}: Provider comparable pools disagree on the same sale date; price is quarantined from evaluation`)
     if (!permitsData) evidenceLimitations.push(config.enrichment?.permits === false
       ? 'Subject permits were not requested; system replacement evidence is unknown'
@@ -337,7 +320,7 @@ export class AnalysisJobDO {
         fetchedAt: new Date().toISOString(),
         provider: property.provider,
         searchParams: config.search as import('../services/property-api/types').PropertySearchParams,
-        comparablesParams: { ...comparablesParams, ...(this.env.EVALUATION_ENGINE === 'python-v4' ? { additionalNearbyPool: defaultComparablesParams } : {}) },
+        comparablesParams: { ...comparablesParams },
         enrichmentOptions: { permits: config.enrichment?.permits ?? true, floodZone: config.enrichment?.floodZone ?? true, weatherRisk: false, neighbourhood: false },
       },
       enrichment: {
@@ -364,7 +347,7 @@ export class AnalysisJobDO {
 
     let evalResult
     try {
-      evalResult = await evaluateConfigured({ jobId: config.jobId, bundle, ...evalParams, userId: config.userId }, this.env)
+      evalResult = await performAnalysis({ jobId: config.jobId, bundle, ...evalParams, userId: config.userId }, this.env)
     } catch (evalError) {
       const msg = evalError instanceof Error ? evalError.message : 'Evaluation failed'
       const code = (evalError as { code?: string })?.code
@@ -470,7 +453,7 @@ export class AnalysisJobDO {
     await this.pushEvent('evaluation_complete', { updatedResult: analysisResult })
 
     // ── Step 5: LLM comp selection ──────────────────────────────────────────
-    if (config.llmEnabled && analysisResult.evaluationEngine !== 'python-v4') {
+    if (config.llmEnabled) {
       const llmStart = Date.now()
       try {
         await this.pushEvent('llm_started', { message: 'AI selecting best comps...', compCount: enrichedComps.length })
@@ -583,7 +566,7 @@ export class AnalysisJobDO {
       try {
         await this.pushEvent('evaluation_started', { message: 'Evaluating comparables...' })
 
-        const evalResult = await evaluateConfigured({
+        const evalResult = await performAnalysis({
           jobId: config.jobId,
           bundle: config.bundle,
           ...config.evalParams,
@@ -593,7 +576,7 @@ export class AnalysisJobDO {
         const updatedResponse = evalResult.response as unknown as Record<string, unknown>
 
         // If LLM will run, disable all comp selections — LLM decides final selection
-        if (config.pending.includes('llm') && updatedResponse.evaluationEngine !== 'python-v4') {
+        if (config.pending.includes('llm')) {
           const comps = updatedResponse.comps as Record<string, unknown> | undefined
           if (comps?.items && Array.isArray(comps.items)) {
             comps.items = comps.items.map((c: Record<string, unknown>) => ({ ...c, isEnabled: false }))
@@ -665,7 +648,7 @@ export class AnalysisJobDO {
     // Note: market_data step (Firecrawl/Zillow scraping) has been removed.
     // Property details are now sourced from CoreLogic enrichment.
     // Step B: LLM comp analysis (uses enriched data if market data ran first)
-    if (config.pending.includes('llm') && config.analysisResult.evaluationEngine !== 'python-v4') {
+    if (config.pending.includes('llm')) {
       const llmStart = Date.now()
       try {
         await this.pushEvent('llm_started', { message: 'AI analyzing comparables...', compCount: config.bundle.comparables.length })

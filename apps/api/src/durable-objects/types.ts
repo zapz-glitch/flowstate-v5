@@ -1,0 +1,462 @@
+/**
+ * Durable Object Types
+ *
+ * Types for the real-time analysis queue system using Cloudflare Durable Objects.
+ */
+
+import type {
+  AppraisalFilter,
+  AppraisalAdjustment,
+} from '../services/appraisal/types'
+import type { MajorItem } from '../services/valuation/types'
+
+// ─── Analyze Request Type ─────────────────────────────────────────────────────
+
+export interface AnalyzeRequest {
+  // Property identification (one of these required)
+  address?: string
+  streetAddress?: string
+  city?: string
+  state?: string
+  zipCode?: string
+  propertyId?: string
+
+  // Comparable search options
+  searchOptions?: {
+    radiusMiles?: number
+    maxComps?: number
+    monthsBack?: number
+  }
+
+  // Appraisal rules preset
+  appraisalRules?: {
+    filters?: AppraisalFilter[]
+    adjustments?: AppraisalAdjustment[]
+  }
+
+  // Buybox parameters
+  buybox?: {
+    rehabLevelIndex?: number
+    majorItems?: MajorItem[]
+    additionPlay?: number
+    closingCostsPercent?: number
+    carryingCostsPercent?: number
+    wholesaleFee?: number
+    desiredProfit?: number
+  }
+
+  // Enrichment options
+  enrichment?: {
+    permits?: boolean
+    floodZone?: boolean
+    weatherRisk?: boolean
+  }
+
+  // Photo analysis options (deprecated - use zillowContext instead)
+  photoAnalysis?: {
+    enabled?: boolean
+    provider?: 'zillow' | 'mls' | 'redfin'
+    maxComps?: number
+    requireBetterOrEqual?: boolean
+  }
+
+  // Zillow context options (photos, descriptions for classification)
+  zillowContext?: {
+    enabled?: boolean
+    maxComps?: number
+    skipCache?: boolean
+  }
+
+  skipCache?: boolean
+}
+
+// ─── Analysis Response Type (placeholder - full response from analyze route) ──
+
+export interface AnalysisResponse {
+  // The full response type would be complex, using a simplified placeholder
+  // The actual response is built in analyze.ts
+  [key: string]: unknown
+}
+
+// ─── Job Status Types ─────────────────────────────────────────────────────────
+
+export type JobStatus = 'queued' | 'processing' | 'completed' | 'failed' | 'cancelled'
+
+export type AnalysisStep =
+  | 'cache_check'
+  | 'property_fetch'
+  | 'comparables_fetch'
+  | 'permits_fetch'
+  | 'flood_fetch'
+  | 'appraisal_rules'
+  | 'photo_fetch'
+  | 'comp_selection'
+  | 'valuation'
+  | 'response_build'
+
+export type StepStatus = 'pending' | 'in_progress' | 'completed' | 'failed' | 'skipped'
+
+// ─── Step Progress ────────────────────────────────────────────────────────────
+
+export interface StepProgress {
+  step: AnalysisStep
+  status: StepStatus
+  startedAt?: string
+  completedAt?: string
+  durationMs?: number
+  message?: string
+  error?: string
+  fromCache?: boolean
+}
+
+// ─── Analysis Job State ───────────────────────────────────────────────────────
+
+export interface AnalysisJobState {
+  jobId: string
+  userId: string
+  apiKeyId: string
+  propertyKey: string
+
+  // Request data
+  request: AnalyzeRequest
+
+  // Status
+  status: JobStatus
+  currentStep: AnalysisStep | null
+  steps: StepProgress[]
+
+  // Timing
+  createdAt: string
+  startedAt: string | null
+  completedAt: string | null
+  totalDurationMs: number | null
+
+  // Results
+  result: AnalysisResponse | null
+  error: JobError | null
+
+  // Cache info
+  cacheHits: string[]
+  cacheMisses: string[]
+}
+
+export interface JobError {
+  code: string
+  message: string
+  step?: AnalysisStep
+  retryable: boolean
+}
+
+// ─── Step Configuration ───────────────────────────────────────────────────────
+
+export interface StepConfig {
+  step: AnalysisStep
+  label: string
+  description: string
+  required: boolean
+  maxRetries: number
+  backoffMs: number
+  exponentialBackoff: boolean
+}
+
+export const STEP_CONFIGS: StepConfig[] = [
+  {
+    step: 'cache_check',
+    label: 'Cache Check',
+    description: 'Checking for cached data',
+    required: true,
+    maxRetries: 1,
+    backoffMs: 0,
+    exponentialBackoff: false,
+  },
+  {
+    step: 'property_fetch',
+    label: 'Property Fetch',
+    description: 'Fetching subject property details',
+    required: true,
+    maxRetries: 3,
+    backoffMs: 1000,
+    exponentialBackoff: true,
+  },
+  {
+    step: 'comparables_fetch',
+    label: 'Comparables Fetch',
+    description: 'Fetching comparable properties',
+    required: true,
+    maxRetries: 3,
+    backoffMs: 1000,
+    exponentialBackoff: true,
+  },
+  {
+    step: 'permits_fetch',
+    label: 'Permits Fetch',
+    description: 'Fetching building permits',
+    required: false,
+    maxRetries: 2,
+    backoffMs: 500,
+    exponentialBackoff: false,
+  },
+  {
+    step: 'flood_fetch',
+    label: 'Flood Zone Fetch',
+    description: 'Fetching flood zone data',
+    required: false,
+    maxRetries: 2,
+    backoffMs: 500,
+    exponentialBackoff: false,
+  },
+  {
+    step: 'appraisal_rules',
+    label: 'Appraisal Rules',
+    description: 'Applying appraisal filters and adjustments',
+    required: true,
+    maxRetries: 1,
+    backoffMs: 0,
+    exponentialBackoff: false,
+  },
+  {
+    step: 'photo_fetch',
+    label: 'Photo Fetch',
+    description: 'Fetching property photos from Zillow',
+    required: false,
+    maxRetries: 2,
+    backoffMs: 2000,
+    exponentialBackoff: true,
+  },
+  {
+    step: 'comp_selection',
+    label: 'Comp Selection',
+    description: 'LLM-based comparable selection',
+    required: false,
+    maxRetries: 2,
+    backoffMs: 1000,
+    exponentialBackoff: false,
+  },
+  {
+    step: 'valuation',
+    label: 'Valuation',
+    description: 'Calculating ARV and valuation metrics',
+    required: true,
+    maxRetries: 1,
+    backoffMs: 0,
+    exponentialBackoff: false,
+  },
+  {
+    step: 'response_build',
+    label: 'Response Build',
+    description: 'Building final response',
+    required: true,
+    maxRetries: 1,
+    backoffMs: 0,
+    exponentialBackoff: false,
+  },
+]
+
+export const TOTAL_STEPS = STEP_CONFIGS.length
+
+export function getStepConfig(step: AnalysisStep): StepConfig {
+  const config = STEP_CONFIGS.find((c) => c.step === step)
+  if (!config) {
+    throw new Error(`Unknown step: ${step}`)
+  }
+  return config
+}
+
+export function getStepNumber(step: AnalysisStep): number {
+  return STEP_CONFIGS.findIndex((c) => c.step === step) + 1
+}
+
+// ─── Real-Time Status Messages ────────────────────────────────────────────────
+
+export type StatusMessageType =
+  | 'job_created'
+  | 'job_started'
+  | 'step_started'
+  | 'step_progress'
+  | 'step_completed'
+  | 'step_failed'
+  | 'step_skipped'
+  | 'job_completed'
+  | 'job_failed'
+  | 'cache_hit'
+
+export interface StatusMessage {
+  type: StatusMessageType
+  jobId: string
+  timestamp: string
+  data: StatusMessageData
+}
+
+export type StatusMessageData =
+  | JobCreatedData
+  | JobStartedData
+  | StepStartedData
+  | StepProgressData
+  | StepCompletedData
+  | StepFailedData
+  | StepSkippedData
+  | JobCompletedData
+  | JobFailedData
+  | CacheHitData
+
+export interface JobCreatedData {
+  propertyKey: string
+  totalSteps: number
+}
+
+export interface JobStartedData {
+  message: string
+}
+
+export interface StepStartedData {
+  step: AnalysisStep
+  stepNumber: number
+  totalSteps: number
+  label: string
+  message: string
+}
+
+export interface StepProgressData {
+  step: AnalysisStep
+  progress: number // 0-100
+  message: string
+}
+
+export interface StepCompletedData {
+  step: AnalysisStep
+  stepNumber: number
+  totalSteps: number
+  durationMs: number
+  fromCache: boolean
+  message: string
+}
+
+export interface StepFailedData {
+  step: AnalysisStep
+  stepNumber: number
+  totalSteps: number
+  error: string
+  retryable: boolean
+}
+
+export interface StepSkippedData {
+  step: AnalysisStep
+  stepNumber: number
+  totalSteps: number
+  reason: string
+}
+
+export interface JobCompletedData {
+  totalDurationMs: number
+  cacheHits: number
+  cacheMisses: number
+  stepsCompleted: number
+  stepsSkipped: number
+}
+
+export interface JobFailedData {
+  error: string
+  code: string
+  step?: AnalysisStep
+  retryable: boolean
+}
+
+export interface CacheHitData {
+  component: string
+  message: string
+}
+
+// ─── Rate Limit Coordinator Types ─────────────────────────────────────────────
+
+export interface KeyState {
+  index: number
+  isAvailable: boolean
+  lastUsedAt: string | null
+  todayUsage: number
+  cooldownUntil: string | null
+}
+
+export interface DailyUsage {
+  date: string // YYYY-MM-DD
+  count: number
+}
+
+export interface RateLimitState {
+  keys: KeyState[]
+  dailyUsage: Record<number, DailyUsage> // keyIndex -> usage
+}
+
+export interface AcquireKeyResult {
+  success: boolean
+  keyIndex: number | null
+  error?: string
+  waitMs?: number
+}
+
+export interface ReleaseKeyResult {
+  success: boolean
+}
+
+// ─── API Response Types ───────────────────────────────────────────────────────
+
+export interface QueueJobResponse {
+  success: true
+  data: {
+    jobId: string
+    propertyKey: string
+    status: JobStatus
+    /** WebSocket URL — requires a token from POST /v1/analyze/ws-token */
+    streamUrl: string
+    pollUrl: string
+    estimatedDurationMs?: number
+    /** True when an existing active job was returned instead of starting a new one */
+    deduplicated?: boolean
+  }
+}
+
+export interface JobStatusResponse {
+  success: true
+  data: {
+    jobId: string
+    status: JobStatus
+    currentStep: AnalysisStep | null
+    progress: {
+      completedSteps: number
+      totalSteps: number
+      percentComplete: number
+    }
+    steps: StepProgress[]
+    createdAt: string
+    startedAt: string | null
+    completedAt: string | null
+    totalDurationMs: number | null
+    result?: AnalysisResponse
+    error?: JobError
+  }
+}
+
+// ─── DO Internal Request Types ────────────────────────────────────────────────
+
+export interface InitJobRequest {
+  jobId: string
+  userId: string
+  apiKeyId: string
+  propertyKey: string
+  request: AnalyzeRequest
+}
+
+export interface UpdateStepRequest {
+  step: AnalysisStep
+  status: StepStatus
+  message?: string
+  error?: string
+  fromCache?: boolean
+}
+
+export interface SetResultRequest {
+  result: AnalysisResponse
+}
+
+export interface SetErrorRequest {
+  error: JobError
+}

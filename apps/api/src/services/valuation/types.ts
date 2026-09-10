@@ -76,6 +76,8 @@ export interface ValuationParams {
   carryingCostsPercent?: number
   /** Wholesale fee amount (default: $10,000) */
   wholesaleFee?: number
+  /** Override minimum profit (uses tier default if not provided) */
+  desiredProfit?: number
 }
 
 // ─── Valuation Result ──────────────────────────────────────────────────────────
@@ -113,6 +115,12 @@ export interface ValuationResult {
   projectedProfit: number
   projectedROI: number
   totalInvestment: number
+  /** Minimum profit target applied (caller override or tier default) */
+  desiredProfit: number
+
+  // Recommendation
+  recommendation: 'strong-buy' | 'buy' | 'hold' | 'pass'
+  recommendationReason: string
 
   // Breakdown for UI
   breakdown: {

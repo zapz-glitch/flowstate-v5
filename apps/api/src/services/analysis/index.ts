@@ -496,6 +496,8 @@ export interface AnalysisResponse {
     projectedProfit: number
     projectedROI: number
     wholesalePrice: number
+    recommendation?: 'strong-buy' | 'buy' | 'hold' | 'pass'
+    recommendationReason?: string
   }
   comps: {
     /** Total number of comps returned from API */
@@ -684,11 +686,21 @@ export interface AnalysisResponse {
   } | null
   /** External API call statistics for this analysis */
   apiCallStats?: ApiCallStats | null
+  /**
+   * Justified end-to-end evaluation report: ordered pipeline steps,
+   * fallbacks used, ARV drivers, rehab derivation, itemized deductions,
+   * and final verdict.
+   */
+  report?: import('../evaluation/types').EvaluationReport
+  /** Full computer-vision renovation assessment (subject photos) */
+  visionAssessment?: import('../vision/renovation').RenovationAssessment | null
+  /** Where the rehab level came from: manual_override | vision | classification | default */
+  renovationLevelSource?: 'manual_override' | 'vision' | 'classification' | 'default'
+  /** Photo provider that delivered the subject photos (zillow/redfin/realtor) */
+  photoProvider?: string
+  /** Evaluation engine that produced this response */
+  evaluationEngine?: string
 }
-
-/**
- * External API call statistics for a single analysis run
- */
 export interface ApiCallStats {
   corelogic: {
     total: number
@@ -1003,6 +1015,8 @@ export function buildAnalysisResponse(
       projectedProfit: valuation.projectedProfit,
       projectedROI: valuation.projectedROI,
       wholesalePrice: valuation.wholesalePrice,
+      recommendation: valuation.recommendation,
+      recommendationReason: valuation.recommendationReason,
       rehabLevelEstimates: ctx.rehabLevelEstimates ?? [],
       asIsMarketIntel: ctx.groupBResult ? {
         asIsMarketPrice: ctx.groupBResult.asIsMarketPrice,

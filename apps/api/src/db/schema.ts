@@ -523,6 +523,31 @@ export const majorItemCosts = sqliteTable(
 )
 
 // ==========================================
+// Major Item Settings (per-user permit-age rules: enabled + cost + age threshold)
+// ==========================================
+
+export const majorItemSetting = sqliteTable(
+  'major_item_setting',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    itemId: text('item_id').notNull(), // 'roof' | 'hvac' | 'water_heater' | 'electric_panel' | 'replumb' | 'rewire' | ...
+    enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
+    cost: integer('cost').notNull(), // configured replacement cost
+    ageThreshold: integer('age_threshold'), // years — evidence at-or-past this triggers replacement; null = no age rule
+    updatedAt: text('updated_at')
+      .notNull()
+      .$defaultFn(() => new Date().toISOString()),
+  },
+  (table) => [
+    index('idx_major_item_setting_user_id').on(table.userId),
+    index('idx_major_item_setting_user_item').on(table.userId, table.itemId),
+  ]
+)
+
+// ==========================================
 // GHL Integration Settings (per-user GoHighLevel CRM config)
 // ==========================================
 

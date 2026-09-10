@@ -173,7 +173,7 @@ app.onError((err, c) => {
 })
 
 // Export Durable Object classes
-export { AnalysisJobDO, BatchJobDO } from './durable-objects'
+export { AnalysisJobDO, BatchJobDO, RateLimitCoordinatorDO } from './durable-objects'
 
 // Export worker
 export default {

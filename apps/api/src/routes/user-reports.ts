@@ -13,7 +13,7 @@ import { getSession } from '../lib/session'
 import { savedReports, reportHistory } from '../db/schema'
 import { hashSharePassword } from '../lib/share-token'
 import { bodyLimit } from 'hono/body-limit'
-import { recalculatePythonReport } from '../services/evaluation/python'
+import { recalculateReport } from '../services/evaluation/recalculate'
 import { deleteReportAssets } from '../services/report-assets'
 
 const userReports = new Hono<{ Bindings: Env }>()
@@ -42,18 +42,18 @@ userReports.post('/:jobId/comps', bodyLimit({ maxSize: 20000 }), async (c) => {
   if ((saved.evaluationRevision ?? 0) !== body.expectedRevision) return c.json({ error: 'This report changed. Reload it before editing comparables.' }, 409)
   let analysis
   try {
-    analysis = await recalculatePythonReport(saved, jobId, body.selectedCompIds, c.env, session.user.id)
+    analysis = await recalculateReport(saved, jobId, body.selectedCompIds, c.env, session.user.id)
   } catch (error) {
     if ((error as { status?: number }).status === 409) return c.json({ error: (error as Error).message }, 409)
     if ((error as { status?: number }).status === 422) return c.json({ error: (error as Error).message }, 422)
-    return c.json({ error: 'Python could not recalculate this selection. The saved report was not changed.' }, 502)
+    return c.json({ error: 'Could not recalculate this selection. The saved report was not changed.' }, 502)
   }
   const nextJson = JSON.stringify(analysis)
   const changes = JSON.stringify({ actor: session.user.id, before: saved, after: analysis })
-  const description = body.selectedCompIds === null ? 'Restored Python automatic comparable selection' : `Python recalculated ${body.selectedCompIds.length} operator-selected comparables`
+  const description = body.selectedCompIds === null ? 'Restored automatic comparable selection' : `Recalculated ${body.selectedCompIds.length} operator-selected comparables`
   const results = await c.env.DB.batch([
     c.env.DB.prepare('INSERT INTO report_history (id, report_id, user_id, action, description, changes_json, created_at) SELECT ?, id, user_id, ?, ?, ?, ? FROM saved_reports WHERE id = ? AND user_id = ? AND full_response_json = ?')
-      .bind(crypto.randomUUID(), 'python_comp_selection', description, changes, new Date().toISOString(), report.id, session.user.id, report.fullResponseJson),
+      .bind(crypto.randomUUID(), 'comp_selection', description, changes, new Date().toISOString(), report.id, session.user.id, report.fullResponseJson),
     c.env.DB.prepare('UPDATE saved_reports SET full_response_json = ?, valuation_data = ?, comparables_data = ?, arv = ?, as_is_value = ?, max_allowable_offer = ?, estimated_repairs = ? WHERE id = ? AND user_id = ? AND full_response_json = ?')
       .bind(nextJson, JSON.stringify(analysis.valuation), JSON.stringify(analysis.comps), analysis.valuation?.arv ?? null, analysis.valuation?.asIsValue ?? null, analysis.valuation?.buyPrice ?? null, analysis.valuation?.rehabCost ?? null, report.id, session.user.id, report.fullResponseJson),
   ])
@@ -287,17 +287,6 @@ userReports.put('/:jobId', async (c) => {
     .limit(1)
 
   if (!report) return c.json({ error: 'Report not found' }, 404)
-  if (JSON.parse(report.fullResponseJson || '{}').evaluationEngine === 'python-v4') {
-    return c.json({ error: 'Python V4 reports are server-authored. Run a new analysis to change valuation inputs.' }, 409)
-  }
-  if (body.fullResponseJson !== undefined) {
-    try {
-      const incoming = JSON.parse(body.fullResponseJson)
-      if (incoming?.evaluationEngine === 'python-v4' || incoming?.pythonRequest || incoming?.pythonRequestSignature) {
-        return c.json({ error: 'Python evaluation snapshots can only be created by the server' }, 400)
-      }
-    } catch { return c.json({ error: 'Invalid report JSON' }, 400) }
-  }
 
   // Update report data
   const updates: Record<string, unknown> = {}

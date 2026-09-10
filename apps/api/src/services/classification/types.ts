@@ -10,7 +10,7 @@
  * - as_is: Property needs renovation (investor/fixer properties)
  * - after_renovation: Property is renovated/turnkey (retail ready)
  */
-export type PropertyClassification = 'as_is' | 'after_renovation'
+export type PropertyClassification = 'as_is' | 'after_renovation' | 'transitional'
 
 /**
  * Method used to determine classification

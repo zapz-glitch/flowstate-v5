@@ -126,6 +126,54 @@ const calculators: Record<AdjustmentType, AdjustmentCalculator> = {
       reason: `Subject has carport (+$${adjustment.amount.toLocaleString()})`,
     }
   },
+  traffic_siding(_subject, comp, adjustment) {
+    const inf = comp.siteInfluence?.toLowerCase() ?? ''
+    const applies = inf.includes('traffic') && inf.includes('sid')
+    return {
+      type: 'traffic_siding',
+      applied: applies,
+      amount: applies ? -Math.abs(adjustment.amount) : 0,
+      reason: applies ? 'Traffic influence (siding)' : 'No traffic siding influence',
+    }
+  },
+
+  traffic_backing(_subject, comp, adjustment) {
+    const inf = comp.siteInfluence?.toLowerCase() ?? ''
+    const applies = inf.includes('traffic') && inf.includes('back')
+    return {
+      type: 'traffic_backing',
+      applied: applies,
+      amount: applies ? -Math.abs(adjustment.amount) : 0,
+      reason: applies ? 'Traffic influence (backing)' : 'No traffic backing influence',
+    }
+  },
+
+  traffic_fronting(_subject, comp, adjustment) {
+    const inf = comp.siteInfluence?.toLowerCase() ?? ''
+    const applies = inf.includes('traffic') && inf.includes('front')
+    return {
+      type: 'traffic_fronting',
+      applied: applies,
+      amount: applies ? -Math.abs(adjustment.amount) : 0,
+      reason: applies ? 'Traffic influence (fronting)' : 'No traffic fronting influence',
+    }
+  },
+
+  basement_sqft(subject, comp, adjustment) {
+    const compBsmt = comp.basementSquareFeet ?? 0
+    const subjBsmt = subject.basementSquareFeet ?? 0
+    const diff = compBsmt - subjBsmt
+    if (diff === 0) {
+      return { type: 'basement_sqft', applied: false, amount: 0, reason: 'No basement sqft difference' }
+    }
+    // Baseline area valued at a discounted $/sqft
+    return {
+      type: 'basement_sqft',
+      applied: true,
+      amount: -Math.round(diff * Math.abs(adjustment.amount)),
+      reason: `Basement difference ${diff} sqft @ $${Math.abs(adjustment.amount)}/sqft`,
+    }
+  },
 }
 
 // ─── Public API ─────────────────────────────────────────────────────────────

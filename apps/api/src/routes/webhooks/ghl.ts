@@ -23,7 +23,7 @@ import { loadUserAnalysisSettings } from '../../services/user-settings'
 import { createPropertyApi } from '../../services/property-api'
 import { DEFAULT_FILTERS } from '../../services/appraisal'
 import { filtersToApiParams } from '../../services/appraisal/types'
-import { evaluateConfigured } from '../../services/evaluation/python'
+import { performAnalysis } from '../../services/evaluation'
 import {
   buildGHLCustomFields,
   updateGHLOpportunity,
@@ -293,7 +293,7 @@ ghlWebhook.post('/:webhookSecret', async (c) => {
     const evalStart = Date.now()
     const propertyCallStats = propertyApi.getCallStats()
 
-    const { response: analysisResult } = await evaluateConfigured({
+    const { response: analysisResult } = await performAnalysis({
       jobId,
       userId,
       bundle: bundleResult.data,
