@@ -36,23 +36,23 @@
      white-on-black contrast and less blue output for night work. */
   .dark {
     --background: 40 5% 8%;
-    --foreground: 40 4% 94%;
-    --foreground-secondary: 40 4% 68%;
+    --foreground: 40 5% 86%;
+    --foreground-secondary: 40 4% 64%;
     --foreground-tertiary: 40 4% 46%;
     --card: 40 5% 10.5%;
     --card-hover: 40 5% 13%;
-    --card-foreground: 40 4% 94%;
+    --card-foreground: 40 5% 86%;
     --popover: 40 5% 10.5%;
-    --popover-foreground: 40 4% 94%;
-    --primary: 40 4% 95%;
+    --popover-foreground: 40 5% 86%;
+    --primary: 40 5% 88%;
     --primary-foreground: 40 6% 10%;
     --secondary: 40 4% 13%;
-    --secondary-foreground: 40 4% 94%;
+    --secondary-foreground: 40 5% 86%;
     --muted: 40 4% 13%;
     --muted-foreground: 40 4% 56%;
     --accent: 40 4% 19%;
     --accent-secondary: 40 4% 44%;
-    --accent-foreground: 40 4% 96%;
+    --accent-foreground: 40 5% 88%;
     --destructive: 0 72% 55%;
     --destructive-foreground: 0 0% 100%;
     --border: 40 4% 18%;

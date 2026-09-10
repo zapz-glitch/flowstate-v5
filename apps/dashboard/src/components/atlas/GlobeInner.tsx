@@ -78,7 +78,7 @@ export default function GlobeInner({ points }: GlobeInnerProps) {
         source: 'reports',
         paint: {
           'circle-radius': 9,
-          'circle-color': '#ffffff',
+          'circle-color': '#e0dcd4',
           'circle-opacity': 0.18,
         },
       })
@@ -88,7 +88,7 @@ export default function GlobeInner({ points }: GlobeInnerProps) {
         source: 'reports',
         paint: {
           'circle-radius': 4.5,
-          'circle-color': '#ffffff',
+          'circle-color': '#e0dcd4',
           'circle-stroke-width': 1.5,
           'circle-stroke-color': '#0a0a0a',
         },
