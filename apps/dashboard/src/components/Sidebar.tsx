@@ -20,7 +20,7 @@ import {
   Globe2,
 } from 'lucide-react'
 import { signOut } from '@/lib/auth-client'
-import { Logo } from '@/components/ui/Logo'
+import { Logo, LogoIcon } from '@/components/ui/Logo'
 import { cn } from '@/lib/utils'
 import { useUser } from '@/components/auth/UserProvider'
 import { useTheme } from '@/components/theme-provider'
@@ -102,13 +102,7 @@ export default function Sidebar() {
           {/* Logo & Collapse Button */}
           <div className="flex items-center justify-between h-16 px-4 border-b border-border">
             <Link href="/dashboard" className="flex items-center">
-              {collapsed ? (
-                <div className="w-8 h-8 rounded-md bg-foreground flex items-center justify-center">
-                  <span className="text-background font-bold text-sm">F</span>
-                </div>
-              ) : (
-                <Logo size="sm" />
-              )}
+              {collapsed ? <LogoIcon /> : <Logo size="sm" showText={false} />}
             </Link>
             <button
               onClick={toggleCollapsed}
@@ -258,7 +252,7 @@ export default function Sidebar() {
       {/* Mobile Header */}
       <div className="lg:hidden fixed top-0 left-0 right-0 z-40 h-16 bg-background border-b border-border flex items-center justify-between px-4">
         <Link href="/dashboard">
-          <Logo size="sm" />
+          <Logo size="sm" showText={false} />
         </Link>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
