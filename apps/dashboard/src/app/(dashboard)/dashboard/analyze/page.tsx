@@ -183,6 +183,9 @@ export default function AnalyzePage() {
   const restoredRef = useRef(false)
   useEffect(() => {
     if (restoredRef.current || analysisResult || activeAnalysis) return
+    // ?address= takes precedence — an incoming analysis request shouldn't be
+    // pre-empted by the last-property restore
+    if (new URLSearchParams(window.location.search).has('address')) return
     restoredRef.current = true
     const restore = (jobId: string, address: string) => {
       setPhase('fetching')
@@ -592,6 +595,25 @@ export default function AnalyzePage() {
       handleAnalyze()
     }
   }, [pendingRetry, handleAnalyze])
+
+  // ?address=<addr> — browser-extension / shared-link entry point.
+  // Prefills the search bar and runs through the normal flow, so the
+  // existing-report dialog still intercepts when a report already exists.
+  const pendingUrlAddress = useRef<string | null>(null)
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search).get('address')?.trim()
+    if (q) {
+      pendingUrlAddress.current = q
+      setAddress(q)
+      setSearchExpanded(true)
+    }
+  }, [])
+  useEffect(() => {
+    if (pendingUrlAddress.current && pendingUrlAddress.current === address) {
+      pendingUrlAddress.current = null
+      handleAnalyze()
+    }
+  }, [address, handleAnalyze])
 
   const handleCancel = useCallback(() => {
     setPhase('idle')
