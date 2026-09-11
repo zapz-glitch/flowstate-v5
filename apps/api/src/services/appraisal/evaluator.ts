@@ -281,12 +281,44 @@ function evaluateBuildingStyleMatch(
   }
 }
 
+/** Foundation match — slab ≠ pier/beam ≠ basement changes rehab scope */
+function evaluateFoundationMatch(
+  subject: NormalizedProperty,
+  comp: NormalizedComparable,
+  _filter: AppraisalFilter
+): FilterResult {
+  const normalize = (v?: string | null) =>
+    v?.toLowerCase().replace(/[^a-z]/g, '')
+  const subjectFoundation = normalize(subject.construction?.foundationType)
+  const compFoundation = normalize(comp.construction?.foundationType)
+
+  if (!subjectFoundation || !compFoundation) {
+    return {
+      type: 'foundation_match',
+      passed: true,
+      status: 'not_verified',
+      reason: 'Foundation type data not available',
+    }
+  }
+
+  const passed = subjectFoundation === compFoundation
+  return {
+    type: 'foundation_match',
+    passed,
+    status: passed ? 'passed' : 'failed',
+    reason: passed ? undefined : `Foundation mismatch: "${comp.construction?.foundationType}" vs subject "${subject.construction?.foundationType}"`,
+    actualValue: comp.construction?.foundationType,
+    threshold: subject.construction?.foundationType,
+  }
+}
+
 const FILTER_EVALUATORS: Record<
   FilterType,
   (subject: NormalizedProperty, comp: NormalizedComparable, filter: AppraisalFilter) => FilterResult
 > = {
   subdivision_match: evaluateSubdivisionMatch,
   building_style_match: evaluateBuildingStyleMatch,
+  foundation_match: evaluateFoundationMatch,
   sale_age: evaluateSaleAge,
   sqft_diff: evaluateSqftDiff,
   year_built_diff: evaluateYearBuiltDiff,

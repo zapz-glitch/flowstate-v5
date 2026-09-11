@@ -10,6 +10,7 @@
 export type FilterType =
   | 'subdivision_match'
   | 'building_style_match'
+  | 'foundation_match'
   | 'sale_age'
   | 'sqft_diff'
   | 'property_type'

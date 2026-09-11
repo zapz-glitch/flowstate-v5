@@ -63,6 +63,25 @@ const evaluators: Record<FilterType, FilterEvaluator> = {
     }
   },
 
+  foundation_match(subject, comp, _filter) {
+    const normalize = (v?: string | null) => v?.toLowerCase().replace(/[^a-z]/g, '')
+    const subjectFoundation = normalize(subject.construction?.foundationType)
+    const compFoundation = normalize(comp.construction?.foundationType)
+
+    if (!subjectFoundation || !compFoundation) {
+      return { type: 'foundation_match', passed: true, reason: 'Foundation type data not available' }
+    }
+
+    const passed = subjectFoundation === compFoundation
+    return {
+      type: 'foundation_match',
+      passed,
+      reason: passed ? undefined : `Foundation mismatch: "${comp.construction?.foundationType}" vs subject "${subject.construction?.foundationType}"`,
+      actualValue: comp.construction?.foundationType,
+      threshold: subject.construction?.foundationType,
+    }
+  },
+
   sale_age(_subject, comp, filter) {
     if (!comp.saleDate) {
       return {

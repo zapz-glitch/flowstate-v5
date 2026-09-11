@@ -12,6 +12,7 @@ import type { NormalizedProperty, NormalizedComparable } from '../property-api/t
 export type FilterType =
   | 'subdivision_match'
   | 'building_style_match'
+  | 'foundation_match'
   | 'sale_age'
   | 'sqft_diff'
   | 'year_built_diff'
@@ -29,6 +30,7 @@ export interface AppraisalFilter {
 
 export const DEFAULT_FILTERS: AppraisalFilter[] = [
   { type: 'subdivision_match', enabled: true, value: 1 }, // Enabled - uses enriched comp data
+  { type: 'foundation_match', enabled: true, value: 1 }, // Same foundation type (not_verified when missing)
   { type: 'sale_age', enabled: true, value: 180 }, // 6 months max comp age
   { type: 'sqft_diff', enabled: true, value: 250 }, // ±250 sqft variance
   { type: 'year_built_diff', enabled: true, value: 10 }, // ±10 years
@@ -57,6 +59,12 @@ export const FILTER_LABELS: Record<FilterType, {
     shortLabel: 'Style',
     unit: '',
     description: 'Must match subject building style (e.g. Ranch, Colonial)',
+  },
+  foundation_match: {
+    label: 'Foundation Match',
+    shortLabel: 'Foundation',
+    unit: '',
+    description: 'Must match subject foundation type (e.g. Slab, Continuous Footing)',
   },
   sale_age: {
     label: 'Sale Age',

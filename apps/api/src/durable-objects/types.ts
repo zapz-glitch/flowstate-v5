@@ -43,6 +43,8 @@ export interface AnalyzeRequest {
     carryingCostsPercent?: number
     wholesaleFee?: number
     desiredProfit?: number
+    /** Location-risk deduction as % of ARV (major road/railroad/commercial proximity) */
+    locationPenaltyPercent?: number
   }
 
   // Enrichment options

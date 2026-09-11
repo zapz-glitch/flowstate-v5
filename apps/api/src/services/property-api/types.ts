@@ -442,6 +442,8 @@ export interface EnrichmentData {
   evidenceLimitations?: string[]
   permits: PermitsEnrichment | null
   floodZone: NormalizedFloodZone | null
+  /** OSM-detected location risks (major roads, railroads, commercial) */
+  locationRisks?: import('../location-risk').LocationRisk[] | null
   weatherRisk: WeatherRisk | null
   neighbourhood: import('../neighbourhood').NeighbourhoodData | null
 }

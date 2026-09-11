@@ -229,13 +229,18 @@ export class AnalysisJobDO {
         subjectSqft: property.squareFeet ?? undefined,
         subjectPropertyType: property.propertyType ?? undefined,
     }
-    const [compsResult, permitsResult, floodResult] = await Promise.all([
+    const [compsResult, permitsResult, floodResult, osmResult] = await Promise.all([
       propertyApi.getComparables(comparablesParams),
       (config.enrichment?.permits !== false)
         ? propertyApi.getBuildingPermits(property.id, { address1: property.address, address2: `${property.city}, ${property.state} ${property.zipCode}` }).catch(() => null)
         : Promise.resolve(null),
       (config.enrichment?.floodZone !== false && property.latitude && property.longitude)
         ? propertyApi.getFloodZone(property.latitude, property.longitude).catch(() => null)
+        : Promise.resolve(null),
+      // Location risk (major roads, railroads, commercial) — fetched during
+      // enrichment so it can deduct from valuation, not just flag post-hoc
+      property.latitude && property.longitude
+        ? detectOsmLocationRisks(property.latitude, property.longitude).catch(() => null)
         : Promise.resolve(null),
     ])
 
@@ -271,22 +276,16 @@ export class AnalysisJobDO {
     })
 
     // ── Step 3: Enrich comps ───────────────────────────────────────────────────
-    // Lazy enrichment: thin search data already carries distance, sqft, year,
-    // sale date, lot size, property type — enough to fail comps on the cheap
-    // filters before spending a property-detail call. Filters needing
-    // enrichment data (subdivision_match — the hammer — plus building style
-    // and road barrier) resolve not_verified here and land post-enrichment
-    // inside performAnalysis. Non-surviving comps stay in the bundle thin so
-    // the report still shows them with their failed-rule reasons.
+    // No shortcuts: every returned comp gets the property-detail call —
+    // subdivision, foundation type, building style, features. The apples-to-
+    // apples rules (subdivision_match — the hammer — style, foundation) can
+    // only bite with enriched data. Sorted nearest-first so the cap, if ever
+    // hit, drops the least relevant.
     await this.pushEvent('property_fetch', { message: 'Enriching comparable details...' })
     const enrichStart = Date.now()
 
-    const ENRICH_CAP = 12
-    const toEnrich = rawComps
-      .filter((comp) => !evaluateComparable(property, comp, filters, []).shouldDisable)
+    const toEnrich = [...rawComps]
       .sort((a, b) => (a.distanceMiles ?? 999) - (b.distanceMiles ?? 999))
-      .slice(0, ENRICH_CAP)
-    console.log(`[AnalysisJobDO] Lazy enrichment: ${toEnrich.length}/${rawComps.length} comps survive cheap filters`)
 
     const enrichedList = await propertyApi.enrichComparables(toEnrich, { concurrency: 10 })
     const enrichedById = new Map(enrichedList.map((c) => [c.id, c]))
@@ -350,6 +349,7 @@ export class AnalysisJobDO {
         evidenceLimitations,
         permits,
         floodZone: floodData ?? null,
+        locationRisks: osmResult?.risks ?? null,
         weatherRisk: null,
         neighbourhood: null,
       },
@@ -398,19 +398,8 @@ export class AnalysisJobDO {
 
     console.log(`[AnalysisJobDO] ✓ Evaluation complete in ${Date.now() - evalStart}ms`)
 
-    // OSM location risks — fire-and-forget, push update when ready
-    const osmPromise = (async () => {
-      try {
-        if (property.latitude && property.longitude) {
-          const osmResult = await detectOsmLocationRisks(property.latitude, property.longitude)
-          if (osmResult.riskFlags.length > 0) {
-            const existingFlags = (analysisResult.riskFlags as string[] | null) ?? []
-            analysisResult.riskFlags = [...existingFlags, ...osmResult.riskFlags]
-            await this.pushEvent('risk_flags_updated', { riskFlags: analysisResult.riskFlags })
-          }
-        }
-      } catch { /* Non-fatal */ }
-    })()
+    // OSM location risks now fetched during enrichment — they're already in
+    // the response via bundle.enrichment.locationRisks (and feed valuation)
 
     // Save/update report in DB
     try {
@@ -545,7 +534,7 @@ export class AnalysisJobDO {
     }
 
     // Wait for parallel tasks before closing SSE (so client receives them)
-    await Promise.all([marketContextPromise, osmPromise])
+    await marketContextPromise
     await this.pushEvent('enrichment_done', { totalDurationMs: Date.now() - startTime })
     console.log(`[AnalysisJobDO] ── Streaming analysis complete in ${Date.now() - startTime}ms ──`)
   }

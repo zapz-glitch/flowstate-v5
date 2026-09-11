@@ -149,6 +149,7 @@ class PropertyValuationService implements ValuationService {
       carryingCostsPercent = 2,
       wholesaleFee = 10000,
       desiredProfit,
+      locationPenaltyPercent = 0,
     } = params
 
     const arvTier = getArvTier(arv, this.tierRanges)
@@ -168,9 +169,12 @@ class PropertyValuationService implements ValuationService {
     const closingCosts = Math.round(arv * (closingCostsPercent / 100))
     const carryingCosts = Math.round(arv * (carryingCostsPercent / 100))
     const minProfit = desiredProfit ?? (typeof rehabEstimate.minProfit === 'number' ? rehabEstimate.minProfit : 0)
+    // Location-risk deduction — major road/railroad/commercial proximity
+    // discounts what a buyer will pay post-rehab.
+    const locationPenalty = Math.round(arv * (locationPenaltyPercent / 100))
 
-    // Buy Price = ARV − Rehab − Closing Costs − Carrying Costs − Profit Target
-    const buyPrice = arv - totalRehabCost - closingCosts - carryingCosts - minProfit
+    // Buy Price = ARV − Rehab − Closing − Carrying − Profit Target − Location Penalty
+    const buyPrice = arv - totalRehabCost - closingCosts - carryingCosts - minProfit - locationPenalty
     const buyPricePercent = arv > 0 ? Math.round((buyPrice / arv) * 100) : 0
 
     // Wholesale Price = Buy Price − Wholesale Fee
@@ -212,6 +216,7 @@ class PropertyValuationService implements ValuationService {
       { label: 'Closing Costs', amount: -closingCosts, percent: closingCostsPercent },
       { label: 'Carrying Costs', amount: -carryingCosts, percent: carryingCostsPercent },
       { label: 'Flip Profit', amount: -minProfit },
+      { label: 'Location Penalty', amount: -locationPenalty, percent: locationPenaltyPercent },
       { label: 'Maximum Buy Price', amount: buyPrice, percent: buyPricePercent },
       { label: 'Wholesale Fee', amount: -wholesaleFee },
       { label: 'Wholesale Price', amount: wholesalePrice, percent: wholesalePricePercent },
@@ -231,6 +236,8 @@ class PropertyValuationService implements ValuationService {
       closingCosts,
       carryingCostsPercent,
       carryingCosts,
+      locationPenalty,
+      locationPenaltyPercent,
       buyPrice: Math.round(buyPrice),
       buyPricePercent,
       wholesaleFee,

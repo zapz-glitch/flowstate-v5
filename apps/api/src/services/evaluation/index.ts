@@ -63,6 +63,8 @@ export interface EvaluationParams {
     carryingCostsPercent?: number
     wholesaleFee?: number
     desiredProfit?: number
+    /** Location-risk deduction as % of ARV (major road/railroad/commercial proximity) */
+    locationPenaltyPercent?: number
   }
   customRehabTable?: RehabTable
   customTierRanges?: TierRangeDefinition[]
@@ -335,8 +337,22 @@ export async function performAnalysis(
   const { bundle, jobId } = params
   const appraisalService = createAppraisalService()
   const rules = params.appraisalRules ?? {}
-  const filters = rules.filters ?? DEFAULT_FILTERS
+  const filters = [...(rules.filters ?? DEFAULT_FILTERS)]
   const adjustments = rules.adjustments ?? DEFAULT_ADJUSTMENTS
+
+  // Evidence-critical rules always run: subdivision_match + foundation_match
+  // are the apples-to-apples hammers and only bite when enriched data proves
+  // a mismatch — not_verified never disqualifies, so enabling them is safe
+  // even in markets where the provider returns no subdivision/foundation.
+  for (const required of ['subdivision_match', 'foundation_match'] as const) {
+    const existing = filters.find((f) => f.type === required)
+    if (existing) {
+      existing.enabled = true
+    } else {
+      const def = DEFAULT_FILTERS.find((f) => f.type === required)
+      if (def) filters.push({ ...def })
+    }
+  }
 
   const steps: ReportStep[] = []
   const fallbacksUsed: string[] = []
@@ -528,6 +544,11 @@ export async function performAnalysis(
     compAvgSqft,
     rehabLevelIndex: derivedBuybox.rehabLevelIndex,
     skipBaseRehab: derivedBuybox.renovatedVerified === true,
+    // Location-risk deduction: OSM flags (major road / railroad / commercial
+    // proximity) discount the buy price by a % of ARV — configurable via buybox
+    locationPenaltyPercent: (bundle.enrichment.locationRisks?.length ?? 0) > 0
+      ? (params.buybox?.locationPenaltyPercent ?? 3)
+      : 0,
     majorItems: derivedBuybox.majorItems,
     additionPlay: derivedBuybox.additionPlay ?? buybox.additionPlay ?? 0,
     closingCostsPercent: buybox.closingCostsPercent ?? 8,

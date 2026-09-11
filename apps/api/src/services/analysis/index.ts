@@ -863,6 +863,11 @@ export function buildAnalysisResponse(
     riskFlags.push('Major Permits (>$50K)')
   }
 
+  // Location risks (OSM: major roads, railroads, commercial proximity)
+  for (const risk of enrichment.locationRisks ?? []) {
+    riskFlags.push(risk.description)
+  }
+
   // Location risk detection — zoning, busy road, commercial adjacency
   const zoningRisks = detectLocationRisks(property)
   riskFlags.push(...zoningRisks)

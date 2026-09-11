@@ -68,6 +68,8 @@ export interface ValuationParams {
   rehabLevelIndex?: number
   /** Vision-verified renovated — skip base $/sqft rehab (major items still apply) */
   skipBaseRehab?: boolean
+  /** Location-risk deduction as % of ARV (0 = none) — major road/railroad/commercial proximity */
+  locationPenaltyPercent?: number
   /** Major items with costs */
   majorItems?: MajorItem[]
   /** Addition play (extra budget for improvements) */
@@ -103,6 +105,10 @@ export interface ValuationResult {
   closingCosts: number
   carryingCostsPercent: number
   carryingCosts: number
+
+  // Location risk deduction (major road/railroad/commercial proximity)
+  locationPenalty: number
+  locationPenaltyPercent: number
 
   // Buy Price
   buyPrice: number
