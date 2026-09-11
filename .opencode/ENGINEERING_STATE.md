@@ -62,6 +62,17 @@ valuation (renovated-skip, location penalty) -> report.
 - npm run test: 15 regression files PASS; vitest src/: all pass;
   typechecks clean both apps; next build clean (all routes).
 
+## Eval-result cache + grade semantics (committed)
+- 21-day eval cache: KV key eval-result:{userId}:{normalizedAddr}:{paramsHash}
+  -> jobId, written on DO save; route returns stored report with cached:true
+  on hit. params hash = sha256(stableStringify(evalParams)) — ANY settings/
+  buybox/threshold change = fresh run. skipCache/isRefresh bypass.
+- Verified live: repeat call returns report in 24ms; arvThresholdPercent
+  change -> fresh job queued.
+- Permits gate now informational — always pass (caller params cover rehab
+  scope); available/empty/unavailable recorded as detail, never warn/fail.
+- upsert verified live: "Report overwritten" path fires on re-analysis.
+
 ## Pending / Next
 - Observability: extend evidence with photo/vision metrics if desired.
 - foundation_match visible in Evaluation Settings UI (preset editor lists filters).

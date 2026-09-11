@@ -44,6 +44,8 @@ export interface StartEnrichmentRequest {
   bundle: import('../services/property-api/types').PropertyBundle
   /** Original evaluation params (for re-evaluation after enrichment) */
   evalParams: Omit<EvaluationParams, 'jobId' | 'bundle'>
+  /** KV key under which to store this run's report pointer (21-day eval cache) */
+  evalResultCacheKey?: string
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   analysisResult: Record<string, any>
   llmOptions?: {
@@ -79,6 +81,8 @@ export interface StartStreamingRequest {
     floodZone?: boolean
   }
   skipCache?: boolean
+  /** KV key under which to store this run's report pointer (21-day eval cache) */
+  evalResultCacheKey?: string
   /** Evaluation params (user settings, thresholds, etc.) */
   evalParams: Omit<EvaluationParams, 'jobId' | 'bundle'>
   /** Whether to run LLM comp selection */
@@ -504,6 +508,11 @@ export class AnalysisJobDO {
         propertyState: property.state || '',
         propertyZip: property.zipCode || '',
       }, reportData)
+      if (config.evalResultCacheKey) {
+        await this.env.API_CACHE.put(config.evalResultCacheKey, config.jobId, {
+          expirationTtl: 21 * 24 * 60 * 60, // 21 days
+        }).catch(() => { /* best-effort */ })
+      }
     } catch (dbError) {
       console.warn(`[AnalysisJobDO] Failed to save report:`, dbError instanceof Error ? dbError.message : dbError)
       await this.pushEvent('error', { step: 'persistence', message: 'The evaluation could not be saved. Retry the analysis; no saved report is available for this run.' })
@@ -686,6 +695,11 @@ export class AnalysisJobDO {
             maxAllowableOffer: (valuation?.buyPrice as number) ?? null,
             estimatedRepairs: (valuation?.rehabCost as number) ?? null,
           })
+          if (config.evalResultCacheKey) {
+            await this.env.API_CACHE.put(config.evalResultCacheKey, config.jobId, {
+              expirationTtl: 21 * 24 * 60 * 60, // 21 days
+            }).catch(() => { /* best-effort */ })
+          }
         } catch (dbError) {
           console.warn(`[AnalysisJobDO] Failed to save report:`, dbError instanceof Error ? dbError.message : dbError)
           throw new Error('The evaluation could not be saved. Retry the analysis.')
