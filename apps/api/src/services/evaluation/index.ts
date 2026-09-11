@@ -436,9 +436,18 @@ export async function performAnalysis(
 
   // ── 3b. Curb appeal: visual ARV-candidacy check on selected comps ──────────
   // Only ARV-selected comps get a vision call — cheap, bounded, and validates
-  // that the sales anchoring the ARV look like post-renovation comps.
+  // that the sales anchoring the ARV look like post-renovation comps. The
+  // subject gets the same check so its card can show the same label.
   let compCurbAppeal: Record<string, CurbAppealCheck> | undefined
+  let subjectCurbAppeal: CurbAppealCheck | null = null
   {
+    if (subjectPhotos.length > 0) {
+      try {
+        subjectCurbAppeal = await assessCompCurbAppeal(env, subjectPhotos)
+      } catch {
+        subjectCurbAppeal = null
+      }
+    }
     const selectedIds = appraisalResult.selectedCompIds ?? []
     const photoPairs = selectedIds
       .map((id) => ({ id, photos: photoBundle?.comps[id]?.photos ?? [] }))
@@ -590,6 +599,8 @@ export async function performAnalysis(
       appliedSettings,
       visionAnalysis: mapRenovationToVision(renovation),
       compCurbAppeal,
+      subjectCurbAppeal,
+      subjectListingUrl: photoBundle?.subject?.sourceUrl ?? null,
       apiCallStats: params.apiCallStats,
       bestMatch,
       groupBResult,

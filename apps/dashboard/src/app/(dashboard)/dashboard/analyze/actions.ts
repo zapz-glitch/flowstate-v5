@@ -165,6 +165,16 @@ export interface SubjectData {
   photos?: string[]
   /** Vision-assessed condition/renovation level ('NA' when unverifiable) */
   condition?: string | null
+  /** Curb-appeal condition label from listing photos */
+  curbAppeal?: {
+    condition: 'renovated' | 'dated' | 'distressed' | 'unknown'
+    source?: 'vision' | 'price'
+    confidence: number | null
+    summary: string | null
+    photosExamined: number
+  } | null
+  /** Direct listing URL from the provider that delivered photos */
+  listingUrl?: string | null
   /** Foundation type (e.g., Slab, Crawl Space, Basement) */
   foundationType?: string | null
   /** Building style (e.g., Colonial, Cape Cod, Ranch) */

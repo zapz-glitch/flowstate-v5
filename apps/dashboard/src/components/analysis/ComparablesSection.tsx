@@ -87,7 +87,16 @@ export function ComparablesSection({
   // Sorted items preserving original index for stable keys & map marker numbering
   const sortedItems = useMemo(() => {
     const indexed = compItems.map((comp, i) => ({ comp, originalIndex: i }))
-    if (sortBy === 'default') return indexed
+    // Default ordering: same-subdivision comps first, then nearest → farthest
+    if (sortBy === 'default') {
+      const subNorm = normalizeSubdivision(subjectSubdivision)
+      return [...indexed].sort((a, b) => {
+        const aMatch = normalizeSubdivision(a.comp.subdivision) === subNorm ? 1 : 0
+        const bMatch = normalizeSubdivision(b.comp.subdivision) === subNorm ? 1 : 0
+        if (aMatch !== bMatch) return bMatch - aMatch
+        return (a.comp.distanceMiles ?? 999) - (b.comp.distanceMiles ?? 999)
+      })
+    }
     const dir = sortDesc ? -1 : 1
     const sorted = [...indexed]
     switch (sortBy) {

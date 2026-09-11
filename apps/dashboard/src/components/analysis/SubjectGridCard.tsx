@@ -1,9 +1,9 @@
 'use client'
 
 import { MapPin } from 'lucide-react'
+import { cn } from '@/lib/utils'
 import type { SubjectData } from './shared-types'
 import { StreetViewImage } from './StreetViewImage'
-import { AddressDisplay } from './AddressDisplay'
 import { formatShortDate } from './format-helpers'
 import { PropertyPermits } from './PropertyPermits'
 import { PhotoGallery } from './PhotoGallery'
@@ -41,12 +41,20 @@ export function SubjectGridCard({ subject, isLoading }: SubjectGridCardProps) {
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 {subject.address ? (
-                  <AddressDisplay address={subject.address} latitude={subject.latitude} longitude={subject.longitude} className="text-body-sm font-semibold" showStreetView={false} />
+                  <a
+                    href={subject.listingUrl ?? `https://www.zillow.com/homes/${encodeURIComponent(subject.address)}_rb/`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-body-sm font-semibold hover:text-primary hover:underline"
+                    title={subject.listingUrl ? 'Open listing' : 'Search on Zillow'}
+                  >
+                    {subject.address}
+                  </a>
                 ) : (
                   <span className="text-body-sm font-semibold">Unknown Address</span>
                 )}
                 {subject.subdivision && (
-                  <span className="inline-flex items-center gap-1 mt-0.5 px-1.5 py-0.5 rounded-full text-[9px] font-medium bg-primary/10 text-primary border border-primary/20 truncate max-w-full">
+                  <span className="inline-flex items-center gap-1 mt-0.5 px-1.5 py-0.5 rounded-full text-[9px] font-medium bg-primary/10 text-primary border border-primary/20">
                     {subject.subdivision}
                   </span>
                 )}
@@ -94,7 +102,16 @@ export function SubjectGridCard({ subject, isLoading }: SubjectGridCardProps) {
               )}
               <div className="flex items-center justify-between text-[11px]">
                 <span className="text-foreground-tertiary">Condition</span>
-                <span className="font-medium truncate ml-2">{subject.condition || 'NA'}</span>
+                <span className={cn(
+                  'font-medium truncate ml-2',
+                  subject.curbAppeal?.condition === 'renovated' && 'text-emerald-500',
+                  subject.curbAppeal?.condition === 'dated' && 'text-amber-500',
+                  subject.curbAppeal?.condition === 'distressed' && 'text-red-400',
+                )} title={subject.curbAppeal?.summary ?? subject.condition ?? undefined}>
+                  {subject.curbAppeal && subject.curbAppeal.condition !== 'unknown'
+                    ? subject.curbAppeal.condition === 'renovated' ? 'Renovated ✓' : subject.curbAppeal.condition === 'dated' ? 'Dated' : 'Distressed'
+                    : subject.condition || 'NA'}
+                </span>
               </div>
               <div className="flex items-center justify-between text-[11px]">
                 <span className="text-foreground-tertiary">Pool</span>

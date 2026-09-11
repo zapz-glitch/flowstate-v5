@@ -168,7 +168,7 @@ export function CompGridCard({
             const hasSubject = !!subject?.subdivision
             return (
               <span className={cn(
-                'inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[9px] font-medium truncate max-w-[60%]',
+                'inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[9px] font-medium',
                 hasSubject
                   ? isMatch
                     ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20'
@@ -179,7 +179,7 @@ export function CompGridCard({
                   ? <Check className="w-2.5 h-2.5 flex-shrink-0" />
                   : <X className="w-2.5 h-2.5 flex-shrink-0" />
                 )}
-                <span className="truncate">{comp.subdivision}</span>
+                <span>{comp.subdivision}</span>
               </span>
             )
           })()}

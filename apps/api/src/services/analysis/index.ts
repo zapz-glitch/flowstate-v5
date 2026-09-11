@@ -330,6 +330,16 @@ export interface ResponseContext {
     interior?: { condition: string; notes: string[] }
     features?: Record<string, string | undefined>
   }
+  /** Curb-appeal condition check on the subject's listing photos */
+  subjectCurbAppeal?: {
+    condition: 'renovated' | 'dated' | 'distressed' | 'unknown'
+    source: 'vision' | 'price'
+    confidence: number | null
+    summary: string | null
+    photosExamined: number
+  } | null
+  /** Actual listing URL from the photo provider that delivered (Redfin/Zillow/Realtor) */
+  subjectListingUrl?: string | null
   /** Visual ARV-candidacy check per ARV-selected comp (by comp ID) */
   compCurbAppeal?: Record<string, {
     condition: 'renovated' | 'dated' | 'distressed' | 'unknown'
@@ -442,6 +452,16 @@ export interface AnalysisResponse {
     zillowUrl: string | null
     /** Vision-assessed condition/renovation level (or 'NA' when unverifiable) */
     condition: string | null
+    /** Curb-appeal condition label (renovated/dated/distressed/unknown) */
+    curbAppeal: {
+      condition: 'renovated' | 'dated' | 'distressed' | 'unknown'
+      source: 'vision' | 'price'
+      confidence: number | null
+      summary: string | null
+      photosExamined: number
+    } | null
+    /** Direct listing URL from the provider that delivered photos */
+    listingUrl: string | null
     /** Building permit records for the subject */
     permits: {
       status: 'available' | 'empty' | 'unavailable'
@@ -1040,6 +1060,8 @@ export function buildAnalysisResponse(
           }
         : { status: 'unavailable', items: [] },
       condition: ctx.visionAnalysis?.overallCondition ?? null,
+      curbAppeal: ctx.subjectCurbAppeal ?? null,
+      listingUrl: ctx.subjectListingUrl ?? null,
       classification: subjectClassificationSummary,
     },
 
