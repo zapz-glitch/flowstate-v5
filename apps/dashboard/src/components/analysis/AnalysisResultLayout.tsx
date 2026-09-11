@@ -1,14 +1,13 @@
 'use client'
 
 import { useState } from 'react'
-import { Loader2, ChevronDown, ChevronRight, TrendingUp, BrainCircuit } from 'lucide-react'
+import { Loader2, ChevronDown, ChevronRight, TrendingUp } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useEvaluation } from '@/hooks/use-evaluation'
 import { ComparablesSection } from './ComparablesSection'
 import { DealSummaryHero } from './DealSummaryHero'
 import { MarketContextCard } from './MarketContextCard'
 import { SubjectGridCard } from './SubjectGridCard'
-import { PhotoGallery } from './PhotoGallery'
 import { InvestorAnalysisSummary } from './InvestorAnalysisSummary'
 
 // ─── Analysis Result Layout ──────────────────────────────────────────────────
@@ -34,15 +33,11 @@ export function AnalysisResultLayout({
     isRecalculated,
     compOverride,
     marketContext,
-    aiReport,
-    aiAnalyzing,
     isStreaming,
     onToggleComp,
     onResetComps,
     onOpenSettings,
     onCompClick,
-    onRunAiAnalysis,
-    onUndoAiSelection,
   } = useEvaluation()
 
   const selectedCompKeys = compOverride?.selectedCompKeys
@@ -106,31 +101,6 @@ export function AnalysisResultLayout({
         </div>
       )}
 
-      {/* AI analysis banner */}
-      {aiAnalyzing && (
-        <div className="border border-primary/20 bg-primary/5 px-4 py-3 flex items-center gap-3">
-          <Loader2 className="w-4 h-4 text-primary animate-spin flex-shrink-0" />
-          <span className="text-body-sm text-foreground-secondary">AI analysis in progress — comp selection may update</span>
-        </div>
-      )}
-
-      {/* AI analysis report — shows after AI completes */}
-      {aiReport && !aiAnalyzing && (
-        <div className="border border-emerald-500/20 bg-emerald-500/5 px-4 py-3 rounded-sm">
-          <div className="flex items-center gap-2 mb-1">
-            <BrainCircuit className="w-3.5 h-3.5 text-emerald-500 flex-shrink-0" />
-            <span className="text-[10px] font-semibold text-emerald-600 uppercase tracking-wider">AI Analysis</span>
-            <span className="text-[9px] text-foreground-tertiary ml-auto">{aiReport.model}</span>
-          </div>
-          <p className="text-body-sm text-foreground-secondary">{aiReport.summary}</p>
-          <div className="mt-2">
-            <span className="text-[10px] text-foreground-tertiary">
-              {aiReport.selected} of {aiReport.total} comps selected for ARV
-            </span>
-          </div>
-        </div>
-      )}
-
       {/* Properties grid (subject + comps) */}
       {comps ? (
         <ComparablesSection
@@ -143,9 +113,6 @@ export function AnalysisResultLayout({
           onToggleComp={onToggleComp}
           onReset={onResetComps}
           highlightedCompKey={null}
-          isAnalyzing={aiAnalyzing}
-          onRunAiAnalysis={onRunAiAnalysis}
-          onUndoAiSelection={onUndoAiSelection}
           onCompClick={onCompClick}
           onCompHover={onCompHover}
         />
@@ -176,16 +143,6 @@ export function AnalysisResultLayout({
           </div>
         </div>
       ) : null}
-
-      {/* Photos */}
-      {subject?.photos && subject.photos.length > 0 && (
-        <div className="border border-border px-4 py-3">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-caption font-medium text-foreground-secondary">Property Photos</span>
-          </div>
-          <PhotoGallery photos={subject.photos} />
-        </div>
-      )}
 
       {footer}
     </>

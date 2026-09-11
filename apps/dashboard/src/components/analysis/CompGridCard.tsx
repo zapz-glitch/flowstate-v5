@@ -153,14 +153,6 @@ export function CompGridCard({
             </div>
           )}
           <span className="flex items-center gap-1.5 flex-shrink-0">
-            {comp.pricePercentile != null && (
-              <span className={cn(
-                'text-[10px] font-medium tabular-nums',
-                comp.compGroup === 'arv' ? 'text-emerald-500' : comp.compGroup === 'as_is' ? 'text-amber-500' : 'text-foreground-tertiary'
-              )}>
-                Top {comp.pricePercentile}%
-              </span>
-            )}
             {comp.pricePerSqft && (
               <span className="text-[10px] text-foreground-tertiary tabular-nums">${comp.pricePerSqft.toFixed(0)}/sf</span>
             )}

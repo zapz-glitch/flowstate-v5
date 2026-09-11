@@ -6,6 +6,7 @@ import { StreetViewImage } from './StreetViewImage'
 import { AddressDisplay } from './AddressDisplay'
 import { formatShortDate } from './format-helpers'
 import { PropertyPermits } from './PropertyPermits'
+import { PhotoGallery } from './PhotoGallery'
 
 interface SubjectGridCardProps {
   subject: SubjectData
@@ -109,6 +110,9 @@ export function SubjectGridCard({ subject, isLoading }: SubjectGridCardProps) {
               </div>
             </div>
             <PropertyPermits permits={subject.permits} loading={isLoading} />
+            {subject.photos && subject.photos.length > 0 && (
+              <PhotoGallery photos={subject.photos} className="mt-2" />
+            )}
           </div>
         </div>
       </div>

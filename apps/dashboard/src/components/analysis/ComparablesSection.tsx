@@ -1,12 +1,11 @@
 'use client'
 
 import { useState, useEffect, useMemo } from 'react'
-import { SlidersHorizontal, RotateCcw, Loader2, LayoutGrid, List, ArrowUpDown, Undo2 } from 'lucide-react'
+import { SlidersHorizontal, RotateCcw, Loader2, LayoutGrid, List, ArrowUpDown } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 import type { CompsData, CompItem, SubjectData } from './shared-types'
-import { getCompKey } from './format-helpers'
+import { getCompKey, normalizeSubdivision } from './format-helpers'
 import { CompCard } from './CompCard'
 import { CompGridCard } from './CompGridCard'
 import { RuleMatchDetails } from './RuleMatchDetails'
@@ -40,10 +39,11 @@ export interface ComparablesSectionProps {
   onCompHover?: (key: string | null) => void
 }
 
-type SortOption = 'default' | 'distance' | 'price' | 'psf'
+type SortOption = 'default' | 'subdivision' | 'distance' | 'price' | 'psf'
 
 const SORT_LABELS: Record<SortOption, string> = {
   default: 'Default',
+  subdivision: 'Subdivision',
   distance: 'Distance',
   price: 'Price',
   psf: '$/Sqft',
@@ -91,6 +91,17 @@ export function ComparablesSection({
     const dir = sortDesc ? -1 : 1
     const sorted = [...indexed]
     switch (sortBy) {
+      case 'subdivision': {
+        // Subject-subdivision matches first (desc) / last (asc), then by name
+        const subNorm = normalizeSubdivision(subjectSubdivision)
+        sorted.sort((a, b) => {
+          const aMatch = normalizeSubdivision(a.comp.subdivision) === subNorm ? 1 : 0
+          const bMatch = normalizeSubdivision(b.comp.subdivision) === subNorm ? 1 : 0
+          if (aMatch !== bMatch) return dir * (aMatch - bMatch)
+          return (a.comp.subdivision ?? '').localeCompare(b.comp.subdivision ?? '')
+        })
+        break
+      }
       case 'distance':
         sorted.sort((a, b) => dir * ((a.comp.distanceMiles ?? 999) - (b.comp.distanceMiles ?? 999)))
         break
@@ -154,31 +165,6 @@ export function ComparablesSection({
             </span>
           </div>
           <div className="flex items-center gap-2">
-            {isAnalyzing ? (
-              <Badge variant="outline" className="text-[10px] gap-1 border-primary/30 text-primary no-print">
-                <Loader2 className="w-3 h-3 animate-spin" />
-                AI Analyzing
-              </Badge>
-            ) : onUndoAiSelection ? (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={onUndoAiSelection}
-                className="h-7 px-2 text-[10px] no-print"
-              >
-                <Undo2 className="w-3 h-3" />
-                Undo AI
-              </Button>
-            ) : onRunAiAnalysis ? (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={onRunAiAnalysis}
-                className="h-7 px-2 text-[10px] no-print"
-              >
-                AI Analysis
-              </Button>
-            ) : null}
             {/* Grid/List toggle */}
             <div className="flex items-center border border-border rounded overflow-hidden no-print">
               <button
@@ -204,7 +190,7 @@ export function ComparablesSection({
         {/* Row 2: Sort controls */}
         <div className="flex items-center gap-1 no-print">
           <ArrowUpDown className="w-3 h-3 text-foreground-tertiary mr-0.5" />
-          {(['default', 'distance', 'price', 'psf'] as const).map((opt) => (
+          {(['default', 'subdivision', 'distance', 'price', 'psf'] as const).map((opt) => (
             <button
               key={opt}
               type="button"
