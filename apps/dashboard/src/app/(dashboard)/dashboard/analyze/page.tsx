@@ -612,15 +612,6 @@ export default function AnalyzePage() {
               <div className="text-body-sm text-foreground-secondary truncate">
                 {activeAnalysis?.address || address || 'Search an address...'}
               </div>
-              {streamingStep !== 'idle' && streamingStep !== 'done' && !error && (
-                <div className="text-xs text-primary mt-0.5 flex items-center gap-1.5">
-                  <Loader2 className="w-3 h-3 animate-spin" />
-                  {streamingStep === 'searching' && 'Searching property...'}
-                  {streamingStep === 'subject' && 'Loading comparables...'}
-                  {streamingStep === 'comps' && 'Enriching comp details...'}
-                  {streamingStep === 'evaluating' && 'Evaluating comparables...'}
-                </div>
-              )}
               {error && (
                 <div className="text-xs text-red-500 mt-0.5 truncate">{error}</div>
               )}
@@ -811,6 +802,13 @@ export default function AnalyzePage() {
           floodZone={authoritativeData?.floodZone ?? renderData?.floodZone}
 
           valuationCardRef={valuationCardRef}
+          statusLabel={
+            streamingStep === 'searching' ? 'Searching property...'
+            : streamingStep === 'subject' ? 'Loading comparables...'
+            : streamingStep === 'comps' ? 'Enriching comp details...'
+            : streamingStep === 'evaluating' ? 'Evaluating comparables...'
+            : null
+          }
           footer={
             isReady && hasResult ? (
               <div className="border border-border overflow-hidden no-print min-w-0">

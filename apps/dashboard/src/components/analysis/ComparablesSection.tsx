@@ -87,10 +87,15 @@ export function ComparablesSection({
   // Sorted items preserving original index for stable keys & map marker numbering
   const sortedItems = useMemo(() => {
     const indexed = compItems.map((comp, i) => ({ comp, originalIndex: i }))
-    // Default ordering: same-subdivision comps first, then nearest → farthest
+    // Default ordering: selected comps first (engine's pick = highest trust),
+    // then same-subdivision, then nearest → farthest
     if (sortBy === 'default') {
       const subNorm = normalizeSubdivision(subjectSubdivision)
+      const rank = (c: typeof compItems[number]) =>
+        c.compGroup === 'arv' ? 0 : c.isEnabled ? 1 : 2
       return [...indexed].sort((a, b) => {
+        const ra = rank(a.comp), rb = rank(b.comp)
+        if (ra !== rb) return ra - rb
         const aMatch = normalizeSubdivision(a.comp.subdivision) === subNorm ? 1 : 0
         const bMatch = normalizeSubdivision(b.comp.subdivision) === subNorm ? 1 : 0
         if (aMatch !== bMatch) return bMatch - aMatch

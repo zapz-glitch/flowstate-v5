@@ -17,6 +17,8 @@ export interface AnalysisResultLayoutProps {
   onCompHover?: (key: string | null) => void
   /** Valuation card ref for sticky/intersection observer */
   valuationCardRef?: React.RefObject<HTMLDivElement | null>
+  /** Streaming step label — rendered near the comparables section */
+  statusLabel?: string | null
   /** Optional footer (e.g. Raw JSON toggle) */
   footer?: React.ReactNode
 }
@@ -24,6 +26,7 @@ export interface AnalysisResultLayoutProps {
 export function AnalysisResultLayout({
   onCompHover,
   valuationCardRef,
+  statusLabel,
   footer,
 }: AnalysisResultLayoutProps) {
   const {
@@ -101,6 +104,14 @@ export function AnalysisResultLayout({
         </div>
       )}
 
+      {/* Streaming status — lives near the comps section, not the search bar */}
+      {statusLabel && isStreaming && (
+        <div className="flex items-center gap-2 px-1">
+          <Loader2 className="w-3 h-3 text-primary animate-spin" />
+          <span className="text-caption text-foreground-tertiary">{statusLabel}</span>
+        </div>
+      )}
+
       {/* Properties grid (subject + comps) */}
       {comps ? (
         <ComparablesSection
@@ -121,7 +132,7 @@ export function AnalysisResultLayout({
         <div className="space-y-3">
           <div className="flex items-center gap-2">
             <Loader2 className="w-3 h-3 text-primary animate-spin" />
-            <span className="text-caption text-foreground-tertiary">Loading comparables...</span>
+            <span className="text-caption text-foreground-tertiary">{statusLabel ?? 'Loading comparables...'}</span>
           </div>
           <div className="comps-grid">
             {Array.from({ length: 4 }).map((_, i) => (

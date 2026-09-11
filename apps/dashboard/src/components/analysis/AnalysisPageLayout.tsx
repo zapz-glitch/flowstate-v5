@@ -29,6 +29,9 @@ export interface AnalysisPageLayoutProps {
   // Loading state
   loading?: boolean
 
+  /** Current streaming step label — shown near the comparables section */
+  statusLabel?: string | null
+
   // Optional footer (e.g. Raw JSON)
   footer?: ReactNode
 }
@@ -41,6 +44,7 @@ export function AnalysisPageLayout({
   floodZone,
   valuationCardRef,
   loading = false,
+  statusLabel,
   footer,
 }: AnalysisPageLayoutProps) {
   const { subject, displayComps: comps, compOverride } = useEvaluation()
@@ -57,6 +61,7 @@ export function AnalysisPageLayout({
   const resultProps = {
     onCompHover: handleCompHover,
     valuationCardRef,
+    statusLabel,
     footer,
   }
 

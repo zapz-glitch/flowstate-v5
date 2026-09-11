@@ -137,6 +137,14 @@ function MapHud({ subject }: { subject: { lat: number; lng: number } | null }) {
   const modeRef = useRef(mode)
   modeRef.current = mode
 
+  // Start in 3D: tilt as soon as the map is ready (zoom-independent at load)
+  useEffect(() => {
+    if (map && mode === '3d') {
+      animate(map, (v: number) => map.setTilt(v), map.getTilt() ?? 0, 45, 800)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [map])
+
   // Zoom → tilt + street-view approach (3D mode only)
   useEffect(() => {
     const gm = (window as any).google?.maps
