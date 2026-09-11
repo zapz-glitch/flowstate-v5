@@ -13,11 +13,13 @@ export default function TasksPage() {
   const [dueDate, setDueDate] = useState('')
   const [adding, setAdding] = useState(false)
 
+  const notifyTasksChanged = () => window.dispatchEvent(new Event('tasks-updated'))
+
   useEffect(() => {
     getTasks()
       .then((r) => setTasks(r.tasks))
       .catch(() => {})
-      .finally(() => setLoading(false))
+      .finally(() => { setLoading(false); notifyTasksChanged() })
   }, [])
 
   const projects = useMemo(
@@ -37,6 +39,7 @@ export default function TasksPage() {
       setTasks((prev) => [task, ...prev])
       setTitle('')
       setDueDate('')
+      notifyTasksChanged()
     } finally {
       setAdding(false)
     }
@@ -50,11 +53,13 @@ export default function TasksPage() {
     } catch {
       setTasks((prev) => prev.map((x) => (x.id === t.id ? { ...x, done: !next } : x)))
     }
+    notifyTasksChanged()
   }
 
   const remove = async (t: TaskItem) => {
     setTasks((prev) => prev.filter((x) => x.id !== t.id))
     await deleteTask(t.id).catch(() => {})
+    notifyTasksChanged()
   }
 
   const fmtDue = (d: string | null) => {

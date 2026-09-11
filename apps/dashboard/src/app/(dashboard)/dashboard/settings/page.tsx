@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { signOut } from '@/lib/auth-client'
-import { AlertTriangle, Plus, X, Download } from 'lucide-react'
+import { AlertTriangle, Plus, X, Download, ArrowUp, ArrowDown } from 'lucide-react'
 import { getUiPrefs, saveUiPrefs, type UiPrefs } from '@/lib/client-api'
 
 const NAV_ITEMS = [
@@ -24,6 +24,7 @@ export default function SettingsPage() {
   const [deleteConfirmText, setDeleteConfirmText] = useState('')
 
   const [navLabels, setNavLabels] = useState<Record<string, string>>({})
+  const [navOrder, setNavOrder] = useState<string[]>(NAV_ITEMS.map((i) => i.href))
   const [customLinks, setCustomLinks] = useState<Array<{ label: string; url: string }>>([])
   const [faviconUrl, setFaviconUrl] = useState('')
   const [prefsLoaded, setPrefsLoaded] = useState(false)
@@ -33,6 +34,9 @@ export default function SettingsPage() {
   useEffect(() => {
     getUiPrefs().then((p) => {
       setNavLabels(p.navLabels ?? {})
+      // Saved order first, then any new items appended in default order
+      const saved = p.navOrder ?? []
+      setNavOrder([...saved.filter((h) => NAV_ITEMS.some((i) => i.href === h)), ...NAV_ITEMS.map((i) => i.href).filter((h) => !saved.includes(h))])
       setCustomLinks(p.customLinks ?? [])
       setFaviconUrl(p.faviconUrl ?? '')
       setPrefsLoaded(true)
@@ -44,6 +48,7 @@ export default function SettingsPage() {
     try {
       const prefs: UiPrefs = {
         navLabels,
+        navOrder,
         customLinks: customLinks.filter((l) => l.label.trim() && l.url.trim()),
         faviconUrl: faviconUrl.trim() || null,
       }
@@ -149,27 +154,48 @@ export default function SettingsPage() {
           </p>
 
           <div className="space-y-2 mb-5">
-            <p className="text-xs font-medium text-neutral-500 dark:text-neutral-400 uppercase tracking-wide">Item names</p>
-            {NAV_ITEMS.map((item) => (
-              <div key={item.href} className="flex items-center gap-3">
-                <span className="w-40 text-sm text-neutral-500 dark:text-neutral-400">{item.defaultName}</span>
-                <input
-                  type="text"
-                  value={navLabels[item.href] ?? ''}
-                  placeholder={item.defaultName}
-                  onChange={(e) => {
-                    const v = e.target.value
-                    setNavLabels((prev) => {
-                      const next = { ...prev }
-                      if (v.trim()) next[item.href] = v
-                      else delete next[item.href]
-                      return next
-                    })
-                  }}
-                  className="flex-1 px-3 py-1.5 text-sm rounded-md border border-neutral-200 dark:border-neutral-700 bg-transparent text-neutral-900 dark:text-white"
-                />
-              </div>
-            ))}
+            <p className="text-xs font-medium text-neutral-500 dark:text-neutral-400 uppercase tracking-wide">Item names & order</p>
+            {navOrder.map((href, idx) => {
+              const item = NAV_ITEMS.find((i) => i.href === href)
+              if (!item) return null
+              const move = (dir: -1 | 1) => {
+                const j = idx + dir
+                if (j < 0 || j >= navOrder.length) return
+                setNavOrder((prev) => {
+                  const next = [...prev]
+                  ;[next[idx], next[j]] = [next[j], next[idx]]
+                  return next
+                })
+              }
+              return (
+                <div key={item.href} className="flex items-center gap-2">
+                  <div className="flex flex-col">
+                    <button onClick={() => move(-1)} disabled={idx === 0} className="text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 disabled:opacity-30" aria-label="Move up">
+                      <ArrowUp className="w-3.5 h-3.5" />
+                    </button>
+                    <button onClick={() => move(1)} disabled={idx === navOrder.length - 1} className="text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 disabled:opacity-30" aria-label="Move down">
+                      <ArrowDown className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                  <span className="w-40 text-sm text-neutral-500 dark:text-neutral-400">{item.defaultName}</span>
+                  <input
+                    type="text"
+                    value={navLabels[item.href] ?? ''}
+                    placeholder={item.defaultName}
+                    onChange={(e) => {
+                      const v = e.target.value
+                      setNavLabels((prev) => {
+                        const next = { ...prev }
+                        if (v.trim()) next[item.href] = v
+                        else delete next[item.href]
+                        return next
+                      })
+                    }}
+                    className="flex-1 px-3 py-1.5 text-sm rounded-md border border-neutral-200 dark:border-neutral-700 bg-transparent text-neutral-900 dark:text-white"
+                  />
+                </div>
+              )
+            })}
           </div>
 
           <div className="space-y-2 mb-5">

@@ -9,6 +9,7 @@ export const uiPrefsRoute = new Hono<{ Bindings: Env }>()
 
 interface UiPrefsShape {
   navLabels: Record<string, string>
+  navOrder: string[]
   customLinks: Array<{ label: string; url: string }>
   faviconUrl: string | null
 }
@@ -42,7 +43,10 @@ function sanitize(body: Record<string, unknown>): UiPrefsShape {
     typeof body.faviconUrl === 'string' && /^(https?:\/\/|\/)/.test(body.faviconUrl)
       ? body.faviconUrl.slice(0, 500)
       : null
-  return { navLabels, customLinks, faviconUrl }
+  const navOrder = Array.isArray(body.navOrder)
+    ? body.navOrder.filter((h): h is string => typeof h === 'string' && h.startsWith('/')).slice(0, 30)
+    : []
+  return { navLabels, navOrder, customLinks, faviconUrl }
 }
 
 uiPrefsRoute.get('/', async (c) => {
@@ -52,6 +56,7 @@ uiPrefsRoute.get('/', async (c) => {
   const [row] = await db.select().from(uiPrefs).where(eq(uiPrefs.userId, session.user.id)).limit(1)
   return c.json({
     navLabels: row?.navLabelsJson ? JSON.parse(row.navLabelsJson) : {},
+    navOrder: row?.navOrderJson ? JSON.parse(row.navOrderJson) : [],
     customLinks: row?.customLinksJson ? JSON.parse(row.customLinksJson) : [],
     faviconUrl: row?.faviconUrl ?? null,
   })
@@ -66,6 +71,7 @@ uiPrefsRoute.put('/', async (c) => {
   const values = {
     userId: session.user.id,
     navLabelsJson: JSON.stringify(prefs.navLabels),
+    navOrderJson: JSON.stringify(prefs.navOrder),
     customLinksJson: JSON.stringify(prefs.customLinks),
     faviconUrl: prefs.faviconUrl,
     updatedAt: new Date().toISOString(),

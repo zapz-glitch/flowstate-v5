@@ -32,7 +32,7 @@ import { useUser } from '@/components/auth/UserProvider'
 import { useTheme } from '@/components/theme-provider'
 import { useSidebar } from '@/components/SidebarProvider'
 import { useAnalysis } from '@/hooks/use-analysis'
-import { getUiPrefs, type UiPrefs } from '@/lib/client-api'
+import { getUiPrefs, getTasks, type UiPrefs } from '@/lib/client-api'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import {
   DropdownMenu,
@@ -103,9 +103,32 @@ export default function Sidebar() {
     return () => window.removeEventListener('ui-prefs-updated', onUpdate)
   }, [])
 
+  // Open-task badge on the Tasks nav item — updates live via tasks-updated event
+  const [openTaskCount, setOpenTaskCount] = useState(0)
+  useEffect(() => {
+    const refresh = () => getTasks().then((r) => setOpenTaskCount(r.tasks.filter((t) => !t.done).length)).catch(() => {})
+    refresh()
+    window.addEventListener('tasks-updated', refresh)
+    return () => window.removeEventListener('tasks-updated', refresh)
+  }, [])
+
+  const builtins = (user?.role === 'admin' ? [...baseNavigation, ...adminNavigation] : baseNavigation)
+    .map((item) => ({ ...item, name: prefs?.navLabels?.[item.href] || item.name }))
+
+  // Apply saved nav ordering — ordered hrefs first (in saved order), then any
+  // unlisted items keep their default order at the end.
+  const order = prefs?.navOrder ?? []
+  const orderedBuiltins = order.length
+    ? [
+        ...order
+          .map((href) => builtins.find((i) => i.href === href))
+          .filter((i): i is typeof builtins[number] => !!i),
+        ...builtins.filter((i) => !order.includes(i.href)),
+      ]
+    : builtins
+
   const navigation = [
-    ...(user?.role === 'admin' ? [...baseNavigation, ...adminNavigation] : baseNavigation)
-      .map((item) => ({ ...item, name: prefs?.navLabels?.[item.href] || item.name })),
+    ...orderedBuiltins,
     ...(prefs?.customLinks ?? [])
       .filter((l) => l.label && l.url)
       .map((l) => ({ name: l.label, href: l.url, icon: ExternalLink, external: true, favicon: faviconFor(l.url) as string | null })),
@@ -216,6 +239,16 @@ export default function Sidebar() {
                     className={cn('w-[18px] h-[18px] flex-shrink-0', isActive && 'text-primary')}
                   />
                   {!collapsed && <span>{item.name}</span>}
+                  {item.href === '/dashboard/tasks' && openTaskCount > 0 && (
+                    <span
+                      className={cn(
+                        'flex items-center justify-center rounded-full bg-red-500 text-white text-[10px] font-semibold min-w-[18px] h-[18px] px-1',
+                        collapsed ? 'absolute top-1 right-1' : 'ml-auto'
+                      )}
+                    >
+                      {openTaskCount > 99 ? '99+' : openTaskCount}
+                    </span>
+                  )}
                   {showAnalysisIndicator && (
                     <span className={cn('relative flex h-1.5 w-1.5 ml-auto', collapsed && 'absolute top-1.5 right-1.5')}>
                       <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
@@ -367,6 +400,11 @@ export default function Sidebar() {
               >
                 <item.icon className="w-[18px] h-[18px]" />
                 <span className="text-caption-sm">{item.name.split(' ')[0]}</span>
+                {item.href === '/dashboard/tasks' && openTaskCount > 0 && (
+                  <span className="absolute top-0.5 right-1.5 flex items-center justify-center rounded-full bg-red-500 text-white text-[9px] font-semibold min-w-[15px] h-[15px] px-0.5">
+                    {openTaskCount > 99 ? '99+' : openTaskCount}
+                  </span>
+                )}
                 {showMobileIndicator && (
                   <span className="absolute top-1.5 right-1.5 flex h-1.5 w-1.5">
                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />

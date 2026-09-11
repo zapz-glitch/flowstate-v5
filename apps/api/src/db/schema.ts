@@ -410,6 +410,8 @@ export const uiPrefs = sqliteTable(
       .references(() => user.id, { onDelete: 'cascade' }),
     // Rename built-in nav items: { "/dashboard/analyze": "Deal Search", ... }
     navLabelsJson: text('nav_labels_json'),
+    // Custom ordering of built-in nav items: ["/dashboard", "/dashboard/tasks", ...]
+    navOrderJson: text('nav_order_json'),
     // Extra links appended to the nav: [{ label, url }]
     customLinksJson: text('custom_links_json'),
     // Custom favicon URL (https or absolute path)
