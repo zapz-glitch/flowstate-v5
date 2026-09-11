@@ -114,7 +114,7 @@ export function SubjectGridCard({ subject, isLoading }: SubjectGridCardProps) {
                   subject.curbAppeal?.condition === 'distressed' && 'text-red-400',
                 )} title={subject.curbAppeal?.summary ?? subject.condition ?? undefined}>
                   {subject.curbAppeal && subject.curbAppeal.condition !== 'unknown'
-                    ? subject.curbAppeal.condition === 'renovated' ? 'Renovated ✓' : subject.curbAppeal.condition === 'dated' ? 'Dated' : 'Distressed'
+                    ? subject.curbAppeal.condition === 'renovated' ? 'Renovated' : subject.curbAppeal.condition === 'dated' ? 'Dated' : 'Distressed'
                     : subject.condition || 'NA'}
                 </span>
               </div>

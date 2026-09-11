@@ -120,6 +120,8 @@ export function deriveBuybox(
     visionLevelIndex?: number | null
     /** Confidence of the vision assessment (0-100) */
     visionConfidence?: number | null
+    /** Vision curb-appeal verified the subject as renovated — base $/sqft rehab is skipped (major items still charge) */
+    visionRenovated?: boolean
   }
 ): DerivedBuybox {
   const notes: string[] = []
@@ -146,6 +148,15 @@ export function deriveBuybox(
     rehabReason = derived.reason
     rehabDerived = true
     rehabLevelSource = classification ? 'classification' : 'default'
+  }
+
+  // Vision-verified renovated subjects skip base $/sqft rehab — major items
+  // (permit thresholds) still charge. Manual caller overrides win.
+  const renovatedVerified =
+    opts?.visionRenovated === true && caller.rehabLevelIndex === undefined
+  if (renovatedVerified) {
+    rehabReason += ' — vision verified renovated: no base per-sqft rehab charged'
+    notes.push('Subject verified renovated — base rehab skipped; major items still apply')
   }
 
   // Major items — permit-age engine is authoritative. Caller items are
@@ -183,6 +194,7 @@ export function deriveBuybox(
     rehabLevelName: REHAB_LEVELS[rehabLevelIndex] ?? 'Full Cosmetic',
     rehabReason,
     rehabLevelSource,
+    renovatedVerified,
     majorItems,
     majorItemAssessments: assessments,
     additionPlay: caller.additionPlay ?? 0,

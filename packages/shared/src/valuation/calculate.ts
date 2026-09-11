@@ -29,6 +29,7 @@ export function calculateValuation(
     subjectSqft,
     compAvgSqft = subjectSqft,
     rehabLevelIndex = 2,
+    skipBaseRehab = false,
     majorItems = [],
     additionPlay = 0,
     closingCostsPercent = 8,
@@ -38,11 +39,13 @@ export function calculateValuation(
 
   const arvTier = getArvTier(arv, tierRanges)
   const rehabEstimate = getRehabEstimate(rehabTable, arv, rehabLevelIndex, tierRanges)
-  const rehabLevel = REHAB_LEVELS[rehabLevelIndex]
+  // Vision-verified renovated subjects carry no base rehab — major items
+  // (permit thresholds) still charge below.
+  const rehabLevel = skipBaseRehab ? 'Renovated' : REHAB_LEVELS[rehabLevelIndex]
 
   // Calculate costs
   const pricePerSqft = subjectSqft > 0 ? Math.round(arv / subjectSqft) : (compAvgSqft > 0 ? Math.round(arv / compAvgSqft) : 0)
-  const baseRehabCost = (subjectSqft || compAvgSqft) * rehabEstimate.perSqft
+  const baseRehabCost = skipBaseRehab ? 0 : (subjectSqft || compAvgSqft) * rehabEstimate.perSqft
   const majorItemsCost = majorItems
     .filter((item) => item.enabled)
     .reduce((sum, item) => sum + item.cost, 0)
@@ -90,7 +93,7 @@ export function calculateValuation(
     arvTier,
     pricePerSqft,
     rehabLevel,
-    rehabPerSqft: rehabEstimate.perSqft,
+    rehabPerSqft: skipBaseRehab ? 0 : rehabEstimate.perSqft,
     baseRehabCost: Math.round(baseRehabCost),
     majorItemsCost,
     additionPlay,

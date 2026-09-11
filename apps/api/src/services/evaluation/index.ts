@@ -505,6 +505,7 @@ export async function performAnalysis(
     majorItemConfig,
     visionLevelIndex: renovation?.renovationLevelIndex ?? null,
     visionConfidence: renovation?.confidence ?? null,
+    visionRenovated: subjectCurbAppeal?.condition === 'renovated',
   })
   step(
     'major_items',
@@ -526,6 +527,7 @@ export async function performAnalysis(
     subjectSqft,
     compAvgSqft,
     rehabLevelIndex: derivedBuybox.rehabLevelIndex,
+    skipBaseRehab: derivedBuybox.renovatedVerified === true,
     majorItems: derivedBuybox.majorItems,
     additionPlay: derivedBuybox.additionPlay ?? buybox.additionPlay ?? 0,
     closingCostsPercent: buybox.closingCostsPercent ?? 8,

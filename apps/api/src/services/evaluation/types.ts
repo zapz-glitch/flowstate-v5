@@ -31,6 +31,8 @@ export interface DerivedBuybox {
   rehabReason: string
   /** Where the final rehab level came from */
   rehabLevelSource: 'manual_override' | 'vision' | 'classification' | 'default'
+  /** Vision verified the subject renovated — base $/sqft rehab skipped */
+  renovatedVerified?: boolean
   majorItems: DerivedMajorItem[]
   /**
    * Full per-item audit trail from the permit-age engine — includes
@@ -130,7 +132,7 @@ export interface EvaluationReport {
 
   /** Rehab justification — full renovation cost ledger */
   rehab: {
-    level: RehabLevel
+    level: RehabLevel | 'Renovated'
     levelIndex: number
     perSqft: number
     baseCost: number

@@ -83,6 +83,8 @@ export interface ValuationParams {
   compAvgSqft?: number
   /** Rehab level index */
   rehabLevelIndex?: number
+  /** Subject verified renovated by vision — no base $/sqft rehab (major items still apply) */
+  skipBaseRehab?: boolean
   /** Major items with costs */
   majorItems?: MajorItem[]
   /** Addition play (extra budget for improvements) */
@@ -104,7 +106,7 @@ export interface ValuationResult {
   pricePerSqft: number
 
   // Rehab Costs
-  rehabLevel: RehabLevel
+  rehabLevel: RehabLevel | 'Renovated'
   rehabPerSqft: number
   baseRehabCost: number
   majorItemsCost: number
