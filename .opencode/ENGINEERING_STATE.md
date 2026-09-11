@@ -860,3 +860,28 @@ Main unchanged, no push/deployment. Maps/Firecrawl credentials deferred by user.
 - Verified in egress-blocked sandbox with fresh log: homepage HTTP 200
   (~27KB), zero fonts.googleapis.com fetches, dashboard typecheck clean.
   Removed the stale .next/dev/lock afterward.
+
+## Eval-engine milestone 2026-09-10 (agent session)
+
+Commits on feat/devin-theme: b11966a (engine port), 4639eab (photo fallback +
+Redfin-first + secret sync + recommendation fields), NA-condition change,
+nearest-comps fallback, foundation map + subject.permits + curb appeal.
+
+- Appraisal: any passing comp now drives ARV (1-comp floor); INSUFFICIENT_COMPS
+  only when zero comps inside the sale-age window — otherwise relaxes to the
+  most recent sales (fallback 'nearest_comps', confidence low, audit preserved).
+- Known data issue: pre-merge appraisal preset stores sqft_diff=20 under old
+  percent semantics — engine reads it as absolute sqft. Fix = update preset in
+  Evaluation Settings (sqft_diff 250, distance 1.0) or add a semantics shim.
+- subject.permits {status,items[]} populated; dashboard PropertyPermits is now
+  a compact collapsible strip. Foundation code map covers the full CoreLogic
+  codeset (CNF → Continuous Footing). Comp curb-appeal vision runs on
+  ARV-selected comps only (renovated/dated/distressed/unknown).
+- Photo chain: Redfin discovery is upstream-blocked at every layer (CloudFront
+  403, slug 404s, search-scrape empty). Zillow regex fallback rescues the run
+  when Firecrawl JSON + LLM extraction both fail — verified live (6 photos).
+- Local: API :8787 (wrangler, detached), dashboard :3004 (next --webpack,
+  detached). Login admin@flowstate.homes/admin123 in api.flowstate local DB;
+  v5 DB has its own accounts. Dashboard↔API secrets synced.
+- Verified live on 1141 Engman St: ARV $344,403 via nearest_comps, 12 permits,
+  curb appeal renovated@90/85% on selected comps, foundation labeled.

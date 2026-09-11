@@ -61,8 +61,8 @@ export function SubjectGridCard({ subject, isLoading }: SubjectGridCardProps) {
               )}
             </div>
 
-            {/* Property stats — 2-column grid */}
-            <div className="grid grid-cols-2 gap-x-4 gap-y-1 mt-2.5">
+            {/* Property stats — 3-column grid keeps the subject card ratio closer to comp cards */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1 mt-2.5">
               <div className="flex items-center justify-between text-[11px]">
                 <span className="text-foreground-tertiary">Bed/Bath</span>
                 <span className="font-medium">{subject.bedrooms ?? '-'}/{subject.bathrooms ?? '-'}</span>
