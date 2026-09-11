@@ -137,11 +137,21 @@ function MapHud({ subject }: { subject: { lat: number; lng: number } | null }) {
   const modeRef = useRef(mode)
   modeRef.current = mode
 
-  // Start in 3D: tilt as soon as the map is ready (zoom-independent at load)
+  // Start in 3D: once the map is at tilt-capable zoom, ease into 45°.
+  // Raster 45° imagery requires zoom >= TILT_ZOOM — setTilt is a no-op below it.
   useEffect(() => {
-    if (map && mode === '3d') {
+    const gm = (window as any).google?.maps
+    if (!map || !gm) return
+    const applyTilt = () => {
+      if (modeRef.current !== '3d') return
+      const z = map.getZoom() ?? 0
+      if (z < TILT_ZOOM) map.setZoom(TILT_ZOOM)
       animate(map, (v: number) => map.setTilt(v), map.getTilt() ?? 0, 45, 800)
     }
+    // 'idle' fires after the first tiles render — once-only so later
+    // pans/zooms don't re-trigger the tilt animation
+    const idle = gm.event.addListenerOnce(map, 'idle', applyTilt)
+    return () => gm.event.removeListener(idle)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [map])
 
@@ -154,6 +164,7 @@ function MapHud({ subject }: { subject: { lat: number; lng: number } | null }) {
       if (modeRef.current !== '3d') return
       const z = map.getZoom() ?? 0
       map.setTilt(z >= TILT_ZOOM ? 45 : 0)
+      if (z < TILT_ZOOM) map.setHeading(0)
       const sv = map.getStreetView()
       if (z >= STREETVIEW_ZOOM && subject) {
         sv.setPosition(subject)
@@ -166,7 +177,12 @@ function MapHud({ subject }: { subject: { lat: number; lng: number } | null }) {
     const zoomListener = map.addListener('zoom_changed', onZoom)
 
     // Double-click = rotate counterclockwise 90° (4 clicks = full turn)
+    // Requires 45° imagery — only applies at tilt-capable zoom in 3D mode.
     const dblListener = map.addListener('dblclick', () => {
+      if (modeRef.current !== '3d') return
+      const z = map.getZoom() ?? 0
+      if (z < TILT_ZOOM) map.setZoom(TILT_ZOOM)
+      map.setTilt(45)
       const from = map.getHeading() ?? 0
       animate(map, (v: number) => map.setHeading(v), from, from - 90, ANIM_MS)
     })
@@ -184,6 +200,11 @@ function MapHud({ subject }: { subject: { lat: number; lng: number } | null }) {
   }
 
   const rotateCCW = () => {
+    if (modeRef.current === '3d') {
+      const z = map.getZoom() ?? 0
+      if (z < TILT_ZOOM) map.setZoom(TILT_ZOOM)
+      map.setTilt(45)
+    }
     const from = map.getHeading() ?? 0
     animate(map, (v: number) => map.setHeading(v), from, from - 90, ANIM_MS)
   }
@@ -310,7 +331,7 @@ export default function PropertyMapInner({ markers, onMarkerClick, activeMarkerK
       <div className="relative h-full w-full min-h-[350px]">
         <Map
           defaultCenter={center}
-          defaultZoom={17}
+          defaultZoom={18}
           mapTypeId="hybrid"
           gestureHandling="greedy"
           disableDefaultUI
