@@ -333,6 +333,8 @@ export async function assessRenovationFromPhotos(
 export interface CurbAppealCheck {
   /** renovated | dated | distressed | unknown — ARV candidacy signal */
   condition: 'renovated' | 'dated' | 'distressed' | 'unknown'
+  /** vision = verified from photos; price = inferred from top-of-market sale */
+  source: 'vision' | 'price'
   confidence: number | null
   summary: string | null
   photosExamined: number
@@ -367,7 +369,7 @@ export async function assessCompCurbAppeal(
   photoUrls: string[]
 ): Promise<CurbAppealCheck> {
   const photos = [...new Set(photoUrls.filter(Boolean))].slice(0, CURB_APPEAL_PHOTOS)
-  const base: CurbAppealCheck = { condition: 'unknown', confidence: null, summary: null, photosExamined: photos.length }
+  const base: CurbAppealCheck = { condition: 'unknown', source: 'vision', confidence: null, summary: null, photosExamined: photos.length }
 
   if (photos.length < CURB_APPEAL_MIN_PHOTOS) return { ...base, summary: 'Insufficient photos' }
   if (!env.OPENROUTER_API_KEY) return { ...base, summary: 'Vision provider not configured' }
@@ -395,6 +397,7 @@ export async function assessCompCurbAppeal(
     typeof parsed.confidence === 'number' ? Math.min(100, Math.max(0, parsed.confidence)) : null
   return {
     condition,
+    source: 'vision',
     confidence,
     summary: typeof parsed.summary === 'string' ? parsed.summary : null,
     photosExamined: photos.length,

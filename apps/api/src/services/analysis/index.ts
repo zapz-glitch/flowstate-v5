@@ -333,6 +333,7 @@ export interface ResponseContext {
   /** Visual ARV-candidacy check per ARV-selected comp (by comp ID) */
   compCurbAppeal?: Record<string, {
     condition: 'renovated' | 'dated' | 'distressed' | 'unknown'
+    source: 'vision' | 'price'
     confidence: number | null
     summary: string | null
     photosExamined: number
@@ -439,6 +440,8 @@ export interface AnalysisResponse {
     hoaFee: number | null
     /** Zillow search URL for this property */
     zillowUrl: string | null
+    /** Vision-assessed condition/renovation level (or 'NA' when unverifiable) */
+    condition: string | null
     /** Building permit records for the subject */
     permits: {
       status: 'available' | 'empty' | 'unavailable'
@@ -565,6 +568,8 @@ export interface AnalysisResponse {
       /** Visual ARV-candidacy check (photos) for ARV-selected comps */
       curbAppeal?: {
         condition: 'renovated' | 'dated' | 'distressed' | 'unknown'
+        /** vision = verified from photos; price = inferred from top-of-market sale */
+        source: 'vision' | 'price'
         confidence: number | null
         summary: string | null
         photosExamined: number
@@ -1034,6 +1039,7 @@ export function buildAnalysisResponse(
             })),
           }
         : { status: 'unavailable', items: [] },
+      condition: ctx.visionAnalysis?.overallCondition ?? null,
       classification: subjectClassificationSummary,
     },
 

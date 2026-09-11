@@ -9,7 +9,6 @@ import type { CompsData, CompItem, SubjectData } from './shared-types'
 import { getCompKey } from './format-helpers'
 import { CompCard } from './CompCard'
 import { CompGridCard } from './CompGridCard'
-import { SubjectGridCard } from './SubjectGridCard'
 import { RuleMatchDetails } from './RuleMatchDetails'
 
 export interface ComparablesSectionProps {
@@ -70,6 +69,7 @@ export function ComparablesSection({
   const [excludedOpen, setExcludedOpen] = useState(false)
   const [layout, setLayout] = useState<'grid' | 'list'>('grid')
   const [sortBy, setSortBy] = useState<SortOption>('default')
+  const [sortDesc, setSortDesc] = useState(true)
 
   // Auto-expand excluded section when a highlighted comp is in it
   useEffect(() => {
@@ -88,20 +88,21 @@ export function ComparablesSection({
   const sortedItems = useMemo(() => {
     const indexed = compItems.map((comp, i) => ({ comp, originalIndex: i }))
     if (sortBy === 'default') return indexed
+    const dir = sortDesc ? -1 : 1
     const sorted = [...indexed]
     switch (sortBy) {
       case 'distance':
-        sorted.sort((a, b) => (a.comp.distanceMiles ?? 999) - (b.comp.distanceMiles ?? 999))
+        sorted.sort((a, b) => dir * ((a.comp.distanceMiles ?? 999) - (b.comp.distanceMiles ?? 999)))
         break
       case 'price':
-        sorted.sort((a, b) => (a.comp.salePrice ?? 0) - (b.comp.salePrice ?? 0))
+        sorted.sort((a, b) => dir * ((a.comp.salePrice ?? 0) - (b.comp.salePrice ?? 0)))
         break
       case 'psf':
-        sorted.sort((a, b) => (a.comp.pricePerSqft ?? 0) - (b.comp.pricePerSqft ?? 0))
+        sorted.sort((a, b) => dir * ((a.comp.pricePerSqft ?? 0) - (b.comp.pricePerSqft ?? 0)))
         break
     }
     return sorted
-  }, [compItems, sortBy])
+  }, [compItems, sortBy, sortDesc])
 
   const hasInteractiveSelection = !!selectedCompKeys
 
@@ -207,15 +208,21 @@ export function ComparablesSection({
             <button
               key={opt}
               type="button"
-              onClick={() => setSortBy(opt)}
+              onClick={() => {
+                if (sortBy === opt && opt !== 'default') setSortDesc((d) => !d)
+                else { setSortBy(opt); setSortDesc(true) }
+              }}
               className={cn(
-                'text-[10px] px-2 py-0.5 rounded transition-colors',
+                'text-[10px] px-2 py-0.5 rounded transition-colors inline-flex items-center gap-0.5',
                 sortBy === opt
                   ? 'bg-primary/15 text-primary font-medium'
                   : 'text-foreground-tertiary hover:text-foreground hover:bg-secondary'
               )}
             >
               {SORT_LABELS[opt]}
+              {sortBy === opt && opt !== 'default' && (
+                <span className="text-[8px]">{sortDesc ? '↓' : '↑'}</span>
+              )}
             </button>
           ))}
         </div>
@@ -306,11 +313,6 @@ export function ComparablesSection({
       <div className="print:hidden">
         {layout === 'grid' ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {subject && (
-              <div className="sm:col-span-2">
-                <SubjectGridCard subject={subject} />
-              </div>
-            )}
             {sortedItems.map(({ comp, originalIndex }) => {
               const key = getCompKey(comp, originalIndex)
               const isSelected = hasInteractiveSelection

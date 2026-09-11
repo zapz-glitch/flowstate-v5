@@ -92,6 +92,10 @@ export function SubjectGridCard({ subject, isLoading }: SubjectGridCardProps) {
                 </div>
               )}
               <div className="flex items-center justify-between text-[11px]">
+                <span className="text-foreground-tertiary">Condition</span>
+                <span className="font-medium truncate ml-2">{subject.condition || 'NA'}</span>
+              </div>
+              <div className="flex items-center justify-between text-[11px]">
                 <span className="text-foreground-tertiary">Pool</span>
                 <span className="font-medium">{subject.pool ? 'Yes' : '-'}</span>
               </div>

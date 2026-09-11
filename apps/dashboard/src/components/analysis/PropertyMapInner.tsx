@@ -3,6 +3,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useCallback, useEffect, useRef } from 'react'
 import { APIProvider, Map, useMap } from '@vis.gl/react-google-maps'
+import { Crosshair, PersonStanding } from 'lucide-react'
 import type { MapMarker } from './PropertyMap'
 
 // ─── Config ─────────────────────────────────────────────────────────────────
@@ -110,6 +111,85 @@ function MapMarkers({
   return null
 }
 
+// ─── 3D tilt + street-view approach effects ─────────────────────────────────
+
+const TILT_ZOOM = 18      // zoom ≥ 18 → 45° aerial approach
+const STREETVIEW_ZOOM = 20 // zoom ≥ 20 → street-level panorama at subject
+
+function MapEffects({ subject }: { subject: { lat: number; lng: number } | null }) {
+  const map = useMap()
+
+  useEffect(() => {
+    const gm = (window as any).google?.maps
+    if (!map || !gm) return
+
+    const onZoom = () => {
+      const z = map.getZoom() ?? 0
+      map.setTilt(z >= TILT_ZOOM ? 45 : 0)
+      const sv = map.getStreetView()
+      if (z >= STREETVIEW_ZOOM && subject) {
+        sv.setPosition(subject)
+        sv.setPov({ heading: 0, pitch: 0 })
+        sv.setVisible(true)
+      } else if (sv.getVisible()) {
+        sv.setVisible(false)
+      }
+    }
+    const listener = map.addListener('zoom_changed', onZoom)
+    return () => gm.event.removeListener(listener)
+  }, [map, subject])
+
+  return null
+}
+
+/** Overlay buttons: recenter on the subject / jump into its street view. */
+function MapButtons({ subject }: { subject: { lat: number; lng: number } | null }) {
+  const map = useMap()
+  if (!map || !subject) return null
+
+  const goSubject = () => {
+    map.getStreetView().setVisible(false)
+    map.panTo(subject)
+    map.setZoom(18)
+    map.setTilt(45)
+  }
+
+  const goStreetView = () => {
+    const gm = (window as any).google?.maps
+    if (!gm) return
+    // Resolve nearest pano first — rural addresses may lack coverage
+    new gm.StreetViewService().getPanorama(
+      { location: subject, radius: 100, source: 'outdoor' },
+      (data: any, status: string) => {
+        if (status === 'OK' && data?.location?.latLng) {
+          const sv = map.getStreetView()
+          sv.setPosition(data.location.latLng)
+          sv.setPov({ heading: 0, pitch: 0 })
+          sv.setVisible(true)
+        } else {
+          // No coverage — fall back to max-tilt aerial at the subject
+          goSubject()
+          map.setZoom(19)
+        }
+      }
+    )
+  }
+
+  const btn =
+    'flex items-center gap-1.5 px-2.5 py-1.5 rounded-sm bg-background/95 border border-border text-[10px] font-medium text-foreground shadow-sm hover:bg-secondary transition-colors'
+
+  return (
+    <div className="absolute top-2 right-2 z-10 flex flex-col gap-1.5">
+      <button type="button" className={btn} onClick={goSubject} title="Center on subject property">
+        <Crosshair className="w-3.5 h-3.5" /> Subject
+      </button>
+      <button type="button" className={btn} onClick={goStreetView} title="Street View at subject">
+        <PersonStanding className="w-3.5 h-3.5" /> Street View
+      </button>
+    </div>
+  )
+}
+
 // ─── Main ───────────────────────────────────────────────────────────────────
 
 interface PropertyMapInnerProps {
@@ -127,6 +207,8 @@ export default function PropertyMapInner({ markers, onMarkerClick, activeMarkerK
   }, [onMarkerClick])
 
   const center = markers.length > 0 ? { lat: markers[0].lat, lng: markers[0].lng } : { lat: 28, lng: -82 }
+  const subjectMarker = markers.find((m) => m.type === 'subject')
+  const subject = subjectMarker ? { lat: subjectMarker.lat, lng: subjectMarker.lng } : null
 
   if (!apiKey) {
     return (
@@ -137,13 +219,13 @@ export default function PropertyMapInner({ markers, onMarkerClick, activeMarkerK
   }
 
   return (
-    <APIProvider apiKey={apiKey}>
-      <div className="h-full w-full min-h-[350px]">
+    <APIProvider apiKey={apiKey} libraries={['streetView']}>
+      <div className="relative h-full w-full min-h-[350px]">
         <Map
           defaultCenter={center}
-          defaultZoom={13}
+          defaultZoom={17}
           mapTypeId="hybrid"
-          gestureHandling="cooperative"
+          gestureHandling="greedy"
           disableDefaultUI
           zoomControl
           zoomControlOptions={{ position: 5 }}
@@ -155,6 +237,8 @@ export default function PropertyMapInner({ markers, onMarkerClick, activeMarkerK
           style={{ width: '100%', height: '100%' }}
         >
           <MapMarkers markers={markers} activeMarkerKey={activeMarkerKey} onMarkerClick={handleClick} />
+          <MapEffects subject={subject} />
+          <MapButtons subject={subject} />
         </Map>
       </div>
     </APIProvider>

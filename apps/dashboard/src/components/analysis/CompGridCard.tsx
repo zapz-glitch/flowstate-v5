@@ -236,6 +236,7 @@ export function CompGridCard({
                 comp.curbAppeal.condition === 'distressed' && 'text-red-400',
               )} title={comp.curbAppeal.summary ?? undefined}>
                 {comp.curbAppeal.condition === 'renovated' ? 'Renovated ✓' : comp.curbAppeal.condition === 'dated' ? 'Dated' : 'Distressed'}
+                {comp.curbAppeal.source === 'price' && <span className="text-[8px] text-foreground-tertiary font-normal"> (by price)</span>}
               </span>
             </div>
           )}

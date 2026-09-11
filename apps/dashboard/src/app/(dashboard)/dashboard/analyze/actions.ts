@@ -163,6 +163,8 @@ export interface SubjectData {
   } | null
   taxAssessment?: number | null
   photos?: string[]
+  /** Vision-assessed condition/renovation level ('NA' when unverifiable) */
+  condition?: string | null
   /** Foundation type (e.g., Slab, Crawl Space, Basement) */
   foundationType?: string | null
   /** Building style (e.g., Colonial, Cape Cod, Ranch) */
@@ -315,6 +317,8 @@ export interface CompItem {
     condition: 'renovated' | 'dated' | 'distressed' | 'unknown'
     confidence: number | null
     summary: string | null
+    /** vision = verified from photos; price = inferred from top-of-market sale */
+    source?: 'vision' | 'price'
     photosExamined: number
   } | null
   /** Price percentile among all comps (1 = highest, 100 = lowest) */

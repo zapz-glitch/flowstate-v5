@@ -457,6 +457,25 @@ export async function performAnalysis(
     }
   }
 
+  // Price fallback: a selected comp that meets the appraisal rules and sold
+  // at the top of the market is deemed an ARV/renovated comp even when its
+  // photos can't verify condition — top-of-market pricing IS the evidence.
+  for (const id of appraisalResult.selectedCompIds ?? []) {
+    const check = compCurbAppeal?.[id]
+    const comp = appraisalResult.comparables.find((c) => c.id === id)
+    if (!comp?.isEnabled) continue
+    if (!check || check.condition === 'unknown') {
+      compCurbAppeal ??= {}
+      compCurbAppeal[id] = {
+        condition: 'renovated',
+        source: 'price',
+        confidence: null,
+        summary: 'Condition unverifiable from photos; priced at top of market and meets appraisal rules — treated as an ARV/renovated comp',
+        photosExamined: check?.photosExamined ?? 0,
+      }
+    }
+  }
+
   // ── 4. Classifications (price percentile, display grouping) ─────────────────
   const arvThreshold = params.arvThreshold ?? { percent: 15 }
   const compClassifications = classifyCompsByPrice(bundle.comparables, arvThreshold.percent)
