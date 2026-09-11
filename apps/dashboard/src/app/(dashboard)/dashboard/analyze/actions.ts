@@ -310,6 +310,13 @@ export interface CompItem {
   isEnabled?: boolean
   /** Which comp group: 'arv' (Group A, drives valuation), 'as_is' (Group B, market intel), or null */
   compGroup?: 'arv' | 'as_is' | null
+  /** Visual ARV-candidacy check on listing photos (ARV-selected comps only) */
+  curbAppeal?: {
+    condition: 'renovated' | 'dated' | 'distressed' | 'unknown'
+    confidence: number | null
+    summary: string | null
+    photosExamined: number
+  } | null
   /** Price percentile among all comps (1 = highest, 100 = lowest) */
   pricePercentile?: number | null
   /** Reasons why this comp was disabled (if any) */

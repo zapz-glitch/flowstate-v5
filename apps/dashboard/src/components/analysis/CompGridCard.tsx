@@ -223,6 +223,23 @@ export function CompGridCard({
             <span className="font-medium truncate ml-2">{comp.buildingStyle || '-'}</span>
           </div>
           <div className="flex items-center justify-between text-[11px]">
+            <span className="text-foreground-tertiary">Foundation</span>
+            <span className="font-medium truncate ml-2">{comp.foundationType || '-'}</span>
+          </div>
+          {comp.curbAppeal && comp.curbAppeal.condition !== 'unknown' && (
+            <div className="flex items-center justify-between text-[11px]">
+              <span className="text-foreground-tertiary">Condition</span>
+              <span className={cn(
+                'font-medium truncate ml-2',
+                comp.curbAppeal.condition === 'renovated' && 'text-emerald-500',
+                comp.curbAppeal.condition === 'dated' && 'text-amber-500',
+                comp.curbAppeal.condition === 'distressed' && 'text-red-400',
+              )} title={comp.curbAppeal.summary ?? undefined}>
+                {comp.curbAppeal.condition === 'renovated' ? 'Renovated ✓' : comp.curbAppeal.condition === 'dated' ? 'Dated' : 'Distressed'}
+              </span>
+            </div>
+          )}
+          <div className="flex items-center justify-between text-[11px]">
             <span className="text-foreground-tertiary">Pool</span>
             <span className="font-medium">{comp.pool ? 'Yes' : '-'}</span>
           </div>

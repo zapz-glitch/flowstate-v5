@@ -327,3 +327,76 @@ export async function assessRenovationFromPhotos(
     model: provider.model,
   }
 }
+
+// ─── Comp curb-appeal check ──────────────────────────────────────────────────
+
+export interface CurbAppealCheck {
+  /** renovated | dated | distressed | unknown — ARV candidacy signal */
+  condition: 'renovated' | 'dated' | 'distressed' | 'unknown'
+  confidence: number | null
+  summary: string | null
+  photosExamined: number
+}
+
+const CURB_APPEAL_PROMPT = `You are reviewing listing photos of a recently SOLD comparable property. Determine whether the sale price plausibly represents an AFTER-REPAIR (renovated/turnkey) value — i.e., whether this comp is a valid ARV candidate visually.
+
+Return ONLY JSON:
+{
+  "condition": "renovated" | "dated" | "distressed" | "unknown",
+  "confidence": 0-100,
+  "summary": "one sentence describing visible condition"
+}
+
+- renovated: modern finishes, updated kitchen/baths, new flooring, move-in ready
+- dated: livable but visibly dated finishes/original surfaces
+- distressed: obvious disrepair, damage, heavy wear
+- unknown: photos insufficient (exteriors only, low detail)
+
+Never guess a condition the photos don't show — use "unknown".`
+
+const CURB_APPEAL_PHOTOS = 4
+const CURB_APPEAL_MIN_PHOTOS = 2
+
+/**
+ * Lightweight per-comp visual check: is this comp's sale price plausibly
+ * an ARV (post-renovation) candidate? Returns 'unknown' when photo evidence
+ * can't support a judgment — never invents a condition.
+ */
+export async function assessCompCurbAppeal(
+  env: RenovationEnv,
+  photoUrls: string[]
+): Promise<CurbAppealCheck> {
+  const photos = [...new Set(photoUrls.filter(Boolean))].slice(0, CURB_APPEAL_PHOTOS)
+  const base: CurbAppealCheck = { condition: 'unknown', confidence: null, summary: null, photosExamined: photos.length }
+
+  if (photos.length < CURB_APPEAL_MIN_PHOTOS) return { ...base, summary: 'Insufficient photos' }
+  if (!env.OPENROUTER_API_KEY) return { ...base, summary: 'Vision provider not configured' }
+
+  const provider = createLLMProvider({
+    provider: 'openrouter',
+    apiKey: env.OPENROUTER_API_KEY as string,
+    model: env.OPENROUTER_MODEL || 'google/gemini-2.5-flash',
+  })
+
+  const result = await provider.execute({
+    prompt: CURB_APPEAL_PROMPT,
+    images: photos.map((url) => ({ url })),
+    responseFormat: 'json',
+  })
+  if (!result.success || !result.data?.content) return { ...base, summary: 'Vision call failed' }
+
+  const parsed = parseVisionJson(result.data.content)
+  if (!parsed) return { ...base, summary: 'Unparseable vision response' }
+
+  const raw = String(parsed.condition ?? '').toLowerCase()
+  const condition =
+    raw === 'renovated' || raw === 'dated' || raw === 'distressed' ? (raw as CurbAppealCheck['condition']) : 'unknown'
+  const confidence =
+    typeof parsed.confidence === 'number' ? Math.min(100, Math.max(0, parsed.confidence)) : null
+  return {
+    condition,
+    confidence,
+    summary: typeof parsed.summary === 'string' ? parsed.summary : null,
+    photosExamined: photos.length,
+  }
+}

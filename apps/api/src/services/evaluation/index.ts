@@ -35,7 +35,7 @@ import {
   type ResponseContext,
 } from '../analysis'
 import { createPhotoService, type PhotoBundle, type PropertyIdentifier } from '../photo-provider'
-import { assessRenovationFromPhotos, type RenovationAssessment } from '../vision/renovation'
+import { assessRenovationFromPhotos, assessCompCurbAppeal, type RenovationAssessment, type CurbAppealCheck } from '../vision/renovation'
 import { deriveBuybox } from './derivation'
 import { buildEvaluationReport } from './report'
 import type { ReportStep } from './types'
@@ -434,6 +434,29 @@ export async function performAnalysis(
   }
   onProgress?.('Renovation level assessed')
 
+  // ── 3b. Curb appeal: visual ARV-candidacy check on selected comps ──────────
+  // Only ARV-selected comps get a vision call — cheap, bounded, and validates
+  // that the sales anchoring the ARV look like post-renovation comps.
+  let compCurbAppeal: Record<string, CurbAppealCheck> | undefined
+  {
+    const selectedIds = appraisalResult.selectedCompIds ?? []
+    const photoPairs = selectedIds
+      .map((id) => ({ id, photos: photoBundle?.comps[id]?.photos ?? [] }))
+      .filter((p) => p.photos.length > 0)
+    if (photoPairs.length > 0) {
+      const checks = await Promise.all(
+        photoPairs.map(async (p) => {
+          try {
+            return { id: p.id, check: await assessCompCurbAppeal(env, p.photos) }
+          } catch {
+            return { id: p.id, check: { condition: 'unknown', confidence: null, summary: 'Vision call failed', photosExamined: p.photos.length } as CurbAppealCheck }
+          }
+        })
+      )
+      compCurbAppeal = Object.fromEntries(checks.map((c) => [c.id, c.check]))
+    }
+  }
+
   // ── 4. Classifications (price percentile, display grouping) ─────────────────
   const arvThreshold = params.arvThreshold ?? { percent: 15 }
   const compClassifications = classifyCompsByPrice(bundle.comparables, arvThreshold.percent)
@@ -547,6 +570,7 @@ export async function performAnalysis(
       rehabLevelEstimates,
       appliedSettings,
       visionAnalysis: mapRenovationToVision(renovation),
+      compCurbAppeal,
       apiCallStats: params.apiCallStats,
       bestMatch,
       groupBResult,

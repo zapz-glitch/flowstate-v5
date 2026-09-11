@@ -330,6 +330,13 @@ export interface ResponseContext {
     interior?: { condition: string; notes: string[] }
     features?: Record<string, string | undefined>
   }
+  /** Visual ARV-candidacy check per ARV-selected comp (by comp ID) */
+  compCurbAppeal?: Record<string, {
+    condition: 'renovated' | 'dated' | 'distressed' | 'unknown'
+    confidence: number | null
+    summary: string | null
+    photosExamined: number
+  }>
   /** External API call statistics */
   apiCallStats?: ApiCallStats
   /** LLM-selected best matching comp */
@@ -432,6 +439,19 @@ export interface AnalysisResponse {
     hoaFee: number | null
     /** Zillow search URL for this property */
     zillowUrl: string | null
+    /** Building permit records for the subject */
+    permits: {
+      status: 'available' | 'empty' | 'unavailable'
+      items: Array<{
+        permitId: string
+        permitNumber: string | null
+        projectType: string | null
+        description: string | null
+        status: string | null
+        effectiveDate: string | null
+        jobValue: number | null
+      }>
+    } | null
     /** Property classification (as_is or after_renovation) */
     classification: ClassificationSummary | null
   }
@@ -542,6 +562,13 @@ export interface AnalysisResponse {
       buildingStyle: string | null
       /** Story type description (e.g., Split Foyer, Tri Level, 2 Story) */
       storiesType: string | null
+      /** Visual ARV-candidacy check (photos) for ARV-selected comps */
+      curbAppeal?: {
+        condition: 'renovated' | 'dated' | 'distressed' | 'unknown'
+        confidence: number | null
+        summary: string | null
+        photosExamined: number
+      } | null
       /** Pool type */
       pool: string | null
       /** Garage type */
@@ -920,6 +947,7 @@ export function buildAnalysisResponse(
       compGroup: ctx.groupACompIds?.has(comp.id) ? 'arv' as const
         : ctx.groupBCompIds?.has(comp.id) ? 'as_is' as const
         : null,
+      curbAppeal: ctx.compCurbAppeal?.[comp.id] ?? null,
       disableReasons: evaluation?.disableReasons ?? [],
       classification: classificationSummary,
       isBestMatch: ctx.bestMatch?.compId === comp.id,
@@ -992,6 +1020,20 @@ export function buildAnalysisResponse(
         state: property.state,
         zipCode: property.zipCode,
       }),
+      permits: enrichment.permits
+        ? {
+            status: enrichment.permits.items.length > 0 ? 'available' : 'empty',
+            items: enrichment.permits.items.map((p) => ({
+              permitId: p.permitId,
+              permitNumber: p.permitNumber ?? null,
+              projectType: p.projectType ?? null,
+              description: p.description ?? null,
+              status: p.status ?? null,
+              effectiveDate: p.effectiveDate ?? null,
+              jobValue: p.jobValue ?? null,
+            })),
+          }
+        : { status: 'unavailable', items: [] },
       classification: subjectClassificationSummary,
     },
 
