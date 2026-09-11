@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { signOut } from '@/lib/auth-client'
-import { AlertTriangle, Plus, X } from 'lucide-react'
+import { AlertTriangle, Plus, X, Download } from 'lucide-react'
 import { getUiPrefs, saveUiPrefs, type UiPrefs } from '@/lib/client-api'
 
 const NAV_ITEMS = [
@@ -53,6 +53,66 @@ export default function SettingsPage() {
     } finally {
       setPrefsSaving(false)
     }
+  }
+
+  // Renders the Flowstate mark + wordmark to canvas and downloads a JPEG.
+  // dark=true → black background version; dark=false → white background version.
+  const downloadLogo = (dark: boolean) => {
+    const W = 1600, H = 800
+    const canvas = document.createElement('canvas')
+    canvas.width = W
+    canvas.height = H
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+
+    const bg = dark ? '#0a0a0a' : '#ffffff'
+    const fg = dark ? '#fafafa' : '#0a0a0a'
+    ctx.fillStyle = bg
+    ctx.fillRect(0, 0, W, H)
+
+    // Logo mark — rounded square + flow glyph, centered left of wordmark
+    const icon = 260
+    const gap = 48
+    const font = '600 190px ui-sans-serif, system-ui, sans-serif'
+    ctx.font = font
+    const wordmark = 'flowstate'
+    const textWidth = ctx.measureText(wordmark).width
+    const totalWidth = icon + gap + textWidth
+    const ix = (W - totalWidth) / 2
+    const iy = (H - icon) / 2
+
+    // Rounded-square icon background
+    const r = 40
+    ctx.fillStyle = fg
+    ctx.beginPath()
+    ctx.roundRect(ix, iy, icon, icon, r)
+    ctx.fill()
+
+    // Flow glyph — the 24x24 SVG path scaled into the icon box
+    const scale = icon / 24
+    ctx.save()
+    ctx.translate(ix, iy)
+    ctx.scale(scale, scale)
+    const path = new Path2D(
+      'M4.5 17.5 V10.8 L12 4.5 L19.5 10.8 V17.5 M4.5 17.5 C7 17.5 8 15.5 10.5 15.5 C13 15.5 14 17.5 16.5 17.5 C17.8 17.5 19 17 19.5 16.3'
+    )
+    ctx.strokeStyle = bg
+    ctx.lineWidth = 1.9
+    ctx.lineCap = 'round'
+    ctx.lineJoin = 'round'
+    ctx.stroke(path)
+    ctx.restore()
+
+    // Wordmark
+    ctx.fillStyle = fg
+    ctx.font = font
+    ctx.textBaseline = 'middle'
+    ctx.fillText(wordmark, ix + icon + gap, H / 2 + 8)
+
+    const a = document.createElement('a')
+    a.href = canvas.toDataURL('image/jpeg', 0.92)
+    a.download = dark ? 'flowstate-logo-black.jpg' : 'flowstate-logo-white.jpg'
+    a.click()
   }
 
   const handleDeleteAccount = async () => {
@@ -162,6 +222,30 @@ export default function SettingsPage() {
           </button>
         </div>
       )}
+
+      {/* Brand assets */}
+      <div className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-800 p-6">
+        <h2 className="text-lg font-semibold text-neutral-900 dark:text-white mb-1">
+          Brand Assets
+        </h2>
+        <p className="text-sm text-neutral-500 dark:text-neutral-400 mb-4">
+          Download the Flowstate logo as a JPEG.
+        </p>
+        <div className="flex flex-wrap gap-3">
+          <button
+            onClick={() => downloadLogo(true)}
+            className="flex items-center gap-2 px-4 py-2 text-sm border border-neutral-200 dark:border-neutral-700 rounded-lg bg-neutral-900 text-white hover:opacity-90"
+          >
+            <Download className="w-4 h-4" /> Logo — black background
+          </button>
+          <button
+            onClick={() => downloadLogo(false)}
+            className="flex items-center gap-2 px-4 py-2 text-sm border border-neutral-300 rounded-lg bg-white text-neutral-900 hover:bg-neutral-50"
+          >
+            <Download className="w-4 h-4" /> Logo — white background
+          </button>
+        </div>
+      </div>
 
       {/* Account section */}
       <div className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-800 p-6">

@@ -73,6 +73,10 @@ valuation (renovated-skip, location penalty) -> report.
   scope); available/empty/unavailable recorded as detail, never warn/fail.
 - upsert verified live: "Report overwritten" path fires on re-analysis.
 
+## Deployment
+- Migrations 0021 (analysis_runs) + 0022 (ui_prefs) applied to remote D1.
+- API + dashboard deployed to production by product engineer 2026-09-11.
+
 ## Pending / Next
 - Observability: extend evidence with photo/vision metrics if desired.
 - foundation_match visible in Evaluation Settings UI (preset editor lists filters).
