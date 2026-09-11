@@ -106,8 +106,8 @@ export default function Sidebar() {
       .map((item) => ({ ...item, name: prefs?.navLabels?.[item.href] || item.name })),
     ...(prefs?.customLinks ?? [])
       .filter((l) => l.label && l.url)
-      .map((l) => ({ name: l.label, href: l.url, icon: ExternalLink, external: true, favicon: faviconFor(l.url) })),
-  ]
+      .map((l) => ({ name: l.label, href: l.url, icon: ExternalLink, external: true, favicon: faviconFor(l.url) as string | null })),
+  ] as Array<{ name: string; href: string; icon: typeof Home; external?: boolean; favicon?: string | null }>
 
   const handleSignOut = async () => {
     await signOut()
@@ -173,7 +173,7 @@ export default function Sidebar() {
               )
 
               if (item.external) {
-                const favicon = 'favicon' in item ? item.favicon : null
+                const favicon = item.favicon
                 return (
                   <a
                     key={item.name}
