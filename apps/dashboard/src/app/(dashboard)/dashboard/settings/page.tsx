@@ -75,11 +75,20 @@ export default function SettingsPage() {
     const ix = (W - icon) / 2
     const iy = (H - icon) / 2
 
-    // Rounded-square icon background
+    // Rounded-square icon background (manual path — roundRect isn't in all browsers)
     const r = 100
     ctx.fillStyle = fg
     ctx.beginPath()
-    ctx.roundRect(ix, iy, icon, icon, r)
+    ctx.moveTo(ix + r, iy)
+    ctx.lineTo(ix + icon - r, iy)
+    ctx.arcTo(ix + icon, iy, ix + icon, iy + r, r)
+    ctx.lineTo(ix + icon, iy + icon - r)
+    ctx.arcTo(ix + icon, iy + icon, ix + icon - r, iy + icon, r)
+    ctx.lineTo(ix + r, iy + icon)
+    ctx.arcTo(ix, iy + icon, ix, iy + icon - r, r)
+    ctx.lineTo(ix, iy + r)
+    ctx.arcTo(ix, iy, ix + r, iy, r)
+    ctx.closePath()
     ctx.fill()
 
     // Flow glyph — the 24x24 SVG path scaled into the icon box
@@ -97,10 +106,17 @@ export default function SettingsPage() {
     ctx.stroke(path)
     ctx.restore()
 
-    const a = document.createElement('a')
-    a.href = canvas.toDataURL('image/jpeg', 0.92)
-    a.download = dark ? 'flowstate-logo-black.jpg' : 'flowstate-logo-white.jpg'
-    a.click()
+    canvas.toBlob((blob) => {
+      if (!blob) return
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = dark ? 'flowstate-logo-black.jpg' : 'flowstate-logo-white.jpg'
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+    }, 'image/jpeg', 0.92)
   }
 
   const handleDeleteAccount = async () => {
