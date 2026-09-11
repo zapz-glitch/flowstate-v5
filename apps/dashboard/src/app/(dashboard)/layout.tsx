@@ -6,6 +6,7 @@ import { ImpersonationProvider } from '@/components/auth/ImpersonationProvider'
 import { SidebarProvider, useSidebar } from '@/components/SidebarProvider'
 import { useImpersonation } from '@/components/auth/ImpersonationProvider'
 import { AnalysisBridge } from '@/components/AnalysisBridge'
+import { FaviconManager } from '@/components/FaviconManager'
 import { cn } from '@/lib/utils'
 
 function DashboardContent({ children }: { children: React.ReactNode }) {
@@ -40,6 +41,7 @@ export default function DashboardLayout({
       <ImpersonationProvider>
         <SidebarProvider>
           <AnalysisBridge />
+          <FaviconManager />
           <DashboardContent>{children}</DashboardContent>
         </SidebarProvider>
       </ImpersonationProvider>

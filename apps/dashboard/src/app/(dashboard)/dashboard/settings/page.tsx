@@ -1,14 +1,59 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { signOut } from '@/lib/auth-client'
-import { AlertTriangle } from 'lucide-react'
+import { AlertTriangle, Plus, X } from 'lucide-react'
+import { getUiPrefs, saveUiPrefs, type UiPrefs } from '@/lib/client-api'
+
+const NAV_ITEMS = [
+  { href: '/dashboard', defaultName: 'Overview' },
+  { href: '/dashboard/analyze', defaultName: 'Property Search' },
+  { href: '/dashboard/batch', defaultName: 'Batch Import' },
+  { href: '/dashboard/reports', defaultName: 'Property Reports' },
+  { href: '/dashboard/evaluation-settings', defaultName: 'Evaluation Settings' },
+  { href: '/dashboard/api-hub', defaultName: 'API Hub' },
+  { href: '/dashboard/admin', defaultName: 'Admin Panel' },
+  { href: '/dashboard/admin/observability', defaultName: 'Observability' },
+]
 
 export default function SettingsPage() {
   const router = useRouter()
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [deleteConfirmText, setDeleteConfirmText] = useState('')
+
+  const [navLabels, setNavLabels] = useState<Record<string, string>>({})
+  const [customLinks, setCustomLinks] = useState<Array<{ label: string; url: string }>>([])
+  const [faviconUrl, setFaviconUrl] = useState('')
+  const [prefsLoaded, setPrefsLoaded] = useState(false)
+  const [prefsSaving, setPrefsSaving] = useState(false)
+  const [prefsSaved, setPrefsSaved] = useState(false)
+
+  useEffect(() => {
+    getUiPrefs().then((p) => {
+      setNavLabels(p.navLabels ?? {})
+      setCustomLinks(p.customLinks ?? [])
+      setFaviconUrl(p.faviconUrl ?? '')
+      setPrefsLoaded(true)
+    }).catch(() => setPrefsLoaded(true))
+  }, [])
+
+  const savePrefs = async () => {
+    setPrefsSaving(true)
+    try {
+      const prefs: UiPrefs = {
+        navLabels,
+        customLinks: customLinks.filter((l) => l.label.trim() && l.url.trim()),
+        faviconUrl: faviconUrl.trim() || null,
+      }
+      await saveUiPrefs(prefs)
+      window.dispatchEvent(new CustomEvent<UiPrefs>('ui-prefs-updated', { detail: prefs }))
+      setPrefsSaved(true)
+      setTimeout(() => setPrefsSaved(false), 2000)
+    } finally {
+      setPrefsSaving(false)
+    }
+  }
 
   const handleDeleteAccount = async () => {
     if (deleteConfirmText !== 'DELETE') return
@@ -27,6 +72,96 @@ export default function SettingsPage() {
           Manage your account settings
         </p>
       </div>
+
+      {/* Menu bar customization */}
+      {prefsLoaded && (
+        <div className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-800 p-6">
+          <h2 className="text-lg font-semibold text-neutral-900 dark:text-white mb-1">
+            Menu Bar
+          </h2>
+          <p className="text-sm text-neutral-500 dark:text-neutral-400 mb-4">
+            Rename sidebar items, add your own links, or set a custom favicon.
+          </p>
+
+          <div className="space-y-2 mb-5">
+            <p className="text-xs font-medium text-neutral-500 dark:text-neutral-400 uppercase tracking-wide">Item names</p>
+            {NAV_ITEMS.map((item) => (
+              <div key={item.href} className="flex items-center gap-3">
+                <span className="w-40 text-sm text-neutral-500 dark:text-neutral-400">{item.defaultName}</span>
+                <input
+                  type="text"
+                  value={navLabels[item.href] ?? ''}
+                  placeholder={item.defaultName}
+                  onChange={(e) => {
+                    const v = e.target.value
+                    setNavLabels((prev) => {
+                      const next = { ...prev }
+                      if (v.trim()) next[item.href] = v
+                      else delete next[item.href]
+                      return next
+                    })
+                  }}
+                  className="flex-1 px-3 py-1.5 text-sm rounded-md border border-neutral-200 dark:border-neutral-700 bg-transparent text-neutral-900 dark:text-white"
+                />
+              </div>
+            ))}
+          </div>
+
+          <div className="space-y-2 mb-5">
+            <p className="text-xs font-medium text-neutral-500 dark:text-neutral-400 uppercase tracking-wide">Custom links</p>
+            {customLinks.map((link, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={link.label}
+                  placeholder="Label"
+                  onChange={(e) => setCustomLinks((prev) => prev.map((l, j) => j === i ? { ...l, label: e.target.value } : l))}
+                  className="w-40 px-3 py-1.5 text-sm rounded-md border border-neutral-200 dark:border-neutral-700 bg-transparent text-neutral-900 dark:text-white"
+                />
+                <input
+                  type="url"
+                  value={link.url}
+                  placeholder="https://…"
+                  onChange={(e) => setCustomLinks((prev) => prev.map((l, j) => j === i ? { ...l, url: e.target.value } : l))}
+                  className="flex-1 px-3 py-1.5 text-sm rounded-md border border-neutral-200 dark:border-neutral-700 bg-transparent text-neutral-900 dark:text-white"
+                />
+                <button
+                  onClick={() => setCustomLinks((prev) => prev.filter((_, j) => j !== i))}
+                  className="p-1.5 text-neutral-400 hover:text-red-500"
+                  aria-label="Remove link"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            ))}
+            <button
+              onClick={() => setCustomLinks((prev) => [...prev, { label: '', url: '' }])}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-neutral-600 dark:text-neutral-400 border border-dashed border-neutral-300 dark:border-neutral-700 rounded-md hover:bg-neutral-50 dark:hover:bg-neutral-800"
+            >
+              <Plus className="w-3.5 h-3.5" /> Add link
+            </button>
+          </div>
+
+          <div className="mb-5">
+            <p className="text-xs font-medium text-neutral-500 dark:text-neutral-400 uppercase tracking-wide mb-2">Favicon</p>
+            <input
+              type="url"
+              value={faviconUrl}
+              placeholder="https://example.com/icon.png (blank = default)"
+              onChange={(e) => setFaviconUrl(e.target.value)}
+              className="w-full px-3 py-1.5 text-sm rounded-md border border-neutral-200 dark:border-neutral-700 bg-transparent text-neutral-900 dark:text-white"
+            />
+          </div>
+
+          <button
+            onClick={savePrefs}
+            disabled={prefsSaving}
+            className="px-4 py-2 text-sm bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 rounded-lg hover:opacity-90 disabled:opacity-50"
+          >
+            {prefsSaved ? 'Saved' : prefsSaving ? 'Saving…' : 'Save menu bar settings'}
+          </button>
+        </div>
+      )}
 
       {/* Account section */}
       <div className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-800 p-6">

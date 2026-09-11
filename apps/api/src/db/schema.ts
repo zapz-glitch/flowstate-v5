@@ -397,6 +397,30 @@ export const rehabConfig = sqliteTable(
 )
 
 // ==========================================
+// UI Prefs (per-user menu/branding customization)
+// ==========================================
+
+export const uiPrefs = sqliteTable(
+  'ui_prefs',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    userId: text('user_id')
+      .notNull()
+      .unique()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    // Rename built-in nav items: { "/dashboard/analyze": "Deal Search", ... }
+    navLabelsJson: text('nav_labels_json'),
+    // Extra links appended to the nav: [{ label, url }]
+    customLinksJson: text('custom_links_json'),
+    // Custom favicon URL (https or absolute path)
+    faviconUrl: text('favicon_url'),
+    createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
+    updatedAt: text('updated_at').notNull().$defaultFn(() => new Date().toISOString()),
+  },
+  (table) => [index('idx_ui_prefs_user_id').on(table.userId)]
+)
+
+// ==========================================
 // Deal Params (per-user valuation defaults)
 // ==========================================
 

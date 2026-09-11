@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import { useEffect, useState } from 'react'
 import {
   Key,
   LogOut,
@@ -21,6 +22,7 @@ import {
   ShieldCheck,
   Upload,
   Activity,
+  ExternalLink,
 } from 'lucide-react'
 import { signOut } from '@/lib/auth-client'
 import { Logo, LogoIcon } from '@/components/ui/Logo'
@@ -29,6 +31,7 @@ import { useUser } from '@/components/auth/UserProvider'
 import { useTheme } from '@/components/theme-provider'
 import { useSidebar } from '@/components/SidebarProvider'
 import { useAnalysis } from '@/hooks/use-analysis'
+import { getUiPrefs, type UiPrefs } from '@/lib/client-api'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import {
   DropdownMenu,
@@ -79,9 +82,21 @@ export default function Sidebar() {
 
   const isAnalysisRunning = activeAnalysis !== null && analysisState.status !== 'completed' && analysisState.status !== 'failed'
 
-  const navigation = user?.role === 'admin'
-    ? [...baseNavigation, ...adminNavigation]
-    : baseNavigation
+  const [prefs, setPrefs] = useState<UiPrefs | null>(null)
+  useEffect(() => {
+    getUiPrefs().then(setPrefs).catch(() => {})
+    const onUpdate = (e: Event) => setPrefs((e as CustomEvent<UiPrefs>).detail)
+    window.addEventListener('ui-prefs-updated', onUpdate)
+    return () => window.removeEventListener('ui-prefs-updated', onUpdate)
+  }, [])
+
+  const navigation = [
+    ...(user?.role === 'admin' ? [...baseNavigation, ...adminNavigation] : baseNavigation)
+      .map((item) => ({ ...item, name: prefs?.navLabels?.[item.href] || item.name })),
+    ...(prefs?.customLinks ?? [])
+      .filter((l) => l.label && l.url)
+      .map((l) => ({ name: l.label, href: l.url, icon: ExternalLink, external: true })),
+  ]
 
   const handleSignOut = async () => {
     await signOut()

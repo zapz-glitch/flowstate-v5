@@ -459,6 +459,25 @@ export async function resetDealParams(): Promise<DealParamsResponse> {
   return fetchApi('/deal-params', { method: 'DELETE' })
 }
 
+// ─── UI Prefs (menu labels, custom links, favicon) ───────────────────────────
+
+export interface UiPrefs {
+  navLabels: Record<string, string>
+  customLinks: Array<{ label: string; url: string }>
+  faviconUrl: string | null
+}
+
+export async function getUiPrefs(): Promise<UiPrefs> {
+  return fetchApi<UiPrefs>('/ui-prefs')
+}
+
+export async function saveUiPrefs(prefs: UiPrefs): Promise<UiPrefs & { success: boolean }> {
+  return fetchApi('/ui-prefs', {
+    method: 'PUT',
+    body: JSON.stringify(prefs),
+  })
+}
+
 // ─── Proximity Adjustment Config ─────────────────────────────────────────────
 
 export interface ProximityPosition {
