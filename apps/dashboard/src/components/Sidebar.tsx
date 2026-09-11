@@ -56,6 +56,17 @@ const baseNavigation: Array<{
   { name: 'API Hub', href: '/dashboard/api-hub', icon: Key },
 ]
 
+/** Resolve a custom link's site favicon (internal paths return null → default icon). */
+function faviconFor(url: string): string | null {
+  try {
+    const u = new URL(url, window.location.origin)
+    if (u.origin === window.location.origin) return null
+    return `https://icons.duckduckgo.com/ip3/${u.hostname}.ico`
+  } catch {
+    return null
+  }
+}
+
 const adminNavigation: Array<{
   name: string
   href: string
@@ -95,7 +106,7 @@ export default function Sidebar() {
       .map((item) => ({ ...item, name: prefs?.navLabels?.[item.href] || item.name })),
     ...(prefs?.customLinks ?? [])
       .filter((l) => l.label && l.url)
-      .map((l) => ({ name: l.label, href: l.url, icon: ExternalLink, external: true })),
+      .map((l) => ({ name: l.label, href: l.url, icon: ExternalLink, external: true, favicon: faviconFor(l.url) })),
   ]
 
   const handleSignOut = async () => {
@@ -162,6 +173,7 @@ export default function Sidebar() {
               )
 
               if (item.external) {
+                const favicon = 'favicon' in item ? item.favicon : null
                 return (
                   <a
                     key={item.name}
@@ -171,7 +183,19 @@ export default function Sidebar() {
                     className={linkClasses}
                     title={collapsed ? item.name : undefined}
                   >
-                    <item.icon className="w-[18px] h-[18px] flex-shrink-0" />
+                    {favicon ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={favicon}
+                        alt=""
+                        className="w-[18px] h-[18px] flex-shrink-0 rounded-sm"
+                        onError={(e) => {
+                          e.currentTarget.style.display = 'none'
+                          e.currentTarget.nextElementSibling?.classList.remove('hidden')
+                        }}
+                      />
+                    ) : null}
+                    <item.icon className={cn('w-[18px] h-[18px] flex-shrink-0', favicon && 'hidden')} />
                     {!collapsed && <span>{item.name}</span>}
                   </a>
                 )
