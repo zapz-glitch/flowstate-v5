@@ -53,9 +53,12 @@ function isPropertyPhoto(url: string, patterns: RegExp[]): boolean {
 export const redfinAdapter: ListingSiteAdapter = {
   name: 'redfin',
 
+  // The stingray autocomplete endpoint is CloudFront-blocked for datacenter
+  // IPs. Resolve via a Google site-search rendered through Firecrawl instead —
+  // listing links carry /home/<id> which parseListingUrl extracts.
   searchUrl(property) {
-    const query = `${property.address}, ${property.city}, ${property.state} ${property.zipCode}`
-    return `https://www.redfin.com/stingray/do/location-autocomplete?location=${encodeURIComponent(query)}&al=1&iss=false&ooa=true&v=2`
+    const query = `"${property.address}" ${property.city} ${property.state} site:redfin.com/home`
+    return `https://www.google.com/search?q=${encodeURIComponent(query)}`
   },
 
   // Response is JSON prefixed with "{}&&" (JSONP guard); address rows carry

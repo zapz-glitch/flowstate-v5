@@ -231,8 +231,10 @@ export class AnalysisJobDO {
     }
     const [compsResult, permitsResult, floodResult, osmResult] = await Promise.all([
       propertyApi.getComparables(comparablesParams),
+      // Permits: preserve the error object — 'unavailable' must mean the call
+      // failed, not that the property has no permits on file (that's 'empty')
       (config.enrichment?.permits !== false)
-        ? propertyApi.getBuildingPermits(property.id, { address1: property.address, address2: `${property.city}, ${property.state} ${property.zipCode}` }).catch(() => null)
+        ? propertyApi.getBuildingPermits(property.id, { address1: property.address, address2: `${property.city}, ${property.state} ${property.zipCode}` })
         : Promise.resolve(null),
       (config.enrichment?.floodZone !== false && property.latitude && property.longitude)
         ? propertyApi.getFloodZone(property.latitude, property.longitude).catch(() => null)
@@ -321,11 +323,20 @@ export class AnalysisJobDO {
 
     // Build the full property bundle
     const permitsData = permitsResult && 'success' in permitsResult && permitsResult.success ? permitsResult.data : null
+    const permitsError = permitsResult && 'success' in permitsResult && !permitsResult.success
+      ? ('error' in permitsResult ? permitsResult.error : 'permit fetch failed')
+      : null
     const permits = permitsData ? {
       items: permitsData.permits,
       count: permitsData.count,
+      status: permitsData.count > 0 ? 'ok' as const : 'empty' as const,
       totalJobValue: permitsData.permits.reduce((sum: number, p: { jobValue?: number | null }) => sum + (p.jobValue ?? 0), 0),
       recentPermitTypes: [...new Set(permitsData.permits.map((p: { projectType?: string | null }) => p.projectType).filter(Boolean) as string[])],
+    } : permitsError ? {
+      items: [],
+      count: 0,
+      status: 'unavailable' as const,
+      error: String(permitsError),
     } : null
 
     const floodData = floodResult && 'success' in floodResult && floodResult.success ? floodResult.data : null

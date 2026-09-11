@@ -436,6 +436,10 @@ export interface PermitsEnrichment {
   count: number
   totalJobValue?: number
   recentPermitTypes?: string[]
+  /** 'ok' | 'empty' when the call succeeded; 'unavailable' when it errored */
+  status?: 'ok' | 'empty' | 'unavailable'
+  /** Error detail when status is 'unavailable' */
+  error?: string
 }
 
 export interface EnrichmentData {

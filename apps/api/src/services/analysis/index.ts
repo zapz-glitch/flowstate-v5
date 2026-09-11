@@ -465,6 +465,8 @@ export interface AnalysisResponse {
     /** Building permit records for the subject */
     permits: {
       status: 'available' | 'empty' | 'unavailable'
+      /** Error detail when the permit lookup failed (status 'unavailable') */
+      error?: string | null
       items: Array<{
         permitId: string
         permitNumber: string | null
@@ -1059,7 +1061,10 @@ export function buildAnalysisResponse(
       }),
       permits: enrichment.permits
         ? {
-            status: enrichment.permits.items.length > 0 ? 'available' : 'empty',
+            status: enrichment.permits.status === 'unavailable'
+              ? 'unavailable'
+              : enrichment.permits.items.length > 0 ? 'available' : 'empty',
+            error: enrichment.permits.error ?? null,
             items: enrichment.permits.items.map((p) => ({
               permitId: p.permitId,
               permitNumber: p.permitNumber ?? null,
