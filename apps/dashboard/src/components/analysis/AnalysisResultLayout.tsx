@@ -7,7 +7,6 @@ import { useEvaluation } from '@/hooks/use-evaluation'
 import { ComparablesSection } from './ComparablesSection'
 import { DealSummaryHero } from './DealSummaryHero'
 import { MarketContextCard } from './MarketContextCard'
-import { SubjectGridCard } from './SubjectGridCard'
 import { PhotoGallery } from './PhotoGallery'
 import { InvestorAnalysisSummary } from './InvestorAnalysisSummary'
 
@@ -51,8 +50,7 @@ export function AnalysisResultLayout({
 
   return (
     <>
-      {/* Subject property */}
-      {subject && <SubjectGridCard subject={subject} isLoading={isStreaming} />}
+      {/* Subject property — rendered inside the comps grid (lead card, 2× width) */}
 
       {/* Valuation panel — sticky so it's always visible while scrolling comps */}
       {valuation ? (

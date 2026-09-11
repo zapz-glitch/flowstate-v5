@@ -9,6 +9,7 @@ import type { CompsData, CompItem, SubjectData } from './shared-types'
 import { getCompKey } from './format-helpers'
 import { CompCard } from './CompCard'
 import { CompGridCard } from './CompGridCard'
+import { SubjectGridCard } from './SubjectGridCard'
 import { RuleMatchDetails } from './RuleMatchDetails'
 
 export interface ComparablesSectionProps {
@@ -305,6 +306,11 @@ export function ComparablesSection({
       <div className="print:hidden">
         {layout === 'grid' ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {subject && (
+              <div className="sm:col-span-2">
+                <SubjectGridCard subject={subject} />
+              </div>
+            )}
             {sortedItems.map(({ comp, originalIndex }) => {
               const key = getCompKey(comp, originalIndex)
               const isSelected = hasInteractiveSelection

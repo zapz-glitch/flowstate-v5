@@ -885,3 +885,13 @@ nearest-comps fallback, foundation map + subject.permits + curb appeal.
   v5 DB has its own accounts. Dashboard↔API secrets synced.
 - Verified live on 1141 Engman St: ARV $344,403 via nearest_comps, 12 permits,
   curb appeal renovated@90/85% on selected comps, foundation labeled.
+
+## Google Maps key + card ratio fix 2026-09-10
+
+- The key in apps/dashboard/.env.local was billing-disabled (Street View +
+  Maps JS both REQUEST_DENIED) — that is why property cards showed no photos
+  when Zillow had none. Replaced with the working key family found in
+  flowstate-api-production/.env.local (verified: Street View returns a real
+  JPEG, Maps JS bootstrap loads). .dev.vars has no GOOGLE key.
+- Subject card stats grid now 3-col (ratio closer to comp cards).
+- Note: dashboard restart required to pick up NEXT_PUBLIC_ env changes — done.
