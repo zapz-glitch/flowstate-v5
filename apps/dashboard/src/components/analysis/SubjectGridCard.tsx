@@ -58,6 +58,11 @@ export function SubjectGridCard({ subject, isLoading }: SubjectGridCardProps) {
                     {subject.subdivision}
                   </span>
                 )}
+                {subject.yearBuilt != null && subject.yearBuilt < 1978 && (
+                  <span className="inline-flex items-center gap-1 mt-0.5 ml-1 px-1.5 py-0.5 rounded-full text-[9px] font-medium bg-amber-500/10 text-amber-500 border border-amber-500/20" title="Built before 1978 — lead-based paint disclosure applies">
+                    Pre-1978 · Lead Paint
+                  </span>
+                )}
               </div>
               {subject.lastSale?.price && (
                 <div className="text-right flex-shrink-0">

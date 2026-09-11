@@ -895,3 +895,17 @@ nearest-comps fallback, foundation map + subject.permits + curb appeal.
   JPEG, Maps JS bootstrap loads). .dev.vars has no GOOGLE key.
 - Subject card stats grid now 3-col (ratio closer to comp cards).
 - Note: dashboard restart required to pick up NEXT_PUBLIC_ env changes — done.
+
+## Observability milestone 2026-09-10
+
+- analysis_runs (migration 0021, local applied): every run outcome captured —
+  steps trace, fallbacks, vision/photo evidence, apiCallStats, eval grade.
+- Benchmark gates in services/observability/evals.ts: pipeline, comps_found,
+  comps_selected, valuation, photos, vision, permits, step integrity, latency
+  (120s). Grade pass/warn/fail. Failures (INSUFFICIENT_COMPS, property not
+  found, fatal) record error rows too — not just saved reports.
+- Admin routes under /admin/observability/* (session + admin role).
+- Dashboard: Sidebar admin nav "Observability" → /dashboard/admin/observability
+  (summary + graded run table) + /admin/observability/[jobId] (trace detail).
+- Verified live: Engman run recorded grade=pass, ARV 344253, 6 comps/3 enabled,
+  vision ok, 11.1s.

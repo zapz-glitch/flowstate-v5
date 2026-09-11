@@ -20,7 +20,6 @@ import {
   Settings2,
   ShieldCheck,
   Upload,
-  Globe2,
   Activity,
 } from 'lucide-react'
 import { signOut } from '@/lib/auth-client'
@@ -48,7 +47,6 @@ const baseNavigation: Array<{
 }> = [
   { name: 'Overview', href: '/dashboard', icon: Home },
   { name: 'Property Search', href: '/dashboard/analyze', icon: Search },
-  { name: 'Atlas', href: '/dashboard/atlas', icon: Globe2 },
   { name: 'Batch Import', href: '/dashboard/batch', icon: Upload },
   { name: 'Property Reports', href: '/dashboard/reports', icon: ClipboardList },
   { name: 'Evaluation Settings', href: '/dashboard/evaluation-settings', icon: Settings2 },

@@ -858,7 +858,7 @@ export function buildAnalysisResponse(
   }
   if (property.transaction?.isForeclosure) riskFlags.push('Foreclosure')
   if (property.transaction?.isShortSale) riskFlags.push('Short Sale')
-  if (property.yearBuilt && property.yearBuilt < 1978) riskFlags.push('Pre-1978 (Lead Paint)')
+
   if (enrichment.permits?.items.some((p) => p.jobValue && p.jobValue > 50000)) {
     riskFlags.push('Major Permits (>$50K)')
   }
