@@ -693,6 +693,24 @@ export async function getSavedReport(
   return fetchApi(`/user/reports/${jobId}`)
 }
 
+/** Latest saved report for the session user — enables cross-device resume */
+export async function getLatestReport(): Promise<{
+  jobId: string
+  address: string
+  createdAt: string
+} | null> {
+  const res = await fetchApi<{
+    reports: Array<{ jobId: string | null; propertyAddress: string; propertyCity?: string; propertyState?: string; createdAt: string }>
+  }>('/user/reports?limit=1')
+  const latest = res.reports?.[0]
+  if (!latest?.jobId) return null
+  return {
+    jobId: latest.jobId,
+    address: [latest.propertyAddress, latest.propertyCity, latest.propertyState].filter(Boolean).join(', '),
+    createdAt: latest.createdAt,
+  }
+}
+
 export interface ExistingReport {
   id: string
   jobId: string

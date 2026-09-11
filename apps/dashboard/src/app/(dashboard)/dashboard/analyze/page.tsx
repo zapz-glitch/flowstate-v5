@@ -20,7 +20,7 @@ import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
 import { EvaluationSettingsSheet } from '@/components/report/EvaluationSettingsSheet'
 import { queueAnalysis, type AnalyzeData } from './actions'
-import { getArvThreshold, getReportsByProperty, getSavedReport, runCompSelection, type ExistingReport } from '@/lib/client-api'
+import { getArvThreshold, getLatestReport, getReportsByProperty, getSavedReport, runCompSelection, type ExistingReport } from '@/lib/client-api'
 import { useAutoSave } from '@/hooks/use-auto-save'
 import { ExistingReportsDialog } from './ExistingReportsDialog'
 // cn is used in the outer wrapper
@@ -184,28 +184,41 @@ export default function AnalyzePage() {
   useEffect(() => {
     if (restoredRef.current || analysisResult || activeAnalysis) return
     restoredRef.current = true
+    const restore = (jobId: string, address: string) => {
+      setPhase('fetching')
+      getSavedReport(jobId).then((res) => {
+        if (res?.analysis) {
+          setAnalysisResult(res.analysis as AnalyzeData)
+          setActiveAnalysis({ jobId: res.jobId ?? jobId, address: res.address || address })
+          setAddress(res.address || address)
+          try { localStorage.setItem(LAST_ANALYSIS_KEY, JSON.stringify({ jobId, address: res.address || address, savedAt: Date.now() })) } catch { /* ignore */ }
+          setPhase('ready')
+        } else {
+          setPhase('idle')
+        }
+      }).catch(() => setPhase('idle'))
+    }
+
     let last: { jobId?: string; address?: string; savedAt?: number } | null = null
     try { last = JSON.parse(localStorage.getItem(LAST_ANALYSIS_KEY) || 'null') } catch { /* ignore */ }
-    if (!last?.jobId) return
+
     // Expire after 7 days — the report still exists, we just stop auto-resuming
-    if (last.savedAt && Date.now() - last.savedAt > LAST_ANALYSIS_TTL_MS) {
-      try { localStorage.removeItem(LAST_ANALYSIS_KEY) } catch { /* ignore */ }
+    const fresh = last?.jobId && !(last.savedAt && Date.now() - last.savedAt > LAST_ANALYSIS_TTL_MS)
+    if (fresh && last) {
+      restore(last.jobId!, last.address ?? '')
       return
     }
-    setPhase('fetching')
-    getSavedReport(last.jobId).then((res) => {
-      if (res?.analysis) {
-        setAnalysisResult(res.analysis as AnalyzeData)
-        setActiveAnalysis({ jobId: res.jobId ?? last.jobId!, address: res.address || last.address || '' })
-        setAddress(res.address || last.address || '')
-        setPhase('ready')
-      } else {
-        setPhase('idle')
-      }
-    }).catch(() => {
+    if (last?.jobId) {
       try { localStorage.removeItem(LAST_ANALYSIS_KEY) } catch { /* ignore */ }
-      setPhase('idle')
-    })
+    }
+
+    // Cross-device resume — no local pointer (or expired): pull the user's
+    // newest report server-side and restore it if it's inside the 7-day window
+    getLatestReport().then((latest) => {
+      if (!latest) { setPhase('idle'); return }
+      const age = Date.now() - new Date(latest.createdAt).getTime()
+      if (age <= LAST_ANALYSIS_TTL_MS) restore(latest.jobId, latest.address)
+    }).catch(() => setPhase('idle'))
   }, [analysisResult, activeAnalysis, setAnalysisResult, setActiveAnalysis])
 
   // ─── SSE Event Handler ────────────────────────────────────────────────────
