@@ -33,31 +33,31 @@ export const RENOVATION_LEVEL_DEFINITIONS: Array<{ index: number; name: string; 
     index: 0,
     name: 'Lipstick',
     criteria:
-      'Mostly paint, cleaning, carpet/flooring, fixtures, and very minor cosmetic work. Kitchen and baths are dated or worn but functional; no system or structural work needed.',
+      'Very minor refresh: paint, touch-ups, cleaning, small fixture/hardware changes, and basic curb appeal.',
   },
   {
     index: 1,
     name: 'Light Cosmetic',
     criteria:
-      'Light cosmetic refresh — paint, flooring, fixtures, minor repairs, curb appeal. Kitchen/baths may need light updates (paint, hardware, counters) but no full replacement.',
+      'Light interior updating such as paint, flooring, fixtures, minor kitchen/bath updates, and small repairs with no major systems work.',
   },
   {
     index: 2,
     name: 'Full Cosmetic',
     criteria:
-      'Material cosmetic renovation including kitchen and bathroom refresh, flooring throughout, paint, fixtures, and finishes. No mechanical, roof, foundation, or layout work.',
+      'Full visual renovation of the house: flooring, paint, kitchen, bathrooms, fixtures, doors/trim, exterior touch-ups, but generally no major structural reconstruction.',
   },
   {
     index: 3,
     name: 'Heavy Rehab',
     criteria:
-      'Significant work potentially involving mechanical systems (HVAC, electrical, plumbing), roof, foundation, substantial repairs, or layout changes. Major systems visibly failed or end-of-life.',
+      'Cosmetic renovation plus meaningful mechanical or building-system work such as roof, HVAC, plumbing, electrical, windows, foundation repairs, or significant damage remediation.',
   },
   {
     index: 4,
-    name: 'Down to Stud',
+    name: 'Full Gut',
     criteria:
-      'Major/down-to-studs ("Full Gut") renovation where essentially the entire property requires renovation — gutted interiors, fire/water/structural damage, or unfinished construction throughout.',
+      'Property is substantially stripped/rebuilt, with major interior reconstruction and potentially extensive structural, mechanical, electrical, plumbing, roof, and layout work.',
   },
 ]
 

@@ -23,7 +23,7 @@ import {
 /**
  * Base rehab level implied by the subject's classification.
  * REHAB_LEVELS indexes 0-4 form the severity progression:
- *   0 Lipstick, 1 Light Cosmetic, 2 Full Cosmetic, 3 Heavy Rehab, 4 Down to Stud
+ *   0 Lipstick, 1 Light Cosmetic, 2 Full Cosmetic, 3 Heavy Rehab, 4 Full Gut
  * (Indexes 5-6 are market-cost variants and are never auto-selected.)
  */
 const CLASSIFICATION_BASE_LEVEL: Record<string, number> = {
@@ -85,7 +85,7 @@ function deriveRehabLevel(
   const yearBuilt = property.effectiveYearBuilt ?? property.yearBuilt
   if (yearBuilt && yearBuilt < 1960 && index >= 3 && index < 4) {
     index = 4
-    reasons.push(`Built ${yearBuilt} — pre-1960 distressed stock typically requires down-to-stud renovation`)
+    reasons.push(`Built ${yearBuilt} — pre-1960 distressed stock typically requires full-gut renovation`)
   }
 
   return { index, reason: reasons.join('. ') + '.' }

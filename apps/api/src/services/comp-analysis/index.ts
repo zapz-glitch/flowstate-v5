@@ -133,7 +133,7 @@ function buildMegaPrompt(ctx: CompAnalysisContext): string {
   const adjLines = ctx.adjustments
     .map((a) => `  ${a.type}: ${a.enabled ? `enabled ($${a.amount.toLocaleString()}${a.percent ? `, ${a.percent}%` : ''})` : 'disabled'}`)
     .join('\n')
-  const rehabLevels = ['Lipstick', 'Light Cosmetic', 'Full Cosmetic', 'Heavy Rehab', 'Down to Stud']
+  const rehabLevels = ['Lipstick', 'Light Cosmetic', 'Full Cosmetic', 'Heavy Rehab', 'Full Gut']
 
   const userPrefs = `USER'S EVALUATION PREFERENCES:
   ARV Threshold: Top ${ctx.arvThresholdPercent}% of comps by sale price

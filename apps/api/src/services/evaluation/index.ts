@@ -490,43 +490,29 @@ export async function performAnalysis(
   let compCurbAppeal: Record<string, CurbAppealCheck> | undefined =
     compChecks.length > 0 ? Object.fromEntries(compChecks.map((c) => [c.id, c.check])) : undefined
 
-  // Price fallback: a selected comp that meets the appraisal rules and sold
-  // at the top of the market is deemed an ARV/renovated comp even when its
-  // photos can't verify condition — top-of-market pricing IS the evidence.
-  for (const id of appraisalResult.selectedCompIds ?? []) {
-    const check = compCurbAppeal?.[id]
-    const comp = appraisalResult.comparables.find((c) => c.id === id)
-    if (!comp?.isEnabled) continue
-    if (!check || check.condition === 'unknown') {
-      compCurbAppeal ??= {}
-      compCurbAppeal[id] = {
-        condition: 'renovated',
-        source: 'price',
-        confidence: null,
-        summary: 'Condition unverifiable from photos; priced at top of market and meets appraisal rules — treated as an ARV/renovated comp',
-        photosExamined: check?.photosExamined ?? 0,
-      }
-    }
-  }
-
   // ── ARV condition gate ────────────────────────────────────────────────────
-  // A selected comp anchors ARV only when it's AR quality (renovated/fixed-
-  // and-flipped) or visibly needs LESS work than the subject's assessed rehab
-  // level — a comp in worse condition sold as-is, not after-repair. Price-
-  // inferred comps (unverifiable, top-of-market) stay eligible.
-  const subjectLevelIdx = renovation?.renovationLevelIndex ?? null
+  // ARV-comp-worthy = recently sold, arm's-length, physically similar, and
+  // verified AR quality — renovated/updated/retail-ready, matching the
+  // condition the subject will reach after repair. A high sale price alone
+  // NEVER qualifies a comp: dated/distressed verification excludes it, and
+  // unverifiable condition means its price cannot influence ARV.
+  const isArvWorthy = (check: CurbAppealCheck | undefined): boolean =>
+    !!check &&
+    check.source === 'vision' &&
+    (check.condition === 'renovated' || check.rehabLevelIndex === 0)
+
+  const unverifiable: string[] = []
   const prunedFromArv: string[] = []
   for (const id of appraisalResult.selectedCompIds ?? []) {
     const check = compCurbAppeal?.[id]
-    if (!check || check.source === 'price') continue
-    const eligible =
-      check.condition === 'renovated' ||
-      (check.rehabLevelIndex != null && subjectLevelIdx != null && check.rehabLevelIndex < subjectLevelIdx)
-    if (!eligible) {
+    if (!isArvWorthy(check)) {
       prunedFromArv.push(id)
-      compCurbAppeal![id] = {
-        ...check,
-        summary: `${check.summary ?? check.condition} — excluded from ARV: condition does not beat subject rehab level`,
+      if (!check || check.condition === 'unknown') unverifiable.push(id)
+      if (check && check.source !== 'price') {
+        compCurbAppeal![id] = {
+          ...check,
+          summary: `${check.summary ?? check.condition} — excluded from ARV: not verified renovated/retail-ready`,
+        }
       }
     }
   }
@@ -539,13 +525,16 @@ export async function performAnalysis(
       finalArv = appraisalResult.arv
       fallbacksUsed.push(`arv_condition_pruned:${prunedFromArv.length}`)
       step('arv_condition_gate', 'fallback',
-        `${prunedFromArv.length} comp(s) excluded — worse condition than subject's ${renovation?.renovationLevel ?? 'assessed'} level; ARV recomputed on ${remainingComps.length}`)
+        `${prunedFromArv.length} comp(s) excluded — not verified renovated/retail-ready; ARV recomputed on ${remainingComps.length}`)
     } else {
       // Can't recompose a 3-comp ARV — keep the set but mark the evidence
       fallbacksUsed.push('arv_condition_thin')
       step('arv_condition_gate', 'fallback',
-        `${prunedFromArv.length} comp(s) failed the condition gate but ARV kept — fewer than 3 verified comps remain`)
+        `${prunedFromArv.length} comp(s) not verified AR-quality (${unverifiable.length} unverifiable) — ARV kept on ${remainingComps.length + prunedFromArv.length} comps, fewer than 3 verified`)
     }
+  } else if (appraisalResult.selectedCompIds?.length) {
+    step('arv_condition_gate', 'completed',
+      `${appraisalResult.selectedCompIds.length} comp(s) verified AR-quality (renovated/retail-ready)`)
   }
 
   // ── 4. Classifications (price percentile, display grouping) ─────────────────

@@ -49,7 +49,7 @@ const ARV_TIER_LABELS: Record<string, string> = {
   over3m: 'Over $3M',
 }
 
-const LEVEL_NAMES = ['Lipstick', 'Light Cosmetic', 'Full Cosmetic', 'Heavy Rehab', 'Down to Stud']
+const LEVEL_NAMES = ['Lipstick', 'Light Cosmetic', 'Full Cosmetic', 'Heavy Rehab', 'Full Gut']
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 

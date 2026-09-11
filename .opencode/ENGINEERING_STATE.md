@@ -33,6 +33,20 @@ comps search -> enrich ALL (subdivision/foundation/style) -> appraisal rules
 selected/rule-passing comps (+subject) -> permits subject-only -> major items ->
 valuation (renovated-skip, location penalty) -> report.
 
+## Framework Update (committed)
+- Rehab framework renamed to canonical: Lipstick / Light Cosmetic / Full
+  Cosmetic / Heavy Rehab / FULL GUT (was "Down to Stud") — criteria updated
+  to product definitions verbatim (subject classify -> store -> price rehab).
+- ARV-worthy rule tightened: comp anchors ARV ONLY if vision-verified
+  renovated/retail-ready (condition==='renovated' OR rehabLevelIndex===0).
+  Price inference REMOVED as eligibility — "a high sale price alone does not
+  make a property an ARV comp; similarity + condition checks come first."
+  Unverifiable condition => cannot influence ARV. Dated/distressed verified
+  => excluded. ARV recomputed on remaining >=3; thin-set fallback documented.
+- Permit status fidelity: available/empty(unavailable w/ error preserved).
+- Redfin discovery via Google site:search through Firecrawl (autocomplete 403).
+- StreetView no-imagery -> static insignia via metadata endpoint.
+
 ## Pending / Next
 - Observability: extend evidence with photo/vision metrics if desired.
 - foundation_match visible in Evaluation Settings UI (preset editor lists filters).

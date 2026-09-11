@@ -30,7 +30,7 @@ export const REHAB_LEVELS = [
   'Light Cosmetic',
   'Full Cosmetic',
   'Heavy Rehab',
-  'Down to Stud',
+  'Full Gut',
 ] as const
 
 export type RehabLevel = (typeof REHAB_LEVELS)[number]

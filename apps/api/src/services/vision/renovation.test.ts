@@ -123,7 +123,7 @@ describe('renovation level classification', () => {
 })
 
 function REHAB_LEVEL_NAME(idx: number): string {
-  return ['Lipstick', 'Light Cosmetic', 'Full Cosmetic', 'Heavy Rehab', 'Down to Stud'][idx]
+  return ['Lipstick', 'Light Cosmetic', 'Full Cosmetic', 'Heavy Rehab', 'Full Gut'][idx]
 }
 
 // ─── Photo sufficiency / failure handling ────────────────────────────────────

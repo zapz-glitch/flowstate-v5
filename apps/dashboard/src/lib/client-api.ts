@@ -365,7 +365,7 @@ export const REHAB_LEVEL_NAMES = [
   'Light Cosmetic',
   'Full Cosmetic',
   'Heavy Rehab',
-  'Down to Stud',
+  'Full Gut',
 ] as const
 
 /** Auto-compute a tier label from its boundaries */
