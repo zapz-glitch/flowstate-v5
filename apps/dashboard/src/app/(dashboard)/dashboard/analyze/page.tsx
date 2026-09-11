@@ -51,6 +51,7 @@ type AnalysisPhase = 'idle' | 'fetching' | 'ready'
 
 // Last searched property — restored when returning to Property Search
 const LAST_ANALYSIS_KEY = 'flowstate:last-analysis'
+const LAST_ANALYSIS_TTL_MS = 7 * 24 * 60 * 60 * 1000 // restore window: 7 days
 
 // ─── Status Labels ───────────────────────────────────────────────────────────
 
@@ -183,9 +184,14 @@ export default function AnalyzePage() {
   useEffect(() => {
     if (restoredRef.current || analysisResult || activeAnalysis) return
     restoredRef.current = true
-    let last: { jobId?: string; address?: string } | null = null
+    let last: { jobId?: string; address?: string; savedAt?: number } | null = null
     try { last = JSON.parse(localStorage.getItem(LAST_ANALYSIS_KEY) || 'null') } catch { /* ignore */ }
     if (!last?.jobId) return
+    // Expire after 7 days — the report still exists, we just stop auto-resuming
+    if (last.savedAt && Date.now() - last.savedAt > LAST_ANALYSIS_TTL_MS) {
+      try { localStorage.removeItem(LAST_ANALYSIS_KEY) } catch { /* ignore */ }
+      return
+    }
     setPhase('fetching')
     getSavedReport(last.jobId).then((res) => {
       if (res?.analysis) {
@@ -515,7 +521,7 @@ export default function AnalyzePage() {
         setActiveAnalysis({ jobId: response.jobId ?? '', address: address.trim() })
         setAnalysisState({ ...initialAnalysisState, jobId: response.jobId ?? null, status: 'processing' })
         try {
-          localStorage.setItem(LAST_ANALYSIS_KEY, JSON.stringify({ jobId: response.jobId ?? '', address: address.trim() }))
+          localStorage.setItem(LAST_ANALYSIS_KEY, JSON.stringify({ jobId: response.jobId ?? '', address: address.trim(), savedAt: Date.now() }))
         } catch { /* ignore */ }
 
         // Result streams via SSE — connect immediately
