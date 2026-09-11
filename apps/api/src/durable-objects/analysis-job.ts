@@ -23,7 +23,7 @@ import { filtersToApiParams } from '../services/appraisal/types'
 import type { Env } from '../types'
 import type { NormalizedProperty, NormalizedComparable } from '../services/property-api/types'
 import { drizzle } from 'drizzle-orm/d1'
-import { eq } from 'drizzle-orm'
+import { eq, and } from 'drizzle-orm'
 import { savedReports, reportHistory, analysisRuns } from '../db/schema'
 import { evaluateRun } from '../services/observability/evals'
 
@@ -91,6 +91,74 @@ export interface StartStreamingRequest {
     marketSearchModel?: string
     reasoning?: boolean
   }
+}
+
+type DrizzleDb = ReturnType<typeof drizzle>
+
+/**
+ * One report per property per user: a completed analysis for an address the
+ * user already has a report for overwrites it in place (and records a
+ * 'reanalyzed' history entry) rather than stacking a duplicate row.
+ */
+async function upsertPropertyReport(
+  db: DrizzleDb,
+  fields: {
+    userId: string
+    jobId: string
+    propertyAddress: string
+    propertyCity: string
+    propertyState: string
+    propertyZip?: string
+    propertyClip?: string | null
+  },
+  reportData: {
+    fullResponseJson: string
+    arv: number | null
+    asIsValue: number | null
+    maxAllowableOffer: number | null
+    estimatedRepairs: number | null
+  },
+): Promise<void> {
+  const historyChanges = JSON.stringify({
+    arv: reportData.arv,
+    buyPrice: reportData.maxAllowableOffer,
+    rehabCost: reportData.estimatedRepairs,
+  })
+
+  const [existing] = await db
+    .select({ id: savedReports.id })
+    .from(savedReports)
+    .where(and(eq(savedReports.userId, fields.userId), eq(savedReports.propertyAddress, fields.propertyAddress)))
+    .limit(1)
+
+  if (existing) {
+    await db.update(savedReports)
+      .set({ ...reportData, jobId: fields.jobId })
+      .where(eq(savedReports.id, existing.id))
+    await db.insert(reportHistory).values({
+      reportId: existing.id,
+      userId: fields.userId,
+      action: 'reanalyzed',
+      description: 'Report overwritten by a new analysis',
+      changesJson: historyChanges,
+    })
+    console.log(`[AnalysisJobDO] Report overwritten for ${fields.propertyAddress} (job ${fields.jobId})`)
+    return
+  }
+
+  const [inserted] = await db.insert(savedReports).values({
+    ...fields,
+    propertyZip: fields.propertyZip ?? '',
+    ...reportData,
+  }).returning({ id: savedReports.id })
+  await db.insert(reportHistory).values({
+    reportId: inserted.id,
+    userId: fields.userId,
+    action: 'created',
+    description: 'Report created',
+    changesJson: historyChanges,
+  })
+  console.log(`[AnalysisJobDO] Report saved for job ${fields.jobId}`)
 }
 
 export class AnalysisJobDO {
@@ -428,47 +496,14 @@ export class AnalysisJobDO {
         estimatedRepairs: (val?.rehabCost as number) ?? null,
       }
 
-      const historyChanges = JSON.stringify({
-        arv: reportData.arv,
-        buyPrice: reportData.maxAllowableOffer,
-        rehabCost: reportData.estimatedRepairs,
-      })
-      if (config.isRefresh) {
-        // Update existing report
-        const [updated] = await db.update(savedReports)
-          .set(reportData)
-          .where(eq(savedReports.jobId, config.jobId))
-          .returning({ id: savedReports.id })
-        if (updated) {
-          await db.insert(reportHistory).values({
-            reportId: updated.id,
-            userId: config.userId,
-            action: 'reanalyzed',
-            description: 'Report reanalyzed with fresh property data',
-            changesJson: historyChanges,
-          })
-        }
-        console.log(`[AnalysisJobDO] Report updated for job ${config.jobId}`)
-      } else {
-        // Insert new report
-        const [inserted] = await db.insert(savedReports).values({
-          userId: config.userId,
-          jobId: config.jobId,
-          propertyAddress: (subj.address as string) || '',
-          propertyCity: property.city || '',
-          propertyState: property.state || '',
-          propertyZip: property.zipCode || '',
-          ...reportData,
-        }).returning({ id: savedReports.id })
-        await db.insert(reportHistory).values({
-          reportId: inserted.id,
-          userId: config.userId,
-          action: 'created',
-          description: 'Report created',
-          changesJson: historyChanges,
-        })
-        console.log(`[AnalysisJobDO] Report saved for job ${config.jobId}`)
-      }
+      await upsertPropertyReport(db, {
+        userId: config.userId,
+        jobId: config.jobId,
+        propertyAddress: (subj.address as string) || '',
+        propertyCity: property.city || '',
+        propertyState: property.state || '',
+        propertyZip: property.zipCode || '',
+      }, reportData)
     } catch (dbError) {
       console.warn(`[AnalysisJobDO] Failed to save report:`, dbError instanceof Error ? dbError.message : dbError)
       await this.pushEvent('error', { step: 'persistence', message: 'The evaluation could not be saved. Retry the analysis; no saved report is available for this run.' })
@@ -637,31 +672,20 @@ export class AnalysisJobDO {
           const result = updatedResponse as Record<string, unknown>
           const subject = result.subject as Record<string, unknown>
           const valuation = result.valuation as Record<string, unknown> | null
-          const [inserted] = await db.insert(savedReports).values({
+          await upsertPropertyReport(db, {
             userId: config.userId,
             jobId: config.jobId,
             propertyAddress: (subject.address as string) || '',
             propertyCity: (config.bundle.property.city) || '',
             propertyState: (config.bundle.property.state) || '',
             propertyZip: (config.bundle.property.zipCode) || '',
+          }, {
             fullResponseJson: JSON.stringify(updatedResponse),
             arv: (valuation?.arv as number) ?? null,
             asIsValue: (valuation?.asIsValue as number) ?? null,
             maxAllowableOffer: (valuation?.buyPrice as number) ?? null,
             estimatedRepairs: (valuation?.rehabCost as number) ?? null,
-          }).returning({ id: savedReports.id })
-          await db.insert(reportHistory).values({
-            reportId: inserted.id,
-            userId: config.userId,
-            action: 'created',
-            description: 'Report created',
-            changesJson: JSON.stringify({
-              arv: (valuation?.arv as number) ?? null,
-              buyPrice: (valuation?.buyPrice as number) ?? null,
-              rehabCost: (valuation?.rehabCost as number) ?? null,
-            }),
           })
-          console.log(`[AnalysisJobDO] Report saved for job ${config.jobId}`)
         } catch (dbError) {
           console.warn(`[AnalysisJobDO] Failed to save report:`, dbError instanceof Error ? dbError.message : dbError)
           throw new Error('The evaluation could not be saved. Retry the analysis.')
