@@ -349,6 +349,8 @@ export async function assessRenovationFromPhotos(
 export interface CurbAppealCheck {
   /** renovated | dated | distressed | unknown — ARV candidacy signal */
   condition: 'renovated' | 'dated' | 'distressed' | 'unknown'
+  /** REHAB_LEVELS index (0-4) for the comp's visible condition — ARV gate uses this vs the subject's level */
+  rehabLevelIndex?: number | null
   /** vision = verified from photos; price = inferred from top-of-market sale */
   source: 'vision' | 'price'
   confidence: number | null
@@ -358,14 +360,18 @@ export interface CurbAppealCheck {
 
 const CURB_APPEAL_PROMPT = `You are reviewing listing photos of a recently SOLD comparable property. Determine whether the sale price plausibly represents an AFTER-REPAIR (renovated/turnkey) value — i.e., whether this comp is a valid ARV candidate visually.
 
+Also estimate the rehab scope this comp would need to reach renovated condition, using these levels:
+${RENOVATION_LEVEL_DEFINITIONS.map((d) => `- ${d.name}: ${d.criteria}`).join('\n')}
+
 Return ONLY JSON:
 {
   "condition": "renovated" | "dated" | "distressed" | "unknown",
+  "rehab_level": "one of the level names above, or null if unknown",
   "confidence": 0-100,
   "summary": "one sentence describing visible condition"
 }
 
-- renovated: modern finishes, updated kitchen/baths, new flooring, move-in ready
+- renovated: modern finishes, updated kitchen/baths, new flooring, move-in ready — an "AR" (after-repair) sale
 - dated: livable but visibly dated finishes/original surfaces
 - distressed: obvious disrepair, damage, heavy wear
 - unknown: photos insufficient (exteriors only, low detail)
@@ -413,6 +419,7 @@ export async function assessCompCurbAppeal(
     typeof parsed.confidence === 'number' ? Math.min(100, Math.max(0, parsed.confidence)) : null
   return {
     condition,
+    rehabLevelIndex: renovationLevelToIndex(parsed.rehab_level as string | null),
     source: 'vision',
     confidence,
     summary: typeof parsed.summary === 'string' ? parsed.summary : null,

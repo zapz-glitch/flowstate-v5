@@ -389,7 +389,7 @@ export async function performAnalysis(
     `${enabledComps.length}/${bundle.comparables.length} comps passed` +
       (appraisalResult.fallbackUsed !== 'none' ? ` (${appraisalResult.fallbackUsed})` : '')
   )
-  const finalArv = appraisalResult.arv
+  let finalArv = appraisalResult.arv
 
   // ── 2. Photos: subject + comps via Zillow → Redfin → Realtor chain ─────────
   let photoBundle: PhotoBundle | null = null
@@ -506,6 +506,45 @@ export async function performAnalysis(
         summary: 'Condition unverifiable from photos; priced at top of market and meets appraisal rules — treated as an ARV/renovated comp',
         photosExamined: check?.photosExamined ?? 0,
       }
+    }
+  }
+
+  // ── ARV condition gate ────────────────────────────────────────────────────
+  // A selected comp anchors ARV only when it's AR quality (renovated/fixed-
+  // and-flipped) or visibly needs LESS work than the subject's assessed rehab
+  // level — a comp in worse condition sold as-is, not after-repair. Price-
+  // inferred comps (unverifiable, top-of-market) stay eligible.
+  const subjectLevelIdx = renovation?.renovationLevelIndex ?? null
+  const prunedFromArv: string[] = []
+  for (const id of appraisalResult.selectedCompIds ?? []) {
+    const check = compCurbAppeal?.[id]
+    if (!check || check.source === 'price') continue
+    const eligible =
+      check.condition === 'renovated' ||
+      (check.rehabLevelIndex != null && subjectLevelIdx != null && check.rehabLevelIndex < subjectLevelIdx)
+    if (!eligible) {
+      prunedFromArv.push(id)
+      compCurbAppeal![id] = {
+        ...check,
+        summary: `${check.summary ?? check.condition} — excluded from ARV: condition does not beat subject rehab level`,
+      }
+    }
+  }
+  if (prunedFromArv.length > 0) {
+    const remaining = (appraisalResult.selectedCompIds ?? []).filter((id) => !prunedFromArv.includes(id))
+    const remainingComps = appraisalResult.comparables.filter((c) => remaining.includes(c.id))
+    if (remainingComps.length >= 3) {
+      appraisalResult.arv = appraisalService.calculateARV(remainingComps)
+      appraisalResult.selectedCompIds = remaining
+      finalArv = appraisalResult.arv
+      fallbacksUsed.push(`arv_condition_pruned:${prunedFromArv.length}`)
+      step('arv_condition_gate', 'fallback',
+        `${prunedFromArv.length} comp(s) excluded — worse condition than subject's ${renovation?.renovationLevel ?? 'assessed'} level; ARV recomputed on ${remainingComps.length}`)
+    } else {
+      // Can't recompose a 3-comp ARV — keep the set but mark the evidence
+      fallbacksUsed.push('arv_condition_thin')
+      step('arv_condition_gate', 'fallback',
+        `${prunedFromArv.length} comp(s) failed the condition gate but ARV kept — fewer than 3 verified comps remain`)
     }
   }
 
