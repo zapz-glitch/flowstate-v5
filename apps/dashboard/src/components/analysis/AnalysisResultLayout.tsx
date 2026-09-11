@@ -123,7 +123,7 @@ export function AnalysisResultLayout({
             <Loader2 className="w-3 h-3 text-primary animate-spin" />
             <span className="text-caption text-foreground-tertiary">Loading comparables...</span>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="comps-grid">
             {Array.from({ length: 4 }).map((_, i) => (
               <div key={i} className="border border-border rounded-sm overflow-hidden">
                 <Skeleton className="h-28 w-full rounded-none" />

@@ -307,7 +307,7 @@ export function ComparablesSection({
       {/* All comps — grid or list */}
       <div className="print:hidden">
         {layout === 'grid' ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="comps-grid">
             {sortedItems.map(({ comp, originalIndex }) => {
               const key = getCompKey(comp, originalIndex)
               const isSelected = hasInteractiveSelection

@@ -17,9 +17,9 @@ export function SubjectGridCard({ subject, isLoading }: SubjectGridCardProps) {
   return (
     <div data-card-key="subject" className="border border-primary/30 rounded-sm overflow-hidden bg-primary/[0.02]">
       {/* Body: Image left + Details right */}
-      <div className="flex flex-col sm:flex-row">
+      <div className="subject-card-row">
         {/* Image with subject badge overlay */}
-        <div className="relative w-full sm:w-56 h-28 sm:h-auto flex-shrink-0 bg-muted/30 overflow-hidden">
+        <div className="subject-card-media relative bg-muted/30 overflow-hidden">
           <StreetViewImage
             photos={subject.photos}
             address={subject.address}
@@ -71,7 +71,7 @@ export function SubjectGridCard({ subject, isLoading }: SubjectGridCardProps) {
             </div>
 
             {/* Property stats — 3-column grid keeps the subject card ratio closer to comp cards */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1 mt-2.5">
+            <div className="subject-stats mt-2.5">
               <div className="flex items-center justify-between text-[11px]">
                 <span className="text-foreground-tertiary">Bed/Bath</span>
                 <span className="font-medium">{subject.bedrooms ?? '-'}/{subject.bathrooms ?? '-'}</span>

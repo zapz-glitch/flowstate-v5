@@ -84,7 +84,7 @@ export function AnalysisPageLayout({
         </div>
       }
       right={
-        <div className="min-w-0">
+        <div className="min-w-0 props-pane">
           <div className={cn('flex flex-col gap-4 lg:pl-4 pt-2 pb-4')}>
             {loading ? loadingSkeleton : (
               <AnalysisResultLayout {...resultProps} />
@@ -95,7 +95,7 @@ export function AnalysisPageLayout({
     />
   ) : (
     <div className="flex-1 min-w-0 p-4 sm:p-6">
-      <div className="flex flex-col gap-4 max-w-5xl mx-auto">
+      <div className="flex flex-col gap-4 max-w-5xl mx-auto props-pane">
         {loading ? loadingSkeleton : <AnalysisResultLayout {...resultProps} />}
       </div>
     </div>

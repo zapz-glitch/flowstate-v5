@@ -584,3 +584,71 @@ body {
 .atlas-popup-wrap .maplibregl-popup-tip {
   display: none;
 }
+
+/* ─── Container-query responsive property cards ─────────────────────────────
+   The results pane is user-resizable, so card grids must respond to the PANE
+   width — not the viewport. `.props-pane` marks the container; `.comps-grid`
+   and `.subject-*` adapt inside it. */
+.props-pane {
+  container-type: inline-size;
+}
+
+.comps-grid {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: minmax(0, 1fr);
+}
+@container (min-width: 560px) {
+  .comps-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@container (min-width: 1000px) {
+  .comps-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+/* Subject card: stacks image-over-details in narrow panes, row when wide */
+.subject-card-row {
+  display: flex;
+  flex-direction: column;
+}
+.subject-card-media {
+  width: 100%;
+  height: 7rem; /* h-28 */
+}
+@container (min-width: 520px) {
+  .subject-card-row {
+    flex-direction: row;
+  }
+  .subject-card-media {
+    width: 14rem; /* w-56 */
+    height: auto;
+    flex-shrink: 0;
+  }
+}
+
+/* Subject stats: 2 cols narrow, 3 cols when the pane has room */
+.subject-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 1rem;
+  row-gap: 0.25rem;
+}
+@container (min-width: 560px) {
+  .subject-stats {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+/* Valuation hero stats: 4 cols when wide, 2x2 in narrow panes */
+.hero-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+@container (min-width: 520px) {
+  .hero-stats {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
