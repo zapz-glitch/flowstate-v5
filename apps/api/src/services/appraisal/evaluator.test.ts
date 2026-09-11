@@ -365,8 +365,9 @@ describe('evaluateComparables', () => {
 
 describe('Default Values', () => {
   it('should have all default filters', () => {
-    expect(DEFAULT_FILTERS.length).toBe(8)
+    expect(DEFAULT_FILTERS.length).toBe(9)
     expect(DEFAULT_FILTERS.map((f) => f.type)).toContain('subdivision_match')
+    expect(DEFAULT_FILTERS.map((f) => f.type)).toContain('foundation_match')
     expect(DEFAULT_FILTERS.map((f) => f.type)).toContain('sale_age')
     expect(DEFAULT_FILTERS.map((f) => f.type)).toContain('sqft_diff')
     expect(DEFAULT_FILTERS.map((f) => f.type)).toContain('year_built_diff')

@@ -433,6 +433,9 @@ export function recalculateValuationFromComps(
       closingCostsPercent: dealParams.closingCostsPercent,
       carryingCostsPercent: dealParams.carryingCostsPercent,
       wholesaleFee: dealParams.wholesaleFee,
+      // Carry the server's position-tiered proximity deduction through recalc —
+      // recomputing it here would need the OSM risk data the client lacks.
+      locationPenaltyAmount: originalValuation.locationPenalty,
     },
     rehabTable,
     tierRanges

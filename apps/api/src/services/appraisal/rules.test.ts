@@ -404,13 +404,21 @@ describe('ARV comp selection', () => {
     expect(r.arv).toBe(330000)
   })
 
-  it('returns INSUFFICIENT_COMPS when fewer than 3 valid and expansion exhausted', () => {
+  it('relaxes to nearest recent comps when fewer than 3 valid and expansion exhausted', () => {
     const comps = [comp('c1'), comp('c2')]
+    const r = service.evaluateWithFallback(subject(), comps, { filters: lax, adjustments: [] })
+
+    expect(r.fallbackUsed).toBe('nearest_comps')
+    expect(r.insufficientComps).toBe(false)
+    expect(r.selectedCompIds?.length).toBe(2)
+  })
+
+  it('returns INSUFFICIENT_COMPS only when no comps sold within the age window', () => {
+    const comps = [comp('c1', { saleDate: daysAgo(900) }), comp('c2', { saleDate: daysAgo(800) })]
     const r = service.evaluateWithFallback(subject(), comps, { filters: lax, adjustments: [] })
 
     expect(r.fallbackUsed).toBe('insufficient')
     expect(r.insufficientComps).toBe(true)
-    expect(r.selectedCompIds?.length).toBe(2)
   })
 
   it('expands geography before relaxing sale age', () => {

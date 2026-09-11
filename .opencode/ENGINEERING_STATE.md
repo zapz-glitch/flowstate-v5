@@ -47,6 +47,21 @@ valuation (renovated-skip, location penalty) -> report.
 - Redfin discovery via Google site:search through Firecrawl (autocomplete 403).
 - StreetView no-imagery -> static insignia via metadata endpoint.
 
+## Production-prep QA (committed)
+- Deleted 6 stale python-*.test.ts regression files (dead python engine modules).
+- FIXED real bug: selectCredential returned a cooling-down key when ALL
+  CoreLogic creds were rate-limited -> now fails fast with "retry window"
+  error (test: second call makes no request).
+- FIXED: insufficientComps restored to <REQUIRED_ARV_COMPS — thin sets
+  (1-2 comps) now trigger geographic -> older-sales -> nearest fallbacks.
+- locationPenalty parity added to shared package (dashboard recalc carries
+  the server-computed amount through — was silently dropped).
+- Reports list deduped by propertyAddress (legacy dupes collapse to newest).
+- ?address= param on /dashboard/analyze (extension entry; suppresses restore).
+- apps/extension: MV3 right-click -> analyze extension committed.
+- npm run test: 15 regression files PASS; vitest src/: all pass;
+  typechecks clean both apps; next build clean (all routes).
+
 ## Pending / Next
 - Observability: extend evidence with photo/vision metrics if desired.
 - foundation_match visible in Evaluation Settings UI (preset editor lists filters).

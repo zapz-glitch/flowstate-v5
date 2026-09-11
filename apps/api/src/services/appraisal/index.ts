@@ -338,9 +338,10 @@ class PropertyAppraisalService implements AppraisalService {
       avgPricePerSqft,
       medianSalePrice,
       selectedCompIds: selected.map((c) => c.id),
-      // Any valid comp is enough to produce an ARV — a single qualifying
-      // comp still drives the evaluation
-      insufficientComps: selected.length === 0,
+      // Fewer than REQUIRED_ARV_COMPS verified comps is insufficient — thin
+      // sets must trigger the expansion fallbacks (geography → older sales →
+      // nearest) rather than silently anchoring ARV on 1–2 sales.
+      insufficientComps: selected.length < REQUIRED_ARV_COMPS,
     }
   }
 

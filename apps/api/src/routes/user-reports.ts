@@ -87,6 +87,16 @@ userReports.get('/', async (c) => {
       )
     : baseCondition
 
+  // One report per property — collapse legacy duplicate rows to the newest.
+  const latestPerProperty = sql`${savedReports.id} IN (
+    SELECT id FROM (
+      SELECT id, MAX(created_at) AS mx FROM saved_reports
+      WHERE user_id = ${session.user.id}
+      GROUP BY property_address
+    ) latest WHERE saved_reports.id = latest.id
+  )`
+  const dedupedCondition = and(whereCondition, latestPerProperty)
+
   const [reports, countResult] = await Promise.all([
     db
       .select({
@@ -102,14 +112,14 @@ userReports.get('/', async (c) => {
         createdAt: savedReports.createdAt,
       })
       .from(savedReports)
-      .where(whereCondition)
+      .where(dedupedCondition)
       .orderBy(desc(savedReports.createdAt))
       .limit(limit)
       .offset(offset),
     db
       .select({ count: sql<number>`count(*)` })
       .from(savedReports)
-      .where(whereCondition)
+      .where(dedupedCondition)
       .then((r) => r[0]),
   ])
 

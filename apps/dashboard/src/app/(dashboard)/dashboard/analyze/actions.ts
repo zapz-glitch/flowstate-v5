@@ -227,6 +227,9 @@ export interface ValuationData {
   projectedProfit?: number
   projectedROI?: number
   wholesalePrice?: number
+  /** Location-risk deduction applied to buy price (positional proximity) */
+  locationPenalty?: number
+  locationPenaltyPercent?: number
   recommendation?: string
   recommendationReason?: string
   investorAnalysis?: {

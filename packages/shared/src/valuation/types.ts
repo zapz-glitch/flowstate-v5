@@ -95,6 +95,10 @@ export interface ValuationParams {
   carryingCostsPercent?: number
   /** Wholesale fee amount (default: $10,000) */
   wholesaleFee?: number
+  /** Location-risk deduction as % of ARV (0 = none) */
+  locationPenaltyPercent?: number
+  /** Explicit location-risk deduction in dollars — wins over the percent form */
+  locationPenaltyAmount?: number
 }
 
 // ─── Valuation Result ──────────────────────────────────────────────────────────
@@ -127,6 +131,10 @@ export interface ValuationResult {
   wholesaleFee: number
   wholesalePrice: number
   wholesalePricePercent: number
+
+  // Location-risk deduction applied
+  locationPenalty: number
+  locationPenaltyPercent: number
 
   // Profit & ROI
   projectedProfit: number

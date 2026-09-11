@@ -272,8 +272,9 @@ function selectCredential(credentials: ApiCredentials[]): ApiCredentials | null 
     return cred
   }
 
-  currentKeyIndex = (currentKeyIndex + 1) % credentials.length
-  return credentials[currentKeyIndex]
+  // All credentials are inside their failure cooldown — return null so the
+  // caller fails fast instead of hammering the provider mid-retry-window.
+  return null
 }
 
 function markKeyFailed(keyIndex: number): void {
@@ -377,7 +378,13 @@ async function request<T>(
 
   for (let attempt = 0; attempt < credentials.length; attempt++) {
     const cred = selectCredential(credentials)
-    if (!cred || triedKeys.has(cred.index)) {
+    if (!cred) {
+      lastError = new Error(
+        `CoreLogic rate limited — retry window active for ~${Math.ceil(FAILURE_COOLDOWN_MS / 1000)}s`
+      )
+      break
+    }
+    if (triedKeys.has(cred.index)) {
       continue
     }
     triedKeys.add(cred.index)
