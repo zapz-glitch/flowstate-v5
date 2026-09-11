@@ -70,6 +70,8 @@ export interface ValuationParams {
   skipBaseRehab?: boolean
   /** Location-risk deduction as % of ARV (0 = none) — major road/railroad/commercial proximity */
   locationPenaltyPercent?: number
+  /** Explicit location-risk deduction in dollars — wins over locationPenaltyPercent */
+  locationPenaltyAmount?: number
   /** Major items with costs */
   majorItems?: MajorItem[]
   /** Addition play (extra budget for improvements) */

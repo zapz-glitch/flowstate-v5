@@ -656,6 +656,13 @@ export interface AnalysisResponse {
     inFloodZone: boolean
     description: string | null
   } | null
+  /** Positional proximity risks — drives the proximity deduction */
+  locationRisks: Array<{
+    type: string
+    description: string
+    position: 'fronting' | 'backing' | 'siding' | null
+    featureName: string | null
+  }> | null
   /** Neighbourhood analysis — community, schools, POI */
   neighbourhood: {
     crime: {
@@ -1129,6 +1136,16 @@ export function buildAnalysisResponse(
           totalValue: enrichment.permits.totalJobValue ?? null,
           recentTypes: (enrichment.permits.recentPermitTypes ?? []).slice(0, 5),
         }
+      : null,
+
+    // ═══ LOCATION RISKS (positional proximity evidence) ═════════════════════
+    locationRisks: enrichment.locationRisks?.length
+      ? enrichment.locationRisks.map((r) => ({
+          type: r.type,
+          description: r.description,
+          position: r.position ?? null,
+          featureName: r.featureName ?? null,
+        }))
       : null,
 
     // ═══ FLOOD ZONE ═════════════════════════════════════════════════════════

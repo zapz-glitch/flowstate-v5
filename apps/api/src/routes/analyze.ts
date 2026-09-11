@@ -230,6 +230,7 @@ analyze.post('/', async (c) => {
           arvThreshold,
           asIsThresholdPercent:
             body.asIsThresholdPercent ?? userSettings.asIsThresholdPercent,
+          proximityConfig: userSettings.proximityConfig,
         },
         llmEnabled:
           body.llmAnalysis?.enabled === true && !!c.env.OPENROUTER_API_KEY,

@@ -18,6 +18,7 @@ import {
   locationSettings,
   majorItemCosts,
   arvThreshold as arvThresholdTable,
+  proximityConfig as proximityConfigTable,
 } from '../../db'
 import type {
   FilterType,
@@ -47,6 +48,8 @@ export interface UserAnalysisSettings {
   customMajorItemCosts?: Record<string, number>
   arvThreshold: ArvThresholdConfig
   asIsThresholdPercent?: number
+  /** Proximity deductions — siding/backing/fronting amounts + ARV threshold */
+  proximityConfig?: import('../../routes/proximity-config').ProximityConfig
 }
 
 export interface LoadSettingsOptions {
@@ -137,15 +140,22 @@ export async function loadUserAnalysisSettings(
   }
 
   // Load rehab config + deal params + major item costs + arv threshold in parallel
-  const [rehabRow, dealParamsRow, majorItemCostsRow, arvThresholdRow] = await Promise.all([
+  const [rehabRow, dealParamsRow, majorItemCostsRow, arvThresholdRow, proximityRow] = await Promise.all([
     db.select().from(rehabConfig).where(eq(rehabConfig.userId, userId)).limit(1).then((r) => r[0]),
     db.select().from(dealParams).where(eq(dealParams.userId, userId)).limit(1).then((r) => r[0]),
     db.select().from(majorItemCosts).where(eq(majorItemCosts.userId, userId)).limit(1).then((r) => r[0]),
     db.select().from(arvThresholdTable).where(eq(arvThresholdTable.userId, userId)).limit(1).then((r) => r[0]),
+    db.select().from(proximityConfigTable).where(eq(proximityConfigTable.userId, userId)).limit(1).then((r) => r[0]),
   ])
 
   let customRehabTable: Record<ArvTier, RehabEstimate[]> | undefined
   let customTierRanges: TierRangeDefinition[] | undefined
+  let proximityCfg: import('../../routes/proximity-config').ProximityConfig | undefined
+  if (proximityRow) {
+    try {
+      proximityCfg = JSON.parse(proximityRow.configJson)
+    } catch {}
+  }
   if (rehabRow) {
     try {
       customRehabTable = JSON.parse(rehabRow.configJson)
@@ -230,6 +240,7 @@ export async function loadUserAnalysisSettings(
     const dealMatch = bestMatch('deal')
     const majorMatch = bestMatch('major')
     const arvMatch = bestMatch('arv_threshold')
+    const proximityMatch = bestMatch('proximity')
 
     // Override appraisal preset
     if (appraisalMatch?.appraisalPresetId) {
@@ -282,6 +293,12 @@ export async function loadUserAnalysisSettings(
         arvThresholdConfig = { ...arvThresholdConfig, ...locArv }
       } catch {}
     }
+    // Override proximity config (siding/backing/fronting deductions)
+    if (proximityMatch?.proximityConfigJson) {
+      try {
+        proximityCfg = JSON.parse(proximityMatch.proximityConfigJson)
+      } catch {}
+    }
 
     const appliedTypes = [
       appraisalMatch && 'appraisal',
@@ -303,6 +320,7 @@ export async function loadUserAnalysisSettings(
     customMajorItemCosts,
     arvThreshold: arvThresholdConfig,
     asIsThresholdPercent: arvThresholdConfig.asIsThresholdPercent ?? dealParamsRow?.asIsThresholdPercent ?? undefined,
+    proximityConfig: proximityCfg,
   }
 
   // Cache the result (without per-request buyboxOverrides — those are applied on read)

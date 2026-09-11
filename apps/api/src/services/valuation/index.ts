@@ -150,6 +150,7 @@ class PropertyValuationService implements ValuationService {
       wholesaleFee = 10000,
       desiredProfit,
       locationPenaltyPercent = 0,
+      locationPenaltyAmount,
     } = params
 
     const arvTier = getArvTier(arv, this.tierRanges)
@@ -170,8 +171,9 @@ class PropertyValuationService implements ValuationService {
     const carryingCosts = Math.round(arv * (carryingCostsPercent / 100))
     const minProfit = desiredProfit ?? (typeof rehabEstimate.minProfit === 'number' ? rehabEstimate.minProfit : 0)
     // Location-risk deduction — major road/railroad/commercial proximity
-    // discounts what a buyer will pay post-rehab.
-    const locationPenalty = Math.round(arv * (locationPenaltyPercent / 100))
+    // discounts what a buyer will pay post-rehab. An explicit dollar amount
+    // (position-tiered proximity config) wins over the percentage form.
+    const locationPenalty = locationPenaltyAmount ?? Math.round(arv * (locationPenaltyPercent / 100))
 
     // Buy Price = ARV − Rehab − Closing − Carrying − Profit Target − Location Penalty
     const buyPrice = arv - totalRehabCost - closingCosts - carryingCosts - minProfit - locationPenalty

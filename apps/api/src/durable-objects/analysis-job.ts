@@ -238,9 +238,12 @@ export class AnalysisJobDO {
         ? propertyApi.getFloodZone(property.latitude, property.longitude).catch(() => null)
         : Promise.resolve(null),
       // Location risk (major roads, railroads, commercial) — fetched during
-      // enrichment so it can deduct from valuation, not just flag post-hoc
+      // enrichment so it can deduct from valuation, not just flag post-hoc.
+      // The street name lets detection classify fronting/backing/siding.
       property.latitude && property.longitude
-        ? detectOsmLocationRisks(property.latitude, property.longitude).catch(() => null)
+        ? detectOsmLocationRisks(property.latitude, property.longitude, 150, {
+            streetName: property.address?.replace(/^\d+\s+/, '') ?? undefined,
+          }).catch(() => null)
         : Promise.resolve(null),
     ])
 

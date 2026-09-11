@@ -23,6 +23,8 @@ const ROAD_TYPE_LABELS: Record<string, string> = {
   secondary: 'Secondary Road',
 }
 
+export type RiskPosition = 'fronting' | 'backing' | 'siding'
+
 export interface LocationRisk {
   type: 'major_road' | 'railroad' | 'commercial'
   description: string
@@ -30,6 +32,10 @@ export interface LocationRisk {
   distanceMeters: number
   /** Additional detail (road name, road type, etc.) */
   detail?: string
+  /** Where the exposure sits relative to the subject — drives proximity deduction */
+  position?: RiskPosition | null
+  /** Feature name (road/commercial) when OSM provides one */
+  featureName?: string
 }
 
 export interface LocationRiskResult {
@@ -46,14 +52,17 @@ export interface LocationRiskResult {
  */
 function buildOverpassQuery(lat: number, lng: number, radiusMeters: number): string {
   const roadTypes = MAJOR_ROAD_TYPES.join('|')
+  // Minor-road ways give us the subject's own street — the front reference
+  // for fronting/backing/siding classification.
   return `
 [out:json][timeout:10];
 (
   way(around:${radiusMeters},${lat},${lng})["highway"~"^(${roadTypes})$"];
   way(around:${radiusMeters},${lat},${lng})["railway"="rail"];
   way(around:${radiusMeters},${lat},${lng})["landuse"~"^(commercial|industrial|retail)$"];
+  way(around:80,${lat},${lng})["highway"~"^(residential|unclassified|living_street|tertiary)$"];
 );
-out tags;
+out center tags;
 `.trim()
 }
 
@@ -61,6 +70,30 @@ interface OverpassElement {
   type: string
   id: number
   tags?: Record<string, string>
+  center?: { lat: number; lon: number }
+}
+
+/** Initial bearing (degrees) from subject to a point */
+function bearingBetween(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const toRad = (d: number) => (d * Math.PI) / 180
+  const dLng = toRad(lng2 - lng1)
+  const y = Math.sin(dLng) * Math.cos(toRad(lat2))
+  const x = Math.cos(toRad(lat1)) * Math.sin(toRad(lat2)) - Math.sin(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.cos(dLng)
+  return ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360
+}
+
+/** Smallest angle between two bearings (0-180) */
+function bearingDelta(a: number, b: number): number {
+  const d = Math.abs(a - b) % 360
+  return d > 180 ? 360 - d : d
+}
+
+/** Normalize a street name for comparison — "Engman St", "N Missouri Ave" */
+function normalizeStreet(name: string | null | undefined): string {
+  return (name ?? '')
+    .toLowerCase()
+    .replace(/\b(street|st|avenue|ave|drive|dr|boulevard|blvd|road|rd|lane|ln|court|ct|place|pl|terrace|ter|way|circle|cir|north|n|south|s|east|e|west|w)\b\.?/g, '')
+    .replace(/[^a-z]/g, '')
 }
 
 interface OverpassResponse {
@@ -79,6 +112,7 @@ export async function detectOsmLocationRisks(
   lat: number,
   lng: number,
   radiusMeters = 150,
+  opts?: { streetName?: string },
 ): Promise<LocationRiskResult> {
   const start = Date.now()
   const risks: LocationRisk[] = []
@@ -115,6 +149,28 @@ export async function detectOsmLocationRisks(
       }
     }
 
+    // ── Front reference: the subject's own street ───────────────────────────
+    // Prefer a name match with the address street; otherwise the nearest
+    // minor-road center. Its bearing = the direction the property faces.
+    const subjectStreetNorm = normalizeStreet(opts?.streetName)
+    const minorRoads = elements.filter((el) => {
+      const h = el.tags?.highway
+      return h && ['residential', 'unclassified', 'living_street', 'tertiary'].includes(h)
+    })
+    const namedMatch = subjectStreetNorm
+      ? minorRoads.find((el) => normalizeStreet(el.tags?.name) === subjectStreetNorm)
+      : undefined
+    const frontRef = (namedMatch ?? minorRoads[0])?.center
+    const frontBearing = frontRef ? bearingBetween(lat, lng, frontRef.lat, frontRef.lon) : null
+
+    const positionOf = (featureName: string | undefined, center?: { lat: number; lon: number }): RiskPosition | null => {
+      // A road risk on the subject's own street is always fronting
+      if (featureName && subjectStreetNorm && normalizeStreet(featureName) === subjectStreetNorm) return 'fronting'
+      if (!center || frontBearing === null) return null
+      const delta = bearingDelta(frontBearing, bearingBetween(lat, lng, center.lat, center.lon))
+      return delta <= 60 ? 'fronting' : delta >= 120 ? 'backing' : 'siding'
+    }
+
     // Dedupe by type — only report one risk per category
     const seenRoadTypes = new Set<string>()
     let hasRailroad = false
@@ -129,11 +185,14 @@ export async function detectOsmLocationRisks(
           seenRoadTypes.add(tags.highway)
           const roadName = tags.name || tags.ref || 'Unnamed road'
           const typeLabel = ROAD_TYPE_LABELS[tags.highway] || tags.highway
+          const position = positionOf(roadName !== 'Unnamed road' ? roadName : undefined, el.center)
           risks.push({
             type: 'major_road',
-            description: `Adjacent to ${typeLabel}: ${roadName}`,
+            description: `Adjacent to ${typeLabel}: ${roadName}${position ? ` (${position})` : ''}`,
             distanceMeters: radiusMeters,
             detail: `${typeLabel} (${tags.highway}) within ${radiusMeters}m`,
+            position,
+            featureName: roadName !== 'Unnamed road' ? roadName : undefined,
           })
         }
       }
@@ -142,11 +201,14 @@ export async function detectOsmLocationRisks(
       if (tags.railway === 'rail' && !hasRailroad) {
         hasRailroad = true
         const railName = tags.name || 'Railroad'
+        const position = positionOf(tags.name, el.center)
         risks.push({
           type: 'railroad',
-          description: `Near railroad: ${railName}`,
+          description: `Near railroad: ${railName}${position ? ` (${position})` : ''}`,
           distanceMeters: radiusMeters,
           detail: `Railroad tracks within ${radiusMeters}m`,
+          position,
+          featureName: tags.name,
         })
       }
 
@@ -154,11 +216,14 @@ export async function detectOsmLocationRisks(
       if (tags.landuse && !seenLandUse.has(tags.landuse)) {
         seenLandUse.add(tags.landuse)
         const name = tags.name || tags.landuse
+        const position = positionOf(tags.name, el.center)
         risks.push({
           type: 'commercial',
-          description: `Adjacent to ${tags.landuse} area: ${name}`,
+          description: `Adjacent to ${tags.landuse} area: ${name}${position ? ` (${position})` : ''}`,
           distanceMeters: radiusMeters,
           detail: `${tags.landuse} land use within ${radiusMeters}m`,
+          position,
+          featureName: tags.name,
         })
       }
     }

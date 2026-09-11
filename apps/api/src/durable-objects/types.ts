@@ -47,6 +47,9 @@ export interface AnalyzeRequest {
     locationPenaltyPercent?: number
   }
 
+  /** Proximity deduction config — siding/backing/fronting + ARV threshold */
+  proximityConfig?: import('../routes/proximity-config').ProximityConfig
+
   // Enrichment options
   enrichment?: {
     permits?: boolean

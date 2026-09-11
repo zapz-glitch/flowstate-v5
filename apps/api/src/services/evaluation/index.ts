@@ -36,6 +36,7 @@ import {
 } from '../analysis'
 import { createPhotoService, type PhotoBundle, type PropertyIdentifier } from '../photo-provider'
 import { assessRenovationFromPhotos, assessCompCurbAppeal, type RenovationAssessment, type CurbAppealCheck } from '../vision/renovation'
+import { PROXIMITY_DEFAULTS } from '../../routes/proximity-config'
 import { deriveBuybox } from './derivation'
 import { buildEvaluationReport } from './report'
 import type { ReportStep } from './types'
@@ -66,6 +67,8 @@ export interface EvaluationParams {
     /** Location-risk deduction as % of ARV (major road/railroad/commercial proximity) */
     locationPenaltyPercent?: number
   }
+  /** Proximity deduction config — siding/backing/fronting + ARV threshold */
+  proximityConfig?: import('../../routes/proximity-config').ProximityConfig
   customRehabTable?: RehabTable
   customTierRanges?: TierRangeDefinition[]
   customMajorItemCosts?: Record<string, number>
@@ -544,11 +547,22 @@ export async function performAnalysis(
     compAvgSqft,
     rehabLevelIndex: derivedBuybox.rehabLevelIndex,
     skipBaseRehab: derivedBuybox.renovatedVerified === true,
-    // Location-risk deduction: OSM flags (major road / railroad / commercial
-    // proximity) discount the buy price by a % of ARV — configurable via buybox
-    locationPenaltyPercent: (bundle.enrichment.locationRisks?.length ?? 0) > 0
-      ? (params.buybox?.locationPenaltyPercent ?? 3)
-      : 0,
+    // Proximity deduction — Evaluation Settings' Proximity Adjustments:
+    // worst detected position wins (fronting > backing > siding);
+    // flat $ below the ARV threshold, % of ARV at/above it.
+    locationPenaltyAmount: (() => {
+      const risks = bundle.enrichment.locationRisks ?? []
+      if (risks.length === 0) return 0
+      const cfg = params.proximityConfig ?? PROXIMITY_DEFAULTS
+      const rank = { fronting: 3, backing: 2, siding: 1 } as const
+      const worst = risks.reduce<keyof typeof rank | null>((w, r) => {
+        const pos = r.position ?? 'siding'
+        return !w || rank[pos] > rank[w] ? pos : w
+      }, null)
+      if (!worst) return 0
+      const tier = cfg[worst]
+      return finalArv >= cfg.arvThreshold ? Math.round(finalArv * (tier.percent / 100)) : tier.flat
+    })(),
     majorItems: derivedBuybox.majorItems,
     additionPlay: derivedBuybox.additionPlay ?? buybox.additionPlay ?? 0,
     closingCostsPercent: buybox.closingCostsPercent ?? 8,
