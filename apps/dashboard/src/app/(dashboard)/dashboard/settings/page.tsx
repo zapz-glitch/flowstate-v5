@@ -13,6 +13,7 @@ const NAV_ITEMS = [
   { href: '/dashboard/reports', defaultName: 'Property Reports' },
   { href: '/dashboard/evaluation-settings', defaultName: 'Evaluation Settings' },
   { href: '/dashboard/api-hub', defaultName: 'API Hub' },
+  { href: '/dashboard/tasks', defaultName: 'Tasks' },
   { href: '/dashboard/admin', defaultName: 'Admin Panel' },
   { href: '/dashboard/admin/observability', defaultName: 'Observability' },
 ]

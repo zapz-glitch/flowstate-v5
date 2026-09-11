@@ -478,6 +478,34 @@ export async function saveUiPrefs(prefs: UiPrefs): Promise<UiPrefs & { success: 
   })
 }
 
+// ─── Tasks ───────────────────────────────────────────────────────────────────
+
+export interface TaskItem {
+  id: string
+  title: string
+  project: string | null
+  dueDate: string | null
+  done: boolean
+  doneAt: string | null
+  createdAt: string
+}
+
+export async function getTasks(): Promise<{ tasks: TaskItem[] }> {
+  return fetchApi('/tasks')
+}
+
+export async function createTask(input: { title: string; project?: string; dueDate?: string }): Promise<{ task: TaskItem }> {
+  return fetchApi('/tasks', { method: 'POST', body: JSON.stringify(input) })
+}
+
+export async function updateTask(id: string, patch: Partial<Pick<TaskItem, 'title' | 'project' | 'dueDate' | 'done'>>): Promise<{ task: TaskItem }> {
+  return fetchApi(`/tasks/${id}`, { method: 'PATCH', body: JSON.stringify(patch) })
+}
+
+export async function deleteTask(id: string): Promise<{ success: boolean }> {
+  return fetchApi(`/tasks/${id}`, { method: 'DELETE' })
+}
+
 // ─── Proximity Adjustment Config ─────────────────────────────────────────────
 
 export interface ProximityPosition {

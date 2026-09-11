@@ -723,3 +723,30 @@ export const analysisRuns = sqliteTable(
     index('idx_analysis_runs_created_at').on(table.createdAt),
   ]
 )
+
+// ==========================================
+// Tasks (per-user to-do list)
+// ==========================================
+
+export const tasks = sqliteTable(
+  'tasks',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    title: text('title').notNull(),
+    /** Optional project grouping (free text — e.g. a property address) */
+    project: text('project'),
+    /** ISO date or datetime-local string; null = no deadline */
+    dueDate: text('due_date'),
+    done: integer('done').notNull().default(0), // 0/1 — D1 has no boolean
+    doneAt: text('done_at'),
+    createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
+    updatedAt: text('updated_at').notNull().$defaultFn(() => new Date().toISOString()),
+  },
+  (table) => [
+    index('idx_tasks_user_id').on(table.userId),
+    index('idx_tasks_done').on(table.userId, table.done),
+  ]
+)

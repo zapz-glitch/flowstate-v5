@@ -23,6 +23,7 @@ import {
   Upload,
   Activity,
   ExternalLink,
+  ListTodo,
 } from 'lucide-react'
 import { signOut } from '@/lib/auth-client'
 import { Logo, LogoIcon } from '@/components/ui/Logo'
@@ -54,6 +55,7 @@ const baseNavigation: Array<{
   { name: 'Property Reports', href: '/dashboard/reports', icon: ClipboardList },
   { name: 'Evaluation Settings', href: '/dashboard/evaluation-settings', icon: Settings2 },
   { name: 'API Hub', href: '/dashboard/api-hub', icon: Key },
+  { name: 'Tasks', href: '/dashboard/tasks', icon: ListTodo },
 ]
 
 /** Resolve a custom link's site favicon (internal paths return null → default icon). */
