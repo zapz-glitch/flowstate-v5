@@ -384,14 +384,23 @@ export async function performAnalysis(
         state: bundle.property.state,
         zipCode: bundle.property.zipCode,
       }
-      const compIdents: PropertyIdentifier[] = bundle.comparables.map((c) => ({
+      // Prioritize photo spend: ARV-selected comps first, then nearest —
+      // cards without listing photos fall back to Street View anyway
+      const selectedSet = new Set(appraisalResult.selectedCompIds ?? [])
+      const rankedComps = [...bundle.comparables].sort((a, b) => {
+        const aSel = selectedSet.has(a.id) ? 1 : 0
+        const bSel = selectedSet.has(b.id) ? 1 : 0
+        if (aSel !== bSel) return bSel - aSel
+        return (a.distanceMiles ?? 999) - (b.distanceMiles ?? 999)
+      })
+      const compIdents: PropertyIdentifier[] = rankedComps.map((c) => ({
         propertyId: c.id,
         address: c.address,
         city: c.city,
         state: c.state,
         zipCode: c.zipCode,
       }))
-      photoBundle = await photoService.fetchPhotoBundle(subjectIdent, compIdents, { maxComps: 10 })
+      photoBundle = await photoService.fetchPhotoBundle(subjectIdent, compIdents, { maxComps: 6 })
       step(
         'photo_fetch',
         photoBundle.subject ? 'completed' : 'fallback',
@@ -408,15 +417,37 @@ export async function performAnalysis(
   }
   onProgress?.('Photos fetched')
 
-  // ── 3. Vision: renovation level from subject photos ─────────────────────────
-  let renovation: RenovationAssessment | null = null
+  // ── 3. Vision: subject renovation+curb-appeal AND comp checks in parallel ──
+  // One merged LLM call for the subject (renovation level + curb appeal);
+  // per-comp curb checks run alongside it — all vision resolves together.
   const subjectPhotos = photoBundle?.subject?.photos ?? []
-  try {
-    renovation = await assessRenovationFromPhotos(env, subjectPhotos, {
-      address: bundle.property.address,
-      squareFeet: bundle.property.squareFeet,
-      yearBuilt: bundle.property.yearBuilt,
-    })
+  const compVisionPairs = (appraisalResult.selectedCompIds ?? [])
+    .map((id) => ({ id, photos: photoBundle?.comps[id]?.photos ?? [] }))
+    .filter((p) => p.photos.length > 0)
+
+  const [renovationResult, compChecks] = await Promise.all([
+    (async () => {
+      try {
+        return await assessRenovationFromPhotos(env, subjectPhotos, {
+          address: bundle.property.address,
+          squareFeet: bundle.property.squareFeet,
+          yearBuilt: bundle.property.yearBuilt,
+        })
+      } catch { return null }
+    })(),
+    Promise.all(
+      compVisionPairs.map(async (p) => {
+        try {
+          return { id: p.id, check: await assessCompCurbAppeal(env, p.photos) }
+        } catch {
+          return { id: p.id, check: { condition: 'unknown', confidence: null, summary: 'Vision call failed', photosExamined: p.photos.length } as CurbAppealCheck }
+        }
+      })
+    ),
+  ])
+
+  const renovation: RenovationAssessment | null = renovationResult
+  if (renovation) {
     step(
       'renovation_assessment',
       renovation.renovationLevelIndex != null ? 'completed' : 'fallback',
@@ -427,44 +458,18 @@ export async function performAnalysis(
     if (renovation.status !== 'ok' && renovation.status !== 'insufficient_photo_evidence') {
       fallbacksUsed.push(`vision:${renovation.status}`)
     }
-  } catch (error) {
-    console.warn('[Evaluate] Vision assessment failed (non-fatal):', error)
-    step('renovation_assessment', 'fallback', error instanceof Error ? error.message : 'vision failed')
+  } else {
+    step('renovation_assessment', 'fallback', 'vision call failed')
     fallbacksUsed.push('vision:error')
   }
   onProgress?.('Renovation level assessed')
 
-  // ── 3b. Curb appeal: visual ARV-candidacy check on selected comps ──────────
-  // Only ARV-selected comps get a vision call — cheap, bounded, and validates
-  // that the sales anchoring the ARV look like post-renovation comps. The
-  // subject gets the same check so its card can show the same label.
-  let compCurbAppeal: Record<string, CurbAppealCheck> | undefined
-  let subjectCurbAppeal: CurbAppealCheck | null = null
-  {
-    if (subjectPhotos.length > 0) {
-      try {
-        subjectCurbAppeal = await assessCompCurbAppeal(env, subjectPhotos)
-      } catch {
-        subjectCurbAppeal = null
-      }
-    }
-    const selectedIds = appraisalResult.selectedCompIds ?? []
-    const photoPairs = selectedIds
-      .map((id) => ({ id, photos: photoBundle?.comps[id]?.photos ?? [] }))
-      .filter((p) => p.photos.length > 0)
-    if (photoPairs.length > 0) {
-      const checks = await Promise.all(
-        photoPairs.map(async (p) => {
-          try {
-            return { id: p.id, check: await assessCompCurbAppeal(env, p.photos) }
-          } catch {
-            return { id: p.id, check: { condition: 'unknown', confidence: null, summary: 'Vision call failed', photosExamined: p.photos.length } as CurbAppealCheck }
-          }
-        })
-      )
-      compCurbAppeal = Object.fromEntries(checks.map((c) => [c.id, c.check]))
-    }
-  }
+  // Subject curb appeal comes from the merged vision pass (one LLM call for
+  // both renovation level + curb-appeal condition); comp checks resolved in
+  // the same parallel batch above.
+  const subjectCurbAppeal: CurbAppealCheck | null = renovation?.curbAppeal ?? null
+  let compCurbAppeal: Record<string, CurbAppealCheck> | undefined =
+    compChecks.length > 0 ? Object.fromEntries(compChecks.map((c) => [c.id, c.check])) : undefined
 
   // Price fallback: a selected comp that meets the appraisal rules and sold
   // at the top of the market is deemed an ARV/renovated comp even when its

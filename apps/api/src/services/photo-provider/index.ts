@@ -279,18 +279,24 @@ class MultiPhotoService implements PhotoService {
     // All fetches in parallel — subject gets full extraction via the fallback
     // chain, comps use the primary provider only (HTML-only, no fallback — the
     // 3-provider chain per comp would multiply scraper calls for display data)
+    // Each fetch is timeout-bounded so one hung scrape can't gate the bundle.
+    const withTimeout = <T>(p: Promise<T>, ms: number, fallback: T): Promise<T> =>
+      Promise.race([p, new Promise<T>((r) => setTimeout(() => r(fallback), ms))])
+
     const compProvider = this.providers.get('zillow') ?? this.activeProvider
+    const failed = (propertyId: string, error: string, code: 'NO_PROVIDER' | 'FETCH_FAILED') =>
+      ({ success: false as const, propertyId, error, code })
+
     const [subjectResult, ...compResults] = await Promise.all([
-      this.fetchPhotos(subject, options),
+      withTimeout(this.fetchPhotos(subject, options), 20000, failed(subject.propertyId, 'Subject photo fetch timed out', 'FETCH_FAILED')),
       ...compsToFetch.map((comp) =>
         compProvider
-          ? compProvider.fetchPhotos(comp, { ...options, skipJsonExtraction: true })
-          : Promise.resolve({
-              success: false as const,
-              propertyId: comp.propertyId,
-              error: 'No photo provider available',
-              code: 'NO_PROVIDER' as const,
-            })
+          ? withTimeout(
+              compProvider.fetchPhotos(comp, { ...options, skipJsonExtraction: true }),
+              12000,
+              failed(comp.propertyId, 'Comp photo fetch timed out', 'FETCH_FAILED')
+            )
+          : Promise.resolve(failed(comp.propertyId, 'No photo provider available', 'NO_PROVIDER'))
       ),
     ])
 

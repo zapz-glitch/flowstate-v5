@@ -134,6 +134,8 @@ export interface RenovationAssessment {
   limitations: string[]
   provider: string | null
   model: string | null
+  /** Curb-appeal condition assessed in the same vision pass */
+  curbAppeal?: CurbAppealCheck | null
   error?: string
 }
 
@@ -175,8 +177,13 @@ Return ONLY a JSON object:
   "evidence_for_classification": ["why this level fits the whole property"],
   "evidence_against_more_severe_level": ["why NOT the next heavier level"],
   "evidence_against_less_severe_level": ["why NOT the next lighter level"],
-  "limitations": ["what photos did not show"]
-}`
+  "limitations": ["what photos did not show"],
+  "curb_appeal_condition": "renovated|dated|distressed|unknown",
+  "curb_appeal_confidence": 0-100,
+  "curb_appeal_summary": "one sentence describing visible condition"
+}
+
+For curb_appeal_condition: renovated = modern finishes/move-in ready, dated = livable but visibly dated finishes, distressed = obvious disrepair or heavy wear, unknown = photos insufficient to judge. Never guess — use "unknown".`
 
 // ─── Assessment ───────────────────────────────────────────────────────────────
 
@@ -325,6 +332,15 @@ export async function assessRenovationFromPhotos(
     limitations: list(parsed.limitations),
     provider: provider.name,
     model: provider.model,
+    curbAppeal: (() => {
+      const raw = String(parsed.curb_appeal_condition ?? '').toLowerCase()
+      const condition = raw === 'renovated' || raw === 'dated' || raw === 'distressed' ? raw : 'unknown'
+      const caConf = typeof parsed.curb_appeal_confidence === 'number' ? Math.min(100, Math.max(0, parsed.curb_appeal_confidence)) : null
+      const summary = typeof parsed.curb_appeal_summary === 'string' ? parsed.curb_appeal_summary : null
+      return condition !== 'unknown' || summary
+        ? { condition: condition as CurbAppealCheck['condition'], source: 'vision' as const, confidence: caConf, summary, photosExamined: photos.length }
+        : null
+    })(),
   }
 }
 
