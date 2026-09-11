@@ -18,7 +18,7 @@ import { type EvaluationParams } from '../services/evaluation'
 import { performAnalysis } from '../services/evaluation'
 import { detectOsmLocationRisks } from '../services/location-risk'
 import { createPropertyApi } from '../services/property-api'
-import { DEFAULT_FILTERS, type AppraisalFilter } from '../services/appraisal'
+import { DEFAULT_FILTERS, evaluateComparable, type AppraisalFilter } from '../services/appraisal'
 import { filtersToApiParams } from '../services/appraisal/types'
 import type { Env } from '../types'
 import type { NormalizedProperty, NormalizedComparable } from '../services/property-api/types'
@@ -271,10 +271,26 @@ export class AnalysisJobDO {
     })
 
     // ── Step 3: Enrich comps ───────────────────────────────────────────────────
+    // Lazy enrichment: thin search data already carries distance, sqft, year,
+    // sale date, lot size, property type — enough to fail comps on the cheap
+    // filters before spending a property-detail call. Filters needing
+    // enrichment data (subdivision_match — the hammer — plus building style
+    // and road barrier) resolve not_verified here and land post-enrichment
+    // inside performAnalysis. Non-surviving comps stay in the bundle thin so
+    // the report still shows them with their failed-rule reasons.
     await this.pushEvent('property_fetch', { message: 'Enriching comparable details...' })
     const enrichStart = Date.now()
 
-    const enrichedComps = await propertyApi.enrichComparables(rawComps, { concurrency: 10 })
+    const ENRICH_CAP = 12
+    const toEnrich = rawComps
+      .filter((comp) => !evaluateComparable(property, comp, filters, []).shouldDisable)
+      .sort((a, b) => (a.distanceMiles ?? 999) - (b.distanceMiles ?? 999))
+      .slice(0, ENRICH_CAP)
+    console.log(`[AnalysisJobDO] Lazy enrichment: ${toEnrich.length}/${rawComps.length} comps survive cheap filters`)
+
+    const enrichedList = await propertyApi.enrichComparables(toEnrich, { concurrency: 10 })
+    const enrichedById = new Map(enrichedList.map((c) => [c.id, c]))
+    const enrichedComps = rawComps.map((c) => enrichedById.get(c.id) ?? c)
 
     // Market context search runs in parallel — doesn't block evaluation or LLM
     // but we track the promise so we can await it before enrichment_done
