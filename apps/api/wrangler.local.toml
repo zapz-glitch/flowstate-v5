@@ -35,6 +35,10 @@ class_name = "AnalysisJobDO"
 name = "BATCH_JOB"
 class_name = "BatchJobDO"
 
+[[durable_objects.bindings]]
+name = "RATE_LIMIT_COORDINATOR"
+class_name = "RateLimitCoordinatorDO"
+
 [[migrations]]
 tag = "v5"
 new_classes = ["AnalysisJobDO"]
@@ -42,3 +46,7 @@ new_classes = ["AnalysisJobDO"]
 [[migrations]]
 tag = "v6"
 new_classes = ["BatchJobDO"]
+
+[[migrations]]
+tag = "v3"
+new_classes = ["RateLimitCoordinatorDO"]

@@ -1,14 +1,129 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { signOut } from '@/lib/auth-client'
-import { AlertTriangle } from 'lucide-react'
+import { AlertTriangle, Plus, X, Download, ArrowUp, ArrowDown } from 'lucide-react'
+import { getUiPrefs, saveUiPrefs, type UiPrefs } from '@/lib/client-api'
+
+const NAV_ITEMS = [
+  { href: '/dashboard', defaultName: 'Overview' },
+  { href: '/dashboard/analyze', defaultName: 'Property Search' },
+  { href: '/dashboard/batch', defaultName: 'Batch Import' },
+  { href: '/dashboard/reports', defaultName: 'Property Reports' },
+  { href: '/dashboard/evaluation-settings', defaultName: 'Evaluation Settings' },
+  { href: '/dashboard/api-hub', defaultName: 'API Hub' },
+  { href: '/dashboard/tasks', defaultName: 'Tasks' },
+  { href: '/dashboard/admin', defaultName: 'Admin Panel' },
+  { href: '/dashboard/admin/observability', defaultName: 'Observability' },
+]
 
 export default function SettingsPage() {
   const router = useRouter()
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [deleteConfirmText, setDeleteConfirmText] = useState('')
+
+  const [navLabels, setNavLabels] = useState<Record<string, string>>({})
+  const [navOrder, setNavOrder] = useState<string[]>(NAV_ITEMS.map((i) => i.href))
+  const [customLinks, setCustomLinks] = useState<Array<{ label: string; url: string }>>([])
+  const [faviconUrl, setFaviconUrl] = useState('')
+  const [prefsLoaded, setPrefsLoaded] = useState(false)
+  const [prefsSaving, setPrefsSaving] = useState(false)
+  const [prefsSaved, setPrefsSaved] = useState(false)
+
+  useEffect(() => {
+    getUiPrefs().then((p) => {
+      setNavLabels(p.navLabels ?? {})
+      // Saved order first, then any new items appended in default order
+      const saved = p.navOrder ?? []
+      setNavOrder([...saved.filter((h) => NAV_ITEMS.some((i) => i.href === h)), ...NAV_ITEMS.map((i) => i.href).filter((h) => !saved.includes(h))])
+      setCustomLinks(p.customLinks ?? [])
+      setFaviconUrl(p.faviconUrl ?? '')
+      setPrefsLoaded(true)
+    }).catch(() => setPrefsLoaded(true))
+  }, [])
+
+  const savePrefs = async () => {
+    setPrefsSaving(true)
+    try {
+      const prefs: UiPrefs = {
+        navLabels,
+        navOrder,
+        customLinks: customLinks.filter((l) => l.label.trim() && l.url.trim()),
+        faviconUrl: faviconUrl.trim() || null,
+      }
+      await saveUiPrefs(prefs)
+      window.dispatchEvent(new CustomEvent<UiPrefs>('ui-prefs-updated', { detail: prefs }))
+      setPrefsSaved(true)
+      setTimeout(() => setPrefsSaved(false), 2000)
+    } finally {
+      setPrefsSaving(false)
+    }
+  }
+
+  // Renders the Flowstate mark (icon only) to canvas and downloads a JPEG.
+  // dark=true → black background version; dark=false → white background version.
+  const downloadLogo = (dark: boolean) => {
+    const W = 1024, H = 1024
+    const canvas = document.createElement('canvas')
+    canvas.width = W
+    canvas.height = H
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+
+    const bg = dark ? '#0a0a0a' : '#ffffff'
+    const fg = dark ? '#fafafa' : '#0a0a0a'
+    ctx.fillStyle = bg
+    ctx.fillRect(0, 0, W, H)
+
+    // Logo mark — rounded square + flow glyph, centered with padding
+    const icon = 640
+    const ix = (W - icon) / 2
+    const iy = (H - icon) / 2
+
+    // Rounded-square icon background (manual path — roundRect isn't in all browsers)
+    const r = 100
+    ctx.fillStyle = fg
+    ctx.beginPath()
+    ctx.moveTo(ix + r, iy)
+    ctx.lineTo(ix + icon - r, iy)
+    ctx.arcTo(ix + icon, iy, ix + icon, iy + r, r)
+    ctx.lineTo(ix + icon, iy + icon - r)
+    ctx.arcTo(ix + icon, iy + icon, ix + icon - r, iy + icon, r)
+    ctx.lineTo(ix + r, iy + icon)
+    ctx.arcTo(ix, iy + icon, ix, iy + icon - r, r)
+    ctx.lineTo(ix, iy + r)
+    ctx.arcTo(ix, iy, ix + r, iy, r)
+    ctx.closePath()
+    ctx.fill()
+
+    // Flow glyph — the 24x24 SVG path scaled into the icon box
+    const scale = icon / 24
+    ctx.save()
+    ctx.translate(ix, iy)
+    ctx.scale(scale, scale)
+    const path = new Path2D(
+      'M4.5 17.5 V10.8 L12 4.5 L19.5 10.8 V17.5 M4.5 17.5 C7 17.5 8 15.5 10.5 15.5 C13 15.5 14 17.5 16.5 17.5 C17.8 17.5 19 17 19.5 16.3'
+    )
+    ctx.strokeStyle = bg
+    ctx.lineWidth = 1.9
+    ctx.lineCap = 'round'
+    ctx.lineJoin = 'round'
+    ctx.stroke(path)
+    ctx.restore()
+
+    canvas.toBlob((blob) => {
+      if (!blob) return
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = dark ? 'flowstate-logo-black.jpg' : 'flowstate-logo-white.jpg'
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+    }, 'image/jpeg', 0.92)
+  }
 
   const handleDeleteAccount = async () => {
     if (deleteConfirmText !== 'DELETE') return
@@ -26,6 +141,141 @@ export default function SettingsPage() {
         <p className="text-neutral-600 dark:text-neutral-400 mt-1">
           Manage your account settings
         </p>
+      </div>
+
+      {/* Menu bar customization */}
+      {prefsLoaded && (
+        <div className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-800 p-6">
+          <h2 className="text-lg font-semibold text-neutral-900 dark:text-white mb-1">
+            Menu Bar
+          </h2>
+          <p className="text-sm text-neutral-500 dark:text-neutral-400 mb-4">
+            Rename sidebar items, add your own links, or set a custom favicon.
+          </p>
+
+          <div className="space-y-2 mb-5">
+            <p className="text-xs font-medium text-neutral-500 dark:text-neutral-400 uppercase tracking-wide">Item names & order</p>
+            {navOrder.map((href, idx) => {
+              const item = NAV_ITEMS.find((i) => i.href === href)
+              if (!item) return null
+              const move = (dir: -1 | 1) => {
+                const j = idx + dir
+                if (j < 0 || j >= navOrder.length) return
+                setNavOrder((prev) => {
+                  const next = [...prev]
+                  ;[next[idx], next[j]] = [next[j], next[idx]]
+                  return next
+                })
+              }
+              return (
+                <div key={item.href} className="flex items-center gap-2">
+                  <div className="flex flex-col">
+                    <button onClick={() => move(-1)} disabled={idx === 0} className="text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 disabled:opacity-30" aria-label="Move up">
+                      <ArrowUp className="w-3.5 h-3.5" />
+                    </button>
+                    <button onClick={() => move(1)} disabled={idx === navOrder.length - 1} className="text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 disabled:opacity-30" aria-label="Move down">
+                      <ArrowDown className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                  <span className="w-40 text-sm text-neutral-500 dark:text-neutral-400">{item.defaultName}</span>
+                  <input
+                    type="text"
+                    value={navLabels[item.href] ?? ''}
+                    placeholder={item.defaultName}
+                    onChange={(e) => {
+                      const v = e.target.value
+                      setNavLabels((prev) => {
+                        const next = { ...prev }
+                        if (v.trim()) next[item.href] = v
+                        else delete next[item.href]
+                        return next
+                      })
+                    }}
+                    className="flex-1 px-3 py-1.5 text-sm rounded-md border border-neutral-200 dark:border-neutral-700 bg-transparent text-neutral-900 dark:text-white"
+                  />
+                </div>
+              )
+            })}
+          </div>
+
+          <div className="space-y-2 mb-5">
+            <p className="text-xs font-medium text-neutral-500 dark:text-neutral-400 uppercase tracking-wide">Custom links</p>
+            {customLinks.map((link, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={link.label}
+                  placeholder="Label"
+                  onChange={(e) => setCustomLinks((prev) => prev.map((l, j) => j === i ? { ...l, label: e.target.value } : l))}
+                  className="w-40 px-3 py-1.5 text-sm rounded-md border border-neutral-200 dark:border-neutral-700 bg-transparent text-neutral-900 dark:text-white"
+                />
+                <input
+                  type="url"
+                  value={link.url}
+                  placeholder="https://…"
+                  onChange={(e) => setCustomLinks((prev) => prev.map((l, j) => j === i ? { ...l, url: e.target.value } : l))}
+                  className="flex-1 px-3 py-1.5 text-sm rounded-md border border-neutral-200 dark:border-neutral-700 bg-transparent text-neutral-900 dark:text-white"
+                />
+                <button
+                  onClick={() => setCustomLinks((prev) => prev.filter((_, j) => j !== i))}
+                  className="p-1.5 text-neutral-400 hover:text-red-500"
+                  aria-label="Remove link"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            ))}
+            <button
+              onClick={() => setCustomLinks((prev) => [...prev, { label: '', url: '' }])}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-neutral-600 dark:text-neutral-400 border border-dashed border-neutral-300 dark:border-neutral-700 rounded-md hover:bg-neutral-50 dark:hover:bg-neutral-800"
+            >
+              <Plus className="w-3.5 h-3.5" /> Add link
+            </button>
+          </div>
+
+          <div className="mb-5">
+            <p className="text-xs font-medium text-neutral-500 dark:text-neutral-400 uppercase tracking-wide mb-2">Favicon</p>
+            <input
+              type="url"
+              value={faviconUrl}
+              placeholder="https://example.com/icon.png (blank = default)"
+              onChange={(e) => setFaviconUrl(e.target.value)}
+              className="w-full px-3 py-1.5 text-sm rounded-md border border-neutral-200 dark:border-neutral-700 bg-transparent text-neutral-900 dark:text-white"
+            />
+          </div>
+
+          <button
+            onClick={savePrefs}
+            disabled={prefsSaving}
+            className="px-4 py-2 text-sm bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 rounded-lg hover:opacity-90 disabled:opacity-50"
+          >
+            {prefsSaved ? 'Saved' : prefsSaving ? 'Saving…' : 'Save menu bar settings'}
+          </button>
+        </div>
+      )}
+
+      {/* Brand assets */}
+      <div className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-800 p-6">
+        <h2 className="text-lg font-semibold text-neutral-900 dark:text-white mb-1">
+          Brand Assets
+        </h2>
+        <p className="text-sm text-neutral-500 dark:text-neutral-400 mb-4">
+          Download the Flowstate logo as a JPEG.
+        </p>
+        <div className="flex flex-wrap gap-3">
+          <button
+            onClick={() => downloadLogo(true)}
+            className="flex items-center gap-2 px-4 py-2 text-sm border border-neutral-200 dark:border-neutral-700 rounded-lg bg-neutral-900 text-white hover:opacity-90"
+          >
+            <Download className="w-4 h-4" /> Logo — black background
+          </button>
+          <button
+            onClick={() => downloadLogo(false)}
+            className="flex items-center gap-2 px-4 py-2 text-sm border border-neutral-300 rounded-lg bg-white text-neutral-900 hover:bg-neutral-50"
+          >
+            <Download className="w-4 h-4" /> Logo — white background
+          </button>
+        </div>
       </div>
 
       {/* Account section */}

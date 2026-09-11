@@ -15,7 +15,7 @@ export const REHAB_LEVELS = [
   'Light Cosmetic',
   'Full Cosmetic',
   'Heavy Rehab',
-  'Down to Stud',
+  'Full Gut',
 ] as const
 
 export type RehabLevel = (typeof REHAB_LEVELS)[number]
@@ -66,6 +66,12 @@ export interface ValuationParams {
   compAvgSqft?: number
   /** Rehab level index (0-4) */
   rehabLevelIndex?: number
+  /** Vision-verified renovated — skip base $/sqft rehab (major items still apply) */
+  skipBaseRehab?: boolean
+  /** Location-risk deduction as % of ARV (0 = none) — major road/railroad/commercial proximity */
+  locationPenaltyPercent?: number
+  /** Explicit location-risk deduction in dollars — wins over locationPenaltyPercent */
+  locationPenaltyAmount?: number
   /** Major items with costs */
   majorItems?: MajorItem[]
   /** Addition play (extra budget for improvements) */
@@ -76,6 +82,8 @@ export interface ValuationParams {
   carryingCostsPercent?: number
   /** Wholesale fee amount (default: $10,000) */
   wholesaleFee?: number
+  /** Override minimum profit (uses tier default if not provided) */
+  desiredProfit?: number
 }
 
 // ─── Valuation Result ──────────────────────────────────────────────────────────
@@ -87,7 +95,7 @@ export interface ValuationResult {
   pricePerSqft: number
 
   // Rehab Costs
-  rehabLevel: RehabLevel
+  rehabLevel: RehabLevel | 'Renovated'
   rehabPerSqft: number
   baseRehabCost: number
   majorItemsCost: number
@@ -99,6 +107,10 @@ export interface ValuationResult {
   closingCosts: number
   carryingCostsPercent: number
   carryingCosts: number
+
+  // Location risk deduction (major road/railroad/commercial proximity)
+  locationPenalty: number
+  locationPenaltyPercent: number
 
   // Buy Price
   buyPrice: number
@@ -113,6 +125,12 @@ export interface ValuationResult {
   projectedProfit: number
   projectedROI: number
   totalInvestment: number
+  /** Minimum profit target applied (caller override or tier default) */
+  desiredProfit: number
+
+  // Recommendation
+  recommendation: 'strong-buy' | 'buy' | 'hold' | 'pass'
+  recommendationReason: string
 
   // Breakdown for UI
   breakdown: {

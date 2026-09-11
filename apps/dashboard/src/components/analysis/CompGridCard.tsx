@@ -153,14 +153,6 @@ export function CompGridCard({
             </div>
           )}
           <span className="flex items-center gap-1.5 flex-shrink-0">
-            {comp.pricePercentile != null && (
-              <span className={cn(
-                'text-[10px] font-medium tabular-nums',
-                comp.compGroup === 'arv' ? 'text-emerald-500' : comp.compGroup === 'as_is' ? 'text-amber-500' : 'text-foreground-tertiary'
-              )}>
-                Top {comp.pricePercentile}%
-              </span>
-            )}
             {comp.pricePerSqft && (
               <span className="text-[10px] text-foreground-tertiary tabular-nums">${comp.pricePerSqft.toFixed(0)}/sf</span>
             )}
@@ -176,7 +168,7 @@ export function CompGridCard({
             const hasSubject = !!subject?.subdivision
             return (
               <span className={cn(
-                'inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[9px] font-medium truncate max-w-[60%]',
+                'inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[9px] font-medium',
                 hasSubject
                   ? isMatch
                     ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20'
@@ -187,7 +179,7 @@ export function CompGridCard({
                   ? <Check className="w-2.5 h-2.5 flex-shrink-0" />
                   : <X className="w-2.5 h-2.5 flex-shrink-0" />
                 )}
-                <span className="truncate">{comp.subdivision}</span>
+                <span>{comp.subdivision}</span>
               </span>
             )
           })()}
@@ -222,6 +214,24 @@ export function CompGridCard({
             <span className="text-foreground-tertiary">Style</span>
             <span className="font-medium truncate ml-2">{comp.buildingStyle || '-'}</span>
           </div>
+          <div className="flex items-center justify-between text-[11px]">
+            <span className="text-foreground-tertiary">Foundation</span>
+            <span className="font-medium truncate ml-2">{comp.foundationType || '-'}</span>
+          </div>
+          {comp.curbAppeal && comp.curbAppeal.condition !== 'unknown' && (
+            <div className="flex items-center justify-between text-[11px]">
+              <span className="text-foreground-tertiary">Condition</span>
+              <span className={cn(
+                'font-medium truncate ml-2',
+                comp.curbAppeal.condition === 'renovated' && 'text-emerald-500',
+                comp.curbAppeal.condition === 'dated' && 'text-amber-500',
+                comp.curbAppeal.condition === 'distressed' && 'text-red-400',
+              )} title={comp.curbAppeal.summary ?? undefined}>
+                {comp.curbAppeal.condition === 'renovated' ? 'Renovated' : comp.curbAppeal.condition === 'dated' ? 'Dated' : 'Distressed'}
+                {comp.curbAppeal.source === 'price' && <span className="text-[8px] text-foreground-tertiary font-normal"> (by price)</span>}
+              </span>
+            </div>
+          )}
           <div className="flex items-center justify-between text-[11px]">
             <span className="text-foreground-tertiary">Pool</span>
             <span className="font-medium">{comp.pool ? 'Yes' : '-'}</span>

@@ -33,7 +33,7 @@ export function DealSummaryHero({ valuation, isRecalculated, onOpenSettings }: D
       </div>
 
       {/* Primary metrics grid */}
-      <div className="grid grid-cols-4">
+      <div className="hero-stats">
         <div className="px-3 py-2.5 border-r border-border/20">
           <div className="text-[11px] text-foreground-tertiary uppercase tracking-wider">ARV</div>
           <div className="text-base font-bold tabular-nums text-primary mt-0.5">${formatHeadlineMoney(valuation.arv, valuation.displayedArv, valuation.displayRounding)}</div>

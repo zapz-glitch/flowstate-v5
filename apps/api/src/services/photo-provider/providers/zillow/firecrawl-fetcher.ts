@@ -1136,11 +1136,15 @@ ${content.html.slice(0, 80000)}
 
     // Fallback: use OpenRouter LLM to parse HTML/markdown
     if (this.openrouterApiKey) {
-      return this.parseWithLLM(content)
+      const llmResult = await this.parseWithLLM(content)
+      if (isValidExtraction(llmResult)) {
+        return llmResult
+      }
+      console.warn(`[FirecrawlZillow] LLM extraction invalid, using regex fallback`)
     }
 
-    // Last resort: regex-only parsing
-    console.warn(`[FirecrawlZillow] No OpenRouter key available, using regex fallback`)
+    // Last resort: regex-only parsing (same path comps use — photo URLs are
+    // extractable from raw HTML without any LLM/JSON-extraction help)
     return parseZillowHtml(content.html)
   }
 

@@ -397,6 +397,32 @@ export const rehabConfig = sqliteTable(
 )
 
 // ==========================================
+// UI Prefs (per-user menu/branding customization)
+// ==========================================
+
+export const uiPrefs = sqliteTable(
+  'ui_prefs',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    userId: text('user_id')
+      .notNull()
+      .unique()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    // Rename built-in nav items: { "/dashboard/analyze": "Deal Search", ... }
+    navLabelsJson: text('nav_labels_json'),
+    // Custom ordering of built-in nav items: ["/dashboard", "/dashboard/tasks", ...]
+    navOrderJson: text('nav_order_json'),
+    // Extra links appended to the nav: [{ label, url }]
+    customLinksJson: text('custom_links_json'),
+    // Custom favicon URL (https or absolute path)
+    faviconUrl: text('favicon_url'),
+    createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
+    updatedAt: text('updated_at').notNull().$defaultFn(() => new Date().toISOString()),
+  },
+  (table) => [index('idx_ui_prefs_user_id').on(table.userId)]
+)
+
+// ==========================================
 // Deal Params (per-user valuation defaults)
 // ==========================================
 
@@ -523,6 +549,31 @@ export const majorItemCosts = sqliteTable(
 )
 
 // ==========================================
+// Major Item Settings (per-user permit-age rules: enabled + cost + age threshold)
+// ==========================================
+
+export const majorItemSetting = sqliteTable(
+  'major_item_setting',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    itemId: text('item_id').notNull(), // 'roof' | 'hvac' | 'water_heater' | 'electric_panel' | 'replumb' | 'rewire' | ...
+    enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
+    cost: integer('cost').notNull(), // configured replacement cost
+    ageThreshold: integer('age_threshold'), // years — evidence at-or-past this triggers replacement; null = no age rule
+    updatedAt: text('updated_at')
+      .notNull()
+      .$defaultFn(() => new Date().toISOString()),
+  },
+  (table) => [
+    index('idx_major_item_setting_user_id').on(table.userId),
+    index('idx_major_item_setting_user_item').on(table.userId, table.itemId),
+  ]
+)
+
+// ==========================================
 // GHL Integration Settings (per-user GoHighLevel CRM config)
 // ==========================================
 
@@ -625,5 +676,79 @@ export const batchJobs = sqliteTable(
   (table) => [
     index('idx_batch_jobs_user_id').on(table.userId),
     index('idx_batch_jobs_created_at').on(table.createdAt),
+  ]
+)
+
+// ==========================================
+// Analysis Runs (observability — every analysis outcome, success or failure)
+// ==========================================
+
+export const analysisRuns = sqliteTable(
+  'analysis_runs',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    jobId: text('job_id').notNull(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    // Property identity
+    propertyAddress: text('property_address'),
+    propertyCity: text('property_city'),
+    propertyState: text('property_state'),
+    propertyZip: text('property_zip'),
+    // Outcome
+    status: text('status').notNull(), // 'completed' | 'error'
+    errorCode: text('error_code'), // e.g. 'INSUFFICIENT_COMPS', 'EVALUATION_ERROR'
+    errorMessage: text('error_message'),
+    durationMs: integer('duration_ms'),
+    // Key outputs
+    arv: real('arv'),
+    recommendation: text('recommendation'),
+    compCount: integer('comp_count'),
+    enabledCompCount: integer('enabled_comp_count'),
+    // Evidence pipeline health
+    photoProvider: text('photo_provider'),
+    photoCount: integer('photo_count'),
+    renovationLevelSource: text('renovation_level_source'), // 'vision' | 'default'
+    visionStatus: text('vision_status'), // 'ok' | 'insufficient_photo_evidence' | 'needs_review' | 'unavailable'
+    // Trace evidence
+    stepsJson: text('steps_json'), // ReportStep[] — name/status/detail/durationMs per pipeline step
+    fallbacksJson: text('fallbacks_json'), // string[] — fallback codes used
+    evalJson: text('eval_json'), // computed benchmark checks + grade
+    apiCallStatsJson: text('api_call_stats_json'), // per-provider call counts/latency
+    createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
+  },
+  (table) => [
+    index('idx_analysis_runs_job_id').on(table.jobId),
+    index('idx_analysis_runs_user_id').on(table.userId),
+    index('idx_analysis_runs_status').on(table.status),
+    index('idx_analysis_runs_created_at').on(table.createdAt),
+  ]
+)
+
+// ==========================================
+// Tasks (per-user to-do list)
+// ==========================================
+
+export const tasks = sqliteTable(
+  'tasks',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    title: text('title').notNull(),
+    /** Optional project grouping (free text — e.g. a property address) */
+    project: text('project'),
+    /** ISO date or datetime-local string; null = no deadline */
+    dueDate: text('due_date'),
+    done: integer('done').notNull().default(0), // 0/1 — D1 has no boolean
+    doneAt: text('done_at'),
+    createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
+    updatedAt: text('updated_at').notNull().$defaultFn(() => new Date().toISOString()),
+  },
+  (table) => [
+    index('idx_tasks_user_id').on(table.userId),
+    index('idx_tasks_done').on(table.userId, table.done),
   ]
 )

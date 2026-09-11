@@ -3,14 +3,6 @@
  *
  * Types for comparable filtering, price adjustments, and appraisal presets.
  * Based on standard real estate appraisal methodology.
- *
- * Constants (DEFAULT_FILTERS, DEFAULT_ADJUSTMENTS, FILTER_LABELS, etc.)
- * are derived from the rule definitions in filters.ts and adjustments.ts.
- * To add a new rule:
- *   1. Add the type to the FilterType/AdjustmentType union below
- *   2. Add one object to the RULES array in filters.ts or adjustments.ts
- * That's it — defaults, labels, evaluator lookup, and filtersToApiParams
- * all update automatically from the rules.
  */
 
 import type { NormalizedProperty, NormalizedComparable } from '../property-api/types'
@@ -20,10 +12,14 @@ import type { NormalizedProperty, NormalizedComparable } from '../property-api/t
 export type FilterType =
   | 'subdivision_match'
   | 'building_style_match'
+  | 'foundation_match'
   | 'sale_age'
   | 'sqft_diff'
   | 'year_built_diff'
   | 'distance'
+  | 'property_type'
+  | 'lot_size_diff'
+  | 'road_barrier'
 
 export interface AppraisalFilter {
   type: FilterType
@@ -32,22 +28,86 @@ export interface AppraisalFilter {
   value: number
 }
 
-/** UI metadata for a filter */
-export interface FilterLabel {
+export const DEFAULT_FILTERS: AppraisalFilter[] = [
+  { type: 'subdivision_match', enabled: true, value: 1 }, // Enabled - uses enriched comp data
+  { type: 'foundation_match', enabled: true, value: 1 }, // Same foundation type (not_verified when missing)
+  { type: 'sale_age', enabled: true, value: 180 }, // 6 months max comp age
+  { type: 'sqft_diff', enabled: true, value: 250 }, // ±250 sqft variance
+  { type: 'year_built_diff', enabled: true, value: 10 }, // ±10 years
+  { type: 'distance', enabled: true, value: 1.0 }, // 1 mile (matches API search)
+  { type: 'property_type', enabled: true, value: 1 }, // Same property/build type
+  { type: 'lot_size_diff', enabled: true, value: 2500 }, // ±2,500 sqft lot
+  { type: 'road_barrier', enabled: true, value: 1 }, // No crossing major roads (not_verified when no data)
+]
+
+// ─── Filter Labels (for UI) ────────────────────────────────────────────────────
+
+export const FILTER_LABELS: Record<FilterType, {
   label: string
   shortLabel: string
   unit: string
   description: string
-}
-
-export interface FilterResult {
-  type: FilterType
-  passed: boolean
-  reason?: string
-  /** Actual value that was evaluated */
-  actualValue?: number | string
-  /** Threshold value */
-  threshold?: number | string
+}> = {
+  subdivision_match: {
+    label: 'Subdivision Match',
+    shortLabel: 'Subdivision',
+    unit: '',
+    description: 'Must be in same subdivision as subject',
+  },
+  building_style_match: {
+    label: 'Building Style Match',
+    shortLabel: 'Style',
+    unit: '',
+    description: 'Must match subject building style (e.g. Ranch, Colonial)',
+  },
+  foundation_match: {
+    label: 'Foundation Match',
+    shortLabel: 'Foundation',
+    unit: '',
+    description: 'Must match subject foundation type (e.g. Slab, Continuous Footing)',
+  },
+  sale_age: {
+    label: 'Sale Age',
+    shortLabel: 'Sale Age',
+    unit: 'days',
+    description: 'Maximum days since comparable sold',
+  },
+  sqft_diff: {
+    label: 'Square Footage Difference',
+    shortLabel: 'SqFt Diff',
+    unit: 'sqft',
+    description: 'Maximum sqft difference from subject',
+  },
+  year_built_diff: {
+    label: 'Year Built Difference',
+    shortLabel: 'Year Diff',
+    unit: 'years',
+    description: 'Maximum year built difference from subject',
+  },
+  distance: {
+    label: 'Search Distance',
+    shortLabel: 'Distance',
+    unit: 'miles',
+    description: 'Maximum distance from subject property',
+  },
+  property_type: {
+    label: 'Property Type Match',
+    shortLabel: 'Prop Type',
+    unit: '',
+    description: 'Must be the same property/build type as subject',
+  },
+  lot_size_diff: {
+    label: 'Lot Size Difference',
+    shortLabel: 'Lot Diff',
+    unit: 'sqft',
+    description: 'Maximum lot size difference from subject (sqft)',
+  },
+  road_barrier: {
+    label: 'Major Road Barrier',
+    shortLabel: 'Road Barrier',
+    unit: '',
+    description: 'Comp must not be across a major road from subject (not verified when geospatial road data unavailable)',
+  },
 }
 
 // ─── Adjustment Types ──────────────────────────────────────────────────────────
@@ -59,22 +119,107 @@ export type AdjustmentType =
   | 'pool'
   | 'garage'
   | 'carport'
+  | 'traffic_siding'
+  | 'traffic_backing'
+  | 'traffic_fronting'
+  | 'basement_sqft'
 
 export interface AppraisalAdjustment {
   type: AdjustmentType
   enabled: boolean
-  /** Fixed dollar amount per unit */
+  /** Fixed dollar amount per unit (for traffic: flat deduction below valueThreshold) */
   amount: number
-  /** Percentage (for old_comp_discount) */
+  /** Percentage (for old_comp_discount; for traffic: percent deduction at/above valueThreshold) */
   percent?: number
+  /** For traffic adjustments: comp value boundary switching flat $ → % deduction (default 500000) */
+  valueThreshold?: number
 }
 
-/** UI metadata for an adjustment */
-export interface AdjustmentLabel {
+export const DEFAULT_ADJUSTMENTS: AppraisalAdjustment[] = [
+  { type: 'old_comp_discount', enabled: true, amount: 0, percent: 15 },
+  { type: 'bedroom', enabled: true, amount: 15000 },
+  { type: 'bathroom', enabled: true, amount: 10000 },
+  { type: 'pool', enabled: true, amount: 10000 },
+  { type: 'garage', enabled: true, amount: 10000 },
+  { type: 'carport', enabled: true, amount: 5000 },
+  // Traffic/commercial exposure: flat $ under $500K, % at/over $500K
+  { type: 'traffic_siding', enabled: true, amount: 10000, percent: 10, valueThreshold: 500000 },
+  { type: 'traffic_backing', enabled: true, amount: 10000, percent: 15, valueThreshold: 500000 },
+  { type: 'traffic_fronting', enabled: true, amount: 15000, percent: 20, valueThreshold: 500000 },
+  // Basement/guest-house sqft credited at 50% of normal $/sqft
+  { type: 'basement_sqft', enabled: true, amount: 0, percent: 50 },
+]
+
+// ─── Adjustment Labels (for UI) ───────────────────────────────────────────────
+
+export const ADJUSTMENT_LABELS: Record<AdjustmentType, {
   label: string
   description: string
   isPercentage?: boolean
   unavailable?: boolean
+}> = {
+  old_comp_discount: {
+    label: 'Old Comp Discount',
+    description: 'Discount percentage for older sales',
+    isPercentage: true,
+  },
+  bedroom: {
+    label: 'Bedroom Adjustment',
+    description: 'Dollar adjustment per bedroom difference',
+  },
+  bathroom: {
+    label: 'Bathroom Adjustment',
+    description: 'Dollar adjustment per bathroom difference',
+  },
+  pool: {
+    label: 'Pool Adjustment',
+    description: 'Add value if subject has a pool',
+  },
+  garage: {
+    label: 'Garage Adjustment',
+    description: 'Add value if subject has a garage',
+  },
+  carport: {
+    label: 'Carport Adjustment',
+    description: 'Add value if subject has a carport and comp does not',
+  },
+  traffic_siding: {
+    label: 'Traffic Siding Adjustment',
+    description: 'Deduction when comp sides a busy road/commercial (flat $ under threshold, % over)',
+    unavailable: false,
+  },
+  traffic_backing: {
+    label: 'Traffic Backing Adjustment',
+    description: 'Deduction when comp backs a busy road/commercial (flat $ under threshold, % over)',
+  },
+  traffic_fronting: {
+    label: 'Traffic Fronting Adjustment',
+    description: 'Deduction when comp fronts a busy road/commercial (flat $ under threshold, % over)',
+  },
+  basement_sqft: {
+    label: 'Basement/Guest-House SqFt',
+    description: 'Basement or guest-house square footage credited at configured % of normal $/sqft',
+    isPercentage: true,
+  },
+}
+
+// ─── Evaluation Results ────────────────────────────────────────────────────────
+
+export interface FilterResult {
+  type: FilterType
+  passed: boolean
+  /**
+   * Verification status of the rule check:
+   * - passed/failed: rule was evaluated with available data
+   * - not_verified: required data was unavailable — the rule was NOT
+   *   checked and did not disqualify the comp
+   */
+  status?: 'passed' | 'failed' | 'not_verified'
+  reason?: string
+  /** Actual value that was evaluated */
+  actualValue?: number | string
+  /** Threshold value */
+  threshold?: number | string
 }
 
 export interface AdjustmentResult {
@@ -83,8 +228,6 @@ export interface AdjustmentResult {
   amount: number
   reason?: string
 }
-
-// ─── Evaluation Results ────────────────────────────────────────────────────────
 
 export interface ComparableEvaluation {
   comparableId: string
@@ -117,11 +260,45 @@ export interface AppraisalRulePreset {
 
 // ─── Appraisal Options ─────────────────────────────────────────────────────────
 
+/**
+ * Expansion policy — governs how comp rules relax when fewer than the
+ * required number of valid comps are found. Rules are never silently
+ * weakened; each expansion tier is explicitly enabled and recorded.
+ *
+ * Appraisal principle applied: "better to leave the subdivision than
+ * time travel" — geography expands before sale-age relaxes.
+ */
+export interface ExpansionPolicy {
+  /** Master switch for all expansion tiers (default: true) */
+  enabled?: boolean
+  /** Allow dropping the subdivision/micro-market constraint (default: true) */
+  allowGeographicExpansion?: boolean
+  /** Distance multiplier when geography expands (default: 2 = widen to 2× configured radius) */
+  geographicDistanceMultiplier?: number
+  /** Allow materially older sales as a last resort (default: false) */
+  allowOlderSales?: boolean
+  /** Sale-age multiplier when older sales allowed (default: 2 = up to 2× configured max age) */
+  olderSaleAgeMultiplier?: number
+  /** Downward market-correction % applied to expansion-era older sales (10-20; default 15) */
+  olderSaleDiscountPercent?: number
+}
+
+export const DEFAULT_EXPANSION_POLICY: Required<ExpansionPolicy> = {
+  enabled: true,
+  allowGeographicExpansion: true,
+  geographicDistanceMultiplier: 2,
+  allowOlderSales: false,
+  olderSaleAgeMultiplier: 2,
+  olderSaleDiscountPercent: 15,
+}
+
 export interface AppraisalOptions {
   /** Filters to apply (uses defaults if not provided) */
   filters?: AppraisalFilter[]
   /** Adjustments to apply (uses defaults if not provided) */
   adjustments?: AppraisalAdjustment[]
+  /** Expansion policy for insufficient-comp scenarios */
+  expansion?: ExpansionPolicy
 }
 
 // ─── Appraised Comparable ──────────────────────────────────────────────────────
@@ -129,8 +306,16 @@ export interface AppraisalOptions {
 export interface AppraisedComparable extends NormalizedComparable {
   /** Evaluation results */
   evaluation: ComparableEvaluation
-  /** Whether this comparable is included in ARV calculation */
+  /** Whether this comparable passed the appraisal rules */
   isEnabled: boolean
+  /**
+   * ARV selection status:
+   * - selected: one of the top-3 highest-priced valid comps used for ARV
+   * - not_examined: passed rules but never reached — 3 valid comps already
+   *   accepted (NOT_EXAMINED_FOR_ARV)
+   * - disqualified: failed one or more appraisal rules
+   */
+  arvStatus?: 'selected' | 'not_examined' | 'disqualified'
   /** Adjusted price after applying rules */
   adjustedSalePrice: number | null
 }
@@ -150,12 +335,18 @@ export interface AppraisalResult {
   appliedFilters: AppraisalFilter[]
   /** Applied adjustments */
   appliedAdjustments: AppraisalAdjustment[]
-  /** ARV calculated from enabled comparables */
+  /** ARV calculated from selected comps (top-3 highest-priced valid sales) */
   arv: number
   /** Average price per sqft */
   avgPricePerSqft: number | null
   /** Median sale price of enabled comparables */
   medianSalePrice: number | null
+  /** IDs of comps selected for ARV (up to 3, highest-priced valid) */
+  selectedCompIds?: string[]
+  /** True when fewer than 3 valid comps found even after approved expansion */
+  insufficientComps?: boolean
+  /** Expansion tiers actually applied to reach the comp set */
+  expansionApplied?: Array<'geographic' | 'older_sales'>
 }
 
 // ─── Response Types ────────────────────────────────────────────────────────────
@@ -175,11 +366,9 @@ export type AppraisalResponse = AppraisalSuccessResponse | AppraisalErrorRespons
 
 // ─── API-Level Filter Params ──────────────────────────────────────────────────
 
-export type ApiFilterParamKey = 'radiusMiles' | 'monthsBack' | 'sqftVariance'
-
 /**
- * Parameters that can be sent to the CoreLogic API for pre-filtering.
- * These reduce API payload before post-fetch filtering is applied.
+ * Parameters that can be sent to the CoreLogic API for pre-filtering
+ * These reduce API payload before post-fetch filtering is applied
  */
 export interface ApiFilterParams {
   /** Search radius in miles (from distance filter) */
@@ -190,43 +379,18 @@ export interface ApiFilterParams {
   sqftVariance?: number
 }
 
-// ─── Derived Constants (from Rule Definitions) ──────────────────────────────
-
-// NOTE: These are imported lazily to avoid circular dependency.
-// filters.ts and adjustments.ts import types from this file, so we import
-// the rule arrays here only for deriving constants (not types).
-
-import { FILTER_RULES } from './filters'
-import { ADJUSTMENT_RULES } from './adjustments'
-
-/** Derived from FILTER_RULES — one entry per rule definition */
-export const DEFAULT_FILTERS: AppraisalFilter[] = FILTER_RULES.map((r) => ({
-  type: r.type as FilterType,
-  enabled: r.defaults.enabled,
-  value: r.defaults.value,
-}))
-
-/** Derived from FILTER_RULES */
-export const FILTER_LABELS = Object.fromEntries(
-  FILTER_RULES.map((r) => [r.type, r.label])
-) as Record<FilterType, FilterLabel>
-
-/** Derived from ADJUSTMENT_RULES — one entry per rule definition */
-export const DEFAULT_ADJUSTMENTS: AppraisalAdjustment[] = ADJUSTMENT_RULES.map((r) => ({
-  type: r.type as AdjustmentType,
-  enabled: r.defaults.enabled,
-  amount: r.defaults.amount,
-  percent: r.defaults.percent,
-}))
-
-/** Derived from ADJUSTMENT_RULES */
-export const ADJUSTMENT_LABELS = Object.fromEntries(
-  ADJUSTMENT_RULES.map((r) => [r.type, r.label])
-) as Record<AdjustmentType, AdjustmentLabel>
-
 /**
- * Convert appraisal filters to API-level filter parameters.
- * Derived from FILTER_RULES — each rule declares its own apiParam mapping.
+ * Convert appraisal filters to API-level filter parameters
+ *
+ * API-level filters (reduce API payload):
+ * - sale_age → monthsBack (days converted to months)
+ * - sqft_diff → sqftVariance
+ * - distance → radiusMiles
+ *
+ * Post-fetch filters (applied after enrichment):
+ * - subdivision_match (requires property details)
+ * - property_type (strict matching)
+ * - year_built_diff (not supported by API)
  */
 export function filtersToApiParams(filters: AppraisalFilter[]): ApiFilterParams {
   const params: ApiFilterParams = {}
@@ -234,11 +398,24 @@ export function filtersToApiParams(filters: AppraisalFilter[]): ApiFilterParams 
   for (const filter of filters) {
     if (!filter.enabled) continue
 
-    const rule = FILTER_RULES.find((r) => r.type === filter.type)
-    if (!rule?.apiParam) continue
-
-    const value = rule.apiParamConvert ? rule.apiParamConvert(filter.value) : filter.value
-    params[rule.apiParam] = value
+    switch (filter.type) {
+      case 'sale_age':
+        // Convert days to months (round up to include partial months)
+        params.monthsBack = Math.ceil(filter.value / 30)
+        break
+      case 'sqft_diff':
+        // Pass sqftVariance directly
+        params.sqftVariance = filter.value
+        break
+      case 'distance':
+        // Pass radiusMiles directly
+        params.radiusMiles = filter.value
+        break
+      // These filters are applied post-fetch:
+      // - subdivision_match (requires enrichment)
+      // - property_type (needs normalization)
+      // - year_built_diff (not API-supported)
+    }
   }
 
   return params

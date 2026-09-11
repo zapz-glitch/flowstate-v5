@@ -163,6 +163,18 @@ export interface SubjectData {
   } | null
   taxAssessment?: number | null
   photos?: string[]
+  /** Vision-assessed condition/renovation level ('NA' when unverifiable) */
+  condition?: string | null
+  /** Curb-appeal condition label from listing photos */
+  curbAppeal?: {
+    condition: 'renovated' | 'dated' | 'distressed' | 'unknown'
+    source?: 'vision' | 'price'
+    confidence: number | null
+    summary: string | null
+    photosExamined: number
+  } | null
+  /** Direct listing URL from the provider that delivered photos */
+  listingUrl?: string | null
   /** Foundation type (e.g., Slab, Crawl Space, Basement) */
   foundationType?: string | null
   /** Building style (e.g., Colonial, Cape Cod, Ranch) */
@@ -215,6 +227,9 @@ export interface ValuationData {
   projectedProfit?: number
   projectedROI?: number
   wholesalePrice?: number
+  /** Location-risk deduction applied to buy price (positional proximity) */
+  locationPenalty?: number
+  locationPenaltyPercent?: number
   recommendation?: string
   recommendationReason?: string
   investorAnalysis?: {
@@ -310,6 +325,15 @@ export interface CompItem {
   isEnabled?: boolean
   /** Which comp group: 'arv' (Group A, drives valuation), 'as_is' (Group B, market intel), or null */
   compGroup?: 'arv' | 'as_is' | null
+  /** Visual ARV-candidacy check on listing photos (ARV-selected comps only) */
+  curbAppeal?: {
+    condition: 'renovated' | 'dated' | 'distressed' | 'unknown'
+    confidence: number | null
+    summary: string | null
+    /** vision = verified from photos; price = inferred from top-of-market sale */
+    source?: 'vision' | 'price'
+    photosExamined: number
+  } | null
   /** Price percentile among all comps (1 = highest, 100 = lowest) */
   pricePercentile?: number | null
   /** Reasons why this comp was disabled (if any) */

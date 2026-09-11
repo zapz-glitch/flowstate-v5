@@ -365,7 +365,7 @@ export const REHAB_LEVEL_NAMES = [
   'Light Cosmetic',
   'Full Cosmetic',
   'Heavy Rehab',
-  'Down to Stud',
+  'Full Gut',
 ] as const
 
 /** Auto-compute a tier label from its boundaries */
@@ -457,6 +457,54 @@ export async function saveDealParams(config: Partial<DealParamsConfig>): Promise
 
 export async function resetDealParams(): Promise<DealParamsResponse> {
   return fetchApi('/deal-params', { method: 'DELETE' })
+}
+
+// ─── UI Prefs (menu labels, custom links, favicon) ───────────────────────────
+
+export interface UiPrefs {
+  navLabels: Record<string, string>
+  navOrder: string[]
+  customLinks: Array<{ label: string; url: string }>
+  faviconUrl: string | null
+}
+
+export async function getUiPrefs(): Promise<UiPrefs> {
+  return fetchApi<UiPrefs>('/ui-prefs')
+}
+
+export async function saveUiPrefs(prefs: UiPrefs): Promise<UiPrefs & { success: boolean }> {
+  return fetchApi('/ui-prefs', {
+    method: 'PUT',
+    body: JSON.stringify(prefs),
+  })
+}
+
+// ─── Tasks ───────────────────────────────────────────────────────────────────
+
+export interface TaskItem {
+  id: string
+  title: string
+  project: string | null
+  dueDate: string | null
+  done: boolean
+  doneAt: string | null
+  createdAt: string
+}
+
+export async function getTasks(): Promise<{ tasks: TaskItem[] }> {
+  return fetchApi('/tasks')
+}
+
+export async function createTask(input: { title: string; project?: string; dueDate?: string }): Promise<{ task: TaskItem }> {
+  return fetchApi('/tasks', { method: 'POST', body: JSON.stringify(input) })
+}
+
+export async function updateTask(id: string, patch: Partial<Pick<TaskItem, 'title' | 'project' | 'dueDate' | 'done'>>): Promise<{ task: TaskItem }> {
+  return fetchApi(`/tasks/${id}`, { method: 'PATCH', body: JSON.stringify(patch) })
+}
+
+export async function deleteTask(id: string): Promise<{ success: boolean }> {
+  return fetchApi(`/tasks/${id}`, { method: 'DELETE' })
 }
 
 // ─── Proximity Adjustment Config ─────────────────────────────────────────────
@@ -693,6 +741,24 @@ export async function getSavedReport(
   return fetchApi(`/user/reports/${jobId}`)
 }
 
+/** Latest saved report for the session user — enables cross-device resume */
+export async function getLatestReport(): Promise<{
+  jobId: string
+  address: string
+  createdAt: string
+} | null> {
+  const res = await fetchApi<{
+    reports: Array<{ jobId: string | null; propertyAddress: string; propertyCity?: string; propertyState?: string; createdAt: string }>
+  }>('/user/reports?limit=1')
+  const latest = res.reports?.[0]
+  if (!latest?.jobId) return null
+  return {
+    jobId: latest.jobId,
+    address: [latest.propertyAddress, latest.propertyCity, latest.propertyState].filter(Boolean).join(', '),
+    createdAt: latest.createdAt,
+  }
+}
+
 export interface ExistingReport {
   id: string
   jobId: string
@@ -709,6 +775,22 @@ export async function getReportsByProperty(opts: { clip?: string; address?: stri
   if (opts.clip) params.set('clip', opts.clip)
   else if (opts.address) params.set('address', opts.address)
   return fetchApi(`/user/reports/by-property?${params.toString()}`)
+}
+
+export interface ReportMapPoint {
+  jobId: string | null
+  propertyAddress: string
+  propertyCity: string
+  propertyState: string
+  arv: number | null
+  maxAllowableOffer: number | null
+  createdAt: string
+  latitude: number
+  longitude: number
+}
+
+export async function getReportMapPoints(): Promise<{ points: ReportMapPoint[] }> {
+  return fetchApi('/user/reports/map-points')
 }
 
 export interface ReportHistoryEntry {

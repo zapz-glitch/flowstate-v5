@@ -1,8 +1,10 @@
 'use client'
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { APIProvider, Map, useMap } from '@vis.gl/react-google-maps'
+import { Crosshair, PersonStanding, Plus, Minus, RotateCcw, Box, Map as MapIcon } from 'lucide-react'
+import { cn } from '@/lib/utils'
 import type { MapMarker } from './PropertyMap'
 
 // ─── Config ─────────────────────────────────────────────────────────────────
@@ -13,10 +15,8 @@ const COLORS: Record<MapMarker['type'], string> = {
   'comp-disabled': '#6b7280',
 }
 
-const MAP_STYLES = [
-  { featureType: 'poi' as const, stylers: [{ visibility: 'off' as const }] },
-  { featureType: 'transit' as const, stylers: [{ visibility: 'off' as const }] },
-]
+// POIs intentionally visible — commercial businesses, grocery stores, parks
+// are part of the area context users need when evaluating a flip.
 
 // ─── SVG icon builder ───────────────────────────────────────────────────────
 
@@ -110,6 +110,194 @@ function MapMarkers({
   return null
 }
 
+// ─── 3D map experience: tilt, rotation, animated zoom, street-view approach ──
+
+const TILT_ZOOM = 18       // 3D mode: zoom ≥ 18 → 45° aerial approach
+const STREETVIEW_ZOOM = 20 // 3D mode: zoom ≥ 20 → street-level panorama
+const ANIM_MS = 550
+
+type MapMode = '2d' | '3d'
+
+const easeInOut = (p: number) => p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2
+
+/** rAF-driven interpolation — Google Maps has no animated zoom/heading API. */
+function animate(map: any, apply: (v: number) => void, from: number, to: number, ms = ANIM_MS) {
+  const t0 = performance.now()
+  const step = (t: number) => {
+    const p = Math.min((t - t0) / ms, 1)
+    apply(from + (to - from) * easeInOut(p))
+    if (p < 1) requestAnimationFrame(step)
+  }
+  requestAnimationFrame(step)
+}
+
+function MapHud({ subject }: { subject: { lat: number; lng: number } | null }) {
+  const map = useMap()
+  const [mode, setMode] = useState<MapMode>('3d')
+  const modeRef = useRef(mode)
+  modeRef.current = mode
+
+  // Start in 3D: once the map is at tilt-capable zoom, ease into 45°.
+  // Raster 45° imagery requires zoom >= TILT_ZOOM — setTilt is a no-op below it.
+  useEffect(() => {
+    const gm = (window as any).google?.maps
+    if (!map || !gm) return
+    const applyTilt = () => {
+      if (modeRef.current !== '3d') return
+      const z = map.getZoom() ?? 0
+      if (z < TILT_ZOOM) map.setZoom(TILT_ZOOM)
+      animate(map, (v: number) => map.setTilt(v), map.getTilt() ?? 0, 45, 800)
+    }
+    // 'idle' fires after the first tiles render — once-only so later
+    // pans/zooms don't re-trigger the tilt animation
+    const idle = gm.event.addListenerOnce(map, 'idle', applyTilt)
+    return () => gm.event.removeListener(idle)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [map])
+
+  // Zoom → tilt + street-view approach (3D mode only)
+  useEffect(() => {
+    const gm = (window as any).google?.maps
+    if (!map || !gm) return
+
+    const onZoom = () => {
+      if (modeRef.current !== '3d') return
+      const z = map.getZoom() ?? 0
+      map.setTilt(z >= TILT_ZOOM ? 45 : 0)
+      if (z < TILT_ZOOM) map.setHeading(0)
+      const sv = map.getStreetView()
+      if (z >= STREETVIEW_ZOOM && subject) {
+        sv.setPosition(subject)
+        sv.setPov({ heading: 0, pitch: 0 })
+        sv.setVisible(true)
+      } else if (sv.getVisible()) {
+        sv.setVisible(false)
+      }
+    }
+    const zoomListener = map.addListener('zoom_changed', onZoom)
+
+    // Double-click = rotate counterclockwise 90° (4 clicks = full turn)
+    // Requires 45° imagery — only applies at tilt-capable zoom in 3D mode.
+    const dblListener = map.addListener('dblclick', () => {
+      if (modeRef.current !== '3d') return
+      const z = map.getZoom() ?? 0
+      if (z < TILT_ZOOM) map.setZoom(TILT_ZOOM)
+      map.setTilt(45)
+      const from = map.getHeading() ?? 0
+      animate(map, (v: number) => map.setHeading(v), from, from - 90, ANIM_MS)
+    })
+
+    return () => {
+      gm.event.removeListener(zoomListener)
+      gm.event.removeListener(dblListener)
+    }
+  }, [map, subject])
+
+  if (!map) return null
+
+  const zoomBy = (delta: number) => {
+    animate(map, (v: number) => map.setZoom(v), map.getZoom() ?? 13, (map.getZoom() ?? 13) + delta)
+  }
+
+  const rotateCCW = () => {
+    if (modeRef.current === '3d') {
+      const z = map.getZoom() ?? 0
+      if (z < TILT_ZOOM) map.setZoom(TILT_ZOOM)
+      map.setTilt(45)
+    }
+    const from = map.getHeading() ?? 0
+    animate(map, (v: number) => map.setHeading(v), from, from - 90, ANIM_MS)
+  }
+
+  const setMapMode = (m: MapMode) => {
+    setMode(m)
+    if (m === '3d') {
+      animate(map, (v: number) => map.setTilt(v), map.getTilt() ?? 0, 45)
+      const z = map.getZoom() ?? 13
+      if (z < 17) zoomBy(17 - z)
+    } else {
+      map.getStreetView().setVisible(false)
+      animate(map, (v: number) => map.setTilt(v), map.getTilt() ?? 45, 0)
+      map.setHeading(0)
+    }
+  }
+
+  const goSubject = () => {
+    map.getStreetView().setVisible(false)
+    map.panTo(subject!)
+    const z = map.getZoom() ?? 13
+    if (z < 18) zoomBy(18 - z)
+    if (modeRef.current === '3d') animate(map, (v: number) => map.setTilt(v), map.getTilt() ?? 0, 45)
+  }
+
+  const goStreetView = () => {
+    const gm = (window as any).google?.maps
+    if (!gm || !subject) return
+    new gm.StreetViewService().getPanorama(
+      { location: subject, radius: 100, source: 'outdoor' },
+      (data: any, status: string) => {
+        if (status === 'OK' && data?.location?.latLng) {
+          const sv = map.getStreetView()
+          sv.setPosition(data.location.latLng)
+          sv.setPov({ heading: 0, pitch: 0 })
+          sv.setVisible(true)
+        } else {
+          goSubject()
+          zoomBy(19 - (map.getZoom() ?? 13))
+        }
+      }
+    )
+  }
+
+  const btn =
+    'flex items-center justify-center w-8 h-8 bg-background/95 border border-border text-foreground shadow-md hover:bg-secondary transition-colors'
+  const labelBtn =
+    'flex items-center gap-1.5 px-2.5 h-8 rounded-md bg-background/95 border border-border text-[10px] font-medium text-foreground shadow-md hover:bg-secondary transition-colors'
+
+  return (
+    <>
+      {/* Mode + subject controls — top right */}
+      <div className="absolute top-2 right-2 z-10 flex flex-col gap-1.5 items-end">
+        <div className="flex rounded-md border border-border overflow-hidden shadow-md">
+          <button type="button" onClick={() => setMapMode('2d')} title="2D flat view"
+            className={cn('flex items-center gap-1 px-2 h-8 text-[10px] font-medium transition-colors',
+              mode === '2d' ? 'bg-primary text-primary-foreground' : 'bg-background/95 text-foreground hover:bg-secondary')}>
+            <MapIcon className="w-3.5 h-3.5" /> 2D
+          </button>
+          <button type="button" onClick={() => setMapMode('3d')} title="3D aerial view"
+            className={cn('flex items-center gap-1 px-2 h-8 text-[10px] font-medium transition-colors',
+              mode === '3d' ? 'bg-primary text-primary-foreground' : 'bg-background/95 text-foreground hover:bg-secondary')}>
+            <Box className="w-3.5 h-3.5" /> 3D
+          </button>
+        </div>
+        {subject && (
+          <>
+            <button type="button" className={labelBtn} onClick={goSubject} title="Center on subject property">
+              <Crosshair className="w-3.5 h-3.5" /> Subject
+            </button>
+            <button type="button" className={labelBtn} onClick={goStreetView} title="Street View at subject">
+              <PersonStanding className="w-3.5 h-3.5" /> Street View
+            </button>
+          </>
+        )}
+      </div>
+
+      {/* Zoom + rotate — bottom left */}
+      <div className="absolute bottom-6 left-2 z-10 flex flex-col gap-1">
+        <button type="button" className={cn(btn, 'rounded-t-md border-b-0')} onClick={() => zoomBy(1)} title="Zoom in">
+          <Plus className="w-4 h-4" />
+        </button>
+        <button type="button" className={cn(btn, 'rounded-b-md')} onClick={() => zoomBy(-1)} title="Zoom out">
+          <Minus className="w-4 h-4" />
+        </button>
+        <button type="button" className={cn(btn, 'rounded-md mt-1.5')} onClick={rotateCCW} title="Rotate counterclockwise (or double-click map)">
+          <RotateCcw className="w-3.5 h-3.5" />
+        </button>
+      </div>
+    </>
+  )
+}
+
 // ─── Main ───────────────────────────────────────────────────────────────────
 
 interface PropertyMapInnerProps {
@@ -127,6 +315,8 @@ export default function PropertyMapInner({ markers, onMarkerClick, activeMarkerK
   }, [onMarkerClick])
 
   const center = markers.length > 0 ? { lat: markers[0].lat, lng: markers[0].lng } : { lat: 28, lng: -82 }
+  const subjectMarker = markers.find((m) => m.type === 'subject')
+  const subject = subjectMarker ? { lat: subjectMarker.lat, lng: subjectMarker.lng } : null
 
   if (!apiKey) {
     return (
@@ -137,24 +327,24 @@ export default function PropertyMapInner({ markers, onMarkerClick, activeMarkerK
   }
 
   return (
-    <APIProvider apiKey={apiKey}>
-      <div className="h-full w-full min-h-[350px]">
+    <APIProvider apiKey={apiKey} libraries={['streetView']}>
+      <div className="relative h-full w-full min-h-[350px]">
         <Map
           defaultCenter={center}
-          defaultZoom={13}
+          defaultZoom={18}
           mapTypeId="hybrid"
-          gestureHandling="cooperative"
+          gestureHandling="greedy"
           disableDefaultUI
-          zoomControl
-          zoomControlOptions={{ position: 5 }}
+          disableDoubleClickZoom
+          rotateControl={false}
           mapTypeControl={false}
           streetViewControl={false}
           fullscreenControl={false}
           clickableIcons={false}
-          styles={MAP_STYLES}
           style={{ width: '100%', height: '100%' }}
         >
           <MapMarkers markers={markers} activeMarkerKey={activeMarkerKey} onMarkerClick={handleClick} />
+          <MapHud subject={subject} />
         </Map>
       </div>
     </APIProvider>

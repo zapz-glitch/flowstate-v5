@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Flowstate Extension Settings</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 480px; margin: 40px auto; padding: 0 16px; color: #e5e5e5; background: #0a0a0a; }
+    label { display: block; font-size: 13px; margin-bottom: 6px; color: #a3a3a3; }
+    input { width: 100%; padding: 8px 10px; font-size: 14px; border: 1px solid #333; background: #141414; color: #e5e5e5; border-radius: 4px; box-sizing: border-box; }
+    button { margin-top: 12px; padding: 8px 16px; font-size: 13px; background: #fff; color: #000; border: none; border-radius: 4px; cursor: pointer; }
+    #saved { font-size: 12px; color: #4ade80; margin-top: 8px; display: none; }
+    .hint { font-size: 12px; color: #737373; margin-top: 6px; }
+  </style>
+</head>
+<body>
+  <label for="baseUrl">Flowstate dashboard URL</label>
+  <input id="baseUrl" type="url" placeholder="https://app.flowstate.homes">
+  <p class="hint">Use http://localhost:3004 for local development.</p>
+  <button id="save">Save</button>
+  <div id="saved">Saved.</div>
+  <script src="options.js"></script>
+</body>
+</html>

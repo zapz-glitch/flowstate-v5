@@ -63,6 +63,25 @@ const evaluators: Record<FilterType, FilterEvaluator> = {
     }
   },
 
+  foundation_match(subject, comp, _filter) {
+    const normalize = (v?: string | null) => v?.toLowerCase().replace(/[^a-z]/g, '')
+    const subjectFoundation = normalize(subject.construction?.foundationType)
+    const compFoundation = normalize(comp.construction?.foundationType)
+
+    if (!subjectFoundation || !compFoundation) {
+      return { type: 'foundation_match', passed: true, reason: 'Foundation type data not available' }
+    }
+
+    const passed = subjectFoundation === compFoundation
+    return {
+      type: 'foundation_match',
+      passed,
+      reason: passed ? undefined : `Foundation mismatch: "${comp.construction?.foundationType}" vs subject "${subject.construction?.foundationType}"`,
+      actualValue: comp.construction?.foundationType,
+      threshold: subject.construction?.foundationType,
+    }
+  },
+
   sale_age(_subject, comp, filter) {
     if (!comp.saleDate) {
       return {
@@ -175,6 +194,35 @@ const evaluators: Record<FilterType, FilterEvaluator> = {
     }
   },
 
+  lot_size_diff(subject, comp, filter) {
+    const subjLot = subject.lotSizeSquareFeet
+    const compLot = comp.lotSizeSquareFeet
+    if (subjLot == null || compLot == null) {
+      return { type: 'lot_size_diff', passed: true, reason: 'Lot size data not available' }
+    }
+    const diff = Math.abs(compLot - subjLot)
+    return {
+      type: 'lot_size_diff',
+      passed: diff <= filter.value,
+      reason: diff <= filter.value ? undefined : `Lot size difference too large: ${diff} sqft (max: ${filter.value})`,
+      actualValue: diff,
+      threshold: filter.value,
+    }
+  },
+
+  road_barrier(_subject, comp, _filter) {
+    if (comp.crossesMajorRoad == null) {
+      return { type: 'road_barrier', passed: true, reason: 'Road-barrier data not available' }
+    }
+    const passed = comp.crossesMajorRoad === false
+    return {
+      type: 'road_barrier',
+      passed,
+      reason: passed ? undefined : 'Comparable is across a major road from subject',
+      actualValue: comp.crossesMajorRoad ? 'crosses' : 'same_side',
+      threshold: 'same_side',
+    }
+  },
 }
 
 // ─── Public API ─────────────────────────────────────────────────────────────

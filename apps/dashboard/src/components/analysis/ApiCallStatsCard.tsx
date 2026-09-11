@@ -12,8 +12,8 @@ export function ApiCallStatsCard({ stats }: ApiCallStatsCardProps) {
     <div className="rounded-xl overflow-hidden border border-border">
       <div className="px-6 py-4">
         <div className="flex items-center gap-3 mb-4">
-          <div className="w-8 h-8 rounded-lg bg-violet-500/10 flex items-center justify-center">
-            <Activity className="w-4 h-4 text-violet-600" />
+          <div className="w-8 h-8 rounded-md border border-border flex items-center justify-center">
+            <Activity className="w-4 h-4 text-foreground-secondary" />
           </div>
           <div>
             <h3 className="text-body font-semibold text-foreground">API Call Statistics</h3>

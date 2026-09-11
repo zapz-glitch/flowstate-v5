@@ -28,6 +28,15 @@ const config: Config = {
           'Times New Roman',
           'serif',
         ],
+        mono: [
+          'var(--font-mono)',
+          'ui-monospace',
+          'SFMono-Regular',
+          'Menlo',
+          'Consolas',
+          'Liberation Mono',
+          'monospace',
+        ],
       },
       fontSize: {
         // Display - for hero sections, primary numbers

@@ -23,6 +23,9 @@ import {
 import { loadUserAnalysisSettings } from '../services/user-settings';
 import { generateSseToken } from '../utils/sse-token';
 import { AnalysisError } from '../utils/analysis-error';
+import { drizzle } from 'drizzle-orm/d1';
+import { eq, and } from 'drizzle-orm';
+import { savedReports } from '../db/schema';
 
 type Variables = { auth: AuthContext };
 
@@ -35,6 +38,30 @@ const analyze = new Hono<{ Bindings: Env; Variables: Variables }>();
  */
 function generateJobId(): string {
   return `job_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
+}
+
+/** 21 days — window in which a repeat evaluation with identical params returns the stored report. */
+export const EVAL_RESULT_TTL_SECONDS = 21 * 24 * 60 * 60;
+
+/** Stable, order-insensitive stringify for hashing eval params. */
+function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
+  return `{${Object.keys(value as Record<string, unknown>)
+    .sort()
+    .map((k) => `${JSON.stringify(k)}:${stableStringify((value as Record<string, unknown>)[k])}`)
+    .join(',')}}`;
+}
+
+async function hashEvalParams(params: unknown): Promise<string> {
+  const data = new TextEncoder().encode(stableStringify(params));
+  const digest = await crypto.subtle.digest('SHA-256', data);
+  return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+export function evalResultKey(userId: string, address: string, paramsHash: string): string {
+  const norm = address.trim().toLowerCase().replace(/\s+/g, ' ');
+  return `eval-result:${userId}:${norm}:${paramsHash}`;
 }
 
 // ─── Request Types ─────────────────────────────────────────────────────────────
@@ -151,7 +178,7 @@ analyze.post('/', async (c) => {
       );
     }
 
-    const isRefresh = c.env.EVALUATION_ENGINE !== 'python-v4' && !!body.existingJobId;
+    const isRefresh = !!body.existingJobId;
     const jobId = isRefresh ? body.existingJobId! : generateJobId();
 
     // ─── 1. Load user settings ───────────────────────────────────────────────
@@ -198,6 +225,50 @@ analyze.post('/', async (c) => {
       ? { percent: body.arvThresholdPercent }
       : userSettings.arvThreshold;
 
+    const evalParams = {
+      appraisalRules,
+      buybox: userSettings.mergedBuybox,
+      customRehabTable: userSettings.customRehabTable,
+      customTierRanges: userSettings.customTierRanges,
+      customMajorItemCosts: userSettings.customMajorItemCosts,
+      arvThreshold,
+      asIsThresholdPercent:
+        body.asIsThresholdPercent ?? userSettings.asIsThresholdPercent,
+      proximityConfig: userSettings.proximityConfig,
+    };
+
+    // 21-day eval-result cache: same address + same effective params returns
+    // the stored report; different params hash -> fresh run. skipCache and
+    // explicit refresh always bypass.
+    const evalParamsHash = await hashEvalParams(evalParams);
+    const resultCacheKey = evalResultKey(auth.userId, body.address ?? '', evalParamsHash);
+    if (!body.skipCache && !isRefresh && c.env.API_CACHE) {
+      try {
+        const cachedJobId = await c.env.API_CACHE.get(resultCacheKey)
+        if (cachedJobId) {
+          const db = drizzle(c.env.DB)
+          const [cached] = await db
+            .select({ fullResponseJson: savedReports.fullResponseJson })
+            .from(savedReports)
+            .where(and(eq(savedReports.userId, auth.userId), eq(savedReports.jobId, cachedJobId)))
+            .limit(1)
+          if (cached?.fullResponseJson) {
+            return c.json({
+              success: true,
+              data: {
+                jobId: cachedJobId,
+                result: JSON.parse(cached.fullResponseJson),
+                cached: true,
+                enrichment: null,
+              },
+            });
+          }
+          // Report row gone — stale pointer, fall through to a fresh run
+          await c.env.API_CACHE.delete(resultCacheKey).catch(() => {})
+        }
+      } catch { /* cache best-effort */ }
+    }
+
     const sseSecret = c.env.BETTER_AUTH_SECRET || '';
     const token = await generateSseToken(sseSecret, jobId, auth.userId);
     const apiBaseUrl = c.req.url.replace(/\/v1\/analyze.*/, '');
@@ -221,18 +292,10 @@ analyze.post('/', async (c) => {
         searchOptions: body.searchOptions ?? {},
         enrichment: body.enrichment,
         skipCache: body.skipCache,
-        evalParams: {
-          appraisalRules,
-          buybox: userSettings.mergedBuybox,
-          customRehabTable: userSettings.customRehabTable,
-          customTierRanges: userSettings.customTierRanges,
-          customMajorItemCosts: userSettings.customMajorItemCosts,
-          arvThreshold,
-          asIsThresholdPercent:
-            body.asIsThresholdPercent ?? userSettings.asIsThresholdPercent,
-        },
+        evalResultCacheKey: resultCacheKey,
+        evalParams,
         llmEnabled:
-          c.env.EVALUATION_ENGINE !== 'python-v4' && body.llmAnalysis?.enabled === true && !!c.env.OPENROUTER_API_KEY,
+          body.llmAnalysis?.enabled === true && !!c.env.OPENROUTER_API_KEY,
         isRefresh,
         llmOptions: {
           includePhotos: body.llmAnalysis?.includePhotos,

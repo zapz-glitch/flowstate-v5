@@ -75,9 +75,14 @@ export type {
   PropertyCondition,
 } from './providers/zillow'
 
+import { createListingPhotoProvider } from './providers/listing-provider'
+
 // ─── Provider Registry ──────────────────────────────────────────────────────────
 
-export type PhotoProviderType = 'zillow' | 'mls' | 'redfin' | 'manual'
+export type PhotoProviderType = 'zillow' | 'mls' | 'redfin' | 'realtor' | 'manual'
+
+/** Subject-photo fallback order: Zillow → Redfin → Realtor.com → none */
+const SUBJECT_FALLBACK_ORDER: PhotoProviderType[] = ['redfin', 'zillow', 'realtor']
 
 interface PhotoProviderConfig {
   /** Preferred provider (defaults to first available) */
@@ -138,11 +143,13 @@ class MultiPhotoService implements PhotoService {
       this.providers.set('zillow', zillowProvider)
     }
 
-    // Add more providers here as they're implemented:
-    // const mlsProvider = createMLSPhotoProvider(env)
-    // if (mlsProvider.isAvailable()) {
-    //   this.providers.set('mls', mlsProvider)
-    // }
+    // Listing-site fallbacks (Redfin, Realtor.com) — Firecrawl-based
+    for (const site of ['redfin', 'realtor'] as const) {
+      const provider = createListingPhotoProvider(env, site)
+      if (provider.isAvailable()) {
+        this.providers.set(site, provider)
+      }
+    }
 
     // Set active provider based on config or first available
     this.selectActiveProvider()
@@ -192,7 +199,7 @@ class MultiPhotoService implements PhotoService {
     property: PropertyIdentifier,
     options?: PhotoFetchOptions
   ): Promise<PhotoFetchResult> {
-    if (!this.activeProvider) {
+    if (this.providers.size === 0) {
       return {
         success: false,
         propertyId: property.propertyId,
@@ -201,7 +208,37 @@ class MultiPhotoService implements PhotoService {
       }
     }
 
-    return this.activeProvider.fetchPhotos(property, options)
+    // Fallback chain: configured provider first (if set), then SUBJECT_FALLBACK_ORDER
+    const order: PhotoProviderType[] = []
+    if (this.config.provider) order.push(this.config.provider)
+    for (const name of this.config.fallbacks ?? SUBJECT_FALLBACK_ORDER) {
+      if (!order.includes(name)) order.push(name)
+    }
+    for (const name of this.providers.keys()) {
+      if (!order.includes(name)) order.push(name)
+    }
+
+    const errors: string[] = []
+    for (const name of order) {
+      const provider = this.providers.get(name)
+      if (!provider?.isAvailable()) continue
+
+      const result = await provider.fetchPhotos(property, options)
+      if (result.success && result.data.photos.length > 0) {
+        if (errors.length > 0) {
+          console.log(`[PhotoService] ${name} succeeded after fallbacks: ${errors.join(' → ')}`)
+        }
+        return result
+      }
+      errors.push(`${name}: ${result.success ? 'no photos' : result.error}`)
+    }
+
+    return {
+      success: false,
+      propertyId: property.propertyId,
+      error: `All photo providers failed — ${errors.join('; ') || 'none available'}`,
+      code: 'NOT_FOUND',
+    }
   }
 
   async fetchBulkPhotos(
@@ -239,11 +276,27 @@ class MultiPhotoService implements PhotoService {
     const maxComps = options?.maxComps ?? 5
     const compsToFetch = comps.slice(0, maxComps)
 
-    // All fetches in parallel — subject gets full extraction, comps get HTML-only
+    // All fetches in parallel — subject gets full extraction via the fallback
+    // chain, comps use the primary provider only (HTML-only, no fallback — the
+    // 3-provider chain per comp would multiply scraper calls for display data)
+    // Each fetch is timeout-bounded so one hung scrape can't gate the bundle.
+    const withTimeout = <T>(p: Promise<T>, ms: number, fallback: T): Promise<T> =>
+      Promise.race([p, new Promise<T>((r) => setTimeout(() => r(fallback), ms))])
+
+    const compProvider = this.providers.get('zillow') ?? this.activeProvider
+    const failed = (propertyId: string, error: string, code: 'NO_PROVIDER' | 'FETCH_FAILED') =>
+      ({ success: false as const, propertyId, error, code })
+
     const [subjectResult, ...compResults] = await Promise.all([
-      this.fetchPhotos(subject, options),
+      withTimeout(this.fetchPhotos(subject, options), 20000, failed(subject.propertyId, 'Subject photo fetch timed out', 'FETCH_FAILED')),
       ...compsToFetch.map((comp) =>
-        this.fetchPhotos(comp, { ...options, skipJsonExtraction: true })
+        compProvider
+          ? withTimeout(
+              compProvider.fetchPhotos(comp, { ...options, skipJsonExtraction: true }),
+              12000,
+              failed(comp.propertyId, 'Comp photo fetch timed out', 'FETCH_FAILED')
+            )
+          : Promise.resolve(failed(comp.propertyId, 'No photo provider available', 'NO_PROVIDER'))
       ),
     ])
 
@@ -258,7 +311,8 @@ class MultiPhotoService implements PhotoService {
     return {
       subject: subjectResult.success ? subjectResult.data : null,
       comps: compPhotos,
-      provider: this.getProviderName() ?? 'none',
+      // Report the provider that actually delivered (fallback chain aware)
+      provider: subjectResult.success ? subjectResult.data.source : (this.getProviderName() ?? 'none'),
       fetchedAt: new Date().toISOString(),
     }
   }
@@ -289,8 +343,12 @@ export function createPhotoProvider(env: Env, type: PhotoProviderType): PhotoPro
     case 'zillow':
       const provider = createZillowPhotoProvider(env)
       return provider.isAvailable() ? provider : null
-    case 'mls':
     case 'redfin':
+    case 'realtor': {
+      const listingProvider = createListingPhotoProvider(env, type)
+      return listingProvider.isAvailable() ? listingProvider : null
+    }
+    case 'mls':
     case 'manual':
       // Not yet implemented
       return null

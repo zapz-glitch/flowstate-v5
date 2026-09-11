@@ -2,50 +2,61 @@
 
 import { createContext, useContext, useEffect, useState } from 'react'
 
-type Theme = 'dark' | 'light'
+// Environment presets — palette tuned per lighting condition.
+// night/dawn are dark palettes; outdoor/led are light palettes.
+export type Theme = 'night' | 'dawn' | 'outdoor' | 'led'
+
+const DARK_PRESETS: ReadonlySet<Theme> = new Set(['night', 'dawn'])
 
 interface ThemeContextType {
   theme: Theme
+  setTheme: (theme: Theme) => void
   toggleTheme: () => void
 }
 
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined)
 
+// Migrate legacy stored values
+function normalizeTheme(stored: string | null): Theme | null {
+  if (stored === 'dark') return 'night'
+  if (stored === 'light') return 'led'
+  if (stored === 'night' || stored === 'dawn' || stored === 'outdoor' || stored === 'led') return stored
+  return null
+}
+
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [theme, setTheme] = useState<Theme>('dark')
+  const [theme, setThemeState] = useState<Theme>('night')
   const [mounted, setMounted] = useState(false)
 
   useEffect(() => {
     setMounted(true)
-    // Check localStorage or system preference
-    const stored = localStorage.getItem('theme') as Theme | null
+    const stored = normalizeTheme(localStorage.getItem('theme'))
     if (stored) {
-      setTheme(stored)
-    } else if (window.matchMedia('(prefers-color-scheme: light)').matches) {
-      setTheme('light')
+      setThemeState(stored)
+    } else if (!window.matchMedia('(prefers-color-scheme: dark)').matches) {
+      setThemeState('led')
     }
   }, [])
 
   useEffect(() => {
     if (!mounted) return
-
     const root = document.documentElement
-    if (theme === 'dark') {
-      root.classList.add('dark')
-      root.classList.remove('light')
-    } else {
-      root.classList.remove('dark')
-      root.classList.add('light')
-    }
+    const isDark = DARK_PRESETS.has(theme)
+    root.classList.toggle('dark', isDark)
+    root.classList.toggle('light', !isDark)
+    root.dataset.preset = theme
     localStorage.setItem('theme', theme)
   }, [theme, mounted])
 
+  const setTheme = (next: Theme) => setThemeState(next)
+
+  // Binary toggle for quick switches: any dark preset ↔ led
   const toggleTheme = () => {
-    setTheme(prev => prev === 'dark' ? 'light' : 'dark')
+    setThemeState(prev => (DARK_PRESETS.has(prev) ? 'led' : 'night'))
   }
 
   return (
-    <ThemeContext.Provider value={{ theme, toggleTheme }}>
+    <ThemeContext.Provider value={{ theme, setTheme, toggleTheme }}>
       {children}
     </ThemeContext.Provider>
   )

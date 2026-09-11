@@ -30,7 +30,7 @@ export default function DocsLayout({ children }: { children: React.ReactNode }) 
   if (session.isPending || !session.data?.user) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
-        <Loader2 className="w-8 h-8 animate-spin text-purple-500" />
+        <Loader2 className="w-8 h-8 animate-spin text-foreground" />
       </div>
     )
   }
@@ -42,7 +42,7 @@ export default function DocsLayout({ children }: { children: React.ReactNode }) 
         <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-6">
           <div className="flex items-center gap-6">
             <Link href="/" className="flex items-center gap-2">
-              <Logo size="sm" />
+              <Logo size="sm" showText={false} />
             </Link>
             {/* Tabs */}
             <nav className="hidden sm:flex items-center gap-1">
@@ -75,7 +75,7 @@ export default function DocsLayout({ children }: { children: React.ReactNode }) 
               onClick={toggleTheme}
               className="text-muted-foreground hover:text-foreground hover:bg-secondary"
             >
-              {theme === 'dark' ? (
+              {theme === 'night' || theme === 'dawn' ? (
                 <Sun className="h-5 w-5" />
               ) : (
                 <Moon className="h-5 w-5" />

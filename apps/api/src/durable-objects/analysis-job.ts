@@ -15,18 +15,17 @@
 import { analyzeComps, type CompEvalContext } from '../services/comp-analysis'
 import { fetchMarketContext, type MarketContext } from '../services/market-context'
 import { type EvaluationParams } from '../services/evaluation'
-import { evaluateConfigured } from '../services/evaluation/python'
-import { mergeComparablePools } from '../services/property-api/comparable-pool'
-import { verifyPropertyIdentity } from '../services/property-api/property-identity'
+import { performAnalysis } from '../services/evaluation'
 import { detectOsmLocationRisks } from '../services/location-risk'
 import { createPropertyApi } from '../services/property-api'
-import { DEFAULT_FILTERS, type AppraisalFilter } from '../services/appraisal'
+import { DEFAULT_FILTERS, evaluateComparable, type AppraisalFilter } from '../services/appraisal'
 import { filtersToApiParams } from '../services/appraisal/types'
 import type { Env } from '../types'
 import type { NormalizedProperty, NormalizedComparable } from '../services/property-api/types'
 import { drizzle } from 'drizzle-orm/d1'
-import { eq } from 'drizzle-orm'
-import { savedReports } from '../db/schema'
+import { eq, and } from 'drizzle-orm'
+import { savedReports, reportHistory, analysisRuns } from '../db/schema'
+import { evaluateRun } from '../services/observability/evals'
 
 interface JobState {
   jobId: string
@@ -45,6 +44,8 @@ export interface StartEnrichmentRequest {
   bundle: import('../services/property-api/types').PropertyBundle
   /** Original evaluation params (for re-evaluation after enrichment) */
   evalParams: Omit<EvaluationParams, 'jobId' | 'bundle'>
+  /** KV key under which to store this run's report pointer (21-day eval cache) */
+  evalResultCacheKey?: string
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   analysisResult: Record<string, any>
   llmOptions?: {
@@ -80,6 +81,8 @@ export interface StartStreamingRequest {
     floodZone?: boolean
   }
   skipCache?: boolean
+  /** KV key under which to store this run's report pointer (21-day eval cache) */
+  evalResultCacheKey?: string
   /** Evaluation params (user settings, thresholds, etc.) */
   evalParams: Omit<EvaluationParams, 'jobId' | 'bundle'>
   /** Whether to run LLM comp selection */
@@ -92,6 +95,74 @@ export interface StartStreamingRequest {
     marketSearchModel?: string
     reasoning?: boolean
   }
+}
+
+type DrizzleDb = ReturnType<typeof drizzle>
+
+/**
+ * One report per property per user: a completed analysis for an address the
+ * user already has a report for overwrites it in place (and records a
+ * 'reanalyzed' history entry) rather than stacking a duplicate row.
+ */
+async function upsertPropertyReport(
+  db: DrizzleDb,
+  fields: {
+    userId: string
+    jobId: string
+    propertyAddress: string
+    propertyCity: string
+    propertyState: string
+    propertyZip?: string
+    propertyClip?: string | null
+  },
+  reportData: {
+    fullResponseJson: string
+    arv: number | null
+    asIsValue: number | null
+    maxAllowableOffer: number | null
+    estimatedRepairs: number | null
+  },
+): Promise<void> {
+  const historyChanges = JSON.stringify({
+    arv: reportData.arv,
+    buyPrice: reportData.maxAllowableOffer,
+    rehabCost: reportData.estimatedRepairs,
+  })
+
+  const [existing] = await db
+    .select({ id: savedReports.id })
+    .from(savedReports)
+    .where(and(eq(savedReports.userId, fields.userId), eq(savedReports.propertyAddress, fields.propertyAddress)))
+    .limit(1)
+
+  if (existing) {
+    await db.update(savedReports)
+      .set({ ...reportData, jobId: fields.jobId })
+      .where(eq(savedReports.id, existing.id))
+    await db.insert(reportHistory).values({
+      reportId: existing.id,
+      userId: fields.userId,
+      action: 'reanalyzed',
+      description: 'Report overwritten by a new analysis',
+      changesJson: historyChanges,
+    })
+    console.log(`[AnalysisJobDO] Report overwritten for ${fields.propertyAddress} (job ${fields.jobId})`)
+    return
+  }
+
+  const [inserted] = await db.insert(savedReports).values({
+    ...fields,
+    propertyZip: fields.propertyZip ?? '',
+    ...reportData,
+  }).returning({ id: savedReports.id })
+  await db.insert(reportHistory).values({
+    reportId: inserted.id,
+    userId: fields.userId,
+    action: 'created',
+    description: 'Report created',
+    changesJson: historyChanges,
+  })
+  console.log(`[AnalysisJobDO] Report saved for job ${fields.jobId}`)
 }
 
 export class AnalysisJobDO {
@@ -149,8 +220,10 @@ export class AnalysisJobDO {
 
     this.runStreamingAnalysis(body).catch((err) => {
       console.error('[AnalysisJobDO] Streaming analysis fatal error:', err)
+      const durationMs = Date.now() - (this.jobState?.createdAt ?? Date.now())
       this.pushEvent('error', { step: 'fatal', message: err instanceof Error ? err.message : 'Unknown error' })
-      this.pushEvent('enrichment_done', { totalDurationMs: Date.now() - (this.jobState?.createdAt ?? Date.now()) })
+      this.recordRun(body, { status: 'error', durationMs, errorCode: 'FATAL', errorMessage: err instanceof Error ? err.message : 'Unknown error' })
+      this.pushEvent('enrichment_done', { totalDurationMs: durationMs })
     })
 
     return new Response('OK', { status: 200 })
@@ -168,9 +241,7 @@ export class AnalysisJobDO {
     // ── Step 1: Search subject property ─────────────────────────────────────
     await this.pushEvent('property_fetch', { message: 'Searching property...' })
 
-    const searchResult = this.env.EVALUATION_ENGINE === 'python-v4' && config.search.propertyId
-      ? await propertyApi.getPropertyById(config.search.propertyId)
-      : await propertyApi.searchProperty({
+    const searchResult = await propertyApi.searchProperty({
       address: config.search.address,
       streetAddress: config.search.streetAddress,
       city: config.search.city,
@@ -179,20 +250,14 @@ export class AnalysisJobDO {
     })
 
     if (!searchResult.success) {
-      await this.pushEvent('error', { step: 'property_fetch', message: ('error' in searchResult ? searchResult.error : null) || 'Property not found' })
+      const msg = ('error' in searchResult ? searchResult.error : null) || 'Property not found'
+      await this.pushEvent('error', { step: 'property_fetch', message: msg })
+      await this.recordRun(config, { status: 'error', durationMs: Date.now() - startTime, errorCode: 'PROPERTY_NOT_FOUND', errorMessage: msg })
       await this.pushEvent('enrichment_done', { totalDurationMs: Date.now() - startTime })
       return
     }
 
     const property = searchResult.data
-    if (this.env.EVALUATION_ENGINE === 'python-v4') {
-      const identity = verifyPropertyIdentity(config.search, property, config.search.propertyId)
-      if (!identity.matched) {
-        await this.pushEvent('error', { step: 'property_fetch', message: identity.reason })
-        await this.pushEvent('enrichment_done', { totalDurationMs: Date.now() - startTime })
-        return
-      }
-    }
     console.log(`[AnalysisJobDO] ✓ Subject found: ${property.address} in ${Date.now() - startTime}ms`)
 
     // Stream subject immediately → dashboard shows map marker + subject card
@@ -230,33 +295,41 @@ export class AnalysisJobDO {
     const comparablesParams = {
         propertyId: property.id,
         radiusMiles: config.searchOptions.radiusMiles ?? apiFilterParams.radiusMiles ?? 1,
-        maxComps: this.env.EVALUATION_ENGINE === 'python-v4' ? 50 : config.searchOptions.maxComps ?? 15,
-        monthsBack: this.env.EVALUATION_ENGINE === 'python-v4' ? 12 : config.searchOptions.monthsBack ?? apiFilterParams.monthsBack ?? 12,
+        maxComps: config.searchOptions.maxComps ?? 15,
+        monthsBack: config.searchOptions.monthsBack ?? apiFilterParams.monthsBack ?? 12,
         sqftVariance: apiFilterParams.sqftVariance,
         subjectSqft: property.squareFeet ?? undefined,
         subjectPropertyType: property.propertyType ?? undefined,
     }
-    const defaultComparablesParams = { propertyId: property.id, providerDefaults: true, maxComps: 50 }
-    const [compsResult, permitsResult, floodResult, nearbyResult] = await Promise.all([
+    const [compsResult, permitsResult, floodResult, osmResult] = await Promise.all([
       propertyApi.getComparables(comparablesParams),
+      // Permits: preserve the error object — 'unavailable' must mean the call
+      // failed, not that the property has no permits on file (that's 'empty')
       (config.enrichment?.permits !== false)
-        ? propertyApi.getBuildingPermits(property.id, { address1: property.address, address2: `${property.city}, ${property.state} ${property.zipCode}` }).catch(() => null)
+        ? propertyApi.getBuildingPermits(property.id, { address1: property.address, address2: `${property.city}, ${property.state} ${property.zipCode}` })
         : Promise.resolve(null),
       (config.enrichment?.floodZone !== false && property.latitude && property.longitude)
         ? propertyApi.getFloodZone(property.latitude, property.longitude).catch(() => null)
         : Promise.resolve(null),
-      this.env.EVALUATION_ENGINE === 'python-v4' ? propertyApi.getComparables(defaultComparablesParams) : Promise.resolve(null),
+      // Location risk (major roads, railroads, commercial) — fetched during
+      // enrichment so it can deduct from valuation, not just flag post-hoc.
+      // The street name lets detection classify fronting/backing/siding.
+      property.latitude && property.longitude
+        ? detectOsmLocationRisks(property.latitude, property.longitude, 150, {
+            streetName: property.address?.replace(/^\d+\s+/, '') ?? undefined,
+          }).catch(() => null)
+        : Promise.resolve(null),
     ])
 
-    if (!compsResult.success && !nearbyResult?.success) {
-      await this.pushEvent('error', { step: 'comps_fetch', message: ('error' in compsResult ? compsResult.error : null) || 'Failed to fetch comparables' })
+    if (!compsResult.success) {
+      const msg = ('error' in compsResult ? compsResult.error : null) || 'Failed to fetch comparables'
+      await this.pushEvent('error', { step: 'comps_fetch', message: msg })
+      await this.recordRun(config, { status: 'error', durationMs: Date.now() - startTime, errorCode: 'COMPS_FETCH_FAILED', errorMessage: msg })
       await this.pushEvent('enrichment_done', { totalDurationMs: Date.now() - startTime })
       return
     }
 
-    const pools = this.env.EVALUATION_ENGINE === 'python-v4'
-      ? mergeComparablePools(nearbyResult?.success ? nearbyResult.data.comparables : [], compsResult.success ? compsResult.data.comparables : [])
-      : { comparables: compsResult.success ? compsResult.data.comparables : [], conflictIds: [] }
+    const pools = { comparables: compsResult.success ? compsResult.data.comparables : [], conflictIds: [] as string[] }
     const rawComps = pools.comparables
     console.log(`[AnalysisJobDO] ✓ ${rawComps.length} comps found in ${Date.now() - compsStart}ms`)
 
@@ -280,10 +353,20 @@ export class AnalysisJobDO {
     })
 
     // ── Step 3: Enrich comps ───────────────────────────────────────────────────
+    // No shortcuts: every returned comp gets the property-detail call —
+    // subdivision, foundation type, building style, features. The apples-to-
+    // apples rules (subdivision_match — the hammer — style, foundation) can
+    // only bite with enriched data. Sorted nearest-first so the cap, if ever
+    // hit, drops the least relevant.
     await this.pushEvent('property_fetch', { message: 'Enriching comparable details...' })
     const enrichStart = Date.now()
 
-    const enrichedComps = await propertyApi.enrichComparables(rawComps, { concurrency: 10 })
+    const toEnrich = [...rawComps]
+      .sort((a, b) => (a.distanceMiles ?? 999) - (b.distanceMiles ?? 999))
+
+    const enrichedList = await propertyApi.enrichComparables(toEnrich, { concurrency: 10 })
+    const enrichedById = new Map(enrichedList.map((c) => [c.id, c]))
+    const enrichedComps = rawComps.map((c) => enrichedById.get(c.id) ?? c)
 
     // Market context search runs in parallel — doesn't block evaluation or LLM
     // but we track the promise so we can await it before enrichment_done
@@ -312,16 +395,24 @@ export class AnalysisJobDO {
 
     // Build the full property bundle
     const permitsData = permitsResult && 'success' in permitsResult && permitsResult.success ? permitsResult.data : null
+    const permitsError = permitsResult && 'success' in permitsResult && !permitsResult.success
+      ? ('error' in permitsResult ? permitsResult.error : 'permit fetch failed')
+      : null
     const permits = permitsData ? {
       items: permitsData.permits,
       count: permitsData.count,
+      status: permitsData.count > 0 ? 'ok' as const : 'empty' as const,
       totalJobValue: permitsData.permits.reduce((sum: number, p: { jobValue?: number | null }) => sum + (p.jobValue ?? 0), 0),
       recentPermitTypes: [...new Set(permitsData.permits.map((p: { projectType?: string | null }) => p.projectType).filter(Boolean) as string[])],
+    } : permitsError ? {
+      items: [],
+      count: 0,
+      status: 'unavailable' as const,
+      error: String(permitsError),
     } : null
 
     const floodData = floodResult && 'success' in floodResult && floodResult.success ? floodResult.data : null
     const evidenceLimitations: string[] = []
-    if (this.env.EVALUATION_ENGINE === 'python-v4' && (!nearbyResult?.success || !compsResult.success)) evidenceLimitations.push('One provider comparable pool was unavailable; evaluation uses the surviving pool and coverage may be incomplete')
     for (const id of pools.conflictIds) evidenceLimitations.push(`${id}: Provider comparable pools disagree on the same sale date; price is quarantined from evaluation`)
     if (!permitsData) evidenceLimitations.push(config.enrichment?.permits === false
       ? 'Subject permits were not requested; system replacement evidence is unknown'
@@ -337,13 +428,14 @@ export class AnalysisJobDO {
         fetchedAt: new Date().toISOString(),
         provider: property.provider,
         searchParams: config.search as import('../services/property-api/types').PropertySearchParams,
-        comparablesParams: { ...comparablesParams, ...(this.env.EVALUATION_ENGINE === 'python-v4' ? { additionalNearbyPool: defaultComparablesParams } : {}) },
+        comparablesParams: { ...comparablesParams },
         enrichmentOptions: { permits: config.enrichment?.permits ?? true, floodZone: config.enrichment?.floodZone ?? true, weatherRisk: false, neighbourhood: false },
       },
       enrichment: {
         evidenceLimitations,
         permits,
         floodZone: floodData ?? null,
+        locationRisks: osmResult?.risks ?? null,
         weatherRisk: null,
         neighbourhood: null,
       },
@@ -364,7 +456,7 @@ export class AnalysisJobDO {
 
     let evalResult
     try {
-      evalResult = await evaluateConfigured({ jobId: config.jobId, bundle, ...evalParams, userId: config.userId }, this.env)
+      evalResult = await performAnalysis({ jobId: config.jobId, bundle, ...evalParams, userId: config.userId }, this.env)
     } catch (evalError) {
       const msg = evalError instanceof Error ? evalError.message : 'Evaluation failed'
       const code = (evalError as { code?: string })?.code
@@ -381,6 +473,7 @@ export class AnalysisJobDO {
         evidenceRefresh: (evalError as { evidenceRefresh?: unknown })?.evidenceRefresh,
         physicalEvidence: (evalError as { physicalEvidence?: unknown })?.physicalEvidence,
       })
+      await this.recordRun(config, { status: 'error', durationMs: Date.now() - startTime, errorCode: code ?? 'EVALUATION_ERROR', errorMessage: msg, compCount: bundle.comparables?.length })
       await this.pushEvent('enrichment_done', { totalDurationMs: Date.now() - startTime })
       return
     }
@@ -391,19 +484,8 @@ export class AnalysisJobDO {
 
     console.log(`[AnalysisJobDO] ✓ Evaluation complete in ${Date.now() - evalStart}ms`)
 
-    // OSM location risks — fire-and-forget, push update when ready
-    const osmPromise = (async () => {
-      try {
-        if (property.latitude && property.longitude) {
-          const osmResult = await detectOsmLocationRisks(property.latitude, property.longitude)
-          if (osmResult.riskFlags.length > 0) {
-            const existingFlags = (analysisResult.riskFlags as string[] | null) ?? []
-            analysisResult.riskFlags = [...existingFlags, ...osmResult.riskFlags]
-            await this.pushEvent('risk_flags_updated', { riskFlags: analysisResult.riskFlags })
-          }
-        }
-      } catch { /* Non-fatal */ }
-    })()
+    // OSM location risks now fetched during enrichment — they're already in
+    // the response via bundle.enrichment.locationRisks (and feed valuation)
 
     // Save/update report in DB
     try {
@@ -418,24 +500,18 @@ export class AnalysisJobDO {
         estimatedRepairs: (val?.rehabCost as number) ?? null,
       }
 
-      if (config.isRefresh) {
-        // Update existing report
-        await db.update(savedReports)
-          .set(reportData)
-          .where(eq(savedReports.jobId, config.jobId))
-        console.log(`[AnalysisJobDO] Report updated for job ${config.jobId}`)
-      } else {
-        // Insert new report
-        await db.insert(savedReports).values({
-          userId: config.userId,
-          jobId: config.jobId,
-          propertyAddress: (subj.address as string) || '',
-          propertyCity: property.city || '',
-          propertyState: property.state || '',
-          propertyZip: property.zipCode || '',
-          ...reportData,
-        })
-        console.log(`[AnalysisJobDO] Report saved for job ${config.jobId}`)
+      await upsertPropertyReport(db, {
+        userId: config.userId,
+        jobId: config.jobId,
+        propertyAddress: (subj.address as string) || '',
+        propertyCity: property.city || '',
+        propertyState: property.state || '',
+        propertyZip: property.zipCode || '',
+      }, reportData)
+      if (config.evalResultCacheKey) {
+        await this.env.API_CACHE.put(config.evalResultCacheKey, config.jobId, {
+          expirationTtl: 21 * 24 * 60 * 60, // 21 days
+        }).catch(() => { /* best-effort */ })
       }
     } catch (dbError) {
       console.warn(`[AnalysisJobDO] Failed to save report:`, dbError instanceof Error ? dbError.message : dbError)
@@ -446,9 +522,10 @@ export class AnalysisJobDO {
 
     // Private image access checks the saved report owner before serving any bytes.
     await this.pushEvent('evaluation_complete', { updatedResult: analysisResult })
+    await this.recordRun(config, { status: 'completed', durationMs: Date.now() - startTime, response: analysisResult })
 
     // ── Step 5: LLM comp selection ──────────────────────────────────────────
-    if (config.llmEnabled && analysisResult.evaluationEngine !== 'python-v4') {
+    if (config.llmEnabled) {
       const llmStart = Date.now()
       try {
         await this.pushEvent('llm_started', { message: 'AI selecting best comps...', compCount: enrichedComps.length })
@@ -515,7 +592,7 @@ export class AnalysisJobDO {
     }
 
     // Wait for parallel tasks before closing SSE (so client receives them)
-    await Promise.all([marketContextPromise, osmPromise])
+    await marketContextPromise
     await this.pushEvent('enrichment_done', { totalDurationMs: Date.now() - startTime })
     console.log(`[AnalysisJobDO] ── Streaming analysis complete in ${Date.now() - startTime}ms ──`)
   }
@@ -561,7 +638,7 @@ export class AnalysisJobDO {
       try {
         await this.pushEvent('evaluation_started', { message: 'Evaluating comparables...' })
 
-        const evalResult = await evaluateConfigured({
+        const evalResult = await performAnalysis({
           jobId: config.jobId,
           bundle: config.bundle,
           ...config.evalParams,
@@ -571,7 +648,7 @@ export class AnalysisJobDO {
         const updatedResponse = evalResult.response as unknown as Record<string, unknown>
 
         // If LLM will run, disable all comp selections — LLM decides final selection
-        if (config.pending.includes('llm') && updatedResponse.evaluationEngine !== 'python-v4') {
+        if (config.pending.includes('llm')) {
           const comps = updatedResponse.comps as Record<string, unknown> | undefined
           if (comps?.items && Array.isArray(comps.items)) {
             comps.items = comps.items.map((c: Record<string, unknown>) => ({ ...c, isEnabled: false }))
@@ -604,20 +681,25 @@ export class AnalysisJobDO {
           const result = updatedResponse as Record<string, unknown>
           const subject = result.subject as Record<string, unknown>
           const valuation = result.valuation as Record<string, unknown> | null
-          await db.insert(savedReports).values({
+          await upsertPropertyReport(db, {
             userId: config.userId,
             jobId: config.jobId,
             propertyAddress: (subject.address as string) || '',
             propertyCity: (config.bundle.property.city) || '',
             propertyState: (config.bundle.property.state) || '',
             propertyZip: (config.bundle.property.zipCode) || '',
+          }, {
             fullResponseJson: JSON.stringify(updatedResponse),
             arv: (valuation?.arv as number) ?? null,
             asIsValue: (valuation?.asIsValue as number) ?? null,
             maxAllowableOffer: (valuation?.buyPrice as number) ?? null,
             estimatedRepairs: (valuation?.rehabCost as number) ?? null,
           })
-          console.log(`[AnalysisJobDO] Report saved for job ${config.jobId}`)
+          if (config.evalResultCacheKey) {
+            await this.env.API_CACHE.put(config.evalResultCacheKey, config.jobId, {
+              expirationTtl: 21 * 24 * 60 * 60, // 21 days
+            }).catch(() => { /* best-effort */ })
+          }
         } catch (dbError) {
           console.warn(`[AnalysisJobDO] Failed to save report:`, dbError instanceof Error ? dbError.message : dbError)
           throw new Error('The evaluation could not be saved. Retry the analysis.')
@@ -632,7 +714,7 @@ export class AnalysisJobDO {
     // Note: market_data step (Firecrawl/Zillow scraping) has been removed.
     // Property details are now sourced from CoreLogic enrichment.
     // Step B: LLM comp analysis (uses enriched data if market data ran first)
-    if (config.pending.includes('llm') && config.analysisResult.evaluationEngine !== 'python-v4') {
+    if (config.pending.includes('llm')) {
       const llmStart = Date.now()
       try {
         await this.pushEvent('llm_started', { message: 'AI analyzing comparables...', compCount: config.bundle.comparables.length })
@@ -742,6 +824,74 @@ export class AnalysisJobDO {
   }
 
   // ─── Event Management ─────────────────────────────────────────────────────
+
+  // ─── Observability: record every run outcome (success AND failure) ────────
+
+  private async recordRun(
+    config: StartStreamingRequest,
+    outcome: {
+      status: 'completed' | 'error'
+      durationMs: number
+      response?: Record<string, unknown> | null
+      errorCode?: string
+      errorMessage?: string
+      compCount?: number
+    }
+  ): Promise<void> {
+    try {
+      const db = drizzle(this.env.DB)
+      const resp = (outcome.response ?? null) as Record<string, unknown> | null
+      const subj = (resp?.subject ?? null) as Record<string, unknown> | null
+      const val = (resp?.valuation ?? null) as Record<string, unknown> | null
+      const comps = (resp?.comps ?? null) as Record<string, unknown> | null
+      const report = (resp?.report ?? null) as { steps?: Array<{ name: string; status: string; detail?: string }>; fallbacksUsed?: string[] } | null
+      const vision = (resp?.visionAssessment ?? null) as { status?: string } | null
+      const permits = (subj?.permits ?? null) as { status?: string } | null
+
+      const evidence = {
+        status: outcome.status,
+        errorCode: outcome.errorCode ?? null,
+        compCount: outcome.compCount ?? (comps?.total as number) ?? null,
+        enabledCompCount: (comps?.enabledCount as number) ?? null,
+        arv: (val?.arv as number) ?? null,
+        photoCount: Array.isArray(subj?.photos) ? (subj.photos as unknown[]).length : 0,
+        renovationLevelSource: (resp?.renovationLevelSource as string) ?? null,
+        visionStatus: vision?.status ?? null,
+        permitStatus: permits?.status ?? null,
+        fallbacks: report?.fallbacksUsed ?? [],
+        durationMs: outcome.durationMs,
+        steps: report?.steps ?? null,
+      }
+      const runEval = evaluateRun(evidence)
+
+      await db.insert(analysisRuns).values({
+        jobId: config.jobId,
+        userId: config.userId,
+        propertyAddress: (subj?.address as string) ?? config.search.address ?? config.search.streetAddress ?? null,
+        propertyCity: (config.search.city as string) ?? null,
+        propertyState: (config.search.state as string) ?? null,
+        propertyZip: (config.search.zipCode as string) ?? null,
+        status: outcome.status,
+        errorCode: outcome.errorCode ?? null,
+        errorMessage: outcome.errorMessage ?? null,
+        durationMs: outcome.durationMs,
+        arv: (val?.arv as number) ?? null,
+        recommendation: (val?.recommendation as string) ?? null,
+        compCount: (comps?.total as number) ?? outcome.compCount ?? null,
+        enabledCompCount: (comps?.enabledCount as number) ?? null,
+        photoProvider: (resp?.photoProvider as string) ?? null,
+        photoCount: Array.isArray(subj?.photos) ? (subj.photos as unknown[]).length : 0,
+        renovationLevelSource: (resp?.renovationLevelSource as string) ?? null,
+        visionStatus: vision?.status ?? null,
+        stepsJson: report?.steps ? JSON.stringify(report.steps) : null,
+        fallbacksJson: report?.fallbacksUsed ? JSON.stringify(report.fallbacksUsed) : null,
+        evalJson: JSON.stringify(runEval),
+        apiCallStatsJson: resp?.apiCallStats ? JSON.stringify(resp.apiCallStats) : null,
+      })
+    } catch (err) {
+      console.warn('[AnalysisJobDO] recordRun failed (non-fatal):', err instanceof Error ? err.message : err)
+    }
+  }
 
   private async pushEvent(event: string, data: unknown): Promise<void> {
     if (!this.jobState) return

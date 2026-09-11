@@ -1,25 +1,39 @@
 'use client'
 
 import { Terminal, Copy, Check, Loader2, CheckCircle } from 'lucide-react'
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 
 interface HeroProps {
   onGetStartedClick: () => void
 }
 
 interface TerminalLine {
-  type: 'command' | 'output' | 'success' | 'loading'
+  id: number
+  type: 'command' | 'output' | 'success' | 'spacer'
   content: string
   color?: string
 }
 
+// Keep a rolling window so the terminal scrolls like a real one instead of
+// clearing abruptly between commands.
+const MAX_LINES = 22
+
 export function Hero({ onGetStartedClick: _onGetStartedClick }: HeroProps) {
   const [copied, setCopied] = useState(false)
   const [lines, setLines] = useState<TerminalLine[]>([])
+  const lineId = useRef(0)
   const [currentText, setCurrentText] = useState('')
   const [isTyping, setIsTyping] = useState(false)
+  const [isFetching, setIsFetching] = useState(false)
   const [showCursor, setShowCursor] = useState(true)
   const [commandIndex, setCommandIndex] = useState(0)
+
+  const appendLines = useCallback((newLines: Omit<TerminalLine, 'id'>[]) => {
+    setLines(prev => [
+      ...prev,
+      ...newLines.map(l => ({ ...l, id: lineId.current++ })),
+    ].slice(-MAX_LINES))
+  }, [])
 
   // Waitlist form state
   const [firstName, setFirstName] = useState('')
@@ -167,21 +181,21 @@ export function Hero({ onGetStartedClick: _onGetStartedClick }: HeroProps) {
   // Add output lines one by one
   const showOutput = useCallback((outputLines: string[], index: number, onComplete: () => void) => {
     if (index < outputLines.length) {
-      setLines(prev => [...prev, { type: 'output', content: outputLines[index] }])
-      setTimeout(() => showOutput(outputLines, index + 1, onComplete), 60)
+      appendLines([{ type: 'output', content: outputLines[index] }])
+      setTimeout(() => showOutput(outputLines, index + 1, onComplete), 70)
     } else {
       onComplete()
     }
-  }, [])
+  }, [appendLines])
 
   // Main animation loop
   useEffect(() => {
     const runAnimation = async () => {
       const command = commands[commandIndex]
 
-      // Clear and start fresh
-      setLines([])
+      // Separate runs with a blank line instead of clearing the buffer
       setCurrentText('')
+      appendLines([{ type: 'spacer', content: '' }])
       setIsTyping(true)
 
       // Wait a moment before starting
@@ -193,19 +207,17 @@ export function Hero({ onGetStartedClick: _onGetStartedClick }: HeroProps) {
       })
 
       // Add the command to lines
-      setLines([{ type: 'command', content: command.text }])
+      appendLines([{ type: 'command', content: command.text }])
       setCurrentText('')
       setIsTyping(false)
 
-      // Show loading
+      // Show loading (rendered below the list, no array mutation)
       await new Promise(resolve => setTimeout(resolve, 300))
-      setLines(prev => [...prev, { type: 'loading', content: 'Fetching...' }])
+      setIsFetching(true)
 
       // Wait for "response"
-      await new Promise(resolve => setTimeout(resolve, 600))
-
-      // Remove loading and show response
-      setLines(prev => prev.filter(l => l.type !== 'loading'))
+      await new Promise(resolve => setTimeout(resolve, 700))
+      setIsFetching(false)
 
       await new Promise<void>(resolve => {
         showOutput(command.response, 0, resolve)
@@ -213,7 +225,7 @@ export function Hero({ onGetStartedClick: _onGetStartedClick }: HeroProps) {
 
       // Show success message
       await new Promise(resolve => setTimeout(resolve, 200))
-      setLines(prev => [...prev, { type: 'success', content: command.successMsg }])
+      appendLines([{ type: 'success', content: command.successMsg }])
 
       // Wait before next command
       await new Promise(resolve => setTimeout(resolve, 3000))
@@ -232,19 +244,18 @@ export function Hero({ onGetStartedClick: _onGetStartedClick }: HeroProps) {
   }
 
   return (
-    <section className="relative pt-24 sm:pt-32 pb-12 sm:pb-16 overflow-hidden bg-background">
-      {/* Subtle gradient overlay */}
-      <div className="absolute inset-0 bg-gradient-to-br from-transparent via-purple-950/10 to-transparent" />
-
+    <section className="relative pt-28 sm:pt-40 pb-16 sm:pb-24 overflow-hidden bg-background border-b border-border">
       <div className="relative z-10 max-w-6xl mx-auto px-4 sm:px-6 w-full">
-        <div className="grid lg:grid-cols-2 gap-8 lg:gap-16 items-center">
+        <div className="grid lg:grid-cols-2 gap-10 lg:gap-20 items-center">
           {/* Left side - Text content */}
           <div className="space-y-6 sm:space-y-8 text-center lg:text-left">
-            {/* Main headline - italic serif style like agent.flowstate.homes */}
-            <h1 className="text-4xl sm:text-5xl lg:text-6xl font-serif font-normal text-foreground leading-[1.1] mb-4 sm:mb-6">
-              <span className="italic">Analyze fast,</span>
+            <p className="mono-label">01 / Property valuation API</p>
+
+            {/* Main headline - tight grotesque, monochrome */}
+            <h1 className="text-4xl sm:text-5xl lg:text-6xl font-sans font-medium tracking-[-0.03em] text-foreground leading-[1.05] mb-4 sm:mb-6">
+              Analyze fast.
               <br />
-              <span>invest smarter</span>
+              <span className="text-foreground-secondary">Invest smarter.</span>
             </h1>
 
             {/* Subtitle */}
@@ -271,7 +282,7 @@ export function Hero({ onGetStartedClick: _onGetStartedClick }: HeroProps) {
                       onChange={(e) => setFirstName(e.target.value)}
                       required
                       placeholder="First name"
-                      className="flex-1 min-w-0 px-3.5 py-2.5 bg-secondary/50 border border-border rounded-xl text-foreground placeholder:text-muted-foreground text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500/50 transition-colors"
+                      className="flex-1 min-w-0 px-3.5 py-2.5 bg-secondary/50 border border-border rounded-md text-foreground placeholder:text-muted-foreground text-sm focus:outline-none focus:ring-1 focus:ring-ring focus:border-ring transition-colors"
                     />
                     <input
                       type="text"
@@ -279,7 +290,7 @@ export function Hero({ onGetStartedClick: _onGetStartedClick }: HeroProps) {
                       onChange={(e) => setLastName(e.target.value)}
                       required
                       placeholder="Last name"
-                      className="flex-1 min-w-0 px-3.5 py-2.5 bg-secondary/50 border border-border rounded-xl text-foreground placeholder:text-muted-foreground text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500/50 transition-colors"
+                      className="flex-1 min-w-0 px-3.5 py-2.5 bg-secondary/50 border border-border rounded-md text-foreground placeholder:text-muted-foreground text-sm focus:outline-none focus:ring-1 focus:ring-ring focus:border-ring transition-colors"
                     />
                   </div>
                   <input
@@ -288,12 +299,12 @@ export function Hero({ onGetStartedClick: _onGetStartedClick }: HeroProps) {
                     onChange={(e) => setEmail(e.target.value)}
                     required
                     placeholder="you@example.com"
-                    className="w-full px-3.5 py-2.5 bg-secondary/50 border border-border rounded-xl text-foreground placeholder:text-muted-foreground text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500/50 transition-colors"
+                    className="w-full px-3.5 py-2.5 bg-secondary/50 border border-border rounded-md text-foreground placeholder:text-muted-foreground text-sm focus:outline-none focus:ring-1 focus:ring-ring focus:border-ring transition-colors"
                   />
                   <button
                     type="submit"
                     disabled={waitlistLoading}
-                    className="w-full py-2.5 px-4 bg-gradient-to-r from-purple-500 to-violet-600 text-white font-medium rounded-xl hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2 shadow-lg shadow-purple-500/25"
+                    className="w-full py-2.5 px-4 bg-foreground text-background font-medium rounded-full hover:bg-foreground/85 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
                   >
                     {waitlistLoading ? (
                       <>
@@ -312,7 +323,7 @@ export function Hero({ onGetStartedClick: _onGetStartedClick }: HeroProps) {
 
           {/* Right side - Terminal API demo */}
           <div className="w-full">
-            <div className="rounded-xl overflow-hidden border border-border bg-card shadow-2xl">
+            <div className="rounded-lg overflow-hidden border border-border bg-card">
               {/* Terminal header */}
               <div className="flex items-center justify-between px-3 sm:px-4 py-2.5 sm:py-3 bg-secondary border-b border-border">
                 <div className="flex items-center gap-2">
@@ -344,15 +355,16 @@ export function Hero({ onGetStartedClick: _onGetStartedClick }: HeroProps) {
                 </button>
               </div>
 
-              {/* Terminal content */}
-              <div className="p-3 sm:p-4 font-mono text-xs sm:text-sm min-h-[200px] sm:min-h-[300px] max-h-[250px] sm:max-h-[300px] overflow-hidden">
+              {/* Terminal content — fixed height, bottom-anchored like a real terminal */}
+              <div className="p-3 sm:p-4 font-mono text-xs sm:text-sm h-[280px] sm:h-[320px] overflow-hidden flex flex-col justify-end">
                 {/* Previous lines */}
                 <div className="space-y-1">
-                  {lines.map((line, index) => (
+                  {lines.map((line) => (
                     <div
-                      key={index}
-                      className="animate-in fade-in slide-in-from-bottom-1 duration-150"
+                      key={line.id}
+                      className="animate-fade-in"
                     >
+                      {line.type === 'spacer' && <div className="h-3" />}
                       {line.type === 'command' && (
                         <div className="flex items-start gap-2">
                           <span className="text-green-500 dark:text-green-400 select-none">$</span>
@@ -361,7 +373,7 @@ export function Hero({ onGetStartedClick: _onGetStartedClick }: HeroProps) {
                       )}
                       {line.type === 'output' && (
                         <div className="ml-4 text-xs">
-                          <span className="text-purple-500 dark:text-purple-400">
+                          <span className="text-foreground-secondary">
                             {line.content.replace(/"([^"]+)":/g, (_, key) => `"${key}":`).split(':')[0]}
                           </span>
                           <span className="text-muted-foreground">
@@ -370,16 +382,6 @@ export function Hero({ onGetStartedClick: _onGetStartedClick }: HeroProps) {
                           {!line.content.includes(':') && (
                             <span className="text-muted-foreground">{line.content}</span>
                           )}
-                        </div>
-                      )}
-                      {line.type === 'loading' && (
-                        <div className="flex items-center gap-2 ml-4 text-muted-foreground">
-                          <div className="flex gap-1">
-                            <span className="w-1.5 h-1.5 rounded-full bg-purple-500 dark:bg-purple-400 animate-bounce" style={{ animationDelay: '0ms' }} />
-                            <span className="w-1.5 h-1.5 rounded-full bg-purple-500 dark:bg-purple-400 animate-bounce" style={{ animationDelay: '150ms' }} />
-                            <span className="w-1.5 h-1.5 rounded-full bg-purple-500 dark:bg-purple-400 animate-bounce" style={{ animationDelay: '300ms' }} />
-                          </div>
-                          <span className="text-xs">{line.content}</span>
                         </div>
                       )}
                       {line.type === 'success' && (
@@ -391,6 +393,18 @@ export function Hero({ onGetStartedClick: _onGetStartedClick }: HeroProps) {
                     </div>
                   ))}
                 </div>
+
+                {/* Fetching indicator — separate element, never mutates the lines array */}
+                {isFetching && (
+                  <div className="flex items-center gap-2 ml-4 mt-1 text-muted-foreground animate-fade-in">
+                    <div className="flex gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-foreground/50 animate-bounce" style={{ animationDelay: '0ms' }} />
+                      <span className="w-1.5 h-1.5 rounded-full bg-foreground/50 animate-bounce" style={{ animationDelay: '150ms' }} />
+                      <span className="w-1.5 h-1.5 rounded-full bg-foreground/50 animate-bounce" style={{ animationDelay: '300ms' }} />
+                    </div>
+                    <span className="text-xs">Fetching...</span>
+                  </div>
+                )}
 
                 {/* Current typing line */}
                 {isTyping && (
@@ -408,7 +422,7 @@ export function Hero({ onGetStartedClick: _onGetStartedClick }: HeroProps) {
                 )}
 
                 {/* Waiting cursor when not typing */}
-                {!isTyping && lines.length === 0 && (
+                {!isTyping && !isFetching && lines.length === 0 && (
                   <div className="flex items-start gap-2">
                     <span className="text-green-500 dark:text-green-400 select-none">$</span>
                     <span

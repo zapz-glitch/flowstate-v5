@@ -20,7 +20,7 @@ import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
 import { EvaluationSettingsSheet } from '@/components/report/EvaluationSettingsSheet'
 import { queueAnalysis, type AnalyzeData } from './actions'
-import { getArvThreshold, getReportsByProperty, runCompSelection, type ExistingReport } from '@/lib/client-api'
+import { getArvThreshold, getLatestReport, getReportsByProperty, getSavedReport, runCompSelection, type ExistingReport } from '@/lib/client-api'
 import { useAutoSave } from '@/hooks/use-auto-save'
 import { ExistingReportsDialog } from './ExistingReportsDialog'
 // cn is used in the outer wrapper
@@ -48,6 +48,10 @@ import type { CompItem } from './actions'
 //             Zillow photos + optional AI analysis may still be running in background
 //
 type AnalysisPhase = 'idle' | 'fetching' | 'ready'
+
+// Last searched property — restored when returning to Property Search
+const LAST_ANALYSIS_KEY = 'flowstate:last-analysis'
+const LAST_ANALYSIS_TTL_MS = 7 * 24 * 60 * 60 * 1000 // restore window: 7 days
 
 // ─── Status Labels ───────────────────────────────────────────────────────────
 
@@ -173,6 +177,52 @@ export default function AnalyzePage() {
   const setActiveAnalysis = useSetAtom(activeAnalysisAtom)
   const setAnalysisResult = useSetAtom(analysisResultAtom)
   const setAnalysisState = useSetAtom(analysisStateAtom)
+
+  // Restore the last searched property when the page mounts with no
+  // in-flight analysis — the saved report carries the full AnalyzeData JSON.
+  const restoredRef = useRef(false)
+  useEffect(() => {
+    if (restoredRef.current || analysisResult || activeAnalysis) return
+    // ?address= takes precedence — an incoming analysis request shouldn't be
+    // pre-empted by the last-property restore
+    if (new URLSearchParams(window.location.search).has('address')) return
+    restoredRef.current = true
+    const restore = (jobId: string, address: string) => {
+      setPhase('fetching')
+      getSavedReport(jobId).then((res) => {
+        if (res?.analysis) {
+          setAnalysisResult(res.analysis as AnalyzeData)
+          setActiveAnalysis({ jobId: res.jobId ?? jobId, address: res.address || address })
+          setAddress(res.address || address)
+          try { localStorage.setItem(LAST_ANALYSIS_KEY, JSON.stringify({ jobId, address: res.address || address, savedAt: Date.now() })) } catch { /* ignore */ }
+          setPhase('ready')
+        } else {
+          setPhase('idle')
+        }
+      }).catch(() => setPhase('idle'))
+    }
+
+    let last: { jobId?: string; address?: string; savedAt?: number } | null = null
+    try { last = JSON.parse(localStorage.getItem(LAST_ANALYSIS_KEY) || 'null') } catch { /* ignore */ }
+
+    // Expire after 7 days — the report still exists, we just stop auto-resuming
+    const fresh = last?.jobId && !(last.savedAt && Date.now() - last.savedAt > LAST_ANALYSIS_TTL_MS)
+    if (fresh && last) {
+      restore(last.jobId!, last.address ?? '')
+      return
+    }
+    if (last?.jobId) {
+      try { localStorage.removeItem(LAST_ANALYSIS_KEY) } catch { /* ignore */ }
+    }
+
+    // Cross-device resume — no local pointer (or expired): pull the user's
+    // newest report server-side and restore it if it's inside the 7-day window
+    getLatestReport().then((latest) => {
+      if (!latest) { setPhase('idle'); return }
+      const age = Date.now() - new Date(latest.createdAt).getTime()
+      if (age <= LAST_ANALYSIS_TTL_MS) restore(latest.jobId, latest.address)
+    }).catch(() => setPhase('idle'))
+  }, [analysisResult, activeAnalysis, setAnalysisResult, setActiveAnalysis])
 
   // ─── SSE Event Handler ────────────────────────────────────────────────────
 
@@ -486,6 +536,9 @@ export default function AnalyzePage() {
       if (response.success) {
         setActiveAnalysis({ jobId: response.jobId ?? '', address: address.trim() })
         setAnalysisState({ ...initialAnalysisState, jobId: response.jobId ?? null, status: 'processing' })
+        try {
+          localStorage.setItem(LAST_ANALYSIS_KEY, JSON.stringify({ jobId: response.jobId ?? '', address: address.trim(), savedAt: Date.now() }))
+        } catch { /* ignore */ }
 
         // Result streams via SSE — connect immediately
         if (response.enrichment) {
@@ -543,6 +596,25 @@ export default function AnalyzePage() {
     }
   }, [pendingRetry, handleAnalyze])
 
+  // ?address=<addr> — browser-extension / shared-link entry point.
+  // Prefills the search bar and runs through the normal flow, so the
+  // existing-report dialog still intercepts when a report already exists.
+  const pendingUrlAddress = useRef<string | null>(null)
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search).get('address')?.trim()
+    if (q) {
+      pendingUrlAddress.current = q
+      setAddress(q)
+      setSearchExpanded(true)
+    }
+  }, [])
+  useEffect(() => {
+    if (pendingUrlAddress.current && pendingUrlAddress.current === address) {
+      pendingUrlAddress.current = null
+      handleAnalyze()
+    }
+  }, [address, handleAnalyze])
+
   const handleCancel = useCallback(() => {
     setPhase('idle')
     cancelAnalysis()
@@ -562,8 +634,8 @@ export default function AnalyzePage() {
       <div className={cn(showTwoColumn ? 'px-4 sm:px-6 pt-3 pb-1 space-y-3 flex-shrink-0' : 'space-y-6')}>
       {phase === 'idle' && !error && (
         <div>
-          <h1 className="text-heading-lg text-foreground tracking-tight">API Playground</h1>
-          <p className="text-body text-foreground-tertiary mt-1">Test the Flowstate API with real property data</p>
+          <h1 className="text-heading-lg text-foreground tracking-tight">Property Search</h1>
+          <p className="text-body text-foreground-tertiary mt-1">Search an address. Underwrite the deal.</p>
         </div>
       )}
 
@@ -581,15 +653,6 @@ export default function AnalyzePage() {
               <div className="text-body-sm text-foreground-secondary truncate">
                 {activeAnalysis?.address || address || 'Search an address...'}
               </div>
-              {streamingStep !== 'idle' && streamingStep !== 'done' && !error && (
-                <div className="text-xs text-primary mt-0.5 flex items-center gap-1.5">
-                  <Loader2 className="w-3 h-3 animate-spin" />
-                  {streamingStep === 'searching' && 'Searching property...'}
-                  {streamingStep === 'subject' && 'Loading comparables...'}
-                  {streamingStep === 'comps' && 'Enriching comp details...'}
-                  {streamingStep === 'evaluating' && 'Evaluating comparables...'}
-                </div>
-              )}
               {error && (
                 <div className="text-xs text-red-500 mt-0.5 truncate">{error}</div>
               )}
@@ -780,6 +843,13 @@ export default function AnalyzePage() {
           floodZone={authoritativeData?.floodZone ?? renderData?.floodZone}
 
           valuationCardRef={valuationCardRef}
+          statusLabel={
+            streamingStep === 'searching' ? 'Searching property...'
+            : streamingStep === 'subject' ? 'Loading comparables...'
+            : streamingStep === 'comps' ? 'Enriching comp details...'
+            : streamingStep === 'evaluating' ? 'Evaluating comparables...'
+            : null
+          }
           footer={
             isReady && hasResult ? (
               <div className="border border-border overflow-hidden no-print min-w-0">

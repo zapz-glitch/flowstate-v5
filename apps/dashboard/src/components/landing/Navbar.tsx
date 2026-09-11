@@ -39,8 +39,8 @@ export function Navbar({ onSignInClick, isSignedIn }: NavbarProps) {
       <div className="max-w-6xl mx-auto px-6">
         <div className="flex items-center justify-between">
           {/* Logo */}
-          <Link href="/" className="flex items-center gap-2.5">
-            <Logo size="md" />
+          <Link href="/" className="flex items-center">
+            <Logo size="md" showText={false} />
           </Link>
 
           {/* Desktop Navigation */}
@@ -67,16 +67,15 @@ export function Navbar({ onSignInClick, isSignedIn }: NavbarProps) {
               onClick={toggleTheme}
               className="text-muted-foreground hover:text-foreground hover:bg-secondary"
             >
-              {theme === 'dark' ? (
+              {theme === 'night' || theme === 'dawn' ? (
                 <Sun className="h-5 w-5" />
               ) : (
                 <Moon className="h-5 w-5" />
               )}
             </Button>
             <Button
-              variant="outline"
               onClick={onSignInClick}
-              className="border-border text-foreground hover:bg-secondary"
+              className="bg-foreground text-background hover:bg-foreground/85 rounded-full h-9 px-5"
             >
               {isSignedIn ? 'Dashboard' : 'Sign in'}
             </Button>
@@ -115,9 +114,8 @@ export function Navbar({ onSignInClick, isSignedIn }: NavbarProps) {
               </Link>
               <div className="pt-4">
                 <Button
-                  variant="outline"
                   onClick={() => { onSignInClick(); setIsMobileMenuOpen(false) }}
-                  className="w-full border-border text-foreground hover:bg-secondary"
+                  className="w-full bg-foreground text-background hover:bg-foreground/85 rounded-full"
                 >
                   {isSignedIn ? 'Dashboard' : 'Sign in'}
                 </Button>

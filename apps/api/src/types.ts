@@ -8,8 +8,9 @@ export interface Env {
   REPORT_ASSETS?: R2Bucket
   ANALYSIS_JOB: DurableObjectNamespace
   BATCH_JOB: DurableObjectNamespace
+  /** Global Cotality request throttle (50 req/min sliding window) */
+  RATE_LIMIT_COORDINATOR?: DurableObjectNamespace
   ENVIRONMENT: string
-  EVALUATION_ENGINE?: string
   V4_LOCAL_BRIDGE_URL?: string
   V4_LOCAL_BRIDGE_TOKEN?: string
   V4_HOSTED_API_URL?: string
@@ -30,6 +31,25 @@ export interface Env {
   // ─── Property Data (CoreLogic) ─────────────────────────────────────────────
   CORELOGIC_CLIENT_ID?: string
   CORELOGIC_CLIENT_SECRET?: string
+  /** Rotation pool — keys 0..8, each with its own API-product entitlements */
+  CORELOGIC_CLIENT_ID_0?: string
+  CORELOGIC_CLIENT_SECRET_0?: string
+  CORELOGIC_CLIENT_ID_1?: string
+  CORELOGIC_CLIENT_SECRET_1?: string
+  CORELOGIC_CLIENT_ID_2?: string
+  CORELOGIC_CLIENT_SECRET_2?: string
+  CORELOGIC_CLIENT_ID_3?: string
+  CORELOGIC_CLIENT_SECRET_3?: string
+  CORELOGIC_CLIENT_ID_4?: string
+  CORELOGIC_CLIENT_SECRET_4?: string
+  CORELOGIC_CLIENT_ID_5?: string
+  CORELOGIC_CLIENT_SECRET_5?: string
+  CORELOGIC_CLIENT_ID_6?: string
+  CORELOGIC_CLIENT_SECRET_6?: string
+  CORELOGIC_CLIENT_ID_7?: string
+  CORELOGIC_CLIENT_SECRET_7?: string
+  CORELOGIC_CLIENT_ID_8?: string
+  CORELOGIC_CLIENT_SECRET_8?: string
 
   // ─── Property Data (ATTOM) ─────────────────────────────────────────────────
   ATTOM_API_KEY?: string

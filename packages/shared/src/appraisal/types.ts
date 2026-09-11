@@ -10,11 +10,14 @@
 export type FilterType =
   | 'subdivision_match'
   | 'building_style_match'
+  | 'foundation_match'
   | 'sale_age'
   | 'sqft_diff'
   | 'property_type'
   | 'year_built_diff'
   | 'distance'
+  | 'lot_size_diff'
+  | 'road_barrier'
 
 /** Whether a filter is required (hard) or preferred (soft) */
 export type FilterPriority = 'hard' | 'soft'
@@ -43,6 +46,10 @@ export type AdjustmentType =
   | 'pool'
   | 'garage'
   | 'carport'
+  | 'traffic_siding'
+  | 'traffic_backing'
+  | 'traffic_fronting'
+  | 'basement_sqft'
 
 export interface AppraisalAdjustment {
   type: AdjustmentType
@@ -72,8 +79,12 @@ export interface PropertyLike {
   bathrooms?: number | null
   yearBuilt?: number | null
   subdivision?: string | null
+  propertyType?: string | null
+  lotSizeSquareFeet?: number | null
+  basementSquareFeet?: number | null
   construction?: {
     buildingStyle?: string | null
+    foundationType?: string | null
   } | null
   features?: {
     poolType?: string[] | null
@@ -92,6 +103,10 @@ export interface CompLike extends PropertyLike {
   saleDate?: string | null
   pricePerSqft?: number | null
   distanceMiles?: number | null
+  /** True when the comp sits across a major road from the subject */
+  crossesMajorRoad?: boolean
+  /** Site/influence quality flag (traffic influence) */
+  siteInfluence?: string | null
 }
 
 // ─── Evaluation Result ─────────────────────────────────────────────────────────

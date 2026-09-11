@@ -1,22 +1,29 @@
 import type { Metadata, Viewport } from 'next'
-import { Inter, Source_Serif_4 } from 'next/font/google'
+import localFont from 'next/font/local'
+
+// Self-hosted variable fonts (same Inter + Source Serif 4 faces previously
+// served by next/font/google). Vendored woff2 files so `next dev` and
+// production builds work fully offline with zero Google Fonts fetches.
+const inter = localFont({
+  src: './fonts/inter-latin-wght-normal.woff2',
+  variable: '--font-inter',
+  display: 'swap',
+})
+
+const sourceSerif = localFont({
+  src: [
+    { path: './fonts/source-serif-4-latin-wght-normal.woff2', style: 'normal' },
+    { path: './fonts/source-serif-4-latin-wght-italic.woff2', style: 'italic' },
+  ],
+  variable: '--font-serif',
+  display: 'swap',
+})
 import { ThemeProvider } from '@/components/theme-provider'
 import { ServiceWorkerRegistrar } from '@/components/ServiceWorkerRegistrar'
 import './globals.css'
 
-const inter = Inter({
-  subsets: ['latin'],
-  variable: '--font-inter',
-})
-
-const sourceSerif = Source_Serif_4({
-  subsets: ['latin'],
-  variable: '--font-serif',
-  style: ['normal', 'italic'],
-})
-
 export const viewport: Viewport = {
-  themeColor: '#a855f7',
+  themeColor: '#0a0a0a',
   width: 'device-width',
   initialScale: 1,
   maximumScale: 1,

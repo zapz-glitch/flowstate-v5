@@ -30,7 +30,7 @@ export const REHAB_LEVELS = [
   'Light Cosmetic',
   'Full Cosmetic',
   'Heavy Rehab',
-  'Down to Stud',
+  'Full Gut',
 ] as const
 
 export type RehabLevel = (typeof REHAB_LEVELS)[number]
@@ -83,6 +83,8 @@ export interface ValuationParams {
   compAvgSqft?: number
   /** Rehab level index */
   rehabLevelIndex?: number
+  /** Subject verified renovated by vision — no base $/sqft rehab (major items still apply) */
+  skipBaseRehab?: boolean
   /** Major items with costs */
   majorItems?: MajorItem[]
   /** Addition play (extra budget for improvements) */
@@ -93,6 +95,10 @@ export interface ValuationParams {
   carryingCostsPercent?: number
   /** Wholesale fee amount (default: $10,000) */
   wholesaleFee?: number
+  /** Location-risk deduction as % of ARV (0 = none) */
+  locationPenaltyPercent?: number
+  /** Explicit location-risk deduction in dollars — wins over the percent form */
+  locationPenaltyAmount?: number
 }
 
 // ─── Valuation Result ──────────────────────────────────────────────────────────
@@ -104,7 +110,7 @@ export interface ValuationResult {
   pricePerSqft: number
 
   // Rehab Costs
-  rehabLevel: RehabLevel
+  rehabLevel: RehabLevel | 'Renovated'
   rehabPerSqft: number
   baseRehabCost: number
   majorItemsCost: number
@@ -125,6 +131,10 @@ export interface ValuationResult {
   wholesaleFee: number
   wholesalePrice: number
   wholesalePricePercent: number
+
+  // Location-risk deduction applied
+  locationPenalty: number
+  locationPenaltyPercent: number
 
   // Profit & ROI
   projectedProfit: number

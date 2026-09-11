@@ -132,6 +132,7 @@ export const CONSTRUCTION_TYPE: Record<string, string> = {
 // ─── Foundation Type ─────────────────────────────────────────────────────────
 
 export const FOUNDATION_TYPE: Record<string, string> = {
+  // Standard CoreLogic/Melissa foundation codes → plain English
   'SLB': 'Slab',
   'SL0': 'Slab',
   'CRW': 'Crawl Space',
@@ -144,12 +145,38 @@ export const FOUNDATION_TYPE: Record<string, string> = {
   'PL0': 'Pilings',
   'RSD': 'Raised',
   'RS0': 'Raised',
+  'RAS': 'Raised',
   'CNT': 'Continuous Footing',
   'CN0': 'Continuous Footing',
+  'CNF': 'Continuous Footing',
+  'CNW': 'Continuous Wall',
   'MDS': 'Mud Sill',
   'MD0': 'Mud Sill',
+  'MUD': 'Mud Sill',
   'FLT': 'Floating',
   'FL0': 'Floating',
+  'BLK': 'Block',
+  'BRK': 'Brick',
+  'CNB': 'Concrete Block',
+  'CRB': 'Concrete/Beam',
+  'CRE': 'Concrete',
+  'CRS': 'Cross Bridged/Walls',
+  'DRE': 'Dirt/Earth',
+  'GDB': 'Grade Beam',
+  'MSN': 'Masonry',
+  'PPI': 'Pipe/Iron',
+  'PRE': 'Pre-Fab',
+  'SDF': 'Spread Footing',
+  'STD': 'Standard',
+  'STE': 'Steel',
+  'STM': 'Stem Wall',
+  'STN': 'Stone',
+  'WOO': 'Wood',
+  'UBM': 'Unknown (with basement)',
+  'UCR': 'Unknown (with crawl space)',
+  'UPB': 'Unknown (with partial basement)',
+  '000': 'None',
+  '001': 'Unknown',
 }
 
 // ─── Roof Type (Shape) ───────────────────────────────────────────────────────

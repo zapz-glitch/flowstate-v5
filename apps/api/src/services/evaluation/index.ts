@@ -1,16 +1,24 @@
 /**
  * Property Evaluation Service
  *
- * Synchronous evaluation pipeline: appraisal → price classification → valuation.
- * No external API calls — pure CPU computation on CoreLogic data.
+ * Hands-off evaluation pipeline: appraisal rules → photo fetch → vision
+ * renovation assessment → permit-derived major items → valuation → report.
+ * Photo and vision stages are async but fully non-fatal — they degrade to
+ * honest "insufficient evidence" outcomes rather than failing the run.
  */
 
+import type { Env } from '../../types'
+import { drizzle } from 'drizzle-orm/d1'
+import { eq } from 'drizzle-orm'
+import { majorItemSetting, majorItemCosts } from '../../db/schema'
 import type { PropertyBundle } from '../property-api'
 import type { NormalizedComparable, NormalizedProperty } from '../property-api/types'
 import {
   createAppraisalService,
   DEFAULT_FILTERS,
   DEFAULT_ADJUSTMENTS,
+  DEFAULT_EXPANSION_POLICY,
+  summarizeClassifications,
   type AppraisedComparable,
   type AppraisalResultWithFallback,
   type AppraisalFilter,
@@ -24,11 +32,15 @@ import {
   calculateAllRehabLevelEstimates,
   type AnalysisResponse,
   type ApiCallStats,
+  type ResponseContext,
 } from '../analysis'
-import { generateZillowUrl } from '../photo-provider'
+import { createPhotoService, type PhotoBundle, type PropertyIdentifier } from '../photo-provider'
+import { assessRenovationFromPhotos, assessCompCurbAppeal, type RenovationAssessment, type CurbAppealCheck } from '../vision/renovation'
+import { PROXIMITY_DEFAULTS } from '../../routes/proximity-config'
+import { deriveBuybox } from './derivation'
+import { buildEvaluationReport } from './report'
+import type { ReportStep } from './types'
 import { AnalysisError } from '../../utils/analysis-error'
-
-import { scoreComp, calculateARV, getFiltersAtStep, MAX_RELAXATION_STEPS, type ArvCompLike } from '@flowstate-api/shared/appraisal'
 
 function formatUsd(amount: number): string {
   return `$${Math.round(amount).toLocaleString()}`
@@ -52,7 +64,11 @@ export interface EvaluationParams {
     carryingCostsPercent?: number
     wholesaleFee?: number
     desiredProfit?: number
+    /** Location-risk deduction as % of ARV (major road/railroad/commercial proximity) */
+    locationPenaltyPercent?: number
   }
+  /** Proximity deduction config — siding/backing/fronting + ARV threshold */
+  proximityConfig?: import('../../routes/proximity-config').ProximityConfig
   customRehabTable?: RehabTable
   customTierRanges?: TierRangeDefinition[]
   customMajorItemCosts?: Record<string, number>
@@ -184,298 +200,31 @@ function selectBestMatch(
     reasoning: `Best match: ${best.reasons.join(', ')}. Score: ${best.score}.`,
   }
 }
-
-// ─── Group A: Smart Comp Selection ──────────────────────────────────────────
-
-type GroupAResult = {
-  appraisalResult: AppraisalResultWithFallback
-  arvCompsSource: 'group_a' | 'all_comps'
-  compClassifications: Map<string, ClassificationResult>
-  groupACompIds: Set<string>
-}
-
-/** Minimum percentage of enabled filters a comp must pass to be selected for ARV */
-const MIN_FILTER_PASS_RATE = 0.7 // 70% of filters must pass
-
-/**
- * Score, select top comps, build ARV, and return the final Group A result.
- */
-function finalizeGroupASelection(
-  candidates: AppraisedComparable[],
-  allComparables: NormalizedComparable[],
-  groupAIds: Set<string>,
-  classifications: Map<string, ClassificationResult>,
-  subject: NormalizedProperty,
-  appraisalService: ReturnType<typeof createAppraisalService>,
-  filters: AppraisalFilter[],
-  adjustments: AppraisalAdjustment[],
-  fallbackUsed: 'none' | 'relaxed_filters' | 'relaxed_all',
-): GroupAResult {
-  // Calculate filter pass rate for each comp
-  const enabledFilterCount = filters.filter((f) => f.enabled).length || 1
-  const scored = candidates
-    .filter((c) => c.salePrice != null && c.salePrice > 0)
-    .map((c) => {
-      const passedCount = c.evaluation.filterResults.filter((f) => f.passed).length
-      const passRate = passedCount / enabledFilterCount
-      return {
-        comp: c,
-        score: scoreComp(c.evaluation.filterResults, c.distanceMiles),
-        passRate,
-        passedCount,
-      }
-    })
-    .sort((a, b) => {
-      // Primary: more filters passed
-      if (b.passedCount !== a.passedCount) return b.passedCount - a.passedCount
-      // Secondary: higher score
-      if (b.score !== a.score) return b.score - a.score
-      // Tertiary: higher sale price
-      return (b.comp.salePrice ?? 0) - (a.comp.salePrice ?? 0)
-    })
-
-  // Select comps that pass ALL filters first, then fall back to MOST filters
-  let selected = scored.filter((s) => s.passRate >= 1.0) // all filters pass
-  if (selected.length === 0) {
-    selected = scored.filter((s) => s.passRate >= MIN_FILTER_PASS_RATE) // 70%+ filters pass
-  }
-  if (selected.length === 0 && scored.length > 0) {
-    // Last resort: take the best available (highest pass count)
-    const bestPassCount = scored[0].passedCount
-    selected = scored.filter((s) => s.passedCount === bestPassCount)
-  }
-  const enabledIds = new Set(selected.map((s) => s.comp.id))
-
-  console.log(`[Evaluate] ${scored.length} scored, ${selected.length} selected (pass rates: ${scored.slice(0, 5).map((s) => `${s.comp.address?.split(',')[0]}(${s.passedCount}/${enabledFilterCount}=${Math.round(s.passRate * 100)}%)`).join(', ')})`)
-
-  const arvComps: ArvCompLike[] = selected.map((s) => ({
-    isEnabled: true,
-    adjustedPrice: s.comp.adjustedSalePrice ?? s.comp.salePrice ?? null,
-    salePrice: s.comp.salePrice ?? null,
-    squareFeet: s.comp.squareFeet ?? null,
-    distanceMiles: s.comp.distanceMiles ?? null,
-    filterResults: s.comp.evaluation.filterResults.map((f) => ({
-      type: f.type, passed: f.passed, reason: f.reason, actualValue: f.actualValue, threshold: f.threshold,
-    })),
-  }))
-  const selectedArv = calculateARV(arvComps, subject.squareFeet)
-  console.log(`[Evaluate] ARV from ${selected.length} comps: $${selectedArv.toLocaleString()}`)
-
-  const allResult = appraisalService.evaluate(subject, allComparables, { filters, adjustments })
-  const confidence = fallbackUsed === 'none'
-    ? (selected.length >= 3 ? 90 : selected.length >= 2 ? 70 : 55)
-    : fallbackUsed === 'relaxed_filters'
-      ? (selected.length >= 3 ? 60 : selected.length >= 2 ? 45 : 30)
-      : (selected.length >= 3 ? 30 : selected.length >= 2 ? 20 : 10)
-
-  return {
-    appraisalResult: buildGroupAResult(allResult, {
-      ...allResult, fallbackUsed, confidence,
-    }, enabledIds, groupAIds, allComparables, selectedArv),
-    arvCompsSource: fallbackUsed === 'relaxed_all' ? 'all_comps' : 'group_a',
-    compClassifications: classifications,
-    groupACompIds: enabledIds,
-  }
-}
-
-/**
- * Select Group A comps: appraisal-first, then price preference.
- *
- * Algorithm:
- * 1. Evaluate ALL comps against appraisal filters and score them
- * 2. Select top-scoring comps that meet minimum score threshold
- * 3. Among qualifying comps, prefer higher-priced (after-renovation)
- * 4. If not enough qualify, relax filters one step and retry:
- *    - sqft_diff:       20 →  30 →  40 →   50  (±% of subject sqft)
- *    - year_built_diff:  10 →  15 →  20 →   25
- *    - sale_age:        180 → 270 → 360 →  540
- *    - distance:        0.5 → 1.0 → 1.5 →  2.0
- * 5. Price classification applied AFTER filter selection for display
- * 6. If all steps exhausted, picks best available comps with low confidence
- */
-function selectGroupAComps(
-  subject: NormalizedProperty,
-  allComparables: NormalizedComparable[],
-  baseThreshold: number,
-  appraisalService: ReturnType<typeof createAppraisalService>,
-  filters: AppraisalFilter[],
-  adjustments: AppraisalAdjustment[],
-): GroupAResult {
-
-  // Step 1: Evaluate ALL comps against appraisal filters first, then select best
-  for (let step = 0; step < MAX_RELAXATION_STEPS; step++) {
-    const stepFilters = step === 0 ? filters : getFiltersAtStep(filters, step) as AppraisalFilter[]
-
-    // Evaluate ALL comps (no price gate)
-    const result = appraisalService.evaluate(subject, allComparables, { filters: stepFilters, adjustments })
-
-    // Score and calculate filter pass rate for each comp
-    const enabledFilterCount = stepFilters.filter((f) => f.enabled).length || 1
-    const scored = result.comparables
-      .filter((c) => c.salePrice != null && c.salePrice > 0)
-      .map((c) => {
-        const passedCount = c.evaluation.filterResults.filter((f) => f.passed).length
-        const passRate = passedCount / enabledFilterCount
-        return {
-          comp: c,
-          score: scoreComp(c.evaluation.filterResults, c.distanceMiles),
-          passRate,
-          passedCount,
-        }
-      })
-
-    // Check for comps passing all filters, then 70%+
-    const allPassCount = scored.filter((s) => s.passRate >= 1.0).length
-    const mostPassCount = scored.filter((s) => s.passRate >= MIN_FILTER_PASS_RATE).length
-
-    console.log(`[Evaluate] Step ${step}: ${allComparables.length} comps, ${allPassCount} pass all filters, ${mostPassCount} pass 70%+`)
-
-    if (mostPassCount === 0) continue
-
-    // Select comps that match all filters first, fall back to 70%+
-    const filterQualifying = (allPassCount > 0
-      ? scored.filter((s) => s.passRate >= 1.0)
-      : scored.filter((s) => s.passRate >= MIN_FILTER_PASS_RATE)
-    ).sort((a, b) => {
-      if (b.passedCount !== a.passedCount) return b.passedCount - a.passedCount
-      if (b.score !== a.score) return b.score - a.score
-      return (b.comp.salePrice ?? 0) - (a.comp.salePrice ?? 0)
-    })
-
-    // Apply ARV threshold: only select comps in the top X% by sale price
-    // This ensures we use higher-priced comps that represent after-renovation value
-    const stepThreshold = Math.min(Math.ceil(baseThreshold * Math.pow(1.5, step)), 100)
-    const classifications = classifyCompsByPrice(allComparables, stepThreshold)
-    const topPriceIds = new Set(
-      [...classifications.entries()]
-        .filter(([, c]) => c.classification === 'after_renovation')
-        .map(([id]) => id)
-    )
-
-    // Prefer comps that pass filters AND are in the top price percentile
-    const topPriceQualifying = filterQualifying.filter((s) => topPriceIds.has(s.comp.id))
-    // Fall back to all qualifying comps if none are in the top percentile
-    const qualifying = topPriceQualifying.length > 0 ? topPriceQualifying : filterQualifying
-
-    if (topPriceQualifying.length > 0 && topPriceQualifying.length < filterQualifying.length) {
-      console.log(`[Evaluate] ARV threshold ${stepThreshold}%: ${topPriceQualifying.length}/${filterQualifying.length} qualifying comps in top price percentile`)
-    }
-
-    const groupAIds = new Set(qualifying.map((s) => s.comp.id))
-
-    const fallbackUsed = step === 0 ? 'none' as const : 'relaxed_filters' as const
-    if (step > 0) {
-      console.log(`[Evaluate] Relaxation step ${step}: filters relaxed to find ${qualifying.length} comps`)
-    }
-
-    return finalizeGroupASelection(
-      qualifying.map((s) => s.comp), allComparables, groupAIds, classifications,
-      subject, appraisalService, stepFilters, adjustments, fallbackUsed,
-    )
-  }
-
-  // All steps exhausted — pick best available with loosest filters
-  console.log(`[Evaluate] All relaxation steps exhausted. Selecting best available comps.`)
-
-  const looseFilters = getFiltersAtStep(filters, MAX_RELAXATION_STEPS - 1) as AppraisalFilter[]
-  const allResult = appraisalService.evaluate(subject, allComparables, { filters: looseFilters, adjustments })
-  const allClassifications = classifyCompsByPrice(allComparables, 100)
-  const allGroupAIds = new Set(allComparables.map((c) => c.id))
-
-  const scored = allResult.comparables
-    .filter((c) => c.salePrice != null && c.salePrice > 0)
-    .map((c) => ({ comp: c, score: scoreComp(c.evaluation.filterResults, c.distanceMiles) }))
-    .sort((a, b) => {
-      if (b.score !== a.score) return b.score - a.score
-      return (b.comp.salePrice ?? 0) - (a.comp.salePrice ?? 0)
-    })
-
-  if (scored.length === 0) {
-    const reason = allComparables.length === 0
-      ? 'No comparable sales were found in this area. Try expanding the search radius or date range.'
-      : `${allComparables.length} comparable${allComparables.length === 1 ? ' was' : 's were'} found but none had valid sale price data. The comps in this area may not have recent recorded sales.`
-    throw new AnalysisError(reason, { code: 'INSUFFICIENT_COMPARABLES' })
-  }
-
-  console.log(`[Evaluate] Best-available fallback: ${scored.slice(0, 5).map((s) => `${s.comp.address}(${s.score})`).join(', ')}`)
-
-  return finalizeGroupASelection(
-    scored.map((s) => s.comp), allComparables, allGroupAIds, allClassifications,
-    subject, appraisalService, looseFilters, adjustments, 'relaxed_all',
-  )
-}
-
-/** Build the final Group A appraisal result with proper enable/disable reasons for all comps */
-function buildGroupAResult(
-  allCompsResult: import('../appraisal').AppraisalResult,
-  groupAResult: AppraisalResultWithFallback,
-  enabledIds: Set<string>,
-  topPercentileIds: Set<string>,
-  allComparables: NormalizedComparable[],
-  selectedArv?: number,
-): AppraisalResultWithFallback {
-  return {
-    ...allCompsResult,
-    comparables: allCompsResult.comparables.map((c) => {
-      if (enabledIds.has(c.id)) {
-        const groupComp = groupAResult.comparables.find((rc) => rc.id === c.id)
-        return groupComp ? { ...groupComp, isEnabled: true } : { ...c, isEnabled: true }
-      }
-      const inTopPercentile = topPercentileIds.has(c.id)
-      const disableReason = inTopPercentile
-        ? 'In top price percentile but excluded by appraisal rules'
-        : 'Below ARV comp threshold (not in top price percentile)'
-      return {
-        ...c,
-        isEnabled: false,
-        evaluation: {
-          ...c.evaluation,
-          shouldDisable: true,
-          disableReasons: [...(c.evaluation.disableReasons ?? []), disableReason],
-        },
-      }
-    }),
-    arv: selectedArv ?? groupAResult.arv,
-    enabledCount: enabledIds.size,
-    disabledCount: allComparables.length - enabledIds.size,
-    fallbackUsed: groupAResult.fallbackUsed,
-    confidence: groupAResult.confidence,
-  }
-}
-
 // ─── Group B: As-Is Market Intelligence ─────────────────────────────────────
 
 /**
- * Select Group B comps: sale price ≤ 70% of ARV = As-Is market price.
- * These are properties selling "as-is" — used for market intelligence only.
+ * Select as-is market comps: enabled comps that didn't make the ARV group and
+ * sold at or below `thresholdPercent` of ARV. Display-only market intelligence.
  */
 function selectGroupBComps(
   subject: NormalizedProperty,
-  allComparables: NormalizedComparable[],
+  appraisalResult: AppraisalResultWithFallback,
   arv: number,
   thresholdPercent: number,
   groupACompIds: Set<string>,
-  appraisalService: ReturnType<typeof createAppraisalService>,
-  filters: AppraisalFilter[],
-  adjustments: AppraisalAdjustment[],
 ): GroupBResult | null {
-  const priceCeiling = arv * thresholdPercent / 100
-  const subjectSqft = subject.squareFeet || 0
+  const priceCeiling = Math.round((arv * thresholdPercent) / 100)
 
-  // Comps with sale price ≤ 70% of ARV AND not in Group A
-  const candidates = allComparables.filter((c) =>
-    c.salePrice != null && c.salePrice > 0 && c.salePrice <= priceCeiling && !groupACompIds.has(c.id)
+  const qualifying = appraisalResult.comparables.filter(
+    (c) =>
+      c.isEnabled &&
+      !groupACompIds.has(c.id) &&
+      c.salePrice != null &&
+      c.salePrice > 0 &&
+      c.salePrice <= priceCeiling
   )
 
-  if (candidates.length === 0) {
-    // Find the lowest-priced non-Group-A comp to explain why
-    const nonGroupA = allComparables
-      .filter((c) => c.salePrice != null && c.salePrice > 0 && !groupACompIds.has(c.id))
-      .sort((a, b) => a.salePrice! - b.salePrice!)
-    const lowestPrice = nonGroupA[0]?.salePrice
-    const reason = lowestPrice
-      ? `No comps priced at or below ${thresholdPercent}% of ARV (${formatUsd(priceCeiling)}). Lowest non-ARV comp is ${formatUsd(lowestPrice)}.`
-      : `All comps are selected for ARV calculation — none available for as-is comparison.`
+  if (qualifying.length === 0) {
     return {
       compIds: [],
       asIsMarketPrice: null,
@@ -483,116 +232,335 @@ function selectGroupBComps(
       count: 0,
       thresholdPercent,
       arvUsed: arv,
-      priceCeiling: Math.round(priceCeiling),
-      noDataReason: reason,
+      priceCeiling,
+      noDataReason: `No enabled comps sold at or below ${thresholdPercent}% of ARV (${formatUsd(priceCeiling)})`,
     }
   }
 
-  // Single-pass evaluation (no fallback — informational)
-  const result = appraisalService.evaluate(subject, candidates, { filters, adjustments })
-  const passingComps = result.comparables.filter((c) => c.isEnabled)
+  // Sqft-scale each comp's sale price to the subject's sqft, then average
+  const subjectSqft = subject.squareFeet ?? 0
+  const scaledPrices: number[] = []
+  const perSqftPrices: number[] = []
 
-  if (passingComps.length === 0) {
-    // Even without filter matches, show the raw candidates as Group B
-    const rawPrices = candidates
-      .filter((c) => c.salePrice != null && c.squareFeet && c.squareFeet > 0)
-      .map((c) => (c.salePrice! / c.squareFeet!) * subjectSqft)
-    const avgPrice = rawPrices.length > 0 ? Math.round(rawPrices.reduce((a, b) => a + b, 0) / rawPrices.length) : null
-    const avgPricePerSqft = avgPrice != null && subjectSqft > 0 ? Math.round(avgPrice / subjectSqft) : null
-    return {
-      compIds: candidates.map((c) => c.id),
-      asIsMarketPrice: avgPrice,
-      avgPricePerSqft,
-      count: candidates.length,
-      thresholdPercent,
-      arvUsed: arv,
-      priceCeiling: Math.round(priceCeiling),
+  for (const comp of qualifying) {
+    if (comp.squareFeet && comp.squareFeet > 0) {
+      const perSqft = comp.salePrice! / comp.squareFeet
+      perSqftPrices.push(perSqft)
+      scaledPrices.push(subjectSqft > 0 ? perSqft * subjectSqft : comp.salePrice!)
+    } else {
+      scaledPrices.push(comp.salePrice!)
     }
   }
 
-  // Calculate sqft-scaled average from passing comps (same formula as ARV)
-  const scaledPrices = passingComps
-    .filter((c) => c.adjustedSalePrice != null && c.squareFeet && c.squareFeet > 0)
-    .map((c) => (c.adjustedSalePrice! / c.squareFeet!) * subjectSqft)
-
-  const asIsMarketPrice = scaledPrices.length > 0
-    ? Math.round(scaledPrices.reduce((a, b) => a + b, 0) / scaledPrices.length)
-    : null
-  const avgPricePerSqft = asIsMarketPrice != null && subjectSqft > 0
-    ? Math.round(asIsMarketPrice / subjectSqft)
-    : null
+  const asIsMarketPrice =
+    scaledPrices.length > 0
+      ? Math.round(scaledPrices.reduce((s, p) => s + p, 0) / scaledPrices.length)
+      : null
+  const avgPricePerSqft =
+    perSqftPrices.length > 0
+      ? Math.round((perSqftPrices.reduce((s, p) => s + p, 0) / perSqftPrices.length) * 100) / 100
+      : null
 
   return {
-    compIds: passingComps.map((c) => c.id),
+    compIds: qualifying.map((c) => c.id),
     asIsMarketPrice,
     avgPricePerSqft,
-    count: passingComps.length,
+    count: qualifying.length,
     thresholdPercent,
     arvUsed: arv,
-    priceCeiling: Math.round(priceCeiling),
+    priceCeiling,
   }
 }
 
-// ─── Main Evaluation ─────────────────────────────────────────────────────────
+// ─── Major-Item Settings Loader ──────────────────────────────────────────────
 
 /**
- * Perform full property evaluation synchronously.
- * Returns the complete analysis response ready to send to the client.
- *
- * Pipeline:
- * 1. Group A: Select top-percentile comps by sale price with strict filter matching
- * 2. Calculate ARV from Group A comps
- * 3. Group B: Select as-is comps (≤70% of ARV) — market intelligence only
- * 4. Calculate valuation (ARV, rehab, buy price, profit, ROI)
- * 5. Build response
+ * Load the user's Evaluation Settings → Major Items overrides (permit-age rules).
+ * Merges the `major_item_setting` table (enabled/cost/ageThreshold) with the
+ * legacy `major_item_costs` JSON overrides (cost only). Rows absent from both
+ * inherit MAJOR_ITEMS defaults.
  */
-export function performAnalysis(params: EvaluationParams): EvaluationResult {
+async function loadMajorItemConfig(
+  env: Env,
+  userId: string | undefined
+): Promise<Record<string, { enabled?: boolean; cost?: number; ageThreshold?: number | null }>> {
+  if (!userId) return {}
+  const config: Record<string, { enabled?: boolean; cost?: number; ageThreshold?: number | null }> = {}
+
+  try {
+    const db = drizzle(env.DB)
+
+    const rows = await db
+      .select()
+      .from(majorItemSetting)
+      .where(eq(majorItemSetting.userId, userId))
+    for (const row of rows) {
+      config[row.itemId] = {
+        enabled: row.enabled,
+        cost: row.cost,
+        ageThreshold: row.ageThreshold,
+      }
+    }
+
+    const [costRow] = await db
+      .select()
+      .from(majorItemCosts)
+      .where(eq(majorItemCosts.userId, userId))
+      .limit(1)
+    if (costRow?.costsJson) {
+      const costs = JSON.parse(costRow.costsJson) as Record<string, number>
+      for (const [itemId, cost] of Object.entries(costs)) {
+        config[itemId] = { ...config[itemId], cost }
+      }
+    }
+  } catch (error) {
+    console.warn('[Evaluate] Failed to load major-item settings:', error)
+  }
+
+  return config
+}
+
+// ─── Main Evaluation Pipeline ────────────────────────────────────────────────
+
+/**
+ * Hands-off evaluation pipeline: appraisal rules → photo fetch → vision
+ * renovation assessment → permit-derived major items → valuation → report.
+ *
+ * - Appraisal: filters + adjustments with expansion fallback; insufficient
+ *   comps produces a BAD_DEAL AnalysisError (never a fabricated ARV).
+ * - Photos: Zillow → Redfin → Realtor.com fallback; all-fail is non-fatal.
+ * - Vision: subject-photo renovation level drives the rehab tier (falls back
+ *   to the caller's buybox or defaults when no evidence exists).
+ */
+export async function performAnalysis(
+  params: EvaluationParams,
+  env: Env,
+  onProgress?: (message: string) => void
+): Promise<EvaluationResult> {
   const { bundle, jobId } = params
   const appraisalService = createAppraisalService()
   const rules = params.appraisalRules ?? {}
-  const filters = rules.filters ?? DEFAULT_FILTERS
+  const filters = [...(rules.filters ?? DEFAULT_FILTERS)]
   const adjustments = rules.adjustments ?? DEFAULT_ADJUSTMENTS
 
-  // ── 1. Group A: Select top-percentile comps ────────────────────────────────
+  // Evidence-critical rules always run: subdivision_match + foundation_match
+  // are the apples-to-apples hammers and only bite when enriched data proves
+  // a mismatch — not_verified never disqualifies, so enabling them is safe
+  // even in markets where the provider returns no subdivision/foundation.
+  for (const required of ['subdivision_match', 'foundation_match'] as const) {
+    const existing = filters.find((f) => f.type === required)
+    if (existing) {
+      existing.enabled = true
+    } else {
+      const def = DEFAULT_FILTERS.find((f) => f.type === required)
+      if (def) filters.push({ ...def })
+    }
+  }
+
+  const steps: ReportStep[] = []
+  const fallbacksUsed: string[] = []
+  const step = (name: string, status: ReportStep['status'], detail?: string) => {
+    steps.push({ step: name, label: name, status, detail })
+  }
+
+  // ── 1. Appraisal: filter comps, apply adjustments, select ARV comps ────────
+  const appraisalResult = appraisalService.evaluateWithFallback(
+    bundle.property,
+    bundle.comparables,
+    { filters, adjustments, expansion: DEFAULT_EXPANSION_POLICY }
+  )
+
+  if (appraisalResult.fallbackUsed && appraisalResult.fallbackUsed !== 'none') {
+    fallbacksUsed.push(`comp_fallback:${appraisalResult.fallbackUsed}`)
+  }
+
+  const enabledComps = appraisalResult.comparables.filter((c) => c.isEnabled)
+  if (appraisalResult.insufficientComps || enabledComps.length === 0) {
+    step('appraisal_rules', 'failed', appraisalResult.fallbackReason ?? 'insufficient comps')
+    throw new AnalysisError(
+      appraisalResult.fallbackReason ??
+        `Only ${enabledComps.length} comps satisfy appraisal rules (required: 3). Try adjusting your appraisal filters.`,
+      { code: 'INSUFFICIENT_COMPS' }
+    )
+  }
+  step(
+    'appraisal_rules',
+    appraisalResult.fallbackUsed === 'none' ? 'completed' : 'fallback',
+    `${enabledComps.length}/${bundle.comparables.length} comps passed` +
+      (appraisalResult.fallbackUsed !== 'none' ? ` (${appraisalResult.fallbackUsed})` : '')
+  )
+  let finalArv = appraisalResult.arv
+
+  // ── 2. Photos: subject + comps via Zillow → Redfin → Realtor chain ─────────
+  let photoBundle: PhotoBundle | null = null
+  try {
+    const photoService = createPhotoService(env)
+    if (photoService.isAvailable()) {
+      const subjectIdent: PropertyIdentifier = {
+        propertyId: bundle.property.id,
+        address: bundle.property.address,
+        city: bundle.property.city,
+        state: bundle.property.state,
+        zipCode: bundle.property.zipCode,
+      }
+      // Prioritize photo spend: ARV-selected comps first, then nearest —
+      // cards without listing photos fall back to Street View anyway
+      const selectedSet = new Set(appraisalResult.selectedCompIds ?? [])
+      const rankedComps = [...bundle.comparables].sort((a, b) => {
+        const aSel = selectedSet.has(a.id) ? 1 : 0
+        const bSel = selectedSet.has(b.id) ? 1 : 0
+        if (aSel !== bSel) return bSel - aSel
+        return (a.distanceMiles ?? 999) - (b.distanceMiles ?? 999)
+      })
+      const compIdents: PropertyIdentifier[] = rankedComps.map((c) => ({
+        propertyId: c.id,
+        address: c.address,
+        city: c.city,
+        state: c.state,
+        zipCode: c.zipCode,
+      }))
+      photoBundle = await photoService.fetchPhotoBundle(subjectIdent, compIdents, { maxComps: 6 })
+      step(
+        'photo_fetch',
+        photoBundle.subject ? 'completed' : 'fallback',
+        photoBundle.subject
+          ? `${photoBundle.subject.photos.length} subject photos via ${photoBundle.subject.source}`
+          : 'No subject photos found'
+      )
+    } else {
+      step('photo_fetch', 'fallback', 'No photo provider configured')
+    }
+  } catch (error) {
+    console.warn('[Evaluate] Photo fetch failed (non-fatal):', error)
+    step('photo_fetch', 'fallback', error instanceof Error ? error.message : 'photo fetch failed')
+  }
+  onProgress?.('Photos fetched')
+
+  // ── 3. Vision: subject renovation+curb-appeal AND comp checks in parallel ──
+  // One merged LLM call for the subject (renovation level + curb appeal);
+  // per-comp curb checks run alongside it — all vision resolves together.
+  const subjectPhotos = photoBundle?.subject?.photos ?? []
+  const compVisionPairs = (appraisalResult.selectedCompIds ?? [])
+    .map((id) => ({ id, photos: photoBundle?.comps[id]?.photos ?? [] }))
+    .filter((p) => p.photos.length > 0)
+
+  const [renovationResult, compChecks] = await Promise.all([
+    (async () => {
+      try {
+        return await assessRenovationFromPhotos(env, subjectPhotos, {
+          address: bundle.property.address,
+          squareFeet: bundle.property.squareFeet,
+          yearBuilt: bundle.property.yearBuilt,
+        })
+      } catch { return null }
+    })(),
+    Promise.all(
+      compVisionPairs.map(async (p) => {
+        try {
+          return { id: p.id, check: await assessCompCurbAppeal(env, p.photos) }
+        } catch {
+          return { id: p.id, check: { condition: 'unknown', confidence: null, summary: 'Vision call failed', photosExamined: p.photos.length } as CurbAppealCheck }
+        }
+      })
+    ),
+  ])
+
+  const renovation: RenovationAssessment | null = renovationResult
+  if (renovation) {
+    step(
+      'renovation_assessment',
+      renovation.renovationLevelIndex != null ? 'completed' : 'fallback',
+      renovation.renovationLevel != null
+        ? `${renovation.renovationLevel} @ ${renovation.confidence ?? '?'}% (${renovation.photosExamined} photos)`
+        : renovation.status
+    )
+    if (renovation.status !== 'ok' && renovation.status !== 'insufficient_photo_evidence') {
+      fallbacksUsed.push(`vision:${renovation.status}`)
+    }
+  } else {
+    step('renovation_assessment', 'fallback', 'vision call failed')
+    fallbacksUsed.push('vision:error')
+  }
+  onProgress?.('Renovation level assessed')
+
+  // Subject curb appeal comes from the merged vision pass (one LLM call for
+  // both renovation level + curb-appeal condition); comp checks resolved in
+  // the same parallel batch above.
+  const subjectCurbAppeal: CurbAppealCheck | null = renovation?.curbAppeal ?? null
+  let compCurbAppeal: Record<string, CurbAppealCheck> | undefined =
+    compChecks.length > 0 ? Object.fromEntries(compChecks.map((c) => [c.id, c.check])) : undefined
+
+  // ── ARV condition gate ────────────────────────────────────────────────────
+  // ARV-comp-worthy = recently sold, arm's-length, physically similar, and
+  // verified AR quality — renovated/updated/retail-ready, matching the
+  // condition the subject will reach after repair. A high sale price alone
+  // NEVER qualifies a comp: dated/distressed verification excludes it, and
+  // unverifiable condition means its price cannot influence ARV.
+  const isArvWorthy = (check: CurbAppealCheck | undefined): boolean =>
+    !!check &&
+    check.source === 'vision' &&
+    (check.condition === 'renovated' || check.rehabLevelIndex === 0)
+
+  const unverifiable: string[] = []
+  const prunedFromArv: string[] = []
+  for (const id of appraisalResult.selectedCompIds ?? []) {
+    const check = compCurbAppeal?.[id]
+    if (!isArvWorthy(check)) {
+      prunedFromArv.push(id)
+      if (!check || check.condition === 'unknown') unverifiable.push(id)
+      if (check && check.source !== 'price') {
+        compCurbAppeal![id] = {
+          ...check,
+          summary: `${check.summary ?? check.condition} — excluded from ARV: not verified renovated/retail-ready`,
+        }
+      }
+    }
+  }
+  if (prunedFromArv.length > 0) {
+    const remaining = (appraisalResult.selectedCompIds ?? []).filter((id) => !prunedFromArv.includes(id))
+    const remainingComps = appraisalResult.comparables.filter((c) => remaining.includes(c.id))
+    if (remainingComps.length >= 3) {
+      appraisalResult.arv = appraisalService.calculateARV(remainingComps)
+      appraisalResult.selectedCompIds = remaining
+      finalArv = appraisalResult.arv
+      fallbacksUsed.push(`arv_condition_pruned:${prunedFromArv.length}`)
+      step('arv_condition_gate', 'fallback',
+        `${prunedFromArv.length} comp(s) excluded — not verified renovated/retail-ready; ARV recomputed on ${remainingComps.length}`)
+    } else {
+      // Can't recompose a 3-comp ARV — keep the set but mark the evidence
+      fallbacksUsed.push('arv_condition_thin')
+      step('arv_condition_gate', 'fallback',
+        `${prunedFromArv.length} comp(s) not verified AR-quality (${unverifiable.length} unverifiable) — ARV kept on ${remainingComps.length + prunedFromArv.length} comps, fewer than 3 verified`)
+    }
+  } else if (appraisalResult.selectedCompIds?.length) {
+    step('arv_condition_gate', 'completed',
+      `${appraisalResult.selectedCompIds.length} comp(s) verified AR-quality (renovated/retail-ready)`)
+  }
+
+  // ── 4. Classifications (price percentile, display grouping) ─────────────────
   const arvThreshold = params.arvThreshold ?? { percent: 15 }
-  const allComparables = bundle.comparables
-
-  const groupA = selectGroupAComps(
-    bundle.property, allComparables, arvThreshold.percent,
-    appraisalService, filters, adjustments
-  )
-
-  const finalAppraisalResult = groupA.appraisalResult
-  const compClassifications = groupA.compClassifications
-  // Note: selectGroupAComps throws BAD_DEAL error with filter advice if no comps pass
-
-  // ── 2. Calculate ARV from Group A ──────────────────────────────────────────
-  const enabledComps = finalAppraisalResult.comparables.filter((c) => c.isEnabled)
-  if (enabledComps.length === 0) {
-    throw new AnalysisError('No comparable sales were selected for ARV calculation. Try adjusting your appraisal filters or increasing the ARV threshold.')
-  }
-  const finalArv = finalAppraisalResult.arv
-
-  // ── 3. Group B: As-is market intelligence ──────────────────────────────────
-  const asIsThresholdPercent = params.asIsThresholdPercent ?? 70
-  const groupBResult = selectGroupBComps(
-    bundle.property, allComparables, finalArv, asIsThresholdPercent,
-    groupA.groupACompIds, appraisalService, filters, adjustments
-  )
-
-  if (groupBResult) {
-    console.log(`[Evaluate] Group B: ${groupBResult.count} as-is comps (≤$${groupBResult.priceCeiling.toLocaleString()}, ${asIsThresholdPercent}% of ARV)`)
-  }
-
-  // Classification summary
-  const classificationSummary = appraisalService.summarizeClassifications(
-    finalAppraisalResult.comparables,
+  const compClassifications = classifyCompsByPrice(bundle.comparables, arvThreshold.percent)
+  const classificationSummary = summarizeClassifications(
+    appraisalResult.comparables,
     compClassifications
   )
 
-  // ── 4. Best match + valuation ──────────────────────────────────────────────
-  const bestMatch = selectBestMatch(bundle.property, enabledComps)
+  // ── 5. Derive buybox: vision level → rehab tier, permits → major items ──────
+  const majorItemConfig = await loadMajorItemConfig(env, params.userId)
+  const derivedBuybox = deriveBuybox(bundle.property, undefined, params.buybox, {
+    permits: bundle.enrichment.permits?.items,
+    majorItemConfig,
+    visionLevelIndex: renovation?.renovationLevelIndex ?? null,
+    visionConfidence: renovation?.confidence ?? null,
+    visionRenovated: subjectCurbAppeal?.condition === 'renovated',
+  })
+  step(
+    'major_items',
+    'completed',
+    `${derivedBuybox.majorItems.filter((m) => m.enabled).length} major items charged`
+  )
 
+  // ── 6. Valuation ────────────────────────────────────────────────────────────
   const buybox = params.buybox ?? {}
   const subjectSqft = bundle.property.squareFeet || 0
   const compAvgSqft =
@@ -600,49 +568,69 @@ export function performAnalysis(params: EvaluationParams): EvaluationResult {
       ? enabledComps.reduce((sum, c) => sum + (c.squareFeet || 0), 0) / enabledComps.length
       : subjectSqft
 
-  const selectedRehabLevelIndex = buybox.rehabLevelIndex ?? 2
-
-  const resolvedMajorItems = buybox.majorItems ?? (
-    params.customMajorItemCosts
-      ? MAJOR_ITEMS.map((item) => ({
-          id: item.id,
-          enabled: false,
-          cost: params.customMajorItemCosts![item.id] ?? item.defaultCost,
-        }))
-      : undefined
-  )
-
   const valuationService = createValuationService(params.customRehabTable, params.customTierRanges)
   const valuation = valuationService.calculateValuation({
     arv: finalArv,
     subjectSqft,
     compAvgSqft,
-    rehabLevelIndex: selectedRehabLevelIndex,
-    majorItems: resolvedMajorItems,
-    additionPlay: buybox.additionPlay ?? 0,
+    rehabLevelIndex: derivedBuybox.rehabLevelIndex,
+    skipBaseRehab: derivedBuybox.renovatedVerified === true,
+    // Proximity deduction — Evaluation Settings' Proximity Adjustments:
+    // worst detected position wins (fronting > backing > siding);
+    // flat $ below the ARV threshold, % of ARV at/above it.
+    locationPenaltyAmount: (() => {
+      const risks = bundle.enrichment.locationRisks ?? []
+      if (risks.length === 0) return 0
+      const cfg = params.proximityConfig ?? PROXIMITY_DEFAULTS
+      const rank = { fronting: 3, backing: 2, siding: 1 } as const
+      const worst = risks.reduce<keyof typeof rank | null>((w, r) => {
+        const pos = r.position ?? 'siding'
+        return !w || rank[pos] > rank[w] ? pos : w
+      }, null)
+      if (!worst) return 0
+      const tier = cfg[worst]
+      return finalArv >= cfg.arvThreshold ? Math.round(finalArv * (tier.percent / 100)) : tier.flat
+    })(),
+    majorItems: derivedBuybox.majorItems,
+    additionPlay: derivedBuybox.additionPlay ?? buybox.additionPlay ?? 0,
     closingCostsPercent: buybox.closingCostsPercent ?? 8,
     carryingCostsPercent: buybox.carryingCostsPercent ?? 2,
     wholesaleFee: buybox.wholesaleFee ?? 10000,
+    desiredProfit: buybox.desiredProfit,
   })
 
   const rehabLevelEstimates = calculateAllRehabLevelEstimates(valuationService, {
     arv: finalArv,
     subjectSqft,
     compAvgSqft,
-    selectedRehabLevelIndex,
-    majorItems: resolvedMajorItems,
+    selectedRehabLevelIndex: derivedBuybox.rehabLevelIndex,
+    majorItems: derivedBuybox.majorItems,
     additionPlay: buybox.additionPlay ?? 0,
     closingCostsPercent: buybox.closingCostsPercent ?? 8,
     carryingCostsPercent: buybox.carryingCostsPercent ?? 2,
     wholesaleFee: buybox.wholesaleFee ?? 10000,
   })
+  step('valuation', 'completed', `ARV ${formatUsd(finalArv)} · rehab ${formatUsd(valuation.totalRehabCost)}`)
+
+  // ── 7. Group B as-is market intelligence ────────────────────────────────────
+  const asIsThresholdPercent = params.asIsThresholdPercent ?? 70
+  const groupACompIds = new Set(appraisalResult.selectedCompIds ?? [])
+  const groupBResult = selectGroupBComps(
+    bundle.property,
+    appraisalResult,
+    finalArv,
+    asIsThresholdPercent,
+    groupACompIds
+  )
+  if (groupBResult && groupBResult.count > 0) {
+    console.log(`[Evaluate] Group B: ${groupBResult.count} as-is comps (≤${formatUsd(groupBResult.priceCeiling)}, ${asIsThresholdPercent}% of ARV)`)
+  }
+
+  // ── 8. Best match + applied settings snapshot ───────────────────────────────
+  const bestMatch = selectBestMatch(bundle.property, enabledComps)
 
   const appliedSettings = {
-    filters: filters.map((f) => ({
-      type: f.type,
-      enabled: f.enabled,
-      value: f.value,
-    })),
+    filters: filters.map((f) => ({ type: f.type, enabled: f.enabled, value: f.value })),
     adjustments: adjustments.map((a) => ({
       type: a.type,
       enabled: a.enabled,
@@ -654,25 +642,22 @@ export function performAnalysis(params: EvaluationParams): EvaluationResult {
       carryingCostsPercent: buybox.carryingCostsPercent ?? 2,
       wholesaleFee: buybox.wholesaleFee ?? 10000,
     },
-    rehabLevelIndex: selectedRehabLevelIndex,
+    rehabLevelIndex: derivedBuybox.rehabLevelIndex,
     rehabTable: valuationService.getRehabTable(),
-    majorItems: resolvedMajorItems,
+    majorItems: derivedBuybox.majorItems,
     additionPlay: buybox.additionPlay ?? 0,
     arvThresholdPercent: arvThreshold.percent,
     asIsThresholdPercent,
   }
 
-  // ── 5. Build response ──────────────────────────────────────────────────────
-  const arvSource: 'appraisal' | 'comp-selection' = groupA.arvCompsSource === 'group_a' ? 'comp-selection' : 'appraisal'
-  const groupBCompIds = new Set(groupBResult?.compIds ?? [])
-
+  // ── 9. Build response ───────────────────────────────────────────────────────
   const response = buildAnalysisResponse(
     bundle,
-    finalAppraisalResult,
-    null, // no photo bundle
+    appraisalResult,
+    photoBundle,
     valuation,
     {
-      arvSource,
+      arvSource: 'appraisal',
       finalArv,
       analysisId: jobId,
       subjectClassification: undefined,
@@ -682,19 +667,71 @@ export function performAnalysis(params: EvaluationParams): EvaluationResult {
       compSupplementedFields: new Map(),
       rehabLevelEstimates,
       appliedSettings,
-      visionAnalysis: undefined,
+      visionAnalysis: mapRenovationToVision(renovation),
+      compCurbAppeal,
+      subjectCurbAppeal,
+      subjectListingUrl: photoBundle?.subject?.sourceUrl ?? null,
       apiCallStats: params.apiCallStats,
       bestMatch,
       groupBResult,
-      groupACompIds: groupA.groupACompIds,
-      groupBCompIds,
+      groupACompIds,
+      groupBCompIds: new Set(groupBResult?.compIds ?? []),
     }
   )
 
+  // ── 10. Justified evaluation report (additive) ──────────────────────────────
+  step('response_build', 'completed', 'Response assembled')
+  response.report = buildEvaluationReport({
+    bundle,
+    appraisalResult,
+    subjectClassification: undefined,
+    weightedARVResult: undefined,
+    derivedBuybox,
+    valuation,
+    steps,
+    fallbacksUsed,
+    renovationAssessment: renovation,
+  })
+  response.visionAssessment = renovation
+  response.renovationLevelSource = derivedBuybox.rehabLevelSource
+  response.evaluationEngine = 'ts-v5'
+  if (photoBundle) response.photoProvider = photoBundle.provider
+
   return {
     response,
-    appraisalResult: finalAppraisalResult,
+    appraisalResult,
     compClassifications,
     groupB: groupBResult,
+  }
+}
+
+/**
+ * Map the vision renovation assessment into the response's visionAnalysis shape.
+ */
+function mapRenovationToVision(
+  assessment: RenovationAssessment | null
+): NonNullable<ResponseContext['visionAnalysis']> | undefined {
+  if (!assessment) return undefined
+
+  const interiorParts = [
+    assessment.kitchenCondition !== 'NA' && `kitchen: ${assessment.kitchenCondition}`,
+    assessment.bathroomCondition !== 'NA' && `bath: ${assessment.bathroomCondition}`,
+    assessment.flooringCondition !== 'NA' && `flooring: ${assessment.flooringCondition}`,
+    assessment.wallCeilingCondition !== 'NA' && `walls: ${assessment.wallCeilingCondition}`,
+  ].filter(Boolean) as string[]
+
+  return {
+    overallCondition: assessment.renovationLevel,
+    confidence: assessment.confidence ?? 0,
+    estimatedRehabNeeds: assessment.majorObservations.join('; ') || 'See report',
+    summary: `Renovation level ${assessment.renovationLevel} at ${assessment.confidence ?? '?'}% confidence from ${assessment.photosExamined} photos`,
+    interior: {
+      condition: interiorParts.length ? interiorParts.join('; ') : 'NA',
+      notes: assessment.evidenceForClassification,
+    },
+    exterior: {
+      condition: assessment.exteriorCondition,
+      notes: [...assessment.visibleMajorSystemConcerns, ...assessment.structuralConcerns],
+    },
   }
 }

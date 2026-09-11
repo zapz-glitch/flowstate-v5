@@ -83,7 +83,23 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
 
   const analyzeData = report?.analysis ?? null
 
+  // ─── Back-button trap: overlays push history; back closes topmost ────────
+  const overlayStackRef = useRef<string[]>([])
+  const suppressPopRef = useRef(false)
+  const overlayClosersRef = useRef<Record<string, () => void>>({})
+
+  useEffect(() => {
+    const onPop = () => {
+      if (suppressPopRef.current) { suppressPopRef.current = false; return }
+      const top = overlayStackRef.current.pop()
+      if (top) overlayClosersRef.current[top]?.()
+    }
+    window.addEventListener('popstate', onPop)
+    return () => window.removeEventListener('popstate', onPop)
+  }, [])
+
   const {
+
     authoritativeData,
     settingsHook,
     recalcData,
@@ -309,6 +325,37 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
   } = useMapInteraction(() =>
     (effectiveComps?.items ?? []) as CompItem[]
   )
+
+  // ─── Back-button trap (cont.) — sync overlay flags with history stack ────
+  useEffect(() => {
+    overlayClosersRef.current = {
+      comparison: () => setComparisonOpen(false),
+      share: () => setShareOpen(false),
+      refresh: () => setRefreshOpen(false),
+      history: () => setHistoryOpen(false),
+      settings: () => setSettingsOpen(false),
+    }
+    const flags: Array<[string, boolean]> = [
+      ['comparison', comparisonOpen],
+      ['share', shareOpen],
+      ['refresh', refreshOpen],
+      ['history', historyOpen],
+      ['settings', settingsOpen],
+    ]
+    for (const [id, open] of flags) {
+      const idx = overlayStackRef.current.lastIndexOf(id)
+      if (open && idx === -1) {
+        // Opened via UI → push a sentinel so Back closes it instead of leaving
+        overlayStackRef.current.push(id)
+        window.history.pushState({ overlay: id }, '')
+      } else if (!open && idx !== -1) {
+        // Closed via UI → consume the sentinel without closing another overlay
+        overlayStackRef.current.splice(idx, 1)
+        suppressPopRef.current = true
+        window.history.back()
+      }
+    }
+  }, [comparisonOpen, shareOpen, refreshOpen, historyOpen, settingsOpen])
 
   // Run AI comp selection on existing report — lightweight LLM-only call
   const handleRunAiAnalysis = useCallback(async () => {

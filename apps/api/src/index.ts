@@ -19,6 +19,8 @@ import analyze from './routes/analyze'
 import appraisalRules from './routes/appraisal-rules'
 import rehabConfigRoute from './routes/rehab-config'
 import dealParamsRoute from './routes/deal-params'
+import { uiPrefsRoute } from './routes/ui-prefs'
+import { tasksRoute } from './routes/tasks'
 import locationSettingsRoute from './routes/location-settings'
 import majorItemCostsRoute from './routes/major-item-costs'
 import reportsRoute from './routes/reports'
@@ -106,6 +108,12 @@ app.route('/major-item-costs', majorItemCostsRoute)
 // Proximity adjustment config routes (session auth via Better Auth cookies)
 app.route('/proximity-config', proximityConfigRoute)
 
+// UI prefs routes (session auth via Better Auth cookies)
+app.route('/ui-prefs', uiPrefsRoute)
+
+// Tasks routes (session auth via Better Auth cookies)
+app.route('/tasks', tasksRoute)
+
 // Batch analysis routes (session auth via Better Auth cookies)
 app.route('/batch', batchRoute)
 
@@ -173,7 +181,7 @@ app.onError((err, c) => {
 })
 
 // Export Durable Object classes
-export { AnalysisJobDO, BatchJobDO } from './durable-objects'
+export { AnalysisJobDO, BatchJobDO, RateLimitCoordinatorDO } from './durable-objects'
 
 // Export worker
 export default {

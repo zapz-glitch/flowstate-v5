@@ -142,20 +142,26 @@ class PropertyValuationService implements ValuationService {
       subjectSqft,
       compAvgSqft = subjectSqft,
       rehabLevelIndex = 2,
+      skipBaseRehab = false,
       majorItems = [],
       additionPlay = 0,
       closingCostsPercent = 8,
       carryingCostsPercent = 2,
       wholesaleFee = 10000,
+      desiredProfit,
+      locationPenaltyPercent = 0,
+      locationPenaltyAmount,
     } = params
 
     const arvTier = getArvTier(arv, this.tierRanges)
     const rehabEstimate = getRehabEstimate(this.rehabTable, arv, rehabLevelIndex, this.tierRanges)
-    const rehabLevel = REHAB_LEVELS[rehabLevelIndex]
+    // Vision-verified renovated subjects carry no base rehab — major items
+    // (permit thresholds) still charge below.
+    const rehabLevel = skipBaseRehab ? 'Renovated' : REHAB_LEVELS[rehabLevelIndex]
 
     // Calculate costs
     const pricePerSqft = subjectSqft > 0 ? Math.round(arv / subjectSqft) : (compAvgSqft > 0 ? Math.round(arv / compAvgSqft) : 0)
-    const baseRehabCost = (subjectSqft || compAvgSqft) * rehabEstimate.perSqft
+    const baseRehabCost = skipBaseRehab ? 0 : (subjectSqft || compAvgSqft) * rehabEstimate.perSqft
     const majorItemsCost = majorItems
       .filter((item) => item.enabled)
       .reduce((sum, item) => sum + item.cost, 0)
@@ -163,10 +169,14 @@ class PropertyValuationService implements ValuationService {
 
     const closingCosts = Math.round(arv * (closingCostsPercent / 100))
     const carryingCosts = Math.round(arv * (carryingCostsPercent / 100))
-    const minProfit = typeof rehabEstimate.minProfit === 'number' ? rehabEstimate.minProfit : 0
+    const minProfit = desiredProfit ?? (typeof rehabEstimate.minProfit === 'number' ? rehabEstimate.minProfit : 0)
+    // Location-risk deduction — major road/railroad/commercial proximity
+    // discounts what a buyer will pay post-rehab. An explicit dollar amount
+    // (position-tiered proximity config) wins over the percentage form.
+    const locationPenalty = locationPenaltyAmount ?? Math.round(arv * (locationPenaltyPercent / 100))
 
-    // Buy Price = ARV − Rehab − Closing Costs − Carrying Costs − Profit Target
-    const buyPrice = arv - totalRehabCost - closingCosts - carryingCosts - minProfit
+    // Buy Price = ARV − Rehab − Closing − Carrying − Profit Target − Location Penalty
+    const buyPrice = arv - totalRehabCost - closingCosts - carryingCosts - minProfit - locationPenalty
     const buyPricePercent = arv > 0 ? Math.round((buyPrice / arv) * 100) : 0
 
     // Wholesale Price = Buy Price − Wholesale Fee
@@ -182,6 +192,23 @@ class PropertyValuationService implements ValuationService {
     // ROI = (Projected Profit / Total Investment) × 100
     const projectedROI = totalInvestment > 0 ? Math.round((projectedProfit / totalInvestment) * 1000) / 10 : 0
 
+    // Determine recommendation
+    let recommendation: 'strong-buy' | 'buy' | 'hold' | 'pass'
+    let recommendationReason: string
+    if (projectedROI >= 25 && buyPricePercent <= 70) {
+      recommendation = 'strong-buy'
+      recommendationReason = `Excellent ROI (${projectedROI}%) with strong buy price (${buyPricePercent}% of ARV)`
+    } else if (projectedROI >= 15 && buyPricePercent <= 75) {
+      recommendation = 'buy'
+      recommendationReason = `Good ROI (${projectedROI}%) with acceptable buy price (${buyPricePercent}% of ARV)`
+    } else if (projectedROI >= 10) {
+      recommendation = 'hold'
+      recommendationReason = `Moderate opportunity - consider negotiating lower price`
+    } else {
+      recommendation = 'pass'
+      recommendationReason = `Low ROI (${projectedROI}%) or high buy price (${buyPricePercent}% of ARV)`
+    }
+
     // Build breakdown
     const breakdown = [
       { label: 'After Repair Value (ARV)', amount: arv, percent: 100 },
@@ -191,6 +218,7 @@ class PropertyValuationService implements ValuationService {
       { label: 'Closing Costs', amount: -closingCosts, percent: closingCostsPercent },
       { label: 'Carrying Costs', amount: -carryingCosts, percent: carryingCostsPercent },
       { label: 'Flip Profit', amount: -minProfit },
+      { label: 'Location Penalty', amount: -locationPenalty, percent: locationPenaltyPercent },
       { label: 'Maximum Buy Price', amount: buyPrice, percent: buyPricePercent },
       { label: 'Wholesale Fee', amount: -wholesaleFee },
       { label: 'Wholesale Price', amount: wholesalePrice, percent: wholesalePricePercent },
@@ -201,7 +229,7 @@ class PropertyValuationService implements ValuationService {
       arvTier,
       pricePerSqft,
       rehabLevel,
-      rehabPerSqft: rehabEstimate.perSqft,
+      rehabPerSqft: skipBaseRehab ? 0 : rehabEstimate.perSqft,
       baseRehabCost: Math.round(baseRehabCost),
       majorItemsCost,
       additionPlay,
@@ -210,6 +238,8 @@ class PropertyValuationService implements ValuationService {
       closingCosts,
       carryingCostsPercent,
       carryingCosts,
+      locationPenalty,
+      locationPenaltyPercent,
       buyPrice: Math.round(buyPrice),
       buyPricePercent,
       wholesaleFee,
@@ -218,6 +248,9 @@ class PropertyValuationService implements ValuationService {
       projectedProfit: Math.round(projectedProfit),
       projectedROI,
       totalInvestment: Math.round(totalInvestment),
+      desiredProfit: minProfit,
+      recommendation,
+      recommendationReason,
       breakdown,
     }
   }

@@ -192,3 +192,81 @@ export interface ImpersonateResponse {
 export async function startImpersonation(userId: string): Promise<ImpersonateResponse> {
   return fetchAdmin(`/impersonate/${userId}`, { method: 'POST' })
 }
+
+// ─── Observability ──────────────────────────────────────────────────────────
+
+export interface ObservabilitySummary {
+  total: number
+  completed: number
+  failed: number
+  successRate: number
+  benchmark: { pass: number; warn: number; fail: number }
+  benchmarkRate: number
+  avgDurationMs: number | null
+  visionVerifiedRate: number
+  visionNaRate: number
+  topFallbacks: Array<{ code: string; count: number }>
+  topErrors: Array<{ code: string; count: number }>
+  providers: Record<string, number>
+}
+
+export interface ObservabilityRun {
+  jobId: string
+  address: string
+  status: 'completed' | 'error'
+  grade: 'pass' | 'warn' | 'fail' | null
+  arv: number | null
+  recommendation: string | null
+  compCount: number | null
+  enabledCompCount: number | null
+  errorCode: string | null
+  durationMs: number | null
+  renovationLevelSource: string | null
+  visionStatus: string | null
+  photoProvider: string | null
+  createdAt: string
+}
+
+export interface ObservabilityRunDetail {
+  run: {
+    jobId: string
+    status: string
+    errorCode: string | null
+    errorMessage: string | null
+    durationMs: number | null
+    arv: number | null
+    propertyAddress: string | null
+    propertyCity: string | null
+    propertyState: string | null
+    createdAt: string
+    eval: {
+      grade: 'pass' | 'warn' | 'fail'
+      checks: Array<{ key: string; label: string; status: 'pass' | 'warn' | 'fail'; detail: string }>
+    } | null
+    steps: Array<{ name: string; status: string; detail?: string; durationMs?: number }>
+    fallbacks: string[]
+  }
+  reportId: string | null
+  responseSummary: {
+    valuation: Record<string, unknown> | null
+    visionAssessment: Record<string, unknown> | null
+    photoProvider: string | null
+    renovationLevelSource: string | null
+    subject: Record<string, unknown> | null
+    comps: Array<Record<string, unknown>>
+    fallbacksUsed: string[]
+    apiCallStats: Record<string, unknown> | null
+  } | null
+}
+
+export async function getObservabilitySummary(): Promise<ObservabilitySummary> {
+  return fetchAdmin<ObservabilitySummary>('/observability/summary')
+}
+
+export async function getObservabilityRuns(limit = 50): Promise<{ runs: ObservabilityRun[] }> {
+  return fetchAdmin<{ runs: ObservabilityRun[] }>(`/observability/runs?limit=${limit}`)
+}
+
+export async function getObservabilityRun(jobId: string): Promise<ObservabilityRunDetail> {
+  return fetchAdmin<ObservabilityRunDetail>(`/observability/runs/${encodeURIComponent(jobId)}`)
+}

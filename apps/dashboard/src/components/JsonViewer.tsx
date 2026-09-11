@@ -135,7 +135,7 @@ function highlightLine(line: string): React.ReactNode {
     if (keyMatch) {
       tokens.push(<span key={key++}>{keyMatch[1]}</span>)
       tokens.push(
-        <span key={key++} className="text-purple-600 dark:text-purple-400">
+        <span key={key++} className="text-foreground">
           {keyMatch[2]}
         </span>
       )

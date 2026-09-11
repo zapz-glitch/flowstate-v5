@@ -13,9 +13,6 @@ custom_domain = true
 ENVIRONMENT = "staging"
 DASHBOARD_URL = "https://staging.flowstate.homes"
 PROPERTY_PROVIDER = "corelogic"
-EVALUATION_ENGINE = "python-v4"
-V4_HOSTED_API_URL = "https://flowstate-v4-staging-python.onrender.com"
-V4_STAGING_ASSETS_ENABLED = "true"
 
 [[d1_databases]]
 binding = "DB"
@@ -39,6 +36,10 @@ class_name = "AnalysisJobDO"
 name = "BATCH_JOB"
 class_name = "BatchJobDO"
 
+[[durable_objects.bindings]]
+name = "RATE_LIMIT_COORDINATOR"
+class_name = "RateLimitCoordinatorDO"
+
 [[migrations]]
 tag = "v5"
 new_sqlite_classes = ["AnalysisJobDO"]
@@ -46,3 +47,7 @@ new_sqlite_classes = ["AnalysisJobDO"]
 [[migrations]]
 tag = "v6"
 new_sqlite_classes = ["BatchJobDO"]
+
+[[migrations]]
+tag = "v3"
+new_sqlite_classes = ["RateLimitCoordinatorDO"]

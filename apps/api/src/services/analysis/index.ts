@@ -278,6 +278,8 @@ export interface ValuationResult {
   projectedProfit: number
   projectedROI: number
   wholesalePrice: number
+  recommendation?: 'strong-buy' | 'buy' | 'hold' | 'pass'
+  recommendationReason?: string
 }
 
 /**
@@ -328,6 +330,24 @@ export interface ResponseContext {
     interior?: { condition: string; notes: string[] }
     features?: Record<string, string | undefined>
   }
+  /** Curb-appeal condition check on the subject's listing photos */
+  subjectCurbAppeal?: {
+    condition: 'renovated' | 'dated' | 'distressed' | 'unknown'
+    source: 'vision' | 'price'
+    confidence: number | null
+    summary: string | null
+    photosExamined: number
+  } | null
+  /** Actual listing URL from the photo provider that delivered (Redfin/Zillow/Realtor) */
+  subjectListingUrl?: string | null
+  /** Visual ARV-candidacy check per ARV-selected comp (by comp ID) */
+  compCurbAppeal?: Record<string, {
+    condition: 'renovated' | 'dated' | 'distressed' | 'unknown'
+    source: 'vision' | 'price'
+    confidence: number | null
+    summary: string | null
+    photosExamined: number
+  }>
   /** External API call statistics */
   apiCallStats?: ApiCallStats
   /** LLM-selected best matching comp */
@@ -430,6 +450,33 @@ export interface AnalysisResponse {
     hoaFee: number | null
     /** Zillow search URL for this property */
     zillowUrl: string | null
+    /** Vision-assessed condition/renovation level (or 'NA' when unverifiable) */
+    condition: string | null
+    /** Curb-appeal condition label (renovated/dated/distressed/unknown) */
+    curbAppeal: {
+      condition: 'renovated' | 'dated' | 'distressed' | 'unknown'
+      source: 'vision' | 'price'
+      confidence: number | null
+      summary: string | null
+      photosExamined: number
+    } | null
+    /** Direct listing URL from the provider that delivered photos */
+    listingUrl: string | null
+    /** Building permit records for the subject */
+    permits: {
+      status: 'available' | 'empty' | 'unavailable'
+      /** Error detail when the permit lookup failed (status 'unavailable') */
+      error?: string | null
+      items: Array<{
+        permitId: string
+        permitNumber: string | null
+        projectType: string | null
+        description: string | null
+        status: string | null
+        effectiveDate: string | null
+        jobValue: number | null
+      }>
+    } | null
     /** Property classification (as_is or after_renovation) */
     classification: ClassificationSummary | null
   }
@@ -496,6 +543,8 @@ export interface AnalysisResponse {
     projectedProfit: number
     projectedROI: number
     wholesalePrice: number
+    recommendation?: 'strong-buy' | 'buy' | 'hold' | 'pass'
+    recommendationReason?: string
   }
   comps: {
     /** Total number of comps returned from API */
@@ -538,6 +587,15 @@ export interface AnalysisResponse {
       buildingStyle: string | null
       /** Story type description (e.g., Split Foyer, Tri Level, 2 Story) */
       storiesType: string | null
+      /** Visual ARV-candidacy check (photos) for ARV-selected comps */
+      curbAppeal?: {
+        condition: 'renovated' | 'dated' | 'distressed' | 'unknown'
+        /** vision = verified from photos; price = inferred from top-of-market sale */
+        source: 'vision' | 'price'
+        confidence: number | null
+        summary: string | null
+        photosExamined: number
+      } | null
       /** Pool type */
       pool: string | null
       /** Garage type */
@@ -600,6 +658,13 @@ export interface AnalysisResponse {
     inFloodZone: boolean
     description: string | null
   } | null
+  /** Positional proximity risks — drives the proximity deduction */
+  locationRisks: Array<{
+    type: string
+    description: string
+    position: 'fronting' | 'backing' | 'siding' | null
+    featureName: string | null
+  }> | null
   /** Neighbourhood analysis — community, schools, POI */
   neighbourhood: {
     crime: {
@@ -684,11 +749,21 @@ export interface AnalysisResponse {
   } | null
   /** External API call statistics for this analysis */
   apiCallStats?: ApiCallStats | null
+  /**
+   * Justified end-to-end evaluation report: ordered pipeline steps,
+   * fallbacks used, ARV drivers, rehab derivation, itemized deductions,
+   * and final verdict.
+   */
+  report?: import('../evaluation/types').EvaluationReport
+  /** Full computer-vision renovation assessment (subject photos) */
+  visionAssessment?: import('../vision/renovation').RenovationAssessment | null
+  /** Where the rehab level came from: manual_override | vision | classification | default */
+  renovationLevelSource?: 'manual_override' | 'vision' | 'classification' | 'default'
+  /** Photo provider that delivered the subject photos (zillow/redfin/realtor) */
+  photoProvider?: string
+  /** Evaluation engine that produced this response */
+  evaluationEngine?: string
 }
-
-/**
- * External API call statistics for a single analysis run
- */
 export interface ApiCallStats {
   corelogic: {
     total: number
@@ -792,9 +867,14 @@ export function buildAnalysisResponse(
   }
   if (property.transaction?.isForeclosure) riskFlags.push('Foreclosure')
   if (property.transaction?.isShortSale) riskFlags.push('Short Sale')
-  if (property.yearBuilt && property.yearBuilt < 1978) riskFlags.push('Pre-1978 (Lead Paint)')
+
   if (enrichment.permits?.items.some((p) => p.jobValue && p.jobValue > 50000)) {
     riskFlags.push('Major Permits (>$50K)')
+  }
+
+  // Location risks (OSM: major roads, railroads, commercial proximity)
+  for (const risk of enrichment.locationRisks ?? []) {
+    riskFlags.push(risk.description)
   }
 
   // Location risk detection — zoning, busy road, commercial adjacency
@@ -906,6 +986,7 @@ export function buildAnalysisResponse(
       compGroup: ctx.groupACompIds?.has(comp.id) ? 'arv' as const
         : ctx.groupBCompIds?.has(comp.id) ? 'as_is' as const
         : null,
+      curbAppeal: ctx.compCurbAppeal?.[comp.id] ?? null,
       disableReasons: evaluation?.disableReasons ?? [],
       classification: classificationSummary,
       isBestMatch: ctx.bestMatch?.compId === comp.id,
@@ -978,6 +1059,26 @@ export function buildAnalysisResponse(
         state: property.state,
         zipCode: property.zipCode,
       }),
+      permits: enrichment.permits
+        ? {
+            status: enrichment.permits.status === 'unavailable'
+              ? 'unavailable'
+              : enrichment.permits.items.length > 0 ? 'available' : 'empty',
+            error: enrichment.permits.error ?? null,
+            items: enrichment.permits.items.map((p) => ({
+              permitId: p.permitId,
+              permitNumber: p.permitNumber ?? null,
+              projectType: p.projectType ?? null,
+              description: p.description ?? null,
+              status: p.status ?? null,
+              effectiveDate: p.effectiveDate ?? null,
+              jobValue: p.jobValue ?? null,
+            })),
+          }
+        : { status: 'unavailable', items: [] },
+      condition: ctx.visionAnalysis?.overallCondition ?? null,
+      curbAppeal: ctx.subjectCurbAppeal ?? null,
+      listingUrl: ctx.subjectListingUrl ?? null,
       classification: subjectClassificationSummary,
     },
 
@@ -1003,6 +1104,8 @@ export function buildAnalysisResponse(
       projectedProfit: valuation.projectedProfit,
       projectedROI: valuation.projectedROI,
       wholesalePrice: valuation.wholesalePrice,
+      recommendation: valuation.recommendation,
+      recommendationReason: valuation.recommendationReason,
       rehabLevelEstimates: ctx.rehabLevelEstimates ?? [],
       asIsMarketIntel: ctx.groupBResult ? {
         asIsMarketPrice: ctx.groupBResult.asIsMarketPrice,
@@ -1038,6 +1141,16 @@ export function buildAnalysisResponse(
           totalValue: enrichment.permits.totalJobValue ?? null,
           recentTypes: (enrichment.permits.recentPermitTypes ?? []).slice(0, 5),
         }
+      : null,
+
+    // ═══ LOCATION RISKS (positional proximity evidence) ═════════════════════
+    locationRisks: enrichment.locationRisks?.length
+      ? enrichment.locationRisks.map((r) => ({
+          type: r.type,
+          description: r.description,
+          position: r.position ?? null,
+          featureName: r.featureName ?? null,
+        }))
       : null,
 
     // ═══ FLOOD ZONE ═════════════════════════════════════════════════════════

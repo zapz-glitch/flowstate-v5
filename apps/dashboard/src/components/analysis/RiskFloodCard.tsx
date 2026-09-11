@@ -57,7 +57,7 @@ export function RiskFloodCard({ riskFlags, floodZone, permits }: RiskFloodCardPr
       {hasPermits && (
         <div>
           <div className="flex items-center gap-2.5 mb-2">
-            <FileCheck className="w-4 h-4 text-violet-600" />
+            <FileCheck className="w-4 h-4 text-foreground-secondary" />
             <span className="text-body-sm font-medium">Building Permits</span>
           </div>
           <div className="flex items-center gap-4 text-body-sm">
@@ -75,7 +75,7 @@ export function RiskFloodCard({ riskFlags, floodZone, permits }: RiskFloodCardPr
           {permits.recentTypes && permits.recentTypes.length > 0 && (
             <div className="flex flex-wrap gap-2 mt-2">
               {permits.recentTypes.map((type, i) => (
-                <Badge key={i} variant="outline" className="bg-violet-500/10 text-violet-700 border-violet-500/30">
+                <Badge key={i} variant="outline" className="bg-secondary text-foreground-secondary border-border">
                   {type}
                 </Badge>
               ))}

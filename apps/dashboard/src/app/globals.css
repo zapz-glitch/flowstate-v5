@@ -3,59 +3,141 @@
 @tailwind utilities;
 
 @layer base {
-  /* Light mode (default) */
+  /* Light mode (default) — monochrome, inverted-contrast actions */
   :root {
     --background: 0 0% 100%;
-    --foreground: 0 0% 9%;
-    --foreground-secondary: 0 0% 25%;
-    --foreground-tertiary: 0 0% 45%;
-    --card: 0 0% 99%;
-    --card-hover: 0 0% 96%;
-    --card-foreground: 0 0% 9%;
-    --popover: 0 0% 98%;
-    --popover-foreground: 0 0% 9%;
-    --primary: 263 70% 50%;
-    --primary-foreground: 0 0% 100%;
-    --secondary: 0 0% 96%;
+    --foreground: 0 0% 7%;
+    --foreground-secondary: 0 0% 30%;
+    --foreground-tertiary: 0 0% 48%;
+    --card: 0 0% 100%;
+    --card-hover: 0 0% 97%;
+    --card-foreground: 0 0% 7%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 7%;
+    --primary: 0 0% 9%;
+    --primary-foreground: 0 0% 98%;
+    --secondary: 0 0% 94%;
     --secondary-foreground: 0 0% 9%;
-    --muted: 0 0% 96%;
-    --muted-foreground: 0 0% 50%;
-    --accent: 263 70% 50%;
-    --accent-secondary: 280 80% 60%;
-    --accent-foreground: 0 0% 100%;
-    --destructive: 0 84% 60%;
+    --muted: 0 0% 94%;
+    --muted-foreground: 0 0% 45%;
+    --accent: 0 0% 90%;
+    --accent-secondary: 0 0% 60%;
+    --accent-foreground: 0 0% 9%;
+    --destructive: 0 72% 51%;
     --destructive-foreground: 0 0% 100%;
-    --border: 0 0% 90%;
-    --input: 0 0% 90%;
-    --ring: 263 70% 50%;
-    --radius: 0.75rem;
+    --border: 0 0% 89%;
+    --input: 0 0% 85%;
+    --ring: 0 0% 45%;
+    --radius: 0.375rem;
   }
 
-  /* Dark mode — deep, Firecrawl-style surfaces */
+  /* Dark mode — warm charcoal monochrome, hairline borders.
+     Slightly elevated lightness + low-saturation warm hue: softer
+     white-on-black contrast and less blue output for night work. */
   .dark {
-    --background: 240 6% 4%;
-    --foreground: 0 0% 96%;
-    --foreground-secondary: 0 0% 70%;
-    --foreground-tertiary: 0 0% 45%;
-    --card: 240 4% 8%;
-    --card-hover: 240 4% 11%;
-    --card-foreground: 0 0% 96%;
-    --popover: 240 4% 8%;
-    --popover-foreground: 0 0% 96%;
-    --primary: 263 70% 58%;
-    --primary-foreground: 0 0% 100%;
-    --secondary: 240 4% 11%;
-    --secondary-foreground: 0 0% 96%;
-    --muted: 240 4% 11%;
-    --muted-foreground: 0 0% 45%;
-    --accent: 263 70% 58%;
-    --accent-secondary: 280 80% 65%;
-    --accent-foreground: 0 0% 100%;
-    --destructive: 0 84% 60%;
+    --background: 40 5% 8%;
+    --foreground: 40 5% 86%;
+    --foreground-secondary: 40 4% 64%;
+    --foreground-tertiary: 40 4% 46%;
+    --card: 40 5% 10.5%;
+    --card-hover: 40 5% 13%;
+    --card-foreground: 40 5% 86%;
+    --popover: 40 5% 10.5%;
+    --popover-foreground: 40 5% 86%;
+    --primary: 40 5% 88%;
+    --primary-foreground: 40 6% 10%;
+    --secondary: 40 4% 13%;
+    --secondary-foreground: 40 5% 86%;
+    --muted: 40 4% 13%;
+    --muted-foreground: 40 4% 56%;
+    --accent: 40 4% 19%;
+    --accent-secondary: 40 4% 44%;
+    --accent-foreground: 40 5% 88%;
+    --destructive: 0 72% 55%;
     --destructive-foreground: 0 0% 100%;
-    --border: 240 4% 15%;
-    --input: 240 4% 11%;
-    --ring: 263 70% 58%;
+    --border: 40 4% 18%;
+    --input: 40 4% 21%;
+    --ring: 40 4% 58%;
+  }
+
+  /* Environment presets — palettes tuned per lighting condition.
+     Applied via data-preset on <html>; night = default .dark above. */
+
+  /* Dawn — cool slate dark: blue-enriched cool tone aids morning alertness */
+  html.dark[data-preset="dawn"] {
+    --background: 225 7% 10%;
+    --foreground: 220 6% 85%;
+    --foreground-secondary: 220 5% 66%;
+    --foreground-tertiary: 220 5% 48%;
+    --card: 225 7% 12.5%;
+    --card-hover: 225 6% 15%;
+    --card-foreground: 220 6% 85%;
+    --popover: 225 7% 12.5%;
+    --popover-foreground: 220 6% 85%;
+    --primary: 220 6% 88%;
+    --primary-foreground: 225 8% 10%;
+    --secondary: 225 5% 15%;
+    --secondary-foreground: 220 6% 85%;
+    --muted: 225 5% 15%;
+    --muted-foreground: 220 5% 58%;
+    --accent: 225 5% 21%;
+    --accent-secondary: 220 5% 46%;
+    --accent-foreground: 220 6% 88%;
+    --border: 225 5% 20%;
+    --input: 225 5% 23%;
+    --ring: 220 5% 58%;
+  }
+
+  /* Outdoor — maximum-contrast light: survives direct-sun glare */
+  html.light[data-preset="outdoor"] {
+    --background: 0 0% 100%;
+    --foreground: 0 0% 4%;
+    --foreground-secondary: 0 0% 22%;
+    --foreground-tertiary: 0 0% 38%;
+    --card: 0 0% 100%;
+    --card-hover: 0 0% 95%;
+    --card-foreground: 0 0% 4%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 4%;
+    --primary: 0 0% 5%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 0 0% 90%;
+    --secondary-foreground: 0 0% 5%;
+    --muted: 0 0% 90%;
+    --muted-foreground: 0 0% 34%;
+    --accent: 0 0% 85%;
+    --accent-secondary: 0 0% 48%;
+    --accent-foreground: 0 0% 5%;
+    --border: 0 0% 76%;
+    --input: 0 0% 68%;
+    --ring: 0 0% 32%;
+  }
+
+  /* LED / bright indoor — warm paper: off-white surface cuts glare,
+     warm-tinted grays/blacks keep the palette cohesive (not cold gray
+     text on warm paper) */
+  html.light[data-preset="led"] {
+    --background: 40 12% 92%;
+    --foreground: 35 9% 12%;
+    --foreground-secondary: 38 6% 30%;
+    --foreground-tertiary: 38 5% 45%;
+    --card: 40 12% 96%;
+    --card-hover: 40 8% 92%;
+    --card-foreground: 35 9% 12%;
+    --popover: 40 12% 96%;
+    --popover-foreground: 35 9% 12%;
+    --primary: 35 10% 11%;
+    --primary-foreground: 40 12% 95%;
+    --secondary: 40 7% 88%;
+    --secondary-foreground: 35 9% 12%;
+    --muted: 40 7% 88%;
+    --muted-foreground: 38 6% 42%;
+    --accent: 40 6% 85%;
+    --accent-secondary: 38 5% 50%;
+    --accent-foreground: 35 9% 12%;
+    --border: 40 7% 80%;
+    --input: 40 6% 74%;
+    --ring: 38 6% 44%;
   }
 
   * {
@@ -104,19 +186,19 @@ body {
 
 /* Selection */
 ::selection {
-  background: hsl(var(--accent) / 0.3);
+  background: hsl(var(--foreground) / 0.18);
   color: hsl(var(--foreground));
 }
 
 /* Focus styles */
 :focus-visible {
-  outline: 2px solid hsl(var(--accent));
+  outline: 2px solid hsl(var(--ring));
   outline-offset: 2px;
 }
 
-/* Gradient text */
+/* Gradient text — subtle monochrome fade */
 .gradient-text {
-  background: linear-gradient(135deg, hsl(263 70% 55%) 0%, hsl(290 80% 65%) 100%);
+  background: linear-gradient(135deg, hsl(var(--foreground)) 0%, hsl(var(--foreground-tertiary)) 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -138,7 +220,7 @@ body {
   inset: 0;
   border-radius: inherit;
   padding: 1px;
-  background: linear-gradient(135deg, hsl(263 70% 55%), hsl(290 80% 65%), hsl(263 70% 55%));
+  background: linear-gradient(135deg, hsl(var(--foreground) / 0.5), hsl(var(--foreground) / 0.15), hsl(var(--foreground) / 0.5));
   background-size: 200% 200%;
   animation: gradient-shift 3s ease infinite;
   -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
@@ -172,6 +254,16 @@ body {
     rgba(255, 255, 255, 0) 100%
   );
   background-size: 200% 100%;
+}
+
+/* Mono micro-label — uppercase engineering-index eyebrow text */
+.mono-label {
+  font-family: var(--font-mono), ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: hsl(var(--muted-foreground));
 }
 
 /* ─── Playground-specific styles (analysis page) ─────────────────────────────*/
@@ -476,5 +568,87 @@ body {
     font-size: 7.5pt;
     color: #9ca3af;
     text-align: center;
+  }
+}
+
+/* Atlas globe popups (MapLibre) */
+.atlas-popup-wrap .maplibregl-popup-content {
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
+  border-radius: 6px;
+  padding: 10px 12px;
+  color: hsl(var(--foreground));
+  box-shadow: 0 4px 16px rgb(0 0 0 / 0.4);
+  cursor: pointer;
+}
+.atlas-popup-wrap .maplibregl-popup-tip {
+  display: none;
+}
+
+/* ─── Container-query responsive property cards ─────────────────────────────
+   The results pane is user-resizable, so card grids must respond to the PANE
+   width — not the viewport. `.props-pane` marks the container; `.comps-grid`
+   and `.subject-*` adapt inside it. */
+.props-pane {
+  container-type: inline-size;
+}
+
+.comps-grid {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: minmax(0, 1fr);
+}
+@container (min-width: 560px) {
+  .comps-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@container (min-width: 1000px) {
+  .comps-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+/* Subject card: stacks image-over-details in narrow panes, row when wide */
+.subject-card-row {
+  display: flex;
+  flex-direction: column;
+}
+.subject-card-media {
+  width: 100%;
+  height: 7rem; /* h-28 */
+}
+@container (min-width: 520px) {
+  .subject-card-row {
+    flex-direction: row;
+  }
+  .subject-card-media {
+    width: 14rem; /* w-56 */
+    height: auto;
+    flex-shrink: 0;
+  }
+}
+
+/* Subject stats: 2 cols narrow, 3 cols when the pane has room */
+.subject-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 1rem;
+  row-gap: 0.25rem;
+}
+@container (min-width: 560px) {
+  .subject-stats {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+/* Valuation hero stats: 4 cols when wide, 2x2 in narrow panes */
+.hero-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+@container (min-width: 520px) {
+  .hero-stats {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 }

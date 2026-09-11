@@ -29,20 +29,25 @@ export function calculateValuation(
     subjectSqft,
     compAvgSqft = subjectSqft,
     rehabLevelIndex = 2,
+    skipBaseRehab = false,
     majorItems = [],
     additionPlay = 0,
     closingCostsPercent = 8,
     carryingCostsPercent = 2,
     wholesaleFee = 10000,
+    locationPenaltyPercent = 0,
+    locationPenaltyAmount,
   } = params
 
   const arvTier = getArvTier(arv, tierRanges)
   const rehabEstimate = getRehabEstimate(rehabTable, arv, rehabLevelIndex, tierRanges)
-  const rehabLevel = REHAB_LEVELS[rehabLevelIndex]
+  // Vision-verified renovated subjects carry no base rehab — major items
+  // (permit thresholds) still charge below.
+  const rehabLevel = skipBaseRehab ? 'Renovated' : REHAB_LEVELS[rehabLevelIndex]
 
   // Calculate costs
   const pricePerSqft = subjectSqft > 0 ? Math.round(arv / subjectSqft) : (compAvgSqft > 0 ? Math.round(arv / compAvgSqft) : 0)
-  const baseRehabCost = (subjectSqft || compAvgSqft) * rehabEstimate.perSqft
+  const baseRehabCost = skipBaseRehab ? 0 : (subjectSqft || compAvgSqft) * rehabEstimate.perSqft
   const majorItemsCost = majorItems
     .filter((item) => item.enabled)
     .reduce((sum, item) => sum + item.cost, 0)
@@ -51,9 +56,12 @@ export function calculateValuation(
   const closingCosts = Math.round(arv * (closingCostsPercent / 100))
   const carryingCosts = Math.round(arv * (carryingCostsPercent / 100))
   const minProfit = typeof rehabEstimate.minProfit === 'number' ? rehabEstimate.minProfit : 0
+  // Location-risk deduction — explicit dollar amount (position-tiered
+  // proximity config) wins over the percentage form
+  const locationPenalty = locationPenaltyAmount ?? Math.round(arv * (locationPenaltyPercent / 100))
 
-  // Buy Price = ARV − Rehab − Closing Costs − Carrying Costs − Profit Target
-  const buyPrice = arv - totalRehabCost - closingCosts - carryingCosts - minProfit
+  // Buy Price = ARV − Rehab − Closing Costs − Carrying Costs − Profit Target − Location Penalty
+  const buyPrice = arv - totalRehabCost - closingCosts - carryingCosts - minProfit - locationPenalty
   const buyPricePercent = arv > 0 ? Math.round((buyPrice / arv) * 100) : 0
 
   // Wholesale Price = Buy Price − Wholesale Fee
@@ -79,6 +87,7 @@ export function calculateValuation(
     { label: 'Addition Play', amount: -additionPlay },
     { label: 'Closing Costs', amount: -closingCosts, percent: closingCostsPercent },
     { label: 'Carrying Costs', amount: -carryingCosts, percent: carryingCostsPercent },
+    { label: 'Location Penalty', amount: -locationPenalty, percent: locationPenaltyPercent },
     { label: 'Flip Profit', amount: -minProfit },
     { label: 'Maximum Buy Price', amount: buyPrice, percent: buyPricePercent },
     { label: 'Wholesale Fee', amount: -wholesaleFee },
@@ -90,7 +99,7 @@ export function calculateValuation(
     arvTier,
     pricePerSqft,
     rehabLevel,
-    rehabPerSqft: rehabEstimate.perSqft,
+    rehabPerSqft: skipBaseRehab ? 0 : rehabEstimate.perSqft,
     baseRehabCost: Math.round(baseRehabCost),
     majorItemsCost,
     additionPlay,
@@ -104,6 +113,8 @@ export function calculateValuation(
     wholesaleFee,
     wholesalePrice: Math.round(wholesalePrice),
     wholesalePricePercent,
+    locationPenalty: Math.round(locationPenalty),
+    locationPenaltyPercent,
     projectedProfit: Math.round(projectedProfit),
     projectedROI,
     totalInvestment: Math.round(totalInvestment),
