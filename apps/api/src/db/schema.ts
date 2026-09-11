@@ -652,3 +652,50 @@ export const batchJobs = sqliteTable(
     index('idx_batch_jobs_created_at').on(table.createdAt),
   ]
 )
+
+// ==========================================
+// Analysis Runs (observability — every analysis outcome, success or failure)
+// ==========================================
+
+export const analysisRuns = sqliteTable(
+  'analysis_runs',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    jobId: text('job_id').notNull(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    // Property identity
+    propertyAddress: text('property_address'),
+    propertyCity: text('property_city'),
+    propertyState: text('property_state'),
+    propertyZip: text('property_zip'),
+    // Outcome
+    status: text('status').notNull(), // 'completed' | 'error'
+    errorCode: text('error_code'), // e.g. 'INSUFFICIENT_COMPS', 'EVALUATION_ERROR'
+    errorMessage: text('error_message'),
+    durationMs: integer('duration_ms'),
+    // Key outputs
+    arv: real('arv'),
+    recommendation: text('recommendation'),
+    compCount: integer('comp_count'),
+    enabledCompCount: integer('enabled_comp_count'),
+    // Evidence pipeline health
+    photoProvider: text('photo_provider'),
+    photoCount: integer('photo_count'),
+    renovationLevelSource: text('renovation_level_source'), // 'vision' | 'default'
+    visionStatus: text('vision_status'), // 'ok' | 'insufficient_photo_evidence' | 'needs_review' | 'unavailable'
+    // Trace evidence
+    stepsJson: text('steps_json'), // ReportStep[] — name/status/detail/durationMs per pipeline step
+    fallbacksJson: text('fallbacks_json'), // string[] — fallback codes used
+    evalJson: text('eval_json'), // computed benchmark checks + grade
+    apiCallStatsJson: text('api_call_stats_json'), // per-provider call counts/latency
+    createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
+  },
+  (table) => [
+    index('idx_analysis_runs_job_id').on(table.jobId),
+    index('idx_analysis_runs_user_id').on(table.userId),
+    index('idx_analysis_runs_status').on(table.status),
+    index('idx_analysis_runs_created_at').on(table.createdAt),
+  ]
+)

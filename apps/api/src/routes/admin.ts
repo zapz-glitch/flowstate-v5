@@ -10,7 +10,7 @@ import { drizzle } from 'drizzle-orm/d1'
 import { eq, desc, and, gte, sql, like, or } from 'drizzle-orm'
 import type { Env } from '../types'
 import { createAuth } from '../lib/auth'
-import { users, apiKeys, apiUsageLogs, subscriptions, savedReports, PLAN_LIMITS } from '../db'
+import { users, apiKeys, apiUsageLogs, subscriptions, savedReports, analysisRuns, PLAN_LIMITS } from '../db'
 import type { Plan } from '../db/schema'
 
 const admin = new Hono<{ Bindings: Env }>()
@@ -412,3 +412,169 @@ admin.post('/impersonate/:id', async (c) => {
 })
 
 export default admin
+
+// ─── Observability ──────────────────────────────────────────────────────────
+
+interface RunEvalShape { grade: 'pass' | 'warn' | 'fail'; passed: number; warned: number; failed: number; checks: unknown[] }
+
+const parseEval = (json: string | null): RunEvalShape | null => {
+  if (!json) return null
+  try { return JSON.parse(json) } catch { return null }
+}
+
+// GET /admin/observability/summary - aggregate system evidence
+admin.get('/observability/summary', async (c) => {
+  const adminSession = await getAdminSession(c)
+  if (!adminSession) return c.json({ error: 'Unauthorized' }, 403)
+
+  const db = drizzle(c.env.DB)
+  const runs = await db.select({
+    status: analysisRuns.status,
+    errorCode: analysisRuns.errorCode,
+    durationMs: analysisRuns.durationMs,
+    renovationLevelSource: analysisRuns.renovationLevelSource,
+    visionStatus: analysisRuns.visionStatus,
+    photoProvider: analysisRuns.photoProvider,
+    photoCount: analysisRuns.photoCount,
+    evalJson: analysisRuns.evalJson,
+    fallbacksJson: analysisRuns.fallbacksJson,
+  }).from(analysisRuns).orderBy(desc(analysisRuns.createdAt)).limit(500)
+
+  const total = runs.length
+  const completed = runs.filter((r) => r.status === 'completed')
+  const grades = { pass: 0, warn: 0, fail: 0 }
+  const fallbackCounts: Record<string, number> = {}
+  const providerCounts: Record<string, number> = {}
+  const errorCounts: Record<string, number> = {}
+  let visionVerified = 0, visionNA = 0, durationSum = 0, durationN = 0
+
+  for (const r of runs) {
+    const ev = parseEval(r.evalJson)
+    if (ev) grades[ev.grade]++
+    for (const f of (r.fallbacksJson ? JSON.parse(r.fallbacksJson) : []) as string[]) {
+      fallbackCounts[f] = (fallbackCounts[f] ?? 0) + 1
+    }
+    if (r.photoProvider) providerCounts[r.photoProvider] = (providerCounts[r.photoProvider] ?? 0) + 1
+    if (r.errorCode) errorCounts[r.errorCode] = (errorCounts[r.errorCode] ?? 0) + 1
+    if (r.renovationLevelSource === 'vision') visionVerified++
+    else if (r.visionStatus && r.visionStatus !== 'ok') visionNA++
+    if (r.durationMs) { durationSum += r.durationMs; durationN++ }
+  }
+
+  const topFallbacks = Object.entries(fallbackCounts).sort((a, b) => b[1] - a[1]).slice(0, 10)
+    .map(([code, count]) => ({ code, count }))
+  const topErrors = Object.entries(errorCounts).sort((a, b) => b[1] - a[1]).slice(0, 10)
+    .map(([code, count]) => ({ code, count }))
+
+  return c.json({
+    total,
+    completed: completed.length,
+    failed: total - completed.length,
+    successRate: total ? Math.round((completed.length / total) * 100) : 0,
+    benchmark: grades,
+    benchmarkRate: total ? Math.round((grades.pass / total) * 100) : 0,
+    avgDurationMs: durationN ? Math.round(durationSum / durationN) : null,
+    visionVerifiedRate: total ? Math.round((visionVerified / total) * 100) : 0,
+    visionNaRate: total ? Math.round((visionNA / total) * 100) : 0,
+    topFallbacks,
+    topErrors,
+    providers: providerCounts,
+  })
+})
+
+// GET /admin/observability/runs - recent runs with eval grades
+admin.get('/observability/runs', async (c) => {
+  const adminSession = await getAdminSession(c)
+  if (!adminSession) return c.json({ error: 'Unauthorized' }, 403)
+
+  const db = drizzle(c.env.DB)
+  const limit = Math.min(Number(c.req.query('limit')) || 50, 200)
+
+  const runs = await db.select().from(analysisRuns)
+    .orderBy(desc(analysisRuns.createdAt)).limit(limit)
+
+  return c.json({
+    runs: runs.map((r) => ({
+      jobId: r.jobId,
+      address: [r.propertyAddress, r.propertyCity, r.propertyState].filter(Boolean).join(', '),
+      status: r.status,
+      grade: parseEval(r.evalJson)?.grade ?? null,
+      arv: r.arv,
+      recommendation: r.recommendation,
+      compCount: r.compCount,
+      enabledCompCount: r.enabledCompCount,
+      errorCode: r.errorCode,
+      durationMs: r.durationMs,
+      renovationLevelSource: r.renovationLevelSource,
+      visionStatus: r.visionStatus,
+      photoProvider: r.photoProvider,
+      createdAt: r.createdAt,
+    })),
+  })
+})
+
+// GET /admin/observability/runs/:jobId - full trace + eval checks for one run
+admin.get('/observability/runs/:jobId', async (c) => {
+  const adminSession = await getAdminSession(c)
+  if (!adminSession) return c.json({ error: 'Unauthorized' }, 403)
+
+  const db = drizzle(c.env.DB)
+  const jobId = c.req.param('jobId')
+
+  const [run] = await db.select().from(analysisRuns).where(eq(analysisRuns.jobId, jobId)).limit(1)
+  if (!run) return c.json({ error: 'Run not found' }, 404)
+
+  // Join the saved report for the full step trace + response evidence
+  const [report] = await db.select({
+    id: savedReports.id,
+    fullResponseJson: savedReports.fullResponseJson,
+  }).from(savedReports).where(eq(savedReports.jobId, jobId)).limit(1)
+
+  let reportSteps: unknown[] = []
+  let responseSummary: Record<string, unknown> | null = null
+  if (report?.fullResponseJson) {
+    try {
+      const resp = JSON.parse(report.fullResponseJson)
+      reportSteps = resp?.report?.steps ?? []
+      const comps = resp?.comps?.items ?? []
+      responseSummary = {
+        valuation: resp?.valuation ?? null,
+        visionAssessment: resp?.visionAssessment ?? null,
+        photoProvider: resp?.photoProvider ?? null,
+        renovationLevelSource: resp?.renovationLevelSource ?? null,
+        subject: resp?.subject ? {
+          address: resp.subject.address,
+          foundationType: resp.subject.foundationType,
+          condition: resp.subject.condition,
+          curbAppeal: resp.subject.curbAppeal,
+          listingUrl: resp.subject.listingUrl,
+          permits: resp.subject.permits,
+          photoCount: resp.subject.photos?.length ?? 0,
+        } : null,
+        comps: comps.map((cmp: Record<string, unknown>) => ({
+          id: cmp.id,
+          address: cmp.address,
+          salePrice: cmp.salePrice,
+          compGroup: cmp.compGroup,
+          isEnabled: cmp.isEnabled,
+          curbAppeal: cmp.curbAppeal,
+          foundationType: cmp.foundationType,
+          passedFilters: (cmp.appraisalRules as { passedFilters?: boolean })?.passedFilters ?? null,
+        })),
+        fallbacksUsed: resp?.report?.fallbacksUsed ?? [],
+        apiCallStats: resp?.apiCallStats ?? null,
+      }
+    } catch { /* fall through with steps only */ }
+  }
+
+  return c.json({
+    run: {
+      ...run,
+      eval: parseEval(run.evalJson),
+      steps: run.stepsJson ? JSON.parse(run.stepsJson) : reportSteps,
+      fallbacks: run.fallbacksJson ? JSON.parse(run.fallbacksJson) : [],
+    },
+    reportId: report?.id ?? null,
+    responseSummary,
+  })
+})

@@ -24,7 +24,8 @@ import type { Env } from '../types'
 import type { NormalizedProperty, NormalizedComparable } from '../services/property-api/types'
 import { drizzle } from 'drizzle-orm/d1'
 import { eq } from 'drizzle-orm'
-import { savedReports, reportHistory } from '../db/schema'
+import { savedReports, reportHistory, analysisRuns } from '../db/schema'
+import { evaluateRun } from '../services/observability/evals'
 
 interface JobState {
   jobId: string
@@ -147,8 +148,10 @@ export class AnalysisJobDO {
 
     this.runStreamingAnalysis(body).catch((err) => {
       console.error('[AnalysisJobDO] Streaming analysis fatal error:', err)
+      const durationMs = Date.now() - (this.jobState?.createdAt ?? Date.now())
       this.pushEvent('error', { step: 'fatal', message: err instanceof Error ? err.message : 'Unknown error' })
-      this.pushEvent('enrichment_done', { totalDurationMs: Date.now() - (this.jobState?.createdAt ?? Date.now()) })
+      this.recordRun(body, { status: 'error', durationMs, errorCode: 'FATAL', errorMessage: err instanceof Error ? err.message : 'Unknown error' })
+      this.pushEvent('enrichment_done', { totalDurationMs: durationMs })
     })
 
     return new Response('OK', { status: 200 })
@@ -175,7 +178,9 @@ export class AnalysisJobDO {
     })
 
     if (!searchResult.success) {
-      await this.pushEvent('error', { step: 'property_fetch', message: ('error' in searchResult ? searchResult.error : null) || 'Property not found' })
+      const msg = ('error' in searchResult ? searchResult.error : null) || 'Property not found'
+      await this.pushEvent('error', { step: 'property_fetch', message: msg })
+      await this.recordRun(config, { status: 'error', durationMs: Date.now() - startTime, errorCode: 'PROPERTY_NOT_FOUND', errorMessage: msg })
       await this.pushEvent('enrichment_done', { totalDurationMs: Date.now() - startTime })
       return
     }
@@ -235,7 +240,9 @@ export class AnalysisJobDO {
     ])
 
     if (!compsResult.success) {
-      await this.pushEvent('error', { step: 'comps_fetch', message: ('error' in compsResult ? compsResult.error : null) || 'Failed to fetch comparables' })
+      const msg = ('error' in compsResult ? compsResult.error : null) || 'Failed to fetch comparables'
+      await this.pushEvent('error', { step: 'comps_fetch', message: msg })
+      await this.recordRun(config, { status: 'error', durationMs: Date.now() - startTime, errorCode: 'COMPS_FETCH_FAILED', errorMessage: msg })
       await this.pushEvent('enrichment_done', { totalDurationMs: Date.now() - startTime })
       return
     }
@@ -364,6 +371,7 @@ export class AnalysisJobDO {
         evidenceRefresh: (evalError as { evidenceRefresh?: unknown })?.evidenceRefresh,
         physicalEvidence: (evalError as { physicalEvidence?: unknown })?.physicalEvidence,
       })
+      await this.recordRun(config, { status: 'error', durationMs: Date.now() - startTime, errorCode: code ?? 'EVALUATION_ERROR', errorMessage: msg, compCount: bundle.comparables?.length })
       await this.pushEvent('enrichment_done', { totalDurationMs: Date.now() - startTime })
       return
     }
@@ -451,6 +459,7 @@ export class AnalysisJobDO {
 
     // Private image access checks the saved report owner before serving any bytes.
     await this.pushEvent('evaluation_complete', { updatedResult: analysisResult })
+    await this.recordRun(config, { status: 'completed', durationMs: Date.now() - startTime, response: analysisResult })
 
     // ── Step 5: LLM comp selection ──────────────────────────────────────────
     if (config.llmEnabled) {
@@ -758,6 +767,74 @@ export class AnalysisJobDO {
   }
 
   // ─── Event Management ─────────────────────────────────────────────────────
+
+  // ─── Observability: record every run outcome (success AND failure) ────────
+
+  private async recordRun(
+    config: StartStreamingRequest,
+    outcome: {
+      status: 'completed' | 'error'
+      durationMs: number
+      response?: Record<string, unknown> | null
+      errorCode?: string
+      errorMessage?: string
+      compCount?: number
+    }
+  ): Promise<void> {
+    try {
+      const db = drizzle(this.env.DB)
+      const resp = (outcome.response ?? null) as Record<string, unknown> | null
+      const subj = (resp?.subject ?? null) as Record<string, unknown> | null
+      const val = (resp?.valuation ?? null) as Record<string, unknown> | null
+      const comps = (resp?.comps ?? null) as Record<string, unknown> | null
+      const report = (resp?.report ?? null) as { steps?: Array<{ name: string; status: string; detail?: string }>; fallbacksUsed?: string[] } | null
+      const vision = (resp?.visionAssessment ?? null) as { status?: string } | null
+      const permits = (subj?.permits ?? null) as { status?: string } | null
+
+      const evidence = {
+        status: outcome.status,
+        errorCode: outcome.errorCode ?? null,
+        compCount: outcome.compCount ?? (comps?.total as number) ?? null,
+        enabledCompCount: (comps?.enabledCount as number) ?? null,
+        arv: (val?.arv as number) ?? null,
+        photoCount: Array.isArray(subj?.photos) ? (subj.photos as unknown[]).length : 0,
+        renovationLevelSource: (resp?.renovationLevelSource as string) ?? null,
+        visionStatus: vision?.status ?? null,
+        permitStatus: permits?.status ?? null,
+        fallbacks: report?.fallbacksUsed ?? [],
+        durationMs: outcome.durationMs,
+        steps: report?.steps ?? null,
+      }
+      const runEval = evaluateRun(evidence)
+
+      await db.insert(analysisRuns).values({
+        jobId: config.jobId,
+        userId: config.userId,
+        propertyAddress: (subj?.address as string) ?? config.search.address ?? config.search.streetAddress ?? null,
+        propertyCity: (config.search.city as string) ?? null,
+        propertyState: (config.search.state as string) ?? null,
+        propertyZip: (config.search.zipCode as string) ?? null,
+        status: outcome.status,
+        errorCode: outcome.errorCode ?? null,
+        errorMessage: outcome.errorMessage ?? null,
+        durationMs: outcome.durationMs,
+        arv: (val?.arv as number) ?? null,
+        recommendation: (val?.recommendation as string) ?? null,
+        compCount: (comps?.total as number) ?? outcome.compCount ?? null,
+        enabledCompCount: (comps?.enabledCount as number) ?? null,
+        photoProvider: (resp?.photoProvider as string) ?? null,
+        photoCount: Array.isArray(subj?.photos) ? (subj.photos as unknown[]).length : 0,
+        renovationLevelSource: (resp?.renovationLevelSource as string) ?? null,
+        visionStatus: vision?.status ?? null,
+        stepsJson: report?.steps ? JSON.stringify(report.steps) : null,
+        fallbacksJson: report?.fallbacksUsed ? JSON.stringify(report.fallbacksUsed) : null,
+        evalJson: JSON.stringify(runEval),
+        apiCallStatsJson: resp?.apiCallStats ? JSON.stringify(resp.apiCallStats) : null,
+      })
+    } catch (err) {
+      console.warn('[AnalysisJobDO] recordRun failed (non-fatal):', err instanceof Error ? err.message : err)
+    }
+  }
 
   private async pushEvent(event: string, data: unknown): Promise<void> {
     if (!this.jobState) return

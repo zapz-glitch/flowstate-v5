@@ -21,6 +21,7 @@ import {
   ShieldCheck,
   Upload,
   Globe2,
+  Activity,
 } from 'lucide-react'
 import { signOut } from '@/lib/auth-client'
 import { Logo, LogoIcon } from '@/components/ui/Logo'
@@ -61,6 +62,7 @@ const adminNavigation: Array<{
   external?: boolean
 }> = [
   { name: 'Admin Panel', href: '/dashboard/admin', icon: ShieldCheck },
+  { name: 'Observability', href: '/dashboard/admin/observability', icon: Activity },
 ]
 
 const THEME_PRESETS = [
