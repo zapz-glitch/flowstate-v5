@@ -55,10 +55,10 @@ export default function SettingsPage() {
     }
   }
 
-  // Renders the Flowstate mark + wordmark to canvas and downloads a JPEG.
+  // Renders the Flowstate mark (icon only) to canvas and downloads a JPEG.
   // dark=true → black background version; dark=false → white background version.
   const downloadLogo = (dark: boolean) => {
-    const W = 1600, H = 800
+    const W = 1024, H = 1024
     const canvas = document.createElement('canvas')
     canvas.width = W
     canvas.height = H
@@ -70,19 +70,13 @@ export default function SettingsPage() {
     ctx.fillStyle = bg
     ctx.fillRect(0, 0, W, H)
 
-    // Logo mark — rounded square + flow glyph, centered left of wordmark
-    const icon = 260
-    const gap = 48
-    const font = '600 190px ui-sans-serif, system-ui, sans-serif'
-    ctx.font = font
-    const wordmark = 'flowstate'
-    const textWidth = ctx.measureText(wordmark).width
-    const totalWidth = icon + gap + textWidth
-    const ix = (W - totalWidth) / 2
+    // Logo mark — rounded square + flow glyph, centered with padding
+    const icon = 640
+    const ix = (W - icon) / 2
     const iy = (H - icon) / 2
 
     // Rounded-square icon background
-    const r = 40
+    const r = 100
     ctx.fillStyle = fg
     ctx.beginPath()
     ctx.roundRect(ix, iy, icon, icon, r)
@@ -102,12 +96,6 @@ export default function SettingsPage() {
     ctx.lineJoin = 'round'
     ctx.stroke(path)
     ctx.restore()
-
-    // Wordmark
-    ctx.fillStyle = fg
-    ctx.font = font
-    ctx.textBaseline = 'middle'
-    ctx.fillText(wordmark, ix + icon + gap, H / 2 + 8)
 
     const a = document.createElement('a')
     a.href = canvas.toDataURL('image/jpeg', 0.92)
