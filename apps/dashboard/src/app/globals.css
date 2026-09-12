@@ -209,18 +209,6 @@ body {
   background-clip: text;
 }
 
-/* USA flag — full flag (50-star canton + 13 stripes) clipped to the
-   glyphs; hairline stroke keeps the white stripes legible on light bg */
-.text-flag-usa {
-  background-image: url('/us-flag.svg');
-  background-size: 100% 100%;
-  background-position: left center;
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-  -webkit-text-stroke: 0.5px hsl(var(--foreground) / 0.35);
-}
-
 /* Animated gradient border */
 @keyframes gradient-shift {
   0%, 100% { background-position: 0% 50%; }
