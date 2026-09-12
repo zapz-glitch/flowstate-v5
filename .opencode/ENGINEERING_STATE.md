@@ -124,6 +124,35 @@ access to the dashboard after auth.
   (fix/maplibre-xss, feat/hide-nav-items, fix/ci-node-22 are all in
   main). Pre-existing test-infra gap: headline-money.test.mjs
   `@/` alias fails under node --test.
+- PHOTO PERSISTENCE (2026-09-12, deployed): `feat/photo-persistence`
+  merged + deployed via CI run 34712448597 (green). Listing photo
+  bytes now persist to R2 per report instance: new prod bucket
+  `flowstate-report-assets` bound as REPORT_ASSETS in wrangler.toml;
+  evaluation/index.ts calls persistReportAssets AFTER vision (vision
+  needs live CDN URLs) and rewrites photoBundle photos to
+  /user/reports/{jobId}/assets/{uuid} — served by the existing
+  owner/share-gated route + dashboard proxy (already built). R2 has
+  no expiry => photos outlive CDN link rot (6-month ask exceeded).
+  Zillow scrape caches 24h -> 30d (zillow-fc + ZILLOW_DATA).
+  persistReportAssets env gate now includes production; still no-ops
+  when REPORT_ASSETS unbound. Persist batch capped 15s, non-fatal.
+- Verified live on prod: analysis job_1789239868640_pwvaod60 (5802
+  Misty Gln) saved report contains 6 /user/reports/.../assets/... URLs,
+  0 zillowstatic URLs; asset GET returns 200 image/webp 138KB real
+  image. 15/15 api regression tests pass (report-assets + deployment
+  config assertions updated for prod-enable + apex domain).
+- Known limitation: comps fetch Zillow ONLY (no redfin/realtor
+  fallback), 12s timeout, max 6 — properties without a live/recent
+  Zillow listing still get no photos (e.g. 1416 E Idlewild returned
+  none; Street View fills the card). Widening the comp fallback chain
+  = more Firecrawl spend — product call if needed.
+- Local-dev quirk: worktree API (local code + remote D1/KV) hangs on
+  outbound CoreLogic fetch inside the local DO — request logged, never
+  returns; prod pipeline unaffected (same address errored cleanly in
+  1.7s). Use prod API for e2e analysis verification.
+- Verification helper: prod /v1/analyze needs an api_keys row (no
+  session-cookie path on /v1); generated a temp fs_ key, verified,
+  deleted it after.
 
 ## Completed (landing-v2)
 - Rewrote `/` (`src/app/page.tsx`) as a company credibility landing page:
