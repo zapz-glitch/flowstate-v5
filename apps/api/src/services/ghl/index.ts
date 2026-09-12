@@ -160,7 +160,7 @@ export function buildAnalysisSummary(response: AnalysisResponse): string {
 
 // ─── Custom Field Builder ────────────────────────────────────────────────────
 
-const DASHBOARD_BASE_URL = 'https://app.flowstate.homes'
+const DASHBOARD_BASE_URL = 'https://flowstate.homes'
 
 /**
  * Build GHL custom fields array from an analysis response and field mappings

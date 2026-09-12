@@ -21,7 +21,7 @@ export interface Env {
   V4_SNAPSHOT_LEGACY_KEYS?: string
 
   // ─── Dashboard URL ────────────────────────────────────────────────────────
-  /** Production dashboard URL (e.g. 'https://app.flowstate.homes') */
+  /** Production dashboard URL (e.g. 'https://flowstate.homes') */
   DASHBOARD_URL?: string
 
   // ─── Property Data Provider ────────────────────────────────────────────────

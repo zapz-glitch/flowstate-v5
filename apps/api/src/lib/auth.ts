@@ -103,7 +103,7 @@ export function createAuth(
   const staging = stagingAuthProfile(baseURL)
   const dashboardUrl = envDashboardUrl || staging?.dashboardUrl || (baseURL?.includes('localhost')
     ? 'http://localhost:3000'
-    : 'https://app.flowstate.homes')
+    : 'https://flowstate.homes')
 
   return betterAuth({
     secret,
