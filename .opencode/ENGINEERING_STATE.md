@@ -83,11 +83,17 @@ access to the dashboard after auth.
   (password) — no heading, no forgot-password, no sign-up links.
   SignUpModal/ForgotPasswordModal components deleted; SiteShell
   sign-up state removed. `disableSignUp: true` set API-side.
-- IP lockout (deployed): better-auth rateLimit storage='database'
-  → migration 0026 `rateLimit` table (applied local+prod).
-  customRule '/sign-in/email' = max 3 per 900s window per IP+path
-  (keyed "ip|/sign-in/email"). ipAddressHeaders = cf-connecting-ip,
-  x-forwarded-for. Verified prod: 3x401 then 429.
+- IP lockout (deployed, v2): better-auth request-based rateLimit was
+  replaced — it counted successful logins too and locked out the
+  product engineer's IP during testing (shared egress IP). Now a
+  Hono middleware on POST /auth/sign-in/email counts FAILURES only:
+  401/403 increments `login_failures` (migration 0027, D1, applied
+  local+prod), 2xx deletes the row, >=3 in a 15-min window → 429 +
+  X-Retry-After. Verified local + prod (fail then success works).
+  `rateLimit` table (0026) remains but unused — better-auth reverted
+  to default memory limiting. ipAddressHeaders kept in advanced.
+- Local test account: isaiah@flowstate.homes password reset to
+  `testpass123` (local D1 only) for lockout verification.
 - Remaining: none blocking. Optional: delete merged branches
   (fix/maplibre-xss, feat/hide-nav-items, fix/ci-node-22 are all in
   main). Pre-existing test-infra gap: headline-money.test.mjs
