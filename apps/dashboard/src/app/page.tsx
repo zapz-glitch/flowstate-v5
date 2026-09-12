@@ -31,9 +31,11 @@ function HomePageContent() {
 
   const isSignedIn = !session.isPending && !!session.data?.user
 
-  // Public site is night-only; presets remain available inside the dashboard
+  // Public site offers just night (dark) and led (bright indoor); normalize
+  // any dashboard-only stored preset on entry
   useEffect(() => {
-    if (theme !== 'night') setTheme('night')
+    if (theme === 'dawn') setTheme('night')
+    else if (theme === 'outdoor') setTheme('led')
     document.documentElement.classList.add('scroll-smooth')
     return () => document.documentElement.classList.remove('scroll-smooth')
     // eslint-disable-next-line react-hooks/exhaustive-deps

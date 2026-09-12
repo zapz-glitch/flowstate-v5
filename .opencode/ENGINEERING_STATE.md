@@ -63,6 +63,15 @@ access to the dashboard after auth.
   still send; if MailChannels is dead there too, switch to Resend or set
   CONTACT_WEBHOOK_URL (GHL/Zapier → email).
 
+## Polish pass 3 (product engineer feedback, 2026-09-11)
+- Menu rework: right-side Sheet drawer removed. Burger now toggles a
+  full-screen overlay (same bg color, fade-in 150ms): large sans nav links
+  (serif italic dropped per feedback), Login/Dashboard pill at bottom,
+  Escape/scroll-lock, header X stays above overlay (z-70 vs overlay z-65).
+- Theme: simple Sun/Moon toggle in header (night ↔ led "bright indoor"),
+  replacing night-only lock. Mount effect normalizes dashboard-only
+  presets (dawn→night, outdoor→led) so the public site stays binary.
+
 ## Branch / Baseline (updated 2026-09-11)
 - `landing-page-v2` — reset to `origin/feat/devin-theme` HEAD (7afe144).
   No commits yet.
