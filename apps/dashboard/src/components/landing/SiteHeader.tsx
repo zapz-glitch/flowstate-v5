@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
-import { Menu, X, Sun, Moon, ArrowUpRight } from 'lucide-react'
+import { Sun, Moon, ArrowUpRight } from 'lucide-react'
 import { Logo } from '@/components/ui/Logo'
 import { useTheme } from '@/components/theme-provider'
 import { cn } from '@/lib/utils'
@@ -20,7 +20,6 @@ interface SiteHeaderProps {
 }
 
 export function SiteHeader({ onPortalClick, isSignedIn }: SiteHeaderProps) {
-  const [open, setOpen] = useState(false)
   const [isScrolled, setIsScrolled] = useState(false)
   const [activeId, setActiveId] = useState<string | null>(null)
   const { theme, toggleTheme } = useTheme()
@@ -51,91 +50,77 @@ export function SiteHeader({ onPortalClick, isSignedIn }: SiteHeaderProps) {
     return () => observer.disconnect()
   }, [])
 
-  useEffect(() => {
-    if (!open) return
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false)
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [open])
+  const linkClass = (href: string, base: string) =>
+    cn(
+      base,
+      'transition-all duration-150 active:scale-[0.97] whitespace-nowrap',
+      activeId === href
+        ? 'text-foreground'
+        : 'text-muted-foreground hover:text-foreground'
+    )
 
   return (
-    <>
-      <header
-        className={cn(
-          'fixed top-0 left-0 right-0 z-[70] transition-all duration-300',
-          open
-            ? 'bg-transparent'
-            : isScrolled
-              ? 'bg-background/80 backdrop-blur-xl border-b border-border'
-              : 'bg-transparent'
-        )}
-      >
-        <div className="max-w-6xl mx-auto px-4 sm:px-6">
-          <div className="flex items-center justify-between py-4">
-            <Link
-              href="/"
-              className="flex items-center active:scale-[0.98] transition-transform duration-150"
-              onClick={() => setOpen(false)}
-            >
-              <Logo size="md" />
-            </Link>
+    <header
+      className={cn(
+        'fixed top-0 left-0 right-0 z-[70] transition-all duration-300',
+        isScrolled
+          ? 'bg-background/80 backdrop-blur-xl border-b border-border'
+          : 'bg-transparent'
+      )}
+    >
+      <div className="max-w-6xl mx-auto px-4 sm:px-6">
+        <div className="flex items-center justify-between gap-6 py-4">
+          <Link
+            href="/"
+            className="flex items-center shrink-0 active:scale-[0.98] transition-transform duration-150"
+          >
+            <Logo size="md" />
+          </Link>
 
-            <div className="flex items-center gap-1">
-              <button
-                onClick={toggleTheme}
-                aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
-                className="p-2 text-muted-foreground hover:text-foreground active:scale-90 transition-all duration-150"
+          {/* Desktop nav */}
+          <nav className="hidden md:flex items-center gap-7 flex-1 justify-center">
+            {NAV_LINKS.map((link) => (
+              <Link
+                key={link.href}
+                href={link.href}
+                className={linkClass(link.href, 'text-[15px]')}
               >
-                {isDark ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
-              </button>
-              <button
-                onClick={() => setOpen((v) => !v)}
-                aria-label={open ? 'Close menu' : 'Open menu'}
-                aria-expanded={open}
-                className="p-2 -mr-2 text-muted-foreground hover:text-foreground active:scale-90 transition-all duration-150"
-              >
-                {open ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
-              </button>
-            </div>
-          </div>
-        </div>
-      </header>
+                {link.label}
+              </Link>
+            ))}
+          </nav>
 
-      {open && (
-        <div className="fixed inset-0 z-[65] bg-background/85 backdrop-blur-xl animate-in fade-in duration-150 pointer-events-none">
-          <div className="h-full max-w-6xl mx-auto px-4 sm:px-6 flex flex-col items-end pt-24 pb-8">
-            <nav className="flex-1 w-full">
-              <ul className="space-y-2 text-right">
-                {NAV_LINKS.map((link) => (
-                  <li key={link.href}>
-                    <Link
-                      href={link.href}
-                      className={cn(
-                        'inline-block py-2 text-3xl sm:text-4xl font-medium tracking-tight transition-all duration-150 hover:-translate-x-1 active:scale-[0.99] pointer-events-auto',
-                        activeId === link.href
-                          ? 'text-foreground'
-                          : 'text-muted-foreground hover:text-foreground'
-                      )}
-                    >
-                      {link.label}
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            </nav>
-
+          <div className="flex items-center gap-2 shrink-0">
             <button
-              onClick={() => { setOpen(false); onPortalClick() }}
-              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 py-3 px-6 bg-foreground text-background font-medium rounded-full hover:bg-foreground/85 active:scale-[0.98] transition-all duration-150 pointer-events-auto"
+              onClick={toggleTheme}
+              aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+              className="p-2 text-muted-foreground hover:text-foreground active:scale-90 transition-all duration-150"
+            >
+              {isDark ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
+            </button>
+            <button
+              onClick={onPortalClick}
+              className="inline-flex items-center gap-1.5 py-2 px-4 bg-foreground text-background text-sm font-medium rounded-full hover:bg-foreground/85 active:scale-[0.98] transition-all duration-150"
             >
               <span>{isSignedIn ? 'Dashboard' : 'Login'}</span>
               <ArrowUpRight className="h-4 w-4" />
             </button>
           </div>
         </div>
-      )}
-    </>
+
+        {/* Mobile nav row */}
+        <nav className="md:hidden flex items-center gap-5 pb-3 -mt-1 overflow-x-auto">
+          {NAV_LINKS.map((link) => (
+            <Link
+              key={link.href}
+              href={link.href}
+              className={linkClass(link.href, 'mono-label !text-[10px]')}
+            >
+              {link.label}
+            </Link>
+          ))}
+        </nav>
+      </div>
+    </header>
   )
 }

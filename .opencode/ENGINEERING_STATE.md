@@ -105,6 +105,13 @@ access to the dashboard after auth.
 - Scroll snap on landing only: snap-y proximity on <html> while on /
   (short sections never trap), snap-start on all five sections.
 
+## Polish pass 7 (product engineer feedback, 2026-09-11)
+- Burger menu + overlay REMOVED. Header is now a standard top nav: logo
+  left, 4 anchor links centered on md+, theme toggle + Login/Dashboard
+  pill right. Mobile gets a compact mono-label links row under the bar.
+  Scroll-spy highlighting kept. scroll-mt bumped to 28/24 for the taller
+  mobile header.
+
 ## Branch / Baseline (updated 2026-09-11)
 - `landing-page-v2` — reset to `origin/feat/devin-theme` HEAD (7afe144).
   No commits yet.

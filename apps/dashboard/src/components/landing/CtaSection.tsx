@@ -2,7 +2,7 @@ import { DealForm } from './DealForm'
 
 export function CtaSection() {
   return (
-    <section id="contact" className="bg-background scroll-mt-20 snap-start">
+    <section id="contact" className="bg-background scroll-mt-28 md:scroll-mt-24 snap-start">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 py-20 sm:py-28">
         <div className="max-w-xl mx-auto">
           <p className="mono-label mb-6">04 / Contact</p>
