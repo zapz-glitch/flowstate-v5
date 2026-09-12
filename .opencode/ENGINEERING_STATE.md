@@ -9,23 +9,35 @@ access to the dashboard after auth.
 ## Merge & Deploy Status (2026-09-12)
 - `landing-page-v2` pushed to origin; fast-forward merged into `main`
   (`16f879a..d7af415`). main now = devin-theme + landing page + Tasks.
-- AUTO-DEPLOY ON MAIN PUSH FAILED (run 34671954629): repo has NO GitHub
-  secrets — `CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ACCOUNT_ID` unset.
-  Typecheck passed; `wrangler deploy` exited on missing token.
+- AUTO-DEPLOY ON MAIN PUSH FAILED (run 34671954629): repo had NO GitHub
+  secrets. Typecheck passed; `wrangler deploy` exited on missing token.
   Prod UNCHANGED — still the 2026-09-11 16:56 UTC devin-theme build.
-  Prior main deploy (Sep 8) failed the same way — CI has never deployed.
-- Local wrangler OAuth works (weareflowstate1@gmail.com, account
-  52e4db30…); that's how the 16:56 deploy went out. To deploy: fix repo
-  secrets OR `npm run deploy` in apps/api then apps/dashboard locally.
-- PROD D1 DRIFT: `d1_migrations` shows applied only through 0018.
-  0019–0024 pending. `batch_jobs` exists out-of-band (created manually),
-  so `db:migrate:remote` will ABORT on 0019's CREATE TABLE. Missing
-  tables: `major_item_setting` (0020), `analysis_runs` (0021),
-  `ui_prefs` (0022), `tasks` (0023) — live code already queries these;
-  those prod features are presumably erroring. Fix path: insert 0019
-  into d1_migrations manually (table exists), then apply 0020–0024.
-- Product engineer chose: skip deploy, leave migrations (2026-09-12).
-- Dev server running: apps/dashboard on localhost:3100 (shell 7886c4).
+- PARTIALLY FIXED: `CLOUDFLARE_ACCOUNT_ID` repo secret set
+  (52e4db30ec50dcb20a46c30a0a8da3d4). `CLOUDFLARE_API_TOKEN` still
+  needed — local wrangler is OAuth-only and cannot supply one; token
+  must be created in the Cloudflare dashboard, or deploy via local
+  `npm run deploy` in apps/api then apps/dashboard.
+- PROD D1 DRIFT FIXED: verified out-of-band `batch_jobs` matched
+  0019's schema (columns, FK, both indexes), inserted `0019_batch_jobs.sql`
+  into `d1_migrations`, then `db:migrate:remote` applied 0020–0024.
+  Verified `analysis_runs`, `major_item_setting`, `ui_prefs` (incl.
+  `nav_order_json`), and `tasks` now exist in prod. `d1_migrations`
+  is caught up through 0024.
+- LOCAL DEV FIXED: node_modules had drifted again (better-auth 1.4.18
+  vs locked 1.7.3) breaking typecheck on `validateSchema` — resolved
+  via `npm ci`. `DASHBOARD_URL` was stale at `localhost:3004` in
+  `wrangler.local.toml` + `.dev.vars` (broke CORS/trustedOrigins for
+  the real dashboard on :3000) — corrected to `localhost:3000`.
+- Verified local: `npm run typecheck` clean both apps; dashboard :3000
+  200; API :8787 /health + /health/db ok; auth probe from
+  Origin: localhost:3000 returns INVALID_EMAIL_OR_PASSWORD (not
+  INVALID_ORIGIN/SQLITE_AUTH) — CORS + better-auth 1.7.3 +
+  `validateSchema:false` all working.
+- npm audit: 1 critical — maplibre-gl <=6.4.0 XSS (GHSA-jrc7-96c5-q579);
+  fix requires 6.9.0 (breaking). Not yet applied.
+- Dev servers running: dashboard localhost:3000, API localhost:8787.
+- Remaining before deploy: prod deploy trigger (secrets or local),
+  decide on maplibre-gl upgrade.
 
 ## Completed (landing-v2)
 - Rewrote `/` (`src/app/page.tsx`) as a company credibility landing page:
