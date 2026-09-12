@@ -15,7 +15,7 @@ export function Hero() {
         <h1 className="text-4xl sm:text-6xl lg:text-7xl font-sans font-medium tracking-[-0.03em] text-foreground leading-[1.02] max-w-4xl">
           We buy houses as-is.
           <br />
-          <span className="text-[#4C8DFF]">Cash. Closed in 21 days.</span>
+          <span className="text-[#2E5BFF]">Cash. Closed in 21 days.</span>
         </h1>
 
         <p className="mt-6 sm:mt-8 text-base sm:text-lg text-muted-foreground max-w-xl leading-relaxed">
