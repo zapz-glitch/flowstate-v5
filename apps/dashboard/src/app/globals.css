@@ -27,6 +27,7 @@
     --destructive-foreground: 0 0% 100%;
     --border: 0 0% 89%;
     --input: 0 0% 85%;
+    --input-fill: 0 0% 100%;
     --ring: 0 0% 45%;
     --radius: 0.375rem;
   }
@@ -57,6 +58,7 @@
     --destructive-foreground: 0 0% 100%;
     --border: 40 4% 18%;
     --input: 40 4% 21%;
+    --input-fill: 0 0% 0%;
     --ring: 40 4% 58%;
   }
 
@@ -85,6 +87,7 @@
     --accent-foreground: 220 6% 88%;
     --border: 225 5% 20%;
     --input: 225 5% 23%;
+    --input-fill: 225 7% 5%;
     --ring: 220 5% 58%;
   }
 
@@ -110,6 +113,7 @@
     --accent-foreground: 0 0% 5%;
     --border: 0 0% 76%;
     --input: 0 0% 68%;
+    --input-fill: 0 0% 100%;
     --ring: 0 0% 32%;
   }
 
@@ -137,6 +141,7 @@
     --accent-foreground: 35 9% 12%;
     --border: 40 7% 80%;
     --input: 40 6% 74%;
+    --input-fill: 0 0% 100%;
     --ring: 38 6% 44%;
   }
 
@@ -659,7 +664,7 @@ input:-webkit-autofill:hover,
 input:-webkit-autofill:focus,
 textarea:-webkit-autofill {
   -webkit-text-fill-color: hsl(var(--foreground));
-  -webkit-box-shadow: 0 0 0 1000px hsl(var(--secondary) / 0.5) inset;
+  -webkit-box-shadow: 0 0 0 1000px hsl(var(--input-fill)) inset;
   caret-color: hsl(var(--foreground));
   transition: background-color 9999s ease-out;
 }

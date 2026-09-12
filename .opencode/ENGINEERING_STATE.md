@@ -88,6 +88,11 @@ access to the dashboard after auth.
   do-not-sell + STOP/unsubscribe live in the Privacy Policy); footer links
   added. NOTE: legal text is a working draft, review by counsel advised.
 
+## Polish pass 5 (product engineer feedback, 2026-09-11)
+- Form field surface: new `--input-fill` token per preset (night black
+  0 0% 0%, dawn near-black, outdoor/led/root white) replacing
+  bg-secondary/50 on wizard inputs; autofill inset shadow follows it.
+
 ## Branch / Baseline (updated 2026-09-11)
 - `landing-page-v2` — reset to `origin/feat/devin-theme` HEAD (7afe144).
   No commits yet.
