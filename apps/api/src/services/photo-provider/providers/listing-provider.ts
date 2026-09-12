@@ -45,6 +45,7 @@ export class ListingPhotoProvider implements PhotoProvider {
         openrouterApiKey: this.env.OPENROUTER_API_KEY,
         openrouterModel: this.env.OPENROUTER_MODEL,
         cache: this.env.API_CACHE,
+        cacheTtl: 30 * 24 * 60 * 60,
       })
     }
     return this.scraper
