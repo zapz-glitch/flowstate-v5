@@ -23,7 +23,7 @@ const CRITERIA = [
 
 export function WhatWeBuy() {
   return (
-    <section id="what-we-buy" className="bg-background border-b border-border">
+    <section id="what-we-buy" className="bg-background border-b border-border scroll-mt-20">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 py-16 sm:py-24">
         <p className="mono-label mb-4">01 / What we buy</p>
         <h2 className="text-3xl sm:text-4xl font-sans font-medium tracking-[-0.03em] text-foreground leading-tight max-w-2xl mb-10 sm:mb-14">

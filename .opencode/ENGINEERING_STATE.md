@@ -44,6 +44,25 @@ access to the dashboard after auth.
   dashboard), "Investor portal" renamed to Login ("Dashboard" when signed
   in). Public site forces night theme on mount.
 
+## Polish pass 2 (product engineer feedback, 2026-09-11)
+- Footer minimalized: logo + hello@flowstate.homes + disclaimer + copyright
+  only. Site link column and API docs link removed. The old /docs link was
+  what redirected unauthenticated clicks into the login flow.
+- Burger header: z-index bumped above all content (z-[60]); sections got
+  scroll-mt-20 so anchor jumps don't hide headings under the fixed header.
+- DealForm rebuilt as a step wizard (name → email → address → notes): one
+  serif-italic question at a time, slide direction animation, progress
+  "01 / 04" + hairline bar, Enter to advance, back button, per-step
+  validation, autofocus guarded against page-load scroll-jump.
+- /api/deal now emails hello@flowstate.homes via MailChannels
+  (same tx endpoint as the API's auth emails), from noreply@flowstate.homes
+  with reply_to = submitter; CONTACT_WEBHOOK_URL kept as optional extra sink.
+- KNOWN UNKNOWN: MailChannels delivery from the dashboard worker is
+  unverified locally (tx API rejects non-CF-originated calls with 401 →
+  route returns honest 502 in dev). Confirm prod password-reset emails
+  still send; if MailChannels is dead there too, switch to Resend or set
+  CONTACT_WEBHOOK_URL (GHL/Zapier → email).
+
 ## Branch / Baseline (updated 2026-09-11)
 - `landing-page-v2` — reset to `origin/feat/devin-theme` HEAD (7afe144).
   No commits yet.
