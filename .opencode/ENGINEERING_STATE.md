@@ -105,9 +105,21 @@ access to the dashboard after auth.
   copied, NEXT_PUBLIC_API_URL=:8788). Sign-in hello@flowstate.homes
   / flowstate123 verified. WARNING: writes hit prod D1. Main
   checkout still runs local-emulated stack on :3000/:8787.
-  To resume: cd worktree, npx wrangler dev --remote --config
-  wrangler.worktree.toml (api), npx next dev --turbopack -p 3001
+  To resume: cd worktree, npx wrangler dev --config
+  wrangler.worktree.toml (api — local code, remote D1/KV via
+  `remote = true`; DO NOT use `wrangler dev --remote`, it breaks
+  auth cookies on localhost), npx next dev --turbopack -p 3001
   (dashboard).
+- WORKTREE PROGRESS (ui/polish, unpushed): commits 1316295,
+  6fc6ea1, 1aeb004 — IndexedDB offline cache for all GETs via
+  fetchApi (21-day max, cleared on sign-in, bypassed when
+  impersonating); atlas popup innerHTML→textContent XSS fix;
+  security headers + prod-only CSP in next.config.js; API KV TTLs
+  property/comps/vision → 21 days; landing wheel-hijack scroll
+  removed. Bundle audit: heavy deps already code-split (maplibre
+  274KB gz → /atlas only; react-pdf 512KB gz → report downloads).
+  NOT yet: merge to main / prod deploy — pending product engineer
+  testing on :3001. CSP is prod-gated and untested live.
 - Remaining: none blocking. Optional: delete merged branches
   (fix/maplibre-xss, feat/hide-nav-items, fix/ci-node-22 are all in
   main). Pre-existing test-infra gap: headline-money.test.mjs
