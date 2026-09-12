@@ -45,8 +45,20 @@ access to the dashboard after auth.
   Settings → Menu Bar eye-toggle; Sidebar filters hidden hrefs.
   Verified: /ui-prefs PUT→GET round trip persists navHidden;
   typecheck clean both apps.
-- Remaining before deploy: prod deploy trigger (secrets or local),
-  merge fix/maplibre-xss + feat/hide-nav-items to main.
+- MERGED TO MAIN (2026-09-12): `fix/maplibre-xss` +
+  `feat/hide-nav-items` fast-forwarded into main @ `56748ce`, pushed
+  to origin. Deploy prep verification on main: typecheck clean both
+  apps, API regression tests pass, `wrangler deploy --dry-run` bundles
+  OK (prod vars: ENVIRONMENT=production, DASHBOARD_URL=
+  app.flowstate.homes), OpenNext production build completes
+  (22 static pages, worker.js generated). Known pre-existing failure:
+  headline-money.test.mjs can't resolve `@/` alias under node --test
+  (unrelated to this work; predates merge).
+- Remaining before deploy: ONLY the trigger — `CLOUDFLARE_API_TOKEN`
+  secret (then re-run workflow) or local `npm run deploy` in
+  apps/api then apps/dashboard. Prod D1 already has all migrations
+  through 0025. Push to main triggered CI run 34674170553 which will
+  fail on the missing token (expected).
 
 ## Completed (landing-v2)
 - Rewrote `/` (`src/app/page.tsx`) as a company credibility landing page:
