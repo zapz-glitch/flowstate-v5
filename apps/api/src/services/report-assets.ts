@@ -73,7 +73,8 @@ async function imageBytes(response: Response): Promise<{ bytes: Uint8Array; cont
 
 export async function persistReportAssets(env: Pick<Env, 'REPORT_ASSETS' | 'ENVIRONMENT' | 'V4_STAGING_ASSETS_ENABLED'>, jobId: string, propertyId: string, sources: ReportAssetSource[], options: { fetcher?: typeof fetch } = {}) {
   const assets: ReportAsset[] = [], errors: string[] = []
-  const enabled = env.ENVIRONMENT === 'development' || (env.ENVIRONMENT === 'staging' && env.V4_STAGING_ASSETS_ENABLED === 'true')
+  const enabled = env.ENVIRONMENT === 'development' || env.ENVIRONMENT === 'production' ||
+    (env.ENVIRONMENT === 'staging' && env.V4_STAGING_ASSETS_ENABLED === 'true')
   if (!enabled || !env.REPORT_ASSETS) return { assets, errors: ['Private report asset storage unavailable'] }
   const candidates = [...new Map(sources.map(source => [source.url, source])).values()].slice(0, 4)
   let cursor = 0

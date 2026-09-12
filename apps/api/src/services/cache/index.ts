@@ -31,8 +31,8 @@ export const CACHE_TTL = {
   PERMITS: 7 * 24 * 60 * 60,
   // Vision analysis results - cache for 21 days
   VISION_ANALYSIS: 21 * 24 * 60 * 60,
-  // Zillow data - cache for 24 hours (listings can change)
-  ZILLOW_DATA: 24 * 60 * 60,
+  // Zillow listing/photo scrape results - cache for 30 days
+  ZILLOW_DATA: 30 * 24 * 60 * 60,
   // OAuth tokens - cache until expiry minus buffer
   OAUTH_TOKEN: 50 * 60, // 50 minutes (tokens last 60 min)
   // Neighbourhood data - cache for 7 days (community/school/POI data rarely changes)

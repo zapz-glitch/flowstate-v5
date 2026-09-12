@@ -61,7 +61,7 @@ export function createZillowFetcher(env: Env): ZillowFetcher | null {
       openrouterApiKey: env.OPENROUTER_API_KEY,  // Optional fallback
       openrouterModel: env.OPENROUTER_MODEL,
       cache: env.API_CACHE,
-      cacheTtl: 24 * 60 * 60,
+      cacheTtl: 30 * 24 * 60 * 60,
     })
   }
 

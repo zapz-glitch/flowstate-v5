@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs'
 const production = readFileSync(new URL('../wrangler.toml', import.meta.url), 'utf8')
 const local = readFileSync(new URL('../wrangler.local.toml', import.meta.url), 'utf8')
 assert.match(production, /^ENVIRONMENT = "production"$/m)
-assert.match(production, /^DASHBOARD_URL = "https:\/\/app\.flowstate\.homes"$/m)
+assert.match(production, /^DASHBOARD_URL = "https:\/\/flowstate\.homes"$/m)
 assert.doesNotMatch(production, /localhost|127\.0\.0\.1|flowstate-v4-local-report-assets|V4_LOCAL_BRIDGE/)
 assert.doesNotMatch(production, /^EVALUATION_ENGINE\s*=\s*"python-v4"/m)
 assert.match(local, /^ENVIRONMENT = "development"$/m)

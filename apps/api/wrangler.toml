@@ -22,6 +22,10 @@ migrations_dir = "migrations"
 binding = "API_CACHE"
 id = "076d6c5a242c4b5d9765d04b8b8755b6"
 
+[[r2_buckets]]
+binding = "REPORT_ASSETS"
+bucket_name = "flowstate-report-assets"
+
 [[durable_objects.bindings]]
 name = "ANALYSIS_JOB"
 class_name = "AnalysisJobDO"
