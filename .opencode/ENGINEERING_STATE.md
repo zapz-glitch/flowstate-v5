@@ -166,6 +166,21 @@ access to the dashboard after auth.
   session-cookie path on /v1); generated a temp fs_ key, verified,
   deleted it after.
 
+## Google Cloud / Maps (2026-09-12 — FIX PENDING, user action required)
+- Prod Maps key AIzaSyD1mztBbiP93zRqPiUiV0Upk7uM435EQDU lives in
+  GCP project number 631070523239 (extracted via geolocation API error
+  metadata). Dev/local key AIzaSyADvOh4RfRJEi5rd93DFGP5L_BKdvSh8pM is in
+  project 600584575168 and works.
+- Billing account ID: 0130DC-E80A6F-587A29 (user label "F1.1") —
+  needs to be linked to project 631070523239.
+- BLOCKER: prod maps show "for development purposes only" because
+  (1) billing not enabled on project 631070523239, and
+  (2) key HTTP referrers do NOT include flowstate.homes (geolocation
+  call with Referer: flowstate.homes -> "blocked"). User must fix both
+  in console; OAuth client URLs do NOT affect API-key referrers.
+- Re-verify: curl streetview metadata + geolocation with the prod key
+  and Referer https://flowstate.homes/ — expect status OK.
+
 ## Completed (landing-v2)
 - Rewrote `/` (`src/app/page.tsx`) as a company credibility landing page:
   Hero ("We buy houses as-is. Cash. Closed in 21 days." + stats strip),
