@@ -90,7 +90,7 @@ export function SiteHeader({ onPortalClick, isSignedIn }: SiteHeaderProps) {
             onClick={onPortalClick}
             className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground active:scale-[0.97] transition-all duration-150 whitespace-nowrap shrink-0"
           >
-            <span>{isSignedIn ? 'Dashboard' : 'Login'}</span>
+            <span className="underline underline-offset-4">{isSignedIn ? 'Dashboard' : 'Login'}</span>
             <ArrowUpRight className="h-3.5 w-3.5" />
           </button>
         </div>
