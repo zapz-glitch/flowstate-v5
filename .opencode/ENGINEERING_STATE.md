@@ -64,6 +64,20 @@ access to the dashboard after auth.
 - Deploy path going forward: push to main → GitHub Actions deploys
   both apps automatically. Local `npm run deploy` remains break-glass
   fallback.
+- APEX DOMAIN CONSOLIDATION (2026-09-12): dashboard now canonically
+  on https://flowstate.homes; `app.flowstate.homes` worker domain
+  detached (deploy re-synced custom domains to declared route in
+  wrangler.jsonc — apex now codified as `custom_domain`). API stays
+  at api.flowstate.homes. Updated: DASHBOARD_URL prod var, auth.ts
+  fallback, user-reports links, GHL base URL. Cookies unchanged
+  (.flowstate.homes covers apex+subdomains). Verified: apex 200,
+  app.* NXDOMAIN, sign-in via Origin flowstate.homes works.
+- PROD LOGIN SET (2026-09-12): the enterprise account is now
+  `hello@flowstate.homes` / password reset as requested (renamed
+  from admin@flowstate.homes — same user id, all data preserved,
+  plan=enterprise, emailVerified=1). Gotcha recorded: better-auth
+  credential `account.accountId` must equal the userId, NOT the
+  email. Sign-in verified live returning session token.
 - Remaining: none blocking. Optional: delete merged branches
   (fix/maplibre-xss, feat/hide-nav-items, fix/ci-node-22 are all in
   main). Pre-existing test-infra gap: headline-money.test.mjs
