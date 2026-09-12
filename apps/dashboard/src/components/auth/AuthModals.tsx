@@ -158,12 +158,6 @@ function SignInModal({ isOpen, onClose, onForgotPassword, onSwitchToSignUp }: Si
                 <span className="text-xl font-semibold text-foreground">flowstate</span>
               </div>
 
-              <h2 className="text-2xl font-bold text-foreground mb-1">
-                Welcome back
-              </h2>
-              <p className="text-sm text-muted-foreground">
-                Sign in to access your account
-              </p>
             </div>
 
             {/* Form */}
@@ -179,7 +173,7 @@ function SignInModal({ isOpen, onClose, onForgotPassword, onSwitchToSignUp }: Si
                 {/* Email field */}
                 <div className="mb-4">
                   <label htmlFor="signin-email" className="block text-sm font-medium text-foreground mb-1.5">
-                    Email
+                    Liquidity
                   </label>
                   <input
                     id="signin-email"
@@ -195,7 +189,7 @@ function SignInModal({ isOpen, onClose, onForgotPassword, onSwitchToSignUp }: Si
                 {/* Password field */}
                 <div className="mb-4">
                   <label htmlFor="signin-password" className="block text-sm font-medium text-foreground mb-1.5">
-                    Password
+                    Profitable Investments
                   </label>
                   <input
                     id="signin-password"
