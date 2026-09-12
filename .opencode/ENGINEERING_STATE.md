@@ -1,6 +1,59 @@
 # Engineering State — flowstate-v5
 
 ## Current Objective
+Build a new landing page for Flowstate on `apps/dashboard`, fresh baseline.
+Direction from product engineer (2026-09-11): credibility landing page for
+realtors, wholesalers, and investors. Burger menu top-right with portal
+access to the dashboard after auth.
+
+## Completed (landing-v2)
+- Rewrote `/` (`src/app/page.tsx`) as a company credibility landing page:
+  Hero ("We buy houses as-is. Cash. Closed in 21 days." + stats strip),
+  WhatWeBuy (01-04 criteria grid), Process (submit/evaluate/offer/close),
+  WhoWeWorkWith (realtors/wholesalers/investors), CtaSection (contact,
+  mailto hello@flowstate.homes), SiteFooter (not-a-licensed-broker
+  disclaimer).
+- New `SiteHeader`: logo + burger menu (all viewports) via shadcn Sheet
+  (right slide-over): nav anchors, 4-preset Environment picker (night/dawn/
+  outdoor/led, identical to dashboard Sidebar), Investor portal button.
+  Portal opens AuthModals sign-in when signed out (redirects to /dashboard
+  on success), or goes straight to /dashboard when signed in.
+- page.tsx now reuses `components/auth/AuthModals.tsx` (inline auth forms
+  deleted); `?signin=true` auto-open flow preserved (used by /docs).
+- Deleted old SaaS landing: Navbar, Features, Pricing, Waitlist, Footer.
+- Root metadata: "Flowstate | Real Estate Investment" + company description.
+
+## Verification (landing-v2)
+- `npx tsc --noEmit` in apps/dashboard: clean.
+- localhost:3100 `/` → 200 with new hero/sections/contact markup; new title.
+- eslint unavailable on this branch (root config needs typescript-eslint,
+  not in node_modules) — typecheck used as gate per CLAUDE.md.
+- Not deployed (deploy only on explicit instruction).
+
+## Branch / Baseline (updated 2026-09-11)
+- `landing-page-v2` — reset to `origin/feat/devin-theme` HEAD (7afe144).
+  No commits yet.
+- Prod verification (read-only, GitHub + Cloudflare): flowstate.homes is
+  served by Cloudflare Worker `flowstate-dashboard` (OpenNext Next.js).
+  Latest deploy 2026-09-11 16:56 UTC, version 4ed6b5c0. Deployed bundle CSS
+  contains 5 grayscale `--primary` values = devin-theme multi-preset mono
+  system; main's purple `263 70%` absent. Prod = feat/devin-theme build.
+- `main` is stale (105 commits behind devin-theme, purple SaaS landing).
+  Product engineer initially chose main, then agreed to rebase onto
+  devin-theme so new work matches production.
+- Prior v1 landing work preserved on local branch `landing-page`
+  (5844240, ad6422c, 9df2c4f ahead of devin-theme). Unpushed.
+
+## Dev Environment (updated 2026-09-11)
+- Dev server: `apps/dashboard` on **localhost:3100** (PORT=3100 npm run dev).
+  Old :3000/:3001 servers killed.
+- Gotcha: killing `next dev` mid-write can corrupt `.next` Turbopack cache
+  → panic "Unable to open static sorted file". Fix: `rm -rf .next`.
+
+---
+# Archive — prior session state (evaluation engine work on devin-theme)
+
+## Prior Objective
 End-to-end hands-off fix-&-flip evaluation: accurate, fast, scalable, with evidence.
 
 ## Completed (this session arc)

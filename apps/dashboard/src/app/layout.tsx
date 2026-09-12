@@ -30,8 +30,12 @@ export const viewport: Viewport = {
 }
 
 export const metadata: Metadata = {
-  title: 'Flowstate',
-  description: 'Property valuation and underwriting platform for real estate investors',
+  title: {
+    default: 'Flowstate | Real Estate Investment',
+    template: '%s | Flowstate',
+  },
+  description:
+    'Private real estate investment company acquiring as-is, distressed, and original-condition properties. Cash offers, closing in 21 days or less.',
   manifest: '/manifest.json',
   appleWebApp: {
     capable: true,
