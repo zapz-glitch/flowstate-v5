@@ -38,7 +38,7 @@ export function SiteShell({ children }: { children: React.ReactNode }) {
 
   const openPortal = useCallback(() => {
     if (isSignedIn) {
-      router.push('/dashboard')
+      router.push('/dashboard/analyze')
     } else {
       setIsSignInOpen(true)
     }

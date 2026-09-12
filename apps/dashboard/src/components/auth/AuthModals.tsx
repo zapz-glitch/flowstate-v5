@@ -80,7 +80,7 @@ function SignInModal({ isOpen, onClose }: SignInModalProps) {
 
       // Success - redirect to dashboard
       onClose()
-      router.push('/dashboard')
+      router.push('/dashboard/analyze')
       router.refresh()
     } catch {
       setError('Failed to sign in. Please try again.')
