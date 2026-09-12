@@ -97,6 +97,17 @@ access to the dashboard after auth.
 - Post-login route (deployed): sign-in success + signed-in portal
   button route to /dashboard/analyze (property search), not the
   overview page.
+- UI WORKTREE SESSION (paused): `/home/lucke/src/flowstate-v5-ui`
+  branch `ui/polish` off main @6259a08. For UI changes/testing.
+  Runs PROD-LIKE: `wrangler dev --remote --config wrangler.worktree.toml`
+  (committed on branch) → API :8788 against REAL prod D1/KV/DOs +
+  real secrets from copied .dev.vars; dashboard :3001 (.env.local
+  copied, NEXT_PUBLIC_API_URL=:8788). Sign-in hello@flowstate.homes
+  / flowstate123 verified. WARNING: writes hit prod D1. Main
+  checkout still runs local-emulated stack on :3000/:8787.
+  To resume: cd worktree, npx wrangler dev --remote --config
+  wrangler.worktree.toml (api), npx next dev --turbopack -p 3001
+  (dashboard).
 - Remaining: none blocking. Optional: delete merged branches
   (fix/maplibre-xss, feat/hide-nav-items, fix/ci-node-22 are all in
   main). Pre-existing test-infra gap: headline-money.test.mjs
