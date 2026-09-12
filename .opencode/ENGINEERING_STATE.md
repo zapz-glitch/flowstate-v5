@@ -78,6 +78,16 @@ access to the dashboard after auth.
   plan=enterprise, emailVerified=1). Gotcha recorded: better-auth
   credential `account.accountId` must equal the userId, NOT the
   email. Sign-in verified live returning session token.
+- SIGN-IN HARDENING (2026-09-12, deployed): modal now shows only
+  logo header + "Liquidity." (email) + "Profitable Investments."
+  (password) — no heading, no forgot-password, no sign-up links.
+  SignUpModal/ForgotPasswordModal components deleted; SiteShell
+  sign-up state removed. `disableSignUp: true` set API-side.
+- IP lockout (deployed): better-auth rateLimit storage='database'
+  → migration 0026 `rateLimit` table (applied local+prod).
+  customRule '/sign-in/email' = max 3 per 900s window per IP+path
+  (keyed "ip|/sign-in/email"). ipAddressHeaders = cf-connecting-ip,
+  x-forwarded-for. Verified prod: 3x401 then 429.
 - Remaining: none blocking. Optional: delete merged branches
   (fix/maplibre-xss, feat/hide-nav-items, fix/ci-node-22 are all in
   main). Pre-existing test-infra gap: headline-money.test.mjs
