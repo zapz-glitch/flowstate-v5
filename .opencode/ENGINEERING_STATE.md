@@ -93,6 +93,18 @@ access to the dashboard after auth.
   0 0% 0%, dawn near-black, outdoor/led/root white) replacing
   bg-secondary/50 on wizard inputs; autofill inset shadow follows it.
 
+## Polish pass 6 (product engineer feedback, 2026-09-11)
+- Menu overlay right-aligned under burger (prior commit), now PERSISTENT:
+  links no longer close it; overlay is translucent (bg/85 + backdrop-blur)
+  so the page visibly scrolls behind while navigating; scroll-spy
+  (IntersectionObserver) highlights current section; body scroll lock
+  removed; X/Escape close.
+- Grids made flush: rounded corners + divide utilities removed from
+  WhatWeBuy/Process/WhoWeWorkWith/Hero-stats; explicit per-cell hairline
+  borders connect cleanly to container edges at every breakpoint.
+- Scroll snap on landing only: snap-y proximity on <html> while on /
+  (short sections never trap), snap-start on all five sections.
+
 ## Branch / Baseline (updated 2026-09-11)
 - `landing-page-v2` — reset to `origin/feat/devin-theme` HEAD (7afe144).
   No commits yet.

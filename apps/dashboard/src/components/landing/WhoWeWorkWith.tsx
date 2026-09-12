@@ -1,3 +1,5 @@
+import { cn } from '@/lib/utils'
+
 const AUDIENCES = [
   {
     index: '01',
@@ -16,18 +18,25 @@ const AUDIENCES = [
   },
 ]
 
+// Flush hairlines: stack on mobile, 3 columns at sm and up
+const CELL_BORDERS = [
+  'border-b sm:border-b-0 sm:border-r',
+  'border-b sm:border-b-0 sm:border-r',
+  '',
+]
+
 export function WhoWeWorkWith() {
   return (
-    <section id="network" className="bg-background border-b border-border scroll-mt-20">
+    <section id="network" className="bg-background border-b border-border scroll-mt-20 snap-start">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 py-16 sm:py-24">
         <p className="mono-label mb-4">03 / Who we work with</p>
         <h2 className="text-3xl sm:text-4xl font-sans font-medium tracking-[-0.03em] text-foreground leading-tight max-w-2xl mb-10 sm:mb-14">
           Built for the people who find the deals.
         </h2>
 
-        <div className="grid sm:grid-cols-3 border border-border rounded-lg overflow-hidden divide-y divide-border sm:divide-y-0 sm:divide-x">
-          {AUDIENCES.map((audience) => (
-            <div key={audience.index} className="p-6 sm:p-8">
+        <div className="grid sm:grid-cols-3 border border-border">
+          {AUDIENCES.map((audience, i) => (
+            <div key={audience.index} className={cn('p-6 sm:p-8 border-border', CELL_BORDERS[i])}>
               <p className="mono-label !text-[10px] mb-4">{audience.index}</p>
               <h3 className="text-lg font-medium text-foreground mb-2">{audience.title}</h3>
               <p className="text-sm text-muted-foreground leading-relaxed">{audience.body}</p>

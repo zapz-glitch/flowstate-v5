@@ -22,6 +22,7 @@ interface SiteHeaderProps {
 export function SiteHeader({ onPortalClick, isSignedIn }: SiteHeaderProps) {
   const [open, setOpen] = useState(false)
   const [isScrolled, setIsScrolled] = useState(false)
+  const [activeId, setActiveId] = useState<string | null>(null)
   const { theme, toggleTheme } = useTheme()
 
   const isDark = theme === 'night' || theme === 'dawn'
@@ -32,17 +33,31 @@ export function SiteHeader({ onPortalClick, isSignedIn }: SiteHeaderProps) {
     return () => window.removeEventListener('scroll', handleScroll)
   }, [])
 
+  // Scroll-spy: highlight the section currently in view
+  useEffect(() => {
+    const sections = NAV_LINKS
+      .map((l) => document.getElementById(l.href.slice(1)))
+      .filter((el): el is HTMLElement => el !== null)
+    if (sections.length === 0) return
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) setActiveId(`#${entry.target.id}`)
+        }
+      },
+      { rootMargin: '-35% 0px -60% 0px' }
+    )
+    sections.forEach((el) => observer.observe(el))
+    return () => observer.disconnect()
+  }, [])
+
   useEffect(() => {
     if (!open) return
-    document.body.style.overflow = 'hidden'
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setOpen(false)
     }
     window.addEventListener('keydown', onKey)
-    return () => {
-      document.body.style.overflow = ''
-      window.removeEventListener('keydown', onKey)
-    }
+    return () => window.removeEventListener('keydown', onKey)
   }, [open])
 
   return (
@@ -89,7 +104,7 @@ export function SiteHeader({ onPortalClick, isSignedIn }: SiteHeaderProps) {
       </header>
 
       {open && (
-        <div className="fixed inset-0 z-[65] bg-background animate-in fade-in duration-150">
+        <div className="fixed inset-0 z-[65] bg-background/85 backdrop-blur-xl animate-in fade-in duration-150 pointer-events-none">
           <div className="h-full max-w-6xl mx-auto px-4 sm:px-6 flex flex-col items-end pt-24 pb-8">
             <nav className="flex-1 w-full">
               <ul className="space-y-2 text-right">
@@ -97,8 +112,12 @@ export function SiteHeader({ onPortalClick, isSignedIn }: SiteHeaderProps) {
                   <li key={link.href}>
                     <Link
                       href={link.href}
-                      onClick={() => setOpen(false)}
-                      className="block py-2 text-3xl sm:text-4xl font-medium tracking-tight text-foreground transition-all duration-150 hover:text-foreground-secondary hover:-translate-x-1 active:scale-[0.99]"
+                      className={cn(
+                        'inline-block py-2 text-3xl sm:text-4xl font-medium tracking-tight transition-all duration-150 hover:-translate-x-1 active:scale-[0.99] pointer-events-auto',
+                        activeId === link.href
+                          ? 'text-foreground'
+                          : 'text-muted-foreground hover:text-foreground'
+                      )}
                     >
                       {link.label}
                     </Link>
@@ -109,7 +128,7 @@ export function SiteHeader({ onPortalClick, isSignedIn }: SiteHeaderProps) {
 
             <button
               onClick={() => { setOpen(false); onPortalClick() }}
-              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 py-3 px-6 bg-foreground text-background font-medium rounded-full hover:bg-foreground/85 active:scale-[0.98] transition-all duration-150"
+              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 py-3 px-6 bg-foreground text-background font-medium rounded-full hover:bg-foreground/85 active:scale-[0.98] transition-all duration-150 pointer-events-auto"
             >
               <span>{isSignedIn ? 'Dashboard' : 'Login'}</span>
               <ArrowUpRight className="h-4 w-4" />

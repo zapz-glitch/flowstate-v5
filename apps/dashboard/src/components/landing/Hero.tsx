@@ -8,7 +8,7 @@ const STATS = [
 
 export function Hero() {
   return (
-    <section className="relative pt-32 sm:pt-44 pb-16 sm:pb-24 bg-background border-b border-border">
+    <section className="relative pt-32 sm:pt-44 pb-16 sm:pb-24 bg-background border-b border-border snap-start">
       <div className="max-w-6xl mx-auto px-4 sm:px-6">
         <p className="mono-label mb-6 sm:mb-8">Flowstate | Private real estate investment</p>
 
@@ -40,7 +40,7 @@ export function Hero() {
           </a>
         </div>
 
-        <div className="mt-14 sm:mt-20 grid grid-cols-3 border border-border divide-x divide-border rounded-lg overflow-hidden">
+        <div className="mt-14 sm:mt-20 grid grid-cols-3 border border-border divide-x divide-border">
           {STATS.map((stat) => (
             <div key={stat.label} className="px-3 py-5 sm:px-6 sm:py-7 text-center sm:text-left">
               <p className="text-xl sm:text-3xl font-medium tracking-tight text-foreground">
