@@ -18,10 +18,12 @@ binding = "DB"
 database_name = "flowstate-api-db"
 database_id = "106d2645-8ec1-4ae9-8f72-7563ba8aa93f"
 migrations_dir = "migrations"
+remote = true
 
 [[kv_namespaces]]
 binding = "API_CACHE"
 id = "076d6c5a242c4b5d9765d04b8b8755b6"
+remote = true
 
 
 [[durable_objects.bindings]]
