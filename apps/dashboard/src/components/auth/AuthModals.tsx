@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { signIn } from '@/lib/auth-client'
+import { offlineClear } from '@/lib/offline-cache'
 import { LogoIcon } from '@/components/ui/Logo'
 import { Loader2 } from 'lucide-react'
 
@@ -78,7 +79,9 @@ function SignInModal({ isOpen, onClose }: SignInModalProps) {
         return
       }
 
-      // Success - redirect to dashboard
+      // Success — clear any cached data from a previous user's session,
+      // then redirect to the dashboard
+      void offlineClear()
       onClose()
       router.push('/dashboard/analyze')
       router.refresh()

@@ -5,6 +5,7 @@
  */
 
 import { getImpersonatedUserId } from '@/components/auth/ImpersonationProvider'
+import { offlineGet, offlineSet } from '@/lib/offline-cache'
 import type { AnalyzeData } from '@/app/(dashboard)/dashboard/analyze/actions'
 
 // API URL - inlined at build time via next.config.js
@@ -17,22 +18,37 @@ async function fetchApi<T>(path: string, options: RequestInit = {}): Promise<T> 
     ? { 'X-Impersonate-User-Id': impersonateId }
     : {}
 
-  const response = await fetch(`${API_URL}${path}`, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...impersonateHeaders,
-      ...options.headers,
-    },
-    credentials: 'include',
-  })
+  // GET responses are cached in IndexedDB and served as a fallback when the
+  // network is unreachable. Impersonated views never touch the cache.
+  const cacheable = (!options.method || options.method === 'GET') && !impersonateId
+
+  let response: Response
+  try {
+    response = await fetch(`${API_URL}${path}`, {
+      ...options,
+      headers: {
+        'Content-Type': 'application/json',
+        ...impersonateHeaders,
+        ...options.headers,
+      },
+      credentials: 'include',
+    })
+  } catch (err) {
+    if (cacheable) {
+      const cached = await offlineGet<T>(path)
+      if (cached !== null) return cached
+    }
+    throw err
+  }
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({ error: 'Unknown error' })) as { error?: string }
     throw new Error(errorData.error || `API error: ${response.status}`)
   }
 
-  return response.json()
+  const data = await response.json() as T
+  if (cacheable) void offlineSet(path, data)
+  return data
 }
 
 // ─── Address Typeahead ───────────────────────────────────────────────────────

@@ -111,11 +111,18 @@ export default function GlobeInner({ points }: GlobeInnerProps) {
 
         const el = document.createElement('div')
         el.className = 'atlas-popup'
-        el.innerHTML = `
-          <div style="font-weight:600;font-size:12px;margin-bottom:4px">${props.address}</div>
-          <div style="font-size:11px;color:#a1a1aa">ARV ${fmt(props.arv)} · MAO ${fmt(props.mao)}</div>
-          <div style="font-size:11px;color:#e4e4e7;margin-top:6px;text-decoration:underline">Open report →</div>
-        `
+        const title = document.createElement('div')
+        title.style.cssText = 'font-weight:600;font-size:12px;margin-bottom:4px'
+        title.textContent = props.address
+        const stats = document.createElement('div')
+        stats.style.cssText = 'font-size:11px;color:#a1a1aa'
+        stats.textContent = `ARV ${fmt(props.arv)} · MAO ${fmt(props.mao)}`
+        const link = document.createElement('div')
+        link.style.cssText = 'font-size:11px;color:#e4e4e7;margin-top:6px;text-decoration:underline'
+        link.textContent = 'Open report →'
+        el.appendChild(title)
+        el.appendChild(stats)
+        el.appendChild(link)
         el.addEventListener('click', () => {
           if (props.jobId) routerRef.current.push(`/dashboard/reports/${props.jobId}`)
         })

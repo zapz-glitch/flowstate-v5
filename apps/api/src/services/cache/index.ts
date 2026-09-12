@@ -21,16 +21,16 @@ export interface CacheService {
 
 // Default TTLs for different cache types (in seconds)
 export const CACHE_TTL = {
-  // Property data rarely changes - cache for 7 days
-  PROPERTY_DETAILS: 7 * 24 * 60 * 60,
-  // Comparables data can be cached for 24 hours
-  COMPARABLES: 24 * 60 * 60,
+  // Property data rarely changes - cache for 21 days
+  PROPERTY_DETAILS: 21 * 24 * 60 * 60,
+  // Comparables data - cache for 21 days
+  COMPARABLES: 21 * 24 * 60 * 60,
   // Flood zone data rarely changes - cache for 30 days
   FLOOD_ZONE: 30 * 24 * 60 * 60,
   // Permits data - cache for 7 days
   PERMITS: 7 * 24 * 60 * 60,
-  // Vision analysis results - cache for 30 days (photos don't change)
-  VISION_ANALYSIS: 30 * 24 * 60 * 60,
+  // Vision analysis results - cache for 21 days
+  VISION_ANALYSIS: 21 * 24 * 60 * 60,
   // Zillow data - cache for 24 hours (listings can change)
   ZILLOW_DATA: 24 * 60 * 60,
   // OAuth tokens - cache until expiry minus buffer
