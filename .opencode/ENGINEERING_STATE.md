@@ -141,11 +141,23 @@ access to the dashboard after auth.
   0 zillowstatic URLs; asset GET returns 200 image/webp 138KB real
   image. 15/15 api regression tests pass (report-assets + deployment
   config assertions updated for prod-enable + apex domain).
-- Known limitation: comps fetch Zillow ONLY (no redfin/realtor
-  fallback), 12s timeout, max 6 — properties without a live/recent
-  Zillow listing still get no photos (e.g. 1416 E Idlewild returned
-  none; Street View fills the card). Widening the comp fallback chain
-  = more Firecrawl spend — product call if needed.
+- COMP FALLBACK CHAIN (2026-09-12, deployed, run 34715664434 green):
+  comps now run zillow -> redfin -> realtor (was zillow-only). Per-attempt
+  15s cap, 40s per-comp chain budget, comps parallel. Listing URL
+  resolution reworked — Google site-search only ever got a consent wall;
+  now Firecrawl /v1/search primary -> DuckDuckGo HTML (uddg decode) ->
+  Google scrape. Resolved URLs validated against requested street number
+  (rejects wrong-house listings — realtor returned 5747 for a 5802 query
+  and was correctly rejected). safeAssetUrl widened to *.rdcpix.com so
+  realtor CDN photos persist to R2. Listing scrape cache 24h -> 30d.
+  VERIFIED LIVE: 5802 Misty Gln run -> "20 subject photos via redfin",
+  6 comps with photos, 28 objects in flowstate-report-assets, all report
+  photo URLs are /user/reports/.../assets/... — zero CDN URLs.
+- Known limitation: truly unlisted properties (no listing on zillow/
+  redfin/realtor) still get no photos (e.g. 1416 E Idlewild) — Street
+  View fills the card. Pre-existing saved_reports dedup bug noted:
+  multiple rows can exist for same user+address (upsert limit(1) picks
+  one arbitrarily) — worth fixing separately.
 - Local-dev quirk: worktree API (local code + remote D1/KV) hangs on
   outbound CoreLogic fetch inside the local DO — request logged, never
   returns; prod pipeline unaffected (same address errored cleanly in
