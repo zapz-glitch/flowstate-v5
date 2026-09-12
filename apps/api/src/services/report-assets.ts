@@ -20,7 +20,8 @@ export function safeAssetUrl(value: string): boolean {
   try {
     const url = new URL(value)
     if (url.protocol !== 'https:' || url.username || url.password || (url.port && url.port !== '443')) return false
-    return ['photos.zillowstatic.com', 'ssl.cdn-redfin.com', 'ap.rdcpix.com', 'ar.rdcpix.com'].includes(url.hostname) ||
+    return ['photos.zillowstatic.com', 'ssl.cdn-redfin.com'].includes(url.hostname) ||
+      url.hostname.endsWith('.rdcpix.com') ||
       (url.hostname === 'storage.googleapis.com' && url.pathname.startsWith('/firecrawl-scrape-media/'))
   } catch { return false }
 }

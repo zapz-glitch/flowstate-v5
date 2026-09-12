@@ -84,6 +84,18 @@ export type PhotoProviderType = 'zillow' | 'mls' | 'redfin' | 'realtor' | 'manua
 /** Subject-photo fallback order: Zillow → Redfin → Realtor.com → none */
 const SUBJECT_FALLBACK_ORDER: PhotoProviderType[] = ['redfin', 'zillow', 'realtor']
 
+/**
+ * Comp-photo fallback order: Zillow first (richest listing data), then
+ * Redfin and Realtor.com so comps without a Zillow listing still get
+ * real listing photos instead of Street View.
+ */
+const COMP_FALLBACK_ORDER: PhotoProviderType[] = ['zillow', 'redfin', 'realtor']
+
+/** Per-provider attempt cap for comp fetches */
+const COMP_ATTEMPT_TIMEOUT_MS = 15000
+/** Total budget for one comp across the whole fallback chain */
+const COMP_CHAIN_BUDGET_MS = 40000
+
 interface PhotoProviderConfig {
   /** Preferred provider (defaults to first available) */
   provider?: PhotoProviderType
@@ -276,28 +288,47 @@ class MultiPhotoService implements PhotoService {
     const maxComps = options?.maxComps ?? 5
     const compsToFetch = comps.slice(0, maxComps)
 
-    // All fetches in parallel — subject gets full extraction via the fallback
-    // chain, comps use the primary provider only (HTML-only, no fallback — the
-    // 3-provider chain per comp would multiply scraper calls for display data)
-    // Each fetch is timeout-bounded so one hung scrape can't gate the bundle.
+    // All fetches in parallel — subject and comps both run the provider
+    // fallback chain; comps stay HTML-only (skipJsonExtraction) to keep the
+    // per-attempt cost down. Each attempt is timeout-bounded and the whole
+    // chain per comp is capped so one hung scrape can't gate the bundle.
     const withTimeout = <T>(p: Promise<T>, ms: number, fallback: T): Promise<T> =>
       Promise.race([p, new Promise<T>((r) => setTimeout(() => r(fallback), ms))])
 
-    const compProvider = this.providers.get('zillow') ?? this.activeProvider
     const failed = (propertyId: string, error: string, code: 'NO_PROVIDER' | 'FETCH_FAILED') =>
       ({ success: false as const, propertyId, error, code })
 
+    const fetchCompWithFallback = async (comp: PropertyIdentifier): Promise<PhotoFetchResult> => {
+      const deadline = Date.now() + COMP_CHAIN_BUDGET_MS
+      const errors: string[] = []
+      for (const name of COMP_FALLBACK_ORDER) {
+        const provider = this.providers.get(name)
+        if (!provider?.isAvailable()) continue
+        const remaining = deadline - Date.now()
+        if (remaining <= 0) break
+        const result = await withTimeout(
+          provider.fetchPhotos(comp, { ...options, skipJsonExtraction: true }),
+          Math.min(COMP_ATTEMPT_TIMEOUT_MS, remaining),
+          failed(comp.propertyId, `${name} attempt timed out`, 'FETCH_FAILED')
+        )
+        if (result.success && result.data.photos.length > 0) {
+          if (errors.length > 0) {
+            console.log(`[PhotoService] comp ${comp.propertyId}: ${name} delivered after ${errors.join(' → ')}`)
+          }
+          return result
+        }
+        errors.push(`${name}: ${result.success ? 'no photos' : result.error}`)
+      }
+      return failed(
+        comp.propertyId,
+        errors.length > 0 ? `All comp providers failed — ${errors.join('; ')}` : 'No photo provider available',
+        errors.length > 0 ? 'FETCH_FAILED' : 'NO_PROVIDER'
+      )
+    }
+
     const [subjectResult, ...compResults] = await Promise.all([
       withTimeout(this.fetchPhotos(subject, options), 20000, failed(subject.propertyId, 'Subject photo fetch timed out', 'FETCH_FAILED')),
-      ...compsToFetch.map((comp) =>
-        compProvider
-          ? withTimeout(
-              compProvider.fetchPhotos(comp, { ...options, skipJsonExtraction: true }),
-              12000,
-              failed(comp.propertyId, 'Comp photo fetch timed out', 'FETCH_FAILED')
-            )
-          : Promise.resolve(failed(comp.propertyId, 'No photo provider available', 'NO_PROVIDER'))
-      ),
+      ...compsToFetch.map((comp) => fetchCompWithFallback(comp)),
     ])
 
     const compPhotos: Record<string, PropertyPhotos> = {}

@@ -19,8 +19,12 @@ import type { PropertyIdentifier } from '../types'
 export interface ListingSiteAdapter {
   /** Provider name ('redfin', 'realtor') */
   name: string
+  /** Search-engine query that surfaces the listing page for this property */
+  searchQuery(property: PropertyIdentifier): string
   /** Search/autocomplete endpoint URL that yields listing-page links */
   searchUrl(property: PropertyIdentifier): string
+  /** Regex matching a listing page URL inside search-result text */
+  listingUrlPattern: RegExp
   /** Extract the listing page URL from the search endpoint's response text */
   parseListingUrl(body: string, property: PropertyIdentifier): string | null
   /** CDN host/path patterns that carry real property photos */
@@ -53,13 +57,20 @@ function isPropertyPhoto(url: string, patterns: RegExp[]): boolean {
 export const redfinAdapter: ListingSiteAdapter = {
   name: 'redfin',
 
+  searchQuery(property) {
+    // site:redfin.com without the /home path — the full path restriction
+    // starves the search index; listingUrlPattern still enforces /home/<id>
+    return `"${property.address}" ${property.city} ${property.state} site:redfin.com`
+  },
+
   // The stingray autocomplete endpoint is CloudFront-blocked for datacenter
   // IPs. Resolve via a Google site-search rendered through Firecrawl instead —
   // listing links carry /home/<id> which parseListingUrl extracts.
   searchUrl(property) {
-    const query = `"${property.address}" ${property.city} ${property.state} site:redfin.com/home`
-    return `https://www.google.com/search?q=${encodeURIComponent(query)}`
+    return `https://www.google.com/search?q=${encodeURIComponent(this.searchQuery(property))}`
   },
+
+  listingUrlPattern: /https?:\/\/(?:www\.)?redfin\.com\/[^"'\s<&?]+\/home\/\d+/,
 
   // Response is JSON prefixed with "{}&&" (JSONP guard); address rows carry
   // relative listing URLs like /FL/Riverview/12600-...-33579/home/12345
@@ -98,11 +109,16 @@ export const redfinAdapter: ListingSiteAdapter = {
 export const realtorAdapter: ListingSiteAdapter = {
   name: 'realtor',
 
+  searchQuery(property) {
+    return `${property.address} ${property.city} ${property.state} ${property.zipCode} site:realtor.com/realestateandhomes-detail`
+  },
+
   // Google-indexed search — Firecrawl renders it; listing links carry the slug
   searchUrl(property) {
-    const query = `${property.address} ${property.city} ${property.state} ${property.zipCode} site:realtor.com/realestateandhomes-detail`
-    return `https://www.google.com/search?q=${encodeURIComponent(query)}`
+    return `https://www.google.com/search?q=${encodeURIComponent(this.searchQuery(property))}`
   },
+
+  listingUrlPattern: /https?:\/\/(?:www\.)?realtor\.com\/realestateandhomes-detail\/[A-Za-z0-9_-]+/,
 
   parseListingUrl(body) {
     const m = body.match(/https:\/\/www\.realtor\.com\/realestateandhomes-detail\/[A-Za-z0-9_-]+/)
@@ -258,26 +274,69 @@ export class ListingPhotoScraper {
   }
 
   /**
-   * Resolve a listing page URL: try the site's autocomplete/search endpoint
-   * directly, then scrape it through Firecrawl when bot-protection blocks us.
+   * Reject resolved listing URLs that point at a different property —
+   * search engines happily return the neighbor's listing ("5747 Misty Gln"
+   * for a "5802 Misty Gln" query), and wrong-house photos are worse than
+   * none. Requires the street number to appear in the URL when the address
+   * has one.
+   */
+  private listingUrlMatchesAddress(url: string, property: PropertyIdentifier): boolean {
+    const streetNumber = property.address.match(/\d+/)?.[0]
+    if (!streetNumber) return true
+    return new RegExp(`\\b${streetNumber}\\b`).test(url)
+  }
+
+  /**
+   * Resolve a listing page URL. Google site-search returns a bot/consent wall
+   * to datacenter scrapers, so the chain is: Firecrawl /v1/search (reliable)
+   * → DuckDuckGo HTML direct (free, rate-limited) → legacy Google scrape.
+   * Every result is validated against the requested street number.
    */
   private async resolveListingUrl(property: PropertyIdentifier, adapter: ListingSiteAdapter): Promise<string | null> {
-    const searchUrl = adapter.searchUrl(property)
+    const query = adapter.searchQuery(property)
+    const valid = (url: string | null | undefined) =>
+      url && this.listingUrlMatchesAddress(url, property) ? url : null
 
+    // 1. Firecrawl search API
     try {
-      const res = await fetch(searchUrl, {
-        headers: { 'User-Agent': UA, Accept: 'application/json,text/html' },
+      const res = await fetch('https://api.firecrawl.dev/v1/search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${this.apiKey}` },
+        body: JSON.stringify({ query, limit: 5 }),
+        signal: AbortSignal.timeout(30000),
+      })
+      if (res.ok) {
+        const data = (await res.json()) as { success?: boolean; data?: Array<{ url?: string }> }
+        for (const item of data.data ?? []) {
+          const m = item.url?.match(adapter.listingUrlPattern)
+          const url = valid(m?.[0])
+          if (url) return url
+        }
+      }
+    } catch { /* fall through */ }
+
+    // 2. DuckDuckGo HTML endpoint — outbound links are wrapped in uddg=
+    //    params, so decode those before scanning for the listing URL.
+    try {
+      const res = await fetch(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`, {
+        headers: { 'User-Agent': UA, Accept: 'text/html' },
         signal: AbortSignal.timeout(15000),
       })
       if (res.ok) {
-        const url = adapter.parseListingUrl(await res.text(), property)
+        const decoded = (await res.text()).replace(/uddg=([^&"']+)/g, (_m, v) => {
+          try { return decodeURIComponent(v) } catch { return v }
+        })
+        const url = valid(decoded.match(adapter.listingUrlPattern)?.[0])
+          ?? valid(adapter.parseListingUrl(decoded, property))
         if (url) return url
       }
-    } catch { /* direct fetch blocked — try Firecrawl */ }
+    } catch { /* fall through */ }
 
+    // 3. Legacy: scrape the adapter's search page (usually Google) — mostly
+    //    walled now, kept as a last resort.
     try {
-      const content = await this.scrape(searchUrl)
-      return adapter.parseListingUrl(content.html + '\n' + content.markdown, property)
+      const content = await this.scrape(adapter.searchUrl(property))
+      return valid(adapter.parseListingUrl(content.html + '\n' + content.markdown, property))
     } catch {
       return null
     }
