@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
-import { ArrowUpRight } from 'lucide-react'
 import { Logo } from '@/components/ui/Logo'
 import { cn } from '@/lib/utils'
 
@@ -88,10 +87,9 @@ export function SiteHeader({ onPortalClick, isSignedIn }: SiteHeaderProps) {
 
           <button
             onClick={onPortalClick}
-            className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground active:scale-[0.97] transition-all duration-150 whitespace-nowrap shrink-0"
+            className="text-sm text-muted-foreground hover:text-foreground active:scale-[0.97] transition-all duration-150 whitespace-nowrap shrink-0"
           >
             <span className="underline underline-offset-4">{isSignedIn ? 'Dashboard' : 'Login'}</span>
-            <ArrowUpRight className="h-3.5 w-3.5" />
           </button>
         </div>
 
