@@ -54,11 +54,20 @@ access to the dashboard after auth.
   (22 static pages, worker.js generated). Known pre-existing failure:
   headline-money.test.mjs can't resolve `@/` alias under node --test
   (unrelated to this work; predates merge).
-- Remaining before deploy: ONLY the trigger — `CLOUDFLARE_API_TOKEN`
-  secret (then re-run workflow) or local `npm run deploy` in
-  apps/api then apps/dashboard. Prod D1 already has all migrations
-  through 0025. Push to main triggered CI run 34674170553 which will
-  fail on the missing token (expected).
+- DEPLOYED TO PROD (2026-09-12): `CLOUDFLARE_API_TOKEN` repo secret
+  added by product engineer; CI deploy workflow run 34674609400
+  GREEN — first successful CI deploy on this repo. API deployed
+  (wrangler-action) + dashboard deployed (OpenNext). One fix needed:
+  workflow NODE_VERSION 20→22 (locked wrangler requires >=22) —
+  commit on main, pushed. Live verified: api.flowstate.homes/health
+  ok, app.flowstate.homes 200, flowstate.homes 200.
+- Deploy path going forward: push to main → GitHub Actions deploys
+  both apps automatically. Local `npm run deploy` remains break-glass
+  fallback.
+- Remaining: none blocking. Optional: delete merged branches
+  (fix/maplibre-xss, feat/hide-nav-items, fix/ci-node-22 are all in
+  main). Pre-existing test-infra gap: headline-money.test.mjs
+  `@/` alias fails under node --test.
 
 ## Completed (landing-v2)
 - Rewrote `/` (`src/app/page.tsx`) as a company credibility landing page:
