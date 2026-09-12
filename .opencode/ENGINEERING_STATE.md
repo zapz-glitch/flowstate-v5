@@ -33,11 +33,20 @@ access to the dashboard after auth.
   Origin: localhost:3000 returns INVALID_EMAIL_OR_PASSWORD (not
   INVALID_ORIGIN/SQLITE_AUTH) — CORS + better-auth 1.7.3 +
   `validateSchema:false` all working.
-- npm audit: 1 critical — maplibre-gl <=6.4.0 XSS (GHSA-jrc7-96c5-q579);
-  fix requires 6.9.0 (breaking). Not yet applied.
+- npm audit: maplibre-gl XSS (GHSA-jrc7-96c5-q579) resolved — upgraded
+  to 6.9.0 on `fix/maplibre-xss`; audit now 0 findings.
 - Dev servers running: dashboard localhost:3000, API localhost:8787.
+- Product engineer chose: hold deploy, upgrade maplibre-gl → done on
+  `fix/maplibre-xss` (maplibre-gl 6.9.0, namespace import fix,
+  audit 0 findings, typecheck clean, /dashboard/atlas compiles 200).
+- NEW FEATURE `feat/hide-nav-items` @ 8abbabf (branched off
+  fix/maplibre-xss): per-user hidden sidebar items via
+  `ui_prefs.nav_hidden_json` (migration 0025, applied local + remote).
+  Settings → Menu Bar eye-toggle; Sidebar filters hidden hrefs.
+  Verified: /ui-prefs PUT→GET round trip persists navHidden;
+  typecheck clean both apps.
 - Remaining before deploy: prod deploy trigger (secrets or local),
-  decide on maplibre-gl upgrade.
+  merge fix/maplibre-xss + feat/hide-nav-items to main.
 
 ## Completed (landing-v2)
 - Rewrote `/` (`src/app/page.tsx`) as a company credibility landing page:
