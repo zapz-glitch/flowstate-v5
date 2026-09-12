@@ -26,15 +26,15 @@ export function Hero() {
 
         <div className="mt-8 sm:mt-10 flex flex-col sm:flex-row gap-3 sm:items-center">
           <a
-            href="mailto:hello@flowstate.homes?subject=Deal%20submission"
-            className="inline-flex items-center justify-center gap-2 py-3 px-6 bg-foreground text-background font-medium rounded-full hover:bg-foreground/85 transition-colors"
+            href="#contact"
+            className="inline-flex items-center justify-center gap-2 py-3 px-6 bg-foreground text-background font-medium rounded-full hover:bg-foreground/85 active:scale-[0.98] transition-all duration-150"
           >
             <span>Submit a deal</span>
             <ArrowRight className="h-4 w-4" />
           </a>
           <a
             href="#process"
-            className="inline-flex items-center justify-center gap-2 py-3 px-6 border border-border text-foreground font-medium rounded-full hover:bg-secondary/60 transition-colors"
+            className="inline-flex items-center justify-center gap-2 py-3 px-6 border border-border text-foreground font-medium rounded-full hover:bg-secondary/60 active:scale-[0.98] transition-all duration-150"
           >
             <span>How we work</span>
           </a>

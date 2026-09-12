@@ -3,6 +3,7 @@
 import { Suspense, useState, useEffect, useCallback } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useSession } from '@/lib/auth-client'
+import { useTheme } from '@/components/theme-provider'
 import { AuthModals } from '@/components/auth/AuthModals'
 import { SiteHeader } from '@/components/landing/SiteHeader'
 import { Hero } from '@/components/landing/Hero'
@@ -24,10 +25,19 @@ function HomePageContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const session = useSession()
+  const { theme, setTheme } = useTheme()
   const [isSignInOpen, setIsSignInOpen] = useState(false)
   const [isSignUpOpen, setIsSignUpOpen] = useState(false)
 
   const isSignedIn = !session.isPending && !!session.data?.user
+
+  // Public site is night-only; presets remain available inside the dashboard
+  useEffect(() => {
+    if (theme !== 'night') setTheme('night')
+    document.documentElement.classList.add('scroll-smooth')
+    return () => document.documentElement.classList.remove('scroll-smooth')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // Auto-open sign-in modal when redirected with ?signin=true
   useEffect(() => {

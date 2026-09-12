@@ -26,9 +26,23 @@ access to the dashboard after auth.
 ## Verification (landing-v2)
 - `npx tsc --noEmit` in apps/dashboard: clean.
 - localhost:3100 `/` → 200 with new hero/sections/contact markup; new title.
+- `POST /api/deal`: 400 on missing fields; 501 `not_configured` without
+  CONTACT_WEBHOOK_URL (client shows direct-email fallback). Needs
+  CONTACT_WEBHOOK_URL (GHL/Zapier/etc.) set in the worker env to activate.
 - eslint unavailable on this branch (root config needs typescript-eslint,
   not in node_modules) — typecheck used as gate per CLAUDE.md.
 - Not deployed (deploy only on explicit instruction).
+
+## Polish pass 1 (product engineer feedback, 2026-09-11)
+- Speed feel: `active:scale-[0.98]` press feedback + duration-150 on all
+  CTAs/menu items; smooth scroll during landing visit only.
+- Submit a deal is now a real form: `DealForm` (name/email/address/notes +
+  honeypot) → `POST /api/deal` route handler → CONTACT_WEBHOOK_URL forward
+  (5s timeout). Inline spinner/success states, no page nav, no mailto.
+- Burger menu simplified: Navigate label removed, links in Source Serif 4
+  italic, Environment picker removed from public site (presets stay in the
+  dashboard), "Investor portal" renamed to Login ("Dashboard" when signed
+  in). Public site forces night theme on mount.
 
 ## Branch / Baseline (updated 2026-09-11)
 - `landing-page-v2` — reset to `origin/feat/devin-theme` HEAD (7afe144).
