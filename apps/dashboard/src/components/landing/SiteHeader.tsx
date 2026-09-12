@@ -83,7 +83,7 @@ export function SiteHeader({ onPortalClick, isSignedIn }: SiteHeaderProps) {
               <Link
                 key={link.href}
                 href={link.href}
-                className={linkClass(link.href, 'text-[15px]')}
+                className={linkClass(link.href, 'text-sm')}
               >
                 {link.label}
               </Link>
