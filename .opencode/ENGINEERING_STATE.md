@@ -94,6 +94,9 @@ access to the dashboard after auth.
   to default memory limiting. ipAddressHeaders kept in advanced.
 - Local test account: isaiah@flowstate.homes password reset to
   `testpass123` (local D1 only) for lockout verification.
+- Post-login route (deployed): sign-in success + signed-in portal
+  button route to /dashboard/analyze (property search), not the
+  overview page.
 - Remaining: none blocking. Optional: delete merged branches
   (fix/maplibre-xss, feat/hide-nav-items, fix/ci-node-22 are all in
   main). Pre-existing test-infra gap: headline-money.test.mjs
