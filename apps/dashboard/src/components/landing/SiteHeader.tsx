@@ -2,9 +2,8 @@
 
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
-import { Sun, Moon, ArrowUpRight } from 'lucide-react'
+import { ArrowUpRight } from 'lucide-react'
 import { Logo } from '@/components/ui/Logo'
-import { useTheme } from '@/components/theme-provider'
 import { cn } from '@/lib/utils'
 
 const NAV_LINKS = [
@@ -22,9 +21,6 @@ interface SiteHeaderProps {
 export function SiteHeader({ onPortalClick, isSignedIn }: SiteHeaderProps) {
   const [isScrolled, setIsScrolled] = useState(false)
   const [activeId, setActiveId] = useState<string | null>(null)
-  const { theme, toggleTheme } = useTheme()
-
-  const isDark = theme === 'night' || theme === 'dawn'
 
   useEffect(() => {
     const handleScroll = () => setIsScrolled(window.scrollY > 20)
@@ -90,22 +86,13 @@ export function SiteHeader({ onPortalClick, isSignedIn }: SiteHeaderProps) {
             ))}
           </nav>
 
-          <div className="flex items-center gap-2 shrink-0">
-            <button
-              onClick={toggleTheme}
-              aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
-              className="p-2 text-muted-foreground hover:text-foreground active:scale-90 transition-all duration-150"
-            >
-              {isDark ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
-            </button>
-            <button
-              onClick={onPortalClick}
-              className="inline-flex items-center gap-1.5 py-2 px-4 bg-foreground text-background text-sm font-medium rounded-full hover:bg-foreground/85 active:scale-[0.98] transition-all duration-150"
-            >
-              <span>{isSignedIn ? 'Dashboard' : 'Login'}</span>
-              <ArrowUpRight className="h-4 w-4" />
-            </button>
-          </div>
+          <button
+            onClick={onPortalClick}
+            className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground active:scale-[0.97] transition-all duration-150 whitespace-nowrap shrink-0"
+          >
+            <span>{isSignedIn ? 'Dashboard' : 'Login'}</span>
+            <ArrowUpRight className="h-3.5 w-3.5" />
+          </button>
         </div>
 
         {/* Mobile nav row */}

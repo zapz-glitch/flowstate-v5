@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useSession } from '@/lib/auth-client'
 import { useTheme } from '@/components/theme-provider'
+import { Sun, Moon } from 'lucide-react'
 import { AuthModals } from '@/components/auth/AuthModals'
 import { SiteHeader } from '@/components/landing/SiteHeader'
 import { SiteFooter } from '@/components/landing/SiteFooter'
@@ -12,7 +13,8 @@ export function SiteShell({ children }: { children: React.ReactNode }) {
   const router = useRouter()
   const searchParams = useSearchParams()
   const session = useSession()
-  const { theme, setTheme } = useTheme()
+  const { theme, setTheme, toggleTheme } = useTheme()
+  const isDark = theme === 'night' || theme === 'dawn'
   const [isSignInOpen, setIsSignInOpen] = useState(false)
   const [isSignUpOpen, setIsSignUpOpen] = useState(false)
 
@@ -48,6 +50,13 @@ export function SiteShell({ children }: { children: React.ReactNode }) {
       <SiteHeader onPortalClick={openPortal} isSignedIn={isSignedIn} />
       {children}
       <SiteFooter />
+      <button
+        onClick={toggleTheme}
+        aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+        className="fixed bottom-5 right-5 z-[80] p-3 rounded-full border border-border bg-background/80 backdrop-blur-xl text-muted-foreground hover:text-foreground hover:border-foreground/30 active:scale-90 transition-all duration-150"
+      >
+        {isDark ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
+      </button>
       <AuthModals
         isSignInOpen={isSignInOpen}
         isSignUpOpen={isSignUpOpen}
