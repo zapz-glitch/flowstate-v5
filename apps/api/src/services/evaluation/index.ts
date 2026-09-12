@@ -34,7 +34,8 @@ import {
   type ApiCallStats,
   type ResponseContext,
 } from '../analysis'
-import { createPhotoService, type PhotoBundle, type PropertyIdentifier } from '../photo-provider'
+import { createPhotoService, type PhotoBundle, type PropertyIdentifier, type PropertyPhotos } from '../photo-provider'
+import { persistReportAssets } from '../report-assets'
 import { assessRenovationFromPhotos, assessCompCurbAppeal, type RenovationAssessment, type CurbAppealCheck } from '../vision/renovation'
 import { PROXIMITY_DEFAULTS } from '../../routes/proximity-config'
 import { deriveBuybox } from './derivation'
@@ -464,6 +465,37 @@ export async function performAnalysis(
       })
     ),
   ])
+
+  // ── Persist listing photos into private report storage ────────────────────
+  // Copy image bytes to R2 and rewrite CDN URLs to /user/reports/{jobId}/
+  // assets/{id} so saved reports keep working photos indefinitely — listing
+  // CDN links rot or get hotlink-blocked. Runs after vision, which needs the
+  // live CDN URLs. Non-fatal: failures keep the original URLs.
+  if (photoBundle && env.REPORT_ASSETS) {
+    const persistPhotos = async (propertyId: string, entry: PropertyPhotos | null) => {
+      if (!entry || entry.photos.length === 0) return
+      try {
+        const src = entry.source
+        const { assets } = await persistReportAssets(env, jobId, propertyId,
+          entry.photos.map((url) => ({
+            url,
+            kind: 'photo' as const,
+            sourcePageUrl: entry.sourceUrl,
+            source: src === 'zillow' || src === 'redfin' || src === 'realtor' ? src : undefined,
+          })))
+        if (assets.length === 0) return
+        const persisted = new Set(assets.map((a) => a.sourceUrl))
+        entry.photos = [...assets.map((a) => a.url), ...entry.photos.filter((u) => !persisted.has(u))]
+      } catch { /* non-fatal — keep CDN URLs */ }
+    }
+    await Promise.race([
+      Promise.all([
+        persistPhotos(bundle.property.id, photoBundle.subject),
+        ...Object.entries(photoBundle.comps).map(([id, entry]) => persistPhotos(id, entry)),
+      ]),
+      new Promise<void>((resolve) => setTimeout(resolve, 15_000)),
+    ])
+  }
 
   const renovation: RenovationAssessment | null = renovationResult
   if (renovation) {

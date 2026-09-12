@@ -21,7 +21,7 @@ for (const response of [
   () => new Response(new Uint8Array(5 * 1024 * 1024 + 1), { headers: { 'Content-Type': 'image/jpeg' } }),
 ]) { const result = await capture(response); assert.equal(result.assets.length, 0); assert.equal(result.errors.length, 1) }
 assert.equal(stored.size, 0)
-for (const [environment, enabled, expected] of [['staging', 'true', 1], ['staging', 'false', 0], ['production', 'true', 0]] as const) {
+for (const [environment, enabled, expected] of [['staging', 'true', 1], ['staging', 'false', 0], ['production', 'true', 1]] as const) {
   const result = await persistReportAssets({ ...env, ENVIRONMENT: environment, V4_STAGING_ASSETS_ENABLED: enabled }, 'job_stage', 'property', [source], { fetcher: async () => new Response(jpeg, { headers: { 'Content-Type': 'image/jpeg' } }) })
   assert.equal(result.assets.length, expected)
 }
@@ -31,7 +31,7 @@ assert.equal(result.assets.length, 1)
 assert.equal(result.assets[0].capturedAt, source.capturedAt)
 assert.equal(result.assets[0].sourceUrl, source.url)
 assert.equal(stored.size, 1)
-const blocked = await persistReportAssets({ ...env, ENVIRONMENT: 'production' }, 'job_test', 'property', [source], { fetcher: async () => { throw new Error('Must not fetch in production') } })
+const blocked = await persistReportAssets({ ENVIRONMENT: 'production' } as any, 'job_test', 'property', [source], { fetcher: async () => { throw new Error('Must not fetch without binding') } })
 assert.equal(blocked.assets.length, 0)
 assert.equal(stored.size, 1)
 assert.equal([...stored.values()][0].customMetadata.propertyId, 'property')
