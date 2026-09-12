@@ -118,8 +118,8 @@ access to the dashboard after auth.
   property/comps/vision → 21 days; landing wheel-hijack scroll
   removed. Bundle audit: heavy deps already code-split (maplibre
   274KB gz → /atlas only; react-pdf 512KB gz → report downloads).
-  NOT yet: merge to main / prod deploy — pending product engineer
-  testing on :3001. CSP is prod-gated and untested live.
+  MERGED to main + deployed (run 34710697761 green). CSP verified
+  live on flowstate.homes.
 - Remaining: none blocking. Optional: delete merged branches
   (fix/maplibre-xss, feat/hide-nav-items, fix/ci-node-22 are all in
   main). Pre-existing test-infra gap: headline-money.test.mjs
