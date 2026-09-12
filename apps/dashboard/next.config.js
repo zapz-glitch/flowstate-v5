@@ -16,6 +16,39 @@ const nextConfig = {
   env: {
     NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL,
   },
+  async headers() {
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'https://api.flowstate.homes'
+    const securityHeaders = [
+      { key: 'X-Content-Type-Options', value: 'nosniff' },
+      { key: 'X-Frame-Options', value: 'DENY' },
+      { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+      { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=(self)' },
+    ]
+    // CSP is production-only: dev tooling (turbopack/react-refresh) needs
+    // unsafe-eval, and CSP breakage in dev costs more than it protects.
+    if (process.env.NODE_ENV === 'production') {
+      securityHeaders.push({
+        key: 'Content-Security-Policy',
+        value: [
+          "default-src 'self'",
+          // Next.js hydrates via inline scripts; Google Maps JS API loads from googleapis
+          `script-src 'self' 'unsafe-inline' https://maps.googleapis.com`,
+          // MapLibre and component libs inject inline styles
+          "style-src 'self' 'unsafe-inline'",
+          // Property photos, map tiles, streetview, data/blob images
+          "img-src 'self' data: blob: https:",
+          "font-src 'self' data:",
+          `connect-src 'self' ${apiUrl} https://maps.googleapis.com https://server.arcgisonline.com https://*.arcgisonline.com data: blob:`,
+          // MapLibre renders in workers from blob: URLs
+          "worker-src 'self' blob:",
+          "frame-ancestors 'none'",
+          "base-uri 'self'",
+          "form-action 'self'",
+        ].join('; '),
+      })
+    }
+    return [{ source: '/:path*', headers: securityHeaders }]
+  },
 }
 
 export default nextConfig
