@@ -16,7 +16,6 @@ export function SiteShell({ children }: { children: React.ReactNode }) {
   const { theme, setTheme, toggleTheme } = useTheme()
   const isDark = theme === 'night' || theme === 'dawn'
   const [isSignInOpen, setIsSignInOpen] = useState(false)
-  const [isSignUpOpen, setIsSignUpOpen] = useState(false)
 
   const isSignedIn = !session.isPending && !!session.data?.user
 
@@ -59,9 +58,7 @@ export function SiteShell({ children }: { children: React.ReactNode }) {
       </button>
       <AuthModals
         isSignInOpen={isSignInOpen}
-        isSignUpOpen={isSignUpOpen}
         onSignInOpenChange={setIsSignInOpen}
-        onSignUpOpenChange={setIsSignUpOpen}
       />
     </div>
   )

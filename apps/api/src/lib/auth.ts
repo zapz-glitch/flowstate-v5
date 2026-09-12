@@ -114,6 +114,7 @@ export function createAuth(
     },
     emailAndPassword: {
       enabled: true,
+      disableSignUp: true,
       requireEmailVerification: false,
       sendResetPassword: async ({ user, url, token }) => {
         // Build reset URL pointing to dashboard
@@ -182,7 +183,20 @@ export function createAuth(
     trustedOrigins: envDashboardUrl
       ? [envDashboardUrl]
       : [dashboardUrl],
+    // IP-keyed sign-in lockout: 3 attempts per 15 minutes per IP.
+    // Stored in D1 (`rateLimit` table) so it is enforced across Workers
+    // isolates; memory storage would reset on every cold start.
+    rateLimit: {
+      enabled: true,
+      storage: 'database',
+      customRules: {
+        '/sign-in/email': { window: 900, max: 3 },
+      },
+    },
     advanced: {
+      ipAddress: {
+        ipAddressHeaders: ['cf-connecting-ip', 'x-forwarded-for'],
+      },
       // D1 rejects the Kysely pragma-table join used by runtime introspection.
       // Schema compatibility is checked by migrations and local auth probes.
       database: { validateSchema: false },

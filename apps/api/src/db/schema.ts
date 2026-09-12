@@ -18,6 +18,14 @@ export const user = sqliteTable('user', {
   role: text('role').notNull().default('user'), // 'user' | 'admin'
 })
 
+// Rate limit table (Better Auth — storage: 'database')
+export const rateLimit = sqliteTable('rateLimit', {
+  id: text('id').primaryKey(),
+  key: text('key').notNull().unique(),
+  count: integer('count').notNull(),
+  lastRequest: integer('lastRequest').notNull(),
+})
+
 // Alias for backwards compatibility
 export const users = user
 
