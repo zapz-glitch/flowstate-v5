@@ -209,18 +209,12 @@ body {
   background-clip: text;
 }
 
-/* USA flag stripes — hard Old Glory red/white/blue bands clipped to text;
-   hairline stroke keeps the white band legible on the light theme */
+/* USA flag — full flag (50-star canton + 13 stripes) clipped to the
+   glyphs; hairline stroke keeps the white stripes legible on light bg */
 .text-flag-usa {
-  background-image: linear-gradient(
-    90deg,
-    #b22234 0%,
-    #b22234 33.4%,
-    #ffffff 33.4%,
-    #ffffff 66.6%,
-    #3c3b6e 66.6%,
-    #3c3b6e 100%
-  );
+  background-image: url('/us-flag.svg');
+  background-size: 100% 100%;
+  background-position: left center;
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
