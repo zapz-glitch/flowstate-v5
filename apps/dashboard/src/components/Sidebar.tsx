@@ -116,9 +116,10 @@ export default function Sidebar() {
     .map((item) => ({ ...item, name: prefs?.navLabels?.[item.href] || item.name }))
 
   // Apply saved nav ordering — ordered hrefs first (in saved order), then any
-  // unlisted items keep their default order at the end.
+  // unlisted items keep their default order at the end. Hidden items are dropped.
   const order = prefs?.navOrder ?? []
-  const orderedBuiltins = order.length
+  const hidden = new Set(prefs?.navHidden ?? [])
+  const orderedBuiltins = (order.length
     ? [
         ...order
           .map((href) => builtins.find((i) => i.href === href))
@@ -126,6 +127,7 @@ export default function Sidebar() {
         ...builtins.filter((i) => !order.includes(i.href)),
       ]
     : builtins
+  ).filter((i) => !hidden.has(i.href))
 
   const navigation = [
     ...orderedBuiltins,

@@ -464,6 +464,7 @@ export async function resetDealParams(): Promise<DealParamsResponse> {
 export interface UiPrefs {
   navLabels: Record<string, string>
   navOrder: string[]
+  navHidden: string[]
   customLinks: Array<{ label: string; url: string }>
   faviconUrl: string | null
 }

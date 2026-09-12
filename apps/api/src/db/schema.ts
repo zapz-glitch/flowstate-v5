@@ -412,6 +412,8 @@ export const uiPrefs = sqliteTable(
     navLabelsJson: text('nav_labels_json'),
     // Custom ordering of built-in nav items: ["/dashboard", "/dashboard/tasks", ...]
     navOrderJson: text('nav_order_json'),
+    // Built-in nav items hidden from the sidebar: ["/dashboard/batch", ...]
+    navHiddenJson: text('nav_hidden_json'),
     // Extra links appended to the nav: [{ label, url }]
     customLinksJson: text('custom_links_json'),
     // Custom favicon URL (https or absolute path)

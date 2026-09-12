@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { signOut } from '@/lib/auth-client'
-import { AlertTriangle, Plus, X, Download, ArrowUp, ArrowDown } from 'lucide-react'
+import { AlertTriangle, Plus, X, Download, ArrowUp, ArrowDown, Eye, EyeOff } from 'lucide-react'
 import { getUiPrefs, saveUiPrefs, type UiPrefs } from '@/lib/client-api'
 
 const NAV_ITEMS = [
@@ -25,6 +25,7 @@ export default function SettingsPage() {
 
   const [navLabels, setNavLabels] = useState<Record<string, string>>({})
   const [navOrder, setNavOrder] = useState<string[]>(NAV_ITEMS.map((i) => i.href))
+  const [navHidden, setNavHidden] = useState<string[]>([])
   const [customLinks, setCustomLinks] = useState<Array<{ label: string; url: string }>>([])
   const [faviconUrl, setFaviconUrl] = useState('')
   const [prefsLoaded, setPrefsLoaded] = useState(false)
@@ -37,6 +38,7 @@ export default function SettingsPage() {
       // Saved order first, then any new items appended in default order
       const saved = p.navOrder ?? []
       setNavOrder([...saved.filter((h) => NAV_ITEMS.some((i) => i.href === h)), ...NAV_ITEMS.map((i) => i.href).filter((h) => !saved.includes(h))])
+      setNavHidden(p.navHidden ?? [])
       setCustomLinks(p.customLinks ?? [])
       setFaviconUrl(p.faviconUrl ?? '')
       setPrefsLoaded(true)
@@ -49,6 +51,7 @@ export default function SettingsPage() {
       const prefs: UiPrefs = {
         navLabels,
         navOrder,
+        navHidden,
         customLinks: customLinks.filter((l) => l.label.trim() && l.url.trim()),
         faviconUrl: faviconUrl.trim() || null,
       }
@@ -150,14 +153,15 @@ export default function SettingsPage() {
             Menu Bar
           </h2>
           <p className="text-sm text-neutral-500 dark:text-neutral-400 mb-4">
-            Rename sidebar items, add your own links, or set a custom favicon.
+            Rename, reorder, or hide sidebar items, add your own links, or set a custom favicon.
           </p>
 
           <div className="space-y-2 mb-5">
-            <p className="text-xs font-medium text-neutral-500 dark:text-neutral-400 uppercase tracking-wide">Item names & order</p>
+            <p className="text-xs font-medium text-neutral-500 dark:text-neutral-400 uppercase tracking-wide">Item names, order & visibility</p>
             {navOrder.map((href, idx) => {
               const item = NAV_ITEMS.find((i) => i.href === href)
               if (!item) return null
+              const isHidden = navHidden.includes(item.href)
               const move = (dir: -1 | 1) => {
                 const j = idx + dir
                 if (j < 0 || j >= navOrder.length) return
@@ -168,7 +172,7 @@ export default function SettingsPage() {
                 })
               }
               return (
-                <div key={item.href} className="flex items-center gap-2">
+                <div key={item.href} className={`flex items-center gap-2 ${isHidden ? 'opacity-50' : ''}`}>
                   <div className="flex flex-col">
                     <button onClick={() => move(-1)} disabled={idx === 0} className="text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 disabled:opacity-30" aria-label="Move up">
                       <ArrowUp className="w-3.5 h-3.5" />
@@ -193,6 +197,18 @@ export default function SettingsPage() {
                     }}
                     className="flex-1 px-3 py-1.5 text-sm rounded-md border border-neutral-200 dark:border-neutral-700 bg-transparent text-neutral-900 dark:text-white"
                   />
+                  <button
+                    onClick={() =>
+                      setNavHidden((prev) =>
+                        isHidden ? prev.filter((h) => h !== item.href) : [...prev, item.href]
+                      )
+                    }
+                    className="p-1.5 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200"
+                    aria-label={isHidden ? `Show ${item.defaultName}` : `Hide ${item.defaultName}`}
+                    title={isHidden ? 'Show in sidebar' : 'Hide from sidebar'}
+                  >
+                    {isHidden ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
                 </div>
               )
             })}
