@@ -90,15 +90,15 @@ export function SiteHeader({ onPortalClick, isSignedIn }: SiteHeaderProps) {
 
       {open && (
         <div className="fixed inset-0 z-[65] bg-background animate-in fade-in duration-150">
-          <div className="h-full max-w-6xl mx-auto px-4 sm:px-6 flex flex-col pt-24 pb-8">
-            <nav className="flex-1">
-              <ul className="space-y-2">
+          <div className="h-full max-w-6xl mx-auto px-4 sm:px-6 flex flex-col items-end pt-24 pb-8">
+            <nav className="flex-1 w-full">
+              <ul className="space-y-2 text-right">
                 {NAV_LINKS.map((link) => (
                   <li key={link.href}>
                     <Link
                       href={link.href}
                       onClick={() => setOpen(false)}
-                      className="block py-2 text-3xl sm:text-4xl font-medium tracking-tight text-foreground transition-all duration-150 hover:text-foreground-secondary hover:translate-x-1 active:scale-[0.99]"
+                      className="block py-2 text-3xl sm:text-4xl font-medium tracking-tight text-foreground transition-all duration-150 hover:text-foreground-secondary hover:-translate-x-1 active:scale-[0.99]"
                     >
                       {link.label}
                     </Link>
@@ -109,7 +109,7 @@ export function SiteHeader({ onPortalClick, isSignedIn }: SiteHeaderProps) {
 
             <button
               onClick={() => { setOpen(false); onPortalClick() }}
-              className="w-full sm:w-auto sm:self-start inline-flex items-center justify-center gap-2 py-3 px-6 bg-foreground text-background font-medium rounded-full hover:bg-foreground/85 active:scale-[0.98] transition-all duration-150"
+              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 py-3 px-6 bg-foreground text-background font-medium rounded-full hover:bg-foreground/85 active:scale-[0.98] transition-all duration-150"
             >
               <span>{isSignedIn ? 'Dashboard' : 'Login'}</span>
               <ArrowUpRight className="h-4 w-4" />
