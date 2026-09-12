@@ -23,7 +23,7 @@ const STEPS: Step[] = [
 ]
 
 const inputClass =
-  'w-full px-4 py-3.5 bg-[hsl(var(--input-fill))] border border-border rounded-md text-lg sm:text-xl text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-ring focus:border-ring transition-colors'
+  'w-full bg-transparent border-0 border-b border-border rounded-none px-0 py-3 text-xl sm:text-2xl text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:border-foreground transition-colors duration-200'
 
 export function DealForm() {
   const [stepIndex, setStepIndex] = useState(0)

@@ -664,7 +664,7 @@ input:-webkit-autofill:hover,
 input:-webkit-autofill:focus,
 textarea:-webkit-autofill {
   -webkit-text-fill-color: hsl(var(--foreground));
-  -webkit-box-shadow: 0 0 0 1000px hsl(var(--input-fill)) inset;
+  -webkit-box-shadow: 0 0 0 1000px hsl(var(--background)) inset;
   caret-color: hsl(var(--foreground));
   transition: background-color 9999s ease-out;
 }
