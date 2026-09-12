@@ -6,6 +6,27 @@ Direction from product engineer (2026-09-11): credibility landing page for
 realtors, wholesalers, and investors. Burger menu top-right with portal
 access to the dashboard after auth.
 
+## Merge & Deploy Status (2026-09-12)
+- `landing-page-v2` pushed to origin; fast-forward merged into `main`
+  (`16f879a..d7af415`). main now = devin-theme + landing page + Tasks.
+- AUTO-DEPLOY ON MAIN PUSH FAILED (run 34671954629): repo has NO GitHub
+  secrets — `CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ACCOUNT_ID` unset.
+  Typecheck passed; `wrangler deploy` exited on missing token.
+  Prod UNCHANGED — still the 2026-09-11 16:56 UTC devin-theme build.
+  Prior main deploy (Sep 8) failed the same way — CI has never deployed.
+- Local wrangler OAuth works (weareflowstate1@gmail.com, account
+  52e4db30…); that's how the 16:56 deploy went out. To deploy: fix repo
+  secrets OR `npm run deploy` in apps/api then apps/dashboard locally.
+- PROD D1 DRIFT: `d1_migrations` shows applied only through 0018.
+  0019–0024 pending. `batch_jobs` exists out-of-band (created manually),
+  so `db:migrate:remote` will ABORT on 0019's CREATE TABLE. Missing
+  tables: `major_item_setting` (0020), `analysis_runs` (0021),
+  `ui_prefs` (0022), `tasks` (0023) — live code already queries these;
+  those prod features are presumably erroring. Fix path: insert 0019
+  into d1_migrations manually (table exists), then apply 0020–0024.
+- Product engineer chose: skip deploy, leave migrations (2026-09-12).
+- Dev server running: apps/dashboard on localhost:3100 (shell 7886c4).
+
 ## Completed (landing-v2)
 - Rewrote `/` (`src/app/page.tsx`) as a company credibility landing page:
   Hero ("We buy houses as-is. Cash. Closed in 21 days." + stats strip),
