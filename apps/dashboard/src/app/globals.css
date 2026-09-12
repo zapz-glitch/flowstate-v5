@@ -652,3 +652,14 @@ body {
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 }
+
+/* Keep browser autofill inside the site palette (no default yellow/blue wash) */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+textarea:-webkit-autofill {
+  -webkit-text-fill-color: hsl(var(--foreground));
+  -webkit-box-shadow: 0 0 0 1000px hsl(var(--secondary) / 0.5) inset;
+  caret-color: hsl(var(--foreground));
+  transition: background-color 9999s ease-out;
+}

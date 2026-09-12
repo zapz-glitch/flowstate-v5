@@ -23,7 +23,7 @@ const STEPS: Step[] = [
 ]
 
 const inputClass =
-  'w-full bg-transparent border-0 border-b border-border py-3 text-xl sm:text-2xl text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:border-foreground transition-colors rounded-none'
+  'w-full px-4 py-3.5 bg-secondary/50 border border-border rounded-md text-lg sm:text-xl text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-ring focus:border-ring transition-colors autofill:bg-secondary/50'
 
 export function DealForm() {
   const [stepIndex, setStepIndex] = useState(0)
@@ -119,7 +119,7 @@ export function DealForm() {
           <p className="text-lg text-foreground font-medium">Received, {values.name.split(' ')[0]}.</p>
         </div>
         <p className="text-sm text-muted-foreground leading-relaxed">
-          We will review the property and respond within 48 hours.
+          We will review the property and respond within 24 hours.
         </p>
       </div>
     )
@@ -242,8 +242,13 @@ export function DealForm() {
         </button>
       </div>
 
-      <p className="mt-6 text-xs text-muted-foreground/60">
-        Press Enter to continue. No obligation; we respond within 48 hours.
+      <p className="mt-6 text-xs text-muted-foreground/60 leading-relaxed">
+        Press Enter to continue. No obligation; we respond within 24 hours.
+        By submitting you agree to our{' '}
+        <a href="/terms" className="underline underline-offset-2 hover:text-muted-foreground">Terms of Service</a>
+        {' '}and{' '}
+        <a href="/privacy" className="underline underline-offset-2 hover:text-muted-foreground">Privacy Policy</a>
+        {' '}and consent to email follow-up about your submission.
       </p>
     </form>
   )

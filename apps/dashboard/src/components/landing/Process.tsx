@@ -7,7 +7,7 @@ const STEPS = [
   {
     index: '02',
     title: 'Evaluate',
-    body: 'We pull comps and run our own underwriting. Most decisions come back within 48 hours.',
+    body: 'We pull comps and run our own underwriting. Most decisions come back within 24 hours.',
   },
   {
     index: '03',
@@ -27,7 +27,7 @@ export function Process() {
       <div className="max-w-6xl mx-auto px-4 sm:px-6 py-16 sm:py-24">
         <p className="mono-label mb-4">02 / Process</p>
         <h2 className="text-3xl sm:text-4xl font-sans font-medium tracking-[-0.03em] text-foreground leading-tight max-w-2xl mb-10 sm:mb-14">
-          From address to answer in 48 hours.
+          From address to answer in 24 hours.
         </h2>
 
         <div className="grid sm:grid-cols-2 lg:grid-cols-4 border border-border rounded-lg overflow-hidden divide-y divide-border lg:divide-y-0 lg:divide-x">

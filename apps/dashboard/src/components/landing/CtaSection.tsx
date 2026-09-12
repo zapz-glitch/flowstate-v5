@@ -10,7 +10,7 @@ export function CtaSection() {
             Have a property that fits?
           </h2>
           <p className="text-base sm:text-lg text-muted-foreground leading-relaxed mb-8">
-            Send the address and condition. You will hear back within 48 hours.
+            Send the address and condition. You will hear back within 24 hours.
           </p>
           <DealForm />
         </div>

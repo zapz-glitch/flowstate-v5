@@ -72,6 +72,22 @@ access to the dashboard after auth.
   replacing night-only lock. Mount effect normalizes dashboard-only
   presets (dawn→night, outdoor→led) so the public site stays binary.
 
+## Polish pass 4 (product engineer feedback, 2026-09-11)
+- Response-time copy unified to 24 hours everywhere (Process heading/steps,
+  CtaSection, form success/footnote).
+- Wizard inputs restyled into the site input language (bg-secondary/50
+  border rounded-md, focus ring) + -webkit-autofill override in globals.css
+  (kills browser yellow/blue wash, "old Microsoft feel").
+- /api/deal never 5xxs a valid submission: every lead is console.log'd
+  (worker observability on), email via MailChannels, optional webhook, and
+  API /waitlist backstop if both fail. Always returns ok:true → form always
+  confirms success.
+- Legal: /privacy and /terms pages (site-styled, mono-label sections);
+  SiteShell extracted so legal pages share header/footer/auth/theme wiring;
+  form now carries Terms/Privacy consent microcopy (email follow-up consent,
+  do-not-sell + STOP/unsubscribe live in the Privacy Policy); footer links
+  added. NOTE: legal text is a working draft, review by counsel advised.
+
 ## Branch / Baseline (updated 2026-09-11)
 - `landing-page-v2` — reset to `origin/feat/devin-theme` HEAD (7afe144).
   No commits yet.

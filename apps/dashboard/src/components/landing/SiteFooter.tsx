@@ -23,9 +23,17 @@ export function SiteFooter() {
             not a licensed real estate broker or agent and does not represent
             buyers or sellers in any transaction.
           </p>
-          <p className="text-xs text-muted-foreground/50 mt-3">
-            &copy; {new Date().getFullYear()} Flowstate. All rights reserved.
-          </p>
+          <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1">
+            <p className="text-xs text-muted-foreground/50">
+              &copy; {new Date().getFullYear()} Flowstate. All rights reserved.
+            </p>
+            <Link href="/privacy" className="text-xs text-muted-foreground/50 hover:text-muted-foreground transition-colors">
+              Privacy Policy
+            </Link>
+            <Link href="/terms" className="text-xs text-muted-foreground/50 hover:text-muted-foreground transition-colors">
+              Terms of Service
+            </Link>
+          </div>
         </div>
       </div>
     </footer>

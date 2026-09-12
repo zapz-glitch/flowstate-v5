@@ -88,6 +88,12 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Invalid email address' }, { status: 400 })
   }
 
+  // Capture every submission in worker logs (observability is enabled on
+  // this worker), independent of downstream delivery
+  console.log('DEAL_SUBMISSION', JSON.stringify({
+    name, email, address, notes, submittedAt: new Date().toISOString(),
+  }))
+
   const emailed = await sendDealEmail({ name, email, address, notes })
 
   const webhookUrl = process.env.CONTACT_WEBHOOK_URL
@@ -111,9 +117,30 @@ export async function POST(request: Request) {
     }
   }
 
+  // Backstop: if neither email nor webhook delivered, park the lead in the
+  // API waitlist so it is never lost
   if (!emailed && !webhookUrl) {
-    return NextResponse.json({ error: 'Delivery failed' }, { status: 502 })
+    try {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL
+      if (apiUrl) {
+        const [firstName, ...rest] = name.split(' ')
+        await fetch(`${apiUrl}/waitlist`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email,
+            firstName: firstName || name,
+            lastName: rest.join(' ') || '-',
+          }),
+          signal: AbortSignal.timeout(5000),
+        })
+      }
+    } catch {
+      console.error('Waitlist backstop failed for', email)
+    }
   }
 
+  // Never surface delivery plumbing problems to the visitor: the lead is
+  // captured in worker logs at minimum
   return NextResponse.json({ ok: true })
 }
