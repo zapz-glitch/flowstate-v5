@@ -12,10 +12,10 @@ export function Hero() {
       <div className="max-w-6xl mx-auto px-4 sm:px-6">
         <p className="mono-label mb-6 sm:mb-8">Flowstate | Private real estate investment</p>
 
-        <h1 className="text-4xl sm:text-6xl lg:text-7xl font-sans font-medium tracking-[-0.03em] text-foreground leading-[1.02] max-w-4xl">
+        <h1 className="text-4xl sm:text-6xl lg:text-7xl font-sans font-medium tracking-[-0.03em] leading-[1.02] max-w-4xl text-flag-usa">
           We buy houses as-is.
           <br />
-          <span className="text-flag-usa">Cash. Closed in 21 days.</span>
+          Cash. Closed in 21 days.
         </h1>
 
         <p className="mt-6 sm:mt-8 text-base sm:text-lg text-muted-foreground max-w-xl leading-relaxed">
