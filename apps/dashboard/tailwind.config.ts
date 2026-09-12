@@ -99,7 +99,6 @@ const config: Config = {
         'float': 'float 6s ease-in-out infinite',
         'shimmer': 'shimmer 2s infinite',
         'pulse-slow': 'pulse 3s ease-in-out infinite',
-        'caret': 'caret 1.1s step-end infinite',
       },
       keyframes: {
         fadeIn: {
@@ -121,10 +120,6 @@ const config: Config = {
         shimmer: {
           '0%': { transform: 'translateX(-100%)' },
           '100%': { transform: 'translateX(100%)' },
-        },
-        caret: {
-          '0%, 100%': { opacity: '1' },
-          '50%': { opacity: '0' },
         },
       },
       borderRadius: {
