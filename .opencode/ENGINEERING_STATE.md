@@ -266,6 +266,31 @@ access to the dashboard after auth.
 - TODO when merged: deploy, then verify a live analysis logs
   /property/{id}/flood-zone and report.floodZone.source==='parcel'.
 
+## Subject AVM + building-detail enrichment (2026-09-13, same branch, commit 608a21b)
+- AVM endpoint DISCOVERED + GATED: GET
+  property.corelogicapi.com/property/{parcelId}/avm/thv/{model} — model
+  `thvMarketingStandard` is the ONLY model the gateway validates (all
+  other names → "No THV model"). Valid model dispatches to the Order
+  Manager which returns 404 "no response" → THV ordering product is NOT
+  entitled (same class as market analytics). Provider method getAvm()
+  implemented + wired subject-only; fails graceful (subject.avm=null)
+  until the account adds THV.
+- Building info: no extra endpoint needed — property-detail's
+  buildings.data.buildings[0] already carries condition
+  (buildingImprovementConditionCode, e.g. AVE), grade (gradeTypeCode),
+  improvementValue, plus all coded construction fields. Also confirmed
+  /property/{parcelId}/building exists (literal text: condition AVERAGE,
+  airConditioning CENTRAL, heatType FORCED AIR, parkingType, pool, style)
+  — available if richer per-parcel pulls are wanted later.
+- Normalized: subject+comp buildingCondition/buildingGrade/
+  improvementValue; comps gain parcelId (own v1PropertyId),
+  neighborhoodName, stories, features.heating/cooling/fireplacesCount
+  via enrichComparables — usable by eval rules pre-selection.
+- Analysis response: subject.buildingCondition/buildingGrade/
+  improvementValue/avm{value,confidence,range,model,asOfDate}; comp
+  items gain the enriched fields. enrichComparables also feeds them.
+- 15/15 regressions pass; api typecheck clean.
+
 ## Completed (landing-v2)
 - Rewrote `/` (`src/app/page.tsx`) as a company credibility landing page:
   Hero ("We buy houses as-is. Cash. Closed in 21 days." + stats strip),
