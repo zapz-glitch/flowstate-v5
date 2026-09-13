@@ -34,6 +34,11 @@ export interface AppraisalFilter {
   enabled: boolean
   /** Threshold value for the filter */
   value: number
+  /**
+   * hard (default): a verified failure disqualifies the comp.
+   * soft: failure is recorded for ranking/reporting but never disqualifies.
+   */
+  priority?: 'hard' | 'soft'
 }
 
 export interface FilterResult {

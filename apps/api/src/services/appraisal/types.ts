@@ -42,19 +42,21 @@ export interface AppraisalFilter {
 }
 
 export const DEFAULT_FILTERS: AppraisalFilter[] = [
-  // Location — subdivision is the hammer; neighborhood is the fallback
-  // geography when no HOA/subdivision exists.
+  // HARD RULES (the fixed deal-breakers):
+  //   sale_age ≤180d · same subdivision · ±250 sqft · same property type ·
+  //   no major-road crossing · ±10yr build date. Neighborhood is the hard
+  //   location fallback when the subject has no subdivision (priority is
+  //   resolved per-subject in evaluate()).
   { type: 'subdivision_match', enabled: true, value: 1 },
-  { type: 'neighborhood_match', enabled: true, value: 1 },
-  // Apples-to-apples physical matches (hard) — assessed from provider
-  // building data; not_verified never disqualifies.
-  { type: 'building_style_match', enabled: true, value: 1 },
-  { type: 'foundation_match', enabled: true, value: 1 },
-  { type: 'construction_material_match', enabled: true, value: 1 },
-  { type: 'pool_match', enabled: true, value: 1 },
-  { type: 'garage_match', enabled: true, value: 1 },
-  { type: 'condition_match', enabled: true, value: 1 }, // assessor condition — comp must be at/above subject tier
-  // Preferred matches (soft) — recorded for ranking, never disqualify.
+  { type: 'neighborhood_match', enabled: true, value: 1, priority: 'soft' },
+  // Preferred physical matches (soft) — assessed from provider building
+  // data; recorded for confidence/ranking, never disqualify.
+  { type: 'building_style_match', enabled: true, value: 1, priority: 'soft' },
+  { type: 'foundation_match', enabled: true, value: 1, priority: 'soft' },
+  { type: 'construction_material_match', enabled: true, value: 1, priority: 'soft' },
+  { type: 'pool_match', enabled: true, value: 1, priority: 'soft' },
+  { type: 'garage_match', enabled: true, value: 1, priority: 'soft' },
+  { type: 'condition_match', enabled: true, value: 1, priority: 'soft' }, // assessor condition — comp at/above subject tier scores higher
   { type: 'stories_match', enabled: true, value: 1, priority: 'soft' },
   { type: 'roof_material_match', enabled: true, value: 1, priority: 'soft' },
   // Size/recency/geography thresholds (relaxable in expansion tiers)
@@ -63,7 +65,7 @@ export const DEFAULT_FILTERS: AppraisalFilter[] = [
   { type: 'year_built_diff', enabled: true, value: 10 }, // ±10 years
   { type: 'distance', enabled: true, value: 1.0 }, // 1 mile (matches API search)
   { type: 'property_type', enabled: true, value: 1 }, // Same property/build type
-  { type: 'lot_size_diff', enabled: true, value: 2500 }, // ±2,500 sqft lot
+  { type: 'lot_size_diff', enabled: true, value: 2500, priority: 'soft' }, // ±2,500 sqft lot — similarity data, not a deal-breaker
   { type: 'road_barrier', enabled: true, value: 1 }, // No crossing major roads (not_verified when no data)
 ]
 

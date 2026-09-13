@@ -361,7 +361,9 @@ export async function performAnalysis(
     const existing = filters.find((f) => f.type === required.type)
     if (existing) {
       existing.enabled = true
-      existing.priority ??= required.priority
+      // Presets can't express hard/soft — always take the default priority
+      // so preferred-match fields rank but never disqualify.
+      existing.priority = required.priority
     } else {
       filters.push({ ...required })
     }

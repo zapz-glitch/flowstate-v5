@@ -9,6 +9,7 @@ import { describe, it, expect } from 'vitest'
 import { evaluateComparable } from './evaluator'
 import { createAppraisalService } from './index'
 import type { AppraisalFilter, AppraisalAdjustment } from './types'
+import { DEFAULT_FILTERS } from './types'
 import type { NormalizedProperty, NormalizedComparable } from '../property-api/types'
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
@@ -476,42 +477,61 @@ describe('ARV comp selection', () => {
     expect(r.selectedCompIds).not.toContain('out1')
   })
 
-  it('relaxes style/construction matches only as a last resort after geography', () => {
-    // Every comp mismatches on building style — hard fail under strict rules.
-    // Expansion must exhaust older sales → subdivision → neighborhood before
-    // dropping the physical match set.
+  it('matches subdivision units/phases to their parent development', () => {
+    // Jacksonville scenario: subject "SWEETWATER CREEK" must match the
+    // plat-filed unit names inside the same community — but not genuinely
+    // different subdivisions.
+    const filters: AppraisalFilter[] = [{ type: 'subdivision_match', enabled: true, value: 1 }]
+    const subj = subject({ subdivision: 'SWEETWATER CREEK' })
+
+    for (const name of [
+      'SWEETWATER CREEK',
+      'SWEETWATER CREEK SOUTH',
+      'SWEETWATER CREEK S UT 2E',
+      'SWEETWATER CREEK S UNIT 2W',
+      'SWEETWATER CREEK PH 03',
+    ]) {
+      const r = evaluateComparable(subj, comp('c', { subdivision: name }), filters, [])
+      const f = r.filterResults.find((x) => x.type === 'subdivision_match')
+      expect(f?.passed, name).toBe(true)
+    }
+
+    for (const name of ['GRAND LAKES', 'PARKSIDE LAKES PH 01', 'OAKWOOD']) {
+      const r = evaluateComparable(subj, comp('c', { subdivision: name }), filters, [])
+      const f = r.filterResults.find((x) => x.type === 'subdivision_match')
+      expect(f?.passed, name).toBe(false)
+      expect(f?.status).toBe('failed')
+    }
+  })
+
+  it('treats style/construction mismatches as soft — rank lower, never disqualify', () => {
+    // Hard rules are only: sale age, subdivision, sqft, property type,
+    // road barrier, year built. Physical matches are confidence data — a
+    // verified style match outranks a mismatch but a mismatch stays usable.
     const styleComps = [
-      comp('m1', { construction: { buildingStyle: 'Colonial' } }),
-      comp('m2', { construction: { buildingStyle: 'Colonial' } }),
-      comp('m3', { construction: { buildingStyle: 'Colonial' } }),
+      comp('match', { construction: { buildingStyle: 'Ranch' }, salePrice: 280000 }),
+      comp('m1', { construction: { buildingStyle: 'Colonial' }, salePrice: 400000 }),
+      comp('m2', { construction: { buildingStyle: 'Colonial' }, salePrice: 390000 }),
+      comp('m3', { construction: { buildingStyle: 'Colonial' }, salePrice: 380000 }),
     ]
     const r = service.evaluateWithFallback(
       subject({ construction: { buildingStyle: 'Ranch' } }),
       styleComps,
       {
-        filters: [
-          { type: 'subdivision_match', enabled: true, value: 1 },
-          { type: 'building_style_match', enabled: true, value: 1 },
-          { type: 'sale_age', enabled: true, value: 180 },
-          { type: 'distance', enabled: true, value: 1.0 },
-        ],
+        filters: DEFAULT_FILTERS,
         adjustments: [],
-        expansion: {
-          allowGeographicExpansion: true,
-          allowNeighborhoodExpansion: true,
-          allowOlderSales: true,
-          olderSaleAgeMultiplier: 2,
-          olderSaleDiscountPercent: 15,
-        },
       }
     )
 
-    expect(r.fallbackUsed).toBe('physical_relaxation')
-    expect(r.expansionApplied).toContain('physical')
+    // No disqualification — no expansion needed at all
+    expect(r.fallbackUsed).toBe('none')
     expect(r.selectedCompIds?.length).toBe(3)
-    // The failed rule stays on the record — relaxation is visible, not silent
+    // The verified style match ranks ahead of higher-priced mismatches
+    expect(r.selectedCompIds).toContain('match')
+    // The failed rule stays on the record — soft failures remain visible
     const comp1 = r.comparables.find((c) => c.id === 'm1')
     expect(comp1?.evaluation?.filterResults.some((f) => f.type === 'building_style_match' && !f.passed)).toBe(true)
+    expect(comp1?.isEnabled).toBe(true)
   })
 
   it('uses older sales only when allowed, with configured discount', () => {

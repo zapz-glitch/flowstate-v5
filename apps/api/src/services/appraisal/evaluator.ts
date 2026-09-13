@@ -38,7 +38,7 @@ function evaluateSubdivisionMatch(
     }
   }
 
-  const passed = subjectSub === compSub
+  const passed = subdivisionsMatch(subjectSub, compSub)
   return {
     type: 'subdivision_match',
     passed,
@@ -903,6 +903,41 @@ const ADJUSTMENT_CALCULATORS: Record<
 function normalizeSubdivision(value: string | null | undefined): string | null {
   if (!value) return null
   return value.toLowerCase().trim().replace(/\s+/g, ' ')
+}
+
+/**
+ * Subdivision base name — strips unit/phase/section/plat designators so
+ * "SWEETWATER CREEK", "SWEETWATER CREEK S UT 2E", and "PARKSIDE LAKES PH 01"
+ * resolve to their parent development ("sweetwater creek", "parkside lakes").
+ */
+function subdivisionBase(value: string | null | undefined): string | null {
+  let v = normalizeSubdivision(value)
+  if (!v) return null
+  v = v.replace(/[\/\-_.,]/g, ' ').replace(/\s+/g, ' ').trim()
+  v = v
+    .replace(
+      /\b(?:un|unit|ut|u|ph|phase|sec|sect|section|blk|block|lot|plat|tract|add|addn|addition|part|pt|rep|repl|replat|vlg)\s*\w*.*$/i,
+      ''
+    )
+    .trim()
+  return v || null
+}
+
+/**
+ * Two subdivisions match when their base names are equal, or one base is a
+ * word-boundary prefix of the other — "sweetwater creek" ⊂ "sweetwater creek
+ * south" (same parent development) but "oak" ⊄ "oakwood" (different names).
+ */
+function subdivisionsMatch(
+  subjectSub: string | null | undefined,
+  compSub: string | null | undefined
+): boolean {
+  const a = subdivisionBase(subjectSub)
+  const b = subdivisionBase(compSub)
+  if (!a || !b) return false
+  if (a === b) return true
+  const [shorter, longer] = a.length <= b.length ? [a, b] : [b, a]
+  return longer.startsWith(shorter) && longer[shorter.length] === ' '
 }
 
 function normalizePropertyType(value: string | null | undefined): string | null {

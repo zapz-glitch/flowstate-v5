@@ -14,6 +14,40 @@ function normalizeSubdivision(value: string | null | undefined): string | null {
   return value.toLowerCase().trim().replace(/\s+/g, ' ')
 }
 
+/**
+ * Subdivision base name — strips unit/phase/section/plat designators so
+ * "SWEETWATER CREEK", "SWEETWATER CREEK S UT 2E", and "PARKSIDE LAKES PH 01"
+ * resolve to their parent development.
+ */
+function subdivisionBase(value: string | null | undefined): string | null {
+  let v = normalizeSubdivision(value)
+  if (!v) return null
+  v = v.replace(/[\/\-_.,]/g, ' ').replace(/\s+/g, ' ').trim()
+  v = v
+    .replace(
+      /\b(?:un|unit|ut|u|ph|phase|sec|sect|section|blk|block|lot|plat|tract|add|addn|addition|part|pt|rep|repl|replat|vlg)\s*\w*.*$/i,
+      ''
+    )
+    .trim()
+  return v || null
+}
+
+/**
+ * Equal base names, or one base a word-boundary prefix of the other —
+ * "sweetwater creek" ⊂ "sweetwater creek south" but "oak" ⊄ "oakwood".
+ */
+function subdivisionsMatch(
+  subjectSub: string | null | undefined,
+  compSub: string | null | undefined
+): boolean {
+  const a = subdivisionBase(subjectSub)
+  const b = subdivisionBase(compSub)
+  if (!a || !b) return false
+  if (a === b) return true
+  const [shorter, longer] = a.length <= b.length ? [a, b] : [b, a]
+  return longer.startsWith(shorter) && longer[shorter.length] === ' '
+}
+
 // ─── Filter Evaluator Map ───────────────────────────────────────────────────
 
 type FilterEvaluator = (
@@ -35,7 +69,7 @@ const evaluators: Record<FilterType, FilterEvaluator> = {
       }
     }
 
-    const passed = subjectSub === compSub
+    const passed = subdivisionsMatch(subjectSub, compSub)
     return {
       type: 'subdivision_match',
       passed,

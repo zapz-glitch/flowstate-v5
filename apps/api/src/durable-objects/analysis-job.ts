@@ -511,23 +511,16 @@ export class AnalysisJobDO {
 
         const llmResult = await analyzeComps(compAnalysisCtx, this.env, { includePhotos: config.llmOptions?.includePhotos, modelOverride: config.llmOptions?.compSelectionModel, reasoning: config.llmOptions?.reasoning })
 
-        if (llmResult && llmResult.selectedForArv.length > 0) {
-          const selectedSet = new Set(llmResult.selectedForArv)
-          const asIsSet = new Set(llmResult.asIsComps ?? [])
+        if (llmResult && llmResult.rankings.length > 0) {
+          // Rule-based selection is authoritative — the LLM only annotates
+          // comps with reasoning/scores; it cannot change isEnabled/compGroup.
           const comps = analysisResult.comps as Record<string, unknown>
           if (comps?.items && Array.isArray(comps.items)) {
             comps.items = (comps.items as Array<Record<string, unknown>>).map((comp) => {
               const compId = comp.id as string
               const ranking = llmResult.rankings.find((r) => r.compId === compId)
-              // Provider-backed hard filters are authoritative — the LLM can rank
-              // eligible comps but cannot resurrect one that failed a hard rule.
-              const hardFailed = (comp.appraisalRules as { passedFilters?: boolean } | null | undefined)?.passedFilters === false
-              const isSelected = selectedSet.has(compId) && !hardFailed
-              const isAsIs = asIsSet.has(compId)
-              return { ...comp, isEnabled: isSelected, compGroup: isSelected ? 'arv' : isAsIs ? 'as_is' : null, selectionReason: ranking?.reasoning || null, qualityScore: ranking?.score ?? null, keyFeatures: ranking?.keyFeatures?.length ? ranking.keyFeatures : null, disableReasons: isSelected ? [] : hardFailed ? comp.disableReasons : [ranking?.reasoning || 'Not selected by AI analysis'] }
+              return { ...comp, selectionReason: ranking?.reasoning || null, qualityScore: ranking?.score ?? null, keyFeatures: ranking?.keyFeatures?.length ? ranking.keyFeatures : null }
             })
-            comps.enabledCount = (comps.items as Array<Record<string, unknown>>).filter((c) => c.isEnabled).length
-            comps.disabledCount = (comps.items as unknown[]).length - (comps.enabledCount as number)
           }
 
           await this.pushEvent('llm_complete', {
@@ -535,7 +528,7 @@ export class AnalysisJobDO {
             rankings: llmResult.rankings,
             updatedResult: analysisResult,
           })
-          console.log(`[AnalysisJobDO] ✓ LLM: ${llmResult.selectedForArv.length} comps selected in ${Date.now() - llmStart}ms${llmResult.reasoning ? ' (with reasoning)' : ''}`)
+          console.log(`[AnalysisJobDO] ✓ LLM: ${llmResult.rankings.length} comps annotated in ${Date.now() - llmStart}ms${llmResult.reasoning ? ' (with reasoning)' : ''}`)
         } else {
           await this.pushEvent('llm_complete', { llmAnalysis: null, rankings: [], skipped: true, reason: llmResult ? 'No comps selected' : 'LLM not available' })
         }
@@ -600,16 +593,6 @@ export class AnalysisJobDO {
         }, this.env)
 
         const updatedResponse = evalResult.response as unknown as Record<string, unknown>
-
-        // If LLM will run, disable all comp selections — LLM decides final selection
-        if (config.pending.includes('llm')) {
-          const comps = updatedResponse.comps as Record<string, unknown> | undefined
-          if (comps?.items && Array.isArray(comps.items)) {
-            comps.items = comps.items.map((c: Record<string, unknown>) => ({ ...c, isEnabled: false }))
-            comps.enabledCount = 0
-            comps.disabledCount = (comps.items as unknown[]).length
-          }
-        }
 
         config.analysisResult = updatedResponse
         console.log(`[AnalysisJobDO] ✓ Evaluation complete in ${Date.now() - evalStart}ms`)
@@ -710,41 +693,21 @@ export class AnalysisJobDO {
           this.env, { includePhotos: config.llmOptions?.includePhotos },
         )
 
-        if (llmResult && llmResult.selectedForArv.length > 0) {
-          console.log(`[AnalysisJobDO] LLM selected ${llmResult.selectedForArv.length} comps for ARV: ${llmResult.selectedForArv.join(', ')}`)
-
-          // Apply LLM's comp selection: update isEnabled on all comps
-          const selectedSet = new Set(llmResult.selectedForArv)
-          const asIsSet = new Set(llmResult.asIsComps ?? [])
+        if (llmResult && llmResult.rankings.length > 0) {
+          // Rule-based selection is authoritative — the LLM only annotates
+          // comps with reasoning/scores; it cannot change isEnabled/compGroup.
           const currentResult = config.analysisResult
           if (currentResult.comps?.items && Array.isArray(currentResult.comps.items)) {
             currentResult.comps.items = currentResult.comps.items.map((comp: Record<string, unknown>) => {
               const compId = comp.id as string
               const ranking = llmResult.rankings.find((r) => r.compId === compId)
-              // Provider-backed hard filters are authoritative — the LLM can rank
-              // eligible comps but cannot resurrect one that failed a hard rule.
-              const hardFailed = (comp.appraisalRules as { passedFilters?: boolean } | null | undefined)?.passedFilters === false
-              const isSelected = selectedSet.has(compId) && !hardFailed
-              const isAsIs = asIsSet.has(compId)
               return {
                 ...comp,
-                isEnabled: isSelected,
-                compGroup: isSelected ? 'arv' : isAsIs ? 'as_is' : null,
                 selectionReason: ranking?.reasoning || null,
                 qualityScore: ranking?.score ?? null,
                 keyFeatures: ranking?.keyFeatures?.length ? ranking.keyFeatures : null,
-                disableReasons: isSelected
-                  ? []
-                  : hardFailed
-                    ? comp.disableReasons
-                    : [ranking?.reasoning || 'Not selected by AI analysis'],
               }
             })
-
-            // Update comp counts
-            const enabledCount = currentResult.comps.items.filter((c: Record<string, unknown>) => c.isEnabled).length
-            currentResult.comps.enabledCount = enabledCount
-            currentResult.comps.disabledCount = currentResult.comps.items.length - enabledCount
           }
 
           await this.pushEvent('llm_complete', {
@@ -759,7 +722,7 @@ export class AnalysisJobDO {
             rankings: llmResult.rankings,
             updatedResult: currentResult,
           })
-          console.log(`[AnalysisJobDO] ✓ LLM: ${llmResult.rankings.length} comps analyzed, ${llmResult.selectedForArv.length} selected for ARV in ${Date.now() - llmStart}ms`)
+          console.log(`[AnalysisJobDO] ✓ LLM: ${llmResult.rankings.length} comps annotated in ${Date.now() - llmStart}ms`)
         } else if (llmResult) {
           // LLM returned rankings but no selection — just enrich without changing selection
           await this.pushEvent('llm_complete', {
