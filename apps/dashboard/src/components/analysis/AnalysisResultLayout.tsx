@@ -1,12 +1,10 @@
 'use client'
 
-import { useState } from 'react'
-import { Loader2, ChevronDown, ChevronRight, TrendingUp } from 'lucide-react'
+import { Loader2 } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useEvaluation } from '@/hooks/use-evaluation'
 import { ComparablesSection } from './ComparablesSection'
 import { DealSummaryHero } from './DealSummaryHero'
-import { MarketContextCard } from './MarketContextCard'
 import { SubjectGridCard } from './SubjectGridCard'
 import { InvestorAnalysisSummary } from './InvestorAnalysisSummary'
 
@@ -35,7 +33,6 @@ export function AnalysisResultLayout({
     displayComps: comps,
     isRecalculated,
     compOverride,
-    marketContext,
     isStreaming,
     onToggleComp,
     onResetComps,
@@ -45,7 +42,6 @@ export function AnalysisResultLayout({
 
   const selectedCompKeys = compOverride?.selectedCompKeys
   const isManual = compOverride?.isManual ?? false
-  const [marketOpen, setMarketOpen] = useState(false)
 
   return (
     <>
@@ -57,7 +53,6 @@ export function AnalysisResultLayout({
         <div ref={valuationCardRef as React.RefObject<HTMLDivElement>} className="sticky top-0 z-10">
           <DealSummaryHero
             valuation={valuation}
-            avm={subject?.avm}
             isRecalculated={isRecalculated}
             onOpenSettings={onOpenSettings}
           />
@@ -81,29 +76,6 @@ export function AnalysisResultLayout({
       ) : null}
 
       <InvestorAnalysisSummary analysis={valuation?.investorAnalysis} />
-
-      {/* Market Research — collapsed by default */}
-      {marketContext && (
-        <div className="border border-border rounded-sm overflow-hidden">
-          <button
-            type="button"
-            onClick={() => setMarketOpen(!marketOpen)}
-            className="w-full px-4 py-2.5 flex items-center gap-2 hover:bg-secondary/30 transition-colors"
-          >
-            <TrendingUp className="w-3.5 h-3.5 text-blue-500 flex-shrink-0" />
-            <span className="text-[10px] font-semibold text-foreground-tertiary uppercase tracking-wider flex-1 text-left">Market Research</span>
-            {marketOpen
-              ? <ChevronDown className="w-3.5 h-3.5 text-foreground-tertiary" />
-              : <ChevronRight className="w-3.5 h-3.5 text-foreground-tertiary" />
-            }
-          </button>
-          {marketOpen && (
-            <div className="border-t border-border/30">
-              <MarketContextCard data={marketContext} />
-            </div>
-          )}
-        </div>
-      )}
 
       {/* Streaming status — lives near the comps section, not the search bar */}
       {statusLabel && isStreaming && (
