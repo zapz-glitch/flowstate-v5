@@ -1008,3 +1008,23 @@ ordering confirmed in evaluation/index.ts.
   wholesale properties; successes only passed via nearest_comps fallback
   with 1-2 comps. Under-reporting gap: api_call_stats_json is NULL on
   error runs, so failed analyses' provider calls aren't counted.
+
+### Batch stop/cancel + stuck-flag fix (feat/batch-stop-cancel → main 7a6f827, DEPLOYED run 34790356619)
+
+- POST /batch/:id/stop — pauses after current address; rows stay pending
+  (resumable via play); queued batches stop into 'cancelled'; dead-DO
+  fallback pauses row directly + kicks queue.
+- POST /batch/:id/cancel — remaining rows → 'Cancelled — stopped by
+  user', batch completes; works on processing/queued/paused.
+- BatchJobDO: stopRequested flag checked between addresses in
+  processBatch + retryFailed; finishStopped finalizes + kicks queue.
+  New batch status 'paused' (non-blocking for the FIFO queue).
+- Stuck-flag fix: DO heartbeat now touches batch_jobs.updated_at every
+  60s — a >3min single-address analysis no longer trips isStuck.
+- UI: Stop + Cancel list buttons on the queue card (cancel confirms);
+  'paused' shows 'Paused — click ▶ on any row to resume'; poll handles
+  paused/cancelled terminal states.
+- Verified: tsc clean api + dashboard.
+- NOTE: batch_c3711744 was resumed via the deployed /resume path and is
+  processing natively (13+ done at 23:39Z). fs_1d32fdcf temp key still
+  needs revoking when all batch work settles.
