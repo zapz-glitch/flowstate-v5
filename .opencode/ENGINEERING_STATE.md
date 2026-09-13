@@ -439,3 +439,62 @@ valuation (renovated-skip, location penalty) -> report.
 ## Last Handoff
 Pipeline hardened per spec. Next likely: more comp-quality evidence or
 foundation_match toggle in preset UI if user wants it configurable.
+
+## Apples-to-apples comps + AVM (branch: feat/cotality-flood-zone, pushed, NOT deployed)
+
+Product spec implemented 2026-09-12:
+
+### Comp qualification (hard rules, provider building data)
+- New filter types: neighborhood_match, construction_material_match,
+  pool_match, garage_match, stories_match (soft), roof_material_match
+  (soft), condition_match. Defaults now 17 filters.
+- Assessor buildingCondition drives condition_match via tier ordering
+  (Excellent > Very Good > Good > Average > Fair > Poor > Very Poor);
+  comp must be >= subject tier.
+- Missing evidence = status 'not_verified' — records, never disqualifies;
+  selectArvComps ranks verified pass > not_verified > then price.
+- Soft priority on stories/roof: mismatch recorded, never disables.
+- LLM comp selection can NO LONGER re-enable hard-failed comps
+  (passedFilters === false stays disabled in both DO override paths).
+
+### Location + expansion order (flipped vs old behavior)
+- Subdivision preferred; neighborhood is the location level when no
+  subdivision/HOA. Equal weight (40/40) in shared scoring.
+- Expansion now: strict -> older_sales (2x age, 2x yearBuilt tolerance,
+  15% older-sale discount) -> subdivision_expansion (drop subdivision,
+  keep neighborhood) -> neighborhood/geographic -> nearest fallback.
+  Previously geography expanded FIRST; now last before nearest.
+
+### Condition gate
+- services/evaluation uses assessor buildingCondition for the ARV gate;
+  comp vision calls skipped when provider condition exists. Vision /
+  Firecrawl code retained as fallback only.
+
+### Normalization + response
+- Subject: additionSquareFeet (buildingAdditionsAreaSquareFeet),
+  roofCover, buildingCondition/Grade, improvementValue, neighborhoodName,
+  avm {value, confidence, valueRangeLow/High, model, asOfDate}.
+- Comps: parcelId, neighborhoodName, buildingCondition/Grade, stories,
+  heating/cooling/fireplacesCount — all from existing per-comp
+  property-detail calls (no new provider calls).
+
+### Dashboard
+- DealSummaryHero: AVM cell with +/- delta vs ARV (tooltip: excluded
+  from math). actions.ts types extended (subject + comp).
+- SubjectGridCard: neighborhood pill, Construction, Roof, Stories,
+  Heat/AC, Assessor Cond (+grade), Addition rows.
+- CompGridCard: Construction, Roof, Stories, Assessor Cond, Heat/AC rows
+  (all conditional on presence).
+
+### Verified
+- vitest src/: 78 appraisal tests pass (35 evaluator + 43 rules incl.
+  new older-sales-before-geography ordering test).
+- npm test: 15/15 regression files pass.
+- tsc --noEmit clean: api + dashboard.
+
+### Remaining
+- AVM entitlement: thvMarketingStandard model valid but Order Manager
+  returns "no response" — needs Cotality account scope add. subject.avm
+  is null until then; UI cell hidden.
+- Comp cards: could add neighborhood pill when subdivision absent.
+- Deploy requires user approval (deploy-on-request rule).
