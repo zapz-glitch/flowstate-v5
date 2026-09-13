@@ -868,3 +868,22 @@ ordering confirmed in evaluation/index.ts.
   (analyze page, public report, saved report); threaded through
   AnalysisResultLayout → ComparablesSection.
 - Verified: tsc clean api+dashboard.
+
+### Card density + UI cleanup (860c8e6, merged to main)
+
+- Notify button moved to comparables header — always visible (was
+  gated behind isManual banner; user couldn't find it on reports).
+- CompGridCard collapsed → essentials only (bed/bath, sqft, year,
+  lot, style). Full comparison data → CompComparisonDialog +
+  CompCard expander: foundation, construction, ext walls, roof,
+  stories, heat/AC, assessor cond, vision condition, pool,
+  garage/carport, lot delta.
+- formatLotSize(): sqft ≤0.5ac, acres above — cards, subject, dialog.
+- Removed pre-1978 lead-paint badges + neighborhood badges from UI;
+  subdivision name only (neighborhood name+code stays in backend
+  matching via neighborhoodsMatch).
+- SubjectGridCard: Style row always rendered.
+- Verified AI is NOT doing comp selection: analysis-job.ts annotates
+  only; /comp-selection/analyze (LLM-selects) is dead code —
+  runCompSelection never called.
+- Verified: tsc clean dashboard.
