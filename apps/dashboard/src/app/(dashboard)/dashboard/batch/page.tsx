@@ -2,11 +2,11 @@
 
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import Link from 'next/link'
-import { Upload, FileText, Loader2, Check, X, Download, ChevronRight, Flag, CheckCircle2, Clock } from 'lucide-react'
+import { Upload, FileText, Loader2, Check, X, Download, ChevronRight, Flag, CheckCircle2, Clock, Play } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
-import { submitBatchAnalysis, getBatchStatus, getBatchJobs, retryFailedAddresses, recoverStuckBatch, getBatchStreamToken, type BatchResult } from './actions'
+import { submitBatchAnalysis, getBatchStatus, getBatchJobs, retryFailedAddresses, recoverStuckBatch, getBatchStreamToken, resumeBatch, type BatchResult } from './actions'
 
 type Phase = 'upload' | 'processing' | 'complete'
 type ConfBucket = 'high' | 'medium' | 'low' | 'unrated'
@@ -327,6 +327,10 @@ export default function BatchPage() {
     startPolling(batchId)
   }, [batchId, failedCount, startPolling])
 
+  // ─── Resume From Row ─────────────────────────────────────────────────────
+
+  const [resumingIndex, setResumingIndex] = useState<number | null>(null)
+
   // ─── Reset ────────────────────────────────────────────────────────────────
 
   const handleReset = useCallback(() => {
@@ -344,6 +348,7 @@ export default function BatchPage() {
     setViewAll(false)
     setAllResults([])
     setConfFilter('all')
+    setResumingIndex(null)
   }, [stopPolling])
 
   // ─── Progress calculation ─────────────────────────────────────────────────
@@ -393,6 +398,26 @@ export default function BatchPage() {
     }
     setAllResults(merged)
   }, [allJobs, stopPolling])
+
+  // ─── Resume From Row ─────────────────────────────────────────────────────
+
+  const handleResumeFrom = useCallback(async (id: string, fromIndex: number) => {
+    setResumingIndex(fromIndex)
+    setError(null)
+    const result = await resumeBatch(id, fromIndex)
+    if (!result.success) {
+      setError(result.error || 'Resume failed')
+      setResumingIndex(null)
+      return
+    }
+    setResumingIndex(null)
+    if (id !== batchId) {
+      await selectBatch(id)
+      return
+    }
+    setPhase('processing')
+    startPolling(id)
+  }, [batchId, startPolling, selectBatch])
 
   // ─── Confidence buckets ───────────────────────────────────────────────────
 
@@ -679,6 +704,7 @@ export default function BatchPage() {
                 <table className="w-full text-xs">
                   <thead className="bg-muted/50 sticky top-0">
                     <tr>
+                      <th className="w-8"></th>
                       <th className="text-left px-3 py-2 font-medium text-foreground-tertiary w-8">#</th>
                       <th className="text-left px-3 py-2 font-medium text-foreground-tertiary">Address</th>
                       <th className="text-left px-3 py-2 font-medium text-foreground-tertiary">Status</th>
@@ -694,6 +720,21 @@ export default function BatchPage() {
                         r.status === 'processing' && 'bg-primary/5',
                         r.status === 'failed' && 'bg-red-500/5',
                       )}>
+                        <td className="pl-3 py-2 w-8">
+                          {r.status !== 'completed' && r.batchId && phase !== 'processing' && (
+                            <button
+                              type="button"
+                              title={`Resume batch from row ${r.index + 1}`}
+                              disabled={resumingIndex === r.index}
+                              onClick={() => handleResumeFrom(r.batchId!, r.index)}
+                              className="text-primary hover:text-primary/80 disabled:opacity-40"
+                            >
+                              {resumingIndex === r.index
+                                ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                : <Play className="w-3.5 h-3.5" />}
+                            </button>
+                          )}
+                        </td>
                         <td className="px-3 py-2 text-foreground-tertiary">{i + 1}</td>
                         <td className="px-3 py-2 text-foreground-secondary truncate max-w-[300px]" title={r.address}>
                           {r.address}

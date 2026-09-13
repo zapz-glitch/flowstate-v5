@@ -171,6 +171,30 @@ export async function retryFailedAddresses(batchId: string): Promise<{ success: 
   }
 }
 
+/** Resume a stopped/finished batch starting at a specific row index */
+export async function resumeBatch(batchId: string, fromIndex: number): Promise<{ success: boolean; streamUrl?: string; token?: string; error?: string }> {
+  try {
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL!
+    const { cookies } = await import('next/headers')
+    const cookieStore = await cookies()
+    const cookieHeader = cookieStore.getAll().map((c) => `${c.name}=${c.value}`).join('; ')
+
+    const response = await fetch(`${apiUrl}/batch/${batchId}/resume`, {
+      method: 'POST',
+      headers: { 'Cookie': cookieHeader, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fromIndex }),
+    })
+
+    if (!response.ok) {
+      const data = await response.json() as { error?: string }
+      return { success: false, error: data.error || 'Resume failed' }
+    }
+    return await response.json() as { success: boolean; streamUrl?: string; token?: string }
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : 'Resume failed' }
+  }
+}
+
 /** Stamp a report as validated or flagged-for-improvement (batch review loop) */
 export async function submitReportFeedback(
   jobId: string,
