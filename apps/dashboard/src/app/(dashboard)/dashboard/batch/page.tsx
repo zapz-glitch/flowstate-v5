@@ -6,7 +6,7 @@ import { Upload, FileText, Loader2, Check, X, Download, ChevronRight, Flag, Chec
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
-import { submitBatchAnalysis, getBatchStatus, getBatchJobs, retryFailedAddresses, recoverStuckBatch, getBatchStreamToken, resumeBatch, type BatchResult } from './actions'
+import { submitBatchAnalysis, getBatchStatus, getBatchJobs, retryFailedAddresses, recoverStuckBatch, getBatchStreamToken, resumeBatch, stopBatch, cancelBatch, type BatchResult } from './actions'
 
 type Phase = 'upload' | 'processing' | 'complete'
 type ConfBucket = 'high' | 'medium' | 'low' | 'unrated'
@@ -72,7 +72,7 @@ export default function BatchPage() {
         setFailedCount(job.failedCount)
         setIsStuck(job.isStuck ?? false)
         setJobStatus(job.status)
-        if (job.status === 'completed' || job.status === 'failed') {
+        if (job.status === 'completed' || job.status === 'failed' || job.status === 'paused' || job.status === 'cancelled') {
           setPhase('complete')
           setIsStuck(false)
           stopPolling()
@@ -110,6 +110,7 @@ export default function BatchPage() {
           setResults((prev) => prev.map((r, i) => i === data.index ? { ...r, status: 'failed', error: data.error } : r))
           setFailedCount((c) => c + 1)
         })
+        es.addEventListener('batch_paused', () => { setPhase('complete'); stopPolling() })
         es.addEventListener('batch_completed', (e) => {
           const data = JSON.parse(e.data)
           if (data.results) setResults(data.results)
@@ -150,7 +151,7 @@ export default function BatchPage() {
             setFailedCount(job.failedCount)
             startPolling(recent.id)
           }
-        } else if (recent.status === 'completed' || recent.status === 'failed') {
+        } else if (recent.status === 'completed' || recent.status === 'failed' || recent.status === 'paused' || recent.status === 'cancelled') {
           const job = await getBatchStatus(recent.id)
           if (job && !cancelled) {
             setResults(job.results ?? [])
@@ -419,6 +420,30 @@ export default function BatchPage() {
     startPolling(id)
   }, [batchId, startPolling, selectBatch])
 
+  // ─── Stop / Cancel ────────────────────────────────────────────────────────
+
+  const handleStopBatch = useCallback(async () => {
+    if (!batchId) return
+    setError(null)
+    const result = await stopBatch(batchId)
+    if (!result.success) {
+      setError(result.error || 'Stop failed')
+      return
+    }
+    // Poll flips to 'paused' → phase 'complete' once the current address finishes
+  }, [batchId])
+
+  const handleCancelBatch = useCallback(async () => {
+    if (!batchId) return
+    if (!window.confirm('Cancel this list? Finished reports are kept — remaining rows are marked cancelled.')) return
+    setError(null)
+    const result = await cancelBatch(batchId)
+    if (!result.success) {
+      setError(result.error || 'Cancel failed')
+      return
+    }
+  }, [batchId])
+
   // ─── Confidence buckets ───────────────────────────────────────────────────
 
   // Rows for the current view — per-list results get their batchId attached for nav links
@@ -584,9 +609,11 @@ export default function BatchPage() {
                   <span className="text-sm font-medium">
                     {jobStatus === 'queued'
                       ? `Queued — starts when the current list finishes`
-                      : phase === 'processing'
-                        ? currentIndex >= 0 ? `Processing ${currentIndex + 1} of ${totalAddresses}...` : `Processing...`
-                        : 'Batch Complete'}
+                      : jobStatus === 'paused'
+                        ? 'Paused — click ▶ on any row to resume'
+                        : phase === 'processing'
+                          ? currentIndex >= 0 ? `Processing ${currentIndex + 1} of ${totalAddresses}...` : `Processing...`
+                          : 'Batch Complete'}
                   </span>
                 </div>
                 <div className="flex items-center gap-3">
@@ -598,6 +625,16 @@ export default function BatchPage() {
                   )}
                   {failedCount > 0 && (
                     <span className="text-xs text-red-500">{failedCount} failed</span>
+                  )}
+                  {phase === 'processing' && jobStatus === 'processing' && (
+                    <Button size="sm" variant="outline" onClick={handleStopBatch} className="h-6 px-2 text-[10px]">
+                      Stop
+                    </Button>
+                  )}
+                  {batchId && jobStatus !== 'completed' && jobStatus !== 'failed' && jobStatus !== 'cancelled' && remaining > 0 && (
+                    <Button size="sm" variant="outline" onClick={handleCancelBatch} className="h-6 px-2 text-[10px] text-red-500 hover:text-red-400">
+                      Cancel list
+                    </Button>
                   )}
                 </div>
               </div>

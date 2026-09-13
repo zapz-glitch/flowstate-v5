@@ -195,6 +195,50 @@ export async function resumeBatch(batchId: string, fromIndex: number): Promise<{
   }
 }
 
+/** Pause a running batch — remaining rows stay pending, resumable via play buttons */
+export async function stopBatch(batchId: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL!
+    const { cookies } = await import('next/headers')
+    const cookieStore = await cookies()
+    const cookieHeader = cookieStore.getAll().map((c) => `${c.name}=${c.value}`).join('; ')
+
+    const response = await fetch(`${apiUrl}/batch/${batchId}/stop`, {
+      method: 'POST',
+      headers: { 'Cookie': cookieHeader },
+    })
+    if (!response.ok) {
+      const data = await response.json() as { error?: string }
+      return { success: false, error: data.error || 'Stop failed' }
+    }
+    return { success: true }
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : 'Stop failed' }
+  }
+}
+
+/** Cancel a batch entirely — remaining rows marked cancelled, list is done */
+export async function cancelBatch(batchId: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL!
+    const { cookies } = await import('next/headers')
+    const cookieStore = await cookies()
+    const cookieHeader = cookieStore.getAll().map((c) => `${c.name}=${c.value}`).join('; ')
+
+    const response = await fetch(`${apiUrl}/batch/${batchId}/cancel`, {
+      method: 'POST',
+      headers: { 'Cookie': cookieHeader },
+    })
+    if (!response.ok) {
+      const data = await response.json() as { error?: string }
+      return { success: false, error: data.error || 'Cancel failed' }
+    }
+    return { success: true }
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : 'Cancel failed' }
+  }
+}
+
 /** Stamp a report as validated or flagged-for-improvement (batch review loop) */
 export async function submitReportFeedback(
   jobId: string,
