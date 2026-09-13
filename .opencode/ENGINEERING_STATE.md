@@ -175,9 +175,32 @@ access to the dashboard after auth.
   631070523239 (no billing + missing flowstate.homes referrer — that
   combo caused "for development purposes only"). Safe to delete in
   console; nothing references it anymore.
-- OPEN: new key currently has NO referrer restrictions (verified —
-  serves with no referer). User should add flowstate.homes/* and
-  *.flowstate.homes/* in console Credentials to prevent key theft.
+- RESOLVED: referrer restrictions added by user (verified — evil
+  referer 403, flowstate.homes 200; no-referer still allowed per
+  Google semantics). Remaining hardening: API restrictions on the key.
+
+## Report dedup + fixes (2026-09-13, deployed, run 34730181169 green)
+- Shared services/report-upsert.ts: matches by provider clip OR
+  normalized address+city+state, updates newest match, deletes extra
+  duplicate rows on every write (self-healing). GHL webhook switched
+  from raw insert to the same upsert. DO call sites now pass
+  propertyClip = NormalizedProperty.id.
+- PROD PURGED: 774 duplicate saved_reports rows deleted (627 address
+  groups + 15 clip groups, 4 users). Backup of deleted rows at
+  /tmp/saved_reports_backup.json (ephemeral). 0 dup groups remain;
+  report_history orphans cleaned via cascade.
+- Verified live: two consecutive analyses on 5802 Misty Gln -> single
+  row, latest job_id, clip 5533034499 populated.
+- "Open previous report" prompt already existed (analyze page calls
+  /user/reports/by-property and shows existing-report dialog) — no work
+  needed.
+- DO HANG FIXED: local DO outbound fetch hung on wrangler 4.129.1;
+  upgraded to 4.131.1 + workers-types ^5 -> cache-miss analysis
+  completes in ~9s locally. package.json pins updated.
+- flowstate-extension.tar.gz reviewed: legit MV3 companion extension
+  (right-click analyze), no secrets — intentionally public.
+- CI: checkout/setup-node bumped to v5 (Node 24). wrangler-action has
+  no v4 — residual deprecation annotation is upstream's.
 
 ## Completed (landing-v2)
 - Rewrote `/` (`src/app/page.tsx`) as a company credibility landing page:
