@@ -424,7 +424,7 @@ export interface AppraisalResult {
   /** True when fewer than 3 valid comps found even after approved expansion */
   insufficientComps?: boolean
   /** Expansion tiers actually applied to reach the comp set */
-  expansionApplied?: Array<'older_sales' | 'subdivision' | 'geographic'>
+  expansionApplied?: Array<'older_sales' | 'subdivision' | 'geographic' | 'physical'>
 }
 
 // ─── Response Types ────────────────────────────────────────────────────────────

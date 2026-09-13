@@ -158,11 +158,8 @@ export function CompGridCard({
             )}
           </span>
         </div>
-        {/* Distance + Subdivision + Adj price */}
-        <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
-          {comp.distanceMiles != null && (
-            <span className="text-[9px] text-foreground-tertiary tabular-nums">{comp.distanceMiles.toFixed(2)} mi</span>
-          )}
+        {/* Location badges — own line directly under the address */}
+        <div className="flex items-center gap-1 mt-1 flex-wrap">
           {comp.subdivision && (() => {
             const isMatch = !!(subject?.subdivision && normalizeSubdivision(comp.subdivision) === normalizeSubdivision(subject.subdivision))
             const hasSubject = !!subject?.subdivision
@@ -204,6 +201,17 @@ export function CompGridCard({
               </span>
             )
           })()}
+          {comp.yearBuilt != null && comp.yearBuilt < 1978 && (
+            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[9px] font-medium bg-amber-500/10 text-amber-500 border border-amber-500/20" title="Built before 1978 — lead-based paint disclosure applies">
+              Pre-1978 · Lead Paint
+            </span>
+          )}
+        </div>
+        {/* Distance + Adj price */}
+        <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+          {comp.distanceMiles != null && (
+            <span className="text-[9px] text-foreground-tertiary tabular-nums">{comp.distanceMiles.toFixed(2)} mi</span>
+          )}
           {comp.adjustedPrice != null && comp.adjustedPrice !== comp.salePrice && (
             <span className="text-[10px] font-medium text-emerald-500 tabular-nums ml-auto">Adj ${comp.adjustedPrice.toLocaleString()}</span>
           )}

@@ -208,6 +208,7 @@ export interface AppraisalResultWithFallback extends AppraisalResult {
     | 'older_sales'
     | 'subdivision_expansion'
     | 'geographic_expansion'
+    | 'physical_relaxation'
     | 'no_subdivision'
     | 'nearest_comps'
     | 'insufficient'
@@ -476,6 +477,73 @@ class PropertyAppraisalService implements AppraisalService {
             fallbackUsed: 'geographic_expansion',
             fallbackReason: `Insufficient comps in neighborhood "${subject.neighborhoodName || 'unknown'}". Expanded to radius-only geography (distance ×${expansion.geographicDistanceMultiplier}).`,
             expansionApplied: expansion.allowOlderSales ? ['older_sales', 'subdivision', 'geographic'] : ['subdivision', 'geographic'],
+          }
+        }
+
+        // Step 4b: Nothing qualifies even outside the neighborhood — now
+        // relax the physical match rules (style, construction, foundation,
+        // pool, garage, condition). They're hard pass/fail "until we have
+        // nothing else to choose from"; this is that last resort. Filters
+        // stay evaluated so the failed-rule audit trail is preserved —
+        // we force-enable the best-priced comps instead of hiding failures.
+        const result4b = this.evaluate(subject, comparables, {
+          filters: geoFilters,
+          adjustments,
+        })
+        const PHYSICAL_MATCH_TYPES = new Set([
+          'building_style_match',
+          'construction_material_match',
+          'foundation_match',
+          'pool_match',
+          'garage_match',
+          'condition_match',
+        ])
+        // Rescue only comps whose failures are EXCLUSIVELY physical matches —
+        // a comp that also fails distance/sale-age/etc. is not a candidate.
+        const priorityByType = new Map(geoFilters.map((f) => [f.type, f.priority]))
+        const physicalCandidates = result4b.comparables
+          .filter((c) => {
+            if ((c.adjustedSalePrice ?? c.salePrice ?? 0) <= 0) return false
+            const hardFailures = (c.evaluation?.filterResults ?? []).filter(
+              (f) => !f.passed && f.status === 'failed' && priorityByType.get(f.type) !== 'soft'
+            )
+            return hardFailures.length > 0 && hardFailures.every((f) => PHYSICAL_MATCH_TYPES.has(f.type))
+          })
+          .sort((a, b) => (b.adjustedSalePrice ?? b.salePrice ?? 0) - (a.adjustedSalePrice ?? a.salePrice ?? 0))
+          .slice(0, REQUIRED_ARV_COMPS)
+        if (physicalCandidates.length > 0) {
+          const pickedIds = new Set(physicalCandidates.map((c) => c.id))
+          const physComps = result4b.comparables.map((c) =>
+            pickedIds.has(c.id)
+              ? { ...c, isEnabled: true, arvStatus: 'selected' as const }
+              : { ...c, arvStatus: c.isEnabled ? ('not_examined' as const) : ('disqualified' as const) }
+          )
+          const canPpsf =
+            subject.squareFeet != null && subject.squareFeet > 0 &&
+            physicalCandidates.every((c) => c.squareFeet != null && c.squareFeet > 0)
+          const physArv = canPpsf
+            ? Math.round(
+                (physicalCandidates.reduce(
+                  (sum, c) => sum + (c.adjustedSalePrice ?? c.salePrice ?? 0) / (c.squareFeet as number), 0
+                ) / physicalCandidates.length) * (subject.squareFeet as number)
+              )
+            : Math.round(
+                physicalCandidates.reduce((sum, c) => sum + (c.adjustedSalePrice ?? c.salePrice ?? 0), 0) /
+                  physicalCandidates.length
+              )
+          console.log(`Appraisal: ${physicalCandidates.length} comps selected after physical-match relaxation`)
+          return {
+            ...result4b,
+            comparables: physComps,
+            arv: physArv,
+            enabledCount: physComps.filter((c) => c.isEnabled).length,
+            selectedCompIds: physicalCandidates.map((c) => c.id),
+            insufficientComps: false,
+            fallbackUsed: 'physical_relaxation',
+            fallbackReason: `No comps matched the subject's style/construction profile even outside the neighborhood. Selected the ${physicalCandidates.length} best-priced sales with physical-match rules relaxed — failed rules remain visible per comp.`,
+            expansionApplied: expansion.allowOlderSales
+              ? ['older_sales', 'subdivision', 'geographic', 'physical']
+              : ['subdivision', 'geographic', 'physical'],
           }
         }
       }

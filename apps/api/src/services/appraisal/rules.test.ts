@@ -476,6 +476,44 @@ describe('ARV comp selection', () => {
     expect(r.selectedCompIds).not.toContain('out1')
   })
 
+  it('relaxes style/construction matches only as a last resort after geography', () => {
+    // Every comp mismatches on building style — hard fail under strict rules.
+    // Expansion must exhaust older sales → subdivision → neighborhood before
+    // dropping the physical match set.
+    const styleComps = [
+      comp('m1', { construction: { buildingStyle: 'Colonial' } }),
+      comp('m2', { construction: { buildingStyle: 'Colonial' } }),
+      comp('m3', { construction: { buildingStyle: 'Colonial' } }),
+    ]
+    const r = service.evaluateWithFallback(
+      subject({ construction: { buildingStyle: 'Ranch' } }),
+      styleComps,
+      {
+        filters: [
+          { type: 'subdivision_match', enabled: true, value: 1 },
+          { type: 'building_style_match', enabled: true, value: 1 },
+          { type: 'sale_age', enabled: true, value: 180 },
+          { type: 'distance', enabled: true, value: 1.0 },
+        ],
+        adjustments: [],
+        expansion: {
+          allowGeographicExpansion: true,
+          allowNeighborhoodExpansion: true,
+          allowOlderSales: true,
+          olderSaleAgeMultiplier: 2,
+          olderSaleDiscountPercent: 15,
+        },
+      }
+    )
+
+    expect(r.fallbackUsed).toBe('physical_relaxation')
+    expect(r.expansionApplied).toContain('physical')
+    expect(r.selectedCompIds?.length).toBe(3)
+    // The failed rule stays on the record — relaxation is visible, not silent
+    const comp1 = r.comparables.find((c) => c.id === 'm1')
+    expect(comp1?.evaluation?.filterResults.some((f) => f.type === 'building_style_match' && !f.passed)).toBe(true)
+  })
+
   it('uses older sales only when allowed, with configured discount', () => {
     const comps = [
       comp('recent1', { salePrice: 300000, saleDate: daysAgo(30) }),
