@@ -71,7 +71,7 @@ const comp = (id: string, overrides?: Partial<NormalizedComparable>): Normalized
 
 const only = (filters: FilterType[]) =>
   filters.map((type) => {
-    const defaults: Record<FilterType, number> = {
+    const defaults: Partial<Record<FilterType, number>> = {
       subdivision_match: 1,
       sale_age: 180,
       sqft_diff: 250,
@@ -421,7 +421,7 @@ describe('ARV comp selection', () => {
     expect(r.insufficientComps).toBe(true)
   })
 
-  it('expands geography before relaxing sale age', () => {
+  it('leaves the subdivision before dropping the neighborhood', () => {
     // 2 in-subdivision comps + 2 out-of-subdivision comps in range
     const comps = [
       comp('in1', { subdivision: 'Oak Park', salePrice: 300000 }),
@@ -438,10 +438,42 @@ describe('ARV comp selection', () => {
       expansion: { allowGeographicExpansion: true, allowOlderSales: false },
     })
 
-    expect(r.fallbackUsed).toBe('geographic_expansion')
-    expect(r.expansionApplied).toContain('geographic')
+    expect(r.fallbackUsed).toBe('subdivision_expansion')
+    expect(r.expansionApplied).toContain('subdivision')
     expect(r.expansionApplied).not.toContain('older_sales')
     expect(r.selectedCompIds).toContain('out1')
+  })
+
+  it('time-travels to older in-area sales before leaving the subdivision', () => {
+    // 2 recent + 1 old in-subdivision comps, and 1 recent out-of-subdivision
+    // comp. Policy: relax sale_age/year_built while keeping subdivision —
+    // never pick the closer-but-outside sale when an older inside sale exists.
+    const comps = [
+      comp('recent1', { subdivision: 'Oak Park', salePrice: 300000 }),
+      comp('recent2', { subdivision: 'Oak Park', salePrice: 310000 }),
+      comp('old_in', { subdivision: 'Oak Park', salePrice: 400000, saleDate: daysAgo(300) }),
+      comp('out1', { subdivision: 'Other', distanceMiles: 0.9, salePrice: 320000 }),
+    ]
+    const r = service.evaluateWithFallback(subject(), comps, {
+      filters: [
+        { type: 'subdivision_match', enabled: true, value: 1 },
+        { type: 'sale_age', enabled: true, value: 180 },
+        { type: 'distance', enabled: true, value: 1.0 },
+      ],
+      adjustments: [],
+      expansion: {
+        allowGeographicExpansion: true,
+        allowOlderSales: true,
+        olderSaleAgeMultiplier: 2,
+        olderSaleDiscountPercent: 15,
+      },
+    })
+
+    expect(r.fallbackUsed).toBe('older_sales')
+    expect(r.expansionApplied).toEqual(['older_sales'])
+    // The old in-subdivision comp wins over the recent out-of-subdivision comp
+    expect(r.selectedCompIds).toContain('old_in')
+    expect(r.selectedCompIds).not.toContain('out1')
   })
 
   it('uses older sales only when allowed, with configured discount', () => {

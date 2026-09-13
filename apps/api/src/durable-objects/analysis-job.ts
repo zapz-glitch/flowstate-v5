@@ -519,9 +519,12 @@ export class AnalysisJobDO {
             comps.items = (comps.items as Array<Record<string, unknown>>).map((comp) => {
               const compId = comp.id as string
               const ranking = llmResult.rankings.find((r) => r.compId === compId)
-              const isSelected = selectedSet.has(compId)
+              // Provider-backed hard filters are authoritative — the LLM can rank
+              // eligible comps but cannot resurrect one that failed a hard rule.
+              const hardFailed = (comp.appraisalRules as { passedFilters?: boolean } | null | undefined)?.passedFilters === false
+              const isSelected = selectedSet.has(compId) && !hardFailed
               const isAsIs = asIsSet.has(compId)
-              return { ...comp, isEnabled: isSelected, compGroup: isSelected ? 'arv' : isAsIs ? 'as_is' : null, selectionReason: ranking?.reasoning || null, qualityScore: ranking?.score ?? null, keyFeatures: ranking?.keyFeatures?.length ? ranking.keyFeatures : null, disableReasons: isSelected ? [] : [ranking?.reasoning || 'Not selected by AI analysis'] }
+              return { ...comp, isEnabled: isSelected, compGroup: isSelected ? 'arv' : isAsIs ? 'as_is' : null, selectionReason: ranking?.reasoning || null, qualityScore: ranking?.score ?? null, keyFeatures: ranking?.keyFeatures?.length ? ranking.keyFeatures : null, disableReasons: isSelected ? [] : hardFailed ? comp.disableReasons : [ranking?.reasoning || 'Not selected by AI analysis'] }
             })
             comps.enabledCount = (comps.items as Array<Record<string, unknown>>).filter((c) => c.isEnabled).length
             comps.disabledCount = (comps.items as unknown[]).length - (comps.enabledCount as number)
@@ -718,7 +721,10 @@ export class AnalysisJobDO {
             currentResult.comps.items = currentResult.comps.items.map((comp: Record<string, unknown>) => {
               const compId = comp.id as string
               const ranking = llmResult.rankings.find((r) => r.compId === compId)
-              const isSelected = selectedSet.has(compId)
+              // Provider-backed hard filters are authoritative — the LLM can rank
+              // eligible comps but cannot resurrect one that failed a hard rule.
+              const hardFailed = (comp.appraisalRules as { passedFilters?: boolean } | null | undefined)?.passedFilters === false
+              const isSelected = selectedSet.has(compId) && !hardFailed
               const isAsIs = asIsSet.has(compId)
               return {
                 ...comp,
@@ -729,7 +735,9 @@ export class AnalysisJobDO {
                 keyFeatures: ranking?.keyFeatures?.length ? ranking.keyFeatures : null,
                 disableReasons: isSelected
                   ? []
-                  : [ranking?.reasoning || 'Not selected by AI analysis'],
+                  : hardFailed
+                    ? comp.disableReasons
+                    : [ranking?.reasoning || 'Not selected by AI analysis'],
               }
             })
 

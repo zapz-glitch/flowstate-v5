@@ -19,13 +19,14 @@ import {
   CONSTRUCTION_TYPE,
   FOUNDATION_TYPE,
   ROOF_TYPE,
+  ROOF_COVER,
   EXTERIOR_WALLS,
   BUILDING_QUALITY,
 } from '../property-api/providers/corelogic-codes'
 
 /** Resolve construction codes to labels (safety net for cached data with raw codes) */
 function resolveConstruction(c?: { type?: string; qualityCode?: string; buildingStyle?: string; foundationType?: string; roofType?: string; exteriorWalls?: string; storiesType?: string; roofCover?: string }) {
-  if (!c) return { foundationType: null as string | null, buildingStyle: null as string | null, storiesType: null as string | null, constructionType: null as string | null, qualityCode: null as string | null, roofType: null as string | null, exteriorWalls: null as string | null }
+  if (!c) return { foundationType: null as string | null, buildingStyle: null as string | null, storiesType: null as string | null, constructionType: null as string | null, qualityCode: null as string | null, roofType: null as string | null, roofCover: null as string | null, exteriorWalls: null as string | null }
   return {
     foundationType: lookupCode(FOUNDATION_TYPE, c.foundationType) ?? null,
     buildingStyle: lookupCode(BUILDING_STYLE, c.buildingStyle) ?? null,
@@ -33,6 +34,7 @@ function resolveConstruction(c?: { type?: string; qualityCode?: string; building
     constructionType: lookupCode(CONSTRUCTION_TYPE, c.type) ?? null,
     qualityCode: lookupCode(BUILDING_QUALITY, c.qualityCode) ?? null,
     roofType: lookupCode(ROOF_TYPE, c.roofType) ?? null,
+    roofCover: lookupCode(ROOF_COVER, c.roofCover) ?? null,
     exteriorWalls: lookupCode(EXTERIOR_WALLS, c.exteriorWalls) ?? null,
   }
 }
@@ -497,7 +499,23 @@ export interface AnalysisResponse {
     buildingGrade: string | null
     /** Assessor improvement value in dollars */
     improvementValue: number | null
-    /** Cotality THV AVM estimate (subject only, parcel-level) */
+    /** Added-on building area (sqft) — non-null indicates a permitted addition */
+    additionSquareFeet: number | null
+    /** Roof cover material (e.g. Composition Shingle, Tile) */
+    roofCover: string | null
+    /** Construction type (e.g. Frame, Masonry) */
+    constructionType: string | null
+    /** Exterior wall material (e.g. Wood Siding, Brick) */
+    exteriorWalls: string | null
+    /** Roof type (e.g. Gable, Hip) */
+    roofType: string | null
+    /** Heating type (e.g. Forced Air) */
+    heating: string | null
+    /** Cooling/air conditioning type */
+    cooling: string | null
+    /** Fireplace count */
+    fireplacesCount: number | null
+    /** Cotality THV AVM estimate (subject only, parcel-level, display-only — never enters valuation math) */
     avm: {
       value: number | null
       confidence: number | null
@@ -628,6 +646,14 @@ export interface AnalysisResponse {
       buildingStyle: string | null
       /** Story type description (e.g., Split Foyer, Tri Level, 2 Story) */
       storiesType: string | null
+      /** Construction type (e.g. Frame, Masonry) */
+      constructionType: string | null
+      /** Exterior wall material (e.g. Wood Siding, Brick) */
+      exteriorWalls: string | null
+      /** Roof type (e.g. Gable, Hip) */
+      roofType: string | null
+      /** Roof cover material (e.g. Composition Shingle, Tile) */
+      roofCover: string | null
       /** Visual ARV-candidacy check (photos) for ARV-selected comps */
       curbAppeal?: {
         condition: 'renovated' | 'dated' | 'distressed' | 'unknown'
@@ -1116,6 +1142,9 @@ export function buildAnalysisResponse(
       garage: property.features?.garageType ?? null,
       garageSquareFeet: property.features?.garageSquareFeet ?? null,
       carport: property.features?.carportType ?? null,
+      heating: property.features?.heating ?? null,
+      cooling: property.features?.cooling ?? null,
+      fireplacesCount: property.features?.fireplacesCount ?? null,
       hoaFee: property.hoaFee ?? null,
       zillowUrl: generateZillowUrl({
         propertyId: property.id,
@@ -1148,6 +1177,7 @@ export function buildAnalysisResponse(
       buildingCondition: property.buildingCondition ?? null,
       buildingGrade: property.buildingGrade ?? null,
       improvementValue: property.improvementValue ?? null,
+      additionSquareFeet: property.additionSquareFeet ?? null,
       avm: enrichment.avm
         ? {
             value: enrichment.avm.value,

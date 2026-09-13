@@ -365,8 +365,16 @@ describe('evaluateComparables', () => {
 
 describe('Default Values', () => {
   it('should have all default filters', () => {
-    expect(DEFAULT_FILTERS.length).toBe(9)
+    expect(DEFAULT_FILTERS.length).toBe(17)
     expect(DEFAULT_FILTERS.map((f) => f.type)).toContain('subdivision_match')
+    expect(DEFAULT_FILTERS.map((f) => f.type)).toContain('neighborhood_match')
+    expect(DEFAULT_FILTERS.map((f) => f.type)).toContain('building_style_match')
+    expect(DEFAULT_FILTERS.map((f) => f.type)).toContain('construction_material_match')
+    expect(DEFAULT_FILTERS.map((f) => f.type)).toContain('pool_match')
+    expect(DEFAULT_FILTERS.map((f) => f.type)).toContain('garage_match')
+    expect(DEFAULT_FILTERS.map((f) => f.type)).toContain('condition_match')
+    expect(DEFAULT_FILTERS.map((f) => f.type)).toContain('stories_match')
+    expect(DEFAULT_FILTERS.map((f) => f.type)).toContain('roof_material_match')
     expect(DEFAULT_FILTERS.map((f) => f.type)).toContain('foundation_match')
     expect(DEFAULT_FILTERS.map((f) => f.type)).toContain('sale_age')
     expect(DEFAULT_FILTERS.map((f) => f.type)).toContain('sqft_diff')
@@ -394,5 +402,110 @@ describe('Default Values', () => {
     expect(DEFAULT_ADJUSTMENTS.map((a) => a.type)).toContain('traffic_backing')
     expect(DEFAULT_ADJUSTMENTS.map((a) => a.type)).toContain('traffic_fronting')
     expect(DEFAULT_ADJUSTMENTS.map((a) => a.type)).toContain('basement_sqft')
+  })
+
+  it('stories and roof material are soft priority (never disqualify)', () => {
+    expect(DEFAULT_FILTERS.find((f) => f.type === 'stories_match')?.priority).toBe('soft')
+    expect(DEFAULT_FILTERS.find((f) => f.type === 'roof_material_match')?.priority).toBe('soft')
+  })
+})
+
+// ─── Apples-to-Apples Match Filters ────────────────────────────────────────────
+
+describe('Match filters', () => {
+  const matchSubject = (overrides?: Partial<NormalizedProperty>) =>
+    createSubject({
+      neighborhoodName: 'High Country',
+      buildingCondition: 'Average',
+      construction: { buildingStyle: 'Ranch', foundationType: 'Slab', type: 'Frame', exteriorWalls: 'Wood Siding', roofCover: 'Composition Shingle' },
+      features: { poolType: 'In Ground', garageType: 'Attached', heating: 'Forced Air', cooling: 'Central' },
+      ...overrides,
+    })
+  const matchComp = (overrides?: Partial<NormalizedComparable>) =>
+    createComparable({
+      subdivision: 'Oak Hills',
+      neighborhoodName: 'High Country',
+      buildingCondition: 'Good',
+      stories: 1,
+      construction: { buildingStyle: 'Ranch', foundationType: 'Slab', type: 'Frame', exteriorWalls: 'Wood Siding', roofCover: 'Composition Shingle' },
+      features: { poolType: 'In Ground', garageType: 'Attached', heating: 'Forced Air', cooling: 'Central' },
+      ...overrides,
+    })
+  const only = (type: AppraisalFilter['type'], priority?: 'hard' | 'soft'): AppraisalFilter[] =>
+    [{ type, enabled: true, value: 1, priority }]
+
+  it('neighborhood_match fails on mismatch, not_verified when missing', () => {
+    expect(evaluateComparable(matchSubject(), matchComp({ neighborhoodName: 'Other Hood' }), only('neighborhood_match'), []).shouldDisable).toBe(true)
+    expect(evaluateComparable(matchSubject(), matchComp({ neighborhoodName: null }), only('neighborhood_match'), []).shouldDisable).toBe(false)
+    expect(evaluateComparable(matchSubject(), matchComp(), only('neighborhood_match'), []).filterResults[0].status).toBe('passed')
+  })
+
+  it('building_style_match fails on style mismatch', () => {
+    const r = evaluateComparable(matchSubject(), matchComp({ construction: { buildingStyle: 'Colonial' } }), only('building_style_match'), [])
+    expect(r.shouldDisable).toBe(true)
+    expect(r.disableReasons[0]).toContain('Style mismatch')
+  })
+
+  it('construction_material_match fails on exterior wall mismatch', () => {
+    const r = evaluateComparable(matchSubject(), matchComp({ construction: { type: 'Masonry', exteriorWalls: 'Brick' } }), only('construction_material_match'), [])
+    expect(r.shouldDisable).toBe(true)
+    // Missing comp data → not_verified pass
+    const nv = evaluateComparable(matchSubject(), matchComp({ construction: undefined }), only('construction_material_match'), [])
+    expect(nv.shouldDisable).toBe(false)
+    expect(nv.filterResults[0].status).toBe('not_verified')
+  })
+
+  it('pool_match fails on presence mismatch; missing data is not_verified', () => {
+    // Subject has pool, comp has explicit no-pool → fail
+    const fail = evaluateComparable(
+      matchSubject(),
+      matchComp({ features: { poolType: '' } }),
+      only('pool_match'),
+      []
+    )
+    expect(fail.shouldDisable).toBe(true)
+    // Missing comp data → not_verified, not a fail
+    const nv = evaluateComparable(matchSubject(), matchComp({ features: { poolType: undefined } }), only('pool_match'), [])
+    expect(nv.shouldDisable).toBe(false)
+    expect(nv.filterResults[0].status).toBe('not_verified')
+  })
+
+  it('garage_match fails when subject has covered parking and comp has none', () => {
+    // Present-but-empty fields signal "has data, no covered parking"
+    const compNoGarage = createComparable({ features: { garageType: '', garageSquareFeet: 0, carportType: '' } })
+    const r = evaluateComparable(matchSubject(), compNoGarage, only('garage_match'), [])
+    expect(r.shouldDisable).toBe(true)
+    // Carport counts as covered parking → match
+    const compCarport = createComparable({ features: { carportType: 'Attached' } })
+    expect(evaluateComparable(matchSubject(), compCarport, only('garage_match'), []).shouldDisable).toBe(false)
+  })
+
+  it('condition_match fails when comp condition is below subject', () => {
+    const r = evaluateComparable(matchSubject(), matchComp({ buildingCondition: 'Poor' }), only('condition_match'), [])
+    expect(r.shouldDisable).toBe(true)
+    // Equal or better passes
+    expect(evaluateComparable(matchSubject(), matchComp({ buildingCondition: 'Excellent' }), only('condition_match'), []).shouldDisable).toBe(false)
+    expect(evaluateComparable(matchSubject(), matchComp({ buildingCondition: 'Average' }), only('condition_match'), []).shouldDisable).toBe(false)
+    // Missing → not_verified
+    const nv = evaluateComparable(matchSubject(), matchComp({ buildingCondition: null }), only('condition_match'), [])
+    expect(nv.filterResults[0].status).toBe('not_verified')
+  })
+
+  it('stories_match records mismatch but does not disqualify (soft)', () => {
+    const r = evaluateComparable(matchSubject(), matchComp({ stories: 2 }), only('stories_match', 'soft'), [])
+    expect(r.shouldDisable).toBe(false)
+    expect(r.filterResults[0].passed).toBe(false)
+    expect(r.filterResults[0].status).toBe('failed')
+  })
+
+  it('roof_material_match records mismatch but does not disqualify (soft)', () => {
+    const r = evaluateComparable(
+      matchSubject(),
+      matchComp({ construction: { roofCover: 'Tile' } }),
+      only('roof_material_match', 'soft'),
+      []
+    )
+    expect(r.shouldDisable).toBe(false)
+    expect(r.filterResults[0].passed).toBe(false)
   })
 })

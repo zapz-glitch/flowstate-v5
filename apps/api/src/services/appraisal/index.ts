@@ -205,8 +205,9 @@ export interface AppraisalResultWithFallback extends AppraisalResult {
   /** Indicates which fallback strategy was used, if any */
   fallbackUsed:
     | 'none'
-    | 'geographic_expansion'
     | 'older_sales'
+    | 'subdivision_expansion'
+    | 'geographic_expansion'
     | 'no_subdivision'
     | 'nearest_comps'
     | 'insufficient'
@@ -237,12 +238,19 @@ class PropertyAppraisalService implements AppraisalService {
       return c.isEnabled && price != null && price > 0
     })
 
-    // Highest-priced valid sales first — stop after REQUIRED_ARV_COMPS
-    const sorted = [...eligible].sort(
-      (a, b) =>
+    // Best apples-to-apples first: comps with more verified match passes
+    // (status 'passed') outrank comps that slid through on missing data
+    // ('not_verified'). Price breaks the tie — highest adjusted first.
+    const verifiedPasses = (c: AppraisedComparable) =>
+      c.evaluation.filterResults.filter((r) => r.status === 'passed').length
+    const sorted = [...eligible].sort((a, b) => {
+      const diff = verifiedPasses(b) - verifiedPasses(a)
+      if (diff !== 0) return diff
+      return (
         (b.adjustedSalePrice ?? b.salePrice ?? 0) -
         (a.adjustedSalePrice ?? a.salePrice ?? 0)
-    )
+      )
+    })
     const selected = sorted.slice(0, REQUIRED_ARV_COMPS)
     const selectedIds = new Set(selected.map((c) => c.id))
 
@@ -377,44 +385,17 @@ class PropertyAppraisalService implements AppraisalService {
       }
     }
 
-    // Step 2: Geographic expansion FIRST — "better to leave the
-    // subdivision than time travel." Drop subdivision_match and widen
-    // the distance radius by the configured multiplier.
-    if (expansion.allowGeographicExpansion) {
-      const expandedFilters = defaultFilters.map((f) => {
-        if (f.type === 'subdivision_match') return { ...f, enabled: false }
-        if (f.type === 'distance') return { ...f, value: f.value * expansion.geographicDistanceMultiplier }
-        return f
-      })
-      const result2 = this.evaluate(subject, comparables, {
-        filters: expandedFilters,
-        adjustments,
-      })
-
-      if (!result2.insufficientComps) {
-        console.log(`Appraisal: ${result2.selectedCompIds?.length} comps selected after geographic expansion`)
-        return {
-          ...result2,
-          fallbackUsed: 'geographic_expansion',
-          fallbackReason: `Insufficient comps in subdivision "${subject.subdivision || 'unknown'}". Expanded geography (distance ×${expansion.geographicDistanceMultiplier}).`,
-          expansionApplied: ['geographic'],
-        }
-      }
-    }
-
-    // Step 3: Older sales as LAST resort — relax sale_age by the
-    // configured multiplier and apply the configured market-correction
-    // discount to expansion-era comps.
+    // Step 2: TIME TRAVEL FIRST — "better to time travel for older
+    // sales/older construction that match than to leave the subdivision."
+    // Relax sale_age and year_built_diff while every location and physical
+    // match rule stays enforced; apply the market-correction discount.
     if (expansion.allowOlderSales) {
       const olderFilters = defaultFilters.map((f) => {
-        if (f.type === 'subdivision_match' && expansion.allowGeographicExpansion) {
-          return { ...f, enabled: false }
-        }
-        if (f.type === 'distance' && expansion.allowGeographicExpansion) {
-          return { ...f, value: f.value * expansion.geographicDistanceMultiplier }
-        }
         if (f.type === 'sale_age') {
           return { ...f, value: f.value * expansion.olderSaleAgeMultiplier }
+        }
+        if (f.type === 'year_built_diff') {
+          return { ...f, value: f.value * expansion.olderYearBuiltMultiplier }
         }
         return f
       })
@@ -433,26 +414,74 @@ class PropertyAppraisalService implements AppraisalService {
           percent: expansion.olderSaleDiscountPercent,
         })
       }
-      const result3 = this.evaluate(subject, comparables, {
+      const result2 = this.evaluate(subject, comparables, {
         filters: olderFilters,
         adjustments: olderAdjustments,
       })
 
-      if (!result3.insufficientComps) {
-        console.log(`Appraisal: ${result3.selectedCompIds?.length} comps selected after allowing older sales`)
-        const applied: Array<'geographic' | 'older_sales'> = expansion.allowGeographicExpansion
-          ? ['geographic', 'older_sales']
-          : ['older_sales']
+      if (!result2.insufficientComps) {
+        const maxDays = Math.round(
+          (defaultFilters.find((f) => f.type === 'sale_age')?.value ?? 180) *
+            expansion.olderSaleAgeMultiplier
+        )
+        console.log(`Appraisal: ${result2.selectedCompIds?.length} comps selected after allowing older sales`)
         return {
-          ...result3,
+          ...result2,
           fallbackUsed: 'older_sales',
-          fallbackReason: `Insufficient recent comps. Allowed sales up to ${Math.round((defaultFilters.find((f) => f.type === 'sale_age')?.value ?? 180) * expansion.olderSaleAgeMultiplier)} days with ${expansion.olderSaleDiscountPercent}% market correction.`,
-          expansionApplied: applied,
+          fallbackReason: `Insufficient recent comps in "${subject.subdivision || subject.neighborhoodName || 'subject area'}". Time-traveled to sales up to ${maxDays} days / ±${Math.round((defaultFilters.find((f) => f.type === 'year_built_diff')?.value ?? 10) * expansion.olderYearBuiltMultiplier)}yr builds with ${expansion.olderSaleDiscountPercent}% market correction — location and physical matches still enforced.`,
+          expansionApplied: ['older_sales'],
         }
       }
     }
 
-    // Step 4: No comp satisfies the full rule set. INSUFFICIENT_COMPS is
+    // Step 3: Leave the subdivision — neighborhood match (when data exists)
+    // still holds the comp inside the micro-market; distance widens.
+    if (expansion.allowGeographicExpansion) {
+      const subExpandedFilters = defaultFilters.map((f) => {
+        if (f.type === 'subdivision_match') return { ...f, enabled: false }
+        if (f.type === 'distance') return { ...f, value: f.value * expansion.geographicDistanceMultiplier }
+        if (f.type === 'sale_age' && expansion.allowOlderSales) return { ...f, value: f.value * expansion.olderSaleAgeMultiplier }
+        if (f.type === 'year_built_diff' && expansion.allowOlderSales) return { ...f, value: f.value * expansion.olderYearBuiltMultiplier }
+        return f
+      })
+      const result3 = this.evaluate(subject, comparables, {
+        filters: subExpandedFilters,
+        adjustments,
+      })
+
+      if (!result3.insufficientComps) {
+        console.log(`Appraisal: ${result3.selectedCompIds?.length} comps selected after subdivision expansion`)
+        return {
+          ...result3,
+          fallbackUsed: 'subdivision_expansion',
+          fallbackReason: `Insufficient comps in subdivision "${subject.subdivision || 'unknown'}". Left the subdivision — neighborhood match and widened radius (×${expansion.geographicDistanceMultiplier}) still apply.`,
+          expansionApplied: expansion.allowOlderSales ? ['older_sales', 'subdivision'] : ['subdivision'],
+        }
+      }
+
+      // Step 4: Leave the neighborhood — radius-only geography.
+      if (expansion.allowNeighborhoodExpansion) {
+        const geoFilters = subExpandedFilters.map((f) =>
+          f.type === 'neighborhood_match' ? { ...f, enabled: false } : f
+        )
+        const result4 = this.evaluate(subject, comparables, {
+          filters: geoFilters,
+          adjustments,
+        })
+
+        if (!result4.insufficientComps) {
+          console.log(`Appraisal: ${result4.selectedCompIds?.length} comps selected after geographic expansion`)
+          return {
+            ...result4,
+            fallbackUsed: 'geographic_expansion',
+            fallbackReason: `Insufficient comps in neighborhood "${subject.neighborhoodName || 'unknown'}". Expanded to radius-only geography (distance ×${expansion.geographicDistanceMultiplier}).`,
+            expansionApplied: expansion.allowOlderSales ? ['older_sales', 'subdivision', 'geographic'] : ['subdivision', 'geographic'],
+          }
+        }
+      }
+    }
+
+    // Step 5: No comp satisfies the full rule set. INSUFFICIENT_COMPS is
     // reserved for the honest dead end — no comparable sold within the
     // configured sale-age window. When recent sales DO exist, relax to the
     // most recent ones (up to 3, highest adjusted price first) so the
@@ -462,7 +491,7 @@ class PropertyAppraisalService implements AppraisalService {
     const lastResult = this.evaluate(subject, comparables, {
       filters: expansion.allowGeographicExpansion
         ? defaultFilters.map((f) =>
-            f.type === 'subdivision_match' ? { ...f, enabled: false } : f
+            f.type === 'subdivision_match' || f.type === 'neighborhood_match' ? { ...f, enabled: false } : f
           )
         : defaultFilters,
       adjustments,
@@ -529,7 +558,7 @@ class PropertyAppraisalService implements AppraisalService {
       insufficientComps: false,
       fallbackUsed: 'nearest_comps',
       fallbackReason: `No comps satisfied all appraisal rules; using the ${recentComps.length} most recent sale(s) within ${saleAgeDays} days. Failed rules remain visible per comp.`,
-      expansionApplied: ['geographic'],
+      expansionApplied: expansion.allowGeographicExpansion ? ['subdivision', 'geographic'] : [],
     }
   }
 

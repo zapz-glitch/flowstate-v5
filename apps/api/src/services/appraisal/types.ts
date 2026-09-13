@@ -11,8 +11,15 @@ import type { NormalizedProperty, NormalizedComparable } from '../property-api/t
 
 export type FilterType =
   | 'subdivision_match'
+  | 'neighborhood_match'
   | 'building_style_match'
   | 'foundation_match'
+  | 'construction_material_match'
+  | 'pool_match'
+  | 'garage_match'
+  | 'stories_match'
+  | 'roof_material_match'
+  | 'condition_match'
   | 'sale_age'
   | 'sqft_diff'
   | 'year_built_diff'
@@ -26,11 +33,31 @@ export interface AppraisalFilter {
   enabled: boolean
   /** Threshold value for the filter */
   value: number
+  /**
+   * hard (default): a verified failure disqualifies the comp.
+   * soft: failure is recorded for ranking/reporting but never disqualifies —
+   * used for "ideally matches" fields like stories and roof material.
+   */
+  priority?: 'hard' | 'soft'
 }
 
 export const DEFAULT_FILTERS: AppraisalFilter[] = [
-  { type: 'subdivision_match', enabled: true, value: 1 }, // Enabled - uses enriched comp data
-  { type: 'foundation_match', enabled: true, value: 1 }, // Same foundation type (not_verified when missing)
+  // Location — subdivision is the hammer; neighborhood is the fallback
+  // geography when no HOA/subdivision exists.
+  { type: 'subdivision_match', enabled: true, value: 1 },
+  { type: 'neighborhood_match', enabled: true, value: 1 },
+  // Apples-to-apples physical matches (hard) — assessed from provider
+  // building data; not_verified never disqualifies.
+  { type: 'building_style_match', enabled: true, value: 1 },
+  { type: 'foundation_match', enabled: true, value: 1 },
+  { type: 'construction_material_match', enabled: true, value: 1 },
+  { type: 'pool_match', enabled: true, value: 1 },
+  { type: 'garage_match', enabled: true, value: 1 },
+  { type: 'condition_match', enabled: true, value: 1 }, // assessor condition — comp must be at/above subject tier
+  // Preferred matches (soft) — recorded for ranking, never disqualify.
+  { type: 'stories_match', enabled: true, value: 1, priority: 'soft' },
+  { type: 'roof_material_match', enabled: true, value: 1, priority: 'soft' },
+  // Size/recency/geography thresholds (relaxable in expansion tiers)
   { type: 'sale_age', enabled: true, value: 180 }, // 6 months max comp age
   { type: 'sqft_diff', enabled: true, value: 250 }, // ±250 sqft variance
   { type: 'year_built_diff', enabled: true, value: 10 }, // ±10 years
@@ -54,6 +81,12 @@ export const FILTER_LABELS: Record<FilterType, {
     unit: '',
     description: 'Must be in same subdivision as subject',
   },
+  neighborhood_match: {
+    label: 'Neighborhood Match',
+    shortLabel: 'Neighborhood',
+    unit: '',
+    description: 'Must be in the same neighborhood — fallback geography when no subdivision exists',
+  },
   building_style_match: {
     label: 'Building Style Match',
     shortLabel: 'Style',
@@ -65,6 +98,42 @@ export const FILTER_LABELS: Record<FilterType, {
     shortLabel: 'Foundation',
     unit: '',
     description: 'Must match subject foundation type (e.g. Slab, Continuous Footing)',
+  },
+  construction_material_match: {
+    label: 'Construction Material Match',
+    shortLabel: 'Construction',
+    unit: '',
+    description: 'Must match subject construction type and exterior wall material (e.g. Frame/Wood Siding vs Brick)',
+  },
+  pool_match: {
+    label: 'Pool Match',
+    shortLabel: 'Pool',
+    unit: '',
+    description: 'Pool presence must match the subject',
+  },
+  garage_match: {
+    label: 'Garage/Carport Match',
+    shortLabel: 'Garage',
+    unit: '',
+    description: 'Covered parking (garage or carport) presence must match the subject',
+  },
+  stories_match: {
+    label: 'Stories Match',
+    shortLabel: 'Stories',
+    unit: '',
+    description: 'Story count should match the subject (preferred — ranks comps, never disqualifies)',
+  },
+  roof_material_match: {
+    label: 'Roof Material Match',
+    shortLabel: 'Roof',
+    unit: '',
+    description: 'Roof cover material should match the subject (preferred — matters in some markets)',
+  },
+  condition_match: {
+    label: 'Assessor Condition Match',
+    shortLabel: 'Condition',
+    unit: '',
+    description: 'Comp assessor condition must be at or above the subject tier (e.g. comp cannot be worse condition)',
   },
   sale_age: {
     label: 'Sale Age',
@@ -265,31 +334,40 @@ export interface AppraisalRulePreset {
  * required number of valid comps are found. Rules are never silently
  * weakened; each expansion tier is explicitly enabled and recorded.
  *
- * Appraisal principle applied: "better to leave the subdivision than
- * time travel" — geography expands before sale-age relaxes.
+ * Appraisal principle applied: "better to time travel than leave the
+ * subdivision" — sale-age and year-built relax FIRST (older sales/older
+ * construction that still match the subject), geography expands only
+ * after the in-area history is exhausted: subdivision → neighborhood →
+ * widened radius.
  */
 export interface ExpansionPolicy {
   /** Master switch for all expansion tiers (default: true) */
   enabled?: boolean
-  /** Allow dropping the subdivision/micro-market constraint (default: true) */
-  allowGeographicExpansion?: boolean
-  /** Distance multiplier when geography expands (default: 2 = widen to 2× configured radius) */
-  geographicDistanceMultiplier?: number
-  /** Allow materially older sales as a last resort (default: false) */
+  /** Allow materially older sales that still match on location+physical rules (default: true) */
   allowOlderSales?: boolean
   /** Sale-age multiplier when older sales allowed (default: 2 = up to 2× configured max age) */
   olderSaleAgeMultiplier?: number
+  /** Year-built variance multiplier applied alongside older sales (default: 2) */
+  olderYearBuiltMultiplier?: number
   /** Downward market-correction % applied to expansion-era older sales (10-20; default 15) */
   olderSaleDiscountPercent?: number
+  /** Allow dropping the subdivision constraint (falls back to neighborhood match) (default: true) */
+  allowGeographicExpansion?: boolean
+  /** Allow dropping the neighborhood constraint entirely (radius only) (default: true) */
+  allowNeighborhoodExpansion?: boolean
+  /** Distance multiplier when geography expands (default: 2 = widen to 2× configured radius) */
+  geographicDistanceMultiplier?: number
 }
 
 export const DEFAULT_EXPANSION_POLICY: Required<ExpansionPolicy> = {
   enabled: true,
-  allowGeographicExpansion: true,
-  geographicDistanceMultiplier: 2,
-  allowOlderSales: false,
+  allowOlderSales: true,
   olderSaleAgeMultiplier: 2,
+  olderYearBuiltMultiplier: 2,
   olderSaleDiscountPercent: 15,
+  allowGeographicExpansion: true,
+  allowNeighborhoodExpansion: true,
+  geographicDistanceMultiplier: 2,
 }
 
 export interface AppraisalOptions {
@@ -346,7 +424,7 @@ export interface AppraisalResult {
   /** True when fewer than 3 valid comps found even after approved expansion */
   insufficientComps?: boolean
   /** Expansion tiers actually applied to reach the comp set */
-  expansionApplied?: Array<'geographic' | 'older_sales'>
+  expansionApplied?: Array<'older_sales' | 'subdivision' | 'geographic'>
 }
 
 // ─── Response Types ────────────────────────────────────────────────────────────

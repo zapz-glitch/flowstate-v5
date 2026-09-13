@@ -57,6 +57,7 @@ export function AnalysisResultLayout({
         <div ref={valuationCardRef as React.RefObject<HTMLDivElement>} className="sticky top-0 z-10">
           <DealSummaryHero
             valuation={valuation}
+            avm={subject?.avm}
             isRecalculated={isRecalculated}
             onOpenSettings={onOpenSettings}
           />

@@ -793,6 +793,7 @@ function normalizeProperty(
   const structureFeatures = firstBuilding?.structureFeatures as Record<string, unknown> | undefined
   const structureExterior = firstBuilding?.structureExterior as Record<string, unknown> | undefined
   const structureVerticalProfile = firstBuilding?.structureVerticalProfile as Record<string, unknown> | undefined
+  const interiorArea = firstBuilding?.interiorArea as Record<string, unknown> | undefined
 
   // Site location data - v1 structure: siteLocation.data.locationLegal, landUseAndZoningCodes
   const siteLocationResponse = rawData.siteLocation as Record<string, unknown> | undefined
@@ -962,6 +963,8 @@ function normalizeProperty(
     buildingCondition: lookupCode(BUILDING_CONDITION, constructionDetails?.buildingImprovementConditionCode as string) || null,
     buildingGrade: lookupCode(BUILDING_CONDITION, structureClassification?.gradeTypeCode as string) || null,
     improvementValue: (constructionDetails?.buildingImprovementValue as number) || null,
+    // Addition area — non-null indicates a permitted addition on the subject
+    additionSquareFeet: (interiorArea?.buildingAdditionsAreaSquareFeet as number) || null,
     // Site-location geography — neighborhood/subdivision support for comp analysis
     neighborhoodName: (siteLocationData?.neighborhood as Record<string, unknown> | undefined)?.name as string || undefined,
     neighborhoodCode: (siteLocationData?.neighborhood as Record<string, unknown> | undefined)?.code as string || undefined,

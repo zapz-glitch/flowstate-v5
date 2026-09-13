@@ -166,6 +166,8 @@ export interface NormalizedProperty {
   buildingGrade?: string | null
   /** Assessor improvement value in dollars */
   improvementValue?: number | null
+  /** Added-on building area (sqft) — indicates a permitted addition exists on the subject */
+  additionSquareFeet?: number | null
   neighborhoodName?: string
   neighborhoodCode?: string
   cbsaCode?: string

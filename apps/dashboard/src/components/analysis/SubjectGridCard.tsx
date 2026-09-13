@@ -58,6 +58,11 @@ export function SubjectGridCard({ subject, isLoading }: SubjectGridCardProps) {
                     {subject.subdivision}
                   </span>
                 )}
+                {subject.neighborhoodName && (
+                  <span className="inline-flex items-center gap-1 mt-0.5 ml-1 px-1.5 py-0.5 rounded-full text-[9px] font-medium bg-muted text-foreground-secondary border border-border">
+                    {subject.neighborhoodName}
+                  </span>
+                )}
                 {subject.yearBuilt != null && subject.yearBuilt < 1978 && (
                   <span className="inline-flex items-center gap-1 mt-0.5 ml-1 px-1.5 py-0.5 rounded-full text-[9px] font-medium bg-amber-500/10 text-amber-500 border border-amber-500/20" title="Built before 1978 — lead-based paint disclosure applies">
                     Pre-1978 · Lead Paint
@@ -130,6 +135,42 @@ export function SubjectGridCard({ subject, isLoading }: SubjectGridCardProps) {
                 <span className="text-foreground-tertiary">Carport</span>
                 <span className="font-medium">{subject.carport ? 'Yes' : '-'}</span>
               </div>
+              {(subject.constructionType || subject.exteriorWalls) && (
+                <div className="flex items-center justify-between text-[11px]">
+                  <span className="text-foreground-tertiary">Construction</span>
+                  <span className="font-medium truncate ml-2">{[subject.constructionType, subject.exteriorWalls].filter(Boolean).join(' / ')}</span>
+                </div>
+              )}
+              {(subject.roofCover || subject.roofType) && (
+                <div className="flex items-center justify-between text-[11px]">
+                  <span className="text-foreground-tertiary">Roof</span>
+                  <span className="font-medium truncate ml-2">{subject.roofCover || subject.roofType}</span>
+                </div>
+              )}
+              {subject.storiesType && (
+                <div className="flex items-center justify-between text-[11px]">
+                  <span className="text-foreground-tertiary">Stories</span>
+                  <span className="font-medium truncate ml-2">{subject.storiesType}</span>
+                </div>
+              )}
+              {(subject.heating || subject.cooling) && (
+                <div className="flex items-center justify-between text-[11px]">
+                  <span className="text-foreground-tertiary">Heat / AC</span>
+                  <span className="font-medium truncate ml-2">{[subject.heating, subject.cooling].filter(Boolean).join(' / ')}</span>
+                </div>
+              )}
+              {subject.buildingCondition && (
+                <div className="flex items-center justify-between text-[11px]">
+                  <span className="text-foreground-tertiary">Assessor Cond.</span>
+                  <span className="font-medium truncate ml-2">{subject.buildingCondition}{subject.buildingGrade ? ` · ${subject.buildingGrade} grade` : ''}</span>
+                </div>
+              )}
+              {subject.additionSquareFeet != null && subject.additionSquareFeet > 0 && (
+                <div className="flex items-center justify-between text-[11px]">
+                  <span className="text-foreground-tertiary">Addition</span>
+                  <span className="font-medium tabular-nums">{subject.additionSquareFeet.toLocaleString()} sf</span>
+                </div>
+              )}
             </div>
             <PropertyPermits permits={subject.permits} loading={isLoading} />
             {subject.photos && subject.photos.length > 0 && (

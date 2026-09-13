@@ -344,17 +344,24 @@ export async function performAnalysis(
   const filters = [...(rules.filters ?? DEFAULT_FILTERS)]
   const adjustments = rules.adjustments ?? DEFAULT_ADJUSTMENTS
 
-  // Evidence-critical rules always run: subdivision_match + foundation_match
-  // are the apples-to-apples hammers and only bite when enriched data proves
-  // a mismatch — not_verified never disqualifies, so enabling them is safe
-  // even in markets where the provider returns no subdivision/foundation.
-  for (const required of ['subdivision_match', 'foundation_match'] as const) {
-    const existing = filters.find((f) => f.type === required)
+  // Evidence-critical rules always run — the apples-to-apples match set:
+  // subdivision → neighborhood geography, then physical matches (style,
+  // foundation, construction material, pool, garage, assessor condition).
+  // They only bite when enriched data proves a mismatch — not_verified never
+  // disqualifies — so enabling them is safe even where provider data is thin.
+  const requiredMatches = DEFAULT_FILTERS.filter((f) =>
+    ['subdivision_match', 'neighborhood_match', 'building_style_match',
+     'foundation_match', 'construction_material_match', 'pool_match',
+     'garage_match', 'condition_match', 'stories_match', 'roof_material_match'
+    ].includes(f.type)
+  )
+  for (const required of requiredMatches) {
+    const existing = filters.find((f) => f.type === required.type)
     if (existing) {
       existing.enabled = true
+      existing.priority ??= required.priority
     } else {
-      const def = DEFAULT_FILTERS.find((f) => f.type === required)
-      if (def) filters.push({ ...def })
+      filters.push({ ...required })
     }
   }
 
@@ -438,10 +445,14 @@ export async function performAnalysis(
   onProgress?.('Photos fetched')
 
   // ── 3. Vision: subject renovation+curb-appeal AND comp checks in parallel ──
-  // One merged LLM call for the subject (renovation level + curb appeal);
-  // per-comp curb checks run alongside it — all vision resolves together.
+  // One merged LLM call for the subject (renovation level + curb appeal).
+  // Per-comp curb checks only run when the provider's assessor condition is
+  // missing — assessor data replaces the LLM classification for comps and
+  // saves a vision round-trip per comp.
+  const compById = new Map(appraisalResult.comparables.map((c) => [c.id, c]))
   const subjectPhotos = photoBundle?.subject?.photos ?? []
   const compVisionPairs = (appraisalResult.selectedCompIds ?? [])
+    .filter((id) => compById.get(id)?.buildingCondition == null)
     .map((id) => ({ id, photos: photoBundle?.comps[id]?.photos ?? [] }))
     .filter((p) => p.photos.length > 0)
 
@@ -533,13 +544,27 @@ export async function performAnalysis(
     check.source === 'vision' &&
     (check.condition === 'renovated' || check.rehabLevelIndex === 0)
 
+  // Assessor condition is the primary ARV-worthiness signal — comps rated
+  // Good/Very Good/Excellent are treated as retail-ready without a vision
+  // call. Vision curb-appeal remains the fallback when the provider has no
+  // condition data for the comp.
+  const ARV_WORTHY_CONDITIONS = new Set(['excellent', 'verygood', 'good'])
+  const assessorArvWorthy = (compId: string): boolean | null => {
+    const cond = compById.get(compId)?.buildingCondition?.toLowerCase().replace(/[^a-z]/g, '')
+    if (!cond) return null
+    return ARV_WORTHY_CONDITIONS.has(cond)
+  }
+
   const unverifiable: string[] = []
   const prunedFromArv: string[] = []
   for (const id of appraisalResult.selectedCompIds ?? []) {
     const check = compCurbAppeal?.[id]
-    if (!isArvWorthy(check)) {
+    const worthy = assessorArvWorthy(id) ?? isArvWorthy(check)
+    if (!worthy) {
       prunedFromArv.push(id)
-      if (!check || check.condition === 'unknown') unverifiable.push(id)
+      const assessorCond = compById.get(id)?.buildingCondition
+      if (!check && !assessorCond) unverifiable.push(id)
+      else if (check?.condition === 'unknown') unverifiable.push(id)
       if (check && check.source !== 'price') {
         compCurbAppeal![id] = {
           ...check,

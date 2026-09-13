@@ -187,6 +187,41 @@ export interface SubjectData {
   garageSquareFeet?: number | null
   /** Carport type */
   carport?: string | null
+  /** Construction type (e.g., Frame, Masonry) */
+  constructionType?: string | null
+  /** Exterior walls material */
+  exteriorWalls?: string | null
+  /** Roof type */
+  roofType?: string | null
+  /** Roof cover material */
+  roofCover?: string | null
+  /** Stories description (e.g., One Story) */
+  storiesType?: string | null
+  /** Heating system type */
+  heating?: string | null
+  /** Cooling system type */
+  cooling?: string | null
+  /** Fireplace count */
+  fireplacesCount?: number | null
+  /** Assessor building condition (e.g., Average, Good) */
+  buildingCondition?: string | null
+  /** Assessor construction grade (e.g., Fair, Good) */
+  buildingGrade?: string | null
+  /** Assessed improvement value */
+  improvementValue?: number | null
+  /** Building additions area (sqft) */
+  additionSquareFeet?: number | null
+  /** Neighborhood name from site-location */
+  neighborhoodName?: string | null
+  /** CoreLogic Automated Valuation Model — display only, never used in ARV math */
+  avm?: {
+    value?: number | null
+    confidence?: number | null
+    valueRangeLow?: number | null
+    valueRangeHigh?: number | null
+    model?: string | null
+    asOfDate?: string | null
+  } | null
   /** Property classification (as_is, after_renovation, transitional) */
   classification?: ClassificationSummary | null
 }
@@ -315,6 +350,22 @@ export interface CompItem {
   exteriorWalls?: string | null
   /** Number of stories */
   storiesType?: string | null
+  /** Stories count */
+  stories?: number | null
+  /** Roof cover material */
+  roofCover?: string | null
+  /** Heating system type */
+  heating?: string | null
+  /** Cooling system type */
+  cooling?: string | null
+  /** Fireplace count */
+  fireplacesCount?: number | null
+  /** Assessor building condition (e.g., Average, Good) */
+  buildingCondition?: string | null
+  /** Assessor construction grade */
+  buildingGrade?: string | null
+  /** Neighborhood name from site-location */
+  neighborhoodName?: string | null
   /** Building quality code */
   qualityCode?: string | null
   /** Reason this comp was selected/analyzed (LLM reasoning) */

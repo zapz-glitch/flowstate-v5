@@ -33,7 +33,8 @@ function evaluateSubdivisionMatch(
     return {
       type: 'subdivision_match',
       passed: true,
-      reason: 'Subdivision data not available',
+      status: 'not_verified',
+      reason: 'Subdivision data not available — rule not verified',
     }
   }
 
@@ -93,7 +94,8 @@ function evaluateSqftDiff(
     return {
       type: 'sqft_diff',
       passed: true,
-      reason: 'Subject sqft not available',
+      status: 'not_verified',
+      reason: 'Subject sqft not available — rule not verified',
     }
   }
 
@@ -126,7 +128,8 @@ function evaluateYearBuiltDiff(
     return {
       type: 'year_built_diff',
       passed: true,
-      reason: 'Year built not available',
+      status: 'not_verified',
+      reason: 'Year built not available — rule not verified',
     }
   }
 
@@ -151,7 +154,8 @@ function evaluateDistance(
     return {
       type: 'distance',
       passed: true,
-      reason: 'Distance not available',
+      status: 'not_verified',
+      reason: 'Distance not available — rule not verified',
     }
   }
 
@@ -297,7 +301,7 @@ function evaluateFoundationMatch(
       type: 'foundation_match',
       passed: true,
       status: 'not_verified',
-      reason: 'Foundation type data not available',
+      reason: 'Foundation type data not available — rule not verified',
     }
   }
 
@@ -312,13 +316,278 @@ function evaluateFoundationMatch(
   }
 }
 
+/**
+ * Neighborhood match — the fallback geography when a market has no
+ * HOA/subdivision. Uses the provider's normalized neighborhood name.
+ */
+function evaluateNeighborhoodMatch(
+  subject: NormalizedProperty,
+  comp: NormalizedComparable,
+  _filter: AppraisalFilter
+): FilterResult {
+  const normalize = (v?: string | null) => v?.toLowerCase().trim().replace(/\s+/g, ' ') || null
+  const subjectNeighborhood = normalize(subject.neighborhoodName)
+  const compNeighborhood = normalize(comp.neighborhoodName)
+
+  if (!subjectNeighborhood || !compNeighborhood) {
+    return {
+      type: 'neighborhood_match',
+      passed: true,
+      status: 'not_verified',
+      reason: 'Neighborhood data not available — rule not verified',
+    }
+  }
+
+  const passed = subjectNeighborhood === compNeighborhood
+  return {
+    type: 'neighborhood_match',
+    passed,
+    status: passed ? 'passed' : 'failed',
+    reason: passed ? undefined : `Neighborhood mismatch: "${compNeighborhood}" vs subject "${subjectNeighborhood}"`,
+    actualValue: compNeighborhood,
+    threshold: subjectNeighborhood,
+  }
+}
+
+/**
+ * Construction material match — construction type (frame/masonry) and
+ * exterior wall material (brick/wood siding/stucco). Compares every field
+ * present on both sides; a mismatch on any compared field fails.
+ */
+function evaluateConstructionMaterialMatch(
+  subject: NormalizedProperty,
+  comp: NormalizedComparable,
+  _filter: AppraisalFilter
+): FilterResult {
+  const normalize = (v?: string | null) => v?.toLowerCase().replace(/[^a-z]/g, '') || null
+  const pairs: Array<[string | null, string | null, string]> = [
+    [normalize(subject.construction?.type), normalize(comp.construction?.type), 'construction type'],
+    [normalize(subject.construction?.exteriorWalls), normalize(comp.construction?.exteriorWalls), 'exterior walls'],
+  ]
+
+  const compared = pairs.filter(([s, c]) => s && c)
+  if (compared.length === 0) {
+    return {
+      type: 'construction_material_match',
+      passed: true,
+      status: 'not_verified',
+      reason: 'Construction material data not available — rule not verified',
+    }
+  }
+
+  const mismatched = compared.find(([s, c]) => s !== c)
+  const passed = !mismatched
+  return {
+    type: 'construction_material_match',
+    passed,
+    status: passed ? 'passed' : 'failed',
+    reason: passed
+      ? undefined
+      : `Construction mismatch: ${mismatched![2]} "${comp.construction?.exteriorWalls ?? comp.construction?.type}" vs subject "${subject.construction?.exteriorWalls ?? subject.construction?.type}"`,
+    actualValue: comp.construction?.exteriorWalls ?? comp.construction?.type,
+    threshold: subject.construction?.exteriorWalls ?? subject.construction?.type,
+  }
+}
+
+/** Pool match — pool presence must match the subject */
+function evaluatePoolMatch(
+  subject: NormalizedProperty,
+  comp: NormalizedComparable,
+  _filter: AppraisalFilter
+): FilterResult {
+  if (subject.features?.poolType == null || comp.features?.poolType == null) {
+    return {
+      type: 'pool_match',
+      passed: true,
+      status: 'not_verified',
+      reason: 'Pool data not available — rule not verified',
+    }
+  }
+
+  const subjectHas = hasPool(subject)
+  const compHas = hasPool(comp)
+  const passed = subjectHas === compHas
+  return {
+    type: 'pool_match',
+    passed,
+    status: passed ? 'passed' : 'failed',
+    reason: passed
+      ? undefined
+      : `Pool mismatch: comp ${compHas ? 'has' : 'has no'} pool vs subject ${subjectHas ? 'has' : 'has no'} pool`,
+    actualValue: compHas ? 'pool' : 'none',
+    threshold: subjectHas ? 'pool' : 'none',
+  }
+}
+
+/** Garage/carport match — covered parking presence must match the subject */
+function evaluateGarageMatch(
+  subject: NormalizedProperty,
+  comp: NormalizedComparable,
+  _filter: AppraisalFilter
+): FilterResult {
+  const compHasParkingData =
+    comp.features != null &&
+    (comp.features.garageType != null ||
+      comp.features.garageSquareFeet != null ||
+      comp.features.carportType != null)
+  const subjectHasParkingData =
+    subject.features != null &&
+    (subject.features.garageType != null ||
+      subject.features.garageSquareFeet != null ||
+      subject.features.carportType != null ||
+      subject.features.carportSpaces != null)
+
+  if (!subjectHasParkingData || !compHasParkingData) {
+    return {
+      type: 'garage_match',
+      passed: true,
+      status: 'not_verified',
+      reason: 'Garage/carport data not available — rule not verified',
+    }
+  }
+
+  // Covered parking = garage OR carport on either side
+  const subjectHas = hasGarage(subject) || hasCarport(subject)
+  const compHas = hasGarage(comp) || hasCarport(comp)
+  const passed = subjectHas === compHas
+  return {
+    type: 'garage_match',
+    passed,
+    status: passed ? 'passed' : 'failed',
+    reason: passed
+      ? undefined
+      : `Garage/carport mismatch: comp ${compHas ? 'has' : 'has no'} covered parking vs subject ${subjectHas ? 'has' : 'has none'}`,
+    actualValue: compHas ? 'covered_parking' : 'none',
+    threshold: subjectHas ? 'covered_parking' : 'none',
+  }
+}
+
+/** Stories match — story count (soft priority: ranks, never disqualifies) */
+function evaluateStoriesMatch(
+  subject: NormalizedProperty,
+  comp: NormalizedComparable,
+  _filter: AppraisalFilter
+): FilterResult {
+  const subjectStories = subject.stories ?? null
+  const compStories = comp.stories ?? null
+
+  if (subjectStories == null || compStories == null) {
+    return {
+      type: 'stories_match',
+      passed: true,
+      status: 'not_verified',
+      reason: 'Story count not available — rule not verified',
+    }
+  }
+
+  const passed = subjectStories === compStories
+  return {
+    type: 'stories_match',
+    passed,
+    status: passed ? 'passed' : 'failed',
+    reason: passed ? undefined : `Stories mismatch: comp ${compStories} vs subject ${subjectStories}`,
+    actualValue: compStories,
+    threshold: subjectStories,
+  }
+}
+
+/** Roof material match — roof cover material (soft priority) */
+function evaluateRoofMaterialMatch(
+  subject: NormalizedProperty,
+  comp: NormalizedComparable,
+  _filter: AppraisalFilter
+): FilterResult {
+  const normalize = (v?: string | null) => v?.toLowerCase().replace(/[^a-z]/g, '') || null
+  const subjectRoof = normalize(subject.construction?.roofCover ?? subject.construction?.roofType)
+  const compRoof = normalize(comp.construction?.roofCover ?? comp.construction?.roofType)
+
+  if (!subjectRoof || !compRoof) {
+    return {
+      type: 'roof_material_match',
+      passed: true,
+      status: 'not_verified',
+      reason: 'Roof material data not available — rule not verified',
+    }
+  }
+
+  const passed = subjectRoof === compRoof
+  return {
+    type: 'roof_material_match',
+    passed,
+    status: passed ? 'passed' : 'failed',
+    reason: passed
+      ? undefined
+      : `Roof material mismatch: "${comp.construction?.roofCover ?? comp.construction?.roofType}" vs subject "${subject.construction?.roofCover ?? subject.construction?.roofType}"`,
+    actualValue: comp.construction?.roofCover ?? comp.construction?.roofType,
+    threshold: subject.construction?.roofCover ?? subject.construction?.roofType,
+  }
+}
+
+// Assessor condition tiers, best → worst. Unknown labels get no tier.
+const CONDITION_TIERS: Record<string, number> = {
+  excellent: 7,
+  verygood: 6,
+  good: 5,
+  average: 4,
+  fair: 3,
+  poor: 2,
+  verypoor: 1,
+}
+
+function conditionTier(v?: string | null): number | null {
+  if (!v) return null
+  return CONDITION_TIERS[v.toLowerCase().replace(/[^a-z]/g, '')] ?? null
+}
+
+/**
+ * Assessor condition match — the comp cannot be in a worse assessor
+ * condition tier than the subject (a distressed comp never anchors ARV).
+ * Replaces the LLM/Firecrawl condition classification with provider data.
+ */
+function evaluateConditionMatch(
+  subject: NormalizedProperty,
+  comp: NormalizedComparable,
+  _filter: AppraisalFilter
+): FilterResult {
+  const subjectTier = conditionTier(subject.buildingCondition)
+  const compTier = conditionTier(comp.buildingCondition)
+
+  if (subjectTier == null || compTier == null) {
+    return {
+      type: 'condition_match',
+      passed: true,
+      status: 'not_verified',
+      reason: 'Assessor condition data not available — rule not verified',
+    }
+  }
+
+  const passed = compTier >= subjectTier
+  return {
+    type: 'condition_match',
+    passed,
+    status: passed ? 'passed' : 'failed',
+    reason: passed
+      ? undefined
+      : `Condition mismatch: comp "${comp.buildingCondition}" below subject "${subject.buildingCondition}"`,
+    actualValue: comp.buildingCondition ?? undefined,
+    threshold: subject.buildingCondition ?? undefined,
+  }
+}
+
 const FILTER_EVALUATORS: Record<
   FilterType,
   (subject: NormalizedProperty, comp: NormalizedComparable, filter: AppraisalFilter) => FilterResult
 > = {
   subdivision_match: evaluateSubdivisionMatch,
+  neighborhood_match: evaluateNeighborhoodMatch,
   building_style_match: evaluateBuildingStyleMatch,
   foundation_match: evaluateFoundationMatch,
+  construction_material_match: evaluateConstructionMaterialMatch,
+  pool_match: evaluatePoolMatch,
+  garage_match: evaluateGarageMatch,
+  stories_match: evaluateStoriesMatch,
+  roof_material_match: evaluateRoofMaterialMatch,
+  condition_match: evaluateConditionMatch,
   sale_age: evaluateSaleAge,
   sqft_diff: evaluateSqftDiff,
   year_built_diff: evaluateYearBuiltDiff,
@@ -676,7 +945,9 @@ export function evaluateComparable(
     }
     filterResults.push(result)
 
-    if (!result.passed && result.reason) {
+    // Soft filters (stories, roof material) record the mismatch for
+    // ranking/reporting but never disqualify the comp.
+    if (!result.passed && result.reason && filter.priority !== 'soft') {
       disableReasons.push(result.reason)
     }
   }

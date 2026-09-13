@@ -223,6 +223,131 @@ const evaluators: Record<FilterType, FilterEvaluator> = {
       threshold: 'same_side',
     }
   },
+
+  neighborhood_match(subject, comp, _filter) {
+    const norm = (v?: string | null) => v?.toLowerCase().trim().replace(/\s+/g, ' ') || null
+    const s = norm(subject.neighborhoodName)
+    const c = norm(comp.neighborhoodName)
+    if (!s || !c) {
+      return { type: 'neighborhood_match', passed: true, reason: 'Neighborhood data not available' }
+    }
+    const passed = s === c
+    return {
+      type: 'neighborhood_match',
+      passed,
+      reason: passed ? undefined : `Neighborhood mismatch: "${c}" vs subject "${s}"`,
+      actualValue: c,
+      threshold: s,
+    }
+  },
+
+  construction_material_match(subject, comp, _filter) {
+    const norm = (v?: string | null) => v?.toLowerCase().replace(/[^a-z]/g, '') || null
+    const pairs = [
+      [norm(subject.construction?.type), norm(comp.construction?.type)],
+      [norm(subject.construction?.exteriorWalls), norm(comp.construction?.exteriorWalls)],
+    ].filter(([s, c]) => s && c)
+    if (pairs.length === 0) {
+      return { type: 'construction_material_match', passed: true, reason: 'Construction material data not available' }
+    }
+    const passed = pairs.every(([s, c]) => s === c)
+    return {
+      type: 'construction_material_match',
+      passed,
+      reason: passed ? undefined : 'Construction material/type mismatch with subject',
+      actualValue: comp.construction?.exteriorWalls ?? comp.construction?.type,
+      threshold: subject.construction?.exteriorWalls ?? subject.construction?.type,
+    }
+  },
+
+  pool_match(subject, comp, _filter) {
+    const sHas = (subject.features?.poolType?.length ?? 0) > 0
+    const cHas = (comp.features?.poolType?.length ?? 0) > 0
+    if (subject.features?.poolType == null || comp.features?.poolType == null) {
+      return { type: 'pool_match', passed: true, reason: 'Pool data not available' }
+    }
+    const passed = sHas === cHas
+    return {
+      type: 'pool_match',
+      passed,
+      reason: passed ? undefined : `Pool mismatch: comp ${cHas ? 'has' : 'has no'} pool`,
+      actualValue: cHas ? 'pool' : 'none',
+      threshold: sHas ? 'pool' : 'none',
+    }
+  },
+
+  garage_match(subject, comp, _filter) {
+    const covered = (p: PropertyLike) =>
+      ((p.features?.garageType?.length ?? 0) > 0) ||
+      ((p.features?.garageSquareFeet ?? 0) > 0) ||
+      ((p.features?.carportType?.length ?? 0) > 0)
+    const hasData = (p: PropertyLike) =>
+      p.features != null && (p.features.garageType != null || p.features.garageSquareFeet != null || p.features.carportType != null)
+    if (!hasData(subject) || !hasData(comp)) {
+      return { type: 'garage_match', passed: true, reason: 'Garage/carport data not available' }
+    }
+    const sHas = covered(subject)
+    const cHas = covered(comp)
+    const passed = sHas === cHas
+    return {
+      type: 'garage_match',
+      passed,
+      reason: passed ? undefined : `Covered-parking mismatch: comp ${cHas ? 'has' : 'has none'}`,
+      actualValue: cHas ? 'covered_parking' : 'none',
+      threshold: sHas ? 'covered_parking' : 'none',
+    }
+  },
+
+  stories_match(subject, comp, _filter) {
+    if (subject.stories == null || comp.stories == null) {
+      return { type: 'stories_match', passed: true, reason: 'Story count not available' }
+    }
+    const passed = subject.stories === comp.stories
+    return {
+      type: 'stories_match',
+      passed,
+      reason: passed ? undefined : `Stories mismatch: ${comp.stories} vs subject ${subject.stories}`,
+      actualValue: comp.stories,
+      threshold: subject.stories,
+    }
+  },
+
+  roof_material_match(subject, comp, _filter) {
+    const norm = (v?: string | null) => v?.toLowerCase().replace(/[^a-z]/g, '') || null
+    const s = norm(subject.construction?.roofCover)
+    const c = norm(comp.construction?.roofCover)
+    if (!s || !c) {
+      return { type: 'roof_material_match', passed: true, reason: 'Roof material data not available' }
+    }
+    const passed = s === c
+    return {
+      type: 'roof_material_match',
+      passed,
+      reason: passed ? undefined : `Roof material mismatch: "${comp.construction?.roofCover}" vs subject "${subject.construction?.roofCover}"`,
+      actualValue: comp.construction?.roofCover,
+      threshold: subject.construction?.roofCover,
+    }
+  },
+
+  condition_match(subject, comp, _filter) {
+    const tiers: Record<string, number> = {
+      excellent: 7, verygood: 6, good: 5, average: 4, fair: 3, poor: 2, verypoor: 1,
+    }
+    const tier = (v?: string | null) => (v ? tiers[v.toLowerCase().replace(/[^a-z]/g, '')] ?? null : null)
+    const s = tier(subject.buildingCondition)
+    const c = tier(comp.buildingCondition)
+    if (s == null || c == null) {
+      return { type: 'condition_match', passed: true, reason: 'Assessor condition data not available' }
+    }
+    const passed = c >= s
+    return {
+      type: 'condition_match',
+      passed,
+      reason: passed ? undefined : `Condition mismatch: comp "${comp.buildingCondition}" below subject "${subject.buildingCondition}"`,
+      actualValue: comp.buildingCondition,
+      threshold: subject.buildingCondition,
+    }
+  },
 }
 
 // ─── Public API ─────────────────────────────────────────────────────────────

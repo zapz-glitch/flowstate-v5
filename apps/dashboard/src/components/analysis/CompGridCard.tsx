@@ -218,6 +218,36 @@ export function CompGridCard({
             <span className="text-foreground-tertiary">Foundation</span>
             <span className="font-medium truncate ml-2">{comp.foundationType || '-'}</span>
           </div>
+          {(comp.constructionType || comp.exteriorWalls) && (
+            <div className="flex items-center justify-between text-[11px]">
+              <span className="text-foreground-tertiary">Construction</span>
+              <span className="font-medium truncate ml-2">{[comp.constructionType, comp.exteriorWalls].filter(Boolean).join(' / ')}</span>
+            </div>
+          )}
+          {(comp.roofCover || comp.roofType) && (
+            <div className="flex items-center justify-between text-[11px]">
+              <span className="text-foreground-tertiary">Roof</span>
+              <span className="font-medium truncate ml-2">{comp.roofCover || comp.roofType}</span>
+            </div>
+          )}
+          {(comp.storiesType || comp.stories != null) && (
+            <div className="flex items-center justify-between text-[11px]">
+              <span className="text-foreground-tertiary">Stories</span>
+              <span className="font-medium truncate ml-2">{comp.storiesType || comp.stories}</span>
+            </div>
+          )}
+          {comp.buildingCondition && (
+            <div className="flex items-center justify-between text-[11px]">
+              <span className="text-foreground-tertiary">Assessor Cond.</span>
+              <span className="font-medium truncate ml-2">{comp.buildingCondition}</span>
+            </div>
+          )}
+          {(comp.heating || comp.cooling) && (
+            <div className="flex items-center justify-between text-[11px]">
+              <span className="text-foreground-tertiary">Heat / AC</span>
+              <span className="font-medium truncate ml-2">{[comp.heating, comp.cooling].filter(Boolean).join(' / ')}</span>
+            </div>
+          )}
           {comp.curbAppeal && comp.curbAppeal.condition !== 'unknown' && (
             <div className="flex items-center justify-between text-[11px]">
               <span className="text-foreground-tertiary">Condition</span>
