@@ -887,3 +887,45 @@ ordering confirmed in evaluation/index.ts.
   only; /comp-selection/analyze (LLM-selects) is dead code —
   runCompSelection never called.
 - Verified: tsc clean dashboard.
+
+### Stacked comp sort + neighborhood filter (9720a10, on main)
+
+- ComparablesSection sort stack: selected comps pinned contiguous →
+  geo grouping (subdivision / neighborhood modes) → appraisal-rule
+  closeness (constant, direction-invariant) → directional key.
+- Subdivision & Neighborhood modes arrow-toggles asc/desc by PRICE;
+  Distance arrows flip miles; Price & $/Sqft standalone.
+- neighborhoodCode serialized to dashboard so client-side
+  neighborhood filter can match by name OR code (same as backend
+  neighborhoodsMatch).
+- Default sort remains the engine's selection order.
+- Verified: tsc clean dashboard.
+
+### Batch review workflow (e92ce60, feat/batch-review-workflow)
+
+- api migration 0029: saved_reports + feedback_status / notes /
+  report / at. POST /user/reports/:jobId/feedback stamps
+  'validated' | 'improve' + notes + generated ticket (validated
+  origin/session/content-type). GET /user/reports/:jobId returns
+  feedbackStatus/feedbackAt. GET /batch/:id joins feedbackStatus
+  per result jobId (inArray over saved_reports). BatchJobDO results
+  now carry confidence into resultsJson.
+- dashboard batch page: list picker (All lists + per-list chips with
+  progress), queue card with "N left in queue", confidence bucket
+  cards (All/Low/Medium/High/Unrated — counts + reviewed + Review
+  link to first unreviewed), table gains Confidence + Reviewed
+  (Validated ✓ / Flagged ⚑) columns; row links carry ?batch&conf.
+- report page batch-review mode: ?batch=<id>&conf=<bucket> loads the
+  batch queue → fixed bottom bar (prev address left, next right,
+  position + reviewed count + back-to-batch center). Notify submit
+  auto-advances to next unreviewed (onFeedbackSubmitted callback
+  through atom → AnalysisResultLayout → ComparablesSection).
+- Notify dialog: two actions — Validate (stamp correct) /
+  Flag for improvement (generate ticket). Blank notes OK.
+- Verified: tsc clean api+dashboard; 154 vitest pass; 15/15
+  regression files pass; migration 0029 applied to local D1.
+- NOT deployed — remote migration 0029 must run on remote D1 before
+  stamps persist in prod (deploy applies migrations? verify in
+  deploy.yml before pushing to main).
+- Next: user uploads batch list → reviews low-confidence bucket →
+  Notify loop generates devin-ready tickets.
