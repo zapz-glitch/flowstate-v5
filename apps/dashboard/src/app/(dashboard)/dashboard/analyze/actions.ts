@@ -224,6 +224,8 @@ export interface SubjectData {
   additionSquareFeet?: number | null
   /** Neighborhood name from site-location */
   neighborhoodName?: string | null
+  /** Neighborhood code from site-location */
+  neighborhoodCode?: string | null
   /** CoreLogic Automated Valuation Model — display only, never used in ARV math */
   avm?: {
     value?: number | null
@@ -382,6 +384,8 @@ export interface CompItem {
   buildingGrade?: string | null
   /** Neighborhood name from site-location */
   neighborhoodName?: string | null
+  /** Neighborhood code from site-location */
+  neighborhoodCode?: string | null
   /** Building quality code */
   qualityCode?: string | null
   /** Reason this comp was selected/analyzed (LLM reasoning) */

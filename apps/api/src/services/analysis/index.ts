@@ -705,6 +705,8 @@ export interface AnalysisResponse {
       parcelId: string | null
       /** Cotality site-location neighborhood name */
       neighborhoodName: string | null
+      /** Cotality site-location neighborhood code */
+      neighborhoodCode: string | null
       /** Assessor building improvement condition */
       buildingCondition: string | null
       /** Construction quality grade */
@@ -1124,6 +1126,7 @@ export function buildAnalysisResponse(
       subdivision: comp.subdivision ?? null,
       parcelId: comp.parcelId ?? null,
       neighborhoodName: comp.neighborhoodName ?? null,
+      neighborhoodCode: comp.neighborhoodCode ?? null,
       buildingCondition: comp.buildingCondition ?? null,
       buildingGrade: comp.buildingGrade ?? null,
       stories: comp.stories ?? null,

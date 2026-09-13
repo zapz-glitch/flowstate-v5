@@ -49,14 +49,36 @@ export interface ComparablesSectionProps {
   feedbackContext?: FeedbackContext | null
 }
 
-type SortOption = 'default' | 'subdivision' | 'distance' | 'price' | 'psf'
+type SortOption = 'default' | 'subdivision' | 'neighborhood' | 'distance' | 'price' | 'psf'
 
 const SORT_LABELS: Record<SortOption, string> = {
   default: 'Default',
   subdivision: 'Subdivision',
+  neighborhood: 'Neighborhood',
   distance: 'Distance',
   price: 'Price',
   psf: '$/Sqft',
+}
+
+/** Fraction of appraisal filters a comp passed — the "closest to our rules" score */
+function compRuleScore(comp: CompItem): number {
+  const filters = comp.appraisalRules?.filters
+  if (filters && filters.length > 0) {
+    const passed = filters.filter((f) => f.status === 'passed' || (f.status == null && f.passed)).length
+    return passed / filters.length
+  }
+  if (comp.matchPercent != null) return comp.matchPercent
+  if (comp.matchRuleCount != null && comp.matchRuleTotal) return comp.matchRuleCount / comp.matchRuleTotal
+  return 0
+}
+
+/** Neighborhood match by normalized name OR provider code (mirrors server-side neighborhoodsMatch) */
+function neighborhoodsMatchClient(comp: CompItem, subject: SubjectData | null | undefined): boolean {
+  const norm = (s?: string | null) => s?.trim().toLowerCase() || null
+  const a = norm(comp.neighborhoodName)
+  const b = norm(subject?.neighborhoodName)
+  if (a && b && a === b) return true
+  return comp.neighborhoodCode != null && subject?.neighborhoodCode != null && comp.neighborhoodCode === subject.neighborhoodCode
 }
 
 export function ComparablesSection({
@@ -98,18 +120,24 @@ export function ComparablesSection({
     }
   }, [highlightedCompKey, comps.items, selectedCompKeys, excludedOpen])
   const compItems = comps.items || []
+  const hasInteractiveSelection = !!selectedCompKeys
 
-  // Sorted items preserving original index for stable keys & map marker numbering
+  // Sorted items preserving original index for stable keys & map marker numbering.
+  // Stacked ordering: selected block pinned first → geo grouping (subdivision/
+  // neighborhood modes) → appraisal-rule closeness (constant across every sort)
+  // → directional key (price under geo modes, own key for distance/price/psf).
   const sortedItems = useMemo(() => {
     const indexed = compItems.map((comp, i) => ({ comp, originalIndex: i }))
-    // Default ordering: selected comps first (engine's pick = highest trust),
-    // then same-subdivision, then nearest → farthest
+    const isSel = (c: CompItem, i: number) =>
+      hasInteractiveSelection ? selectedCompKeys!.has(getCompKey(c, i)) : (c.compGroup === 'arv' || c.isEnabled === true)
+    const subNorm = normalizeSubdivision(subjectSubdivision)
+
     if (sortBy === 'default') {
-      const subNorm = normalizeSubdivision(subjectSubdivision)
-      const rank = (c: typeof compItems[number]) =>
-        c.compGroup === 'arv' ? 0 : c.isEnabled ? 1 : 2
+      // What the rules selected: selected block first, then enabled, then
+      // excluded; subdivision matches before non-matches; nearest first
       return [...indexed].sort((a, b) => {
-        const ra = rank(a.comp), rb = rank(b.comp)
+        const ra = isSel(a.comp, a.originalIndex) ? 0 : a.comp.isEnabled ? 1 : 2
+        const rb = isSel(b.comp, b.originalIndex) ? 0 : b.comp.isEnabled ? 1 : 2
         if (ra !== rb) return ra - rb
         const aMatch = normalizeSubdivision(a.comp.subdivision) === subNorm ? 1 : 0
         const bMatch = normalizeSubdivision(b.comp.subdivision) === subNorm ? 1 : 0
@@ -117,34 +145,33 @@ export function ComparablesSection({
         return (a.comp.distanceMiles ?? 999) - (b.comp.distanceMiles ?? 999)
       })
     }
-    const dir = sortDesc ? -1 : 1
-    const sorted = [...indexed]
-    switch (sortBy) {
-      case 'subdivision': {
-        // Subject-subdivision matches first (desc) / last (asc), then by name
-        const subNorm = normalizeSubdivision(subjectSubdivision)
-        sorted.sort((a, b) => {
-          const aMatch = normalizeSubdivision(a.comp.subdivision) === subNorm ? 1 : 0
-          const bMatch = normalizeSubdivision(b.comp.subdivision) === subNorm ? 1 : 0
-          if (aMatch !== bMatch) return dir * (aMatch - bMatch)
-          return (a.comp.subdivision ?? '').localeCompare(b.comp.subdivision ?? '')
-        })
-        break
-      }
-      case 'distance':
-        sorted.sort((a, b) => dir * ((a.comp.distanceMiles ?? 999) - (b.comp.distanceMiles ?? 999)))
-        break
-      case 'price':
-        sorted.sort((a, b) => dir * ((a.comp.salePrice ?? 0) - (b.comp.salePrice ?? 0)))
-        break
-      case 'psf':
-        sorted.sort((a, b) => dir * ((a.comp.pricePerSqft ?? 0) - (b.comp.pricePerSqft ?? 0)))
-        break
-    }
-    return sorted
-  }, [compItems, sortBy, sortDesc])
 
-  const hasInteractiveSelection = !!selectedCompKeys
+    const dir = sortDesc ? -1 : 1
+    const geoMatch = (c: CompItem): number => {
+      if (sortBy === 'subdivision') return normalizeSubdivision(c.subdivision) === subNorm ? 1 : 0
+      if (sortBy === 'neighborhood') return neighborhoodsMatchClient(c, subject) ? 1 : 0
+      return 0
+    }
+    const numKey = (c: CompItem): number => {
+      switch (sortBy) {
+        case 'distance': return c.distanceMiles ?? 999
+        case 'psf': return c.pricePerSqft ?? 0
+        // subdivision & neighborhood ascend/descend by price
+        default: return c.salePrice ?? 0
+      }
+    }
+
+    return [...indexed].sort((a, b) => {
+      const sa = isSel(a.comp, a.originalIndex) ? 0 : 1
+      const sb = isSel(b.comp, b.originalIndex) ? 0 : 1
+      if (sa !== sb) return sa - sb
+      const ga = geoMatch(a.comp), gb = geoMatch(b.comp)
+      if (ga !== gb) return gb - ga
+      const rs = compRuleScore(b.comp) - compRuleScore(a.comp)
+      if (rs !== 0) return rs
+      return dir * (numKey(a.comp) - numKey(b.comp)) || (a.originalIndex - b.originalIndex)
+    })
+  }, [compItems, sortBy, sortDesc, subjectSubdivision, subject, selectedCompKeys, hasInteractiveSelection])
 
   const toggleExpand = (key: string) => {
     const next = new Set(expandedComps)
@@ -245,7 +272,7 @@ export function ComparablesSection({
         {/* Row 2: Sort controls */}
         <div className="flex items-center gap-1 no-print">
           <ArrowUpDown className="w-3 h-3 text-foreground-tertiary mr-0.5" />
-          {(['default', 'subdivision', 'distance', 'price', 'psf'] as const).map((opt) => (
+          {(['default', 'subdivision', 'neighborhood', 'distance', 'price', 'psf'] as const).map((opt) => (
             <button
               key={opt}
               type="button"
