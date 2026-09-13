@@ -225,6 +225,47 @@ access to the dashboard after auth.
   property loaded (maplibre removed with atlas — rebuild on Google
   Maps or re-add lighter approach), last-property focus already works.
 
+## Parcel flood-zone + site-location integration (2026-09-13, branch feat/cotality-flood-zone, NOT yet merged/deployed)
+- Parcel flood-zone VERIFIED on existing host+token: GET
+  property.corelogicapi.com/property/{fipsCode}:{universalParcelId}/flood-zone
+  (the api1.cotality.com URL the user gave also works, but only with an
+  api1-realm token — the same call on property.corelogicapi.com accepts
+  our current property token, so that host is used).
+- {id} is NOT the clip — it is the composite parcel ID. Search items
+  carry it as `v1PropertyId` (e.g. "48029:36205502") or reconstructable
+  from `propertyAPN.fipsCode:universalParcelId`. property-detail does
+  NOT contain it — it only exists in the search response.
+- Implementation (corelogic.ts / property-api index/types):
+  - NormalizedProperty gains parcelId, apnFormatted, neighborhoodName,
+    neighborhoodCode, cbsaCode, censusTract, legalDescription — all
+    normalized from the already-fetched property-detail siteLocation
+    block (no extra HTTP call needed; property-detail embeds the full
+    site-location payload incl. neighborhood/CBSA/census tract).
+  - New provider method getFloodZoneByParcel + service wrapper with KV
+    cache key floodZoneKey(`parcel:{id}`) sharing CACHE_TTL.FLOOD_ZONE.
+  - getFloodZoneForProperty(property): parcel first when parcelId known,
+    graceful fallback to coordinate spatial lookup (and spatial only when
+    no parcelId — e.g. getPropertyById path where detail lacks it).
+  - NormalizedFloodZone gains specialFloodHazardArea ('In'/'Out') and
+    source ('parcel'|'spatial'); shared FLOOD_ZONE_PATTERN validation;
+    isInFloodZone honors SFHA 'In' even for unlisted zone codes.
+  - Both flood call sites covered: AnalysisJobDO enrichment and
+    getPropertyBundle (GHL webhook path searches by address → gets
+    parcelId → parcel flood).
+- Analysis response/report: subject gains parcelId/apnFormatted/
+  neighborhoodName/neighborhoodCode/cbsaCode/censusTract/
+  legalDescription; floodZone gains specialFloodHazardArea/mapPanel/
+  mapDate/communityName/source. SSE subject_found carries parcelId +
+  neighborhoodName + cbsaCode. Market-context prompt now includes
+  neighborhood line.
+- Tests: provider-evidence.test.ts extended — parcel flood normalization
+  (X/Out → not in zone, panel+date+community mapped), zone 'D' rejected,
+  SFHA 'In' flags high risk, malformed ID (no colon) fails without a
+  request, parcelId/site-location propagation through search→detail.
+  15/15 regression files pass; api typecheck clean.
+- TODO when merged: deploy, then verify a live analysis logs
+  /property/{id}/flood-zone and report.floodZone.source==='parcel'.
+
 ## Completed (landing-v2)
 - Rewrote `/` (`src/app/page.tsx`) as a company credibility landing page:
   Hero ("We buy houses as-is. Cash. Closed in 21 days." + stats strip),
