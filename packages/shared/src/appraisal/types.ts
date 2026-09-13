@@ -70,6 +70,8 @@ export interface AppraisalAdjustment {
   amount: number
   /** Percentage (for old_comp_discount) */
   percent?: number
+  /** For old_comp_discount: sales older than this many days get the discount (default 90) */
+  thresholdDays?: number
 }
 
 export interface AdjustmentResult {

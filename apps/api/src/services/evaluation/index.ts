@@ -720,7 +720,8 @@ export async function performAnalysis(
     adjustments: adjustments.map((a) => ({
       type: a.type,
       enabled: a.enabled,
-      amount: a.amount,
+      // old_comp_discount carries its age threshold (days) in `amount`
+      amount: a.type === 'old_comp_discount' ? (a.thresholdDays ?? a.amount) : a.amount,
       percent: a.percent,
     })),
     dealParams: {

@@ -632,6 +632,37 @@ pretend precision exists.
   tests pin HIGH (3 verified), MEDIUM (unverified dims), LOW (gated
   recommendation) paths.
 
+### Rule rework — sale age absolute, year-built ladder (2026-09-13, same branch)
+
+Product spec change (user): sale_age ≤180d is ABSOLUTE — never relaxed
+at any tier; always prefer most-recent sales. The sanctioned concession
+is build-era: year_built_diff widens progressively (configured ±10 →
++2 → +4 ⇒ ±12, ±14) INSIDE each location scope before geography expands.
+
+- ExpansionPolicy: removed allowOlderSales/olderSaleAgeMultiplier/
+  olderYearBuiltMultiplier/olderSaleDiscountPercent; added
+  allowYearBuiltExpansion + yearBuiltExpansionSteps (default [2,4]).
+- Ladder: strict → in-subdivision year widening → leave subdivision
+  (radius ×mult, year ladder restarts) → drop radius (year ladder
+  restarts) → nearest_comps. Year-widened comps PASS legitimately at the
+  tier's threshold (audit shows threshold:12) — no rescue needed; rescue
+  still used for location failures (subdivision/distance).
+- fallbackUsed union: older_sales → year_built_expansion;
+  expansionApplied entries: 'year_built' | 'subdivision' | 'geographic'.
+- nearest_comps last resort uses year tolerance at widest sanctioned
+  step (±14 default); sale_age strict, only location failures carried.
+- selectArvComps ordering: verified-passes → recency (newest sale) →
+  adjusted price.
+- old_comp_discount: thresholdDays field added (default 90; stored in
+  preset amount column for that type, surfaced in Evaluation Settings as
+  a days input + percent input). Shared package calculator + dashboard
+  recalc path honor thresholdDays.
+- Tests: 'time-travels to older in-area sales' replaced with
+  year-widening test; 'uses older sales' replaced with sale-age-is-
+  absolute test; Canoe Creek test updated (17yr comp dead at every tier
+  incl. ±14 max). 139 vitest + 15/15 regression + tsc clean api + dash
+  + shared.
+
 NOT deployed — deploy-on-request rule stands.
 
 Known divergence to revisit: shared sqft_diff evaluator is %-based

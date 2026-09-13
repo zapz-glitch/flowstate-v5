@@ -612,9 +612,11 @@ function calculateOldCompDiscount(
   const today = new Date()
   const daysDiff = Math.floor((today.getTime() - saleDate.getTime()) / (1000 * 60 * 60 * 24))
 
-  // Only apply if sale is > 90 days old
-  if (daysDiff <= 90) {
-    return { type: 'old_comp_discount', applied: false, amount: 0, reason: 'Sale within 90 days' }
+  // Only apply if the sale is older than the configured threshold —
+  // the adjustment's thresholdDays field (default 90) carries it.
+  const thresholdDays = adjustment.thresholdDays ?? 90
+  if (daysDiff <= thresholdDays) {
+    return { type: 'old_comp_discount', applied: false, amount: 0, reason: `Sale within ${thresholdDays} days` }
   }
 
   const monthsOld = daysDiff / 30

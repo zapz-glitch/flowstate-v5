@@ -37,6 +37,8 @@ export type RecalcAdjustment = {
   enabled: boolean
   amount: number
   percent?: number
+  /** For old_comp_discount: sales older than this many days get the discount */
+  thresholdDays?: number
 }
 
 // ─── Major Items Setting ─────────────────────────────────────────────────────

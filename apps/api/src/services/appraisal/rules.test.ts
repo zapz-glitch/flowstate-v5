@@ -436,45 +436,51 @@ describe('ARV comp selection', () => {
         { type: 'distance', enabled: true, value: 1.0 },
       ],
       adjustments: [],
-      expansion: { allowGeographicExpansion: true, allowOlderSales: false },
+      expansion: { allowGeographicExpansion: true, allowYearBuiltExpansion: false },
     })
 
     expect(r.fallbackUsed).toBe('subdivision_expansion')
     expect(r.expansionApplied).toContain('subdivision')
-    expect(r.expansionApplied).not.toContain('older_sales')
+    expect(r.expansionApplied).not.toContain('year_built')
     expect(r.selectedCompIds).toContain('out1')
   })
 
-  it('time-travels to older in-area sales before leaving the subdivision', () => {
-    // 2 recent + 1 old in-subdivision comps, and 1 recent out-of-subdivision
-    // comp. Policy: relax sale_age/year_built while keeping subdivision —
-    // never pick the closer-but-outside sale when an older inside sale exists.
+  it('widens year-built inside the subdivision before leaving it', () => {
+    // 2 strict-year + 1 older-era in-subdivision comps, and 1 strict-year
+    // out-of-subdivision comp. Policy: widen year_built while keeping
+    // subdivision — never pick the closer-but-outside sale when an
+    // in-subdivision sale within the widened tolerance exists.
+    // Subject is built 2008 → strict ±10, steps +2/+4 → ±12, ±14.
     const comps = [
-      comp('recent1', { subdivision: 'Oak Park', salePrice: 300000 }),
-      comp('recent2', { subdivision: 'Oak Park', salePrice: 310000 }),
-      comp('old_in', { subdivision: 'Oak Park', salePrice: 400000, saleDate: daysAgo(300) }),
-      comp('out1', { subdivision: 'Other', distanceMiles: 0.9, salePrice: 320000 }),
+      comp('recent1', { subdivision: 'Oak Park', yearBuilt: 2006, salePrice: 300000 }),
+      comp('recent2', { subdivision: 'Oak Park', yearBuilt: 2004, salePrice: 310000 }),
+      comp('old_in', { subdivision: 'Oak Park', yearBuilt: 1996, salePrice: 400000 }), // 12yr off
+      comp('out1', { subdivision: 'Other', yearBuilt: 2008, distanceMiles: 0.9, salePrice: 320000 }),
     ]
-    const r = service.evaluateWithFallback(subject(), comps, {
+    const r = service.evaluateWithFallback(subject({ yearBuilt: 2008 }), comps, {
       filters: [
         { type: 'subdivision_match', enabled: true, value: 1 },
-        { type: 'sale_age', enabled: true, value: 180 },
+        { type: 'year_built_diff', enabled: true, value: 10 },
         { type: 'distance', enabled: true, value: 1.0 },
       ],
       adjustments: [],
       expansion: {
         allowGeographicExpansion: true,
-        allowOlderSales: true,
-        olderSaleAgeMultiplier: 2,
-        olderSaleDiscountPercent: 15,
+        allowYearBuiltExpansion: true,
+        yearBuiltExpansionSteps: [2, 4],
       },
     })
 
-    expect(r.fallbackUsed).toBe('older_sales')
-    expect(r.expansionApplied).toEqual(['older_sales'])
-    // The old in-subdivision comp wins over the recent out-of-subdivision comp
+    expect(r.fallbackUsed).toBe('year_built_expansion')
+    expect(r.expansionApplied).toEqual(['year_built'])
+    // The older-era in-subdivision comp wins over the strict-year
+    // out-of-subdivision comp — and its audit shows threshold ±12
     expect(r.selectedCompIds).toContain('old_in')
     expect(r.selectedCompIds).not.toContain('out1')
+    const oldIn = r.comparables.find((c) => c.id === 'old_in')
+    const yearRule = oldIn?.evaluation?.filterResults.find((f) => f.type === 'year_built_diff')
+    expect(yearRule?.passed).toBe(true)
+    expect(yearRule?.threshold).toBe(12)
   })
 
   it('matches subdivision units/phases to their parent development', () => {
@@ -534,11 +540,11 @@ describe('ARV comp selection', () => {
     expect(comp1?.isEnabled).toBe(true)
   })
 
-  it('uses older sales only when allowed, with configured discount', () => {
+  it('never relaxes sale age — a 300-day-old comp is dead at every tier', () => {
     const comps = [
       comp('recent1', { salePrice: 300000, saleDate: daysAgo(30) }),
       comp('recent2', { salePrice: 310000, saleDate: daysAgo(45) }),
-      comp('old1', { salePrice: 400000, saleDate: daysAgo(300) }), // >180d, <360d
+      comp('stale', { salePrice: 400000, saleDate: daysAgo(300) }), // >180d absolute
     ]
     const r = service.evaluateWithFallback(subject(), comps, {
       filters: [
@@ -548,33 +554,34 @@ describe('ARV comp selection', () => {
       adjustments: [],
       expansion: {
         allowGeographicExpansion: true,
-        allowOlderSales: true,
-        olderSaleAgeMultiplier: 2,
-        olderSaleDiscountPercent: 15,
+        allowYearBuiltExpansion: true,
+        yearBuiltExpansionSteps: [2, 4],
       },
     })
 
-    expect(r.fallbackUsed).toBe('older_sales')
-    expect(r.expansionApplied).toContain('older_sales')
-    expect(r.selectedCompIds).toContain('old1')
-    // old comp gets the configured market-correction discount
-    const old = r.comparables.find((c) => c.id === 'old1')
-    const discount = old?.evaluation.adjustmentResults.find((a) => a.type === 'old_comp_discount')
-    expect(discount?.applied).toBe(true)
-    expect(discount?.amount).toBeLessThan(0)
+    // Sale age is absolute — the stale comp is never enabled, even by the
+    // nearest-comps last resort (it only carries location failures).
+    const stale = r.comparables.find((c) => c.id === 'stale')
+    expect(stale?.isEnabled).toBe(false)
+    expect(r.selectedCompIds ?? []).not.toContain('stale')
+    // And its sale_age failure stays on the audit trail
+    expect(
+      stale?.evaluation?.filterResults.some(
+        (f) => f.type === 'sale_age' && !f.passed && f.status === 'failed'
+      )
+    ).toBe(true)
   })
 
-  it('reverts to strict time/age rules once the search leaves the subdivision', () => {
+  it('a comp beyond the widest year tolerance is dead at every tier', () => {
     // Canoe Creek scenario: subject built 2008, comp built 2025 (17yr off).
-    // The older-sales concession relaxes year_built to ±20 — but only
-    // inside the subdivision. Once we expand geographically the hard rules
-    // go back to strict ±10yr / ≤180d, so this comp must die.
+    // The year ladder reaches ±14 max — 17yr breaches every tier, so this
+    // comp must die even when the search leaves the subdivision.
     const comps = [
-      comp('in1', { subdivision: 'Oak Park', salePrice: 300000 }),
-      comp('in2', { subdivision: 'Oak Park', salePrice: 310000 }),
+      comp('in1', { subdivision: 'Oak Park', yearBuilt: 2008, salePrice: 300000 }),
+      comp('in2', { subdivision: 'Oak Park', yearBuilt: 2008, salePrice: 310000 }),
       comp('new_out', {
         subdivision: 'Seaton Crk Reserve Ph 3',
-        yearBuilt: 2025, // 17yr off the 2008 subject — fails strict ±10
+        yearBuilt: 2025, // 17yr off the 2008 subject — beyond ±14 max
         salePrice: 330000,
         distanceMiles: 1.2,
       }),
@@ -589,16 +596,13 @@ describe('ARV comp selection', () => {
       adjustments: [],
       expansion: {
         allowGeographicExpansion: true,
-        allowOlderSales: true,
-        olderSaleAgeMultiplier: 2,
-        olderYearBuiltMultiplier: 2,
-        olderSaleDiscountPercent: 15,
+        allowYearBuiltExpansion: true,
+        yearBuiltExpansionSteps: [2, 4],
         geographicDistanceMultiplier: 2,
       },
     })
 
-    // The 2025 comp is never enabled — its year_built failure is outside
-    // the subdivision tier's allowed set under strict rules
+    // The 2025 comp is never enabled — 17yr breaches even the widest tier
     const newOut = r.comparables.find((c) => c.id === 'new_out')
     expect(newOut?.isEnabled).toBe(false)
     expect(r.selectedCompIds ?? []).not.toContain('new_out')

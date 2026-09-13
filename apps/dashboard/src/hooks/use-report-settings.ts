@@ -59,7 +59,7 @@ const DEFAULT_FILTERS: RecalcFilter[] = [
 ]
 
 const DEFAULT_ADJUSTMENTS: RecalcAdjustment[] = [
-  { type: 'old_comp_discount', enabled: true, amount: 0, percent: 15 },
+  { type: 'old_comp_discount', enabled: true, amount: 0, percent: 15, thresholdDays: 90 },
   { type: 'bedroom', enabled: true, amount: 15000 },
   { type: 'bathroom', enabled: true, amount: 10000 },
   { type: 'pool', enabled: false, amount: 10000 },
@@ -159,6 +159,7 @@ export function useReportSettings(data: AnalyzeData | null): UseReportSettingsRe
               enabled: a.enabled,
               amount: a.amount,
               percent: a.percent,
+              thresholdDays: a.type === 'old_comp_discount' ? (a.amount || 90) : undefined,
             }))
           : preset?.adjustments
             ? preset.adjustments.map((a) => ({
@@ -166,6 +167,7 @@ export function useReportSettings(data: AnalyzeData | null): UseReportSettingsRe
                 enabled: a.enabled,
                 amount: a.amount,
                 percent: a.percentage || undefined,
+                thresholdDays: a.adjustmentType === 'old_comp_discount' ? (a.amount || 90) : undefined,
               }))
             : DEFAULT_ADJUSTMENTS
         // Ensure all default adjustment types exist (e.g. carport added later)

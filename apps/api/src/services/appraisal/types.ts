@@ -198,16 +198,19 @@ export type AdjustmentType =
 export interface AppraisalAdjustment {
   type: AdjustmentType
   enabled: boolean
-  /** Fixed dollar amount per unit (for traffic: flat deduction below valueThreshold) */
+  /** Fixed dollar amount per unit (for traffic: flat deduction below valueThreshold).
+   *  For old_comp_discount this carries the age threshold in days. */
   amount: number
   /** Percentage (for old_comp_discount; for traffic: percent deduction at/above valueThreshold) */
   percent?: number
+  /** For old_comp_discount: sales older than this many days get the discount (default 90) */
+  thresholdDays?: number
   /** For traffic adjustments: comp value boundary switching flat $ → % deduction (default 500000) */
   valueThreshold?: number
 }
 
 export const DEFAULT_ADJUSTMENTS: AppraisalAdjustment[] = [
-  { type: 'old_comp_discount', enabled: true, amount: 0, percent: 15 },
+  { type: 'old_comp_discount', enabled: true, amount: 0, percent: 15, thresholdDays: 90 },
   { type: 'bedroom', enabled: true, amount: 15000 },
   { type: 'bathroom', enabled: true, amount: 10000 },
   { type: 'pool', enabled: true, amount: 10000 },
@@ -231,7 +234,7 @@ export const ADJUSTMENT_LABELS: Record<AdjustmentType, {
 }> = {
   old_comp_discount: {
     label: 'Old Comp Discount',
-    description: 'Discount percentage for older sales',
+    description: 'Discount % applied to sales older than the configured age threshold (days)',
     isPercentage: true,
   },
   bedroom: {
@@ -336,26 +339,26 @@ export interface AppraisalRulePreset {
  * required number of valid comps are found. Rules are never silently
  * weakened; each expansion tier is explicitly enabled and recorded.
  *
- * Appraisal principle applied: "better to time travel than leave the
- * subdivision" — sale-age and year-built relax FIRST (older sales/older
- * construction that still match the subject), geography expands only
- * after the in-area history is exhausted: subdivision → neighborhood →
- * widened radius.
+ * Sale age is NEVER relaxed — comps must be inside the configured max
+ * (default 180 days) at every tier; we always want the most recent
+ * sales. The sanctioned concession is build-era: year_built_diff widens
+ * progressively (±10 → ±12 → ±14 by default) inside each location scope
+ * before geography expands — subdivision → widened radius → radius-only.
  */
 export interface ExpansionPolicy {
   /** Master switch for all expansion tiers (default: true) */
   enabled?: boolean
-  /** Allow materially older sales that still match on location+physical rules (default: true) */
-  allowOlderSales?: boolean
-  /** Sale-age multiplier when older sales allowed (default: 2 = up to 2× configured max age) */
-  olderSaleAgeMultiplier?: number
-  /** Year-built variance multiplier applied alongside older sales (default: 2) */
-  olderYearBuiltMultiplier?: number
-  /** Downward market-correction % applied to expansion-era older sales (10-20; default 15) */
-  olderSaleDiscountPercent?: number
-  /** Allow dropping the subdivision constraint (falls back to neighborhood match) (default: true) */
+  /** Allow widening year_built_diff when the comp pool is thin (default: true) */
+  allowYearBuiltExpansion?: boolean
+  /**
+   * Extra year tolerances tried in order after the configured
+   * year_built_diff value (default: [+2, +4] → ±10, ±12, ±14).
+   * These are the ONLY sanctioned year-built relaxations.
+   */
+  yearBuiltExpansionSteps?: number[]
+  /** Allow dropping the subdivision constraint within a widened radius (default: true) */
   allowGeographicExpansion?: boolean
-  /** Allow dropping the neighborhood constraint entirely (radius only) (default: true) */
+  /** Allow dropping the radius constraint entirely (default: true) */
   allowNeighborhoodExpansion?: boolean
   /** Distance multiplier when geography expands (default: 2 = widen to 2× configured radius) */
   geographicDistanceMultiplier?: number
@@ -363,10 +366,8 @@ export interface ExpansionPolicy {
 
 export const DEFAULT_EXPANSION_POLICY: Required<ExpansionPolicy> = {
   enabled: true,
-  allowOlderSales: true,
-  olderSaleAgeMultiplier: 2,
-  olderYearBuiltMultiplier: 2,
-  olderSaleDiscountPercent: 15,
+  allowYearBuiltExpansion: true,
+  yearBuiltExpansionSteps: [2, 4],
   allowGeographicExpansion: true,
   allowNeighborhoodExpansion: true,
   geographicDistanceMultiplier: 2,
@@ -426,7 +427,7 @@ export interface AppraisalResult {
   /** True when fewer than 3 valid comps found even after approved expansion */
   insufficientComps?: boolean
   /** Expansion tiers actually applied to reach the comp set */
-  expansionApplied?: Array<'older_sales' | 'subdivision' | 'geographic' | 'physical'>
+  expansionApplied?: Array<'year_built' | 'subdivision' | 'geographic'>
 }
 
 // ─── Response Types ────────────────────────────────────────────────────────────

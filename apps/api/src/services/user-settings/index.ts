@@ -132,7 +132,16 @@ export async function loadUserAnalysisSettings(
         ])
         appraisalRules = {
           filters: presetFilters.map((f) => ({ type: f.filterType as FilterType, enabled: f.enabled, value: f.value })),
-          adjustments: presetAdjustments.map((a) => ({ type: a.adjustmentType as AdjustmentType, enabled: a.enabled, amount: a.amount, percent: a.percentage })),
+          adjustments: presetAdjustments.map((a) => ({
+            type: a.adjustmentType as AdjustmentType,
+            enabled: a.enabled,
+            amount: a.amount,
+            percent: a.percentage,
+            // old_comp_discount stores its age threshold (days) in `amount`
+            ...(a.adjustmentType === 'old_comp_discount' && a.amount > 0
+              ? { thresholdDays: a.amount }
+              : {}),
+          })),
         }
         console.log(`[UserSettings] Loaded appraisal preset: "${preset.name}" (${presetFilters.length} filters, ${presetAdjustments.length} adjustments)`)
       }

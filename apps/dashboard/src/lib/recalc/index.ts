@@ -121,7 +121,7 @@ export function recalculateReport(
       subjectWithFeatures,
       compWithConstruction,
       settings.filters.map((f) => ({ type: f.type as FilterType, enabled: f.enabled, value: f.value })),
-      settings.adjustments.map((a) => ({ type: a.type as AdjustmentType, enabled: a.enabled, amount: a.amount, percent: a.percent }))
+      settings.adjustments.map((a) => ({ type: a.type as AdjustmentType, enabled: a.enabled, amount: a.amount, percent: a.percent, thresholdDays: a.thresholdDays }))
     )
 
     // Hard/soft filter scoring: comp must pass hard filters (sqft, sale_age),

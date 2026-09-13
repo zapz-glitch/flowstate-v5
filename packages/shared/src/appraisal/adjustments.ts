@@ -25,9 +25,10 @@ const calculators: Record<AdjustmentType, AdjustmentCalculator> = {
     const today = new Date()
     const daysDiff = Math.floor((today.getTime() - saleDate.getTime()) / (1000 * 60 * 60 * 24))
 
-    // Only apply discount for sales older than 90 days
-    if (daysDiff <= 90) {
-      return { type: 'old_comp_discount', applied: false, amount: 0, reason: 'Sale within 90 days' }
+    // Only apply discount for sales older than the configured threshold
+    const thresholdDays = adjustment.thresholdDays ?? 90
+    if (daysDiff <= thresholdDays) {
+      return { type: 'old_comp_discount', applied: false, amount: 0, reason: `Sale within ${thresholdDays} days` }
     }
 
     const monthsOld = daysDiff / 30

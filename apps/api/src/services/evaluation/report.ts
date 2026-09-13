@@ -88,8 +88,8 @@ function assessConfidence(input: BuildReportInput): {
   const weakCount = grades.filter((g) => g === 'weak').length
   const excellentCount = grades.filter((g) => g === 'excellent').length
 
-  // Staleness — sales beyond the strict 180-day window only qualify via
-  // the time-travel concession; anything past a year is stale outright.
+  // Staleness — sale age is an absolute rule (≤180d at every tier), so
+  // anything past a year in a selected set means the data is wrong.
   const now = Date.now()
   const selectedAgesDays = selected
     .map((c) => (c.saleDate ? (now - new Date(c.saleDate).getTime()) / 86_400_000 : null))

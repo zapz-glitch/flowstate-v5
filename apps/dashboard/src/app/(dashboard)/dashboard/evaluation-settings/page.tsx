@@ -278,9 +278,28 @@ function AdjustmentRow({
           {unavailable ? 'N/A' : isPercentage ? 'Percent' : 'Dollar'}
         </span>
       </div>
-      <div className="flex items-center justify-center">
+      <div className="flex items-center justify-center gap-1.5">
         {unavailable ? (
           <span className="text-[10px] text-muted-foreground/40">—</span>
+        ) : adjustmentType === 'old_comp_discount' ? (
+          <>
+            <div className="flex items-center rounded-md border border-border bg-muted/30 overflow-hidden focus-within:ring-1 focus-within:ring-primary/30 focus-within:border-primary/50" title="Apply to sales older than this many days">
+              <Input
+                type="number" min={0} max={365} value={amount || 90} disabled={!enabled}
+                onChange={(e) => { const v = parseInt(e.target.value, 10); if (!isNaN(v) && v >= 0 && v <= 365) onAmountChange(v) }}
+                className="h-7 w-12 text-[11px] text-right tabular-nums border-0 bg-transparent shadow-none focus-visible:ring-0 pr-1 pl-2"
+              />
+              <span className="text-[10px] text-muted-foreground pr-2 select-none">d</span>
+            </div>
+            <div className="flex items-center rounded-md border border-border bg-muted/30 overflow-hidden focus-within:ring-1 focus-within:ring-primary/30 focus-within:border-primary/50">
+              <Input
+                type="number" min={0} max={100} value={percentage} disabled={!enabled}
+                onChange={(e) => { const v = parseInt(e.target.value, 10); if (!isNaN(v) && v >= 0 && v <= 100) onPercentageChange(v) }}
+                className="h-7 w-12 text-[11px] text-right tabular-nums border-0 bg-transparent shadow-none focus-visible:ring-0 pr-1 pl-2"
+              />
+              <span className="text-[10px] text-muted-foreground pr-2 select-none">%</span>
+            </div>
+          </>
         ) : isPercentage ? (
           <div className="flex items-center rounded-md border border-border bg-muted/30 overflow-hidden focus-within:ring-1 focus-within:ring-primary/30 focus-within:border-primary/50">
             <Input
