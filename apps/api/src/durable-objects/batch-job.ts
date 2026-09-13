@@ -21,7 +21,7 @@ import { kickNextQueuedBatch } from '../services/batch-queue'
 interface BatchState {
   batchId: string
   userId: string
-  status: 'idle' | 'processing' | 'completed' | 'failed'
+  status: 'idle' | 'processing' | 'paused' | 'completed' | 'failed'
   addresses: string[]
   results: BatchResult[]
   currentIndex: number
@@ -80,6 +80,12 @@ export class BatchJobDO {
     }
     if (request.method === 'POST' && path === '/resume') {
       return this.handleResume(request)
+    }
+    if (request.method === 'POST' && path === '/stop') {
+      return this.handleStop('stop')
+    }
+    if (request.method === 'POST' && path === '/cancel') {
+      return this.handleStop('cancel')
     }
     if (request.method === 'POST' && path === '/mark-completed') {
       return this.handleMarkCompleted()
@@ -256,6 +262,63 @@ export class BatchJobDO {
     return new Response('OK', { status: 200 })
   }
 
+  // ─── Stop / Cancel ──────────────────────────────────────────────────────
+
+  /** 'stop' pauses (rows stay pending, resumable); 'cancel' marks the rest cancelled. Checked between addresses. */
+  private stopRequested: 'stop' | 'cancel' | null = null
+  private lastDbTouch = 0
+
+  private handleStop(mode: 'stop' | 'cancel'): Response {
+    if (!this.batchState || this.batchState.status !== 'processing') {
+      return new Response('Not processing', { status: 400 })
+    }
+    this.stopRequested = mode
+    return new Response('OK', { status: 200 })
+  }
+
+  /** Bump batch_jobs.updated_at during long analyses so the UI doesn't flag a live run as stuck. */
+  private touchDb(): void {
+    if (!this.batchState || Date.now() - this.lastDbTouch < 60_000) return
+    this.lastDbTouch = Date.now()
+    const batchId = this.batchState.batchId
+    drizzle(this.env.DB)
+      .update(batchJobs)
+      .set({ updatedAt: new Date().toISOString() })
+      .where(eq(batchJobs.id, batchId))
+      .catch((err) => console.warn('[BatchJobDO] heartbeat touch failed:', err))
+  }
+
+  private async finishStopped(mode: 'stop' | 'cancel', userId: string): Promise<void> {
+    if (!this.batchState) return
+    if (mode === 'cancel') {
+      this.batchState.results = this.batchState.results.map((r) =>
+        r.status === 'completed' ? r : { ...r, status: 'failed' as const, error: 'Cancelled — stopped by user' })
+      this.batchState.completedCount = this.batchState.results.filter((r) => r.status === 'completed').length
+      this.batchState.failedCount = this.batchState.results.filter((r) => r.status === 'failed').length
+      this.batchState.status = 'completed'
+      await this.state.storage.put('batchState', this.batchState)
+      await this.updateDbStatus('completed')
+      await this.pushEvent('batch_completed', {
+        totalAddresses: this.batchState.totalAddresses,
+        completedCount: this.batchState.completedCount,
+        failedCount: this.batchState.failedCount,
+        results: this.batchState.results,
+      })
+    } else {
+      this.batchState.results = this.batchState.results.map((r) =>
+        r.status === 'processing' ? { ...r, status: 'pending' as const } : r)
+      this.batchState.status = 'paused'
+      await this.state.storage.put('batchState', this.batchState)
+      await this.updateDbStatus('paused')
+      await this.pushEvent('batch_paused', {
+        completedCount: this.batchState.completedCount,
+        failedCount: this.batchState.failedCount,
+      })
+    }
+    this.stopRequested = null
+    await kickNextQueuedBatch(this.env, userId)
+  }
+
   private async retryFailed(userId: string, indices: number[]): Promise<void> {
     if (!this.batchState) return
 
@@ -269,10 +332,16 @@ export class BatchJobDO {
 
     const heartbeat = setInterval(() => {
       this.broadcast('heartbeat', { timestamp: Date.now() })
+      this.touchDb()
     }, 15000)
 
     for (const i of indices) {
       if (!this.batchState) break
+      if (this.stopRequested) {
+        clearInterval(heartbeat)
+        await this.finishStopped(this.stopRequested, userId)
+        return
+      }
       const address = this.batchState.addresses[i]
 
       this.batchState.currentIndex = i
@@ -352,6 +421,7 @@ export class BatchJobDO {
     // Heartbeat keeps SSE connections alive through proxies/CDNs
     const heartbeat = setInterval(() => {
       this.broadcast('heartbeat', { timestamp: Date.now() })
+      this.touchDb()
     }, 15000)
 
     await this.pushEvent('batch_started', {
@@ -362,6 +432,11 @@ export class BatchJobDO {
     for (let i = 0; i < config.addresses.length; i++) {
       const address = config.addresses[i]
       if (!this.batchState) break
+      if (this.stopRequested) {
+        clearInterval(heartbeat)
+        await this.finishStopped(this.stopRequested, config.userId)
+        return
+      }
 
       this.batchState.currentIndex = i
       this.batchState.results[i].status = 'processing'

@@ -261,6 +261,107 @@ batch.post('/:id/resume', async (c) => {
   return c.json({ success: true, streamUrl, token })
 })
 
+// ─── POST /batch/:id/stop — Pause processing, remaining rows stay pending ──
+
+batch.post('/:id/stop', async (c) => {
+  const session = await getSession(c)
+  if (!session?.user) {
+    return c.json({ error: 'Not authenticated' }, 401)
+  }
+
+  const batchId = c.req.param('id')
+  const db = drizzle(c.env.DB)
+  const [job] = await db.select()
+    .from(batchJobs)
+    .where(eq(batchJobs.id, batchId))
+    .limit(1)
+
+  if (!job || job.userId !== session.user.id) {
+    return c.json({ error: 'Not found' }, 404)
+  }
+
+  if (job.status === 'queued') {
+    // Stopping a list that hasn't started = cancel it outright
+    await db.update(batchJobs)
+      .set({ status: 'cancelled', updatedAt: new Date().toISOString() })
+      .where(eq(batchJobs.id, batchId))
+    return c.json({ success: true })
+  }
+  if (job.status !== 'processing') {
+    return c.json({ error: 'Batch is not processing' }, 409)
+  }
+
+  const doId = c.env.BATCH_JOB.idFromName(batchId)
+  const stub = c.env.BATCH_JOB.get(doId)
+  const resp = await stub.fetch('http://internal/stop', { method: 'POST' })
+  await resp.text()
+
+  if (!resp.ok) {
+    // DO has no live run (evicted/crashed) — pause it directly
+    await db.update(batchJobs)
+      .set({ status: 'paused', updatedAt: new Date().toISOString() })
+      .where(eq(batchJobs.id, batchId))
+    await kickNextQueuedBatch(c.env, session.user.id)
+  }
+
+  return c.json({ success: true })
+})
+
+// ─── POST /batch/:id/cancel — Stop and mark remaining rows cancelled ───────
+
+batch.post('/:id/cancel', async (c) => {
+  const session = await getSession(c)
+  if (!session?.user) {
+    return c.json({ error: 'Not authenticated' }, 401)
+  }
+
+  const batchId = c.req.param('id')
+  const db = drizzle(c.env.DB)
+  const [job] = await db.select()
+    .from(batchJobs)
+    .where(eq(batchJobs.id, batchId))
+    .limit(1)
+
+  if (!job || job.userId !== session.user.id) {
+    return c.json({ error: 'Not found' }, 404)
+  }
+
+  const finalizeCancelled = async () => {
+    const results = job.resultsJson
+      ? (JSON.parse(job.resultsJson) as Array<{ status?: string }>)
+      : []
+    const next = results.map((r) =>
+      r.status === 'completed' ? r : { ...r, status: 'failed', error: 'Cancelled — stopped by user' })
+    await db.update(batchJobs)
+      .set({
+        status: 'completed',
+        completedCount: next.filter((r) => r.status === 'completed').length,
+        failedCount: next.filter((r) => r.status === 'failed').length,
+        resultsJson: JSON.stringify(next),
+        updatedAt: new Date().toISOString(),
+      })
+      .where(eq(batchJobs.id, batchId))
+  }
+
+  if (job.status === 'processing') {
+    const doId = c.env.BATCH_JOB.idFromName(batchId)
+    const stub = c.env.BATCH_JOB.get(doId)
+    const resp = await stub.fetch('http://internal/cancel', { method: 'POST' })
+    await resp.text()
+
+    if (!resp.ok) {
+      // DO dead — finalize directly
+      await finalizeCancelled()
+      await kickNextQueuedBatch(c.env, session.user.id)
+    }
+    return c.json({ success: true })
+  }
+
+  // queued / paused / finished — just mark remaining rows cancelled
+  await finalizeCancelled()
+  return c.json({ success: true })
+})
+
 // ─── GET /batch/:id — Get batch status + results ──────────────────────────
 
 batch.get('/:id', async (c) => {
