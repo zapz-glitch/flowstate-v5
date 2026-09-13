@@ -32,6 +32,8 @@ export interface EvaluationCallbacks {
   onCompClick?: (comp: CompItem) => void
   onRunAiAnalysis?: () => void
   onUndoAiSelection?: () => void
+  /** Called after a Notify stamp is submitted — batch review uses it to advance */
+  onFeedbackSubmitted?: (type: 'validate' | 'improve') => void
 }
 
 // ─── Consolidated State ────────────────────────────────────────────────────

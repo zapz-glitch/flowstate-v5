@@ -9,8 +9,8 @@ import { Hono } from 'hono'
 import type { Env } from '../types'
 import { getSession } from '../lib/session'
 import { drizzle } from 'drizzle-orm/d1'
-import { eq, desc } from 'drizzle-orm'
-import { batchJobs } from '../db/schema'
+import { eq, desc, inArray } from 'drizzle-orm'
+import { batchJobs, savedReports } from '../db/schema'
 import { generateSseToken } from '../utils/sse-token'
 
 const batch = new Hono<{ Bindings: Env }>()
@@ -204,13 +204,29 @@ batch.get('/:id', async (c) => {
   const updatedAtMs = new Date(job.updatedAt).getTime()
   const isStuck = job.status === 'processing' && (Date.now() - updatedAtMs) > STUCK_THRESHOLD_MS
 
+  const results = job.resultsJson ? JSON.parse(job.resultsJson) as Array<{ jobId?: string; feedbackStatus?: string | null }> : []
+
+  // Join review stamps from saved_reports so the batch list shows which
+  // reports have been validated / flagged already
+  const jobIds = results.map((r) => r.jobId).filter((id): id is string => !!id)
+  if (jobIds.length > 0) {
+    const stamped = await db
+      .select({ jobId: savedReports.jobId, feedbackStatus: savedReports.feedbackStatus })
+      .from(savedReports)
+      .where(inArray(savedReports.jobId, jobIds))
+    const stampByJobId = new Map(stamped.map((s) => [s.jobId, s.feedbackStatus]))
+    for (const r of results) {
+      if (r.jobId) r.feedbackStatus = stampByJobId.get(r.jobId) ?? null
+    }
+  }
+
   return c.json({
     id: job.id,
     status: job.status,
     totalAddresses: job.totalAddresses,
     completedCount: job.completedCount,
     failedCount: job.failedCount,
-    results: job.resultsJson ? JSON.parse(job.resultsJson) : [],
+    results,
     createdAt: job.createdAt,
     updatedAt: job.updatedAt,
     isStuck,

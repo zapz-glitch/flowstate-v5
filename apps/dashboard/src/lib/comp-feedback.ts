@@ -25,6 +25,8 @@ export interface FeedbackContext {
   subjectAddress?: string | null
 }
 
+export type FeedbackKind = 'improve' | 'validate'
+
 export interface FeedbackInput {
   subject: SubjectData | null | undefined
   comps: CompItem[]
@@ -32,6 +34,8 @@ export interface FeedbackInput {
   userSelectedKeys: Set<string>
   context?: FeedbackContext
   userNotes?: string
+  /** 'improve' = flagged for a system fix; 'validate' = stamped as correct */
+  kind?: FeedbackKind
 }
 
 const FILTER_LABEL: Record<string, string> = {
@@ -148,7 +152,7 @@ function explainAddedComp(comp: CompItem, appliedFilters: AppliedFilter[] | null
 }
 
 export function generateCompFeedbackReport(input: FeedbackInput): string {
-  const { subject, comps, userSelectedKeys, context, userNotes } = input
+  const { subject, comps, userSelectedKeys, context, userNotes, kind = 'improve' } = input
 
   const indexed = comps.map((c, i) => ({ comp: c, key: getCompKey(c, i) }))
   // Engine's ARV selection is marked by compGroup === 'arv' on the server data
@@ -159,10 +163,14 @@ export function generateCompFeedbackReport(input: FeedbackInput): string {
   const removed = indexed.filter(({ key }) => engineKeys.has(key) && !userSelectedKeys.has(key))
 
   const lines: string[] = []
-  lines.push('# Comp Selection Feedback — paste into devin.ai')
+  lines.push(kind === 'validate'
+    ? '# Comp Selection VALIDATION — analyst stamped this report as correct'
+    : '# Comp Selection Feedback — paste into devin.ai')
   lines.push('')
   lines.push('**Repo:** flowstate-v5 — `apps/api/src/services/appraisal/` (rules engine), `apps/dashboard/` (settings UI)')
-  lines.push('**Task:** adjust appraisal rules/data so the comp selection below matches what the analyst intended. Read the per-comp analysis and the suggested changes; implement the smallest change that achieves it, then run `cd apps/api && npx vitest run src/services/appraisal && npx tsc --noEmit`.')
+  lines.push(kind === 'validate'
+    ? '**Task:** NO changes needed — the analyst reviewed this report and marked it correct. Use it as a positive example when tuning rules (a passing pattern to preserve in tests).'
+    : '**Task:** adjust appraisal rules/data so the comp selection below matches what the analyst intended. Read the per-comp analysis and the suggested changes; implement the smallest change that achieves it, then run `cd apps/api && npx vitest run src/services/appraisal && npx tsc --noEmit`.')
   lines.push('')
 
   // Analyst notes

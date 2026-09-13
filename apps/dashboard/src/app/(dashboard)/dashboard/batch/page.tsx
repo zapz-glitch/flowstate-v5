@@ -1,13 +1,30 @@
 'use client'
 
-import { useState, useEffect, useRef, useCallback } from 'react'
-import { Upload, FileText, Loader2, Check, X, Download, ExternalLink } from 'lucide-react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import Link from 'next/link'
+import { Upload, FileText, Loader2, Check, X, Download, ChevronRight, Flag, CheckCircle2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
 import { submitBatchAnalysis, getBatchStatus, getBatchJobs, retryFailedAddresses, recoverStuckBatch, getBatchStreamToken, type BatchResult } from './actions'
 
 type Phase = 'upload' | 'processing' | 'complete'
+type ConfBucket = 'high' | 'medium' | 'low' | 'unrated'
+
+const CONF_LABELS: Record<ConfBucket, string> = {
+  high: 'High confidence',
+  medium: 'Medium confidence',
+  low: 'Low confidence',
+  unrated: 'Unrated',
+}
+
+function confBucket(r: BatchResult): ConfBucket {
+  const c = r.confidence?.toLowerCase()
+  if (c === 'high' || c === 'medium' || c === 'low') return c
+  return 'unrated'
+}
+
+interface JobSummary { id: string; status: string; totalAddresses: number; completedCount: number; failedCount: number; createdAt: string }
 
 export default function BatchPage() {
   const [phase, setPhase] = useState<Phase>('upload')
@@ -21,6 +38,12 @@ export default function BatchPage() {
   const [completedCount, setCompletedCount] = useState(0)
   const [failedCount, setFailedCount] = useState(0)
   const [isStuck, setIsStuck] = useState(false)
+
+  // List picker + confidence filter
+  const [allJobs, setAllJobs] = useState<JobSummary[]>([])
+  const [viewAll, setViewAll] = useState(false) // aggregate across lists
+  const [allResults, setAllResults] = useState<Array<BatchResult & { batchId: string }>>([])
+  const [confFilter, setConfFilter] = useState<ConfBucket | 'all'>('all')
 
   const fileInputRef = useRef<HTMLInputElement>(null)
   const pollingRef = useRef<NodeJS.Timeout | null>(null)
@@ -106,6 +129,8 @@ export default function BatchPage() {
     async function resumeBatch() {
       try {
         const jobs = await getBatchJobs()
+        if (cancelled) return
+        setAllJobs(jobs)
         const active = jobs.find((j) => j.status === 'processing')
         const recent = active ?? jobs[0]
         if (!recent || cancelled) return
@@ -309,6 +334,9 @@ export default function BatchPage() {
     setCompletedCount(0)
     setFailedCount(0)
     setIsStuck(false)
+    setViewAll(false)
+    setAllResults([])
+    setConfFilter('all')
   }, [stopPolling])
 
   // ─── Progress calculation ─────────────────────────────────────────────────
@@ -317,6 +345,86 @@ export default function BatchPage() {
   const totalAddresses = results.length > 0 ? results.length : addresses.length
   const progressPercent = totalAddresses > 0 ? Math.round((totalDone / totalAddresses) * 100) : 0
   const currentIndex = results.findIndex((r) => r.status === 'processing')
+  const remaining = totalAddresses - totalDone
+
+  // ─── List picker ──────────────────────────────────────────────────────────
+
+  const selectBatch = useCallback(async (id: string) => {
+    if (id === batchId) return
+    stopPolling()
+    setViewAll(false)
+    setConfFilter('all')
+    setBatchId(id)
+    setError(null)
+    const job = await getBatchStatus(id)
+    if (!job) return
+    setResults(job.results ?? [])
+    setCompletedCount(job.completedCount)
+    setFailedCount(job.failedCount)
+    setIsStuck(job.isStuck ?? false)
+    if (job.status === 'processing') {
+      setPhase('processing')
+      startPolling(id)
+    } else {
+      setPhase('complete')
+    }
+  }, [batchId, startPolling, stopPolling])
+
+  const selectAllLists = useCallback(async () => {
+    stopPolling()
+    setViewAll(true)
+    setConfFilter('all')
+    setPhase('complete')
+    // Fetch every job's results and merge (stamps + confidence join server-side)
+    const merged: Array<BatchResult & { batchId: string }> = []
+    for (const j of allJobs) {
+      const job = await getBatchStatus(j.id)
+      if (job?.results?.length) {
+        for (const r of job.results) merged.push({ ...r, batchId: j.id })
+      }
+    }
+    setAllResults(merged)
+  }, [allJobs, stopPolling])
+
+  // ─── Confidence buckets ───────────────────────────────────────────────────
+
+  // Rows for the current view — per-list results get their batchId attached for nav links
+  const viewRows = useMemo((): Array<BatchResult & { batchId?: string }> => {
+    if (viewAll) return allResults
+    return results.map((r) => ({ ...r, batchId: batchId ?? undefined }))
+  }, [viewAll, allResults, results, batchId])
+
+  const completedRows = useMemo(() => viewRows.filter((r) => r.status === 'completed' && r.jobId), [viewRows])
+
+  const buckets = useMemo(() => {
+    const b: Record<ConfBucket, { total: number; reviewed: number; rows: typeof completedRows }> = {
+      high: { total: 0, reviewed: 0, rows: [] },
+      medium: { total: 0, reviewed: 0, rows: [] },
+      low: { total: 0, reviewed: 0, rows: [] },
+      unrated: { total: 0, reviewed: 0, rows: [] },
+    }
+    for (const r of completedRows) {
+      const k = confBucket(r)
+      b[k].total++
+      if (r.feedbackStatus) b[k].reviewed++
+      b[k].rows.push(r)
+    }
+    return b
+  }, [completedRows])
+
+  const filteredRows = useMemo(() => {
+    if (confFilter === 'all') return viewRows
+    return viewRows.filter((r) => r.status === 'completed' && confBucket(r) === confFilter)
+  }, [viewRows, confFilter])
+
+  // First unreviewed report in a bucket — where "Review" jumps to
+  const firstUnreviewed = useCallback((bucket: ConfBucket) => {
+    const rows = buckets[bucket].rows
+    return rows.find((r) => !r.feedbackStatus) ?? rows[0] ?? null
+  }, [buckets])
+
+  const reportHref = (r: BatchResult & { batchId?: string }, conf?: string) =>
+    r.jobId ? `/dashboard/reports/${r.jobId}${r.batchId ? `?batch=${r.batchId}&conf=${conf ?? (confFilter === 'all' ? 'all' : confFilter)}` : ''}` : '#'
 
   return (
     <div className="space-y-6">
@@ -399,7 +507,39 @@ export default function BatchPage() {
       {/* Phase: Processing / Complete */}
       {(phase === 'processing' || phase === 'complete') && (
         <div className="space-y-4">
-          {/* Progress bar */}
+          {/* List picker — which batch list to view, or all lists */}
+          {allJobs.length > 0 && (
+            <div className="flex items-center gap-1 flex-wrap">
+              <button
+                type="button"
+                onClick={selectAllLists}
+                className={cn(
+                  'text-[11px] px-2.5 py-1 rounded transition-colors',
+                  viewAll ? 'bg-primary/15 text-primary font-medium' : 'text-foreground-tertiary hover:text-foreground hover:bg-secondary'
+                )}
+              >
+                All lists
+              </button>
+              {allJobs.map((j, i) => (
+                <button
+                  key={j.id}
+                  type="button"
+                  onClick={() => selectBatch(j.id)}
+                  className={cn(
+                    'text-[11px] px-2.5 py-1 rounded transition-colors inline-flex items-center gap-1',
+                    !viewAll && batchId === j.id ? 'bg-primary/15 text-primary font-medium' : 'text-foreground-tertiary hover:text-foreground hover:bg-secondary'
+                  )}
+                >
+                  List {allJobs.length - i}
+                  <span className="text-[9px] opacity-70">· {j.completedCount}/{j.totalAddresses}</span>
+                  {j.status === 'processing' && <Loader2 className="w-2.5 h-2.5 animate-spin" />}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Queue card — how many in the list, how many left */}
+          {!viewAll && (
           <Card className="rounded-sm">
             <CardContent className="p-4">
               <div className="flex items-center justify-between mb-2">
@@ -413,6 +553,9 @@ export default function BatchPage() {
                   </span>
                 </div>
                 <div className="flex items-center gap-3">
+                  {remaining > 0 && (
+                    <span className="text-xs text-foreground-tertiary">{remaining} left in queue</span>
+                  )}
                   {completedCount > 0 && (
                     <span className="text-xs text-emerald-500">{completedCount} completed</span>
                   )}
@@ -432,6 +575,57 @@ export default function BatchPage() {
               </div>
             </CardContent>
           </Card>
+          )}
+
+          {/* Confidence buckets — click a bucket to filter, Review jumps to first unreviewed */}
+          {completedRows.length > 0 && (
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+              <button
+                type="button"
+                onClick={() => setConfFilter('all')}
+                className={cn(
+                  'rounded-sm border px-3 py-2.5 text-left transition-colors',
+                  confFilter === 'all' ? 'border-primary/50 bg-primary/5' : 'border-border hover:border-foreground/20'
+                )}
+              >
+                <div className="text-[10px] uppercase tracking-wider text-foreground-tertiary">All</div>
+                <div className="text-lg font-bold tabular-nums">{completedRows.length}</div>
+                <div className="text-[9px] text-foreground-tertiary">
+                  {completedRows.filter((r) => r.feedbackStatus).length} reviewed
+                </div>
+              </button>
+              {(['low', 'medium', 'high', 'unrated'] as ConfBucket[]).map((bucket) => {
+                const b = buckets[bucket]
+                const target = firstUnreviewed(bucket)
+                return (
+                  <div
+                    key={bucket}
+                    className={cn(
+                      'rounded-sm border px-3 py-2.5 transition-colors',
+                      confFilter === bucket ? 'border-primary/50 bg-primary/5' : 'border-border',
+                      bucket === 'low' && 'border-l-2 border-l-red-500/50',
+                      bucket === 'medium' && 'border-l-2 border-l-amber-500/50',
+                      bucket === 'high' && 'border-l-2 border-l-emerald-500/50',
+                    )}
+                  >
+                    <button type="button" onClick={() => setConfFilter(confFilter === bucket ? 'all' : bucket)} className="block w-full text-left">
+                      <div className="text-[10px] uppercase tracking-wider text-foreground-tertiary">{CONF_LABELS[bucket]}</div>
+                      <div className="text-lg font-bold tabular-nums">{b.total}</div>
+                      <div className="text-[9px] text-foreground-tertiary">{b.reviewed} reviewed</div>
+                    </button>
+                    {target && (
+                      <Link
+                        href={reportHref(target, bucket)}
+                        className="mt-1 inline-flex items-center gap-0.5 text-[10px] font-medium text-primary hover:underline"
+                      >
+                        Review <ChevronRight className="w-3 h-3" />
+                      </Link>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )}
 
           {/* Stuck batch warning */}
           {isStuck && phase === 'processing' && (
@@ -476,12 +670,14 @@ export default function BatchPage() {
                       <th className="text-left px-3 py-2 font-medium text-foreground-tertiary w-8">#</th>
                       <th className="text-left px-3 py-2 font-medium text-foreground-tertiary">Address</th>
                       <th className="text-left px-3 py-2 font-medium text-foreground-tertiary">Status</th>
+                      <th className="text-left px-3 py-2 font-medium text-foreground-tertiary w-20">Confidence</th>
+                      <th className="text-left px-3 py-2 font-medium text-foreground-tertiary w-24">Reviewed</th>
                       <th className="text-center px-3 py-2 font-medium text-foreground-tertiary w-20">Report</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border/30">
-                    {results.map((r, i) => (
-                      <tr key={i} className={cn(
+                    {filteredRows.map((r, i) => (
+                      <tr key={r.jobId ?? i} className={cn(
                         'transition-colors',
                         r.status === 'processing' && 'bg-primary/5',
                         r.status === 'failed' && 'bg-red-500/5',
@@ -508,16 +704,42 @@ export default function BatchPage() {
                             </span>
                           )}
                         </td>
+                        <td className="px-3 py-2">
+                          {r.status === 'completed' ? (() => {
+                            const b = confBucket(r)
+                            return b === 'unrated'
+                              ? <span className="text-foreground-tertiary">—</span>
+                              : <span className={cn(
+                                  'inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium',
+                                  b === 'low' && 'bg-red-500/10 text-red-400',
+                                  b === 'medium' && 'bg-amber-500/10 text-amber-500',
+                                  b === 'high' && 'bg-emerald-500/10 text-emerald-500',
+                                )}>{b}</span>
+                          })() : <span className="text-foreground-tertiary">—</span>}
+                        </td>
+                        <td className="px-3 py-2">
+                          {r.feedbackStatus === 'validated' && (
+                            <span className="inline-flex items-center gap-1 text-emerald-500 text-[10px] font-medium">
+                              <CheckCircle2 className="w-3 h-3" /> Validated
+                            </span>
+                          )}
+                          {r.feedbackStatus === 'improve' && (
+                            <span className="inline-flex items-center gap-1 text-amber-500 text-[10px] font-medium">
+                              <Flag className="w-3 h-3" /> Flagged
+                            </span>
+                          )}
+                          {!r.feedbackStatus && r.status === 'completed' && (
+                            <span className="text-foreground-tertiary text-[10px]">—</span>
+                          )}
+                        </td>
                         <td className="px-3 py-2 text-center">
                           {r.jobId && r.status === 'completed' ? (
-                            <a
-                              href={`/dashboard/reports/${r.jobId}`}
-                              target="_blank"
-                              rel="noopener noreferrer"
+                            <Link
+                              href={reportHref(r, r.confidence?.toLowerCase() ?? 'unrated')}
                               className="text-primary hover:underline inline-flex items-center gap-0.5"
                             >
-                              View <ExternalLink className="w-2.5 h-2.5" />
-                            </a>
+                              Review <ChevronRight className="w-2.5 h-2.5" />
+                            </Link>
                           ) : '-'}
                         </td>
                       </tr>

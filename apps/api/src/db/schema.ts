@@ -181,6 +181,11 @@ export const savedReports = sqliteTable(
     // Sharing
     isShared: integer('is_shared', { mode: 'boolean' }).notNull().default(false),
     sharePasswordHash: text('share_password_hash'), // format: "salt:sha256hex"
+    // Review stamps — batch-review feedback loop
+    feedbackStatus: text('feedback_status'), // 'validated' | 'improve' | null
+    feedbackNotes: text('feedback_notes'),
+    feedbackReport: text('feedback_report'),
+    feedbackAt: text('feedback_at'),
     // Timestamps
     createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
   },

@@ -13,6 +13,9 @@ export interface BatchResult {
   buyPrice?: number
   rehabCost?: number
   recommendation?: string
+  confidence?: string
+  /** Review stamp: 'validated' | 'improve' — joined from saved_reports */
+  feedbackStatus?: string | null
 }
 
 export interface BatchJob {
@@ -161,6 +164,35 @@ export async function retryFailedAddresses(batchId: string): Promise<{ success: 
     return await response.json() as { success: boolean; streamUrl?: string; token?: string }
   } catch (err) {
     return { success: false, error: err instanceof Error ? err.message : 'Retry failed' }
+  }
+}
+
+/** Stamp a report as validated or flagged-for-improvement (batch review loop) */
+export async function submitReportFeedback(
+  jobId: string,
+  type: 'validate' | 'improve',
+  notes: string,
+  report: string,
+): Promise<{ success: boolean; feedbackStatus?: string; error?: string }> {
+  try {
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL!
+    const { cookies } = await import('next/headers')
+    const cookieStore = await cookies()
+    const cookieHeader = cookieStore.getAll().map((c) => `${c.name}=${c.value}`).join('; ')
+
+    const response = await fetch(`${apiUrl}/user/reports/${encodeURIComponent(jobId)}/feedback`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Cookie': cookieHeader },
+      body: JSON.stringify({ type, notes, report }),
+    })
+
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({})) as { error?: string }
+      return { success: false, error: data.error || `Feedback failed (${response.status})` }
+    }
+    return await response.json() as { success: boolean; feedbackStatus?: string }
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : 'Feedback failed' }
   }
 }
 

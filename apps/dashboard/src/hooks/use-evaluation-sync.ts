@@ -40,6 +40,7 @@ interface SyncOptions {
   onCompClick?: (comp: CompItem) => void
   onRunAiAnalysis?: () => void
   onUndoAiSelection?: () => void
+  onFeedbackSubmitted?: (type: 'validate' | 'improve') => void
 }
 
 export function useEvaluationSync({
@@ -56,6 +57,7 @@ export function useEvaluationSync({
   onCompClick,
   onRunAiAnalysis,
   onUndoAiSelection,
+  onFeedbackSubmitted,
 }: SyncOptions) {
   const setState = useSetAtom(evaluationStateAtom)
 
@@ -79,6 +81,7 @@ export function useEvaluationSync({
         onCompClick,
         onRunAiAnalysis,
         onUndoAiSelection,
+        onFeedbackSubmitted,
       },
     })
   }, [
@@ -86,6 +89,6 @@ export function useEvaluationSync({
     evaluation.isRecalculated, evaluation.recalcData, evaluation.compOverride,
     evaluation.handleToggleComp, evaluation.handleResetComps,
     feedback,
-    aiAnalyzing, isStreaming, marketContext, aiReport, onOpenSettings, onCompClick, onRunAiAnalysis, onUndoAiSelection, setState,
+    aiAnalyzing, isStreaming, marketContext, aiReport, onOpenSettings, onCompClick, onRunAiAnalysis, onUndoAiSelection, onFeedbackSubmitted, setState,
   ])
 }

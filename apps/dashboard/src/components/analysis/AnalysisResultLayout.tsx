@@ -39,6 +39,7 @@ export function AnalysisResultLayout({
     onResetComps,
     onOpenSettings,
     onCompClick,
+    onFeedbackSubmitted,
   } = useEvaluation()
 
   const selectedCompKeys = compOverride?.selectedCompKeys
@@ -101,6 +102,7 @@ export function AnalysisResultLayout({
           onCompClick={onCompClick}
           onCompHover={onCompHover}
           feedbackContext={feedbackContext}
+          onFeedbackSubmitted={onFeedbackSubmitted}
         />
       ) : subject && isStreaming ? (
         /* Comps loading skeleton — only while streaming */

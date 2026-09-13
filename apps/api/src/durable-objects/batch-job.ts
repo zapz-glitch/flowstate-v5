@@ -40,6 +40,7 @@ interface BatchResult {
   buyPrice?: number
   rehabCost?: number
   recommendation?: string
+  confidence?: string
 }
 
 export interface StartBatchRequest {
@@ -224,12 +225,13 @@ export class BatchJobDO {
           buyPrice: result.buyPrice,
           rehabCost: result.rehabCost,
           recommendation: result.recommendation,
+          confidence: result.confidence,
           error: undefined,
         }
         this.batchState.completedCount++
         await this.pushEvent('address_completed', {
           index: i, total: this.batchState.totalAddresses, address,
-          jobId: result.jobId, arv: result.arv, buyPrice: result.buyPrice, recommendation: result.recommendation,
+          jobId: result.jobId, arv: result.arv, buyPrice: result.buyPrice, recommendation: result.recommendation, confidence: result.confidence,
         })
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : 'Retry failed'
@@ -311,6 +313,7 @@ export class BatchJobDO {
           buyPrice: result.buyPrice,
           rehabCost: result.rehabCost,
           recommendation: result.recommendation,
+          confidence: result.confidence,
         }
         this.batchState.completedCount++
 
@@ -322,6 +325,7 @@ export class BatchJobDO {
           arv: result.arv,
           buyPrice: result.buyPrice,
           recommendation: result.recommendation,
+          confidence: result.confidence,
         })
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : 'Analysis failed'
@@ -378,6 +382,7 @@ export class BatchJobDO {
     buyPrice?: number
     rehabCost?: number
     recommendation?: string
+    confidence?: string
   }> {
     const jobId = `batch_${config.batchId}_${crypto.randomUUID().slice(0, 8)}`
 
@@ -465,6 +470,7 @@ export class BatchJobDO {
           buyPrice: result?.valuation?.buyPrice,
           rehabCost: result?.valuation?.rehabCost,
           recommendation: result?.valuation?.recommendation,
+          confidence: result?.report?.confidence,
         }
       }
     }

@@ -292,6 +292,48 @@ userReports.put('/:jobId', async (c) => {
   return c.json({ success: true })
 })
 
+// ─── POST /user/reports/:jobId/feedback — Review stamp (batch review loop) ────
+// 'validate' = the report/comps look right; 'improve' = flagged for a system fix.
+// The generated ticket text is stored for audit; the dashboard also copies it
+// so the reviewer can paste it into devin.ai.
+
+userReports.post('/:jobId/feedback', bodyLimit({ maxSize: 100000 }), async (c) => {
+  const session = await getSession(c)
+  if (!session?.user) return c.json({ error: 'Not authenticated' }, 401)
+  const origin = c.req.header('Origin')
+  if (!c.env.DASHBOARD_URL || origin !== new URL(c.env.DASHBOARD_URL).origin) return c.json({ error: 'Untrusted origin' }, 403)
+  if (!c.req.header('Content-Type')?.toLowerCase().startsWith('application/json')) return c.json({ error: 'JSON request required' }, 415)
+
+  const body = await c.req.json().catch(() => null)
+  if (!body || typeof body !== 'object' || Array.isArray(body) ||
+      Object.keys(body).some(key => !['type', 'notes', 'report'].includes(key)) ||
+      (body.type !== 'validate' && body.type !== 'improve') ||
+      (body.notes != null && typeof body.notes !== 'string') ||
+      (body.report != null && typeof body.report !== 'string')) {
+    return c.json({ error: 'Invalid feedback — type must be "validate" or "improve"' }, 400)
+  }
+
+  const jobId = c.req.param('jobId')
+  const db = drizzle(c.env.DB)
+  const status = body.type === 'validate' ? 'validated' : 'improve'
+  const updated = await db
+    .update(savedReports)
+    .set({
+      feedbackStatus: status,
+      feedbackNotes: typeof body.notes === 'string' ? body.notes.slice(0, 5000) : null,
+      feedbackReport: typeof body.report === 'string' ? body.report.slice(0, 50000) : null,
+      feedbackAt: new Date().toISOString(),
+    })
+    .where(and(eq(savedReports.jobId, jobId), eq(savedReports.userId, session.user.id)))
+    .returning({ id: savedReports.id })
+
+  if (updated.length === 0) {
+    return c.json({ error: 'Report not found' }, 404)
+  }
+
+  return c.json({ success: true, feedbackStatus: status })
+})
+
 // ─── GET /user/reports/:jobId ─────────────────────────────────────────────────
 
 userReports.get('/:jobId', async (c) => {
@@ -331,6 +373,8 @@ userReports.get('/:jobId', async (c) => {
     address: report.propertyAddress,
     createdAt: report.createdAt,
     analysis,
+    feedbackStatus: report.feedbackStatus ?? null,
+    feedbackAt: report.feedbackAt ?? null,
   })
 })
 

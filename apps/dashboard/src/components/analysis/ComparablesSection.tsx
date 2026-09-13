@@ -16,7 +16,8 @@ import { getCompKey, normalizeSubdivision } from './format-helpers'
 import { CompCard } from './CompCard'
 import { CompGridCard } from './CompGridCard'
 import { RuleMatchDetails } from './RuleMatchDetails'
-import { generateCompFeedbackReport, type FeedbackContext } from '@/lib/comp-feedback'
+import { generateCompFeedbackReport, type FeedbackContext, type FeedbackKind } from '@/lib/comp-feedback'
+import { submitReportFeedback } from '@/app/(dashboard)/dashboard/batch/actions'
 
 export interface ComparablesSectionProps {
   comps: CompsData
@@ -47,6 +48,8 @@ export interface ComparablesSectionProps {
   onCompHover?: (key: string | null) => void
   /** Rules/fallback context for the "Notify" comp-selection feedback report */
   feedbackContext?: FeedbackContext | null
+  /** Called after a feedback stamp is submitted — batch review uses it to advance */
+  onFeedbackSubmitted?: (type: 'validate' | 'improve') => void
 }
 
 type SortOption = 'default' | 'subdivision' | 'neighborhood' | 'distance' | 'price' | 'psf'
@@ -97,6 +100,7 @@ export function ComparablesSection({
   onCompClick,
   onCompHover,
   feedbackContext,
+  onFeedbackSubmitted,
 }: ComparablesSectionProps) {
   const [expandedComps, setExpandedComps] = useState<Set<string>>(new Set())
   const [excludedOpen, setExcludedOpen] = useState(false)
@@ -107,6 +111,9 @@ export function ComparablesSection({
   const [notifyNotes, setNotifyNotes] = useState('')
   const [notifyReport, setNotifyReport] = useState<string | null>(null)
   const [notifyCopied, setNotifyCopied] = useState(false)
+  const [notifySubmitting, setNotifySubmitting] = useState<FeedbackKind | null>(null)
+  const [notifyStamped, setNotifyStamped] = useState<'validated' | 'improve' | null>(null)
+  const [notifySaveError, setNotifySaveError] = useState<string | null>(null)
 
   // Auto-expand excluded section when a highlighted comp is in it
   useEffect(() => {
@@ -192,20 +199,39 @@ export function ComparablesSection({
 
   const selectedCount = arvComps.length
 
-  // Notify — build the paste-ready devin.ai ticket from the manual diff
-  const submitNotify = () => {
+  // Notify — build the paste-ready devin.ai ticket, stamp the report, copy it
+  const submitNotify = async (kind: FeedbackKind) => {
+    if (notifySubmitting) return
+    setNotifySubmitting(kind)
     const report = generateCompFeedbackReport({
       subject,
       comps: compItems,
       userSelectedKeys: selectedCompKeys ?? new Set(),
       context: feedbackContext ?? {},
       userNotes: notifyNotes,
+      kind,
     })
     setNotifyReport(report)
+    setNotifySaveError(null)
     navigator.clipboard
       .writeText(report)
       .then(() => setNotifyCopied(true))
       .catch(() => setNotifyCopied(false))
+
+    // Persist the stamp so the batch list shows this report as reviewed
+    const jobId = feedbackContext?.jobId
+    if (jobId) {
+      try {
+        const res = await submitReportFeedback(jobId, kind, notifyNotes, report)
+        if (res.success) setNotifyStamped(kind === 'validate' ? 'validated' : 'improve')
+        else setNotifySaveError(res.error ?? 'Stamp not saved')
+      } catch {
+        setNotifySaveError('Stamp not saved')
+      }
+    }
+    setNotifySubmitting(null)
+    // Batch review mode — advance to the next report after stamping
+    onFeedbackSubmitted?.(kind === 'validate' ? 'validate' : 'improve')
   }
 
   // Stats from selected comps
@@ -240,7 +266,7 @@ export function ComparablesSection({
             {/* Notify — comp-selection feedback report (always available) */}
             <button
               type="button"
-              onClick={() => { setNotifyReport(null); setNotifyNotes(''); setNotifyCopied(false); setNotifyOpen(true) }}
+              onClick={() => { setNotifyReport(null); setNotifyNotes(''); setNotifyCopied(false); setNotifyStamped(null); setNotifySaveError(null); setNotifyOpen(true) }}
               className="flex items-center gap-1 text-caption text-foreground-tertiary hover:text-foreground font-medium transition-colors no-print"
               title="Generate a comp-selection feedback report for devin.ai"
             >
@@ -448,29 +474,57 @@ export function ComparablesSection({
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault()
-                    submitNotify()
+                    submitNotify('improve')
                   }
                 }}
-                placeholder="Optional notes for this ticket — e.g. '10321 Briarcliff is the right comp, same street renovated sale'&#10;&#10;Press Enter to send, Shift+Enter for a new line."
+                placeholder="Optional notes for this ticket — e.g. '10321 Briarcliff is the right comp, same street renovated sale'&#10;&#10;Enter = Flag for improvement · Shift+Enter = new line"
                 rows={4}
                 className="w-full rounded-lg border border-border bg-background px-3 py-2 text-body-sm text-foreground placeholder:text-foreground-tertiary focus:outline-none focus:ring-1 focus:ring-primary resize-y"
               />
-              <div className="flex justify-end gap-2">
-                <Button variant="outline" size="sm" onClick={() => setNotifyOpen(false)}>
-                  Cancel
-                </Button>
-                <Button size="sm" onClick={submitNotify}>
-                  <Bell className="w-3.5 h-3.5 mr-1.5" />
-                  Send
-                </Button>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[10px] text-foreground-tertiary">
+                  Both stamp this report + copy a ticket to your clipboard
+                </span>
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => submitNotify('validate')}
+                    disabled={notifySubmitting !== null}
+                    className="text-emerald-600 border-emerald-500/30 hover:bg-emerald-500/10"
+                  >
+                    {notifySubmitting === 'validate' ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <Check className="w-3.5 h-3.5 mr-1.5" />}
+                    Validate
+                  </Button>
+                  <Button
+                    size="sm"
+                    onClick={() => submitNotify('improve')}
+                    disabled={notifySubmitting !== null}
+                    className="bg-amber-600 hover:bg-amber-700 text-white"
+                  >
+                    {notifySubmitting === 'improve' ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <Bell className="w-3.5 h-3.5 mr-1.5" />}
+                    Flag for improvement
+                  </Button>
+                </div>
               </div>
             </div>
           ) : (
             <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <p className="text-caption text-foreground-tertiary">
-                  {notifyCopied ? 'Copied to clipboard — paste into devin.ai' : 'Generated — copy below'}
-                </p>
+                <div className="flex items-center gap-2">
+                  {notifyStamped && (
+                    <span className={cn(
+                      'text-[10px] font-medium px-1.5 py-0.5 rounded',
+                      notifyStamped === 'validated' ? 'bg-emerald-500/10 text-emerald-500' : 'bg-amber-500/10 text-amber-500'
+                    )}>
+                      {notifyStamped === 'validated' ? '✓ Validated' : '⚑ Flagged'}
+                    </span>
+                  )}
+                  <p className="text-caption text-foreground-tertiary">
+                    {notifyCopied ? 'Copied to clipboard — paste into devin.ai' : 'Generated — copy below'}
+                    {notifySaveError && <span className="text-red-400 ml-1">({notifySaveError})</span>}
+                  </p>
+                </div>
                 <Button
                   variant="outline"
                   size="sm"

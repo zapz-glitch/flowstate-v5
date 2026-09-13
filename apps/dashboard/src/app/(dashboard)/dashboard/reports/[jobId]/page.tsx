@@ -2,7 +2,8 @@
 
 import { useState, useEffect, useCallback, useRef, use } from 'react'
 import Link from 'next/link'
-import { ArrowLeft, Share2, RefreshCw, AlertTriangle, History, Loader2 } from 'lucide-react'
+import { useRouter } from 'next/navigation'
+import { ArrowLeft, ArrowRight, Share2, RefreshCw, AlertTriangle, History, Loader2, ListChecks } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -35,6 +36,7 @@ import { useMapInteraction } from '@/hooks/use-map-interaction'
 import { useEvaluationSync } from '@/hooks/use-evaluation-sync'
 import { useEnrichmentSSE, type EnrichmentEvent } from '@/hooks/use-enrichment-sse'
 import { useSidebar } from '@/components/SidebarProvider'
+import { getBatchStatus } from '@/app/(dashboard)/dashboard/batch/actions'
 
 // ─── Main Page ──────────────────────────────────────────────────────────────
 
@@ -82,6 +84,54 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
   const preAiCompsRef = useRef<unknown>(null)
 
   const analyzeData = report?.analysis ?? null
+
+  // ─── Batch review mode — ?batch=<id>&conf=<bucket> ──────────────────────
+  // When opened from the batch list, load that batch's review queue so the
+  // user can step through reports with prev/next and auto-advance on Notify.
+  const router = useRouter()
+  const [batchQueue, setBatchQueue] = useState<{
+    batchId: string
+    conf: string
+    items: Array<{ jobId: string; address: string; feedbackStatus?: string | null }>
+  } | null>(null)
+
+  useEffect(() => {
+    const qs = new URLSearchParams(window.location.search)
+    const bId = qs.get('batch')
+    const conf = qs.get('conf') ?? 'all'
+    if (!bId) { setBatchQueue(null); return }
+    let cancelled = false
+    getBatchStatus(bId).then((job) => {
+      if (cancelled || !job?.results) return
+      const items = job.results
+        .filter((r) => r.status === 'completed' && r.jobId)
+        .filter((r) => {
+          if (conf === 'all') return true
+          const c = r.confidence?.toLowerCase()
+          const bucket = c === 'high' || c === 'medium' || c === 'low' ? c : 'unrated'
+          return bucket === conf
+        })
+        .map((r) => ({ jobId: r.jobId!, address: r.address, feedbackStatus: r.feedbackStatus }))
+      if (!cancelled) setBatchQueue({ batchId: bId, conf, items })
+    })
+    return () => { cancelled = true }
+  }, [jobId])
+
+  const navIndex = batchQueue ? batchQueue.items.findIndex((q) => q.jobId === jobId) : -1
+  const prevItem = batchQueue && navIndex > 0 ? batchQueue.items[navIndex - 1] : null
+  const nextItem = batchQueue && navIndex >= 0 && navIndex < batchQueue.items.length - 1 ? batchQueue.items[navIndex + 1] : null
+  const nextUnreviewed = batchQueue?.items.find((q, i) => i > navIndex && !q.feedbackStatus) ?? nextItem
+  const reviewedCount = batchQueue?.items.filter((q) => q.feedbackStatus).length ?? 0
+  const batchNavHref = (item: { jobId: string }) =>
+    `/dashboard/reports/${item.jobId}?batch=${batchQueue!.batchId}&conf=${batchQueue!.conf}`
+
+  // Auto-advance to the next unreviewed report after stamping
+  const handleFeedbackSubmitted = useCallback(() => {
+    if (nextUnreviewed && batchQueue) {
+      router.push(batchNavHref(nextUnreviewed))
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nextUnreviewed, batchQueue, router])
 
   // ─── Back-button trap: overlays push history; back closes topmost ────────
   const overlayStackRef = useRef<string[]>([])
@@ -442,6 +492,7 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
     onCompClick: (comp) => { setComparisonComp(comp as CompItem); setComparisonOpen(true) },
     onRunAiAnalysis: handleRunAiAnalysis,
     onUndoAiSelection: aiAnalysisDone ? handleUndoAiSelection : undefined,
+    onFeedbackSubmitted: batchQueue ? handleFeedbackSubmitted : undefined,
   })
 
   if (loading) {
@@ -652,6 +703,41 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Batch review bar — prev / queue position / next, fixed at bottom */}
+      {batchQueue && navIndex >= 0 && (
+        <div className="fixed bottom-0 inset-x-0 z-30 no-print border-t border-border bg-background/95 backdrop-blur-xl">
+          <div className="px-3 sm:px-5 py-2 flex items-center justify-between gap-3">
+            <div className="flex-1 min-w-0">
+              {prevItem ? (
+                <Link href={batchNavHref(prevItem)} className="inline-flex items-center gap-1.5 text-body-sm text-foreground-secondary hover:text-foreground transition-colors">
+                  <ArrowLeft className="w-3.5 h-3.5 flex-shrink-0" />
+                  <span className="truncate max-w-[220px]">{prevItem.address}</span>
+                </Link>
+              ) : <span />}
+            </div>
+            <div className="flex items-center gap-2.5 flex-shrink-0">
+              <Link href="/dashboard/batch" className="inline-flex items-center gap-1 text-[10px] text-foreground-tertiary hover:text-foreground transition-colors">
+                <ListChecks className="w-3 h-3" />
+                Batch
+              </Link>
+              <span className="text-[10px] text-foreground-tertiary tabular-nums">
+                {navIndex + 1} of {batchQueue.items.length}
+                {batchQueue.conf !== 'all' && ` · ${batchQueue.conf}`}
+                {` · ${reviewedCount} reviewed`}
+              </span>
+            </div>
+            <div className="flex-1 min-w-0 flex justify-end">
+              {nextItem ? (
+                <Link href={batchNavHref(nextItem)} className="inline-flex items-center gap-1.5 text-body-sm text-foreground-secondary hover:text-foreground transition-colors">
+                  <span className="truncate max-w-[220px]">{nextItem.address}</span>
+                  <ArrowRight className="w-3.5 h-3.5 flex-shrink-0" />
+                </Link>
+              ) : <span />}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
