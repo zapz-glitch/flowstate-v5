@@ -941,3 +941,25 @@ ordering confirmed in evaluation/index.ts.
   auto-advance on Notify submit.
 - Note: tsconfig.tsbuildinfo keeps dirtying the worktree on
   typecheck — consider gitignoring it.
+
+### Batch FIFO queue + provider-call tracking (f7b9640, feat/batch-queue-and-usage, NOT deployed)
+
+- Address cap 50 → 1000 per list (route + CSV validation).
+- services/batch-queue.ts: FIFO across a user's lists — new batches
+  insert as 'queued' when a list is active; the finishing batch
+  atomically claims + starts the oldest queued list (kick on
+  complete / fatal-error / retry / mark-completed / recover).
+  Stale 'processing' (>10min no DB update) auto-fails so a dead
+  DO can't wedge the queue; GET /batch/:id repairs a stranded
+  queue while polled; kick is claim-guarded (no double-start).
+- /user/usage: providerCalls {month, limit:5000} — sums
+  analysis_runs.api_call_stats_json corelogic.total (real provider
+  calls, cache hits excluded). Display-only, not enforced.
+- Overview Rate Limits panel: 4th cell "Provider calls — this month"
+  (amber ≥80%, red ≥100% of 5,000).
+- Batch UI: queued lists show clock chip + "Queued — starts when
+  the current list finishes"; polling flips to live on kick.
+- Verified: tsc clean api + dashboard.
+- Heads-up for user: ~10–30 CoreLogic calls per address means a
+  300-property upload ≈ 3k–9k calls vs the 5k/mo plan — the monthly
+  counter will show the burn.
