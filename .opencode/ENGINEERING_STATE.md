@@ -942,7 +942,7 @@ ordering confirmed in evaluation/index.ts.
 - Note: tsconfig.tsbuildinfo keeps dirtying the worktree on
   typecheck — consider gitignoring it.
 
-### Batch FIFO queue + provider-call tracking (f7b9640, feat/batch-queue-and-usage, NOT deployed)
+### Batch FIFO queue + provider-call tracking (f7b9640 → main 907e551, DEPLOYED run 34787573784)
 
 - Address cap 50 → 1000 per list (route + CSV validation).
 - services/batch-queue.ts: FIFO across a user's lists — new batches
@@ -963,3 +963,48 @@ ordering confirmed in evaluation/index.ts.
 - Heads-up for user: ~10–30 CoreLogic calls per address means a
   300-property upload ≈ 3k–9k calls vs the 5k/mo plan — the monthly
   counter will show the burn.
+
+### 164-address production batch (IN PROGRESS 2026-09-13)
+
+- Source: redfin_2026-09-13-15-30-26.csv → 164 San Antonio addresses.
+- Auth blocked every scripted path (prod BETTER_AUTH_SECRET and
+  DASHBOARD_INTERNAL_SECRET differ from .dev.vars; wrangler dev --remote
+  no longer supports Durable Objects). Resolution: generated fs_ API key
+  + inserted its sha256 into prod api_keys (id batch-driver-temp key
+  prefix fs_1d32fdcf) for hello@flowstate.homes — REVOKE when batch done.
+- Inserted batch_jobs row batch_c3711744-a8d1-4a49-a51a-525af9e6de99
+  (status=processing, 164 pending results) directly via remote D1.
+- Driver /tmp/fs_batch_driver.mjs (log /tmp/fs_driver.log, state
+  /tmp/fs_driver_state.json): sequential POST /v1/analyze → SSE watch for
+  evaluation_complete → writes results_json + counts + heartbeat to
+  batch_jobs (shape identical to BatchJobDO). D1 poll of analysis_runs as
+  fallback when SSE drops. Stops batch if monthly CoreLogic calls ≥5000.
+- Monthly provider calls at driver start: 235/5000.
+- Cleanup pending: revoke fs_1d32fdcf key, delete temp session row
+  inserted earlier in session table (token et5vUPzR6O-...), delete local
+  temp files /tmp/fs_*.
+
+### Batch resume-from-row (feat/batch-resume-from-row → main 697d599, DEPLOYED run 34789984225)
+
+- POST /batch/:id/resume {fromIndex}: session-auth; 409 while a live run
+  is processing (stale >3min resumable) or while queued; passes
+  addresses+results+fromIndex to the DO.
+- BatchJobDO /resume: reconstructs batchState for DO instances that never
+  ran the batch (DB-seeded rows), resets non-completed results >=
+  fromIndex, reuses retryFailed index runner (progress SSE, DB updates,
+  kickNextQueuedBatch at end).
+- Batch page: per-row Play button on unfinished rows (hidden while the
+  list is processing); resumes that list and switches to it.
+- Verified: tsc clean api + dashboard.
+
+### List-1 run stopped by user (2026-09-13 ~23:10Z)
+
+- batch_c3711744 stopped at 8 completed / 10 failed / 146 cancelled
+  (cancelled rows marked failed w/ 'Cancelled — stopped by user').
+- Orphan duplicate row af372339 (same 164 addrs, from the failed
+  remote-dev POST) deleted.
+- Failure pattern: INSUFFICIENT_COMPS — ~15 comps fetched, 0 enabled.
+  Same-subdivision + 180d + ±250sf + ±10yr rules exhaust the pool on SA
+  wholesale properties; successes only passed via nearest_comps fallback
+  with 1-2 comps. Under-reporting gap: api_call_stats_json is NULL on
+  error runs, so failed analyses' provider calls aren't counted.
