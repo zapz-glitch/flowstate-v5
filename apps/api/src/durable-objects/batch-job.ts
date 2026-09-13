@@ -78,6 +78,9 @@ export class BatchJobDO {
     if (request.method === 'POST' && path === '/retry-failed') {
       return this.handleRetryFailed(request)
     }
+    if (request.method === 'POST' && path === '/resume') {
+      return this.handleResume(request)
+    }
     if (request.method === 'POST' && path === '/mark-completed') {
       return this.handleMarkCompleted()
     }
@@ -190,6 +193,64 @@ export class BatchJobDO {
     this.retryFailed(body.userId, failedIndices).catch((err) => {
       console.error('[BatchJobDO] Retry fatal error:', err)
       this.pushEvent('batch_error', { message: err instanceof Error ? err.message : 'Retry failed' })
+    })
+
+    return new Response('OK', { status: 200 })
+  }
+
+  // ─── Resume From Index ──────────────────────────────────────────────────
+
+  private async handleResume(request: Request): Promise<Response> {
+    const body = await request.json() as {
+      userId: string
+      batchId?: string
+      addresses?: string[]
+      results?: BatchResult[]
+      fromIndex?: number
+    }
+
+    if (!this.batchState) {
+      this.batchState = await this.state.storage.get<BatchState>('batchState') ?? null
+    }
+    // Reconstruct state when this DO never ran the batch (e.g. DB-seeded rows)
+    if (!this.batchState && body.addresses && body.results) {
+      this.batchState = {
+        batchId: body.batchId!,
+        userId: body.userId,
+        status: 'completed',
+        addresses: body.addresses,
+        results: body.results,
+        currentIndex: 0,
+        totalAddresses: body.addresses.length,
+        completedCount: 0,
+        failedCount: 0,
+        createdAt: Date.now(),
+      }
+    }
+    if (!this.batchState) {
+      return new Response('No batch state', { status: 400 })
+    }
+
+    const fromIndex = Math.max(0, Math.floor(body.fromIndex ?? 0))
+    const indices = this.batchState.results
+      .map((r, i) => (i >= fromIndex && r.status !== 'completed') ? i : -1)
+      .filter((i) => i >= 0)
+
+    if (indices.length === 0) {
+      return new Response('Nothing to resume', { status: 400 })
+    }
+
+    for (const i of indices) {
+      this.batchState.results[i] = { ...this.batchState.results[i], status: 'pending', error: undefined }
+    }
+    this.batchState.status = 'processing'
+    this.batchState.completedCount = this.batchState.results.filter((r) => r.status === 'completed').length
+    this.batchState.failedCount = this.batchState.results.filter((r) => r.status === 'failed').length
+    await this.state.storage.put('batchState', this.batchState)
+
+    this.retryFailed(body.userId, indices).catch((err) => {
+      console.error('[BatchJobDO] Resume fatal error:', err)
+      this.pushEvent('batch_error', { message: err instanceof Error ? err.message : 'Resume failed' })
     })
 
     return new Response('OK', { status: 200 })

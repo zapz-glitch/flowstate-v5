@@ -190,6 +190,77 @@ batch.post('/:id/retry-failed', async (c) => {
   return c.json({ success: true, streamUrl, token })
 })
 
+// ─── POST /batch/:id/resume — Resume processing from a given row ──────────
+
+batch.post('/:id/resume', async (c) => {
+  const session = await getSession(c)
+  if (!session?.user) {
+    return c.json({ error: 'Not authenticated' }, 401)
+  }
+
+  const batchId = c.req.param('id')
+  const db = drizzle(c.env.DB)
+  const [job] = await db.select()
+    .from(batchJobs)
+    .where(eq(batchJobs.id, batchId))
+    .limit(1)
+
+  if (!job || job.userId !== session.user.id) {
+    return c.json({ error: 'Not found' }, 404)
+  }
+
+  const body = await c.req.json().catch(() => ({})) as { fromIndex?: number }
+  const fromIndex = Math.max(0, Math.floor(body.fromIndex ?? 0))
+
+  // Refuse while a run is live; stale 'processing' rows (no update for a while) are resumable
+  const updatedAtMs = Date.parse(job.updatedAt ?? '') || 0
+  const isStale = Date.now() - updatedAtMs > 3 * 60 * 1000
+  if (job.status === 'processing' && !isStale) {
+    return c.json({ error: 'Batch is already processing' }, 409)
+  }
+  if (job.status === 'queued') {
+    return c.json({ error: 'Batch is queued — it starts automatically when the current list finishes' }, 409)
+  }
+
+  const addresses = job.addressesJson ? JSON.parse(job.addressesJson) as string[] : []
+  const results = job.resultsJson ? JSON.parse(job.resultsJson) as Array<Record<string, unknown>> : []
+  if (addresses.length === 0 || fromIndex >= addresses.length) {
+    return c.json({ error: 'fromIndex out of range' }, 400)
+  }
+
+  await db.update(batchJobs)
+    .set({ status: 'processing', updatedAt: new Date().toISOString() })
+    .where(eq(batchJobs.id, batchId))
+
+  const doId = c.env.BATCH_JOB.idFromName(batchId)
+  const stub = c.env.BATCH_JOB.get(doId)
+  const resp = await stub.fetch('http://internal/resume', {
+    method: 'POST',
+    body: JSON.stringify({
+      userId: session.user.id,
+      batchId,
+      addresses,
+      results,
+      fromIndex,
+    }),
+  })
+  await resp.text()
+
+  if (!resp.ok) {
+    await db.update(batchJobs)
+      .set({ status: job.status, updatedAt: new Date().toISOString() })
+      .where(eq(batchJobs.id, batchId))
+    return c.json({ error: 'Failed to resume batch' }, 500)
+  }
+
+  const sseSecret = c.env.BETTER_AUTH_SECRET || ''
+  const token = await generateSseToken(sseSecret, batchId, session.user.id)
+  const apiBaseUrl = c.req.url.replace(/\/batch\/.*/, '')
+  const streamUrl = `${apiBaseUrl}/sse/batch/${batchId}`
+
+  return c.json({ success: true, streamUrl, token })
+})
+
 // ─── GET /batch/:id — Get batch status + results ──────────────────────────
 
 batch.get('/:id', async (c) => {
