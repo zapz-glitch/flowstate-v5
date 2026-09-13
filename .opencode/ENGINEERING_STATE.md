@@ -929,3 +929,15 @@ ordering confirmed in evaluation/index.ts.
   deploy.yml before pushing to main).
 - Next: user uploads batch list → reviews low-confidence bucket →
   Notify loop generates devin-ready tickets.
+
+### DEPLOYED: feat/batch-review-workflow → main (044640a)
+
+- Deploy run 34785478384: API (38s) + Dashboard (1m29s) green.
+- Remote D1: 0029_report_feedback applied via dashboard console,
+  d1_migrations row inserted manually — wrangler shows clean.
+- wrangler OAuth re-authed locally (was user-read only scope → 7403).
+- Live: batch list picker, queue counts, L/M/H confidence buckets,
+  validated/flagged stamps, report-page prev/next review bar with
+  auto-advance on Notify submit.
+- Note: tsconfig.tsbuildinfo keeps dirtying the worktree on
+  typecheck — consider gitignoring it.
