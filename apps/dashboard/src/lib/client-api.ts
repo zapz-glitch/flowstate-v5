@@ -161,6 +161,8 @@ export interface UsageSummary {
       createdAt: string
     }>
   }
+  /** Real CoreLogic calls this month (cache hits excluded) — display-only */
+  providerCalls?: { month: number; limit: number }
 }
 
 export async function getUsageSummary(): Promise<UsageSummary> {

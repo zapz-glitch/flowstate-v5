@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import Link from 'next/link'
-import { Upload, FileText, Loader2, Check, X, Download, ChevronRight, Flag, CheckCircle2 } from 'lucide-react'
+import { Upload, FileText, Loader2, Check, X, Download, ChevronRight, Flag, CheckCircle2, Clock } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
@@ -38,6 +38,7 @@ export default function BatchPage() {
   const [completedCount, setCompletedCount] = useState(0)
   const [failedCount, setFailedCount] = useState(0)
   const [isStuck, setIsStuck] = useState(false)
+  const [jobStatus, setJobStatus] = useState<string>('processing')
 
   // List picker + confidence filter
   const [allJobs, setAllJobs] = useState<JobSummary[]>([])
@@ -70,6 +71,7 @@ export default function BatchPage() {
         setCompletedCount(job.completedCount)
         setFailedCount(job.failedCount)
         setIsStuck(job.isStuck ?? false)
+        setJobStatus(job.status)
         if (job.status === 'completed' || job.status === 'failed') {
           setPhase('complete')
           setIsStuck(false)
@@ -131,13 +133,14 @@ export default function BatchPage() {
         const jobs = await getBatchJobs()
         if (cancelled) return
         setAllJobs(jobs)
-        const active = jobs.find((j) => j.status === 'processing')
+        const active = jobs.find((j) => j.status === 'processing') ?? jobs.find((j) => j.status === 'queued')
         const recent = active ?? jobs[0]
         if (!recent || cancelled) return
 
         setBatchId(recent.id)
+        setJobStatus(recent.status)
 
-        if (recent.status === 'processing') {
+        if (recent.status === 'processing' || recent.status === 'queued') {
           setPhase('processing')
           // Load current state from DB then start polling
           const job = await getBatchStatus(recent.id)
@@ -224,8 +227,8 @@ export default function BatchPage() {
         setError('No valid addresses found in file')
         return
       }
-      if (parsed.length > 50) {
-        setError(`Too many addresses (${parsed.length}). Maximum is 50.`)
+      if (parsed.length > 1000) {
+        setError(`Too many addresses (${parsed.length}). Maximum is 1,000.`)
         return
       }
       setAddresses(parsed)
@@ -258,6 +261,9 @@ export default function BatchPage() {
     }
 
     setBatchId(result.batchId)
+    setJobStatus(result.queued ? 'queued' : 'processing')
+    // Refresh the list picker so the new list chip appears
+    getBatchJobs().then(setAllJobs).catch(() => {})
     startPolling(result.batchId)
   }, [addresses, startPolling])
 
@@ -334,6 +340,7 @@ export default function BatchPage() {
     setCompletedCount(0)
     setFailedCount(0)
     setIsStuck(false)
+    setJobStatus('processing')
     setViewAll(false)
     setAllResults([])
     setConfFilter('all')
@@ -362,7 +369,8 @@ export default function BatchPage() {
     setCompletedCount(job.completedCount)
     setFailedCount(job.failedCount)
     setIsStuck(job.isStuck ?? false)
-    if (job.status === 'processing') {
+    setJobStatus(job.status)
+    if (job.status === 'processing' || job.status === 'queued') {
       setPhase('processing')
       startPolling(id)
     } else {
@@ -533,6 +541,7 @@ export default function BatchPage() {
                   List {allJobs.length - i}
                   <span className="text-[9px] opacity-70">· {j.completedCount}/{j.totalAddresses}</span>
                   {j.status === 'processing' && <Loader2 className="w-2.5 h-2.5 animate-spin" />}
+                  {j.status === 'queued' && <Clock className="w-2.5 h-2.5 text-amber-500" />}
                 </button>
               ))}
             </div>
@@ -544,16 +553,19 @@ export default function BatchPage() {
             <CardContent className="p-4">
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-2">
-                  {phase === 'processing' && <Loader2 className="w-4 h-4 animate-spin text-primary" />}
+                  {phase === 'processing' && jobStatus === 'queued' && <Clock className="w-4 h-4 text-amber-500" />}
+                  {phase === 'processing' && jobStatus !== 'queued' && <Loader2 className="w-4 h-4 animate-spin text-primary" />}
                   {phase === 'complete' && <Check className="w-4 h-4 text-emerald-500" />}
                   <span className="text-sm font-medium">
-                    {phase === 'processing'
-                      ? currentIndex >= 0 ? `Processing ${currentIndex + 1} of ${totalAddresses}...` : `Processing...`
-                      : 'Batch Complete'}
+                    {jobStatus === 'queued'
+                      ? `Queued — starts when the current list finishes`
+                      : phase === 'processing'
+                        ? currentIndex >= 0 ? `Processing ${currentIndex + 1} of ${totalAddresses}...` : `Processing...`
+                        : 'Batch Complete'}
                   </span>
                 </div>
                 <div className="flex items-center gap-3">
-                  {remaining > 0 && (
+                  {jobStatus !== 'queued' && remaining > 0 && (
                     <span className="text-xs text-foreground-tertiary">{remaining} left in queue</span>
                   )}
                   {completedCount > 0 && (

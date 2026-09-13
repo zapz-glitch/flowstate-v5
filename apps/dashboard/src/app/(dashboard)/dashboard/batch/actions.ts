@@ -34,6 +34,8 @@ export interface SubmitBatchResult {
   success: boolean
   batchId?: string
   totalAddresses?: number
+  /** True when another list is still processing — this one runs next */
+  queued?: boolean
   streamUrl?: string
   token?: string
   error?: string
@@ -65,6 +67,7 @@ export async function submitBatchAnalysis(addresses: string[]): Promise<SubmitBa
       success?: boolean
       batchId?: string
       totalAddresses?: number
+      queued?: boolean
       streamUrl?: string
       token?: string
       error?: string
@@ -78,6 +81,7 @@ export async function submitBatchAnalysis(addresses: string[]): Promise<SubmitBa
       success: true,
       batchId: result.batchId,
       totalAddresses: result.totalAddresses,
+      queued: result.queued,
       streamUrl: result.streamUrl,
       token: result.token,
     }
