@@ -498,3 +498,23 @@ Product spec implemented 2026-09-12:
   is null until then; UI cell hidden.
 - Comp cards: could add neighborhood pill when subdivision absent.
 - Deploy requires user approval (deploy-on-request rule).
+
+### Follow-up (same branch): Zillow fallback fills + card tweaks
+- mergeZillowDataIntoProperty extended: when provider data is missing,
+  Zillow listing data (already fetched for photos) fills buildingStyle,
+  stories/storiesType, roofCover, construction type, heating, cooling,
+  parking -> garage/carport (regex /carport/i routes), pool (presence
+  only). Provider always wins; fills only write into null slots.
+  Nested construction/features objects now deep-copied to avoid
+  aliasing the source bundle.
+- performAnalysis restructured: appraisal pass 1 -> photo fetch ->
+  merge fills -> appraisal re-run when fills landed (recorded as
+  zillow_supplement report step). Insufficient-comps throw moved after
+  the re-run so Zillow fills can rescue thin pools.
+- Garage/carport evaluator already treated them as one covered-parking
+  category — matches product rule. UI merged into a single "Parking"
+  row on subject + comp cards.
+- CompGridCard gains neighborhood pill (match-state colored vs subject).
+- DealSummaryHero AVM cell now renders whenever subject.avm key is
+  provided — shows '—' when provider returned no value.
+- Verified: 134 vitest + 15/15 regression + both typechecks clean.
