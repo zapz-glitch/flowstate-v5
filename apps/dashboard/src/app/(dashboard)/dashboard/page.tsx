@@ -209,7 +209,7 @@ export default function DashboardPage() {
             )}
           </div>
           <div className="p-5">
-            <div className="grid grid-cols-3 gap-4">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
               <div>
                 <p className="text-caption text-foreground-tertiary">429s — 24h</p>
                 <p className={cn(
@@ -235,6 +235,22 @@ export default function DashboardPage() {
                   usage.rateLimit.serverErrors24h > 0 ? 'text-red-500' : 'text-foreground'
                 )}>
                   {usage.rateLimit.serverErrors24h}
+                </p>
+              </div>
+              <div>
+                <p className="text-caption text-foreground-tertiary">Provider calls — this month</p>
+                <p className={cn(
+                  'text-display-sm font-bold tracking-tight',
+                  usage.providerCalls && usage.providerCalls.limit > 0 && usage.providerCalls.month >= usage.providerCalls.limit
+                    ? 'text-red-500'
+                    : usage.providerCalls && usage.providerCalls.limit > 0 && usage.providerCalls.month >= usage.providerCalls.limit * 0.8
+                      ? 'text-amber-500'
+                      : 'text-foreground'
+                )}>
+                  {usage.providerCalls?.month ?? 0}
+                  {usage.providerCalls && usage.providerCalls.limit > 0 && (
+                    <span className="text-body-sm font-normal text-foreground-tertiary"> / {usage.providerCalls.limit.toLocaleString()}</span>
+                  )}
                 </p>
               </div>
             </div>

@@ -12,6 +12,9 @@ import { drizzle } from 'drizzle-orm/d1'
 import { eq, desc, inArray } from 'drizzle-orm'
 import { batchJobs, savedReports } from '../db/schema'
 import { generateSseToken } from '../utils/sse-token'
+import { hasBlockingBatch, kickNextQueuedBatch, repairQueueIfIdle } from '../services/batch-queue'
+
+const MAX_BATCH_ADDRESSES = 1000
 
 const batch = new Hono<{ Bindings: Env }>()
 
@@ -40,37 +43,43 @@ batch.post('/analyze', async (c) => {
       .filter((a) => a.length > 0)
   )]
 
-  if (addresses.length > 50) {
-    return c.json({ error: 'Maximum 50 addresses per batch' }, 400)
+  if (addresses.length > MAX_BATCH_ADDRESSES) {
+    return c.json({ error: `Maximum ${MAX_BATCH_ADDRESSES} addresses per batch` }, 400)
   }
 
   const batchId = crypto.randomUUID()
 
-  // Create DB record
+  // FIFO queue — one list at a time per user. If another batch is active
+  // (or ahead in the queue) this one waits as 'queued' and is kicked by
+  // the batch that finishes before it.
   const db = drizzle(c.env.DB)
+  const queued = await hasBlockingBatch(c.env, session.user.id)
+
   await db.insert(batchJobs).values({
     id: batchId,
     userId: session.user.id,
-    status: 'processing',
+    status: queued ? 'queued' : 'processing',
     totalAddresses: addresses.length,
     addressesJson: JSON.stringify(addresses),
     resultsJson: JSON.stringify([]),
   })
 
-  // Spawn BatchJobDO
-  const doId = c.env.BATCH_JOB.idFromName(batchId)
-  const stub = c.env.BATCH_JOB.get(doId)
-  const resp = await stub.fetch('http://internal/start', {
-    method: 'POST',
-    body: JSON.stringify({
-      batchId,
-      userId: session.user.id,
-      addresses,
-      searchOptions: body.searchOptions,
-      skipCache: body.skipCache,
-    }),
-  })
-  await resp.text()
+  if (!queued) {
+    // Spawn BatchJobDO
+    const doId = c.env.BATCH_JOB.idFromName(batchId)
+    const stub = c.env.BATCH_JOB.get(doId)
+    const resp = await stub.fetch('http://internal/start', {
+      method: 'POST',
+      body: JSON.stringify({
+        batchId,
+        userId: session.user.id,
+        addresses,
+        searchOptions: body.searchOptions,
+        skipCache: body.skipCache,
+      }),
+    })
+    await resp.text()
+  }
 
   // Generate SSE token
   const sseSecret = c.env.BETTER_AUTH_SECRET || ''
@@ -82,6 +91,7 @@ batch.post('/analyze', async (c) => {
     success: true,
     batchId,
     totalAddresses: addresses.length,
+    queued,
     streamUrl,
     token,
   })
@@ -204,6 +214,11 @@ batch.get('/:id', async (c) => {
   const updatedAtMs = new Date(job.updatedAt).getTime()
   const isStuck = job.status === 'processing' && (Date.now() - updatedAtMs) > STUCK_THRESHOLD_MS
 
+  // Self-heal a stranded queue while the user is polling a queued batch
+  if (job.status === 'queued') {
+    await repairQueueIfIdle(c.env, session.user.id)
+  }
+
   const results = job.resultsJson ? JSON.parse(job.resultsJson) as Array<{ jobId?: string; feedbackStatus?: string | null }> : []
 
   // Join review stamps from saved_reports so the batch list shows which
@@ -285,6 +300,9 @@ batch.post('/:id/recover', async (c) => {
     const resp = await stub.fetch('http://internal/mark-completed', { method: 'POST' })
     await resp.text()
   } catch { /* best effort */ }
+
+  // Release the queue — the next uploaded list starts now
+  await kickNextQueuedBatch(c.env, session.user.id)
 
   return c.json({ success: true, recoveredCount: newFailed })
 })

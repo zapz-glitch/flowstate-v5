@@ -10,7 +10,7 @@ import { drizzle } from 'drizzle-orm/d1'
 import { eq, desc, and, gte, sql } from 'drizzle-orm'
 import type { Env } from '../types'
 import { getSession } from '../lib/session'
-import { users, apiKeys, apiUsageLogs, PLAN_LIMITS } from '../db'
+import { users, apiKeys, apiUsageLogs, analysisRuns, PLAN_LIMITS } from '../db'
 
 const user = new Hono<{ Bindings: Env }>()
 
@@ -249,6 +249,25 @@ user.get('/usage', async (c) => {
   const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
   const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
 
+  // Provider (CoreLogic) calls this month — summed from per-run call stats.
+  // `total` counts real provider requests only (cache hits tracked separately).
+  const runStats = await db
+    .select({ stats: analysisRuns.apiCallStatsJson })
+    .from(analysisRuns)
+    .where(
+      and(eq(analysisRuns.userId, session.user.id), gte(analysisRuns.createdAt, startOfMonth.toISOString()))
+    )
+    .limit(10000)
+
+  let providerCallsThisMonth = 0
+  for (const row of runStats) {
+    if (!row.stats) continue
+    try {
+      const s = JSON.parse(row.stats) as { corelogic?: { total?: number } }
+      providerCallsThisMonth += s.corelogic?.total ?? 0
+    } catch { /* skip malformed rows */ }
+  }
+
   const [rl24h, rl7d, err24h, recentRateLimits] = await Promise.all([
     db
       .select({ count: sql<number>`count(*)` })
@@ -286,6 +305,10 @@ user.get('/usage', async (c) => {
       hits7d: rl7d[0]?.count ?? 0,
       serverErrors24h: err24h[0]?.count ?? 0,
       recent: recentRateLimits,
+    },
+    providerCalls: {
+      month: providerCallsThisMonth,
+      limit: 5000, // CoreLogic plan — display-only, not enforced
     },
   })
 })

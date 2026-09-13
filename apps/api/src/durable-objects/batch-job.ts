@@ -16,6 +16,7 @@ import { drizzle } from 'drizzle-orm/d1'
 import { eq } from 'drizzle-orm'
 import { batchJobs } from '../db/schema'
 import { loadUserAnalysisSettings } from '../services/user-settings'
+import { kickNextQueuedBatch } from '../services/batch-queue'
 
 interface BatchState {
   batchId: string
@@ -114,9 +115,16 @@ export class BatchJobDO {
     await this.state.storage.put('batchState', this.batchState)
 
     // Run processing in background
-    this.processBatch(body).catch((err) => {
+    this.processBatch(body).catch(async (err) => {
       console.error('[BatchJobDO] Fatal error:', err)
-      this.pushEvent('batch_error', { message: err instanceof Error ? err.message : 'Unknown error' })
+      await this.pushEvent('batch_error', { message: err instanceof Error ? err.message : 'Unknown error' })
+      // Mark failed + release the FIFO queue so the next list isn't stranded
+      if (this.batchState) {
+        this.batchState.status = 'failed'
+        await this.state.storage.put('batchState', this.batchState)
+      }
+      await this.updateDbStatus('failed')
+      await kickNextQueuedBatch(this.env, body.userId)
     })
 
     return new Response('OK', { status: 200 })
@@ -145,6 +153,7 @@ export class BatchJobDO {
         failedCount: this.batchState.failedCount,
         results: this.batchState.results,
       })
+      await kickNextQueuedBatch(this.env, this.batchState.userId)
     }
     return new Response('OK', { status: 200 })
   }
@@ -261,6 +270,7 @@ export class BatchJobDO {
       failedCount: this.batchState?.failedCount ?? 0,
       results: this.batchState?.results ?? [],
     })
+    await kickNextQueuedBatch(this.env, userId)
   }
 
   // ─── Sequential Processing ──────────────────────────────────────────────
@@ -362,6 +372,7 @@ export class BatchJobDO {
       await this.state.storage.put('batchState', this.batchState)
     }
     await this.updateDbStatus('completed')
+    await kickNextQueuedBatch(this.env, config.userId)
 
     const totalMs = Date.now() - startTime
     await this.pushEvent('batch_completed', {
