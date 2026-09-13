@@ -617,10 +617,10 @@ describe('ARV comp selection', () => {
     }
   })
 
-  it('treats style/construction mismatches as soft — rank lower, never disqualify', () => {
-    // Hard rules are only: sale age, subdivision, sqft, property type,
-    // road barrier, year built. Physical matches are confidence data — a
-    // verified style match outranks a mismatch but a mismatch stays usable.
+  it('building_style_match is required by default — verified mismatches disqualify', () => {
+    // Product rule: like-for-like style. A verified Ranch-vs-Colonial
+    // mismatch is a hard failure that no expansion tier can rescue —
+    // missing style data stays not_verified and never kills the comp.
     const styleComps = [
       comp('match', { construction: { buildingStyle: 'Ranch' }, salePrice: 280000 }),
       comp('m1', { construction: { buildingStyle: 'Colonial' }, salePrice: 400000 }),
@@ -636,15 +636,19 @@ describe('ARV comp selection', () => {
       }
     )
 
-    // No disqualification — no expansion needed at all
-    expect(r.fallbackUsed).toBe('none')
-    expect(r.selectedCompIds?.length).toBe(3)
-    // The verified style match ranks ahead of higher-priced mismatches
-    expect(r.selectedCompIds).toContain('match')
-    // The failed rule stays on the record — soft failures remain visible
-    const comp1 = r.comparables.find((c) => c.id === 'm1')
-    expect(comp1?.evaluation?.filterResults.some((f) => f.type === 'building_style_match' && !f.passed)).toBe(true)
-    expect(comp1?.isEnabled).toBe(true)
+    // The 3 Colonial comps are disqualified — hard style failure, and
+    // rescue tiers only carry location failures
+    for (const id of ['m1', 'm2', 'm3']) {
+      const c = r.comparables.find((x) => x.id === id)
+      expect(c?.isEnabled).toBe(false)
+      expect(
+        c?.evaluation?.filterResults.some(
+          (f) => f.type === 'building_style_match' && !f.passed && f.status === 'failed'
+        )
+      ).toBe(true)
+    }
+    expect(r.selectedCompIds ?? []).toContain('match')
+    expect(r.selectedCompIds ?? []).toHaveLength(1)
   })
 
   it('never relaxes sale age — a 300-day-old comp is dead at every tier', () => {

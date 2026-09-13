@@ -150,6 +150,17 @@ export interface UsageSummary {
   currentUsage: number
   remaining: number
   resetDate: string
+  rateLimit?: {
+    hits24h: number
+    hits7d: number
+    serverErrors24h: number
+    recent: Array<{
+      endpoint: string
+      propertyAddress: string | null
+      errorMessage: string | null
+      createdAt: string
+    }>
+  }
 }
 
 export async function getUsageSummary(): Promise<UsageSummary> {

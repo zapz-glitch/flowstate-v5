@@ -245,12 +245,48 @@ user.get('/usage', async (c) => {
 
   const totalRequests = monthlyUsage[0]?.totalRequests || 0
 
+  // Rate-limit + error tracking for the overview dashboard
+  const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+  const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
+
+  const [rl24h, rl7d, err24h, recentRateLimits] = await Promise.all([
+    db
+      .select({ count: sql<number>`count(*)` })
+      .from(apiUsageLogs)
+      .where(and(eq(apiUsageLogs.userId, session.user.id), eq(apiUsageLogs.statusCode, 429), gte(apiUsageLogs.createdAt, dayAgo))),
+    db
+      .select({ count: sql<number>`count(*)` })
+      .from(apiUsageLogs)
+      .where(and(eq(apiUsageLogs.userId, session.user.id), eq(apiUsageLogs.statusCode, 429), gte(apiUsageLogs.createdAt, weekAgo))),
+    db
+      .select({ count: sql<number>`count(*)` })
+      .from(apiUsageLogs)
+      .where(and(eq(apiUsageLogs.userId, session.user.id), gte(apiUsageLogs.statusCode, 500), gte(apiUsageLogs.createdAt, dayAgo))),
+    db
+      .select({
+        endpoint: apiUsageLogs.endpoint,
+        propertyAddress: apiUsageLogs.propertyAddress,
+        errorMessage: apiUsageLogs.errorMessage,
+        createdAt: apiUsageLogs.createdAt,
+      })
+      .from(apiUsageLogs)
+      .where(and(eq(apiUsageLogs.userId, session.user.id), eq(apiUsageLogs.statusCode, 429)))
+      .orderBy(desc(apiUsageLogs.createdAt))
+      .limit(10),
+  ])
+
   return c.json({
     plan,
     monthlyLimit: limits.monthlyRequests,
     currentUsage: totalRequests,
     remaining: limits.monthlyRequests === -1 ? -1 : Math.max(0, limits.monthlyRequests - totalRequests),
     resetDate: new Date(new Date().getFullYear(), new Date().getMonth() + 1, 1).toISOString(),
+    rateLimit: {
+      hits24h: rl24h[0]?.count ?? 0,
+      hits7d: rl7d[0]?.count ?? 0,
+      serverErrors24h: err24h[0]?.count ?? 0,
+      recent: recentRateLimits,
+    },
   })
 })
 

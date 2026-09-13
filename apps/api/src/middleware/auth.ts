@@ -311,6 +311,38 @@ export async function authMiddleware(
     c.header('X-RateLimit-Remaining', '0')
     c.header('X-RateLimit-Reset', quotaResetAt)
 
+    // Log the rejection — 429s are otherwise invisible to the usage tracker
+    try {
+      const rlPropertyInfo = extractPropertyInfo(requestBody)
+      await c.env.DB.prepare(`
+        INSERT INTO api_usage_logs (
+          id, api_key_id, user_id, endpoint, method, status_code, response_time_ms,
+          property_address, property_city, property_state,
+          ip_address, user_agent, error_message, created_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `)
+        .bind(
+          crypto.randomUUID(),
+          result.api_key_id,
+          result.user_id,
+          c.req.path,
+          c.req.method,
+          429,
+          Date.now() - startTime,
+          rlPropertyInfo.address,
+          rlPropertyInfo.city,
+          rlPropertyInfo.state,
+          c.req.header('CF-Connecting-IP') || c.req.header('X-Forwarded-For') || null,
+          c.req.header('User-Agent') || null,
+          'Monthly quota exceeded',
+          new Date().toISOString()
+        )
+        .run()
+    } catch (error) {
+      console.error('[Auth] Failed to log rate-limit rejection:', error)
+    }
+
     return c.json(
       {
         success: false,

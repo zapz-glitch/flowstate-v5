@@ -827,3 +827,15 @@ NOT yet done: production golden-eval re-run on this code (needs deploy
 or a fresh prod run after merge); Firecrawl is already the photo source
 for comp vision (photoBundle.comps via Zillow) — provider→photos→vision
 ordering confirmed in evaluation/index.ts.
+
+### Style-match required + rate-limit tracker (2026-09-13, feat/condition-and-neighborhood)
+
+- building_style_match default priority → 'hard'. Verified style
+  mismatch disqualifies at every tier (rescue allowlists only carry
+  location failures). Missing style data stays not_verified.
+- Rate-limit tracking: auth middleware now LOGS 429 quota rejections
+  into api_usage_logs (previously invisible — the 429 return preceded
+  the usage insert). /user/usage returns rateLimit {hits24h, hits7d,
+  serverErrors24h, recent[]}. Overview page has a Rate Limits panel
+  (counts + recent hits, Healthy/Attention badge).
+- Verified: 154 vitest, tsc clean api+dashboard.

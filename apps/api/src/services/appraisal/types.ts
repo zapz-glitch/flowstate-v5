@@ -45,13 +45,14 @@ export const DEFAULT_FILTERS: AppraisalFilter[] = [
   // HARD RULES (the fixed deal-breakers):
   //   sale_age ≤180d · same subdivision · ±250 sqft · same property type ·
   //   no major-road crossing · ±10yr build date.
-  // Neighborhood is a datapoint only — recorded and displayed, never used
-  // for comp selection.
+  // Neighborhood is a datapoint only — recorded and displayed; also used
+  // as the dedicated fallback tier when subdivision matching can't fill
+  // the comp pool (name OR code).
   { type: 'subdivision_match', enabled: true, value: 1 },
   { type: 'neighborhood_match', enabled: true, value: 1, priority: 'soft' },
+  { type: 'building_style_match', enabled: true, value: 1, priority: 'hard' }, // Ranch vs Ranch, 2-story style vs same — verified mismatches disqualify
   // Preferred physical matches (soft) — assessed from provider building
   // data; recorded for confidence/ranking, never disqualify.
-  { type: 'building_style_match', enabled: true, value: 1, priority: 'soft' },
   { type: 'foundation_match', enabled: true, value: 1, priority: 'soft' },
   { type: 'construction_material_match', enabled: true, value: 1, priority: 'soft' },
   { type: 'pool_match', enabled: true, value: 1, priority: 'soft' },
