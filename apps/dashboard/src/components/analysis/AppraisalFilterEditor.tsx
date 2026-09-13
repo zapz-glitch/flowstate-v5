@@ -16,6 +16,8 @@ export interface FilterState {
   type: string
   enabled: boolean
   value: number
+  /** 'hard' = required (disqualifies) | 'soft' = preferred (ranks only) */
+  priority?: 'hard' | 'soft'
 }
 
 export interface AdjustmentState {
@@ -79,7 +81,7 @@ export function AppraisalFilterEditor({
 
         const initFilters: FilterState[] = defs.filters.map((f) => {
           const saved = presetFilterMap.get(f.type)
-          return { type: f.type, enabled: saved?.enabled ?? f.enabled, value: saved?.value ?? f.value }
+          return { type: f.type, enabled: saved?.enabled ?? f.enabled, value: saved?.value ?? f.value, priority: saved?.priority ?? f.priority ?? 'hard' }
         })
         const initAdjs: AdjustmentState[] = defs.adjustments.map((a) => {
           const saved = presetAdjMap.get(a.type)
@@ -178,7 +180,7 @@ export function AppraisalFilterEditor({
         <div className="rounded-lg border border-border divide-y divide-border/50">
           {filters.map((f, idx) => {
             const label = defaults.filterLabels[f.type as FilterType]
-            const isBoolean = f.type === 'subdivision_match' || f.type === 'building_style_match' || f.type === 'property_type'
+            const isBoolean = !label?.unit
             const suggestedFilter = suggested?.find((s) => s.type === f.type)
             const hasDiff = suggestedFilter && (suggestedFilter.enabled !== f.enabled || suggestedFilter.value !== f.value)
 
@@ -218,6 +220,19 @@ export function AppraisalFilterEditor({
                     <span className="text-[10px] text-muted-foreground pr-1.5">{label?.unit}</span>
                   </div>
                 )}
+                <button
+                  type="button"
+                  disabled={!f.enabled}
+                  onClick={() => updateFilter(idx, { priority: (f.priority ?? 'hard') === 'hard' ? 'soft' : 'hard' })}
+                  title={(f.priority ?? 'hard') === 'hard' ? 'Required — a verified failure disqualifies the comp' : 'Preferred — a failure ranks but never disqualifies'}
+                  className={`text-[9px] font-medium px-2 py-0.5 rounded-full border transition-colors disabled:cursor-not-allowed ${
+                    (f.priority ?? 'hard') === 'hard'
+                      ? 'bg-red-500/10 border-red-400/30 text-red-600 dark:text-red-400'
+                      : 'bg-blue-500/10 border-blue-400/30 text-blue-600 dark:text-blue-400'
+                  }`}
+                >
+                  {(f.priority ?? 'hard') === 'hard' ? 'Req' : 'Pref'}
+                </button>
                 <Switch
                   checked={f.enabled}
                   onCheckedChange={(v) => updateFilter(idx, { enabled: v })}

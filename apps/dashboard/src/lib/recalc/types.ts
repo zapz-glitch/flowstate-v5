@@ -30,6 +30,8 @@ export type RecalcFilter = {
   type: string
   enabled: boolean
   value: number
+  /** 'hard' = required (disqualifies on verified failure) | 'soft' = preferred (ranks only) */
+  priority?: 'hard' | 'soft'
 }
 
 export type RecalcAdjustment = {

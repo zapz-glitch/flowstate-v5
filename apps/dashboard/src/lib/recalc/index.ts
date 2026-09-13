@@ -46,7 +46,7 @@ function hasFilterChanges(data: AnalyzeData, settings: EvaluationSettings): bool
   for (const sf of settings.filters) {
     const af = appliedFilters.find((f) => f.type === sf.type)
     if (!af) continue
-    if (sf.enabled !== af.enabled || sf.value !== af.value) return true
+    if (sf.enabled !== af.enabled || sf.value !== af.value || (sf.priority ?? 'hard') !== (af.priority ?? 'hard')) return true
   }
 
   return false
@@ -120,7 +120,7 @@ export function recalculateReport(
     const evaluation = evaluateComparable(
       subjectWithFeatures,
       compWithConstruction,
-      settings.filters.map((f) => ({ type: f.type as FilterType, enabled: f.enabled, value: f.value })),
+      settings.filters.map((f) => ({ type: f.type as FilterType, enabled: f.enabled, value: f.value, priority: f.priority })),
       settings.adjustments.map((a) => ({ type: a.type as AdjustmentType, enabled: a.enabled, amount: a.amount, percent: a.percent, thresholdDays: a.thresholdDays }))
     )
 

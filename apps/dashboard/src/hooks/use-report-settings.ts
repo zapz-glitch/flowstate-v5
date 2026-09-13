@@ -52,10 +52,22 @@ const DEFAULT_DEAL_PARAMS: DealParamsConfig = {
 
 const DEFAULT_FILTERS: RecalcFilter[] = [
   { type: 'subdivision_match', enabled: true, value: 1 },
+  { type: 'neighborhood_match', enabled: true, value: 1, priority: 'soft' },
+  { type: 'building_style_match', enabled: true, value: 1, priority: 'soft' },
+  { type: 'foundation_match', enabled: true, value: 1, priority: 'soft' },
+  { type: 'construction_material_match', enabled: true, value: 1, priority: 'soft' },
+  { type: 'pool_match', enabled: true, value: 1, priority: 'soft' },
+  { type: 'garage_match', enabled: true, value: 1, priority: 'soft' },
+  { type: 'condition_match', enabled: true, value: 1, priority: 'soft' },
+  { type: 'stories_match', enabled: true, value: 1, priority: 'soft' },
+  { type: 'roof_material_match', enabled: true, value: 1, priority: 'soft' },
   { type: 'sale_age', enabled: true, value: 180 },
-  { type: 'sqft_diff', enabled: true, value: 20 },
+  { type: 'sqft_diff', enabled: true, value: 250 },
   { type: 'year_built_diff', enabled: true, value: 10 },
-  { type: 'distance', enabled: true, value: 0.5 },
+  { type: 'distance', enabled: true, value: 1.0 },
+  { type: 'property_type', enabled: true, value: 1 },
+  { type: 'lot_size_diff', enabled: true, value: 2500, priority: 'soft' },
+  { type: 'road_barrier', enabled: true, value: 1 },
 ]
 
 const DEFAULT_ADJUSTMENTS: RecalcAdjustment[] = [
@@ -143,12 +155,14 @@ export function useReportSettings(data: AnalyzeData | null): UseReportSettingsRe
               type: f.type,
               enabled: f.enabled,
               value: f.value,
+              priority: f.priority,
             }))
           : preset?.filters
             ? preset.filters.map((f) => ({
                 type: f.filterType,
                 enabled: f.enabled,
                 value: f.value,
+                priority: f.priority,
               }))
             : DEFAULT_FILTERS
 

@@ -69,6 +69,11 @@ export const DEFAULT_FILTERS: AppraisalFilter[] = [
   { type: 'road_barrier', enabled: true, value: 1 }, // No crossing major roads (not_verified when no data)
 ]
 
+/** System default priority for a filter type ('hard' when unspecified). */
+export function defaultFilterPriority(type: FilterType): 'hard' | 'soft' {
+  return DEFAULT_FILTERS.find((f) => f.type === type)?.priority ?? 'hard'
+}
+
 // ─── Filter Labels (for UI) ────────────────────────────────────────────────────
 
 export const FILTER_LABELS: Record<FilterType, {

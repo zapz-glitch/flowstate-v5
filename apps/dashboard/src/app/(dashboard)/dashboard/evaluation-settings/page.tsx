@@ -106,12 +106,12 @@ import {
 // APPRAISAL RULES TAB — preset list only
 // ═══════════════════════════════════════════════════════════════════════════════
 
-type FormFilterState = { filterType: FilterType; enabled: boolean; value: number }
+type FormFilterState = { filterType: FilterType; enabled: boolean; value: number; priority: 'hard' | 'soft' }
 type FormAdjustmentState = { adjustmentType: AdjustmentType; enabled: boolean; amount: number; percentage: number }
 
 function buildDefaultFormState(defaults: AppraisalDefaults) {
   return {
-    filters: defaults.filters.map((f) => ({ filterType: f.type, enabled: f.enabled, value: f.value })),
+    filters: defaults.filters.map((f) => ({ filterType: f.type, enabled: f.enabled, value: f.value, priority: f.priority ?? 'hard' })),
     adjustments: defaults.adjustments.map((a) => ({
       adjustmentType: a.type,
       enabled: a.enabled,
@@ -128,7 +128,7 @@ function buildFormStateFromPreset(preset: AppraisalPreset, defaults: AppraisalDe
   return {
     filters: base.filters.map((f) => {
       const saved = filterMap.get(f.filterType)
-      return saved ? { filterType: f.filterType, enabled: saved.enabled, value: saved.value } : f
+      return saved ? { filterType: f.filterType, enabled: saved.enabled, value: saved.value, priority: saved.priority ?? f.priority } : f
     }),
     adjustments: base.adjustments.map((a) => {
       const saved = adjMap.get(a.adjustmentType)
@@ -144,10 +144,13 @@ function buildFormStateFromPreset(preset: AppraisalPreset, defaults: AppraisalDe
 function RulesTable({
   accent,
   headers,
+  columns,
   children,
 }: {
   accent: 'blue' | 'emerald' | 'amber'
   headers: string[]
+  /** Explicit grid template — defaults to the legacy 3/4-col layouts */
+  columns?: string
   children: React.ReactNode
 }) {
   return (
@@ -158,7 +161,7 @@ function RulesTable({
             ? 'border-blue-500/20 bg-blue-500/5 text-blue-600 dark:text-blue-400'
             : 'border-emerald-500/20 bg-emerald-500/5 text-emerald-600 dark:text-emerald-400'
         }`}
-        style={{ gridTemplateColumns: headers.length === 3 ? '1fr 120px 80px' : '1fr 120px 100px 80px' }}
+        style={{ gridTemplateColumns: columns ?? (headers.length === 3 ? '1fr 120px 80px' : '1fr 120px 100px 80px') }}
       >
         {headers.map((h) => (
           <span key={h} className={h !== headers[0] ? 'text-center' : ''}>{h}</span>
@@ -176,9 +179,11 @@ function FilterRow({
   description,
   enabled,
   value,
+  priority,
   isBoolean,
   onToggle,
   onValueChange,
+  onPriorityChange,
 }: {
   filterType: FilterType
   label: string
@@ -186,14 +191,17 @@ function FilterRow({
   description: string
   enabled: boolean
   value: number
+  /** 'hard' = required (verified failure disqualifies) | 'soft' = preferred (ranks only) */
+  priority: 'hard' | 'soft'
   isBoolean: boolean
   onToggle: (enabled: boolean) => void
   onValueChange: (value: number) => void
+  onPriorityChange: (priority: 'hard' | 'soft') => void
 }) {
   return (
     <div
       className={`grid items-center gap-x-3 px-3 py-2 transition-colors ${enabled ? '' : 'opacity-50'}`}
-      style={{ gridTemplateColumns: '1fr 120px 80px' }}
+      style={{ gridTemplateColumns: '1fr 110px 96px 56px' }}
     >
       <div className="min-w-0">
         <div className="text-[12px] font-medium text-foreground leading-tight">{label}</div>
@@ -201,13 +209,7 @@ function FilterRow({
       </div>
       <div className="flex items-center justify-center">
         {isBoolean ? (
-          <span className={`text-[10px] font-medium px-2.5 py-1 rounded-full border ${
-            enabled
-              ? 'bg-blue-500/10 border-blue-400/30 text-blue-600 dark:text-blue-400'
-              : 'bg-muted border-border text-muted-foreground'
-          }`}>
-            {enabled ? 'Required' : 'Ignored'}
-          </span>
+          <span className="text-[10px] text-muted-foreground select-none">must match</span>
         ) : (
           <div className="flex items-center rounded-md border border-border bg-muted/30 overflow-hidden focus-within:ring-1 focus-within:ring-primary/30 focus-within:border-primary/50">
             <Input
@@ -225,6 +227,21 @@ function FilterRow({
             <span className="text-[10px] text-muted-foreground pr-2 select-none">{unit}</span>
           </div>
         )}
+      </div>
+      <div className="flex items-center justify-center">
+        <button
+          type="button"
+          disabled={!enabled}
+          onClick={() => onPriorityChange(priority === 'hard' ? 'soft' : 'hard')}
+          title={priority === 'hard' ? 'Required — a verified failure disqualifies the comp' : 'Preferred — a failure is recorded for ranking but never disqualifies'}
+          className={`text-[10px] font-medium px-2.5 py-1 rounded-full border transition-colors disabled:cursor-not-allowed ${
+            priority === 'hard'
+              ? 'bg-red-500/10 border-red-400/30 text-red-600 dark:text-red-400'
+              : 'bg-blue-500/10 border-blue-400/30 text-blue-600 dark:text-blue-400'
+          } ${enabled ? '' : 'opacity-60'}`}
+        >
+          {priority === 'hard' ? 'Required' : 'Preferred'}
+        </button>
       </div>
       <div className="flex justify-center">
         <Switch checked={enabled} onCheckedChange={onToggle} className="data-[state=checked]:bg-blue-500" />
@@ -389,7 +406,7 @@ function PresetFormDialog({
         name: name.trim(),
         description: description.trim() || undefined,
         isDefault,
-        filters: filters.map((f) => ({ filterType: f.filterType, enabled: f.enabled, value: f.value })),
+        filters: filters.map((f) => ({ filterType: f.filterType, enabled: f.enabled, value: f.value, priority: f.priority })),
         adjustments: adjustments.map((a) => ({ adjustmentType: a.adjustmentType, enabled: a.enabled, amount: a.amount, percentage: a.percentage })),
       }
       const saved = await updateAppraisalPreset(editingPreset!.id, input)
@@ -437,10 +454,10 @@ function PresetFormDialog({
                 <span className="text-xs font-semibold text-foreground">Filter Rules</span>
                 <span className="text-[10px] text-muted-foreground">— exclude comps that don&apos;t meet threshold criteria</span>
               </div>
-              <RulesTable accent="blue" headers={['Rule', 'Threshold', 'Active']}>
+              <RulesTable accent="blue" headers={['Rule', 'Threshold', 'Mode', 'Active']} columns="1fr 110px 96px 56px">
                 {filters.map((f, idx) => {
                   const labelInfo = defaults.filterLabels[f.filterType]
-                  const isBoolean = f.filterType === 'subdivision_match' || f.filterType === 'building_style_match' || f.filterType === 'property_type'
+                  const isBoolean = !labelInfo?.unit
                   return (
                     <FilterRow
                       key={f.filterType}
@@ -450,9 +467,11 @@ function PresetFormDialog({
                       description={labelInfo?.description ?? ''}
                       enabled={f.enabled}
                       value={f.value}
+                      priority={f.priority}
                       isBoolean={isBoolean}
                       onToggle={(v) => updateFilter(idx, { enabled: v })}
                       onValueChange={(v) => updateFilter(idx, { value: v })}
+                      onPriorityChange={(v) => updateFilter(idx, { priority: v })}
                     />
                   )
                 })}
@@ -594,8 +613,8 @@ function PresetCard({ preset, onEdit, onDelete, onSetDefault }: {
             </div>
             <div className="flex flex-wrap gap-1.5">
               {preset.filters.map((f) => {
-                const isBoolean = f.filterType === 'subdivision_match' || f.filterType === 'building_style_match' || f.filterType === 'property_type'
                 const unit = FILTER_UNIT[f.filterType]
+                const isBoolean = !unit
                 return <FilterChip key={f.filterType} label={FILTER_SHORT[f.filterType] ?? f.filterType} value={isBoolean ? '' : `≤ ${f.value}${unit ? ` ${unit}` : ''}`} enabled={f.enabled} />
               })}
               {preset.filters.length === 0 && <span className="text-[10px] text-muted-foreground/50 italic">No filters configured</span>}
@@ -726,7 +745,7 @@ function AppraisalRulesTab() {
     try {
       const [saved] = await Promise.all([
         updateAppraisalPreset(preset.id, {
-          filters: filters.map((f) => ({ filterType: f.filterType, enabled: f.enabled, value: f.value })),
+          filters: filters.map((f) => ({ filterType: f.filterType, enabled: f.enabled, value: f.value, priority: f.priority })),
           adjustments: adjustments.map((a) => ({ adjustmentType: a.adjustmentType, enabled: a.enabled, amount: a.amount, percentage: a.percentage })),
         }),
         proximityDirty ? saveProximityConfig(proximityConfig) : Promise.resolve(null),
@@ -783,7 +802,7 @@ function AppraisalRulesTab() {
     patchLocEditState(s.id, s, { saving: true, error: null })
     try {
       const updated = await updateLocationSetting(s.id, {
-        appraisalFilters: es.filters.map((f) => ({ filterType: f.filterType, enabled: f.enabled, value: f.value })),
+        appraisalFilters: es.filters.map((f) => ({ filterType: f.filterType, enabled: f.enabled, value: f.value, priority: f.priority })),
         appraisalAdjustments: es.adjustments.map((a) => ({ adjustmentType: a.adjustmentType, enabled: a.enabled, amount: a.amount, percentage: a.percentage })),
         proximityConfigJson: es.proximity,
       })
@@ -856,10 +875,10 @@ function AppraisalRulesTab() {
               <span className="text-xs font-semibold text-foreground">Filter Rules</span>
               <span className="text-[10px] text-muted-foreground">— exclude comps that don&apos;t meet threshold criteria</span>
             </div>
-            <RulesTable accent="blue" headers={['Rule', 'Threshold', 'Active']}>
+            <RulesTable accent="blue" headers={['Rule', 'Threshold', 'Mode', 'Active']} columns="1fr 110px 96px 56px">
               {filters.map((f, idx) => {
                 const labelInfo = defaults.filterLabels[f.filterType]
-                const isBoolean = f.filterType === 'subdivision_match' || f.filterType === 'building_style_match' || f.filterType === 'property_type'
+                const isBoolean = !labelInfo?.unit
                 return (
                   <FilterRow
                     key={f.filterType}
@@ -869,9 +888,11 @@ function AppraisalRulesTab() {
                     description={labelInfo?.description ?? ''}
                     enabled={f.enabled}
                     value={f.value}
+                    priority={f.priority}
                     isBoolean={isBoolean}
                     onToggle={(v) => updateFilter(idx, { enabled: v })}
                     onValueChange={(v) => updateFilter(idx, { value: v })}
+                    onPriorityChange={(v) => updateFilter(idx, { priority: v })}
                   />
                 )
               })}
@@ -1009,10 +1030,10 @@ function AppraisalRulesTab() {
                               <span className="inline-block w-2 h-2 rounded-full bg-blue-500" />
                               <span className="text-xs font-semibold text-foreground">Filter Rules</span>
                             </div>
-                            <RulesTable accent="blue" headers={['Rule', 'Threshold', 'Active']}>
+                            <RulesTable accent="blue" headers={['Rule', 'Threshold', 'Mode', 'Active']} columns="1fr 110px 96px 56px">
                               {es.filters.map((f, idx) => {
                                 const labelInfo = defaults.filterLabels[f.filterType]
-                                const isBoolean = f.filterType === 'subdivision_match' || f.filterType === 'building_style_match' || f.filterType === 'property_type'
+                                const isBoolean = !labelInfo?.unit
                                 return (
                                   <FilterRow
                                     key={f.filterType}
@@ -1022,9 +1043,11 @@ function AppraisalRulesTab() {
                                     description={labelInfo?.description ?? ''}
                                     enabled={f.enabled}
                                     value={f.value}
+                                    priority={f.priority ?? (defaults.filters.find((d) => d.type === f.filterType)?.priority ?? 'hard')}
                                     isBoolean={isBoolean}
                                     onToggle={(v) => patchLocEditState(s.id, s, { filters: es.filters.map((ff, i) => i === idx ? { ...ff, enabled: v } : ff) })}
                                     onValueChange={(v) => patchLocEditState(s.id, s, { filters: es.filters.map((ff, i) => i === idx ? { ...ff, value: v } : ff) })}
+                                    onPriorityChange={(v) => patchLocEditState(s.id, s, { filters: es.filters.map((ff, i) => i === idx ? { ...ff, priority: v } : ff) })}
                                   />
                                 )
                               })}

@@ -646,3 +646,44 @@ describe('ARV comp selection', () => {
     expect(bad?.evaluation.filterResults.find((f) => f.type === 'sale_age')?.status).toBe('failed')
   })
 })
+
+// ─── User-configured priority (Required vs Preferred) ──────────────────────────
+
+describe('filter priority (required vs preferred)', () => {
+  it('preferred (soft) sqft_diff: a verified failure is recorded but does not disqualify', () => {
+    const filters: AppraisalFilter[] = [{ type: 'sqft_diff', enabled: true, value: 250, priority: 'soft' }]
+    const r = evaluateComparable(subject(), comp('c1', { squareFeet: 2000 }), filters, [])
+    expect(r.shouldDisable).toBe(false)
+    expect(r.filterResults.find((f) => f.type === 'sqft_diff')?.passed).toBe(false)
+  })
+
+  it('required (hard) building_style_match: a verified mismatch disqualifies', () => {
+    const filters: AppraisalFilter[] = [{ type: 'building_style_match', enabled: true, value: 1, priority: 'hard' }]
+    const r = evaluateComparable(
+      subject({ construction: { buildingStyle: 'Ranch' } }),
+      comp('c1', { construction: { buildingStyle: 'Colonial' } }),
+      filters,
+      []
+    )
+    expect(r.shouldDisable).toBe(true)
+  })
+
+  it('same building_style_match at preferred (soft) does not disqualify', () => {
+    const filters: AppraisalFilter[] = [{ type: 'building_style_match', enabled: true, value: 1, priority: 'soft' }]
+    const r = evaluateComparable(
+      subject({ construction: { buildingStyle: 'Ranch' } }),
+      comp('c1', { construction: { buildingStyle: 'Colonial' } }),
+      filters,
+      []
+    )
+    expect(r.shouldDisable).toBe(false)
+    expect(r.filterResults.find((f) => f.type === 'building_style_match')?.passed).toBe(false)
+  })
+
+  it('a disabled filter produces no evaluation result at all', () => {
+    const filters: AppraisalFilter[] = [{ type: 'subdivision_match', enabled: false, value: 1 }]
+    const r = evaluateComparable(subject(), comp('c1', { subdivision: 'Far Away' }), filters, [])
+    expect(r.filterResults).toHaveLength(0)
+    expect(r.shouldDisable).toBe(false)
+  })
+})

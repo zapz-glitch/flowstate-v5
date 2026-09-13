@@ -67,7 +67,7 @@ export interface AnalyzeRequest {
   asIsThresholdPercent?: number
   /** Override appraisal rules for this request */
   appraisalOverrides?: {
-    filters?: Array<{ type: string; enabled: boolean; value: number }>
+    filters?: Array<{ type: string; enabled: boolean; value: number; priority?: 'hard' | 'soft' }>
     adjustments?: Array<{ type: string; enabled: boolean; amount: number; percent?: number }>
   }
 }
@@ -104,7 +104,7 @@ export interface AnalyzeData {
   apiCallStats?: ApiCallStats | null
   /** Settings used during this analysis (for client-side recalculation initialization) */
   appliedSettings?: {
-    filters: Array<{ type: string; enabled: boolean; value: number }>
+    filters: Array<{ type: string; enabled: boolean; value: number; priority?: 'hard' | 'soft' }>
     adjustments: Array<{ type: string; enabled: boolean; amount: number; percent?: number }>
     dealParams: {
       closingCostsPercent: number

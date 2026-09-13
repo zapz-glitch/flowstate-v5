@@ -329,6 +329,7 @@ export const appraisalRuleFilter = sqliteTable(
     filterType: text('filter_type').notNull(), // 'subdivision_match' | 'sale_age' | 'sqft_diff' | 'property_type' | 'year_built_diff' | 'distance'
     enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
     value: real('value').notNull(), // threshold value (days, sqft, years, miles, or 1 for must-match)
+    priority: text('priority'), // 'hard' (required) | 'soft' (preferred) | NULL = system default
     createdAt: text('created_at')
       .notNull()
       .$defaultFn(() => new Date().toISOString()),

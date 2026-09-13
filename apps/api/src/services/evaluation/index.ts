@@ -18,6 +18,7 @@ import {
   DEFAULT_FILTERS,
   DEFAULT_ADJUSTMENTS,
   DEFAULT_EXPANSION_POLICY,
+  defaultFilterPriority,
   summarizeClassifications,
   type AppraisedComparable,
   type AppraisalResultWithFallback,
@@ -346,26 +347,13 @@ export async function performAnalysis(
   const filters = [...(rules.filters ?? DEFAULT_FILTERS)]
   const adjustments = rules.adjustments ?? DEFAULT_ADJUSTMENTS
 
-  // Evidence-critical rules always run — the apples-to-apples match set:
-  // subdivision → neighborhood geography, then physical matches (style,
-  // foundation, construction material, pool, garage, assessor condition).
-  // They only bite when enriched data proves a mismatch — not_verified never
-  // disqualifies — so enabling them is safe even where provider data is thin.
-  const requiredMatches = DEFAULT_FILTERS.filter((f) =>
-    ['subdivision_match', 'neighborhood_match', 'building_style_match',
-     'foundation_match', 'construction_material_match', 'pool_match',
-     'garage_match', 'condition_match', 'stories_match', 'roof_material_match'
-    ].includes(f.type)
-  )
-  for (const required of requiredMatches) {
-    const existing = filters.find((f) => f.type === required.type)
-    if (existing) {
-      existing.enabled = true
-      // Presets can't express hard/soft — always take the default priority
-      // so preferred-match fields rank but never disqualify.
-      existing.priority = required.priority
-    } else {
-      filters.push({ ...required })
+  // Filters the preset doesn't define at all are injected with system defaults
+  // so the audit trail always covers every rule. Filters the preset DOES define
+  // keep the user's own enabled + required(preferred) choices — the preset is
+  // authoritative for those.
+  for (const defaultFilter of DEFAULT_FILTERS) {
+    if (!filters.some((f) => f.type === defaultFilter.type)) {
+      filters.push({ ...defaultFilter })
     }
   }
 
@@ -716,7 +704,12 @@ export async function performAnalysis(
   const bestMatch = selectBestMatch(bundle.property, enabledComps)
 
   const appliedSettings = {
-    filters: filters.map((f) => ({ type: f.type, enabled: f.enabled, value: f.value })),
+    filters: filters.map((f) => ({
+      type: f.type,
+      enabled: f.enabled,
+      value: f.value,
+      priority: f.priority ?? defaultFilterPriority(f.type),
+    })),
     adjustments: adjustments.map((a) => ({
       type: a.type,
       enabled: a.enabled,

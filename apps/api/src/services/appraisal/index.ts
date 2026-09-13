@@ -45,7 +45,7 @@ export type {
   AdjustmentType,
   ExpansionPolicy,
 } from './types'
-export { DEFAULT_FILTERS, DEFAULT_ADJUSTMENTS, DEFAULT_EXPANSION_POLICY } from './types'
+export { DEFAULT_FILTERS, DEFAULT_ADJUSTMENTS, DEFAULT_EXPANSION_POLICY, defaultFilterPriority } from './types'
 export { evaluateComparable, evaluateComparables } from './evaluator'
 // Note: WeightFactors, CompWeightBreakdown, WeightedARVResult are defined below and exported from this file
 

@@ -665,7 +665,46 @@ is build-era: year_built_diff widens progressively (configured ±10 →
 
 NOT deployed — deploy-on-request rule stands.
 
+### Per-filter Required/Preferred (priority) — user-configurable (2026-09-13, same branch)
+
+User request: every filter needs Active toggle + Required/Preferred
+control + a real threshold (the value:1 on match filters was
+meaningless). Changes must flow preset → analysis.
+
+- DB: migration 0028 adds `appraisal_rule_filter.priority TEXT`
+  (NULL = system default for that type — preserves existing semantics).
+  Applied LOCAL only; `db:migrate:remote` REQUIRED before API deploy.
+- appraisal-rules.ts: FilterInput.priority accepted; serializeFilter
+  resolves NULL → defaultFilterPriority(type) on all GET responses;
+  POST/PATCH/mine/location inserts persist it. location-settings.ts
+  FilterInput + upsert/resolver updated likewise.
+- user-settings loader maps row priority → AppraisalFilter at both
+  preset + location-override sites.
+- performAnalysis merge changed: previously force-enabled match
+  filters AND force-set default priority — now only injects filter
+  types MISSING from the preset (system defaults); user-set
+  enabled/priority is authoritative. appliedSettings.filters now
+  serializes resolved priority.
+- analyze.ts appraisalOverrides.filters + comp-selection.ts
+  settings.filters accept priority (public API parity).
+- Dashboard: AppraisalFilter/AppraisalDefaults/input types +
+  widened FilterType unions (api.ts, client-api.ts);
+  LocationAppraisalFilter.priority. evaluation-settings page:
+  FilterRow redesigned — 4 cols (Rule | Threshold | Mode | Active);
+  boolean match filters show "must match" instead of value:1;
+  Mode column is a Required/Preferred pill toggle. Same Req/Pref
+  pill added to analyze-page AppraisalFilterEditor + report
+  SettingsPanel (updateFilter carries priority into recalc).
+- RecalcFilter.priority; recalc passes it to shared evaluator and
+  hasFilterChanges compares it; use-report-settings DEFAULT_FILTERS
+  synced to API defaults (was stale: sqft_diff 20, 5 filters).
+- rules.test.ts: +4 tests (soft sqft_diff doesn't disqualify, hard
+  style-match does, soft style-match doesn't, disabled filter
+  produces no result).
+
+Verified: 143 vitest + 15/15 regression + tsc clean api + dashboard
++ shared.
+
 Known divergence to revisit: shared sqft_diff evaluator is %-based
 while API uses absolute sqft — recalc only re-evaluates when the user
 edits settings, so impact is limited to client-side scoring.
-- Verified: 81 vitest (incl. Canoe Creek strict-reversion test) + 15/15 regression + both typechecks clean.
