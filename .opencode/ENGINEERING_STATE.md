@@ -166,20 +166,18 @@ access to the dashboard after auth.
   session-cookie path on /v1); generated a temp fs_ key, verified,
   deleted it after.
 
-## Google Cloud / Maps (2026-09-12 — FIX PENDING, user action required)
-- Prod Maps key AIzaSyD1mztBbiP93zRqPiUiV0Upk7uM435EQDU lives in
-  GCP project number 631070523239 (extracted via geolocation API error
-  metadata). Dev/local key AIzaSyADvOh4RfRJEi5rd93DFGP5L_BKdvSh8pM is in
-  project 600584575168 and works.
-- Billing account ID: 0130DC-E80A6F-587A29 (user label "F1.1") —
-  needs to be linked to project 631070523239.
-- BLOCKER: prod maps show "for development purposes only" because
-  (1) billing not enabled on project 631070523239, and
-  (2) key HTTP referrers do NOT include flowstate.homes (geolocation
-  call with Referer: flowstate.homes -> "blocked"). User must fix both
-  in console; OAuth client URLs do NOT affect API-key referrers.
-- Re-verify: curl streetview metadata + geolocation with the prod key
-  and Referer https://flowstate.homes/ — expect status OK.
+## Google Cloud / Maps (2026-09-13 — RESOLVED, key rotated)
+- Prod Maps key rotated to AIzaSyCQVFWXbhBwmp6mskH8ngBOLNbRds2LVDc on
+  billed project 600584575168 (billing acct 0130DC-E80A6F-587A29).
+  Updated wrangler.jsonc vars + .env.production + .env.development;
+  deployed via run 34728767879; verified new key inlined in live chunk.
+- Old key AIzaSyD1mztBbiP93zRqPiUiV0Upk7uM435EQDU was on project
+  631070523239 (no billing + missing flowstate.homes referrer — that
+  combo caused "for development purposes only"). Safe to delete in
+  console; nothing references it anymore.
+- OPEN: new key currently has NO referrer restrictions (verified —
+  serves with no referer). User should add flowstate.homes/* and
+  *.flowstate.homes/* in console Credentials to prevent key theft.
 
 ## Completed (landing-v2)
 - Rewrote `/` (`src/app/page.tsx`) as a company credibility landing page:
