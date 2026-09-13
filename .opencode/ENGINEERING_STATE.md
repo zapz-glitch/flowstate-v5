@@ -202,6 +202,29 @@ access to the dashboard after auth.
 - CI: checkout/setup-node bumped to v5 (Node 24). wrangler-action has
   no v4 — residual deprecation annotation is upstream's.
 
+## Cotality endpoints + Atlas removal (2026-09-13, deployed 34734669544)
+- Atlas globe REMOVED: atlas page, GlobeInner, /user/reports/map-points
+  route, getReportMapPoints, popup CSS, maplibre-gl dep (~274KB gz),
+  ArcGIS hosts from CSP.
+- site-location ENTITLED + VERIFIED: GET
+  property.corelogicapi.com/v2/properties/{clip}/site-location works with
+  existing token (also api1.cotality.com with own oauth endpoint).
+  Returns subdivisionName (legal plat desc e.g. "HIGH COUNTRY BL 17786
+  UN 13"), neighborhood code/name, municipality, CBSA code, census
+  tract, tax district, lot dims, land-use/zoning codes, utilities.
+  Integration candidates: comp matching within subdivision, market
+  context, report fields, CBSA key for analytics.
+- MARKET ANALYTICS NOT ENTITLED: tools pr-get_listing_trends,
+  pr-get_market_trends, pr-get_rental_trends, pr-get_home_price_index,
+  pr-get_home_price_index_forecast exist (MCP at mcp.cotality.com) but
+  our token -> "no apiproduct match found". OAuth on api.cotality.com
+  accepts our creds; api1.cotality.com also issues tokens. User must
+  ask Cotality account team to add the Market Trend Analytics product
+  scope, then integration = REST or MCP calls with same creds.
+- Next planned work: satellite-US landing view on analyze page when no
+  property loaded (maplibre removed with atlas — rebuild on Google
+  Maps or re-add lighter approach), last-property focus already works.
+
 ## Completed (landing-v2)
 - Rewrote `/` (`src/app/page.tsx`) as a company credibility landing page:
   Hero ("We buy houses as-is. Cash. Closed in 21 days." + stats strip),
