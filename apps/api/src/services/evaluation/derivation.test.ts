@@ -7,6 +7,7 @@
 
 import { describe, it, expect } from 'vitest'
 import { deriveBuybox } from './derivation'
+import { MAJOR_ITEMS } from '../valuation/types'
 import type { NormalizedProperty, NormalizedPermit } from '../property-api/types'
 import type { ClassificationResult } from '../vision/types'
 
@@ -136,8 +137,9 @@ describe('deriveBuybox — major items (permit-age engine)', () => {
 
     expect(ids).toContain('roof') // ~26y > 20y threshold
     expect(ids).toContain('hvac') // ~21y > 15y threshold
-    // No evidence → never charged
-    expect(ids).not.toContain('water_heater')
+    // Big-four no-permit rule: 1995 house → water heater assumed original
+    // (~30y ≥ 10y threshold) → charged; septic stays evidence-gated
+    expect(ids).toContain('water_heater')
     expect(ids).not.toContain('septic')
   })
 
@@ -213,15 +215,72 @@ describe('deriveBuybox — major items (permit-age engine)', () => {
     expect(roof?.thresholdYears).toBe(10)
   })
 
-  it('no permit evidence → UNKNOWN, not charged, flagged', () => {
+  it('no permits on an old house → big four assumed original and charged', () => {
     const result = deriveBuybox(createProperty({ yearBuilt: 1970 }), classify('as_is'), undefined, {
       permits: [],
     })
-    const roof = result.majorItemAssessments?.find((a) => a.id === 'roof')
+    const a = result.majorItemAssessments ?? []
+    const ids = result.majorItems.filter((m) => m.enabled).map((m) => m.id)
 
-    expect(roof?.evidenceStatus).toBe('unknown')
-    expect(roof?.enabled).toBe(false)
+    for (const id of ['roof', 'hvac', 'water_heater', 'electric_panel'] as const) {
+      const item = a.find((x) => x.id === id)
+      expect(item?.evidenceStatus).toBe('unknown')
+      expect(item?.enabled).toBe(true)
+      expect(item?.reason).toContain('assumed original install')
+      expect(ids).toContain(id)
+    }
+    // Charged big-four assumptions don't count toward the unknown tally —
+    // only the still-ungated items (replumb/foundation/etc.) do
+    const unknownNote = result.notes.find((n) => n.includes('UNKNOWN'))
+    expect(unknownNote).toBeDefined()
+    expect(unknownNote).toContain(`${MAJOR_ITEMS.length - 4} major item(s)`)
+  })
+
+  it('no permits on a young house → big four not charged when under threshold', () => {
+    const youngYear = CURRENT_YEAR - 8 // 8y < every big-four threshold (10/15/20/30)
+    const result = deriveBuybox(createProperty({ yearBuilt: youngYear }), classify('as_is'), undefined, {
+      permits: [],
+    })
+    const a = result.majorItemAssessments ?? []
+
+    for (const id of ['roof', 'hvac', 'water_heater', 'electric_panel'] as const) {
+      const item = a.find((x) => x.id === id)
+      expect(item?.enabled).toBe(false)
+      expect(item?.cost).toBe(0)
+      expect(item?.reason).toContain('not charged')
+    }
+  })
+
+  it('no permit evidence → plumbing and foundation never assumed', () => {
+    const result = deriveBuybox(createProperty({ yearBuilt: 1960 }), classify('as_is'), undefined, {
+      permits: [],
+    })
+    const a = result.majorItemAssessments ?? []
+    const ids = result.majorItems.filter((m) => m.enabled).map((m) => m.id)
+
+    for (const id of ['replumb', 'foundation', 'rewire', 'septic'] as const) {
+      const item = a.find((x) => x.id === id)
+      expect(item?.evidenceStatus).toBe('unknown')
+      expect(item?.enabled).toBe(false)
+      expect(item?.reason).toContain('not charged')
+    }
+    expect(ids).not.toContain('replumb')
+    expect(ids).not.toContain('foundation')
+    // These remain genuine unknowns — flagged in the notes
     expect(result.notes.some((n) => n.includes('UNKNOWN'))).toBe(true)
+  })
+
+  it('no permits + unknown build year → big four assumed due', () => {
+    const result = deriveBuybox(createProperty({ yearBuilt: null }), classify('as_is'), undefined, {
+      permits: [],
+    })
+    const a = result.majorItemAssessments ?? []
+
+    for (const id of ['roof', 'hvac', 'water_heater', 'electric_panel'] as const) {
+      const item = a.find((x) => x.id === id)
+      expect(item?.enabled).toBe(true)
+      expect(item?.reason).toContain('build year unknown')
+    }
   })
 
   it('conflicting evidence (newer cancelled permit) → CONFLICTING, uses older valid date', () => {

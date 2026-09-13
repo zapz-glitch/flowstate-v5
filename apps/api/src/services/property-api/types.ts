@@ -220,6 +220,7 @@ export interface NormalizedComparable {
   /** Composite parcel ID `fipsCode:universalParcelId` — present on comparables responses */
   parcelId?: string | null
   neighborhoodName?: string | null
+  neighborhoodCode?: string | null
 
   /** Assessor building improvement condition (e.g. "Average") */
   buildingCondition?: string | null

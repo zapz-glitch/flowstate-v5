@@ -550,44 +550,54 @@ export async function performAnalysis(
   let compCurbAppeal: Record<string, CurbAppealCheck> | undefined =
     compChecks.length > 0 ? Object.fromEntries(compChecks.map((c) => [c.id, c.check])) : undefined
 
-  // ── ARV condition gate ────────────────────────────────────────────────────
-  // ARV-comp-worthy = recently sold, arm's-length, physically similar, and
-  // verified AR quality — renovated/updated/retail-ready, matching the
-  // condition the subject will reach after repair. A high sale price alone
-  // NEVER qualifies a comp: dated/distressed verification excludes it, and
-  // unverifiable condition means its price cannot influence ARV.
-  const isArvWorthy = (check: CurbAppealCheck | undefined): boolean =>
-    !!check &&
-    check.source === 'vision' &&
+  // ── ARV condition evidence ────────────────────────────────────────────────
+  // Product spec: the rules already picked the comps — condition verification
+  // is the cherry on top that boosts confidence, NOT a selection gate.
+  //   • verified AR-quality (assessor Good+ / vision renovated) → confidence +
+  //   • verified NOT AR-quality (assessor Fair/Poor/Very Poor or vision
+  //     dated/distressed) → excluded — confirmed evidence it isn't ARV spec
+  //   • unverifiable → KEPT: top-of-market comps matching the rules are valid
+  //     ARV anchors; lack of condition data only lowers confidence.
+  const visionVerifiedNegative = (check: CurbAppealCheck | undefined): boolean =>
+    !!check && check.source === 'vision' &&
+    (check.condition === 'dated' || check.condition === 'distressed')
+  const visionVerifiedPositive = (check: CurbAppealCheck | undefined): boolean =>
+    !!check && check.source === 'vision' &&
     (check.condition === 'renovated' || check.rehabLevelIndex === 0)
 
-  // Assessor condition is the primary ARV-worthiness signal — comps rated
-  // Good/Very Good/Excellent are treated as retail-ready without a vision
-  // call. Vision curb-appeal remains the fallback when the provider has no
-  // condition data for the comp.
-  const ARV_WORTHY_CONDITIONS = new Set(['excellent', 'verygood', 'good'])
-  const assessorArvWorthy = (compId: string): boolean | null => {
+  // Assessor condition is the primary signal — Good/Very Good/Excellent are
+  // retail-ready; Fair/Poor/Very Poor are confirmed below ARV spec.
+  const ARV_POSITIVE_CONDITIONS = new Set(['excellent', 'verygood', 'good'])
+  const ARV_NEGATIVE_CONDITIONS = new Set(['fair', 'poor', 'verypoor'])
+  const assessorSignal = (compId: string): 'positive' | 'negative' | 'average' | null => {
     const cond = compById.get(compId)?.buildingCondition?.toLowerCase().replace(/[^a-z]/g, '')
     if (!cond) return null
-    return ARV_WORTHY_CONDITIONS.has(cond)
+    if (ARV_POSITIVE_CONDITIONS.has(cond)) return 'positive'
+    if (ARV_NEGATIVE_CONDITIONS.has(cond)) return 'negative'
+    return 'average' // 'average' and unmapped values — usable, no boost
   }
 
   const unverifiable: string[] = []
   const prunedFromArv: string[] = []
+  let verifiedPositiveCount = 0
   for (const id of appraisalResult.selectedCompIds ?? []) {
     const check = compCurbAppeal?.[id]
-    const worthy = assessorArvWorthy(id) ?? isArvWorthy(check)
-    if (!worthy) {
+    const assessor = assessorSignal(id)
+    const verifiedNegative = assessor === 'negative' || visionVerifiedNegative(check)
+    const verifiedPositive = assessor === 'positive' || visionVerifiedPositive(check)
+    if (verifiedNegative) {
       prunedFromArv.push(id)
-      const assessorCond = compById.get(id)?.buildingCondition
-      if (!check && !assessorCond) unverifiable.push(id)
-      else if (check?.condition === 'unknown') unverifiable.push(id)
       if (check && check.source !== 'price') {
         compCurbAppeal![id] = {
           ...check,
-          summary: `${check.summary ?? check.condition} — excluded from ARV: not verified renovated/retail-ready`,
+          summary: `${check.summary ?? check.condition} — excluded from ARV: verified below ARV spec (${assessor === 'negative' ? `assessor ${compById.get(id)?.buildingCondition}` : check.condition})`,
         }
       }
+    } else if (verifiedPositive || assessor === 'average') {
+      if (verifiedPositive) verifiedPositiveCount++
+    } else {
+      // No signal at all — kept in the ARV set, counted for confidence
+      unverifiable.push(id)
     }
   }
   if (prunedFromArv.length > 0) {
@@ -599,16 +609,19 @@ export async function performAnalysis(
       finalArv = appraisalResult.arv
       fallbacksUsed.push(`arv_condition_pruned:${prunedFromArv.length}`)
       step('arv_condition_gate', 'fallback',
-        `${prunedFromArv.length} comp(s) excluded — not verified renovated/retail-ready; ARV recomputed on ${remainingComps.length}`)
+        `${prunedFromArv.length} comp(s) excluded — verified below ARV spec (dated/distressed/poor assessor condition); ARV recomputed on ${remainingComps.length}`)
     } else {
       // Can't recompose a 3-comp ARV — keep the set but mark the evidence
       fallbacksUsed.push('arv_condition_thin')
       step('arv_condition_gate', 'fallback',
-        `${prunedFromArv.length} comp(s) not verified AR-quality (${unverifiable.length} unverifiable) — ARV kept on ${remainingComps.length + prunedFromArv.length} comps, fewer than 3 verified`)
+        `${prunedFromArv.length} comp(s) verified below ARV spec — ARV kept on ${remainingComps.length + prunedFromArv.length} comps, fewer than 3 verified`)
     }
   } else if (appraisalResult.selectedCompIds?.length) {
     step('arv_condition_gate', 'completed',
-      `${appraisalResult.selectedCompIds.length} comp(s) verified AR-quality (renovated/retail-ready)`)
+      `${appraisalResult.selectedCompIds.length} comp(s) selected — ${verifiedPositiveCount} verified AR-quality${unverifiable.length ? `, ${unverifiable.length} unverified (kept: rules-matched)` : ''}`)
+  }
+  if (unverifiable.length > 0) {
+    fallbacksUsed.push(`arv_condition_unverified:${unverifiable.length}`)
   }
 
   // ── 4. Classifications (price percentile, display grouping) ─────────────────

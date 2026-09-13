@@ -440,6 +440,30 @@ describe('Match filters', () => {
     expect(evaluateComparable(matchSubject(), matchComp(), only('neighborhood_match'), []).filterResults[0].status).toBe('passed')
   })
 
+  it('neighborhood_match passes on code equality alone', () => {
+    // Names differ/missing but provider neighborhood codes agree → match
+    const r = evaluateComparable(
+      matchSubject({ neighborhoodName: null, neighborhoodCode: 'NB-4417' }),
+      matchComp({ neighborhoodName: 'Other Hood', neighborhoodCode: 'NB-4417' }),
+      only('neighborhood_match'),
+      []
+    )
+    expect(r.shouldDisable).toBe(false)
+    expect(r.filterResults[0].status).toBe('passed')
+  })
+
+  it('neighborhood_match not_verified when only one side has each field', () => {
+    // Subject has code only, comp has name only → no comparable pair
+    const r = evaluateComparable(
+      matchSubject({ neighborhoodName: null, neighborhoodCode: 'NB-4417' }),
+      matchComp({ neighborhoodName: 'High Country', neighborhoodCode: null }),
+      only('neighborhood_match'),
+      []
+    )
+    expect(r.filterResults[0].status).toBe('not_verified')
+    expect(r.shouldDisable).toBe(false)
+  })
+
   it('building_style_match fails on style mismatch', () => {
     const r = evaluateComparable(matchSubject(), matchComp({ construction: { buildingStyle: 'Colonial' } }), only('building_style_match'), [])
     expect(r.shouldDisable).toBe(true)

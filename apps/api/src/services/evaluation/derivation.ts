@@ -164,7 +164,9 @@ export function deriveBuybox(
   const assessments = assessMajorItems(
     opts?.permits,
     opts?.majorItemConfig,
-    caller.majorItems
+    caller.majorItems,
+    undefined,
+    property.effectiveYearBuilt ?? property.yearBuilt ?? null
   )
   const valuationItems = toValuationMajorItems(assessments, caller.majorItems)
   const assessmentById = new Map(assessments.map((a) => [a.id, a]))
@@ -180,12 +182,13 @@ export function deriveBuybox(
     }
   })
 
+  // Charged unknowns (big-four no-permit assumption) are resolved, not flagged
   const unknownCount = assessments.filter(
-    (a) => a.evidenceStatus === 'unknown' && !a.deduplicated
+    (a) => a.evidenceStatus === 'unknown' && !a.deduplicated && !a.enabled
   ).length
   if (unknownCount > 0) {
     notes.push(
-      `${unknownCount} major item(s) have no permit evidence — UNKNOWN (not charged, flagged for review)`
+      `${unknownCount} major item(s) have no permit evidence — UNKNOWN (not charged)`
     )
   }
 

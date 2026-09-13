@@ -317,19 +317,40 @@ function evaluateFoundationMatch(
 }
 
 /**
- * Neighborhood match — the fallback geography when a market has no
- * HOA/subdivision. Uses the provider's normalized neighborhood name.
+ * Pure neighborhood match: name OR code equality is sufficient evidence.
+ * Returns null when no comparable field pair exists (not verifiable).
+ * Used both by the neighborhood_match filter and by the fallback ladder's
+ * neighborhood tier — the tier works off raw geography even when the
+ * soft filter is disabled in the user's preset.
  */
+export function neighborhoodsMatch(
+  subject: Pick<NormalizedProperty, 'neighborhoodName' | 'neighborhoodCode'>,
+  comp: Pick<NormalizedComparable, 'neighborhoodName' | 'neighborhoodCode'>
+): boolean | null {
+  const normalize = (v?: string | null) => v?.toLowerCase().trim().replace(/\s+/g, ' ') || null
+  const subjectName = normalize(subject.neighborhoodName)
+  const compName = normalize(comp.neighborhoodName)
+  const subjectCode = normalize(subject.neighborhoodCode)
+  const compCode = normalize(comp.neighborhoodCode)
+
+  if ((!subjectName || !compName) && (!subjectCode || !compCode)) return null
+  return (subjectName != null && subjectName === compName) ||
+    (subjectCode != null && subjectCode === compCode)
+}
+
 function evaluateNeighborhoodMatch(
   subject: NormalizedProperty,
   comp: NormalizedComparable,
   _filter: AppraisalFilter
 ): FilterResult {
   const normalize = (v?: string | null) => v?.toLowerCase().trim().replace(/\s+/g, ' ') || null
-  const subjectNeighborhood = normalize(subject.neighborhoodName)
-  const compNeighborhood = normalize(comp.neighborhoodName)
+  const subjectName = normalize(subject.neighborhoodName)
+  const compName = normalize(comp.neighborhoodName)
+  const subjectCode = normalize(subject.neighborhoodCode)
+  const compCode = normalize(comp.neighborhoodCode)
+  const matched = neighborhoodsMatch(subject, comp)
 
-  if (!subjectNeighborhood || !compNeighborhood) {
+  if (matched === null) {
     return {
       type: 'neighborhood_match',
       passed: true,
@@ -338,14 +359,19 @@ function evaluateNeighborhoodMatch(
     }
   }
 
-  const passed = subjectNeighborhood === compNeighborhood
+  // Match on name OR code — either is sufficient evidence
+  const nameMatch = subjectName != null && compName != null && subjectName === compName
+  const codeMatch = subjectCode != null && compCode != null && subjectCode === compCode
+  const via = nameMatch && codeMatch ? 'name+code' : nameMatch ? 'name' : 'code'
   return {
     type: 'neighborhood_match',
-    passed,
-    status: passed ? 'passed' : 'failed',
-    reason: passed ? undefined : `Neighborhood mismatch: "${compNeighborhood}" vs subject "${subjectNeighborhood}"`,
-    actualValue: compNeighborhood,
-    threshold: subjectNeighborhood,
+    passed: matched,
+    status: matched ? 'passed' : 'failed',
+    reason: matched
+      ? (nameMatch && !codeMatch ? undefined : `Neighborhood matched via ${via}`)
+      : `Neighborhood mismatch: "${compName ?? compCode}" vs subject "${subjectName ?? subjectCode}"`,
+    actualValue: compName ?? compCode ?? undefined,
+    threshold: subjectName ?? subjectCode ?? undefined,
   }
 }
 

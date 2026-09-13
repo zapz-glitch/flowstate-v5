@@ -445,6 +445,113 @@ describe('ARV comp selection', () => {
     expect(r.selectedCompIds).toContain('out1')
   })
 
+  it('tries verified neighborhood comps before leaving to raw geography', () => {
+    // 2 in-subdivision comps + 2 out-of-subdivision comps. One out comp
+    // shares the subject's neighborhood name — it wins the neighborhood
+    // tier over the unrelated out comp.
+    const subj = subject({ neighborhoodName: 'Arlington Hills' })
+    const comps = [
+      comp('in1', { subdivision: 'Oak Park', salePrice: 300000 }),
+      comp('in2', { subdivision: 'Oak Park', salePrice: 310000 }),
+      comp('nb', { subdivision: 'Other', neighborhoodName: 'Arlington Hills', distanceMiles: 0.8, salePrice: 320000 }),
+      comp('far', { subdivision: 'Elsewhere', neighborhoodName: 'Westside', distanceMiles: 0.7, salePrice: 400000 }),
+    ]
+    const r = service.evaluateWithFallback(subj, comps, {
+      filters: [
+        { type: 'subdivision_match', enabled: true, value: 1 },
+        { type: 'neighborhood_match', enabled: true, value: 1 },
+        { type: 'distance', enabled: true, value: 1.0 },
+      ],
+      adjustments: [],
+      expansion: { allowGeographicExpansion: true, allowYearBuiltExpansion: false },
+    })
+
+    expect(r.fallbackUsed).toBe('neighborhood_expansion')
+    expect(r.expansionApplied).toContain('neighborhood')
+    expect(r.selectedCompIds).toContain('nb')
+    // The unrelated comp is NOT rescued at this tier — its only chance was
+    // the neighborhood evidence, which failed.
+    expect(r.selectedCompIds).not.toContain('far')
+    const nb = r.comparables.find((c) => c.id === 'nb')
+    // subdivision failure stays on the audit trail — rescued, not erased
+    expect(
+      nb?.evaluation?.filterResults.some(
+        (f) => f.type === 'subdivision_match' && !f.passed && f.status === 'failed'
+      )
+    ).toBe(true)
+  })
+
+  it('neighborhood code alone is enough when names differ or are missing', () => {
+    const subj = subject({ neighborhoodName: null, neighborhoodCode: 'NB-4417' })
+    const comps = [
+      comp('in1', { subdivision: 'Oak Park', salePrice: 300000 }),
+      comp('in2', { subdivision: 'Oak Park', salePrice: 310000 }),
+      comp('code', { subdivision: 'Other', neighborhoodCode: 'NB-4417', distanceMiles: 0.8, salePrice: 320000 }),
+    ]
+    const r = service.evaluateWithFallback(subj, comps, {
+      filters: [
+        { type: 'subdivision_match', enabled: true, value: 1 },
+        { type: 'distance', enabled: true, value: 1.0 },
+      ],
+      adjustments: [],
+      expansion: { allowGeographicExpansion: true, allowYearBuiltExpansion: false },
+    })
+
+    expect(r.fallbackUsed).toBe('neighborhood_expansion')
+    expect(r.selectedCompIds).toContain('code')
+  })
+
+  it('out-of-neighborhood comps skip the neighborhood tier and fall through to geography', () => {
+    const subj = subject({ neighborhoodName: 'Arlington Hills' })
+    const comps = [
+      comp('in1', { subdivision: 'Oak Park', salePrice: 300000 }),
+      comp('in2', { subdivision: 'Oak Park', salePrice: 310000 }),
+      comp('geo1', { subdivision: 'Other', neighborhoodName: 'Westside', distanceMiles: 1.5, salePrice: 320000 }),
+      comp('geo2', { subdivision: 'Other', neighborhoodName: null, neighborhoodCode: null, distanceMiles: 1.8, salePrice: 305000 }),
+    ]
+    const r = service.evaluateWithFallback(subj, comps, {
+      filters: [
+        { type: 'subdivision_match', enabled: true, value: 1 },
+        { type: 'distance', enabled: true, value: 1.0 },
+      ],
+      adjustments: [],
+      expansion: { allowGeographicExpansion: true, allowYearBuiltExpansion: false },
+    })
+
+    // No verified neighborhood comps → tier 3 fails through to radius×2
+    expect(r.fallbackUsed).toBe('subdivision_expansion')
+    expect(r.expansionApplied).not.toContain('neighborhood')
+    expect(r.selectedCompIds).toContain('geo1')
+  })
+
+  it('still enforces other hard rules at the neighborhood tier', () => {
+    // Same-neighborhood comp with an intrinsic hard failure (year) must
+    // NOT be rescued — neighborhood only carries location failures.
+    const subj = subject({ neighborhoodName: 'Arlington Hills', yearBuilt: 2008 })
+    const comps = [
+      comp('in1', { subdivision: 'Oak Park', yearBuilt: 2008, salePrice: 300000 }),
+      comp('in2', { subdivision: 'Oak Park', yearBuilt: 2008, salePrice: 310000 }),
+      comp('nb_old', { subdivision: 'Other', neighborhoodName: 'Arlington Hills', yearBuilt: 1975, salePrice: 320000 }), // 33yr off — beyond ±14
+    ]
+    const r = service.evaluateWithFallback(subj, comps, {
+      filters: [
+        { type: 'subdivision_match', enabled: true, value: 1 },
+        { type: 'year_built_diff', enabled: true, value: 10 },
+        { type: 'distance', enabled: true, value: 1.0 },
+      ],
+      adjustments: [],
+      expansion: {
+        allowGeographicExpansion: true,
+        allowYearBuiltExpansion: true,
+        yearBuiltExpansionSteps: [2, 4],
+      },
+    })
+
+    const nbOld = r.comparables.find((c) => c.id === 'nb_old')
+    expect(nbOld?.isEnabled).toBe(false)
+    expect(r.selectedCompIds ?? []).not.toContain('nb_old')
+  })
+
   it('widens year-built inside the subdivision before leaving it', () => {
     // 2 strict-year + 1 older-era in-subdivision comps, and 1 strict-year
     // out-of-subdivision comp. Policy: widen year_built while keeping

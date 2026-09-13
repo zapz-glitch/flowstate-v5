@@ -20,7 +20,7 @@
  */
 
 import type { NormalizedProperty, NormalizedComparable } from '../property-api/types'
-import { evaluateComparables, evaluateComparable } from './evaluator'
+import { evaluateComparables, evaluateComparable, neighborhoodsMatch } from './evaluator'
 import type {
   AppraisalFilter,
   AppraisalAdjustment,
@@ -206,6 +206,7 @@ export interface AppraisalResultWithFallback extends AppraisalResult {
   fallbackUsed:
     | 'none'
     | 'year_built_expansion'
+    | 'neighborhood_expansion'
     | 'subdivision_expansion'
     | 'geographic_expansion'
     | 'nearest_comps'
@@ -397,9 +398,11 @@ class PropertyAppraisalService implements AppraisalService {
     // Ladder (each tier requires ≥REQUIRED_ARV_COMPS selected):
     //   1. strict rules (done above)
     //   2. widen year_built INSIDE the subdivision — ±10 → ±12 → ±14
-    //   3. leave the subdivision (radius ×mult), re-walking the year ladder
-    //   4. drop the radius gate entirely, re-walking the year ladder
-    //   5. most recent sales — only location failures may be carried
+    //   3. verified same-NEIGHBORHOOD comps (name/code) at strict radius,
+    //      year ladder restarts — subdivision_match may be rescued
+    //   4. leave the subdivision (radius ×mult), re-walking the year ladder
+    //   5. drop the radius gate entirely, re-walking the year ladder
+    //   6. most recent sales — only location failures may be carried
     //
     // sale_age is NEVER relaxed: every comp must be within the configured
     // max (default 180d) at every tier — the most recent sales win. Older
@@ -428,7 +431,7 @@ class PropertyAppraisalService implements AppraisalService {
       yearLimit > strictYear ? ` (year-built widened to ±${yearLimit}yr)` : ''
     const appliedFor = (
       yearLimit: number,
-      scope: 'subdivision' | 'geographic' | null
+      scope: 'subdivision' | 'neighborhood' | 'geographic' | null
     ): NonNullable<AppraisalResult['expansionApplied']> => {
       const applied: NonNullable<AppraisalResult['expansionApplied']> = []
       if (yearLimit > strictYear) applied.push('year_built')
@@ -437,11 +440,13 @@ class PropertyAppraisalService implements AppraisalService {
     }
 
     // Rescue helper: force-enable disabled comps whose hard failures are all
-    // in `allowed`, then re-run ARV selection over the combined pool so
-    // verified matches still outrank unverified and price breaks ties.
+    // in `allowed` (and that satisfy `extra` when given), then re-run ARV
+    // selection over the combined pool so verified matches still outrank
+    // unverified and price breaks ties.
     const rescue = (
       base: AppraisalResult,
-      allowed: ReadonlySet<string>
+      allowed: ReadonlySet<string>,
+      extra?: (c: AppraisedComparable) => boolean
     ) => {
       const priorityByType = new Map(
         base.appliedFilters.map((f) => [f.type, f.priority ?? 'hard'])
@@ -451,6 +456,7 @@ class PropertyAppraisalService implements AppraisalService {
           .filter((c) => {
             if (c.isEnabled) return false
             if ((c.adjustedSalePrice ?? c.salePrice ?? 0) <= 0) return false
+            if (extra && !extra(c)) return false
             const failures = (c.evaluation?.filterResults ?? []).filter(
               (f) => !f.passed && f.status === 'failed' && priorityByType.get(f.type) !== 'soft'
             )
@@ -496,7 +502,32 @@ class PropertyAppraisalService implements AppraisalService {
       }
     }
 
-    // Step 3: leave the subdivision — radius ×mult, year ladder restarts at
+    // Step 3: neighborhood tier — when the subdivision can't fill the pool,
+    // prefer verified same-neighborhood comps (name OR code) at the strict
+    // radius before expanding geography. Rescue subdivision_match only when
+    // neighborhood_match verified-passed; any other hard failure still kills.
+    if (expansion.allowNeighborhoodExpansion && (subject.neighborhoodName || subject.neighborhoodCode)) {
+      for (const yearLimit of yearLadder) {
+        const resultNb = this.evaluate(subject, comparables, {
+          filters: filtersAt(yearLimit),
+          adjustments,
+        })
+        const picked = rescue(resultNb, new Set(['subdivision_match']), (c) =>
+          neighborhoodsMatch(subject, c) === true
+        )
+        if (picked && picked.selected.length >= REQUIRED_ARV_COMPS) {
+          console.log(`Appraisal: ${picked.selected.length} comps selected via neighborhood match${yearNote(yearLimit)}`)
+          return {
+            ...applyRescued(resultNb, picked),
+            fallbackUsed: 'neighborhood_expansion',
+            fallbackReason: `Insufficient comps in subdivision "${subject.subdivision || 'unknown'}". Expanded to neighborhood "${subject.neighborhoodName ?? subject.neighborhoodCode}" (verified name/code match)${yearNote(yearLimit)} — all other rules apply at the tier's thresholds.`,
+            expansionApplied: appliedFor(yearLimit, 'neighborhood'),
+          }
+        }
+      }
+    }
+
+    // Step 4: leave the subdivision — radius ×mult, year ladder restarts at
     // each scope. Rescue is subdivision_match-only: a comp failing any other
     // hard rule at this tier's thresholds stays disqualified.
     if (expansion.allowGeographicExpansion) {
@@ -517,9 +548,9 @@ class PropertyAppraisalService implements AppraisalService {
         }
       }
 
-      // Step 4: drop the radius gate — rescue comps whose only hard
+      // Step 5: drop the radius gate — rescue comps whose only hard
       // failures are subdivision and/or distance, year ladder restarts.
-      if (expansion.allowNeighborhoodExpansion) {
+      {
         let resultGeo = result1
         for (const yearLimit of yearLadder) {
           resultGeo = this.evaluate(subject, comparables, {
@@ -538,7 +569,7 @@ class PropertyAppraisalService implements AppraisalService {
           }
         }
 
-        // Step 5: No rule-qualified set exists. Final fallback — the most
+        // Step 6: No rule-qualified set exists. Final fallback — the most
         // recent sales that still satisfy every intrinsic hard rule (sale
         // age, sqft, property type, road barrier, year built at the widest
         // sanctioned tolerance ±maxYear); only location failures

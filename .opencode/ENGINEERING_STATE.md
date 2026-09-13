@@ -783,3 +783,47 @@ Verified: 145 vitest + 15/15 regression + tsc clean api + dashboard.
 - Confirmed: comp selection is 100% rules — LLM annotates
   reasoning/scores only (cannot touch isEnabled/compGroup).
 - Temp prod api_keys row `golden-eval-tmp` deleted after run.
+
+### WIP: condition evidence + neighborhood fallback (2026-09-13, feat/condition-and-neighborhood)
+
+Implemented per product spec (vision/permits for subject, provider-first
+condition for comps, subdivision→neighborhood fallback):
+
+- major-items.ts: ASSUME_REPLACE_WHEN_NO_PERMIT = {roof, hvac,
+  water_heater, electric_panel}. No permits → item assumed original
+  install at house age; charged when houseAge ≥ threshold; unknown
+  build year → assumed due. replumb/foundation/rewire and all other
+  items stay evidence-gated (never assumed).
+- derivation.ts: passes effectiveYearBuilt ?? yearBuilt into
+  assessMajorItems; unknown-count note only counts uncharged unknowns.
+- appraisal/index.ts: NEW tier 3 'neighborhood_expansion' between
+  in-subdivision year widening and geographic expansion — rescues
+  subdivision_match failures only when neighborhoodsMatch(subject, c)
+  is verified true; year ladder restarts; gated by
+  allowNeighborhoodExpansion (default true). Drop-radius tier now runs
+  under allowGeographicExpansion only.
+- evaluator.ts: exported neighborhoodsMatch(subject, comp) — name OR
+  code equality; null when no comparable pair exists. Used by both the
+  soft filter and the fallback tier (works even if user disabled the
+  neighborhood_match filter — it is geographic evidence).
+- property-api: neighborhoodCode propagated onto NormalizedComparable
+  via enrichment merge (subject already carried name+code).
+- evaluation/index.ts ARV gate (prior session, now verified): provider
+  Good/VeryGood/Excellent positive; Fair/Poor/VeryPoor negative; vision
+  renovated positive / dated+distressed negative; unverifiable comps
+  KEPT (rules are primary, condition = confidence boost); verified-
+  negative pruned only when ≥3 remain else arv_condition_thin.
+- report.ts: subject condition counts verified via vision
+  (renovationAssessment.status==='ok' or vision curb-appeal);
+  stale 'review recommended'/'verify value manually' strings replaced;
+  requiresHumanReview kept for API compat (documented as advisory).
+
+Verified: 154 vitest (incl. 4 new derivation tests for big-four
+no-permit behavior, 4 new rules tests for the neighborhood tier, 2 new
+evaluator code-match tests), 15/15 regression files, tsc clean on
+api + shared + dashboard.
+
+NOT yet done: production golden-eval re-run on this code (needs deploy
+or a fresh prod run after merge); Firecrawl is already the photo source
+for comp vision (photoBundle.comps via Zillow) — provider→photos→vision
+ordering confirmed in evaluation/index.ts.

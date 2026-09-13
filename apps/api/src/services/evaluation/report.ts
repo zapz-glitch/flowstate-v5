@@ -37,11 +37,13 @@ export interface BuildReportInput {
  *        style/condition, no expansion fallback, subject condition
  *        verified. Use the ARV normally.
  * MEDIUM — 3 selected comps but weaker dimensions (unverified data,
- *        soft mismatches, expansion tiers used, aging sales). Use the
- *        ARV but flag for human review.
+ *        soft mismatches, expansion tiers used, aging sales).
  * LOW — fewer than 3 selected comps, any selected comp carrying a hard
  *        failure (rescued by a fallback tier), nearest-comps/insufficient
- *        fallback, or stale sales. Do not pretend precision exists.
+ *        fallback, or stale sales.
+ *
+ * There is no human reviewer — the formula recommendation always stands;
+ * confidence is an advisory signal carried on the report.
  */
 function assessConfidence(input: BuildReportInput): {
   level: 'high' | 'medium' | 'low'
@@ -96,10 +98,16 @@ function assessConfidence(input: BuildReportInput): {
     .filter((d): d is number => d != null && Number.isFinite(d))
   const oldestSaleDays = selectedAgesDays.length ? Math.max(...selectedAgesDays) : null
 
-  // Subject condition verified via vision classification or assessor data
+  // Subject condition verified via keyword classification, vision reno
+  // assessment, or assessor building condition
+  const visionVerified =
+    input.renovationAssessment?.status === 'ok' ||
+    (input.renovationAssessment?.curbAppeal?.source === 'vision' &&
+      input.renovationAssessment.curbAppeal.condition !== 'unknown')
   const subjectConditionVerified =
     input.subjectClassification != null ||
-    input.bundle.property.buildingCondition != null
+    input.bundle.property.buildingCondition != null ||
+    visionVerified === true
 
   if (selected.length === 0) {
     reasons.push('No comps were selected for ARV')
@@ -147,12 +155,14 @@ function assessConfidence(input: BuildReportInput): {
     )
   } else if (level === 'medium') {
     reasons.unshift(
-      `${selected.length} comps selected with weaker dimensions — review recommended`
+      `${selected.length} comps selected with weaker dimensions — reduced confidence`
     )
   } else {
-    reasons.unshift('Thin or rule-breaching comp pool — verify value manually')
+    reasons.unshift('Thin or rule-breaching comp pool — treat the valuation as approximate')
   }
 
+  // requiresHumanReview kept for API compatibility — there is no review
+  // workflow; consumers should read `confidence`/`reasons` instead.
   return { level, reasons, requiresHumanReview: level !== 'high' }
 }
 
