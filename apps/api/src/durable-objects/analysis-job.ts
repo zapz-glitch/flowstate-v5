@@ -23,8 +23,8 @@ import { filtersToApiParams } from '../services/appraisal/types'
 import type { Env } from '../types'
 import type { NormalizedProperty, NormalizedComparable } from '../services/property-api/types'
 import { drizzle } from 'drizzle-orm/d1'
-import { eq, and } from 'drizzle-orm'
-import { savedReports, reportHistory, analysisRuns } from '../db/schema'
+import { upsertPropertyReport } from '../services/report-upsert'
+import { analysisRuns } from '../db/schema'
 import { evaluateRun } from '../services/observability/evals'
 
 interface JobState {
@@ -95,74 +95,6 @@ export interface StartStreamingRequest {
     marketSearchModel?: string
     reasoning?: boolean
   }
-}
-
-type DrizzleDb = ReturnType<typeof drizzle>
-
-/**
- * One report per property per user: a completed analysis for an address the
- * user already has a report for overwrites it in place (and records a
- * 'reanalyzed' history entry) rather than stacking a duplicate row.
- */
-async function upsertPropertyReport(
-  db: DrizzleDb,
-  fields: {
-    userId: string
-    jobId: string
-    propertyAddress: string
-    propertyCity: string
-    propertyState: string
-    propertyZip?: string
-    propertyClip?: string | null
-  },
-  reportData: {
-    fullResponseJson: string
-    arv: number | null
-    asIsValue: number | null
-    maxAllowableOffer: number | null
-    estimatedRepairs: number | null
-  },
-): Promise<void> {
-  const historyChanges = JSON.stringify({
-    arv: reportData.arv,
-    buyPrice: reportData.maxAllowableOffer,
-    rehabCost: reportData.estimatedRepairs,
-  })
-
-  const [existing] = await db
-    .select({ id: savedReports.id })
-    .from(savedReports)
-    .where(and(eq(savedReports.userId, fields.userId), eq(savedReports.propertyAddress, fields.propertyAddress)))
-    .limit(1)
-
-  if (existing) {
-    await db.update(savedReports)
-      .set({ ...reportData, jobId: fields.jobId })
-      .where(eq(savedReports.id, existing.id))
-    await db.insert(reportHistory).values({
-      reportId: existing.id,
-      userId: fields.userId,
-      action: 'reanalyzed',
-      description: 'Report overwritten by a new analysis',
-      changesJson: historyChanges,
-    })
-    console.log(`[AnalysisJobDO] Report overwritten for ${fields.propertyAddress} (job ${fields.jobId})`)
-    return
-  }
-
-  const [inserted] = await db.insert(savedReports).values({
-    ...fields,
-    propertyZip: fields.propertyZip ?? '',
-    ...reportData,
-  }).returning({ id: savedReports.id })
-  await db.insert(reportHistory).values({
-    reportId: inserted.id,
-    userId: fields.userId,
-    action: 'created',
-    description: 'Report created',
-    changesJson: historyChanges,
-  })
-  console.log(`[AnalysisJobDO] Report saved for job ${fields.jobId}`)
 }
 
 export class AnalysisJobDO {
@@ -507,6 +439,7 @@ export class AnalysisJobDO {
         propertyCity: property.city || '',
         propertyState: property.state || '',
         propertyZip: property.zipCode || '',
+        propertyClip: property.id || null,
       }, reportData)
       if (config.evalResultCacheKey) {
         await this.env.API_CACHE.put(config.evalResultCacheKey, config.jobId, {
@@ -688,6 +621,7 @@ export class AnalysisJobDO {
             propertyCity: (config.bundle.property.city) || '',
             propertyState: (config.bundle.property.state) || '',
             propertyZip: (config.bundle.property.zipCode) || '',
+            propertyClip: config.bundle.property.id || null,
           }, {
             fullResponseJson: JSON.stringify(updatedResponse),
             arv: (valuation?.arv as number) ?? null,
