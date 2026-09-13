@@ -404,8 +404,8 @@ describe('Default Values', () => {
     expect(DEFAULT_ADJUSTMENTS.map((a) => a.type)).toContain('basement_sqft')
   })
 
-  it('stories and roof material are soft priority (never disqualify)', () => {
-    expect(DEFAULT_FILTERS.find((f) => f.type === 'stories_match')?.priority).toBe('soft')
+  it('stories is hard priority (1-story vs 1-story, 2-story vs 2-story); roof material is soft', () => {
+    expect(DEFAULT_FILTERS.find((f) => f.type === 'stories_match')?.priority).toBe('hard')
     expect(DEFAULT_FILTERS.find((f) => f.type === 'roof_material_match')?.priority).toBe('soft')
   })
 })

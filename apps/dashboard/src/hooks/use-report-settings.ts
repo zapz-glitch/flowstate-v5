@@ -59,7 +59,7 @@ const DEFAULT_FILTERS: RecalcFilter[] = [
   { type: 'pool_match', enabled: true, value: 1, priority: 'soft' },
   { type: 'garage_match', enabled: true, value: 1, priority: 'soft' },
   { type: 'condition_match', enabled: true, value: 1, priority: 'soft' },
-  { type: 'stories_match', enabled: true, value: 1, priority: 'soft' },
+  { type: 'stories_match', enabled: true, value: 1 },
   { type: 'roof_material_match', enabled: true, value: 1, priority: 'soft' },
   { type: 'sale_age', enabled: true, value: 180 },
   { type: 'sqft_diff', enabled: true, value: 250 },

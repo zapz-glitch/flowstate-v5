@@ -5,7 +5,7 @@ import { cn } from '@/lib/utils'
 import type { CompItem, SubjectData } from './shared-types'
 import { StreetViewImage } from './StreetViewImage'
 import { RuleMatchDetails } from './RuleMatchDetails'
-import { normalizeSubdivision, sqftMatchColor, yearMatchColor, fmtDelta, formatShortDate } from './format-helpers'
+import { normalizeSubdivision, sqftMatchColor, yearMatchColor, lotMatchColor, fmtDelta, fmtLotDelta, formatShortDate } from './format-helpers'
 
 export interface CompGridCardProps {
   comp: CompItem
@@ -37,11 +37,15 @@ export function CompGridCard({
     ? comp.squareFeet - subject.squareFeet : null
   const yearDelta = comp.yearBuilt != null && subject?.yearBuilt != null
     ? comp.yearBuilt - subject.yearBuilt : null
+  const lotDelta = comp.lotSizeAcres != null && subject?.lotSizeAcres != null
+    ? comp.lotSizeAcres - subject.lotSizeAcres : null
 
   const sqftColor = sqftDelta != null && subject?.squareFeet
     ? sqftMatchColor(comp.squareFeet!, subject.squareFeet) : null
   const yearColor = yearDelta != null && subject?.yearBuilt != null
     ? yearMatchColor(comp.yearBuilt!, subject.yearBuilt) : null
+  const lotColor = lotDelta != null
+    ? lotMatchColor(comp.lotSizeAcres!, subject!.lotSizeAcres!) : null
 
   // Build external links
   const streetViewUrl = comp.latitude && comp.longitude
@@ -240,6 +244,13 @@ export function CompGridCard({
             </span>
           </div>
           <div className="flex items-center justify-between text-[11px]">
+            <span className="text-foreground-tertiary">Lot</span>
+            <span className="font-medium tabular-nums">
+              {comp.lotSizeAcres != null ? `${Number(comp.lotSizeAcres).toFixed(3)} ac` : '-'}
+              {lotDelta != null && <span className={cn('ml-1 text-[9px]', lotColor)}>({fmtLotDelta(comp.lotSizeAcres!, subject!.lotSizeAcres!)})</span>}
+            </span>
+          </div>
+          <div className="flex items-center justify-between text-[11px]">
             <span className="text-foreground-tertiary">Style</span>
             <span className="font-medium truncate ml-2">{comp.buildingStyle || '-'}</span>
           </div>
@@ -296,9 +307,11 @@ export function CompGridCard({
             <span className="font-medium">{comp.pool ? 'Yes' : '-'}</span>
           </div>
           <div className="flex items-center justify-between text-[11px]">
-            <span className="text-foreground-tertiary">Parking</span>
+            <span className="text-foreground-tertiary">Garage</span>
             <span className="font-medium truncate ml-2" title={[comp.garage, comp.carport].filter(Boolean).join(' + ') || undefined}>
-              {[comp.garage, comp.carport].filter(Boolean).join(' + ') || '-'}
+              {comp.garage
+                ? `${comp.garage}${comp.garageSquareFeet ? ` ${comp.garageSquareFeet} sf` : ''}${comp.carport ? ` + ${comp.carport}` : ''}`
+                : comp.carport ?? '-'}
             </span>
           </div>
         </div>

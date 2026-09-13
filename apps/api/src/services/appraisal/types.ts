@@ -57,7 +57,7 @@ export const DEFAULT_FILTERS: AppraisalFilter[] = [
   { type: 'pool_match', enabled: true, value: 1, priority: 'soft' },
   { type: 'garage_match', enabled: true, value: 1, priority: 'soft' },
   { type: 'condition_match', enabled: true, value: 1, priority: 'soft' }, // assessor condition — comp at/above subject tier scores higher
-  { type: 'stories_match', enabled: true, value: 1, priority: 'soft' },
+  { type: 'stories_match', enabled: true, value: 1, priority: 'hard' }, // 1-story vs 1-story, 2-story vs 2-story — verified mismatches disqualify
   { type: 'roof_material_match', enabled: true, value: 1, priority: 'soft' },
   // Size/recency/geography thresholds (relaxable in expansion tiers)
   { type: 'sale_age', enabled: true, value: 180 }, // 6 months max comp age

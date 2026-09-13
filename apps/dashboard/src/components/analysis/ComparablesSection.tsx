@@ -348,6 +348,7 @@ export function ComparablesSection({
                   isExpanded={expandedComps.has(key)}
                   onToggle={() => toggleExpand(key)}
                   subjectSubdivision={subjectSubdivision}
+                  subjectLotAcres={subject?.lotSizeAcres}
                   isSelectedForArv={isSelected}
                   onToggleArv={onToggleComp ? () => onToggleComp(key) : undefined}
                 />

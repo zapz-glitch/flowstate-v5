@@ -708,3 +708,30 @@ Verified: 143 vitest + 15/15 regression + tsc clean api + dashboard
 Known divergence to revisit: shared sqft_diff evaluator is %-based
 while API uses absolute sqft — recalc only re-evaluates when the user
 edits settings, so impact is limited to client-side scoring.
+
+### Comp-card lot/garage + stories hard rule (2026-09-13, same branch)
+
+- CompGridCard: new "Lot" row — comp acres + sqft delta vs subject,
+  color-coded via lotMatchColor (±2.5k sf green / ±5k grey / red).
+  "Parking" row renamed "Garage" — shows garage + garageSquareFeet,
+  carport appended only when present; carport alone shows as value.
+- CompCard (list view): Lot stat now shows `0.230 ac (+2,310 sf)` delta
+  via new subjectLotAcres prop (passed from ComparablesSection).
+- SubjectGridCard: Parking → Garage with same garage-sqft rendering.
+- format-helpers: +lotMatchColor, +fmtLotDelta.
+- DEFAULT_FILTERS stories_match: soft → HARD (product rule: 1-story
+  only comps 1-story, 2-story only comps 2-story; verified numeric
+  mismatch disqualifies, missing data still not_verified). Not rescuable
+  in expansion tiers (rescue allowlist = subdivision/distance only).
+- River Park Villas example (comp 15yr off subject): at default
+  year_built_diff=10 it exceeds the ±14 ladder max — rejected at every
+  tier, and the nearest_comps last resort rejects it too. Knob already
+  exists: user can set year_built_diff threshold to 15 in Evaluation
+  Settings → ladder becomes ±15/±17/±19 and it passes at strict tier.
+  NOT run locally — CoreLogic keys dead in local env; no saved report.
+- evaluator.test.ts updated (stories now hard, roof stays soft).
+
+Verified: 85 appraisal vitest + tsc clean api + dashboard.
+Pending: story-count data quality — a 1.5-story comp fails strict
+equality vs 1 or 2; watch for false rejections if provider stories
+values are noisy.

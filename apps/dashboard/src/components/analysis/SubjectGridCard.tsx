@@ -128,9 +128,11 @@ export function SubjectGridCard({ subject, isLoading }: SubjectGridCardProps) {
                 <span className="font-medium">{subject.pool ? 'Yes' : '-'}</span>
               </div>
               <div className="flex items-center justify-between text-[11px]">
-                <span className="text-foreground-tertiary">Parking</span>
+                <span className="text-foreground-tertiary">Garage</span>
                 <span className="font-medium truncate ml-2" title={[subject.garage, subject.carport].filter(Boolean).join(' + ') || undefined}>
-                  {[subject.garage, subject.carport].filter(Boolean).join(' + ') || '-'}
+                  {subject.garage
+                    ? `${subject.garage}${subject.garageSquareFeet ? ` ${subject.garageSquareFeet} sf` : ''}${subject.carport ? ` + ${subject.carport}` : ''}`
+                    : subject.carport ?? '-'}
                 </span>
               </div>
               {(subject.constructionType || subject.exteriorWalls) && (

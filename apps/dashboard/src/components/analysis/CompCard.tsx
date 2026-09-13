@@ -9,7 +9,7 @@ import { StatCell } from './StatCell'
 import { ClassificationBadge } from './ClassificationBadge'
 import { PhotoGallery } from './PhotoGallery'
 import { AddressDisplay } from './AddressDisplay'
-import { formatFilterType, formatAdjustmentType, formatCurrency, normalizeSubdivision, getCompKey } from './format-helpers'
+import { formatFilterType, formatAdjustmentType, formatCurrency, normalizeSubdivision, getCompKey, fmtLotDelta } from './format-helpers'
 import { StreetViewImage } from './StreetViewImage'
 import { RuleMatchDetails } from './RuleMatchDetails'
 
@@ -17,6 +17,8 @@ export interface CompCardProps {
   comp: CompItem
   index: number
   subjectSubdivision?: string | null
+  /** Subject lot size in acres — enables the lot delta display */
+  subjectLotAcres?: number | null
   isExpanded?: boolean
   onToggle?: () => void
   isSelectedForArv?: boolean
@@ -27,6 +29,7 @@ export function CompCard({
   comp,
   index,
   subjectSubdivision,
+  subjectLotAcres,
   isExpanded: controlledExpanded,
   onToggle: controlledOnToggle,
   isSelectedForArv,
@@ -135,7 +138,14 @@ export function CompCard({
         <StatCell label="Baths" value={comp.bathrooms ?? '-'} />
         <StatCell label="Sq Ft" value={comp.squareFeet?.toLocaleString() || '-'} />
         <StatCell label="Year" value={comp.yearBuilt || '-'} />
-        <StatCell label="Lot" value={comp.lotSizeAcres ? `${Number(comp.lotSizeAcres).toFixed(3)} ac` : '-'} />
+        <StatCell
+          label="Lot"
+          value={
+            comp.lotSizeAcres != null
+              ? `${Number(comp.lotSizeAcres).toFixed(3)} ac${comp.lotSizeAcres != null && subjectLotAcres != null ? ` (${fmtLotDelta(comp.lotSizeAcres, subjectLotAcres)})` : ''}`
+              : '-'
+          }
+        />
         <StatCell label="Foundation" value={comp.foundationType || '-'} />
         <StatCell label="House Style" value={comp.buildingStyle || '-'} />
       </div>
