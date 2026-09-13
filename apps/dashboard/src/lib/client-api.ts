@@ -794,22 +794,6 @@ export async function getReportsByProperty(opts: { clip?: string; address?: stri
   return fetchApi(`/user/reports/by-property?${params.toString()}`)
 }
 
-export interface ReportMapPoint {
-  jobId: string | null
-  propertyAddress: string
-  propertyCity: string
-  propertyState: string
-  arv: number | null
-  maxAllowableOffer: number | null
-  createdAt: string
-  latitude: number
-  longitude: number
-}
-
-export async function getReportMapPoints(): Promise<{ points: ReportMapPoint[] }> {
-  return fetchApi('/user/reports/map-points')
-}
-
 export interface ReportHistoryEntry {
   id: string
   action: string

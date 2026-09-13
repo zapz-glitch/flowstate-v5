@@ -38,7 +38,7 @@ const nextConfig = {
           // Property photos, map tiles, streetview, data/blob images
           "img-src 'self' data: blob: https:",
           "font-src 'self' data:",
-          `connect-src 'self' ${apiUrl} https://maps.googleapis.com https://server.arcgisonline.com https://*.arcgisonline.com data: blob:`,
+          `connect-src 'self' ${apiUrl} https://maps.googleapis.com data: blob:`,
           // MapLibre renders in workers from blob: URLs
           "worker-src 'self' blob:",
           "frame-ancestors 'none'",
