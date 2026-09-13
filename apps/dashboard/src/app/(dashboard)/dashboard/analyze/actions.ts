@@ -102,6 +102,17 @@ export interface AnalyzeData {
   }
   /** API call statistics from the analysis workflow */
   apiCallStats?: ApiCallStats | null
+  /** Justified evaluation report (subset used by comp feedback) */
+  report?: {
+    arv?: {
+      compPool?: {
+        total: number
+        enabled: number
+        fallbackUsed: string
+        fallbackReason?: string
+      }
+    }
+  }
   /** Settings used during this analysis (for client-side recalculation initialization) */
   appliedSettings?: {
     filters: Array<{ type: string; enabled: boolean; value: number; priority?: 'hard' | 'soft' }>
@@ -408,6 +419,8 @@ export interface CompItem {
     filters: Array<{
       type: string
       passed: boolean
+      /** 'passed' | 'failed' | 'not_verified' — distinguishes a real failure from missing data */
+      status?: 'passed' | 'failed' | 'not_verified'
       reason?: string
       actualValue?: number | string | null
       threshold?: number | string | null

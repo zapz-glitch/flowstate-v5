@@ -487,6 +487,13 @@ export default function AnalyzePage() {
     subject: renderData?.subject,
     displayValuation: isReady ? displayValuation : undefined,
     effectiveComps: isReady ? effectiveComps : undefined,
+    feedback: isReady ? {
+      appliedFilters: analysisResult?.appliedSettings?.filters ?? null,
+      fallbackUsed: analysisResult?.report?.arv?.compPool?.fallbackUsed ?? null,
+      fallbackReason: analysisResult?.report?.arv?.compPool?.fallbackReason ?? null,
+      jobId: analysisResult?.meta?.analysisId ?? null,
+      subjectAddress: analysisResult?.subject?.address ?? null,
+    } : null,
     aiAnalyzing,
     isStreaming: streamingStep !== 'idle' && streamingStep !== 'done',
     marketContext,

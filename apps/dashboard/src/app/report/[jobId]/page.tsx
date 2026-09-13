@@ -138,6 +138,13 @@ export default function ReportPage({ params }: { params: Promise<{ jobId: string
     subject: analyzeData?.subject,
     displayValuation,
     effectiveComps,
+    feedback: {
+      appliedFilters: analyzeData?.appliedSettings?.filters ?? null,
+      fallbackUsed: analyzeData?.report?.arv?.compPool?.fallbackUsed ?? null,
+      fallbackReason: analyzeData?.report?.arv?.compPool?.fallbackReason ?? null,
+      jobId: resolvedJobId,
+      subjectAddress: report?.address ?? analyzeData?.subject?.address ?? null,
+    },
     onOpenSettings: () => setSettingsOpen(true),
     onCompClick: (comp) => { setComparisonComp(comp as CompItem); setComparisonOpen(true) },
   })

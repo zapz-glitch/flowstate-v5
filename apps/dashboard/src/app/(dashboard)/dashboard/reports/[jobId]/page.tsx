@@ -428,6 +428,13 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
     subject: analyzeData?.subject,
     displayValuation,
     effectiveComps,
+    feedback: {
+      appliedFilters: analyzeData?.appliedSettings?.filters ?? null,
+      fallbackUsed: analyzeData?.report?.arv?.compPool?.fallbackUsed ?? null,
+      fallbackReason: analyzeData?.report?.arv?.compPool?.fallbackReason ?? null,
+      jobId,
+      subjectAddress: report?.address ?? analyzeData?.subject?.address ?? null,
+    },
     aiAnalyzing,
     marketContext,
     aiReport,

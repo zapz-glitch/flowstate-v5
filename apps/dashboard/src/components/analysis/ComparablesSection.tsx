@@ -1,14 +1,22 @@
 'use client'
 
 import { useState, useEffect, useMemo } from 'react'
-import { SlidersHorizontal, RotateCcw, Loader2, LayoutGrid, List, ArrowUpDown } from 'lucide-react'
+import { SlidersHorizontal, RotateCcw, Loader2, LayoutGrid, List, ArrowUpDown, Bell, Copy, Check } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
 import type { CompsData, CompItem, SubjectData } from './shared-types'
 import { getCompKey, normalizeSubdivision } from './format-helpers'
 import { CompCard } from './CompCard'
 import { CompGridCard } from './CompGridCard'
 import { RuleMatchDetails } from './RuleMatchDetails'
+import { generateCompFeedbackReport, type FeedbackContext } from '@/lib/comp-feedback'
 
 export interface ComparablesSectionProps {
   comps: CompsData
@@ -37,6 +45,8 @@ export interface ComparablesSectionProps {
   onCompClick?: (comp: CompItem) => void
   /** Called when a comp card is hovered (for map marker sync) */
   onCompHover?: (key: string | null) => void
+  /** Rules/fallback context for the "Notify" comp-selection feedback report */
+  feedbackContext?: FeedbackContext | null
 }
 
 type SortOption = 'default' | 'subdivision' | 'distance' | 'price' | 'psf'
@@ -64,12 +74,17 @@ export function ComparablesSection({
   onUndoAiSelection,
   onCompClick,
   onCompHover,
+  feedbackContext,
 }: ComparablesSectionProps) {
   const [expandedComps, setExpandedComps] = useState<Set<string>>(new Set())
   const [excludedOpen, setExcludedOpen] = useState(false)
   const [layout, setLayout] = useState<'grid' | 'list'>('grid')
   const [sortBy, setSortBy] = useState<SortOption>('default')
   const [sortDesc, setSortDesc] = useState(true)
+  const [notifyOpen, setNotifyOpen] = useState(false)
+  const [notifyNotes, setNotifyNotes] = useState('')
+  const [notifyReport, setNotifyReport] = useState<string | null>(null)
+  const [notifyCopied, setNotifyCopied] = useState(false)
 
   // Auto-expand excluded section when a highlighted comp is in it
   useEffect(() => {
@@ -149,6 +164,22 @@ export function ComparablesSection({
   const showAllFlat = arvComps.length === 0 && excludedComps.length > 0
 
   const selectedCount = arvComps.length
+
+  // Notify — build the paste-ready devin.ai ticket from the manual diff
+  const submitNotify = () => {
+    const report = generateCompFeedbackReport({
+      subject,
+      comps: compItems,
+      userSelectedKeys: selectedCompKeys ?? new Set(),
+      context: feedbackContext ?? {},
+      userNotes: notifyNotes,
+    })
+    setNotifyReport(report)
+    navigator.clipboard
+      .writeText(report)
+      .then(() => setNotifyCopied(true))
+      .catch(() => setNotifyCopied(false))
+  }
 
   // Stats from selected comps
   const selectedPrices = arvComps
@@ -236,16 +267,27 @@ export function ComparablesSection({
                 Manual · {selectedCount} comp{selectedCount !== 1 ? 's' : ''} · ARV: <span className="font-semibold tabular-nums">~${recalculatedArv?.toLocaleString() ?? '—'}</span>
               </span>
             </div>
-            {onReset && (
+            <div className="flex items-center gap-3">
               <button
                 type="button"
-                onClick={onReset}
+                onClick={() => { setNotifyReport(null); setNotifyNotes(''); setNotifyCopied(false); setNotifyOpen(true) }}
                 className="flex items-center gap-1 text-caption text-amber-600 hover:text-amber-700 font-medium transition-colors"
+                title="Generate a comp-selection feedback report for devin.ai"
               >
-                <RotateCcw className="w-3 h-3" />
-                Reset
+                <Bell className="w-3 h-3" />
+                Notify
               </button>
-            )}
+              {onReset && (
+                <button
+                  type="button"
+                  onClick={onReset}
+                  className="flex items-center gap-1 text-caption text-amber-600 hover:text-amber-700 font-medium transition-colors"
+                >
+                  <RotateCcw className="w-3 h-3" />
+                  Reset
+                </button>
+              )}
+            </div>
           </div>
         )}
       </div>
@@ -357,6 +399,73 @@ export function ComparablesSection({
           </div>
         )}
       </div>
+
+      {/* Notify dialog — notes → generates a paste-ready devin.ai ticket */}
+      <Dialog open={notifyOpen} onOpenChange={setNotifyOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Notify — comp selection feedback</DialogTitle>
+            <DialogDescription>
+              Generates a report explaining why your comp changes differ from the engine&apos;s
+              selection and what needs to change. Paste it into devin.ai.
+            </DialogDescription>
+          </DialogHeader>
+
+          {notifyReport === null ? (
+            <div className="space-y-3">
+              <textarea
+                autoFocus
+                value={notifyNotes}
+                onChange={(e) => setNotifyNotes(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault()
+                    submitNotify()
+                  }
+                }}
+                placeholder="Optional notes for this ticket — e.g. '10321 Briarcliff is the right comp, same street renovated sale'&#10;&#10;Press Enter to send, Shift+Enter for a new line."
+                rows={4}
+                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-body-sm text-foreground placeholder:text-foreground-tertiary focus:outline-none focus:ring-1 focus:ring-primary resize-y"
+              />
+              <div className="flex justify-end gap-2">
+                <Button variant="outline" size="sm" onClick={() => setNotifyOpen(false)}>
+                  Cancel
+                </Button>
+                <Button size="sm" onClick={submitNotify}>
+                  <Bell className="w-3.5 h-3.5 mr-1.5" />
+                  Send
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <p className="text-caption text-foreground-tertiary">
+                  {notifyCopied ? 'Copied to clipboard — paste into devin.ai' : 'Generated — copy below'}
+                </p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    navigator.clipboard.writeText(notifyReport).then(() => setNotifyCopied(true)).catch(() => {})
+                  }}
+                >
+                  {notifyCopied ? <Check className="w-3.5 h-3.5 mr-1.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5 mr-1.5" />}
+                  {notifyCopied ? 'Copied' : 'Copy'}
+                </Button>
+              </div>
+              <pre className="max-h-[50vh] overflow-auto rounded-lg border border-border bg-secondary/40 p-3 text-[11px] leading-relaxed text-foreground whitespace-pre-wrap font-mono">
+                {notifyReport}
+              </pre>
+              <div className="flex justify-end">
+                <Button variant="outline" size="sm" onClick={() => setNotifyOpen(false)}>
+                  Done
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
     </div>
   )

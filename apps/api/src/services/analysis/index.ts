@@ -1069,6 +1069,7 @@ export function buildAnalysisResponse(
           filters: evaluation.filterResults.map((f) => ({
             type: f.type,
             passed: f.passed,
+            status: f.status,
             reason: f.reason,
             actualValue: f.actualValue ?? null,
             threshold: f.threshold ?? null,

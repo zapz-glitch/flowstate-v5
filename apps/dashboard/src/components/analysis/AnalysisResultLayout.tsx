@@ -33,6 +33,7 @@ export function AnalysisResultLayout({
     displayComps: comps,
     isRecalculated,
     compOverride,
+    feedbackContext,
     isStreaming,
     onToggleComp,
     onResetComps,
@@ -99,6 +100,7 @@ export function AnalysisResultLayout({
           highlightedCompKey={null}
           onCompClick={onCompClick}
           onCompHover={onCompHover}
+          feedbackContext={feedbackContext}
         />
       ) : subject && isStreaming ? (
         /* Comps loading skeleton — only while streaming */

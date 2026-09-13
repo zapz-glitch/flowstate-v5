@@ -47,6 +47,15 @@ export interface EvaluationState {
   // Comp selection
   compOverride: CompOverrideState | null
 
+  // Comp-selection feedback ("Notify") context — rules/fallback as applied
+  feedbackContext: {
+    appliedFilters?: Array<{ type: string; enabled: boolean; value: number; priority?: 'hard' | 'soft' }> | null
+    fallbackUsed?: string | null
+    fallbackReason?: string | null
+    jobId?: string | null
+    subjectAddress?: string | null
+  } | null
+
   // Market research (from web search, arrives independently)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   marketContext: Record<string, any> | null
@@ -77,6 +86,7 @@ export const evaluationStateAtom = atom<EvaluationState>({
   isRecalculated: false,
   recalcData: null,
   compOverride: null,
+  feedbackContext: null,
   marketContext: null,
   aiReport: null,
   aiAnalyzing: false,
