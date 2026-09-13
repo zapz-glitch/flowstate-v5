@@ -183,6 +183,27 @@ export function CompGridCard({
               </span>
             )
           })()}
+          {comp.neighborhoodName && (() => {
+            const norm = (s?: string | null) => s?.trim().toLowerCase() ?? null
+            const hasSubject = !!subject?.neighborhoodName
+            const isMatch = hasSubject && norm(comp.neighborhoodName) === norm(subject?.neighborhoodName)
+            return (
+              <span className={cn(
+                'inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[9px] font-medium',
+                hasSubject
+                  ? isMatch
+                    ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20'
+                    : 'bg-red-500/10 text-red-400 border border-red-500/20'
+                  : 'bg-muted text-foreground-tertiary'
+              )} title={`Neighborhood: ${comp.neighborhoodName}`}>
+                {hasSubject && (isMatch
+                  ? <Check className="w-2.5 h-2.5 flex-shrink-0" />
+                  : <X className="w-2.5 h-2.5 flex-shrink-0" />
+                )}
+                <span>{comp.neighborhoodName}</span>
+              </span>
+            )
+          })()}
           {comp.adjustedPrice != null && comp.adjustedPrice !== comp.salePrice && (
             <span className="text-[10px] font-medium text-emerald-500 tabular-nums ml-auto">Adj ${comp.adjustedPrice.toLocaleString()}</span>
           )}
@@ -267,12 +288,10 @@ export function CompGridCard({
             <span className="font-medium">{comp.pool ? 'Yes' : '-'}</span>
           </div>
           <div className="flex items-center justify-between text-[11px]">
-            <span className="text-foreground-tertiary">Garage</span>
-            <span className="font-medium">{comp.garage ? 'Yes' : '-'}</span>
-          </div>
-          <div className="flex items-center justify-between text-[11px]">
-            <span className="text-foreground-tertiary">Carport</span>
-            <span className="font-medium">{comp.carport ? 'Yes' : '-'}</span>
+            <span className="text-foreground-tertiary">Parking</span>
+            <span className="font-medium truncate ml-2" title={[comp.garage, comp.carport].filter(Boolean).join(' + ') || undefined}>
+              {[comp.garage, comp.carport].filter(Boolean).join(' + ') || '-'}
+            </span>
           </div>
         </div>
       </div>

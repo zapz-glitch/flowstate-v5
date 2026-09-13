@@ -83,8 +83,11 @@ export function mergeZillowDataIntoProperty<T extends NormalizedProperty | Norma
 
   if (!zillowData) return { property, supplementedFields }
 
-  // Create a copy to avoid mutating the original
+  // Create a copy to avoid mutating the original — deep-copy the nested
+  // objects we may write into so fills don't alias the source bundle.
   const merged = { ...property }
+  if (merged.construction) merged.construction = { ...merged.construction }
+  if (merged.features) merged.features = { ...merged.features }
 
   // Merge bedrooms if missing
   if (merged.bedrooms == null && zillowData.bedrooms != null) {
@@ -122,6 +125,73 @@ export function mergeZillowDataIntoProperty<T extends NormalizedProperty | Norma
     merged.construction.foundationType = zillowData.foundationType
     supplementedFields.push({ field: 'foundationType', value: zillowData.foundationType, source: 'zillow' })
     console.log(`[ZillowMerge] Supplemented foundationType from Zillow: ${zillowData.foundationType}`)
+  }
+
+  // Merge building style if missing
+  if (merged.construction?.buildingStyle == null && zillowData.style != null) {
+    if (!merged.construction) merged.construction = {}
+    merged.construction.buildingStyle = zillowData.style
+    supplementedFields.push({ field: 'buildingStyle', value: zillowData.style, source: 'zillow' })
+    console.log(`[ZillowMerge] Supplemented buildingStyle from Zillow: ${zillowData.style}`)
+  }
+
+  // Merge stories if missing
+  if (merged.stories == null && zillowData.stories != null) {
+    merged.stories = zillowData.stories
+    supplementedFields.push({ field: 'stories', value: zillowData.stories, source: 'zillow' })
+  }
+  if (merged.construction?.storiesType == null && zillowData.stories != null) {
+    if (!merged.construction) merged.construction = {}
+    merged.construction.storiesType = `${zillowData.stories} Story`
+    supplementedFields.push({ field: 'storiesType', value: merged.construction.storiesType, source: 'zillow' })
+  }
+
+  // Merge roof material if missing
+  if (merged.construction?.roofCover == null && merged.construction?.roofType == null && zillowData.roof != null) {
+    if (!merged.construction) merged.construction = {}
+    merged.construction.roofCover = zillowData.roof
+    supplementedFields.push({ field: 'roofCover', value: zillowData.roof, source: 'zillow' })
+    console.log(`[ZillowMerge] Supplemented roofCover from Zillow: ${zillowData.roof}`)
+  }
+
+  // Merge construction material if missing
+  if (merged.construction?.type == null && merged.construction?.exteriorWalls == null && zillowData.construction != null) {
+    if (!merged.construction) merged.construction = {}
+    merged.construction.type = zillowData.construction
+    supplementedFields.push({ field: 'constructionType', value: zillowData.construction, source: 'zillow' })
+    console.log(`[ZillowMerge] Supplemented constructionType from Zillow: ${zillowData.construction}`)
+  }
+
+  // Merge heating/cooling if missing
+  if (merged.features?.heating == null && zillowData.heating != null) {
+    if (!merged.features) merged.features = {}
+    merged.features.heating = zillowData.heating
+    supplementedFields.push({ field: 'heating', value: zillowData.heating, source: 'zillow' })
+  }
+  if (merged.features?.cooling == null && zillowData.cooling != null) {
+    if (!merged.features) merged.features = {}
+    merged.features.cooling = zillowData.cooling
+    supplementedFields.push({ field: 'cooling', value: zillowData.cooling, source: 'zillow' })
+  }
+
+  // Merge covered parking if missing — Zillow "parking" is free text like
+  // "2 spaces, Attached Garage" or "Carport"; route to the right slot.
+  if (merged.features?.garageType == null && merged.features?.carportType == null && zillowData.parking != null) {
+    if (!merged.features) merged.features = {}
+    if (/carport/i.test(zillowData.parking)) {
+      merged.features.carportType = zillowData.parking
+      supplementedFields.push({ field: 'carportType', value: zillowData.parking, source: 'zillow' })
+    } else {
+      merged.features.garageType = zillowData.parking
+      supplementedFields.push({ field: 'garageType', value: zillowData.parking, source: 'zillow' })
+    }
+  }
+
+  // Merge pool if missing (Zillow exposes presence only — true fills, false/absent stays unverified)
+  if (merged.features?.poolType == null && zillowData.pool === true) {
+    if (!merged.features) merged.features = {}
+    merged.features.poolType = 'Pool'
+    supplementedFields.push({ field: 'poolType', value: 'Pool', source: 'zillow' })
   }
 
   // Merge hoaFee if missing (subject properties only — NormalizedProperty has hoaFee, NormalizedComparable does not)

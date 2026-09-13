@@ -30,6 +30,7 @@ import type { RehabTable, TierRangeDefinition } from '@flowstate-api/shared/valu
 import {
   buildAnalysisResponse,
   calculateAllRehabLevelEstimates,
+  mergeZillowDataIntoBundle,
   type AnalysisResponse,
   type ApiCallStats,
   type ResponseContext,
@@ -338,7 +339,8 @@ export async function performAnalysis(
   env: Env,
   onProgress?: (message: string) => void
 ): Promise<EvaluationResult> {
-  const { bundle, jobId } = params
+  const { jobId } = params
+  let { bundle } = params
   const appraisalService = createAppraisalService()
   const rules = params.appraisalRules ?? {}
   const filters = [...(rules.filters ?? DEFAULT_FILTERS)]
@@ -372,7 +374,7 @@ export async function performAnalysis(
   }
 
   // ── 1. Appraisal: filter comps, apply adjustments, select ARV comps ────────
-  const appraisalResult = appraisalService.evaluateWithFallback(
+  let appraisalResult = appraisalService.evaluateWithFallback(
     bundle.property,
     bundle.comparables,
     { filters, adjustments, expansion: DEFAULT_EXPANSION_POLICY }
@@ -381,23 +383,6 @@ export async function performAnalysis(
   if (appraisalResult.fallbackUsed && appraisalResult.fallbackUsed !== 'none') {
     fallbacksUsed.push(`comp_fallback:${appraisalResult.fallbackUsed}`)
   }
-
-  const enabledComps = appraisalResult.comparables.filter((c) => c.isEnabled)
-  if (appraisalResult.insufficientComps || enabledComps.length === 0) {
-    step('appraisal_rules', 'failed', appraisalResult.fallbackReason ?? 'insufficient comps')
-    throw new AnalysisError(
-      appraisalResult.fallbackReason ??
-        `Only ${enabledComps.length} comps satisfy appraisal rules (required: 3). Try adjusting your appraisal filters.`,
-      { code: 'INSUFFICIENT_COMPS' }
-    )
-  }
-  step(
-    'appraisal_rules',
-    appraisalResult.fallbackUsed === 'none' ? 'completed' : 'fallback',
-    `${enabledComps.length}/${bundle.comparables.length} comps passed` +
-      (appraisalResult.fallbackUsed !== 'none' ? ` (${appraisalResult.fallbackUsed})` : '')
-  )
-  let finalArv = appraisalResult.arv
 
   // ── 2. Photos: subject + comps via Zillow → Redfin → Realtor chain ─────────
   let photoBundle: PhotoBundle | null = null
@@ -443,6 +428,48 @@ export async function performAnalysis(
     step('photo_fetch', 'fallback', error instanceof Error ? error.message : 'photo fetch failed')
   }
   onProgress?.('Photos fetched')
+
+  // ── 2b. Zillow fallback fills: provider building data takes priority, ──────
+  // but when a field is missing we fill it from the Zillow listing we already
+  // fetched for photos (style, foundation, construction, roof, stories,
+  // heating/cooling, parking, pool). Re-run the appraisal when fills landed —
+  // a comp that was not_verified may now verify (or disqualify) for real.
+  if (photoBundle) {
+    const mergeResult = mergeZillowDataIntoBundle(bundle, photoBundle)
+    const filledCount =
+      mergeResult.subjectSupplementedFields.length +
+      [...mergeResult.compSupplementedFields.values()].reduce((n, f) => n + f.length, 0)
+    if (filledCount > 0) {
+      bundle = mergeResult.bundle
+      appraisalResult = appraisalService.evaluateWithFallback(
+        bundle.property,
+        bundle.comparables,
+        { filters, adjustments, expansion: DEFAULT_EXPANSION_POLICY }
+      )
+      if (appraisalResult.fallbackUsed && appraisalResult.fallbackUsed !== 'none'
+          && !fallbacksUsed.includes(`comp_fallback:${appraisalResult.fallbackUsed}`)) {
+        fallbacksUsed.push(`comp_fallback:${appraisalResult.fallbackUsed}`)
+      }
+      step('zillow_supplement', 'completed', `${filledCount} field(s) supplemented from Zillow listings`)
+    }
+  }
+
+  const enabledComps = appraisalResult.comparables.filter((c) => c.isEnabled)
+  if (appraisalResult.insufficientComps || enabledComps.length === 0) {
+    step('appraisal_rules', 'failed', appraisalResult.fallbackReason ?? 'insufficient comps')
+    throw new AnalysisError(
+      appraisalResult.fallbackReason ??
+        `Only ${enabledComps.length} comps satisfy appraisal rules (required: 3). Try adjusting your appraisal filters.`,
+      { code: 'INSUFFICIENT_COMPS' }
+    )
+  }
+  step(
+    'appraisal_rules',
+    appraisalResult.fallbackUsed === 'none' ? 'completed' : 'fallback',
+    `${enabledComps.length}/${bundle.comparables.length} comps passed` +
+      (appraisalResult.fallbackUsed !== 'none' ? ` (${appraisalResult.fallbackUsed})` : '')
+  )
+  let finalArv = appraisalResult.arv
 
   // ── 3. Vision: subject renovation+curb-appeal AND comp checks in parallel ──
   // One merged LLM call for the subject (renovation level + curb appeal).

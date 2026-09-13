@@ -58,10 +58,10 @@ export function DealSummaryHero({ valuation, avm, isRecalculated, onOpenSettings
           <div className={cn('text-base font-bold tabular-nums mt-0.5', (valuation.projectedProfit ?? 0) > 0 ? 'text-emerald-500' : 'text-red-500')}>${fmt(valuation.projectedProfit)}</div>
           {valuation.projectedROI != null && <div className="text-[10px] text-foreground-tertiary tabular-nums mt-0.5">{fmt(valuation.projectedROI)}% ROI</div>}
         </div>
-        {avm?.value != null && (
-          <div className="px-3 py-2.5" title={`${avm.model ?? 'AVM'} — reference only, excluded from valuation math`}>
+        {avm !== undefined && (
+          <div className="px-3 py-2.5" title={`${avm?.model ?? 'Provider AVM'} — reference only, excluded from valuation math${avm?.value == null ? ' (not returned for this property)' : ''}`}>
             <div className="text-[11px] text-foreground-tertiary uppercase tracking-wider">AVM</div>
-            <div className="text-base font-bold tabular-nums mt-0.5">${fmt(avm.value)}</div>
+            <div className="text-base font-bold tabular-nums mt-0.5">{avm?.value != null ? `$${fmt(avm.value)}` : '—'}</div>
             {avmDelta != null && (
               <div className={cn(
                 'text-[10px] tabular-nums mt-0.5',
