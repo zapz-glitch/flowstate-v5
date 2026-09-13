@@ -732,6 +732,23 @@ edits settings, so impact is limited to client-side scoring.
 - evaluator.test.ts updated (stories now hard, roof stays soft).
 
 Verified: 85 appraisal vitest + tsc clean api + dashboard.
-Pending: story-count data quality — a 1.5-story comp fails strict
-equality vs 1 or 2; watch for false rejections if provider stories
-values are noisy.
+
+### No-human-review + half-story tolerance (2026-09-13, same branch)
+
+Product clarification: there is NO analyst/human-review step — the
+system must always return its best decision. Changes:
+- stories_match now tolerates ±0.5 (1.5-story comps compatible with
+  1 and 2) in API evaluator + shared/filters.ts. Full-story mismatch
+  (1 vs 2) still fails and disqualifies when required.
+- manual-review override REMOVED: report.outcome.recommendation and
+  response.valuation.recommendation always carry the formula call.
+  confidence + confidenceReasons + requiresHumanReview flag remain as
+  the reliability signal; low/medium append a caveat to
+  recommendationReason. 'manual-review' kept in the recommendation
+  union types for stored-report compatibility.
+- DealSummaryHero badge text updated (no "verify manually").
+- report.test.ts updated: LOW keeps formula rec + 'LOW confidence'
+  reason; MEDIUM asserts 'medium confidence' caveat; +2 stories
+  tolerance/disqualify tests.
+
+Verified: 145 vitest + 15/15 regression + tsc clean api + dashboard.

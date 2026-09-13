@@ -498,6 +498,18 @@ describe('Match filters', () => {
     expect(r.filterResults[0].status).toBe('failed')
   })
 
+  it('stories_match tolerates a half-story difference (1.5-story comp)', () => {
+    const r = evaluateComparable(matchSubject(), matchComp({ stories: 1.5 }), only('stories_match', 'hard'), [])
+    expect(r.shouldDisable).toBe(false)
+    expect(r.filterResults[0].passed).toBe(true)
+  })
+
+  it('stories_match hard-disqualifies a full-story mismatch (1 vs 2)', () => {
+    const r = evaluateComparable(matchSubject(), matchComp({ stories: 2 }), only('stories_match', 'hard'), [])
+    expect(r.shouldDisable).toBe(true)
+    expect(r.filterResults[0].status).toBe('failed')
+  })
+
   it('roof_material_match records mismatch but does not disqualify (soft)', () => {
     const r = evaluateComparable(
       matchSubject(),

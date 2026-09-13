@@ -249,10 +249,11 @@ describe('buildEvaluationReport', () => {
 
   it('reports outcome and confidence', () => {
     expect(report.outcome.maxBuyPrice).toBe(valuation.buyPrice)
-    // Fixture has only 1 selected comp → LOW gate withholds the call
+    // Fixture has only 1 selected comp → LOW confidence; the formula call
+    // still stands (no human reviewer exists), reasons carry the caveat
     expect(report.confidence).toBe('low')
-    expect(report.outcome.recommendation).toBe('manual-review')
-    expect(report.outcome.recommendationReason).toContain(valuation.recommendation)
+    expect(report.outcome.recommendation).toBe(valuation.recommendation)
+    expect(report.outcome.recommendationReason).toContain('LOW confidence')
     expect(report.requiresHumanReview).toBe(true)
     expect(report.confidenceReasons.length).toBeGreaterThan(0)
   })
@@ -311,9 +312,9 @@ describe('buildEvaluationReport', () => {
     })
     expect(medium.confidence).toBe('medium')
     expect(medium.requiresHumanReview).toBe(true)
-    // Medium keeps the formula recommendation but flags it
+    // Medium keeps the formula recommendation with a confidence caveat
     expect(medium.outcome.recommendation).toBe(valuation.recommendation)
-    expect(medium.outcome.recommendationReason).toContain('human review')
+    expect(medium.outcome.recommendationReason).toContain('medium confidence')
   })
 
   it('degrades to low confidence with no classification and comp fallback', () => {

@@ -336,7 +336,8 @@ const evaluators: Record<FilterType, FilterEvaluator> = {
     if (subject.stories == null || comp.stories == null) {
       return { type: 'stories_match', passed: true, reason: 'Story count not available' }
     }
-    const passed = subject.stories === comp.stories
+    // Half-story tolerance: 1.5-story comps are compatible with both 1 and 2
+    const passed = Math.abs(subject.stories - comp.stories) <= 0.5
     return {
       type: 'stories_match',
       passed,

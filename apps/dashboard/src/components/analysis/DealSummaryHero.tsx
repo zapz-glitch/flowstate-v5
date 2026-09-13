@@ -38,9 +38,9 @@ export function DealSummaryHero({ valuation, avm, isRecalculated, onOpenSettings
               title={(valuation.confidenceReasons ?? []).join('\n')}
             >
               {valuation.confidence === 'low'
-                ? 'Low confidence — verify manually'
+                ? 'Low confidence'
                 : valuation.confidence === 'medium'
-                  ? 'Medium — review'
+                  ? 'Medium confidence'
                   : 'High confidence'}
             </span>
           )}

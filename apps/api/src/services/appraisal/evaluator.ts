@@ -480,7 +480,8 @@ function evaluateStoriesMatch(
     }
   }
 
-  const passed = subjectStories === compStories
+  // Half-story tolerance: 1.5-story comps are compatible with both 1 and 2
+  const passed = Math.abs(subjectStories - compStories) <= 0.5
   return {
     type: 'stories_match',
     passed,

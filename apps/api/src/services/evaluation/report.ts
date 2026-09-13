@@ -341,15 +341,15 @@ export function buildEvaluationReport(input: BuildReportInput): EvaluationReport
       projectedProfit: valuation.projectedProfit,
       projectedROI: valuation.projectedROI,
       totalInvestment: valuation.totalInvestment,
-      // LOW confidence does not pretend precision exists — the buy/no-buy
-      // call is withheld and the deal is sent back for manual valuation.
-      recommendation:
-        confidence.level === 'low' ? 'manual-review' : valuation.recommendation,
+      // The formula call always stands — there is no human reviewer, so
+      // confidence is communicated via the confidence field + reasons
+      // instead of withholding the recommendation.
+      recommendation: valuation.recommendation,
       recommendationReason:
         confidence.level === 'low'
-          ? `Comp evidence is too thin or stale to support a confident number — verify the value manually. (${valuation.recommendation} by formula)`
+          ? `${valuation.recommendationReason} — LOW confidence: comp evidence is thin or stale`
           : confidence.level === 'medium'
-            ? `${valuation.recommendationReason} — flagged for human review`
+            ? `${valuation.recommendationReason} — medium confidence: some dimensions unverified`
             : valuation.recommendationReason,
     },
 

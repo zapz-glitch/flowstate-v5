@@ -773,18 +773,17 @@ export async function performAnalysis(
     renovationAssessment: renovation,
   })
   // Confidence gate on the comps that drive the ARV — surfaces onto the
-  // valuation block so the UI can flag thin/stale/rule-breaching pools.
-  // LOW withholds the buy/no-buy call: do not pretend precision exists.
+  // valuation block. There is no human reviewer, so the formula call
+  // always stands; confidence + reasons carry the reliability signal.
   response.valuation.confidence = response.report.confidence
   response.valuation.confidenceReasons = response.report.confidenceReasons
   response.valuation.requiresHumanReview = response.report.requiresHumanReview
   if (response.report.confidence === 'low') {
-    response.valuation.recommendation = 'manual-review'
     response.valuation.recommendationReason =
-      `Comp evidence is too thin or stale to support a confident number — verify the value manually. (Formula said: ${valuation.recommendation})`
+      `${valuation.recommendationReason ?? ''} — LOW confidence: comp evidence is thin or stale`.trim()
   } else if (response.report.confidence === 'medium') {
     response.valuation.recommendationReason =
-      `${valuation.recommendationReason ?? ''} — flagged for human review`.trim()
+      `${valuation.recommendationReason ?? ''} — medium confidence: some dimensions unverified`.trim()
   }
   response.visionAssessment = renovation
   response.renovationLevelSource = derivedBuybox.rehabLevelSource
