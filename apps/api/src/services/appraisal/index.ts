@@ -390,17 +390,24 @@ class PropertyAppraisalService implements AppraisalService {
     // audit trail never disappears — a comp always shows exactly which rules
     // passed, failed, or were unverifiable. Expansion tiers rescue comps
     // whose hard failures fall inside that tier's allowed set, in order:
-    // older sales in-location → leave the subdivision → leave the
-    // neighborhood (widened radius) → most recent sales.
+    // older sales in-location → leave the subdivision → drop the radius →
+    // most recent sales.
+    //
+    // The relaxed time/age/distance thresholds apply ONLY to the in-area
+    // time-travel tier. Once we leave the subdivision the six hard rules
+    // revert to strict values — an out-of-subdivision comp must satisfy
+    // ≤180d / ±10yr / ±250sqft exactly. Relaxations never compound.
 
-    // Relaxed time/age thresholds, shared by every expansion tier.
+    // Relaxed sale-age/distance thresholds — the in-area concession only.
+    // year_built_diff is NEVER relaxed: ±10yr is an absolute hard rule at
+    // every tier (a comp built 17 years off the subject is never a comp).
     const baseFilters = defaultFilters.map((f) => {
       if (!expansion.allowOlderSales) return f
       if (f.type === 'sale_age') {
         return { ...f, value: f.value * expansion.olderSaleAgeMultiplier }
       }
-      if (f.type === 'year_built_diff') {
-        return { ...f, value: f.value * expansion.olderYearBuiltMultiplier }
+      if (f.type === 'distance') {
+        return { ...f, value: f.value * expansion.geographicDistanceMultiplier }
       }
       return f
     })
@@ -485,27 +492,28 @@ class PropertyAppraisalService implements AppraisalService {
       return {
         ...result2,
         fallbackUsed: 'older_sales',
-        fallbackReason: `Insufficient recent comps in "${subject.subdivision || subject.neighborhoodName || 'subject area'}". Time-traveled to sales up to ${maxDays} days / ±${Math.round((defaultFilters.find((f) => f.type === 'year_built_diff')?.value ?? 10) * expansion.olderYearBuiltMultiplier)}yr builds with ${expansion.olderSaleDiscountPercent}% market correction — location still enforced.`,
+        fallbackReason: `Insufficient recent comps in "${subject.subdivision || subject.neighborhoodName || 'subject area'}". Time-traveled to sales up to ${maxDays} days with ${expansion.olderSaleDiscountPercent}% market correction — subdivision and all other hard rules still enforced.`,
         expansionApplied: ['older_sales'],
       }
     }
 
     {
-      // Steps 3-4: leave the subdivision. Neighborhood is a display
-      // datapoint, not a selection rule — the only location deal-breaker is
-      // subdivision. Tier 3 rescues subdivision-only failures inside the
-      // expanded radius (staying in the surrounding area); tier 4 drops the
-      // radius gate entirely. Every rule stays evaluated — the failed-rule
-      // audit trail is kept.
+      // Steps 3-4: leave the subdivision — hard rules revert to STRICT
+      // values here. Neighborhood is a display datapoint, not a selection
+      // rule — the only location deal-breaker is subdivision. Tier 3
+      // rescues subdivision-only failures inside the expanded radius
+      // (staying in the surrounding area); tier 4 drops the radius gate
+      // entirely. Every rule stays evaluated — the failed-rule audit
+      // trail is kept.
       if (expansion.allowGeographicExpansion) {
-        const subFilters = baseFilters.map((f) =>
+        const subFilters = defaultFilters.map((f) =>
           f.type === 'distance'
             ? { ...f, value: f.value * expansion.geographicDistanceMultiplier }
             : f
         )
         const resultSub = this.evaluate(subject, comparables, {
           filters: subFilters,
-          adjustments: baseAdjustments,
+          adjustments,
         })
         const picked = rescue(resultSub, new Set(['subdivision_match']))
         if (picked && picked.selected.length >= REQUIRED_ARV_COMPS) {
@@ -513,7 +521,7 @@ class PropertyAppraisalService implements AppraisalService {
           return {
             ...applyRescued(resultSub, picked),
             fallbackUsed: 'subdivision_expansion',
-            fallbackReason: `Insufficient comps in subdivision "${subject.subdivision || 'unknown'}". Expanded to the surrounding area (radius ×${expansion.geographicDistanceMultiplier}) — all other rules still apply.`,
+            fallbackReason: `Insufficient comps in subdivision "${subject.subdivision || 'unknown'}". Expanded to the surrounding area (radius ×${expansion.geographicDistanceMultiplier}) — all other rules apply at their strict thresholds.`,
             expansionApplied: expansion.allowOlderSales
               ? ['older_sales', 'subdivision']
               : ['subdivision'],
@@ -524,8 +532,8 @@ class PropertyAppraisalService implements AppraisalService {
         // failures are subdivision and/or distance.
         if (expansion.allowNeighborhoodExpansion) {
           const resultGeo = this.evaluate(subject, comparables, {
-            filters: baseFilters,
-            adjustments: baseAdjustments,
+            filters: defaultFilters,
+            adjustments,
           })
           const picked4 = rescue(resultGeo, new Set(['subdivision_match', 'distance']))
           if (picked4 && picked4.selected.length >= REQUIRED_ARV_COMPS) {
@@ -540,30 +548,44 @@ class PropertyAppraisalService implements AppraisalService {
             }
           }
 
-          // Step 5: No rule-qualified set exists. INSUFFICIENT_COMPS is the
-          // honest dead end — no comparable sold within the sale-age window.
-          // When recent sales DO exist, relax to the most recent ones (up to
-          // 3, highest adjusted price first); the full failed-rule audit
-          // trail is preserved on every comp.
+          // Step 5: No rule-qualified set exists. Final fallback — the most
+          // recent sales that still satisfy every intrinsic hard rule (sale
+          // age, sqft, property type, year built, road barrier); only
+          // location failures (subdivision/distance) may be carried. A comp
+          // that breaches a hard property rule is never enabled — better
+          // INSUFFICIENT_COMPS than a valuation on a rule-breaker.
           console.log('Appraisal: no comps passed all rules — checking for recent sales')
           const saleAgeDays =
             (defaultFilters.find((f) => f.type === 'sale_age')?.value ?? 180) *
             (expansion.allowOlderSales ? expansion.olderSaleAgeMultiplier : 1)
+          const LOCATION_FAILURES = new Set(['subdivision_match', 'distance'])
+          const geoPriority = new Map(
+            resultGeo.appliedFilters.map((f) => [f.type, f.priority ?? 'hard'])
+          )
           const now = Date.now()
           const recentComps = resultGeo.comparables
             .filter((c) => {
               if (!c.saleDate || (c.adjustedSalePrice ?? c.salePrice ?? 0) <= 0) return false
               const days = (now - new Date(c.saleDate).getTime()) / 86_400_000
-              return Number.isFinite(days) && days <= saleAgeDays
+              if (!Number.isFinite(days) || days > saleAgeDays) return false
+              // Intrinsic hard rules must all pass — only location may fail
+              const hardFailures = (c.evaluation?.filterResults ?? []).filter(
+                (f) =>
+                  !f.passed &&
+                  f.status === 'failed' &&
+                  geoPriority.get(f.type) !== 'soft' &&
+                  !LOCATION_FAILURES.has(f.type)
+              )
+              return hardFailures.length === 0
             })
             .sort(
               (a, b) =>
-                (b.adjustedSalePrice ?? b.salePrice ?? 0) - (a.adjustedSalePrice ?? a.salePrice ?? 0)
+                new Date(b.saleDate!).getTime() - new Date(a.saleDate!).getTime()
             )
             .slice(0, REQUIRED_ARV_COMPS)
 
           if (recentComps.length === 0) {
-            console.log('Appraisal: INSUFFICIENT_COMPS — no comps within sale-age window')
+            console.log('Appraisal: INSUFFICIENT_COMPS — no comps satisfy the hard rules')
             return {
               ...resultGeo,
               insufficientComps: true,

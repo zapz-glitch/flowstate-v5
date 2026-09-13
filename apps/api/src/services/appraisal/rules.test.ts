@@ -564,6 +564,52 @@ describe('ARV comp selection', () => {
     expect(discount?.amount).toBeLessThan(0)
   })
 
+  it('reverts to strict time/age rules once the search leaves the subdivision', () => {
+    // Canoe Creek scenario: subject built 2008, comp built 2025 (17yr off).
+    // The older-sales concession relaxes year_built to ±20 — but only
+    // inside the subdivision. Once we expand geographically the hard rules
+    // go back to strict ±10yr / ≤180d, so this comp must die.
+    const comps = [
+      comp('in1', { subdivision: 'Oak Park', salePrice: 300000 }),
+      comp('in2', { subdivision: 'Oak Park', salePrice: 310000 }),
+      comp('new_out', {
+        subdivision: 'Seaton Crk Reserve Ph 3',
+        yearBuilt: 2025, // 17yr off the 2008 subject — fails strict ±10
+        salePrice: 330000,
+        distanceMiles: 1.2,
+      }),
+    ]
+    const r = service.evaluateWithFallback(subject({ yearBuilt: 2008 }), comps, {
+      filters: [
+        { type: 'subdivision_match', enabled: true, value: 1 },
+        { type: 'year_built_diff', enabled: true, value: 10 },
+        { type: 'sale_age', enabled: true, value: 180 },
+        { type: 'distance', enabled: true, value: 1.0 },
+      ],
+      adjustments: [],
+      expansion: {
+        allowGeographicExpansion: true,
+        allowOlderSales: true,
+        olderSaleAgeMultiplier: 2,
+        olderYearBuiltMultiplier: 2,
+        olderSaleDiscountPercent: 15,
+        geographicDistanceMultiplier: 2,
+      },
+    })
+
+    // The 2025 comp is never enabled — its year_built failure is outside
+    // the subdivision tier's allowed set under strict rules
+    const newOut = r.comparables.find((c) => c.id === 'new_out')
+    expect(newOut?.isEnabled).toBe(false)
+    expect(r.selectedCompIds ?? []).not.toContain('new_out')
+    // The failed hard rule stays on the audit trail
+    expect(
+      newOut?.evaluation?.filterResults.some(
+        (f) => f.type === 'year_built_diff' && !f.passed && f.status === 'failed'
+      )
+    ).toBe(true)
+  })
+
   it('respects expansion disabled → INSUFFICIENT_COMPS', () => {
     const comps = [
       comp('in1'),

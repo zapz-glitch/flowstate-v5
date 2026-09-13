@@ -558,6 +558,18 @@ Implementation:
   Full audit trail in every tier — fixes the missing location rules
   in reports. physical_relaxation tier removed (no hard physical
   rules remain).
+- HARD-RULE ISOLATION (post-Canoe-Creek fix): the relaxed thresholds
+  apply ONLY to the in-area time-travel tier. Leaving the subdivision
+  reverts all six hard rules to strict values — relaxations never
+  compound. year_built_diff is NEVER relaxed (±10yr absolute at every
+  tier). The final nearest_comps fallback only picks sales whose hard
+  failures are location-only — a comp breaching sale_age/sqft/type/
+  year_built/road_barrier is never enabled; INSUFFICIENT_COMPS is the
+  honest dead end.
+  Root cause of the Canoe Creek breach (15827, job_1789278874955):
+  relaxed ±20yr/360d thresholds persisted into geographic tiers AND
+  the nearest-comps fallback had no hard-rule check — a 2025-built
+  out-of-subdivision comp (17yr off the 2008 subject) was rescued.
 - performAnalysis: required-match merge now always takes default
   priority (presets can't express soft).
 - corelogic-codes: EXTERIOR_WALLS expanded (ALV/BRI/FST/SDS/LPS/BLO/
@@ -602,4 +614,4 @@ NOT deployed — deploy-on-request rule stands.
 Known divergence to revisit: shared sqft_diff evaluator is %-based
 while API uses absolute sqft — recalc only re-evaluates when the user
 edits settings, so impact is limited to client-side scoring.
-- Verified: 134 vitest + 15/15 regression + both typechecks clean.
+- Verified: 81 vitest (incl. Canoe Creek strict-reversion test) + 15/15 regression + both typechecks clean.
