@@ -27,6 +27,23 @@ export function DealSummaryHero({ valuation, avm, isRecalculated, onOpenSettings
           {isRecalculated && (
             <span className="text-[8px] font-medium px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-500">Recalculated</span>
           )}
+          {valuation.confidence && (
+            <span
+              className={cn(
+                'text-[8px] font-medium px-1.5 py-0.5 rounded uppercase tracking-wide',
+                valuation.confidence === 'high' && 'bg-emerald-500/15 text-emerald-500',
+                valuation.confidence === 'medium' && 'bg-amber-500/15 text-amber-500',
+                valuation.confidence === 'low' && 'bg-red-500/15 text-red-500',
+              )}
+              title={(valuation.confidenceReasons ?? []).join('\n')}
+            >
+              {valuation.confidence === 'low'
+                ? 'Low confidence — verify manually'
+                : valuation.confidence === 'medium'
+                  ? 'Medium — review'
+                  : 'High confidence'}
+            </span>
+          )}
         </div>
         {onOpenSettings && (
           <button type="button" onClick={onOpenSettings} className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] text-foreground-tertiary hover:text-foreground hover:bg-secondary transition-colors no-print">

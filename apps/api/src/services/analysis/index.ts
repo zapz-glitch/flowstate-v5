@@ -350,7 +350,7 @@ export interface ValuationResult {
   projectedProfit: number
   projectedROI: number
   wholesalePrice: number
-  recommendation?: 'strong-buy' | 'buy' | 'hold' | 'pass'
+  recommendation?: 'strong-buy' | 'buy' | 'hold' | 'pass' | 'manual-review'
   recommendationReason?: string
 }
 
@@ -658,8 +658,13 @@ export interface AnalysisResponse {
     projectedProfit: number
     projectedROI: number
     wholesalePrice: number
-    recommendation?: 'strong-buy' | 'buy' | 'hold' | 'pass'
+    recommendation?: 'strong-buy' | 'buy' | 'hold' | 'pass' | 'manual-review'
     recommendationReason?: string
+    /** Confidence gate on the comps driving the ARV */
+    confidence?: 'high' | 'medium' | 'low'
+    confidenceReasons?: string[]
+    /** True unless HIGH — medium flags for review, low withholds the call */
+    requiresHumanReview?: boolean
   }
   comps: {
     /** Total number of comps returned from API */

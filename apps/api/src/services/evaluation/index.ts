@@ -778,6 +778,20 @@ export async function performAnalysis(
     fallbacksUsed,
     renovationAssessment: renovation,
   })
+  // Confidence gate on the comps that drive the ARV — surfaces onto the
+  // valuation block so the UI can flag thin/stale/rule-breaching pools.
+  // LOW withholds the buy/no-buy call: do not pretend precision exists.
+  response.valuation.confidence = response.report.confidence
+  response.valuation.confidenceReasons = response.report.confidenceReasons
+  response.valuation.requiresHumanReview = response.report.requiresHumanReview
+  if (response.report.confidence === 'low') {
+    response.valuation.recommendation = 'manual-review'
+    response.valuation.recommendationReason =
+      `Comp evidence is too thin or stale to support a confident number — verify the value manually. (Formula said: ${valuation.recommendation})`
+  } else if (response.report.confidence === 'medium') {
+    response.valuation.recommendationReason =
+      `${valuation.recommendationReason ?? ''} — flagged for human review`.trim()
+  }
   response.visionAssessment = renovation
   response.renovationLevelSource = derivedBuybox.rehabLevelSource
   response.evaluationEngine = 'ts-v5'

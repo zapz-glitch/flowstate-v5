@@ -267,6 +267,11 @@ export interface ValuationData {
   locationPenaltyPercent?: number
   recommendation?: string
   recommendationReason?: string
+  /** Confidence gate on the comps driving the ARV */
+  confidence?: 'high' | 'medium' | 'low'
+  confidenceReasons?: string[]
+  /** True unless HIGH — medium flags for review, low withholds the call */
+  requiresHumanReview?: boolean
   investorAnalysis?: {
     status: string
     methodLabel: string

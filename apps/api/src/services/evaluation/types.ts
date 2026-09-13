@@ -174,4 +174,6 @@ export interface EvaluationReport {
   confidence: 'high' | 'medium' | 'low'
   /** Why that confidence level was assigned */
   confidenceReasons: string[]
+  /** True unless HIGH — medium flags for review, low withholds the call */
+  requiresHumanReview: boolean
 }

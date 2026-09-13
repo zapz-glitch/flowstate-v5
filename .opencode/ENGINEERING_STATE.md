@@ -605,9 +605,32 @@ values; now wired as a provider supplement:
 - D1: user's Default preset sqft_diff corrected 20 → 250 (report user's
   preset e251da86, user 5c3f729f).
 
-Verified: 80/80 appraisal vitest (incl. new Sweetwater unit-matching
-test + soft-rank test), 15/15 regression files, tsc clean api +
-dashboard + shared.
+Verified: 139 vitest + 15/15 regression + tsc clean api + dashboard.
+
+### Confidence gating (2026-09-13, same branch)
+
+Product spec: HIGH = 3+ excellent comps (recent, tight size/year/style,
+verified condition) → ARV normal; MEDIUM = 3 comps w/ weaker dims →
+ARV + human-review flag; LOW = <3 strong comps / rescued hard-failure
+comps / nearest-comps or insufficient fallback / stale sales → do not
+pretend precision exists.
+
+- report.ts assessConfidence rewritten as a gate on the SELECTED ARV
+  comps (not just pool size): per-comp grading excellent (all hard
+  rules verified-pass + style/condition verified) / adequate (no hard
+  failure) / weak (hard failure rescued by expansion). Staleness:
+  >365d = low, >180d noted. Subject condition verified via
+  classification or assessor buildingCondition.
+- EvaluationReport.requiresHumanReview added; at LOW the report +
+  response.valuation recommendation is overridden to 'manual-review'
+  (formula rec preserved in the reason string); MEDIUM appends a
+  review flag to the reason.
+- response.valuation gains confidence/confidenceReasons/
+  requiresHumanReview; dashboard ValuationData extended; DealSummaryHero
+  renders a confidence badge (emerald/amber/red) with reasons tooltip.
+- report.test.ts: fixture now carries selectedCompIds/arvStatus; new
+  tests pin HIGH (3 verified), MEDIUM (unverified dims), LOW (gated
+  recommendation) paths.
 
 NOT deployed — deploy-on-request rule stands.
 
