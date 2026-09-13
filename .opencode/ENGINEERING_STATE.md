@@ -839,3 +839,14 @@ ordering confirmed in evaluation/index.ts.
   serverErrors24h, recent[]}. Overview page has a Rate Limits panel
   (counts + recent hits, Healthy/Attention badge).
 - Verified: 154 vitest, tsc clean api+dashboard.
+
+### DEPLOYED: feat/condition-and-neighborhood → main (33c2e62)
+
+- Deploy run 34781263673: API + Dashboard both green.
+- Live: big-four no-permit assumptions, neighborhood fallback tier,
+  provider→photos→vision comp condition gate, style match required,
+  rate-limit tracker on Overview.
+- Next: user uploads batch-import list for prod eval; watch the
+  Rate Limits panel (tracks our API 429s + 5xx — provider-side
+  CoreLogic/Firecrawl throttling is NOT yet logged, only visible as
+  failures/latency).
