@@ -156,6 +156,15 @@ export interface NormalizedProperty {
   subdivision?: string
   zoning?: string
   zoningDescription?: string
+  /** Composite parcel ID `fipsCode:universalParcelId` (Cotality v1PropertyId) — required by parcel-level flood-zone */
+  parcelId?: string | null
+  /** Formatted assessor parcel number (e.g. "17786-042-0330") */
+  apnFormatted?: string | null
+  neighborhoodName?: string
+  neighborhoodCode?: string
+  cbsaCode?: string
+  censusTract?: string
+  legalDescription?: string
 
   /** Raw API response for debugging */
   raw?: unknown
@@ -279,6 +288,10 @@ export interface NormalizedFloodZone {
   mapPanel: string | null
   mapDate: string | null
   participationStatus: string | null
+  /** FEMA Special Flood Hazard Area determination ('In'/'Out') — parcel-level only */
+  specialFloodHazardArea?: string | null
+  /** Which resource produced this: parcel-level determination or coordinate spatial lookup */
+  source?: 'parcel' | 'spatial'
 }
 
 // ─── Response Types ─────────────────────────────────────────────────────────
@@ -363,6 +376,9 @@ export interface PropertyProviderAdapter {
 
   /** Get flood zone (optional) */
   getFloodZone?(latitude: number, longitude: number): Promise<FloodZoneResponse>
+
+  /** Get parcel-level flood zone by composite parcel ID (fipsCode:universalParcelId) — more accurate than the coordinate spatial lookup */
+  getFloodZoneByParcel?(parcelId: string): Promise<FloodZoneResponse>
 }
 
 // ─── Configuration ──────────────────────────────────────────────────────────

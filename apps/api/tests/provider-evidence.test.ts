@@ -45,8 +45,89 @@ try {
   payload = { floodZone: ' ae ' }
   const flood = await provider.getFloodZone(27, -82)
   assert.equal(flood.success && flood.data.isInFloodZone, true)
+  assert.equal(flood.success && flood.data.source, 'spatial')
   payload = { items: [] }
   const empty = await provider.getBuildingPermits('test')
   assert.equal(empty.success && empty.data.count, 0)
+
+  // Parcel-level flood-zone: GET /property/{fipsCode:universalParcelId}/flood-zone
+  payload = {
+    corelogicPropertyId: '48029:36205502',
+    compositePropertyId: '48029:36205502',
+    floodZoneCode: 'X',
+    panelNumber: '48029C0260G',
+    panelDate: '20100929',
+    specialFloodHazardArea: 'Out',
+    floodZoneDescription: ' Zone X-An area that is determined to be outside the 100- and 500-year floodplains.',
+    communityName: 'SAN ANTONIO',
+    multipleFloodZoneProximity: 'No',
+    communityNumber: '480045',
+  }
+  const parcelFlood = await provider.getFloodZoneByParcel!('48029:36205502')
+  assert.equal(paths.at(-1), '/property/48029%3A36205502/flood-zone')
+  assert.equal(parcelFlood.success, true)
+  if (parcelFlood.success) {
+    assert.equal(parcelFlood.data.floodZone, 'X')
+    assert.equal(parcelFlood.data.isInFloodZone, false)
+    assert.equal(parcelFlood.data.isNearFloodZone, false)
+    assert.equal(parcelFlood.data.specialFloodHazardArea, 'Out')
+    assert.equal(parcelFlood.data.mapPanel, '48029C0260G')
+    assert.equal(parcelFlood.data.mapDate, '2010-09-29')
+    assert.equal(parcelFlood.data.communityName, 'SAN ANTONIO')
+    assert.equal(parcelFlood.data.source, 'parcel')
+    assert.match(parcelFlood.data.floodZoneDescription ?? '', /outside the 100- and 500-year/)
+  }
+
+  // SFHA 'In' must flag high risk even for unexpected zone codes
+  payload = { floodZoneCode: 'D', specialFloodHazardArea: 'In' }
+  assert.equal((await provider.getFloodZoneByParcel!('48029:36205502')).success, false) // D rejected by zone validation
+
+  payload = { floodZoneCode: 'AE', specialFloodHazardArea: 'In' }
+  const sfhaIn = await provider.getFloodZoneByParcel!('48029:36205502')
+  assert.equal(sfhaIn.success && sfhaIn.data.isInFloodZone, true)
+
+  // Malformed parcel ID — must fail without firing a request
+  const beforeMalformed = paths.length
+  const malformed = await provider.getFloodZoneByParcel!('5533034499')
+  assert.equal(malformed.success, false)
+  assert.equal(!malformed.success && malformed.code, 'INVALID_RESPONSE')
+  assert.equal(paths.length, beforeMalformed)
 } finally { globalThis.fetch = originalFetch }
-console.log('Provider evidence fixtures: permit nesting/history, empty versus unavailable, flood unknown and cache version passed')
+
+// parcelId + site-location propagation: the search item's v1PropertyId must reach
+// NormalizedProperty so getPropertyBundle can prefer the parcel flood-zone resource.
+globalThis.fetch = async (input, init) => {
+  if (init?.method === 'POST') return Response.json({ access_token: 'fixture-token', expires_in: 3600 })
+  const url = new URL(String(input))
+  if (url.pathname === '/v2/properties/search') {
+    return Response.json({ items: [{
+      clip: '5533034499',
+      v1PropertyId: '48029:36205502',
+      propertyAPN: { fipsCode: '48029', universalParcelId: '36205502', apnParcelNumberFormatted: '17786-042-0330' },
+      propertyAddress: { streetAddress: '5802 Misty Gln', city: 'San Antonio', state: 'TX', zipCode: '78247' },
+    }] })
+  }
+  return Response.json({ siteLocation: { data: {
+    neighborhood: { code: '98476', name: 'HIGH COUNTRY' },
+    cbsa: { code: '41700', type: 'Metro' },
+    censusTract: { id: '1218125002' },
+    locationLegal: { subdivisionName: 'HIGH COUNTRY BL 17786 UN 13', blockNumber: '42', lotNumber: '33', description: 'NCB 17786 BLK 42 LOT 33' },
+  } } })
+}
+try {
+  const provider = createCoreLogicProvider({ CORELOGIC_CLIENT_ID: 'fixture', CORELOGIC_CLIENT_SECRET: 'fixture' } as Env)
+  const result = await provider.searchProperty({ address: '5802 Misty Gln, San Antonio, TX 78247' })
+  assert.equal(result.success, true)
+  if (result.success) {
+    assert.equal(result.data.id, '5533034499')
+    assert.equal(result.data.parcelId, '48029:36205502')
+    assert.equal(result.data.apnFormatted, '17786-042-0330')
+    assert.equal(result.data.subdivision, 'HIGH COUNTRY BL 17786 UN 13')
+    assert.equal(result.data.neighborhoodName, 'HIGH COUNTRY')
+    assert.equal(result.data.neighborhoodCode, '98476')
+    assert.equal(result.data.cbsaCode, '41700')
+    assert.equal(result.data.censusTract, '1218125002')
+    assert.equal(result.data.legalDescription, 'NCB 17786 BLK 42 LOT 33')
+  }
+} finally { globalThis.fetch = originalFetch }
+console.log('Provider evidence fixtures: permit nesting/history, empty versus unavailable, flood unknown/parcel, parcelId propagation and cache version passed')

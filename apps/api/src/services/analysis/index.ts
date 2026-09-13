@@ -425,6 +425,18 @@ export interface AnalysisResponse {
     propertyType: string | null
     /** Subdivision name (if available) */
     subdivision: string | null
+    /** Cotality composite parcel ID (fipsCode:universalParcelId) */
+    parcelId: string | null
+    /** Formatted assessor parcel number */
+    apnFormatted: string | null
+    /** Cotality site-location neighborhood name */
+    neighborhoodName: string | null
+    neighborhoodCode: string | null
+    /** Core Based Statistical Area code (metro geography for market analytics) */
+    cbsaCode: string | null
+    censusTract: string | null
+    /** Legal description from site-location (plat/block/lot) */
+    legalDescription: string | null
     lastSale: {
       price: number
       date: string | null
@@ -657,6 +669,15 @@ export interface AnalysisResponse {
     zone: string | null
     inFloodZone: boolean
     description: string | null
+    /** FEMA Special Flood Hazard Area determination ('In'/'Out') — parcel-level only */
+    specialFloodHazardArea: string | null
+    /** FIRM panel number */
+    mapPanel: string | null
+    /** FIRM panel date (ISO) */
+    mapDate: string | null
+    communityName: string | null
+    /** 'parcel' (fips:universalParcelId determination) or 'spatial' (coordinate lookup) */
+    source: string | null
   } | null
   /** Positional proximity risks — drives the proximity deduction */
   locationRisks: Array<{
@@ -1037,6 +1058,13 @@ export function buildAnalysisResponse(
       yearBuilt: property.yearBuilt ?? null,
       propertyType: property.propertyType ?? null,
       subdivision: property.subdivision ?? null,
+      parcelId: property.parcelId ?? null,
+      apnFormatted: property.apnFormatted ?? null,
+      neighborhoodName: property.neighborhoodName ?? null,
+      neighborhoodCode: property.neighborhoodCode ?? null,
+      cbsaCode: property.cbsaCode ?? null,
+      censusTract: property.censusTract ?? null,
+      legalDescription: property.legalDescription ?? null,
       lastSale: property.lastSalePrice
         ? {
             price: property.lastSalePrice,
@@ -1159,6 +1187,11 @@ export function buildAnalysisResponse(
           zone: enrichment.floodZone.floodZone,
           inFloodZone: enrichment.floodZone.isInFloodZone,
           description: enrichment.floodZone.floodZoneDescription,
+          specialFloodHazardArea: enrichment.floodZone.specialFloodHazardArea ?? null,
+          mapPanel: enrichment.floodZone.mapPanel ?? null,
+          mapDate: enrichment.floodZone.mapDate ?? null,
+          communityName: enrichment.floodZone.communityName ?? null,
+          source: enrichment.floodZone.source ?? null,
         }
       : null,
 

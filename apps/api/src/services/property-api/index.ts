@@ -184,6 +184,10 @@ export interface PropertyApiService {
   getBuildingPermits(propertyId: string, address?: { address1: string; address2: string }): Promise<PermitsResponse>;
   /** Get flood zone data */
   getFloodZone(latitude: number, longitude: number): Promise<FloodZoneResponse>;
+  /** Get parcel-level flood zone by composite parcel ID (fipsCode:universalParcelId) */
+  getFloodZoneByParcel(parcelId: string): Promise<FloodZoneResponse>;
+  /** Flood zone for a property: parcel-level when parcelId is present, spatial fallback */
+  getFloodZoneForProperty(property: NormalizedProperty): Promise<FloodZoneResponse | null>;
 
   /** Search property with fallback to alternate provider on failure */
   searchPropertyWithFallback(
@@ -485,6 +489,67 @@ class PropertyApi implements PropertyApiService {
     return result;
   }
 
+  /**
+   * Parcel-level flood determination keyed on `fipsCode:universalParcelId`.
+   * More accurate than the coordinate spatial lookup — preferred when the
+   * subject property carries a parcelId.
+   */
+  async getFloodZoneByParcel(parcelId: string): Promise<FloodZoneResponse> {
+    const provider = this.getProvider();
+
+    if (!provider.getFloodZoneByParcel) {
+      return {
+        success: false,
+        error: `${provider.name} does not support parcel flood zone lookup`,
+        code: 'NOT_SUPPORTED',
+      };
+    }
+
+    const cacheKey = floodZoneKey(`parcel:${parcelId}`, provider.name);
+    if (!this._skipCache) {
+      const cached = await this.cache.get<NormalizedFloodZone>(cacheKey);
+      if (cached) {
+        this._stats.logCacheHit('flood-zone');
+        return { success: true, data: cached };
+      }
+    }
+
+    this._stats.logCall('flood-zone');
+    const result = await provider.getFloodZoneByParcel(parcelId);
+
+    if (result.success && result.data) {
+      await this.cache.set(cacheKey, result.data, {
+        ttl: CACHE_TTL.FLOOD_ZONE,
+      });
+    }
+
+    return result;
+  }
+
+  /**
+   * Flood zone for a subject property: parcel-level determination when a
+   * parcelId is present, with graceful fallback to the coordinate spatial
+   * lookup (and vice versa when parcel data is unavailable).
+   */
+  async getFloodZoneForProperty(
+    property: NormalizedProperty,
+  ): Promise<FloodZoneResponse | null> {
+    if (property.parcelId) {
+      const parcelResult = await this.getFloodZoneByParcel(property.parcelId);
+      if (parcelResult.success) return parcelResult;
+      console.log('PropertyAPI: Parcel flood zone unavailable, falling back to spatial', {
+        parcelId: property.parcelId,
+        code: parcelResult.code,
+      });
+    }
+
+    if (property.latitude && property.longitude) {
+      return this.getFloodZone(property.latitude, property.longitude);
+    }
+
+    return null;
+  }
+
   async searchPropertyWithFallback(
     params: PropertySearchParams,
     fallbackProvider?: PropertyProvider,
@@ -639,9 +704,10 @@ class PropertyApi implements PropertyApiService {
       enrichOpts.permits !== false
         ? this.getBuildingPermits(property.id, { address1, address2 })
         : Promise.resolve(null),
-      // Get flood zone (if enabled and coordinates exist)
-      enrichOpts.floodZone !== false && property.latitude && property.longitude
-        ? this.getFloodZone(property.latitude, property.longitude)
+      // Get flood zone (if enabled) — parcel-level when parcelId is known,
+      // coordinate spatial lookup as fallback
+      enrichOpts.floodZone !== false
+        ? this.getFloodZoneForProperty(property)
         : Promise.resolve(null),
       // Get neighbourhood data (community, schools, POI)
       enrichOpts.neighbourhood !== false && property.latitude && property.longitude

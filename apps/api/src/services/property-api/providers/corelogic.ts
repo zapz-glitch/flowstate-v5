@@ -489,6 +489,13 @@ interface RawPropertySearchResponse {
 interface RawPropertySearchItem {
   clip: string
   clipId?: string
+  /** Composite parcel ID `fipsCode:universalParcelId` — required by the parcel-level flood-zone resource */
+  v1PropertyId?: string
+  propertyAPN?: {
+    fipsCode?: string
+    universalParcelId?: string
+    apnParcelNumberFormatted?: string
+  }
   propertyAddress?: {
     streetAddress?: string
     city?: string
@@ -707,6 +714,20 @@ interface RawFloodZoneResponse {
   participationStatus?: string
 }
 
+/** Parcel-level flood determination: GET /property/{fipsCode:universalParcelId}/flood-zone */
+interface RawParcelFloodZoneResponse {
+  corelogicPropertyId?: string
+  compositePropertyId?: string
+  floodZoneCode?: string
+  floodZoneDescription?: string
+  panelNumber?: string
+  panelDate?: string
+  specialFloodHazardArea?: string
+  multipleFloodZoneProximity?: string
+  communityName?: string
+  communityNumber?: string
+}
+
 // ─── Normalizers ───────────────────────────────────────────────────────────────
 
 interface AddressFallback {
@@ -717,6 +738,8 @@ interface AddressFallback {
   county?: string
   latitude?: number
   longitude?: number
+  parcelId?: string
+  apnFormatted?: string
 }
 
 function normalizeProperty(
@@ -911,6 +934,15 @@ function normalizeProperty(
     subdivision: (locationLegal?.subdivisionName as string) || location?.subdivision || undefined,
     zoning: (landUse?.zoningCode as string) || property?.zoning || undefined,
     zoningDescription: (landUse?.zoningCodeDescription as string) || (landUse?.landUseDescription as string) || undefined,
+    // Parcel identity (from the search item — required by parcel-level flood-zone)
+    parcelId: addressFallback?.parcelId || null,
+    apnFormatted: addressFallback?.apnFormatted || null,
+    // Site-location geography — neighborhood/subdivision support for comp analysis
+    neighborhoodName: (siteLocationData?.neighborhood as Record<string, unknown> | undefined)?.name as string || undefined,
+    neighborhoodCode: (siteLocationData?.neighborhood as Record<string, unknown> | undefined)?.code as string || undefined,
+    cbsaCode: (siteLocationData?.cbsa as Record<string, unknown> | undefined)?.code as string || undefined,
+    censusTract: (siteLocationData?.censusTract as Record<string, unknown> | undefined)?.id as string || undefined,
+    legalDescription: (locationLegal?.description as string) || undefined,
 
     raw,
   }
@@ -1030,6 +1062,31 @@ function normalizeFloodZone(raw: RawFloodZoneResponse): NormalizedFloodZone {
     mapPanel: raw.panelNumber || null,
     mapDate: raw.mapDate || null,
     participationStatus: raw.participationStatus || null,
+    source: 'spatial',
+  }
+}
+
+/** Flood zone code validation shared by spatial + parcel determinations */
+const FLOOD_ZONE_PATTERN = /^(A|AE|AH|AO|AR|A99|A(?:[1-9]|[12][0-9]|30)|V|VE|V(?:[1-9]|[12][0-9]|30)|B|C|X)$/
+
+function normalizeParcelFloodZone(raw: RawParcelFloodZoneResponse): NormalizedFloodZone {
+  const zone = raw.floodZoneCode || null
+  const isHighRisk = zone ? ['A', 'AE', 'AH', 'AO', 'AR', 'V', 'VE'].some((z) => zone.startsWith(z)) : false
+  const apiDescription = raw.floodZoneDescription?.trim() || null
+
+  return {
+    floodZone: zone,
+    floodZoneDescription: apiDescription || getFloodZoneDescription(zone),
+    isInFloodZone: raw.specialFloodHazardArea === 'In' || isHighRisk,
+    isNearFloodZone: raw.multipleFloodZoneProximity === 'Yes',
+    communityName: raw.communityName || null,
+    communityNumber: raw.communityNumber || null,
+    firmMapNumber: raw.panelNumber || null,
+    mapPanel: raw.panelNumber || null,
+    mapDate: parseCoreLogicDate(raw.panelDate),
+    participationStatus: null,
+    specialFloodHazardArea: raw.specialFloodHazardArea || null,
+    source: 'parcel',
   }
 }
 
@@ -1117,8 +1174,11 @@ class CoreLogicProvider implements PropertyProviderAdapter {
       const item = response.items[0]
       const clip = item.clipId || item.clip
 
-      // Extract address from search result as fallback
+      // Extract address + parcel identity from search result as fallback.
+      // parcelId (fipsCode:universalParcelId) is required by the parcel-level
+      // flood-zone resource — it is NOT the clip and only appears in search.
       const searchAddress = item.propertyAddress || item.address
+      const apn = item.propertyAPN
       const addressFallback: AddressFallback = {
         streetAddress: searchAddress?.streetAddress,
         city: searchAddress?.city,
@@ -1127,6 +1187,8 @@ class CoreLogicProvider implements PropertyProviderAdapter {
         county: searchAddress?.county,
         latitude: item.location?.latitude,
         longitude: item.location?.longitude,
+        parcelId: item.v1PropertyId || (apn?.fipsCode && apn?.universalParcelId ? `${apn.fipsCode}:${apn.universalParcelId}` : undefined),
+        apnFormatted: apn?.apnParcelNumberFormatted,
       }
 
       // Fetch full property details
@@ -1267,13 +1329,42 @@ class CoreLogicProvider implements PropertyProviderAdapter {
 
       const rawZone = response.floodZone ?? response.floodHazardZone
       const zone = typeof rawZone === 'string' ? rawZone.trim().toUpperCase() : ''
-      if (!/^(A|AE|AH|AO|AR|A99|A(?:[1-9]|[12][0-9]|30)|V|VE|V(?:[1-9]|[12][0-9]|30)|B|C|X)$/.test(zone)) throw new Error('INVALID_RESPONSE: Flood zone is missing or undetermined')
+      if (!FLOOD_ZONE_PATTERN.test(zone)) throw new Error('INVALID_RESPONSE: Flood zone is missing or undetermined')
       return {
         success: true,
         data: normalizeFloodZone({ ...response, floodZone: zone }),
       }
     } catch (error) {
       return evidenceError(error, 'flood zone')
+    }
+  }
+
+  /**
+   * Parcel-level flood determination.
+   * GET /property/{parcelId}/flood-zone where parcelId is the composite
+   * `fipsCode:universalParcelId` (search item's v1PropertyId) — NOT the clip.
+   * More accurate than the coordinate spatial lookup; callers should prefer
+   * this when a parcelId is available and fall back to getFloodZone otherwise.
+   */
+  async getFloodZoneByParcel(parcelId: string): Promise<FloodZoneResponse> {
+    try {
+      if (!parcelId.includes(':')) {
+        throw new Error('INVALID_RESPONSE: Parcel flood-zone requires fipsCode:universalParcelId')
+      }
+      const response = await request<RawParcelFloodZoneResponse>(
+        this.env,
+        `/property/${encodeURIComponent(parcelId)}/flood-zone`,
+        { strictNotFound: true },
+      )
+
+      const zone = typeof response.floodZoneCode === 'string' ? response.floodZoneCode.trim().toUpperCase() : ''
+      if (!FLOOD_ZONE_PATTERN.test(zone)) throw new Error('INVALID_RESPONSE: Flood zone is missing or undetermined')
+      return {
+        success: true,
+        data: normalizeParcelFloodZone({ ...response, floodZoneCode: zone }),
+      }
+    } catch (error) {
+      return evidenceError(error, 'parcel flood zone')
     }
   }
 

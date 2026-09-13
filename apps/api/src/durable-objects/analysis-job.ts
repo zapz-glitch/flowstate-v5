@@ -205,6 +205,9 @@ export class AnalysisJobDO {
         squareFeet: property.squareFeet,
         yearBuilt: property.yearBuilt,
         subdivision: property.subdivision,
+        parcelId: property.parcelId ?? null,
+        neighborhoodName: property.neighborhoodName ?? null,
+        cbsaCode: property.cbsaCode ?? null,
         lotSizeAcres: property.lotSizeAcres,
         propertyType: property.propertyType,
         lastSale: property.lastSalePrice ? {
@@ -240,8 +243,10 @@ export class AnalysisJobDO {
       (config.enrichment?.permits !== false)
         ? propertyApi.getBuildingPermits(property.id, { address1: property.address, address2: `${property.city}, ${property.state} ${property.zipCode}` })
         : Promise.resolve(null),
-      (config.enrichment?.floodZone !== false && property.latitude && property.longitude)
-        ? propertyApi.getFloodZone(property.latitude, property.longitude).catch(() => null)
+      // Flood zone: parcel-level determination when the search returned a
+      // v1PropertyId, coordinate spatial lookup as fallback
+      (config.enrichment?.floodZone !== false)
+        ? propertyApi.getFloodZoneForProperty(property).catch(() => null)
         : Promise.resolve(null),
       // Location risk (major roads, railroads, commercial) — fetched during
       // enrichment so it can deduct from valuation, not just flag post-hoc.
@@ -311,6 +316,7 @@ export class AnalysisJobDO {
         zipCode: property.zipCode,
         propertyType: property.propertyType,
         subdivision: property.subdivision,
+        neighborhood: property.neighborhoodName,
       }, this.env, config.llmOptions?.marketSearchModel)
         .then((mc) => {
           if (mc) {
