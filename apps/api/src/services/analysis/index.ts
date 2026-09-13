@@ -491,6 +491,21 @@ export interface AnalysisResponse {
     } | null
     /** Property classification (as_is or after_renovation) */
     classification: ClassificationSummary | null
+    /** Assessor building improvement condition (e.g. "Average") — distinct from vision `condition` */
+    buildingCondition: string | null
+    /** Construction quality grade (e.g. "Fair") */
+    buildingGrade: string | null
+    /** Assessor improvement value in dollars */
+    improvementValue: number | null
+    /** Cotality THV AVM estimate (subject only, parcel-level) */
+    avm: {
+      value: number | null
+      confidence: number | null
+      valueRangeLow: number | null
+      valueRangeHigh: number | null
+      model: string
+      asOfDate: string | null
+    } | null
   }
   valuation: {
     displayedArv?: number
@@ -593,6 +608,20 @@ export interface AnalysisResponse {
       photos: string[]
       /** Subdivision name (if available) */
       subdivision: string | null
+      /** Composite parcel ID (fipsCode:universalParcelId) */
+      parcelId: string | null
+      /** Cotality site-location neighborhood name */
+      neighborhoodName: string | null
+      /** Assessor building improvement condition */
+      buildingCondition: string | null
+      /** Construction quality grade */
+      buildingGrade: string | null
+      stories: number | null
+      /** Heating type (e.g. Forced Air) */
+      heating: string | null
+      /** Cooling/A/C type (e.g. Central) */
+      cooling: string | null
+      fireplacesCount: number | null
       /** Foundation type (e.g., Slab, Crawl Space, Basement) */
       foundationType: string | null
       /** Building style (e.g., Colonial, Cape Cod, Bungalow, Ranch) */
@@ -991,6 +1020,14 @@ export function buildAnalysisResponse(
       adjustedPrice: comp.adjustedSalePrice,
       photos: compPhotos,
       subdivision: comp.subdivision ?? null,
+      parcelId: comp.parcelId ?? null,
+      neighborhoodName: comp.neighborhoodName ?? null,
+      buildingCondition: comp.buildingCondition ?? null,
+      buildingGrade: comp.buildingGrade ?? null,
+      stories: comp.stories ?? null,
+      heating: merged?.features?.heating ?? comp.features?.heating ?? null,
+      cooling: merged?.features?.cooling ?? comp.features?.cooling ?? null,
+      fireplacesCount: merged?.features?.fireplacesCount ?? comp.features?.fireplacesCount ?? null,
       ...resolveConstruction(comp.construction),
       pool: merged?.features?.poolType ?? null,
       garage: merged?.features?.garageType ?? null,
@@ -1108,6 +1145,19 @@ export function buildAnalysisResponse(
       curbAppeal: ctx.subjectCurbAppeal ?? null,
       listingUrl: ctx.subjectListingUrl ?? null,
       classification: subjectClassificationSummary,
+      buildingCondition: property.buildingCondition ?? null,
+      buildingGrade: property.buildingGrade ?? null,
+      improvementValue: property.improvementValue ?? null,
+      avm: enrichment.avm
+        ? {
+            value: enrichment.avm.value,
+            confidence: enrichment.avm.confidence,
+            valueRangeLow: enrichment.avm.valueRangeLow,
+            valueRangeHigh: enrichment.avm.valueRangeHigh,
+            model: enrichment.avm.model,
+            asOfDate: enrichment.avm.asOfDate,
+          }
+        : null,
     },
 
     // ═══ VALUATION SUMMARY ══════════════════════════════════════════════════

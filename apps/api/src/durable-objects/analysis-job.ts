@@ -236,7 +236,7 @@ export class AnalysisJobDO {
         subjectSqft: property.squareFeet ?? undefined,
         subjectPropertyType: property.propertyType ?? undefined,
     }
-    const [compsResult, permitsResult, floodResult, osmResult] = await Promise.all([
+    const [compsResult, permitsResult, floodResult, avmResult, osmResult] = await Promise.all([
       propertyApi.getComparables(comparablesParams),
       // Permits: preserve the error object — 'unavailable' must mean the call
       // failed, not that the property has no permits on file (that's 'empty')
@@ -247,6 +247,10 @@ export class AnalysisJobDO {
       // v1PropertyId, coordinate spatial lookup as fallback
       (config.enrichment?.floodZone !== false)
         ? propertyApi.getFloodZoneForProperty(property).catch(() => null)
+        : Promise.resolve(null),
+      // Subject AVM (Total Home Value) — parcel-level, subject only
+      property.parcelId
+        ? propertyApi.getAvm(property.parcelId).catch(() => null)
         : Promise.resolve(null),
       // Location risk (major roads, railroads, commercial) — fetched during
       // enrichment so it can deduct from valuation, not just flag post-hoc.
@@ -350,6 +354,13 @@ export class AnalysisJobDO {
     } : null
 
     const floodData = floodResult && 'success' in floodResult && floodResult.success ? floodResult.data : null
+    // Subject AVM (Cotality THV) — parcel-level; attaches to enrichment and
+    // mirrors onto the property so report serialization can surface it.
+    const avmData = avmResult && 'success' in avmResult && avmResult.success ? avmResult.data : null
+    if (avmData) {
+      property.avmValue = avmData.value
+      property.avmConfidence = avmData.confidence
+    }
     const evidenceLimitations: string[] = []
     for (const id of pools.conflictIds) evidenceLimitations.push(`${id}: Provider comparable pools disagree on the same sale date; price is quarantined from evaluation`)
     if (!permitsData) evidenceLimitations.push(config.enrichment?.permits === false
@@ -373,6 +384,7 @@ export class AnalysisJobDO {
         evidenceLimitations,
         permits,
         floodZone: floodData ?? null,
+        avm: avmData ?? null,
         locationRisks: osmResult?.risks ?? null,
         weatherRisk: null,
         neighbourhood: null,

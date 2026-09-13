@@ -14,6 +14,7 @@ import type {
   ComparablesSearchResponse,
   PermitsResponse,
   FloodZoneResponse,
+  AvmResponse,
   NormalizedProperty,
   NormalizedComparable,
   NormalizedPermit,
@@ -32,6 +33,7 @@ import {
   COOLING_TYPE,
   POOL_TYPE,
   BUILDING_QUALITY,
+  BUILDING_CONDITION,
 } from './corelogic-codes'
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
@@ -662,6 +664,8 @@ interface RawComparablesResponse {
 interface RawComparableProperty {
   clip: string
   clipId?: string
+  /** Composite parcel ID `fipsCode:universalParcelId` */
+  v1PropertyId?: string
   streetAddress?: string
   city?: string
   state?: string
@@ -712,6 +716,21 @@ interface RawFloodZoneResponse {
   panelNumber?: string
   mapDate?: string
   participationStatus?: string
+}
+
+/** THV AVM response: GET /property/{fipsCode:universalParcelId}/avm/thv/{model} */
+interface RawAvmResponse {
+  corelogicPropertyId?: string
+  compositePropertyId?: string
+  amount?: number
+  value?: number
+  avmValue?: number
+  confidenceScore?: number | string
+  fsd?: number
+  valueRange?: { low?: number; high?: number }
+  asOfDate?: string
+  avm?: Record<string, unknown>
+  [key: string]: unknown
 }
 
 /** Parcel-level flood determination: GET /property/{fipsCode:universalParcelId}/flood-zone */
@@ -770,6 +789,7 @@ function normalizeProperty(
   const buildingsArray = (buildingsData?.Buildings || buildingsData?.buildings) as Array<Record<string, unknown>> | undefined
   const firstBuilding = buildingsArray?.[0]
   const constructionDetails = firstBuilding?.constructionDetails as Record<string, unknown> | undefined
+  const structureClassification = firstBuilding?.structureClassification as Record<string, unknown> | undefined
   const structureFeatures = firstBuilding?.structureFeatures as Record<string, unknown> | undefined
   const structureExterior = firstBuilding?.structureExterior as Record<string, unknown> | undefined
   const structureVerticalProfile = firstBuilding?.structureVerticalProfile as Record<string, unknown> | undefined
@@ -934,9 +954,14 @@ function normalizeProperty(
     subdivision: (locationLegal?.subdivisionName as string) || location?.subdivision || undefined,
     zoning: (landUse?.zoningCode as string) || property?.zoning || undefined,
     zoningDescription: (landUse?.zoningCodeDescription as string) || (landUse?.landUseDescription as string) || undefined,
-    // Parcel identity (from the search item — required by parcel-level flood-zone)
+    // Parcel identity (from the search item — required by parcel-level flood-zone/AVM)
     parcelId: addressFallback?.parcelId || null,
     apnFormatted: addressFallback?.apnFormatted || null,
+    // Assessor building detail — condition/grade/improvement value live on
+    // buildings.data.buildings[0] alongside the coded construction fields
+    buildingCondition: lookupCode(BUILDING_CONDITION, constructionDetails?.buildingImprovementConditionCode as string) || null,
+    buildingGrade: lookupCode(BUILDING_CONDITION, structureClassification?.gradeTypeCode as string) || null,
+    improvementValue: (constructionDetails?.buildingImprovementValue as number) || null,
     // Site-location geography — neighborhood/subdivision support for comp analysis
     neighborhoodName: (siteLocationData?.neighborhood as Record<string, unknown> | undefined)?.name as string || undefined,
     neighborhoodCode: (siteLocationData?.neighborhood as Record<string, unknown> | undefined)?.code as string || undefined,
@@ -975,6 +1000,7 @@ function normalizeComparable(raw: RawComparableProperty): NormalizedComparable {
   return {
     id: raw.clipId || raw.clip,
     provider: 'corelogic',
+    parcelId: raw.v1PropertyId || null,
 
     address: raw.streetAddress || '',
     city: raw.city || '',
@@ -1365,6 +1391,49 @@ class CoreLogicProvider implements PropertyProviderAdapter {
       }
     } catch (error) {
       return evidenceError(error, 'parcel flood zone')
+    }
+  }
+
+  /**
+   * Subject AVM estimate via Cotality Total Home Value.
+   * GET /property/{parcelId}/avm/thv/{model} — model defaults to
+   * thvMarketingStandard (the only THV model the gateway validates today).
+   * Requires the THV order product on the account — fails gracefully until
+   * entitled.
+   */
+  async getAvm(parcelId: string, model = 'thvMarketingStandard'): Promise<AvmResponse> {
+    try {
+      if (!parcelId.includes(':')) {
+        throw new Error('INVALID_RESPONSE: AVM requires fipsCode:universalParcelId')
+      }
+      const response = await request<RawAvmResponse>(
+        this.env,
+        `/property/${encodeURIComponent(parcelId)}/avm/thv/${model}`,
+        { strictNotFound: true },
+      )
+
+      const avm = (response.avm as Record<string, unknown> | undefined) ?? response
+      const num = (v: unknown): number | null =>
+        typeof v === 'number' && isFinite(v) ? v : typeof v === 'string' && v.trim() && isFinite(Number(v)) ? Number(v) : null
+      const value = num(avm.amount) ?? num(avm.value) ?? num(avm.avmValue) ?? num(avm.totalHomeValue)
+      if (value === null) throw new Error('INVALID_RESPONSE: AVM value is missing')
+
+      const range = (avm.valueRange as Record<string, unknown> | undefined) ?? {}
+      const confidence = num(avm.confidenceScore) ?? num(avm.confidence)
+      return {
+        success: true,
+        data: {
+          value,
+          confidence: confidence !== null ? Math.round(confidence) : null,
+          valueRangeLow: num(range.low) ?? num(avm.valueRangeLow),
+          valueRangeHigh: num(range.high) ?? num(avm.valueRangeHigh),
+          fsd: num(avm.fsd),
+          model,
+          asOfDate: (avm.asOfDate as string) || (avm.effectiveDate as string) || null,
+        },
+      }
+    } catch (error) {
+      return evidenceError(error, 'AVM')
     }
   }
 

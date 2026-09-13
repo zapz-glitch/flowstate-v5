@@ -44,10 +44,12 @@ import type {
   PermitsResponse,
   PermitsResult,
   FloodZoneResponse,
+  AvmResponse,
   PropertyApiConfig,
   NormalizedProperty,
   NormalizedComparable,
   NormalizedFloodZone,
+  NormalizedAvm,
   // PropertyBundle types
   PropertyBundle,
   PropertyBundleParams,
@@ -188,6 +190,8 @@ export interface PropertyApiService {
   getFloodZoneByParcel(parcelId: string): Promise<FloodZoneResponse>;
   /** Flood zone for a property: parcel-level when parcelId is present, spatial fallback */
   getFloodZoneForProperty(property: NormalizedProperty): Promise<FloodZoneResponse | null>;
+  /** AVM estimate by composite parcel ID (subject properties only) */
+  getAvm(parcelId: string, model?: string): Promise<AvmResponse>;
 
   /** Search property with fallback to alternate provider on failure */
   searchPropertyWithFallback(
@@ -550,6 +554,42 @@ class PropertyApi implements PropertyApiService {
     return null;
   }
 
+  /**
+   * AVM estimate via Cotality Total Home Value (subject properties only).
+   * Requires the composite parcelId; cached per parcel+model.
+   */
+  async getAvm(parcelId: string, model = 'thvMarketingStandard'): Promise<AvmResponse> {
+    const provider = this.getProvider();
+
+    if (!provider.getAvm) {
+      return {
+        success: false,
+        error: `${provider.name} does not support AVM lookup`,
+        code: 'NOT_SUPPORTED',
+      };
+    }
+
+    const cacheKey = floodZoneKey(`avm:${model}:${parcelId}`, provider.name);
+    if (!this._skipCache) {
+      const cached = await this.cache.get<NormalizedAvm>(cacheKey);
+      if (cached) {
+        this._stats.logCacheHit('avm');
+        return { success: true, data: cached };
+      }
+    }
+
+    this._stats.logCall('avm');
+    const result = await provider.getAvm(parcelId, model);
+
+    if (result.success && result.data) {
+      await this.cache.set(cacheKey, result.data, {
+        ttl: CACHE_TTL.FLOOD_ZONE,
+      });
+    }
+
+    return result;
+  }
+
   async searchPropertyWithFallback(
     params: PropertySearchParams,
     fallbackProvider?: PropertyProvider,
@@ -689,7 +729,7 @@ class PropertyApi implements PropertyApiService {
     const address1 = property.address || params.streetAddress || ''
     const address2 = [property.city || params.city, property.state || params.state, property.zipCode || params.zipCode].filter(Boolean).join(', ')
 
-    const [compsResult, permitsResult, floodResult, neighbourhoodResult] = await Promise.all([
+    const [compsResult, permitsResult, floodResult, neighbourhoodResult, avmResult] = await Promise.all([
       // Get comparables
       this.getComparables({
         propertyId: property.id,
@@ -712,6 +752,10 @@ class PropertyApi implements PropertyApiService {
       // Get neighbourhood data (community, schools, POI)
       enrichOpts.neighbourhood !== false && property.latitude && property.longitude
         ? this.fetchNeighbourhood(property.latitude, property.longitude, address1)
+        : Promise.resolve(null),
+      // Subject AVM (Cotality THV) — parcel-level, subject only; graceful fail
+      property.parcelId
+        ? this.getAvm(property.parcelId).catch(() => null)
         : Promise.resolve(null),
     ]);
 
@@ -758,6 +802,12 @@ class PropertyApi implements PropertyApiService {
 
     const floodZone: NormalizedFloodZone | null =
       floodResult && floodResult.success ? floodResult.data : null;
+    const avm: NormalizedAvm | null =
+      avmResult && avmResult.success ? avmResult.data : null;
+    if (avm) {
+      property.avmValue = avm.value;
+      property.avmConfidence = avm.confidence;
+    }
     const weatherRisk: WeatherRisk | null = enrichOpts.weatherRisk
       ? this.estimateWeatherRisk(property.state)
       : null;
@@ -769,6 +819,7 @@ class PropertyApi implements PropertyApiService {
       ],
       permits,
       floodZone,
+      avm,
       weatherRisk,
       neighbourhood: neighbourhoodResult ?? null,
     };
@@ -856,6 +907,10 @@ class PropertyApi implements PropertyApiService {
                   enrichment: result.data.raw,
                 },
                 subdivision: result.data.subdivision ?? null,
+                neighborhoodName: result.data.neighborhoodName ?? null,
+                buildingCondition: result.data.buildingCondition ?? null,
+                buildingGrade: result.data.buildingGrade ?? null,
+                stories: result.data.stories ?? null,
                 construction,
                 transaction: result.data.transaction ? {
                   buyerNames: result.data.transaction.buyerNames,
@@ -866,6 +921,9 @@ class PropertyApi implements PropertyApiService {
                   garageType: result.data.features.garageType,
                   garageSquareFeet: result.data.features.garageSquareFeet,
                   carportType: result.data.features.carportType,
+                  heating: result.data.features.heating,
+                  cooling: result.data.features.cooling,
+                  fireplacesCount: result.data.features.fireplacesCount,
                 } : undefined,
                 isEnriched: true,
               };

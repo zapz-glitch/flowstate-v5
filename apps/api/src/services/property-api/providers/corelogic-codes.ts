@@ -374,6 +374,29 @@ export const BUILDING_QUALITY: Record<string, string> = {
   'QPR': 'Poor',
 }
 
+// ─── Building Condition / Grade ─────────────────────────────────────────────
+// constructionDetails.buildingImprovementConditionCode and
+// structureClassification.gradeTypeCode share the same rating scale.
+
+export const BUILDING_CONDITION: Record<string, string> = {
+  'EXC': 'Excellent',
+  'EX0': 'Excellent',
+  'VGD': 'Very Good',
+  'VG0': 'Very Good',
+  'GD': 'Good',
+  'GD0': 'Good',
+  'G00': 'Good',
+  'AVE': 'Average',
+  'AV0': 'Average',
+  'FAI': 'Fair',
+  'FA0': 'Fair',
+  'PR': 'Poor',
+  'PR0': 'Poor',
+  'POO': 'Poor',
+  'VPR': 'Very Poor',
+  'VP0': 'Very Poor',
+}
+
 // ─── Lookup Helper ───────────────────────────────────────────────────────────
 
 /**

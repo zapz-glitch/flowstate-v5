@@ -112,7 +112,10 @@ globalThis.fetch = async (input, init) => {
     cbsa: { code: '41700', type: 'Metro' },
     censusTract: { id: '1218125002' },
     locationLegal: { subdivisionName: 'HIGH COUNTRY BL 17786 UN 13', blockNumber: '42', lotNumber: '33', description: 'NCB 17786 BLK 42 LOT 33' },
-  } } })
+  } }, buildings: { data: { buildings: [{
+    structureClassification: { gradeTypeCode: 'FAI' },
+    constructionDetails: { buildingImprovementConditionCode: 'AVE', buildingImprovementValue: 171470, yearBuilt: 1982 },
+  }] } } })
 }
 try {
   const provider = createCoreLogicProvider({ CORELOGIC_CLIENT_ID: 'fixture', CORELOGIC_CLIENT_SECRET: 'fixture' } as Env)
@@ -128,6 +131,41 @@ try {
     assert.equal(result.data.cbsaCode, '41700')
     assert.equal(result.data.censusTract, '1218125002')
     assert.equal(result.data.legalDescription, 'NCB 17786 BLK 42 LOT 33')
+    assert.equal(result.data.buildingCondition, 'Average')
+    assert.equal(result.data.buildingGrade, 'Fair')
+    assert.equal(result.data.improvementValue, 171470)
   }
 } finally { globalThis.fetch = originalFetch }
-console.log('Provider evidence fixtures: permit nesting/history, empty versus unavailable, flood unknown/parcel, parcelId propagation and cache version passed')
+
+// Subject AVM (THV): normalized estimate, malformed parcel ID, missing value
+let avmPayload: unknown = { amount: 312000, confidenceScore: 82, fsd: 0.061, valueRange: { low: 295000, high: 329000 }, asOfDate: '2026-09-01' }
+globalThis.fetch = async (input, init) => {
+  if (init?.method === 'POST') return Response.json({ access_token: 'fixture-token', expires_in: 3600 })
+  paths.push(new URL(String(input)).pathname)
+  return Response.json(avmPayload)
+}
+try {
+  const provider = createCoreLogicProvider({ CORELOGIC_CLIENT_ID: 'fixture', CORELOGIC_CLIENT_SECRET: 'fixture' } as Env)
+  const avm = await provider.getAvm!('48029:36205502')
+  assert.equal(paths.at(-1), '/property/48029%3A36205502/avm/thv/thvMarketingStandard')
+  assert.equal(avm.success, true)
+  if (avm.success) {
+    assert.equal(avm.data.value, 312000)
+    assert.equal(avm.data.confidence, 82)
+    assert.equal(avm.data.valueRangeLow, 295000)
+    assert.equal(avm.data.valueRangeHigh, 329000)
+    assert.equal(avm.data.fsd, 0.061)
+    assert.equal(avm.data.model, 'thvMarketingStandard')
+  }
+  // Malformed parcel ID — must fail without firing a request
+  const beforeAvm = paths.length
+  const badAvm = await provider.getAvm!('5533034499')
+  assert.equal(badAvm.success, false)
+  assert.equal(paths.length, beforeAvm)
+  // Missing value — INVALID_RESPONSE
+  avmPayload = { corelogicPropertyId: '48029:36205502' }
+  const noValue = await provider.getAvm!('48029:36205502')
+  assert.equal(noValue.success, false)
+  assert.equal(!noValue.success && noValue.code, 'INVALID_RESPONSE')
+} finally { globalThis.fetch = originalFetch }
+console.log('Provider evidence fixtures: permit nesting/history, empty versus unavailable, flood unknown/parcel, parcelId/building-detail propagation, AVM and cache version passed')
