@@ -850,3 +850,21 @@ ordering confirmed in evaluation/index.ts.
   Rate Limits panel (tracks our API 429s + 5xx — provider-side
   CoreLogic/Firecrawl throttling is NOT yet logged, only visible as
   failures/latency).
+
+### Notify feedback loop (9d769cc, merged to main)
+
+- ComparablesSection: Notify button in manual-selection banner →
+  notes dialog (Enter or Send submits, blank OK) → generates
+  paste-ready devin.ai ticket + copies to clipboard.
+- New lib/comp-feedback.ts: diffs user selection vs engine ARV set
+  (compGroup), per-comp rule audit (passed/failed/not_verified,
+  actual vs threshold), why-added-comp-wasn't-selected, and minimal
+  config/code change to select it. Missing-evidence comps flagged
+  "data gap, not rule change".
+- API: comp filter serialization now emits `status` field so
+  not_verified is distinguishable from failed client-side.
+- Atom plumbing: `feedbackContext` (appliedFilters, fallbackUsed,
+  fallbackReason, jobId, subjectAddress) synced on all 3 surfaces
+  (analyze page, public report, saved report); threaded through
+  AnalysisResultLayout → ComparablesSection.
+- Verified: tsc clean api+dashboard.
