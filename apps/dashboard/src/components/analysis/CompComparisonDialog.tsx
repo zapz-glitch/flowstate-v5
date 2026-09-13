@@ -13,7 +13,7 @@ import { Switch } from '@/components/ui/switch'
 import { cn } from '@/lib/utils'
 import type { SubjectData, CompItem } from './shared-types'
 import { AddressDisplay } from './AddressDisplay'
-import { formatFilterType, formatCurrency, normalizeSubdivision } from './format-helpers'
+import { formatFilterType, formatCurrency, normalizeSubdivision, formatLotSize, fmtLotDelta } from './format-helpers'
 import { StreetViewImage } from './StreetViewImage'
 import { RuleMatchDetails } from './RuleMatchDetails'
 import type { ProximityConfig } from '@/lib/client-api'
@@ -77,6 +77,8 @@ export function CompComparisonDialog({ open, onOpenChange, subject, comp, isSele
     ? comp.squareFeet - subject.squareFeet : null
   const yearDiff = comp.yearBuilt != null && subject?.yearBuilt != null
     ? comp.yearBuilt - subject.yearBuilt : null
+  const lotDiff = comp.lotSizeAcres != null && subject?.lotSizeAcres != null
+    ? fmtLotDelta(comp.lotSizeAcres, subject.lotSizeAcres) : null
 
   // External links
   const streetViewUrl = comp.latitude && comp.longitude
@@ -221,20 +223,37 @@ export function CompComparisonDialog({ open, onOpenChange, subject, comp, isSele
               />
             </div>
             <div className="grid grid-cols-3 bg-muted/40 border-b border-border/30">
-              <StatCell label="Lot" value={comp.lotSizeAcres ? `${Number(comp.lotSizeAcres).toFixed(2)} ac` : '-'} />
+              <StatCell label="Lot" value={`${formatLotSize(comp.lotSizeAcres)}${lotDiff ? ` (${lotDiff})` : ''}`} />
               <StatCell label="Style" value={comp.buildingStyle || '-'} />
               <StatCell label="Foundation" value={comp.foundationType || '-'} />
             </div>
             <div className="grid grid-cols-3 bg-muted/40 border-b border-border/30">
               <StatCell label="Construction" value={comp.constructionType || '-'} />
-              <StatCell label="Roof" value={comp.roofType || '-'} />
+              <StatCell label="Roof" value={comp.roofCover || comp.roofType || '-'} />
               <StatCell label="Ext. Walls" value={comp.exteriorWalls || '-'} />
             </div>
-            <div className="grid grid-cols-4 bg-muted/40">
+            <div className="grid grid-cols-4 bg-muted/40 border-b border-border/30">
               <StatCell label="Pool" value={comp.pool ? 'Yes' : '-'} />
               <StatCell label="Garage" value={comp.garage ? (comp.garageSquareFeet ? `${comp.garageSquareFeet} sf` : 'Yes') : '-'} />
               <StatCell label="Carport" value={comp.carport ? 'Yes' : '-'} />
-              <StatCell label="Stories" value={comp.storiesType || '-'} />
+              <StatCell label="Stories" value={comp.storiesType || (comp.stories != null ? String(comp.stories) : '-')} />
+            </div>
+            <div className="grid grid-cols-3 bg-muted/40">
+              <StatCell label="Heat / AC" value={[comp.heating, comp.cooling].filter(Boolean).join(' / ') || '-'} />
+              <StatCell label="Assessor Cond." value={comp.buildingCondition || '-'} />
+              <StatCell
+                label="Condition"
+                value={
+                  comp.curbAppeal && comp.curbAppeal.condition !== 'unknown'
+                    ? comp.curbAppeal.condition === 'renovated' ? 'Renovated' : comp.curbAppeal.condition === 'dated' ? 'Dated' : 'Distressed'
+                    : '-'
+                }
+                highlight={
+                  comp.curbAppeal && comp.curbAppeal.condition !== 'unknown'
+                    ? comp.curbAppeal.condition === 'renovated' ? 'match' : 'mismatch'
+                    : undefined
+                }
+              />
             </div>
           </div>
 

@@ -210,6 +210,16 @@ export function ComparablesSection({
             </span>
           </div>
           <div className="flex items-center gap-2">
+            {/* Notify — comp-selection feedback report (always available) */}
+            <button
+              type="button"
+              onClick={() => { setNotifyReport(null); setNotifyNotes(''); setNotifyCopied(false); setNotifyOpen(true) }}
+              className="flex items-center gap-1 text-caption text-foreground-tertiary hover:text-foreground font-medium transition-colors no-print"
+              title="Generate a comp-selection feedback report for devin.ai"
+            >
+              <Bell className="w-3 h-3" />
+              Notify
+            </button>
             {/* Grid/List toggle */}
             <div className="flex items-center border border-border rounded overflow-hidden no-print">
               <button
@@ -268,15 +278,6 @@ export function ComparablesSection({
               </span>
             </div>
             <div className="flex items-center gap-3">
-              <button
-                type="button"
-                onClick={() => { setNotifyReport(null); setNotifyNotes(''); setNotifyCopied(false); setNotifyOpen(true) }}
-                className="flex items-center gap-1 text-caption text-amber-600 hover:text-amber-700 font-medium transition-colors"
-                title="Generate a comp-selection feedback report for devin.ai"
-              >
-                <Bell className="w-3 h-3" />
-                Notify
-              </button>
               {onReset && (
                 <button
                   type="button"

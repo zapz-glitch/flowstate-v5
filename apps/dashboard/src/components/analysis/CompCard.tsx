@@ -9,7 +9,7 @@ import { StatCell } from './StatCell'
 import { ClassificationBadge } from './ClassificationBadge'
 import { PhotoGallery } from './PhotoGallery'
 import { AddressDisplay } from './AddressDisplay'
-import { formatFilterType, formatAdjustmentType, formatCurrency, normalizeSubdivision, getCompKey, fmtLotDelta } from './format-helpers'
+import { formatFilterType, formatAdjustmentType, formatCurrency, normalizeSubdivision, getCompKey, fmtLotDelta, formatLotSize } from './format-helpers'
 import { StreetViewImage } from './StreetViewImage'
 import { RuleMatchDetails } from './RuleMatchDetails'
 
@@ -142,16 +142,75 @@ export function CompCard({
           label="Lot"
           value={
             comp.lotSizeAcres != null
-              ? `${Number(comp.lotSizeAcres).toFixed(3)} ac${comp.lotSizeAcres != null && subjectLotAcres != null ? ` (${fmtLotDelta(comp.lotSizeAcres, subjectLotAcres)})` : ''}`
+              ? `${formatLotSize(comp.lotSizeAcres)}${subjectLotAcres != null ? ` (${fmtLotDelta(comp.lotSizeAcres, subjectLotAcres)})` : ''}`
               : '-'
           }
         />
-        <StatCell label="Foundation" value={comp.foundationType || '-'} />
-        <StatCell label="House Style" value={comp.buildingStyle || '-'} />
+        <StatCell label="Style" value={comp.buildingStyle || '-'} />
       </div>
 
       {isExpanded && (
         <div className="px-5 pb-4 pt-2 space-y-4">
+          {/* Full property details — everything valid for comparison */}
+          <div>
+            <div className="text-caption font-medium text-foreground-secondary mb-1.5">Property Details</div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1">
+              <div className="flex items-center justify-between text-[11px]">
+                <span className="text-foreground-tertiary">Foundation</span>
+                <span className="font-medium truncate ml-2">{comp.foundationType || '-'}</span>
+              </div>
+              <div className="flex items-center justify-between text-[11px]">
+                <span className="text-foreground-tertiary">Construction</span>
+                <span className="font-medium truncate ml-2">{comp.constructionType || '-'}</span>
+              </div>
+              <div className="flex items-center justify-between text-[11px]">
+                <span className="text-foreground-tertiary">Ext. Walls</span>
+                <span className="font-medium truncate ml-2">{comp.exteriorWalls || '-'}</span>
+              </div>
+              <div className="flex items-center justify-between text-[11px]">
+                <span className="text-foreground-tertiary">Roof</span>
+                <span className="font-medium truncate ml-2">{comp.roofCover || comp.roofType || '-'}</span>
+              </div>
+              <div className="flex items-center justify-between text-[11px]">
+                <span className="text-foreground-tertiary">Stories</span>
+                <span className="font-medium truncate ml-2">{comp.storiesType || (comp.stories != null ? String(comp.stories) : '-')}</span>
+              </div>
+              <div className="flex items-center justify-between text-[11px]">
+                <span className="text-foreground-tertiary">Heat / AC</span>
+                <span className="font-medium truncate ml-2">{[comp.heating, comp.cooling].filter(Boolean).join(' / ') || '-'}</span>
+              </div>
+              <div className="flex items-center justify-between text-[11px]">
+                <span className="text-foreground-tertiary">Assessor Cond.</span>
+                <span className="font-medium truncate ml-2">{comp.buildingCondition || '-'}</span>
+              </div>
+              <div className="flex items-center justify-between text-[11px]">
+                <span className="text-foreground-tertiary">Condition</span>
+                <span className={cn(
+                  'font-medium truncate ml-2',
+                  comp.curbAppeal?.condition === 'renovated' && 'text-emerald-500',
+                  comp.curbAppeal?.condition === 'dated' && 'text-amber-500',
+                  comp.curbAppeal?.condition === 'distressed' && 'text-red-400',
+                )} title={comp.curbAppeal?.summary ?? undefined}>
+                  {comp.curbAppeal && comp.curbAppeal.condition !== 'unknown'
+                    ? comp.curbAppeal.condition === 'renovated' ? 'Renovated' : comp.curbAppeal.condition === 'dated' ? 'Dated' : 'Distressed'
+                    : '-'}
+                </span>
+              </div>
+              <div className="flex items-center justify-between text-[11px]">
+                <span className="text-foreground-tertiary">Pool</span>
+                <span className="font-medium">{comp.pool ? 'Yes' : '-'}</span>
+              </div>
+              <div className="flex items-center justify-between text-[11px]">
+                <span className="text-foreground-tertiary">Garage</span>
+                <span className="font-medium truncate ml-2" title={[comp.garage, comp.carport].filter(Boolean).join(' + ') || undefined}>
+                  {comp.garage
+                    ? `${comp.garage}${comp.garageSquareFeet ? ` ${comp.garageSquareFeet} sf` : ''}${comp.carport ? ` + ${comp.carport}` : ''}`
+                    : comp.carport ?? '-'}
+                </span>
+              </div>
+            </div>
+          </div>
+
           {comp.classification && (
             <div>
               <div className="text-caption text-foreground-tertiary flex items-center gap-2 mb-1">

@@ -5,7 +5,7 @@ import { cn } from '@/lib/utils'
 import type { CompItem, SubjectData } from './shared-types'
 import { StreetViewImage } from './StreetViewImage'
 import { RuleMatchDetails } from './RuleMatchDetails'
-import { normalizeSubdivision, sqftMatchColor, yearMatchColor, lotMatchColor, fmtDelta, fmtLotDelta, formatShortDate } from './format-helpers'
+import { normalizeSubdivision, sqftMatchColor, yearMatchColor, lotMatchColor, fmtDelta, fmtLotDelta, formatShortDate, formatLotSize } from './format-helpers'
 
 export interface CompGridCardProps {
   comp: CompItem
@@ -184,32 +184,6 @@ export function CompGridCard({
               </span>
             )
           })()}
-          {comp.neighborhoodName && (() => {
-            const norm = (s?: string | null) => s?.trim().toLowerCase() ?? null
-            const hasSubject = !!subject?.neighborhoodName
-            const isMatch = hasSubject && norm(comp.neighborhoodName) === norm(subject?.neighborhoodName)
-            return (
-              <span className={cn(
-                'inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[9px] font-medium',
-                hasSubject
-                  ? isMatch
-                    ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20'
-                    : 'bg-red-500/10 text-red-400 border border-red-500/20'
-                  : 'bg-muted text-foreground-tertiary'
-              )} title={`Neighborhood: ${comp.neighborhoodName}`}>
-                {hasSubject && (isMatch
-                  ? <Check className="w-2.5 h-2.5 flex-shrink-0" />
-                  : <X className="w-2.5 h-2.5 flex-shrink-0" />
-                )}
-                <span>{comp.neighborhoodName}</span>
-              </span>
-            )
-          })()}
-          {comp.yearBuilt != null && comp.yearBuilt < 1978 && (
-            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[9px] font-medium bg-amber-500/10 text-amber-500 border border-amber-500/20" title="Built before 1978 — lead-based paint disclosure applies">
-              Pre-1978 · Lead Paint
-            </span>
-          )}
         </div>
         {/* Distance + Adj price */}
         <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
@@ -223,7 +197,7 @@ export function CompGridCard({
 
         <RuleMatchDetails comp={comp} />
 
-        {/* Stats grid — 2 columns */}
+        {/* Stats grid — collapsed essentials; full detail in the expand dialog */}
         <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 mt-2">
           <div className="flex items-center justify-between text-[11px]">
             <span className="text-foreground-tertiary">Bed/Bath</span>
@@ -246,73 +220,13 @@ export function CompGridCard({
           <div className="flex items-center justify-between text-[11px]">
             <span className="text-foreground-tertiary">Lot</span>
             <span className="font-medium tabular-nums">
-              {comp.lotSizeAcres != null ? `${Number(comp.lotSizeAcres).toFixed(3)} ac` : '-'}
+              {formatLotSize(comp.lotSizeAcres)}
               {lotDelta != null && <span className={cn('ml-1 text-[9px]', lotColor)}>({fmtLotDelta(comp.lotSizeAcres!, subject!.lotSizeAcres!)})</span>}
             </span>
           </div>
           <div className="flex items-center justify-between text-[11px]">
             <span className="text-foreground-tertiary">Style</span>
             <span className="font-medium truncate ml-2">{comp.buildingStyle || '-'}</span>
-          </div>
-          <div className="flex items-center justify-between text-[11px]">
-            <span className="text-foreground-tertiary">Foundation</span>
-            <span className="font-medium truncate ml-2">{comp.foundationType || '-'}</span>
-          </div>
-          {(comp.constructionType || comp.exteriorWalls) && (
-            <div className="flex items-center justify-between text-[11px]">
-              <span className="text-foreground-tertiary">Construction</span>
-              <span className="font-medium truncate ml-2">{[comp.constructionType, comp.exteriorWalls].filter(Boolean).join(' / ')}</span>
-            </div>
-          )}
-          {(comp.roofCover || comp.roofType) && (
-            <div className="flex items-center justify-between text-[11px]">
-              <span className="text-foreground-tertiary">Roof</span>
-              <span className="font-medium truncate ml-2">{comp.roofCover || comp.roofType}</span>
-            </div>
-          )}
-          {(comp.storiesType || comp.stories != null) && (
-            <div className="flex items-center justify-between text-[11px]">
-              <span className="text-foreground-tertiary">Stories</span>
-              <span className="font-medium truncate ml-2">{comp.storiesType || comp.stories}</span>
-            </div>
-          )}
-          {comp.buildingCondition && (
-            <div className="flex items-center justify-between text-[11px]">
-              <span className="text-foreground-tertiary">Assessor Cond.</span>
-              <span className="font-medium truncate ml-2">{comp.buildingCondition}</span>
-            </div>
-          )}
-          {(comp.heating || comp.cooling) && (
-            <div className="flex items-center justify-between text-[11px]">
-              <span className="text-foreground-tertiary">Heat / AC</span>
-              <span className="font-medium truncate ml-2">{[comp.heating, comp.cooling].filter(Boolean).join(' / ')}</span>
-            </div>
-          )}
-          {comp.curbAppeal && comp.curbAppeal.condition !== 'unknown' && (
-            <div className="flex items-center justify-between text-[11px]">
-              <span className="text-foreground-tertiary">Condition</span>
-              <span className={cn(
-                'font-medium truncate ml-2',
-                comp.curbAppeal.condition === 'renovated' && 'text-emerald-500',
-                comp.curbAppeal.condition === 'dated' && 'text-amber-500',
-                comp.curbAppeal.condition === 'distressed' && 'text-red-400',
-              )} title={comp.curbAppeal.summary ?? undefined}>
-                {comp.curbAppeal.condition === 'renovated' ? 'Renovated' : comp.curbAppeal.condition === 'dated' ? 'Dated' : 'Distressed'}
-                {comp.curbAppeal.source === 'price' && <span className="text-[8px] text-foreground-tertiary font-normal"> (by price)</span>}
-              </span>
-            </div>
-          )}
-          <div className="flex items-center justify-between text-[11px]">
-            <span className="text-foreground-tertiary">Pool</span>
-            <span className="font-medium">{comp.pool ? 'Yes' : '-'}</span>
-          </div>
-          <div className="flex items-center justify-between text-[11px]">
-            <span className="text-foreground-tertiary">Garage</span>
-            <span className="font-medium truncate ml-2" title={[comp.garage, comp.carport].filter(Boolean).join(' + ') || undefined}>
-              {comp.garage
-                ? `${comp.garage}${comp.garageSquareFeet ? ` ${comp.garageSquareFeet} sf` : ''}${comp.carport ? ` + ${comp.carport}` : ''}`
-                : comp.carport ?? '-'}
-            </span>
           </div>
         </div>
       </div>

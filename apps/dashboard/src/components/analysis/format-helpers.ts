@@ -75,6 +75,13 @@ export function lotMatchColor(compAcres: number, subAcres: number): string {
   return 'text-red-400'
 }
 
+/** Format lot size: sqft for ≤0.5 ac, acres above — "9,540 sf" / "0.62 ac" */
+export function formatLotSize(acres: number | null | undefined): string {
+  if (acres == null) return '-'
+  if (acres <= 0.5) return `${Math.round(acres * 43560).toLocaleString()} sf`
+  return `${Number(acres).toFixed(2)} ac`
+}
+
 /** Format a lot-size delta in sqft as "+2,310 sf" */
 export function fmtLotDelta(compAcres: number, subAcres: number): string {
   const diffSf = Math.round((compAcres - subAcres) * 43560)
