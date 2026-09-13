@@ -1,14 +1,23 @@
 'use client'
 
 import { useState, useEffect, useMemo } from 'react'
-import { SlidersHorizontal, RotateCcw, Loader2, LayoutGrid, List, ArrowUpDown } from 'lucide-react'
+import { SlidersHorizontal, RotateCcw, Loader2, LayoutGrid, List, ArrowUpDown, Bell, Copy, Check } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
 import type { CompsData, CompItem, SubjectData } from './shared-types'
 import { getCompKey, normalizeSubdivision } from './format-helpers'
 import { CompCard } from './CompCard'
 import { CompGridCard } from './CompGridCard'
 import { RuleMatchDetails } from './RuleMatchDetails'
+import { generateCompFeedbackReport, type FeedbackContext, type FeedbackKind } from '@/lib/comp-feedback'
+import { submitReportFeedback } from '@/app/(dashboard)/dashboard/batch/actions'
 
 export interface ComparablesSectionProps {
   comps: CompsData
@@ -37,16 +46,42 @@ export interface ComparablesSectionProps {
   onCompClick?: (comp: CompItem) => void
   /** Called when a comp card is hovered (for map marker sync) */
   onCompHover?: (key: string | null) => void
+  /** Rules/fallback context for the "Notify" comp-selection feedback report */
+  feedbackContext?: FeedbackContext | null
+  /** Called after a feedback stamp is submitted — batch review uses it to advance */
+  onFeedbackSubmitted?: (type: 'validate' | 'improve') => void
 }
 
-type SortOption = 'default' | 'subdivision' | 'distance' | 'price' | 'psf'
+type SortOption = 'default' | 'subdivision' | 'neighborhood' | 'distance' | 'price' | 'psf'
 
 const SORT_LABELS: Record<SortOption, string> = {
   default: 'Default',
   subdivision: 'Subdivision',
+  neighborhood: 'Neighborhood',
   distance: 'Distance',
   price: 'Price',
   psf: '$/Sqft',
+}
+
+/** Fraction of appraisal filters a comp passed — the "closest to our rules" score */
+function compRuleScore(comp: CompItem): number {
+  const filters = comp.appraisalRules?.filters
+  if (filters && filters.length > 0) {
+    const passed = filters.filter((f) => f.status === 'passed' || (f.status == null && f.passed)).length
+    return passed / filters.length
+  }
+  if (comp.matchPercent != null) return comp.matchPercent
+  if (comp.matchRuleCount != null && comp.matchRuleTotal) return comp.matchRuleCount / comp.matchRuleTotal
+  return 0
+}
+
+/** Neighborhood match by normalized name OR provider code (mirrors server-side neighborhoodsMatch) */
+function neighborhoodsMatchClient(comp: CompItem, subject: SubjectData | null | undefined): boolean {
+  const norm = (s?: string | null) => s?.trim().toLowerCase() || null
+  const a = norm(comp.neighborhoodName)
+  const b = norm(subject?.neighborhoodName)
+  if (a && b && a === b) return true
+  return comp.neighborhoodCode != null && subject?.neighborhoodCode != null && comp.neighborhoodCode === subject.neighborhoodCode
 }
 
 export function ComparablesSection({
@@ -64,12 +99,21 @@ export function ComparablesSection({
   onUndoAiSelection,
   onCompClick,
   onCompHover,
+  feedbackContext,
+  onFeedbackSubmitted,
 }: ComparablesSectionProps) {
   const [expandedComps, setExpandedComps] = useState<Set<string>>(new Set())
   const [excludedOpen, setExcludedOpen] = useState(false)
   const [layout, setLayout] = useState<'grid' | 'list'>('grid')
   const [sortBy, setSortBy] = useState<SortOption>('default')
   const [sortDesc, setSortDesc] = useState(true)
+  const [notifyOpen, setNotifyOpen] = useState(false)
+  const [notifyNotes, setNotifyNotes] = useState('')
+  const [notifyReport, setNotifyReport] = useState<string | null>(null)
+  const [notifyCopied, setNotifyCopied] = useState(false)
+  const [notifySubmitting, setNotifySubmitting] = useState<FeedbackKind | null>(null)
+  const [notifyStamped, setNotifyStamped] = useState<'validated' | 'improve' | null>(null)
+  const [notifySaveError, setNotifySaveError] = useState<string | null>(null)
 
   // Auto-expand excluded section when a highlighted comp is in it
   useEffect(() => {
@@ -83,18 +127,24 @@ export function ComparablesSection({
     }
   }, [highlightedCompKey, comps.items, selectedCompKeys, excludedOpen])
   const compItems = comps.items || []
+  const hasInteractiveSelection = !!selectedCompKeys
 
-  // Sorted items preserving original index for stable keys & map marker numbering
+  // Sorted items preserving original index for stable keys & map marker numbering.
+  // Stacked ordering: selected block pinned first → geo grouping (subdivision/
+  // neighborhood modes) → appraisal-rule closeness (constant across every sort)
+  // → directional key (price under geo modes, own key for distance/price/psf).
   const sortedItems = useMemo(() => {
     const indexed = compItems.map((comp, i) => ({ comp, originalIndex: i }))
-    // Default ordering: selected comps first (engine's pick = highest trust),
-    // then same-subdivision, then nearest → farthest
+    const isSel = (c: CompItem, i: number) =>
+      hasInteractiveSelection ? selectedCompKeys!.has(getCompKey(c, i)) : (c.compGroup === 'arv' || c.isEnabled === true)
+    const subNorm = normalizeSubdivision(subjectSubdivision)
+
     if (sortBy === 'default') {
-      const subNorm = normalizeSubdivision(subjectSubdivision)
-      const rank = (c: typeof compItems[number]) =>
-        c.compGroup === 'arv' ? 0 : c.isEnabled ? 1 : 2
+      // What the rules selected: selected block first, then enabled, then
+      // excluded; subdivision matches before non-matches; nearest first
       return [...indexed].sort((a, b) => {
-        const ra = rank(a.comp), rb = rank(b.comp)
+        const ra = isSel(a.comp, a.originalIndex) ? 0 : a.comp.isEnabled ? 1 : 2
+        const rb = isSel(b.comp, b.originalIndex) ? 0 : b.comp.isEnabled ? 1 : 2
         if (ra !== rb) return ra - rb
         const aMatch = normalizeSubdivision(a.comp.subdivision) === subNorm ? 1 : 0
         const bMatch = normalizeSubdivision(b.comp.subdivision) === subNorm ? 1 : 0
@@ -102,34 +152,33 @@ export function ComparablesSection({
         return (a.comp.distanceMiles ?? 999) - (b.comp.distanceMiles ?? 999)
       })
     }
-    const dir = sortDesc ? -1 : 1
-    const sorted = [...indexed]
-    switch (sortBy) {
-      case 'subdivision': {
-        // Subject-subdivision matches first (desc) / last (asc), then by name
-        const subNorm = normalizeSubdivision(subjectSubdivision)
-        sorted.sort((a, b) => {
-          const aMatch = normalizeSubdivision(a.comp.subdivision) === subNorm ? 1 : 0
-          const bMatch = normalizeSubdivision(b.comp.subdivision) === subNorm ? 1 : 0
-          if (aMatch !== bMatch) return dir * (aMatch - bMatch)
-          return (a.comp.subdivision ?? '').localeCompare(b.comp.subdivision ?? '')
-        })
-        break
-      }
-      case 'distance':
-        sorted.sort((a, b) => dir * ((a.comp.distanceMiles ?? 999) - (b.comp.distanceMiles ?? 999)))
-        break
-      case 'price':
-        sorted.sort((a, b) => dir * ((a.comp.salePrice ?? 0) - (b.comp.salePrice ?? 0)))
-        break
-      case 'psf':
-        sorted.sort((a, b) => dir * ((a.comp.pricePerSqft ?? 0) - (b.comp.pricePerSqft ?? 0)))
-        break
-    }
-    return sorted
-  }, [compItems, sortBy, sortDesc])
 
-  const hasInteractiveSelection = !!selectedCompKeys
+    const dir = sortDesc ? -1 : 1
+    const geoMatch = (c: CompItem): number => {
+      if (sortBy === 'subdivision') return normalizeSubdivision(c.subdivision) === subNorm ? 1 : 0
+      if (sortBy === 'neighborhood') return neighborhoodsMatchClient(c, subject) ? 1 : 0
+      return 0
+    }
+    const numKey = (c: CompItem): number => {
+      switch (sortBy) {
+        case 'distance': return c.distanceMiles ?? 999
+        case 'psf': return c.pricePerSqft ?? 0
+        // subdivision & neighborhood ascend/descend by price
+        default: return c.salePrice ?? 0
+      }
+    }
+
+    return [...indexed].sort((a, b) => {
+      const sa = isSel(a.comp, a.originalIndex) ? 0 : 1
+      const sb = isSel(b.comp, b.originalIndex) ? 0 : 1
+      if (sa !== sb) return sa - sb
+      const ga = geoMatch(a.comp), gb = geoMatch(b.comp)
+      if (ga !== gb) return gb - ga
+      const rs = compRuleScore(b.comp) - compRuleScore(a.comp)
+      if (rs !== 0) return rs
+      return dir * (numKey(a.comp) - numKey(b.comp)) || (a.originalIndex - b.originalIndex)
+    })
+  }, [compItems, sortBy, sortDesc, subjectSubdivision, subject, selectedCompKeys, hasInteractiveSelection])
 
   const toggleExpand = (key: string) => {
     const next = new Set(expandedComps)
@@ -149,6 +198,41 @@ export function ComparablesSection({
   const showAllFlat = arvComps.length === 0 && excludedComps.length > 0
 
   const selectedCount = arvComps.length
+
+  // Notify — build the paste-ready devin.ai ticket, stamp the report, copy it
+  const submitNotify = async (kind: FeedbackKind) => {
+    if (notifySubmitting) return
+    setNotifySubmitting(kind)
+    const report = generateCompFeedbackReport({
+      subject,
+      comps: compItems,
+      userSelectedKeys: selectedCompKeys ?? new Set(),
+      context: feedbackContext ?? {},
+      userNotes: notifyNotes,
+      kind,
+    })
+    setNotifyReport(report)
+    setNotifySaveError(null)
+    navigator.clipboard
+      .writeText(report)
+      .then(() => setNotifyCopied(true))
+      .catch(() => setNotifyCopied(false))
+
+    // Persist the stamp so the batch list shows this report as reviewed
+    const jobId = feedbackContext?.jobId
+    if (jobId) {
+      try {
+        const res = await submitReportFeedback(jobId, kind, notifyNotes, report)
+        if (res.success) setNotifyStamped(kind === 'validate' ? 'validated' : 'improve')
+        else setNotifySaveError(res.error ?? 'Stamp not saved')
+      } catch {
+        setNotifySaveError('Stamp not saved')
+      }
+    }
+    setNotifySubmitting(null)
+    // Batch review mode — advance to the next report after stamping
+    onFeedbackSubmitted?.(kind === 'validate' ? 'validate' : 'improve')
+  }
 
   // Stats from selected comps
   const selectedPrices = arvComps
@@ -179,6 +263,16 @@ export function ComparablesSection({
             </span>
           </div>
           <div className="flex items-center gap-2">
+            {/* Notify — comp-selection feedback report (always available) */}
+            <button
+              type="button"
+              onClick={() => { setNotifyReport(null); setNotifyNotes(''); setNotifyCopied(false); setNotifyStamped(null); setNotifySaveError(null); setNotifyOpen(true) }}
+              className="flex items-center gap-1 text-caption text-foreground-tertiary hover:text-foreground font-medium transition-colors no-print"
+              title="Generate a comp-selection feedback report for devin.ai"
+            >
+              <Bell className="w-3 h-3" />
+              Notify
+            </button>
             {/* Grid/List toggle */}
             <div className="flex items-center border border-border rounded overflow-hidden no-print">
               <button
@@ -204,7 +298,7 @@ export function ComparablesSection({
         {/* Row 2: Sort controls */}
         <div className="flex items-center gap-1 no-print">
           <ArrowUpDown className="w-3 h-3 text-foreground-tertiary mr-0.5" />
-          {(['default', 'subdivision', 'distance', 'price', 'psf'] as const).map((opt) => (
+          {(['default', 'subdivision', 'neighborhood', 'distance', 'price', 'psf'] as const).map((opt) => (
             <button
               key={opt}
               type="button"
@@ -236,16 +330,18 @@ export function ComparablesSection({
                 Manual · {selectedCount} comp{selectedCount !== 1 ? 's' : ''} · ARV: <span className="font-semibold tabular-nums">~${recalculatedArv?.toLocaleString() ?? '—'}</span>
               </span>
             </div>
-            {onReset && (
-              <button
-                type="button"
-                onClick={onReset}
-                className="flex items-center gap-1 text-caption text-amber-600 hover:text-amber-700 font-medium transition-colors"
-              >
-                <RotateCcw className="w-3 h-3" />
-                Reset
-              </button>
-            )}
+            <div className="flex items-center gap-3">
+              {onReset && (
+                <button
+                  type="button"
+                  onClick={onReset}
+                  className="flex items-center gap-1 text-caption text-amber-600 hover:text-amber-700 font-medium transition-colors"
+                >
+                  <RotateCcw className="w-3 h-3" />
+                  Reset
+                </button>
+              )}
+            </div>
           </div>
         )}
       </div>
@@ -348,6 +444,7 @@ export function ComparablesSection({
                   isExpanded={expandedComps.has(key)}
                   onToggle={() => toggleExpand(key)}
                   subjectSubdivision={subjectSubdivision}
+                  subjectLotAcres={subject?.lotSizeAcres}
                   isSelectedForArv={isSelected}
                   onToggleArv={onToggleComp ? () => onToggleComp(key) : undefined}
                 />
@@ -356,6 +453,101 @@ export function ComparablesSection({
           </div>
         )}
       </div>
+
+      {/* Notify dialog — notes → generates a paste-ready devin.ai ticket */}
+      <Dialog open={notifyOpen} onOpenChange={setNotifyOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Notify — comp selection feedback</DialogTitle>
+            <DialogDescription>
+              Generates a report explaining why your comp changes differ from the engine&apos;s
+              selection and what needs to change. Paste it into devin.ai.
+            </DialogDescription>
+          </DialogHeader>
+
+          {notifyReport === null ? (
+            <div className="space-y-3">
+              <textarea
+                autoFocus
+                value={notifyNotes}
+                onChange={(e) => setNotifyNotes(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault()
+                    submitNotify('improve')
+                  }
+                }}
+                placeholder="Optional notes for this ticket — e.g. '10321 Briarcliff is the right comp, same street renovated sale'&#10;&#10;Enter = Flag for improvement · Shift+Enter = new line"
+                rows={4}
+                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-body-sm text-foreground placeholder:text-foreground-tertiary focus:outline-none focus:ring-1 focus:ring-primary resize-y"
+              />
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[10px] text-foreground-tertiary">
+                  Both stamp this report + copy a ticket to your clipboard
+                </span>
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => submitNotify('validate')}
+                    disabled={notifySubmitting !== null}
+                    className="text-emerald-600 border-emerald-500/30 hover:bg-emerald-500/10"
+                  >
+                    {notifySubmitting === 'validate' ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <Check className="w-3.5 h-3.5 mr-1.5" />}
+                    Validate
+                  </Button>
+                  <Button
+                    size="sm"
+                    onClick={() => submitNotify('improve')}
+                    disabled={notifySubmitting !== null}
+                    className="bg-amber-600 hover:bg-amber-700 text-white"
+                  >
+                    {notifySubmitting === 'improve' ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <Bell className="w-3.5 h-3.5 mr-1.5" />}
+                    Flag for improvement
+                  </Button>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  {notifyStamped && (
+                    <span className={cn(
+                      'text-[10px] font-medium px-1.5 py-0.5 rounded',
+                      notifyStamped === 'validated' ? 'bg-emerald-500/10 text-emerald-500' : 'bg-amber-500/10 text-amber-500'
+                    )}>
+                      {notifyStamped === 'validated' ? '✓ Validated' : '⚑ Flagged'}
+                    </span>
+                  )}
+                  <p className="text-caption text-foreground-tertiary">
+                    {notifyCopied ? 'Copied to clipboard — paste into devin.ai' : 'Generated — copy below'}
+                    {notifySaveError && <span className="text-red-400 ml-1">({notifySaveError})</span>}
+                  </p>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    navigator.clipboard.writeText(notifyReport).then(() => setNotifyCopied(true)).catch(() => {})
+                  }}
+                >
+                  {notifyCopied ? <Check className="w-3.5 h-3.5 mr-1.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5 mr-1.5" />}
+                  {notifyCopied ? 'Copied' : 'Copy'}
+                </Button>
+              </div>
+              <pre className="max-h-[50vh] overflow-auto rounded-lg border border-border bg-secondary/40 p-3 text-[11px] leading-relaxed text-foreground whitespace-pre-wrap font-mono">
+                {notifyReport}
+              </pre>
+              <div className="flex justify-end">
+                <Button variant="outline" size="sm" onClick={() => setNotifyOpen(false)}>
+                  Done
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
     </div>
   )

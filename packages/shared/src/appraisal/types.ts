@@ -9,8 +9,15 @@
 
 export type FilterType =
   | 'subdivision_match'
+  | 'neighborhood_match'
   | 'building_style_match'
   | 'foundation_match'
+  | 'construction_material_match'
+  | 'pool_match'
+  | 'garage_match'
+  | 'stories_match'
+  | 'roof_material_match'
+  | 'condition_match'
   | 'sale_age'
   | 'sqft_diff'
   | 'property_type'
@@ -27,6 +34,11 @@ export interface AppraisalFilter {
   enabled: boolean
   /** Threshold value for the filter */
   value: number
+  /**
+   * hard (default): a verified failure disqualifies the comp.
+   * soft: failure is recorded for ranking/reporting but never disqualifies.
+   */
+  priority?: 'hard' | 'soft'
 }
 
 export interface FilterResult {
@@ -58,6 +70,8 @@ export interface AppraisalAdjustment {
   amount: number
   /** Percentage (for old_comp_discount) */
   percent?: number
+  /** For old_comp_discount: sales older than this many days get the discount (default 90) */
+  thresholdDays?: number
 }
 
 export interface AdjustmentResult {
@@ -82,9 +96,21 @@ export interface PropertyLike {
   propertyType?: string | null
   lotSizeSquareFeet?: number | null
   basementSquareFeet?: number | null
+  /** Cotality site-location neighborhood name */
+  neighborhoodName?: string | null
+  /** Story count */
+  stories?: number | null
+  /** Assessor building improvement condition (e.g. "Average") */
+  buildingCondition?: string | null
   construction?: {
     buildingStyle?: string | null
     foundationType?: string | null
+    /** Construction type (e.g. Frame, Masonry) */
+    type?: string | null
+    /** Exterior wall material (e.g. Wood Siding, Brick) */
+    exteriorWalls?: string | null
+    /** Roof cover material */
+    roofCover?: string | null
   } | null
   features?: {
     poolType?: string[] | null

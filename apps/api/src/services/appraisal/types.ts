@@ -11,8 +11,15 @@ import type { NormalizedProperty, NormalizedComparable } from '../property-api/t
 
 export type FilterType =
   | 'subdivision_match'
+  | 'neighborhood_match'
   | 'building_style_match'
   | 'foundation_match'
+  | 'construction_material_match'
+  | 'pool_match'
+  | 'garage_match'
+  | 'stories_match'
+  | 'roof_material_match'
+  | 'condition_match'
   | 'sale_age'
   | 'sqft_diff'
   | 'year_built_diff'
@@ -26,19 +33,47 @@ export interface AppraisalFilter {
   enabled: boolean
   /** Threshold value for the filter */
   value: number
+  /**
+   * hard (default): a verified failure disqualifies the comp.
+   * soft: failure is recorded for ranking/reporting but never disqualifies —
+   * used for "ideally matches" fields like stories and roof material.
+   */
+  priority?: 'hard' | 'soft'
 }
 
 export const DEFAULT_FILTERS: AppraisalFilter[] = [
-  { type: 'subdivision_match', enabled: true, value: 1 }, // Enabled - uses enriched comp data
-  { type: 'foundation_match', enabled: true, value: 1 }, // Same foundation type (not_verified when missing)
+  // HARD RULES (the fixed deal-breakers):
+  //   sale_age ≤180d · same subdivision · ±250 sqft · same property type ·
+  //   no major-road crossing · ±10yr build date.
+  // Neighborhood is a datapoint only — recorded and displayed; also used
+  // as the dedicated fallback tier when subdivision matching can't fill
+  // the comp pool (name OR code).
+  { type: 'subdivision_match', enabled: true, value: 1 },
+  { type: 'neighborhood_match', enabled: true, value: 1, priority: 'soft' },
+  { type: 'building_style_match', enabled: true, value: 1, priority: 'hard' }, // Ranch vs Ranch, 2-story style vs same — verified mismatches disqualify
+  // Preferred physical matches (soft) — assessed from provider building
+  // data; recorded for confidence/ranking, never disqualify.
+  { type: 'foundation_match', enabled: true, value: 1, priority: 'soft' },
+  { type: 'construction_material_match', enabled: true, value: 1, priority: 'soft' },
+  { type: 'pool_match', enabled: true, value: 1, priority: 'soft' },
+  { type: 'garage_match', enabled: true, value: 1, priority: 'soft' },
+  { type: 'condition_match', enabled: true, value: 1, priority: 'soft' }, // assessor condition — comp at/above subject tier scores higher
+  { type: 'stories_match', enabled: true, value: 1, priority: 'hard' }, // 1-story vs 1-story, 2-story vs 2-story — verified mismatches disqualify
+  { type: 'roof_material_match', enabled: true, value: 1, priority: 'soft' },
+  // Size/recency/geography thresholds (relaxable in expansion tiers)
   { type: 'sale_age', enabled: true, value: 180 }, // 6 months max comp age
   { type: 'sqft_diff', enabled: true, value: 250 }, // ±250 sqft variance
   { type: 'year_built_diff', enabled: true, value: 10 }, // ±10 years
   { type: 'distance', enabled: true, value: 1.0 }, // 1 mile (matches API search)
   { type: 'property_type', enabled: true, value: 1 }, // Same property/build type
-  { type: 'lot_size_diff', enabled: true, value: 2500 }, // ±2,500 sqft lot
+  { type: 'lot_size_diff', enabled: true, value: 2500, priority: 'soft' }, // ±2,500 sqft lot — similarity data, not a deal-breaker
   { type: 'road_barrier', enabled: true, value: 1 }, // No crossing major roads (not_verified when no data)
 ]
+
+/** System default priority for a filter type ('hard' when unspecified). */
+export function defaultFilterPriority(type: FilterType): 'hard' | 'soft' {
+  return DEFAULT_FILTERS.find((f) => f.type === type)?.priority ?? 'hard'
+}
 
 // ─── Filter Labels (for UI) ────────────────────────────────────────────────────
 
@@ -54,6 +89,12 @@ export const FILTER_LABELS: Record<FilterType, {
     unit: '',
     description: 'Must be in same subdivision as subject',
   },
+  neighborhood_match: {
+    label: 'Neighborhood Match',
+    shortLabel: 'Neighborhood',
+    unit: '',
+    description: 'Must be in the same neighborhood — fallback geography when no subdivision exists',
+  },
   building_style_match: {
     label: 'Building Style Match',
     shortLabel: 'Style',
@@ -65,6 +106,42 @@ export const FILTER_LABELS: Record<FilterType, {
     shortLabel: 'Foundation',
     unit: '',
     description: 'Must match subject foundation type (e.g. Slab, Continuous Footing)',
+  },
+  construction_material_match: {
+    label: 'Construction Material Match',
+    shortLabel: 'Construction',
+    unit: '',
+    description: 'Must match subject construction type and exterior wall material (e.g. Frame/Wood Siding vs Brick)',
+  },
+  pool_match: {
+    label: 'Pool Match',
+    shortLabel: 'Pool',
+    unit: '',
+    description: 'Pool presence must match the subject',
+  },
+  garage_match: {
+    label: 'Garage/Carport Match',
+    shortLabel: 'Garage',
+    unit: '',
+    description: 'Covered parking (garage or carport) presence must match the subject',
+  },
+  stories_match: {
+    label: 'Stories Match',
+    shortLabel: 'Stories',
+    unit: '',
+    description: 'Story count should match the subject (preferred — ranks comps, never disqualifies)',
+  },
+  roof_material_match: {
+    label: 'Roof Material Match',
+    shortLabel: 'Roof',
+    unit: '',
+    description: 'Roof cover material should match the subject (preferred — matters in some markets)',
+  },
+  condition_match: {
+    label: 'Assessor Condition Match',
+    shortLabel: 'Condition',
+    unit: '',
+    description: 'Comp assessor condition must be at or above the subject tier (e.g. comp cannot be worse condition)',
   },
   sale_age: {
     label: 'Sale Age',
@@ -127,16 +204,19 @@ export type AdjustmentType =
 export interface AppraisalAdjustment {
   type: AdjustmentType
   enabled: boolean
-  /** Fixed dollar amount per unit (for traffic: flat deduction below valueThreshold) */
+  /** Fixed dollar amount per unit (for traffic: flat deduction below valueThreshold).
+   *  For old_comp_discount this carries the age threshold in days. */
   amount: number
   /** Percentage (for old_comp_discount; for traffic: percent deduction at/above valueThreshold) */
   percent?: number
+  /** For old_comp_discount: sales older than this many days get the discount (default 90) */
+  thresholdDays?: number
   /** For traffic adjustments: comp value boundary switching flat $ → % deduction (default 500000) */
   valueThreshold?: number
 }
 
 export const DEFAULT_ADJUSTMENTS: AppraisalAdjustment[] = [
-  { type: 'old_comp_discount', enabled: true, amount: 0, percent: 15 },
+  { type: 'old_comp_discount', enabled: true, amount: 0, percent: 15, thresholdDays: 90 },
   { type: 'bedroom', enabled: true, amount: 15000 },
   { type: 'bathroom', enabled: true, amount: 10000 },
   { type: 'pool', enabled: true, amount: 10000 },
@@ -160,7 +240,7 @@ export const ADJUSTMENT_LABELS: Record<AdjustmentType, {
 }> = {
   old_comp_discount: {
     label: 'Old Comp Discount',
-    description: 'Discount percentage for older sales',
+    description: 'Discount % applied to sales older than the configured age threshold (days)',
     isPercentage: true,
   },
   bedroom: {
@@ -265,31 +345,38 @@ export interface AppraisalRulePreset {
  * required number of valid comps are found. Rules are never silently
  * weakened; each expansion tier is explicitly enabled and recorded.
  *
- * Appraisal principle applied: "better to leave the subdivision than
- * time travel" — geography expands before sale-age relaxes.
+ * Sale age is NEVER relaxed — comps must be inside the configured max
+ * (default 180 days) at every tier; we always want the most recent
+ * sales. The sanctioned concession is build-era: year_built_diff widens
+ * progressively (±10 → ±12 → ±14 by default) inside each location scope
+ * before geography expands — subdivision → widened radius → radius-only.
  */
 export interface ExpansionPolicy {
   /** Master switch for all expansion tiers (default: true) */
   enabled?: boolean
-  /** Allow dropping the subdivision/micro-market constraint (default: true) */
+  /** Allow widening year_built_diff when the comp pool is thin (default: true) */
+  allowYearBuiltExpansion?: boolean
+  /**
+   * Extra year tolerances tried in order after the configured
+   * year_built_diff value (default: [+2, +4] → ±10, ±12, ±14).
+   * These are the ONLY sanctioned year-built relaxations.
+   */
+  yearBuiltExpansionSteps?: number[]
+  /** Allow dropping the subdivision constraint within a widened radius (default: true) */
   allowGeographicExpansion?: boolean
+  /** Allow dropping the radius constraint entirely (default: true) */
+  allowNeighborhoodExpansion?: boolean
   /** Distance multiplier when geography expands (default: 2 = widen to 2× configured radius) */
   geographicDistanceMultiplier?: number
-  /** Allow materially older sales as a last resort (default: false) */
-  allowOlderSales?: boolean
-  /** Sale-age multiplier when older sales allowed (default: 2 = up to 2× configured max age) */
-  olderSaleAgeMultiplier?: number
-  /** Downward market-correction % applied to expansion-era older sales (10-20; default 15) */
-  olderSaleDiscountPercent?: number
 }
 
 export const DEFAULT_EXPANSION_POLICY: Required<ExpansionPolicy> = {
   enabled: true,
+  allowYearBuiltExpansion: true,
+  yearBuiltExpansionSteps: [2, 4],
   allowGeographicExpansion: true,
+  allowNeighborhoodExpansion: true,
   geographicDistanceMultiplier: 2,
-  allowOlderSales: false,
-  olderSaleAgeMultiplier: 2,
-  olderSaleDiscountPercent: 15,
 }
 
 export interface AppraisalOptions {
@@ -346,7 +433,7 @@ export interface AppraisalResult {
   /** True when fewer than 3 valid comps found even after approved expansion */
   insufficientComps?: boolean
   /** Expansion tiers actually applied to reach the comp set */
-  expansionApplied?: Array<'geographic' | 'older_sales'>
+  expansionApplied?: Array<'year_built' | 'subdivision' | 'neighborhood' | 'geographic'>
 }
 
 // ─── Response Types ────────────────────────────────────────────────────────────

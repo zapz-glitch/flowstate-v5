@@ -30,6 +30,8 @@ export type RecalcFilter = {
   type: string
   enabled: boolean
   value: number
+  /** 'hard' = required (disqualifies on verified failure) | 'soft' = preferred (ranks only) */
+  priority?: 'hard' | 'soft'
 }
 
 export type RecalcAdjustment = {
@@ -37,6 +39,8 @@ export type RecalcAdjustment = {
   enabled: boolean
   amount: number
   percent?: number
+  /** For old_comp_discount: sales older than this many days get the discount */
+  thresholdDays?: number
 }
 
 // ─── Major Items Setting ─────────────────────────────────────────────────────

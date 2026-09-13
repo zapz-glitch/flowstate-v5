@@ -67,7 +67,7 @@ export interface AnalyzeRequest {
   asIsThresholdPercent?: number
   /** Override appraisal rules for this request */
   appraisalOverrides?: {
-    filters?: Array<{ type: string; enabled: boolean; value: number }>
+    filters?: Array<{ type: string; enabled: boolean; value: number; priority?: 'hard' | 'soft' }>
     adjustments?: Array<{ type: string; enabled: boolean; amount: number; percent?: number }>
   }
 }
@@ -102,9 +102,20 @@ export interface AnalyzeData {
   }
   /** API call statistics from the analysis workflow */
   apiCallStats?: ApiCallStats | null
+  /** Justified evaluation report (subset used by comp feedback) */
+  report?: {
+    arv?: {
+      compPool?: {
+        total: number
+        enabled: number
+        fallbackUsed: string
+        fallbackReason?: string
+      }
+    }
+  }
   /** Settings used during this analysis (for client-side recalculation initialization) */
   appliedSettings?: {
-    filters: Array<{ type: string; enabled: boolean; value: number }>
+    filters: Array<{ type: string; enabled: boolean; value: number; priority?: 'hard' | 'soft' }>
     adjustments: Array<{ type: string; enabled: boolean; amount: number; percent?: number }>
     dealParams: {
       closingCostsPercent: number
@@ -187,6 +198,43 @@ export interface SubjectData {
   garageSquareFeet?: number | null
   /** Carport type */
   carport?: string | null
+  /** Construction type (e.g., Frame, Masonry) */
+  constructionType?: string | null
+  /** Exterior walls material */
+  exteriorWalls?: string | null
+  /** Roof type */
+  roofType?: string | null
+  /** Roof cover material */
+  roofCover?: string | null
+  /** Stories description (e.g., One Story) */
+  storiesType?: string | null
+  /** Heating system type */
+  heating?: string | null
+  /** Cooling system type */
+  cooling?: string | null
+  /** Fireplace count */
+  fireplacesCount?: number | null
+  /** Assessor building condition (e.g., Average, Good) */
+  buildingCondition?: string | null
+  /** Assessor construction grade (e.g., Fair, Good) */
+  buildingGrade?: string | null
+  /** Assessed improvement value */
+  improvementValue?: number | null
+  /** Building additions area (sqft) */
+  additionSquareFeet?: number | null
+  /** Neighborhood name from site-location */
+  neighborhoodName?: string | null
+  /** Neighborhood code from site-location */
+  neighborhoodCode?: string | null
+  /** CoreLogic Automated Valuation Model — display only, never used in ARV math */
+  avm?: {
+    value?: number | null
+    confidence?: number | null
+    valueRangeLow?: number | null
+    valueRangeHigh?: number | null
+    model?: string | null
+    asOfDate?: string | null
+  } | null
   /** Property classification (as_is, after_renovation, transitional) */
   classification?: ClassificationSummary | null
 }
@@ -232,6 +280,11 @@ export interface ValuationData {
   locationPenaltyPercent?: number
   recommendation?: string
   recommendationReason?: string
+  /** Confidence gate on the comps driving the ARV */
+  confidence?: 'high' | 'medium' | 'low'
+  confidenceReasons?: string[]
+  /** True unless HIGH — medium flags for review, low withholds the call */
+  requiresHumanReview?: boolean
   investorAnalysis?: {
     status: string
     methodLabel: string
@@ -315,6 +368,24 @@ export interface CompItem {
   exteriorWalls?: string | null
   /** Number of stories */
   storiesType?: string | null
+  /** Stories count */
+  stories?: number | null
+  /** Roof cover material */
+  roofCover?: string | null
+  /** Heating system type */
+  heating?: string | null
+  /** Cooling system type */
+  cooling?: string | null
+  /** Fireplace count */
+  fireplacesCount?: number | null
+  /** Assessor building condition (e.g., Average, Good) */
+  buildingCondition?: string | null
+  /** Assessor construction grade */
+  buildingGrade?: string | null
+  /** Neighborhood name from site-location */
+  neighborhoodName?: string | null
+  /** Neighborhood code from site-location */
+  neighborhoodCode?: string | null
   /** Building quality code */
   qualityCode?: string | null
   /** Reason this comp was selected/analyzed (LLM reasoning) */
@@ -352,6 +423,8 @@ export interface CompItem {
     filters: Array<{
       type: string
       passed: boolean
+      /** 'passed' | 'failed' | 'not_verified' — distinguishes a real failure from missing data */
+      status?: 'passed' | 'failed' | 'not_verified'
       reason?: string
       actualValue?: number | string | null
       threshold?: number | string | null

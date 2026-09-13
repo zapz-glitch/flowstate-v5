@@ -14,6 +14,8 @@ import type {
   ComparablesSearchResponse,
   PermitsResponse,
   FloodZoneResponse,
+  AvmResponse,
+  BuildingDetailResponse,
   NormalizedProperty,
   NormalizedComparable,
   NormalizedPermit,
@@ -32,6 +34,7 @@ import {
   COOLING_TYPE,
   POOL_TYPE,
   BUILDING_QUALITY,
+  BUILDING_CONDITION,
 } from './corelogic-codes'
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
@@ -489,6 +492,13 @@ interface RawPropertySearchResponse {
 interface RawPropertySearchItem {
   clip: string
   clipId?: string
+  /** Composite parcel ID `fipsCode:universalParcelId` — required by the parcel-level flood-zone resource */
+  v1PropertyId?: string
+  propertyAPN?: {
+    fipsCode?: string
+    universalParcelId?: string
+    apnParcelNumberFormatted?: string
+  }
   propertyAddress?: {
     streetAddress?: string
     city?: string
@@ -655,6 +665,8 @@ interface RawComparablesResponse {
 interface RawComparableProperty {
   clip: string
   clipId?: string
+  /** Composite parcel ID `fipsCode:universalParcelId` */
+  v1PropertyId?: string
   streetAddress?: string
   city?: string
   state?: string
@@ -707,6 +719,43 @@ interface RawFloodZoneResponse {
   participationStatus?: string
 }
 
+/** THV AVM response: GET /property/{fipsCode:universalParcelId}/avm/thv/{model} */
+interface RawAvmResponse {
+  corelogicPropertyId?: string
+  compositePropertyId?: string
+  amount?: number
+  value?: number
+  avmValue?: number
+  confidenceScore?: number | string
+  fsd?: number
+  valueRange?: { low?: number; high?: number }
+  asOfDate?: string
+  avm?: Record<string, unknown>
+  [key: string]: unknown
+}
+
+/** Building detail: GET /property/{fipsCode:universalParcelId}/building */
+interface RawBuildingResponse {
+  building?: Record<string, unknown>
+  buildings?: Array<Record<string, unknown>>
+  data?: { buildings?: Array<Record<string, unknown>> }
+  [key: string]: unknown
+}
+
+/** Parcel-level flood determination: GET /property/{fipsCode:universalParcelId}/flood-zone */
+interface RawParcelFloodZoneResponse {
+  corelogicPropertyId?: string
+  compositePropertyId?: string
+  floodZoneCode?: string
+  floodZoneDescription?: string
+  panelNumber?: string
+  panelDate?: string
+  specialFloodHazardArea?: string
+  multipleFloodZoneProximity?: string
+  communityName?: string
+  communityNumber?: string
+}
+
 // ─── Normalizers ───────────────────────────────────────────────────────────────
 
 interface AddressFallback {
@@ -717,6 +766,8 @@ interface AddressFallback {
   county?: string
   latitude?: number
   longitude?: number
+  parcelId?: string
+  apnFormatted?: string
 }
 
 function normalizeProperty(
@@ -747,9 +798,11 @@ function normalizeProperty(
   const buildingsArray = (buildingsData?.Buildings || buildingsData?.buildings) as Array<Record<string, unknown>> | undefined
   const firstBuilding = buildingsArray?.[0]
   const constructionDetails = firstBuilding?.constructionDetails as Record<string, unknown> | undefined
+  const structureClassification = firstBuilding?.structureClassification as Record<string, unknown> | undefined
   const structureFeatures = firstBuilding?.structureFeatures as Record<string, unknown> | undefined
   const structureExterior = firstBuilding?.structureExterior as Record<string, unknown> | undefined
   const structureVerticalProfile = firstBuilding?.structureVerticalProfile as Record<string, unknown> | undefined
+  const interiorArea = firstBuilding?.interiorArea as Record<string, unknown> | undefined
 
   // Site location data - v1 structure: siteLocation.data.locationLegal, landUseAndZoningCodes
   const siteLocationResponse = rawData.siteLocation as Record<string, unknown> | undefined
@@ -911,6 +964,22 @@ function normalizeProperty(
     subdivision: (locationLegal?.subdivisionName as string) || location?.subdivision || undefined,
     zoning: (landUse?.zoningCode as string) || property?.zoning || undefined,
     zoningDescription: (landUse?.zoningCodeDescription as string) || (landUse?.landUseDescription as string) || undefined,
+    // Parcel identity (from the search item — required by parcel-level flood-zone/AVM)
+    parcelId: addressFallback?.parcelId || null,
+    apnFormatted: addressFallback?.apnFormatted || null,
+    // Assessor building detail — condition/grade/improvement value live on
+    // buildings.data.buildings[0] alongside the coded construction fields
+    buildingCondition: lookupCode(BUILDING_CONDITION, constructionDetails?.buildingImprovementConditionCode as string) || null,
+    buildingGrade: lookupCode(BUILDING_CONDITION, structureClassification?.gradeTypeCode as string) || null,
+    improvementValue: (constructionDetails?.buildingImprovementValue as number) || null,
+    // Addition area — non-null indicates a permitted addition on the subject
+    additionSquareFeet: (interiorArea?.buildingAdditionsAreaSquareFeet as number) || null,
+    // Site-location geography — neighborhood/subdivision support for comp analysis
+    neighborhoodName: (siteLocationData?.neighborhood as Record<string, unknown> | undefined)?.name as string || undefined,
+    neighborhoodCode: (siteLocationData?.neighborhood as Record<string, unknown> | undefined)?.code as string || undefined,
+    cbsaCode: (siteLocationData?.cbsa as Record<string, unknown> | undefined)?.code as string || undefined,
+    censusTract: (siteLocationData?.censusTract as Record<string, unknown> | undefined)?.id as string || undefined,
+    legalDescription: (locationLegal?.description as string) || undefined,
 
     raw,
   }
@@ -943,6 +1012,7 @@ function normalizeComparable(raw: RawComparableProperty): NormalizedComparable {
   return {
     id: raw.clipId || raw.clip,
     provider: 'corelogic',
+    parcelId: raw.v1PropertyId || null,
 
     address: raw.streetAddress || '',
     city: raw.city || '',
@@ -1030,6 +1100,31 @@ function normalizeFloodZone(raw: RawFloodZoneResponse): NormalizedFloodZone {
     mapPanel: raw.panelNumber || null,
     mapDate: raw.mapDate || null,
     participationStatus: raw.participationStatus || null,
+    source: 'spatial',
+  }
+}
+
+/** Flood zone code validation shared by spatial + parcel determinations */
+const FLOOD_ZONE_PATTERN = /^(A|AE|AH|AO|AR|A99|A(?:[1-9]|[12][0-9]|30)|V|VE|V(?:[1-9]|[12][0-9]|30)|B|C|X)$/
+
+function normalizeParcelFloodZone(raw: RawParcelFloodZoneResponse): NormalizedFloodZone {
+  const zone = raw.floodZoneCode || null
+  const isHighRisk = zone ? ['A', 'AE', 'AH', 'AO', 'AR', 'V', 'VE'].some((z) => zone.startsWith(z)) : false
+  const apiDescription = raw.floodZoneDescription?.trim() || null
+
+  return {
+    floodZone: zone,
+    floodZoneDescription: apiDescription || getFloodZoneDescription(zone),
+    isInFloodZone: raw.specialFloodHazardArea === 'In' || isHighRisk,
+    isNearFloodZone: raw.multipleFloodZoneProximity === 'Yes',
+    communityName: raw.communityName || null,
+    communityNumber: raw.communityNumber || null,
+    firmMapNumber: raw.panelNumber || null,
+    mapPanel: raw.panelNumber || null,
+    mapDate: parseCoreLogicDate(raw.panelDate),
+    participationStatus: null,
+    specialFloodHazardArea: raw.specialFloodHazardArea || null,
+    source: 'parcel',
   }
 }
 
@@ -1117,8 +1212,11 @@ class CoreLogicProvider implements PropertyProviderAdapter {
       const item = response.items[0]
       const clip = item.clipId || item.clip
 
-      // Extract address from search result as fallback
+      // Extract address + parcel identity from search result as fallback.
+      // parcelId (fipsCode:universalParcelId) is required by the parcel-level
+      // flood-zone resource — it is NOT the clip and only appears in search.
       const searchAddress = item.propertyAddress || item.address
+      const apn = item.propertyAPN
       const addressFallback: AddressFallback = {
         streetAddress: searchAddress?.streetAddress,
         city: searchAddress?.city,
@@ -1127,6 +1225,8 @@ class CoreLogicProvider implements PropertyProviderAdapter {
         county: searchAddress?.county,
         latitude: item.location?.latitude,
         longitude: item.location?.longitude,
+        parcelId: item.v1PropertyId || (apn?.fipsCode && apn?.universalParcelId ? `${apn.fipsCode}:${apn.universalParcelId}` : undefined),
+        apnFormatted: apn?.apnParcelNumberFormatted,
       }
 
       // Fetch full property details
@@ -1267,13 +1367,149 @@ class CoreLogicProvider implements PropertyProviderAdapter {
 
       const rawZone = response.floodZone ?? response.floodHazardZone
       const zone = typeof rawZone === 'string' ? rawZone.trim().toUpperCase() : ''
-      if (!/^(A|AE|AH|AO|AR|A99|A(?:[1-9]|[12][0-9]|30)|V|VE|V(?:[1-9]|[12][0-9]|30)|B|C|X)$/.test(zone)) throw new Error('INVALID_RESPONSE: Flood zone is missing or undetermined')
+      if (!FLOOD_ZONE_PATTERN.test(zone)) throw new Error('INVALID_RESPONSE: Flood zone is missing or undetermined')
       return {
         success: true,
         data: normalizeFloodZone({ ...response, floodZone: zone }),
       }
     } catch (error) {
       return evidenceError(error, 'flood zone')
+    }
+  }
+
+  /**
+   * Parcel-level flood determination.
+   * GET /property/{parcelId}/flood-zone where parcelId is the composite
+   * `fipsCode:universalParcelId` (search item's v1PropertyId) — NOT the clip.
+   * More accurate than the coordinate spatial lookup; callers should prefer
+   * this when a parcelId is available and fall back to getFloodZone otherwise.
+   */
+  async getFloodZoneByParcel(parcelId: string): Promise<FloodZoneResponse> {
+    try {
+      if (!parcelId.includes(':')) {
+        throw new Error('INVALID_RESPONSE: Parcel flood-zone requires fipsCode:universalParcelId')
+      }
+      const response = await request<RawParcelFloodZoneResponse>(
+        this.env,
+        `/property/${encodeURIComponent(parcelId)}/flood-zone`,
+        { strictNotFound: true },
+      )
+
+      const zone = typeof response.floodZoneCode === 'string' ? response.floodZoneCode.trim().toUpperCase() : ''
+      if (!FLOOD_ZONE_PATTERN.test(zone)) throw new Error('INVALID_RESPONSE: Flood zone is missing or undetermined')
+      return {
+        success: true,
+        data: normalizeParcelFloodZone({ ...response, floodZoneCode: zone }),
+      }
+    } catch (error) {
+      return evidenceError(error, 'parcel flood zone')
+    }
+  }
+
+  /**
+   * Subject AVM estimate via Cotality Total Home Value.
+   * GET /property/{parcelId}/avm/thv/{model} — model defaults to
+   * thvMarketingStandard (the only THV model the gateway validates today).
+   * Requires the THV order product on the account — fails gracefully until
+   * entitled.
+   */
+  async getAvm(parcelId: string, model = 'thvMarketingStandard'): Promise<AvmResponse> {
+    try {
+      if (!parcelId.includes(':')) {
+        throw new Error('INVALID_RESPONSE: AVM requires fipsCode:universalParcelId')
+      }
+      const response = await request<RawAvmResponse>(
+        this.env,
+        `/property/${encodeURIComponent(parcelId)}/avm/thv/${model}`,
+        { strictNotFound: true },
+      )
+
+      const avm = (response.avm as Record<string, unknown> | undefined) ?? response
+      const num = (v: unknown): number | null =>
+        typeof v === 'number' && isFinite(v) ? v : typeof v === 'string' && v.trim() && isFinite(Number(v)) ? Number(v) : null
+      const value = num(avm.amount) ?? num(avm.value) ?? num(avm.avmValue) ?? num(avm.totalHomeValue)
+      if (value === null) throw new Error('INVALID_RESPONSE: AVM value is missing')
+
+      const range = (avm.valueRange as Record<string, unknown> | undefined) ?? {}
+      const confidence = num(avm.confidenceScore) ?? num(avm.confidence)
+      return {
+        success: true,
+        data: {
+          value,
+          confidence: confidence !== null ? Math.round(confidence) : null,
+          valueRangeLow: num(range.low) ?? num(avm.valueRangeLow),
+          valueRangeHigh: num(range.high) ?? num(avm.valueRangeHigh),
+          fsd: num(avm.fsd),
+          model,
+          asOfDate: (avm.asOfDate as string) || (avm.effectiveDate as string) || null,
+        },
+      }
+    } catch (error) {
+      return evidenceError(error, 'AVM')
+    }
+  }
+
+  /**
+   * Building attributes via the dedicated building endpoint.
+   * GET /property/{parcelId}/building — returns literal-text condition,
+   * style, foundation, HVAC, parking, pool. Used to supplement
+   * property-detail when its coded buildings block lacks these fields
+   * (e.g. Duval county doesn't ship buildingImprovementConditionCode).
+   */
+  async getBuildingDetail(parcelId: string): Promise<BuildingDetailResponse> {
+    try {
+      if (!parcelId.includes(':')) {
+        throw new Error('INVALID_RESPONSE: building detail requires fipsCode:universalParcelId')
+      }
+      const response = await request<RawBuildingResponse>(
+        this.env,
+        `/property/${encodeURIComponent(parcelId)}/building`,
+        { strictNotFound: true },
+      )
+
+      // Locate the building object across plausible nestings
+      const b =
+        response.building ??
+        response.buildings?.[0] ??
+        response.data?.buildings?.[0] ??
+        (response as Record<string, unknown>)
+
+      const str = (...keys: string[]): string | null => {
+        for (const k of keys) {
+          const v = b[k]
+          if (typeof v === 'string' && v.trim()) return v.trim()
+        }
+        return null
+      }
+      const num = (...keys: string[]): number | null => {
+        for (const k of keys) {
+          const v = b[k]
+          if (typeof v === 'number' && isFinite(v)) return v
+          if (typeof v === 'string' && v.trim() && isFinite(Number(v))) return Number(v)
+        }
+        return null
+      }
+
+      return {
+        success: true,
+        data: {
+          condition: str('condition', 'buildingCondition', 'buildingImprovementCondition'),
+          buildingStyle: str('style', 'buildingStyle', 'buildingStyleType'),
+          foundation: str('foundation', 'foundationType'),
+          constructionType: str('constructionType', 'construction'),
+          exteriorWalls: str('exteriorWalls', 'exteriorWallType', 'walls'),
+          roofCover: str('roofCover', 'roofCoverType', 'roofMaterial'),
+          stories: num('stories', 'numberOfStories', 'storyCount'),
+          heating: str('heatType', 'heating', 'heatingType'),
+          cooling: str('airConditioning', 'cooling', 'coolingType'),
+          parkingType: str('parkingType', 'garageType', 'parking'),
+          garageSquareFeet: num('garageSquareFeet', 'garageAreaSquareFeet'),
+          pool: str('pool', 'poolType'),
+          yearBuilt: num('yearBuilt'),
+        },
+      }
+    } catch (error) {
+      return evidenceError(error, 'building detail')
     }
   }
 

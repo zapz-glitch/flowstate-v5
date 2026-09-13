@@ -205,6 +205,9 @@ export class AnalysisJobDO {
         squareFeet: property.squareFeet,
         yearBuilt: property.yearBuilt,
         subdivision: property.subdivision,
+        parcelId: property.parcelId ?? null,
+        neighborhoodName: property.neighborhoodName ?? null,
+        cbsaCode: property.cbsaCode ?? null,
         lotSizeAcres: property.lotSizeAcres,
         propertyType: property.propertyType,
         lastSale: property.lastSalePrice ? {
@@ -233,15 +236,29 @@ export class AnalysisJobDO {
         subjectSqft: property.squareFeet ?? undefined,
         subjectPropertyType: property.propertyType ?? undefined,
     }
-    const [compsResult, permitsResult, floodResult, osmResult] = await Promise.all([
+    const [compsResult, permitsResult, floodResult, avmResult, buildingDetailResult, osmResult] = await Promise.all([
       propertyApi.getComparables(comparablesParams),
       // Permits: preserve the error object — 'unavailable' must mean the call
       // failed, not that the property has no permits on file (that's 'empty')
       (config.enrichment?.permits !== false)
         ? propertyApi.getBuildingPermits(property.id, { address1: property.address, address2: `${property.city}, ${property.state} ${property.zipCode}` })
         : Promise.resolve(null),
-      (config.enrichment?.floodZone !== false && property.latitude && property.longitude)
-        ? propertyApi.getFloodZone(property.latitude, property.longitude).catch(() => null)
+      // Flood zone: parcel-level determination when the search returned a
+      // v1PropertyId, coordinate spatial lookup as fallback
+      (config.enrichment?.floodZone !== false)
+        ? propertyApi.getFloodZoneForProperty(property).catch(() => null)
+        : Promise.resolve(null),
+      // Subject AVM (Total Home Value) — parcel-level, subject only
+      property.parcelId
+        ? propertyApi.getAvm(property.parcelId).catch(() => null)
+        : Promise.resolve(null),
+      // Subject building detail — literal-text condition/style/foundation
+      // when the coded property-detail block lacks them
+      property.parcelId &&
+        (!property.buildingCondition ||
+          !property.construction?.buildingStyle ||
+          !property.construction?.foundationType)
+        ? propertyApi.getBuildingDetail(property.parcelId).catch(() => null)
         : Promise.resolve(null),
       // Location risk (major roads, railroads, commercial) — fetched during
       // enrichment so it can deduct from valuation, not just flag post-hoc.
@@ -311,6 +328,7 @@ export class AnalysisJobDO {
         zipCode: property.zipCode,
         propertyType: property.propertyType,
         subdivision: property.subdivision,
+        neighborhood: property.neighborhoodName,
       }, this.env, config.llmOptions?.marketSearchModel)
         .then((mc) => {
           if (mc) {
@@ -344,6 +362,44 @@ export class AnalysisJobDO {
     } : null
 
     const floodData = floodResult && 'success' in floodResult && floodResult.success ? floodResult.data : null
+    // Subject AVM (Cotality THV) — parcel-level; attaches to enrichment and
+    // mirrors onto the property so report serialization can surface it.
+    const avmData = avmResult && 'success' in avmResult && avmResult.success ? avmResult.data : null
+    if (avmData) {
+      property.avmValue = avmData.value
+      property.avmConfidence = avmData.confidence
+    }
+    // Building detail supplement — fills condition/style/foundation when the
+    // coded property-detail block lacks them (literal-text provider data)
+    const buildingDetail = buildingDetailResult && 'success' in buildingDetailResult && buildingDetailResult.success ? buildingDetailResult.data : null
+    if (buildingDetail) {
+      property.buildingCondition ??= buildingDetail.condition
+      property.stories ??= buildingDetail.stories
+      property.yearBuilt ??= buildingDetail.yearBuilt
+      property.construction = {
+        ...(property.construction ?? {}),
+        buildingStyle: property.construction?.buildingStyle ?? buildingDetail.buildingStyle ?? undefined,
+        foundationType: property.construction?.foundationType ?? buildingDetail.foundation ?? undefined,
+        type: property.construction?.type ?? buildingDetail.constructionType ?? undefined,
+        exteriorWalls: property.construction?.exteriorWalls ?? buildingDetail.exteriorWalls ?? undefined,
+        roofCover: property.construction?.roofCover ?? buildingDetail.roofCover ?? undefined,
+      }
+      property.features = {
+        ...(property.features ?? {}),
+        heating: property.features?.heating ?? buildingDetail.heating ?? undefined,
+        cooling: property.features?.cooling ?? buildingDetail.cooling ?? undefined,
+        poolType: property.features?.poolType ?? buildingDetail.pool ?? undefined,
+        garageType: property.features?.garageType ??
+          (buildingDetail.parkingType && !/carport/i.test(buildingDetail.parkingType)
+            ? buildingDetail.parkingType
+            : undefined),
+        garageSquareFeet: property.features?.garageSquareFeet ?? buildingDetail.garageSquareFeet ?? undefined,
+        carportType: property.features?.carportType ??
+          (buildingDetail.parkingType && /carport/i.test(buildingDetail.parkingType)
+            ? buildingDetail.parkingType
+            : undefined),
+      }
+    }
     const evidenceLimitations: string[] = []
     for (const id of pools.conflictIds) evidenceLimitations.push(`${id}: Provider comparable pools disagree on the same sale date; price is quarantined from evaluation`)
     if (!permitsData) evidenceLimitations.push(config.enrichment?.permits === false
@@ -367,6 +423,7 @@ export class AnalysisJobDO {
         evidenceLimitations,
         permits,
         floodZone: floodData ?? null,
+        avm: avmData ?? null,
         locationRisks: osmResult?.risks ?? null,
         weatherRisk: null,
         neighbourhood: null,
@@ -461,7 +518,7 @@ export class AnalysisJobDO {
     if (config.llmEnabled) {
       const llmStart = Date.now()
       try {
-        await this.pushEvent('llm_started', { message: 'AI selecting best comps...', compCount: enrichedComps.length })
+        await this.pushEvent('llm_started', { message: 'AI annotating comps...', compCount: enrichedComps.length })
 
         const evalContexts: CompEvalContext[] = ((analysisResult.comps as Record<string, unknown>)?.items as Array<Record<string, unknown>> ?? []).map((comp: Record<string, unknown>) => ({
           compId: comp.id as string,
@@ -493,20 +550,16 @@ export class AnalysisJobDO {
 
         const llmResult = await analyzeComps(compAnalysisCtx, this.env, { includePhotos: config.llmOptions?.includePhotos, modelOverride: config.llmOptions?.compSelectionModel, reasoning: config.llmOptions?.reasoning })
 
-        if (llmResult && llmResult.selectedForArv.length > 0) {
-          const selectedSet = new Set(llmResult.selectedForArv)
-          const asIsSet = new Set(llmResult.asIsComps ?? [])
+        if (llmResult && llmResult.rankings.length > 0) {
+          // Rule-based selection is authoritative — the LLM only annotates
+          // comps with reasoning/scores; it cannot change isEnabled/compGroup.
           const comps = analysisResult.comps as Record<string, unknown>
           if (comps?.items && Array.isArray(comps.items)) {
             comps.items = (comps.items as Array<Record<string, unknown>>).map((comp) => {
               const compId = comp.id as string
               const ranking = llmResult.rankings.find((r) => r.compId === compId)
-              const isSelected = selectedSet.has(compId)
-              const isAsIs = asIsSet.has(compId)
-              return { ...comp, isEnabled: isSelected, compGroup: isSelected ? 'arv' : isAsIs ? 'as_is' : null, selectionReason: ranking?.reasoning || null, qualityScore: ranking?.score ?? null, keyFeatures: ranking?.keyFeatures?.length ? ranking.keyFeatures : null, disableReasons: isSelected ? [] : [ranking?.reasoning || 'Not selected by AI analysis'] }
+              return { ...comp, selectionReason: ranking?.reasoning || null, qualityScore: ranking?.score ?? null, keyFeatures: ranking?.keyFeatures?.length ? ranking.keyFeatures : null }
             })
-            comps.enabledCount = (comps.items as Array<Record<string, unknown>>).filter((c) => c.isEnabled).length
-            comps.disabledCount = (comps.items as unknown[]).length - (comps.enabledCount as number)
           }
 
           await this.pushEvent('llm_complete', {
@@ -514,7 +567,7 @@ export class AnalysisJobDO {
             rankings: llmResult.rankings,
             updatedResult: analysisResult,
           })
-          console.log(`[AnalysisJobDO] ✓ LLM: ${llmResult.selectedForArv.length} comps selected in ${Date.now() - llmStart}ms${llmResult.reasoning ? ' (with reasoning)' : ''}`)
+          console.log(`[AnalysisJobDO] ✓ LLM: ${llmResult.rankings.length} comps annotated in ${Date.now() - llmStart}ms${llmResult.reasoning ? ' (with reasoning)' : ''}`)
         } else {
           await this.pushEvent('llm_complete', { llmAnalysis: null, rankings: [], skipped: true, reason: llmResult ? 'No comps selected' : 'LLM not available' })
         }
@@ -579,16 +632,6 @@ export class AnalysisJobDO {
         }, this.env)
 
         const updatedResponse = evalResult.response as unknown as Record<string, unknown>
-
-        // If LLM will run, disable all comp selections — LLM decides final selection
-        if (config.pending.includes('llm')) {
-          const comps = updatedResponse.comps as Record<string, unknown> | undefined
-          if (comps?.items && Array.isArray(comps.items)) {
-            comps.items = comps.items.map((c: Record<string, unknown>) => ({ ...c, isEnabled: false }))
-            comps.enabledCount = 0
-            comps.disabledCount = (comps.items as unknown[]).length
-          }
-        }
 
         config.analysisResult = updatedResponse
         console.log(`[AnalysisJobDO] ✓ Evaluation complete in ${Date.now() - evalStart}ms`)
@@ -689,36 +732,21 @@ export class AnalysisJobDO {
           this.env, { includePhotos: config.llmOptions?.includePhotos },
         )
 
-        if (llmResult && llmResult.selectedForArv.length > 0) {
-          console.log(`[AnalysisJobDO] LLM selected ${llmResult.selectedForArv.length} comps for ARV: ${llmResult.selectedForArv.join(', ')}`)
-
-          // Apply LLM's comp selection: update isEnabled on all comps
-          const selectedSet = new Set(llmResult.selectedForArv)
-          const asIsSet = new Set(llmResult.asIsComps ?? [])
+        if (llmResult && llmResult.rankings.length > 0) {
+          // Rule-based selection is authoritative — the LLM only annotates
+          // comps with reasoning/scores; it cannot change isEnabled/compGroup.
           const currentResult = config.analysisResult
           if (currentResult.comps?.items && Array.isArray(currentResult.comps.items)) {
             currentResult.comps.items = currentResult.comps.items.map((comp: Record<string, unknown>) => {
               const compId = comp.id as string
               const ranking = llmResult.rankings.find((r) => r.compId === compId)
-              const isSelected = selectedSet.has(compId)
-              const isAsIs = asIsSet.has(compId)
               return {
                 ...comp,
-                isEnabled: isSelected,
-                compGroup: isSelected ? 'arv' : isAsIs ? 'as_is' : null,
                 selectionReason: ranking?.reasoning || null,
                 qualityScore: ranking?.score ?? null,
                 keyFeatures: ranking?.keyFeatures?.length ? ranking.keyFeatures : null,
-                disableReasons: isSelected
-                  ? []
-                  : [ranking?.reasoning || 'Not selected by AI analysis'],
               }
             })
-
-            // Update comp counts
-            const enabledCount = currentResult.comps.items.filter((c: Record<string, unknown>) => c.isEnabled).length
-            currentResult.comps.enabledCount = enabledCount
-            currentResult.comps.disabledCount = currentResult.comps.items.length - enabledCount
           }
 
           await this.pushEvent('llm_complete', {
@@ -733,7 +761,7 @@ export class AnalysisJobDO {
             rankings: llmResult.rankings,
             updatedResult: currentResult,
           })
-          console.log(`[AnalysisJobDO] ✓ LLM: ${llmResult.rankings.length} comps analyzed, ${llmResult.selectedForArv.length} selected for ARV in ${Date.now() - llmStart}ms`)
+          console.log(`[AnalysisJobDO] ✓ LLM: ${llmResult.rankings.length} comps annotated in ${Date.now() - llmStart}ms`)
         } else if (llmResult) {
           // LLM returned rankings but no selection — just enrich without changing selection
           await this.pushEvent('llm_complete', {

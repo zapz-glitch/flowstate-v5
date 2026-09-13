@@ -188,6 +188,76 @@ export default function DashboardPage() {
         </div>
       )}
 
+      {/* Rate-Limit Tracker */}
+      {usage.rateLimit && (
+        <div className="rounded-2xl border border-border overflow-hidden">
+          <div className="px-6 py-4 border-b border-border flex items-center justify-between">
+            <div>
+              <h2 className="text-heading font-semibold text-foreground">Rate Limits</h2>
+              <p className="text-body-sm text-foreground-tertiary mt-0.5">
+                Quota rejections and server errors from API + batch runs
+              </p>
+            </div>
+            {usage.rateLimit.hits7d === 0 && usage.rateLimit.serverErrors24h === 0 ? (
+              <span className="inline-flex items-center gap-1.5 text-caption font-medium text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-full">
+                <CheckCircle2 className="w-3.5 h-3.5" /> Healthy
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1.5 text-caption font-medium text-amber-600 dark:text-amber-400 bg-amber-500/10 px-2.5 py-1 rounded-full">
+                <AlertTriangle className="w-3.5 h-3.5" /> Attention
+              </span>
+            )}
+          </div>
+          <div className="p-5">
+            <div className="grid grid-cols-3 gap-4">
+              <div>
+                <p className="text-caption text-foreground-tertiary">429s — 24h</p>
+                <p className={cn(
+                  'text-display-sm font-bold tracking-tight',
+                  usage.rateLimit.hits24h > 0 ? 'text-amber-500' : 'text-foreground'
+                )}>
+                  {usage.rateLimit.hits24h}
+                </p>
+              </div>
+              <div>
+                <p className="text-caption text-foreground-tertiary">429s — 7 days</p>
+                <p className={cn(
+                  'text-display-sm font-bold tracking-tight',
+                  usage.rateLimit.hits7d > 0 ? 'text-amber-500' : 'text-foreground'
+                )}>
+                  {usage.rateLimit.hits7d}
+                </p>
+              </div>
+              <div>
+                <p className="text-caption text-foreground-tertiary">5xx — 24h</p>
+                <p className={cn(
+                  'text-display-sm font-bold tracking-tight',
+                  usage.rateLimit.serverErrors24h > 0 ? 'text-red-500' : 'text-foreground'
+                )}>
+                  {usage.rateLimit.serverErrors24h}
+                </p>
+              </div>
+            </div>
+            {usage.rateLimit.recent.length > 0 && (
+              <div className="mt-4 pt-4 border-t border-border space-y-2">
+                <p className="text-caption text-foreground-tertiary font-medium">Recent rate-limit hits</p>
+                {usage.rateLimit.recent.slice(0, 5).map((hit, i) => (
+                  <div key={i} className="flex items-center gap-3 text-body-sm">
+                    <XCircle className="w-3.5 h-3.5 text-amber-500 flex-shrink-0" />
+                    <span className="text-foreground truncate flex-1">
+                      {hit.propertyAddress || hit.endpoint}
+                    </span>
+                    <span className="text-caption text-foreground-tertiary flex-shrink-0">
+                      {new Date(hit.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       <div className="grid gap-6 lg:grid-cols-2">
         {/* Quick Start */}
         <div className="rounded-2xl border border-border overflow-hidden">

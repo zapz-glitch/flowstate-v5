@@ -156,6 +156,23 @@ export interface NormalizedProperty {
   subdivision?: string
   zoning?: string
   zoningDescription?: string
+  /** Composite parcel ID `fipsCode:universalParcelId` (Cotality v1PropertyId) — required by parcel-level flood-zone/AVM */
+  parcelId?: string | null
+  /** Formatted assessor parcel number (e.g. "17786-042-0330") */
+  apnFormatted?: string | null
+  /** Assessor building improvement condition (e.g. "Average", "Good") */
+  buildingCondition?: string | null
+  /** Construction quality grade (e.g. "Fair", "Good") */
+  buildingGrade?: string | null
+  /** Assessor improvement value in dollars */
+  improvementValue?: number | null
+  /** Added-on building area (sqft) — indicates a permitted addition exists on the subject */
+  additionSquareFeet?: number | null
+  neighborhoodName?: string
+  neighborhoodCode?: string
+  cbsaCode?: string
+  censusTract?: string
+  legalDescription?: string
 
   /** Raw API response for debugging */
   raw?: unknown
@@ -200,6 +217,16 @@ export interface NormalizedComparable {
 
   // Location details (from enrichment)
   subdivision?: string | null
+  /** Composite parcel ID `fipsCode:universalParcelId` — present on comparables responses */
+  parcelId?: string | null
+  neighborhoodName?: string | null
+  neighborhoodCode?: string | null
+
+  /** Assessor building improvement condition (e.g. "Average") */
+  buildingCondition?: string | null
+  /** Construction quality grade */
+  buildingGrade?: string | null
+  stories?: number | null
 
   /** True when the comp sits across a major road from the subject (not_verified when unknown) */
   crossesMajorRoad?: boolean
@@ -237,6 +264,9 @@ export interface NormalizedComparable {
     garageType?: string
     garageSquareFeet?: number
     carportType?: string
+    heating?: string
+    cooling?: string
+    fireplacesCount?: number
   }
 
   /** Whether this comp has been enriched with full property details */
@@ -279,6 +309,10 @@ export interface NormalizedFloodZone {
   mapPanel: string | null
   mapDate: string | null
   participationStatus: string | null
+  /** FEMA Special Flood Hazard Area determination ('In'/'Out') — parcel-level only */
+  specialFloodHazardArea?: string | null
+  /** Which resource produced this: parcel-level determination or coordinate spatial lookup */
+  source?: 'parcel' | 'spatial'
 }
 
 // ─── Response Types ─────────────────────────────────────────────────────────
@@ -343,6 +377,72 @@ export interface FloodZoneError {
 
 export type FloodZoneResponse = FloodZoneResult | FloodZoneError
 
+// ─── AVM (Automated Valuation Model) ────────────────────────────────────────
+
+export interface NormalizedAvm {
+  /** Point estimate value */
+  value: number | null
+  /** Confidence score (0-100 when provided) */
+  confidence: number | null
+  valueRangeLow: number | null
+  valueRangeHigh: number | null
+  /** Forecast standard deviation (accuracy measure) */
+  fsd: number | null
+  /** Model identifier used (e.g. thvMarketingStandard) */
+  model: string
+  asOfDate: string | null
+}
+
+export interface AvmResult {
+  success: true
+  data: NormalizedAvm
+}
+
+export interface AvmError {
+  success: false
+  error: string
+  code?: string
+}
+
+export type AvmResponse = AvmResult | AvmError
+
+// ─── Building Detail (/property/{id}/building) ──────────────────────────────
+
+/**
+ * Literal-text building attributes from the dedicated building endpoint.
+ * Used to supplement property-detail when its coded buildings block is
+ * missing condition/style/etc. — provider data, so it outranks Zillow fills.
+ */
+export interface NormalizedBuildingDetail {
+  /** Assessor condition (e.g. 'Average', 'Good') */
+  condition: string | null
+  buildingStyle: string | null
+  foundation: string | null
+  constructionType: string | null
+  exteriorWalls: string | null
+  roofCover: string | null
+  stories: number | null
+  heating: string | null
+  cooling: string | null
+  parkingType: string | null
+  garageSquareFeet: number | null
+  pool: string | null
+  yearBuilt: number | null
+}
+
+export interface BuildingDetailResult {
+  success: true
+  data: NormalizedBuildingDetail
+}
+
+export interface BuildingDetailError {
+  success: false
+  error: string
+  code?: string
+}
+
+export type BuildingDetailResponse = BuildingDetailResult | BuildingDetailError
+
 // ─── Provider Interface ─────────────────────────────────────────────────────
 
 export interface PropertyProviderAdapter {
@@ -363,6 +463,15 @@ export interface PropertyProviderAdapter {
 
   /** Get flood zone (optional) */
   getFloodZone?(latitude: number, longitude: number): Promise<FloodZoneResponse>
+
+  /** Get parcel-level flood zone by composite parcel ID (fipsCode:universalParcelId) — more accurate than the coordinate spatial lookup */
+  getFloodZoneByParcel?(parcelId: string): Promise<FloodZoneResponse>
+
+  /** Get an AVM estimate by composite parcel ID (fipsCode:universalParcelId) */
+  getAvm?(parcelId: string, model?: string): Promise<AvmResponse>
+
+  /** Get building detail by composite parcel ID — supplements property-detail when condition/style codes are absent */
+  getBuildingDetail?(parcelId: string): Promise<BuildingDetailResponse>
 }
 
 // ─── Configuration ──────────────────────────────────────────────────────────
@@ -446,6 +555,8 @@ export interface EnrichmentData {
   evidenceLimitations?: string[]
   permits: PermitsEnrichment | null
   floodZone: NormalizedFloodZone | null
+  /** Subject AVM estimate (Cotality THV) — parcel-level, subject only */
+  avm?: NormalizedAvm | null
   /** OSM-detected location risks (major roads, railroads, commercial) */
   locationRisks?: import('../location-risk').LocationRisk[] | null
   weatherRisk: WeatherRisk | null

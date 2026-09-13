@@ -33,7 +33,7 @@ interface CompSelectionRequest {
   riskFlags?: string[]
   /** User's evaluation settings */
   settings?: {
-    filters?: Array<{ type: string; enabled: boolean; value: number }>
+    filters?: Array<{ type: string; enabled: boolean; value: number; priority?: 'hard' | 'soft' }>
     adjustments?: Array<{ type: string; enabled: boolean; amount: number; percent?: number }>
     dealParams?: { closingCostsPercent: number; carryingCostsPercent: number; wholesaleFee: number }
     rehabLevelIndex?: number
@@ -160,6 +160,7 @@ app.post('/analyze', async (c) => {
       type: f.type as 'subdivision_match' | 'sale_age' | 'sqft_diff' | 'year_built_diff' | 'distance',
       enabled: f.enabled,
       value: f.value,
+      priority: f.priority,
     })),
     adjustments: (settings.adjustments ?? []).map((a) => ({
       type: a.type as 'old_comp_discount' | 'bedroom' | 'bathroom' | 'pool' | 'garage',

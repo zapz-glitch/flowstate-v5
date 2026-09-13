@@ -73,6 +73,7 @@ const appraisal: AppraisalResultWithFallback = {
       ...comp,
       isEnabled: true,
       adjustedSalePrice: 395000,
+      arvStatus: 'selected',
       evaluation: {
         shouldDisable: false,
         disableReasons: [],
@@ -90,6 +91,50 @@ const appraisal: AppraisalResultWithFallback = {
   arv: 395000,
   avgPricePerSqft: 225,
   medianSalePrice: 395000,
+  selectedCompIds: ['comp-1'],
+  fallbackUsed: 'none',
+}
+
+// 3 fully verified comps — every hard + soft rule evaluated with real
+// data — for the HIGH-confidence gate path.
+const HARD_FILTER_TYPES = [
+  'sale_age', 'subdivision_match', 'sqft_diff', 'property_type',
+  'road_barrier', 'year_built_diff', 'distance',
+] as const
+const verifiedComp = (id: string, salePrice: number) => ({
+  ...comp,
+  id,
+  salePrice,
+  isEnabled: true,
+  adjustedSalePrice: salePrice,
+  arvStatus: 'selected' as const,
+  evaluation: {
+    shouldDisable: false,
+    disableReasons: [],
+    filterResults: [
+      ...HARD_FILTER_TYPES.map((t) => ({ type: t, passed: true, status: 'passed' as const })),
+      { type: 'building_style_match', passed: true, status: 'passed' as const },
+      { type: 'condition_match', passed: true, status: 'passed' as const },
+    ],
+    adjustmentResults: [],
+    totalAdjustment: 0,
+    adjustedPrice: salePrice,
+  },
+})
+const strongAppraisal: AppraisalResultWithFallback = {
+  ...appraisal,
+  comparables: [
+    verifiedComp('v1', 390000),
+    verifiedComp('v2', 395000),
+    verifiedComp('v3', 400000),
+  ] as unknown as AppraisalResultWithFallback['comparables'],
+  enabledCount: 3,
+  appliedFilters: [
+    { type: 'subdivision_match', enabled: true, value: 1 },
+    { type: 'building_style_match', enabled: true, value: 1, priority: 'soft' },
+    { type: 'condition_match', enabled: true, value: 1, priority: 'soft' },
+  ],
+  selectedCompIds: ['v1', 'v2', 'v3'],
   fallbackUsed: 'none',
 }
 
@@ -204,9 +249,72 @@ describe('buildEvaluationReport', () => {
 
   it('reports outcome and confidence', () => {
     expect(report.outcome.maxBuyPrice).toBe(valuation.buyPrice)
+    // Fixture has only 1 selected comp → LOW confidence; the formula call
+    // still stands (no human reviewer exists), reasons carry the caveat
+    expect(report.confidence).toBe('low')
     expect(report.outcome.recommendation).toBe(valuation.recommendation)
-    expect(['high', 'medium', 'low']).toContain(report.confidence)
+    expect(report.outcome.recommendationReason).toContain('LOW confidence')
+    expect(report.requiresHumanReview).toBe(true)
     expect(report.confidenceReasons.length).toBeGreaterThan(0)
+  })
+
+  it('gates HIGH only when 3+ verified comps with no fallback', () => {
+    const strong = buildEvaluationReport({
+      bundle,
+      appraisalResult: strongAppraisal,
+      subjectClassification,
+      weightedARVResult: weightedARV,
+      derivedBuybox: derived,
+      valuation,
+      steps: [],
+      fallbacksUsed: [],
+    })
+    expect(strong.confidence).toBe('high')
+    expect(strong.requiresHumanReview).toBe(false)
+    expect(strong.outcome.recommendation).toBe(valuation.recommendation)
+  })
+
+  it('flags MEDIUM for review when comps carry unverified or soft-failed dims', () => {
+    const unverified = {
+      ...comp,
+      id: 'u1',
+      isEnabled: true,
+      arvStatus: 'selected' as const,
+      evaluation: {
+        shouldDisable: false,
+        disableReasons: [],
+        filterResults: [
+          { type: 'sale_age', passed: true, status: 'passed' as const },
+          { type: 'foundation_match', passed: true, status: 'not_verified' as const },
+        ],
+        adjustmentResults: [],
+        totalAdjustment: 0,
+        adjustedPrice: 390000,
+      },
+    }
+    const medium = buildEvaluationReport({
+      bundle,
+      appraisalResult: {
+        ...strongAppraisal,
+        comparables: [
+          verifiedComp('v1', 390000),
+          verifiedComp('v2', 395000),
+          unverified,
+        ] as unknown as AppraisalResultWithFallback['comparables'],
+        selectedCompIds: ['v1', 'v2', 'u1'],
+      },
+      subjectClassification,
+      weightedARVResult: weightedARV,
+      derivedBuybox: derived,
+      valuation,
+      steps: [],
+      fallbacksUsed: [],
+    })
+    expect(medium.confidence).toBe('medium')
+    expect(medium.requiresHumanReview).toBe(true)
+    // Medium keeps the formula recommendation with a confidence caveat
+    expect(medium.outcome.recommendation).toBe(valuation.recommendation)
+    expect(medium.outcome.recommendationReason).toContain('medium confidence')
   })
 
   it('degrades to low confidence with no classification and comp fallback', () => {

@@ -67,6 +67,27 @@ export function sqftMatchColor(compSf: number, subSf: number): string {
   return 'text-red-400'
 }
 
+/** Lot-size match quality color class — deltas in sqft vs lot_size_diff default (±2,500 sf) */
+export function lotMatchColor(compAcres: number, subAcres: number): string {
+  const diffSf = Math.abs(compAcres - subAcres) * 43560
+  if (diffSf <= 2500) return 'text-emerald-500'
+  if (diffSf <= 5000) return 'text-foreground-tertiary'
+  return 'text-red-400'
+}
+
+/** Format lot size: sqft for ≤0.5 ac, acres above — "9,540 sf" / "0.62 ac" */
+export function formatLotSize(acres: number | null | undefined): string {
+  if (acres == null) return '-'
+  if (acres <= 0.5) return `${Math.round(acres * 43560).toLocaleString()} sf`
+  return `${Number(acres).toFixed(2)} ac`
+}
+
+/** Format a lot-size delta in sqft as "+2,310 sf" */
+export function fmtLotDelta(compAcres: number, subAcres: number): string {
+  const diffSf = Math.round((compAcres - subAcres) * 43560)
+  return diffSf > 0 ? `+${diffSf.toLocaleString()} sf` : `${diffSf.toLocaleString()} sf`
+}
+
 /** Year-built match quality color class */
 export function yearMatchColor(compYr: number, subYr: number): string {
   if (compYr <= 1940 && subYr <= 1940) return 'text-emerald-500'

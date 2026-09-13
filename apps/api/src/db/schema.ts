@@ -181,6 +181,11 @@ export const savedReports = sqliteTable(
     // Sharing
     isShared: integer('is_shared', { mode: 'boolean' }).notNull().default(false),
     sharePasswordHash: text('share_password_hash'), // format: "salt:sha256hex"
+    // Review stamps — batch-review feedback loop
+    feedbackStatus: text('feedback_status'), // 'validated' | 'improve' | null
+    feedbackNotes: text('feedback_notes'),
+    feedbackReport: text('feedback_report'),
+    feedbackAt: text('feedback_at'),
     // Timestamps
     createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
   },
@@ -329,6 +334,7 @@ export const appraisalRuleFilter = sqliteTable(
     filterType: text('filter_type').notNull(), // 'subdivision_match' | 'sale_age' | 'sqft_diff' | 'property_type' | 'year_built_diff' | 'distance'
     enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
     value: real('value').notNull(), // threshold value (days, sqft, years, miles, or 1 for must-match)
+    priority: text('priority'), // 'hard' (required) | 'soft' (preferred) | NULL = system default
     createdAt: text('created_at')
       .notNull()
       .$defaultFn(() => new Date().toISOString()),

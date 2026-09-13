@@ -23,6 +23,23 @@ export function DealSummaryHero({ valuation, isRecalculated, onOpenSettings }: D
           {isRecalculated && (
             <span className="text-[8px] font-medium px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-500">Recalculated</span>
           )}
+          {valuation.confidence && (
+            <span
+              className={cn(
+                'text-[8px] font-medium px-1.5 py-0.5 rounded uppercase tracking-wide',
+                valuation.confidence === 'high' && 'bg-emerald-500/15 text-emerald-500',
+                valuation.confidence === 'medium' && 'bg-amber-500/15 text-amber-500',
+                valuation.confidence === 'low' && 'bg-red-500/15 text-red-500',
+              )}
+              title={(valuation.confidenceReasons ?? []).join('\n')}
+            >
+              {valuation.confidence === 'low'
+                ? 'Low confidence'
+                : valuation.confidence === 'medium'
+                  ? 'Medium confidence'
+                  : 'High confidence'}
+            </span>
+          )}
         </div>
         {onOpenSettings && (
           <button type="button" onClick={onOpenSettings} className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] text-foreground-tertiary hover:text-foreground hover:bg-secondary transition-colors no-print">
@@ -49,7 +66,7 @@ export function DealSummaryHero({ valuation, isRecalculated, onOpenSettings }: D
           <div className="text-base font-bold tabular-nums mt-0.5">${fmt(valuation.rehabCost)}</div>
           {valuation.rehabLevel && <div className="text-[10px] text-foreground-tertiary mt-0.5">{valuation.rehabLevel}</div>}
         </div>
-        <div className="px-3 py-2.5">
+        <div className="px-3 py-2.5 border-r border-border/20">
           <div className="text-[11px] text-foreground-tertiary uppercase tracking-wider">Profit</div>
           <div className={cn('text-base font-bold tabular-nums mt-0.5', (valuation.projectedProfit ?? 0) > 0 ? 'text-emerald-500' : 'text-red-500')}>${fmt(valuation.projectedProfit)}</div>
           {valuation.projectedROI != null && <div className="text-[10px] text-foreground-tertiary tabular-nums mt-0.5">{fmt(valuation.projectedROI)}% ROI</div>}

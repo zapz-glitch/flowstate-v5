@@ -230,41 +230,122 @@ export const ROOF_COVER: Record<string, string> = {
   'AL0': 'Aluminum',
   'CMP': 'Composition',
   'CP0': 'Composition',
+  // Numeric RFCO assessor codes (county-level data ships these)
+  '102': 'Wood Shingle',
+  '103': 'Shake',
+  '104': 'Tile',
+  '105': 'Composition Shingle',
+  '106': 'Roll Composition',
+  '107': 'Gravel',
+  '108': 'Built-Up',
+  '109': 'Asphalt',
+  '110': 'Slate',
+  '111': 'Aluminum',
+  '112': 'Metal',
+  '114': 'Other',
+  '115': 'Asbestos',
+  '116': 'Roll Paper',
+  '117': 'Bi-Metal',
+  '118': 'Heavy Composition Shingle',
+  '119': 'Light Composition Shingle',
+  '120': 'Composition Shingle',
+  '121': 'Fiberglass',
+  '122': 'Galvanized',
+  '123': 'Medium Shake',
+  '124': 'Bar Tile',
+  '125': 'Clay Tile',
+  '126': 'Synthetic Tile',
+  '127': 'Wood Shake',
+  '128': 'Concrete Tile',
+  '129': 'Rubber',
+  '130': 'Slate Tile',
+  '131': 'Wood',
+  '140': 'Wood Shake',
+  '141': 'Cedar Shake',
+  '149': 'Cement Tile',
+  '150': 'Ceramic Tile',
+  '151': 'Glazed Tile',
+  '157': 'Composition',
+  '158': 'Shingle',
+  '159': 'Composition Shingle/Metal',
+  '160': 'Composition Shingle',
+  '166': 'Composition',
+  '172': 'Tar/Gravel',
+  '173': 'Crushed Rock',
+  '174': 'Gravel/Rock',
+  '175': 'Rock',
+  '176': 'Rock/Gravel',
+  '177': 'Stone/Rock',
+  '178': 'Stone/Pebble',
+  '179': 'Stone',
+  '180': 'Roll Tar/Gravel',
 }
+
+/** Assessor codes that mean "no data" — treated as missing, not as a value.
+ *  Note: NON/NONE are NOT here — "None" is real data (e.g. no garage). */
+export const UNKNOWN_CODES = new Set(['0', '00', '000', '101', 'NULL', 'UNKNOWN', 'UNK'])
 
 // ─── Exterior Walls ──────────────────────────────────────────────────────────
 
 export const EXTERIOR_WALLS: Record<string, string> = {
   'BRK': 'Brick',
   'BR0': 'Brick',
+  'BRI': 'Brick',
   'BVN': 'Brick Veneer',
   'BV0': 'Brick Veneer',
+  'BRV': 'Brick Veneer',
   'BOF': 'Brick on Frame',
+  'BRM': 'Brick/Masonry',
+  'BRS': 'Brick/Stone',
+  'BRW': 'Brick/Wood',
+  'BRO': 'Brick/Stucco',
   'STN': 'Stone',
   'SN0': 'Stone',
   'SNV': 'Stone Veneer',
+  'STV': 'Stone Veneer',
   'STU': 'Stucco',
   'ST0': 'Stucco',
+  'STS': 'Steel/Stucco',
+  'FST': 'Frame/Stucco',
   'VNL': 'Vinyl Siding',
   'VN0': 'Vinyl Siding',
   'WDS': 'Wood Siding',
   'WD0': 'Wood Siding',
+  'WOO': 'Wood',
   'ALM': 'Aluminum Siding',
   'AL0': 'Aluminum Siding',
+  'ALS': 'Aluminum Siding',
+  'ALU': 'Aluminum',
+  'ALV': 'Aluminum/Vinyl',
+  'ALF': 'Frame/Aluminum',
   'CNB': 'Concrete Block',
   'CB0': 'Concrete Block',
+  'CCB': 'Concrete Block',
+  'CND': 'Cinder Block',
+  'BLO': 'Block',
+  'BLM': 'Block/Masonry',
   'HDB': 'Hardboard',
   'HD0': 'Hardboard',
   'CED': 'Cedar',
   'CE0': 'Cedar',
+  'CLP': 'Clapboard',
   'LOG': 'Log',
   'LG0': 'Log',
+  'LPS': 'Lap Siding',
+  'SDS': 'Siding Sheathing',
   'FBR': 'Fiber Cement',
   'FB0': 'Fiber Cement',
+  'FRM': 'Frame',
+  'MAS': 'Masonite',
+  'MET': 'Metal',
   'MIX': 'Mixed',
   'MX0': 'Mixed',
+  'COM': 'Combination',
   'MSN': 'Masonry',
   'MS0': 'Masonry',
+  'MAN': 'Manufactured',
+  'SHI': 'Shingle',
+  'SGS': 'Shingle Siding',
 }
 
 // ─── Garage Type ─────────────────────────────────────────────────────────────
@@ -374,6 +455,29 @@ export const BUILDING_QUALITY: Record<string, string> = {
   'QPR': 'Poor',
 }
 
+// ─── Building Condition / Grade ─────────────────────────────────────────────
+// constructionDetails.buildingImprovementConditionCode and
+// structureClassification.gradeTypeCode share the same rating scale.
+
+export const BUILDING_CONDITION: Record<string, string> = {
+  'EXC': 'Excellent',
+  'EX0': 'Excellent',
+  'VGD': 'Very Good',
+  'VG0': 'Very Good',
+  'GD': 'Good',
+  'GD0': 'Good',
+  'G00': 'Good',
+  'AVE': 'Average',
+  'AV0': 'Average',
+  'FAI': 'Fair',
+  'FA0': 'Fair',
+  'PR': 'Poor',
+  'PR0': 'Poor',
+  'POO': 'Poor',
+  'VPR': 'Very Poor',
+  'VP0': 'Very Poor',
+}
+
 // ─── Lookup Helper ───────────────────────────────────────────────────────────
 
 /**
@@ -382,5 +486,8 @@ export const BUILDING_QUALITY: Record<string, string> = {
  */
 export function lookupCode(table: Record<string, string>, code: string | null | undefined): string | undefined {
   if (!code) return undefined
+  // Assessor "no data" codes normalize to missing, not a literal value —
+  // otherwise two unknowns would compare equal in match filters.
+  if (UNKNOWN_CODES.has(code.toUpperCase().trim())) return undefined
   return table[code.toUpperCase()] ?? table[code] ?? code
 }

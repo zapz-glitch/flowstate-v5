@@ -26,6 +26,9 @@ export function useEvaluation() {
     // Comp selection
     compOverride: state.compOverride,
 
+    // Comp feedback context
+    feedbackContext: state.feedbackContext,
+
     // Market research
     marketContext: state.marketContext,
     aiReport: state.aiReport,
@@ -41,5 +44,6 @@ export function useEvaluation() {
     onCompClick: state.callbacks.onCompClick,
     onRunAiAnalysis: state.callbacks.onRunAiAnalysis,
     onUndoAiSelection: state.callbacks.onUndoAiSelection,
+    onFeedbackSubmitted: state.callbacks.onFeedbackSubmitted,
   }
 }

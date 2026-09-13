@@ -32,6 +32,8 @@ export interface EvaluationCallbacks {
   onCompClick?: (comp: CompItem) => void
   onRunAiAnalysis?: () => void
   onUndoAiSelection?: () => void
+  /** Called after a Notify stamp is submitted — batch review uses it to advance */
+  onFeedbackSubmitted?: (type: 'validate' | 'improve') => void
 }
 
 // ─── Consolidated State ────────────────────────────────────────────────────
@@ -46,6 +48,15 @@ export interface EvaluationState {
 
   // Comp selection
   compOverride: CompOverrideState | null
+
+  // Comp-selection feedback ("Notify") context — rules/fallback as applied
+  feedbackContext: {
+    appliedFilters?: Array<{ type: string; enabled: boolean; value: number; priority?: 'hard' | 'soft' }> | null
+    fallbackUsed?: string | null
+    fallbackReason?: string | null
+    jobId?: string | null
+    subjectAddress?: string | null
+  } | null
 
   // Market research (from web search, arrives independently)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -77,6 +88,7 @@ export const evaluationStateAtom = atom<EvaluationState>({
   isRecalculated: false,
   recalcData: null,
   compOverride: null,
+  feedbackContext: null,
   marketContext: null,
   aiReport: null,
   aiAnalyzing: false,

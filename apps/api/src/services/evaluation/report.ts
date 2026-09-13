@@ -31,55 +31,139 @@ export interface BuildReportInput {
 }
 
 /**
- * Overall confidence in the evaluation, based on data quality signals.
+ * Confidence gate on the comps that actually drive the ARV.
+ *
+ * HIGH — 3+ selected comps, every one verified on the hard rules plus
+ *        style/condition, no expansion fallback, subject condition
+ *        verified. Use the ARV normally.
+ * MEDIUM — 3 selected comps but weaker dimensions (unverified data,
+ *        soft mismatches, expansion tiers used, aging sales).
+ * LOW — fewer than 3 selected comps, any selected comp carrying a hard
+ *        failure (rescued by a fallback tier), nearest-comps/insufficient
+ *        fallback, or stale sales.
+ *
+ * There is no human reviewer — the formula recommendation always stands;
+ * confidence is an advisory signal carried on the report.
  */
 function assessConfidence(input: BuildReportInput): {
   level: 'high' | 'medium' | 'low'
   reasons: string[]
+  requiresHumanReview: boolean
 } {
   const reasons: string[] = []
-  let score = 0
+  const appraisal = input.appraisalResult
 
-  const enabled = input.appraisalResult.enabledCount
-  if (enabled >= 5) {
-    score += 2
-    reasons.push(`${enabled} comps passed appraisal rules`)
-  } else if (enabled >= 3) {
-    score += 1
-    reasons.push(`${enabled} comps passed appraisal rules`)
-  } else {
-    reasons.push(`Only ${enabled} comps usable`)
+  const softTypes = new Set(
+    appraisal.appliedFilters.filter((f) => f.priority === 'soft').map((f) => f.type)
+  )
+  const selectedIds = new Set(
+    appraisal.selectedCompIds ??
+      appraisal.comparables.filter((c) => c.arvStatus === 'selected').map((c) => c.id)
+  )
+  const selected = appraisal.comparables.filter((c) => selectedIds.has(c.id))
+
+  // Per-comp grading: 'excellent' = every hard rule verified-pass AND
+  // style/condition verified; 'adequate' = no hard failure; 'weak' =
+  // a hard failure rescued by expansion.
+  const grades = selected.map((c) => {
+    const results = c.evaluation?.filterResults ?? []
+    const hardFailed = results.some(
+      (f) => f.status === 'failed' && !f.passed && !softTypes.has(f.type)
+    )
+    const hardUnverified = results.some(
+      (f) => f.status === 'not_verified' && !softTypes.has(f.type)
+    )
+    const keySoftUnverified = results.some(
+      (f) =>
+        softTypes.has(f.type) &&
+        f.status === 'not_verified' &&
+        (f.type === 'building_style_match' || f.type === 'condition_match')
+    )
+    const softFailed = results.some(
+      (f) => f.status === 'failed' && !f.passed && softTypes.has(f.type)
+    )
+    if (hardFailed) return 'weak' as const
+    if (hardUnverified || keySoftUnverified || softFailed) return 'adequate' as const
+    return 'excellent' as const
+  })
+
+  const weakCount = grades.filter((g) => g === 'weak').length
+  const excellentCount = grades.filter((g) => g === 'excellent').length
+
+  // Staleness — sale age is an absolute rule (≤180d at every tier), so
+  // anything past a year in a selected set means the data is wrong.
+  const now = Date.now()
+  const selectedAgesDays = selected
+    .map((c) => (c.saleDate ? (now - new Date(c.saleDate).getTime()) / 86_400_000 : null))
+    .filter((d): d is number => d != null && Number.isFinite(d))
+  const oldestSaleDays = selectedAgesDays.length ? Math.max(...selectedAgesDays) : null
+
+  // Subject condition verified via keyword classification, vision reno
+  // assessment, or assessor building condition
+  const visionVerified =
+    input.renovationAssessment?.status === 'ok' ||
+    (input.renovationAssessment?.curbAppeal?.source === 'vision' &&
+      input.renovationAssessment.curbAppeal.condition !== 'unknown')
+  const subjectConditionVerified =
+    input.subjectClassification != null ||
+    input.bundle.property.buildingCondition != null ||
+    visionVerified === true
+
+  if (selected.length === 0) {
+    reasons.push('No comps were selected for ARV')
+    return { level: 'low', reasons, requiresHumanReview: true }
+  }
+  if (selected.length < 3) {
+    reasons.push(`Only ${selected.length} comp(s) drive the ARV — fewer than 3`)
+  }
+  if (weakCount > 0) {
+    reasons.push(
+      `${weakCount} selected comp(s) breached a hard rule and were rescued by expansion`
+    )
+  }
+  if (appraisal.fallbackUsed === 'nearest_comps' || appraisal.fallbackUsed === 'insufficient') {
+    reasons.push(`Comp fallback used: ${appraisal.fallbackUsed}`)
+  } else if (appraisal.fallbackUsed !== 'none' && appraisal.fallbackUsed) {
+    reasons.push(`Comp expansion used: ${appraisal.fallbackUsed}`)
+  }
+  if (oldestSaleDays != null && oldestSaleDays > 365) {
+    reasons.push(`Stale sale: oldest selected comp sold ${Math.round(oldestSaleDays / 30)} months ago`)
+  } else if (oldestSaleDays != null && oldestSaleDays > 180) {
+    reasons.push(`Oldest selected comp sold ${Math.round(oldestSaleDays)} days ago (beyond 180-day window)`)
+  }
+  if (!subjectConditionVerified) {
+    reasons.push('Subject condition could not be verified')
   }
 
-  if (input.appraisalResult.fallbackUsed === 'none') {
-    score += 1
+  const level =
+    selected.length < 3 ||
+    weakCount > 0 ||
+    appraisal.fallbackUsed === 'nearest_comps' ||
+    appraisal.fallbackUsed === 'insufficient' ||
+    (oldestSaleDays != null && oldestSaleDays > 365)
+      ? 'low'
+      : selected.length >= 3 &&
+          excellentCount === selected.length &&
+          appraisal.fallbackUsed === 'none' &&
+          subjectConditionVerified
+        ? 'high'
+        : 'medium'
+
+  if (level === 'high') {
+    reasons.unshift(
+      `${excellentCount} verified comps — recent sales, tight size/year/style match`
+    )
+  } else if (level === 'medium') {
+    reasons.unshift(
+      `${selected.length} comps selected with weaker dimensions — reduced confidence`
+    )
   } else {
-    reasons.push(`Comp fallback used: ${input.appraisalResult.fallbackUsed}`)
+    reasons.unshift('Thin or rule-breaching comp pool — treat the valuation as approximate')
   }
 
-  const conf = input.subjectClassification?.confidence ?? 0
-  if (conf >= 70) {
-    score += 1
-    reasons.push(`Subject classified with ${conf}% confidence`)
-  } else if (!input.subjectClassification) {
-    score -= 1
-    reasons.push('Subject could not be classified')
-  } else {
-    reasons.push(`Low classification confidence (${conf}%)`)
-  }
-
-  if (input.weightedARVResult) {
-    score += 1
-    reasons.push('Classification-weighted ARV computed')
-  } else {
-    score -= 1
-    reasons.push('ARV computed without condition weighting')
-  }
-
-  if (input.fallbacksUsed.length > 0) score -= 1
-
-  const level = score >= 3 ? 'high' : score >= 1 ? 'medium' : 'low'
-  return { level, reasons }
+  // requiresHumanReview kept for API compatibility — there is no review
+  // workflow; consumers should read `confidence`/`reasons` instead.
+  return { level, reasons, requiresHumanReview: level !== 'high' }
 }
 
 /**
@@ -267,11 +351,20 @@ export function buildEvaluationReport(input: BuildReportInput): EvaluationReport
       projectedProfit: valuation.projectedProfit,
       projectedROI: valuation.projectedROI,
       totalInvestment: valuation.totalInvestment,
+      // The formula call always stands — there is no human reviewer, so
+      // confidence is communicated via the confidence field + reasons
+      // instead of withholding the recommendation.
       recommendation: valuation.recommendation,
-      recommendationReason: valuation.recommendationReason,
+      recommendationReason:
+        confidence.level === 'low'
+          ? `${valuation.recommendationReason} — LOW confidence: comp evidence is thin or stale`
+          : confidence.level === 'medium'
+            ? `${valuation.recommendationReason} — medium confidence: some dimensions unverified`
+            : valuation.recommendationReason,
     },
 
     confidence: confidence.level,
     confidenceReasons: [...confidence.reasons, ...derivedBuybox.notes],
+    requiresHumanReview: confidence.requiresHumanReview,
   }
 }

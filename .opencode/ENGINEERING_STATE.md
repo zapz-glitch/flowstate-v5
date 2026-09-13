@@ -505,3 +505,493 @@ valuation (renovated-skip, location penalty) -> report.
 ## Last Handoff
 Pipeline hardened per spec. Next likely: more comp-quality evidence or
 foundation_match toggle in preset UI if user wants it configurable.
+
+## Apples-to-apples comps + AVM (branch: feat/cotality-flood-zone, pushed, NOT deployed)
+
+Product spec implemented 2026-09-12:
+
+### Comp qualification (hard rules, provider building data)
+- New filter types: neighborhood_match, construction_material_match,
+  pool_match, garage_match, stories_match (soft), roof_material_match
+  (soft), condition_match. Defaults now 17 filters.
+- Assessor buildingCondition drives condition_match via tier ordering
+  (Excellent > Very Good > Good > Average > Fair > Poor > Very Poor);
+  comp must be >= subject tier.
+- Missing evidence = status 'not_verified' — records, never disqualifies;
+  selectArvComps ranks verified pass > not_verified > then price.
+- Soft priority on stories/roof: mismatch recorded, never disables.
+- LLM comp selection can NO LONGER re-enable hard-failed comps
+  (passedFilters === false stays disabled in both DO override paths).
+
+### Location + expansion order (flipped vs old behavior)
+- Subdivision preferred; neighborhood is the location level when no
+  subdivision/HOA. Equal weight (40/40) in shared scoring.
+- Expansion now: strict -> older_sales (2x age, 2x yearBuilt tolerance,
+  15% older-sale discount) -> subdivision_expansion (drop subdivision,
+  keep neighborhood) -> neighborhood/geographic -> nearest fallback.
+  Previously geography expanded FIRST; now last before nearest.
+
+### Condition gate
+- services/evaluation uses assessor buildingCondition for the ARV gate;
+  comp vision calls skipped when provider condition exists. Vision /
+  Firecrawl code retained as fallback only.
+
+### Normalization + response
+- Subject: additionSquareFeet (buildingAdditionsAreaSquareFeet),
+  roofCover, buildingCondition/Grade, improvementValue, neighborhoodName,
+  avm {value, confidence, valueRangeLow/High, model, asOfDate}.
+- Comps: parcelId, neighborhoodName, buildingCondition/Grade, stories,
+  heating/cooling/fireplacesCount — all from existing per-comp
+  property-detail calls (no new provider calls).
+
+### Dashboard
+- DealSummaryHero: AVM cell with +/- delta vs ARV (tooltip: excluded
+  from math). actions.ts types extended (subject + comp).
+- SubjectGridCard: neighborhood pill, Construction, Roof, Stories,
+  Heat/AC, Assessor Cond (+grade), Addition rows.
+- CompGridCard: Construction, Roof, Stories, Assessor Cond, Heat/AC rows
+  (all conditional on presence).
+
+### Verified
+- vitest src/: 78 appraisal tests pass (35 evaluator + 43 rules incl.
+  new older-sales-before-geography ordering test).
+- npm test: 15/15 regression files pass.
+- tsc --noEmit clean: api + dashboard.
+
+### Remaining
+- AVM entitlement: thvMarketingStandard model valid but Order Manager
+  returns "no response" — needs Cotality account scope add. subject.avm
+  is null until then; UI cell hidden.
+- Comp cards: could add neighborhood pill when subdivision absent.
+- Deploy requires user approval (deploy-on-request rule).
+
+### Follow-up (same branch): Zillow fallback fills + card tweaks
+- mergeZillowDataIntoProperty extended: when provider data is missing,
+  Zillow listing data (already fetched for photos) fills buildingStyle,
+  stories/storiesType, roofCover, construction type, heating, cooling,
+  parking -> garage/carport (regex /carport/i routes), pool (presence
+  only). Provider always wins; fills only write into null slots.
+  Nested construction/features objects now deep-copied to avoid
+  aliasing the source bundle.
+- performAnalysis restructured: appraisal pass 1 -> photo fetch ->
+  merge fills -> appraisal re-run when fills landed (recorded as
+  zillow_supplement report step). Insufficient-comps throw moved after
+  the re-run so Zillow fills can rescue thin pools.
+- Garage/carport evaluator already treated them as one covered-parking
+  category — matches product rule. UI merged into a single "Parking"
+  row on subject + comp cards.
+- CompGridCard gains neighborhood pill (match-state colored vs subject).
+- DealSummaryHero AVM cell now renders whenever subject.avm key is
+  provided — shows '—' when provider returned no value.
+
+### Hard-rule spec + audit-trail rework (2026-09-13, same branch, pushed)
+
+Diagnosis for `5351 Oxford Crest Dr` (job_1789274746482_oh1tga5q):
+report ended at `physical_relaxation` where location filters were
+disabled — so subdivision/neighborhood rules were absent from every
+comp's rule list and out-of-area comps could be rescued. Two more
+causes: user's saved preset had `sqft_diff=20` (±20 sqft, ~1% — failed
+13/15 comps incl. all in-subdivision sales), and raw assessor codes
+leaked (`Roof 111` = Aluminum; exteriorWalls `ALV`/`FST`/`SDS`).
+
+Product engineer's authoritative rule spec:
+- HARD (deal-breakers): sale_age ≤180d, same subdivision, ±250 sqft,
+  same property type, no major-road crossing, ±10yr build.
+- SOFT (confidence/ranking, never disqualify): neighborhood (when
+  subject HAS a subdivision), building style, foundation, construction
+  material, pool, garage/carport, assessor condition, stories, roof,
+  lot size.
+- LLM comp selection removed — rule-based selection authoritative;
+  LLM annotates rankings/reasoning/scores only (cannot touch
+  isEnabled/compGroup; "disable-all-when-LLM-pending" removed).
+
+Implementation:
+- DEFAULT_FILTERS: all physical matches + lot_size + neighborhood now
+  priority 'soft'. Neighborhood is a datapoint ONLY — recorded and
+  displayed on cards, never a selection gate (product engineer:
+  "remove neighborhood, use it as a datapoint" 2026-09-13).
+- subdivisionsMatch(): strips unit/phase/section/plat/#NN designators
+  (UN/UT/U1/PH/SEC/LOT/PLAT/ADDN... incl. "TURTLE CREEK VILLAGE #01")
+  then word-boundary prefix match — "SWEETWATER CREEK S UT 2E" matches
+  subject "SWEETWATER CREEK"; "OAK" does NOT match "OAKWOOD".
+  Mirrored in shared/filters.ts.
+- evaluateWithFallback rewritten: no tier disables filters anymore.
+  Every tier evaluates the full rule set; expansion tiers rescue comps
+  whose hard failures ⊆ allowed set: older_sales →
+  subdivision_expansion (radius ×geographicDistanceMultiplier, rescue
+  {subdivision_match}) → geographic_expansion (strict radius filters,
+  rescue {subdivision_match,distance}) → most-recent fallback.
+  Full audit trail in every tier — fixes the missing location rules
+  in reports. physical_relaxation tier removed (no hard physical
+  rules remain).
+- HARD-RULE ISOLATION (post-Canoe-Creek fix): the relaxed thresholds
+  apply ONLY to the in-area time-travel tier. Leaving the subdivision
+  reverts all six hard rules to strict values — relaxations never
+  compound. year_built_diff is NEVER relaxed (±10yr absolute at every
+  tier). The final nearest_comps fallback only picks sales whose hard
+  failures are location-only — a comp breaching sale_age/sqft/type/
+  year_built/road_barrier is never enabled; INSUFFICIENT_COMPS is the
+  honest dead end.
+  Root cause of the Canoe Creek breach (15827, job_1789278874955):
+  relaxed ±20yr/360d thresholds persisted into geographic tiers AND
+  the nearest-comps fallback had no hard-rule check — a 2025-built
+  out-of-subdivision comp (17yr off the 2008 subject) was rescued.
+- performAnalysis: required-match merge now always takes default
+  priority (presets can't express soft).
+- corelogic-codes: EXTERIOR_WALLS expanded (ALV/BRI/FST/SDS/LPS/BLO/
+  STV/CLP/FRM/MAS/CND...), ROOF_COVER numeric RFCO set added earlier.
+
+### Provider building-detail supplement (2026-09-13, same branch)
+
+Duval county property-detail lacks buildingImprovementConditionCode —
+condition/style/foundation were null everywhere. The dedicated
+GET /property/{fips:upi}/building endpoint returns literal-text
+values; now wired as a provider supplement:
+
+- types.ts: NormalizedBuildingDetail + BuildingDetailResponse +
+  optional provider getBuildingDetail(parcelId).
+- corelogic.ts getBuildingDetail: defensive nesting search
+  (building / buildings[0] / data.buildings[0] / root), alias lookup
+  per field (condition, style, foundation, constructionType,
+  exteriorWalls, roofCover, stories, heatType, airConditioning,
+  parkingType, garage sqft, pool, yearBuilt). Requires composite
+  fips:upi parcel ID; errors via evidenceError (non-fatal).
+- index.ts: cached PropertyAPI.getBuildingDetail wrapper
+  (provider-scoped key, flood-zone TTL); enrichComparables calls it
+  when a comp's detail lacks condition/style/foundation and merges
+  into construction+features (provider wins over Zillow fills);
+  getPropertyBundle fetches it for the subject in the same
+  Promise.all and merges onto property before analysis.
+- analysis-job.ts DO: same subject supplement in the parallel batch
+  (5th element of Promise.all → merged before performAnalysis).
+- provider-evidence.test.ts: building-detail fixture coverage
+  (both nestings, aliases, malformed parcel short-circuit).
+- shared package: AppraisalFilter.priority added; shared evaluator
+  honors soft (no disableReasons) — matches API semantics.
+- D1: user's Default preset sqft_diff corrected 20 → 250 (report user's
+  preset e251da86, user 5c3f729f).
+
+Verified: 139 vitest + 15/15 regression + tsc clean api + dashboard.
+
+### Confidence gating (2026-09-13, same branch)
+
+Product spec: HIGH = 3+ excellent comps (recent, tight size/year/style,
+verified condition) → ARV normal; MEDIUM = 3 comps w/ weaker dims →
+ARV + human-review flag; LOW = <3 strong comps / rescued hard-failure
+comps / nearest-comps or insufficient fallback / stale sales → do not
+pretend precision exists.
+
+- report.ts assessConfidence rewritten as a gate on the SELECTED ARV
+  comps (not just pool size): per-comp grading excellent (all hard
+  rules verified-pass + style/condition verified) / adequate (no hard
+  failure) / weak (hard failure rescued by expansion). Staleness:
+  >365d = low, >180d noted. Subject condition verified via
+  classification or assessor buildingCondition.
+- EvaluationReport.requiresHumanReview added; at LOW the report +
+  response.valuation recommendation is overridden to 'manual-review'
+  (formula rec preserved in the reason string); MEDIUM appends a
+  review flag to the reason.
+- response.valuation gains confidence/confidenceReasons/
+  requiresHumanReview; dashboard ValuationData extended; DealSummaryHero
+  renders a confidence badge (emerald/amber/red) with reasons tooltip.
+- report.test.ts: fixture now carries selectedCompIds/arvStatus; new
+  tests pin HIGH (3 verified), MEDIUM (unverified dims), LOW (gated
+  recommendation) paths.
+
+### Rule rework — sale age absolute, year-built ladder (2026-09-13, same branch)
+
+Product spec change (user): sale_age ≤180d is ABSOLUTE — never relaxed
+at any tier; always prefer most-recent sales. The sanctioned concession
+is build-era: year_built_diff widens progressively (configured ±10 →
++2 → +4 ⇒ ±12, ±14) INSIDE each location scope before geography expands.
+
+- ExpansionPolicy: removed allowOlderSales/olderSaleAgeMultiplier/
+  olderYearBuiltMultiplier/olderSaleDiscountPercent; added
+  allowYearBuiltExpansion + yearBuiltExpansionSteps (default [2,4]).
+- Ladder: strict → in-subdivision year widening → leave subdivision
+  (radius ×mult, year ladder restarts) → drop radius (year ladder
+  restarts) → nearest_comps. Year-widened comps PASS legitimately at the
+  tier's threshold (audit shows threshold:12) — no rescue needed; rescue
+  still used for location failures (subdivision/distance).
+- fallbackUsed union: older_sales → year_built_expansion;
+  expansionApplied entries: 'year_built' | 'subdivision' | 'geographic'.
+- nearest_comps last resort uses year tolerance at widest sanctioned
+  step (±14 default); sale_age strict, only location failures carried.
+- selectArvComps ordering: verified-passes → recency (newest sale) →
+  adjusted price.
+- old_comp_discount: thresholdDays field added (default 90; stored in
+  preset amount column for that type, surfaced in Evaluation Settings as
+  a days input + percent input). Shared package calculator + dashboard
+  recalc path honor thresholdDays.
+- Tests: 'time-travels to older in-area sales' replaced with
+  year-widening test; 'uses older sales' replaced with sale-age-is-
+  absolute test; Canoe Creek test updated (17yr comp dead at every tier
+  incl. ±14 max). 139 vitest + 15/15 regression + tsc clean api + dash
+  + shared.
+
+NOT deployed — deploy-on-request rule stands.
+
+### Per-filter Required/Preferred (priority) — user-configurable (2026-09-13, same branch)
+
+User request: every filter needs Active toggle + Required/Preferred
+control + a real threshold (the value:1 on match filters was
+meaningless). Changes must flow preset → analysis.
+
+- DB: migration 0028 adds `appraisal_rule_filter.priority TEXT`
+  (NULL = system default for that type — preserves existing semantics).
+  Applied LOCAL only; `db:migrate:remote` REQUIRED before API deploy.
+- appraisal-rules.ts: FilterInput.priority accepted; serializeFilter
+  resolves NULL → defaultFilterPriority(type) on all GET responses;
+  POST/PATCH/mine/location inserts persist it. location-settings.ts
+  FilterInput + upsert/resolver updated likewise.
+- user-settings loader maps row priority → AppraisalFilter at both
+  preset + location-override sites.
+- performAnalysis merge changed: previously force-enabled match
+  filters AND force-set default priority — now only injects filter
+  types MISSING from the preset (system defaults); user-set
+  enabled/priority is authoritative. appliedSettings.filters now
+  serializes resolved priority.
+- analyze.ts appraisalOverrides.filters + comp-selection.ts
+  settings.filters accept priority (public API parity).
+- Dashboard: AppraisalFilter/AppraisalDefaults/input types +
+  widened FilterType unions (api.ts, client-api.ts);
+  LocationAppraisalFilter.priority. evaluation-settings page:
+  FilterRow redesigned — 4 cols (Rule | Threshold | Mode | Active);
+  boolean match filters show "must match" instead of value:1;
+  Mode column is a Required/Preferred pill toggle. Same Req/Pref
+  pill added to analyze-page AppraisalFilterEditor + report
+  SettingsPanel (updateFilter carries priority into recalc).
+- RecalcFilter.priority; recalc passes it to shared evaluator and
+  hasFilterChanges compares it; use-report-settings DEFAULT_FILTERS
+  synced to API defaults (was stale: sqft_diff 20, 5 filters).
+- rules.test.ts: +4 tests (soft sqft_diff doesn't disqualify, hard
+  style-match does, soft style-match doesn't, disabled filter
+  produces no result).
+
+Verified: 143 vitest + 15/15 regression + tsc clean api + dashboard
++ shared.
+
+Known divergence FIXED (2026-09-13): shared sqft_diff evaluator was
+%-based while the API uses absolute sqft — recalc treated value 250
+as "250%" so the rule effectively never failed client-side. Shared
+filter now uses absolute sqft, matching the API; settings UI unit
+labels corrected '%' → 'sf' (evaluation-settings page + report
+SettingsPanel).
+
+### Comp-card lot/garage + stories hard rule (2026-09-13, same branch)
+
+- CompGridCard: new "Lot" row — comp acres + sqft delta vs subject,
+  color-coded via lotMatchColor (±2.5k sf green / ±5k grey / red).
+  "Parking" row renamed "Garage" — shows garage + garageSquareFeet,
+  carport appended only when present; carport alone shows as value.
+- CompCard (list view): Lot stat now shows `0.230 ac (+2,310 sf)` delta
+  via new subjectLotAcres prop (passed from ComparablesSection).
+- SubjectGridCard: Parking → Garage with same garage-sqft rendering.
+- format-helpers: +lotMatchColor, +fmtLotDelta.
+- DEFAULT_FILTERS stories_match: soft → HARD (product rule: 1-story
+  only comps 1-story, 2-story only comps 2-story; verified numeric
+  mismatch disqualifies, missing data still not_verified). Not rescuable
+  in expansion tiers (rescue allowlist = subdivision/distance only).
+- River Park Villas example (comp 15yr off subject): at default
+  year_built_diff=10 it exceeds the ±14 ladder max — rejected at every
+  tier, and the nearest_comps last resort rejects it too. Knob already
+  exists: user can set year_built_diff threshold to 15 in Evaluation
+  Settings → ladder becomes ±15/±17/±19 and it passes at strict tier.
+  NOT run locally — CoreLogic keys dead in local env; no saved report.
+- evaluator.test.ts updated (stories now hard, roof stays soft).
+
+Verified: 85 appraisal vitest + tsc clean api + dashboard.
+
+### No-human-review + half-story tolerance (2026-09-13, same branch)
+
+Product clarification: there is NO analyst/human-review step — the
+system must always return its best decision. Changes:
+- stories_match now tolerates ±0.5 (1.5-story comps compatible with
+  1 and 2) in API evaluator + shared/filters.ts. Full-story mismatch
+  (1 vs 2) still fails and disqualifies when required.
+- manual-review override REMOVED: report.outcome.recommendation and
+  response.valuation.recommendation always carry the formula call.
+  confidence + confidenceReasons + requiresHumanReview flag remain as
+  the reliability signal; low/medium append a caveat to
+  recommendationReason. 'manual-review' kept in the recommendation
+  union types for stored-report compatibility.
+- DealSummaryHero badge text updated (no "verify manually").
+- report.test.ts updated: LOW keeps formula rec + 'LOW confidence'
+  reason; MEDIUM asserts 'medium confidence' caveat; +2 stories
+  tolerance/disqualify tests.
+
+Verified: 145 vitest + 15/15 regression + tsc clean api + dashboard.
+
+### DEPLOYED + golden-eval harness (2026-09-13)
+
+- Migration 0028 applied to REMOTE D1 (d1_migrations row inserted
+  manually — `migrations apply` hit a 7403 API error; direct
+  `--file` execute worked).
+- `feat/cotality-flood-zone` fast-forwarded to main (1edcfc6) → CI
+  deploy run 34777219422 GREEN (2m0s). All appraisal work live.
+- UI: AVM cell removed from DealSummaryHero; Market Research section
+  removed from AnalysisResultLayout (Cotality AVM/analytics not
+  entitled; data still flows in the API response).
+- `apps/api/src/scripts/golden-eval.ts`: golden-dataset harness —
+  POST /v1/analyze (streetAddress+city/state/zip, skipCache) → SSE
+  `evaluation_complete` → per-run ARV/recommendation/confidence/
+  rulesApplied/fallbacks/selected comps + speed stats + accuracy vs
+  expected labels + "what would raise confidence" aggregation.
+  Dataset: apps/api/golden-dataset.json (6 real addresses). Run:
+  `FS_API_KEY=fs_... npx tsx src/scripts/golden-eval.ts golden-dataset.json --runs N`
+- First prod run (6 addresses, all on new code): 6/6 ok;
+  speed mean 36.2s p50 39.0s p95 47.4s (10.9s outlier = thin
+  3-comp pool); confidence low×5 medium×1; decisions hold×3
+  strong-buy×1 buy×2; Canoe Creek's 2025 comp correctly absent.
+  Dominant confidence blockers: unverified subject condition (4×),
+  thin in-subdivision pools (3× nearest_comps), missing permit
+  evidence.
+- Confirmed: comp selection is 100% rules — LLM annotates
+  reasoning/scores only (cannot touch isEnabled/compGroup).
+- Temp prod api_keys row `golden-eval-tmp` deleted after run.
+
+### WIP: condition evidence + neighborhood fallback (2026-09-13, feat/condition-and-neighborhood)
+
+Implemented per product spec (vision/permits for subject, provider-first
+condition for comps, subdivision→neighborhood fallback):
+
+- major-items.ts: ASSUME_REPLACE_WHEN_NO_PERMIT = {roof, hvac,
+  water_heater, electric_panel}. No permits → item assumed original
+  install at house age; charged when houseAge ≥ threshold; unknown
+  build year → assumed due. replumb/foundation/rewire and all other
+  items stay evidence-gated (never assumed).
+- derivation.ts: passes effectiveYearBuilt ?? yearBuilt into
+  assessMajorItems; unknown-count note only counts uncharged unknowns.
+- appraisal/index.ts: NEW tier 3 'neighborhood_expansion' between
+  in-subdivision year widening and geographic expansion — rescues
+  subdivision_match failures only when neighborhoodsMatch(subject, c)
+  is verified true; year ladder restarts; gated by
+  allowNeighborhoodExpansion (default true). Drop-radius tier now runs
+  under allowGeographicExpansion only.
+- evaluator.ts: exported neighborhoodsMatch(subject, comp) — name OR
+  code equality; null when no comparable pair exists. Used by both the
+  soft filter and the fallback tier (works even if user disabled the
+  neighborhood_match filter — it is geographic evidence).
+- property-api: neighborhoodCode propagated onto NormalizedComparable
+  via enrichment merge (subject already carried name+code).
+- evaluation/index.ts ARV gate (prior session, now verified): provider
+  Good/VeryGood/Excellent positive; Fair/Poor/VeryPoor negative; vision
+  renovated positive / dated+distressed negative; unverifiable comps
+  KEPT (rules are primary, condition = confidence boost); verified-
+  negative pruned only when ≥3 remain else arv_condition_thin.
+- report.ts: subject condition counts verified via vision
+  (renovationAssessment.status==='ok' or vision curb-appeal);
+  stale 'review recommended'/'verify value manually' strings replaced;
+  requiresHumanReview kept for API compat (documented as advisory).
+
+Verified: 154 vitest (incl. 4 new derivation tests for big-four
+no-permit behavior, 4 new rules tests for the neighborhood tier, 2 new
+evaluator code-match tests), 15/15 regression files, tsc clean on
+api + shared + dashboard.
+
+NOT yet done: production golden-eval re-run on this code (needs deploy
+or a fresh prod run after merge); Firecrawl is already the photo source
+for comp vision (photoBundle.comps via Zillow) — provider→photos→vision
+ordering confirmed in evaluation/index.ts.
+
+### Style-match required + rate-limit tracker (2026-09-13, feat/condition-and-neighborhood)
+
+- building_style_match default priority → 'hard'. Verified style
+  mismatch disqualifies at every tier (rescue allowlists only carry
+  location failures). Missing style data stays not_verified.
+- Rate-limit tracking: auth middleware now LOGS 429 quota rejections
+  into api_usage_logs (previously invisible — the 429 return preceded
+  the usage insert). /user/usage returns rateLimit {hits24h, hits7d,
+  serverErrors24h, recent[]}. Overview page has a Rate Limits panel
+  (counts + recent hits, Healthy/Attention badge).
+- Verified: 154 vitest, tsc clean api+dashboard.
+
+### DEPLOYED: feat/condition-and-neighborhood → main (33c2e62)
+
+- Deploy run 34781263673: API + Dashboard both green.
+- Live: big-four no-permit assumptions, neighborhood fallback tier,
+  provider→photos→vision comp condition gate, style match required,
+  rate-limit tracker on Overview.
+- Next: user uploads batch-import list for prod eval; watch the
+  Rate Limits panel (tracks our API 429s + 5xx — provider-side
+  CoreLogic/Firecrawl throttling is NOT yet logged, only visible as
+  failures/latency).
+
+### Notify feedback loop (9d769cc, merged to main)
+
+- ComparablesSection: Notify button in manual-selection banner →
+  notes dialog (Enter or Send submits, blank OK) → generates
+  paste-ready devin.ai ticket + copies to clipboard.
+- New lib/comp-feedback.ts: diffs user selection vs engine ARV set
+  (compGroup), per-comp rule audit (passed/failed/not_verified,
+  actual vs threshold), why-added-comp-wasn't-selected, and minimal
+  config/code change to select it. Missing-evidence comps flagged
+  "data gap, not rule change".
+- API: comp filter serialization now emits `status` field so
+  not_verified is distinguishable from failed client-side.
+- Atom plumbing: `feedbackContext` (appliedFilters, fallbackUsed,
+  fallbackReason, jobId, subjectAddress) synced on all 3 surfaces
+  (analyze page, public report, saved report); threaded through
+  AnalysisResultLayout → ComparablesSection.
+- Verified: tsc clean api+dashboard.
+
+### Card density + UI cleanup (860c8e6, merged to main)
+
+- Notify button moved to comparables header — always visible (was
+  gated behind isManual banner; user couldn't find it on reports).
+- CompGridCard collapsed → essentials only (bed/bath, sqft, year,
+  lot, style). Full comparison data → CompComparisonDialog +
+  CompCard expander: foundation, construction, ext walls, roof,
+  stories, heat/AC, assessor cond, vision condition, pool,
+  garage/carport, lot delta.
+- formatLotSize(): sqft ≤0.5ac, acres above — cards, subject, dialog.
+- Removed pre-1978 lead-paint badges + neighborhood badges from UI;
+  subdivision name only (neighborhood name+code stays in backend
+  matching via neighborhoodsMatch).
+- SubjectGridCard: Style row always rendered.
+- Verified AI is NOT doing comp selection: analysis-job.ts annotates
+  only; /comp-selection/analyze (LLM-selects) is dead code —
+  runCompSelection never called.
+- Verified: tsc clean dashboard.
+
+### Stacked comp sort + neighborhood filter (9720a10, on main)
+
+- ComparablesSection sort stack: selected comps pinned contiguous →
+  geo grouping (subdivision / neighborhood modes) → appraisal-rule
+  closeness (constant, direction-invariant) → directional key.
+- Subdivision & Neighborhood modes arrow-toggles asc/desc by PRICE;
+  Distance arrows flip miles; Price & $/Sqft standalone.
+- neighborhoodCode serialized to dashboard so client-side
+  neighborhood filter can match by name OR code (same as backend
+  neighborhoodsMatch).
+- Default sort remains the engine's selection order.
+- Verified: tsc clean dashboard.
+
+### Batch review workflow (e92ce60, feat/batch-review-workflow)
+
+- api migration 0029: saved_reports + feedback_status / notes /
+  report / at. POST /user/reports/:jobId/feedback stamps
+  'validated' | 'improve' + notes + generated ticket (validated
+  origin/session/content-type). GET /user/reports/:jobId returns
+  feedbackStatus/feedbackAt. GET /batch/:id joins feedbackStatus
+  per result jobId (inArray over saved_reports). BatchJobDO results
+  now carry confidence into resultsJson.
+- dashboard batch page: list picker (All lists + per-list chips with
+  progress), queue card with "N left in queue", confidence bucket
+  cards (All/Low/Medium/High/Unrated — counts + reviewed + Review
+  link to first unreviewed), table gains Confidence + Reviewed
+  (Validated ✓ / Flagged ⚑) columns; row links carry ?batch&conf.
+- report page batch-review mode: ?batch=<id>&conf=<bucket> loads the
+  batch queue → fixed bottom bar (prev address left, next right,
+  position + reviewed count + back-to-batch center). Notify submit
+  auto-advances to next unreviewed (onFeedbackSubmitted callback
+  through atom → AnalysisResultLayout → ComparablesSection).
+- Notify dialog: two actions — Validate (stamp correct) /
+  Flag for improvement (generate ticket). Blank notes OK.
+- Verified: tsc clean api+dashboard; 154 vitest pass; 15/15
+  regression files pass; migration 0029 applied to local D1.
+- NOT deployed — remote migration 0029 must run on remote D1 before
+  stamps persist in prod (deploy applies migrations? verify in
+  deploy.yml before pushing to main).
+- Next: user uploads batch list → reviews low-confidence bucket →
+  Notify loop generates devin-ready tickets.

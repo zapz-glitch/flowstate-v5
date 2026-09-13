@@ -18,6 +18,7 @@ import {
   DEFAULT_FILTERS,
   DEFAULT_ADJUSTMENTS,
   DEFAULT_EXPANSION_POLICY,
+  defaultFilterPriority,
   summarizeClassifications,
   type AppraisedComparable,
   type AppraisalResultWithFallback,
@@ -30,6 +31,7 @@ import type { RehabTable, TierRangeDefinition } from '@flowstate-api/shared/valu
 import {
   buildAnalysisResponse,
   calculateAllRehabLevelEstimates,
+  mergeZillowDataIntoBundle,
   type AnalysisResponse,
   type ApiCallStats,
   type ResponseContext,
@@ -338,23 +340,20 @@ export async function performAnalysis(
   env: Env,
   onProgress?: (message: string) => void
 ): Promise<EvaluationResult> {
-  const { bundle, jobId } = params
+  const { jobId } = params
+  let { bundle } = params
   const appraisalService = createAppraisalService()
   const rules = params.appraisalRules ?? {}
   const filters = [...(rules.filters ?? DEFAULT_FILTERS)]
   const adjustments = rules.adjustments ?? DEFAULT_ADJUSTMENTS
 
-  // Evidence-critical rules always run: subdivision_match + foundation_match
-  // are the apples-to-apples hammers and only bite when enriched data proves
-  // a mismatch — not_verified never disqualifies, so enabling them is safe
-  // even in markets where the provider returns no subdivision/foundation.
-  for (const required of ['subdivision_match', 'foundation_match'] as const) {
-    const existing = filters.find((f) => f.type === required)
-    if (existing) {
-      existing.enabled = true
-    } else {
-      const def = DEFAULT_FILTERS.find((f) => f.type === required)
-      if (def) filters.push({ ...def })
+  // Filters the preset doesn't define at all are injected with system defaults
+  // so the audit trail always covers every rule. Filters the preset DOES define
+  // keep the user's own enabled + required(preferred) choices — the preset is
+  // authoritative for those.
+  for (const defaultFilter of DEFAULT_FILTERS) {
+    if (!filters.some((f) => f.type === defaultFilter.type)) {
+      filters.push({ ...defaultFilter })
     }
   }
 
@@ -365,7 +364,7 @@ export async function performAnalysis(
   }
 
   // ── 1. Appraisal: filter comps, apply adjustments, select ARV comps ────────
-  const appraisalResult = appraisalService.evaluateWithFallback(
+  let appraisalResult = appraisalService.evaluateWithFallback(
     bundle.property,
     bundle.comparables,
     { filters, adjustments, expansion: DEFAULT_EXPANSION_POLICY }
@@ -374,23 +373,6 @@ export async function performAnalysis(
   if (appraisalResult.fallbackUsed && appraisalResult.fallbackUsed !== 'none') {
     fallbacksUsed.push(`comp_fallback:${appraisalResult.fallbackUsed}`)
   }
-
-  const enabledComps = appraisalResult.comparables.filter((c) => c.isEnabled)
-  if (appraisalResult.insufficientComps || enabledComps.length === 0) {
-    step('appraisal_rules', 'failed', appraisalResult.fallbackReason ?? 'insufficient comps')
-    throw new AnalysisError(
-      appraisalResult.fallbackReason ??
-        `Only ${enabledComps.length} comps satisfy appraisal rules (required: 3). Try adjusting your appraisal filters.`,
-      { code: 'INSUFFICIENT_COMPS' }
-    )
-  }
-  step(
-    'appraisal_rules',
-    appraisalResult.fallbackUsed === 'none' ? 'completed' : 'fallback',
-    `${enabledComps.length}/${bundle.comparables.length} comps passed` +
-      (appraisalResult.fallbackUsed !== 'none' ? ` (${appraisalResult.fallbackUsed})` : '')
-  )
-  let finalArv = appraisalResult.arv
 
   // ── 2. Photos: subject + comps via Zillow → Redfin → Realtor chain ─────────
   let photoBundle: PhotoBundle | null = null
@@ -437,11 +419,57 @@ export async function performAnalysis(
   }
   onProgress?.('Photos fetched')
 
+  // ── 2b. Zillow fallback fills: provider building data takes priority, ──────
+  // but when a field is missing we fill it from the Zillow listing we already
+  // fetched for photos (style, foundation, construction, roof, stories,
+  // heating/cooling, parking, pool). Re-run the appraisal when fills landed —
+  // a comp that was not_verified may now verify (or disqualify) for real.
+  if (photoBundle) {
+    const mergeResult = mergeZillowDataIntoBundle(bundle, photoBundle)
+    const filledCount =
+      mergeResult.subjectSupplementedFields.length +
+      [...mergeResult.compSupplementedFields.values()].reduce((n, f) => n + f.length, 0)
+    if (filledCount > 0) {
+      bundle = mergeResult.bundle
+      appraisalResult = appraisalService.evaluateWithFallback(
+        bundle.property,
+        bundle.comparables,
+        { filters, adjustments, expansion: DEFAULT_EXPANSION_POLICY }
+      )
+      if (appraisalResult.fallbackUsed && appraisalResult.fallbackUsed !== 'none'
+          && !fallbacksUsed.includes(`comp_fallback:${appraisalResult.fallbackUsed}`)) {
+        fallbacksUsed.push(`comp_fallback:${appraisalResult.fallbackUsed}`)
+      }
+      step('zillow_supplement', 'completed', `${filledCount} field(s) supplemented from Zillow listings`)
+    }
+  }
+
+  const enabledComps = appraisalResult.comparables.filter((c) => c.isEnabled)
+  if (appraisalResult.insufficientComps || enabledComps.length === 0) {
+    step('appraisal_rules', 'failed', appraisalResult.fallbackReason ?? 'insufficient comps')
+    throw new AnalysisError(
+      appraisalResult.fallbackReason ??
+        `Only ${enabledComps.length} comps satisfy appraisal rules (required: 3). Try adjusting your appraisal filters.`,
+      { code: 'INSUFFICIENT_COMPS' }
+    )
+  }
+  step(
+    'appraisal_rules',
+    appraisalResult.fallbackUsed === 'none' ? 'completed' : 'fallback',
+    `${enabledComps.length}/${bundle.comparables.length} comps passed` +
+      (appraisalResult.fallbackUsed !== 'none' ? ` (${appraisalResult.fallbackUsed})` : '')
+  )
+  let finalArv = appraisalResult.arv
+
   // ── 3. Vision: subject renovation+curb-appeal AND comp checks in parallel ──
-  // One merged LLM call for the subject (renovation level + curb appeal);
-  // per-comp curb checks run alongside it — all vision resolves together.
+  // One merged LLM call for the subject (renovation level + curb appeal).
+  // Per-comp curb checks only run when the provider's assessor condition is
+  // missing — assessor data replaces the LLM classification for comps and
+  // saves a vision round-trip per comp.
+  const compById = new Map(appraisalResult.comparables.map((c) => [c.id, c]))
   const subjectPhotos = photoBundle?.subject?.photos ?? []
   const compVisionPairs = (appraisalResult.selectedCompIds ?? [])
+    .filter((id) => compById.get(id)?.buildingCondition == null)
     .map((id) => ({ id, photos: photoBundle?.comps[id]?.photos ?? [] }))
     .filter((p) => p.photos.length > 0)
 
@@ -522,30 +550,54 @@ export async function performAnalysis(
   let compCurbAppeal: Record<string, CurbAppealCheck> | undefined =
     compChecks.length > 0 ? Object.fromEntries(compChecks.map((c) => [c.id, c.check])) : undefined
 
-  // ── ARV condition gate ────────────────────────────────────────────────────
-  // ARV-comp-worthy = recently sold, arm's-length, physically similar, and
-  // verified AR quality — renovated/updated/retail-ready, matching the
-  // condition the subject will reach after repair. A high sale price alone
-  // NEVER qualifies a comp: dated/distressed verification excludes it, and
-  // unverifiable condition means its price cannot influence ARV.
-  const isArvWorthy = (check: CurbAppealCheck | undefined): boolean =>
-    !!check &&
-    check.source === 'vision' &&
+  // ── ARV condition evidence ────────────────────────────────────────────────
+  // Product spec: the rules already picked the comps — condition verification
+  // is the cherry on top that boosts confidence, NOT a selection gate.
+  //   • verified AR-quality (assessor Good+ / vision renovated) → confidence +
+  //   • verified NOT AR-quality (assessor Fair/Poor/Very Poor or vision
+  //     dated/distressed) → excluded — confirmed evidence it isn't ARV spec
+  //   • unverifiable → KEPT: top-of-market comps matching the rules are valid
+  //     ARV anchors; lack of condition data only lowers confidence.
+  const visionVerifiedNegative = (check: CurbAppealCheck | undefined): boolean =>
+    !!check && check.source === 'vision' &&
+    (check.condition === 'dated' || check.condition === 'distressed')
+  const visionVerifiedPositive = (check: CurbAppealCheck | undefined): boolean =>
+    !!check && check.source === 'vision' &&
     (check.condition === 'renovated' || check.rehabLevelIndex === 0)
+
+  // Assessor condition is the primary signal — Good/Very Good/Excellent are
+  // retail-ready; Fair/Poor/Very Poor are confirmed below ARV spec.
+  const ARV_POSITIVE_CONDITIONS = new Set(['excellent', 'verygood', 'good'])
+  const ARV_NEGATIVE_CONDITIONS = new Set(['fair', 'poor', 'verypoor'])
+  const assessorSignal = (compId: string): 'positive' | 'negative' | 'average' | null => {
+    const cond = compById.get(compId)?.buildingCondition?.toLowerCase().replace(/[^a-z]/g, '')
+    if (!cond) return null
+    if (ARV_POSITIVE_CONDITIONS.has(cond)) return 'positive'
+    if (ARV_NEGATIVE_CONDITIONS.has(cond)) return 'negative'
+    return 'average' // 'average' and unmapped values — usable, no boost
+  }
 
   const unverifiable: string[] = []
   const prunedFromArv: string[] = []
+  let verifiedPositiveCount = 0
   for (const id of appraisalResult.selectedCompIds ?? []) {
     const check = compCurbAppeal?.[id]
-    if (!isArvWorthy(check)) {
+    const assessor = assessorSignal(id)
+    const verifiedNegative = assessor === 'negative' || visionVerifiedNegative(check)
+    const verifiedPositive = assessor === 'positive' || visionVerifiedPositive(check)
+    if (verifiedNegative) {
       prunedFromArv.push(id)
-      if (!check || check.condition === 'unknown') unverifiable.push(id)
       if (check && check.source !== 'price') {
         compCurbAppeal![id] = {
           ...check,
-          summary: `${check.summary ?? check.condition} — excluded from ARV: not verified renovated/retail-ready`,
+          summary: `${check.summary ?? check.condition} — excluded from ARV: verified below ARV spec (${assessor === 'negative' ? `assessor ${compById.get(id)?.buildingCondition}` : check.condition})`,
         }
       }
+    } else if (verifiedPositive || assessor === 'average') {
+      if (verifiedPositive) verifiedPositiveCount++
+    } else {
+      // No signal at all — kept in the ARV set, counted for confidence
+      unverifiable.push(id)
     }
   }
   if (prunedFromArv.length > 0) {
@@ -557,16 +609,19 @@ export async function performAnalysis(
       finalArv = appraisalResult.arv
       fallbacksUsed.push(`arv_condition_pruned:${prunedFromArv.length}`)
       step('arv_condition_gate', 'fallback',
-        `${prunedFromArv.length} comp(s) excluded — not verified renovated/retail-ready; ARV recomputed on ${remainingComps.length}`)
+        `${prunedFromArv.length} comp(s) excluded — verified below ARV spec (dated/distressed/poor assessor condition); ARV recomputed on ${remainingComps.length}`)
     } else {
       // Can't recompose a 3-comp ARV — keep the set but mark the evidence
       fallbacksUsed.push('arv_condition_thin')
       step('arv_condition_gate', 'fallback',
-        `${prunedFromArv.length} comp(s) not verified AR-quality (${unverifiable.length} unverifiable) — ARV kept on ${remainingComps.length + prunedFromArv.length} comps, fewer than 3 verified`)
+        `${prunedFromArv.length} comp(s) verified below ARV spec — ARV kept on ${remainingComps.length + prunedFromArv.length} comps, fewer than 3 verified`)
     }
   } else if (appraisalResult.selectedCompIds?.length) {
     step('arv_condition_gate', 'completed',
-      `${appraisalResult.selectedCompIds.length} comp(s) verified AR-quality (renovated/retail-ready)`)
+      `${appraisalResult.selectedCompIds.length} comp(s) selected — ${verifiedPositiveCount} verified AR-quality${unverifiable.length ? `, ${unverifiable.length} unverified (kept: rules-matched)` : ''}`)
+  }
+  if (unverifiable.length > 0) {
+    fallbacksUsed.push(`arv_condition_unverified:${unverifiable.length}`)
   }
 
   // ── 4. Classifications (price percentile, display grouping) ─────────────────
@@ -662,11 +717,17 @@ export async function performAnalysis(
   const bestMatch = selectBestMatch(bundle.property, enabledComps)
 
   const appliedSettings = {
-    filters: filters.map((f) => ({ type: f.type, enabled: f.enabled, value: f.value })),
+    filters: filters.map((f) => ({
+      type: f.type,
+      enabled: f.enabled,
+      value: f.value,
+      priority: f.priority ?? defaultFilterPriority(f.type),
+    })),
     adjustments: adjustments.map((a) => ({
       type: a.type,
       enabled: a.enabled,
-      amount: a.amount,
+      // old_comp_discount carries its age threshold (days) in `amount`
+      amount: a.type === 'old_comp_discount' ? (a.thresholdDays ?? a.amount) : a.amount,
       percent: a.percent,
     })),
     dealParams: {
@@ -724,6 +785,19 @@ export async function performAnalysis(
     fallbacksUsed,
     renovationAssessment: renovation,
   })
+  // Confidence gate on the comps that drive the ARV — surfaces onto the
+  // valuation block. There is no human reviewer, so the formula call
+  // always stands; confidence + reasons carry the reliability signal.
+  response.valuation.confidence = response.report.confidence
+  response.valuation.confidenceReasons = response.report.confidenceReasons
+  response.valuation.requiresHumanReview = response.report.requiresHumanReview
+  if (response.report.confidence === 'low') {
+    response.valuation.recommendationReason =
+      `${valuation.recommendationReason ?? ''} — LOW confidence: comp evidence is thin or stale`.trim()
+  } else if (response.report.confidence === 'medium') {
+    response.valuation.recommendationReason =
+      `${valuation.recommendationReason ?? ''} — medium confidence: some dimensions unverified`.trim()
+  }
   response.visionAssessment = renovation
   response.renovationLevelSource = derivedBuybox.rehabLevelSource
   response.evaluationEngine = 'ts-v5'

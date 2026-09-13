@@ -5,7 +5,7 @@ import { cn } from '@/lib/utils'
 import type { CompItem, SubjectData } from './shared-types'
 import { StreetViewImage } from './StreetViewImage'
 import { RuleMatchDetails } from './RuleMatchDetails'
-import { normalizeSubdivision, sqftMatchColor, yearMatchColor, fmtDelta, formatShortDate } from './format-helpers'
+import { normalizeSubdivision, sqftMatchColor, yearMatchColor, lotMatchColor, fmtDelta, fmtLotDelta, formatShortDate, formatLotSize } from './format-helpers'
 
 export interface CompGridCardProps {
   comp: CompItem
@@ -37,11 +37,15 @@ export function CompGridCard({
     ? comp.squareFeet - subject.squareFeet : null
   const yearDelta = comp.yearBuilt != null && subject?.yearBuilt != null
     ? comp.yearBuilt - subject.yearBuilt : null
+  const lotDelta = comp.lotSizeAcres != null && subject?.lotSizeAcres != null
+    ? comp.lotSizeAcres - subject.lotSizeAcres : null
 
   const sqftColor = sqftDelta != null && subject?.squareFeet
     ? sqftMatchColor(comp.squareFeet!, subject.squareFeet) : null
   const yearColor = yearDelta != null && subject?.yearBuilt != null
     ? yearMatchColor(comp.yearBuilt!, subject.yearBuilt) : null
+  const lotColor = lotDelta != null
+    ? lotMatchColor(comp.lotSizeAcres!, subject!.lotSizeAcres!) : null
 
   // Build external links
   const streetViewUrl = comp.latitude && comp.longitude
@@ -158,11 +162,8 @@ export function CompGridCard({
             )}
           </span>
         </div>
-        {/* Distance + Subdivision + Adj price */}
-        <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
-          {comp.distanceMiles != null && (
-            <span className="text-[9px] text-foreground-tertiary tabular-nums">{comp.distanceMiles.toFixed(2)} mi</span>
-          )}
+        {/* Location badges — own line directly under the address */}
+        <div className="flex items-center gap-1 mt-1 flex-wrap">
           {comp.subdivision && (() => {
             const isMatch = !!(subject?.subdivision && normalizeSubdivision(comp.subdivision) === normalizeSubdivision(subject.subdivision))
             const hasSubject = !!subject?.subdivision
@@ -183,6 +184,12 @@ export function CompGridCard({
               </span>
             )
           })()}
+        </div>
+        {/* Distance + Adj price */}
+        <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+          {comp.distanceMiles != null && (
+            <span className="text-[9px] text-foreground-tertiary tabular-nums">{comp.distanceMiles.toFixed(2)} mi</span>
+          )}
           {comp.adjustedPrice != null && comp.adjustedPrice !== comp.salePrice && (
             <span className="text-[10px] font-medium text-emerald-500 tabular-nums ml-auto">Adj ${comp.adjustedPrice.toLocaleString()}</span>
           )}
@@ -190,7 +197,7 @@ export function CompGridCard({
 
         <RuleMatchDetails comp={comp} />
 
-        {/* Stats grid — 2 columns */}
+        {/* Stats grid — collapsed essentials; full detail in the expand dialog */}
         <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 mt-2">
           <div className="flex items-center justify-between text-[11px]">
             <span className="text-foreground-tertiary">Bed/Bath</span>
@@ -211,38 +218,15 @@ export function CompGridCard({
             </span>
           </div>
           <div className="flex items-center justify-between text-[11px]">
+            <span className="text-foreground-tertiary">Lot</span>
+            <span className="font-medium tabular-nums">
+              {formatLotSize(comp.lotSizeAcres)}
+              {lotDelta != null && <span className={cn('ml-1 text-[9px]', lotColor)}>({fmtLotDelta(comp.lotSizeAcres!, subject!.lotSizeAcres!)})</span>}
+            </span>
+          </div>
+          <div className="flex items-center justify-between text-[11px]">
             <span className="text-foreground-tertiary">Style</span>
             <span className="font-medium truncate ml-2">{comp.buildingStyle || '-'}</span>
-          </div>
-          <div className="flex items-center justify-between text-[11px]">
-            <span className="text-foreground-tertiary">Foundation</span>
-            <span className="font-medium truncate ml-2">{comp.foundationType || '-'}</span>
-          </div>
-          {comp.curbAppeal && comp.curbAppeal.condition !== 'unknown' && (
-            <div className="flex items-center justify-between text-[11px]">
-              <span className="text-foreground-tertiary">Condition</span>
-              <span className={cn(
-                'font-medium truncate ml-2',
-                comp.curbAppeal.condition === 'renovated' && 'text-emerald-500',
-                comp.curbAppeal.condition === 'dated' && 'text-amber-500',
-                comp.curbAppeal.condition === 'distressed' && 'text-red-400',
-              )} title={comp.curbAppeal.summary ?? undefined}>
-                {comp.curbAppeal.condition === 'renovated' ? 'Renovated' : comp.curbAppeal.condition === 'dated' ? 'Dated' : 'Distressed'}
-                {comp.curbAppeal.source === 'price' && <span className="text-[8px] text-foreground-tertiary font-normal"> (by price)</span>}
-              </span>
-            </div>
-          )}
-          <div className="flex items-center justify-between text-[11px]">
-            <span className="text-foreground-tertiary">Pool</span>
-            <span className="font-medium">{comp.pool ? 'Yes' : '-'}</span>
-          </div>
-          <div className="flex items-center justify-between text-[11px]">
-            <span className="text-foreground-tertiary">Garage</span>
-            <span className="font-medium">{comp.garage ? 'Yes' : '-'}</span>
-          </div>
-          <div className="flex items-center justify-between text-[11px]">
-            <span className="text-foreground-tertiary">Carport</span>
-            <span className="font-medium">{comp.carport ? 'Yes' : '-'}</span>
           </div>
         </div>
       </div>

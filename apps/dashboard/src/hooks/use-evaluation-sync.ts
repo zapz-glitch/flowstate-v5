@@ -24,6 +24,13 @@ interface SyncOptions {
   subject?: SubjectData | null
   displayValuation?: ValuationData
   effectiveComps?: CompsData
+  feedback?: {
+    appliedFilters?: Array<{ type: string; enabled: boolean; value: number; priority?: 'hard' | 'soft' }> | null
+    fallbackUsed?: string | null
+    fallbackReason?: string | null
+    jobId?: string | null
+    subjectAddress?: string | null
+  } | null
   aiAnalyzing?: boolean
   isStreaming?: boolean
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -33,6 +40,7 @@ interface SyncOptions {
   onCompClick?: (comp: CompItem) => void
   onRunAiAnalysis?: () => void
   onUndoAiSelection?: () => void
+  onFeedbackSubmitted?: (type: 'validate' | 'improve') => void
 }
 
 export function useEvaluationSync({
@@ -40,6 +48,7 @@ export function useEvaluationSync({
   subject,
   displayValuation,
   effectiveComps,
+  feedback = null,
   aiAnalyzing = false,
   isStreaming = false,
   marketContext = null,
@@ -48,6 +57,7 @@ export function useEvaluationSync({
   onCompClick,
   onRunAiAnalysis,
   onUndoAiSelection,
+  onFeedbackSubmitted,
 }: SyncOptions) {
   const setState = useSetAtom(evaluationStateAtom)
 
@@ -59,6 +69,7 @@ export function useEvaluationSync({
       isRecalculated: evaluation.isRecalculated,
       recalcData: evaluation.recalcData,
       compOverride: evaluation.compOverride,
+      feedbackContext: feedback ?? null,
       marketContext,
       aiReport,
       aiAnalyzing,
@@ -70,12 +81,14 @@ export function useEvaluationSync({
         onCompClick,
         onRunAiAnalysis,
         onUndoAiSelection,
+        onFeedbackSubmitted,
       },
     })
   }, [
     subject, displayValuation, effectiveComps,
     evaluation.isRecalculated, evaluation.recalcData, evaluation.compOverride,
     evaluation.handleToggleComp, evaluation.handleResetComps,
-    aiAnalyzing, isStreaming, marketContext, aiReport, onOpenSettings, onCompClick, onRunAiAnalysis, onUndoAiSelection, setState,
+    feedback,
+    aiAnalyzing, isStreaming, marketContext, aiReport, onOpenSettings, onCompClick, onRunAiAnalysis, onUndoAiSelection, onFeedbackSubmitted, setState,
   ])
 }

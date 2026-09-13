@@ -20,11 +20,12 @@ import {
   arvThreshold as arvThresholdTable,
   proximityConfig as proximityConfigTable,
 } from '../../db'
-import type {
-  FilterType,
-  AdjustmentType,
-  AppraisalFilter,
-  AppraisalAdjustment,
+import {
+  defaultFilterPriority,
+  type FilterType,
+  type AdjustmentType,
+  type AppraisalFilter,
+  type AppraisalAdjustment,
 } from '../appraisal'
 import type { ArvTier, RehabEstimate } from '../valuation'
 import type { TierRangeDefinition } from '@flowstate-api/shared/valuation'
@@ -131,8 +132,22 @@ export async function loadUserAnalysisSettings(
           db.select().from(appraisalRuleAdjustment).where(eq(appraisalRuleAdjustment.presetId, preset.id)),
         ])
         appraisalRules = {
-          filters: presetFilters.map((f) => ({ type: f.filterType as FilterType, enabled: f.enabled, value: f.value })),
-          adjustments: presetAdjustments.map((a) => ({ type: a.adjustmentType as AdjustmentType, enabled: a.enabled, amount: a.amount, percent: a.percentage })),
+          filters: presetFilters.map((f) => ({
+            type: f.filterType as FilterType,
+            enabled: f.enabled,
+            value: f.value,
+            priority: f.priority === 'hard' || f.priority === 'soft' ? f.priority : defaultFilterPriority(f.filterType as FilterType),
+          })),
+          adjustments: presetAdjustments.map((a) => ({
+            type: a.adjustmentType as AdjustmentType,
+            enabled: a.enabled,
+            amount: a.amount,
+            percent: a.percentage,
+            // old_comp_discount stores its age threshold (days) in `amount`
+            ...(a.adjustmentType === 'old_comp_discount' && a.amount > 0
+              ? { thresholdDays: a.amount }
+              : {}),
+          })),
         }
         console.log(`[UserSettings] Loaded appraisal preset: "${preset.name}" (${presetFilters.length} filters, ${presetAdjustments.length} adjustments)`)
       }
@@ -255,7 +270,12 @@ export async function loadUserAnalysisSettings(
           db.select().from(appraisalRuleAdjustment).where(eq(appraisalRuleAdjustment.presetId, locPreset.id)),
         ])
         appraisalRules = {
-          filters: pFilters.map((f) => ({ type: f.filterType as FilterType, enabled: f.enabled, value: f.value })),
+          filters: pFilters.map((f) => ({
+            type: f.filterType as FilterType,
+            enabled: f.enabled,
+            value: f.value,
+            priority: f.priority === 'hard' || f.priority === 'soft' ? f.priority : defaultFilterPriority(f.filterType as FilterType),
+          })),
           adjustments: pAdjs.map((a) => ({ type: a.adjustmentType as AdjustmentType, enabled: a.enabled, amount: a.amount, percent: a.percentage })),
         }
       }

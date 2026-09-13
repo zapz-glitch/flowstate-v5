@@ -167,6 +167,17 @@ export interface UsageSummary {
   currentUsage: number
   remaining: number
   resetDate: string
+  rateLimit?: {
+    hits24h: number
+    hits7d: number
+    serverErrors24h: number
+    recent: Array<{
+      endpoint: string
+      propertyAddress: string | null
+      errorMessage: string | null
+      createdAt: string
+    }>
+  }
 }
 
 export async function getUsageSummary(): Promise<UsageSummary> {
@@ -227,11 +238,22 @@ export async function getUsageLogDetail(id: string): Promise<UsageLogDetail> {
 
 export type FilterType =
   | 'subdivision_match'
+  | 'neighborhood_match'
+  | 'building_style_match'
+  | 'foundation_match'
+  | 'construction_material_match'
+  | 'pool_match'
+  | 'garage_match'
+  | 'stories_match'
+  | 'roof_material_match'
+  | 'condition_match'
   | 'sale_age'
   | 'sqft_diff'
   | 'property_type'
   | 'year_built_diff'
   | 'distance'
+  | 'lot_size_diff'
+  | 'road_barrier'
 
 export type AdjustmentType =
   | 'old_comp_discount'
@@ -247,6 +269,8 @@ export interface AppraisalFilter {
   filterType: FilterType
   enabled: boolean
   value: number
+  /** 'hard' = required (disqualifies) | 'soft' = preferred (ranks only) */
+  priority: 'hard' | 'soft'
   createdAt: string
 }
 
@@ -287,7 +311,7 @@ export interface AdjustmentLabel {
 }
 
 export interface AppraisalDefaults {
-  filters: Array<{ type: FilterType; enabled: boolean; value: number }>
+  filters: Array<{ type: FilterType; enabled: boolean; value: number; priority?: 'hard' | 'soft' }>
   adjustments: Array<{ type: AdjustmentType; enabled: boolean; amount: number; percent?: number }>
   filterLabels: Record<FilterType, FilterLabel>
   adjustmentLabels: Record<AdjustmentType, AdjustmentLabel>
@@ -332,7 +356,7 @@ export interface CreatePresetInput {
   name: string
   description?: string
   isDefault?: boolean
-  filters?: Array<{ filterType: FilterType; enabled: boolean; value: number }>
+  filters?: Array<{ filterType: FilterType; enabled: boolean; value: number; priority?: 'hard' | 'soft' }>
   adjustments?: Array<{ adjustmentType: AdjustmentType; enabled: boolean; amount: number; percentage: number }>
 }
 
@@ -340,7 +364,7 @@ export interface UpdatePresetInput {
   name?: string
   description?: string
   isDefault?: boolean
-  filters?: Array<{ filterType: FilterType; enabled: boolean; value: number }>
+  filters?: Array<{ filterType: FilterType; enabled: boolean; value: number; priority?: 'hard' | 'soft' }>
   adjustments?: Array<{ adjustmentType: AdjustmentType; enabled: boolean; amount: number; percentage: number }>
 }
 

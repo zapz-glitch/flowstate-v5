@@ -34,7 +34,7 @@ export function evaluateComparable(
     const result = evaluateFilter(subject, comp, filter)
     filterResults.push(result)
 
-    if (!result.passed && result.reason) {
+    if (!result.passed && result.reason && filter.priority !== 'soft') {
       disableReasons.push(result.reason)
     }
   }

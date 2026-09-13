@@ -19,13 +19,14 @@ import {
   CONSTRUCTION_TYPE,
   FOUNDATION_TYPE,
   ROOF_TYPE,
+  ROOF_COVER,
   EXTERIOR_WALLS,
   BUILDING_QUALITY,
 } from '../property-api/providers/corelogic-codes'
 
 /** Resolve construction codes to labels (safety net for cached data with raw codes) */
 function resolveConstruction(c?: { type?: string; qualityCode?: string; buildingStyle?: string; foundationType?: string; roofType?: string; exteriorWalls?: string; storiesType?: string; roofCover?: string }) {
-  if (!c) return { foundationType: null as string | null, buildingStyle: null as string | null, storiesType: null as string | null, constructionType: null as string | null, qualityCode: null as string | null, roofType: null as string | null, exteriorWalls: null as string | null }
+  if (!c) return { foundationType: null as string | null, buildingStyle: null as string | null, storiesType: null as string | null, constructionType: null as string | null, qualityCode: null as string | null, roofType: null as string | null, roofCover: null as string | null, exteriorWalls: null as string | null }
   return {
     foundationType: lookupCode(FOUNDATION_TYPE, c.foundationType) ?? null,
     buildingStyle: lookupCode(BUILDING_STYLE, c.buildingStyle) ?? null,
@@ -33,6 +34,7 @@ function resolveConstruction(c?: { type?: string; qualityCode?: string; building
     constructionType: lookupCode(CONSTRUCTION_TYPE, c.type) ?? null,
     qualityCode: lookupCode(BUILDING_QUALITY, c.qualityCode) ?? null,
     roofType: lookupCode(ROOF_TYPE, c.roofType) ?? null,
+    roofCover: lookupCode(ROOF_COVER, c.roofCover) ?? null,
     exteriorWalls: lookupCode(EXTERIOR_WALLS, c.exteriorWalls) ?? null,
   }
 }
@@ -81,8 +83,11 @@ export function mergeZillowDataIntoProperty<T extends NormalizedProperty | Norma
 
   if (!zillowData) return { property, supplementedFields }
 
-  // Create a copy to avoid mutating the original
+  // Create a copy to avoid mutating the original — deep-copy the nested
+  // objects we may write into so fills don't alias the source bundle.
   const merged = { ...property }
+  if (merged.construction) merged.construction = { ...merged.construction }
+  if (merged.features) merged.features = { ...merged.features }
 
   // Merge bedrooms if missing
   if (merged.bedrooms == null && zillowData.bedrooms != null) {
@@ -120,6 +125,73 @@ export function mergeZillowDataIntoProperty<T extends NormalizedProperty | Norma
     merged.construction.foundationType = zillowData.foundationType
     supplementedFields.push({ field: 'foundationType', value: zillowData.foundationType, source: 'zillow' })
     console.log(`[ZillowMerge] Supplemented foundationType from Zillow: ${zillowData.foundationType}`)
+  }
+
+  // Merge building style if missing
+  if (merged.construction?.buildingStyle == null && zillowData.style != null) {
+    if (!merged.construction) merged.construction = {}
+    merged.construction.buildingStyle = zillowData.style
+    supplementedFields.push({ field: 'buildingStyle', value: zillowData.style, source: 'zillow' })
+    console.log(`[ZillowMerge] Supplemented buildingStyle from Zillow: ${zillowData.style}`)
+  }
+
+  // Merge stories if missing
+  if (merged.stories == null && zillowData.stories != null) {
+    merged.stories = zillowData.stories
+    supplementedFields.push({ field: 'stories', value: zillowData.stories, source: 'zillow' })
+  }
+  if (merged.construction?.storiesType == null && zillowData.stories != null) {
+    if (!merged.construction) merged.construction = {}
+    merged.construction.storiesType = `${zillowData.stories} Story`
+    supplementedFields.push({ field: 'storiesType', value: merged.construction.storiesType, source: 'zillow' })
+  }
+
+  // Merge roof material if missing
+  if (merged.construction?.roofCover == null && merged.construction?.roofType == null && zillowData.roof != null) {
+    if (!merged.construction) merged.construction = {}
+    merged.construction.roofCover = zillowData.roof
+    supplementedFields.push({ field: 'roofCover', value: zillowData.roof, source: 'zillow' })
+    console.log(`[ZillowMerge] Supplemented roofCover from Zillow: ${zillowData.roof}`)
+  }
+
+  // Merge construction material if missing
+  if (merged.construction?.type == null && merged.construction?.exteriorWalls == null && zillowData.construction != null) {
+    if (!merged.construction) merged.construction = {}
+    merged.construction.type = zillowData.construction
+    supplementedFields.push({ field: 'constructionType', value: zillowData.construction, source: 'zillow' })
+    console.log(`[ZillowMerge] Supplemented constructionType from Zillow: ${zillowData.construction}`)
+  }
+
+  // Merge heating/cooling if missing
+  if (merged.features?.heating == null && zillowData.heating != null) {
+    if (!merged.features) merged.features = {}
+    merged.features.heating = zillowData.heating
+    supplementedFields.push({ field: 'heating', value: zillowData.heating, source: 'zillow' })
+  }
+  if (merged.features?.cooling == null && zillowData.cooling != null) {
+    if (!merged.features) merged.features = {}
+    merged.features.cooling = zillowData.cooling
+    supplementedFields.push({ field: 'cooling', value: zillowData.cooling, source: 'zillow' })
+  }
+
+  // Merge covered parking if missing — Zillow "parking" is free text like
+  // "2 spaces, Attached Garage" or "Carport"; route to the right slot.
+  if (merged.features?.garageType == null && merged.features?.carportType == null && zillowData.parking != null) {
+    if (!merged.features) merged.features = {}
+    if (/carport/i.test(zillowData.parking)) {
+      merged.features.carportType = zillowData.parking
+      supplementedFields.push({ field: 'carportType', value: zillowData.parking, source: 'zillow' })
+    } else {
+      merged.features.garageType = zillowData.parking
+      supplementedFields.push({ field: 'garageType', value: zillowData.parking, source: 'zillow' })
+    }
+  }
+
+  // Merge pool if missing (Zillow exposes presence only — true fills, false/absent stays unverified)
+  if (merged.features?.poolType == null && zillowData.pool === true) {
+    if (!merged.features) merged.features = {}
+    merged.features.poolType = 'Pool'
+    supplementedFields.push({ field: 'poolType', value: 'Pool', source: 'zillow' })
   }
 
   // Merge hoaFee if missing (subject properties only — NormalizedProperty has hoaFee, NormalizedComparable does not)
@@ -278,7 +350,7 @@ export interface ValuationResult {
   projectedProfit: number
   projectedROI: number
   wholesalePrice: number
-  recommendation?: 'strong-buy' | 'buy' | 'hold' | 'pass'
+  recommendation?: 'strong-buy' | 'buy' | 'hold' | 'pass' | 'manual-review'
   recommendationReason?: string
 }
 
@@ -425,6 +497,18 @@ export interface AnalysisResponse {
     propertyType: string | null
     /** Subdivision name (if available) */
     subdivision: string | null
+    /** Cotality composite parcel ID (fipsCode:universalParcelId) */
+    parcelId: string | null
+    /** Formatted assessor parcel number */
+    apnFormatted: string | null
+    /** Cotality site-location neighborhood name */
+    neighborhoodName: string | null
+    neighborhoodCode: string | null
+    /** Core Based Statistical Area code (metro geography for market analytics) */
+    cbsaCode: string | null
+    censusTract: string | null
+    /** Legal description from site-location (plat/block/lot) */
+    legalDescription: string | null
     lastSale: {
       price: number
       date: string | null
@@ -479,6 +563,37 @@ export interface AnalysisResponse {
     } | null
     /** Property classification (as_is or after_renovation) */
     classification: ClassificationSummary | null
+    /** Assessor building improvement condition (e.g. "Average") — distinct from vision `condition` */
+    buildingCondition: string | null
+    /** Construction quality grade (e.g. "Fair") */
+    buildingGrade: string | null
+    /** Assessor improvement value in dollars */
+    improvementValue: number | null
+    /** Added-on building area (sqft) — non-null indicates a permitted addition */
+    additionSquareFeet: number | null
+    /** Roof cover material (e.g. Composition Shingle, Tile) */
+    roofCover: string | null
+    /** Construction type (e.g. Frame, Masonry) */
+    constructionType: string | null
+    /** Exterior wall material (e.g. Wood Siding, Brick) */
+    exteriorWalls: string | null
+    /** Roof type (e.g. Gable, Hip) */
+    roofType: string | null
+    /** Heating type (e.g. Forced Air) */
+    heating: string | null
+    /** Cooling/air conditioning type */
+    cooling: string | null
+    /** Fireplace count */
+    fireplacesCount: number | null
+    /** Cotality THV AVM estimate (subject only, parcel-level, display-only — never enters valuation math) */
+    avm: {
+      value: number | null
+      confidence: number | null
+      valueRangeLow: number | null
+      valueRangeHigh: number | null
+      model: string
+      asOfDate: string | null
+    } | null
   }
   valuation: {
     displayedArv?: number
@@ -543,8 +658,13 @@ export interface AnalysisResponse {
     projectedProfit: number
     projectedROI: number
     wholesalePrice: number
-    recommendation?: 'strong-buy' | 'buy' | 'hold' | 'pass'
+    recommendation?: 'strong-buy' | 'buy' | 'hold' | 'pass' | 'manual-review'
     recommendationReason?: string
+    /** Confidence gate on the comps driving the ARV */
+    confidence?: 'high' | 'medium' | 'low'
+    confidenceReasons?: string[]
+    /** True unless HIGH — medium flags for review, low withholds the call */
+    requiresHumanReview?: boolean
   }
   comps: {
     /** Total number of comps returned from API */
@@ -581,12 +701,36 @@ export interface AnalysisResponse {
       photos: string[]
       /** Subdivision name (if available) */
       subdivision: string | null
+      /** Composite parcel ID (fipsCode:universalParcelId) */
+      parcelId: string | null
+      /** Cotality site-location neighborhood name */
+      neighborhoodName: string | null
+      /** Cotality site-location neighborhood code */
+      neighborhoodCode: string | null
+      /** Assessor building improvement condition */
+      buildingCondition: string | null
+      /** Construction quality grade */
+      buildingGrade: string | null
+      stories: number | null
+      /** Heating type (e.g. Forced Air) */
+      heating: string | null
+      /** Cooling/A/C type (e.g. Central) */
+      cooling: string | null
+      fireplacesCount: number | null
       /** Foundation type (e.g., Slab, Crawl Space, Basement) */
       foundationType: string | null
       /** Building style (e.g., Colonial, Cape Cod, Bungalow, Ranch) */
       buildingStyle: string | null
       /** Story type description (e.g., Split Foyer, Tri Level, 2 Story) */
       storiesType: string | null
+      /** Construction type (e.g. Frame, Masonry) */
+      constructionType: string | null
+      /** Exterior wall material (e.g. Wood Siding, Brick) */
+      exteriorWalls: string | null
+      /** Roof type (e.g. Gable, Hip) */
+      roofType: string | null
+      /** Roof cover material (e.g. Composition Shingle, Tile) */
+      roofCover: string | null
       /** Visual ARV-candidacy check (photos) for ARV-selected comps */
       curbAppeal?: {
         condition: 'renovated' | 'dated' | 'distressed' | 'unknown'
@@ -657,6 +801,15 @@ export interface AnalysisResponse {
     zone: string | null
     inFloodZone: boolean
     description: string | null
+    /** FEMA Special Flood Hazard Area determination ('In'/'Out') — parcel-level only */
+    specialFloodHazardArea: string | null
+    /** FIRM panel number */
+    mapPanel: string | null
+    /** FIRM panel date (ISO) */
+    mapDate: string | null
+    communityName: string | null
+    /** 'parcel' (fips:universalParcelId determination) or 'spatial' (coordinate lookup) */
+    source: string | null
   } | null
   /** Positional proximity risks — drives the proximity deduction */
   locationRisks: Array<{
@@ -918,6 +1071,7 @@ export function buildAnalysisResponse(
           filters: evaluation.filterResults.map((f) => ({
             type: f.type,
             passed: f.passed,
+            status: f.status,
             reason: f.reason,
             actualValue: f.actualValue ?? null,
             threshold: f.threshold ?? null,
@@ -970,6 +1124,15 @@ export function buildAnalysisResponse(
       adjustedPrice: comp.adjustedSalePrice,
       photos: compPhotos,
       subdivision: comp.subdivision ?? null,
+      parcelId: comp.parcelId ?? null,
+      neighborhoodName: comp.neighborhoodName ?? null,
+      neighborhoodCode: comp.neighborhoodCode ?? null,
+      buildingCondition: comp.buildingCondition ?? null,
+      buildingGrade: comp.buildingGrade ?? null,
+      stories: comp.stories ?? null,
+      heating: merged?.features?.heating ?? comp.features?.heating ?? null,
+      cooling: merged?.features?.cooling ?? comp.features?.cooling ?? null,
+      fireplacesCount: merged?.features?.fireplacesCount ?? comp.features?.fireplacesCount ?? null,
       ...resolveConstruction(comp.construction),
       pool: merged?.features?.poolType ?? null,
       garage: merged?.features?.garageType ?? null,
@@ -1037,6 +1200,13 @@ export function buildAnalysisResponse(
       yearBuilt: property.yearBuilt ?? null,
       propertyType: property.propertyType ?? null,
       subdivision: property.subdivision ?? null,
+      parcelId: property.parcelId ?? null,
+      apnFormatted: property.apnFormatted ?? null,
+      neighborhoodName: property.neighborhoodName ?? null,
+      neighborhoodCode: property.neighborhoodCode ?? null,
+      cbsaCode: property.cbsaCode ?? null,
+      censusTract: property.censusTract ?? null,
+      legalDescription: property.legalDescription ?? null,
       lastSale: property.lastSalePrice
         ? {
             price: property.lastSalePrice,
@@ -1051,6 +1221,9 @@ export function buildAnalysisResponse(
       garage: property.features?.garageType ?? null,
       garageSquareFeet: property.features?.garageSquareFeet ?? null,
       carport: property.features?.carportType ?? null,
+      heating: property.features?.heating ?? null,
+      cooling: property.features?.cooling ?? null,
+      fireplacesCount: property.features?.fireplacesCount ?? null,
       hoaFee: property.hoaFee ?? null,
       zillowUrl: generateZillowUrl({
         propertyId: property.id,
@@ -1080,6 +1253,20 @@ export function buildAnalysisResponse(
       curbAppeal: ctx.subjectCurbAppeal ?? null,
       listingUrl: ctx.subjectListingUrl ?? null,
       classification: subjectClassificationSummary,
+      buildingCondition: property.buildingCondition ?? null,
+      buildingGrade: property.buildingGrade ?? null,
+      improvementValue: property.improvementValue ?? null,
+      additionSquareFeet: property.additionSquareFeet ?? null,
+      avm: enrichment.avm
+        ? {
+            value: enrichment.avm.value,
+            confidence: enrichment.avm.confidence,
+            valueRangeLow: enrichment.avm.valueRangeLow,
+            valueRangeHigh: enrichment.avm.valueRangeHigh,
+            model: enrichment.avm.model,
+            asOfDate: enrichment.avm.asOfDate,
+          }
+        : null,
     },
 
     // ═══ VALUATION SUMMARY ══════════════════════════════════════════════════
@@ -1159,6 +1346,11 @@ export function buildAnalysisResponse(
           zone: enrichment.floodZone.floodZone,
           inFloodZone: enrichment.floodZone.isInFloodZone,
           description: enrichment.floodZone.floodZoneDescription,
+          specialFloodHazardArea: enrichment.floodZone.specialFloodHazardArea ?? null,
+          mapPanel: enrichment.floodZone.mapPanel ?? null,
+          mapDate: enrichment.floodZone.mapDate ?? null,
+          communityName: enrichment.floodZone.communityName ?? null,
+          source: enrichment.floodZone.source ?? null,
         }
       : null,
 

@@ -42,6 +42,7 @@ interface MarketContextParams {
   zipCode: string
   propertyType?: string | null
   subdivision?: string | null
+  neighborhood?: string | null
 }
 
 /**
@@ -62,10 +63,11 @@ export async function fetchMarketContext(
   }
 
   const startTime = Date.now()
-  const { address, city, state, zipCode, propertyType, subdivision } = params
+  const { address, city, state, zipCode, propertyType, subdivision, neighborhood } = params
 
   const prompt = `Research the current real estate market conditions for the area around ${address}, ${city}, ${state} ${zipCode}.
 ${subdivision ? `Subdivision: ${subdivision}` : ''}
+${neighborhood ? `Neighborhood: ${neighborhood}` : ''}
 ${propertyType ? `Property type: ${propertyType}` : ''}
 
 Search for recent data and return a JSON object:

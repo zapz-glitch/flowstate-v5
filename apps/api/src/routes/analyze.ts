@@ -112,7 +112,13 @@ interface AnalyzeRequest {
 
   /** Override appraisal rules for this request */
   appraisalOverrides?: {
-    filters?: Array<{ type: string; enabled: boolean; value: number }>;
+    filters?: Array<{
+      type: string;
+      enabled: boolean;
+      value: number;
+      /** 'hard' = required (verified failure disqualifies) | 'soft' = preferred (ranks only) */
+      priority?: 'hard' | 'soft';
+    }>;
     adjustments?: Array<{
       type: string;
       enabled: boolean;
@@ -206,6 +212,7 @@ analyze.post('/', async (c) => {
         type: f.type as import('../services/appraisal').FilterType,
         enabled: f.enabled,
         value: f.value,
+        priority: f.priority,
       }));
       const overrideAdjustments = body.appraisalOverrides.adjustments?.map(
         (a) => ({

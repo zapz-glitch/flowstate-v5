@@ -28,7 +28,7 @@ const FILTER_LABELS: Record<string, { label: string; unit: string; hint: string 
   subdivision_match: { label: 'Subdivision Match', unit: '', hint: 'Same subdivision required' },
   building_style_match: { label: 'Building Style', unit: '', hint: 'Same building style required' },
   sale_age: { label: 'Sale Age', unit: 'days', hint: 'Max days since sold' },
-  sqft_diff: { label: 'Sqft Difference', unit: '%', hint: 'Max ±% sqft variance' },
+  sqft_diff: { label: 'Sqft Difference', unit: 'sf', hint: 'Max ± sqft variance' },
   year_built_diff: { label: 'Year Built Diff', unit: 'yrs', hint: 'Max year variance' },
   distance: { label: 'Distance', unit: 'mi', hint: 'Max miles from subject' },
 }
@@ -263,7 +263,8 @@ export function SettingsPanel({ settingsHook, recalcData }: SettingsPanelProps) 
             <div className="space-y-1">
               {settings.filters.map((filter) => {
                 const meta = FILTER_LABELS[filter.type] || { label: filter.type, unit: '', hint: '' }
-                const isSubdivision = filter.type === 'subdivision_match' || filter.type === 'building_style_match'
+                const isBoolean = !meta.unit
+                const priority = filter.priority ?? 'hard'
 
                 return (
                   <SettingRow
@@ -272,7 +273,20 @@ export function SettingsPanel({ settingsHook, recalcData }: SettingsPanelProps) 
                     enabled={filter.enabled}
                     onToggle={(checked) => updateFilter(filter.type, { enabled: checked })}
                   >
-                    {!isSubdivision && (
+                    <button
+                      type="button"
+                      disabled={!filter.enabled}
+                      onClick={() => updateFilter(filter.type, { priority: priority === 'hard' ? 'soft' : 'hard' })}
+                      title={priority === 'hard' ? 'Required — a verified failure disqualifies the comp' : 'Preferred — a failure ranks but never disqualifies'}
+                      className={`text-[9px] font-medium px-2 py-0.5 rounded-full border transition-colors disabled:cursor-not-allowed ${
+                        priority === 'hard'
+                          ? 'bg-red-500/10 border-red-400/30 text-red-600 dark:text-red-400'
+                          : 'bg-blue-500/10 border-blue-400/30 text-blue-600 dark:text-blue-400'
+                      }`}
+                    >
+                      {priority === 'hard' ? 'Req' : 'Pref'}
+                    </button>
+                    {!isBoolean && (
                       <CompactInput
                         value={filter.value}
                         onChange={(v) => updateFilter(filter.type, { value: parseFloat(v) || 0 })}

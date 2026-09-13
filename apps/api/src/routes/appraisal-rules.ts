@@ -20,6 +20,7 @@ import {
   DEFAULT_ADJUSTMENTS,
   FILTER_LABELS,
   ADJUSTMENT_LABELS,
+  defaultFilterPriority,
   type FilterType,
   type AdjustmentType,
 } from '../services/appraisal/types'
@@ -33,6 +34,8 @@ interface FilterInput {
   filterType: FilterType
   enabled: boolean
   value: number
+  /** 'hard' = required (disqualifies on verified failure) | 'soft' = preferred (ranks only) */
+  priority?: 'hard' | 'soft' | null
 }
 
 interface AdjustmentInput {
@@ -65,6 +68,19 @@ function convertToAppraisalFilter(filter: FilterInput) {
     type: filter.filterType,
     enabled: filter.enabled,
     value: filter.value,
+    priority: filter.priority ?? null,
+  }
+}
+
+/** Serialize a filter row for API responses — NULL priority resolves to the system default. */
+function serializeFilter<F extends { filterType: string; priority: string | null }>(f: F) {
+  return {
+    ...f,
+    filterType: f.filterType as FilterType,
+    priority:
+      f.priority === 'hard' || f.priority === 'soft'
+        ? (f.priority as 'hard' | 'soft')
+        : defaultFilterPriority(f.filterType as FilterType),
   }
 }
 
@@ -108,10 +124,7 @@ appraisalRules.get('/', async (c) => {
 
       return {
         ...preset,
-        filters: filters.map((f) => ({
-          ...f,
-          filterType: f.filterType as FilterType,
-        })),
+        filters: filters.map(serializeFilter),
         adjustments: adjustments.map((a) => ({
           ...a,
           adjustmentType: a.adjustmentType as AdjustmentType,
@@ -181,6 +194,7 @@ appraisalRules.get('/mine', async (c) => {
         filterType: f.type,
         enabled: f.enabled,
         value: f.value,
+        priority: f.priority ?? null,
         createdAt: now,
       }))
     )
@@ -255,10 +269,7 @@ appraisalRules.get('/default', async (c) => {
   return c.json({
     preset: {
       ...preset,
-      filters: filters.map((f) => ({
-        ...f,
-        filterType: f.filterType as FilterType,
-      })),
+      filters: filters.map(serializeFilter),
       adjustments: adjustments.map((a) => ({
         ...a,
         adjustmentType: a.adjustmentType as AdjustmentType,
@@ -306,10 +317,7 @@ appraisalRules.get('/:id', async (c) => {
   return c.json({
     preset: {
       ...preset,
-      filters: filters.map((f) => ({
-        ...f,
-        filterType: f.filterType as FilterType,
-      })),
+      filters: filters.map(serializeFilter),
       adjustments: adjustments.map((a) => ({
         ...a,
         adjustmentType: a.adjustmentType as AdjustmentType,
@@ -362,6 +370,7 @@ appraisalRules.post('/', async (c) => {
     filterType: f.type,
     enabled: f.enabled,
     value: f.value,
+    priority: f.priority ?? null,
   }))
 
   if (filtersToInsert.length > 0) {
@@ -372,6 +381,7 @@ appraisalRules.post('/', async (c) => {
         filterType: f.filterType,
         enabled: f.enabled,
         value: f.value,
+        priority: f.priority ?? null,
         createdAt: now,
       }))
     )
@@ -416,10 +426,7 @@ appraisalRules.post('/', async (c) => {
   return c.json({
     preset: {
       ...created,
-      filters: filters.map((f) => ({
-        ...f,
-        filterType: f.filterType as FilterType,
-      })),
+      filters: filters.map(serializeFilter),
       adjustments: adjustments.map((a) => ({
         ...a,
         adjustmentType: a.adjustmentType as AdjustmentType,
@@ -491,6 +498,7 @@ appraisalRules.patch('/:id', async (c) => {
           filterType: f.filterType,
           enabled: f.enabled,
           value: f.value,
+          priority: f.priority ?? null,
           createdAt: now,
         }))
       )
@@ -536,10 +544,7 @@ appraisalRules.patch('/:id', async (c) => {
     preset: {
       ...existing,
       ...updates,
-      filters: filters.map((f) => ({
-        ...f,
-        filterType: f.filterType as FilterType,
-      })),
+      filters: filters.map(serializeFilter),
       adjustments: adjustments.map((a) => ({
         ...a,
         adjustmentType: a.adjustmentType as AdjustmentType,

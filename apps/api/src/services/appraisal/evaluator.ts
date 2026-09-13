@@ -33,11 +33,12 @@ function evaluateSubdivisionMatch(
     return {
       type: 'subdivision_match',
       passed: true,
-      reason: 'Subdivision data not available',
+      status: 'not_verified',
+      reason: 'Subdivision data not available — rule not verified',
     }
   }
 
-  const passed = subjectSub === compSub
+  const passed = subdivisionsMatch(subjectSub, compSub)
   return {
     type: 'subdivision_match',
     passed,
@@ -93,7 +94,8 @@ function evaluateSqftDiff(
     return {
       type: 'sqft_diff',
       passed: true,
-      reason: 'Subject sqft not available',
+      status: 'not_verified',
+      reason: 'Subject sqft not available — rule not verified',
     }
   }
 
@@ -126,7 +128,8 @@ function evaluateYearBuiltDiff(
     return {
       type: 'year_built_diff',
       passed: true,
-      reason: 'Year built not available',
+      status: 'not_verified',
+      reason: 'Year built not available — rule not verified',
     }
   }
 
@@ -151,7 +154,8 @@ function evaluateDistance(
     return {
       type: 'distance',
       passed: true,
-      reason: 'Distance not available',
+      status: 'not_verified',
+      reason: 'Distance not available — rule not verified',
     }
   }
 
@@ -297,7 +301,7 @@ function evaluateFoundationMatch(
       type: 'foundation_match',
       passed: true,
       status: 'not_verified',
-      reason: 'Foundation type data not available',
+      reason: 'Foundation type data not available — rule not verified',
     }
   }
 
@@ -312,13 +316,305 @@ function evaluateFoundationMatch(
   }
 }
 
+/**
+ * Pure neighborhood match: name OR code equality is sufficient evidence.
+ * Returns null when no comparable field pair exists (not verifiable).
+ * Used both by the neighborhood_match filter and by the fallback ladder's
+ * neighborhood tier — the tier works off raw geography even when the
+ * soft filter is disabled in the user's preset.
+ */
+export function neighborhoodsMatch(
+  subject: Pick<NormalizedProperty, 'neighborhoodName' | 'neighborhoodCode'>,
+  comp: Pick<NormalizedComparable, 'neighborhoodName' | 'neighborhoodCode'>
+): boolean | null {
+  const normalize = (v?: string | null) => v?.toLowerCase().trim().replace(/\s+/g, ' ') || null
+  const subjectName = normalize(subject.neighborhoodName)
+  const compName = normalize(comp.neighborhoodName)
+  const subjectCode = normalize(subject.neighborhoodCode)
+  const compCode = normalize(comp.neighborhoodCode)
+
+  if ((!subjectName || !compName) && (!subjectCode || !compCode)) return null
+  return (subjectName != null && subjectName === compName) ||
+    (subjectCode != null && subjectCode === compCode)
+}
+
+function evaluateNeighborhoodMatch(
+  subject: NormalizedProperty,
+  comp: NormalizedComparable,
+  _filter: AppraisalFilter
+): FilterResult {
+  const normalize = (v?: string | null) => v?.toLowerCase().trim().replace(/\s+/g, ' ') || null
+  const subjectName = normalize(subject.neighborhoodName)
+  const compName = normalize(comp.neighborhoodName)
+  const subjectCode = normalize(subject.neighborhoodCode)
+  const compCode = normalize(comp.neighborhoodCode)
+  const matched = neighborhoodsMatch(subject, comp)
+
+  if (matched === null) {
+    return {
+      type: 'neighborhood_match',
+      passed: true,
+      status: 'not_verified',
+      reason: 'Neighborhood data not available — rule not verified',
+    }
+  }
+
+  // Match on name OR code — either is sufficient evidence
+  const nameMatch = subjectName != null && compName != null && subjectName === compName
+  const codeMatch = subjectCode != null && compCode != null && subjectCode === compCode
+  const via = nameMatch && codeMatch ? 'name+code' : nameMatch ? 'name' : 'code'
+  return {
+    type: 'neighborhood_match',
+    passed: matched,
+    status: matched ? 'passed' : 'failed',
+    reason: matched
+      ? (nameMatch && !codeMatch ? undefined : `Neighborhood matched via ${via}`)
+      : `Neighborhood mismatch: "${compName ?? compCode}" vs subject "${subjectName ?? subjectCode}"`,
+    actualValue: compName ?? compCode ?? undefined,
+    threshold: subjectName ?? subjectCode ?? undefined,
+  }
+}
+
+/**
+ * Construction material match — construction type (frame/masonry) and
+ * exterior wall material (brick/wood siding/stucco). Compares every field
+ * present on both sides; a mismatch on any compared field fails.
+ */
+function evaluateConstructionMaterialMatch(
+  subject: NormalizedProperty,
+  comp: NormalizedComparable,
+  _filter: AppraisalFilter
+): FilterResult {
+  const normalize = (v?: string | null) => v?.toLowerCase().replace(/[^a-z]/g, '') || null
+  const pairs: Array<[string | null, string | null, string]> = [
+    [normalize(subject.construction?.type), normalize(comp.construction?.type), 'construction type'],
+    [normalize(subject.construction?.exteriorWalls), normalize(comp.construction?.exteriorWalls), 'exterior walls'],
+  ]
+
+  const compared = pairs.filter(([s, c]) => s && c)
+  if (compared.length === 0) {
+    return {
+      type: 'construction_material_match',
+      passed: true,
+      status: 'not_verified',
+      reason: 'Construction material data not available — rule not verified',
+    }
+  }
+
+  const mismatched = compared.find(([s, c]) => s !== c)
+  const passed = !mismatched
+  return {
+    type: 'construction_material_match',
+    passed,
+    status: passed ? 'passed' : 'failed',
+    reason: passed
+      ? undefined
+      : `Construction mismatch: ${mismatched![2]} "${comp.construction?.exteriorWalls ?? comp.construction?.type}" vs subject "${subject.construction?.exteriorWalls ?? subject.construction?.type}"`,
+    actualValue: comp.construction?.exteriorWalls ?? comp.construction?.type,
+    threshold: subject.construction?.exteriorWalls ?? subject.construction?.type,
+  }
+}
+
+/** Pool match — pool presence must match the subject */
+function evaluatePoolMatch(
+  subject: NormalizedProperty,
+  comp: NormalizedComparable,
+  _filter: AppraisalFilter
+): FilterResult {
+  if (subject.features?.poolType == null || comp.features?.poolType == null) {
+    return {
+      type: 'pool_match',
+      passed: true,
+      status: 'not_verified',
+      reason: 'Pool data not available — rule not verified',
+    }
+  }
+
+  const subjectHas = hasPool(subject)
+  const compHas = hasPool(comp)
+  const passed = subjectHas === compHas
+  return {
+    type: 'pool_match',
+    passed,
+    status: passed ? 'passed' : 'failed',
+    reason: passed
+      ? undefined
+      : `Pool mismatch: comp ${compHas ? 'has' : 'has no'} pool vs subject ${subjectHas ? 'has' : 'has no'} pool`,
+    actualValue: compHas ? 'pool' : 'none',
+    threshold: subjectHas ? 'pool' : 'none',
+  }
+}
+
+/** Garage/carport match — covered parking presence must match the subject */
+function evaluateGarageMatch(
+  subject: NormalizedProperty,
+  comp: NormalizedComparable,
+  _filter: AppraisalFilter
+): FilterResult {
+  const compHasParkingData =
+    comp.features != null &&
+    (comp.features.garageType != null ||
+      comp.features.garageSquareFeet != null ||
+      comp.features.carportType != null)
+  const subjectHasParkingData =
+    subject.features != null &&
+    (subject.features.garageType != null ||
+      subject.features.garageSquareFeet != null ||
+      subject.features.carportType != null ||
+      subject.features.carportSpaces != null)
+
+  if (!subjectHasParkingData || !compHasParkingData) {
+    return {
+      type: 'garage_match',
+      passed: true,
+      status: 'not_verified',
+      reason: 'Garage/carport data not available — rule not verified',
+    }
+  }
+
+  // Covered parking = garage OR carport on either side
+  const subjectHas = hasGarage(subject) || hasCarport(subject)
+  const compHas = hasGarage(comp) || hasCarport(comp)
+  const passed = subjectHas === compHas
+  return {
+    type: 'garage_match',
+    passed,
+    status: passed ? 'passed' : 'failed',
+    reason: passed
+      ? undefined
+      : `Garage/carport mismatch: comp ${compHas ? 'has' : 'has no'} covered parking vs subject ${subjectHas ? 'has' : 'has none'}`,
+    actualValue: compHas ? 'covered_parking' : 'none',
+    threshold: subjectHas ? 'covered_parking' : 'none',
+  }
+}
+
+/** Stories match — story count (soft priority: ranks, never disqualifies) */
+function evaluateStoriesMatch(
+  subject: NormalizedProperty,
+  comp: NormalizedComparable,
+  _filter: AppraisalFilter
+): FilterResult {
+  const subjectStories = subject.stories ?? null
+  const compStories = comp.stories ?? null
+
+  if (subjectStories == null || compStories == null) {
+    return {
+      type: 'stories_match',
+      passed: true,
+      status: 'not_verified',
+      reason: 'Story count not available — rule not verified',
+    }
+  }
+
+  // Half-story tolerance: 1.5-story comps are compatible with both 1 and 2
+  const passed = Math.abs(subjectStories - compStories) <= 0.5
+  return {
+    type: 'stories_match',
+    passed,
+    status: passed ? 'passed' : 'failed',
+    reason: passed ? undefined : `Stories mismatch: comp ${compStories} vs subject ${subjectStories}`,
+    actualValue: compStories,
+    threshold: subjectStories,
+  }
+}
+
+/** Roof material match — roof cover material (soft priority) */
+function evaluateRoofMaterialMatch(
+  subject: NormalizedProperty,
+  comp: NormalizedComparable,
+  _filter: AppraisalFilter
+): FilterResult {
+  const normalize = (v?: string | null) => v?.toLowerCase().replace(/[^a-z]/g, '') || null
+  const subjectRoof = normalize(subject.construction?.roofCover ?? subject.construction?.roofType)
+  const compRoof = normalize(comp.construction?.roofCover ?? comp.construction?.roofType)
+
+  if (!subjectRoof || !compRoof) {
+    return {
+      type: 'roof_material_match',
+      passed: true,
+      status: 'not_verified',
+      reason: 'Roof material data not available — rule not verified',
+    }
+  }
+
+  const passed = subjectRoof === compRoof
+  return {
+    type: 'roof_material_match',
+    passed,
+    status: passed ? 'passed' : 'failed',
+    reason: passed
+      ? undefined
+      : `Roof material mismatch: "${comp.construction?.roofCover ?? comp.construction?.roofType}" vs subject "${subject.construction?.roofCover ?? subject.construction?.roofType}"`,
+    actualValue: comp.construction?.roofCover ?? comp.construction?.roofType,
+    threshold: subject.construction?.roofCover ?? subject.construction?.roofType,
+  }
+}
+
+// Assessor condition tiers, best → worst. Unknown labels get no tier.
+const CONDITION_TIERS: Record<string, number> = {
+  excellent: 7,
+  verygood: 6,
+  good: 5,
+  average: 4,
+  fair: 3,
+  poor: 2,
+  verypoor: 1,
+}
+
+function conditionTier(v?: string | null): number | null {
+  if (!v) return null
+  return CONDITION_TIERS[v.toLowerCase().replace(/[^a-z]/g, '')] ?? null
+}
+
+/**
+ * Assessor condition match — the comp cannot be in a worse assessor
+ * condition tier than the subject (a distressed comp never anchors ARV).
+ * Replaces the LLM/Firecrawl condition classification with provider data.
+ */
+function evaluateConditionMatch(
+  subject: NormalizedProperty,
+  comp: NormalizedComparable,
+  _filter: AppraisalFilter
+): FilterResult {
+  const subjectTier = conditionTier(subject.buildingCondition)
+  const compTier = conditionTier(comp.buildingCondition)
+
+  if (subjectTier == null || compTier == null) {
+    return {
+      type: 'condition_match',
+      passed: true,
+      status: 'not_verified',
+      reason: 'Assessor condition data not available — rule not verified',
+    }
+  }
+
+  const passed = compTier >= subjectTier
+  return {
+    type: 'condition_match',
+    passed,
+    status: passed ? 'passed' : 'failed',
+    reason: passed
+      ? undefined
+      : `Condition mismatch: comp "${comp.buildingCondition}" below subject "${subject.buildingCondition}"`,
+    actualValue: comp.buildingCondition ?? undefined,
+    threshold: subject.buildingCondition ?? undefined,
+  }
+}
+
 const FILTER_EVALUATORS: Record<
   FilterType,
   (subject: NormalizedProperty, comp: NormalizedComparable, filter: AppraisalFilter) => FilterResult
 > = {
   subdivision_match: evaluateSubdivisionMatch,
+  neighborhood_match: evaluateNeighborhoodMatch,
   building_style_match: evaluateBuildingStyleMatch,
   foundation_match: evaluateFoundationMatch,
+  construction_material_match: evaluateConstructionMaterialMatch,
+  pool_match: evaluatePoolMatch,
+  garage_match: evaluateGarageMatch,
+  stories_match: evaluateStoriesMatch,
+  roof_material_match: evaluateRoofMaterialMatch,
+  condition_match: evaluateConditionMatch,
   sale_age: evaluateSaleAge,
   sqft_diff: evaluateSqftDiff,
   year_built_diff: evaluateYearBuiltDiff,
@@ -343,9 +639,11 @@ function calculateOldCompDiscount(
   const today = new Date()
   const daysDiff = Math.floor((today.getTime() - saleDate.getTime()) / (1000 * 60 * 60 * 24))
 
-  // Only apply if sale is > 90 days old
-  if (daysDiff <= 90) {
-    return { type: 'old_comp_discount', applied: false, amount: 0, reason: 'Sale within 90 days' }
+  // Only apply if the sale is older than the configured threshold —
+  // the adjustment's thresholdDays field (default 90) carries it.
+  const thresholdDays = adjustment.thresholdDays ?? 90
+  if (daysDiff <= thresholdDays) {
+    return { type: 'old_comp_discount', applied: false, amount: 0, reason: `Sale within ${thresholdDays} days` }
   }
 
   const monthsOld = daysDiff / 30
@@ -636,6 +934,41 @@ function normalizeSubdivision(value: string | null | undefined): string | null {
   return value.toLowerCase().trim().replace(/\s+/g, ' ')
 }
 
+/**
+ * Subdivision base name — strips unit/phase/section/plat designators so
+ * "SWEETWATER CREEK", "SWEETWATER CREEK S UT 2E", and "PARKSIDE LAKES PH 01"
+ * resolve to their parent development ("sweetwater creek", "parkside lakes").
+ */
+function subdivisionBase(value: string | null | undefined): string | null {
+  let v = normalizeSubdivision(value)
+  if (!v) return null
+  v = v.replace(/[\/\-_.,]/g, ' ').replace(/\s+/g, ' ').trim()
+  v = v
+    .replace(
+      /(?:\b(?:un|unit|ut|u|ph|phase|sec|sect|section|blk|block|lot|plat|tract|add|addn|addition|part|pt|rep|repl|replat|vlg)\s*\w*|#\s*\w+).*$/i,
+      ''
+    )
+    .trim()
+  return v || null
+}
+
+/**
+ * Two subdivisions match when their base names are equal, or one base is a
+ * word-boundary prefix of the other — "sweetwater creek" ⊂ "sweetwater creek
+ * south" (same parent development) but "oak" ⊄ "oakwood" (different names).
+ */
+function subdivisionsMatch(
+  subjectSub: string | null | undefined,
+  compSub: string | null | undefined
+): boolean {
+  const a = subdivisionBase(subjectSub)
+  const b = subdivisionBase(compSub)
+  if (!a || !b) return false
+  if (a === b) return true
+  const [shorter, longer] = a.length <= b.length ? [a, b] : [b, a]
+  return longer.startsWith(shorter) && longer[shorter.length] === ' '
+}
+
 function normalizePropertyType(value: string | null | undefined): string | null {
   if (!value) return null
   const v = value.toLowerCase().trim()
@@ -676,7 +1009,9 @@ export function evaluateComparable(
     }
     filterResults.push(result)
 
-    if (!result.passed && result.reason) {
+    // Soft filters (stories, roof material) record the mismatch for
+    // ranking/reporting but never disqualify the comp.
+    if (!result.passed && result.reason && filter.priority !== 'soft') {
       disableReasons.push(result.reason)
     }
   }

@@ -9,6 +9,7 @@ import { describe, it, expect } from 'vitest'
 import { evaluateComparable } from './evaluator'
 import { createAppraisalService } from './index'
 import type { AppraisalFilter, AppraisalAdjustment } from './types'
+import { DEFAULT_FILTERS } from './types'
 import type { NormalizedProperty, NormalizedComparable } from '../property-api/types'
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
@@ -71,7 +72,7 @@ const comp = (id: string, overrides?: Partial<NormalizedComparable>): Normalized
 
 const only = (filters: FilterType[]) =>
   filters.map((type) => {
-    const defaults: Record<FilterType, number> = {
+    const defaults: Partial<Record<FilterType, number>> = {
       subdivision_match: 1,
       sale_age: 180,
       sqft_diff: 250,
@@ -421,7 +422,7 @@ describe('ARV comp selection', () => {
     expect(r.insufficientComps).toBe(true)
   })
 
-  it('expands geography before relaxing sale age', () => {
+  it('leaves the subdivision before dropping the neighborhood', () => {
     // 2 in-subdivision comps + 2 out-of-subdivision comps in range
     const comps = [
       comp('in1', { subdivision: 'Oak Park', salePrice: 300000 }),
@@ -435,20 +436,226 @@ describe('ARV comp selection', () => {
         { type: 'distance', enabled: true, value: 1.0 },
       ],
       adjustments: [],
-      expansion: { allowGeographicExpansion: true, allowOlderSales: false },
+      expansion: { allowGeographicExpansion: true, allowYearBuiltExpansion: false },
     })
 
-    expect(r.fallbackUsed).toBe('geographic_expansion')
-    expect(r.expansionApplied).toContain('geographic')
-    expect(r.expansionApplied).not.toContain('older_sales')
+    expect(r.fallbackUsed).toBe('subdivision_expansion')
+    expect(r.expansionApplied).toContain('subdivision')
+    expect(r.expansionApplied).not.toContain('year_built')
     expect(r.selectedCompIds).toContain('out1')
   })
 
-  it('uses older sales only when allowed, with configured discount', () => {
+  it('tries verified neighborhood comps before leaving to raw geography', () => {
+    // 2 in-subdivision comps + 2 out-of-subdivision comps. One out comp
+    // shares the subject's neighborhood name — it wins the neighborhood
+    // tier over the unrelated out comp.
+    const subj = subject({ neighborhoodName: 'Arlington Hills' })
+    const comps = [
+      comp('in1', { subdivision: 'Oak Park', salePrice: 300000 }),
+      comp('in2', { subdivision: 'Oak Park', salePrice: 310000 }),
+      comp('nb', { subdivision: 'Other', neighborhoodName: 'Arlington Hills', distanceMiles: 0.8, salePrice: 320000 }),
+      comp('far', { subdivision: 'Elsewhere', neighborhoodName: 'Westside', distanceMiles: 0.7, salePrice: 400000 }),
+    ]
+    const r = service.evaluateWithFallback(subj, comps, {
+      filters: [
+        { type: 'subdivision_match', enabled: true, value: 1 },
+        { type: 'neighborhood_match', enabled: true, value: 1 },
+        { type: 'distance', enabled: true, value: 1.0 },
+      ],
+      adjustments: [],
+      expansion: { allowGeographicExpansion: true, allowYearBuiltExpansion: false },
+    })
+
+    expect(r.fallbackUsed).toBe('neighborhood_expansion')
+    expect(r.expansionApplied).toContain('neighborhood')
+    expect(r.selectedCompIds).toContain('nb')
+    // The unrelated comp is NOT rescued at this tier — its only chance was
+    // the neighborhood evidence, which failed.
+    expect(r.selectedCompIds).not.toContain('far')
+    const nb = r.comparables.find((c) => c.id === 'nb')
+    // subdivision failure stays on the audit trail — rescued, not erased
+    expect(
+      nb?.evaluation?.filterResults.some(
+        (f) => f.type === 'subdivision_match' && !f.passed && f.status === 'failed'
+      )
+    ).toBe(true)
+  })
+
+  it('neighborhood code alone is enough when names differ or are missing', () => {
+    const subj = subject({ neighborhoodName: null, neighborhoodCode: 'NB-4417' })
+    const comps = [
+      comp('in1', { subdivision: 'Oak Park', salePrice: 300000 }),
+      comp('in2', { subdivision: 'Oak Park', salePrice: 310000 }),
+      comp('code', { subdivision: 'Other', neighborhoodCode: 'NB-4417', distanceMiles: 0.8, salePrice: 320000 }),
+    ]
+    const r = service.evaluateWithFallback(subj, comps, {
+      filters: [
+        { type: 'subdivision_match', enabled: true, value: 1 },
+        { type: 'distance', enabled: true, value: 1.0 },
+      ],
+      adjustments: [],
+      expansion: { allowGeographicExpansion: true, allowYearBuiltExpansion: false },
+    })
+
+    expect(r.fallbackUsed).toBe('neighborhood_expansion')
+    expect(r.selectedCompIds).toContain('code')
+  })
+
+  it('out-of-neighborhood comps skip the neighborhood tier and fall through to geography', () => {
+    const subj = subject({ neighborhoodName: 'Arlington Hills' })
+    const comps = [
+      comp('in1', { subdivision: 'Oak Park', salePrice: 300000 }),
+      comp('in2', { subdivision: 'Oak Park', salePrice: 310000 }),
+      comp('geo1', { subdivision: 'Other', neighborhoodName: 'Westside', distanceMiles: 1.5, salePrice: 320000 }),
+      comp('geo2', { subdivision: 'Other', neighborhoodName: null, neighborhoodCode: null, distanceMiles: 1.8, salePrice: 305000 }),
+    ]
+    const r = service.evaluateWithFallback(subj, comps, {
+      filters: [
+        { type: 'subdivision_match', enabled: true, value: 1 },
+        { type: 'distance', enabled: true, value: 1.0 },
+      ],
+      adjustments: [],
+      expansion: { allowGeographicExpansion: true, allowYearBuiltExpansion: false },
+    })
+
+    // No verified neighborhood comps → tier 3 fails through to radius×2
+    expect(r.fallbackUsed).toBe('subdivision_expansion')
+    expect(r.expansionApplied).not.toContain('neighborhood')
+    expect(r.selectedCompIds).toContain('geo1')
+  })
+
+  it('still enforces other hard rules at the neighborhood tier', () => {
+    // Same-neighborhood comp with an intrinsic hard failure (year) must
+    // NOT be rescued — neighborhood only carries location failures.
+    const subj = subject({ neighborhoodName: 'Arlington Hills', yearBuilt: 2008 })
+    const comps = [
+      comp('in1', { subdivision: 'Oak Park', yearBuilt: 2008, salePrice: 300000 }),
+      comp('in2', { subdivision: 'Oak Park', yearBuilt: 2008, salePrice: 310000 }),
+      comp('nb_old', { subdivision: 'Other', neighborhoodName: 'Arlington Hills', yearBuilt: 1975, salePrice: 320000 }), // 33yr off — beyond ±14
+    ]
+    const r = service.evaluateWithFallback(subj, comps, {
+      filters: [
+        { type: 'subdivision_match', enabled: true, value: 1 },
+        { type: 'year_built_diff', enabled: true, value: 10 },
+        { type: 'distance', enabled: true, value: 1.0 },
+      ],
+      adjustments: [],
+      expansion: {
+        allowGeographicExpansion: true,
+        allowYearBuiltExpansion: true,
+        yearBuiltExpansionSteps: [2, 4],
+      },
+    })
+
+    const nbOld = r.comparables.find((c) => c.id === 'nb_old')
+    expect(nbOld?.isEnabled).toBe(false)
+    expect(r.selectedCompIds ?? []).not.toContain('nb_old')
+  })
+
+  it('widens year-built inside the subdivision before leaving it', () => {
+    // 2 strict-year + 1 older-era in-subdivision comps, and 1 strict-year
+    // out-of-subdivision comp. Policy: widen year_built while keeping
+    // subdivision — never pick the closer-but-outside sale when an
+    // in-subdivision sale within the widened tolerance exists.
+    // Subject is built 2008 → strict ±10, steps +2/+4 → ±12, ±14.
+    const comps = [
+      comp('recent1', { subdivision: 'Oak Park', yearBuilt: 2006, salePrice: 300000 }),
+      comp('recent2', { subdivision: 'Oak Park', yearBuilt: 2004, salePrice: 310000 }),
+      comp('old_in', { subdivision: 'Oak Park', yearBuilt: 1996, salePrice: 400000 }), // 12yr off
+      comp('out1', { subdivision: 'Other', yearBuilt: 2008, distanceMiles: 0.9, salePrice: 320000 }),
+    ]
+    const r = service.evaluateWithFallback(subject({ yearBuilt: 2008 }), comps, {
+      filters: [
+        { type: 'subdivision_match', enabled: true, value: 1 },
+        { type: 'year_built_diff', enabled: true, value: 10 },
+        { type: 'distance', enabled: true, value: 1.0 },
+      ],
+      adjustments: [],
+      expansion: {
+        allowGeographicExpansion: true,
+        allowYearBuiltExpansion: true,
+        yearBuiltExpansionSteps: [2, 4],
+      },
+    })
+
+    expect(r.fallbackUsed).toBe('year_built_expansion')
+    expect(r.expansionApplied).toEqual(['year_built'])
+    // The older-era in-subdivision comp wins over the strict-year
+    // out-of-subdivision comp — and its audit shows threshold ±12
+    expect(r.selectedCompIds).toContain('old_in')
+    expect(r.selectedCompIds).not.toContain('out1')
+    const oldIn = r.comparables.find((c) => c.id === 'old_in')
+    const yearRule = oldIn?.evaluation?.filterResults.find((f) => f.type === 'year_built_diff')
+    expect(yearRule?.passed).toBe(true)
+    expect(yearRule?.threshold).toBe(12)
+  })
+
+  it('matches subdivision units/phases to their parent development', () => {
+    // Jacksonville scenario: subject "SWEETWATER CREEK" must match the
+    // plat-filed unit names inside the same community — but not genuinely
+    // different subdivisions.
+    const filters: AppraisalFilter[] = [{ type: 'subdivision_match', enabled: true, value: 1 }]
+    const subj = subject({ subdivision: 'SWEETWATER CREEK' })
+
+    for (const name of [
+      'SWEETWATER CREEK',
+      'SWEETWATER CREEK SOUTH',
+      'SWEETWATER CREEK S UT 2E',
+      'SWEETWATER CREEK S UNIT 2W',
+      'SWEETWATER CREEK PH 03',
+    ]) {
+      const r = evaluateComparable(subj, comp('c', { subdivision: name }), filters, [])
+      const f = r.filterResults.find((x) => x.type === 'subdivision_match')
+      expect(f?.passed, name).toBe(true)
+    }
+
+    for (const name of ['GRAND LAKES', 'PARKSIDE LAKES PH 01', 'OAKWOOD']) {
+      const r = evaluateComparable(subj, comp('c', { subdivision: name }), filters, [])
+      const f = r.filterResults.find((x) => x.type === 'subdivision_match')
+      expect(f?.passed, name).toBe(false)
+      expect(f?.status).toBe('failed')
+    }
+  })
+
+  it('building_style_match is required by default — verified mismatches disqualify', () => {
+    // Product rule: like-for-like style. A verified Ranch-vs-Colonial
+    // mismatch is a hard failure that no expansion tier can rescue —
+    // missing style data stays not_verified and never kills the comp.
+    const styleComps = [
+      comp('match', { construction: { buildingStyle: 'Ranch' }, salePrice: 280000 }),
+      comp('m1', { construction: { buildingStyle: 'Colonial' }, salePrice: 400000 }),
+      comp('m2', { construction: { buildingStyle: 'Colonial' }, salePrice: 390000 }),
+      comp('m3', { construction: { buildingStyle: 'Colonial' }, salePrice: 380000 }),
+    ]
+    const r = service.evaluateWithFallback(
+      subject({ construction: { buildingStyle: 'Ranch' } }),
+      styleComps,
+      {
+        filters: DEFAULT_FILTERS,
+        adjustments: [],
+      }
+    )
+
+    // The 3 Colonial comps are disqualified — hard style failure, and
+    // rescue tiers only carry location failures
+    for (const id of ['m1', 'm2', 'm3']) {
+      const c = r.comparables.find((x) => x.id === id)
+      expect(c?.isEnabled).toBe(false)
+      expect(
+        c?.evaluation?.filterResults.some(
+          (f) => f.type === 'building_style_match' && !f.passed && f.status === 'failed'
+        )
+      ).toBe(true)
+    }
+    expect(r.selectedCompIds ?? []).toContain('match')
+    expect(r.selectedCompIds ?? []).toHaveLength(1)
+  })
+
+  it('never relaxes sale age — a 300-day-old comp is dead at every tier', () => {
     const comps = [
       comp('recent1', { salePrice: 300000, saleDate: daysAgo(30) }),
       comp('recent2', { salePrice: 310000, saleDate: daysAgo(45) }),
-      comp('old1', { salePrice: 400000, saleDate: daysAgo(300) }), // >180d, <360d
+      comp('stale', { salePrice: 400000, saleDate: daysAgo(300) }), // >180d absolute
     ]
     const r = service.evaluateWithFallback(subject(), comps, {
       filters: [
@@ -458,20 +665,64 @@ describe('ARV comp selection', () => {
       adjustments: [],
       expansion: {
         allowGeographicExpansion: true,
-        allowOlderSales: true,
-        olderSaleAgeMultiplier: 2,
-        olderSaleDiscountPercent: 15,
+        allowYearBuiltExpansion: true,
+        yearBuiltExpansionSteps: [2, 4],
       },
     })
 
-    expect(r.fallbackUsed).toBe('older_sales')
-    expect(r.expansionApplied).toContain('older_sales')
-    expect(r.selectedCompIds).toContain('old1')
-    // old comp gets the configured market-correction discount
-    const old = r.comparables.find((c) => c.id === 'old1')
-    const discount = old?.evaluation.adjustmentResults.find((a) => a.type === 'old_comp_discount')
-    expect(discount?.applied).toBe(true)
-    expect(discount?.amount).toBeLessThan(0)
+    // Sale age is absolute — the stale comp is never enabled, even by the
+    // nearest-comps last resort (it only carries location failures).
+    const stale = r.comparables.find((c) => c.id === 'stale')
+    expect(stale?.isEnabled).toBe(false)
+    expect(r.selectedCompIds ?? []).not.toContain('stale')
+    // And its sale_age failure stays on the audit trail
+    expect(
+      stale?.evaluation?.filterResults.some(
+        (f) => f.type === 'sale_age' && !f.passed && f.status === 'failed'
+      )
+    ).toBe(true)
+  })
+
+  it('a comp beyond the widest year tolerance is dead at every tier', () => {
+    // Canoe Creek scenario: subject built 2008, comp built 2025 (17yr off).
+    // The year ladder reaches ±14 max — 17yr breaches every tier, so this
+    // comp must die even when the search leaves the subdivision.
+    const comps = [
+      comp('in1', { subdivision: 'Oak Park', yearBuilt: 2008, salePrice: 300000 }),
+      comp('in2', { subdivision: 'Oak Park', yearBuilt: 2008, salePrice: 310000 }),
+      comp('new_out', {
+        subdivision: 'Seaton Crk Reserve Ph 3',
+        yearBuilt: 2025, // 17yr off the 2008 subject — beyond ±14 max
+        salePrice: 330000,
+        distanceMiles: 1.2,
+      }),
+    ]
+    const r = service.evaluateWithFallback(subject({ yearBuilt: 2008 }), comps, {
+      filters: [
+        { type: 'subdivision_match', enabled: true, value: 1 },
+        { type: 'year_built_diff', enabled: true, value: 10 },
+        { type: 'sale_age', enabled: true, value: 180 },
+        { type: 'distance', enabled: true, value: 1.0 },
+      ],
+      adjustments: [],
+      expansion: {
+        allowGeographicExpansion: true,
+        allowYearBuiltExpansion: true,
+        yearBuiltExpansionSteps: [2, 4],
+        geographicDistanceMultiplier: 2,
+      },
+    })
+
+    // The 2025 comp is never enabled — 17yr breaches even the widest tier
+    const newOut = r.comparables.find((c) => c.id === 'new_out')
+    expect(newOut?.isEnabled).toBe(false)
+    expect(r.selectedCompIds ?? []).not.toContain('new_out')
+    // The failed hard rule stays on the audit trail
+    expect(
+      newOut?.evaluation?.filterResults.some(
+        (f) => f.type === 'year_built_diff' && !f.passed && f.status === 'failed'
+      )
+    ).toBe(true)
   })
 
   it('respects expansion disabled → INSUFFICIENT_COMPS', () => {
@@ -504,5 +755,46 @@ describe('ARV comp selection', () => {
     expect(bad?.arvStatus).toBe('disqualified')
     expect(bad?.evaluation.disableReasons.length).toBeGreaterThan(0)
     expect(bad?.evaluation.filterResults.find((f) => f.type === 'sale_age')?.status).toBe('failed')
+  })
+})
+
+// ─── User-configured priority (Required vs Preferred) ──────────────────────────
+
+describe('filter priority (required vs preferred)', () => {
+  it('preferred (soft) sqft_diff: a verified failure is recorded but does not disqualify', () => {
+    const filters: AppraisalFilter[] = [{ type: 'sqft_diff', enabled: true, value: 250, priority: 'soft' }]
+    const r = evaluateComparable(subject(), comp('c1', { squareFeet: 2000 }), filters, [])
+    expect(r.shouldDisable).toBe(false)
+    expect(r.filterResults.find((f) => f.type === 'sqft_diff')?.passed).toBe(false)
+  })
+
+  it('required (hard) building_style_match: a verified mismatch disqualifies', () => {
+    const filters: AppraisalFilter[] = [{ type: 'building_style_match', enabled: true, value: 1, priority: 'hard' }]
+    const r = evaluateComparable(
+      subject({ construction: { buildingStyle: 'Ranch' } }),
+      comp('c1', { construction: { buildingStyle: 'Colonial' } }),
+      filters,
+      []
+    )
+    expect(r.shouldDisable).toBe(true)
+  })
+
+  it('same building_style_match at preferred (soft) does not disqualify', () => {
+    const filters: AppraisalFilter[] = [{ type: 'building_style_match', enabled: true, value: 1, priority: 'soft' }]
+    const r = evaluateComparable(
+      subject({ construction: { buildingStyle: 'Ranch' } }),
+      comp('c1', { construction: { buildingStyle: 'Colonial' } }),
+      filters,
+      []
+    )
+    expect(r.shouldDisable).toBe(false)
+    expect(r.filterResults.find((f) => f.type === 'building_style_match')?.passed).toBe(false)
+  })
+
+  it('a disabled filter produces no evaluation result at all', () => {
+    const filters: AppraisalFilter[] = [{ type: 'subdivision_match', enabled: false, value: 1 }]
+    const r = evaluateComparable(subject(), comp('c1', { subdivision: 'Far Away' }), filters, [])
+    expect(r.filterResults).toHaveLength(0)
+    expect(r.shouldDisable).toBe(false)
   })
 })

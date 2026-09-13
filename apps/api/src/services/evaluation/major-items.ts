@@ -17,6 +17,13 @@
  * Charging rule: only when evidence age is at-or-past the configured age
  * threshold is the configured replacement cost added. UNKNOWN items are
  * never charged automatically — they are flagged for review.
+ *
+ * EXCEPTION (product spec): the "big four" wear items — roof, HVAC, water
+ * heater, electric panel — are assumed to need replacement when there is no
+ * permit evidence at all and the house is at-or-past the item's age
+ * threshold (no permit pulled = original install = house age). All other
+ * items (plumbing, foundation, etc.) stay evidence-gated: no evidence of
+ * issues → not factored in.
  */
 
 import type { NormalizedPermit } from '../property-api/types'
@@ -88,6 +95,17 @@ const ITEM_PERMIT_PATTERNS: Record<MajorItemId, RegExp> = {
   mold: /mold|mould|remediation/i,
 }
 
+/**
+ * Items assumed to need replacement when no permit was ever pulled and the
+ * house is past the age threshold — original install age = house age.
+ */
+const ASSUME_REPLACE_WHEN_NO_PERMIT: ReadonlySet<MajorItemId> = new Set([
+  'roof',
+  'hvac',
+  'water_heater',
+  'electric_panel',
+])
+
 /** Permit statuses that do NOT constitute install/replacement evidence */
 const INVALID_PERMIT_STATUS = /cancel|expired|withdrawn|denied|void|reject|abandon/i
 /** Permit statuses that confirm completed work */
@@ -122,7 +140,8 @@ function assessItem(
   thresholdYears: number | null,
   permits: NormalizedPermit[],
   manualCovered: boolean,
-  currentYear: number
+  currentYear: number,
+  subjectYearBuilt?: number | null
 ): MajorItemAssessment {
   const pattern = ITEM_PERMIT_PATTERNS[itemId]
   const base: Omit<MajorItemAssessment, 'reason'> = {
@@ -143,11 +162,35 @@ function assessItem(
   const matching = pattern ? permits.filter((p) => pattern.test(permitText(p))) : []
 
   if (matching.length === 0) {
+    if (manualCovered) {
+      return {
+        ...base,
+        reason: 'Already provided manually — no additional permit-evidence charge',
+      }
+    }
+    // Big-four rule: no permit was ever pulled → original install → the
+    // item's age is the house age. Charge when the house is at-or-past the
+    // threshold; when the build year is unknown, assume replacement (per
+    // product spec — no permits means we ARE replacing the big items).
+    if (ASSUME_REPLACE_WHEN_NO_PERMIT.has(itemId)) {
+      const houseAge = subjectYearBuilt != null ? currentYear - subjectYearBuilt : null
+      const due = houseAge == null || (thresholdYears !== null && houseAge >= thresholdYears)
+      return {
+        ...base,
+        evidenceStatus: 'unknown',
+        ageYears: houseAge,
+        enabled: due,
+        cost: due ? configuredCost : 0,
+        reason: due
+          ? houseAge == null
+            ? 'No permit evidence and build year unknown — assumed due for replacement (no permits pulled)'
+            : `No permit evidence — assumed original install (${houseAge}y old ≥ threshold ${thresholdYears}y) — replacement cost added`
+          : `No permit evidence — assumed original install (${houseAge}y old < threshold ${thresholdYears}y) — not charged`,
+      }
+    }
     return {
       ...base,
-      reason: manualCovered
-        ? 'Already provided manually — no additional permit-evidence charge'
-        : 'No permit/install evidence — age UNKNOWN, not charged',
+      reason: 'No permit/install evidence — age UNKNOWN, not charged',
     }
   }
 
@@ -230,12 +273,15 @@ function assessItem(
  * @param permits Subject-property permits ONLY — never comp permits.
  * @param config  Per-user threshold/cost overrides keyed by item id.
  * @param manualItems Caller-supplied major items — these win and dedupe.
+ * @param subjectYearBuilt Subject build year — lets the big-four no-permit
+ *   rule treat the item's age as the house age.
  */
 export function assessMajorItems(
   permits: NormalizedPermit[] | null | undefined,
   config?: Record<string, MajorItemConfigOverride> | null,
   manualItems?: MajorItem[] | null,
-  currentYear: number = new Date().getFullYear()
+  currentYear: number = new Date().getFullYear(),
+  subjectYearBuilt?: number | null
 ): MajorItemAssessment[] {
   const permitList = permits ?? []
   const manualById = new Map((manualItems ?? []).filter((m) => m.enabled).map((m) => [m.id, m]))
@@ -272,7 +318,7 @@ export function assessMajorItems(
       override?.ageThreshold === undefined ? item.ageThreshold : override.ageThreshold
     const cost = override?.cost ?? item.defaultCost
 
-    return assessItem(id, item.name, cost, threshold, permitList, manualById.has(id), currentYear)
+    return assessItem(id, item.name, cost, threshold, permitList, manualById.has(id), currentYear, subjectYearBuilt)
   })
 }
 

@@ -30,6 +30,8 @@ interface FilterInput {
   filterType: FilterType
   enabled: boolean
   value: number
+  /** 'hard' = required | 'soft' = preferred | null/omitted = system default */
+  priority?: 'hard' | 'soft' | null
 }
 
 interface AdjustmentInput {
@@ -126,6 +128,7 @@ async function upsertLocationPreset(
         filterType: f.filterType,
         enabled: f.enabled,
         value: f.value,
+        priority: f.priority ?? null,
         createdAt: now,
       }))
     )
@@ -195,6 +198,7 @@ async function resolveLocationAppraisalRules(
       filterType: f.filterType as FilterType,
       enabled: f.enabled,
       value: f.value,
+      priority: f.priority === 'hard' || f.priority === 'soft' ? f.priority : null,
     })),
     appraisalAdjustments: adjustments.map((a) => ({
       adjustmentType: a.adjustmentType as AdjustmentType,
