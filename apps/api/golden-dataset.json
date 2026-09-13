@@ -1,0 +1,46 @@
+{
+  "addresses": [
+    {
+      "address": "5207 River Park Villas Dr",
+      "city": "Saint Augustine",
+      "state": "FL",
+      "zipCode": "32092",
+      "notes": "User example: comp w/ subdivision+sqft+foundation match but ~15yr older"
+    },
+    {
+      "address": "15827 Canoe Creek Dr",
+      "city": "Jacksonville",
+      "state": "FL",
+      "zipCode": "32218",
+      "notes": "Bug case: 2025-built comp (17yr off 2008 subject) was wrongly rescued"
+    },
+    {
+      "address": "10905 Player Rd W",
+      "city": "Jacksonville",
+      "state": "FL",
+      "zipCode": "32218",
+      "notes": "10321 Briarcliff should be the standout comp"
+    },
+    {
+      "address": "5351 Oxford Crest Dr",
+      "city": "Jacksonville",
+      "state": "FL",
+      "zipCode": "32258",
+      "notes": "Prior physical_relaxation audit-gap case"
+    },
+    {
+      "address": "1416 E Idlewild Ave",
+      "city": "Tampa",
+      "state": "FL",
+      "zipCode": "33604",
+      "notes": "Unlisted property — no listing photos, Street View only"
+    },
+    {
+      "address": "5802 Misty Gln",
+      "city": "San Antonio",
+      "state": "TX",
+      "zipCode": "78247",
+      "notes": "Baseline verified-good run"
+    }
+  ]
+}

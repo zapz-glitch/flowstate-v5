@@ -755,3 +755,31 @@ system must always return its best decision. Changes:
   tolerance/disqualify tests.
 
 Verified: 145 vitest + 15/15 regression + tsc clean api + dashboard.
+
+### DEPLOYED + golden-eval harness (2026-09-13)
+
+- Migration 0028 applied to REMOTE D1 (d1_migrations row inserted
+  manually — `migrations apply` hit a 7403 API error; direct
+  `--file` execute worked).
+- `feat/cotality-flood-zone` fast-forwarded to main (1edcfc6) → CI
+  deploy run 34777219422 GREEN (2m0s). All appraisal work live.
+- UI: AVM cell removed from DealSummaryHero; Market Research section
+  removed from AnalysisResultLayout (Cotality AVM/analytics not
+  entitled; data still flows in the API response).
+- `apps/api/src/scripts/golden-eval.ts`: golden-dataset harness —
+  POST /v1/analyze (streetAddress+city/state/zip, skipCache) → SSE
+  `evaluation_complete` → per-run ARV/recommendation/confidence/
+  rulesApplied/fallbacks/selected comps + speed stats + accuracy vs
+  expected labels + "what would raise confidence" aggregation.
+  Dataset: apps/api/golden-dataset.json (6 real addresses). Run:
+  `FS_API_KEY=fs_... npx tsx src/scripts/golden-eval.ts golden-dataset.json --runs N`
+- First prod run (6 addresses, all on new code): 6/6 ok;
+  speed mean 36.2s p50 39.0s p95 47.4s (10.9s outlier = thin
+  3-comp pool); confidence low×5 medium×1; decisions hold×3
+  strong-buy×1 buy×2; Canoe Creek's 2025 comp correctly absent.
+  Dominant confidence blockers: unverified subject condition (4×),
+  thin in-subdivision pools (3× nearest_comps), missing permit
+  evidence.
+- Confirmed: comp selection is 100% rules — LLM annotates
+  reasoning/scores only (cannot touch isEnabled/compGroup).
+- Temp prod api_keys row `golden-eval-tmp` deleted after run.

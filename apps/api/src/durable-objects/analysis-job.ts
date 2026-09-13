@@ -518,7 +518,7 @@ export class AnalysisJobDO {
     if (config.llmEnabled) {
       const llmStart = Date.now()
       try {
-        await this.pushEvent('llm_started', { message: 'AI selecting best comps...', compCount: enrichedComps.length })
+        await this.pushEvent('llm_started', { message: 'AI annotating comps...', compCount: enrichedComps.length })
 
         const evalContexts: CompEvalContext[] = ((analysisResult.comps as Record<string, unknown>)?.items as Array<Record<string, unknown>> ?? []).map((comp: Record<string, unknown>) => ({
           compId: comp.id as string,
