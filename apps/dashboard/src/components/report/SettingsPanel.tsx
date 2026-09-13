@@ -28,7 +28,7 @@ const FILTER_LABELS: Record<string, { label: string; unit: string; hint: string 
   subdivision_match: { label: 'Subdivision Match', unit: '', hint: 'Same subdivision required' },
   building_style_match: { label: 'Building Style', unit: '', hint: 'Same building style required' },
   sale_age: { label: 'Sale Age', unit: 'days', hint: 'Max days since sold' },
-  sqft_diff: { label: 'Sqft Difference', unit: '%', hint: 'Max ±% sqft variance' },
+  sqft_diff: { label: 'Sqft Difference', unit: 'sf', hint: 'Max ± sqft variance' },
   year_built_diff: { label: 'Year Built Diff', unit: 'yrs', hint: 'Max year variance' },
   distance: { label: 'Distance', unit: 'mi', hint: 'Max miles from subject' },
 }

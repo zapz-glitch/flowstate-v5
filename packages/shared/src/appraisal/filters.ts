@@ -164,14 +164,16 @@ const evaluators: Record<FilterType, FilterEvaluator> = {
       }
     }
 
-    const pctDiff = Math.abs(comp.squareFeet - subject.squareFeet) / subject.squareFeet * 100
-    const passed = pctDiff <= filter.value
+    // Absolute sqft difference — matches the API evaluator semantics
+    // (filter.value is a sqft threshold, e.g. ±250).
+    const diff = Math.abs(comp.squareFeet - subject.squareFeet)
+    const passed = diff <= filter.value
 
     return {
       type: 'sqft_diff',
       passed,
-      reason: passed ? undefined : `Sqft difference too large: ${Math.round(pctDiff)}% (max: ±${filter.value}%)`,
-      actualValue: Math.round(pctDiff),
+      reason: passed ? undefined : `Sqft difference too large: ${diff} sqft (max: ${filter.value})`,
+      actualValue: diff,
       threshold: filter.value,
     }
   },

@@ -534,7 +534,7 @@ const FILTER_SHORT: Record<string, string> = {
   subdivision_match: 'Subdivision', sale_age: 'Sale Age', sqft_diff: 'Sqft Diff',
   property_type: 'Prop. Type', year_built_diff: 'Year Built', distance: 'Distance',
 }
-const FILTER_UNIT: Record<string, string> = { sale_age: 'days', sqft_diff: '%', year_built_diff: 'yrs', distance: 'mi' }
+const FILTER_UNIT: Record<string, string> = { sale_age: 'days', sqft_diff: 'sf', year_built_diff: 'yrs', distance: 'mi' }
 const ADJUSTMENT_SHORT: Record<string, string> = {
   old_comp_discount: 'Comp Discount', bedroom: 'Bedroom', bathroom: 'Bathroom',
   pool: 'Pool', garage: 'Garage', carport: 'Carport',

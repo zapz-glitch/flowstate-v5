@@ -705,9 +705,12 @@ meaningless). Changes must flow preset → analysis.
 Verified: 143 vitest + 15/15 regression + tsc clean api + dashboard
 + shared.
 
-Known divergence to revisit: shared sqft_diff evaluator is %-based
-while API uses absolute sqft — recalc only re-evaluates when the user
-edits settings, so impact is limited to client-side scoring.
+Known divergence FIXED (2026-09-13): shared sqft_diff evaluator was
+%-based while the API uses absolute sqft — recalc treated value 250
+as "250%" so the rule effectively never failed client-side. Shared
+filter now uses absolute sqft, matching the API; settings UI unit
+labels corrected '%' → 'sf' (evaluation-settings page + report
+SettingsPanel).
 
 ### Comp-card lot/garage + stories hard rule (2026-09-13, same branch)
 
