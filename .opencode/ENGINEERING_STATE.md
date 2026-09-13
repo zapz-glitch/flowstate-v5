@@ -517,4 +517,58 @@ Product spec implemented 2026-09-12:
 - CompGridCard gains neighborhood pill (match-state colored vs subject).
 - DealSummaryHero AVM cell now renders whenever subject.avm key is
   provided — shows '—' when provider returned no value.
+
+### Hard-rule spec + audit-trail rework (2026-09-13, same branch, pushed)
+
+Diagnosis for `5351 Oxford Crest Dr` (job_1789274746482_oh1tga5q):
+report ended at `physical_relaxation` where location filters were
+disabled — so subdivision/neighborhood rules were absent from every
+comp's rule list and out-of-area comps could be rescued. Two more
+causes: user's saved preset had `sqft_diff=20` (±20 sqft, ~1% — failed
+13/15 comps incl. all in-subdivision sales), and raw assessor codes
+leaked (`Roof 111` = Aluminum; exteriorWalls `ALV`/`FST`/`SDS`).
+
+Product engineer's authoritative rule spec:
+- HARD (deal-breakers): sale_age ≤180d, same subdivision, ±250 sqft,
+  same property type, no major-road crossing, ±10yr build.
+- SOFT (confidence/ranking, never disqualify): neighborhood (when
+  subject HAS a subdivision), building style, foundation, construction
+  material, pool, garage/carport, assessor condition, stories, roof,
+  lot size.
+- LLM comp selection removed — rule-based selection authoritative;
+  LLM annotates rankings/reasoning/scores only (cannot touch
+  isEnabled/compGroup; "disable-all-when-LLM-pending" removed).
+
+Implementation:
+- DEFAULT_FILTERS: all physical matches + lot_size + neighborhood now
+  priority 'soft'. Neighborhood resolved per-subject in evaluate():
+  hard when subject.subdivision absent, soft otherwise.
+- subdivisionsMatch(): strips unit/phase/section/plat designators
+  (UN/UT/U1/PH/SEC/LOT/PLAT/ADDN...) then word-boundary prefix match —
+  "SWEETWATER CREEK S UT 2E" matches subject "SWEETWATER CREEK";
+  "OAK" does NOT match "OAKWOOD". Mirrored in shared/filters.ts.
+- evaluateWithFallback rewritten: no tier disables filters anymore.
+  Every tier evaluates the full rule set; expansion tiers rescue comps
+  whose hard failures ⊆ allowed set ({subdivision} then
+  {subdivision,neighborhood} at widened radius). Full audit trail in
+  every tier — fixes the missing location rules in reports.
+  physical_relaxation tier removed (no hard physical rules remain).
+- performAnalysis: required-match merge now always takes default
+  priority (presets can't express soft).
+- corelogic-codes: EXTERIOR_WALLS expanded (ALV/BRI/FST/SDS/LPS/BLO/
+  STV/CLP/FRM/MAS/CND...), ROOF_COVER numeric RFCO set added earlier.
+- shared package: AppraisalFilter.priority added; shared evaluator
+  honors soft (no disableReasons) — matches API semantics.
+- D1: user's Default preset sqft_diff corrected 20 → 250 (report user's
+  preset e251da86, user 5c3f729f).
+
+Verified: 80/80 appraisal vitest (incl. new Sweetwater unit-matching
+test + soft-rank test), 15/15 regression files, tsc clean api +
+dashboard + shared.
+
+NOT deployed — deploy-on-request rule stands.
+
+Known divergence to revisit: shared sqft_diff evaluator is %-based
+while API uses absolute sqft — recalc only re-evaluates when the user
+edits settings, so impact is limited to client-side scoring.
 - Verified: 134 vitest + 15/15 regression + both typechecks clean.
