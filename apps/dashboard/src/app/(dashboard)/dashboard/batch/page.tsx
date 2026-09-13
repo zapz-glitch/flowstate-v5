@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import Link from 'next/link'
-import { Upload, FileText, Loader2, Check, X, Download, ChevronRight, Flag, CheckCircle2, Clock, Play } from 'lucide-react'
+import { Upload, FileText, Loader2, Check, X, Download, ChevronRight, Flag, CheckCircle2, Clock, Play, Pause } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
@@ -444,6 +444,13 @@ export default function BatchPage() {
     }
   }, [batchId])
 
+  // Batch-level resume — picks up at the first unfinished row
+  const handleResumeBatch = useCallback(async () => {
+    if (!batchId) return
+    const next = results.find((r) => r.status !== 'completed')
+    await handleResumeFrom(batchId, next?.index ?? 0)
+  }, [batchId, results, handleResumeFrom])
+
   // ─── Confidence buckets ───────────────────────────────────────────────────
 
   // Rows for the current view — per-list results get their batchId attached for nav links
@@ -605,7 +612,8 @@ export default function BatchPage() {
                 <div className="flex items-center gap-2">
                   {phase === 'processing' && jobStatus === 'queued' && <Clock className="w-4 h-4 text-amber-500" />}
                   {phase === 'processing' && jobStatus !== 'queued' && <Loader2 className="w-4 h-4 animate-spin text-primary" />}
-                  {phase === 'complete' && <Check className="w-4 h-4 text-emerald-500" />}
+                  {phase === 'complete' && jobStatus === 'paused' && <Pause className="w-4 h-4 text-amber-500" />}
+                  {phase === 'complete' && jobStatus !== 'paused' && <Check className="w-4 h-4 text-emerald-500" />}
                   <span className="text-sm font-medium">
                     {jobStatus === 'queued'
                       ? `Queued — starts when the current list finishes`
@@ -627,8 +635,13 @@ export default function BatchPage() {
                     <span className="text-xs text-red-500">{failedCount} failed</span>
                   )}
                   {phase === 'processing' && jobStatus === 'processing' && (
-                    <Button size="sm" variant="outline" onClick={handleStopBatch} className="h-6 px-2 text-[10px]">
-                      Stop
+                    <Button size="sm" variant="outline" onClick={handleStopBatch} className="h-6 px-2 text-[10px] gap-1">
+                      <Pause className="w-3 h-3" /> Pause
+                    </Button>
+                  )}
+                  {jobStatus === 'paused' && remaining > 0 && (
+                    <Button size="sm" onClick={handleResumeBatch} className="h-6 px-2 text-[10px] gap-1">
+                      <Play className="w-3 h-3" /> Resume
                     </Button>
                   )}
                   {batchId && jobStatus !== 'completed' && jobStatus !== 'failed' && jobStatus !== 'cancelled' && remaining > 0 && (
