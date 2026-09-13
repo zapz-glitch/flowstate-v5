@@ -123,8 +123,9 @@ export class BatchJobDO {
     }
     await this.state.storage.put('batchState', this.batchState)
 
-    // Run processing in background
-    this.processBatch(body).catch(async (err) => {
+    // Run processing in background — waitUntil keeps the isolate alive
+    // until the run settles (without it the DO can be evicted mid-batch)
+    this.state.waitUntil(this.processBatch(body).catch(async (err) => {
       console.error('[BatchJobDO] Fatal error:', err)
       await this.pushEvent('batch_error', { message: err instanceof Error ? err.message : 'Unknown error' })
       // Mark failed + release the FIFO queue so the next list isn't stranded
@@ -134,7 +135,7 @@ export class BatchJobDO {
       }
       await this.updateDbStatus('failed')
       await kickNextQueuedBatch(this.env, body.userId)
-    })
+    }))
 
     return new Response('OK', { status: 200 })
   }
@@ -195,11 +196,11 @@ export class BatchJobDO {
     this.batchState.failedCount = 0
     await this.state.storage.put('batchState', this.batchState)
 
-    // Run retry in background
-    this.retryFailed(body.userId, failedIndices).catch((err) => {
+    // Run retry in background — waitUntil survives isolate eviction
+    this.state.waitUntil(this.retryFailed(body.userId, failedIndices).catch((err) => {
       console.error('[BatchJobDO] Retry fatal error:', err)
       this.pushEvent('batch_error', { message: err instanceof Error ? err.message : 'Retry failed' })
-    })
+    }))
 
     return new Response('OK', { status: 200 })
   }
@@ -254,10 +255,10 @@ export class BatchJobDO {
     this.batchState.failedCount = this.batchState.results.filter((r) => r.status === 'failed').length
     await this.state.storage.put('batchState', this.batchState)
 
-    this.retryFailed(body.userId, indices).catch((err) => {
+    this.state.waitUntil(this.retryFailed(body.userId, indices).catch((err) => {
       console.error('[BatchJobDO] Resume fatal error:', err)
       this.pushEvent('batch_error', { message: err instanceof Error ? err.message : 'Resume failed' })
-    })
+    }))
 
     return new Response('OK', { status: 200 })
   }
