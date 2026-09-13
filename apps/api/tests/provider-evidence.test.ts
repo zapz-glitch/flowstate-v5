@@ -168,4 +168,63 @@ try {
   assert.equal(noValue.success, false)
   assert.equal(!noValue.success && noValue.code, 'INVALID_RESPONSE')
 } finally { globalThis.fetch = originalFetch }
-console.log('Provider evidence fixtures: permit nesting/history, empty versus unavailable, flood unknown/parcel, parcelId/building-detail propagation, AVM and cache version passed')
+
+// Building detail supplement: GET /property/{parcelId}/building — literal-text
+// condition/style/foundation when the coded property-detail block lacks them.
+let buildingPayload: unknown = {
+  buildings: [{
+    condition: 'AVERAGE',
+    style: 'RANCH/RAMBler',
+    foundationType: 'SLAB',
+    constructionType: 'FRAME',
+    exteriorWallType: 'VINYL SIDING',
+    roofCoverType: 'COMPOSITION SHINGLE',
+    numberOfStories: 1,
+    heatType: 'CENTRAL',
+    airConditioning: 'CENTRAL',
+    parkingType: 'ATTACHED GARAGE',
+    garageAreaSquareFeet: 440,
+    poolType: 'NONE',
+    yearBuilt: 1996,
+  }],
+}
+globalThis.fetch = async (input, init) => {
+  if (init?.method === 'POST') return Response.json({ access_token: 'fixture-token', expires_in: 3600 })
+  paths.push(new URL(String(input)).pathname)
+  return Response.json(buildingPayload)
+}
+try {
+  const provider = createCoreLogicProvider({ CORELOGIC_CLIENT_ID: 'fixture', CORELOGIC_CLIENT_SECRET: 'fixture' } as Env)
+  const detail = await provider.getBuildingDetail!('48029:36205502')
+  assert.equal(paths.at(-1), '/property/48029%3A36205502/building')
+  assert.equal(detail.success, true)
+  if (detail.success) {
+    assert.equal(detail.data.condition, 'AVERAGE')
+    assert.equal(detail.data.buildingStyle, 'RANCH/RAMBler')
+    assert.equal(detail.data.foundation, 'SLAB')
+    assert.equal(detail.data.constructionType, 'FRAME')
+    assert.equal(detail.data.exteriorWalls, 'VINYL SIDING')
+    assert.equal(detail.data.roofCover, 'COMPOSITION SHINGLE')
+    assert.equal(detail.data.stories, 1)
+    assert.equal(detail.data.heating, 'CENTRAL')
+    assert.equal(detail.data.cooling, 'CENTRAL')
+    assert.equal(detail.data.parkingType, 'ATTACHED GARAGE')
+    assert.equal(detail.data.garageSquareFeet, 440)
+    assert.equal(detail.data.pool, 'NONE')
+    assert.equal(detail.data.yearBuilt, 1996)
+  }
+  // Alternate nesting (data.buildings) resolves identically
+  buildingPayload = { data: { buildings: [{ buildingCondition: 'GOOD', stories: '2' }] } }
+  const nested = await provider.getBuildingDetail!('48029:36205502')
+  assert.equal(nested.success, true)
+  if (nested.success) {
+    assert.equal(nested.data.condition, 'GOOD')
+    assert.equal(nested.data.stories, 2)
+  }
+  // Malformed parcel ID — must fail without firing a request
+  const beforeBd = paths.length
+  const badBd = await provider.getBuildingDetail!('5533034499')
+  assert.equal(badBd.success, false)
+  assert.equal(paths.length, beforeBd)
+} finally { globalThis.fetch = originalFetch }
+console.log('Provider evidence fixtures: permit nesting/history, empty versus unavailable, flood unknown/parcel, parcelId/building-detail propagation, AVM, building detail and cache version passed')

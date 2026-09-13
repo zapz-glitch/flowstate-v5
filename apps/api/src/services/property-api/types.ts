@@ -405,6 +405,43 @@ export interface AvmError {
 
 export type AvmResponse = AvmResult | AvmError
 
+// ─── Building Detail (/property/{id}/building) ──────────────────────────────
+
+/**
+ * Literal-text building attributes from the dedicated building endpoint.
+ * Used to supplement property-detail when its coded buildings block is
+ * missing condition/style/etc. — provider data, so it outranks Zillow fills.
+ */
+export interface NormalizedBuildingDetail {
+  /** Assessor condition (e.g. 'Average', 'Good') */
+  condition: string | null
+  buildingStyle: string | null
+  foundation: string | null
+  constructionType: string | null
+  exteriorWalls: string | null
+  roofCover: string | null
+  stories: number | null
+  heating: string | null
+  cooling: string | null
+  parkingType: string | null
+  garageSquareFeet: number | null
+  pool: string | null
+  yearBuilt: number | null
+}
+
+export interface BuildingDetailResult {
+  success: true
+  data: NormalizedBuildingDetail
+}
+
+export interface BuildingDetailError {
+  success: false
+  error: string
+  code?: string
+}
+
+export type BuildingDetailResponse = BuildingDetailResult | BuildingDetailError
+
 // ─── Provider Interface ─────────────────────────────────────────────────────
 
 export interface PropertyProviderAdapter {
@@ -431,6 +468,9 @@ export interface PropertyProviderAdapter {
 
   /** Get an AVM estimate by composite parcel ID (fipsCode:universalParcelId) */
   getAvm?(parcelId: string, model?: string): Promise<AvmResponse>
+
+  /** Get building detail by composite parcel ID — supplements property-detail when condition/style codes are absent */
+  getBuildingDetail?(parcelId: string): Promise<BuildingDetailResponse>
 }
 
 // ─── Configuration ──────────────────────────────────────────────────────────

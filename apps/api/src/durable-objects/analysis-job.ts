@@ -236,7 +236,7 @@ export class AnalysisJobDO {
         subjectSqft: property.squareFeet ?? undefined,
         subjectPropertyType: property.propertyType ?? undefined,
     }
-    const [compsResult, permitsResult, floodResult, avmResult, osmResult] = await Promise.all([
+    const [compsResult, permitsResult, floodResult, avmResult, buildingDetailResult, osmResult] = await Promise.all([
       propertyApi.getComparables(comparablesParams),
       // Permits: preserve the error object — 'unavailable' must mean the call
       // failed, not that the property has no permits on file (that's 'empty')
@@ -251,6 +251,14 @@ export class AnalysisJobDO {
       // Subject AVM (Total Home Value) — parcel-level, subject only
       property.parcelId
         ? propertyApi.getAvm(property.parcelId).catch(() => null)
+        : Promise.resolve(null),
+      // Subject building detail — literal-text condition/style/foundation
+      // when the coded property-detail block lacks them
+      property.parcelId &&
+        (!property.buildingCondition ||
+          !property.construction?.buildingStyle ||
+          !property.construction?.foundationType)
+        ? propertyApi.getBuildingDetail(property.parcelId).catch(() => null)
         : Promise.resolve(null),
       // Location risk (major roads, railroads, commercial) — fetched during
       // enrichment so it can deduct from valuation, not just flag post-hoc.
@@ -360,6 +368,37 @@ export class AnalysisJobDO {
     if (avmData) {
       property.avmValue = avmData.value
       property.avmConfidence = avmData.confidence
+    }
+    // Building detail supplement — fills condition/style/foundation when the
+    // coded property-detail block lacks them (literal-text provider data)
+    const buildingDetail = buildingDetailResult && 'success' in buildingDetailResult && buildingDetailResult.success ? buildingDetailResult.data : null
+    if (buildingDetail) {
+      property.buildingCondition ??= buildingDetail.condition
+      property.stories ??= buildingDetail.stories
+      property.yearBuilt ??= buildingDetail.yearBuilt
+      property.construction = {
+        ...(property.construction ?? {}),
+        buildingStyle: property.construction?.buildingStyle ?? buildingDetail.buildingStyle ?? undefined,
+        foundationType: property.construction?.foundationType ?? buildingDetail.foundation ?? undefined,
+        type: property.construction?.type ?? buildingDetail.constructionType ?? undefined,
+        exteriorWalls: property.construction?.exteriorWalls ?? buildingDetail.exteriorWalls ?? undefined,
+        roofCover: property.construction?.roofCover ?? buildingDetail.roofCover ?? undefined,
+      }
+      property.features = {
+        ...(property.features ?? {}),
+        heating: property.features?.heating ?? buildingDetail.heating ?? undefined,
+        cooling: property.features?.cooling ?? buildingDetail.cooling ?? undefined,
+        poolType: property.features?.poolType ?? buildingDetail.pool ?? undefined,
+        garageType: property.features?.garageType ??
+          (buildingDetail.parkingType && !/carport/i.test(buildingDetail.parkingType)
+            ? buildingDetail.parkingType
+            : undefined),
+        garageSquareFeet: property.features?.garageSquareFeet ?? buildingDetail.garageSquareFeet ?? undefined,
+        carportType: property.features?.carportType ??
+          (buildingDetail.parkingType && /carport/i.test(buildingDetail.parkingType)
+            ? buildingDetail.parkingType
+            : undefined),
+      }
     }
     const evidenceLimitations: string[] = []
     for (const id of pools.conflictIds) evidenceLimitations.push(`${id}: Provider comparable pools disagree on the same sale date; price is quarantined from evaluation`)

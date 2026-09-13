@@ -296,13 +296,7 @@ class PropertyAppraisalService implements AppraisalService {
     comparables: NormalizedComparable[],
     options?: AppraisalOptions
   ): AppraisalResult {
-    // Neighborhood is the hard location boundary only when the subject has
-    // no subdivision/HOA to match against; otherwise it's soft ranking data.
-    const filters = (options?.filters ?? DEFAULT_FILTERS).map((f): AppraisalFilter =>
-      f.type === 'neighborhood_match'
-        ? { ...f, priority: subject.subdivision ? 'soft' : 'hard' }
-        : f
-    )
+    const filters = options?.filters ?? DEFAULT_FILTERS
     const adjustments = options?.adjustments ?? DEFAULT_ADJUSTMENTS
     const evaluations = evaluateComparables(subject, comparables, filters, adjustments)
 
@@ -497,47 +491,49 @@ class PropertyAppraisalService implements AppraisalService {
     }
 
     {
-      // Steps 3-4 share one evaluation with the widened radius: tier 3
-      // rescues comps failing ONLY subdivision_match (still inside the
-      // neighborhood); tier 4 also rescues neighborhood_match failures.
-      // Every rule stays evaluated — the failed-rule audit trail is kept.
+      // Steps 3-4: leave the subdivision. Neighborhood is a display
+      // datapoint, not a selection rule — the only location deal-breaker is
+      // subdivision. Tier 3 rescues subdivision-only failures inside the
+      // expanded radius (staying in the surrounding area); tier 4 drops the
+      // radius gate entirely. Every rule stays evaluated — the failed-rule
+      // audit trail is kept.
       if (expansion.allowGeographicExpansion) {
-        const geoFilters = baseFilters.map((f) =>
+        const subFilters = baseFilters.map((f) =>
           f.type === 'distance'
             ? { ...f, value: f.value * expansion.geographicDistanceMultiplier }
             : f
         )
-        const resultGeo = this.evaluate(subject, comparables, {
-          filters: geoFilters,
+        const resultSub = this.evaluate(subject, comparables, {
+          filters: subFilters,
           adjustments: baseAdjustments,
         })
-
-        const picked = rescue(resultGeo, new Set(['subdivision_match']))
+        const picked = rescue(resultSub, new Set(['subdivision_match']))
         if (picked && picked.selected.length >= REQUIRED_ARV_COMPS) {
           console.log(`Appraisal: ${picked.selected.length} comps selected after subdivision expansion`)
           return {
-            ...applyRescued(resultGeo, picked),
+            ...applyRescued(resultSub, picked),
             fallbackUsed: 'subdivision_expansion',
-            fallbackReason: `Insufficient comps in subdivision "${subject.subdivision || 'unknown'}". Expanded to the surrounding neighborhood (radius ×${expansion.geographicDistanceMultiplier}) — all other rules still apply.`,
+            fallbackReason: `Insufficient comps in subdivision "${subject.subdivision || 'unknown'}". Expanded to the surrounding area (radius ×${expansion.geographicDistanceMultiplier}) — all other rules still apply.`,
             expansionApplied: expansion.allowOlderSales
               ? ['older_sales', 'subdivision']
               : ['subdivision'],
           }
         }
 
-        // Step 4: Leave the neighborhood — rescue comps failing only
-        // location rules (subdivision and/or neighborhood).
+        // Step 4: Drop the radius gate — rescue comps whose only hard
+        // failures are subdivision and/or distance.
         if (expansion.allowNeighborhoodExpansion) {
-          const picked4 = rescue(
-            resultGeo,
-            new Set(['subdivision_match', 'neighborhood_match'])
-          )
+          const resultGeo = this.evaluate(subject, comparables, {
+            filters: baseFilters,
+            adjustments: baseAdjustments,
+          })
+          const picked4 = rescue(resultGeo, new Set(['subdivision_match', 'distance']))
           if (picked4 && picked4.selected.length >= REQUIRED_ARV_COMPS) {
             console.log(`Appraisal: ${picked4.selected.length} comps selected after geographic expansion`)
             return {
               ...applyRescued(resultGeo, picked4),
               fallbackUsed: 'geographic_expansion',
-              fallbackReason: `Insufficient comps in "${subject.subdivision || subject.neighborhoodName || 'subject area'}". Expanded to radius-only geography (distance ×${expansion.geographicDistanceMultiplier}) — failed location rules remain visible per comp.`,
+              fallbackReason: `Insufficient comps in "${subject.subdivision || subject.neighborhoodName || 'subject area'}". Expanded to radius-only geography — failed location rules remain visible per comp.`,
               expansionApplied: expansion.allowOlderSales
                 ? ['older_sales', 'subdivision', 'geographic']
                 : ['subdivision', 'geographic'],

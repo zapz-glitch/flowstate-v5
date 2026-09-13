@@ -541,22 +541,53 @@ Product engineer's authoritative rule spec:
 
 Implementation:
 - DEFAULT_FILTERS: all physical matches + lot_size + neighborhood now
-  priority 'soft'. Neighborhood resolved per-subject in evaluate():
-  hard when subject.subdivision absent, soft otherwise.
-- subdivisionsMatch(): strips unit/phase/section/plat designators
-  (UN/UT/U1/PH/SEC/LOT/PLAT/ADDN...) then word-boundary prefix match —
-  "SWEETWATER CREEK S UT 2E" matches subject "SWEETWATER CREEK";
-  "OAK" does NOT match "OAKWOOD". Mirrored in shared/filters.ts.
+  priority 'soft'. Neighborhood is a datapoint ONLY — recorded and
+  displayed on cards, never a selection gate (product engineer:
+  "remove neighborhood, use it as a datapoint" 2026-09-13).
+- subdivisionsMatch(): strips unit/phase/section/plat/#NN designators
+  (UN/UT/U1/PH/SEC/LOT/PLAT/ADDN... incl. "TURTLE CREEK VILLAGE #01")
+  then word-boundary prefix match — "SWEETWATER CREEK S UT 2E" matches
+  subject "SWEETWATER CREEK"; "OAK" does NOT match "OAKWOOD".
+  Mirrored in shared/filters.ts.
 - evaluateWithFallback rewritten: no tier disables filters anymore.
   Every tier evaluates the full rule set; expansion tiers rescue comps
-  whose hard failures ⊆ allowed set ({subdivision} then
-  {subdivision,neighborhood} at widened radius). Full audit trail in
-  every tier — fixes the missing location rules in reports.
-  physical_relaxation tier removed (no hard physical rules remain).
+  whose hard failures ⊆ allowed set: older_sales →
+  subdivision_expansion (radius ×geographicDistanceMultiplier, rescue
+  {subdivision_match}) → geographic_expansion (strict radius filters,
+  rescue {subdivision_match,distance}) → most-recent fallback.
+  Full audit trail in every tier — fixes the missing location rules
+  in reports. physical_relaxation tier removed (no hard physical
+  rules remain).
 - performAnalysis: required-match merge now always takes default
   priority (presets can't express soft).
 - corelogic-codes: EXTERIOR_WALLS expanded (ALV/BRI/FST/SDS/LPS/BLO/
   STV/CLP/FRM/MAS/CND...), ROOF_COVER numeric RFCO set added earlier.
+
+### Provider building-detail supplement (2026-09-13, same branch)
+
+Duval county property-detail lacks buildingImprovementConditionCode —
+condition/style/foundation were null everywhere. The dedicated
+GET /property/{fips:upi}/building endpoint returns literal-text
+values; now wired as a provider supplement:
+
+- types.ts: NormalizedBuildingDetail + BuildingDetailResponse +
+  optional provider getBuildingDetail(parcelId).
+- corelogic.ts getBuildingDetail: defensive nesting search
+  (building / buildings[0] / data.buildings[0] / root), alias lookup
+  per field (condition, style, foundation, constructionType,
+  exteriorWalls, roofCover, stories, heatType, airConditioning,
+  parkingType, garage sqft, pool, yearBuilt). Requires composite
+  fips:upi parcel ID; errors via evidenceError (non-fatal).
+- index.ts: cached PropertyAPI.getBuildingDetail wrapper
+  (provider-scoped key, flood-zone TTL); enrichComparables calls it
+  when a comp's detail lacks condition/style/foundation and merges
+  into construction+features (provider wins over Zillow fills);
+  getPropertyBundle fetches it for the subject in the same
+  Promise.all and merges onto property before analysis.
+- analysis-job.ts DO: same subject supplement in the parallel batch
+  (5th element of Promise.all → merged before performAnalysis).
+- provider-evidence.test.ts: building-detail fixture coverage
+  (both nestings, aliases, malformed parcel short-circuit).
 - shared package: AppraisalFilter.priority added; shared evaluator
   honors soft (no disableReasons) — matches API semantics.
 - D1: user's Default preset sqft_diff corrected 20 → 250 (report user's

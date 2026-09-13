@@ -45,11 +45,13 @@ import type {
   PermitsResult,
   FloodZoneResponse,
   AvmResponse,
+  BuildingDetailResponse,
   PropertyApiConfig,
   NormalizedProperty,
   NormalizedComparable,
   NormalizedFloodZone,
   NormalizedAvm,
+  NormalizedBuildingDetail,
   // PropertyBundle types
   PropertyBundle,
   PropertyBundleParams,
@@ -192,6 +194,8 @@ export interface PropertyApiService {
   getFloodZoneForProperty(property: NormalizedProperty): Promise<FloodZoneResponse | null>;
   /** AVM estimate by composite parcel ID (subject properties only) */
   getAvm(parcelId: string, model?: string): Promise<AvmResponse>;
+  /** Building detail by composite parcel ID — supplements property-detail when coded fields are absent */
+  getBuildingDetail(parcelId: string): Promise<BuildingDetailResponse>;
 
   /** Search property with fallback to alternate provider on failure */
   searchPropertyWithFallback(
@@ -590,6 +594,43 @@ class PropertyApi implements PropertyApiService {
     return result;
   }
 
+  /**
+   * Building detail supplement — literal-text condition/style/foundation/
+   * HVAC/parking from /property/{id}/building. Cached per parcel; used to
+   * fill fields the coded property-detail block doesn't carry.
+   */
+  async getBuildingDetail(parcelId: string): Promise<BuildingDetailResponse> {
+    const provider = this.getProvider();
+
+    if (!provider.getBuildingDetail) {
+      return {
+        success: false,
+        error: `${provider.name} does not support building detail`,
+        code: 'NOT_SUPPORTED',
+      };
+    }
+
+    const cacheKey = floodZoneKey(`building:${parcelId}`, provider.name);
+    if (!this._skipCache) {
+      const cached = await this.cache.get<NormalizedBuildingDetail>(cacheKey);
+      if (cached) {
+        this._stats.logCacheHit('building_detail');
+        return { success: true, data: cached };
+      }
+    }
+
+    this._stats.logCall('building_detail');
+    const result = await provider.getBuildingDetail(parcelId);
+
+    if (result.success && result.data) {
+      await this.cache.set(cacheKey, result.data, {
+        ttl: CACHE_TTL.FLOOD_ZONE,
+      });
+    }
+
+    return result;
+  }
+
   async searchPropertyWithFallback(
     params: PropertySearchParams,
     fallbackProvider?: PropertyProvider,
@@ -729,7 +770,7 @@ class PropertyApi implements PropertyApiService {
     const address1 = property.address || params.streetAddress || ''
     const address2 = [property.city || params.city, property.state || params.state, property.zipCode || params.zipCode].filter(Boolean).join(', ')
 
-    const [compsResult, permitsResult, floodResult, neighbourhoodResult, avmResult] = await Promise.all([
+    const [compsResult, permitsResult, floodResult, neighbourhoodResult, avmResult, buildingDetailResult] = await Promise.all([
       // Get comparables
       this.getComparables({
         propertyId: property.id,
@@ -756,6 +797,14 @@ class PropertyApi implements PropertyApiService {
       // Subject AVM (Cotality THV) — parcel-level, subject only; graceful fail
       property.parcelId
         ? this.getAvm(property.parcelId).catch(() => null)
+        : Promise.resolve(null),
+      // Subject building detail — supplements property-detail when the coded
+      // buildings block lacks condition/style (literal-text provider data)
+      property.parcelId &&
+        (!property.buildingCondition ||
+          !property.construction?.buildingStyle ||
+          !property.construction?.foundationType)
+        ? this.getBuildingDetail(property.parcelId).catch(() => null)
         : Promise.resolve(null),
     ]);
 
@@ -807,6 +856,42 @@ class PropertyApi implements PropertyApiService {
     if (avm) {
       property.avmValue = avm.value;
       property.avmConfidence = avm.confidence;
+    }
+
+    // Building detail supplement — fills fields the coded detail block lacks
+    const buildingDetail: NormalizedBuildingDetail | null =
+      buildingDetailResult && buildingDetailResult.success ? buildingDetailResult.data : null;
+    if (buildingDetail) {
+      property.buildingCondition ??= buildingDetail.condition;
+      property.stories ??= buildingDetail.stories;
+      property.yearBuilt ??= buildingDetail.yearBuilt;
+      if (property.construction || buildingDetail.buildingStyle || buildingDetail.foundation) {
+        property.construction = {
+          ...(property.construction ?? {}),
+          buildingStyle: property.construction?.buildingStyle ?? buildingDetail.buildingStyle ?? undefined,
+          foundationType: property.construction?.foundationType ?? buildingDetail.foundation ?? undefined,
+          type: property.construction?.type ?? buildingDetail.constructionType ?? undefined,
+          exteriorWalls: property.construction?.exteriorWalls ?? buildingDetail.exteriorWalls ?? undefined,
+          roofCover: property.construction?.roofCover ?? buildingDetail.roofCover ?? undefined,
+        };
+      }
+      if (property.features || buildingDetail.heating || buildingDetail.cooling || buildingDetail.parkingType || buildingDetail.pool) {
+        property.features = {
+          ...(property.features ?? {}),
+          heating: property.features?.heating ?? buildingDetail.heating ?? undefined,
+          cooling: property.features?.cooling ?? buildingDetail.cooling ?? undefined,
+          poolType: property.features?.poolType ?? buildingDetail.pool ?? undefined,
+          garageType: property.features?.garageType ??
+            (buildingDetail.parkingType && !/carport/i.test(buildingDetail.parkingType)
+              ? buildingDetail.parkingType
+              : undefined),
+          garageSquareFeet: property.features?.garageSquareFeet ?? buildingDetail.garageSquareFeet ?? undefined,
+          carportType: property.features?.carportType ??
+            (buildingDetail.parkingType && /carport/i.test(buildingDetail.parkingType)
+              ? buildingDetail.parkingType
+              : undefined),
+        };
+      }
     }
     const weatherRisk: WeatherRisk | null = enrichOpts.weatherRisk
       ? this.estimateWeatherRisk(property.state)
@@ -900,6 +985,35 @@ class PropertyApi implements PropertyApiService {
               const construction = result.data.construction
                 ? this.resolveConstructionCodes(result.data.construction)
                 : undefined;
+
+              // Supplement with the /building endpoint when the coded
+              // detail block lacks condition/style — provider data, so it
+              // outranks any Zillow fills applied later.
+              let buildingDetail: NormalizedBuildingDetail | null = null;
+              const needsBuilding =
+                result.data.parcelId &&
+                (!result.data.buildingCondition || !construction?.buildingStyle || !construction?.foundationType);
+              if (needsBuilding) {
+                const bd = await this.getBuildingDetail(result.data.parcelId as string).catch(() => null);
+                if (bd?.success) buildingDetail = bd.data;
+              }
+              if (buildingDetail) {
+                result.data.buildingCondition ??= buildingDetail.condition;
+                result.data.buildingGrade ??= null;
+                result.data.stories ??= buildingDetail.stories;
+              }
+
+              const mergedConstruction = construction || buildingDetail
+                ? {
+                    ...(construction ?? {}),
+                    buildingStyle: construction?.buildingStyle ?? buildingDetail?.buildingStyle ?? undefined,
+                    foundationType: construction?.foundationType ?? buildingDetail?.foundation ?? undefined,
+                    type: construction?.type ?? buildingDetail?.constructionType ?? undefined,
+                    exteriorWalls: construction?.exteriorWalls ?? buildingDetail?.exteriorWalls ?? undefined,
+                    roofCover: construction?.roofCover ?? buildingDetail?.roofCover ?? undefined,
+                  }
+                : undefined;
+
               return {
                 ...comp,
                 raw: {
@@ -911,19 +1025,25 @@ class PropertyApi implements PropertyApiService {
                 buildingCondition: result.data.buildingCondition ?? null,
                 buildingGrade: result.data.buildingGrade ?? null,
                 stories: result.data.stories ?? null,
-                construction,
+                construction: mergedConstruction,
                 transaction: result.data.transaction ? {
                   buyerNames: result.data.transaction.buyerNames,
                   buyerIsCorporate: result.data.transaction.buyerIsCorporate,
                 } : undefined,
-                features: result.data.features ? {
-                  poolType: result.data.features.poolType,
-                  garageType: result.data.features.garageType,
-                  garageSquareFeet: result.data.features.garageSquareFeet,
-                  carportType: result.data.features.carportType,
-                  heating: result.data.features.heating,
-                  cooling: result.data.features.cooling,
-                  fireplacesCount: result.data.features.fireplacesCount,
+                features: (result.data.features || buildingDetail) ? {
+                  poolType: result.data.features?.poolType ?? buildingDetail?.pool ?? undefined,
+                  garageType: result.data.features?.garageType ??
+                    (buildingDetail?.parkingType
+                      ? (/carport/i.test(buildingDetail.parkingType) ? undefined : buildingDetail.parkingType)
+                      : undefined),
+                  garageSquareFeet: result.data.features?.garageSquareFeet ?? buildingDetail?.garageSquareFeet ?? undefined,
+                  carportType: result.data.features?.carportType ??
+                    (buildingDetail?.parkingType && /carport/i.test(buildingDetail.parkingType)
+                      ? buildingDetail.parkingType
+                      : undefined),
+                  heating: result.data.features?.heating ?? buildingDetail?.heating ?? undefined,
+                  cooling: result.data.features?.cooling ?? buildingDetail?.cooling ?? undefined,
+                  fireplacesCount: result.data.features?.fireplacesCount,
                 } : undefined,
                 isEnriched: true,
               };

@@ -44,9 +44,9 @@ export interface AppraisalFilter {
 export const DEFAULT_FILTERS: AppraisalFilter[] = [
   // HARD RULES (the fixed deal-breakers):
   //   sale_age ≤180d · same subdivision · ±250 sqft · same property type ·
-  //   no major-road crossing · ±10yr build date. Neighborhood is the hard
-  //   location fallback when the subject has no subdivision (priority is
-  //   resolved per-subject in evaluate()).
+  //   no major-road crossing · ±10yr build date.
+  // Neighborhood is a datapoint only — recorded and displayed, never used
+  // for comp selection.
   { type: 'subdivision_match', enabled: true, value: 1 },
   { type: 'neighborhood_match', enabled: true, value: 1, priority: 'soft' },
   // Preferred physical matches (soft) — assessed from provider building

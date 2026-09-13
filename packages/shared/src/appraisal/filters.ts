@@ -25,7 +25,7 @@ function subdivisionBase(value: string | null | undefined): string | null {
   v = v.replace(/[\/\-_.,]/g, ' ').replace(/\s+/g, ' ').trim()
   v = v
     .replace(
-      /\b(?:un|unit|ut|u|ph|phase|sec|sect|section|blk|block|lot|plat|tract|add|addn|addition|part|pt|rep|repl|replat|vlg)\s*\w*.*$/i,
+      /(?:\b(?:un|unit|ut|u|ph|phase|sec|sect|section|blk|block|lot|plat|tract|add|addn|addition|part|pt|rep|repl|replat|vlg)\s*\w*|#\s*\w+).*$/i,
       ''
     )
     .trim()

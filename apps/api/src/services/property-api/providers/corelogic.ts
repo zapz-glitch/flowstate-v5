@@ -15,6 +15,7 @@ import type {
   PermitsResponse,
   FloodZoneResponse,
   AvmResponse,
+  BuildingDetailResponse,
   NormalizedProperty,
   NormalizedComparable,
   NormalizedPermit,
@@ -733,6 +734,14 @@ interface RawAvmResponse {
   [key: string]: unknown
 }
 
+/** Building detail: GET /property/{fipsCode:universalParcelId}/building */
+interface RawBuildingResponse {
+  building?: Record<string, unknown>
+  buildings?: Array<Record<string, unknown>>
+  data?: { buildings?: Array<Record<string, unknown>> }
+  [key: string]: unknown
+}
+
 /** Parcel-level flood determination: GET /property/{fipsCode:universalParcelId}/flood-zone */
 interface RawParcelFloodZoneResponse {
   corelogicPropertyId?: string
@@ -1437,6 +1446,70 @@ class CoreLogicProvider implements PropertyProviderAdapter {
       }
     } catch (error) {
       return evidenceError(error, 'AVM')
+    }
+  }
+
+  /**
+   * Building attributes via the dedicated building endpoint.
+   * GET /property/{parcelId}/building — returns literal-text condition,
+   * style, foundation, HVAC, parking, pool. Used to supplement
+   * property-detail when its coded buildings block lacks these fields
+   * (e.g. Duval county doesn't ship buildingImprovementConditionCode).
+   */
+  async getBuildingDetail(parcelId: string): Promise<BuildingDetailResponse> {
+    try {
+      if (!parcelId.includes(':')) {
+        throw new Error('INVALID_RESPONSE: building detail requires fipsCode:universalParcelId')
+      }
+      const response = await request<RawBuildingResponse>(
+        this.env,
+        `/property/${encodeURIComponent(parcelId)}/building`,
+        { strictNotFound: true },
+      )
+
+      // Locate the building object across plausible nestings
+      const b =
+        response.building ??
+        response.buildings?.[0] ??
+        response.data?.buildings?.[0] ??
+        (response as Record<string, unknown>)
+
+      const str = (...keys: string[]): string | null => {
+        for (const k of keys) {
+          const v = b[k]
+          if (typeof v === 'string' && v.trim()) return v.trim()
+        }
+        return null
+      }
+      const num = (...keys: string[]): number | null => {
+        for (const k of keys) {
+          const v = b[k]
+          if (typeof v === 'number' && isFinite(v)) return v
+          if (typeof v === 'string' && v.trim() && isFinite(Number(v))) return Number(v)
+        }
+        return null
+      }
+
+      return {
+        success: true,
+        data: {
+          condition: str('condition', 'buildingCondition', 'buildingImprovementCondition'),
+          buildingStyle: str('style', 'buildingStyle', 'buildingStyleType'),
+          foundation: str('foundation', 'foundationType'),
+          constructionType: str('constructionType', 'construction'),
+          exteriorWalls: str('exteriorWalls', 'exteriorWallType', 'walls'),
+          roofCover: str('roofCover', 'roofCoverType', 'roofMaterial'),
+          stories: num('stories', 'numberOfStories', 'storyCount'),
+          heating: str('heatType', 'heating', 'heatingType'),
+          cooling: str('airConditioning', 'cooling', 'coolingType'),
+          parkingType: str('parkingType', 'garageType', 'parking'),
+          garageSquareFeet: num('garageSquareFeet', 'garageAreaSquareFeet'),
+          pool: str('pool', 'poolType'),
+          yearBuilt: num('yearBuilt'),
+        },
+      }
+    } catch (error) {
+      return evidenceError(error, 'building detail')
     }
   }
 
