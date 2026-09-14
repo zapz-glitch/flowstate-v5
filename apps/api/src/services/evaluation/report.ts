@@ -135,14 +135,17 @@ function assessConfidence(input: BuildReportInput): {
     reasons.push('Subject condition could not be verified')
   }
 
+  // Confidence = quality of the comp MATCH, not comp count. A thin-market
+  // pocket can still produce a high-confidence ARV when the 1-2 comps
+  // that exist are verified matches. Volume is surfaced separately.
   const level =
-    selected.length < 3 ||
+    selected.length === 0 ||
     weakCount > 0 ||
     appraisal.fallbackUsed === 'nearest_comps' ||
     appraisal.fallbackUsed === 'insufficient' ||
     (oldestSaleDays != null && oldestSaleDays > 365)
       ? 'low'
-      : selected.length >= 3 &&
+      : selected.length > 0 &&
           excellentCount === selected.length &&
           appraisal.fallbackUsed === 'none' &&
           subjectConditionVerified

@@ -163,6 +163,8 @@ export interface UsageSummary {
   }
   /** Real CoreLogic calls this month (cache hits excluded) — display-only */
   providerCalls?: { month: number; limit: number }
+  /** Lifetime average report generation time across all analysis runs */
+  analysisTiming?: { avgMs: number | null; runs: number }
 }
 
 export async function getUsageSummary(): Promise<UsageSummary> {

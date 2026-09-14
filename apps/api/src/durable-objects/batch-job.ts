@@ -42,6 +42,10 @@ interface BatchResult {
   rehabCost?: number
   recommendation?: string
   confidence?: string
+  /** Volume: comps selected that matched appraisal rules */
+  compCount?: number
+  /** Wall time for this address's analysis */
+  durationMs?: number
 }
 
 export interface StartBatchRequest {
@@ -366,6 +370,8 @@ export class BatchJobDO {
           rehabCost: result.rehabCost,
           recommendation: result.recommendation,
           confidence: result.confidence,
+          compCount: result.compCount,
+          durationMs: result.durationMs,
           error: undefined,
         }
         this.batchState.completedCount++
@@ -461,6 +467,8 @@ export class BatchJobDO {
           rehabCost: result.rehabCost,
           recommendation: result.recommendation,
           confidence: result.confidence,
+          compCount: result.compCount,
+          durationMs: result.durationMs,
         }
         this.batchState.completedCount++
 
@@ -531,7 +539,10 @@ export class BatchJobDO {
     rehabCost?: number
     recommendation?: string
     confidence?: string
+    compCount?: number
+    durationMs?: number
   }> {
+    const startTime = Date.now()
     const jobId = `batch_${config.batchId}_${crypto.randomUUID().slice(0, 8)}`
 
     const doId = this.env.ANALYSIS_JOB.idFromName(jobId)
@@ -619,6 +630,8 @@ export class BatchJobDO {
           rehabCost: result?.valuation?.rehabCost,
           recommendation: result?.valuation?.recommendation,
           confidence: result?.report?.confidence,
+          compCount: result?.comps?.enabledCount ?? result?.report?.arv?.compPool?.enabled,
+          durationMs: Date.now() - startTime,
         }
       }
     }
