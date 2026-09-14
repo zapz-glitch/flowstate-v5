@@ -373,36 +373,43 @@ describe('ARV comp selection', () => {
     { type: 'distance', enabled: true, value: 5 },
   ]
 
-  it('selects the 3 highest-priced valid comps and stops', () => {
+  it('selects only in-band comps — within 10% of the top-priced eligible comp', () => {
     const comps = [
       comp('c1', { salePrice: 250000 }),
       comp('c2', { salePrice: 400000 }),
       comp('c3', { salePrice: 300000 }),
       comp('c4', { salePrice: 350000 }),
       comp('c5', { salePrice: 200000 }),
+      comp('c6', { salePrice: 380000 }),
     ]
     const r = service.evaluate(subject(), comps, { filters: lax, adjustments: [] })
 
-    expect(r.selectedCompIds).toEqual(['c2', 'c4', 'c3'])
+    // Top = c2 ($400k) → band floor $360k → only c2 + c6 qualify for ARV.
+    // c4 ($350k) and c3 ($300k) pass the rules but fall below the band.
+    expect(r.selectedCompIds).toEqual(['c2', 'c6'])
     const statuses = Object.fromEntries(r.comparables.map((c) => [c.id, c.arvStatus]))
     expect(statuses['c2']).toBe('selected')
-    expect(statuses['c4']).toBe('selected')
-    expect(statuses['c3']).toBe('selected')
+    expect(statuses['c6']).toBe('selected')
+    expect(statuses['c4']).toBe('not_examined')
+    expect(statuses['c3']).toBe('not_examined')
     expect(statuses['c1']).toBe('not_examined')
     expect(statuses['c5']).toBe('not_examined')
+    // Insufficiency keys off eligible (rules-passing) count, not the band —
+    // 6 eligible comps means no expansion despite only 2 driving ARV.
     expect(r.insufficientComps).toBe(false)
   })
 
   it('ARV = mean adjusted $/sqft × subject sqft', () => {
     // 3 comps all 1500 sqft → ppsf = price/1500; subject 1500 sqft
+    // c1 ($300k) is below the 10% band of top comp c2 ($360k → floor $324k)
     const comps = [
       comp('c1', { salePrice: 300000, squareFeet: 1500 }),
       comp('c2', { salePrice: 360000, squareFeet: 1500 }),
       comp('c3', { salePrice: 330000, squareFeet: 1500 }),
     ]
     const r = service.evaluate(subject(), comps, { filters: lax, adjustments: [] })
-    // mean ppsf = (200 + 240 + 220)/3 = 220 → ARV = 220 × 1500 = 330000
-    expect(r.arv).toBe(330000)
+    // mean ppsf = (240 + 220)/2 = 230 → ARV = 230 × 1500 = 345000
+    expect(r.arv).toBe(345000)
   })
 
   it('relaxes to nearest recent comps when fewer than 3 valid and expansion exhausted', () => {

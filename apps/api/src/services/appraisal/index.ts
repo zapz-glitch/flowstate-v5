@@ -218,6 +218,14 @@ export interface AppraisalResultWithFallback extends AppraisalResult {
 /** Number of valid comps required for ARV (classical appraisal model) */
 const REQUIRED_ARV_COMPS = 3
 
+/**
+ * Top-of-market band: only eligible comps priced within this fraction of the
+ * highest-priced eligible comp may drive ARV. Guards against as-is /
+ * original-condition sales dragging ARV down when vision can't verify
+ * condition — price is the proxy for ARV-spec condition.
+ */
+const ARV_PRICE_BAND_PCT = 0.10
+
 // ─── Implementation ────────────────────────────────────────────────────────────
 
 class PropertyAppraisalService implements AppraisalService {
@@ -232,11 +240,18 @@ class PropertyAppraisalService implements AppraisalService {
   private selectArvComps(
     subject: NormalizedProperty,
     appraisedComps: AppraisedComparable[]
-  ): { comparables: AppraisedComparable[]; selected: AppraisedComparable[]; arv: number } {
+  ): { comparables: AppraisedComparable[]; selected: AppraisedComparable[]; eligible: AppraisedComparable[]; arv: number } {
     const eligible = appraisedComps.filter((c) => {
       const price = c.adjustedSalePrice ?? c.salePrice
       return c.isEnabled && price != null && price > 0
     })
+
+    // Top-of-market band — drop eligible comps priced below 90% of the best
+    // eligible comp. When condition can't be verified (no vision), price is
+    // the signal that a comp is renovated/ARV-spec rather than as-is.
+    const compPrice = (c: AppraisedComparable) => c.adjustedSalePrice ?? c.salePrice ?? 0
+    const topPrice = eligible.reduce((m, c) => Math.max(m, compPrice(c)), 0)
+    const banded = eligible.filter((c) => compPrice(c) >= topPrice * (1 - ARV_PRICE_BAND_PCT))
 
     // Best apples-to-apples first: comps with more verified match passes
     // (status 'passed') outrank comps that slid through on missing data
@@ -247,7 +262,7 @@ class PropertyAppraisalService implements AppraisalService {
       c.evaluation.filterResults.filter((r) => r.status === 'passed').length
     const saleTime = (c: AppraisedComparable) =>
       c.saleDate ? new Date(c.saleDate).getTime() : 0
-    const sorted = [...eligible].sort((a, b) => {
+    const sorted = [...banded].sort((a, b) => {
       const diff = verifiedPasses(b) - verifiedPasses(a)
       if (diff !== 0) return diff
       const recency = saleTime(b) - saleTime(a)
@@ -293,7 +308,7 @@ class PropertyAppraisalService implements AppraisalService {
       )
     }
 
-    return { comparables, selected, arv }
+    return { comparables, selected, eligible, arv }
   }
 
   evaluate(
@@ -318,7 +333,7 @@ class PropertyAppraisalService implements AppraisalService {
     })
 
     // ARV comp selection: top-3 highest-priced valid, early stop
-    const { comparables: marked, selected, arv } = this.selectArvComps(subject, appraisedComps)
+    const { comparables: marked, selected, eligible, arv } = this.selectArvComps(subject, appraisedComps)
     const enabledComps = marked.filter((c) => c.isEnabled)
 
     const enabledPrices = enabledComps
@@ -355,7 +370,7 @@ class PropertyAppraisalService implements AppraisalService {
       // Fewer than REQUIRED_ARV_COMPS verified comps is insufficient — thin
       // sets must trigger the expansion fallbacks (geography → older sales →
       // nearest) rather than silently anchoring ARV on 1–2 sales.
-      insufficientComps: selected.length < REQUIRED_ARV_COMPS,
+      insufficientComps: eligible.length < REQUIRED_ARV_COMPS,
     }
   }
 
@@ -473,14 +488,14 @@ class PropertyAppraisalService implements AppraisalService {
 
     const applyRescued = (
       base: AppraisalResult,
-      picked: { comparables: AppraisedComparable[]; selected: AppraisedComparable[]; arv: number }
+      picked: { comparables: AppraisedComparable[]; selected: AppraisedComparable[]; eligible: AppraisedComparable[]; arv: number }
     ) => ({
       ...base,
       comparables: picked.comparables,
       arv: picked.arv,
       enabledCount: picked.comparables.filter((c) => c.isEnabled).length,
       selectedCompIds: picked.selected.map((c) => c.id),
-      insufficientComps: picked.selected.length < REQUIRED_ARV_COMPS,
+      insufficientComps: picked.eligible.length < REQUIRED_ARV_COMPS,
     })
 
     // Step 2: widen the build-era INSIDE the subdivision first — better a
@@ -515,7 +530,7 @@ class PropertyAppraisalService implements AppraisalService {
         const picked = rescue(resultNb, new Set(['subdivision_match']), (c) =>
           neighborhoodsMatch(subject, c) === true
         )
-        if (picked && picked.selected.length >= REQUIRED_ARV_COMPS) {
+        if (picked && picked.eligible.length >= REQUIRED_ARV_COMPS) {
           console.log(`Appraisal: ${picked.selected.length} comps selected via neighborhood match${yearNote(yearLimit)}`)
           return {
             ...applyRescued(resultNb, picked),
@@ -537,7 +552,7 @@ class PropertyAppraisalService implements AppraisalService {
           adjustments,
         })
         const picked = rescue(resultSub, new Set(['subdivision_match']))
-        if (picked && picked.selected.length >= REQUIRED_ARV_COMPS) {
+        if (picked && picked.eligible.length >= REQUIRED_ARV_COMPS) {
           console.log(`Appraisal: ${picked.selected.length} comps selected after subdivision expansion${yearNote(yearLimit)}`)
           return {
             ...applyRescued(resultSub, picked),
@@ -558,7 +573,7 @@ class PropertyAppraisalService implements AppraisalService {
             adjustments,
           })
           const picked = rescue(resultGeo, new Set(['subdivision_match', 'distance']))
-          if (picked && picked.selected.length >= REQUIRED_ARV_COMPS) {
+          if (picked && picked.eligible.length >= REQUIRED_ARV_COMPS) {
             console.log(`Appraisal: ${picked.selected.length} comps selected after geographic expansion${yearNote(yearLimit)}`)
             return {
               ...applyRescued(resultGeo, picked),

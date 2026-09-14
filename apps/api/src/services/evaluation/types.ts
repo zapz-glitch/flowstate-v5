@@ -125,6 +125,8 @@ export interface EvaluationReport {
     compPool: {
       total: number
       enabled: number
+      /** Comps actually driving ARV — enabled ∩ within 10% of top price, top 3 */
+      selected: number
       fallbackUsed: string
       fallbackReason?: string
     }
