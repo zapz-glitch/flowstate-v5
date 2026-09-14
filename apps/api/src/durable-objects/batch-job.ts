@@ -91,9 +91,7 @@ export class BatchJobDO {
     if (request.method === 'POST' && path === '/cancel') {
       return this.handleStop('cancel')
     }
-    if (request.method === 'POST' && path === '/mark-completed') {
-      return this.handleMarkCompleted()
-    }
+
     if (request.method === 'GET' && path === '/sse') {
       return this.handleSSE(request)
     }
@@ -144,34 +142,6 @@ export class BatchJobDO {
     return new Response('OK', { status: 200 })
   }
 
-  // ─── Mark Completed (for stuck batch recovery) ──────────────────────────
-
-  private async handleMarkCompleted(): Promise<Response> {
-    if (!this.batchState) {
-      this.batchState = await this.state.storage.get<BatchState>('batchState') ?? null
-    }
-    if (this.batchState) {
-      // Mark any pending/processing as failed
-      this.batchState.results = this.batchState.results.map((r) => {
-        if (r.status === 'pending' || r.status === 'processing') {
-          this.batchState!.failedCount++
-          return { ...r, status: 'failed' as const, error: r.error || 'Batch timed out' }
-        }
-        return r
-      })
-      this.batchState.status = 'completed'
-      await this.state.storage.put('batchState', this.batchState)
-      await this.pushEvent('batch_completed', {
-        totalAddresses: this.batchState.totalAddresses,
-        completedCount: this.batchState.completedCount,
-        failedCount: this.batchState.failedCount,
-        results: this.batchState.results,
-      })
-      await kickNextQueuedBatch(this.env, this.batchState.userId)
-    }
-    return new Response('OK', { status: 200 })
-  }
-
   // ─── Retry Failed Addresses ─────────────────────────────────────────────
 
   private async handleRetryFailed(request: Request): Promise<Response> {
@@ -201,9 +171,15 @@ export class BatchJobDO {
     await this.state.storage.put('batchState', this.batchState)
 
     // Run retry in background — waitUntil survives isolate eviction
-    this.state.waitUntil(this.retryFailed(body.userId, failedIndices).catch((err) => {
+    this.state.waitUntil(this.retryFailed(body.userId, failedIndices).catch(async (err) => {
       console.error('[BatchJobDO] Retry fatal error:', err)
-      this.pushEvent('batch_error', { message: err instanceof Error ? err.message : 'Retry failed' })
+      await this.pushEvent('batch_error', { message: err instanceof Error ? err.message : 'Retry failed' })
+      if (this.batchState) {
+        this.batchState.status = 'failed'
+        await this.state.storage.put('batchState', this.batchState)
+      }
+      await this.updateDbStatus('failed')
+      await kickNextQueuedBatch(this.env, body.userId)
     }))
 
     return new Response('OK', { status: 200 })
@@ -259,9 +235,15 @@ export class BatchJobDO {
     this.batchState.failedCount = this.batchState.results.filter((r) => r.status === 'failed').length
     await this.state.storage.put('batchState', this.batchState)
 
-    this.state.waitUntil(this.retryFailed(body.userId, indices).catch((err) => {
+    this.state.waitUntil(this.retryFailed(body.userId, indices).catch(async (err) => {
       console.error('[BatchJobDO] Resume fatal error:', err)
-      this.pushEvent('batch_error', { message: err instanceof Error ? err.message : 'Resume failed' })
+      await this.pushEvent('batch_error', { message: err instanceof Error ? err.message : 'Resume failed' })
+      if (this.batchState) {
+        this.batchState.status = 'failed'
+        await this.state.storage.put('batchState', this.batchState)
+      }
+      await this.updateDbStatus('failed')
+      await kickNextQueuedBatch(this.env, body.userId)
     }))
 
     return new Response('OK', { status: 200 })
@@ -548,45 +530,73 @@ export class BatchJobDO {
     const doId = this.env.ANALYSIS_JOB.idFromName(jobId)
     const stub = this.env.ANALYSIS_JOB.get(doId)
 
-    // Start the analysis in the sub-DO (no LLM)
+    // Start the analysis in the sub-DO (no LLM) — bounded fetch so a hung
+    // child DO fails the address instead of freezing the whole list.
     const appraisalRules = userSettings.appraisalRules ?? {}
-    const startResp = await stub.fetch('http://internal/start-streaming', {
-      method: 'POST',
-      body: JSON.stringify({
-        jobId,
-        userId: config.userId,
-        search: { address },
-        searchOptions: config.searchOptions ?? { radiusMiles: 1, maxComps: 15, monthsBack: 12 },
-        skipCache: config.skipCache ?? false,
-        evalParams: {
-          appraisalRules,
-          buybox: userSettings.mergedBuybox,
-          customRehabTable: userSettings.customRehabTable,
-          customTierRanges: userSettings.customTierRanges,
-          customMajorItemCosts: userSettings.customMajorItemCosts,
-          arvThreshold: userSettings.arvThreshold,
-          asIsThresholdPercent: userSettings.asIsThresholdPercent,
-        },
-        llmEnabled: false, // No AI for batch
-        isRefresh: false,
-      }),
-    })
-    await startResp.text()
+    let startResp: Response
+    try {
+      startResp = await stub.fetch('http://internal/start-streaming', {
+        method: 'POST',
+        signal: AbortSignal.timeout(15_000),
+        body: JSON.stringify({
+          jobId,
+          userId: config.userId,
+          search: { address },
+          searchOptions: config.searchOptions ?? { radiusMiles: 1, maxComps: 15, monthsBack: 12 },
+          skipCache: config.skipCache ?? false,
+          evalParams: {
+            appraisalRules,
+            buybox: userSettings.mergedBuybox,
+            customRehabTable: userSettings.customRehabTable,
+            customTierRanges: userSettings.customTierRanges,
+            customMajorItemCosts: userSettings.customMajorItemCosts,
+            arvThreshold: userSettings.arvThreshold,
+            asIsThresholdPercent: userSettings.asIsThresholdPercent,
+          },
+          llmEnabled: false, // No AI for batch
+          isRefresh: false,
+        }),
+      })
+      await startResp.text()
+    } catch (err) {
+      throw new Error(`Failed to start analysis: ${err instanceof Error ? err.message : 'timeout'}`)
+    }
 
-    // Poll for completion (3 min timeout per address)
-    const timeout = Date.now() + 180_000
+    // Poll for completion — 3 min hard cap, plus stall detection: once the
+    // address has run 60s+, if the child DO shows no new events or status
+    // change for 45s it's wedged → fail the address and continue the list.
+    const deadline = Date.now() + 180_000
     let lastStep = ''
+    let lastProgressAt = Date.now()
+    let lastEventCount = 0
+    let lastStatus = ''
+    let fetchFailures = 0
     const index = this.batchState?.currentIndex ?? 0
-    while (Date.now() < timeout) {
+    while (Date.now() < deadline) {
       await new Promise((r) => setTimeout(r, 2000))
 
       let state: { status: string; events?: Array<{ event: string; data: unknown }> }
       try {
-        const stateResp = await stub.fetch('http://internal/state')
+        const stateResp = await stub.fetch('http://internal/state', {
+          signal: AbortSignal.timeout(15_000),
+        })
         state = await stateResp.json()
+        fetchFailures = 0
       } catch (err) {
-        console.warn(`[BatchJobDO] Failed to poll child DO state for ${address}:`, err)
-        continue // Retry on next poll cycle
+        fetchFailures++
+        console.warn(`[BatchJobDO] Failed to poll child DO state for ${address} (${fetchFailures}/3):`, err)
+        if (fetchFailures >= 3) {
+          throw new Error('Analysis job unreachable — child DO not responding')
+        }
+        continue
+      }
+
+      // Progress = new events or a status change
+      const eventCount = state.events?.length ?? 0
+      if (eventCount > lastEventCount || state.status !== lastStatus) {
+        lastProgressAt = Date.now()
+        lastEventCount = eventCount
+        lastStatus = state.status
       }
 
       // Broadcast sub-step progress to batch SSE clients
@@ -633,6 +643,12 @@ export class BatchJobDO {
           compCount: result?.comps?.enabledCount ?? result?.report?.arv?.compPool?.enabled,
           durationMs: Date.now() - startTime,
         }
+      }
+
+      // Stall detection: past 60s with no new events/status for 45s → wedged
+      const elapsed = Date.now() - startTime
+      if (elapsed > 60_000 && Date.now() - lastProgressAt > 45_000) {
+        throw new Error(`Analysis stalled — no progress for ${Math.round((Date.now() - lastProgressAt) / 1000)}s`)
       }
     }
 
