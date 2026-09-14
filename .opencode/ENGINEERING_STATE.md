@@ -1228,3 +1228,22 @@ ordering confirmed in evaluation/index.ts.
 - Client resets per-row start stamps on batch/view switch — stamps were
   keyed by index only, so a different list's row could inherit a stale
   elapsed time.
+
+### 2026-09-14 — Headshot-photo fix + copy buttons (deployed `34804498166`)
+
+- Root cause of "girl's face" cover photo on 20810 WOODLAND CV comp:
+  Zillow serves agent headshots from the same photos.zillowstatic.com/fp/
+  path as listing photos (-h_* suffixes). Gallery-branch extraction in
+  parseZillowHtml applied ZERO suffix filtering; other paths only excluded
+  5 hardcoded -h_ variants. Broad /-h_[a-z]+[.-]/ exclusion at all layers.
+- persistReportAssets now parses image dimensions (JPEG/PNG/WebP) and
+  rejects <300x200 — catches any small headshot/icon regardless of URL.
+  Returns `rejected` URLs; evaluation drops them from photo lists instead
+  of leaving hotlinked CDN URLs (previously a failed persist still showed
+  the image). Verified against live report: 2 headshots + 1 floorplan
+  were stored; headshots now blocked at both layers.
+- CopyButton (components/ui/copy-button.tsx) added to: report header
+  subject address, comparables tables, comp grid cards. CompCard/
+  SubjectPropertyCard already had copy via AddressDisplay.
+- NOTE: existing saved reports keep their old stored photos — the
+  Woodland Cv report needs a Refresh to re-scrape with clean photos.
