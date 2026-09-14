@@ -249,16 +249,16 @@ describe('buildEvaluationReport', () => {
 
   it('reports outcome and confidence', () => {
     expect(report.outcome.maxBuyPrice).toBe(valuation.buyPrice)
-    // Fixture has only 1 selected comp → LOW confidence; the formula call
-    // still stands (no human reviewer exists), reasons carry the caveat
-    expect(report.confidence).toBe('low')
+    // Fixture's single selected comp is fully verified with no fallback —
+    // confidence grades the MATCH, not the count, so 1 excellent comp is HIGH.
+    // The reason list still notes thin volume for context.
+    expect(report.confidence).toBe('high')
     expect(report.outcome.recommendation).toBe(valuation.recommendation)
-    expect(report.outcome.recommendationReason).toContain('LOW confidence')
-    expect(report.requiresHumanReview).toBe(true)
+    expect(report.requiresHumanReview).toBe(false)
     expect(report.confidenceReasons.length).toBeGreaterThan(0)
   })
 
-  it('gates HIGH only when 3+ verified comps with no fallback', () => {
+  it('gates HIGH when every selected comp is verified with no fallback', () => {
     const strong = buildEvaluationReport({
       bundle,
       appraisalResult: strongAppraisal,

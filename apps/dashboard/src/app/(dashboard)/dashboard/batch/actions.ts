@@ -14,6 +14,10 @@ export interface BatchResult {
   rehabCost?: number
   recommendation?: string
   confidence?: string
+  /** Volume: comps selected that matched appraisal rules */
+  compCount?: number
+  /** Wall time for this address's analysis */
+  durationMs?: number
   /** Review stamp: 'validated' | 'improve' — joined from saved_reports */
   feedbackStatus?: string | null
 }

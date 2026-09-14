@@ -759,6 +759,8 @@ export default function BatchPage() {
                       <th className="text-left px-3 py-2 font-medium text-foreground-tertiary">Address</th>
                       <th className="text-left px-3 py-2 font-medium text-foreground-tertiary">Status</th>
                       <th className="text-left px-3 py-2 font-medium text-foreground-tertiary w-20">Confidence</th>
+                      <th className="text-left px-3 py-2 font-medium text-foreground-tertiary w-14">Comps</th>
+                      <th className="text-left px-3 py-2 font-medium text-foreground-tertiary w-14">Time</th>
                       <th className="text-left px-3 py-2 font-medium text-foreground-tertiary w-24">Reviewed</th>
                       <th className="text-center px-3 py-2 font-medium text-foreground-tertiary w-20">Report</th>
                     </tr>
@@ -819,6 +821,16 @@ export default function BatchPage() {
                                   b === 'high' && 'bg-emerald-500/10 text-emerald-500',
                                 )}>{b}</span>
                           })() : <span className="text-foreground-tertiary">—</span>}
+                        </td>
+                        <td className="px-3 py-2 text-foreground-secondary tabular-nums">
+                          {r.status === 'completed' && r.compCount != null ? r.compCount : '—'}
+                        </td>
+                        <td className="px-3 py-2 text-foreground-tertiary tabular-nums">
+                          {r.durationMs != null
+                            ? r.durationMs >= 60_000
+                              ? `${Math.floor(r.durationMs / 60_000)}m${Math.round((r.durationMs % 60_000) / 1000)}s`
+                              : `${Math.round(r.durationMs / 1000)}s`
+                            : '—'}
                         </td>
                         <td className="px-3 py-2">
                           {r.feedbackStatus === 'validated' && (

@@ -209,7 +209,7 @@ export default function DashboardPage() {
             )}
           </div>
           <div className="p-5">
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-4">
               <div>
                 <p className="text-caption text-foreground-tertiary">429s — 24h</p>
                 <p className={cn(
@@ -252,6 +252,17 @@ export default function DashboardPage() {
                     <span className="text-body-sm font-normal text-foreground-tertiary"> / {usage.providerCalls.limit.toLocaleString()}</span>
                   )}
                 </p>
+              </div>
+              <div>
+                <p className="text-caption text-foreground-tertiary">Avg report time — lifetime</p>
+                <p className="text-display-sm font-bold tracking-tight text-foreground">
+                  {usage.analysisTiming?.avgMs != null
+                    ? usage.analysisTiming.avgMs >= 60_000
+                      ? `${Math.floor(usage.analysisTiming.avgMs / 60_000)}m ${Math.round((usage.analysisTiming.avgMs % 60_000) / 1000)}s`
+                      : `${(usage.analysisTiming.avgMs / 1000).toFixed(1)}s`
+                    : '—'}
+                </p>
+                <p className="text-caption text-foreground-tertiary">{usage.analysisTiming?.runs ?? 0} reports</p>
               </div>
             </div>
             {usage.rateLimit.recent.length > 0 && (

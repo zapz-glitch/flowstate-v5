@@ -268,6 +268,15 @@ user.get('/usage', async (c) => {
     } catch { /* skip malformed rows */ }
   }
 
+  // Lifetime average report generation time across all analysis runs
+  const [timing] = await db
+    .select({
+      avgMs: sql<number>`avg(${analysisRuns.durationMs})`,
+      runs: sql<number>`count(*)`,
+    })
+    .from(analysisRuns)
+    .where(and(eq(analysisRuns.userId, session.user.id), sql`${analysisRuns.durationMs} is not null`))
+
   const [rl24h, rl7d, err24h, recentRateLimits] = await Promise.all([
     db
       .select({ count: sql<number>`count(*)` })
@@ -309,6 +318,10 @@ user.get('/usage', async (c) => {
     providerCalls: {
       month: providerCallsThisMonth,
       limit: 5000, // CoreLogic plan — display-only, not enforced
+    },
+    analysisTiming: {
+      avgMs: timing?.avgMs != null ? Math.round(timing.avgMs) : null,
+      runs: timing?.runs ?? 0,
     },
   })
 })
