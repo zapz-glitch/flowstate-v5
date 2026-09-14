@@ -1217,3 +1217,14 @@ ordering confirmed in evaluation/index.ts.
 - Report page already auto-advances past stamped rows (nextUnreviewed) —
   confirmed, no change needed there.
 - Also shipped: failed batch rows now record `durationMs` (Time column).
+
+### 2026-09-14 — Stopwatch staleness fix (deployed `34802230275`)
+
+- Alarm auto-resume resets now clear `startedAt` AND write progress to D1
+  immediately — a poll landing in the reset→restart gap previously showed
+  the dead run's old timestamp (user saw "7 min" when the row had actually
+  restarted 51s ago).
+- Manual resume/retry reset paths clear `startedAt` too.
+- Client resets per-row start stamps on batch/view switch — stamps were
+  keyed by index only, so a different list's row could inherit a stale
+  elapsed time.
