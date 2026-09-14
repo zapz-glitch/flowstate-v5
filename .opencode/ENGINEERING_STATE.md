@@ -1313,3 +1313,19 @@ sequential rate-limited processing requirement.
 - Fix: chunked the stamp join at 90 ids/chunk in batch.ts.
 - Note: raw `wrangler d1 execute` accepts >100 params — the cap is
   enforced by the D1 Worker binding, not the HTTP API. Keep joins ≤90.
+
+### 2026-09-14 — iPhone PWA native feel (deployed `34904235419`)
+
+- viewport-fit=cover + userScalable=false in layout.tsx → safe-area
+  insets now resolve (env() was returning 0 without cover).
+- --sat/--sab CSS vars in globals.css; mobile header, bottom tab bar,
+  main content padding, report toolbar, valuation card, batch review
+  bar, impersonation banner, landing header all safe-area aware.
+- Translucent bg-background/80 + backdrop-blur-xl on mobile chrome.
+- Inputs forced 16px below lg breakpoint — iOS focus auto-zoom gone.
+- tap-highlight transparent, touch-action manipulation,
+  overscroll-behavior-y none, html bg = --background (bounce fill).
+- Bottom tab bar: explicit short labels (Home/Search/Batch/Reports/
+  Settings) — 'Property'/'Property' dup fixed; 44px targets; active
+  scale feedback. Batch results table: min-w-[680px] + overflow-auto.
+- theme_color unified #161511 (manifest + viewport).
