@@ -18,6 +18,8 @@ export interface BatchResult {
   compCount?: number
   /** Wall time for this address's analysis */
   durationMs?: number
+  /** Epoch ms when this address entered processing — drives the stopwatch */
+  startedAt?: number
   /** Review stamp: 'validated' | 'improve' — joined from saved_reports */
   feedbackStatus?: string | null
 }
