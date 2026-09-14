@@ -171,6 +171,12 @@ export default function BatchPage() {
     return () => { cancelled = true; stopPolling() }
   }, [startPolling, stopPolling])
 
+  // Stamps are keyed by row index — reset when the viewed list changes so a
+  // different batch's row doesn't inherit a stale start time
+  useEffect(() => {
+    setProcessingStart({})
+  }, [batchId, viewAll])
+
   // Stopwatch: stamp start time when a row enters 'processing' (works for
   // both SSE events and polling — both funnel through `results`), and tick
   // once a second while any row is in-flight.
