@@ -96,7 +96,7 @@ export default function BatchPage() {
         })
         es.addEventListener('address_started', (e) => {
           const data = JSON.parse(e.data)
-          setResults((prev) => prev.map((r, i) => i === data.index ? { ...r, status: 'processing' } : r))
+          setResults((prev) => prev.map((r, i) => i === data.index ? { ...r, status: 'processing', startedAt: data.startedAt ?? Date.now() } : r))
         })
         es.addEventListener('address_completed', (e) => {
           const data = JSON.parse(e.data)
@@ -175,9 +175,11 @@ export default function BatchPage() {
       const next = { ...prev }
       let changed = false
       for (const r of results) {
-        if (r.status === 'processing' && next[r.index] == null) {
-          next[r.index] = Date.now()
-          changed = true
+        if (r.status === 'processing') {
+          // Prefer the server's start timestamp (survives reloads); fall back
+          // to first-sight so the timer is never wrong by more than a poll.
+          const start = r.startedAt ?? next[r.index] ?? Date.now()
+          if (next[r.index] !== start) { next[r.index] = start; changed = true }
         } else if ((r.status === 'completed' || r.status === 'failed') && next[r.index] != null) {
           delete next[r.index]
           changed = true

@@ -49,6 +49,8 @@ interface BatchResult {
   compCount?: number
   /** Wall time for this address's analysis */
   durationMs?: number
+  /** Epoch ms when this address entered processing — drives the UI stopwatch */
+  startedAt?: number
 }
 
 export interface StartBatchRequest {
@@ -410,8 +412,12 @@ export class BatchJobDO {
 
       this.batchState.currentIndex = i
       this.batchState.results[i].status = 'processing'
+      this.batchState.results[i].startedAt = Date.now()
       await this.state.storage.put('batchState', this.batchState)
-      await this.pushEvent('address_started', { index: i, total: this.batchState.totalAddresses, address })
+      // Persist the in-flight row so page reloads/polls see it processing
+      // (with its real start time) instead of pending
+      await this.updateDbProgress()
+      await this.pushEvent('address_started', { index: i, total: this.batchState.totalAddresses, address, startedAt: this.batchState.results[i].startedAt })
 
       try {
         const config: StartBatchRequest = {
@@ -519,12 +525,15 @@ export class BatchJobDO {
 
       this.batchState.currentIndex = i
       this.batchState.results[i].status = 'processing'
+      this.batchState.results[i].startedAt = Date.now()
       await this.state.storage.put('batchState', this.batchState)
+      await this.updateDbProgress()
 
       await this.pushEvent('address_started', {
         index: i,
         total: config.addresses.length,
         address,
+        startedAt: this.batchState.results[i].startedAt,
       })
 
       try {
