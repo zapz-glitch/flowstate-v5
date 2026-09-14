@@ -1205,3 +1205,15 @@ ordering confirmed in evaluation/index.ts.
   on completion and resets to zero for the next row.
 - Verified live: batch_c3711744 kept processing across the deploy
   (36 → 39 completed, heartbeat fresh) — alarm watchdog working as designed.
+
+### 2026-09-14 — Batch review triage filters (deployed `34801584274`)
+
+- "Hide reviewed" checkbox (default on) — stamped rows (validated/improve)
+  drop out of All and every confidence bucket; chip counts show remaining
+  vs reviewed. Fixes re-review churn on the low-confidence sweep.
+- New filter chips: **Validated**, **Flagged**, **Insufficient comps**
+  (failed runs with INSUFFICIENT_COMPS). Non-bucket filters pass conf=all
+  into the report page so the in-report review queue isn't broken.
+- Report page already auto-advances past stamped rows (nextUnreviewed) —
+  confirmed, no change needed there.
+- Also shipped: failed batch rows now record `durationMs` (Time column).
