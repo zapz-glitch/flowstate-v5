@@ -1,7 +1,8 @@
 'use client'
 
 import { useState, useEffect, useMemo } from 'react'
-import { SlidersHorizontal, RotateCcw, Loader2, LayoutGrid, List, ArrowUpDown, Bell, Copy, Check } from 'lucide-react'
+import { SlidersHorizontal, RotateCcw, Loader2, LayoutGrid, List, ArrowUpDown, Bell, Check } from 'lucide-react'
+import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -109,10 +110,7 @@ export function ComparablesSection({
   const [sortDesc, setSortDesc] = useState(true)
   const [notifyOpen, setNotifyOpen] = useState(false)
   const [notifyNotes, setNotifyNotes] = useState('')
-  const [notifyReport, setNotifyReport] = useState<string | null>(null)
-  const [notifyCopied, setNotifyCopied] = useState(false)
   const [notifySubmitting, setNotifySubmitting] = useState<FeedbackKind | null>(null)
-  const [notifyStamped, setNotifyStamped] = useState<'validated' | 'improve' | null>(null)
   const [notifySaveError, setNotifySaveError] = useState<string | null>(null)
 
   // Auto-expand excluded section when a highlighted comp is in it
@@ -199,10 +197,12 @@ export function ComparablesSection({
 
   const selectedCount = arvComps.length
 
-  // Notify — build the paste-ready devin.ai ticket, stamp the report, copy it
+  // Notify — submit the feedback ticket (stored on the report for the agent),
+  // stamp it, then advance to the next property in batch-review mode
   const submitNotify = async (kind: FeedbackKind) => {
     if (notifySubmitting) return
     setNotifySubmitting(kind)
+    setNotifySaveError(null)
     const report = generateCompFeedbackReport({
       subject,
       comps: compItems,
@@ -211,26 +211,27 @@ export function ComparablesSection({
       userNotes: notifyNotes,
       kind,
     })
-    setNotifyReport(report)
-    setNotifySaveError(null)
-    navigator.clipboard
-      .writeText(report)
-      .then(() => setNotifyCopied(true))
-      .catch(() => setNotifyCopied(false))
 
-    // Persist the stamp so the batch list shows this report as reviewed
     const jobId = feedbackContext?.jobId
     if (jobId) {
       try {
         const res = await submitReportFeedback(jobId, kind, notifyNotes, report)
-        if (res.success) setNotifyStamped(kind === 'validate' ? 'validated' : 'improve')
-        else setNotifySaveError(res.error ?? 'Stamp not saved')
+        if (!res.success) {
+          setNotifySaveError(res.error ?? 'Submission failed')
+          setNotifySubmitting(null)
+          return
+        }
       } catch {
-        setNotifySaveError('Stamp not saved')
+        setNotifySaveError('Submission failed')
+        setNotifySubmitting(null)
+        return
       }
     }
+
     setNotifySubmitting(null)
-    // Batch review mode — advance to the next report after stamping
+    setNotifyOpen(false)
+    setNotifyNotes('')
+    toast.success(kind === 'validate' ? 'Validated — report stamped' : 'Submitted — feedback ticket saved')
     onFeedbackSubmitted?.(kind === 'validate' ? 'validate' : 'improve')
   }
 
@@ -266,7 +267,7 @@ export function ComparablesSection({
             {/* Notify — comp-selection feedback report (always available) */}
             <button
               type="button"
-              onClick={() => { setNotifyReport(null); setNotifyNotes(''); setNotifyCopied(false); setNotifyStamped(null); setNotifySaveError(null); setNotifyOpen(true) }}
+              onClick={() => { setNotifyNotes(''); setNotifySaveError(null); setNotifyOpen(true) }}
               className="flex items-center gap-1 text-caption text-foreground-tertiary hover:text-foreground font-medium transition-colors no-print"
               title="Generate a comp-selection feedback report for devin.ai"
             >
@@ -454,98 +455,57 @@ export function ComparablesSection({
         )}
       </div>
 
-      {/* Notify dialog — notes → generates a paste-ready devin.ai ticket */}
+      {/* Notify dialog — notes → submits a feedback ticket, then advances */}
       <Dialog open={notifyOpen} onOpenChange={setNotifyOpen}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
             <DialogTitle>Notify — comp selection feedback</DialogTitle>
             <DialogDescription>
-              Generates a report explaining why your comp changes differ from the engine&apos;s
-              selection and what needs to change. Paste it into devin.ai.
+              Submit a ticket on this report&apos;s comp selection. It&apos;s stored on the
+              report for review — no copy/paste needed.
             </DialogDescription>
           </DialogHeader>
 
-          {notifyReport === null ? (
-            <div className="space-y-3">
-              <textarea
-                autoFocus
-                value={notifyNotes}
-                onChange={(e) => setNotifyNotes(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault()
-                    submitNotify('improve')
-                  }
-                }}
-                placeholder="Optional notes for this ticket — e.g. '10321 Briarcliff is the right comp, same street renovated sale'&#10;&#10;Enter = Flag for improvement · Shift+Enter = new line"
-                rows={4}
-                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-body-sm text-foreground placeholder:text-foreground-tertiary focus:outline-none focus:ring-1 focus:ring-primary resize-y"
-              />
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-[10px] text-foreground-tertiary">
-                  Both stamp this report + copy a ticket to your clipboard
-                </span>
-                <div className="flex gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => submitNotify('validate')}
-                    disabled={notifySubmitting !== null}
-                    className="text-emerald-600 border-emerald-500/30 hover:bg-emerald-500/10"
-                  >
-                    {notifySubmitting === 'validate' ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <Check className="w-3.5 h-3.5 mr-1.5" />}
-                    Validate
-                  </Button>
-                  <Button
-                    size="sm"
-                    onClick={() => submitNotify('improve')}
-                    disabled={notifySubmitting !== null}
-                    className="bg-amber-600 hover:bg-amber-700 text-white"
-                  >
-                    {notifySubmitting === 'improve' ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <Bell className="w-3.5 h-3.5 mr-1.5" />}
-                    Flag for improvement
-                  </Button>
-                </div>
-              </div>
+          <div className="space-y-3">
+            <textarea
+              autoFocus
+              value={notifyNotes}
+              onChange={(e) => setNotifyNotes(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault()
+                  submitNotify('improve')
+                }
+              }}
+              placeholder="Optional notes for this ticket — e.g. '10321 Briarcliff is the right comp, same street renovated sale'&#10;&#10;Enter = Flag for improvement · Shift+Enter = new line"
+              rows={4}
+              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-body-sm text-foreground placeholder:text-foreground-tertiary focus:outline-none focus:ring-1 focus:ring-primary resize-y"
+            />
+            {notifySaveError && (
+              <p className="text-xs text-red-400">{notifySaveError}</p>
+            )}
+            <div className="flex items-center justify-end gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => submitNotify('validate')}
+                disabled={notifySubmitting !== null}
+                className="text-emerald-600 border-emerald-500/30 hover:bg-emerald-500/10"
+              >
+                {notifySubmitting === 'validate' ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <Check className="w-3.5 h-3.5 mr-1.5" />}
+                Validate
+              </Button>
+              <Button
+                size="sm"
+                onClick={() => submitNotify('improve')}
+                disabled={notifySubmitting !== null}
+                className="bg-amber-600 hover:bg-amber-700 text-white"
+              >
+                {notifySubmitting === 'improve' ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <Bell className="w-3.5 h-3.5 mr-1.5" />}
+                Flag for improvement
+              </Button>
             </div>
-          ) : (
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  {notifyStamped && (
-                    <span className={cn(
-                      'text-[10px] font-medium px-1.5 py-0.5 rounded',
-                      notifyStamped === 'validated' ? 'bg-emerald-500/10 text-emerald-500' : 'bg-amber-500/10 text-amber-500'
-                    )}>
-                      {notifyStamped === 'validated' ? '✓ Validated' : '⚑ Flagged'}
-                    </span>
-                  )}
-                  <p className="text-caption text-foreground-tertiary">
-                    {notifyCopied ? 'Copied to clipboard — paste into devin.ai' : 'Generated — copy below'}
-                    {notifySaveError && <span className="text-red-400 ml-1">({notifySaveError})</span>}
-                  </p>
-                </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    navigator.clipboard.writeText(notifyReport).then(() => setNotifyCopied(true)).catch(() => {})
-                  }}
-                >
-                  {notifyCopied ? <Check className="w-3.5 h-3.5 mr-1.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5 mr-1.5" />}
-                  {notifyCopied ? 'Copied' : 'Copy'}
-                </Button>
-              </div>
-              <pre className="max-h-[50vh] overflow-auto rounded-lg border border-border bg-secondary/40 p-3 text-[11px] leading-relaxed text-foreground whitespace-pre-wrap font-mono">
-                {notifyReport}
-              </pre>
-              <div className="flex justify-end">
-                <Button variant="outline" size="sm" onClick={() => setNotifyOpen(false)}>
-                  Done
-                </Button>
-              </div>
-            </div>
-          )}
+          </div>
         </DialogContent>
       </Dialog>
 
