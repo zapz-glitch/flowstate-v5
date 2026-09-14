@@ -429,6 +429,47 @@ describe('ARV comp selection', () => {
     expect(r.insufficientComps).toBe(true)
   })
 
+  it('ranks same-street and closer comps above newer-but-farther comps', () => {
+    // All comps pass the lax rules and land in the price band — ranking is
+    // what decides selection. Subject is on "100 Subject St".
+    const comps = [
+      comp('newfar', { address: '5 Faraway Ln', distanceMiles: 0.9, saleDate: daysAgo(10), salePrice: 390000 }),
+      comp('samestreet', { address: '220 Subject St', distanceMiles: 0.3, saleDate: daysAgo(120), salePrice: 380000 }),
+      comp('closest', { address: '88 Nearby Rd', distanceMiles: 0.1, saleDate: daysAgo(80), salePrice: 385000 }),
+      comp('mid', { address: '12 Elsewhere Dr', distanceMiles: 0.5, saleDate: daysAgo(60), salePrice: 395000 }),
+    ]
+    const r = service.evaluate(subject(), comps, { filters: lax, adjustments: [] })
+
+    // Same street outranks everything; distance orders the rest
+    expect(r.selectedCompIds).toEqual(['samestreet', 'closest', 'mid'])
+  })
+
+  it('street name matching ignores suffix abbreviations and house numbers', () => {
+    const comps = [
+      comp('c1', { address: '999 Woodland Cove', distanceMiles: 0.4, salePrice: 390000 }),
+      comp('c2', { address: '5 Woodland Cv', distanceMiles: 0.4, salePrice: 380000 }),
+    ]
+    const subj = subject({ address: '123 Woodland Cv, San Antonio, TX 78266' })
+    const r = service.evaluate(subj, comps, { filters: lax, adjustments: [] })
+    // Both on the same street — ordering falls through to distance/recency
+    expect(r.selectedCompIds?.length).toBe(2)
+    expect(r.fallbackUsed).toBeUndefined()
+  })
+
+  it('nearest_comps fallback picks the closest qualifying sale, not just the newest', () => {
+    // Only 2 eligible comps → nearest_comps tier. Prices kept inside the
+    // 10% band so both survive into selection; the newer comp is farther
+    // away, the older-but-closer one should rank first.
+    const comps = [
+      comp('far', { distanceMiles: 0.9, saleDate: daysAgo(30), salePrice: 400000 }),
+      comp('near', { distanceMiles: 0.05, saleDate: daysAgo(90), salePrice: 380000 }),
+    ]
+    const r = service.evaluateWithFallback(subject(), comps, { filters: lax, adjustments: [] })
+
+    expect(r.fallbackUsed).toBe('nearest_comps')
+    expect(r.selectedCompIds?.[0]).toBe('near')
+  })
+
   it('leaves the subdivision before dropping the neighborhood', () => {
     // 2 in-subdivision comps + 2 out-of-subdivision comps in range
     const comps = [
