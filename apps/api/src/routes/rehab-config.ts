@@ -14,6 +14,7 @@ import { getSession } from '../lib/session'
 import { rehabConfig } from '../db'
 import { DEFAULT_REHAB_TABLE } from '../services/valuation'
 import { invalidateUserSettingsCache } from '../services/user-settings'
+import { withDbRetry } from '../lib/db-retry'
 import type { ArvTier, RehabEstimate } from '../services/valuation'
 import { DEFAULT_TIER_RANGES, type TierRangeDefinition } from '@flowstate-api/shared/valuation'
 
@@ -117,25 +118,25 @@ rehabConfigRoute.put('/', async (c) => {
   const configJson = JSON.stringify(body.config)
   const tierRangesJson = tierRanges ? JSON.stringify(tierRanges) : null
 
-  const [existing] = await db
+  const [existing] = await withDbRetry(() => db
     .select({ id: rehabConfig.id })
     .from(rehabConfig)
     .where(eq(rehabConfig.userId, session.user.id))
-    .limit(1)
+    .limit(1))
 
   if (existing) {
-    await db
+    await withDbRetry(() => db
       .update(rehabConfig)
       .set({ configJson, tierRangesJson, updatedAt: now })
-      .where(eq(rehabConfig.userId, session.user.id))
+      .where(eq(rehabConfig.userId, session.user.id)))
   } else {
-    await db.insert(rehabConfig).values({
+    await withDbRetry(() => db.insert(rehabConfig).values({
       userId: session.user.id,
       configJson,
       tierRangesJson,
       createdAt: now,
       updatedAt: now,
-    })
+    }))
   }
 
   // Invalidate cached user settings
@@ -153,7 +154,7 @@ rehabConfigRoute.delete('/', async (c) => {
   }
 
   const db = drizzle(c.env.DB)
-  await db.delete(rehabConfig).where(eq(rehabConfig.userId, session.user.id))
+  await withDbRetry(() => db.delete(rehabConfig).where(eq(rehabConfig.userId, session.user.id)))
 
   // Invalidate cached user settings
   await invalidateUserSettingsCache(c.env.API_CACHE, session.user.id)

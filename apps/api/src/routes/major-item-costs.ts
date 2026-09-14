@@ -14,6 +14,7 @@ import { getSession } from '../lib/session'
 import { majorItemCosts } from '../db'
 import { MAJOR_ITEMS } from '../services/valuation'
 import { invalidateUserSettingsCache } from '../services/user-settings'
+import { withDbRetry } from '../lib/db-retry'
 
 const majorItemCostsRoute = new Hono<{ Bindings: Env }>()
 
@@ -77,12 +78,12 @@ majorItemCostsRoute.put('/', async (c) => {
   const now = new Date().toISOString()
   const costsJson = JSON.stringify(sanitized)
 
-  const [existing] = await db.select().from(majorItemCosts).where(eq(majorItemCosts.userId, session.user.id)).limit(1)
+  const [existing] = await withDbRetry(() => db.select().from(majorItemCosts).where(eq(majorItemCosts.userId, session.user.id)).limit(1))
 
   if (existing) {
-    await db.update(majorItemCosts).set({ costsJson, updatedAt: now }).where(eq(majorItemCosts.userId, session.user.id))
+    await withDbRetry(() => db.update(majorItemCosts).set({ costsJson, updatedAt: now }).where(eq(majorItemCosts.userId, session.user.id)))
   } else {
-    await db.insert(majorItemCosts).values({ userId: session.user.id, costsJson, createdAt: now, updatedAt: now })
+    await withDbRetry(() => db.insert(majorItemCosts).values({ userId: session.user.id, costsJson, createdAt: now, updatedAt: now }))
   }
 
   // Invalidate cached user settings
@@ -98,7 +99,7 @@ majorItemCostsRoute.delete('/', async (c) => {
   if (!session?.user) return c.json({ error: 'Not authenticated' }, 401)
 
   const db = drizzle(c.env.DB)
-  await db.delete(majorItemCosts).where(eq(majorItemCosts.userId, session.user.id))
+  await withDbRetry(() => db.delete(majorItemCosts).where(eq(majorItemCosts.userId, session.user.id)))
 
   // Invalidate cached user settings
   await invalidateUserSettingsCache(c.env.API_CACHE, session.user.id)

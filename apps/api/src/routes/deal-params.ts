@@ -11,6 +11,7 @@ import type { Env } from '../types'
 import { getSession } from '../lib/session'
 import { dealParams } from '../db'
 import { invalidateUserSettingsCache } from '../services/user-settings'
+import { withDbRetry } from '../lib/db-retry'
 
 const dealParamsRoute = new Hono<{ Bindings: Env }>()
 
@@ -75,12 +76,12 @@ dealParamsRoute.put('/', async (c) => {
   const db = drizzle(c.env.DB)
   const now = new Date().toISOString()
 
-  const [existing] = await db.select().from(dealParams).where(eq(dealParams.userId, session.user.id)).limit(1)
+  const [existing] = await withDbRetry(() => db.select().from(dealParams).where(eq(dealParams.userId, session.user.id)).limit(1))
 
   if (existing) {
-    await db.update(dealParams).set({ closingCostsPercent, carryingCostsPercent, wholesaleFee, asIsThresholdPercent, updatedAt: now }).where(eq(dealParams.userId, session.user.id))
+    await withDbRetry(() => db.update(dealParams).set({ closingCostsPercent, carryingCostsPercent, wholesaleFee, asIsThresholdPercent, updatedAt: now }).where(eq(dealParams.userId, session.user.id)))
   } else {
-    await db.insert(dealParams).values({ userId: session.user.id, closingCostsPercent, carryingCostsPercent, wholesaleFee, asIsThresholdPercent, createdAt: now, updatedAt: now })
+    await withDbRetry(() => db.insert(dealParams).values({ userId: session.user.id, closingCostsPercent, carryingCostsPercent, wholesaleFee, asIsThresholdPercent, createdAt: now, updatedAt: now }))
   }
 
   // Invalidate cached user settings
@@ -96,7 +97,7 @@ dealParamsRoute.delete('/', async (c) => {
   if (!session?.user) return c.json({ error: 'Not authenticated' }, 401)
 
   const db = drizzle(c.env.DB)
-  await db.delete(dealParams).where(eq(dealParams.userId, session.user.id))
+  await withDbRetry(() => db.delete(dealParams).where(eq(dealParams.userId, session.user.id)))
 
   // Invalidate cached user settings
   await invalidateUserSettingsCache(c.env.API_CACHE, session.user.id)
