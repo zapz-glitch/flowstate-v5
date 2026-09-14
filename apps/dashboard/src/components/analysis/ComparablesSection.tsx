@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { SlidersHorizontal, RotateCcw, Loader2, LayoutGrid, List, ArrowUpDown, Bell, Check } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
+import { CopyButton } from '@/components/ui/copy-button'
 import {
   Dialog,
   DialogContent,
@@ -374,7 +375,7 @@ export function ComparablesSection({
                 {arvComps.map((comp, i) => (
                   <tr key={i} className="border-b border-gray-100">
                     <td className="py-1.5 pr-4 text-gray-400">{i + 1}</td>
-                    <td className="py-1.5 pr-4 font-medium">{comp.address}<RuleMatchDetails comp={comp} /></td>
+                    <td className="py-1.5 pr-4 font-medium">{comp.address}<CopyButton text={comp.address ?? ''} title="Copy address" className="ml-1" /><RuleMatchDetails comp={comp} /></td>
                     <td className="text-right py-1.5 px-2">${comp.salePrice?.toLocaleString() || '-'}</td>
                     <td className="text-right py-1.5 px-2 text-emerald-700">{comp.adjustedPrice ? `$${comp.adjustedPrice.toLocaleString()}` : '-'}</td>
                     <td className="text-right py-1.5 px-2">{comp.squareFeet?.toLocaleString() || '-'}</td>
@@ -393,7 +394,7 @@ export function ComparablesSection({
               <tbody>
                 {excludedComps.map((comp, i) => (
                   <tr key={i} className="border-b border-gray-100 text-gray-400">
-                    <td className="py-1 pr-4">{comp.address}<RuleMatchDetails comp={comp} /></td>
+                    <td className="py-1 pr-4">{comp.address}<CopyButton text={comp.address ?? ''} title="Copy address" className="ml-1" /><RuleMatchDetails comp={comp} /></td>
                     <td className="text-right py-1 px-2">${comp.salePrice?.toLocaleString() || '-'}</td>
                     <td className="text-right py-1 pl-2">
                       {comp.disableReasons?.join(', ') || 'Manually excluded'}

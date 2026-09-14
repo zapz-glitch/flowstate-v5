@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { ArrowLeft, ArrowRight, Share2, RefreshCw, AlertTriangle, History, Loader2, ListChecks } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { CopyButton } from '@/components/ui/copy-button'
 import {
   Dialog,
   DialogContent,
@@ -533,6 +534,7 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
           </Link>
           <span className="text-body-sm font-medium truncate flex-1 min-w-0" title={report.address || undefined}>
             {report.address || 'Property Report'}
+            {report.address && <CopyButton text={report.address} title="Copy address" className="ml-1.5" />}
           </span>
           {autoSaveStatus === 'saving' && (
             <span className="text-[10px] text-foreground-tertiary flex items-center gap-1 flex-shrink-0">

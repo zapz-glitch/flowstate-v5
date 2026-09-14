@@ -302,7 +302,15 @@ function parseZillowHtml(html: string): ZillowExtraction {
 
     if (galleryHtml) {
       const matches = galleryHtml.match(photoUrlPattern) || []
+      // Zillow serves agent headshots and other non-listing images from the
+      // same /fp/ path (-h_* suffixes) — the gallery section of the page can
+      // still contain them (agent cards render above the fold), so apply the
+      // same exclusions as the full-page fallback
+      const galleryExcludeSubstrings = ['profile', 'agent', 'avatar', 'broker', 'headshot', 'portrait', 'logo']
       for (const match of matches) {
+        const lower = match.toLowerCase()
+        if (/-h_[a-z]+[.-]/.test(lower)) continue
+        if (galleryExcludeSubstrings.some((s) => lower.includes(s))) continue
         const normalized = match
           .replace(/\/p_[a-z]\//, '/p_f/')
           .replace(/-(?:p_[a-z]|cc_ft_\d+|uncropped_scaled_within_\d+_\d+)/, '-p_f')
@@ -319,12 +327,11 @@ function parseZillowHtml(html: string): ZillowExtraction {
     if (photos.length === 0) {
       console.log(`[FirecrawlZillow] No gallery section found, using full-page extraction with strict filtering`)
       const matches = html.match(photoUrlPattern) || []
-      // Suffixes that indicate non-property images (agent headshots, etc.)
-      const excludeSuffixes = ['-h_n', '-h_l', '-h_g', '-h_s', '-h_x']
+      // -h_<size> suffixes are agent/headshot images, not listing photos
       const excludeSubstrings = ['profile', 'agent', 'avatar', 'broker', 'headshot', 'portrait', 'logo']
       for (const match of matches) {
         const lower = match.toLowerCase()
-        if (excludeSuffixes.some((s) => lower.includes(s))) continue
+        if (/-h_[a-z]+[.-]/.test(lower)) continue
         if (excludeSubstrings.some((s) => lower.includes(s))) continue
         // Only include full-res photo URLs
         if (!lower.includes('-p_f') && !lower.includes('-cc_ft_') && !lower.includes('-uncropped_scaled_within_')) continue
@@ -1040,8 +1047,6 @@ ${content.html.slice(0, 80000)}
       '150x150',
       // Zillow headshot/profile photo paths (both /h_l/ and -h_l. formats)
       '/h_n/', '/h_l/', '/h_g/',
-      '-h_n.', '-h_l.', '-h_g.',
-      '-h_n-', '-h_l-', '-h_g-',
       'profilephotos',
       'profile_photos',
     ]
@@ -1051,6 +1056,9 @@ ${content.html.slice(0, 80000)}
         return false
       }
     }
+
+    // -h_<size> file suffix = agent/headshot image (e.g. -h_a.jpg, -h_b.webp)
+    if (/-h_[a-z]+[.-]/.test(lowerUrl)) return false
 
     // Must be from zillowstatic.com
     if (!lowerUrl.includes('zillowstatic.com')) {
