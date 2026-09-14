@@ -1193,3 +1193,15 @@ ordering confirmed in evaluation/index.ts.
 - Fix: allow Origin-less requests (browsers always send Origin on POST, so
   absent = server-side caller, still session-authed); wrong origins still 403.
 - Verified: tsc clean; deploy green. Notify → Validate/Flag now persists.
+
+### 2026-09-14 — Real-time stopwatch for in-flight batch row (merged `3e534c8`, deployed `34800425701`)
+
+- `BatchResult.startedAt` (epoch ms) stamped in BatchJobDO when an address
+  enters processing; `updateDbProgress()` now runs at address *start* too, so
+  polls/reloads see the live row with its true start time (previously only
+  SSE-connected clients saw 'processing'; a reload showed it as pending).
+- SSE `address_started` carries `startedAt`; dashboard stopwatch prefers the
+  server timestamp, falls back to first-sight. Timer freezes to `durationMs`
+  on completion and resets to zero for the next row.
+- Verified live: batch_c3711744 kept processing across the deploy
+  (36 → 39 completed, heartbeat fresh) — alarm watchdog working as designed.
