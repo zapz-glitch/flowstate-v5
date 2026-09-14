@@ -446,7 +446,12 @@ export class BatchJobDO {
         })
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : 'Retry failed'
-        this.batchState.results[i] = { ...this.batchState.results[i], status: 'failed', error: errorMsg }
+        this.batchState.results[i] = {
+          ...this.batchState.results[i],
+          status: 'failed',
+          error: errorMsg,
+          durationMs: this.batchState.results[i].startedAt ? Date.now() - this.batchState.results[i].startedAt! : undefined,
+        }
         this.batchState.failedCount++
         await this.pushEvent('address_failed', { index: i, total: this.batchState.totalAddresses, address, error: errorMsg })
       }
@@ -569,6 +574,7 @@ export class BatchJobDO {
           ...this.batchState.results[i],
           status: 'failed',
           error: errorMsg,
+          durationMs: this.batchState.results[i].startedAt ? Date.now() - this.batchState.results[i].startedAt! : undefined,
         }
         this.batchState.failedCount++
 
