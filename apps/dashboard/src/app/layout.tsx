@@ -23,10 +23,12 @@ import { ServiceWorkerRegistrar } from '@/components/ServiceWorkerRegistrar'
 import './globals.css'
 
 export const viewport: Viewport = {
-  themeColor: '#0a0a0a',
+  themeColor: '#161511',
   width: 'device-width',
   initialScale: 1,
   maximumScale: 1,
+  userScalable: false,
+  viewportFit: 'cover',
 }
 
 export const metadata: Metadata = {

@@ -45,17 +45,18 @@ import {
 
 const baseNavigation: Array<{
   name: string
+  short: string
   href: string
   icon: typeof Home
   external?: boolean
 }> = [
-  { name: 'Overview', href: '/dashboard', icon: Home },
-  { name: 'Property Search', href: '/dashboard/analyze', icon: Search },
-  { name: 'Batch Import', href: '/dashboard/batch', icon: Upload },
-  { name: 'Property Reports', href: '/dashboard/reports', icon: ClipboardList },
-  { name: 'Evaluation Settings', href: '/dashboard/evaluation-settings', icon: Settings2 },
-  { name: 'API Hub', href: '/dashboard/api-hub', icon: Key },
-  { name: 'Tasks', href: '/dashboard/tasks', icon: ListTodo },
+  { name: 'Overview', short: 'Home', href: '/dashboard', icon: Home },
+  { name: 'Property Search', short: 'Search', href: '/dashboard/analyze', icon: Search },
+  { name: 'Batch Import', short: 'Batch', href: '/dashboard/batch', icon: Upload },
+  { name: 'Property Reports', short: 'Reports', href: '/dashboard/reports', icon: ClipboardList },
+  { name: 'Evaluation Settings', short: 'Settings', href: '/dashboard/evaluation-settings', icon: Settings2 },
+  { name: 'API Hub', short: 'API', href: '/dashboard/api-hub', icon: Key },
+  { name: 'Tasks', short: 'Tasks', href: '/dashboard/tasks', icon: ListTodo },
 ]
 
 /** Resolve a custom link's site favicon (internal paths return null → default icon). */
@@ -71,12 +72,13 @@ function faviconFor(url: string): string | null {
 
 const adminNavigation: Array<{
   name: string
+  short: string
   href: string
   icon: typeof Home
   external?: boolean
 }> = [
-  { name: 'Admin Panel', href: '/dashboard/admin', icon: ShieldCheck },
-  { name: 'Observability', href: '/dashboard/admin/observability', icon: Activity },
+  { name: 'Admin Panel', short: 'Admin', href: '/dashboard/admin', icon: ShieldCheck },
+  { name: 'Observability', short: 'Observe', href: '/dashboard/admin/observability', icon: Activity },
 ]
 
 const THEME_PRESETS = [
@@ -133,8 +135,8 @@ export default function Sidebar() {
     ...orderedBuiltins,
     ...(prefs?.customLinks ?? [])
       .filter((l) => l.label && l.url)
-      .map((l) => ({ name: l.label, href: l.url, icon: ExternalLink, external: true, favicon: faviconFor(l.url) as string | null })),
-  ] as Array<{ name: string; href: string; icon: typeof Home; external?: boolean; favicon?: string | null }>
+      .map((l) => ({ name: l.label, short: l.label.split(' ')[0], href: l.url, icon: ExternalLink, external: true, favicon: faviconFor(l.url) as string | null })),
+  ] as Array<{ name: string; short: string; href: string; icon: typeof Home; external?: boolean; favicon?: string | null }>
 
   const handleSignOut = async () => {
     await signOut()
@@ -331,14 +333,18 @@ export default function Sidebar() {
         </div>
       </div>
 
-      {/* Mobile Header */}
-      <div className="lg:hidden fixed top-0 left-0 right-0 z-40 h-16 bg-background border-b border-border flex items-center justify-between px-4">
+      {/* Mobile Header — translucent bar that extends behind the iPhone
+          status bar; padding keeps content below the safe area */}
+      <div
+        className="lg:hidden fixed top-0 left-0 right-0 z-40 bg-background/80 backdrop-blur-xl border-b border-border flex items-center justify-between px-4"
+        style={{ height: 'calc(3.5rem + var(--sat))', paddingTop: 'var(--sat)' }}
+      >
         <Link href="/dashboard">
           <Logo size="sm" showText={false} />
         </Link>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <button className="p-1">
+            <button className="p-2 -m-1">
               <Avatar className="h-8 w-8">
                 <AvatarFallback className="bg-secondary border border-border text-foreground text-xs font-medium">
                   {initials}
@@ -383,9 +389,13 @@ export default function Sidebar() {
         </DropdownMenu>
       </div>
 
-      {/* Mobile Navigation Bottom Bar */}
-      <div className="lg:hidden fixed bottom-0 left-0 right-0 z-40 h-16 bg-background border-t border-border">
-        <nav className="flex items-center justify-around h-full px-2">
+      {/* Mobile Navigation Bottom Bar — tab bar clears the home indicator
+          via safe-area padding; bar extends behind it for a native look */}
+      <div
+        className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-background/80 backdrop-blur-xl border-t border-border"
+        style={{ paddingBottom: 'var(--sab)' }}
+      >
+        <nav className="flex items-stretch justify-around h-14 px-1">
           {navigation.slice(0, 5).map((item) => {
             const isActive = pathname === item.href
             const showMobileIndicator = isAnalysisRunning && item.href === '/dashboard/analyze'
@@ -394,21 +404,21 @@ export default function Sidebar() {
                 key={item.name}
                 href={item.href}
                 className={cn(
-                  'relative flex flex-col items-center justify-center gap-0.5 px-2 py-1.5 rounded-lg transition-colors',
+                  'relative flex flex-1 flex-col items-center justify-center gap-1 rounded-lg transition-colors active:scale-95',
                   isActive
                     ? 'text-primary'
                     : 'text-foreground-tertiary hover:text-foreground'
                 )}
               >
-                <item.icon className="w-[18px] h-[18px]" />
-                <span className="text-caption-sm">{item.name.split(' ')[0]}</span>
+                <item.icon className={cn('w-5 h-5 transition-transform', isActive && 'scale-110')} />
+                <span className="text-[10px] font-medium leading-none">{item.short}</span>
                 {item.href === '/dashboard/tasks' && openTaskCount > 0 && (
-                  <span className="absolute top-0.5 right-1.5 flex items-center justify-center rounded-full bg-red-500 text-white text-[9px] font-semibold min-w-[15px] h-[15px] px-0.5">
+                  <span className="absolute top-1 right-[calc(50%-18px)] flex items-center justify-center rounded-full bg-red-500 text-white text-[9px] font-semibold min-w-[15px] h-[15px] px-0.5">
                     {openTaskCount > 99 ? '99+' : openTaskCount}
                   </span>
                 )}
                 {showMobileIndicator && (
-                  <span className="absolute top-1.5 right-1.5 flex h-1.5 w-1.5">
+                  <span className="absolute top-1 right-[calc(50%-16px)] flex h-1.5 w-1.5">
                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
                     <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500" />
                   </span>

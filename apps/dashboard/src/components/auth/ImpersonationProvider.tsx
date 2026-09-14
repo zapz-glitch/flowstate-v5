@@ -116,7 +116,7 @@ export function ImpersonationProvider({ children }: ImpersonationProviderProps) 
 
 function ImpersonationBanner({ target, onStop }: { target: ImpersonationTarget; onStop: () => void }) {
   return (
-    <div className="fixed top-0 left-0 right-0 z-[100] bg-amber-500 text-black px-4 py-2 flex items-center justify-center gap-3 text-body-sm font-medium shadow-lg">
+    <div className="fixed top-0 left-0 right-0 z-[100] bg-amber-500 text-black px-4 py-2 flex items-center justify-center gap-3 text-body-sm font-medium shadow-lg pt-[calc(0.5rem+var(--sat))]">
       <Eye className="w-4 h-4 shrink-0" />
       <span>
         Impersonating <strong>{target.name}</strong> ({target.email}) — {target.plan} plan

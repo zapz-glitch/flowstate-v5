@@ -856,8 +856,8 @@ export default function BatchPage() {
           {/* Results table */}
           <Card className="rounded-sm">
             <CardContent className="p-0">
-              <div className={cn('max-h-[60vh] overflow-y-auto transition-opacity', loadingListId && 'opacity-40 pointer-events-none')}>
-                <table className="w-full text-xs">
+              <div className={cn('max-h-[60vh] overflow-auto transition-opacity', loadingListId && 'opacity-40 pointer-events-none')}>
+                <table className="w-full text-xs min-w-[680px]">
                   <thead className="bg-muted/50 sticky top-0">
                     <tr>
                       <th className="w-8"></th>

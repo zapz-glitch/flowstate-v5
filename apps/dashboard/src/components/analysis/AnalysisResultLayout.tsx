@@ -52,7 +52,7 @@ export function AnalysisResultLayout({
 
       {/* Valuation panel — sticky so it's always visible while scrolling comps */}
       {valuation ? (
-        <div ref={valuationCardRef as React.RefObject<HTMLDivElement>} className="sticky top-0 z-10">
+        <div ref={valuationCardRef as React.RefObject<HTMLDivElement>} className="sticky z-10 top-[calc(3.5rem+var(--sat))] lg:top-0">
           <DealSummaryHero
             valuation={valuation}
             isRecalculated={isRecalculated}

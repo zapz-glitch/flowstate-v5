@@ -162,12 +162,35 @@
 
 html {
   scroll-behavior: smooth;
+  /* Fill behind rubber-band overscroll so iPhone bounce never shows white */
+  background: hsl(var(--background));
+}
+
+:root {
+  /* iPhone safe-area helpers — resolve to 0 on desktop / non-notch devices */
+  --sat: env(safe-area-inset-top, 0px);
+  --sab: env(safe-area-inset-bottom, 0px);
 }
 
 body {
   font-feature-settings: "rlig" 1, "calt" 1;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  /* App-feel: no gray flash on tap, no double-tap zoom delay, no chained
+     overscroll spilling past the fixed chrome */
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  overscroll-behavior-y: none;
+}
+
+/* iOS Safari auto-zooms on input focus when font-size < 16px. Bump all
+   form fields to 16px on touch-width screens — also improves legibility. */
+@media (max-width: 1023px) {
+  input,
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
 }
 
 /* Custom scrollbar */
