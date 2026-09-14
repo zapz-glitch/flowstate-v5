@@ -1302,3 +1302,14 @@ Architecture decision (answered for product engineer): no stack change
 needed. DO + alarm + cron covers self-healing FIFO processing with SSE;
 a Queue-based rewrite adds complexity for no reliability gain given the
 sequential rate-limited processing requirement.
+
+### 2026-09-14 — List-detail 500 root cause (deployed `34866433602`)
+
+- GET /batch/:id 500'd for the 164-row list since the feedback-stamp join
+  shipped: inArray(savedReports.jobId, jobIds) exceeded D1's 100 bound-
+  parameter limit at the Worker binding. June lists (49-50) were under
+  the cap — masked the bug. Mount path also silently swallowed it
+  (empty table, no error) until the selectBatch error path surfaced it.
+- Fix: chunked the stamp join at 90 ids/chunk in batch.ts.
+- Note: raw `wrangler d1 execute` accepts >100 params — the cap is
+  enforced by the D1 Worker binding, not the HTTP API. Keep joins ≤90.
