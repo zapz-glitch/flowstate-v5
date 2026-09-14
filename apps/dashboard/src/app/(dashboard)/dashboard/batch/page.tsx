@@ -167,6 +167,33 @@ export default function BatchPage() {
     return () => { cancelled = true; stopPolling() }
   }, [startPolling, stopPolling])
 
+  // Stopwatch: stamp start time when a row enters 'processing' (works for
+  // both SSE events and polling — both funnel through `results`), and tick
+  // once a second while any row is in-flight.
+  useEffect(() => {
+    setProcessingStart((prev) => {
+      const next = { ...prev }
+      let changed = false
+      for (const r of results) {
+        if (r.status === 'processing' && next[r.index] == null) {
+          next[r.index] = Date.now()
+          changed = true
+        } else if ((r.status === 'completed' || r.status === 'failed') && next[r.index] != null) {
+          delete next[r.index]
+          changed = true
+        }
+      }
+      return changed ? next : prev
+    })
+  }, [results])
+
+  const anyProcessing = results.some((r) => r.status === 'processing')
+  useEffect(() => {
+    if (!anyProcessing) return
+    const t = setInterval(() => setTick((n) => n + 1), 1000)
+    return () => clearInterval(t)
+  }, [anyProcessing])
+
   // Cleanup on unmount
   useEffect(() => {
     return () => stopPolling()
@@ -313,6 +340,9 @@ export default function BatchPage() {
 
   const [resumingIndex, setResumingIndex] = useState<number | null>(null)
   const [showUpload, setShowUpload] = useState(false)
+  // Per-row stopwatch — index → epoch ms when the row entered 'processing'
+  const [processingStart, setProcessingStart] = useState<Record<number, number>>({})
+  const [, setTick] = useState(0)
 
   // ─── Reset ────────────────────────────────────────────────────────────────
 
@@ -806,7 +836,15 @@ export default function BatchPage() {
                           {r.status === 'completed' && r.compCount != null ? r.compCount : '—'}
                         </td>
                         <td className="px-3 py-2 text-foreground-tertiary tabular-nums">
-                          {r.durationMs != null
+                          {r.status === 'processing' ? (
+                            <span className="text-primary tabular-nums">
+                              {(() => {
+                                const start = processingStart[r.index]
+                                const secs = start != null ? Math.max(0, Math.floor((Date.now() - start) / 1000)) : 0
+                                return `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`
+                              })()}
+                            </span>
+                          ) : r.durationMs != null
                             ? r.durationMs >= 60_000
                               ? `${Math.floor(r.durationMs / 60_000)}m${Math.round((r.durationMs % 60_000) / 1000)}s`
                               : `${Math.round(r.durationMs / 1000)}s`
