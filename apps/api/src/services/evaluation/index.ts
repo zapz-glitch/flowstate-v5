@@ -504,16 +504,16 @@ export async function performAnalysis(
       if (!entry || entry.photos.length === 0) return
       try {
         const src = entry.source
-        const { assets } = await persistReportAssets(env, jobId, propertyId,
+        const { assets, rejected } = await persistReportAssets(env, jobId, propertyId,
           entry.photos.map((url) => ({
             url,
             kind: 'photo' as const,
             sourcePageUrl: entry.sourceUrl,
             source: src === 'zillow' || src === 'redfin' || src === 'realtor' ? src : undefined,
           })))
-        if (assets.length === 0) return
+        const dropped = new Set(rejected)
         const persisted = new Set(assets.map((a) => a.sourceUrl))
-        entry.photos = [...assets.map((a) => a.url), ...entry.photos.filter((u) => !persisted.has(u))]
+        entry.photos = [...assets.map((a) => a.url), ...entry.photos.filter((u) => !persisted.has(u) && !dropped.has(u))]
       } catch { /* non-fatal — keep CDN URLs */ }
     }
     await Promise.race([

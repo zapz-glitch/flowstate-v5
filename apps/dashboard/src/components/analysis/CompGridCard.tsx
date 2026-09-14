@@ -2,6 +2,7 @@
 
 import { Check, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { CopyButton } from '@/components/ui/copy-button'
 import type { CompItem, SubjectData } from './shared-types'
 import { StreetViewImage } from './StreetViewImage'
 import { RuleMatchDetails } from './RuleMatchDetails'
@@ -160,6 +161,7 @@ export function CompGridCard({
             {comp.pricePerSqft && (
               <span className="text-[10px] text-foreground-tertiary tabular-nums">${comp.pricePerSqft.toFixed(0)}/sf</span>
             )}
+            <CopyButton text={comp.address ?? ''} title="Copy address" />
           </span>
         </div>
         {/* Location badges — own line directly under the address */}
