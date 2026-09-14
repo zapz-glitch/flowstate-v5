@@ -1183,3 +1183,4 @@ ordering confirmed in evaluation/index.ts.
 - ✅ Prod: dead batch `batch_c3711744` (29 done / 114 left) flipped to `paused`
   — predates this fix, needs one manual Resume click.
 - Verified: `tsc --noEmit` clean in api + dashboard.
+- ✅ Deployed to production (merge `fdd62a8`, deploy run `34796998689` green).
