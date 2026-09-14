@@ -1247,3 +1247,35 @@ ordering confirmed in evaluation/index.ts.
   SubjectPropertyCard already had copy via AddressDisplay.
 - NOTE: existing saved reports keep their old stored photos — the
   Woodland Cv report needs a Refresh to re-scrape with clean photos.
+
+### 2026-09-14 — Proximity comp ranking + card photo ratios (deployed `34804950103`)
+
+Ticket summary — 4 flagged-for-improvement reports (feedback_status='improve'):
+
+1. 8686 RIDGE MILE DR — analyst added same-street comp (8770 RIDGE MILE,
+   0.22mi) that failed sale_age (284d > 180d). Intent: distance takes
+   precedence when rules match; knowingly overrode 180d for same street.
+2. 311 RIVERDALE DR — analyst added 2 same-neighborhood comps matching
+   foundation type (pier & beam vs slab = 10-15% value delta). Both failed
+   subdivision; foundation data is missing on comps ("—" in audit) —
+   DATA COVERAGE issue, not a rules issue.
+3. 11235 PECAN CYN — analyst added CHASE CYN (passed all rules, lost
+   ranking) + HICKORY CYN (sqft failed by 5sf — 255 vs 250 boundary).
+4. 21210 FOREST WATERS — analyst added same-street 21660 (passed all
+   rules, lost ranking) + WOODLAND CV (failed sale_age + sqft).
+
+Corrections shipped:
+- ARV selection ranking: verified passes → same street → distance →
+  recency → price (proximity now beats recency among rule-equals).
+- nearest_comps fallback orders by proximity, not pure recency.
+- streetNameKey() same-street detection w/ suffix canonicalization.
+- Comp grid cards h-28 → aspect-[3/2]; subject/comp images → aspect-video.
+- 3 new vitest cases (96 pass).
+
+Open product decisions for analyst:
+- Ticket 1/4: allow a sale-age exception for same-street comps? (would
+  breach the hard 180d rule — needs explicit policy, e.g. same-street
+  sales up to 365d as a disclosed exception)
+- Ticket 3: sqft boundary grace? (255 vs 250 — ±5sf tolerance or bump to 300)
+- Ticket 2: foundation data coverage from provider — engine can't verify
+  pier-vs-slab without data; when present it already counts as a soft rule.
