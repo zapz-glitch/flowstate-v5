@@ -17,6 +17,7 @@ import { eq } from 'drizzle-orm'
 import { batchJobs } from '../db/schema'
 import { loadUserAnalysisSettings } from '../services/user-settings'
 import { kickNextQueuedBatch } from '../services/batch-queue'
+import { withDbRetry } from '../lib/db-retry'
 
 interface BatchState {
   batchId: string
@@ -374,9 +375,18 @@ export class BatchJobDO {
 
     let userSettings
     try {
-      userSettings = await loadUserAnalysisSettings(this.env.DB, { userId })
-    } catch {
+      userSettings = await withDbRetry(() => loadUserAnalysisSettings(this.env.DB, { userId }))
+    } catch (err) {
+      // Previously this returned silently — before the alarm was armed and
+      // without updating status — leaving the batch 'processing' forever.
+      console.error('[BatchJobDO] retryFailed: settings load failed:', err)
       await this.pushEvent('batch_error', { message: 'Failed to load user settings' })
+      if (this.batchState) {
+        this.batchState.status = 'failed'
+        await this.state.storage.put('batchState', this.batchState)
+      }
+      await this.updateDbStatus('failed')
+      await kickNextQueuedBatch(this.env, userId)
       return
     }
 
@@ -471,10 +481,15 @@ export class BatchJobDO {
     // Load user settings once for all addresses
     let userSettings
     try {
-      userSettings = await loadUserAnalysisSettings(this.env.DB, { userId: config.userId })
+      userSettings = await withDbRetry(() => loadUserAnalysisSettings(this.env.DB, { userId: config.userId }))
     } catch (err) {
       await this.pushEvent('batch_error', { message: 'Failed to load user settings' })
+      if (this.batchState) {
+        this.batchState.status = 'failed'
+        await this.state.storage.put('batchState', this.batchState)
+      }
       await this.updateDbStatus('failed')
+      await kickNextQueuedBatch(this.env, config.userId)
       return
     }
 

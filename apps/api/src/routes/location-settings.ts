@@ -23,6 +23,7 @@ import {
 } from '../db'
 import type { FilterType, AdjustmentType } from '../services/appraisal/types'
 import { invalidateUserSettingsCache } from '../services/user-settings'
+import { withDbRetry } from '../lib/db-retry'
 
 const locationSettingsRoute = new Hono<{ Bindings: Env }>()
 
@@ -94,22 +95,29 @@ async function upsertLocationPreset(
   const now = new Date().toISOString()
 
   // Find existing hidden preset
-  const [existing] = await db
-    .select({ id: appraisalRulePreset.id })
-    .from(appraisalRulePreset)
-    .where(and(eq(appraisalRulePreset.userId, userId), eq(appraisalRulePreset.name, hiddenName)))
-    .limit(1)
+  const [existing] = await withDbRetry(() =>
+    db
+      .select({ id: appraisalRulePreset.id })
+      .from(appraisalRulePreset)
+      .where(and(eq(appraisalRulePreset.userId, userId), eq(appraisalRulePreset.name, hiddenName)))
+      .limit(1)
+  )
 
   let presetId: string
   if (existing) {
     presetId = existing.id
-    // Replace filters and adjustments
-    await db.delete(appraisalRuleFilter).where(eq(appraisalRuleFilter.presetId, presetId))
-    await db.delete(appraisalRuleAdjustment).where(eq(appraisalRuleAdjustment.presetId, presetId))
-    await db.update(appraisalRulePreset).set({ updatedAt: now }).where(eq(appraisalRulePreset.id, presetId))
+    // Replace filters and adjustments atomically
+    await withDbRetry(() =>
+      db.batch([
+        db.delete(appraisalRuleFilter).where(eq(appraisalRuleFilter.presetId, presetId)),
+        db.delete(appraisalRuleAdjustment).where(eq(appraisalRuleAdjustment.presetId, presetId)),
+        db.update(appraisalRulePreset).set({ updatedAt: now }).where(eq(appraisalRulePreset.id, presetId)),
+      ])
+    )
   } else {
     presetId = crypto.randomUUID()
-    await db.insert(appraisalRulePreset).values({
+    await withDbRetry(() =>
+      db.insert(appraisalRulePreset).values({
       id: presetId,
       userId,
       name: hiddenName,
@@ -117,11 +125,13 @@ async function upsertLocationPreset(
       isDefault: false,
       createdAt: now,
       updatedAt: now,
-    })
+      })
+    )
   }
 
   if (filters.length > 0) {
-    await db.insert(appraisalRuleFilter).values(
+    await withDbRetry(() =>
+      db.insert(appraisalRuleFilter).values(
       filters.map((f) => ({
         id: crypto.randomUUID(),
         presetId,
@@ -130,12 +140,14 @@ async function upsertLocationPreset(
         value: f.value,
         priority: f.priority ?? null,
         createdAt: now,
-      }))
+        }))
+      )
     )
   }
 
   if (adjustments.length > 0) {
-    await db.insert(appraisalRuleAdjustment).values(
+    await withDbRetry(() =>
+      db.insert(appraisalRuleAdjustment).values(
       adjustments.map((a) => ({
         id: crypto.randomUUID(),
         presetId,
@@ -144,7 +156,8 @@ async function upsertLocationPreset(
         amount: a.amount,
         percentage: a.percentage,
         createdAt: now,
-      }))
+        }))
+      )
     )
   }
 
@@ -159,13 +172,15 @@ async function deleteLocationPreset(
   userId: string,
   presetId: string
 ): Promise<void> {
-  const [preset] = await db
-    .select({ id: appraisalRulePreset.id, name: appraisalRulePreset.name })
-    .from(appraisalRulePreset)
-    .where(and(eq(appraisalRulePreset.id, presetId), eq(appraisalRulePreset.userId, userId)))
-    .limit(1)
+  const [preset] = await withDbRetry(() =>
+    db
+      .select({ id: appraisalRulePreset.id, name: appraisalRulePreset.name })
+      .from(appraisalRulePreset)
+      .where(and(eq(appraisalRulePreset.id, presetId), eq(appraisalRulePreset.userId, userId)))
+      .limit(1)
+  )
   if (preset && preset.name.startsWith('__loc_')) {
-    await db.delete(appraisalRulePreset).where(eq(appraisalRulePreset.id, presetId))
+    await withDbRetry(() => db.delete(appraisalRulePreset).where(eq(appraisalRulePreset.id, presetId)))
   }
 }
 
@@ -189,8 +204,8 @@ async function resolveLocationAppraisalRules(
   if (!preset || !preset.name.startsWith('__loc_')) return null
 
   const [filters, adjustments] = await Promise.all([
-    db.select().from(appraisalRuleFilter).where(eq(appraisalRuleFilter.presetId, presetId)),
-    db.select().from(appraisalRuleAdjustment).where(eq(appraisalRuleAdjustment.presetId, presetId)),
+    withDbRetry(() => db.select().from(appraisalRuleFilter).where(eq(appraisalRuleFilter.presetId, presetId))),
+    withDbRetry(() => db.select().from(appraisalRuleAdjustment).where(eq(appraisalRuleAdjustment.presetId, presetId))),
   ])
 
   return {
@@ -242,15 +257,17 @@ locationSettingsRoute.get('/', async (c) => {
   const typeParam = c.req.query('type') as SettingType | undefined
   const db = drizzle(c.env.DB)
 
-  const rows = await db
-    .select()
-    .from(locationSettings)
-    .where(
-      typeParam && VALID_SETTING_TYPES.includes(typeParam)
-        ? and(eq(locationSettings.userId, session.user.id), eq(locationSettings.settingType, typeParam))
-        : eq(locationSettings.userId, session.user.id)
-    )
-    .orderBy(locationSettings.createdAt)
+  const rows = await withDbRetry(() =>
+    db
+      .select()
+      .from(locationSettings)
+      .where(
+        typeParam && VALID_SETTING_TYPES.includes(typeParam)
+          ? and(eq(locationSettings.userId, session.user.id), eq(locationSettings.settingType, typeParam))
+          : eq(locationSettings.userId, session.user.id)
+      )
+      .orderBy(locationSettings.createdAt)
+  )
 
   // Resolve inline appraisal rules for hidden presets
   const settings = await Promise.all(
@@ -287,20 +304,24 @@ locationSettingsRoute.post('/', async (c) => {
 
   if (body.appraisalPresetId) {
     const db = drizzle(c.env.DB)
-    const [preset] = await db
-      .select({ id: appraisalRulePreset.id })
-      .from(appraisalRulePreset)
-      .where(and(eq(appraisalRulePreset.id, body.appraisalPresetId), eq(appraisalRulePreset.userId, session.user.id)))
-      .limit(1)
+    const presetId = body.appraisalPresetId
+    const [preset] = await withDbRetry(() =>
+      db
+        .select({ id: appraisalRulePreset.id })
+        .from(appraisalRulePreset)
+        .where(and(eq(appraisalRulePreset.id, presetId), eq(appraisalRulePreset.userId, session.user.id)))
+        .limit(1)
+    )
     if (!preset) return c.json({ error: 'Appraisal preset not found' }, 404)
   }
 
   const db = drizzle(c.env.DB)
   const now = new Date().toISOString()
 
-  const [row] = await db
-    .insert(locationSettings)
-    .values({
+  const [row] = await withDbRetry(() =>
+    db
+      .insert(locationSettings)
+      .values({
       userId: session.user.id,
       settingType,
       isEnabled: body.isEnabled !== false,
@@ -316,8 +337,9 @@ locationSettingsRoute.post('/', async (c) => {
       proximityConfigJson: body.proximityConfigJson ? JSON.stringify(body.proximityConfigJson) : null,
       createdAt: now,
       updatedAt: now,
-    })
-    .returning()
+      })
+      .returning()
+  )
 
   // If appraisalFilters provided, upsert hidden preset now that we have the row ID
   let finalRow = row
@@ -329,11 +351,13 @@ locationSettingsRoute.post('/', async (c) => {
       body.appraisalFilters,
       body.appraisalAdjustments ?? []
     )
-    const [updated] = await db
-      .update(locationSettings)
-      .set({ appraisalPresetId: presetId, updatedAt: now })
-      .where(eq(locationSettings.id, row.id))
-      .returning()
+    const [updated] = await withDbRetry(() =>
+      db
+        .update(locationSettings)
+        .set({ appraisalPresetId: presetId, updatedAt: now })
+        .where(eq(locationSettings.id, row.id))
+        .returning()
+    )
     finalRow = updated
   }
 
@@ -362,11 +386,13 @@ locationSettingsRoute.patch('/:id', async (c) => {
   const id = c.req.param('id')
   const db = drizzle(c.env.DB)
 
-  const [existing] = await db
-    .select()
-    .from(locationSettings)
-    .where(and(eq(locationSettings.id, id), eq(locationSettings.userId, session.user.id)))
-    .limit(1)
+  const [existing] = await withDbRetry(() =>
+    db
+      .select()
+      .from(locationSettings)
+      .where(and(eq(locationSettings.id, id), eq(locationSettings.userId, session.user.id)))
+      .limit(1)
+  )
   if (!existing) return c.json({ error: 'Location setting not found' }, 404)
 
   const body = await c.req.json().catch(() => ({})) as Partial<LocationSettingInput>
@@ -383,11 +409,14 @@ locationSettingsRoute.patch('/:id', async (c) => {
   }
 
   if (body.appraisalPresetId) {
-    const [preset] = await db
-      .select({ id: appraisalRulePreset.id })
-      .from(appraisalRulePreset)
-      .where(and(eq(appraisalRulePreset.id, body.appraisalPresetId), eq(appraisalRulePreset.userId, session.user.id)))
-      .limit(1)
+    const presetId = body.appraisalPresetId
+    const [preset] = await withDbRetry(() =>
+      db
+        .select({ id: appraisalRulePreset.id })
+        .from(appraisalRulePreset)
+        .where(and(eq(appraisalRulePreset.id, presetId), eq(appraisalRulePreset.userId, session.user.id)))
+        .limit(1)
+    )
     if (!preset) return c.json({ error: 'Appraisal preset not found' }, 404)
   }
 
@@ -427,12 +456,12 @@ locationSettingsRoute.patch('/:id', async (c) => {
     }
   }
 
-  await db.update(locationSettings).set(updates).where(eq(locationSettings.id, id))
+  await withDbRetry(() => db.update(locationSettings).set(updates).where(eq(locationSettings.id, id)))
 
   // Invalidate cached user settings
   await invalidateUserSettingsCache(c.env.API_CACHE, session.user.id)
 
-  const [updated] = await db.select().from(locationSettings).where(eq(locationSettings.id, id)).limit(1)
+  const [updated] = await withDbRetry(() => db.select().from(locationSettings).where(eq(locationSettings.id, id)).limit(1))
   const appraisalRules = await resolveLocationAppraisalRules(db, session.user.id, updated.appraisalPresetId)
 
   return c.json({
@@ -456,11 +485,13 @@ locationSettingsRoute.delete('/:id', async (c) => {
   const id = c.req.param('id')
   const db = drizzle(c.env.DB)
 
-  const [existing] = await db
-    .select()
-    .from(locationSettings)
-    .where(and(eq(locationSettings.id, id), eq(locationSettings.userId, session.user.id)))
-    .limit(1)
+  const [existing] = await withDbRetry(() =>
+    db
+      .select()
+      .from(locationSettings)
+      .where(and(eq(locationSettings.id, id), eq(locationSettings.userId, session.user.id)))
+      .limit(1)
+  )
   if (!existing) return c.json({ error: 'Location setting not found' }, 404)
 
   // Clean up hidden appraisal preset if present
@@ -468,7 +499,7 @@ locationSettingsRoute.delete('/:id', async (c) => {
     await deleteLocationPreset(db, session.user.id, existing.appraisalPresetId)
   }
 
-  await db.delete(locationSettings).where(eq(locationSettings.id, id))
+  await withDbRetry(() => db.delete(locationSettings).where(eq(locationSettings.id, id)))
 
   // Invalidate cached user settings
   await invalidateUserSettingsCache(c.env.API_CACHE, session.user.id)

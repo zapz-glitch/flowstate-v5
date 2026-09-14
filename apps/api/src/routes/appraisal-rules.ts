@@ -25,6 +25,7 @@ import {
   type AdjustmentType,
 } from '../services/appraisal/types'
 import { invalidateUserSettingsCache } from '../services/user-settings'
+import { withDbRetry } from '../lib/db-retry'
 
 const appraisalRules = new Hono<{ Bindings: Env }>()
 
@@ -103,24 +104,30 @@ appraisalRules.get('/', async (c) => {
 
   const db = drizzle(c.env.DB)
 
-  const presets = await db
-    .select()
-    .from(appraisalRulePreset)
-    .where(eq(appraisalRulePreset.userId, session.user.id))
-    .orderBy(desc(appraisalRulePreset.createdAt))
+  const presets = await withDbRetry(() =>
+    db
+      .select()
+      .from(appraisalRulePreset)
+      .where(eq(appraisalRulePreset.userId, session.user.id))
+      .orderBy(desc(appraisalRulePreset.createdAt))
+  )
 
   // Fetch filters and adjustments for each preset
   const presetsWithRules = await Promise.all(
     presets.map(async (preset) => {
-      const filters = await db
-        .select()
-        .from(appraisalRuleFilter)
-        .where(eq(appraisalRuleFilter.presetId, preset.id))
+      const filters = await withDbRetry(() =>
+        db
+          .select()
+          .from(appraisalRuleFilter)
+          .where(eq(appraisalRuleFilter.presetId, preset.id))
+      )
 
-      const adjustments = await db
-        .select()
-        .from(appraisalRuleAdjustment)
-        .where(eq(appraisalRuleAdjustment.presetId, preset.id))
+      const adjustments = await withDbRetry(() =>
+        db
+          .select()
+          .from(appraisalRuleAdjustment)
+          .where(eq(appraisalRuleAdjustment.presetId, preset.id))
+      )
 
       return {
         ...preset,
@@ -160,67 +167,79 @@ appraisalRules.get('/mine', async (c) => {
   const now = new Date().toISOString()
 
   // Find or create the user's default preset
-  let [preset] = await db
-    .select()
-    .from(appraisalRulePreset)
-    .where(
-      and(
-        eq(appraisalRulePreset.userId, session.user.id),
-        eq(appraisalRulePreset.isDefault, true)
+  let [preset] = await withDbRetry(() =>
+    db
+      .select()
+      .from(appraisalRulePreset)
+      .where(
+        and(
+          eq(appraisalRulePreset.userId, session.user.id),
+          eq(appraisalRulePreset.isDefault, true)
+        )
       )
-    )
-    .limit(1)
+      .limit(1)
+  )
 
   if (!preset) {
     // Auto-create default preset seeded from system defaults
     const presetId = crypto.randomUUID()
-    ;[preset] = await db
-      .insert(appraisalRulePreset)
-      .values({
-        id: presetId,
-        userId: session.user.id,
-        name: 'Default',
-        description: null,
-        isDefault: true,
-        createdAt: now,
-        updatedAt: now,
-      })
-      .returning()
-
-    await db.insert(appraisalRuleFilter).values(
-      DEFAULT_FILTERS.map((f) => ({
-        id: crypto.randomUUID(),
-        presetId,
-        filterType: f.type,
-        enabled: f.enabled,
-        value: f.value,
-        priority: f.priority ?? null,
-        createdAt: now,
-      }))
+    ;[preset] = await withDbRetry(() =>
+      db
+        .insert(appraisalRulePreset)
+        .values({
+          id: presetId,
+          userId: session.user.id,
+          name: 'Default',
+          description: null,
+          isDefault: true,
+          createdAt: now,
+          updatedAt: now,
+        })
+        .returning()
     )
 
-    await db.insert(appraisalRuleAdjustment).values(
-      DEFAULT_ADJUSTMENTS.map((a) => ({
-        id: crypto.randomUUID(),
-        presetId,
-        adjustmentType: a.type,
-        enabled: a.enabled,
-        amount: a.amount,
-        percentage: a.percent ?? 0,
-        createdAt: now,
-      }))
+    await withDbRetry(() =>
+      db.insert(appraisalRuleFilter).values(
+        DEFAULT_FILTERS.map((f) => ({
+          id: crypto.randomUUID(),
+          presetId,
+          filterType: f.type,
+          enabled: f.enabled,
+          value: f.value,
+          priority: f.priority ?? null,
+          createdAt: now,
+        }))
+      )
+    )
+
+    await withDbRetry(() =>
+      db.insert(appraisalRuleAdjustment).values(
+        DEFAULT_ADJUSTMENTS.map((a) => ({
+          id: crypto.randomUUID(),
+          presetId,
+          adjustmentType: a.type,
+          enabled: a.enabled,
+          amount: a.amount,
+          percentage: a.percent ?? 0,
+          createdAt: now,
+        }))
+      )
     )
   }
 
-  const filters = await db
-    .select()
-    .from(appraisalRuleFilter)
-    .where(eq(appraisalRuleFilter.presetId, preset.id))
+  const filters = await withDbRetry(() =>
+    db
+      .select()
+      .from(appraisalRuleFilter)
+      .where(eq(appraisalRuleFilter.presetId, preset.id))
+  )
 
-  const adjustments = await db
-    .select()
-    .from(appraisalRuleAdjustment)
-    .where(eq(appraisalRuleAdjustment.presetId, preset.id))
+  const adjustments = await withDbRetry(() =>
+    db
+      .select()
+      .from(appraisalRuleAdjustment)
+      .where(eq(appraisalRuleAdjustment.presetId, preset.id))
+  )
 
   return c.json({
     preset: {
@@ -241,30 +260,36 @@ appraisalRules.get('/default', async (c) => {
 
   const db = drizzle(c.env.DB)
 
-  const [preset] = await db
-    .select()
-    .from(appraisalRulePreset)
-    .where(
-      and(
-        eq(appraisalRulePreset.userId, session.user.id),
-        eq(appraisalRulePreset.isDefault, true)
+  const [preset] = await withDbRetry(() =>
+    db
+      .select()
+      .from(appraisalRulePreset)
+      .where(
+        and(
+          eq(appraisalRulePreset.userId, session.user.id),
+          eq(appraisalRulePreset.isDefault, true)
+        )
       )
-    )
-    .limit(1)
+      .limit(1)
+  )
 
   if (!preset) {
     return c.json({ preset: null })
   }
 
-  const filters = await db
-    .select()
-    .from(appraisalRuleFilter)
-    .where(eq(appraisalRuleFilter.presetId, preset.id))
+  const filters = await withDbRetry(() =>
+    db
+      .select()
+      .from(appraisalRuleFilter)
+      .where(eq(appraisalRuleFilter.presetId, preset.id))
+  )
 
-  const adjustments = await db
-    .select()
-    .from(appraisalRuleAdjustment)
-    .where(eq(appraisalRuleAdjustment.presetId, preset.id))
+  const adjustments = await withDbRetry(() =>
+    db
+      .select()
+      .from(appraisalRuleAdjustment)
+      .where(eq(appraisalRuleAdjustment.presetId, preset.id))
+  )
 
   return c.json({
     preset: {
@@ -289,30 +314,36 @@ appraisalRules.get('/:id', async (c) => {
   const presetId = c.req.param('id')
   const db = drizzle(c.env.DB)
 
-  const [preset] = await db
-    .select()
-    .from(appraisalRulePreset)
-    .where(
-      and(
-        eq(appraisalRulePreset.id, presetId),
-        eq(appraisalRulePreset.userId, session.user.id)
+  const [preset] = await withDbRetry(() =>
+    db
+      .select()
+      .from(appraisalRulePreset)
+      .where(
+        and(
+          eq(appraisalRulePreset.id, presetId),
+          eq(appraisalRulePreset.userId, session.user.id)
+        )
       )
-    )
-    .limit(1)
+      .limit(1)
+  )
 
   if (!preset) {
     return c.json({ error: 'Preset not found' }, 404)
   }
 
-  const filters = await db
-    .select()
-    .from(appraisalRuleFilter)
-    .where(eq(appraisalRuleFilter.presetId, presetId))
+  const filters = await withDbRetry(() =>
+    db
+      .select()
+      .from(appraisalRuleFilter)
+      .where(eq(appraisalRuleFilter.presetId, preset.id))
+  )
 
-  const adjustments = await db
-    .select()
-    .from(appraisalRuleAdjustment)
-    .where(eq(appraisalRuleAdjustment.presetId, presetId))
+  const adjustments = await withDbRetry(() =>
+    db
+      .select()
+      .from(appraisalRuleAdjustment)
+      .where(eq(appraisalRuleAdjustment.presetId, preset.id))
+  )
 
   return c.json({
     preset: {
@@ -345,25 +376,29 @@ appraisalRules.post('/', async (c) => {
 
   // If this is set as default, unset other defaults first
   if (body.isDefault) {
-    await db
-      .update(appraisalRulePreset)
-      .set({ isDefault: false, updatedAt: now })
-      .where(eq(appraisalRulePreset.userId, session.user.id))
+    await withDbRetry(() =>
+      db
+        .update(appraisalRulePreset)
+        .set({ isDefault: false, updatedAt: now })
+        .where(eq(appraisalRulePreset.userId, session.user.id))
+    )
   }
 
   // Insert preset
-  const [created] = await db
-    .insert(appraisalRulePreset)
-    .values({
-      id: presetId,
-      userId: session.user.id,
-      name: body.name,
-      description: body.description ?? null,
-      isDefault: body.isDefault ?? false,
-      createdAt: now,
-      updatedAt: now,
-    })
-    .returning()
+  const [created] = await withDbRetry(() =>
+    db
+      .insert(appraisalRulePreset)
+      .values({
+        id: presetId,
+        userId: session.user.id,
+        name: body.name,
+        description: body.description ?? null,
+        isDefault: body.isDefault ?? false,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning()
+  )
 
   // Insert filters (use input if provided, else defaults)
   const filtersToInsert = body.filters ?? DEFAULT_FILTERS.map((f) => ({
@@ -374,16 +409,18 @@ appraisalRules.post('/', async (c) => {
   }))
 
   if (filtersToInsert.length > 0) {
-    await db.insert(appraisalRuleFilter).values(
-      filtersToInsert.map((f) => ({
-        id: crypto.randomUUID(),
-        presetId: presetId,
-        filterType: f.filterType,
-        enabled: f.enabled,
-        value: f.value,
-        priority: f.priority ?? null,
-        createdAt: now,
-      }))
+    await withDbRetry(() =>
+      db.insert(appraisalRuleFilter).values(
+        filtersToInsert.map((f) => ({
+          id: crypto.randomUUID(),
+          presetId: presetId,
+          filterType: f.filterType,
+          enabled: f.enabled,
+          value: f.value,
+          priority: f.priority ?? null,
+          createdAt: now,
+        }))
+      )
     )
   }
 
@@ -396,16 +433,18 @@ appraisalRules.post('/', async (c) => {
   }))
 
   if (adjustmentsToInsert.length > 0) {
-    await db.insert(appraisalRuleAdjustment).values(
-      adjustmentsToInsert.map((a) => ({
-        id: crypto.randomUUID(),
-        presetId: presetId,
-        adjustmentType: a.adjustmentType,
-        enabled: a.enabled,
-        amount: a.amount,
-        percentage: a.percentage,
-        createdAt: now,
-      }))
+    await withDbRetry(() =>
+      db.insert(appraisalRuleAdjustment).values(
+        adjustmentsToInsert.map((a) => ({
+          id: crypto.randomUUID(),
+          presetId: presetId,
+          adjustmentType: a.adjustmentType,
+          enabled: a.enabled,
+          amount: a.amount,
+          percentage: a.percentage,
+          createdAt: now,
+        }))
+      )
     )
   }
 
@@ -413,15 +452,19 @@ appraisalRules.post('/', async (c) => {
   await invalidateUserSettingsCache(c.env.API_CACHE, session.user.id)
 
   // Fetch created preset with rules
-  const filters = await db
-    .select()
-    .from(appraisalRuleFilter)
-    .where(eq(appraisalRuleFilter.presetId, presetId))
+  const filters = await withDbRetry(() =>
+    db
+      .select()
+      .from(appraisalRuleFilter)
+      .where(eq(appraisalRuleFilter.presetId, presetId))
+  )
 
-  const adjustments = await db
-    .select()
-    .from(appraisalRuleAdjustment)
-    .where(eq(appraisalRuleAdjustment.presetId, presetId))
+  const adjustments = await withDbRetry(() =>
+    db
+      .select()
+      .from(appraisalRuleAdjustment)
+      .where(eq(appraisalRuleAdjustment.presetId, presetId))
+  )
 
   return c.json({
     preset: {
@@ -448,16 +491,18 @@ appraisalRules.patch('/:id', async (c) => {
   const db = drizzle(c.env.DB)
 
   // Verify ownership
-  const [existing] = await db
-    .select()
-    .from(appraisalRulePreset)
-    .where(
-      and(
-        eq(appraisalRulePreset.id, presetId),
-        eq(appraisalRulePreset.userId, session.user.id)
+  const [existing] = await withDbRetry(() =>
+    db
+      .select()
+      .from(appraisalRulePreset)
+      .where(
+        and(
+          eq(appraisalRulePreset.id, presetId),
+          eq(appraisalRulePreset.userId, session.user.id)
+        )
       )
-    )
-    .limit(1)
+      .limit(1)
+  )
 
   if (!existing) {
     return c.json({ error: 'Preset not found' }, 404)
@@ -467,10 +512,12 @@ appraisalRules.patch('/:id', async (c) => {
 
   // If this is set as default, unset other defaults first
   if (body.isDefault) {
-    await db
-      .update(appraisalRulePreset)
-      .set({ isDefault: false, updatedAt: now })
-      .where(eq(appraisalRulePreset.userId, session.user.id))
+    await withDbRetry(() =>
+      db
+        .update(appraisalRulePreset)
+        .set({ isDefault: false, updatedAt: now })
+        .where(eq(appraisalRulePreset.userId, session.user.id))
+    )
   }
 
   // Update preset fields
@@ -479,66 +526,77 @@ appraisalRules.patch('/:id', async (c) => {
   if (body.description !== undefined) updates.description = body.description
   if (body.isDefault !== undefined) updates.isDefault = body.isDefault
 
-  await db
-    .update(appraisalRulePreset)
-    .set(updates)
-    .where(eq(appraisalRulePreset.id, presetId))
+  await withDbRetry(() =>
+    db
+      .update(appraisalRulePreset)
+      .set(updates)
+      .where(eq(appraisalRulePreset.id, presetId))
+  )
 
-  // Update filters if provided (replace all)
+  // Update filters if provided (replace all — delete+insert in one atomic batch
+  // so a transient failure can't leave the preset with zero rules)
   if (body.filters !== undefined) {
-    await db
-      .delete(appraisalRuleFilter)
-      .where(eq(appraisalRuleFilter.presetId, presetId))
-
-    if (body.filters.length > 0) {
-      await db.insert(appraisalRuleFilter).values(
-        body.filters.map((f) => ({
-          id: crypto.randomUUID(),
-          presetId: presetId,
-          filterType: f.filterType,
-          enabled: f.enabled,
-          value: f.value,
-          priority: f.priority ?? null,
-          createdAt: now,
-        }))
-      )
-    }
+    const stmts = [
+      db.delete(appraisalRuleFilter).where(eq(appraisalRuleFilter.presetId, presetId)),
+      ...(body.filters.length > 0
+        ? [
+            db.insert(appraisalRuleFilter).values(
+              body.filters.map((f) => ({
+                id: crypto.randomUUID(),
+                presetId: presetId,
+                filterType: f.filterType,
+                enabled: f.enabled,
+                value: f.value,
+                priority: f.priority ?? null,
+                createdAt: now,
+              }))
+            ),
+          ]
+        : []),
+    ]
+    await withDbRetry(() => db.batch(stmts as [typeof stmts[0], ...typeof stmts]))
   }
 
-  // Update adjustments if provided (replace all)
+  // Update adjustments if provided (replace all — same atomic batch)
   if (body.adjustments !== undefined) {
-    await db
-      .delete(appraisalRuleAdjustment)
-      .where(eq(appraisalRuleAdjustment.presetId, presetId))
-
-    if (body.adjustments.length > 0) {
-      await db.insert(appraisalRuleAdjustment).values(
-        body.adjustments.map((a) => ({
-          id: crypto.randomUUID(),
-          presetId: presetId,
-          adjustmentType: a.adjustmentType,
-          enabled: a.enabled,
-          amount: a.amount,
-          percentage: a.percentage,
-          createdAt: now,
-        }))
-      )
-    }
+    const stmts = [
+      db.delete(appraisalRuleAdjustment).where(eq(appraisalRuleAdjustment.presetId, presetId)),
+      ...(body.adjustments.length > 0
+        ? [
+            db.insert(appraisalRuleAdjustment).values(
+              body.adjustments.map((a) => ({
+                id: crypto.randomUUID(),
+                presetId: presetId,
+                adjustmentType: a.adjustmentType,
+                enabled: a.enabled,
+                amount: a.amount,
+                percentage: a.percentage,
+                createdAt: now,
+              }))
+            ),
+          ]
+        : []),
+    ]
+    await withDbRetry(() => db.batch(stmts as [typeof stmts[0], ...typeof stmts]))
   }
 
   // Invalidate cached user settings
   await invalidateUserSettingsCache(c.env.API_CACHE, session.user.id)
 
   // Fetch updated preset with rules
-  const filters = await db
-    .select()
-    .from(appraisalRuleFilter)
-    .where(eq(appraisalRuleFilter.presetId, presetId))
+  const filters = await withDbRetry(() =>
+    db
+      .select()
+      .from(appraisalRuleFilter)
+      .where(eq(appraisalRuleFilter.presetId, presetId))
+  )
 
-  const adjustments = await db
-    .select()
-    .from(appraisalRuleAdjustment)
-    .where(eq(appraisalRuleAdjustment.presetId, presetId))
+  const adjustments = await withDbRetry(() =>
+    db
+      .select()
+      .from(appraisalRuleAdjustment)
+      .where(eq(appraisalRuleAdjustment.presetId, presetId))
+  )
 
   return c.json({
     preset: {
@@ -566,32 +624,37 @@ appraisalRules.post('/:id/set-default', async (c) => {
   const now = new Date().toISOString()
 
   // Verify ownership
-  const [existing] = await db
-    .select()
-    .from(appraisalRulePreset)
-    .where(
-      and(
-        eq(appraisalRulePreset.id, presetId),
-        eq(appraisalRulePreset.userId, session.user.id)
+  const [existing] = await withDbRetry(() =>
+    db
+      .select()
+      .from(appraisalRulePreset)
+      .where(
+        and(
+          eq(appraisalRulePreset.id, presetId),
+          eq(appraisalRulePreset.userId, session.user.id)
+        )
       )
-    )
-    .limit(1)
+      .limit(1)
+  )
 
   if (!existing) {
     return c.json({ error: 'Preset not found' }, 404)
   }
 
-  // Unset all other defaults for this user
-  await db
-    .update(appraisalRulePreset)
-    .set({ isDefault: false, updatedAt: now })
-    .where(eq(appraisalRulePreset.userId, session.user.id))
-
-  // Set this preset as default
-  await db
-    .update(appraisalRulePreset)
-    .set({ isDefault: true, updatedAt: now })
-    .where(eq(appraisalRulePreset.id, presetId))
+  // Unset all other defaults, then set this one — atomic so a transient
+  // failure can't leave the user with no default preset
+  await withDbRetry(() =>
+    db.batch([
+      db
+        .update(appraisalRulePreset)
+        .set({ isDefault: false, updatedAt: now })
+        .where(eq(appraisalRulePreset.userId, session.user.id)),
+      db
+        .update(appraisalRulePreset)
+        .set({ isDefault: true, updatedAt: now })
+        .where(eq(appraisalRulePreset.id, presetId)),
+    ])
+  )
 
   // Invalidate cached user settings
   await invalidateUserSettingsCache(c.env.API_CACHE, session.user.id)
@@ -610,15 +673,17 @@ appraisalRules.delete('/:id', async (c) => {
   const presetId = c.req.param('id')
   const db = drizzle(c.env.DB)
 
-  const result = await db
-    .delete(appraisalRulePreset)
-    .where(
-      and(
-        eq(appraisalRulePreset.id, presetId),
-        eq(appraisalRulePreset.userId, session.user.id)
+  const result = await withDbRetry(() =>
+    db
+      .delete(appraisalRulePreset)
+      .where(
+        and(
+          eq(appraisalRulePreset.id, presetId),
+          eq(appraisalRulePreset.userId, session.user.id)
+        )
       )
-    )
-    .returning()
+      .returning()
+  )
 
   if (result.length === 0) {
     return c.json({ error: 'Preset not found' }, 404)

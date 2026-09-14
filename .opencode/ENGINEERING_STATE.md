@@ -1028,3 +1028,92 @@ ordering confirmed in evaluation/index.ts.
 - NOTE: batch_c3711744 was resumed via the deployed /resume path and is
   processing natively (13+ done at 23:39Z). fs_1d32fdcf temp key still
   needs revoking when all batch work settles.
+
+### 2026-09-13 — Confidence decoupled from comp volume + report timing (merged `3e00dc6`, deployed)
+
+- ✅ **Confidence = match quality, not count.** `report.ts`: `selected.length < 3`
+  no longer forces LOW. A single fully-verified comp with no fallback +
+  verified subject condition can be HIGH. LOW only on: zero selected comps,
+  hard-rule-breaching selected comps, `nearest_comps`/`insufficient` fallback,
+  or very stale selected sales (>365d). Test updated to new semantics.
+- ✅ **Volume surfaced separately.** `BatchResult.compCount` (enabled comps
+  matching rules) written in batch DO → new **Comps** column in batch table.
+- ✅ **Per-address timing.** `BatchResult.durationMs` measured in
+  `processOneAddress` → **Time** column.
+- ✅ **Lifetime avg report time.** `/user/usage` returns
+  `analysisTiming { avgMs, runs }` (avg over `analysis_runs.duration_ms`);
+  Overview Rate Limits grid → 5th cell "Avg report time — lifetime".
+- ✅ Verified: tsc clean api + dashboard; report.test.ts 7/7 green.
+- ✅ Deployed to production (deploy run green after merge to main).
+- ⚠️ Pre-existing batch rows (resultsJson written before this change) have no
+  `compCount`/`durationMs` → columns show `—` for old rows; new rows populate.
+- ⏳ Still open: provider-call undercount on error runs
+  (`api_call_stats_json = NULL` on failures); temp key `fs_1d32fdcf` revoke;
+  temp session row + /tmp/fs_* cleanup.
+
+### 2026-09-14 — Batch watchdog + force-complete removal (merged `4e8f8d7`, deployed `34793494581`)
+
+- ✅ **Per-address watchdog** in `BatchJobDO.processOneAddress`: every child-DO
+  `stub.fetch` bounded by `AbortSignal.timeout(15s)`; 3 consecutive unreachable
+  polls fail the address. Stall detection: after 60s elapsed, no new events or
+  status change for 45s → address failed ("Analysis stalled") and the list
+  continues. 180s hard cap retained. This was the wedge: a hung fetch meant the
+  timeout check never ran and the whole list froze silently.
+- ✅ **Fatal-path consistency**: retry + resume `.catch` handlers now mark the
+  batch `failed` in D1 + kick the FIFO queue (previously left `processing`
+  until the 10-min stale sweep).
+- ✅ **Force-complete removed**: `/batch/:id/recover` route, DO
+  `/mark-completed`, `recoverStuckBatch` action, stuck banner + button. The
+  feature corrupted state — the still-running DO loop overwrote the recovery.
+- ✅ Verified: tsc clean api + dashboard. Deployed.
+- ⚠️ `batch_c3711744` died ~00:37:44Z when the deploy evicted the DO isolate
+  (25 done / 20 failed / 164). Row flipped to `paused` — user resumes via
+  the Resume button, which now runs under the watchdog.
+- ⏳ Still open: provider-call undercount on error runs; temp key
+  `fs_1d32fdcf` revoke; temp session row + /tmp/fs_* cleanup.
+
+### 2026-09-14 — Batch self-heal alarm + settings-save retry + UX fixes (merged `210775a`, deployed `34794556662`)
+
+- ✅ **DO alarm watchdog (permanent auto-resume).** `BatchJobDO.alarm()`:
+  processing loops re-arm a 60s alarm each address; `loopRunning` flag
+  distinguishes a live loop from an evicted isolate. On alarm with a dead
+  loop + `lastProgressAt` older than 210s → resets the in-flight row to
+  pending and calls `retryFailed` automatically. Deploys/evictions/crashes
+  now self-recover with zero user action. Stale sweep (10min) remains as
+  the last-resort safety net.
+- ✅ **Settings-save 500 during batch**: new `lib/db-retry.ts`
+  `withDbRetry` (backoff on SQLITE_BUSY / connection drops / D1_ERROR)
+  applied to all settings write routes — deal-params, rehab-config,
+  arv-threshold, major-item-costs, proximity-config, ui-prefs.
+- ✅ **Batch import lands on lists view**: whenever batch_jobs exist the
+  picker + confidence buckets show by default; upload form only on New
+  Batch (with "← Back to lists"). Stale "Max 50" copy → 1,000.
+- ✅ **Play button hover-only**: row resume button hidden until row hover
+  (always visible while its resume is in-flight).
+- ⚠️ batch_c3711744 is `paused` (25/20/164). It predates alarms — one
+  manual Resume click restarts it; from then on the watchdog covers it.
+- ⏳ Still open: provider-call undercount on error runs; temp key revoke;
+  /tmp/fs_* cleanup.
+
+### 2026-09-14 — Evaluation-settings save 500 + batch alarm silent-death fix
+
+- ✅ **`appraisal-rules.ts` fully wrapped in `withDbRetry`** (was the only
+  settings route left unwrapped — the reported 500 on toggling
+  `old_comp_discount`). All GET/POST/PATCH/DELETE/set-default ops retry
+  transient D1 errors (SQLITE_BUSY / dropped connections during batch writes).
+- ✅ **Atomic delete+insert** via `db.batch()` for filter/adjustment replace-all
+  in PATCH + hidden-preset upsert in `location-settings.ts` — a mid-sequence
+  failure can no longer leave a preset with zero rules.
+- ✅ **`location-settings.ts` wrapped** (20 sites) — same contention exposure.
+- ✅ **Batch silent-death hole fixed**: `retryFailed`'s settings-load failure
+  previously returned *before* `setAlarm` and without updating status → batch
+  stuck `processing` forever, even consuming the watchdog alarm (the likely
+  cause of the 01:02Z freeze). Now: `withDbRetry` on settings load, then on
+  persistent failure marks batch `failed` in state+D1 and kicks the queue.
+  `processBatch` gets the same treatment + missing queue kick added.
+- ✅ **Error surfacing**: `fetchApi` (client-api.ts + api.ts) now appends the
+  API's `message` field to thrown errors — the toast shows the real cause
+  instead of bare "Internal server error".
+- ✅ Prod: dead batch `batch_c3711744` (29 done / 114 left) flipped to `paused`
+  — predates this fix, needs one manual Resume click.
+- Verified: `tsc --noEmit` clean in api + dashboard.
