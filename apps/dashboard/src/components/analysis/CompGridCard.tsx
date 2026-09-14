@@ -72,7 +72,7 @@ export function CompGridCard({
       )}
     >
       {/* Image with price overlay — clicks to Street View */}
-      <div className="relative h-28 bg-muted/30 overflow-hidden">
+      <div className="relative aspect-[3/2] bg-muted/30 overflow-hidden">
         {streetViewUrl ? (
           <a href={streetViewUrl} target="_blank" rel="noopener noreferrer" className="block w-full h-full">
             <StreetViewImage
@@ -80,8 +80,8 @@ export function CompGridCard({
               address={comp.address}
               latitude={comp.latitude}
               longitude={comp.longitude}
-              width={400}
-              height={200}
+              width={640}
+              height={427}
               className="w-full h-full object-cover"
             />
           </a>

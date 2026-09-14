@@ -226,6 +226,58 @@ const REQUIRED_ARV_COMPS = 3
  */
 const ARV_PRICE_BAND_PCT = 0.10
 
+/**
+ * Normalize an address to its street name for same-street matching.
+ * "21660 FOREST WATERS CIR, SAN ANTONIO, TX 78266" → "forest waters cir"
+ * Street suffixes are canonicalized (DRIVE→DR, COURT→CT, ...) so "CV"/"COVE"
+ * style variations still compare equal.
+ */
+const STREET_SUFFIXES: Record<string, string> = {
+  drive: 'dr', dr: 'dr', street: 'st', st: 'st', avenue: 'ave', ave: 'ave',
+  boulevard: 'blvd', blvd: 'blvd', court: 'ct', ct: 'ct', circle: 'cir', cir: 'cir',
+  cove: 'cv', cv: 'cv', lane: 'ln', ln: 'ln', road: 'rd', rd: 'rd', trail: 'trl',
+  trl: 'trl', way: 'way', place: 'pl', pl: 'pl', terrace: 'ter', ter: 'ter',
+  parkway: 'pkwy', pkwy: 'pkwy', highway: 'hwy', hwy: 'hwy', crossing: 'xing',
+  xing: 'xing', bend: 'bnd', bnd: 'bnd', run: 'run', pass: 'pass', canyon: 'cyn',
+  cyn: 'cyn', heights: 'hts', hts: 'hts',
+}
+export function streetNameKey(address?: string | null): string | null {
+  if (!address) return null
+  const first = address.split(',')[0].trim()
+  const noNumber = first.replace(/^\d+[\w-]*\s+/, '')
+  if (!noNumber) return null
+  const words = noNumber.toLowerCase().replace(/[^a-z0-9\s]/g, '').split(/\s+/).filter(Boolean)
+  if (words.length === 0) return null
+  const last = words[words.length - 1]
+  words[words.length - 1] = STREET_SUFFIXES[last] ?? last
+  return words.join(' ')
+}
+
+/**
+ * Proximity comparator shared by ARV selection and the nearest_comps
+ * fallback: same street beats everything, then ascending distance, then
+ * sale recency, then price. Analysts weight proximity to the subject over
+ * recency when comps otherwise satisfy the appraisal rules.
+ */
+function proximityCompare(
+  a: { address?: string; distanceMiles?: number | null; saleDate?: string | null },
+  b: { address?: string; distanceMiles?: number | null; saleDate?: string | null },
+  subjectStreet: string | null
+): number {
+  const aStreet = streetNameKey(a.address)
+  const bStreet = streetNameKey(b.address)
+  if (subjectStreet) {
+    const aSame = aStreet === subjectStreet ? 1 : 0
+    const bSame = bStreet === subjectStreet ? 1 : 0
+    if (aSame !== bSame) return bSame - aSame
+  }
+  const distDiff = (a.distanceMiles ?? Infinity) - (b.distanceMiles ?? Infinity)
+  if (distDiff !== 0) return distDiff
+  const aTime = a.saleDate ? new Date(a.saleDate).getTime() : 0
+  const bTime = b.saleDate ? new Date(b.saleDate).getTime() : 0
+  return bTime - aTime
+}
+
 // ─── Implementation ────────────────────────────────────────────────────────────
 
 class PropertyAppraisalService implements AppraisalService {
@@ -255,18 +307,17 @@ class PropertyAppraisalService implements AppraisalService {
 
     // Best apples-to-apples first: comps with more verified match passes
     // (status 'passed') outrank comps that slid through on missing data
-    // ('not_verified'). Then most-recent sale wins — sale age is an
-    // absolute rule, so recency is the ranking signal — and adjusted
+    // ('not_verified'). Then proximity to the subject — same street beats
+    // everything, then ascending distance — then sale recency, and adjusted
     // price breaks the final tie.
     const verifiedPasses = (c: AppraisedComparable) =>
       c.evaluation.filterResults.filter((r) => r.status === 'passed').length
-    const saleTime = (c: AppraisedComparable) =>
-      c.saleDate ? new Date(c.saleDate).getTime() : 0
+    const subjectStreet = streetNameKey(subject.address)
     const sorted = [...banded].sort((a, b) => {
       const diff = verifiedPasses(b) - verifiedPasses(a)
       if (diff !== 0) return diff
-      const recency = saleTime(b) - saleTime(a)
-      if (recency !== 0) return recency
+      const proximity = proximityCompare(a, b, subjectStreet)
+      if (proximity !== 0) return proximity
       return (
         (b.adjustedSalePrice ?? b.salePrice ?? 0) -
         (a.adjustedSalePrice ?? a.salePrice ?? 0)
@@ -613,9 +664,9 @@ class PropertyAppraisalService implements AppraisalService {
             )
             return hardFailures.length === 0
           })
-          .sort(
-            (a, b) =>
-              new Date(b.saleDate!).getTime() - new Date(a.saleDate!).getTime()
+          .sort((a, b) =>
+            proximityCompare(a, b, streetNameKey(subject.address)) ||
+            new Date(b.saleDate!).getTime() - new Date(a.saleDate!).getTime()
           )
           .slice(0, REQUIRED_ARV_COMPS)
 
@@ -634,7 +685,7 @@ class PropertyAppraisalService implements AppraisalService {
           recentIds.has(c.id) ? { ...c, isEnabled: true } : c
         )
         const relaxed = this.selectArvComps(subject, marked)
-        console.log(`Appraisal: relaxed to ${recentComps.length} most-recent comps (no rule-qualified set exists)`)
+        console.log(`Appraisal: relaxed to ${recentComps.length} closest comps (no rule-qualified set exists)`)
         return {
           ...resultGeo,
           comparables: relaxed.comparables,
@@ -643,7 +694,7 @@ class PropertyAppraisalService implements AppraisalService {
           selectedCompIds: relaxed.selected.map((c) => c.id),
           insufficientComps: false,
           fallbackUsed: 'nearest_comps',
-          fallbackReason: `No comps satisfied all appraisal rules; using the ${recentComps.length} most recent sale(s) within ${saleAgeDays} days (year-built tolerance ±${maxYear}yr). Failed rules remain visible per comp.`,
+          fallbackReason: `No comps satisfied all appraisal rules; using the ${recentComps.length} closest sale(s) within ${saleAgeDays} days (year-built tolerance ±${maxYear}yr). Failed rules remain visible per comp.`,
           expansionApplied: appliedFor(maxYear, 'geographic'),
         }
       }

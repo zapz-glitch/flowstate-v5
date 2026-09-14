@@ -76,7 +76,7 @@ export function SubjectPropertyCard({ subject, children, footer }: SubjectProper
             longitude={subject.longitude}
             width={640}
             height={360}
-            className="w-full h-auto max-h-[240px] object-cover bg-muted"
+            className="w-full aspect-video object-cover bg-muted"
           />
           {((subject.photos && subject.photos.length > 0) || children) && (
             <PhotoGallery photos={subject.photos || []}>

@@ -303,9 +303,9 @@ export function CompCard({
               address={comp.address}
               latitude={comp.latitude}
               longitude={comp.longitude}
-              width={400}
-              height={200}
-              className="w-full h-auto max-h-[160px] object-cover bg-muted"
+              width={640}
+              height={360}
+              className="w-full aspect-video object-cover bg-muted"
             />
           )}
         </div>
