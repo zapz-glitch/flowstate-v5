@@ -56,9 +56,13 @@ async function fetchApi<T>(path: string, options: RequestInit = {}): Promise<T> 
   const durationMs = Date.now() - startTime
 
   if (!response.ok) {
-    const errorData = await response.json().catch(() => ({ error: 'Unknown error' })) as { error?: string }
+    const errorData = await response.json().catch(() => ({ error: 'Unknown error' })) as { error?: string; message?: string }
     logResponse(method, path, response.status, durationMs, errorData.error)
-    throw new Error(errorData.error || `API error: ${response.status}`)
+    throw new Error(
+      errorData.message
+        ? `${errorData.error ?? 'API error'} — ${errorData.message}`
+        : errorData.error || `API error: ${response.status}`
+    )
   }
 
   logResponse(method, path, response.status, durationMs)

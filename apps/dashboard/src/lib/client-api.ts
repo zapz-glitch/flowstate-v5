@@ -42,8 +42,12 @@ async function fetchApi<T>(path: string, options: RequestInit = {}): Promise<T> 
   }
 
   if (!response.ok) {
-    const errorData = await response.json().catch(() => ({ error: 'Unknown error' })) as { error?: string }
-    throw new Error(errorData.error || `API error: ${response.status}`)
+    const errorData = await response.json().catch(() => ({ error: 'Unknown error' })) as { error?: string; message?: string }
+    throw new Error(
+      errorData.message
+        ? `${errorData.error ?? 'API error'} — ${errorData.message}`
+        : errorData.error || `API error: ${response.status}`
+    )
   }
 
   const data = await response.json() as T
