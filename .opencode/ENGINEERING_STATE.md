@@ -1184,3 +1184,12 @@ ordering confirmed in evaluation/index.ts.
   — predates this fix, needs one manual Resume click.
 - Verified: `tsc --noEmit` clean in api + dashboard.
 - ✅ Deployed to production (merge `fdd62a8`, deploy run `34796998689` green).
+
+### 2026-09-14 — Feedback submit 403 "Untrusted origin" (merged `79b3c0a`, deployed `34798338081`)
+
+- Root cause: `submitReportFeedback` is a Next.js server action → the API
+  request carries no `Origin` header → the strict origin check on
+  `POST /user/reports/:jobId/feedback` (and `/:jobId/comps`) rejected it.
+- Fix: allow Origin-less requests (browsers always send Origin on POST, so
+  absent = server-side caller, still session-authed); wrong origins still 403.
+- Verified: tsc clean; deploy green. Notify → Validate/Flag now persists.
