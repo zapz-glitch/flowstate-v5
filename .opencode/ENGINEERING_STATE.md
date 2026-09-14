@@ -1279,3 +1279,26 @@ Open product decisions for analyst:
 - Ticket 3: sqft boundary grace? (255 vs 250 — ±5sf tolerance or bump to 300)
 - Ticket 2: foundation data coverage from provider — engine can't verify
   pier-vs-slab without data; when present it already counts as a soft rule.
+
+### 2026-09-14 — 24/7 batch sweeper + list-switch UX (deployed `34862156165`)
+
+- Overnight batch batch_c3711744 DID complete (~04:55Z): 97 done / 67
+  failed / 164 total. 66 failures = INSUFFICIENT_COMPS (legit), 1 =
+  transient CoreLogic 500. It self-healed through multiple deaths — the
+  perceived failure was stale UI + no autonomous sweeper.
+- NEW: Cloudflare Cron trigger (*/5min) + scheduled() handler →
+  sweepStaleBatches(): nudges stale processing DOs (same resume path as
+  the alarm), fails rows dead >15min to release the FIFO queue, starts
+  stranded queued batches. Batch now recovers with no dashboard open —
+  the last 24/7 gap closed. POST /nudge on BatchJobDO reuses alarm().
+- TOML gotcha hit+fixed: [triggers] must sit at END of wrangler.toml —
+  placed mid-file it swallowed compatibility_date/flags into its table.
+- Dashboard: selectBatch fetches BEFORE committing selection (dead click
+  fix — a failed fetch left a chip highlighted over the previous list's
+  rows); per-chip spinner + upload-date label; table dims while loading;
+  All-lists merge parallelized.
+
+Architecture decision (answered for product engineer): no stack change
+needed. DO + alarm + cron covers self-healing FIFO processing with SSE;
+a Queue-based rewrite adds complexity for no reliability gain given the
+sequential rate-limited processing requirement.
