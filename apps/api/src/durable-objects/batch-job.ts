@@ -162,6 +162,12 @@ export class BatchJobDO {
     if (request.method === 'POST' && path === '/cancel') {
       return this.handleStop('cancel')
     }
+    if (request.method === 'POST' && path === '/nudge') {
+      // Cron sweeper poke — run the same dead-loop check the alarm watchdog
+      // uses so an unattended batch resumes even when no alarm survived
+      await this.alarm()
+      return new Response(JSON.stringify({ ok: true }))
+    }
 
     if (request.method === 'GET' && path === '/sse') {
       return this.handleSSE(request)

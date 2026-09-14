@@ -119,3 +119,65 @@ export async function repairQueueIfIdle(env: Env, userId: string): Promise<void>
 
   if (!running) await kickNextQueuedBatch(env, userId)
 }
+
+// ─── Cron sweep — the unattended layer ───────────────────────────────────────
+// Runs on a schedule (wrangler [triggers]). No human needs to have the page
+// open: stale 'processing' batches get their DO nudged (which resumes the
+// loop through the same path as the alarm watchdog), unrecoverable ones are
+// failed so they release the FIFO queue, and stranded 'queued' batches start
+// whenever their user has nothing running.
+
+/** A 'processing' row with no DB update for this long gets its DO nudged. */
+const NUDGE_STALE_MS = 4 * 60 * 1000
+/** Still stale this long after nudges — DO is unrecoverable, release the queue. */
+const DEAD_PROCESSING_MS = 15 * 60 * 1000
+
+export async function sweepStaleBatches(env: Env): Promise<void> {
+  const db = drizzle(env.DB)
+  const rows = await db
+    .select({
+      id: batchJobs.id,
+      userId: batchJobs.userId,
+      status: batchJobs.status,
+      updatedAt: batchJobs.updatedAt,
+    })
+    .from(batchJobs)
+    .where(inArray(batchJobs.status, ['processing', 'queued']))
+
+  const now = Date.now()
+  const age = (r: { updatedAt: string }) => now - new Date(r.updatedAt).getTime()
+  const nudgedUsers = new Set<string>()
+
+  for (const row of rows) {
+    if (row.status !== 'processing') continue
+    if (age(row) > DEAD_PROCESSING_MS) {
+      // Repeatedly nudged and never recovered — fail it so the queue moves on
+      console.warn(`[batch-sweep] batch ${row.id} dead >15min — marking failed`)
+      await db
+        .update(batchJobs)
+        .set({ status: 'failed', updatedAt: new Date(now).toISOString() })
+        .where(and(eq(batchJobs.id, row.id), eq(batchJobs.status, 'processing')))
+      await kickNextQueuedBatch(env, row.userId)
+    } else if (age(row) > NUDGE_STALE_MS) {
+      // Poke the DO — its alarm path resumes the list if the loop died
+      try {
+        const stub = env.BATCH_JOB.get(env.BATCH_JOB.idFromName(row.id))
+        const resp = await stub.fetch('http://internal/nudge', { method: 'POST' })
+        await resp.text()
+        nudgedUsers.add(row.userId)
+      } catch (err) {
+        console.warn(`[batch-sweep] nudge failed for ${row.id}:`, err)
+      }
+    }
+  }
+
+  // Queued rows whose user has nothing running get the line moving again.
+  // Skip users we just nudged — their runner may be resuming right now.
+  const queuedUsers = new Set(rows.filter((r) => r.status === 'queued').map((r) => r.userId))
+  const processingUsers = new Set(rows.filter((r) => r.status === 'processing').map((r) => r.userId))
+  for (const userId of queuedUsers) {
+    if (!processingUsers.has(userId) && !nudgedUsers.has(userId)) {
+      await kickNextQueuedBatch(env, userId)
+    }
+  }
+}
