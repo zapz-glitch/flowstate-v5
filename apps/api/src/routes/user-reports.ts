@@ -10,7 +10,7 @@ import { drizzle } from 'drizzle-orm/d1'
 import { eq, desc, sql, like, or, and } from 'drizzle-orm'
 import type { Env } from '../types'
 import { getSession } from '../lib/session'
-import { savedReports, reportHistory } from '../db/schema'
+import { savedReports, reportHistory, analysisRuns } from '../db/schema'
 import { hashSharePassword } from '../lib/share-token'
 import { bodyLimit } from 'hono/body-limit'
 import { recalculateReport } from '../services/evaluation/recalculate'
@@ -328,7 +328,33 @@ userReports.post('/:jobId/feedback', bodyLimit({ maxSize: 100000 }), async (c) =
     .returning({ id: savedReports.id })
 
   if (updated.length === 0) {
-    return c.json({ error: 'Report not found' }, 404)
+    // Batch-run reports have no saved_reports row — create one so the stamp
+    // persists and the batch list can join it back.
+    const [run] = await db
+      .select({
+        propertyAddress: analysisRuns.propertyAddress,
+        arv: analysisRuns.arv,
+      })
+      .from(analysisRuns)
+      .where(and(eq(analysisRuns.jobId, jobId), eq(analysisRuns.userId, session.user.id)))
+      .limit(1)
+    if (!run?.propertyAddress) return c.json({ error: 'Report not found' }, 404)
+
+    const parts = run.propertyAddress.split(',').map((s) => s.trim())
+    const stateZip = (parts[2] ?? '').split(/\s+/)
+    await db.insert(savedReports).values({
+      userId: session.user.id,
+      jobId,
+      propertyAddress: parts[0] ?? run.propertyAddress,
+      propertyCity: parts[1] ?? '',
+      propertyState: stateZip[0] ?? '',
+      propertyZip: stateZip[1] ?? null,
+      arv: run.arv ?? null,
+      feedbackStatus: status,
+      feedbackNotes: typeof body.notes === 'string' ? body.notes.slice(0, 5000) : null,
+      feedbackReport: typeof body.report === 'string' ? body.report.slice(0, 50000) : null,
+      feedbackAt: new Date().toISOString(),
+    })
   }
 
   return c.json({ success: true, feedbackStatus: status })
