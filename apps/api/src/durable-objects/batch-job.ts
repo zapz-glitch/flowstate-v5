@@ -119,11 +119,17 @@ export class BatchJobDO {
       return
     }
 
-    // Reset the in-flight row so it gets re-run
+    // Reset the in-flight row so it gets re-run — clear its startedAt and
+    // persist immediately so polling clients don't see a stale stopwatch
     for (const i of indices) {
-      if (bs.results[i].status === 'processing') bs.results[i].status = 'pending'
+      if (bs.results[i].status === 'processing') {
+        bs.results[i].status = 'pending'
+        bs.results[i].startedAt = undefined
+      }
     }
+    this.batchState = bs
     await this.state.storage.put('batchState', bs)
+    await this.updateDbProgress()
 
     this.state.waitUntil(this.retryFailed(bs.userId, indices).catch(async (err) => {
       console.error('[BatchJobDO] Alarm-resume fatal error:', err)
@@ -229,7 +235,7 @@ export class BatchJobDO {
 
     // Reset failed results to pending
     for (const i of failedIndices) {
-      this.batchState.results[i] = { ...this.batchState.results[i], status: 'pending', error: undefined }
+      this.batchState.results[i] = { ...this.batchState.results[i], status: 'pending', error: undefined, startedAt: undefined }
     }
     this.batchState.status = 'processing'
     this.batchState.failedCount = 0
@@ -293,7 +299,7 @@ export class BatchJobDO {
     }
 
     for (const i of indices) {
-      this.batchState.results[i] = { ...this.batchState.results[i], status: 'pending', error: undefined }
+      this.batchState.results[i] = { ...this.batchState.results[i], status: 'pending', error: undefined, startedAt: undefined }
     }
     this.batchState.status = 'processing'
     this.batchState.completedCount = this.batchState.results.filter((r) => r.status === 'completed').length
