@@ -394,14 +394,21 @@ batch.get('/:id', async (c) => {
   const results = job.resultsJson ? JSON.parse(job.resultsJson) as Array<{ jobId?: string; feedbackStatus?: string | null }> : []
 
   // Join review stamps from saved_reports so the batch list shows which
-  // reports have been validated / flagged already
-  const jobIds = results.map((r) => r.jobId).filter((id): id is string => !!id)
+  // reports have been validated / flagged already. D1 caps bound parameters
+  // at 100 per query — chunk the IN clause for lists larger than that.
+  const jobIds = [...new Set(results.map((r) => r.jobId).filter((id): id is string => !!id))]
   if (jobIds.length > 0) {
-    const stamped = await db
-      .select({ jobId: savedReports.jobId, feedbackStatus: savedReports.feedbackStatus })
-      .from(savedReports)
-      .where(inArray(savedReports.jobId, jobIds))
-    const stampByJobId = new Map(stamped.map((s) => [s.jobId, s.feedbackStatus]))
+    const stampByJobId = new Map<string, string | null>()
+    const CHUNK = 90
+    for (let i = 0; i < jobIds.length; i += CHUNK) {
+      const stamped = await db
+        .select({ jobId: savedReports.jobId, feedbackStatus: savedReports.feedbackStatus })
+        .from(savedReports)
+        .where(inArray(savedReports.jobId, jobIds.slice(i, i + CHUNK)))
+      for (const s of stamped) {
+        if (s.jobId) stampByJobId.set(s.jobId, s.feedbackStatus)
+      }
+    }
     for (const r of results) {
       if (r.jobId) r.feedbackStatus = stampByJobId.get(r.jobId) ?? null
     }
