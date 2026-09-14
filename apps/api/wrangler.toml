@@ -1,9 +1,6 @@
 name = "flowstate-api"
 main = "src/index.ts"
 
-# Cron: sweeps dead/stuck batch jobs so lists run unattended to completion
-[triggers]
-crons = ["*/5 * * * *"]
 compatibility_date = "2024-09-09"
 compatibility_flags = ["nodejs_compat"]
 
@@ -72,3 +69,7 @@ invocation_logs = true
 #
 # Dashboard Integration (shared secret for session-based auth)
 # - DASHBOARD_INTERNAL_SECRET
+
+# Cron: sweeps dead/stuck batch jobs so lists run unattended to completion
+[triggers]
+crons = ["*/5 * * * *"]
