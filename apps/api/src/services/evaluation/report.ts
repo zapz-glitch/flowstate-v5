@@ -134,6 +134,21 @@ function assessConfidence(input: BuildReportInput): {
   if (!subjectConditionVerified) {
     reasons.push('Subject condition could not be verified')
   }
+  // Top-of-market band disclosure — rule-passing comps priced >10% below
+  // the best comp were excluded from ARV (price is the condition proxy)
+  const enabledPriced = appraisal.comparables.filter(
+    (c) => c.isEnabled && (c.adjustedSalePrice ?? c.salePrice ?? 0) > 0
+  )
+  const topEnabledPrice = enabledPriced.reduce(
+    (m, c) => Math.max(m, c.adjustedSalePrice ?? c.salePrice ?? 0), 0
+  )
+  const bandExcluded = enabledPriced.filter(
+    (c) => (c.adjustedSalePrice ?? c.salePrice ?? 0) < topEnabledPrice * 0.9 &&
+      c.arvStatus !== 'selected'
+  ).length
+  if (bandExcluded > 0) {
+    reasons.push(`ARV anchored to top-of-market: ${bandExcluded} rule-passing comp(s) priced >10% below the best comp were excluded`)
+  }
 
   // Confidence = quality of the comp MATCH, not comp count. A thin-market
   // pocket can still produce a high-confidence ARV when the 1-2 comps
@@ -323,6 +338,8 @@ export function buildEvaluationReport(input: BuildReportInput): EvaluationReport
       compPool: {
         total: appraisalResult.comparables.length,
         enabled: appraisalResult.enabledCount,
+        selected: appraisalResult.selectedCompIds?.length
+          ?? appraisalResult.comparables.filter((c) => c.arvStatus === 'selected').length,
         fallbackUsed: appraisalResult.fallbackUsed,
         fallbackReason: appraisalResult.fallbackReason,
       },
