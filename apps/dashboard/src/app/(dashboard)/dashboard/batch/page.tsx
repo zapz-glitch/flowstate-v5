@@ -10,6 +10,7 @@ import { submitBatchAnalysis, getBatchStatus, getBatchJobs, retryFailedAddresses
 
 type Phase = 'upload' | 'processing' | 'complete'
 type ConfBucket = 'high' | 'medium' | 'low' | 'unrated'
+type RowFilter = ConfBucket | 'all' | 'validated' | 'improve' | 'insufficient'
 
 const CONF_LABELS: Record<ConfBucket, string> = {
   high: 'High confidence',
@@ -44,7 +45,10 @@ export default function BatchPage() {
   const [allJobs, setAllJobs] = useState<JobSummary[]>([])
   const [viewAll, setViewAll] = useState(false) // aggregate across lists
   const [allResults, setAllResults] = useState<Array<BatchResult & { batchId: string }>>([])
-  const [confFilter, setConfFilter] = useState<ConfBucket | 'all'>('all')
+  const [confFilter, setConfFilter] = useState<RowFilter>('all')
+  // Reviewed = validated or flagged-for-improvement — hidden by default so
+  // the low-confidence sweep doesn't re-show already-stamped reports
+  const [hideReviewed, setHideReviewed] = useState(true)
 
   const fileInputRef = useRef<HTMLInputElement>(null)
   const pollingRef = useRef<NodeJS.Timeout | null>(null)
@@ -491,10 +495,28 @@ export default function BatchPage() {
     return b
   }, [completedRows])
 
+  const isInsufficient = (r: BatchResult) => r.status === 'failed' && (r.error ?? '').includes('INSUFFICIENT_COMPS')
+
   const filteredRows = useMemo(() => {
-    if (confFilter === 'all') return viewRows
-    return viewRows.filter((r) => r.status === 'completed' && confBucket(r) === confFilter)
-  }, [viewRows, confFilter])
+    switch (confFilter) {
+      case 'all':
+        return hideReviewed ? viewRows.filter((r) => !r.feedbackStatus) : viewRows
+      case 'validated':
+        return viewRows.filter((r) => r.feedbackStatus === 'validated')
+      case 'improve':
+        return viewRows.filter((r) => r.feedbackStatus === 'improve')
+      case 'insufficient':
+        return viewRows.filter(isInsufficient)
+      default:
+        return viewRows.filter(
+          (r) => r.status === 'completed' && confBucket(r) === confFilter && (!hideReviewed || !r.feedbackStatus)
+        )
+    }
+  }, [viewRows, confFilter, hideReviewed])
+
+  const validatedCount = useMemo(() => completedRows.filter((r) => r.feedbackStatus === 'validated').length, [completedRows])
+  const flaggedCount = useMemo(() => completedRows.filter((r) => r.feedbackStatus === 'improve').length, [completedRows])
+  const insufficientCount = useMemo(() => viewRows.filter(isInsufficient).length, [viewRows])
 
   // First unreviewed report in a bucket — where "Review" jumps to
   const firstUnreviewed = useCallback((bucket: ConfBucket) => {
@@ -502,8 +524,10 @@ export default function BatchPage() {
     return rows.find((r) => !r.feedbackStatus) ?? rows[0] ?? null
   }, [buckets])
 
-  const reportHref = (r: BatchResult & { batchId?: string }, conf?: string) =>
-    r.jobId ? `/dashboard/reports/${r.jobId}${r.batchId ? `?batch=${r.batchId}&conf=${conf ?? (confFilter === 'all' ? 'all' : confFilter)}` : ''}` : '#'
+  const reportHref = (r: BatchResult & { batchId?: string }, conf?: string) => {
+    const confParam = conf ?? (confFilter === 'all' || confFilter === 'validated' || confFilter === 'improve' || confFilter === 'insufficient' ? 'all' : confFilter)
+    return r.jobId ? `/dashboard/reports/${r.jobId}${r.batchId ? `?batch=${r.batchId}&conf=${confParam}` : ''}` : '#'
+  }
 
   return (
     <div className="space-y-6">
@@ -688,9 +712,19 @@ export default function BatchPage() {
           </Card>
           )}
 
-          {/* Confidence buckets — click a bucket to filter, Review jumps to first unreviewed */}
-          {completedRows.length > 0 && (
-            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+          {/* Confidence buckets + review-status filters — click to filter the table */}
+          {(completedRows.length > 0 || insufficientCount > 0) && (
+            <div className="space-y-2">
+              <label className="flex items-center gap-2 text-xs text-foreground-secondary cursor-pointer w-fit">
+                <input
+                  type="checkbox"
+                  checked={hideReviewed}
+                  onChange={(e) => setHideReviewed(e.target.checked)}
+                  className="accent-primary"
+                />
+                Hide reviewed (validated / flagged for improvement)
+              </label>
+              <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2">
               <button
                 type="button"
                 onClick={() => setConfFilter('all')}
@@ -700,7 +734,9 @@ export default function BatchPage() {
                 )}
               >
                 <div className="text-[10px] uppercase tracking-wider text-foreground-tertiary">All</div>
-                <div className="text-lg font-bold tabular-nums">{completedRows.length}</div>
+                <div className="text-lg font-bold tabular-nums">
+                  {hideReviewed ? completedRows.filter((r) => !r.feedbackStatus).length : completedRows.length}
+                </div>
                 <div className="text-[9px] text-foreground-tertiary">
                   {completedRows.filter((r) => r.feedbackStatus).length} reviewed
                 </div>
@@ -708,6 +744,7 @@ export default function BatchPage() {
               {(['low', 'medium', 'high', 'unrated'] as ConfBucket[]).map((bucket) => {
                 const b = buckets[bucket]
                 const target = firstUnreviewed(bucket)
+                const shown = hideReviewed ? b.total - b.reviewed : b.total
                 return (
                   <div
                     key={bucket}
@@ -721,8 +758,10 @@ export default function BatchPage() {
                   >
                     <button type="button" onClick={() => setConfFilter(confFilter === bucket ? 'all' : bucket)} className="block w-full text-left">
                       <div className="text-[10px] uppercase tracking-wider text-foreground-tertiary">{CONF_LABELS[bucket]}</div>
-                      <div className="text-lg font-bold tabular-nums">{b.total}</div>
-                      <div className="text-[9px] text-foreground-tertiary">{b.reviewed} reviewed</div>
+                      <div className="text-lg font-bold tabular-nums">{shown}</div>
+                      <div className="text-[9px] text-foreground-tertiary">
+                        {hideReviewed ? `${b.reviewed} reviewed hidden` : `${b.reviewed} reviewed`}
+                      </div>
                     </button>
                     {target && (
                       <Link
@@ -735,6 +774,30 @@ export default function BatchPage() {
                   </div>
                 )
               })}
+              {/* Review-status + failure triage sections */}
+              {([
+                { key: 'validated' as const, label: 'Validated', count: validatedCount, accent: 'border-l-2 border-l-emerald-500/50' },
+                { key: 'improve' as const, label: 'Flagged', count: flaggedCount, accent: 'border-l-2 border-l-amber-500/50' },
+                { key: 'insufficient' as const, label: 'Insufficient comps', count: insufficientCount, accent: 'border-l-2 border-l-red-500/50' },
+              ]).map(({ key, label, count, accent }) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setConfFilter(confFilter === key ? 'all' : key)}
+                  className={cn(
+                    'rounded-sm border px-3 py-2.5 text-left transition-colors',
+                    accent,
+                    confFilter === key ? 'border-primary/50 bg-primary/5' : 'border-border hover:border-foreground/20'
+                  )}
+                >
+                  <div className="text-[10px] uppercase tracking-wider text-foreground-tertiary">{label}</div>
+                  <div className="text-lg font-bold tabular-nums">{count}</div>
+                  <div className="text-[9px] text-foreground-tertiary">
+                    {key === 'insufficient' ? 'failed runs' : 'stamped'}
+                  </div>
+                </button>
+              ))}
+              </div>
             </div>
           )}
 
