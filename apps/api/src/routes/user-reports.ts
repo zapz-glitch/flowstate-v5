@@ -22,7 +22,9 @@ userReports.post('/:jobId/comps', bodyLimit({ maxSize: 20000 }), async (c) => {
   const session = await getSession(c)
   if (!session?.user) return c.json({ error: 'Not authenticated' }, 401)
   const origin = c.req.header('Origin')
-  if (!c.env.DASHBOARD_URL || origin !== new URL(c.env.DASHBOARD_URL).origin) return c.json({ error: 'Untrusted origin' }, 403)
+  // Browsers always send Origin on POST; a missing Origin means a
+  // server-side caller (dashboard server action) — already session-authed.
+  if (origin != null && origin !== (c.env.DASHBOARD_URL ? new URL(c.env.DASHBOARD_URL).origin : null)) return c.json({ error: 'Untrusted origin' }, 403)
   if (!c.req.header('Content-Type')?.toLowerCase().startsWith('application/json')) return c.json({ error: 'JSON request required' }, 415)
   const body = await c.req.json().catch(() => null)
   if (!body || typeof body !== 'object' || Array.isArray(body) ||
@@ -301,7 +303,9 @@ userReports.post('/:jobId/feedback', bodyLimit({ maxSize: 100000 }), async (c) =
   const session = await getSession(c)
   if (!session?.user) return c.json({ error: 'Not authenticated' }, 401)
   const origin = c.req.header('Origin')
-  if (!c.env.DASHBOARD_URL || origin !== new URL(c.env.DASHBOARD_URL).origin) return c.json({ error: 'Untrusted origin' }, 403)
+  // Browsers always send Origin on POST; a missing Origin means a
+  // server-side caller (dashboard server action) — already session-authed.
+  if (origin != null && origin !== (c.env.DASHBOARD_URL ? new URL(c.env.DASHBOARD_URL).origin : null)) return c.json({ error: 'Untrusted origin' }, 403)
   if (!c.req.header('Content-Type')?.toLowerCase().startsWith('application/json')) return c.json({ error: 'JSON request required' }, 415)
 
   const body = await c.req.json().catch(() => null)
