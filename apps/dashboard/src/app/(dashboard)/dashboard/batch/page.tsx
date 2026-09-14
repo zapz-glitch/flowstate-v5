@@ -49,6 +49,8 @@ export default function BatchPage() {
   // Reviewed = validated or flagged-for-improvement — hidden by default so
   // the low-confidence sweep doesn't re-show already-stamped reports
   const [hideReviewed, setHideReviewed] = useState(true)
+  // Which list chip is mid-load — shows a spinner and blocks stale state
+  const [loadingListId, setLoadingListId] = useState<string | null>(null)
 
   const fileInputRef = useRef<HTMLInputElement>(null)
   const pollingRef = useRef<NodeJS.Timeout | null>(null)
@@ -386,42 +388,63 @@ export default function BatchPage() {
   // ─── List picker ──────────────────────────────────────────────────────────
 
   const selectBatch = useCallback(async (id: string) => {
-    if (id === batchId) return
-    stopPolling()
-    setShowUpload(false)
-    setViewAll(false)
-    setConfFilter('all')
-    setBatchId(id)
+    if (id === batchId && !viewAll) return
+    // Load before committing selection — a failed fetch must not leave the
+    // chip highlighted over the previous list's rows
+    setLoadingListId(id)
     setError(null)
-    const job = await getBatchStatus(id)
-    if (!job) return
-    setResults(job.results ?? [])
-    setCompletedCount(job.completedCount)
-    setFailedCount(job.failedCount)
-    setJobStatus(job.status)
-    if (job.status === 'processing' || job.status === 'queued') {
-      setPhase('processing')
-      startPolling(id)
-    } else {
-      setPhase('complete')
+    try {
+      const job = await getBatchStatus(id)
+      if (!job) {
+        setError('Could not load that list — try again')
+        return
+      }
+      stopPolling()
+      setShowUpload(false)
+      setViewAll(false)
+      setConfFilter('all')
+      setBatchId(id)
+      setResults(job.results ?? [])
+      setCompletedCount(job.completedCount)
+      setFailedCount(job.failedCount)
+      setJobStatus(job.status)
+      if (job.status === 'processing' || job.status === 'queued') {
+        setPhase('processing')
+        startPolling(id)
+      } else {
+        setPhase('complete')
+      }
+    } catch {
+      setError('Could not load that list — try again')
+    } finally {
+      setLoadingListId(null)
     }
-  }, [batchId, startPolling, stopPolling])
+  }, [batchId, viewAll, startPolling, stopPolling])
 
   const selectAllLists = useCallback(async () => {
-    stopPolling()
-    setShowUpload(false)
-    setViewAll(true)
-    setConfFilter('all')
-    setPhase('complete')
-    // Fetch every job's results and merge (stamps + confidence join server-side)
-    const merged: Array<BatchResult & { batchId: string }> = []
-    for (const j of allJobs) {
-      const job = await getBatchStatus(j.id)
-      if (job?.results?.length) {
-        for (const r of job.results) merged.push({ ...r, batchId: j.id })
+    setLoadingListId('all')
+    setError(null)
+    try {
+      // Fetch every job's results and merge (stamps + confidence join server-side)
+      const merged: Array<BatchResult & { batchId: string }> = []
+      const jobs = await Promise.all(allJobs.map((j) => getBatchStatus(j.id)))
+      for (let i = 0; i < allJobs.length; i++) {
+        const job = jobs[i]
+        if (job?.results?.length) {
+          for (const r of job.results) merged.push({ ...r, batchId: allJobs[i].id })
+        }
       }
+      stopPolling()
+      setShowUpload(false)
+      setViewAll(true)
+      setConfFilter('all')
+      setPhase('complete')
+      setAllResults(merged)
+    } catch {
+      setError('Could not load lists — try again')
+    } finally {
+      setLoadingListId(null)
     }
-    setAllResults(merged)
   }, [allJobs, stopPolling])
 
   // ─── Resume From Row ─────────────────────────────────────────────────────
@@ -633,25 +656,30 @@ export default function BatchPage() {
                 type="button"
                 onClick={selectAllLists}
                 className={cn(
-                  'text-[11px] px-2.5 py-1 rounded transition-colors',
+                  'text-[11px] px-2.5 py-1 rounded transition-colors inline-flex items-center gap-1',
                   viewAll ? 'bg-primary/15 text-primary font-medium' : 'text-foreground-tertiary hover:text-foreground hover:bg-secondary'
                 )}
               >
                 All lists
+                {loadingListId === 'all' && <Loader2 className="w-2.5 h-2.5 animate-spin" />}
               </button>
               {allJobs.map((j, i) => (
                 <button
                   key={j.id}
                   type="button"
                   onClick={() => selectBatch(j.id)}
+                  title={`Uploaded ${new Date(j.createdAt).toLocaleString()}`}
                   className={cn(
                     'text-[11px] px-2.5 py-1 rounded transition-colors inline-flex items-center gap-1',
-                    !viewAll && batchId === j.id ? 'bg-primary/15 text-primary font-medium' : 'text-foreground-tertiary hover:text-foreground hover:bg-secondary'
+                    !viewAll && batchId === j.id ? 'bg-primary/15 text-primary font-medium' : 'text-foreground-tertiary hover:text-foreground hover:bg-secondary',
+                    loadingListId === j.id && 'opacity-60'
                   )}
                 >
                   List {allJobs.length - i}
-                  <span className="text-[9px] opacity-70">· {j.completedCount}/{j.totalAddresses}</span>
-                  {j.status === 'processing' && <Loader2 className="w-2.5 h-2.5 animate-spin" />}
+                  <span className="text-[9px] opacity-70">· {new Date(j.createdAt).toLocaleDateString('en-US', { month: 'numeric', day: 'numeric' })} · {j.completedCount}/{j.totalAddresses}</span>
+                  {loadingListId === j.id
+                    ? <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                    : j.status === 'processing' && <Loader2 className="w-2.5 h-2.5 animate-spin" />}
                   {j.status === 'queued' && <Clock className="w-2.5 h-2.5 text-amber-500" />}
                 </button>
               ))}
@@ -828,7 +856,7 @@ export default function BatchPage() {
           {/* Results table */}
           <Card className="rounded-sm">
             <CardContent className="p-0">
-              <div className="max-h-[60vh] overflow-y-auto">
+              <div className={cn('max-h-[60vh] overflow-y-auto transition-opacity', loadingListId && 'opacity-40 pointer-events-none')}>
                 <table className="w-full text-xs">
                   <thead className="bg-muted/50 sticky top-0">
                     <tr>

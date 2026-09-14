@@ -37,6 +37,7 @@ import typeaheadRoute from './routes/typeahead'
 import compSelectionRoute from './routes/comp-selection'
 import sseStream from './routes/sse-stream'
 import ghlWebhook from './routes/webhooks/ghl'
+import { sweepStaleBatches } from './services/batch-queue'
 
 type Variables = { auth: AuthContext }
 
@@ -186,4 +187,9 @@ export { AnalysisJobDO, BatchJobDO, RateLimitCoordinatorDO } from './durable-obj
 // Export worker
 export default {
   fetch: app.fetch,
+  // Cron (every 5 min): revive dead batch jobs and stranded queues so lists
+  // run unattended to completion — no one needs the dashboard open
+  scheduled: (_event: ScheduledEvent, env: Env, ctx: ExecutionContext) => {
+    ctx.waitUntil(sweepStaleBatches(env))
+  },
 }
