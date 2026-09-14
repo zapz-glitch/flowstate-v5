@@ -11,6 +11,7 @@ import type { Env } from '../types'
 import { getSession } from '../lib/session'
 import { arvThreshold } from '../db'
 import { invalidateUserSettingsCache } from '../services/user-settings'
+import { withDbRetry } from '../lib/db-retry'
 
 const arvThresholdRoute = new Hono<{ Bindings: Env }>()
 
@@ -55,12 +56,12 @@ arvThresholdRoute.put('/', async (c) => {
   const db = drizzle(c.env.DB)
   const now = new Date().toISOString()
 
-  const [existing] = await db.select().from(arvThreshold).where(eq(arvThreshold.userId, session.user.id)).limit(1)
+  const [existing] = await withDbRetry(() => db.select().from(arvThreshold).where(eq(arvThreshold.userId, session.user.id)).limit(1))
 
   if (existing) {
-    await db.update(arvThreshold).set({ percent, updatedAt: now }).where(eq(arvThreshold.userId, session.user.id))
+    await withDbRetry(() => db.update(arvThreshold).set({ percent, updatedAt: now }).where(eq(arvThreshold.userId, session.user.id)))
   } else {
-    await db.insert(arvThreshold).values({ userId: session.user.id, percent, createdAt: now, updatedAt: now })
+    await withDbRetry(() => db.insert(arvThreshold).values({ userId: session.user.id, percent, createdAt: now, updatedAt: now }))
   }
 
   await invalidateUserSettingsCache(c.env.API_CACHE, session.user.id)
@@ -75,7 +76,7 @@ arvThresholdRoute.delete('/', async (c) => {
   if (!session?.user) return c.json({ error: 'Not authenticated' }, 401)
 
   const db = drizzle(c.env.DB)
-  await db.delete(arvThreshold).where(eq(arvThreshold.userId, session.user.id))
+  await withDbRetry(() => db.delete(arvThreshold).where(eq(arvThreshold.userId, session.user.id)))
 
   await invalidateUserSettingsCache(c.env.API_CACHE, session.user.id)
 

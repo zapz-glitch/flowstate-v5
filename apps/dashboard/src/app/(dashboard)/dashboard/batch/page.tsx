@@ -149,14 +149,17 @@ export default function BatchPage() {
             setFailedCount(job.failedCount)
             startPolling(recent.id)
           }
-        } else if (recent.status === 'completed' || recent.status === 'failed' || recent.status === 'paused' || recent.status === 'cancelled') {
+        } else {
           const job = await getBatchStatus(recent.id)
-          if (job && !cancelled) {
+          if (cancelled) return
+          if (job) {
             setResults(job.results ?? [])
             setCompletedCount(job.completedCount)
             setFailedCount(job.failedCount)
-            setPhase('complete')
           }
+          // Always land on the lists view when jobs exist — even if the
+          // detail fetch fails, the list picker + buckets should show
+          setPhase('complete')
         }
       } catch { /* show upload phase */ }
     }
@@ -247,6 +250,7 @@ export default function BatchPage() {
   const handleStart = useCallback(async () => {
     if (addresses.length === 0) return
     setError(null)
+    setShowUpload(false)
     setPhase('processing')
     setResults(addresses.map((address, i) => ({ address, index: i, status: 'pending' })))
     setCompletedCount(0)
@@ -308,6 +312,7 @@ export default function BatchPage() {
   // ─── Resume From Row ─────────────────────────────────────────────────────
 
   const [resumingIndex, setResumingIndex] = useState<number | null>(null)
+  const [showUpload, setShowUpload] = useState(false)
 
   // ─── Reset ────────────────────────────────────────────────────────────────
 
@@ -341,6 +346,7 @@ export default function BatchPage() {
   const selectBatch = useCallback(async (id: string) => {
     if (id === batchId) return
     stopPolling()
+    setShowUpload(false)
     setViewAll(false)
     setConfFilter('all')
     setBatchId(id)
@@ -361,6 +367,7 @@ export default function BatchPage() {
 
   const selectAllLists = useCallback(async () => {
     stopPolling()
+    setShowUpload(false)
     setViewAll(true)
     setConfFilter('all')
     setPhase('complete')
@@ -483,9 +490,19 @@ export default function BatchPage() {
         </div>
       )}
 
-      {/* Phase: Upload */}
-      {phase === 'upload' && (
+      {/* Phase: Upload — only the default when no lists exist yet, or when
+          the user explicitly asks for a new import */}
+      {(phase === 'upload' && allJobs.length === 0) || showUpload ? (
         <div className="space-y-4">
+          {allJobs.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowUpload(false)}
+              className="text-xs text-foreground-tertiary hover:text-foreground transition-colors"
+            >
+              ← Back to lists
+            </button>
+          )}
           {/* Drop zone */}
           <div
             onDragOver={(e) => e.preventDefault()}
@@ -498,7 +515,7 @@ export default function BatchPage() {
               Drag & drop a CSV file, or click to browse
             </p>
             <p className="text-xs text-foreground-tertiary mt-1">
-              One address per line. Max 50 addresses.
+              One address per line. Up to 1,000 per list.
             </p>
             <div className="mt-3 text-left inline-block bg-muted/50 border border-border/50 rounded-sm px-4 py-2.5">
               <p className="text-[10px] font-medium text-foreground-tertiary uppercase tracking-wider mb-1.5">Sample CSV format</p>
@@ -542,7 +559,7 @@ export default function BatchPage() {
             </Card>
           )}
         </div>
-      )}
+      ) : null}
 
       {/* Phase: Processing / Complete */}
       {(phase === 'processing' || phase === 'complete') && (
@@ -701,7 +718,7 @@ export default function BatchPage() {
                   Retry Failed ({failedCount})
                 </Button>
               )}
-              <Button size="sm" variant="outline" onClick={handleReset} className="gap-1.5">
+              <Button size="sm" variant="outline" onClick={() => { handleReset(); setShowUpload(true) }} className="gap-1.5">
                 New Batch
               </Button>
             </div>
@@ -728,7 +745,7 @@ export default function BatchPage() {
                   <tbody className="divide-y divide-border/30">
                     {filteredRows.map((r, i) => (
                       <tr key={r.jobId ?? i} className={cn(
-                        'transition-colors',
+                        'group transition-colors',
                         r.status === 'processing' && 'bg-primary/5',
                         r.status === 'failed' && 'bg-red-500/5',
                       )}>
@@ -739,7 +756,10 @@ export default function BatchPage() {
                               title={`Resume batch from row ${r.index + 1}`}
                               disabled={resumingIndex === r.index}
                               onClick={() => handleResumeFrom(r.batchId!, r.index)}
-                              className="text-primary hover:text-primary/80 disabled:opacity-40"
+                              className={cn(
+                                'text-primary hover:text-primary/80 disabled:opacity-40 transition-opacity',
+                                resumingIndex === r.index ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
+                              )}
                             >
                               {resumingIndex === r.index
                                 ? <Loader2 className="w-3.5 h-3.5 animate-spin" />

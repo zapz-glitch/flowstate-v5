@@ -3,6 +3,7 @@ import { drizzle } from 'drizzle-orm/d1'
 import { eq } from 'drizzle-orm'
 import { uiPrefs } from '../db'
 import { getSession } from '../lib/session'
+import { withDbRetry } from '../lib/db-retry'
 import type { Env } from '../types'
 
 export const uiPrefsRoute = new Hono<{ Bindings: Env }>()
@@ -82,11 +83,11 @@ uiPrefsRoute.put('/', async (c) => {
     faviconUrl: prefs.faviconUrl,
     updatedAt: new Date().toISOString(),
   }
-  const [existing] = await db.select({ id: uiPrefs.id }).from(uiPrefs).where(eq(uiPrefs.userId, session.user.id)).limit(1)
+  const [existing] = await withDbRetry(() => db.select({ id: uiPrefs.id }).from(uiPrefs).where(eq(uiPrefs.userId, session.user.id)).limit(1))
   if (existing) {
-    await db.update(uiPrefs).set(values).where(eq(uiPrefs.id, existing.id))
+    await withDbRetry(() => db.update(uiPrefs).set(values).where(eq(uiPrefs.id, existing.id)))
   } else {
-    await db.insert(uiPrefs).values(values)
+    await withDbRetry(() => db.insert(uiPrefs).values(values))
   }
   return c.json({ success: true, ...prefs })
 })

@@ -13,6 +13,7 @@ import type { Env } from '../types'
 import { getSession } from '../lib/session'
 import { proximityConfig } from '../db'
 import { invalidateUserSettingsCache } from '../services/user-settings'
+import { withDbRetry } from '../lib/db-retry'
 
 const proximityConfigRoute = new Hono<{ Bindings: Env }>()
 
@@ -87,12 +88,12 @@ proximityConfigRoute.put('/', async (c) => {
   const now = new Date().toISOString()
   const configJson = JSON.stringify(config)
 
-  const [existing] = await db.select().from(proximityConfig).where(eq(proximityConfig.userId, session.user.id)).limit(1)
+  const [existing] = await withDbRetry(() => db.select().from(proximityConfig).where(eq(proximityConfig.userId, session.user.id)).limit(1))
 
   if (existing) {
-    await db.update(proximityConfig).set({ configJson, updatedAt: now }).where(eq(proximityConfig.userId, session.user.id))
+    await withDbRetry(() => db.update(proximityConfig).set({ configJson, updatedAt: now }).where(eq(proximityConfig.userId, session.user.id)))
   } else {
-    await db.insert(proximityConfig).values({ userId: session.user.id, configJson, createdAt: now, updatedAt: now })
+    await withDbRetry(() => db.insert(proximityConfig).values({ userId: session.user.id, configJson, createdAt: now, updatedAt: now }))
   }
 
   await invalidateUserSettingsCache(c.env.API_CACHE, session.user.id)
@@ -107,7 +108,7 @@ proximityConfigRoute.delete('/', async (c) => {
   if (!session?.user) return c.json({ error: 'Not authenticated' }, 401)
 
   const db = drizzle(c.env.DB)
-  await db.delete(proximityConfig).where(eq(proximityConfig.userId, session.user.id))
+  await withDbRetry(() => db.delete(proximityConfig).where(eq(proximityConfig.userId, session.user.id)))
 
   await invalidateUserSettingsCache(c.env.API_CACHE, session.user.id)
 

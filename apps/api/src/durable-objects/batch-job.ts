@@ -29,6 +29,8 @@ interface BatchState {
   completedCount: number
   failedCount: number
   createdAt: number
+  /** Timestamp of last address completion — lets the DO alarm detect a dead loop */
+  lastProgressAt?: number
 }
 
 interface BatchResult {
@@ -66,10 +68,70 @@ export class BatchJobDO {
   private sseClients: Set<WritableStreamDefaultWriter<Uint8Array>> = new Set()
   private encoder = new TextEncoder()
   private batchState: BatchState | null = null
+  /** True while processBatch/retryFailed is actively iterating in this isolate */
+  private loopRunning = false
 
   constructor(state: DurableObjectState, env: Env) {
     this.state = state
     this.env = env
+  }
+
+  // ─── Alarm: self-healing watchdog ─────────────────────────────────────────
+  // The processing loop re-arms this every address. If the isolate was evicted
+  // mid-run (deploy, idle reclaim, crash), loopRunning resets to false and the
+  // alarm still fires — that's the signal to resume the list automatically.
+
+  async alarm(): Promise<void> {
+    if (!this.batchState) {
+      this.batchState = await this.state.storage.get<BatchState>('batchState') ?? null
+    }
+    const bs = this.batchState
+    if (!bs || bs.status !== 'processing' || this.stopRequested) {
+      await this.state.storage.deleteAlarm()
+      return
+    }
+    // Loop alive in this isolate → just re-arm
+    if (this.loopRunning) {
+      await this.state.storage.setAlarm(Date.now() + 60_000)
+      return
+    }
+    // Grace window: a single address can legitimately take ~180s. Only declare
+    // the loop dead when the last completed address is older than that.
+    const lastProgress = bs.lastProgressAt ?? 0
+    if (Date.now() - lastProgress < 210_000) {
+      await this.state.storage.setAlarm(Date.now() + 60_000)
+      return
+    }
+
+    console.warn('[BatchJobDO] alarm: processing batch with dead loop — resuming automatically')
+    const indices = bs.results
+      .map((r, i) => (r.status === 'pending' || r.status === 'processing') ? i : -1)
+      .filter((i) => i >= 0)
+
+    if (indices.length === 0) {
+      bs.status = 'completed'
+      await this.state.storage.put('batchState', bs)
+      await this.updateDbStatus('completed')
+      await kickNextQueuedBatch(this.env, bs.userId)
+      return
+    }
+
+    // Reset the in-flight row so it gets re-run
+    for (const i of indices) {
+      if (bs.results[i].status === 'processing') bs.results[i].status = 'pending'
+    }
+    await this.state.storage.put('batchState', bs)
+
+    this.state.waitUntil(this.retryFailed(bs.userId, indices).catch(async (err) => {
+      console.error('[BatchJobDO] Alarm-resume fatal error:', err)
+      await this.pushEvent('batch_error', { message: err instanceof Error ? err.message : 'Auto-resume failed' })
+      if (this.batchState) {
+        this.batchState.status = 'failed'
+        await this.state.storage.put('batchState', this.batchState)
+      }
+      await this.updateDbStatus('failed')
+      await kickNextQueuedBatch(this.env, bs.userId)
+    }))
   }
 
   async fetch(request: Request): Promise<Response> {
@@ -303,6 +365,7 @@ export class BatchJobDO {
       })
     }
     this.stopRequested = null
+    await this.state.storage.deleteAlarm()
     await kickNextQueuedBatch(this.env, userId)
   }
 
@@ -322,9 +385,13 @@ export class BatchJobDO {
       this.touchDb()
     }, 15000)
 
+    this.loopRunning = true
+    await this.state.storage.setAlarm(Date.now() + 60_000)
+
     for (const i of indices) {
       if (!this.batchState) break
       if (this.stopRequested) {
+        this.loopRunning = false
         clearInterval(heartbeat)
         await this.finishStopped(this.stopRequested, userId)
         return
@@ -368,15 +435,19 @@ export class BatchJobDO {
         await this.pushEvent('address_failed', { index: i, total: this.batchState.totalAddresses, address, error: errorMsg })
       }
 
+      this.batchState.lastProgressAt = Date.now()
       await this.state.storage.put('batchState', this.batchState)
       await this.updateDbProgress()
+      await this.state.storage.setAlarm(Date.now() + 60_000)
 
       if (i < indices[indices.length - 1]) {
         await new Promise((r) => setTimeout(r, 2000))
       }
     }
 
+    this.loopRunning = false
     clearInterval(heartbeat)
+    await this.state.storage.deleteAlarm()
 
     if (this.batchState) {
       this.batchState.status = 'completed'
@@ -418,10 +489,14 @@ export class BatchJobDO {
       message: `Processing ${config.addresses.length} addresses...`,
     })
 
+    this.loopRunning = true
+    await this.state.storage.setAlarm(Date.now() + 60_000)
+
     for (let i = 0; i < config.addresses.length; i++) {
       const address = config.addresses[i]
       if (!this.batchState) break
       if (this.stopRequested) {
+        this.loopRunning = false
         clearInterval(heartbeat)
         await this.finishStopped(this.stopRequested, config.userId)
         return
@@ -481,8 +556,10 @@ export class BatchJobDO {
         })
       }
 
+      this.batchState.lastProgressAt = Date.now()
       await this.state.storage.put('batchState', this.batchState)
       await this.updateDbProgress()
+      await this.state.storage.setAlarm(Date.now() + 60_000)
 
       // Rate limit delay between addresses (2s)
       if (i < config.addresses.length - 1) {
@@ -490,8 +567,9 @@ export class BatchJobDO {
       }
     }
 
-    // Clean up heartbeat
+    this.loopRunning = false
     clearInterval(heartbeat)
+    await this.state.storage.deleteAlarm()
 
     // Mark complete
     if (this.batchState) {
