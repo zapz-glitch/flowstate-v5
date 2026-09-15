@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Provision the Flowstate Slack->Devin pipeline in a Devin Cloud org.
 
-Creates/updates the three role playbooks and the six pipeline automations via the
-Devin v3 API, validates trigger condition fields against the live event-schemas
-endpoint, captures the build-webhook credentials, and uploads them as org secrets.
+Creates/updates the builder playbook and the four pipeline automations via the
+Devin v3 API and validates trigger condition fields against the live
+event-schemas endpoint.
 
 Usage:
     export DEVIN_API_KEY=cog_...            # service user (ManageOrgAutomations);
@@ -44,21 +44,16 @@ API = "https://api.devin.ai/v3"
 DEVIN_CLI = "/home/lucke/.local/share/devin/cli/_versions/3000.10.21/bin/devin"
 
 PLAYBOOKS = {
-    "PLANNER": ("flowstate/PLANNER", DEVIN_DIR / "playbooks" / "PLANNER.md"),
     "BUILDER": ("flowstate/BUILDER", DEVIN_DIR / "playbooks" / "BUILDER.md"),
-    "EVAL": ("flowstate/EVAL", DEVIN_DIR / "playbooks" / "EVAL.md"),
 }
 
-# Created in this order: build first (mints the webhook the plan stage needs),
-# then the GitHub stages, then plan last so ${DEVIN_BUILD_WEBHOOK_*} tokens
-# resolve against already-uploaded org secrets.
+# Single-agent pipeline: Slack message -> task session -> PR -> CI/Devin Review
+# -> repair/ci-fix loops -> main-verify on push. No webhook handoff, no specs.
 AUTOMATION_FILES = [
-    "02_build.json",
-    "03_eval.json",
+    "01_task.json",
     "04_repair.json",
     "05_ci_fix.json",
     "06_main_verify.json",
-    "01_plan.json",
 ]
 
 SECRETS_FILE = DEVIN_DIR / ".pipeline-secrets.json"
@@ -280,42 +275,17 @@ def main() -> None:
                 for a in paged(key, f"/organizations/{org}/automations")}
     failures = []
 
-    webhook_creds: dict | None = None
-    secrets_uploaded = False
     for d in defs:
-        fname = d.pop("_file")
-        # The plan automation's prompt references ${DEVIN_BUILD_WEBHOOK_*};
-        # those tokens are validated at save, so the org secrets must exist
-        # before flowstate/plan is created.
-        if fname == "01_plan.json" and webhook_creds and not secrets_uploaded:
-            SECRETS_FILE.write_text(json.dumps(webhook_creds, indent=1) + "\n")
-            os.chmod(SECRETS_FILE, 0o600)
-            print(f"Build webhook minted; saved to {SECRETS_FILE} (gitignored).")
-            secrets_uploaded = all([
-                upload_secret("DEVIN_BUILD_WEBHOOK_URL", webhook_creds["url"]),
-                upload_secret("DEVIN_BUILD_WEBHOOK_SECRET",
-                              webhook_creds["secret"]),
-            ])
-            if not secrets_uploaded and not args.dry_run:
-                print("WARN: org secrets not uploaded — flowstate/plan creation "
-                      "will fail until DEVIN_BUILD_WEBHOOK_URL and "
-                      "DEVIN_BUILD_WEBHOOK_SECRET exist in Settings > Secrets. "
-                      "Upload them, then re-run apply.py.")
+        d.pop("_file")
         try:
-            resp = upsert_automation(key, org,
-                                     d if slack_ready else strip_slack(d),
-                                     args.dry_run, existing)
+            upsert_automation(key, org,
+                              d if slack_ready else strip_slack(d),
+                              args.dry_run, existing)
         except SystemExit as e:
             failures.append((d["name"], str(e)))
             print(f"FAILED {d['name']}: {e}")
             continue
-        for trig in resp.get("triggers", []):
-            wh = trig.get("webhook")
-            if wh and wh.get("secret"):
-                webhook_creds = {"url": wh["url"], "secret": wh["secret"]}
 
-    if not webhook_creds and not args.dry_run:
-        print("\nNo new webhook secret minted (existing automation preserved it).")
     if failures:
         print(f"\n{len(failures)} automation(s) failed — fix and re-run apply.py.")
 

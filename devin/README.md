@@ -1,8 +1,8 @@
 # Devin Slack Pipeline — flowstate-v5
 
-Devin-native automation: a message in the pipeline Slack channel runs a
-Planner → Builder → Eval pipeline of Devin Cloud sessions that lands work on a
-GitHub PR. CI, Devin Review, and a human gate sit between the PR and merge.
+Devin-native automation: a message in the pipeline Slack channel spawns a
+Devin Cloud session that implements the request on a branch and opens a PR.
+CI, Devin Review, and a human gate sit between the PR and merge.
 
 ## Provisioned state (2026-09-15, org org-6c0122ecb67544ccb259ae9b1e9cc4dc)
 
@@ -10,42 +10,35 @@ GitHub PR. CI, Devin Review, and a human gate sit between the PR and merge.
 
 | Automation | ID | Trigger |
 |---|---|---|
-| `flowstate/plan` | `auto-625f17fff89c417088d4dc234a2f6b95` | `slack:message` (any top-level human message in `C0C1DRMK52T`) |
-| `flowstate/build` | `auto-da479195ba094124b5d2b565dd029992` | `webhook:incoming` |
-| `flowstate/eval` | `auto-6ffbc26fd3b8423a8b4a9ad02e741dac` | `github:pull_request` opened/sync/reopened on `devin/*` |
+| `flowstate/task` | `auto-664bfb20f5de41bb8227b304ddbbe7b0` | `slack:message` (any top-level human message in `C0C1DRMK52T`) |
 | `flowstate/repair` | `auto-07b6a0a9a44d4ef08fda86f68b8144a7` | review `changes_requested` + review comments on `devin/*` |
 | `flowstate/ci-fix` | `auto-5829e59c07ba40109af9653d75842af7` | `github:check_run` failure on `devin/*` |
 | `flowstate/main-verify` | `auto-776e11948866437b98df9335bb78c971` | `github:push` to `main` — full verify run |
 
-Also live: playbooks `flowstate/{PLANNER,BUILDER,EVAL}` (`run_as: creator`),
-org secrets `DEVIN_BUILD_WEBHOOK_URL`/`SECRET`, blueprint
+Also live: playbook `flowstate/BUILDER` (`run_as: creator`), blueprint
 `snapshot-blueprint-3773826372e144f9a872eaec89ee0faa` (build
-`sbj-a10b70d88822449fb9fe4c42abf82994` success; verified in a Devin VM:
-`npm install` + `npm run typecheck` green, api tests pass — note: 1 dashboard
-regression file is red on `main`, pre-existing), Slack connected +
-bot invited to `C0C1DRMK52T`. **Devin Review must be re-enrolled for
-`zapz-glitch/flowstate-v5`** (Settings → Review → Add repo).
+`sbj-a10b70d88822449fb9fe4c42abf82994` success), Slack connected +
+bot invited to `C0C1DRMK52T`. Devin Review enrolled on
+`zapz-glitch/flowstate-v5` (user-confirmed).
 
 Org quirks encountered (definitions already adjusted): automation-level
 `notifications.slack` unavailable; `session.notifications.slack` conflicts
 with `attach_thread` replies; playbooks update via PUT not PATCH.
 
 Reliability notes (v2 audit):
-- Slack thread coordinates travel inside the spec file (`SLACK_CHANNEL` /
-  `SLACK_THREAD_TS`) because GitHub/webhook payloads don't carry them.
-- All mutating stages run `max_concurrent_runs: 1` — serializes spec numbering,
-  same-branch pushes, and per-event fan-out (one review = N comment triggers;
-  one CI run = N check_run triggers).
+- Slack thread coordinates travel in the PR body (`Slack-Thread:` line)
+  because GitHub event payloads don't carry them.
+- All mutating stages run `max_concurrent_runs: 1` — serializes same-branch
+  pushes and per-event fan-out (one review = N comment triggers; one CI run =
+  N check_run triggers).
 - `github:issue_comment` deliberately NOT used for repair — the automations'
   own `post_response` PR comments would re-trigger it (self-loop). Human
   feedback should come as a review or inline review comment.
-- Eval counts only COMPLETED check failures (it fires on `opened`, before CI
-  finishes); its PASS state-doc commit is idempotent so the `synchronize` it
-  causes doesn't loop.
-- Planner escalation: the session is thread-bound and waits for your reply; if
-  it already ended, re-post the clarified request as a NEW top-level message.
-- Optional upgrade idea: `slack:reaction_added` is available — e.g. a ✅ on the
-  planner's packet could gate the build webhook (human plan-approval variant).
+- The task session is thread-bound and waits for your reply if it asks a
+  question; if it already ended, re-post the clarified request as a NEW
+  top-level message.
+- Optional upgrade idea: `slack:reaction_added` is available — e.g. a ✅
+  reaction could gate stages for a human-approval variant.
 
 **Smoke test**: post a small, well-scoped request as a new top-level message in the channel and
 watch the `flowstate/*` automation Activity tabs + the bound thread.
@@ -54,32 +47,26 @@ watch the `flowstate/*` automation Activity tabs + the bound thread.
 
 ```
 Slack: new top-level message in the pipeline channel
-  └─▶ flowstate/plan      (slack:message)   PLANNER session
-        writes specs/NNN_<slug>.md on devin/NNN-<slug>, pushes, POSTs webhook
-  └─▶ flowstate/build     (webhook)         BUILDER session
-        implements the packet, pushes, opens PR → base branch
-  └─▶ flowstate/eval      (github:pull_request: opened/synchronize/ready)
-                                          EVAL session
-        reproduces VERIFY, submits PR review verdict
-        FAIL-BUILDER (request changes) ─┐
-  ┌───────────────────────────────────┘
+  └─▶ flowstate/task      (slack:message)   BUILDER session
+        reads request (optional `base: <branch>` override), asks in the
+        thread if ambiguous, implements on devin/<slug>, pushes, opens PR
+        (PR body carries `Slack-Thread:` line for downstream stages)
+  └─▶ CI + Devin Review   on the PR
   └─▶ flowstate/repair    (github:pull_request_review/_comment)
                                           BUILDER session, repair mode
-        applies findings, pushes → PR syncs → eval re-runs (max ~2 rounds)
-  └─▶ flowstate/ci-fix    (github:check_run conclusion=failure)
+        applies findings, pushes (max 2 `repair:` rounds then escalates)
+  └─▶ flowstate/ci-fix    (github:check_run bad conclusion)
                                           BUILDER session, ci-fix mode
-  └─▶ Devin Review        auto-review on the PR (repo enrollment)
-  └─▶ CI green + reviews clean → human tests → human merges
+  └─▶ human tests → human merges
   └─▶ flowstate/main-verify (github:push to main)
-                                          session runs install + typecheck +
-                                          test + build on the new head, posts
-                                          VERIFY PASS/FAIL to Slack (thread if
-                                          the merge was a pipeline PR)
+                                          runs install + typecheck + test +
+                                          build on new head, posts VERIFY
+                                          PASS/FAIL to Slack
 ```
 
-Handoffs travel through git (the spec file) and GitHub/webhook events — no
-shared session state. Each stage is a fresh session: Eval never inherits the
-Builder's context.
+Handoffs travel through git and GitHub events — no shared session state.
+Each stage is a fresh session; the PR body's `Slack-Thread:` line is how
+downstream stages find the originating thread.
 
 ## Prerequisites (one-time, in the Devin app)
 
@@ -114,28 +101,27 @@ export DEVIN_API_KEY=cog_...
 # 3. Dry-run: validates trigger fields against the org's event schemas
 python3 devin/apply.py --dry-run
 
-# 4. Apply: creates playbooks + automations, mints the build webhook,
-#    uploads DEVIN_BUILD_WEBHOOK_URL / DEVIN_BUILD_WEBHOOK_SECRET org secrets
+# 4. Apply: creates the playbook + automations
 python3 devin/apply.py
 ```
 
-Re-running is safe — resources match by name and update in place; the webhook
-secret is preserved unless the webhook trigger is removed and re-added.
+Re-running is safe — resources match by name and update in place.
 
 ## Operating it
 
 - **Request work**: post the request as a new top-level message in the
-  pipeline channel, e.g. `add a market filter to the analysis endpoint`. The Planner binds to the thread and reports there.
+  pipeline channel, e.g. `add a market filter to the analysis endpoint`. The
+  session binds to the thread, asks clarifying questions there if needed, and
+  reports there.
 - **Target a different base branch**: include `base: <branch>` anywhere in the
   message — e.g. `base: integration add the batch pause toggle back`. The
-  Planner branches off it, records `BASE:` in the spec, and the Builder opens
-  the PR to it. Default is `main`.
+  session branches off it and opens the PR to it. Default is `main`.
 - **Post-merge verification**: every push to `main` (pipeline merge or your
   own) fires `flowstate/main-verify` — install, typecheck, test, build on the
   new head, result posted to Slack. It never deploys; deploys stay human.
-- **Stages post to Slack**: every spawned session has `post_updates` to the
-  pipeline channel, so each stage gets a live thread; the original request
-  thread gets the Planner's packet and the final reports.
+- **Give feedback**: on the PR — request changes or leave inline review
+  comments; the repair automation picks them up. Slack thread replies only
+  reach the task session while it's still alive.
 - **Watch runs**: Automations page → each `flowstate/*` automation → Activity
   tab; or Sessions filtered by the `flowstate-pipeline` tag.
 - **Stop a runaway stage**: disable the automation (list page toggle) — queued
@@ -146,12 +132,9 @@ secret is preserved unless the webhook trigger is removed and re-added.
 
 ## Human gates
 
-- Merge is always human. Eval `PASS` approves the PR; it never merges.
-- `FAIL-PLANNER` and `ESCALATE` post to the Slack thread for a human.
-- Optional plan approval: to require a human ACK between plan and build,
-  don't run the webhook step automatically — disable `flowstate/build`,
-  review the posted packet in the thread, then re-enable and let the Planner
-  re-fire (or POST the webhook manually from `devin/.pipeline-secrets.json`).
+- Merge is always human; the pipeline never merges.
+- `ESCALATE`/`BLOCKED` reports post to the Slack thread for a human.
+- Deploys are always human — main-verify builds but never deploys.
 
 ## Security notes
 
@@ -159,18 +142,18 @@ secret is preserved unless the webhook trigger is removed and re-added.
   request text as data. For stronger isolation add a `net_policy` under
   `session_settings` in each automation JSON (allowlist github.com,
   api.devin.ai, slack.com, package registries).
-- `devin/.pipeline-secrets.json` (webhook creds) is gitignored. Org secrets
-  live in Devin Settings → Secrets; nothing secret is committed.
+- `devin/.pipeline-secrets.json` (retired webhook creds) is gitignored.
+  Nothing secret is committed.
 - Trigger condition field names are validated against the org's
   `automations/schemas` endpoint at apply time — if the API reports different
   field names, `apply.py` prints the valid set and aborts.
 
 ## Files
 
-- `playbooks/{PLANNER,BUILDER,EVAL}.md` — org playbooks (applied via API)
-- `automations/*.json` — declarative automation definitions
-  (01_plan, 02_build, 03_eval, 04_repair, 05_ci_fix, 06_main_verify)
-- `apply.py` — idempotent provisioner (playbooks → webhook → secrets → automations)
+- `playbooks/BUILDER.md` — the single org playbook (applied via API)
+- `automations/*.json` — declarative definitions
+  (01_task, 04_repair, 05_ci_fix, 06_main_verify)
+- `apply.py` — idempotent provisioner (playbook + automations)
 - `pipeline.config.json` — repo/branch/Slack coordinates
 - `environment.yaml` — DRS blueprint for the repo's Devin VM environment
-- `.pipeline-secrets.json` — minted webhook creds (gitignored)
+- `.pipeline-secrets.json` — retired webhook creds, kept gitignored
