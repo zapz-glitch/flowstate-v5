@@ -51,6 +51,9 @@ export default function BatchPage() {
   const [hideReviewed, setHideReviewed] = useState(true)
   // Which list chip is mid-load — shows a spinner and blocks stale state
   const [loadingListId, setLoadingListId] = useState<string | null>(null)
+  // Gate first paint on the jobs fetch — otherwise the upload UI flashes
+  // before the lists view mounts
+  const [jobsLoaded, setJobsLoaded] = useState(false)
 
   const fileInputRef = useRef<HTMLInputElement>(null)
   const pollingRef = useRef<NodeJS.Timeout | null>(null)
@@ -138,6 +141,7 @@ export default function BatchPage() {
         const jobs = await getBatchJobs()
         if (cancelled) return
         setAllJobs(jobs)
+        setJobsLoaded(true)
         const active = jobs.find((j) => j.status === 'processing') ?? jobs.find((j) => j.status === 'queued')
         const recent = active ?? jobs[0]
         if (!recent || cancelled) return
@@ -167,7 +171,7 @@ export default function BatchPage() {
           // detail fetch fails, the list picker + buckets should show
           setPhase('complete')
         }
-      } catch { /* show upload phase */ }
+      } catch { setJobsLoaded(true) /* show upload phase */ }
     }
     resumeBatch()
     return () => { cancelled = true; stopPolling() }
@@ -575,9 +579,17 @@ export default function BatchPage() {
         </div>
       )}
 
+      {/* Initial load — brief loader while the job list is fetched so the
+          upload UI never flashes ahead of the lists view */}
+      {!jobsLoaded && !showUpload && (
+        <div className="flex items-center justify-center py-16 text-foreground-tertiary">
+          <Loader2 className="w-5 h-5 animate-spin" />
+        </div>
+      )}
+
       {/* Phase: Upload — only the default when no lists exist yet, or when
           the user explicitly asks for a new import */}
-      {(phase === 'upload' && allJobs.length === 0) || showUpload ? (
+      {((phase === 'upload' && allJobs.length === 0 && jobsLoaded) || showUpload) ? (
         <div className="space-y-4">
           {allJobs.length > 0 && (
             <button
