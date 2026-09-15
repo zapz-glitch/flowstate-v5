@@ -44,13 +44,16 @@ API = "https://api.devin.ai/v3"
 DEVIN_CLI = "/home/lucke/.local/share/devin/cli/_versions/3000.10.21/bin/devin"
 
 PLAYBOOKS = {
+    "PLANNER": ("flowstate/PLANNER", DEVIN_DIR / "playbooks" / "PLANNER.md"),
     "BUILDER": ("flowstate/BUILDER", DEVIN_DIR / "playbooks" / "BUILDER.md"),
 }
 
-# Single-agent pipeline: Slack message -> task session -> PR -> CI/Devin Review
-# -> repair/ci-fix loops -> main-verify on push. No webhook handoff, no specs.
+# Two-agent pipeline: Slack message -> planner (spec push) -> builder -> PR ->
+# CI/Devin Review -> repair/ci-fix loops -> main-verify on push to main.
+# Handoff is the spec push itself (github:push trigger) — no webhook/secrets.
 AUTOMATION_FILES = [
-    "01_task.json",
+    "01_plan.json",
+    "02_build.json",
     "04_repair.json",
     "05_ci_fix.json",
     "06_main_verify.json",

@@ -1,8 +1,8 @@
 # Devin Slack Pipeline — flowstate-v5
 
-Devin-native automation: a message in the pipeline Slack channel spawns a
-Devin Cloud session that implements the request on a branch and opens a PR.
-CI, Devin Review, and a human gate sit between the PR and merge.
+Devin-native automation: a message in the pipeline Slack channel runs a
+Planner → Builder pipeline of Devin Cloud sessions that lands work on a
+GitHub PR. CI, Devin Review, and a human gate sit between the PR and merge.
 
 ## Provisioned state (2026-09-15, org org-6c0122ecb67544ccb259ae9b1e9cc4dc)
 
@@ -10,12 +10,13 @@ CI, Devin Review, and a human gate sit between the PR and merge.
 
 | Automation | ID | Trigger |
 |---|---|---|
-| `flowstate/task` | `auto-664bfb20f5de41bb8227b304ddbbe7b0` | `slack:message` (any top-level human message in `C0C1DRMK52T`) |
+| `flowstate/plan` | `auto-30fba943cd354b99be885975cb360bfa` | `slack:message` (any top-level human message in `C0C1DRMK52T`) |
+| `flowstate/build` | `auto-7b4bfdbb4f8441a6b7508810b6a1e4b8` | `github:push` to `devin/*` with `spec ` commit |
 | `flowstate/repair` | `auto-07b6a0a9a44d4ef08fda86f68b8144a7` | review `changes_requested` + review comments on `devin/*` |
 | `flowstate/ci-fix` | `auto-5829e59c07ba40109af9653d75842af7` | `github:check_run` failure on `devin/*` |
 | `flowstate/main-verify` | `auto-776e11948866437b98df9335bb78c971` | `github:push` to `main` — full verify run |
 
-Also live: playbook `flowstate/BUILDER` (`run_as: creator`), blueprint
+Also live: playbooks `flowstate/{PLANNER,BUILDER}` (`run_as: creator`), blueprint
 `snapshot-blueprint-3773826372e144f9a872eaec89ee0faa` (build
 `sbj-a10b70d88822449fb9fe4c42abf82994` success), Slack connected +
 bot invited to `C0C1DRMK52T`. Devin Review enrolled on
@@ -26,15 +27,16 @@ Org quirks encountered (definitions already adjusted): automation-level
 with `attach_thread` replies; playbooks update via PUT not PATCH.
 
 Reliability notes (v2 audit):
-- Slack thread coordinates travel in the PR body (`Slack-Thread:` line)
-  because GitHub event payloads don't carry them.
+- Slack thread coordinates travel in the spec file (`SLACK_CHANNEL` /
+  `SLACK_THREAD_TS`) with a `Slack-Thread:` PR-body line as fallback —
+  GitHub event payloads don't carry them.
 - All mutating stages run `max_concurrent_runs: 1` — serializes same-branch
   pushes and per-event fan-out (one review = N comment triggers; one CI run =
   N check_run triggers).
 - `github:issue_comment` deliberately NOT used for repair — the automations'
   own `post_response` PR comments would re-trigger it (self-loop). Human
   feedback should come as a review or inline review comment.
-- The task session is thread-bound and waits for your reply if it asks a
+- The planner session is thread-bound and waits for your reply if it asks a
   question; if it already ended, re-post the clarified request as a NEW
   top-level message.
 - Optional upgrade idea: `slack:reaction_added` is available — e.g. a ✅
@@ -47,10 +49,13 @@ watch the `flowstate/*` automation Activity tabs + the bound thread.
 
 ```
 Slack: new top-level message in the pipeline channel
-  └─▶ flowstate/task      (slack:message)   BUILDER session
+  └─▶ flowstate/plan      (slack:message)   PLANNER session, thread-bound
         reads request (optional `base: <branch>` override), asks in the
-        thread if ambiguous, implements on devin/<slug>, pushes, opens PR
-        (PR body carries `Slack-Thread:` line for downstream stages)
+        thread if ambiguous, writes specs/NNN_<slug>.md (carries
+        SLACK_CHANNEL/SLACK_THREAD_TS), pushes devin/NNN-<slug>
+  └─▶ flowstate/build     (github:push — the spec push IS the dispatch;
+                                          no webhook)  BUILDER session
+        implements the packet, pushes, opens PR to its BASE
   └─▶ CI + Devin Review   on the PR
   └─▶ flowstate/repair    (github:pull_request_review/_comment)
                                           BUILDER session, repair mode
@@ -64,9 +69,10 @@ Slack: new top-level message in the pipeline channel
                                           PASS/FAIL to Slack
 ```
 
-Handoffs travel through git and GitHub events — no shared session state.
-Each stage is a fresh session; the PR body's `Slack-Thread:` line is how
-downstream stages find the originating thread.
+Handoffs travel through git — the spec file is the contract AND the
+dispatch (its push triggers the builder via github:push + `spec ` commit
+filter; it also carries the Slack thread coordinates for every later stage).
+No shared session state; each stage is a fresh session.
 
 ## Prerequisites (one-time, in the Devin app)
 
@@ -111,11 +117,12 @@ Re-running is safe — resources match by name and update in place.
 
 - **Request work**: post the request as a new top-level message in the
   pipeline channel, e.g. `add a market filter to the analysis endpoint`. The
-  session binds to the thread, asks clarifying questions there if needed, and
-  reports there.
+  Planner binds to the thread, asks clarifying questions there if needed, and
+  reports the packet there before the Builder picks it up.
 - **Target a different base branch**: include `base: <branch>` anywhere in the
   message — e.g. `base: integration add the batch pause toggle back`. The
-  session branches off it and opens the PR to it. Default is `main`.
+  Planner branches off it, records `BASE:` in the spec, and the Builder opens
+  the PR to it. Default is `main`.
 - **Post-merge verification**: every push to `main` (pipeline merge or your
   own) fires `flowstate/main-verify` — install, typecheck, test, build on the
   new head, result posted to Slack. It never deploys; deploys stay human.
@@ -150,9 +157,9 @@ Re-running is safe — resources match by name and update in place.
 
 ## Files
 
-- `playbooks/BUILDER.md` — the single org playbook (applied via API)
+- `playbooks/{PLANNER,BUILDER}.md` — org playbooks (applied via API)
 - `automations/*.json` — declarative definitions
-  (01_task, 04_repair, 05_ci_fix, 06_main_verify)
+  (01_plan, 02_build, 04_repair, 05_ci_fix, 06_main_verify)
 - `apply.py` — idempotent provisioner (playbook + automations)
 - `pipeline.config.json` — repo/branch/Slack coordinates
 - `environment.yaml` — DRS blueprint for the repo's Devin VM environment
