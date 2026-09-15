@@ -1329,3 +1329,33 @@ sequential rate-limited processing requirement.
   Settings) — 'Property'/'Property' dup fixed; 44px targets; active
   scale feedback. Batch results table: min-w-[680px] + overflow-auto.
 - theme_color unified #161511 (manifest + viewport).
+
+### 2026-09-15 — Provider-call efficiency pass (merged `5fa2673`, deployed `34927651033`)
+
+Real batch stats (120 completed runs): 11.8 paid calls/report avg
+(844 property-detail, 120 property-search, 120 AVM, 99 flood, 100
+comparables, 103 permits, 25 building_detail); 41% cache-hit rate.
+Three provable wastes fixed:
+
+- **Comp enrichment pre-filter** (analysis-job.ts): `sale_age`,
+  `sqft_diff`, and `year_built` at the widest sanctioned ladder step
+  (strict + max yearBuiltExpansionSteps = ±14 default) are NEVER
+  relaxed by any fallback tier — rescue allowlists only carry
+  subdivision_match/distance, and filtersAt() only widens year+distance.
+  enrichComparables never overwrites saleDate/sqft/yearBuilt, so a raw
+  comp verifiably failing one is dead under every tier. Those comps are
+  skipped before per-comp property-detail calls; missing fields still
+  enrich (not_verified semantics preserved). Skipped count logged.
+  Disabled filter (enabled:false) → Infinity → no pre-reject on it.
+- **AVM circuit breaker** (property-api/index.ts getAvm): 3 consecutive
+  ENTITLEMENTS_ERROR/NOT_FOUND failures → `avm:disabled:{provider}` KV
+  flag, 7-day TTL (self-heals if the account gains entitlement).
+  Success resets the fail counter. THV model 404'd on every one of 120
+  runs — this removes a guaranteed paid miss.
+- **property-search cache**: address→parcel mapping cached under
+  `prop:search:{provider}:{normalized-addr-key}` for 21d
+  (PROPERTY_DETAILS TTL). Success-only caching; cache hits logged as
+  'property-search' cacheHits.
+
+Verified: tsc clean; 96 appraisal vitest pass (no comp-selection
+change). Expected ~11.8 → ~6-7 paid calls/report.
