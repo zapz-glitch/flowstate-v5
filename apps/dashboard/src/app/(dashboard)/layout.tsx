@@ -25,7 +25,7 @@ function DashboardContent({ children }: { children: React.ReactNode }) {
           'pt-[calc(3.5rem+var(--sat)+var(--page-gap))] pb-[calc(3.5rem+var(--sab))] lg:pt-0 lg:pb-0'
         )}
       >
-        <div className="p-4 sm:p-6 lg:px-8 lg:pb-[calc(2rem+var(--sab))] lg:pt-[calc(2rem+var(--sat))]">{children}</div>
+        <div className="p-4 sm:p-6 lg:px-8 lg:pb-[calc(2rem+var(--sab))] lg:pt-[calc(1rem+var(--sat))]">{children}</div>
       </main>
     </div>
   )

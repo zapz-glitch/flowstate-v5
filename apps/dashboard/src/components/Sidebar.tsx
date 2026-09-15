@@ -165,25 +165,11 @@ export default function Sidebar() {
         style={{ paddingTop: 'var(--sat)', paddingBottom: 'var(--sab)' }}
       >
         <div className="flex flex-col h-full">
-          {/* Logo & Collapse Button */}
-          <div className="flex items-center justify-between h-16 px-4 border-b border-border">
+          {/* Logo */}
+          <div className="flex items-center h-16 px-4 border-b border-border">
             <Link href="/dashboard" className="flex items-center">
               {collapsed ? <LogoIcon /> : <Logo size="sm" showText={false} />}
             </Link>
-            <button
-              onClick={toggleCollapsed}
-              className={cn(
-                'p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors',
-                collapsed && 'absolute -right-3 top-[calc(1.5rem+var(--sat))] bg-background border border-border shadow-sm'
-              )}
-              aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-            >
-              {collapsed ? (
-                <ChevronRight className="w-4 h-4" />
-              ) : (
-                <ChevronLeft className="w-4 h-4" />
-              )}
-            </button>
           </div>
 
           {/* Navigation */}
@@ -264,6 +250,23 @@ export default function Sidebar() {
               )
             })}
           </nav>
+
+          {/* Collapse toggle — pinned near the bottom, ~1in above the
+              account row */}
+          <div className={cn('px-3 pb-3 mb-20 flex', collapsed ? 'justify-center' : 'justify-start')}>
+            <button
+              onClick={toggleCollapsed}
+              className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
+              aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+              title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            >
+              {collapsed ? (
+                <ChevronRight className="w-4 h-4" />
+              ) : (
+                <ChevronLeft className="w-4 h-4" />
+              )}
+            </button>
+          </div>
 
           {/* User Section with Dropdown */}
           <div className="p-3 border-t border-border">
