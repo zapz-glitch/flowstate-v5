@@ -557,6 +557,18 @@ export default function BatchPage() {
     return rows.find((r) => !r.feedbackStatus) ?? rows[0] ?? null
   }, [buckets])
 
+  // Review target for any section — first unreviewed row, else first row.
+  // Only rows with a report (jobId) qualify; failed runs have no report.
+  const reviewTarget = useCallback((key: RowFilter): (BatchResult & { batchId?: string }) | null => {
+    const rows =
+      key === 'all' ? completedRows.filter((r) => r.jobId)
+      : key === 'validated' ? viewRows.filter((r) => r.feedbackStatus === 'validated' && r.jobId)
+      : key === 'improve' ? viewRows.filter((r) => r.feedbackStatus === 'improve' && r.jobId)
+      : key === 'insufficient' ? viewRows.filter((r) => isInsufficient(r) && r.jobId)
+      : buckets[key].rows.filter((r) => r.jobId)
+    return rows.find((r) => !r.feedbackStatus) ?? rows[0] ?? null
+  }, [completedRows, viewRows, buckets])
+
   const reportHref = (r: BatchResult & { batchId?: string }, conf?: string) => {
     const confParam = conf ?? (confFilter === 'all' || confFilter === 'validated' || confFilter === 'improve' || confFilter === 'insufficient' ? 'all' : confFilter)
     return r.jobId ? `/dashboard/reports/${r.jobId}${r.batchId ? `?batch=${r.batchId}&conf=${confParam}` : ''}` : '#'
@@ -770,23 +782,32 @@ export default function BatchPage() {
                 />
                 Hide reviewed (validated / flagged for improvement)
               </label>
-              <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2">
-              <button
-                type="button"
-                onClick={() => setConfFilter('all')}
+              {/* Level 1 — confidence buckets */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
+              <div
                 className={cn(
-                  'rounded-sm border px-3 py-2.5 text-left transition-colors',
-                  confFilter === 'all' ? 'border-primary/50 bg-primary/5' : 'border-border hover:border-foreground/20'
+                  'rounded-sm border px-3 py-2.5 transition-colors',
+                  confFilter === 'all' ? 'border-primary/50 bg-primary/5' : 'border-border'
                 )}
               >
-                <div className="text-[10px] uppercase tracking-wider text-foreground-tertiary">All</div>
-                <div className="text-lg font-bold tabular-nums">
-                  {hideReviewed ? completedRows.filter((r) => !r.feedbackStatus).length : completedRows.length}
-                </div>
-                <div className="text-[9px] text-foreground-tertiary">
-                  {completedRows.filter((r) => r.feedbackStatus).length} reviewed
-                </div>
-              </button>
+                <button type="button" onClick={() => setConfFilter('all')} className="block w-full text-left">
+                  <div className="text-[10px] uppercase tracking-wider text-foreground-tertiary">All</div>
+                  <div className="text-lg font-bold tabular-nums">
+                    {hideReviewed ? completedRows.filter((r) => !r.feedbackStatus).length : completedRows.length}
+                  </div>
+                  <div className="text-[9px] text-foreground-tertiary">
+                    {completedRows.filter((r) => r.feedbackStatus).length} reviewed
+                  </div>
+                </button>
+                {reviewTarget('all') && (
+                  <Link
+                    href={reportHref(reviewTarget('all')!, 'all')}
+                    className="mt-1 inline-flex items-center gap-0.5 text-[10px] font-medium text-primary hover:underline"
+                  >
+                    Review <ChevronRight className="w-3 h-3" />
+                  </Link>
+                )}
+              </div>
               {(['low', 'medium', 'high', 'unrated'] as ConfBucket[]).map((bucket) => {
                 const b = buckets[bucket]
                 const target = firstUnreviewed(bucket)
@@ -820,29 +841,43 @@ export default function BatchPage() {
                   </div>
                 )
               })}
-              {/* Review-status + failure triage sections */}
+              </div>
+
+              {/* Level 2 — review-status + failure triage */}
+              <div className="grid grid-cols-3 gap-2">
               {([
                 { key: 'validated' as const, label: 'Validated', count: validatedCount, accent: 'border-l-2 border-l-emerald-500/50' },
                 { key: 'improve' as const, label: 'Flagged', count: flaggedCount, accent: 'border-l-2 border-l-amber-500/50' },
                 { key: 'insufficient' as const, label: 'Insufficient comps', count: insufficientCount, accent: 'border-l-2 border-l-red-500/50' },
-              ]).map(({ key, label, count, accent }) => (
-                <button
-                  key={key}
-                  type="button"
-                  onClick={() => setConfFilter(confFilter === key ? 'all' : key)}
-                  className={cn(
-                    'rounded-sm border px-3 py-2.5 text-left transition-colors',
-                    accent,
-                    confFilter === key ? 'border-primary/50 bg-primary/5' : 'border-border hover:border-foreground/20'
-                  )}
-                >
-                  <div className="text-[10px] uppercase tracking-wider text-foreground-tertiary">{label}</div>
-                  <div className="text-lg font-bold tabular-nums">{count}</div>
-                  <div className="text-[9px] text-foreground-tertiary">
-                    {key === 'insufficient' ? 'failed runs' : 'stamped'}
+              ]).map(({ key, label, count, accent }) => {
+                const target = reviewTarget(key)
+                return (
+                  <div
+                    key={key}
+                    className={cn(
+                      'rounded-sm border px-3 py-2.5 transition-colors',
+                      accent,
+                      confFilter === key ? 'border-primary/50 bg-primary/5' : 'border-border'
+                    )}
+                  >
+                    <button type="button" onClick={() => setConfFilter(confFilter === key ? 'all' : key)} className="block w-full text-left">
+                      <div className="text-[10px] uppercase tracking-wider text-foreground-tertiary">{label}</div>
+                      <div className="text-lg font-bold tabular-nums">{count}</div>
+                      <div className="text-[9px] text-foreground-tertiary">
+                        {key === 'insufficient' ? 'failed runs' : 'stamped'}
+                      </div>
+                    </button>
+                    {target && (
+                      <Link
+                        href={reportHref(target, key)}
+                        className="mt-1 inline-flex items-center gap-0.5 text-[10px] font-medium text-primary hover:underline"
+                      >
+                        Review <ChevronRight className="w-3 h-3" />
+                      </Link>
+                    )}
                   </div>
-                </button>
-              ))}
+                )
+              })}
               </div>
             </div>
           )}

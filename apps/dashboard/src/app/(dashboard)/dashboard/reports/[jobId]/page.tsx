@@ -108,6 +108,8 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
         .filter((r) => r.status === 'completed' && r.jobId)
         .filter((r) => {
           if (conf === 'all') return true
+          if (conf === 'validated') return r.feedbackStatus === 'validated'
+          if (conf === 'improve') return r.feedbackStatus === 'improve'
           const c = r.confidence?.toLowerCase()
           const bucket = c === 'high' || c === 'medium' || c === 'low' ? c : 'unrated'
           return bucket === conf
@@ -725,7 +727,7 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
               </Link>
               <span className="text-[10px] text-foreground-tertiary tabular-nums">
                 {navIndex + 1} of {batchQueue.items.length}
-                {batchQueue.conf !== 'all' && ` · ${batchQueue.conf}`}
+                {batchQueue.conf !== 'all' && ` · ${{ improve: 'flagged', validated: 'validated' }[batchQueue.conf] ?? batchQueue.conf}`}
                 {` · ${reviewedCount} reviewed`}
               </span>
             </div>
