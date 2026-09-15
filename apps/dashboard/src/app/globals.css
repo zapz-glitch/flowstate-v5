@@ -170,6 +170,8 @@ html {
   /* iPhone safe-area helpers — resolve to 0 on desktop / non-notch devices */
   --sat: env(safe-area-inset-top, 0px);
   --sab: env(safe-area-inset-bottom, 0px);
+  /* Extra gap between the fixed header and page content */
+  --page-gap: 0px;
 }
 
 /* Installed PWA (iPad/iPhone Home Screen app): the status bar always
@@ -179,6 +181,14 @@ html {
 @media (display-mode: standalone) {
   :root {
     --sat: max(env(safe-area-inset-top, 0px), 24px);
+  }
+}
+
+/* iPad standalone — deeper top inset + breathing room before content */
+@media (display-mode: standalone) and (min-width: 768px) {
+  :root {
+    --sat: max(env(safe-area-inset-top, 0px), 72px);
+    --page-gap: 48px;
   }
 }
 
