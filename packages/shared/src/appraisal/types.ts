@@ -62,6 +62,7 @@ export type AdjustmentType =
   | 'traffic_backing'
   | 'traffic_fronting'
   | 'basement_sqft'
+  | 'foundation'
 
 export interface AppraisalAdjustment {
   type: AdjustmentType

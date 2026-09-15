@@ -22,6 +22,8 @@ import {
 } from '../../db'
 import {
   defaultFilterPriority,
+  DEFAULT_FILTERS,
+  DEFAULT_ADJUSTMENTS,
   type FilterType,
   type AdjustmentType,
   type AppraisalFilter,
@@ -131,25 +133,34 @@ export async function loadUserAnalysisSettings(
           db.select().from(appraisalRuleFilter).where(eq(appraisalRuleFilter.presetId, preset.id)),
           db.select().from(appraisalRuleAdjustment).where(eq(appraisalRuleAdjustment.presetId, preset.id)),
         ])
-        appraisalRules = {
-          filters: presetFilters.map((f) => ({
-            type: f.filterType as FilterType,
-            enabled: f.enabled,
-            value: f.value,
-            priority: f.priority === 'hard' || f.priority === 'soft' ? f.priority : defaultFilterPriority(f.filterType as FilterType),
-          })),
-          adjustments: presetAdjustments.map((a) => ({
-            type: a.adjustmentType as AdjustmentType,
-            enabled: a.enabled,
-            amount: a.amount,
-            percent: a.percentage,
-            // old_comp_discount stores its age threshold (days) in `amount`
-            ...(a.adjustmentType === 'old_comp_discount' && a.amount > 0
-              ? { thresholdDays: a.amount }
-              : {}),
-          })),
+        const filters: AppraisalFilter[] = presetFilters.map((f) => ({
+          type: f.filterType as FilterType,
+          enabled: f.enabled,
+          value: f.value,
+          priority: f.priority === 'hard' || f.priority === 'soft' ? f.priority : defaultFilterPriority(f.filterType as FilterType),
+        }))
+        const adjustments: AppraisalAdjustment[] = presetAdjustments.map((a) => ({
+          type: a.adjustmentType as AdjustmentType,
+          enabled: a.enabled,
+          amount: a.amount,
+          percent: a.percentage,
+          // old_comp_discount stores its age threshold (days) in `amount`
+          ...(a.adjustmentType === 'old_comp_discount' && a.amount > 0
+            ? { thresholdDays: a.amount }
+            : {}),
+        }))
+        // Backfill rule types added after the preset was created — presets
+        // only materialize rows for the types that existed at save time, so
+        // a missing type means "never configured" and should inherit the
+        // system default rather than silently never applying.
+        for (const df of DEFAULT_FILTERS) {
+          if (!filters.some((f) => f.type === df.type)) filters.push({ ...df })
         }
-        console.log(`[UserSettings] Loaded appraisal preset: "${preset.name}" (${presetFilters.length} filters, ${presetAdjustments.length} adjustments)`)
+        for (const da of DEFAULT_ADJUSTMENTS) {
+          if (!adjustments.some((a) => a.type === da.type)) adjustments.push({ ...da })
+        }
+        appraisalRules = { filters, adjustments }
+        console.log(`[UserSettings] Loaded appraisal preset: "${preset.name}" (${filters.length} filters, ${adjustments.length} adjustments)`)
       }
     }
   }
@@ -269,15 +280,22 @@ export async function loadUserAnalysisSettings(
           db.select().from(appraisalRuleFilter).where(eq(appraisalRuleFilter.presetId, locPreset.id)),
           db.select().from(appraisalRuleAdjustment).where(eq(appraisalRuleAdjustment.presetId, locPreset.id)),
         ])
-        appraisalRules = {
-          filters: pFilters.map((f) => ({
-            type: f.filterType as FilterType,
-            enabled: f.enabled,
-            value: f.value,
-            priority: f.priority === 'hard' || f.priority === 'soft' ? f.priority : defaultFilterPriority(f.filterType as FilterType),
-          })),
-          adjustments: pAdjs.map((a) => ({ type: a.adjustmentType as AdjustmentType, enabled: a.enabled, amount: a.amount, percent: a.percentage })),
+        const locFilters: AppraisalFilter[] = pFilters.map((f) => ({
+          type: f.filterType as FilterType,
+          enabled: f.enabled,
+          value: f.value,
+          priority: f.priority === 'hard' || f.priority === 'soft' ? f.priority : defaultFilterPriority(f.filterType as FilterType),
+        }))
+        const locAdjs: AppraisalAdjustment[] = pAdjs.map((a) => ({ type: a.adjustmentType as AdjustmentType, enabled: a.enabled, amount: a.amount, percent: a.percentage }))
+        // Same backfill as the default preset — location presets created
+        // before a rule type existed inherit the system default for it.
+        for (const df of DEFAULT_FILTERS) {
+          if (!locFilters.some((f) => f.type === df.type)) locFilters.push({ ...df })
         }
+        for (const da of DEFAULT_ADJUSTMENTS) {
+          if (!locAdjs.some((a) => a.type === da.type)) locAdjs.push({ ...da })
+        }
+        appraisalRules = { filters: locFilters, adjustments: locAdjs }
       }
     }
     // Override rehab config

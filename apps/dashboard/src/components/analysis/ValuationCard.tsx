@@ -98,6 +98,26 @@ export function ValuationCard({
                 <div className="text-caption-sm text-foreground-tertiary mt-1">${valuation.arvPerSqft.toFixed(0)}/sqft</div>
               )}
             </div>
+            {valuation.listPrice != null && (
+              <div className="p-3 min-w-[120px] flex-1">
+                <MetricLabel
+                  label="List Price"
+                  tooltip={
+                    <div className="space-y-1.5">
+                      <p className="font-medium">Asking Price</p>
+                      <p className="text-foreground-tertiary">The seller's listed asking price, scraped from the property's active listing.</p>
+                      <p className="font-mono text-[10px] text-foreground-tertiary mt-1">ARV delta = ARV - List Price</p>
+                    </div>
+                  }
+                />
+                <div className="text-heading-sm font-semibold">${safeFmt(valuation.listPrice)}</div>
+                {valuation.arvVsListPrice != null && valuation.arvVsListPrice !== 0 && (
+                  <div className={cn('text-caption-sm mt-1', valuation.arvVsListPrice < 0 ? 'text-emerald-600' : 'text-amber-600')}>
+                    ARV ${safeFmt(Math.abs(valuation.arvVsListPrice))} {valuation.arvVsListPrice < 0 ? 'below' : 'above'} list
+                  </div>
+                )}
+              </div>
+            )}
             <div className="p-3 min-w-[120px] flex-1">
               <MetricLabel
                 label="Max Buy Price"
@@ -105,7 +125,7 @@ export function ValuationCard({
                   <div className="space-y-1.5">
                     <p className="font-medium">Maximum Acquisition Price</p>
                     <p className="text-foreground-tertiary">The highest price you should pay for this property to hit your profit target.</p>
-                    <p className="font-mono text-[10px] text-foreground-tertiary mt-1">= ARV - Rehab - Flip Profit - Closing Costs - Carrying Costs</p>
+                    <p className="font-mono text-[10px] text-foreground-tertiary mt-1">= ARV - Rehab - Flip Profit - Closing Costs - Carrying Costs{valuation.locationPenalty ? ' - Location Penalty' : ''}</p>
                   </div>
                 }
               />
@@ -187,7 +207,7 @@ export function ValuationCard({
             )}
           </div>
 
-          {(valuation.closingCosts != null || valuation.carryingCosts != null || valuation.totalInvestment != null) && (
+          {(valuation.closingCosts != null || valuation.carryingCosts != null || valuation.totalInvestment != null || (valuation.locationPenalty ?? 0) > 0) && (
             <div className="flex items-center flex-wrap gap-x-6 gap-y-1 mt-3 text-body-sm px-1">
               {valuation.closingCosts != null && (
                 <Tooltip>
@@ -221,6 +241,24 @@ export function ValuationCard({
                       <p className="font-medium">Carrying Costs</p>
                       <p className="text-foreground-tertiary">Ongoing costs while holding the property (insurance, taxes, utilities, etc.).</p>
                       <p className="font-mono text-[10px] text-foreground-tertiary mt-1">= ARV x Carrying%</p>
+                    </div>
+                  </TooltipContent>
+                </Tooltip>
+              )}
+              {(valuation.locationPenalty ?? 0) > 0 && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="cursor-help">
+                      <span className="text-amber-600 dark:text-amber-400 underline decoration-dotted decoration-amber-500/40 underline-offset-2">Location Penalty</span>
+                      <span className="text-foreground-tertiary">: </span>
+                      <span className="font-medium text-amber-600 dark:text-amber-400">−${safeFmt(valuation.locationPenalty)}</span>
+                      {valuation.locationPenaltyPercent ? <span className="text-foreground-tertiary"> ({safeFmt(valuation.locationPenaltyPercent)}%)</span> : null}
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="max-w-xs">
+                    <div className="space-y-1.5">
+                      <p className="font-medium">Proximity Deduction</p>
+                      <p className="text-foreground-tertiary">Deduction for the subject fronting, backing, or siding a major road/commercial corridor. Tiers are configured in Evaluation Settings → Proximity.</p>
                     </div>
                   </TooltipContent>
                 </Tooltip>

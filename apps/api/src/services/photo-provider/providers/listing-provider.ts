@@ -81,7 +81,12 @@ export class ListingPhotoProvider implements PhotoProvider {
       source: this.name,
       sourceUrl: result.sourceUrl,
       fetchedAt: new Date().toISOString(),
-      metadata: result.floodRisk ? { floodRisk: result.floodRisk } : undefined,
+      metadata: (result.floodRisk || result.listPrice)
+        ? {
+            ...(result.floodRisk ? { floodRisk: result.floodRisk } : {}),
+            ...(result.listPrice ? { listPrice: result.listPrice } : {}),
+          }
+        : undefined,
     }
     return { success: true, data: photos }
   }

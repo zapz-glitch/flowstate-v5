@@ -391,7 +391,7 @@ describe('Default Values', () => {
   })
 
   it('should have all default adjustments', () => {
-    expect(DEFAULT_ADJUSTMENTS.length).toBe(10)
+    expect(DEFAULT_ADJUSTMENTS.length).toBe(11)
     expect(DEFAULT_ADJUSTMENTS.map((a) => a.type)).toContain('old_comp_discount')
     expect(DEFAULT_ADJUSTMENTS.map((a) => a.type)).toContain('bedroom')
     expect(DEFAULT_ADJUSTMENTS.map((a) => a.type)).toContain('bathroom')
@@ -402,11 +402,18 @@ describe('Default Values', () => {
     expect(DEFAULT_ADJUSTMENTS.map((a) => a.type)).toContain('traffic_backing')
     expect(DEFAULT_ADJUSTMENTS.map((a) => a.type)).toContain('traffic_fronting')
     expect(DEFAULT_ADJUSTMENTS.map((a) => a.type)).toContain('basement_sqft')
+    expect(DEFAULT_ADJUSTMENTS.map((a) => a.type)).toContain('foundation')
+    // Foundation mismatch default: 10% deduction off comp sale price
+    expect(DEFAULT_ADJUSTMENTS.find((a) => a.type === 'foundation')?.percent).toBe(10)
   })
 
   it('stories is hard priority (1-story vs 1-story, 2-story vs 2-story); roof material is soft', () => {
     expect(DEFAULT_FILTERS.find((f) => f.type === 'stories_match')?.priority).toBe('hard')
     expect(DEFAULT_FILTERS.find((f) => f.type === 'roof_material_match')?.priority).toBe('soft')
+  })
+
+  it('foundation_match is hard priority by default', () => {
+    expect(DEFAULT_FILTERS.find((f) => f.type === 'foundation_match')?.priority).toBe('hard')
   })
 })
 
@@ -542,6 +549,148 @@ describe('Match filters', () => {
       []
     )
     expect(r.shouldDisable).toBe(false)
+    expect(r.filterResults[0].passed).toBe(false)
+  })
+})
+
+// ─── Subdivision Base-Name Matching ────────────────────────────────────────────
+
+describe('subdivision_match legal-designator normalization', () => {
+  const only = (): AppraisalFilter[] => [{ type: 'subdivision_match', enabled: true, value: 1, priority: 'hard' }]
+
+  it('matches across unit/lot/block/phase/plat identifiers', () => {
+    const subject = createSubject({ subdivision: 'HIGHLAND HILLS SUB UN 17 NCB 1' })
+    for (const compSub of [
+      'HIGHLAND HILLS BL 10854 UN 15',
+      'HIGHLAND HILLS',
+      'HIGHLAND HILLS SUB',
+      'HIGHLAND HILLS PH 3',
+      'HIGHLAND HILLS LOT 42',
+    ]) {
+      const r = evaluateComparable(subject, createComparable({ raw: { subdivision: compSub } }), only(), [])
+      expect(r.filterResults[0].passed, compSub).toBe(true)
+      expect(r.shouldDisable).toBe(false)
+    }
+  })
+
+  it('matches word-boundary prefix names (base community vs directional variant)', () => {
+    const r = evaluateComparable(
+      createSubject({ subdivision: 'SWEETWATER CREEK' }),
+      createComparable({ raw: { subdivision: 'SWEETWATER CREEK S UT 2E' } }),
+      only(), []
+    )
+    expect(r.filterResults[0].passed).toBe(true)
+  })
+
+  it('does not substring-match unrelated names (OAK vs OAKWOOD)', () => {
+    const r = evaluateComparable(
+      createSubject({ subdivision: 'OAK' }),
+      createComparable({ raw: { subdivision: 'OAKWOOD ESTATES' } }),
+      only(), []
+    )
+    expect(r.filterResults[0].passed).toBe(false)
+    expect(r.shouldDisable).toBe(true)
+  })
+})
+
+// ─── Foundation Rules ──────────────────────────────────────────────────────────
+
+describe('foundation_match filter + foundation adjustment', () => {
+  const only = (priority?: 'hard' | 'soft'): AppraisalFilter[] =>
+    [{ type: 'foundation_match', enabled: true, value: 1, priority }]
+  const foundationAdj = (percent = 10): AppraisalAdjustment[] =>
+    [{ type: 'foundation', enabled: true, amount: 0, percent }]
+  const withFoundation = (s: string | null, c: string | null) => ({
+    subject: createSubject({ construction: { foundationType: s } }),
+    comp: createComparable({ construction: { foundationType: c } }),
+  })
+
+  it('hard-disqualifies verified family mismatches (pier comp vs slab subject)', () => {
+    const { subject, comp } = withFoundation('Slab', 'Pier & Beam')
+    const r = evaluateComparable(subject, comp, only('hard'), [])
+    expect(r.shouldDisable).toBe(true)
+    expect(r.filterResults[0].status).toBe('failed')
+  })
+
+  it('passes same-family variants ("Concrete Slab" vs "Slab")', () => {
+    const { subject, comp } = withFoundation('Slab', 'Concrete Slab')
+    const r = evaluateComparable(subject, comp, only('hard'), [])
+    expect(r.shouldDisable).toBe(false)
+  })
+
+  it('classifies "Post Tension" as slab, not raised', () => {
+    const { subject, comp } = withFoundation('Slab', 'Post Tension')
+    const r = evaluateComparable(subject, comp, only('hard'), [])
+    expect(r.filterResults[0].passed).toBe(true)
+  })
+
+  it('not_verified (never a hard fail) when either side lacks data', () => {
+    const { subject, comp } = withFoundation('Slab', null)
+    const r = evaluateComparable(subject, comp, only('hard'), [])
+    expect(r.shouldDisable).toBe(false)
+    expect(r.filterResults[0].status).toBe('not_verified')
+  })
+
+  it('deducts the configured % on a family mismatch (wood comp vs slab subject)', () => {
+    const { subject, comp } = withFoundation('Slab', 'Wood')
+    const r = evaluateComparable(subject, comp, only('soft'), foundationAdj(10))
+    const adj = r.adjustmentResults.find((a) => a.type === 'foundation')
+    expect(adj?.applied).toBe(true)
+    // 10% of $375,000 comp price
+    expect(adj?.amount).toBe(-37500)
+  })
+
+  it('no deduction when foundations match', () => {
+    const { subject, comp } = withFoundation('Slab', 'Slab')
+    const r = evaluateComparable(subject, comp, [], foundationAdj(10))
+    expect(r.adjustmentResults.find((a) => a.type === 'foundation')?.applied).toBe(false)
+  })
+
+  it('no deduction when foundation data is unavailable', () => {
+    const { subject, comp } = withFoundation(null, 'Slab')
+    const r = evaluateComparable(subject, comp, [], foundationAdj(10))
+    expect(r.adjustmentResults.find((a) => a.type === 'foundation')?.applied).toBe(false)
+  })
+})
+
+// ─── Small-Subject Sqft Rule ───────────────────────────────────────────────────
+
+describe('sqft_diff small-subject rule', () => {
+  const only = (): AppraisalFilter[] => [{ type: 'sqft_diff', enabled: true, value: 250, priority: 'hard' }]
+
+  it('subject <1000sf: comp ≤1000sf qualifies even beyond ±250', () => {
+    const r = evaluateComparable(
+      createSubject({ squareFeet: 780 }),
+      createComparable({ squareFeet: 990 }), // +210 is inside ±250 anyway — use a real outlier
+      only(), []
+    )
+    expect(r.filterResults[0].passed).toBe(true)
+
+    const wide = evaluateComparable(
+      createSubject({ squareFeet: 600 }),
+      createComparable({ squareFeet: 999 }), // +399sf — outside ±250 but under the ceiling
+      only(), []
+    )
+    expect(wide.filterResults[0].passed).toBe(true)
+    expect(wide.shouldDisable).toBe(false)
+  })
+
+  it('subject <1000sf: comp >1000sf still fails', () => {
+    const r = evaluateComparable(
+      createSubject({ squareFeet: 600 }),
+      createComparable({ squareFeet: 1100 }),
+      only(), []
+    )
+    expect(r.filterResults[0].passed).toBe(false)
+    expect(r.shouldDisable).toBe(true)
+  })
+
+  it('subject ≥1000sf: normal ±250 band applies', () => {
+    const r = evaluateComparable(
+      createSubject({ squareFeet: 2000 }),
+      createComparable({ squareFeet: 2400 }),
+      only(), []
+    )
     expect(r.filterResults[0].passed).toBe(false)
   })
 })

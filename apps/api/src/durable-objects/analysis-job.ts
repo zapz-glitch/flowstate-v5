@@ -233,7 +233,12 @@ export class AnalysisJobDO {
         radiusMiles: config.searchOptions.radiusMiles ?? apiFilterParams.radiusMiles ?? 1,
         maxComps: config.searchOptions.maxComps ?? 25,
         monthsBack: config.searchOptions.monthsBack ?? apiFilterParams.monthsBack ?? 12,
-        sqftVariance: apiFilterParams.sqftVariance,
+        // Sub-1,000sf subjects: the ±variance band is replaced by an absolute
+        // 1,000sf ceiling at evaluation — widen the provider-side variance so
+        // qualifying comps aren't culled upstream.
+        sqftVariance: (property.squareFeet != null && property.squareFeet < 1000)
+          ? Math.max(apiFilterParams.sqftVariance ?? 0, 1000)
+          : apiFilterParams.sqftVariance,
         subjectSqft: property.squareFeet ?? undefined,
         subjectPropertyType: property.propertyType ?? undefined,
     }
@@ -327,7 +332,14 @@ export class AnalysisJobDO {
         const days = (nowMs - new Date(c.saleDate).getTime()) / 86_400_000
         if (Number.isFinite(days) && days > saleAgeDays) return true
       }
-      if (c.squareFeet && property.squareFeet && Math.abs(c.squareFeet - property.squareFeet) > sqftDiff) return true
+      if (c.squareFeet && property.squareFeet) {
+        // Sub-1,000sf subject bypass: comps ≤1,000sf pass regardless of the
+        // ±variance band — matches evaluateSqftDiff's absolute ceiling.
+        const sqftOk = property.squareFeet < 1000
+          ? c.squareFeet <= 1000
+          : Math.abs(c.squareFeet - property.squareFeet) <= sqftDiff
+        if (!sqftOk) return true
+      }
       if (c.yearBuilt && property.yearBuilt && Math.abs(c.yearBuilt - property.yearBuilt) > maxYear) return true
       return false
     }

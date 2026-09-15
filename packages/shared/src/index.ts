@@ -36,6 +36,9 @@ export {
   isHardFilter,
   HARD_FILTER_TYPES,
   SOFT_FILTER_SCORES,
+  subdivisionBase,
+  subdivisionsMatch,
+  foundationFamily,
 } from './appraisal/index'
 
 export type {

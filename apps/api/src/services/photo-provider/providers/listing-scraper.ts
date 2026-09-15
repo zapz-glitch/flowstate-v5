@@ -274,6 +274,43 @@ export class ListingPhotoScraper {
   }
 
   /**
+   * Extract the listing's asking/list price from scraped content.
+   * Redfin/Realtor embed structured JSON ("listPrice", JSON-LD offers.price);
+   * markdown falls back to "List Price: $…" / "Listed for $…" text.
+   * Returns null when absent — off-market properties simply have no ask.
+   */
+  private extractListPrice(content: { html: string; markdown: string }): number | null {
+    const sane = (raw: string | undefined): number | null => {
+      const n = parseInt((raw ?? '').replace(/[^\d]/g, ''), 10)
+      return Number.isFinite(n) && n >= 10_000 && n <= 100_000_000 ? n : null
+    }
+
+    // Structured keys first — most specific to least
+    for (const re of [
+      /"listPrice"\s*:\s*"?([\d,]+)"?/i,
+      /"listingPrice"\s*:\s*"?([\d,]+)"?/i,
+      /"forSalePrice"\s*:\s*"?([\d,]+)"?/i,
+      /"askingPrice"\s*:\s*"?([\d,]+)"?/i,
+    ]) {
+      const n = sane(content.html.match(re)?.[1])
+      if (n) return n
+    }
+
+    // JSON-LD blocks: offers.price / price inside RealEstateListing schema
+    for (const m of content.html.matchAll(/<script[^>]*application\/ld\+json[^>]*>([\s\S]*?)<\/script>/gi)) {
+      const n = sane(m[1].match(/"price"\s*:\s*"?([\d,]+)"?/i)?.[1])
+      if (n) return n
+    }
+
+    // Markdown text: "List Price: $250,000" / "Listed for $250,000" / "Asking $250,000"
+    const md = content.markdown.match(
+      /(?:list(?:ed)?\s*(?:price|for)|asking(?:\s*price)?|priced at|price:\s*list)\s*[:\-]?\s*\$\s*([\d,]{5,})/i
+    )
+    const n = sane(md?.[1])
+    return n
+  }
+
+  /**
    * Reject resolved listing URLs that point at a different property —
    * search engines happily return the neighbor's listing ("5747 Misty Gln"
    * for a "5802 Misty Gln" query), and wrong-house photos are worse than
@@ -349,13 +386,13 @@ export class ListingPhotoScraper {
   async fetchPhotos(
     property: PropertyIdentifier,
     adapter: ListingSiteAdapter,
-  ): Promise<{ photos: string[]; sourceUrl: string; floodRisk: { level: string; source: string } | null } | null> {
+  ): Promise<{ photos: string[]; sourceUrl: string; floodRisk: { level: string; source: string } | null; listPrice: number | null } | null> {
     const tag = `[${adapter.name}]`
     try {
       // Cache check
       if (this.cache) {
         try {
-          const cached = await this.cache.get<{ photos: string[]; sourceUrl: string; floodRisk: { level: string; source: string } | null }>(
+          const cached = await this.cache.get<{ photos: string[]; sourceUrl: string; floodRisk: { level: string; source: string } | null; listPrice: number | null }>(
             this.cacheKey(adapter, property), 'json')
           if (cached && cached.photos.length > 0) {
             console.log(`${tag} cache hit: ${cached.photos.length} photos`)
@@ -401,8 +438,10 @@ export class ListingPhotoScraper {
 
       const floodRisk = this.extractFloodSignal(content)
       if (floodRisk) console.log(`${tag} flood signal: ${floodRisk.level} (${floodRisk.source})`)
+      const listPrice = this.extractListPrice(content)
+      if (listPrice) console.log(`${tag} list price: $${listPrice.toLocaleString()}`)
 
-      const result = { photos, sourceUrl: listingUrl, floodRisk }
+      const result = { photos, sourceUrl: listingUrl, floodRisk, listPrice }
       if (this.cache) {
         try {
           await this.cache.put(this.cacheKey(adapter, property), JSON.stringify(result), {

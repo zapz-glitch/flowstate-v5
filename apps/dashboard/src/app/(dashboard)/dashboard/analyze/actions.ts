@@ -186,6 +186,8 @@ export interface SubjectData {
   } | null
   /** Direct listing URL from the provider that delivered photos */
   listingUrl?: string | null
+  /** Asking/list price scraped from the subject's listing (null when off-market) */
+  listPrice?: number | null
   /** Foundation type (e.g., Slab, Crawl Space, Basement) */
   foundationType?: string | null
   /** Building style (e.g., Colonial, Cape Cod, Ranch) */
@@ -303,6 +305,10 @@ export interface ValuationData {
     priceCeiling?: number
     noDataReason?: string
   } | null
+  /** Asking/list price scraped from the subject's listing */
+  listPrice?: number | null
+  /** ARV minus list price — negative = ARV below asking (negotiation room) */
+  arvVsListPrice?: number | null
 }
 
 export interface CompsData {

@@ -59,13 +59,23 @@ export function SubjectGridCard({ subject, isLoading }: SubjectGridCardProps) {
                   </span>
                 )}
               </div>
-              {subject.lastSale?.price && (
+              {(subject.listPrice != null || subject.lastSale?.price) && (
                 <div className="text-right flex-shrink-0">
-                  <div className="text-sm font-bold tabular-nums">${subject.lastSale.price.toLocaleString()}</div>
-                  <div className="text-[9px] text-foreground-tertiary tabular-nums">
-                    {subject.lastSale.pricePerSqft ? `$${subject.lastSale.pricePerSqft.toFixed(0)}/sf · ` : ''}
-                    {subject.lastSale.date ? formatShortDate(subject.lastSale.date) : 'Last Sale'}
-                  </div>
+                  {subject.listPrice != null && (
+                    <>
+                      <div className="text-sm font-bold tabular-nums">${subject.listPrice.toLocaleString()}</div>
+                      <div className="text-[9px] text-foreground-tertiary">List Price</div>
+                    </>
+                  )}
+                  {subject.lastSale?.price && (
+                    <div className={subject.listPrice != null ? 'mt-1' : ''}>
+                      <div className="text-[11px] font-medium tabular-nums text-foreground-secondary">${subject.lastSale.price.toLocaleString()}</div>
+                      <div className="text-[9px] text-foreground-tertiary tabular-nums">
+                        {subject.lastSale.pricePerSqft ? `$${subject.lastSale.pricePerSqft.toFixed(0)}/sf · ` : ''}
+                        {subject.lastSale.date ? formatShortDate(subject.lastSale.date) : 'Last Sale'}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

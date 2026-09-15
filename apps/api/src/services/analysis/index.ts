@@ -350,6 +350,9 @@ export interface ValuationResult {
   projectedProfit: number
   projectedROI: number
   wholesalePrice: number
+  /** Positional proximity deduction applied to buy price (0 when none) */
+  locationPenalty?: number
+  locationPenaltyPercent?: number
   recommendation?: 'strong-buy' | 'buy' | 'hold' | 'pass' | 'manual-review'
   recommendationReason?: string
 }
@@ -412,6 +415,8 @@ export interface ResponseContext {
   } | null
   /** Actual listing URL from the photo provider that delivered (Redfin/Zillow/Realtor) */
   subjectListingUrl?: string | null
+  /** Asking price scraped from the subject's listing page */
+  subjectListPrice?: number | null
   /** Visual ARV-candidacy check per ARV-selected comp (by comp ID) */
   compCurbAppeal?: Record<string, {
     condition: 'renovated' | 'dated' | 'distressed' | 'unknown'
@@ -546,6 +551,8 @@ export interface AnalysisResponse {
     } | null
     /** Direct listing URL from the provider that delivered photos */
     listingUrl: string | null
+    /** Asking/list price scraped from the subject's listing (null when off-market or unlisted) */
+    listPrice: number | null
     /** Building permit records for the subject */
     permits: {
       /** 'not_requested' = permits are pulled on demand via the report's Permits action */
@@ -635,8 +642,15 @@ export interface AnalysisResponse {
       priceCeiling: number
       noDataReason?: string
     } | null
+    /** Asking/list price scraped from the subject's listing (null when off-market) */
+    listPrice: number | null
+    /** ARV minus list price — negative = ARV below asking (negotiation room), positive = above */
+    arvVsListPrice: number | null
     buyPrice: number
     buyPricePercent: number
+    /** Positional proximity deduction applied to buy price (0 when none) */
+    locationPenalty: number
+    locationPenaltyPercent: number
     rehabCost: number
     rehabLevel: string
     rehabPerSqft: number
@@ -1039,6 +1053,19 @@ export function buildAnalysisResponse(
   const zoningRisks = detectLocationRisks(property)
   riskFlags.push(...zoningRisks)
 
+  // ARV vs asking price — flag when the ARV clears below the seller's ask
+  // (negotiation room) or lands above it (seller underpriced).
+  if (ctx.subjectListPrice != null && finalArv != null) {
+    const delta = finalArv - ctx.subjectListPrice
+    riskFlags.push(
+      delta < 0
+        ? `ARV $${Math.abs(delta).toLocaleString()} below list price`
+        : delta > 0
+          ? `ARV $${delta.toLocaleString()} above list price`
+          : 'ARV at list price'
+    )
+  }
+
   // Get enabled and disabled comp counts
   const enabledComps = appraisalResult.comparables.filter((c) => c.isEnabled)
   const disabledComps = appraisalResult.comparables.filter((c) => !c.isEnabled)
@@ -1259,6 +1286,7 @@ export function buildAnalysisResponse(
       condition: ctx.visionAnalysis?.overallCondition ?? null,
       curbAppeal: ctx.subjectCurbAppeal ?? null,
       listingUrl: ctx.subjectListingUrl ?? null,
+      listPrice: ctx.subjectListPrice ?? null,
       classification: subjectClassificationSummary,
       buildingCondition: property.buildingCondition ?? null,
       buildingGrade: property.buildingGrade ?? null,
@@ -1298,6 +1326,10 @@ export function buildAnalysisResponse(
       projectedProfit: valuation.projectedProfit,
       projectedROI: valuation.projectedROI,
       wholesalePrice: valuation.wholesalePrice,
+      // Position-tiered proximity deduction (fronting/backing/siding a busy
+      // road/commercial) — deducted from buy price inside calculateValuation
+      locationPenalty: valuation.locationPenalty ?? 0,
+      locationPenaltyPercent: valuation.locationPenaltyPercent ?? 0,
       recommendation: valuation.recommendation,
       recommendationReason: valuation.recommendationReason,
       rehabLevelEstimates: ctx.rehabLevelEstimates ?? [],
@@ -1310,6 +1342,11 @@ export function buildAnalysisResponse(
         priceCeiling: ctx.groupBResult.priceCeiling,
         noDataReason: ctx.groupBResult.noDataReason,
       } : null,
+      listPrice: ctx.subjectListPrice ?? null,
+      arvVsListPrice:
+        ctx.subjectListPrice != null && finalArv != null
+          ? finalArv - ctx.subjectListPrice
+          : null,
     },
 
     // ═══ COMPARABLE SALES (All comps with enable/disable status) ═══════════════

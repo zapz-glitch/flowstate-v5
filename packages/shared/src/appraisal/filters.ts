@@ -6,6 +6,7 @@
  */
 
 import type { PropertyLike, CompLike, AppraisalFilter, FilterResult, FilterType } from './types'
+import { foundationFamily } from './adjustments'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -15,20 +16,36 @@ function normalizeSubdivision(value: string | null | undefined): string | null {
 }
 
 /**
- * Subdivision base name — strips unit/phase/section/plat designators so
- * "SWEETWATER CREEK", "SWEETWATER CREEK S UT 2E", and "PARKSIDE LAKES PH 01"
- * resolve to their parent development.
+ * Subdivision base name — strips ALL plat/legal designator tokens (unit,
+ * block, phase, lot, plat, NCB, SUB, etc.) and bare numeric identifiers so
+ * differently-recorded parcels of the same community resolve to the shared
+ * meaningful name:
+ *   "HIGHLAND HILLS SUB UN 17 NCB 1" → "highland hills"
+ *   "HIGHLAND HILLS BL 10854 UN 15"  → "highland hills"
  */
-function subdivisionBase(value: string | null | undefined): string | null {
+const SUBDIVISION_DESIGNATORS = new Set([
+  'un', 'unit', 'ut', 'u',
+  'ph', 'phase',
+  'sec', 'sect', 'section',
+  'blk', 'block', 'bl',
+  'lot', 'plat', 'tract',
+  'add', 'addn', 'addition',
+  'part', 'pt',
+  'rep', 'repl', 'replat',
+  'vlg',
+  'sub', 'subdiv', 'subdivision',
+  'ncb', 'nb',
+  'the', 'of',
+])
+
+export function subdivisionBase(value: string | null | undefined): string | null {
   let v = normalizeSubdivision(value)
   if (!v) return null
-  v = v.replace(/[\/\-_.,]/g, ' ').replace(/\s+/g, ' ').trim()
-  v = v
-    .replace(
-      /(?:\b(?:un|unit|ut|u|ph|phase|sec|sect|section|blk|block|lot|plat|tract|add|addn|addition|part|pt|rep|repl|replat|vlg)\s*\w*|#\s*\w+).*$/i,
-      ''
-    )
-    .trim()
+  v = v.replace(/[\/\-_.,#]/g, ' ').replace(/\s+/g, ' ').trim()
+  const tokens = v
+    .split(' ')
+    .filter((t) => !SUBDIVISION_DESIGNATORS.has(t) && !/^\d+[a-z]?$/.test(t))
+  v = tokens.join(' ').trim()
   return v || null
 }
 
@@ -36,7 +53,7 @@ function subdivisionBase(value: string | null | undefined): string | null {
  * Equal base names, or one base a word-boundary prefix of the other —
  * "sweetwater creek" ⊂ "sweetwater creek south" but "oak" ⊄ "oakwood".
  */
-function subdivisionsMatch(
+export function subdivisionsMatch(
   subjectSub: string | null | undefined,
   compSub: string | null | undefined
 ): boolean {
@@ -106,11 +123,25 @@ const evaluators: Record<FilterType, FilterEvaluator> = {
       return { type: 'foundation_match', passed: true, reason: 'Foundation type data not available' }
     }
 
-    const passed = subjectFoundation === compFoundation
+    const subjectFam = foundationFamily(subject.construction?.foundationType)
+    const compFam = foundationFamily(comp.construction?.foundationType)
+
+    const passed =
+      subjectFoundation === compFoundation ||
+      subjectFam === compFam ||
+      subjectFam === 'other' ||
+      compFam === 'other'
+
     return {
       type: 'foundation_match',
       passed,
-      reason: passed ? undefined : `Foundation mismatch: "${comp.construction?.foundationType}" vs subject "${subject.construction?.foundationType}"`,
+      reason: passed
+        ? subjectFoundation !== compFoundation && subjectFam === compFam
+          ? `Foundation family match: "${comp.construction?.foundationType}" vs subject "${subject.construction?.foundationType}"`
+          : subjectFam === 'other' || compFam === 'other'
+            ? 'Foundation types differ but could not be classified — not verified'
+            : undefined
+        : `Foundation mismatch: "${comp.construction?.foundationType}" (${compFam}) vs subject "${subject.construction?.foundationType}" (${subjectFam})`,
       actualValue: comp.construction?.foundationType,
       threshold: subject.construction?.foundationType,
     }
@@ -167,14 +198,22 @@ const evaluators: Record<FilterType, FilterEvaluator> = {
     // Absolute sqft difference — matches the API evaluator semantics
     // (filter.value is a sqft threshold, e.g. ±250).
     const diff = Math.abs(comp.squareFeet - subject.squareFeet)
-    const passed = diff <= filter.value
+
+    // Sub-1,000 sqft subjects: size comparability is bounded by an absolute
+    // ceiling instead of the ±variance band — any comp ≤1,000 sqft qualifies.
+    const passed =
+      subject.squareFeet < 1000 ? comp.squareFeet <= 1000 : diff <= filter.value
 
     return {
       type: 'sqft_diff',
       passed,
-      reason: passed ? undefined : `Sqft difference too large: ${diff} sqft (max: ${filter.value})`,
+      reason: passed
+        ? undefined
+        : subject.squareFeet < 1000
+          ? `Comp too large: ${comp.squareFeet} sqft (sub-1,000sf subject caps comps at 1,000 sf)`
+          : `Sqft difference too large: ${diff} sqft (max: ${filter.value})`,
       actualValue: diff,
-      threshold: filter.value,
+      threshold: subject.squareFeet < 1000 ? 'comp ≤ 1000 sf' : filter.value,
     }
   },
 

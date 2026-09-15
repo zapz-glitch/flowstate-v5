@@ -51,9 +51,9 @@ export const DEFAULT_FILTERS: AppraisalFilter[] = [
   { type: 'subdivision_match', enabled: true, value: 1 },
   { type: 'neighborhood_match', enabled: true, value: 1, priority: 'soft' },
   { type: 'building_style_match', enabled: true, value: 1, priority: 'hard' }, // Ranch vs Ranch, 2-story style vs same — verified mismatches disqualify
-  // Preferred physical matches (soft) — assessed from provider building
-  // data; recorded for confidence/ranking, never disqualify.
-  { type: 'foundation_match', enabled: true, value: 1, priority: 'soft' },
+  // Foundation is a verified-hard match — slab vs pier/crawl comps carry
+  // real value gaps (typically ~10%); a verified mismatch disqualifies.
+  { type: 'foundation_match', enabled: true, value: 1, priority: 'hard' },
   { type: 'construction_material_match', enabled: true, value: 1, priority: 'soft' },
   { type: 'pool_match', enabled: true, value: 1, priority: 'soft' },
   { type: 'garage_match', enabled: true, value: 1, priority: 'soft' },
@@ -200,6 +200,7 @@ export type AdjustmentType =
   | 'traffic_backing'
   | 'traffic_fronting'
   | 'basement_sqft'
+  | 'foundation'
 
 export interface AppraisalAdjustment {
   type: AdjustmentType
@@ -228,6 +229,9 @@ export const DEFAULT_ADJUSTMENTS: AppraisalAdjustment[] = [
   { type: 'traffic_fronting', enabled: true, amount: 15000, percent: 20, valueThreshold: 500000 },
   // Basement/guest-house sqft credited at 50% of normal $/sqft
   { type: 'basement_sqft', enabled: true, amount: 0, percent: 50 },
+  // Foundation-family mismatch (e.g. pier/crawl comp vs slab subject) —
+  // % deduction off the comp's sale price.
+  { type: 'foundation', enabled: true, amount: 0, percent: 10 },
 ]
 
 // ─── Adjustment Labels (for UI) ───────────────────────────────────────────────
@@ -279,6 +283,11 @@ export const ADJUSTMENT_LABELS: Record<AdjustmentType, {
   basement_sqft: {
     label: 'Basement/Guest-House SqFt',
     description: 'Basement or guest-house square footage credited at configured % of normal $/sqft',
+    isPercentage: true,
+  },
+  foundation: {
+    label: 'Foundation Mismatch Deduction',
+    description: 'Deduction % applied to comps on a different foundation family than the subject (e.g. slab vs pier/beam)',
     isPercentage: true,
   },
 }

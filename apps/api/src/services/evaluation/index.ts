@@ -800,6 +800,9 @@ export async function performAnalysis(
       compCurbAppeal,
       subjectCurbAppeal,
       subjectListingUrl: photoBundle?.subject?.sourceUrl ?? null,
+      subjectListPrice: typeof photoBundle?.subject?.metadata?.listPrice === 'number'
+        ? photoBundle.subject.metadata.listPrice
+        : null,
       apiCallStats: params.apiCallStats,
       bestMatch,
       groupBResult,

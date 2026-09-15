@@ -1441,3 +1441,75 @@ Verified: api + dashboard tsc clean; 96/96 appraisal vitest pass;
 sortBy=Distance in the request URL).
 
 NOT DEPLOYED — awaiting explicit deploy instruction.
+
+### 2026-09-15 — Deployed (34931916528) + appraisal/UI improvement package
+
+**Deployed**: `bba0a64` (permits on demand + listing flood) and
+`a6b83c7` (closest-first comp selection) — merged to main, CI deploy
+run 34931916528 GREEN.
+
+**New work (uncommitted, feat/iphone-pwa)** — the 13-flag feedback
+package the product engineer approved:
+
+- **Overpass failover**: location-risk endpoints were all returning 406
+  (0/25 reports had locationRisks). Now kumi.systems + private.coffee
+  lead, originals as fallback; POST form-encoded; 15s per-endpoint
+  timeout; 25s query timeout.
+- **Fuzzy subdivision**: subdivisionBase() strips UN/UNIT/BL/LOT/PH/
+  SEC/NCB/PLAT/etc + numeric identifiers; word-boundary prefix match
+  (SWEETWATER CREEK ≈ SWEETWATER CREEK S UT 2E) but not OAK≈OAKWOOD.
+  Mirrored API evaluator + shared filters + all dashboard call sites
+  (grid badge, list card, comparison dialog, section sorting).
+- **Foundation hard rule + adjustment**: foundation_match promoted to
+  hard (verified family mismatch disqualifies; 'other'/unclassifiable/
+  missing never fail hard). Post Tension classifies slab not raised.
+  New `foundation` adjustment type — % deduction (default 10%) off comp
+  price on verified family mismatch; matters when user demotes the
+  filter to soft. Migration 0030 promotes existing presets' NULL/soft
+  foundation_match rows to hard.
+- **Settings backfill**: loadUserAnalysisSettings now fills missing
+  rule types from DEFAULT_FILTERS/DEFAULT_ADJUSTMENTS — presets saved
+  before new types existed (foundation adj, traffic_*, basement_sqft,
+  new filters) inherit system defaults instead of silently never
+  applying. Both default-preset and location-override paths.
+- **Batch settings**: re-reads settings per address (both runBatch and
+  retryFailed loops), last-good snapshot on transient failure,
+  proximityConfig now forwarded in evalParams to /start-streaming.
+- **Location penalty end-to-end**: OSM risks → bundle.enrichment →
+  computeLocationPenalty(worst position, ARV, user proximityConfig) →
+  calculateValuation deducts from buyPrice. FIXED: penalty now
+  serialized to response (valuation.locationPenalty + effective %),
+  breakdown ledger line shows effective % not 0, ValuationCard renders
+  an amber "Location Penalty" line + updated buy-price formula tooltip.
+- **List price**: extractListPrice() in listing-scraper (listPrice/
+  askingPrice/JSON-LD offers.price) → photoBundle.metadata →
+  ctx.subjectListPrice → subject.listPrice + valuation.listPrice +
+  valuation.arvVsListPrice (ARV − list; negative = below ask).
+  SubjectGridCard shows List Price above last-sale; ValuationCard adds
+  a List Price metric cell with ARV-vs-list delta.
+- **Sub-1k sqft**: subject <1000sf → comps ≤1000sf bypass ±250 (API
+  evaluator + shared + batch pre-filter + provider sqftVariance widen).
+- **Feature-match indicators**: new feature-match.ts compares 17
+  card-visible features vs subject (subdivision, neighborhood,
+  foundation, style, stories, construction, roof, condition, pool,
+  garage, hvac, fireplaces, beds, baths, sqft, year, lot) — match/
+  mismatch/unknown. CompGridCard gets a dot strip + match count;
+  CompCard gets dot strip + green/red on every stats cell and expanded
+  detail row (needs subject prop — added, back-compat with old props);
+  CompComparisonDialog highlights every StatCell. Gray = unverifiable,
+  never a false red.
+- **Settings UI**: client-api AdjustmentType gains traffic_*/
+  basement_sqft/foundation; format-helpers label maps cover all
+  types; evaluation-settings chips show new types with correct
+  %/$ /flat+% formats; AdjustmentRow gets dual $+% inputs for
+  traffic_* types and Days+% badge for old_comp_discount.
+
+Verified: api tsc clean; dashboard tsc clean; 110/110 appraisal vitest
+pass (incl. 15 new tests: subdivision normalization, foundation
+families/hard match/deduction, small-subject sqft); dashboard
+regression 5/5 files pass (new feature-match.test.mjs covers match/
+mismatch/unknown semantics against real shared matchers).
+
+NOT DEPLOYED — awaiting explicit deploy instruction. Migration 0030
+must run with the next deploy (db:migrate:remote) or existing presets
+keep soft foundation_match.

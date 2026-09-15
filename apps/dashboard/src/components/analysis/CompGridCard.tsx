@@ -1,12 +1,15 @@
 'use client'
 
+import { useMemo } from 'react'
 import { Check, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { subdivisionsMatch } from '@flowstate-api/shared'
 import { CopyButton } from '@/components/ui/copy-button'
 import type { CompItem, SubjectData } from './shared-types'
 import { StreetViewImage } from './StreetViewImage'
 import { RuleMatchDetails } from './RuleMatchDetails'
-import { normalizeSubdivision, sqftMatchColor, yearMatchColor, lotMatchColor, fmtDelta, fmtLotDelta, formatShortDate, formatLotSize } from './format-helpers'
+import { sqftMatchColor, yearMatchColor, lotMatchColor, fmtDelta, fmtLotDelta, formatShortDate, formatLotSize } from './format-helpers'
+import { compFeatureMatches, featureState, matchDotClass, matchTextClass } from './feature-match'
 
 export interface CompGridCardProps {
   comp: CompItem
@@ -47,6 +50,11 @@ export function CompGridCard({
     ? yearMatchColor(comp.yearBuilt!, subject.yearBuilt) : null
   const lotColor = lotDelta != null
     ? lotMatchColor(comp.lotSizeAcres!, subject!.lotSizeAcres!) : null
+
+  // Feature-vs-subject verification — every card-visible field, green/red/gray
+  const featureMatches = useMemo(() => compFeatureMatches(comp, subject), [comp, subject])
+  const verifiedCount = featureMatches.filter((m) => m.state !== 'unknown').length
+  const matchCount = featureMatches.filter((m) => m.state === 'match').length
 
   // Build external links
   const streetViewUrl = comp.latitude && comp.longitude
@@ -167,7 +175,7 @@ export function CompGridCard({
         {/* Location badges — own line directly under the address */}
         <div className="flex items-center gap-1 mt-1 flex-wrap">
           {comp.subdivision && (() => {
-            const isMatch = !!(subject?.subdivision && normalizeSubdivision(comp.subdivision) === normalizeSubdivision(subject.subdivision))
+            const isMatch = !!(subject?.subdivision && subdivisionsMatch(comp.subdivision, subject.subdivision))
             const hasSubject = !!subject?.subdivision
             return (
               <span className={cn(
@@ -228,9 +236,24 @@ export function CompGridCard({
           </div>
           <div className="flex items-center justify-between text-[11px]">
             <span className="text-foreground-tertiary">Style</span>
-            <span className="font-medium truncate ml-2">{comp.buildingStyle || '-'}</span>
+            <span className={cn('font-medium truncate ml-2', matchTextClass(featureState(featureMatches, 'style')))}>{comp.buildingStyle || '-'}</span>
           </div>
         </div>
+
+        {/* Feature-match strip — one dot per compared feature vs subject.
+            Green = match, red = verified mismatch, gray = no data to verify. */}
+        {featureMatches.length > 0 && (
+          <div className="flex items-center gap-1 mt-1.5" title={`${matchCount}/${verifiedCount} verified features match the subject`}>
+            {featureMatches.map((m) => (
+              <span
+                key={m.key}
+                title={`${m.label}: ${m.state === 'match' ? 'match' : m.state === 'mismatch' ? 'mismatch' : 'no data'}${m.detail ? ` — ${m.detail}` : ''}`}
+                className={cn('w-2 h-2 rounded-full flex-shrink-0', matchDotClass(m.state))}
+              />
+            ))}
+            <span className="text-[9px] text-foreground-tertiary tabular-nums ml-auto">{matchCount}/{verifiedCount}</span>
+          </div>
+        )}
       </div>
     </div>
   )
