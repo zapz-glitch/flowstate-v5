@@ -1510,6 +1510,15 @@ families/hard match/deduction, small-subject sqft); dashboard
 regression 5/5 files pass (new feature-match.test.mjs covers match/
 mismatch/unknown semantics against real shared matchers).
 
-NOT DEPLOYED — awaiting explicit deploy instruction. Migration 0030
-must run with the next deploy (db:migrate:remote) or existing presets
-keep soft foundation_match.
+DEPLOYED (2026-09-15): feat/iphone-pwa fast-forwarded to main
+(a6b83c7..4f50165) via `git push origin feat/iphone-pwa:main` — main
+is checked out in the sibling worktree so push-by-ref is the merge
+path. CI deploy run 34936244099 GREEN (API 43s, dashboard 1m24s).
+Migration 0030_foundation_match_hard applied to prod D1 via
+db:migrate:remote (first attempt 7403'd transiently; retry succeeded).
+
+Follow-up still open: routes/user-reports /comps recalc path
+(recalculateReport) does not recompute the location penalty — same
+gap the permits route had; passes no locationPenaltyAmount into
+calculateValuation so buy price can drift upward on comp edits for
+fronting/backing subjects.
