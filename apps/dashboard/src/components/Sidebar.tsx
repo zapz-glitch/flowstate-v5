@@ -162,7 +162,7 @@ export default function Sidebar() {
           'fixed inset-y-0 left-0 z-40 hidden lg:flex lg:flex-col bg-background border-r border-border transition-all duration-300 ease-in-out',
           collapsed ? 'w-[72px]' : 'w-64'
         )}
-        style={{ paddingTop: 'var(--sat)' }}
+        style={{ paddingTop: 'var(--sat)', paddingBottom: 'var(--sab)' }}
       >
         <div className="flex flex-col h-full">
           {/* Logo & Collapse Button */}
@@ -174,7 +174,7 @@ export default function Sidebar() {
               onClick={toggleCollapsed}
               className={cn(
                 'p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors',
-                collapsed && 'absolute -right-3 top-6 bg-background border border-border shadow-sm'
+                collapsed && 'absolute -right-3 top-[calc(1.5rem+var(--sat))] bg-background border border-border shadow-sm'
               )}
               aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
             >
