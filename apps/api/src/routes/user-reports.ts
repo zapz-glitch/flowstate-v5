@@ -15,6 +15,13 @@ import { hashSharePassword } from '../lib/share-token'
 import { bodyLimit } from 'hono/body-limit'
 import { recalculateReport } from '../services/evaluation/recalculate'
 import { deleteReportAssets } from '../services/report-assets'
+import { createPropertyApi } from '../services/property-api'
+import { createValuationService } from '../services/valuation'
+import { calculateAllRehabLevelEstimates } from '../services/analysis'
+import { assessMajorItems, toValuationMajorItems } from '../services/evaluation/major-items'
+import { loadMajorItemConfig, computeLocationPenalty } from '../services/evaluation'
+import { loadUserAnalysisSettings } from '../services/user-settings'
+import type { MajorItem } from '../services/valuation/types'
 
 const userReports = new Hono<{ Bindings: Env }>()
 
@@ -60,6 +67,253 @@ userReports.post('/:jobId/comps', bodyLimit({ maxSize: 20000 }), async (c) => {
       .bind(nextJson, JSON.stringify(analysis.valuation), JSON.stringify(analysis.comps), analysis.valuation?.arv ?? null, analysis.valuation?.asIsValue ?? null, analysis.valuation?.buyPrice ?? null, analysis.valuation?.rehabCost ?? null, report.id, session.user.id, report.fullResponseJson),
   ])
   if (results[1].meta.changes !== 1) return c.json({ error: 'This report changed. Reload it before editing comparables.' }, 409)
+  return c.json({ analysis })
+})
+
+// ─── POST /user/reports/:jobId/permits ────────────────────────────────────────
+// On-demand permit pull. Permits are no longer fetched during analysis (a paid
+// provider call per report); this route pulls them for the subject, re-derives
+// the permit-age major items, and re-runs valuation so the buy price reflects
+// real permit evidence instead of the no-permit assumptions.
+userReports.post('/:jobId/permits', async (c) => {
+  const session = await getSession(c)
+  if (!session?.user) return c.json({ error: 'Not authenticated' }, 401)
+  const origin = c.req.header('Origin')
+  if (origin != null && origin !== (c.env.DASHBOARD_URL ? new URL(c.env.DASHBOARD_URL).origin : null)) return c.json({ error: 'Untrusted origin' }, 403)
+
+  const jobId = c.req.param('jobId')
+  const db = drizzle(c.env.DB)
+  const [report] = await db.select().from(savedReports)
+    .where(and(eq(savedReports.jobId, jobId), eq(savedReports.userId, session.user.id))).limit(1)
+  if (!report) return c.json({ error: 'Report not found' }, 404)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let saved: any
+  try { saved = JSON.parse(report.fullResponseJson ?? '{}') } catch { return c.json({ error: 'Report data is corrupted' }, 409) }
+
+  const subject = saved.subject
+  if (!subject?.id) return c.json({ error: 'Report has no subject property to pull permits for' }, 409)
+
+  const address = typeof subject.address === 'string' ? subject.address : ''
+  const comma = address.indexOf(',')
+  const propertyApi = createPropertyApi(c.env)
+  const permitsResult = await propertyApi.getBuildingPermits(subject.id, {
+    address1: comma > 0 ? address.slice(0, comma).trim() : address,
+    address2: comma > 0 ? address.slice(comma + 1).trim() : '',
+  })
+  if (!permitsResult.success || !permitsResult.data) {
+    return c.json({ error: ('error' in permitsResult ? permitsResult.error : null) ?? 'Permit lookup failed' }, 502)
+  }
+  const permits = permitsResult.data.permits ?? []
+
+  // Re-derive major items — caller-specified (manual) items carry over; the
+  // permit-age engine re-assesses everything else against real evidence.
+  const prevMajor: Array<{ id: MajorItem['id']; enabled: boolean; cost: number; reason?: string }> =
+    Array.isArray(saved.appliedSettings?.majorItems) ? saved.appliedSettings.majorItems : []
+  const callerItems: MajorItem[] = prevMajor
+    .filter((m) => typeof m?.reason === 'string' && m.reason.startsWith('Caller-specified'))
+    .map((m) => ({ id: m.id, enabled: m.enabled !== false, cost: m.cost }))
+  const majorItemConfig = await loadMajorItemConfig(c.env, session.user.id)
+  const assessments = assessMajorItems(permits, majorItemConfig, callerItems, undefined, subject.yearBuilt ?? null)
+  const valuationItems = toValuationMajorItems(assessments, callerItems)
+  const assessmentById = new Map(assessments.map((a) => [a.id, a]))
+  const callerIds = new Set(callerItems.filter((m) => m.enabled).map((m) => m.id))
+  const derivedMajorItems = valuationItems.map((m) => ({
+    ...m,
+    reason: callerIds.has(m.id)
+      ? `Caller-specified item${assessmentById.get(m.id)?.deduplicated ? ' (permit rule deduplicated)' : ''}`
+      : (assessmentById.get(m.id)?.reason ?? 'Enabled'),
+  }))
+
+  // Re-run valuation with the report's applied-settings snapshot — ARV and
+  // comp selection are unchanged; only major-item cost evidence moves.
+  const applied = saved.appliedSettings ?? {}
+  const subjectSqft = subject.squareFeet ?? 0
+  const arvItems = (saved.comps?.items ?? []).filter(
+    (item: { compGroup?: string; squareFeet?: number | null }) => item?.compGroup === 'arv' && (item?.squareFeet ?? 0) > 0
+  )
+  const compAvgSqft = arvItems.length
+    ? arvItems.reduce((s: number, item: { squareFeet: number }) => s + item.squareFeet, 0) / arvItems.length
+    : subjectSqft
+  // The proximity deduction isn't serialized into the response — rebuild it
+  // from the saved locationRisks with the user's proximity config, resolved
+  // against the subject's address the same way the original analysis did.
+  const addrParts = address.split(',').map((s: string) => s.trim())
+  const stateZip = (addrParts[2] ?? '').split(/\s+/)
+  const userSettings = await loadUserAnalysisSettings(c.env.DB, {
+    userId: session.user.id,
+    address: { city: addrParts[1], state: stateZip[0], zipCode: stateZip[1] },
+  }, c.env.API_CACHE)
+  const locationPenaltyAmount = computeLocationPenalty(
+    Array.isArray(saved.locationRisks) ? saved.locationRisks : null,
+    saved.valuation?.arv ?? 0,
+    userSettings.proximityConfig
+  )
+  const valuationService = createValuationService(applied.rehabTable)
+  const valuation = valuationService.calculateValuation({
+    arv: saved.valuation?.arv ?? 0,
+    subjectSqft,
+    compAvgSqft,
+    rehabLevelIndex: applied.rehabLevelIndex ?? 2,
+    skipBaseRehab: saved.valuation?.rehabLevel === 'Renovated',
+    locationPenaltyAmount,
+    majorItems: valuationItems,
+    additionPlay: applied.additionPlay ?? 0,
+    closingCostsPercent: applied.dealParams?.closingCostsPercent ?? 8,
+    carryingCostsPercent: applied.dealParams?.carryingCostsPercent ?? 2,
+    wholesaleFee: applied.dealParams?.wholesaleFee ?? 10000,
+  })
+  const rehabLevelEstimates = calculateAllRehabLevelEstimates(valuationService, {
+    arv: saved.valuation?.arv ?? 0,
+    subjectSqft,
+    compAvgSqft,
+    selectedRehabLevelIndex: applied.rehabLevelIndex ?? 2,
+    majorItems: valuationItems,
+    additionPlay: applied.additionPlay ?? 0,
+    closingCostsPercent: applied.dealParams?.closingCostsPercent ?? 8,
+    carryingCostsPercent: applied.dealParams?.carryingCostsPercent ?? 2,
+    wholesaleFee: applied.dealParams?.wholesaleFee ?? 10000,
+  })
+
+  const conf = saved.report?.confidence
+  const recommendationReason = conf === 'low'
+    ? `${valuation.recommendationReason ?? ''} — LOW confidence: comp evidence is thin or stale`.trim()
+    : conf === 'medium'
+      ? `${valuation.recommendationReason ?? ''} — medium confidence: some dimensions unverified`.trim()
+      : valuation.recommendationReason
+
+  // Rebuild the report's rehab ledger + deductions so the audit trail shows
+  // the new permit evidence, not the old no-permit assumptions.
+  const prevLedger: Array<Record<string, unknown>> = saved.report?.rehab?.ledger ?? []
+  const ledger = [
+    ...prevLedger.filter((l) => l.source === 'rehab_tier'),
+    ...derivedMajorItems.filter((m) => m.enabled).map((m) => ({
+      label: m.id,
+      amount: m.cost,
+      source: callerIds.has(m.id) ? 'major_item_manual' : 'major_item_permit',
+      reason: m.reason,
+      deduplicated: assessmentById.get(m.id)?.deduplicated ?? false,
+      evidenceStatus: assessmentById.get(m.id)?.evidenceStatus,
+    })),
+    ...assessments.filter((a) => !a.enabled && a.deduplicated).map((a) => ({
+      label: a.id,
+      amount: 0,
+      source: 'major_item_permit',
+      reason: a.reason,
+      deduplicated: true,
+      evidenceStatus: a.evidenceStatus,
+    })),
+    ...prevLedger.filter((l) => l.source === 'addition'),
+  ]
+  const prevDeductions: Array<{ label: string; reason?: string }> = saved.report?.deductions ?? []
+  const baseReason = prevDeductions.find((d) => d.label === 'Base Rehab')?.reason
+    ?? `${valuation.rehabLevel} at $${valuation.rehabPerSqft}/sqft`
+  const additionPlay = applied.additionPlay ?? 0
+  const deductions = [
+    { label: 'Base Rehab', amount: -valuation.baseRehabCost, reason: baseReason },
+    ...derivedMajorItems.filter((m) => m.enabled).map((m) => ({ label: m.id, amount: -m.cost, reason: m.reason })),
+    ...(additionPlay > 0 ? [{ label: 'Addition Play', amount: -additionPlay, reason: 'Additional improvement budget' }] : []),
+    ...(locationPenaltyAmount > 0 ? [{ label: 'Location Penalty', amount: -locationPenaltyAmount, reason: 'Proximity risk deduction (major road/railroad/commercial)' }] : []),
+    { label: 'Closing Costs', amount: -valuation.closingCosts, reason: `${valuation.closingCostsPercent}% of ARV — purchase + resale transaction costs` },
+    { label: 'Carrying Costs', amount: -valuation.carryingCosts, reason: `${valuation.carryingCostsPercent}% of ARV — holding costs during rehab` },
+    { label: 'Minimum Profit', amount: -valuation.desiredProfit, reason: `Required margin for ${valuation.arvTier} price tier` },
+  ]
+
+  const analysis = {
+    ...saved,
+    subject: {
+      ...subject,
+      permits: {
+        status: permits.length > 0 ? 'available' : 'empty',
+        error: null,
+        items: permits.map((p) => ({
+          permitId: p.permitId,
+          permitNumber: p.permitNumber ?? null,
+          projectType: p.projectType ?? null,
+          description: p.description ?? null,
+          status: p.status ?? null,
+          effectiveDate: p.effectiveDate ?? null,
+          jobValue: p.jobValue ?? null,
+        })),
+      },
+    },
+    valuation: {
+      ...(saved.valuation ?? {}),
+      buyPrice: valuation.buyPrice,
+      buyPricePercent: valuation.buyPricePercent,
+      rehabCost: valuation.totalRehabCost,
+      rehabLevel: valuation.rehabLevel,
+      rehabPerSqft: valuation.rehabPerSqft,
+      baseRehabCost: valuation.baseRehabCost,
+      majorItemsCost: valuation.majorItemsCost,
+      closingCosts: valuation.closingCosts,
+      carryingCosts: valuation.carryingCosts,
+      totalCosts: valuation.closingCosts + valuation.carryingCosts,
+      totalInvestment: valuation.totalInvestment,
+      projectedProfit: valuation.projectedProfit,
+      projectedROI: valuation.projectedROI,
+      wholesalePrice: valuation.wholesalePrice,
+      recommendation: valuation.recommendation,
+      recommendationReason,
+      rehabLevelEstimates,
+      breakdown: valuation.breakdown,
+    },
+    permits: {
+      count: permits.length,
+      totalValue: permits.reduce((sum: number, p: { jobValue?: number | null }) => sum + (p.jobValue ?? 0), 0),
+      recentTypes: [...new Set(permits.map((p) => p.projectType).filter(Boolean) as string[])].slice(0, 5),
+    },
+    riskFlags: (() => {
+      const flags: string[] = Array.isArray(saved.riskFlags) ? [...saved.riskFlags] : []
+      if (permits.some((p) => p.jobValue && p.jobValue > 50000) && !flags.includes('Major Permits (>$50K)')) {
+        flags.push('Major Permits (>$50K)')
+      }
+      return flags.length > 0 ? flags : null
+    })(),
+    appliedSettings: { ...applied, majorItems: derivedMajorItems },
+    evaluationRevision: (saved.evaluationRevision ?? 0) + 1,
+    ...(saved.report ? {
+      report: {
+        ...saved.report,
+        rehab: {
+          ...(saved.report.rehab ?? {}),
+          majorItems: derivedMajorItems.filter((m) => m.enabled).map((m) => ({ name: m.id, cost: m.cost, reason: m.reason })),
+          majorItemsCost: valuation.majorItemsCost,
+          totalCost: valuation.totalRehabCost,
+          ledger,
+        },
+        deductions,
+        outcome: {
+          ...(saved.report.outcome ?? {}),
+          maxBuyPrice: valuation.buyPrice,
+          buyPricePercent: valuation.buyPricePercent,
+          wholesalePrice: valuation.wholesalePrice,
+          projectedProfit: valuation.projectedProfit,
+          projectedROI: valuation.projectedROI,
+          totalInvestment: valuation.totalInvestment,
+          recommendation: valuation.recommendation,
+          recommendationReason,
+        },
+        // Stale no-permit notes are replaced by the fresh unknown-count note
+        confidenceReasons: [
+          ...(saved.report.confidenceReasons ?? []).filter((r: string) => !/no permit evidence|permit evidence/i.test(r)),
+          ...(() => {
+            const unknown = assessments.filter((a) => a.evidenceStatus === 'unknown' && !a.deduplicated && !a.enabled).length
+            return unknown > 0 ? [`${unknown} major item(s) have no permit evidence — UNKNOWN (not charged)`] : []
+          })(),
+        ],
+      },
+    } : {}),
+  }
+
+  const nextJson = JSON.stringify(analysis)
+  const changes = JSON.stringify({ actor: session.user.id, before: saved, after: analysis })
+  const results = await c.env.DB.batch([
+    c.env.DB.prepare('INSERT INTO report_history (id, report_id, user_id, action, description, changes_json, created_at) SELECT ?, id, user_id, ?, ?, ?, ? FROM saved_reports WHERE id = ? AND user_id = ? AND full_response_json = ?')
+      .bind(crypto.randomUUID(), 'permits_pull', `Pulled ${permits.length} building permit(s); re-derived major items and valuation`, changes, new Date().toISOString(), report.id, session.user.id, report.fullResponseJson),
+    c.env.DB.prepare('UPDATE saved_reports SET full_response_json = ?, valuation_data = ?, arv = ?, max_allowable_offer = ?, estimated_repairs = ? WHERE id = ? AND user_id = ? AND full_response_json = ?')
+      .bind(nextJson, JSON.stringify(analysis.valuation), analysis.valuation?.arv ?? null, analysis.valuation?.buyPrice ?? null, analysis.valuation?.rehabCost ?? null, report.id, session.user.id, report.fullResponseJson),
+  ])
+  if (results[1].meta.changes !== 1) return c.json({ error: 'This report changed. Reload it and try again.' }, 409)
   return c.json({ analysis })
 })
 

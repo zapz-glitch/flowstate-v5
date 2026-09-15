@@ -311,8 +311,8 @@ export interface NormalizedFloodZone {
   participationStatus: string | null
   /** FEMA Special Flood Hazard Area determination ('In'/'Out') — parcel-level only */
   specialFloodHazardArea?: string | null
-  /** Which resource produced this: parcel-level determination or coordinate spatial lookup */
-  source?: 'parcel' | 'spatial'
+  /** Which resource produced this: parcel-level determination, coordinate spatial lookup, or a First Street signal scraped from the public listing */
+  source?: 'parcel' | 'spatial' | 'listing'
 }
 
 // ─── Response Types ─────────────────────────────────────────────────────────
@@ -564,9 +564,9 @@ export interface EnrichmentData {
 }
 
 export interface EnrichmentOptions {
-  /** Include building permits (default: true) */
+  /** Include building permits (default: false — on-demand via report Permits action) */
   permits?: boolean
-  /** Include flood zone data (default: true) */
+  /** Include provider flood zone data (default: false — listing scrape carries the flood signal) */
   floodZone?: boolean
   /** Include weather/natural disaster risk (default: false) */
   weatherRisk?: boolean

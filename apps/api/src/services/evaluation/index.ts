@@ -283,7 +283,7 @@ function selectGroupBComps(
  * legacy `major_item_costs` JSON overrides (cost only). Rows absent from both
  * inherit MAJOR_ITEMS defaults.
  */
-async function loadMajorItemConfig(
+export async function loadMajorItemConfig(
   env: Env,
   userId: string | undefined
 ): Promise<Record<string, { enabled?: boolean; cost?: number; ageThreshold?: number | null }>> {
@@ -321,6 +321,28 @@ async function loadMajorItemConfig(
   }
 
   return config
+}
+
+/**
+ * Proximity deduction — Evaluation Settings' Proximity Adjustments:
+ * worst detected position wins (fronting > backing > siding);
+ * flat $ below the ARV threshold, % of ARV at/above it.
+ */
+export function computeLocationPenalty(
+  locationRisks: Array<{ position?: 'fronting' | 'backing' | 'siding' | null }> | null | undefined,
+  arv: number,
+  config?: import('../../routes/proximity-config').ProximityConfig
+): number {
+  if (!locationRisks?.length) return 0
+  const cfg = config ?? PROXIMITY_DEFAULTS
+  const rank = { fronting: 3, backing: 2, siding: 1 } as const
+  const worst = locationRisks.reduce<keyof typeof rank | null>((w, r) => {
+    const pos = r.position ?? 'siding'
+    return !w || rank[pos] > rank[w] ? pos : w
+  }, null)
+  if (!worst) return 0
+  const tier = cfg[worst]
+  return arv >= cfg.arvThreshold ? Math.round(arv * (tier.percent / 100)) : tier.flat
 }
 
 // ─── Main Evaluation Pipeline ────────────────────────────────────────────────
@@ -441,6 +463,35 @@ export async function performAnalysis(
         fallbacksUsed.push(`comp_fallback:${appraisalResult.fallbackUsed}`)
       }
       step('zillow_supplement', 'completed', `${filledCount} field(s) supplemented from Zillow listings`)
+    }
+  }
+
+  // ── 2c. Flood signal from the listing scrape — the subject photo fetch
+  // already resolves the Redfin/Realtor page, which embeds First Street
+  // "Flood Factor" data. Free (Firecrawl, not the property provider), so it
+  // replaces the paid flood-zone call. Provider data wins when present.
+  if (!bundle.enrichment.floodZone) {
+    const sig = photoBundle?.subject?.metadata?.floodRisk
+    if (sig && typeof sig === 'object' && typeof (sig as { level?: unknown }).level === 'string') {
+      const level = (sig as { level: string; source?: string }).level
+      const elevated = /moderate|major|severe|extreme|zone /i.test(level)
+      bundle.enrichment.floodZone = {
+        floodZone: level,
+        floodZoneDescription: `Flood risk signal from the ${photoBundle!.subject!.source} listing (First Street)`,
+        isInFloodZone: elevated,
+        isNearFloodZone: !elevated && !/minimal/i.test(level),
+        communityName: null,
+        communityNumber: null,
+        firmMapNumber: null,
+        mapPanel: null,
+        mapDate: null,
+        participationStatus: null,
+        specialFloodHazardArea: null,
+        source: 'listing',
+      }
+      bundle.enrichment.evidenceLimitations = (bundle.enrichment.evidenceLimitations ?? [])
+        .filter((m) => !/flood/i.test(m))
+      step('photo_fetch', 'completed', `Flood signal from listing: ${level}`)
     }
   }
 
@@ -662,22 +713,7 @@ export async function performAnalysis(
     compAvgSqft,
     rehabLevelIndex: derivedBuybox.rehabLevelIndex,
     skipBaseRehab: derivedBuybox.renovatedVerified === true,
-    // Proximity deduction — Evaluation Settings' Proximity Adjustments:
-    // worst detected position wins (fronting > backing > siding);
-    // flat $ below the ARV threshold, % of ARV at/above it.
-    locationPenaltyAmount: (() => {
-      const risks = bundle.enrichment.locationRisks ?? []
-      if (risks.length === 0) return 0
-      const cfg = params.proximityConfig ?? PROXIMITY_DEFAULTS
-      const rank = { fronting: 3, backing: 2, siding: 1 } as const
-      const worst = risks.reduce<keyof typeof rank | null>((w, r) => {
-        const pos = r.position ?? 'siding'
-        return !w || rank[pos] > rank[w] ? pos : w
-      }, null)
-      if (!worst) return 0
-      const tier = cfg[worst]
-      return finalArv >= cfg.arvThreshold ? Math.round(finalArv * (tier.percent / 100)) : tier.flat
-    })(),
+    locationPenaltyAmount: computeLocationPenalty(bundle.enrichment.locationRisks, finalArv, params.proximityConfig),
     majorItems: derivedBuybox.majorItems,
     additionPlay: derivedBuybox.additionPlay ?? buybox.additionPlay ?? 0,
     closingCostsPercent: buybox.closingCostsPercent ?? 8,

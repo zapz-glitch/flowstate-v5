@@ -38,11 +38,20 @@ export function RiskFloodCard({ riskFlags, floodZone, permits }: RiskFloodCardPr
           <div className="flex items-center gap-2.5 mb-2">
             <Droplets className="w-4 h-4 text-blue-600" />
             <span className="text-body-sm font-medium">Flood Zone</span>
+            {floodZone.source === 'listing' && (
+              <Badge variant="outline" className="bg-secondary text-foreground-secondary border-border text-[10px]">
+                Listing estimate — not FEMA
+              </Badge>
+            )}
           </div>
           <div className="flex items-center gap-4 text-body-sm">
-            {floodZone.zone && <span>Zone: <span className="font-medium">{floodZone.zone}</span></span>}
+            {floodZone.zone && (
+              <span>
+                {floodZone.source === 'listing' ? 'Risk' : 'Zone'}: <span className="font-medium">{floodZone.zone}</span>
+              </span>
+            )}
             <span>
-              In Flood Zone:{' '}
+              {floodZone.source === 'listing' ? 'Elevated Risk' : 'In Flood Zone'}:{' '}
               <span className={cn('font-medium', floodZone.inFloodZone ? 'text-red-600' : 'text-emerald-600')}>
                 {floodZone.inFloodZone ? 'Yes' : 'No'}
               </span>

@@ -142,7 +142,7 @@ export interface ClassificationSummary {
 
 export interface SubjectData {
   permits?: {
-    status: 'available' | 'empty' | 'unavailable'
+    status: 'available' | 'empty' | 'unavailable' | 'not_requested'
     items: Array<{
       permitId: string
       permitNumber: string | null
@@ -449,6 +449,12 @@ export interface FloodZoneData {
   zone?: string | null
   inFloodZone?: boolean
   description?: string | null
+  /** 'parcel'/'spatial' = provider FEMA data · 'listing' = Redfin/First Street scrape signal */
+  source?: 'parcel' | 'spatial' | 'listing' | null
+  specialFloodHazardArea?: string | null
+  mapPanel?: string | null
+  mapDate?: string | null
+  communityName?: string | null
 }
 
 export interface NeighbourhoodData {

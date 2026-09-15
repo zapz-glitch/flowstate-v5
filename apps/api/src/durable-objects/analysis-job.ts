@@ -239,14 +239,15 @@ export class AnalysisJobDO {
     }
     const [compsResult, permitsResult, floodResult, avmResult, buildingDetailResult, osmResult] = await Promise.all([
       propertyApi.getComparables(comparablesParams),
-      // Permits: preserve the error object — 'unavailable' must mean the call
-      // failed, not that the property has no permits on file (that's 'empty')
-      (config.enrichment?.permits !== false)
+      // Permits: OPT-IN only — the paid call moved to on-demand (report's
+      // Permits action). 'unavailable' must still mean the call failed, not
+      // that the property has no permits on file (that's 'empty').
+      (config.enrichment?.permits === true)
         ? propertyApi.getBuildingPermits(property.id, { address1: property.address, address2: `${property.city}, ${property.state} ${property.zipCode}` })
         : Promise.resolve(null),
-      // Flood zone: parcel-level determination when the search returned a
-      // v1PropertyId, coordinate spatial lookup as fallback
-      (config.enrichment?.floodZone !== false)
+      // Flood zone: OPT-IN only — the First Street signal is scraped from the
+      // Redfin listing during photo fetch instead (free via Firecrawl).
+      (config.enrichment?.floodZone === true)
         ? propertyApi.getFloodZoneForProperty(property).catch(() => null)
         : Promise.resolve(null),
       // Subject AVM (Total Home Value) — parcel-level, subject only
@@ -428,11 +429,11 @@ export class AnalysisJobDO {
     }
     const evidenceLimitations: string[] = []
     for (const id of pools.conflictIds) evidenceLimitations.push(`${id}: Provider comparable pools disagree on the same sale date; price is quarantined from evaluation`)
-    if (!permitsData) evidenceLimitations.push(config.enrichment?.permits === false
-      ? 'Subject permits were not requested; system replacement evidence is unknown'
+    if (!permitsData) evidenceLimitations.push(config.enrichment?.permits !== true
+      ? 'Subject permits were not pulled during analysis — pull them on demand from the report'
       : 'Subject permit lookup failed or is unavailable; this does not mean no permits exist')
-    if (!floodData) evidenceLimitations.push(config.enrichment?.floodZone === false
-      ? 'Subject flood zone was not requested; flood risk is unknown'
+    if (!floodData) evidenceLimitations.push(config.enrichment?.floodZone !== true
+      ? 'Subject flood zone was not pulled from the provider; a listing-derived flood signal may still apply'
       : 'Subject flood-zone evidence is unavailable; this does not mean the property is outside a flood zone')
 
     const bundle: import('../services/property-api/types').PropertyBundle = {
@@ -443,7 +444,7 @@ export class AnalysisJobDO {
         provider: property.provider,
         searchParams: config.search as import('../services/property-api/types').PropertySearchParams,
         comparablesParams: { ...comparablesParams },
-        enrichmentOptions: { permits: config.enrichment?.permits ?? true, floodZone: config.enrichment?.floodZone ?? true, weatherRisk: false, neighbourhood: false },
+        enrichmentOptions: { permits: config.enrichment?.permits === true, floodZone: config.enrichment?.floodZone === true, weatherRisk: false, neighbourhood: false },
       },
       enrichment: {
         evidenceLimitations,

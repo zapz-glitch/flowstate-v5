@@ -869,6 +869,16 @@ export async function recalculateReportComps(jobId: string, selectedCompIds: str
   return result.analysis
 }
 
+/** Pull building permits for a saved report's subject on demand — re-derives
+ *  major items and re-runs valuation server-side, returns the updated analysis. */
+export async function pullReportPermits(jobId: string): Promise<AnalyzeData> {
+  const result = await fetchApi<{ analysis: AnalyzeData }>(`/user/reports/${encodeURIComponent(jobId)}/permits`, {
+    method: 'POST',
+    body: JSON.stringify({}),
+  })
+  return result.analysis
+}
+
 // ─── Report Sharing ──────────────────────────────────────────────────────────
 
 export interface ShareSettings {

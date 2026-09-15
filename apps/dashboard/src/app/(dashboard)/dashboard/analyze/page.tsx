@@ -502,6 +502,7 @@ export default function AnalyzePage() {
     onCompClick: (comp) => { setComparisonComp(comp as CompItem); setComparisonOpen(true) },
     onRunAiAnalysis: handleRunAiAnalysis,
     onUndoAiSelection: aiAnalysisDone ? handleUndoAiSelection : undefined,
+    onPermitsPulled: (a) => setAnalysisResult(a),
   })
 
   // ─── Analysis Handler ────────────────────────────────────────────────────

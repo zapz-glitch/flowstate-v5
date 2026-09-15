@@ -545,10 +545,12 @@ export function UnderwritingReportPDF({
 
             {floodZone && (
               <View style={[s.row, s.gap8, s.mt4]}>
-                <Text style={{ fontSize: 8, color: C.muted }}>Flood Zone:</Text>
+                <Text style={{ fontSize: 8, color: C.muted }}>{floodZone.source === 'listing' ? 'Flood Risk:' : 'Flood Zone:'}</Text>
                 <Text style={{ fontSize: 8, fontFamily: 'Helvetica-Bold' }}>{floodZone.zone ?? 'N/A'}</Text>
                 <Text style={{ fontSize: 8, color: floodZone.inFloodZone ? C.red : C.green, fontFamily: 'Helvetica-Bold' }}>
-                  {floodZone.inFloodZone ? 'IN FLOOD ZONE' : 'Not in Flood Zone'}
+                  {floodZone.source === 'listing'
+                    ? (floodZone.inFloodZone ? 'ELEVATED RISK (listing)' : 'LOW RISK (listing)')
+                    : (floodZone.inFloodZone ? 'IN FLOOD ZONE' : 'Not in Flood Zone')}
                 </Text>
               </View>
             )}

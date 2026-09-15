@@ -15,6 +15,7 @@ import type {
   CompItem,
 } from '@/app/(dashboard)/dashboard/analyze/actions'
 import type { RecalcResult } from '@/lib/recalc'
+import type { AnalyzeData } from '@/app/(dashboard)/dashboard/analyze/actions'
 
 // ─── Comp Override ─────────────────────────────────────────────────────────
 
@@ -34,6 +35,8 @@ export interface EvaluationCallbacks {
   onUndoAiSelection?: () => void
   /** Called after a Notify stamp is submitted — batch review uses it to advance */
   onFeedbackSubmitted?: (type: 'validate' | 'improve') => void
+  /** Called after an on-demand permit pull returns the updated analysis */
+  onPermitsPulled?: (analysis: AnalyzeData) => void
 }
 
 // ─── Consolidated State ────────────────────────────────────────────────────

@@ -378,9 +378,11 @@ analyze.get('/defaults', async (c) => {
         carryingCostsPercent: 2,
         wholesaleFee: 10000,
       },
+      // Permits moved to the on-demand report action; flood signal comes from
+      // the Redfin listing scrape (Firecrawl) instead of the paid provider call.
       enrichment: {
-        permits: true,
-        floodZone: true,
+        permits: false,
+        floodZone: false,
         weatherRisk: false,
       },
       rehabLevels: REHAB_LEVELS.map((name, index) => ({ index, name })),

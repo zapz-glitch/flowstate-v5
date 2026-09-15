@@ -66,15 +66,24 @@ test('valuation headline renders ARV, Buy and Wholesale from display fields and 
   assert.ok(!html.includes('73.50981'))
 })
 
-test('permits render records and distinguish empty, unavailable, historical and loading states', () => {
-  const { PropertyPermits } = load('./PropertyPermits.tsx', { './format-helpers': { formatShortDate: value => value } })
+test('permits render records and distinguish empty, unavailable, not-requested and loading states', () => {
+  const { PropertyPermits } = load('./PropertyPermits.tsx', {
+    './format-helpers': { formatShortDate: value => value },
+    '@/lib/utils': { cn: (...classes) => classes.filter(Boolean).join(' ') },
+    '@/hooks/use-evaluation': { useEvaluation: () => ({ feedbackContext: null, onPermitsPulled: undefined }) },
+    '@/lib/client-api': { pullReportPermits: async () => ({}) },
+    'sonner': { toast: { success: () => {}, error: () => {} } },
+  })
   const render = props => renderToStaticMarkup(React.createElement(PropertyPermits, props))
-  assert.match(render({ permits: { status: 'empty', items: [] } }), /Permits - NA.*No permit records returned/)
+  assert.match(render({ permits: { status: 'empty', items: [] } }), /Permits — NA[\s\S]*No permit records returned/)
   assert.match(render({ permits: { status: 'unavailable', items: [] } }), /lookup unavailable/)
-  assert.match(render({}), /not saved/)
-  assert.match(render({ loading: true }), /Loading/)
+  assert.match(render({}), /Not pulled during analysis/)
+  assert.match(render({ permits: { status: 'not_requested', items: [] } }), /Not pulled during analysis/)
+  assert.match(render({ loading: true }), /loading/i)
+  // Item rows sit behind the collapsed toggle — static markup exposes the
+  // header summary (count + total job value); row detail is client-rendered.
   const html = render({ permits: { status: 'available', items: [{ permitId: 'p1', permitNumber: 'R1', projectType: 'Roofing', description: 'Replace roof', status: 'Completed', effectiveDate: '2024-03-01', jobValue: 12000 }] } })
-  for (const value of ['Roofing', 'R1', 'Replace roof', 'Completed', '2024-03-01', '12,000']) assert.ok(html.includes(value))
+  for (const value of ['Permits (1)', '12,000']) assert.ok(html.includes(value))
   assert.ok(!html.includes('Permits - NA'))
 })
 

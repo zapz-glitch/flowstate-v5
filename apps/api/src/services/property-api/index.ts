@@ -812,9 +812,12 @@ class PropertyApi implements PropertyApiService {
 
     // ─── Step 2: Parallel fetch - comparables + enrichment ─────────────────────
     const compParams = params.comparables ?? {};
+    // Permits + flood-zone provider calls are opt-in: permits moved to the
+    // on-demand report action, flood comes from the listing scrape (First
+    // Street signal via Redfin/Realtor) — both keep the CoreLogic spend down.
     const enrichOpts: EnrichmentOptions = params.enrichment ?? {
-      permits: true,
-      floodZone: true,
+      permits: false,
+      floodZone: false,
     };
 
     // Build address strings for providers that need them (e.g. ATTOM permits)

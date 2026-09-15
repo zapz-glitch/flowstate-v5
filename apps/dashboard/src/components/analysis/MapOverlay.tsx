@@ -4,7 +4,7 @@ import { Droplets, AlertTriangle, ShieldCheck } from 'lucide-react'
 
 interface MapOverlayProps {
   riskFlags?: string[] | null
-  floodZone?: { zone?: string | null; inFloodZone?: boolean | null } | null
+  floodZone?: { zone?: string | null; inFloodZone?: boolean | null; source?: 'parcel' | 'spatial' | 'listing' | null } | null
 }
 
 const LEGEND_ITEMS = [
@@ -40,12 +40,16 @@ export function MapOverlay({ riskFlags, floodZone }: MapOverlayProps) {
             floodZone.inFloodZone ? (
               <span className="inline-flex items-center gap-1.5 text-xs font-medium text-red-400">
                 <Droplets className="w-3.5 h-3.5 flex-shrink-0" />
-                Flood Zone{floodZone.zone ? ` ${floodZone.zone}` : ''}
+                {floodZone.source === 'listing'
+                  ? `Flood risk: ${floodZone.zone ?? 'elevated'}`
+                  : `Flood Zone${floodZone.zone ? ` ${floodZone.zone}` : ''}`}
               </span>
             ) : (
               <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-400">
                 <ShieldCheck className="w-3.5 h-3.5 flex-shrink-0" />
-                No Flood Zone
+                {floodZone.source === 'listing'
+                  ? `Flood risk: ${floodZone.zone ?? 'low'}`
+                  : 'No Flood Zone'}
               </span>
             )
           )}

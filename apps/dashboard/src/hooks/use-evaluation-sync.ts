@@ -10,7 +10,7 @@
 
 import { useEffect } from 'react'
 import { useSetAtom } from 'jotai'
-import type { SubjectData, ValuationData, CompsData, CompItem } from '@/app/(dashboard)/dashboard/analyze/actions'
+import type { AnalyzeData, SubjectData, ValuationData, CompsData, CompItem } from '@/app/(dashboard)/dashboard/analyze/actions'
 import type { UseAnalysisEvaluationReturn } from '@/hooks/use-analysis-evaluation'
 import { evaluationStateAtom } from '@/atoms/evaluation'
 
@@ -41,6 +41,7 @@ interface SyncOptions {
   onRunAiAnalysis?: () => void
   onUndoAiSelection?: () => void
   onFeedbackSubmitted?: (type: 'validate' | 'improve') => void
+  onPermitsPulled?: (analysis: AnalyzeData) => void
 }
 
 export function useEvaluationSync({
@@ -58,6 +59,7 @@ export function useEvaluationSync({
   onRunAiAnalysis,
   onUndoAiSelection,
   onFeedbackSubmitted,
+  onPermitsPulled,
 }: SyncOptions) {
   const setState = useSetAtom(evaluationStateAtom)
 
@@ -82,6 +84,7 @@ export function useEvaluationSync({
         onRunAiAnalysis,
         onUndoAiSelection,
         onFeedbackSubmitted,
+        onPermitsPulled,
       },
     })
   }, [
@@ -89,6 +92,6 @@ export function useEvaluationSync({
     evaluation.isRecalculated, evaluation.recalcData, evaluation.compOverride,
     evaluation.handleToggleComp, evaluation.handleResetComps,
     feedback,
-    aiAnalyzing, isStreaming, marketContext, aiReport, onOpenSettings, onCompClick, onRunAiAnalysis, onUndoAiSelection, onFeedbackSubmitted, setState,
+    aiAnalyzing, isStreaming, marketContext, aiReport, onOpenSettings, onCompClick, onRunAiAnalysis, onUndoAiSelection, onFeedbackSubmitted, onPermitsPulled, setState,
   ])
 }

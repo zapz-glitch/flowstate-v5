@@ -45,5 +45,6 @@ export function useEvaluation() {
     onRunAiAnalysis: state.callbacks.onRunAiAnalysis,
     onUndoAiSelection: state.callbacks.onUndoAiSelection,
     onFeedbackSubmitted: state.callbacks.onFeedbackSubmitted,
+    onPermitsPulled: state.callbacks.onPermitsPulled,
   }
 }

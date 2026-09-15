@@ -548,7 +548,8 @@ export interface AnalysisResponse {
     listingUrl: string | null
     /** Building permit records for the subject */
     permits: {
-      status: 'available' | 'empty' | 'unavailable'
+      /** 'not_requested' = permits are pulled on demand via the report's Permits action */
+      status: 'available' | 'empty' | 'unavailable' | 'not_requested'
       /** Error detail when the permit lookup failed (status 'unavailable') */
       error?: string | null
       items: Array<{
@@ -1016,7 +1017,11 @@ export function buildAnalysisResponse(
   // Build risk flags for underwriter attention
   const riskFlags: string[] = []
   if (enrichment.floodZone?.isInFloodZone) {
-    riskFlags.push(`Flood Zone: ${enrichment.floodZone.floodZone}`)
+    riskFlags.push(
+      enrichment.floodZone.source === 'listing'
+        ? `Flood risk (listing): ${enrichment.floodZone.floodZone}`
+        : `Flood Zone: ${enrichment.floodZone.floodZone}`
+    )
   }
   if (property.transaction?.isForeclosure) riskFlags.push('Foreclosure')
   if (property.transaction?.isShortSale) riskFlags.push('Short Sale')
@@ -1248,7 +1253,9 @@ export function buildAnalysisResponse(
               jobValue: p.jobValue ?? null,
             })),
           }
-        : { status: 'unavailable', items: [] },
+        // Permits are pulled on demand (report Permits action) — 'not_requested'
+        // tells the UI to offer the pull button rather than an error state.
+        : { status: 'not_requested', items: [] },
       condition: ctx.visionAnalysis?.overallCondition ?? null,
       curbAppeal: ctx.subjectCurbAppeal ?? null,
       listingUrl: ctx.subjectListingUrl ?? null,

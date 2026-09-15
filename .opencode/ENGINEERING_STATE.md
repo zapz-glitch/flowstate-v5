@@ -1359,3 +1359,53 @@ Three provable wastes fixed:
 
 Verified: tsc clean; 96 appraisal vitest pass (no comp-selection
 change). Expected ~11.8 → ~6-7 paid calls/report.
+
+### 2026-09-15 — Opt-in permits + listing-derived flood (uncommitted, main)
+
+Product direction: motivated-seller vetting (~25 evals/day → 750/mo).
+Permit + flood-zone provider calls removed from the default pipeline
+(~1.7 paid calls/report saved → ~5.3/report → ~940 reports/mo ceiling).
+
+- **Permits → on demand**: AnalysisJobDO + getPropertyBundle only fetch
+  permits when `enrichment.permits === true`. Reports emit
+  `subject.permits.status: 'not_requested'` (new union member, API +
+  dashboard types) so the UI shows a pull action, not an error.
+- **New route** `POST /user/reports/:jobId/permits` (session + origin
+  checked): pulls subject permits via propertyApi.getBuildingPermits
+  (CLIP id from saved.subject.id), re-runs assessMajorItems with the
+  user's major-item config, preserves Caller-specified manual items,
+  re-runs valuation + calculateAllRehabLevelEstimates against the
+  appliedSettings snapshot, rebuilds report.rehab.ledger + deductions +
+  outcome + riskFlags + top-level permits summary, bumps
+  evaluationRevision, optimistic-locked batch write (history + update).
+- **Location-penalty gap fixed**: the proximity deduction was never
+  serialized — recalculateReport (comps route) silently drops it too
+  (pre-existing). Extracted `computeLocationPenalty()` in
+  evaluation/index.ts (shared by pipeline + route); permits route
+  rebuilds it from saved.locationRisks + loadUserAnalysisSettings
+  (subject's parsed address → same resolution incl. location overrides).
+  Rebuilt deductions now include a Location Penalty line when > 0.
+- **Flood → listing scrape**: extractFloodSignal already ran inside the
+  subject photo fetch (Redfin first in SUBJECT_FALLBACK_ORDER, Realtor
+  also covered — both via listing-scraper). evaluation/index.ts now
+  converts photoBundle.subject.metadata.floodRisk into a
+  NormalizedFloodZone with `source: 'listing'` when no provider flood
+  data exists; FEMA fields null. Risk flag reads "Flood risk (listing):
+  X" vs "Flood Zone: X"; RiskFloodCard shows "Listing estimate — not
+  FEMA" badge + "Risk"/"Elevated Risk" labels; MapOverlay + PDF label
+  it as listing risk, not FEMA zone.
+- **UI**: PropertyPermits renders a "Permits" button for
+  not_requested/unavailable/missing states (authed pages only — public
+  report page has no onPermitsPulled → button hidden). Pull →
+  pullReportPermits() → onPermitsPulled(analysis) → analyze page
+  setAnalysisResult / report page setReport. evaluationRevision flows
+  through so subsequent comp edits can't stale-lock.
+- /analyze/defaults now advertises permits:false, floodZone:false.
+
+Verified: api + dashboard tsc clean; 157 api vitest pass;
+dashboard regression 4/4 files pass (headline-money.test.mjs permits
+subtest fixed — was already broken on HEAD: unresolvable `@/` imports
++ stale assertions; now mocks useEvaluation/client-api/sonner/cn and
+asserts not_requested/loading/available states).
+
+NOT DEPLOYED — awaiting explicit deploy instruction.

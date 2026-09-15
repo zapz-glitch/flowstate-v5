@@ -496,6 +496,7 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
     onRunAiAnalysis: handleRunAiAnalysis,
     onUndoAiSelection: aiAnalysisDone ? handleUndoAiSelection : undefined,
     onFeedbackSubmitted: batchQueue ? handleFeedbackSubmitted : undefined,
+    onPermitsPulled: (a) => setReport((prev) => (prev ? { ...prev, analysis: a } : prev)),
   })
 
   if (loading) {
