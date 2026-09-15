@@ -120,7 +120,7 @@ export function comparablesKey(clip: string, radius?: number, months?: number, p
     : CACHE_PREFIX.COMPARABLES
   const effective = { ...parameters, radiusMiles: radius ?? null, monthsBack: months ?? null }
   const entries = Object.entries(effective).filter(([, value]) => value !== undefined).sort(([a], [b]) => a.localeCompare(b))
-  return `${prefix}search-v3:${clip}:${JSON.stringify(entries)}`
+  return `${prefix}search-v4:${clip}:${JSON.stringify(entries)}`
 }
 
 /**

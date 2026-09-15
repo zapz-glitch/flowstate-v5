@@ -7,7 +7,7 @@ import type { Env } from '../src/types'
 
 const base: ComparablesSearchParams = { propertyId: 'fixture', radiusMiles: 0.5, monthsBack: 12, maxComps: 25, subjectSqft: 2000, sqftVariance: 20, minBeds: 2, maxBeds: 5, minBaths: 1, maxBaths: 4 }
 const key = (params: ComparablesSearchParams) => comparablesKey(params.propertyId, params.radiusMiles, params.monthsBack, 'corelogic', { ...params })
-assert.match(key(base), /search-v3/)
+assert.match(key(base), /search-v4/)
 assert.equal(key(base), key(Object.fromEntries(Object.entries(base).reverse()) as unknown as ComparablesSearchParams))
 const variants = [
   { propertyId: 'other' }, { radiusMiles: 1 }, { monthsBack: 6 }, { maxComps: 100 },
@@ -37,7 +37,7 @@ try {
   assert.equal(urls[0].pathname, '/v2/properties/fixture/comparables')
   assert.deepEqual(Object.fromEntries(query), {
     searchDistance: '0.5', maxComps: '25', monthsBack: '12', minBeds: '2', maxBeds: '5',
-    minBaths: '1', maxBaths: '4', minBldgSqFt: '1600', maxBldgSqFt: '2400', sortBy: 'Sale_Date',
+    minBaths: '1', maxBaths: '4', minBldgSqFt: '1600', maxBldgSqFt: '2400', sortBy: 'Distance',
   })
   const docs = JSON.parse(readFileSync(new URL('../src/services/property-api/providers/docs/corelogic-api-docs.json', import.meta.url), 'utf8'))
   const documented = new Set(docs.paths['/v2/properties/{clipId}/comparables'].get.parameters.filter((p: any) => p.in === 'query').map((p: any) => p.name))

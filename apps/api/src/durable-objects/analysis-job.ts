@@ -231,7 +231,7 @@ export class AnalysisJobDO {
     const comparablesParams = {
         propertyId: property.id,
         radiusMiles: config.searchOptions.radiusMiles ?? apiFilterParams.radiusMiles ?? 1,
-        maxComps: config.searchOptions.maxComps ?? 15,
+        maxComps: config.searchOptions.maxComps ?? 25,
         monthsBack: config.searchOptions.monthsBack ?? apiFilterParams.monthsBack ?? 12,
         sqftVariance: apiFilterParams.sqftVariance,
         subjectSqft: property.squareFeet ?? undefined,

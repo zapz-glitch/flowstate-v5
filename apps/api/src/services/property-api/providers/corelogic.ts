@@ -1295,7 +1295,10 @@ class CoreLogicProvider implements PropertyProviderAdapter {
           maxBaths: params.maxBaths,
           minBldgSqFt,
           maxBldgSqFt,
-          sortBy: 'Sale_Date',
+          // Distance-ordered: the pool is the NEAREST sales in the radius,
+          // not the newest — appraisal then scrutinizes closest-first and
+          // only reaches outward when a nearby comp fails the rules.
+          sortBy: 'Distance',
           }),
         },
       })

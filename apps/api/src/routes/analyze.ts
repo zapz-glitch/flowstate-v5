@@ -369,7 +369,7 @@ analyze.get('/defaults', async (c) => {
     data: {
       searchOptions: {
         radiusMiles: 1,
-        maxComps: 15,
+        maxComps: 25,
         monthsBack: 12,
       },
       buybox: {

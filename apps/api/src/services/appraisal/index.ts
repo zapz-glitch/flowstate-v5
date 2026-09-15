@@ -305,19 +305,21 @@ class PropertyAppraisalService implements AppraisalService {
     const topPrice = eligible.reduce((m, c) => Math.max(m, compPrice(c)), 0)
     const banded = eligible.filter((c) => compPrice(c) >= topPrice * (1 - ARV_PRICE_BAND_PCT))
 
-    // Best apples-to-apples first: comps with more verified match passes
-    // (status 'passed') outrank comps that slid through on missing data
-    // ('not_verified'). Then proximity to the subject — same street beats
-    // everything, then ascending distance — then sale recency, and adjusted
-    // price breaks the final tie.
+    // Closest-first selection: within the eligible+in-band set, proximity to
+    // the subject leads — same street beats everything, then ascending
+    // distance, then sale recency. Verified match passes break the remaining
+    // ties (a comp that slid through on missing data ranks below an
+    // equidistant verified match), and adjusted price is the last resort.
+    // Nearby comps are only skipped when scrutiny actually rejects them —
+    // never because a farther comp merely carried more verified fields.
     const verifiedPasses = (c: AppraisedComparable) =>
       c.evaluation.filterResults.filter((r) => r.status === 'passed').length
     const subjectStreet = streetNameKey(subject.address)
     const sorted = [...banded].sort((a, b) => {
-      const diff = verifiedPasses(b) - verifiedPasses(a)
-      if (diff !== 0) return diff
       const proximity = proximityCompare(a, b, subjectStreet)
       if (proximity !== 0) return proximity
+      const diff = verifiedPasses(b) - verifiedPasses(a)
+      if (diff !== 0) return diff
       return (
         (b.adjustedSalePrice ?? b.salePrice ?? 0) -
         (a.adjustedSalePrice ?? a.salePrice ?? 0)
@@ -507,8 +509,8 @@ class PropertyAppraisalService implements AppraisalService {
 
     // Rescue helper: force-enable disabled comps whose hard failures are all
     // in `allowed` (and that satisfy `extra` when given), then re-run ARV
-    // selection over the combined pool so verified matches still outrank
-    // unverified and price breaks ties.
+    // selection over the combined pool — closest-first ordering applies to
+    // rescued comps the same as rule-passing ones.
     const rescue = (
       base: AppraisalResult,
       allowed: ReadonlySet<string>,

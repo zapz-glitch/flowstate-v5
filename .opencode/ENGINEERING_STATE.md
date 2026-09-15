@@ -1409,3 +1409,35 @@ subtest fixed — was already broken on HEAD: unresolvable `@/` imports
 asserts not_requested/loading/available states).
 
 NOT DEPLOYED — awaiting explicit deploy instruction.
+
+### 2026-09-15 — Closest-first comp selection (uncommitted, feat/iphone-pwa)
+
+Product rule: nearby comps are scrutinized first and only skipped when
+they actually fail — never because a farther comp carried more verified
+fields or sold more recently.
+
+- **Fetch ordered by distance**: CoreLogic comparables now request
+  `sortBy: 'Distance'` (was `Sale_Date`) — the pool is the NEAREST sales
+  in the 1mi/12mo window, not the newest. Nearby-but-older sales no
+  longer get crowded out of the 15-comp pool before rules see them.
+  ATTOM fallback unchanged (no sort param). Comparables cache key bumped
+  search-v3 → search-v4 so stale recency-ordered pools don't linger.
+- **Pool depth 15 → 25** (analysis-job/batch defaults, analyze route +
+  dashboard queueAnalysis + /analyze/defaults): distance-sorted, the
+  extra candidates are still the closest available — the sale-age rule
+  culls older ones, so depth matters. Same single comparables call;
+  enrichment cost unchanged for dead comps (pre-filter).
+- **ARV selection order**: selectArvComps now sorts proximity FIRST
+  (same street → ascending distance → sale recency), then verified
+  passes, then price — was verifiedPasses-first, so a 0.9mi comp with
+  more verified data could outrank a same-street comp. The 90%
+  top-of-market band still gates (that's the condition-proxy scrutiny
+  that legitimately rejects a cheap nearby as-is sale).
+- Enrichment already ran closest-first (toEnrich sorted by distance);
+  the nearest_comps fallback tier already used proximityCompare.
+
+Verified: api + dashboard tsc clean; 96/96 appraisal vitest pass;
+15/15 api regression files pass (comparable-search asserts
+sortBy=Distance in the request URL).
+
+NOT DEPLOYED — awaiting explicit deploy instruction.
