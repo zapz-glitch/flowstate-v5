@@ -1,0 +1,80 @@
+{
+  "name": "flowstate/build",
+  "enabled": true,
+  "run_as": {
+    "type": "creator"
+  },
+  "metadata": {
+    "pipeline": "flowstate",
+    "stage": "build"
+  },
+  "triggers": [
+    {
+      "event_type": "github:push",
+      "conditions": {
+        "any": [
+          {
+            "all": [
+              {
+                "field": "repository.full_name",
+                "operator": "eq",
+                "value": "{{REPO}}"
+              },
+              {
+                "field": "branch",
+                "operator": "starts_with",
+                "value": "devin/"
+              },
+              {
+                "field": "head_commit.message",
+                "operator": "starts_with",
+                "value": "spec "
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "actions": [
+    {
+      "type": "start_session",
+      "prompt": "You are the BUILDER stage of the Flowstate pipeline for {{REPO_AT}}. Follow @playbook:{{BUILDER_PLAYBOOK_ID}} exactly.\n\nThe github:push event payload below is the Planner's spec push \u2014 it names the branch devin/NNN-<slug>. Check out that branch and read the spec packet (specs/NNN_*.md \u2014 it carries the task contract plus SLACK_CHANNEL / SLACK_THREAD_TS for your report). If the branch or spec is missing, report to the channel and stop.\n\nImplement the packet inside its SCOPE, prove each ACCEPTANCE criterion with tests, run its VERIFY commands, push, and open a PR to the packet's BASE (title 'NNN: <task>'; embed a 'Slack-Thread: <channel>/<ts>' line in the PR body as a fallback for later stages). Post the BUILD report in the Slack thread.",
+      "session": {
+        "bypass_approval": true,
+        "tags": [
+          "flowstate-pipeline",
+          "stage-build"
+        ],
+        "notifications": {
+          "slack": {
+            "mode": "post_updates",
+            "channel_id": "{{CHANNEL_ID}}"
+          }
+        }
+      }
+    }
+  ],
+  "tools": {
+    "slack_channels": [
+      {
+        "team_id": "{{TEAM_ID}}",
+        "channel_id": "{{CHANNEL_ID}}"
+      }
+    ]
+  },
+  "session_settings": {
+    "devin_mode": "normal"
+  },
+  "limits": {
+    "max_acu_limit": 60,
+    "invocations": {
+      "max_per_window": 12,
+      "window_seconds": 3600
+    }
+  },
+  "concurrency": {
+    "max_concurrent_runs": 1,
+    "max_queue_depth": 20
+  }
+}
