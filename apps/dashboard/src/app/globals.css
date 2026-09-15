@@ -172,6 +172,16 @@ html {
   --sab: env(safe-area-inset-bottom, 0px);
 }
 
+/* Installed PWA (iPad/iPhone Home Screen app): the status bar always
+   overlays the app, and some devices report safe-area-inset-top = 0.
+   Keep a minimum top inset so chrome never rides under the
+   clock/battery row. In-browser Safari is unaffected. */
+@media (display-mode: standalone) {
+  :root {
+    --sat: max(env(safe-area-inset-top, 0px), 24px);
+  }
+}
+
 body {
   font-feature-settings: "rlig" 1, "calt" 1;
   -webkit-font-smoothing: antialiased;

@@ -162,6 +162,7 @@ export default function Sidebar() {
           'fixed inset-y-0 left-0 z-40 hidden lg:flex lg:flex-col bg-background border-r border-border transition-all duration-300 ease-in-out',
           collapsed ? 'w-[72px]' : 'w-64'
         )}
+        style={{ paddingTop: 'var(--sat)' }}
       >
         <div className="flex flex-col h-full">
           {/* Logo & Collapse Button */}
