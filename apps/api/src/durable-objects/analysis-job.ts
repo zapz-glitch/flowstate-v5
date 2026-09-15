@@ -19,6 +19,7 @@ import { performAnalysis } from '../services/evaluation'
 import { detectOsmLocationRisks } from '../services/location-risk'
 import { createPropertyApi } from '../services/property-api'
 import { DEFAULT_FILTERS, evaluateComparable, type AppraisalFilter } from '../services/appraisal'
+import { DEFAULT_EXPANSION_POLICY } from '../services/appraisal/types'
 import { filtersToApiParams } from '../services/appraisal/types'
 import type { Env } from '../types'
 import type { NormalizedProperty, NormalizedComparable } from '../services/property-api/types'
@@ -302,16 +303,41 @@ export class AnalysisJobDO {
     })
 
     // ── Step 3: Enrich comps ───────────────────────────────────────────────────
-    // No shortcuts: every returned comp gets the property-detail call —
-    // subdivision, foundation type, building style, features. The apples-to-
-    // apples rules (subdivision_match — the hammer — style, foundation) can
-    // only bite with enriched data. Sorted nearest-first so the cap, if ever
-    // hit, drops the least relevant.
+    // Every comp that can still qualify gets the property-detail call —
+    // subdivision, foundation type, building style, features. But sale_age,
+    // sqft_diff and year_built (at its widest sanctioned tolerance) are never
+    // relaxed by ANY fallback tier, and enrichment never overwrites those
+    // fields — so a comp verifiably failing one is dead under every tier and
+    // its detail call is provably wasted. Missing fields still enrich.
     await this.pushEvent('property_fetch', { message: 'Enriching comparable details...' })
     const enrichStart = Date.now()
 
-    const toEnrich = [...rawComps]
+    const filterValue = (type: string, fallback: number): number => {
+      const f = filters.find((x) => x.type === type)
+      return f && f.enabled === false ? Infinity : (f?.value ?? fallback)
+    }
+    const saleAgeDays = filterValue('sale_age', 180)
+    const sqftDiff = filterValue('sqft_diff', 250)
+    const maxYear = filterValue('year_built_diff', 10) +
+      Math.max(0, ...DEFAULT_EXPANSION_POLICY.yearBuiltExpansionSteps)
+    const nowMs = Date.now()
+    const isDeadComp = (c: NormalizedComparable): boolean => {
+      if (c.saleDate) {
+        const days = (nowMs - new Date(c.saleDate).getTime()) / 86_400_000
+        if (Number.isFinite(days) && days > saleAgeDays) return true
+      }
+      if (c.squareFeet && property.squareFeet && Math.abs(c.squareFeet - property.squareFeet) > sqftDiff) return true
+      if (c.yearBuilt && property.yearBuilt && Math.abs(c.yearBuilt - property.yearBuilt) > maxYear) return true
+      return false
+    }
+
+    const toEnrich = rawComps
+      .filter((c) => !isDeadComp(c))
       .sort((a, b) => (a.distanceMiles ?? 999) - (b.distanceMiles ?? 999))
+    const skipped = rawComps.length - toEnrich.length
+    if (skipped > 0) {
+      console.log(`[AnalysisJobDO] Skipping enrichment for ${skipped} comp(s) dead on sale-age/sqft/year rules`)
+    }
 
     const enrichedList = await propertyApi.enrichComparables(toEnrich, { concurrency: 10 })
     const enrichedById = new Map(enrichedList.map((c) => [c.id, c]))

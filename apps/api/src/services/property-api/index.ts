@@ -315,8 +315,37 @@ class PropertyApi implements PropertyApiService {
       provider: provider.name,
       address: params.address,
     });
+    // Address → property resolution is a stable mapping; cache the
+    // normalized subject by normalized address so repeat/nearby lookups
+    // don't burn a provider call.
+    const addrKey = [
+      params.address,
+      params.streetAddress,
+      params.city,
+      params.state,
+      params.zipCode,
+    ]
+      .filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
+      .join('|')
+      .toLowerCase()
+      .replace(/\s+/g, ' ')
+      .trim();
+    const cacheKey = `prop:search:${provider.name}:${addrKey}`;
+    if (!this._skipCache) {
+      const cached = await this.cache.get<NormalizedProperty>(cacheKey);
+      if (cached) {
+        console.log('PropertyAPI: Cache HIT for property search', { address: params.address });
+        this._stats.logCacheHit('property-search');
+        return { success: true, data: cached };
+      }
+    }
+
     this._stats.logCall('property-search');
-    return provider.searchProperty(params);
+    const result = await provider.searchProperty(params);
+    if (result.success && result.data) {
+      await this.cache.set(cacheKey, result.data, { ttl: CACHE_TTL.PROPERTY_DETAILS });
+    }
+    return result;
   }
 
   async getPropertyById(propertyId: string): Promise<PropertySearchResponse> {
@@ -573,6 +602,19 @@ class PropertyApi implements PropertyApiService {
       };
     }
 
+    // Circuit breaker: the THV product is gated per-account. After a few
+    // consecutive entitlement/not-found failures we stop paying for a call
+    // that can never return data; the flag expires weekly so a newly
+    // entitled product self-heals.
+    const disabledKey = `avm:disabled:${provider.name}`;
+    if (await this.cache.get<number>(disabledKey)) {
+      return {
+        success: false,
+        error: 'AVM product not entitled on this account (breaker open)',
+        code: 'AVM_DISABLED',
+      };
+    }
+
     const cacheKey = floodZoneKey(`avm:${model}:${parcelId}`, provider.name);
     if (!this._skipCache) {
       const cached = await this.cache.get<NormalizedAvm>(cacheKey);
@@ -589,6 +631,15 @@ class PropertyApi implements PropertyApiService {
       await this.cache.set(cacheKey, result.data, {
         ttl: CACHE_TTL.FLOOD_ZONE,
       });
+      await this.cache.delete(`avm:failcount:${provider.name}`);
+    } else if (!result.success && (result.code === 'ENTITLEMENTS_ERROR' || result.code === 'NOT_FOUND')) {
+      const cntKey = `avm:failcount:${provider.name}`;
+      const n = ((await this.cache.get<number>(cntKey)) ?? 0) + 1;
+      await this.cache.set(cntKey, n, { ttl: CACHE_TTL.FLOOD_ZONE });
+      if (n >= 3) {
+        console.warn(`PropertyAPI: AVM failed ${n} consecutive times (${result.code}) — disabling for 7 days`);
+        await this.cache.set(disabledKey, 1, { ttl: CACHE_TTL.PERMITS });
+      }
     }
 
     return result;
