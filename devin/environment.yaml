@@ -1,0 +1,28 @@
+initialize:
+  - run: |
+      cd ~/repos/flowstate-v5 2>/dev/null && npm install || true
+knowledge:
+  - name: test
+    contents: |
+      Install once at the root: `npm install` (npm workspaces + turbo).
+      Typecheck all workspaces: `npm run typecheck` (turbo).
+      Tests (vitest): `npm run test` — both workspaces, or scope with
+      `npm run test -w @flowstate-api/api` / `-w @flowstate-api/dashboard`.
+      Lint: `npm run lint` — eslint over apps/*/src and packages/shared/src.
+  - name: boundaries
+    contents: |
+      NEVER build or deploy: no `npm run deploy`, no deploy-bound `npm run build`,
+      no `db:migrate:remote` — deploys are human-gated per CLAUDE.md.
+      apps/api runs on the Cloudflare Workers runtime — no Node-only APIs.
+      Durable Object stub.fetch() responses MUST be consumed (await resp.text()).
+      packages/shared stays dependency-free pure TypeScript.
+      Local D1 schema work: `cd apps/api && npm run db:generate && npm run
+      db:migrate:local`. Migrations are additive — never edit applied ones.
+  - name: pipeline
+    contents: |
+      This repo is built by the Slack->Devin pipeline (devin/README.md).
+      Spec packets live in specs/NNN_<slug>.md; work branches are devin/NNN-<slug>
+      off `main` (protected — PRs only, never push to main).
+      Never commit .env or secrets; deterministic fixtures only, no live
+      paid-provider calls (CoreLogic/ATTOM, Firecrawl, OpenRouter/OpenAI/Gemini,
+      GoHighLevel) unless a packet explicitly authorizes a bounded smoke.

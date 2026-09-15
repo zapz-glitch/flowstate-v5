@@ -1,0 +1,95 @@
+{
+  "name": "flowstate/eval",
+  "enabled": true,
+  "run_as": {
+    "type": "creator"
+  },
+  "metadata": {
+    "pipeline": "flowstate",
+    "stage": "eval"
+  },
+  "triggers": [
+    {
+      "event_type": "github:pull_request",
+      "conditions": {
+        "any": [
+          {
+            "all": [
+              {
+                "field": "repository.full_name",
+                "operator": "eq",
+                "value": "{{REPO}}"
+              },
+              {
+                "field": "pull_request.head.ref",
+                "operator": "starts_with",
+                "value": "devin/"
+              },
+              {
+                "field": "action",
+                "operator": "in",
+                "value": [
+                  "opened",
+                  "synchronize",
+                  "reopened",
+                  "ready_for_review"
+                ]
+              },
+              {
+                "field": "pull_request.draft",
+                "operator": "eq",
+                "value": false
+              }
+            ]
+          }
+        ]
+      },
+      "replies": [
+        {
+          "type": "post_response"
+        }
+      ]
+    }
+  ],
+  "actions": [
+    {
+      "type": "start_session",
+      "prompt": "You are the EVAL stage of the Flowstate pipeline for {{REPO_AT}}. Follow @playbook:{{EVAL_PLAYBOOK_ID}} exactly.\n\nThe pull_request event payload below identifies the PR. Read the spec packet (specs/NNN_*.md) on the head branch \u2014 it also carries SLACK_CHANNEL / SLACK_THREAD_TS for your report. Verify the diff and reproduce VERIFY yourself, then submit your verdict as a GitHub PR review (approve / request changes / comment per the playbook). CI may still be running when you start \u2014 only completed check failures count as findings; pending checks are informational. Post the one-line EVAL report to the Slack thread from the spec (fall back to the channel if absent).",
+      "session": {
+        "bypass_approval": true,
+        "tags": [
+          "flowstate-pipeline",
+          "stage-eval"
+        ],
+        "notifications": {
+          "slack": {
+            "mode": "post_updates",
+            "channel_id": "{{CHANNEL_ID}}"
+          }
+        }
+      }
+    }
+  ],
+  "tools": {
+    "slack_channels": [
+      {
+        "team_id": "{{TEAM_ID}}",
+        "channel_id": "{{CHANNEL_ID}}"
+      }
+    ]
+  },
+  "session_settings": {
+    "devin_mode": "normal"
+  },
+  "limits": {
+    "max_acu_limit": 30,
+    "invocations": {
+      "max_per_window": 15,
+      "window_seconds": 3600
+    }
+  },
+  "concurrency": {
+    "max_concurrent_runs": 1,
+    "max_queue_depth": 20
+  }
+}

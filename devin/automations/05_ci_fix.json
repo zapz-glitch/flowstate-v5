@@ -1,0 +1,90 @@
+{
+  "name": "flowstate/ci-fix",
+  "enabled": true,
+  "run_as": {
+    "type": "creator"
+  },
+  "metadata": {
+    "pipeline": "flowstate",
+    "stage": "ci-fix"
+  },
+  "triggers": [
+    {
+      "event_type": "github:check_run",
+      "conditions": {
+        "any": [
+          {
+            "all": [
+              {
+                "field": "repository.full_name",
+                "operator": "eq",
+                "value": "{{REPO}}"
+              },
+              {
+                "field": "check_run.conclusion",
+                "operator": "in",
+                "value": [
+                  "failure",
+                  "timed_out",
+                  "action_required",
+                  "startup_failure"
+                ]
+              },
+              {
+                "field": "check_run.check_suite.head_branch",
+                "operator": "starts_with",
+                "value": "devin/"
+              },
+              {
+                "field": "action",
+                "operator": "eq",
+                "value": "completed"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "actions": [
+    {
+      "type": "start_session",
+      "prompt": "You are the CI-FIX stage of the Flowstate pipeline for {{REPO_AT}} \u2014 Builder playbook @playbook:{{BUILDER_PLAYBOOK_ID}} in CI-FIX mode.\n\nThe check_run event payload below identifies a failed CI check on a pipeline branch. One CI run can fire several of these triggers \u2014 fix ALL currently-failing checks on the branch, not just the triggering one. If the branch has no open PR yet (e.g. only a spec commit exists) or the checks are already green, report briefly and stop without pushing.\n\nFind the associated PR, read the failing checks' logs and the spec packet (it carries SLACK_CHANNEL / SLACK_THREAD_TS), make the minimal fix that turns CI green without weakening tests or removing checks, and push to the same head branch with a 'ci-fix:' prefixed commit. Post a one-line CI-FIX report in the Slack thread. If the failure is infrastructure-only or an unreproducible flake, note it and stop.",
+      "session": {
+        "bypass_approval": true,
+        "tags": [
+          "flowstate-pipeline",
+          "stage-ci-fix"
+        ],
+        "notifications": {
+          "slack": {
+            "mode": "post_updates",
+            "channel_id": "{{CHANNEL_ID}}"
+          }
+        }
+      }
+    }
+  ],
+  "tools": {
+    "slack_channels": [
+      {
+        "team_id": "{{TEAM_ID}}",
+        "channel_id": "{{CHANNEL_ID}}"
+      }
+    ]
+  },
+  "session_settings": {
+    "devin_mode": "normal"
+  },
+  "limits": {
+    "max_acu_limit": 30,
+    "invocations": {
+      "max_per_window": 10,
+      "window_seconds": 3600
+    }
+  },
+  "concurrency": {
+    "max_concurrent_runs": 1,
+    "max_queue_depth": 10
+  }
+}

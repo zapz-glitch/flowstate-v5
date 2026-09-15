@@ -45,3 +45,6 @@ npm-debug.log*
 coverage/
 .data/
 .dev.vars.*
+
+# Devin pipeline — minted webhook credentials (never commit)
+devin/.pipeline-secrets.json

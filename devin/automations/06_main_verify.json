@@ -1,0 +1,75 @@
+{
+  "name": "flowstate/main-verify",
+  "enabled": true,
+  "run_as": {
+    "type": "creator"
+  },
+  "metadata": {
+    "pipeline": "flowstate",
+    "stage": "verify"
+  },
+  "triggers": [
+    {
+      "event_type": "github:push",
+      "conditions": {
+        "any": [
+          {
+            "all": [
+              {
+                "field": "repository.full_name",
+                "operator": "eq",
+                "value": "{{REPO}}"
+              },
+              {
+                "field": "branch",
+                "operator": "eq",
+                "value": "{{BASE_BRANCH}}"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "actions": [
+    {
+      "type": "start_session",
+      "prompt": "You are the VERIFY stage of the Flowstate pipeline for {{REPO_AT}} — a post-merge health check, not a code-change agent.\n\nA push just landed on {{BASE_BRANCH}} (event payload below). Check out {{BASE_BRANCH}} at the pushed head commit, then run the full verification in order, stopping on first failure: npm install, npm run typecheck, npm run test, npm run build (build proves deployability — NEVER deploy: no npm run deploy, no db:migrate:remote).\n\nIf the push merged a pipeline PR (head branch devin/NNN-<slug>), its spec specs/NNN_*.md is now on {{BASE_BRANCH}} and carries SLACK_CHANNEL / SLACK_THREAD_TS — post your report as a reply in that thread. Otherwise post to the pipeline channel.\n\nReport format:\nVERIFY: <PASS|FAIL> — <head sha>\nmerge: <PR title/commit subject>\nresults: typecheck <ok/fail> · test <ok/fail N> · build <ok/fail>\nOn FAIL: include the failing command's last ~20 lines and say a human should decide next steps. Do not push fixes to {{BASE_BRANCH}} — it is protected. Make no code changes; end the session when the report is posted.",
+      "session": {
+        "bypass_approval": true,
+        "tags": [
+          "flowstate-pipeline",
+          "stage-verify"
+        ],
+        "notifications": {
+          "slack": {
+            "mode": "post_updates",
+            "channel_id": "{{CHANNEL_ID}}"
+          }
+        }
+      }
+    }
+  ],
+  "tools": {
+    "slack_channels": [
+      {
+        "team_id": "{{TEAM_ID}}",
+        "channel_id": "{{CHANNEL_ID}}"
+      }
+    ]
+  },
+  "session_settings": {
+    "devin_mode": "normal"
+  },
+  "limits": {
+    "max_acu_limit": 25,
+    "invocations": {
+      "max_per_window": 10,
+      "window_seconds": 3600
+    }
+  },
+  "concurrency": {
+    "max_concurrent_runs": 1,
+    "max_queue_depth": 10
+  }
+}
