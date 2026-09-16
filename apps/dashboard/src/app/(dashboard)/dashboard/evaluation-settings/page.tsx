@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react'
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useSearchParams } from 'next/navigation'
 import {
   SlidersHorizontal,
@@ -569,6 +569,69 @@ const PERCENT_ADJUSTMENTS = new Set(['old_comp_discount', 'basement_sqft', 'foun
 // Traffic adjustments carry BOTH a flat $ and a % — show flat on the chip
 const TRAFFIC_ADJUSTMENTS = new Set(['traffic_siding', 'traffic_backing', 'traffic_fronting'])
 
+// ─── Auto-save ────────────────────────────────────────────────────────────────
+
+type AutoSaveState = 'idle' | 'pending' | 'saving' | 'saved' | 'error'
+
+/**
+ * Debounced auto-save: schedules `save` `delayMs` after the last change to
+ * `deps` while `dirty` is true. Retries on the next change after a failure —
+ * never auto-retries a failed save (avoids a tight error loop).
+ */
+function useAutoSave(dirty: boolean, save: () => Promise<void>, deps: readonly unknown[], delayMs = 900): AutoSaveState {
+  const [state, setState] = useState<AutoSaveState>('idle')
+  const saveRef = useRef(save)
+  saveRef.current = save
+  const inFlight = useRef(false)
+
+  useEffect(() => {
+    if (!dirty) {
+      setState((s) => (s === 'saving' || s === 'saved' ? s : 'idle'))
+      return
+    }
+    setState('pending')
+    let cancelled = false
+    let t: ReturnType<typeof setTimeout>
+    const tick = async () => {
+      if (cancelled) return
+      if (inFlight.current) { t = setTimeout(tick, delayMs); return }
+      inFlight.current = true
+      setState('saving')
+      try {
+        await saveRef.current()
+        if (cancelled) return
+        setState('saved')
+        setTimeout(() => { if (!cancelled) setState((s) => (s === 'saved' ? 'idle' : s)) }, 2500)
+      } catch {
+        if (!cancelled) setState('error')
+      } finally {
+        inFlight.current = false
+      }
+    }
+    t = setTimeout(tick, delayMs)
+    return () => { cancelled = true; clearTimeout(t) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [...deps, dirty, delayMs])
+
+  return state
+}
+
+function AutoSaveIndicator({ state }: { state: AutoSaveState }) {
+  if (state === 'saving') {
+    return <Badge variant="outline" className="border-blue-500 text-blue-600 dark:text-blue-400 text-xs gap-1"><Loader2 className="w-3 h-3 animate-spin" />Saving…</Badge>
+  }
+  if (state === 'pending') {
+    return <Badge variant="outline" className="border-amber-500 text-amber-600 dark:text-amber-400 text-xs">Unsaved changes</Badge>
+  }
+  if (state === 'saved') {
+    return <Badge variant="outline" className="border-green-500 text-green-600 dark:text-green-400 text-xs gap-1"><Check className="w-3 h-3" />Saved</Badge>
+  }
+  if (state === 'error') {
+    return <Badge variant="outline" className="border-red-500 text-red-600 dark:text-red-400 text-xs">Save failed — edit again to retry</Badge>
+  }
+  return null
+}
+
 function FilterChip({ label, value, enabled }: { label: string; value: string; enabled: boolean }) {
   return (
     <div className={`flex items-center gap-1.5 px-2 py-1 rounded-md border text-[10px] transition-colors ${
@@ -704,7 +767,9 @@ function AppraisalRulesTab() {
   // Inline form state (mirrors preset filters/adjustments)
   const [filters, setFilters] = useState<FormFilterState[]>([])
   const [adjustments, setAdjustments] = useState<FormAdjustmentState[]>([])
-  const [dirty, setDirty] = useState(false)
+  // Derived dirty: JSON snapshot of last-persisted form state. Edits made
+  // while a save is in flight stay dirty and trigger a follow-up save.
+  const savedSnapshot = useRef('')
 
   // Location overrides for appraisal rules
   const [locSettings, setLocSettings] = useState<LocationSetting[]>([])
@@ -742,10 +807,10 @@ function AppraisalRulesTab() {
       const { filters: f, adjustments: a } = buildFormStateFromPreset(presetData, defaultsData)
       setFilters(f)
       setAdjustments(a)
-      setDirty(false)
       setLocSettings(settingsData)
       setProximityConfig(proxRes.config)
       setProximityOriginal(proxRes.config)
+      savedSnapshot.current = JSON.stringify({ filters: f, adjustments: a, proximityConfig: proxRes.config })
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load')
     } finally {
@@ -757,24 +822,24 @@ function AppraisalRulesTab() {
 
   const updateFilter = (idx: number, patch: Partial<FormFilterState>) => {
     setFilters((prev) => prev.map((f, i) => (i === idx ? { ...f, ...patch } : f)))
-    setDirty(true)
   }
   const updateAdjustment = (idx: number, patch: Partial<FormAdjustmentState>) => {
     setAdjustments((prev) => prev.map((a, i) => (i === idx ? { ...a, ...patch } : a)))
-    setDirty(true)
   }
 
   const updateProximity = (c: ProximityConfig) => {
     setProximityConfig(c)
-    setDirty(true)
   }
 
   const proximityDirty = JSON.stringify(proximityConfig) !== JSON.stringify(proximityOriginal)
+  const dirty = savedSnapshot.current !== '' &&
+    JSON.stringify({ filters, adjustments, proximityConfig }) !== savedSnapshot.current
 
   const handleSave = async () => {
     if (!preset) return
     setSaving(true)
     setError(null)
+    const sentJson = JSON.stringify({ filters, adjustments, proximityConfig })
     try {
       const [saved] = await Promise.all([
         updateAppraisalPreset(preset.id, {
@@ -785,15 +850,19 @@ function AppraisalRulesTab() {
       ])
       setPreset(saved)
       setProximityOriginal(proximityConfig)
-      setDirty(false)
+      // Mark persisted at the dispatched snapshot — edits made during the
+      // flight keep the form dirty and trigger a follow-up auto-save.
+      savedSnapshot.current = sentJson
       setSuccessMessage('Appraisal rules saved.')
       setTimeout(() => setSuccessMessage(null), 3000)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Save failed')
+      throw e
     } finally {
       setSaving(false)
     }
   }
+  const autoSaveState = useAutoSave(dirty, handleSave, [filters, adjustments, proximityConfig])
 
   const handleReset = () => {
     if (!defaults) return
@@ -801,7 +870,6 @@ function AppraisalRulesTab() {
     setFilters(f)
     setAdjustments(a)
     setProximityConfig(PROXIMITY_DEFAULTS)
-    setDirty(true)
   }
 
   // ── Location override helpers ──────────────────────────────────────────────
@@ -972,17 +1040,13 @@ function AppraisalRulesTab() {
             <ProximitySection config={proximityConfig} onChange={updateProximity} />
           </div>
 
-          {/* ── Save / Reset ── */}
+          {/* ── Auto-save status / Reset ── */}
           <div className="flex items-center gap-2 pt-1">
-            <Button size="sm" onClick={handleSave} disabled={saving || (!dirty && !proximityDirty)} className="gap-1.5">
-              {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
-              Save Changes
-            </Button>
             <Button size="sm" variant="outline" onClick={handleReset} disabled={saving} className="gap-1.5">
               <RotateCcw className="w-3.5 h-3.5" />
               Reset to Defaults
             </Button>
-            {(dirty || proximityDirty) && <span className="text-xs text-amber-600 dark:text-amber-400">Unsaved changes</span>}
+            <AutoSaveIndicator state={autoSaveState} />
           </div>
 
           {/* ══ Location Overrides section ══════════════════════════════════════ */}
@@ -1555,24 +1619,30 @@ function RenovationLevelsTab() {
   const handleSave = async () => {
     if (!table || !isDirty) return
     setSaving(true); setError(null); setSuccessMessage(null)
+    const sentTableJson = JSON.stringify(table)
+    const sentRangesJson = JSON.stringify(tierRanges)
     try {
       // Auto-compute labels before save
       const rangesWithLabels = tierRanges.map((t) => ({ ...t, label: computeTierLabel(t) }))
       const tierRangesToSave = JSON.stringify(rangesWithLabels) !== JSON.stringify(DEFAULT_TIER_RANGES) ? rangesWithLabels : undefined
       const res = await saveRehabConfig(table, tierRangesToSave)
       setOriginal(structuredClone(res.config))
-      setTable(structuredClone(res.config))
+      // Snap form to server state only if untouched since dispatch —
+      // mid-flight edits stay dirty and re-trigger auto-save.
+      setTable((prev) => (JSON.stringify(prev) === sentTableJson ? structuredClone(res.config) : prev))
       const ranges = res.tierRanges ?? DEFAULT_TIER_RANGES
-      setTierRanges(structuredClone(ranges))
+      setTierRanges((prev) => (JSON.stringify(prev) === sentRangesJson ? structuredClone(ranges) : prev))
       setOriginalTierRanges(structuredClone(ranges))
       setIsCustom(true); setUpdatedAt(res.updatedAt)
       setSuccessMessage('Renovation pricing saved successfully.')
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Save failed')
+      throw e
     } finally {
       setSaving(false)
     }
   }
+  const autoSaveState = useAutoSave(isDirty, handleSave, [table, tierRanges])
 
   const handleReset = async () => {
     if (!confirm('Reset all renovation pricing and tier ranges to system defaults? This cannot be undone.')) return
@@ -1708,13 +1778,11 @@ function RenovationLevelsTab() {
     return s.state ?? '—'
   }
 
-  const statusBadge = isDirty
-    ? <Badge variant="outline" className="border-amber-500 text-amber-600 dark:text-amber-400 text-xs">Unsaved changes</Badge>
-    : isCustom
-      ? <Badge variant="outline" className="border-green-500 text-green-600 dark:text-green-400 text-xs">
-          Custom pricing{updatedAt && <span className="ml-1 opacity-70">· {new Date(updatedAt).toLocaleDateString()}</span>}
-        </Badge>
-      : <Badge variant="outline" className="text-xs text-muted-foreground">Using system defaults</Badge>
+  const statusBadge = isCustom
+    ? <Badge variant="outline" className="border-green-500 text-green-600 dark:text-green-400 text-xs">
+        Custom pricing{updatedAt && <span className="ml-1 opacity-70">· {new Date(updatedAt).toLocaleDateString()}</span>}
+      </Badge>
+    : <Badge variant="outline" className="text-xs text-muted-foreground">Using system defaults</Badge>
 
   return (
     <div className="space-y-5">
@@ -1722,13 +1790,10 @@ function RenovationLevelsTab() {
         <p className="text-sm text-muted-foreground">Configure $/sqft and minimum profit per rehab level and ARV tier.</p>
         <div className="flex items-center gap-2 flex-shrink-0">
           {!loading && statusBadge}
+          <AutoSaveIndicator state={autoSaveState} />
           <Button variant="outline" size="sm" onClick={handleReset} disabled={saving || loading || (!isCustom && !isDirty)} className="gap-1.5">
             {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
             Reset Defaults
-          </Button>
-          <Button size="sm" onClick={handleSave} disabled={!isDirty || saving || loading} className="gap-1.5">
-            {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
-            Save Changes
           </Button>
         </div>
       </div>
@@ -2132,17 +2197,21 @@ function DealParamsTab() {
   const handleSave = async () => {
     if (!isDirty) return
     setSaving(true); setError(null); setSuccessMessage(null)
+    const sentJson = JSON.stringify(config)
     try {
       const res = await saveDealParams(config)
-      setConfig(res.config); setOriginal(res.config)
+      setOriginal(res.config)
+      setConfig((prev) => (JSON.stringify(prev) === sentJson ? res.config : prev))
       setIsCustom(true); setUpdatedAt(res.updatedAt)
       setSuccessMessage('Deal parameters saved.')
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Save failed')
+      throw e
     } finally {
       setSaving(false)
     }
   }
+  const autoSaveState = useAutoSave(isDirty, handleSave, [config])
 
   const handleReset = async () => {
     if (!confirm('Reset deal parameters to system defaults?')) return
@@ -2227,13 +2296,11 @@ function DealParamsTab() {
   const profitDeduct = tierMinProfit
   const mao = arv - rehabCost - closingDeduct - carryingDeduct - profitDeduct - config.wholesaleFee
 
-  const statusBadge = isDirty
-    ? <Badge variant="outline" className="border-amber-500 text-amber-600 dark:text-amber-400 text-xs">Unsaved changes</Badge>
-    : isCustom
-      ? <Badge variant="outline" className="border-green-500 text-green-600 dark:text-green-400 text-xs">
-          Custom{updatedAt && <span className="ml-1 opacity-70">· {new Date(updatedAt).toLocaleDateString()}</span>}
-        </Badge>
-      : <Badge variant="outline" className="text-xs text-muted-foreground">System defaults</Badge>
+  const statusBadge = isCustom
+    ? <Badge variant="outline" className="border-green-500 text-green-600 dark:text-green-400 text-xs">
+        Custom{updatedAt && <span className="ml-1 opacity-70">· {new Date(updatedAt).toLocaleDateString()}</span>}
+      </Badge>
+    : <Badge variant="outline" className="text-xs text-muted-foreground">System defaults</Badge>
 
   return (
     <div className="space-y-5">
@@ -2244,13 +2311,10 @@ function DealParamsTab() {
         </p>
         <div className="flex items-center gap-2 flex-shrink-0">
           {!loading && statusBadge}
+          <AutoSaveIndicator state={autoSaveState} />
           <Button variant="outline" size="sm" onClick={handleReset} disabled={saving || loading || (!isCustom && !isDirty)} className="gap-1.5">
             {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
             Reset
-          </Button>
-          <Button size="sm" onClick={handleSave} disabled={!isDirty || saving || loading} className="gap-1.5">
-            {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
-            Save Changes
           </Button>
         </div>
       </div>
@@ -2588,7 +2652,6 @@ function MajorItemCostsTab() {
   const [isCustom, setIsCustom] = useState(false)
   const [updatedAt, setUpdatedAt] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [saved, setSaved] = useState(false)
 
   // Location overrides
   const [locSettings, setLocSettings] = useState<LocationSetting[]>([])
@@ -2639,10 +2702,9 @@ function MajorItemCostsTab() {
       setItems(data.items)
       setIsCustom(data.isCustom)
       setUpdatedAt(data.updatedAt)
-      setSaved(true)
-      setTimeout(() => setSaved(false), 2000)
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to save')
+      throw e
     } finally {
       setSaving(false)
     }
@@ -2734,6 +2796,9 @@ function MajorItemCostsTab() {
     return s.state ?? '—'
   }
 
+  const dirty = hasPendingChanges()
+  const autoSaveState = useAutoSave(dirty, handleSave, [pending, items])
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-16 text-muted-foreground gap-2">
@@ -2742,8 +2807,6 @@ function MajorItemCostsTab() {
       </div>
     )
   }
-
-  const dirty = hasPendingChanges()
 
   return (
     <div className="space-y-5">
@@ -2768,16 +2831,13 @@ function MajorItemCostsTab() {
           )}
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
+          <AutoSaveIndicator state={autoSaveState} />
           {isCustom && (
             <Button size="sm" variant="outline" className="gap-1.5 h-8" onClick={handleReset} disabled={saving}>
               <RotateCcw className="w-3.5 h-3.5" />
               Reset to defaults
             </Button>
           )}
-          <Button size="sm" className="gap-1.5 h-8" onClick={handleSave} disabled={saving || !dirty}>
-            {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : saved ? <Check className="w-3.5 h-3.5" /> : <Save className="w-3.5 h-3.5" />}
-            {saved ? 'Saved' : 'Save changes'}
-          </Button>
         </div>
       </div>
 
@@ -3112,19 +3172,24 @@ function ArvThresholdTab() {
   const handleSave = async () => {
     if (!isDirty) return
     setSaving(true); setError(null); setSuccessMessage(null)
+    const sentJson = JSON.stringify(config)
+    const sentAsIs = asIsThreshold
     try {
       const [res] = await Promise.all([
         saveArvThreshold(config),
         asIsThreshold !== originalAsIs ? saveDealParams({ asIsThresholdPercent: asIsThreshold }) : Promise.resolve(null),
       ])
-      setConfig(res.config); setOriginal(res.config)
+      setOriginal(res.config)
+      setConfig((prev) => (JSON.stringify(prev) === sentJson ? res.config : prev))
       setIsCustom(true); setUpdatedAt(res.updatedAt)
-      setOriginalAsIs(asIsThreshold)
+      setOriginalAsIs(sentAsIs)
       setSuccessMessage('Thresholds saved.')
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Save failed')
+      throw e
     } finally { setSaving(false) }
   }
+  const autoSaveState = useAutoSave(isDirty, handleSave, [config, asIsThreshold])
 
   const handleReset = async () => {
     if (!confirm('Reset thresholds to system defaults?')) return
@@ -3193,13 +3258,11 @@ function ArvThresholdTab() {
     return s.state ?? '—'
   }
 
-  const statusBadge = isDirty
-    ? <Badge variant="outline" className="border-amber-500 text-amber-600 dark:text-amber-400 text-xs">Unsaved changes</Badge>
-    : isCustom
-      ? <Badge variant="outline" className="border-green-500 text-green-600 dark:text-green-400 text-xs">
-          Custom{updatedAt && <span className="ml-1 opacity-70">· {new Date(updatedAt).toLocaleDateString()}</span>}
-        </Badge>
-      : <Badge variant="outline" className="text-xs text-muted-foreground">System default</Badge>
+  const statusBadge = isCustom
+    ? <Badge variant="outline" className="border-green-500 text-green-600 dark:text-green-400 text-xs">
+        Custom{updatedAt && <span className="ml-1 opacity-70">· {new Date(updatedAt).toLocaleDateString()}</span>}
+      </Badge>
+    : <Badge variant="outline" className="text-xs text-muted-foreground">System default</Badge>
 
   return (
     <div className="space-y-5">
@@ -3210,13 +3273,10 @@ function ArvThresholdTab() {
         </p>
         <div className="flex items-center gap-2 flex-shrink-0">
           {!loading && statusBadge}
+          <AutoSaveIndicator state={autoSaveState} />
           <Button variant="outline" size="sm" onClick={handleReset} disabled={saving || loading || (!isCustom && !isDirty)} className="gap-1.5">
             {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
             Reset
-          </Button>
-          <Button size="sm" onClick={handleSave} disabled={!isDirty || saving || loading} className="gap-1.5">
-            {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
-            Save
           </Button>
         </div>
       </div>
