@@ -49,6 +49,29 @@ export default async function CdarvPerformancePage() {
         </Card>
       </div>
 
+      <Card className="px-4 py-3">
+        <h2 className="text-body-sm font-medium text-foreground mb-2">Shadow agreement</h2>
+        <p className="text-caption text-foreground-tertiary mb-2">
+          Diagnostic only — agreement with the rules engine or reviewer is not outcome accuracy.
+        </p>
+        <div className="flex flex-wrap gap-2">
+          <Badge variant="secondary">
+            vs evaluator:{' '}
+            {summary.shadow_agreement.evaluator_jaccard_mean != null
+              ? `${Math.round(summary.shadow_agreement.evaluator_jaccard_mean * 100)}%`
+              : '—'}
+          </Badge>
+          <Badge variant="secondary">
+            vs reviewer:{' '}
+            {summary.shadow_agreement.reviewer_overlap_mean != null
+              ? `${Math.round(summary.shadow_agreement.reviewer_overlap_mean * 100)}%`
+              : '—'}
+          </Badge>
+          <Badge variant="secondary">gold standard: {summary.gold_standard_reports}</Badge>
+          <Badge variant="secondary">outcome accuracy: {summary.shadow_agreement.outcome_accuracy}</Badge>
+        </div>
+      </Card>
+
       <div className="grid sm:grid-cols-2 gap-3">
         <Card className="px-4 py-3">
           <h2 className="text-body-sm font-medium text-foreground mb-2">Labels recorded</h2>

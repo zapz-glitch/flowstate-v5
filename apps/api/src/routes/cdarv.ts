@@ -25,6 +25,7 @@ export const cdarv = new Hono<{ Bindings: Env }>()
 export const cdarvInternal = new Hono<{ Bindings: Env }>()
 
 const MAX_REPORTS_PER_SUBMIT = 50
+const SERVICE_TIMEOUT_MS = 15_000
 
 function cdarvConfig(c: { env: Env }): { base: string; token: string } | null {
   const base = c.env.CDARV_API_URL?.replace(/\/+$/, '')
@@ -51,7 +52,11 @@ async function serviceFetch(
     headers.set('Content-Type', 'application/json')
   }
   try {
-    return await fetch(`${cfg.base}${path}`, { ...init, headers })
+    return await fetch(`${cfg.base}${path}`, {
+      ...init,
+      headers,
+      signal: AbortSignal.timeout(SERVICE_TIMEOUT_MS),
+    })
   } catch {
     return new Response(
       JSON.stringify({ success: false, error: 'cdarv_unreachable', message: 'CDARV service request failed' }),

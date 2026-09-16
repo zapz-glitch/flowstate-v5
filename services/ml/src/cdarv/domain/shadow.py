@@ -63,7 +63,12 @@ def score_snapshot(
     artifact = load_artifact(model_row)
 
     # Eligibility gate: only comps the appraisal rules passed are rankable.
-    eligible = [c for c in report.comps if c.is_enabled]
+    # Eligible = what the production recalc accepts (passedFilters !==
+    # false AND positive price) — is_enabled is a broader pipeline flag
+    # that can include fallback-enabled, filter-failing comps the recalc
+    # would reject. The model ranks; it cannot make an ineligible comp
+    # eligible.
+    eligible = [c for c in report.comps if c.recalc_eligible]
     input_hash = snapshot.content_hash
 
     if not eligible:

@@ -1,10 +1,112 @@
 # Engineering State — flowstate-v5
 
+### 2026-09-16 — Integration verification pass (feat/cdarv-ml-foundation, uncommitted retrieval changes preserved)
+
+Full runtime verification of the suspended candidate-retrieval hardening +
+current architecture, on top of committed CDARV work.
+
+Executed evidence:
+- API regression: 18/18 files pass (incl. comparable-retrieval.test.ts, cdarv.test.ts).
+- `tsc --noEmit` clean: apps/api AND apps/dashboard (stale .next already removed).
+- eval-engine: 233 non-DB tests pass incl. 5/5 canonical-contract audit;
+  6 Postgres-dependent test files BLOCKED — no Docker in this WSL distro
+  (harness correctly refuses foreign PG; not a code failure).
+- CDARV: 59/59 pytest pass; `/cdarv/*` proxy routes fail closed when
+  CDARV_API_URL unset; production path never calls CDARV.
+- Real local E2E: wrangler dev (127.0.0.1:8787) + next dev (:3000),
+  better-auth sign-in as local@flowstate.test, API key via /user/api-keys,
+  POST /v1/analyze for 5802 Misty Gln → job_1789538087877_nu8qr1el
+  completed via AnalysisJobDO + SSE, saved_reports + analysis_runs rows
+  persisted before completion.
+- Retrieval hardening live: request URL shows maxComps=100 (default =
+  provider max; no env override needed); retrieval meta in comps_found SSE
+  + saved report (received=6, truncated=false, pages=2, calls=2).
+- Expansion refetch fired for real: log "Expansion refetch: widening
+  comparable search to 1mi", pool 2→6 merged, 0 extra enrichment.
+- Enrichment pruning live: 6 received → 4 provably-dead pruned → 2 enriched.
+- Settings→engine: PUT /deal-params closingCostsPercent 8→10 → next eval
+  consumed it (closing 20774→25968, buy 112556→107362, ARV unchanged) →
+  restored via DELETE. No redeploy needed.
+- Deterministic recalc: POST /user/reports/:jobId/comps
+  {selectedCompIds:null} → identical ARV/comps/valuation, revision 0→1,
+  report_history row written.
+- Dashboard auth paths: session cookie AND X-Dashboard-User-Id/Secret
+  both verified live; /v1/analyze/defaults returns maxComps=100.
+
+Blockers (environment, not code):
+- No Docker → V4 persistence/API/worker test files can't run.
+- No usable browser (missing libnspr4; no playwright pkg) → interactive
+  dashboard checklist (login UI, submit, report render, recalc UI) not
+  browser-verified. Dashboard serves + typechecks; data path proven via API.
+- canonical_v1 policy NOT implemented in eval-engine (approved contract,
+  queued work).
+- Dashboard lib/recalc client-side path still diverges from server
+  recalculateReport (known; methodology consolidation needs owner decision).
+- V4 engine NOT connected to production (V4_* env vars dead code; by plan).
+
 ## Current Objective
 CDARV (Comp-Derived After Repair Value): human-curated ML learning loop
 for comp selection/ranking, on `feat/cdarv-ml-foundation`. Design doc:
 `docs/cdarv/DESIGN.md`; runbook: `services/ml/README.md`. Shadow-only —
 production underwriting unchanged and never depends on CDARV.
+
+### 2026-09-16 — CDARV independent audit + live hardening pass (uncommitted fixes below)
+
+Ran the real system end-to-end against local services + real
+`saved_reports` data. Local stack used: pgserver Postgres 16.2 on
+127.0.0.1:55432 (dbs cdarv_dev/cdarv_test/cdarv_clean), wrangler dev
+:8787, next dev :3000, uvicorn cdarv.app :8005, worker process.
+Headless Chromium via cached playwright build + locally extracted
+libnspr4/libnss3/libasound debs (no system install possible).
+
+Verified live (not just tests):
+- Real PG migrations: clean db → 13 cdarv tables at head; downgrade→0;
+  re-upgrade→13. Unique (report_id, content_hash) enforced — duplicate
+  insert rejected. Full pytest suite green on Postgres AND sqlite: 60/60.
+- Real e2e: 12 real reports submitted via POST /cdarv/submissions
+  (jobIds, owner-scoped session) → 12 snapshots; resubmit idempotent;
+  changed report → new immutable version. 63 labels + 1 preference +
+  1 external comp + 8 comp_ranking approvals (1 gold, evidence required).
+  Dataset baseline v1 frozen (8 members, feature_spec v2, code rev
+  abbf3d7, grouped time-aware splits). Worker trained → model
+  `baseline v1` (id ede2620e…). Explicit activate → shadow scoring via
+  real /internal/cdarv/recalculate → production recalculateReport math.
+  Scored ARV 246492 (comps 5779347055+3935211447); LA report correctly
+  abstained `insufficient_evidence`. Production saved_reports rows
+  byte-identical before/after.
+- Browser-verified (Playwright): sign-in → queue → open review → set
+  labels → save → approve (persisted); models page Disable shadow /
+  Activate shadow round-trip; performance page renders; report detail
+  flask button → "Queued for CDARV review"; unauthenticated /cdarv
+  redirected to landing. Screenshots in /tmp/cdarv-shots/.
+- Failure isolation: wrong token → 401 AUTH_INVALID; none → 401
+  AUTH_MISSING; service down → proxy 503 cdarv_unreachable (was ~2.5min
+  hang — now bounded 15s by new AbortSignal.timeout in serviceFetch);
+  dashboard shows clean "service unavailable"; worker down → jobs stay
+  queued, resume on restart; malformed job → HANDLER_ERROR ×3 → dead,
+  worker survives; invalid model/dataset → 400/404; report page renders
+  with CDARV down (no server-side CDARV dependency).
+- Monitoring live: status/label/prediction counts, gold_standard count,
+  market coverage, shadow_agreement (evaluator jaccard + reviewer
+  overlap means), "insufficient outcome data" stated explicitly.
+
+Fixes this pass:
+- `reports.py`/`shadow.py`: NEW `CandidateComp.recalc_eligible` —
+  mirrors recalculateReport's gate (passedFilters !== false AND positive
+  adjustedPrice ?? salePrice). Real reports carry isEnabled=true +
+  passedFilters=false (fallback tiers); shadow was ranking comps prod
+  recalc rejects → 422s. Tests updated for both ineligible kinds.
+- `apps/api/src/routes/cdarv.ts`: serviceFetch 15s AbortSignal.timeout.
+- `monitoring.py` + performance page + cdarv-api.ts: gold_standard count
+  + shadow_agreement metrics (per DESIGN §6 promise; was missing).
+- tests/conftest.py: CDARV_TEST_DATABASE_URL opt-in Postgres backend.
+
+Still scaffolded (intentional): guidance curation UI (storage+routes
+only); external-comp evidence detail; outcome-accuracy monitoring
+(awaiting real renovated-resale outcomes).
+Blocked on product engineer: Cotality ML-training license; real secrets
+(CDARV_INTERNAL_API_TOKEN, CDARV_TS_*); Postgres hosting decision;
+deploy authorization. Nothing deployed; prod untouched.
 
 ### 2026-09-16 — CDARV full loop built (feat/cdarv-ml-foundation, NOT merged/deployed)
 

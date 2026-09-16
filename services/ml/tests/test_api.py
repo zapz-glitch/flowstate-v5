@@ -156,7 +156,13 @@ def test_full_learning_loop(client, monkeypatch):
     resp = client.post("/v1/shadow/deactivate", headers=_auth())
     assert resp.json()["shadow"]["active_model_id"] is None
 
-    # 7. Monitoring summary reports descriptive counts.
+    # 7. Monitoring summary reports descriptive counts + agreement.
     summary = client.get("/v1/monitoring/summary", headers=_auth()).json()["summary"]
     assert summary["independently_reviewed_reports"] == 3
     assert summary["predictions_by_status"]["scored"] == 1
+    assert summary["gold_standard_reports"] == 0
+    agree = summary["shadow_agreement"]
+    assert agree["scored_predictions"] == 1
+    assert agree["predictions_with_review"] == 1
+    assert agree["evaluator_jaccard_mean"] is not None
+    assert agree["outcome_accuracy"] == "insufficient outcome data"

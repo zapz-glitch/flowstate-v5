@@ -155,6 +155,42 @@ Blocked / requires product engineer:
 - **Artifact storage**: model pickles live in `cdarv_models.artifact_blob`;
   promote to R2 if/when artifacts grow past comfortable row sizes.
 
+## 7b. Verification status (independent audit pass)
+
+Verified end-to-end against real services and real `saved_reports` data
+(PostgreSQL 16.2, local apps/api on :8787, dashboard on :3000, CDARV
+service on :8005, worker process):
+
+- Alembic on real Postgres: upgrade→13 tables, downgrade→0, re-upgrade→13;
+  uniqueness/idempotency constraints enforced at the DB level; full pytest
+  suite passes against Postgres (`CDARV_TEST_DATABASE_URL`) and SQLite.
+- Real chain: 12 real reports submitted → 63 labels + preference +
+  external comp → 8 comp_ranking approvals (1 gold) → frozen dataset v1
+  (8 members, pinned feature spec + code rev) → worker-trained model
+  `baseline v1` → explicit shadow activation → live shadow scoring via the
+  real `/internal/cdarv/recalculate` callback (production
+  `recalculateReport`) → prediction rows + monitoring.
+- Browser-verified (headless Chromium): sign-in, review queue, snapshot
+  review form (labels/save/approve), model registry + shadow
+  activate/deactivate, performance view, Send-to-CDARV on report detail,
+  unauthenticated redirect.
+- Failure isolation: wrong/missing token → 401; service down → proxy 503
+  (bounded by a 15s timeout in `serviceFetch`); dashboard renders a clean
+  "service unavailable" state; worker down → jobs stay queued and resume
+  on restart; malformed job → HANDLER_ERROR, retries ×3, then `dead`;
+  invalid model/dataset refs rejected at the API; production report
+  rendering unaffected by CDARV outage (no server-side dependency).
+- Monitoring: status/label/prediction counts, gold-standard count, market
+  coverage, shadow agreement (evaluator-diagnostic + reviewer-signal),
+  explicit "insufficient outcome data" — no fabricated accuracy.
+
+Fixed during the audit: shadow eligibility now mirrors
+`recalculateReport`'s gate (`passedFilters !== false` AND positive
+adjusted/sale price) via `CandidateComp.recalc_eligible` — real reports
+carry `isEnabled=true` + `passedFilters=false` comps that production recalc
+rejects; the proxy fetch gained a 15s timeout; monitoring gained the
+agreement metrics promised in §6.
+
 ## 8. Local runbook
 
 ```bash
