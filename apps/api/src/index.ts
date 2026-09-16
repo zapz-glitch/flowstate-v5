@@ -35,6 +35,7 @@ import arvThresholdRoute from './routes/arv-threshold'
 import proximityConfigRoute from './routes/proximity-config'
 import typeaheadRoute from './routes/typeahead'
 import compSelectionRoute from './routes/comp-selection'
+import mlExportRoute from './routes/ml-export'
 import sseStream from './routes/sse-stream'
 import ghlWebhook from './routes/webhooks/ghl'
 import { sweepStaleBatches } from './services/batch-queue'
@@ -153,6 +154,7 @@ app.route('/reports', reportsRoute)
 const v1 = new Hono<{ Bindings: Env; Variables: Variables }>()
 v1.use('*', authMiddleware)
 v1.route('/analyze', analyze)
+v1.route('/ml', mlExportRoute)
 
 app.route('/v1', v1)
 
