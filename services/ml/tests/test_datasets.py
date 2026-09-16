@@ -61,6 +61,25 @@ def test_excluded_review_omitted_from_dataset(session):
     assert snap_bad.id not in member_snap_ids
 
 
+def test_approved_then_excluded_snapshot_omitted(session):
+    """Excluding a snapshot after approval must drop it from datasets —
+    the stale approved v1 must not leak back in."""
+    snap_ok, _ = submit_payload(session, "r1")
+    approve_review(session, snap_ok)
+    snap_bad, _ = submit_payload(session, "r2")
+    approve_review(session, snap_bad)
+    # Reopen and exclude: v2 becomes 'excluded', snapshot excluded.
+    review2, _ = open_review(session, snapshot_id=snap_bad.id, reviewer_id="rev1")
+    decide(session, review2, action="exclude", reviewer_id="rev1")
+
+    dataset = build_dataset(session, name="d", created_by="test")
+    member_snap_ids = {
+        m["snapshot_id"] for m in dataset.manifest_json["members"]
+    }
+    assert snap_ok.id in member_snap_ids
+    assert snap_bad.id not in member_snap_ids
+
+
 def test_superseded_review_not_reused(session):
     """A correction creates a new version; the dataset uses the latest
     approved version only."""
