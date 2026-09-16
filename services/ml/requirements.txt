@@ -1,0 +1,6 @@
+# CDARV ML package dependencies (pinned).
+# Direct inputs live in requirements.in. Installed into services/ml/.venv:
+#   python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+numpy==2.5.3
+scikit-learn==1.9.1
+pytest==9.1.1

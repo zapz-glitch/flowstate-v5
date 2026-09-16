@@ -1,0 +1,6 @@
+# Human-editable direct inputs for the CDARV ML package.
+# Keep this service's dependency surface separate from eval-engine —
+# CDARV must never share fate with production underwriting.
+numpy==2.5.3
+scikit-learn==1.9.1
+pytest==9.1.1

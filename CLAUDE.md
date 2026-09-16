@@ -222,6 +222,7 @@ Step 6: GHL Integration (optional, 3x retry, non-fatal)
 | `POST /v1/analyze` | Bearer (API Key) | Start analysis workflow |
 | `GET /v1/analyze/jobs/:jobId` | Bearer (API Key) | Poll job status |
 | `POST /v1/analyze/stream-token` | Bearer (API Key) | Generate signed SSE token |
+| `GET /v1/ml/ideal-reports` | Bearer (API Key) | Export caller's validated reports for CDARV (services/ml) |
 
 ### Services Layer
 

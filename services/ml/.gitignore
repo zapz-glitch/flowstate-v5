@@ -1,0 +1,4 @@
+artifacts/
+*.db
+*.db-journal
+*.pkl
