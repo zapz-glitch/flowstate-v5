@@ -462,8 +462,12 @@ export interface ApiFilterParams {
   radiusMiles?: number
   /** Months back to search (from sale_age filter, converted from days) */
   monthsBack?: number
-  /** Square footage variance (from sqft_diff filter) */
-  sqftVariance?: number
+  /**
+   * Absolute sqft tolerance (from sqft_diff filter). NOT a percent — the
+   * provider's sqftVariance param is a percent, so callers must pass this as
+   * the absolute `sqftDiff` bound instead.
+   */
+  sqftDiff?: number
 }
 
 /**
@@ -471,7 +475,7 @@ export interface ApiFilterParams {
  *
  * API-level filters (reduce API payload):
  * - sale_age → monthsBack (days converted to months)
- * - sqft_diff → sqftVariance
+ * - sqft_diff → sqftDiff (absolute sqft bounds — never relaxed, safe prefilter)
  * - distance → radiusMiles
  *
  * Post-fetch filters (applied after enrichment):
@@ -491,8 +495,9 @@ export function filtersToApiParams(filters: AppraisalFilter[]): ApiFilterParams 
         params.monthsBack = Math.ceil(filter.value / 30)
         break
       case 'sqft_diff':
-        // Pass sqftVariance directly
-        params.sqftVariance = filter.value
+        // Absolute sqft tolerance — providers receive it as sqftDiff
+        // (minBldgSqFt/maxBldgSqFt), not the percent-based sqftVariance param.
+        params.sqftDiff = filter.value
         break
       case 'distance':
         // Pass radiusMiles directly

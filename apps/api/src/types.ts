@@ -27,6 +27,17 @@ export interface Env {
   // ─── Property Data Provider ────────────────────────────────────────────────
   /** Active provider: 'corelogic' | 'attom' (default: 'corelogic') */
   PROPERTY_PROVIDER?: string
+  /**
+   * Candidate-pool size for comparable retrieval (system config — not an
+   * owner-facing Appraisal Rule). Defaults to the provider maximum
+   * (CoreLogic maxComps = 100); values above the provider max are clamped.
+   */
+  COMPARABLE_CANDIDATE_LIMIT?: string
+  /**
+   * Radius used when the appraisal expansion ladder needs candidates beyond
+   * the fetched radius (default: fetched radius x geographicDistanceMultiplier).
+   */
+  COMPARABLE_EXPANSION_RADIUS_MILES?: string
 
   // ─── Property Data (CoreLogic) ─────────────────────────────────────────────
   CORELOGIC_CLIENT_ID?: string

@@ -21,6 +21,7 @@ import {
   type MajorItem,
 } from '../services/valuation';
 import { loadUserAnalysisSettings } from '../services/user-settings';
+import { resolveCandidateLimit } from '../services/property-api/retrieval-policy';
 import { generateSseToken } from '../utils/sse-token';
 import { AnalysisError } from '../utils/analysis-error';
 import { drizzle } from 'drizzle-orm/d1';
@@ -369,7 +370,7 @@ analyze.get('/defaults', async (c) => {
     data: {
       searchOptions: {
         radiusMiles: 1,
-        maxComps: 25,
+        maxComps: resolveCandidateLimit(c.env, 'corelogic'),
         monthsBack: 12,
       },
       buybox: {

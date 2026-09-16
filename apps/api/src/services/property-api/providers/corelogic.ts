@@ -36,6 +36,7 @@ import {
   BUILDING_QUALITY,
   BUILDING_CONDITION,
 } from './corelogic-codes'
+import { CORELOGIC_MAX_COMPS, buildRetrievalMeta } from '../retrieval-policy'
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
 
@@ -1274,18 +1275,30 @@ class CoreLogicProvider implements PropertyProviderAdapter {
 
   async getComparables(params: ComparablesSearchParams): Promise<ComparablesSearchResponse> {
     try {
+      // Absolute bounds from the sqft_diff rule (never relaxed by any
+      // evaluation tier → safe provider prefilter) take precedence over the
+      // legacy percent param. Percent values are converted to absolute bounds.
       let minBldgSqFt: number | undefined
       let maxBldgSqFt: number | undefined
-      if (params.sqftVariance && params.subjectSqft) {
+      if (params.sqftDiff != null && params.subjectSqft) {
+        minBldgSqFt = Math.max(0, params.subjectSqft - params.sqftDiff)
+        maxBldgSqFt = params.subjectSqft + params.sqftDiff
+        console.log(`CoreLogic: Using sqft range ${minBldgSqFt}-${maxBldgSqFt} (subject: ${params.subjectSqft}, ±${params.sqftDiff} sqft)`)
+      } else if (params.sqftVariance && params.subjectSqft) {
         const absoluteVariance = Math.round(params.subjectSqft * (params.sqftVariance / 100))
         minBldgSqFt = Math.max(0, params.subjectSqft - absoluteVariance)
         maxBldgSqFt = params.subjectSqft + absoluteVariance
         console.log(`CoreLogic: Using sqft range ${minBldgSqFt}-${maxBldgSqFt} (subject: ${params.subjectSqft}, ±${params.sqftVariance}%)`)
       }
 
+      // Provider hard max is 100 (documented); clamp rather than let the
+      // provider silently truncate or reject an over-limit request.
+      const requestedLimit = params.maxComps ?? CORELOGIC_MAX_COMPS
+      const effectiveLimit = Math.max(1, Math.min(requestedLimit, CORELOGIC_MAX_COMPS))
+
       const response = await request<RawComparablesResponse>(this.env, `/v2/properties/${params.propertyId}/comparables`, {
         params: {
-          maxComps: params.maxComps ?? 25,
+          maxComps: effectiveLimit,
           ...(params.providerDefaults ? {} : {
           searchDistance: params.radiusMiles ?? 0.5,
           monthsBack: params.monthsBack ?? 12,
@@ -1313,6 +1326,14 @@ class CoreLogicProvider implements PropertyProviderAdapter {
           },
           comparables,
           count: comparables.length,
+          retrieval: buildRetrievalMeta({
+            requested: requestedLimit,
+            effectiveLimit,
+            received: comparables.length,
+            ordering: 'distance',
+            radiusMiles: params.providerDefaults ? 0.5 : (params.radiusMiles ?? 0.5),
+            monthsBack: params.providerDefaults ? 9 : (params.monthsBack ?? 12),
+          }),
         },
       }
     } catch (error) {

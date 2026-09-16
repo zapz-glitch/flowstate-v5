@@ -18,8 +18,11 @@ function validSale(comp: NormalizedComparable, asOfDate: string): string | null 
 
 export function mergeComparablePools(defaults: NormalizedComparable[], expanded: NormalizedComparable[], asOfDate = new Date().toISOString().slice(0, 10)) {
   const groups = new Map<string, Entry[]>()
+  // No artificial per-pool cap — pool size is bounded by the provider's
+  // documented maximum (CoreLogic maxComps = 100); truncating here would
+  // silently drop candidates the appraisal rules were entitled to see.
   for (const [pool, comps] of [['defaults', defaults], ['expanded', expanded]] as const) {
-    for (const comp of comps.slice(0, 50)) {
+    for (const comp of comps) {
       const entries = groups.get(comp.id) ?? []
       entries.push({ pool, comp })
       groups.set(comp.id, entries)

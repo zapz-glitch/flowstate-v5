@@ -532,7 +532,9 @@ export default function AnalyzePage() {
 
       const response = await queueAnalysis({
         address: address.trim(),
-        searchOptions: { radiusMiles: 1, maxComps: 25, monthsBack: 12 },
+        // maxComps omitted — pool size is system config on the API
+        // (COMPARABLE_CANDIDATE_LIMIT, provider max 100), not a client choice.
+        searchOptions: { radiusMiles: 1, monthsBack: 12 },
         skipCache,
         marketData: { enabled: true },
         arvThresholdPercent: arvThreshold,

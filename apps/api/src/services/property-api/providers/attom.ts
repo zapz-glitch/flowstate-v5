@@ -31,6 +31,7 @@ import type {
   NormalizedComparable,
   NormalizedPermit,
 } from '../types'
+import { ATTOM_MAX_COMPS, buildRetrievalMeta } from '../retrieval-policy'
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
 
@@ -596,7 +597,7 @@ class AttomProvider implements PropertyProviderAdapter {
       const url = `${BASE_URL}/property/v2/salescomparables/propid/${params.propertyId}?${queryStr}`
       const data = await attomFetch<AttomV2Response>(this.apiKey, url)
 
-      return this.parseV2CompsResponse(data, params.propertyId)
+      return this.parseV2CompsResponse(data, params.propertyId, params)
     } catch (error) {
       if (error instanceof AttomNotFoundError) {
         return { success: false, error: 'No comparable properties found', code: 'NOT_FOUND' }
@@ -615,7 +616,7 @@ class AttomProvider implements PropertyProviderAdapter {
     q.append('searchType', 'Radius')
     q.append('miles', String(params.radiusMiles ?? 1))
     q.append('minComps', '1')
-    q.append('maxComps', String(params.maxComps ?? 50))
+    q.append('maxComps', String(Math.max(1, Math.min(params.maxComps ?? 50, ATTOM_MAX_COMPS))))
 
     if (params.monthsBack) {
       q.append('saleDateRange', String(params.monthsBack))
@@ -635,7 +636,10 @@ class AttomProvider implements PropertyProviderAdapter {
           : 1
       q.append('bathroomRange', String(bathsRange))
     }
-    if (params.sqftVariance && params.subjectSqft) {
+    if (params.sqftDiff != null) {
+      // Absolute sqft tolerance from the sqft_diff rule — never relaxed.
+      q.append('sqFeetRange', String(params.sqftDiff))
+    } else if (params.sqftVariance && params.subjectSqft) {
       const absoluteVariance = Math.round(params.subjectSqft * (params.sqftVariance / 100))
       q.append('sqFeetRange', String(absoluteVariance))
     } else if (params.sqftVariance) {
@@ -649,7 +653,7 @@ class AttomProvider implements PropertyProviderAdapter {
   }
 
   /** Parse the v2 comps response envelope */
-  private parseV2CompsResponse(data: AttomV2Response, propertyId: string): ComparablesSearchResponse {
+  private parseV2CompsResponse(data: AttomV2Response, propertyId: string, params?: ComparablesSearchParams): ComparablesSearchResponse {
     const status = data.RESPONSE_GROUP?.PRODUCT?.STATUS
     if (status && status._Code !== 0 && status._Code !== undefined) {
       return { success: false, error: status._Description ?? 'Comparables request failed' }
@@ -666,6 +670,8 @@ class AttomProvider implements PropertyProviderAdapter {
       .filter((item) => item.COMPARABLE_PROPERTY_ext != null)
       .map((item) => normalizeComparable(item))
 
+    const requested = params?.maxComps ?? 50
+    const effectiveLimit = Math.max(1, Math.min(requested, ATTOM_MAX_COMPS))
     return {
       success: true,
       data: {
@@ -675,6 +681,14 @@ class AttomProvider implements PropertyProviderAdapter {
         },
         comparables,
         count: comparables.length,
+        retrieval: buildRetrievalMeta({
+          requested,
+          effectiveLimit,
+          received: comparables.length,
+          ordering: 'distance',
+          radiusMiles: params?.radiusMiles ?? 1,
+          monthsBack: params?.monthsBack ?? 0,
+        }),
       },
     }
   }

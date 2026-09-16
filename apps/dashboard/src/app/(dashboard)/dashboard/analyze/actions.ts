@@ -577,7 +577,6 @@ export async function queueAnalysis(request: AnalyzeRequest): Promise<QueueAnaly
       existingJobId: request.existingJobId,
       searchOptions: request.searchOptions ?? {
         radiusMiles: 1,
-        maxComps: 25,
         monthsBack: 12,
       },
       skipCache: request.skipCache,

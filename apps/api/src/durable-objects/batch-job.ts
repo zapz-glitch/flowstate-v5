@@ -662,7 +662,7 @@ export class BatchJobDO {
           jobId,
           userId: config.userId,
           search: { address },
-          searchOptions: config.searchOptions ?? { radiusMiles: 1, maxComps: 25, monthsBack: 12 },
+          searchOptions: config.searchOptions ?? { radiusMiles: 1, monthsBack: 12 },
           skipCache: config.skipCache ?? false,
           evalParams: {
             appraisalRules,

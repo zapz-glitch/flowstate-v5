@@ -269,9 +269,10 @@ ghlWebhook.post('/:webhookSecret', async (c) => {
       zipCode,
       comparables: {
         radiusMiles: apiFilterParams.radiusMiles ?? 1,
-        maxComps: 10,
+        // maxComps omitted — the provider-max candidate limit is system
+        // config (COMPARABLE_CANDIDATE_LIMIT), not a per-caller choice.
         monthsBack: apiFilterParams.monthsBack ?? 12,
-        sqftVariance: apiFilterParams.sqftVariance,
+        sqftDiff: apiFilterParams.sqftDiff,
       },
       enrichment: {
         permits: true,

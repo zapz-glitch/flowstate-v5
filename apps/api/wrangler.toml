@@ -12,6 +12,12 @@ port = 8787
 ENVIRONMENT = "production"
 DASHBOARD_URL = "https://flowstate.homes"
 PROPERTY_PROVIDER = "corelogic"
+# Comparable candidate-pool size — system config, NOT an owner Appraisal
+# Rule. CoreLogic maxComps documented max is 100 (no pagination).
+COMPARABLE_CANDIDATE_LIMIT = "100"
+# Radius for the single provider refetch when the appraisal expansion ladder
+# reaches beyond the fetched radius (default: radius x 2).
+COMPARABLE_EXPANSION_RADIUS_MILES = "2"
 
 [[d1_databases]]
 binding = "DB"

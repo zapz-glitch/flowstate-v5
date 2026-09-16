@@ -36,9 +36,17 @@ export interface ComparablesSearchParams {
   /** Bathroom filters */
   minBaths?: number
   maxBaths?: number
-  /** Square footage variance for filtering */
+  /** Square footage variance PERCENT for filtering (provider param) */
   sqftVariance?: number
-  /** Subject sqft (required with sqftVariance) */
+  /**
+   * Absolute sqft tolerance (from the sqft_diff appraisal rule). Preferred
+   * over sqftVariance — the rule value is absolute sqft, not a percent.
+   * Never relaxed by any evaluation tier, so a provider-side bound is a
+   * SAFE_PROVIDER_PREFILTER. Sent only when the rule is enabled and
+   * subjectSqft is known.
+   */
+  sqftDiff?: number
+  /** Subject sqft (required with sqftVariance/sqftDiff) */
   subjectSqft?: number
   /** Subject property type (used when API doesn't return it) */
   subjectPropertyType?: string
@@ -336,6 +344,8 @@ export interface ComparablesResult {
     subject: { id: string; address?: string }
     comparables: NormalizedComparable[]
     count: number
+    /** What the provider actually returned — pool breadth + truncation audit */
+    retrieval?: import('./retrieval-policy').ComparablesRetrievalMeta
   }
 }
 
@@ -600,6 +610,8 @@ export interface PropertyBundle {
     searchParams: PropertySearchParams | { propertyId: string }
     comparablesParams: Omit<ComparablesSearchParams, 'subjectSqft' | 'subjectPropertyType'>
     enrichmentOptions: EnrichmentOptions
+    /** Provider retrieval audit — pool breadth, truncation inference, refetches */
+    retrieval?: import('./retrieval-policy').ComparablesRetrievalMeta
   }
 }
 
@@ -625,7 +637,9 @@ export interface PropertyBundleParams {
     radiusMiles?: number
     maxComps?: number
     monthsBack?: number
-    /** Square footage variance for filtering (passed to API) */
+    /** Absolute sqft tolerance from the sqft_diff rule (provider bounds) */
+    sqftDiff?: number
+    /** Square footage variance PERCENT for filtering (legacy provider param) */
     sqftVariance?: number
   }
 

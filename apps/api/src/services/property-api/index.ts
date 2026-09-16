@@ -33,6 +33,7 @@ import {
   type CacheService,
 } from '../cache';
 import { createNeighbourhoodService, type NeighbourhoodData } from '../neighbourhood';
+import { resolveCandidateLimit } from './retrieval-policy';
 import type {
   PropertyProvider,
   PropertyProviderAdapter,
@@ -824,13 +825,15 @@ class PropertyApi implements PropertyApiService {
     const address1 = property.address || params.streetAddress || ''
     const address2 = [property.city || params.city, property.state || params.state, property.zipCode || params.zipCode].filter(Boolean).join(', ')
 
+    const candidateLimit = resolveCandidateLimit(this.env, this.currentConfig.provider, compParams.maxComps)
     const [compsResult, permitsResult, floodResult, neighbourhoodResult, avmResult, buildingDetailResult] = await Promise.all([
-      // Get comparables
+      // Get comparables — up to the configured/provider-max candidate limit
       this.getComparables({
         propertyId: property.id,
         radiusMiles: compParams.radiusMiles ?? 1,
-        maxComps: compParams.maxComps ?? 10,
+        maxComps: candidateLimit,
         monthsBack: compParams.monthsBack ?? 12,
+        sqftDiff: compParams.sqftDiff,
         sqftVariance: compParams.sqftVariance,
         subjectSqft: property.squareFeet ?? undefined,
         subjectPropertyType: property.propertyType ?? undefined,
@@ -983,10 +986,11 @@ class PropertyApi implements PropertyApiService {
         comparablesParams: {
           propertyId: property.id,
           radiusMiles: compParams.radiusMiles ?? 1,
-          maxComps: compParams.maxComps ?? 10,
+          maxComps: candidateLimit,
           monthsBack: compParams.monthsBack ?? 12,
         },
         enrichmentOptions: enrichOpts,
+        retrieval: compsResult.data.retrieval,
       },
     };
 

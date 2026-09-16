@@ -38,6 +38,7 @@ import {
 } from '../analysis'
 import { createPhotoService, type PhotoBundle, type PropertyIdentifier, type PropertyPhotos } from '../photo-provider'
 import { persistReportAssets } from '../report-assets'
+import { expansionRefetchRadius } from '../property-api/retrieval-policy'
 import { assessRenovationFromPhotos, assessCompCurbAppeal, type RenovationAssessment, type CurbAppealCheck } from '../vision/renovation'
 import { PROXIMITY_DEFAULTS } from '../../routes/proximity-config'
 import { deriveBuybox } from './derivation'
@@ -80,6 +81,14 @@ export interface EvaluationParams {
   /** Threshold for Group B: comps with salePrice <= X% of ARV (default: 70) */
   asIsThresholdPercent?: number
   apiCallStats?: ApiCallStats
+  /**
+   * Expansion refetch seam. When the appraisal ladder reaches a tier that
+   * searches beyond the fetched radius, the pool provably lacks those
+   * candidates — the caller makes ONE additional provider request at the
+   * wider radius and returns the merged, enriched pool. Deterministic
+   * selection always runs after retrieval; this never picks comps itself.
+   */
+  expandComparablesPool?: (radiusMiles: number) => Promise<NormalizedComparable[] | null>
 }
 
 export interface GroupBResult {
@@ -394,6 +403,46 @@ export async function performAnalysis(
 
   if (appraisalResult.fallbackUsed && appraisalResult.fallbackUsed !== 'none') {
     fallbacksUsed.push(`comp_fallback:${appraisalResult.fallbackUsed}`)
+  }
+
+  // ── 1b. Expansion refetch: radius-bound tiers (subdivision 2x, geographic,
+  // pool exhaustion) search geography the fetched pool provably lacks. The
+  // caller performs ONE wider provider request; deterministic selection then
+  // re-runs on the real, merged candidate universe.
+  const refetchRadius = expansionRefetchRadius(
+    appraisalResult.fallbackUsed,
+    bundle.metadata?.comparablesParams?.radiusMiles,
+    DEFAULT_EXPANSION_POLICY.geographicDistanceMultiplier,
+    Number.parseFloat(env.COMPARABLE_EXPANSION_RADIUS_MILES ?? '') || undefined,
+  )
+  if (refetchRadius != null && params.expandComparablesPool) {
+    try {
+      const widened = await params.expandComparablesPool(refetchRadius)
+      if (widened && widened.length > 0) {
+        bundle = { ...bundle, comparables: widened }
+        appraisalResult = appraisalService.evaluateWithFallback(
+          bundle.property,
+          bundle.comparables,
+          { filters, adjustments, expansion: DEFAULT_EXPANSION_POLICY }
+        )
+        fallbacksUsed.push('pool_expansion_refetch')
+        step(
+          'comparables_fetch',
+          'fallback',
+          `Expanded provider search to ${refetchRadius}mi — ${widened.length} candidates in merged pool`,
+        )
+        if (appraisalResult.fallbackUsed && appraisalResult.fallbackUsed !== 'none'
+            && !fallbacksUsed.includes(`comp_fallback:${appraisalResult.fallbackUsed}`)) {
+          fallbacksUsed.push(`comp_fallback:${appraisalResult.fallbackUsed}`)
+        }
+      } else {
+        fallbacksUsed.push('pool_expansion_refetch')
+        step('comparables_fetch', 'fallback', `Refetch at ${refetchRadius}mi returned no additional candidates`)
+      }
+    } catch (refetchError) {
+      console.warn('[Evaluate] Expansion refetch failed (non-fatal):', refetchError)
+      step('comparables_fetch', 'failed', `Expansion refetch failed: ${refetchError instanceof Error ? refetchError.message : 'unknown'}`)
+    }
   }
 
   // ── 2. Photos: subject + comps via Zillow → Redfin → Realtor chain ─────────

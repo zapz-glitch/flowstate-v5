@@ -37,7 +37,10 @@ assert.deepEqual((conflict.comparables[0].raw as any).retrievalVariants.map((v: 
 const physical = merge([comp('one')], [comp('one', 300000, '2026-01-01', { squareFeet: 1600, yearBuilt: 2001 })])
 assert.deepEqual((physical.comparables[0].raw as any).retrievalPhysicalConflicts, ['squareFeet', 'yearBuilt'])
 assert.deepEqual(physical.conflictIds, [])
-assert.equal(merge(Array.from({ length: 70 }, (_, i) => comp(`n${i}`)), Array.from({ length: 70 }, (_, i) => comp(`e${i}`))).comparables.length, 100)
+// No artificial per-pool cap: pools are bounded by the provider's documented
+// maximum (CoreLogic maxComps = 100). The old slice(0, 50) silently dropped
+// candidates the appraisal rules were entitled to evaluate.
+assert.equal(merge(Array.from({ length: 70 }, (_, i) => comp(`n${i}`)), Array.from({ length: 70 }, (_, i) => comp(`e${i}`))).comparables.length, 140)
 const probePath = (label: string) => new URL(`../../../.data/local-candidate/magnolia-coverage-probe-${label}.json`, import.meta.url)
 if (existsSync(probePath('defaults')) && existsSync(probePath('filtered'))) {
   const load = (label: string) => JSON.parse(readFileSync(probePath(label), 'utf8')).raw.comparables.map((raw: any) => comp(String(raw.clip), raw.salePrice, `${raw.saleDate.slice(0, 4)}-${raw.saleDate.slice(4, 6)}-${raw.saleDate.slice(6, 8)}`, { address: raw.streetAddress, squareFeet: raw.buildingSquareFeet, raw }))

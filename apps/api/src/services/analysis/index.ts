@@ -670,6 +670,8 @@ export interface AnalysisResponse {
   comps: {
     /** Total number of comps returned from API */
     total: number
+    /** Provider retrieval audit: requested limit, received count, inferred truncation, refetches */
+    retrieval: import('../property-api/retrieval-policy').ComparablesRetrievalMeta | null
     /** Number of comps that passed all filters (enabled) */
     enabledCount: number
     /** Number of comps that failed filters (disabled) */
@@ -1315,6 +1317,8 @@ export function buildAnalysisResponse(
     // ═══ COMPARABLE SALES (All comps with enable/disable status) ═══════════════
     comps: {
       total: appraisalResult.comparables.length,
+      // Provider retrieval audit: pool breadth, inferred truncation, refetches
+      retrieval: bundle.metadata?.retrieval ?? null,
       enabledCount: enabledComps.length,
       disabledCount: disabledComps.length,
       avgPricePerSqft: appraisalResult.avgPricePerSqft,

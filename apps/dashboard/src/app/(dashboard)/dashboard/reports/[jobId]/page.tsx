@@ -334,7 +334,8 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
       const response = await queueAnalysis({
         address: report.address,
         existingJobId: jobId,
-        searchOptions: { radiusMiles: 1, maxComps: 15, monthsBack: 12 },
+        // maxComps omitted — API applies the configured provider-max limit.
+        searchOptions: { radiusMiles: 1, monthsBack: 12 },
         skipCache: true,
         llmAnalysis: { enabled: true },
       })

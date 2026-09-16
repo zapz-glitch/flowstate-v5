@@ -18,6 +18,13 @@ import { type EvaluationParams } from '../services/evaluation'
 import { performAnalysis } from '../services/evaluation'
 import { detectOsmLocationRisks } from '../services/location-risk'
 import { createPropertyApi } from '../services/property-api'
+import { mergeComparablePools } from '../services/property-api/comparable-pool'
+import {
+  resolveCandidateLimit,
+  expansionRefetchRadius,
+  isProvablyDeadComp,
+  type ComparablesRetrievalMeta,
+} from '../services/property-api/retrieval-policy'
 import { DEFAULT_FILTERS, evaluateComparable, type AppraisalFilter } from '../services/appraisal'
 import { DEFAULT_EXPANSION_POLICY } from '../services/appraisal/types'
 import { filtersToApiParams } from '../services/appraisal/types'
@@ -228,12 +235,16 @@ export class AnalysisJobDO {
     await this.pushEvent('property_fetch', { message: 'Fetching comparables...' })
     const compsStart = Date.now()
 
+    // Candidate pool: request up to the configured/provider-max limit so the
+    // appraisal rules see the broadest universe the provider supports in one
+    // call (CoreLogic maxComps hard max = 100, no pagination).
+    const candidateLimit = resolveCandidateLimit(this.env, propertyApi.providerName, config.searchOptions.maxComps)
     const comparablesParams = {
         propertyId: property.id,
         radiusMiles: config.searchOptions.radiusMiles ?? apiFilterParams.radiusMiles ?? 1,
-        maxComps: config.searchOptions.maxComps ?? 25,
+        maxComps: candidateLimit,
         monthsBack: config.searchOptions.monthsBack ?? apiFilterParams.monthsBack ?? 12,
-        sqftVariance: apiFilterParams.sqftVariance,
+        sqftDiff: apiFilterParams.sqftDiff,
         subjectSqft: property.squareFeet ?? undefined,
         subjectPropertyType: property.propertyType ?? undefined,
     }
@@ -282,11 +293,29 @@ export class AnalysisJobDO {
 
     const pools = { comparables: compsResult.success ? compsResult.data.comparables : [], conflictIds: [] as string[] }
     const rawComps = pools.comparables
-    console.log(`[AnalysisJobDO] ✓ ${rawComps.length} comps found in ${Date.now() - compsStart}ms`)
+    // Retrieval audit — what the provider actually returned for this pool.
+    // Provider exposes no totalCount/hasMore, so providerTruncated is an
+    // inference (received filled the whole requested window).
+    const retrieval: ComparablesRetrievalMeta = compsResult.data.retrieval ?? {
+      providerCandidatesReported: null,
+      providerCandidatesReceived: rawComps.length,
+      candidateLimitRequested: candidateLimit,
+      candidateLimitEffective: candidateLimit,
+      providerTruncated: rawComps.length >= candidateLimit,
+      pagesRequested: 1,
+      providerCallsUsed: 1,
+      ordering: 'distance',
+      radiusMiles: comparablesParams.radiusMiles,
+      monthsBack: comparablesParams.monthsBack,
+    }
+    let candidatesPruned = 0
+    let candidatesEnriched = 0
+    console.log(`[AnalysisJobDO] ✓ ${rawComps.length} comps found in ${Date.now() - compsStart}ms (requested ${retrieval.candidateLimitEffective}${retrieval.providerTruncated ? ', provider-truncated' : ''})`)
 
     // Stream comps immediately → dashboard shows map markers + basic comp cards
     await this.pushEvent('comps_found', {
       compCount: rawComps.length,
+      retrieval,
       comps: rawComps.map((c) => ({
         id: c.id,
         address: `${c.address}, ${c.city}, ${c.state}`,
@@ -317,32 +346,77 @@ export class AnalysisJobDO {
       const f = filters.find((x) => x.type === type)
       return f && f.enabled === false ? Infinity : (f?.value ?? fallback)
     }
-    const saleAgeDays = filterValue('sale_age', 180)
-    const sqftDiff = filterValue('sqft_diff', 250)
-    const maxYear = filterValue('year_built_diff', 10) +
-      Math.max(0, ...DEFAULT_EXPANSION_POLICY.yearBuiltExpansionSteps)
-    const nowMs = Date.now()
-    const isDeadComp = (c: NormalizedComparable): boolean => {
-      if (c.saleDate) {
-        const days = (nowMs - new Date(c.saleDate).getTime()) / 86_400_000
-        if (Number.isFinite(days) && days > saleAgeDays) return true
-      }
-      if (c.squareFeet && property.squareFeet && Math.abs(c.squareFeet - property.squareFeet) > sqftDiff) return true
-      if (c.yearBuilt && property.yearBuilt && Math.abs(c.yearBuilt - property.yearBuilt) > maxYear) return true
-      return false
+    const deadThresholds = {
+      saleAgeDays: filterValue('sale_age', 180),
+      sqftDiff: filterValue('sqft_diff', 250),
+      maxYearDiff: filterValue('year_built_diff', 10) +
+        Math.max(0, ...DEFAULT_EXPANSION_POLICY.yearBuiltExpansionSteps),
     }
+    const nowMs = Date.now()
+    const isDeadComp = (c: NormalizedComparable): boolean =>
+      isProvablyDeadComp(c, property, deadThresholds, nowMs)
 
     const toEnrich = rawComps
       .filter((c) => !isDeadComp(c))
       .sort((a, b) => (a.distanceMiles ?? 999) - (b.distanceMiles ?? 999))
     const skipped = rawComps.length - toEnrich.length
+    candidatesPruned = skipped
+    candidatesEnriched = toEnrich.length
     if (skipped > 0) {
       console.log(`[AnalysisJobDO] Skipping enrichment for ${skipped} comp(s) dead on sale-age/sqft/year rules`)
     }
 
     const enrichedList = await propertyApi.enrichComparables(toEnrich, { concurrency: 10 })
     const enrichedById = new Map(enrichedList.map((c) => [c.id, c]))
-    const enrichedComps = rawComps.map((c) => enrichedById.get(c.id) ?? c)
+    let enrichedComps = rawComps.map((c) => enrichedById.get(c.id) ?? c)
+    retrieval.candidatesPrunedBeforeEnrichment = candidatesPruned
+    retrieval.candidatesEnriched = candidatesEnriched
+
+    // ── Expansion refetch ─────────────────────────────────────────────────────
+    // The pool fetched at radius R provably contains zero candidates beyond R.
+    // When the appraisal ladder reaches a radius-bound tier (subdivision 2x,
+    // geographic, or pool exhaustion), do ONE wider provider request, merge
+    // pools (conflict-aware), and enrich only new provably-live candidates.
+    // evidenceLimitations is referenced by the bundle built below — pushes
+    // here land in the audit trail even though they run inside evaluation.
+    const evidenceLimitations: string[] = []
+    let refetchUsed = false
+    const expandComparablesPool = async (radiusMiles: number): Promise<NormalizedComparable[] | null> => {
+      if (refetchUsed) return null
+      refetchUsed = true
+      console.log(`[AnalysisJobDO] Expansion refetch: widening comparable search to ${radiusMiles}mi`)
+      await this.pushEvent('property_fetch', { message: `Widening comp search to ${radiusMiles} miles...` })
+      const wider = await propertyApi.getComparables({ ...comparablesParams, radiusMiles })
+      if (!wider.success) {
+        console.warn(`[AnalysisJobDO] Expansion refetch failed: ${wider.error}`)
+        return null
+      }
+      const merged = mergeComparablePools(rawComps, wider.data.comparables)
+      for (const id of merged.conflictIds) {
+        pools.conflictIds.push(id)
+        evidenceLimitations.push(`${id}: Provider comparable pools disagree on the same sale date; price is quarantined from evaluation`)
+      }
+      const newCandidates = merged.comparables.filter((c) => !enrichedById.has(c.id))
+      const toEnrichNew = newCandidates
+        .filter((c) => !isDeadComp(c))
+        .sort((a, b) => (a.distanceMiles ?? 999) - (b.distanceMiles ?? 999))
+      candidatesPruned += newCandidates.length - toEnrichNew.length
+      candidatesEnriched += toEnrichNew.length
+      if (toEnrichNew.length > 0) {
+        const newlyEnriched = await propertyApi.enrichComparables(toEnrichNew, { concurrency: 10 })
+        for (const c of newlyEnriched) enrichedById.set(c.id, c)
+      }
+      enrichedComps = merged.comparables.map((c) => enrichedById.get(c.id) ?? c)
+      retrieval.providerCallsUsed += 1
+      retrieval.pagesRequested += 1
+      retrieval.providerCandidatesReceived = enrichedComps.length
+      retrieval.candidatesPrunedBeforeEnrichment = candidatesPruned
+      retrieval.candidatesEnriched = candidatesEnriched
+      retrieval.providerTruncated =
+        (wider.data.retrieval?.providerTruncated ?? wider.data.comparables.length >= candidateLimit) || retrieval.providerTruncated
+      console.log(`[AnalysisJobDO] Expansion refetch: pool ${rawComps.length} → ${enrichedComps.length} candidates (${toEnrichNew.length} new enriched)`)
+      return enrichedComps
+    }
 
     // Market context search runs in parallel — doesn't block evaluation or LLM
     // but we track the promise so we can await it before enrichment_done
@@ -427,7 +501,6 @@ export class AnalysisJobDO {
             : undefined),
       }
     }
-    const evidenceLimitations: string[] = []
     for (const id of pools.conflictIds) evidenceLimitations.push(`${id}: Provider comparable pools disagree on the same sale date; price is quarantined from evaluation`)
     if (!permitsData) evidenceLimitations.push(config.enrichment?.permits !== true
       ? 'Subject permits were not pulled during analysis — pull them on demand from the report'
@@ -435,6 +508,8 @@ export class AnalysisJobDO {
     if (!floodData) evidenceLimitations.push(config.enrichment?.floodZone !== true
       ? 'Subject flood zone was not pulled from the provider; a listing-derived flood signal may still apply'
       : 'Subject flood-zone evidence is unavailable; this does not mean the property is outside a flood zone')
+    if (retrieval.providerTruncated) evidenceLimitations.push(
+      `Provider returned the maximum requested comparables (${retrieval.candidateLimitEffective}); additional qualifying sales may exist beyond the candidate limit`)
 
     const bundle: import('../services/property-api/types').PropertyBundle = {
       property,
@@ -445,6 +520,7 @@ export class AnalysisJobDO {
         searchParams: config.search as import('../services/property-api/types').PropertySearchParams,
         comparablesParams: { ...comparablesParams },
         enrichmentOptions: { permits: config.enrichment?.permits === true, floodZone: config.enrichment?.floodZone === true, weatherRisk: false, neighbourhood: false },
+        retrieval,
       },
       enrichment: {
         evidenceLimitations,
@@ -468,6 +544,9 @@ export class AnalysisJobDO {
         corelogic: { total: propertyCallStats.total, cached: propertyCallStats.cached, endpoints: propertyCallStats.endpoints },
         totalExternalCalls: propertyCallStats.total,
       },
+      // Radius-bound expansion tiers refetch instead of pretending the
+      // fetched-radius pool contains candidates it never had.
+      expandComparablesPool,
     }
 
     let evalResult
