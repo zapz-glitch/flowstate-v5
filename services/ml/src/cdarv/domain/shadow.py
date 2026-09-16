@@ -44,6 +44,9 @@ def _recalc(report_id: str, comp_ids: list[str]) -> dict[str, Any]:
         headers={
             "Content-Type": "application/json",
             "X-CDARV-Internal-Secret": secret,
+            # urllib's default UA signature is rejected by Cloudflare's
+            # bot check (error 1010) on public API endpoints.
+            "User-Agent": "cdarv-worker/1.0",
         },
         method="POST",
     )
