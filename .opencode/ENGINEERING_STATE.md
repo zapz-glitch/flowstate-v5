@@ -1,5 +1,29 @@
 # Engineering State — flowstate-v5
 
+### 2026-09-16 — CDARV-only production release candidate (release/cdarv-prod-rc, NOT deployed)
+
+Clean branch cut from origin/main containing ONLY the verified CDARV
+work — cherry-picked c4fc09c→98554c1, abbf3d7→9edcbea, b5c68b9→fe9a1f8,
+25f4c10→5cda32e, 9d779ca→123b1c1, 4acd531→ec81d1e. Excluded: 89bef4a
+(retrieval/comp-pool widening — changes prod underwriting inputs) and
+the 3411afa merge (its only content was origin/main + the resolution,
+already present).
+
+Verification vs staging-tested code (4acd531): services/ml tree
+byte-identical; cdarv.ts / ml-export.ts / cdarv dashboard / tests /
+docs identical; shared-file diffs vs origin/main are additive CDARV
+mounts only (index.ts routes, types.ts env vars, Sidebar nav, reports
+page SendToCdarvButton). Retrieval dirs byte-identical to origin/main.
+Regressions on the RC: 61/61 pytest, 17/17 api regression files, tsc
+clean both apps, 5/5 canonical-contract audit.
+
+Prod-readiness: routes mount but fail closed 503 cdarv_unavailable
+without CDARV_API_URL/CDARV_INTERNAL_API_TOKEN — code can ship to prod
+inert. Prod needs (when authorized): Render web + worker (Dockerfile,
+worker cmd `python -m cdarv.worker.main`), dedicated Postgres
+(artifacts are DB blobs — survive redeploys), alembic pre-deploy,
+4 secrets (see DEPLOYMENT.md). No prod infra provisioned.
+
 ### 2026-09-16 — Integration verification pass (feat/cdarv-ml-foundation, uncommitted retrieval changes preserved)
 
 Full runtime verification of the suspended candidate-retrieval hardening +
