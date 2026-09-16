@@ -49,6 +49,53 @@ services:
         value: "false"
       - key: V4_EXTERNAL_CALLS_ENABLED
         value: "false"
+  # CDARV — experimental comp-ranking learning loop (shadow only, never in the
+  # production underwriting path). Dedicated Postgres keeps its alembic chain
+  # and blast radius separate from eval-engine staging. autoDeploy off.
+  - type: web
+    name: flowstate-cdarv-staging
+    runtime: docker
+    branch: main
+    region: virginia
+    plan: 0.5c-512mb
+    autoDeployTrigger: "off"
+    dockerfilePath: ./services/ml/Dockerfile
+    dockerContext: ./services/ml
+    preDeployCommand: alembic upgrade head
+    healthCheckPath: /health
+    envVars:
+      - key: CDARV_DATABASE_URL
+        fromDatabase:
+          name: flowstate-cdarv-staging-postgres
+          property: connectionString
+      - key: CDARV_INTERNAL_API_TOKEN
+        sync: false
+      - key: CDARV_TEST_PROFILE
+        value: "false"
+  - type: worker
+    name: flowstate-cdarv-staging-worker
+    runtime: docker
+    branch: main
+    region: virginia
+    plan: 0.5c-512mb
+    autoDeployTrigger: "off"
+    dockerfilePath: ./services/ml/Dockerfile
+    dockerContext: ./services/ml
+    dockerCommand: python -m cdarv.worker.main
+    maxShutdownDelaySeconds: 300
+    envVars:
+      - key: CDARV_DATABASE_URL
+        fromDatabase:
+          name: flowstate-cdarv-staging-postgres
+          property: connectionString
+      - key: CDARV_WORKER_OWNER
+        value: cdarv-staging-worker
+      - key: CDARV_TS_API_URL
+        sync: false
+      - key: CDARV_TS_INTERNAL_SECRET
+        sync: false
+      - key: CDARV_TEST_PROFILE
+        value: "false"
 databases:
   - name: flowstate-v4-staging-postgres
     region: virginia
@@ -57,4 +104,12 @@ databases:
     diskSizeGB: 5
     databaseName: flowstate_v4_staging
     user: flowstate_v4_staging
+    ipAllowList: []
+  - name: flowstate-cdarv-staging-postgres
+    region: virginia
+    plan: 0.1c-256mb
+    postgresMajorVersion: "17"
+    diskSizeGB: 5
+    databaseName: flowstate_cdarv_staging
+    user: flowstate_cdarv_staging
     ipAllowList: []

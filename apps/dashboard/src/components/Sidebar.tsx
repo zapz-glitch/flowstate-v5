@@ -24,6 +24,7 @@ import {
   Activity,
   ExternalLink,
   ListTodo,
+  FlaskConical,
 } from 'lucide-react'
 import { signOut } from '@/lib/auth-client'
 import { Logo, LogoIcon } from '@/components/ui/Logo'
@@ -54,6 +55,7 @@ const baseNavigation: Array<{
   { name: 'Property Search', short: 'Search', href: '/dashboard/analyze', icon: Search },
   { name: 'Batch Import', short: 'Batch', href: '/dashboard/batch', icon: Upload },
   { name: 'Property Reports', short: 'Reports', href: '/dashboard/reports', icon: ClipboardList },
+  { name: 'CDARV (Experimental)', short: 'CDARV', href: '/dashboard/cdarv', icon: FlaskConical },
   { name: 'Evaluation Settings', short: 'Settings', href: '/dashboard/evaluation-settings', icon: Settings2 },
   { name: 'API Hub', short: 'API', href: '/dashboard/api-hub', icon: Key },
   { name: 'Tasks', short: 'Tasks', href: '/dashboard/tasks', icon: ListTodo },

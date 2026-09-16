@@ -36,6 +36,7 @@ import proximityConfigRoute from './routes/proximity-config'
 import typeaheadRoute from './routes/typeahead'
 import compSelectionRoute from './routes/comp-selection'
 import mlExportRoute from './routes/ml-export'
+import { cdarv, cdarvInternal } from './routes/cdarv'
 import sseStream from './routes/sse-stream'
 import ghlWebhook from './routes/webhooks/ghl'
 import { sweepStaleBatches } from './services/batch-queue'
@@ -140,6 +141,11 @@ app.route('/typeahead', typeaheadRoute)
 
 // Comp selection (session-authenticated, LLM-only)
 app.route('/comp-selection', compSelectionRoute)
+
+// CDARV learning service (session-auth proxy; fails closed when unconfigured)
+app.route('/cdarv', cdarv)
+// CDARV worker callback — internal-secret auth, runs production recalc only
+app.route('/internal/cdarv', cdarvInternal)
 
 // SSE stream routes (token-authenticated)
 app.route('/sse', sseStream)

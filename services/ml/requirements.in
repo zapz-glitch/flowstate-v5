@@ -1,6 +1,14 @@
 # Human-editable direct inputs for the CDARV ML package.
 # Keep this service's dependency surface separate from eval-engine —
 # CDARV must never share fate with production underwriting.
+# Pins mirror the eval-engine lockfile where the packages overlap.
 numpy==2.5.3
 scikit-learn==1.9.1
 pytest==9.1.1
+httpx==0.28.1
+alembic==1.19.2
+fastapi==0.141.1
+uvicorn[standard]==0.52.4
+pydantic==2.13.5
+sqlalchemy==2.0.52
+psycopg[binary]==3.3.5

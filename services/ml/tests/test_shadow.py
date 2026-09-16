@@ -1,53 +1,103 @@
+"""Shadow scoring: eligibility gate, insufficient evidence, recalc call."""
+
 import json
 
-from cdarv.ingest import SqliteReportSource, ingest_reports
-from cdarv.model import train
-from cdarv.shadow import run_shadow
-from cdarv.store import Store
-from conftest import insert_saved_report, make_report
+import pytest
+from sqlalchemy import select
+
+import cdarv.domain.shadow as shadow
+from cdarv.domain.datasets import build_dataset
+from cdarv.domain.submissions import submit_report
+from cdarv.domain.training import train_model
+from cdarv.persistence.models import Prediction
+from conftest import approve_review, make_report, submit_payload
 
 
-def test_shadow_predictions_written(tmp_path, d1_file):
+@pytest.fixture
+def trained(session):
     for i in range(6):
-        insert_saved_report(d1_file, f"r{i}", make_report(f"r{i}"))
-    store = Store(tmp_path / "cdarv.db")
-    ingest_reports(store, SqliteReportSource(str(d1_file)))
-    train(store, artifact_dir=tmp_path / "artifacts")
-
-    outcomes = run_shadow(store)
-    assert len(outcomes) == 6
-
-    outcome = outcomes[0]
-    p = outcome.prediction
-    assert p["model_target"] == "arv"
-    assert len(p["selected"]) == 3
-    # Planted rule: shadow selection should match the actual ARV picks.
-    assert p["overlap_with_actual"] == 3
-    assert p["shadow_arv"] is not None
-    assert p["actual_arv"] == 260000.0
-    assert p["arv_delta"] is not None
-
-    with store.connect() as conn:
-        stored = conn.execute("SELECT COUNT(*) c FROM shadow_predictions").fetchone()["c"]
-        assert stored == 6
+        snap, _ = submit_payload(
+            session, f"r{i}", created_at=f"2026-0{(i % 8) + 1}-15T00:00:00Z")
+        approve_review(session, snap)
+    dataset = build_dataset(session, name="d", created_by="test", seed=42)
+    return train_model(session, dataset_id=dataset.id, name="baseline")
 
 
-def test_shadow_single_report(tmp_path, d1_file):
-    insert_saved_report(d1_file, "r1", make_report("r1"))
-    insert_saved_report(d1_file, "r2", make_report("r2"))
-    store = Store(tmp_path / "cdarv.db")
-    ingest_reports(store, SqliteReportSource(str(d1_file)))
-    train(store, artifact_dir=tmp_path / "artifacts")
-
-    outcomes = run_shadow(store, report_id="r1")
-    assert len(outcomes) == 1
-    assert outcomes[0].report_id == "r1"
+def _fake_recalc(arv=270000):
+    def _fn(report_id, comp_ids):
+        return {"valuation": {"arv": arv, "arvPerSqft": 180},
+                "comps": {"afterRenovationCompIds": comp_ids}}
+    return _fn
 
 
-def test_shadow_requires_model(tmp_path, d1_file):
-    insert_saved_report(d1_file, "r1", make_report("r1"))
-    store = Store(tmp_path / "cdarv.db")
-    ingest_reports(store, SqliteReportSource(str(d1_file)))
-    import pytest
-    with pytest.raises(RuntimeError, match="not found"):
-        run_shadow(store)
+def _submit_payload(session, report_id, payload):
+    return submit_report(
+        session, report_id=report_id, user_id="u1",
+        created_at="2026-09-01T00:00:00Z",
+        report_json=json.dumps(payload), submitted_by="test",
+    )
+
+
+def test_shadow_scores_and_calls_production_recalc(session, trained, monkeypatch):
+    calls = []
+
+    def _spy(rid, ids):
+        calls.append((rid, ids))
+        return _fake_recalc()(rid, ids)
+
+    monkeypatch.setattr(shadow, "_recalc", _spy)
+    snap, _ = submit_payload(session, "live-1")
+    pred = shadow.score_snapshot(session, snapshot=snap, model_row=trained)
+
+    assert pred.status == "scored"
+    assert pred.shadow_arv == 270000
+    assert len(pred.selected_comp_ids) == 3
+    assert calls and calls[0][0] == "live-1"
+    assert set(pred.selected_comp_ids) == set(calls[0][1])
+    assert pred.input_hash == snap.content_hash
+
+
+def test_shadow_only_ranks_eligible_comps(session, trained, monkeypatch):
+    """The model can never make an ineligible comp eligible."""
+    monkeypatch.setattr(shadow, "_recalc", _fake_recalc())
+    payload = make_report("live-2")
+    for i, item in enumerate(payload["comps"]["items"]):
+        item["isEnabled"] = i < 4  # only first 4 eligible
+    snap, _ = _submit_payload(session, "live-2", payload)
+    pred = shadow.score_snapshot(session, snapshot=snap, model_row=trained)
+    eligible_ids = {f"live-2-c{i}" for i in range(4)}
+    assert set(pred.selected_comp_ids) <= eligible_ids
+    assert set(pred.scores_json.keys()) <= eligible_ids
+
+
+def test_shadow_insufficient_evidence_when_no_eligible(session, trained, monkeypatch):
+    monkeypatch.setattr(shadow, "_recalc", _fake_recalc())
+    payload = make_report("live-3")
+    for item in payload["comps"]["items"]:
+        item["isEnabled"] = False
+    snap, _ = _submit_payload(session, "live-3", payload)
+    pred = shadow.score_snapshot(session, snapshot=snap, model_row=trained)
+    assert pred.status == "insufficient_evidence"
+    assert pred.shadow_arv is None
+    assert pred.selected_comp_ids == []
+
+
+def test_shadow_recalc_failure_records_error_not_number(session, trained, monkeypatch):
+    def _boom(rid, ids):
+        raise shadow.RecalcError("downstream down")
+    monkeypatch.setattr(shadow, "_recalc", _boom)
+    snap, _ = submit_payload(session, "live-4")
+    pred = shadow.score_snapshot(session, snapshot=snap, model_row=trained)
+    assert pred.status == "error"
+    assert pred.shadow_arv is None
+    assert "downstream down" in pred.recalc_json["error"]
+
+
+def test_prediction_upsert_per_snapshot_model(session, trained, monkeypatch):
+    monkeypatch.setattr(shadow, "_recalc", _fake_recalc())
+    snap, _ = submit_payload(session, "live-5")
+    p1 = shadow.score_snapshot(session, snapshot=snap, model_row=trained)
+    p2 = shadow.score_snapshot(session, snapshot=snap, model_row=trained)
+    assert p1.id == p2.id  # same (snapshot, model) → same prediction row
+    rows = session.execute(select(Prediction)).scalars().all()
+    assert len(rows) == 1

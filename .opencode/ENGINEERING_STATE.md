@@ -1,10 +1,187 @@
 # Engineering State — flowstate-v5
 
 ## Current Objective
-Build a new landing page for Flowstate on `apps/dashboard`, fresh baseline.
-Direction from product engineer (2026-09-11): credibility landing page for
-realtors, wholesalers, and investors. Burger menu top-right with portal
-access to the dashboard after auth.
+CDARV (Comp-Derived After Repair Value): human-curated ML learning loop
+for comp selection/ranking, on `feat/cdarv-ml-foundation`. Design doc:
+`docs/cdarv/DESIGN.md`; runbook: `services/ml/README.md`. Shadow-only —
+production underwriting unchanged and never depends on CDARV.
+
+### 2026-09-16 — CDARV full loop built (feat/cdarv-ml-foundation, NOT merged/deployed)
+
+Stage 2–4 implemented on top of the c4fc09c foundation (v1 scaffold fully
+replaced by the domain/persistence architecture):
+
+- **Persistence** (`services/ml/src/cdarv/persistence/`): `cdarv_*`
+  tables — snapshots (unique report_id+content_hash, versioned),
+  reviews (immutable versions), comp_labels (strong_arv/
+  usable_with_adjustment/unsuitable/not_reviewed + structured reasons),
+  preferences, external_comps, approvals (comp_ranking /
+  valuation_benchmark scopes, gold_standard w/ evidence), datasets +
+  members (pinned versions, splits, feature/code versions, geo overlap),
+  jobs (lease/claim), models (immutable, artifact_blob), shadow_state
+  (singleton), predictions, guidance.
+- **Domain** (`domain/`): submissions, reviews, labels, features v2
+  (rule echoes + subject.avm + valuation outputs EXCLUDED; NaN+_known
+  for unknowns), datasets (approved-only, report-grouped time-aware
+  splits), training (sklearn CPU baseline), shadow (eligible-only
+  ranking → top-k → production recalculateReport via internal callback),
+  monitoring, registry (explicit activate/deactivate/rollback).
+- **Service**: `cdarv/app.py` FastAPI, bearer-token (`CDARV_INTERNAL_API_TOKEN`,
+  constant-time hash compare), all routes under /v1. `app.routes` shows
+  a `_IncludedRouter` entry — normal for FastAPI 0.141; requests route
+  fine (verified via TestClient).
+- **Worker**: `python -m cdarv.worker.main` — lease/claim over
+  cdarv_jobs; sleeps poll_seconds when idle (busy-loop fixed).
+- **apps/api**: `routes/cdarv.ts` — `POST /cdarv/submissions`
+  (reportIds OR jobIds, owner-scoped against saved_reports),
+  `/cdarv/proxy/*` session→bearer passthrough,
+  `POST /internal/cdarv/recalculate` (X-CDARV-Internal-Secret or Bearer
+  == CDARV_INTERNAL_API_TOKEN → runs real recalculateReport). Fails
+  closed 503 when CDARV_API_URL unset.
+- **Dashboard**: `/dashboard/cdarv` (queue, snapshot review form,
+  models/registry w/ activate-deactivate, performance), Send-to-CDARV
+  button on report detail, sidebar entry "CDARV (Experimental)".
+- **Deploy artifacts (staged, not deployed)**: services/ml/Dockerfile
+  (hashed --require-hashes install, port 8005), bootstrap-requirements.txt,
+  render.staging.yaml entries (web + worker + dedicated
+  flowstate-cdarv-staging-postgres), hashed requirements.txt via
+  pip-compile. Alembic chain `services/ml/alembic` (0001 generates DDL
+  from ORM metadata — cannot drift; PG-only env guard).
+- **CLI**: init-db / submit --d1 / queue / build-dataset / train /
+  worker --once / shadow activate|deactivate|score|state / status.
+  `python -m cdarv` entrypoint fixed (was missing __main__ block).
+
+Verified:
+- 59/59 pytest (synthetic fixtures only; idempotent submit, approval
+  gating, not_reviewed-not-negative, grouped time-aware splits, AVM/rule
+  exclusion, worker train+shadow e2e on sqlite).
+- Live TestClient e2e: submit 201 created → resubmit 201 duplicate →
+  changed payload → new_version v2; queue/models/shadow-state all 200;
+  no-auth → 401.
+- 18/18 api regression files incl. NEW tests/cdarv.test.ts (session 401s,
+  token 401/400/404 on internal recalc).
+- `npx tsc --noEmit` clean: apps/api AND apps/dashboard (fixed
+  review-form import path; stale .next/types atlas error removed by
+  deleting .next/types — pre-existing artifact, unrelated).
+
+Not verified: Alembic against real Postgres (Docker unavailable —
+create_all verified on sqlite only); real saved_reports payloads through
+the full submit→review→train→shadow chain (needs deployed service +
+secrets); dashboard pages not browser-verified.
+
+Blockers for product engineer (all in DESIGN.md §7): Cotality ML-
+training licensing, secrets provisioning (CDARV_INTERNAL_API_TOKEN,
+CDARV_TS_*), Postgres home decision, no deploy authorized.
+
+### Prior: eval-engine canonical ARV audit (suspended)
+Evaluations hardening: establish the canonical Flowstate ARV contract,
+audit Python V4 (`services/eval-engine`) against it, and define the
+smallest migration repair sequence. No production behavior changes
+authorized yet.
+
+### 2026-09-?? — Canonical ARV contract audit of V4 (this session)
+
+Owner-supplied canonical contract (top-3 by verified sale price DESC,
+plain mean of adjusted PPSF x subject sqft, no weighting/bands/
+proximity reorder/avg-price fallback; NOT_EXAMINED_FOR_ARV for unreached
+candidates; identical inputs -> identical result across eval/save/load/
+recalc; changed input -> new revision).
+
+Audit artifact: `services/eval-engine/tests/test_canonical_contract_audit.py`
+(5 fixtures, all passing on V4 engine — verified `62 passed` suite +
+this file's `5 passed`).
+
+Findings (full report in session):
+- `legacy_physical_v1` = LEGACY: physical-similarity ordering, selects
+  exactly ONE comp (arv_selection_rank==1). Conflicts (not top-3).
+- `upper_half_rule_weighted_v1` / `provider_authoritative_upper_half_v2`
+  = EXPERIMENTAL: upper-half cohort (ceil(n/2) priced above 2nd-ranked
+  qualified), rule_match_fraction weighting, 180/(180+age) recency
+  weighting, 3x-median PPSF quarantine, weighted-mean PPSF. All
+  conflict with owner contract (hidden weighting; cohort not top-3).
+- V4 has NO 90%-of-highest band (that's TS `ARV_PRICE_BAND_PCT`), NO
+  mean-sale-price fallback (missing sqft -> MISSING_SQFT/FAILED) —
+  conforms on those two points.
+- `NOT_EXAMINED_FOR_ARV` declared in contracts but NEVER assigned —
+  contract gap.
+- Fixture A result: all three policies yield exact_value 375000 BUT
+  with different accepted sets (legacy: c-high only; upper-half:
+  c-high+c-mid with 0.5/0.5 weights).
+- Save/load + recalc determinism verified via payload round-trip
+  (read path returns stored versioned payload; no silent re-eval).
+- Competing live paths (TS): selectArvComps 90% band + proximity-first;
+  evaluateWithFallback expansion ladder; condition-gate recompute via
+  calculateARV (plain mean price, different formula); saved-report
+  recalculateReport (top-3 by adjusted price); dashboard lib/recalc
+  (all enabled comps, no top-3, passesHardFilters always true);
+  /comp-selection LLM route overrides isEnabled directly.
+
+Smallest repair sequence proposed (NOT implemented):
+1. Add `canonical_v1` selection policy in select_arv_comps (price-desc
+   iterate, first 3 passers, rest NOT_EXAMINED_FOR_ARV).
+2. Plain mean-of-PPSF formula; bypass weighting.
+3. Keep arv_selection_policy snapshot versioning — old snapshots keep
+   old policies.
+4. Align/neutralize TS + client recalc + LLM-override paths.
+
+No production code modified. Next: product engineer confirms canonical
+policy name/scope, then implement step 1-2 behind the policy switch.
+
+### 2026-09-?? — Comparable candidate-retrieval hardening (uncommitted)
+
+Audited + hardened CoreLogic/Cotality pool retrieval. Provider facts
+(bundled OpenAPI spec, providers/docs/corelogic-api-docs.json):
+maxComps max=100 (default 10), monthsBack max=36, NO pagination, response
+has no totalCount/hasMore/cursor (truncation inferred: received>=limit),
+sortBy Distance|Sale_Date only, landUse defaults to subject's
+(provider-imposed, not overridable). Enrichment = separate paid
+property-detail calls.
+
+Changed (uncommitted):
+- New `services/property-api/retrieval-policy.ts`: resolveCandidateLimit
+  (COMPARABLE_CANDIDATE_LIMIT env → default 100, clamped to provider
+  max), ComparablesRetrievalMeta audit type, expansionRefetchRadius
+  (radius-bound tiers only), isProvablyDeadComp (extracted from
+  analysis-job — only sale_age/sqft/year-at-widest-tolerance prune).
+- corelogic.ts: clamps maxComps to 100, absolute sqftDiff bounds
+  (minBldgSqFt/maxBldgSqFt), returns retrieval meta.
+- attom.ts: same clamp + meta + sqftDiff.
+- comparable-pool.ts: removed silent 50-per-pool merge cap.
+- appraisal/types.ts: filtersToApiParams now emits absolute `sqftDiff`
+  (was percent-mismatched sqftVariance — provider received 250% = no-op).
+- analysis-job.ts: candidateLimit resolution, retrieval meta in
+  bundle.metadata + comps_found event + truncation evidenceLimitation,
+  expandComparablesPool callback (ONE wider-radius refetch when ladder
+  reaches subdivision_expansion/geographic/nearest_comps/insufficient;
+  mergeComparablePools + enrich only new provably-live comps).
+- evaluation/index.ts: EvaluationParams.expandComparablesPool; performs
+  refetch + full re-evaluation; 'pool_expansion_refetch' fallback +
+  comparables_fetch step recorded.
+- analysis/index.ts: comps.retrieval in response (audit trail).
+- Callers: analyze /defaults + batch-job + ghl + dashboard (3 sites) no
+  longer hardcode maxComps 10/15/25 — system config wins.
+- wrangler.toml: COMPARABLE_CANDIDATE_LIMIT=100,
+  COMPARABLE_EXPANSION_RADIUS_MILES=2.
+
+Prefilter classification: monthsBack SAFE; sqftDiff SAFE (never-relaxed,
+absolute bounds now correct); year_built SAFE (post-fetch only);
+distance REQUIRES_EXPANSION_REFETCH (implemented); landUse
+provider-imposed bound (documented).
+
+Verified: `npx tsc --noEmit` api clean; `npm run test` api 17 regression
+files pass incl. new tests/comparable-retrieval.test.ts (6 proofs:
+>25 pool, position-36 candidate selected, order invariance, truncation
+audit, refetch-radius + merge, enrichment pruning). Dashboard tsc has a
+pre-existing stale `.next/types` atlas/page error unrelated to this work.
+
+Cost implication: enrichment calls scale with provably-live pool size
+(up to ~100 property-detail calls vs ~25 before, minus dead-comp
+prunes); one extra comparables call only when expansion tiers engage.
+ARV formula + selection methodology unchanged. NOT DEPLOYED.
+
+## Prior Objective (completed)
+Landing page v2 for `apps/dashboard` — credibility landing page for
+realtors, wholesalers, investors; burger menu w/ portal access post-auth.
 
 ## Merge & Deploy Status (2026-09-12)
 - `landing-page-v2` pushed to origin; fast-forward merged into `main`
@@ -1441,3 +1618,43 @@ Verified: api + dashboard tsc clean; 96/96 appraisal vitest pass;
 sortBy=Distance in the request URL).
 
 NOT DEPLOYED — awaiting explicit deploy instruction.
+
+### 2026-09-15 — CDARV ML foundation (feat/cdarv-ml-foundation, c4fc09c, NOT merged/deployed)
+
+Foundation for ML that consumes ideal reports and learns comp
+selection/ranking. Product-engineer decisions: source = prod API
+validated reports (`saved_reports.feedback_status='validated'`); model
+target = comp selection/ranking; placement = own Python package under
+services/ml, NOT a separate deployed microservice — uses existing
+backend/background-worker infra when scheduled. eval-engine stays a
+data producer only; CDARV returns shadow results only.
+
+- `services/ml/src/cdarv/`: reports.py (parse full_response_json →
+  IdealReport + CandidateComp; compGroup/asIsCompIds/afterRenovationCompIds
+  are labels, never features), features.py (61 features: geography, size,
+  market, per-filter ±1/0 scores, classification, subject context; NaN +
+  _known indicators), store.py (SQLite: ideal_reports, comp_examples,
+  model_versions, shadow_predictions; raw report kept verbatim for
+  re-derivation), ingest.py (SqliteReportSource for D1 files/exports +
+  HttpReportSource for prod API; content-hash idempotent), model.py
+  (sklearn median-impute→scale→LogisticRegression, report-grouped split,
+  top-k metrics, pickled artifacts in artifacts/ + model_versions rows),
+  shadow.py (top-3 shadow selection + shadow ARV = mean selected $/sqft ×
+  subject sqft, stored per model version), cli.py (init-db / ingest /
+  train / shadow / dataset / status).
+- `GET /v1/ml/ideal-reports` (apps/api/src/routes/ml-export.ts): API-key
+  auth via existing v1 middleware; caller-scoped validated reports with
+  full response JSON; cursor = `createdAt~id`, limit ≤50.
+- Labels are trustworthy: manual comp edits rewrite full_response_json
+  (user-reports.ts comp route) before stamping.
+- Deps: numpy 2.5.3, scikit-learn 1.9.1, pytest 9.1.1 — pinned, own venv
+  at services/ml/.venv. Run: `PYTHONPATH=src .venv/bin/python -m cdarv …`.
+
+Verified: 27/27 pytest pass; 16/16 api regression files pass (new
+ml-export.test.ts covers pagination/validated-only/scoping/bad cursor);
+apps/api tsc clean; CLI smoke (init-db/status) ok.
+
+Next when data flows: `ingest --source api` needs a prod fs_ key; then
+train → shadow on real validated reports (164-address batch output is
+the expected corpus). Known gap: staging/deploy scheduling of the ingest
+job not wired — run manually for now.
