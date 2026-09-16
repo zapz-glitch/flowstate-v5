@@ -15,6 +15,10 @@ class SubmissionIn(BaseModel):
     address: str | None = Field(default=None, max_length=512)
     report_json: dict[str, Any]
     submitted_by: str = Field(min_length=1, max_length=128)
+    # Operator-edit trail from report_history: compact {action, description,
+    # created_at, arv_before, arv_after} entries — the engine-vs-user
+    # selection variance reviewers and training both need.
+    selection_history: list[dict[str, Any]] | None = None
 
 
 class OpenReviewIn(BaseModel):

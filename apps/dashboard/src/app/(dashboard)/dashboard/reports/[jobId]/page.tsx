@@ -38,7 +38,7 @@ import { useEvaluationSync } from '@/hooks/use-evaluation-sync'
 import { useEnrichmentSSE, type EnrichmentEvent } from '@/hooks/use-enrichment-sse'
 import { useSidebar } from '@/components/SidebarProvider'
 import { getBatchStatus } from '@/app/(dashboard)/dashboard/batch/actions'
-import { SendToCdarvButton } from './send-to-cdarv-button'
+import { SendToCdarvButton } from '@/components/SendToCdarvButton'
 
 // ─── Main Page ──────────────────────────────────────────────────────────────
 

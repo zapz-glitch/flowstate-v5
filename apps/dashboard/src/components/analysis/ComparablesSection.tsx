@@ -21,6 +21,8 @@ import { CompGridCard } from './CompGridCard'
 import { RuleMatchDetails } from './RuleMatchDetails'
 import { generateCompFeedbackReport, type FeedbackContext, type FeedbackKind } from '@/lib/comp-feedback'
 import { submitReportFeedback } from '@/app/(dashboard)/dashboard/batch/actions'
+import { SendToCdarvButton } from '@/components/SendToCdarvButton'
+import { CdarvStatusChip } from './CdarvStatusChip'
 
 export interface ComparablesSectionProps {
   comps: CompsData
@@ -277,6 +279,10 @@ export function ComparablesSection({
               <Bell className="w-3 h-3" />
               Notify
             </button>
+            {/* CDARV — send this report to the ML training-review queue */}
+            {feedbackContext?.jobId && (
+              <SendToCdarvButton jobId={feedbackContext.jobId} variant="inline" />
+            )}
             {/* Grid/List toggle */}
             <div className="flex items-center border border-border rounded overflow-hidden no-print">
               <button
@@ -324,6 +330,9 @@ export function ComparablesSection({
             </button>
           ))}
         </div>
+
+        {/* CDARV status — observational only; never gates evaluation */}
+        {feedbackContext?.jobId && <CdarvStatusChip jobId={feedbackContext.jobId} />}
 
         {/* Manual mode banner */}
         {isManual && (

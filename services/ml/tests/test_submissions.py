@@ -61,3 +61,33 @@ def test_incomplete_snapshot_preserved(session):
     )
     assert snap.completeness == "incomplete"
     assert snap.completeness_notes
+
+
+def test_selection_history_lands_in_provenance(session):
+    """The operator-edit trail (engine-vs-user variance) is preserved on
+    the snapshot's provenance for reviewers and training."""
+    history = [
+        {
+            "action": "comp_selection",
+            "description": "Recalculated 2 operator-selected comparables",
+            "created_at": "2026-09-02T00:00:00Z",
+            "arv_before": ["r1-c0", "r1-c1", "r1-c2"],
+            "arv_after": ["r1-c0", "r1-c4"],
+        }
+    ]
+    snap, outcome = submit_payload(session, "r1", selection_history=history)
+    assert outcome == "created"
+    assert snap.provenance_json["selection_history"] == history
+
+
+def test_selection_history_refreshes_on_duplicate(session):
+    """Same report re-sent with a longer edit trail updates the envelope
+    metadata without minting a new snapshot version."""
+    submit_payload(session, "r1")
+    history = [{"action": "comp_selection", "description": "edit",
+                "created_at": "2026-09-02T00:00:00Z",
+                "arv_before": ["a"], "arv_after": ["b"]}]
+    snap, outcome = submit_payload(session, "r1", selection_history=history)
+    assert outcome == "duplicate"
+    assert snap.version == 1
+    assert snap.provenance_json["selection_history"] == history

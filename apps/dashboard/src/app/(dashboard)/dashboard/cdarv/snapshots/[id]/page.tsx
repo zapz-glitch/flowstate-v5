@@ -42,6 +42,39 @@ export default async function CdarvSnapshotPage({ params }: { params: Promise<{ 
         )}
       </Card>
 
+      {review_packet.applied_settings?.filters && review_packet.applied_settings.filters.length > 0 && (
+        <Card className="px-4 py-3">
+          <h3 className="text-body-sm font-medium text-foreground mb-2">Rules applied (this run)</h3>
+          <div className="flex flex-wrap gap-1.5">
+            {review_packet.applied_settings.filters.map((f) => (
+              <Badge key={f.type} variant={f.enabled ? 'secondary' : 'outline'}>
+                {f.type}{f.enabled ? `: ${f.value}` : ' (off)'}
+              </Badge>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      {review_packet.selection_history.length > 0 && (
+        <Card className="px-4 py-3 space-y-2">
+          <h3 className="text-body-sm font-medium text-foreground">Operator selection trail</h3>
+          <ul className="space-y-1.5 text-caption">
+            {review_packet.selection_history.map((h, i) => (
+              <li key={i} className="text-foreground-secondary">
+                <span className="text-foreground-tertiary">{h.created_at ? new Date(h.created_at).toLocaleString() : ''}</span>
+                {' '}<Badge variant="outline" className="mx-1">{h.action}</Badge>{' '}
+                {h.description}
+                {h.arv_before && h.arv_after && (
+                  <span className="block text-foreground-tertiary pl-4 mt-0.5">
+                    {h.arv_before.join(', ') || '(auto)'} → {h.arv_after.join(', ') || '(auto)'}
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
+
       <Card className="overflow-hidden">
         <div className="px-4 py-3 border-b border-border">
           <h3 className="text-body-sm font-medium text-foreground">

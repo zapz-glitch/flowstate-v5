@@ -59,6 +59,44 @@ export async function submitReportsToCdarv(jobIds: string[]): Promise<ActionResu
   }
 }
 
+export interface CdarvReportStatus {
+  /** Total snapshots in the training corpus (all users — internal count) */
+  corpus: number
+  /** This report's latest snapshot, if submitted */
+  snapshot: { id: string; status: string; version: number } | null
+  /** Latest shadow prediction for this report's snapshot, if any */
+  prediction: { status: string; selected_comp_ids: string[]; shadow_arv: number | null } | null
+}
+
+/**
+ * Read-only CDARV status for a report — used by the evaluation section
+ * to show whether this report is in the training queue and what the
+ * shadow model predicted (observational only; never feeds evaluation).
+ * Returns null when CDARV is unavailable.
+ */
+export async function getCdarvReportStatus(jobId: string): Promise<CdarvReportStatus | null> {
+  try {
+    await requireUserId()
+    const { getQueue, getPredictions } = await import('@/lib/cdarv-api')
+    const queue = await getQueue()
+    const snaps = queue
+      .filter((s) => s.job_id === jobId)
+      .sort((a, b) => b.version - a.version)
+    const snapshot = snaps[0] ?? null
+    const predictions = snapshot ? await getPredictions(snapshot.id).catch(() => []) : []
+    const prediction = predictions[predictions.length - 1] ?? null
+    return {
+      corpus: queue.length,
+      snapshot: snapshot ? { id: snapshot.id, status: snapshot.status, version: snapshot.version } : null,
+      prediction: prediction
+        ? { status: prediction.status, selected_comp_ids: prediction.selected_comp_ids, shadow_arv: prediction.shadow_arv }
+        : null,
+    }
+  } catch {
+    return null
+  }
+}
+
 export async function openReview(snapshotId: string): Promise<ActionResult> {
   try {
     const reviewer = await requireUserId()

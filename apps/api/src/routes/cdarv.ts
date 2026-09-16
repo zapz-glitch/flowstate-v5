@@ -25,7 +25,41 @@ export const cdarv = new Hono<{ Bindings: Env }>()
 export const cdarvInternal = new Hono<{ Bindings: Env }>()
 
 const MAX_REPORTS_PER_SUBMIT = 50
+const MAX_HISTORY_ENTRIES = 50
 const SERVICE_TIMEOUT_MS = 15_000
+
+/**
+ * Compact comp-selection trail for a report. report_history.changes_json
+ * holds { actor, before, after } full analyses — far too large to ship —
+ * so we extract only the ARV comp-id sets that changed.
+ */
+function compactHistory(rows: Array<{ action: string; description: string; changes_json: string | null; created_at: string }>) {
+  const out: Array<Record<string, unknown>> = []
+  for (const row of rows.slice(0, MAX_HISTORY_ENTRIES)) {
+    const entry: Record<string, unknown> = {
+      action: row.action,
+      description: row.description,
+      created_at: row.created_at,
+    }
+    if (row.action === 'comp_selection' && row.changes_json) {
+      try {
+        const changes = JSON.parse(row.changes_json) as {
+          before?: { comps?: { afterRenovationCompIds?: unknown; asIsCompIds?: unknown } }
+          after?: { comps?: { afterRenovationCompIds?: unknown; asIsCompIds?: unknown } }
+        }
+        const ids = (side: { comps?: { afterRenovationCompIds?: unknown; asIsCompIds?: unknown } } | undefined) =>
+          [
+            ...((Array.isArray(side?.comps?.afterRenovationCompIds) ? side!.comps!.afterRenovationCompIds : []) as unknown[]),
+            ...((Array.isArray(side?.comps?.asIsCompIds) ? side!.comps!.asIsCompIds : []) as unknown[]),
+          ].filter((v): v is string => typeof v === 'string')
+        entry.arv_before = ids(changes.before)
+        entry.arv_after = ids(changes.after)
+      } catch { entry.parse_error = true }
+    }
+    out.push(entry)
+  }
+  return out
+}
 
 function cdarvConfig(c: { env: Env }): { base: string; token: string } | null {
   const base = c.env.CDARV_API_URL?.replace(/\/+$/, '')
@@ -129,6 +163,17 @@ cdarv.post('/submissions', async (c) => {
       continue
     }
 
+    // Operator-edit trail — engine-vs-user selection variance is the
+    // training signal CDARV needs (manual recalcs, restores, reanalyses).
+    const history = await c.env.DB.prepare(
+      `SELECT action, description, changes_json, created_at
+       FROM report_history WHERE report_id = ? ORDER BY created_at ASC LIMIT ?`
+    )
+      .bind(row.id, MAX_HISTORY_ENTRIES)
+      .all<{ action: string; description: string; changes_json: string | null; created_at: string }>()
+      .then((r) => compactHistory(r.results ?? []))
+      .catch(() => [] as Array<Record<string, unknown>>)
+
     const resp = await serviceFetch(c, '/v1/submissions', {
       method: 'POST',
       body: JSON.stringify({
@@ -141,6 +186,7 @@ cdarv.post('/submissions', async (c) => {
           .join(', '),
         report_json: reportJson,
         submitted_by: session.user.id,
+        selection_history: history,
       }),
     })
     if (!resp.ok) {

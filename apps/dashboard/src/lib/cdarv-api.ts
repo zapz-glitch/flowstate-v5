@@ -189,6 +189,22 @@ export async function getSnapshotDetail(snapshotId: string): Promise<{
   review_packet: {
     subject: Record<string, unknown>
     valuation: Record<string, unknown>
+    /** appliedSettings from the report — the rules that ran this evaluation */
+    applied_settings: {
+      filters?: Array<{ type: string; enabled: boolean; value: number }>
+      adjustments?: Array<{ type: string; enabled: boolean; amount: number; percent?: number }>
+      rehabLevelIndex?: number
+      arvThresholdPercent?: number
+      asIsThresholdPercent?: number
+    } | null
+    /** Operator-edit trail — engine-vs-user comp selection variance */
+    selection_history: Array<{
+      action: string
+      description?: string
+      created_at?: string
+      arv_before?: string[]
+      arv_after?: string[]
+    }>
     comps: CdarvComp[]
   }
   reviews: Array<{ id: string; version: number; status: string; reviewer_id: string; created_at: string | null }>

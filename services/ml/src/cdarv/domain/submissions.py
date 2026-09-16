@@ -27,6 +27,7 @@ def submit_report(
     job_id: str | None = None,
     address: str | None = None,
     submitted_by: str,
+    selection_history: list[dict] | None = None,
 ) -> tuple[Snapshot, str]:
     """Create or reuse a snapshot. Returns (snapshot, outcome) where
     outcome is 'created' | 'new_version' | 'duplicate'."""
@@ -42,7 +43,18 @@ def submit_report(
 
     for snap in existing:
         if snap.content_hash == parsed.content_hash:
+            # Report content is identical but the operator-edit trail may
+            # have grown — refresh provenance metadata (report_json stays
+            # immutable; history is envelope data, not evaluated content).
+            if selection_history is not None:
+                prov = dict(snap.provenance_json or {})
+                prov["selection_history"] = selection_history
+                snap.provenance_json = prov
+                session.flush()
             return snap, "duplicate"
+
+    provenance = dict(parsed.provenance)
+    provenance["selection_history"] = selection_history or []
 
     snapshot = Snapshot(
         report_id=report_id,
@@ -54,7 +66,7 @@ def submit_report(
         completeness=parsed.completeness,
         completeness_notes="; ".join(parsed.completeness_notes) or None,
         report_json=json.loads(parsed.raw_json),
-        provenance_json=parsed.provenance,
+        provenance_json=provenance,
         submitted_by=submitted_by,
     )
     session.add(snapshot)

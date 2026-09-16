@@ -112,6 +112,7 @@ def submit(body: SubmissionIn, session: Session = Depends(get_session)):
         created_at=body.created_at, report_json=body.report_json,
         job_id=body.job_id, address=body.address,
         submitted_by=body.submitted_by,
+        selection_history=body.selection_history,
     )
     return {"snapshot": _snapshot_out(snap), "outcome": outcome}
 
@@ -141,6 +142,13 @@ def snapshot_detail(snapshot_id: str, session: Session = Depends(get_session)):
         "review_packet": {
             "subject": parsed.subject,
             "valuation": parsed.valuation,
+            # Rules as applied for this run + the operator's edit trail —
+            # reviewers see what ran, what the user kept, and the variance.
+            "applied_settings": (
+                snap.report_json.get("appliedSettings")
+                if isinstance(snap.report_json, dict) else None
+            ),
+            "selection_history": (snap.provenance_json or {}).get("selection_history") or [],
             "comps": [
                 {
                     "comp_id": c.comp_id,
