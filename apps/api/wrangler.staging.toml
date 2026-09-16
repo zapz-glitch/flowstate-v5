@@ -13,6 +13,9 @@ custom_domain = true
 ENVIRONMENT = "staging"
 DASHBOARD_URL = "https://staging.flowstate.homes"
 PROPERTY_PROVIDER = "corelogic"
+# CDARV experimental service (staging Render). The bearer token lives in
+# worker secrets (CDARV_INTERNAL_API_TOKEN), never in vars.
+CDARV_API_URL = "https://flowstate-cdarv-staging.onrender.com"
 
 [[d1_databases]]
 binding = "DB"
