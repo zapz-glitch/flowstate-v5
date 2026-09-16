@@ -18,6 +18,9 @@ COMPARABLE_CANDIDATE_LIMIT = "100"
 # Radius for the single provider refetch when the appraisal expansion ladder
 # reaches beyond the fetched radius (default: radius x 2).
 COMPARABLE_EXPANSION_RADIUS_MILES = "2"
+# CDARV learning service (Render) — session-auth /cdarv/* routes proxy here.
+# Shadow-only: never called by production valuation paths.
+CDARV_API_URL = "https://flowstate-cdarv-prod.onrender.com"
 
 [[d1_databases]]
 binding = "DB"
