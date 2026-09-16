@@ -74,7 +74,11 @@ def approved_members(session: Session, scope: str = "comp_ranking") -> list[dict
         select(Snapshot, Review, Approval)
         .join(Review, Review.snapshot_id == Snapshot.id)
         .join(Approval, Approval.review_id == Review.id)
-        .where(Review.status == "approved", col.is_(True))
+        .where(
+            Review.status == "approved",
+            col.is_(True),
+            Snapshot.status != "excluded",
+        )
         .order_by(Snapshot.created_at)
     ).all()
     # Latest approved review version per snapshot wins.
