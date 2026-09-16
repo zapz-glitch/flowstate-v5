@@ -29,6 +29,18 @@ import { withDbRetry } from '../lib/db-retry'
 
 const appraisalRules = new Hono<{ Bindings: Env }>()
 
+/**
+ * D1 caps bound parameters at 100 per statement. Filter/adjustment rows
+ * bind 7 columns each, so a full-preset insert must be chunked.
+ */
+const D1_MAX_BOUND_VARS = 100
+function chunkRows<T>(rows: T[], colsPerRow: number): T[][] {
+  const perChunk = Math.max(1, Math.floor((D1_MAX_BOUND_VARS - 10) / colsPerRow))
+  const chunks: T[][] = []
+  for (let i = 0; i < rows.length; i += perChunk) chunks.push(rows.slice(i, i + perChunk))
+  return chunks
+}
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface FilterInput {
@@ -198,32 +210,34 @@ appraisalRules.get('/mine', async (c) => {
         .returning()
     )
 
-    await withDbRetry(() =>
-      db.insert(appraisalRuleFilter).values(
-        DEFAULT_FILTERS.map((f) => ({
-          id: crypto.randomUUID(),
-          presetId,
-          filterType: f.type,
-          enabled: f.enabled,
-          value: f.value,
-          priority: f.priority ?? null,
-          createdAt: now,
-        }))
-      )
+    const filterRows = DEFAULT_FILTERS.map((f) => ({
+      id: crypto.randomUUID(),
+      presetId,
+      filterType: f.type,
+      enabled: f.enabled,
+      value: f.value,
+      priority: f.priority ?? null,
+      createdAt: now,
+    }))
+    const filterStmts = chunkRows(filterRows, 7).map((chunk) =>
+      db.insert(appraisalRuleFilter).values(chunk)
     )
+    await withDbRetry(() => db.batch(filterStmts as [typeof filterStmts[0], ...typeof filterStmts]))
 
+    const adjustmentRows = DEFAULT_ADJUSTMENTS.map((a) => ({
+      id: crypto.randomUUID(),
+      presetId,
+      adjustmentType: a.type,
+      enabled: a.enabled,
+      amount: a.amount,
+      percentage: a.percent ?? 0,
+      createdAt: now,
+    }))
+    const adjustmentStmts = chunkRows(adjustmentRows, 7).map((chunk) =>
+      db.insert(appraisalRuleAdjustment).values(chunk)
+    )
     await withDbRetry(() =>
-      db.insert(appraisalRuleAdjustment).values(
-        DEFAULT_ADJUSTMENTS.map((a) => ({
-          id: crypto.randomUUID(),
-          presetId,
-          adjustmentType: a.type,
-          enabled: a.enabled,
-          amount: a.amount,
-          percentage: a.percent ?? 0,
-          createdAt: now,
-        }))
-      )
+      db.batch(adjustmentStmts as [typeof adjustmentStmts[0], ...typeof adjustmentStmts])
     )
   }
 
@@ -409,19 +423,19 @@ appraisalRules.post('/', async (c) => {
   }))
 
   if (filtersToInsert.length > 0) {
-    await withDbRetry(() =>
-      db.insert(appraisalRuleFilter).values(
-        filtersToInsert.map((f) => ({
-          id: crypto.randomUUID(),
-          presetId: presetId,
-          filterType: f.filterType,
-          enabled: f.enabled,
-          value: f.value,
-          priority: f.priority ?? null,
-          createdAt: now,
-        }))
-      )
+    const filterRows = filtersToInsert.map((f) => ({
+      id: crypto.randomUUID(),
+      presetId: presetId,
+      filterType: f.filterType,
+      enabled: f.enabled,
+      value: f.value,
+      priority: f.priority ?? null,
+      createdAt: now,
+    }))
+    const filterStmts = chunkRows(filterRows, 7).map((chunk) =>
+      db.insert(appraisalRuleFilter).values(chunk)
     )
+    await withDbRetry(() => db.batch(filterStmts as [typeof filterStmts[0], ...typeof filterStmts]))
   }
 
   // Insert adjustments (use input if provided, else defaults)
@@ -433,18 +447,20 @@ appraisalRules.post('/', async (c) => {
   }))
 
   if (adjustmentsToInsert.length > 0) {
+    const adjustmentRows = adjustmentsToInsert.map((a) => ({
+      id: crypto.randomUUID(),
+      presetId: presetId,
+      adjustmentType: a.adjustmentType,
+      enabled: a.enabled,
+      amount: a.amount,
+      percentage: a.percentage,
+      createdAt: now,
+    }))
+    const adjustmentStmts = chunkRows(adjustmentRows, 7).map((chunk) =>
+      db.insert(appraisalRuleAdjustment).values(chunk)
+    )
     await withDbRetry(() =>
-      db.insert(appraisalRuleAdjustment).values(
-        adjustmentsToInsert.map((a) => ({
-          id: crypto.randomUUID(),
-          presetId: presetId,
-          adjustmentType: a.adjustmentType,
-          enabled: a.enabled,
-          amount: a.amount,
-          percentage: a.percentage,
-          createdAt: now,
-        }))
-      )
+      db.batch(adjustmentStmts as [typeof adjustmentStmts[0], ...typeof adjustmentStmts])
     )
   }
 
@@ -536,46 +552,40 @@ appraisalRules.patch('/:id', async (c) => {
   // Update filters if provided (replace all — delete+insert in one atomic batch
   // so a transient failure can't leave the preset with zero rules)
   if (body.filters !== undefined) {
+    const filterRows = body.filters.map((f) => ({
+      id: crypto.randomUUID(),
+      presetId: presetId,
+      filterType: f.filterType,
+      enabled: f.enabled,
+      value: f.value,
+      priority: f.priority ?? null,
+      createdAt: now,
+    }))
     const stmts = [
       db.delete(appraisalRuleFilter).where(eq(appraisalRuleFilter.presetId, presetId)),
-      ...(body.filters.length > 0
-        ? [
-            db.insert(appraisalRuleFilter).values(
-              body.filters.map((f) => ({
-                id: crypto.randomUUID(),
-                presetId: presetId,
-                filterType: f.filterType,
-                enabled: f.enabled,
-                value: f.value,
-                priority: f.priority ?? null,
-                createdAt: now,
-              }))
-            ),
-          ]
-        : []),
+      ...chunkRows(filterRows, 7).map((chunk) =>
+        db.insert(appraisalRuleFilter).values(chunk)
+      ),
     ]
     await withDbRetry(() => db.batch(stmts as [typeof stmts[0], ...typeof stmts]))
   }
 
   // Update adjustments if provided (replace all — same atomic batch)
   if (body.adjustments !== undefined) {
+    const adjustmentRows = body.adjustments.map((a) => ({
+      id: crypto.randomUUID(),
+      presetId: presetId,
+      adjustmentType: a.adjustmentType,
+      enabled: a.enabled,
+      amount: a.amount,
+      percentage: a.percentage,
+      createdAt: now,
+    }))
     const stmts = [
       db.delete(appraisalRuleAdjustment).where(eq(appraisalRuleAdjustment.presetId, presetId)),
-      ...(body.adjustments.length > 0
-        ? [
-            db.insert(appraisalRuleAdjustment).values(
-              body.adjustments.map((a) => ({
-                id: crypto.randomUUID(),
-                presetId: presetId,
-                adjustmentType: a.adjustmentType,
-                enabled: a.enabled,
-                amount: a.amount,
-                percentage: a.percentage,
-                createdAt: now,
-              }))
-            ),
-          ]
-        : []),
+      ...chunkRows(adjustmentRows, 7).map((chunk) =>
+        db.insert(appraisalRuleAdjustment).values(chunk)
+      ),
     ]
     await withDbRetry(() => db.batch(stmts as [typeof stmts[0], ...typeof stmts]))
   }
