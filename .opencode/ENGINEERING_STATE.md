@@ -1,5 +1,68 @@
 # Engineering State — flowstate-v5
 
+
+### 2026-09-16 — CDARV deployed to staging, full e2e verified
+
+Merge/deploy (staging-only per user; main NOT pushed — deploy.yml would
+ship 89bef4a's retrieval changes to prod):
+- Local main = origin/main + merge (3411afa) + CDARV commits through
+  4acd531; pushed to origin/feat/cdarv-ml-foundation only.
+- Merge conflict resolved in analysis-job.ts: kept absolute sqftDiff,
+  ported origin/main's sub-1000sf bypass into provider request +
+  isProvablyDeadComp. tsc clean.
+
+Staging resources (Render, blueprint render.staging.yaml):
+- Postgres `flowstate-cdarv-staging-postgres` dpg-dalclj2jnfac73944de0-a
+  (virginia, 0.1c-256mb) — alembic upgrade head ran in pre-deploy.
+- Web `flowstate-cdarv-staging` srv-dalclsijnfac73945ck0 →
+  https://flowstate-cdarv-staging.onrender.com — LIVE on 4acd531.
+- Worker `flowstate-cdarv-staging-worker` srv-dalcm365vjqs73etp6rg —
+  LIVE on 4acd531. Model artifacts = blobs in Postgres, survive
+  redeploys (verified: post-redeploy score worked).
+- Secrets: CDARV_INTERNAL_API_TOKEN (hex, /tmp/cdarv-staging-token.txt
+  0600) on web + wrangler secret on staging API; worker has
+  CDARV_TS_API_URL=api.staging + CDARV_TS_INTERNAL_SECRET=same token.
+- Staging API: CDARV_API_URL var in wrangler.staging.toml (committed
+  9d779ca); deployed versions 139ba2ba (current).
+- Staging dashboard: OpenNext deploy afdf2f5d with
+  NEXT_PUBLIC_API_URL=https://api.staging.flowstate.homes inlined.
+
+Staging e2e (session cookie via staging@flowstate.test):
+- 5 submissions through /cdarv/submissions → 5 snapshots (1 real
+  cotality report MISTY GLN + 4 synthetic fixtures inserted into
+  staging D1 saved_reports, ids in /tmp/cdarv-synth/).
+- Real report: 17 comps rendered, 5 labels, 1 preference, 1 external
+  comp, decided needs_more_evidence — deliberately NOT approved
+  (license constraint; build_dataset sweeps all approvals).
+- 4 synthetic: labeled + approved → dataset staging-synthetic-v1
+  (462ce816, 4 members) → train job → worker trained model
+  staging-baseline 1e0bc9d8 (candidate) → explicit shadow activate →
+  score → worker recalc callback → real recalculateReport →
+  shadow_arv 343001 stored as prediction; real report correctly
+  abstained insufficient_evidence.
+- saved_reports rows byte-identical (arv unchanged) after scoring.
+- Monitoring summary live: counts + shadow_agreement (jaccard 0.375,
+  reviewer overlap 1.0, outcome_accuracy "insufficient outcome data").
+- Dashboard SSR verified on staging.flowstate.homes: queue, models
+  (staging-baseline + shadow state), performance (agreement card).
+- Failure isolation: invalid/missing token 401s; bogus model 400;
+  bogus dataset 404; unauth 401; dead CDARV_API_URL → bounded 530/503
+  passthrough (0.35s) while API health+reports stayed 200; worker
+  redeploy gap → job queued then processed (recovery observed).
+- Prod isolation: api.flowstate.homes /cdarv/* → 404 (routes not
+  deployed to prod at all); prod /health 200; zero prod changes.
+
+Fixes shipped this phase: 25f4c10 (excluded-snapshot dataset leak via
+stale v1 approval — new regression test), 4acd531 (worker recalc
+callback UA — Cloudflare 1010 banned python-urllib signature).
+
+Blockers: Render API returning bare 400s late in session (rate-limit
+or WAF) — could not suspend worker for explicit worker-down test;
+mitigated by observed queued→processed recovery across worker
+redeploy. Cotality ML-training license still unconfirmed — real-data
+reviews held at needs_more_evidence. Production hosting decision for
+CDARV Postgres not made.
+
 ### 2026-09-16 — Retrieval hardening committed + staging verification
 
 - Committed `89bef4a` on feat/cdarv-ml-foundation: candidate-pool
