@@ -50,48 +50,64 @@ sseStream.get('/analyze/:jobId', async (c) => {
     await writer.write(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`))
   }
 
+  const POLL_INTERVAL_MS = 500
+  const MAX_POLLS = 600 // 5 minutes
+  const MAX_CONSECUTIVE_FETCH_FAILURES = 20 // 10 seconds of the DO throwing
+
   // Background: poll DO state and stream events
   ;(async () => {
     let lastEventCount = 0
+    let terminalStatus: 'complete' | 'error' | null = null
+    let consecutiveFetchFailures = 0
+    let lastFetchError: string | null = null
     await sendSSE('connected', { jobId })
 
-    for (let i = 0; i < 600; i++) { // max 5 minutes
+    for (let i = 0; i < MAX_POLLS; i++) {
       try {
         const resp = await stub.fetch('http://internal/state')
+        consecutiveFetchFailures = 0
         if (!resp.ok) {
-          await new Promise((r) => setTimeout(r, 500))
-          continue
-        }
+          await resp.text() // DO not initialized yet (404) — consume body
+        } else {
+          const state = await resp.json() as {
+            status?: string
+            events?: Array<{ event: string; data: unknown }>
+          }
 
-        const state = await resp.json() as {
-          status?: string
-          events?: Array<{ event: string; data: unknown }>
-        }
+          const events = state.events ?? []
+          for (let j = lastEventCount; j < events.length; j++) {
+            await sendSSE(events[j].event, events[j].data)
+          }
+          lastEventCount = events.length
 
-        if (!state.status || state.status === 'not_found') {
-          await new Promise((r) => setTimeout(r, 500))
-          continue
+          if (state.status === 'complete' || state.status === 'error') {
+            terminalStatus = state.status
+            break
+          }
         }
-
-        // Stream new events
-        const events = state.events ?? []
-        for (let j = lastEventCount; j < events.length; j++) {
-          await sendSSE(events[j].event, events[j].data)
-        }
-        lastEventCount = events.length
-
-        // Done
-        if (state.status === 'complete' || state.status === 'error') {
+      } catch (err) {
+        consecutiveFetchFailures++
+        lastFetchError = err instanceof Error ? err.message : String(err)
+        console.warn(`[SSE] AnalysisJobDO state fetch failed (${consecutiveFetchFailures}/${MAX_CONSECUTIVE_FETCH_FAILURES}) for job ${jobId}: ${lastFetchError}`)
+        if (consecutiveFetchFailures >= MAX_CONSECUTIVE_FETCH_FAILURES) {
           break
         }
-      } catch {
-        // DO not ready yet
       }
 
-      await new Promise((r) => setTimeout(r, 500))
+      await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS))
     }
 
-    await sendSSE('enrichment_done', { finished: true })
+    if (terminalStatus) {
+      await sendSSE('enrichment_done', { finished: true, status: terminalStatus })
+    } else if (consecutiveFetchFailures >= MAX_CONSECUTIVE_FETCH_FAILURES) {
+      console.error(`[SSE] AnalysisJobDO unreachable for job ${jobId}: ${lastFetchError}`)
+      await sendSSE('error', { step: 'stream', message: 'Analysis job is unreachable. Please retry the analysis.' })
+      await sendSSE('enrichment_done', { finished: false, reason: 'unreachable' })
+    } else {
+      console.error(`[SSE] Analysis job ${jobId} did not reach a terminal state within ${(MAX_POLLS * POLL_INTERVAL_MS) / 1000}s`)
+      await sendSSE('error', { step: 'timeout', message: 'Analysis did not complete in time. Please retry the analysis.' })
+      await sendSSE('enrichment_done', { finished: false, reason: 'timeout' })
+    }
     writer.close()
   })()
 
