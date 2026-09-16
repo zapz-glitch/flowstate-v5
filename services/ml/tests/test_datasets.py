@@ -24,7 +24,7 @@ def _approved_snapshots(session, n: int):
 
 def test_unapproved_reports_never_enter_dataset(session):
     submit_payload(session, "r0")  # submitted, never reviewed
-    with pytest.raises(ValueError, match="no approved examples"):
+    with pytest.raises(ValueError, match="no eligible approved examples"):
         build_dataset(session, name="d", created_by="test")
 
 
@@ -78,6 +78,38 @@ def test_approved_then_excluded_snapshot_omitted(session):
     }
     assert snap_ok.id in member_snap_ids
     assert snap_bad.id not in member_snap_ids
+
+
+def test_real_data_gate_blocks_unmarked_snapshots(session, monkeypatch):
+    """With CDARV_REAL_DATA_TRAINING_ENABLED unset (default), approved
+    snapshots without a synthetic marker cannot enter datasets."""
+    monkeypatch.delenv("CDARV_REAL_DATA_TRAINING_ENABLED", raising=False)
+    snap, _ = submit_payload(session, "r1", report_overrides={"meta": {}})
+    approve_review(session, snap)
+    with pytest.raises(ValueError, match="real-data training is disabled"):
+        build_dataset(session, name="d", created_by="test")
+
+
+def test_real_data_gate_mixed_pool(session):
+    """Synthetic members pass; unmarked approved members are dropped."""
+    syn, _ = submit_payload(session, "r1")  # fixture carries meta.synthetic
+    approve_review(session, syn)
+    real, _ = submit_payload(session, "r2", report_overrides={"meta": {}})
+    approve_review(session, real)
+
+    dataset = build_dataset(session, name="d", created_by="test")
+    member_ids = {m["snapshot_id"] for m in dataset.manifest_json["members"]}
+    assert member_ids == {syn.id}
+
+
+def test_real_data_gate_enabled_includes_real(session, monkeypatch):
+    """Explicit opt-in admits unmarked (provider-derived) snapshots."""
+    monkeypatch.setenv("CDARV_REAL_DATA_TRAINING_ENABLED", "true")
+    snap, _ = submit_payload(session, "r1", report_overrides={"meta": {}})
+    approve_review(session, snap)
+    dataset = build_dataset(session, name="d", created_by="test")
+    member_ids = {m["snapshot_id"] for m in dataset.manifest_json["members"]}
+    assert snap.id in member_ids
 
 
 def test_superseded_review_not_reused(session):

@@ -145,6 +145,7 @@ def make_report(
         },
         "evaluationRevision": 7,
         "riskFlags": None,
+        "meta": {"synthetic": True},
     }
 
 

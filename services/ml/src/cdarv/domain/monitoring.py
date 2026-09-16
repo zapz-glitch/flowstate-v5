@@ -10,6 +10,7 @@ from __future__ import annotations
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from . import datasets as datasets_mod
 from ..persistence.models import (
     Approval, CompLabel, Dataset, Model, Prediction, Review, Snapshot,
 )
@@ -133,6 +134,7 @@ def summary(session: Session) -> dict:
         "models": models,
         "coverage_by_market": markets,
         "shadow_agreement": _shadow_agreement(session),
+        "real_data_training_enabled": datasets_mod.real_data_training_enabled(),
     }
 
 

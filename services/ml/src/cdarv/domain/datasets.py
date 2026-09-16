@@ -107,8 +107,15 @@ def build_dataset(
     seed: int = 42,
 ) -> Dataset:
     members = approved_members(session, scope=scope)
+    if not real_data_training_enabled():
+        members = [m for m in members if _is_synthetic(m["snapshot"])]
     if not members:
-        raise ValueError("no approved examples for scope — approve reviews first")
+        raise ValueError(
+            "no eligible approved examples for scope — approve reviews first"
+            + ("" if real_data_training_enabled()
+               else "; real-data training is disabled "
+                    "(CDARV_REAL_DATA_TRAINING_ENABLED is not set)")
+        )
 
     # Time-aware test split: most recent reports by report-created date.
     ordered = sorted(members, key=lambda m: m["report_created_at"])
@@ -195,6 +202,29 @@ def build_dataset(
         )
     session.flush()
     return dataset
+
+
+def real_data_training_enabled() -> bool:
+    """CDARV_REAL_DATA_TRAINING_ENABLED — default OFF.
+
+    When off, only snapshots whose report payload carries an explicit
+    synthetic marker (report_json.meta.synthetic == true) may enter a
+    training dataset. Provider-derived real reports can still be
+    submitted, reviewed, labeled, and approved — they just cannot cross
+    into training while the flag is off.
+    """
+    return os.environ.get("CDARV_REAL_DATA_TRAINING_ENABLED", "").strip().lower() in (
+        "1", "true", "yes",
+    )
+
+
+def _is_synthetic(snapshot: Snapshot) -> bool:
+    rj = snapshot.report_json
+    return (
+        isinstance(rj, dict)
+        and isinstance(rj.get("meta"), dict)
+        and rj["meta"].get("synthetic") is True
+    )
 
 
 def dataset_examples(session: Session, dataset: Dataset) -> list[dict[str, Any]]:
