@@ -58,14 +58,37 @@ def test_shadow_scores_and_calls_production_recalc(session, trained, monkeypatch
 
 
 def test_shadow_only_ranks_eligible_comps(session, trained, monkeypatch):
-    """The model can never make an ineligible comp eligible."""
+    """The model can never make an ineligible comp eligible.
+
+    Eligibility = the production recalc contract (passedFilters !== false
+    AND positive price), which is what the recalc callback will accept.
+    """
     monkeypatch.setattr(shadow, "_recalc", _fake_recalc())
     payload = make_report("live-2")
     for i, item in enumerate(payload["comps"]["items"]):
-        item["isEnabled"] = i < 4  # only first 4 eligible
+        if i >= 4:
+            item["isEnabled"] = False
+            item["appraisalRules"]["passedFilters"] = False
     snap, _ = _submit_payload(session, "live-2", payload)
     pred = shadow.score_snapshot(session, snapshot=snap, model_row=trained)
     eligible_ids = {f"live-2-c{i}" for i in range(4)}
+    assert set(pred.selected_comp_ids) <= eligible_ids
+    assert set(pred.scores_json.keys()) <= eligible_ids
+
+
+def test_shadow_enabled_but_rules_failed_is_not_rankable(session, trained, monkeypatch):
+    """Real reports carry isEnabled=true with passedFilters=false (pipeline
+    fallback tiers / manual enables). recalculateReport rejects those comps,
+    so they are NOT shadow-eligible even though the pipeline enabled them."""
+    monkeypatch.setattr(shadow, "_recalc", _fake_recalc())
+    payload = make_report("live-2b")
+    for i, item in enumerate(payload["comps"]["items"]):
+        item["isEnabled"] = True  # pipeline enabled all of them
+        if i >= 4:
+            item["appraisalRules"]["passedFilters"] = False
+    snap, _ = _submit_payload(session, "live-2b", payload)
+    pred = shadow.score_snapshot(session, snapshot=snap, model_row=trained)
+    eligible_ids = {f"live-2b-c{i}" for i in range(4)}
     assert set(pred.selected_comp_ids) <= eligible_ids
     assert set(pred.scores_json.keys()) <= eligible_ids
 
@@ -75,6 +98,7 @@ def test_shadow_insufficient_evidence_when_no_eligible(session, trained, monkeyp
     payload = make_report("live-3")
     for item in payload["comps"]["items"]:
         item["isEnabled"] = False
+        item["appraisalRules"]["passedFilters"] = False
     snap, _ = _submit_payload(session, "live-3", payload)
     pred = shadow.score_snapshot(session, snapshot=snap, model_row=trained)
     assert pred.status == "insufficient_evidence"

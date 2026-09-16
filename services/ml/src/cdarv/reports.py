@@ -52,6 +52,23 @@ class CandidateComp:
     def evaluator_selected(self) -> bool:
         return self.group is not None or self.in_arv_ids or self.in_as_is_ids
 
+    @property
+    def recalc_eligible(self) -> bool:
+        """Mirrors recalculateReport's eligibility gate exactly:
+
+        appraisalRules.passedFilters !== false AND a positive
+        (adjustedPrice ?? salePrice). Real reports can carry
+        isEnabled=true with passedFilters=false (fallback tiers /
+        manual enables) — those comps were ARV-usable at eval time but
+        the production recalc contract rejects them, so shadow ranking
+        must gate on this predicate, not on is_enabled.
+        """
+        rules = self.raw.get("appraisalRules")
+        if isinstance(rules, dict) and rules.get("passedFilters") is False:
+            return False
+        price = self.raw.get("adjustedPrice") or self.raw.get("salePrice")
+        return isinstance(price, (int, float)) and price > 0
+
 
 @dataclass(frozen=True)
 class ReportSnapshot:

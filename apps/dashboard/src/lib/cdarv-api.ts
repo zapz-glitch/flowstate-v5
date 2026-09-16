@@ -136,9 +136,17 @@ export interface CdarvSummary {
   labels_by_kind: Record<string, number>
   predictions_by_status: Record<string, number>
   independently_reviewed_reports: number
+  gold_standard_reports: number
   datasets: number
   models: number
   coverage_by_market: Record<string, number>
+  shadow_agreement: {
+    scored_predictions: number
+    predictions_with_review: number
+    evaluator_jaccard_mean: number | null
+    reviewer_overlap_mean: number | null
+    outcome_accuracy: string
+  }
 }
 
 export class CdarvUnavailable extends Error {}

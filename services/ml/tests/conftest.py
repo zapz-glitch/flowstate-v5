@@ -7,6 +7,7 @@ this directory can reach a real database (sqlite :memory: only).
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import sys
 from pathlib import Path
@@ -154,12 +155,21 @@ def report_payload() -> dict:
 
 @pytest.fixture
 def session():
-    """In-memory SQLite session with the full cdarv schema."""
-    engine = create_engine("sqlite:///:memory:")
+    """In-memory SQLite session with the full cdarv schema.
 
-    @event.listens_for(engine, "connect")
-    def _fk_on(dbapi_conn, _record):
-        dbapi_conn.execute("PRAGMA foreign_keys = ON")
+    Set CDARV_TEST_DATABASE_URL to a throwaway PostgreSQL database to run
+    the suite against real Postgres (each test rebuilds the schema).
+    """
+    url = os.environ.get("CDARV_TEST_DATABASE_URL", "sqlite:///:memory:")
+    engine = create_engine(url)
+
+    if engine.url.get_backend_name() == "sqlite":
+
+        @event.listens_for(engine, "connect")
+        def _fk_on(dbapi_conn, _record):
+            dbapi_conn.execute("PRAGMA foreign_keys = ON")
+    else:
+        Base.metadata.drop_all(engine)  # clean slate per test
 
     create_schema(engine)
     factory = create_session_factory(engine)
@@ -169,6 +179,7 @@ def session():
         s.commit()
     finally:
         s.close()
+        engine.dispose()
 
 
 def submit_payload(session, report_id: str, **overrides):
