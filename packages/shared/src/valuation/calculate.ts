@@ -59,6 +59,9 @@ export function calculateValuation(
   // Location-risk deduction — explicit dollar amount (position-tiered
   // proximity config) wins over the percentage form
   const locationPenalty = locationPenaltyAmount ?? Math.round(arv * (locationPenaltyPercent / 100))
+  const effectiveLocationPenaltyPercent = arv > 0
+    ? Math.round((locationPenalty / arv) * 1000) / 10
+    : 0
 
   // Buy Price = ARV − Rehab − Closing Costs − Carrying Costs − Profit Target − Location Penalty
   const buyPrice = arv - totalRehabCost - closingCosts - carryingCosts - minProfit - locationPenalty
@@ -87,7 +90,7 @@ export function calculateValuation(
     { label: 'Addition Play', amount: -additionPlay },
     { label: 'Closing Costs', amount: -closingCosts, percent: closingCostsPercent },
     { label: 'Carrying Costs', amount: -carryingCosts, percent: carryingCostsPercent },
-    { label: 'Location Penalty', amount: -locationPenalty, percent: locationPenaltyPercent },
+    { label: 'Location Penalty', amount: -locationPenalty, percent: effectiveLocationPenaltyPercent },
     { label: 'Flip Profit', amount: -minProfit },
     { label: 'Maximum Buy Price', amount: buyPrice, percent: buyPricePercent },
     { label: 'Wholesale Fee', amount: -wholesaleFee },
@@ -114,7 +117,7 @@ export function calculateValuation(
     wholesalePrice: Math.round(wholesalePrice),
     wholesalePricePercent,
     locationPenalty: Math.round(locationPenalty),
-    locationPenaltyPercent,
+    locationPenaltyPercent: effectiveLocationPenaltyPercent,
     projectedProfit: Math.round(projectedProfit),
     projectedROI,
     totalInvestment: Math.round(totalInvestment),

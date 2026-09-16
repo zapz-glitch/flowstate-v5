@@ -1,21 +1,26 @@
 'use client'
 
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { ChevronRight, Check } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
-import type { CompItem } from './shared-types'
+import { subdivisionsMatch } from '@flowstate-api/shared'
+import type { CompItem, SubjectData } from './shared-types'
 import { StatCell } from './StatCell'
 import { ClassificationBadge } from './ClassificationBadge'
 import { PhotoGallery } from './PhotoGallery'
 import { AddressDisplay } from './AddressDisplay'
-import { formatFilterType, formatAdjustmentType, formatCurrency, normalizeSubdivision, getCompKey, fmtLotDelta, formatLotSize } from './format-helpers'
+import { formatFilterType, formatAdjustmentType, formatCurrency, getCompKey, fmtLotDelta, formatLotSize } from './format-helpers'
+import { compFeatureMatches, featureState, matchDotClass, matchTextClass } from './feature-match'
 import { StreetViewImage } from './StreetViewImage'
 import { RuleMatchDetails } from './RuleMatchDetails'
 
 export interface CompCardProps {
   comp: CompItem
   index: number
+  /** Full subject data — enables per-feature match indicators */
+  subject?: SubjectData | null
+  /** @deprecated prefer `subject` — subject subdivision name */
   subjectSubdivision?: string | null
   /** Subject lot size in acres — enables the lot delta display */
   subjectLotAcres?: number | null
@@ -28,6 +33,7 @@ export interface CompCardProps {
 export function CompCard({
   comp,
   index,
+  subject,
   subjectSubdivision,
   subjectLotAcres,
   isExpanded: controlledExpanded,
@@ -50,11 +56,16 @@ export function CompCard({
   const hasArvSelection = isSelectedForArv !== undefined
   const isEnabled = hasArvSelection ? isSelectedForArv : comp.isEnabled !== false
 
+  const subjectSubdiv = subject?.subdivision ?? subjectSubdivision
   const hasSubdivisionMatch = !!(
-    subjectSubdivision &&
+    subjectSubdiv &&
     comp.subdivision &&
-    normalizeSubdivision(subjectSubdivision) === normalizeSubdivision(comp.subdivision)
+    subdivisionsMatch(subjectSubdiv, comp.subdivision)
   )
+
+  // Feature-vs-subject verification — green/red/neutral per displayable field
+  const featureMatches = useMemo(() => compFeatureMatches(comp, subject), [comp, subject])
+  const fm = (key: Parameters<typeof featureState>[1]) => featureState(featureMatches, key)
 
   const cardKey = getCompKey(comp, index)
 
@@ -120,10 +131,30 @@ export function CompCard({
           </div>
         </div>
 
+        {/* Row 1b: Feature-match strip — green/red/gray per feature vs subject */}
+        {featureMatches.length > 0 && (
+          <div className="flex items-center gap-1 mt-1 pl-8">
+            {featureMatches.map((m) => (
+              <span
+                key={m.key}
+                title={`${m.label}: ${m.state === 'match' ? 'match' : m.state === 'mismatch' ? 'mismatch' : 'no data'}${m.detail ? ` — ${m.detail}` : ''}`}
+                className={cn('w-2 h-2 rounded-full flex-shrink-0', matchDotClass(m.state))}
+              />
+            ))}
+          </div>
+        )}
+
         {/* Row 2: Meta — distance, date, subdivision, adjusted price */}
         <div className="flex items-center gap-2 mt-1 text-[10px] text-foreground-tertiary flex-wrap pl-8">
           {comp.distanceMiles != null && <span>{comp.distanceMiles.toFixed(2)} mi</span>}
-          {comp.subdivision && <><span className="text-border">·</span><span>{comp.subdivision}</span></>}
+          {comp.subdivision && (
+            <>
+              <span className="text-border">·</span>
+              <span className={cn(hasSubdivisionMatch && 'text-emerald-500', subjectSubdiv && comp.subdivision && !hasSubdivisionMatch && 'text-red-400')}>
+                {comp.subdivision}
+              </span>
+            </>
+          )}
           {comp.adjustedPrice && comp.salePrice !== comp.adjustedPrice && (
             <><span className="text-border">·</span><span className="text-emerald-600">Adj: ${comp.adjustedPrice.toLocaleString()}</span></>
           )}
@@ -134,19 +165,20 @@ export function CompCard({
 
       {/* Stats grid */}
       <div className={cn('flex flex-wrap bg-muted/40 border-t border-border/30', !isAlwaysExpanded && 'cursor-pointer')} onClick={handleToggle}>
-        <StatCell label="Beds" value={comp.bedrooms ?? '-'} />
-        <StatCell label="Baths" value={comp.bathrooms ?? '-'} />
-        <StatCell label="Sq Ft" value={comp.squareFeet?.toLocaleString() || '-'} />
-        <StatCell label="Year" value={comp.yearBuilt || '-'} />
+        <StatCell label="Beds" value={comp.bedrooms ?? '-'} match={fm('beds')} />
+        <StatCell label="Baths" value={comp.bathrooms ?? '-'} match={fm('baths')} />
+        <StatCell label="Sq Ft" value={comp.squareFeet?.toLocaleString() || '-'} match={fm('sqft')} />
+        <StatCell label="Year" value={comp.yearBuilt || '-'} match={fm('year')} />
         <StatCell
           label="Lot"
+          match={fm('lot')}
           value={
             comp.lotSizeAcres != null
               ? `${formatLotSize(comp.lotSizeAcres)}${subjectLotAcres != null ? ` (${fmtLotDelta(comp.lotSizeAcres, subjectLotAcres)})` : ''}`
               : '-'
           }
         />
-        <StatCell label="Style" value={comp.buildingStyle || '-'} />
+        <StatCell label="Style" value={comp.buildingStyle || '-'} match={fm('style')} />
       </div>
 
       {isExpanded && (
@@ -157,31 +189,31 @@ export function CompCard({
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1">
               <div className="flex items-center justify-between text-[11px]">
                 <span className="text-foreground-tertiary">Foundation</span>
-                <span className="font-medium truncate ml-2">{comp.foundationType || '-'}</span>
+                <span className={cn('font-medium truncate ml-2', matchTextClass(fm('foundation')))}>{comp.foundationType || '-'}</span>
               </div>
               <div className="flex items-center justify-between text-[11px]">
                 <span className="text-foreground-tertiary">Construction</span>
-                <span className="font-medium truncate ml-2">{comp.constructionType || '-'}</span>
+                <span className={cn('font-medium truncate ml-2', matchTextClass(fm('construction')))}>{comp.constructionType || '-'}</span>
               </div>
               <div className="flex items-center justify-between text-[11px]">
                 <span className="text-foreground-tertiary">Ext. Walls</span>
-                <span className="font-medium truncate ml-2">{comp.exteriorWalls || '-'}</span>
+                <span className={cn('font-medium truncate ml-2', matchTextClass(fm('construction')))}>{comp.exteriorWalls || '-'}</span>
               </div>
               <div className="flex items-center justify-between text-[11px]">
                 <span className="text-foreground-tertiary">Roof</span>
-                <span className="font-medium truncate ml-2">{comp.roofCover || comp.roofType || '-'}</span>
+                <span className={cn('font-medium truncate ml-2', matchTextClass(fm('roof')))}>{comp.roofCover || comp.roofType || '-'}</span>
               </div>
               <div className="flex items-center justify-between text-[11px]">
                 <span className="text-foreground-tertiary">Stories</span>
-                <span className="font-medium truncate ml-2">{comp.storiesType || (comp.stories != null ? String(comp.stories) : '-')}</span>
+                <span className={cn('font-medium truncate ml-2', matchTextClass(fm('stories')))}>{comp.storiesType || (comp.stories != null ? String(comp.stories) : '-')}</span>
               </div>
               <div className="flex items-center justify-between text-[11px]">
                 <span className="text-foreground-tertiary">Heat / AC</span>
-                <span className="font-medium truncate ml-2">{[comp.heating, comp.cooling].filter(Boolean).join(' / ') || '-'}</span>
+                <span className={cn('font-medium truncate ml-2', matchTextClass(fm('hvac')))}>{[comp.heating, comp.cooling].filter(Boolean).join(' / ') || '-'}</span>
               </div>
               <div className="flex items-center justify-between text-[11px]">
                 <span className="text-foreground-tertiary">Assessor Cond.</span>
-                <span className="font-medium truncate ml-2">{comp.buildingCondition || '-'}</span>
+                <span className={cn('font-medium truncate ml-2', matchTextClass(fm('condition')))}>{comp.buildingCondition || '-'}</span>
               </div>
               <div className="flex items-center justify-between text-[11px]">
                 <span className="text-foreground-tertiary">Condition</span>
@@ -198,11 +230,11 @@ export function CompCard({
               </div>
               <div className="flex items-center justify-between text-[11px]">
                 <span className="text-foreground-tertiary">Pool</span>
-                <span className="font-medium">{comp.pool ? 'Yes' : '-'}</span>
+                <span className={cn('font-medium', matchTextClass(fm('pool')))}>{comp.pool ? 'Yes' : '-'}</span>
               </div>
               <div className="flex items-center justify-between text-[11px]">
                 <span className="text-foreground-tertiary">Garage</span>
-                <span className="font-medium truncate ml-2" title={[comp.garage, comp.carport].filter(Boolean).join(' + ') || undefined}>
+                <span className={cn('font-medium truncate ml-2', matchTextClass(fm('garage')))} title={[comp.garage, comp.carport].filter(Boolean).join(' + ') || undefined}>
                   {comp.garage
                     ? `${comp.garage}${comp.garageSquareFeet ? ` ${comp.garageSquareFeet} sf` : ''}${comp.carport ? ` + ${comp.carport}` : ''}`
                     : comp.carport ?? '-'}

@@ -1,10 +1,21 @@
 export const FILTER_TYPE_LABELS: Record<string, string> = {
   subdivision_match: 'Subdivision Match',
+  neighborhood_match: 'Neighborhood',
   building_style_match: 'Building Style',
+  foundation_match: 'Foundation Match',
+  construction_material_match: 'Construction Material',
+  pool_match: 'Pool Match',
+  garage_match: 'Garage Match',
+  stories_match: 'Stories Match',
+  roof_material_match: 'Roof Material',
+  condition_match: 'Condition Match',
+  property_type: 'Property Type',
   sale_age: 'Sale Age',
   sqft_diff: 'Sqft Difference',
   year_built_diff: 'Year Built Diff',
   distance: 'Distance',
+  lot_size_diff: 'Lot Size Diff',
+  road_barrier: 'Road Barrier',
 }
 
 export const ADJUSTMENT_TYPE_LABELS: Record<string, string> = {
@@ -14,6 +25,11 @@ export const ADJUSTMENT_TYPE_LABELS: Record<string, string> = {
   pool: 'Pool Adjustment',
   garage: 'Garage Adjustment',
   carport: 'Carport Adjustment',
+  traffic_siding: 'Traffic — Siding',
+  traffic_backing: 'Traffic — Backing',
+  traffic_fronting: 'Traffic — Fronting',
+  basement_sqft: 'Basement/Guest Sqft',
+  foundation: 'Foundation Mismatch',
 }
 
 export function formatFilterType(type: string): string {

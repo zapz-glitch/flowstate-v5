@@ -13,8 +13,9 @@ import {
   DialogDescription,
 } from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
+import { subdivisionsMatch } from '@flowstate-api/shared'
 import type { CompsData, CompItem, SubjectData } from './shared-types'
-import { getCompKey, normalizeSubdivision } from './format-helpers'
+import { getCompKey } from './format-helpers'
 import { CompCard } from './CompCard'
 import { CompGridCard } from './CompGridCard'
 import { RuleMatchDetails } from './RuleMatchDetails'
@@ -136,7 +137,8 @@ export function ComparablesSection({
     const indexed = compItems.map((comp, i) => ({ comp, originalIndex: i }))
     const isSel = (c: CompItem, i: number) =>
       hasInteractiveSelection ? selectedCompKeys!.has(getCompKey(c, i)) : (c.compGroup === 'arv' || c.isEnabled === true)
-    const subNorm = normalizeSubdivision(subjectSubdivision)
+    const subdivMatch = (c: CompItem) =>
+      subjectSubdivision && c.subdivision && subdivisionsMatch(subjectSubdivision, c.subdivision) ? 1 : 0
 
     if (sortBy === 'default') {
       // What the rules selected: selected block first, then enabled, then
@@ -145,8 +147,8 @@ export function ComparablesSection({
         const ra = isSel(a.comp, a.originalIndex) ? 0 : a.comp.isEnabled ? 1 : 2
         const rb = isSel(b.comp, b.originalIndex) ? 0 : b.comp.isEnabled ? 1 : 2
         if (ra !== rb) return ra - rb
-        const aMatch = normalizeSubdivision(a.comp.subdivision) === subNorm ? 1 : 0
-        const bMatch = normalizeSubdivision(b.comp.subdivision) === subNorm ? 1 : 0
+        const aMatch = subdivMatch(a.comp)
+        const bMatch = subdivMatch(b.comp)
         if (aMatch !== bMatch) return bMatch - aMatch
         return (a.comp.distanceMiles ?? 999) - (b.comp.distanceMiles ?? 999)
       })
@@ -154,7 +156,7 @@ export function ComparablesSection({
 
     const dir = sortDesc ? -1 : 1
     const geoMatch = (c: CompItem): number => {
-      if (sortBy === 'subdivision') return normalizeSubdivision(c.subdivision) === subNorm ? 1 : 0
+      if (sortBy === 'subdivision') return subdivMatch(c)
       if (sortBy === 'neighborhood') return neighborhoodsMatchClient(c, subject) ? 1 : 0
       return 0
     }
@@ -445,6 +447,7 @@ export function ComparablesSection({
                   index={originalIndex}
                   isExpanded={expandedComps.has(key)}
                   onToggle={() => toggleExpand(key)}
+                  subject={subject}
                   subjectSubdivision={subjectSubdivision}
                   subjectLotAcres={subject?.lotSizeAcres}
                   isSelectedForArv={isSelected}

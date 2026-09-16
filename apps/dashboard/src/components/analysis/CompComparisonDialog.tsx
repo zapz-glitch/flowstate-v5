@@ -11,9 +11,11 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { Switch } from '@/components/ui/switch'
 import { cn } from '@/lib/utils'
+import { subdivisionsMatch } from '@flowstate-api/shared'
 import type { SubjectData, CompItem } from './shared-types'
 import { AddressDisplay } from './AddressDisplay'
-import { formatFilterType, formatCurrency, normalizeSubdivision, formatLotSize, fmtLotDelta } from './format-helpers'
+import { formatFilterType, formatCurrency, formatLotSize, fmtLotDelta } from './format-helpers'
+import { compFeatureMatches, featureState } from './feature-match'
 import { StreetViewImage } from './StreetViewImage'
 import { RuleMatchDetails } from './RuleMatchDetails'
 import type { ProximityConfig } from '@/lib/client-api'
@@ -55,6 +57,13 @@ export function CompComparisonDialog({ open, onOpenChange, subject, comp, isSele
   const passedCount = filters.filter((f) => f.passed).length
   const totalFilters = filters.length
 
+  // Per-feature verification vs subject — green/red, gray when unverifiable
+  const featureMatches = compFeatureMatches(comp, subject)
+  const fm = (key: Parameters<typeof featureState>[1]): 'match' | 'mismatch' | undefined => {
+    const s = featureState(featureMatches, key)
+    return s === 'unknown' ? undefined : s
+  }
+
   const fmt = (n: number | null | undefined) => n != null ? n.toLocaleString() : '-'
 
   // Proximity deduction calculation
@@ -72,7 +81,7 @@ export function CompComparisonDialog({ open, onOpenChange, subject, comp, isSele
 
   // Subject comparison helpers
   const subdivMatch = subject?.subdivision && comp.subdivision
-    ? normalizeSubdivision(comp.subdivision) === normalizeSubdivision(subject.subdivision) : null
+    ? subdivisionsMatch(comp.subdivision, subject.subdivision) : null
   const sqftDiff = comp.squareFeet != null && subject?.squareFeet != null
     ? comp.squareFeet - subject.squareFeet : null
   const yearDiff = comp.yearBuilt != null && subject?.yearBuilt != null
@@ -209,8 +218,8 @@ export function CompComparisonDialog({ open, onOpenChange, subject, comp, isSele
           {/* ── Property Details (grid layout) ── */}
           <div className="border-b border-border">
             <div className="grid grid-cols-4 bg-muted/40 border-b border-border/30">
-              <StatCell label="Beds" value={comp.bedrooms ?? '-'} />
-              <StatCell label="Baths" value={comp.bathrooms ?? '-'} />
+              <StatCell label="Beds" value={comp.bedrooms ?? '-'} highlight={fm('beds')} />
+              <StatCell label="Baths" value={comp.bathrooms ?? '-'} highlight={fm('baths')} />
               <StatCell
                 label="Sq Ft"
                 value={`${fmt(comp.squareFeet)}${sqftDiff != null ? ` (${sqftDiff > 0 ? '+' : ''}${sqftDiff.toLocaleString()})` : ''}`}
@@ -223,24 +232,24 @@ export function CompComparisonDialog({ open, onOpenChange, subject, comp, isSele
               />
             </div>
             <div className="grid grid-cols-3 bg-muted/40 border-b border-border/30">
-              <StatCell label="Lot" value={`${formatLotSize(comp.lotSizeAcres)}${lotDiff ? ` (${lotDiff})` : ''}`} />
-              <StatCell label="Style" value={comp.buildingStyle || '-'} />
-              <StatCell label="Foundation" value={comp.foundationType || '-'} />
+              <StatCell label="Lot" value={`${formatLotSize(comp.lotSizeAcres)}${lotDiff ? ` (${lotDiff})` : ''}`} highlight={fm('lot')} />
+              <StatCell label="Style" value={comp.buildingStyle || '-'} highlight={fm('style')} />
+              <StatCell label="Foundation" value={comp.foundationType || '-'} highlight={fm('foundation')} />
             </div>
             <div className="grid grid-cols-3 bg-muted/40 border-b border-border/30">
-              <StatCell label="Construction" value={comp.constructionType || '-'} />
-              <StatCell label="Roof" value={comp.roofCover || comp.roofType || '-'} />
-              <StatCell label="Ext. Walls" value={comp.exteriorWalls || '-'} />
+              <StatCell label="Construction" value={comp.constructionType || '-'} highlight={fm('construction')} />
+              <StatCell label="Roof" value={comp.roofCover || comp.roofType || '-'} highlight={fm('roof')} />
+              <StatCell label="Ext. Walls" value={comp.exteriorWalls || '-'} highlight={fm('construction')} />
             </div>
             <div className="grid grid-cols-4 bg-muted/40 border-b border-border/30">
-              <StatCell label="Pool" value={comp.pool ? 'Yes' : '-'} />
-              <StatCell label="Garage" value={comp.garage ? (comp.garageSquareFeet ? `${comp.garageSquareFeet} sf` : 'Yes') : '-'} />
-              <StatCell label="Carport" value={comp.carport ? 'Yes' : '-'} />
-              <StatCell label="Stories" value={comp.storiesType || (comp.stories != null ? String(comp.stories) : '-')} />
+              <StatCell label="Pool" value={comp.pool ? 'Yes' : '-'} highlight={fm('pool')} />
+              <StatCell label="Garage" value={comp.garage ? (comp.garageSquareFeet ? `${comp.garageSquareFeet} sf` : 'Yes') : '-'} highlight={fm('garage')} />
+              <StatCell label="Carport" value={comp.carport ? 'Yes' : '-'} highlight={fm('garage')} />
+              <StatCell label="Stories" value={comp.storiesType || (comp.stories != null ? String(comp.stories) : '-')} highlight={fm('stories')} />
             </div>
             <div className="grid grid-cols-3 bg-muted/40">
-              <StatCell label="Heat / AC" value={[comp.heating, comp.cooling].filter(Boolean).join(' / ') || '-'} />
-              <StatCell label="Assessor Cond." value={comp.buildingCondition || '-'} />
+              <StatCell label="Heat / AC" value={[comp.heating, comp.cooling].filter(Boolean).join(' / ') || '-'} highlight={fm('hvac')} />
+              <StatCell label="Assessor Cond." value={comp.buildingCondition || '-'} highlight={fm('condition')} />
               <StatCell
                 label="Condition"
                 value={

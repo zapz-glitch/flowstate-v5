@@ -292,7 +292,7 @@ function AdjustmentRow({
               ? 'border-amber-400/30 text-amber-600 dark:text-amber-400 bg-amber-500/5'
               : 'border-emerald-400/30 text-emerald-600 dark:text-emerald-400 bg-emerald-500/5'
         }`}>
-          {unavailable ? 'N/A' : isPercentage ? 'Percent' : 'Dollar'}
+          {unavailable ? 'N/A' : adjustmentType === 'old_comp_discount' ? 'Days+%' : adjustmentType.startsWith('traffic_') ? 'Flat+%' : isPercentage ? 'Percent' : 'Dollar'}
         </span>
       </div>
       <div className="flex items-center justify-center gap-1.5">
@@ -309,6 +309,25 @@ function AdjustmentRow({
               <span className="text-[10px] text-muted-foreground pr-2 select-none">d</span>
             </div>
             <div className="flex items-center rounded-md border border-border bg-muted/30 overflow-hidden focus-within:ring-1 focus-within:ring-primary/30 focus-within:border-primary/50">
+              <Input
+                type="number" min={0} max={100} value={percentage} disabled={!enabled}
+                onChange={(e) => { const v = parseInt(e.target.value, 10); if (!isNaN(v) && v >= 0 && v <= 100) onPercentageChange(v) }}
+                className="h-7 w-12 text-[11px] text-right tabular-nums border-0 bg-transparent shadow-none focus-visible:ring-0 pr-1 pl-2"
+              />
+              <span className="text-[10px] text-muted-foreground pr-2 select-none">%</span>
+            </div>
+          </>
+        ) : adjustmentType.startsWith('traffic_') ? (
+          <>
+            <div className="flex items-center rounded-md border border-border bg-muted/30 overflow-hidden focus-within:ring-1 focus-within:ring-primary/30 focus-within:border-primary/50" title="Flat deduction below the value threshold">
+              <span className="text-[10px] text-muted-foreground pl-2 select-none">$</span>
+              <Input
+                type="number" min={0} step={1000} value={amount} disabled={!enabled}
+                onChange={(e) => { const v = parseInt(e.target.value, 10); if (!isNaN(v) && v >= 0) onAmountChange(v) }}
+                className="h-7 w-14 text-[11px] text-right tabular-nums border-0 bg-transparent shadow-none focus-visible:ring-0 pr-1"
+              />
+            </div>
+            <div className="flex items-center rounded-md border border-border bg-muted/30 overflow-hidden focus-within:ring-1 focus-within:ring-primary/30 focus-within:border-primary/50" title="Percent deduction at/above the value threshold">
               <Input
                 type="number" min={0} max={100} value={percentage} disabled={!enabled}
                 onChange={(e) => { const v = parseInt(e.target.value, 10); if (!isNaN(v) && v >= 0 && v <= 100) onPercentageChange(v) }}
@@ -531,14 +550,24 @@ function PresetFormDialog({
 // ─── Preset Card ───────────────────────────────────────────────────────────────
 
 const FILTER_SHORT: Record<string, string> = {
-  subdivision_match: 'Subdivision', sale_age: 'Sale Age', sqft_diff: 'Sqft Diff',
-  property_type: 'Prop. Type', year_built_diff: 'Year Built', distance: 'Distance',
+  subdivision_match: 'Subdivision', neighborhood_match: 'Neighborhood', sale_age: 'Sale Age',
+  sqft_diff: 'Sqft Diff', property_type: 'Prop. Type', year_built_diff: 'Year Built',
+  distance: 'Distance', building_style_match: 'Style', foundation_match: 'Foundation',
+  stories_match: 'Stories', construction_material_match: 'Construction', roof_material_match: 'Roof',
+  condition_match: 'Condition', pool_match: 'Pool', garage_match: 'Garage',
+  lot_size_diff: 'Lot Diff', road_barrier: 'Road Barrier',
 }
-const FILTER_UNIT: Record<string, string> = { sale_age: 'days', sqft_diff: 'sf', year_built_diff: 'yrs', distance: 'mi' }
+const FILTER_UNIT: Record<string, string> = { sale_age: 'days', sqft_diff: 'sf', year_built_diff: 'yrs', distance: 'mi', lot_size_diff: 'sf' }
 const ADJUSTMENT_SHORT: Record<string, string> = {
   old_comp_discount: 'Comp Discount', bedroom: 'Bedroom', bathroom: 'Bathroom',
   pool: 'Pool', garage: 'Garage', carport: 'Carport',
+  traffic_siding: 'Traffic Siding', traffic_backing: 'Traffic Backing', traffic_fronting: 'Traffic Fronting',
+  basement_sqft: 'Basement Sqft', foundation: 'Foundation Mismatch',
 }
+// Adjustment types whose `percentage` (not `amount`) is the displayed value
+const PERCENT_ADJUSTMENTS = new Set(['old_comp_discount', 'basement_sqft', 'foundation'])
+// Traffic adjustments carry BOTH a flat $ and a % — show flat on the chip
+const TRAFFIC_ADJUSTMENTS = new Set(['traffic_siding', 'traffic_backing', 'traffic_fronting'])
 
 function FilterChip({ label, value, enabled }: { label: string; value: string; enabled: boolean }) {
   return (
@@ -628,8 +657,12 @@ function PresetCard({ preset, onEdit, onDelete, onSetDefault }: {
             </div>
             <div className="flex flex-wrap gap-1.5">
               {preset.adjustments.map((a) => {
-                const isPercent = a.adjustmentType === 'old_comp_discount'
-                return <AdjustmentChip key={a.adjustmentType} label={ADJUSTMENT_SHORT[a.adjustmentType] ?? a.adjustmentType} value={isPercent ? `${a.percentage}%` : `$${a.amount.toLocaleString()}`} enabled={a.enabled} />
+                const value = PERCENT_ADJUSTMENTS.has(a.adjustmentType)
+                  ? `${a.percentage}%`
+                  : TRAFFIC_ADJUSTMENTS.has(a.adjustmentType)
+                    ? `$${a.amount.toLocaleString()}/${a.percentage}%`
+                    : `$${a.amount.toLocaleString()}`
+                return <AdjustmentChip key={a.adjustmentType} label={ADJUSTMENT_SHORT[a.adjustmentType] ?? a.adjustmentType} value={value} enabled={a.enabled} />
               })}
               {preset.adjustments.length === 0 && <span className="text-[10px] text-muted-foreground/50 italic">No adjustments configured</span>}
             </div>

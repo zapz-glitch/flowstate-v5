@@ -195,7 +195,14 @@ export function isProvablyDeadComp(
     const days = (nowMs - new Date(comp.saleDate).getTime()) / 86_400_000
     if (Number.isFinite(days) && days > thresholds.saleAgeDays) return true
   }
-  if (comp.squareFeet && subject.squareFeet && Math.abs(comp.squareFeet - subject.squareFeet) > thresholds.sqftDiff) return true
+  if (comp.squareFeet && subject.squareFeet) {
+    // Sub-1,000sf subject bypass: comps ≤1,000sf pass regardless of the
+    // ±diff band — matches the shared evaluator's absolute ceiling.
+    const sqftOk = subject.squareFeet < 1000
+      ? comp.squareFeet <= 1000
+      : Math.abs(comp.squareFeet - subject.squareFeet) <= thresholds.sqftDiff
+    if (!sqftOk) return true
+  }
   if (comp.yearBuilt && subject.yearBuilt && Math.abs(comp.yearBuilt - subject.yearBuilt) > thresholds.maxYearDiff) return true
   return false
 }

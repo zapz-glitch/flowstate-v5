@@ -244,7 +244,12 @@ export class AnalysisJobDO {
         radiusMiles: config.searchOptions.radiusMiles ?? apiFilterParams.radiusMiles ?? 1,
         maxComps: candidateLimit,
         monthsBack: config.searchOptions.monthsBack ?? apiFilterParams.monthsBack ?? 12,
-        sqftDiff: apiFilterParams.sqftDiff,
+        // Sub-1,000sf subjects: evaluation replaces the ±diff band with an
+        // absolute 1,000sf ceiling — widen the provider-side diff so
+        // qualifying comps aren't culled upstream.
+        sqftDiff: (property.squareFeet != null && property.squareFeet < 1000)
+          ? Math.max(apiFilterParams.sqftDiff ?? 0, 1000)
+          : apiFilterParams.sqftDiff,
         subjectSqft: property.squareFeet ?? undefined,
         subjectPropertyType: property.propertyType ?? undefined,
     }

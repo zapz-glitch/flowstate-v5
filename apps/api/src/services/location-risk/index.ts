@@ -5,11 +5,15 @@
  * near a property's coordinates to identify location-based risks.
  */
 
-// Multiple Overpass API endpoints for failover
+// Multiple Overpass API endpoints for failover.
+// kumi.systems/private.coffee lead — the canonical overpass-api.de instances
+// currently reject our requests with HTTP 406 (UA/geo filtering).
 const OVERPASS_ENDPOINTS = [
+  'https://overpass.kumi.systems/api/interpreter',
+  'https://overpass.private.coffee/api/interpreter',
+  'https://overpass-api.de/api/interpreter',
   'https://lz4.overpass-api.de/api/interpreter',
   'https://z.overpass-api.de/api/interpreter',
-  'https://overpass-api.de/api/interpreter',
 ]
 
 /** OSM road types considered "major" (high traffic, noise risk) */
@@ -55,7 +59,7 @@ function buildOverpassQuery(lat: number, lng: number, radiusMeters: number): str
   // Minor-road ways give us the subject's own street — the front reference
   // for fronting/backing/siding classification.
   return `
-[out:json][timeout:10];
+[out:json][timeout:25];
 (
   way(around:${radiusMeters},${lat},${lng})["highway"~"^(${roadTypes})$"];
   way(around:${radiusMeters},${lat},${lng})["railway"="rail"];
@@ -129,7 +133,7 @@ export async function detectOsmLocationRisks(
           method: 'POST',
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
           body,
-          signal: AbortSignal.timeout(6000),
+          signal: AbortSignal.timeout(15000),
         })
 
         if (!response.ok) continue

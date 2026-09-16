@@ -640,8 +640,15 @@ export default function AnalyzePage() {
 
   return (
     <div className={cn('playground-bg -m-4 sm:-m-6 lg:-m-8', showTwoColumn ? 'min-h-screen lg:h-[100dvh] flex flex-col lg:overflow-hidden' : 'min-h-screen p-4 sm:p-6 lg:p-8 space-y-6')}>
-      {/* Search bar + controls */}
-      <div className={cn(showTwoColumn ? 'px-4 sm:px-6 pt-3 pb-1 space-y-3 flex-shrink-0' : 'space-y-6')}>
+      {/* Search bar + controls — collapsed state renders as a fixed-height header
+          band whose bottom border lands at 64px, aligned with the sidebar logo divider */}
+      <div className={cn(
+        showTwoColumn
+          ? isSearchCollapsed
+            ? 'px-4 sm:px-6 lg:px-4 pt-3 pb-1 lg:pt-4 lg:pb-0 lg:h-20 lg:flex lg:items-center lg:space-y-0 lg:border-b lg:border-border space-y-3 flex-shrink-0'
+            : 'px-4 sm:px-6 lg:px-4 pt-3 pb-1 lg:pt-8 space-y-3 flex-shrink-0'
+          : 'space-y-6'
+      )}>
       {phase === 'idle' && !error && (
         <div>
           <h1 className="text-heading-lg text-foreground tracking-tight">Property Search</h1>
@@ -652,7 +659,7 @@ export default function AnalyzePage() {
       {/* Input Form — collapses to compact bar once active */}
       {isSearchCollapsed ? (
         <div
-          className="border border-border/60 overflow-hidden cursor-pointer hover:border-primary/30 transition-all bg-background/80 backdrop-blur-sm shadow-sm corner-accents corner-accents-bottom"
+          className="w-full border border-border/60 overflow-hidden cursor-pointer hover:border-primary/30 transition-all bg-background/80 backdrop-blur-sm shadow-sm corner-accents corner-accents-bottom"
           onClick={() => setSearchExpanded(true)}
         >
           <div className="px-4 py-3 flex items-center gap-3">

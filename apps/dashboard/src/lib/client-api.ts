@@ -262,6 +262,11 @@ export type AdjustmentType =
   | 'pool'
   | 'garage'
   | 'carport'
+  | 'traffic_siding'
+  | 'traffic_backing'
+  | 'traffic_fronting'
+  | 'basement_sqft'
+  | 'foundation'
 
 export interface AppraisalFilter {
   id: string

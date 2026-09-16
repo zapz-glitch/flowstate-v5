@@ -422,6 +422,16 @@ export class BatchJobDO {
       }
       const address = this.batchState.addresses[i]
 
+      // Re-read settings before each address — evaluation-setting changes
+      // made mid-batch apply to the NEXT property, matching the
+      // single-analysis path. A transient read failure keeps the last-good
+      // snapshot rather than failing the address.
+      try {
+        userSettings = await withDbRetry(() => loadUserAnalysisSettings(this.env.DB, { userId }))
+      } catch (err) {
+        console.warn('[BatchJobDO] retryFailed: settings refresh failed, using last-good:', err instanceof Error ? err.message : err)
+      }
+
       this.batchState.currentIndex = i
       this.batchState.results[i].status = 'processing'
       this.batchState.results[i].startedAt = Date.now()
@@ -538,6 +548,16 @@ export class BatchJobDO {
         clearInterval(heartbeat)
         await this.finishStopped(this.stopRequested, config.userId)
         return
+      }
+
+      // Re-read settings before each address — evaluation-setting changes
+      // made mid-batch (filters, adjustments, comp discount, proximity
+      // tiers) apply to the NEXT property. A transient read failure keeps
+      // the last-good snapshot rather than failing the address.
+      try {
+        userSettings = await withDbRetry(() => loadUserAnalysisSettings(this.env.DB, { userId: config.userId }))
+      } catch (err) {
+        console.warn('[BatchJobDO] settings refresh failed, using last-good:', err instanceof Error ? err.message : err)
       }
 
       this.batchState.currentIndex = i
@@ -672,6 +692,7 @@ export class BatchJobDO {
             customMajorItemCosts: userSettings.customMajorItemCosts,
             arvThreshold: userSettings.arvThreshold,
             asIsThresholdPercent: userSettings.asIsThresholdPercent,
+            proximityConfig: userSettings.proximityConfig,
           },
           llmEnabled: false, // No AI for batch
           isRefresh: false,

@@ -1,5 +1,26 @@
 # Engineering State — flowstate-v5
 
+### 2026-09-16 — Retrieval hardening committed + staging verification
+
+- Committed `89bef4a` on feat/cdarv-ml-foundation: candidate-pool
+  retrieval hardening only (20 files; tsbuildinfo + devin/ excluded).
+- Staging deploys: API `c9534568` (wrangler.staging.toml), dashboard
+  `857ae3de` (OpenNext, NEXT_PUBLIC_API_URL=api.staging inlined; env var
+  correctly beat .env.local at build).
+- Staging D1 was 10 migrations behind (0020-0029) — applied; auth had been
+  failing on missing login_failures table.
+- Real staging E2E: staging@flowstate.test sign-in (staging cookie
+  prefix `__Secure-flowstate-v4-staging`), API key, POST /v1/analyze
+  5802 Misty Gln → job_1789576471189_3s6htr11 complete. Result identical
+  to local: ARV 259679, comps 3182238834+9875187195, buy 112556.
+- Retrieval meta on staging: candidateLimitEffective=100 (default
+  resolution, no env var needed), expansion refetch fired (2 provider
+  calls, pool 2→6), 4 dead pruned / 2 enriched, meta persisted to report.
+- Staging save→load→recalc identical (rev 0→1, history row).
+- Note: explicit caller maxComps overrides env (resolveCandidateLimit) —
+  old dashboard builds sending maxComps=15/25 still cap the pool; fixed
+  by the staging dashboard redeploy.
+
 ### 2026-09-16 — Integration verification pass (feat/cdarv-ml-foundation, uncommitted retrieval changes preserved)
 
 Full runtime verification of the suspended candidate-retrieval hardening +
@@ -1720,6 +1741,87 @@ Verified: api + dashboard tsc clean; 96/96 appraisal vitest pass;
 sortBy=Distance in the request URL).
 
 NOT DEPLOYED — awaiting explicit deploy instruction.
+
+### 2026-09-15 — Deployed (34931916528) + appraisal/UI improvement package
+
+**Deployed**: `bba0a64` (permits on demand + listing flood) and
+`a6b83c7` (closest-first comp selection) — merged to main, CI deploy
+run 34931916528 GREEN.
+
+**New work (uncommitted, feat/iphone-pwa)** — the 13-flag feedback
+package the product engineer approved:
+
+- **Overpass failover**: location-risk endpoints were all returning 406
+  (0/25 reports had locationRisks). Now kumi.systems + private.coffee
+  lead, originals as fallback; POST form-encoded; 15s per-endpoint
+  timeout; 25s query timeout.
+- **Fuzzy subdivision**: subdivisionBase() strips UN/UNIT/BL/LOT/PH/
+  SEC/NCB/PLAT/etc + numeric identifiers; word-boundary prefix match
+  (SWEETWATER CREEK ≈ SWEETWATER CREEK S UT 2E) but not OAK≈OAKWOOD.
+  Mirrored API evaluator + shared filters + all dashboard call sites
+  (grid badge, list card, comparison dialog, section sorting).
+- **Foundation hard rule + adjustment**: foundation_match promoted to
+  hard (verified family mismatch disqualifies; 'other'/unclassifiable/
+  missing never fail hard). Post Tension classifies slab not raised.
+  New `foundation` adjustment type — % deduction (default 10%) off comp
+  price on verified family mismatch; matters when user demotes the
+  filter to soft. Migration 0030 promotes existing presets' NULL/soft
+  foundation_match rows to hard.
+- **Settings backfill**: loadUserAnalysisSettings now fills missing
+  rule types from DEFAULT_FILTERS/DEFAULT_ADJUSTMENTS — presets saved
+  before new types existed (foundation adj, traffic_*, basement_sqft,
+  new filters) inherit system defaults instead of silently never
+  applying. Both default-preset and location-override paths.
+- **Batch settings**: re-reads settings per address (both runBatch and
+  retryFailed loops), last-good snapshot on transient failure,
+  proximityConfig now forwarded in evalParams to /start-streaming.
+- **Location penalty end-to-end**: OSM risks → bundle.enrichment →
+  computeLocationPenalty(worst position, ARV, user proximityConfig) →
+  calculateValuation deducts from buyPrice. FIXED: penalty now
+  serialized to response (valuation.locationPenalty + effective %),
+  breakdown ledger line shows effective % not 0, ValuationCard renders
+  an amber "Location Penalty" line + updated buy-price formula tooltip.
+- **List price**: extractListPrice() in listing-scraper (listPrice/
+  askingPrice/JSON-LD offers.price) → photoBundle.metadata →
+  ctx.subjectListPrice → subject.listPrice + valuation.listPrice +
+  valuation.arvVsListPrice (ARV − list; negative = below ask).
+  SubjectGridCard shows List Price above last-sale; ValuationCard adds
+  a List Price metric cell with ARV-vs-list delta.
+- **Sub-1k sqft**: subject <1000sf → comps ≤1000sf bypass ±250 (API
+  evaluator + shared + batch pre-filter + provider sqftVariance widen).
+- **Feature-match indicators**: new feature-match.ts compares 17
+  card-visible features vs subject (subdivision, neighborhood,
+  foundation, style, stories, construction, roof, condition, pool,
+  garage, hvac, fireplaces, beds, baths, sqft, year, lot) — match/
+  mismatch/unknown. CompGridCard gets a dot strip + match count;
+  CompCard gets dot strip + green/red on every stats cell and expanded
+  detail row (needs subject prop — added, back-compat with old props);
+  CompComparisonDialog highlights every StatCell. Gray = unverifiable,
+  never a false red.
+- **Settings UI**: client-api AdjustmentType gains traffic_*/
+  basement_sqft/foundation; format-helpers label maps cover all
+  types; evaluation-settings chips show new types with correct
+  %/$ /flat+% formats; AdjustmentRow gets dual $+% inputs for
+  traffic_* types and Days+% badge for old_comp_discount.
+
+Verified: api tsc clean; dashboard tsc clean; 110/110 appraisal vitest
+pass (incl. 15 new tests: subdivision normalization, foundation
+families/hard match/deduction, small-subject sqft); dashboard
+regression 5/5 files pass (new feature-match.test.mjs covers match/
+mismatch/unknown semantics against real shared matchers).
+
+DEPLOYED (2026-09-15): feat/iphone-pwa fast-forwarded to main
+(a6b83c7..4f50165) via `git push origin feat/iphone-pwa:main` — main
+is checked out in the sibling worktree so push-by-ref is the merge
+path. CI deploy run 34936244099 GREEN (API 43s, dashboard 1m24s).
+Migration 0030_foundation_match_hard applied to prod D1 via
+db:migrate:remote (first attempt 7403'd transiently; retry succeeded).
+
+Follow-up still open: routes/user-reports /comps recalc path
+(recalculateReport) does not recompute the location penalty — same
+gap the permits route had; passes no locationPenaltyAmount into
+calculateValuation so buy price can drift upward on comp edits for
+fronting/backing subjects.
 
 ### 2026-09-15 — CDARV ML foundation (feat/cdarv-ml-foundation, c4fc09c, NOT merged/deployed)
 

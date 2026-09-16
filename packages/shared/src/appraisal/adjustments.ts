@@ -15,6 +15,20 @@ type AdjustmentCalculator = (
   adjustment: AppraisalAdjustment
 ) => AdjustmentResult
 
+/**
+ * Foundation families — slab vs raised (pier/beam/crawl/wood) vs basement
+ * carry real value differences. 'other' = value we cannot classify;
+ * null = no data. Mirrors the API evaluator's classifier.
+ */
+export function foundationFamily(v?: string | null): 'slab' | 'raised' | 'basement' | 'other' | null {
+  const n = v?.toLowerCase().replace(/[^a-z]/g, '') ?? ''
+  if (!n || n === 'unknown' || n === 'none') return null
+  if (/basement|bsmt|daylight/.test(n)) return 'basement'
+  if (/posttension|slab|monolithic|stemwall|floating|continuousfooting|spreadfooting|^concrete$/.test(n)) return 'slab'
+  if (/pier|beam|piling|post|wood|raised|crawl|mudsill|pipe|dirte?arth|crossbridged/.test(n)) return 'raised'
+  return 'other'
+}
+
 const calculators: Record<AdjustmentType, AdjustmentCalculator> = {
   old_comp_discount(_subject, comp, adjustment) {
     if (!comp.saleDate || !comp.salePrice) {
@@ -173,6 +187,39 @@ const calculators: Record<AdjustmentType, AdjustmentCalculator> = {
       applied: true,
       amount: -Math.round(diff * Math.abs(adjustment.amount)),
       reason: `Basement difference ${diff} sqft @ $${Math.abs(adjustment.amount)}/sqft`,
+    }
+  },
+
+  foundation(subject, comp, adjustment) {
+    const sFam = foundationFamily(subject.construction?.foundationType)
+    const cFam = foundationFamily(comp.construction?.foundationType)
+
+    if (!sFam || !cFam) {
+      return { type: 'foundation', applied: false, amount: 0, reason: 'Foundation data unavailable' }
+    }
+    if (sFam === 'other' || cFam === 'other') {
+      return { type: 'foundation', applied: false, amount: 0, reason: 'Foundation family not classifiable' }
+    }
+    if (sFam === cFam) {
+      return { type: 'foundation', applied: false, amount: 0, reason: 'Same foundation family' }
+    }
+
+    const compValue =
+      comp.salePrice ??
+      (comp.pricePerSqft != null && comp.squareFeet != null
+        ? Math.round(comp.pricePerSqft * comp.squareFeet)
+        : null)
+    if (!compValue) {
+      return { type: 'foundation', applied: false, amount: 0, reason: 'No comp sale price' }
+    }
+
+    const percent = adjustment.percent ?? 10
+    const deduction = Math.round(compValue * (percent / 100))
+    return {
+      type: 'foundation',
+      applied: deduction > 0,
+      amount: -deduction,
+      reason: `Foundation mismatch: comp ${cFam} vs subject ${sFam} (-${percent}%)`,
     }
   },
 }

@@ -108,14 +108,23 @@ function evaluateSqftDiff(
   }
 
   const diff = Math.abs(comp.squareFeet - subject.squareFeet)
-  const passed = diff <= filter.value
+
+  // Sub-1,000 sqft subjects: the ±variance band is proportionally too tight
+  // at this size — size comparability is bounded by an absolute ceiling
+  // instead (any comp ≤1,000 sqft qualifies).
+  const passed =
+    subject.squareFeet < 1000 ? comp.squareFeet <= 1000 : diff <= filter.value
 
   return {
     type: 'sqft_diff',
     passed,
-    reason: passed ? undefined : `Sqft difference too large: ${diff} sqft (max: ${filter.value})`,
+    reason: passed
+      ? undefined
+      : subject.squareFeet < 1000
+        ? `Comp too large: ${comp.squareFeet} sqft (sub-1,000sf subject caps comps at 1,000 sf)`
+        : `Sqft difference too large: ${diff} sqft (max: ${filter.value})`,
     actualValue: diff,
-    threshold: filter.value,
+    threshold: subject.squareFeet < 1000 ? 'comp ≤ 1000 sf' : filter.value,
   }
 }
 
@@ -285,16 +294,36 @@ function evaluateBuildingStyleMatch(
   }
 }
 
-/** Foundation match — slab ≠ pier/beam ≠ basement changes rehab scope */
+/**
+ * Foundation families — slab vs raised (pier/beam/crawl/wood) vs basement
+ * carry real value and rehab differences. 'other' = provider value we
+ * cannot classify; 'null' = no data.
+ */
+function foundationFamily(v?: string | null): 'slab' | 'raised' | 'basement' | 'other' | null {
+  const n = v?.toLowerCase().replace(/[^a-z]/g, '') ?? ''
+  if (!n || n === 'unknown' || n === 'none') return null
+  // Order matters: basement first (covers "Unknown (with basement)"),
+  // slab before raised so "Post Tension" doesn't trip the bare "post".
+  if (/basement|bsmt|daylight/.test(n)) return 'basement'
+  if (/posttension|slab|monolithic|stemwall|floating|continuousfooting|spreadfooting|^concrete$/.test(n)) return 'slab'
+  if (/pier|beam|piling|post|wood|raised|crawl|mudsill|pipe|dirte?arth|crossbridged/.test(n)) return 'raised'
+  return 'other'
+}
+
+/** Foundation match — hard rule on verified family mismatches (slab ≠
+ *  pier/beam ≠ basement). Exact-name equality also passes ("Concrete Slab"
+ *  vs "Slab"); unclassifiable pairs are not_verified, never a hard fail. */
 function evaluateFoundationMatch(
   subject: NormalizedProperty,
   comp: NormalizedComparable,
   _filter: AppraisalFilter
 ): FilterResult {
+  const subjectRaw = subject.construction?.foundationType
+  const compRaw = comp.construction?.foundationType
   const normalize = (v?: string | null) =>
     v?.toLowerCase().replace(/[^a-z]/g, '')
-  const subjectFoundation = normalize(subject.construction?.foundationType)
-  const compFoundation = normalize(comp.construction?.foundationType)
+  const subjectFoundation = normalize(subjectRaw)
+  const compFoundation = normalize(compRaw)
 
   if (!subjectFoundation || !compFoundation) {
     return {
@@ -305,14 +334,28 @@ function evaluateFoundationMatch(
     }
   }
 
-  const passed = subjectFoundation === compFoundation
+  const subjectFam = foundationFamily(subjectRaw)
+  const compFam = foundationFamily(compRaw)
+
+  const passed =
+    subjectFoundation === compFoundation ||
+    (subjectFam === compFam) ||
+    subjectFam === 'other' ||
+    compFam === 'other'
+
   return {
     type: 'foundation_match',
     passed,
-    status: passed ? 'passed' : 'failed',
-    reason: passed ? undefined : `Foundation mismatch: "${comp.construction?.foundationType}" vs subject "${subject.construction?.foundationType}"`,
-    actualValue: comp.construction?.foundationType,
-    threshold: subject.construction?.foundationType,
+    status: passed ? (subjectFoundation === compFoundation || subjectFam === compFam ? 'passed' : 'not_verified') : 'failed',
+    reason: passed
+      ? (subjectFoundation !== compFoundation && subjectFam === compFam
+          ? `Foundation family match: "${compRaw}" vs subject "${subjectRaw}"`
+          : subjectFam === 'other' || compFam === 'other'
+            ? 'Foundation types differ but could not be classified — not verified'
+            : undefined)
+      : `Foundation mismatch: "${compRaw}" (${compFam}) vs subject "${subjectRaw}" (${subjectFam})`,
+    actualValue: compRaw,
+    threshold: subjectRaw,
   }
 }
 
@@ -911,6 +954,51 @@ function calculateBasementSqft(
   }
 }
 
+/**
+ * Foundation-family mismatch deduction — percent off the comp's sale price
+ * when its foundation is a different family than the subject's (e.g. a
+ * pier/crawl comp vs a slab subject). Applies to comp value so retained
+ * fallback/manual comps still carry the discount when the hard
+ * foundation_match filter is off or data was unverifiable.
+ */
+function calculateFoundationAdjustment(
+  subject: NormalizedProperty,
+  comp: NormalizedComparable,
+  adjustment: AppraisalAdjustment
+): AdjustmentResult {
+  const subjectFam = foundationFamily(subject.construction?.foundationType)
+  const compFam = foundationFamily(comp.construction?.foundationType)
+
+  if (!subjectFam || !compFam) {
+    return { type: 'foundation', applied: false, amount: 0, reason: 'Foundation data unavailable — not verified' }
+  }
+  if (subjectFam === 'other' || compFam === 'other') {
+    return { type: 'foundation', applied: false, amount: 0, reason: 'Foundation family not classifiable — no deduction' }
+  }
+  if (subjectFam === compFam) {
+    return { type: 'foundation', applied: false, amount: 0, reason: 'Same foundation family' }
+  }
+
+  const compValue =
+    comp.salePrice ??
+    (comp.pricePerSqft != null && comp.squareFeet != null
+      ? Math.round(comp.pricePerSqft * comp.squareFeet)
+      : null)
+  if (!compValue) {
+    return { type: 'foundation', applied: false, amount: 0, reason: 'No comp sale price to adjust' }
+  }
+
+  const percent = adjustment.percent ?? 10
+  const deduction = Math.round(compValue * (percent / 100))
+
+  return {
+    type: 'foundation',
+    applied: deduction > 0,
+    amount: -deduction,
+    reason: `Foundation mismatch: comp ${compFam} vs subject ${subjectFam} (-${percent}% = -$${deduction.toLocaleString()})`,
+  }
+}
+
 const ADJUSTMENT_CALCULATORS: Record<
   AdjustmentType,
   (subject: NormalizedProperty, comp: NormalizedComparable, adjustment: AppraisalAdjustment) => AdjustmentResult
@@ -925,6 +1013,7 @@ const ADJUSTMENT_CALCULATORS: Record<
   traffic_backing: calculateTrafficBacking,
   traffic_fronting: calculateTrafficFronting,
   basement_sqft: calculateBasementSqft,
+  foundation: calculateFoundationAdjustment,
 }
 
 // ─── Helper Functions ──────────────────────────────────────────────────────────
@@ -935,20 +1024,39 @@ function normalizeSubdivision(value: string | null | undefined): string | null {
 }
 
 /**
- * Subdivision base name — strips unit/phase/section/plat designators so
- * "SWEETWATER CREEK", "SWEETWATER CREEK S UT 2E", and "PARKSIDE LAKES PH 01"
- * resolve to their parent development ("sweetwater creek", "parkside lakes").
+ * Subdivision base name — strips ALL plat/legal designator tokens (unit,
+ * block, phase, lot, plat, NCB, SUB, etc.) and bare numeric identifiers so
+ * differently-recorded parcels of the same community resolve to the shared
+ * meaningful name:
+ *   "HIGHLAND HILLS SUB UN 17 NCB 1"  → "highland hills"
+ *   "HIGHLAND HILLS BL 10854 UN 15"   → "highland hills"
+ *   "SWEETWATER CREEK S UT 2E"        → "sweetwater creek s"
  */
+const SUBDIVISION_DESIGNATORS = new Set([
+  'un', 'unit', 'ut', 'u',
+  'ph', 'phase',
+  'sec', 'sect', 'section',
+  'blk', 'block', 'bl',
+  'lot', 'plat', 'tract',
+  'add', 'addn', 'addition',
+  'part', 'pt',
+  'rep', 'repl', 'replat',
+  'vlg',
+  'sub', 'subdiv', 'subdivision',
+  'ncb', 'nb',
+  'the', 'of',
+])
+
 function subdivisionBase(value: string | null | undefined): string | null {
   let v = normalizeSubdivision(value)
   if (!v) return null
-  v = v.replace(/[\/\-_.,]/g, ' ').replace(/\s+/g, ' ').trim()
-  v = v
-    .replace(
-      /(?:\b(?:un|unit|ut|u|ph|phase|sec|sect|section|blk|block|lot|plat|tract|add|addn|addition|part|pt|rep|repl|replat|vlg)\s*\w*|#\s*\w+).*$/i,
-      ''
+  v = v.replace(/[\/\-_.,#]/g, ' ').replace(/\s+/g, ' ').trim()
+  const tokens = v
+    .split(' ')
+    .filter(
+      (t) => !SUBDIVISION_DESIGNATORS.has(t) && !/^\d+[a-z]?$/.test(t)
     )
-    .trim()
+  v = tokens.join(' ').trim()
   return v || null
 }
 
