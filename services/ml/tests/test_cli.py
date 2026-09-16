@@ -1,42 +1,44 @@
+"""CLI smoke: init-db + submit-from-D1 + queue + status."""
+
 import json
-import sqlite3
+import os
 
 from cdarv.cli import main
 from conftest import insert_saved_report, make_report
 
 
-def test_end_to_end_cli(tmp_path, d1_file, capsys):
-    db = str(tmp_path / "cdarv.db")
-    artifacts = str(tmp_path / "artifacts")
+def test_init_submit_status(tmp_path, monkeypatch, d1_file, capsys):
+    db = tmp_path / "cdarv.sqlite"
+    monkeypatch.setenv("CDARV_TEST_PROFILE", "true")
+    url = f"sqlite:///{db}"
 
-    for i in range(6):
-        insert_saved_report(d1_file, f"r{i}", make_report(f"r{i}"))
+    insert_saved_report(d1_file, "r1", make_report("r1"), feedback="validated")
+    insert_saved_report(d1_file, "r2", make_report("r2"), feedback="improve")
 
-    assert main(["init-db", "--db", db]) == 0
-    assert main(["ingest", "--db", db, "--source", "sqlite", "--d1", str(d1_file)]) == 0
-    capsys.readouterr()
-    assert main(["train", "--db", db, "--artifact-dir", artifacts]) == 0
-    train_out = capsys.readouterr().out
-    metrics = json.loads(train_out)
-    assert metrics["model_version_id"] == 1
+    assert main(["--db", url, "init-db"]) == 0
+    assert main(["--db", url, "submit", "--d1", str(d1_file)]) == 0
+    out = capsys.readouterr().out
+    assert "1 created" in out  # only the validated report
 
-    assert main(["shadow", "--db", db]) == 0
-    shadow_out = capsys.readouterr().out
-    assert "shadow predictions written: 6" in shadow_out
+    # Resubmit: idempotent.
+    assert main(["--db", url, "submit", "--d1", str(d1_file)]) == 0
+    assert "1 duplicates" in capsys.readouterr().out
 
-    assert main(["status", "--db", db]) == 0
-    status_out = capsys.readouterr().out
-    assert "ideal reports: 6" in status_out
-    assert "comp examples: 48" in status_out
+    assert main(["--db", url, "queue"]) == 0
+    assert "1 snapshots" in capsys.readouterr().out
 
-    dataset_path = tmp_path / "examples.jsonl"
-    assert main(["dataset", "--db", db, "--out", str(dataset_path)]) == 0
-    lines = dataset_path.read_text().strip().split("\n")
-    assert len(lines) == 48
-    row = json.loads(lines[0])
-    assert set(row) == {"report_id", "comp_id", "y", "features"}
+    assert main(["--db", url, "status"]) == 0
+    summary = json.loads(capsys.readouterr().out)
+    assert summary["snapshots_by_status"]["submitted"] == 1
 
 
-def test_ingest_api_requires_credentials(tmp_path, capsys):
-    code = main(["ingest", "--db", str(tmp_path / "x.db"), "--source", "api"])
-    assert code == 2
+def test_sqlite_requires_test_profile(tmp_path, monkeypatch, capsys):
+    monkeypatch.delenv("CDARV_TEST_PROFILE", raising=False)
+    db = tmp_path / "cdarv.sqlite"
+    try:
+        main(["--db", f"sqlite:///{db}", "queue"])
+    except SystemExit as e:
+        assert e.code == 2
+    else:
+        raise AssertionError("expected SystemExit")
+    assert "CDARV_TEST_PROFILE" in capsys.readouterr().err

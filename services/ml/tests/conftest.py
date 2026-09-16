@@ -1,4 +1,8 @@
-"""Shared fixtures: synthetic ideal reports in the real full_response_json shape."""
+"""Shared fixtures: SYNTHETIC reports in the real full_response_json shape.
+
+Everything here is synthetic — no production data is used, and nothing in
+this directory can reach a real database (sqlite :memory: only).
+"""
 
 from __future__ import annotations
 
@@ -11,7 +15,10 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-import cdarv  # noqa: E402  — verifies package import after sys.path fix
+import cdarv  # noqa: E402,F401  — verifies package import after sys.path fix
+from cdarv.persistence.db import create_schema, create_session_factory  # noqa: E402
+from cdarv.persistence.models import Base  # noqa: E402
+from sqlalchemy import create_engine, event  # noqa: E402
 
 
 def make_comp(
@@ -29,7 +36,7 @@ def make_comp(
     subdivision: str = "OAK PARK",
     passed: bool = True,
 ) -> dict:
-    """A comp item in the production response shape."""
+    """A comp item in the production response shape (synthetic)."""
     filters = [
         {"type": t, "passed": passed, "status": "passed" if passed else "failed"}
         for t in ("subdivision_match", "sale_age", "sqft_diff", "distance", "property_type")
@@ -69,16 +76,21 @@ def make_comp(
     }
 
 
-def make_report(report_id: str, *, n_comps: int = 8, created_at: str = "2026-09-01T00:00:00Z") -> dict:
-    """A full_response_json-shaped payload.
+def make_report(
+    report_id: str,
+    *,
+    n_comps: int = 8,
+    created_at: str = "2026-09-01T00:00:00Z",
+    n_selected: int = 3,
+) -> dict:
+    """A full_response_json-shaped payload (synthetic).
 
-    Selection rule planted for tests: comps within 0.3 miles AND enabled
-    are the ARV selection — deterministic and learnable.
+    The first `n_selected` comps are near + grouped 'arv'; the rest are far.
     """
     items = []
     arv_ids: list[str] = []
     for i in range(n_comps):
-        near = i < 3  # first 3 comps are the close ones
+        near = i < n_selected
         comp = make_comp(
             f"{report_id}-c{i}",
             distance=0.1 + 0.05 * i if near else 0.6 + 0.1 * i,
@@ -92,7 +104,7 @@ def make_report(report_id: str, *, n_comps: int = 8, created_at: str = "2026-09-
     return {
         "subject": {
             "id": f"subj-{report_id}",
-            "address": f"100 Main St, Austin, TX 78704",
+            "address": "100 Main St, Austin, TX 78704",
             "latitude": 30.26,
             "longitude": -97.74,
             "bedrooms": 3,
@@ -108,12 +120,19 @@ def make_report(report_id: str, *, n_comps: int = 8, created_at: str = "2026-09-
             "buildingStyle": "Ranch",
             "lastSale": {"price": 180000, "date": "2020-01-01", "pricePerSqft": 120},
             "classification": {"type": "after_renovation", "confidence": 0.8},
+            "avm": {"estimate": 250000, "confidence": "high", "range": [240000, 260000]},
         },
         "valuation": {
             "arv": 260000,
             "arvPerSqft": 173,
             "buyPrice": 150000,
             "recommendation": "BUY",
+            "rehabLevel": "Full Cosmetic",
+        },
+        "appliedSettings": {
+            "rehabLevelIndex": 2,
+            "rehabTable": {"Full Cosmetic": [{"perSqft": 35, "minProfit": 25000}]},
+            "dealParams": {"closingCostsPercent": 0.02},
         },
         "comps": {
             "total": n_comps,
@@ -123,6 +142,7 @@ def make_report(report_id: str, *, n_comps: int = 8, created_at: str = "2026-09-
             "asIsCompIds": [],
             "items": items,
         },
+        "evaluationRevision": 7,
         "riskFlags": None,
     }
 
@@ -133,8 +153,71 @@ def report_payload() -> dict:
 
 
 @pytest.fixture
+def session():
+    """In-memory SQLite session with the full cdarv schema."""
+    engine = create_engine("sqlite:///:memory:")
+
+    @event.listens_for(engine, "connect")
+    def _fk_on(dbapi_conn, _record):
+        dbapi_conn.execute("PRAGMA foreign_keys = ON")
+
+    create_schema(engine)
+    factory = create_session_factory(engine)
+    s = factory()
+    try:
+        yield s
+        s.commit()
+    finally:
+        s.close()
+
+
+def submit_payload(session, report_id: str, **overrides):
+    """Helper: submit a synthetic report, return (snapshot, outcome)."""
+    from cdarv.domain.submissions import submit_report
+
+    payload = make_report(report_id)
+    payload.update(overrides.pop("report_overrides", {}))
+    return submit_report(
+        session,
+        report_id=report_id,
+        user_id=overrides.pop("user_id", "u1"),
+        created_at=overrides.pop("created_at", "2026-09-01T00:00:00Z"),
+        report_json=json.dumps(payload),
+        submitted_by=overrides.pop("submitted_by", "test"),
+        **overrides,
+    )
+
+
+def approve_review(session, snapshot, *, reviewer="rev1", label_map=None, gold=False):
+    """Helper: open a review, label comps, approve for comp_ranking."""
+    from cdarv.domain.reviews import decide, open_review, set_comp_labels
+    from cdarv.reports import parse_report
+
+    review, _ = open_review(session, snapshot_id=snapshot.id, reviewer_id=reviewer)
+    parsed = parse_report(
+        report_id=snapshot.report_id, user_id=snapshot.user_id,
+        created_at=snapshot.provenance_json.get("report_created_at") or "",
+        report_json=snapshot.report_json,
+    )
+    if label_map is None:
+        label_map = {}
+        for comp in parsed.comps:
+            label_map[comp.comp_id] = (
+                "strong_arv" if comp.evaluator_selected else "unsuitable"
+            )
+    set_comp_labels(session, review, [
+        {"comp_id": cid, "label": lab} for cid, lab in label_map.items()
+    ])
+    return decide(
+        session, review, action="approve", reviewer_id=reviewer,
+        comp_ranking=True, gold_standard=gold,
+        gold_standard_evidence="verified by second reviewer" if gold else None,
+    )
+
+
+@pytest.fixture
 def d1_file(tmp_path: Path) -> Path:
-    """A SQLite file mimicking the prod saved_reports table."""
+    """A SQLite file mimicking the prod saved_reports table (synthetic)."""
     path = tmp_path / "d1.sqlite"
     conn = sqlite3.connect(path)
     conn.execute(

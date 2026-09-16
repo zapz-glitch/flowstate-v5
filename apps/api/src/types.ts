@@ -76,6 +76,11 @@ export interface Env {
   // Internal secret for dashboard-to-API authentication (no API key required)
   DASHBOARD_INTERNAL_SECRET?: string
 
+  // ─── CDARV ML Service ──────────────────────────────────────────────────────
+  // Session-auth proxy target + shared service token (both directions)
+  CDARV_API_URL?: string
+  CDARV_INTERNAL_API_TOKEN?: string
+
   // ─── Better Auth ─────────────────────────────────────────────────────────────
   BETTER_AUTH_SECRET?: string
 
