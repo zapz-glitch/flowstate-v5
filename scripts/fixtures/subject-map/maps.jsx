@@ -2,7 +2,15 @@
 import React, { createContext, useContext, useLayoutEffect, useRef, useState } from 'react'
 const ThreeD = createContext(null)
 const Flat = createContext(null)
-export const APIProvider = ({ children }) => children
+export function APIProvider({ children }) {
+  window.google.maps.ControlPosition ??= { LEFT_TOP: 5 }
+  if (!window.fixture.libraryRequests) {
+    window.fixture.libraryRequests = []
+    const original = window.google.maps.importLibrary
+    window.google.maps.importLibrary = name => { window.fixture.libraryRequests.push(name); return original(name) }
+  }
+  return children
+}
 export const useApiIsLoaded = () => true
 export const useMap3D = () => useContext(ThreeD)
 export const useMap = () => useContext(Flat)
@@ -12,10 +20,24 @@ export const Pin = ({ background, glyphText, glyph }) => <span data-pin={glyphTe
 export function Marker3D({ children, title, onClick, position }) {
   return <button data-marker={title} data-position={JSON.stringify(position)} onClick={onClick}>{children}</button>
 }
-export function Map({ children, center, zoom }) {
-  const ref = useRef({})
-  window.fixture.flat = { center, zoom }
-  return <div data-testid="flat-map" style={{ height: 400 }}><Flat.Provider value={ref.current}>{children}</Flat.Provider></div>
+export function Map({ children, center, zoom, defaultCenter, defaultZoom, ...options }) {
+  const ref = useRef(null)
+  if (!ref.current) ref.current = {
+    center: defaultCenter ?? center, zoom: defaultZoom ?? zoom,
+    panTo(value) { this.center = value },
+    setZoom(value) { this.zoom = value },
+    getZoom() { return this.zoom },
+  }
+  const map = ref.current
+  map.options = options
+  map.controlledCenter = center !== undefined
+  window.fixture.flat = map
+  return <div data-testid="flat-map" style={{ height: 400 }}
+    onDoubleClick={() => { if (!options.disableDoubleClickZoom) map.setZoom(map.getZoom() + 1) }}
+    onWheel={event => map.setZoom(map.getZoom() + (event.deltaY < 0 ? 1 : -1))}>
+    <button data-testid="native-poi" onClick={() => { if (options.clickableIcons) window.fixture.poiOpened = true }}>Native place label</button>
+    <Flat.Provider value={map}>{children}</Flat.Provider>
+  </div>
 }
 export function Map3D({ children }) {
   const ref = useRef(null)

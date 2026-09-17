@@ -13,7 +13,7 @@ const artifacts = await mkdtemp(join(tmpdir(), 'flowstate-subject-map-'))
 const fixture = join(root, 'scripts/fixtures/subject-map')
 const output = await build({
   entryPoints: [join(fixture, 'app.jsx')], bundle: true, write: false, format: 'iife', jsx: 'automatic',
-  define: { 'process.env.NEXT_PUBLIC_GOOGLE_MAP_KEY': '"fixture"', 'process.env.NODE_ENV': '"development"' },
+  define: { 'process.env.NEXT_PUBLIC_GOOGLE_MAP_KEY': '"fixture"', 'process.env.NEXT_PUBLIC_GOOGLE_MAP_ID': '""', 'process.env.NODE_ENV': '"development"' },
   alias: { '@vis.gl/react-google-maps': join(fixture, 'maps.jsx'), 'next/dynamic': join(fixture, 'dynamic.jsx'), '@': join(root, 'apps/dashboard/src') },
 })
 const html = '<!doctype html><html><body><div id="root"></div><script>' + output.outputFiles[0].text + '</script></body></html>'
@@ -34,7 +34,7 @@ try {
     if (query.includes('stalled-3d')) await page.clock.install()
     await page.goto(origin + query)
     try { await run(page); assert.deepEqual(errors, []); results.push({ name, passed: true }) }
-    catch (error) { await page.screenshot({ path: join(artifacts, `${results.length}-failure.png`) }); throw error }
+    catch (error) { if (errors.length) console.error('Page errors:', errors); await page.screenshot({ path: join(artifacts, `${results.length}-failure.png`) }); throw error }
     finally { await page.close() }
   }
   const street = page => page.locator('[data-panorama]').waitFor()
@@ -42,6 +42,47 @@ try {
     await page.getByTestId('native-aerial').waitFor()
     await page.getByText('Loading subject’s 3D map…').waitFor({ state: 'hidden' })
   }
+  await scenario('native satellite default, labels, free gestures, layers and recenter', '', async page => {
+    await street(page)
+    assert.equal(await page.evaluate(() => fixture.libraryRequests.includes('maps3d')), false)
+    await page.getByRole('button', { name: 'Back to map', exact: true }).click()
+    await page.getByTestId('flat-map').waitFor()
+    const options = await page.evaluate(() => ({ ...fixture.flat.options, controlledCenter: fixture.flat.controlledCenter }))
+    assert.equal(options.mapTypeId, 'hybrid')
+    assert.equal(options.renderingType, 'VECTOR')
+    assert.equal(options.isFractionalZoomEnabled, true)
+    assert.equal(options.clickableIcons, true)
+    assert.equal(options.gestureHandling, 'greedy')
+    assert.equal(options.keyboardShortcuts, true)
+    assert.equal(options.disableDoubleClickZoom, undefined)
+    assert.equal(options.draggable, undefined)
+    assert.equal(options.controlledCenter, false)
+    assert.equal(await page.evaluate(() => fixture.flat.zoom), 18)
+    assert.equal(await page.evaluate(() => fixture.libraryRequests.includes('maps3d')), false)
+    await page.getByTestId('native-poi').click()
+    assert.equal(await page.evaluate(() => fixture.poiOpened), true)
+    await page.getByTestId('flat-map').dblclick({ position: { x: 400, y: 180 } })
+    assert.equal(await page.evaluate(() => fixture.flat.zoom), 19)
+    await page.getByTestId('flat-map').dispatchEvent('wheel', { deltaY: -100 })
+    assert.equal(await page.evaluate(() => fixture.flat.zoom), 20)
+    await page.evaluate(() => { fixture.flat.panTo({ lat: 39.8, lng: -105.1 }); fixture.toggleComp() })
+    await page.waitForTimeout(80)
+    assert.deepEqual(await page.evaluate(() => fixture.flat.center), { lat: 39.8, lng: -105.1 })
+    await page.getByRole('button', { name: 'Map', exact: true }).click()
+    assert.equal(await page.evaluate(() => fixture.flat.options.mapTypeId), 'roadmap')
+    assert.deepEqual(await page.evaluate(() => fixture.flat.center), { lat: 39.8, lng: -105.1 })
+    await page.getByRole('button', { name: 'Satellite', exact: true }).click()
+    assert.equal(await page.evaluate(() => fixture.flat.options.mapTypeId), 'hybrid')
+    await page.getByRole('button', { name: 'Subject', exact: true }).click()
+    assert.deepEqual(await page.evaluate(() => fixture.flat.center), { lat: 39.75, lng: -104.99 })
+    assert.equal(await page.evaluate(() => fixture.flat.zoom), 18)
+    await page.getByRole('button', { name: 'Zoom in', exact: true }).click()
+    assert.equal(await page.evaluate(() => fixture.flat.zoom), 19)
+    assert.equal(await page.evaluate(() => fixture.libraryRequests.includes('maps3d')), false)
+    await page.getByRole('button', { name: '3D', exact: true }).click()
+    await aerial(page)
+    assert.equal(await page.evaluate(() => fixture.libraryRequests.includes('maps3d')), true)
+  })
   await scenario('subject panorama, aerial controls, drift, zoom, rerender', '', async page => {
     await street(page)
     assert.equal(await page.locator('[data-panorama]').getAttribute('data-panorama'), 'pano-101')
@@ -50,6 +91,7 @@ try {
     assert.deepEqual(lookup.request.sources, ['google', 'outdoor'])
     assert.equal(lookup.options.pov.heading, 0)
     await page.getByRole('button', { name: 'Back to map', exact: true }).click()
+    await page.getByRole('button', { name: '3D', exact: true }).click()
     await aerial(page)
     const initialCamera = await page.evaluate(() => ({ center: fixture.aerial.center, tilt: fixture.aerial.tilt, mode: fixture.groundMode, range: fixture.aerial.range }))
     assert.deepEqual(initialCamera.center, { lat: 39.75, lng: -104.99, altitude: 1600 })
@@ -101,6 +143,7 @@ try {
   await scenario('wheel zoom, drag orbit, and touch pinch keep subject anchor', '', async page => {
     await street(page)
     await page.getByRole('button', { name: 'Back to map', exact: true }).click()
+    await page.getByRole('button', { name: '3D', exact: true }).click()
     await aerial(page)
     const map = page.getByTestId('native-aerial')
     const bounds = await map.boundingBox()
@@ -125,6 +168,8 @@ try {
     await street(page)
   })
   await scenario('missing panorama keeps subject-centered aerial usable', '?no-panorama', async page => {
+    await page.getByTestId('flat-map').waitFor()
+    await page.getByRole('button', { name: '3D', exact: true }).click()
     await aerial(page)
     assert.equal(await page.getByRole('button', { name: 'Street View', exact: true }).isDisabled(), true)
     assert.equal(await page.evaluate(() => fixture.aerial.center.lat), 39.75)
@@ -135,7 +180,7 @@ try {
   })
   await scenario('3D library unavailable falls back to subject satellite', '?no-3d', async page => {
     await street(page)
-    await page.getByRole('button', { name: 'Back to map', exact: true }).click()
+    await page.getByRole('button', { name: '3D', exact: true }).click()
     await page.getByTestId('flat-map').waitFor()
     assert.deepEqual(await page.evaluate(() => fixture.flat.center), { lat: 39.75, lng: -104.99 })
     assert.equal(await page.getByRole('button', { name: 'Rotate counterclockwise' }).isDisabled(), true)
@@ -144,13 +189,14 @@ try {
   await scenario('native 3D renderer failure falls back', '', async page => {
     await street(page)
     await page.getByRole('button', { name: 'Back to map', exact: true }).click()
+    await page.getByRole('button', { name: '3D', exact: true }).click()
     await aerial(page)
     await page.evaluate(() => fixture.aerial.dispatchEvent(new Event('gmp-error')))
     await page.getByTestId('flat-map').waitFor()
   })
   await scenario('3D imagery readiness timeout falls back', '?stalled-3d', async page => {
     await street(page)
-    await page.getByRole('button', { name: 'Back to map', exact: true }).click()
+    await page.getByRole('button', { name: '3D', exact: true }).click()
     await page.getByTestId('native-aerial').waitFor()
     await page.clock.fastForward(15001)
     await page.getByTestId('flat-map').waitFor()

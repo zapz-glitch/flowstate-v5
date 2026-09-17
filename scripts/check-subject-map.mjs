@@ -13,11 +13,11 @@ const testKey = process.env.FLOWSTATE_MAP_TEST_ENV ? parse(await readFile(proces
 if (process.env.FLOWSTATE_MAP_TEST_ENV && !testKey) throw new Error('Selected test environment has no Google Maps browser key')
 const root = fileURLToPath(new URL('../', import.meta.url)).replace(/\/$/, '')
 const artifacts = await mkdtemp(join(tmpdir(), 'flowstate-subject-map-'))
-const base = 'http://127.0.0.1:3109'
-const server = spawn(process.execPath, [root + '/node_modules/next/dist/bin/next', 'start', '-p', '3109', '-H', '127.0.0.1'], { cwd: root + '/apps/dashboard', stdio: 'pipe' })
+const base = process.env.FLOWSTATE_MAP_TEST_BASE || 'http://127.0.0.1:3109'
+const server = process.env.FLOWSTATE_MAP_TEST_BASE ? null : spawn(process.execPath, [root + '/node_modules/next/dist/bin/next', 'start', '-p', '3109', '-H', '127.0.0.1'], { cwd: root + '/apps/dashboard', stdio: 'pipe' })
 let serverLog = '', browser, page
-server.stdout.on('data', d => { serverLog += d })
-server.stderr.on('data', d => { serverLog += d })
+server?.stdout.on('data', d => { serverLog += d })
+server?.stderr.on('data', d => { serverLog += d })
 const sanitize = text => text.replace(/https?:\/\/[^\s)]+/g, value => { try { const url = new URL(value); return url.origin + url.pathname } catch { return '[URL]' } }).replace(/AIza[\w-]+/g, '[REDACTED]')
 const errors = [], consoleErrors = [], consoleWarnings = [], failedGoogleResponses = [], checks = []
 const subject = { address: '710 Steiner St, San Francisco, CA 94117', latitude: 37.77625, longitude: -122.43272, bedrooms: 3, bathrooms: 2, squareFeet: 1500, yearBuilt: 1900, photos: [] }
@@ -40,11 +40,11 @@ async function until(predicate, label, timeout = 15000) {
 try {
   for (let i = 0; i < 100; i++) {
     try { if ((await fetch(base)).ok) break } catch {}
-    if (server.exitCode !== null) throw new Error(`Local server exited (${server.exitCode}): ${sanitize(serverLog) || 'No output; verify localhost permissions and production build.'}`)
+    if (server && server.exitCode !== null) throw new Error(`Local server exited (${server.exitCode}): ${sanitize(serverLog) || 'No output; verify localhost permissions and production build.'}`)
     if (i === 99) throw new Error(`Local server did not become reachable at ${base}: ${sanitize(serverLog) || 'No server output; check sandbox localhost access.'}`)
     await sleep(100)
   }
-  browser = await chromium.launch({ executablePath: process.env.CHROME_BIN || undefined, headless: true, args: ['--no-sandbox', '--enable-webgl', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] })
+  browser = await chromium.launch({ executablePath: process.env.CHROME_BIN || undefined, headless: true, args: ['--no-sandbox', '--enable-webgl', '--ignore-gpu-blocklist', '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] })
   const context = await browser.newContext({ serviceWorkers: 'block', viewport: { width: 1600, height: 1100 } })
   page = await context.newPage()
   page.on('pageerror', error => errors.push(sanitize(error.message)))
@@ -78,7 +78,7 @@ try {
     const request = route.request(), url = new URL(request.url())
     if (testKey && url.hostname === 'maps.googleapis.com' && url.pathname === '/maps/api/js') { url.searchParams.set('key', testKey); return route.continue({ url: url.href }) }
     if (url.origin === base || ['google.com', 'googleapis.com', 'gstatic.com', 'googleusercontent.com', 'ggpht.com'].some(domain => url.hostname === domain || url.hostname.endsWith('.' + domain))) return route.continue()
-    if (!['api.flowstate.homes', 'api.staging.flowstate.homes'].includes(url.hostname)) return route.abort()
+    if (!['api.flowstate.homes', 'api.staging.flowstate.homes'].includes(url.hostname) && !(['localhost', '127.0.0.1'].includes(url.hostname) && url.port === '8787')) return route.abort()
     const json = (body, status = 200) => route.fulfill({ status, contentType: 'application/json', headers: { 'Access-Control-Allow-Origin': base, 'Access-Control-Allow-Credentials': 'true', 'Access-Control-Allow-Headers': 'Content-Type,X-Impersonate-User-Id', 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS' }, body: JSON.stringify(body) })
     if (request.method() === 'OPTIONS') return json({})
     if (url.pathname === '/auth/get-session') return json(session)
@@ -104,6 +104,17 @@ try {
   assert.match(await map.innerText(), /facing subject/)
   checks.push({ check: 'Automatic nearby panorama selection with proximity disclosure (imagery requires screenshot inspection)', pass: true })
   await map.getByRole('button', { name: 'Back to map' }).click()
+  await map.locator('.gm-style').waitFor()
+  assert.equal(await map.getByRole('button', { name: 'Satellite', exact: true }).getAttribute('aria-pressed'), 'true')
+  assert.equal(await page.locator('gmp-map-3d').count(), 0, '3D must stay unloaded until requested')
+  await page.waitForTimeout(3000)
+  await page.screenshot({ path: join(artifacts, 'satellite.png') })
+  await map.getByRole('button', { name: 'Map', exact: true }).click()
+  await page.waitForTimeout(3000)
+  await page.screenshot({ path: join(artifacts, 'roadmap.png') })
+  assert.equal(await map.getByRole('button', { name: 'Map', exact: true }).getAttribute('aria-pressed'), 'true')
+  checks.push({ check: 'Native satellite and road layers render before optional 3D', pass: true })
+  await map.getByRole('button', { name: '3D', exact: true }).click()
   await until(async () => await page.locator('gmp-map-3d').count() > 0 || (await map.innerText()).includes('Satellite fallback'), 'Aerial view did not resolve', 25000)
   await until(async () => !(await map.innerText()).includes('Loading subject'), '3D camera did not finish ground placement', 20000)
   assert.equal(await page.locator('gmp-map-3d').count(), 1, '3D unavailable: inspect Google account entitlement/WebGL errors')
@@ -164,5 +175,5 @@ try {
   console.log(JSON.stringify(result, null, 2))
   console.log('Artifacts:', artifacts)
   if (browser) await browser.close()
-  server.kill('SIGTERM')
+  server?.kill('SIGTERM')
 }

@@ -13,7 +13,14 @@ matches must be within 250 meters; distant corrections require a verified
 state/ZIP-qualified address. Failed or ambiguous geocoding retains report
 coordinates and discloses that the address was not confirmed.
 
-“Back to map” opens photorealistic Map3D at 45 degrees, using a ground-relative
+“Back to map” opens Google's stock labeled satellite map (hybrid) at zoom 18.
+Map and Satellite layers use native vector rendering, fractional zoom, freely
+pannable streets, normal double-click zoom, keyboard controls and clickable POIs.
+Subject recenters the camera; changing the property starts a fresh map session.
+Google controls which street, business and landmark labels appear at each zoom.
+No custom styles hide basemap labels. Exact google.com/maps label parity is not guaranteed.
+
+The explicit 3D layer opens photorealistic Map3D at 45 degrees, using a ground-relative
 camera to accommodate terrain elevation. Center and tilt remain anchored during
 zoom, orbit and resizing. Double-click or the rotate button advances N→W→S→E.
 Zooming within 45 meters enters available Street View; zooming out at its minimum
@@ -60,3 +67,18 @@ Primary references:
 - https://developers.google.com/maps/documentation/javascript/reference/street-view-service
 - https://developers.google.com/maps/documentation/javascript/content-security-policy
 - https://developers.google.com/maps/domains
+
+## Standard maps configuration
+
+The existing browser key with Maps JavaScript API enabled can render standard
+Map/Satellite layers; a new key or map ID is not required. Geocoding API must be
+enabled for address correction (the existing local key previously rejected it).
+Keep localhost and deployment origins in the browser key's referrer restrictions.
+To tune business/landmark density, publish a cloud-based map style and set its
+JavaScript map ID as NEXT_PUBLIC_GOOGLE_MAP_ID. Map IDs are not secret API keys.
+POI-density customization is not available on photorealistic 3D maps.
+References: https://developers.google.com/maps/documentation/javascript/map-rendering-type
+and https://developers.google.com/maps/documentation/javascript/cloud-customization/poi-behavior-customization
+
+Real-service QA can use FLOWSTATE_MAP_TEST_BASE=http://localhost:3000 to test an
+already running local dashboard without building or starting a second server.

@@ -48,6 +48,15 @@ function FlatMarkers({ markers, activeMarkerKey, onMarkerClick }: {
   return null
 }
 
+function NativeMapCamera({ mapRef }: { mapRef: MutableRefObject<google.maps.Map | null> }) {
+  const map = useMap()
+  useEffect(() => {
+    mapRef.current = map
+    return () => { if (mapRef.current === map) mapRef.current = null }
+  }, [map, mapRef])
+  return null
+}
+
 function SubjectStreetView({ panorama, subject, onBack, onFailure, viewRef }: { panorama: Panorama; subject: MapCoordinate; onBack: () => void; onFailure: () => void; viewRef: MutableRefObject<google.maps.StreetViewPanorama | null> }) {
   const container = useRef<HTMLDivElement>(null)
   const [pending, setPending] = useState(true)
@@ -132,7 +141,8 @@ function SubjectMap({ markers, onMarkerClick, activeMarkerKey }: PropertyMapInne
   const [view, setView] = useState<'loading' | 'street' | 'aerial'>('loading')
   const [streetStatus, setStreetStatus] = useState('Checking subject location…')
   const [threeD, setThreeD] = useState<'loading' | 'ready' | 'unavailable'>('loading')
-  const [flatZoom, setFlatZoom] = useState(19)
+  const [mapStyle, setMapStyle] = useState<'roadmap' | 'hybrid' | '3d'>('hybrid')
+  const nativeMap = useRef<google.maps.Map | null>(null)
   const aerial = useRef<SubjectAerialMapHandle>(null)
   const streetView = useRef<google.maps.StreetViewPanorama | null>(null)
   const viewChoice = useRef(false)
@@ -166,15 +176,14 @@ function SubjectMap({ markers, onMarkerClick, activeMarkerKey }: PropertyMapInne
   // Load and render 3D only when requested: don't keep an invisible WebGL map
   // running behind the panorama during a long review session.
   useEffect(() => {
-    if (view !== 'aerial' || threeD !== 'loading') return
+    if (view !== 'aerial' || mapStyle !== '3d' || threeD !== 'loading') return
     let cancelled = false
     void loadLibrary('maps3d').then(ok => { if (!cancelled) setThreeD(ok ? 'ready' : 'unavailable') })
     return () => { cancelled = true }
-  }, [view, threeD])
+  }, [view, threeD, mapStyle])
 
   const backToMap = useCallback(() => {
     viewChoice.current = true
-    setFlatZoom(19)
     setView('aerial')
   }, [])
   const openStreet = useCallback(() => {
@@ -195,9 +204,11 @@ function SubjectMap({ markers, onMarkerClick, activeMarkerKey }: PropertyMapInne
       else streetView.current?.setZoom(Math.max(0, Math.min(3, zoom + direction * 0.5)))
       return
     }
-    if (threeD === 'ready') aerial.current?.zoomBy(direction)
-    else if (flatZoom + direction >= 21 && panorama) openStreet()
-    else setFlatZoom(zoom => Math.min(21, Math.max(10, zoom + direction)))
+    if (mapStyle === '3d' && threeD === 'ready') aerial.current?.zoomBy(direction)
+    else {
+      const map = nativeMap.current
+      if (map) map.setZoom(Math.min(22, Math.max(3, (map.getZoom() ?? 18) + direction)))
+    }
   }
 
   if (loadFailed && !loaded) return <div role="status" className="p-4 text-sm">Map could not load. Reload this page to try again.</div>
@@ -206,26 +217,35 @@ function SubjectMap({ markers, onMarkerClick, activeMarkerKey }: PropertyMapInne
       <div className="flex shrink-0 flex-wrap items-center gap-1 border-b border-border bg-background p-2">
         {view === 'street' ? <button type="button" className={buttonClass} onClick={backToMap}><ArrowLeft size={14} /> Back to map</button>
           : <button type="button" className={buttonClass} onClick={openStreet} disabled={!panorama}><PersonStanding size={14} /> Street View</button>}
-        <button type="button" className={buttonClass} disabled={!location} onClick={() => { backToMap(); aerial.current?.recenter() }}><Crosshair size={14} /> Subject</button>
+        <button type="button" className={buttonClass} disabled={!location} onClick={() => { backToMap(); aerial.current?.recenter(); if (location) { nativeMap.current?.panTo(location.coordinate); nativeMap.current?.setZoom(18) } }}><Crosshair size={14} /> Subject</button>
         <button type="button" className={buttonClass} aria-label="Zoom in" disabled={view === 'loading'} onClick={() => zoomBy(1)}><Plus size={14} /></button>
         <button type="button" className={buttonClass} aria-label="Zoom out" disabled={view === 'loading'} onClick={() => zoomBy(-1)}><Minus size={14} /></button>
-        <button type="button" className={buttonClass} aria-label="Rotate counterclockwise" title="Rotate N → W → S → E; or double-click the map" disabled={view !== 'aerial' || threeD !== 'ready'} onClick={() => aerial.current?.rotate()}><RotateCcw size={14} /></button>
+        <button type="button" className={buttonClass} aria-label="Rotate counterclockwise" title="Rotate N → W → S → E; or double-click the map" disabled={view !== 'aerial' || mapStyle !== '3d' || threeD !== 'ready'} onClick={() => aerial.current?.rotate()}><RotateCcw size={14} /></button>
+        <div className="flex gap-1" role="group" aria-label="Map layers">
+          {([['roadmap', 'Map'], ['hybrid', 'Satellite'], ['3d', '3D']] as const).map(([style, label]) =>
+            <button key={style} type="button" className={`${buttonClass} ${view === 'aerial' && mapStyle === style ? 'border-primary bg-secondary font-semibold' : ''}`} aria-pressed={view === 'aerial' && mapStyle === style} disabled={!location}
+              onClick={() => { setMapStyle(style); backToMap() }}>{label}</button>)}
+        </div>
         {view === 'loading' && location && <button type="button" className={buttonClass} onClick={backToMap}>Open map</button>}
       </div>
       <div className="relative min-h-[160px] flex-1 overflow-hidden bg-secondary/30">
         {view === 'street' && panorama && location && <SubjectStreetView viewRef={streetView} panorama={panorama} subject={location.coordinate} onBack={backToMap} onFailure={streetFailed} />}
-        {view === 'aerial' && location && (threeD === 'ready' ?
-          <SubjectAerialMap ref={aerial} subject={location.coordinate} markers={correctedMarkers} activeMarkerKey={activeMarkerKey} onMarkerClick={selectMarker} onStreetView={panorama ? openStreet : undefined} onUnavailable={mark3DUnavailable} /> : threeD === 'unavailable' ?
-          <Map center={location.coordinate} zoom={flatZoom} onZoomChanged={event => { if (event.detail.zoom >= 21 && panorama) openStreet(); else setFlatZoom(event.detail.zoom) }} mapTypeId="hybrid" tilt={0} gestureHandling="greedy" draggable={false} disableDefaultUI disableDoubleClickZoom clickableIcons={false}>
+        {view === 'aerial' && location && (mapStyle === '3d' && threeD === 'ready' ?
+          <SubjectAerialMap ref={aerial} subject={location.coordinate} markers={correctedMarkers} activeMarkerKey={activeMarkerKey} onMarkerClick={selectMarker} onStreetView={panorama ? openStreet : undefined} onUnavailable={mark3DUnavailable} /> : mapStyle !== '3d' || threeD === 'unavailable' ?
+          <Map defaultCenter={location.coordinate} defaultZoom={18} mapTypeId={mapStyle === 'roadmap' ? 'roadmap' : 'hybrid'}
+            mapId={process.env.NEXT_PUBLIC_GOOGLE_MAP_ID || undefined}
+            renderingType="VECTOR" isFractionalZoomEnabled tilt={0} gestureHandling="greedy" clickableIcons keyboardShortcuts
+            zoomControl mapTypeControl={false} streetViewControl={false} fullscreenControl fullscreenControlOptions={{ position: google.maps.ControlPosition.LEFT_TOP }} scaleControl>
+            <NativeMapCamera mapRef={nativeMap} />
             <FlatMarkers markers={correctedMarkers} activeMarkerKey={activeMarkerKey} onMarkerClick={selectMarker} />
           </Map> : <div role="status" className="p-4 text-sm">Loading 3D map…</div>)}
-        {view === 'aerial' && threeD !== 'loading' && <MapLegend />}
+        {view === 'aerial' && (mapStyle !== '3d' || threeD !== 'loading') && <MapLegend />}
         {view === 'loading' && <div role="status" className="p-4 text-sm">{streetStatus}</div>}
       </div>
       <div className="shrink-0 border-t border-border bg-background px-2 py-1 text-[10px] text-foreground-secondary" aria-live="polite">
         <div className="truncate font-medium" title={original.label}>{original.label}</div>
         {view === 'street' ? <><div>{streetStatus}</div><div>{location?.addressMatched ? 'Address matched.' : 'Using report coordinates; address not confirmed.'} Image may show neighboring buildings.</div></>
-          : view === 'aerial' ? <><div>{threeD === 'unavailable' ? 'Satellite fallback · 3D unavailable' : '45° aerial · double-click to rotate · zoom in for Street View'}</div>{!location?.addressMatched && <div>Using report coordinates; address not confirmed.</div>}{!panorama && <div>{streetStatus}</div>}</> : null}
+          : view === 'aerial' ? <><div>{mapStyle !== '3d' ? 'Drag to explore · double-click or scroll to zoom · Subject to recenter' : threeD === 'unavailable' ? 'Satellite fallback · 3D unavailable' : '45° aerial · double-click to rotate · zoom in for Street View'}</div>{!location?.addressMatched && <div>Using report coordinates; address not confirmed.</div>}{!panorama && <div>{streetStatus}</div>}</> : null}
       </div>
     </div>
   )
