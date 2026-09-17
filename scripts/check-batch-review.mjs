@@ -88,7 +88,7 @@ try {
     let aggregate = false, oldRead = false, reportRead = false
     const allReads = new Set()
     const start = requests.length
-    const { context, page, errors } = await setup(async (url, json) => {
+    const { context, page: batchPage, errors } = await setup(async (url, json) => {
       if (url.pathname === '/batch') { await jobsHeld; await json({ jobs: [aJob, bJob] }); return true }
       if (url.pathname === '/batch/job-a' || url.pathname === '/batch/job-b') {
         if (aggregate) { allReads.add(url.pathname); await allHeld }
@@ -99,6 +99,7 @@ try {
       if (url.pathname === '/user/reports/report-b') { reportRead = true; await reportHeld; await json(bReport); return true }
       return false
     })
+    let page = batchPage
     await page.goto(base + '/dashboard/batch')
     await page.getByRole('heading', { name: 'Batch Import', exact: true }).waitFor()
     releaseJobs()
@@ -120,8 +121,13 @@ try {
     aggregate = false
     results.push({ check: 'All lists reads execute concurrently', pass: true })
     await page.getByRole('button', { name: /^List 1/ }).click()
+    const popup = page.waitForEvent('popup')
     await page.getByRole('link', { name: 'Review', exact: true }).first().click()
+    page = await popup
+    page.on('pageerror', error => errors.push(error.message))
+    assert.equal(new URL(batchPage.url()).pathname, '/dashboard/batch')
     await page.waitForURL(/reports\/report-b/)
+    assert.equal(await page.evaluate(() => window.opener), null)
     await waitUntil(() => reportRead)
     await page.getByRole('heading', { name: 'Property report', exact: true }).waitFor()
     await page.getByRole('link', { name: 'Back to Batch Import', exact: true }).waitFor()

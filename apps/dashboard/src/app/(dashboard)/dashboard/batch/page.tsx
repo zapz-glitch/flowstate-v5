@@ -827,6 +827,9 @@ export default function BatchPage() {
                 {reviewTarget('all') && (
                   <Link
                     href={reportHref(reviewTarget('all')!, 'all')}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title="Review in a new tab"
                     className="mt-1 inline-flex items-center gap-0.5 text-[10px] font-medium text-primary hover:underline"
                   >
                     Review <ChevronRight className="w-3 h-3" />
@@ -858,6 +861,9 @@ export default function BatchPage() {
                     {target && (
                       <Link
                         href={reportHref(target, bucket)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title="Review in a new tab"
                         className="mt-1 inline-flex items-center gap-0.5 text-[10px] font-medium text-primary hover:underline"
                       >
                         Review <ChevronRight className="w-3 h-3" />
@@ -895,6 +901,9 @@ export default function BatchPage() {
                     {target && (
                       <Link
                         href={reportHref(target, key)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title="Review in a new tab"
                         className="mt-1 inline-flex items-center gap-0.5 text-[10px] font-medium text-primary hover:underline"
                       >
                         Review <ChevronRight className="w-3 h-3" />
@@ -1040,6 +1049,9 @@ export default function BatchPage() {
                           {r.jobId && r.status === 'completed' ? (
                             <Link
                               href={reportHref(r, r.confidence?.toLowerCase() ?? 'unrated')}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              title="Review in a new tab"
                               className="text-primary hover:underline inline-flex items-center gap-0.5"
                             >
                               Review <ChevronRight className="w-2.5 h-2.5" />
