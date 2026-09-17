@@ -41,6 +41,8 @@ const nextConfig = {
           `connect-src 'self' ${apiUrl} https://maps.googleapis.com data: blob:`,
           // MapLibre renders in workers from blob: URLs
           "worker-src 'self' blob:",
+          // SEO engine console embeds at /dashboard/seo
+          "frame-src 'self' https://insights.flowstate.homes",
           "frame-ancestors 'none'",
           "base-uri 'self'",
           "form-action 'self'",
