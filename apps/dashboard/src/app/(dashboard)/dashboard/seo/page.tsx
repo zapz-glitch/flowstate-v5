@@ -1,5 +1,3 @@
-'use client'
-
 // SEO Engine console — the flowstate-seo-engine admin UI served from
 // insights.flowstate.homes, embedded same-origin style inside the dashboard.
 // Admin auth is the engine's own SEO_ADMIN_KEY cookie (SameSite=None;Secure),

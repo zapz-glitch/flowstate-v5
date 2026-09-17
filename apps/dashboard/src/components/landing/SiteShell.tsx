@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { Suspense, useState, useEffect, useCallback } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useSession } from '@/lib/auth-client'
 import { useTheme } from '@/components/theme-provider'
@@ -9,9 +9,19 @@ import { AuthModals } from '@/components/auth/AuthModals'
 import { SiteHeader } from '@/components/landing/SiteHeader'
 import { SiteFooter } from '@/components/landing/SiteFooter'
 
+// Reads ?signin=true in its own Suspense island so the page content can
+// prerender — useSearchParams in an unsuspended boundary forces the whole
+// page to bail out to client-side rendering.
+function SigninParamEffect({ onSignin }: { onSignin: () => void }) {
+  const searchParams = useSearchParams()
+  useEffect(() => {
+    if (searchParams.get('signin') === 'true') onSignin()
+  }, [searchParams, onSignin])
+  return null
+}
+
 export function SiteShell({ children }: { children: React.ReactNode }) {
   const router = useRouter()
-  const searchParams = useSearchParams()
   const session = useSession()
   const { theme, setTheme, toggleTheme } = useTheme()
   const isDark = theme === 'night' || theme === 'dawn'
@@ -32,11 +42,9 @@ export function SiteShell({ children }: { children: React.ReactNode }) {
   }, [])
 
   // Auto-open sign-in modal when redirected with ?signin=true
-  useEffect(() => {
-    if (searchParams.get('signin') === 'true' && !isSignedIn) {
-      setIsSignInOpen(true)
-    }
-  }, [searchParams, isSignedIn])
+  const requestSignin = useCallback(() => {
+    if (!isSignedIn) setIsSignInOpen(true)
+  }, [isSignedIn])
 
   const openPortal = useCallback(() => {
     if (isSignedIn) {
@@ -62,6 +70,9 @@ export function SiteShell({ children }: { children: React.ReactNode }) {
         isSignInOpen={isSignInOpen}
         onSignInOpenChange={setIsSignInOpen}
       />
+      <Suspense fallback={null}>
+        <SigninParamEffect onSignin={requestSignin} />
+      </Suspense>
     </div>
   )
 }
