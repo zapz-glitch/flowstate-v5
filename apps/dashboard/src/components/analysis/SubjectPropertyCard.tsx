@@ -71,6 +71,7 @@ export function SubjectPropertyCard({ subject, children, footer }: SubjectProper
         {/* Street View + Photos */}
         <div className="mt-4 space-y-2">
           <StreetViewImage
+            photos={subject.photos}
             address={subject.address}
             latitude={subject.latitude}
             longitude={subject.longitude}

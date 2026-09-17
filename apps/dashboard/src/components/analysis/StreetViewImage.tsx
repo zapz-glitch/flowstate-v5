@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Home } from 'lucide-react'
 
 interface StreetViewImageProps {
@@ -40,64 +40,36 @@ function ImageInsignia({ className, loading }: { className?: string; loading?: b
   )
 }
 
-export function StreetViewImage({
-  photos,
-  address,
-  latitude,
-  longitude,
-  width = 640,
-  height = 480,
-  className,
-}: StreetViewImageProps) {
-  const [error, setError] = useState(false)
-  const [failedPhotos, setFailedPhotos] = useState<string[]>([])
-  const [coverage, setCoverage] = useState<'checking' | 'ok' | 'none'>('checking')
+export function StreetViewImage(props: StreetViewImageProps) {
+  const streetViewSrc = getStreetViewUrl({ ...props, width: props.width ?? 640, height: props.height ?? 480 })
+  // Reset image failures when a card is reused for another property.
+  return <PropertyImage key={streetViewSrc ?? props.address ?? ''} {...props} streetViewSrc={streetViewSrc} />
+}
 
-  const photo = photos?.find(url => /^\/user\/reports\/[a-zA-Z0-9_-]+\/assets\/[a-f0-9-]{36}$/.test(url) && !failedPhotos.includes(url))
-  const key = process.env.NEXT_PUBLIC_GOOGLE_MAP_KEY
-  const location = latitude && longitude
-    ? `${latitude},${longitude}`
-    : address
-      ? encodeURIComponent(address)
-      : null
-
-  // Check coverage via the metadata endpoint — Street View returns a
-  // "Sorry, we have no imagery here" image with HTTP 200 when there's no
-  // coverage, so the metadata status is the only reliable signal.
-  useEffect(() => {
-    if (photo || !key || !location) {
-      setCoverage('none')
-      return
-    }
-    let cancelled = false
-    fetch(`https://maps.googleapis.com/maps/api/streetview/metadata?location=${location}&source=outdoor&key=${key}`)
-      .then((r) => r.json() as Promise<{ status?: string }>)
-      .then((d) => { if (!cancelled) setCoverage(d.status === 'OK' ? 'ok' : 'none') })
-      .catch(() => { if (!cancelled) setCoverage('ok') }) // fail-open: try the image
-    return () => { cancelled = true }
-  }, [photo, key, location])
-
-  if (photo) return <img src={photo} alt={address ? `Saved property photo: ${address}` : 'Saved property photo'} className={className ?? 'w-full h-auto'} loading="lazy" onError={() => setFailedPhotos(previous => [...previous, photo])} />
-  if (!key || error || !location) return <ImageInsignia className={className} />
-  if (coverage === 'checking') return <ImageInsignia className={className} loading />
-  if (coverage === 'none') return <ImageInsignia className={className} />
-
-  const src = `https://maps.googleapis.com/maps/api/streetview?location=${location}&size=${width}x${height}&key=${key}&source=outdoor`
+function PropertyImage({ photos, address, className, streetViewSrc }: StreetViewImageProps & { streetViewSrc: string | null }) {
+  const [failedSources, setFailedSources] = useState<string[]>([])
+  const streetView = streetViewSrc && !failedSources.includes(streetViewSrc) ? streetViewSrc : null
+  const photo = photos?.find(url => /^\/user\/reports\/[a-zA-Z0-9_-]+\/assets\/[a-f0-9-]{36}$/.test(url) && !failedSources.includes(url))
+  const src = streetView ?? photo
+  if (!src) return <ImageInsignia className={className} />
 
   return (
     <img
+      key={src}
       src={src}
-      alt="Street view"
+      alt={streetView ? `Google Street View${address ? `: ${address}` : ''}` : `Saved property photo${address ? `: ${address}` : ''}`}
       className={className ?? 'w-full h-auto'}
       loading="lazy"
-      onError={() => setError(true)}
+      decoding="async"
+      onError={() => setFailedSources(previous => [...previous, src])}
     />
   )
 }
 
 /**
  * Generates a Street View Static API URL for use as a thumbnail.
- * Returns null if no key is configured.
+ * Returns null if no key is configured. Missing coverage returns an HTTP error
+ * so the image fallback works without a separate metadata request.
  */
 export function getStreetViewUrl(opts: {
   address?: string
@@ -109,7 +81,7 @@ export function getStreetViewUrl(opts: {
   const key = process.env.NEXT_PUBLIC_GOOGLE_MAP_KEY
   if (!key) return null
 
-  const location = opts.latitude && opts.longitude
+  const location = opts.latitude != null && opts.longitude != null && Number.isFinite(opts.latitude) && Number.isFinite(opts.longitude)
     ? `${opts.latitude},${opts.longitude}`
     : opts.address
       ? encodeURIComponent(opts.address)
@@ -119,5 +91,5 @@ export function getStreetViewUrl(opts: {
 
   const w = opts.width ?? 400
   const h = opts.height ?? 300
-  return `https://maps.googleapis.com/maps/api/streetview?location=${location}&size=${w}x${h}&key=${key}&source=outdoor`
+  return `https://maps.googleapis.com/maps/api/streetview?location=${location}&size=${w}x${h}&key=${key}&source=outdoor&return_error_code=true`
 }

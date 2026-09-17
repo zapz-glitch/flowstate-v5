@@ -6,7 +6,9 @@ import { Upload, FileText, Loader2, Check, X, Download, ChevronRight, Flag, Chec
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
-import { submitBatchAnalysis, getBatchStatus, getBatchJobs, retryFailedAddresses, getBatchStreamToken, resumeBatch, stopBatch, cancelBatch, type BatchResult } from './actions'
+import { submitBatchAnalysis, retryFailedAddresses, getBatchStreamToken, resumeBatch, stopBatch, cancelBatch, type BatchResult } from './actions'
+
+import { getBatchStatus, getBatchJobs } from '@/lib/batch-client'
 
 type Phase = 'upload' | 'processing' | 'complete'
 type ConfBucket = 'high' | 'medium' | 'low' | 'unrated'
@@ -51,9 +53,11 @@ export default function BatchPage() {
   const [hideReviewed, setHideReviewed] = useState(true)
   // Which list chip is mid-load — shows a spinner and blocks stale state
   const [loadingListId, setLoadingListId] = useState<string | null>(null)
-  // Gate first paint on the jobs fetch — otherwise the upload UI flashes
-  // before the lists view mounts
+  // Show the list picker as soon as summaries arrive; rows load independently.
   const [jobsLoaded, setJobsLoaded] = useState(false)
+
+  const selectionVersion = useRef(0)
+  const pollingVersion = useRef(0)
 
   const fileInputRef = useRef<HTMLInputElement>(null)
   const pollingRef = useRef<NodeJS.Timeout | null>(null)
@@ -62,6 +66,7 @@ export default function BatchPage() {
   // ─── Polling — reliable progress mechanism ───────────────────────────────
 
   const stopPolling = useCallback(() => {
+    pollingVersion.current++
     if (pollingRef.current) {
       clearInterval(pollingRef.current)
       pollingRef.current = null
@@ -70,12 +75,16 @@ export default function BatchPage() {
     eventSourceRef.current = null
   }, [])
 
-  const startPolling = useCallback((id: string) => {
+  const startPolling = useCallback((id: string, pollImmediately = true) => {
     stopPolling()
+    const version = pollingVersion.current
+    let polling = false
     const poll = async () => {
+      if (polling || version !== pollingVersion.current) return
+      polling = true
       try {
         const job = await getBatchStatus(id)
-        if (!job) return
+        if (!job || version !== pollingVersion.current) return
         if (job.results?.length) setResults(job.results)
         setCompletedCount(job.completedCount)
         setFailedCount(job.failedCount)
@@ -84,41 +93,46 @@ export default function BatchPage() {
           setPhase('complete')
           stopPolling()
         }
-      } catch { /* ignore */ }
+      } catch { /* ignore */ } finally { polling = false }
     }
     // Poll immediately, then every 3 seconds
-    poll()
+    if (pollImmediately) void poll()
     pollingRef.current = setInterval(poll, 3000)
 
     // Also try SSE for real-time updates (non-critical — polling is the fallback)
     getBatchStreamToken(id).then((tokenResult) => {
-      if (!tokenResult) return
+      if (!tokenResult || version !== pollingVersion.current) return
       try {
         const es = new EventSource(`${tokenResult.streamUrl}?token=${tokenResult.token}`)
         eventSourceRef.current = es
 
         es.addEventListener('batch_state', (e) => {
+          if (version !== pollingVersion.current) return
           const data = JSON.parse(e.data)
           if (data.results) setResults(data.results)
           setCompletedCount(data.completedCount ?? 0)
           setFailedCount(data.failedCount ?? 0)
         })
         es.addEventListener('address_started', (e) => {
+          if (version !== pollingVersion.current) return
           const data = JSON.parse(e.data)
           setResults((prev) => prev.map((r, i) => i === data.index ? { ...r, status: 'processing', startedAt: data.startedAt ?? Date.now() } : r))
         })
         es.addEventListener('address_completed', (e) => {
+          if (version !== pollingVersion.current) return
           const data = JSON.parse(e.data)
           setResults((prev) => prev.map((r, i) => i === data.index ? { ...r, status: 'completed', jobId: data.jobId } : r))
           setCompletedCount((c) => c + 1)
         })
         es.addEventListener('address_failed', (e) => {
+          if (version !== pollingVersion.current) return
           const data = JSON.parse(e.data)
           setResults((prev) => prev.map((r, i) => i === data.index ? { ...r, status: 'failed', error: data.error } : r))
           setFailedCount((c) => c + 1)
         })
-        es.addEventListener('batch_paused', () => { setPhase('complete'); stopPolling() })
+        es.addEventListener('batch_paused', () => { if (version !== pollingVersion.current) return; setPhase('complete'); stopPolling() })
         es.addEventListener('batch_completed', (e) => {
+          if (version !== pollingVersion.current) return
           const data = JSON.parse(e.data)
           if (data.results) setResults(data.results)
           setCompletedCount(data.completedCount ?? 0)
@@ -126,8 +140,8 @@ export default function BatchPage() {
           setPhase('complete')
           stopPolling()
         })
-        es.addEventListener('batch_done', () => { setPhase('complete'); stopPolling() })
-        es.onerror = () => { es.close(); eventSourceRef.current = null } // Silent — polling continues
+        es.addEventListener('batch_done', () => { if (version !== pollingVersion.current) return; setPhase('complete'); stopPolling() })
+        es.onerror = () => { es.close(); if (eventSourceRef.current === es) eventSourceRef.current = null } // Silent — polling continues
       } catch { /* SSE failed — polling continues */ }
     }).catch(() => { /* ignore */ })
   }, [stopPolling])
@@ -136,45 +150,41 @@ export default function BatchPage() {
 
   useEffect(() => {
     let cancelled = false
+    const version = ++selectionVersion.current
     async function resumeBatch() {
       try {
         const jobs = await getBatchJobs()
-        if (cancelled) return
+        if (cancelled || version !== selectionVersion.current) return
         setAllJobs(jobs)
         setJobsLoaded(true)
-        const active = jobs.find((j) => j.status === 'processing') ?? jobs.find((j) => j.status === 'queued')
-        const recent = active ?? jobs[0]
-        if (!recent || cancelled) return
-
+        const recent = jobs.find((j) => j.status === 'processing') ?? jobs.find((j) => j.status === 'queued') ?? jobs[0]
+        if (!recent) return
         setBatchId(recent.id)
         setJobStatus(recent.status)
-
-        if (recent.status === 'processing' || recent.status === 'queued') {
-          setPhase('processing')
-          // Load current state from DB then start polling
-          const job = await getBatchStatus(recent.id)
-          if (job && !cancelled) {
-            if (job.results?.length) setResults(job.results)
-            setCompletedCount(job.completedCount)
-            setFailedCount(job.failedCount)
-            startPolling(recent.id)
-          }
-        } else {
-          const job = await getBatchStatus(recent.id)
-          if (cancelled) return
-          if (job) {
-            setResults(job.results ?? [])
-            setCompletedCount(job.completedCount)
-            setFailedCount(job.failedCount)
-          }
-          // Always land on the lists view when jobs exist — even if the
-          // detail fetch fails, the list picker + buckets should show
-          setPhase('complete')
+        setCompletedCount(recent.completedCount)
+        setFailedCount(recent.failedCount)
+        setPhase(recent.status === 'processing' || recent.status === 'queued' ? 'processing' : 'complete')
+        setLoadingListId(recent.id)
+        const job = await getBatchStatus(recent.id)
+        if (cancelled || version !== selectionVersion.current) return
+        setResults(job.results ?? [])
+        setCompletedCount(job.completedCount)
+        setFailedCount(job.failedCount)
+        setJobStatus(job.status)
+        const running = job.status === 'processing' || job.status === 'queued'
+        setPhase(running ? 'processing' : 'complete')
+        if (running) startPolling(recent.id, false)
+      } catch {
+        if (!cancelled && version === selectionVersion.current) {
+          setJobsLoaded(true)
+          setError('Could not load your lists — refresh to try again')
         }
-      } catch { setJobsLoaded(true) /* show upload phase */ }
+      } finally {
+        if (!cancelled && version === selectionVersion.current) setLoadingListId(null)
+      }
     }
     resumeBatch()
-    return () => { cancelled = true; stopPolling() }
+    return () => { cancelled = true; selectionVersion.current++; stopPolling() }
   }, [startPolling, stopPolling])
 
   // Stamps are keyed by row index — reset when the viewed list changes so a
@@ -294,6 +304,9 @@ export default function BatchPage() {
 
   const handleStart = useCallback(async () => {
     if (addresses.length === 0) return
+    selectionVersion.current++
+    setLoadingListId(null)
+    stopPolling()
     setError(null)
     setShowUpload(false)
     setPhase('processing')
@@ -313,7 +326,7 @@ export default function BatchPage() {
     // Refresh the list picker so the new list chip appears
     getBatchJobs().then(setAllJobs).catch(() => {})
     startPolling(result.batchId)
-  }, [addresses, startPolling])
+  }, [addresses, startPolling, stopPolling])
 
   // ─── CSV Export ───────────────────────────────────────────────────────────
 
@@ -365,6 +378,8 @@ export default function BatchPage() {
   // ─── Reset ────────────────────────────────────────────────────────────────
 
   const handleReset = useCallback(() => {
+    selectionVersion.current++
+    setLoadingListId(null)
     stopPolling()
     setPhase('upload')
     setAddresses([])
@@ -384,7 +399,7 @@ export default function BatchPage() {
   // ─── Progress calculation ─────────────────────────────────────────────────
 
   const totalDone = completedCount + failedCount
-  const totalAddresses = results.length > 0 ? results.length : addresses.length
+  const totalAddresses = results.length > 0 ? results.length : (allJobs.find((j) => j.id === batchId)?.totalAddresses ?? addresses.length)
   const progressPercent = totalAddresses > 0 ? Math.round((totalDone / totalAddresses) * 100) : 0
   const currentIndex = results.findIndex((r) => r.status === 'processing')
   const remaining = totalAddresses - totalDone
@@ -392,13 +407,15 @@ export default function BatchPage() {
   // ─── List picker ──────────────────────────────────────────────────────────
 
   const selectBatch = useCallback(async (id: string) => {
-    if (id === batchId && !viewAll) return
+    if (id === batchId && !viewAll && !loadingListId && results.length > 0) return
+    const version = ++selectionVersion.current
     // Load before committing selection — a failed fetch must not leave the
     // chip highlighted over the previous list's rows
     setLoadingListId(id)
     setError(null)
     try {
       const job = await getBatchStatus(id)
+      if (version !== selectionVersion.current) return
       if (!job) {
         setError('Could not load that list — try again')
         return
@@ -414,24 +431,26 @@ export default function BatchPage() {
       setJobStatus(job.status)
       if (job.status === 'processing' || job.status === 'queued') {
         setPhase('processing')
-        startPolling(id)
+        startPolling(id, false)
       } else {
         setPhase('complete')
       }
     } catch {
-      setError('Could not load that list — try again')
+      if (version === selectionVersion.current) setError('Could not load that list — try again')
     } finally {
-      setLoadingListId(null)
+      if (version === selectionVersion.current) setLoadingListId(null)
     }
-  }, [batchId, viewAll, startPolling, stopPolling])
+  }, [batchId, viewAll, loadingListId, results.length, startPolling, stopPolling])
 
   const selectAllLists = useCallback(async () => {
+    const version = ++selectionVersion.current
     setLoadingListId('all')
     setError(null)
     try {
       // Fetch every job's results and merge (stamps + confidence join server-side)
       const merged: Array<BatchResult & { batchId: string }> = []
       const jobs = await Promise.all(allJobs.map((j) => getBatchStatus(j.id)))
+      if (version !== selectionVersion.current) return
       for (let i = 0; i < allJobs.length; i++) {
         const job = jobs[i]
         if (job?.results?.length) {
@@ -445,9 +464,9 @@ export default function BatchPage() {
       setPhase('complete')
       setAllResults(merged)
     } catch {
-      setError('Could not load lists — try again')
+      if (version === selectionVersion.current) setError('Could not load lists — try again')
     } finally {
-      setLoadingListId(null)
+      if (version === selectionVersion.current) setLoadingListId(null)
     }
   }, [allJobs, stopPolling])
 
@@ -707,6 +726,12 @@ export default function BatchPage() {
                   {j.status === 'queued' && <Clock className="w-2.5 h-2.5 text-amber-500" />}
                 </button>
               ))}
+            </div>
+          )}
+
+          {loadingListId && results.length === 0 && (
+            <div role="status" className="flex items-center gap-2 py-8 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" /> Loading properties for review…
             </div>
           )}
 

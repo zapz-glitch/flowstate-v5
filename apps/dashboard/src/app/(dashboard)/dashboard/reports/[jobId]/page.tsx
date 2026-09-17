@@ -2,6 +2,8 @@
 
 import { useState, useEffect, useCallback, useRef, use } from 'react'
 import Link from 'next/link'
+import dynamic from 'next/dynamic'
+import ReportLoading from './loading'
 import { useRouter } from 'next/navigation'
 import { ArrowLeft, ArrowRight, Share2, RefreshCw, AlertTriangle, History, Loader2, ListChecks } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -25,20 +27,21 @@ import { getReportHistory, type ReportHistoryEntry } from '@/lib/client-api'
 import { useAutoSave } from '@/hooks/use-auto-save'
 import { getSavedReport, runCompSelection } from '@/lib/client-api'
 import { useAnalysisEvaluation } from '@/hooks/use-analysis-evaluation'
-import { EvaluationSettingsSheet } from '@/components/report/EvaluationSettingsSheet'
 import { DownloadReportButton } from '@/components/report/DownloadReportButton'
-import { ShareReportDialog } from '@/components/report/ShareReportDialog'
-import { ReportHistoryTimeline } from '@/components/report/ReportHistoryTimeline'
-import { AnalysisPageLayout } from '@/components/analysis'
+import { AnalysisPageLayout } from '@/components/analysis/AnalysisPageLayout'
 import type { AnalyzeData, CompItem } from '@/components/analysis'
 import { queueAnalysis, type AnalyzeData as ActionAnalyzeData } from '@/app/(dashboard)/dashboard/analyze/actions'
-import { CompComparisonDialog } from '@/components/analysis/CompComparisonDialog'
 import { useMapInteraction } from '@/hooks/use-map-interaction'
 import { useEvaluationSync } from '@/hooks/use-evaluation-sync'
 import { useEnrichmentSSE, type EnrichmentEvent } from '@/hooks/use-enrichment-sse'
 import { useSidebar } from '@/components/SidebarProvider'
-import { getBatchStatus } from '@/app/(dashboard)/dashboard/batch/actions'
+import { getBatchStatus } from '@/lib/batch-client'
 import { SendToCdarvButton } from '@/components/SendToCdarvButton'
+
+const EvaluationSettingsSheet = dynamic(() => import('@/components/report/EvaluationSettingsSheet').then((mod) => mod.EvaluationSettingsSheet))
+const ShareReportDialog = dynamic(() => import('@/components/report/ShareReportDialog').then((mod) => mod.ShareReportDialog))
+const ReportHistoryTimeline = dynamic(() => import('@/components/report/ReportHistoryTimeline').then((mod) => mod.ReportHistoryTimeline))
+const CompComparisonDialog = dynamic(() => import('@/components/analysis/CompComparisonDialog').then((mod) => mod.CompComparisonDialog))
 
 // ─── Main Page ──────────────────────────────────────────────────────────────
 
@@ -85,7 +88,7 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
   const [aiAnalysisDone, setAiAnalysisDone] = useState(false)
   const preAiCompsRef = useRef<unknown>(null)
 
-  const analyzeData = report?.analysis ?? null
+  const analyzeData = report?.jobId === jobId ? report.analysis : null
 
   // ─── Batch review mode — ?batch=<id>&conf=<bucket> ──────────────────────
   // When opened from the batch list, load that batch's review queue so the
@@ -103,6 +106,7 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
     const conf = qs.get('conf') ?? 'all'
     if (!bId) { setBatchQueue(null); return }
     let cancelled = false
+    setBatchQueue(null)
     getBatchStatus(bId).then((job) => {
       if (cancelled || !job?.results) return
       const items = job.results
@@ -117,7 +121,7 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
         })
         .map((r) => ({ jobId: r.jobId!, address: r.address, feedbackStatus: r.feedbackStatus }))
       if (!cancelled) setBatchQueue({ batchId: bId, conf, items })
-    })
+    }).catch(() => { if (!cancelled) setBatchQueue(null) })
     return () => { cancelled = true }
   }, [jobId])
 
@@ -192,7 +196,7 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
   // ─── Auto-save on evaluation/comp changes ──────────────────────────────
   const { autoSaveStatus } = useAutoSave({
     jobId,
-    analysisData: report?.analysis,
+    analysisData: analyzeData,
     displayValuation,
     recalcData,
     compOverride,
@@ -202,11 +206,14 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
     onSaved: historyOpen ? loadHistory : undefined,
   })
 
+  const reportRequestRef = useRef(0)
   const fetchReport = useCallback(async () => {
+    const requestId = ++reportRequestRef.current
     try {
       setLoading(true)
       setError(null)
       const data = await getSavedReport(jobId)
+      if (requestId !== reportRequestRef.current) return
       const analysis = data.analysis as AnalyzeData & {
         aiReport?: { summary: string; selected: number; total: number; model: string }
         preAiComps?: unknown
@@ -217,6 +224,9 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
         createdAt: data.createdAt,
         analysis,
       })
+      setAiReport(null)
+      setAiAnalysisDone(false)
+      preAiCompsRef.current = null
       // Restore persisted AI analysis report and pre-AI comps for undo
       if (analysis.aiReport) {
         setAiReport(analysis.aiReport)
@@ -226,14 +236,15 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
         }
       }
     } catch {
-      setError('Report not found')
+      if (requestId === reportRequestRef.current) setError('Report not found')
     } finally {
-      setLoading(false)
+      if (requestId === reportRequestRef.current) setLoading(false)
     }
   }, [jobId])
 
   useEffect(() => {
     fetchReport()
+    return () => { reportRequestRef.current++ }
   }, [fetchReport])
 
   // SSE handler for refresh streaming
@@ -501,12 +512,8 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
     onPermitsPulled: (a) => setReport((prev) => (prev ? { ...prev, analysis: a } : prev)),
   })
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center py-32">
-        <div className="text-foreground-tertiary text-body">Loading report...</div>
-      </div>
-    )
+  if (loading || (report && report.jobId !== jobId && !error)) {
+    return <ReportLoading />
   }
 
   if (error || !report) {
@@ -629,12 +636,12 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
         />
 
       {/* Evaluation Settings Sheet */}
-      <EvaluationSettingsSheet
+      {settingsOpen && <EvaluationSettingsSheet
         open={settingsOpen}
         onOpenChange={setSettingsOpen}
         settingsHook={settingsHook}
         recalcData={recalcData}
-      />
+      />}
 
       {/* History Sidebar */}
       <Sheet open={historyOpen} onOpenChange={setHistoryOpen}>
@@ -654,14 +661,14 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
       </Sheet>
 
       {/* Share Dialog */}
-      <ShareReportDialog
+      {shareOpen && <ShareReportDialog
         open={shareOpen}
         onOpenChange={setShareOpen}
         jobId={jobId}
-      />
+      />}
 
       {/* Subject vs Comp comparison dialog */}
-      <CompComparisonDialog
+      {comparisonOpen && <CompComparisonDialog
         open={comparisonOpen}
         onOpenChange={setComparisonOpen}
         subject={analyzeData?.subject ?? null}
@@ -675,7 +682,7 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
         } : undefined}
         arv={displayValuation?.arv}
         proximityConfig={settingsHook.settings.proximityConfig}
-      />
+      />}
 
       {/* Refresh Confirmation Dialog */}
       <Dialog open={refreshOpen} onOpenChange={setRefreshOpen}>

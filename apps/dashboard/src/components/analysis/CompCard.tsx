@@ -325,20 +325,20 @@ export function CompCard({
             </div>
           )}
 
-          {comp.photos && comp.photos.length > 0 ? (
+          <StreetViewImage
+            photos={comp.photos}
+            address={[comp.address, comp.city, comp.state, comp.zipCode].filter(Boolean).join(', ')}
+            latitude={comp.latitude}
+            longitude={comp.longitude}
+            width={640}
+            height={360}
+            className="w-full aspect-video object-cover bg-muted"
+          />
+          {comp.photos && comp.photos.length > 0 && (
             <div>
               <div className="text-caption text-foreground-tertiary mb-2">Photos</div>
               <PhotoGallery photos={comp.photos} />
             </div>
-          ) : (
-            <StreetViewImage
-              address={comp.address}
-              latitude={comp.latitude}
-              longitude={comp.longitude}
-              width={640}
-              height={360}
-              className="w-full aspect-video object-cover bg-muted"
-            />
           )}
         </div>
       )}

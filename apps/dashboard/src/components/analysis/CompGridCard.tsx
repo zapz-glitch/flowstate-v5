@@ -85,7 +85,7 @@ export function CompGridCard({
           <a href={streetViewUrl} target="_blank" rel="noopener noreferrer" className="block w-full h-full">
             <StreetViewImage
               photos={comp.photos}
-              address={comp.address}
+              address={[comp.address, comp.city, comp.state, comp.zipCode].filter(Boolean).join(', ')}
               latitude={comp.latitude}
               longitude={comp.longitude}
               width={640}
@@ -96,7 +96,7 @@ export function CompGridCard({
         ) : (
           <StreetViewImage
             photos={comp.photos}
-            address={comp.address}
+            address={[comp.address, comp.city, comp.state, comp.zipCode].filter(Boolean).join(', ')}
             latitude={comp.latitude}
             longitude={comp.longitude}
             width={400}
