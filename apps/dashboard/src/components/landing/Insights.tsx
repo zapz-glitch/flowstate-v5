@@ -8,7 +8,7 @@ const SECTIONS = [
     href: `${INSIGHTS_BASE}/insights`,
     label: 'Insights',
     title: 'Guides for sellers and operators',
-    body: 'Practical answers on selling as-is, timelines, repairs, and cash offers — written from real deal flow.',
+    body: 'Practical answers on selling as-is, timelines, repairs, and cash offers, written from real deal flow.',
   },
   {
     href: `${INSIGHTS_BASE}/research`,
@@ -20,7 +20,7 @@ const SECTIONS = [
     href: `${INSIGHTS_BASE}/markets`,
     label: 'Markets',
     title: 'Where we buy',
-    body: 'Local market snapshots — median days on market, cash share, and what we pay attention to in each.',
+    body: 'Local market snapshots, median days on market, cash share, and what we pay attention to in each.',
   },
 ]
 

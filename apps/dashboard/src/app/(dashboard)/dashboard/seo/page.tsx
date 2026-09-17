@@ -34,7 +34,7 @@ export default function SeoPage() {
         <div className="space-y-1">
           <h1 className="text-heading-lg text-foreground tracking-tight">SEO Engine</h1>
           <p className="text-body text-foreground-tertiary">
-            Autonomous SEO pipeline — opportunities, content, experiments, and agent runs.
+            Autonomous SEO pipeline: opportunities, content, experiments, and agent runs.
           </p>
         </div>
         <a
