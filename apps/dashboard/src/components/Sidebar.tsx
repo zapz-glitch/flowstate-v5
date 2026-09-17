@@ -25,6 +25,7 @@ import {
   ExternalLink,
   ListTodo,
   FlaskConical,
+  TrendingUp,
 } from 'lucide-react'
 import { signOut } from '@/lib/auth-client'
 import { Logo, LogoIcon } from '@/components/ui/Logo'
@@ -59,6 +60,7 @@ const baseNavigation: Array<{
   { name: 'Evaluation Settings', short: 'Settings', href: '/dashboard/evaluation-settings', icon: Settings2 },
   { name: 'API Hub', short: 'API', href: '/dashboard/api-hub', icon: Key },
   { name: 'Tasks', short: 'Tasks', href: '/dashboard/tasks', icon: ListTodo },
+  { name: 'SEO Engine', short: 'SEO', href: '/dashboard/seo', icon: TrendingUp },
 ]
 
 /** Resolve a custom link's site favicon (internal paths return null → default icon). */

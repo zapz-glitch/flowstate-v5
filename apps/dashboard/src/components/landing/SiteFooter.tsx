@@ -33,6 +33,9 @@ export function SiteFooter() {
             <Link href="/terms" className="text-xs text-muted-foreground/50 hover:text-muted-foreground transition-colors">
               Terms of Service
             </Link>
+            <Link href="/?signin=true" className="text-xs text-muted-foreground/50 hover:text-muted-foreground transition-colors">
+              Operator login
+            </Link>
           </div>
         </div>
       </div>
