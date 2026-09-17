@@ -9,7 +9,6 @@ import {
   TrendingUp,
   Gauge,
   ArrowRight,
-  Loader2,
   Copy,
   Check,
   AlertTriangle,
@@ -31,29 +30,30 @@ interface DashboardData {
 }
 
 export default function DashboardPage() {
-  const [data, setData] = useState<DashboardData | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const [data, setData] = useState<Partial<DashboardData>>({})
+  const [errors, setErrors] = useState<Partial<Record<keyof DashboardData, string>>>({})
+  const [attempt, setAttempt] = useState(0)
   const [copied, setCopied] = useState(false)
 
   useEffect(() => {
-    async function loadData() {
-      try {
-        const [user, keys, usage, logsRes] = await Promise.all([
-          getUser(),
-          getApiKeys(),
-          getUsageSummary(),
-          getUsageLogs(1, 5),
-        ])
-        setData({ user, keys, usage, recentLogs: logsRes.logs })
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load data')
-      } finally {
-        setLoading(false)
-      }
+    let cancelled = false
+    setErrors({})
+    function load<K extends keyof DashboardData>(key: K, request: Promise<DashboardData[K]>) {
+      void request.then((value) => {
+        if (!cancelled) setData((current) => ({ ...current, [key]: value }))
+      }).catch((err: unknown) => {
+        if (!cancelled) setErrors((current) => ({
+          ...current,
+          [key]: err instanceof Error ? err.message : 'Failed to load data',
+        }))
+      })
     }
-    loadData()
-  }, [])
+    load('user', getUser())
+    load('keys', getApiKeys())
+    load('usage', getUsageSummary())
+    load('recentLogs', getUsageLogs(1, 5).then((result) => result.logs))
+    return () => { cancelled = true }
+  }, [attempt])
 
   const curlExample = `curl -X POST https://api.flowstate.homes/v1/analyze \\
   -H "Authorization: Bearer YOUR_API_KEY" \\
@@ -66,56 +66,28 @@ export default function DashboardPage() {
     setTimeout(() => setCopied(false), 2000)
   }
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-[60vh]">
-        <div className="flex flex-col items-center gap-3">
-          <Loader2 className="w-8 h-8 animate-spin text-foreground" />
-          <p className="text-sm text-muted-foreground">Loading dashboard...</p>
-        </div>
-      </div>
-    )
-  }
-
-  if (error || !data) {
-    return (
-      <div className="flex items-center justify-center min-h-[60vh]">
-        <div className="text-center max-w-md">
-          <div className="w-12 h-12 rounded-full bg-red-500/10 flex items-center justify-center mx-auto mb-4">
-            <AlertTriangle className="w-6 h-6 text-red-500" />
-          </div>
-          <h3 className="text-lg font-semibold text-foreground mb-2">Failed to load data</h3>
-          <p className="text-sm text-muted-foreground mb-4">{error || 'An unexpected error occurred'}</p>
-          <button
-            onClick={() => window.location.reload()}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-secondary text-foreground text-sm font-medium hover:bg-secondary/80 transition-colors"
-          >
-            Try again
-          </button>
-        </div>
-      </div>
-    )
-  }
-
   const { user, keys, usage, recentLogs } = data
-  const planLimits = PLAN_LIMITS[user.plan as Plan] || PLAN_LIMITS.free
-  const usagePercent = usage.monthlyLimit > 0 ? Math.round((usage.currentUsage / usage.monthlyLimit) * 100) : 0
-  const activeKeys = keys.filter((k) => k.isActive).length
-  const avgResponseTime = recentLogs.length > 0
+  const planLimits = user ? PLAN_LIMITS[user.plan as Plan] || PLAN_LIMITS.free : null
+  const usagePercent = usage && usage.monthlyLimit > 0 ? Math.round((usage.currentUsage / usage.monthlyLimit) * 100) : 0
+  const activeKeys = keys?.filter((k) => k.isActive).length
+  const avgResponseTime = recentLogs?.length
     ? Math.round(recentLogs.reduce((sum, l) => sum + (l.responseTimeMs || 0), 0) / recentLogs.length)
     : 0
-  const successRate = recentLogs.length > 0
+  const successRate = recentLogs?.length
     ? Math.round((recentLogs.filter((l) => l.statusCode >= 200 && l.statusCode < 300).length / recentLogs.length) * 100)
-    : 100
+    : null
+  const pendingLabel = (...sections: (keyof DashboardData)[]) =>
+    sections.some((section) => errors[section]) ? 'Unavailable' : 'Loading…'
 
   return (
-    <div className="space-y-8 animate-in fade-in duration-500">
+    <div className="space-y-8">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
         <div className="space-y-1">
           <h1 className="text-heading-lg text-foreground tracking-tight">Dashboard</h1>
           <p className="text-body text-foreground-tertiary">
-            {user.plan.charAt(0).toUpperCase() + user.plan.slice(1)} plan — {usage.remaining.toLocaleString()} requests remaining
+            {user ? `${user.plan.charAt(0).toUpperCase()}${user.plan.slice(1)} plan` : 'Your account overview'}
+            {usage ? ` — ${usage.remaining.toLocaleString()} requests remaining` : ''}
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -129,42 +101,51 @@ export default function DashboardPage() {
         </div>
       </div>
 
+      {Object.keys(errors).length > 0 && (
+        <div role="alert" className="flex items-center justify-between gap-4 rounded-xl border border-border p-4 text-body-sm">
+          <span>Some account details couldn’t load. You can still use the dashboard.</span>
+          <button onClick={() => setAttempt((value) => value + 1)} className="text-primary font-medium hover:underline shrink-0">
+            Try again
+          </button>
+        </div>
+      )}
+
       {/* Stats Grid */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
           title="API Keys"
-          value={`${activeKeys}/${planLimits.maxApiKeys === -1 ? '\u221e' : planLimits.maxApiKeys}`}
-          subtitle="active"
+          value={activeKeys !== undefined && planLimits ? `${activeKeys}/${planLimits.maxApiKeys === -1 ? '\u221e' : planLimits.maxApiKeys}` : '—'}
+          subtitle={keys && planLimits ? 'active' : pendingLabel('keys', 'user')}
           icon={Key}
           color="neutral"
           href="/dashboard/api-hub"
         />
         <StatCard
           title="Requests"
-          value={usage.currentUsage.toLocaleString()}
-          subtitle={`of ${usage.monthlyLimit === -1 ? 'unlimited' : usage.monthlyLimit.toLocaleString()}`}
+          value={usage ? usage.currentUsage.toLocaleString() : '—'}
+          subtitle={usage ? `of ${usage.monthlyLimit === -1 ? 'unlimited' : usage.monthlyLimit.toLocaleString()}` : pendingLabel('usage')}
           icon={Activity}
           color="emerald"
           href="/dashboard/api-hub?tab=usage"
         />
         <StatCard
           title="Quota Used"
-          value={`${usagePercent}%`}
-          subtitle={`resets ${new Date(usage.resetDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`}
+          value={usage ? `${usagePercent}%` : '—'}
+          subtitle={usage ? `resets ${new Date(usage.resetDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}` : pendingLabel('usage')}
           icon={Gauge}
           color={usagePercent >= 90 ? 'red' : usagePercent >= 75 ? 'amber' : 'emerald'}
         />
         <StatCard
           title="Success Rate"
-          value={`${successRate}%`}
-          subtitle={avgResponseTime > 0 ? `avg ${avgResponseTime}ms` : 'no requests yet'}
+          value={successRate !== null ? `${successRate}%` : '—'}
+          subtitle={!recentLogs ? pendingLabel('recentLogs') : avgResponseTime > 0 ? `avg ${avgResponseTime}ms` : recentLogs.length ? 'recent requests' : 'no requests yet'}
           icon={TrendingUp}
           color="blue"
         />
       </div>
 
       {/* Usage Progress Bar */}
-      {usage.monthlyLimit > 0 && (
+      {usage && usage.monthlyLimit > 0 && (
         <div className="rounded-2xl border border-border p-5">
           <div className="flex items-center justify-between mb-3">
             <span className="text-body-sm font-medium text-foreground">Monthly Usage</span>
@@ -189,7 +170,7 @@ export default function DashboardPage() {
       )}
 
       {/* Rate-Limit Tracker */}
-      {usage.rateLimit && (
+      {usage?.rateLimit && (
         <div className="rounded-2xl border border-border overflow-hidden">
           <div className="px-6 py-4 border-b border-border flex items-center justify-between">
             <div>
@@ -385,7 +366,13 @@ export default function DashboardPage() {
           </div>
 
           {/* Recent Activity */}
-          {recentLogs.length > 0 && (
+          {!recentLogs && (
+            <div className="rounded-2xl border border-border p-5" role="status">
+              <h2 className="text-heading font-semibold text-foreground">Recent Requests</h2>
+              <p className="text-body-sm text-foreground-tertiary mt-2">{pendingLabel('recentLogs')}</p>
+            </div>
+          )}
+          {recentLogs && recentLogs.length > 0 && (
             <div className="rounded-2xl border border-border overflow-hidden">
               <div className="px-6 py-4 border-b border-border flex items-center justify-between">
                 <h2 className="text-heading font-semibold text-foreground">Recent Requests</h2>

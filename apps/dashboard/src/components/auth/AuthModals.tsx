@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
-import { signIn } from '@/lib/auth-client'
+import { signIn, useSession } from '@/lib/auth-client'
 import { offlineClear } from '@/lib/offline-cache'
 import { LogoIcon } from '@/components/ui/Logo'
 import { Loader2 } from 'lucide-react'
@@ -31,6 +31,7 @@ interface SignInModalProps {
 
 function SignInModal({ isOpen, onClose }: SignInModalProps) {
   const router = useRouter()
+  const { refetch: refreshSession } = useSession()
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const onCloseRef = useRef(onClose)
@@ -41,11 +42,13 @@ function SignInModal({ isOpen, onClose }: SignInModalProps) {
   // Reset form when modal opens/closes
   useEffect(() => {
     if (isOpen) {
+      router.prefetch('/dashboard/analyze')
+      router.prefetch('/dashboard')
       setError(null)
       setEmail('')
       setPassword('')
     }
-  }, [isOpen])
+  }, [isOpen, router])
 
   // Handle escape key
   useEffect(() => {
@@ -79,12 +82,15 @@ function SignInModal({ isOpen, onClose }: SignInModalProps) {
         return
       }
 
+      // A prefetched route can mount before Better Auth's signal refresh starts.
+      // Finish that session refresh first so the auth guard doesn't bounce home.
+      await refreshSession()
+
       // Success — clear any cached data from a previous user's session,
       // then redirect to the dashboard
       void offlineClear()
       onClose()
       router.push('/dashboard/analyze')
-      router.refresh()
     } catch {
       setError('Failed to sign in. Please try again.')
       setIsLoading(false)

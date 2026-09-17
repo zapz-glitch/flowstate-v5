@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useCallback, useEffect, useRef } from 'react'
+import dynamic from 'next/dynamic'
 import { useSetAtom } from 'jotai'
 import { activeAnalysisAtom, analysisResultAtom, analysisStateAtom } from '@/atoms/analysis'
 import { initialAnalysisState } from '@/types/analysis'
@@ -18,27 +19,31 @@ import { Button } from '@/components/ui/button'
 import { AddressAutocomplete } from '@/components/AddressAutocomplete'
 import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
-import { EvaluationSettingsSheet } from '@/components/report/EvaluationSettingsSheet'
 import { queueAnalysis, type AnalyzeData } from './actions'
 import { getArvThreshold, getLatestReport, getReportsByProperty, getSavedReport, runCompSelection, type ExistingReport } from '@/lib/client-api'
 import { useAutoSave } from '@/hooks/use-auto-save'
-import { ExistingReportsDialog } from './ExistingReportsDialog'
 // cn is used in the outer wrapper
 import { cn } from '@/lib/utils'
 import { useAnalysis } from '@/hooks/use-analysis'
 import { useAnalysisEvaluation } from '@/hooks/use-analysis-evaluation'
 import type { AnalysisStep } from '@/types/analysis'
-import {
-  AnalysisPageLayout,
-} from '@/components/analysis'
 import { AnalysisPageSkeleton } from '@/components/analysis/AnalysisSkeletons'
 import { useEnrichmentSSE, type EnrichmentEvent } from '@/hooks/use-enrichment-sse'
-import { AppraisalFilterEditor, type FilterState, type AdjustmentState } from '@/components/analysis/AppraisalFilterEditor'
+import type { FilterState, AdjustmentState } from '@/components/analysis/AppraisalFilterEditor'
 import { DownloadReportButton } from '@/components/report/DownloadReportButton'
-import { CompComparisonDialog } from '@/components/analysis/CompComparisonDialog'
 import { useMapInteraction } from '@/hooks/use-map-interaction'
 import { useEvaluationSync } from '@/hooks/use-evaluation-sync'
 import type { CompItem } from './actions'
+
+// Keep the initial search route light; load report UI only when it is needed.
+const AnalysisPageLayout = dynamic(
+  () => import('@/components/analysis/AnalysisPageLayout').then((mod) => mod.AnalysisPageLayout),
+  { loading: () => <AnalysisPageSkeleton /> },
+)
+const EvaluationSettingsSheet = dynamic(() => import('@/components/report/EvaluationSettingsSheet').then((mod) => mod.EvaluationSettingsSheet))
+const CompComparisonDialog = dynamic(() => import('@/components/analysis/CompComparisonDialog').then((mod) => mod.CompComparisonDialog))
+const ExistingReportsDialog = dynamic(() => import('./ExistingReportsDialog').then((mod) => mod.ExistingReportsDialog))
+const AppraisalFilterEditor = dynamic(() => import('@/components/analysis/AppraisalFilterEditor').then((mod) => mod.AppraisalFilterEditor))
 
 // ─── Analysis Phases ────────────────────────────────────────────────────────
 //
@@ -107,8 +112,18 @@ function TypewriterText({ text, typeSpeed = 30 }: { text: string; typeSpeed?: nu
 // ─── Main Page ───────────────────────────────────────────────────────────────
 
 export default function AnalyzePage() {
+  // Global analysis context (Jotai)
+  const {
+    activeAnalysis,
+    analysisState,
+    analysisResult,
+    displayData,
+    clearAnalysis,
+    cancelAnalysis,
+  } = useAnalysis()
+
   // Search & options
-  const [address, setAddress] = useState('')
+  const [address, setAddress] = useState(activeAnalysis?.address ?? '')
   const [skipCache, setSkipCache] = useState(false)
   const [arvThreshold, setArvThreshold] = useState(15)
   const [asIsThreshold, setAsIsThreshold] = useState(70)
@@ -143,21 +158,11 @@ export default function AnalyzePage() {
   const [durationMs, setDurationMs] = useState<number | null>(null)
 
   // Phase-based state machine
-  const [phase, setPhase] = useState<AnalysisPhase>('idle')
+  const [phase, setPhase] = useState<AnalysisPhase>(analysisResult ? 'ready' : 'idle')
   const [aiAnalyzing, setAiAnalyzing] = useState(false)
   const [streamingStep, setStreamingStep] = useState<'idle' | 'searching' | 'subject' | 'comps' | 'evaluating' | 'done'>('idle')
   const [enrichmentStreamUrl, setEnrichmentStreamUrl] = useState<string | null>(null)
   const [enrichmentToken, setEnrichmentToken] = useState<string | null>(null)
-
-  // Global analysis context (Jotai)
-  const {
-    activeAnalysis,
-    analysisState,
-    analysisResult,
-    displayData,
-    clearAnalysis,
-    cancelAnalysis,
-  } = useAnalysis()
 
   // Load user's saved ARV threshold on mount
   useEffect(() => {
@@ -178,50 +183,51 @@ export default function AnalyzePage() {
   const setAnalysisResult = useSetAtom(analysisResultAtom)
   const setAnalysisState = useSetAtom(analysisStateAtom)
 
-  // Restore the last searched property when the page mounts with no
-  // in-flight analysis — the saved report carries the full AnalyzeData JSON.
-  const restoredRef = useRef(false)
+  // Restore in the background. Typing or starting a search takes precedence
+  // over a late response, so an old report cannot replace the user's new work.
+  const restoreCancelledRef = useRef(false)
+  const [restoringReport, setRestoringReport] = useState(false)
+  const cancelRestore = useCallback(() => {
+    restoreCancelledRef.current = true
+    setRestoringReport(false)
+  }, [])
+
   useEffect(() => {
-    if (restoredRef.current || analysisResult || activeAnalysis) return
-    // ?address= takes precedence — an incoming analysis request shouldn't be
-    // pre-empted by the last-property restore
+    if (analysisResult || activeAnalysis || restoreCancelledRef.current) return
     if (new URLSearchParams(window.location.search).has('address')) return
-    restoredRef.current = true
-    const restore = (jobId: string, address: string) => {
-      setPhase('fetching')
-      getSavedReport(jobId).then((res) => {
-        if (res?.analysis) {
-          setAnalysisResult(res.analysis as AnalyzeData)
-          setActiveAnalysis({ jobId: res.jobId ?? jobId, address: res.address || address })
-          setAddress(res.address || address)
-          try { localStorage.setItem(LAST_ANALYSIS_KEY, JSON.stringify({ jobId, address: res.address || address, savedAt: Date.now() })) } catch { /* ignore */ }
-          setPhase('ready')
-        } else {
-          setPhase('idle')
+    let cancelled = false
+    const isCancelled = () => cancelled || restoreCancelledRef.current
+    setRestoringReport(true)
+
+    async function resumeReport() {
+      let last: { jobId?: string; address?: string; savedAt?: number } | null = null
+      try { last = JSON.parse(localStorage.getItem(LAST_ANALYSIS_KEY) || 'null') } catch { /* ignore */ }
+      const fresh = last?.jobId && !(last.savedAt && Date.now() - last.savedAt > LAST_ANALYSIS_TTL_MS)
+      if (!fresh) {
+        if (last?.jobId) {
+          try { localStorage.removeItem(LAST_ANALYSIS_KEY) } catch { /* ignore */ }
         }
-      }).catch(() => setPhase('idle'))
+        const latest = await getLatestReport()
+        if (isCancelled() || !latest || Date.now() - new Date(latest.createdAt).getTime() > LAST_ANALYSIS_TTL_MS) return
+        last = latest
+      }
+      if (isCancelled() || !last?.jobId) return
+      const res = await getSavedReport(last.jobId)
+      if (isCancelled() || !res?.analysis) return
+      const jobId = res.jobId ?? last.jobId
+      const restoredAddress = res.address || last.address || ''
+      setAnalysisResult(res.analysis as AnalyzeData)
+      setActiveAnalysis({ jobId, address: restoredAddress })
+      setAddress(restoredAddress)
+      try { localStorage.setItem(LAST_ANALYSIS_KEY, JSON.stringify({ jobId, address: restoredAddress, savedAt: Date.now() })) } catch { /* ignore */ }
+      setPhase('ready')
+      setRestoringReport(false)
     }
 
-    let last: { jobId?: string; address?: string; savedAt?: number } | null = null
-    try { last = JSON.parse(localStorage.getItem(LAST_ANALYSIS_KEY) || 'null') } catch { /* ignore */ }
-
-    // Expire after 7 days — the report still exists, we just stop auto-resuming
-    const fresh = last?.jobId && !(last.savedAt && Date.now() - last.savedAt > LAST_ANALYSIS_TTL_MS)
-    if (fresh && last) {
-      restore(last.jobId!, last.address ?? '')
-      return
-    }
-    if (last?.jobId) {
-      try { localStorage.removeItem(LAST_ANALYSIS_KEY) } catch { /* ignore */ }
-    }
-
-    // Cross-device resume — no local pointer (or expired): pull the user's
-    // newest report server-side and restore it if it's inside the 7-day window
-    getLatestReport().then((latest) => {
-      if (!latest) { setPhase('idle'); return }
-      const age = Date.now() - new Date(latest.createdAt).getTime()
-      if (age <= LAST_ANALYSIS_TTL_MS) restore(latest.jobId, latest.address)
-    }).catch(() => setPhase('idle'))
+    void resumeReport().catch(() => {}).finally(() => {
+      if (!isCancelled()) setRestoringReport(false)
+    })
+    return () => { cancelled = true }
   }, [analysisResult, activeAnalysis, setAnalysisResult, setActiveAnalysis])
 
   // ─── SSE Event Handler ────────────────────────────────────────────────────
@@ -509,6 +515,7 @@ export default function AnalyzePage() {
 
   // Core analysis runner
   const runAnalysis = useCallback(async () => {
+    cancelRestore()
     clearAnalysis()
     setError(null)
     setDurationMs(null)
@@ -578,11 +585,12 @@ export default function AnalyzePage() {
       setPhase('idle')
       setError(err instanceof Error ? err.message : 'Failed to start analysis')
     }
-  }, [address, skipCache, arvThreshold, asIsThreshold, appraisalFilters, appraisalAdjustments, clearAnalysis, setActiveAnalysis, setAnalysisResult, setAnalysisState])
+  }, [address, skipCache, arvThreshold, asIsThreshold, appraisalFilters, appraisalAdjustments, cancelRestore, clearAnalysis, setActiveAnalysis, setAnalysisResult, setAnalysisState])
 
   // Entry point — checks for existing reports first
   const handleAnalyze = useCallback(async () => {
     if (!address.trim()) return
+    cancelRestore()
 
     try {
       const { reports } = await getReportsByProperty({ address: address.trim() })
@@ -596,7 +604,7 @@ export default function AnalyzePage() {
     }
 
     runAnalysis()
-  }, [address, runAnalysis])
+  }, [address, runAnalysis, cancelRestore])
 
   // Auto-retry after "Apply & Retry"
   useEffect(() => {
@@ -736,7 +744,7 @@ export default function AnalyzePage() {
             <div className="flex gap-3">
               <AddressAutocomplete
                 value={address}
-                onChange={setAddress}
+                onChange={(value) => { cancelRestore(); setAddress(value) }}
                 onSubmit={() => {
                   if (!isFetching && address.trim()) {
                     handleAnalyze()
@@ -786,6 +794,13 @@ export default function AnalyzePage() {
             )}
           </div>
         </div>
+      )}
+
+      {restoringReport && (
+        <p role="status" className="text-caption text-foreground-tertiary flex items-center gap-2">
+          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+          Restoring your last report. You can start a new search now.
+        </p>
       )}
 
       {/* Error display */}
@@ -908,7 +923,7 @@ export default function AnalyzePage() {
       )}
 
       {/* Evaluation Settings Sheet */}
-      <EvaluationSettingsSheet
+      {settingsOpen && <EvaluationSettingsSheet
         open={settingsOpen}
         onOpenChange={(open) => {
           setSettingsOpen(open)
@@ -919,10 +934,10 @@ export default function AnalyzePage() {
         }}
         settingsHook={settingsHook}
         recalcData={recalcData}
-      />
+      />}
 
       {/* Subject vs Comp comparison dialog */}
-      <CompComparisonDialog
+      {comparisonOpen && <CompComparisonDialog
         open={comparisonOpen}
         onOpenChange={setComparisonOpen}
         subject={renderData?.subject ?? null}
@@ -936,15 +951,15 @@ export default function AnalyzePage() {
         } : undefined}
         arv={displayValuation?.arv}
         proximityConfig={settingsHook.settings.proximityConfig}
-      />
+      />}
 
       {/* Existing Reports Dialog */}
-      <ExistingReportsDialog
+      {showExistingDialog && <ExistingReportsDialog
         open={showExistingDialog}
         onOpenChange={setShowExistingDialog}
         reports={existingReports}
         onNewAnalysis={runAnalysis}
-      />
+      />}
     </div>
   )
 }

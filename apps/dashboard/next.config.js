@@ -31,8 +31,9 @@ const nextConfig = {
         key: 'Content-Security-Policy',
         value: [
           "default-src 'self'",
-          // Next.js hydrates via inline scripts; Google Maps JS API loads from googleapis
-          `script-src 'self' 'unsafe-inline' https://maps.googleapis.com`,
+          // Next hydrates inline scripts; the on-demand PDF layout engine uses
+          // WebAssembly. Allow WASM compilation without enabling JavaScript eval.
+          `script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://maps.googleapis.com`,
           // MapLibre and component libs inject inline styles
           "style-src 'self' 'unsafe-inline'",
           // Property photos, map tiles, streetview, data/blob images

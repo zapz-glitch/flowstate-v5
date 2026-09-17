@@ -1,9 +1,8 @@
 'use client'
 
 import { useState, useCallback } from 'react'
-import { pdf } from '@react-pdf/renderer'
 import { Download, Loader2 } from 'lucide-react'
-import { UnderwritingReportPDF, type UnderwritingReportProps } from './UnderwritingReportPDF'
+import type { UnderwritingReportProps } from './UnderwritingReportPDF'
 
 interface DownloadReportButtonInnerProps {
   reportProps: UnderwritingReportProps
@@ -19,6 +18,11 @@ export default function DownloadReportButtonInner({
   const handleDownload = useCallback(async () => {
     setGenerating(true)
     try {
+      // Load the PDF engine only when an export is requested.
+      const [{ pdf }, { UnderwritingReportPDF }] = await Promise.all([
+        import('@react-pdf/renderer'),
+        import('./UnderwritingReportPDF'),
+      ])
       let unavailable = 0
       let count = 0
       const image = async (photos?: string[]) => {

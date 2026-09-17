@@ -27,7 +27,8 @@ async function fetchApi<T>(path: string, options: RequestInit = {}): Promise<T> 
     response = await fetch(`${API_URL}${path}`, {
       ...options,
       headers: {
-        'Content-Type': 'application/json',
+        // Bodyless reads need no JSON content type (or CORS preflight).
+        ...(options.body != null ? { 'Content-Type': 'application/json' } : {}),
         ...impersonateHeaders,
         ...options.headers,
       },

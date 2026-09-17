@@ -128,9 +128,12 @@ export function useReportSettings(data: AnalyzeData | null): UseReportSettingsRe
   // Keep a ref to the loaded defaults object for reset
   const savedDefaultsObjRef = useRef<EvaluationSettings | null>(null)
 
-  // Fetch user's current settings from the API on mount
+  // Fetch settings once a report exists.
   useEffect(() => {
+    // Avoid a redundant seven-request batch before last-report restoration.
+    if (!data) return
     let cancelled = false
+    setLoading(true)
 
     async function loadSettings() {
       try {
@@ -258,7 +261,7 @@ export function useReportSettings(data: AnalyzeData | null): UseReportSettingsRe
 
     loadSettings()
     return () => { cancelled = true }
-  }, [data?.appliedSettings])
+  }, [!!data, data?.appliedSettings])
 
   // Detect whether user changed settings from loaded defaults.
   // Compares current settings JSON against the snapshot taken at load time.
