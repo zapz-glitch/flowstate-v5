@@ -12,6 +12,7 @@
  *   GET  /state      — Current job state
  */
 
+import { ChunkedJobState } from './chunked-job-state'
 import { analyzeComps, type CompEvalContext } from '../services/comp-analysis'
 import { fetchMarketContext, type MarketContext } from '../services/market-context'
 import { type EvaluationParams } from '../services/evaluation'
@@ -111,10 +112,15 @@ export class AnalysisJobDO {
   private sseClients: Set<WritableStreamDefaultWriter<Uint8Array>> = new Set()
   private encoder = new TextEncoder()
   private jobState: JobState | null = null
+  private persistence: ChunkedJobState<JobState>
 
   constructor(state: DurableObjectState, env: Env) {
     this.state = state
     this.env = env
+    this.persistence = new ChunkedJobState(state.storage)
+    state.blockConcurrencyWhile(async () => {
+      this.jobState = await this.persistence.read()
+    })
   }
 
   async fetch(request: Request): Promise<Response> {
@@ -156,7 +162,7 @@ export class AnalysisJobDO {
       events: [],
       createdAt: Date.now(),
     }
-    await this.state.storage.put('jobState', this.jobState)
+    await this.persistence.write(this.jobState)
 
     this.runStreamingAnalysis(body).catch((err) => {
       console.error('[AnalysisJobDO] Streaming analysis fatal error:', err)
@@ -707,7 +713,7 @@ export class AnalysisJobDO {
       events: [],
       createdAt: Date.now(),
     }
-    await this.state.storage.put('jobState', this.jobState)
+    await this.persistence.write(this.jobState)
 
     // Run enrichment inside the DO — persistent context, no waitUntil needed
     // The DO stays alive as long as there are SSE clients or pending work
@@ -977,7 +983,7 @@ export class AnalysisJobDO {
       this.jobState.error = (data as { message?: string })?.message
     }
 
-    await this.state.storage.put('jobState', this.jobState)
+    await this.persistence.write(this.jobState)
     this.broadcast(event, data)
   }
 
@@ -991,7 +997,7 @@ export class AnalysisJobDO {
 
   private async handleSSE(request: Request): Promise<Response> {
     if (!this.jobState) {
-      this.jobState = await this.state.storage.get<JobState>('jobState') ?? null
+      this.jobState = await this.persistence.read()
     }
 
     const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>()
