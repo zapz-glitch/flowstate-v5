@@ -1,5 +1,7 @@
 'use client'
 
+import { isValidCoordinate } from '@/lib/property-map-geometry'
+
 import { useState, useCallback, useEffect, useRef } from 'react'
 import dynamic from 'next/dynamic'
 import { useSetAtom } from 'jotai'
@@ -641,7 +643,7 @@ export default function AnalyzePage() {
   // ─── Layout Flags ────────────────────────────────────────────────────────
 
   const isSearchCollapsed = isActive && !searchExpanded
-  const hasMapData = !!(renderData?.subject?.latitude && renderData?.subject?.longitude)
+  const hasMapData = isValidCoordinate({ lat: renderData?.subject?.latitude, lng: renderData?.subject?.longitude })
   const showTwoColumn = isActive && hasMapData
 
   // ─── Render ──────────────────────────────────────────────────────────────

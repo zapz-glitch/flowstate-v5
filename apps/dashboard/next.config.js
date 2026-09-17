@@ -33,17 +33,17 @@ const nextConfig = {
           "default-src 'self'",
           // Next hydrates inline scripts; the on-demand PDF layout engine uses
           // WebAssembly. Allow WASM compilation without enabling JavaScript eval.
-          `script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://maps.googleapis.com`,
+          `script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://maps.googleapis.com https://maps.gstatic.com`,
           // MapLibre and component libs inject inline styles
-          "style-src 'self' 'unsafe-inline'",
+          "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
           // Property photos, map tiles, streetview, data/blob images
           "img-src 'self' data: blob: https:",
-          "font-src 'self' data:",
-          `connect-src 'self' ${apiUrl} https://maps.googleapis.com data: blob:`,
+          "font-src 'self' data: https://fonts.gstatic.com",
+          `connect-src 'self' ${apiUrl} https://*.googleapis.com https://*.gstatic.com https://*.google.com data: blob:`,
           // MapLibre renders in workers from blob: URLs
           "worker-src 'self' blob:",
           // SEO engine console embeds at /dashboard/seo
-          "frame-src 'self' https://insights.flowstate.homes",
+          "frame-src 'self' https://insights.flowstate.homes https://*.google.com",
           "frame-ancestors 'none'",
           "base-uri 'self'",
           "form-action 'self'",

@@ -1,5 +1,7 @@
 'use client'
 
+import { isValidCoordinate } from '@/lib/property-map-geometry'
+
 import { useState, useEffect, useCallback, useRef, use } from 'react'
 import Link from 'next/link'
 import dynamic from 'next/dynamic'
@@ -534,7 +536,7 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
 
   const analysis = authoritativeData ?? report.analysis
 
-  const hasMapData = !!(analysis.subject?.latitude && analysis.subject?.longitude)
+  const hasMapData = isValidCoordinate({ lat: analysis.subject?.latitude, lng: analysis.subject?.longitude })
 
   return (
     <div className={cn(hasMapData ? '-m-4 sm:-m-6 lg:-m-8 min-h-screen lg:h-[100dvh] flex flex-col lg:overflow-hidden' : 'max-w-[1600px] mx-auto space-y-6')}>

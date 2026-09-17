@@ -4,6 +4,7 @@ import { useMemo, useCallback } from 'react'
 import dynamic from 'next/dynamic'
 import type { SubjectData, CompItem } from './shared-types'
 import { getCompKey } from './format-helpers'
+import { isValidCoordinate } from '@/lib/property-map-geometry'
 
 const MapInner = dynamic(() => import('./PropertyMapInner'), {
   ssr: false,
@@ -39,10 +40,10 @@ export function PropertyMap({ subject, comps, selectedCompKeys, onMarkerSelect, 
     const m: MapMarker[] = []
 
     // Subject property
-    if (subject?.latitude && subject?.longitude) {
+    if (subject && isValidCoordinate({ lat: subject.latitude, lng: subject.longitude })) {
       m.push({
-        lat: subject.latitude,
-        lng: subject.longitude,
+        lat: subject.latitude!,
+        lng: subject.longitude!,
         type: 'subject',
         label: subject.address ?? 'Subject Property',
       })
@@ -52,12 +53,12 @@ export function PropertyMap({ subject, comps, selectedCompKeys, onMarkerSelect, 
     if (comps?.items) {
       for (let i = 0; i < comps.items.length; i++) {
         const comp = comps.items[i]
-        if (comp.latitude && comp.longitude) {
+        if (isValidCoordinate({ lat: comp.latitude, lng: comp.longitude })) {
           const compKey = getCompKey(comp, i)
           const enabled = selectedCompKeys ? selectedCompKeys.has(compKey) : comp.isEnabled !== false
           m.push({
-            lat: comp.latitude,
-            lng: comp.longitude,
+            lat: comp.latitude!,
+            lng: comp.longitude!,
             type: enabled ? 'comp-enabled' : 'comp-disabled',
             label: comp.address ?? 'Comparable',
             compKey,
@@ -73,10 +74,11 @@ export function PropertyMap({ subject, comps, selectedCompKeys, onMarkerSelect, 
     onMarkerSelect?.(markerType, compKey)
   }, [onMarkerSelect])
 
-  if (markers.length === 0) return null
+  if (!markers.some(marker => marker.type === 'subject')) return null
 
   return (
     <MapInner
+      key={`${subject?.address}|${subject?.latitude}|${subject?.longitude}`}
       markers={markers}
       onMarkerClick={handleMarkerClick}
       activeMarkerKey={activeMarkerKey}

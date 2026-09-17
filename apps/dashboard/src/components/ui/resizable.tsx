@@ -88,7 +88,7 @@ export function ResizableLayout({ left, right, className }: ResizableLayoutProps
 
       {/* Left panel: full-width fixed height on mobile, percentage width on desktop */}
       <div
-        className="no-print h-[280px] sm:h-[350px] lg:h-auto lg:flex-shrink-0 lg:w-[var(--left-pct)]"
+        className="no-print h-[380px] sm:h-[400px] lg:h-auto flex-shrink-0 lg:w-[var(--left-pct)]"
         style={{ pointerEvents: isDragging ? "none" : undefined }}
       >
         {left}

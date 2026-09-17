@@ -1,10 +1,12 @@
 'use client'
 
+import { isValidCoordinate } from '@/lib/property-map-geometry'
+
 import { useState, useCallback, type ReactNode } from 'react'
 import { cn } from '@/lib/utils'
 import { useEvaluation } from '@/hooks/use-evaluation'
 import { ResizableLayout } from '@/components/ui/resizable'
-import { MapLegend, MapOverlay } from './MapOverlay'
+import { MapOverlay } from './MapOverlay'
 import { PropertyMap } from './PropertyMap'
 import { AnalysisResultLayout } from './AnalysisResultLayout'
 import {
@@ -49,7 +51,7 @@ export function AnalysisPageLayout({
 }: AnalysisPageLayoutProps) {
   const { subject, displayComps: comps, compOverride } = useEvaluation()
   const selectedCompKeys = compOverride?.selectedCompKeys
-  const hasMapData = !!(subject?.latitude && subject?.longitude)
+  const hasMapData = isValidCoordinate({ lat: subject?.latitude, lng: subject?.longitude })
 
   // ─── Hover state for map↔list sync ──────────────────────────────────
   const [hoveredCompKey, setHoveredCompKey] = useState<string | null>(null)
@@ -76,7 +78,7 @@ export function AnalysisPageLayout({
     <ResizableLayout
       className="flex-1 min-h-0 mx-4 sm:mx-6 mt-3"
       left={
-        <div className="h-full relative">
+        <div className="h-full relative flex flex-col">
           <PropertyMap
             subject={subject!}
             comps={mapComps ?? comps}
@@ -84,7 +86,6 @@ export function AnalysisPageLayout({
             onMarkerSelect={onMarkerSelect}
             activeMarkerKey={mapActiveKey}
           />
-          <MapLegend />
           <MapOverlay riskFlags={riskFlags} floodZone={floodZone} />
         </div>
       }
