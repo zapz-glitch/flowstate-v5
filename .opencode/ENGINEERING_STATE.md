@@ -129,10 +129,30 @@ Blockers (environment, not code):
 - V4 engine NOT connected to production (V4_* env vars dead code; by plan).
 
 ## Current Objective
-CDARV (Comp-Derived After Repair Value): human-curated ML learning loop
-for comp selection/ranking, on `feat/cdarv-ml-foundation`. Design doc:
-`docs/cdarv/DESIGN.md`; runbook: `services/ml/README.md`. Shadow-only —
-production underwriting unchanged and never depends on CDARV.
+Jev read-only outcome classification on `feat/jev-outcome-classification`
+(worktree `~/src/flowstate-v5-jev-classify`, branched from main). The v5
+pipeline is untouched — Jev has zero role in comp selection, ARV, or the
+recommendation. After `performAnalysis` builds the response, Jev labels the
+outcome on five dimensions (evidence_sufficiency, comp_set_quality,
+deal_outlook, recommendation_agreement, risk_flags) via one Typesafe
+SystemOne typed-choice request; result attaches as `response.jevOutcome`.
+Missing key → `skipped`; request/parse failure → `unavailable`.
+
+### 2026-09-18 — Reset from feat/jev-rules-evaluation
+- Prior branch (Python/GIS bridge + Jev atomic signals + Python-owned
+  qualification/ranking) deleted per user direction — it replaced v5
+  evaluation and produced generic BAD_DEAL dead ends.
+- Deleted branch tip preserved as tag `archive/jev-rules-evaluation`;
+  uncommitted WIP + env files + local D1 state archived at
+  `/home/lucke/backups/jev-rules-wip-20260918/`.
+- Implemented `apps/api/src/services/jev/index.ts` (outcome classifier),
+  wired post-`buildEvaluationReport` in `performAnalysis`. tsc clean;
+  `tests/jev-outcome.test.ts` passes (skip/complete/error/malformed paths).
+- Local stack: API 8792, dashboard 3012 (same ports as before; no Python
+  service needed). Env + local D1 restored from archive; JEV_GEO_* vars
+  removed from .dev.vars.
+- Open: dashboard does not yet render `jevOutcome` — response/report JSON
+  only. Decide whether/where to surface it in the UI.
 
 ### 2026-09-16 — CDARV independent audit + live hardening pass (uncommitted fixes below)
 
