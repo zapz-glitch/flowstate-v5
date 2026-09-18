@@ -75,6 +75,11 @@ export interface Env {
   /** Model for market context web search — fast/cheap (e.g., 'google/gemini-2.0-flash-001') */
   MARKET_SEARCH_MODEL?: string
 
+  // ─── Jev Outcome Classification (Typesafe SystemOne) ───────────────────────
+  // Read-only post-analysis labeling; absence disables classification only.
+  TYPESAFE_API_KEY?: string
+  TYPESAFE_MODEL?: string
+
   // ─── Google AI (Gemini) ──────────────────────────────────────────────────────
   // Direct Google AI API key for Gemini URL context and Zillow data fetching
   GEMINI_API_KEY?: string

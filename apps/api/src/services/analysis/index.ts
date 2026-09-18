@@ -933,6 +933,12 @@ export interface AnalysisResponse {
   photoProvider?: string
   /** Evaluation engine that produced this response */
   evaluationEngine?: string
+  /**
+   * Jev read-only classification of this completed outcome. Attached after the
+   * pipeline finishes; it never influences comp selection, ARV, or the
+   * recommendation.
+   */
+  jevOutcome?: import('../jev').JevOutcomeClassification | null
 }
 export interface ApiCallStats {
   corelogic: {

@@ -43,6 +43,7 @@ import { assessRenovationFromPhotos, assessCompCurbAppeal, type RenovationAssess
 import { PROXIMITY_DEFAULTS } from '../../routes/proximity-config'
 import { deriveBuybox } from './derivation'
 import { buildEvaluationReport } from './report'
+import { classifyOutcomeWithJev } from '../jev'
 import type { ReportStep } from './types'
 import { AnalysisError } from '../../utils/analysis-error'
 
@@ -890,6 +891,14 @@ export async function performAnalysis(
   response.renovationLevelSource = derivedBuybox.rehabLevelSource
   response.evaluationEngine = 'ts-v5'
   if (photoBundle) response.photoProvider = photoBundle.provider
+
+  // ── 11. Jev outcome classification (read-only; never affects the result) ──
+  try {
+    response.jevOutcome = await classifyOutcomeWithJev(response, env)
+  } catch (jevError) {
+    console.warn('[Evaluation] Jev outcome classification failed:', jevError instanceof Error ? jevError.message : jevError)
+    response.jevOutcome = { status: 'unavailable', reason: 'classification_failed' }
+  }
 
   return {
     response,
