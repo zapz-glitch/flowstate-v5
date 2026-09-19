@@ -32,7 +32,9 @@ import { createOpenRouterProvider } from '../../../llm'
 // ─── Cache Configuration ────────────────────────────────────────────────────
 
 /** Cache key prefix for Firecrawl Zillow responses */
-const CACHE_PREFIX = 'zillow-fc:'
+// v2: comp fetches now use full JSON extraction (priceHistory for stale-price
+// reconciliation + flip detection) — HTML-only cached extractions must not be reused
+const CACHE_PREFIX = 'zillow-fc-v2:'
 
 /** Default cache TTL in seconds (24 hours) */
 const DEFAULT_CACHE_TTL = 24 * 60 * 60
