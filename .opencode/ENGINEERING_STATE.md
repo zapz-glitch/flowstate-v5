@@ -236,6 +236,14 @@ colors per user; outcome projection decontaminated (see commit
 930fd0b) — labels still honest-negative on this thin-evidence
 property, which is Jev's real read.
 
+Fix (post-spec): empty Jev ARV bucket no longer forces
+INSUFFICIENT_COMPS — user clarified "its not jevs job to pass
+insufficient comps its job is to classify." Empty A∩rules → rules
+selection stands, truth scores still attach, step reports
+'Jev found no ARV-eligible comps — appraisal-rules selection used'.
+INSUFFICIENT_COMPS now only fires when the rules selection itself
+found nothing (pre-existing behavior).
+
 Remaining: nothing blocking. Stack live: API :8792, dashboard :3012.
 
 ### 2026-09-18 — Reset from feat/jev-rules-evaluation
