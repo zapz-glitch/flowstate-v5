@@ -56,30 +56,10 @@ const DRIVERS: Record<JevOutcomeDimension, Array<{ key: string; label: string; f
   ],
 }
 
-const TONE: Record<string, 'good' | 'warn' | 'bad'> = {
-  sufficient: 'good', limited: 'warn', insufficient: 'bad',
-  strong: 'good', adequate: 'warn', weak: 'bad',
-  favorable: 'good', marginal: 'warn', unfavorable: 'bad',
-  agree: 'good', uncertain: 'warn', disagree: 'bad',
-  none: 'good', minor: 'warn', material: 'bad',
-}
-
-const TONE_CLASSES = {
-  good: 'bg-emerald-500/15 text-emerald-500',
-  warn: 'bg-amber-500/15 text-amber-500',
-  bad: 'bg-red-500/15 text-red-500',
-} as const
-
-const BAR_CLASSES = {
-  good: 'bg-emerald-500',
-  warn: 'bg-amber-500',
-  bad: 'bg-red-500',
-} as const
-
-function driverTone(noul: number, favorable: boolean): keyof typeof TONE_CLASSES {
-  const effective = favorable ? noul : 1 - noul
-  return effective >= 0.6 ? 'good' : effective >= 0.35 ? 'warn' : 'bad'
-}
+// Chips and driver bars are uniformly emerald — the labels are Jev's
+// informational classification, not a verdict on the deal.
+const CHIP_CLASS = 'bg-emerald-500/15 text-emerald-500'
+const BAR_CLASS = 'bg-emerald-500'
 
 export function JevOutcomeCard({ outcome }: { outcome: JevOutcomeData | null | undefined }) {
   const [expanded, setExpanded] = useState(false)
@@ -122,14 +102,13 @@ export function JevOutcomeCard({ outcome }: { outcome: JevOutcomeData | null | u
         {DIMENSION_ORDER.map((dimension) => {
           const signal = outcome.classifications?.[dimension]
           if (!signal) return null
-          const tone = TONE[signal.choice] ?? 'warn'
           return (
             <div key={dimension} className="space-y-1">
               <p className="text-[10px] text-foreground-tertiary uppercase tracking-wide">
                 {DIMENSION_LABELS[dimension]}
               </p>
               <span
-                className={`inline-block px-2 py-0.5 rounded-sm text-[11px] font-medium ${TONE_CLASSES[tone]}`}
+                className={`inline-block px-2 py-0.5 rounded-sm text-[11px] font-medium ${CHIP_CLASS}`}
                 title={`confidence ${(signal.confidence * 100).toFixed(0)}%`}
               >
                 {signal.choice.replaceAll('_', ' ')}
@@ -148,11 +127,10 @@ export function JevOutcomeCard({ outcome }: { outcome: JevOutcomeData | null | u
                 <p className="text-[10px] text-foreground-tertiary uppercase tracking-wide">
                   {DIMENSION_LABELS[dimension]}
                 </p>
-                {DRIVERS[dimension].map(({ key, label, favorable }) => {
+                {DRIVERS[dimension].map(({ key, label }) => {
                   const noul = drivers[key]
                   if (typeof noul !== 'number') return null
                   const pct = Math.round(noul * 100)
-                  const tone = driverTone(noul, favorable)
                   return (
                     <div key={key} title={`${label}: ${pct}%`}>
                       <div className="flex items-center justify-between gap-1">
@@ -160,7 +138,7 @@ export function JevOutcomeCard({ outcome }: { outcome: JevOutcomeData | null | u
                         <span className="text-[10px] tabular-nums text-foreground-tertiary">{pct}%</span>
                       </div>
                       <div className="h-1 rounded-sm bg-border/50">
-                        <div className={`h-1 rounded-sm ${BAR_CLASSES[tone]}`} style={{ width: `${pct}%` }} />
+                        <div className={`h-1 rounded-sm ${BAR_CLASS}`} style={{ width: `${pct}%` }} />
                       </div>
                     </div>
                   )
