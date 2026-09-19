@@ -142,6 +142,8 @@ export interface JevOutcomeData {
   status: 'completed' | 'skipped' | 'unavailable'
   reason?: string
   classifications?: Partial<Record<JevOutcomeDimension, JevOutcomeSignal>>
+  /** Atomic yes/no sub-checks (0–1) exposing what drove each headline label */
+  drivers?: Partial<Record<JevOutcomeDimension, Record<string, number>>>
   model?: string
   latencyMs?: number
   inputTokens?: number

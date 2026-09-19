@@ -30,10 +30,15 @@ export interface JevSignal {
   probabilities: Record<string, number>
 }
 
+/** Driver sub-check: 0–1 probability the statement holds. Keyed `dimension.key`. */
+export type JevOutcomeDrivers = Record<JevOutcomeDimension, Record<string, number>>
+
 export type JevOutcomeClassification =
   | {
       status: 'completed'
       classifications: Record<JevOutcomeDimension, JevSignal>
+      /** Atomic yes/no sub-checks that expose what drove each headline label */
+      drivers: JevOutcomeDrivers
       model: string
       latencyMs: number
       inputTokens: number
@@ -46,6 +51,8 @@ type ChoiceQuestion = {
   instructions: string
   criteria: Record<string, string>
 }
+type NoulQuestion = { type: 'noul'; instructions: string }
+type Question = ChoiceQuestion | NoulQuestion
 
 const ENDPOINT = 'https://api.typesafe.ai/v1/systemone'
 const TIMEOUT_MS = 20_000
@@ -115,6 +122,52 @@ function question(dimension: JevOutcomeDimension): ChoiceQuestion {
     type: 'choice',
     instructions: `Classify the completed property analysis outcome on ${dimension}: ${descriptions[dimension]} Use only the supplied state.outcome, state.subject, state.comps and state.appraisalRules as evidence. Missing/null values are unknown, never false or zero. This is a read-only label — it cannot change the outcome.`,
     criteria: CRITERIA[dimension],
+  }
+}
+
+/**
+ * Atomic yes/no sub-checks per dimension. These are Jev's "reasoning",
+ * exposed as data: each noul answers one concrete factor feeding the
+ * headline label. `favorable` drivers read yes=good; `risk` drivers read
+ * yes=risk present. Dashboard labels mirror these keys.
+ */
+const DRIVERS: Record<JevOutcomeDimension, Array<{ key: string; favorable: boolean; instructions: string }>> = {
+  evidence_sufficiency: [
+    { key: 'enough_comps', favorable: true, instructions: 'The outcome is supported by at least three enabled comparable sales.' },
+    { key: 'recent_sales', favorable: true, instructions: 'The selected comparable sales are recent enough to reflect current market value (roughly the trailing 12 months).' },
+    { key: 'condition_verified', favorable: true, instructions: 'The subject condition or renovation level is backed by direct evidence rather than assumption.' },
+  ],
+  comp_set_quality: [
+    { key: 'comps_nearby', favorable: true, instructions: 'The selected comps are geographically close to the subject — roughly within a mile or in the same neighborhood.' },
+    { key: 'comps_similar', favorable: true, instructions: 'The selected comps are physically similar to the subject in size, age, and bed/bath count.' },
+    { key: 'minor_adjustments', favorable: true, instructions: 'Price adjustments applied to the selected comps are minor relative to their sale prices.' },
+  ],
+  deal_outlook: [
+    { key: 'adequate_margin', favorable: true, instructions: 'Projected profit and ROI meet a typical investor threshold for this price range.' },
+    { key: 'headroom', favorable: true, instructions: 'The ARV comfortably exceeds buy price plus rehab and transaction costs.' },
+  ],
+  recommendation_agreement: [
+    { key: 'numbers_support', favorable: true, instructions: 'The valuation metrics — profit, ROI, margin — support the computed recommendation.' },
+    { key: 'evidence_supports', favorable: true, instructions: 'The quality of the comp evidence supports the computed recommendation.' },
+  ],
+  risk_flags: [
+    { key: 'thin_evidence', favorable: false, instructions: 'The outcome relies on thin or weak comparable evidence.' },
+    { key: 'stale_sales', favorable: false, instructions: 'Key comparable sales are stale or near the edge of the acceptable window.' },
+    { key: 'location_risk', favorable: false, instructions: 'Location-based penalties or flags materially affect this outcome.' },
+    { key: 'confidence_flagged', favorable: false, instructions: "The pipeline's own confidence gate flagged this outcome for human review." },
+  ],
+}
+
+const DRIVER_KEYS = Object.fromEntries(
+  Object.entries(DRIVERS).flatMap(([dimension, drivers]) =>
+    drivers.map((driver) => [`driver_${dimension}_${driver.key}`, { dimension: dimension as JevOutcomeDimension, key: driver.key }]),
+  ),
+) as Record<string, { dimension: JevOutcomeDimension; key: string }>
+
+function driverQuestion(dimension: JevOutcomeDimension, driver: { instructions: string }): NoulQuestion {
+  return {
+    type: 'noul',
+    instructions: `${driver.instructions} Judge against state.outcome, state.comps, state.report and state.subject only — the ${dimension} factor. Missing/null values are unknown; answer by what the supplied evidence supports, not by assumption.`,
   }
 }
 
@@ -216,8 +269,8 @@ function projectOutcome(response: AnalysisResponse): Record<string, unknown> {
 
 function parseResponse(
   json: unknown,
-  questions: Record<string, ChoiceQuestion>,
-): { classifications: Record<JevOutcomeDimension, JevSignal>; model: string; inputTokens: number } {
+  questions: Record<string, Question>,
+): { classifications: Record<JevOutcomeDimension, JevSignal>; drivers: JevOutcomeDrivers; model: string; inputTokens: number } {
   const malformed = () =>
     new Error('Jev outcome classification returned an invalid or incomplete typed response.')
   if (!object(json) || typeof json.model !== 'string' || !/^jev-[\w.-]+$/.test(json.model) || !object(json.answers) || !object(json.usage)) throw malformed()
@@ -226,19 +279,30 @@ function parseResponse(
   const keys = Object.keys(questions)
   if (Object.keys(json.answers).length !== keys.length || keys.some((key) => !Object.hasOwn(json.answers as object, key))) throw malformed()
   const classifications = {} as Record<JevOutcomeDimension, JevSignal>
-  keys.forEach((key, index) => {
+  const drivers = Object.fromEntries(OUTCOME_DIMENSIONS.map((d) => [d, {}])) as JevOutcomeDrivers
+  for (const key of keys) {
+    const question = questions[key]
     const answer = (json.answers as Record<string, unknown>)[key]
-    const options = Object.keys(questions[key].criteria)
-    if (!object(answer) || answer.type !== 'choice' || typeof answer.choice !== 'string' || !options.includes(answer.choice) || !probability(answer.confidence) || !object(answer.probabilities)) throw malformed()
-    const probabilities = answer.probabilities
-    if (Object.keys(probabilities).length !== options.length || options.some((option) => !probability(probabilities[option])) || Math.abs(options.reduce((sum, option) => sum + (probabilities[option] as number), 0) - 1) > options.length * 0.005 + Number.EPSILON) throw malformed()
-    classifications[OUTCOME_DIMENSIONS[index]] = {
-      choice: answer.choice,
-      confidence: answer.confidence,
-      probabilities: probabilities as Record<string, number>,
+    if (!object(answer)) throw malformed()
+    if (question.type === 'choice') {
+      const options = Object.keys(question.criteria)
+      if (answer.type !== 'choice' || typeof answer.choice !== 'string' || !options.includes(answer.choice) || !probability(answer.confidence) || !object(answer.probabilities)) throw malformed()
+      const probabilities = answer.probabilities
+      if (Object.keys(probabilities).length !== options.length || options.some((option) => !probability(probabilities[option])) || Math.abs(options.reduce((sum, option) => sum + (probabilities[option] as number), 0) - 1) > options.length * 0.005 + Number.EPSILON) throw malformed()
+      const dimension = key.slice('outcome_'.length) as JevOutcomeDimension
+      if (!OUTCOME_DIMENSIONS.includes(dimension)) throw malformed()
+      classifications[dimension] = {
+        choice: answer.choice,
+        confidence: answer.confidence,
+        probabilities: probabilities as Record<string, number>,
+      }
+    } else {
+      const driver = DRIVER_KEYS[key]
+      if (!driver || answer.type !== 'noul' || !probability(answer.noul)) throw malformed()
+      drivers[driver.dimension][driver.key] = answer.noul
     }
-  })
-  return { classifications, model: json.model, inputTokens }
+  }
+  return { classifications, drivers, model: json.model, inputTokens }
 }
 
 /**
@@ -256,9 +320,16 @@ export async function classifyOutcomeWithJev(
   const model = env.TYPESAFE_MODEL?.trim() || 'jev-latest'
   if (!/^jev-[\w.-]+$/.test(model)) throw new Error('Jev outcome classification requires a Jev model identifier.')
 
-  const questions: Record<string, ChoiceQuestion> = Object.fromEntries(
-    OUTCOME_DIMENSIONS.map((dimension) => [`outcome_${dimension}`, question(dimension)]),
-  )
+  const questions: Record<string, Question> = {
+    ...Object.fromEntries(
+      OUTCOME_DIMENSIONS.map((dimension) => [`outcome_${dimension}`, question(dimension)]),
+    ),
+    ...Object.fromEntries(
+      Object.entries(DRIVERS).flatMap(([dimension, drivers]) =>
+        drivers.map((driver) => [`driver_${dimension}_${driver.key}`, driverQuestion(dimension as JevOutcomeDimension, driver)]),
+      ),
+    ),
+  }
   const body = {
     model,
     state: {
@@ -300,6 +371,7 @@ export async function classifyOutcomeWithJev(
   return {
     status: 'completed',
     classifications: parsed.classifications,
+    drivers: parsed.drivers,
     model: parsed.model,
     latencyMs: Date.now() - start,
     inputTokens: parsed.inputTokens,

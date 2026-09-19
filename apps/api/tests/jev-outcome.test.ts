@@ -59,7 +59,7 @@ function fakeResponse(): AnalysisResponse {
 }
 
 const answers = Object.fromEntries(
-  OUTCOME_DIMENSIONS.map((d, i) => {
+  OUTCOME_DIMENSIONS.flatMap((d, i) => {
     const options = [
       ['sufficient', 'limited', 'insufficient'],
       ['strong', 'adequate', 'weak'],
@@ -67,12 +67,14 @@ const answers = Object.fromEntries(
       ['agree', 'disagree', 'uncertain'],
       ['none', 'minor', 'material'],
     ][i]
-    return [`outcome_${d}`, {
+    return [[`outcome_${d}`, {
       type: 'choice', choice: options[0], confidence: 0.9,
       probabilities: { [options[0]]: 0.9, [options[1]]: 0.07, [options[2]]: 0.03 },
-    }]
+    }]]
   }),
 )
+// Mirror whatever driver questions the service emits — assert via request body
+// shape in test 2 rather than hardcoding keys here.
 
 const originalFetch = globalThis.fetch
 
@@ -88,7 +90,18 @@ const originalFetch = globalThis.fetch
   let body: Record<string, unknown> | null = null
   globalThis.fetch = async (_url, init) => {
     body = JSON.parse(String(init?.body))
-    return Response.json({ model: 'jev-test-1', answers, usage: { input_tokens: 1234 } })
+    const questions = (body!.questions ?? {}) as Record<string, { type: string; criteria?: Record<string, string> }>
+    const echoed = Object.fromEntries(Object.entries(questions).map(([id, q]) => {
+      if (q.type === 'choice') {
+        const options = Object.keys(q.criteria ?? {})
+        return [id, answers[id] ?? {
+          type: 'choice', choice: options[0], confidence: 0.9,
+          probabilities: { [options[0]]: 0.9, [options[1]]: 0.07, [options[2]]: 0.03 },
+        }]
+      }
+      return [id, { type: 'noul', noul: 0.75 }]
+    }))
+    return Response.json({ model: 'jev-test-1', answers: echoed, usage: { input_tokens: 1234 } })
   }
   const result = await classifyOutcomeWithJev(fakeResponse(), { TYPESAFE_API_KEY: 'k', TYPESAFE_MODEL: 'jev-test-1' })
   assert.equal(result.status, 'completed')
@@ -98,6 +111,10 @@ const originalFetch = globalThis.fetch
   assert.equal(result.classifications.evidence_sufficiency.choice, 'sufficient')
   assert.equal(result.classifications.risk_flags.choice, 'none')
   assert.equal(Object.keys(result.classifications).length, OUTCOME_DIMENSIONS.length)
+  // Driver nouls folded under their dimension
+  assert.equal(result.drivers.evidence_sufficiency.enough_comps, 0.75)
+  assert.equal(result.drivers.risk_flags.thin_evidence, 0.75)
+  assert.ok(Object.keys(result.drivers.comp_set_quality).length > 0)
   // Only enabled comps are projected as selected
   assert.equal((body!.state as { comps: { selected: unknown[] } }).comps.selected.length, 1)
   // Input response is not mutated
