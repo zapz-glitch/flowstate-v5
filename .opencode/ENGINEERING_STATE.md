@@ -151,8 +151,17 @@ Missing key → `skipped`; request/parse failure → `unavailable`.
 - Local stack: API 8792, dashboard 3012 (same ports as before; no Python
   service needed). Env + local D1 restored from archive; JEV_GEO_* vars
   removed from .dev.vars.
-- Open: dashboard does not yet render `jevOutcome` — response/report JSON
-  only. Decide whether/where to surface it in the UI.
+- Dashboard renders `jevOutcome` via `JevOutcomeCard` (five tone-coded
+  chips + confidence on hover) in `AnalysisResultLayout`, plumbed through
+  the evaluation atom on analyze + both report pages.
+- Verified live: analysis `job_1789779869253_3qaug384` (2447 Crestview Ave)
+  produced jevOutcome.completed — evidence limited (0.51), comp set weak
+  (0.99), deal favorable (0.66), recommendation uncertain, risk material
+  (1.0); model jev-1.13.0, 4177 input tokens, 317ms.
+- Note: first dev-server boot served a stale chunk importing
+  @vis.gl/react-google-maps from the sibling flowstate-v5 worktree
+  (createContext crash in PropertyMapInner). Fixed by wiping `.next` and
+  restarting; module resolution itself is correct.
 
 ### 2026-09-16 — CDARV independent audit + live hardening pass (uncommitted fixes below)
 
