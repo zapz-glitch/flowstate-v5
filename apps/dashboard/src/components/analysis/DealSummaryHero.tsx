@@ -54,7 +54,7 @@ export function DealSummaryHero({ valuation, isRecalculated, onOpenSettings }: D
         <div
           className="px-3 py-2.5 border-r border-border/20"
           title={valuation.asIsMarketIntel?.asIsMarketPrice != null
-            ? `As-is AVG across ${valuation.asIsMarketIntel.compCount ?? 0} investment-classified comps matching appraisal rules — insight only, does not affect ARV`
+            ? `As-is AVG across ${valuation.asIsMarketIntel.compCount ?? 0} investment-classified comps matching appraisal rules${(valuation.asIsMarketIntel.flipSaleCount ?? 0) > 0 ? ` + ${valuation.asIsMarketIntel.flipSaleCount} verified flip acquisition(s)` : ''} — insight only, does not affect ARV`
             : 'No investment-classified comps matched the appraisal rules — insight only, does not affect ARV'}
         >
           <div className="text-[11px] text-foreground-tertiary uppercase tracking-wider">As-is AVG</div>
@@ -64,7 +64,10 @@ export function DealSummaryHero({ valuation, isRecalculated, onOpenSettings }: D
           <div className="text-[10px] text-foreground-tertiary tabular-nums mt-0.5">
             {valuation.asIsMarketIntel?.avgPricePerSqft != null
               ? `$${valuation.asIsMarketIntel.avgPricePerSqft.toFixed(0)}/sf`
-              : `${valuation.asIsMarketIntel?.compCount ?? 0} comps`}
+              : `${(valuation.asIsMarketIntel?.compCount ?? 0) + (valuation.asIsMarketIntel?.flipSaleCount ?? 0)} sales`}
+            {(valuation.asIsMarketIntel?.flipSaleCount ?? 0) > 0 && (
+              <span className="text-foreground-tertiary/50"> · {valuation.asIsMarketIntel!.flipSaleCount} flip</span>
+            )}
           </div>
         </div>
         <div className="px-3 py-2.5 border-r border-border/20">

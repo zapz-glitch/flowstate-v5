@@ -104,6 +104,8 @@ export interface GroupBResult {
   avgPricePerSqft: number | null
   /** Number of comps that qualified */
   count: number
+  /** Verified flip acquisition (priorSale) data points folded into the average */
+  flipSaleCount: number
   /** Threshold used: salePrice <= X% of ARV */
   thresholdPercent: number
   /** The ARV value used to determine the threshold */
@@ -240,12 +242,14 @@ function selectGroupBComps(
       c.salePrice <= priceCeiling
   )
 
-  if (qualifying.length === 0) {
+  const hasFlips = appraisalResult.comparables.some((c) => c.flip != null)
+  if (qualifying.length === 0 && !hasFlips) {
     return {
       compIds: [],
       asIsMarketPrice: null,
       avgPricePerSqft: null,
       count: 0,
+      flipSaleCount: 0,
       thresholdPercent,
       arvUsed: arv,
       priceCeiling,
@@ -253,7 +257,7 @@ function selectGroupBComps(
     }
   }
 
-  return summarizeGroupB(qualifying, subject, arv, thresholdPercent, priceCeiling)
+  return summarizeGroupB(qualifying, subject, arv, thresholdPercent, priceCeiling, appraisalResult.comparables)
 }
 
 /**
@@ -266,6 +270,7 @@ function summarizeGroupB(
   arv: number,
   thresholdPercent: number,
   priceCeiling: number,
+  allComparables?: AppraisedComparable[],
 ): GroupBResult {
 
   // Sqft-scale each comp's sale price to the subject's sqft, then average
@@ -273,14 +278,29 @@ function summarizeGroupB(
   const scaledPrices: number[] = []
   const perSqftPrices: number[] = []
 
-  for (const comp of qualifying) {
-    if (comp.squareFeet && comp.squareFeet > 0) {
-      const perSqft = comp.salePrice! / comp.squareFeet
+  const addSale = (price: number, compSqft: number | null | undefined) => {
+    if (compSqft && compSqft > 0) {
+      const perSqft = price / compSqft
       perSqftPrices.push(perSqft)
-      scaledPrices.push(subjectSqft > 0 ? perSqft * subjectSqft : comp.salePrice!)
+      scaledPrices.push(subjectSqft > 0 ? perSqft * subjectSqft : price)
     } else {
-      scaledPrices.push(comp.salePrice!)
+      scaledPrices.push(price)
     }
+  }
+
+  for (const comp of qualifying) {
+    addSale(comp.salePrice!, comp.squareFeet)
+  }
+
+  // Verified flips also contribute their acquisition sale — the priorSale is
+  // what an investor actually paid for the same property as-is. A flip comp
+  // may sit in the ARV bucket on its resale, so scan the full evaluated pool,
+  // not just the as-is picks.
+  let flipSaleCount = 0
+  for (const comp of allComparables ?? qualifying) {
+    if (!comp.flip || !(comp.flip.priorSalePrice > 0)) continue
+    addSale(comp.flip.priorSalePrice, comp.squareFeet)
+    flipSaleCount++
   }
 
   const asIsMarketPrice =
@@ -297,6 +317,7 @@ function summarizeGroupB(
     asIsMarketPrice,
     avgPricePerSqft,
     count: qualifying.length,
+    flipSaleCount,
     thresholdPercent,
     arvUsed: arv,
     priceCeiling,
@@ -921,6 +942,7 @@ export async function performAnalysis(
         finalArv,
         asIsThresholdPercent,
         Math.round((finalArv * asIsThresholdPercent) / 100),
+        appraisalResult.comparables,
       )
     : selectGroupBComps(
         bundle.property,

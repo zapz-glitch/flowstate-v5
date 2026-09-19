@@ -331,6 +331,8 @@ export interface ValuationData {
     asIsMarketPrice?: number | null
     avgPricePerSqft?: number | null
     compCount?: number
+    /** Verified flip acquisition (priorSale) data points folded into the average */
+    flipSaleCount?: number
     compIds?: string[]
     thresholdPercent?: number
     priceCeiling?: number

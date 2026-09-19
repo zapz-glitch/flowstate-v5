@@ -678,6 +678,8 @@ export interface AnalysisResponse {
       asIsMarketPrice: number | null
       avgPricePerSqft: number | null
       compCount: number
+      /** Verified flip acquisition (priorSale) data points folded into the average */
+      flipSaleCount: number
       compIds: string[]
       thresholdPercent: number
       priceCeiling: number
@@ -1393,6 +1395,7 @@ export function buildAnalysisResponse(
         asIsMarketPrice: ctx.groupBResult.asIsMarketPrice,
         avgPricePerSqft: ctx.groupBResult.avgPricePerSqft,
         compCount: ctx.groupBResult.count,
+        flipSaleCount: ctx.groupBResult.flipSaleCount,
         compIds: ctx.groupBResult.compIds,
         thresholdPercent: ctx.groupBResult.thresholdPercent,
         priceCeiling: ctx.groupBResult.priceCeiling,
