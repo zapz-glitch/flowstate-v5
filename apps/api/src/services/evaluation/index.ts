@@ -565,11 +565,12 @@ export async function performAnalysis(
   // Every candidate gets two 0–1 truth scores: ARV (after-renovation retail
   // value evidence) and investment (as-is investor value evidence). The
   // HIGHER score assigns the comp's market: A > I → ARV-eligible; I > A →
-  // investment-only, never ARV-eligible. Appraisal rules gate each bucket —
-  // only comps matching the rules count toward an average. ARV = mean of
-  // adjusted prices over the A-bucket rule-matches; the I-bucket rule-matches
-  // average into the as-is AVG shown for insight. If Jev is unavailable, the
-  // rules selection and the price-threshold Group B stand.
+  // investment-only, never ARV-eligible. Location gate is distance ≤0.5mi —
+  // subdivision/neighborhood enrichment only exists for rule-matched comps,
+  // so geo-identity filters can't gate; other evaluated rule failures still
+  // disqualify. ARV = mean of adjusted prices over the A-bucket matches; the
+  // I-bucket matches average into the as-is AVG shown for insight. If Jev is
+  // unavailable or the ARV bucket is empty, the rules selection stands.
   let jevInvestmentCompIds: string[] = []
   try {
     const jev = await scoreCompTruthWithJev(
@@ -579,7 +580,17 @@ export async function performAnalysis(
       env,
     )
     const truth = (id: string) => jev.scores[id] ?? { arvTruth: 0, investmentTruth: 0 }
-    const rulesPassed = (c: AppraisedComparable) => !c.evaluation || !c.evaluation.shouldDisable
+    // Location criterion is distance, not subdivision/neighborhood match —
+    // geo identity data is only enriched for rule-matching comps, so most of
+    // the pool can't be judged that way. Other evaluated rule failures still
+    // disqualify (missing data is 'not_verified', which never does).
+    const JEV_LOCATION_RADIUS_MILES = 0.5
+    const GEO_IDENTITY_FILTERS = new Set(['subdivision_match', 'neighborhood_match'])
+    const rulesPassed = (c: AppraisedComparable) =>
+      c.distanceMiles != null && c.distanceMiles <= JEV_LOCATION_RADIUS_MILES &&
+      !(c.evaluation?.filterResults ?? []).some(
+        (f) => f.passed === false && !GEO_IDENTITY_FILTERS.has(f.type),
+      )
     const jevArvIds = new Set(
       appraisalResult.comparables
         .filter((c) => truth(c.id).arvTruth > truth(c.id).investmentTruth && rulesPassed(c))
@@ -615,7 +626,7 @@ export async function performAnalysis(
         appraisalResult.comparables.filter((c) => jevArvIds.has(c.id)),
       )
       appraisalResult.insufficientComps = false
-      step('jev_selection', 'completed', `Jev bucketed ${appraisalResult.comparables.length} candidates → ${jevArvIds.size} ARV + ${jevInvestmentIds.size} investment comps matching appraisal rules (${jev.model})`)
+      step('jev_selection', 'completed', `Jev bucketed ${appraisalResult.comparables.length} candidates → ${jevArvIds.size} ARV + ${jevInvestmentIds.size} investment comps within 0.5mi matching rules (${jev.model})`)
     }
   } catch (error) {
     console.warn('[Evaluate] Jev comp selection unavailable — rules selection stands:', error instanceof Error ? error.message : error)
