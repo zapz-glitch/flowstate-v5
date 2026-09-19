@@ -460,6 +460,8 @@ export const dealParams = sqliteTable(
     asIsThresholdPercent: real('as_is_threshold_percent').notNull().default(70),
     /** Max age in days for a Zillow sale event to reconcile a comp's stale provider price (default: 365) */
     reconciliationSaleAgeDays: real('reconciliation_sale_age_days').notNull().default(365),
+    /** Max sale age in days for as-is/investment comp evidence (default: 548 ≈ 18 months); ARV uses the appraisal sale_age filter */
+    asIsSaleAgeDays: real('as_is_sale_age_days').notNull().default(548),
     createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
     updatedAt: text('updated_at').notNull().$defaultFn(() => new Date().toISOString()),
   },

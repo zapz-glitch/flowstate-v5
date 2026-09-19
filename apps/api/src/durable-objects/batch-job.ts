@@ -693,6 +693,7 @@ export class BatchJobDO {
             arvThreshold: userSettings.arvThreshold,
             asIsThresholdPercent: userSettings.asIsThresholdPercent,
             reconciliationSaleAgeDays: userSettings.reconciliationSaleAgeDays,
+            asIsSaleAgeDays: userSettings.asIsSaleAgeDays,
             proximityConfig: userSettings.proximityConfig,
           },
           llmEnabled: false, // No AI for batch

@@ -490,6 +490,7 @@ export interface DealParamsConfig {
   asIsThresholdPercent?: number
   arvThresholdPercent?: number
   reconciliationSaleAgeDays?: number
+  asIsSaleAgeDays?: number
 }
 
 export interface DealParamsResponse {

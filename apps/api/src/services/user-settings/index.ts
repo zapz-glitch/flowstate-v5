@@ -53,6 +53,8 @@ export interface UserAnalysisSettings {
   asIsThresholdPercent?: number
   /** Max age (days) for a Zillow sale to reconcile a stale provider comp price — default 365 */
   reconciliationSaleAgeDays?: number
+  /** Max sale age (days) for as-is/investment comp evidence — default 548 (~18mo) */
+  asIsSaleAgeDays?: number
   /** Proximity deductions — siding/backing/fronting amounts + ARV threshold */
   proximityConfig?: import('../../routes/proximity-config').ProximityConfig
 }
@@ -361,6 +363,7 @@ export async function loadUserAnalysisSettings(
     arvThreshold: arvThresholdConfig,
     asIsThresholdPercent: arvThresholdConfig.asIsThresholdPercent ?? dealParamsRow?.asIsThresholdPercent ?? undefined,
     reconciliationSaleAgeDays: dealParamsRow?.reconciliationSaleAgeDays ?? undefined,
+    asIsSaleAgeDays: dealParamsRow?.asIsSaleAgeDays ?? undefined,
     proximityConfig: proximityCfg,
   }
 
