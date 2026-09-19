@@ -252,6 +252,20 @@ the uniform location gate. Re-verified live: same property → 1 ARV comp
 (545 Quillian, A 0.32/I 0.24) → ARV $269,800, no dead end; no verified
 geo mismatch existed within 0.5mi, so outcome unchanged.
 
+Update (d1c01e4): three fixes after user reported single-comp selection
+on a subject whose nearest comps were being skipped. (1) Removed the
+sub-1,000sf cap in evaluateSqftDiff (API evaluator + shared package) —
+it silently replaced the configured ±250 band; configured filter value
+now governs. (2) Jev gate uses shouldDisable (hard failures) instead of
+passed===false — soft failures (construction_material_match) no longer
+disqualify. (3) Distance priority: Jev scores candidates closest-first;
+response orders enabled comps by distance (was subdivision-first).
+Verified live (job_1789784553571, subject 864sf/1946): 3 enabled —
+2426 Hillside d=0.06 investment (1052sf, now passes ±250), 2384 McAfee
+d=0.34 ARV (was rejected on a soft fail), 545 Quillian d=0.47 ARV.
+ARV $242,244; as-is AVG $127,300 under valuation.asIsMarketIntel
+(1 investment comp, insight-only). All 20 regression tests pass.
+
 Update (952b5df): user flagged that subdivision/neighborhood are only
 enriched for rule-matched comps, so geo data is absent across most of
 the pool — geo-identity filters (subdivision_match, neighborhood_match)
