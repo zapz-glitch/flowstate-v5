@@ -51,6 +51,22 @@ export function DealSummaryHero({ valuation, isRecalculated, onOpenSettings }: D
 
       {/* Primary metrics grid */}
       <div className="hero-stats">
+        <div
+          className="px-3 py-2.5 border-r border-border/20"
+          title={valuation.asIsMarketIntel?.asIsMarketPrice != null
+            ? `As-is AVG across ${valuation.asIsMarketIntel.compCount ?? 0} investment-classified comps matching appraisal rules — insight only, does not affect ARV`
+            : 'No investment-classified comps matched the appraisal rules — insight only, does not affect ARV'}
+        >
+          <div className="text-[11px] text-foreground-tertiary uppercase tracking-wider">As-is AVG</div>
+          <div className="text-base font-bold tabular-nums mt-0.5">
+            {valuation.asIsMarketIntel?.asIsMarketPrice != null ? `$${fmt(valuation.asIsMarketIntel.asIsMarketPrice)}` : '—'}
+          </div>
+          <div className="text-[10px] text-foreground-tertiary tabular-nums mt-0.5">
+            {valuation.asIsMarketIntel?.avgPricePerSqft != null
+              ? `$${valuation.asIsMarketIntel.avgPricePerSqft.toFixed(0)}/sf`
+              : `${valuation.asIsMarketIntel?.compCount ?? 0} comps`}
+          </div>
+        </div>
         <div className="px-3 py-2.5 border-r border-border/20">
           <div className="text-[11px] text-foreground-tertiary uppercase tracking-wider">ARV</div>
           <div className="text-base font-bold tabular-nums text-primary mt-0.5">${formatHeadlineMoney(valuation.arv, valuation.displayedArv, valuation.displayRounding)}</div>
@@ -79,12 +95,6 @@ export function DealSummaryHero({ valuation, isRecalculated, onOpenSettings }: D
         {valuation.carryingCosts != null && <span>Carry ${fmt(valuation.carryingCosts)}</span>}
         {valuation.totalInvestment != null && <span>Invest ${fmt(valuation.totalInvestment)}</span>}
         {valuation.wholesalePrice != null && <span>Wholesale ${formatHeadlineMoney(valuation.wholesalePrice, valuation.displayedWholesalePrice, valuation.displayRounding)}</span>}
-        {valuation.asIsMarketIntel?.asIsMarketPrice != null && (
-          <span title={`As-is AVG across ${valuation.asIsMarketIntel.compCount ?? 0} investment comps — insight only, does not affect ARV`}>
-            As-is AVG <span className="text-foreground-secondary">${fmt(valuation.asIsMarketIntel.asIsMarketPrice)}</span>
-            <span className="text-foreground-tertiary/50"> · insight</span>
-          </span>
-        )}
       </div>
     </div>
   )

@@ -676,14 +676,14 @@ body {
   }
 }
 
-/* Valuation hero stats: 4 cols when wide, 2x2 in narrow panes */
+/* Valuation hero stats: 5 cols when wide, 2-col wrap in narrow panes */
 .hero-stats {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 @container (min-width: 520px) {
   .hero-stats {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(5, minmax(0, 1fr));
   }
 }
 
