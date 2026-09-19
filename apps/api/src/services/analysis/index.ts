@@ -1082,24 +1082,19 @@ export function buildAnalysisResponse(
   const enabledComps = appraisalResult.comparables.filter((c) => c.isEnabled)
   const disabledComps = appraisalResult.comparables.filter((c) => !c.isEnabled)
 
-  // Sort helper: subdivision match first, then by distance
-  const bySubdivisionThenDistance = (a: AppraisedComparable, b: AppraisedComparable) => {
-    const aSubMatch = a.evaluation.filterResults.find((f) => f.type === 'subdivision_match')?.passed ?? false
-    const bSubMatch = b.evaluation.filterResults.find((f) => f.type === 'subdivision_match')?.passed ?? false
-    if (aSubMatch && !bSubMatch) return -1
-    if (!aSubMatch && bSubMatch) return 1
-    return (a.distanceMiles ?? 999) - (b.distanceMiles ?? 999)
-  }
+  // Sort helper: closest first — distance is the location criterion
+  const byDistance = (a: AppraisedComparable, b: AppraisedComparable) =>
+    (a.distanceMiles ?? 999) - (b.distanceMiles ?? 999)
 
   // Build lookup from merged bundle comps (has Zillow-supplemented data like bedrooms)
   const mergedCompLookup = new Map(
     bundle.comparables.map((c) => [c.id, c])
   )
 
-  // Return ALL comps: enabled first (subdivision match → distance), then disabled (same order)
+  // Return ALL comps: enabled first (closest → farthest), then disabled (same order)
   const allComps = [
-    ...enabledComps.sort(bySubdivisionThenDistance),
-    ...disabledComps.sort(bySubdivisionThenDistance),
+    ...enabledComps.sort(byDistance),
+    ...disabledComps.sort(byDistance),
   ].map((comp) => {
     const compPhotos = photoBundle?.comps[comp.id]?.photos.slice(0, 3) ?? []
 

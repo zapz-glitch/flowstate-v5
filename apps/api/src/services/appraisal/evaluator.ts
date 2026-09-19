@@ -108,23 +108,14 @@ function evaluateSqftDiff(
   }
 
   const diff = Math.abs(comp.squareFeet - subject.squareFeet)
-
-  // Sub-1,000 sqft subjects: the ±variance band is proportionally too tight
-  // at this size — size comparability is bounded by an absolute ceiling
-  // instead (any comp ≤1,000 sqft qualifies).
-  const passed =
-    subject.squareFeet < 1000 ? comp.squareFeet <= 1000 : diff <= filter.value
+  const passed = diff <= filter.value
 
   return {
     type: 'sqft_diff',
     passed,
-    reason: passed
-      ? undefined
-      : subject.squareFeet < 1000
-        ? `Comp too large: ${comp.squareFeet} sqft (sub-1,000sf subject caps comps at 1,000 sf)`
-        : `Sqft difference too large: ${diff} sqft (max: ${filter.value})`,
+    reason: passed ? undefined : `Sqft difference too large: ${diff} sqft (max: ${filter.value})`,
     actualValue: diff,
-    threshold: subject.squareFeet < 1000 ? 'comp ≤ 1000 sf' : filter.value,
+    threshold: filter.value,
   }
 }
 

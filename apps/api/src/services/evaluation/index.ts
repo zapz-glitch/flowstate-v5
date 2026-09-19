@@ -574,23 +574,26 @@ export async function performAnalysis(
   // unavailable or the ARV bucket is empty, the rules selection stands.
   let jevInvestmentCompIds: string[] = []
   try {
+    // Classify closest-first: distance is the location criterion, so the
+    // nearest candidates lead Jev's evaluation order.
     const jev = await scoreCompTruthWithJev(
       bundle.property,
-      appraisalResult.comparables,
+      [...appraisalResult.comparables].sort(
+        (a, b) => (a.distanceMiles ?? 999) - (b.distanceMiles ?? 999),
+      ),
       { filters, adjustments },
       env,
     )
     const truth = (id: string) => jev.scores[id] ?? { arvTruth: 0, investmentTruth: 0 }
     // Location criterion is distance — geo enrichment only exists for a
-    // minority of comps, so distance gates everyone uniformly. A filter only
-    // disqualifies when it was actually evaluated (passed === false);
-    // 'not_verified' results (missing data) never do — so an enriched comp's
-    // real subdivision mismatch still counts, while unenriched comps aren't
-    // punished for data they never had.
+    // minority of comps, so distance gates everyone uniformly. Rule
+    // eligibility uses shouldDisable (hard-priority failures only): soft
+    // failures and 'not_verified' (missing data) never disqualify, while a
+    // verified subdivision mismatch on an enriched comp still does.
     const JEV_LOCATION_RADIUS_MILES = 0.5
     const rulesPassed = (c: AppraisedComparable) =>
       c.distanceMiles != null && c.distanceMiles <= JEV_LOCATION_RADIUS_MILES &&
-      !(c.evaluation?.filterResults ?? []).some((f) => f.passed === false)
+      (!c.evaluation || !c.evaluation.shouldDisable)
     const jevArvIds = new Set(
       appraisalResult.comparables
         .filter((c) => truth(c.id).arvTruth > truth(c.id).investmentTruth && rulesPassed(c))
