@@ -158,6 +158,10 @@ Missing key → `skipped`; request/parse failure → `unavailable`.
   produced jevOutcome.completed — evidence limited (0.51), comp set weak
   (0.99), deal favorable (0.66), recommendation uncertain, risk material
   (1.0); model jev-1.13.0, 4177 input tokens, 317ms.
+- Jev "reasoning" exposed via 14 Noul driver sub-checks (2–4 per headline
+  dimension, same request, ~no added latency). Card shows them in an
+  expandable scoring breakdown. Jev returns typed values only — no prose
+  rationale exists in the SystemOne API (Choice/Score/Noul primitives).
 - Note: first dev-server boot served a stale chunk importing
   @vis.gl/react-google-maps from the sibling flowstate-v5 worktree
   (createContext crash in PropertyMapInner). Fixed by wiping `.next` and
