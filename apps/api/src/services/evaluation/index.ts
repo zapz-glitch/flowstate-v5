@@ -589,21 +589,34 @@ export async function performAnalysis(
       .filter((c) => truth(c.id).investmentTruth > truth(c.id).arvTruth && rulesPassed(c))
       .map((c) => c.id)
     const jevInvestmentIds = new Set(jevInvestmentCompIds)
-    appraisalResult.comparables = appraisalResult.comparables.map((comp) => ({
-      ...comp,
-      isEnabled: jevArvIds.has(comp.id) || jevInvestmentIds.has(comp.id),
-      arvStatus: jevArvIds.has(comp.id)
-        ? 'selected' as const
-        : comp.arvStatus === 'selected' ? 'not_examined' as const : comp.arvStatus,
-      jevArvTruth: jev.scores[comp.id]?.arvTruth ?? null,
-      jevInvestmentTruth: jev.scores[comp.id]?.investmentTruth ?? null,
-    }))
-    appraisalResult.selectedCompIds = [...jevArvIds]
-    appraisalResult.arv = appraisalService.calculateARV(
-      appraisalResult.comparables.filter((c) => jevArvIds.has(c.id)),
-    )
-    appraisalResult.insufficientComps = jevArvIds.size === 0
-    step('jev_selection', 'completed', `Jev bucketed ${appraisalResult.comparables.length} candidates → ${jevArvIds.size} ARV + ${jevInvestmentIds.size} investment comps matching appraisal rules (${jev.model})`)
+    if (jevArvIds.size === 0) {
+      // Jev's job is classification, not sufficiency — an empty ARV bucket
+      // is not INSUFFICIENT_COMPS. Keep the rules selection; truth scores
+      // still attach for display.
+      appraisalResult.comparables = appraisalResult.comparables.map((comp) => ({
+        ...comp,
+        jevArvTruth: jev.scores[comp.id]?.arvTruth ?? null,
+        jevInvestmentTruth: jev.scores[comp.id]?.investmentTruth ?? null,
+      }))
+      step('jev_selection', 'fallback', `Jev found no ARV-eligible comps — appraisal-rules selection used (${jev.model})`)
+      fallbacksUsed.push('jev_selection:empty_arv_bucket')
+    } else {
+      appraisalResult.comparables = appraisalResult.comparables.map((comp) => ({
+        ...comp,
+        isEnabled: jevArvIds.has(comp.id) || jevInvestmentIds.has(comp.id),
+        arvStatus: jevArvIds.has(comp.id)
+          ? 'selected' as const
+          : comp.arvStatus === 'selected' ? 'not_examined' as const : comp.arvStatus,
+        jevArvTruth: jev.scores[comp.id]?.arvTruth ?? null,
+        jevInvestmentTruth: jev.scores[comp.id]?.investmentTruth ?? null,
+      }))
+      appraisalResult.selectedCompIds = [...jevArvIds]
+      appraisalResult.arv = appraisalService.calculateARV(
+        appraisalResult.comparables.filter((c) => jevArvIds.has(c.id)),
+      )
+      appraisalResult.insufficientComps = false
+      step('jev_selection', 'completed', `Jev bucketed ${appraisalResult.comparables.length} candidates → ${jevArvIds.size} ARV + ${jevInvestmentIds.size} investment comps matching appraisal rules (${jev.model})`)
+    }
   } catch (error) {
     console.warn('[Evaluate] Jev comp selection unavailable — rules selection stands:', error instanceof Error ? error.message : error)
     step('jev_selection', 'fallback', 'Jev unavailable — appraisal-rules selection used')
