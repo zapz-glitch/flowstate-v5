@@ -15,7 +15,7 @@ import type {
   CompItem,
 } from '@/app/(dashboard)/dashboard/analyze/actions'
 import type { RecalcResult } from '@/lib/recalc'
-import type { AnalyzeData } from '@/app/(dashboard)/dashboard/analyze/actions'
+import type { AnalyzeData, JevOutcomeData } from '@/app/(dashboard)/dashboard/analyze/actions'
 
 // ─── Comp Override ─────────────────────────────────────────────────────────
 
@@ -68,6 +68,9 @@ export interface EvaluationState {
   // AI analysis report
   aiReport: { summary: string; selected: number; total: number; model: string } | null
 
+  /** Jev read-only outcome classification for the displayed result */
+  jevOutcome: JevOutcomeData | null | undefined
+
   // UI state
   aiAnalyzing: boolean
   /** Whether the streaming pipeline is still running (property fetch → evaluation → LLM) */
@@ -94,6 +97,7 @@ export const evaluationStateAtom = atom<EvaluationState>({
   feedbackContext: null,
   marketContext: null,
   aiReport: null,
+  jevOutcome: undefined,
   aiAnalyzing: false,
   isStreaming: false,
   callbacks: defaultCallbacks,

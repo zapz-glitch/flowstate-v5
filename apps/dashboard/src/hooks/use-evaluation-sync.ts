@@ -10,7 +10,7 @@
 
 import { useEffect } from 'react'
 import { useSetAtom } from 'jotai'
-import type { AnalyzeData, SubjectData, ValuationData, CompsData, CompItem } from '@/app/(dashboard)/dashboard/analyze/actions'
+import type { AnalyzeData, JevOutcomeData, SubjectData, ValuationData, CompsData, CompItem } from '@/app/(dashboard)/dashboard/analyze/actions'
 import type { UseAnalysisEvaluationReturn } from '@/hooks/use-analysis-evaluation'
 import { evaluationStateAtom } from '@/atoms/evaluation'
 
@@ -36,6 +36,7 @@ interface SyncOptions {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   marketContext?: Record<string, any> | null
   aiReport?: { summary: string; selected: number; total: number; model: string } | null
+  jevOutcome?: JevOutcomeData | null
   onOpenSettings: () => void
   onCompClick?: (comp: CompItem) => void
   onRunAiAnalysis?: () => void
@@ -54,6 +55,7 @@ export function useEvaluationSync({
   isStreaming = false,
   marketContext = null,
   aiReport = null,
+  jevOutcome = null,
   onOpenSettings,
   onCompClick,
   onRunAiAnalysis,
@@ -74,6 +76,7 @@ export function useEvaluationSync({
       feedbackContext: feedback ?? null,
       marketContext,
       aiReport,
+      jevOutcome,
       aiAnalyzing,
       isStreaming,
       callbacks: {
@@ -92,6 +95,6 @@ export function useEvaluationSync({
     evaluation.isRecalculated, evaluation.recalcData, evaluation.compOverride,
     evaluation.handleToggleComp, evaluation.handleResetComps,
     feedback,
-    aiAnalyzing, isStreaming, marketContext, aiReport, onOpenSettings, onCompClick, onRunAiAnalysis, onUndoAiSelection, onFeedbackSubmitted, onPermitsPulled, setState,
+    aiAnalyzing, isStreaming, marketContext, aiReport, jevOutcome, onOpenSettings, onCompClick, onRunAiAnalysis, onUndoAiSelection, onFeedbackSubmitted, onPermitsPulled, setState,
   ])
 }

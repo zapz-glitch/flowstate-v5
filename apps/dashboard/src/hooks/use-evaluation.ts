@@ -33,6 +33,9 @@ export function useEvaluation() {
     marketContext: state.marketContext,
     aiReport: state.aiReport,
 
+    // Jev read-only outcome classification
+    jevOutcome: state.jevOutcome,
+
     // UI state
     aiAnalyzing: state.aiAnalyzing,
     isStreaming: state.isStreaming,

@@ -506,6 +506,7 @@ export default function AnalyzePage() {
     isStreaming: streamingStep !== 'idle' && streamingStep !== 'done',
     marketContext,
     aiReport,
+    jevOutcome: renderData?.jevOutcome ?? null,
     onOpenSettings: () => setSettingsOpen(true),
     onCompClick: (comp) => { setComparisonComp(comp as CompItem); setComparisonOpen(true) },
     onRunAiAnalysis: handleRunAiAnalysis,

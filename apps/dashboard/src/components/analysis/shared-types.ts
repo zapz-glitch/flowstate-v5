@@ -14,4 +14,7 @@ export type {
   FloodZoneData,
   NeighbourhoodData,
   ApiCallStats,
+  JevOutcomeData,
+  JevOutcomeDimension,
+  JevOutcomeSignal,
 } from '@/app/(dashboard)/dashboard/analyze/actions'

@@ -102,6 +102,11 @@ export interface AnalyzeData {
   }
   /** API call statistics from the analysis workflow */
   apiCallStats?: ApiCallStats | null
+  /**
+   * Jev read-only classification of this completed outcome. Display-only —
+   * never influenced comp selection, ARV, or the recommendation.
+   */
+  jevOutcome?: JevOutcomeData | null
   /** Justified evaluation report (subset used by comp feedback) */
   report?: {
     arv?: {
@@ -130,6 +135,30 @@ export interface AnalyzeData {
     arvThresholdPercent?: number
     asIsThresholdPercent?: number
   }
+}
+
+/** Jev read-only outcome classification attached to a completed analysis */
+export interface JevOutcomeData {
+  status: 'completed' | 'skipped' | 'unavailable'
+  reason?: string
+  classifications?: Partial<Record<JevOutcomeDimension, JevOutcomeSignal>>
+  model?: string
+  latencyMs?: number
+  inputTokens?: number
+  classifiedAt?: string
+}
+
+export type JevOutcomeDimension =
+  | 'evidence_sufficiency'
+  | 'comp_set_quality'
+  | 'deal_outlook'
+  | 'recommendation_agreement'
+  | 'risk_flags'
+
+export interface JevOutcomeSignal {
+  choice: string
+  confidence: number
+  probabilities: Record<string, number>
 }
 
 /** Property classification (As-Is vs After-Renovation) */
