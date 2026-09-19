@@ -79,6 +79,12 @@ export function DealSummaryHero({ valuation, isRecalculated, onOpenSettings }: D
         {valuation.carryingCosts != null && <span>Carry ${fmt(valuation.carryingCosts)}</span>}
         {valuation.totalInvestment != null && <span>Invest ${fmt(valuation.totalInvestment)}</span>}
         {valuation.wholesalePrice != null && <span>Wholesale ${formatHeadlineMoney(valuation.wholesalePrice, valuation.displayedWholesalePrice, valuation.displayRounding)}</span>}
+        {valuation.asIsMarketIntel?.asIsMarketPrice != null && (
+          <span title={`As-is AVG across ${valuation.asIsMarketIntel.compCount ?? 0} investment comps — insight only, does not affect ARV`}>
+            As-is AVG <span className="text-foreground-secondary">${fmt(valuation.asIsMarketIntel.asIsMarketPrice)}</span>
+            <span className="text-foreground-tertiary/50"> · insight</span>
+          </span>
+        )}
       </div>
     </div>
   )

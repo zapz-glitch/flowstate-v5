@@ -450,14 +450,14 @@ const TRUTH_STATE_AND_QUESTION_BYTES = 28_000
 function arvTruthQuestion(index: number): NoulQuestion {
   return {
     type: 'noul',
-    instructions: `Is state.comparables[${index}] a reliable source of truth for the subject's AFTER-RENOVATION retail market value — does its sale reflect what a retail buyer would credibly pay for the subject once renovated? This is the ARV bucket: the comp should read like a renovated/retail-priced sale (strong condition signals, retail-grade price per sqft), physically similar and nearby. Judge against state.subject using state.appraisalRules as context; the comp's ruleEvidence lists appraisal-rule outcomes as evidence, not verdicts. Missing values are unknown — answer only what the supplied evidence supports.`,
+    instructions: `Is state.comparables[${index}] a reliable source of truth for the subject's AFTER-RENOVATION retail market value — does its sale reflect what a retail buyer would credibly pay for the subject once renovated? This is the ARV bucket: the comp should read like a renovated/retail-priced sale (strong condition signals, retail-grade price per sqft), physically similar and nearby. Judge against state.subject using state.appraisalRules as context; the comp's ruleEvidence lists appraisal-rule outcomes as evidence, not verdicts. Missing or null fields are unknown — they must NOT reduce the score; score only the evidence that is present.`,
   }
 }
 
 function investmentTruthQuestion(index: number): NoulQuestion {
   return {
     type: 'noul',
-    instructions: `Is state.comparables[${index}] a reliable source of truth for the subject's AS-IS investment value — does its sale reflect what an investor would credibly pay for the subject today, in current condition? This is the investment bucket: the comp should read like an as-is or investment-grade sale (dated/distressed condition or below-retail pricing), physically similar and nearby. Judge against state.subject using state.appraisalRules as context; the comp's ruleEvidence lists appraisal-rule outcomes as evidence, not verdicts. Missing values are unknown — answer only what the supplied evidence supports.`,
+    instructions: `Is state.comparables[${index}] a reliable source of truth for the subject's AS-IS investment value — does its sale reflect what an investor would credibly pay for the subject today, in current condition? This is the investment bucket: the comp should read like an as-is or investment-grade sale (dated/distressed condition or below-retail pricing), physically similar and nearby. Judge against state.subject using state.appraisalRules as context; the comp's ruleEvidence lists appraisal-rule outcomes as evidence, not verdicts. Missing or null fields are unknown — they must NOT reduce the score; score only the evidence that is present.`,
   }
 }
 

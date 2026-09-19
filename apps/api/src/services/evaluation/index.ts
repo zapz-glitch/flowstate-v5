@@ -563,11 +563,13 @@ export async function performAnalysis(
 
   // ── Jev comp selection — authoritative for both comp sets ──────────────────
   // Every candidate gets two 0–1 truth scores: ARV (after-renovation retail
-  // value evidence) and investment (as-is investor value evidence). Top-3 by
-  // ARV truth drive the ARV; top-3 by investment truth become the investment
-  // (Group B) set. Appraisal rules already ran: their results are Jev's
-  // evidence and stay on the comp cards. If Jev is unavailable, the rules
-  // selection and the price-threshold Group B stand.
+  // value evidence) and investment (as-is investor value evidence). The
+  // HIGHER score assigns the comp's market: A > I → ARV-eligible; I > A →
+  // investment-only, never ARV-eligible. Appraisal rules gate each bucket —
+  // only comps matching the rules count toward an average. ARV = mean of
+  // adjusted prices over the A-bucket rule-matches; the I-bucket rule-matches
+  // average into the as-is AVG shown for insight. If Jev is unavailable, the
+  // rules selection and the price-threshold Group B stand.
   let jevInvestmentCompIds: string[] = []
   try {
     const jev = await scoreCompTruthWithJev(
@@ -576,38 +578,32 @@ export async function performAnalysis(
       { filters, adjustments },
       env,
     )
-    // ARV standard is a 3-comp set — Jev decides WHICH comps, not how many.
-    const arvTarget = Math.min(
-      appraisalResult.comparables.length,
-      Math.max(3, appraisalResult.selectedCompIds?.length ?? 0),
-    )
-    const jevSelectedIds = new Set(
-      [...appraisalResult.comparables]
-        .sort((a, b) => (jev.scores[b.id]?.arvTruth ?? -1) - (jev.scores[a.id]?.arvTruth ?? -1))
-        .slice(0, arvTarget)
+    const truth = (id: string) => jev.scores[id] ?? { arvTruth: 0, investmentTruth: 0 }
+    const rulesPassed = (c: AppraisedComparable) => !c.evaluation || !c.evaluation.shouldDisable
+    const jevArvIds = new Set(
+      appraisalResult.comparables
+        .filter((c) => truth(c.id).arvTruth > truth(c.id).investmentTruth && rulesPassed(c))
         .map((c) => c.id),
     )
-    jevInvestmentCompIds = [...appraisalResult.comparables]
-      .filter((c) => !jevSelectedIds.has(c.id))
-      .sort((a, b) => (jev.scores[b.id]?.investmentTruth ?? -1) - (jev.scores[a.id]?.investmentTruth ?? -1))
-      .slice(0, 3)
+    jevInvestmentCompIds = appraisalResult.comparables
+      .filter((c) => truth(c.id).investmentTruth > truth(c.id).arvTruth && rulesPassed(c))
       .map((c) => c.id)
     const jevInvestmentIds = new Set(jevInvestmentCompIds)
     appraisalResult.comparables = appraisalResult.comparables.map((comp) => ({
       ...comp,
-      isEnabled: jevSelectedIds.has(comp.id) || jevInvestmentIds.has(comp.id),
-      arvStatus: jevSelectedIds.has(comp.id)
+      isEnabled: jevArvIds.has(comp.id) || jevInvestmentIds.has(comp.id),
+      arvStatus: jevArvIds.has(comp.id)
         ? 'selected' as const
         : comp.arvStatus === 'selected' ? 'not_examined' as const : comp.arvStatus,
       jevArvTruth: jev.scores[comp.id]?.arvTruth ?? null,
       jevInvestmentTruth: jev.scores[comp.id]?.investmentTruth ?? null,
     }))
-    appraisalResult.selectedCompIds = [...jevSelectedIds]
+    appraisalResult.selectedCompIds = [...jevArvIds]
     appraisalResult.arv = appraisalService.calculateARV(
-      appraisalResult.comparables.filter((c) => jevSelectedIds.has(c.id)),
+      appraisalResult.comparables.filter((c) => jevArvIds.has(c.id)),
     )
-    appraisalResult.insufficientComps = jevSelectedIds.size === 0
-    step('jev_selection', 'completed', `Jev selected ${jevSelectedIds.size} ARV + ${jevInvestmentIds.size} investment comps from ${appraisalResult.comparables.length} candidates (${jev.model})`)
+    appraisalResult.insufficientComps = jevArvIds.size === 0
+    step('jev_selection', 'completed', `Jev bucketed ${appraisalResult.comparables.length} candidates → ${jevArvIds.size} ARV + ${jevInvestmentIds.size} investment comps matching appraisal rules (${jev.model})`)
   } catch (error) {
     console.warn('[Evaluate] Jev comp selection unavailable — rules selection stands:', error instanceof Error ? error.message : error)
     step('jev_selection', 'fallback', 'Jev unavailable — appraisal-rules selection used')
