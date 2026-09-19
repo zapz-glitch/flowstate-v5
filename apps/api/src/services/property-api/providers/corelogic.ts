@@ -196,41 +196,54 @@ let currentKeyIndex = 0
  * we wait for it. This is what keeps bursts of evaluations queued instead
  * of hitting the provider limit.
  *
- * granted=false (queue saturated) throws a retryable error so callers can
- * back off and retry. Transport errors to the coordinator itself fail open
- * with a warning — a throttle hiccup shouldn't kill evaluations.
+ * granted=false means the reserved backlog exceeded the coordinator's cap.
+ * The window drains continuously (50/min), so we retry with jitter for up
+ * to ACQUIRE_BUDGET_MS — a burst of concurrent jobs waits its turn instead
+ * of dying on arrival order. Only a sustained overload beyond the budget
+ * still throws. Transport errors to the coordinator itself fail open with
+ * a warning — a throttle hiccup shouldn't kill evaluations.
  */
+const ACQUIRE_BUDGET_MS = 20 * 60_000
+
 async function acquireCotalitySlot(env: Env): Promise<void> {
   const ns = env.RATE_LIMIT_COORDINATOR
   if (!ns) return
 
-  try {
-    const doId = ns.idFromName('cotality-global-throttle')
-    const stub = ns.get(doId)
-    const res = await stub.fetch(
-      new Request('https://internal/throttle/acquire', { method: 'POST' })
-    )
-    if (!res.ok) {
-      console.warn(`[Cotality Throttle] Coordinator error ${res.status} — proceeding unthrottled`)
+  const deadline = Date.now() + ACQUIRE_BUDGET_MS
+  for (;;) {
+    let data: { granted: boolean; waitMs?: number; error?: string }
+    try {
+      const doId = ns.idFromName('cotality-global-throttle')
+      const stub = ns.get(doId)
+      const res = await stub.fetch(
+        new Request('https://internal/throttle/acquire', { method: 'POST' })
+      )
+      if (!res.ok) {
+        await res.text().catch(() => {})
+        console.warn(`[Cotality Throttle] Coordinator error ${res.status} — proceeding unthrottled`)
+        return
+      }
+      data = (await res.json()) as typeof data
+    } catch (error) {
+      console.warn('[Cotality Throttle] Acquire failed — proceeding unthrottled:', error)
       return
     }
-    const data = (await res.json()) as {
-      granted: boolean
-      waitMs?: number
-      error?: string
+
+    if (data.granted) {
+      if (data.waitMs && data.waitMs > 0) {
+        console.log(`[Cotality Throttle] Queued ${data.waitMs}ms for rate-limit slot`)
+        await new Promise((resolve) => setTimeout(resolve, data.waitMs))
+      }
+      return
     }
-    if (!data.granted) {
+
+    const remaining = deadline - Date.now()
+    if (remaining <= 0) {
       throw new Error(data.error || 'Cotality rate-limit queue saturated')
     }
-    if (data.waitMs && data.waitMs > 0) {
-      console.log(`[Cotality Throttle] Queued ${data.waitMs}ms for rate-limit slot`)
-      await new Promise((resolve) => setTimeout(resolve, data.waitMs))
-    }
-  } catch (error) {
-    if (error instanceof Error && error.message.includes('rate-limit queue saturated')) {
-      throw error
-    }
-    console.warn('[Cotality Throttle] Acquire failed — proceeding unthrottled:', error)
+    const backoff = Math.min(15_000 + Math.random() * 15_000, remaining)
+    console.log(`[Cotality Throttle] Queue saturated — retrying acquire in ${Math.ceil(backoff / 1000)}s`)
+    await new Promise((resolve) => setTimeout(resolve, backoff))
   }
 }
 

@@ -498,6 +498,39 @@ proofs in jev-outcome.test.ts: score-retyped dimension stays in
 dimension is absent (not fatal); unknown future answer types pass
 through `answers`; driver nouls still extract.
 
+### 2026-09-19 — API polling endpoint + burst-throttle hardening
+
+User is about to send properties via the API in bursts up to ~100
+concurrent. Two changes:
+
+1. `GET /v1/analyze/jobs/:jobId` (analyze.ts) — the documented-but-
+   missing polling endpoint. Reads the AnalysisJobDO `/state`; ownership
+   check (`state.userId === auth.userId`, 404 on mismatch). Returns:
+   - processing → {status:'processing', pending, lastEvent, elapsedMs}
+   - complete → {status:'complete', result} — latest `updatedResult`
+     event wins (llm_complete carries the post-annotation copy); falls
+     back to savedReports.fullResponseJson when the DO state is gone.
+   - errored → {status:'error', error}
+   Serves both Bearer keys and dashboard internal auth (same router).
+
+2. `acquireCotalitySlot` (corelogic.ts) — burst hardening. The global
+   Cotality window is 50 req/min with a 5-min backlog cap (~250 slots);
+   granted=false previously threw immediately, killing the whole job on
+   critical-path calls (search/comparables). Now retries with 15–30s
+   jitter for up to ACQUIRE_BUDGET_MS (20 min) — the window drains
+   continuously so concurrent jobs wait their turn instead of dying.
+   Enrichment per-comp calls were already failure-isolated.
+
+Burst reality check: ~5–30 provider calls/job after dead-comp pruning →
+a 100-property cold burst drains in roughly 10–60 min of provider time.
+Jobs complete rather than fail; SSE clients will outlive the 5-min
+stream cap under heavy bursts — polling is the right channel there.
+
+Verified live (local :8792): processing status mid-flight (pending +
+lastEvent), complete result with jevOutcome.classifications (all 5
+dims) + answers (19 entries), 404 on unknown job, ownership enforced.
+tsc clean; 20/20 regression files pass.
+
 ### 2026-09-18 — Reset from feat/jev-rules-evaluation
 - Prior branch (Python/GIS bridge + Jev atomic signals + Python-owned
   qualification/ranking) deleted per user direction — it replaced v5

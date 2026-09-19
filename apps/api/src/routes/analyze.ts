@@ -163,13 +163,12 @@ function validateModel(model: string | undefined): string | undefined {
 /**
  * POST /analyze
  *
- * Start a property analysis using Cloudflare Workflows.
- * Returns immediately with job ID and URLs for status/streaming.
+ * Start a property analysis. Returns immediately with job ID and a
+ * signed SSE stream URL; the work runs inside a per-job Durable Object.
  *
- * Processing is handled by AnalysisWorkflow with parallel execution.
  * Results can be retrieved via:
- * - WebSocket: /ws/analyze/:jobId (real-time updates)
- * - Polling: GET /analyze/jobs/:jobId
+ * - SSE: GET /sse/analyze/:jobId?token=... (real-time events)
+ * - Polling: GET /v1/analyze/jobs/:jobId
  */
 analyze.post('/', async (c) => {
   try {
@@ -362,6 +361,86 @@ analyze.post('/', async (c) => {
       error instanceof Error ? error.message : 'Failed to analyze property';
     return c.json({ success: false, error: message }, 500);
   }
+});
+
+/**
+ * GET /analyze/jobs/:jobId
+ *
+ * Poll a submitted analysis — the return channel for API clients that
+ * can't hold the SSE stream. Returns job status while running and the
+ * same AnalysisResponse (incl. jevOutcome) once complete. Falls back to
+ * the saved report when the Durable Object state is gone.
+ */
+analyze.get('/jobs/:jobId', async (c) => {
+  const auth = c.get('auth');
+  const jobId = c.req.param('jobId');
+
+  const doId = c.env.ANALYSIS_JOB.idFromName(jobId);
+  const stub = c.env.ANALYSIS_JOB.get(doId);
+  const resp = await stub.fetch('http://internal/state');
+  const state = (await resp.json().catch(() => null)) as {
+    userId?: string
+    status?: string
+    pending?: string[]
+    events?: Array<{ event: string; data?: unknown }>
+    error?: string
+    createdAt?: number
+  } | null;
+
+  // jobIds are unguessable, but still verify ownership so a leaked id
+  // can't read another user's evaluation.
+  if (state?.userId && state.userId !== auth.userId) {
+    return c.json({ success: false, error: 'Job not found' }, 404);
+  }
+
+  const reportResult = async () => {
+    const db = drizzle(c.env.DB);
+    const [report] = await db
+      .select({ fullResponseJson: savedReports.fullResponseJson })
+      .from(savedReports)
+      .where(and(eq(savedReports.userId, auth.userId), eq(savedReports.jobId, jobId)))
+      .limit(1);
+    return report?.fullResponseJson ? JSON.parse(report.fullResponseJson) : null;
+  };
+
+  if (state?.status === 'complete' || state?.status === 'error') {
+    // The latest updatedResult event is canonical — llm_complete carries
+    // the post-annotation copy.
+    let result: unknown = null;
+    for (const ev of state.events ?? []) {
+      const data = ev.data as { updatedResult?: unknown } | null | undefined;
+      if (data && typeof data === 'object' && data.updatedResult) result = data.updatedResult;
+    }
+    if (!result) result = await reportResult();
+    if (result) {
+      return c.json({ success: true, data: { jobId, status: 'complete', result } });
+    }
+    return c.json({
+      success: true,
+      data: { jobId, status: 'error', error: state.error ?? 'Evaluation failed' },
+    });
+  }
+
+  if (state?.status === 'processing' || state?.status === 'idle') {
+    const events = state.events ?? [];
+    return c.json({
+      success: true,
+      data: {
+        jobId,
+        status: 'processing',
+        pending: state.pending ?? [],
+        lastEvent: events.length ? events[events.length - 1]!.event : null,
+        elapsedMs: state.createdAt ? Date.now() - state.createdAt : null,
+      },
+    });
+  }
+
+  // DO state missing ('not_found') — the saved report outlives it.
+  const result = await reportResult();
+  if (result) {
+    return c.json({ success: true, data: { jobId, status: 'complete', result } });
+  }
+  return c.json({ success: false, error: 'Job not found' }, 404);
 });
 
 /**
