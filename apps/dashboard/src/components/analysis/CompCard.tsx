@@ -56,6 +56,15 @@ export function CompCard({
   const hasArvSelection = isSelectedForArv !== undefined
   const isEnabled = hasArvSelection ? isSelectedForArv : comp.isEnabled !== false
 
+  // Bucket label = Jev's classification (higher truth wins; tie → no
+  // bucket) — shown for every scored comp, not only the counted set.
+  // compGroup (the server's counted group) is the fallback when scores
+  // are absent.
+  const bucket = comp.jevArvTruth != null && comp.jevInvestmentTruth != null
+    ? (comp.jevArvTruth > comp.jevInvestmentTruth ? 'arv'
+      : comp.jevInvestmentTruth > comp.jevArvTruth ? 'as_is' : null)
+    : comp.compGroup ?? null
+
   const subjectSubdiv = subject?.subdivision ?? subjectSubdivision
   const hasSubdivisionMatch = !!(
     subjectSubdiv &&
@@ -112,6 +121,19 @@ export function CompCard({
                 title={`Investment truth ${(comp.jevInvestmentTruth * 100).toFixed(0)}% — Jev's probability this comp is reliable evidence of the subject's as-is investor value`}
               >
                 I·{(comp.jevInvestmentTruth * 100).toFixed(0)}%
+              </div>
+            )}
+            {bucket && (
+              <div
+                className={cn(
+                  'h-6 px-1.5 rounded flex items-center text-[10px] font-bold flex-shrink-0',
+                  bucket === 'arv' ? 'bg-emerald-500/15 text-emerald-600' : 'bg-amber-500/15 text-amber-600'
+                )}
+                title={bucket === 'arv'
+                  ? 'Jev classified this comp as ARV (after-renovation) evidence — enabled comps in this bucket count toward the ARV'
+                  : 'Jev classified this comp as as-is (investment) evidence — enabled comps in this bucket count toward the as-is average'}
+              >
+                {bucket === 'arv' ? 'ARV' : 'AS-IS'}
               </div>
             )}
             {comp.flip && (

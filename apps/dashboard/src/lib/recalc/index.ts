@@ -138,7 +138,9 @@ export function recalculateReport(
     return {
       isEnabled,
       compScore,
-      compGroup: null as 'arv' | 'as_is' | null, // computed after ARV is known
+      // Jev's bucket is the authoritative classification — threshold
+      // grouping below only fills comps the server left unbucketed.
+      compGroup: (comp.compGroup ?? null) as 'arv' | 'as_is' | null,
       pricePercentile: null as number | null, // computed after all comps scored
       disableReasons: evaluation.disableReasons,
       filterResults: evaluation.filterResults,
@@ -194,12 +196,13 @@ export function recalculateReport(
   compEvaluations.forEach((ev, i) => {
     const salePrice = comps[i].salePrice ?? 0
 
-    if (ev.isEnabled && topPriceIndices.has(i)) {
-      ev.compGroup = 'arv'
-    } else if (salePrice > 0 && salePrice <= priceCeiling) {
-      ev.compGroup = 'as_is'
-    } else {
-      ev.compGroup = null
+    if (ev.compGroup == null) {
+      // No server bucket (Jev unbucketed / unavailable) — threshold fallback.
+      if (ev.isEnabled && topPriceIndices.has(i)) {
+        ev.compGroup = 'arv'
+      } else if (salePrice > 0 && salePrice <= priceCeiling) {
+        ev.compGroup = 'as_is'
+      }
     }
 
     // Percentile among ALL comps by sale price
