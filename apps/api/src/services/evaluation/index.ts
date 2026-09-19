@@ -36,7 +36,7 @@ import {
   type ApiCallStats,
   type ResponseContext,
 } from '../analysis'
-import { createPhotoService, type PhotoBundle, type PropertyIdentifier, type PropertyPhotos } from '../photo-provider'
+import { createPhotoService, createPhotoProvider, type PhotoBundle, type PropertyIdentifier, type PropertyPhotos } from '../photo-provider'
 import { scoreCompTruthWithJev } from '../jev'
 import { persistReportAssets } from '../report-assets'
 import { expansionRefetchRadius } from '../property-api/retrieval-policy'
@@ -500,6 +500,32 @@ export async function performAnalysis(
           ? `${photoBundle.subject.photos.length} subject photos via ${photoBundle.subject.source}`
           : 'No subject photos found'
       )
+
+      // Reconciliation needs Zillow's priceHistory, but the comp chain bounds
+      // each provider attempt at ~15s — a stealth scrape takes 40-90s, so
+      // Zillow usually loses the race and a history-less fallback provider
+      // wins. The timed-out Zillow fetch keeps running and still writes its
+      // KV cache entry, so re-reading Zillow here is near-instant for those
+      // comps; genuinely missing ones get one real scrape. Only the
+      // rule-matching set is queried — the same group fetched above.
+      const zillow = createPhotoProvider(env, 'zillow')
+      if (zillow?.isAvailable() && compIdents.length > 0) {
+        await Promise.all(
+          compIdents.map(async (ident) => {
+            const existing = photoBundle!.comps[ident.propertyId]
+            if (existing?.priceHistory?.length) return
+            const res = await zillow.fetchPhotos(ident, { maxPhotos: 0 })
+            if (!res.success || !res.data.priceHistory?.length) return
+            if (existing) {
+              existing.priceHistory = res.data.priceHistory
+              existing.lastSaleDate = res.data.lastSaleDate ?? existing.lastSaleDate
+              existing.lastSalePrice = res.data.lastSalePrice ?? existing.lastSalePrice
+            } else {
+              photoBundle!.comps[ident.propertyId] = res.data
+            }
+          }),
+        )
+      }
     } else {
       step('photo_fetch', 'fallback', 'No photo provider configured')
     }

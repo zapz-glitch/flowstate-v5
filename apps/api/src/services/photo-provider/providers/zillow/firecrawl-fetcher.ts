@@ -32,9 +32,8 @@ import { createOpenRouterProvider } from '../../../llm'
 // ─── Cache Configuration ────────────────────────────────────────────────────
 
 /** Cache key prefix for Firecrawl Zillow responses */
-// v2: comp fetches now use full JSON extraction (priceHistory for stale-price
-// reconciliation + flip detection) — HTML-only cached extractions must not be reused
-const CACHE_PREFIX = 'zillow-fc-v2:'
+// v3: priceHistory parsed from HTML table labels — drop v2 entries that lack it
+const CACHE_PREFIX = 'zillow-fc-v3:'
 
 /** Default cache TTL in seconds (24 hours) */
 const DEFAULT_CACHE_TTL = 24 * 60 * 60
@@ -252,6 +251,7 @@ function isValidExtraction(extraction: ZillowExtraction): boolean {
 function parseZillowHtml(html: string): ZillowExtraction {
   const photos: string[] = []
   const features: string[] = []
+  const priceHistory: NonNullable<ZillowExtraction['priceHistory']> = []
   let description: string | undefined
   let price: number | undefined
   let status: ZillowExtraction['status'] | undefined
@@ -400,6 +400,23 @@ function parseZillowHtml(html: string): ZillowExtraction {
       }
     }
 
+    // Price history from the "Price history" table — each row carries a label
+    // like "Date: 6/9/2026, Event: Sold, Price: $325,000 (-9.7%)". This is the
+    // deterministic source for sold events when JSON/LLM extraction is
+    // unavailable (Firecrawl's extraction model overflows its context window
+    // on ~3MB Zillow pages).
+    const historyRowPattern = /label="Date: (\d{1,2})\/(\d{1,2})\/(\d{4}), Event: ([^,"]+), Price: \$([0-9,]+)/g
+    let rowMatch
+    while ((rowMatch = historyRowPattern.exec(html)) !== null) {
+      const price = parseInt(rowMatch[5].replace(/,/g, ''), 10)
+      if (!(price > 0)) continue
+      priceHistory.push({
+        date: `${rowMatch[3]}-${rowMatch[1].padStart(2, '0')}-${rowMatch[2].padStart(2, '0')}`,
+        event: rowMatch[4].trim(),
+        price,
+      })
+    }
+
   } catch (error) {
     console.error('[FirecrawlZillow] HTML parsing error:', error)
     return { photos: [], error: 'Failed to parse HTML' }
@@ -411,6 +428,7 @@ function parseZillowHtml(html: string): ZillowExtraction {
     price,
     status,
     features: features.length > 0 ? features : undefined,
+    priceHistory: priceHistory.length > 0 ? priceHistory : undefined,
   }
 }
 
@@ -881,7 +899,7 @@ export class FirecrawlZillowFetcher {
       pool: j.pool as boolean | undefined,
       waterfront: j.waterfront as boolean | undefined,
       view: j.view as string | undefined,
-      priceHistory: j.priceHistory as ZillowExtraction['priceHistory'],
+      priceHistory: (j.priceHistory ?? htmlPhotos.priceHistory) as ZillowExtraction['priceHistory'],
       neighborhood: j.neighborhood as string | undefined,
       walkScore: j.walkScore as number | undefined,
       transitScore: j.transitScore as number | undefined,
