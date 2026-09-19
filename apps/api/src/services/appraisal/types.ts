@@ -29,6 +29,15 @@ export type FilterType =
   | 'road_barrier'
   | 'sale_age_expansion'
   | 'sale_age_expansion_2'
+  // Vintage-subject fallback — NOT a per-comp rule (no evaluator exists,
+  // so the per-comp loop skips it). When the subject was built before the
+  // cap year and every year-built tier still finds too few comps, the
+  // ladder retries with year_built_diff swapped for `year_built_cap`.
+  | 'vintage_year_cap'
+  // Injected by the ladder at the vintage tier in place of
+  // year_built_diff: evaluates comp.yearBuilt <= filter.value. Never a
+  // default filter row — the evaluator exists only for that tier.
+  | 'year_built_cap'
 
 export interface AppraisalFilter {
   type: FilterType
@@ -76,6 +85,11 @@ export const DEFAULT_FILTERS: AppraisalFilter[] = [
   // ends insufficient.
   { type: 'sale_age_expansion', enabled: true, value: 365, priority: 'soft' }, // first retry ≈ 12 months
   { type: 'sale_age_expansion_2', enabled: true, value: 548, priority: 'soft' }, // deepest retry ≈ 18 months
+  // Vintage-subject year fallback — NOT a per-comp rule (no evaluator).
+  // For subjects built BEFORE this year: when no year-built tier finds
+  // comps, the ladder allows comps built on/before this year instead of
+  // the ±diff. Disable to keep only the ±diff widening for old stock.
+  { type: 'vintage_year_cap', enabled: true, value: 1970, priority: 'soft' },
 ]
 
 /** System default priority for a filter type ('hard' when unspecified). */
@@ -97,6 +111,21 @@ export function saleAgeExpansionSteps(filters: AppraisalFilter[], baseDays: numb
     .map((f) => f.value)
     .filter((v) => v > baseDays)
   return [...new Set(steps)].sort((a, b) => a - b)
+}
+
+/**
+ * The configured vintage-subject year cap when it applies to this
+ * subject: the enabled `vintage_year_cap` row's value, only when the
+ * subject was built before that year. Undefined otherwise — the rule
+ * exists solely for pre-cap stock (a cap of 1970 means subjects ≥1970
+ * never reach the vintage tier).
+ */
+export function vintageYearCap(
+  filters: AppraisalFilter[],
+  subjectYearBuilt?: number | null
+): number | undefined {
+  const cap = filters.find((f) => f.type === 'vintage_year_cap' && f.enabled)?.value
+  return cap != null && subjectYearBuilt != null && subjectYearBuilt < cap ? cap : undefined
 }
 
 // ─── Filter Labels (for UI) ────────────────────────────────────────────────────
@@ -220,6 +249,18 @@ export const FILTER_LABELS: Record<FilterType, {
     shortLabel: 'Age Fallback 2',
     unit: 'days',
     description: 'Deepest sale-age retry — attempted only if Tier 1 still yields insufficient comps',
+  },
+  vintage_year_cap: {
+    label: 'Vintage Year Fallback',
+    shortLabel: 'Vintage Cap',
+    unit: 'year',
+    description: 'Subjects built before this year: when no comps satisfy year-built, allow comps built on/before this year',
+  },
+  year_built_cap: {
+    label: 'Year Built Cap',
+    shortLabel: 'Year Cap',
+    unit: 'year',
+    description: 'Comp must be built on or before this year (vintage-subject fallback tier)',
   },
 }
 
@@ -406,8 +447,10 @@ export interface ExpansionPolicy {
   allowYearBuiltExpansion?: boolean
   /**
    * Extra year tolerances tried in order after the configured
-   * year_built_diff value (default: [+2, +4] → ±10, ±12, ±14).
-   * These are the ONLY sanctioned year-built relaxations.
+   * year_built_diff value (default: [+2, +4] → ±10, ±12, ±14). The only
+   * other sanctioned year-built relaxation is the vintage-subject cap:
+   * for subjects built before the enabled vintage_year_cap row's year,
+   * a final ladder step allows comps built on/before that year.
    */
   yearBuiltExpansionSteps?: number[]
   /** Allow dropping the subdivision constraint within a widened radius (default: true) */

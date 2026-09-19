@@ -27,7 +27,7 @@ import {
   type ComparablesRetrievalMeta,
 } from '../services/property-api/retrieval-policy'
 import { DEFAULT_FILTERS, evaluateComparable, type AppraisalFilter } from '../services/appraisal'
-import { DEFAULT_EXPANSION_POLICY, saleAgeExpansionSteps } from '../services/appraisal/types'
+import { DEFAULT_EXPANSION_POLICY, saleAgeExpansionSteps, vintageYearCap } from '../services/appraisal/types'
 import { filtersToApiParams } from '../services/appraisal/types'
 import type { Env } from '../types'
 import type { NormalizedProperty, NormalizedComparable } from '../services/property-api/types'
@@ -376,6 +376,10 @@ export class AnalysisJobDO {
       sqftDiff: filterValue('sqft_diff', 250),
       maxYearDiff: filterValue('year_built_diff', 10) +
         Math.max(0, ...DEFAULT_EXPANSION_POLICY.yearBuiltExpansionSteps),
+      // Vintage-subject fallback: when the subject predates the configured
+      // cap, comps built on/before it can still be admitted by the vintage
+      // tier — pruning on ±maxYearDiff would starve them of enrichment.
+      vintageYearCap: vintageYearCap(filters, property.yearBuilt),
     }
     const nowMs = Date.now()
     const isDeadComp = (c: NormalizedComparable): boolean =>

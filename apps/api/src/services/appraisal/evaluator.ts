@@ -145,6 +145,35 @@ function evaluateYearBuiltDiff(
   }
 }
 
+/**
+ * Absolute build-year ceiling — the vintage-subject fallback rule the
+ * ladder swaps in for year_built_diff. One-sided: any comp built on or
+ * before the cap passes, however much older than the subject it is.
+ */
+function evaluateYearBuiltCap(
+  _subject: NormalizedProperty,
+  comp: NormalizedComparable,
+  filter: AppraisalFilter
+): FilterResult {
+  if (!comp.yearBuilt) {
+    return {
+      type: 'year_built_cap',
+      passed: true,
+      status: 'not_verified',
+      reason: 'Year built not available — rule not verified',
+    }
+  }
+
+  const passed = comp.yearBuilt <= filter.value
+  return {
+    type: 'year_built_cap',
+    passed,
+    reason: passed ? undefined : `Built after vintage cap: ${comp.yearBuilt} (cap: ${filter.value})`,
+    actualValue: comp.yearBuilt,
+    threshold: filter.value,
+  }
+}
+
 function evaluateDistance(
   _subject: NormalizedProperty,
   comp: NormalizedComparable,
@@ -652,6 +681,7 @@ const FILTER_EVALUATORS: Partial<Record<
   sale_age: evaluateSaleAge,
   sqft_diff: evaluateSqftDiff,
   year_built_diff: evaluateYearBuiltDiff,
+  year_built_cap: evaluateYearBuiltCap,
   distance: evaluateDistance,
   property_type: evaluatePropertyType,
   lot_size_diff: evaluateLotSizeDiff,

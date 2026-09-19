@@ -410,6 +410,50 @@ walk via error-message drift 180→548.
 Open: ARV `sale_age` row remains the primary window — ladder tiers are
 last-resort only. Disabling both rows = feature off.
 
+### 2026-09-19 — Vintage-subject year cap (pre-1970 fallback)
+
+User rule: "If the property is pre 1970 and there are no comps that
+match year built (e.g. subject 1949, nothing within ±10yr), you can use
+comps up to 1970 year built — only for pre-1970 properties when no
+year-built comps are found."
+
+Model: same pattern as the sale-age tiers — TWO new FilterTypes:
+- `vintage_year_cap` (config row in DEFAULT_FILTERS, enabled, 1970,
+  soft; NO evaluator → never a per-comp rule). Editable in the filter
+  rules section like everything else; disable = feature off.
+- `year_built_cap` (real evaluator: comp.yearBuilt <= value, one-sided;
+  NOT in DEFAULT_FILTERS — injected by the ladder only at the vintage
+  tier, replacing year_built_diff in the tier's filter set).
+
+Engine (appraisal/index.ts): year steps are now `number | 'vintage'`.
+When `vintageYearCap(filters, subject.yearBuilt)` returns a cap
+(subject.yearBuilt < cap AND row enabled), `'vintage'` is appended to
+both the strict-exit step list and the full year ladder — so the cap is
+tried inside every geography scope (subdivision → neighborhood →
+×radius → no-radius) after the numeric ± tolerances. At that step,
+filtersAt swaps year_built_diff for `{type:'year_built_cap', hard,
+value:cap}` — real audit-trail row ("Built after vintage cap: 1975
+(cap: 1970)"). Success reports fallbackUsed='year_built_expansion',
+expansionApplied=['year_built', ...scope]. Gated by
+allowYearBuiltExpansion like the other year steps. Step-6 (nearest)
+message/audit reflects the cap when vintage applies.
+
+Prune (retrieval-policy.ts + analysis-job.ts): DeadCompThresholds
+gains `vintageYearCap`; isProvablyDeadComp uses a ONE-SIDED check
+(comp.yearBuilt <= cap) when the subject predates the cap — a 1920 comp
+for a 1949 subject is no longer starved of enrichment. Post-cap
+subjects keep the symmetric ±maxYearDiff bound.
+
+Verified: tsc clean api+dashboard; 20/20 regression files pass with new
+proofs (1949 subject: 1964/1968/1920 comps admitted via cap, 1975 comp
+disqualified + audited; 1975 subject never reaches the tier; disabled
+row disables it; one-sided pruning). Live: 275 Temple St Mulberry (1920)
+— INSUFFICIENT_COMPS, market pool only has 2 comps (can't manufacture
+comps that don't exist); 1420 Bolton Rd NW Atlanta (1945) — pool
+resolved as RESIDENTIAL LOT, insufficient by type; 2447 Crestview Ave
+Decatur (1946) — completed, fallbackUsed:'none' (strict pool filled,
+vintage never needed — correct).
+
 ### 2026-09-18 — Reset from feat/jev-rules-evaluation
 - Prior branch (Python/GIS bridge + Jev atomic signals + Python-owned
   qualification/ranking) deleted per user direction — it replaced v5

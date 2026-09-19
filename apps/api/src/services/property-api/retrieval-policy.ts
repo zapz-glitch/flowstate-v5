@@ -177,6 +177,12 @@ export interface DeadCompThresholds {
   sqftDiff: number
   /** Max |comp year - subject year| at the WIDEST sanctioned tolerance. */
   maxYearDiff: number
+  /**
+   * Vintage-subject ceiling (e.g. 1970): when set and the subject was
+   * built before it, the year check becomes one-sided —
+   * comp.yearBuilt <= cap — matching the ladder's vintage tier.
+   */
+  vintageYearCap?: number
 }
 
 /**
@@ -207,6 +213,12 @@ export function isProvablyDeadComp(
       : Math.abs(comp.squareFeet - subject.squareFeet) <= thresholds.sqftDiff
     if (!sqftOk) return true
   }
-  if (comp.yearBuilt && subject.yearBuilt && Math.abs(comp.yearBuilt - subject.yearBuilt) > thresholds.maxYearDiff) return true
+  if (comp.yearBuilt && subject.yearBuilt) {
+    const vintage = thresholds.vintageYearCap != null && subject.yearBuilt < thresholds.vintageYearCap
+    const yearOk = vintage
+      ? comp.yearBuilt <= thresholds.vintageYearCap!
+      : Math.abs(comp.yearBuilt - subject.yearBuilt) <= thresholds.maxYearDiff
+    if (!yearOk) return true
+  }
   return false
 }

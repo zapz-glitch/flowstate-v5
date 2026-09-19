@@ -8,6 +8,8 @@
  * 5. Radius-bound expansion triggers a refetch, not an incomplete pool.
  * 6. A bigger pool does not enrich every candidate — only provably-dead
  *    comps (never-relaxed rules) skip the paid property-detail call.
+ * 7. Pre-cap-vintage subjects (e.g. built <1970) get a last-resort
+ *    one-sided year cap when no year-built tier finds comps.
  */
 import assert from 'node:assert/strict'
 import { createPropertyApi } from '../src/services/property-api'
@@ -194,4 +196,66 @@ const bigPool = Array.from({ length: 60 }, (_, i) =>
 const enrichable = bigPool.filter((c) => !isProvablyDeadComp(c, subject, thresholds, now))
 assert.equal(enrichable.length, 50, 'only provably-live candidates get paid enrichment')
 
-console.log('Comparable retrieval: pool breadth, deep-candidate selection, order invariance, truncation audit, expansion refetch, enrichment pruning — all passed')
+// ─── 7: vintage-subject year cap (pre-1970 fallback) ─────────────────────────
+
+// 1949 subject — nothing within the ±10/±12/±14 ladder, but comps built
+// ≤1970 qualify at the vintage tier (one-sided cap — 1920 is admissible).
+const vintageSubject: NormalizedProperty = { ...subject, yearBuilt: 1949 }
+const vintageFilters: AppraisalFilter[] = [
+  ...filters,
+  { type: 'year_built_diff', enabled: true, value: 10 },
+  { type: 'vintage_year_cap', enabled: true, value: 1970, priority: 'soft' },
+]
+const vintagePool = [
+  mkComp('v-64', { yearBuilt: 1964, salePrice: 210000 }),
+  mkComp('v-68', { yearBuilt: 1968, salePrice: 200000 }),
+  mkComp('v-20', { yearBuilt: 1920, salePrice: 150000 }),
+  mkComp('v-75', { yearBuilt: 1975, salePrice: 999999 }),
+]
+const vr = service.evaluateWithFallback(vintageSubject, vintagePool, { filters: vintageFilters, adjustments: [] })
+assert.equal(vr.insufficientComps, false, 'vintage tier fills the pool')
+assert.equal(vr.fallbackUsed, 'year_built_expansion')
+const v20 = vr.comparables.find((c) => c.id === 'v-20')
+assert.equal(v20?.isEnabled, true, 'cap admits any ≤1970 build — however old')
+assert.ok(
+  v20?.evaluation?.filterResults.some((f) => f.type === 'year_built_cap' && f.passed === true),
+  'admission is audited as a passed year_built_cap row'
+)
+// Eligible ≠ selected: the cheapest vintage comp can still fall outside
+// the top-of-market ARV band — eligibility is what the cap governs.
+assert.equal(v20?.arvStatus, 'not_examined')
+const v75 = vr.comparables.find((c) => c.id === 'v-75')
+assert.equal(v75?.isEnabled, false, 'post-cap comp stays disqualified')
+assert.ok(
+  v75?.evaluation?.filterResults.some((f) => f.type === 'year_built_cap' && f.passed === false),
+  'post-cap failure is audited as year_built_cap'
+)
+
+// The rule is strictly for pre-cap stock: a 1975 subject never reaches
+// the vintage tier — same pool stays insufficient.
+const modernSubject: NormalizedProperty = { ...subject, yearBuilt: 1975 }
+const modernPool = [
+  mkComp('m-90a', { yearBuilt: 1990 }),
+  mkComp('m-90b', { yearBuilt: 1990 }),
+  mkComp('m-90c', { yearBuilt: 1990 }),
+]
+const mr = service.evaluateWithFallback(modernSubject, modernPool, { filters: vintageFilters, adjustments: [] })
+assert.equal(mr.insufficientComps, true, 'vintage cap never applies to post-cap subjects')
+
+// Disabled config row → no vintage tier, identical vintage pool is insufficient.
+const vrOff = service.evaluateWithFallback(vintageSubject, vintagePool, {
+  filters: vintageFilters.map((f) =>
+    f.type === 'vintage_year_cap' ? { ...f, enabled: false } : f
+  ),
+  adjustments: [],
+})
+assert.equal(vrOff.insufficientComps, true, 'disabling the row disables the tier')
+
+// Pruning honors the cap one-sidedly for pre-cap subjects.
+const vintageThresholds = { saleAgeDays: 548, sqftDiff: 250, maxYearDiff: 14, vintageYearCap: 1970 }
+assert.equal(isProvablyDeadComp(mkComp('pv-65', { yearBuilt: 1965 }), vintageSubject, vintageThresholds, now), false, '≤cap comp is enrichable')
+assert.equal(isProvablyDeadComp(mkComp('pv-20', { yearBuilt: 1920 }), vintageSubject, vintageThresholds, now), false, 'any pre-cap year is enrichable — one-sided')
+assert.equal(isProvablyDeadComp(mkComp('pv-75', { yearBuilt: 1975 }), vintageSubject, vintageThresholds, now), true, 'post-cap comp is provably dead')
+assert.equal(isProvablyDeadComp(mkComp('pv-60', { yearBuilt: 1960 }), modernSubject, vintageThresholds, now), true, 'post-cap subjects keep the symmetric bound')
+
+console.log('Comparable retrieval: pool breadth, deep-candidate selection, order invariance, truncation audit, expansion refetch, enrichment pruning, vintage year cap — all passed')

@@ -30,7 +30,7 @@ import type {
   ComparableEvaluation,
   ExpansionPolicy,
 } from './types'
-import { DEFAULT_FILTERS, DEFAULT_ADJUSTMENTS, DEFAULT_EXPANSION_POLICY, saleAgeExpansionSteps } from './types'
+import { DEFAULT_FILTERS, DEFAULT_ADJUSTMENTS, DEFAULT_EXPANSION_POLICY, saleAgeExpansionSteps, vintageYearCap } from './types'
 import type { ClassificationResult, PropertyClassification } from '../classification'
 
 // Re-export types
@@ -45,7 +45,7 @@ export type {
   AdjustmentType,
   ExpansionPolicy,
 } from './types'
-export { DEFAULT_FILTERS, DEFAULT_ADJUSTMENTS, DEFAULT_EXPANSION_POLICY, defaultFilterPriority, saleAgeExpansionSteps } from './types'
+export { DEFAULT_FILTERS, DEFAULT_ADJUSTMENTS, DEFAULT_EXPANSION_POLICY, defaultFilterPriority, saleAgeExpansionSteps, vintageYearCap } from './types'
 export { evaluateComparable, evaluateComparables } from './evaluator'
 // Note: WeightFactors, CompWeightBreakdown, WeightedARVResult are defined below and exported from this file
 
@@ -527,26 +527,49 @@ class PropertyAppraisalService implements AppraisalService {
     const yearSteps = expansion.allowYearBuiltExpansion
       ? expansion.yearBuiltExpansionSteps.map((s) => strictYear + s)
       : []
-    const yearLadder = [strictYear, ...yearSteps]
-    const maxYear = yearLadder[yearLadder.length - 1]
+    // Vintage-subject last-resort year step: for subjects built before the
+    // configured cap (vintage_year_cap row, default 1970) the ladder's
+    // deepest year step swaps the ±diff rule for an absolute build-year
+    // ceiling — "no year-built comps found" → allow comps built on or
+    // before the cap year. Tried inside every geography scope, after the
+    // numeric tolerances.
+    type YearStep = number | 'vintage'
+    const vintageCap = vintageYearCap(defaultFilters, subject.yearBuilt)
+    const vintageSteps: YearStep[] =
+      expansion.allowYearBuiltExpansion && vintageCap != null ? ['vintage'] : []
+    const yearLadder: YearStep[] = [strictYear, ...yearSteps, ...vintageSteps]
+    const expansionYearSteps: YearStep[] = [...yearSteps, ...vintageSteps]
+    const maxYear = Math.max(strictYear, ...yearSteps)
     const subdivisionName = subject.subdivision || subject.neighborhoodName || 'subject area'
 
-    const filtersAt = (yearLimit: number, distanceMult = 1) =>
+    const filtersAt = (yearLimit: YearStep, distanceMult = 1) =>
       defaultFilters.map((f) => {
-        if (f.type === 'year_built_diff') return { ...f, value: yearLimit }
+        if (f.type === 'year_built_diff') {
+          return yearLimit === 'vintage'
+            ? { type: 'year_built_cap' as const, enabled: true, value: vintageCap!, priority: 'hard' as const }
+            : { ...f, value: yearLimit }
+        }
         if (f.type === 'distance' && distanceMult !== 1) {
           return { ...f, value: f.value * distanceMult }
         }
         return f
       })
-    const yearNote = (yearLimit: number) =>
-      yearLimit > strictYear ? ` (year-built widened to ±${yearLimit}yr)` : ''
+    const yearDesc = (yearLimit: YearStep) =>
+      yearLimit === 'vintage'
+        ? `build-year cap ${vintageCap} (vintage subject)`
+        : `±${yearLimit}yr`
+    const yearNote = (yearLimit: YearStep) =>
+      yearLimit === 'vintage'
+        ? ` (pre-${vintageCap} subject — year-built relaxed to ≤${vintageCap})`
+        : yearLimit > strictYear
+          ? ` (year-built widened to ±${yearLimit}yr)`
+          : ''
     const appliedFor = (
-      yearLimit: number,
+      yearLimit: YearStep,
       scope: 'subdivision' | 'neighborhood' | 'geographic' | null
     ): NonNullable<AppraisalResult['expansionApplied']> => {
       const applied: NonNullable<AppraisalResult['expansionApplied']> = []
-      if (yearLimit > strictYear) applied.push('year_built')
+      if (yearLimit === 'vintage' || yearLimit > strictYear) applied.push('year_built')
       if (scope) applied.push(scope)
       return applied
     }
@@ -598,17 +621,17 @@ class PropertyAppraisalService implements AppraisalService {
     // Step 2: widen the build-era INSIDE the subdivision first — better a
     // slightly older/newer comp in-area than a perfect-year comp out-of-area.
     // Comps legitimately pass at the tier's threshold — nothing is rescued.
-    for (const yearLimit of yearSteps) {
+    for (const yearLimit of expansionYearSteps) {
       const r = this.evaluate(subject, comparables, {
         filters: filtersAt(yearLimit),
         adjustments,
       })
       if (!r.insufficientComps) {
-        console.log(`Appraisal: ${r.selectedCompIds?.length} comps selected after year-built widening to ±${yearLimit}yr`)
+        console.log(`Appraisal: ${r.selectedCompIds?.length} comps selected after year-built widening to ${yearDesc(yearLimit)}`)
         return {
           ...r,
           fallbackUsed: 'year_built_expansion',
-          fallbackReason: `Insufficient comps within ±${strictYear}yr of the subject's build year in "${subdivisionName}". Widened year-built tolerance to ±${yearLimit}yr — sale age, subdivision and all other hard rules still enforced.`,
+          fallbackReason: `Insufficient comps within ±${strictYear}yr of the subject's build year in "${subdivisionName}". Widened year-built tolerance to ${yearDesc(yearLimit)} — sale age, subdivision and all other hard rules still enforced.`,
           expansionApplied: ['year_built'],
         }
       }
@@ -684,7 +707,8 @@ class PropertyAppraisalService implements AppraisalService {
         // Step 6: No rule-qualified set exists. Final fallback — the most
         // recent sales that still satisfy every intrinsic hard rule (sale
         // age, sqft, property type, road barrier, year built at the widest
-        // sanctioned tolerance ±maxYear); only location failures
+        // sanctioned tolerance — ±maxYear, or the vintage cap when the
+        // subject predates it); only location failures
         // (subdivision/distance) may be carried. A comp that breaches a
         // hard property rule is never enabled — better INSUFFICIENT_COMPS
         // than a valuation on a rule-breaker.
@@ -740,8 +764,8 @@ class PropertyAppraisalService implements AppraisalService {
           selectedCompIds: relaxed.selected.map((c) => c.id),
           insufficientComps: false,
           fallbackUsed: 'nearest_comps',
-          fallbackReason: `No comps satisfied all appraisal rules; using the ${recentComps.length} closest sale(s) within ${saleAgeDays} days (year-built tolerance ±${maxYear}yr). Failed rules remain visible per comp.`,
-          expansionApplied: appliedFor(maxYear, 'geographic'),
+          fallbackReason: `No comps satisfied all appraisal rules; using the ${recentComps.length} closest sale(s) within ${saleAgeDays} days (year-built tolerance ${vintageCap != null ? `≤${vintageCap} vintage cap` : `±${maxYear}yr`}). Failed rules remain visible per comp.`,
+          expansionApplied: appliedFor(vintageCap != null ? 'vintage' : maxYear, 'geographic'),
         }
       }
     }

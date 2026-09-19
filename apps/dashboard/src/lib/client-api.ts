@@ -257,6 +257,8 @@ export type FilterType =
   | 'road_barrier'
   | 'sale_age_expansion'
   | 'sale_age_expansion_2'
+  | 'vintage_year_cap'
+  | 'year_built_cap'
 
 export type AdjustmentType =
   | 'old_comp_discount'
