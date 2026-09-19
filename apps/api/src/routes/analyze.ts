@@ -392,6 +392,74 @@ analyze.get('/defaults', async (c) => {
   });
 });
 
+/**
+ * GET /analyze/jobs/:jobId
+ *
+ * Poll the status of an analysis job started via POST /analyze.
+ * Status comes from the job's Durable Object; on 'complete' the saved
+ * report's metrics and full response are attached as `result`.
+ */
+analyze.get('/jobs/:jobId', async (c) => {
+  const jobId = c.req.param('jobId');
+  const auth = c.get('auth');
+
+  const doId = c.env.ANALYSIS_JOB.idFromName(jobId);
+  const stub = c.env.ANALYSIS_JOB.get(doId);
+  const stateResp = await stub.fetch('http://internal/state');
+  const state = (await stateResp.json()) as {
+    jobId?: string;
+    userId?: string;
+    status?: string;
+    error?: string;
+    createdAt?: number;
+  };
+
+  if (!state.status || state.status === 'not_found' || state.status === 'idle') {
+    return c.json({ success: false, error: 'Job not found', jobId }, 404);
+  }
+  if (state.userId && state.userId !== auth.userId) {
+    return c.json({ success: false, error: 'Job not found', jobId }, 404);
+  }
+
+  let result: unknown = null;
+  if (state.status === 'complete') {
+    const db = drizzle(c.env.DB);
+    const report = await db
+      .select()
+      .from(savedReports)
+      .where(eq(savedReports.jobId, jobId))
+      .limit(1)
+      .then((rows) => rows[0] ?? null);
+    if (report) {
+      result = {
+        reportId: report.id,
+        propertyAddress: report.propertyAddress,
+        propertyCity: report.propertyCity,
+        propertyState: report.propertyState,
+        propertyZip: report.propertyZip,
+        arv: report.arv,
+        asIsValue: report.asIsValue,
+        maxAllowableOffer: report.maxAllowableOffer,
+        estimatedRepairs: report.estimatedRepairs,
+        fullResponse: report.fullResponseJson
+          ? JSON.parse(report.fullResponseJson)
+          : null,
+      };
+    }
+  }
+
+  return c.json({
+    success: true,
+    data: {
+      jobId,
+      status: state.status,
+      error: state.error ?? null,
+      createdAt: state.createdAt ?? null,
+      result,
+    },
+  });
+});
+
 // ─── Lazy Photo Loading ───────────────────────────────────────────────────────
 
 /**
