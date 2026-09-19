@@ -112,6 +112,19 @@ export function CompGridCard({
           )}>
             {index + 1}
           </div>
+          {comp.jevTruth != null && (
+            <div
+              className={cn(
+                'h-6 px-1.5 rounded-sm flex items-center gap-0.5 text-[10px] font-bold tabular-nums',
+                comp.jevTruth >= 0.7 ? 'bg-emerald-500/90 text-white'
+                  : comp.jevTruth >= 0.4 ? 'bg-amber-500/90 text-white'
+                  : 'bg-red-500/80 text-white'
+              )}
+              title={`Jev truth ${(comp.jevTruth * 100).toFixed(0)}% — Jev's probability that this comp is reliable evidence of the subject's market value`}
+            >
+              {(comp.jevTruth * 100).toFixed(0)}%
+            </div>
+          )}
         </div>
         {/* Bottom: price + date */}
         <div className="absolute bottom-0 left-0 right-0 px-2 py-1.5 bg-gradient-to-t from-black/70 to-transparent flex items-end justify-between pointer-events-none">

@@ -129,14 +129,62 @@ Blockers (environment, not code):
 - V4 engine NOT connected to production (V4_* env vars dead code; by plan).
 
 ## Current Objective
-Jev read-only outcome classification on `feat/jev-outcome-classification`
+Jev-authoritative comp selection on `feat/jev-outcome-classification`
 (worktree `~/src/flowstate-v5-jev-classify`, branched from main). The v5
-pipeline is untouched — Jev has zero role in comp selection, ARV, or the
-recommendation. After `performAnalysis` builds the response, Jev labels the
-outcome on five dimensions (evidence_sufficiency, comp_set_quality,
-deal_outlook, recommendation_agreement, risk_flags) via one Typesafe
-SystemOne typed-choice request; result attaches as `response.jevOutcome`.
-Missing key → `skipped`; request/parse failure → `unavailable`.
+pipeline still owns retrieval, normalization, appraisal-rule evaluation,
+ARV/valuation math, and outcome classification. Jev now additionally owns
+total comp selection: every candidate comparable gets a 0–1 Noul "truth"
+score (is this comp reliable evidence of the subject's market value); the
+top-N by truth become the enabled/ARV set (N = the count appraisal
+selection would have used, typically 3). The score renders on each comp
+card. If Jev is unavailable the appraisal-rules selection stands
+(`jev_selection` step reports `fallback`).
+
+### 2026-09-19 — Jev-authoritative comp selection + per-comp truth scores
+
+User directive: "made JEV in charge of total comp selection … ask JEV out
+of all the address which are closest to our source and truth … numerical
+value of truth for each comparable in the property card."
+
+Implemented:
+- `services/jev/index.ts`: new `scoreCompTruthWithJev(subject, comps,
+  rules, env)` — one Noul question per candidate ("is this comp a
+  reliable source of truth for the subject's market value"), Jev sees
+  the whole candidate pool per batch (byte-budgeted: 28KB state+question,
+  56KB request, same budgets as the archived comp-selection work). Comp
+  evidence = normalized fields + appraisal `ruleEvidence` (failedFilters,
+  passed/total counts, adjustments, original/adjusted price) — labeled
+  explicitly as evidence, not verdicts. Rejects: missing key, dup/empty
+  ids, HTTP errors, missing/extra answers, non-noul types, model drift
+  between batches.
+- `services/evaluation/index.ts`: after the final appraisal evaluation
+  (post Zillow-merge + flood), Jev scores every candidate; top-N by
+  truth become `isEnabled`/`selectedCompIds`/`arvStatus='selected'`;
+  ARV recomputed via `appraisalService.calculateARV` on Jev's set.
+  `jevTruth` attached to each appraised comp. Failure → rules selection
+  stands + `jev_selection` step `fallback`. Downstream (photo
+  prioritization, condition gate/prune, Group A/B, best match,
+  valuation) consumes Jev's set unchanged.
+- `appraisal/types.ts`: `AppraisedComparable.jevTruth?: number | null`;
+  `services/analysis/index.ts`: response item `jevTruth` + mapping.
+- Dashboard: `CompItem.jevTruth` + tone-coded % badge on `CompGridCard`
+  (photo overlay, next to index) and `CompCard` (header row), tooltip
+  explains the score meaning.
+
+Verified: `npx tsc --noEmit` clean (api + dashboard); `npm test` api =
+20/20 regression files pass incl. extended `jev-outcome.test.ts` (truth
+keying, per-comp noul questions, evidence projection without score
+leak, missing-answer rejection, dup-id rejection, no-key path).
+
+Semantics (document for product engineer): "truth" = Jev's Noul
+probability the comp is reliable evidence of the subject's market
+value — evidence-supported, not verified ground truth. Jev CAN select a
+comp that failed an appraisal filter (rules are evidence in its state);
+post-vision condition gating still prunes verified-bad comps from ARV.
+User ARV-toggle overrides remain intact.
+
+Remaining: live end-to-end analysis to confirm real Jev scores +
+badge rendering (stack live: API :8792, dashboard :3012).
 
 ### 2026-09-18 — Reset from feat/jev-rules-evaluation
 - Prior branch (Python/GIS bridge + Jev atomic signals + Python-owned

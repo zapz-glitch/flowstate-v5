@@ -37,6 +37,7 @@ import {
   type ResponseContext,
 } from '../analysis'
 import { createPhotoService, type PhotoBundle, type PropertyIdentifier, type PropertyPhotos } from '../photo-provider'
+import { scoreCompTruthWithJev } from '../jev'
 import { persistReportAssets } from '../report-assets'
 import { expansionRefetchRadius } from '../property-api/retrieval-policy'
 import { assessRenovationFromPhotos, assessCompCurbAppeal, type RenovationAssessment, type CurbAppealCheck } from '../vision/renovation'
@@ -543,6 +544,49 @@ export async function performAnalysis(
         .filter((m) => !/flood/i.test(m))
       step('photo_fetch', 'completed', `Flood signal from listing: ${level}`)
     }
+  }
+
+  // ── Jev comp selection — authoritative for the ARV set ─────────────────────
+  // Every candidate gets a 0–1 truth score (is this comp reliable evidence of
+  // the subject's market value). The top-N by truth become the enabled set.
+  // Appraisal rules already ran: their results are Jev's evidence and stay on
+  // the comp cards. If Jev is unavailable, the rules selection stands.
+  try {
+    const jev = await scoreCompTruthWithJev(
+      bundle.property,
+      appraisalResult.comparables,
+      { filters, adjustments },
+      env,
+    )
+    // ARV standard is a 3-comp set — Jev decides WHICH comps, not how many.
+    const targetCount = Math.min(
+      appraisalResult.comparables.length,
+      Math.max(3, appraisalResult.selectedCompIds?.length ?? 0),
+    )
+    const jevSelectedIds = new Set(
+      [...appraisalResult.comparables]
+        .sort((a, b) => (jev.truth[b.id] ?? -1) - (jev.truth[a.id] ?? -1))
+        .slice(0, targetCount)
+        .map((c) => c.id),
+    )
+    appraisalResult.comparables = appraisalResult.comparables.map((comp) => ({
+      ...comp,
+      isEnabled: jevSelectedIds.has(comp.id),
+      arvStatus: jevSelectedIds.has(comp.id)
+        ? 'selected' as const
+        : comp.arvStatus === 'selected' ? 'not_examined' as const : comp.arvStatus,
+      jevTruth: jev.truth[comp.id] ?? null,
+    }))
+    appraisalResult.selectedCompIds = [...jevSelectedIds]
+    appraisalResult.arv = appraisalService.calculateARV(
+      appraisalResult.comparables.filter((c) => jevSelectedIds.has(c.id)),
+    )
+    appraisalResult.insufficientComps = jevSelectedIds.size === 0
+    step('jev_selection', 'completed', `Jev selected ${jevSelectedIds.size}/${appraisalResult.comparables.length} comps by truth (${jev.model})`)
+  } catch (error) {
+    console.warn('[Evaluate] Jev comp selection unavailable — rules selection stands:', error instanceof Error ? error.message : error)
+    step('jev_selection', 'fallback', 'Jev unavailable — appraisal-rules selection used')
+    fallbacksUsed.push('jev_selection:unavailable')
   }
 
   const enabledComps = appraisalResult.comparables.filter((c) => c.isEnabled)

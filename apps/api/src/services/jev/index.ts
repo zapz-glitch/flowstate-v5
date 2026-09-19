@@ -1,14 +1,20 @@
 /**
- * Jev outcome classification (read-only).
+ * Jev integration — two surfaces:
  *
- * Jev sees the COMPLETED v5 analysis — subject, valuation, selected comps,
- * confidence gate, pipeline fallbacks — and labels the outcome along five
- * fixed dimensions. It has zero influence on comp selection, ARV, or the
- * recommendation: classification runs after the result is built and is
- * attached to the response for display/review only.
+ * 1. COMP TRUTH + SELECTION (authoritative): every candidate comparable gets
+ *    a Noul "truth" score (0–1: is this comp reliable evidence of the
+ *    subject's market value). The top-N by truth become the ARV set — Jev is
+ *    in charge of total comp selection. Appraisal rules still run first and
+ *    their results are part of Jev's evidence; they remain visible on cards.
+ *
+ * 2. OUTCOME CLASSIFICATION (read-only): Jev sees the COMPLETED analysis and
+ *    labels the outcome along five dimensions plus atomic driver sub-checks.
+ *    Attached to the response for display/review only.
  */
 
 import type { AnalysisResponse } from '../analysis'
+import type { NormalizedComparable, NormalizedProperty } from '../property-api/types'
+import type { AppraisedComparable } from '../appraisal/types'
 
 export interface JevEnv {
   TYPESAFE_API_KEY?: string
@@ -377,4 +383,189 @@ export async function classifyOutcomeWithJev(
     inputTokens: parsed.inputTokens,
     classifiedAt: new Date(start).toISOString(),
   }
+}
+
+// ─── Comp truth scoring (Jev is authoritative for selection) ──────────────────
+
+export interface JevCompTruthResult {
+  /** compId → truth score (0–1 noul: reliable evidence of the subject's value) */
+  truth: Record<string, number>
+  model: string
+  latencyMs: number
+  inputTokens: number
+}
+
+// Copy factual normalized fields explicitly: runtime objects may carry prior
+// selection flags or scores — those are not evidence for this decision.
+const subjectTruthFields = [
+  'id', 'provider', 'address', 'city', 'state', 'zipCode', 'county', 'latitude', 'longitude',
+  'bedrooms', 'bathrooms', 'fullBathrooms', 'halfBathrooms', 'squareFeet', 'lotSizeAcres',
+  'lotSizeSquareFeet', 'basementSquareFeet', 'yearBuilt', 'effectiveYearBuilt', 'propertyType',
+  'stories', 'lastSalePrice', 'lastSaleDate', 'pricePerSqft', 'assessedValue', 'marketValue',
+  'construction', 'features', 'subdivision', 'neighborhoodName', 'neighborhoodCode',
+  'buildingCondition', 'buildingGrade', 'additionSquareFeet', 'legalDescription',
+] as const satisfies readonly (keyof NormalizedProperty)[]
+
+const compTruthFields = [
+  'id', 'provider', 'address', 'city', 'state', 'zipCode', 'latitude', 'longitude', 'distanceMiles',
+  'bedrooms', 'bathrooms', 'squareFeet', 'lotSizeAcres', 'lotSizeSquareFeet', 'basementSquareFeet',
+  'yearBuilt', 'propertyType', 'salePrice', 'saleDate', 'pricePerSqft', 'subdivision', 'parcelId',
+  'neighborhoodName', 'neighborhoodCode', 'buildingCondition', 'buildingGrade', 'stories',
+  'construction', 'transaction', 'features', 'isEnriched',
+] as const satisfies readonly (keyof NormalizedComparable)[]
+
+function truthEvidence<T extends object>(value: T, fields: readonly (keyof T)[]): Record<string, unknown> {
+  return Object.fromEntries(fields.filter((key) => value[key] !== undefined).map((key) => [key, value[key]]))
+}
+
+function compTruthEvidence(comp: AppraisedComparable): Record<string, unknown> {
+  const ev = comp.evaluation
+  return {
+    ...truthEvidence(comp, compTruthFields),
+    adjustedSalePrice: comp.adjustedSalePrice ?? null,
+    ruleEvidence: ev
+      ? {
+          failedFilters: ev.filterResults.filter((f) => f.passed === false).map((f) => f.type),
+          passedFilterCount: ev.filterResults.filter((f) => f.passed === true).length,
+          totalFilterCount: ev.filterResults.length,
+          totalAdjustment: ev.totalAdjustment ?? null,
+          originalPrice: ev.originalPrice ?? null,
+          adjustedPrice: ev.adjustedPrice ?? null,
+        }
+      : null,
+    evidenceNote:
+      'Rule results are pipeline evidence about this comp, not a verdict — the truth judgment is yours. Missing/null fields are unknown.',
+  }
+}
+
+const TRUTH_STATE_AND_QUESTION_BYTES = 28_000
+
+function truthQuestion(index: number): NoulQuestion {
+  return {
+    type: 'noul',
+    instructions: `Is state.comparables[${index}] a reliable source of truth for the subject's market value — does its sale reflect what a similar buyer would credibly pay for the subject? Judge physical similarity, sale legitimacy and recency, and location comparability against state.subject, using state.appraisalRules as context. The comp's own ruleEvidence lists appraisal-rule outcomes as evidence, not verdicts. Missing values are unknown — answer only what the supplied evidence supports.`,
+  }
+}
+
+type TruthBatch = { ids: string[]; body: { model: string; state: Record<string, unknown>; questions: Record<string, NoulQuestion> } }
+
+function makeTruthBatch(
+  subject: Record<string, unknown>, rules: unknown, comps: Array<Record<string, unknown>>,
+  ids: string[], offset: number, model: string, evaluationDate: string,
+): TruthBatch {
+  return {
+    ids,
+    body: {
+      model,
+      state: { subject, appraisalRules: rules, evaluationDate, comparables: comps },
+      questions: Object.fromEntries(
+        comps.map((_, index) => [`comp_${offset + index}_truth`, truthQuestion(index)]),
+      ),
+    },
+  }
+}
+
+function truthFits(batch: TruthBatch): boolean {
+  const longestQuestion = Math.max(0, ...Object.values(batch.body.questions).map(bytes))
+  return bytes(batch.body.state) + longestQuestion <= TRUTH_STATE_AND_QUESTION_BYTES && bytes(batch.body) <= REQUEST_BYTES
+}
+
+function truthBatches(
+  subject: NormalizedProperty, comps: AppraisedComparable[], rules: unknown,
+  model: string, evaluationDate: string,
+): TruthBatch[] {
+  const subjectEvidence = truthEvidence(subject, subjectTruthFields)
+  const result: TruthBatch[] = []
+  let pending: Array<Record<string, unknown>> = []
+  let ids: string[] = []
+  let offset = 0
+  for (const comp of comps) {
+    const item = compTruthEvidence(comp)
+    const next = makeTruthBatch(subjectEvidence, rules, [...pending, item], [...ids, comp.id], offset, model, evaluationDate)
+    if (truthFits(next)) { pending.push(item); ids.push(comp.id); continue }
+    if (pending.length) {
+      result.push(makeTruthBatch(subjectEvidence, rules, pending, ids, offset, model, evaluationDate))
+      offset += pending.length
+    }
+    const single = makeTruthBatch(subjectEvidence, rules, [item], [comp.id], offset, model, evaluationDate)
+    if (!truthFits(single)) throw new Error('Jev truth context limit: subject, rules, and one comparable exceed the request budget; evidence was not truncated.')
+    pending = [item]
+    ids = [comp.id]
+  }
+  if (pending.length) result.push(makeTruthBatch(subjectEvidence, rules, pending, ids, offset, model, evaluationDate))
+  return result
+}
+
+function parseTruthResponse(
+  value: unknown, batch: TruthBatch,
+): { truth: Record<string, number>; model: string; inputTokens: number } {
+  const malformed = () => new Error('Jev truth scoring returned an invalid or incomplete typed response; no scores were accepted.')
+  if (!object(value) || typeof value.model !== 'string' || !/^jev-[\w.-]+$/.test(value.model) || !object(value.answers) || !object(value.usage)) throw malformed()
+  const { input_tokens: inputTokens } = value.usage
+  if (typeof inputTokens !== 'number' || !Number.isSafeInteger(inputTokens) || inputTokens < 0) throw malformed()
+  const keys = Object.keys(batch.body.questions)
+  if (Object.keys(value.answers).length !== keys.length || keys.some((key) => !Object.hasOwn(value.answers as object, key))) throw malformed()
+  const truth: Record<string, number> = Object.create(null)
+  keys.forEach((key, index) => {
+    const answer = (value.answers as Record<string, unknown>)[key]
+    if (!object(answer) || answer.type !== 'noul' || !probability(answer.noul)) throw malformed()
+    truth[batch.ids[index]] = answer.noul
+  })
+  return { truth, model: value.model, inputTokens }
+}
+
+/**
+ * Score every candidate's "truth" — a 0–1 noul answering whether the comp is
+ * reliable evidence of the subject's market value. Jev sees the whole
+ * candidate pool per batch, so scores are relative to all supplied addresses.
+ * Selection (top-N) is the caller's decision; this only returns scores.
+ * Throws on missing key / API / malformed response — callers degrade to the
+ * appraisal-rules selection.
+ */
+export async function scoreCompTruthWithJev(
+  subject: NormalizedProperty,
+  comps: AppraisedComparable[],
+  appraisalRules: unknown,
+  env: JevEnv,
+): Promise<JevCompTruthResult> {
+  const start = Date.now()
+  const evaluationDate = new Date(start).toISOString().slice(0, 10)
+  const key = env.TYPESAFE_API_KEY?.trim()
+  if (!key) throw new Error('Jev truth scoring requires TYPESAFE_API_KEY.')
+  const model = env.TYPESAFE_MODEL?.trim() || 'jev-latest'
+  if (!/^jev-[\w.-]+$/.test(model)) throw new Error('Jev truth scoring requires a Jev model identifier.')
+  if (comps.some((comp) => typeof comp.id !== 'string' || !comp.id.trim()) || new Set(comps.map((c) => c.id)).size !== comps.length) {
+    throw new Error('Jev truth scoring requires a unique, nonempty ID for every comparable.')
+  }
+
+  const truth: Record<string, number> = Object.create(null)
+  let inputTokens = 0
+  let actualModel: string | undefined
+  for (const batch of truthBatches(subject, comps, appraisalRules, model, evaluationDate)) {
+    let httpResponse: Response
+    try {
+      httpResponse = await fetch(ENDPOINT, {
+        method: 'POST',
+        redirect: 'manual',
+        headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+        body: serialized(batch.body),
+        signal: AbortSignal.timeout(TIMEOUT_MS),
+      })
+    } catch {
+      throw new Error('Jev truth scoring request failed or timed out.')
+    }
+    if (!httpResponse.ok) {
+      // Never expose response bodies: they can echo credentials or request data.
+      void httpResponse.body?.cancel().catch(() => {})
+      throw new Error(`Jev truth scoring API returned HTTP ${httpResponse.status}.`)
+    }
+    let json: unknown
+    try { json = await httpResponse.json() } catch { throw new Error('Jev truth scoring returned unreadable JSON.') }
+    const parsed = parseTruthResponse(json, batch)
+    if (actualModel && actualModel !== parsed.model) throw new Error('Jev truth model changed between batches; no mixed-model scores were accepted.')
+    actualModel = parsed.model
+    inputTokens += parsed.inputTokens
+    Object.assign(truth, parsed.truth)
+  }
+  return { truth, model: actualModel ?? model, latencyMs: Date.now() - start, inputTokens }
 }

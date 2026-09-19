@@ -88,6 +88,19 @@ export function CompCard({
             )}>
               {index + 1}
             </div>
+            {comp.jevTruth != null && (
+              <div
+                className={cn(
+                  'h-6 px-1.5 rounded flex items-center text-[10px] font-bold tabular-nums flex-shrink-0',
+                  comp.jevTruth >= 0.7 ? 'bg-emerald-500/15 text-emerald-600'
+                    : comp.jevTruth >= 0.4 ? 'bg-amber-500/15 text-amber-600'
+                    : 'bg-red-500/15 text-red-500'
+                )}
+                title={`Jev truth ${(comp.jevTruth * 100).toFixed(0)}% — Jev's probability that this comp is reliable evidence of the subject's market value`}
+              >
+                {(comp.jevTruth * 100).toFixed(0)}%
+              </div>
+            )}
             <div className="flex-1 min-w-0">
               {comp.address ? (
                 <AddressDisplay address={comp.address} latitude={comp.latitude} longitude={comp.longitude} className="text-body-sm font-medium" />

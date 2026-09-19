@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { classifyOutcomeWithJev, OUTCOME_DIMENSIONS } from '../src/services/jev'
+import { classifyOutcomeWithJev, OUTCOME_DIMENSIONS, scoreCompTruthWithJev } from '../src/services/jev'
 import type { AnalysisResponse } from '../src/services/analysis'
 
 function fakeResponse(): AnalysisResponse {
@@ -131,6 +131,74 @@ const originalFetch = globalThis.fetch
 {
   globalThis.fetch = async () => Response.json({ model: 'jev-test-1', answers: {}, usage: { input_tokens: 1 } })
   await assert.rejects(() => classifyOutcomeWithJev(fakeResponse(), { TYPESAFE_API_KEY: 'k' }))
+}
+
+// ─── Comp truth scoring ────────────────────────────────────────────────────────
+
+const fakeSubject = {
+  id: 's1', address: '1 Main St', city: 'Atlanta', state: 'GA', zipCode: '30301',
+  bedrooms: 3, bathrooms: 2, squareFeet: 1400, yearBuilt: 1985, subdivision: 'Test Sub',
+} as never
+
+const fakeComp = (id: string, overrides: Record<string, unknown> = {}) => ({
+  id, address: `${id} Oak Ln`, city: 'Atlanta', state: 'GA', salePrice: 240000,
+  saleDate: '2026-06-01', squareFeet: 1420, distanceMiles: 0.4, bedrooms: 3, bathrooms: 2,
+  yearBuilt: 1987, adjustedSalePrice: 245000,
+  evaluation: {
+    comparableId: id, shouldDisable: false, disableReasons: [],
+    filterResults: [{ type: 'distance', passed: true }],
+    totalAdjustment: 5000, adjustmentResults: [], originalPrice: 240000, adjustedPrice: 245000,
+  },
+  ...overrides,
+}) as never
+
+// 5. No key → throws
+{
+  globalThis.fetch = async () => { throw new Error('fetch should not be called') }
+  await assert.rejects(() => scoreCompTruthWithJev(fakeSubject, [fakeComp('c1')], {}, {}))
+}
+
+// 6. Valid response → truth keyed by comp id, one noul question per comp
+{
+  let body: Record<string, unknown> | null = null
+  globalThis.fetch = async (_url, init) => {
+    body = JSON.parse(String(init?.body))
+    const questions = (body!.questions ?? {}) as Record<string, { type: string }>
+    assert.ok(Object.values(questions).every((q) => q.type === 'noul'))
+    const echoed = Object.fromEntries(
+      Object.keys(questions).map((id, i) => [id, { type: 'noul', noul: 0.9 - i * 0.2 }]),
+    )
+    return Response.json({ model: 'jev-test-1', answers: echoed, usage: { input_tokens: 800 } })
+  }
+  const comps = [fakeComp('c1'), fakeComp('c2'), fakeComp('c3')]
+  const result = await scoreCompTruthWithJev(fakeSubject, comps, { filters: [] }, { TYPESAFE_API_KEY: 'k', TYPESAFE_MODEL: 'jev-test-1' })
+  assert.equal(result.model, 'jev-test-1')
+  assert.deepEqual(Object.keys(result.truth).sort(), ['c1', 'c2', 'c3'])
+  assert.equal(result.truth.c1, 0.9)
+  assert.equal(result.truth.c2, 0.7)
+  assert.equal(result.truth.c3, 0.5)
+  // Comps are projected into state.comparables with rule evidence, no scores leaked
+  const state = body!.state as { comparables: Array<Record<string, unknown>> }
+  assert.equal(state.comparables.length, 3)
+  assert.equal(state.comparables[0].jevTruth, undefined)
+  assert.ok(Object.hasOwn(state.comparables[0], 'ruleEvidence'))
+}
+
+// 7. Missing answer for one comp → whole batch rejected
+{
+  globalThis.fetch = async (_url, init) => {
+    const body = JSON.parse(String(init?.body)) as { questions: Record<string, unknown> }
+    const keys = Object.keys(body.questions)
+    const echoed = Object.fromEntries(keys.slice(0, -1).map((id) => [id, { type: 'noul', noul: 0.5 }]))
+    return Response.json({ model: 'jev-test-1', answers: echoed, usage: { input_tokens: 1 } })
+  }
+  await assert.rejects(() => scoreCompTruthWithJev(fakeSubject, [fakeComp('c1'), fakeComp('c2')], {}, { TYPESAFE_API_KEY: 'k' }))
+}
+
+// 8. Duplicate comp ids → throws before any request
+{
+  globalThis.fetch = async () => { throw new Error('fetch should not be called') }
+  await assert.rejects(() => scoreCompTruthWithJev(fakeSubject, [fakeComp('c1'), fakeComp('c1')], {}, { TYPESAFE_API_KEY: 'k' }))
 }
 
 globalThis.fetch = originalFetch

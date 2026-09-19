@@ -446,6 +446,8 @@ export interface CompItem {
   pricePercentile?: number | null
   /** Reasons why this comp was disabled (if any) */
   disableReasons?: string[]
+  /** Jev truth score (0–1): how reliable this comp is as evidence of the subject's market value */
+  jevTruth?: number | null
   /** Property classification (as_is, after_renovation, transitional) */
   classification?: ClassificationSummary | null
   /** Weight contribution to ARV calculation (0-1) */
