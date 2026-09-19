@@ -19,6 +19,7 @@ import {
   DEFAULT_ADJUSTMENTS,
   DEFAULT_EXPANSION_POLICY,
   defaultFilterPriority,
+  saleAgeExpansionSteps,
   summarizeClassifications,
   type AppraisedComparable,
   type AppraisalResultWithFallback,
@@ -92,7 +93,7 @@ export interface EvaluationParams {
    * wider radius and returns the merged, enriched pool. Deterministic
    * selection always runs after retrieval; this never picks comps itself.
    */
-  expandComparablesPool?: (radiusMiles: number) => Promise<NormalizedComparable[] | null>
+  expandComparablesPool?: (radiusMiles: number, monthsBack?: number) => Promise<NormalizedComparable[] | null>
 }
 
 export interface GroupBResult {
@@ -455,9 +456,31 @@ export async function performAnalysis(
     DEFAULT_EXPANSION_POLICY.geographicDistanceMultiplier,
     Number.parseFloat(env.COMPARABLE_EXPANSION_RADIUS_MILES ?? '') || undefined,
   )
-  if (refetchRadius != null && params.expandComparablesPool) {
+  // Time axis too: the fetched window (default 12mo) provably lacks older
+  // sales — when the ladder still ends insufficient after its sale-age
+  // tiers, the ONE allowed refetch also widens monthsBack to cover the
+  // deepest configured tier (e.g. 548d ≈ 18mo), like radius-bound tiers
+  // widen radius. The window comes from the preset's sale_age_expansion*
+  // filter rows — the same configured values the ladder just walked.
+  const fetchedMonthsBack = bundle.metadata?.comparablesParams?.monthsBack ?? 12
+  const saleAgeSteps = saleAgeExpansionSteps(
+    filters,
+    filters.find((f) => f.type === 'sale_age')?.value ?? 0,
+  )
+  const deepestSaleAgeDays = saleAgeSteps[saleAgeSteps.length - 1] ?? 0
+  const saleAgeRefetchMonths = Math.ceil(deepestSaleAgeDays / 30.44)
+  const refetchMonthsBack =
+    appraisalResult.fallbackUsed === 'insufficient' &&
+    DEFAULT_EXPANSION_POLICY.allowSaleAgeExpansion &&
+    saleAgeRefetchMonths > fetchedMonthsBack
+      ? saleAgeRefetchMonths
+      : undefined
+  if ((refetchRadius != null || refetchMonthsBack != null) && params.expandComparablesPool) {
     try {
-      const widened = await params.expandComparablesPool(refetchRadius)
+      const widened = await params.expandComparablesPool(
+        refetchRadius ?? bundle.metadata?.comparablesParams?.radiusMiles ?? 1,
+        refetchMonthsBack,
+      )
       if (widened && widened.length > 0) {
         bundle = { ...bundle, comparables: widened }
         appraisalResult = appraisalService.evaluateWithFallback(

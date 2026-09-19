@@ -30,7 +30,7 @@ import type {
   ComparableEvaluation,
   ExpansionPolicy,
 } from './types'
-import { DEFAULT_FILTERS, DEFAULT_ADJUSTMENTS, DEFAULT_EXPANSION_POLICY } from './types'
+import { DEFAULT_FILTERS, DEFAULT_ADJUSTMENTS, DEFAULT_EXPANSION_POLICY, saleAgeExpansionSteps } from './types'
 import type { ClassificationResult, PropertyClassification } from '../classification'
 
 // Re-export types
@@ -45,7 +45,7 @@ export type {
   AdjustmentType,
   ExpansionPolicy,
 } from './types'
-export { DEFAULT_FILTERS, DEFAULT_ADJUSTMENTS, DEFAULT_EXPANSION_POLICY, defaultFilterPriority } from './types'
+export { DEFAULT_FILTERS, DEFAULT_ADJUSTMENTS, DEFAULT_EXPANSION_POLICY, defaultFilterPriority, saleAgeExpansionSteps } from './types'
 export { evaluateComparable, evaluateComparables } from './evaluator'
 // Note: WeightFactors, CompWeightBreakdown, WeightedARVResult are defined below and exported from this file
 
@@ -209,6 +209,7 @@ export interface AppraisalResultWithFallback extends AppraisalResult {
     | 'neighborhood_expansion'
     | 'subdivision_expansion'
     | 'geographic_expansion'
+    | 'sale_age_expansion'
     | 'nearest_comps'
     | 'insufficient'
   /** Message explaining the fallback */
@@ -432,6 +433,45 @@ class PropertyAppraisalService implements AppraisalService {
     comparables: NormalizedComparable[],
     options?: AppraisalOptions & FallbackOptions
   ): AppraisalResultWithFallback {
+    const result = this.evaluateExpansionLadder(subject, comparables, options)
+    if (!result.insufficientComps) return result
+
+    // Sale-age ladder — LAST resort. Every location/year tier already ran
+    // at the configured sale_age and still ended insufficient. Each
+    // enabled sale_age_expansion* filter row is one step that re-runs the
+    // FULL ladder with only the sale_age ceiling widened; recursion
+    // walks the steps (default tiers: 365d → 548d ≈ 18mo).
+    const expansion: Required<ExpansionPolicy> = {
+      ...DEFAULT_EXPANSION_POLICY,
+      ...(options?.expansion ?? {}),
+    }
+    if (!expansion.enabled || !expansion.allowSaleAgeExpansion) return result
+    const filters = options?.filters ?? DEFAULT_FILTERS
+    const saleAgeFilter = filters.find((f) => f.type === 'sale_age')
+    if (!saleAgeFilter?.enabled) return result
+    // Retry windows come from the preset's enabled sale_age_expansion*
+    // filter rows — user-configurable like every other filter.
+    const next = saleAgeExpansionSteps(filters, saleAgeFilter.value)[0]
+    if (next == null) return result
+
+    const retry = this.evaluateWithFallback(subject, comparables, {
+      ...options,
+      filters: filters.map((f) => (f.type === 'sale_age' ? { ...f, value: next } : f)),
+    })
+    if (retry.insufficientComps) return retry
+    return {
+      ...retry,
+      fallbackUsed: 'sale_age_expansion',
+      fallbackReason: `Insufficient comps within ${saleAgeFilter.value}d sale age — widened to ${next}d. ${retry.fallbackReason ?? ''}`.trim(),
+      expansionApplied: [...(retry.expansionApplied ?? []), 'sale_age'],
+    }
+  }
+
+  private evaluateExpansionLadder(
+    subject: NormalizedProperty,
+    comparables: NormalizedComparable[],
+    options?: AppraisalOptions & FallbackOptions
+  ): AppraisalResultWithFallback {
     const adjustments = options?.adjustments ?? DEFAULT_ADJUSTMENTS
     const expansion: Required<ExpansionPolicy> = {
       ...DEFAULT_EXPANSION_POLICY,
@@ -472,10 +512,14 @@ class PropertyAppraisalService implements AppraisalService {
     //   5. drop the radius gate entirely, re-walking the year ladder
     //   6. most recent sales — only location failures may be carried
     //
-    // sale_age is NEVER relaxed: every comp must be within the configured
-    // max (default 180d) at every tier — the most recent sales win. Older
-    // qualifying sales get the configurable old_comp_discount adjustment
-    // (threshold + percent live on the adjustment, not this policy).
+    // sale_age is never relaxed INSIDE this ladder: every comp must be
+    // within the configured max (default 180d) at every tier — the most
+    // recent sales win. Only when the whole ladder ends insufficient does
+    // the caller's sale-age ladder re-run this entire sequence at a wider
+    // ceiling (the preset's sale_age_expansion* rows). Older qualifying
+    // sales get the
+    // configurable old_comp_discount adjustment (threshold + percent live
+    // on the adjustment, not this policy).
     // Year-widening is a real threshold change, not a rescue: a comp at
     // ±12 passes year_built_diff with threshold:12 on its audit record.
 

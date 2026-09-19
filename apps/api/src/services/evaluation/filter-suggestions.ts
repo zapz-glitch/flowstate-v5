@@ -9,7 +9,7 @@
 import type { NormalizedComparable } from '../property-api/types'
 import type { AppraisalFilter, AppraisedComparable } from '../appraisal'
 import { AnalysisError } from '../../utils/analysis-error'
-import { HARD_FILTER_TYPES, HARD_FILTER_RELAXATION_ORDER } from '@flowstate-api/shared/appraisal'
+import { HARD_FILTER_TYPES, HARD_FILTER_RELAXATION_ORDER, type FilterType as SharedFilterType } from '@flowstate-api/shared/appraisal'
 
 const FILTER_LABELS: Record<string, string> = {
   subdivision_match: 'Subdivision Match',
@@ -52,7 +52,7 @@ function analyzeCompFilterFailures(comparables: AppraisedComparable[]): CompFixA
         continue
       }
       // Only suggest fixes for HARD filters — soft filters don't reject comps
-      if (!HARD_FILTER_TYPES.has(fr.type)) {
+      if (!HARD_FILTER_TYPES.has(fr.type as SharedFilterType)) {
         continue
       }
       const actual = typeof fr.actualValue === 'number' ? fr.actualValue : 0

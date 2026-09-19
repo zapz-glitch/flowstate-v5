@@ -27,7 +27,7 @@ import {
   type ComparablesRetrievalMeta,
 } from '../services/property-api/retrieval-policy'
 import { DEFAULT_FILTERS, evaluateComparable, type AppraisalFilter } from '../services/appraisal'
-import { DEFAULT_EXPANSION_POLICY } from '../services/appraisal/types'
+import { DEFAULT_EXPANSION_POLICY, saleAgeExpansionSteps } from '../services/appraisal/types'
 import { filtersToApiParams } from '../services/appraisal/types'
 import type { Env } from '../types'
 import type { NormalizedProperty, NormalizedComparable } from '../services/property-api/types'
@@ -181,7 +181,13 @@ export class AnalysisJobDO {
     console.log(`[AnalysisJobDO] ── Streaming analysis started ──`)
 
     const propertyApi = createPropertyApi(this.env)
-    const filters = (config.evalParams.appraisalRules?.filters ?? DEFAULT_FILTERS) as AppraisalFilter[]
+    const filters = [...(config.evalParams.appraisalRules?.filters ?? DEFAULT_FILTERS)] as AppraisalFilter[]
+    // Inject defaults for filter types the preset doesn't define — same
+    // merge performAnalysis does, so pruning/params see the identical
+    // effective rule set (incl. sale_age_expansion* tiers).
+    for (const df of DEFAULT_FILTERS) {
+      if (!filters.some((f) => f.type === df.type)) filters.push({ ...df })
+    }
     const apiFilterParams = filtersToApiParams(filters)
 
     // ── Step 1: Search subject property ─────────────────────────────────────
@@ -345,11 +351,12 @@ export class AnalysisJobDO {
 
     // ── Step 3: Enrich comps ───────────────────────────────────────────────────
     // Every comp that can still qualify gets the property-detail call —
-    // subdivision, foundation type, building style, features. But sale_age,
-    // sqft_diff and year_built (at its widest sanctioned tolerance) are never
-    // relaxed by ANY fallback tier, and enrichment never overwrites those
-    // fields — so a comp verifiably failing one is dead under every tier and
-    // its detail call is provably wasted. Missing fields still enrich.
+    // subdivision, foundation type, building style, features. But sale_age
+    // (at the deepest configured expansion tier), sqft_diff and year_built
+    // (at its widest sanctioned tolerance) are never relaxed beyond those
+    // ceilings by ANY fallback tier, and enrichment never overwrites those
+    // fields — so a comp verifiably failing one is dead under every tier
+    // and its detail call is provably wasted. Missing fields still enrich.
     await this.pushEvent('property_fetch', { message: 'Enriching comparable details...' })
     const enrichStart = Date.now()
 
@@ -357,8 +364,15 @@ export class AnalysisJobDO {
       const f = filters.find((x) => x.type === type)
       return f && f.enabled === false ? Infinity : (f?.value ?? fallback)
     }
+    const saleAgeBase = filterValue('sale_age', 180)
     const deadThresholds = {
-      saleAgeDays: filterValue('sale_age', 180),
+      // Widest window ANY tier can reach — the deepest enabled
+      // sale_age_expansion* row. Pruning on the strict sale_age alone
+      // would starve enrichment for comps a configured fallback tier
+      // could still admit.
+      saleAgeDays: DEFAULT_EXPANSION_POLICY.allowSaleAgeExpansion
+        ? Math.max(saleAgeBase, ...saleAgeExpansionSteps(filters, saleAgeBase))
+        : saleAgeBase,
       sqftDiff: filterValue('sqft_diff', 250),
       maxYearDiff: filterValue('year_built_diff', 10) +
         Math.max(0, ...DEFAULT_EXPANSION_POLICY.yearBuiltExpansionSteps),
@@ -392,12 +406,16 @@ export class AnalysisJobDO {
     // here land in the audit trail even though they run inside evaluation.
     const evidenceLimitations: string[] = []
     let refetchUsed = false
-    const expandComparablesPool = async (radiusMiles: number): Promise<NormalizedComparable[] | null> => {
+    const expandComparablesPool = async (radiusMiles: number, monthsBack?: number): Promise<NormalizedComparable[] | null> => {
       if (refetchUsed) return null
       refetchUsed = true
-      console.log(`[AnalysisJobDO] Expansion refetch: widening comparable search to ${radiusMiles}mi`)
-      await this.pushEvent('property_fetch', { message: `Widening comp search to ${radiusMiles} miles...` })
-      const wider = await propertyApi.getComparables({ ...comparablesParams, radiusMiles })
+      console.log(`[AnalysisJobDO] Expansion refetch: widening comparable search to ${radiusMiles}mi${monthsBack != null ? ` / ${monthsBack}mo` : ''}`)
+      await this.pushEvent('property_fetch', { message: `Widening comp search to ${radiusMiles} miles${monthsBack != null ? `, ${monthsBack} months back` : ''}...` })
+      const wider = await propertyApi.getComparables({
+        ...comparablesParams,
+        radiusMiles,
+        ...(monthsBack != null ? { monthsBack } : {}),
+      })
       if (!wider.success) {
         console.warn(`[AnalysisJobDO] Expansion refetch failed: ${wider.error}`)
         return null
@@ -420,6 +438,7 @@ export class AnalysisJobDO {
       enrichedComps = merged.comparables.map((c) => enrichedById.get(c.id) ?? c)
       retrieval.providerCallsUsed += 1
       retrieval.pagesRequested += 1
+      if (monthsBack != null) retrieval.monthsBack = monthsBack
       retrieval.providerCandidatesReceived = enrichedComps.length
       retrieval.candidatesPrunedBeforeEnrichment = candidatesPruned
       retrieval.candidatesEnriched = candidatesEnriched

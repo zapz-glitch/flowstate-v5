@@ -27,6 +27,8 @@ export type FilterType =
   | 'property_type'
   | 'lot_size_diff'
   | 'road_barrier'
+  | 'sale_age_expansion'
+  | 'sale_age_expansion_2'
 
 export interface AppraisalFilter {
   type: FilterType
@@ -68,11 +70,33 @@ export const DEFAULT_FILTERS: AppraisalFilter[] = [
   { type: 'property_type', enabled: true, value: 1 }, // Same property/build type
   { type: 'lot_size_diff', enabled: true, value: 2500, priority: 'soft' }, // ±2,500 sqft lot — similarity data, not a deal-breaker
   { type: 'road_barrier', enabled: true, value: 1 }, // No crossing major roads (not_verified when no data)
+  // Sale-age expansion tiers — NOT per-comp rules (no evaluator exists, so
+  // the per-comp loop skips them). Each enabled row is one ladder retry at
+  // a wider sale-age window, attempted only when the full ladder still
+  // ends insufficient.
+  { type: 'sale_age_expansion', enabled: true, value: 365, priority: 'soft' }, // first retry ≈ 12 months
+  { type: 'sale_age_expansion_2', enabled: true, value: 548, priority: 'soft' }, // deepest retry ≈ 18 months
 ]
 
 /** System default priority for a filter type ('hard' when unspecified). */
 export function defaultFilterPriority(type: FilterType): 'hard' | 'soft' {
   return DEFAULT_FILTERS.find((f) => f.type === type)?.priority ?? 'hard'
+}
+
+/**
+ * Enabled sale_age_expansion* filter rows → the configured sale-age
+ * fallback ladder: each value is one retry window (days), sorted
+ * ascending and limited to steps beyond the current base window. Empty
+ * when no tier is enabled — the ladder is fully user-configurable.
+ */
+export function saleAgeExpansionSteps(filters: AppraisalFilter[], baseDays: number): number[] {
+  const steps = filters
+    .filter(
+      (f) => f.enabled && (f.type === 'sale_age_expansion' || f.type === 'sale_age_expansion_2')
+    )
+    .map((f) => f.value)
+    .filter((v) => v > baseDays)
+  return [...new Set(steps)].sort((a, b) => a - b)
 }
 
 // ─── Filter Labels (for UI) ────────────────────────────────────────────────────
@@ -184,6 +208,18 @@ export const FILTER_LABELS: Record<FilterType, {
     shortLabel: 'Road Barrier',
     unit: '',
     description: 'Comp must not be across a major road from subject (not verified when geospatial road data unavailable)',
+  },
+  sale_age_expansion: {
+    label: 'Sale Age Fallback — Tier 1',
+    shortLabel: 'Age Fallback 1',
+    unit: 'days',
+    description: 'When no comps pass, retry the full ladder allowing sales up to this age (first retry)',
+  },
+  sale_age_expansion_2: {
+    label: 'Sale Age Fallback — Tier 2',
+    shortLabel: 'Age Fallback 2',
+    unit: 'days',
+    description: 'Deepest sale-age retry — attempted only if Tier 1 still yields insufficient comps',
   },
 }
 
@@ -354,11 +390,14 @@ export interface AppraisalRulePreset {
  * required number of valid comps are found. Rules are never silently
  * weakened; each expansion tier is explicitly enabled and recorded.
  *
- * Sale age is NEVER relaxed — comps must be inside the configured max
- * (default 180 days) at every tier; we always want the most recent
- * sales. The sanctioned concession is build-era: year_built_diff widens
- * progressively (±10 → ±12 → ±14 by default) inside each location scope
- * before geography expands — subdivision → widened radius → radius-only.
+ * Sale age is relaxed ONLY as a last resort: recent sales are always
+ * preferred, so the configured max (default 180 days) holds at every
+ * tier; only when the ENTIRE ladder still ends insufficient does the
+ * sale-age ladder re-run the full sequence at each step of
+ * saleAgeExpansionSteps (default 365 → 548 ≈ 18mo). The ordinary
+ * concession remains build-era: year_built_diff widens progressively
+ * (±10 → ±12 → ±14 by default) inside each location scope before
+ * geography expands — subdivision → widened radius → radius-only.
  */
 export interface ExpansionPolicy {
   /** Master switch for all expansion tiers (default: true) */
@@ -377,6 +416,18 @@ export interface ExpansionPolicy {
   allowNeighborhoodExpansion?: boolean
   /** Distance multiplier when geography expands (default: 2 = widen to 2× configured radius) */
   geographicDistanceMultiplier?: number
+  /**
+   * Allow widening sale_age ONLY after every other tier still ends in
+   * insufficient comps (default: true). Each allowed step re-runs the
+   * FULL ladder (strict → year/geo/neighborhood tiers) at the widened
+   * window — older sales never beat newer ones, they are only reached
+   * when nothing recent qualifies. The retry windows themselves are
+   * user-configured via the enabled sale_age_expansion* filter rows
+   * (see saleAgeExpansionSteps()); steps beyond the provider's fetched
+   * window require the expansion refetch to bring older sales into the
+   * pool.
+   */
+  allowSaleAgeExpansion?: boolean
 }
 
 export const DEFAULT_EXPANSION_POLICY: Required<ExpansionPolicy> = {
@@ -386,6 +437,7 @@ export const DEFAULT_EXPANSION_POLICY: Required<ExpansionPolicy> = {
   allowGeographicExpansion: true,
   allowNeighborhoodExpansion: true,
   geographicDistanceMultiplier: 2,
+  allowSaleAgeExpansion: true,
 }
 
 export interface AppraisalOptions {
@@ -449,7 +501,7 @@ export interface AppraisalResult {
   /** True when fewer than 3 valid comps found even after approved expansion */
   insufficientComps?: boolean
   /** Expansion tiers actually applied to reach the comp set */
-  expansionApplied?: Array<'year_built' | 'subdivision' | 'neighborhood' | 'geographic'>
+  expansionApplied?: Array<'year_built' | 'subdivision' | 'neighborhood' | 'geographic' | 'sale_age'>
 }
 
 // ─── Response Types ────────────────────────────────────────────────────────────

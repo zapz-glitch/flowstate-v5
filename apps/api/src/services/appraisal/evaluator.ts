@@ -635,10 +635,10 @@ function evaluateConditionMatch(
   }
 }
 
-const FILTER_EVALUATORS: Record<
+const FILTER_EVALUATORS: Partial<Record<
   FilterType,
   (subject: NormalizedProperty, comp: NormalizedComparable, filter: AppraisalFilter) => FilterResult
-> = {
+>> = {
   subdivision_match: evaluateSubdivisionMatch,
   neighborhood_match: evaluateNeighborhoodMatch,
   building_style_match: evaluateBuildingStyleMatch,

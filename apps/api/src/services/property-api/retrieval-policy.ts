@@ -20,8 +20,11 @@
  *   property_type rule. Documented provider-imposed bound; not overridable.
  *
  * Provider prefilter audit (distance / sale window / sqft / year / type):
- * - monthsBack:   SAFE_PROVIDER_PREFILTER — sale_age is never relaxed, and
- *   the fetched window (default 12mo) is wider than the strictest rule.
+ * - monthsBack:   SAFE_PROVIDER_PREFILTER at configured sale_age — the
+ *   fetched window (default 12mo) is wider than the strictest rule. The
+ *   last-resort sale-age tiers (365d/548d ≈ 18mo) reach BEYOND the fetched
+ *   window — like radius, an insufficient result widens monthsBack on the
+ *   single expansion refetch so those tiers see real candidates.
  * - sqft bounds:  SAFE_PROVIDER_PREFILTER — sqft_diff is never relaxed;
  *   absolute bounds sent only when the rule is enabled AND subject sqft is
  *   known (missing data never disqualifies).
@@ -168,7 +171,7 @@ export function expansionRefetchRadius(
 }
 
 export interface DeadCompThresholds {
-  /** Max sale age in days — never relaxed by any tier. */
+  /** Max sale age in days — the DEEPEST configured window any tier may reach. */
   saleAgeDays: number
   /** Max |comp sqft - subject sqft| — never relaxed. */
   sqftDiff: number
@@ -178,9 +181,10 @@ export interface DeadCompThresholds {
 
 /**
  * Provably-dead predicate for pre-enrichment pruning. A comp is dead only
- * when data the provider ALREADY returned proves it fails a rule no
- * evaluation tier ever relaxes (sale age, sqft diff, year built at its
- * widest sanctioned tolerance). Missing data is not proof — those comps are
+ * when data the provider ALREADY returned proves it fails a rule beyond
+ * the widest ceiling any evaluation tier can reach (sale age at the
+ * deepest configured expansion tier, sqft diff, year built at its widest
+ * sanctioned tolerance). Missing data is not proof — those comps are
  * still enriched. Distance/subdivision/property-type are NOT here: the
  * expansion ladder can rescue them, so pruning on them would contradict the
  * approved expansion policy.

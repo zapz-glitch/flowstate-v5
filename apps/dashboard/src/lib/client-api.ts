@@ -255,6 +255,8 @@ export type FilterType =
   | 'distance'
   | 'lot_size_diff'
   | 'road_barrier'
+  | 'sale_age_expansion'
+  | 'sale_age_expansion_2'
 
 export type AdjustmentType =
   | 'old_comp_discount'
