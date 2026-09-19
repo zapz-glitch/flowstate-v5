@@ -244,6 +244,19 @@ selection stands, truth scores still attach, step reports
 INSUFFICIENT_COMPS now only fires when the rules selection itself
 found nothing (pre-existing behavior).
 
+Update (952b5df): user flagged that subdivision/neighborhood are only
+enriched for rule-matched comps, so geo data is absent across most of
+the pool — geo-identity filters (subdivision_match, neighborhood_match)
+can no longer gate the Jev buckets. Location criterion is now
+distanceMiles <= 0.5 (hard gate); other evaluated rule failures still
+disqualify (missing data is already 'not_verified', non-disqualifying).
+Truth questions tell Jev distanceMiles is the primary location signal
+and absent geo fields are unknown, not negative. Verified live
+(job_1789784553571): 67 candidates → 19 within 0.5mi → 12 A>I + 4 I>A;
+the 11 A>I losers failed evaluated rules (sqft cap, year-built), not
+geo — correct per spec. Result: 1 ARV comp → ARV $269,800, no dead end.
+User expectation: manual report review fine-tunes location judgment.
+
 Remaining: nothing blocking. Stack live: API :8792, dashboard :3012.
 
 ### 2026-09-18 — Reset from feat/jev-rules-evaluation
