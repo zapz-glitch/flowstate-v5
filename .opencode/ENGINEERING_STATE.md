@@ -358,6 +358,58 @@ Also verified: 228 Cobblestone thin-comp question answered — rules gate
 Levers discussed: wider tolerances, soft-priority filters, asymmetric
 year rule, location overrides — none requested yet.
 
+### 2026-09-19 — Configurable sale-age fallback tiers (a135400)
+
+User directive: on INSUFFICIENT_COMPS, retry at 365d then 18 months —
+"as customizable like the rest of the settings in the appraisal rules
+filter rules section" and picked up on initial + fallback scenarios.
+(An earlier asIsSaleAgeDays deal-param + as-is-only gate was built,
+verified live, then reverted by user request — this replaces it with a
+preset-level mechanism.)
+
+Model: each fallback tier is a FILTER ROW — `sale_age_expansion` (365d)
+and `sale_age_expansion_2` (548d) added to FilterType, DEFAULT_FILTERS
+(enabled, priority soft), FILTER_LABELS. They render as rows in
+AppraisalFilterEditor like every other rule, persist per-preset via the
+existing filter table, and get default-injected for presets lacking
+them. They have NO per-comp evaluator (FILTER_EVALUATORS is now
+Partial) so they never disqualify a comp — they only parameterize the
+last-resort ladder via `saleAgeExpansionSteps(filters, baseDays)`.
+
+Engine:
+- `evaluateWithFallback`: after the full existing ladder ends
+  insufficient, retries the ENTIRE ladder with only the sale_age
+  ceiling widened to each configured step ascending (recursion walks
+  180→365→548). `fallbackUsed: 'sale_age_expansion'`,
+  `expansionApplied: 'sale_age'`. ExpansionPolicy keeps only
+  `allowSaleAgeExpansion` (master flag); steps come from the rows.
+- Same `filters` drive all three call sites (initial eval, post-refetch
+  re-eval, post-photo re-eval) — configured values picked up everywhere.
+- performAnalysis: the ONE expansion refetch now also widens monthsBack
+  to cover the deepest configured tier (ceil(days/30.44) — fetched
+  6–12mo window provably lacks 18mo sales, same doctrine as radius).
+  `expandComparablesPool(radius, monthsBack?)` seam; analysis-job
+  passes monthsBack to getComparables and updates retrieval meta.
+- Dead-comp enrichment prune: saleAgeDays now uses the DEEPEST
+  configured tier (was strict sale_age on the now-false doctrine that
+  sale_age is never relaxed) — comps a fallback tier could admit are
+  no longer starved of enrichment. DO also merges missing
+  DEFAULT_FILTERS into the preset list for parity with performAnalysis.
+- Shared package + batch-job + GHL webhook untouched: shared evaluator
+  passes unknown types; batch/GHL run the ladder on the existing pool
+  (no refetch seam — same limitation as radius expansion today).
+
+Verified: tsc clean api+dashboard; 20/20 regression files pass; live
+38036 Central Ave Zephyrhills — ladder walked 180→365→548, ONE refetch
+combined radius 1→2mi + monthsBack→18 (KV key confirmed), provider
+returned the only comp in that market (609 W County Line Rd) → honest
+INSUFFICIENT_COMPS (1 < 3 required). comp_count records pre-refetch
+pool. Earlier hardcoded [365,548] version also verified the ladder
+walk via error-message drift 180→548.
+
+Open: ARV `sale_age` row remains the primary window — ladder tiers are
+last-resort only. Disabling both rows = feature off.
+
 ### 2026-09-18 — Reset from feat/jev-rules-evaluation
 - Prior branch (Python/GIS bridge + Jev atomic signals + Python-owned
   qualification/ranking) deleted per user direction — it replaced v5
