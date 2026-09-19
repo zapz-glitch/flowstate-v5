@@ -190,8 +190,41 @@ group=arv, ARV 271167. Step: "Jev selected 3/67 comps by truth
 (jev-1.13.0)". Note: selection count floors at the ARV standard of 3 —
 Jev decides WHICH comps, not how many.
 
-Remaining: nothing blocking. Badge rendering visible on next dashboard
-analysis load (stack live: API :8792, dashboard :3012).
+### 2026-09-19 — Dual truth: ARV vs investment comp buckets
+
+User concern: "separating ARV priced and condition comps from
+Investment priced and condition comps." Product decisions (user):
+Jev picks the investment set (replaces ≤70%-of-ARV price threshold);
+every card shows both scores.
+
+Implemented:
+- `scoreCompTruthWithJev` now asks TWO nouls per candidate:
+  `comp_i_arv_truth` (after-renovation retail value evidence) and
+  `comp_i_investment_truth` (as-is investor value evidence). Returns
+  `scores[id] = {arvTruth, investmentTruth}`; batch offset tracked on
+  TruthBatch for correct answer mapping.
+- Pipeline: top-3 arvTruth → ARV set; top-3 investmentTruth among the
+  rest → Group B (`summarizeGroupB` extracted, shared sqft-scaling
+  math). Price-threshold Group B is the Jev-down fallback. Both sets
+  marked isEnabled; bestMatch scoped to ARV set only.
+- `AppraisedComparable.jevTruth` → `jevArvTruth`/`jevInvestmentTruth`
+  (item type + mapping + dashboard CompItem + projectComp).
+- Cards: A·/I· dual value-toned badges (CompGridCard overlay, CompCard
+  header) with explanatory tooltips.
+
+Live E2E (same job, refreshed): ARV set = 2384 McAfee (A.36/I.22),
+545 Quillian (A.42/I.21), 1990 McAfee Pl (A.41/I.17); investment set =
+1987 Merle Cir (I.26), 2355 Hillside (I.26), 500 Allendale (I.26) —
+sets diverge correctly (2355 Hillside moved from ARV to investment
+once buckets separated). ARV 301167, asIsValue 221917. Step: "Jev
+selected 3 ARV + 3 investment comps from 67 candidates".
+
+Also this session: Jev outcome card chips reverted to tone-coded
+colors per user; outcome projection decontaminated (see commit
+930fd0b) — labels still honest-negative on this thin-evidence
+property, which is Jev's real read.
+
+Remaining: nothing blocking. Stack live: API :8792, dashboard :3012.
 
 ### 2026-09-18 — Reset from feat/jev-rules-evaluation
 - Prior branch (Python/GIS bridge + Jev atomic signals + Python-owned
