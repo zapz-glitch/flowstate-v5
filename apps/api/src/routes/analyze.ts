@@ -412,17 +412,33 @@ analyze.get('/jobs/:jobId', async (c) => {
     status?: string;
     error?: string;
     createdAt?: number;
+    events?: Array<{ event: string; data: unknown }>;
   };
 
   if (!state.status || state.status === 'not_found' || state.status === 'idle') {
     return c.json({ success: false, error: 'Job not found', jobId }, 404);
   }
-  if (state.userId && state.userId !== auth.userId) {
+  // Strict ownership: a missing owner on the job is never a pass.
+  if (!state.userId || state.userId !== auth.userId) {
     return c.json({ success: false, error: 'Job not found', jobId }, 404);
   }
 
+  // The DO flips status to 'complete' on enrichment_done even after an
+  // earlier 'error' event — the evaluation_complete event is the only
+  // reliable success marker.
+  const events = state.events ?? [];
+  const evalComplete = events.find((e) => e.event === 'evaluation_complete');
+  const errorEvent = events.find((e) => e.event === 'error');
+  const status =
+    state.status === 'complete' && !evalComplete && errorEvent
+      ? 'error'
+      : state.status;
+  const error =
+    state.error ??
+    ((errorEvent?.data as { message?: string } | undefined)?.message ?? null);
+
   let result: unknown = null;
-  if (state.status === 'complete') {
+  if (status === 'complete') {
     const db = drizzle(c.env.DB);
     const report = await db
       .select()
@@ -445,6 +461,30 @@ analyze.get('/jobs/:jobId', async (c) => {
           ? JSON.parse(report.fullResponseJson)
           : null,
       };
+    } else if (evalComplete) {
+      // upsertPropertyReport repoints the row's jobId when a property is
+      // re-analyzed, so an older completed job loses its report mapping —
+      // fall back to the immutable evaluation result stored in the DO event.
+      const r = evalComplete.data as {
+        updatedResult?: {
+          property?: { address?: string; city?: string; state?: string; zipCode?: string };
+          valuation?: { arv?: number; asIsValue?: number; buyPrice?: number; rehabCost?: number };
+        };
+      };
+      const val = r.updatedResult?.valuation ?? {};
+      const prop = r.updatedResult?.property ?? {};
+      result = {
+        reportId: null,
+        propertyAddress: prop.address ?? null,
+        propertyCity: prop.city ?? null,
+        propertyState: prop.state ?? null,
+        propertyZip: prop.zipCode ?? null,
+        arv: val.arv ?? null,
+        asIsValue: val.asIsValue ?? null,
+        maxAllowableOffer: val.buyPrice ?? null,
+        estimatedRepairs: val.rehabCost ?? null,
+        fullResponse: r.updatedResult ?? null,
+      };
     }
   }
 
@@ -452,8 +492,8 @@ analyze.get('/jobs/:jobId', async (c) => {
     success: true,
     data: {
       jobId,
-      status: state.status,
-      error: state.error ?? null,
+      status,
+      error,
       createdAt: state.createdAt ?? null,
       result,
     },
