@@ -114,9 +114,6 @@ interface AnalyzeRequest {
   /** Override max age (days) for a Zillow sale to reconcile a stale comp price — default 365 */
   reconciliationSaleAgeDays?: number;
 
-  /** Override max sale age (days) for as-is/investment comp evidence — default 548 (~18mo) */
-  asIsSaleAgeDays?: number;
-
   /** Override appraisal rules for this request */
   appraisalOverrides?: {
     filters?: Array<{
@@ -250,8 +247,6 @@ analyze.post('/', async (c) => {
         body.asIsThresholdPercent ?? userSettings.asIsThresholdPercent,
       reconciliationSaleAgeDays:
         body.reconciliationSaleAgeDays ?? userSettings.reconciliationSaleAgeDays,
-      asIsSaleAgeDays:
-        body.asIsSaleAgeDays ?? userSettings.asIsSaleAgeDays,
       proximityConfig: userSettings.proximityConfig,
     };
 

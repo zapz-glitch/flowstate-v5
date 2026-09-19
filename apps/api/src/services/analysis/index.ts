@@ -498,10 +498,6 @@ export interface AppliedSettings {
   arvThresholdPercent?: number
   /** Resolved as-is threshold percent (includes location overrides) */
   asIsThresholdPercent?: number
-  /** Resolved max sale age (days) for as-is/investment comp evidence */
-  asIsSaleAgeDays?: number
-  /** Resolved max age (days) for Zillow sale reconciliation */
-  reconciliationSaleAgeDays?: number
 }
 
 /**

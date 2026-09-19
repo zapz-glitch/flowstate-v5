@@ -84,10 +84,6 @@ export interface EvaluationParams {
   asIsThresholdPercent?: number
   /** Max age (days) for a Zillow sale event to reconcile a stale comp price (default: 365) */
   reconciliationSaleAgeDays?: number
-  /** Max sale age (days) for as-is/investment evidence — relaxes only the
-   *  sale_age appraisal filter for the as-is bucket (default: 548 ≈ 18mo).
-   *  ARV eligibility always uses the configured sale_age filter. */
-  asIsSaleAgeDays?: number
   apiCallStats?: ApiCallStats
   /**
    * Expansion refetch seam. When the appraisal ladder reaches a tier that
@@ -649,30 +645,13 @@ export async function performAnalysis(
     const rulesPassed = (c: AppraisedComparable) =>
       c.distanceMiles != null && c.distanceMiles <= JEV_LOCATION_RADIUS_MILES &&
       (!c.evaluation || !c.evaluation.shouldDisable)
-    // As-is evidence gets a longer sale-age window (asIsSaleAgeDays, default
-    // ~18mo): investors transact on older sales. A comp disqualified ONLY by
-    // the hard sale_age filter still qualifies for the investment bucket when
-    // it sold within that window; every other hard failure and the distance
-    // gate still apply. ARV keeps the configured sale_age rule untouched.
-    const asIsSaleAgeDays = params.asIsSaleAgeDays ?? 548
-    const asIsRulesPassed = (c: AppraisedComparable) => {
-      if (c.distanceMiles == null || c.distanceMiles > JEV_LOCATION_RADIUS_MILES) return false
-      if (!c.evaluation || !c.evaluation.shouldDisable) return true
-      const otherHardFailure = c.evaluation.filterResults.some(
-        (f) => f.type !== 'sale_age' && f.passed === false &&
-          (filters.find((af) => af.type === f.type)?.priority ?? defaultFilterPriority(f.type)) !== 'soft',
-      )
-      if (otherHardFailure) return false
-      const saleMs = c.saleDate ? new Date(c.saleDate).getTime() : NaN
-      return Number.isFinite(saleMs) && (Date.now() - saleMs) / 86_400_000 <= asIsSaleAgeDays
-    }
     const jevArvIds = new Set(
       appraisalResult.comparables
         .filter((c) => truth(c.id).arvTruth > truth(c.id).investmentTruth && rulesPassed(c))
         .map((c) => c.id),
     )
     jevInvestmentCompIds = appraisalResult.comparables
-      .filter((c) => truth(c.id).investmentTruth > truth(c.id).arvTruth && asIsRulesPassed(c))
+      .filter((c) => truth(c.id).investmentTruth > truth(c.id).arvTruth && rulesPassed(c))
       .map((c) => c.id)
     const jevInvestmentIds = new Set(jevInvestmentCompIds)
     if (jevArvIds.size === 0) {
@@ -1007,8 +986,6 @@ export async function performAnalysis(
     additionPlay: buybox.additionPlay ?? 0,
     arvThresholdPercent: arvThreshold.percent,
     asIsThresholdPercent,
-    asIsSaleAgeDays: params.asIsSaleAgeDays ?? 548,
-    reconciliationSaleAgeDays: params.reconciliationSaleAgeDays ?? 365,
   }
 
   // ── 9. Build response ───────────────────────────────────────────────────────
