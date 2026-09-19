@@ -565,10 +565,11 @@ export async function performAnalysis(
   // Every candidate gets two 0–1 truth scores: ARV (after-renovation retail
   // value evidence) and investment (as-is investor value evidence). The
   // HIGHER score assigns the comp's market: A > I → ARV-eligible; I > A →
-  // investment-only, never ARV-eligible. Location gate is distance ≤0.5mi —
-  // subdivision/neighborhood enrichment only exists for rule-matched comps,
-  // so geo-identity filters can't gate; other evaluated rule failures still
-  // disqualify. ARV = mean of adjusted prices over the A-bucket matches; the
+  // investment-only, never ARV-eligible. Location gate is distance ≤0.5mi
+  // (geo enrichment is sparse — distance is the uniform location signal);
+  // evaluated rule failures disqualify, verified geo mismatches included,
+  // while 'not_verified' (missing data) never does. ARV = mean of adjusted
+  // prices over the A-bucket matches; the
   // I-bucket matches average into the as-is AVG shown for insight. If Jev is
   // unavailable or the ARV bucket is empty, the rules selection stands.
   let jevInvestmentCompIds: string[] = []
@@ -580,17 +581,16 @@ export async function performAnalysis(
       env,
     )
     const truth = (id: string) => jev.scores[id] ?? { arvTruth: 0, investmentTruth: 0 }
-    // Location criterion is distance, not subdivision/neighborhood match —
-    // geo identity data is only enriched for rule-matching comps, so most of
-    // the pool can't be judged that way. Other evaluated rule failures still
-    // disqualify (missing data is 'not_verified', which never does).
+    // Location criterion is distance — geo enrichment only exists for a
+    // minority of comps, so distance gates everyone uniformly. A filter only
+    // disqualifies when it was actually evaluated (passed === false);
+    // 'not_verified' results (missing data) never do — so an enriched comp's
+    // real subdivision mismatch still counts, while unenriched comps aren't
+    // punished for data they never had.
     const JEV_LOCATION_RADIUS_MILES = 0.5
-    const GEO_IDENTITY_FILTERS = new Set(['subdivision_match', 'neighborhood_match'])
     const rulesPassed = (c: AppraisedComparable) =>
       c.distanceMiles != null && c.distanceMiles <= JEV_LOCATION_RADIUS_MILES &&
-      !(c.evaluation?.filterResults ?? []).some(
-        (f) => f.passed === false && !GEO_IDENTITY_FILTERS.has(f.type),
-      )
+      !(c.evaluation?.filterResults ?? []).some((f) => f.passed === false)
     const jevArvIds = new Set(
       appraisalResult.comparables
         .filter((c) => truth(c.id).arvTruth > truth(c.id).investmentTruth && rulesPassed(c))
