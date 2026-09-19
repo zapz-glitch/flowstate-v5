@@ -158,7 +158,7 @@ const fakeComp = (id: string, overrides: Record<string, unknown> = {}) => ({
   await assert.rejects(() => scoreCompTruthWithJev(fakeSubject, [fakeComp('c1')], {}, {}))
 }
 
-// 6. Valid response → truth keyed by comp id, one noul question per comp
+// 6. Valid response → dual truth scores keyed by comp id, two noul questions per comp
 {
   let body: Record<string, unknown> | null = null
   globalThis.fetch = async (_url, init) => {
@@ -166,21 +166,25 @@ const fakeComp = (id: string, overrides: Record<string, unknown> = {}) => ({
     const questions = (body!.questions ?? {}) as Record<string, { type: string }>
     assert.ok(Object.values(questions).every((q) => q.type === 'noul'))
     const echoed = Object.fromEntries(
-      Object.keys(questions).map((id, i) => [id, { type: 'noul', noul: 0.9 - i * 0.2 }]),
+      Object.keys(questions).map((id) => {
+        const noul = id.endsWith('_arv_truth') ? 0.9 : 0.3
+        return [id, { type: 'noul', noul }]
+      }),
     )
     return Response.json({ model: 'jev-test-1', answers: echoed, usage: { input_tokens: 800 } })
   }
   const comps = [fakeComp('c1'), fakeComp('c2'), fakeComp('c3')]
   const result = await scoreCompTruthWithJev(fakeSubject, comps, { filters: [] }, { TYPESAFE_API_KEY: 'k', TYPESAFE_MODEL: 'jev-test-1' })
   assert.equal(result.model, 'jev-test-1')
-  assert.deepEqual(Object.keys(result.truth).sort(), ['c1', 'c2', 'c3'])
-  assert.equal(result.truth.c1, 0.9)
-  assert.equal(result.truth.c2, 0.7)
-  assert.equal(result.truth.c3, 0.5)
+  assert.deepEqual(Object.keys(result.scores).sort(), ['c1', 'c2', 'c3'])
+  assert.deepEqual(result.scores.c1, { arvTruth: 0.9, investmentTruth: 0.3 })
+  assert.deepEqual(result.scores.c3, { arvTruth: 0.9, investmentTruth: 0.3 })
+  // Two questions per comp: arv + investment truth
+  assert.equal(Object.keys((body!.questions ?? {})).length, 6)
   // Comps are projected into state.comparables with rule evidence, no scores leaked
   const state = body!.state as { comparables: Array<Record<string, unknown>> }
   assert.equal(state.comparables.length, 3)
-  assert.equal(state.comparables[0].jevTruth, undefined)
+  assert.equal(state.comparables[0].jevArvTruth, undefined)
   assert.ok(Object.hasOwn(state.comparables[0], 'ruleEvidence'))
 }
 

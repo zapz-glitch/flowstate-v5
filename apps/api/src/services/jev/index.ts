@@ -196,7 +196,8 @@ function projectComp(comp: CompItem): Record<string, unknown> {
     adjustedPrice: comp.adjustedPrice,
     subdivision: comp.subdivision,
     compGroup: comp.compGroup ?? null,
-    jevTruth: comp.jevTruth ?? null,
+    jevArvTruth: comp.jevArvTruth ?? null,
+    jevInvestmentTruth: comp.jevInvestmentTruth ?? null,
     failedFilters: failed.length ? failed : null,
   }
 }
@@ -390,8 +391,12 @@ export async function classifyOutcomeWithJev(
 // ─── Comp truth scoring (Jev is authoritative for selection) ──────────────────
 
 export interface JevCompTruthResult {
-  /** compId → truth score (0–1 noul: reliable evidence of the subject's value) */
-  truth: Record<string, number>
+  /**
+   * compId → dual truth scores. `arvTruth`: evidence of the subject's
+   * after-renovation retail value. `investmentTruth`: evidence of what an
+   * investor would pay for the subject as-is.
+   */
+  scores: Record<string, { arvTruth: number; investmentTruth: number }>
   model: string
   latencyMs: number
   inputTokens: number
@@ -442,14 +447,21 @@ function compTruthEvidence(comp: AppraisedComparable): Record<string, unknown> {
 
 const TRUTH_STATE_AND_QUESTION_BYTES = 28_000
 
-function truthQuestion(index: number): NoulQuestion {
+function arvTruthQuestion(index: number): NoulQuestion {
   return {
     type: 'noul',
-    instructions: `Is state.comparables[${index}] a reliable source of truth for the subject's market value — does its sale reflect what a similar buyer would credibly pay for the subject? Judge physical similarity, sale legitimacy and recency, and location comparability against state.subject, using state.appraisalRules as context. The comp's own ruleEvidence lists appraisal-rule outcomes as evidence, not verdicts. Missing values are unknown — answer only what the supplied evidence supports.`,
+    instructions: `Is state.comparables[${index}] a reliable source of truth for the subject's AFTER-RENOVATION retail market value — does its sale reflect what a retail buyer would credibly pay for the subject once renovated? This is the ARV bucket: the comp should read like a renovated/retail-priced sale (strong condition signals, retail-grade price per sqft), physically similar and nearby. Judge against state.subject using state.appraisalRules as context; the comp's ruleEvidence lists appraisal-rule outcomes as evidence, not verdicts. Missing values are unknown — answer only what the supplied evidence supports.`,
   }
 }
 
-type TruthBatch = { ids: string[]; body: { model: string; state: Record<string, unknown>; questions: Record<string, NoulQuestion> } }
+function investmentTruthQuestion(index: number): NoulQuestion {
+  return {
+    type: 'noul',
+    instructions: `Is state.comparables[${index}] a reliable source of truth for the subject's AS-IS investment value — does its sale reflect what an investor would credibly pay for the subject today, in current condition? This is the investment bucket: the comp should read like an as-is or investment-grade sale (dated/distressed condition or below-retail pricing), physically similar and nearby. Judge against state.subject using state.appraisalRules as context; the comp's ruleEvidence lists appraisal-rule outcomes as evidence, not verdicts. Missing values are unknown — answer only what the supplied evidence supports.`,
+  }
+}
+
+type TruthBatch = { ids: string[]; offset: number; body: { model: string; state: Record<string, unknown>; questions: Record<string, NoulQuestion> } }
 
 function makeTruthBatch(
   subject: Record<string, unknown>, rules: unknown, comps: Array<Record<string, unknown>>,
@@ -457,11 +469,15 @@ function makeTruthBatch(
 ): TruthBatch {
   return {
     ids,
+    offset,
     body: {
       model,
       state: { subject, appraisalRules: rules, evaluationDate, comparables: comps },
       questions: Object.fromEntries(
-        comps.map((_, index) => [`comp_${offset + index}_truth`, truthQuestion(index)]),
+        comps.flatMap((_, index) => [
+          [`comp_${offset + index}_arv_truth`, arvTruthQuestion(index)],
+          [`comp_${offset + index}_investment_truth`, investmentTruthQuestion(index)],
+        ]),
       ),
     },
   }
@@ -500,29 +516,31 @@ function truthBatches(
 
 function parseTruthResponse(
   value: unknown, batch: TruthBatch,
-): { truth: Record<string, number>; model: string; inputTokens: number } {
+): { scores: Record<string, { arvTruth: number; investmentTruth: number }>; model: string; inputTokens: number } {
   const malformed = () => new Error('Jev truth scoring returned an invalid or incomplete typed response; no scores were accepted.')
   if (!object(value) || typeof value.model !== 'string' || !/^jev-[\w.-]+$/.test(value.model) || !object(value.answers) || !object(value.usage)) throw malformed()
   const { input_tokens: inputTokens } = value.usage
   if (typeof inputTokens !== 'number' || !Number.isSafeInteger(inputTokens) || inputTokens < 0) throw malformed()
   const keys = Object.keys(batch.body.questions)
   if (Object.keys(value.answers).length !== keys.length || keys.some((key) => !Object.hasOwn(value.answers as object, key))) throw malformed()
-  const truth: Record<string, number> = Object.create(null)
-  keys.forEach((key, index) => {
-    const answer = (value.answers as Record<string, unknown>)[key]
-    if (!object(answer) || answer.type !== 'noul' || !probability(answer.noul)) throw malformed()
-    truth[batch.ids[index]] = answer.noul
+  const scores: Record<string, { arvTruth: number; investmentTruth: number }> = Object.create(null)
+  batch.ids.forEach((id, index) => {
+    const arv = (value.answers as Record<string, unknown>)[`comp_${batch.offset + index}_arv_truth`]
+    const inv = (value.answers as Record<string, unknown>)[`comp_${batch.offset + index}_investment_truth`]
+    if (!object(arv) || arv.type !== 'noul' || !probability(arv.noul)) throw malformed()
+    if (!object(inv) || inv.type !== 'noul' || !probability(inv.noul)) throw malformed()
+    scores[id] = { arvTruth: arv.noul, investmentTruth: inv.noul }
   })
-  return { truth, model: value.model, inputTokens }
+  return { scores, model: value.model, inputTokens }
 }
 
 /**
- * Score every candidate's "truth" — a 0–1 noul answering whether the comp is
- * reliable evidence of the subject's market value. Jev sees the whole
- * candidate pool per batch, so scores are relative to all supplied addresses.
- * Selection (top-N) is the caller's decision; this only returns scores.
- * Throws on missing key / API / malformed response — callers degrade to the
- * appraisal-rules selection.
+ * Score every candidate on two truths — 0–1 nouls for ARV (after-renovation
+ * retail value) and investment (as-is investor value) evidence. Jev sees the
+ * whole candidate pool per batch, so scores are relative to all supplied
+ * addresses. Selection (top-N per bucket) is the caller's decision; this only
+ * returns scores. Throws on missing key / API / malformed response — callers
+ * degrade to the appraisal-rules selection.
  */
 export async function scoreCompTruthWithJev(
   subject: NormalizedProperty,
@@ -540,7 +558,7 @@ export async function scoreCompTruthWithJev(
     throw new Error('Jev truth scoring requires a unique, nonempty ID for every comparable.')
   }
 
-  const truth: Record<string, number> = Object.create(null)
+  const scores: Record<string, { arvTruth: number; investmentTruth: number }> = Object.create(null)
   let inputTokens = 0
   let actualModel: string | undefined
   for (const batch of truthBatches(subject, comps, appraisalRules, model, evaluationDate)) {
@@ -567,7 +585,7 @@ export async function scoreCompTruthWithJev(
     if (actualModel && actualModel !== parsed.model) throw new Error('Jev truth model changed between batches; no mixed-model scores were accepted.')
     actualModel = parsed.model
     inputTokens += parsed.inputTokens
-    Object.assign(truth, parsed.truth)
+    Object.assign(scores, parsed.scores)
   }
-  return { truth, model: actualModel ?? model, latencyMs: Date.now() - start, inputTokens }
+  return { scores, model: actualModel ?? model, latencyMs: Date.now() - start, inputTokens }
 }

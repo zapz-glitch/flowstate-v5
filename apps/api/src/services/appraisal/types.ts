@@ -415,10 +415,12 @@ export interface AppraisedComparable extends NormalizedComparable {
   /** Adjusted price after applying rules */
   adjustedSalePrice: number | null
   /**
-   * Jev truth score (0–1): how reliable this comp is as evidence of the
-   * subject's market value. Present when Jev comp selection ran.
+   * Jev truth scores (0–1). arvTruth: reliable evidence of the subject's
+   * after-renovation retail value. investmentTruth: reliable evidence of
+   * the subject's as-is investor value. Present when Jev comp selection ran.
    */
-  jevTruth?: number | null
+  jevArvTruth?: number | null
+  jevInvestmentTruth?: number | null
 }
 
 // ─── Appraisal Result ──────────────────────────────────────────────────────────

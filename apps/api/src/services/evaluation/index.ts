@@ -251,6 +251,21 @@ function selectGroupBComps(
     }
   }
 
+  return summarizeGroupB(qualifying, subject, arv, thresholdPercent, priceCeiling)
+}
+
+/**
+ * Sqft-scale each comp's sale price to the subject's sqft, then average —
+ * shared by the price-threshold Group B and Jev's investment selection.
+ */
+function summarizeGroupB(
+  qualifying: AppraisedComparable[],
+  subject: NormalizedProperty,
+  arv: number,
+  thresholdPercent: number,
+  priceCeiling: number,
+): GroupBResult {
+
   // Sqft-scale each comp's sale price to the subject's sqft, then average
   const subjectSqft = subject.squareFeet ?? 0
   const scaledPrices: number[] = []
@@ -546,11 +561,14 @@ export async function performAnalysis(
     }
   }
 
-  // ── Jev comp selection — authoritative for the ARV set ─────────────────────
-  // Every candidate gets a 0–1 truth score (is this comp reliable evidence of
-  // the subject's market value). The top-N by truth become the enabled set.
-  // Appraisal rules already ran: their results are Jev's evidence and stay on
-  // the comp cards. If Jev is unavailable, the rules selection stands.
+  // ── Jev comp selection — authoritative for both comp sets ──────────────────
+  // Every candidate gets two 0–1 truth scores: ARV (after-renovation retail
+  // value evidence) and investment (as-is investor value evidence). Top-3 by
+  // ARV truth drive the ARV; top-3 by investment truth become the investment
+  // (Group B) set. Appraisal rules already ran: their results are Jev's
+  // evidence and stay on the comp cards. If Jev is unavailable, the rules
+  // selection and the price-threshold Group B stand.
+  let jevInvestmentCompIds: string[] = []
   try {
     const jev = await scoreCompTruthWithJev(
       bundle.property,
@@ -559,30 +577,37 @@ export async function performAnalysis(
       env,
     )
     // ARV standard is a 3-comp set — Jev decides WHICH comps, not how many.
-    const targetCount = Math.min(
+    const arvTarget = Math.min(
       appraisalResult.comparables.length,
       Math.max(3, appraisalResult.selectedCompIds?.length ?? 0),
     )
     const jevSelectedIds = new Set(
       [...appraisalResult.comparables]
-        .sort((a, b) => (jev.truth[b.id] ?? -1) - (jev.truth[a.id] ?? -1))
-        .slice(0, targetCount)
+        .sort((a, b) => (jev.scores[b.id]?.arvTruth ?? -1) - (jev.scores[a.id]?.arvTruth ?? -1))
+        .slice(0, arvTarget)
         .map((c) => c.id),
     )
+    jevInvestmentCompIds = [...appraisalResult.comparables]
+      .filter((c) => !jevSelectedIds.has(c.id))
+      .sort((a, b) => (jev.scores[b.id]?.investmentTruth ?? -1) - (jev.scores[a.id]?.investmentTruth ?? -1))
+      .slice(0, 3)
+      .map((c) => c.id)
+    const jevInvestmentIds = new Set(jevInvestmentCompIds)
     appraisalResult.comparables = appraisalResult.comparables.map((comp) => ({
       ...comp,
-      isEnabled: jevSelectedIds.has(comp.id),
+      isEnabled: jevSelectedIds.has(comp.id) || jevInvestmentIds.has(comp.id),
       arvStatus: jevSelectedIds.has(comp.id)
         ? 'selected' as const
         : comp.arvStatus === 'selected' ? 'not_examined' as const : comp.arvStatus,
-      jevTruth: jev.truth[comp.id] ?? null,
+      jevArvTruth: jev.scores[comp.id]?.arvTruth ?? null,
+      jevInvestmentTruth: jev.scores[comp.id]?.investmentTruth ?? null,
     }))
     appraisalResult.selectedCompIds = [...jevSelectedIds]
     appraisalResult.arv = appraisalService.calculateARV(
       appraisalResult.comparables.filter((c) => jevSelectedIds.has(c.id)),
     )
     appraisalResult.insufficientComps = jevSelectedIds.size === 0
-    step('jev_selection', 'completed', `Jev selected ${jevSelectedIds.size}/${appraisalResult.comparables.length} comps by truth (${jev.model})`)
+    step('jev_selection', 'completed', `Jev selected ${jevSelectedIds.size} ARV + ${jevInvestmentIds.size} investment comps from ${appraisalResult.comparables.length} candidates (${jev.model})`)
   } catch (error) {
     console.warn('[Evaluate] Jev comp selection unavailable — rules selection stands:', error instanceof Error ? error.message : error)
     step('jev_selection', 'fallback', 'Jev unavailable — appraisal-rules selection used')
@@ -832,19 +857,34 @@ export async function performAnalysis(
   // ── 7. Group B as-is market intelligence ────────────────────────────────────
   const asIsThresholdPercent = params.asIsThresholdPercent ?? 70
   const groupACompIds = new Set(appraisalResult.selectedCompIds ?? [])
-  const groupBResult = selectGroupBComps(
-    bundle.property,
-    appraisalResult,
-    finalArv,
-    asIsThresholdPercent,
-    groupACompIds
-  )
+  // Jev's investment-truth picks are the investment set when available;
+  // otherwise fall back to the price-threshold Group B.
+  const groupBResult = jevInvestmentCompIds.length > 0
+    ? summarizeGroupB(
+        appraisalResult.comparables.filter(
+          (c) => jevInvestmentCompIds.includes(c.id) && c.salePrice != null && c.salePrice > 0,
+        ),
+        bundle.property,
+        finalArv,
+        asIsThresholdPercent,
+        Math.round((finalArv * asIsThresholdPercent) / 100),
+      )
+    : selectGroupBComps(
+        bundle.property,
+        appraisalResult,
+        finalArv,
+        asIsThresholdPercent,
+        groupACompIds
+      )
   if (groupBResult && groupBResult.count > 0) {
-    console.log(`[Evaluate] Group B: ${groupBResult.count} as-is comps (≤${formatUsd(groupBResult.priceCeiling)}, ${asIsThresholdPercent}% of ARV)`)
+    console.log(`[Evaluate] Group B: ${groupBResult.count} as-is comps (${jevInvestmentCompIds.length > 0 ? 'Jev investment-truth selected' : `≤${formatUsd(groupBResult.priceCeiling)}, ${asIsThresholdPercent}% of ARV`})`)
   }
 
   // ── 8. Best match + applied settings snapshot ───────────────────────────────
-  const bestMatch = selectBestMatch(bundle.property, enabledComps)
+  const bestMatch = selectBestMatch(
+    bundle.property,
+    appraisalResult.comparables.filter((c) => groupACompIds.has(c.id)),
+  )
 
   const appliedSettings = {
     filters: filters.map((f) => ({

@@ -88,17 +88,30 @@ export function CompCard({
             )}>
               {index + 1}
             </div>
-            {comp.jevTruth != null && (
+            {comp.jevArvTruth != null && (
               <div
                 className={cn(
                   'h-6 px-1.5 rounded flex items-center text-[10px] font-bold tabular-nums flex-shrink-0',
-                  comp.jevTruth >= 0.7 ? 'bg-emerald-500/15 text-emerald-600'
-                    : comp.jevTruth >= 0.4 ? 'bg-amber-500/15 text-amber-600'
+                  comp.jevArvTruth >= 0.7 ? 'bg-emerald-500/15 text-emerald-600'
+                    : comp.jevArvTruth >= 0.4 ? 'bg-amber-500/15 text-amber-600'
                     : 'bg-red-500/15 text-red-500'
                 )}
-                title={`Jev truth ${(comp.jevTruth * 100).toFixed(0)}% — Jev's probability that this comp is reliable evidence of the subject's market value`}
+                title={`ARV truth ${(comp.jevArvTruth * 100).toFixed(0)}% — Jev's probability this comp is reliable evidence of the subject's after-renovation retail value`}
               >
-                {(comp.jevTruth * 100).toFixed(0)}%
+                A·{(comp.jevArvTruth * 100).toFixed(0)}%
+              </div>
+            )}
+            {comp.jevInvestmentTruth != null && (
+              <div
+                className={cn(
+                  'h-6 px-1.5 rounded flex items-center text-[10px] font-bold tabular-nums flex-shrink-0',
+                  comp.jevInvestmentTruth >= 0.7 ? 'bg-emerald-500/15 text-emerald-600'
+                    : comp.jevInvestmentTruth >= 0.4 ? 'bg-amber-500/15 text-amber-600'
+                    : 'bg-red-500/15 text-red-500'
+                )}
+                title={`Investment truth ${(comp.jevInvestmentTruth * 100).toFixed(0)}% — Jev's probability this comp is reliable evidence of the subject's as-is investor value`}
+              >
+                I·{(comp.jevInvestmentTruth * 100).toFixed(0)}%
               </div>
             )}
             <div className="flex-1 min-w-0">

@@ -784,8 +784,10 @@ export interface AnalysisResponse {
       classification: ClassificationSummary | null
       /** Whether this comp is the LLM/rule-selected best match */
       isBestMatch?: boolean
-      /** Jev truth score (0–1): how reliable this comp is as evidence of the subject's market value */
-      jevTruth?: number | null
+      /** Jev truth score (0–1): reliable evidence of the subject's after-renovation retail value */
+      jevArvTruth?: number | null
+      /** Jev truth score (0–1): reliable evidence of the subject's as-is investor value */
+      jevInvestmentTruth?: number | null
       /** Appraisal rule evaluation details */
       appraisalRules: {
         /** Whether this comp passed all filters */
@@ -1195,7 +1197,8 @@ export function buildAnalysisResponse(
       disableReasons: evaluation?.disableReasons ?? [],
       classification: classificationSummary,
       isBestMatch: ctx.bestMatch?.compId === comp.id,
-      jevTruth: comp.jevTruth ?? null,
+      jevArvTruth: comp.jevArvTruth ?? null,
+      jevInvestmentTruth: comp.jevInvestmentTruth ?? null,
       appraisalRules,
     }
   })
