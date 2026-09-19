@@ -160,7 +160,7 @@ const DRIVERS: Record<JevOutcomeDimension, Array<{ key: string; favorable: boole
     { key: 'thin_evidence', favorable: false, instructions: 'The outcome relies on thin or weak comparable evidence.' },
     { key: 'stale_sales', favorable: false, instructions: 'Key comparable sales are stale or near the edge of the acceptable window.' },
     { key: 'location_risk', favorable: false, instructions: 'Location-based penalties or flags materially affect this outcome.' },
-    { key: 'confidence_flagged', favorable: false, instructions: "The pipeline's own confidence gate flagged this outcome for human review." },
+    { key: 'data_gaps', favorable: false, instructions: 'Material subject or comparable data fields are missing or unknown where the outcome depends on them.' },
   ],
 }
 
@@ -196,6 +196,7 @@ function projectComp(comp: CompItem): Record<string, unknown> {
     adjustedPrice: comp.adjustedPrice,
     subdivision: comp.subdivision,
     compGroup: comp.compGroup ?? null,
+    jevTruth: comp.jevTruth ?? null,
     failedFilters: failed.length ? failed : null,
   }
 }
@@ -240,14 +241,16 @@ function projectOutcome(response: AnalysisResponse): Record<string, unknown> {
       wholesalePrice: v.wholesalePrice,
       recommendation: v.recommendation ?? null,
       recommendationReason: v.recommendationReason ?? null,
-      confidence: v.confidence ?? null,
-      confidenceReasons: v.confidenceReasons ?? null,
-      requiresHumanReview: v.requiresHumanReview ?? null,
+      // Pipeline self-assessment (confidence gate, human-review flag) is
+      // deliberately excluded: it derives from the same evidence Jev is
+      // judging, so feeding it back would double-count the negatives.
     },
     comps: {
-      total: response.comps.total,
-      enabledCount: response.comps.enabledCount,
-      disabledCount: response.comps.disabledCount,
+      candidatesConsidered: response.comps.total,
+      selectedCount: enabled.length,
+      // Jev truth-ranked the whole candidate pool; non-selected candidates
+      // simply ranked lower — they are not rejections or rule failures.
+      selectionMethod: 'jev_truth_ranking',
       avgPricePerSqft: response.comps.avgPricePerSqft,
       medianPrice: response.comps.medianPrice,
       bestMatch: response.comps.bestMatch ?? null,
@@ -255,9 +258,8 @@ function projectOutcome(response: AnalysisResponse): Record<string, unknown> {
     },
     report: response.report
       ? {
-          confidence: response.report.confidence,
-          confidenceReasons: response.report.confidenceReasons,
-          fallbacksUsed: response.report.fallbacksUsed,
+          // Step provenance only — the report's confidence gate and fallback
+          // notes are pipeline self-assessment, not evidence.
           steps: response.report.steps.map((step) => ({
             step: step.step,
             status: step.status,

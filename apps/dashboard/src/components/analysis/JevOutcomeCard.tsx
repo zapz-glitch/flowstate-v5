@@ -52,7 +52,7 @@ const DRIVERS: Record<JevOutcomeDimension, Array<{ key: string; label: string; f
     { key: 'thin_evidence', label: 'Thin comp evidence', favorable: false },
     { key: 'stale_sales', label: 'Stale comparable sales', favorable: false },
     { key: 'location_risk', label: 'Location risk', favorable: false },
-    { key: 'confidence_flagged', label: 'Pipeline flagged review', favorable: false },
+    { key: 'data_gaps', label: 'Material data gaps', favorable: false },
   ],
 }
 
