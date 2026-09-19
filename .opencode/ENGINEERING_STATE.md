@@ -219,6 +219,18 @@ sets diverge correctly (2355 Hillside moved from ARV to investment
 once buckets separated). ARV 301167, asIsValue 221917. Step: "Jev
 selected 3 ARV + 3 investment comps from 67 candidates".
 
+### 2026-09-19 — Bucket-by-higher-truth eval model (current spec)
+
+User spec (d506841): the higher truth score assigns each comp's
+market — A > I → ARV-eligible; I > A → investment-only, never ARV.
+Appraisal rules gate each bucket (evaluation.shouldDisable must be
+false). ARV = mean of adjusted prices over ALL A∩rules comps (no
+top-3 cap); I∩rules comps average into the as-is AVG, shown in the
+DealSummaryHero footer as insight only. Jev instructions now state
+missing/null fields must NOT reduce scores. Verified live: 67
+candidates → 2 ARV comps (A>I + rules-pass) → ARV = mean(225000,
+285000) = 255000; 0 investment rule-matches → no as-is AVG.
+
 Also this session: Jev outcome card chips reverted to tone-coded
 colors per user; outcome projection decontaminated (see commit
 930fd0b) — labels still honest-negative on this thin-evidence
