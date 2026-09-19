@@ -338,6 +338,26 @@ Known gaps / next: manual comp-card ARV override (option B) not built —
 deferred as last-mile tool. OpenRouter model name in .dev.vars is stale
 (404s) — local config fix, prod secret needs same update.
 
+Follow-ups shipped (92eacbe, ded3864):
+- As-is AVG promoted to a headline stat left of ARV in the valuation
+  hero (5-col grid; was a footer chip). Shows $/sf subline or "—" +
+  sales count; tooltip marks it insight-only.
+- Verified flip acquisitions now fold into the as-is AVG: a flip's
+  priorSale is what an investor paid as-is, so summarizeGroupB scans
+  the full evaluated pool for comp.flip and adds priorSalePrice as an
+  extra sqft-scaled data point (flip comps often sit in the ARV bucket
+  on their resale — scan is not limited to as-is picks; lone-flip case
+  still produces an AVG). flipSaleCount flows GroupBResult → response
+  → dashboard tooltip/subline.
+- Verified live (job_1789801587065_jt98aywt): SEASONS $200k acq →
+  as-is AVG $202,667 (166.67/sf × 1216sf subject) where it was null.
+
+Also verified: 228 Cobblestone thin-comp question answered — rules gate
+(year_built ±12 after expansion + sale_age 180d) correctly eliminates
+15/17 nearby comps on a 2007 subject amid 1973-93 stock; not a bug.
+Levers discussed: wider tolerances, soft-priority filters, asymmetric
+year rule, location overrides — none requested yet.
+
 ### 2026-09-18 — Reset from feat/jev-rules-evaluation
 - Prior branch (Python/GIS bridge + Jev atomic signals + Python-owned
   qualification/ranking) deleted per user direction — it replaced v5
