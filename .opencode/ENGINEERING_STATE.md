@@ -281,6 +281,63 @@ User expectation: manual report review fine-tunes location judgment.
 
 Remaining: nothing blocking. Stack live: API :8792, dashboard :3012.
 
+### 2026-09-19 — Stale-price reconciliation + flip classification (verified)
+
+User spec: reconcile stale provider sale prices against Zillow for ALL
+appraisal-rule-matching comps regardless of provider sale-date age;
+editable `reconciliationSaleAgeDays` setting (default 365, supports 18
+months+); deterministic flip = profitable resale 30-365 days after prior
+sale; flip/reconciliation evidence flows to Jev; minimal code.
+
+Shipped (3ba88f8, 78c12f1, 92b233b):
+- `deal_params.reconciliation_sale_age_days` column (migration 0031) +
+  deal-params route, user-settings resolution, analyze/batch plumbing,
+  dashboard evaluation-settings editable field.
+- Photo-fetch group = every rule-matching comp nearest-first
+  (`shouldDisable` excluded), not the top-6 selected.
+- `mergeZillowDataIntoProperty`: newest Zillow 'sold' event strictly
+  newer than provider saleDate (and within maxSaleAgeDays) replaces
+  price+date; prior values kept in `saleReconciled`. Two sold events
+  30-365d apart with a gain → `flip {priorSalePrice, priorSaleDate,
+  daysHeld, gainPct}`. Both fields on NormalizedComparable → response
+  item + dashboard CompItem + card badges.
+- Jev: `saleReconciled`/`flip` in compTruthFields; both truth questions
+  explain semantics (flip resale = strong ARV evidence; priorSale = what
+  an investor paid as-is).
+
+Root causes fixed in 92b233b (the feature was silently dead):
+- Firecrawl v2 JSON extraction returns data.json=null on ~3MB Zillow
+  pages — "input exceeds the context window of this model" warning.
+  OpenRouter fallback 404s (google/gemini-2.0-flash-001 has no
+  endpoints — stale model name in .dev.vars OPENROUTER_MODEL, still
+  unfixed, affects all LLM-fallback paths). Net: every extraction
+  degraded to regex parsing.
+- Fix: parseZillowHtml now parses the price-history table rows
+  (label="Date: M/D/YYYY, Event: X, Price: $N") — deterministic, no
+  LLM needed. parseJsonExtraction also fills priceHistory from HTML
+  when the schema extraction omits it. Cache prefix → zillow-fc-v3.
+- Comp chain bounds each provider attempt at 15s
+  (COMP_ATTEMPT_TIMEOUT_MS); a stealth-proxy Zillow scrape takes
+  40-90s, so Zillow loses every race and Redfin (no priceHistory) wins
+  — while the timed-out Zillow fetch still completes in background and
+  writes its KV entry. Fix: after fetchPhotoBundle, re-read Zillow for
+  rule-matching comps lacking priceHistory (cache hit ≈ instant for
+  the background-completed scrapes; real scrape only for true misses).
+
+Verified live (job_1789793008122_aqrs8bmg, 8120 Golden Bear Loop):
+- 7834 SEASONS LN: flip {priorSalePrice: 200000 @2025-12-02, daysHeld:
+  189, gainPct: 62.5} + saleReconciled (date 06-06→06-09); enabled in
+  ARV bucket, highest arvTruth 0.68 — Jev weighed the flip evidence.
+- 8415 BRIARLEAF CT: date reconciled 06-24→06-25.
+- 8741 ELM LEAF CT: price corrected 290000@03-23 → 250000@09-08
+  (provider showed older, higher sale) — eligibility changed correctly.
+- ARV $298,333 (3 enabled ARV comps). 20/20 regression files pass;
+  tsc clean api+dashboard.
+
+Known gaps / next: manual comp-card ARV override (option B) not built —
+deferred as last-mile tool. OpenRouter model name in .dev.vars is stale
+(404s) — local config fix, prod secret needs same update.
+
 ### 2026-09-18 — Reset from feat/jev-rules-evaluation
 - Prior branch (Python/GIS bridge + Jev atomic signals + Python-owned
   qualification/ranking) deleted per user direction — it replaced v5
