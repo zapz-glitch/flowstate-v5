@@ -489,6 +489,7 @@ export interface DealParamsConfig {
   wholesaleFee: number
   asIsThresholdPercent?: number
   arvThresholdPercent?: number
+  reconciliationSaleAgeDays?: number
 }
 
 export interface DealParamsResponse {

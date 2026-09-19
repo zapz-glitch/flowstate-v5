@@ -111,6 +111,9 @@ interface AnalyzeRequest {
   /** Override as-is threshold (% of ARV below which comps are classified as-is) — default 70 */
   asIsThresholdPercent?: number;
 
+  /** Override max age (days) for a Zillow sale to reconcile a stale comp price — default 365 */
+  reconciliationSaleAgeDays?: number;
+
   /** Override appraisal rules for this request */
   appraisalOverrides?: {
     filters?: Array<{
@@ -242,6 +245,8 @@ analyze.post('/', async (c) => {
       arvThreshold,
       asIsThresholdPercent:
         body.asIsThresholdPercent ?? userSettings.asIsThresholdPercent,
+      reconciliationSaleAgeDays:
+        body.reconciliationSaleAgeDays ?? userSettings.reconciliationSaleAgeDays,
       proximityConfig: userSettings.proximityConfig,
     };
 

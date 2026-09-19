@@ -418,7 +418,7 @@ const compTruthFields = [
   'bedrooms', 'bathrooms', 'squareFeet', 'lotSizeAcres', 'lotSizeSquareFeet', 'basementSquareFeet',
   'yearBuilt', 'propertyType', 'salePrice', 'saleDate', 'pricePerSqft', 'subdivision', 'parcelId',
   'neighborhoodName', 'neighborhoodCode', 'buildingCondition', 'buildingGrade', 'stories',
-  'construction', 'transaction', 'features', 'isEnriched',
+  'construction', 'transaction', 'features', 'isEnriched', 'saleReconciled', 'flip',
 ] as const satisfies readonly (keyof NormalizedComparable)[]
 
 function truthEvidence<T extends object>(value: T, fields: readonly (keyof T)[]): Record<string, unknown> {
@@ -450,14 +450,14 @@ const TRUTH_STATE_AND_QUESTION_BYTES = 28_000
 function arvTruthQuestion(index: number): NoulQuestion {
   return {
     type: 'noul',
-    instructions: `Is state.comparables[${index}] a reliable source of truth for the subject's AFTER-RENOVATION retail market value — does its sale reflect what a retail buyer would credibly pay for the subject once renovated? This is the ARV bucket: the comp should read like a renovated/retail-priced sale (strong condition signals, retail-grade price per sqft), physically similar and nearby. distanceMiles is the primary location signal — closer is stronger evidence; subdivision and neighborhood are often missing (enrichment is limited to rule-matched comps) and their absence must NOT reduce the score. Judge against state.subject using state.appraisalRules as context; the comp's ruleEvidence lists appraisal-rule outcomes as evidence, not verdicts. Missing or null fields are unknown — they must NOT reduce the score; score only the evidence that is present.`,
+    instructions: `Is state.comparables[${index}] a reliable source of truth for the subject's AFTER-RENOVATION retail market value — does its sale reflect what a retail buyer would credibly pay for the subject once renovated? This is the ARV bucket: the comp should read like a renovated/retail-priced sale (strong condition signals, retail-grade price per sqft), physically similar and nearby. distanceMiles is the primary location signal — closer is stronger evidence; subdivision and neighborhood are often missing (enrichment is limited to rule-matched comps) and their absence must NOT reduce the score. flip (when present) is a verified profit resale 30–365 days after its priorSale — the flip resale price is strong after-renovation retail evidence. saleReconciled means the sale price/date were corrected to a newer Zillow sale — treat them as current. Judge against state.subject using state.appraisalRules as context; the comp's ruleEvidence lists appraisal-rule outcomes as evidence, not verdicts. Missing or null fields are unknown — they must NOT reduce the score; score only the evidence that is present.`,
   }
 }
 
 function investmentTruthQuestion(index: number): NoulQuestion {
   return {
     type: 'noul',
-    instructions: `Is state.comparables[${index}] a reliable source of truth for the subject's AS-IS investment value — does its sale reflect what an investor would credibly pay for the subject today, in current condition? This is the investment bucket: the comp should read like an as-is or investment-grade sale (dated/distressed condition or below-retail pricing), physically similar and nearby. distanceMiles is the primary location signal — closer is stronger evidence; subdivision and neighborhood are often missing (enrichment is limited to rule-matched comps) and their absence must NOT reduce the score. Judge against state.subject using state.appraisalRules as context; the comp's ruleEvidence lists appraisal-rule outcomes as evidence, not verdicts. Missing or null fields are unknown — they must NOT reduce the score; score only the evidence that is present.`,
+    instructions: `Is state.comparables[${index}] a reliable source of truth for the subject's AS-IS investment value — does its sale reflect what an investor would credibly pay for the subject today, in current condition? This is the investment bucket: the comp should read like an as-is or investment-grade sale (dated/distressed condition or below-retail pricing), physically similar and nearby. distanceMiles is the primary location signal — closer is stronger evidence; subdivision and neighborhood are often missing (enrichment is limited to rule-matched comps) and their absence must NOT reduce the score. flip (when present) is a verified profit resale 30–365 days after its priorSale — priorSale is what an investor paid for it as-is, strong as-is evidence. saleReconciled means the sale price/date were corrected to a newer Zillow sale — treat them as current. Judge against state.subject using state.appraisalRules as context; the comp's ruleEvidence lists appraisal-rule outcomes as evidence, not verdicts. Missing or null fields are unknown — they must NOT reduce the score; score only the evidence that is present.`,
   }
 }
 

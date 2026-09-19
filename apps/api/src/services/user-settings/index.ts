@@ -51,6 +51,8 @@ export interface UserAnalysisSettings {
   customMajorItemCosts?: Record<string, number>
   arvThreshold: ArvThresholdConfig
   asIsThresholdPercent?: number
+  /** Max age (days) for a Zillow sale to reconcile a stale provider comp price — default 365 */
+  reconciliationSaleAgeDays?: number
   /** Proximity deductions — siding/backing/fronting amounts + ARV threshold */
   proximityConfig?: import('../../routes/proximity-config').ProximityConfig
 }
@@ -358,6 +360,7 @@ export async function loadUserAnalysisSettings(
     customMajorItemCosts,
     arvThreshold: arvThresholdConfig,
     asIsThresholdPercent: arvThresholdConfig.asIsThresholdPercent ?? dealParamsRow?.asIsThresholdPercent ?? undefined,
+    reconciliationSaleAgeDays: dealParamsRow?.reconciliationSaleAgeDays ?? undefined,
     proximityConfig: proximityCfg,
   }
 

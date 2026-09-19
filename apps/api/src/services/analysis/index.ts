@@ -77,7 +77,8 @@ export interface MergeResult<T> {
  */
 export function mergeZillowDataIntoProperty<T extends NormalizedProperty | NormalizedComparable>(
   property: T,
-  zillowData: PropertyPhotos | null | undefined
+  zillowData: PropertyPhotos | null | undefined,
+  opts?: { maxSaleAgeDays?: number }
 ): MergeResult<T> {
   const supplementedFields: SupplementedField[] = []
 
@@ -226,6 +227,45 @@ export function mergeZillowDataIntoProperty<T extends NormalizedProperty | Norma
         comp.pricePerSqft = Math.round(comp.salePrice / comp.squareFeet)
       }
     }
+
+    // Stale-price reconciliation + flip detection from Zillow price history.
+    // Provider records lag MLS closes (deed recording delay), so a newer
+    // Zillow 'sold' event supersedes the provider price/date.
+    const soldEvents = (zillowData.priceHistory ?? [])
+      .filter((e) => e.event.toLowerCase().includes('sold') && e.price > 0 && e.date)
+      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+    const newest = soldEvents[soldEvents.length - 1]
+    const prior = soldEvents[soldEvents.length - 2]
+    const maxAgeDays = opts?.maxSaleAgeDays ?? 365
+    const newestAgeDays = newest ? (Date.now() - new Date(newest.date).getTime()) / 86_400_000 : Infinity
+
+    if (newest && newestAgeDays <= maxAgeDays &&
+        (comp.saleDate == null || new Date(newest.date).getTime() > new Date(comp.saleDate).getTime())) {
+      comp.saleReconciled = { previousPrice: comp.salePrice, previousDate: comp.saleDate, source: 'zillow' }
+      comp.saleDate = newest.date
+      comp.salePrice = newest.price
+      if (comp.squareFeet && comp.squareFeet > 0) {
+        comp.pricePerSqft = Math.round(newest.price / comp.squareFeet)
+      }
+      supplementedFields.push({ field: 'salePrice', value: newest.price, source: 'zillow' })
+      supplementedFields.push({ field: 'saleDate', value: newest.date, source: 'zillow' })
+      console.log(`[ZillowMerge] Reconciled stale sale ${comp.id}: ${comp.saleReconciled.previousPrice} → ${newest.price} (${newest.date})`)
+    }
+
+    // Flip: resold at a profit 30–365 days after the prior sold event
+    if (newest && prior) {
+      const daysHeld = Math.round(
+        (new Date(newest.date).getTime() - new Date(prior.date).getTime()) / 86_400_000,
+      )
+      if (daysHeld >= 30 && daysHeld <= 365 && newest.price > prior.price) {
+        comp.flip = {
+          priorSalePrice: prior.price,
+          priorSaleDate: prior.date,
+          daysHeld,
+          gainPct: Math.round(((newest.price - prior.price) / prior.price) * 1000) / 10,
+        }
+      }
+    }
   }
 
   // For subject property, merge last sale data if missing
@@ -271,7 +311,8 @@ export interface BundleMergeResult {
  */
 export function mergeZillowDataIntoBundle(
   bundle: PropertyBundle,
-  photoBundle: PhotoBundle | null
+  photoBundle: PhotoBundle | null,
+  opts?: { maxSaleAgeDays?: number }
 ): BundleMergeResult {
   const compSupplementedFields = new Map<string, SupplementedField[]>()
 
@@ -289,7 +330,7 @@ export function mergeZillowDataIntoBundle(
   // Merge comparables
   const mergedComps = bundle.comparables.map((comp) => {
     const compPhotos = photoBundle.comps[comp.id]
-    const result = mergeZillowDataIntoProperty(comp, compPhotos)
+    const result = mergeZillowDataIntoProperty(comp, compPhotos, opts)
     if (result.supplementedFields.length > 0) {
       compSupplementedFields.set(comp.id, result.supplementedFields)
     }
@@ -705,6 +746,10 @@ export interface AnalysisResponse {
       longitude: number | null
       salePrice: number | null
       saleDate: string | null
+      /** Set when a newer Zillow sale corrected the stale provider price/date */
+      saleReconciled: { previousPrice: number | null; previousDate: string | null; source: 'zillow' } | null
+      /** Verified flip: prior sold event 30–365 days before saleDate at a lower price */
+      flip: { priorSalePrice: number; priorSaleDate: string; daysHeld: number; gainPct: number } | null
       squareFeet: number | null
       pricePerSqft: number | null
       distanceMiles: number | null
@@ -1150,6 +1195,8 @@ export function buildAnalysisResponse(
       longitude: comp.longitude ?? null,
       salePrice: comp.salePrice,
       saleDate: formatDate(comp.saleDate),
+      saleReconciled: comp.saleReconciled ?? null,
+      flip: comp.flip ?? null,
       squareFeet,
       pricePerSqft: squareFeet && squareFeet > 0 && (comp.adjustedSalePrice ?? comp.salePrice) != null
         ? Math.round((comp.adjustedSalePrice ?? comp.salePrice)! / squareFeet)

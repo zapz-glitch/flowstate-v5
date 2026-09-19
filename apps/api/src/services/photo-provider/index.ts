@@ -284,13 +284,13 @@ class MultiPhotoService implements PhotoService {
     options?: PhotoFetchOptions & { maxComps?: number }
   ): Promise<PhotoBundle> {
     // Fetch subject with full JSON extraction (rich structured data),
-    // and comps with skipJsonExtraction (HTML-only — faster, gets photos + description for classification)
+    // and comps with full JSON extraction — priceHistory is required for
+    // stale-price reconciliation and flip detection downstream.
     const maxComps = options?.maxComps ?? 5
     const compsToFetch = comps.slice(0, maxComps)
 
     // All fetches in parallel — subject and comps both run the provider
-    // fallback chain; comps stay HTML-only (skipJsonExtraction) to keep the
-    // per-attempt cost down. Each attempt is timeout-bounded and the whole
+    // fallback chain. Each attempt is timeout-bounded and the whole
     // chain per comp is capped so one hung scrape can't gate the bundle.
     const withTimeout = <T>(p: Promise<T>, ms: number, fallback: T): Promise<T> =>
       Promise.race([p, new Promise<T>((r) => setTimeout(() => r(fallback), ms))])
@@ -307,7 +307,7 @@ class MultiPhotoService implements PhotoService {
         const remaining = deadline - Date.now()
         if (remaining <= 0) break
         const result = await withTimeout(
-          provider.fetchPhotos(comp, { ...options, skipJsonExtraction: true }),
+          provider.fetchPhotos(comp, { ...options }),
           Math.min(COMP_ATTEMPT_TIMEOUT_MS, remaining),
           failed(comp.propertyId, `${name} attempt timed out`, 'FETCH_FAILED')
         )

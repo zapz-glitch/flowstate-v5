@@ -458,6 +458,8 @@ export const dealParams = sqliteTable(
     wholesaleFee: real('wholesale_fee').notNull().default(10000),
     /** As-is threshold as a percentage of ARV (default: 70) — comps below this are classified as-is */
     asIsThresholdPercent: real('as_is_threshold_percent').notNull().default(70),
+    /** Max age in days for a Zillow sale event to reconcile a comp's stale provider price (default: 365) */
+    reconciliationSaleAgeDays: real('reconciliation_sale_age_days').notNull().default(365),
     createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
     updatedAt: text('updated_at').notNull().$defaultFn(() => new Date().toISOString()),
   },

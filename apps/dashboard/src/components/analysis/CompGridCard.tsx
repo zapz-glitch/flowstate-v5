@@ -138,6 +138,14 @@ export function CompGridCard({
               I·{(comp.jevInvestmentTruth * 100).toFixed(0)}%
             </div>
           )}
+          {comp.flip && (
+            <div
+              className="h-6 px-1.5 rounded-sm flex items-center text-[10px] font-bold bg-violet-500/90 text-white"
+              title={`Verified flip — bought $${comp.flip.priorSalePrice.toLocaleString()} ${comp.flip.daysHeld}d prior, resold +${comp.flip.gainPct}%`}
+            >
+              FLIP
+            </div>
+          )}
         </div>
         {/* Bottom: price + date */}
         <div className="absolute bottom-0 left-0 right-0 px-2 py-1.5 bg-gradient-to-t from-black/70 to-transparent flex items-end justify-between pointer-events-none">

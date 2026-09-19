@@ -223,6 +223,15 @@ export interface NormalizedComparable {
   saleDate: string | null
   pricePerSqft: number | null
 
+  /**
+   * Set when a Zillow sale event newer than the provider's record
+   * reconciled the stale price/date above.
+   */
+  saleReconciled?: { previousPrice: number | null; previousDate: string | null; source: 'zillow' }
+
+  /** Verified flip: prior sold event 30–365 days before saleDate at a lower price (from Zillow price history) */
+  flip?: { priorSalePrice: number; priorSaleDate: string; daysHeld: number; gainPct: number }
+
   // Location details (from enrichment)
   subdivision?: string | null
   /** Composite parcel ID `fipsCode:universalParcelId` — present on comparables responses */

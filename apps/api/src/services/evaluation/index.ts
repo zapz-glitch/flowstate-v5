@@ -82,6 +82,8 @@ export interface EvaluationParams {
   arvThreshold?: { percent: number }
   /** Threshold for Group B: comps with salePrice <= X% of ARV (default: 70) */
   asIsThresholdPercent?: number
+  /** Max age (days) for a Zillow sale event to reconcile a stale comp price (default: 365) */
+  reconciliationSaleAgeDays?: number
   apiCallStats?: ApiCallStats
   /**
    * Expansion refetch seam. When the appraisal ladder reaches a tier that
@@ -474,15 +476,15 @@ export async function performAnalysis(
         state: bundle.property.state,
         zipCode: bundle.property.zipCode,
       }
-      // Prioritize photo spend: ARV-selected comps first, then nearest —
-      // cards without listing photos fall back to Street View anyway
-      const selectedSet = new Set(appraisalResult.selectedCompIds ?? [])
-      const rankedComps = [...bundle.comparables].sort((a, b) => {
-        const aSel = selectedSet.has(a.id) ? 1 : 0
-        const bSel = selectedSet.has(b.id) ? 1 : 0
-        if (aSel !== bSel) return bSel - aSel
-        return (a.distanceMiles ?? 999) - (b.distanceMiles ?? 999)
-      })
+      // Zillow targets: every comp matching the appraisal rules (hard
+      // failures excluded), nearest first — the fetched price history
+      // drives stale-price reconciliation and flip detection downstream.
+      const evaluated = new Map(
+        appraisalResult.comparables.map((c) => [c.id, c.evaluation?.shouldDisable ?? true]),
+      )
+      const rankedComps = bundle.comparables
+        .filter((c) => !evaluated.get(c.id))
+        .sort((a, b) => (a.distanceMiles ?? 999) - (b.distanceMiles ?? 999))
       const compIdents: PropertyIdentifier[] = rankedComps.map((c) => ({
         propertyId: c.id,
         address: c.address,
@@ -490,7 +492,7 @@ export async function performAnalysis(
         state: c.state,
         zipCode: c.zipCode,
       }))
-      photoBundle = await photoService.fetchPhotoBundle(subjectIdent, compIdents, { maxComps: 6 })
+      photoBundle = await photoService.fetchPhotoBundle(subjectIdent, compIdents, { maxComps: compIdents.length })
       step(
         'photo_fetch',
         photoBundle.subject ? 'completed' : 'fallback',
@@ -513,7 +515,9 @@ export async function performAnalysis(
   // heating/cooling, parking, pool). Re-run the appraisal when fills landed —
   // a comp that was not_verified may now verify (or disqualify) for real.
   if (photoBundle) {
-    const mergeResult = mergeZillowDataIntoBundle(bundle, photoBundle)
+    const mergeResult = mergeZillowDataIntoBundle(bundle, photoBundle, {
+      maxSaleAgeDays: params.reconciliationSaleAgeDays ?? 365,
+    })
     const filledCount =
       mergeResult.subjectSupplementedFields.length +
       [...mergeResult.compSupplementedFields.values()].reduce((n, f) => n + f.length, 0)

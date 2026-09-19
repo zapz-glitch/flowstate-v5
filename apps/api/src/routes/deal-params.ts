@@ -20,6 +20,7 @@ export const DEAL_PARAMS_DEFAULTS = {
   carryingCostsPercent: 2,
   wholesaleFee: 10000,
   asIsThresholdPercent: 70,
+  reconciliationSaleAgeDays: 365,
 }
 
 export type DealParamsConfig = typeof DEAL_PARAMS_DEFAULTS
@@ -49,6 +50,7 @@ dealParamsRoute.get('/', async (c) => {
       carryingCostsPercent: row.carryingCostsPercent,
       wholesaleFee: row.wholesaleFee,
       asIsThresholdPercent: row.asIsThresholdPercent,
+      reconciliationSaleAgeDays: row.reconciliationSaleAgeDays,
     },
     isCustom: true,
     updatedAt: row.updatedAt,
@@ -67,11 +69,13 @@ dealParamsRoute.put('/', async (c) => {
   const carryingCostsPercent = typeof body.carryingCostsPercent === 'number' ? body.carryingCostsPercent : DEAL_PARAMS_DEFAULTS.carryingCostsPercent
   const wholesaleFee = typeof body.wholesaleFee === 'number' ? body.wholesaleFee : DEAL_PARAMS_DEFAULTS.wholesaleFee
   const asIsThresholdPercent = typeof body.asIsThresholdPercent === 'number' ? body.asIsThresholdPercent : DEAL_PARAMS_DEFAULTS.asIsThresholdPercent
+  const reconciliationSaleAgeDays = typeof body.reconciliationSaleAgeDays === 'number' ? body.reconciliationSaleAgeDays : DEAL_PARAMS_DEFAULTS.reconciliationSaleAgeDays
 
   if (closingCostsPercent < 0 || closingCostsPercent > 100) return c.json({ error: 'closingCostsPercent must be 0–100' }, 400)
   if (carryingCostsPercent < 0 || carryingCostsPercent > 100) return c.json({ error: 'carryingCostsPercent must be 0–100' }, 400)
   if (wholesaleFee < 0) return c.json({ error: 'wholesaleFee must be >= 0' }, 400)
   if (asIsThresholdPercent < 0 || asIsThresholdPercent > 100) return c.json({ error: 'asIsThresholdPercent must be 0–100' }, 400)
+  if (reconciliationSaleAgeDays < 30 || reconciliationSaleAgeDays > 730) return c.json({ error: 'reconciliationSaleAgeDays must be 30–730' }, 400)
 
   const db = drizzle(c.env.DB)
   const now = new Date().toISOString()
@@ -79,15 +83,15 @@ dealParamsRoute.put('/', async (c) => {
   const [existing] = await withDbRetry(() => db.select().from(dealParams).where(eq(dealParams.userId, session.user.id)).limit(1))
 
   if (existing) {
-    await withDbRetry(() => db.update(dealParams).set({ closingCostsPercent, carryingCostsPercent, wholesaleFee, asIsThresholdPercent, updatedAt: now }).where(eq(dealParams.userId, session.user.id)))
+    await withDbRetry(() => db.update(dealParams).set({ closingCostsPercent, carryingCostsPercent, wholesaleFee, asIsThresholdPercent, reconciliationSaleAgeDays, updatedAt: now }).where(eq(dealParams.userId, session.user.id)))
   } else {
-    await withDbRetry(() => db.insert(dealParams).values({ userId: session.user.id, closingCostsPercent, carryingCostsPercent, wholesaleFee, asIsThresholdPercent, createdAt: now, updatedAt: now }))
+    await withDbRetry(() => db.insert(dealParams).values({ userId: session.user.id, closingCostsPercent, carryingCostsPercent, wholesaleFee, asIsThresholdPercent, reconciliationSaleAgeDays, createdAt: now, updatedAt: now }))
   }
 
   // Invalidate cached user settings
   await invalidateUserSettingsCache(c.env.API_CACHE, session.user.id)
 
-  return c.json({ config: { closingCostsPercent, carryingCostsPercent, wholesaleFee, asIsThresholdPercent }, isCustom: true, updatedAt: now })
+  return c.json({ config: { closingCostsPercent, carryingCostsPercent, wholesaleFee, asIsThresholdPercent, reconciliationSaleAgeDays }, isCustom: true, updatedAt: now })
 })
 
 // ─── DELETE /deal-params ──────────────────────────────────────────────────────

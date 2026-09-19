@@ -369,6 +369,8 @@ export interface CompItem {
   zillowUrl?: string | null
   salePrice?: number | null
   saleDate?: string | null
+  saleReconciled?: { previousPrice: number | null; previousDate: string | null; source: 'zillow' } | null
+  flip?: { priorSalePrice: number; priorSaleDate: string; daysHeld: number; gainPct: number } | null
   squareFeet?: number | null
   pricePerSqft?: number | null
   distanceMiles?: number | null

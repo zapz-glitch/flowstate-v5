@@ -3133,6 +3133,9 @@ function ArvThresholdTab() {
   const [original, setOriginal] = useState<ArvThresholdConfig>(ARV_THRESHOLD_DEFAULTS_UI)
   const [asIsThreshold, setAsIsThreshold] = useState(70)
   const [originalAsIs, setOriginalAsIs] = useState(70)
+  const [reconAge, setReconAge] = useState(365)
+  const [originalReconAge, setOriginalReconAge] = useState(365)
+  const [dealConfig, setDealConfig] = useState<DealParamsConfig | null>(null)
   const [isCustom, setIsCustom] = useState(false)
   const [updatedAt, setUpdatedAt] = useState<string | undefined>()
   const [loading, setLoading] = useState(true)
@@ -3162,34 +3165,42 @@ function ArvThresholdTab() {
         setLocSettings(settingsData)
         const asIs = dealRes.config.asIsThresholdPercent ?? 70
         setAsIsThreshold(asIs); setOriginalAsIs(asIs)
+        const recon = dealRes.config.reconciliationSaleAgeDays ?? 365
+        setReconAge(recon); setOriginalReconAge(recon)
+        setDealConfig(dealRes.config)
       })
       .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load'))
       .finally(() => setLoading(false))
   }, [])
 
-  const isDirty = JSON.stringify(config) !== JSON.stringify(original) || asIsThreshold !== originalAsIs
+  const dealDirty = asIsThreshold !== originalAsIs || reconAge !== originalReconAge
+  const isDirty = JSON.stringify(config) !== JSON.stringify(original) || dealDirty
 
   const handleSave = async () => {
     if (!isDirty) return
     setSaving(true); setError(null); setSuccessMessage(null)
     const sentJson = JSON.stringify(config)
     const sentAsIs = asIsThreshold
+    const sentRecon = reconAge
     try {
       const [res] = await Promise.all([
         saveArvThreshold(config),
-        asIsThreshold !== originalAsIs ? saveDealParams({ asIsThresholdPercent: asIsThreshold }) : Promise.resolve(null),
+        dealDirty
+          ? saveDealParams({ ...(dealConfig ?? {}), asIsThresholdPercent: asIsThreshold, reconciliationSaleAgeDays: reconAge })
+          : Promise.resolve(null),
       ])
       setOriginal(res.config)
       setConfig((prev) => (JSON.stringify(prev) === sentJson ? res.config : prev))
       setIsCustom(true); setUpdatedAt(res.updatedAt)
       setOriginalAsIs(sentAsIs)
+      setOriginalReconAge(sentRecon)
       setSuccessMessage('Thresholds saved.')
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Save failed')
       throw e
     } finally { setSaving(false) }
   }
-  const autoSaveState = useAutoSave(isDirty, handleSave, [config, asIsThreshold])
+  const autoSaveState = useAutoSave(isDirty, handleSave, [config, asIsThreshold, reconAge])
 
   const handleReset = async () => {
     if (!confirm('Reset thresholds to system defaults?')) return
@@ -3318,6 +3329,19 @@ function ArvThresholdTab() {
                   onChange={(v) => setAsIsThreshold(v ?? 70)}
                   min={0} max={100} step={5}
                   suffix="%"
+                  className="w-24"
+                />
+              </div>
+              <div className="grid grid-cols-[1fr_auto] items-center gap-4 px-4 py-3">
+                <div>
+                  <p className="text-sm font-medium text-foreground">Sale Reconciliation Age</p>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">Zillow sales up to {reconAge} days old can correct stale comp prices</p>
+                </div>
+                <NumericInput
+                  value={reconAge}
+                  onChange={(v) => setReconAge(v ?? 365)}
+                  min={30} max={730} step={5}
+                  suffix="d"
                   className="w-24"
                 />
               </div>

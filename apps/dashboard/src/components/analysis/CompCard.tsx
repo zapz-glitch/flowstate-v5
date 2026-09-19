@@ -114,6 +114,14 @@ export function CompCard({
                 I·{(comp.jevInvestmentTruth * 100).toFixed(0)}%
               </div>
             )}
+            {comp.flip && (
+              <div
+                className="h-6 px-1.5 rounded flex items-center text-[10px] font-bold bg-violet-500/15 text-violet-500 flex-shrink-0"
+                title={`Verified flip — bought $${comp.flip.priorSalePrice.toLocaleString()} ${comp.flip.daysHeld}d prior, resold +${comp.flip.gainPct}%`}
+              >
+                FLIP
+              </div>
+            )}
             <div className="flex-1 min-w-0">
               {comp.address ? (
                 <AddressDisplay address={comp.address} latitude={comp.latitude} longitude={comp.longitude} className="text-body-sm font-medium" />
@@ -125,6 +133,11 @@ export function CompCard({
           <div className="flex items-center gap-2 flex-shrink-0">
             <div className="text-right">
               <div className="text-body-sm font-bold tabular-nums">${comp.salePrice?.toLocaleString() || '-'}</div>
+              {comp.saleReconciled?.previousPrice != null && (
+                <div className="text-[10px] text-violet-500" title={`Provider record was stale — corrected to the newer Zillow sale`}>
+                  was ${comp.saleReconciled.previousPrice.toLocaleString()}
+                </div>
+              )}
               <div className="text-[10px] text-foreground-tertiary">
                 {comp.pricePerSqft ? `$${comp.pricePerSqft.toFixed(0)}/sqft` : ''}
                 {comp.pricePerSqft && comp.saleDate ? ' · ' : ''}
