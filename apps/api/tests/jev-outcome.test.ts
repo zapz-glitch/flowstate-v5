@@ -108,9 +108,12 @@ const originalFetch = globalThis.fetch
   if (result.status !== 'completed') throw new Error('unreachable')
   assert.equal(result.model, 'jev-test-1')
   assert.equal(result.inputTokens, 1234)
-  assert.equal(result.classifications.evidence_sufficiency.choice, 'sufficient')
-  assert.equal(result.classifications.risk_flags.choice, 'none')
+  assert.equal(result.classifications.evidence_sufficiency?.choice, 'sufficient')
+  assert.equal(result.classifications.risk_flags?.choice, 'none')
   assert.equal(Object.keys(result.classifications).length, OUTCOME_DIMENSIONS.length)
+  // Raw passthrough carries every answer
+  assert.equal(Object.keys(result.answers).length, Object.keys((body!.questions ?? {})).length)
+  assert.equal(result.answers.outcome_deal_outlook?.choice, 'favorable')
   // Driver nouls folded under their dimension
   assert.equal(result.drivers.evidence_sufficiency.enough_comps, 0.75)
   assert.equal(result.drivers.risk_flags.thin_evidence, 0.75)
@@ -121,13 +124,54 @@ const originalFetch = globalThis.fetch
   assert.equal(fakeResponse().valuation.arv, 250000)
 }
 
+// 2b. Question-type changes still return the outcome — score answers,
+// missing keys, and unknown question types pass through `answers`
+{
+  globalThis.fetch = async (_url, init) => {
+    const body = JSON.parse(String(init?.body))
+    const questions = (body!.questions ?? {}) as Record<string, { type: string }>
+    const echoed: Record<string, unknown> = {}
+    for (const [id, q] of Object.entries(questions)) {
+      if (id === 'outcome_risk_flags') continue // dimension unanswered entirely
+      if (id === 'outcome_deal_outlook') {
+        // Retyped to a score question — must not nuke the classification
+        echoed[id] = { type: 'score', score: 1.4, confidence: 0.8, probabilities: { '0': 0.1, '1': 0.5, '2': 0.4 } }
+      } else if (q.type === 'choice') {
+        const options = Object.keys((q as { criteria?: Record<string, string> }).criteria ?? {})
+        echoed[id] = answers[id] ?? {
+          type: 'choice', choice: options[0], confidence: 0.9,
+          probabilities: { [options[0]]: 0.9, [options[1]]: 0.07, [options[2]]: 0.03 },
+        }
+      } else {
+        echoed[id] = { type: 'noul', noul: 0.75 }
+      }
+    }
+    echoed['future_custom_key'] = { type: 'wat', value: 42 } // unknown future type
+    return Response.json({ model: 'jev-test-1', answers: echoed, usage: { input_tokens: 9 } })
+  }
+  const result = await classifyOutcomeWithJev(fakeResponse(), { TYPESAFE_API_KEY: 'k', TYPESAFE_MODEL: 'jev-test-1' })
+  assert.equal(result.status, 'completed')
+  if (result.status !== 'completed') throw new Error('unreachable')
+  // The retyped dimension stays in `classifications` under its stable name;
+  // the unanswered one is the only absent key
+  assert.equal(result.classifications.deal_outlook?.type, 'score')
+  assert.equal(result.classifications.deal_outlook?.score, 1.4)
+  assert.equal(result.classifications.risk_flags, undefined)
+  assert.equal(result.answers.outcome_deal_outlook?.type, 'score')
+  assert.equal(result.answers.future_custom_key?.type, 'wat')
+  // Surviving dimensions still classify
+  assert.equal(result.classifications.evidence_sufficiency?.choice, 'sufficient')
+  // Drivers still extracted under the changed set
+  assert.equal(result.drivers.evidence_sufficiency.enough_comps, 0.75)
+}
+
 // 3. HTTP error → throws (caller degrades to unavailable)
 {
   globalThis.fetch = async () => Response.json({ error: 'x' }, { status: 500 })
   await assert.rejects(() => classifyOutcomeWithJev(fakeResponse(), { TYPESAFE_API_KEY: 'k' }))
 }
 
-// 4. Malformed answer payload → throws
+// 4. Empty answer payload → throws (nothing to report)
 {
   globalThis.fetch = async () => Response.json({ model: 'jev-test-1', answers: {}, usage: { input_tokens: 1 } })
   await assert.rejects(() => classifyOutcomeWithJev(fakeResponse(), { TYPESAFE_API_KEY: 'k' }))

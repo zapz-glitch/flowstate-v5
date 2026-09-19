@@ -122,7 +122,13 @@ export function JevOutcomeCard({ outcome }: { outcome: JevOutcomeData | null | u
         {DIMENSION_ORDER.map((dimension) => {
           const signal = outcome.classifications?.[dimension]
           if (!signal) return null
-          const tone = TONE[signal.choice] ?? 'warn'
+          // `choice` renders the label; `score`/`noul`/future types render
+          // their scalar so a retyped question still shows in the report.
+          const label = signal.choice?.replaceAll('_', ' ')
+            ?? (typeof signal.score === 'number' ? String(signal.score) : null)
+            ?? (typeof signal.noul === 'number' ? `${Math.round(signal.noul * 100)}%` : null)
+          if (!label) return null
+          const tone = (signal.choice && TONE[signal.choice]) || 'warn'
           return (
             <div key={dimension} className="space-y-1">
               <p className="text-[10px] text-foreground-tertiary uppercase tracking-wide">
@@ -130,9 +136,9 @@ export function JevOutcomeCard({ outcome }: { outcome: JevOutcomeData | null | u
               </p>
               <span
                 className={`inline-block px-2 py-0.5 rounded-sm text-[11px] font-medium ${TONE_CLASSES[tone]}`}
-                title={`confidence ${(signal.confidence * 100).toFixed(0)}%`}
+                title={typeof signal.confidence === 'number' ? `confidence ${(signal.confidence * 100).toFixed(0)}%` : undefined}
               >
-                {signal.choice.replaceAll('_', ' ')}
+                {label}
               </span>
             </div>
           )

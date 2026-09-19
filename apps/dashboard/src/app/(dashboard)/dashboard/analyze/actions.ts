@@ -144,10 +144,23 @@ export interface JevOutcomeData {
   classifications?: Partial<Record<JevOutcomeDimension, JevOutcomeSignal>>
   /** Atomic yes/no sub-checks (0–1) exposing what drove each headline label */
   drivers?: Partial<Record<JevOutcomeDimension, Record<string, number>>>
+  /** Every answer Jev returned, verbatim — survives question-type changes */
+  answers?: Record<string, JevOutcomeAnswer>
   model?: string
   latencyMs?: number
   inputTokens?: number
   classifiedAt?: string
+}
+
+export interface JevOutcomeAnswer {
+  /** 'choice' | 'score' | 'noul' today; future types pass through */
+  type: string
+  choice?: string
+  score?: number
+  noul?: number
+  confidence?: number
+  probabilities?: Record<string, number>
+  [key: string]: unknown
 }
 
 export type JevOutcomeDimension =
@@ -157,11 +170,8 @@ export type JevOutcomeDimension =
   | 'recommendation_agreement'
   | 'risk_flags'
 
-export interface JevOutcomeSignal {
-  choice: string
-  confidence: number
-  probabilities: Record<string, number>
-}
+/** A dimension's raw Jev answer — `choice`/`score`/`noul` or future types */
+export type JevOutcomeSignal = JevOutcomeAnswer
 
 /** Property classification (As-Is vs After-Renovation) */
 export interface ClassificationSummary {

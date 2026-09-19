@@ -9,7 +9,10 @@
  *
  * 2. OUTCOME CLASSIFICATION (read-only): Jev sees the COMPLETED analysis and
  *    labels the outcome along five dimensions plus atomic driver sub-checks.
- *    Attached to the response for display/review only.
+ *    Attached to the response for display/review only. `answers` carries
+ *    every returned answer verbatim — the durable API contract that keeps
+ *    the five outcome dimensions in the response even when question types
+ *    change (choice/score/noul or future primitives).
  */
 
 import type { AnalysisResponse } from '../analysis'
@@ -30,11 +33,19 @@ export const OUTCOME_DIMENSIONS = [
 ] as const
 export type JevOutcomeDimension = typeof OUTCOME_DIMENSIONS[number]
 
-export interface JevSignal {
-  choice: string
-  confidence: number
-  probabilities: Record<string, number>
-}
+/**
+ * A single Jev answer, passed through unmodified. `choice`, `score`, and
+ * `noul` are today's primitives; any future answer type still lands in
+ * `answers` so API consumers always see what Jev returned.
+ */
+export type JevAnswer = {
+  type: string
+  choice?: string
+  score?: number
+  noul?: number
+  confidence?: number
+  probabilities?: Record<string, number>
+} & Record<string, unknown>
 
 /** Driver sub-check: 0–1 probability the statement holds. Keyed `dimension.key`. */
 export type JevOutcomeDrivers = Record<JevOutcomeDimension, Record<string, number>>
@@ -42,9 +53,22 @@ export type JevOutcomeDrivers = Record<JevOutcomeDimension, Record<string, numbe
 export type JevOutcomeClassification =
   | {
       status: 'completed'
-      classifications: Record<JevOutcomeDimension, JevSignal>
+      /**
+       * The five outcome dimensions, keyed by dimension name — the stable
+       * API contract. Each entry is Jev's raw answer whatever its primitive:
+       * `choice` answers carry `.choice`, `score` answers `.score`, `noul`
+       * answers `.noul`. A dimension is absent only when Jev returned no
+       * answer for it; it is never dropped because its type changed.
+       */
+      classifications: Partial<Record<JevOutcomeDimension, JevAnswer>>
       /** Atomic yes/no sub-checks that expose what drove each headline label */
       drivers: JevOutcomeDrivers
+      /**
+       * Every answer Jev returned, keyed by question key — the durable API
+       * contract. Survives question-type changes (choice/score/noul or
+       * future types), added questions, and renamed keys.
+       */
+      answers: Record<string, JevAnswer>
       model: string
       latencyMs: number
       inputTokens: number
@@ -57,8 +81,14 @@ type ChoiceQuestion = {
   instructions: string
   criteria: Record<string, string>
 }
+type ScoreQuestion = {
+  type: 'score'
+  instructions: string
+  /** Ordered level descriptions — position in the array is the level number */
+  criteria: string[]
+}
 type NoulQuestion = { type: 'noul'; instructions: string }
-type Question = ChoiceQuestion | NoulQuestion
+type Question = ChoiceQuestion | ScoreQuestion | NoulQuestion
 
 const ENDPOINT = 'https://api.typesafe.ai/v1/systemone'
 const TIMEOUT_MS = 20_000
@@ -278,40 +308,44 @@ function projectOutcome(response: AnalysisResponse): Record<string, unknown> {
 
 function parseResponse(
   json: unknown,
-  questions: Record<string, Question>,
-): { classifications: Record<JevOutcomeDimension, JevSignal>; drivers: JevOutcomeDrivers; model: string; inputTokens: number } {
+): {
+  classifications: Partial<Record<JevOutcomeDimension, JevAnswer>>
+  drivers: JevOutcomeDrivers
+  answers: Record<string, JevAnswer>
+  model: string
+  inputTokens: number
+} {
   const malformed = () =>
     new Error('Jev outcome classification returned an invalid or incomplete typed response.')
   if (!object(json) || typeof json.model !== 'string' || !/^jev-[\w.-]+$/.test(json.model) || !object(json.answers) || !object(json.usage)) throw malformed()
   const { input_tokens: inputTokens } = json.usage
   if (typeof inputTokens !== 'number' || !Number.isSafeInteger(inputTokens) || inputTokens < 0) throw malformed()
-  const keys = Object.keys(questions)
-  if (Object.keys(json.answers).length !== keys.length || keys.some((key) => !Object.hasOwn(json.answers as object, key))) throw malformed()
-  const classifications = {} as Record<JevOutcomeDimension, JevSignal>
+
+  // Iterate the answers Jev RETURNED, not the questions we registered —
+  // added/renamed/retyped questions all flow through `answers`, and one
+  // malformed entry degrades its typed view without dropping the rest.
+  const entries = Object.entries(json.answers)
+  if (!entries.length) throw malformed()
+
+  const answers: Record<string, JevAnswer> = {}
+  const classifications: Partial<Record<JevOutcomeDimension, JevAnswer>> = {}
   const drivers = Object.fromEntries(OUTCOME_DIMENSIONS.map((d) => [d, {}])) as JevOutcomeDrivers
-  for (const key of keys) {
-    const question = questions[key]
-    const answer = (json.answers as Record<string, unknown>)[key]
-    if (!object(answer)) throw malformed()
-    if (question.type === 'choice') {
-      const options = Object.keys(question.criteria)
-      if (answer.type !== 'choice' || typeof answer.choice !== 'string' || !options.includes(answer.choice) || !probability(answer.confidence) || !object(answer.probabilities)) throw malformed()
-      const probabilities = answer.probabilities
-      if (Object.keys(probabilities).length !== options.length || options.some((option) => !probability(probabilities[option])) || Math.abs(options.reduce((sum, option) => sum + (probabilities[option] as number), 0) - 1) > options.length * 0.005 + Number.EPSILON) throw malformed()
+  for (const [key, answer] of entries) {
+    if (!object(answer) || typeof answer.type !== 'string') continue
+    answers[key] = answer as JevAnswer
+
+    // A dimension answered under ANY primitive lands in `classifications`
+    // under its stable name — the report contract survives retyping
+    // (choice → score → noul or future types) without code changes.
+    if (key.startsWith('outcome_')) {
       const dimension = key.slice('outcome_'.length) as JevOutcomeDimension
-      if (!OUTCOME_DIMENSIONS.includes(dimension)) throw malformed()
-      classifications[dimension] = {
-        choice: answer.choice,
-        confidence: answer.confidence,
-        probabilities: probabilities as Record<string, number>,
-      }
-    } else {
+      if (OUTCOME_DIMENSIONS.includes(dimension)) classifications[dimension] = answer as JevAnswer
+    } else if (key.startsWith('driver_') && answer.type === 'noul' && probability(answer.noul)) {
       const driver = DRIVER_KEYS[key]
-      if (!driver || answer.type !== 'noul' || !probability(answer.noul)) throw malformed()
-      drivers[driver.dimension][driver.key] = answer.noul
+      if (driver) drivers[driver.dimension][driver.key] = answer.noul
     }
   }
-  return { classifications, drivers, model: json.model, inputTokens }
+  return { classifications, drivers, answers, model: json.model, inputTokens }
 }
 
 /**
@@ -376,11 +410,12 @@ export async function classifyOutcomeWithJev(
   } catch {
     throw new Error('Jev outcome classification returned unreadable JSON.')
   }
-  const parsed = parseResponse(json, questions)
+  const parsed = parseResponse(json)
   return {
     status: 'completed',
     classifications: parsed.classifications,
     drivers: parsed.drivers,
+    answers: parsed.answers,
     model: parsed.model,
     latencyMs: Date.now() - start,
     inputTokens: parsed.inputTokens,

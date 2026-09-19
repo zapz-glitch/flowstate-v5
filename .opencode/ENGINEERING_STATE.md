@@ -454,6 +454,50 @@ resolved as RESIDENTIAL LOT, insufficient by type; 2447 Crestview Ave
 Decatur (1946) — completed, fallbackUsed:'none' (strict pool filled,
 vintage never needed — correct).
 
+### 2026-09-19 — Jev outcome API durability (primitive-agnostic contract)
+
+Requirement: the service is primarily an API tool — a property submitted
+via `POST /v1/analyze` returns an evaluation through the same connection
+(SSE `evaluation_complete` event + saved report + DO `/state`), and the
+report must always carry the five Jev dimensions (evidence_sufficiency,
+comp_set_quality, deal_outlook, recommendation_agreement, risk_flags)
+EVEN IF the underlying TypeSafe question primitive changes (choice →
+score → noul → future types).
+
+Prior fragility: `parseResponse` validated every answer against the
+registered question's type and threw the WHOLE outcome away if any
+answer deviated — retyping one question nuked all five dimensions to
+`{status:'unavailable'}`.
+
+Change (apps/api/src/services/jev/index.ts):
+- `JevAnswer` passthrough type: `{type:string, choice?, score?, noul?,
+  confidence?, probabilities?, ...}` — verbatim record, any primitive.
+- `ScoreQuestion` added to the internal `Question` union.
+- `parseResponse` now iterates the answers Jev RETURNED (not the
+  questions registered); malformed single entries are skipped, never
+  fatal. Only an empty/invalid top-level payload still throws.
+- `classifications` is now `Partial<Record<JevOutcomeDimension,
+  JevAnswer>>` — the stable per-dimension contract: a dimension answered
+  under ANY primitive lands under its canonical name.
+- New `answers: Record<string, JevAnswer>` on completed outcomes —
+  every raw answer keyed by question id, surviving added/renamed/retyped
+  questions. `drivers` unchanged (noul driver extraction best-effort).
+
+Dashboard: `JevOutcomeSignal` widened to the passthrough shape;
+`JevOutcomeCard` renders `.choice` labels, falls back to `.score`/`.noul`
+scalars so a retyped dimension still displays; confidence tooltip now
+optional-guarded.
+
+Flow-through verified: `evaluation_complete` SSE event, savedReports
+`fullResponseJson`, eval-result cache hit, and DO `/state` all carry the
+full AnalysisResponse → `jevOutcome` reaches API consumers unchanged.
+
+Verified: tsc clean api+dashboard; 20/20 regression files pass. New
+proofs in jev-outcome.test.ts: score-retyped dimension stays in
+`classifications` under its stable name AND in `answers`; unanswered
+dimension is absent (not fatal); unknown future answer types pass
+through `answers`; driver nouls still extract.
+
 ### 2026-09-18 — Reset from feat/jev-rules-evaluation
 - Prior branch (Python/GIS bridge + Jev atomic signals + Python-owned
   qualification/ranking) deleted per user direction — it replaced v5
