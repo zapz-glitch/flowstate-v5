@@ -183,8 +183,15 @@ comp that failed an appraisal filter (rules are evidence in its state);
 post-vision condition gating still prunes verified-bad comps from ARV.
 User ARV-toggle overrides remain intact.
 
-Remaining: live end-to-end analysis to confirm real Jev scores +
-badge rendering (stack live: API :8792, dashboard :3012).
+Live E2E verified (job_1789781023487_oe11zm8y, 2447 Crestview Ave):
+all 67 candidates scored (truth 0.14–0.56); Jev selected top-3
+(2384 McAfee Rd 0.56, 2355 Hillside Ave 0.52, 1990 McAfee Pl 0.52) →
+group=arv, ARV 271167. Step: "Jev selected 3/67 comps by truth
+(jev-1.13.0)". Note: selection count floors at the ARV standard of 3 —
+Jev decides WHICH comps, not how many.
+
+Remaining: nothing blocking. Badge rendering visible on next dashboard
+analysis load (stack live: API :8792, dashboard :3012).
 
 ### 2026-09-18 — Reset from feat/jev-rules-evaluation
 - Prior branch (Python/GIS bridge + Jev atomic signals + Python-owned
