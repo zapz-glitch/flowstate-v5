@@ -358,6 +358,42 @@ Also verified: 228 Cobblestone thin-comp question answered — rules gate
 Levers discussed: wider tolerances, soft-priority filters, asymmetric
 year rule, location overrides — none requested yet.
 
+### 2026-09-19 — asIsSaleAgeDays: 18-month as-is sale window (b25f210)
+
+User spec: separate editable sale-age window for as-is/investment comps
+(~18mo) so the as-is AVG populates; ARV keeps its own configured
+sale_age rule; both backend parameters must be picked up by eval.
+
+Shipped (scalpel, mirrors reconciliationSaleAgeDays plumbing):
+- `deal_params.as_is_sale_age_days` column (migration 0032, default 548
+  ≈ 18mo) + deal-params route (defaults/GET/PUT, 30–1095d validation),
+  user-settings resolution, analyze body+evalParams, batch-job plumbing,
+  EvaluationParams field, dashboard DealParamsConfig type + editable
+  "As-Is Sale Age" field in evaluation-settings (30–1095d).
+- Gate (evaluation/index.ts ~L652): new `asIsRulesPassed` used only for
+  the investment bucket. Distance ≤0.5mi still gates; if shouldDisable,
+  the comp qualifies only when every non-sale_age filterResult passes
+  (respecting hard/soft priority) AND sale age ≤ asIsSaleAgeDays. ARV
+  bucket unchanged — uses rulesPassed (configured sale_age=180).
+- appliedSettings now exposes asIsSaleAgeDays + reconciliationSaleAgeDays
+  so reports prove which backend params ran. hashEvalParams covers the
+  whole evalParams object, so changing the setting busts the 21-day
+  eval-result cache automatically.
+
+Verified live (job_1789802334369_0r0znrkk, 3249 54th St N, St Pete):
+- 3128 49TH + 2630 56TH: disableReasons 'Sale too old: 183 days
+  (max: 180)' — sale_age-ONLY failures → enabled compGroup as_is under
+  the 548d window → as-is AVG $307,506 (224.79/sf, compCount 2).
+- 3272 54TH (closest comp d=0.038, I>A) correctly stayed disabled —
+  building_style_match hard failure, not sale_age.
+- ARV $380,216 from 3 A>I comps under the normal 180d rule; report
+  appliedSettings.filters shows sale_age 180/hard (preset-sourced).
+- tsc clean api+dashboard; 20/20 regression files pass.
+
+Note: PUT /deal-params from older dashboard builds that omit the new
+field will reset it to 548 — harmless default, not a data-loss risk.
+Remaining: manual comp-card ARV override still unbuilt (deferred).
+
 ### 2026-09-18 — Reset from feat/jev-rules-evaluation
 - Prior branch (Python/GIS bridge + Jev atomic signals + Python-owned
   qualification/ranking) deleted per user direction — it replaced v5
