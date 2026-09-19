@@ -244,6 +244,14 @@ selection stands, truth scores still attach, step reports
 INSUFFICIENT_COMPS now only fires when the rules selection itself
 found nothing (pre-existing behavior).
 
+Update (83bdf83): geo-filter exemption removed — f.passed===false only
+fires on evaluated failures ('not_verified' returns passed=true), so
+verified subdivision/neighborhood mismatches on enriched comps gate
+again while unenriched comps stay unpunished. Distance ≤0.5mi remains
+the uniform location gate. Re-verified live: same property → 1 ARV comp
+(545 Quillian, A 0.32/I 0.24) → ARV $269,800, no dead end; no verified
+geo mismatch existed within 0.5mi, so outcome unchanged.
+
 Update (952b5df): user flagged that subdivision/neighborhood are only
 enriched for rule-matched comps, so geo data is absent across most of
 the pool — geo-identity filters (subdivision_match, neighborhood_match)
