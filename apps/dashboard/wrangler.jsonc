@@ -28,4 +28,5 @@
   }
   // Secrets (set via wrangler secret put):
   // - DASHBOARD_INTERNAL_SECRET (shared with API for session-based auth)
+  // - FASTMAIL_API_TOKEN (JMAP token — deal-form email delivery to hello@)
 }

@@ -2,7 +2,15 @@
 
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
+import { Menu } from 'lucide-react'
 import { Logo } from '@/components/ui/Logo'
+import {
+  Sheet,
+  SheetClose,
+  SheetContent,
+  SheetTitle,
+  SheetTrigger,
+} from '@/components/ui/sheet'
 import { cn } from '@/lib/utils'
 
 const NAV_LINKS = [
@@ -40,15 +48,6 @@ export function SiteHeader() {
     return () => observer.disconnect()
   }, [])
 
-  const linkClass = (href: string, base: string) =>
-    cn(
-      base,
-      'transition-all duration-150 active:scale-[0.97] whitespace-nowrap',
-      activeId === href
-        ? 'text-foreground'
-        : 'text-muted-foreground hover:text-foreground'
-    )
-
   return (
     <header
       className={cn(
@@ -67,33 +66,37 @@ export function SiteHeader() {
             <Logo size="md" />
           </Link>
 
-          {/* Desktop nav */}
-          <nav className="hidden md:flex items-center gap-7 flex-1 justify-center">
-            {NAV_LINKS.map((link) => (
-              <Link
-                key={link.href}
-                href={link.href}
-                className={linkClass(link.href, 'text-sm')}
+          <Sheet>
+            <SheetTrigger asChild>
+              <button
+                aria-label="Open menu"
+                className="flex items-center justify-center h-10 w-10 -mr-2 text-muted-foreground hover:text-foreground active:scale-[0.94] transition-all duration-150"
               >
-                {link.label}
-              </Link>
-            ))}
-          </nav>
-
+                <Menu className="h-5 w-5" />
+              </button>
+            </SheetTrigger>
+            <SheetContent side="right" className="w-72 sm:w-80">
+              <SheetTitle className="mono-label">Menu</SheetTitle>
+              <nav className="flex flex-col mt-8">
+                {NAV_LINKS.map((link) => (
+                  <SheetClose asChild key={link.href}>
+                    <Link
+                      href={link.href}
+                      className={cn(
+                        'py-4 text-lg font-medium border-b border-border/60 transition-colors duration-150',
+                        activeId === link.href
+                          ? 'text-foreground'
+                          : 'text-muted-foreground hover:text-foreground'
+                      )}
+                    >
+                      {link.label}
+                    </Link>
+                  </SheetClose>
+                ))}
+              </nav>
+            </SheetContent>
+          </Sheet>
         </div>
-
-        {/* Mobile nav row */}
-        <nav className="md:hidden flex items-center gap-5 pb-3 -mt-1 overflow-x-auto">
-          {NAV_LINKS.map((link) => (
-            <Link
-              key={link.href}
-              href={link.href}
-              className={linkClass(link.href, 'mono-label !text-[10px]')}
-            >
-              {link.label}
-            </Link>
-          ))}
-        </nav>
       </div>
     </header>
   )

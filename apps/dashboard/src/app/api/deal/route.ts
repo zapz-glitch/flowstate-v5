@@ -1,6 +1,12 @@
 import { NextResponse } from 'next/server'
 
 const DEAL_INBOX = 'hello@flowstate.homes'
+const JMAP_SESSION_URL = 'https://api.fastmail.com/jmap/session'
+const JMAP_USING = [
+  'urn:ietf:params:jmap:core',
+  'urn:ietf:params:jmap:mail',
+  'urn:ietf:params:jmap:submission',
+]
 
 interface DealPayload {
   name?: string
@@ -19,14 +25,47 @@ function escapeHtml(value: string): string {
     .replace(/'/g, '&#39;')
 }
 
+interface JmapSession {
+  apiUrl: string
+  primaryAccounts: Record<string, string>
+}
+
+async function jmapCall(
+  apiUrl: string,
+  token: string,
+  methodCalls: [string, Record<string, unknown>, string][],
+): Promise<{ methodResponses: [string, Record<string, any>, string][] }> {
+  const res = await fetch(apiUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ using: JMAP_USING, methodCalls }),
+    signal: AbortSignal.timeout(8000),
+  })
+  if (!res.ok) throw new Error(`JMAP ${res.status}: ${(await res.text()).slice(0, 200)}`)
+  return res.json()
+}
+
+/**
+ * Sends the deal notification via Fastmail's JMAP API (RFC 8620/8621).
+ * hello@flowstate.homes is hosted on Fastmail, so the message is sent by the
+ * same provider that owns the inbox — SPF/DKIM are inherently aligned.
+ * The draft is created in the Sent mailbox so submissions leave an audit
+ * trail in the account's Sent folder.
+ */
 async function sendDealEmail(payload: {
   name: string
   email: string
   address: string
   notes: string
 }): Promise<boolean> {
+  const token = process.env.FASTMAIL_API_TOKEN
+  if (!token) {
+    console.error('FASTMAIL_API_TOKEN not configured — deal email skipped')
+    return false
+  }
   const { name, email, address, notes } = payload
   const submittedAt = new Date().toISOString()
+  const preferredFrom = process.env.DEAL_FROM_EMAIL || DEAL_INBOX
 
   const html = `
     <h2 style="margin:0 0 16px">New deal submission</h2>
@@ -40,25 +79,57 @@ async function sendDealEmail(payload: {
   `
 
   try {
-    const res = await fetch('https://api.mailchannels.net/tx/v1/send', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        personalizations: [{ to: [{ email: DEAL_INBOX }] }],
-        from: { email: 'noreply@flowstate.homes', name: 'Flowstate Website' },
-        reply_to: { email, name },
-        subject: `Deal submission: ${address}`,
-        content: [{ type: 'text/html', value: html }],
-      }),
+    const sessionRes = await fetch(JMAP_SESSION_URL, {
+      headers: { Authorization: `Bearer ${token}` },
       signal: AbortSignal.timeout(5000),
     })
-    if (!res.ok) {
-      console.error('MailChannels send failed:', res.status, await res.text())
-      return false
-    }
+    if (!sessionRes.ok) throw new Error(`JMAP session ${sessionRes.status}`)
+    const session = (await sessionRes.json()) as JmapSession
+    const mailAccount = session.primaryAccounts['urn:ietf:params:jmap:mail']
+    const subAccount = session.primaryAccounts['urn:ietf:params:jmap:submission']
+    if (!mailAccount || !subAccount) throw new Error('JMAP accounts missing from session')
+
+    const lookup = await jmapCall(session.apiUrl, token, [
+      ['Identity/get', { accountId: mailAccount }, 'ids'],
+      ['Mailbox/query', { accountId: mailAccount, filter: { role: 'sent' }, limit: 1 }, 'mbox'],
+    ])
+    const identities: { id: string; email: string }[] =
+      lookup.methodResponses.find(([m]) => m === 'Identity/get')?.[1]?.list ?? []
+    const sentIds: string[] =
+      lookup.methodResponses.find(([m]) => m === 'Mailbox/query')?.[1]?.ids ?? []
+    const identity =
+      identities.find((i) => i.email.toLowerCase() === preferredFrom.toLowerCase()) ?? identities[0]
+    const sentMailbox = sentIds[0]
+    if (!identity || !sentMailbox) throw new Error('No identity or Sent mailbox on account')
+
+    const submit = await jmapCall(session.apiUrl, token, [
+      ['Email/set', {
+        accountId: mailAccount,
+        create: {
+          draft: {
+            mailboxIds: { [sentMailbox]: true },
+            from: [{ name: 'Flowstate Website', email: identity.email }],
+            to: [{ email: DEAL_INBOX }],
+            replyTo: [{ name, email }],
+            subject: `Deal submission: ${address}`,
+            htmlBody: [{ partId: 'html', type: 'text/html' }],
+            bodyValues: { html: { value: html } },
+          },
+        },
+      }, 'draft'],
+      ['EmailSubmission/set', {
+        accountId: subAccount,
+        create: { sub: { emailId: '#draft', identityId: identity.id } },
+      }, 'sub'],
+    ])
+    const emailSet = submit.methodResponses.find(([, , tag]) => tag === 'draft')?.[1]
+    const subSet = submit.methodResponses.find(([, , tag]) => tag === 'sub')?.[1]
+    if (emailSet?.notCreated?.draft) throw new Error(`Email/set rejected: ${JSON.stringify(emailSet.notCreated.draft).slice(0, 200)}`)
+    if (subSet?.notCreated?.sub) throw new Error(`EmailSubmission rejected: ${JSON.stringify(subSet.notCreated.sub).slice(0, 200)}`)
+    if (!subSet?.created?.sub) throw new Error('EmailSubmission returned no created result')
     return true
   } catch (err) {
-    console.error('MailChannels send error:', err)
+    console.error('JMAP send error:', err instanceof Error ? err.message : err)
     return false
   }
 }
