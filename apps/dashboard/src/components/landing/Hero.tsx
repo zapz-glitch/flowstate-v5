@@ -33,10 +33,10 @@ export function Hero() {
             <ArrowRight className="h-4 w-4" />
           </a>
           <a
-            href="https://insights.flowstate.homes/insights"
+            href="#process"
             className="inline-flex items-center justify-center gap-2 py-3 px-6 border border-border text-foreground font-medium rounded-full hover:bg-secondary/60 active:scale-[0.98] transition-all duration-150"
           >
-            <span>Read our research</span>
+            <span>How it works</span>
           </a>
         </div>
 

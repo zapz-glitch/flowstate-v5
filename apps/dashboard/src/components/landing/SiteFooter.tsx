@@ -1,7 +1,13 @@
+'use client'
+
 import Link from 'next/link'
 import { Logo } from '@/components/ui/Logo'
 
-export function SiteFooter() {
+interface SiteFooterProps {
+  onAdminClick: () => void
+}
+
+export function SiteFooter({ onAdminClick }: SiteFooterProps) {
   return (
     <footer className="border-t border-border bg-background">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 py-12">
@@ -33,9 +39,12 @@ export function SiteFooter() {
             <Link href="/terms" className="text-xs text-muted-foreground/50 hover:text-muted-foreground transition-colors">
               Terms of Service
             </Link>
-            <Link href="/?signin=true" className="text-xs text-muted-foreground/50 hover:text-muted-foreground transition-colors">
-              Operator login
-            </Link>
+            <button
+              onClick={onAdminClick}
+              className="ml-auto text-xs text-muted-foreground/50 hover:text-muted-foreground transition-colors"
+            >
+              Admin
+            </button>
           </div>
         </div>
       </div>

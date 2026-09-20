@@ -12,12 +12,7 @@ const NAV_LINKS = [
   { label: 'Contact', href: '#contact' },
 ]
 
-interface SiteHeaderProps {
-  onPortalClick: () => void
-  isSignedIn?: boolean
-}
-
-export function SiteHeader({ onPortalClick, isSignedIn }: SiteHeaderProps) {
+export function SiteHeader() {
   const [isScrolled, setIsScrolled] = useState(false)
   const [activeId, setActiveId] = useState<string | null>(null)
 
@@ -85,12 +80,6 @@ export function SiteHeader({ onPortalClick, isSignedIn }: SiteHeaderProps) {
             ))}
           </nav>
 
-          <button
-            onClick={onPortalClick}
-            className="text-sm text-muted-foreground hover:text-foreground active:scale-[0.97] transition-all duration-150 whitespace-nowrap shrink-0"
-          >
-            <span className="underline underline-offset-4">{isSignedIn ? 'Dashboard' : 'Login'}</span>
-          </button>
         </div>
 
         {/* Mobile nav row */}

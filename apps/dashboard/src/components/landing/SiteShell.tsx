@@ -56,9 +56,9 @@ export function SiteShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="min-h-screen bg-background">
-      <SiteHeader onPortalClick={openPortal} isSignedIn={isSignedIn} />
+      <SiteHeader />
       {children}
-      <SiteFooter />
+      <SiteFooter onAdminClick={openPortal} />
       <button
         onClick={toggleTheme}
         aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
