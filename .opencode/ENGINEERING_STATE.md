@@ -2615,3 +2615,22 @@ Branch feat/landing-admin-footer (not merged).
   (INVALID_REDIRECT_URL).
 - Also fixed a latent TS error in dashboard deal route (res.json() unknown)
   so dashboard typecheck is clean again.
+
+## 2026-09-20 — SHIPPED: landing v2 + Fastmail email (main 0c541fc)
+
+feat/landing-admin-footer fast-forwarded to main (ad810ba..0c541fc, 8
+commits), deploy run 35543595525 green (API 43s, dashboard 1m24s).
+- Landing live: Insights removed, header nav → full-bleed index-style menu
+  (mono 01–04 labels, hairlines, morphing 2-bar burger), footer
+  "Operator Login" inline after Terms of Service.
+- Contact form live on Fastmail JMAP: prod POST /api/deal → email confirmed
+  in Sent ("789 Production Verify Blvd" → hello@ 19:07 ET).
+- Password reset now sends via JMAP in prod (secret pre-provisioned).
+- Prod smoke: api /health 200, flowstate.homes 200 with new markup.
+- Branch state: fix/landing-remove-insights-admin still holds the unmerged
+  force-fresh "New Analysis" skipCache fix (6d0fa22) — cherry-pick if wanted.
+  feat/jev-shadow-valuation (2a17ce3) preserved, unmerged.
+
+Last handoff: nothing in flight. Next candidates: merge the skipCache
+re-run fix; open decisions unchanged (gate starvation, outlier guard, ARV
+formula split, client recalc vs B, OPENROUTER_MODEL check, DO watchdog).
