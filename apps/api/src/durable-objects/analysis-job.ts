@@ -553,7 +553,7 @@ export class AnalysisJobDO {
         provider: property.provider,
         searchParams: config.search as import('../services/property-api/types').PropertySearchParams,
         comparablesParams: { ...comparablesParams },
-        enrichmentOptions: { permits: config.enrichment?.permits === true, floodZone: config.enrichment?.floodZone === true, weatherRisk: false, neighbourhood: false },
+        enrichmentOptions: { permits: config.enrichment?.permits === true, floodZone: config.enrichment?.floodZone === true, weatherRisk: false },
         retrieval,
       },
       enrichment: {

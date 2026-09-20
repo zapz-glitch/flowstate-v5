@@ -278,7 +278,6 @@ ghlWebhook.post('/:webhookSecret', async (c) => {
         permits: true,
         floodZone: true,
         weatherRisk: false,
-        neighbourhood: false,
       },
     })
 

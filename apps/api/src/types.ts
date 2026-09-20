@@ -11,14 +11,7 @@ export interface Env {
   /** Global Cotality request throttle (50 req/min sliding window) */
   RATE_LIMIT_COORDINATOR?: DurableObjectNamespace
   ENVIRONMENT: string
-  V4_LOCAL_BRIDGE_URL?: string
-  V4_LOCAL_BRIDGE_TOKEN?: string
-  V4_HOSTED_API_URL?: string
-  V4_HOSTED_USER_CREDENTIALS?: string
   V4_STAGING_ASSETS_ENABLED?: string
-  V4_SNAPSHOT_ACTIVE_KEY_ID?: string
-  V4_SNAPSHOT_KEYS?: string
-  V4_SNAPSHOT_LEGACY_KEYS?: string
 
   // ─── Dashboard URL ────────────────────────────────────────────────────────
   /** Production dashboard URL (e.g. 'https://flowstate.homes') */

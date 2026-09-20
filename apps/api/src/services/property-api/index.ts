@@ -28,11 +28,9 @@ import {
   comparablesKey,
   floodZoneKey,
   permitsKey,
-  neighbourhoodKey,
   CACHE_TTL,
   type CacheService,
 } from '../cache';
-import { createNeighbourhoodService, type NeighbourhoodData } from '../neighbourhood';
 import { resolveCandidateLimit } from './retrieval-policy';
 import type {
   PropertyProvider,
@@ -847,10 +845,9 @@ class PropertyApi implements PropertyApiService {
       enrichOpts.floodZone !== false
         ? this.getFloodZoneForProperty(property)
         : Promise.resolve(null),
-      // Get neighbourhood data (community, schools, POI)
-      enrichOpts.neighbourhood !== false && property.latitude && property.longitude
-        ? this.fetchNeighbourhood(property.latitude, property.longitude, address1)
-        : Promise.resolve(null),
+      // Neighbourhood enrichment removed — the ATTOM service is dead code
+      // (all callers disabled it); the field stays null on the response.
+      Promise.resolve(null),
       // Subject AVM (Cotality THV) — parcel-level, subject only; graceful fail
       property.parcelId
         ? this.getAvm(property.parcelId).catch(() => null)
@@ -1213,45 +1210,6 @@ class PropertyApi implements PropertyApiService {
     };
   }
 
-  /**
-   * Fetch neighbourhood data (community, schools, POI) with caching
-   */
-  private async fetchNeighbourhood(
-    latitude: number,
-    longitude: number,
-    address?: string,
-  ): Promise<NeighbourhoodData | null> {
-    // Check cache first
-    const cacheKey = neighbourhoodKey(latitude, longitude);
-    if (!this._skipCache) {
-      const cached = await this.cache.get<NeighbourhoodData>(cacheKey);
-      if (cached) {
-        console.log('PropertyAPI: Cache HIT for neighbourhood', { latitude, longitude });
-        return cached;
-      }
-    }
-
-    console.log('PropertyAPI: Fetching neighbourhood data', { latitude, longitude });
-
-    try {
-      const apiKey = this.env.ATTOM_API_KEY ?? '';
-      if (!apiKey) {
-        console.log('PropertyAPI: No ATTOM API key for neighbourhood data');
-        return null;
-      }
-
-      const service = createNeighbourhoodService(apiKey);
-      const result = await service.getNeighbourhoodData(latitude, longitude, address);
-
-      // Cache the result
-      await this.cache.set(cacheKey, result, { ttl: CACHE_TTL.NEIGHBOURHOOD });
-
-      return result;
-    } catch (error) {
-      console.log('PropertyAPI: Neighbourhood fetch failed:', error instanceof Error ? error.message : error);
-      return null;
-    }
-  }
 }
 
 // ─── Factory Function ──────────────────────────────────────────────────────────

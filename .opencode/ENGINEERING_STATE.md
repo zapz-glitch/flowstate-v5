@@ -129,15 +129,14 @@ Blockers (environment, not code):
 - V4 engine NOT connected to production (V4_* env vars dead code; by plan).
 
 ## Current Objective
-Candidate B structured comp classifier is the PRODUCTION comp classifier on
-`feat/jev-outcome-classification` (worktree `~/src/flowstate-v5-jev-classify`).
-Product engineer approved promotion 2026-09-20: B's mutually-exclusive
-ARV|AS_IS|UNIDENTIFIED Choice routes gate-passed comps; Baseline A dual-noul
-argmax is preserved behind `JEV_COMP_CLASSIFIER_V2_ENABLED="false"` for
-rollback. Fallbacks/abstentions are intentional fail-closed behavior —
-over-inclusion is the worse failure mode for a mean-based ARV. Branch is
-merge-ready pending the user's explicit OK to merge to main; NO merge or
-deploy has been performed.
+Post-merge repo health audit on `main` (worktree `~/src/flowstate-v5-deploy`,
+main = 17bcf51 = Candidate B production). Dead code + redundancy sweep,
+high-volume readiness, evaluation speed/accuracy review. Findings below in
+"### 2026-09-20 (d) — Post-merge repo audit". Removals NOT yet applied —
+awaiting product-engineer pick-list.
+
+NOTE: `git push origin main` NOT done — pushing main triggers deploy.yml
+(prod deploy). Awaiting explicit user authorization to push.
 
 ### 2026-09-19 — Jev-authoritative comp selection + per-comp truth scores
 
@@ -2459,3 +2458,63 @@ Readiness evidence:
 Remaining:
 - Commit the above; report ready-for-merge to user; merge ONLY on
   explicit user OK. No deploy performed or authorized.
+
+### 2026-09-20 (d) — Post-merge repo audit (main @ 17bcf51)
+
+Systematic sweep of apps/api (122 ts files, 41k LOC) + dashboard lib.
+Removals NOT applied — findings only.
+
+DEAD CODE (verified zero/ghost-only references):
+- services/core/ (832 LOC) — provider interfaces + observability infra,
+  zero importers.
+- services/neighbourhood/ (397 LOC) — ATTOM community/schools/POI fetcher;
+  both real callers (analysis-job.ts:556, webhooks/ghl.ts:281) hardcode
+  neighbourhood:false. comp-selection's enrichmentOptions:{} never fetches.
+- services/vision/scoring/ (305 LOC) — barrel re-export, zero importers.
+- services/evaluation/filter-suggestions.ts (212 LOC) — zero refs incl tests.
+- services/evaluation/condition-evidence.ts (93) + physical-evidence.ts (88)
+  — referenced ONLY by their own tests (test-shadowed dead code).
+- dashboard lib/fastapi-bridge.ts (214) + fastapi-config.ts (31) +
+  fastapi-integration-example.ts (94) — dead V4-era FastAPI bridge.
+- dashboard lib/merge-utils.ts — zero importers.
+- types.ts: 7 dead V4_* env vars (LOCAL_BRIDGE_URL/TOKEN, HOSTED_API_URL,
+  HOSTED_USER_CREDENTIALS, SNAPSHOT_ACTIVE_KEY_ID, SNAPSHOT_KEYS,
+  SNAPSHOT_LEGACY_KEYS). Only V4_STAGING_ASSETS_ENABLED still read
+  (report-assets.ts).
+- middleware/auth.ts + routes/user.ts: identical hashApiKey duplicated.
+
+ACCURACY (high severity):
+- THREE ARV computations, two formulas: pipeline AppraisalService.
+  calculateARV = raw mean(adjustedSalePrice ?? salePrice); server
+  recalculateReport + dashboard lib/recalc shared calculateARV =
+  sqft-scaled mean(adjustedPrice/compSqft)*subjectSqft (mean fallback).
+  Same data → different ARV after any recalc. Silent formula switch.
+- dashboard lib/recalc bypasses Candidate B: never reads
+  jevPriceClassification; when filters changed, isEnabled=passesHard
+  resurrects UNIDENTIFIED comps; compGroup==null gets price-threshold
+  filled; and its ARV pool = all isEnabled (ARV+AS_IS buckets both
+  isEnabled=true) vs server pool = selectedCompIds (ARV bucket only).
+- OPENROUTER_MODEL env var overrides ALL task model defaults
+  (llm/index.ts:80, analyzer.ts:327, renovation.ts:251/402). Stale
+  google/gemini-2.0-flash-001 (no endpoints → 404) was in local .dev.vars;
+  VERIFY PROD SECRET — if set there, all vision/LLM calls have been
+  silently failing to fallback paths.
+
+HIGH-VOLUME READINESS:
+- ATTOM attomFetch: NO AbortSignal timeout — hung fallback stalls job.
+- OpenRouter provider fetch (llm/openai-compatible.ts:138): NO timeout at
+  any layer — vision/comp-analysis calls can hang indefinitely. (Jev
+  service itself has 20s AbortSignal — good.)
+- Single-analysis DO has no stall watchdog (batch DO has 180s cap + 45s
+  stall detection; single job relies on SSE client patience).
+- authMiddleware (all /v1/*): captureResponseBody reads ENTIRE response
+  into memory to truncate at 50KB for api_usage_logs, plus a blocking D1
+  insert per request. Move insert to ctx.waitUntil; cap body read.
+- Good: DO responses consumed everywhere; KV caching on property/comps/
+  permits/flood; comp enrichment concurrency-batched (10) + 100ms pacing;
+  CoreLogic 10s token / 20s call timeouts + key rotation; Firecrawl DO
+  concurrency cap; ChunkedJobState for DO event storage.
+
+STALE DOCS: CLAUDE.md documents a Cloudflare Workflow + ANALYSIS_WORKFLOW
+binding that doesn't exist (no workflows/ dir, no binding) — pipeline runs
+in the analysis route+DO.

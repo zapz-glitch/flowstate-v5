@@ -35,8 +35,7 @@ export const CACHE_TTL = {
   ZILLOW_DATA: 30 * 24 * 60 * 60,
   // OAuth tokens - cache until expiry minus buffer
   OAUTH_TOKEN: 50 * 60, // 50 minutes (tokens last 60 min)
-  // Neighbourhood data - cache for 7 days (community/school/POI data rarely changes)
-  NEIGHBOURHOOD: 7 * 24 * 60 * 60,
+
   // User analysis settings - cache for 1 hour (invalidated on mutation)
   USER_SETTINGS: 60 * 60,
 } as const
@@ -50,7 +49,6 @@ export const CACHE_PREFIX = {
   VISION: 'vision:',
   ZILLOW: 'zillow:',
   OAUTH: 'oauth:',
-  NEIGHBOURHOOD: 'nbhd:',
   USER_SETTINGS: 'user-settings:',
 } as const
 
@@ -172,13 +170,7 @@ export function oauthKey(clientId: string): string {
   return `${CACHE_PREFIX.OAUTH}${clientId}`
 }
 
-/**
- * Generate a cache key for neighbourhood data
- * Uses lat/lng rounded to 3 decimal places (~100m precision, neighbourhood-level)
- */
-export function neighbourhoodKey(latitude: number, longitude: number): string {
-  return `${CACHE_PREFIX.NEIGHBOURHOOD}${latitude.toFixed(3)},${longitude.toFixed(3)}`
-}
+
 
 /**
  * Generate a cache key for user analysis settings.

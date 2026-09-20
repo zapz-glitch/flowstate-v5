@@ -579,7 +579,71 @@ export interface EnrichmentData {
   /** OSM-detected location risks (major roads, railroads, commercial) */
   locationRisks?: import('../location-risk').LocationRisk[] | null
   weatherRisk: WeatherRisk | null
-  neighbourhood: import('../neighbourhood').NeighbourhoodData | null
+  /** Neighbourhood data — the ATTOM fetcher was removed; always null on new
+   *  bundles but KV-cached bundles may still carry it (7-day TTL). */
+  neighbourhood: NeighbourhoodData | null
+}
+
+// ─── Neighbourhood types (kept for cached-bundle compatibility; the ATTOM
+//     fetcher that populated this was removed — field is always null on new
+//     bundles) ────────────────────────────────────────────────────────────────
+
+export interface NeighbourhoodData {
+  geoIdV4: string | null
+  community: {
+    crime: {
+      crimeIndex: number | null
+      crimeRisk: string | null
+      murderIndex: number | null
+      assaultIndex: number | null
+      robberyIndex: number | null
+      burglaryIndex: number | null
+      larcenyIndex: number | null
+      motorVehicleTheftIndex: number | null
+      violentCrimeIndex: number | null
+      propertyCrimeIndex: number | null
+    } | null
+    demographics: {
+      population: number | null
+      populationDensity: number | null
+      medianIncome: number | null
+      medianAge: number | null
+      householdCount: number | null
+      medianHomeValue: number | null
+    } | null
+    climate: {
+      avgHighTemp: number | null
+      avgLowTemp: number | null
+      annualRainfall: number | null
+      annualSnowfall: number | null
+      comfortIndex: number | null
+    } | null
+  } | null
+  schools: {
+    nearby: Array<{
+      name: string
+      type: string | null
+      gradeRange: string | null
+      rating: number | null
+      distance: number | null
+      address: string | null
+      latitude: number | null
+      longitude: number | null
+      geoIdV4: string | null
+    }>
+    count: number
+  } | null
+  poi: {
+    items: Array<{
+      name: string
+      category: string | null
+      address: string | null
+      distance: number | null
+      latitude: number | null
+      longitude: number | null
+    }>
+    summary: Record<string, number>
+  } | null
 }
 
 export interface EnrichmentOptions {
@@ -589,8 +653,6 @@ export interface EnrichmentOptions {
   floodZone?: boolean
   /** Include weather/natural disaster risk (default: false) */
   weatherRisk?: boolean
-  /** Include neighbourhood analysis — community, schools, POI (default: true) */
-  neighbourhood?: boolean
 }
 
 // ─── Property Bundle ───────────────────────────────────────────────────────────

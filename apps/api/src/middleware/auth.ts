@@ -13,7 +13,7 @@
 import { Context, Next } from 'hono'
 import type { Env } from '../types'
 
-async function hashApiKey(key: string): Promise<string> {
+export async function hashApiKey(key: string): Promise<string> {
   const encoder = new TextEncoder()
   const data = encoder.encode(key)
   const hashBuffer = await crypto.subtle.digest('SHA-256', data)
@@ -193,45 +193,54 @@ export async function authMiddleware(
     // Calculate response time for dashboard requests
     const dashboardResponseTimeMs = Date.now() - startTime
 
-    // Capture response body for logging
-    const dashboardResponseBody = await captureResponseBody(c.res)
-
-    // Extract property info from request for analytics
+    // Usage logging is analytics-only — body capture + insert run off the
+    // response path via waitUntil.
+    const res = c.res
+    const path = c.req.path
+    const method = c.req.method
+    const status = c.res.status
+    const ip = c.req.header('CF-Connecting-IP') || c.req.header('X-Forwarded-For') || null
+    const userAgent = c.req.header('User-Agent') || null
+    const dashboardUserIdLog = dashboardAuth.user.id
     const dashboardPropertyInfo = extractPropertyInfo(requestBody)
 
-    // Log usage for dashboard requests (apiKeyId is null for dashboard)
-    const dashboardLogId = crypto.randomUUID()
-    try {
-      await c.env.DB.prepare(`
-        INSERT INTO api_usage_logs (
-          id, api_key_id, user_id, endpoint, method, status_code, response_time_ms,
-          property_address, property_city, property_state,
-          ip_address, user_agent, request_body, response_body, request_headers, created_at
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `)
-        .bind(
-          dashboardLogId,
-          null, // No API key for dashboard requests
-          dashboardAuth.user.id,
-          c.req.path,
-          c.req.method,
-          c.res.status,
-          dashboardResponseTimeMs,
-          dashboardPropertyInfo.address,
-          dashboardPropertyInfo.city,
-          dashboardPropertyInfo.state,
-          c.req.header('CF-Connecting-IP') || c.req.header('X-Forwarded-For') || null,
-          c.req.header('User-Agent') || null,
-          requestBody,
-          dashboardResponseBody,
-          requestHeaders,
-          new Date().toISOString()
-        )
-        .run()
-    } catch (error) {
-      console.error('[Auth] Failed to log dashboard usage:', error)
-    }
+    c.executionCtx.waitUntil(
+      (async () => {
+        try {
+          const dashboardResponseBody = await captureResponseBody(res)
+          const dashboardLogId = crypto.randomUUID()
+          await c.env.DB.prepare(`
+            INSERT INTO api_usage_logs (
+              id, api_key_id, user_id, endpoint, method, status_code, response_time_ms,
+              property_address, property_city, property_state,
+              ip_address, user_agent, request_body, response_body, request_headers, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `)
+            .bind(
+              dashboardLogId,
+              null, // No API key for dashboard requests
+              dashboardUserIdLog,
+              path,
+              method,
+              status,
+              dashboardResponseTimeMs,
+              dashboardPropertyInfo.address,
+              dashboardPropertyInfo.city,
+              dashboardPropertyInfo.state,
+              ip,
+              userAgent,
+              requestBody,
+              dashboardResponseBody,
+              requestHeaders,
+              new Date().toISOString()
+            )
+            .run()
+        } catch (error) {
+          console.error('[Auth] Failed to log dashboard usage:', error)
+        }
+      })()
+    )
 
     return
   }
@@ -378,9 +387,6 @@ export async function authMiddleware(
   // Calculate response time
   const responseTimeMs = Date.now() - startTime
 
-  // Capture response body for logging
-  const responseBody = await captureResponseBody(c.res)
-
   // Increment usage and update lastUsedAt after successful request
   await c.env.DB.prepare(`
     UPDATE api_keys
@@ -390,36 +396,51 @@ export async function authMiddleware(
     .bind(new Date().toISOString(), result.api_key_id)
     .run()
 
-  // Extract property info from request for analytics
+  // Usage logging is analytics-only — run it off the response path so big
+  // analysis payloads don't pay the body-capture + insert latency.
+  const res = c.res
+  const path = c.req.path
+  const method = c.req.method
+  const status = c.res.status
+  const ip = c.req.header('CF-Connecting-IP') || c.req.header('X-Forwarded-For') || null
+  const userAgent = c.req.header('User-Agent') || null
   const propertyInfo = extractPropertyInfo(requestBody)
 
-  // Log usage with request/response bodies and property info
-  const logId = crypto.randomUUID()
-  await c.env.DB.prepare(`
-    INSERT INTO api_usage_logs (
-      id, api_key_id, user_id, endpoint, method, status_code, response_time_ms,
-      property_address, property_city, property_state,
-      ip_address, user_agent, request_body, response_body, request_headers, created_at
-    )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `)
-    .bind(
-      logId,
-      result.api_key_id,
-      result.user_id,
-      c.req.path,
-      c.req.method,
-      c.res.status,
-      responseTimeMs,
-      propertyInfo.address,
-      propertyInfo.city,
-      propertyInfo.state,
-      c.req.header('CF-Connecting-IP') || c.req.header('X-Forwarded-For') || null,
-      c.req.header('User-Agent') || null,
-      requestBody,
-      responseBody,
-      requestHeaders,
-      new Date().toISOString()
-    )
-    .run()
+  c.executionCtx.waitUntil(
+    (async () => {
+      try {
+        const responseBody = await captureResponseBody(res)
+        const logId = crypto.randomUUID()
+        await c.env.DB.prepare(`
+          INSERT INTO api_usage_logs (
+            id, api_key_id, user_id, endpoint, method, status_code, response_time_ms,
+            property_address, property_city, property_state,
+            ip_address, user_agent, request_body, response_body, request_headers, created_at
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `)
+          .bind(
+            logId,
+            result.api_key_id,
+            result.user_id,
+            path,
+            method,
+            status,
+            responseTimeMs,
+            propertyInfo.address,
+            propertyInfo.city,
+            propertyInfo.state,
+            ip,
+            userAgent,
+            requestBody,
+            responseBody,
+            requestHeaders,
+            new Date().toISOString()
+          )
+          .run()
+      } catch (error) {
+        console.error('[Auth] Failed to log api usage:', error)
+      }
+    })()
+  )
 }

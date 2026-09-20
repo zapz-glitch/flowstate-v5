@@ -10,6 +10,7 @@ import { drizzle } from 'drizzle-orm/d1'
 import { eq, desc, and, gte, sql } from 'drizzle-orm'
 import type { Env } from '../types'
 import { getSession } from '../lib/session'
+import { hashApiKey } from '../middleware/auth'
 import { users, apiKeys, apiUsageLogs, analysisRuns, PLAN_LIMITS } from '../db'
 
 const user = new Hono<{ Bindings: Env }>()
@@ -24,15 +25,6 @@ function generateApiKey(): string {
       .map((b) => b.toString(16).padStart(2, '0'))
       .join('')
   )
-}
-
-// Hash API key for storage
-async function hashApiKey(key: string): Promise<string> {
-  const encoder = new TextEncoder()
-  const data = encoder.encode(key)
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data)
-  const hashArray = Array.from(new Uint8Array(hashBuffer))
-  return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('')
 }
 
 // ─── User Profile ────────────────────────────────────────────────────────────

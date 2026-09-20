@@ -438,6 +438,9 @@ async function attomFetch<T>(apiKey: string, url: string): Promise<T> {
   console.log(`ATTOM fetch: ${logUrl}`)
 
   const res = await fetch(url, {
+    // Match CoreLogic's 20s call timeout — an unbounded fallback fetch can
+    // stall the whole analysis.
+    signal: AbortSignal.timeout(20000),
     headers: {
       Accept: 'application/json',
       apikey: apiKey,

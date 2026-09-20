@@ -121,7 +121,7 @@ Root commands (`npm run dev`, `npm run build`, etc.) delegate to Turbo, which or
 - **Framework**: Hono (lightweight web framework)
 - **Database**: Cloudflare D1 (SQLite) via Drizzle ORM
 - **Auth**: Better Auth (email/password sessions) + SHA-256 hashed API keys
-- **Async Processing**: Cloudflare Workflows (durable multi-step execution)
+- **Async Processing**: AnalysisJobDO (durable per-job execution)
 - **Real-time**: Server-Sent Events via Durable Objects
 - **Storage**: Cloudflare KV (caching), R2 (photo storage)
 - **Validation**: Zod schemas
@@ -140,7 +140,6 @@ apps/api/src/
 │   └── auth.ts           # API key auth, quota checking, usage logging
 ├── routes/               # All route handlers (see Routes section)
 ├── durable-objects/      # Cloudflare Durable Objects
-├── workflows/            # Cloudflare Workflows
 └── services/             # Business logic layer
 ```
 
@@ -154,7 +153,7 @@ apps/api/src/
 | `ANALYSIS_JOB` | Durable Object | Per-job state management & SSE streaming |
 | `RATE_LIMIT_COORDINATOR` | Durable Object | Cross-key rate limit coordination |
 | `FIRECRAWL_RATE_LIMITER` | Durable Object | Firecrawl concurrency limiter (max 50) |
-| `ANALYSIS_WORKFLOW` | Workflow | Durable async analysis orchestration |
+| `BATCH_JOB` | Durable Object | Batch list analysis orchestration |
 
 ### Durable Objects
 
@@ -175,28 +174,26 @@ apps/api/src/
 
 **Important**: DO `stub.fetch()` responses MUST be consumed (`await resp.text()`) to avoid "RPC result not disposed" warnings. Never call `stub.dispose()` — consume the response body instead.
 
-### Cloudflare Workflow (`workflows/analysis-workflow.ts`)
+### Analysis Pipeline (`AnalysisJobDO` + `services/evaluation`)
 
-Multi-step durable analysis pipeline with automatic retries and parallel execution:
+There is no Cloudflare Workflow — the pipeline runs inside the per-job
+Durable Object. `POST /v1/analyze` prefetches the property bundle from
+CoreLogic (saves a round-trip), posts `/start-streaming` to the job's
+`AnalysisJobDO`, and returns the jobId immediately. The DO runs
+`services/evaluation` end-to-end and streams step events over SSE:
 
 ```
-Step 1: Property Fetch (skipped when preloaded from endpoint)
-  → CoreLogic/ATTOM API → subject + comps + enrichment
-Step 2: Photo Fetch (parallel for all properties)
-  → Zillow via Firecrawl → photos + supplemental data
-Step 3: Classification (parallel)
-  → Keyword analysis + optional LLM vision → as_is / after_renovation
-Step 4: Appraisal Evaluation
-  → 3-pass filter system → select best 3 comps → apply adjustments
-Step 5: ARV & Valuation Calculation
-  → Weighted ARV → rehab costs → buy price → profit → recommendation
-Step 6: GHL Integration (optional, 3x retry, non-fatal)
-  → Push results to GoHighLevel CRM opportunity
+Property fetch (preloaded) → enrichment (building detail, transaction
+facts, Zillow reconciliation, flip detection) → photo/Zillow supplement →
+deterministic appraisal gate → Jev comp classifier (Candidate B Choice:
+ARV/AS_IS/UNIDENTIFIED; Baseline A behind JEV_COMP_CLASSIFIER_V2_ENABLED
+="false") → ARV condition gate → ARV + valuation → Group B as-is intel →
+Jev outcome classification → response persisted to saved_reports.
 ```
 
-**Key architectural detail**: The route handler (`routes/analyze.ts`) pre-fetches the property bundle from CoreLogic *before* starting the workflow. This eliminates ~1-2s of Workflow checkpoint latency. The bundle is passed via `preloadedPropertyBundle` in `AnalysisWorkflowParams`. Since Workers and Workflows run in **separate isolates**, module-level state (like CoreLogic call logs) is NOT shared — stats are passed via `preloadedApiCallStats`.
-
-**Workflow I/O types**: `AnalysisWorkflowParams` (input) and `AnalysisWorkflowResult` (output) in `workflows/types.ts`.
+Clients get the result via the SSE `evaluation_complete` event or by
+polling `GET /v1/analyze/jobs/:jobId` (which falls back to the saved
+report when the DO state is evicted).
 
 ### Routes
 
@@ -219,7 +216,7 @@ Step 6: GHL Integration (optional, 3x retry, non-fatal)
 | `/reports/:jobId` | None/Password | Public shared report access |
 | `/webhooks/ghl/:secret` | URL Secret | GHL webhook receiver |
 | `GET /sse/analyze/:jobId` | Signed Token | SSE real-time progress stream |
-| `POST /v1/analyze` | Bearer (API Key) | Start analysis workflow |
+| `POST /v1/analyze` | Bearer (API Key) | Start analysis job |
 | `GET /v1/analyze/jobs/:jobId` | Bearer (API Key) | Poll job status |
 | `POST /v1/analyze/stream-token` | Bearer (API Key) | Generate signed SSE token |
 | `GET /v1/ml/ideal-reports` | Bearer (API Key) | Export caller's validated reports for CDARV (services/ml) |
@@ -411,7 +408,7 @@ User submits address → server action queueAnalysis()
   → Connect EventSource(streamUrl?token=xxx)
   → SSE events update Jotai atoms in real-time
   → Components re-render with partial data as steps complete
-  → workflow_completed → full result available
+  → evaluation_complete → full result available
   → Fallback: SSE fails after 3 retries → switch to HTTP polling (2s interval)
 ```
 
@@ -556,8 +553,7 @@ request body params → zip override → city+state override → state override 
 | **Cloudflare D1** | SQLite database | Binding in `wrangler.toml` |
 | **Cloudflare KV** | Response caching (7-day TTL) | `API_CACHE` binding |
 | **Cloudflare R2** | Photo storage | `REPORT_PHOTOS` binding |
-| **Cloudflare Workflows** | Durable async analysis | `ANALYSIS_WORKFLOW` binding |
-| **Cloudflare Durable Objects** | Job state, SSE, rate limiting | 3 DO classes |
+| **Cloudflare Durable Objects** | Job state, SSE, rate limiting, batch orchestration | 4 DO classes |
 
 ## Environment Variables
 
@@ -588,8 +584,8 @@ NEXT_PUBLIC_API_URL=http://localhost:8787
 | Feature | Primary File(s) |
 |---------|----------------|
 | Analysis endpoint | `apps/api/src/routes/analyze.ts` |
-| Analysis workflow | `apps/api/src/workflows/analysis-workflow.ts` |
-| Workflow types | `apps/api/src/workflows/types.ts` |
+| Evaluation pipeline | `apps/api/src/services/evaluation/index.ts` |
+| Analysis job runner | `apps/api/src/durable-objects/analysis-job.ts` |
 | Appraisal rules (3-pass) | `apps/api/src/services/appraisal/index.ts`, `evaluator.ts` |
 | Property classification | `apps/api/src/services/classification/index.ts` |
 | Response building | `apps/api/src/services/analysis/index.ts` |
