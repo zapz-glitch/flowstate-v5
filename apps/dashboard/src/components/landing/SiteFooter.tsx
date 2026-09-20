@@ -41,7 +41,7 @@ export function SiteFooter({ onAdminClick }: SiteFooterProps) {
             </Link>
             <button
               onClick={onAdminClick}
-              className="ml-auto text-xs text-muted-foreground/50 hover:text-muted-foreground transition-colors"
+              className="text-xs text-muted-foreground/50 hover:text-muted-foreground transition-colors"
             >
               Admin
             </button>
