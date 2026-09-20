@@ -146,6 +146,7 @@ export default function ReportPage({ params }: { params: Promise<{ jobId: string
       subjectAddress: report?.address ?? analyzeData?.subject?.address ?? null,
     },
     jevOutcome: analyzeData?.jevOutcome ?? null,
+    jevCompClassification: analyzeData?.jevCompClassification ?? null,
     onOpenSettings: () => setSettingsOpen(true),
     onCompClick: (comp) => { setComparisonComp(comp as CompItem); setComparisonOpen(true) },
   })

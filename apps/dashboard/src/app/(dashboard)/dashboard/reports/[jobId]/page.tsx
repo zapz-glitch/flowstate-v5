@@ -507,6 +507,7 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
     marketContext,
     aiReport,
     jevOutcome: analyzeData?.jevOutcome ?? null,
+    jevCompClassification: analyzeData?.jevCompClassification ?? null,
     onOpenSettings: () => setSettingsOpen(true),
     onCompClick: (comp) => { setComparisonComp(comp as CompItem); setComparisonOpen(true) },
     onRunAiAnalysis: handleRunAiAnalysis,

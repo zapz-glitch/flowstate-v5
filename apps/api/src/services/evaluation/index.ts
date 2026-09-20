@@ -46,7 +46,7 @@ import {
   routeCompPriceClasses,
   scoreCompTruthWithJev,
 } from '../jev'
-import type { JevCompClassificationRun } from '../jev'
+import type { JevCompClassificationRun, JevCompPriceClass } from '../jev'
 import { persistReportAssets } from '../report-assets'
 import { expansionRefetchRadius } from '../property-api/retrieval-policy'
 import { assessRenovationFromPhotos, assessCompCurbAppeal, type RenovationAssessment, type CurbAppealCheck } from '../vision/renovation'
@@ -662,6 +662,8 @@ export async function performAnalysis(
     (a.distanceMiles ?? 999) - (b.distanceMiles ?? 999)
   const v2Mode = compClassifierMode(env)
   let baselineTruth: Record<string, { arvTruth: number; investmentTruth: number }> | null = null
+  /** B's raw classifications when running shadow — held for the counterfactual valuation below */
+  let shadowBClasses: Record<string, JevCompPriceClass> | null = null
 
   if (v2Mode === 'enabled') {
     // ── Candidate B (production): one structured choice per eligible comp ──
@@ -774,6 +776,7 @@ export async function performAnalysis(
       try {
         const eligible = [...appraisalResult.comparables].filter(rulesPassed).sort(byDistance)
         const cls = await classifyCompPriceWithJev(bundle.property, eligible, { filters, adjustments }, env)
+        shadowBClasses = cls.classifications
         appraisalResult.comparables = appraisalResult.comparables.map((comp) => ({
           ...comp,
           jevPriceClassification: cls.classifications[comp.id] ?? null,
@@ -1071,6 +1074,83 @@ export async function performAnalysis(
       )
   if (groupBResult && groupBResult.count > 0) {
     console.log(`[Evaluate] Group B: ${groupBResult.count} as-is comps (${jevInvestmentCompIds.length > 0 ? 'Jev investment-truth selected' : `≤${formatUsd(groupBResult.priceCeiling)}, ${asIsThresholdPercent}% of ARV`})`)
+  }
+
+  // ── Candidate B counterfactual (shadow only) ──────────────────────────────
+  // What B's routing would have produced through the same deterministic math:
+  // same ARV condition-gate prune, same valuation service, same Group B
+  // summarizer. Purely observational — nothing here touches the response's
+  // production figures.
+  if (v2Mode === 'shadow' && compClassificationRun?.status === 'completed' && shadowBClasses) {
+    try {
+      const { arvIds: bArvIds, asIsIds: bAsIsIds } = routeCompPriceClasses(shadowBClasses)
+      const bArvComps = appraisalResult.comparables.filter((c) => bArvIds.has(c.id))
+
+      // Mirror the ARV condition gate: verified below-spec comps drop out,
+      // and the prune only applies when ≥3 comps remain afterward.
+      const bArvBelowSpec = bArvComps.filter(
+        (c) => assessorSignal(c.id) === 'negative' || visionVerifiedNegative(compCurbAppeal?.[c.id]),
+      )
+      const bArvEffective =
+        bArvComps.length - bArvBelowSpec.length >= 3
+          ? bArvComps.filter((c) => !bArvBelowSpec.includes(c))
+          : bArvComps
+      const shadowArv = bArvEffective.length > 0 ? appraisalService.calculateARV(bArvEffective) : null
+
+      const shadowArvForAsIs = shadowArv ?? finalArv
+      const bAsIsComps = appraisalResult.comparables.filter(
+        (c) => bAsIsIds.has(c.id) && c.salePrice != null && c.salePrice > 0,
+      )
+      const shadowGroupB = summarizeGroupB(
+        bAsIsComps,
+        bundle.property,
+        shadowArvForAsIs,
+        asIsThresholdPercent,
+        Math.round((shadowArvForAsIs * asIsThresholdPercent) / 100),
+        appraisalResult.comparables,
+      )
+
+      const shadowVal = shadowArv != null
+        ? valuationService.calculateValuation({
+            arv: shadowArv,
+            subjectSqft,
+            compAvgSqft,
+            rehabLevelIndex: derivedBuybox.rehabLevelIndex,
+            skipBaseRehab: derivedBuybox.renovatedVerified === true,
+            locationPenaltyAmount: computeLocationPenalty(bundle.enrichment.locationRisks, shadowArv, params.proximityConfig),
+            majorItems: derivedBuybox.majorItems,
+            additionPlay: derivedBuybox.additionPlay ?? buybox.additionPlay ?? 0,
+            closingCostsPercent: buybox.closingCostsPercent ?? 8,
+            carryingCostsPercent: buybox.carryingCostsPercent ?? 2,
+            wholesaleFee: buybox.wholesaleFee ?? 10000,
+            desiredProfit: buybox.desiredProfit,
+          })
+        : null
+
+      compClassificationRun.shadowValuation = {
+        arv: shadowArv,
+        arvComps: bArvEffective.length,
+        arvPrunedBelowSpec: bArvBelowSpec.length > 0 && bArvEffective !== bArvComps ? bArvBelowSpec.length : 0,
+        asIsValue: shadowGroupB.asIsMarketPrice,
+        asIsComps: shadowGroupB.count,
+        buyPrice: shadowVal?.buyPrice ?? null,
+        projectedProfit: shadowVal?.projectedProfit ?? null,
+        projectedROI: shadowVal?.projectedROI ?? null,
+        recommendation: (shadowVal as { recommendation?: string } | null)?.recommendation ?? null,
+        deltas: {
+          arv: shadowArv != null ? shadowArv - finalArv : null,
+          asIsValue:
+            shadowGroupB.asIsMarketPrice != null && groupBResult?.asIsMarketPrice != null
+              ? shadowGroupB.asIsMarketPrice - groupBResult.asIsMarketPrice
+              : null,
+          buyPrice: shadowVal ? shadowVal.buyPrice - valuation.buyPrice : null,
+        },
+      }
+      step('jev_v2_shadow_valuation', 'completed',
+        `v2 shadow valuation: ARV ${shadowArv != null ? formatUsd(shadowArv) : 'n/a'} vs ${formatUsd(finalArv)} · as-is ${shadowGroupB.asIsMarketPrice != null ? formatUsd(shadowGroupB.asIsMarketPrice) : 'n/a'} · buy ${shadowVal ? formatUsd(shadowVal.buyPrice) : 'n/a'} — observability only`)
+    } catch (error) {
+      console.warn('[Evaluate] v2 shadow valuation failed:', error instanceof Error ? error.message : error)
+    }
   }
 
   // ── 8. Best match + applied settings snapshot ───────────────────────────────

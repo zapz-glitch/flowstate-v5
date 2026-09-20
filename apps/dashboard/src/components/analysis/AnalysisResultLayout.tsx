@@ -8,6 +8,7 @@ import { DealSummaryHero } from './DealSummaryHero'
 import { SubjectGridCard } from './SubjectGridCard'
 import { InvestorAnalysisSummary } from './InvestorAnalysisSummary'
 import { JevOutcomeCard } from './JevOutcomeCard'
+import { JevShadowValuationCard } from './JevShadowValuationCard'
 
 // ─── Analysis Result Layout ──────────────────────────────────────────────────
 
@@ -42,6 +43,7 @@ export function AnalysisResultLayout({
     onCompClick,
     onFeedbackSubmitted,
     jevOutcome,
+    jevCompClassification,
   } = useEvaluation()
 
   const selectedCompKeys = compOverride?.selectedCompKeys
@@ -82,6 +84,8 @@ export function AnalysisResultLayout({
       <InvestorAnalysisSummary analysis={valuation?.investorAnalysis} />
 
       <JevOutcomeCard outcome={jevOutcome} />
+
+      <JevShadowValuationCard run={jevCompClassification} />
 
       {/* Streaming status — lives near the comps section, not the search bar */}
       {statusLabel && isStreaming && (

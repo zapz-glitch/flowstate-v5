@@ -113,20 +113,7 @@ export interface AnalyzeData {
    * Candidate B comp price-classification run metadata — mode (shadow or
    * enabled), per-class counts, disagreement count vs Baseline A.
    */
-  jevCompClassification?: {
-    status: 'completed' | 'skipped' | 'unavailable'
-    reason?: string
-    mode: 'enabled' | 'shadow'
-    questionVersion: string
-    model?: string
-    latencyMs?: number
-    inputTokens?: number
-    eligibleCount?: number
-    counts?: { arv: number; asIs: number; unidentified: number }
-    disagreements?: number | null
-    stateHashes?: string[]
-    classifiedAt?: string
-  } | null
+  jevCompClassification?: JevCompClassificationData | null
   /** Justified evaluation report (subset used by comp feedback) */
   report?: {
     arv?: {
@@ -154,6 +141,38 @@ export interface AnalyzeData {
     additionPlay: number
     arvThresholdPercent?: number
     asIsThresholdPercent?: number
+  }
+}
+
+/** Candidate B comp-classification run metadata (shadow or enabled) */
+export interface JevCompClassificationData {
+  status: 'completed' | 'skipped' | 'unavailable'
+  reason?: string
+  mode: 'enabled' | 'shadow'
+  questionVersion: string
+  model?: string
+  latencyMs?: number
+  inputTokens?: number
+  eligibleCount?: number
+  counts?: { arv: number; asIs: number; unidentified: number }
+  disagreements?: number | null
+  stateHashes?: string[]
+  classifiedAt?: string
+  /**
+   * Counterfactual (shadow only): what B's pool routing would have produced
+   * through the same deterministic valuation math. Display-only.
+   */
+  shadowValuation?: {
+    arv: number | null
+    arvComps: number
+    arvPrunedBelowSpec: number
+    asIsValue: number | null
+    asIsComps: number
+    buyPrice: number | null
+    projectedProfit: number | null
+    projectedROI: number | null
+    recommendation: string | null
+    deltas: { arv: number | null; asIsValue: number | null; buyPrice: number | null }
   }
 }
 

@@ -507,6 +507,7 @@ export default function AnalyzePage() {
     marketContext,
     aiReport,
     jevOutcome: renderData?.jevOutcome ?? null,
+    jevCompClassification: renderData?.jevCompClassification ?? null,
     onOpenSettings: () => setSettingsOpen(true),
     onCompClick: (comp) => { setComparisonComp(comp as CompItem); setComparisonOpen(true) },
     onRunAiAnalysis: handleRunAiAnalysis,

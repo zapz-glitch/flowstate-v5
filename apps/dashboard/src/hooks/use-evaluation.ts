@@ -35,6 +35,8 @@ export function useEvaluation() {
 
     // Jev read-only outcome classification
     jevOutcome: state.jevOutcome,
+    // Candidate B comp classification + shadow counterfactual
+    jevCompClassification: state.jevCompClassification,
 
     // UI state
     aiAnalyzing: state.aiAnalyzing,

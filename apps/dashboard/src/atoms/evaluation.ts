@@ -15,7 +15,7 @@ import type {
   CompItem,
 } from '@/app/(dashboard)/dashboard/analyze/actions'
 import type { RecalcResult } from '@/lib/recalc'
-import type { AnalyzeData, JevOutcomeData } from '@/app/(dashboard)/dashboard/analyze/actions'
+import type { AnalyzeData, JevOutcomeData, JevCompClassificationData } from '@/app/(dashboard)/dashboard/analyze/actions'
 
 // ─── Comp Override ─────────────────────────────────────────────────────────
 
@@ -71,6 +71,9 @@ export interface EvaluationState {
   /** Jev read-only outcome classification for the displayed result */
   jevOutcome: JevOutcomeData | null | undefined
 
+  /** Candidate B comp-classification run + shadow counterfactual valuation */
+  jevCompClassification: JevCompClassificationData | null | undefined
+
   // UI state
   aiAnalyzing: boolean
   /** Whether the streaming pipeline is still running (property fetch → evaluation → LLM) */
@@ -98,6 +101,7 @@ export const evaluationStateAtom = atom<EvaluationState>({
   marketContext: null,
   aiReport: null,
   jevOutcome: undefined,
+  jevCompClassification: undefined,
   aiAnalyzing: false,
   isStreaming: false,
   callbacks: defaultCallbacks,

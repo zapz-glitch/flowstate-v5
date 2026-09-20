@@ -737,6 +737,28 @@ export interface JevCompClassificationRun {
   disagreements?: number | null
   stateHashes?: string[]
   classifiedAt?: string
+  /**
+   * Counterfactual (shadow mode only): what B's pool routing would have
+   * produced through the same deterministic math — same ARV condition-gate
+   * prune, same valuation service, same Group B summarizer. Display only;
+   * never feeds the production valuation.
+   */
+  shadowValuation?: {
+    /** ARV over B's ARV bucket after the same condition-gate prune; null when B selected none */
+    arv: number | null
+    arvComps: number
+    /** B-ARV comps dropped by the verified-below-spec prune */
+    arvPrunedBelowSpec: number
+    /** Sqft-scaled mean over B's AS_IS bucket (same as asIsMarketIntel math) */
+    asIsValue: number | null
+    asIsComps: number
+    buyPrice: number | null
+    projectedProfit: number | null
+    projectedROI: number | null
+    recommendation: string | null
+    /** B figure minus production figure per metric */
+    deltas: { arv: number | null; asIsValue: number | null; buyPrice: number | null }
+  }
 }
 
 function fnv1a(str: string): string {
