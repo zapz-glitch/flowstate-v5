@@ -42,7 +42,13 @@ async function jmapCall(
     signal: AbortSignal.timeout(8000),
   })
   if (!res.ok) throw new Error(`JMAP ${res.status}: ${(await res.text()).slice(0, 200)}`)
-  return res.json()
+  const data = await res.json()
+  // Method-level failures come back as ["error", {type, description}, tag]
+  const methodError = data.methodResponses?.find(([m]: [string]) => m === 'error')
+  if (methodError) {
+    throw new Error(`JMAP ${methodError[1]?.type ?? 'error'}: ${methodError[1]?.description ?? ''}`.slice(0, 200))
+  }
+  return data
 }
 
 /**
