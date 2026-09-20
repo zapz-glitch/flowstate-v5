@@ -516,8 +516,9 @@ export default function AnalyzePage() {
 
   // ─── Analysis Handler ────────────────────────────────────────────────────
 
-  // Core analysis runner
-  const runAnalysis = useCallback(async () => {
+  // Core analysis runner. `forceFresh` bypasses the 21-day eval-result cache —
+  // used when the user explicitly picks "New Analysis" on a known address.
+  const runAnalysis = useCallback(async (forceFresh = false) => {
     cancelRestore()
     clearAnalysis()
     setError(null)
@@ -545,7 +546,7 @@ export default function AnalyzePage() {
         // maxComps omitted — pool size is system config on the API
         // (COMPARABLE_CANDIDATE_LIMIT, provider max 100), not a client choice.
         searchOptions: { radiusMiles: 1, monthsBack: 12 },
-        skipCache,
+        skipCache: skipCache || forceFresh,
         marketData: { enabled: true },
         arvThresholdPercent: arvThreshold,
         asIsThresholdPercent: asIsThreshold,
@@ -961,7 +962,7 @@ export default function AnalyzePage() {
         open={showExistingDialog}
         onOpenChange={setShowExistingDialog}
         reports={existingReports}
-        onNewAnalysis={runAnalysis}
+        onNewAnalysis={() => runAnalysis(true)}
       />}
     </div>
   )
