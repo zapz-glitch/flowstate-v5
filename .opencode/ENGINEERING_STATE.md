@@ -2518,3 +2518,37 @@ HIGH-VOLUME READINESS:
 STALE DOCS: CLAUDE.md documents a Cloudflare Workflow + ANALYSIS_WORKFLOW
 binding that doesn't exist (no workflows/ dir, no binding) — pipeline runs
 in the analysis route+DO.
+
+### 2026-09-20 (e) — Post-merge hardening shipped + PRODUCTION DEPLOYED
+
+Branch chore/post-merge-hardening → main → pushed origin/main (f103ea2).
+Deploy run 35483972348: API 42s ✓, dashboard 1m18s ✓. Post-deploy smoke:
+api.flowstate.homes/health 200, flowstate.homes 200.
+
+Applied (26 files, +258/−2,177):
+- Deleted: services/core/{index,observability}.ts (types.ts KEPT — live
+  import via llm/types.ts + zillow/types.ts relative paths), services/
+  neighbourhood/ (fetcher + EnrichmentOptions.neighbourhood + callers'
+  literals + neighbourhoodKey/TTL/prefix; NeighbourhoodData types moved
+  into property-api/types.ts for 7-day KV cache compat), services/vision/
+  scoring/, evaluation/{filter-suggestions,condition-evidence,
+  physical-evidence}.ts + their 2 tests, dashboard lib/fastapi-*.ts +
+  merge-utils.ts, 7 dead V4_* Env vars, duplicate hashApiKey.
+- ATTOM attomFetch: 20s AbortSignal (was unbounded).
+- authMiddleware: usage-log body capture + insert → ctx.waitUntil on both
+  dashboard + api-key paths (quota UPDATE stays synchronous).
+- CLAUDE.md: stale Workflow section → real AnalysisJobDO pipeline.
+- WITHDRAWN finding: OpenRouter fetch already bounded —
+  BaseLLMProvider.createFetchOptions wires this.timeout=60s.
+
+Verified: tsc api+dashboard clean, 19/19 regression files pass
+(post-deletion count), CI typecheck+deploy green.
+
+Still open (need product-engineer decisions, NOT bugs of this commit):
+- ARV formula split: pipeline raw mean vs recalc sqft-scaled — pick one.
+- lib/recalc bypasses B classification (resurrects UNIDENTIFIED, pools
+  ARV+AS_IS into client ARV) — consolidate on server recalc or port rules.
+- Verify prod OPENROUTER_MODEL secret isn't stale gemini-2.0-flash-001.
+- Single-analysis DO has no stall watchdog (batch DO does).
+- services/neighbourhood removal means ATTOM key still provisioned but
+  neighbourhood endpoint unused — can rotate/de-scope the key if desired.
