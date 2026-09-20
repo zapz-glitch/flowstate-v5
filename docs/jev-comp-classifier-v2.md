@@ -41,16 +41,24 @@ sequentially; model must match across batches; input tokens summed. Response env
 is strictly validated; any malformed answer fails the whole batch (throws → caller
 falls back to rules selection).
 
-**Argmax routing** (`services/evaluation/index.ts`). Per comp:
+**Argmax routing** (`services/evaluation/index.ts`). Per comp, **strict `>` both
+ways** — an exact tie enters NEITHER pool:
 
 ```
 arvTruth > investmentTruth  → ARV bucket candidate
-investmentTruth ≥ arvTruth  → AS-IS bucket candidate (ties land AS-IS)
+investmentTruth > arvTruth  → AS-IS bucket candidate
+equal                       → NEITHER (isEnabled stays false)
 ```
 
 Both filtered by the comp-classification eligibility gate — now the shared predicate
 `compClassifierEligible(comp)`: `distanceMiles ≤ 0.5` AND `!evaluation.shouldDisable`.
 (Soft failures and `not_verified` never disqualify; verified mismatches do.)
+
+**Downstream deterministic stages after Jev routing** (unchanged for B): the
+`arv_condition_gate` prunes ARV-pool comps verified below ARV spec (negative
+assessor condition or vision-verified negative curb appeal) and recomputes ARV
+when ≥3 remain; Group B then sqft-scales the as-is pool and folds in verified
+flip priorSales from the whole evaluated pool.
 
 - `jevArvIds` non-empty → `isEnabled = in either bucket`, `arvStatus` updated,
   `selectedCompIds = arvIds`, `arv = calculateARV(arv pool)` (mean of
@@ -174,35 +182,92 @@ recomputes ARV/as-is with the production formulas. Without `--labels` it reports
 coverage/forcing, agreement, downstream deltas, and ops cost — **accuracy,
 contamination, and calibration require human labels and are never fabricated**.
 
-## 9. First live shadow run (2486 BREAKWATER CIR — 1 report, 11 eligible comps)
+## 9. Live shadow runs (2 Sarasota reports, 18 eligible comps)
 
 | Metric | Baseline A | Candidate B |
 |---|---|---|
-| ARV pool | 8 | 7 |
-| AS_IS pool | 3 | 3 |
-| UNIDENTIFIED | 0 (impossible) | 1 |
-| Forced-classification rate | 100% | 90.9% coverage |
-| Recomputed ARV | $426,450 | $437,638 (+$11,188) |
-| Recomputed as-is intel | $363,028 | $324,985 (−$38,043) |
+| ARV pool | 15 | 11 |
+| AS_IS pool | 2 | 5 |
+| Unrouted (A tie / B UNIDENTIFIED) | 1 | 2 |
+| Forced-classification rate | 94.4% | 88.9% coverage |
+| A↔B routing agreement | — | 66.7% |
+| Recomputed ARV (gate-mirrored) | $430,942 / $456,397 | $437,638 / $485,353 |
+| Recomputed as-is intel | $314,612 / $250,503 | $324,985 / $335,292 |
 | Questions/comp | 2 nouls | 1 choice |
-| Latency | 576 ms | 269 ms |
-| Input tokens | 15,595 | 16,311 |
+| Latency p50 | 576 ms | 269 ms |
+| Input tokens/run | 13,695 | 13,647 |
 
-Note: token cost did **not** halve — B's state carries richer evidence
-(eligible-market stats, percentiles, transaction/flip facts). The savings is in
-question count, not bytes. Latency was ~2× faster this run.
+Both A-side recomputations reproduce production exactly (Breakwater ARV
+$430,942, as-is $314,612) — proof shadow mode did not touch routing.
 
-Disagreements (3 of 11):
+Notable: every B-ARV pick across both reports carries a positive vision curb-
+appeal note — B's ARV picks align with the deterministic condition gate's
+independent verdicts.
 
-- **3016 CHASE CIR** $410k — A forced ARV (0.31/0.25, both weak); B abstained
-  (UNIDENTIFIED 0.53). Correct abstention: mid-pack price, no distinguishing facts.
-- **2501 CASS ST** $395k — A ARV (0.56/0.45); B AS_IS (P 0.45/0.38, conf **0.17**).
-  This comp is a verified flip ($279k→$395k) — arguably B should have said ARV or
-  abstained; a near-coin-flip forced into AS_IS at 0.17 confidence is the kind of
-  error to watch. Candidate for question-tuning (flip semantics are in the prompt;
-  confidence thresholding is a future policy lever, not in scope).
-- **3120 MARKRIDGE RD** $450k — A tied 0.25/0.25 → AS_IS by argmax rule; B ARV
-  (P 0.73, conf 0.59). B's structured answer is more decisive than A's tie.
+Note: token cost did **not** halve — B's state carries richer evidence. The
+savings is in question count, not bytes. Latency was ~2× faster.
+
+## 9b. Abstention analysis (shadow-only; no threshold selected)
+
+Per-comp persisted for every Choice: `class`, `probabilities` (all 3 options),
+`confidence`, `top1`, `top2`, `margin` (top1−top2). Verified live.
+
+Across 18 eligible comps:
+
+- **Low-confidence forced rate** (ARV/AS_IS picks below t): conf<0.2 → 18.8%;
+  conf<0.4 → 43.8%; conf<0.6 → 68.8%. Jev's `confidence` runs low in this
+  market — any conf-based rule must be chosen from labeled data, not assumed.
+- **Top-two margin distribution**: 0–0.05: 3; 0.05–0.1: 3; 0.1–0.2: 2;
+  0.2–0.3: 1; 0.3–0.5: 5; ≥0.5: 4. Both B mislabels-of-interest live in the
+  0–0.1 band.
+- **Coverage/contamination sweeps** (confidence and margin thresholds) are
+  printed by the harness; contamination cells populate once labels exist.
+
+## 9c. Regression case: 2501 CASS ST (verified flip, $279k→$395k)
+
+B selected **AS_IS** at P={AS_IS 0.45, ARV 0.38, UNIDENTIFIED 0.17}, conf **0.17**,
+top1 0.45, top2 0.38, **margin 0.07**.
+
+**Evidence Jev saw:** salePrice $395k = 0.2 percentile among eligible
+($350k–$511k, median $424.9k); $/sqft $242 = 0.2 percentile; flip prior
+$279k→$395k (+41.6%, 125 days — a retail-exit signature per the question
+instructions); adjustedPrice unchanged; no transaction flags; no assessor
+condition/grade; not saleReconciled. (Vision "dated" existed downstream but is
+deliberately NOT a B input.)
+
+**Why AS_IS:** the primary-task signal — price position — said bottom-quintile
+discounted; the flip record said renovated exit. Directly conflicting evidence
+→ near-tie (0.45 vs 0.38). The model DID register the conflict (margin 0.07,
+conf 0.17); deterministic argmax forced a class anyway. The defensible answer
+was UNIDENTIFIED.
+
+**Counterfactual:** every candidate abstention threshold removes it from the
+AS-IS pool — conf ≥0.2 (its 0.17 fails all) and margin ≥0.1 (its 0.07 fails
+all but 0.05). An abstention rule would have prevented the AS-IS pool entry.
+
+**Nuance:** production's own condition gate independently pruned CASS ST from
+the ARV pool (vision-verified "dated") — B's lean agreed directionally with
+the pipeline's deterministic verdict; the mislabel is "forced class instead of
+abstain," which is exactly what the calibrated rule is for.
+
+## 9d. Stage-1 deployment checklist — verified
+
+| Check | How verified |
+|---|---|
+| `V2_ENABLED=false` | Not set in `.dev.vars`/`wrangler.toml` → `compClassifierMode` never returns `'enabled'`; flag test asserts default |
+| `V2_SHADOW=true` | Unset → default shadow; run metadata shows `"mode": "shadow"` on both live runs |
+| A controls production | `enabled` branch is the only B-routing path; shadow runs inside the `else` after A; compGroup tags on both stored reports match A's argmax exactly (CHASE `arv` though B said UNIDENTIFIED; CASS ST `arv`-routed though B said AS_IS; MARKRIDGE `enabled=false` on A's tie) |
+| B cannot write ARV pool | Shadow writes only `jevPriceClassification`; `routeCompPriceClasses` is called only in the `enabled` branch (grep-verified) |
+| B cannot write AS-IS pool | `jevInvestmentCompIds` assigned only from A's truth filter or enabled-branch B sets; shadow never touches it |
+| B cannot change ARV | A-recomputed ARV over A's pool (condition-gate-mirrored) = production $430,942 exactly |
+| B cannot change offer | Offer math reads `finalArv` + `selectedCompIds` — neither is written by the shadow block |
+| B cannot change ranking | `selectedCompIds`/best-match untouched by shadow |
+| B cannot change recommendation | Recommendation derives from valuation outputs downstream of the Jev block; shadow writes only display fields |
+| JEV failure cannot break evaluation | Service throws → catch → `jev_selection` fallback → rules selection stands (same doctrine as A; tested: timeout/HTTP/no-key/malformed all throw, never force a class) |
+| All three B probabilities persisted | `probabilities` map verified on live items `{ARV, AS_IS, UNIDENTIFIED}` |
+| Confidence persisted | `confidence` on every classified comp |
+| A/B disagreement persisted | `jevCompClassification.disagreements` (3 and 3 on live runs) + per-comp `jevPriceClassification` vs `jevArvTruth`/`jevInvestmentTruth` on items |
+| top1/top2/margin persisted | New parser fields verified live (`top1 0.75, top2 0.25, margin 0.5`) |
 
 ## 10. Known limitations
 
@@ -214,9 +279,16 @@ Disagreements (3 of 11):
 - Under shadow, B runs on ~the same evidence A scores — but only eligible comps,
   so the eligible-market stats are computed over a smaller, cleaner pool than A
   sees. Deliberate, but it means evidence distributions differ slightly.
-- `confidence` semantics are Jev-internal; calibration buckets need labeled data.
+- `confidence` semantics are Jev-internal and run LOW in this market (median
+  pick ~0.5; 68.8% of picks below 0.6) — a conf-based abstention threshold
+  must come from labeled calibration, not intuition. `margin` looks like the
+  more informative abstention signal so far (mislabels live in the 0–0.1 band).
 - Shadow mode doubles Jev spend per analysis while it runs (bounded by
   `JEV_COMP_CLASSIFIER_V2_SHADOW=false`).
+- Abstention analysis is measurement-only — no threshold is implemented in
+  routing code. Any future rule is a one-line deterministic remap
+  (low-confidence/low-margin ARV/AS_IS pick → UNIDENTIFIED) gated by its own
+  flag; choosing it requires the labeled dataset.
 
 ## 11. Recommendation
 

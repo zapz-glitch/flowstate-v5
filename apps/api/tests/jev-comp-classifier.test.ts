@@ -253,6 +253,38 @@ assert.deepEqual(routeCompPriceClass(undefined), { arvPool: false, asIsPool: fal
   assert.equal(asIsIds.size, 0)
 }
 
+// ─── 8b. top1/top2/margin persisted for abstention analysis ──────────────────
+
+{
+  mockJev(() => ({ type: 'choice', choice: 'ARV', confidence: 0.7, probabilities: { ARV: 0.7, AS_IS: 0.2, UNIDENTIFIED: 0.1 } }))
+  const result = await classifyCompPriceWithJev(fakeSubject, [fakeComp('c1')], {}, env)
+  const cls = result.classifications.c1!
+  assert.equal(cls.top1, 0.7)
+  assert.equal(cls.top2, 0.2)
+  assert.equal(cls.margin, 0.5)
+}
+
+{
+  // Missing probabilities → nulls, still classified
+  mockJev(() => ({ type: 'choice', choice: 'AS_IS', confidence: 0.6 }))
+  const result = await classifyCompPriceWithJev(fakeSubject, [fakeComp('c1')], {}, env)
+  const cls = result.classifications.c1!
+  assert.equal(cls.class, 'AS_IS')
+  assert.equal(cls.top1, null)
+  assert.equal(cls.top2, null)
+  assert.equal(cls.margin, null)
+}
+
+{
+  // Single-probability payload → top1 set, top2/margin null
+  mockJev(() => ({ type: 'choice', choice: 'ARV', probabilities: { ARV: 0.99 } }))
+  const result = await classifyCompPriceWithJev(fakeSubject, [fakeComp('c1')], {}, env)
+  const cls = result.classifications.c1!
+  assert.equal(cls.top1, 0.99)
+  assert.equal(cls.top2, null)
+  assert.equal(cls.margin, null)
+}
+
 // ─── 9. Run metadata ──────────────────────────────────────────────────────────
 
 {

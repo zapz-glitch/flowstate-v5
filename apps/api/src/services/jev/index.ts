@@ -651,6 +651,12 @@ export interface JevCompPriceClass {
   /** Per-option probability mass (debug/calibration only — never routing) */
   probabilities: Record<string, number> | null
   confidence: number | null
+  /** Largest option probability — observability for abstention analysis */
+  top1?: number | null
+  /** Second-largest option probability */
+  top2?: number | null
+  /** top1 − top2 margin — the decisiveness signal for candidate abstention rules */
+  margin?: number | null
   /** Jev's raw choice string when it wasn't a known class (always UNIDENTIFIED then) */
   rawChoice?: string | null
 }
@@ -949,14 +955,21 @@ function parsePriceClassResponse(
       classifications[id] = { ...closed, rawChoice: answer.choice }
       return
     }
+    const probs = object(answer.probabilities)
+      ? Object.fromEntries(
+          Object.entries(answer.probabilities).filter(([, p]) => probability(p)),
+        ) as Record<string, number>
+      : null
+    const ranked = probs ? Object.values(probs).sort((a, b) => b - a) : []
+    const top1 = ranked.length ? ranked[0]! : null
+    const top2 = ranked.length > 1 ? ranked[1]! : null
     classifications[id] = {
       class: answer.choice as CompPriceClass,
-      probabilities: object(answer.probabilities)
-        ? Object.fromEntries(
-            Object.entries(answer.probabilities).filter(([, p]) => probability(p)),
-          ) as Record<string, number>
-        : null,
+      probabilities: probs,
       confidence: probability(answer.confidence) ? answer.confidence : null,
+      top1,
+      top2,
+      margin: top1 != null && top2 != null ? Math.round((top1 - top2) * 1000) / 1000 : null,
     }
   })
   return { classifications, model: value.model, inputTokens }

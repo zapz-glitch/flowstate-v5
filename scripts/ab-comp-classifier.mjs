@@ -53,16 +53,45 @@ const jsonOut = flag('json')
 const CLASSES = ['ARV', 'AS_IS', 'UNIDENTIFIED']
 const mean = (xs) => xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null
 
-// Baseline A production rule: strict argmax, ties fall to AS_IS.
+// Baseline A production rule: strict argmax BOTH ways — arvTruth must be
+// strictly greater for the ARV bucket AND investmentTruth strictly greater
+// for the investment bucket, so an exact tie enters NEITHER pool (isEnabled
+// stays false; production does not force a class on a tie).
 const aClass = (item) =>
   typeof item.jevArvTruth === 'number' && typeof item.jevInvestmentTruth === 'number'
-    ? (item.jevArvTruth > item.jevInvestmentTruth ? 'ARV' : 'AS_IS')
+    ? (item.jevArvTruth > item.jevInvestmentTruth ? 'ARV'
+      : item.jevInvestmentTruth > item.jevArvTruth ? 'AS_IS'
+      : 'NEITHER')
     : null
 
 const bClass = (item) => item.jevPriceClassification?.class ?? null
 
-const arvEstimate = (items, ids) =>
-  mean(items.filter((c) => ids.has(c.id)).map((c) => c.adjustedPrice ?? c.salePrice).filter((p) => p > 0))
+/**
+ * Decisiveness stats for a B classification. Newer reports persist top1/top2/
+ * margin; older ones only have probabilities — derive from either.
+ */
+const bStats = (item) => {
+  const c = item.jevPriceClassification
+  if (!c) return { confidence: null, top1: null, top2: null, margin: null }
+  let { top1, top2, margin } = c
+  if (top1 == null && c.probabilities) {
+    const ranked = Object.values(c.probabilities).sort((a, b) => b - a)
+    top1 = ranked[0] ?? null
+    top2 = ranked[1] ?? null
+  }
+  if (margin == null && top1 != null && top2 != null) margin = Math.round((top1 - top2) * 1000) / 1000
+  return { confidence: c.confidence ?? null, top1, top2, margin }
+}
+
+// ARV = mean(adjustedPrice ?? salePrice) over the pool, then the production
+// arv_condition_gate mirror: comps verified below ARV spec (the stored
+// curbAppeal summary carries the exclusion note) are pruned when ≥3 remain.
+const arvEstimate = (items, ids) => {
+  const pool = items.filter((c) => ids.has(c.id))
+  const kept = pool.filter((c) => !(c.curbAppeal?.summary ?? '').includes('excluded from ARV'))
+  const effective = kept.length >= 3 ? kept : pool
+  return mean(effective.map((c) => c.adjustedPrice ?? c.salePrice).filter((p) => p > 0))
+}
 
 // Mirrors summarizeGroupB: sqft-scale each pool sale to the subject's sqft;
 // verified flip priorSales across the whole pool fold in too.
@@ -104,14 +133,18 @@ for (const path of reportPaths) {
     const a = aClass(c), b = bClass(c), label = labelFor(c)
     if (a === 'ARV') arvA.add(c.id); else if (a === 'AS_IS') asIsA.add(c.id)
     if (b === 'ARV') arvB.add(c.id); else if (b === 'AS_IS') asIsB.add(c.id)
-    if (a && b && a === b) agree++
+    // Agreement = same routing outcome. A's NEITHER (argmax tie) and B's
+    // UNIDENTIFIED both keep the comp out of every pool → agree.
+    const aRouted = a === 'ARV' || a === 'AS_IS' ? a : 'UNROUTED'
+    const bRouted = b === 'ARV' || b === 'AS_IS' ? b : (b === 'UNIDENTIFIED' ? 'UNROUTED' : null)
+    if (aRouted && bRouted && aRouted === bRouted) agree++
     else if (a && b) {
       disagreements.push({
         report: basename(path), compId: c.id, address: c.address,
         salePrice: c.salePrice, adjustedPrice: c.adjustedPrice,
         distanceMiles: c.distanceMiles, flip: c.flip ?? null,
         a: { class: a, arvTruth: c.jevArvTruth, investmentTruth: c.jevInvestmentTruth },
-        b: { class: b, probabilities: c.jevPriceClassification?.probabilities ?? null, confidence: c.jevPriceClassification?.confidence ?? null },
+        b: { class: b, probabilities: c.jevPriceClassification?.probabilities ?? null, ...bStats(c) },
         label,
       })
     }
@@ -149,9 +182,11 @@ const bRan = allComps.filter((c) => c.b != null)
 const labeled = allComps.filter((c) => c.label != null)
 
 const inPool = (c, cls, which) => which === 'a' ? c.a === cls : c.b === cls
+const PRED_CLASSES_A = ['ARV', 'AS_IS', 'NEITHER'] // A can't emit UNIDENTIFIED; ties → NEITHER
 const confusion = (which) => {
-  const m = Object.fromEntries(CLASSES.map((p) => [p, Object.fromEntries(CLASSES.map((t) => [t, 0]))]))
-  for (const c of labeled) if (c[which]) m[c[which]][c.label]++
+  const preds = which === 'a' ? PRED_CLASSES_A : CLASSES
+  const m = Object.fromEntries(preds.map((p) => [p, Object.fromEntries(CLASSES.map((t) => [t, 0]))]))
+  for (const c of labeled) if (c[which] && m[c[which]]) m[c[which]][c.label]++
   return m
 }
 const precision = (m, cls) => {
@@ -167,9 +202,11 @@ const metrics = {
   reports: perReport.length,
   eligibleComps: total,
   baselineA: {
-    forcedClassificationRate: total ? allComps.filter((c) => c.a).length / total : null,
+    // Fraction of eligible comps A forces into a pool (exact ties abstain)
+    forcedClassificationRate: total ? allComps.filter((c) => c.a === 'ARV' || c.a === 'AS_IS').length / total : null,
     arvPoolSize: allComps.filter((c) => c.a === 'ARV').length,
     asIsPoolSize: allComps.filter((c) => c.a === 'AS_IS').length,
+    neither: allComps.filter((c) => c.a === 'NEITHER').length,
   },
   candidateB: {
     coverage: bRan.length ? (bRan.filter((c) => c.b === 'ARV' || c.b === 'AS_IS').length) / bRan.length : null,
@@ -178,7 +215,10 @@ const metrics = {
     asIsPoolSize: bRan.filter((c) => c.b === 'AS_IS').length,
     unidentified: bRan.filter((c) => c.b === 'UNIDENTIFIED').length,
   },
-  agreement: bRan.length ? bRan.filter((c) => c.a === c.b).length / bRan.length : null,
+  // Agreement = same routing outcome (A NEITHER ≈ B UNIDENTIFIED — both unrouted)
+  agreement: bRan.length ? bRan.filter((c) =>
+    (c.a === 'ARV' || c.a === 'AS_IS' ? c.a : 'UNROUTED') ===
+    (c.b === 'ARV' || c.b === 'AS_IS' ? c.b : 'UNROUTED')).length / bRan.length : null,
   disagreements,
   downstream: {
     arvDeltas: perReport.filter((r) => r.arvDelta != null).map((r) => ({ report: r.report, a: r.arvEstimateA, b: r.arvEstimateB, delta: r.arvDelta })),
@@ -201,11 +241,97 @@ metrics.operational.aLatencyP95 = pct(metrics.operational.aLatencyMs, 0.95)
 metrics.operational.bLatencyP50 = pct(metrics.operational.bLatencyMs, 0.5)
 metrics.operational.bLatencyP95 = pct(metrics.operational.bLatencyMs, 0.95)
 
+// ─── Abstention analysis (shadow-only; no threshold is selected) ─────────────
+//
+// Candidate rule under study — NEVER applied to routing here:
+//   if B picks ARV/AS_IS with confidence < t (or top1−top2 margin < t)
+//   → treat as UNIDENTIFIED.
+// We measure coverage/contamination trade-offs across candidate thresholds so
+// a labeled dataset can pick t; nothing is hard-coded.
+
+const bPicked = bRan.filter((c) => c.b === 'ARV' || c.b === 'AS_IS')
+const CONF_THRESHOLDS = [0.2, 0.3, 0.4, 0.5, 0.6]
+const MARGIN_THRESHOLDS = [0.05, 0.1, 0.15, 0.2, 0.25, 0.3]
+
+metrics.abstention = {
+  // 1. Low-confidence forced classification rate (ARV/AS_IS picks below each
+  //    candidate confidence threshold)
+  lowConfidenceForced: Object.fromEntries(CONF_THRESHOLDS.map((t) => [t, {
+    count: bPicked.filter((c) => (bStats(c.item).confidence ?? 1) < t).length,
+    rate: bPicked.length ? bPicked.filter((c) => (bStats(c.item).confidence ?? 1) < t).length / bPicked.length : null,
+  }])),
+  // 2. Top-two margin distribution across all B classifications
+  marginDistribution: (() => {
+    const edges = [[0, 0.05], [0.05, 0.1], [0.1, 0.2], [0.2, 0.3], [0.3, 0.5], [0.5, 2]]
+    const buckets = edges.map(([lo, hi]) => ({
+      range: `${lo}–${hi === 2 ? '≥0.5' : hi}`,
+      n: bRan.filter((c) => { const m = bStats(c.item).margin; return m != null && m >= lo && m < hi }).length,
+      byClass: Object.fromEntries(CLASSES.map((cls) => [cls, bRan.filter((c) => {
+        const m = bStats(c.item).margin; return c.b === cls && m != null && m >= lo && m < hi
+      }).length])),
+    }))
+    return { buckets, missing: bRan.filter((c) => bStats(c.item).margin == null).length }
+  })(),
+  // Per-comp decisiveness table for forensics
+  perComp: allComps.filter((c) => c.b != null).map((c) => ({
+    report: c.report, compId: c.item.id, address: c.item.address,
+    salePrice: c.item.salePrice, a: c.a, b: c.b, label: c.label,
+    probabilities: c.item.jevPriceClassification?.probabilities ?? null,
+    ...bStats(c.item),
+  })),
+  // 5–6. Contamination vs coverage under candidate abstention thresholds.
+  //    At each threshold, ARV/AS_IS picks below it are hypothetically
+  //    abstained to UNIDENTIFIED — report resulting coverage and (with
+  //    labels) pool contamination.
+  sweep: {
+    byConfidence: CONF_THRESHOLDS.map((t) => {
+      const kept = bPicked.filter((c) => (bStats(c.item).confidence ?? 0) >= t)
+      const keptArv = kept.filter((c) => c.b === 'ARV')
+      const keptAsIs = kept.filter((c) => c.b === 'AS_IS')
+      const contam = (pool, cls) => {
+        const l = pool.filter((c) => c.label != null)
+        return l.length ? l.filter((c) => c.label !== cls).length / l.length : null
+      }
+      return {
+        threshold: t,
+        coverage: bPicked.length ? kept.length / bPicked.length : null,
+        arvPoolSize: keptArv.length, asIsPoolSize: keptAsIs.length,
+        arvContamination: contam(keptArv, 'ARV'),
+        asIsContamination: contam(keptAsIs, 'AS_IS'),
+        arvLabeled: keptArv.filter((c) => c.label != null).length,
+        asIsLabeled: keptAsIs.filter((c) => c.label != null).length,
+      }
+    }),
+    byMargin: MARGIN_THRESHOLDS.map((t) => {
+      const kept = bPicked.filter((c) => (bStats(c.item).margin ?? 0) >= t)
+      const keptArv = kept.filter((c) => c.b === 'ARV')
+      const keptAsIs = kept.filter((c) => c.b === 'AS_IS')
+      const contam = (pool, cls) => {
+        const l = pool.filter((c) => c.label != null)
+        return l.length ? l.filter((c) => c.label !== cls).length / l.length : null
+      }
+      return {
+        threshold: t,
+        coverage: bPicked.length ? kept.length / bPicked.length : null,
+        arvPoolSize: keptArv.length, asIsPoolSize: keptAsIs.length,
+        arvContamination: contam(keptArv, 'ARV'),
+        asIsContamination: contam(keptAsIs, 'AS_IS'),
+        arvLabeled: keptArv.filter((c) => c.label != null).length,
+        asIsLabeled: keptAsIs.filter((c) => c.label != null).length,
+      }
+    }),
+  },
+}
+
 // ─── Labeled metrics (only with --labels) ────────────────────────────────────
 
 if (labeled.length) {
   const mA = confusion('a'), mB = confusion('b')
-  const acc = (which) => labeled.filter((c) => c[which] === c.label).length / labeled.length
+  // Accuracy compares routing outcomes: A's NEITHER and B's UNIDENTIFIED both
+  // mean "not in a pool" — correct only when the label is UNIDENTIFIED.
+  const routed = (cls) => cls === 'ARV' || cls === 'AS_IS' ? cls : 'UNROUTED'
+  const acc = (which) => labeled.filter((c) =>
+    c[which] != null && routed(c[which]) === routed(c.label)).length / labeled.length
   metrics.labeled = {
     count: labeled.length,
     accuracy: { a: acc('a'), b: acc('b') },
@@ -250,6 +376,15 @@ if (labeled.length) {
         highConfidenceErrorRate: highConf.length ? highConf.filter((c) => c.b !== c.label).length / highConf.length : null,
       }
     })(),
+    // 3–4. Accuracy by confidence band and by top-two-margin band
+    accuracyByConfidenceBand: [[0, 0.3], [0.3, 0.5], [0.5, 0.7], [0.7, 0.9], [0.9, 1.01]].map(([lo, hi]) => {
+      const inB = labeled.filter((c) => c.b != null && (bStats(c.item).confidence ?? 0) >= lo && (bStats(c.item).confidence ?? 0) < hi)
+      return { band: `${lo}–${hi === 1.01 ? 1.0 : hi}`, n: inB.length, accuracy: inB.length ? inB.filter((c) => c.b === c.label).length / inB.length : null }
+    }),
+    accuracyByMarginBand: [[0, 0.1], [0.1, 0.2], [0.2, 0.3], [0.3, 0.5], [0.5, 2]].map(([lo, hi]) => {
+      const inB = labeled.filter((c) => c.b != null && (bStats(c.item).margin ?? -1) >= lo && (bStats(c.item).margin ?? -1) < hi)
+      return { band: `${lo}–${hi === 2 ? '≥0.5' : hi}`, n: inB.length, accuracy: inB.length ? inB.filter((c) => c.b === c.label).length / inB.length : null }
+    }),
   }
 }
 
@@ -262,7 +397,7 @@ console.log(`\ncoverage/forcing          A       B`)
 console.log(`  forced rate          ${fmt(metrics.baselineA.forcedClassificationRate)} ${fmt(1 - (metrics.candidateB.unidentifiedRate ?? 0))}`)
 console.log(`  ARV pool             ${fmt(metrics.baselineA.arvPoolSize)} ${fmt(metrics.candidateB.arvPoolSize)}`)
 console.log(`  AS_IS pool           ${fmt(metrics.baselineA.asIsPoolSize)} ${fmt(metrics.candidateB.asIsPoolSize)}`)
-console.log(`  UNIDENTIFIED         ${fmt(0)} ${fmt(metrics.candidateB.unidentified)}`)
+console.log(`  UNROUTED (tie/unid.) ${fmt(metrics.baselineA.neither)} ${fmt(metrics.candidateB.unidentified)}`)
 console.log(`  A↔B agreement        ${fmt(metrics.agreement)}`)
 console.log(`\ndownstream`)
 console.log(`  ARV delta reports    ${metrics.downstream.arvDeltas.length ? metrics.downstream.arvDeltas.map((d) => `${d.report}: ${d.a}→${d.b} (${d.delta > 0 ? '+' : ''}${d.delta})`).join('; ') : 'none changed'}`)
@@ -273,6 +408,25 @@ console.log(`  latency p50          ${fmt(metrics.operational.aLatencyP50)} ${fm
 console.log(`  latency p95          ${fmt(metrics.operational.aLatencyP95)} ${fmt(metrics.operational.bLatencyP95)}`)
 console.log(`  input tokens/run     ${fmt(mean(metrics.operational.aInputTokens))} ${fmt(mean(metrics.operational.bInputTokens))}`)
 console.log(`  questions/comp       ${metrics.operational.aQuestionsPerComp}      ${metrics.operational.bQuestionsPerComp}`)
+
+// ── Abstention analysis (candidate rules — none selected) ──
+const AB = metrics.abstention
+console.log(`\nabstention analysis (candidate rules only — nothing applied to routing)`)
+console.log(`  low-confidence forced rate (ARV/AS_IS picks below t):`)
+for (const [t, s] of Object.entries(AB.lowConfidenceForced)) console.log(`    conf < ${t}: ${s.count} comp(s)  rate=${s.rate == null ? 'n/a' : s.rate.toFixed(3)}`)
+console.log(`  top-two margin distribution:`)
+for (const b of AB.marginDistribution.buckets) console.log(`    ${b.range}: n=${b.n}  (ARV ${b.byClass.ARV} / AS_IS ${b.byClass.AS_IS} / UNIDENTIFIED ${b.byClass.UNIDENTIFIED})`)
+if (AB.marginDistribution.missing) console.log(`    (no probs): n=${AB.marginDistribution.missing}`)
+console.log(`  coverage/contamination sweep — byConfidence:`)
+console.log(`    t      coverage  arvPool  arvContam  asIsPool  asIsContam`)
+for (const s of AB.sweep.byConfidence) console.log(`    ${s.threshold}   ${s.coverage == null ? ' n/a ' : s.coverage.toFixed(3)}   ${String(s.arvPoolSize).padStart(3)}  ${s.arvContamination == null ? ` n/a(${s.arvLabeled}L)` : s.arvContamination.toFixed(3)}   ${String(s.asIsPoolSize).padStart(3)}    ${s.asIsContamination == null ? ` n/a(${s.asIsLabeled}L)` : s.asIsContamination.toFixed(3)}`)
+console.log(`  coverage/contamination sweep — byMargin:`)
+console.log(`    t      coverage  arvPool  arvContam  asIsPool  asIsContam`)
+for (const s of AB.sweep.byMargin) console.log(`    ${s.threshold}  ${s.coverage == null ? ' n/a ' : s.coverage.toFixed(3)}   ${String(s.arvPoolSize).padStart(3)}  ${s.arvContamination == null ? ` n/a(${s.arvLabeled}L)` : s.arvContamination.toFixed(3)}   ${String(s.asIsPoolSize).padStart(3)}    ${s.asIsContamination == null ? ` n/a(${s.asIsLabeled}L)` : s.asIsContamination.toFixed(3)}`)
+console.log(`  per-comp decisiveness:`)
+for (const c of AB.perComp) {
+  console.log(`    ${c.address?.slice(0, 38) ?? c.compId}  $${c.salePrice}  A=${c.a} B=${c.b}${c.label ? ` label=${c.label}` : ''}  conf=${c.confidence ?? 'n/a'} top1=${c.top1 ?? 'n/a'} top2=${c.top2 ?? 'n/a'} margin=${c.margin ?? 'n/a'}`)
+}
 
 if (metrics.labeled) {
   const L = metrics.labeled
@@ -288,6 +442,10 @@ if (metrics.labeled) {
   console.log(`  Brier (B)            ${fmt(L.calibration.brierB)}`)
   console.log(`  high-conf err (B)    ${fmt(L.calibration.highConfidenceErrorRate)}`)
   for (const b of L.calibration.buckets) console.log(`  conf ${b.range}: n=${b.n} acc=${b.accuracy == null ? 'n/a' : b.accuracy.toFixed(2)}`)
+  console.log(`  accuracy by confidence band:`)
+  for (const b of L.accuracyByConfidenceBand) console.log(`    ${b.band}: n=${b.n} acc=${b.accuracy == null ? 'n/a' : b.accuracy.toFixed(3)}`)
+  console.log(`  accuracy by margin band:`)
+  for (const b of L.accuracyByMarginBand) console.log(`    ${b.band}: n=${b.n} acc=${b.accuracy == null ? 'n/a' : b.accuracy.toFixed(3)}`)
 } else {
   console.log(`\nno labels supplied — accuracy/contamination/calibration skipped (pass --labels)`)
 }
@@ -296,7 +454,7 @@ if (disagreements.length) {
   console.log(`\ndisagreements (${disagreements.length}):`)
   for (const d of disagreements.slice(0, 25)) {
     console.log(`  ${d.report} ${d.address}  $${d.salePrice} adj=$${d.adjustedPrice} ${d.distanceMiles}mi${d.flip ? ` flip(prior $${d.flip.priorSalePrice})` : ''}`)
-    console.log(`    A=${d.a.class} (arv ${d.a.arvTruth} / inv ${d.a.investmentTruth})   B=${d.b.class} ${JSON.stringify(d.b.probabilities)} conf=${d.b.confidence}${d.label ? `   label=${d.label}` : ''}`)
+    console.log(`    A=${d.a.class} (arv ${d.a.arvTruth} / inv ${d.a.investmentTruth})   B=${d.b.class} ${JSON.stringify(d.b.probabilities)} conf=${d.b.confidence} margin=${d.b.margin ?? 'n/a'}${d.label ? `   label=${d.label}` : ''}`)
   }
   if (disagreements.length > 25) console.log(`  … and ${disagreements.length - 25} more`)
 }

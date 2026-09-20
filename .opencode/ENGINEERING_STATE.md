@@ -2387,3 +2387,34 @@ defaults to shadow mode.
   verified flip — labeled data will quantify.
 - Recommendation: keep A in production, collect ≥20 labeled reports before
   promotion review. NOT merged/deployed.
+
+### 2026-09-20 (b) — Abstention analysis + Stage-1 verification (still feat/jev-outcome-classification)
+
+Shadow-only abstention instrumentation added; no routing change, no threshold
+selected. B remains shadow-only, A remains production.
+
+- JevCompPriceClass now persists per comp: class, all 3 probabilities,
+  confidence, top1, top2, margin (top1−top2). Parser computes them; dashboard
+  type mirrored. Verified live on a fresh run.
+- scripts/ab-comp-classifier.mjs extended: low-confidence forced rate, top-two
+  margin distribution, per-comp decisiveness table, accuracy-by-confidence-band
+  and accuracy-by-margin-band (labeled), coverage/contamination sweeps under
+  candidate conf/margin abstention thresholds — contamination cells populate
+  when labels exist. A-side argmax corrected: STRICT > both ways → exact ties
+  enter NEITHER pool (was wrongly modeled as ties→AS_IS). ARV estimate now
+  mirrors the arv_condition_gate prune (verified via 'excluded from ARV' in
+  stored curbAppeal summaries).
+- Discovered downstream stage documented: arv_condition_gate prunes verified
+  below-ARV-spec comps from the ARV set post-Jev and recomputes (production
+  Breakwater ARV $430,942 reproduced exactly by the harness).
+- CASS ST regression forensic complete: B saw 0.2 price percentile + a
+  +41.6%/125d flip — conflicting → AS_IS 0.45/ARV 0.38/UNID 0.17, conf 0.17,
+  margin 0.07. Every candidate abstention threshold (conf≥0.2, margin≥0.1)
+  removes it from the AS-IS pool. Production's own condition gate had already
+  pruned it from ARV (vision 'dated').
+- Live corpus now 2 reports/18 eligible comps: B forced rate 88.9% vs A 94.4%,
+  agreement 66.7%; every B-ARV pick has positive vision curb appeal.
+- Stage-1 checklist verified and written into docs/jev-comp-classifier-v2.md
+  §9d (flags default, shadow can't touch pools/ARV/offers/ranking/recs, JEV
+  failure fails closed, all probs/conf/margin/disagreements persisted).
+- 21/21 api regression files pass; tsc clean. Still NOT promoted/deployed.

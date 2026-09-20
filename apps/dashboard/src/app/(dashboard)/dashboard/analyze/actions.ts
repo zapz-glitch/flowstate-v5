@@ -489,6 +489,10 @@ export interface CompItem {
     class: 'ARV' | 'AS_IS' | 'UNIDENTIFIED'
     probabilities: Record<string, number> | null
     confidence: number | null
+    /** Largest / second-largest option probability and their margin — abstention analysis only, never routing */
+    top1?: number | null
+    top2?: number | null
+    margin?: number | null
     rawChoice?: string | null
   } | null
   /** Property classification (as_is, after_renovation, transitional) */
