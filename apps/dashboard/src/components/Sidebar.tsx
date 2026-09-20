@@ -204,7 +204,6 @@ export default function Sidebar() {
                     title={collapsed ? item.name : undefined}
                   >
                     {favicon ? (
-                      // eslint-disable-next-line @next/next/no-img-element
                       <img
                         src={favicon}
                         alt=""

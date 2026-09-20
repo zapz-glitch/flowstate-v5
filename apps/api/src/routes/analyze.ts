@@ -476,6 +476,114 @@ analyze.get('/defaults', async (c) => {
   });
 });
 
+/**
+ * GET /analyze/jobs/:jobId
+ *
+ * Poll the status of an analysis job started via POST /analyze.
+ * Status comes from the job's Durable Object; on 'complete' the saved
+ * report's metrics and full response are attached as `result`.
+ */
+analyze.get('/jobs/:jobId', async (c) => {
+  const jobId = c.req.param('jobId');
+  const auth = c.get('auth');
+
+  const doId = c.env.ANALYSIS_JOB.idFromName(jobId);
+  const stub = c.env.ANALYSIS_JOB.get(doId);
+  const stateResp = await stub.fetch('http://internal/state');
+  const state = (await stateResp.json()) as {
+    jobId?: string;
+    userId?: string;
+    status?: string;
+    error?: string;
+    createdAt?: number;
+    events?: Array<{ event: string; data: unknown }>;
+  };
+
+  if (!state.status || state.status === 'not_found' || state.status === 'idle') {
+    return c.json({ success: false, error: 'Job not found', jobId }, 404);
+  }
+  // Strict ownership: a missing owner on the job is never a pass.
+  if (!state.userId || state.userId !== auth.userId) {
+    return c.json({ success: false, error: 'Job not found', jobId }, 404);
+  }
+
+  // The DO flips status to 'complete' on enrichment_done even after an
+  // earlier 'error' event — the evaluation_complete event is the only
+  // reliable success marker.
+  const events = state.events ?? [];
+  const evalComplete = events.find((e) => e.event === 'evaluation_complete');
+  const errorEvent = events.find((e) => e.event === 'error');
+  const status =
+    state.status === 'complete' && !evalComplete && errorEvent
+      ? 'error'
+      : state.status;
+  const error =
+    state.error ??
+    ((errorEvent?.data as { message?: string } | undefined)?.message ?? null);
+
+  let result: unknown = null;
+  if (status === 'complete') {
+    const db = drizzle(c.env.DB);
+    const report = await db
+      .select()
+      .from(savedReports)
+      .where(eq(savedReports.jobId, jobId))
+      .limit(1)
+      .then((rows) => rows[0] ?? null);
+    if (report) {
+      result = {
+        reportId: report.id,
+        propertyAddress: report.propertyAddress,
+        propertyCity: report.propertyCity,
+        propertyState: report.propertyState,
+        propertyZip: report.propertyZip,
+        arv: report.arv,
+        asIsValue: report.asIsValue,
+        maxAllowableOffer: report.maxAllowableOffer,
+        estimatedRepairs: report.estimatedRepairs,
+        fullResponse: report.fullResponseJson
+          ? JSON.parse(report.fullResponseJson)
+          : null,
+      };
+    } else if (evalComplete) {
+      // upsertPropertyReport repoints the row's jobId when a property is
+      // re-analyzed, so an older completed job loses its report mapping —
+      // fall back to the immutable evaluation result stored in the DO event.
+      const r = evalComplete.data as {
+        updatedResult?: {
+          property?: { address?: string; city?: string; state?: string; zipCode?: string };
+          valuation?: { arv?: number; asIsValue?: number; buyPrice?: number; rehabCost?: number };
+        };
+      };
+      const val = r.updatedResult?.valuation ?? {};
+      const prop = r.updatedResult?.property ?? {};
+      result = {
+        reportId: null,
+        propertyAddress: prop.address ?? null,
+        propertyCity: prop.city ?? null,
+        propertyState: prop.state ?? null,
+        propertyZip: prop.zipCode ?? null,
+        arv: val.arv ?? null,
+        asIsValue: val.asIsValue ?? null,
+        maxAllowableOffer: val.buyPrice ?? null,
+        estimatedRepairs: val.rehabCost ?? null,
+        fullResponse: r.updatedResult ?? null,
+      };
+    }
+  }
+
+  return c.json({
+    success: true,
+    data: {
+      jobId,
+      status,
+      error,
+      createdAt: state.createdAt ?? null,
+      result,
+    },
+  });
+});
+
 // ─── Lazy Photo Loading ───────────────────────────────────────────────────────
 
 /**
