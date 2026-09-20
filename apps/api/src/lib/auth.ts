@@ -12,78 +12,40 @@ import { betterAuth } from 'better-auth'
 import { Kysely } from 'kysely'
 import { D1Dialect } from 'kysely-d1'
 import { stagingAuthProfile } from './staging-auth'
+import { sendEmailViaJmap } from './jmap'
 
-interface SmtpConfig {
-  host?: string
-  port?: string
-  user?: string
-  pass?: string
+interface EmailConfig {
+  token?: string
   from?: string
 }
 
 /**
- * Send email via SMTP using fetch (Cloudflare Workers compatible)
- * Uses MailChannels API which is available on Cloudflare Workers
+ * Send email via Fastmail JMAP (RFC 8620/8621) — Cloudflare Workers compatible.
+ * Never logs the message body (reset URLs contain bearer tokens).
  */
 async function sendEmail(
   to: string,
   subject: string,
   html: string,
-  smtp: SmtpConfig
+  email: EmailConfig
 ): Promise<boolean> {
-  // If no SMTP config, log and skip (for development)
-  if (!smtp.host || !smtp.user || !smtp.pass) {
-    console.log('SMTP not configured. Email would be sent to:', to)
-    console.log('Subject:', subject)
-    console.log('HTML:', html)
-    return true
+  if (!email.token) {
+    console.error('FASTMAIL_API_TOKEN not configured — password reset email NOT sent to', to)
+    return false
   }
 
   try {
-    // Use nodemailer-style SMTP via a simple HTTP relay
-    // For Cloudflare Workers, you'd typically use a service like:
-    // - Resend (resend.com)
-    // - SendGrid
-    // - Mailgun
-    // - Or MailChannels (built into CF Workers)
-
-    // For now, we'll use a basic SMTP approach that works in Workers
-    // You can replace this with your preferred email service
-
-    const response = await fetch('https://api.mailchannels.net/tx/v1/send', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        personalizations: [
-          {
-            to: [{ email: to }],
-          },
-        ],
-        from: {
-          email: smtp.from?.match(/<(.+)>/)?.[1] || smtp.user,
-          name: smtp.from?.match(/^(.+?)\s*</)?.[1] || 'Flowstate',
-        },
-        subject,
-        content: [
-          {
-            type: 'text/html',
-            value: html,
-          },
-        ],
-      }),
+    await sendEmailViaJmap({
+      token: email.token,
+      from: email.from || 'hello@flowstate.homes',
+      fromName: 'Flowstate',
+      to,
+      subject,
+      html,
     })
-
-    if (!response.ok) {
-      const error = await response.text()
-      console.error('Failed to send email:', error)
-      return false
-    }
-
     return true
-  } catch (error) {
-    console.error('Email send error:', error)
+  } catch (err) {
+    console.error('Password reset email send failed:', err instanceof Error ? err.message : err)
     return false
   }
 }
@@ -92,7 +54,7 @@ export function createAuth(
   d1: D1Database,
   secret: string,
   baseURL?: string,
-  smtp?: SmtpConfig,
+  email?: EmailConfig,
   envDashboardUrl?: string
 ) {
   const db = new Kysely({
@@ -168,7 +130,7 @@ export function createAuth(
           user.email,
           'Reset your Flowstate password',
           html,
-          smtp || {}
+          email || {}
         )
       },
     },

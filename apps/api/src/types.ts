@@ -104,12 +104,10 @@ export interface Env {
   // ─── Better Auth ─────────────────────────────────────────────────────────────
   BETTER_AUTH_SECRET?: string
 
-  // ─── SMTP Email ─────────────────────────────────────────────────────────────
-  SMTP_HOST?: string
-  SMTP_PORT?: string
-  SMTP_USER?: string
-  SMTP_PASS?: string
-  SMTP_FROM?: string // e.g., 'Flowstate <noreply@flowstate.homes>'
+  // ─── Transactional Email (Fastmail JMAP) ────────────────────────────────────
+  FASTMAIL_API_TOKEN?: string
+  /** From identity for auth emails, e.g. 'hello@flowstate.homes' (must exist as a Fastmail identity) */
+  AUTH_EMAIL_FROM?: string
 }
 
 // NOTE: AuthContext is defined in middleware/auth.ts and should be imported from there

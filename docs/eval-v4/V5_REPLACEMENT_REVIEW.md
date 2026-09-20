@@ -95,7 +95,7 @@ Names only; no values belong in this report or Git.
 | Gemini | GEMINI_API_KEY | Google project key administration |
 | Maps | NEXT_PUBLIC_GOOGLE_MAP_KEY | Google project restrictions and key administration |
 | Firecrawl | FIRECRAWL_API_KEY | Provider key administration |
-| SMTP | SMTP_USER, SMTP_PASS | Mail provider credential administration |
+| Fastmail | FASTMAIL_API_TOKEN | Mail provider credential administration |
 | Application authentication | BETTER_AUTH_SECRET, DASHBOARD_INTERNAL_SECRET | Deployment secret manager |
 | Python API | V4_API_CREDENTIALS or V4_INTERNAL_API_TOKEN | Candidate server secret configuration |
 

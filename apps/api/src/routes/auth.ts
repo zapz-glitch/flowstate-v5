@@ -70,11 +70,8 @@ auth.all('/*', async (c) => {
   }
 
   const authInstance = createAuth(c.env.DB, c.env.BETTER_AUTH_SECRET, baseURL, {
-    host: c.env.SMTP_HOST,
-    port: c.env.SMTP_PORT,
-    user: c.env.SMTP_USER,
-    pass: c.env.SMTP_PASS,
-    from: c.env.SMTP_FROM,
+    token: c.env.FASTMAIL_API_TOKEN,
+    from: c.env.AUTH_EMAIL_FROM,
   }, c.env.DASHBOARD_URL)
 
   // Convert Hono request to standard Request

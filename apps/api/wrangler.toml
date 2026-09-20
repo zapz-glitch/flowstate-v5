@@ -79,6 +79,9 @@ invocation_logs = true
 #
 # Dashboard Integration (shared secret for session-based auth)
 # - DASHBOARD_INTERNAL_SECRET
+#
+# Transactional email (Fastmail JMAP — password reset emails)
+# - FASTMAIL_API_TOKEN
 
 # Cron: sweeps dead/stuck batch jobs so lists run unattended to completion
 [triggers]

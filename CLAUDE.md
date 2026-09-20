@@ -135,7 +135,7 @@ apps/api/src/
 ├── db/
 │   └── schema.ts         # Drizzle ORM schema (all tables)
 ├── lib/
-│   └── auth.ts           # Better Auth setup (Kysely D1 adapter, MailChannels email)
+│   └── auth.ts           # Better Auth setup (Kysely D1 adapter, Fastmail JMAP email)
 ├── middleware/
 │   └── auth.ts           # API key auth, quota checking, usage logging
 ├── routes/               # All route handlers (see Routes section)
@@ -261,7 +261,7 @@ services/
 - Better Auth with D1 storage via Kysely adapter
 - 7-day sessions, 1-day update interval
 - Cross-subdomain cookies (`.flowstate.homes` in prod, `localhost` in dev)
-- MailChannels for password reset emails
+- Fastmail JMAP for password reset emails
 
 **API Key Auth (`/v1/*` routes)**:
 - Format: `Authorization: Bearer fs_<hex>`
@@ -549,7 +549,7 @@ request body params → zip override → city+state override → state override 
 | **Google Gemini** | Zillow listing data extraction | `GEMINI_API_KEY` |
 | **OpenRouter API** | Unified LLM access (vision analysis) | `OPENROUTER_API_KEY` |
 | **GoHighLevel API** | CRM integration (push results to opportunities) | `GOHIGHLEVEL_API_KEY_INTEGRATION` |
-| **MailChannels** | Email sending (password reset) | SMTP env vars |
+| **Fastmail JMAP** | Email sending (password reset, deal form) | `FASTMAIL_API_TOKEN` |
 | **Cloudflare D1** | SQLite database | Binding in `wrangler.toml` |
 | **Cloudflare KV** | Response caching (7-day TTL) | `API_CACHE` binding |
 | **Cloudflare R2** | Photo storage | `REPORT_PHOTOS` binding |

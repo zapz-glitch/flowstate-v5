@@ -2552,3 +2552,66 @@ Still open (need product-engineer decisions, NOT bugs of this commit):
 - Single-analysis DO has no stall watchdog (batch DO does).
 - services/neighbourhood removal means ATTOM key still provisioned but
   neighbourhood endpoint unused — can rotate/de-scope the key if desired.
+
+
+## 2026-09-20 — Classifier reverted to Baseline A (shadow B), TYPESAFE key provisioned
+
+- Found TYPESAFE_API_KEY absent from prod secrets (had only ever existed in
+  .dev.vars) — every prod analysis to date ran rules-only; jevOutcome card
+  showed "not configured". Uploaded via `wrangler secret put`.
+- User directed rollback: JEV_COMP_CLASSIFIER_V2_ENABLED flipped to "false" on
+  main (ad810ba), deployed — Baseline A nouls route pools, B records in
+  shadow. Runtime-equivalent to 8b8d37d while retaining polling + hardening.
+- Diagnosed gate starvation: eligibility = distance <=0.5mi AND no
+  shouldDisable. Orlando presets (subdivision_match non-soft + fragmented
+  subdivision data) yielded eligibleCount 0 of 51 comps; Dot Ln would give 1
+  of 25. Rules fallback then let an $18M mispriced comp drive ARV to $19.1M.
+  Reproduces identically under A — orthogonal to the A/B decision.
+- Open decisions unchanged: gate starvation policy (widen radius when
+  eligible < N?), outlier guard for absurd $/sqft comps, ARV formula split,
+  client recalc diverging from server, prod OPENROUTER_MODEL check,
+  single-analysis watchdog.
+- Unmerged branch fix/landing-remove-insights-admin: landing Insights removal
+  + Admin footer login + force-fresh "New Analysis" (skipCache on explicit
+  re-run — 21d eval cache was returning stale reports).
+
+## 2026-09-20 — Landing page v2 + deal-form email delivery fixed
+
+Branch feat/landing-admin-footer (not merged): 8333a4a + d78bb45 + 0d8a862
+- Landing: Insights section removed (insights.flowstate.homes was erroring),
+  hero secondary CTA now scrolls to #process, Contact renumbered 04.
+- Header login removed → footer Admin button bottom-right (ml-auto),
+  same openPortal behavior (signed-in → /dashboard, else sign-in modal).
+- Header nav links → burger menu (right side, all breakpoints) opening
+  right-side Sheet slide-over; scroll-spy preserved.
+- Deal form transport: MailChannels dead (401 — free Workers API sunset),
+  replaced with Fastmail JMAP (Email/set + EmailSubmission; draft created
+  in Sent mailbox for audit trail). hello@ is hosted on Fastmail → SPF/DKIM
+  native. FASTMAIL_API_TOKEN set on flowstate-dashboard worker + .env.local.
+- Verified live: JMAP send confirmed via Email/query on Sent mailbox —
+  "Deal submission: 456 JMAP Verify Ave" → hello@flowstate.homes 18:44.
+  Waitlist backstop + honeypot + DEAL_SUBMISSION log unchanged.
+- KNOWN: same dead MailChannels path backs password-reset emails in
+  apps/api/src/lib/auth.ts — still broken pending same JMAP port (needs
+  FASTMAIL_API_TOKEN on the API worker too).
+- Prior shadow-valuation work reverted by user in worktree; preserved on
+  feat/jev-shadow-valuation (2a17ce3).
+
+## 2026-09-20 — Password-reset emails ported to Fastmail JMAP
+
+Branch feat/landing-admin-footer (not merged).
+- apps/api: SmtpConfig + dead MailChannels send path deleted; lib/auth.ts now
+  calls shared lib/jmap.ts sendEmailViaJmap (EmailConfig {token,from}).
+  Env: FASTMAIL_API_TOKEN + optional AUTH_EMAIL_FROM replace SMTP_*.
+  Reset URL/token is no longer logged (old fallback printed full HTML).
+- FASTMAIL_API_TOKEN added to apps/api/.dev.vars and uploaded as a secret on
+  flowstate-api prod worker (secret upload only — no code deploy yet).
+- Verified: api+dashboard tsc clean, 19/19 api test files pass, live local
+  wrangler dev (:8794) POST /auth/request-password-reset → 200, and JMAP
+  Email/query on Sent mailbox shows "Reset your Flowstate password" →
+  hello@flowstate.homes at 18:53.
+- Note: local .dev.vars DASHBOARD_URL=http://localhost:3012 — reset
+  redirectTo must use that origin locally or Better Auth 403s
+  (INVALID_REDIRECT_URL).
+- Also fixed a latent TS error in dashboard deal route (res.json() unknown)
+  so dashboard typecheck is clean again.
