@@ -2634,3 +2634,24 @@ commits), deploy run 35543595525 green (API 43s, dashboard 1m24s).
 Last handoff: nothing in flight. Next candidates: merge the skipCache
 re-run fix; open decisions unchanged (gate starvation, outlier guard, ARV
 formula split, client recalc vs B, OPENROUTER_MODEL check, DO watchdog).
+
+## 2026-09-20 — SHIPPED: "New Analysis" force-fresh + B shadow valuation UI (main 1a3c23f)
+
+- User reported B shadow not visible in UI: root cause — JevShadowValuationCard
+  + counterfactual valuation (2a17ce3) lived only on feat/jev-shadow-valuation
+  and had been reverted from the worktree; never merged. API on main was
+  emitting shadow counts but dashboard rendered nothing.
+- Cherry-picked 6d0fa22 (New Analysis → skipCache:true) and 2a17ce3 (shadow
+  counterfactual + card) onto main via feat/rerun-and-shadow-ui; deploy run
+  35544499947 green. Prod api/dashboard 200.
+- Live local verification (Anchor Way, shadow mode): steps include
+  jev_v2_shadow + jev_v2_shadow_valuation; shadowValuation present
+  (ARV 650,000 / as-is 339,513 / buy 454,150 / ROI 11.2 / hold), deltas 0 vs
+  A on this run (1 ARV + 1 AS_IS of 2 eligible, 0 disagreements).
+  NOTE: eligibleCount was 2 here vs 8 in the earlier jev-classify worktree
+  run — different local D1 preset/data; not a code regression.
+- Card renders only when jevCompClassification.shadowValuation exists — i.e.
+  shadow mode + status completed + eligibleCount > 0. Zero-eligible markets
+  (Orlando gate starvation) will show no card by design.
+
+Last handoff: nothing in flight. Open decisions unchanged.
