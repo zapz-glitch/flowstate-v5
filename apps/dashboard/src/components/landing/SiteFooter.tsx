@@ -43,7 +43,7 @@ export function SiteFooter({ onAdminClick }: SiteFooterProps) {
               onClick={onAdminClick}
               className="text-xs text-muted-foreground/50 hover:text-muted-foreground transition-colors"
             >
-              Admin
+              Operator Login
             </button>
           </div>
         </div>
