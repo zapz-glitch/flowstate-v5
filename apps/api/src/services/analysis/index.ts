@@ -835,6 +835,8 @@ export interface AnalysisResponse {
       jevArvTruth?: number | null
       /** Jev truth score (0–1): reliable evidence of the subject's as-is investor value */
       jevInvestmentTruth?: number | null
+      /** Candidate B structured price class (ARV | AS_IS | UNIDENTIFIED) — present when the v2 classifier ran */
+      jevPriceClassification?: import('../jev').JevCompPriceClass | null
       /** Appraisal rule evaluation details */
       appraisalRules: {
         /** Whether this comp passed all filters */
@@ -990,6 +992,17 @@ export interface AnalysisResponse {
    * recommendation.
    */
   jevOutcome?: import('../jev').JevOutcomeClassification | null
+  /**
+   * Baseline A comp-truth run metadata (dual nouls) — model, latency,
+   * tokens. A/B observability for the comp classifier.
+   */
+  jevCompTruth?: { model: string; latencyMs: number; inputTokens: number; scored: number } | null
+  /**
+   * Candidate B comp price-classification run metadata — mode (shadow or
+   * enabled), per-class counts, disagreement count vs Baseline A, cost.
+   * Read-only; routing facts live on each comp's jevPriceClassification.
+   */
+  jevCompClassification?: import('../jev').JevCompClassificationRun | null
 }
 export interface ApiCallStats {
   corelogic: {
@@ -1243,6 +1256,7 @@ export function buildAnalysisResponse(
       isBestMatch: ctx.bestMatch?.compId === comp.id,
       jevArvTruth: comp.jevArvTruth ?? null,
       jevInvestmentTruth: comp.jevInvestmentTruth ?? null,
+      jevPriceClassification: comp.jevPriceClassification ?? null,
       appraisalRules,
     }
   })

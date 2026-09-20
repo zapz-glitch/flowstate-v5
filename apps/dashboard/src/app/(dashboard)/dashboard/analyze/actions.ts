@@ -107,6 +107,26 @@ export interface AnalyzeData {
    * never influenced comp selection, ARV, or the recommendation.
    */
   jevOutcome?: JevOutcomeData | null
+  /** Baseline A comp-truth run metadata (dual nouls) — A/B observability */
+  jevCompTruth?: { model: string; latencyMs: number; inputTokens: number; scored: number } | null
+  /**
+   * Candidate B comp price-classification run metadata — mode (shadow or
+   * enabled), per-class counts, disagreement count vs Baseline A.
+   */
+  jevCompClassification?: {
+    status: 'completed' | 'skipped' | 'unavailable'
+    reason?: string
+    mode: 'enabled' | 'shadow'
+    questionVersion: string
+    model?: string
+    latencyMs?: number
+    inputTokens?: number
+    eligibleCount?: number
+    counts?: { arv: number; asIs: number; unidentified: number }
+    disagreements?: number | null
+    stateHashes?: string[]
+    classifiedAt?: string
+  } | null
   /** Justified evaluation report (subset used by comp feedback) */
   report?: {
     arv?: {
@@ -464,6 +484,13 @@ export interface CompItem {
   jevArvTruth?: number | null
   /** Jev truth score (0–1): reliable evidence of the subject's as-is investor value */
   jevInvestmentTruth?: number | null
+  /** Candidate B structured price class — present when the v2 classifier ran (shadow or enabled); observability only */
+  jevPriceClassification?: {
+    class: 'ARV' | 'AS_IS' | 'UNIDENTIFIED'
+    probabilities: Record<string, number> | null
+    confidence: number | null
+    rawChoice?: string | null
+  } | null
   /** Property classification (as_is, after_renovation, transitional) */
   classification?: ClassificationSummary | null
   /** Weight contribution to ARV calculation (0-1) */

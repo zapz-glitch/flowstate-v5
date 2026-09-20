@@ -79,6 +79,17 @@ export interface Env {
   // Read-only post-analysis labeling; absence disables classification only.
   TYPESAFE_API_KEY?: string
   TYPESAFE_MODEL?: string
+  /**
+   * 'true' → Candidate B (structured ARV/AS_IS/UNIDENTIFIED choice) drives
+   * comp routing. Default false — Baseline A dual-noul argmax is production.
+   */
+  JEV_COMP_CLASSIFIER_V2_ENABLED?: string
+  /**
+   * 'false' disables the Candidate B shadow run. Default on: B classifies
+   * gate-eligible comps alongside Baseline A and records the result on the
+   * response without affecting routing, valuation, or recommendation.
+   */
+  JEV_COMP_CLASSIFIER_V2_SHADOW?: string
 
   // ─── Google AI (Gemini) ──────────────────────────────────────────────────────
   // Direct Google AI API key for Gemini URL context and Zillow data fetching

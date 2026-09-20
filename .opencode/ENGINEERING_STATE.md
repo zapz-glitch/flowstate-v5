@@ -2351,3 +2351,39 @@ Next when data flows: `ingest --source api` needs a prod fs_ key; then
 train → shadow on real validated reports (164-address batch output is
 the expected corpus). Known gap: staging/deploy scheduling of the ingest
 job not wired — run manually for now.
+
+### 2026-09-20 — Jev comp price classifier Candidate B (feat/jev-outcome-classification, uncommitted→commit pending)
+
+Structured-choice comp classification beside Baseline A dual-noul argmax.
+Production routing UNCHANGED — Baseline A remains authoritative; Candidate B
+defaults to shadow mode.
+
+- Flags: `JEV_COMP_CLASSIFIER_V2_ENABLED` (default false → B not production),
+  `JEV_COMP_CLASSIFIER_V2_SHADOW` (default on → B runs observability-only;
+  `'false'` → B off entirely). `compClassifierMode(env)` → enabled|shadow|off.
+- jev service: `compClassifierEligible` (shared gate: ≤0.5mi + !shouldDisable —
+  hard-gate failures never reach B), `classifyCompPriceWithJev` (one Choice per
+  eligible comp: ARV|AS_IS|UNIDENTIFIED; per-comp bad answers → UNIDENTIFIED;
+  envelope/API/timeout → throw→rules-selection fallback), `routeCompPriceClasses`
+  (disjoint Set routing; UNIDENTIFIED/missing → neither pool). Evidence is
+  price-first and non-circular (percentiles vs eligible pool, transaction flags,
+  flip, saleReconciled, adjustedSalePrice, ruleEvidence; NO truth scores/ARV).
+- evaluation: enabled → B routes production (same downstream + empty-ARV
+  fallback); shadow → B attaches `jevPriceClassification` per comp +
+  `jevCompClassification` run meta (counts, disagreements vs A, tokens, latency,
+  stateHashes) on the response; `jevCompTruth` records A run meta. Under v2 the
+  card chips carry P(ARV)/P(AS_IS).
+- tests/jev-comp-classifier.test.ts: all spec invariants — gate-before-JEV,
+  disjoint pools, fail-closed on missing/malformed/unknown/timeout, flag
+  matrix, dedupe, probs-never-route. 21/21 api regression files pass; tsc clean.
+- scripts/ab-comp-classifier.mjs: replays saved shadow reports → coverage/
+  forcing, agreement, downstream ARV/as-is deltas (production formulas), ops
+  cost; labeled metrics (accuracy/contamination/calibration/Brier) only with
+  --labels — no fabricated ground truth.
+- docs/jev-comp-classifier-v2.md: full 20-point deliverable incl. first live
+  shadow run (Breakwater: B abstained on a genuinely ambiguous comp A forced,
+  resolved an A argmax tie, 269ms vs 576ms; tokens ~equal — savings is question
+  count not bytes). One flagged qualitative concern: low-confidence AS_IS on a
+  verified flip — labeled data will quantify.
+- Recommendation: keep A in production, collect ≥20 labeled reports before
+  promotion review. NOT merged/deployed.

@@ -516,6 +516,13 @@ export interface AppraisedComparable extends NormalizedComparable {
    */
   jevArvTruth?: number | null
   jevInvestmentTruth?: number | null
+  /**
+   * Candidate B structured price classification (ARV | AS_IS |
+   * UNIDENTIFIED) with probabilities + confidence. Present when the v2
+   * classifier ran (shadow or enabled); absent for comps that never
+   * reached classification. Observability only under shadow mode.
+   */
+  jevPriceClassification?: import('../jev').JevCompPriceClass | null
 }
 
 // ─── Appraisal Result ──────────────────────────────────────────────────────────

@@ -22,6 +22,10 @@ import type { AppraisedComparable } from '../appraisal/types'
 export interface JevEnv {
   TYPESAFE_API_KEY?: string
   TYPESAFE_MODEL?: string
+  /** 'true' → Candidate B structured choice drives comp routing (default false = Baseline A) */
+  JEV_COMP_CLASSIFIER_V2_ENABLED?: string
+  /** 'false' disables the Candidate B shadow run (default on — measures B beside A) */
+  JEV_COMP_CLASSIFIER_V2_SHADOW?: string
 }
 
 export const OUTCOME_DIMENSIONS = [
@@ -518,7 +522,7 @@ function makeTruthBatch(
   }
 }
 
-function truthFits(batch: TruthBatch): boolean {
+function truthFits(batch: { body: { state: Record<string, unknown>; questions: Record<string, Question> } }): boolean {
   const longestQuestion = Math.max(0, ...Object.values(batch.body.questions).map(bytes))
   return bytes(batch.body.state) + longestQuestion <= TRUTH_STATE_AND_QUESTION_BYTES && bytes(batch.body) <= REQUEST_BYTES
 }
@@ -623,4 +627,396 @@ export async function scoreCompTruthWithJev(
     Object.assign(scores, parsed.scores)
   }
   return { scores, model: actualModel ?? model, latencyMs: Date.now() - start, inputTokens }
+}
+
+// ─── Candidate B: structured comp price classification ───────────────────────
+//
+// One Choice question per ELIGIBLE comp: ARV | AS_IS | UNIDENTIFIED —
+// mutually exclusive categories (never a Score; there is no BOTH state).
+// The caller supplies only comps that already passed the deterministic
+// appraisal eligibility gate — Jev classifies price regime, it does not
+// decide comparability. Application code owns routing via
+// routeCompPriceClass: ARV → ARV pool, AS_IS → as-is pool, UNIDENTIFIED →
+// neither. Every answer lands under the comp's id, so retried/duplicated
+// responses can never duplicate a comp.
+
+export const COMP_PRICE_CLASSES = ['ARV', 'AS_IS', 'UNIDENTIFIED'] as const
+export type CompPriceClass = typeof COMP_PRICE_CLASSES[number]
+
+/** Question identifier recorded on every run — bump when the schema changes. */
+export const COMP_PRICE_QUESTION_VERSION = 'comp_price_classification_v1'
+
+export interface JevCompPriceClass {
+  class: CompPriceClass
+  /** Per-option probability mass (debug/calibration only — never routing) */
+  probabilities: Record<string, number> | null
+  confidence: number | null
+  /** Jev's raw choice string when it wasn't a known class (always UNIDENTIFIED then) */
+  rawChoice?: string | null
+}
+
+export interface JevCompPriceResult {
+  /** compId → classification. Eligible comps missing a usable answer are UNIDENTIFIED. */
+  classifications: Record<string, JevCompPriceClass>
+  model: string
+  latencyMs: number
+  inputTokens: number
+  /** FNV-1a hashes of each batch's serialized state — input-snapshot fingerprints */
+  stateHashes: string[]
+}
+
+/** Deterministic routing — the only mapping from class to pools. */
+export function routeCompPriceClass(cls: CompPriceClass | null | undefined): { arvPool: boolean; asIsPool: boolean } {
+  return { arvPool: cls === 'ARV', asIsPool: cls === 'AS_IS' }
+}
+
+/**
+ * Apply routing to a whole classification map — the single routing
+ * application point. Sets are disjoint by construction: a comp has one
+ * class, so it can never land in both pools.
+ */
+export function routeCompPriceClasses(
+  classifications: Record<string, JevCompPriceClass | null | undefined>,
+): { arvIds: Set<string>; asIsIds: Set<string> } {
+  const arvIds = new Set<string>()
+  const asIsIds = new Set<string>()
+  for (const [id, c] of Object.entries(classifications)) {
+    const r = routeCompPriceClass(c?.class)
+    if (r.arvPool) arvIds.add(id)
+    if (r.asIsPool) asIsIds.add(id)
+  }
+  return { arvIds, asIsIds }
+}
+
+/** Location radius for comp classification — the uniform location signal (geo enrichment is sparse). */
+export const JEV_COMP_RADIUS_MILES = 0.5
+
+/**
+ * The comp-classification eligibility gate — the SINGLE predicate shared by
+ * Baseline A truth scoring and Candidate B choice classification, so both
+ * always see exactly the same pool: distance ≤0.5mi AND no hard-priority
+ * rule failure (evaluation.shouldDisable). Soft failures and 'not_verified'
+ * (missing data) never disqualify; verified mismatches still do. Comps that
+ * fail this gate must never reach JEV classification or either pool.
+ */
+export function compClassifierEligible(comp: AppraisedComparable): boolean {
+  return comp.distanceMiles != null && comp.distanceMiles <= JEV_COMP_RADIUS_MILES &&
+    (!comp.evaluation || !comp.evaluation.shouldDisable)
+}
+
+/**
+ * Feature-flag resolution: 'enabled' → B is production routing;
+ * 'shadow' → B runs beside Baseline A and records results without
+ * affecting anything; 'off' → B does not run. Default: shadow on.
+ */
+export function compClassifierMode(env: JevEnv): 'enabled' | 'shadow' | 'off' {
+  if (env.JEV_COMP_CLASSIFIER_V2_ENABLED === 'true') return 'enabled'
+  if (env.JEV_COMP_CLASSIFIER_V2_SHADOW === 'false') return 'off'
+  return 'shadow'
+}
+
+/** Run metadata persisted on the response for A/B measurement. */
+export interface JevCompClassificationRun {
+  status: 'completed' | 'skipped' | 'unavailable'
+  reason?: string
+  mode: 'enabled' | 'shadow'
+  questionVersion: typeof COMP_PRICE_QUESTION_VERSION
+  model?: string
+  latencyMs?: number
+  inputTokens?: number
+  /** Comps that passed the deterministic gate and reached classification */
+  eligibleCount?: number
+  counts?: { arv: number; asIs: number; unidentified: number }
+  /** Eligible comps where B's class differs from Baseline A's argmax bucket (shadow only) */
+  disagreements?: number | null
+  stateHashes?: string[]
+  classifiedAt?: string
+}
+
+function fnv1a(str: string): string {
+  let h = 0x811c9dc5
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i)
+    h = Math.imul(h, 0x01000193)
+  }
+  return (h >>> 0).toString(16)
+}
+
+function quantile(sorted: number[], q: number): number {
+  const pos = (sorted.length - 1) * q
+  const lo = Math.floor(pos)
+  const hi = Math.ceil(pos)
+  return sorted[lo]! + (sorted[hi]! - sorted[lo]!) * (pos - lo)
+}
+
+function distributionStats(values: Array<number | null | undefined>) {
+  const v = values.filter((n): n is number => typeof n === 'number' && Number.isFinite(n)).sort((a, b) => a - b)
+  if (!v.length) return null
+  return {
+    min: v[0],
+    q25: Math.round(quantile(v, 0.25) * 100) / 100,
+    median: Math.round(quantile(v, 0.5) * 100) / 100,
+    q75: Math.round(quantile(v, 0.75) * 100) / 100,
+    max: v[v.length - 1],
+  }
+}
+
+/**
+ * The candidate's rank within the eligible pool, EXCLUDING itself —
+ * e.g. 0.9 = priced above 90% of eligible peers. Pure price position;
+ * never derives from any classification or valuation output, so it
+ * cannot be circular.
+ */
+function rankAmong(value: number | null | undefined, others: Array<number | null | undefined>): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null
+  const pool = others.filter((n): n is number => typeof n === 'number' && Number.isFinite(n))
+  if (!pool.length) return null
+  return Math.round((pool.filter((n) => n < value).length / pool.length) * 1000) / 1000
+}
+
+/**
+ * Price-first evidence for one eligible comp. Every field is a provider,
+ * assessor, transaction-record, or deterministic-appraisal fact — none
+ * are derived from any classification or valuation output:
+ *
+ * - salePrice/pricePerSqft/saleDate + adjustedSalePrice (deterministic
+ *   appraisal adjustment of the raw sale — rule math, not a verdict)
+ * - rank vs the eligible pool (self-excluded percentiles — raw sale
+ *   prices of gate-passed candidates only)
+ * - transaction flags (cash/foreclosure/short-sale/interfamily/investor/
+ *   corporate-buyer — recorded transaction facts = distressed-investor
+ *   evidence)
+ * - flip (verified prior-sale record: priorSale ≈ investor entry price,
+ *   current sale ≈ retail exit)
+ * - saleReconciled (price/date corrected to a newer Zillow sale)
+ * - buildingCondition/buildingGrade (assessor records — the only
+ *   condition evidence; photos are unavailable by design)
+ * - ruleEvidence (the comp's own gate results, as evidence not verdict)
+ *
+ * Deliberately absent: jevArvTruth/jevInvestmentTruth (Baseline A's own
+ * outputs would leak its answer into B) and any ARV/as-is estimate —
+ * those are computed FROM classifications, so feeding them back would be
+ * circular.
+ */
+function compPriceEvidence(comp: AppraisedComparable, eligiblePool: AppraisedComparable[]): Record<string, unknown> {
+  const ev = comp.evaluation
+  const others = eligiblePool.filter((c) => c.id !== comp.id)
+  return {
+    ...truthEvidence(comp, compTruthFields),
+    transaction: comp.transaction
+      ? {
+          buyerIsCorporate: comp.transaction.buyerIsCorporate ?? null,
+          isCashPurchase: comp.transaction.isCashPurchase ?? null,
+          isShortSale: comp.transaction.isShortSale ?? null,
+          isForeclosure: comp.transaction.isForeclosure ?? null,
+          isInterfamilyTransfer: comp.transaction.isInterfamilyTransfer ?? null,
+          isInvestorPurchase: comp.transaction.isInvestorPurchase ?? null,
+        }
+      : null,
+    adjustedSalePrice: comp.adjustedSalePrice ?? null,
+    pricePercentileAmongEligible: rankAmong(comp.salePrice, others.map((c) => c.salePrice)),
+    pricePerSqftPercentileAmongEligible: rankAmong(comp.pricePerSqft, others.map((c) => c.pricePerSqft)),
+    ruleEvidence: ev
+      ? {
+          failedFilters: ev.filterResults.filter((f) => f.passed === false).map((f) => f.type),
+          passedFilterCount: ev.filterResults.filter((f) => f.passed === true).length,
+          totalFilterCount: ev.filterResults.length,
+          totalAdjustment: ev.totalAdjustment ?? null,
+          originalPrice: ev.originalPrice ?? null,
+          adjustedPrice: ev.adjustedPrice ?? null,
+        }
+      : null,
+    evidenceNote:
+      'This sale already passed the deterministic appraisal eligibility gate. Rule outcomes are evidence about the sale, not the classification verdict. Missing/null fields are unknown.',
+  }
+}
+
+function priceClassQuestion(index: number): ChoiceQuestion {
+  return {
+    type: 'choice',
+    instructions:
+      `Given that state.comparables[${index}] has already passed Flowstate's deterministic appraisal compatibility rules, which market price condition does this sale most likely represent? ` +
+      `Classify the transaction based primarily on its sale-price position within the qualified local comparable evidence (state.eligibleMarket and the other comparables). ` +
+      `Photographs are unavailable — do not infer renovation quality from nonexistent visual evidence. ` +
+      `Do not re-evaluate whether the sale passes appraisal rules. ` +
+      `Do not force ARV or AS_IS when the available price evidence does not distinguish them — use UNIDENTIFIED when evidence is insufficient, conflicting, or genuinely ambiguous. ` +
+      `The categories are mutually exclusive: pick exactly one. ` +
+      `Signals: pricePercentileAmongEligible and pricePerSqftPercentileAmongEligible rank this sale among gate-passed candidates excluding itself; ` +
+      `transaction flags (isCashPurchase/isForeclosure/isShortSale/isInterfamilyTransfer/isInvestorPurchase/buyerIsCorporate) are recorded transaction facts indicating investor or distressed pricing; ` +
+      `flip (when present) is a verified resale 30–365 days after priorSale — the current flip resale price is after-renovation retail evidence while priorSalePrice is what an investor paid as-is; ` +
+      `saleReconciled means price/date were corrected to a newer Zillow sale — treat as current; ` +
+      `adjustedSalePrice is the deterministic appraisal adjustment of the raw sale; ` +
+      `buildingCondition/buildingGrade are assessor condition records, not photos. ` +
+      `Missing or null fields are unknown — never evidence for or against a class.`,
+    criteria: {
+      ARV:
+        'The sale price is consistent with the renovated / retail-ready price regime for otherwise comparable properties in this market. ' +
+        'Not for: clearly discounted investor/as-is pricing, distressed price behavior, insufficient price evidence, or a forced classification based only on being the higher-priced candidate.',
+      AS_IS:
+        'The sale price is consistent with dated, distressed, investor, or otherwise unrenovated/as-is market pricing for comparable properties. ' +
+        'Not for: renovated retail pricing, insufficient price evidence, or a forced classification based only on being the lower-priced candidate.',
+      UNIDENTIFIED:
+        'The available price evidence cannot reliably distinguish whether the sale represents renovated retail value or as-is/investor value. ' +
+        'Use when: price evidence is too sparse, the candidate sits in an ambiguous price region, relevant benchmarks conflict, or there is not enough information for a defensible classification. ' +
+        'Not for: a weak guess simply to ensure every qualified sale enters a valuation pool.',
+    },
+  }
+}
+
+type PriceBatch = { ids: string[]; offset: number; body: { model: string; state: Record<string, unknown>; questions: Record<string, ChoiceQuestion> } }
+
+function makePriceBatch(
+  subject: Record<string, unknown>, market: Record<string, unknown>, rules: unknown,
+  comps: Array<Record<string, unknown>>, ids: string[], offset: number, model: string, evaluationDate: string,
+): PriceBatch {
+  return {
+    ids,
+    offset,
+    body: {
+      model,
+      state: {
+        subject,
+        eligibleMarket: market,
+        appraisalRules: rules,
+        evaluationDate,
+        comparables: comps,
+        classificationNote:
+          'Every comparable in state.comparables already passed the deterministic appraisal eligibility gate; eligibility is not yours to decide. Classify each sale\'s price regime only.',
+      },
+      questions: Object.fromEntries(
+        comps.map((_, index) => [`comp_${offset + index}_price_classification`, priceClassQuestion(index)]),
+      ),
+    },
+  }
+}
+
+function priceClassBatches(
+  subject: NormalizedProperty, eligible: AppraisedComparable[], rules: unknown,
+  model: string, evaluationDate: string,
+): PriceBatch[] {
+  const subjectEvidence = truthEvidence(subject, subjectTruthFields)
+  const market = {
+    eligibleCount: eligible.length,
+    salePrice: distributionStats(eligible.map((c) => c.salePrice)),
+    pricePerSqft: distributionStats(eligible.map((c) => c.pricePerSqft)),
+    adjustedSalePrice: distributionStats(eligible.map((c) => c.adjustedSalePrice)),
+  }
+  const result: PriceBatch[] = []
+  let pending: Array<Record<string, unknown>> = []
+  let ids: string[] = []
+  let offset = 0
+  for (const comp of eligible) {
+    const item = compPriceEvidence(comp, eligible)
+    const next = makePriceBatch(subjectEvidence, market, rules, [...pending, item], [...ids, comp.id], offset, model, evaluationDate)
+    if (truthFits(next)) { pending.push(item); ids.push(comp.id); continue }
+    if (pending.length) {
+      result.push(makePriceBatch(subjectEvidence, market, rules, pending, ids, offset, model, evaluationDate))
+      offset += pending.length
+    }
+    const single = makePriceBatch(subjectEvidence, market, rules, [item], [comp.id], offset, model, evaluationDate)
+    if (!truthFits(single)) throw new Error('Jev price-classification context limit: subject, market context, and one comparable exceed the request budget; evidence was not truncated.')
+    pending = [item]
+    ids = [comp.id]
+  }
+  if (pending.length) result.push(makePriceBatch(subjectEvidence, market, rules, pending, ids, offset, model, evaluationDate))
+  return result
+}
+
+/**
+ * Strict envelope (model/answers/usage — same as truth scoring), but
+ * per-comp answers fail CLOSED instead of fatal: a missing, malformed, or
+ * unknown-choice answer classifies that comp UNIDENTIFIED — excluded from
+ * both pools — rather than contaminating either.
+ */
+function parsePriceClassResponse(
+  value: unknown, batch: PriceBatch,
+): { classifications: Record<string, JevCompPriceClass>; model: string; inputTokens: number } {
+  const malformed = () => new Error('Jev price classification returned an invalid typed response envelope; no classifications were accepted.')
+  if (!object(value) || typeof value.model !== 'string' || !/^jev-[\w.-]+$/.test(value.model) || !object(value.answers) || !object(value.usage)) throw malformed()
+  const { input_tokens: inputTokens } = value.usage
+  if (typeof inputTokens !== 'number' || !Number.isSafeInteger(inputTokens) || inputTokens < 0) throw malformed()
+
+  const closed: JevCompPriceClass = { class: 'UNIDENTIFIED', probabilities: null, confidence: null }
+  const classifications: Record<string, JevCompPriceClass> = Object.create(null)
+  const answers = value.answers as Record<string, unknown>
+  batch.ids.forEach((id, index) => {
+    const answer = answers[`comp_${batch.offset + index}_price_classification`]
+    if (!object(answer) || answer.type !== 'choice' || typeof answer.choice !== 'string') {
+      classifications[id] = closed
+      return
+    }
+    if (!(COMP_PRICE_CLASSES as readonly string[]).includes(answer.choice)) {
+      classifications[id] = { ...closed, rawChoice: answer.choice }
+      return
+    }
+    classifications[id] = {
+      class: answer.choice as CompPriceClass,
+      probabilities: object(answer.probabilities)
+        ? Object.fromEntries(
+            Object.entries(answer.probabilities).filter(([, p]) => probability(p)),
+          ) as Record<string, number>
+        : null,
+      confidence: probability(answer.confidence) ? answer.confidence : null,
+    }
+  })
+  return { classifications, model: value.model, inputTokens }
+}
+
+/**
+ * Candidate B: classify each ELIGIBLE comp's price regime with one
+ * structured Choice — ARV | AS_IS | UNIDENTIFIED. Callers must pre-filter
+ * to comps that passed the deterministic appraisal gate; this function
+ * trusts that contract (the gate is application code's job). Returns
+ * classifications only — routing is routeCompPriceClasses(). Throws on
+ * missing key / API / malformed envelope; per-comp bad answers degrade to
+ * UNIDENTIFIED.
+ */
+export async function classifyCompPriceWithJev(
+  subject: NormalizedProperty,
+  eligible: AppraisedComparable[],
+  appraisalRules: unknown,
+  env: JevEnv,
+): Promise<JevCompPriceResult> {
+  const start = Date.now()
+  const evaluationDate = new Date(start).toISOString().slice(0, 10)
+  const key = env.TYPESAFE_API_KEY?.trim()
+  if (!key) throw new Error('Jev price classification requires TYPESAFE_API_KEY.')
+  const model = env.TYPESAFE_MODEL?.trim() || 'jev-latest'
+  if (!/^jev-[\w.-]+$/.test(model)) throw new Error('Jev price classification requires a Jev model identifier.')
+  if (eligible.some((comp) => typeof comp.id !== 'string' || !comp.id.trim()) || new Set(eligible.map((c) => c.id)).size !== eligible.length) {
+    throw new Error('Jev price classification requires a unique, nonempty ID for every comparable.')
+  }
+
+  const classifications: Record<string, JevCompPriceClass> = Object.create(null)
+  const stateHashes: string[] = []
+  let inputTokens = 0
+  let actualModel: string | undefined
+  for (const batch of priceClassBatches(subject, eligible, appraisalRules, model, evaluationDate)) {
+    stateHashes.push(fnv1a(serialized(batch.body.state)))
+    let httpResponse: Response
+    try {
+      httpResponse = await fetch(ENDPOINT, {
+        method: 'POST',
+        redirect: 'manual',
+        headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+        body: serialized(batch.body),
+        signal: AbortSignal.timeout(TIMEOUT_MS),
+      })
+    } catch {
+      throw new Error('Jev price classification request failed or timed out.')
+    }
+    if (!httpResponse.ok) {
+      // Never expose response bodies: they can echo credentials or request data.
+      void httpResponse.body?.cancel().catch(() => {})
+      throw new Error(`Jev price classification API returned HTTP ${httpResponse.status}.`)
+    }
+    let json: unknown
+    try { json = await httpResponse.json() } catch { throw new Error('Jev price classification returned unreadable JSON.') }
+    const parsed = parsePriceClassResponse(json, batch)
+    if (actualModel && actualModel !== parsed.model) throw new Error('Jev price-classification model changed between batches; no mixed-model classifications were accepted.')
+    actualModel = parsed.model
+    inputTokens += parsed.inputTokens
+    Object.assign(classifications, parsed.classifications)
+  }
+  return { classifications, model: actualModel ?? model, latencyMs: Date.now() - start, inputTokens, stateHashes }
 }

@@ -38,7 +38,15 @@ import {
   type ResponseContext,
 } from '../analysis'
 import { createPhotoService, createPhotoProvider, type PhotoBundle, type PropertyIdentifier, type PropertyPhotos } from '../photo-provider'
-import { scoreCompTruthWithJev } from '../jev'
+import {
+  classifyCompPriceWithJev,
+  compClassifierEligible,
+  compClassifierMode,
+  COMP_PRICE_QUESTION_VERSION,
+  routeCompPriceClasses,
+  scoreCompTruthWithJev,
+} from '../jev'
+import type { JevCompClassificationRun } from '../jev'
 import { persistReportAssets } from '../report-assets'
 import { expansionRefetchRadius } from '../property-api/retrieval-policy'
 import { assessRenovationFromPhotos, assessCompCurbAppeal, type RenovationAssessment, type CurbAppealCheck } from '../vision/renovation'
@@ -635,80 +643,167 @@ export async function performAnalysis(
     }
   }
 
-  // ── Jev comp selection — authoritative for both comp sets ──────────────────
-  // Every candidate gets two 0–1 truth scores: ARV (after-renovation retail
-  // value evidence) and investment (as-is investor value evidence). The
-  // HIGHER score assigns the comp's market: A > I → ARV-eligible; I > A →
-  // investment-only, never ARV-eligible. Location gate is distance ≤0.5mi
-  // (geo enrichment is sparse — distance is the uniform location signal);
-  // evaluated rule failures disqualify, verified geo mismatches included,
-  // while 'not_verified' (missing data) never does. ARV = mean of adjusted
-  // prices over the A-bucket matches; the
-  // I-bucket matches average into the as-is AVG shown for insight. If Jev is
-  // unavailable or the ARV bucket is empty, the rules selection stands.
+  // ── Jev comp classification ────────────────────────────────────────────────
+  // Baseline A (production, unchanged): every candidate gets two 0–1 truth
+  // nouls — ARV evidence vs as-is-investor evidence; argmax assigns the
+  // bucket. Candidate B (JEV_COMP_CLASSIFIER_V2_*): eligible comps get ONE
+  // structured choice — ARV | AS_IS | UNIDENTIFIED — routed deterministically
+  // (UNIDENTIFIED enters neither pool). Both paths gate on the same
+  // eligibility predicate: distance ≤0.5mi (the uniform location signal —
+  // geo enrichment is sparse) AND no hard-priority rule failure (soft
+  // failures and 'not_verified' never disqualify). If Jev is unavailable or
+  // the ARV pool is empty, the rules selection stands — Jev classifies
+  // evidence, it never declares the pool insufficient.
   let jevInvestmentCompIds: string[] = []
-  try {
-    // Classify closest-first: distance is the location criterion, so the
-    // nearest candidates lead Jev's evaluation order.
-    const jev = await scoreCompTruthWithJev(
-      bundle.property,
-      [...appraisalResult.comparables].sort(
-        (a, b) => (a.distanceMiles ?? 999) - (b.distanceMiles ?? 999),
-      ),
-      { filters, adjustments },
-      env,
-    )
-    const truth = (id: string) => jev.scores[id] ?? { arvTruth: 0, investmentTruth: 0 }
-    // Location criterion is distance — geo enrichment only exists for a
-    // minority of comps, so distance gates everyone uniformly. Rule
-    // eligibility uses shouldDisable (hard-priority failures only): soft
-    // failures and 'not_verified' (missing data) never disqualify, while a
-    // verified subdivision mismatch on an enriched comp still does.
-    const JEV_LOCATION_RADIUS_MILES = 0.5
-    const rulesPassed = (c: AppraisedComparable) =>
-      c.distanceMiles != null && c.distanceMiles <= JEV_LOCATION_RADIUS_MILES &&
-      (!c.evaluation || !c.evaluation.shouldDisable)
-    const jevArvIds = new Set(
-      appraisalResult.comparables
-        .filter((c) => truth(c.id).arvTruth > truth(c.id).investmentTruth && rulesPassed(c))
-        .map((c) => c.id),
-    )
-    jevInvestmentCompIds = appraisalResult.comparables
-      .filter((c) => truth(c.id).investmentTruth > truth(c.id).arvTruth && rulesPassed(c))
-      .map((c) => c.id)
-    const jevInvestmentIds = new Set(jevInvestmentCompIds)
-    if (jevArvIds.size === 0) {
-      // Jev's job is classification, not sufficiency — an empty ARV bucket
-      // is not INSUFFICIENT_COMPS. Keep the rules selection; truth scores
-      // still attach for display.
+  let compClassificationRun: JevCompClassificationRun | null = null
+  let compTruthRun: { model: string; latencyMs: number; inputTokens: number; scored: number } | null = null
+  const rulesPassed = compClassifierEligible
+  const byDistance = (a: AppraisedComparable, b: AppraisedComparable) =>
+    (a.distanceMiles ?? 999) - (b.distanceMiles ?? 999)
+  const v2Mode = compClassifierMode(env)
+  let baselineTruth: Record<string, { arvTruth: number; investmentTruth: number }> | null = null
+
+  if (v2Mode === 'enabled') {
+    // ── Candidate B (production): one structured choice per eligible comp ──
+    try {
+      const eligible = [...appraisalResult.comparables].filter(rulesPassed).sort(byDistance)
+      const cls = await classifyCompPriceWithJev(bundle.property, eligible, { filters, adjustments }, env)
+      const { arvIds, asIsIds } = routeCompPriceClasses(cls.classifications)
+      jevInvestmentCompIds = [...asIsIds]
+      const unidentified = eligible.length - arvIds.size - asIsIds.size
       appraisalResult.comparables = appraisalResult.comparables.map((comp) => ({
         ...comp,
-        jevArvTruth: jev.scores[comp.id]?.arvTruth ?? null,
-        jevInvestmentTruth: jev.scores[comp.id]?.investmentTruth ?? null,
+        jevPriceClassification: cls.classifications[comp.id] ?? null,
+        // Card contract under v2: A·/I· chips read P(ARV)/P(AS_IS)
+        jevArvTruth: cls.classifications[comp.id]?.probabilities?.ARV ?? null,
+        jevInvestmentTruth: cls.classifications[comp.id]?.probabilities?.AS_IS ?? null,
       }))
-      step('jev_selection', 'fallback', `Jev found no ARV-eligible comps — appraisal-rules selection used (${jev.model})`)
-      fallbacksUsed.push('jev_selection:empty_arv_bucket')
-    } else {
-      appraisalResult.comparables = appraisalResult.comparables.map((comp) => ({
-        ...comp,
-        isEnabled: jevArvIds.has(comp.id) || jevInvestmentIds.has(comp.id),
-        arvStatus: jevArvIds.has(comp.id)
-          ? 'selected' as const
-          : comp.arvStatus === 'selected' ? 'not_examined' as const : comp.arvStatus,
-        jevArvTruth: jev.scores[comp.id]?.arvTruth ?? null,
-        jevInvestmentTruth: jev.scores[comp.id]?.investmentTruth ?? null,
-      }))
-      appraisalResult.selectedCompIds = [...jevArvIds]
-      appraisalResult.arv = appraisalService.calculateARV(
-        appraisalResult.comparables.filter((c) => jevArvIds.has(c.id)),
-      )
-      appraisalResult.insufficientComps = false
-      step('jev_selection', 'completed', `Jev bucketed ${appraisalResult.comparables.length} candidates → ${jevArvIds.size} ARV + ${jevInvestmentIds.size} investment comps within 0.5mi matching rules (${jev.model})`)
+      if (arvIds.size === 0) {
+        // Empty ARV pool is not INSUFFICIENT_COMPS — the rules selection
+        // stands; classifications still attach for display.
+        step('jev_selection', 'fallback', `Jev v2 found no ARV comps — appraisal-rules selection used (${cls.model})`)
+        fallbacksUsed.push('jev_selection:empty_arv_bucket')
+      } else {
+        appraisalResult.comparables = appraisalResult.comparables.map((comp) => ({
+          ...comp,
+          isEnabled: arvIds.has(comp.id) || asIsIds.has(comp.id),
+          arvStatus: arvIds.has(comp.id)
+            ? 'selected' as const
+            : comp.arvStatus === 'selected' ? 'not_examined' as const : comp.arvStatus,
+        }))
+        appraisalResult.selectedCompIds = [...arvIds]
+        appraisalResult.arv = appraisalService.calculateARV(
+          appraisalResult.comparables.filter((c) => arvIds.has(c.id)),
+        )
+        appraisalResult.insufficientComps = false
+        step('jev_selection', 'completed', `Jev v2 classified ${eligible.length} eligible → ${arvIds.size} ARV + ${asIsIds.size} AS_IS + ${unidentified} UNIDENTIFIED (${cls.model})`)
+      }
+      compClassificationRun = {
+        status: 'completed', mode: 'enabled', questionVersion: COMP_PRICE_QUESTION_VERSION,
+        model: cls.model, latencyMs: cls.latencyMs, inputTokens: cls.inputTokens,
+        eligibleCount: eligible.length,
+        counts: { arv: arvIds.size, asIs: asIsIds.size, unidentified },
+        disagreements: null, stateHashes: cls.stateHashes, classifiedAt: new Date().toISOString(),
+      }
+    } catch (error) {
+      // Fail closed to the rules selection — never force a class.
+      console.warn('[Evaluate] Jev v2 classification unavailable — rules selection stands:', error instanceof Error ? error.message : error)
+      step('jev_selection', 'fallback', 'Jev v2 unavailable — appraisal-rules selection used')
+      fallbacksUsed.push('jev_selection:unavailable')
+      compClassificationRun = { status: 'unavailable', mode: 'enabled', questionVersion: COMP_PRICE_QUESTION_VERSION, reason: 'classification_failed' }
     }
-  } catch (error) {
-    console.warn('[Evaluate] Jev comp selection unavailable — rules selection stands:', error instanceof Error ? error.message : error)
-    step('jev_selection', 'fallback', 'Jev unavailable — appraisal-rules selection used')
-    fallbacksUsed.push('jev_selection:unavailable')
+  } else {
+    // ── Baseline A (production) — dual nouls + argmax, unchanged ──────────
+    try {
+      // Classify closest-first: distance is the location criterion, so the
+      // nearest candidates lead Jev's evaluation order.
+      const jev = await scoreCompTruthWithJev(
+        bundle.property,
+        [...appraisalResult.comparables].sort(byDistance),
+        { filters, adjustments },
+        env,
+      )
+      baselineTruth = jev.scores
+      compTruthRun = { model: jev.model, latencyMs: jev.latencyMs, inputTokens: jev.inputTokens, scored: appraisalResult.comparables.length }
+      const truth = (id: string) => jev.scores[id] ?? { arvTruth: 0, investmentTruth: 0 }
+      const jevArvIds = new Set(
+        appraisalResult.comparables
+          .filter((c) => truth(c.id).arvTruth > truth(c.id).investmentTruth && rulesPassed(c))
+          .map((c) => c.id),
+      )
+      jevInvestmentCompIds = appraisalResult.comparables
+        .filter((c) => truth(c.id).investmentTruth > truth(c.id).arvTruth && rulesPassed(c))
+        .map((c) => c.id)
+      const jevInvestmentIds = new Set(jevInvestmentCompIds)
+      if (jevArvIds.size === 0) {
+        // Jev's job is classification, not sufficiency — an empty ARV bucket
+        // is not INSUFFICIENT_COMPS. Keep the rules selection; truth scores
+        // still attach for display.
+        appraisalResult.comparables = appraisalResult.comparables.map((comp) => ({
+          ...comp,
+          jevArvTruth: jev.scores[comp.id]?.arvTruth ?? null,
+          jevInvestmentTruth: jev.scores[comp.id]?.investmentTruth ?? null,
+        }))
+        step('jev_selection', 'fallback', `Jev found no ARV-eligible comps — appraisal-rules selection used (${jev.model})`)
+        fallbacksUsed.push('jev_selection:empty_arv_bucket')
+      } else {
+        appraisalResult.comparables = appraisalResult.comparables.map((comp) => ({
+          ...comp,
+          isEnabled: jevArvIds.has(comp.id) || jevInvestmentIds.has(comp.id),
+          arvStatus: jevArvIds.has(comp.id)
+            ? 'selected' as const
+            : comp.arvStatus === 'selected' ? 'not_examined' as const : comp.arvStatus,
+          jevArvTruth: jev.scores[comp.id]?.arvTruth ?? null,
+          jevInvestmentTruth: jev.scores[comp.id]?.investmentTruth ?? null,
+        }))
+        appraisalResult.selectedCompIds = [...jevArvIds]
+        appraisalResult.arv = appraisalService.calculateARV(
+          appraisalResult.comparables.filter((c) => jevArvIds.has(c.id)),
+        )
+        appraisalResult.insufficientComps = false
+        step('jev_selection', 'completed', `Jev bucketed ${appraisalResult.comparables.length} candidates → ${jevArvIds.size} ARV + ${jevInvestmentIds.size} investment comps within 0.5mi matching rules (${jev.model})`)
+      }
+    } catch (error) {
+      console.warn('[Evaluate] Jev comp selection unavailable — rules selection stands:', error instanceof Error ? error.message : error)
+      step('jev_selection', 'fallback', 'Jev unavailable — appraisal-rules selection used')
+      fallbacksUsed.push('jev_selection:unavailable')
+    }
+
+    // ── Candidate B (shadow): classify eligible comps, record only ────────
+    if (v2Mode === 'shadow') {
+      try {
+        const eligible = [...appraisalResult.comparables].filter(rulesPassed).sort(byDistance)
+        const cls = await classifyCompPriceWithJev(bundle.property, eligible, { filters, adjustments }, env)
+        appraisalResult.comparables = appraisalResult.comparables.map((comp) => ({
+          ...comp,
+          jevPriceClassification: cls.classifications[comp.id] ?? null,
+        }))
+        const counts = { arv: 0, asIs: 0, unidentified: 0 }
+        let disagreements = 0
+        for (const c of eligible) {
+          const bCls = cls.classifications[c.id]?.class ?? 'UNIDENTIFIED'
+          if (bCls === 'ARV') counts.arv++
+          else if (bCls === 'AS_IS') counts.asIs++
+          else counts.unidentified++
+          if (baselineTruth) {
+            const t = baselineTruth[c.id] ?? { arvTruth: 0, investmentTruth: 0 }
+            const aCls = t.arvTruth > t.investmentTruth ? 'ARV' : t.investmentTruth > t.arvTruth ? 'AS_IS' : 'UNIDENTIFIED'
+            if (aCls !== bCls) disagreements++
+          }
+        }
+        compClassificationRun = {
+          status: 'completed', mode: 'shadow', questionVersion: COMP_PRICE_QUESTION_VERSION,
+          model: cls.model, latencyMs: cls.latencyMs, inputTokens: cls.inputTokens,
+          eligibleCount: eligible.length, counts,
+          disagreements: baselineTruth ? disagreements : null,
+          stateHashes: cls.stateHashes, classifiedAt: new Date().toISOString(),
+        }
+        step('jev_v2_shadow', 'completed', `v2 shadow: ${counts.arv} ARV / ${counts.asIs} AS_IS / ${counts.unidentified} UNIDENTIFIED of ${eligible.length} eligible${baselineTruth ? ` (${disagreements} differ from A)` : ''} — observability only`)
+      } catch (error) {
+        console.warn('[Evaluate] Jev v2 shadow classification failed:', error instanceof Error ? error.message : error)
+        compClassificationRun = { status: 'unavailable', mode: 'shadow', questionVersion: COMP_PRICE_QUESTION_VERSION, reason: 'classification_failed' }
+      }
+    }
   }
 
   const enabledComps = appraisalResult.comparables.filter((c) => c.isEnabled)
@@ -1081,6 +1176,10 @@ export async function performAnalysis(
     console.warn('[Evaluation] Jev outcome classification failed:', jevError instanceof Error ? jevError.message : jevError)
     response.jevOutcome = { status: 'unavailable', reason: 'classification_failed' }
   }
+  // Comp-classifier run metadata — A/B measurement for Baseline A (dual
+  // nouls) vs Candidate B (structured choice). Read-only observability.
+  if (compTruthRun) response.jevCompTruth = compTruthRun
+  if (compClassificationRun) response.jevCompClassification = compClassificationRun
 
   return {
     response,
