@@ -12,6 +12,9 @@ port = 8787
 ENVIRONMENT = "development"
 DASHBOARD_URL = "http://localhost:3000"
 PROPERTY_PROVIDER = "corelogic"
+# Comp price classifier v2 drives production routing locally too (matches
+# wrangler.toml). Revert to Baseline A by setting "false".
+JEV_COMP_CLASSIFIER_V2_ENABLED = "true"
 
 [[d1_databases]]
 binding = "DB"

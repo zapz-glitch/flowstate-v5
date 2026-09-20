@@ -1,7 +1,7 @@
 # Jev Comp Price Classification — Baseline A vs Candidate B
 
-Status: Candidate B implemented behind flags, **shadow mode default-on, NOT promoted**.
-Production routing is unchanged: Baseline A remains authoritative.
+Status: **Candidate B is the production classifier** (`V2_ENABLED=true` in
+wrangler config); Baseline A preserved for flag-based rollback (§11).
 
 Flags (env):
 
@@ -290,12 +290,31 @@ abstain," which is exactly what the calibrated rule is for.
   (low-confidence/low-margin ARV/AS_IS pick → UNIDENTIFIED) gated by its own
   flag; choosing it requires the labeled dataset.
 
-## 11. Recommendation
+## 11. Deployment decision
 
-**Keep Baseline A in production; keep B in shadow and collect labeled data.**
-The architecture is in place, fail-closed, and flag-isolated. First live signal
-is promising (a defensible abstention + a resolved argmax tie, at ~half the
-latency) but also shows a low-confidence forced pick on a flip — exactly the
-class of error the labeled dataset should quantify before promotion. Promotion
-gate suggestion: ≥20 labeled reports, ARV-pool contamination materially below A's,
-UNIDENTIFIED precision ≥80%, and no systematic flip misreads.
+**Candidate B is the production classifier.** Product engineer approved
+promotion on the strength of the shadow evidence: B's UNIDENTIFIED class is the
+only mechanism that can refuse to force ambiguous comps into a pool (A's argmax
+must always pick a side), it is ~2× faster, and its structured probabilities
+are calibratable. Fallbacks are treated as desirable fail-closed behavior —
+over-inclusion is the worse failure mode for a mean-based ARV.
+
+**Current configuration** — `JEV_COMP_CLASSIFIER_V2_ENABLED = "true"` in
+`apps/api/wrangler.toml` (and `wrangler.local.toml` for local parity).
+
+**Rollback** — set `JEV_COMP_CLASSIFIER_V2_ENABLED = "false"` and redeploy.
+Baseline A's code path is fully preserved; the flag returns A to production
+routing with no code change.
+
+**Historical note** — the shadow-stage recommendation was to keep A in
+production until a labeled dataset quantified B's contamination. That gate was
+superseded by the product decision above; labeled validation remains
+worthwhile (see §10 limitations) but is no longer a promotion blocker.
+
+### What B enabled looks like live
+
+Post-promotion local run (Sarasota): `mode: "enabled"`, `jevCompTruth` absent
+(A skipped — no double spend), 5 ARV / 3 AS_IS / 4 UNIDENTIFIED of 12 eligible,
+3 gate-ineligible comps never classified. Production ARV $525,059 reproduces
+exactly from B's pool — `mean(adjustedSalePrice ?? salePrice)` over the 5
+B-ARV comps. UNIDENTIFIED comps carry no `compGroup` and `enabled=false`.

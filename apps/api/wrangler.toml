@@ -18,6 +18,10 @@ COMPARABLE_CANDIDATE_LIMIT = "100"
 # Radius for the single provider refetch when the appraisal expansion ladder
 # reaches beyond the fetched radius (default: radius x 2).
 COMPARABLE_EXPANSION_RADIUS_MILES = "2"
+# Comp price classifier v2 (structured ARV/AS_IS/UNIDENTIFIED choice) drives
+# production comp routing. Revert to Baseline A (dual nouls + argmax) by
+# setting "false" — the A code path is fully preserved.
+JEV_COMP_CLASSIFIER_V2_ENABLED = "true"
 
 [[d1_databases]]
 binding = "DB"

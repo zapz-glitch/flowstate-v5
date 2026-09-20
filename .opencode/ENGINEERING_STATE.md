@@ -129,16 +129,15 @@ Blockers (environment, not code):
 - V4 engine NOT connected to production (V4_* env vars dead code; by plan).
 
 ## Current Objective
-Jev-authoritative comp selection on `feat/jev-outcome-classification`
-(worktree `~/src/flowstate-v5-jev-classify`, branched from main). The v5
-pipeline still owns retrieval, normalization, appraisal-rule evaluation,
-ARV/valuation math, and outcome classification. Jev now additionally owns
-total comp selection: every candidate comparable gets a 0–1 Noul "truth"
-score (is this comp reliable evidence of the subject's market value); the
-top-N by truth become the enabled/ARV set (N = the count appraisal
-selection would have used, typically 3). The score renders on each comp
-card. If Jev is unavailable the appraisal-rules selection stands
-(`jev_selection` step reports `fallback`).
+Candidate B structured comp classifier is the PRODUCTION comp classifier on
+`feat/jev-outcome-classification` (worktree `~/src/flowstate-v5-jev-classify`).
+Product engineer approved promotion 2026-09-20: B's mutually-exclusive
+ARV|AS_IS|UNIDENTIFIED Choice routes gate-passed comps; Baseline A dual-noul
+argmax is preserved behind `JEV_COMP_CLASSIFIER_V2_ENABLED="false"` for
+rollback. Fallbacks/abstentions are intentional fail-closed behavior —
+over-inclusion is the worse failure mode for a mean-based ARV. Branch is
+merge-ready pending the user's explicit OK to merge to main; NO merge or
+deploy has been performed.
 
 ### 2026-09-19 — Jev-authoritative comp selection + per-comp truth scores
 
@@ -2418,3 +2417,45 @@ selected. B remains shadow-only, A remains production.
   §9d (flags default, shadow can't touch pools/ARV/offers/ranking/recs, JEV
   failure fails closed, all probs/conf/margin/disagreements persisted).
 - 21/21 api regression files pass; tsc clean. Still NOT promoted/deployed.
+
+### 2026-09-20 (c) — Candidate B PROMOTED to production + merge prep
+
+User directive: ship B as the evaluation path ("materially more accurate…
+fallbacks are a good thing… don't over-classify"), keep A for rollback,
+prepare to merge to main, full production-readiness test first.
+
+Shipped:
+- `JEV_COMP_CLASSIFIER_V2_ENABLED = "true"` in apps/api/wrangler.toml AND
+  wrangler.local.toml (dev script uses the local file — first attempt on
+  wrangler.toml alone left the dev worker in shadow mode).
+- Live enabled-path verified (fresh Sarasota analysis): mode "enabled",
+  jevCompTruth absent (A skipped, no double spend), 5 ARV / 3 AS_IS /
+  4 UNIDENTIFIED of 12 eligible; 3 gate-fails never classified (B=null);
+  UNIDENTIFIED comps have no compGroup + enabled=false. Production ARV
+  $525,059 reproduced exactly as mean(adjustedSalePrice ?? salePrice) over
+  B's 5-comp ARV pool. Recommendation computed downstream normally.
+- Rollback = set flag "false" + redeploy; A's code path untouched.
+
+Merge prep:
+- origin/main advanced with 4252bd5 (squash of the polling work, PR #7 —
+  same feature, different hash). Merged origin/main → feat branch (56a38f2).
+- ort auto-merge produced a DUPLICATE /jobs/:jobId route (ours + upstream's).
+  Resolved: kept our handler (richer processing payload, saved-report
+  fallback for evicted DOs, userId-scoped report query) and ported
+  upstream's two fixes — strict ownership (live job state with no owner
+  never passes) and the error-vs-complete status correction
+  (evaluation_complete event is the only reliable success marker; a
+  'complete' status + error event and no eval_complete → 'error').
+- Upstream's Sidebar.tsx stale eslint-disable removal came along cleanly.
+- docs/jev-comp-classifier-v2.md §11 rewritten: historical shadow-stage
+  recommendation preserved; current decision = B is production.
+
+Readiness evidence:
+- tsc --noEmit clean (api, post-merge) — dashboard previously clean.
+- 21/21 api regression files pass post-merge.
+- git status: analyze.ts merge fix + 2 wrangler flag changes + regenerated
+  dashboard tsbuildinfo (tracked file) — commit pending.
+
+Remaining:
+- Commit the above; report ready-for-merge to user; merge ONLY on
+  explicit user OK. No deploy performed or authorized.
