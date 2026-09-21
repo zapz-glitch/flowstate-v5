@@ -318,6 +318,18 @@ analyze.post('/', async (c) => {
         },
       }),
     });
+    // A live run owns the DO — surface its refusal (e.g. 409 already-running)
+    // instead of reporting success for a run that was never started.
+    if (!startResp.ok) {
+      const errBody = await startResp.json().catch(() => null) as { error?: string } | null;
+      return c.json(
+        {
+          success: false,
+          error: errBody?.error ?? 'Analysis could not be started — job already running',
+        },
+        startResp.status === 409 ? 409 : 502,
+      );
+    }
     await startResp.text();
 
     console.log(

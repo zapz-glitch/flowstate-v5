@@ -113,6 +113,11 @@ export class AnalysisJobDO {
   private encoder = new TextEncoder()
   private jobState: JobState | null = null
   private persistence: ChunkedJobState<JobState>
+  /** True while runStreamingAnalysis/runEnrichment is live in THIS isolate */
+  private runActive = false
+
+  /** Watchdog cadence — comfortably above a typical run (~2min). */
+  private static readonly WATCHDOG_MS = 5 * 60_000
 
   constructor(state: DurableObjectState, env: Env) {
     this.state = state
@@ -121,6 +126,47 @@ export class AnalysisJobDO {
     state.blockConcurrencyWhile(async () => {
       this.jobState = await this.persistence.read()
     })
+  }
+
+  /**
+   * Watchdog: fires while the job reads 'processing'. If the pipeline loop is
+   * still live in this isolate, re-arm. If the isolate hosting the run died
+   * (eviction, crash, deploy), runActive is false and the persisted run can
+   * never finish — convert it to a terminal error so polling clients stop
+   * waiting instead of watching 'processing' forever.
+   */
+  async alarm(): Promise<void> {
+    if (!this.jobState) {
+      this.jobState = await this.persistence.read()
+    }
+    const js = this.jobState
+    if (!js || js.status !== 'processing') {
+      await this.state.storage.deleteAlarm()
+      return
+    }
+    if (this.runActive) {
+      await this.state.storage.setAlarm(Date.now() + AnalysisJobDO.WATCHDOG_MS)
+      return
+    }
+
+    console.warn(`[AnalysisJobDO] watchdog: job ${js.jobId} processing with no live run — marking error`)
+    js.status = 'error'
+    js.error = 'Analysis was interrupted before completing — retry the request'
+    this.jobState = js
+    await this.persistence.write(js)
+    this.broadcast('error', { step: 'watchdog', message: js.error })
+    try {
+      const db = drizzle(this.env.DB)
+      await db.insert(analysisRuns).values({
+        jobId: js.jobId,
+        userId: js.userId,
+        status: 'error',
+        errorCode: 'STALLED',
+        errorMessage: js.error,
+        durationMs: Date.now() - js.createdAt,
+      })
+    } catch { /* observability only */ }
+    await this.state.storage.deleteAlarm()
   }
 
   async fetch(request: Request): Promise<Response> {
@@ -151,6 +197,17 @@ export class AnalysisJobDO {
   private async handleStartStreaming(request: Request): Promise<Response> {
     const body = await request.json() as StartStreamingRequest
 
+    // A pipeline is already live in this isolate — a retry/duplicate POST must
+    // not start a second interleaved run over the same state. (A persisted
+    // 'processing' state with runActive=false is a dead run; restarting is
+    // exactly the recovery we want, so only the in-memory flag gates this.)
+    if (this.runActive) {
+      return new Response(JSON.stringify({ error: 'Job already running' }), {
+        status: 409,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }
+
     const pending = ['property_fetch', 'evaluation']
     if (body.llmEnabled) pending.push('llm')
 
@@ -163,14 +220,25 @@ export class AnalysisJobDO {
       createdAt: Date.now(),
     }
     await this.persistence.write(this.jobState)
+    await this.state.storage.setAlarm(Date.now() + AnalysisJobDO.WATCHDOG_MS)
 
-    this.runStreamingAnalysis(body).catch((err) => {
-      console.error('[AnalysisJobDO] Streaming analysis fatal error:', err)
-      const durationMs = Date.now() - (this.jobState?.createdAt ?? Date.now())
-      this.pushEvent('error', { step: 'fatal', message: err instanceof Error ? err.message : 'Unknown error' })
-      this.recordRun(body, { status: 'error', durationMs, errorCode: 'FATAL', errorMessage: err instanceof Error ? err.message : 'Unknown error' })
-      this.pushEvent('enrichment_done', { totalDurationMs: durationMs })
-    })
+    // waitUntil is required: a DO with no tracked work can be evicted the
+    // moment this fetch returns — without it, polling-only API clients (no
+    // SSE connection holding the object alive) lose the run mid-flight.
+    this.runActive = true
+    this.state.waitUntil(
+      this.runStreamingAnalysis(body)
+        .catch((err) => {
+          console.error('[AnalysisJobDO] Streaming analysis fatal error:', err)
+          const durationMs = Date.now() - (this.jobState?.createdAt ?? Date.now())
+          this.pushEvent('error', { step: 'fatal', message: err instanceof Error ? err.message : 'Unknown error' })
+          this.recordRun(body, { status: 'error', durationMs, errorCode: 'FATAL', errorMessage: err instanceof Error ? err.message : 'Unknown error' })
+          this.pushEvent('enrichment_done', { totalDurationMs: durationMs })
+        })
+        .finally(() => {
+          this.runActive = false
+        })
+    )
 
     return new Response('OK', { status: 200 })
   }
@@ -737,14 +805,22 @@ export class AnalysisJobDO {
       createdAt: Date.now(),
     }
     await this.persistence.write(this.jobState)
+    await this.state.storage.setAlarm(Date.now() + AnalysisJobDO.WATCHDOG_MS)
 
-    // Run enrichment inside the DO — persistent context, no waitUntil needed
-    // The DO stays alive as long as there are SSE clients or pending work
-    this.runEnrichment(body).catch((err) => {
-      console.error('[AnalysisJobDO] Enrichment fatal error:', err)
-      this.pushEvent('error', { step: 'fatal', message: err instanceof Error ? err.message : 'Unknown error' })
-      this.pushEvent('enrichment_done', { totalDurationMs: Date.now() - (this.jobState?.createdAt ?? Date.now()) })
-    })
+    // Run enrichment inside the DO under waitUntil — without it the DO can
+    // be evicted mid-run once this fetch returns (see handleStartStreaming).
+    this.runActive = true
+    this.state.waitUntil(
+      this.runEnrichment(body)
+        .catch((err) => {
+          console.error('[AnalysisJobDO] Enrichment fatal error:', err)
+          this.pushEvent('error', { step: 'fatal', message: err instanceof Error ? err.message : 'Unknown error' })
+          this.pushEvent('enrichment_done', { totalDurationMs: Date.now() - (this.jobState?.createdAt ?? Date.now()) })
+        })
+        .finally(() => {
+          this.runActive = false
+        })
+    )
 
     // Return immediately — enrichment runs async in the DO
     return new Response('OK', { status: 200 })
