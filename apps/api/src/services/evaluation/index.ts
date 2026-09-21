@@ -39,14 +39,22 @@ import {
 } from '../analysis'
 import { createPhotoService, createPhotoProvider, type PhotoBundle, type PropertyIdentifier, type PropertyPhotos } from '../photo-provider'
 import {
+  attributeScreenMode,
   classifyCompPriceWithJev,
   compClassifierEligible,
   compClassifierMode,
+  COMP_ATTRIBUTE_QUESTION_VERSION,
   COMP_PRICE_QUESTION_VERSION,
   routeCompPriceClasses,
+  scoreCompAttributesWithJev,
   scoreCompTruthWithJev,
 } from '../jev'
 import type { JevCompClassificationRun, JevCompPriceClass } from '../jev'
+import {
+  screenCompPool,
+  splitPriceBands,
+  type AttributeScreenRun,
+} from '../comp-screen'
 import { persistReportAssets } from '../report-assets'
 import { expansionRefetchRadius } from '../property-api/retrieval-policy'
 import { assessRenovationFromPhotos, assessCompCurbAppeal, type RenovationAssessment, type CurbAppealCheck } from '../vision/renovation'
@@ -809,6 +817,82 @@ export async function performAnalysis(
     }
   }
 
+  // ── Comp screen: Jev attribute judgment → deterministic exception pool ────
+  // Layer 1: Jev scores every candidate on the 8 comparability axes (graded
+  // nouls, not pass/fail). Layer 2: comp-screen ranks all candidates by
+  // preset-weighted closeness and keeps the top-10 pool — a comp that failed
+  // a rule but is otherwise closest is the "exception" this layer keeps.
+  // Layer 3: the pool splits into mutually exclusive price bands — the top
+  // 10% band is ARV evidence, the bottom 10% is the as-is investor floor —
+  // each capped at 5 comps by closeness. Default shadow: results attach for
+  // display/A-B measurement; enabled mode routes production selection.
+  const attrMode = attributeScreenMode(env)
+  let attributeScreenRun: AttributeScreenRun | null = null
+  let attributeScreenBands: { arvIds: string[]; asIsIds: string[] } | null = null
+  if (attrMode !== 'off' && appraisalResult.comparables.length > 0) {
+    try {
+      const screenedCandidates = [...appraisalResult.comparables].sort(byDistance)
+      const attr = await scoreCompAttributesWithJev(bundle.property, screenedCandidates, filters, env)
+      const screen = screenCompPool(screenedCandidates, attr.scores, filters)
+      const compsById = new Map(screenedCandidates.map((c) => [c.id, c]))
+      const bands = splitPriceBands(screen.pool, compsById)
+      attributeScreenBands = { arvIds: bands.arvIds, asIsIds: bands.asIsIds }
+
+      const screenById = new Map(screen.entries.map((e) => [e.compId, e]))
+      appraisalResult.comparables = appraisalResult.comparables.map((comp) => {
+        const entry = screenById.get(comp.id)
+        return {
+          ...comp,
+          jevAttributeScores: attr.scores[comp.id] ?? null,
+          jevScreenScore: entry?.score ?? null,
+          jevScreenPool: entry?.inPool ?? false,
+          jevScreenBand: entry?.band ?? null,
+        }
+      })
+
+      attributeScreenRun = {
+        status: 'completed', mode: attrMode, questionVersion: COMP_ATTRIBUTE_QUESTION_VERSION,
+        model: attr.model, latencyMs: attr.latencyMs, inputTokens: attr.inputTokens,
+        scoredCount: screenedCandidates.length, poolCount: screen.pool.length,
+        counts: { arv: bands.arvIds.length, asIs: bands.asIsIds.length },
+        anchors: { arvAnchor: bands.arvAnchor, asIsAnchor: bands.asIsAnchor },
+        stateHashes: attr.stateHashes, classifiedAt: new Date().toISOString(),
+      }
+
+      if (attrMode === 'enabled') {
+        if (bands.arvIds.length === 0) {
+          // Empty ARV band is not INSUFFICIENT_COMPS — the rules selection
+          // stands; screen scores still attach for display.
+          step('comp_screen', 'fallback', `Attribute screen found no ARV-band comps — appraisal-rules selection used (${attr.model})`)
+          fallbacksUsed.push('comp_screen:empty_arv_band')
+        } else {
+          const poolIds = new Set([...bands.arvIds, ...bands.asIsIds])
+          appraisalResult.comparables = appraisalResult.comparables.map((comp) => ({
+            ...comp,
+            isEnabled: poolIds.has(comp.id),
+            arvStatus: bands.arvIds.includes(comp.id)
+              ? 'selected' as const
+              : comp.arvStatus === 'selected' ? 'not_examined' as const : comp.arvStatus,
+          }))
+          appraisalResult.selectedCompIds = bands.arvIds
+          appraisalResult.arv = appraisalService.calculateARV(
+            appraisalResult.comparables.filter((c) => bands.arvIds.includes(c.id)),
+          )
+          appraisalResult.insufficientComps = false
+          jevInvestmentCompIds = bands.asIsIds
+          step('comp_screen', 'completed', `Screened ${screenedCandidates.length} candidates → pool ${screen.pool.length} → ${bands.arvIds.length} ARV-band + ${bands.asIsIds.length} as-is-band comps (${attr.model})`)
+        }
+      } else {
+        step('comp_screen', 'completed', `shadow: scored ${screenedCandidates.length} → pool ${screen.pool.length} → ${bands.arvIds.length} ARV-band + ${bands.asIsIds.length} as-is-band comps (${attr.model}) — observability only`)
+      }
+    } catch (error) {
+      console.warn('[Evaluate] Attribute screen failed:', error instanceof Error ? error.message : error)
+      step('comp_screen', 'fallback', 'Attribute screen unavailable — appraisal-rules selection used')
+      if (attrMode === 'enabled') fallbacksUsed.push('comp_screen:unavailable')
+      attributeScreenRun = { status: 'unavailable', mode: attrMode, questionVersion: COMP_ATTRIBUTE_QUESTION_VERSION, reason: 'screen_failed' }
+    }
+  }
+
   const enabledComps = appraisalResult.comparables.filter((c) => c.isEnabled)
   if (appraisalResult.insufficientComps || enabledComps.length === 0) {
     step('appraisal_rules', 'failed', appraisalResult.fallbackReason ?? 'insufficient comps')
@@ -1153,6 +1237,70 @@ export async function performAnalysis(
     }
   }
 
+  // ── Attribute-screen counterfactual (shadow only) ─────────────────────────
+  // What the screen's band routing would have produced through the same
+  // deterministic math: same calculateARV, same Group B summarizer, same
+  // valuation service. Purely observational — never touches production figures.
+  if (attrMode === 'shadow' && attributeScreenRun?.status === 'completed' && attributeScreenBands) {
+    try {
+      const sArvComps = appraisalResult.comparables.filter((c) => attributeScreenBands.arvIds.includes(c.id))
+      const screenArv = sArvComps.length > 0 ? appraisalService.calculateARV(sArvComps) : null
+
+      const screenArvForAsIs = screenArv ?? finalArv
+      const sAsIsComps = appraisalResult.comparables.filter(
+        (c) => attributeScreenBands.asIsIds.includes(c.id) && c.salePrice != null && c.salePrice > 0,
+      )
+      const screenGroupB = summarizeGroupB(
+        sAsIsComps,
+        bundle.property,
+        screenArvForAsIs,
+        asIsThresholdPercent,
+        Math.round((screenArvForAsIs * asIsThresholdPercent) / 100),
+        appraisalResult.comparables,
+      )
+
+      const screenVal = screenArv != null
+        ? valuationService.calculateValuation({
+            arv: screenArv,
+            subjectSqft,
+            compAvgSqft,
+            rehabLevelIndex: derivedBuybox.rehabLevelIndex,
+            skipBaseRehab: derivedBuybox.renovatedVerified === true,
+            locationPenaltyAmount: computeLocationPenalty(bundle.enrichment.locationRisks, screenArv, params.proximityConfig),
+            majorItems: derivedBuybox.majorItems,
+            additionPlay: derivedBuybox.additionPlay ?? buybox.additionPlay ?? 0,
+            closingCostsPercent: buybox.closingCostsPercent ?? 8,
+            carryingCostsPercent: buybox.carryingCostsPercent ?? 2,
+            wholesaleFee: buybox.wholesaleFee ?? 10000,
+            desiredProfit: buybox.desiredProfit,
+          })
+        : null
+
+      attributeScreenRun.shadowValuation = {
+        arv: screenArv,
+        arvComps: sArvComps.length,
+        asIsValue: screenGroupB.asIsMarketPrice,
+        asIsComps: screenGroupB.count,
+        buyPrice: screenVal?.buyPrice ?? null,
+        projectedProfit: screenVal?.projectedProfit ?? null,
+        projectedROI: screenVal?.projectedROI ?? null,
+        recommendation: (screenVal as { recommendation?: string } | null)?.recommendation ?? null,
+        deltas: {
+          arv: screenArv != null ? screenArv - finalArv : null,
+          asIsValue:
+            screenGroupB.asIsMarketPrice != null && groupBResult?.asIsMarketPrice != null
+              ? screenGroupB.asIsMarketPrice - groupBResult.asIsMarketPrice
+              : null,
+          buyPrice: screenVal ? screenVal.buyPrice - valuation.buyPrice : null,
+        },
+      }
+      step('comp_screen_valuation', 'completed',
+        `screen shadow valuation: ARV ${screenArv != null ? formatUsd(screenArv) : 'n/a'} vs ${formatUsd(finalArv)} · as-is ${screenGroupB.asIsMarketPrice != null ? formatUsd(screenGroupB.asIsMarketPrice) : 'n/a'} · buy ${screenVal ? formatUsd(screenVal.buyPrice) : 'n/a'} — observability only`)
+    } catch (error) {
+      console.warn('[Evaluate] Attribute-screen shadow valuation failed:', error instanceof Error ? error.message : error)
+    }
+  }
+
   // ── 8. Best match + applied settings snapshot ───────────────────────────────
   const bestMatch = selectBestMatch(
     bundle.property,
@@ -1260,6 +1408,7 @@ export async function performAnalysis(
   // nouls) vs Candidate B (structured choice). Read-only observability.
   if (compTruthRun) response.jevCompTruth = compTruthRun
   if (compClassificationRun) response.jevCompClassification = compClassificationRun
+  if (attributeScreenRun) response.jevAttributeScreen = attributeScreenRun
 
   return {
     response,

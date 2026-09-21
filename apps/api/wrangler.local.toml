@@ -15,6 +15,9 @@ PROPERTY_PROVIDER = "corelogic"
 # Comp price classifier v2 in shadow mode locally (matches wrangler.toml):
 # Baseline A routes comps; v2 records alongside. Set "true" to promote v2.
 JEV_COMP_CLASSIFIER_V2_ENABLED = "false"
+# Three-layer comp screen in shadow mode locally (matches wrangler.toml):
+# screen picks + counterfactual valuation recorded; production unchanged.
+JEV_ATTRIBUTE_SCREEN_ENABLED = "false"
 
 [[d1_databases]]
 binding = "DB"

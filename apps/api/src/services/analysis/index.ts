@@ -837,6 +837,12 @@ export interface AnalysisResponse {
       jevInvestmentTruth?: number | null
       /** Candidate B structured price class (ARV | AS_IS | UNIDENTIFIED) — present when the v2 classifier ran */
       jevPriceClassification?: import('../jev').JevCompPriceClass | null
+      /** Jev per-attribute match scores (0–1 per comparability axis) — present when the attribute screen ran */
+      jevAttributeScores?: Partial<Record<import('../jev').CompAttributeKey, number>> | null
+      /** Deterministic exception-screen closeness score (0–1) and pool/band membership */
+      jevScreenScore?: number | null
+      jevScreenPool?: boolean
+      jevScreenBand?: 'arv' | 'as_is' | null
       /** Appraisal rule evaluation details */
       appraisalRules: {
         /** Whether this comp passed all filters */
@@ -1003,6 +1009,13 @@ export interface AnalysisResponse {
    * Read-only; routing facts live on each comp's jevPriceClassification.
    */
   jevCompClassification?: import('../jev').JevCompClassificationRun | null
+  /**
+   * Comp screen run metadata — Jev 8-axis attribute scores, screened pool
+   * count, ARV/as-is band counts and anchors, plus the shadow counterfactual
+   * valuation. Read-only under shadow mode; per-comp scores live on each
+   * comp's jevAttributeScores/jevScreenScore/jevScreenBand.
+   */
+  jevAttributeScreen?: import('../comp-screen').AttributeScreenRun | null
 }
 export interface ApiCallStats {
   corelogic: {
@@ -1257,6 +1270,10 @@ export function buildAnalysisResponse(
       jevArvTruth: comp.jevArvTruth ?? null,
       jevInvestmentTruth: comp.jevInvestmentTruth ?? null,
       jevPriceClassification: comp.jevPriceClassification ?? null,
+      jevAttributeScores: comp.jevAttributeScores ?? null,
+      jevScreenScore: comp.jevScreenScore ?? null,
+      jevScreenPool: comp.jevScreenPool ?? false,
+      jevScreenBand: comp.jevScreenBand ?? null,
       appraisalRules,
     }
   })

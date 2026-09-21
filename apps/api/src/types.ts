@@ -83,6 +83,18 @@ export interface Env {
    * response without affecting routing, valuation, or recommendation.
    */
   JEV_COMP_CLASSIFIER_V2_SHADOW?: string
+  /**
+   * 'true' → the attribute screen (Jev 8-axis similarity → deterministic
+   * exception pool → ARV/as-is price bands) drives comp routing.
+   * Default false — runs as a shadow alongside production.
+   */
+  JEV_ATTRIBUTE_SCREEN_ENABLED?: string
+  /**
+   * 'false' disables the attribute-screen shadow run entirely. Default on:
+   * records screened pool, bands, and a counterfactual valuation on the
+   * response without affecting routing, valuation, or recommendation.
+   */
+  JEV_ATTRIBUTE_SCREEN_SHADOW?: string
 
   // ─── Google AI (Gemini) ──────────────────────────────────────────────────────
   // Direct Google AI API key for Gemini URL context and Zillow data fetching

@@ -523,6 +523,19 @@ export interface AppraisedComparable extends NormalizedComparable {
    * reached classification. Observability only under shadow mode.
    */
   jevPriceClassification?: import('../jev').JevCompPriceClass | null
+  /**
+   * Attribute screen (services/jev attribute screen): Jev's 0–1 match per
+   * comparability attribute (same neighborhood/subdivision, sqft & lot
+   * range, style/construction/foundation, year built). Present when the
+   * screen ran (shadow or enabled).
+   */
+  jevAttributeScores?: Partial<Record<import('../jev').CompAttributeKey, number>> | null
+  /** Weighted closeness score (0–1) from the deterministic exception screen */
+  jevScreenScore?: number | null
+  /** Whether the comp made the exception screen's top-N candidate pool */
+  jevScreenPool?: boolean
+  /** Price-band bucket the screened comp landed in — 'arv' or 'as_is', mutually exclusive */
+  jevScreenBand?: 'arv' | 'as_is' | null
 }
 
 // ─── Appraisal Result ──────────────────────────────────────────────────────────

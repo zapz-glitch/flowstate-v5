@@ -22,6 +22,11 @@ COMPARABLE_EXPANSION_RADIUS_MILES = "2"
 # shadow mode: Baseline A (dual nouls + argmax) routes comps in production
 # while v2 records classifications for comparison. Set "true" to promote v2.
 JEV_COMP_CLASSIFIER_V2_ENABLED = "false"
+# Three-layer comp screen (Jev 8-attribute classify → weighted exception
+# ranker → ARV/as-is price bands) runs in shadow mode: production comp
+# selection is unchanged while the screen records its picks + counterfactual
+# valuation on the response. Set "true" to let the screen route comps.
+JEV_ATTRIBUTE_SCREEN_ENABLED = "false"
 
 [[d1_databases]]
 binding = "DB"

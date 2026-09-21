@@ -17,7 +17,8 @@
 
 import type { AnalysisResponse } from '../analysis'
 import type { NormalizedComparable, NormalizedProperty } from '../property-api/types'
-import type { AppraisedComparable } from '../appraisal/types'
+import type { AppraisedComparable, AppraisalFilter, FilterType } from '../appraisal/types'
+import { DEFAULT_FILTERS } from '../appraisal/types'
 
 export interface JevEnv {
   TYPESAFE_API_KEY?: string
@@ -26,6 +27,10 @@ export interface JevEnv {
   JEV_COMP_CLASSIFIER_V2_ENABLED?: string
   /** 'false' disables the Candidate B shadow run (default on — measures B beside A) */
   JEV_COMP_CLASSIFIER_V2_SHADOW?: string
+  /** 'true' → the 8-question attribute screen drives comp routing (default false = shadow) */
+  JEV_ATTRIBUTE_SCREEN_ENABLED?: string
+  /** 'false' disables the attribute-screen shadow run entirely (default on) */
+  JEV_ATTRIBUTE_SCREEN_SHADOW?: string
 }
 
 export const OUTCOME_DIMENSIONS = [
@@ -1054,4 +1059,280 @@ export async function classifyCompPriceWithJev(
     Object.assign(classifications, parsed.classifications)
   }
   return { classifications, model: actualModel ?? model, latencyMs: Date.now() - start, inputTokens, stateHashes }
+}
+
+// ─── Attribute screen: Jev judges each comp on the 8 comparability axes ──────
+//
+// The first layer of the comp screen: every candidate gets one noul per
+// attribute — the SAME attributes the appraisal filters check — so each
+// comp carries a graded 0–1 match instead of a binary pass/fail. The
+// deterministic exception screen (services/comp-screen) turns these scores
+// into a closeness ranking; price bands then split the pool into ARV and
+// as-is sets. Jev never sees rule verdicts or prices here — only physical
+// and geographic evidence, so the answers stay a pure similarity judgment.
+
+export const COMP_ATTRIBUTE_KEYS = [
+  'same_neighborhood',
+  'same_subdivision',
+  'within_sqft_range',
+  'within_lot_sqft_range',
+  'same_property_style',
+  'same_construction',
+  'same_foundation',
+  'within_year_built_range',
+] as const
+export type CompAttributeKey = typeof COMP_ATTRIBUTE_KEYS[number]
+
+/** Attribute → the appraisal filter that governs its threshold and weight. */
+export const COMP_ATTRIBUTE_TO_FILTER: Record<CompAttributeKey, FilterType> = {
+  same_neighborhood: 'neighborhood_match',
+  same_subdivision: 'subdivision_match',
+  within_sqft_range: 'sqft_diff',
+  within_lot_sqft_range: 'lot_size_diff',
+  same_property_style: 'building_style_match',
+  same_construction: 'construction_material_match',
+  same_foundation: 'foundation_match',
+  within_year_built_range: 'year_built_diff',
+}
+
+/** Question identifier recorded on every run — bump when the schema changes. */
+export const COMP_ATTRIBUTE_QUESTION_VERSION = 'comp_attribute_screen_v1'
+
+export interface JevAttributeScreenResult {
+  /** compId → attribute → 0–1 match probability */
+  scores: Record<string, Partial<Record<CompAttributeKey, number>>>
+  model: string
+  latencyMs: number
+  inputTokens: number
+  /** FNV-1a hashes of each batch's serialized state — input-snapshot fingerprints */
+  stateHashes: string[]
+}
+
+/**
+ * Feature-flag resolution: 'enabled' → the screen drives comp routing;
+ * 'shadow' → runs beside production and records results only; 'off' →
+ * does not run. Default: shadow on.
+ */
+export function attributeScreenMode(env: JevEnv): 'enabled' | 'shadow' | 'off' {
+  if (env.JEV_ATTRIBUTE_SCREEN_ENABLED === 'true') return 'enabled'
+  if (env.JEV_ATTRIBUTE_SCREEN_SHADOW === 'false') return 'off'
+  return 'shadow'
+}
+
+/** Configured numeric threshold for a range attribute, from the preset filters. */
+function attributeThreshold(attribute: CompAttributeKey, filters: AppraisalFilter[]): number | null {
+  const type = COMP_ATTRIBUTE_TO_FILTER[attribute]
+  const filter = filters.find((f) => f.type === type)
+    ?? DEFAULT_FILTERS.find((f) => f.type === type)
+  return filter?.enabled === false ? null : (filter?.value ?? null)
+}
+
+const subjectScreenFields = [
+  'id', 'address', 'city', 'state', 'zipCode', 'latitude', 'longitude',
+  'squareFeet', 'lotSizeAcres', 'lotSizeSquareFeet', 'yearBuilt', 'effectiveYearBuilt',
+  'propertyType', 'stories', 'subdivision', 'neighborhoodName', 'neighborhoodCode',
+  'construction', 'buildingCondition', 'buildingGrade', 'legalDescription',
+] as const satisfies readonly (keyof NormalizedProperty)[]
+
+const compScreenFields = [
+  'id', 'address', 'city', 'state', 'zipCode', 'latitude', 'longitude', 'distanceMiles',
+  'squareFeet', 'lotSizeAcres', 'lotSizeSquareFeet', 'yearBuilt', 'propertyType', 'stories',
+  'subdivision', 'neighborhoodName', 'neighborhoodCode', 'construction',
+  'buildingCondition', 'buildingGrade', 'parcelId',
+] as const satisfies readonly (keyof NormalizedComparable)[]
+
+const SCREEN_EVIDENCE_NOTE =
+  'Judge each attribute against state.subject only. Missing/null fields are unknown — score by the evidence present, never assume a match or a mismatch. Rule outcomes and sale prices are deliberately excluded: this is a pure similarity judgment.'
+
+function attributeQuestion(index: number, attribute: CompAttributeKey, filters: AppraisalFilter[]): NoulQuestion {
+  const i = `state.comparables[${index}]`
+  let instructions: string
+  switch (attribute) {
+    case 'same_neighborhood':
+      instructions = `Does ${i} sit in the same neighborhood as the subject? Compare neighborhoodName/neighborhoodCode and subdivision — name OR code equality counts, and plat unit/phase/section suffixes (e.g. "Unit 3", "Phase II") still count as the same neighborhood.`
+      break
+    case 'same_subdivision':
+      instructions = `Does ${i} sit in the same recorded subdivision as the subject? Compare subdivision and legalDescription — unit/phase/section suffixes still count as the same subdivision.`
+      break
+    case 'within_sqft_range': {
+      const t = attributeThreshold(attribute, filters)
+      instructions = t != null
+        ? `Is ${i}'s living area within the configured range of the subject's — subject.squareFeet ± ${t} sqft? Judge from the numeric fields.`
+        : `Is ${i}'s living area a comparable size to the subject's squareFeet? Judge from the numeric fields — the configured range check is disabled.`
+      break
+    }
+    case 'within_lot_sqft_range': {
+      const t = attributeThreshold(attribute, filters)
+      instructions = t != null
+        ? `Is ${i}'s lot within the configured range of the subject's lot — ± ${t} sqft? Use lotSizeSquareFeet, or lotSizeAcres × 43560 when only acres are present.`
+        : `Is ${i}'s lot a comparable size to the subject's? Use lotSizeSquareFeet, or lotSizeAcres × 43560 when only acres are present — the configured range check is disabled.`
+      break
+    }
+    case 'same_property_style':
+      instructions = `Does ${i} share the subject's building style (construction.buildingStyle and storiesType — e.g. Ranch vs Ranch, one-story vs one-story)?`
+      break
+    case 'same_construction':
+      instructions = `Does ${i} share the subject's building construction — construction.type and exteriorWalls family (frame/wood vs masonry/brick vs stucco)?`
+      break
+    case 'same_foundation':
+      instructions = `Is ${i} on the same foundation family as the subject — slab vs raised (pier/beam/crawl/wood) vs basement?`
+      break
+    case 'within_year_built_range': {
+      const t = attributeThreshold(attribute, filters)
+      instructions = t != null
+        ? `Was ${i} built within the configured range of the subject — subject.yearBuilt ± ${t} years? Judge from the numeric fields.`
+        : `Was ${i} built in a comparable era to the subject's yearBuilt? Judge from the numeric fields — the configured range check is disabled.`
+      break
+    }
+  }
+  return { type: 'noul', instructions: `${instructions} ${SCREEN_EVIDENCE_NOTE}` }
+}
+
+type AttributeBatch = {
+  ids: string[]
+  offset: number
+  body: { model: string; state: Record<string, unknown>; questions: Record<string, NoulQuestion> }
+}
+
+function makeAttributeBatch(
+  subject: Record<string, unknown>, comps: Array<Record<string, unknown>>,
+  ids: string[], offset: number, model: string, evaluationDate: string,
+  filters: AppraisalFilter[],
+): AttributeBatch {
+  return {
+    ids,
+    offset,
+    body: {
+      model,
+      state: { subject, evaluationDate, comparables: comps },
+      questions: Object.fromEntries(
+        comps.flatMap((_, index) =>
+          COMP_ATTRIBUTE_KEYS.map((attribute) => [
+            `comp_${offset + index}_${attribute}`,
+            attributeQuestion(offset + index, attribute, filters),
+          ]),
+        ),
+      ),
+    },
+  }
+}
+
+function attributeBatches(
+  subject: NormalizedProperty, comps: AppraisedComparable[],
+  filters: AppraisalFilter[], model: string, evaluationDate: string,
+): AttributeBatch[] {
+  const subjectEvidence = truthEvidence(subject, subjectScreenFields)
+  const result: AttributeBatch[] = []
+  let pending: Array<Record<string, unknown>> = []
+  let ids: string[] = []
+  let offset = 0
+  for (const comp of comps) {
+    const item = truthEvidence(comp, compScreenFields)
+    const next = makeAttributeBatch(subjectEvidence, [...pending, item], [...ids, comp.id], offset, model, evaluationDate, filters)
+    if (truthFits(next)) { pending.push(item); ids.push(comp.id); continue }
+    if (pending.length) {
+      result.push(makeAttributeBatch(subjectEvidence, pending, ids, offset, model, evaluationDate, filters))
+      offset += pending.length
+    }
+    const single = makeAttributeBatch(subjectEvidence, [item], [comp.id], offset, model, evaluationDate, filters)
+    if (!truthFits(single)) throw new Error('Jev attribute-screen context limit: subject and one comparable exceed the request budget; evidence was not truncated.')
+    pending = [item]
+    ids = [comp.id]
+  }
+  if (pending.length) result.push(makeAttributeBatch(subjectEvidence, pending, ids, offset, model, evaluationDate, filters))
+  return result
+}
+
+/**
+ * Strict parse — every batched comp must return all 8 nouls, like truth
+ * scoring: a partial batch would give some comps a full similarity vector
+ * and others nothing, so the run fails rather than mixing coverage.
+ */
+function parseAttributeResponse(
+  value: unknown, batch: AttributeBatch,
+): { scores: Record<string, Partial<Record<CompAttributeKey, number>>>; model: string; inputTokens: number } {
+  const malformed = () => new Error('Jev attribute screen returned an invalid or incomplete typed response; no scores were accepted.')
+  if (!object(value) || typeof value.model !== 'string' || !/^jev-[\w.-]+$/.test(value.model) || !object(value.answers) || !object(value.usage)) throw malformed()
+  const { input_tokens: inputTokens } = value.usage
+  if (typeof inputTokens !== 'number' || !Number.isSafeInteger(inputTokens) || inputTokens < 0) throw malformed()
+  const keys = Object.keys(batch.body.questions)
+  if (Object.keys(value.answers).length !== keys.length || keys.some((key) => !Object.hasOwn(value.answers as object, key))) throw malformed()
+  const scores: Record<string, Partial<Record<CompAttributeKey, number>>> = Object.create(null)
+  batch.ids.forEach((id, index) => {
+    const entry: Partial<Record<CompAttributeKey, number>> = {}
+    for (const attribute of COMP_ATTRIBUTE_KEYS) {
+      const answer = (value.answers as Record<string, unknown>)[`comp_${batch.offset + index}_${attribute}`]
+      if (!object(answer) || answer.type !== 'noul' || !probability(answer.noul)) throw malformed()
+      entry[attribute] = answer.noul
+    }
+    scores[id] = entry
+  })
+  return { scores, model: value.model, inputTokens }
+}
+
+/**
+ * Layer 1 of the comp screen: one noul per comp per attribute across all
+ * candidates — the graded similarity evidence the deterministic exception
+ * screen ranks on. Runs over the full evaluated pool (rule failures
+ * included — exception selection is the point). Batches run in parallel;
+ * all-or-nothing: any failed batch throws so callers fall back whole.
+ */
+export async function scoreCompAttributesWithJev(
+  subject: NormalizedProperty,
+  comps: AppraisedComparable[],
+  filters: AppraisalFilter[],
+  env: JevEnv,
+): Promise<JevAttributeScreenResult> {
+  const start = Date.now()
+  const evaluationDate = new Date(start).toISOString().slice(0, 10)
+  const key = env.TYPESAFE_API_KEY?.trim()
+  if (!key) throw new Error('Jev attribute screen requires TYPESAFE_API_KEY.')
+  const model = env.TYPESAFE_MODEL?.trim() || 'jev-latest'
+  if (!/^jev-[\w.-]+$/.test(model)) throw new Error('Jev attribute screen requires a Jev model identifier.')
+  if (comps.some((comp) => typeof comp.id !== 'string' || !comp.id.trim()) || new Set(comps.map((c) => c.id)).size !== comps.length) {
+    throw new Error('Jev attribute screen requires a unique, nonempty ID for every comparable.')
+  }
+
+  const batches = attributeBatches(subject, comps, filters, model, evaluationDate)
+  const responses = await Promise.all(
+    batches.map(async (batch) => {
+      let httpResponse: Response
+      try {
+        httpResponse = await fetch(ENDPOINT, {
+          method: 'POST',
+          redirect: 'manual',
+          headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+          body: serialized(batch.body),
+          signal: AbortSignal.timeout(TIMEOUT_MS),
+        })
+      } catch {
+        throw new Error('Jev attribute screen request failed or timed out.')
+      }
+      if (!httpResponse.ok) {
+        // Never expose response bodies: they can echo credentials or request data.
+        void httpResponse.body?.cancel().catch(() => {})
+        throw new Error(`Jev attribute screen API returned HTTP ${httpResponse.status}.`)
+      }
+      let json: unknown
+      try { json = await httpResponse.json() } catch { throw new Error('Jev attribute screen returned unreadable JSON.') }
+      return parseAttributeResponse(json, batch)
+    }),
+  )
+
+  const scores: Record<string, Partial<Record<CompAttributeKey, number>>> = Object.create(null)
+  let inputTokens = 0
+  let actualModel: string | undefined
+  for (const parsed of responses) {
+    if (actualModel && actualModel !== parsed.model) throw new Error('Jev attribute-screen model changed between batches; no mixed-model scores were accepted.')
+    actualModel = parsed.model
+    inputTokens += parsed.inputTokens
+    Object.assign(scores, parsed.scores)
+  }
+  return {
+    scores,
+    model: actualModel ?? model,
+    latencyMs: Date.now() - start,
+    inputTokens,
+    stateHashes: batches.map((batch) => fnv1a(serialized(batch.body.state))),
+  }
 }
