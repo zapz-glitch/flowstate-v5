@@ -215,6 +215,17 @@ export class AnalysisJobDO {
       })
     }
 
+    // Ownership guard: a start request for a jobId whose persisted state
+    // belongs to a different user is rejected — defense in depth behind the
+    // route-level existingJobId ownership check.
+    if (!this.jobState) this.jobState = await this.persistence.read()
+    if (this.jobState && this.jobState.userId !== body.userId) {
+      return new Response(JSON.stringify({ error: 'Job belongs to another user' }), {
+        status: 403,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }
+
     const pending = ['property_fetch', 'evaluation']
     if (body.llmEnabled) pending.push('llm')
 

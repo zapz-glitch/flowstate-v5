@@ -12,6 +12,7 @@
 
 import { Context, Next } from 'hono'
 import type { Env } from '../types'
+import { timingSafeEqual } from '../lib/share-token'
 
 export async function hashApiKey(key: string): Promise<string> {
   const encoder = new TextEncoder()
@@ -37,7 +38,7 @@ async function verifyDashboardAuth(
   // Verify the secret matches a configured internal secret
   // This secret should be shared between dashboard and API via environment variables
   const expectedSecret = c.env.DASHBOARD_INTERNAL_SECRET
-  if (!expectedSecret || secret !== expectedSecret) {
+  if (!expectedSecret || !timingSafeEqual(secret, expectedSecret)) {
     return { success: false, error: 'Invalid dashboard secret' }
   }
 

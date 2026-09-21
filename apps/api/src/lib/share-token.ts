@@ -3,6 +3,14 @@
  * Uses Web Crypto API (Cloudflare Workers compatible).
  */
 
+/** Constant-time hex-string comparison — avoids timing leaks on secrets. */
+export function timingSafeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false
+  let diff = 0
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i)
+  return diff === 0
+}
+
 // ─── Password Hashing ────────────────────────────────────────────────────────
 
 /** Hash a password with a random salt. Returns "salt:sha256hex". */
@@ -30,7 +38,7 @@ export async function verifySharePassword(
   const hashHex = Array.from(new Uint8Array(hashBuffer))
     .map((b) => b.toString(16).padStart(2, '0'))
     .join('')
-  return hashHex === expectedHash
+  return timingSafeEqual(hashHex, expectedHash)
 }
 
 // ─── HMAC-Signed Access Tokens ───────────────────────────────────────────────
