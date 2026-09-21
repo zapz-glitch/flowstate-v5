@@ -41,61 +41,15 @@ sseStream.get('/analyze/:jobId', async (c) => {
   const doId = c.env.ANALYSIS_JOB.idFromName(jobId)
   const stub = c.env.ANALYSIS_JOB.get(doId)
 
-  // Create SSE stream in the Worker — read events from the DO
-  const { readable, writable } = new TransformStream()
-  const writer = writable.getWriter()
-  const encoder = new TextEncoder()
+  // Proxy the DO's push stream (same as /sse/batch): events reach clients in
+  // real time, the DO replays buffered events for late joiners, and the open
+  // fetch keeps the DO alive while a run is in flight. Holding the client
+  // signal lets a disconnect propagate and clean up the DO-side writer.
+  const doResp = await stub.fetch('http://internal/sse', {
+    signal: c.req.raw.signal,
+  })
 
-  const sendSSE = async (event: string, data: unknown) => {
-    await writer.write(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`))
-  }
-
-  // Background: poll DO state and stream events
-  ;(async () => {
-    let lastEventCount = 0
-    await sendSSE('connected', { jobId })
-
-    for (let i = 0; i < 600; i++) { // max 5 minutes
-      try {
-        const resp = await stub.fetch('http://internal/state')
-        if (!resp.ok) {
-          await new Promise((r) => setTimeout(r, 500))
-          continue
-        }
-
-        const state = await resp.json() as {
-          status?: string
-          events?: Array<{ event: string; data: unknown }>
-        }
-
-        if (!state.status || state.status === 'not_found') {
-          await new Promise((r) => setTimeout(r, 500))
-          continue
-        }
-
-        // Stream new events
-        const events = state.events ?? []
-        for (let j = lastEventCount; j < events.length; j++) {
-          await sendSSE(events[j].event, events[j].data)
-        }
-        lastEventCount = events.length
-
-        // Done
-        if (state.status === 'complete' || state.status === 'error') {
-          break
-        }
-      } catch {
-        // DO not ready yet
-      }
-
-      await new Promise((r) => setTimeout(r, 500))
-    }
-
-    await sendSSE('enrichment_done', { finished: true })
-    writer.close()
-  })()
-
-  return new Response(readable, {
+  return new Response(doResp.body, {
     headers: {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',

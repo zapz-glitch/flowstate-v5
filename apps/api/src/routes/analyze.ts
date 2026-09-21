@@ -24,6 +24,13 @@ import { loadUserAnalysisSettings } from '../services/user-settings';
 import { resolveCandidateLimit } from '../services/property-api/retrieval-policy';
 import { generateSseToken } from '../utils/sse-token';
 import { AnalysisError } from '../utils/analysis-error';
+import {
+  EVAL_RESULT_TTL_SECONDS,
+  decodeVerdict,
+  evalResultKey,
+  hashEvalParams,
+  searchOptionsFingerprint,
+} from '../utils/eval-cache';
 import { drizzle } from 'drizzle-orm/d1';
 import { eq, and } from 'drizzle-orm';
 import { savedReports } from '../db/schema';
@@ -42,28 +49,7 @@ function generateJobId(): string {
 }
 
 /** 21 days — window in which a repeat evaluation with identical params returns the stored report. */
-export const EVAL_RESULT_TTL_SECONDS = 21 * 24 * 60 * 60;
-
-/** Stable, order-insensitive stringify for hashing eval params. */
-function stableStringify(value: unknown): string {
-  if (value === null || typeof value !== 'object') return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
-  return `{${Object.keys(value as Record<string, unknown>)
-    .sort()
-    .map((k) => `${JSON.stringify(k)}:${stableStringify((value as Record<string, unknown>)[k])}`)
-    .join(',')}}`;
-}
-
-async function hashEvalParams(params: unknown): Promise<string> {
-  const data = new TextEncoder().encode(stableStringify(params));
-  const digest = await crypto.subtle.digest('SHA-256', data);
-  return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, '0')).join('');
-}
-
-export function evalResultKey(userId: string, address: string, paramsHash: string): string {
-  const norm = address.trim().toLowerCase().replace(/\s+/g, ' ');
-  return `eval-result:${userId}:${norm}:${paramsHash}`;
-}
+export { EVAL_RESULT_TTL_SECONDS };
 
 // ─── Request Types ─────────────────────────────────────────────────────────────
 
@@ -252,11 +238,22 @@ analyze.post('/', async (c) => {
     // 21-day eval-result cache: same address + same effective params returns
     // the stored report; different params hash -> fresh run. skipCache and
     // explicit refresh always bypass.
-    const evalParamsHash = await hashEvalParams(evalParams);
+    const evalParamsHash = await hashEvalParams({
+      evalParams,
+      searchOptions: searchOptionsFingerprint(body.searchOptions),
+    });
     const resultCacheKey = evalResultKey(auth.userId, body.address ?? '', evalParamsHash);
     if (!body.skipCache && !isRefresh && c.env.API_CACHE) {
       try {
         const cachedJobId = await c.env.API_CACHE.get(resultCacheKey)
+        // Cached terminal verdict — replay the error without a provider call.
+        const verdict = cachedJobId ? decodeVerdict(cachedJobId) : null
+        if (verdict) {
+          return c.json(
+            { success: false, error: verdict.message, code: verdict.code },
+            400,
+          );
+        }
         if (cachedJobId) {
           const db = drizzle(c.env.DB)
           const [cached] = await db
@@ -318,6 +315,18 @@ analyze.post('/', async (c) => {
         },
       }),
     });
+    // A live run owns the DO — surface its refusal (e.g. 409 already-running)
+    // instead of reporting success for a run that was never started.
+    if (!startResp.ok) {
+      const errBody = await startResp.json().catch(() => null) as { error?: string } | null;
+      return c.json(
+        {
+          success: false,
+          error: errBody?.error ?? 'Analysis could not be started — job already running',
+        },
+        startResp.status === 409 ? 409 : 502,
+      );
+    }
     await startResp.text();
 
     console.log(

@@ -32,8 +32,15 @@ import { filtersToApiParams } from '../services/appraisal/types'
 import type { Env } from '../types'
 import type { NormalizedProperty, NormalizedComparable } from '../services/property-api/types'
 import { drizzle } from 'drizzle-orm/d1'
+import { and, eq } from 'drizzle-orm'
 import { upsertPropertyReport } from '../services/report-upsert'
-import { analysisRuns } from '../db/schema'
+import { analysisRuns, savedReports } from '../db/schema'
+import {
+  EVAL_ERROR_TTL_SECONDS,
+  decodeVerdict,
+  encodeVerdict,
+  isCacheableVerdict,
+} from '../utils/eval-cache'
 import { evaluateRun } from '../services/observability/evals'
 
 interface JobState {
@@ -113,6 +120,11 @@ export class AnalysisJobDO {
   private encoder = new TextEncoder()
   private jobState: JobState | null = null
   private persistence: ChunkedJobState<JobState>
+  /** True while runStreamingAnalysis/runEnrichment is live in THIS isolate */
+  private runActive = false
+
+  /** Watchdog cadence — comfortably above a typical run (~2min). */
+  private static readonly WATCHDOG_MS = 5 * 60_000
 
   constructor(state: DurableObjectState, env: Env) {
     this.state = state
@@ -121,6 +133,47 @@ export class AnalysisJobDO {
     state.blockConcurrencyWhile(async () => {
       this.jobState = await this.persistence.read()
     })
+  }
+
+  /**
+   * Watchdog: fires while the job reads 'processing'. If the pipeline loop is
+   * still live in this isolate, re-arm. If the isolate hosting the run died
+   * (eviction, crash, deploy), runActive is false and the persisted run can
+   * never finish — convert it to a terminal error so polling clients stop
+   * waiting instead of watching 'processing' forever.
+   */
+  async alarm(): Promise<void> {
+    if (!this.jobState) {
+      this.jobState = await this.persistence.read()
+    }
+    const js = this.jobState
+    if (!js || js.status !== 'processing') {
+      await this.state.storage.deleteAlarm()
+      return
+    }
+    if (this.runActive) {
+      await this.state.storage.setAlarm(Date.now() + AnalysisJobDO.WATCHDOG_MS)
+      return
+    }
+
+    console.warn(`[AnalysisJobDO] watchdog: job ${js.jobId} processing with no live run — marking error`)
+    js.status = 'error'
+    js.error = 'Analysis was interrupted before completing — retry the request'
+    this.jobState = js
+    await this.persistence.write(js)
+    this.broadcast('error', { step: 'watchdog', message: js.error })
+    try {
+      const db = drizzle(this.env.DB)
+      await db.insert(analysisRuns).values({
+        jobId: js.jobId,
+        userId: js.userId,
+        status: 'error',
+        errorCode: 'STALLED',
+        errorMessage: js.error,
+        durationMs: Date.now() - js.createdAt,
+      })
+    } catch { /* observability only */ }
+    await this.state.storage.deleteAlarm()
   }
 
   async fetch(request: Request): Promise<Response> {
@@ -151,6 +204,17 @@ export class AnalysisJobDO {
   private async handleStartStreaming(request: Request): Promise<Response> {
     const body = await request.json() as StartStreamingRequest
 
+    // A pipeline is already live in this isolate — a retry/duplicate POST must
+    // not start a second interleaved run over the same state. (A persisted
+    // 'processing' state with runActive=false is a dead run; restarting is
+    // exactly the recovery we want, so only the in-memory flag gates this.)
+    if (this.runActive) {
+      return new Response(JSON.stringify({ error: 'Job already running' }), {
+        status: 409,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }
+
     const pending = ['property_fetch', 'evaluation']
     if (body.llmEnabled) pending.push('llm')
 
@@ -163,14 +227,25 @@ export class AnalysisJobDO {
       createdAt: Date.now(),
     }
     await this.persistence.write(this.jobState)
+    await this.state.storage.setAlarm(Date.now() + AnalysisJobDO.WATCHDOG_MS)
 
-    this.runStreamingAnalysis(body).catch((err) => {
-      console.error('[AnalysisJobDO] Streaming analysis fatal error:', err)
-      const durationMs = Date.now() - (this.jobState?.createdAt ?? Date.now())
-      this.pushEvent('error', { step: 'fatal', message: err instanceof Error ? err.message : 'Unknown error' })
-      this.recordRun(body, { status: 'error', durationMs, errorCode: 'FATAL', errorMessage: err instanceof Error ? err.message : 'Unknown error' })
-      this.pushEvent('enrichment_done', { totalDurationMs: durationMs })
-    })
+    // waitUntil is required: a DO with no tracked work can be evicted the
+    // moment this fetch returns — without it, polling-only API clients (no
+    // SSE connection holding the object alive) lose the run mid-flight.
+    this.runActive = true
+    this.state.waitUntil(
+      this.runStreamingAnalysis(body)
+        .catch((err) => {
+          console.error('[AnalysisJobDO] Streaming analysis fatal error:', err)
+          const durationMs = Date.now() - (this.jobState?.createdAt ?? Date.now())
+          this.pushEvent('error', { step: 'fatal', message: err instanceof Error ? err.message : 'Unknown error' })
+          this.recordRun(body, { status: 'error', durationMs, errorCode: 'FATAL', errorMessage: err instanceof Error ? err.message : 'Unknown error' })
+          this.pushEvent('enrichment_done', { totalDurationMs: durationMs })
+        })
+        .finally(() => {
+          this.runActive = false
+        })
+    )
 
     return new Response('OK', { status: 200 })
   }
@@ -190,6 +265,38 @@ export class AnalysisJobDO {
     }
     const apiFilterParams = filtersToApiParams(filters)
 
+    // Eval-result cache (route + batch children): a stored jobId replays the
+    // saved report, an 'err:' marker replays a terminal verdict — zero
+    // provider calls either way.
+    if (config.evalResultCacheKey && !config.skipCache && !config.isRefresh) {
+      try {
+        const cached = await this.env.API_CACHE?.get(config.evalResultCacheKey)
+        const verdict = cached ? decodeVerdict(cached) : null
+        if (verdict) {
+          await this.pushEvent('error', { step: 'cache', message: verdict.message, code: verdict.code })
+          await this.recordRun(config, { status: 'error', durationMs: Date.now() - startTime, errorCode: verdict.code, errorMessage: verdict.message })
+          await this.pushEvent('enrichment_done', { totalDurationMs: Date.now() - startTime })
+          return
+        }
+        if (cached) {
+          const db = drizzle(this.env.DB)
+          const [report] = await db
+            .select({ fullResponseJson: savedReports.fullResponseJson })
+            .from(savedReports)
+            .where(and(eq(savedReports.userId, config.userId), eq(savedReports.jobId, cached)))
+            .limit(1)
+          if (report?.fullResponseJson) {
+            const analysisResult = JSON.parse(report.fullResponseJson)
+            await this.pushEvent('evaluation_complete', { updatedResult: analysisResult })
+            await this.recordRun(config, { status: 'completed', durationMs: Date.now() - startTime, response: analysisResult })
+            await this.pushEvent('enrichment_done', { totalDurationMs: Date.now() - startTime })
+            return
+          }
+          await this.env.API_CACHE.delete(config.evalResultCacheKey).catch(() => {})
+        }
+      } catch { /* cache lookup best-effort */ }
+    }
+
     // ── Step 1: Search subject property ─────────────────────────────────────
     await this.pushEvent('property_fetch', { message: 'Searching property...' })
 
@@ -203,6 +310,7 @@ export class AnalysisJobDO {
 
     if (!searchResult.success) {
       const msg = ('error' in searchResult ? searchResult.error : null) || 'Property not found'
+      await this.cacheVerdict(config, 'PROPERTY_NOT_FOUND', msg)
       await this.pushEvent('error', { step: 'property_fetch', message: msg })
       await this.recordRun(config, { status: 'error', durationMs: Date.now() - startTime, errorCode: 'PROPERTY_NOT_FOUND', errorMessage: msg })
       await this.pushEvent('enrichment_done', { totalDurationMs: Date.now() - startTime })
@@ -602,6 +710,7 @@ export class AnalysisJobDO {
         evidenceRefresh: (evalError as { evidenceRefresh?: unknown })?.evidenceRefresh,
         physicalEvidence: (evalError as { physicalEvidence?: unknown })?.physicalEvidence,
       })
+      await this.cacheVerdict(config, code, msg)
       await this.recordRun(config, { status: 'error', durationMs: Date.now() - startTime, errorCode: code ?? 'EVALUATION_ERROR', errorMessage: msg, compCount: bundle.comparables?.length })
       await this.pushEvent('enrichment_done', { totalDurationMs: Date.now() - startTime })
       return
@@ -737,14 +846,22 @@ export class AnalysisJobDO {
       createdAt: Date.now(),
     }
     await this.persistence.write(this.jobState)
+    await this.state.storage.setAlarm(Date.now() + AnalysisJobDO.WATCHDOG_MS)
 
-    // Run enrichment inside the DO — persistent context, no waitUntil needed
-    // The DO stays alive as long as there are SSE clients or pending work
-    this.runEnrichment(body).catch((err) => {
-      console.error('[AnalysisJobDO] Enrichment fatal error:', err)
-      this.pushEvent('error', { step: 'fatal', message: err instanceof Error ? err.message : 'Unknown error' })
-      this.pushEvent('enrichment_done', { totalDurationMs: Date.now() - (this.jobState?.createdAt ?? Date.now()) })
-    })
+    // Run enrichment inside the DO under waitUntil — without it the DO can
+    // be evicted mid-run once this fetch returns (see handleStartStreaming).
+    this.runActive = true
+    this.state.waitUntil(
+      this.runEnrichment(body)
+        .catch((err) => {
+          console.error('[AnalysisJobDO] Enrichment fatal error:', err)
+          this.pushEvent('error', { step: 'fatal', message: err instanceof Error ? err.message : 'Unknown error' })
+          this.pushEvent('enrichment_done', { totalDurationMs: Date.now() - (this.jobState?.createdAt ?? Date.now()) })
+        })
+        .finally(() => {
+          this.runActive = false
+        })
+    )
 
     // Return immediately — enrichment runs async in the DO
     return new Response('OK', { status: 200 })
@@ -929,6 +1046,18 @@ export class AnalysisJobDO {
 
   // ─── Observability: record every run outcome (success AND failure) ────────
 
+  /**
+   * Persist a terminal verdict (insufficient comps / property not found) under
+   * the eval-result key so retries of the same address+params replay the error
+   * instead of re-spending provider calls. 24h TTL — provider data can change.
+   */
+  private async cacheVerdict(config: StartStreamingRequest, code: string | undefined, message: string): Promise<void> {
+    if (!config.evalResultCacheKey || !isCacheableVerdict(code)) return
+    await this.env.API_CACHE?.put(config.evalResultCacheKey, encodeVerdict(code!, message), {
+      expirationTtl: EVAL_ERROR_TTL_SECONDS,
+    }).catch(() => { /* best-effort */ })
+  }
+
   private async recordRun(
     config: StartStreamingRequest,
     outcome: {
@@ -1026,6 +1155,10 @@ export class AnalysisJobDO {
     const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>()
     const writer = writable.getWriter()
     this.sseClients.add(writer)
+
+    // Connection marker — the old worker-side poll loop emitted this; the
+    // dashboard hook listens for it.
+    await writer.write(this.encoder.encode(`event: connected\ndata: ${JSON.stringify({ jobId: this.jobState?.jobId })}\n\n`))
 
     // Replay buffered events for late-joining clients
     if (this.jobState?.events.length) {
