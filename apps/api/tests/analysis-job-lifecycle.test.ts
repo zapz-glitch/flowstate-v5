@@ -118,4 +118,24 @@ const startReq = (jobId: string) =>
   assert.ok(state.storage.alarmAt !== null, 'watchdog re-arms while the run is live')
 }
 
+// ─── Ownership guard: start for another user's persisted job → 403 ──────────
+{
+  const state = new MockState()
+  const persistence = new ChunkedJobState<{ status: string }>(state.storage as never)
+  await persistence.write({
+    jobId: 'job_victim', userId: 'victim-user', status: 'complete', pending: [], events: [], createdAt: Date.now() - 60_000,
+  })
+  const job = new AnalysisJobDO(state as never, env)
+  const res = await job.fetch(new Request('http://internal/start-streaming', {
+    method: 'POST',
+    body: JSON.stringify({
+      jobId: 'job_victim', userId: 'attacker-user',
+      search: { address: '1 Test St' }, searchOptions: {}, evalParams: {}, llmEnabled: false,
+    }),
+  }))
+  assert.equal(res.status, 403, 'start-streaming on another user\'s job must be rejected')
+  await res.text()
+  assert.equal(state.waited.length, 0, 'no pipeline may launch for a foreign job')
+}
+
 console.log('Analysis job lifecycle tests passed')

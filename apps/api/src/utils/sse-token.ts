@@ -5,6 +5,8 @@
  * Tokens are short-lived (5 minutes) to prevent replay attacks.
  */
 
+import { timingSafeEqual } from '../lib/share-token'
+
 const TOKEN_EXPIRY_MS = 5 * 60 * 1000 // 5 minutes
 
 async function hmacSign(secret: string, data: string): Promise<string> {
@@ -55,7 +57,7 @@ export async function verifySseToken(
   const [payloadStr, providedSig] = parts
   const expectedSig = await hmacSign(secret, payloadStr)
 
-  if (providedSig !== expectedSig) return null
+  if (!timingSafeEqual(providedSig, expectedSig)) return null
 
   try {
     const payload = JSON.parse(atob(payloadStr)) as { jobId: string; userId: string; exp: number }

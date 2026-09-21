@@ -67,7 +67,7 @@ interface GHLWebhookPayload {
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function generateJobId(): string {
-  return `job_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`
+  return `job_${Date.now()}_${crypto.randomUUID().replace(/-/g, '').slice(0, 16)}`
 }
 
 function parseAddress(fullAddress: string): { street: string; city: string; state: string; zip: string } {

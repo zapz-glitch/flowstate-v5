@@ -124,6 +124,12 @@ reports.get('/:jobId', async (c) => {
  *
  * Verify the share password and set an access cookie.
  */
+// Share-password lockout: reuses the generic login_failures (key, count,
+// last_attempt) table with a namespaced key — no migration needed. Blocks an
+// IP on a given report for 15 minutes after 5 failed verifications.
+const SHARE_LOCKOUT_MAX_FAILURES = 5
+const SHARE_LOCKOUT_WINDOW_MS = 15 * 60 * 1000
+
 reports.post('/:jobId/verify', async (c) => {
   try {
     const jobId = c.req.param('jobId')
@@ -131,6 +137,27 @@ reports.post('/:jobId/verify', async (c) => {
 
     if (!body.password) {
       return c.json({ success: false, error: 'Password is required' }, 400)
+    }
+
+    const ip =
+      c.req.header('cf-connecting-ip') ||
+      c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ||
+      'unknown'
+    const lockKey = `share:${jobId}:${ip}`
+    const now = Date.now()
+
+    const lockRow = await c.env.DB
+      .prepare('SELECT count, last_attempt FROM login_failures WHERE ip = ?')
+      .bind(lockKey)
+      .first<{ count: number; last_attempt: number }>()
+
+    if (lockRow && lockRow.count >= SHARE_LOCKOUT_MAX_FAILURES && now - lockRow.last_attempt < SHARE_LOCKOUT_WINDOW_MS) {
+      const retryAfter = Math.ceil((lockRow.last_attempt + SHARE_LOCKOUT_WINDOW_MS - now) / 1000)
+      return c.json(
+        { success: false, error: 'Too many failed attempts. Try again later.' },
+        429,
+        { 'X-Retry-After': String(retryAfter) }
+      )
     }
 
     const db = drizzle(c.env.DB)
@@ -158,7 +185,19 @@ reports.post('/:jobId/verify', async (c) => {
 
     const valid = await verifySharePassword(body.password, report.sharePasswordHash)
     if (!valid) {
+      const count = lockRow && now - lockRow.last_attempt < SHARE_LOCKOUT_WINDOW_MS ? lockRow.count + 1 : 1
+      await c.env.DB
+        .prepare('INSERT INTO login_failures (ip, count, last_attempt) VALUES (?, ?, ?) ON CONFLICT(ip) DO UPDATE SET count = excluded.count, last_attempt = excluded.last_attempt')
+        .bind(lockKey, count, now)
+        .run()
+        .catch((e) => console.warn('[Reports] lockout counter write failed:', e))
       return c.json({ success: false, error: 'Incorrect password' }, 401)
+    }
+
+    // Success clears the counter for this report+IP
+    if (lockRow) {
+      await c.env.DB.prepare('DELETE FROM login_failures WHERE ip = ?').bind(lockKey).run()
+        .catch(() => {})
     }
 
     // Set access cookie (24h)

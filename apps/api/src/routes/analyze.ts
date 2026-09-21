@@ -33,7 +33,7 @@ import {
 } from '../utils/eval-cache';
 import { drizzle } from 'drizzle-orm/d1';
 import { eq, and } from 'drizzle-orm';
-import { savedReports } from '../db/schema';
+import { analysisRuns, savedReports } from '../db/schema';
 
 type Variables = { auth: AuthContext };
 
@@ -45,7 +45,7 @@ const analyze = new Hono<{ Bindings: Env; Variables: Variables }>();
  * Generate a unique job ID
  */
 function generateJobId(): string {
-  return `job_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
+  return `job_${Date.now()}_${crypto.randomUUID().replace(/-/g, '').slice(0, 16)}`;
 }
 
 /** 21 days — window in which a repeat evaluation with identical params returns the stored report. */
@@ -175,6 +175,29 @@ analyze.post('/', async (c) => {
 
     const isRefresh = !!body.existingJobId;
     const jobId = isRefresh ? body.existingJobId! : generateJobId();
+
+    // Re-runs attach to an existing job — verify the caller owns it, else an
+    // authed user could hijack another user's job DO (jobIds leak via shared
+    // report URLs) or collide with their saved_reports row.
+    if (isRefresh) {
+      const ownerDb = drizzle(c.env.DB);
+      const [owner] = await ownerDb
+        .select({ userId: savedReports.userId })
+        .from(savedReports)
+        .where(eq(savedReports.jobId, jobId))
+        .limit(1);
+      // A failed first run leaves no saved_reports row — fall back to the
+      // analysis_runs record so legitimate retries still work.
+      const runOwner = owner ? null : (await ownerDb
+        .select({ userId: analysisRuns.userId })
+        .from(analysisRuns)
+        .where(eq(analysisRuns.jobId, jobId))
+        .limit(1))[0];
+      const ownerId = owner?.userId ?? runOwner?.userId;
+      if (!ownerId || ownerId !== auth.userId) {
+        return c.json({ success: false, error: 'Job not found' }, 404);
+      }
+    }
 
     // ─── 1. Load user settings ───────────────────────────────────────────────
     const settingsStart = Date.now();
