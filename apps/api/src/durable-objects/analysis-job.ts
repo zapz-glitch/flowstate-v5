@@ -1156,6 +1156,10 @@ export class AnalysisJobDO {
     const writer = writable.getWriter()
     this.sseClients.add(writer)
 
+    // Connection marker — the old worker-side poll loop emitted this; the
+    // dashboard hook listens for it.
+    await writer.write(this.encoder.encode(`event: connected\ndata: ${JSON.stringify({ jobId: this.jobState?.jobId })}\n\n`))
+
     // Replay buffered events for late-joining clients
     if (this.jobState?.events.length) {
       for (const evt of this.jobState.events) {
