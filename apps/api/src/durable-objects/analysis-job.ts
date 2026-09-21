@@ -32,8 +32,15 @@ import { filtersToApiParams } from '../services/appraisal/types'
 import type { Env } from '../types'
 import type { NormalizedProperty, NormalizedComparable } from '../services/property-api/types'
 import { drizzle } from 'drizzle-orm/d1'
+import { and, eq } from 'drizzle-orm'
 import { upsertPropertyReport } from '../services/report-upsert'
-import { analysisRuns } from '../db/schema'
+import { analysisRuns, savedReports } from '../db/schema'
+import {
+  EVAL_ERROR_TTL_SECONDS,
+  decodeVerdict,
+  encodeVerdict,
+  isCacheableVerdict,
+} from '../utils/eval-cache'
 import { evaluateRun } from '../services/observability/evals'
 
 interface JobState {
@@ -258,6 +265,38 @@ export class AnalysisJobDO {
     }
     const apiFilterParams = filtersToApiParams(filters)
 
+    // Eval-result cache (route + batch children): a stored jobId replays the
+    // saved report, an 'err:' marker replays a terminal verdict — zero
+    // provider calls either way.
+    if (config.evalResultCacheKey && !config.skipCache && !config.isRefresh) {
+      try {
+        const cached = await this.env.API_CACHE?.get(config.evalResultCacheKey)
+        const verdict = cached ? decodeVerdict(cached) : null
+        if (verdict) {
+          await this.pushEvent('error', { step: 'cache', message: verdict.message, code: verdict.code })
+          await this.recordRun(config, { status: 'error', durationMs: Date.now() - startTime, errorCode: verdict.code, errorMessage: verdict.message })
+          await this.pushEvent('enrichment_done', { totalDurationMs: Date.now() - startTime })
+          return
+        }
+        if (cached) {
+          const db = drizzle(this.env.DB)
+          const [report] = await db
+            .select({ fullResponseJson: savedReports.fullResponseJson })
+            .from(savedReports)
+            .where(and(eq(savedReports.userId, config.userId), eq(savedReports.jobId, cached)))
+            .limit(1)
+          if (report?.fullResponseJson) {
+            const analysisResult = JSON.parse(report.fullResponseJson)
+            await this.pushEvent('evaluation_complete', { updatedResult: analysisResult })
+            await this.recordRun(config, { status: 'completed', durationMs: Date.now() - startTime, response: analysisResult })
+            await this.pushEvent('enrichment_done', { totalDurationMs: Date.now() - startTime })
+            return
+          }
+          await this.env.API_CACHE.delete(config.evalResultCacheKey).catch(() => {})
+        }
+      } catch { /* cache lookup best-effort */ }
+    }
+
     // ── Step 1: Search subject property ─────────────────────────────────────
     await this.pushEvent('property_fetch', { message: 'Searching property...' })
 
@@ -271,6 +310,7 @@ export class AnalysisJobDO {
 
     if (!searchResult.success) {
       const msg = ('error' in searchResult ? searchResult.error : null) || 'Property not found'
+      await this.cacheVerdict(config, 'PROPERTY_NOT_FOUND', msg)
       await this.pushEvent('error', { step: 'property_fetch', message: msg })
       await this.recordRun(config, { status: 'error', durationMs: Date.now() - startTime, errorCode: 'PROPERTY_NOT_FOUND', errorMessage: msg })
       await this.pushEvent('enrichment_done', { totalDurationMs: Date.now() - startTime })
@@ -670,6 +710,7 @@ export class AnalysisJobDO {
         evidenceRefresh: (evalError as { evidenceRefresh?: unknown })?.evidenceRefresh,
         physicalEvidence: (evalError as { physicalEvidence?: unknown })?.physicalEvidence,
       })
+      await this.cacheVerdict(config, code, msg)
       await this.recordRun(config, { status: 'error', durationMs: Date.now() - startTime, errorCode: code ?? 'EVALUATION_ERROR', errorMessage: msg, compCount: bundle.comparables?.length })
       await this.pushEvent('enrichment_done', { totalDurationMs: Date.now() - startTime })
       return
@@ -1004,6 +1045,18 @@ export class AnalysisJobDO {
   // ─── Event Management ─────────────────────────────────────────────────────
 
   // ─── Observability: record every run outcome (success AND failure) ────────
+
+  /**
+   * Persist a terminal verdict (insufficient comps / property not found) under
+   * the eval-result key so retries of the same address+params replay the error
+   * instead of re-spending provider calls. 24h TTL — provider data can change.
+   */
+  private async cacheVerdict(config: StartStreamingRequest, code: string | undefined, message: string): Promise<void> {
+    if (!config.evalResultCacheKey || !isCacheableVerdict(code)) return
+    await this.env.API_CACHE?.put(config.evalResultCacheKey, encodeVerdict(code!, message), {
+      expirationTtl: EVAL_ERROR_TTL_SECONDS,
+    }).catch(() => { /* best-effort */ })
+  }
 
   private async recordRun(
     config: StartStreamingRequest,

@@ -18,6 +18,7 @@ import { batchJobs } from '../db/schema'
 import { loadUserAnalysisSettings } from '../services/user-settings'
 import { kickNextQueuedBatch } from '../services/batch-queue'
 import { withDbRetry } from '../lib/db-retry'
+import { evalResultKey, hashEvalParams, searchOptionsFingerprint } from '../utils/eval-cache'
 
 interface BatchState {
   batchId: string
@@ -673,6 +674,25 @@ export class BatchJobDO {
     // Start the analysis in the sub-DO (no LLM) — bounded fetch so a hung
     // child DO fails the address instead of freezing the whole list.
     const appraisalRules = userSettings.appraisalRules ?? {}
+    const evalParams = {
+      appraisalRules,
+      buybox: userSettings.mergedBuybox,
+      customRehabTable: userSettings.customRehabTable,
+      customTierRanges: userSettings.customTierRanges,
+      customMajorItemCosts: userSettings.customMajorItemCosts,
+      arvThreshold: userSettings.arvThreshold,
+      asIsThresholdPercent: userSettings.asIsThresholdPercent,
+      reconciliationSaleAgeDays: userSettings.reconciliationSaleAgeDays,
+      proximityConfig: userSettings.proximityConfig,
+    }
+    // Same cache key the analyze route computes — lets child DOs replay stored
+    // reports/verdicts and populate the cache for future runs of this address.
+    // Fingerprint the options actually sent to the child DO (defaults applied).
+    const searchOptions = config.searchOptions ?? { radiusMiles: 1, monthsBack: 12 }
+    const evalResultCacheKey = evalResultKey(config.userId, address, await hashEvalParams({
+      evalParams,
+      searchOptions: searchOptionsFingerprint(searchOptions),
+    }))
     let startResp: Response
     try {
       startResp = await stub.fetch('http://internal/start-streaming', {
@@ -682,19 +702,10 @@ export class BatchJobDO {
           jobId,
           userId: config.userId,
           search: { address },
-          searchOptions: config.searchOptions ?? { radiusMiles: 1, monthsBack: 12 },
+          searchOptions,
           skipCache: config.skipCache ?? false,
-          evalParams: {
-            appraisalRules,
-            buybox: userSettings.mergedBuybox,
-            customRehabTable: userSettings.customRehabTable,
-            customTierRanges: userSettings.customTierRanges,
-            customMajorItemCosts: userSettings.customMajorItemCosts,
-            arvThreshold: userSettings.arvThreshold,
-            asIsThresholdPercent: userSettings.asIsThresholdPercent,
-            reconciliationSaleAgeDays: userSettings.reconciliationSaleAgeDays,
-            proximityConfig: userSettings.proximityConfig,
-          },
+          evalParams,
+          evalResultCacheKey,
           llmEnabled: false, // No AI for batch
           isRefresh: false,
         }),

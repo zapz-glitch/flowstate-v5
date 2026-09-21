@@ -311,6 +311,20 @@ async function getAccessToken(env: Env, cred: ApiCredentials): Promise<string> {
     return cached.accessToken
   }
 
+  // KV-shared token — each analysis DO is a fresh isolate, so without this
+  // every job burns a token request against the throttle budget.
+  const kvKey = `cotality-token:${cred.index}`
+  try {
+    const kv = await env.API_CACHE?.get(kvKey)
+    if (kv) {
+      const shared: TokenCache = JSON.parse(kv)
+      if (shared.expiresAt > Date.now() + 60000) {
+        tokenCaches.set(cred.index, shared)
+        return shared.accessToken
+      }
+    }
+  } catch { /* KV best-effort — fall through to fresh token */ }
+
   const credentials = btoa(`${cred.clientId}:${cred.clientSecret}`)
 
   // Token requests count against the provider's request budget too
@@ -337,10 +351,14 @@ async function getAccessToken(env: Env, cred: ApiCredentials): Promise<string> {
 
   const data: { access_token: string; expires_in: number } = await response.json()
 
-  tokenCaches.set(cred.index, {
+  const entry: TokenCache = {
     accessToken: data.access_token,
     expiresAt: Date.now() + data.expires_in * 1000,
-  })
+  }
+  tokenCaches.set(cred.index, entry)
+  env.API_CACHE?.put(kvKey, JSON.stringify(entry), {
+    expirationTtl: Math.max(60, Math.floor((entry.expiresAt - Date.now()) / 1000)),
+  }).catch(() => { /* KV best-effort */ })
 
   return data.access_token
 }
@@ -456,6 +474,9 @@ async function request<T>(
           lastError = new Error(`ENTITLEMENTS_ERROR: Account does not have access to ${endpoint}`)
           continue
         }
+
+        // Shared KV token may be revoked — drop it so other isolates mint fresh.
+        env.API_CACHE?.delete(`cotality-token:${cred.index}`).catch(() => {})
 
         console.warn(`CoreLogic key ${cred.index} auth failed (${response.status}), rotating...`, {
           status: response.status,
