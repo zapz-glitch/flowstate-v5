@@ -874,29 +874,47 @@ export class BatchJobDO {
     const writer = writable.getWriter()
     this.sseClients.add(writer)
 
+    // Initial writes are queued, never awaited: a TransformStream write cannot
+    // settle until the readable is consumed, and the client cannot consume
+    // until this Response is returned — awaiting here deadlocks the connect.
+    const initialWrites: Promise<void>[] = []
+
     // Send current state snapshot for late-joining clients
     if (this.batchState) {
-      await writer.write(this.encoder.encode(`event: batch_state\ndata: ${JSON.stringify({
+      initialWrites.push(writer.write(this.encoder.encode(`event: batch_state\ndata: ${JSON.stringify({
         status: this.batchState.status,
         totalAddresses: this.batchState.totalAddresses,
         completedCount: this.batchState.completedCount,
         failedCount: this.batchState.failedCount,
         currentIndex: this.batchState.currentIndex,
         results: this.batchState.results,
-      })}\n\n`))
+      })}\n\n`)))
     }
 
-    // If already done, close after snapshot
-    if (this.batchState?.status === 'completed' || this.batchState?.status === 'failed') {
-      await writer.write(this.encoder.encode(`event: batch_done\ndata: ${JSON.stringify({ replayed: true })}\n\n`))
-      writer.close()
-      this.sseClients.delete(writer)
+    // If already done, emit the terminal event after the snapshot, then close
+    // once the queued writes settle (waitUntil keeps the DO alive for it).
+    const terminal = this.batchState?.status === 'completed' || this.batchState?.status === 'failed'
+    if (terminal) {
+      initialWrites.push(writer.write(this.encoder.encode(`event: batch_done\ndata: ${JSON.stringify({ replayed: true })}\n\n`)))
     } else {
       request.signal?.addEventListener('abort', () => {
         this.sseClients.delete(writer)
         writer.close().catch(() => {})
       })
     }
+    this.state.waitUntil(
+      Promise.all(initialWrites)
+        .then(async () => {
+          if (terminal) {
+            await writer.close()
+            this.sseClients.delete(writer)
+          }
+        })
+        .catch(() => {
+          this.sseClients.delete(writer)
+          return writer.abort().catch(() => {})
+        }),
+    )
 
     return new Response(readable, {
       headers: {

@@ -1167,28 +1167,46 @@ export class AnalysisJobDO {
     const writer = writable.getWriter()
     this.sseClients.add(writer)
 
-    // Connection marker — the old worker-side poll loop emitted this; the
-    // dashboard hook listens for it.
-    await writer.write(this.encoder.encode(`event: connected\ndata: ${JSON.stringify({ jobId: this.jobState?.jobId })}\n\n`))
+    // Initial writes are queued, never awaited: a TransformStream write cannot
+    // settle until the readable is consumed, and the client cannot consume
+    // until this Response is returned — awaiting here deadlocks the connect.
+    const initialWrites: Promise<void>[] = [
+      // Connection marker — the old worker-side poll loop emitted this; the
+      // dashboard hook listens for it.
+      writer.write(this.encoder.encode(`event: connected\ndata: ${JSON.stringify({ jobId: this.jobState?.jobId })}\n\n`)),
+    ]
 
     // Replay buffered events for late-joining clients
     if (this.jobState?.events.length) {
       for (const evt of this.jobState.events) {
-        await writer.write(this.encoder.encode(`event: ${evt.event}\ndata: ${JSON.stringify(evt.data)}\n\n`))
+        initialWrites.push(writer.write(this.encoder.encode(`event: ${evt.event}\ndata: ${JSON.stringify(evt.data)}\n\n`)))
       }
     }
 
-    // If already complete, close after replay
-    if (this.jobState?.status === 'complete' || this.jobState?.status === 'error') {
-      await writer.write(this.encoder.encode(`event: enrichment_done\ndata: ${JSON.stringify({ replayed: true })}\n\n`))
-      writer.close()
-      this.sseClients.delete(writer)
+    // If already complete, emit the terminal event after replay, then close
+    // once the queued writes settle (waitUntil keeps the DO alive for it).
+    const terminal = this.jobState?.status === 'complete' || this.jobState?.status === 'error'
+    if (terminal) {
+      initialWrites.push(writer.write(this.encoder.encode(`event: enrichment_done\ndata: ${JSON.stringify({ replayed: true })}\n\n`)))
     } else {
       request.signal?.addEventListener('abort', () => {
         this.sseClients.delete(writer)
         writer.close().catch(() => {})
       })
     }
+    this.state.waitUntil(
+      Promise.all(initialWrites)
+        .then(async () => {
+          if (terminal) {
+            await writer.close()
+            this.sseClients.delete(writer)
+          }
+        })
+        .catch(() => {
+          this.sseClients.delete(writer)
+          return writer.abort().catch(() => {})
+        }),
+    )
 
     return new Response(readable, {
       headers: {
