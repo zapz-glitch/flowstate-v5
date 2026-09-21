@@ -18,6 +18,14 @@
 
 export const THROTTLE_WINDOW_MS = 60_000
 export const THROTTLE_MAX_REQUESTS = 50
+/**
+ * Slots per minute reserved for interactive requests (e.g. typeahead).
+ * Bulk callers cap at MAX - RESERVE so interactive traffic never queues
+ * behind a deep analysis backlog; interactive callers may use the full
+ * MAX so total throughput still respects the provider's 50/min limit.
+ */
+export const THROTTLE_INTERACTIVE_RESERVE = 5
+export const THROTTLE_BULK_MAX_REQUESTS = THROTTLE_MAX_REQUESTS - THROTTLE_INTERACTIVE_RESERVE
 /** Reject acquires when the reserved backlog is deeper than this */
 export const THROTTLE_QUEUE_CAP_MS = 300_000 // 5 minutes
 
@@ -56,13 +64,14 @@ export interface ThrottleStats {
  */
 export function computeThrottleSlot(
   grants: number[],
-  now: number
+  now: number,
+  maxRequests: number = THROTTLE_MAX_REQUESTS
 ): { grants: number[]; result: ThrottleAcquireResult } {
   const windowStart = now - THROTTLE_WINDOW_MS
   const active = grants.filter((g) => g > windowStart)
   const queueDepth = active.filter((g) => g > now).length
 
-  if (active.length < THROTTLE_MAX_REQUESTS) {
+  if (active.length < maxRequests) {
     // Capacity in the current window — grant immediately
     active.push(now)
     return {
@@ -77,9 +86,9 @@ export function computeThrottleSlot(
     }
   }
 
-  // Window is full — the new slot frees when the 50th-newest committed
+  // Window is full — the new slot frees when the Nth-newest committed
   // grant rolls off the window's left edge.
-  const scheduledFor = active[active.length - THROTTLE_MAX_REQUESTS] + THROTTLE_WINDOW_MS
+  const scheduledFor = active[active.length - maxRequests] + THROTTLE_WINDOW_MS
   const waitMs = Math.max(0, scheduledFor - now)
 
   if (waitMs > THROTTLE_QUEUE_CAP_MS) {
