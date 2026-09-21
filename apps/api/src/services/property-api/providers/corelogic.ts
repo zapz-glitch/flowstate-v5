@@ -205,7 +205,7 @@ let currentKeyIndex = 0
  */
 const ACQUIRE_BUDGET_MS = 20 * 60_000
 
-async function acquireCotalitySlot(env: Env): Promise<void> {
+async function acquireCotalitySlot(env: Env, priority = false): Promise<void> {
   const ns = env.RATE_LIMIT_COORDINATOR
   if (!ns) return
 
@@ -216,7 +216,11 @@ async function acquireCotalitySlot(env: Env): Promise<void> {
       const doId = ns.idFromName('cotality-global-throttle')
       const stub = ns.get(doId)
       const res = await stub.fetch(
-        new Request('https://internal/throttle/acquire', { method: 'POST' })
+        new Request('https://internal/throttle/acquire', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ priority }),
+        })
       )
       if (!res.ok) {
         await res.text().catch(() => {})
@@ -305,7 +309,7 @@ function markKeySuccess(keyIndex: number): void {
 
 // ─── Authentication ────────────────────────────────────────────────────────────
 
-async function getAccessToken(env: Env, cred: ApiCredentials): Promise<string> {
+async function getAccessToken(env: Env, cred: ApiCredentials, priority = false): Promise<string> {
   const cached = tokenCaches.get(cred.index)
   if (cached && cached.expiresAt > Date.now() + 60000) {
     return cached.accessToken
@@ -328,7 +332,7 @@ async function getAccessToken(env: Env, cred: ApiCredentials): Promise<string> {
   const credentials = btoa(`${cred.clientId}:${cred.clientSecret}`)
 
   // Token requests count against the provider's request budget too
-  await acquireCotalitySlot(env)
+  await acquireCotalitySlot(env, priority)
 
   const response = await fetch(`${TOKEN_URL}?grant_type=client_credentials`, {
     method: 'POST',
@@ -400,6 +404,8 @@ async function request<T>(
     params?: Record<string, string | number | boolean | undefined>
     baseUrl?: string
     strictNotFound?: boolean
+    /** Interactive calls (typeahead) can use reserved headroom slots */
+    priority?: boolean
   }
 ): Promise<T> {
   const credentials = getAvailableCredentials(env)
@@ -425,7 +431,7 @@ async function request<T>(
     triedKeys.add(cred.index)
 
     try {
-      const token = await getAccessToken(env, cred)
+      const token = await getAccessToken(env, cred, options?.priority === true)
       const baseUrl = options?.baseUrl || BASE_URL
 
       const url = new URL(`${baseUrl}${endpoint}`)
@@ -438,7 +444,7 @@ async function request<T>(
       }
 
       // Acquire a global rate-limit slot before every outbound data call
-      await acquireCotalitySlot(env)
+      await acquireCotalitySlot(env, options?.priority === true)
 
       // Track the API call
       _callLog.push({ endpoint, timestamp: Date.now() })
@@ -1604,6 +1610,7 @@ export interface TypeaheadResult {
 export async function corelogicTypeahead(env: Env, input: string): Promise<TypeaheadResult[]> {
   const response = await request<{ results?: TypeaheadResult[] }>(env, '/v2/properties/typeahead', {
     params: { input },
+    priority: true,
   })
   return response.results ?? []
 }

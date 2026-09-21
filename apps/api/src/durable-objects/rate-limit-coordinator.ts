@@ -14,7 +14,7 @@ import type {
   AcquireKeyResult,
   ReleaseKeyResult,
 } from './types'
-import { computeThrottleSlot, computeThrottleStats } from './throttle'
+import { computeThrottleSlot, computeThrottleStats, THROTTLE_BULK_MAX_REQUESTS, THROTTLE_MAX_REQUESTS } from './throttle'
 
 // CoreLogic API limits
 const MAX_DAILY_USAGE_PER_KEY = 100
@@ -148,7 +148,7 @@ export class RateLimitCoordinatorDO extends DurableObject<Env> {
         case '/reset':
           return this.handleResetDaily()
         case '/throttle/acquire':
-          return this.handleThrottleAcquire()
+          return this.handleThrottleAcquire(request)
         case '/throttle/stats':
           return this.handleThrottleStats()
         default:
@@ -366,11 +366,25 @@ export class RateLimitCoordinatorDO extends DurableObject<Env> {
    * or a reserved future slot the caller waits for. granted=false only when
    * the queue backlog exceeds the cap.
    *
+   * Body `{ priority: true }` marks interactive traffic (typeahead) which
+   * may use the reserved headroom slots instead of queueing behind bulk
+   * analysis backlog. Bulk callers are capped at MAX - RESERVE.
+   *
    * Single-threaded DO = serialized acquires, no races across workers.
    */
-  private async handleThrottleAcquire(): Promise<Response> {
+  private async handleThrottleAcquire(request: Request): Promise<Response> {
+    let priority = false
+    try {
+      const body = (await request.json()) as { priority?: boolean }
+      priority = body.priority === true
+    } catch { /* empty body — bulk acquire */ }
+
     const grants = await this.loadThrottleGrants()
-    const { grants: updated, result } = computeThrottleSlot(grants, Date.now())
+    const { grants: updated, result } = computeThrottleSlot(
+      grants,
+      Date.now(),
+      priority ? THROTTLE_MAX_REQUESTS : THROTTLE_BULK_MAX_REQUESTS,
+    )
 
     this.throttleGrants = updated
     await this.ctx.storage.put(THROTTLE_STORAGE_KEY, updated)
