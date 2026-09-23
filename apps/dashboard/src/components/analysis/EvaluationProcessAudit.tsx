@@ -1,6 +1,8 @@
 'use client'
 
 import { useState } from 'react'
+import { ChevronDown } from 'lucide-react'
+import { cn } from '@/lib/utils'
 import type {
   CompItem,
   CompsData,
@@ -198,6 +200,7 @@ export function EvaluationProcessAudit({
   comps: CompsData | undefined
   run: JevHybridData | null | undefined
 }) {
+  const [open, setOpen] = useState(false)
   if (!valuation || !comps) return null
   const items = comps.items ?? []
 
@@ -212,9 +215,18 @@ export function EvaluationProcessAudit({
   const coreTarget = run?.selection?.coreTarget ?? 3
 
   return (
-    <section className="border border-border rounded-sm px-4 py-3 space-y-2 text-foreground">
-      <h3 className="text-body-sm font-semibold">How Jev evaluated the comps</h3>
+    <section className="border border-border rounded-sm px-4 py-2.5 text-foreground">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center justify-between gap-2 text-left"
+        aria-expanded={open}
+      >
+        <span className="text-body-sm font-semibold">How Jev evaluated the comps</span>
+        <ChevronDown className={cn('w-3.5 h-3.5 text-foreground-tertiary transition-transform', open && 'rotate-180')} />
+      </button>
 
+      {open && <div className="space-y-2 mt-2">
       <ol className="list-decimal pl-4 space-y-0.5 text-[10px] text-foreground-tertiary">
         <li>Every comp with a usable sale price and date is eligible — nothing else is pre-filtered.</li>
         <li>{`Test 1 — Jev asks one question per raw field (bathrooms, square feet, lot size, year built, sale price, sale date): does the comp match the subject per the appraisal rules? Passing every verifiable field puts the comp in the "passed test 1" bucket.`}</li>
@@ -261,6 +273,7 @@ export function EvaluationProcessAudit({
           </p>
         </>
       )}
+      </div>}
     </section>
   )
 }
