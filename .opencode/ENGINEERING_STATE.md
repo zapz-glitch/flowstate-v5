@@ -1,6 +1,75 @@
 # Engineering State — flowstate-v5
 
 
+### 2026-09-23 (later 2) — Enrichment deferral: `c5df7ac`
+
+Provider detail calls moved inside the Jev funnel. The DO no longer
+mass-enriches the raw pool (~80 calls/run); `runJevEvaluation` enriches
+test-1 passers only — distance asc, test-1 field-strength tiebreak
+(mean noul prob, unverifiable counts 0), capped at COMP_ENRICH_MAX=10.
+New stage `test1_pass` = passed test 1 but beyond the cap — never
+test-2'd, middle score band (35–74) alongside test2_fail. Dashboard
+union/sort-rank/audit label updated. Refetch merges raw candidates.
+ARV fix: fold-back writes entry.adjustedPrice (recomputed on enriched
+data) onto comp.adjustedSalePrice.
+
+Live-verified job_1790142628758 (24-comp provider pool — provider-side
+variance vs the earlier 89): 3 passers → 3 enriched → 3 core, ARV
+$205,800 (enriched-data adjustments now). Tests 26 files green + new
+cap test; tsc clean.
+
+
+### 2026-09-23 (later) — Runtime pass on feat/jev-experiments: `d47736f`
+
+Subject-only scraping + vision, permits default-on, live Jev progress
+events, LLM annotation pass removed. Live-verified end-to-end.
+
+Changes:
+
+- Photo pipeline: `fetchPhotoBundle` called with an empty comp list —
+  subject-only scrape. Comp cards render map imagery; the comp
+  priceHistory + structured-field (construction/features) Zillow
+  supplement is gone with it. Subject scrape retained (flood signal +
+  vision input + R2 asset persistence).
+- Vision: `assessRenovationFromPhotos` kept for the subject (renovation
+  level → rehab tier + detected condition). `assessCompCurbAppeal` and
+  the vision path in the ARV condition-evidence gate removed — assessor
+  `buildingCondition` is now the only comp condition signal.
+  `compCurbAppeal` dropped from the response context.
+- Permits: `config.enrichment.permits !== false` — fetched on every
+  run (KV-cached). Flows into `bundle.enrichment.permits.items` →
+  `deriveBuybox` → `assessMajorItems` thresholds (unchanged machinery).
+- LLM comp annotation (`analyzeComps`) removed from BOTH the streaming
+  path and legacy `runEnrichment`. `llmEnabled` still gates the market
+  context fetch — that feature is unrelated. The standalone
+  `/comp-selection` route (on-demand AI Selection button) untouched.
+- Live progress: `runJevEvaluation` opts.onProgress emits stage messages
+  (test1 screen/done, enrich, test2/done, selection). performAnalysis's
+  existing `onProgress` param widened to `(message, data?)` and wired in
+  the DO to `pushEvent('eval_progress')` at both call sites. Dashboard:
+  `eval_progress` + `risk_flags_updated` added to SSE EVENT_TYPES
+  (risk_flags was emitted but never subscribed — fixed); analyze page
+  shows the live message in the status label during 'evaluating'.
+- Route: `pending` no longer lists 'llm'.
+
+Live verification — job_1790141417281_28d903f8619547e8 (5460 Lemon Tree):
+13.5s wall (was ~58s). SSE shows eval_progress: photos → test1 (89
+screened, 18 passed) → test2 (18 enriched, 3 passed) → selection (3
+core) → renovation assessed. No llm_started/llm_complete. ARV $195,800
+unchanged, sel scores 100/96/75. Subject: 5 photos via Redfin, vision
+"Full Cosmetic" @90%. Permits: 9 fetched, roof major item charged off
+the 2006-permit 20y threshold. 0 comps carry photos.
+
+Tests: full API suite 26 files green; tsc clean api + dashboard.
+Note: enrich progress event doesn't fire when comps arrive pre-enriched
+(DO Step-3 enrichment) — correct, not a bug.
+
+Architecture note (user question): the per-job DO is NOT the bottleneck —
+Jev runs ~1s of a 13.5s run; the DO hops are per-stage, milliseconds.
+DO earns its keep: SSE fan-out + job state + watchdog. No replacement
+recommended; the win was removing work, not orchestration.
+
+
 ### 2026-09-23 — Two-test Jev pipeline merged to main; tiered composite card score on feat/jev-experiments
 
 State of the repo: the two-test pipeline (test-1 raw-field nouls → enrich
@@ -3161,3 +3230,30 @@ proximity scorer is removed. Pipeline per comp:
 - Test 1 effectively ran on 4 verifiable fields here (sqft/year/price/date) — bedrooms/baths/lot/type were unverifiable on every comp. If the user wants those gated, the feed or the subject needs the data first.
 - Fill path not exercised live (3 passed test 2). 0 or 1–2 passers will show fill picks with the 'FILL' badge.
 - `salePrice` noul is "usable, credible market sale" judgment — no preset price rule exists; watch whether it discriminates as intended across pools.
+
+## 2026-10-06 — fix: inverted vintage-cap clause in test-1 yearBuilt (live-verified on 4014 22nd Ave N)
+
+**Bug:** `buildTest1Defs` injected `vintageYearCap` into the yearBuilt
+question as "Built no earlier than <cap>" — inverted. vintage_year_cap
+(default 1970) is a widening fallback (comps built ≤cap admissible for
+pre-cap subjects); as phrased it failed every comp matching a vintage
+subject's era. For the 1958 subject, all 100 comps failed yearBuilt →
+Jev selected 0 → the code intentionally falls back to the legacy
+rules-engine `isEnabled` set (39 comps, ARV $504,505), which is what the
+user saw as "a ton of comps selected."
+
+**Fix (351b2aa):** dropped the clause; test 1 yearBuilt = strict
+±year_built_diff only. Removed now-unused vintageCap import/local.
+
+**Live rerun job_1790143253140_3f9f1a26b4eb4b74:**
+- 69 comps → 22 passed test 1 → 10 enriched (cap) → **0 passed test 2**
+  (real: all comps in different subdivisions — SIRMONS ESTATES/WHITES
+  REP/etc vs HARSHAW LAKE REP ADD — and different hood codes 41400/
+  111100 vs 111000) → 3 filled from test-2-fail bucket → ARV $410,000.
+- Fill path now exercised live: 3 comps selected as `test2_fail`/fill
+  stage, scores 74/71/71.
+
+**Known-behavior flag (product call pending):** when Jev selects 0 the
+legacy rules selection stands as fallback — that produced the misleading
+"39 selected" display. If the user wants Jev-authoritative emptiness,
+the fallback needs a different UI treatment.
