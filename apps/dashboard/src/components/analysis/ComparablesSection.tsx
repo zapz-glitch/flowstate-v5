@@ -82,7 +82,7 @@ function compScore(comp: CompItem): number | null {
 
 /** Tier rank for the score sort — the test outcome, not the number. */
 function scoreTier(comp: CompItem): number {
-  return comp.jevHybrid?.stage === 'test2_pass' ? 2 : comp.jevHybrid?.stage === 'test2_fail' ? 1 : 0
+  return comp.jevHybrid?.stage === 'test2_pass' ? 2 : (comp.jevHybrid?.stage === 'test2_fail' || comp.jevHybrid?.stage === 'test1_pass') ? 1 : 0
 }
 
 /** Neighborhood match by normalized name OR provider code (mirrors server-side neighborhoodsMatch) */

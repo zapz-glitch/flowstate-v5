@@ -637,15 +637,23 @@ export async function performAnalysis(
       })
 
       // Fold enriched detail back onto the pool so cards/audit see the
-      // property data test 2 used (subdivision, neighborhood, style…).
+      // property data test 2 used (subdivision, neighborhood, style…) —
+      // and so ARV prices adjustments off the enriched record: the entry's
+      // adjustedPrice was recomputed on the merged data inside the funnel.
+      const entryById = new Map(jev.entries.map((e) => [e.compId, e]))
       if (jev.enrichedComps.size > 0) {
         appraisalResult.comparables = appraisalResult.comparables.map((comp) => {
           const e = jev.enrichedComps.get(comp.id)
-          return e ? { ...comp, ...e } : comp
+          if (!e) return comp
+          const adjusted = entryById.get(comp.id)?.adjustedPrice
+          return {
+            ...comp,
+            ...e,
+            adjustedSalePrice: adjusted ?? comp.adjustedSalePrice,
+          }
         })
       }
 
-      const entryById = new Map(jev.entries.map((e) => [e.compId, e]))
       appraisalResult.comparables = appraisalResult.comparables.map((comp) => ({
         ...comp,
         jevHybrid: entryById.get(comp.id) ?? null,

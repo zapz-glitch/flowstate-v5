@@ -65,6 +65,7 @@ function TestedCompRow({ comp, role, questionSet }: { comp: CompItem | undefined
       return parts.join(' · ')
     }
     if (t1) {
+      if (t1.passed) return 'passed test 1 — outside the enrichment cap, never test-2\'d'
       const failed = t1.failedFields.map((k) => t1Labels.get(k) ?? k).join(', ')
       const missing = t1.unverifiableFields.map((k) => t1Labels.get(k) ?? k).join(', ')
       return `failed test 1${failed ? ` — ${failed}` : ''}${missing ? `${failed ? ' ·' : ' —'} unverifiable: ${missing}` : ''}`

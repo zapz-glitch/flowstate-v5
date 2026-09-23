@@ -262,6 +262,25 @@ describe('runJevEvaluation — enrichment', () => {
     )
     assert.equal(enrichCalls.length, 0)
   })
+
+  it('enrichment is capped at the 10 nearest passers — the rest stay test1_pass and never see test 2', async () => {
+    const ids = Array.from({ length: 12 }, (_, i) => `c${i}`)
+    const comps = ids.map((id, i) => comp(id, { distanceMiles: 0.1 + i * 0.05 }))
+    const enrichCalls: string[][] = []
+    const capture: { ids?: string[] } = {}
+    const result = await evaluate(comps, {}, {}, {
+      test2: tester2({}, capture),
+      enrich: async (cs: NormalizedComparable[]) => { enrichCalls.push(cs.map((c) => c.id)); return cs.map((c) => ({ ...c, isEnriched: true })) },
+    })
+    const expected = ids.slice(0, 10) // 10 nearest
+    assert.deepEqual(enrichCalls, [expected])
+    assert.deepEqual(capture.ids, expected, 'test 2 ran on the capped enriched set only')
+    const stageOf = (id: string) => result.entries.find((e) => e.compId === id)!.stage
+    for (const id of expected) assert.equal(stageOf(id), 'test2_pass')
+    assert.equal(stageOf('c10'), 'test1_pass')
+    assert.equal(stageOf('c11'), 'test1_pass')
+    assert.equal(result.counts.enriched, 10)
+  })
 })
 
 // ─── Test 2 — subdivision OR neighborhood ────────────────────────────────────

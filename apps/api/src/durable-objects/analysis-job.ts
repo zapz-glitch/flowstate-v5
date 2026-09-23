@@ -468,17 +468,12 @@ export class AnalysisJobDO {
       })),
     })
 
-    // ── Step 3: Enrich comps ───────────────────────────────────────────────────
-    // Every comp that can still qualify gets the property-detail call —
-    // subdivision, foundation type, building style, features. But sale_age
-    // (at the deepest configured expansion tier), sqft_diff and year_built
-    // (at its widest sanctioned tolerance) are never relaxed beyond those
-    // ceilings by ANY fallback tier, and enrichment never overwrites those
-    // fields — so a comp verifiably failing one is dead under every tier
-    // and its detail call is provably wasted. Missing fields still enrich.
-    await this.pushEvent('property_fetch', { message: 'Enriching comparable details...' })
-    const enrichStart = Date.now()
-
+    // ── Step 3: Dead-comp pruning only — enrichment moved inside the Jev ──────
+    // funnel. Provider detail calls now run on test-1 passers only (nearest +
+    // strongest first, capped) inside evaluation — mass-enriching the raw
+    // pool here spent ~80 detail calls per run on comps that mostly fail
+    // test 1. Pruning is pure field checks (no calls) and feeds retrieval
+    // telemetry.
     const filterValue = (type: string, fallback: number): number => {
       const f = filters.find((x) => x.type === type)
       return f && f.enabled === false ? Infinity : (f?.value ?? fallback)
@@ -504,19 +499,15 @@ export class AnalysisJobDO {
     const isDeadComp = (c: NormalizedComparable): boolean =>
       isProvablyDeadComp(c, property, deadThresholds, nowMs)
 
-    const toEnrich = rawComps
-      .filter((c) => !isDeadComp(c))
-      .sort((a, b) => (a.distanceMiles ?? 999) - (b.distanceMiles ?? 999))
-    const skipped = rawComps.length - toEnrich.length
+    const skipped = rawComps.filter((c) => isDeadComp(c)).length
     candidatesPruned = skipped
-    candidatesEnriched = toEnrich.length
+    candidatesEnriched = 0
     if (skipped > 0) {
-      console.log(`[AnalysisJobDO] Skipping enrichment for ${skipped} comp(s) dead on sale-age/sqft/year rules`)
+      console.log(`[AnalysisJobDO] ${skipped} comp(s) dead on sale-age/sqft/year rules (telemetry only — Jev funnel decides enrichment)`)
     }
 
-    const enrichedList = await propertyApi.enrichComparables(toEnrich, { concurrency: 10 })
-    const enrichedById = new Map(enrichedList.map((c) => [c.id, c]))
-    let enrichedComps = rawComps.map((c) => enrichedById.get(c.id) ?? c)
+    let enrichedComps = rawComps
+    const poolCompIds = new Set(rawComps.map((c) => c.id))
     retrieval.candidatesPrunedBeforeEnrichment = candidatesPruned
     retrieval.candidatesEnriched = candidatesEnriched
 
@@ -548,17 +539,12 @@ export class AnalysisJobDO {
         pools.conflictIds.push(id)
         evidenceLimitations.push(`${id}: Provider comparable pools disagree on the same sale date; price is quarantined from evaluation`)
       }
-      const newCandidates = merged.comparables.filter((c) => !enrichedById.has(c.id))
-      const toEnrichNew = newCandidates
-        .filter((c) => !isDeadComp(c))
-        .sort((a, b) => (a.distanceMiles ?? 999) - (b.distanceMiles ?? 999))
-      candidatesPruned += newCandidates.length - toEnrichNew.length
-      candidatesEnriched += toEnrichNew.length
-      if (toEnrichNew.length > 0) {
-        const newlyEnriched = await propertyApi.enrichComparables(toEnrichNew, { concurrency: 10 })
-        for (const c of newlyEnriched) enrichedById.set(c.id, c)
-      }
-      enrichedComps = merged.comparables.map((c) => enrichedById.get(c.id) ?? c)
+      // New candidates join the raw pool — enrichment is deferred to the
+      // Jev funnel (test-1 passers only), same as the initial pool.
+      const newCandidates = merged.comparables.filter((c) => !poolCompIds.has(c.id))
+      for (const c of newCandidates) poolCompIds.add(c.id)
+      candidatesPruned += newCandidates.filter((c) => isDeadComp(c)).length
+      enrichedComps = merged.comparables
       retrieval.providerCallsUsed += 1
       retrieval.pagesRequested += 1
       if (monthsBack != null) retrieval.monthsBack = monthsBack
@@ -567,7 +553,7 @@ export class AnalysisJobDO {
       retrieval.candidatesEnriched = candidatesEnriched
       retrieval.providerTruncated =
         (wider.data.retrieval?.providerTruncated ?? wider.data.comparables.length >= candidateLimit) || retrieval.providerTruncated
-      console.log(`[AnalysisJobDO] Expansion refetch: pool ${rawComps.length} → ${enrichedComps.length} candidates (${toEnrichNew.length} new enriched)`)
+      console.log(`[AnalysisJobDO] Expansion refetch: pool ${rawComps.length} → ${enrichedComps.length} candidates`)
       return enrichedComps
     }
 
@@ -594,8 +580,6 @@ export class AnalysisJobDO {
           console.warn('[AnalysisJobDO] Market context error:', err instanceof Error ? err.message : err)
         })
     }
-
-    console.log(`[AnalysisJobDO] ✓ Comps enriched in ${Date.now() - enrichStart}ms`)
 
     // Build the full property bundle
     const permitsData = permitsResult && 'success' in permitsResult && permitsResult.success ? permitsResult.data : null

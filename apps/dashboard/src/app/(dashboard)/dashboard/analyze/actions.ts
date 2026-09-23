@@ -259,10 +259,11 @@ export interface JevHybridCompScore {
   /**
    * 'ineligible'  = no usable price/date, never tested
    * 'test1_fail'  = failed a test-1 field (or a field could not be verified)
+   * 'test1_pass'  = passed test 1 but beyond the enrich cap — never test-2'd
    * 'test2_fail'  = passed test 1, failed test 2 — ineligible but scored
    * 'test2_pass'  = passed both tests — eligible for the core set
    */
-  stage: 'ineligible' | 'test1_fail' | 'test2_fail' | 'test2_pass'
+  stage: 'ineligible' | 'test1_fail' | 'test1_pass' | 'test2_fail' | 'test2_pass'
   rejectReasons: string[]
   saleAgeDays: number | null
   /** Property-detail data was merged before test 2 */

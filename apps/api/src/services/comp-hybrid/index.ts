@@ -68,9 +68,13 @@ export const HYBRID_CORE_TARGET = 3
 export const COMP_TIER_BANDS: Record<HybridCompScore['stage'], readonly [number, number]> = {
   test2_pass: [75, 100],
   test2_fail: [35, 74],
+  test1_pass: [35, 74],
   test1_fail: [0, 34],
   ineligible: [0, 34],
 }
+
+/** Max test-1 passers that get a provider detail call — enrichment budget. */
+export const COMP_ENRICH_MAX = 10
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -108,10 +112,11 @@ export interface HybridCompScore {
   /**
    * 'ineligible'  = no usable price/date, never tested
    * 'test1_fail'  = failed a verifiable test-1 field
+   * 'test1_pass'  = passed test 1 but beyond the enrich cap — never test-2'd
    * 'test2_fail'  = passed test 1, failed test 2 — ineligible but scored
    * 'test2_pass'  = passed both tests — eligible for the core set
    */
-  stage: 'ineligible' | 'test1_fail' | 'test2_fail' | 'test2_pass'
+  stage: 'ineligible' | 'test1_fail' | 'test1_pass' | 'test2_fail' | 'test2_pass'
   /** Why the comp never ran test 1 */
   rejectReasons: string[]
   saleAgeDays: number | null
@@ -323,6 +328,7 @@ export async function runJevEvaluation(
     }
   }
   const test1Passers = candidates.filter((e) => e.test1?.passed === true)
+  for (const e of test1Passers) e.stage = 'test1_pass'
   const test1PassComps = test1Passers
     .map((e) => byId.get(e.compId))
     .filter((c): c is AppraisedComparable => c != null)
@@ -330,18 +336,40 @@ export async function runJevEvaluation(
     progress?.(`Test 1 done — ${test1Passers.length} passed, ${candidates.length - test1Passers.length} failed`, { stage: 'test1_done', passed: test1Passers.length, failed: candidates.length - test1Passers.length })
   }
 
-  // Stage 2 — enrich every test-1 passer with property detail (subdivision,
-  // neighborhood, construction, features, transaction) for test 2.
+  // Enrichment budget — provider detail calls go only to the strongest +
+  // closest test-1 passers: proximity first (near = high confidence),
+  // test-1 field strength as the tiebreak. Strength = mean noul
+  // probability across every test-1 field — unverifiable fields count 0,
+  // so coverage is rewarded along with pass quality. Passers beyond the
+  // cap keep stage 'test1_pass' and never see test 2.
+  const strengthOf = (e: HybridCompScore): number => {
+    if (!e.test1 || defs.length === 0) return 0
+    let sum = 0
+    for (const def of defs) sum += e.test1.nouls[def.key] ?? 0
+    return sum / defs.length
+  }
+  const enrichPoolComps = [...test1PassComps]
+    .sort((a, b) => {
+      const da = a.distanceMiles ?? Infinity
+      const db = b.distanceMiles ?? Infinity
+      if (da !== db) return da - db
+      return strengthOf(entries.find((e) => e.compId === b.id)!) - strengthOf(entries.find((e) => e.compId === a.id)!)
+    })
+    .slice(0, COMP_ENRICH_MAX)
+
+  // Stage 2 — enrich the capped passer set with property detail
+  // (subdivision, neighborhood, construction, features, transaction)
+  // for test 2.
   const enrichedComps = new Map<string, NormalizedComparable>()
-  let examComps: AppraisedComparable[] = test1PassComps
-  if (enrich && test1PassComps.length > 0) {
-    const needEnrichment = test1PassComps.filter((c) => c.isEnriched !== true)
+  let examComps: AppraisedComparable[] = enrichPoolComps
+  if (enrich && enrichPoolComps.length > 0) {
+    const needEnrichment = enrichPoolComps.filter((c) => c.isEnriched !== true)
     if (needEnrichment.length > 0) {
-      progress?.(`Enriching ${needEnrichment.length} test-1 passers (property detail)`, { stage: 'enrich', count: needEnrichment.length })
+      progress?.(`Enriching ${needEnrichment.length} of ${test1PassComps.length} test-1 passers (property detail)`, { stage: 'enrich', count: needEnrichment.length, passers: test1PassComps.length })
       const enriched = await enrich(needEnrichment)
       for (const c of enriched) enrichedComps.set(c.id, c)
       const enrichedById = new Map(enriched.map((c) => [c.id, c]))
-      examComps = test1PassComps.map((comp) => {
+      examComps = enrichPoolComps.map((comp) => {
         const e = enrichedById.get(comp.id)
         if (!e) return comp
         const merged: AppraisedComparable = { ...comp, ...e }
@@ -365,7 +393,9 @@ export async function runJevEvaluation(
     progress?.(`Jev test 2 — ${examComps.length} enriched comps (subdivision/neighborhood + proximity score)`, { stage: 'test2', candidates: examComps.length })
     const result = await test2Fn(subject, examComps, rules, env)
     test2Meta = { model: result.model, latencyMs: result.latencyMs, inputTokens: result.inputTokens, stateHashes: result.stateHashes }
+    const examIds = new Set(examComps.map((c) => c.id))
     for (const entry of test1Passers) {
+      if (!examIds.has(entry.compId)) continue // beyond the enrich cap — stays 'test1_pass'
       const t2 = result.results[entry.compId]
       if (!t2) throw new Error(`Jev test 2 returned no result for comparable ${entry.compId}; no partial coverage accepted.`)
       const passed = t2.nouls.subdivision >= noulGate || t2.nouls.neighborhood >= noulGate
@@ -424,7 +454,7 @@ export async function runJevEvaluation(
   // middle, and test-1 fails (or unusable comps) sit at the bottom. A
   // test-2 pass is the boost; failing test 2 is never a penalty — landing
   // in the middle band is all it does.
-  for (const stage of ['test2_pass', 'test2_fail', 'test1_fail', 'ineligible'] as const) {
+  for (const stage of ['test2_pass', 'test2_fail', 'test1_pass', 'test1_fail', 'ineligible'] as const) {
     const tierEntries = entries.filter((e) => e.stage === stage)
     if (tierEntries.length === 0) continue
     const [lo, hi] = COMP_TIER_BANDS[stage]
