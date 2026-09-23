@@ -15,7 +15,7 @@ import type {
   CompItem,
 } from '@/app/(dashboard)/dashboard/analyze/actions'
 import type { RecalcResult } from '@/lib/recalc'
-import type { AnalyzeData, JevOutcomeData, JevCompClassificationData } from '@/app/(dashboard)/dashboard/analyze/actions'
+import type { AnalyzeData, JevOutcomeData, JevCompClassificationData, JevAttributeScreenData, JevHybridData } from '@/app/(dashboard)/dashboard/analyze/actions'
 
 // ─── Comp Override ─────────────────────────────────────────────────────────
 
@@ -73,6 +73,9 @@ export interface EvaluationState {
 
   /** Candidate B comp-classification run + shadow counterfactual valuation */
   jevCompClassification: JevCompClassificationData | null | undefined
+  jevAttributeScreen: JevAttributeScreenData | null | undefined
+  /** V4 hybrid run + shadow counterfactual valuation */
+  jevHybrid: JevHybridData | null | undefined
 
   // UI state
   aiAnalyzing: boolean
@@ -102,6 +105,8 @@ export const evaluationStateAtom = atom<EvaluationState>({
   aiReport: null,
   jevOutcome: undefined,
   jevCompClassification: undefined,
+  jevAttributeScreen: undefined,
+  jevHybrid: undefined,
   aiAnalyzing: false,
   isStreaming: false,
   callbacks: defaultCallbacks,

@@ -27,6 +27,7 @@ import {
   COMP_ATTRIBUTE_TO_FILTER,
   COMP_ATTRIBUTE_QUESTION_VERSION,
   type CompAttributeKey,
+  type JevOutcomeClassification,
 } from '../jev'
 
 export { COMP_ATTRIBUTE_QUESTION_VERSION }
@@ -255,5 +256,8 @@ export interface AttributeScreenRun {
     projectedROI: number | null
     recommendation: string | null
     deltas: { arv: number | null; asIsValue: number | null; buyPrice: number | null }
+    assessment?: JevOutcomeClassification
+    arvCompIds: string[]
+    asIsCompIds: string[]
   }
 }

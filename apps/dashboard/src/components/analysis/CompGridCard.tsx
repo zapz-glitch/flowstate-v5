@@ -37,14 +37,11 @@ export function CompGridCard({
   const isEnabled = hasArvSelection ? isSelectedForArv : comp.isEnabled === true
   const cardKey = comp.address || `comp-${index}`
 
-  // Bucket label = Jev's classification (higher truth wins; tie → no
-  // bucket) — shown for every scored comp, not only the counted set.
-  // compGroup (the server's counted group) is the fallback when scores
-  // are absent.
-  const bucket = comp.jevArvTruth != null && comp.jevInvestmentTruth != null
-    ? (comp.jevArvTruth > comp.jevInvestmentTruth ? 'arv'
-      : comp.jevInvestmentTruth > comp.jevArvTruth ? 'as_is' : null)
-    : comp.compGroup ?? null
+  // Jev score /100 — the exam score when the comp was cross-examined, else
+  // the raw-data screen score. poolRank 1 = closest to the rule truth.
+  const jevScore = comp.jevHybrid?.score ?? null
+  const isTopMatch = comp.jevHybrid?.poolRank === 1
+  const bucket = comp.jevHybrid?.selected ?? comp.compGroup ?? null
 
   const sqftDelta = comp.squareFeet != null && subject?.squareFeet != null
     ? comp.squareFeet - subject.squareFeet : null
@@ -121,43 +118,40 @@ export function CompGridCard({
           )}>
             {index + 1}
           </div>
-          {comp.jevArvTruth != null && (
+          {jevScore != null && (
             <div
               className={cn(
                 'h-6 px-1.5 rounded-sm flex items-center text-[10px] font-bold tabular-nums',
-                comp.jevArvTruth >= 0.7 ? 'bg-emerald-500/90 text-white'
-                  : comp.jevArvTruth >= 0.4 ? 'bg-amber-500/90 text-white'
+                jevScore >= 70 ? 'bg-emerald-500/90 text-white'
+                  : jevScore >= 40 ? 'bg-amber-500/90 text-white'
                   : 'bg-red-500/80 text-white'
               )}
-              title={`ARV truth ${(comp.jevArvTruth * 100).toFixed(0)}% — Jev's probability this comp is reliable evidence of the subject's after-renovation retail value`}
+              title={`Jev score ${jevScore}/100 — ${comp.jevHybrid?.test2 ? (comp.jevHybrid.test2.passed ? 'passed test 2 — eligible for the core set' : 'failed test 2 — scored on distance to subject') : comp.jevHybrid?.test1 ? 'failed test 1' : 'not tested'}${comp.jevHybrid?.test2?.confidence != null ? ` · confidence ${Math.round(comp.jevHybrid.test2.confidence * 100)}%` : ''}`}
             >
-              A·{(comp.jevArvTruth * 100).toFixed(0)}%
+              {jevScore}
             </div>
           )}
-          {comp.jevInvestmentTruth != null && (
+          {isTopMatch && (
             <div
-              className={cn(
-                'h-6 px-1.5 rounded-sm flex items-center text-[10px] font-bold tabular-nums',
-                comp.jevInvestmentTruth >= 0.7 ? 'bg-emerald-500/90 text-white'
-                  : comp.jevInvestmentTruth >= 0.4 ? 'bg-amber-500/90 text-white'
-                  : 'bg-red-500/80 text-white'
-              )}
-              title={`Investment truth ${(comp.jevInvestmentTruth * 100).toFixed(0)}% — Jev's probability this comp is reliable evidence of the subject's as-is investor value`}
+              className="h-6 px-1.5 rounded-sm flex items-center text-[10px] font-bold bg-primary/90 text-white"
+              title="Highest-scoring comp in the Jev cross-examination — closest to the appraisal-rule truth"
             >
-              I·{(comp.jevInvestmentTruth * 100).toFixed(0)}%
+              TOP
             </div>
           )}
           {bucket && (
             <div
               className={cn(
                 'h-6 px-1.5 rounded-sm flex items-center text-[10px] font-bold',
-                bucket === 'arv' ? 'bg-emerald-600 text-white' : 'bg-amber-600 text-white'
+                bucket === 'core' || bucket === 'arv' ? 'bg-emerald-600 text-white' : 'bg-amber-600 text-white'
               )}
-              title={bucket === 'arv'
-                ? 'Jev classified this comp as ARV (after-renovation) evidence — enabled comps in this bucket count toward the ARV'
-                : 'Jev classified this comp as as-is (investment) evidence — enabled comps in this bucket count toward the as-is average'}
+              title={bucket === 'core' || bucket === 'arv'
+                ? 'Passed both Jev tests — in the core comp set, counts toward the ARV'
+                : bucket === 'fill'
+                  ? 'Passed test 1 but failed test 2 — filled the core set on distance score'
+                  : 'Not in the core comp set'}
             >
-              {bucket === 'arv' ? 'ARV' : 'AS-IS'}
+              {bucket === 'core' ? 'CORE' : bucket === 'fill' ? 'FILL' : bucket === 'arv' ? 'ARV' : 'AS-IS'}
             </div>
           )}
           {comp.flip && (

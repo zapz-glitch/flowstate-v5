@@ -1,6 +1,73 @@
 # Engineering State — flowstate-v5
 
 
+### 2026-09-22 — Jev-only evaluation shipped on new-classification (comp_exam_v3 + comp_screen_v1)
+
+User directive (approved spec): Jev is the ONLY evaluation logic visible in
+the UI. Eligibility = usable sale price+date (facts only). Screen every
+comp on raw data (1 spectrum Choice each → score /100 per card, never
+disqualifies) → enrich top-10 by screen score via enrichComparables seam →
+cross-examine enriched set: appraisal match (one noul per enabled preset
+rule, configured tolerance baked in, unverifiable = noted not failed) +
+price match (final gate: "priced at the level the subject would sell for
+after renovation?") + spectrum verdict → score /100 = Σ(verdict weight ×
+prob). Selection: every 100% verifiable-question match, NO CAP; zero
+matches → top-3 closest by score flagged closestOnly. ARV = mean adjusted
+price of selected set (adjustments = only non-Jev step). No baseline, no
+composite weights, no top-N cap — all per user corrections.
+
+Implementation:
+- jev/index.ts: `screenCompsWithJev` (comp_screen_v1, ARV-framed), exam
+  `comp_exam_v3` — `buildCompExamNouls` emits rule nouls + `price_match`
+  gate; EXAM_EVIDENCE_NOTE + verdict criteria all ARV-framed.
+- comp-hybrid/index.ts rewritten: `runJevEvaluation` — screen → enrich →
+  exam → match accounting → uncapped/closestOnly selection. Injectables:
+  screen, examine, enrich, now. `HybridEntry` carries stage/screen/exam/
+  score/poolRank/selected/adjustedPrice.
+- evaluation/index.ts: all old tracks removed (Baseline A truth, v2 price
+  classifier, v3 attribute screen, counterfactual blocks, scenario
+  assessments); single `runJevEvaluation` drives selectedCompIds +
+  isEnabled + appraisalResult.arv; `hybridRun` = Jev run meta incl.
+  questionSet, counts, selection, per-stage model/latency/tokens.
+  `EvaluationParams.enrichComparables` seam → analysis-job passes
+  propertyApi.enrichComparables(concurrency 10). Rules selection is the
+  resilience floor ONLY if Jev throws or pool is empty.
+- report.ts: assessConfidence takes `jev` summary (selected scores,
+  fullMatch, verdict, confidence, counts, closestOnly, topCompId).
+- Dashboard: CompCard + CompGridCard show Jev score /100 + TOP (rank 1) +
+  ARV/AS-IS role; ComparablesSection has score filter (≥25/50/75/90) +
+  "Jev score" sort; EvaluationProcessAudit rewritten as single Jev track
+  (numbered steps, per-comp expandable exam with every noul probability +
+  matched/failed/unverifiable + verdict probs + score formula);
+  JevHybridCard = Jev evaluation summary (no shadow language);
+  AnalysisResultLayout drops v2/v3/v4 shadow cards + their outcome cards.
+  actions.ts types: JevHybridData (screenVersion/examVersion/counts/
+  selection/questionSet), JevHybridCompScore (stage/screen/exam/score/
+  poolRank/selected/adjustedPrice).
+
+Live verification — job_1790060437272_1eaa1aa50c954ac7 (5460 Lemon Tree):
+89 screened → 10 examined → 0 fullMatch → closestOnly → 3 selected → ARV
+$198,616. 48.2s wall, Jev 988ms / 125k tokens / 8 batches / jev-1.13.0.
+16 exam nouls (15 rules incl 3 soft + price_match). price_match coherent:
+top comps borderline 44% (just under gate), reject tail 8–17%; pool(soft)
+~18-33% systematic low (missing features data → mostly unverifiable→n/a or
+low); condos/wrong-tier correctly rejected at scores 3-7.
+Report page renders 200 at :3001/dashboard/reports/<jobId>.
+
+Tests: 18/18 comp-hybrid + jev-comp-exam pass; full 25-file suite green;
+tsc clean both apps.
+
+Known findings / decisions open for user:
+- price_match 44% borderline on top comps — either honest "comps sit below
+  ARV tier" signal or strict-gate artifact; watch on more addresses.
+- pool/soft nouls low pool-wide (features missing pre-enrichment data).
+- as_is pool = examined non-selected (incl. rejects) — feeds as-is line.
+- closestOnly picks top-3 by score when 0 full-match (examined can be <3
+  if exam set smaller).
+- Run metadata named `jevHybrid`/`HybridRun` internally + `hybridRun` var —
+  legacy naming kept for compat; user-facing copy is Jev-only.
+
+
 ### 2026-09-16 — CDARV deployed to staging, full e2e verified
 
 Merge/deploy (staging-only per user; main NOT pushed — deploy.yml would
@@ -129,14 +196,174 @@ Blockers (environment, not code):
 - V4 engine NOT connected to production (V4_* env vars dead code; by plan).
 
 ## Current Objective
-Post-merge repo health audit on `main` (worktree `~/src/flowstate-v5-deploy`,
-main = 17bcf51 = Candidate B production). Dead code + redundancy sweep,
-high-volume readiness, evaluation speed/accuracy review. Findings below in
-"### 2026-09-20 (d) — Post-merge repo audit". Removals NOT yet applied —
-awaiting product-engineer pick-list.
+Run a fourth evaluation track — the V4 hybrid — entirely on branch
+`new-classification`. V4 = Jev classifies every priced comp (ARV / AS_IS /
+UNIDENTIFIED) before rule verdicts → deterministic hard gates (verified
+foundation/construction/property-type mismatch, geography contradicted on both
+levels, sale >365d) → weighted recoverability score against appraisal-settings
+proximity → per-pool top-3 at/above a recovery floor, ≤180d tier first with the
+181–365d tier opening only at zero ideal-tier comps. Default mode is SHADOW
+(read-only observability); `JEV_HYBRID_V4_ENABLED=true` routes production
+selection. Definition of Done now additionally requires the V4 card + audit
+track rendered and a fresh staging-backed analysis whose v4 ARV equation
+recomputes exactly from persisted per-comp adjusted prices.
 
-NOTE: `git push origin main` NOT done — pushing main triggers deploy.yml
-(prod deploy). Awaiting explicit user authorization to push.
+Prior objective (three-track exposure) is complete — see
+"### 2026-09-22 — Three valuation tracks" below.
+
+The prior post-merge audit objective remains documented below under
+"### 2026-09-20 (d) — Post-merge repo audit".
+
+### 2026-09-22 — Three valuation tracks with independent Jev assessments
+
+Implemented locally on `new-classification` (uncommitted, not deployed):
+- Initial production valuation retains its own `jevOutcome` and is labeled
+  explicitly in the dashboard.
+- Jev v2 Candidate-B shadow now persists `shadowValuation.assessment`, built
+  from V2's selected comp set and counterfactual valuation rather than the
+  production outcome.
+- Jev v3 attribute-screen shadow is now fully surfaced: screened pool and
+  ARV/as-is bands, anchors, counterfactual valuation, deltas, and its own
+  `shadowValuation.assessment`.
+- All three outcome-classification requests run in parallel and fail
+  independently; V2/V3 remain read-only and cannot alter production output.
+- Shadow assessment projections recompute selected-comp metrics and exclude
+  production Baseline-A truth scores so evidence does not leak across tracks.
+- Fixed pre-existing counterfactual ARV bug in both shadows: selected shadow
+  comps are cloned enabled before `calculateARV`; production comparables are
+  never mutated. This changed the confirmed V3 result from erroneous $0 to
+  $411,062 for the same two ARV-band comps.
+- Dashboard now renders, in order: initial Jev assessment, V2 shadow valuation,
+  V2 Jev assessment, V3 shadow valuation/classification, V3 Jev assessment.
+- Added `How each valuation chose comps`: three expandable method audits show
+  the ordered selection process, every ARV/as-is pick, method-specific evidence
+  (Baseline-A truth scores, V2 class probabilities, V3 attribute scores/ranks
+  and price-band threshold), appraisal-rule results, sale/adjusted prices, and
+  the exact adjusted-price-average equation that produces each ARV.
+- V2/V3 now persist exact ARV/as-is comp IDs; V2 also persists condition-pruned
+  IDs. V3 response comps persist overall screen rank and within-band rank, so
+  saved reports retain the full selection trail rather than reconstructing it.
+- Local Next development config now merges `.env.local` secrets into partial
+  Cloudflare context, fixing the address-search "Dashboard configuration error".
+
+Verification:
+- `node --import tsx apps/api/tests/jev-outcome.test.ts` — pass, including
+  independent shadow scenario projection and no production-truth leakage.
+- `node --import tsx apps/api/tests/comp-screen.test.ts` — 11/11 pass.
+- API and dashboard `npm run typecheck` — clean.
+- `git diff --check` — clean.
+- Fresh staging-backed local analysis
+  `job_1790043954498_2646a067bb2548e9`: all three assessments completed and
+  exact audit equations revalidated from persisted comps: initial $310,918 =
+  avg($260,502, $361,333); V2 $361,333 = one selected adjusted price; V3
+  $411,062 = avg($401,287, $420,837). V3 also persisted one as-is pick and all
+  selected V3 comps have overall + within-band ranks. Authenticated report route
+  returned 200; after a clean dashboard restart there were no audit-component
+  console errors (Google Geocoding API warning remains pre-existing/config-only).
+
+Remaining: product engineer visual confirmation of the opened report, then a
+commit/push decision. No production deployment or push performed. Local runtime
+uses staging D1/KV/R2 through untracked `apps/api/wrangler.preview.toml`.
+
+Last Handoff (three-track phase): inspect
+`http://localhost:3001/dashboard/reports/job_1790043954498_2646a067bb2548e9`.
+All three tracks, assessments, exact picks, rationale, ranks, and ARV equations
+are persisted on that report. If accepted, review the final working-tree diff,
+remove runtime-only config from any commit, then commit/push only on explicit
+direction.
+
+### 2026-09-22 — V4 hybrid evaluation track (implemented, shadow-verified)
+
+User spec (confirmed in-thread): V4 runs entirely on this branch and is meant
+to become the best of the three methods. Order is classify-all-first:
+Jev price-classifies every usable comp BEFORE rules eliminate anything, then
+deterministic rules decide recoverability.
+
+New service `apps/api/src/services/comp-hybrid/index.ts`:
+- `scoreHybridPool` re-evaluates every comp against the BASE preset
+  (`evaluateComparable` with configured filters/adjustments), then assigns
+  hard gates and per-dimension proximity scores.
+- Hard gates (verified evidence only): foundation mismatch, construction-
+  material mismatch, property-type mismatch, geography contradicted on BOTH
+  levels (subdivision fails AND no neighborhood pass, or reverse), sale age
+  >365d. Disabled filters and 'not_verified' never gate.
+- Geography composite: subdivision match = ideal; subdivision miss rescued
+  by neighborhood match scores 0.6 recoverable; neither verified → Jev's
+  same_subdivision/same_neighborhood nouls grade the ambiguity.
+- Continuous dimensions taper from the configured tolerances (±250 sqft,
+  ±10yr, ±2500 lot, distance, sale age). Vintage exemption: subject ≤1970 →
+  comps ≤1970 get year-built score 1.
+- Garage/carport uses a covered-parking utility ladder (none→carport→1car→
+  2car→3car+) — a 1-car comp for a 2-car subject penalizes less than carport
+  less than none.
+- Stories mismatch boosts the sqft_diff weight 1.5× (mismatched-story comps
+  must sit tight on size).
+- Unknown foundation/construction inherit the comp's own weighted mean over
+  the other dimensions (clamped 0.2–0.9), averaged with Jev's noul when
+  present — matching everything else ≈ small uncertainty penalty, being far
+  off elsewhere ≈ disregard.
+- `selectHybridSets` picks top-3 per pool at/above `HYBRID_RECOVERY_FLOOR`
+  = 0.5 (provisional, exposed for tuning). Ideal ≤180d tier first; the
+  181–365d tier opens only when the pool has ZERO ideal-tier comps (per
+  user confirmation). UNIDENTIFIED never enters a pool.
+- Every comp gets a `jevHybrid` audit record on the response: class,
+  confidence, gate, reject reasons, sale-age tier, weighted score, pool
+  rank, selected role, per-dimension {status, score, weight, detail}, and
+  the v4 recomputed adjustedPrice.
+
+Jev (`services/jev/index.ts`): `classifyCompPriceWithJev` gained
+`opts.gated` — `{gated:false}` classifies the raw priced pool (default
+preserves V2's gated behavior). Prompt/evidence distinguish raw-pool from
+post-gate classification. New env flags `JEV_HYBRID_V4_ENABLED` /
+`JEV_HYBRID_V4_SHADOW` on `Env` + `JevEnv`; outcome scenario id
+`jev_v4_hybrid` for the independent read-only assessment.
+
+Pipeline (`services/evaluation/index.ts`): V4 runs after the V3 attribute
+screen (reusing its per-attribute nouls as `attributeScores`), attaches
+`jevHybrid` to every comp, and in shadow mode computes a counterfactual —
+v4 ARV averages its OWN `adjustedPrice` values, as-is goes through
+`summarizeGroupB`, valuation through `calculateValuation`; its scenario is
+assessed in the same parallel Promise.all as production/V2/V3. Enabled mode
+routes `isEnabled`/`selectedCompIds`/`arv`/`jevInvestmentCompIds` to v4's
+pools with empty-ARV fallback to rules selection.
+
+Dashboard: `JevHybridData`/`JevHybridCompScore` types in analyze actions;
+`jevHybrid` plumbed through atoms → useEvaluationSync → all three pages
+(analyze, reports/[jobId], public report). New `JevHybridCard` (classified
+counts, gates, floor, fallback tier, counterfactual valuation + deltas).
+`EvaluationProcessAudit` gained a fourth track: 6 numbered steps, per-comp
+class/confidence/recovery-score/rank/tier/gate/penalty breakdown, and the
+exact v4 ARV equation from `jevHybrid.adjustedPrice`.
+
+Verification:
+- `apps/api/tests/comp-hybrid.test.ts` — 17/17 pass: hard gates (foundation,
+  construction, dual-geo, >365d), neighborhood rescue, vintage exemption,
+  parking gradient ordering, unknown-foundation inherit-high-vs-low, sqft
+  taper ordering, top-3 selection, UNIDENTIFIED exclusion, zero-ideal-only
+  fallback tier per pool, recovery floor, unusable vs rejected counts.
+- `npm run typecheck` clean in apps/api AND apps/dashboard.
+- `npm run test -w @flowstate-api/api` — 25 regression files pass.
+- Fresh staging-backed analysis `job_1790047652689_6aa30b99cf734dc2`
+  (2227 Benson St): v4 status completed, mode shadow, 34 classified
+  (7 ARV / 4 as-is / 23 unidentified / 0 rejected), 3 ARV comps selected
+  (7480 BLAINE WAY 53.3%, 7810 HOLIDAY DR 52.5%, 1848 SOUTHPOINTE DR 51%),
+  v4 ARV $647,667 — recomputed exactly from persisted `jevHybrid.adjustedPrice`.
+  Production untouched ($326,112), all four Jev assessments completed,
+  report page 200, 34/34 comps carry audit records.
+
+Open tuning question for the product engineer: the 0.5 recovery floor
+admitted three comps at ~51–53% producing a $647k v4 ARV vs $326k
+production — the scores say they are recoverable-but-not-ideal evidence.
+The floor and weights are constants (`HYBRID_RECOVERY_FLOOR`, `W`) meant to
+be tuned from exactly this kind of observed output. Also V4 does not apply
+the production vision/assessor condition prune (condition gate is off per
+spec) — worth a look at whether Jev's ARV class is adequately pricing that
+in, or whether a verified-below-spec ARV safety prune belongs in v4 too.
+
+Last Handoff: inspect
+`http://localhost:3001/dashboard/reports/job_1790047652689_6aa30b99cf734dc2` —
+the v4 card, assessment, and the fourth expandable audit track are on it.
+Nothing committed, pushed, or deployed.
 
 ### 2026-09-19 — Jev-authoritative comp selection + per-comp truth scores
 
@@ -2655,3 +2882,226 @@ formula split, client recalc vs B, OPENROUTER_MODEL check, DO watchdog).
   (Orlando gate starvation) will show no card by design.
 
 Last handoff: nothing in flight. Open decisions unchanged.
+
+## 2026-09-21 — V4 hybrid redesigned: classification-free, score-ordered, 60% floor
+
+Worktree flowstate-v5-new-classification, uncommitted. Supersedes the
+classify-all V4 built earlier this session (job_1790047652689 / _8322741
+runs) per product feedback on the staging report.
+
+### Product decision (user-directed)
+- V4 no longer uses Jev price classification at all — "we haven't found a
+  good process for that yet." No ARV/AS_IS/UNIDENTIFIED gating or pool
+  split anywhere in v4. (V2/V3 tracks keep their own classifiers; only
+  the v4 track changed.)
+- Sale age is a scored dimension, NOT a tier lockout. A comp "locked out
+  purely by sale age" should rank by score like everything else. >365d
+  still hard-gates.
+- Recovery floor raised 0.5 → 0.6 (HYBRID_RECOVERY_FLOOR).
+- Selection = highest scores first, top 3 qualified (gate passed, score
+  ≥0.6, no heavyweight knockout). Fewer than 3 is fine — never force weak
+  comps; single marginal comp can no longer inflate ARV (52.9% Holiday Dr
+  scenario is now impossible).
+- Qualified comps beyond top-3 form the as-is evidence pool; the
+  counterfactual further price-gates them at ≤70% of v4 ARV (same
+  ceiling production Group B uses). No regime classifier involved.
+- Heavyweight knockout retained: ~0 score on geography / sqft_diff /
+  building_style disqualifies regardless of weighted mean.
+
+### Implementation
+- apps/api/src/services/comp-hybrid/index.ts: scoreHybridPool() signature
+  dropped classifications + attributeScores args (subject, comps, filters,
+  adjustments, now). selectHybridSets() is pure score sort + floor +
+  knockout filter. HybridCompScore lost priceClass/confidence, kept
+  knockedOutBy; counts now {scored, qualified, rejected, unusable};
+  HybridRun uses scoredCount + screenedAt (no model/tokens/stateHashes).
+- evaluation/index.ts: v4 block no longer calls classifyCompPriceWithJev;
+  runHybridScreen called with new signature; step text + metadata updated;
+  counterfactual as-is pool = qualified non-ARV comps ≤ price ceiling.
+- Dashboard: JevHybridData/JevHybridCompScore mirror types updated;
+  JevHybridCard shows scored/qualified counts; EvaluationProcessAudit v4
+  steps rewritten (deterministic, 60% floor, no tier lockout) and new
+  HybridCompRow renders every dimension's score × weight + status with an
+  expandable "Score breakdown" so the 60% composition is fully visible.
+
+### Verified
+- comp-hybrid.test.ts: 17/17 (rewritten: score-ordered selection, older-
+  but-better comp outranks fresh-weak one, 60% floor, knockout, counts).
+- api + dashboard tsc clean.
+- Fresh staging run job_1790050672548_191ed8d9f9b940db (2227 Benson St):
+  34 scored → 7 qualified; selected top-3 = 2347 Benson 83.5% (302d),
+  2224 Eugene 72.3% (186d), 7794 Williams 69.3% (194d) — the exact comps
+  the old design locked out (Benson was AS_IS-classified; Eugene/Williams
+  were fallback-tier). v4 ARV $353,349 recomputes exactly vs production
+  $326,112. No sub-60% or knocked-out comp selected; leaderboard confirms
+  selection is strictly top-by-score; 34/34 audit coverage; no priceClass
+  fields remain in the response. Report renders 200.
+
+### Open / watch
+- as-is pool under price ceiling was empty this run (qualified extras all
+  priced above 70% of ARV) → v4 asIsValue null. Deterministic, not a bug,
+  but means thin as-is evidence in some markets.
+- V4 remains shadow-only; JEV_HYBRID_V4_ENABLED=true flips routing.
+- Weights (W) and floor remain tunable after more properties are seen.
+
+Last handoff: V4 redesign verified end-to-end. Nothing in flight. To
+resume: read this file; tests `npx tsx --test tests/comp-hybrid.test.ts`
+in apps/api; verify script /tmp/verify-v4-hybrid.mjs (needs
+DASHBOARD_INTERNAL_SECRET from apps/dashboard/.env.local).
+
+## 2026-09-21 (b) — INSUFFICIENT_COMPS fix: neighborhood_match treated as location rule
+
+User reported "invalid comps" for 2607 Smithtown Dr, Lakeland FL 33801 —
+the run hard-failed BAD_DEAL INSUFFICIENT_COMPS.
+
+### Root cause
+- 44 comps fetched at 1mi, all gated → INSUFFICIENT_COMPS.
+- User preset (staging D1 d6bef694) sets neighborhood_match HARD
+  (default is soft), distance 0.5mi hard, garage/construction hard,
+  sale_age 180 + 365 expansion (548 tier disabled).
+- Subject neighborhoodName is a CoreLogic census-style code "321450.";
+  enriched comps carry different codes (321430./321440./321441.) → every
+  enriched comp had a VERIFIED neighborhood_match failure.
+- neighborhood_match was NOT in the rescue/location-failure sets — the
+  ladder (steps 4-6) only whitelists subdivision_match and distance, so
+  a pure-geography failure was unrecoverable → step-6 found zero → error.
+- Offline repro confirmed: thin pool + user preset → geographic_expansion
+  (not insufficient); enriched pool → all 9 sqft/year survivors died on
+  verified neighborhood_match alone.
+
+### Fix (apps/api/src/services/appraisal/index.ts)
+- Added neighborhood_match to the location-failure family:
+  step-4 rescue {subdivision_match, neighborhood_match},
+  step-5 rescue {subdivision_match, neighborhood_match, distance},
+  step-6 LOCATION_FAILURES same three.
+- A comp failing ONLY geography is now recoverable everywhere the ladder
+  recovers location failures; property hard rules still never enabled.
+
+### Verified
+- Offline: enriched pool + user preset → subdivision_expansion, ARV
+  $197,494 (was INSUFFICIENT).
+- Live rerun job_1790052556526_33c652d62cd24bd0: status complete,
+  78 comps (2mi widening), ARV $207,128; v4 shadow 78 scored → 12
+  qualified → 3 selected (all ≤130d — dense market works as intended),
+  shadow ARV $234,667.
+- api tsc clean; appraisal suite 108/110 (2 pre-existing evaluator.test.ts
+  failures on clean tree: stale DEFAULT_FILTERS count 20-vs-17, broken
+  small-subject sqft rule — unrelated, not touched).
+
+Last handoff: Lakeland fix verified live. Open: pre-existing
+evaluator.test.ts failures; user's preset has neighborhood_match hard —
+now recoverable via fallback rather than fatal.
+
+## 2026-XX — V4 overhaul: pure-Jev cross-examination (comp_exam_v1)
+
+User directive: V4 is entirely Jev-driven — the deterministic weighted
+proximity scorer is removed. Pipeline per comp:
+1. Deterministic pre-gates only — usable sale price, usable sale date,
+   sale ≤365d. Everything else is Jev's judgment.
+2. crossExamineCompsWithJev (services/jev): six appraiser gate nouls —
+   market_area, sale_recency, size, physical_character, utility,
+   transaction — plus one spectrum Choice verdict
+   (anchor/strong/usable/weak/reject) with per-option probabilities +
+   confidence. Asked together per comp, batched in parallel, strict
+   all-or-nothing parse. Configured tolerances baked into question text;
+   Jev never sees deterministic rule verdicts or pipeline scores.
+3. Noul gate: every question ≥0.5 (COMP_EXAM_NOUL_GATE).
+4. Rank gate-passed by weighted spectrum score
+   (anchor 1.0 / strong .75 / usable .5 / weak .25 / reject 0), then
+   confidence, distance, recency. Top-3 ≥0.5 floor selected.
+
+### Implementation
+- services/jev/index.ts: crossExamineCompsWithJev + COMP_EXAM_* exports.
+- services/comp-hybrid/index.ts: rewritten as the Jev orchestrator;
+  runHybridScreen is now async, takes env, `examine` injectable for tests.
+  COMP_HYBRID_VERSION='comp_exam_v1'. Per-comp record: gate
+  (examined/unusable/expired) + exam {nouls, gatePassed, failedNouls,
+  verdict, confidence, probabilities, spectrumScore} + rank + adjustedPrice.
+- evaluation/index.ts: awaited call with env; new metadata (model,
+  inputTokens, stateHashes, counts, selection{noulGate,spectrumFloor}).
+- Dashboard: JevHybridCompScore/JevHybridData mirror types, JevHybridCard
+  counts line, audit track = expandable cross-examination per comp
+  (6 nouls + verdict distribution + spectrum formula).
+- Tests: comp-hybrid.test.ts rewritten (14 node:test tests, injected
+  examiner); new tests/jev-comp-exam.test.ts (request shape, strict parse,
+  error paths, batch budget) — all pass; api+dashboard tsc clean; 26/26
+  regression files pass.
+
+### Verified live — job_1790053429476_202c5cf15b0a47d7 (Sarasota, 34 comps)
+- jev-1.13.0, 58,989 input tokens. 34 examined → 1 passed the all-6 gate.
+- Selected: 2347 Benson — spectrum 69.8%, 'anchor' (conf 35%), nouls
+  96/55/97/83/91/70. v4 ARV $273,001 (recomputes exactly) vs prod $326,112.
+- Jev is SHARP: near-miss tier (Pinehurst/Eugene/Hively/Williams) failed
+  on physical_character ~28-49% + utility ~13-18%, verdict 'usable';
+  weak giants got 'reject' at 80-93% confidence. Discrimination is real.
+- All assertions passed: full audit coverage, complete exam records,
+  gate/floor/counts consistent, top-by-spectrum selection, no stale fields.
+
+### Open tuning decisions (flagged to user)
+- All-6-at-50% gate is strict: 1/34 survived → single-comp ARV. utility
+  (~15-18% pool-wide) may be a systematic penalty better suited to the
+  spectrum than a hard gate. Options: require N-of-6 nouls, lower gate,
+  move utility/physical to spectrum-only, or a min-evidence rule.
+- Verdict confidence is only a tiebreak — Benson's anchor conf was 0.35.
+  Whether confidence should gate/rank selection is a product call.
+- V4 still shadow-only (JEV_HYBRID_V4_ENABLED unset). Nothing committed.
+
+## 2026-09-22 — V4 gate split + best-available fallback (live-verified)
+
+**Decision (product):** split the six exam nouls — `market_area`, `sale_recency`, `size`, `transaction` gate (admissibility: is this sale even evidence); `physical_character`, `utility` are advisory (appraiser adjusts, doesn't disqualify — they shape the spectrum only). Applied per user's explicit approval.
+
+**Why:** utility failed ~89/89 in Pinellas Park and ~15-18% avg in Sarasota — a systematic kill, not judgment.
+
+**Added:** best-available fallback — when zero comps clear the gate, v4 selects top-N by spectrum (>0) anyway, `fallbackMode: true` in run meta + audit. Implements user's "do the best with the data and show it" rather than silent abstention. `COMP_EXAM_GATE_NOUL_KEYS` exported from jev/index.ts.
+
+**Verified:**
+- Lakeland re-run job_1790054194068_5775c46e4dcb4076: 78 examined, 0 gate-passed (genuine admissibility failures — 763sqft subject, 0.5mi preset vs 2mi-widened pool) → fallback selected 3 → v4 ARV $215,249 (production $207,128). failedNouls contain gate keys only — split confirmed live.
+- 18/18 comp-hybrid tests, jev-comp-exam assertions pass, both typechecks clean.
+- Timing: Lakeland 15.1s wall (warm cache) / exam 631ms, 138k tokens, 10 batches. Pinellas cold run: 125.5s wall / exam 655ms, 89 comps, 12 batches.
+
+**Open tuning questions:**
+- Two of three Lakeland fallback picks are `reject` verdicts (22% spectrum) — fallback admits spectrum>0 including rejects; flagged in audit but consider whether modal-reject comps should be excluded.
+- `market_area` avg ~18% in both pools — the question embeds the configured 0.5mi distance while fetches widen to 2mi; consider decoupling the exam's market-area framing from the fetch-radius rule ("competing neighborhood" judgment vs strict radius).
+- Confidence remains tiebreak-only; Benson anchor at 35% confidence, top Lakeland pick usable at 18% — flag for product review.
+
+## 2026-09-22 — comp_exam_v2: preset-generated nouls + verifiability + confidence ranking (live-verified)
+
+**Improvements shipped (user's ordered list 1–4):**
+1. **Verifiability** — each generated noul carries `verifiable(subject, comp)`; when the evidence fields are missing on either side the noul is recorded `unverifiableNouls` and never gates (appraiser notes missing data, doesn't disqualify). market_area reframed to competitive-neighborhood judgment — no longer embeds the configured radius.
+2. **Routing guard** — enabled mode now falls back to appraisal rules when `fallbackMode` (below-gate evidence never routes to production ARV).
+3. **comp_exam_v2** — nouls generated per enabled preset filter: hard → gate, soft → advisory, each question text carrying the configured tolerance; plus `market_area` + `transaction` judgment nouls (always gate). Ladder internals (expansions, vintage cap switch) emit no noul. Run meta persists `questionSet` [{key,label,gate}] for audit; dashboard renders labels/gate tags from it (v1 fallback map retained for old runs).
+4. **Confidence-aware ranking** — `rankScore = spectrumScore × (0.5 + conf/2)` modulates ±50%; absent confidence neutral. rankScore + unverifiableNouls recorded per comp, shown in audit.
+
+**Verified live — job_1790055717732_c5c72cc89ac0436f (Pinellas Park re-run):**
+- 17 nouls generated from user preset (13 gate incl. hard parking/neighborhood, 4 advisory); 580 unverifiable noul instances across 89 comps (missing construction/features) — none gated.
+- 1 gate-passer (Springwood, spec 47% < floor) → fallbackMode → 3 best-available picks → v4 ARV $188,581 vs production $199,950.
+- Magnolia Trl now fails only `neighborhood` (real verified code mismatch) instead of the bogus utility sweep — the fix worked.
+- 23 batches, 267,980 input tokens (17 nouls/comp vs 6 in v1), exam 609ms, wall 43.1s.
+- 19/19 comp-hybrid + jev-comp-exam assertions + all suite files pass; both typechecks clean.
+
+**Watch items:**
+- Fallback picks include a modal-'reject' comp at 6% confidence (Palm Crest) — visible in audit; product call whether modal-rejects should be excluded even in fallback.
+- Token cost roughly doubled per comp (more nouls); exam latency flat (~600ms).
+
+## 2026-09-23 — comp_tests_v1: two-test Jev classification (live-verified)
+
+**Spec (user's fresh prompt, replaces all prior pipelines):** ~100 raw comps → Test 1 = one noul per raw field (bedrooms, bathrooms, squareFeet, lotSize, yearBuilt, propertyType, salePrice, saleDate) "matches our appraisal rules" → passers go to the "passed test 1" bucket → enriched → Test 2 = subdivision noul, else neighborhood noul (either yes = pass; both no = ineligible) + advisory physical-character/material nouls (preferred, not required) + a distance-dominant Score question with confidence → test-2 passers are the core set (ideally 3); when fewer pass, the test-1-pass/test-2-fail bucket fills to 3 by score.
+
+**Implementation:**
+- jev/index.ts: `runCompTest1WithJev` (8 nouls/comp, preset tolerances baked where rules exist — sqft_diff, lot_size_diff, year_built_diff/cap, sale_age) + `runCompTest2WithJev` (4 nouls + Score, 5-level distance spectrum). Removed the old screen/exam block. Question ids batch-local (`t1_<i>_<field>`, `t2_<i>_<key>`); the old exam code had a latent global-index bug.
+- comp-hybrid/index.ts: `runJevEvaluation` rewritten — stage `ineligible | test1_fail | test2_fail | test2_pass`; selected `core | fill`; core = all test-2 passers (no cap), fill to target 3 from fail bucket by score; poolRank by score → confidence → distance.
+- evaluation/index.ts: Jev selection drives selectedCompIds + isEnabled + ARV (mean adjusted price); hybridRun carries test1/test2 metas + new counts.
+- report.ts: jev param {verdict: 'core'|'fill', fillUsed}; all-fill set → low confidence, partial fill → medium cap.
+- Dashboard: actions.ts types, CORE/FILL badges on cards, two-test audit (test-1 fields + test-2 nouls + score levels per comp), JevHybridCard counts — all legacy-tolerant.
+
+**Kink found + decision:** the raw comps feed does not populate bedrooms/bathrooms/lotSize/propertyType (and this subject lacked them) — those are enrichment-level fields. Literal "unverifiable = not a pass" failed all 89 comps at test 1. Adopted the established appraiser rule: unverifiable = noted, never failed; a comp passes test 1 when every VERIFIABLE field clears the 50% gate. Flagged for product review.
+
+**Live verification — job_1790126946797_fc35a4ff171244e5 (5460 Lemon Tree Ln N):**
+- 89 tested → 20 passed test 1 → enriched → 3 passed test 2 (all subdivision matches) → core=3, no fill → ARV $195,800 (mean adj 187.5k/219.9k/180k).
+- Distance scores taper coherently: 99/98/91 core, 61→16 fail bucket. Jev 983ms, 104k tokens, 7 batches.
+- 28/28 comp-hybrid + jev-comp-exam tests, all 26 regression files, both typechecks green.
+
+**Open items for product:**
+- Test 1 effectively ran on 4 verifiable fields here (sqft/year/price/date) — bedrooms/baths/lot/type were unverifiable on every comp. If the user wants those gated, the feed or the subject needs the data first.
+- Fill path not exercised live (3 passed test 2). 0 or 1–2 passers will show fill picks with the 'FILL' badge.
+- `salePrice` noul is "usable, credible market sale" judgment — no preset price rule exists; watch whether it discriminates as intended across pools.

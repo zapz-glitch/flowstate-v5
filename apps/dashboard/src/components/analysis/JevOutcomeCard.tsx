@@ -81,14 +81,22 @@ function driverTone(noul: number, favorable: boolean): keyof typeof TONE_CLASSES
   return effective >= 0.6 ? 'good' : effective >= 0.35 ? 'warn' : 'bad'
 }
 
-export function JevOutcomeCard({ outcome }: { outcome: JevOutcomeData | null | undefined }) {
+export function JevOutcomeCard({
+  outcome,
+  title = 'Jev assessment',
+  footnote = 'Read-only label — did not affect comp selection, ARV, or the recommendation.',
+}: {
+  outcome: JevOutcomeData | null | undefined
+  title?: string
+  footnote?: string
+}) {
   const [expanded, setExpanded] = useState(false)
   if (!outcome) return null
 
   if (outcome.status !== 'completed' || !outcome.classifications) {
     return (
       <section className="border border-border rounded-sm px-4 py-3 text-foreground">
-        <h3 className="text-body-sm font-semibold">Jev assessment</h3>
+        <h3 className="text-body-sm font-semibold">{title}</h3>
         <p className="text-[11px] text-foreground-tertiary">
           {outcome.status === 'skipped' ? 'Jev classification not configured' : 'Jev classification unavailable for this run'}
         </p>
@@ -101,7 +109,7 @@ export function JevOutcomeCard({ outcome }: { outcome: JevOutcomeData | null | u
   return (
     <section className="border border-border rounded-sm px-4 py-3 space-y-2 text-foreground break-words">
       <div className="flex items-baseline justify-between gap-2">
-        <h3 className="text-body-sm font-semibold">Jev assessment</h3>
+        <h3 className="text-body-sm font-semibold">{title}</h3>
         <div className="flex items-center gap-2">
           {hasDrivers && (
             <button
@@ -177,7 +185,7 @@ export function JevOutcomeCard({ outcome }: { outcome: JevOutcomeData | null | u
         </div>
       )}
       <p className="text-[10px] text-foreground-tertiary">
-        Read-only label — did not affect comp selection, ARV, or the recommendation.
+        {footnote}
       </p>
     </section>
   )

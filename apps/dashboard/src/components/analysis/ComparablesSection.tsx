@@ -57,10 +57,11 @@ export interface ComparablesSectionProps {
   onFeedbackSubmitted?: (type: 'validate' | 'improve') => void
 }
 
-type SortOption = 'default' | 'subdivision' | 'neighborhood' | 'distance' | 'price' | 'psf'
+type SortOption = 'default' | 'subdivision' | 'neighborhood' | 'distance' | 'price' | 'psf' | 'score'
 
 const SORT_LABELS: Record<SortOption, string> = {
   default: 'Default',
+  score: 'Jev score',
   subdivision: 'Subdivision',
   neighborhood: 'Neighborhood',
   distance: 'Distance',
@@ -68,16 +69,13 @@ const SORT_LABELS: Record<SortOption, string> = {
   psf: '$/Sqft',
 }
 
-/** Fraction of appraisal filters a comp passed — the "closest to our rules" score */
-function compRuleScore(comp: CompItem): number {
-  const filters = comp.appraisalRules?.filters
-  if (filters && filters.length > 0) {
-    const passed = filters.filter((f) => f.status === 'passed' || (f.status == null && f.passed)).length
-    return passed / filters.length
-  }
-  if (comp.matchPercent != null) return comp.matchPercent
-  if (comp.matchRuleCount != null && comp.matchRuleTotal) return comp.matchRuleCount / comp.matchRuleTotal
-  return 0
+/** Minimum Jev score filter — null = show everything */
+type ScoreFloor = 0 | 25 | 50 | 75 | 90
+const SCORE_FLOORS: ScoreFloor[] = [0, 25, 50, 75, 90]
+
+/** Jev score /100 — exam score for cross-examined comps, screen score otherwise */
+function compScore(comp: CompItem): number | null {
+  return comp.jevHybrid?.score ?? null
 }
 
 /** Neighborhood match by normalized name OR provider code (mirrors server-side neighborhoodsMatch) */
@@ -112,6 +110,7 @@ export function ComparablesSection({
   const [layout, setLayout] = useState<'grid' | 'list'>('grid')
   const [sortBy, setSortBy] = useState<SortOption>('default')
   const [sortDesc, setSortDesc] = useState(true)
+  const [scoreFloor, setScoreFloor] = useState<ScoreFloor>(0)
   const [notifyOpen, setNotifyOpen] = useState(false)
   const [notifyNotes, setNotifyNotes] = useState('')
   const [notifySubmitting, setNotifySubmitting] = useState<FeedbackKind | null>(null)
@@ -136,7 +135,9 @@ export function ComparablesSection({
   // neighborhood modes) → appraisal-rule closeness (constant across every sort)
   // → directional key (price under geo modes, own key for distance/price/psf).
   const sortedItems = useMemo(() => {
-    const indexed = compItems.map((comp, i) => ({ comp, originalIndex: i }))
+    const indexed = compItems
+      .map((comp, i) => ({ comp, originalIndex: i }))
+      .filter(({ comp }) => scoreFloor === 0 || (compScore(comp) ?? -1) >= scoreFloor)
     const isSel = (c: CompItem, i: number) =>
       hasInteractiveSelection ? selectedCompKeys!.has(getCompKey(c, i)) : (c.compGroup === 'arv' || c.isEnabled === true)
     const subdivMatch = (c: CompItem) =>
@@ -166,6 +167,7 @@ export function ComparablesSection({
       switch (sortBy) {
         case 'distance': return c.distanceMiles ?? 999
         case 'psf': return c.pricePerSqft ?? 0
+        case 'score': return compScore(c) ?? -1
         // subdivision & neighborhood ascend/descend by price
         default: return c.salePrice ?? 0
       }
@@ -177,11 +179,11 @@ export function ComparablesSection({
       if (sa !== sb) return sa - sb
       const ga = geoMatch(a.comp), gb = geoMatch(b.comp)
       if (ga !== gb) return gb - ga
-      const rs = compRuleScore(b.comp) - compRuleScore(a.comp)
+      const rs = (compScore(b.comp) ?? -1) - (compScore(a.comp) ?? -1)
       if (rs !== 0) return rs
       return dir * (numKey(a.comp) - numKey(b.comp)) || (a.originalIndex - b.originalIndex)
     })
-  }, [compItems, sortBy, sortDesc, subjectSubdivision, subject, selectedCompKeys, hasInteractiveSelection])
+  }, [compItems, sortBy, sortDesc, scoreFloor, subjectSubdivision, subject, selectedCompKeys, hasInteractiveSelection])
 
   const toggleExpand = (key: string) => {
     const next = new Set(expandedComps)
@@ -305,10 +307,10 @@ export function ComparablesSection({
           </div>
         </div>
 
-        {/* Row 2: Sort controls */}
-        <div className="flex items-center gap-1 no-print">
+        {/* Row 2: Sort controls + Jev score filter */}
+        <div className="flex items-center gap-1 no-print flex-wrap">
           <ArrowUpDown className="w-3 h-3 text-foreground-tertiary mr-0.5" />
-          {(['default', 'subdivision', 'neighborhood', 'distance', 'price', 'psf'] as const).map((opt) => (
+          {(['default', 'score', 'subdivision', 'neighborhood', 'distance', 'price', 'psf'] as const).map((opt) => (
             <button
               key={opt}
               type="button"
@@ -329,6 +331,28 @@ export function ComparablesSection({
               )}
             </button>
           ))}
+          {compItems.some((c) => compScore(c) != null) && (
+            <>
+              <span className="w-px h-3 bg-border mx-1" />
+              <span className="text-[9px] text-foreground-tertiary uppercase tracking-wide mr-0.5">score</span>
+              {SCORE_FLOORS.map((floor) => (
+                <button
+                  key={floor}
+                  type="button"
+                  onClick={() => setScoreFloor(floor)}
+                  className={cn(
+                    'text-[10px] px-2 py-0.5 rounded transition-colors tabular-nums',
+                    scoreFloor === floor
+                      ? 'bg-primary/15 text-primary font-medium'
+                      : 'text-foreground-tertiary hover:text-foreground hover:bg-secondary'
+                  )}
+                  title={floor === 0 ? 'Show every comp' : `Show only comps with a Jev score of at least ${floor}/100`}
+                >
+                  {floor === 0 ? 'All' : `≥${floor}`}
+                </button>
+              ))}
+            </>
+          )}
         </div>
 
         {/* CDARV status — observational only; never gates evaluation */}

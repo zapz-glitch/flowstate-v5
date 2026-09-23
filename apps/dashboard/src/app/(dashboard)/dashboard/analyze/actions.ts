@@ -114,6 +114,8 @@ export interface AnalyzeData {
    * enabled), per-class counts, disagreement count vs Baseline A.
    */
   jevCompClassification?: JevCompClassificationData | null
+  jevAttributeScreen?: JevAttributeScreenData | null
+  jevHybrid?: JevHybridData | null
   /** Justified evaluation report (subset used by comp feedback) */
   report?: {
     arv?: {
@@ -173,7 +175,135 @@ export interface JevCompClassificationData {
     projectedROI: number | null
     recommendation: string | null
     deltas: { arv: number | null; asIsValue: number | null; buyPrice: number | null }
+    assessment?: JevOutcomeData
+    arvCompIds?: string[]
+    asIsCompIds?: string[]
+    arvPrunedCompIds?: string[]
   }
+}
+
+export interface JevAttributeScreenData {
+  status: 'completed' | 'skipped' | 'unavailable'
+  reason?: string
+  mode: 'enabled' | 'shadow'
+  questionVersion: string
+  model?: string
+  latencyMs?: number
+  inputTokens?: number
+  scoredCount?: number
+  poolCount?: number
+  counts?: { arv: number; asIs: number }
+  anchors?: { arvAnchor: number | null; asIsAnchor: number | null }
+  stateHashes?: string[]
+  classifiedAt?: string
+  shadowValuation?: {
+    arv: number | null
+    arvComps: number
+    asIsValue: number | null
+    asIsComps: number
+    buyPrice: number | null
+    projectedProfit: number | null
+    projectedROI: number | null
+    recommendation: string | null
+    deltas: { arv: number | null; asIsValue: number | null; buyPrice: number | null }
+    assessment?: JevOutcomeData
+    arvCompIds?: string[]
+    asIsCompIds?: string[]
+  }
+}
+
+/** Two-test Jev run metadata — test 1 (raw-field nouls) + test 2 (enriched nouls + distance score) */
+export interface JevHybridData {
+  status: 'completed' | 'skipped' | 'unavailable'
+  reason?: string
+  mode: 'enabled' | 'shadow'
+  questionVersion: string
+  /** Jev run metadata — test 1 + test 2 stages combined */
+  model?: string
+  latencyMs?: number
+  inputTokens?: number
+  stateHashes?: string[]
+  test1?: { model: string; latencyMs: number; inputTokens: number; stateHashes: string[] } | null
+  test2?: { model: string; latencyMs: number; inputTokens: number; stateHashes: string[] } | null
+  counts?: {
+    pool: number
+    ineligible: number
+    test1Passed: number
+    test1Failed: number
+    enriched: number
+    test2Passed: number
+    test2Failed: number
+    core: number
+    filled: number
+    selected: number
+  }
+  selection?: {
+    /** The ideal core comp set — test-2 passers; the fail bucket fills to this when short */
+    coreTarget: number
+    noulGate: number
+    /** True when fill picks were needed — fewer than the target passed test 2 */
+    fillUsed?: boolean
+  }
+  /** The questions this run asked — generated from the appraisal preset */
+  questionSet?: {
+    test1: { key: string; label: string }[]
+    test2: { key: string; label: string; advisory: boolean }[]
+    scoreLevels: string[]
+  }
+  screenedAt?: string
+}
+
+/** Per-comp Jev evaluation record — test 1 fields, test 2 nouls + score, selection */
+export interface JevHybridCompScore {
+  compId: string
+  /**
+   * 'ineligible'  = no usable price/date, never tested
+   * 'test1_fail'  = failed a test-1 field (or a field could not be verified)
+   * 'test2_fail'  = passed test 1, failed test 2 — ineligible but scored
+   * 'test2_pass'  = passed both tests — eligible for the core set
+   */
+  stage: 'ineligible' | 'test1_fail' | 'test2_fail' | 'test2_pass'
+  rejectReasons: string[]
+  saleAgeDays: number | null
+  /** Property-detail data was merged before test 2 */
+  enriched?: boolean
+  /** Test 1 — the eight raw-field nouls */
+  test1: {
+    /** field → 0–1 probability the comp matches the subject on it */
+    nouls: Record<string, number | null>
+    /** Verifiable fields below the gate */
+    failedFields: string[]
+    /** Fields the data could not verify — count as not passed */
+    unverifiableFields: string[]
+    /** All fields verified at/above the gate — the "passed test 1" bucket */
+    passed: boolean
+  } | null
+  /** Test 2 — the enriched nouls plus the distance-dominant score */
+  test2: {
+    nouls: {
+      subdivision: number
+      neighborhood: number
+      /** Advisory — preferred, never gating */
+      physicalCharacter: number
+      /** Advisory — preferred, never gating */
+      material: number
+    }
+    /** Subdivision yes, or neighborhood yes — eligible for the core set */
+    passed: boolean
+    /** Distance-dominant spectrum score /100 */
+    score: number
+    confidence: number | null
+    /** Score level index → probability */
+    levelProbabilities: Record<string, number>
+  } | null
+  /** Score /100 for the card — the test-2 score */
+  score: number | null
+  scoreConfidence: number | null
+  /** 1-based rank among test-2-evaluated comps by score — #1 is closest */
+  poolRank: number | null
+  /** 'core' = test-2 passer in the ARV set · 'fill' = fallback pick from the test-2-fail bucket */
+  selected: 'core' | 'fill' | null
+  adjustedPrice: number | null
 }
 
 /** Jev read-only outcome classification attached to a completed analysis */
@@ -514,6 +644,24 @@ export interface CompItem {
     margin?: number | null
     rawChoice?: string | null
   } | null
+  jevAttributeScores?: Partial<Record<
+    | 'same_neighborhood'
+    | 'same_subdivision'
+    | 'within_sqft_range'
+    | 'within_lot_sqft_range'
+    | 'same_property_style'
+    | 'same_construction'
+    | 'same_foundation'
+    | 'within_year_built_range',
+    number
+  >> | null
+  jevScreenScore?: number | null
+  jevScreenPool?: boolean
+  jevScreenBand?: 'arv' | 'as_is' | null
+  jevScreenRank?: number | null
+  jevScreenBandRank?: number | null
+  /** V4 hybrid audit — Jev class, hard-gate result, per-dimension proximity scores, pool rank, role */
+  jevHybrid?: JevHybridCompScore | null
   /** Property classification (as_is, after_renovation, transitional) */
   classification?: ClassificationSummary | null
   /** Weight contribution to ARV calculation (0-1) */

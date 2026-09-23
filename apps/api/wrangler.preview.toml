@@ -1,0 +1,56 @@
+# Local preview only. Never deploy this file.
+name = "flowstate-v4-staging-api-preview"
+main = "src/index.ts"
+compatibility_date = "2024-09-09"
+compatibility_flags = ["nodejs_compat"]
+
+[dev]
+ip = "127.0.0.1"
+port = 8788
+
+[vars]
+ENVIRONMENT = "development"
+DASHBOARD_URL = "http://localhost:3001"
+PROPERTY_PROVIDER = "corelogic"
+CDARV_API_URL = "https://flowstate-cdarv-staging.onrender.com"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "flowstate-v4-staging-app"
+database_id = "13de78d5-6d02-452a-9101-82cfff4299ed"
+migrations_dir = "migrations"
+remote = true
+
+[[kv_namespaces]]
+binding = "API_CACHE"
+id = "1846bfcab8444b198a38a5fd068f8550"
+remote = true
+
+[[r2_buckets]]
+binding = "REPORT_ASSETS"
+bucket_name = "flowstate-v4-staging-report-assets"
+remote = true
+
+[[durable_objects.bindings]]
+name = "ANALYSIS_JOB"
+class_name = "AnalysisJobDO"
+
+[[durable_objects.bindings]]
+name = "BATCH_JOB"
+class_name = "BatchJobDO"
+
+[[durable_objects.bindings]]
+name = "RATE_LIMIT_COORDINATOR"
+class_name = "RateLimitCoordinatorDO"
+
+[[migrations]]
+tag = "v5"
+new_classes = ["AnalysisJobDO"]
+
+[[migrations]]
+tag = "v6"
+new_classes = ["BatchJobDO"]
+
+[[migrations]]
+tag = "v3"
+new_classes = ["RateLimitCoordinatorDO"]

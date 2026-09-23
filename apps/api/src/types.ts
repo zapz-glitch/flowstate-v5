@@ -95,6 +95,18 @@ export interface Env {
    * response without affecting routing, valuation, or recommendation.
    */
   JEV_ATTRIBUTE_SCREEN_SHADOW?: string
+  /**
+   * 'true' → the v4 hybrid (Jev classifies the raw pool → deterministic
+   * hard gates → weighted recoverability scoring) drives comp routing.
+   * Default false — runs as a shadow alongside production.
+   */
+  JEV_HYBRID_V4_ENABLED?: string
+  /**
+   * 'false' disables the v4 hybrid shadow run entirely. Default on:
+   * records per-comp gates/scores/roles and a counterfactual valuation on
+   * the response without affecting routing, valuation, or recommendation.
+   */
+  JEV_HYBRID_V4_SHADOW?: string
 
   // ─── Google AI (Gemini) ──────────────────────────────────────────────────────
   // Direct Google AI API key for Gemini URL context and Zillow data fetching

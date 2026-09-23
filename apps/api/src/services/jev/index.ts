@@ -18,7 +18,7 @@
 import type { AnalysisResponse } from '../analysis'
 import type { NormalizedComparable, NormalizedProperty } from '../property-api/types'
 import type { AppraisedComparable, AppraisalFilter, FilterType } from '../appraisal/types'
-import { DEFAULT_FILTERS } from '../appraisal/types'
+import { DEFAULT_FILTERS, vintageYearCap } from '../appraisal/types'
 
 export interface JevEnv {
   TYPESAFE_API_KEY?: string
@@ -31,6 +31,10 @@ export interface JevEnv {
   JEV_ATTRIBUTE_SCREEN_ENABLED?: string
   /** 'false' disables the attribute-screen shadow run entirely (default on) */
   JEV_ATTRIBUTE_SCREEN_SHADOW?: string
+  /** 'true' → the v4 hybrid (classify-all + rules + recovery scoring) drives comp routing (default false = shadow) */
+  JEV_HYBRID_V4_ENABLED?: string
+  /** 'false' disables the v4 hybrid shadow run entirely (default on) */
+  JEV_HYBRID_V4_SHADOW?: string
 }
 
 export const OUTCOME_DIMENSIONS = [
@@ -84,6 +88,30 @@ export type JevOutcomeClassification =
       classifiedAt: string
     }
   | { status: 'skipped' | 'unavailable'; reason: string }
+
+export interface JevOutcomeScenario {
+  id: 'jev_v2_shadow' | 'jev_v3_shadow' | 'jev_v4_hybrid'
+  selectionMethod: string
+  arvCompIds: string[]
+  asIsCompIds: string[]
+  valuation: {
+    arv: number | null
+    arvPerSqft: number | null
+    arvSource: string
+    asIsValue: number | null
+    afterRenovationValue: number | null
+    buyPrice: number | null
+    buyPricePercent: number | null
+    rehabCost: number | null
+    rehabLevel: string | null
+    locationPenalty: number | null
+    projectedProfit: number | null
+    projectedROI: number | null
+    wholesalePrice: number | null
+    recommendation: string | null
+    recommendationReason: string | null
+  }
+}
 
 type ChoiceQuestion = {
   type: 'choice'
@@ -218,7 +246,7 @@ function driverQuestion(dimension: JevOutcomeDimension, driver: { instructions: 
 
 type CompItem = AnalysisResponse['comps']['items'][number]
 
-function projectComp(comp: CompItem): Record<string, unknown> {
+function projectComp(comp: CompItem, compGroup?: 'arv' | 'as_is' | null): Record<string, unknown> {
   const failed = (comp.appraisalRules?.filters ?? [])
     .filter((f) => f.passed === false)
     .map((f) => f.type)
@@ -234,17 +262,32 @@ function projectComp(comp: CompItem): Record<string, unknown> {
     bathrooms: comp.bathrooms,
     adjustedPrice: comp.adjustedPrice,
     subdivision: comp.subdivision,
-    compGroup: comp.compGroup ?? null,
-    jevArvTruth: comp.jevArvTruth ?? null,
-    jevInvestmentTruth: comp.jevInvestmentTruth ?? null,
+    compGroup: compGroup === undefined ? comp.compGroup ?? null : compGroup,
+    jevArvTruth: compGroup === undefined ? comp.jevArvTruth ?? null : null,
+    jevInvestmentTruth: compGroup === undefined ? comp.jevInvestmentTruth ?? null : null,
     failedFilters: failed.length ? failed : null,
   }
 }
 
-function projectOutcome(response: AnalysisResponse): Record<string, unknown> {
-  const v = response.valuation
+function projectOutcome(response: AnalysisResponse, scenario?: JevOutcomeScenario): Record<string, unknown> {
+  const v = scenario ? scenario.valuation : response.valuation
   const s = response.subject
-  const enabled = response.comps.items.filter((c) => c.isEnabled)
+  const arvIds = scenario ? new Set(scenario.arvCompIds) : null
+  const asIsIds = scenario ? new Set(scenario.asIsCompIds) : null
+  const enabled = scenario
+    ? response.comps.items.filter((c) => arvIds!.has(c.id) || asIsIds!.has(c.id))
+    : response.comps.items.filter((c) => c.isEnabled)
+  const scenarioRates = scenario
+    ? enabled.map((c) => c.pricePerSqft).filter((n): n is number => typeof n === 'number' && n > 0)
+    : []
+  const scenarioPrices = scenario
+    ? enabled.map((c) => c.adjustedPrice ?? c.salePrice).filter((n): n is number => typeof n === 'number' && n > 0).sort((a, b) => a - b)
+    : []
+  const scenarioMedian = scenarioPrices.length
+    ? scenarioPrices.length % 2 === 0
+      ? Math.round((scenarioPrices[scenarioPrices.length / 2 - 1] + scenarioPrices[scenarioPrices.length / 2]) / 2)
+      : scenarioPrices[(scenarioPrices.length - 1) / 2]
+    : null
   return {
     subject: {
       address: s.address,
@@ -290,11 +333,17 @@ function projectOutcome(response: AnalysisResponse): Record<string, unknown> {
       selectedCount: enabled.length,
       // Jev truth-ranked the whole candidate pool; non-selected candidates
       // simply ranked lower — they are not rejections or rule failures.
-      selectionMethod: 'jev_truth_ranking',
-      avgPricePerSqft: response.comps.avgPricePerSqft,
-      medianPrice: response.comps.medianPrice,
-      bestMatch: response.comps.bestMatch ?? null,
-      selected: enabled.map(projectComp),
+      selectionMethod: scenario ? scenario.selectionMethod : 'jev_truth_ranking',
+      avgPricePerSqft: scenario
+        ? scenarioRates.length
+          ? Math.round(scenarioRates.reduce((sum, n) => sum + n, 0) / scenarioRates.length)
+          : null
+        : response.comps.avgPricePerSqft,
+      medianPrice: scenario ? scenarioMedian : response.comps.medianPrice,
+      bestMatch: scenario ? null : response.comps.bestMatch ?? null,
+      selected: enabled.map((comp) =>
+        scenario ? projectComp(comp, arvIds!.has(comp.id) ? 'arv' : 'as_is') : projectComp(comp),
+      ),
     },
     report: response.report
       ? {
@@ -365,6 +414,7 @@ function parseResponse(
 export async function classifyOutcomeWithJev(
   response: AnalysisResponse,
   env: JevEnv,
+  scenario?: JevOutcomeScenario,
 ): Promise<JevOutcomeClassification> {
   const start = Date.now()
   const key = env.TYPESAFE_API_KEY?.trim()
@@ -385,10 +435,11 @@ export async function classifyOutcomeWithJev(
   const body = {
     model,
     state: {
-      ...projectOutcome(response),
+      ...projectOutcome(response, scenario),
       evaluationDate: new Date(start).toISOString().slice(0, 10),
-      evidenceNote:
-        'This analysis outcome was produced by the deterministic v5 pipeline. Jev only labels the outcome; selection and valuation are final.',
+      evidenceNote: scenario
+        ? `This is the ${scenario.id} counterfactual outcome. Jev only labels this shadow outcome; it did not affect production.`
+        : 'This analysis outcome was produced by the deterministic v5 pipeline. Jev only labels the outcome; selection and valuation are final.',
     },
     questions,
   }
@@ -763,6 +814,10 @@ export interface JevCompClassificationRun {
     recommendation: string | null
     /** B figure minus production figure per metric */
     deltas: { arv: number | null; asIsValue: number | null; buyPrice: number | null }
+    assessment?: JevOutcomeClassification
+    arvCompIds: string[]
+    asIsCompIds: string[]
+    arvPrunedCompIds: string[]
   }
 }
 
@@ -831,7 +886,7 @@ function rankAmong(value: number | null | undefined, others: Array<number | null
  * those are computed FROM classifications, so feeding them back would be
  * circular.
  */
-function compPriceEvidence(comp: AppraisedComparable, eligiblePool: AppraisedComparable[]): Record<string, unknown> {
+function compPriceEvidence(comp: AppraisedComparable, eligiblePool: AppraisedComparable[], gated: boolean): Record<string, unknown> {
   const ev = comp.evaluation
   const others = eligiblePool.filter((c) => c.id !== comp.id)
   return {
@@ -859,16 +914,19 @@ function compPriceEvidence(comp: AppraisedComparable, eligiblePool: AppraisedCom
           adjustedPrice: ev.adjustedPrice ?? null,
         }
       : null,
-    evidenceNote:
-      'This sale already passed the deterministic appraisal eligibility gate. Rule outcomes are evidence about the sale, not the classification verdict. Missing/null fields are unknown.',
+    evidenceNote: gated
+      ? 'This sale already passed the deterministic appraisal eligibility gate. Rule outcomes are evidence about the sale, not the classification verdict. Missing/null fields are unknown.'
+      : 'This sale is part of the raw candidate pool — the appraisal gate has NOT been applied yet and runs separately after classification. Rule outcomes are evidence about the sale, not the classification verdict. Missing/null fields are unknown.',
   }
 }
 
-function priceClassQuestion(index: number): ChoiceQuestion {
+function priceClassQuestion(index: number, gated: boolean): ChoiceQuestion {
   return {
     type: 'choice',
     instructions:
-      `Given that state.comparables[${index}] has already passed Flowstate's deterministic appraisal compatibility rules, which market price condition does this sale most likely represent? ` +
+      (gated
+        ? `Given that state.comparables[${index}] has already passed Flowstate's deterministic appraisal compatibility rules, which market price condition does this sale most likely represent? `
+        : `Regardless of whether state.comparables[${index}] passes Flowstate's appraisal compatibility rules — they are applied separately afterward — which market price condition does this sale most likely represent? `) +
       `Classify the transaction based primarily on its sale-price position within the qualified local comparable evidence (state.eligibleMarket and the other comparables). ` +
       `Photographs are unavailable — do not infer renovation quality from nonexistent visual evidence. ` +
       `Do not re-evaluate whether the sale passes appraisal rules. ` +
@@ -901,6 +959,7 @@ type PriceBatch = { ids: string[]; offset: number; body: { model: string; state:
 function makePriceBatch(
   subject: Record<string, unknown>, market: Record<string, unknown>, rules: unknown,
   comps: Array<Record<string, unknown>>, ids: string[], offset: number, model: string, evaluationDate: string,
+  gated: boolean,
 ): PriceBatch {
   return {
     ids,
@@ -913,11 +972,12 @@ function makePriceBatch(
         appraisalRules: rules,
         evaluationDate,
         comparables: comps,
-        classificationNote:
-          'Every comparable in state.comparables already passed the deterministic appraisal eligibility gate; eligibility is not yours to decide. Classify each sale\'s price regime only.',
+        classificationNote: gated
+          ? 'Every comparable in state.comparables already passed the deterministic appraisal eligibility gate; eligibility is not yours to decide. Classify each sale\'s price regime only.'
+          : 'state.comparables is the raw candidate pool; the appraisal gate has NOT run yet — eligibility is applied separately after classification. Classify each sale\'s price regime only.',
       },
       questions: Object.fromEntries(
-        comps.map((_, index) => [`comp_${offset + index}_price_classification`, priceClassQuestion(index)]),
+        comps.map((_, index) => [`comp_${offset + index}_price_classification`, priceClassQuestion(offset + index, gated)]),
       ),
     },
   }
@@ -925,7 +985,7 @@ function makePriceBatch(
 
 function priceClassBatches(
   subject: NormalizedProperty, eligible: AppraisedComparable[], rules: unknown,
-  model: string, evaluationDate: string,
+  model: string, evaluationDate: string, gated: boolean,
 ): PriceBatch[] {
   const subjectEvidence = truthEvidence(subject, subjectTruthFields)
   const market = {
@@ -939,19 +999,19 @@ function priceClassBatches(
   let ids: string[] = []
   let offset = 0
   for (const comp of eligible) {
-    const item = compPriceEvidence(comp, eligible)
-    const next = makePriceBatch(subjectEvidence, market, rules, [...pending, item], [...ids, comp.id], offset, model, evaluationDate)
+    const item = compPriceEvidence(comp, eligible, gated)
+    const next = makePriceBatch(subjectEvidence, market, rules, [...pending, item], [...ids, comp.id], offset, model, evaluationDate, gated)
     if (truthFits(next)) { pending.push(item); ids.push(comp.id); continue }
     if (pending.length) {
-      result.push(makePriceBatch(subjectEvidence, market, rules, pending, ids, offset, model, evaluationDate))
+      result.push(makePriceBatch(subjectEvidence, market, rules, pending, ids, offset, model, evaluationDate, gated))
       offset += pending.length
     }
-    const single = makePriceBatch(subjectEvidence, market, rules, [item], [comp.id], offset, model, evaluationDate)
+    const single = makePriceBatch(subjectEvidence, market, rules, [item], [comp.id], offset, model, evaluationDate, gated)
     if (!truthFits(single)) throw new Error('Jev price-classification context limit: subject, market context, and one comparable exceed the request budget; evidence was not truncated.')
     pending = [item]
     ids = [comp.id]
   }
-  if (pending.length) result.push(makePriceBatch(subjectEvidence, market, rules, pending, ids, offset, model, evaluationDate))
+  if (pending.length) result.push(makePriceBatch(subjectEvidence, market, rules, pending, ids, offset, model, evaluationDate, gated))
   return result
 }
 
@@ -1016,7 +1076,9 @@ export async function classifyCompPriceWithJev(
   eligible: AppraisedComparable[],
   appraisalRules: unknown,
   env: JevEnv,
+  opts?: { gated?: boolean },
 ): Promise<JevCompPriceResult> {
+  const gated = opts?.gated !== false
   const start = Date.now()
   const evaluationDate = new Date(start).toISOString().slice(0, 10)
   const key = env.TYPESAFE_API_KEY?.trim()
@@ -1031,7 +1093,7 @@ export async function classifyCompPriceWithJev(
   const stateHashes: string[] = []
   let inputTokens = 0
   let actualModel: string | undefined
-  for (const batch of priceClassBatches(subject, eligible, appraisalRules, model, evaluationDate)) {
+  for (const batch of priceClassBatches(subject, eligible, appraisalRules, model, evaluationDate, gated)) {
     stateHashes.push(fnv1a(serialized(batch.body.state)))
     let httpResponse: Response
     try {
@@ -1334,5 +1396,474 @@ export async function scoreCompAttributesWithJev(
     latencyMs: Date.now() - start,
     inputTokens,
     stateHashes: batches.map((batch) => fnv1a(serialized(batch.body.state))),
+  }
+}
+
+// ─── Two-test comp evaluation ───────────────────────────────────────────────
+//
+// Product spec (replaces the prior screen/exam pipeline):
+//
+//   TEST 1 — noul on raw comps. For each raw field the question is
+//     "does this comp match the subject on this field, per the appraisal
+//     rules?" — bathrooms, squareFeet, lotSizeAcres, yearBuilt, salePrice,
+//     saleDate. Where the preset configures a tolerance for the field it is
+//     baked into the question; where it does not (bathrooms, salePrice) the
+//     question asks for the appraiser's match judgment against the subject.
+//     Passing ALL of them puts the comp in the "passed test 1" bucket → it
+//     gets enriched.
+//   TEST 2 — noul on the enriched data. A subdivision match passes test 2;
+//     if subdivision fails, a neighborhood match still passes it. Both no →
+//     test 2 fail → ineligible for the core comp set. Physical character
+//     and material matches are asked as preferred-not-required advisory
+//     nouls — recorded, never gating.
+//   SCORE — one Score question per enriched comp: distance to the subject
+//     dominates (closest → highest level, tapering as distance grows);
+//     physical character and material similarity are preferred but not
+//     required. Carries Jev's confidence.
+//   SELECTION — test-2 passers are the primary core comp set (ideally 3).
+//     When fewer than 3 pass, the test-1-pass / test-2-fail bucket is
+//     scored on distance and fills the set to 3 by score.
+
+export const COMP_EVAL_VERSION = 'comp_tests_v1'
+export const COMP_NOUL_GATE = 0.5
+
+const hasEvidence = (v: unknown): boolean =>
+  v != null && v !== '' && !(typeof v === 'number' && Number.isNaN(v))
+
+// ─── Test 1 — raw-field nouls ───────────────────────────────────────────────
+
+export type CompTest1Field =
+  | 'bathrooms' | 'squareFeet' | 'lotSize'
+  | 'yearBuilt' | 'salePrice' | 'saleDate'
+
+export const COMP_TEST1_FIELDS: CompTest1Field[] = [
+  'bathrooms', 'squareFeet', 'lotSize', 'yearBuilt', 'salePrice', 'saleDate',
+]
+
+export const COMP_TEST1_LABELS: Record<CompTest1Field, string> = {
+  bathrooms: 'Bathrooms',
+  squareFeet: 'Square footage',
+  lotSize: 'Lot size',
+  yearBuilt: 'Year built',
+  salePrice: 'Sale price',
+  saleDate: 'Sale date',
+}
+
+export interface CompTest1FieldDef {
+  key: CompTest1Field
+  label: string
+  question: (index: number) => string
+  /** Field must be present on the comp (and subject where required) for the noul to be verifiable */
+  verifiable: (subject: NormalizedProperty, comp: AppraisedComparable) => boolean
+}
+
+export function buildTest1Defs(filters: AppraisalFilter[], subject: NormalizedProperty): CompTest1FieldDef[] {
+  const rule = (type: string) => filters.find((f) => f.type === type)
+  const vintageCap = vintageYearCap(filters, subject.yearBuilt)
+  const subjectLotSqft = hasEvidence(subject.lotSizeSquareFeet)
+    ? subject.lotSizeSquareFeet!
+    : hasEvidence(subject.lotSizeAcres)
+      ? subject.lotSizeAcres! * 43_560
+      : null
+
+  return [
+    {
+      key: 'bathrooms',
+      label: COMP_TEST1_LABELS.bathrooms,
+      question: (i) => `Does state.comparables[${i}] match the subject's bathroom count — a comparable with the same number of bathrooms as the subject? Judge bathrooms.`,
+      verifiable: (s, c) => hasEvidence(s.bathrooms) && hasEvidence(c.bathrooms),
+    },
+    {
+      key: 'squareFeet',
+      label: COMP_TEST1_LABELS.squareFeet,
+      question: (i) => {
+        const t = rule('sqft_diff')?.value ?? 250
+        return `Is state.comparables[${i}]'s living area within ±${t} sqft of the subject's — the appraiser's size-match standard? Judge squareFeet.`
+      },
+      verifiable: (s, c) => hasEvidence(s.squareFeet) && hasEvidence(c.squareFeet),
+    },
+    {
+      key: 'lotSize',
+      label: COMP_TEST1_LABELS.lotSize,
+      question: (i) => {
+        const t = rule('lot_size_diff')?.value ?? 5_000
+        return `Is state.comparables[${i}]'s lot within ±${t} sqft of the subject's — the appraiser's lot-match standard? Judge lotSizeSquareFeet/lotSizeAcres.`
+      },
+      verifiable: (_s, c) => subjectLotSqft != null && (hasEvidence(c.lotSizeSquareFeet) || hasEvidence(c.lotSizeAcres)),
+    },
+    {
+      key: 'yearBuilt',
+      label: COMP_TEST1_LABELS.yearBuilt,
+      question: (i) => {
+        const t = rule('year_built_diff')?.value ?? 15
+        const hardCap = vintageCap != null ? ` Built no earlier than ${vintageCap}.` : ''
+        return `Was state.comparables[${i}] built within ±${t} years of the subject's ${subject.yearBuilt ?? 'year built'}?${hardCap} Judge yearBuilt.`
+      },
+      verifiable: (s, c) => hasEvidence(s.yearBuilt) && hasEvidence(c.yearBuilt),
+    },
+    {
+      key: 'salePrice',
+      label: COMP_TEST1_LABELS.salePrice,
+      question: (i) => `Is state.comparables[${i}]'s salePrice a usable, credible market sale price for this subject's valuation — a real arm's-length price observation an appraiser can work with? Judge salePrice.`,
+      verifiable: (_s, c) => hasEvidence(c.salePrice) && c.salePrice! > 0,
+    },
+    {
+      key: 'saleDate',
+      label: COMP_TEST1_LABELS.saleDate,
+      question: (i) => {
+        const t = rule('sale_age')?.value ?? 180
+        return `Is state.comparables[${i}]'s sale within the appraiser's recency standard — a sale inside roughly the last ${t} days of evaluationDate? Judge saleDate/saleAgeDays.`
+      },
+      verifiable: (_s, c) => hasEvidence(c.saleDate),
+    },
+  ]
+}
+
+// ─── Test 2 — enriched nouls + distance score ───────────────────────────────
+
+export type CompTest2Noul = 'subdivision' | 'neighborhood' | 'physicalCharacter' | 'material'
+
+export const COMP_TEST2_NOUL_LABELS: Record<CompTest2Noul, string> = {
+  subdivision: 'Subdivision',
+  neighborhood: 'Neighborhood',
+  physicalCharacter: 'Physical character',
+  material: 'Material match',
+}
+
+/** Ordered level descriptions for the distance-dominant Score question — index = level. */
+export const COMP_TEST2_SCORE_LEVELS = [
+  'Materially far from the subject — proximity evidence too weak to carry weight',
+  "Distant — outside the subject's immediate market",
+  'Moderate proximity — usable distance evidence',
+  'Close — strong proximity to the subject',
+  'Immediately adjacent — among the closest sales available',
+] as const
+
+function test2Questions(index: number): Record<string, Question> {
+  const c = `state.comparables[${index}]`
+  return {
+    [`t2_${index}_subdivision`]: {
+      type: 'noul',
+      instructions: `Is ${c} in the subject's subdivision — or a directly competing subdivision an appraiser would treat as the same market? Judge subdivision.`,
+    },
+    [`t2_${index}_neighborhood`]: {
+      type: 'noul',
+      instructions: `Is ${c} in the subject's neighborhood — matching the subject's neighborhoodName/neighborhoodCode, or a directly competing area? Judge neighborhoodName/neighborhoodCode.`,
+    },
+    [`t2_${index}_physicalCharacter`]: {
+      type: 'noul',
+      instructions: `Does ${c} match the subject's physical character — the same kind of house in building style, size, era, and layout? This match is preferred but not required. Judge construction.buildingStyle, squareFeet, yearBuilt, stories.`,
+    },
+    [`t2_${index}_material`]: {
+      type: 'noul',
+      instructions: `Do ${c}'s construction materials match the subject's — frame/block/brick, exterior walls, roof? This match is preferred but not required. Judge construction.type/exteriorWalls/roofCover.`,
+    },
+    [`t2_${index}_score`]: {
+      type: 'score',
+      instructions: `Score ${c} as comparable evidence for state.subject — distance to the subject dominates: the closest sale earns the highest level and the score tapers as distanceMiles grows materially farther. Physical character and material similarity are preferred and may lift the score, but they are not required.`,
+      criteria: [...COMP_TEST2_SCORE_LEVELS],
+    },
+  }
+}
+
+// ─── Shared plumbing ────────────────────────────────────────────────────────
+
+const TEST_EVIDENCE_NOTE =
+  "Evaluation date is state.evaluationDate — judge every sale relative to it, not today. saleAgeDays is days since the comp's sale as of evaluationDate. Fields that are null or absent are unknown — an unverifiable fact is not a failure; answer on the evidence present."
+
+function compTestEvidence(comp: AppraisedComparable, evaluationDate: string): Record<string, unknown> {
+  const evalTime = Date.parse(evaluationDate)
+  const saleTime = comp.saleDate ? Date.parse(comp.saleDate) : NaN
+  return {
+    address: comp.address, city: comp.city, state: comp.state, zipCode: comp.zipCode,
+    distanceMiles: comp.distanceMiles,
+    bedrooms: comp.bedrooms ?? null,
+    bathrooms: comp.bathrooms ?? null,
+    squareFeet: comp.squareFeet ?? null,
+    lotSizeSquareFeet: comp.lotSizeSquareFeet ?? null,
+    lotSizeAcres: comp.lotSizeAcres ?? null,
+    yearBuilt: comp.yearBuilt ?? null,
+    propertyType: comp.propertyType ?? null,
+    salePrice: comp.salePrice ?? null,
+    saleDate: comp.saleDate ?? null,
+    saleAgeDays: Number.isNaN(evalTime) || Number.isNaN(saleTime) ? null : Math.max(0, Math.floor((evalTime - saleTime) / 86_400_000)),
+    pricePerSqft: comp.pricePerSqft ?? null,
+    subdivision: comp.subdivision ?? null,
+    neighborhoodName: comp.neighborhoodName ?? null,
+    neighborhoodCode: comp.neighborhoodCode ?? null,
+    stories: comp.stories ?? null,
+    buildingCondition: comp.buildingCondition ?? null,
+    buildingGrade: comp.buildingGrade ?? null,
+    construction: comp.construction ?? null,
+    features: comp.features ?? null,
+    transaction: comp.transaction ?? null,
+    isEnriched: comp.isEnriched === true,
+    evidenceNote: 'This comparable is a candidate sale being evaluated for the subject valuation — property, location, sale, and transaction facts only.',
+  }
+}
+
+interface TestBatch {
+  body: { model: string; state: Record<string, unknown>; questions: Record<string, Question> }
+  ids: string[]
+}
+
+function makeTestBatch(
+  subjectEvidence: Record<string, unknown>, rules: unknown, evaluationDate: string, model: string,
+  comps: Array<Record<string, unknown>>, ids: string[],
+  questionsFor: (index: number) => Record<string, Question>,
+): TestBatch {
+  return {
+    ids,
+    body: {
+      model,
+      state: {
+        note: TEST_EVIDENCE_NOTE,
+        evaluationDate,
+        subject: subjectEvidence,
+        appraisalRules: rules,
+        comparables: comps,
+      },
+      questions: Object.fromEntries(
+        comps.flatMap((_, index) => Object.entries(questionsFor(index))),
+      ),
+    },
+  }
+}
+
+function testBatches(
+  subject: NormalizedProperty, comps: AppraisedComparable[], rules: unknown,
+  evaluationDate: string, model: string,
+  questionsFor: (index: number) => Record<string, Question>,
+): TestBatch[] {
+  const subjectEvidence = truthEvidence(subject, subjectTruthFields)
+  const result: TestBatch[] = []
+  let pending: Array<Record<string, unknown>> = []
+  let ids: string[] = []
+  for (const comp of comps) {
+    const item = compTestEvidence(comp, evaluationDate)
+    const next = makeTestBatch(subjectEvidence, rules, evaluationDate, model, [...pending, item], [...ids, comp.id], questionsFor)
+    if (truthFits(next)) { pending.push(item); ids.push(comp.id); continue }
+    if (pending.length) {
+      result.push(makeTestBatch(subjectEvidence, rules, evaluationDate, model, pending, ids, questionsFor))
+    }
+    const single = makeTestBatch(subjectEvidence, rules, evaluationDate, model, [item], [comp.id], questionsFor)
+    if (!truthFits(single)) throw new Error('Jev comp evaluation context limit: subject, rules, and one comparable exceed the request budget; evidence was not truncated.')
+    pending = [item]
+    ids = [comp.id]
+  }
+  if (pending.length) result.push(makeTestBatch(subjectEvidence, rules, evaluationDate, model, pending, ids, questionsFor))
+  return result
+}
+
+async function askTestBatches(
+  batches: TestBatch[], key: string, stage: string,
+): Promise<{ responses: Array<{ json: unknown; batch: TestBatch }> }> {
+  const responses = await Promise.all(
+    batches.map(async (batch) => {
+      let httpResponse: Response
+      try {
+        httpResponse = await fetch(ENDPOINT, {
+          method: 'POST',
+          redirect: 'manual',
+          headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+          body: serialized(batch.body),
+          signal: AbortSignal.timeout(TIMEOUT_MS),
+        })
+      } catch {
+        throw new Error(`Jev ${stage} request failed or timed out.`)
+      }
+      if (!httpResponse.ok) {
+        void httpResponse.body?.cancel().catch(() => {})
+        throw new Error(`Jev ${stage} API returned HTTP ${httpResponse.status}.`)
+      }
+      let json: unknown
+      try { json = await httpResponse.json() } catch { throw new Error(`Jev ${stage} returned unreadable JSON.`) }
+      return { json, batch }
+    }),
+  )
+  return { responses }
+}
+
+function validateTestEnvelope(value: unknown, batch: TestBatch, stage: string): { answers: Record<string, unknown>; model: string; inputTokens: number } {
+  const malformed = () => new Error(`Jev ${stage} returned an invalid or incomplete typed response; no results were accepted.`)
+  if (!object(value) || typeof value.model !== 'string' || !/^jev-[\w.-]+$/.test(value.model) || !object(value.answers) || !object(value.usage)) throw malformed()
+  const { input_tokens: inputTokens } = value.usage
+  if (typeof inputTokens !== 'number' || !Number.isSafeInteger(inputTokens) || inputTokens < 0) throw malformed()
+  const keys = Object.keys(batch.body.questions)
+  if (Object.keys(value.answers).length !== keys.length || keys.some((key) => !Object.hasOwn(value.answers as object, key))) throw malformed()
+  return { answers: value.answers as Record<string, unknown>, model: value.model, inputTokens }
+}
+
+// ─── Test 1 runner ──────────────────────────────────────────────────────────
+
+export interface JevCompTest1Result {
+  /** compId → field → 0–1 probability the comp matches the subject on it */
+  results: Record<string, Record<CompTest1Field, number>>
+  model: string
+  latencyMs: number
+  inputTokens: number
+  stateHashes: string[]
+}
+
+function parseTest1Response(
+  value: unknown, batch: TestBatch, defs: CompTest1FieldDef[],
+): { results: Record<string, Record<CompTest1Field, number>>; model: string; inputTokens: number } {
+  const malformed = () => new Error('Jev test 1 returned an invalid or incomplete typed response; no results were accepted.')
+  const { answers, model, inputTokens } = validateTestEnvelope(value, batch, 'test 1')
+  const results: Record<string, Record<CompTest1Field, number>> = Object.create(null)
+  batch.ids.forEach((id, index) => {
+    const nouls: Record<CompTest1Field, number> = Object.create(null)
+    for (const def of defs) {
+      const answer = answers[`t1_${index}_${def.key}`]
+      if (!object(answer) || answer.type !== 'noul' || !probability(answer.noul)) throw malformed()
+      nouls[def.key] = answer.noul
+    }
+    results[id] = nouls
+  })
+  return { results, model, inputTokens }
+}
+
+/**
+ * Test 1 — the raw-field nouls. One noul per field per comp — "does this
+ * comp match the subject on this field per the appraisal rules?" Batched;
+ * all-or-nothing. Pass/fail application is the caller's decision
+ * (services/comp-hybrid); this returns the raw probabilities.
+ */
+export async function runCompTest1WithJev(
+  subject: NormalizedProperty,
+  comps: AppraisedComparable[],
+  filters: AppraisalFilter[],
+  rules: unknown,
+  env: JevEnv,
+): Promise<JevCompTest1Result> {
+  const start = Date.now()
+  const evaluationDate = new Date(start).toISOString().slice(0, 10)
+  const key = env.TYPESAFE_API_KEY?.trim()
+  if (!key) throw new Error('Jev test 1 requires TYPESAFE_API_KEY.')
+  const model = env.TYPESAFE_MODEL?.trim() || 'jev-latest'
+  if (!/^jev-[\w.-]+$/.test(model)) throw new Error('Jev test 1 requires a Jev model identifier.')
+  if (comps.some((comp) => typeof comp.id !== 'string' || !comp.id.trim()) || new Set(comps.map((c) => c.id)).size !== comps.length) {
+    throw new Error('Jev test 1 requires a unique, nonempty ID for every comparable.')
+  }
+
+  const defs = buildTest1Defs(filters, subject)
+  const batches = testBatches(
+    subject, comps, rules, evaluationDate, model,
+    (index) => Object.fromEntries(defs.map((def) => [`t1_${index}_${def.key}`, { type: 'noul' as const, instructions: def.question(index) }])),
+  )
+  const { responses } = await askTestBatches(batches, key, 'test 1')
+
+  const results: Record<string, Record<CompTest1Field, number>> = Object.create(null)
+  let inputTokens = 0
+  let actualModel: string | undefined
+  for (const { json, batch } of responses) {
+    const parsed = parseTest1Response(json, batch, defs)
+    if (actualModel && actualModel !== parsed.model) throw new Error('Jev test 1 model changed between batches; no mixed-model results were accepted.')
+    actualModel = parsed.model
+    inputTokens += parsed.inputTokens
+    Object.assign(results, parsed.results)
+  }
+  return {
+    results,
+    model: actualModel ?? model,
+    latencyMs: Date.now() - start,
+    inputTokens,
+    stateHashes: batches.map((b) => fnv1a(serialized(b.body.state))),
+  }
+}
+
+// ─── Test 2 runner ──────────────────────────────────────────────────────────
+
+export interface JevCompTest2Result {
+  results: Record<string, {
+    nouls: Record<CompTest2Noul, number>
+    /** Raw score position across the ordered levels */
+    rawScore: number
+    confidence: number | null
+    /** level index → probability */
+    levelProbabilities: Record<string, number>
+  }>
+  model: string
+  latencyMs: number
+  inputTokens: number
+  stateHashes: string[]
+}
+
+function parseTest2Response(
+  value: unknown, batch: TestBatch,
+): { results: JevCompTest2Result['results']; model: string; inputTokens: number } {
+  const malformed = () => new Error('Jev test 2 returned an invalid or incomplete typed response; no results were accepted.')
+  const { answers, model, inputTokens } = validateTestEnvelope(value, batch, 'test 2')
+  const results: JevCompTest2Result['results'] = Object.create(null)
+  batch.ids.forEach((id, index) => {
+    const nouls: Record<CompTest2Noul, number> = Object.create(null)
+    for (const key of ['subdivision', 'neighborhood', 'physicalCharacter', 'material'] as CompTest2Noul[]) {
+      const answer = answers[`t2_${index}_${key}`]
+      if (!object(answer) || answer.type !== 'noul' || !probability(answer.noul)) throw malformed()
+      nouls[key] = answer.noul
+    }
+    const score = answers[`t2_${index}_score`]
+    if (!object(score) || score.type !== 'score' || typeof score.score !== 'number' || !Number.isFinite(score.score)) throw malformed()
+    if (score.score < 0 || score.score > COMP_TEST2_SCORE_LEVELS.length - 1) throw malformed()
+    if (!object(score.probabilities)) throw malformed()
+    const levelProbabilities: Record<string, number> = Object.create(null)
+    for (let level = 0; level < COMP_TEST2_SCORE_LEVELS.length; level++) {
+      const p = (score.probabilities as Record<string, unknown>)[String(level)]
+      if (!probability(p)) throw malformed()
+      levelProbabilities[String(level)] = p
+    }
+    if (score.confidence != null && !probability(score.confidence)) throw malformed()
+    results[id] = {
+      nouls,
+      rawScore: score.score,
+      confidence: (score.confidence as number | undefined) ?? null,
+      levelProbabilities,
+    }
+  })
+  return { results, model, inputTokens }
+}
+
+/**
+ * Test 2 — the enriched-data nouls plus the distance-dominant Score. Asked
+ * together per comp: subdivision, neighborhood (the pass logic — either yes
+ * passes), physical character and material (advisory, preferred not
+ * required), and the spectrum Score weighted on distance to the subject.
+ * Pass/fail application is the caller's decision (services/comp-hybrid).
+ */
+export async function runCompTest2WithJev(
+  subject: NormalizedProperty,
+  comps: AppraisedComparable[],
+  rules: unknown,
+  env: JevEnv,
+): Promise<JevCompTest2Result> {
+  const start = Date.now()
+  const evaluationDate = new Date(start).toISOString().slice(0, 10)
+  const key = env.TYPESAFE_API_KEY?.trim()
+  if (!key) throw new Error('Jev test 2 requires TYPESAFE_API_KEY.')
+  const model = env.TYPESAFE_MODEL?.trim() || 'jev-latest'
+  if (!/^jev-[\w.-]+$/.test(model)) throw new Error('Jev test 2 requires a Jev model identifier.')
+  if (comps.some((comp) => typeof comp.id !== 'string' || !comp.id.trim()) || new Set(comps.map((c) => c.id)).size !== comps.length) {
+    throw new Error('Jev test 2 requires a unique, nonempty ID for every comparable.')
+  }
+
+  const batches = testBatches(subject, comps, rules, evaluationDate, model, test2Questions)
+  const { responses } = await askTestBatches(batches, key, 'test 2')
+
+  const results: JevCompTest2Result['results'] = Object.create(null)
+  let inputTokens = 0
+  let actualModel: string | undefined
+  for (const { json, batch } of responses) {
+    const parsed = parseTest2Response(json, batch)
+    if (actualModel && actualModel !== parsed.model) throw new Error('Jev test 2 model changed between batches; no mixed-model results were accepted.')
+    actualModel = parsed.model
+    inputTokens += parsed.inputTokens
+    Object.assign(results, parsed.results)
+  }
+  return {
+    results,
+    model: actualModel ?? model,
+    latencyMs: Date.now() - start,
+    inputTokens,
+    stateHashes: batches.map((b) => fnv1a(serialized(b.body.state))),
   }
 }

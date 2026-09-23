@@ -39,22 +39,11 @@ import {
 } from '../analysis'
 import { createPhotoService, createPhotoProvider, type PhotoBundle, type PropertyIdentifier, type PropertyPhotos } from '../photo-provider'
 import {
-  attributeScreenMode,
-  classifyCompPriceWithJev,
-  compClassifierEligible,
-  compClassifierMode,
-  COMP_ATTRIBUTE_QUESTION_VERSION,
-  COMP_PRICE_QUESTION_VERSION,
-  routeCompPriceClasses,
-  scoreCompAttributesWithJev,
-  scoreCompTruthWithJev,
-} from '../jev'
-import type { JevCompClassificationRun, JevCompPriceClass } from '../jev'
-import {
-  screenCompPool,
-  splitPriceBands,
-  type AttributeScreenRun,
-} from '../comp-screen'
+  COMP_HYBRID_VERSION,
+  runJevEvaluation,
+  type HybridRun,
+} from '../comp-hybrid'
+
 import { persistReportAssets } from '../report-assets'
 import { expansionRefetchRadius } from '../property-api/retrieval-policy'
 import { assessRenovationFromPhotos, assessCompCurbAppeal, type RenovationAssessment, type CurbAppealCheck } from '../vision/renovation'
@@ -110,6 +99,12 @@ export interface EvaluationParams {
    * selection always runs after retrieval; this never picks comps itself.
    */
   expandComparablesPool?: (radiusMiles: number, monthsBack?: number) => Promise<NormalizedComparable[] | null>
+  /**
+   * Property-detail seam for the Jev evaluation — enriches the
+   * top-screened candidates (building style, foundation, construction,
+   * features, transaction) before the cross-examination.
+   */
+  enrichComparables?: (comps: NormalizedComparable[]) => Promise<NormalizedComparable[]>
 }
 
 export interface GroupBResult {
@@ -651,245 +646,103 @@ export async function performAnalysis(
     }
   }
 
-  // ── Jev comp classification ────────────────────────────────────────────────
-  // Baseline A (production, unchanged): every candidate gets two 0–1 truth
-  // nouls — ARV evidence vs as-is-investor evidence; argmax assigns the
-  // bucket. Candidate B (JEV_COMP_CLASSIFIER_V2_*): eligible comps get ONE
-  // structured choice — ARV | AS_IS | UNIDENTIFIED — routed deterministically
-  // (UNIDENTIFIED enters neither pool). Both paths gate on the same
-  // eligibility predicate: distance ≤0.5mi (the uniform location signal —
-  // geo enrichment is sparse) AND no hard-priority rule failure (soft
-  // failures and 'not_verified' never disqualify). If Jev is unavailable or
-  // the ARV pool is empty, the rules selection stands — Jev classifies
-  // evidence, it never declares the pool insufficient.
+  // ── Jev comp evaluation — the only selection logic ────────────────────────
+  // Test 1 asks Jev's raw-field nouls — bathrooms, squareFeet, lotSize,
+  // yearBuilt, salePrice, saleDate — "does this comp match the subject on
+  // this field per the appraisal rules?" Passing every verifiable field
+  // puts the comp in the "passed test 1" bucket → it gets enriched.
+  // Test 2 asks the enriched nouls — subdivision yes, else neighborhood
+  // yes — plus advisory physical-character/material nouls and a
+  // distance-dominant Score with confidence. Test-2 passers are the core
+  // comp set (ideally 3); when fewer pass, the test-1-pass / test-2-fail
+  // bucket fills to 3 by score. ARV = mean adjusted price of the selected
+  // set — the only non-Jev step.
   let jevInvestmentCompIds: string[] = []
-  let compClassificationRun: JevCompClassificationRun | null = null
-  let compTruthRun: { model: string; latencyMs: number; inputTokens: number; scored: number } | null = null
-  const rulesPassed = compClassifierEligible
-  const byDistance = (a: AppraisedComparable, b: AppraisedComparable) =>
-    (a.distanceMiles ?? 999) - (b.distanceMiles ?? 999)
-  const v2Mode = compClassifierMode(env)
-  let baselineTruth: Record<string, { arvTruth: number; investmentTruth: number }> | null = null
-  /** B's raw classifications when running shadow — held for the counterfactual valuation below */
-  let shadowBClasses: Record<string, JevCompPriceClass> | null = null
-
-  if (v2Mode === 'enabled') {
-    // ── Candidate B (production): one structured choice per eligible comp ──
+  let hybridRun: HybridRun | null = null
+  let jevSelection: {
+    selected: { compId: string; score: number | null; fullMatch: boolean; verdict: string; confidence: number | null }[]
+    counts: NonNullable<HybridRun['counts']> | null
+    fillUsed: boolean
+    topCompId: string | null
+  } | null = null
+  if (appraisalResult.comparables.length > 0) {
     try {
-      const eligible = [...appraisalResult.comparables].filter(rulesPassed).sort(byDistance)
-      const cls = await classifyCompPriceWithJev(bundle.property, eligible, { filters, adjustments }, env)
-      const { arvIds, asIsIds } = routeCompPriceClasses(cls.classifications)
-      jevInvestmentCompIds = [...asIsIds]
-      const unidentified = eligible.length - arvIds.size - asIsIds.size
-      appraisalResult.comparables = appraisalResult.comparables.map((comp) => ({
-        ...comp,
-        jevPriceClassification: cls.classifications[comp.id] ?? null,
-        // Card contract under v2: A·/I· chips read P(ARV)/P(AS_IS)
-        jevArvTruth: cls.classifications[comp.id]?.probabilities?.ARV ?? null,
-        jevInvestmentTruth: cls.classifications[comp.id]?.probabilities?.AS_IS ?? null,
-      }))
-      if (arvIds.size === 0) {
-        // Empty ARV pool is not INSUFFICIENT_COMPS — the rules selection
-        // stands; classifications still attach for display.
-        step('jev_selection', 'fallback', `Jev v2 found no ARV comps — appraisal-rules selection used (${cls.model})`)
-        fallbacksUsed.push('jev_selection:empty_arv_bucket')
-      } else {
-        appraisalResult.comparables = appraisalResult.comparables.map((comp) => ({
-          ...comp,
-          isEnabled: arvIds.has(comp.id) || asIsIds.has(comp.id),
-          arvStatus: arvIds.has(comp.id)
-            ? 'selected' as const
-            : comp.arvStatus === 'selected' ? 'not_examined' as const : comp.arvStatus,
-        }))
-        appraisalResult.selectedCompIds = [...arvIds]
-        appraisalResult.arv = appraisalService.calculateARV(
-          appraisalResult.comparables.filter((c) => arvIds.has(c.id)),
-        )
-        appraisalResult.insufficientComps = false
-        step('jev_selection', 'completed', `Jev v2 classified ${eligible.length} eligible → ${arvIds.size} ARV + ${asIsIds.size} AS_IS + ${unidentified} UNIDENTIFIED (${cls.model})`)
-      }
-      compClassificationRun = {
-        status: 'completed', mode: 'enabled', questionVersion: COMP_PRICE_QUESTION_VERSION,
-        model: cls.model, latencyMs: cls.latencyMs, inputTokens: cls.inputTokens,
-        eligibleCount: eligible.length,
-        counts: { arv: arvIds.size, asIs: asIsIds.size, unidentified },
-        disagreements: null, stateHashes: cls.stateHashes, classifiedAt: new Date().toISOString(),
-      }
-    } catch (error) {
-      // Fail closed to the rules selection — never force a class.
-      console.warn('[Evaluate] Jev v2 classification unavailable — rules selection stands:', error instanceof Error ? error.message : error)
-      step('jev_selection', 'fallback', 'Jev v2 unavailable — appraisal-rules selection used')
-      fallbacksUsed.push('jev_selection:unavailable')
-      compClassificationRun = { status: 'unavailable', mode: 'enabled', questionVersion: COMP_PRICE_QUESTION_VERSION, reason: 'classification_failed' }
-    }
-  } else {
-    // ── Baseline A (production) — dual nouls + argmax, unchanged ──────────
-    try {
-      // Classify closest-first: distance is the location criterion, so the
-      // nearest candidates lead Jev's evaluation order.
-      const jev = await scoreCompTruthWithJev(
-        bundle.property,
-        [...appraisalResult.comparables].sort(byDistance),
-        { filters, adjustments },
-        env,
-      )
-      baselineTruth = jev.scores
-      compTruthRun = { model: jev.model, latencyMs: jev.latencyMs, inputTokens: jev.inputTokens, scored: appraisalResult.comparables.length }
-      const truth = (id: string) => jev.scores[id] ?? { arvTruth: 0, investmentTruth: 0 }
-      const jevArvIds = new Set(
-        appraisalResult.comparables
-          .filter((c) => truth(c.id).arvTruth > truth(c.id).investmentTruth && rulesPassed(c))
-          .map((c) => c.id),
-      )
-      jevInvestmentCompIds = appraisalResult.comparables
-        .filter((c) => truth(c.id).investmentTruth > truth(c.id).arvTruth && rulesPassed(c))
-        .map((c) => c.id)
-      const jevInvestmentIds = new Set(jevInvestmentCompIds)
-      if (jevArvIds.size === 0) {
-        // Jev's job is classification, not sufficiency — an empty ARV bucket
-        // is not INSUFFICIENT_COMPS. Keep the rules selection; truth scores
-        // still attach for display.
-        appraisalResult.comparables = appraisalResult.comparables.map((comp) => ({
-          ...comp,
-          jevArvTruth: jev.scores[comp.id]?.arvTruth ?? null,
-          jevInvestmentTruth: jev.scores[comp.id]?.investmentTruth ?? null,
-        }))
-        step('jev_selection', 'fallback', `Jev found no ARV-eligible comps — appraisal-rules selection used (${jev.model})`)
-        fallbacksUsed.push('jev_selection:empty_arv_bucket')
-      } else {
-        appraisalResult.comparables = appraisalResult.comparables.map((comp) => ({
-          ...comp,
-          isEnabled: jevArvIds.has(comp.id) || jevInvestmentIds.has(comp.id),
-          arvStatus: jevArvIds.has(comp.id)
-            ? 'selected' as const
-            : comp.arvStatus === 'selected' ? 'not_examined' as const : comp.arvStatus,
-          jevArvTruth: jev.scores[comp.id]?.arvTruth ?? null,
-          jevInvestmentTruth: jev.scores[comp.id]?.investmentTruth ?? null,
-        }))
-        appraisalResult.selectedCompIds = [...jevArvIds]
-        appraisalResult.arv = appraisalService.calculateARV(
-          appraisalResult.comparables.filter((c) => jevArvIds.has(c.id)),
-        )
-        appraisalResult.insufficientComps = false
-        step('jev_selection', 'completed', `Jev bucketed ${appraisalResult.comparables.length} candidates → ${jevArvIds.size} ARV + ${jevInvestmentIds.size} investment comps within 0.5mi matching rules (${jev.model})`)
-      }
-    } catch (error) {
-      console.warn('[Evaluate] Jev comp selection unavailable — rules selection stands:', error instanceof Error ? error.message : error)
-      step('jev_selection', 'fallback', 'Jev unavailable — appraisal-rules selection used')
-      fallbacksUsed.push('jev_selection:unavailable')
-    }
-
-    // ── Candidate B (shadow): classify eligible comps, record only ────────
-    if (v2Mode === 'shadow') {
-      try {
-        const eligible = [...appraisalResult.comparables].filter(rulesPassed).sort(byDistance)
-        const cls = await classifyCompPriceWithJev(bundle.property, eligible, { filters, adjustments }, env)
-        shadowBClasses = cls.classifications
-        appraisalResult.comparables = appraisalResult.comparables.map((comp) => ({
-          ...comp,
-          jevPriceClassification: cls.classifications[comp.id] ?? null,
-        }))
-        const counts = { arv: 0, asIs: 0, unidentified: 0 }
-        let disagreements = 0
-        for (const c of eligible) {
-          const bCls = cls.classifications[c.id]?.class ?? 'UNIDENTIFIED'
-          if (bCls === 'ARV') counts.arv++
-          else if (bCls === 'AS_IS') counts.asIs++
-          else counts.unidentified++
-          if (baselineTruth) {
-            const t = baselineTruth[c.id] ?? { arvTruth: 0, investmentTruth: 0 }
-            const aCls = t.arvTruth > t.investmentTruth ? 'ARV' : t.investmentTruth > t.arvTruth ? 'AS_IS' : 'UNIDENTIFIED'
-            if (aCls !== bCls) disagreements++
-          }
-        }
-        compClassificationRun = {
-          status: 'completed', mode: 'shadow', questionVersion: COMP_PRICE_QUESTION_VERSION,
-          model: cls.model, latencyMs: cls.latencyMs, inputTokens: cls.inputTokens,
-          eligibleCount: eligible.length, counts,
-          disagreements: baselineTruth ? disagreements : null,
-          stateHashes: cls.stateHashes, classifiedAt: new Date().toISOString(),
-        }
-        step('jev_v2_shadow', 'completed', `v2 shadow: ${counts.arv} ARV / ${counts.asIs} AS_IS / ${counts.unidentified} UNIDENTIFIED of ${eligible.length} eligible${baselineTruth ? ` (${disagreements} differ from A)` : ''} — observability only`)
-      } catch (error) {
-        console.warn('[Evaluate] Jev v2 shadow classification failed:', error instanceof Error ? error.message : error)
-        compClassificationRun = { status: 'unavailable', mode: 'shadow', questionVersion: COMP_PRICE_QUESTION_VERSION, reason: 'classification_failed' }
-      }
-    }
-  }
-
-  // ── Comp screen: Jev attribute judgment → deterministic exception pool ────
-  // Layer 1: Jev scores every candidate on the 8 comparability axes (graded
-  // nouls, not pass/fail). Layer 2: comp-screen ranks all candidates by
-  // preset-weighted closeness and keeps the top-10 pool — a comp that failed
-  // a rule but is otherwise closest is the "exception" this layer keeps.
-  // Layer 3: the pool splits into mutually exclusive price bands — the top
-  // 10% band is ARV evidence, the bottom 10% is the as-is investor floor —
-  // each capped at 5 comps by closeness. Default shadow: results attach for
-  // display/A-B measurement; enabled mode routes production selection.
-  const attrMode = attributeScreenMode(env)
-  let attributeScreenRun: AttributeScreenRun | null = null
-  let attributeScreenBands: { arvIds: string[]; asIsIds: string[] } | null = null
-  if (attrMode !== 'off' && appraisalResult.comparables.length > 0) {
-    try {
-      const screenedCandidates = [...appraisalResult.comparables].sort(byDistance)
-      const attr = await scoreCompAttributesWithJev(bundle.property, screenedCandidates, filters, env)
-      const screen = screenCompPool(screenedCandidates, attr.scores, filters)
-      const compsById = new Map(screenedCandidates.map((c) => [c.id, c]))
-      const bands = splitPriceBands(screen.pool, compsById)
-      attributeScreenBands = { arvIds: bands.arvIds, asIsIds: bands.asIsIds }
-
-      const screenById = new Map(screen.entries.map((e) => [e.compId, e]))
-      appraisalResult.comparables = appraisalResult.comparables.map((comp) => {
-        const entry = screenById.get(comp.id)
-        return {
-          ...comp,
-          jevAttributeScores: attr.scores[comp.id] ?? null,
-          jevScreenScore: entry?.score ?? null,
-          jevScreenPool: entry?.inPool ?? false,
-          jevScreenBand: entry?.band ?? null,
-        }
+      const jev = await runJevEvaluation(bundle.property, appraisalResult.comparables, filters, adjustments, env, {
+        rules: { filters, adjustments },
+        enrich: params.enrichComparables,
       })
 
-      attributeScreenRun = {
-        status: 'completed', mode: attrMode, questionVersion: COMP_ATTRIBUTE_QUESTION_VERSION,
-        model: attr.model, latencyMs: attr.latencyMs, inputTokens: attr.inputTokens,
-        scoredCount: screenedCandidates.length, poolCount: screen.pool.length,
-        counts: { arv: bands.arvIds.length, asIs: bands.asIsIds.length },
-        anchors: { arvAnchor: bands.arvAnchor, asIsAnchor: bands.asIsAnchor },
-        stateHashes: attr.stateHashes, classifiedAt: new Date().toISOString(),
+      // Fold enriched detail back onto the pool so cards/audit see the
+      // property data test 2 used (subdivision, neighborhood, style…).
+      if (jev.enrichedComps.size > 0) {
+        appraisalResult.comparables = appraisalResult.comparables.map((comp) => {
+          const e = jev.enrichedComps.get(comp.id)
+          return e ? { ...comp, ...e } : comp
+        })
       }
 
-      if (attrMode === 'enabled') {
-        if (bands.arvIds.length === 0) {
-          // Empty ARV band is not INSUFFICIENT_COMPS — the rules selection
-          // stands; screen scores still attach for display.
-          step('comp_screen', 'fallback', `Attribute screen found no ARV-band comps — appraisal-rules selection used (${attr.model})`)
-          fallbacksUsed.push('comp_screen:empty_arv_band')
-        } else {
-          const poolIds = new Set([...bands.arvIds, ...bands.asIsIds])
-          appraisalResult.comparables = appraisalResult.comparables.map((comp) => ({
-            ...comp,
-            isEnabled: poolIds.has(comp.id),
-            arvStatus: bands.arvIds.includes(comp.id)
-              ? 'selected' as const
-              : comp.arvStatus === 'selected' ? 'not_examined' as const : comp.arvStatus,
-          }))
-          appraisalResult.selectedCompIds = bands.arvIds
-          appraisalResult.arv = appraisalService.calculateARV(
-            appraisalResult.comparables.filter((c) => bands.arvIds.includes(c.id)),
-          )
-          appraisalResult.insufficientComps = false
-          jevInvestmentCompIds = bands.asIsIds
-          step('comp_screen', 'completed', `Screened ${screenedCandidates.length} candidates → pool ${screen.pool.length} → ${bands.arvIds.length} ARV-band + ${bands.asIsIds.length} as-is-band comps (${attr.model})`)
-        }
+      const entryById = new Map(jev.entries.map((e) => [e.compId, e]))
+      appraisalResult.comparables = appraisalResult.comparables.map((comp) => ({
+        ...comp,
+        jevHybrid: entryById.get(comp.id) ?? null,
+      }))
+
+      const fillUsed = jev.fillCompIds.length > 0
+      hybridRun = {
+        status: 'completed', mode: 'enabled', questionVersion: COMP_HYBRID_VERSION,
+        model: jev.test2?.model ?? jev.test1?.model,
+        latencyMs: (jev.test1?.latencyMs ?? 0) + (jev.test2?.latencyMs ?? 0),
+        inputTokens: (jev.test1?.inputTokens ?? 0) + (jev.test2?.inputTokens ?? 0),
+        stateHashes: [...(jev.test1?.stateHashes ?? []), ...(jev.test2?.stateHashes ?? [])],
+        test1: jev.test1, test2: jev.test2,
+        counts: jev.counts,
+        selection: { coreTarget: jev.coreTarget, noulGate: jev.noulGate, fillUsed },
+        questionSet: jev.questionSet,
+        screenedAt: new Date().toISOString(),
+      }
+      jevSelection = {
+        selected: jev.arvCompIds.map((id) => {
+          const e = entryById.get(id)
+          return {
+            compId: id,
+            score: e?.score ?? null,
+            fullMatch: e?.stage === 'test2_pass',
+            verdict: e?.selected ?? 'fill',
+            confidence: e?.scoreConfidence ?? null,
+          }
+        }),
+        counts: jev.counts,
+        fillUsed,
+        topCompId: jev.entries.find((e) => e.poolRank === 1)?.compId ?? null,
+      }
+
+      if (jev.arvCompIds.length === 0) {
+        // No comp reached test 2 (all ineligible or all failed test 1) —
+        // the rules selection stands; test results still attach for display.
+        step('jev_evaluation', 'fallback', `Jev tested ${jev.counts.pool} candidates — none passed both tests (${jev.test1?.model ?? 'jev'})`)
+        fallbacksUsed.push('jev_evaluation:empty_pool')
       } else {
-        step('comp_screen', 'completed', `shadow: scored ${screenedCandidates.length} → pool ${screen.pool.length} → ${bands.arvIds.length} ARV-band + ${bands.asIsIds.length} as-is-band comps (${attr.model}) — observability only`)
+        const selectedIds = new Set(jev.arvCompIds)
+        appraisalResult.comparables = appraisalResult.comparables.map((comp) => ({
+          ...comp,
+          isEnabled: selectedIds.has(comp.id),
+          arvStatus: selectedIds.has(comp.id)
+            ? 'selected' as const
+            : comp.arvStatus === 'selected' ? 'not_examined' as const : comp.arvStatus,
+        }))
+        appraisalResult.selectedCompIds = jev.arvCompIds
+        appraisalResult.arv = appraisalService.calculateARV(
+          appraisalResult.comparables.filter((c) => selectedIds.has(c.id)),
+        )
+        appraisalResult.insufficientComps = false
+        step('jev_evaluation', 'completed',
+          `Jev tested ${jev.counts.pool} → ${jev.counts.test1Passed} passed test 1 → ${jev.counts.test2Passed} passed test 2 → ${jev.counts.selected} selected${fillUsed ? ` (${jev.counts.filled} filled from the test-2-fail bucket)` : ''} · ${jev.counts.ineligible} ineligible (${jev.test2?.model ?? jev.test1?.model ?? 'jev'})`)
       }
     } catch (error) {
-      console.warn('[Evaluate] Attribute screen failed:', error instanceof Error ? error.message : error)
-      step('comp_screen', 'fallback', 'Attribute screen unavailable — appraisal-rules selection used')
-      if (attrMode === 'enabled') fallbacksUsed.push('comp_screen:unavailable')
-      attributeScreenRun = { status: 'unavailable', mode: attrMode, questionVersion: COMP_ATTRIBUTE_QUESTION_VERSION, reason: 'screen_failed' }
+      console.warn('[Evaluate] Jev evaluation failed:', error instanceof Error ? error.message : error)
+      step('jev_evaluation', 'fallback', 'Jev evaluation unavailable — appraisal-rules selection used')
+      fallbacksUsed.push('jev_evaluation:unavailable')
+      hybridRun = { status: 'unavailable', mode: 'enabled', questionVersion: COMP_HYBRID_VERSION, reason: 'jev_failed' }
     }
   }
 
@@ -1160,147 +1013,6 @@ export async function performAnalysis(
     console.log(`[Evaluate] Group B: ${groupBResult.count} as-is comps (${jevInvestmentCompIds.length > 0 ? 'Jev investment-truth selected' : `≤${formatUsd(groupBResult.priceCeiling)}, ${asIsThresholdPercent}% of ARV`})`)
   }
 
-  // ── Candidate B counterfactual (shadow only) ──────────────────────────────
-  // What B's routing would have produced through the same deterministic math:
-  // same ARV condition-gate prune, same valuation service, same Group B
-  // summarizer. Purely observational — nothing here touches the response's
-  // production figures.
-  if (v2Mode === 'shadow' && compClassificationRun?.status === 'completed' && shadowBClasses) {
-    try {
-      const { arvIds: bArvIds, asIsIds: bAsIsIds } = routeCompPriceClasses(shadowBClasses)
-      const bArvComps = appraisalResult.comparables.filter((c) => bArvIds.has(c.id))
-
-      // Mirror the ARV condition gate: verified below-spec comps drop out,
-      // and the prune only applies when ≥3 comps remain afterward.
-      const bArvBelowSpec = bArvComps.filter(
-        (c) => assessorSignal(c.id) === 'negative' || visionVerifiedNegative(compCurbAppeal?.[c.id]),
-      )
-      const bArvEffective =
-        bArvComps.length - bArvBelowSpec.length >= 3
-          ? bArvComps.filter((c) => !bArvBelowSpec.includes(c))
-          : bArvComps
-      const shadowArv = bArvEffective.length > 0 ? appraisalService.calculateARV(bArvEffective) : null
-
-      const shadowArvForAsIs = shadowArv ?? finalArv
-      const bAsIsComps = appraisalResult.comparables.filter(
-        (c) => bAsIsIds.has(c.id) && c.salePrice != null && c.salePrice > 0,
-      )
-      const shadowGroupB = summarizeGroupB(
-        bAsIsComps,
-        bundle.property,
-        shadowArvForAsIs,
-        asIsThresholdPercent,
-        Math.round((shadowArvForAsIs * asIsThresholdPercent) / 100),
-        appraisalResult.comparables,
-      )
-
-      const shadowVal = shadowArv != null
-        ? valuationService.calculateValuation({
-            arv: shadowArv,
-            subjectSqft,
-            compAvgSqft,
-            rehabLevelIndex: derivedBuybox.rehabLevelIndex,
-            skipBaseRehab: derivedBuybox.renovatedVerified === true,
-            locationPenaltyAmount: computeLocationPenalty(bundle.enrichment.locationRisks, shadowArv, params.proximityConfig),
-            majorItems: derivedBuybox.majorItems,
-            additionPlay: derivedBuybox.additionPlay ?? buybox.additionPlay ?? 0,
-            closingCostsPercent: buybox.closingCostsPercent ?? 8,
-            carryingCostsPercent: buybox.carryingCostsPercent ?? 2,
-            wholesaleFee: buybox.wholesaleFee ?? 10000,
-            desiredProfit: buybox.desiredProfit,
-          })
-        : null
-
-      compClassificationRun.shadowValuation = {
-        arv: shadowArv,
-        arvComps: bArvEffective.length,
-        arvPrunedBelowSpec: bArvBelowSpec.length > 0 && bArvEffective !== bArvComps ? bArvBelowSpec.length : 0,
-        asIsValue: shadowGroupB.asIsMarketPrice,
-        asIsComps: shadowGroupB.count,
-        buyPrice: shadowVal?.buyPrice ?? null,
-        projectedProfit: shadowVal?.projectedProfit ?? null,
-        projectedROI: shadowVal?.projectedROI ?? null,
-        recommendation: (shadowVal as { recommendation?: string } | null)?.recommendation ?? null,
-        deltas: {
-          arv: shadowArv != null ? shadowArv - finalArv : null,
-          asIsValue:
-            shadowGroupB.asIsMarketPrice != null && groupBResult?.asIsMarketPrice != null
-              ? shadowGroupB.asIsMarketPrice - groupBResult.asIsMarketPrice
-              : null,
-          buyPrice: shadowVal ? shadowVal.buyPrice - valuation.buyPrice : null,
-        },
-      }
-      step('jev_v2_shadow_valuation', 'completed',
-        `v2 shadow valuation: ARV ${shadowArv != null ? formatUsd(shadowArv) : 'n/a'} vs ${formatUsd(finalArv)} · as-is ${shadowGroupB.asIsMarketPrice != null ? formatUsd(shadowGroupB.asIsMarketPrice) : 'n/a'} · buy ${shadowVal ? formatUsd(shadowVal.buyPrice) : 'n/a'} — observability only`)
-    } catch (error) {
-      console.warn('[Evaluate] v2 shadow valuation failed:', error instanceof Error ? error.message : error)
-    }
-  }
-
-  // ── Attribute-screen counterfactual (shadow only) ─────────────────────────
-  // What the screen's band routing would have produced through the same
-  // deterministic math: same calculateARV, same Group B summarizer, same
-  // valuation service. Purely observational — never touches production figures.
-  if (attrMode === 'shadow' && attributeScreenRun?.status === 'completed' && attributeScreenBands) {
-    try {
-      const sArvComps = appraisalResult.comparables.filter((c) => attributeScreenBands.arvIds.includes(c.id))
-      const screenArv = sArvComps.length > 0 ? appraisalService.calculateARV(sArvComps) : null
-
-      const screenArvForAsIs = screenArv ?? finalArv
-      const sAsIsComps = appraisalResult.comparables.filter(
-        (c) => attributeScreenBands.asIsIds.includes(c.id) && c.salePrice != null && c.salePrice > 0,
-      )
-      const screenGroupB = summarizeGroupB(
-        sAsIsComps,
-        bundle.property,
-        screenArvForAsIs,
-        asIsThresholdPercent,
-        Math.round((screenArvForAsIs * asIsThresholdPercent) / 100),
-        appraisalResult.comparables,
-      )
-
-      const screenVal = screenArv != null
-        ? valuationService.calculateValuation({
-            arv: screenArv,
-            subjectSqft,
-            compAvgSqft,
-            rehabLevelIndex: derivedBuybox.rehabLevelIndex,
-            skipBaseRehab: derivedBuybox.renovatedVerified === true,
-            locationPenaltyAmount: computeLocationPenalty(bundle.enrichment.locationRisks, screenArv, params.proximityConfig),
-            majorItems: derivedBuybox.majorItems,
-            additionPlay: derivedBuybox.additionPlay ?? buybox.additionPlay ?? 0,
-            closingCostsPercent: buybox.closingCostsPercent ?? 8,
-            carryingCostsPercent: buybox.carryingCostsPercent ?? 2,
-            wholesaleFee: buybox.wholesaleFee ?? 10000,
-            desiredProfit: buybox.desiredProfit,
-          })
-        : null
-
-      attributeScreenRun.shadowValuation = {
-        arv: screenArv,
-        arvComps: sArvComps.length,
-        asIsValue: screenGroupB.asIsMarketPrice,
-        asIsComps: screenGroupB.count,
-        buyPrice: screenVal?.buyPrice ?? null,
-        projectedProfit: screenVal?.projectedProfit ?? null,
-        projectedROI: screenVal?.projectedROI ?? null,
-        recommendation: (screenVal as { recommendation?: string } | null)?.recommendation ?? null,
-        deltas: {
-          arv: screenArv != null ? screenArv - finalArv : null,
-          asIsValue:
-            screenGroupB.asIsMarketPrice != null && groupBResult?.asIsMarketPrice != null
-              ? screenGroupB.asIsMarketPrice - groupBResult.asIsMarketPrice
-              : null,
-          buyPrice: screenVal ? screenVal.buyPrice - valuation.buyPrice : null,
-        },
-      }
-      step('comp_screen_valuation', 'completed',
-        `screen shadow valuation: ARV ${screenArv != null ? formatUsd(screenArv) : 'n/a'} vs ${formatUsd(finalArv)} · as-is ${screenGroupB.asIsMarketPrice != null ? formatUsd(screenGroupB.asIsMarketPrice) : 'n/a'} · buy ${screenVal ? formatUsd(screenVal.buyPrice) : 'n/a'} — observability only`)
-    } catch (error) {
-      console.warn('[Evaluate] Attribute-screen shadow valuation failed:', error instanceof Error ? error.message : error)
-    }
-  }
-
   // ── 8. Best match + applied settings snapshot ───────────────────────────────
   const bestMatch = selectBestMatch(
     bundle.property,
@@ -1378,6 +1090,7 @@ export async function performAnalysis(
     steps,
     fallbacksUsed,
     renovationAssessment: renovation,
+    jev: jevSelection,
   })
   // Confidence gate on the comps that drive the ARV — surfaces onto the
   // valuation block. There is no human reviewer, so the formula call
@@ -1398,17 +1111,14 @@ export async function performAnalysis(
   if (photoBundle) response.photoProvider = photoBundle.provider
 
   // ── 11. Jev outcome classification (read-only; never affects the result) ──
+  // Assesses the Jev-driven production outcome — the only scenario left.
   try {
     response.jevOutcome = await classifyOutcomeWithJev(response, env)
   } catch (jevError) {
     console.warn('[Evaluation] Jev outcome classification failed:', jevError instanceof Error ? jevError.message : jevError)
     response.jevOutcome = { status: 'unavailable', reason: 'classification_failed' }
   }
-  // Comp-classifier run metadata — A/B measurement for Baseline A (dual
-  // nouls) vs Candidate B (structured choice). Read-only observability.
-  if (compTruthRun) response.jevCompTruth = compTruthRun
-  if (compClassificationRun) response.jevCompClassification = compClassificationRun
-  if (attributeScreenRun) response.jevAttributeScreen = attributeScreenRun
+  if (hybridRun) response.jevHybrid = hybridRun
 
   return {
     response,

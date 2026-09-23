@@ -671,7 +671,7 @@ class PropertyAppraisalService implements AppraisalService {
           filters: filtersAt(yearLimit, expansion.geographicDistanceMultiplier),
           adjustments,
         })
-        const picked = rescue(resultSub, new Set(['subdivision_match']))
+        const picked = rescue(resultSub, new Set(['subdivision_match', 'neighborhood_match']))
         if (picked && picked.eligible.length >= REQUIRED_ARV_COMPS) {
           console.log(`Appraisal: ${picked.selected.length} comps selected after subdivision expansion${yearNote(yearLimit)}`)
           return {
@@ -692,7 +692,7 @@ class PropertyAppraisalService implements AppraisalService {
             filters: filtersAt(yearLimit),
             adjustments,
           })
-          const picked = rescue(resultGeo, new Set(['subdivision_match', 'distance']))
+          const picked = rescue(resultGeo, new Set(['subdivision_match', 'neighborhood_match', 'distance']))
           if (picked && picked.eligible.length >= REQUIRED_ARV_COMPS) {
             console.log(`Appraisal: ${picked.selected.length} comps selected after geographic expansion${yearNote(yearLimit)}`)
             return {
@@ -709,12 +709,12 @@ class PropertyAppraisalService implements AppraisalService {
         // age, sqft, property type, road barrier, year built at the widest
         // sanctioned tolerance — ±maxYear, or the vintage cap when the
         // subject predates it); only location failures
-        // (subdivision/distance) may be carried. A comp that breaches a
+        // (subdivision/neighborhood/distance) may be carried. A comp that breaches a
         // hard property rule is never enabled — better INSUFFICIENT_COMPS
         // than a valuation on a rule-breaker.
         console.log('Appraisal: no comps passed all rules — checking for recent sales')
         const saleAgeDays = defaultFilters.find((f) => f.type === 'sale_age')?.value ?? 180
-        const LOCATION_FAILURES = new Set(['subdivision_match', 'distance'])
+        const LOCATION_FAILURES = new Set(['subdivision_match', 'neighborhood_match', 'distance'])
         const geoPriority = new Map(
           resultGeo.appliedFilters.map((f) => [f.type, f.priority ?? 'hard'])
         )

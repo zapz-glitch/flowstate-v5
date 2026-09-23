@@ -22,11 +22,12 @@ export interface CloudflareEnv {
  */
 export async function getCloudflareEnv(): Promise<CloudflareEnv> {
   // Try Cloudflare context first (works in production and `npm run preview`)
+  let cloudflareEnv: CloudflareEnv = {}
   try {
     const { getCloudflareContext } = await import('@opennextjs/cloudflare')
     const { env } = await getCloudflareContext({ async: true })
     if (env && Object.keys(env).length > 0) {
-      return env as CloudflareEnv
+      cloudflareEnv = env as CloudflareEnv
     }
   } catch {
     // Cloudflare context not available
@@ -35,8 +36,9 @@ export async function getCloudflareEnv(): Promise<CloudflareEnv> {
   // Fallback to process.env for `npm run dev` with hot reload
   // Reads from .env.local
   return {
-    DASHBOARD_INTERNAL_SECRET: process.env.DASHBOARD_INTERNAL_SECRET,
-    BETTER_AUTH_SECRET: process.env.BETTER_AUTH_SECRET,
+    ...cloudflareEnv,
+    DASHBOARD_INTERNAL_SECRET: cloudflareEnv.DASHBOARD_INTERNAL_SECRET ?? process.env.DASHBOARD_INTERNAL_SECRET,
+    BETTER_AUTH_SECRET: cloudflareEnv.BETTER_AUTH_SECRET ?? process.env.BETTER_AUTH_SECRET,
   }
 }
 

@@ -536,6 +536,15 @@ export interface AppraisedComparable extends NormalizedComparable {
   jevScreenPool?: boolean
   /** Price-band bucket the screened comp landed in — 'arv' or 'as_is', mutually exclusive */
   jevScreenBand?: 'arv' | 'as_is' | null
+  jevScreenRank?: number | null
+  jevScreenBandRank?: number | null
+  /**
+   * V4 hybrid audit record (services/comp-hybrid): Jev's price-regime class
+   * over the UNGATED pool, hard-gate outcome, per-dimension recoverability
+   * scores against the appraisal preset, pool rank, and selection role.
+   * Present when the v4 hybrid ran (shadow or enabled).
+   */
+  jevHybrid?: import('../comp-hybrid').HybridCompScore | null
 }
 
 // ─── Appraisal Result ──────────────────────────────────────────────────────────

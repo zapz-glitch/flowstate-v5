@@ -843,6 +843,10 @@ export interface AnalysisResponse {
       jevScreenScore?: number | null
       jevScreenPool?: boolean
       jevScreenBand?: 'arv' | 'as_is' | null
+      jevScreenRank?: number | null
+      jevScreenBandRank?: number | null
+      /** V4 hybrid audit record — class, gates, dimension scores, rank, role */
+      jevHybrid?: import('../comp-hybrid').HybridCompScore | null
       /** Appraisal rule evaluation details */
       appraisalRules: {
         /** Whether this comp passed all filters */
@@ -1016,6 +1020,13 @@ export interface AnalysisResponse {
    * comp's jevAttributeScores/jevScreenScore/jevScreenBand.
    */
   jevAttributeScreen?: import('../comp-screen').AttributeScreenRun | null
+  /**
+   * V4 hybrid run metadata — Jev classified the raw pool, deterministic
+   * gates rejected non-recoverable comps, weighted proximity scoring picked
+   * the ARV/as-is sets, plus the shadow counterfactual valuation. Read-only
+   * under shadow mode; per-comp audit lives on each comp's jevHybrid.
+   */
+  jevHybrid?: import('../comp-hybrid').HybridRun | null
 }
 export interface ApiCallStats {
   corelogic: {
@@ -1274,6 +1285,9 @@ export function buildAnalysisResponse(
       jevScreenScore: comp.jevScreenScore ?? null,
       jevScreenPool: comp.jevScreenPool ?? false,
       jevScreenBand: comp.jevScreenBand ?? null,
+      jevScreenRank: comp.jevScreenRank ?? null,
+      jevScreenBandRank: comp.jevScreenBandRank ?? null,
+      jevHybrid: comp.jevHybrid ?? null,
       appraisalRules,
     }
   })

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { classifyOutcomeWithJev, OUTCOME_DIMENSIONS, scoreCompTruthWithJev } from '../src/services/jev'
+import type { JevOutcomeScenario } from '../src/services/jev'
 import type { AnalysisResponse } from '../src/services/analysis'
 
 function fakeResponse(): AnalysisResponse {
@@ -163,6 +164,71 @@ const originalFetch = globalThis.fetch
   assert.equal(result.classifications.evidence_sufficiency?.choice, 'sufficient')
   // Drivers still extracted under the changed set
   assert.equal(result.drivers.evidence_sufficiency.enough_comps, 0.75)
+}
+
+// 2c. Shadow scenario — outcome + comps projected from the scenario, not production
+{
+  let body: Record<string, unknown> | null = null
+  globalThis.fetch = async (_url, init) => {
+    body = JSON.parse(String(init?.body))
+    const questions = (body!.questions ?? {}) as Record<string, { type: string; criteria?: Record<string, string> }>
+    const echoed = Object.fromEntries(Object.keys(questions).map((id) => {
+      const q = questions[id]
+      if (q.type === 'choice') {
+        const options = Object.keys(q.criteria ?? {})
+        return [id, { type: 'choice', choice: options[0], confidence: 0.9 }]
+      }
+      return [id, { type: 'noul', noul: 0.5 }]
+    }))
+    return Response.json({ model: 'jev-test-1', answers: echoed, usage: { input_tokens: 42 } })
+  }
+  const scenario: JevOutcomeScenario = {
+    id: 'jev_v2_shadow',
+    selectionMethod: 'jev_v2_price_classification_shadow',
+    arvCompIds: ['c2'],
+    asIsCompIds: [],
+    valuation: {
+      arv: 210000, arvPerSqft: 140, arvSource: 'jev_v2_shadow',
+      asIsValue: 150000, afterRenovationValue: 210000,
+      buyPrice: 120000, buyPricePercent: 57, rehabCost: 30000, rehabLevel: 'light',
+      locationPenalty: 0, projectedProfit: 40000, projectedROI: 20,
+      wholesalePrice: 130000, recommendation: 'buy', recommendationReason: 'shadow test',
+    },
+  }
+  const input = fakeResponse()
+  const result = await classifyOutcomeWithJev(input, { TYPESAFE_API_KEY: 'k', TYPESAFE_MODEL: 'jev-test-1' }, scenario)
+  assert.equal(result.status, 'completed')
+  const state = body!.state as {
+    outcome: Record<string, unknown>
+    comps: {
+      selectionMethod: string
+      selectedCount: number
+      avgPricePerSqft: number | null
+      medianPrice: number | null
+      bestMatch: unknown
+      selected: Array<Record<string, unknown>>
+    }
+    evidenceNote: string
+  }
+  assert.equal(state.outcome.arv, 210000)
+  assert.equal(state.outcome.asIsValue, 150000)
+  assert.equal(state.outcome.buyPrice, 120000)
+  assert.equal(state.outcome.recommendation, 'buy')
+  assert.equal(state.outcome.arvSource, 'jev_v2_shadow')
+  assert.equal(state.comps.selectionMethod, 'jev_v2_price_classification_shadow')
+  assert.equal(state.comps.selectedCount, 1)
+  assert.equal(state.comps.selected.length, 1)
+  assert.equal(state.comps.selected[0].address, '9 Far Rd')
+  assert.equal(state.comps.selected[0].compGroup, 'arv')
+  assert.equal(state.comps.selected[0].jevArvTruth, null)
+  assert.equal(state.comps.selected[0].jevInvestmentTruth, null)
+  assert.equal(state.comps.bestMatch, null)
+  assert.equal(state.comps.avgPricePerSqft, 133)
+  assert.equal(state.comps.medianPrice, 200000)
+  assert.match(state.evidenceNote, /jev_v2_shadow/)
+  assert.equal(input.valuation.arv, 250000)
+  assert.equal(input.comps.items[1].isEnabled, false)
+  assert.equal(input.comps.items[1].compGroup, null)
 }
 
 // 3. HTTP error → throws (caller degrades to unavailable)

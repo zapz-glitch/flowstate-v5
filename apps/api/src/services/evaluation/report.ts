@@ -28,6 +28,29 @@ export interface BuildReportInput {
   fallbacksUsed: string[]
   /** Computer-vision renovation assessment (subject photos) */
   renovationAssessment?: import('../vision/renovation').RenovationAssessment | null
+  /**
+   * Jev evaluation outcome for the comps that drive the ARV — the selected
+   * comps' scores /100, whether each matched every appraisal rule, and
+   * whether the run fell back to closest-available evidence.
+   */
+  jev?: {
+    /** verdict: 'core' = passed test 2 · 'fill' = fallback pick from the test-2-fail bucket */
+    selected: { compId: string; score: number | null; fullMatch: boolean; verdict: string; confidence: number | null }[]
+    counts: {
+      pool: number
+      ineligible: number
+      test1Passed: number
+      test1Failed: number
+      enriched: number
+      test2Passed: number
+      test2Failed: number
+      core: number
+      filled: number
+      selected: number
+    } | null
+    fillUsed: boolean
+    topCompId: string | null
+  } | null
 }
 
 /**
@@ -52,6 +75,73 @@ function assessConfidence(input: BuildReportInput): {
 } {
   const reasons: string[] = []
   const appraisal = input.appraisalResult
+  const jev = input.jev
+
+  // When the Jev evaluation ran, confidence grades Jev's own evidence —
+  // rule matches, scores, and verdicts — not the deterministic filter
+  // outcomes it replaced.
+  if (jev) {
+    const now = Date.now()
+    const selectedIds = new Set(jev.selected.map((s) => s.compId))
+    const selectedComps = appraisal.comparables.filter((c) => selectedIds.has(c.id))
+    const selectedAgesDays = selectedComps
+      .map((c) => (c.saleDate ? (now - new Date(c.saleDate).getTime()) / 86_400_000 : null))
+      .filter((d): d is number => d != null && Number.isFinite(d))
+    const oldestSaleDays = selectedAgesDays.length ? Math.max(...selectedAgesDays) : null
+    const visionVerified =
+      input.renovationAssessment?.status === 'ok' ||
+      (input.renovationAssessment?.curbAppeal?.source === 'vision' &&
+        input.renovationAssessment.curbAppeal.condition !== 'unknown')
+    const subjectConditionVerified =
+      input.subjectClassification != null ||
+      input.bundle.property.buildingCondition != null ||
+      visionVerified === true
+
+    const fullMatchCount = jev.selected.filter((s) => s.fullMatch).length
+    const scores = jev.selected.map((s) => s.score).filter((s): s is number => s != null)
+    const topScore = scores.length ? Math.max(...scores) : null
+    const fillCount = jev.selected.filter((s) => s.verdict === 'fill').length
+
+    if (jev.selected.length === 0) {
+      reasons.push('Jev found no usable comparables — no comps drive the ARV')
+      return { level: 'low', reasons, requiresHumanReview: true }
+    }
+    if (fillCount > 0) {
+      reasons.push(`${fillCount} comp(s) filled the core set from the test-1-pass / test-2-fail bucket — scored on distance, not subdivision/neighborhood matches`)
+    } else {
+      reasons.unshift(
+        `${fullMatchCount} comp(s) passed both Jev tests (raw fields + subdivision/neighborhood)`,
+      )
+    }
+    if (topScore != null) {
+      reasons.push(`Closest comp scored ${topScore}/100 on Jev's distance spectrum`)
+    }
+    if (jev.selected.length < 3) {
+      reasons.push(`Only ${jev.selected.length} comp(s) drive the ARV — fewer than 3`)
+    }
+    if (oldestSaleDays != null && oldestSaleDays > 365) {
+      reasons.push(`Stale sale: oldest selected comp sold ${Math.round(oldestSaleDays / 30)} months ago`)
+    } else if (oldestSaleDays != null && oldestSaleDays > 180) {
+      reasons.push(`Oldest selected comp sold ${Math.round(oldestSaleDays)} days ago (beyond 180-day window)`)
+    }
+    if (!subjectConditionVerified) {
+      reasons.push('Subject condition could not be verified')
+    }
+
+    const level =
+      jev.selected.length === 0 ||
+      fillCount === jev.selected.length ||
+      (oldestSaleDays != null && oldestSaleDays > 365)
+        ? 'low'
+        : fillCount === 0 && fullMatchCount === jev.selected.length && jev.selected.length >= 3 && subjectConditionVerified
+          ? 'high'
+          : 'medium'
+
+    if (level === 'medium' && fillCount === 0) {
+      reasons.unshift(`${jev.selected.length} comps selected — ${fullMatchCount} passed both tests; reduced confidence`)
+    }
+    return { level, reasons, requiresHumanReview: level !== 'high' }
+  }
 
   const softTypes = new Set(
     appraisal.appliedFilters.filter((f) => f.priority === 'soft').map((f) => f.type)

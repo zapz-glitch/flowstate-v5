@@ -37,6 +37,8 @@ export function useEvaluation() {
     jevOutcome: state.jevOutcome,
     // Candidate B comp classification + shadow counterfactual
     jevCompClassification: state.jevCompClassification,
+    jevAttributeScreen: state.jevAttributeScreen,
+    jevHybrid: state.jevHybrid,
 
     // UI state
     aiAnalyzing: state.aiAnalyzing,

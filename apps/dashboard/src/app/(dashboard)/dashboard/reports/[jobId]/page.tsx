@@ -508,6 +508,8 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
     aiReport,
     jevOutcome: analyzeData?.jevOutcome ?? null,
     jevCompClassification: analyzeData?.jevCompClassification ?? null,
+    jevAttributeScreen: analyzeData?.jevAttributeScreen ?? null,
+    jevHybrid: analyzeData?.jevHybrid ?? null,
     onOpenSettings: () => setSettingsOpen(true),
     onCompClick: (comp) => { setComparisonComp(comp as CompItem); setComparisonOpen(true) },
     onRunAiAnalysis: handleRunAiAnalysis,

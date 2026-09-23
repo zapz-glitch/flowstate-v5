@@ -700,6 +700,11 @@ export class AnalysisJobDO {
       // Radius-bound expansion tiers refetch instead of pretending the
       // fetched-radius pool contains candidates it never had.
       expandComparablesPool,
+      // Jev evaluation enriches its top-screened candidates before the
+      // cross-examination — provider detail: style, foundation,
+      // construction, features, transaction.
+      enrichComparables: (comps: NormalizedComparable[]) =>
+        propertyApi.enrichComparables(comps, { concurrency: 10 }),
     }
 
     let evalResult

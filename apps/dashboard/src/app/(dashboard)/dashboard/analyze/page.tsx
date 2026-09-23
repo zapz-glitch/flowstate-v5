@@ -508,6 +508,8 @@ export default function AnalyzePage() {
     aiReport,
     jevOutcome: renderData?.jevOutcome ?? null,
     jevCompClassification: renderData?.jevCompClassification ?? null,
+    jevAttributeScreen: renderData?.jevAttributeScreen ?? null,
+    jevHybrid: renderData?.jevHybrid ?? null,
     onOpenSettings: () => setSettingsOpen(true),
     onCompClick: (comp) => { setComparisonComp(comp as CompItem); setComparisonOpen(true) },
     onRunAiAnalysis: handleRunAiAnalysis,
