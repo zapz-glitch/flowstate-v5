@@ -22,8 +22,10 @@
  *      spectrum (closest → highest, tapering as distance grows) with Jev's
  *      confidence.
  *   5. Selection: test-2 passers are the primary core comp set — ideally 3.
- *      When fewer than 3 pass, the test-1-pass / test-2-fail bucket fills
- *      the set to 3 by score (closer = higher).
+ *      When fewer than 3 pass, the set fills by the composite score —
+ *      highest score, closest distance — across every eligible comp
+ *      (test-2 fails, then capped test-1 passers, then test-1 fails as
+ *      the last resort). Jev is always the selection authority.
  *   6. Adjustments are still deterministic math from appraisal settings;
  *      ARV = average of the selected comps' adjusted prices.
  *
@@ -431,23 +433,7 @@ export async function runJevEvaluation(
     return tb - ta
   })
 
-  // Stage 5 — selection: test-2 passers are the primary core comp set
-  // (ideally 3 — all passers are selected, no cap). When fewer than the
-  // target pass, the test-1-pass / test-2-fail bucket fills the set to the
-  // target by score — the distance-dominant score already ranks them.
-  const core = evaluated.filter((e) => e.stage === 'test2_pass')
-  const fillNeeded = Math.max(0, coreTarget - core.length)
-  const fill = fillNeeded > 0
-    ? evaluated.filter((e) => e.stage === 'test2_fail').slice(0, fillNeeded)
-    : []
-  for (const e of core) e.selected = 'core'
-  for (const e of fill) e.selected = 'fill'
-  progress?.(
-    `Selection — ${core.length} core comps${fill.length ? ` + ${fill.length} fill from the test-2-fail bucket` : ''} — computing ARV`,
-    { stage: 'selected', core: core.length, filled: fill.length, selected: core.length + fill.length }
-  )
-
-  // Stage 6 — the card score for every comp: the test outcome sets the band
+  // Stage 5 — the card score for every comp: the test outcome sets the band
   // and proximity to the subject sets the position inside it, so the score
   // sort reads best→worst with the nearest comps always on top. Test-2
   // passers top the scale, the test-1-pass/test-2-fail bucket sits in the
@@ -469,6 +455,33 @@ export async function runJevEvaluation(
       e.score = Math.round(hi - frac * (hi - lo))
     }
   }
+
+  // Stage 6 — selection: test-2 passers are the primary core comp set
+  // (ideally 3 — all passers are selected, no cap). When fewer than the
+  // target pass, the set fills by the composite score — highest score,
+  // closest distance — across every remaining eligible comp. Jev is the
+  // authority end-to-end: a pool with no passers still yields its best
+  // comps instead of deferring to the legacy rules engine.
+  const core = evaluated.filter((e) => e.stage === 'test2_pass')
+  const fillNeeded = Math.max(0, coreTarget - core.length)
+  const fill = fillNeeded > 0
+    ? [...entries]
+        .filter((e) => e.stage !== 'test2_pass' && e.stage !== 'ineligible')
+        .sort((a, b) => {
+          const ds = (b.score ?? -1) - (a.score ?? -1)
+          if (ds !== 0) return ds
+          const da = byId.get(a.compId)?.distanceMiles ?? Infinity
+          const db = byId.get(b.compId)?.distanceMiles ?? Infinity
+          return da - db
+        })
+        .slice(0, fillNeeded)
+    : []
+  for (const e of core) e.selected = 'core'
+  for (const e of fill) e.selected = 'fill'
+  progress?.(
+    `Selection — ${core.length} core comps${fill.length ? ` + ${fill.length} fill by score` : ''} — computing ARV`,
+    { stage: 'selected', core: core.length, filled: fill.length, selected: core.length + fill.length }
+  )
 
   // Rank the whole pool by the composite (score desc → nearest → newest) so
   // poolRank matches the order the dashboard's score sort shows.

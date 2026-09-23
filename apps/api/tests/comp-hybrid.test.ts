@@ -414,16 +414,28 @@ describe('runJevEvaluation — selection', () => {
     assert.equal(result.entries[0]!.test2!.confidence, 0.93)
   })
 
-  it('test-1 failures are never selected', async () => {
+  it('test-1 fails are the last-resort fill — better tiers fill first', async () => {
     const result = await evaluate(
-      [comp('pass'), comp('fail')],
+      [comp('pass'), comp('f1'), comp('f2'), comp('fail', { distanceMiles: 0.05 })],
       { fail: { bathrooms: 0.1 } },
-      { pass: t2(4) },
+      { pass: t2(4), f1: t2(2, { nouls: { subdivision: 0.1, neighborhood: 0.1 } }), f2: t2(1, { nouls: { subdivision: 0.1, neighborhood: 0.1 } }) },
     )
     const fail = result.entries.find((e) => e.compId === 'fail')!
-    assert.equal(fail.selected, null)
-    assert.ok(fail.poolRank != null, 'test-1 fails still carry a pool rank')
+    assert.equal(fail.selected, null, 'nearest test-1 fail still loses to test-2 fails')
     assert.ok(!result.arvCompIds.includes('fail'))
+    assert.deepEqual(result.fillCompIds.sort(), ['f1', 'f2'])
+  })
+
+  it('a pool where nothing passes still fills by score — Jev never defers to the rules engine', async () => {
+    const result = await evaluate(
+      [comp('a', { distanceMiles: 0.1 }), comp('b', { distanceMiles: 0.3 }), comp('c', { distanceMiles: 0.2 }), comp('d', { distanceMiles: 0.9 })],
+      { a: { bathrooms: 0.1 }, b: { bathrooms: 0.1 }, c: { bathrooms: 0.1 }, d: { bathrooms: 0.1 } },
+      {},
+    )
+    assert.equal(result.coreCompIds.length, 0)
+    assert.deepEqual(result.fillCompIds, ['a', 'c', 'b'], 'nearest-first inside the bottom band')
+    assert.equal(result.counts.selected, 3)
+    assert.ok(result.entries.every((e) => e.stage === 'test1_fail'))
   })
 })
 

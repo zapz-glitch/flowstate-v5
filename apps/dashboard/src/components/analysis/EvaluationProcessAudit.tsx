@@ -222,7 +222,7 @@ export function EvaluationProcessAudit({
         <li>Test 2 — on the enriched data: a subdivision match passes; if subdivision fails, a neighborhood match still passes. Both no → test 2 fail → ineligible for the core set. Physical character and material matches are asked as preferred, not required.</li>
         <li>Every comp gets a card score: the test outcome sets the band — passed both tests on top, test-1-pass/test-2-fail in the middle, test-1 fails at the bottom — and the nearest comp to the subject scores highest inside each band. Failing test 2 is never a penalty; passing it is the boost.</li>
         <li>{fillUsed
-          ? `Fewer than ${coreTarget} comps passed test 2 — the test-1-pass / test-2-fail bucket filled the core set to ${coreTarget} by score.`
+          ? `Fewer than ${coreTarget} comps passed test 2 — the remaining set filled to ${coreTarget} by score: highest score, closest distance, across every eligible comp.`
           : `Test-2 passers are the primary core comp set — ideally ${coreTarget}.`}</li>
         <li>ARV averages the selected comps’ adjusted prices.</li>
       </ol>
@@ -247,7 +247,7 @@ export function EvaluationProcessAudit({
             <p className="text-[10px] text-foreground-tertiary">No comps passed both tests.</p>
           )}
           {fillComps.length > 0 && (
-            <Group label={`Fill picks — test-1-pass / test-2-fail, scored on distance (${fillComps.length})`}>
+            <Group label={`Fill picks — best remaining by score (${fillComps.length})`}>
               {fillComps.map((c) => <TestedCompRow key={c.id} comp={c} role="Fill" questionSet={run.questionSet} />)}
             </Group>
           )}

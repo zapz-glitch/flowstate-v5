@@ -107,7 +107,7 @@ function assessConfidence(input: BuildReportInput): {
       return { level: 'low', reasons, requiresHumanReview: true }
     }
     if (fillCount > 0) {
-      reasons.push(`${fillCount} comp(s) filled the core set from the test-1-pass / test-2-fail bucket — scored on distance, not subdivision/neighborhood matches`)
+      reasons.push(`${fillCount} comp(s) filled the core set by score — highest score and closest distance, not proven subdivision/neighborhood matches`)
     } else {
       reasons.unshift(
         `${fullMatchCount} comp(s) passed both Jev tests (raw fields + subdivision/neighborhood)`,

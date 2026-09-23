@@ -708,7 +708,7 @@ export async function performAnalysis(
         )
         appraisalResult.insufficientComps = false
         step('jev_evaluation', 'completed',
-          `Jev tested ${jev.counts.pool} → ${jev.counts.test1Passed} passed test 1 → ${jev.counts.test2Passed} passed test 2 → ${jev.counts.selected} selected${fillUsed ? ` (${jev.counts.filled} filled from the test-2-fail bucket)` : ''} · ${jev.counts.ineligible} ineligible (${jev.test2?.model ?? jev.test1?.model ?? 'jev'})`)
+          `Jev tested ${jev.counts.pool} → ${jev.counts.test1Passed} passed test 1 → ${jev.counts.test2Passed} passed test 2 → ${jev.counts.selected} selected${fillUsed ? ` (${jev.counts.filled} filled by score)` : ''} · ${jev.counts.ineligible} ineligible (${jev.test2?.model ?? jev.test1?.model ?? 'jev'})`)
       }
     } catch (error) {
       console.warn('[Evaluate] Jev evaluation failed:', error instanceof Error ? error.message : error)
