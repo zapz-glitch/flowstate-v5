@@ -18,7 +18,7 @@
 import type { AnalysisResponse } from '../analysis'
 import type { NormalizedComparable, NormalizedProperty } from '../property-api/types'
 import type { AppraisedComparable, AppraisalFilter, FilterType } from '../appraisal/types'
-import { DEFAULT_FILTERS, vintageYearCap } from '../appraisal/types'
+import { DEFAULT_FILTERS } from '../appraisal/types'
 
 export interface JevEnv {
   TYPESAFE_API_KEY?: string
@@ -1459,7 +1459,6 @@ export interface CompTest1FieldDef {
 
 export function buildTest1Defs(filters: AppraisalFilter[], subject: NormalizedProperty): CompTest1FieldDef[] {
   const rule = (type: string) => filters.find((f) => f.type === type)
-  const vintageCap = vintageYearCap(filters, subject.yearBuilt)
   const subjectLotSqft = hasEvidence(subject.lotSizeSquareFeet)
     ? subject.lotSizeSquareFeet!
     : hasEvidence(subject.lotSizeAcres)
@@ -1496,8 +1495,7 @@ export function buildTest1Defs(filters: AppraisalFilter[], subject: NormalizedPr
       label: COMP_TEST1_LABELS.yearBuilt,
       question: (i) => {
         const t = rule('year_built_diff')?.value ?? 15
-        const hardCap = vintageCap != null ? ` Built no earlier than ${vintageCap}.` : ''
-        return `Was state.comparables[${i}] built within ±${t} years of the subject's ${subject.yearBuilt ?? 'year built'}?${hardCap} Judge yearBuilt.`
+        return `Was state.comparables[${i}] built within ±${t} years of the subject's ${subject.yearBuilt ?? 'year built'}? Judge yearBuilt.`
       },
       verifiable: (s, c) => hasEvidence(s.yearBuilt) && hasEvidence(c.yearBuilt),
     },
