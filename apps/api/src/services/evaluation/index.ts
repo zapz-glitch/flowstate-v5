@@ -105,6 +105,13 @@ export interface EvaluationParams {
    * features, transaction) before the cross-examination.
    */
   enrichComparables?: (comps: NormalizedComparable[]) => Promise<NormalizedComparable[]>
+  /**
+   * Subject photo bundle prefetched by the caller so the scrape overlaps the
+   * comparables fetch. `undefined` = not prefetched — fetch inline.
+   * `null` = prefetch ran and found nothing / provider unavailable — don't
+   * refetch.
+   */
+  prefetchedPhotoBundle?: PhotoBundle | null
 }
 
 export interface GroupBResult {
@@ -523,7 +530,10 @@ export async function performAnalysis(
   let photoBundle: PhotoBundle | null = null
   try {
     const photoService = createPhotoService(env)
-    if (photoService.isAvailable()) {
+    if (params.prefetchedPhotoBundle !== undefined) {
+      // Caller overlapped the scrape with the comps fetch — use it as-is.
+      photoBundle = params.prefetchedPhotoBundle
+    } else if (photoService.isAvailable()) {
       const subjectIdent: PropertyIdentifier = {
         propertyId: bundle.property.id,
         address: bundle.property.address,
@@ -537,10 +547,12 @@ export async function performAnalysis(
       // reconciliation; subject listing data still fills subject gaps
       // and carries the flood signal.)
       photoBundle = await photoService.fetchPhotoBundle(subjectIdent, [], { maxComps: 0 })
+    }
+    if (params.prefetchedPhotoBundle !== undefined || photoService.isAvailable()) {
       step(
         'photo_fetch',
-        photoBundle.subject ? 'completed' : 'fallback',
-        photoBundle.subject
+        photoBundle?.subject ? 'completed' : 'fallback',
+        photoBundle?.subject
           ? `${photoBundle.subject.photos.length} subject photos via ${photoBundle.subject.source}`
           : 'No subject photos found'
       )

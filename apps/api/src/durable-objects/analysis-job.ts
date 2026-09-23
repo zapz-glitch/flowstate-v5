@@ -18,6 +18,7 @@ import { fetchMarketContext, type MarketContext } from '../services/market-conte
 import { type EvaluationParams } from '../services/evaluation'
 import { performAnalysis } from '../services/evaluation'
 import { detectOsmLocationRisks } from '../services/location-risk'
+import { createPhotoService } from '../services/photo-provider'
 import { createPropertyApi } from '../services/property-api'
 import { mergeComparablePools } from '../services/property-api/comparable-pool'
 import {
@@ -383,7 +384,7 @@ export class AnalysisJobDO {
         subjectSqft: property.squareFeet ?? undefined,
         subjectPropertyType: property.propertyType ?? undefined,
     }
-    const [compsResult, permitsResult, floodResult, avmResult, buildingDetailResult, osmResult] = await Promise.all([
+    const [compsResult, permitsResult, floodResult, avmResult, buildingDetailResult, osmResult, prefetchedPhotoBundle] = await Promise.all([
       propertyApi.getComparables(comparablesParams),
       // Permits: fetched on every run (KV-cached) — the permit-age
       // thresholds drive major-item additions in the buybox derivation.
@@ -417,6 +418,22 @@ export class AnalysisJobDO {
             streetName: property.address?.replace(/^\d+\s+/, '') ?? undefined,
           }).catch(() => null)
         : Promise.resolve(null),
+      // Subject photos — subject-only scrape; the bundle feeds the Zillow
+      // field merge, the flood signal, vision, and R2 persistence inside
+      // performAnalysis. Prefetching here overlaps it with the comps fetch.
+      (async () => {
+        try {
+          const photoService = createPhotoService(this.env)
+          if (!photoService.isAvailable()) return null
+          return await photoService.fetchPhotoBundle({
+            propertyId: property.id,
+            address: property.address,
+            city: property.city,
+            state: property.state,
+            zipCode: property.zipCode,
+          }, [], { maxComps: 0 })
+        } catch { return null }
+      })(),
     ])
 
     if (!compsResult.success) {
@@ -689,6 +706,7 @@ export class AnalysisJobDO {
       // construction, features, transaction.
       enrichComparables: (comps: NormalizedComparable[]) =>
         propertyApi.enrichComparables(comps, { concurrency: 10 }),
+      prefetchedPhotoBundle,
     }
 
     let evalResult
