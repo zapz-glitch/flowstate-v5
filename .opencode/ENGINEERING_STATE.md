@@ -3257,3 +3257,19 @@ user saw as "a ton of comps selected."
 legacy rules selection stands as fallback — that produced the misleading
 "39 selected" display. If the user wants Jev-authoritative emptiness,
 the fallback needs a different UI treatment.
+
+## 2026-10-06 — Jev sole-authority fill + subject condition fix (merged to main, deploying)
+
+- `4a1c3ac`: fill now ranks by composite score (highest score → closest
+  distance) across every eligible comp — test-2 fails, capped test-1
+  passers, then test-1 fails last resort. Legacy rules selection only
+  stands when zero comps are eligible at all.
+- `edd564a`: subject card Condition shows the vision renovation level
+  (was displaying curb-appeal "dated"); added one-sentence `rationale`
+  to the vision JSON output → `conditionSummary`/`visionAnalysis.summary`.
+- `ff13915`: Jev evaluation + audit sections collapse to headers.
+- Verified: subject 4014 run vision = Full Cosmetic @90% (12 photos),
+  gemini-2.5-flash via OpenRouter; vision level → rehabLevelIndex →
+  user rehab table already wired; both typechecks + 26-file suite green.
+- Merged feat/jev-experiments → main (ff), pushed — deploy.yml auto-deploys.
+- Now working on main; worktree switched to main.
