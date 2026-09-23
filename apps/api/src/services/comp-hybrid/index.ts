@@ -245,6 +245,8 @@ export async function runJevEvaluation(
     test1?: Test1Fn
     test2?: Test2Fn
     enrich?: EnrichFn
+    /** Stage progress for live UI updates — fires at each funnel boundary. */
+    onProgress?: (message: string, data?: Record<string, unknown>) => void
   },
 ): Promise<HybridTest1Result> {
   const now = opts?.now ?? new Date()
@@ -254,6 +256,7 @@ export async function runJevEvaluation(
   const test2Fn: Test2Fn = opts?.test2 ?? runCompTest2WithJev
   const enrich: EnrichFn | undefined = opts?.enrich
   const rules = opts?.rules ?? filters
+  const progress = opts?.onProgress
 
   // Stage 0 — facts only: usable sale price + usable sale date. Everything
   // else is Jev's judgment.
@@ -288,6 +291,7 @@ export async function runJevEvaluation(
   const defs = buildTest1Defs(filters, subject)
   let test1Meta: HybridTest1Result['test1'] = null
   if (candidateComps.length > 0) {
+    progress?.(`Jev test 1 — screening ${candidateComps.length} comps on raw fields (baths, sqft, lot, year built, price, sale date)`, { stage: 'test1', candidates: candidateComps.length })
     const result = await test1Fn(subject, candidateComps, filters, rules, env)
     test1Meta = { model: result.model, latencyMs: result.latencyMs, inputTokens: result.inputTokens, stateHashes: result.stateHashes }
     for (const entry of candidates) {
@@ -322,6 +326,9 @@ export async function runJevEvaluation(
   const test1PassComps = test1Passers
     .map((e) => byId.get(e.compId))
     .filter((c): c is AppraisedComparable => c != null)
+  if (candidateComps.length > 0) {
+    progress?.(`Test 1 done — ${test1Passers.length} passed, ${candidates.length - test1Passers.length} failed`, { stage: 'test1_done', passed: test1Passers.length, failed: candidates.length - test1Passers.length })
+  }
 
   // Stage 2 — enrich every test-1 passer with property detail (subdivision,
   // neighborhood, construction, features, transaction) for test 2.
@@ -330,6 +337,7 @@ export async function runJevEvaluation(
   if (enrich && test1PassComps.length > 0) {
     const needEnrichment = test1PassComps.filter((c) => c.isEnriched !== true)
     if (needEnrichment.length > 0) {
+      progress?.(`Enriching ${needEnrichment.length} test-1 passers (property detail)`, { stage: 'enrich', count: needEnrichment.length })
       const enriched = await enrich(needEnrichment)
       for (const c of enriched) enrichedComps.set(c.id, c)
       const enrichedById = new Map(enriched.map((c) => [c.id, c]))
@@ -354,6 +362,7 @@ export async function runJevEvaluation(
   const maxLevel = COMP_TEST2_SCORE_LEVELS.length - 1
   let test2Meta: HybridTest1Result['test2'] = null
   if (examComps.length > 0) {
+    progress?.(`Jev test 2 — ${examComps.length} enriched comps (subdivision/neighborhood + proximity score)`, { stage: 'test2', candidates: examComps.length })
     const result = await test2Fn(subject, examComps, rules, env)
     test2Meta = { model: result.model, latencyMs: result.latencyMs, inputTokens: result.inputTokens, stateHashes: result.stateHashes }
     for (const entry of test1Passers) {
@@ -371,6 +380,8 @@ export async function runJevEvaluation(
       entry.score = entry.test2.score
       entry.scoreConfidence = t2.confidence
     }
+    const passed2 = test1Passers.filter((e) => e.test2?.passed === true).length
+    progress?.(`Test 2 done — ${passed2} passed, ${examComps.length - passed2} failed`, { stage: 'test2_done', passed: passed2, failed: examComps.length - passed2 })
   }
 
   // Stage 4 — rank the test-2-evaluated set by Jev's distance Score (ties →
@@ -401,6 +412,10 @@ export async function runJevEvaluation(
     : []
   for (const e of core) e.selected = 'core'
   for (const e of fill) e.selected = 'fill'
+  progress?.(
+    `Selection — ${core.length} core comps${fill.length ? ` + ${fill.length} fill from the test-2-fail bucket` : ''} — computing ARV`,
+    { stage: 'selected', core: core.length, filled: fill.length, selected: core.length + fill.length }
+  )
 
   // Stage 6 — the card score for every comp: the test outcome sets the band
   // and proximity to the subject sets the position inside it, so the score

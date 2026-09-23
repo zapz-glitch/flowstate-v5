@@ -13,7 +13,7 @@
  */
 
 import { ChunkedJobState } from './chunked-job-state'
-import { analyzeComps, type CompEvalContext } from '../services/comp-analysis'
+
 import { fetchMarketContext, type MarketContext } from '../services/market-context'
 import { type EvaluationParams } from '../services/evaluation'
 import { performAnalysis } from '../services/evaluation'
@@ -227,7 +227,6 @@ export class AnalysisJobDO {
     }
 
     const pending = ['property_fetch', 'evaluation']
-    if (body.llmEnabled) pending.push('llm')
 
     this.jobState = {
       jobId: body.jobId,
@@ -386,10 +385,11 @@ export class AnalysisJobDO {
     }
     const [compsResult, permitsResult, floodResult, avmResult, buildingDetailResult, osmResult] = await Promise.all([
       propertyApi.getComparables(comparablesParams),
-      // Permits: OPT-IN only — the paid call moved to on-demand (report's
-      // Permits action). 'unavailable' must still mean the call failed, not
-      // that the property has no permits on file (that's 'empty').
-      (config.enrichment?.permits === true)
+      // Permits: fetched on every run (KV-cached) — the permit-age
+      // thresholds drive major-item additions in the buybox derivation.
+      // 'unavailable' must still mean the call failed, not that the
+      // property has no permits on file (that's 'empty').
+      (config.enrichment?.permits !== false)
         ? propertyApi.getBuildingPermits(property.id, { address1: property.address, address2: `${property.city}, ${property.state} ${property.zipCode}` })
         : Promise.resolve(null),
       // Flood zone: OPT-IN only — the First Street signal is scraped from the
@@ -655,7 +655,7 @@ export class AnalysisJobDO {
       }
     }
     for (const id of pools.conflictIds) evidenceLimitations.push(`${id}: Provider comparable pools disagree on the same sale date; price is quarantined from evaluation`)
-    if (!permitsData) evidenceLimitations.push(config.enrichment?.permits !== true
+    if (!permitsData) evidenceLimitations.push(config.enrichment?.permits === false
       ? 'Subject permits were not pulled during analysis — pull them on demand from the report'
       : 'Subject permit lookup failed or is unavailable; this does not mean no permits exist')
     if (!floodData) evidenceLimitations.push(config.enrichment?.floodZone !== true
@@ -672,7 +672,7 @@ export class AnalysisJobDO {
         provider: property.provider,
         searchParams: config.search as import('../services/property-api/types').PropertySearchParams,
         comparablesParams: { ...comparablesParams },
-        enrichmentOptions: { permits: config.enrichment?.permits === true, floodZone: config.enrichment?.floodZone === true, weatherRisk: false },
+        enrichmentOptions: { permits: config.enrichment?.permits !== false, floodZone: config.enrichment?.floodZone === true, weatherRisk: false },
         retrieval,
       },
       enrichment: {
@@ -709,7 +709,8 @@ export class AnalysisJobDO {
 
     let evalResult
     try {
-      evalResult = await performAnalysis({ jobId: config.jobId, bundle, ...evalParams, userId: config.userId }, this.env)
+      evalResult = await performAnalysis({ jobId: config.jobId, bundle, ...evalParams, userId: config.userId }, this.env,
+        (message, data) => { void this.pushEvent('eval_progress', { message, ...data }) })
     } catch (evalError) {
       const msg = evalError instanceof Error ? evalError.message : 'Evaluation failed'
       const code = (evalError as { code?: string })?.code
@@ -779,68 +780,8 @@ export class AnalysisJobDO {
     await this.pushEvent('evaluation_complete', { updatedResult: analysisResult })
     await this.recordRun(config, { status: 'completed', durationMs: Date.now() - startTime, response: analysisResult })
 
-    // ── Step 5: LLM comp selection ──────────────────────────────────────────
-    if (config.llmEnabled) {
-      const llmStart = Date.now()
-      try {
-        await this.pushEvent('llm_started', { message: 'AI annotating comps...', compCount: enrichedComps.length })
-
-        const evalContexts: CompEvalContext[] = ((analysisResult.comps as Record<string, unknown>)?.items as Array<Record<string, unknown>> ?? []).map((comp: Record<string, unknown>) => ({
-          compId: comp.id as string,
-          isEnabled: comp.isEnabled as boolean,
-          compGroup: (comp.compGroup as 'arv' | 'as_is' | null) ?? null,
-          filterResults: ((comp.appraisalRules as Record<string, unknown>)?.filters as Array<{ type: string; passed: boolean; reason?: string }>) ?? [],
-          adjustmentResults: ((comp.appraisalRules as Record<string, unknown>)?.adjustments as Array<{ type: string; applied: boolean; amount: number }>) ?? [],
-          adjustedPrice: (comp.adjustedPrice as number) ?? null,
-        }))
-
-        const compAnalysisCtx: import('../services/comp-analysis/types').CompAnalysisContext = {
-          bundle,
-          evalContexts,
-          analysisResult,
-          filters: evalParams.appraisalRules?.filters ?? [],
-          adjustments: evalParams.appraisalRules?.adjustments ?? [],
-          dealParams: {
-            closingCostsPercent: evalParams.buybox?.closingCostsPercent ?? 8,
-            carryingCostsPercent: evalParams.buybox?.carryingCostsPercent ?? 2,
-            wholesaleFee: evalParams.buybox?.wholesaleFee ?? 10000,
-          },
-          rehabLevelIndex: evalParams.buybox?.rehabLevelIndex ?? 2,
-          rehabTable: evalParams.customRehabTable,
-          tierRanges: evalParams.customTierRanges,
-          arvThresholdPercent: evalParams.arvThreshold?.percent ?? 15,
-          asIsThresholdPercent: evalParams.asIsThresholdPercent ?? 70,
-          riskFlags: (analysisResult.riskFlags as string[]) ?? [],
-        }
-
-        const llmResult = await analyzeComps(compAnalysisCtx, this.env, { includePhotos: config.llmOptions?.includePhotos, modelOverride: config.llmOptions?.compSelectionModel, reasoning: config.llmOptions?.reasoning })
-
-        if (llmResult && llmResult.rankings.length > 0) {
-          // Rule-based selection is authoritative — the LLM only annotates
-          // comps with reasoning/scores; it cannot change isEnabled/compGroup.
-          const comps = analysisResult.comps as Record<string, unknown>
-          if (comps?.items && Array.isArray(comps.items)) {
-            comps.items = (comps.items as Array<Record<string, unknown>>).map((comp) => {
-              const compId = comp.id as string
-              const ranking = llmResult.rankings.find((r) => r.compId === compId)
-              return { ...comp, selectionReason: ranking?.reasoning || null, qualityScore: ranking?.score ?? null, keyFeatures: ranking?.keyFeatures?.length ? ranking.keyFeatures : null }
-            })
-          }
-
-          await this.pushEvent('llm_complete', {
-            llmAnalysis: { model: llmResult.model, latencyMs: llmResult.latencyMs, tokenUsage: llmResult.tokenUsage, compCount: llmResult.rankings.length, summary: llmResult.summary, selectedForArv: llmResult.selectedForArv, reasoning: llmResult.reasoning },
-            rankings: llmResult.rankings,
-            updatedResult: analysisResult,
-          })
-          console.log(`[AnalysisJobDO] ✓ LLM: ${llmResult.rankings.length} comps annotated in ${Date.now() - llmStart}ms${llmResult.reasoning ? ' (with reasoning)' : ''}`)
-        } else {
-          await this.pushEvent('llm_complete', { llmAnalysis: null, rankings: [], skipped: true, reason: llmResult ? 'No comps selected' : 'LLM not available' })
-        }
-      } catch (error) {
-        console.warn('[AnalysisJobDO] LLM error:', error instanceof Error ? error.message : error)
-        await this.pushEvent('error', { step: 'llm', message: error instanceof Error ? error.message : 'LLM analysis failed' })
-      }
-    }
+    // LLM comp annotation removed — Jev is the selection/evaluation logic;
+    // the separate annotate pass only wrote prose onto cards.
 
     // Wait for parallel tasks before closing SSE (so client receives them)
     await marketContextPromise
@@ -902,7 +843,8 @@ export class AnalysisJobDO {
           bundle: config.bundle,
           ...config.evalParams,
           userId: config.userId,
-        }, this.env)
+        }, this.env,
+          (message, data) => { void this.pushEvent('eval_progress', { message, ...data }) })
 
         const updatedResponse = evalResult.response as unknown as Record<string, unknown>
 
@@ -961,95 +903,7 @@ export class AnalysisJobDO {
       }
     }
 
-    // Note: market_data step (Firecrawl/Zillow scraping) has been removed.
-    // Property details are now sourced from CoreLogic enrichment.
-    // Step B: LLM comp analysis (uses enriched data if market data ran first)
-    if (config.pending.includes('llm')) {
-      const llmStart = Date.now()
-      try {
-        await this.pushEvent('llm_started', { message: 'AI analyzing comparables...', compCount: config.bundle.comparables.length })
-
-        const evalContexts: CompEvalContext[] = (config.analysisResult.comps?.items ?? []).map((comp: Record<string, unknown>) => ({
-          compId: comp.id as string,
-          isEnabled: comp.isEnabled as boolean,
-          compGroup: (comp.compGroup as 'arv' | 'as_is' | null) ?? null,
-          filterResults: ((comp.appraisalRules as Record<string, unknown>)?.filters as Array<{ type: string; passed: boolean; reason?: string }>) ?? [],
-          adjustmentResults: ((comp.appraisalRules as Record<string, unknown>)?.adjustments as Array<{ type: string; applied: boolean; amount: number }>) ?? [],
-          adjustedPrice: (comp.adjustedPrice as number) ?? null,
-        }))
-
-        // Build rich context for AI comp selection
-        const evalParams = config.evalParams
-        const compAnalysisCtx: import('../services/comp-analysis/types').CompAnalysisContext = {
-          bundle: config.bundle,
-          evalContexts,
-          analysisResult: config.analysisResult,
-          filters: evalParams.appraisalRules?.filters ?? [],
-          adjustments: evalParams.appraisalRules?.adjustments ?? [],
-          dealParams: {
-            closingCostsPercent: evalParams.buybox?.closingCostsPercent ?? 8,
-            carryingCostsPercent: evalParams.buybox?.carryingCostsPercent ?? 2,
-            wholesaleFee: evalParams.buybox?.wholesaleFee ?? 10000,
-          },
-          rehabLevelIndex: evalParams.buybox?.rehabLevelIndex ?? 2,
-          rehabTable: evalParams.customRehabTable,
-          tierRanges: evalParams.customTierRanges,
-          arvThresholdPercent: evalParams.arvThreshold?.percent ?? 15,
-          asIsThresholdPercent: evalParams.asIsThresholdPercent ?? 70,
-          riskFlags: (config.analysisResult.riskFlags as string[]) ?? [],
-          marketContext: null, // Legacy path — no market context
-        }
-
-        const llmResult = await analyzeComps(
-          compAnalysisCtx,
-          this.env, { includePhotos: config.llmOptions?.includePhotos },
-        )
-
-        if (llmResult && llmResult.rankings.length > 0) {
-          // Rule-based selection is authoritative — the LLM only annotates
-          // comps with reasoning/scores; it cannot change isEnabled/compGroup.
-          const currentResult = config.analysisResult
-          if (currentResult.comps?.items && Array.isArray(currentResult.comps.items)) {
-            currentResult.comps.items = currentResult.comps.items.map((comp: Record<string, unknown>) => {
-              const compId = comp.id as string
-              const ranking = llmResult.rankings.find((r) => r.compId === compId)
-              return {
-                ...comp,
-                selectionReason: ranking?.reasoning || null,
-                qualityScore: ranking?.score ?? null,
-                keyFeatures: ranking?.keyFeatures?.length ? ranking.keyFeatures : null,
-              }
-            })
-          }
-
-          await this.pushEvent('llm_complete', {
-            llmAnalysis: {
-              model: llmResult.model,
-              latencyMs: llmResult.latencyMs,
-              tokenUsage: llmResult.tokenUsage,
-              compCount: llmResult.rankings.length,
-              summary: llmResult.summary,
-              selectedForArv: llmResult.selectedForArv,
-            },
-            rankings: llmResult.rankings,
-            updatedResult: currentResult,
-          })
-          console.log(`[AnalysisJobDO] ✓ LLM: ${llmResult.rankings.length} comps annotated in ${Date.now() - llmStart}ms`)
-        } else if (llmResult) {
-          // LLM returned rankings but no selection — just enrich without changing selection
-          await this.pushEvent('llm_complete', {
-            llmAnalysis: { model: llmResult.model, latencyMs: llmResult.latencyMs, tokenUsage: llmResult.tokenUsage, compCount: llmResult.rankings.length, summary: llmResult.summary },
-            rankings: llmResult.rankings,
-          })
-          console.log(`[AnalysisJobDO] ✓ LLM: ${llmResult.rankings.length} comps analyzed (no selection override) in ${Date.now() - llmStart}ms`)
-        } else {
-          await this.pushEvent('llm_complete', { llmAnalysis: null, rankings: [], skipped: true, reason: 'LLM provider not available' })
-        }
-      } catch (error) {
-        console.warn('[AnalysisJobDO] LLM error:', error instanceof Error ? error.message : error)
-        await this.pushEvent('error', { step: 'llm', message: error instanceof Error ? error.message : 'LLM analysis failed' })
-      }
-    }
+    // LLM comp annotation removed — Jev is the selection/evaluation logic.
 
     // Wait for OSM risk flags if still running
     await osmPromise

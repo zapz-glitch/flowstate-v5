@@ -20,10 +20,12 @@ const EVENT_TYPES = [
   'subject_found',
   'comps_found',
   'evaluation_started',
+  'eval_progress',
   'evaluation_complete',
   'llm_started',
   'llm_complete',
   'market_context',
+  'risk_flags_updated',
   'enrichment_done',
   'error',
 ]

@@ -365,7 +365,7 @@ analyze.post('/', async (c) => {
         enrichment: {
           streamUrl,
           token,
-          pending: ['property_fetch', 'evaluation', 'llm'],
+          pending: ['property_fetch', 'evaluation'],
         },
       },
     });

@@ -37,7 +37,7 @@ import {
   type ApiCallStats,
   type ResponseContext,
 } from '../analysis'
-import { createPhotoService, createPhotoProvider, type PhotoBundle, type PropertyIdentifier, type PropertyPhotos } from '../photo-provider'
+import { createPhotoService, type PhotoBundle, type PropertyIdentifier, type PropertyPhotos } from '../photo-provider'
 import {
   COMP_HYBRID_VERSION,
   runJevEvaluation,
@@ -46,7 +46,7 @@ import {
 
 import { persistReportAssets } from '../report-assets'
 import { expansionRefetchRadius } from '../property-api/retrieval-policy'
-import { assessRenovationFromPhotos, assessCompCurbAppeal, type RenovationAssessment, type CurbAppealCheck } from '../vision/renovation'
+import { assessRenovationFromPhotos, type RenovationAssessment, type CurbAppealCheck } from '../vision/renovation'
 import { PROXIMITY_DEFAULTS } from '../../routes/proximity-config'
 import { deriveBuybox } from './derivation'
 import { buildEvaluationReport } from './report'
@@ -421,7 +421,7 @@ export function computeLocationPenalty(
 export async function performAnalysis(
   params: EvaluationParams,
   env: Env,
-  onProgress?: (message: string) => void
+  onProgress?: (message: string, data?: Record<string, unknown>) => void
 ): Promise<EvaluationResult> {
   const { jobId } = params
   let { bundle } = params
@@ -531,23 +531,12 @@ export async function performAnalysis(
         state: bundle.property.state,
         zipCode: bundle.property.zipCode,
       }
-      // Zillow targets: every comp matching the appraisal rules (hard
-      // failures excluded), nearest first — the fetched price history
-      // drives stale-price reconciliation and flip detection downstream.
-      const evaluated = new Map(
-        appraisalResult.comparables.map((c) => [c.id, c.evaluation?.shouldDisable ?? true]),
-      )
-      const rankedComps = bundle.comparables
-        .filter((c) => !evaluated.get(c.id))
-        .sort((a, b) => (a.distanceMiles ?? 999) - (b.distanceMiles ?? 999))
-      const compIdents: PropertyIdentifier[] = rankedComps.map((c) => ({
-        propertyId: c.id,
-        address: c.address,
-        city: c.city,
-        state: c.state,
-        zipCode: c.zipCode,
-      }))
-      photoBundle = await photoService.fetchPhotoBundle(subjectIdent, compIdents, { maxComps: compIdents.length })
+      // Subject-only scrape — comp cards render map imagery, so no
+      // Firecrawl/Zillow calls are spent on comparables. (This also ends
+      // the comp price-history supplement used for stale-sale
+      // reconciliation; subject listing data still fills subject gaps
+      // and carries the flood signal.)
+      photoBundle = await photoService.fetchPhotoBundle(subjectIdent, [], { maxComps: 0 })
       step(
         'photo_fetch',
         photoBundle.subject ? 'completed' : 'fallback',
@@ -555,32 +544,6 @@ export async function performAnalysis(
           ? `${photoBundle.subject.photos.length} subject photos via ${photoBundle.subject.source}`
           : 'No subject photos found'
       )
-
-      // Reconciliation needs Zillow's priceHistory, but the comp chain bounds
-      // each provider attempt at ~15s — a stealth scrape takes 40-90s, so
-      // Zillow usually loses the race and a history-less fallback provider
-      // wins. The timed-out Zillow fetch keeps running and still writes its
-      // KV cache entry, so re-reading Zillow here is near-instant for those
-      // comps; genuinely missing ones get one real scrape. Only the
-      // rule-matching set is queried — the same group fetched above.
-      const zillow = createPhotoProvider(env, 'zillow')
-      if (zillow?.isAvailable() && compIdents.length > 0) {
-        await Promise.all(
-          compIdents.map(async (ident) => {
-            const existing = photoBundle!.comps[ident.propertyId]
-            if (existing?.priceHistory?.length) return
-            const res = await zillow.fetchPhotos(ident, { maxPhotos: 0 })
-            if (!res.success || !res.data.priceHistory?.length) return
-            if (existing) {
-              existing.priceHistory = res.data.priceHistory
-              existing.lastSaleDate = res.data.lastSaleDate ?? existing.lastSaleDate
-              existing.lastSalePrice = res.data.lastSalePrice ?? existing.lastSalePrice
-            } else {
-              photoBundle!.comps[ident.propertyId] = res.data
-            }
-          }),
-        )
-      }
     } else {
       step('photo_fetch', 'fallback', 'No photo provider configured')
     }
@@ -670,6 +633,7 @@ export async function performAnalysis(
       const jev = await runJevEvaluation(bundle.property, appraisalResult.comparables, filters, adjustments, env, {
         rules: { filters, adjustments },
         enrich: params.enrichComparables,
+        onProgress,
       })
 
       // Fold enriched detail back onto the pool so cards/audit see the
@@ -763,38 +727,22 @@ export async function performAnalysis(
   )
   let finalArv = appraisalResult.arv
 
-  // ── 3. Vision: subject renovation+curb-appeal AND comp checks in parallel ──
-  // One merged LLM call for the subject (renovation level + curb appeal).
-  // Per-comp curb checks only run when the provider's assessor condition is
-  // missing — assessor data replaces the LLM classification for comps and
-  // saves a vision round-trip per comp.
+  // ── 3. Vision: subject renovation + curb appeal (one merged LLM call) ─────
+  // Subject-only — comps are never photo-scraped, so there is no per-comp
+  // vision pass. The renovation level drives the rehab tier; the curb-appeal
+  // condition is the subject's detected condition.
   const compById = new Map(appraisalResult.comparables.map((c) => [c.id, c]))
   const subjectPhotos = photoBundle?.subject?.photos ?? []
-  const compVisionPairs = (appraisalResult.selectedCompIds ?? [])
-    .filter((id) => compById.get(id)?.buildingCondition == null)
-    .map((id) => ({ id, photos: photoBundle?.comps[id]?.photos ?? [] }))
-    .filter((p) => p.photos.length > 0)
 
-  const [renovationResult, compChecks] = await Promise.all([
-    (async () => {
-      try {
-        return await assessRenovationFromPhotos(env, subjectPhotos, {
-          address: bundle.property.address,
-          squareFeet: bundle.property.squareFeet,
-          yearBuilt: bundle.property.yearBuilt,
-        })
-      } catch { return null }
-    })(),
-    Promise.all(
-      compVisionPairs.map(async (p) => {
-        try {
-          return { id: p.id, check: await assessCompCurbAppeal(env, p.photos) }
-        } catch {
-          return { id: p.id, check: { condition: 'unknown', confidence: null, summary: 'Vision call failed', photosExamined: p.photos.length } as CurbAppealCheck }
-        }
+  const renovationResult = await (async () => {
+    try {
+      return await assessRenovationFromPhotos(env, subjectPhotos, {
+        address: bundle.property.address,
+        squareFeet: bundle.property.squareFeet,
+        yearBuilt: bundle.property.yearBuilt,
       })
-    ),
-  ])
+    } catch { return null }
+  })()
 
   // ── Persist listing photos into private report storage ────────────────────
   // Copy image bytes to R2 and rewrite CDN URLs to /user/reports/{jobId}/
@@ -846,26 +794,17 @@ export async function performAnalysis(
   onProgress?.('Renovation level assessed')
 
   // Subject curb appeal comes from the merged vision pass (one LLM call for
-  // both renovation level + curb-appeal condition); comp checks resolved in
-  // the same parallel batch above.
+  // both renovation level + curb-appeal condition).
   const subjectCurbAppeal: CurbAppealCheck | null = renovation?.curbAppeal ?? null
-  let compCurbAppeal: Record<string, CurbAppealCheck> | undefined =
-    compChecks.length > 0 ? Object.fromEntries(compChecks.map((c) => [c.id, c.check])) : undefined
 
   // ── ARV condition evidence ────────────────────────────────────────────────
   // Product spec: the rules already picked the comps — condition verification
   // is the cherry on top that boosts confidence, NOT a selection gate.
-  //   • verified AR-quality (assessor Good+ / vision renovated) → confidence +
-  //   • verified NOT AR-quality (assessor Fair/Poor/Very Poor or vision
-  //     dated/distressed) → excluded — confirmed evidence it isn't ARV spec
+  //   • verified AR-quality (assessor Good+) → confidence +
+  //   • verified NOT AR-quality (assessor Fair/Poor/Very Poor) → excluded —
+  //     confirmed evidence it isn't ARV spec
   //   • unverifiable → KEPT: top-of-market comps matching the rules are valid
   //     ARV anchors; lack of condition data only lowers confidence.
-  const visionVerifiedNegative = (check: CurbAppealCheck | undefined): boolean =>
-    !!check && check.source === 'vision' &&
-    (check.condition === 'dated' || check.condition === 'distressed')
-  const visionVerifiedPositive = (check: CurbAppealCheck | undefined): boolean =>
-    !!check && check.source === 'vision' &&
-    (check.condition === 'renovated' || check.rehabLevelIndex === 0)
 
   // Assessor condition is the primary signal — Good/Very Good/Excellent are
   // retail-ready; Fair/Poor/Very Poor are confirmed below ARV spec.
@@ -883,21 +822,12 @@ export async function performAnalysis(
   const prunedFromArv: string[] = []
   let verifiedPositiveCount = 0
   for (const id of appraisalResult.selectedCompIds ?? []) {
-    const check = compCurbAppeal?.[id]
     const assessor = assessorSignal(id)
-    const verifiedNegative = assessor === 'negative' || visionVerifiedNegative(check)
-    const verifiedPositive = assessor === 'positive' || visionVerifiedPositive(check)
-    if (verifiedNegative) {
+    if (assessor === 'negative') {
       prunedFromArv.push(id)
-      if (check && check.source !== 'price') {
-        compCurbAppeal![id] = {
-          ...check,
-          summary: `${check.summary ?? check.condition} — excluded from ARV: verified below ARV spec (${assessor === 'negative' ? `assessor ${compById.get(id)?.buildingCondition}` : check.condition})`,
-        }
-      }
-    } else if (verifiedPositive || assessor === 'average') {
-      if (verifiedPositive) verifiedPositiveCount++
-    } else {
+    } else if (assessor === 'positive') {
+      verifiedPositiveCount++
+    } else if (assessor !== 'average') {
       // No signal at all — kept in the ARV set, counted for confidence
       unverifiable.push(id)
     }
@@ -911,7 +841,7 @@ export async function performAnalysis(
       finalArv = appraisalResult.arv
       fallbacksUsed.push(`arv_condition_pruned:${prunedFromArv.length}`)
       step('arv_condition_gate', 'fallback',
-        `${prunedFromArv.length} comp(s) excluded — verified below ARV spec (dated/distressed/poor assessor condition); ARV recomputed on ${remainingComps.length}`)
+        `${prunedFromArv.length} comp(s) excluded — verified below ARV spec (poor assessor condition); ARV recomputed on ${remainingComps.length}`)
     } else {
       // Can't recompose a 3-comp ARV — keep the set but mark the evidence
       fallbacksUsed.push('arv_condition_thin')
@@ -1064,7 +994,6 @@ export async function performAnalysis(
       rehabLevelEstimates,
       appliedSettings,
       visionAnalysis: mapRenovationToVision(renovation),
-      compCurbAppeal,
       subjectCurbAppeal,
       subjectListingUrl: photoBundle?.subject?.sourceUrl ?? null,
       subjectListPrice: typeof photoBundle?.subject?.metadata?.listPrice === 'number'

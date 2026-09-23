@@ -163,6 +163,7 @@ export default function AnalyzePage() {
   const [phase, setPhase] = useState<AnalysisPhase>(analysisResult ? 'ready' : 'idle')
   const [aiAnalyzing, setAiAnalyzing] = useState(false)
   const [streamingStep, setStreamingStep] = useState<'idle' | 'searching' | 'subject' | 'comps' | 'evaluating' | 'done'>('idle')
+  const [evalProgress, setEvalProgress] = useState<string | null>(null)
   const [enrichmentStreamUrl, setEnrichmentStreamUrl] = useState<string | null>(null)
   const [enrichmentToken, setEnrichmentToken] = useState<string | null>(null)
 
@@ -276,6 +277,11 @@ export default function AnalyzePage() {
 
       case 'evaluation_started':
         if (!isAiOnly) setStreamingStep('evaluating')
+        setEvalProgress(null)
+        break
+
+      case 'eval_progress':
+        if (typeof data.message === 'string') setEvalProgress(data.message)
         break
 
       case 'evaluation_complete':
@@ -535,6 +541,7 @@ export default function AnalyzePage() {
     setAiOnlyMode(false)
     aiOnlyModeRef.current = false
     setStreamingStep('idle')
+    setEvalProgress(null)
     setPhase('fetching')
 
     const t0 = Date.now()
@@ -886,7 +893,7 @@ export default function AnalyzePage() {
             streamingStep === 'searching' ? 'Searching property...'
             : streamingStep === 'subject' ? 'Loading comparables...'
             : streamingStep === 'comps' ? 'Enriching comp details...'
-            : streamingStep === 'evaluating' ? 'Evaluating comparables...'
+            : streamingStep === 'evaluating' ? (evalProgress ?? 'Evaluating comparables...')
             : null
           }
           footer={
