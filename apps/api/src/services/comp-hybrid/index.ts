@@ -59,6 +59,19 @@ export const COMP_HYBRID_VERSION = COMP_EVAL_VERSION
 /** The ideal core comp set — test-2 passers; filled from the fail bucket when short. */
 export const HYBRID_CORE_TARGET = 3
 
+/**
+ * Card-score bands per test outcome — the tier dominates, proximity sets
+ * the position inside the band (nearest = band top). Bands never overlap:
+ * every test-2 passer outscores every test-2 fail, and every test-1 passer
+ * outscores every test-1 fail.
+ */
+export const COMP_TIER_BANDS: Record<HybridCompScore['stage'], readonly [number, number]> = {
+  test2_pass: [75, 100],
+  test2_fail: [35, 74],
+  test1_fail: [0, 34],
+  ineligible: [0, 34],
+}
+
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 export interface HybridCompTest1 {
@@ -94,7 +107,7 @@ export interface HybridCompScore {
   compId: string
   /**
    * 'ineligible'  = no usable price/date, never tested
-   * 'test1_fail'  = failed a test-1 field (or a field could not be verified)
+   * 'test1_fail'  = failed a verifiable test-1 field
    * 'test2_fail'  = passed test 1, failed test 2 — ineligible but scored
    * 'test2_pass'  = passed both tests — eligible for the core set
    */
@@ -106,10 +119,16 @@ export interface HybridCompScore {
   enriched: boolean
   test1: HybridCompTest1 | null
   test2: HybridCompTest2 | null
-  /** Score /100 for the card — the test-2 distance-dominant score */
+  /**
+   * Score /100 for the card — tiered composite: the test outcome sets the
+   * band (both tests → top, test-1-pass/test-2-fail → middle, test-1 fail /
+   * ineligible → bottom) and proximity to the subject sets the position
+   * inside the band — nearest scores highest. Every comp carries one.
+   * Jev's distance-spectrum answer lives on test2.score.
+   */
   score: number | null
   scoreConfidence: number | null
-  /** 1-based rank among test-2-evaluated comps by score — #1 is closest */
+  /** 1-based rank across the whole pool by the composite score — #1 is the closest comp that passed both tests */
   poolRank: number | null
   /** 'core' = test-2 passer in the ARV set · 'fill' = fallback pick from the test-2-fail bucket */
   selected: 'core' | 'fill' | null
@@ -354,8 +373,8 @@ export async function runJevEvaluation(
     }
   }
 
-  // Stage 4 — rank the test-2-evaluated set by score (ties → confidence →
-  // distance → recency). #1 is the closest comp to the subject.
+  // Stage 4 — rank the test-2-evaluated set by Jev's distance Score (ties →
+  // confidence → distance → recency). This orders the fill bucket.
   const evaluated = entries.filter((e) => e.test2 !== null).sort((a, b) => {
     const sa = a.test2!.score
     const sb = b.test2!.score
@@ -370,7 +389,6 @@ export async function runJevEvaluation(
     const tb = byId.get(b.compId)?.saleDate ? Date.parse(byId.get(b.compId)!.saleDate!) : 0
     return tb - ta
   })
-  evaluated.forEach((e, i) => { e.poolRank = i + 1 })
 
   // Stage 5 — selection: test-2 passers are the primary core comp set
   // (ideally 3 — all passers are selected, no cap). When fewer than the
@@ -383,6 +401,43 @@ export async function runJevEvaluation(
     : []
   for (const e of core) e.selected = 'core'
   for (const e of fill) e.selected = 'fill'
+
+  // Stage 6 — the card score for every comp: the test outcome sets the band
+  // and proximity to the subject sets the position inside it, so the score
+  // sort reads best→worst with the nearest comps always on top. Test-2
+  // passers top the scale, the test-1-pass/test-2-fail bucket sits in the
+  // middle, and test-1 fails (or unusable comps) sit at the bottom. A
+  // test-2 pass is the boost; failing test 2 is never a penalty — landing
+  // in the middle band is all it does.
+  for (const stage of ['test2_pass', 'test2_fail', 'test1_fail', 'ineligible'] as const) {
+    const tierEntries = entries.filter((e) => e.stage === stage)
+    if (tierEntries.length === 0) continue
+    const [lo, hi] = COMP_TIER_BANDS[stage]
+    const distances = tierEntries
+      .map((e) => byId.get(e.compId)?.distanceMiles)
+      .filter((d): d is number => d != null && Number.isFinite(d))
+    const dMin = distances.length ? Math.min(...distances) : 0
+    const dMax = distances.length ? Math.max(...distances) : 0
+    for (const e of tierEntries) {
+      const d = byId.get(e.compId)?.distanceMiles
+      const frac = d == null || !Number.isFinite(d) ? 1 : dMax > dMin ? (d - dMin) / (dMax - dMin) : 0
+      e.score = Math.round(hi - frac * (hi - lo))
+    }
+  }
+
+  // Rank the whole pool by the composite (score desc → nearest → newest) so
+  // poolRank matches the order the dashboard's score sort shows.
+  const ranked = [...entries].sort((a, b) => {
+    const ds = (b.score ?? -1) - (a.score ?? -1)
+    if (ds !== 0) return ds
+    const da = byId.get(a.compId)?.distanceMiles ?? Infinity
+    const db = byId.get(b.compId)?.distanceMiles ?? Infinity
+    if (da !== db) return da - db
+    const ta = byId.get(a.compId)?.saleDate ? Date.parse(byId.get(a.compId)!.saleDate!) : 0
+    const tb = byId.get(b.compId)?.saleDate ? Date.parse(byId.get(b.compId)!.saleDate!) : 0
+    return tb - ta || a.compId.localeCompare(b.compId)
+  })
+  ranked.forEach((e, i) => { e.poolRank = i + 1 })
 
   const counts = {
     pool: comps.length,

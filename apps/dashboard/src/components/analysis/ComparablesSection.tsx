@@ -73,9 +73,16 @@ const SORT_LABELS: Record<SortOption, string> = {
 type ScoreFloor = 0 | 25 | 50 | 75 | 90
 const SCORE_FLOORS: ScoreFloor[] = [0, 25, 50, 75, 90]
 
-/** Jev score /100 — exam score for cross-examined comps, screen score otherwise */
+/** Composite score /100 — test outcome sets the band (both tests pass → top,
+ * test-1-pass/test-2-fail → middle, test-1 fail → bottom), proximity to the
+ * subject sets the position inside the band. Every comp carries one. */
 function compScore(comp: CompItem): number | null {
   return comp.jevHybrid?.score ?? null
+}
+
+/** Tier rank for the score sort — the test outcome, not the number. */
+function scoreTier(comp: CompItem): number {
+  return comp.jevHybrid?.stage === 'test2_pass' ? 2 : comp.jevHybrid?.stage === 'test2_fail' ? 1 : 0
 }
 
 /** Neighborhood match by normalized name OR provider code (mirrors server-side neighborhoodsMatch) */
@@ -158,6 +165,23 @@ export function ComparablesSection({
     }
 
     const dir = sortDesc ? -1 : 1
+
+    if (sortBy === 'score') {
+      // Tier ordering follows the direction (desc = passed both tests first,
+      // asc = test-1 fails first); proximity is always nearest-first, so
+      // ascending shows the closest of the weakest comps — never far-away
+      // comps first. No selected-block pin: this sort is the pure ranking.
+      return [...indexed].sort((a, b) => {
+        const ta = scoreTier(a.comp)
+        const tb = scoreTier(b.comp)
+        if (ta !== tb) return dir * (ta - tb)
+        const da = a.comp.distanceMiles ?? Infinity
+        const db = b.comp.distanceMiles ?? Infinity
+        if (da !== db) return da - db
+        return (compScore(b.comp) ?? -1) - (compScore(a.comp) ?? -1) || (a.originalIndex - b.originalIndex)
+      })
+    }
+
     const geoMatch = (c: CompItem): number => {
       if (sortBy === 'subdivision') return subdivMatch(c)
       if (sortBy === 'neighborhood') return neighborhoodsMatchClient(c, subject) ? 1 : 0
@@ -167,7 +191,6 @@ export function ComparablesSection({
       switch (sortBy) {
         case 'distance': return c.distanceMiles ?? 999
         case 'psf': return c.pricePerSqft ?? 0
-        case 'score': return compScore(c) ?? -1
         // subdivision & neighborhood ascend/descend by price
         default: return c.salePrice ?? 0
       }

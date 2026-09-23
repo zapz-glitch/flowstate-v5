@@ -1,6 +1,62 @@
 # Engineering State — flowstate-v5
 
 
+### 2026-09-23 — Two-test Jev pipeline merged to main; tiered composite card score on feat/jev-experiments
+
+State of the repo: the two-test pipeline (test-1 raw-field nouls → enrich
+passers → test-2 subdivision/neighborhood → core/fill → ARV) was committed
+as `0726840` on new-classification and fast-forwarded to origin/main. This
+worktree now runs `feat/jev-experiments` (branched at that commit) for
+continued iteration; the other worktrees were left untouched.
+
+New on this branch — composite card score + proximity sort (user-approved
+spec, replaces "score = Jev distance question on test-2 passers only"):
+
+- Every comp gets `entry.score` /100. The test outcome sets the band and
+  distanceMiles sets the position inside it (nearest = band top):
+  test2_pass 75–100, test2_fail 35–74, test1_fail/ineligible 0–34
+  (`COMP_TIER_BANDS`). Tier dominance beats proximity — a close test-1
+  fail never outscores a far test-2 passer.
+- poolRank now ranks the whole pool by the composite (was: evaluated set
+  only, by Jev score). topCompId → rank 1 = nearest test-2 passer.
+- Fill ranking is UNCHANGED — still Jev's distance Score (test2.score)
+  order on the evaluated set, which bakes physical/material advisory
+  preference into fill ordering.
+- Dashboard: 'Jev score' sort = tier direction flips with asc/desc,
+  distanceMiles asc is ALWAYS the secondary (ascending shows the closest
+  of the weakest comps, not the farthest). No selected-block pin on this
+  sort — pure ranking view. Score floors now cover the whole pool (≥75 =
+  tier 1 only, ≥50 = tier 1 + closer test-2 fails, ≥25 ≈ everything).
+- scoreConfidence remains Jev's confidence on the distance Score for
+  test-2-evaluated comps; null elsewhere (composite is deterministic).
+- Audit: step text updated; expanded row labels Jev's raw answer as
+  "proximity score" to disambiguate from the composite badge.
+- report.ts reason text updated ("tier + proximity", not "distance
+  spectrum").
+
+Live verification — job_1790139639941_40604a3bc1cd4a0f (5460 Lemon Tree):
+89 comps all scored — tier1 100/96/75, tier2 74→35, tier3 34→0; 15 test-1
+passers, 3 test-2 passers, core 3, ARV $195,800 (unchanged). 58s wall.
+
+Tests: 24/24 comp-hybrid green (new composite block); full 26-file
+regression suite passes; tsc clean on api + dashboard.
+
+Open product threads (discussed, NOT built):
+- As-is identification via Jev price-tier verdict (Choice spectrum:
+  anomaly/as-is/below-ARV/ARV-tier/premium) — double duty: labels the
+  as-is set AND removes as-is verdicts from ARV eligibility. Runs after
+  ARV is locked; ARV math never absorbs as-is comps.
+- Tiered ARV-tier confidence gates (~90 preferred, 75–80 fallback) to
+  protect core-set purity including high outliers ($1M lot vs $200k homes).
+- Notify/improvements loop verified working as-is (report_history
+  before/after snapshots + feedback stamps); gaps noted: edits carry no
+  reason field, feedbackReport not returned by GET, no daily-clear or
+  digest view, ticket copy still speaks rule-engine not Jev.
+
+Last Handoff: composite score + proximity sort is live and verified on
+feat/jev-experiments. Next: user decides whether to merge this to main,
+then as-is verdict layer is the likely next build.
+
 ### 2026-09-22 — Jev-only evaluation shipped on new-classification (comp_exam_v3 + comp_screen_v1)
 
 User directive (approved spec): Jev is the ONLY evaluation logic visible in

@@ -57,7 +57,7 @@ function TestedCompRow({ comp, role, questionSet }: { comp: CompItem | undefined
         ? `passed test 2${t2.nouls.subdivision >= 0.5 ? ' (subdivision)' : ' (neighborhood)'}`
         : `failed test 2 — subdivision ${fmtPct(t2.nouls.subdivision)} · neighborhood ${fmtPct(t2.nouls.neighborhood)}`
       const parts = [
-        `score ${t2.score}/100`,
+        `proximity score ${t2.score}/100`,
         t2.confidence != null ? `confidence ${fmtPct(t2.confidence)}` : null,
         gate,
         h.poolRank != null ? `rank #${h.poolRank}` : null,
@@ -219,7 +219,7 @@ export function EvaluationProcessAudit({
         <li>{`Test 1 — Jev asks one question per raw field (bathrooms, square feet, lot size, year built, sale price, sale date): does the comp match the subject per the appraisal rules? Passing every verifiable field puts the comp in the "passed test 1" bucket.`}</li>
         <li>Passed-test-1 comps get enriched with full property detail (subdivision, neighborhood, construction, features, transaction).</li>
         <li>Test 2 — on the enriched data: a subdivision match passes; if subdivision fails, a neighborhood match still passes. Both no → test 2 fail → ineligible for the core set. Physical character and material matches are asked as preferred, not required.</li>
-        <li>Jev scores every evaluated comp on a distance spectrum — the closest scores highest, tapering as distance grows materially — with a confidence.</li>
+        <li>Every comp gets a card score: the test outcome sets the band — passed both tests on top, test-1-pass/test-2-fail in the middle, test-1 fails at the bottom — and the nearest comp to the subject scores highest inside each band. Failing test 2 is never a penalty; passing it is the boost.</li>
         <li>{fillUsed
           ? `Fewer than ${coreTarget} comps passed test 2 — the test-1-pass / test-2-fail bucket filled the core set to ${coreTarget} by score.`
           : `Test-2 passers are the primary core comp set — ideally ${coreTarget}.`}</li>

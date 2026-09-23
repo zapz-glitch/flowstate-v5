@@ -114,7 +114,7 @@ function assessConfidence(input: BuildReportInput): {
       )
     }
     if (topScore != null) {
-      reasons.push(`Closest comp scored ${topScore}/100 on Jev's distance spectrum`)
+      reasons.push(`Top selected comp scored ${topScore}/100 (test tier + proximity)`)
     }
     if (jev.selected.length < 3) {
       reasons.push(`Only ${jev.selected.length} comp(s) drive the ARV — fewer than 3`)

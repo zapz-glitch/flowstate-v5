@@ -1,14 +1,16 @@
 /**
  * Jev comp evaluation — two-test engine coverage
  *
- * Facts-only eligibility (usable price + date), test 1 — the eight
- * raw-field nouls (all must verify ≥ gate; unverifiable is not a pass),
- * the enrichment seam (test-1 passers only), test 2 — subdivision OR
- * neighborhood passes, advisory physical-character/material nouls, the
- * distance-dominant score /100 with confidence, the core set (test-2
- * passers, no cap), and filling to the target from the test-2-fail bucket
- * by score. The TypeSafe calls and the provider enrichment seam are
- * injected — these tests cover the engine's decisions, not Jev.
+ * Facts-only eligibility (usable price + date), test 1 — the six
+ * raw-field nouls (verifiable fields must clear the gate; unverifiable is
+ * noted, not failed), the enrichment seam (test-1 passers only), test 2 —
+ * subdivision OR neighborhood passes, advisory physical-character/material
+ * nouls, Jev's distance Score with confidence (fill ranking), the core set
+ * (test-2 passers, no cap), filling to the target from the test-2-fail
+ * bucket, and the tiered composite card score every comp carries (test
+ * outcome sets the band, proximity the position). The TypeSafe calls and
+ * the provider enrichment seam are injected — these tests cover the
+ * engine's decisions, not Jev.
  */
 
 import { describe, it } from 'node:test'
@@ -169,7 +171,7 @@ describe('runJevEvaluation — eligibility', () => {
     const nop = result.entries.find((e) => e.compId === 'noprice')!
     assert.equal(nop.stage, 'ineligible')
     assert.equal(nop.test1, null)
-    assert.equal(nop.score, null)
+    assert.ok(nop.score != null && nop.score <= 34, 'ineligible comps still carry a bottom-band card score')
     assert.ok(nop.rejectReasons.some((r) => /price/i.test(r)))
     assert.equal(result.counts.ineligible, 2)
   })
@@ -302,7 +304,7 @@ describe('runJevEvaluation — test 2', () => {
     assert.equal(b.stage, 'test2_fail')
     assert.equal(b.test2!.passed, false)
     assert.equal(b.test2!.score, 75, 'rawScore 3 of 4 → 75/100')
-    assert.equal(b.score, 75)
+    assert.equal(b.score, 74, 'all four comps share a distance → middle-band top')
   })
 
   it('physical character and material are advisory — they never gate', async () => {
@@ -371,15 +373,16 @@ describe('runJevEvaluation — selection', () => {
     assert.equal(result.counts.filled, 3)
   })
 
-  it('poolRank orders the evaluated set by score — #1 is the closest evidence', async () => {
+  it('poolRank covers the whole pool by composite — #1 is the closest comp that passed both tests', async () => {
     const result = await evaluate(
-      [comp('low'), comp('high')],
+      [comp('far', { distanceMiles: 0.9 }), comp('near', { distanceMiles: 0.1 }), comp('fail', { distanceMiles: 0.05 })],
+      { fail: { bathrooms: 0.1 } },
       {},
-      { low: t2(1), high: t2(4) },
     )
     const ranks = Object.fromEntries(result.entries.map((e) => [e.compId, e.poolRank]))
-    assert.equal(ranks['high'], 1)
-    assert.equal(ranks['low'], 2)
+    assert.equal(ranks['near'], 1, 'nearest test-2 passer tops the pool')
+    assert.equal(ranks['far'], 2)
+    assert.equal(ranks['fail'], 3, 'a test-1 fail ranks below passers even when closest')
   })
 
   it('score confidence propagates to the card record', async () => {
@@ -400,8 +403,53 @@ describe('runJevEvaluation — selection', () => {
     )
     const fail = result.entries.find((e) => e.compId === 'fail')!
     assert.equal(fail.selected, null)
-    assert.equal(fail.poolRank, null)
+    assert.ok(fail.poolRank != null, 'test-1 fails still carry a pool rank')
     assert.ok(!result.arvCompIds.includes('fail'))
+  })
+})
+
+// ─── Composite card score — tier band + proximity position ───────────────────
+
+describe('runJevEvaluation — composite card score', () => {
+  it('every comp carries a score — test outcome sets the band, proximity the position', async () => {
+    const result = await evaluate(
+      [
+        comp('p1', { distanceMiles: 0.2 }),
+        comp('p2', { distanceMiles: 0.6 }),
+        comp('f', { distanceMiles: 0.05 }),
+        comp('t1', { distanceMiles: 0.3 }),
+      ],
+      { t1: { bathrooms: 0.1 } },
+      {
+        p1: t2(4),
+        p2: t2(4),
+        f: t2(2, { nouls: { subdivision: 0.1, neighborhood: 0.1 } }),
+      },
+    )
+    const score = Object.fromEntries(result.entries.map((e) => [e.compId, e.score]))
+    // Tier dominance beats proximity — f at 0.05mi is the nearest comp in
+    // the pool and still sits below both test-2 passers.
+    assert.ok(score['p1']! > score['f']!)
+    assert.ok(score['f']! > score['t1']!)
+    // Bands: both tests → 75–100, test-2 fail → 35–74, test-1 fail → 0–34
+    assert.ok(score['p1']! >= 75 && score['p1']! <= 100)
+    assert.ok(score['f']! >= 35 && score['f']! <= 74)
+    assert.ok(score['t1']! <= 34)
+    // Nearest within the tier scores highest
+    assert.equal(score['p1'], 100)
+    assert.equal(score['p2'], 75)
+    assert.equal(score['f'], 74, 'only test-2 fail → band top')
+    assert.equal(score['t1'], 34, 'only test-1 fail → band top')
+  })
+
+  it('a test-1 fail never outscores a test-2 fail even when much closer', async () => {
+    const result = await evaluate(
+      [comp('t2fail', { distanceMiles: 3 }), comp('t1fail', { distanceMiles: 0.01 })],
+      { t1fail: { bathrooms: 0.1 } },
+      { t2fail: t2(1, { nouls: { subdivision: 0.1, neighborhood: 0.1 } }) },
+    )
+    const score = Object.fromEntries(result.entries.map((e) => [e.compId, e.score]))
+    assert.ok(score['t2fail']! > score['t1fail']!)
   })
 })
 
