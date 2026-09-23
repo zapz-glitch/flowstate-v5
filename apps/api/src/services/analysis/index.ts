@@ -582,6 +582,8 @@ export interface AnalysisResponse {
     zillowUrl: string | null
     /** Vision-assessed condition/renovation level (or 'NA' when unverifiable) */
     condition: string | null
+    /** One-sentence rationale for the assigned renovation level */
+    conditionSummary: string | null
     /** Curb-appeal condition label (renovated/dated/distressed/unknown) */
     curbAppeal: {
       condition: 'renovated' | 'dated' | 'distressed' | 'unknown'
@@ -1387,6 +1389,7 @@ export function buildAnalysisResponse(
         // tells the UI to offer the pull button rather than an error state.
         : { status: 'not_requested', items: [] },
       condition: ctx.visionAnalysis?.overallCondition ?? null,
+      conditionSummary: ctx.visionAnalysis?.summary ?? null,
       curbAppeal: ctx.subjectCurbAppeal ?? null,
       listingUrl: ctx.subjectListingUrl ?? null,
       listPrice: ctx.subjectListPrice ?? null,

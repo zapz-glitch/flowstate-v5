@@ -112,13 +112,13 @@ export function SubjectGridCard({ subject, isLoading }: SubjectGridCardProps) {
                 <span className="text-foreground-tertiary">Condition</span>
                 <span className={cn(
                   'font-medium truncate ml-2',
-                  subject.curbAppeal?.condition === 'renovated' && 'text-emerald-500',
-                  subject.curbAppeal?.condition === 'dated' && 'text-amber-500',
-                  subject.curbAppeal?.condition === 'distressed' && 'text-red-400',
-                )} title={subject.curbAppeal?.summary ?? subject.condition ?? undefined}>
-                  {subject.curbAppeal && subject.curbAppeal.condition !== 'unknown'
-                    ? subject.curbAppeal.condition === 'renovated' ? 'Renovated' : subject.curbAppeal.condition === 'dated' ? 'Dated' : 'Distressed'
-                    : subject.condition || 'NA'}
+                  subject.condition && subject.condition !== 'NA' && (
+                    /lipstick|light cosmetic/i.test(subject.condition) ? 'text-emerald-500'
+                    : /full cosmetic/i.test(subject.condition) ? 'text-amber-500'
+                    : 'text-red-400'
+                  ),
+                )} title={subject.conditionSummary ?? subject.curbAppeal?.summary ?? undefined}>
+                  {subject.condition || 'NA'}
                 </span>
               </div>
               <div className="flex items-center justify-between text-[11px]">

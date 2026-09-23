@@ -1084,7 +1084,7 @@ function mapRenovationToVision(
     overallCondition: assessment.renovationLevel,
     confidence: assessment.confidence ?? 0,
     estimatedRehabNeeds: assessment.majorObservations.join('; ') || 'See report',
-    summary: `Renovation level ${assessment.renovationLevel} at ${assessment.confidence ?? '?'}% confidence from ${assessment.photosExamined} photos`,
+    summary: assessment.rationale ?? `Renovation level ${assessment.renovationLevel} at ${assessment.confidence ?? '?'}% confidence from ${assessment.photosExamined} photos`,
     interior: {
       condition: interiorParts.length ? interiorParts.join('; ') : 'NA',
       notes: assessment.evidenceForClassification,

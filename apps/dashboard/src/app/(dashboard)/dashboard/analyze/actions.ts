@@ -387,6 +387,8 @@ export interface SubjectData {
   photos?: string[]
   /** Vision-assessed condition/renovation level ('NA' when unverifiable) */
   condition?: string | null
+  /** One-sentence rationale for the assigned renovation level */
+  conditionSummary?: string | null
   /** Curb-appeal condition label from listing photos */
   curbAppeal?: {
     condition: 'renovated' | 'dated' | 'distressed' | 'unknown'

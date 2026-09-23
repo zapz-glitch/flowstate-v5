@@ -128,6 +128,8 @@ export interface RenovationAssessment {
   exteriorCondition: string
   visibleMajorSystemConcerns: string[]
   structuralConcerns: string[]
+  /** One sentence — why this renovation level fits the property best */
+  rationale: string | null
   evidenceForClassification: string[]
   evidenceAgainstMoreSevereLevel: string[]
   evidenceAgainstLessSevereLevel: string[]
@@ -174,6 +176,7 @@ Return ONLY a JSON object:
   "exterior_condition": "same scale",
   "visible_major_system_concerns": ["e.g. aged HVAC, knob-and-tube wiring"],
   "structural_concerns": ["e.g. foundation crack, roof sag"],
+  "rationale": "one sentence — why this renovation level fits the property best",
   "evidence_for_classification": ["why this level fits the whole property"],
   "evidence_against_more_severe_level": ["why NOT the next heavier level"],
   "evidence_against_less_severe_level": ["why NOT the next lighter level"],
@@ -213,6 +216,7 @@ export async function assessRenovationFromPhotos(
     exteriorCondition: 'NA',
     visibleMajorSystemConcerns: [],
     structuralConcerns: [],
+    rationale: null,
     evidenceForClassification: [],
     evidenceAgainstMoreSevereLevel: [],
     evidenceAgainstLessSevereLevel: [],
@@ -326,6 +330,7 @@ export async function assessRenovationFromPhotos(
     exteriorCondition: str(parsed.exterior_condition),
     visibleMajorSystemConcerns: list(parsed.visible_major_system_concerns),
     structuralConcerns: list(parsed.structural_concerns),
+    rationale: typeof parsed.rationale === 'string' && parsed.rationale.trim() ? parsed.rationale.trim() : null,
     evidenceForClassification: list(parsed.evidence_for_classification),
     evidenceAgainstMoreSevereLevel: list(parsed.evidence_against_more_severe_level),
     evidenceAgainstLessSevereLevel: list(parsed.evidence_against_less_severe_level),
