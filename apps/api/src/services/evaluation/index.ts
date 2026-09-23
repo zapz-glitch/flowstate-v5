@@ -609,6 +609,57 @@ export async function performAnalysis(
     }
   }
 
+  // ── Vision + photo persistence — concurrent with the Jev funnel ───────────
+  // Neither feeds comp selection; the renovation level is needed only at
+  // deriveBuybox, so this branch is awaited after Jev completes. The photo
+  // URLs are captured up front so R2 persistence can rewrite them while
+  // vision reads the live CDN links.
+  const visionAndPersist = (async (): Promise<RenovationAssessment | null> => {
+    const subjectPhotos = [...(photoBundle?.subject?.photos ?? [])]
+    const renovationPromise = (async () => {
+      try {
+        return await assessRenovationFromPhotos(env, subjectPhotos, {
+          address: bundle.property.address,
+          squareFeet: bundle.property.squareFeet,
+          yearBuilt: bundle.property.yearBuilt,
+        })
+      } catch { return null }
+    })()
+
+    // ── Persist listing photos into private report storage ────────────────
+    // Copy image bytes to R2 and rewrite CDN URLs to /user/reports/{jobId}/
+    // assets/{id} so saved reports keep working photos indefinitely — listing
+    // CDN links rot or get hotlink-blocked. Non-fatal: failures keep the
+    // original URLs.
+    if (photoBundle && env.REPORT_ASSETS) {
+      const persistPhotos = async (propertyId: string, entry: PropertyPhotos | null) => {
+        if (!entry || entry.photos.length === 0) return
+        try {
+          const src = entry.source
+          const { assets, rejected } = await persistReportAssets(env, jobId, propertyId,
+            entry.photos.map((url) => ({
+              url,
+              kind: 'photo' as const,
+              sourcePageUrl: entry.sourceUrl,
+              source: src === 'zillow' || src === 'redfin' || src === 'realtor' ? src : undefined,
+            })))
+          const dropped = new Set(rejected)
+          const persisted = new Set(assets.map((a) => a.sourceUrl))
+          entry.photos = [...assets.map((a) => a.url), ...entry.photos.filter((u) => !persisted.has(u) && !dropped.has(u))]
+        } catch { /* non-fatal — keep CDN URLs */ }
+      }
+      await Promise.race([
+        Promise.all([
+          persistPhotos(bundle.property.id, photoBundle.subject),
+          ...Object.entries(photoBundle.comps).map(([id, entry]) => persistPhotos(id, entry)),
+        ]),
+        new Promise<void>((resolve) => setTimeout(resolve, 15_000)),
+      ])
+    }
+
+    return renovationPromise
+  })()
+
   // ── Jev comp evaluation — the only selection logic ────────────────────────
   // Test 1 asks Jev's raw-field nouls — bathrooms, squareFeet, lotSize,
   // yearBuilt, salePrice, saleDate — "does this comp match the subject on
@@ -738,52 +789,10 @@ export async function performAnalysis(
   // ── 3. Vision: subject renovation + curb appeal (one merged LLM call) ─────
   // Subject-only — comps are never photo-scraped, so there is no per-comp
   // vision pass. The renovation level drives the rehab tier; the curb-appeal
-  // condition is the subject's detected condition.
+  // condition is the subject's detected condition. Launched alongside the
+  // Jev funnel above — the result is only needed here.
   const compById = new Map(appraisalResult.comparables.map((c) => [c.id, c]))
-  const subjectPhotos = photoBundle?.subject?.photos ?? []
-
-  const renovationResult = await (async () => {
-    try {
-      return await assessRenovationFromPhotos(env, subjectPhotos, {
-        address: bundle.property.address,
-        squareFeet: bundle.property.squareFeet,
-        yearBuilt: bundle.property.yearBuilt,
-      })
-    } catch { return null }
-  })()
-
-  // ── Persist listing photos into private report storage ────────────────────
-  // Copy image bytes to R2 and rewrite CDN URLs to /user/reports/{jobId}/
-  // assets/{id} so saved reports keep working photos indefinitely — listing
-  // CDN links rot or get hotlink-blocked. Runs after vision, which needs the
-  // live CDN URLs. Non-fatal: failures keep the original URLs.
-  if (photoBundle && env.REPORT_ASSETS) {
-    const persistPhotos = async (propertyId: string, entry: PropertyPhotos | null) => {
-      if (!entry || entry.photos.length === 0) return
-      try {
-        const src = entry.source
-        const { assets, rejected } = await persistReportAssets(env, jobId, propertyId,
-          entry.photos.map((url) => ({
-            url,
-            kind: 'photo' as const,
-            sourcePageUrl: entry.sourceUrl,
-            source: src === 'zillow' || src === 'redfin' || src === 'realtor' ? src : undefined,
-          })))
-        const dropped = new Set(rejected)
-        const persisted = new Set(assets.map((a) => a.sourceUrl))
-        entry.photos = [...assets.map((a) => a.url), ...entry.photos.filter((u) => !persisted.has(u) && !dropped.has(u))]
-      } catch { /* non-fatal — keep CDN URLs */ }
-    }
-    await Promise.race([
-      Promise.all([
-        persistPhotos(bundle.property.id, photoBundle.subject),
-        ...Object.entries(photoBundle.comps).map(([id, entry]) => persistPhotos(id, entry)),
-      ]),
-      new Promise<void>((resolve) => setTimeout(resolve, 15_000)),
-    ])
-  }
-
-  const renovation: RenovationAssessment | null = renovationResult
+  const renovation: RenovationAssessment | null = await visionAndPersist
   if (renovation) {
     step(
       'renovation_assessment',
