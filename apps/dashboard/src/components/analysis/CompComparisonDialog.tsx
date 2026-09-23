@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { Check, X, MapPin, ExternalLink } from 'lucide-react'
+import { Check, X, Minus, MapPin, ExternalLink } from 'lucide-react'
 import {
   Dialog,
   DialogContent,
@@ -54,7 +54,8 @@ export function CompComparisonDialog({ open, onOpenChange, subject, comp, isSele
 
   const filters = comp.appraisalRules?.filters ?? []
   const adjustments = comp.appraisalRules?.adjustments ?? []
-  const passedCount = filters.filter((f) => f.passed).length
+  const filterStatus = (f: (typeof filters)[number]) => f.status ?? (f.passed ? 'passed' : 'failed')
+  const passedCount = filters.filter((f) => filterStatus(f) === 'passed').length
   const totalFilters = filters.length
 
   // Per-feature verification vs subject — green/red, gray when unverifiable
@@ -298,16 +299,18 @@ export function CompComparisonDialog({ open, onOpenChange, subject, comp, isSele
                   <span className="text-[10px] text-foreground-tertiary ml-2">{passedCount}/{totalFilters}</span>
                 </div>
                 <div className="divide-y divide-border/20">
-                  {filters.map((f) => (
+                  {filters.map((f) => {
+                    const status = filterStatus(f)
+                    return (
                     <div
                       key={f.type}
-                      className={`flex items-center justify-between px-3 sm:px-4 py-2 ${f.passed ? 'border-l-2 border-l-emerald-500' : 'border-l-2 border-l-red-500 bg-red-500/5'}`}
+                      className={`flex items-center justify-between px-3 sm:px-4 py-2 ${status === 'passed' ? 'border-l-2 border-l-emerald-500' : status === 'failed' ? 'border-l-2 border-l-red-500 bg-red-500/5' : 'border-l-2 border-l-border'}`}
                     >
-                      <span className={`text-[11px] font-medium ${f.passed ? 'text-emerald-500' : 'text-red-500'}`}>
+                      <span className={`text-[11px] font-medium ${status === 'passed' ? 'text-emerald-500' : status === 'failed' ? 'text-red-500' : 'text-foreground-tertiary'}`}>
                         {formatFilterType(f.type)}
                       </span>
                       <div className="flex items-center gap-1">
-                        {f.passed ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <X className="w-3.5 h-3.5 text-red-500" />}
+                        {status === 'passed' ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : status === 'failed' ? <X className="w-3.5 h-3.5 text-red-500" /> : <Minus className="w-3.5 h-3.5 text-foreground-tertiary" />}
                         {f.actualValue != null && f.threshold != null && (
                           <span className="text-[10px] text-foreground-tertiary tabular-nums">
                             ({String(f.actualValue)}/{String(f.threshold)})
@@ -315,7 +318,8 @@ export function CompComparisonDialog({ open, onOpenChange, subject, comp, isSele
                         )}
                       </div>
                     </div>
-                  ))}
+                    )
+                  })}
                 </div>
               </div>
             )}

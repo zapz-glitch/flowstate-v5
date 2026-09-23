@@ -160,6 +160,7 @@ export function recalculateReport(
     filterResults: ev.filterResults.map((f) => ({
       type: f.type as FilterType,
       passed: f.passed,
+      status: f.status,
       reason: f.reason,
       actualValue: f.actualValue,
       threshold: f.threshold,

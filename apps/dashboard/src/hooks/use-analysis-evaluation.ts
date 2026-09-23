@@ -299,6 +299,7 @@ export function useAnalysisEvaluation({
           filters: ev.filterResults.map((f) => ({
             type: f.type,
             passed: f.passed,
+            status: f.status,
             reason: f.reason,
             actualValue: f.actualValue,
             threshold: f.threshold,

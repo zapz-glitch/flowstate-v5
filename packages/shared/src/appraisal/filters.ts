@@ -82,6 +82,7 @@ const evaluators: Record<FilterType, FilterEvaluator> = {
       return {
         type: 'subdivision_match',
         passed: true,
+        status: 'not_verified',
         reason: 'Subdivision data not available',
       }
     }
@@ -101,7 +102,7 @@ const evaluators: Record<FilterType, FilterEvaluator> = {
     const compStyle = comp.construction?.buildingStyle?.toLowerCase().trim()
 
     if (!subjectStyle || !compStyle) {
-      return { type: 'building_style_match', passed: true, reason: 'Building style data not available' }
+      return { type: 'building_style_match', passed: true, status: 'not_verified', reason: 'Building style data not available' }
     }
 
     const passed = subjectStyle === compStyle
@@ -120,7 +121,7 @@ const evaluators: Record<FilterType, FilterEvaluator> = {
     const compFoundation = normalize(comp.construction?.foundationType)
 
     if (!subjectFoundation || !compFoundation) {
-      return { type: 'foundation_match', passed: true, reason: 'Foundation type data not available' }
+      return { type: 'foundation_match', passed: true, status: 'not_verified', reason: 'Foundation type data not available' }
     }
 
     const subjectFam = foundationFamily(subject.construction?.foundationType)
@@ -132,9 +133,13 @@ const evaluators: Record<FilterType, FilterEvaluator> = {
       subjectFam === 'other' ||
       compFam === 'other'
 
+    // A pass that relies on an unclassifiable ('other') foundation isn't verified
+    const unclassifiedPass = passed && subjectFoundation !== compFoundation && (subjectFam === 'other' || compFam === 'other')
+
     return {
       type: 'foundation_match',
       passed,
+      status: passed ? (unclassifiedPass ? 'not_verified' : 'passed') : 'failed',
       reason: passed
         ? subjectFoundation !== compFoundation && subjectFam === compFam
           ? `Foundation family match: "${comp.construction?.foundationType}" vs subject "${subject.construction?.foundationType}"`
@@ -183,6 +188,7 @@ const evaluators: Record<FilterType, FilterEvaluator> = {
       return {
         type: 'sqft_diff',
         passed: true,
+        status: 'not_verified',
         reason: 'Subject sqft not available',
       }
     }
@@ -213,6 +219,7 @@ const evaluators: Record<FilterType, FilterEvaluator> = {
     return {
       type: 'property_type',
       passed: true,
+      status: 'not_verified',
       reason: 'Property type filter not evaluated',
     }
   },
@@ -222,6 +229,7 @@ const evaluators: Record<FilterType, FilterEvaluator> = {
       return {
         type: 'year_built_diff',
         passed: true,
+        status: 'not_verified',
         reason: 'Year built not available',
       }
     }
@@ -247,6 +255,7 @@ const evaluators: Record<FilterType, FilterEvaluator> = {
       return {
         type: 'distance',
         passed: true,
+        status: 'not_verified',
         reason: 'Distance not available',
       }
     }
@@ -265,7 +274,7 @@ const evaluators: Record<FilterType, FilterEvaluator> = {
     const subjLot = subject.lotSizeSquareFeet
     const compLot = comp.lotSizeSquareFeet
     if (subjLot == null || compLot == null) {
-      return { type: 'lot_size_diff', passed: true, reason: 'Lot size data not available' }
+      return { type: 'lot_size_diff', passed: true, status: 'not_verified', reason: 'Lot size data not available' }
     }
     const diff = Math.abs(compLot - subjLot)
     return {
@@ -279,7 +288,7 @@ const evaluators: Record<FilterType, FilterEvaluator> = {
 
   road_barrier(_subject, comp, _filter) {
     if (comp.crossesMajorRoad == null) {
-      return { type: 'road_barrier', passed: true, reason: 'Road-barrier data not available' }
+      return { type: 'road_barrier', passed: true, status: 'not_verified', reason: 'Road-barrier data not available' }
     }
     const passed = comp.crossesMajorRoad === false
     return {
@@ -296,7 +305,7 @@ const evaluators: Record<FilterType, FilterEvaluator> = {
     const s = norm(subject.neighborhoodName)
     const c = norm(comp.neighborhoodName)
     if (!s || !c) {
-      return { type: 'neighborhood_match', passed: true, reason: 'Neighborhood data not available' }
+      return { type: 'neighborhood_match', passed: true, status: 'not_verified', reason: 'Neighborhood data not available' }
     }
     const passed = s === c
     return {
@@ -315,7 +324,7 @@ const evaluators: Record<FilterType, FilterEvaluator> = {
       [norm(subject.construction?.exteriorWalls), norm(comp.construction?.exteriorWalls)],
     ].filter(([s, c]) => s && c)
     if (pairs.length === 0) {
-      return { type: 'construction_material_match', passed: true, reason: 'Construction material data not available' }
+      return { type: 'construction_material_match', passed: true, status: 'not_verified', reason: 'Construction material data not available' }
     }
     const passed = pairs.every(([s, c]) => s === c)
     return {
@@ -331,7 +340,7 @@ const evaluators: Record<FilterType, FilterEvaluator> = {
     const sHas = (subject.features?.poolType?.length ?? 0) > 0
     const cHas = (comp.features?.poolType?.length ?? 0) > 0
     if (subject.features?.poolType == null || comp.features?.poolType == null) {
-      return { type: 'pool_match', passed: true, reason: 'Pool data not available' }
+      return { type: 'pool_match', passed: true, status: 'not_verified', reason: 'Pool data not available' }
     }
     const passed = sHas === cHas
     return {
@@ -351,7 +360,7 @@ const evaluators: Record<FilterType, FilterEvaluator> = {
     const hasData = (p: PropertyLike) =>
       p.features != null && (p.features.garageType != null || p.features.garageSquareFeet != null || p.features.carportType != null)
     if (!hasData(subject) || !hasData(comp)) {
-      return { type: 'garage_match', passed: true, reason: 'Garage/carport data not available' }
+      return { type: 'garage_match', passed: true, status: 'not_verified', reason: 'Garage/carport data not available' }
     }
     const sHas = covered(subject)
     const cHas = covered(comp)
@@ -367,7 +376,7 @@ const evaluators: Record<FilterType, FilterEvaluator> = {
 
   stories_match(subject, comp, _filter) {
     if (subject.stories == null || comp.stories == null) {
-      return { type: 'stories_match', passed: true, reason: 'Story count not available' }
+      return { type: 'stories_match', passed: true, status: 'not_verified', reason: 'Story count not available' }
     }
     // Half-story tolerance: 1.5-story comps are compatible with both 1 and 2
     const passed = Math.abs(subject.stories - comp.stories) <= 0.5
@@ -385,7 +394,7 @@ const evaluators: Record<FilterType, FilterEvaluator> = {
     const s = norm(subject.construction?.roofCover)
     const c = norm(comp.construction?.roofCover)
     if (!s || !c) {
-      return { type: 'roof_material_match', passed: true, reason: 'Roof material data not available' }
+      return { type: 'roof_material_match', passed: true, status: 'not_verified', reason: 'Roof material data not available' }
     }
     const passed = s === c
     return {
@@ -405,7 +414,7 @@ const evaluators: Record<FilterType, FilterEvaluator> = {
     const s = tier(subject.buildingCondition)
     const c = tier(comp.buildingCondition)
     if (s == null || c == null) {
-      return { type: 'condition_match', passed: true, reason: 'Assessor condition data not available' }
+      return { type: 'condition_match', passed: true, status: 'not_verified', reason: 'Assessor condition data not available' }
     }
     const passed = c >= s
     return {
@@ -427,7 +436,7 @@ export function evaluateFilter(
 ): FilterResult {
   const evaluator = evaluators[filter.type]
   if (!evaluator) {
-    return { type: filter.type, passed: true, reason: `Unknown filter type: ${filter.type}` }
+    return { type: filter.type, passed: true, status: 'not_verified', reason: `Unknown filter type: ${filter.type}` }
   }
   return evaluator(subject, comp, filter)
 }

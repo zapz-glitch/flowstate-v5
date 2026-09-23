@@ -44,6 +44,8 @@ export interface AppraisalFilter {
 export interface FilterResult {
   type: FilterType
   passed: boolean
+  /** 'passed' | 'failed' | 'not_verified' — distinguishes a real pass/fail from missing data */
+  status?: 'passed' | 'failed' | 'not_verified'
   reason?: string
   actualValue?: number | string | null
   threshold?: number | string | null

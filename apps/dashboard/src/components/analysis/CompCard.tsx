@@ -331,25 +331,33 @@ export function CompCard({
               <div className="space-y-1.5">
                 <div className="text-caption-sm text-foreground-tertiary">Filters Applied</div>
                 <div className="grid gap-1.5">
-                  {comp.appraisalRules.filters.map((filter, i) => (
-                    <div
-                      key={i}
-                      className={cn(
-                        'text-caption-sm px-2.5 py-1.5 rounded-lg flex items-center justify-between',
-                        filter.passed ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400' : 'bg-red-500/10 text-red-700 dark:text-red-400'
-                      )}
-                    >
-                      <span className="font-medium">{formatFilterType(filter.type)}</span>
-                      <span>
-                        {filter.passed ? '✓' : '✗'}
-                        {filter.actualValue != null && (
-                          <span className="ml-1 opacity-70">
-                            ({String(filter.actualValue)}{filter.threshold ? ` / ${filter.threshold}` : ''})
-                          </span>
+                  {comp.appraisalRules.filters.map((filter, i) => {
+                    const status = filter.status ?? (filter.passed ? 'passed' : 'failed')
+                    return (
+                      <div
+                        key={i}
+                        className={cn(
+                          'text-caption-sm px-2.5 py-1.5 rounded-lg flex items-center justify-between',
+                          status === 'passed'
+                            ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'
+                            : status === 'failed'
+                              ? 'bg-red-500/10 text-red-700 dark:text-red-400'
+                              : 'bg-muted/50 text-foreground-tertiary'
                         )}
-                      </span>
-                    </div>
-                  ))}
+                      >
+                        <span className="font-medium">{formatFilterType(filter.type)}</span>
+                        <span>
+                          {status === 'passed' ? '✓' : status === 'failed' ? '✗' : '—'}
+                          {status === 'not_verified' && <span className="ml-1 opacity-70">unverified</span>}
+                          {filter.actualValue != null && (
+                            <span className="ml-1 opacity-70">
+                              ({String(filter.actualValue)}{filter.threshold ? ` / ${filter.threshold}` : ''})
+                            </span>
+                          )}
+                        </span>
+                      </div>
+                    )
+                  })}
                 </div>
               </div>
               {comp.appraisalRules.adjustments.length > 0 && (
