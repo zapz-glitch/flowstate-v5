@@ -47,7 +47,7 @@ import {
 
 import { persistReportAssets } from '../report-assets'
 import { expansionRefetchRadius } from '../property-api/retrieval-policy'
-import { assessRenovationFromPhotos, type RenovationAssessment, type CurbAppealCheck } from '../vision/renovation'
+import { assessRenovationFromPhotos, unavailableAssessment, type RenovationAssessment, type CurbAppealCheck } from '../vision/renovation'
 import { PROXIMITY_DEFAULTS } from '../../routes/proximity-config'
 import { deriveBuybox } from './derivation'
 import { buildEvaluationReport } from './report'
@@ -627,16 +627,24 @@ export async function performAnalysis(
   // deriveBuybox, so this branch is awaited after Jev completes. The photo
   // URLs are captured up front so R2 persistence can rewrite them while
   // vision reads the live CDN links.
-  const visionAndPersist = (async (): Promise<RenovationAssessment | null> => {
+  const visionAndPersist = (async (): Promise<RenovationAssessment> => {
     const subjectPhotos = [...(photoBundle?.subject?.photos ?? [])]
-    const renovationPromise = (async () => {
+    // The subject condition fetch is required for eval completion — a thrown
+    // error still resolves as an explicit 'unavailable' verdict so the run
+    // records the outcome instead of silently completing without it.
+    const renovationPromise = (async (): Promise<RenovationAssessment> => {
       try {
         return await assessRenovationFromPhotos(env, subjectPhotos, {
           address: bundle.property.address,
           squareFeet: bundle.property.squareFeet,
           yearBuilt: bundle.property.yearBuilt,
         })
-      } catch { return null }
+      } catch (e) {
+        return unavailableAssessment({
+          error: e instanceof Error ? e.message : 'Vision assessment failed',
+          limitations: ['Assessment call threw — no level invented'],
+        })
+      }
     })()
 
     // ── Persist listing photos into private report storage ────────────────
@@ -808,27 +816,25 @@ export async function performAnalysis(
   // condition is the subject's detected condition. Launched alongside the
   // Jev funnel above — the result is only needed here.
   const compById = new Map(appraisalResult.comparables.map((c) => [c.id, c]))
-  const renovation: RenovationAssessment | null = await visionAndPersist
-  if (renovation) {
-    step(
-      'renovation_assessment',
-      renovation.renovationLevelIndex != null ? 'completed' : 'fallback',
-      renovation.renovationLevel != null
-        ? `${renovation.renovationLevel} @ ${renovation.confidence ?? '?'}% (${renovation.photosExamined} photos)`
-        : renovation.status
-    )
-    if (renovation.status !== 'ok' && renovation.status !== 'insufficient_photo_evidence') {
-      fallbacksUsed.push(`vision:${renovation.status}`)
-    }
-  } else {
-    step('renovation_assessment', 'fallback', 'vision call failed')
-    fallbacksUsed.push('vision:error')
+  // Required step — the fetch always resolves a verdict object. Non-ok
+  // statuses are recorded in fallbacksUsed so the report exposes that the
+  // subject condition could not be verified from photos.
+  const renovation: RenovationAssessment = await visionAndPersist
+  step(
+    'renovation_assessment',
+    renovation.renovationLevelIndex != null ? 'completed' : 'fallback',
+    renovation.renovationLevelIndex != null
+      ? `${renovation.renovationLevel} @ ${renovation.confidence ?? '?'}% (${renovation.photosExamined} photos)`
+      : `condition fetch completed — ${renovation.status}${renovation.error ? ` (${renovation.error})` : ''}`
+  )
+  if (renovation.status !== 'ok') {
+    fallbacksUsed.push(`vision:${renovation.status}`)
   }
   onProgress?.('Renovation level assessed')
 
   // Subject curb appeal comes from the merged vision pass (one LLM call for
   // both renovation level + curb-appeal condition).
-  const subjectCurbAppeal: CurbAppealCheck | null = renovation?.curbAppeal ?? null
+  const subjectCurbAppeal: CurbAppealCheck | null = renovation.curbAppeal ?? null
 
   // ── ARV condition evidence ────────────────────────────────────────────────
   // Product spec: the rules already picked the comps — condition verification
@@ -902,8 +908,8 @@ export async function performAnalysis(
   const derivedBuybox = deriveBuybox(bundle.property, undefined, params.buybox, {
     permits: bundle.enrichment.permits?.items,
     majorItemConfig,
-    visionLevelIndex: renovation?.renovationLevelIndex ?? null,
-    visionConfidence: renovation?.confidence ?? null,
+    visionLevelIndex: renovation.renovationLevelIndex,
+    visionConfidence: renovation.confidence,
     visionRenovated: subjectCurbAppeal?.condition === 'renovated',
   })
   step(

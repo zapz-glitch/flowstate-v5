@@ -44,18 +44,40 @@ to complete — on both entry paths:**
 - Regular searches (dashboard `/v1/analyze` via session)
 - API searches (`/v1/analyze` via API key)
 
-**Current state:** the subject condition fetch is *best-effort*, not
-required. `assessRenovationFromPhotos` runs only when `subjectPhotos`
-exist and its failure is swallowed to `null` — the eval completes with
-`visionAssessment: null` and nothing flags the gap
-(`services/evaluation/index.ts` ~L630).
+**Implemented (feat/subject-condition-required):** the condition fetch
+is now a required, always-resolving step. The subject photo scrape
+(Firecrawl/Zillow, subject-only) already runs unconditionally in the
+analysis job's `Promise.all` for both entry paths. The vision branch
+runs **in parallel with the Jev/ARV funnel** (launched before Jev,
+awaited before the response builds) and now always resolves a
+`RenovationAssessment` verdict — a thrown provider error resolves as
+explicit `'unavailable'` via `unavailableAssessment()`, never silent
+`null`.
 
-**Open spec questions when implemented:**
-- If the photo fetch itself yields no images (unlisted property, new
-  construction), does the run fail, flag `humanHandoff`, or proceed
-  marked "condition unverifiable"? ("Complete" presumably means the
-  fetch+assessment ran and produced a verdict or an explicit
-  unverifiable state — not silent skip.)
+Verdict outcomes:
+
+- `ok` → `renovationLevelIndex` picked by `deriveBuybox` (precedence:
+  manual override → vision → classification → default) —
+  `renovationLevelSource: 'vision'`.
+- `needs_review` / `insufficient_photo_evidence` / `unavailable` →
+  recorded in `fallbacksUsed` as `vision:<status>`, the
+  `renovation_assessment` step names the status, and the report's
+  `subjectConditionVerified` gate flips `requiresHumanReview` (a run
+  without verified subject condition can never grade 'high').
+
+The rehab levels vision picks from (`RENOVATION_LEVEL_DEFINITIONS` in
+`services/vision/renovation.ts`, injected into the prompt):
+
+- 0 Lipstick — paint, touch-ups, cleaning, small fixture/hardware,
+  basic curb appeal.
+- 1 Light Cosmetic — paint, flooring, fixtures, minor kitchen/bath,
+  small repairs, no major systems.
+- 2 Full Cosmetic — full visual renovation, no major structural work.
+- 3 Heavy Rehab — cosmetic + meaningful systems work (roof, HVAC,
+  plumbing, electrical, windows, foundation).
+- 4 Full Gut — stripped/rebuilt, major reconstruction.
+
+**Still open:**
 - Does the subject condition feed comp selection (style/condition
   matching in test 2) or only the report/buybox as today?
 

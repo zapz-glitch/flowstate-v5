@@ -191,18 +191,13 @@ For curb_appeal_condition: renovated = modern finishes/move-in ready, dated = li
 // ─── Assessment ───────────────────────────────────────────────────────────────
 
 /**
- * Assess the subject property's renovation level from listing photos.
- * Never invents a level on bad/missing evidence.
+ * The 'unavailable' baseline — every non-ok outcome shares this shape so the
+ * evaluation pipeline always resolves a full assessment object (the subject
+ * condition fetch is required for eval completion; a thrown provider error
+ * still surfaces as an explicit 'unavailable' verdict, never silent null).
  */
-export async function assessRenovationFromPhotos(
-  env: RenovationEnv,
-  photoUrls: string[],
-  propertyContext?: { address?: string; squareFeet?: number | null; yearBuilt?: number | null },
-  providerOverride?: { name: string; model: string; execute: (req: any) => Promise<any> }
-): Promise<RenovationAssessment> {
-  // Interior condition is 'NA' whenever it cannot be verified — never null,
-  // never invented
-  const base: RenovationAssessment = {
+export function unavailableAssessment(overrides?: Partial<RenovationAssessment>): RenovationAssessment {
+  return {
     status: 'unavailable',
     renovationLevelIndex: null,
     renovationLevel: 'NA',
@@ -223,7 +218,23 @@ export async function assessRenovationFromPhotos(
     limitations: [],
     provider: null,
     model: null,
+    ...overrides,
   }
+}
+
+/**
+ * Assess the subject property's renovation level from listing photos.
+ * Never invents a level on bad/missing evidence.
+ */
+export async function assessRenovationFromPhotos(
+  env: RenovationEnv,
+  photoUrls: string[],
+  propertyContext?: { address?: string; squareFeet?: number | null; yearBuilt?: number | null },
+  providerOverride?: { name: string; model: string; execute: (req: any) => Promise<any> }
+): Promise<RenovationAssessment> {
+  // Interior condition is 'NA' whenever it cannot be verified — never null,
+  // never invented
+  const base = unavailableAssessment()
 
   // Deduplicate identical listing photos — duplicates carry no evidence
   const uniquePhotos = [...new Set(photoUrls.filter(Boolean))]
