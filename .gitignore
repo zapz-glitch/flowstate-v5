@@ -45,3 +45,4 @@ npm-debug.log*
 coverage/
 .data/
 .dev.vars.*
+e2e/artifacts/

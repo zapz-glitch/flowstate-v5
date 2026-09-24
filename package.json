@@ -16,7 +16,8 @@
     "typecheck": "turbo typecheck",
     "db:generate": "turbo db:generate",
     "db:migrate:local": "turbo db:migrate:local",
-    "db:migrate:remote": "turbo db:migrate:remote"
+    "db:migrate:remote": "turbo db:migrate:remote",
+    "test:e2e": "node scripts/e2e-analyze.mjs"
   },
   "devDependencies": {
     "eslint": "10.10.0",
