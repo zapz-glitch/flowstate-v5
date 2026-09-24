@@ -41,7 +41,6 @@ export function CompGridCard({
   // the raw-data screen score. poolRank 1 = closest to the rule truth.
   const jevScore = comp.jevHybrid?.score ?? null
   const isTopMatch = comp.jevHybrid?.poolRank === 1
-  const bucket = comp.jevHybrid?.selected ?? comp.compGroup ?? null
 
   const sqftDelta = comp.squareFeet != null && subject?.squareFeet != null
     ? comp.squareFeet - subject.squareFeet : null
@@ -139,21 +138,7 @@ export function CompGridCard({
               TOP
             </div>
           )}
-          {bucket && (
-            <div
-              className={cn(
-                'h-6 px-1.5 rounded-sm flex items-center text-[10px] font-bold',
-                bucket === 'core' || bucket === 'arv' ? 'bg-emerald-600 text-white' : 'bg-amber-600 text-white'
-              )}
-              title={bucket === 'core' || bucket === 'arv'
-                ? 'Passed both Jev tests — in the core comp set, counts toward the ARV'
-                : bucket === 'fill'
-                  ? 'Passed test 1 but failed test 2 — filled the core set on distance score'
-                  : 'Not in the core comp set'}
-            >
-              {bucket === 'core' ? 'CORE' : bucket === 'fill' ? 'FILL' : bucket === 'arv' ? 'ARV' : 'AS-IS'}
-            </div>
-          )}
+
           {comp.flip && (
             <div
               className="h-6 px-1.5 rounded-sm flex items-center text-[10px] font-bold bg-violet-500/90 text-white"
