@@ -56,7 +56,7 @@ export interface UseAnalysisEvaluationReturn {
   isRecalculated: boolean
 
   // Sticky bar
-  valuationCardRef: React.RefObject<HTMLDivElement>
+  valuationCardRef: React.RefObject<HTMLDivElement | null>
   showStickyBar: boolean
 
   // Settings panel
