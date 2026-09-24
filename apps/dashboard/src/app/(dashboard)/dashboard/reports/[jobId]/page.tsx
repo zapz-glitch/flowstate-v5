@@ -33,6 +33,7 @@ import { DownloadReportButton } from '@/components/report/DownloadReportButton'
 import { AnalysisPageLayout } from '@/components/analysis/AnalysisPageLayout'
 import type { AnalyzeData, CompItem } from '@/components/analysis'
 import { queueAnalysis, type AnalyzeData as ActionAnalyzeData } from '@/app/(dashboard)/dashboard/analyze/actions'
+import { reloadForStaleAction } from '@/lib/server-action'
 import { useMapInteraction } from '@/hooks/use-map-interaction'
 import { useEvaluationSync } from '@/hooks/use-evaluation-sync'
 import { useEnrichmentSSE, type EnrichmentEvent } from '@/hooks/use-enrichment-sse'
@@ -376,6 +377,7 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
         setRefreshing(false)
       }
     } catch (err) {
+      if (reloadForStaleAction(err)) return
       setRefreshResult({ type: 'error', message: err instanceof Error ? err.message : 'Refresh failed' })
       setTimeout(() => setRefreshResult(null), 5000)
       setRefreshing(false)

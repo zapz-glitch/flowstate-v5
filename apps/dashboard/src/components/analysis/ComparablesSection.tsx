@@ -22,6 +22,7 @@ import { RuleMatchDetails } from './RuleMatchDetails'
 import { generateCompFeedbackReport, type FeedbackContext, type FeedbackKind } from '@/lib/comp-feedback'
 import { submitReportFeedback } from '@/app/(dashboard)/dashboard/batch/actions'
 import { assignCompTier } from '@/app/(dashboard)/dashboard/analyze/actions'
+import { reloadForStaleAction } from '@/lib/server-action'
 import { SendToCdarvButton } from '@/components/SendToCdarvButton'
 import { CdarvStatusChip } from './CdarvStatusChip'
 
@@ -290,7 +291,8 @@ export function ComparablesSection({
           setNotifySubmitting(null)
           return
         }
-      } catch {
+      } catch (err) {
+        if (reloadForStaleAction(err)) return
         setNotifySaveError('Submission failed')
         setNotifySubmitting(null)
         return

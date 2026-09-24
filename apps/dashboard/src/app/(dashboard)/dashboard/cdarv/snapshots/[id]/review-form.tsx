@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import {
   openReview, saveCompLabels, decideReview, scoreSnapshot,
 } from '../../actions'
+import { reloadForStaleAction } from '@/lib/server-action'
 
 const LABEL_OPTIONS = [
   { value: 'strong_arv', label: 'Strong ARV comp' },
@@ -39,9 +40,13 @@ export function ReviewForm({
 
   const run = (fn: () => Promise<{ ok: boolean; message?: string; id?: string }>) =>
     startTransition(async () => {
-      const r = await fn()
-      setMessage(r.message ?? (r.ok ? 'Done' : 'Failed'))
-      if (r.id) setReviewId(r.id)
+      try {
+        const r = await fn()
+        setMessage(r.message ?? (r.ok ? 'Done' : 'Failed'))
+        if (r.id) setReviewId(r.id)
+      } catch (err) {
+        if (!reloadForStaleAction(err)) setMessage('Failed')
+      }
     })
 
   const reviewable = snapshotStatus !== 'excluded'

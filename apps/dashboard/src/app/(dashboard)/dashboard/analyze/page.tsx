@@ -22,6 +22,7 @@ import { AddressAutocomplete } from '@/components/AddressAutocomplete'
 import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
 import { queueAnalysis, type AnalyzeData } from './actions'
+import { reloadForStaleAction } from '@/lib/server-action'
 import { getArvThreshold, getLatestReport, getReportsByProperty, getSavedReport, runCompSelection, type ExistingReport } from '@/lib/client-api'
 import { useAutoSave } from '@/hooks/use-auto-save'
 // cn is used in the outer wrapper
@@ -613,6 +614,7 @@ export default function AnalyzePage() {
         }
       }
     } catch (err) {
+      if (reloadForStaleAction(err)) return
       setPhase('idle')
       setError(err instanceof Error ? err.message : 'Failed to start analysis')
     }

@@ -20,6 +20,7 @@ const sourceSerif = localFont({
 })
 import { ThemeProvider } from '@/components/theme-provider'
 import { ServiceWorkerRegistrar } from '@/components/ServiceWorkerRegistrar'
+import { StaleActionGuard } from '@/components/StaleActionGuard'
 import './globals.css'
 
 export const viewport: Viewport = {
@@ -67,6 +68,7 @@ export default function RootLayout({
           {children}
         </ThemeProvider>
         <ServiceWorkerRegistrar />
+        <StaleActionGuard />
       </body>
     </html>
   )

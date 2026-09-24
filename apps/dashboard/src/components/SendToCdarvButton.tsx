@@ -12,6 +12,7 @@ import {
   DialogDescription,
 } from '@/components/ui/dialog'
 import { submitReportsToCdarv } from '@/app/(dashboard)/dashboard/cdarv/actions'
+import { reloadForStaleAction } from '@/lib/server-action'
 
 /**
  * Send this report to the CDARV review queue. The snapshot carries the
@@ -33,13 +34,17 @@ export function SendToCdarvButton({
 
   const confirm = () =>
     startTransition(async () => {
-      const r = await submitReportsToCdarv([jobId])
-      setOpen(false)
-      if (r.ok) {
-        setSent(true)
-        toast.success(r.message ?? 'Sent to CDARV')
-      } else {
-        toast.error(r.message ?? 'CDARV submission failed')
+      try {
+        const r = await submitReportsToCdarv([jobId])
+        setOpen(false)
+        if (r.ok) {
+          setSent(true)
+          toast.success(r.message ?? 'Sent to CDARV')
+        } else {
+          toast.error(r.message ?? 'CDARV submission failed')
+        }
+      } catch (err) {
+        if (!reloadForStaleAction(err)) toast.error('CDARV submission failed')
       }
     })
 
