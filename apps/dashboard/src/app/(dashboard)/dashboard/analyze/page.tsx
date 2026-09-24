@@ -4,8 +4,8 @@ import { isValidCoordinate } from '@/lib/property-map-geometry'
 
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import dynamic from 'next/dynamic'
-import { useSetAtom } from 'jotai'
-import { activeAnalysisAtom, analysisResultAtom, analysisStateAtom } from '@/atoms/analysis'
+import { useAtomValue, useSetAtom } from 'jotai'
+import { activeAnalysisAtom, analysisResultAtom, analysisStateAtom, evalProgressAtom } from '@/atoms/analysis'
 import { initialAnalysisState } from '@/types/analysis'
 import {
   Search,
@@ -72,6 +72,12 @@ const FRIENDLY_LABELS: Record<AnalysisStep, string> = {
 function getStatusLabel(step: AnalysisStep | null): string {
   if (!step) return 'Starting analysis'
   return FRIENDLY_LABELS[step] ?? 'Processing'
+}
+
+/** Reads evalProgressAtom — SSE ticks re-render this leaf, not the whole page. */
+function EvalProgressLabel() {
+  const evalProgress = useAtomValue(evalProgressAtom)
+  return <>{evalProgress ?? 'Evaluating comparables...'}</>
 }
 
 function TypewriterText({ text, typeSpeed = 30 }: { text: string; typeSpeed?: number }) {
@@ -163,7 +169,8 @@ export default function AnalyzePage() {
   const [phase, setPhase] = useState<AnalysisPhase>(analysisResult ? 'ready' : 'idle')
   const [aiAnalyzing, setAiAnalyzing] = useState(false)
   const [streamingStep, setStreamingStep] = useState<'idle' | 'searching' | 'subject' | 'comps' | 'evaluating' | 'done'>('idle')
-  const [evalProgress, setEvalProgress] = useState<string | null>(null)
+  // Atom, not useState — eval_progress SSE ticks re-render only the label leaf.
+  const setEvalProgress = useSetAtom(evalProgressAtom)
   const [enrichmentStreamUrl, setEnrichmentStreamUrl] = useState<string | null>(null)
   const [enrichmentToken, setEnrichmentToken] = useState<string | null>(null)
 
@@ -903,7 +910,7 @@ export default function AnalyzePage() {
             streamingStep === 'searching' ? 'Searching property...'
             : streamingStep === 'subject' ? 'Loading comparables...'
             : streamingStep === 'comps' ? 'Enriching comp details...'
-            : streamingStep === 'evaluating' ? (evalProgress ?? 'Evaluating comparables...')
+            : streamingStep === 'evaluating' ? <EvalProgressLabel />
             : null
           }
           footer={

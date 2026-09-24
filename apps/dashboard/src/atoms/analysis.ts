@@ -28,6 +28,8 @@ export const activeAnalysisAtom = atom<ActiveAnalysis | null>(null)
 export const analysisResultAtom = atom<AnalyzeData | null>(null)
 export const analysisStateAtom = atom<AnalysisState>(initialAnalysisState)
 export const analysisActionsAtom = atom<AnalysisActions>(noopActions)
+/** Per-tick eval progress label — atom so SSE ticks re-render only the label, not the page */
+export const evalProgressAtom = atom<string | null>(null)
 
 // ─── Derived Atoms (read-only) ──────────────────────────────────────────────
 
