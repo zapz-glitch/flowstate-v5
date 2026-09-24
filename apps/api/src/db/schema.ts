@@ -201,6 +201,28 @@ export const savedReports = sqliteTable(
 // Report History (modification tracking)
 // ==========================================
 
+// Manual comp tier assignments — a reviewer pins a comparable to 'arv' or
+// 'as_is' on the comp card or report. Keyed by (job_id, comp_id) so the
+// override survives cache hits and saved reports; Jev's automatic
+// classification stays alongside it.
+export const compTierOverrides = sqliteTable(
+  'comp_tier_overrides',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    jobId: text('job_id').notNull(),
+    compId: text('comp_id').notNull(),
+    tier: text('tier').notNull(), // 'arv' | 'as_is'
+    createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
+    updatedAt: text('updated_at').notNull().$defaultFn(() => new Date().toISOString()),
+  },
+  (table) => [
+    index('idx_comp_tier_overrides_job').on(table.jobId),
+  ]
+)
+
 export const reportHistory = sqliteTable(
   'report_history',
   {

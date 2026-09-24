@@ -17,6 +17,10 @@ export interface CompGridCardProps {
   subject?: SubjectData | null
   isSelectedForArv?: boolean
   onToggleArv?: () => void
+  /** Pin this comp to a tier — 'arv' | 'as_is' | null clears. Present only when a jobId is available (Property Search). */
+  onAssignTier?: (tier: 'arv' | 'as_is' | null) => void
+  /** A tier assignment is in flight */
+  tierPending?: boolean
   onClick?: () => void
   onHover?: (hovering: boolean) => void
   isHighlighted?: boolean
@@ -29,6 +33,8 @@ export function CompGridCard({
   subject,
   isSelectedForArv,
   onToggleArv,
+  onAssignTier,
+  tierPending,
   onClick,
   onHover,
   isHighlighted,
@@ -147,6 +153,17 @@ export function CompGridCard({
               FLIP
             </div>
           )}
+          {comp.userTier && (
+            <div
+              className={cn(
+                'h-6 px-1.5 rounded-sm flex items-center text-[10px] font-bold',
+                comp.userTier === 'arv' ? 'bg-emerald-500/90 text-white' : 'bg-amber-500/90 text-white'
+              )}
+              title={`You pinned this comp as ${comp.userTier === 'arv' ? 'ARV' : 'as-is'} — Jev classified it ${comp.jevHybrid?.priceTier === 'arv' ? 'ARV' : comp.jevHybrid?.priceTier === 'as_is' ? 'as-is' : 'unclassified'}`}
+            >
+              {comp.userTier === 'arv' ? 'ARV' : 'AS-IS'}·YOU
+            </div>
+          )}
         </div>
         {/* Bottom: price + date */}
         <div className="absolute bottom-0 left-0 right-0 px-2 py-1.5 bg-gradient-to-t from-black/70 to-transparent flex items-end justify-between pointer-events-none">
@@ -239,6 +256,40 @@ export function CompGridCard({
             <span className="text-[10px] font-medium text-emerald-500 tabular-nums ml-auto">Adj ${comp.adjustedPrice.toLocaleString()}</span>
           )}
         </div>
+
+        {/* Manual tier pin — reviewer's call, rides alongside Jev's */}
+        {onAssignTier && (
+          <div
+            className="flex items-center gap-1 mt-1.5"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {(['arv', 'as_is'] as const).map((tier) => {
+              const active = comp.userTier === tier
+              return (
+                <button
+                  key={tier}
+                  type="button"
+                  disabled={tierPending}
+                  onClick={() => onAssignTier(active ? null : tier)}
+                  title={active ? 'Clear your pin' : `Pin as ${tier === 'arv' ? 'ARV' : 'as-is'}${comp.id ? ` — comp ${comp.id}` : ''}`}
+                  className={cn(
+                    'h-5 px-1.5 rounded text-[9px] font-bold transition-colors disabled:opacity-50',
+                    active
+                      ? tier === 'arv' ? 'bg-emerald-500 text-white' : 'bg-amber-500 text-white'
+                      : 'bg-foreground/8 text-foreground-tertiary hover:bg-foreground/15'
+                  )}
+                >
+                  {tier === 'arv' ? 'ARV' : 'AS-IS'}
+                </button>
+              )
+            })}
+            {comp.id && (
+              <span className="text-[8px] text-foreground-tertiary tabular-nums ml-auto" title="Provider comp ID">
+                #{comp.id}
+              </span>
+            )}
+          </div>
+        )}
 
         <RuleMatchDetails comp={comp} />
 

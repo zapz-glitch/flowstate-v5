@@ -133,7 +133,7 @@ function TestedCompRow({ comp, role, questionSet }: { comp: CompItem | undefined
                   {t1.score != null && (
                     <div className="flex items-baseline justify-between gap-2 text-[10px] tabular-nums pt-0.5">
                       <span className="text-foreground-tertiary">Test-1 score</span>
-                      <span className="text-foreground-secondary">{t1.score}/100 · proximity + match strength</span>
+                      <span className="text-foreground-secondary">{t1.score}/100 · proximity — picks the enrich cohort</span>
                     </div>
                   )}
                   <p className="text-[9px] text-foreground-tertiary/70">
@@ -160,8 +160,16 @@ function TestedCompRow({ comp, role, questionSet }: { comp: CompItem | undefined
                       </div>
                     )
                   })}
+                  {h.crossesMajorRoad != null && (
+                    <div className="flex items-baseline justify-between gap-2 text-[10px] tabular-nums">
+                      <span className="text-foreground-tertiary">Major-road barrier</span>
+                      <span className={h.crossesMajorRoad ? 'text-amber-500' : 'text-foreground-secondary'}>
+                        {h.crossesMajorRoad ? 'crosses a tract boundary — likely across a major road' : 'same tract as subject'}
+                      </span>
+                    </div>
+                  )}
                   <p className="text-[9px] text-foreground-tertiary/70">
-                    subdivision yes, else neighborhood yes → passed test 2 · matched characteristics lift a pass 90 → 100
+                    subdivision yes, else neighborhood yes → passed test 2 · fresh score — subdivision + same tract 95–100, hood-only or road crossing 90–95 (distance-led) · style/material/foundation lift the score, missing data penalizes
                   </p>
                   <div className="flex items-baseline justify-between gap-2 text-[10px] tabular-nums pt-0.5">
                     <span className="text-foreground-tertiary">Test-2 score</span>
@@ -242,10 +250,10 @@ export function EvaluationProcessAudit({
       {open && <div className="space-y-2 mt-2">
       <ol className="list-decimal pl-4 space-y-0.5 text-[10px] text-foreground-tertiary">
         <li>Every comp with a usable sale price and date is eligible — nothing else is pre-filtered.</li>
-        <li>{`Test 1 — Jev asks one question per raw field (square feet, lot size, year built, sale price, sale date): does the comp match the subject per the appraisal rules? Every passer gets a score — proximity to the subject plus field-match strength.`}</li>
-        <li>The ten highest-scoring test-1 passers get enriched with full property detail (subdivision, neighborhood, style, construction materials, foundation, features, transaction).</li>
-        <li>Test 2 — on the enriched data: a subdivision match passes; if subdivision fails, a neighborhood match still passes. Both no → test 2 fail. Physical character, construction material, and foundation matches are preferred — they lift a pass from 90 toward 100.</li>
-        <li>Passing test 2 means the comp matched the rules — not that it is an ARV comp. The passers split by adjusted price: the top 15% become the ARV comps, the rest are the as-is market reference. A test-1 or test-2 fail can never be selected — there is no fill.</li>
+        <li>{`Test 1 — Jev asks one question per raw field (square feet, lot size, year built, sale price, sale date): does the comp match the subject per the appraisal rules? Every passer scores 90–100 on pure proximity — the score only picks what to enrich.`}</li>
+        <li>The ten highest-scoring test-1 passers — the ten nearest — get enriched with full property detail (subdivision, neighborhood, style, construction materials, foundation, census tract, features, transaction).</li>
+        <li>Test 2 — on the enriched data: a subdivision match passes; if subdivision fails, a neighborhood match still passes. Both no → test 2 fail. Style, material, and foundation are preferred — missing data penalizes, never fails. Passers rescore fresh: subdivision match on the same side of major roads (same census tract) scores 95–100; neighborhood-only or a road crossing lands 90–95 with distance leading.</li>
+        <li>Passing test 2 means the comp matched the rules — not that it is an ARV comp. The passers split by adjusted price: the top 10% become the ARV comps, the rest are the as-is market reference. A test-1 or test-2 fail can never be selected — there is no fill.</li>
         <li>Zero test-2 passers → human handoff: the run is flagged for manual review instead of standing in unexamined comps.</li>
         <li>ARV averages the ARV comps’ adjusted prices.</li>
       </ol>

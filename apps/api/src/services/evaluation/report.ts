@@ -474,5 +474,16 @@ export function buildEvaluationReport(input: BuildReportInput): EvaluationReport
     confidenceReasons: [...confidence.reasons, ...derivedBuybox.notes],
     requiresHumanReview: confidence.requiresHumanReview,
     humanHandoff: input.jev?.humanHandoff === true,
+    // The Jev funnel record — which comps drove ARV, the stage counts, the
+    // handoff flag. Reviewer tier pins are merged in at read time.
+    jev: input.jev
+      ? {
+          selected: input.jev.selected,
+          counts: input.jev.counts,
+          humanHandoff: input.jev.humanHandoff,
+          asIsCompIds: input.jev.asIsCompIds,
+          topCompId: input.jev.topCompId,
+        }
+      : null,
   }
 }

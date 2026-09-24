@@ -99,6 +99,61 @@ function validate(result) {
   check('every ARV comp is in the arv price tier', wrongTier.length === 0,
     wrongTier.length ? `${wrongTier.length} ARV comp(s) missing arv tier` : 'clean')
 
+  // ── Test-1 score: passers carry a 90–100 proximity score ──────────────────
+  const t1Passers = comps.filter((x) => x.jevHybrid?.test1?.passed === true)
+  const badT1 = t1Passers.filter((x) => {
+    const s = x.jevHybrid.test1.score
+    return typeof s !== 'number' || s < 90 || s > 100
+  })
+  check('test-1 passers score 90–100 (proximity)', badT1.length === 0,
+    badT1.length ? `${badT1.length} passer(s) out of range` : `${t1Passers.length} passers in range`)
+
+  // Enrichment = the highest test-1 scores (top-10 cap) — since the score
+  // ranks pure proximity this is the ten nearest passers.
+  const enriched = t1Passers.filter((x) => x.jevHybrid?.enriched === true)
+  const skipped = t1Passers.filter((x) => x.jevHybrid?.enriched !== true)
+  const minEnriched = enriched.length ? Math.min(...enriched.map((x) => x.jevHybrid.test1.score ?? -1)) : Infinity
+  const maxSkipped = skipped.length ? Math.max(...skipped.map((x) => x.jevHybrid.test1.score ?? -1)) : -Infinity
+  check('enrichment = top test-1 scores (≤10)', enriched.length <= 10 && minEnriched >= maxSkipped,
+    `enriched=${enriched.length} minEnriched=${minEnriched} maxSkipped=${maxSkipped}`)
+
+  // ── Test-2 score: fresh two-tier score — subdivision-match on the same
+  // side of road barriers scores 95–100; neighborhood-only or road-crossing
+  // scores 90–95; fails sit below 90. Test-1 score never carries forward.
+  const t2Passers = comps.filter((x) => x.jevHybrid?.test2?.passed === true)
+  const t2Fails = comps.filter((x) => x.jevHybrid?.test2 != null && x.jevHybrid.test2.passed === false)
+  const NOUL_GATE = 0.5
+  const crosses = (x) => (x.jevHybrid?.crossesMajorRoad ?? x.crossesMajorRoad) === true
+  const subTier = t2Passers.filter((x) => x.jevHybrid.test2.nouls?.subdivision >= NOUL_GATE && !crosses(x))
+  const lowerTier = t2Passers.filter((x) => !(x.jevHybrid.test2.nouls?.subdivision >= NOUL_GATE && !crosses(x)))
+  check('subdivision+same-side passers score 95–100',
+    subTier.every((x) => x.jevHybrid.test2.score >= 95 && x.jevHybrid.test2.score <= 100),
+    `${subTier.length} comp(s) in premium tier`)
+  check('hood-only/crossing passers score 90–95',
+    lowerTier.every((x) => x.jevHybrid.test2.score >= 90 && x.jevHybrid.test2.score <= 95),
+    `${lowerTier.length} comp(s) in lower tier`)
+  check('test-2 fails score below 90',
+    t2Fails.every((x) => x.jevHybrid.test2.score < 90),
+    `${t2Fails.length} fail(s) checked`)
+  check('test-2 passers outscore test-2 fails',
+    t2Fails.length === 0 || t2Passers.length === 0 ||
+    Math.min(...t2Passers.map((x) => x.jevHybrid.test2.score)) > Math.max(...t2Fails.map((x) => x.jevHybrid.test2.score)),
+    `minPass=${t2Passers.length ? Math.min(...t2Passers.map((x) => x.jevHybrid.test2.score)) : '-'} maxFail=${t2Fails.length ? Math.max(...t2Fails.map((x) => x.jevHybrid.test2.score)) : '-'}`)
+
+  // ── Classification: top 10% of test-2 passers by adjusted price = ARV ──────
+  const priceOf = (x) => x.jevHybrid?.adjustedPrice ?? x.adjustedSalePrice ?? x.salePrice ?? 0
+  const expectedArv = t2Passers.length > 0 ? Math.max(1, Math.ceil(t2Passers.length * 0.10)) : 0
+  check('ARV count = top 10% of test-2 passers', jevSelected.length === expectedArv,
+    `passers=${t2Passers.length} arv=${jevSelected.length} expected=${expectedArv}`)
+  if (jevSelected.length > 0) {
+    const arvIds = new Set(jevSelected.map((x) => x.id ?? x.compId))
+    const minArvPrice = Math.min(...jevSelected.map(priceOf))
+    const nonArv = t2Passers.filter((x) => !arvIds.has(x.id ?? x.compId))
+    const maxNonArv = nonArv.length ? Math.max(...nonArv.map(priceOf)) : -Infinity
+    check('ARV comps are the highest-priced passers', minArvPrice >= maxNonArv,
+      `minArv=${Math.round(minArvPrice)} maxNonArv=${maxNonArv === -Infinity ? '-' : Math.round(maxNonArv)}`)
+  }
+
   // ARV = mean of Jev's ARV comps' adjusted price when the funnel produced
   // them; otherwise the number is the rules fallback (handoff run).
   const adjusted = jevSelected.map((x) => x.jevHybrid?.adjustedPrice ?? x.adjustedPrice ?? x.adjustedSalePrice ?? x.salePrice).filter((v) => typeof v === 'number' && v > 0)
@@ -145,6 +200,31 @@ while (Date.now() - t0 < TIMEOUT_MS) {
 check('job reached terminal state', data != null, `status=${data?.status ?? 'timeout'}`)
 if (data?.status === 'error') check('job completed', false, data.error ?? 'evaluation error')
 if (data?.result) validate(data.result)
+
+// ── Manual comp-tier override round-trip ────────────────────────────────────
+// Assign ARV to a comp via the API, reload the job, and verify the override
+// lands on the comp card data and inside the report's jev block.
+if (data?.result) {
+  const comps = data.result?.comps?.items ?? data.result?.comparables ?? []
+  const target = comps[0]
+  const compId = target?.id ?? target?.compId
+  if (compId) {
+    const put = await fetch(`${API}/v1/analyze/jobs/${jobId}/comp-tier`, {
+      method: 'PUT', headers, body: JSON.stringify({ compId, tier: 'arv' }),
+    }).then((r) => r.json()).catch((e) => ({ success: false, error: e.message }))
+    check('comp-tier override accepted', put?.success === true, put?.error ?? `comp=${compId}`)
+
+    const j = await fetch(`${API}/v1/analyze/jobs/${jobId}`, { headers }).then((r) => r.json()).catch(() => null)
+    const rcomps = j?.data?.result?.comps?.items ?? j?.data?.result?.comparables ?? []
+    const hit = rcomps.find((x) => (x.id ?? x.compId) === compId)
+    check('override visible on comp', hit?.userTier === 'arv', `userTier=${hit?.userTier}`)
+    const ov = j?.data?.result?.report?.jev?.userOverrides ?? []
+    check('override visible in report', ov.some((o) => o.compId === compId && o.tier === 'arv'),
+      `${ov.length} override(s) in report`)
+  } else {
+    check('override round-trip target exists', false, 'no comp id on first comp')
+  }
+}
 
 finish(0)
 

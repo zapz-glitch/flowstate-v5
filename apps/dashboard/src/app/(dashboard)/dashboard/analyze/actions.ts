@@ -128,6 +128,11 @@ export interface AnalyzeData {
     }
     /** Jev flagged zero test-2 passers — the report is for manual review */
     humanHandoff?: boolean
+    /** Jev funnel record — selection, counts, and reviewer tier overrides */
+    jev?: {
+      /** Reviewer-pinned comp tiers — compId → 'arv'|'as_is', applied at read time */
+      userOverrides?: Array<{ compId: string; tier: 'arv' | 'as_is' }>
+    } | null
   }
   /** Settings used during this analysis (for client-side recalculation initialization) */
   appliedSettings?: {
@@ -310,11 +315,17 @@ export interface JevHybridCompScore {
   scoreConfidence: number | null
   /** 1-based rank among test-2-evaluated comps by score — #1 is closest */
   poolRank: number | null
-  /** Price tier among test-2 passers — 'arv' = top-15% (the ARV set), 'as_is' = the rest */
+  /** Price tier among test-2 passers — 'arv' = top-10% (the ARV set), 'as_is' = the rest */
   priceTier: 'arv' | 'as_is' | null
   /** 'core' = ARV-tier test-2 passer — the only comps feeding ARV */
   selected: 'core' | null
   adjustedPrice: number | null
+  /**
+   * Road-barrier proxy — the comp's census tract differs from the
+   * subject's (tract boundaries follow major roads). null = unverified.
+   * A crossing demotes a subdivision matcher out of the premium score tier.
+   */
+  crossesMajorRoad?: boolean | null
 }
 
 /** Jev read-only outcome classification attached to a completed analysis */
@@ -629,6 +640,13 @@ export interface CompItem {
   isEnabled?: boolean
   /** Which comp group: 'arv' (Group A, drives valuation), 'as_is' (Group B, market intel), or null */
   compGroup?: 'arv' | 'as_is' | null
+  /**
+   * Reviewer's manual tier pin — 'arv' or 'as_is' — assigned on the comp
+   * card. Rides alongside Jev's automatic priceTier; never rewrites it.
+   */
+  userTier?: 'arv' | 'as_is' | null
+  /** Road-barrier proxy — census tract differs from the subject's. Absent = unverified. */
+  crossesMajorRoad?: boolean
   /** Visual ARV-candidacy check on listing photos (ARV-selected comps only) */
   curbAppeal?: {
     condition: 'renovated' | 'dated' | 'distressed' | 'unknown'
@@ -911,5 +929,50 @@ export async function queueAnalysis(request: AnalyzeRequest): Promise<QueueAnaly
       success: false,
       error: error instanceof Error ? error.message : 'Failed to analyze property',
     }
+  }
+}
+
+/**
+ * Manual comp-tier assignment — pin a comparable to 'arv' or 'as_is' from the
+ * comp card (Property Search), or clear the pin with null. Persisted per
+ * (job, comp) on the API and applied onto the report at read time — Jev's
+ * automatic classification is never rewritten, the pin rides alongside it.
+ */
+export async function assignCompTier(
+  jobId: string,
+  compId: string,
+  tier: 'arv' | 'as_is' | null,
+): Promise<{ success: boolean; error?: string }> {
+  const session = await getSession()
+  if (!session?.user) {
+    return { success: false, error: 'Not authenticated. Please log in to use this feature.' }
+  }
+  const dashboardSecret = await getDashboardSecret()
+  if (!dashboardSecret) {
+    return { success: false, error: 'Dashboard configuration error. Please contact support.' }
+  }
+  try {
+    const apiUrl = await getApiUrl()
+    const url = `${apiUrl}/v1/analyze/jobs/${encodeURIComponent(jobId)}/comp-tier`
+    logApiCall('PUT', url)
+    const startTime = Date.now()
+    const response = await fetch(url, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Dashboard-User-Id': session.user.id,
+        'X-Dashboard-Secret': dashboardSecret,
+      },
+      body: JSON.stringify({ compId, tier }),
+    })
+    logApiCall('PUT', url, response.status, Date.now() - startTime)
+    const data = (await response.json().catch(() => ({}))) as { success?: boolean; error?: string }
+    if (!response.ok || data?.success !== true) {
+      return { success: false, error: data?.error ?? `API request failed with status ${response.status}` }
+    }
+    return { success: true }
+  } catch (error) {
+    logError('assignCompTier exception', error)
+    return { success: false, error: error instanceof Error ? error.message : 'Failed to assign comp tier' }
   }
 }

@@ -1254,6 +1254,9 @@ export function buildAnalysisResponse(
       parcelId: comp.parcelId ?? null,
       neighborhoodName: comp.neighborhoodName ?? null,
       neighborhoodCode: comp.neighborhoodCode ?? null,
+      censusTract: comp.censusTract ?? null,
+      // Road-barrier proxy (census tract) — absent when unverified
+      ...(comp.crossesMajorRoad != null ? { crossesMajorRoad: comp.crossesMajorRoad } : {}),
       buildingCondition: comp.buildingCondition ?? null,
       buildingGrade: comp.buildingGrade ?? null,
       stories: comp.stories ?? null,

@@ -3,16 +3,17 @@
  *
  * Facts-only eligibility (usable price + date), test 1 — the five
  * raw-field nouls, no bathrooms (verifiable fields must clear the gate;
- * unverifiable is noted, not failed) plus the composite score —
- * proximity-dominant, blended with field-match strength — that picks the
- * ten passers who get enriched. Test 2 — subdivision OR neighborhood
- * passes; physical-character/material/foundation nouls are advisory and
- * lift a pass from the 90 baseline toward 100. Classification — passers
- * split by adjusted price, top 15% into the ARV set (variable count), the
- * rest as-is reference. No fill — a short passer set stays short and zero
- * passers flags human handoff. The TypeSafe calls and the provider
- * enrichment seam are injected — these tests cover the engine's
- * decisions, not Jev.
+ * unverifiable is noted, not failed) plus a 90–100 pure-proximity score
+ * that picks the ten nearest passers for enrichment — and nothing else.
+ * Test 2 — subdivision OR neighborhood passes; style/material/foundation
+ * are preferred (missing data penalizes, never fails) and the score is
+ * fresh: subdivision match on the same census tract earns 95–100,
+ * neighborhood-only or a road crossing lands 90–95 with distance leading.
+ * Classification — passers split by adjusted price, top 10% into the ARV
+ * set (variable count), the rest as-is reference. No fill — a short
+ * passer set stays short and zero passers flags human handoff. The
+ * TypeSafe calls and the provider enrichment seam are injected — these
+ * tests cover the engine's decisions, not Jev.
  */
 
 import { describe, it } from 'node:test'
@@ -49,6 +50,7 @@ const subject: NormalizedProperty = {
   stories: 1,
   construction: { buildingStyle: 'ranch', foundationType: 'slab', type: 'frame', exteriorWalls: 'wood siding' },
   features: { garageType: '2 Car Garage' },
+  censusTract: '12011000100',
 } as unknown as NormalizedProperty
 
 const comp = (id: string, overrides?: Partial<AppraisedComparable>): AppraisedComparable => ({
@@ -241,25 +243,30 @@ describe('runJevEvaluation — test 1', () => {
     assert.equal(result.entries[0]!.test1!.passed, true)
   })
 
-  it('composite score rewards proximity — the nearer passer scores higher', async () => {
+  it('test-1 score is 90–100 pure proximity — the nearer passer scores higher', async () => {
     const result = await evaluate(
       [comp('near', { distanceMiles: 0.05 }), comp('far', { distanceMiles: 0.9 })],
     )
     const near = result.entries.find((e) => e.compId === 'near')!
     const far = result.entries.find((e) => e.compId === 'far')!
-    assert.ok(near.test1!.score != null && far.test1!.score != null)
+    // 1mi radius: near prox 0.95 → 100, far prox 0.1 → 91
+    assert.equal(near.test1!.score, 90 + Math.round(10 * 0.95))
+    assert.equal(far.test1!.score, 90 + Math.round(10 * 0.1))
     assert.ok(near.test1!.score! > far.test1!.score!, 'closer to subject scores higher')
   })
 
-  it('composite score rewards field strength — stronger matches score higher at equal distance', async () => {
+  it('test-1 score ignores field strength — equal distance means equal score', async () => {
     const result = await evaluate(
       [comp('strong'), comp('weak')],
-      // Both pass, but 'weak' barely clears each field
+      // Both pass, but 'weak' barely clears each field — the score is pure
+      // proximity, so both land at the same distance-scaled number.
       { weak: { squareFeet: 0.55, lotSize: 0.55, yearBuilt: 0.55, salePrice: 0.55, saleDate: 0.55 } },
     )
     const strong = result.entries.find((e) => e.compId === 'strong')!
     const weak = result.entries.find((e) => e.compId === 'weak')!
-    assert.ok(strong.test1!.score! > weak.test1!.score!)
+    // Both at 0.4mi → 90 + round(10 × 0.6) = 96
+    assert.equal(strong.test1!.score, 96)
+    assert.equal(weak.test1!.score, 96)
   })
 })
 
@@ -316,25 +323,25 @@ describe('runJevEvaluation — enrichment', () => {
     assert.equal(result.counts.enriched, 10)
   })
 
-  it('a stronger-but-farther passer can outscore a nearer weak passer for the enrich cohort', async () => {
-    // 11 passers — 'strong' is farthest but field-perfect; 'w0'..'w9' are
-    // near but barely pass every field. Proximity dominates (60%), so
-    // 'strong' must be extreme to break the top-10… give it a different
-    // shape: keep it simple — 'strong' mid-distance perfect vs 'w10' near
-    // but barely-passing. Assert strong ranks ahead of the weakest.
+  it('enrichment is the ten nearest passers — field strength cannot buy a spot', async () => {
+    // 12 passers — 'strong' is farthest but field-perfect; 'w0'..'w10' are
+    // near but barely pass every field. The score is pure proximity, so
+    // 'strong' at 0.5mi is cut no matter how well it matches.
     const ids = Array.from({ length: 11 }, (_, i) => `w${i}`)
     const comps = [
-      comp('strong', { distanceMiles: 0.45 }),
+      comp('strong', { distanceMiles: 0.5 }),
       ...ids.map((id, i) => comp(id, { distanceMiles: 0.05 + i * 0.04 })), // w0=0.05 … w10=0.45
     ]
     const weakFields = { squareFeet: 0.5, lotSize: 0.5, yearBuilt: 0.5, salePrice: 0.5, saleDate: 0.5 }
     const t1 = Object.fromEntries(ids.map((id) => [id, weakFields]))
     const capture: { ids?: string[] } = {}
     const result = await evaluate(comps, t1, {}, { test2: tester2({}, capture) })
-    assert.ok(capture.ids!.includes('strong'), 'perfect-strength passer made the top-10')
     assert.equal(capture.ids!.length, 10)
+    assert.deepEqual(capture.ids!.sort(), ids.slice(0, 10).sort(), 'the ten nearest passers — w10 and strong cut')
+    assert.ok(!capture.ids!.includes('strong'), 'field-perfect but farthest — not enriched')
     const strong = result.entries.find((e) => e.compId === 'strong')!
-    assert.ok(strong.test1!.score != null)
+    assert.equal(strong.stage, 'test1_pass')
+    assert.equal(strong.test1!.score, 90 + Math.round(10 * 0.5), '0.5mi → 95')
   })
 })
 
@@ -378,7 +385,7 @@ describe('runJevEvaluation — test 2', () => {
     assert.ok(b.test2!.score < 90, `fail scored ${b.test2!.score} — below the 90 pass floor`)
   })
 
-  it('a bare pass starts at 90 — matched physical characteristics push toward 100', async () => {
+  it('a subdivision match on the same side scores 95–100 — physical matches push upward', async () => {
     const result = await evaluate(
       [comp('bare'), comp('matched')],
       {},
@@ -387,15 +394,51 @@ describe('runJevEvaluation — test 2', () => {
         matched: t2(4, { nouls: { physicalCharacter: 1, material: 1, foundation: 1 } }),
       },
     )
+    // Subdivision 0.9, no tract data → unverified (not crossing) → premium
+    // tier. Both at 0.4mi → prox 0.6. bare: 95+round(5×0.3)=97; matched:
+    // 95+round(5×(0.5+0.3))=99.
     const bare = result.entries.find((e) => e.compId === 'bare')!
     const matched = result.entries.find((e) => e.compId === 'matched')!
-    assert.equal(bare.test2!.score, 90, 'no physical matches → the 90 baseline')
-    assert.equal(matched.test2!.score, 100, 'all physical matches → 100')
-    assert.equal(bare.score, 90)
-    assert.equal(matched.score, 100)
+    assert.equal(bare.test2!.score, 97)
+    assert.equal(matched.test2!.score, 99)
+    assert.equal(bare.score, bare.test2!.score)
+    assert.equal(matched.score, matched.test2!.score)
   })
 
-  it('physical character, material, and foundation are advisory — they never gate', async () => {
+  it('a neighborhood-only pass scores 90–95 with distance leading', async () => {
+    const result = await evaluate(
+      [comp('near', { distanceMiles: 0.1 }), comp('far', { distanceMiles: 0.9 })],
+      {},
+      {
+        near: t2(4, { nouls: { subdivision: 0.2, neighborhood: 0.9, physicalCharacter: 0, material: 0, foundation: 0 } }),
+        far: t2(4, { nouls: { subdivision: 0.2, neighborhood: 0.9, physicalCharacter: 0, material: 0, foundation: 0 } }),
+      },
+    )
+    const near = result.entries.find((e) => e.compId === 'near')!
+    const far = result.entries.find((e) => e.compId === 'far')!
+    // near prox 0.9 → 90+round(5×0.6×0.9)=93; far prox 0.1 → 90+round(5×0.06)=90
+    assert.equal(near.test2!.score, 93)
+    assert.equal(far.test2!.score, 90)
+    assert.ok(near.test2!.score <= 95 && far.test2!.score <= 95, 'hood-only never reaches the premium tier')
+  })
+
+  it('a different census tract demotes a subdivision matcher — road-barrier proxy', async () => {
+    const result = await evaluate(
+      [comp('cross', { censusTract: '9999999999' }), comp('same')],
+      {},
+      {},
+    )
+    const cross = result.entries.find((e) => e.compId === 'cross')!
+    const same = result.entries.find((e) => e.compId === 'same')!
+    assert.equal(cross.crossesMajorRoad, true, 'tract differs → flagged as crossing a barrier')
+    assert.equal(same.crossesMajorRoad, null, 'no tract on comp → unverified')
+    // Crossing demotes into the lower tier despite subdivision 0.9.
+    assert.ok(cross.test2!.score! >= 90 && cross.test2!.score! <= 95,
+      `crossing scored ${cross.test2!.score} — lower tier, not premium`)
+    assert.ok(same.test2!.score! >= 95, `unverified stays premium — scored ${same.test2!.score}`)
+  })
+
+  it('physical character, material, and foundation are preferred — they never gate', async () => {
     const result = await evaluate(
       [comp('a')],
       {},
@@ -404,31 +447,32 @@ describe('runJevEvaluation — test 2', () => {
     const a = result.entries[0]!
     assert.equal(a.test2!.nouls.physicalCharacter, 0.1)
     assert.equal(a.test2!.nouls.foundation, 0.1)
-    assert.equal(a.test2!.passed, true, 'advisory nouls do not block a subdivision pass')
-    assert.equal(a.test2!.score, 90 + Math.round(10 * 0.1))
+    assert.equal(a.test2!.passed, true, 'preferred nouls do not block a subdivision pass')
+    // phys 0.1, prox 0.6, premium: 95 + round(5 × (0.5×0.1 + 0.5×0.6)) = 97
+    assert.equal(a.test2!.score, 95 + Math.round(5 * (0.5 * 0.1 + 0.5 * 0.6)))
   })
 })
 
-// ─── Classification — top-15% price tier, no fill, human handoff ─────────────
+// ─── Classification — top-10% price tier, no fill, human handoff ─────────────
 
 describe('runJevEvaluation — classification', () => {
-  it('the top 15% of passers by adjusted price become the ARV set — the rest as-is', async () => {
-    // 10 passers at escalating prices → ceil(10×0.15) = 2 ARV comps:
-    // the two most expensive. Remaining 8 are as-is reference.
+  it('the top 10% of passers by adjusted price become the ARV set — the rest as-is', async () => {
+    // 10 passers at escalating prices → ceil(10×0.10) = 1 ARV comp:
+    // the most expensive. Remaining 9 are as-is reference.
     const ids = Array.from({ length: 10 }, (_, i) => `c${i}`)
     const comps = ids.map((id, i) => comp(id, { salePrice: 300_000 + i * 10_000, distanceMiles: 0.1 + i * 0.05 }))
     const result = await evaluate(comps)
     assert.equal(result.coreCompIds.length, 10)
     assert.equal(result.counts.test2Passed, 10)
-    assert.equal(result.arvCompIds.length, 2, 'top 15% of 10 passers → 2 ARV comps')
-    assert.equal(result.asIsCompIds.length, 8)
+    assert.equal(result.arvCompIds.length, 1, 'top 10% of 10 passers → 1 ARV comp')
+    assert.equal(result.asIsCompIds.length, 9)
     const tiers = Object.fromEntries(result.entries.map((e) => [e.compId, e.priceTier]))
     const arvIds = result.arvCompIds
     for (const id of arvIds) assert.equal(tiers[id], 'arv')
     for (const id of result.asIsCompIds) assert.equal(tiers[id], 'as_is')
-    // The ARV comps are the two highest-priced passers (c8, c9) — adjusted
-    // price tracks sale price with matching fixtures.
-    assert.deepEqual(arvIds.sort(), ['c8', 'c9'])
+    // The ARV comp is the highest-priced passer (c9) — adjusted price
+    // tracks sale price with matching fixtures.
+    assert.deepEqual(arvIds, ['c9'])
     // Only ARV-tier comps are 'selected' for the ARV.
     for (const e of result.entries) {
       assert.equal(e.selected === 'core', e.priceTier === 'arv')
@@ -456,7 +500,7 @@ describe('runJevEvaluation — classification', () => {
       },
     )
     assert.deepEqual(result.coreCompIds.sort(), ['p1', 'p2'])
-    assert.equal(result.arvCompIds.length, 1, 'top 15% of 2 passers → 1 ARV comp, no fill')
+    assert.equal(result.arvCompIds.length, 1, 'top 10% of 2 passers → 1 ARV comp, no fill')
     assert.equal(result.asIsCompIds.length, 1)
     for (const id of ['f1', 'f2']) {
       const e = result.entries.find((en) => en.compId === id)!

@@ -8,25 +8,29 @@
  *      lotSize, yearBuilt, salePrice, saleDate — "does this comp match the
  *      subject on this field, per the appraisal rules?" Passing every
  *      verifiable field puts the comp in the "passed test 1" bucket. Every
- *      passer also carries a composite score: proximity to the subject
- *      dominates, blended with mean field-match strength. A field that
- *      cannot be verified (missing on the comp or the subject) is noted,
- *      never failed.
- *   3. Enrich the TOP-10 test-1 passers by score (property detail:
- *      subdivision, neighborhood, style, construction materials,
- *      foundation, features, transaction) via the caller's provider seam —
- *      test 2 needs fields the raw pool lacks.
+ *      passer also carries a 90–100 proximity score (closer = higher) that
+ *      exists only to pick the enrichment set — test 2 rescores from
+ *      scratch. A field that cannot be verified (missing on the comp or
+ *      the subject) is noted, never failed.
+ *   3. Enrich the TOP-10 test-1 passers by score — the ten nearest passers
+ *      (property detail: subdivision, neighborhood, style, construction
+ *      materials, foundation, census tract, features, transaction) via the
+ *      caller's provider seam — test 2 needs fields the raw pool lacks.
+ *      A comp whose census tract differs from the subject's is flagged
+ *      crossesMajorRoad (tract boundaries follow major roads).
  *   4. Test 2 (services/jev, comp_tests_v1): enriched nouls — a subdivision
  *      match passes; if subdivision fails, a neighborhood match still
  *      passes. Both no → test 2 fail. Physical character, material, and
- *      foundation nouls are preferred-not-required — they lift the score:
- *      a bare pass starts at 90 and each matched physical characteristic
- *      pushes toward 100. The Score primitive also rates every enriched
+ *      foundation nouls are preferred-not-required — missing data counts 0
+ *      (penalized, never failed). Passers get a fresh score: subdivision
+ *      match on the same side of major roads earns the premium tier
+ *      (95–100); neighborhood-only or a road crossing lands 90–95 with
+ *      distance leading. The Score primitive also rates every enriched
  *      comp on a distance-dominant spectrum (closest → highest) with Jev's
  *      confidence — for fail ordering and display.
  *   5. Classification: passing test 2 does NOT make a comp an ARV comp —
  *      it only means the comp matched the rules. The test-2 passers are
- *      split by price: the top 15% become the ARV set (variable count —
+ *      split by price: the top 10% become the ARV set (variable count —
  *      not capped at 3), the remainder become the as-is market reference.
  *   6. No fill. Fewer than three passers yields whatever passed; zero
  *      passers → humanHandoff — the run flags for manual review instead
@@ -64,13 +68,20 @@ import type {
 export const COMP_HYBRID_VERSION = COMP_EVAL_VERSION
 
 /** ARV tier: the top fraction of test-2 passers by adjusted price. */
-export const COMP_ARV_TOP_PERCENT = 15
+export const COMP_ARV_TOP_PERCENT = 10
 
-/** Test-1 composite score: proximity weight (field-match strength takes the rest). */
-export const COMP_TEST1_PROXIMITY_WEIGHT = 0.6
+/** Test-1 passers start at this score; proximity to the subject pushes toward 100. */
+export const COMP_TEST1_PASS_BASELINE = 90
 
-/** Test-2 passers start at this score; matched physical characteristics push toward 100. */
+/**
+ * Test-2 passers start at this score; physical matches and proximity push
+ * toward 100. A subdivision match on the same side of major roads earns the
+ * premium tier instead.
+ */
 export const COMP_TEST2_PASS_BASELINE = 90
+
+/** Test-2 premium tier floor — subdivision match AND same side of major roads. */
+export const COMP_TEST2_SUBDIVISION_BASELINE = 95
 
 /**
  * Card-score bands per test outcome — the tier dominates, proximity sets
@@ -100,7 +111,7 @@ export interface HybridCompTest1 {
   unverifiableFields: CompTest1Field[]
   /** Every verifiable field at/above the gate — the "passed test 1" bucket */
   passed: boolean
-  /** Composite /100 — proximity to the subject dominates, blended with mean field-match strength. Orders passers for the enrichment budget. */
+  /** 90–100 — passers start at 90, proximity to the subject pushes toward 100. Orders passers for the enrichment budget; discarded after test 2. */
   score: number | null
 }
 
@@ -117,7 +128,11 @@ export interface HybridCompTest2 {
   }
   /** Subdivision yes, or neighborhood yes — eligible for classification */
   passed: boolean
-  /** Passers: 90 baseline + up to 10 for matched physical characteristics. Fails: distance spectrum scaled below 90. */
+  /**
+   * Fresh score after test 2 — test-1's score is discarded. Subdivision
+   * match on the same side of major roads: 95–100. Neighborhood-only or
+   * road crossing: 90–95, distance-led. Fails sit below 90.
+   */
   score: number
   confidence: number | null
   /** Score level index → probability */
@@ -139,6 +154,12 @@ export interface HybridCompScore {
   saleAgeDays: number | null
   /** Property-detail data was merged before test 2 */
   enriched: boolean
+  /**
+   * Road-barrier proxy — census tract differs from the subject's.
+   * null = tract data unavailable (not verified). A crossing demotes a
+   * subdivision-matching test-2 passer out of the premium score tier.
+   */
+  crossesMajorRoad: boolean | null
   test1: HybridCompTest1 | null
   test2: HybridCompTest2 | null
   /**
@@ -153,7 +174,7 @@ export interface HybridCompScore {
   /** 1-based rank across the whole pool by the composite score — #1 is the closest comp that passed both tests */
   poolRank: number | null
   /**
-   * Price tier among test-2 passers — 'arv' = top-15% by adjusted price
+   * Price tier among test-2 passers — 'arv' = top-10% by adjusted price
    * (the ARV set), 'as_is' = the remainder (as-is market reference).
    * Null for any comp that didn't pass both tests.
    */
@@ -300,6 +321,7 @@ export async function runJevEvaluation(
       rejectReasons,
       saleAgeDays: days,
       enriched: comp.isEnriched === true,
+      crossesMajorRoad: comp.crossesMajorRoad ?? null,
       test1: null,
       test2: null,
       score: null,
@@ -363,25 +385,18 @@ export async function runJevEvaluation(
     progress?.(`Test 1 done — ${test1Passers.length} passed, ${candidates.length - test1Passers.length} failed`, { stage: 'test1_done', passed: test1Passers.length, failed: candidates.length - test1Passers.length })
   }
 
-  // Test-1 composite score for every passer /100 — proximity to the
-  // subject dominates (closer = higher, scaled against the configured
-  // distance radius), blended with mean field-match strength across the
-  // test-1 fields. Unverifiable fields count 0, so coverage is rewarded
-  // along with pass quality.
+  // Test-1 score for every passer — 90 baseline + up to 10 for proximity
+  // to the subject (closer = higher, scaled against the configured distance
+  // radius). The score exists only to pick the enrichment set; test 2
+  // rescores from scratch.
   const distanceRule = filters.find((f) => f.type === 'distance' && f.enabled !== false)
   const radiusMiles = typeof distanceRule?.value === 'number' && distanceRule.value > 0 ? distanceRule.value : 1
-  const strengthOf = (e: HybridCompScore): number => {
-    if (!e.test1 || defs.length === 0) return 0
-    let sum = 0
-    for (const def of defs) sum += e.test1.nouls[def.key] ?? 0
-    return sum / defs.length
+  const proximityOf = (compId: string): number => {
+    const d = byId.get(compId)?.distanceMiles
+    return d == null || !Number.isFinite(d) ? 0 : Math.max(0, 1 - d / radiusMiles)
   }
   for (const e of test1Passers) {
-    const d = byId.get(e.compId)?.distanceMiles
-    const proximity = d == null || !Number.isFinite(d) ? 0 : Math.max(0, 1 - d / radiusMiles)
-    e.test1!.score = Math.round(
-      100 * (COMP_TEST1_PROXIMITY_WEIGHT * proximity + (1 - COMP_TEST1_PROXIMITY_WEIGHT) * strengthOf(e)),
-    )
+    e.test1!.score = COMP_TEST1_PASS_BASELINE + Math.round((100 - COMP_TEST1_PASS_BASELINE) * proximityOf(e.compId))
   }
 
   // Enrichment budget — provider detail calls go only to the ten
@@ -423,9 +438,25 @@ export async function runJevEvaluation(
     }
   }
 
+  // Road-barrier proxy — census tract boundaries follow major roads, so a
+  // comp in a different tract than the subject likely sits across a
+  // barrier. Derived deterministically from enriched detail; missing tract
+  // data leaves the field unset (not verified, no penalty).
+  const subjectTract = subject.censusTract
+  for (const c of examComps) {
+    const cr = subjectTract != null && c.censusTract != null ? c.censusTract !== subjectTract : null
+    if (cr != null) {
+      c.crossesMajorRoad = cr
+      const en = entries.find((e) => e.compId === c.id)
+      if (en) en.crossesMajorRoad = cr
+      const raw = enrichedComps.get(c.id)
+      if (raw) raw.crossesMajorRoad = cr
+    }
+  }
+
   // Stage 3 — test 2 on the enriched set: subdivision yes OR neighborhood
-  // yes passes; physical character and material are advisory. The Score
-  // question rates each comp on the distance-dominant spectrum.
+  // yes passes; style/material/foundation are preferred — they lift the
+  // score, missing data penalizes but never fails.
   const maxLevel = COMP_TEST2_SCORE_LEVELS.length - 1
   let test2Meta: HybridTest1Result['test2'] = null
   if (examComps.length > 0) {
@@ -438,15 +469,22 @@ export async function runJevEvaluation(
       const t2 = result.results[entry.compId]
       if (!t2) throw new Error(`Jev test 2 returned no result for comparable ${entry.compId}; no partial coverage accepted.`)
       const passed = t2.nouls.subdivision >= noulGate || t2.nouls.neighborhood >= noulGate
-      // Passers: 90 baseline + up to 10 as physical matches land (character,
-      // material, foundation). Fails keep the distance spectrum scaled
-      // below the pass floor so a fail never outranks a pass.
-      const matchMean = (t2.nouls.physicalCharacter + t2.nouls.material + t2.nouls.foundation) / 3
+      // Fresh score — the test-1 proximity score is discarded here.
+      // Subdivision match on the same side of major roads earns the premium
+      // tier (95–100, physical + proximity); neighborhood-only or a road
+      // crossing lands 90–95 with distance leading. Physical nouls (style,
+      // material, foundation) are preferred-not-required: missing data
+      // counts 0 — penalized in the boost, never a fail.
+      const phys = ((t2.nouls.physicalCharacter ?? 0) + (t2.nouls.material ?? 0) + (t2.nouls.foundation ?? 0)) / 3
+      const prox = proximityOf(entry.compId)
+      const premium = t2.nouls.subdivision >= noulGate && entry.crossesMajorRoad !== true
       entry.test2 = {
         nouls: t2.nouls,
         passed,
         score: passed
-          ? Math.min(100, COMP_TEST2_PASS_BASELINE + Math.round((100 - COMP_TEST2_PASS_BASELINE) * matchMean))
+          ? premium
+            ? COMP_TEST2_SUBDIVISION_BASELINE + Math.round(5 * (0.5 * phys + 0.5 * prox))
+            : COMP_TEST2_PASS_BASELINE + Math.round(5 * (0.6 * prox + 0.4 * phys))
           : Math.min(COMP_TEST2_PASS_BASELINE - 1, Math.round((t2.rawScore / maxLevel) * (COMP_TEST2_PASS_BASELINE - 1))),
         confidence: t2.confidence,
         levelProbabilities: t2.levelProbabilities,

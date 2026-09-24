@@ -1078,6 +1078,7 @@ class PropertyApi implements PropertyApiService {
                 subdivision: result.data.subdivision ?? null,
                 neighborhoodName: result.data.neighborhoodName ?? null,
                 neighborhoodCode: result.data.neighborhoodCode ?? null,
+                censusTract: result.data.censusTract ?? null,
                 buildingCondition: result.data.buildingCondition ?? null,
                 buildingGrade: result.data.buildingGrade ?? null,
                 stories: result.data.stories ?? null,

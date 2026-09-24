@@ -184,4 +184,28 @@ export interface EvaluationReport {
    * the Jev funnel produced ARV comps.
    */
   humanHandoff?: boolean
+  /**
+   * The Jev funnel record for this report — which comps were selected, the
+   * stage counts, the handoff flag, and any reviewer-pinned comp tiers.
+   * `userOverrides` is applied at read time from comp_tier_overrides.
+   */
+  jev?: {
+    selected: { compId: string; score: number | null; fullMatch: boolean; verdict: string; confidence: number | null }[]
+    counts: {
+      pool: number
+      ineligible: number
+      test1Passed: number
+      test1Failed: number
+      enriched: number
+      test2Passed: number
+      test2Failed: number
+      arv: number
+      asIs: number
+      selected: number
+    } | null
+    humanHandoff: boolean
+    asIsCompIds: string[]
+    topCompId: string | null
+    userOverrides?: { compId: string; tier: string }[]
+  } | null
 }

@@ -14,6 +14,7 @@ import { savedReports, reportHistory, analysisRuns } from '../db/schema'
 import { hashSharePassword } from '../lib/share-token'
 import { bodyLimit } from 'hono/body-limit'
 import { recalculateReport } from '../services/evaluation/recalculate'
+import { applyCompTierOverrides } from '../utils/comp-tier-overrides'
 import { deleteReportAssets } from '../services/report-assets'
 import { createPropertyApi } from '../services/property-api'
 import { createValuationService } from '../services/valuation'
@@ -651,6 +652,10 @@ userReports.get('/:jobId', async (c) => {
       return c.json({ error: 'Report data is corrupted' }, 500)
     }
   }
+
+  // Manual comp-tier assignments ride the stored payload — applied at read
+  // time so saved reports show the reviewer's pins next to Jev's.
+  await applyCompTierOverrides(c.env, session.user.id, jobId, analysis)
 
   return c.json({
     jobId: report.jobId,

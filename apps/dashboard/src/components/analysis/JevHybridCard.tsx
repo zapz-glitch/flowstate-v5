@@ -59,7 +59,7 @@ export function JevHybridCard({ run }: { run: JevHybridData | null | undefined }
       {open && (
         <div className="text-[10px] text-foreground-tertiary mt-1.5 space-y-1">
           <p>
-            Test 1 checks the raw fields against your appraisal rules — size, lot, year built, sale price, sale date — and scores each passer on proximity plus match strength. The ten highest scorers get enriched; test 2 needs the same subdivision or neighborhood, and matched style/materials/foundation lift a pass from 90 toward 100. Passers split by price — the top 15% are the ARV comps, the rest as-is reference. No fill: a short passer set stays short.
+            Test 1 checks the raw fields against your appraisal rules — size, lot, year built, sale price, sale date — and scores each passer 90–100 on pure proximity. The ten highest scorers — the ten nearest — get enriched; test 2 needs the same subdivision or neighborhood and rescores fresh: a subdivision match on the same side of major roads (same census tract) earns 95–100, neighborhood-only or a road crossing lands 90–95 with distance leading — matched style/materials/foundation lift the score and missing data penalizes it. Passers split by price — the top 10% are the ARV comps, the rest as-is reference. No fill: a short passer set stays short.
           </p>
           {humanHandoff && (
             <p className="text-amber-500/90">

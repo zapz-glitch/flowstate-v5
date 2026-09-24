@@ -1,7 +1,7 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { ChevronRight, Check } from 'lucide-react'
+import { ChevronRight, Check, Loader2 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 import { subdivisionsMatch } from '@flowstate-api/shared'
@@ -28,6 +28,10 @@ export interface CompCardProps {
   onToggle?: () => void
   isSelectedForArv?: boolean
   onToggleArv?: () => void
+  /** Pin this comp to a tier — 'arv' | 'as_is' | null clears. Present only when a jobId is available (Property Search). */
+  onAssignTier?: (tier: 'arv' | 'as_is' | null) => void
+  /** A tier assignment is in flight */
+  tierPending?: boolean
 }
 
 export function CompCard({
@@ -40,6 +44,8 @@ export function CompCard({
   onToggle: controlledOnToggle,
   isSelectedForArv,
   onToggleArv,
+  onAssignTier,
+  tierPending,
 }: CompCardProps) {
   const [internalExpanded, setInternalExpanded] = useState(false)
 
@@ -121,6 +127,17 @@ export function CompCard({
                 title={`Verified flip — bought $${comp.flip.priorSalePrice.toLocaleString()} ${comp.flip.daysHeld}d prior, resold +${comp.flip.gainPct}%`}
               >
                 FLIP
+              </div>
+            )}
+            {comp.userTier && (
+              <div
+                className={cn(
+                  'h-6 px-1.5 rounded flex items-center text-[10px] font-bold flex-shrink-0',
+                  comp.userTier === 'arv' ? 'bg-emerald-500/15 text-emerald-600' : 'bg-amber-500/15 text-amber-600'
+                )}
+                title={`You pinned this comp as ${comp.userTier === 'arv' ? 'ARV' : 'as-is'} — Jev classified it ${comp.jevHybrid?.priceTier === 'arv' ? 'ARV' : comp.jevHybrid?.priceTier === 'as_is' ? 'as-is' : 'unclassified'}`}
+              >
+                {comp.userTier === 'arv' ? 'ARV' : 'AS-IS'}·YOU
               </div>
             )}
             <div className="flex-1 min-w-0">
@@ -223,6 +240,42 @@ export function CompCard({
 
       {isExpanded && (
         <div className="px-5 pb-4 pt-2 space-y-4">
+          {/* Manual tier pin — reviewer's call, rides alongside Jev's */}
+          {(onAssignTier || comp.id) && (
+            <div className="flex items-center justify-between gap-3">
+              {onAssignTier ? (
+                <div className="flex items-center gap-1.5">
+                  <span className="text-caption text-foreground-tertiary mr-1">Assign</span>
+                  {(['arv', 'as_is'] as const).map((tier) => {
+                    const active = comp.userTier === tier
+                    return (
+                      <button
+                        key={tier}
+                        type="button"
+                        disabled={tierPending}
+                        onClick={() => onAssignTier(active ? null : tier)}
+                        title={active ? 'Clear your pin' : `Pin as ${tier === 'arv' ? 'ARV' : 'as-is'}`}
+                        className={cn(
+                          'h-6 px-2 rounded text-[10px] font-bold transition-colors disabled:opacity-50',
+                          active
+                            ? tier === 'arv' ? 'bg-emerald-500 text-white' : 'bg-amber-500 text-white'
+                            : 'bg-foreground/8 text-foreground-secondary hover:bg-foreground/15'
+                        )}
+                      >
+                        {tier === 'arv' ? 'ARV' : 'AS-IS'}
+                      </button>
+                    )
+                  })}
+                  {tierPending && <Loader2 className="w-3 h-3 animate-spin text-foreground-tertiary" />}
+                </div>
+              ) : <span />}
+              {comp.id && (
+                <span className="text-[10px] text-foreground-tertiary tabular-nums" title="Provider comp ID — reference this when flagging the comp">
+                  #{comp.id}
+                </span>
+              )}
+            </div>
+          )}
           {/* Full property details — everything valid for comparison */}
           <div>
             <div className="text-caption font-medium text-foreground-secondary mb-1.5">Property Details</div>

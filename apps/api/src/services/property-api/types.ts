@@ -238,6 +238,8 @@ export interface NormalizedComparable {
   parcelId?: string | null
   neighborhoodName?: string | null
   neighborhoodCode?: string | null
+  /** Census tract ID — boundaries follow major roads; proxy for road-barrier checks */
+  censusTract?: string | null
 
   /** Assessor building improvement condition (e.g. "Average") */
   buildingCondition?: string | null
