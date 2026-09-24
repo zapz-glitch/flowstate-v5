@@ -127,6 +127,7 @@ export const CONSTRUCTION_TYPE: Record<string, string> = {
   'SN0': 'Stone',
   'ADO': 'Adobe',
   'AD0': 'Adobe',
+  'MAS': 'Masonry',
 }
 
 // ─── Foundation Type ─────────────────────────────────────────────────────────
@@ -201,6 +202,11 @@ export const ROOF_TYPE: Record<string, string> = {
   'MN0': 'Mansard',
   'GMB': 'Gambrel',
   'GM0': 'Gambrel',
+  'H00': 'Hip',
+  'G00': 'Gable',
+  'F00': 'Flat',
+  'S00': 'Shed',
+  'M00': 'Mansard',
 }
 
 // ─── Roof Cover (Material) ───────────────────────────────────────────────────
@@ -346,6 +352,7 @@ export const EXTERIOR_WALLS: Record<string, string> = {
   'MAN': 'Manufactured',
   'SHI': 'Shingle',
   'SGS': 'Shingle Siding',
+  'BST': 'Block/Stucco',
 }
 
 // ─── Garage Type ─────────────────────────────────────────────────────────────
@@ -398,6 +405,11 @@ export const HEATING_TYPE: Record<string, string> = {
   'GE0': 'Geothermal',
   'NON': 'None',
   'NO0': 'None',
+  'CL0': 'Central',
+  'CLE': 'Central Electric',
+  'CLG': 'Central Gas',
+  'CF0': 'Central Forced Air',
+  'PK0': 'Package Unit',
 }
 
 // ─── Cooling / Air Conditioning Type ─────────────────────────────────────────
@@ -416,6 +428,10 @@ export const COOLING_TYPE: Record<string, string> = {
   'NO0': 'None',
   'PKG': 'Package Unit',
   'PK0': 'Package Unit',
+  'ACE': 'Central A/C',
+  'ACW': 'Central + Wall Unit',
+  'AHT': 'Heat Pump',
+  'HTP': 'Heat Pump',
 }
 
 // ─── Pool Type ───────────────────────────────────────────────────────────────
@@ -476,6 +492,22 @@ export const BUILDING_CONDITION: Record<string, string> = {
   'POO': 'Poor',
   'VPR': 'Very Poor',
   'VP0': 'Very Poor',
+}
+
+// ─── Stories Type ───────────────────────────────────────────────────────────
+// No text-code table — CoreLogic ships 3-digit numerics = stories × 10
+// (010 = 1 story, 015 = 1.5, 020 = 2). Decode to the field's display
+// convention ("N Story") used by the Zillow supplement path.
+
+export function decodeStoriesType(code: string | null | undefined): string | undefined {
+  if (!code) return undefined
+  if (UNKNOWN_CODES.has(code.toUpperCase().trim())) return undefined
+  const trimmed = code.trim()
+  if (/^\d{3}$/.test(trimmed)) {
+    const stories = Number(trimmed) / 10
+    return `${stories % 1 === 0 ? stories.toFixed(0) : stories} Story`
+  }
+  return code
 }
 
 // ─── Lookup Helper ───────────────────────────────────────────────────────────
