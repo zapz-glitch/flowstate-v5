@@ -339,17 +339,16 @@ Blockers (environment, not code):
 - V4 engine NOT connected to production (V4_* env vars dead code; by plan).
 
 ## Current Objective
-Run a fourth evaluation track — the V4 hybrid — entirely on branch
-`new-classification`. V4 = Jev classifies every priced comp (ARV / AS_IS /
-UNIDENTIFIED) before rule verdicts → deterministic hard gates (verified
-foundation/construction/property-type mismatch, geography contradicted on both
-levels, sale >365d) → weighted recoverability score against appraisal-settings
-proximity → per-pool top-3 at/above a recovery floor, ≤180d tier first with the
-181–365d tier opening only at zero ideal-tier comps. Default mode is SHADOW
-(read-only observability); `JEV_HYBRID_V4_ENABLED=true` routes production
-selection. Definition of Done now additionally requires the V4 card + audit
-track rendered and a fresh staging-backed analysis whose v4 ARV equation
-recomputes exactly from persisted per-comp adjusted prices.
+Branch `swe-2-eval`: the refined Jev evaluation funnel — pure-proximity
+test-1 score (90–100) picking the 10 nearest passers to enrich, test-2
+gate (subdivision OR neighborhood) with fresh two-tier rescore
+(95–100 same-tract subdivision / 90–95 hood-only or tract crossing),
+census-tract road-barrier proxy, top-10%-by-adjusted-price ARV tier,
+no fill, humanHandoff on zero passers, and manual ARV/as-is comp pins
+persisted via comp_tier_overrides. Implemented and E2E-verified — see
+the 2026-10-06 (later) entry at the bottom of this file. Awaiting user
+decision on merge and on suppressing the rules-fallback ARV in handoff
+runs.
 
 Prior objective (three-track exposure) is complete — see
 "### 2026-09-22 — Three valuation tracks" below.
@@ -3350,3 +3349,56 @@ top-15%-by-price ARV tier, no fill, human-handoff flag.
   flag — confirm with user whether that number should be suppressed.
 - As-is passers are visible but not isEnabled (don't feed ARV).
 - Not merged/deployed — swe-2-eval branch only.
+
+## 2026-10-06 (later) — refined swe-2-eval spec + manual tier overrides (commit 37efc58)
+
+**Spec changes after user review of db99f19:**
+
+- Test-1 score is now pure proximity: `90 + round(10 × (1 − d/radius))`.
+  Field-match strength is pass/fail only — the score exists solely to
+  pick the enrich cohort, which makes it exactly the 10 nearest passers.
+- Test-2 rescores fresh in two tiers: subdivision match + same census
+  tract → 95–100; neighborhood-only OR subdivision across a tract
+  boundary → 90–95 (60% proximity / 40% physical inside the tier).
+  Style, material, foundation are preferred (never gate); missing data
+  scores 0 → penalized, not failed.
+- Road barrier implemented as census-tract proxy (user chose option B
+  over Overpass/OSM): `crossesMajorRoad = comp.censusTract !==
+  subject.censusTract` at enrichment; null when either side lacks a
+  tract (no penalty). Surfaced on entries, mapped comps, and the audit.
+- ARV tier tightened 15% → 10% (`COMP_ARV_TOP_PERCENT`).
+
+**Manual comp-tier assignment (new feature):**
+
+- `comp_tier_overrides` table (migration 0032, applied to local D1):
+  userId + jobId + compId → tier `arv|as_is`; DELETE-able via tier null.
+- `PUT /v1/analyze/jobs/:jobId/comp-tier` (dashboard-internal auth) —
+  upserts an override through the job's DO.
+- Read-time merge (`utils/comp-tier-overrides.ts`) applied in both the
+  job-status GET and saved-report GET: `comp.userTier` +
+  `report.jev.userOverrides` — overrides survive cache/saved reads and
+  never rewrite Jev's automatic `priceTier`.
+- Dashboard: `assignCompTier` server action; ARV/As-is pin buttons in
+  the expanded comp card (feedbackContext.jobId threaded through
+  ComparablesSection); `ARV·YOU`/`AS-IS·YOU` badges; provider comp ID
+  shown on the card for reference.
+- `report.jev` block added to `EvaluationReport` (was missing entirely —
+  jevSelection only fed confidence).
+
+**Verified:**
+
+- tsc clean both apps; api suite 24/24 files; dashboard 9/9.
+- E2E harness expanded to 24 assertions (score bounds, enrich-cohort =
+  nearest passers, two-tier test-2 bands, road-crossing demotion, 10%
+  split, handoff flag, override PUT→GET round-trip incl. report.jev).
+- Live runs on :8793: 228 Cobblestone 24/24 (2 passers demoted 93/94 by
+  tract crossing; override round-trip green); 4014 22nd Ave N 23/23
+  (0 passers → humanHandoff; override still persists).
+- Dashboard copy synced (audit steps, Jev card explainer, audit detail
+  shows the tract-barrier row).
+
+**Last Handoff:** branch `swe-2-eval` is the full refined spec, E2E-
+verified, not merged/deployed. Open product call still standing: in
+human-handoff runs the rules-fallback ARV displays next to the flag —
+suppress or keep? Next session: user decides merge, or iterate on the
+fallback-display question.
