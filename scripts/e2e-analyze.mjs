@@ -78,23 +78,33 @@ function validate(result) {
   const selected = comps.filter((x) => x.isEnabled === true || x.arvStatus === 'selected')
   check('selected comps exist', selected.length > 0, `${selected.length} selected`)
 
-  // Spec invariants for the swe-2-eval funnel — red on the pre-rework
-  // baseline, green once it lands:
+  // Jev's ARV set — comps the funnel marked selected:'core' (ARV-tier
+  // test-2 passers). In a human-handoff run this set is empty by design;
+  // whatever the rules engine enabled is reference, not Jev's ARV.
+  const jevSelected = comps.filter((x) => x.jevHybrid?.selected === 'core')
+
+  // Spec invariants for the swe-2-eval funnel:
   //   · nothing in the ARV set may have failed test 1 or test 2 (no fill)
+  //   · every ARV comp is a priceTier 'arv' test-2 passer
   //   · zero test-2 passers → humanHandoff flag on the report
-  const failedT1 = selected.filter((x) => (x.jevHybrid?.test1?.failedFields?.length ?? 0) > 0)
+  const failedT1 = jevSelected.filter((x) => (x.jevHybrid?.test1?.failedFields?.length ?? 0) > 0)
   check('no test-1 failure feeds ARV', failedT1.length === 0,
-    failedT1.length ? `${failedT1.length} selected comp(s) failed test 1` : 'clean')
+    failedT1.length ? `${failedT1.length} ARV comp(s) failed test 1` : 'clean')
 
-  const failedT2 = selected.filter((x) => x.jevHybrid?.test2 && x.jevHybrid.test2.passed !== true)
+  const failedT2 = jevSelected.filter((x) => x.jevHybrid?.test2?.passed !== true)
   check('no test-2 failure feeds ARV (no fill)', failedT2.length === 0,
-    failedT2.length ? `${failedT2.length} selected comp(s) failed test 2` : 'clean')
+    failedT2.length ? `${failedT2.length} ARV comp(s) failed test 2` : 'clean')
 
-  // ARV = mean of selected comps' adjusted price (serialized as adjustedPrice).
-  const adjusted = selected.map((x) => x.adjustedPrice ?? x.adjustedSalePrice ?? x.salePrice).filter((v) => typeof v === 'number' && v > 0)
+  const wrongTier = jevSelected.filter((x) => x.jevHybrid?.priceTier !== 'arv')
+  check('every ARV comp is in the arv price tier', wrongTier.length === 0,
+    wrongTier.length ? `${wrongTier.length} ARV comp(s) missing arv tier` : 'clean')
+
+  // ARV = mean of Jev's ARV comps' adjusted price when the funnel produced
+  // them; otherwise the number is the rules fallback (handoff run).
+  const adjusted = jevSelected.map((x) => x.jevHybrid?.adjustedPrice ?? x.adjustedPrice ?? x.adjustedSalePrice ?? x.salePrice).filter((v) => typeof v === 'number' && v > 0)
   if (adjusted.length > 0 && typeof arv === 'number') {
     const mean = adjusted.reduce((a, b) => a + b, 0) / adjusted.length
-    check('ARV = mean of selected adjusted prices', Math.abs(mean - arv) < Math.max(1, arv * 0.01),
+    check('ARV = mean of ARV-tier adjusted prices', Math.abs(mean - arv) < Math.max(1, arv * 0.01),
       `mean=${Math.round(mean)} arv=${Math.round(arv)}`)
   }
 

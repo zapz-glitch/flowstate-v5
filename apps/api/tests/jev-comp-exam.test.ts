@@ -1,12 +1,13 @@
 /**
  * Jev two-test comp evaluation — question generation and response parsing
  *
- * Test 1: one noul per raw field (8 per comp — bedrooms, bathrooms,
- * squareFeet, lotSize, yearBuilt, propertyType, salePrice, saleDate) with
- * preset tolerances baked into the question text. Test 2: subdivision,
- * neighborhood, advisory physical-character/material nouls, plus the
- * distance-dominant Score question. Strict parse — every question must be
- * answered in the typed envelope or the batch fails.
+ * Test 1: one noul per raw field (5 per comp — squareFeet, lotSize,
+ * yearBuilt, salePrice, saleDate — bedrooms and bathrooms are not judged)
+ * with preset tolerances baked into the question text. Test 2:
+ * subdivision, neighborhood, advisory physical-character/material/
+ * foundation nouls, plus the distance-dominant Score question. Strict
+ * parse — every question must be answered in the typed envelope or the
+ * batch fails.
  */
 
 import { describe, it, afterEach } from 'node:test'
@@ -85,11 +86,11 @@ afterEach(() => { globalThis.fetch = originalFetch })
 // ─── Test 1 — defs and runner ────────────────────────────────────────────────
 
 describe('buildTest1Defs', () => {
-  it('generates one noul per raw field — the six spec fields, in order', () => {
+  it('generates one noul per raw field — the five spec fields, in order', () => {
     const defs = buildTest1Defs(fakeFilters, fakeSubject)
     assert.deepEqual(defs.map((d) => d.key), COMP_TEST1_FIELDS)
     assert.deepEqual(defs.map((d) => d.key), [
-      'bathrooms', 'squareFeet', 'lotSize', 'yearBuilt', 'salePrice', 'saleDate',
+      'squareFeet', 'lotSize', 'yearBuilt', 'salePrice', 'saleDate',
     ])
   })
 
@@ -105,7 +106,7 @@ describe('buildTest1Defs', () => {
 describe('runCompTest1WithJev', () => {
   it('asks t1_<index>_<field> nouls and returns per-comp field probabilities', async () => {
     const capture: { bodies: Array<Record<string, unknown>> } = { bodies: [] }
-    mockJev((id) => (id.endsWith('_bathrooms') ? 0.9 : 0.8), goodScore, capture)
+    mockJev((id) => (id.endsWith('_squareFeet') ? 0.9 : 0.8), goodScore, capture)
     const result = await runCompTest1WithJev(fakeSubject, [fakeComp('a'), fakeComp('b')], fakeFilters, {}, env)
 
     const questions = Object.keys((capture.bodies[0]!.questions ?? {}) as object)
@@ -114,7 +115,7 @@ describe('runCompTest1WithJev', () => {
         assert.ok(questions.includes(`t1_${i}_${field}`), `missing question t1_${i}_${field}`)
       }
     }
-    assert.equal(result.results['a']!.bathrooms, 0.9)
+    assert.equal(result.results['a']!.squareFeet, 0.9)
     assert.equal(result.results['b']!.salePrice, 0.8)
     assert.equal(result.model, 'jev-test-1')
     assert.equal(result.inputTokens, 500)
@@ -142,13 +143,13 @@ describe('runCompTest1WithJev', () => {
 // ─── Test 2 — nouls + score ─────────────────────────────────────────────────
 
 describe('runCompTest2WithJev', () => {
-  it('asks the four nouls plus the score question per comp', async () => {
+  it('asks the five nouls plus the score question per comp', async () => {
     const capture: { bodies: Array<Record<string, unknown>> } = { bodies: [] }
     mockJev(() => 0.85, goodScore, capture)
     const result = await runCompTest2WithJev(fakeSubject, [fakeComp('a')], {}, env)
 
     const questions = (capture.bodies[0]!.questions ?? {}) as Record<string, { type: string; criteria?: string[] }>
-    for (const key of ['subdivision', 'neighborhood', 'physicalCharacter', 'material']) {
+    for (const key of ['subdivision', 'neighborhood', 'physicalCharacter', 'material', 'foundation']) {
       assert.equal(questions[`t2_0_${key}`]?.type, 'noul', `missing t2_0_${key} noul`)
     }
     const scoreQ = questions['t2_0_score']!
@@ -160,6 +161,7 @@ describe('runCompTest2WithJev', () => {
     assert.equal(r.nouls.neighborhood, 0.85)
     assert.equal(r.nouls.physicalCharacter, 0.85)
     assert.equal(r.nouls.material, 0.85)
+    assert.equal(r.nouls.foundation, 0.85)
     assert.equal(r.rawScore, 3.5)
     assert.equal(r.confidence, 0.7)
     assert.equal(r.levelProbabilities['4'], 0.5)

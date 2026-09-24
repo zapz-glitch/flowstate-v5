@@ -1,37 +1,42 @@
 /**
  * Comp Hybrid — the evaluation, entirely Jev-driven.
  *
- * Order of operations (product spec — two-test classification):
+ * Order of operations (product spec — swe-2-eval funnel):
  *   1. Facts only: a comp needs a usable sale price and a usable sale date.
  *      Everything after this line is Jev's judgment.
- *   2. Test 1 (services/jev, comp_tests_v1): raw-field nouls — bathrooms,
- *      squareFeet, lotSize, yearBuilt, salePrice, saleDate — "does this
- *      comp match the subject on this field, per the appraisal rules?"
- *      Passing every verifiable field puts the comp in the "passed test 1"
- *      bucket → it gets enriched. A field that cannot be verified (missing
- *      on the comp or the subject) is noted, never failed.
- *   3. Enrich every test-1 passer (property detail: subdivision,
- *      neighborhood, construction, features, transaction) via the caller's
- *      provider seam — test 2 needs fields the raw pool lacks.
+ *   2. Test 1 (services/jev, comp_tests_v1): raw-field nouls — squareFeet,
+ *      lotSize, yearBuilt, salePrice, saleDate — "does this comp match the
+ *      subject on this field, per the appraisal rules?" Passing every
+ *      verifiable field puts the comp in the "passed test 1" bucket. Every
+ *      passer also carries a composite score: proximity to the subject
+ *      dominates, blended with mean field-match strength. A field that
+ *      cannot be verified (missing on the comp or the subject) is noted,
+ *      never failed.
+ *   3. Enrich the TOP-10 test-1 passers by score (property detail:
+ *      subdivision, neighborhood, style, construction materials,
+ *      foundation, features, transaction) via the caller's provider seam —
+ *      test 2 needs fields the raw pool lacks.
  *   4. Test 2 (services/jev, comp_tests_v1): enriched nouls — a subdivision
  *      match passes; if subdivision fails, a neighborhood match still
- *      passes. Both no → test 2 fail → ineligible for the core comp set.
- *      Physical character and material nouls are asked as
- *      preferred-not-required advisory questions — recorded, never gating.
- *      The Score primitive rates every enriched comp on a distance-dominant
- *      spectrum (closest → highest, tapering as distance grows) with Jev's
- *      confidence.
- *   5. Selection: test-2 passers are the primary core comp set — ideally 3.
- *      When fewer than 3 pass, the set fills by the composite score —
- *      highest score, closest distance — across every eligible comp
- *      (test-2 fails, then capped test-1 passers, then test-1 fails as
- *      the last resort). Jev is always the selection authority.
- *   6. Adjustments are still deterministic math from appraisal settings;
- *      ARV = average of the selected comps' adjusted prices.
+ *      passes. Both no → test 2 fail. Physical character, material, and
+ *      foundation nouls are preferred-not-required — they lift the score:
+ *      a bare pass starts at 90 and each matched physical characteristic
+ *      pushes toward 100. The Score primitive also rates every enriched
+ *      comp on a distance-dominant spectrum (closest → highest) with Jev's
+ *      confidence — for fail ordering and display.
+ *   5. Classification: passing test 2 does NOT make a comp an ARV comp —
+ *      it only means the comp matched the rules. The test-2 passers are
+ *      split by price: the top 15% become the ARV set (variable count —
+ *      not capped at 3), the remainder become the as-is market reference.
+ *   6. No fill. Fewer than three passers yields whatever passed; zero
+ *      passers → humanHandoff — the run flags for manual review instead
+ *      of standing in unexamined comps.
+ *   7. Adjustments are still deterministic math from appraisal settings;
+ *      ARV = average of the ARV-set comps' adjusted prices.
  *
  * Every comp carries an audit record: why it never ran, its test-1 field
- * answers, its test-2 noul answers and score, and its rank among the
- * evaluated set.
+ * answers and composite score, its test-2 noul answers and score, its
+ * price-tier classification, and its rank among the evaluated set.
  */
 
 import type { NormalizedProperty, NormalizedComparable } from '../property-api/types'
@@ -58,8 +63,14 @@ import type {
 /** Pipeline identifier — bump when the stage contract changes. */
 export const COMP_HYBRID_VERSION = COMP_EVAL_VERSION
 
-/** The ideal core comp set — test-2 passers; filled from the fail bucket when short. */
-export const HYBRID_CORE_TARGET = 3
+/** ARV tier: the top fraction of test-2 passers by adjusted price. */
+export const COMP_ARV_TOP_PERCENT = 15
+
+/** Test-1 composite score: proximity weight (field-match strength takes the rest). */
+export const COMP_TEST1_PROXIMITY_WEIGHT = 0.6
+
+/** Test-2 passers start at this score; matched physical characteristics push toward 100. */
+export const COMP_TEST2_PASS_BASELINE = 90
 
 /**
  * Card-score bands per test outcome — the tier dominates, proximity sets
@@ -89,20 +100,24 @@ export interface HybridCompTest1 {
   unverifiableFields: CompTest1Field[]
   /** Every verifiable field at/above the gate — the "passed test 1" bucket */
   passed: boolean
+  /** Composite /100 — proximity to the subject dominates, blended with mean field-match strength. Orders passers for the enrichment budget. */
+  score: number | null
 }
 
 export interface HybridCompTest2 {
   nouls: {
     subdivision: number
     neighborhood: number
-    /** Advisory — preferred, never gating */
+    /** Advisory — preferred, never gating; feeds the 90→100 match boost */
     physicalCharacter: number
-    /** Advisory — preferred, never gating */
+    /** Advisory — preferred, never gating; feeds the 90→100 match boost */
     material: number
+    /** Advisory — preferred, never gating; feeds the 90→100 match boost */
+    foundation: number
   }
-  /** Subdivision yes, or neighborhood yes — eligible for the core comp set */
+  /** Subdivision yes, or neighborhood yes — eligible for classification */
   passed: boolean
-  /** Distance-dominant spectrum score /100 */
+  /** Passers: 90 baseline + up to 10 for matched physical characteristics. Fails: distance spectrum scaled below 90. */
   score: number
   confidence: number | null
   /** Score level index → probability */
@@ -137,21 +152,28 @@ export interface HybridCompScore {
   scoreConfidence: number | null
   /** 1-based rank across the whole pool by the composite score — #1 is the closest comp that passed both tests */
   poolRank: number | null
-  /** 'core' = test-2 passer in the ARV set · 'fill' = fallback pick from the test-2-fail bucket */
-  selected: 'core' | 'fill' | null
+  /**
+   * Price tier among test-2 passers — 'arv' = top-15% by adjusted price
+   * (the ARV set), 'as_is' = the remainder (as-is market reference).
+   * Null for any comp that didn't pass both tests.
+   */
+  priceTier: 'arv' | 'as_is' | null
+  /** 'core' = ARV-tier test-2 passer — the only comps that feed ARV */
+  selected: 'core' | null
   /** Deterministic adjustment — applied to this comp's sale price */
   adjustedPrice: number | null
 }
 
 export interface HybridTest1Result {
   entries: HybridCompScore[]
-  /** The selected comp set — core passers plus any fill picks */
+  /** The ARV set — test-2 passers in the top price tier */
   arvCompIds: string[]
-  /** Test-2 passers selected into the core set */
+  /** Every test-2 passer */
   coreCompIds: string[]
-  /** Test-1-pass / test-2-fail comps selected to fill the set to the target */
-  fillCompIds: string[]
-  coreTarget: number
+  /** Test-2 passers below the ARV tier — the as-is market reference */
+  asIsCompIds: string[]
+  /** True when zero comps passed test 2 — the run flags for manual review instead of standing in unexamined comps */
+  humanHandoff: boolean
   noulGate: number
   /** The questions this run asked — generated from the appraisal preset */
   questionSet: {
@@ -167,8 +189,8 @@ export interface HybridTest1Result {
     enriched: number
     test2Passed: number
     test2Failed: number
-    core: number
-    filled: number
+    arv: number
+    asIs: number
     selected: number
   }
   /** Jev run metadata per stage — absent when the stage never ran */
@@ -194,10 +216,10 @@ export interface HybridRun {
   test2?: { model: string; latencyMs: number; inputTokens: number; stateHashes: string[] } | null
   counts?: HybridTest1Result['counts']
   selection?: {
-    coreTarget: number
     noulGate: number
-    /** True when fill picks were needed — fewer than the target passed test 2 */
-    fillUsed?: boolean
+    arvTopPercent?: number
+    /** True when zero comps passed test 2 — flagged for manual review */
+    humanHandoff?: boolean
   }
   /** The questions this run asked — generated from the appraisal preset */
   questionSet?: HybridTest1Result['questionSet']
@@ -233,10 +255,11 @@ type Test2Fn = (
 type EnrichFn = (comps: NormalizedComparable[]) => Promise<NormalizedComparable[]>
 
 /**
- * Test 1 on the raw pool → enrich every passer → test 2 on the enriched
- * set → core set = test-2 passers, filled to the target from the
- * distance-scored fail bucket. `test1`, `test2`, and `enrich` are
- * injectable so the engine is testable without a live TypeSafe call.
+ * Test 1 on the raw pool → enrich the top-10 passers by composite score →
+ * test 2 on the enriched set → split passers by price into the ARV tier
+ * (top 15%) and the as-is reference. No fill: zero passers flags the run
+ * for human handoff. `test1`, `test2`, and `enrich` are injectable so the
+ * engine is testable without a live TypeSafe call.
  */
 export async function runJevEvaluation(
   subject: NormalizedProperty,
@@ -245,7 +268,6 @@ export async function runJevEvaluation(
   adjustments: AppraisalAdjustment[],
   env: JevEnv,
   opts?: {
-    coreTarget?: number
     noulGate?: number
     now?: Date
     rules?: unknown
@@ -257,7 +279,6 @@ export async function runJevEvaluation(
   },
 ): Promise<HybridTest1Result> {
   const now = opts?.now ?? new Date()
-  const coreTarget = opts?.coreTarget ?? HYBRID_CORE_TARGET
   const noulGate = opts?.noulGate ?? COMP_NOUL_GATE
   const test1Fn: Test1Fn = opts?.test1 ?? runCompTest1WithJev
   const test2Fn: Test2Fn = opts?.test2 ?? runCompTest2WithJev
@@ -284,6 +305,7 @@ export async function runJevEvaluation(
       score: null,
       scoreConfidence: null,
       poolRank: null,
+      priceTier: null,
       selected: null,
       adjustedPrice: evaluation.adjustedPrice,
     }
@@ -326,6 +348,9 @@ export async function runJevEvaluation(
         // not always return bedrooms/lot/type on the raw comps feed, and an
         // appraiser does not disqualify a sale over missing data.
         passed: failedFields.length === 0,
+        // Composite /100 — filled in below for passers (needs every noul
+        // recorded first); fails keep null.
+        score: null,
       }
     }
   }
@@ -338,24 +363,36 @@ export async function runJevEvaluation(
     progress?.(`Test 1 done — ${test1Passers.length} passed, ${candidates.length - test1Passers.length} failed`, { stage: 'test1_done', passed: test1Passers.length, failed: candidates.length - test1Passers.length })
   }
 
-  // Enrichment budget — provider detail calls go only to the strongest +
-  // closest test-1 passers: proximity first (near = high confidence),
-  // test-1 field strength as the tiebreak. Strength = mean noul
-  // probability across every test-1 field — unverifiable fields count 0,
-  // so coverage is rewarded along with pass quality. Passers beyond the
-  // cap keep stage 'test1_pass' and never see test 2.
+  // Test-1 composite score for every passer /100 — proximity to the
+  // subject dominates (closer = higher, scaled against the configured
+  // distance radius), blended with mean field-match strength across the
+  // test-1 fields. Unverifiable fields count 0, so coverage is rewarded
+  // along with pass quality.
+  const distanceRule = filters.find((f) => f.type === 'distance' && f.enabled !== false)
+  const radiusMiles = typeof distanceRule?.value === 'number' && distanceRule.value > 0 ? distanceRule.value : 1
   const strengthOf = (e: HybridCompScore): number => {
     if (!e.test1 || defs.length === 0) return 0
     let sum = 0
     for (const def of defs) sum += e.test1.nouls[def.key] ?? 0
     return sum / defs.length
   }
+  for (const e of test1Passers) {
+    const d = byId.get(e.compId)?.distanceMiles
+    const proximity = d == null || !Number.isFinite(d) ? 0 : Math.max(0, 1 - d / radiusMiles)
+    e.test1!.score = Math.round(
+      100 * (COMP_TEST1_PROXIMITY_WEIGHT * proximity + (1 - COMP_TEST1_PROXIMITY_WEIGHT) * strengthOf(e)),
+    )
+  }
+
+  // Enrichment budget — provider detail calls go only to the ten
+  // highest-scoring test-1 passers. Score desc, nearest as the tiebreak.
+  // Passers beyond the cap keep stage 'test1_pass' and never see test 2.
   const enrichPoolComps = [...test1PassComps]
     .sort((a, b) => {
-      const da = a.distanceMiles ?? Infinity
-      const db = b.distanceMiles ?? Infinity
-      if (da !== db) return da - db
-      return strengthOf(entries.find((e) => e.compId === b.id)!) - strengthOf(entries.find((e) => e.compId === a.id)!)
+      const sa = entries.find((e) => e.compId === a.id)!.test1?.score ?? -1
+      const sb = entries.find((e) => e.compId === b.id)!.test1?.score ?? -1
+      if (sb !== sa) return sb - sa
+      return (a.distanceMiles ?? Infinity) - (b.distanceMiles ?? Infinity)
     })
     .slice(0, COMP_ENRICH_MAX)
 
@@ -401,10 +438,16 @@ export async function runJevEvaluation(
       const t2 = result.results[entry.compId]
       if (!t2) throw new Error(`Jev test 2 returned no result for comparable ${entry.compId}; no partial coverage accepted.`)
       const passed = t2.nouls.subdivision >= noulGate || t2.nouls.neighborhood >= noulGate
+      // Passers: 90 baseline + up to 10 as physical matches land (character,
+      // material, foundation). Fails keep the distance spectrum scaled
+      // below the pass floor so a fail never outranks a pass.
+      const matchMean = (t2.nouls.physicalCharacter + t2.nouls.material + t2.nouls.foundation) / 3
       entry.test2 = {
         nouls: t2.nouls,
         passed,
-        score: Math.round((t2.rawScore / maxLevel) * 100),
+        score: passed
+          ? Math.min(100, COMP_TEST2_PASS_BASELINE + Math.round((100 - COMP_TEST2_PASS_BASELINE) * matchMean))
+          : Math.min(COMP_TEST2_PASS_BASELINE - 1, Math.round((t2.rawScore / maxLevel) * (COMP_TEST2_PASS_BASELINE - 1))),
         confidence: t2.confidence,
         levelProbabilities: t2.levelProbabilities,
       }
@@ -436,13 +479,16 @@ export async function runJevEvaluation(
   // Stage 5 — the card score for every comp: the test outcome sets the band
   // and proximity to the subject sets the position inside it, so the score
   // sort reads best→worst with the nearest comps always on top. Test-2
-  // passers top the scale, the test-1-pass/test-2-fail bucket sits in the
-  // middle, and test-1 fails (or unusable comps) sit at the bottom. A
-  // test-2 pass is the boost; failing test 2 is never a penalty — landing
-  // in the middle band is all it does.
+  // passers carry their match score (90 baseline → 100 on physical
+  // matches); the test-1-pass/test-2-fail bucket sits in the middle, and
+  // test-1 fails (or unusable comps) sit at the bottom.
   for (const stage of ['test2_pass', 'test2_fail', 'test1_pass', 'test1_fail', 'ineligible'] as const) {
     const tierEntries = entries.filter((e) => e.stage === stage)
     if (tierEntries.length === 0) continue
+    if (stage === 'test2_pass') {
+      for (const e of tierEntries) e.score = e.test2!.score
+      continue
+    }
     const [lo, hi] = COMP_TIER_BANDS[stage]
     const distances = tierEntries
       .map((e) => byId.get(e.compId)?.distanceMiles)
@@ -456,31 +502,35 @@ export async function runJevEvaluation(
     }
   }
 
-  // Stage 6 — selection: test-2 passers are the primary core comp set
-  // (ideally 3 — all passers are selected, no cap). When fewer than the
-  // target pass, the set fills by the composite score — highest score,
-  // closest distance — across every remaining eligible comp. Jev is the
-  // authority end-to-end: a pool with no passers still yields its best
-  // comps instead of deferring to the legacy rules engine.
+  // Stage 6 — classification: passing test 2 means the comp matched the
+  // rules, not that it's an ARV comp. Split the passers by adjusted price —
+  // the top 15% become the ARV set (variable count, not capped at 3), the
+  // rest become the as-is market reference. No fill: a short passer set
+  // stays short, and zero passers flags the run for human handoff.
   const core = evaluated.filter((e) => e.stage === 'test2_pass')
-  const fillNeeded = Math.max(0, coreTarget - core.length)
-  const fill = fillNeeded > 0
-    ? [...entries]
-        .filter((e) => e.stage !== 'test2_pass' && e.stage !== 'ineligible')
-        .sort((a, b) => {
-          const ds = (b.score ?? -1) - (a.score ?? -1)
-          if (ds !== 0) return ds
-          const da = byId.get(a.compId)?.distanceMiles ?? Infinity
-          const db = byId.get(b.compId)?.distanceMiles ?? Infinity
-          return da - db
-        })
-        .slice(0, fillNeeded)
-    : []
-  for (const e of core) e.selected = 'core'
-  for (const e of fill) e.selected = 'fill'
+  const arvCount = core.length > 0
+    ? Math.max(1, Math.ceil(core.length * (COMP_ARV_TOP_PERCENT / 100)))
+    : 0
+  const byPrice = [...core].sort((a, b) => {
+    const pa = a.adjustedPrice ?? -Infinity
+    const pb = b.adjustedPrice ?? -Infinity
+    if (pb !== pa) return pb - pa
+    return (b.test2?.score ?? 0) - (a.test2?.score ?? 0)
+  })
+  const arvSet = new Set(byPrice.slice(0, arvCount).map((e) => e.compId))
+  for (const e of core) {
+    e.priceTier = arvSet.has(e.compId) ? 'arv' : 'as_is'
+    e.selected = arvSet.has(e.compId) ? 'core' : null
+  }
+  const arvCompIds = [...arvSet]
+  const asIsCompIds = core.filter((e) => e.priceTier === 'as_is').map((e) => e.compId)
+  const humanHandoff = core.length === 0
+  if (humanHandoff) {
+    progress?.('Human handoff — zero comps passed test 2', { stage: 'human_handoff' })
+  }
   progress?.(
-    `Selection — ${core.length} core comps${fill.length ? ` + ${fill.length} fill by score` : ''} — computing ARV`,
-    { stage: 'selected', core: core.length, filled: fill.length, selected: core.length + fill.length }
+    `Selection — ${arvCompIds.length} ARV / ${asIsCompIds.length} as-is of ${core.length} test-2 passers${humanHandoff ? ' — human handoff' : ''}`,
+    { stage: 'selected', arv: arvCompIds.length, asIs: asIsCompIds.length, passers: core.length, humanHandoff }
   )
 
   // Rank the whole pool by the composite (score desc → nearest → newest) so
@@ -505,17 +555,17 @@ export async function runJevEvaluation(
     enriched: entries.filter((e) => e.enriched).length,
     test2Passed: core.length,
     test2Failed: evaluated.length - core.length,
-    core: core.length,
-    filled: fill.length,
-    selected: core.length + fill.length,
+    arv: arvCompIds.length,
+    asIs: asIsCompIds.length,
+    selected: arvCompIds.length,
   }
 
   return {
     entries,
-    arvCompIds: [...core.map((e) => e.compId), ...fill.map((e) => e.compId)],
+    arvCompIds,
     coreCompIds: core.map((e) => e.compId),
-    fillCompIds: fill.map((e) => e.compId),
-    coreTarget,
+    asIsCompIds,
+    humanHandoff,
     noulGate,
     questionSet: {
       test1: defs.map(({ key, label }) => ({ key, label })),
@@ -524,6 +574,7 @@ export async function runJevEvaluation(
         { key: 'neighborhood', label: COMP_TEST2_NOUL_LABELS.neighborhood, advisory: false },
         { key: 'physicalCharacter', label: COMP_TEST2_NOUL_LABELS.physicalCharacter, advisory: true },
         { key: 'material', label: COMP_TEST2_NOUL_LABELS.material, advisory: true },
+        { key: 'foundation', label: COMP_TEST2_NOUL_LABELS.foundation, advisory: true },
       ],
       scoreLevels: COMP_TEST2_SCORE_LEVELS,
     },

@@ -1,21 +1,23 @@
 /**
- * Jev comp evaluation — two-test engine coverage
+ * Jev comp evaluation — two-test funnel coverage (swe-2-eval spec)
  *
- * Facts-only eligibility (usable price + date), test 1 — the six
- * raw-field nouls (verifiable fields must clear the gate; unverifiable is
- * noted, not failed), the enrichment seam (test-1 passers only), test 2 —
- * subdivision OR neighborhood passes, advisory physical-character/material
- * nouls, Jev's distance Score with confidence (fill ranking), the core set
- * (test-2 passers, no cap), filling to the target from the test-2-fail
- * bucket, and the tiered composite card score every comp carries (test
- * outcome sets the band, proximity the position). The TypeSafe calls and
- * the provider enrichment seam are injected — these tests cover the
- * engine's decisions, not Jev.
+ * Facts-only eligibility (usable price + date), test 1 — the five
+ * raw-field nouls, no bathrooms (verifiable fields must clear the gate;
+ * unverifiable is noted, not failed) plus the composite score —
+ * proximity-dominant, blended with field-match strength — that picks the
+ * ten passers who get enriched. Test 2 — subdivision OR neighborhood
+ * passes; physical-character/material/foundation nouls are advisory and
+ * lift a pass from the 90 baseline toward 100. Classification — passers
+ * split by adjusted price, top 15% into the ARV set (variable count), the
+ * rest as-is reference. No fill — a short passer set stays short and zero
+ * passers flags human handoff. The TypeSafe calls and the provider
+ * enrichment seam are injected — these tests cover the engine's
+ * decisions, not Jev.
  */
 
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { runJevEvaluation, HYBRID_CORE_TARGET } from '../src/services/comp-hybrid'
+import { runJevEvaluation } from '../src/services/comp-hybrid'
 import { DEFAULT_FILTERS, DEFAULT_ADJUSTMENTS } from '../src/services/appraisal/types'
 import { evaluateComparable } from '../src/services/appraisal'
 import type { AppraisedComparable } from '../src/services/appraisal/types'
@@ -112,7 +114,7 @@ const tester1 = (
   }
 
 const PASS_T2_NOULS: Record<CompTest2Noul, number> = {
-  subdivision: 0.9, neighborhood: 0.9, physicalCharacter: 0.9, material: 0.9,
+  subdivision: 0.9, neighborhood: 0.9, physicalCharacter: 0.9, material: 0.9, foundation: 0.9,
 }
 
 type T2Entry = JevCompTest2Result['results'][string]
@@ -177,10 +179,18 @@ describe('runJevEvaluation — eligibility', () => {
   })
 })
 
-// ─── Test 1 — raw-field nouls ────────────────────────────────────────────────
+// ─── Test 1 — raw-field nouls + composite score ──────────────────────────────
 
 describe('runJevEvaluation — test 1', () => {
-  it('all six fields at/above the gate passes test 1 and reaches test 2', async () => {
+  it('bathrooms is not a test-1 field — the five raw fields are', () => {
+    assert.deepEqual(
+      [...COMP_TEST1_FIELDS].sort(),
+      ['lotSize', 'saleDate', 'salePrice', 'squareFeet', 'yearBuilt'],
+    )
+    assert.ok(!COMP_TEST1_FIELDS.includes('bathrooms' as CompTest1Field))
+  })
+
+  it('all fields at/above the gate passes test 1 and reaches test 2', async () => {
     const capture: { ids?: string[] } = {}
     const result = await evaluate([comp('a'), comp('b')], {}, {}, { test2: tester2({}, capture) })
     assert.deepEqual(capture.ids!.sort(), ['a', 'b'], 'both passers are examined')
@@ -208,6 +218,7 @@ describe('runJevEvaluation — test 1', () => {
     assert.equal(b.stage, 'test1_fail')
     assert.deepEqual(b.test1!.failedFields, ['squareFeet'])
     assert.equal(b.test1!.passed, false)
+    assert.equal(b.test1!.score, null, 'fails carry no composite score')
     assert.equal(b.test2, null)
     assert.deepEqual(t2Capture.ids, ['a'], 'only the test-1 passer is examined')
     assert.deepEqual(enrichCalls, [['a']], 'only the test-1 passer is enriched')
@@ -215,12 +226,12 @@ describe('runJevEvaluation — test 1', () => {
 
   it('a field that cannot be verified is noted, not failed — missing data never disqualifies', async () => {
     const result = await evaluate(
-      [comp('a'), comp('noBaths', { bathrooms: null })],
+      [comp('a'), comp('noLot', { lotSizeSquareFeet: null, lotSizeAcres: null })],
     )
-    const nb = result.entries.find((e) => e.compId === 'noBaths')!
+    const nb = result.entries.find((e) => e.compId === 'noLot')!
     assert.equal(nb.stage, 'test2_pass')
     assert.deepEqual(nb.test1!.failedFields, [])
-    assert.deepEqual(nb.test1!.unverifiableFields, ['bathrooms'])
+    assert.deepEqual(nb.test1!.unverifiableFields, ['lotSize'])
     assert.equal(nb.test1!.passed, true)
     assert.equal(result.counts.test1Passed, 2)
   })
@@ -228,6 +239,27 @@ describe('runJevEvaluation — test 1', () => {
   it('a noul exactly at the gate threshold passes the field', async () => {
     const result = await evaluate([comp('a')], { a: { yearBuilt: 0.5 } })
     assert.equal(result.entries[0]!.test1!.passed, true)
+  })
+
+  it('composite score rewards proximity — the nearer passer scores higher', async () => {
+    const result = await evaluate(
+      [comp('near', { distanceMiles: 0.05 }), comp('far', { distanceMiles: 0.9 })],
+    )
+    const near = result.entries.find((e) => e.compId === 'near')!
+    const far = result.entries.find((e) => e.compId === 'far')!
+    assert.ok(near.test1!.score != null && far.test1!.score != null)
+    assert.ok(near.test1!.score! > far.test1!.score!, 'closer to subject scores higher')
+  })
+
+  it('composite score rewards field strength — stronger matches score higher at equal distance', async () => {
+    const result = await evaluate(
+      [comp('strong'), comp('weak')],
+      // Both pass, but 'weak' barely clears each field
+      { weak: { squareFeet: 0.55, lotSize: 0.55, yearBuilt: 0.55, salePrice: 0.55, saleDate: 0.55 } },
+    )
+    const strong = result.entries.find((e) => e.compId === 'strong')!
+    const weak = result.entries.find((e) => e.compId === 'weak')!
+    assert.ok(strong.test1!.score! > weak.test1!.score!)
   })
 })
 
@@ -263,7 +295,9 @@ describe('runJevEvaluation — enrichment', () => {
     assert.equal(enrichCalls.length, 0)
   })
 
-  it('enrichment is capped at the 10 nearest passers — the rest stay test1_pass and never see test 2', async () => {
+  it('enrichment goes to the 10 highest-scoring passers — the rest stay test1_pass', async () => {
+    // 12 passers: c0..c11 nearest→farthest, all with identical field
+    // strength, so composite score follows proximity — the 10 nearest win.
     const ids = Array.from({ length: 12 }, (_, i) => `c${i}`)
     const comps = ids.map((id, i) => comp(id, { distanceMiles: 0.1 + i * 0.05 }))
     const enrichCalls: string[][] = []
@@ -272,7 +306,7 @@ describe('runJevEvaluation — enrichment', () => {
       test2: tester2({}, capture),
       enrich: async (cs: NormalizedComparable[]) => { enrichCalls.push(cs.map((c) => c.id)); return cs.map((c) => ({ ...c, isEnriched: true })) },
     })
-    const expected = ids.slice(0, 10) // 10 nearest
+    const expected = ids.slice(0, 10) // 10 highest scores = 10 nearest here
     assert.deepEqual(enrichCalls, [expected])
     assert.deepEqual(capture.ids, expected, 'test 2 ran on the capped enriched set only')
     const stageOf = (id: string) => result.entries.find((e) => e.compId === id)!.stage
@@ -281,12 +315,33 @@ describe('runJevEvaluation — enrichment', () => {
     assert.equal(stageOf('c11'), 'test1_pass')
     assert.equal(result.counts.enriched, 10)
   })
+
+  it('a stronger-but-farther passer can outscore a nearer weak passer for the enrich cohort', async () => {
+    // 11 passers — 'strong' is farthest but field-perfect; 'w0'..'w9' are
+    // near but barely pass every field. Proximity dominates (60%), so
+    // 'strong' must be extreme to break the top-10… give it a different
+    // shape: keep it simple — 'strong' mid-distance perfect vs 'w10' near
+    // but barely-passing. Assert strong ranks ahead of the weakest.
+    const ids = Array.from({ length: 11 }, (_, i) => `w${i}`)
+    const comps = [
+      comp('strong', { distanceMiles: 0.45 }),
+      ...ids.map((id, i) => comp(id, { distanceMiles: 0.05 + i * 0.04 })), // w0=0.05 … w10=0.45
+    ]
+    const weakFields = { squareFeet: 0.5, lotSize: 0.5, yearBuilt: 0.5, salePrice: 0.5, saleDate: 0.5 }
+    const t1 = Object.fromEntries(ids.map((id) => [id, weakFields]))
+    const capture: { ids?: string[] } = {}
+    const result = await evaluate(comps, t1, {}, { test2: tester2({}, capture) })
+    assert.ok(capture.ids!.includes('strong'), 'perfect-strength passer made the top-10')
+    assert.equal(capture.ids!.length, 10)
+    const strong = result.entries.find((e) => e.compId === 'strong')!
+    assert.ok(strong.test1!.score != null)
+  })
 })
 
-// ─── Test 2 — subdivision OR neighborhood ────────────────────────────────────
+// ─── Test 2 — subdivision OR neighborhood + match-boosted score ──────────────
 
 describe('runJevEvaluation — test 2', () => {
-  it('subdivision yes passes test 2 — eligible for the core set', async () => {
+  it('subdivision yes passes test 2', async () => {
     const result = await evaluate(
       [comp('a')],
       {},
@@ -295,7 +350,6 @@ describe('runJevEvaluation — test 2', () => {
     const a = result.entries[0]!
     assert.equal(a.test2!.passed, true)
     assert.equal(a.stage, 'test2_pass')
-    assert.equal(a.selected, 'core')
   })
 
   it('subdivision no + neighborhood yes still passes test 2', async () => {
@@ -305,10 +359,9 @@ describe('runJevEvaluation — test 2', () => {
       { a: t2(4, { nouls: { subdivision: 0.2, neighborhood: 0.8 } }) },
     )
     assert.equal(result.entries[0]!.test2!.passed, true)
-    assert.equal(result.entries[0]!.selected, 'core')
   })
 
-  it('subdivision no + neighborhood no fails test 2 — ineligible but scored', async () => {
+  it('subdivision no + neighborhood no fails test 2 — scored below the pass floor', async () => {
     const result = await evaluate(
       [comp('a'), comp('b'), comp('c'), comp('d')],
       {},
@@ -322,80 +375,133 @@ describe('runJevEvaluation — test 2', () => {
     const b = result.entries.find((e) => e.compId === 'b')!
     assert.equal(b.stage, 'test2_fail')
     assert.equal(b.test2!.passed, false)
-    assert.equal(b.test2!.score, 75, 'rawScore 3 of 4 → 75/100')
-    assert.equal(b.score, 74, 'all four comps share a distance → middle-band top')
+    assert.ok(b.test2!.score < 90, `fail scored ${b.test2!.score} — below the 90 pass floor`)
   })
 
-  it('physical character and material are advisory — they never gate', async () => {
+  it('a bare pass starts at 90 — matched physical characteristics push toward 100', async () => {
+    const result = await evaluate(
+      [comp('bare'), comp('matched')],
+      {},
+      {
+        bare: t2(4, { nouls: { physicalCharacter: 0, material: 0, foundation: 0 } }),
+        matched: t2(4, { nouls: { physicalCharacter: 1, material: 1, foundation: 1 } }),
+      },
+    )
+    const bare = result.entries.find((e) => e.compId === 'bare')!
+    const matched = result.entries.find((e) => e.compId === 'matched')!
+    assert.equal(bare.test2!.score, 90, 'no physical matches → the 90 baseline')
+    assert.equal(matched.test2!.score, 100, 'all physical matches → 100')
+    assert.equal(bare.score, 90)
+    assert.equal(matched.score, 100)
+  })
+
+  it('physical character, material, and foundation are advisory — they never gate', async () => {
     const result = await evaluate(
       [comp('a')],
       {},
-      { a: t2(4, { nouls: { physicalCharacter: 0.1, material: 0.1 } }) },
+      { a: t2(4, { nouls: { physicalCharacter: 0.1, material: 0.1, foundation: 0.1 } }) },
     )
     const a = result.entries[0]!
     assert.equal(a.test2!.nouls.physicalCharacter, 0.1)
-    assert.equal(a.test2!.nouls.material, 0.1)
+    assert.equal(a.test2!.nouls.foundation, 0.1)
     assert.equal(a.test2!.passed, true, 'advisory nouls do not block a subdivision pass')
-    assert.equal(a.selected, 'core')
+    assert.equal(a.test2!.score, 90 + Math.round(10 * 0.1))
   })
 })
 
-// ─── Selection — core set + fill ─────────────────────────────────────────────
+// ─── Classification — top-15% price tier, no fill, human handoff ─────────────
 
-describe('runJevEvaluation — selection', () => {
-  it('every test-2 passer is selected as core — no cap', async () => {
-    const ids = ['c1', 'c2', 'c3', 'c4', 'c5']
-    const result = await evaluate(
-      ids.map((id, i) => comp(id, { distanceMiles: 0.1 + i * 0.1 })),
-      {},
-      Object.fromEntries(ids.map((id, i) => [id, t2(4 - i * 0.2)])),
-    )
-    assert.equal(result.coreCompIds.length, 5)
-    assert.equal(result.fillCompIds.length, 0)
-    assert.deepEqual(result.arvCompIds.sort(), ids)
-    assert.ok(result.entries.every((e) => e.selected === 'core'))
+describe('runJevEvaluation — classification', () => {
+  it('the top 15% of passers by adjusted price become the ARV set — the rest as-is', async () => {
+    // 10 passers at escalating prices → ceil(10×0.15) = 2 ARV comps:
+    // the two most expensive. Remaining 8 are as-is reference.
+    const ids = Array.from({ length: 10 }, (_, i) => `c${i}`)
+    const comps = ids.map((id, i) => comp(id, { salePrice: 300_000 + i * 10_000, distanceMiles: 0.1 + i * 0.05 }))
+    const result = await evaluate(comps)
+    assert.equal(result.coreCompIds.length, 10)
+    assert.equal(result.counts.test2Passed, 10)
+    assert.equal(result.arvCompIds.length, 2, 'top 15% of 10 passers → 2 ARV comps')
+    assert.equal(result.asIsCompIds.length, 8)
+    const tiers = Object.fromEntries(result.entries.map((e) => [e.compId, e.priceTier]))
+    const arvIds = result.arvCompIds
+    for (const id of arvIds) assert.equal(tiers[id], 'arv')
+    for (const id of result.asIsCompIds) assert.equal(tiers[id], 'as_is')
+    // The ARV comps are the two highest-priced passers (c8, c9) — adjusted
+    // price tracks sale price with matching fixtures.
+    assert.deepEqual(arvIds.sort(), ['c8', 'c9'])
+    // Only ARV-tier comps are 'selected' for the ARV.
+    for (const e of result.entries) {
+      assert.equal(e.selected === 'core', e.priceTier === 'arv')
+    }
+    assert.equal(result.humanHandoff, false)
   })
 
-  it('fewer than 3 passers → the test-2-fail bucket fills to the target by score', async () => {
+  it('a single passer still produces an ARV comp — minimum one ARV slot', async () => {
+    const result = await evaluate([comp('a')])
+    assert.deepEqual(result.arvCompIds, ['a'])
+    assert.deepEqual(result.asIsCompIds, [])
+    assert.equal(result.entries[0]!.priceTier, 'arv')
+    assert.equal(result.entries[0]!.selected, 'core')
+  })
+
+  it('fewer than 3 passers → no fill — the set stays short', async () => {
     const result = await evaluate(
-      [comp('p1'), comp('p2'), comp('f1'), comp('f2'), comp('f3')],
+      [comp('p1'), comp('p2'), comp('f1'), comp('f2')],
       {},
       {
         p1: t2(4, { nouls: { subdivision: 0.9, neighborhood: 0.9 } }),
         p2: t2(3, { nouls: { subdivision: 0.9, neighborhood: 0.4 } }),
         f1: t2(3.5, { nouls: { subdivision: 0.2, neighborhood: 0.2 } }),
         f2: t2(2.5, { nouls: { subdivision: 0.2, neighborhood: 0.2 } }),
-        f3: t2(1, { nouls: { subdivision: 0.1, neighborhood: 0.1 } }),
       },
     )
     assert.deepEqual(result.coreCompIds.sort(), ['p1', 'p2'])
-    assert.deepEqual(result.fillCompIds, ['f1'], 'highest-scored fail fills the set to 3')
-    assert.deepEqual(result.arvCompIds, ['p1', 'p2', 'f1'])
-    assert.equal(result.entries.find((e) => e.compId === 'f1')!.selected, 'fill')
-    assert.equal(result.entries.find((e) => e.compId === 'f2')!.selected, null)
+    assert.equal(result.arvCompIds.length, 1, 'top 15% of 2 passers → 1 ARV comp, no fill')
+    assert.equal(result.asIsCompIds.length, 1)
+    for (const id of ['f1', 'f2']) {
+      const e = result.entries.find((en) => en.compId === id)!
+      assert.equal(e.selected, null, 'test-2 fails never fill')
+      assert.equal(e.priceTier, null)
+      assert.ok(!result.arvCompIds.includes(id))
+    }
   })
 
-  it('zero test-2 passers → the set is entirely fill picks', async () => {
+  it('zero test-2 passers → human handoff, empty ARV set, nothing filled', async () => {
     const result = await evaluate(
-      [comp('a'), comp('b'), comp('c'), comp('d')],
+      [comp('a'), comp('b'), comp('c')],
       {},
       {
         a: t2(4, { nouls: { subdivision: 0.2, neighborhood: 0.2 } }),
-        b: t2(3, { nouls: { subdivision: 0.2, neighborhood: 0.2 } }),
+        b: t2(3, { nouls: { subdivision: 0.1, neighborhood: 0.1 } }),
         c: t2(2, { nouls: { subdivision: 0.1, neighborhood: 0.1 } }),
-        d: t2(1, { nouls: { subdivision: 0.1, neighborhood: 0.1 } }),
       },
     )
-    assert.equal(result.coreCompIds.length, 0)
-    assert.deepEqual(result.fillCompIds, ['a', 'b', 'c'])
     assert.equal(result.counts.test2Passed, 0)
-    assert.equal(result.counts.filled, 3)
+    assert.equal(result.humanHandoff, true)
+    assert.deepEqual(result.arvCompIds, [])
+    assert.deepEqual(result.asIsCompIds, [])
+    assert.equal(result.counts.selected, 0)
+    assert.ok(result.entries.every((e) => e.selected === null))
+  })
+
+  it('a test-1 fail can never be selected — no matter how close or cheap', async () => {
+    const result = await evaluate(
+      [comp('pass'), comp('fail', { distanceMiles: 0.05, salePrice: 999_000 })],
+      { fail: { squareFeet: 0.1 } },
+      { pass: t2(4) },
+    )
+    const fail = result.entries.find((e) => e.compId === 'fail')!
+    assert.equal(fail.stage, 'test1_fail')
+    assert.equal(fail.selected, null)
+    assert.equal(fail.priceTier, null)
+    assert.ok(!result.arvCompIds.includes('fail'))
+    assert.ok(!result.asIsCompIds.includes('fail'))
   })
 
   it('poolRank covers the whole pool by composite — #1 is the closest comp that passed both tests', async () => {
     const result = await evaluate(
       [comp('far', { distanceMiles: 0.9 }), comp('near', { distanceMiles: 0.1 }), comp('fail', { distanceMiles: 0.05 })],
-      { fail: { bathrooms: 0.1 } },
+      { fail: { squareFeet: 0.1 } },
       {},
     )
     const ranks = Object.fromEntries(result.entries.map((e) => [e.compId, e.poolRank]))
@@ -413,36 +519,12 @@ describe('runJevEvaluation — selection', () => {
     assert.equal(result.entries[0]!.scoreConfidence, 0.93)
     assert.equal(result.entries[0]!.test2!.confidence, 0.93)
   })
-
-  it('test-1 fails are the last-resort fill — better tiers fill first', async () => {
-    const result = await evaluate(
-      [comp('pass'), comp('f1'), comp('f2'), comp('fail', { distanceMiles: 0.05 })],
-      { fail: { bathrooms: 0.1 } },
-      { pass: t2(4), f1: t2(2, { nouls: { subdivision: 0.1, neighborhood: 0.1 } }), f2: t2(1, { nouls: { subdivision: 0.1, neighborhood: 0.1 } }) },
-    )
-    const fail = result.entries.find((e) => e.compId === 'fail')!
-    assert.equal(fail.selected, null, 'nearest test-1 fail still loses to test-2 fails')
-    assert.ok(!result.arvCompIds.includes('fail'))
-    assert.deepEqual(result.fillCompIds.sort(), ['f1', 'f2'])
-  })
-
-  it('a pool where nothing passes still fills by score — Jev never defers to the rules engine', async () => {
-    const result = await evaluate(
-      [comp('a', { distanceMiles: 0.1 }), comp('b', { distanceMiles: 0.3 }), comp('c', { distanceMiles: 0.2 }), comp('d', { distanceMiles: 0.9 })],
-      { a: { bathrooms: 0.1 }, b: { bathrooms: 0.1 }, c: { bathrooms: 0.1 }, d: { bathrooms: 0.1 } },
-      {},
-    )
-    assert.equal(result.coreCompIds.length, 0)
-    assert.deepEqual(result.fillCompIds, ['a', 'c', 'b'], 'nearest-first inside the bottom band')
-    assert.equal(result.counts.selected, 3)
-    assert.ok(result.entries.every((e) => e.stage === 'test1_fail'))
-  })
 })
 
 // ─── Composite card score — tier band + proximity position ───────────────────
 
 describe('runJevEvaluation — composite card score', () => {
-  it('every comp carries a score — test outcome sets the band, proximity the position', async () => {
+  it('every comp carries a score — test outcome sets the band', async () => {
     const result = await evaluate(
       [
         comp('p1', { distanceMiles: 0.2 }),
@@ -450,7 +532,7 @@ describe('runJevEvaluation — composite card score', () => {
         comp('f', { distanceMiles: 0.05 }),
         comp('t1', { distanceMiles: 0.3 }),
       ],
-      { t1: { bathrooms: 0.1 } },
+      { t1: { squareFeet: 0.1 } },
       {
         p1: t2(4),
         p2: t2(4),
@@ -462,21 +544,18 @@ describe('runJevEvaluation — composite card score', () => {
     // the pool and still sits below both test-2 passers.
     assert.ok(score['p1']! > score['f']!)
     assert.ok(score['f']! > score['t1']!)
-    // Bands: both tests → 75–100, test-2 fail → 35–74, test-1 fail → 0–34
-    assert.ok(score['p1']! >= 75 && score['p1']! <= 100)
+    // Passers carry the 90→100 match score; test-2 fail → 35–74; test-1
+    // fail → 0–34.
+    assert.ok(score['p1']! >= 90 && score['p1']! <= 100)
+    assert.ok(score['p2']! >= 90 && score['p2']! <= 100)
     assert.ok(score['f']! >= 35 && score['f']! <= 74)
     assert.ok(score['t1']! <= 34)
-    // Nearest within the tier scores highest
-    assert.equal(score['p1'], 100)
-    assert.equal(score['p2'], 75)
-    assert.equal(score['f'], 74, 'only test-2 fail → band top')
-    assert.equal(score['t1'], 34, 'only test-1 fail → band top')
   })
 
   it('a test-1 fail never outscores a test-2 fail even when much closer', async () => {
     const result = await evaluate(
       [comp('t2fail', { distanceMiles: 3 }), comp('t1fail', { distanceMiles: 0.01 })],
-      { t1fail: { bathrooms: 0.1 } },
+      { t1fail: { squareFeet: 0.1 } },
       { t2fail: t2(1, { nouls: { subdivision: 0.1, neighborhood: 0.1 } }) },
     )
     const score = Object.fromEntries(result.entries.map((e) => [e.compId, e.score]))
@@ -500,10 +579,12 @@ describe('runJevEvaluation — result shape', () => {
     assert.equal(result.counts.test1Passed, 1)
     assert.equal(result.counts.test2Passed, 1)
     assert.equal(result.counts.selected, 1)
-    assert.equal(result.coreTarget, HYBRID_CORE_TARGET)
+    assert.equal(result.counts.arv, 1)
+    assert.equal(result.counts.asIs, 0)
+    assert.equal(result.humanHandoff, false)
     assert.equal(result.noulGate, 0.5)
-    assert.equal(result.questionSet.test1.length, 6)
-    assert.equal(result.questionSet.test2.length, 4)
+    assert.equal(result.questionSet.test1.length, 5)
+    assert.equal(result.questionSet.test2.length, 5)
     const a = result.entries.find((e) => e.compId === 'a')!
     const expected = evaluateComparable(subject, comp('a'), DEFAULT_FILTERS, DEFAULT_ADJUSTMENTS).adjustedPrice
     assert.equal(a.adjustedPrice, expected)
@@ -521,11 +602,12 @@ describe('runJevEvaluation — result shape', () => {
     )
   })
 
-  it('empty pool still returns a well-formed result', async () => {
+  it('empty pool still returns a well-formed result — human handoff', async () => {
     const result = await evaluate([comp('noprice', { salePrice: null })])
     assert.equal(result.test1, null)
     assert.equal(result.test2, null)
     assert.deepEqual(result.arvCompIds, [])
+    assert.equal(result.humanHandoff, true, 'no passers → human handoff')
     assert.equal(result.counts.test1Passed, 0)
     assert.equal(result.counts.ineligible, 1)
   })

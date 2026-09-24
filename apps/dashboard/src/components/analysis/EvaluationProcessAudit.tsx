@@ -28,13 +28,14 @@ function equation(prices: number[], result: number | null | undefined): string {
   return `(${prices.map(fmtUsd).join(' + ')}) ÷ ${prices.length} = ${fmtUsd(result)}`
 }
 
-const T2_NOUL_ORDER = ['subdivision', 'neighborhood', 'physicalCharacter', 'material'] as const
+const T2_NOUL_ORDER = ['subdivision', 'neighborhood', 'physicalCharacter', 'material', 'foundation'] as const
 
 type QuestionSet = NonNullable<JevHybridData['questionSet']>
 
-/** Comp row — expandable to both tests: the eight raw-field nouls, the
- *  enriched nouls (subdivision/neighborhood gate + advisory character/
- *  material), and the distance score's level distribution. */
+/** Comp row — expandable to both tests: the five raw-field nouls and the
+ *  composite score, the enriched nouls (subdivision/neighborhood gate +
+ *  advisory character/material/foundation), and the score's level
+ *  distribution. */
 function TestedCompRow({ comp, role, questionSet }: { comp: CompItem | undefined; role: string; questionSet?: QuestionSet }) {
   const [showDetail, setShowDetail] = useState(false)
   const sale = comp?.salePrice
@@ -59,15 +60,16 @@ function TestedCompRow({ comp, role, questionSet }: { comp: CompItem | undefined
         ? `passed test 2${t2.nouls.subdivision >= 0.5 ? ' (subdivision)' : ' (neighborhood)'}`
         : `failed test 2 — subdivision ${fmtPct(t2.nouls.subdivision)} · neighborhood ${fmtPct(t2.nouls.neighborhood)}`
       const parts = [
-        `proximity score ${t2.score}/100`,
+        `score ${t2.score}/100`,
         t2.confidence != null ? `confidence ${fmtPct(t2.confidence)}` : null,
         gate,
+        h.priceTier === 'as_is' ? 'as-is tier' : null,
         h.poolRank != null ? `rank #${h.poolRank}` : null,
       ].filter((p): p is string => p != null)
       return parts.join(' · ')
     }
     if (t1) {
-      if (t1.passed) return 'passed test 1 — outside the enrichment cap, never test-2\'d'
+      if (t1.passed) return `passed test 1 — score ${t1.score ?? '—'}/100, outside the top-10 enrich cohort`
       const failed = t1.failedFields.map((k) => t1Labels.get(k) ?? k).join(', ')
       const missing = t1.unverifiableFields.map((k) => t1Labels.get(k) ?? k).join(', ')
       return `failed test 1${failed ? ` — ${failed}` : ''}${missing ? `${failed ? ' ·' : ' —'} unverifiable: ${missing}` : ''}`
@@ -128,8 +130,14 @@ function TestedCompRow({ comp, role, questionSet }: { comp: CompItem | undefined
                       </div>
                     )
                   })}
+                  {t1.score != null && (
+                    <div className="flex items-baseline justify-between gap-2 text-[10px] tabular-nums pt-0.5">
+                      <span className="text-foreground-tertiary">Test-1 score</span>
+                      <span className="text-foreground-secondary">{t1.score}/100 · proximity + match strength</span>
+                    </div>
+                  )}
                   <p className="text-[9px] text-foreground-tertiary/70">
-                    every verifiable field ≥50% → passed test 1 → enriched
+                    every verifiable field ≥50% → passed test 1 → top-10 scores enriched
                   </p>
                 </div>
               )}
@@ -138,7 +146,7 @@ function TestedCompRow({ comp, role, questionSet }: { comp: CompItem | undefined
                   <p className="text-[9px] uppercase tracking-wide text-foreground-tertiary">Test 2 — enriched data</p>
                   {T2_NOUL_ORDER.map((key) => {
                     const v = t2.nouls[key]
-                    const advisory = key === 'physicalCharacter' || key === 'material'
+                    const advisory = key === 'physicalCharacter' || key === 'material' || key === 'foundation'
                     const ok = v >= 0.5
                     return (
                       <div key={key} className="flex items-baseline justify-between gap-2 text-[10px] tabular-nums">
@@ -153,10 +161,10 @@ function TestedCompRow({ comp, role, questionSet }: { comp: CompItem | undefined
                     )
                   })}
                   <p className="text-[9px] text-foreground-tertiary/70">
-                    subdivision yes, else neighborhood yes → passed test 2
+                    subdivision yes, else neighborhood yes → passed test 2 · matched characteristics lift a pass 90 → 100
                   </p>
                   <div className="flex items-baseline justify-between gap-2 text-[10px] tabular-nums pt-0.5">
-                    <span className="text-foreground-tertiary">Distance score</span>
+                    <span className="text-foreground-tertiary">Test-2 score</span>
                     <span className="text-foreground-secondary">
                       {t2.score}/100{t2.confidence != null ? ` · confidence ${fmtPct(t2.confidence)}` : ''}
                     </span>
@@ -204,15 +212,13 @@ export function EvaluationProcessAudit({
   if (!valuation || !comps) return null
   const items = comps.items ?? []
 
-  // 'arv' tolerated for pre-two-test saved reports.
+  // 'arv'/'fill' selected values tolerated for pre-two-test saved reports.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const coreComps = items.filter((c) => c.jevHybrid?.selected === 'core' || (c.jevHybrid as any)?.selected === 'arv')
-  const fillComps = items.filter((c) => c.jevHybrid?.selected === 'fill')
+  const arvComps = items.filter((c) => c.jevHybrid?.selected === 'core' || (c.jevHybrid as any)?.selected === 'arv' || (c.jevHybrid as any)?.selected === 'fill')
+  const asIsComps = items.filter((c) => c.jevHybrid?.priceTier === 'as_is')
   const t2Fails = items.filter((c) => c.jevHybrid?.stage === 'test2_fail' && c.jevHybrid?.selected == null)
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const fillUsed = run?.selection?.fillUsed === true || (run as any)?.selection?.closestOnly === true
-  const arvPrices = [...coreComps, ...fillComps].map(price).filter((n): n is number => n != null)
-  const coreTarget = run?.selection?.coreTarget ?? 3
+  const humanHandoff = run?.selection?.humanHandoff === true
+  const arvPrices = arvComps.map(price).filter((n): n is number => n != null)
 
   return (
     <section className="border border-border rounded-sm px-4 py-2.5 text-foreground">
@@ -223,44 +229,55 @@ export function EvaluationProcessAudit({
         aria-expanded={open}
       >
         <span className="text-body-sm font-semibold">How Jev evaluated the comps</span>
-        <ChevronDown className={cn('w-3.5 h-3.5 text-foreground-tertiary transition-transform', open && 'rotate-180')} />
+        <span className="flex items-center gap-2 min-w-0">
+          {humanHandoff && (
+            <span className="rounded-sm bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-500">
+              Human handoff
+            </span>
+          )}
+          <ChevronDown className={cn('w-3.5 h-3.5 text-foreground-tertiary transition-transform', open && 'rotate-180')} />
+        </span>
       </button>
 
       {open && <div className="space-y-2 mt-2">
       <ol className="list-decimal pl-4 space-y-0.5 text-[10px] text-foreground-tertiary">
         <li>Every comp with a usable sale price and date is eligible — nothing else is pre-filtered.</li>
-        <li>{`Test 1 — Jev asks one question per raw field (bathrooms, square feet, lot size, year built, sale price, sale date): does the comp match the subject per the appraisal rules? Passing every verifiable field puts the comp in the "passed test 1" bucket.`}</li>
-        <li>Passed-test-1 comps get enriched with full property detail (subdivision, neighborhood, construction, features, transaction).</li>
-        <li>Test 2 — on the enriched data: a subdivision match passes; if subdivision fails, a neighborhood match still passes. Both no → test 2 fail → ineligible for the core set. Physical character and material matches are asked as preferred, not required.</li>
-        <li>Every comp gets a card score: the test outcome sets the band — passed both tests on top, test-1-pass/test-2-fail in the middle, test-1 fails at the bottom — and the nearest comp to the subject scores highest inside each band. Failing test 2 is never a penalty; passing it is the boost.</li>
-        <li>{fillUsed
-          ? `Fewer than ${coreTarget} comps passed test 2 — the remaining set filled to ${coreTarget} by score: highest score, closest distance, across every eligible comp.`
-          : `Test-2 passers are the primary core comp set — ideally ${coreTarget}.`}</li>
-        <li>ARV averages the selected comps’ adjusted prices.</li>
+        <li>{`Test 1 — Jev asks one question per raw field (square feet, lot size, year built, sale price, sale date): does the comp match the subject per the appraisal rules? Every passer gets a score — proximity to the subject plus field-match strength.`}</li>
+        <li>The ten highest-scoring test-1 passers get enriched with full property detail (subdivision, neighborhood, style, construction materials, foundation, features, transaction).</li>
+        <li>Test 2 — on the enriched data: a subdivision match passes; if subdivision fails, a neighborhood match still passes. Both no → test 2 fail. Physical character, construction material, and foundation matches are preferred — they lift a pass from 90 toward 100.</li>
+        <li>Passing test 2 means the comp matched the rules — not that it is an ARV comp. The passers split by adjusted price: the top 15% become the ARV comps, the rest are the as-is market reference. A test-1 or test-2 fail can never be selected — there is no fill.</li>
+        <li>Zero test-2 passers → human handoff: the run is flagged for manual review instead of standing in unexamined comps.</li>
+        <li>ARV averages the ARV comps’ adjusted prices.</li>
       </ol>
 
       {!run || run.status !== 'completed' ? (
         <p className="text-[10px] text-foreground-tertiary">No Jev evaluation data on this analysis{run?.reason ? ` — ${run.reason}` : ''}.</p>
       ) : (
         <>
+          {humanHandoff && (
+            <p className="text-[10px] font-medium text-amber-500">
+              Human handoff — zero comps passed test 2. Any ARV shown is unexamined reference; review the comps manually.
+            </p>
+          )}
           {run.counts && (
             <p className="text-[10px] text-foreground-tertiary tabular-nums">
-              {run.counts.pool} tested · {run.counts.test1Passed} passed test 1 · {run.counts.enriched} enriched · {run.counts.test2Passed} passed test 2 · {run.counts.selected} selected
-              {run.counts.filled > 0 ? ` (${run.counts.filled} filled)` : ''}
+              {run.counts.pool} tested · {run.counts.test1Passed} passed test 1 · {run.counts.enriched} enriched · {run.counts.test2Passed} passed test 2
+              {run.counts.arv != null ? ` · ${run.counts.arv} ARV` : ''}
+              {run.counts.asIs != null ? ` · ${run.counts.asIs} as-is` : ''}
               {run.counts.ineligible > 0 ? ` · ${run.counts.ineligible} ineligible` : ''}
               {run.model ? ` · ${run.model}` : ''}
             </p>
           )}
-          {coreComps.length > 0 ? (
-            <Group label={`Core comp set (${coreComps.length})`}>
-              {coreComps.map((c) => <TestedCompRow key={c.id} comp={c} role="Core" questionSet={run.questionSet} />)}
+          {arvComps.length > 0 ? (
+            <Group label={`ARV comps — top-priced test-2 passers (${arvComps.length})`}>
+              {arvComps.map((c) => <TestedCompRow key={c.id} comp={c} role="ARV" questionSet={run.questionSet} />)}
             </Group>
           ) : (
             <p className="text-[10px] text-foreground-tertiary">No comps passed both tests.</p>
           )}
-          {fillComps.length > 0 && (
-            <Group label={`Fill picks — best remaining by score (${fillComps.length})`}>
-              {fillComps.map((c) => <TestedCompRow key={c.id} comp={c} role="Fill" questionSet={run.questionSet} />)}
+          {asIsComps.length > 0 && (
+            <Group label={`As-is reference — passed test 2, below the ARV price tier (${asIsComps.length})`}>
+              {asIsComps.map((c) => <TestedCompRow key={c.id} comp={c} role="As-is" questionSet={run.questionSet} />)}
             </Group>
           )}
           {t2Fails.length > 0 && (

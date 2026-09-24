@@ -29,12 +29,12 @@ export interface BuildReportInput {
   /** Computer-vision renovation assessment (subject photos) */
   renovationAssessment?: import('../vision/renovation').RenovationAssessment | null
   /**
-   * Jev evaluation outcome for the comps that drive the ARV — the selected
+   * Jev evaluation outcome for the comps that drive the ARV — the ARV-set
    * comps' scores /100, whether each matched every appraisal rule, and
-   * whether the run fell back to closest-available evidence.
+   * whether the run flagged for human handoff (zero test-2 passers).
    */
   jev?: {
-    /** verdict: 'core' = passed test 2 · 'fill' = fallback pick from the test-2-fail bucket */
+    /** verdict: 'core' = ARV-tier test-2 passer */
     selected: { compId: string; score: number | null; fullMatch: boolean; verdict: string; confidence: number | null }[]
     counts: {
       pool: number
@@ -44,11 +44,14 @@ export interface BuildReportInput {
       enriched: number
       test2Passed: number
       test2Failed: number
-      core: number
-      filled: number
+      arv: number
+      asIs: number
       selected: number
     } | null
-    fillUsed: boolean
+    /** Zero comps passed test 2 — the report is flagged for manual review */
+    humanHandoff: boolean
+    /** Test-2 passers below the ARV price tier — as-is market reference */
+    asIsCompIds: string[]
     topCompId: string | null
   } | null
 }
@@ -100,21 +103,16 @@ function assessConfidence(input: BuildReportInput): {
     const fullMatchCount = jev.selected.filter((s) => s.fullMatch).length
     const scores = jev.selected.map((s) => s.score).filter((s): s is number => s != null)
     const topScore = scores.length ? Math.max(...scores) : null
-    const fillCount = jev.selected.filter((s) => s.verdict === 'fill').length
 
-    if (jev.selected.length === 0) {
-      reasons.push('Jev found no usable comparables — no comps drive the ARV')
+    if (jev.humanHandoff || jev.selected.length === 0) {
+      reasons.push('Jev evaluation flagged human handoff — zero comps passed test 2; any ARV shown is unexamined reference')
       return { level: 'low', reasons, requiresHumanReview: true }
     }
-    if (fillCount > 0) {
-      reasons.push(`${fillCount} comp(s) filled the core set by score — highest score and closest distance, not proven subdivision/neighborhood matches`)
-    } else {
-      reasons.unshift(
-        `${fullMatchCount} comp(s) passed both Jev tests (raw fields + subdivision/neighborhood)`,
-      )
-    }
+    reasons.unshift(
+      `${fullMatchCount} comp(s) passed both Jev tests (raw fields + subdivision/neighborhood)`,
+    )
     if (topScore != null) {
-      reasons.push(`Top selected comp scored ${topScore}/100 (test tier + proximity)`)
+      reasons.push(`Top selected comp scored ${topScore}/100 (enrichment match)`)
     }
     if (jev.selected.length < 3) {
       reasons.push(`Only ${jev.selected.length} comp(s) drive the ARV — fewer than 3`)
@@ -130,15 +128,14 @@ function assessConfidence(input: BuildReportInput): {
 
     const level =
       jev.selected.length === 0 ||
-      fillCount === jev.selected.length ||
       (oldestSaleDays != null && oldestSaleDays > 365)
         ? 'low'
-        : fillCount === 0 && fullMatchCount === jev.selected.length && jev.selected.length >= 3 && subjectConditionVerified
+        : fullMatchCount === jev.selected.length && jev.selected.length >= 3 && subjectConditionVerified
           ? 'high'
           : 'medium'
 
-    if (level === 'medium' && fillCount === 0) {
-      reasons.unshift(`${jev.selected.length} comps selected — ${fullMatchCount} passed both tests; reduced confidence`)
+    if (level === 'medium') {
+      reasons.unshift(`${jev.selected.length} ARV comps — ${fullMatchCount} passed both tests; reduced confidence`)
     }
     return { level, reasons, requiresHumanReview: level !== 'high' }
   }
@@ -476,5 +473,6 @@ export function buildEvaluationReport(input: BuildReportInput): EvaluationReport
     confidence: confidence.level,
     confidenceReasons: [...confidence.reasons, ...derivedBuybox.notes],
     requiresHumanReview: confidence.requiresHumanReview,
+    humanHandoff: input.jev?.humanHandoff === true,
   }
 }

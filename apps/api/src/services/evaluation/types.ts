@@ -178,4 +178,10 @@ export interface EvaluationReport {
   confidenceReasons: string[]
   /** True unless HIGH — medium flags for review, low withholds the call */
   requiresHumanReview: boolean
+  /**
+   * Jev evaluation flagged the run for manual review — zero comps passed
+   * test 2, so any ARV shown is unexamined reference. Absent/false when
+   * the Jev funnel produced ARV comps.
+   */
+  humanHandoff?: boolean
 }

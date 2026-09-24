@@ -126,6 +126,8 @@ export interface AnalyzeData {
         fallbackReason?: string
       }
     }
+    /** Jev flagged zero test-2 passers — the report is for manual review */
+    humanHandoff?: boolean
   }
   /** Settings used during this analysis (for client-side recalculation initialization) */
   appliedSettings?: {
@@ -233,16 +235,18 @@ export interface JevHybridData {
     enriched: number
     test2Passed: number
     test2Failed: number
-    core: number
-    filled: number
+    /** ARV-tier test-2 passers (top 15% by adjusted price) */
+    arv: number
+    /** Test-2 passers below the ARV tier — as-is reference */
+    asIs: number
     selected: number
   }
   selection?: {
-    /** The ideal core comp set — test-2 passers; the fail bucket fills to this when short */
-    coreTarget: number
     noulGate: number
-    /** True when fill picks were needed — fewer than the target passed test 2 */
-    fillUsed?: boolean
+    /** The ARV tier fraction applied to test-2 passers */
+    arvTopPercent?: number
+    /** Zero comps passed test 2 — the run is flagged for manual review */
+    humanHandoff?: boolean
   }
   /** The questions this run asked — generated from the appraisal preset */
   questionSet?: {
@@ -268,30 +272,34 @@ export interface JevHybridCompScore {
   saleAgeDays: number | null
   /** Property-detail data was merged before test 2 */
   enriched?: boolean
-  /** Test 1 — the eight raw-field nouls */
+  /** Test 1 — the five raw-field nouls plus the composite score */
   test1: {
     /** field → 0–1 probability the comp matches the subject on it */
     nouls: Record<string, number | null>
     /** Verifiable fields below the gate */
     failedFields: string[]
-    /** Fields the data could not verify — count as not passed */
+    /** Fields the data could not verify — noted, not failed */
     unverifiableFields: string[]
     /** All fields verified at/above the gate — the "passed test 1" bucket */
     passed: boolean
+    /** Composite /100 — proximity-dominant, blended with field-match strength; orders the enrichment cohort */
+    score: number | null
   } | null
-  /** Test 2 — the enriched nouls plus the distance-dominant score */
+  /** Test 2 — the enriched nouls plus the score */
   test2: {
     nouls: {
       subdivision: number
       neighborhood: number
-      /** Advisory — preferred, never gating */
+      /** Advisory — preferred, never gating; feeds the 90→100 boost */
       physicalCharacter: number
-      /** Advisory — preferred, never gating */
+      /** Advisory — preferred, never gating; feeds the 90→100 boost */
       material: number
+      /** Advisory — preferred, never gating; feeds the 90→100 boost */
+      foundation: number
     }
-    /** Subdivision yes, or neighborhood yes — eligible for the core set */
+    /** Subdivision yes, or neighborhood yes — eligible for classification */
     passed: boolean
-    /** Distance-dominant spectrum score /100 */
+    /** Passers: 90 baseline + up to 10 for matched physical characteristics. Fails: distance spectrum scaled below 90. */
     score: number
     confidence: number | null
     /** Score level index → probability */
@@ -302,8 +310,10 @@ export interface JevHybridCompScore {
   scoreConfidence: number | null
   /** 1-based rank among test-2-evaluated comps by score — #1 is closest */
   poolRank: number | null
-  /** 'core' = test-2 passer in the ARV set · 'fill' = fallback pick from the test-2-fail bucket */
-  selected: 'core' | 'fill' | null
+  /** Price tier among test-2 passers — 'arv' = top-15% (the ARV set), 'as_is' = the rest */
+  priceTier: 'arv' | 'as_is' | null
+  /** 'core' = ARV-tier test-2 passer — the only comps feeding ARV */
+  selected: 'core' | null
   adjustedPrice: number | null
 }
 

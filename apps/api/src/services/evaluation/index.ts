@@ -39,6 +39,7 @@ import {
 } from '../analysis'
 import { createPhotoService, type PhotoBundle, type PropertyIdentifier, type PropertyPhotos } from '../photo-provider'
 import {
+  COMP_ARV_TOP_PERCENT,
   COMP_HYBRID_VERSION,
   runJevEvaluation,
   type HybridRun,
@@ -673,22 +674,23 @@ export async function performAnalysis(
   })()
 
   // ── Jev comp evaluation — the only selection logic ────────────────────────
-  // Test 1 asks Jev's raw-field nouls — bathrooms, squareFeet, lotSize,
-  // yearBuilt, salePrice, saleDate — "does this comp match the subject on
-  // this field per the appraisal rules?" Passing every verifiable field
-  // puts the comp in the "passed test 1" bucket → it gets enriched.
+  // Test 1 asks Jev's raw-field nouls — squareFeet, lotSize, yearBuilt,
+  // salePrice, saleDate — "does this comp match the subject on this field
+  // per the appraisal rules?" Passers get a composite score (proximity +
+  // field strength) and the top-10 get enriched.
   // Test 2 asks the enriched nouls — subdivision yes, else neighborhood
-  // yes — plus advisory physical-character/material nouls and a
-  // distance-dominant Score with confidence. Test-2 passers are the core
-  // comp set (ideally 3); when fewer pass, the test-1-pass / test-2-fail
-  // bucket fills to 3 by score. ARV = mean adjusted price of the selected
-  // set — the only non-Jev step.
+  // yes — plus advisory physical-character/material/foundation nouls that
+  // lift the score from a 90 baseline toward 100. Passers split by price:
+  // the top 15% become the ARV set (variable count), the rest the as-is
+  // reference. No fill — zero passers flags human handoff. ARV = mean
+  // adjusted price of the ARV set — the only non-Jev step.
   let jevInvestmentCompIds: string[] = []
   let hybridRun: HybridRun | null = null
   let jevSelection: {
     selected: { compId: string; score: number | null; fullMatch: boolean; verdict: string; confidence: number | null }[]
     counts: NonNullable<HybridRun['counts']> | null
-    fillUsed: boolean
+    humanHandoff: boolean
+    asIsCompIds: string[]
     topCompId: string | null
   } | null = null
   if (appraisalResult.comparables.length > 0) {
@@ -722,7 +724,7 @@ export async function performAnalysis(
         jevHybrid: entryById.get(comp.id) ?? null,
       }))
 
-      const fillUsed = jev.fillCompIds.length > 0
+      const humanHandoff = jev.humanHandoff
       hybridRun = {
         status: 'completed', mode: 'enabled', questionVersion: COMP_HYBRID_VERSION,
         model: jev.test2?.model ?? jev.test1?.model,
@@ -731,7 +733,7 @@ export async function performAnalysis(
         stateHashes: [...(jev.test1?.stateHashes ?? []), ...(jev.test2?.stateHashes ?? [])],
         test1: jev.test1, test2: jev.test2,
         counts: jev.counts,
-        selection: { coreTarget: jev.coreTarget, noulGate: jev.noulGate, fillUsed },
+        selection: { noulGate: jev.noulGate, arvTopPercent: COMP_ARV_TOP_PERCENT, humanHandoff },
         questionSet: jev.questionSet,
         screenedAt: new Date().toISOString(),
       }
@@ -742,20 +744,22 @@ export async function performAnalysis(
             compId: id,
             score: e?.score ?? null,
             fullMatch: e?.stage === 'test2_pass',
-            verdict: e?.selected ?? 'fill',
+            verdict: e?.selected ?? 'core',
             confidence: e?.scoreConfidence ?? null,
           }
         }),
         counts: jev.counts,
-        fillUsed,
+        humanHandoff,
+        asIsCompIds: jev.asIsCompIds,
         topCompId: jev.entries.find((e) => e.poolRank === 1)?.compId ?? null,
       }
 
       if (jev.arvCompIds.length === 0) {
-        // No comp reached test 2 (all ineligible or all failed test 1) —
-        // the rules selection stands; test results still attach for display.
-        step('jev_evaluation', 'fallback', `Jev tested ${jev.counts.pool} candidates — none passed both tests (${jev.test1?.model ?? 'jev'})`)
-        fallbacksUsed.push('jev_evaluation:empty_pool')
+        // Zero test-2 passers — human handoff. The rules selection stands
+        // as a reference number; the flag tells the consumer it is
+        // unexamined. Test results still attach for display.
+        step('jev_evaluation', 'fallback', `Jev tested ${jev.counts.pool} candidates — none passed both tests — human handoff (${jev.test1?.model ?? 'jev'})`)
+        fallbacksUsed.push('jev_evaluation:human_handoff')
       } else {
         const selectedIds = new Set(jev.arvCompIds)
         appraisalResult.comparables = appraisalResult.comparables.map((comp) => ({
@@ -771,7 +775,7 @@ export async function performAnalysis(
         )
         appraisalResult.insufficientComps = false
         step('jev_evaluation', 'completed',
-          `Jev tested ${jev.counts.pool} → ${jev.counts.test1Passed} passed test 1 → ${jev.counts.test2Passed} passed test 2 → ${jev.counts.selected} selected${fillUsed ? ` (${jev.counts.filled} filled by score)` : ''} · ${jev.counts.ineligible} ineligible (${jev.test2?.model ?? jev.test1?.model ?? 'jev'})`)
+          `Jev tested ${jev.counts.pool} → ${jev.counts.test1Passed} passed test 1 → ${jev.counts.test2Passed} passed test 2 → ${jev.counts.arv} ARV / ${jev.counts.asIs} as-is · ${jev.counts.ineligible} ineligible (${jev.test2?.model ?? jev.test1?.model ?? 'jev'})`)
       }
     } catch (error) {
       console.warn('[Evaluate] Jev evaluation failed:', error instanceof Error ? error.message : error)
