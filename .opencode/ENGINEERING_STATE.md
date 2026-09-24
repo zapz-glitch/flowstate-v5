@@ -1,6 +1,21 @@
 # Engineering State — flowstate-v5
 
 
+### 2026-09-24 (later 2) — Stale Server Action auto-reload: `c734949`, deployed
+
+Recurring prod issue: every deploy rotates Server Action IDs; open tabs
+calling an action got "Failed to find Server Action" rendered as a normal
+error. Now self-healing — lib/server-action.ts (isStaleServerActionError +
+reloadForStaleAction, 30s sessionStorage loop guard + in-memory flag),
+StaleActionGuard mounted in root layout (unhandledrejection + error
+listeners), explicit checks at the 4 try/catch call sites (queueAnalysis
+x2, submitReportFeedback, getCdarvReportStatus) and 3 startTransition
+sites (SendToCdarvButton, review-form, model-actions — React 19 routes
+transition errors to onUncaughtError, not window events). Deploy run
+35973289210 green. Verified: tsc clean, matcher tested against both
+reported error strings; browser E2E unavailable (system chromium libs
+missing in this env).
+
 ### 2026-09-24 (later) — Subject condition fetch made required: `5bc5c08` on `feat/subject-condition-required`
 
 Product requirement: every eval (dashboard session + API-key) must run a
