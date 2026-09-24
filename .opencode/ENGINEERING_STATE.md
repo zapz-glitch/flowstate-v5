@@ -1,6 +1,47 @@
 # Engineering State — flowstate-v5
 
 
+### 2026-09-24 (later) — Subject condition fetch made required: `5bc5c08` on `feat/subject-condition-required`
+
+Product requirement: every eval (dashboard session + API-key) must run a
+subject-property condition fetch to complete; the returned rehab level is
+picked for the eval; it runs in parallel with ARV determination.
+
+What already existed: subject-only Firecrawl/Zillow scrape runs
+unconditionally in the analysis job's Promise.all; the vision branch
+launches before the Jev funnel and is awaited before the response;
+deriveBuybox already picks visionLevelIndex (manual override > vision >
+classification > default); report confidence gates 'high' on
+subjectConditionVerified.
+
+What changed:
+
+- `unavailableAssessment()` exported from vision/renovation.ts — full
+  baseline shape so any failure resolves an explicit 'unavailable'
+  verdict instead of null.
+- `visionAndPersist` → `Promise<RenovationAssessment>` (never null);
+  catch → synthesized 'unavailable' with error + limitation.
+- renovation_assessment step always emits; detail names the status when
+  no level returned; ALL non-ok statuses (needs_review,
+  insufficient_photo_evidence, unavailable) now land in fallbacksUsed —
+  previously insufficient_photo_evidence was excluded and a thrown call
+  produced no assessment at all.
+- `renovation` non-null downstream (curbAppeal, deriveBuybox opts).
+
+Renovation level definitions located (RENOVATION_LEVEL_DEFINITIONS,
+vision/renovation.ts): 0 Lipstick / 1 Light Cosmetic / 2 Full Cosmetic /
+3 Heavy Rehab / 4 Full Gut — criteria injected into both subject and
+comp curb-appeal prompts. Doc updated: docs/comp-photo-verification.md.
+
+Verified: tsc clean, 21/21 renovation tests. NOT merged/deployed.
+
+Open: whether subject condition feeds test-2 comp matching or stays
+report/buybox-only; comp-photo verification (compareCompToSubject /
+analyzeCompQuality defined but unwired); lone-anomaly ARV guard from the
+flagged 3249 54th St N report (1-comp ARV at $565k, circular
+price→after_renovation label).
+
+
 ### 2026-09-24 — Price-class merge REVERTED; main reset to `88879cb`
 
 `feat/jev-price-class` was merged (`af9587d`) then force-push reverted
