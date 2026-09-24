@@ -3428,9 +3428,29 @@ no prefix bump.
 - [x] Manual tier overrides + migration 0032 (local applied)
 - [x] Dashboard copy synced to new funnel
 - [x] Code-table decode expansion
-- [ ] Apply 0032 to **remote** D1 BEFORE deploy (job/report GETs query
-  the table unconditionally — CI never runs migrations)
-- [ ] Push swe-2-eval → main (clean fast-forward; deploy.yml auto-
-  deploys API + dashboard to prod)
-- [ ] Post-deploy smoke: prod /health + one saved-report GET
+- [x] Apply 0032 to **remote** D1 BEFORE deploy — done 05:07Z
+  (wrangler OAuth re-authed; `comp_tier_overrides` verified on prod)
+- [x] Push swe-2-eval → main — `bbbc847..10eae9b` fast-forward
+- [x] Deploy — run 35958677146 green end-to-end (API + dashboard);
+  prod /health 200, dashboard 200
 - [ ] Open call: suppress rules-fallback ARV in handoff runs?
+
+## 2026-10-06 (later 3) — MERGED + DEPLOYED to prod
+
+`swe-2-eval` fast-forwarded onto `main` (`bbbc847..10eae9b`) and
+deploy.yml run 35958677146 completed green — API + dashboard live.
+Remote D1 `comp_tier_overrides` created pre-deploy (order mattered:
+job/report GETs query it unconditionally). Prod smoke: /health 200,
+flowstate.homes 200.
+
+Live behavior now in prod: proximity-scored test-1 → enrich 10
+nearest passers → test-2 gate (subdivision OR neighborhood) →
+two-tier rescore (95–100 same-tract sub / 90–95 hood-only or
+crossing) → top-10%-by-adjusted-price ARV tier, rest as-is, no fill,
+humanHandoff on zero passers, manual ARV/as-is pins via
+comp_tier_overrides, census-tract road-barrier proxy, decoded
+county-variant property codes on cards.
+
+Local dev for this branch: dashboard :3005 → API :8793
+(DASHBOARD_URL + NEXT_PUBLIC_API_URL repointed in gitignored env
+files; local login local@flowstate.test / V4-Test-7mQ9-rP2x!).
