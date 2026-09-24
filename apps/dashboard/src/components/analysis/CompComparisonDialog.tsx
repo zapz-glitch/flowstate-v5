@@ -54,7 +54,8 @@ export function CompComparisonDialog({ open, onOpenChange, subject, comp, isSele
 
   const filters = comp.appraisalRules?.filters ?? []
   const adjustments = comp.appraisalRules?.adjustments ?? []
-  const filterStatus = (f: (typeof filters)[number]) => f.status ?? (f.passed ? 'passed' : 'failed')
+  // Legacy payloads carry no status — ambiguous passed:true renders unverified.
+  const filterStatus = (f: (typeof filters)[number]) => f.status ?? (f.passed ? 'not_verified' : 'failed')
   const passedCount = filters.filter((f) => filterStatus(f) === 'passed').length
   const totalFilters = filters.length
 

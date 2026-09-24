@@ -332,7 +332,10 @@ export function CompCard({
                 <div className="text-caption-sm text-foreground-tertiary">Filters Applied</div>
                 <div className="grid gap-1.5">
                   {comp.appraisalRules.filters.map((filter, i) => {
-                    const status = filter.status ?? (filter.passed ? 'passed' : 'failed')
+                    // Legacy payloads carry no status — passed:true is then
+                    // ambiguous (verified pass vs unverifiable data), so
+                    // render it unverified rather than a false green check.
+                    const status = filter.status ?? (filter.passed ? 'not_verified' : 'failed')
                     return (
                       <div
                         key={i}

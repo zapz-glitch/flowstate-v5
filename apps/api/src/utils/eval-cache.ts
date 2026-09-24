@@ -34,7 +34,9 @@ export async function hashEvalParams(params: unknown): Promise<string> {
 
 export function evalResultKey(userId: string, address: string, paramsHash: string): string {
   const norm = address.trim().toLowerCase().replace(/\s+/g, ' ');
-  return `eval-result:${userId}:${norm}:${paramsHash}`;
+  // v2 — payloads written before the filter `status` field (114aeaa) render
+  // unverifiable passes as verified green; don't serve them.
+  return `eval-result:v2:${userId}:${norm}:${paramsHash}`;
 }
 
 /**
