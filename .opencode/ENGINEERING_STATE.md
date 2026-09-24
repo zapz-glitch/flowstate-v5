@@ -3523,3 +3523,11 @@ pure refactor, no user-facing perf gain; only if asked.
 Branch swe-2-eval ahead of main by the eval work (already deployed) +
 6 perf commits. Perf commits NOT merged/deployed — dev-only so far.
 Open calls unchanged: suppress rules-fallback ARV in handoff runs?
+
+## 2026-10-06 (later 5) — perf pass MERGED + DEPLOYED
+
+`swe-2-eval` fast-forwarded `10eae9b..d5881dc` onto main; deploy run
+35967010908 green end-to-end (API + dashboard). Prod smoke:
+api /health 200, flowstate.homes 200. Live: memoized comp cards,
+isolated eval-progress atom, derived sidebar boolean, loading.tsx ×5,
+react-query removed, @types/react@19 unified via dedupe.
