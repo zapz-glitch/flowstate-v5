@@ -1,6 +1,24 @@
 # Engineering State — flowstate-v5
 
 
+### 2026-09-24 — Price-class merge REVERTED; main reset to `88879cb`
+
+`feat/jev-price-class` was merged (`af9587d`) then force-push reverted
+— user rejected the classification behavior ("terrible" ~$90k comp-
+selection spread vs expectations). Main is now `88879cb`
+(filter-status fix) — NO Jev price classification, NO confidence
+floor, cache key back to `eval-result:v2:`.
+
+All classification work remains intact on branch `feat/jev-price-class`
+(commits `7c76787`, `f97e0d2`, `f99c0ad`, `5d63a55`, `7163052`) —
+not deleted, re-mergeable after redesign. Side-by-side experiment
+concluded; branch instance :3004/:8790 shut down.
+
+Open product problem: ARV/as-is delineation is still the percentile
+split on main. The Choice approach tested poorly — needs rethink
+before any new implementation.
+
+
 ### 2026-09-23 (later 2) — Enrichment deferral: `c5df7ac`
 
 Provider detail calls moved inside the Jev funnel. The DO no longer
