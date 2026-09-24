@@ -36,6 +36,29 @@ flagged "improve" 2026-09-24) exposed it:
   system cannot distinguish "genuinely renovated sale" from "anomalous
   overpay" — it just takes the price extreme.
 
+## Stated requirement (2026-09-24)
+
+**Every run must perform a subject-property condition fetch for the eval
+to complete — on both entry paths:**
+
+- Regular searches (dashboard `/v1/analyze` via session)
+- API searches (`/v1/analyze` via API key)
+
+**Current state:** the subject condition fetch is *best-effort*, not
+required. `assessRenovationFromPhotos` runs only when `subjectPhotos`
+exist and its failure is swallowed to `null` — the eval completes with
+`visionAssessment: null` and nothing flags the gap
+(`services/evaluation/index.ts` ~L630).
+
+**Open spec questions when implemented:**
+- If the photo fetch itself yields no images (unlisted property, new
+  construction), does the run fail, flag `humanHandoff`, or proceed
+  marked "condition unverifiable"? ("Complete" presumably means the
+  fetch+assessment ran and produced a verdict or an explicit
+  unverifiable state — not silent skip.)
+- Does the subject condition feed comp selection (style/condition
+  matching in test 2) or only the report/buybox as today?
+
 ## The idea — verify comp condition from listing photos
 
 Use photo evidence as the independent condition signal the ARV tier is

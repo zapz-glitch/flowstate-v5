@@ -3547,3 +3547,10 @@ appeal + style match → real after_renovation evidence instead of the
 price-derived label. Key finding: vision comp APIs
 (`compareCompToSubject`, `analyzeCompQuality`) are defined but unwired;
 Firecrawl fetcher, rate-limiter DO, KV/R2 caching all exist.
+
+Requirement added to the same doc: subject-property condition fetch is
+REQUIRED for eval completion on both entry paths (dashboard + API key).
+Today it's best-effort — no photos or a vision failure silently yields
+visionAssessment:null. Open spec Qs noted: no-photos behavior (fail vs
+handoff vs explicit-unverifiable) and whether subject condition feeds
+comp selection or stays report-only.
