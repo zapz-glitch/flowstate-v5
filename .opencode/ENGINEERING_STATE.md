@@ -3291,3 +3291,62 @@ the fallback needs a different UI treatment.
   user rehab table already wired; both typechecks + 26-file suite green.
 - Merged feat/jev-experiments → main (ff), pushed — deploy.yml auto-deploys.
 - Now working on main; worktree switched to main.
+
+## 2026-10-06 — swe-2-eval funnel implemented + verified (branch swe-2-eval, commit db99f19)
+
+**Objective:** new evaluation funnel per the user's authoritative spec —
+scored test 1, enriched top-10 by score, test-2 gate + 90→100 match score,
+top-15%-by-price ARV tier, no fill, human-handoff flag.
+
+**What shipped (commit db99f19):**
+- `jev/index.ts` — bathrooms removed from `CompTest1Field`/`COMP_TEST1_FIELDS`/
+  defs (5 fields now: squareFeet, lotSize, yearBuilt, salePrice, saleDate);
+  `foundation` noul added to test 2 + parser.
+- `comp-hybrid/index.ts` — test-1 composite score /100 for passers
+  (proximity scaled to the configured `distance` radius at 60% weight +
+  mean field strength at 40%); enrichment = top-10 by score; test-2 pass
+  scores 90 + up to 10 for mean(physicalCharacter, material, foundation),
+  fails scaled below 90; passers split by adjustedPrice — top 15%
+  (`COMP_ARV_TOP_PERCENT`) → ARV set (variable count, min 1), rest as-is;
+  ALL FILL REMOVED; `humanHandoff` when zero test-2 passers; counts now
+  carry `arv`/`asIs` instead of `core`/`filled`; `priceTier` on entries.
+- `evaluation/index.ts` + `report.ts` + `types.ts` — jevSelection carries
+  humanHandoff/asIsCompIds; report.humanHandoff surfaced; confidence =
+  low + requiresHumanReview when handoff; rules fallback stands as
+  unexamined reference (product call — flag shown, number still produced).
+- `eval-cache.ts` — key bumped to `eval-result:v3:`.
+- Dashboard — JevHybridCard + EvaluationProcessAudit show ARV/as-is
+  counts, as-is reference group, foundation noul, test-1 composite score,
+  amber "Human handoff" badges; actions.ts types updated.
+- Tests — comp-hybrid.test.ts rewritten for the new funnel (24 cases);
+  jev-comp-exam.test.ts updated (5 fields / 5 t2 nouls).
+- E2E harness — ARV assertions now scope to `jevHybrid.selected==='core'`
+  + `priceTier==='arv'` checks added.
+
+**Verified:**
+- `npx tsc --noEmit` clean in apps/api and apps/dashboard.
+- api suite: 24 files pass; dashboard: 9 files pass.
+- Live E2E against this worktree's API (wrangler dev :8793, local D1
+  seeded from main worktree's .wrangler state):
+  - 4014 22nd Ave N: 69 pool → 53 t1 pass → 10 enriched → 0 t2 pass →
+    humanHandoff=true, 13/13 assertions. ARV shown is rules-fallback
+    reference ($504,505) — flagged.
+  - 228 Cobblestone Dr: 27 pool → 2 t1 pass → 2 t2 pass → split by price:
+    351 Upland (adj $285k) → arv, 307 Plumtree (adj $270k) → as_is.
+    ARV = $285,000 = the ARV comp exactly. 13/13.
+- E2E user for this worktree's local DB: `8NLlVN9LtfODbvKJ6jpvk9W3a8pfMDep`
+  (local@flowstate.test, owns the default preset).
+
+**Environment notes:**
+- This worktree's API runs on **:8793** (`wrangler dev --config
+  wrangler.local.toml --local --port 8793`). :8787=deploy worktree,
+  :8788=new-classification, :8789=new-classification-v2. :3001 dashboard
+  talks to :8787 — NOT this branch.
+- Local D1 was empty → migrated + seeded by copying main's
+  `.wrangler/state/v3/d1/miniflare-D1DatabaseObject/1847e13...sqlite`.
+
+**Remaining / decisions:**
+- Human-handoff mode still produces a rules-fallback ARV alongside the
+  flag — confirm with user whether that number should be suppressed.
+- As-is passers are visible but not isEnabled (don't feed ARV).
+- Not merged/deployed — swe-2-eval branch only.
