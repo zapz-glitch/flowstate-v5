@@ -33,6 +33,13 @@ export const evalProgressAtom = atom<string | null>(null)
 
 // ─── Derived Atoms (read-only) ──────────────────────────────────────────────
 
+/** Boolean-flip subscription — consumers re-render only when a run starts/ends */
+export const isAnalysisRunningAtom = atom((get) =>
+  get(activeAnalysisAtom) !== null &&
+  get(analysisStateAtom).status !== 'completed' &&
+  get(analysisStateAtom).status !== 'failed'
+)
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const partialResultAtom = atom<Record<string, any> | null>((get) => {
   return get(analysisStateAtom).partialResult ?? null

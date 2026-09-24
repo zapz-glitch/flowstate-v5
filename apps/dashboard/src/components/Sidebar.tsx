@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useEffect, useState } from 'react'
+import { useAtomValue } from 'jotai'
 import {
   Key,
   LogOut,
@@ -33,7 +34,7 @@ import { cn } from '@/lib/utils'
 import { useUser } from '@/components/auth/UserProvider'
 import { useTheme } from '@/components/theme-provider'
 import { useSidebar } from '@/components/SidebarProvider'
-import { useAnalysis } from '@/hooks/use-analysis'
+import { isAnalysisRunningAtom } from '@/atoms/analysis'
 import { getUiPrefs, getTasks, type UiPrefs } from '@/lib/client-api'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import {
@@ -97,9 +98,9 @@ export default function Sidebar() {
   const { user } = useUser()
   const { theme, setTheme } = useTheme()
   const { collapsed, toggleCollapsed } = useSidebar()
-  const { activeAnalysis, analysisState } = useAnalysis()
-
-  const isAnalysisRunning = activeAnalysis !== null && analysisState.status !== 'completed' && analysisState.status !== 'failed'
+  // Derived boolean atom — sidebar re-renders only when a run starts/ends,
+  // not on every analysis atom write during a live run.
+  const isAnalysisRunning = useAtomValue(isAnalysisRunningAtom)
 
   const [prefs, setPrefs] = useState<UiPrefs | null>(null)
   useEffect(() => {
@@ -177,7 +178,7 @@ export default function Sidebar() {
           </div>
 
           {/* Navigation */}
-          <nav className="flex-1 p-2.5 space-y-1 overflow-y-auto">
+          <nav data-analysis-running={isAnalysisRunning || undefined} className="flex-1 p-2.5 space-y-1 overflow-y-auto">
             {navigation.map((item) => {
               // For /dashboard (Overview), only match exactly to avoid matching all sub-routes
               const isActive =

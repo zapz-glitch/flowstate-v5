@@ -143,6 +143,13 @@ async function main() {
     await mark(page, 'run_click') // auto-run fires on hydration; mark right after nav
     step('analyze page', true)
 
+    // Sidebar running-indicator (derived isAnalysisRunningAtom) — watch from
+    // before the run starts so fast runs are still caught. .first() required:
+    // the dot renders in BOTH desktop + mobile navs — a bare locator hits
+    // strict-mode and resolves false the moment it appears.
+    const navDot = page.locator('a[href="/dashboard/analyze"] .animate-ping').first()
+    const navDotSeen = navDot.waitFor({ state: 'visible', timeout: 180000 }).then(() => true).catch(() => false)
+
     // Re-running a known address pops the existing-report dialog — confirm.
     const newAnalysis = page.locator('button:has-text("New Analysis")')
     if (await newAnalysis.waitFor({ timeout: 15000 }).then(() => true).catch(() => false)) {
@@ -176,6 +183,14 @@ async function main() {
     console.log(`  settled via: ${how}`)
     result.compCardCount = await page.locator('[data-card-key]').count()
     step('eval settled', true, `${result.compCardCount} cards`)
+
+    // Sidebar indicator: appeared while running, cleared once complete.
+    step('sidebar running indicator', await navDotSeen)
+    const navDotCleared = await page.waitForFunction(
+      () => !document.querySelector('a[href="/dashboard/analyze"] .animate-ping'),
+      { timeout: 60000 },
+    ).then(() => true).catch(() => false)
+    step('sidebar indicator cleared', navDotCleared)
     await page.screenshot({ path: join(OUT_DIR, `ui-perf-${label}-results.png`), fullPage: false })
 
     // Click→paint latency: measures main-thread render cost of an interaction.
