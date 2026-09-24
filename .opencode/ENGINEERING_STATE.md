@@ -3531,3 +3531,19 @@ Open calls unchanged: suppress rules-fallback ARV in handoff runs?
 api /health 200, flowstate.homes 200. Live: memoized comp cards,
 isolated eval-progress atom, derived sidebar boolean, loading.tsx ×5,
 react-query removed, @types/react@19 unified via dedupe.
+
+## 2026-10-06 (later 6) — comp photo verification idea recorded
+
+User flagged report job_1790233689475_049295ac3f1d47cd (3249 54th St N,
+St Pete) as "improve": top-10%-by-price rule picked 1 ARV comp ($565k),
+and comp `classification` is circular (after_renovation inferred FROM
+price). Discussed ARV-group options (top-cluster + outlier guard /
+min-count / condition-verified) — no decision yet.
+
+Idea recorded in `docs/comp-photo-verification.md` (NOTE-ONLY, not
+read by eval, no runtime execution): fetch comp photos via Firecrawl/
+Zillow + Playwright/Browser Rendering fallback, vision-score curb
+appeal + style match → real after_renovation evidence instead of the
+price-derived label. Key finding: vision comp APIs
+(`compareCompToSubject`, `analyzeCompQuality`) are defined but unwired;
+Firecrawl fetcher, rate-limiter DO, KV/R2 caching all exist.
