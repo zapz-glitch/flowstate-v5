@@ -2,7 +2,7 @@
 
 import { isValidCoordinate } from '@/lib/property-map-geometry'
 
-import { useState, useCallback, useEffect, useRef } from 'react'
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import dynamic from 'next/dynamic'
 import { useSetAtom } from 'jotai'
 import { activeAnalysisAtom, analysisResultAtom, analysisStateAtom } from '@/atoms/analysis'
@@ -496,18 +496,28 @@ export default function AnalyzePage() {
     setAiAnalysisDone(false)
   }, [handleResetComps, setAnalysisResult])
 
+  // Stable props for the evaluation atom — inline objects/callbacks would
+  // retrigger the sync effect on every render and rewrite the atom.
+  const evalFeedback = useMemo(() => isReady ? {
+    appliedFilters: analysisResult?.appliedSettings?.filters ?? null,
+    fallbackUsed: analysisResult?.report?.arv?.compPool?.fallbackUsed ?? null,
+    fallbackReason: analysisResult?.report?.arv?.compPool?.fallbackReason ?? null,
+    jobId: analysisResult?.meta?.analysisId ?? null,
+    subjectAddress: analysisResult?.subject?.address ?? null,
+  } : null, [isReady, analysisResult])
+  const openSettings = useCallback(() => setSettingsOpen(true), [setSettingsOpen])
+  const handleCompClick = useCallback((comp: CompItem) => {
+    setComparisonComp(comp)
+    setComparisonOpen(true)
+  }, [setComparisonComp, setComparisonOpen])
+  const handlePermitsPulled = useCallback((a: AnalyzeData) => setAnalysisResult(a), [setAnalysisResult])
+
   useEvaluationSync({
     evaluation: { isRecalculated, recalcData, compOverride, handleToggleComp, handleResetComps },
     subject: renderData?.subject,
     displayValuation: isReady ? displayValuation : undefined,
     effectiveComps: isReady ? effectiveComps : undefined,
-    feedback: isReady ? {
-      appliedFilters: analysisResult?.appliedSettings?.filters ?? null,
-      fallbackUsed: analysisResult?.report?.arv?.compPool?.fallbackUsed ?? null,
-      fallbackReason: analysisResult?.report?.arv?.compPool?.fallbackReason ?? null,
-      jobId: analysisResult?.meta?.analysisId ?? null,
-      subjectAddress: analysisResult?.subject?.address ?? null,
-    } : null,
+    feedback: evalFeedback,
     aiAnalyzing,
     isStreaming: streamingStep !== 'idle' && streamingStep !== 'done',
     marketContext,
@@ -516,11 +526,11 @@ export default function AnalyzePage() {
     jevCompClassification: renderData?.jevCompClassification ?? null,
     jevAttributeScreen: renderData?.jevAttributeScreen ?? null,
     jevHybrid: renderData?.jevHybrid ?? null,
-    onOpenSettings: () => setSettingsOpen(true),
-    onCompClick: (comp) => { setComparisonComp(comp as CompItem); setComparisonOpen(true) },
+    onOpenSettings: openSettings,
+    onCompClick: handleCompClick,
     onRunAiAnalysis: handleRunAiAnalysis,
     onUndoAiSelection: aiAnalysisDone ? handleUndoAiSelection : undefined,
-    onPermitsPulled: (a) => setAnalysisResult(a),
+    onPermitsPulled: handlePermitsPulled,
   })
 
   // ─── Analysis Handler ────────────────────────────────────────────────────

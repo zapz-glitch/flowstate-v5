@@ -2,7 +2,7 @@
 
 import { isValidCoordinate } from '@/lib/property-map-geometry'
 
-import { useState, useEffect, useCallback, useRef, use } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef, use } from 'react'
 import Link from 'next/link'
 import dynamic from 'next/dynamic'
 import ReportLoading from './loading'
@@ -491,18 +491,31 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
   }, [handleResetComps])
 
   // ─── Sync evaluation state to Jotai atoms ────────────────────────────────
+  // Stable props — inline objects/callbacks would retrigger the sync effect
+  // on every render and rewrite the atom.
+  const evalFeedback = useMemo(() => ({
+    appliedFilters: analyzeData?.appliedSettings?.filters ?? null,
+    fallbackUsed: analyzeData?.report?.arv?.compPool?.fallbackUsed ?? null,
+    fallbackReason: analyzeData?.report?.arv?.compPool?.fallbackReason ?? null,
+    jobId,
+    subjectAddress: report?.address ?? analyzeData?.subject?.address ?? null,
+  }), [analyzeData, jobId, report?.address])
+  const openSettings = useCallback(() => setSettingsOpen(true), [setSettingsOpen])
+  const handleCompClick = useCallback((comp: CompItem) => {
+    setComparisonComp(comp)
+    setComparisonOpen(true)
+  }, [setComparisonComp, setComparisonOpen])
+  const handlePermitsPulled = useCallback(
+    (a: ActionAnalyzeData) => setReport((prev) => (prev ? { ...prev, analysis: a } : prev)),
+    [],
+  )
+
   useEvaluationSync({
     evaluation: { isRecalculated, recalcData, compOverride, handleToggleComp, handleResetComps },
     subject: analyzeData?.subject,
     displayValuation,
     effectiveComps,
-    feedback: {
-      appliedFilters: analyzeData?.appliedSettings?.filters ?? null,
-      fallbackUsed: analyzeData?.report?.arv?.compPool?.fallbackUsed ?? null,
-      fallbackReason: analyzeData?.report?.arv?.compPool?.fallbackReason ?? null,
-      jobId,
-      subjectAddress: report?.address ?? analyzeData?.subject?.address ?? null,
-    },
+    feedback: evalFeedback,
     aiAnalyzing,
     marketContext,
     aiReport,
@@ -510,12 +523,12 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
     jevCompClassification: analyzeData?.jevCompClassification ?? null,
     jevAttributeScreen: analyzeData?.jevAttributeScreen ?? null,
     jevHybrid: analyzeData?.jevHybrid ?? null,
-    onOpenSettings: () => setSettingsOpen(true),
-    onCompClick: (comp) => { setComparisonComp(comp as CompItem); setComparisonOpen(true) },
+    onOpenSettings: openSettings,
+    onCompClick: handleCompClick,
     onRunAiAnalysis: handleRunAiAnalysis,
     onUndoAiSelection: aiAnalysisDone ? handleUndoAiSelection : undefined,
     onFeedbackSubmitted: batchQueue ? handleFeedbackSubmitted : undefined,
-    onPermitsPulled: (a) => setReport((prev) => (prev ? { ...prev, analysis: a } : prev)),
+    onPermitsPulled: handlePermitsPulled,
   })
 
   if (loading || (report && report.jobId !== jobId && !error)) {
