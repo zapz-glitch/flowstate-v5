@@ -3454,3 +3454,72 @@ county-variant property codes on cards.
 Local dev for this branch: dashboard :3005 → API :8793
 (DASHBOARD_URL + NEXT_PUBLIC_API_URL repointed in gitignored env
 files; local login local@flowstate.test / V4-Test-7mQ9-rP2x!).
+
+## 2026-10-06 (later 4) — Front-end performance pass (6 steps, all committed)
+
+User asked for a full UI speed/efficiency audit, then approved a
+6-step plan with per-step E2E verification. Contract: behavior
+identical, only wasted renders drop; verify each step with DOM-mutation
+counts, React commit counts, click→paint latency, functional Playwright
+checks against :3005, tsc clean, e2e green.
+
+**Harness** (`scripts/ui-perf-baseline.mjs`): playwright-core via
+flowstate-v3's node_modules + local chromium-1243 + LD_LIBRARY_PATH to
+/tmp/pw-libs/extracted (NSS/ALSA debs extracted without root). Measures
+MutationObserver DOM mutations, React devtools-hook commit counts,
+click→paint (2×rAF), full interaction flow (login → ?address= auto-run →
+dialog → cards → pin → list → expand → sort → reload persistence).
+Artifacts in e2e/artifacts/ (gitignored).
+
+**Shipped (each = own commit):**
+1. `944fed2` — stabilized useEvaluationSync inputs (memoized feedback
+   object + useCallback handlers) in analyze + reports + public report
+   pages; stopped per-render atom rewrites double-rendering the tree.
+2. `5dd6b72` — memo() on CompCard/CompGridCard; callback props changed
+   to stable (key|comp, ...) signatures; pinTier/toggleExpand →
+   useCallback. Latency: pin 190→47ms, expand 70→21ms, sort 103→51ms.
+3. (next commit) — eval_progress moved to evalProgressAtom; label leaf
+   EvalProgressLabel subscribes; statusLabel widened to ReactNode.
+   Per-tick SSE updates now commit one span, not the page.
+4. (next commit) — Sidebar useAnalysis() (5 atoms) →
+   useAtomValue(isAnalysisRunningAtom) derived boolean; re-renders only
+   on run↔idle flips. Added data-analysis-running nav attr as test hook.
+5. loading.tsx ×5 — analyze, reports list, batch, settings,
+   evaluation-settings (was: only reports/[jobId] had one).
+6. Removed @tanstack/react-query (zero imports); @types/react 18→19
+   (+react-dom). npm dedupe collapsed a stale root @types/react@18 peer
+   copy that had shadowed 19 → 88 phantom gmp-*/ReactNode errors gone;
+   fixed one real React-19 change (useRef<T>(null) → RefObject<T|null>).
+
+**Perf artifact (step6 run):** eval window 2287 mut / 71 commits; pin
+6 mut/1 commit/46ms; expand ~170-390 mut (lazy-image noise); list-view
+~200-390 mut. All functional checks green every run; e2e 24/24.
+
+**Deferred:** splitting evaluation-settings/page.tsx (~3.7k lines) —
+pure refactor, no user-facing perf gain; only if asked.
+
+**Gotchas discovered (document for future sessions):**
+- `?address=` auto-run path: restore skipped, existing-report dialog
+  still intercepts; setActiveAnalysis fires only on response.success —
+  fast-fail runs never show the sidebar dot (pre-existing semantics).
+- Cached terminal verdicts: a PROPERTY_NOT_FOUND/INSUFFICIENT_COMPS
+  400 is cached in KV (eval-result:v3:<user>:<addr>:<paramsHash>) and
+  replays until TTL — a transient provider miss poisons an address.
+  Local flush: delete keys from
+  apps/api/.wrangler/state/v3/kv/miniflare-KVNamespaceObject/*.sqlite
+  (_mf_entries) via python3 sqlite3.
+- npm dedupe hoists packages out of workspace node_modules — a running
+  wrangler dev bakes old template paths into its bundle; restart the
+  process after dedupe or rebuilds fail with unresolvable paths.
+- Playwright locator.waitFor is strict-mode: a selector matching both
+  desktop+mobile nav dots rejects on appearance → false negative.
+  Use .first().
+- Baseline harness address: "228 Cobblestone Dr, Spring Hill, FL 34606"
+  (NOT the Ooltewah address — provider can't find it).
+- e2e script: `E2E_USER_ID=8NLlVN9LtfODbvKJ6jpvk9W3a8pfMDep node
+  scripts/e2e-analyze.mjs "<addr>" --api http://localhost:8793`.
+
+**Last Handoff:** all 6 planned front-end steps complete + verified.
+Branch swe-2-eval ahead of main by the eval work (already deployed) +
+6 perf commits. Perf commits NOT merged/deployed — dev-only so far.
+Open calls unchanged: suppress rules-fallback ARV in handoff runs?
