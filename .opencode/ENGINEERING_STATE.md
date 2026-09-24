@@ -3402,3 +3402,35 @@ verified, not merged/deployed. Open product call still standing: in
 human-handoff runs the rules-fallback ARV displays next to the flag —
 suppress or keep? Next session: user decides merge, or iterate on the
 fallback-display question.
+
+## 2026-10-06 (later 2) — CoreLogic code-table expansion (commit e684489)
+
+**Finding (user-reported):** enriched comp cards showed raw codes
+(`BST`, `H00`, `PK0`, `015`) — looked unenriched. Investigation:
+enrichment fired correctly (nouls scored real values); the decode
+tables simply lacked county-variant codes. `storiesType` was never
+decoded anywhere.
+
+**Shipped:** `e684489` — BST→Block/Stucco, MAS→Masonry, H00→Hip
+(+shape family), CL0/CLE/CLG/CF0→Central heating family, PK0→Package
+Unit, ACE→Central A/C, AHT/HTP→Heat Pump; new `decodeStoriesType`
+(3-digit numeric = stories×10 → "N Story"). Verified live: cold-KV
+run shows Block/Stucco/Hip/Package Unit, 24/24 E2E. Roof numerics
+`015`/`136` left raw — unsourced county codes.
+
+**Product decision:** KV-cached comp payloads keep raw codes until
+TTL expiry (~7d). Offered cache-prefix bump for instant decode (costs
+a burst of provider refetches); **user chose to let it age out** —
+no prefix bump.
+
+**Pre-merge checklist status:**
+- [x] Funnel spec implemented + E2E-verified (24/24, 23/23)
+- [x] Manual tier overrides + migration 0032 (local applied)
+- [x] Dashboard copy synced to new funnel
+- [x] Code-table decode expansion
+- [ ] Apply 0032 to **remote** D1 BEFORE deploy (job/report GETs query
+  the table unconditionally — CI never runs migrations)
+- [ ] Push swe-2-eval → main (clean fast-forward; deploy.yml auto-
+  deploys API + dashboard to prod)
+- [ ] Post-deploy smoke: prod /health + one saved-report GET
+- [ ] Open call: suppress rules-fallback ARV in handoff runs?
