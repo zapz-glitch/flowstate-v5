@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
 import { SlidersHorizontal, RotateCcw, Loader2, LayoutGrid, List, ArrowUpDown, Bell, Check } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -129,7 +129,8 @@ export function ComparablesSection({
   const [tierPending, setTierPending] = useState<Set<string>>(new Set())
 
   const jobId = feedbackContext?.jobId ?? null
-  const pinTier = async (comp: CompItem, tier: 'arv' | 'as_is' | null) => {
+  // Stable callback — memoized cards take it as a prop, so identity matters.
+  const pinTier = useCallback(async (comp: CompItem, tier: 'arv' | 'as_is' | null) => {
     const compId = comp.id
     if (!jobId || !compId) return
     setTierPending((p) => new Set(p).add(compId))
@@ -150,7 +151,7 @@ export function ComparablesSection({
       toast.error(res.error ?? 'Could not save the tier assignment')
     }
     setTierPending((p) => { const n = new Set(p); n.delete(compId); return n })
-  }
+  }, [jobId])
   // Server-rendered overrides merge with optimistic pins — pins win until
   // the next load confirms them.
   const compWithTier = (comp: CompItem): CompItem => {
@@ -243,12 +244,15 @@ export function ComparablesSection({
     })
   }, [compItems, sortBy, sortDesc, scoreFloor, subjectSubdivision, subject, selectedCompKeys, hasInteractiveSelection])
 
-  const toggleExpand = (key: string) => {
-    const next = new Set(expandedComps)
-    if (next.has(key)) next.delete(key)
-    else next.add(key)
-    setExpandedComps(next)
-  }
+  // Functional update keeps the identity stable for memoized cards.
+  const toggleExpand = useCallback((key: string) => {
+    setExpandedComps((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }, [])
 
   // Group comps based on selection mode
   const arvComps = hasInteractiveSelection
@@ -516,11 +520,11 @@ export function ComparablesSection({
                   index={originalIndex}
                   subject={subject}
                   isSelectedForArv={isSelected}
-                  onToggleArv={onToggleComp ? () => onToggleComp(key) : undefined}
-                  onAssignTier={jobId && comp.id ? (tier) => pinTier(comp, tier) : undefined}
+                  onToggleArv={onToggleComp}
+                  onAssignTier={jobId ? pinTier : undefined}
                   tierPending={comp.id ? tierPending.has(comp.id) : false}
-                  onClick={() => onCompClick?.(comp)}
-                  onHover={onCompHover ? (hovering) => onCompHover(hovering ? key : null) : undefined}
+                  onCompClick={onCompClick}
+                  onHover={onCompHover}
                   isHighlighted={highlightedCompKey === key}
                 />
               )
@@ -539,13 +543,13 @@ export function ComparablesSection({
                   comp={compWithTier(comp)}
                   index={originalIndex}
                   isExpanded={expandedComps.has(key)}
-                  onToggle={() => toggleExpand(key)}
+                  onToggle={toggleExpand}
                   subject={subject}
                   subjectSubdivision={subjectSubdivision}
                   subjectLotAcres={subject?.lotSizeAcres}
                   isSelectedForArv={isSelected}
-                  onToggleArv={onToggleComp ? () => onToggleComp(key) : undefined}
-                  onAssignTier={jobId && comp.id ? (tier) => pinTier(comp, tier) : undefined}
+                  onToggleArv={onToggleComp}
+                  onAssignTier={jobId ? pinTier : undefined}
                   tierPending={comp.id ? tierPending.has(comp.id) : false}
                 />
               )
