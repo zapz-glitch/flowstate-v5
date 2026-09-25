@@ -116,35 +116,6 @@ export function ValuationCard({
                     ARV ${safeFmt(Math.abs(valuation.arvVsListPrice))} {valuation.arvVsListPrice < 0 ? 'below' : 'above'} list
                   </div>
                 )}
-                {valuation.listPriceRealism && (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <div className="mt-1.5 w-fit cursor-help">
-                        <Badge
-                          variant="outline"
-                          className={cn(
-                            valuation.listPriceRealism.verdict === 'high' && 'border-emerald-600/40 text-emerald-600',
-                            valuation.listPriceRealism.verdict === 'medium' && 'border-amber-600/40 text-amber-600',
-                            valuation.listPriceRealism.verdict === 'low' && 'border-red-600/40 text-red-600'
-                          )}
-                        >
-                          {valuation.listPriceRealism.verdict === 'high' ? 'Realistic ask' : valuation.listPriceRealism.verdict === 'medium' ? 'Negotiable gap' : 'Unrealistic ask'}
-                        </Badge>
-                      </div>
-                    </TooltipTrigger>
-                    <TooltipContent side="top" className="max-w-xs">
-                      <div className="space-y-1.5">
-                        <p className="font-medium">Ask vs wholesale ceiling</p>
-                        <p className="text-foreground-tertiary">
-                          {valuation.listPriceRealism.gapDollars > 0
-                            ? `Asking $${safeFmt(valuation.listPriceRealism.gapDollars)} (${safeFmt(valuation.listPriceRealism.gapPercent)}%) above the $${safeFmt(valuation.listPriceRealism.wholesalePrice)} wholesale ceiling.`
-                            : `Asking at or below the $${safeFmt(valuation.listPriceRealism.wholesalePrice)} wholesale ceiling.`}
-                        </p>
-                        <p className="font-mono text-[10px] text-foreground-tertiary mt-1">Realistic ≤10% of ask · Negotiable ≤20% · Unrealistic &gt;20%</p>
-                      </div>
-                    </TooltipContent>
-                  </Tooltip>
-                )}
               </div>
             )}
             <div className="p-3 min-w-[120px] flex-1">
@@ -232,11 +203,6 @@ export function ValuationCard({
                 <div className={cn('text-heading-sm font-semibold', (valuation.wholesalePrice ?? 0) >= 0 ? '' : 'text-red-600')}>
                   ${formatHeadlineMoney(valuation.wholesalePrice, valuation.displayedWholesalePrice, valuation.displayRounding)}
                 </div>
-                {valuation.wholesaleFee != null && (
-                  <div className="text-caption-sm text-foreground-tertiary mt-1">
-                    after ${safeFmt(valuation.wholesaleFee)} fee
-                  </div>
-                )}
               </div>
             )}
           </div>

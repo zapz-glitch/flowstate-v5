@@ -511,18 +511,6 @@ export interface ValuationData {
   projectedProfit?: number
   projectedROI?: number
   wholesalePrice?: number
-  /** Wholesale fee deducted from buy price to reach the wholesale ceiling */
-  wholesaleFee?: number
-  /** Ask-vs-wholesale-ceiling realism — null when the subject has no list price */
-  listPriceRealism?: {
-    listPrice: number
-    wholesalePrice: number
-    /** listPrice − wholesalePrice (negative = ask below the ceiling) */
-    gapDollars: number
-    /** Gap as % of ask — ≤10% high, ≤20% medium, else low */
-    gapPercent: number
-    verdict: 'high' | 'medium' | 'low'
-  } | null
   /** Location-risk deduction applied to buy price (positional proximity) */
   locationPenalty?: number
   locationPenaltyPercent?: number
