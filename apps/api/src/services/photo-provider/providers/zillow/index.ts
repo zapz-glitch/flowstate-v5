@@ -143,6 +143,20 @@ export class ZillowPhotoProvider implements PhotoProvider {
       const listing = result.listing
       const maxPhotos = options?.maxPhotos ?? 20
 
+      // Ask price — only when the listing is actually on the market; an
+      // off-market `price` is a Zestimate/last-sale figure, not an ask. The
+      // status regex can misread 'sold' from price-history rows, so a latest
+      // non-sold history event also counts.
+      const latestHistoryEvent = [...(listing.priceHistory ?? [])]
+        .sort((a, b) => Date.parse(b.date) - Date.parse(a.date))[0]
+        ?.event?.toLowerCase() ?? ''
+      const onMarket =
+        listing.status === 'for_sale' ||
+        listing.status === 'pending' ||
+        (latestHistoryEvent !== '' && !/sold/.test(latestHistoryEvent))
+      const listPrice =
+        listing.price != null && listing.price > 0 && onMarket ? listing.price : null
+
       const photos: PropertyPhotos = {
         propertyId: property.propertyId,
         photos: listing.photos.slice(0, maxPhotos),
@@ -177,6 +191,7 @@ export class ZillowPhotoProvider implements PhotoProvider {
         parking: listing.parking,
         pool: listing.pool,
         propertyType: listing.propertyType,
+        ...(listPrice ? { metadata: { listPrice } } : {}),
       }
 
       return {
