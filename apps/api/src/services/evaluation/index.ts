@@ -910,7 +910,11 @@ export async function performAnalysis(
     majorItemConfig,
     visionLevelIndex: renovation.renovationLevelIndex,
     visionConfidence: renovation.confidence,
-    visionRenovated: subjectCurbAppeal?.condition === 'renovated',
+    // "Verified renovated" requires the vision level itself to say no real
+    // work is needed (Lipstick = 0). A renovated-looking exterior alone must
+    // not zero the rehab when the interior verdict assigned a real level.
+    visionRenovated:
+      subjectCurbAppeal?.condition === 'renovated' && renovation.renovationLevelIndex === 0,
   })
   step(
     'major_items',
