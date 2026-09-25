@@ -1,6 +1,30 @@
 # Engineering State — flowstate-v5
 
 
+### 2026-09-25 — Vision rehab level was being overridden by curb appeal: `8bfd16d` on `fix/vision-renovated-gate`
+
+User report: "subject condition isn't getting assigned." Verified the
+required condition fetch IS running end-to-end (e2e on 6104 Shiprock Ave:
+photo_fetch 20 photos via redfin → vision ok, level + evidence lists,
+renovationLevelSource 'vision', both entry paths share evaluate()).
+
+Found the real defect: `renovatedVerified` fired on
+`curbAppeal.condition === 'renovated'` alone (exterior-only signal), so a
+subject whose interior verdict assigned a real level still showed
+`valuation.rehabLevel: 'Renovated'` / rehabCost $0 — the vision pick was
+recorded but never drove the dollars. Fix: `visionRenovated` now requires
+`renovationLevelIndex === 0` (Lipstick) — verified-renovated needs the
+interior verdict to agree nothing needs doing.
+
+Re-verified e2e post-fix: vision 'Full Cosmetic' @90% → valuation
+rehabLevel 'Full Cosmetic', rehabCost $62,965 ($35/sqft) — the picked
+level now drives. 24/24 e2e assertions, tsc clean. NOT merged/deployed.
+
+Also noted: visionAssessment/renovationLevelSource only render on the
+admin observability pages — the user-facing report shows
+valuation.rehabLevel (now correct) but never surfaces the vision verdict
+itself.
+
 ### 2026-09-24 (later 2) — Stale Server Action auto-reload: `c734949`, deployed
 
 Recurring prod issue: every deploy rotates Server Action IDs; open tabs
