@@ -32,7 +32,7 @@ export interface AnalysisPageLayoutProps {
   loading?: boolean
 
   /** Current streaming step label — shown near the comparables section */
-  statusLabel?: string | null
+  statusLabel?: ReactNode
 
   // Optional footer (e.g. Raw JSON)
   footer?: ReactNode

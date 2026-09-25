@@ -69,6 +69,7 @@ import {
   ROOF_COVER,
   EXTERIOR_WALLS,
   BUILDING_QUALITY,
+  decodeStoriesType,
 } from './providers/corelogic-codes';
 
 /** Resolve raw CoreLogic codes to labels in construction data (handles KV-cached entries) */
@@ -82,6 +83,7 @@ function resolveConstructionCodes(c: NonNullable<NormalizedProperty['constructio
     roofType: lookupCode(ROOF_TYPE, c.roofType) ?? c.roofType,
     roofCover: lookupCode(ROOF_COVER, c.roofCover) ?? c.roofCover,
     exteriorWalls: lookupCode(EXTERIOR_WALLS, c.exteriorWalls) ?? c.exteriorWalls,
+    storiesType: decodeStoriesType(c.storiesType) ?? c.storiesType,
   };
 }
 
@@ -1078,6 +1080,7 @@ class PropertyApi implements PropertyApiService {
                 subdivision: result.data.subdivision ?? null,
                 neighborhoodName: result.data.neighborhoodName ?? null,
                 neighborhoodCode: result.data.neighborhoodCode ?? null,
+                censusTract: result.data.censusTract ?? null,
                 buildingCondition: result.data.buildingCondition ?? null,
                 buildingGrade: result.data.buildingGrade ?? null,
                 stories: result.data.stories ?? null,

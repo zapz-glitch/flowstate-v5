@@ -39,6 +39,7 @@ import {
 } from '../analysis'
 import { createPhotoService, type PhotoBundle, type PropertyIdentifier, type PropertyPhotos } from '../photo-provider'
 import {
+  COMP_ARV_TOP_PERCENT,
   COMP_HYBRID_VERSION,
   runJevEvaluation,
   type HybridRun,
@@ -46,7 +47,7 @@ import {
 
 import { persistReportAssets } from '../report-assets'
 import { expansionRefetchRadius } from '../property-api/retrieval-policy'
-import { assessRenovationFromPhotos, type RenovationAssessment, type CurbAppealCheck } from '../vision/renovation'
+import { assessRenovationFromPhotos, unavailableAssessment, type RenovationAssessment, type CurbAppealCheck } from '../vision/renovation'
 import { PROXIMITY_DEFAULTS } from '../../routes/proximity-config'
 import { deriveBuybox } from './derivation'
 import { buildEvaluationReport } from './report'
@@ -626,16 +627,24 @@ export async function performAnalysis(
   // deriveBuybox, so this branch is awaited after Jev completes. The photo
   // URLs are captured up front so R2 persistence can rewrite them while
   // vision reads the live CDN links.
-  const visionAndPersist = (async (): Promise<RenovationAssessment | null> => {
+  const visionAndPersist = (async (): Promise<RenovationAssessment> => {
     const subjectPhotos = [...(photoBundle?.subject?.photos ?? [])]
-    const renovationPromise = (async () => {
+    // The subject condition fetch is required for eval completion — a thrown
+    // error still resolves as an explicit 'unavailable' verdict so the run
+    // records the outcome instead of silently completing without it.
+    const renovationPromise = (async (): Promise<RenovationAssessment> => {
       try {
         return await assessRenovationFromPhotos(env, subjectPhotos, {
           address: bundle.property.address,
           squareFeet: bundle.property.squareFeet,
           yearBuilt: bundle.property.yearBuilt,
         })
-      } catch { return null }
+      } catch (e) {
+        return unavailableAssessment({
+          error: e instanceof Error ? e.message : 'Vision assessment failed',
+          limitations: ['Assessment call threw — no level invented'],
+        })
+      }
     })()
 
     // ── Persist listing photos into private report storage ────────────────
@@ -673,22 +682,23 @@ export async function performAnalysis(
   })()
 
   // ── Jev comp evaluation — the only selection logic ────────────────────────
-  // Test 1 asks Jev's raw-field nouls — bathrooms, squareFeet, lotSize,
-  // yearBuilt, salePrice, saleDate — "does this comp match the subject on
-  // this field per the appraisal rules?" Passing every verifiable field
-  // puts the comp in the "passed test 1" bucket → it gets enriched.
+  // Test 1 asks Jev's raw-field nouls — squareFeet, lotSize, yearBuilt,
+  // salePrice, saleDate — "does this comp match the subject on this field
+  // per the appraisal rules?" Passers get a composite score (proximity +
+  // field strength) and the top-10 get enriched.
   // Test 2 asks the enriched nouls — subdivision yes, else neighborhood
-  // yes — plus advisory physical-character/material nouls and a
-  // distance-dominant Score with confidence. Test-2 passers are the core
-  // comp set (ideally 3); when fewer pass, the test-1-pass / test-2-fail
-  // bucket fills to 3 by score. ARV = mean adjusted price of the selected
-  // set — the only non-Jev step.
+  // yes — plus advisory physical-character/material/foundation nouls that
+  // lift the score from a 90 baseline toward 100. Passers split by price:
+  // the top 15% become the ARV set (variable count), the rest the as-is
+  // reference. No fill — zero passers flags human handoff. ARV = mean
+  // adjusted price of the ARV set — the only non-Jev step.
   let jevInvestmentCompIds: string[] = []
   let hybridRun: HybridRun | null = null
   let jevSelection: {
     selected: { compId: string; score: number | null; fullMatch: boolean; verdict: string; confidence: number | null }[]
     counts: NonNullable<HybridRun['counts']> | null
-    fillUsed: boolean
+    humanHandoff: boolean
+    asIsCompIds: string[]
     topCompId: string | null
   } | null = null
   if (appraisalResult.comparables.length > 0) {
@@ -722,7 +732,7 @@ export async function performAnalysis(
         jevHybrid: entryById.get(comp.id) ?? null,
       }))
 
-      const fillUsed = jev.fillCompIds.length > 0
+      const humanHandoff = jev.humanHandoff
       hybridRun = {
         status: 'completed', mode: 'enabled', questionVersion: COMP_HYBRID_VERSION,
         model: jev.test2?.model ?? jev.test1?.model,
@@ -731,7 +741,7 @@ export async function performAnalysis(
         stateHashes: [...(jev.test1?.stateHashes ?? []), ...(jev.test2?.stateHashes ?? [])],
         test1: jev.test1, test2: jev.test2,
         counts: jev.counts,
-        selection: { coreTarget: jev.coreTarget, noulGate: jev.noulGate, fillUsed },
+        selection: { noulGate: jev.noulGate, arvTopPercent: COMP_ARV_TOP_PERCENT, humanHandoff },
         questionSet: jev.questionSet,
         screenedAt: new Date().toISOString(),
       }
@@ -742,20 +752,22 @@ export async function performAnalysis(
             compId: id,
             score: e?.score ?? null,
             fullMatch: e?.stage === 'test2_pass',
-            verdict: e?.selected ?? 'fill',
+            verdict: e?.selected ?? 'core',
             confidence: e?.scoreConfidence ?? null,
           }
         }),
         counts: jev.counts,
-        fillUsed,
+        humanHandoff,
+        asIsCompIds: jev.asIsCompIds,
         topCompId: jev.entries.find((e) => e.poolRank === 1)?.compId ?? null,
       }
 
       if (jev.arvCompIds.length === 0) {
-        // No comp reached test 2 (all ineligible or all failed test 1) —
-        // the rules selection stands; test results still attach for display.
-        step('jev_evaluation', 'fallback', `Jev tested ${jev.counts.pool} candidates — none passed both tests (${jev.test1?.model ?? 'jev'})`)
-        fallbacksUsed.push('jev_evaluation:empty_pool')
+        // Zero test-2 passers — human handoff. The rules selection stands
+        // as a reference number; the flag tells the consumer it is
+        // unexamined. Test results still attach for display.
+        step('jev_evaluation', 'fallback', `Jev tested ${jev.counts.pool} candidates — none passed both tests — human handoff (${jev.test1?.model ?? 'jev'})`)
+        fallbacksUsed.push('jev_evaluation:human_handoff')
       } else {
         const selectedIds = new Set(jev.arvCompIds)
         appraisalResult.comparables = appraisalResult.comparables.map((comp) => ({
@@ -771,7 +783,7 @@ export async function performAnalysis(
         )
         appraisalResult.insufficientComps = false
         step('jev_evaluation', 'completed',
-          `Jev tested ${jev.counts.pool} → ${jev.counts.test1Passed} passed test 1 → ${jev.counts.test2Passed} passed test 2 → ${jev.counts.selected} selected${fillUsed ? ` (${jev.counts.filled} filled by score)` : ''} · ${jev.counts.ineligible} ineligible (${jev.test2?.model ?? jev.test1?.model ?? 'jev'})`)
+          `Jev tested ${jev.counts.pool} → ${jev.counts.test1Passed} passed test 1 → ${jev.counts.test2Passed} passed test 2 → ${jev.counts.arv} ARV / ${jev.counts.asIs} as-is · ${jev.counts.ineligible} ineligible (${jev.test2?.model ?? jev.test1?.model ?? 'jev'})`)
       }
     } catch (error) {
       console.warn('[Evaluate] Jev evaluation failed:', error instanceof Error ? error.message : error)
@@ -804,27 +816,25 @@ export async function performAnalysis(
   // condition is the subject's detected condition. Launched alongside the
   // Jev funnel above — the result is only needed here.
   const compById = new Map(appraisalResult.comparables.map((c) => [c.id, c]))
-  const renovation: RenovationAssessment | null = await visionAndPersist
-  if (renovation) {
-    step(
-      'renovation_assessment',
-      renovation.renovationLevelIndex != null ? 'completed' : 'fallback',
-      renovation.renovationLevel != null
-        ? `${renovation.renovationLevel} @ ${renovation.confidence ?? '?'}% (${renovation.photosExamined} photos)`
-        : renovation.status
-    )
-    if (renovation.status !== 'ok' && renovation.status !== 'insufficient_photo_evidence') {
-      fallbacksUsed.push(`vision:${renovation.status}`)
-    }
-  } else {
-    step('renovation_assessment', 'fallback', 'vision call failed')
-    fallbacksUsed.push('vision:error')
+  // Required step — the fetch always resolves a verdict object. Non-ok
+  // statuses are recorded in fallbacksUsed so the report exposes that the
+  // subject condition could not be verified from photos.
+  const renovation: RenovationAssessment = await visionAndPersist
+  step(
+    'renovation_assessment',
+    renovation.renovationLevelIndex != null ? 'completed' : 'fallback',
+    renovation.renovationLevelIndex != null
+      ? `${renovation.renovationLevel} @ ${renovation.confidence ?? '?'}% (${renovation.photosExamined} photos)`
+      : `condition fetch completed — ${renovation.status}${renovation.error ? ` (${renovation.error})` : ''}`
+  )
+  if (renovation.status !== 'ok') {
+    fallbacksUsed.push(`vision:${renovation.status}`)
   }
   onProgress?.('Renovation level assessed')
 
   // Subject curb appeal comes from the merged vision pass (one LLM call for
   // both renovation level + curb-appeal condition).
-  const subjectCurbAppeal: CurbAppealCheck | null = renovation?.curbAppeal ?? null
+  const subjectCurbAppeal: CurbAppealCheck | null = renovation.curbAppeal ?? null
 
   // ── ARV condition evidence ────────────────────────────────────────────────
   // Product spec: the rules already picked the comps — condition verification
@@ -898,9 +908,13 @@ export async function performAnalysis(
   const derivedBuybox = deriveBuybox(bundle.property, undefined, params.buybox, {
     permits: bundle.enrichment.permits?.items,
     majorItemConfig,
-    visionLevelIndex: renovation?.renovationLevelIndex ?? null,
-    visionConfidence: renovation?.confidence ?? null,
-    visionRenovated: subjectCurbAppeal?.condition === 'renovated',
+    visionLevelIndex: renovation.renovationLevelIndex,
+    visionConfidence: renovation.confidence,
+    // "Verified renovated" requires the vision level itself to say no real
+    // work is needed (Lipstick = 0). A renovated-looking exterior alone must
+    // not zero the rehab when the interior verdict assigned a real level.
+    visionRenovated:
+      subjectCurbAppeal?.condition === 'renovated' && renovation.renovationLevelIndex === 0,
   })
   step(
     'major_items',

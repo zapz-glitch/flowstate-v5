@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { FlaskConical } from 'lucide-react'
 import { getCdarvReportStatus, type CdarvReportStatus } from '@/app/(dashboard)/dashboard/cdarv/actions'
+import { reloadForStaleAction } from '@/lib/server-action'
 
 /**
  * Read-only CDARV presence in the evaluation section. Shows whether this
@@ -19,7 +20,7 @@ export function CdarvStatusChip({ jobId }: { jobId: string }) {
     let live = true
     getCdarvReportStatus(jobId)
       .then((s) => { if (live) setStatus(s) })
-      .catch(() => {})
+      .catch((err) => { reloadForStaleAction(err) })
       .finally(() => { if (live) setLoaded(true) })
     return () => { live = false }
   }, [jobId])

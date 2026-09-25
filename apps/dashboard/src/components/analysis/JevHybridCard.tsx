@@ -21,12 +21,14 @@ export function JevHybridCard({ run }: { run: JevHybridData | null | undefined }
         counts.test1Passed != null ? `${counts.test1Passed} passed test 1` : null,
         counts.examined != null ? `${counts.examined} enriched + examined` : (counts.enriched != null ? `${counts.enriched} enriched` : null),
         counts.test2Passed != null ? `${counts.test2Passed} passed test 2` : (counts.fullMatch != null ? `${counts.fullMatch} matched every question` : null),
-        counts.selected != null ? `${counts.selected} selected` : null,
+        counts.arv != null ? `${counts.arv} ARV` : null,
+        counts.asIs != null ? `${counts.asIs} as-is` : null,
+        counts.selected != null && counts.arv == null ? `${counts.selected} selected` : null,
         counts.ineligible ? `${counts.ineligible} ineligible` : (counts.unusable ? `${counts.unusable} unusable` : null),
       ].filter(Boolean).join(' · ')
     : ''
 
-  const fillUsed = sel?.fillUsed === true || sel?.closestOnly === true || (run as { fallbackMode?: boolean }).fallbackMode === true
+  const humanHandoff = sel?.humanHandoff === true
 
   return (
     <section className="border border-border rounded-sm px-4 py-2.5 text-foreground">
@@ -38,6 +40,11 @@ export function JevHybridCard({ run }: { run: JevHybridData | null | undefined }
       >
         <span className="text-body-sm font-semibold">Jev evaluation</span>
         <span className="flex items-center gap-2 min-w-0">
+          {humanHandoff && (
+            <span className="rounded-sm bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-500">
+              Human handoff
+            </span>
+          )}
           {run.model && <span className="text-[10px] text-foreground-tertiary tabular-nums">{run.model}</span>}
           <ChevronDown className={cn('w-3.5 h-3.5 text-foreground-tertiary transition-transform', open && 'rotate-180')} />
         </span>
@@ -45,14 +52,21 @@ export function JevHybridCard({ run }: { run: JevHybridData | null | undefined }
 
       <p className="text-[11px] text-foreground-tertiary mt-1">
         {countLine}
-        {fillUsed ? ' — core set filled by score' : ''}
+        {humanHandoff ? ' — zero comps passed test 2' : ''}
         {run.latencyMs != null ? ` · ${(run.latencyMs / 1000).toFixed(1)}s` : ''}
       </p>
 
       {open && (
-        <p className="text-[10px] text-foreground-tertiary mt-1.5">
-          Test 1 checks the raw fields against your appraisal rules; passers get enriched and test 2 checks subdivision, then neighborhood. Every evaluated comp carries a distance score /100 — the closest comp to the subject scores highest.
-        </p>
+        <div className="text-[10px] text-foreground-tertiary mt-1.5 space-y-1">
+          <p>
+            Test 1 checks the raw fields against your appraisal rules — size, lot, year built, sale price, sale date — and scores each passer 90–100 on pure proximity. The ten highest scorers — the ten nearest — get enriched; test 2 needs the same subdivision or neighborhood and rescores fresh: a subdivision match on the same side of major roads (same census tract) earns 95–100, neighborhood-only or a road crossing lands 90–95 with distance leading — matched style/materials/foundation lift the score and missing data penalizes it. Passers split by price — the top 10% are the ARV comps, the rest as-is reference. No fill: a short passer set stays short.
+          </p>
+          {humanHandoff && (
+            <p className="text-amber-500/90">
+              Human handoff — no comp cleared test 2, so this ARV is unexamined reference. Review the comps manually before relying on it.
+            </p>
+          )}
+        </div>
       )}
     </section>
   )

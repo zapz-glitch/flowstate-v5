@@ -34,9 +34,10 @@ export async function hashEvalParams(params: unknown): Promise<string> {
 
 export function evalResultKey(userId: string, address: string, paramsHash: string): string {
   const norm = address.trim().toLowerCase().replace(/\s+/g, ' ');
-  // v2 — payloads written before the filter `status` field (114aeaa) render
-  // unverifiable passes as verified green; don't serve them.
-  return `eval-result:v2:${userId}:${norm}:${paramsHash}`;
+  // v3 — swe-2-eval funnel: no bathrooms noul, top-15% ARV/as-is price
+  // tier, no fill, humanHandoff flag. v2 payloads carry `fill` verdicts and
+  // lack the tier/handoff fields; don't serve them.
+  return `eval-result:v3:${userId}:${norm}:${paramsHash}`;
 }
 
 /**

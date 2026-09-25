@@ -126,6 +126,13 @@ export interface AnalyzeData {
         fallbackReason?: string
       }
     }
+    /** Jev flagged zero test-2 passers — the report is for manual review */
+    humanHandoff?: boolean
+    /** Jev funnel record — selection, counts, and reviewer tier overrides */
+    jev?: {
+      /** Reviewer-pinned comp tiers — compId → 'arv'|'as_is', applied at read time */
+      userOverrides?: Array<{ compId: string; tier: 'arv' | 'as_is' }>
+    } | null
   }
   /** Settings used during this analysis (for client-side recalculation initialization) */
   appliedSettings?: {
@@ -233,16 +240,18 @@ export interface JevHybridData {
     enriched: number
     test2Passed: number
     test2Failed: number
-    core: number
-    filled: number
+    /** ARV-tier test-2 passers (top 15% by adjusted price) */
+    arv: number
+    /** Test-2 passers below the ARV tier — as-is reference */
+    asIs: number
     selected: number
   }
   selection?: {
-    /** The ideal core comp set — test-2 passers; the fail bucket fills to this when short */
-    coreTarget: number
     noulGate: number
-    /** True when fill picks were needed — fewer than the target passed test 2 */
-    fillUsed?: boolean
+    /** The ARV tier fraction applied to test-2 passers */
+    arvTopPercent?: number
+    /** Zero comps passed test 2 — the run is flagged for manual review */
+    humanHandoff?: boolean
   }
   /** The questions this run asked — generated from the appraisal preset */
   questionSet?: {
@@ -268,30 +277,34 @@ export interface JevHybridCompScore {
   saleAgeDays: number | null
   /** Property-detail data was merged before test 2 */
   enriched?: boolean
-  /** Test 1 — the eight raw-field nouls */
+  /** Test 1 — the five raw-field nouls plus the composite score */
   test1: {
     /** field → 0–1 probability the comp matches the subject on it */
     nouls: Record<string, number | null>
     /** Verifiable fields below the gate */
     failedFields: string[]
-    /** Fields the data could not verify — count as not passed */
+    /** Fields the data could not verify — noted, not failed */
     unverifiableFields: string[]
     /** All fields verified at/above the gate — the "passed test 1" bucket */
     passed: boolean
+    /** Composite /100 — proximity-dominant, blended with field-match strength; orders the enrichment cohort */
+    score: number | null
   } | null
-  /** Test 2 — the enriched nouls plus the distance-dominant score */
+  /** Test 2 — the enriched nouls plus the score */
   test2: {
     nouls: {
       subdivision: number
       neighborhood: number
-      /** Advisory — preferred, never gating */
+      /** Advisory — preferred, never gating; feeds the 90→100 boost */
       physicalCharacter: number
-      /** Advisory — preferred, never gating */
+      /** Advisory — preferred, never gating; feeds the 90→100 boost */
       material: number
+      /** Advisory — preferred, never gating; feeds the 90→100 boost */
+      foundation: number
     }
-    /** Subdivision yes, or neighborhood yes — eligible for the core set */
+    /** Subdivision yes, or neighborhood yes — eligible for classification */
     passed: boolean
-    /** Distance-dominant spectrum score /100 */
+    /** Passers: 90 baseline + up to 10 for matched physical characteristics. Fails: distance spectrum scaled below 90. */
     score: number
     confidence: number | null
     /** Score level index → probability */
@@ -302,9 +315,17 @@ export interface JevHybridCompScore {
   scoreConfidence: number | null
   /** 1-based rank among test-2-evaluated comps by score — #1 is closest */
   poolRank: number | null
-  /** 'core' = test-2 passer in the ARV set · 'fill' = fallback pick from the test-2-fail bucket */
-  selected: 'core' | 'fill' | null
+  /** Price tier among test-2 passers — 'arv' = top-10% (the ARV set), 'as_is' = the rest */
+  priceTier: 'arv' | 'as_is' | null
+  /** 'core' = ARV-tier test-2 passer — the only comps feeding ARV */
+  selected: 'core' | null
   adjustedPrice: number | null
+  /**
+   * Road-barrier proxy — the comp's census tract differs from the
+   * subject's (tract boundaries follow major roads). null = unverified.
+   * A crossing demotes a subdivision matcher out of the premium score tier.
+   */
+  crossesMajorRoad?: boolean | null
 }
 
 /** Jev read-only outcome classification attached to a completed analysis */
@@ -631,6 +652,13 @@ export interface CompItem {
   isEnabled?: boolean
   /** Which comp group: 'arv' (Group A, drives valuation), 'as_is' (Group B, market intel), or null */
   compGroup?: 'arv' | 'as_is' | null
+  /**
+   * Reviewer's manual tier pin — 'arv' or 'as_is' — assigned on the comp
+   * card. Rides alongside Jev's automatic priceTier; never rewrites it.
+   */
+  userTier?: 'arv' | 'as_is' | null
+  /** Road-barrier proxy — census tract differs from the subject's. Absent = unverified. */
+  crossesMajorRoad?: boolean
   /** Visual ARV-candidacy check on listing photos (ARV-selected comps only) */
   curbAppeal?: {
     condition: 'renovated' | 'dated' | 'distressed' | 'unknown'
@@ -913,5 +941,50 @@ export async function queueAnalysis(request: AnalyzeRequest): Promise<QueueAnaly
       success: false,
       error: error instanceof Error ? error.message : 'Failed to analyze property',
     }
+  }
+}
+
+/**
+ * Manual comp-tier assignment — pin a comparable to 'arv' or 'as_is' from the
+ * comp card (Property Search), or clear the pin with null. Persisted per
+ * (job, comp) on the API and applied onto the report at read time — Jev's
+ * automatic classification is never rewritten, the pin rides alongside it.
+ */
+export async function assignCompTier(
+  jobId: string,
+  compId: string,
+  tier: 'arv' | 'as_is' | null,
+): Promise<{ success: boolean; error?: string }> {
+  const session = await getSession()
+  if (!session?.user) {
+    return { success: false, error: 'Not authenticated. Please log in to use this feature.' }
+  }
+  const dashboardSecret = await getDashboardSecret()
+  if (!dashboardSecret) {
+    return { success: false, error: 'Dashboard configuration error. Please contact support.' }
+  }
+  try {
+    const apiUrl = await getApiUrl()
+    const url = `${apiUrl}/v1/analyze/jobs/${encodeURIComponent(jobId)}/comp-tier`
+    logApiCall('PUT', url)
+    const startTime = Date.now()
+    const response = await fetch(url, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Dashboard-User-Id': session.user.id,
+        'X-Dashboard-Secret': dashboardSecret,
+      },
+      body: JSON.stringify({ compId, tier }),
+    })
+    logApiCall('PUT', url, response.status, Date.now() - startTime)
+    const data = (await response.json().catch(() => ({}))) as { success?: boolean; error?: string }
+    if (!response.ok || data?.success !== true) {
+      return { success: false, error: data?.error ?? `API request failed with status ${response.status}` }
+    }
+    return { success: true }
+  } catch (error) {
+    logError('assignCompTier exception', error)
+    return { success: false, error: error instanceof Error ? error.message : 'Failed to assign comp tier' }
   }
 }

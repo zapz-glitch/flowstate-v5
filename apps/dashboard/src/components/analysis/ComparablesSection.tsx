@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
 import { SlidersHorizontal, RotateCcw, Loader2, LayoutGrid, List, ArrowUpDown, Bell, Check } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -21,6 +21,8 @@ import { CompGridCard } from './CompGridCard'
 import { RuleMatchDetails } from './RuleMatchDetails'
 import { generateCompFeedbackReport, type FeedbackContext, type FeedbackKind } from '@/lib/comp-feedback'
 import { submitReportFeedback } from '@/app/(dashboard)/dashboard/batch/actions'
+import { assignCompTier } from '@/app/(dashboard)/dashboard/analyze/actions'
+import { reloadForStaleAction } from '@/lib/server-action'
 import { SendToCdarvButton } from '@/components/SendToCdarvButton'
 import { CdarvStatusChip } from './CdarvStatusChip'
 
@@ -122,6 +124,41 @@ export function ComparablesSection({
   const [notifyNotes, setNotifyNotes] = useState('')
   const [notifySubmitting, setNotifySubmitting] = useState<FeedbackKind | null>(null)
   const [notifySaveError, setNotifySaveError] = useState<string | null>(null)
+  // Reviewer-pinned comp tiers — compId → 'arv'|'as_is'. Optimistic local
+  // state; persisted via PUT /v1/analyze/jobs/:jobId/comp-tier.
+  const [tierPins, setTierPins] = useState<Record<string, 'arv' | 'as_is'>>({})
+  const [tierPending, setTierPending] = useState<Set<string>>(new Set())
+
+  const jobId = feedbackContext?.jobId ?? null
+  // Stable callback — memoized cards take it as a prop, so identity matters.
+  const pinTier = useCallback(async (comp: CompItem, tier: 'arv' | 'as_is' | null) => {
+    const compId = comp.id
+    if (!jobId || !compId) return
+    setTierPending((p) => new Set(p).add(compId))
+    setTierPins((p) => {
+      const next = { ...p }
+      if (tier) next[compId] = tier
+      else delete next[compId]
+      return next
+    })
+    const res = await assignCompTier(jobId, compId, tier)
+    if (!res.success) {
+      setTierPins((p) => {
+        const next = { ...p }
+        if (comp.userTier) next[compId] = comp.userTier
+        else delete next[compId]
+        return next
+      })
+      toast.error(res.error ?? 'Could not save the tier assignment')
+    }
+    setTierPending((p) => { const n = new Set(p); n.delete(compId); return n })
+  }, [jobId])
+  // Server-rendered overrides merge with optimistic pins — pins win until
+  // the next load confirms them.
+  const compWithTier = (comp: CompItem): CompItem => {
+    const pinned = comp.id ? tierPins[comp.id] : undefined
+    return pinned ? { ...comp, userTier: pinned } : comp
+  }
 
   // Auto-expand excluded section when a highlighted comp is in it
   useEffect(() => {
@@ -208,12 +245,15 @@ export function ComparablesSection({
     })
   }, [compItems, sortBy, sortDesc, scoreFloor, subjectSubdivision, subject, selectedCompKeys, hasInteractiveSelection])
 
-  const toggleExpand = (key: string) => {
-    const next = new Set(expandedComps)
-    if (next.has(key)) next.delete(key)
-    else next.add(key)
-    setExpandedComps(next)
-  }
+  // Functional update keeps the identity stable for memoized cards.
+  const toggleExpand = useCallback((key: string) => {
+    setExpandedComps((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }, [])
 
   // Group comps based on selection mode
   const arvComps = hasInteractiveSelection
@@ -251,7 +291,8 @@ export function ComparablesSection({
           setNotifySubmitting(null)
           return
         }
-      } catch {
+      } catch (err) {
+        if (reloadForStaleAction(err)) return
         setNotifySaveError('Submission failed')
         setNotifySubmitting(null)
         return
@@ -477,13 +518,15 @@ export function ComparablesSection({
               return (
                 <CompGridCard
                   key={key}
-                  comp={comp}
+                  comp={compWithTier(comp)}
                   index={originalIndex}
                   subject={subject}
                   isSelectedForArv={isSelected}
-                  onToggleArv={onToggleComp ? () => onToggleComp(key) : undefined}
-                  onClick={() => onCompClick?.(comp)}
-                  onHover={onCompHover ? (hovering) => onCompHover(hovering ? key : null) : undefined}
+                  onToggleArv={onToggleComp}
+                  onAssignTier={jobId ? pinTier : undefined}
+                  tierPending={comp.id ? tierPending.has(comp.id) : false}
+                  onCompClick={onCompClick}
+                  onHover={onCompHover}
                   isHighlighted={highlightedCompKey === key}
                 />
               )
@@ -499,15 +542,17 @@ export function ComparablesSection({
               return (
                 <CompCard
                   key={key}
-                  comp={comp}
+                  comp={compWithTier(comp)}
                   index={originalIndex}
                   isExpanded={expandedComps.has(key)}
-                  onToggle={() => toggleExpand(key)}
+                  onToggle={toggleExpand}
                   subject={subject}
                   subjectSubdivision={subjectSubdivision}
                   subjectLotAcres={subject?.lotSizeAcres}
                   isSelectedForArv={isSelected}
-                  onToggleArv={onToggleComp ? () => onToggleComp(key) : undefined}
+                  onToggleArv={onToggleComp}
+                  onAssignTier={jobId ? pinTier : undefined}
+                  tierPending={comp.id ? tierPending.has(comp.id) : false}
                 />
               )
             })}

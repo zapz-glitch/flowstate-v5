@@ -1,7 +1,7 @@
 'use client'
 
-import { useMemo, useState } from 'react'
-import { ChevronRight, Check } from 'lucide-react'
+import { memo, useMemo, useState } from 'react'
+import { ChevronRight, Check, Loader2 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 import { subdivisionsMatch } from '@flowstate-api/shared'
@@ -25,12 +25,18 @@ export interface CompCardProps {
   /** Subject lot size in acres — enables the lot delta display */
   subjectLotAcres?: number | null
   isExpanded?: boolean
-  onToggle?: () => void
+  /** Called with the card's comp key — stable identity lets the card memoize */
+  onToggle?: (key: string) => void
   isSelectedForArv?: boolean
-  onToggleArv?: () => void
+  /** Called with the card's comp key — stable identity lets the card memoize */
+  onToggleArv?: (key: string) => void
+  /** Pin this comp to a tier — 'arv' | 'as_is' | null clears. Present only when a jobId is available (Property Search). */
+  onAssignTier?: (comp: CompItem, tier: 'arv' | 'as_is' | null) => void
+  /** A tier assignment is in flight */
+  tierPending?: boolean
 }
 
-export function CompCard({
+function CompCardInner({
   comp,
   index,
   subject,
@@ -40,8 +46,11 @@ export function CompCard({
   onToggle: controlledOnToggle,
   isSelectedForArv,
   onToggleArv,
+  onAssignTier,
+  tierPending,
 }: CompCardProps) {
   const [internalExpanded, setInternalExpanded] = useState(false)
+  const cardKey = getCompKey(comp, index)
 
   const isControlled = controlledExpanded !== undefined
   const isExpanded = isControlled ? controlledExpanded : internalExpanded
@@ -50,7 +59,7 @@ export function CompCard({
   const handleToggle = isAlwaysExpanded
     ? undefined
     : isControlled
-      ? () => controlledOnToggle?.()
+      ? () => controlledOnToggle?.(cardKey)
       : () => setInternalExpanded((p) => !p)
 
   const hasArvSelection = isSelectedForArv !== undefined
@@ -71,8 +80,6 @@ export function CompCard({
   // Feature-vs-subject verification — green/red/neutral per displayable field
   const featureMatches = useMemo(() => compFeatureMatches(comp, subject), [comp, subject])
   const fm = (key: Parameters<typeof featureState>[1]) => featureState(featureMatches, key)
-
-  const cardKey = getCompKey(comp, index)
 
   return (
     <div
@@ -123,6 +130,17 @@ export function CompCard({
                 FLIP
               </div>
             )}
+            {comp.userTier && (
+              <div
+                className={cn(
+                  'h-6 px-1.5 rounded flex items-center text-[10px] font-bold flex-shrink-0',
+                  comp.userTier === 'arv' ? 'bg-emerald-500/15 text-emerald-600' : 'bg-amber-500/15 text-amber-600'
+                )}
+                title={`You pinned this comp as ${comp.userTier === 'arv' ? 'ARV' : 'as-is'} — Jev classified it ${comp.jevHybrid?.priceTier === 'arv' ? 'ARV' : comp.jevHybrid?.priceTier === 'as_is' ? 'as-is' : 'unclassified'}`}
+              >
+                {comp.userTier === 'arv' ? 'ARV' : 'AS-IS'}·YOU
+              </div>
+            )}
             <div className="flex-1 min-w-0">
               {comp.address ? (
                 <AddressDisplay address={comp.address} latitude={comp.latitude} longitude={comp.longitude} className="text-body-sm font-medium" />
@@ -148,7 +166,7 @@ export function CompCard({
             {hasArvSelection && onToggleArv && (
               <button
                 type="button"
-                onClick={(e) => { e.stopPropagation(); onToggleArv() }}
+                onClick={(e) => { e.stopPropagation(); onToggleArv(cardKey) }}
                 title={isSelectedForArv ? 'Remove from ARV' : 'Add to ARV'}
                 aria-label={comp.selectionPending ? 'Updating ARV selection' : isSelectedForArv ? 'Remove from ARV' : 'Add to ARV'}
                 aria-pressed={isSelectedForArv}
@@ -223,6 +241,42 @@ export function CompCard({
 
       {isExpanded && (
         <div className="px-5 pb-4 pt-2 space-y-4">
+          {/* Manual tier pin — reviewer's call, rides alongside Jev's */}
+          {comp.id && (
+            <div className="flex items-center justify-between gap-3">
+              {onAssignTier ? (
+                <div className="flex items-center gap-1.5">
+                  <span className="text-caption text-foreground-tertiary mr-1">Assign</span>
+                  {(['arv', 'as_is'] as const).map((tier) => {
+                    const active = comp.userTier === tier
+                    return (
+                      <button
+                        key={tier}
+                        type="button"
+                        disabled={tierPending}
+                        onClick={() => onAssignTier(comp, active ? null : tier)}
+                        title={active ? 'Clear your pin' : `Pin as ${tier === 'arv' ? 'ARV' : 'as-is'}`}
+                        className={cn(
+                          'h-6 px-2 rounded text-[10px] font-bold transition-colors disabled:opacity-50',
+                          active
+                            ? tier === 'arv' ? 'bg-emerald-500 text-white' : 'bg-amber-500 text-white'
+                            : 'bg-foreground/8 text-foreground-secondary hover:bg-foreground/15'
+                        )}
+                      >
+                        {tier === 'arv' ? 'ARV' : 'AS-IS'}
+                      </button>
+                    )
+                  })}
+                  {tierPending && <Loader2 className="w-3 h-3 animate-spin text-foreground-tertiary" />}
+                </div>
+              ) : <span />}
+              {comp.id && (
+                <span className="text-[10px] text-foreground-tertiary tabular-nums" title="Provider comp ID — reference this when flagging the comp">
+                  #{comp.id}
+                </span>
+              )}
+            </div>
+          )}
           {/* Full property details — everything valid for comparison */}
           <div>
             <div className="text-caption font-medium text-foreground-secondary mb-1.5">Property Details</div>
@@ -396,3 +450,7 @@ export function CompCard({
     </div>
   )
 }
+
+// Memoized — a comp list can hold ~100 cards; without this any parent state
+// change (pin, hover, sort) re-renders every card's image/detail subtree.
+export const CompCard = memo(CompCardInner)

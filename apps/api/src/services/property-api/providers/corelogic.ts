@@ -35,6 +35,7 @@ import {
   POOL_TYPE,
   BUILDING_QUALITY,
   BUILDING_CONDITION,
+  decodeStoriesType,
 } from './corelogic-codes'
 import { CORELOGIC_MAX_COMPS, buildRetrievalMeta } from '../retrieval-policy'
 
@@ -955,7 +956,7 @@ function normalizeProperty(
       type: lookupCode(CONSTRUCTION_TYPE, constructionDetails?.constructionTypeCode as string) || building?.constructionType,
       qualityCode: lookupCode(BUILDING_QUALITY, constructionDetails?.buildingQualityTypeCode as string) || undefined,
       buildingStyle: lookupCode(BUILDING_STYLE, constructionDetails?.buildingStyleTypeCode as string) || undefined,
-      storiesType: (structureVerticalProfile?.storiesTypeCode as string) || undefined,
+      storiesType: decodeStoriesType(structureVerticalProfile?.storiesTypeCode as string) || undefined,
       roofType: lookupCode(ROOF_TYPE, (structureExterior?.roof as Record<string, unknown>)?.typeCode as string) || building?.roofType,
       roofCover: lookupCode(ROOF_COVER, (structureExterior?.roof as Record<string, unknown>)?.coverTypeCode as string) || undefined,
       foundationType: lookupCode(FOUNDATION_TYPE, constructionDetails?.foundationTypeCode as string) || building?.foundation,

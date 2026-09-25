@@ -1,6 +1,86 @@
 # Engineering State — flowstate-v5
 
 
+### 2026-09-25 — Vision rehab level was being overridden by curb appeal: `8bfd16d` on `fix/vision-renovated-gate`
+
+User report: "subject condition isn't getting assigned." Verified the
+required condition fetch IS running end-to-end (e2e on 6104 Shiprock Ave:
+photo_fetch 20 photos via redfin → vision ok, level + evidence lists,
+renovationLevelSource 'vision', both entry paths share evaluate()).
+
+Found the real defect: `renovatedVerified` fired on
+`curbAppeal.condition === 'renovated'` alone (exterior-only signal), so a
+subject whose interior verdict assigned a real level still showed
+`valuation.rehabLevel: 'Renovated'` / rehabCost $0 — the vision pick was
+recorded but never drove the dollars. Fix: `visionRenovated` now requires
+`renovationLevelIndex === 0` (Lipstick) — verified-renovated needs the
+interior verdict to agree nothing needs doing.
+
+Re-verified e2e post-fix: vision 'Full Cosmetic' @90% → valuation
+rehabLevel 'Full Cosmetic', rehabCost $62,965 ($35/sqft) — the picked
+level now drives. 24/24 e2e assertions, tsc clean. NOT merged/deployed.
+
+Also noted: visionAssessment/renovationLevelSource only render on the
+admin observability pages — the user-facing report shows
+valuation.rehabLevel (now correct) but never surfaces the vision verdict
+itself.
+
+### 2026-09-24 (later 2) — Stale Server Action auto-reload: `c734949`, deployed
+
+Recurring prod issue: every deploy rotates Server Action IDs; open tabs
+calling an action got "Failed to find Server Action" rendered as a normal
+error. Now self-healing — lib/server-action.ts (isStaleServerActionError +
+reloadForStaleAction, 30s sessionStorage loop guard + in-memory flag),
+StaleActionGuard mounted in root layout (unhandledrejection + error
+listeners), explicit checks at the 4 try/catch call sites (queueAnalysis
+x2, submitReportFeedback, getCdarvReportStatus) and 3 startTransition
+sites (SendToCdarvButton, review-form, model-actions — React 19 routes
+transition errors to onUncaughtError, not window events). Deploy run
+35973289210 green. Verified: tsc clean, matcher tested against both
+reported error strings; browser E2E unavailable (system chromium libs
+missing in this env).
+
+### 2026-09-24 (later) — Subject condition fetch made required: `5bc5c08` on `feat/subject-condition-required`
+
+Product requirement: every eval (dashboard session + API-key) must run a
+subject-property condition fetch to complete; the returned rehab level is
+picked for the eval; it runs in parallel with ARV determination.
+
+What already existed: subject-only Firecrawl/Zillow scrape runs
+unconditionally in the analysis job's Promise.all; the vision branch
+launches before the Jev funnel and is awaited before the response;
+deriveBuybox already picks visionLevelIndex (manual override > vision >
+classification > default); report confidence gates 'high' on
+subjectConditionVerified.
+
+What changed:
+
+- `unavailableAssessment()` exported from vision/renovation.ts — full
+  baseline shape so any failure resolves an explicit 'unavailable'
+  verdict instead of null.
+- `visionAndPersist` → `Promise<RenovationAssessment>` (never null);
+  catch → synthesized 'unavailable' with error + limitation.
+- renovation_assessment step always emits; detail names the status when
+  no level returned; ALL non-ok statuses (needs_review,
+  insufficient_photo_evidence, unavailable) now land in fallbacksUsed —
+  previously insufficient_photo_evidence was excluded and a thrown call
+  produced no assessment at all.
+- `renovation` non-null downstream (curbAppeal, deriveBuybox opts).
+
+Renovation level definitions located (RENOVATION_LEVEL_DEFINITIONS,
+vision/renovation.ts): 0 Lipstick / 1 Light Cosmetic / 2 Full Cosmetic /
+3 Heavy Rehab / 4 Full Gut — criteria injected into both subject and
+comp curb-appeal prompts. Doc updated: docs/comp-photo-verification.md.
+
+Verified: tsc clean, 21/21 renovation tests. NOT merged/deployed.
+
+Open: whether subject condition feeds test-2 comp matching or stays
+report/buybox-only; comp-photo verification (compareCompToSubject /
+analyzeCompQuality defined but unwired); lone-anomaly ARV guard from the
+flagged 3249 54th St N report (1-comp ARV at $565k, circular
+price→after_renovation label).
+
+
 ### 2026-09-24 — Price-class merge REVERTED; main reset to `88879cb`
 
 `feat/jev-price-class` was merged (`af9587d`) then force-push reverted
@@ -339,17 +419,16 @@ Blockers (environment, not code):
 - V4 engine NOT connected to production (V4_* env vars dead code; by plan).
 
 ## Current Objective
-Run a fourth evaluation track — the V4 hybrid — entirely on branch
-`new-classification`. V4 = Jev classifies every priced comp (ARV / AS_IS /
-UNIDENTIFIED) before rule verdicts → deterministic hard gates (verified
-foundation/construction/property-type mismatch, geography contradicted on both
-levels, sale >365d) → weighted recoverability score against appraisal-settings
-proximity → per-pool top-3 at/above a recovery floor, ≤180d tier first with the
-181–365d tier opening only at zero ideal-tier comps. Default mode is SHADOW
-(read-only observability); `JEV_HYBRID_V4_ENABLED=true` routes production
-selection. Definition of Done now additionally requires the V4 card + audit
-track rendered and a fresh staging-backed analysis whose v4 ARV equation
-recomputes exactly from persisted per-comp adjusted prices.
+Branch `swe-2-eval`: the refined Jev evaluation funnel — pure-proximity
+test-1 score (90–100) picking the 10 nearest passers to enrich, test-2
+gate (subdivision OR neighborhood) with fresh two-tier rescore
+(95–100 same-tract subdivision / 90–95 hood-only or tract crossing),
+census-tract road-barrier proxy, top-10%-by-adjusted-price ARV tier,
+no fill, humanHandoff on zero passers, and manual ARV/as-is comp pins
+persisted via comp_tier_overrides. Implemented and E2E-verified — see
+the 2026-10-06 (later) entry at the bottom of this file. Awaiting user
+decision on merge and on suppressing the rules-fallback ARV in handoff
+runs.
 
 Prior objective (three-track exposure) is complete — see
 "### 2026-09-22 — Three valuation tracks" below.
@@ -3291,3 +3370,267 @@ the fallback needs a different UI treatment.
   user rehab table already wired; both typechecks + 26-file suite green.
 - Merged feat/jev-experiments → main (ff), pushed — deploy.yml auto-deploys.
 - Now working on main; worktree switched to main.
+
+## 2026-10-06 — swe-2-eval funnel implemented + verified (branch swe-2-eval, commit db99f19)
+
+**Objective:** new evaluation funnel per the user's authoritative spec —
+scored test 1, enriched top-10 by score, test-2 gate + 90→100 match score,
+top-15%-by-price ARV tier, no fill, human-handoff flag.
+
+**What shipped (commit db99f19):**
+- `jev/index.ts` — bathrooms removed from `CompTest1Field`/`COMP_TEST1_FIELDS`/
+  defs (5 fields now: squareFeet, lotSize, yearBuilt, salePrice, saleDate);
+  `foundation` noul added to test 2 + parser.
+- `comp-hybrid/index.ts` — test-1 composite score /100 for passers
+  (proximity scaled to the configured `distance` radius at 60% weight +
+  mean field strength at 40%); enrichment = top-10 by score; test-2 pass
+  scores 90 + up to 10 for mean(physicalCharacter, material, foundation),
+  fails scaled below 90; passers split by adjustedPrice — top 15%
+  (`COMP_ARV_TOP_PERCENT`) → ARV set (variable count, min 1), rest as-is;
+  ALL FILL REMOVED; `humanHandoff` when zero test-2 passers; counts now
+  carry `arv`/`asIs` instead of `core`/`filled`; `priceTier` on entries.
+- `evaluation/index.ts` + `report.ts` + `types.ts` — jevSelection carries
+  humanHandoff/asIsCompIds; report.humanHandoff surfaced; confidence =
+  low + requiresHumanReview when handoff; rules fallback stands as
+  unexamined reference (product call — flag shown, number still produced).
+- `eval-cache.ts` — key bumped to `eval-result:v3:`.
+- Dashboard — JevHybridCard + EvaluationProcessAudit show ARV/as-is
+  counts, as-is reference group, foundation noul, test-1 composite score,
+  amber "Human handoff" badges; actions.ts types updated.
+- Tests — comp-hybrid.test.ts rewritten for the new funnel (24 cases);
+  jev-comp-exam.test.ts updated (5 fields / 5 t2 nouls).
+- E2E harness — ARV assertions now scope to `jevHybrid.selected==='core'`
+  + `priceTier==='arv'` checks added.
+
+**Verified:**
+- `npx tsc --noEmit` clean in apps/api and apps/dashboard.
+- api suite: 24 files pass; dashboard: 9 files pass.
+- Live E2E against this worktree's API (wrangler dev :8793, local D1
+  seeded from main worktree's .wrangler state):
+  - 4014 22nd Ave N: 69 pool → 53 t1 pass → 10 enriched → 0 t2 pass →
+    humanHandoff=true, 13/13 assertions. ARV shown is rules-fallback
+    reference ($504,505) — flagged.
+  - 228 Cobblestone Dr: 27 pool → 2 t1 pass → 2 t2 pass → split by price:
+    351 Upland (adj $285k) → arv, 307 Plumtree (adj $270k) → as_is.
+    ARV = $285,000 = the ARV comp exactly. 13/13.
+- E2E user for this worktree's local DB: `8NLlVN9LtfODbvKJ6jpvk9W3a8pfMDep`
+  (local@flowstate.test, owns the default preset).
+
+**Environment notes:**
+- This worktree's API runs on **:8793** (`wrangler dev --config
+  wrangler.local.toml --local --port 8793`). :8787=deploy worktree,
+  :8788=new-classification, :8789=new-classification-v2. :3001 dashboard
+  talks to :8787 — NOT this branch.
+- Local D1 was empty → migrated + seeded by copying main's
+  `.wrangler/state/v3/d1/miniflare-D1DatabaseObject/1847e13...sqlite`.
+
+**Remaining / decisions:**
+- Human-handoff mode still produces a rules-fallback ARV alongside the
+  flag — confirm with user whether that number should be suppressed.
+- As-is passers are visible but not isEnabled (don't feed ARV).
+- Not merged/deployed — swe-2-eval branch only.
+
+## 2026-10-06 (later) — refined swe-2-eval spec + manual tier overrides (commit 37efc58)
+
+**Spec changes after user review of db99f19:**
+
+- Test-1 score is now pure proximity: `90 + round(10 × (1 − d/radius))`.
+  Field-match strength is pass/fail only — the score exists solely to
+  pick the enrich cohort, which makes it exactly the 10 nearest passers.
+- Test-2 rescores fresh in two tiers: subdivision match + same census
+  tract → 95–100; neighborhood-only OR subdivision across a tract
+  boundary → 90–95 (60% proximity / 40% physical inside the tier).
+  Style, material, foundation are preferred (never gate); missing data
+  scores 0 → penalized, not failed.
+- Road barrier implemented as census-tract proxy (user chose option B
+  over Overpass/OSM): `crossesMajorRoad = comp.censusTract !==
+  subject.censusTract` at enrichment; null when either side lacks a
+  tract (no penalty). Surfaced on entries, mapped comps, and the audit.
+- ARV tier tightened 15% → 10% (`COMP_ARV_TOP_PERCENT`).
+
+**Manual comp-tier assignment (new feature):**
+
+- `comp_tier_overrides` table (migration 0032, applied to local D1):
+  userId + jobId + compId → tier `arv|as_is`; DELETE-able via tier null.
+- `PUT /v1/analyze/jobs/:jobId/comp-tier` (dashboard-internal auth) —
+  upserts an override through the job's DO.
+- Read-time merge (`utils/comp-tier-overrides.ts`) applied in both the
+  job-status GET and saved-report GET: `comp.userTier` +
+  `report.jev.userOverrides` — overrides survive cache/saved reads and
+  never rewrite Jev's automatic `priceTier`.
+- Dashboard: `assignCompTier` server action; ARV/As-is pin buttons in
+  the expanded comp card (feedbackContext.jobId threaded through
+  ComparablesSection); `ARV·YOU`/`AS-IS·YOU` badges; provider comp ID
+  shown on the card for reference.
+- `report.jev` block added to `EvaluationReport` (was missing entirely —
+  jevSelection only fed confidence).
+
+**Verified:**
+
+- tsc clean both apps; api suite 24/24 files; dashboard 9/9.
+- E2E harness expanded to 24 assertions (score bounds, enrich-cohort =
+  nearest passers, two-tier test-2 bands, road-crossing demotion, 10%
+  split, handoff flag, override PUT→GET round-trip incl. report.jev).
+- Live runs on :8793: 228 Cobblestone 24/24 (2 passers demoted 93/94 by
+  tract crossing; override round-trip green); 4014 22nd Ave N 23/23
+  (0 passers → humanHandoff; override still persists).
+- Dashboard copy synced (audit steps, Jev card explainer, audit detail
+  shows the tract-barrier row).
+
+**Last Handoff:** branch `swe-2-eval` is the full refined spec, E2E-
+verified, not merged/deployed. Open product call still standing: in
+human-handoff runs the rules-fallback ARV displays next to the flag —
+suppress or keep? Next session: user decides merge, or iterate on the
+fallback-display question.
+
+## 2026-10-06 (later 2) — CoreLogic code-table expansion (commit e684489)
+
+**Finding (user-reported):** enriched comp cards showed raw codes
+(`BST`, `H00`, `PK0`, `015`) — looked unenriched. Investigation:
+enrichment fired correctly (nouls scored real values); the decode
+tables simply lacked county-variant codes. `storiesType` was never
+decoded anywhere.
+
+**Shipped:** `e684489` — BST→Block/Stucco, MAS→Masonry, H00→Hip
+(+shape family), CL0/CLE/CLG/CF0→Central heating family, PK0→Package
+Unit, ACE→Central A/C, AHT/HTP→Heat Pump; new `decodeStoriesType`
+(3-digit numeric = stories×10 → "N Story"). Verified live: cold-KV
+run shows Block/Stucco/Hip/Package Unit, 24/24 E2E. Roof numerics
+`015`/`136` left raw — unsourced county codes.
+
+**Product decision:** KV-cached comp payloads keep raw codes until
+TTL expiry (~7d). Offered cache-prefix bump for instant decode (costs
+a burst of provider refetches); **user chose to let it age out** —
+no prefix bump.
+
+**Pre-merge checklist status:**
+- [x] Funnel spec implemented + E2E-verified (24/24, 23/23)
+- [x] Manual tier overrides + migration 0032 (local applied)
+- [x] Dashboard copy synced to new funnel
+- [x] Code-table decode expansion
+- [x] Apply 0032 to **remote** D1 BEFORE deploy — done 05:07Z
+  (wrangler OAuth re-authed; `comp_tier_overrides` verified on prod)
+- [x] Push swe-2-eval → main — `bbbc847..10eae9b` fast-forward
+- [x] Deploy — run 35958677146 green end-to-end (API + dashboard);
+  prod /health 200, dashboard 200
+- [ ] Open call: suppress rules-fallback ARV in handoff runs?
+
+## 2026-10-06 (later 3) — MERGED + DEPLOYED to prod
+
+`swe-2-eval` fast-forwarded onto `main` (`bbbc847..10eae9b`) and
+deploy.yml run 35958677146 completed green — API + dashboard live.
+Remote D1 `comp_tier_overrides` created pre-deploy (order mattered:
+job/report GETs query it unconditionally). Prod smoke: /health 200,
+flowstate.homes 200.
+
+Live behavior now in prod: proximity-scored test-1 → enrich 10
+nearest passers → test-2 gate (subdivision OR neighborhood) →
+two-tier rescore (95–100 same-tract sub / 90–95 hood-only or
+crossing) → top-10%-by-adjusted-price ARV tier, rest as-is, no fill,
+humanHandoff on zero passers, manual ARV/as-is pins via
+comp_tier_overrides, census-tract road-barrier proxy, decoded
+county-variant property codes on cards.
+
+Local dev for this branch: dashboard :3005 → API :8793
+(DASHBOARD_URL + NEXT_PUBLIC_API_URL repointed in gitignored env
+files; local login local@flowstate.test / V4-Test-7mQ9-rP2x!).
+
+## 2026-10-06 (later 4) — Front-end performance pass (6 steps, all committed)
+
+User asked for a full UI speed/efficiency audit, then approved a
+6-step plan with per-step E2E verification. Contract: behavior
+identical, only wasted renders drop; verify each step with DOM-mutation
+counts, React commit counts, click→paint latency, functional Playwright
+checks against :3005, tsc clean, e2e green.
+
+**Harness** (`scripts/ui-perf-baseline.mjs`): playwright-core via
+flowstate-v3's node_modules + local chromium-1243 + LD_LIBRARY_PATH to
+/tmp/pw-libs/extracted (NSS/ALSA debs extracted without root). Measures
+MutationObserver DOM mutations, React devtools-hook commit counts,
+click→paint (2×rAF), full interaction flow (login → ?address= auto-run →
+dialog → cards → pin → list → expand → sort → reload persistence).
+Artifacts in e2e/artifacts/ (gitignored).
+
+**Shipped (each = own commit):**
+1. `944fed2` — stabilized useEvaluationSync inputs (memoized feedback
+   object + useCallback handlers) in analyze + reports + public report
+   pages; stopped per-render atom rewrites double-rendering the tree.
+2. `5dd6b72` — memo() on CompCard/CompGridCard; callback props changed
+   to stable (key|comp, ...) signatures; pinTier/toggleExpand →
+   useCallback. Latency: pin 190→47ms, expand 70→21ms, sort 103→51ms.
+3. (next commit) — eval_progress moved to evalProgressAtom; label leaf
+   EvalProgressLabel subscribes; statusLabel widened to ReactNode.
+   Per-tick SSE updates now commit one span, not the page.
+4. (next commit) — Sidebar useAnalysis() (5 atoms) →
+   useAtomValue(isAnalysisRunningAtom) derived boolean; re-renders only
+   on run↔idle flips. Added data-analysis-running nav attr as test hook.
+5. loading.tsx ×5 — analyze, reports list, batch, settings,
+   evaluation-settings (was: only reports/[jobId] had one).
+6. Removed @tanstack/react-query (zero imports); @types/react 18→19
+   (+react-dom). npm dedupe collapsed a stale root @types/react@18 peer
+   copy that had shadowed 19 → 88 phantom gmp-*/ReactNode errors gone;
+   fixed one real React-19 change (useRef<T>(null) → RefObject<T|null>).
+
+**Perf artifact (step6 run):** eval window 2287 mut / 71 commits; pin
+6 mut/1 commit/46ms; expand ~170-390 mut (lazy-image noise); list-view
+~200-390 mut. All functional checks green every run; e2e 24/24.
+
+**Deferred:** splitting evaluation-settings/page.tsx (~3.7k lines) —
+pure refactor, no user-facing perf gain; only if asked.
+
+**Gotchas discovered (document for future sessions):**
+- `?address=` auto-run path: restore skipped, existing-report dialog
+  still intercepts; setActiveAnalysis fires only on response.success —
+  fast-fail runs never show the sidebar dot (pre-existing semantics).
+- Cached terminal verdicts: a PROPERTY_NOT_FOUND/INSUFFICIENT_COMPS
+  400 is cached in KV (eval-result:v3:<user>:<addr>:<paramsHash>) and
+  replays until TTL — a transient provider miss poisons an address.
+  Local flush: delete keys from
+  apps/api/.wrangler/state/v3/kv/miniflare-KVNamespaceObject/*.sqlite
+  (_mf_entries) via python3 sqlite3.
+- npm dedupe hoists packages out of workspace node_modules — a running
+  wrangler dev bakes old template paths into its bundle; restart the
+  process after dedupe or rebuilds fail with unresolvable paths.
+- Playwright locator.waitFor is strict-mode: a selector matching both
+  desktop+mobile nav dots rejects on appearance → false negative.
+  Use .first().
+- Baseline harness address: "228 Cobblestone Dr, Spring Hill, FL 34606"
+  (NOT the Ooltewah address — provider can't find it).
+- e2e script: `E2E_USER_ID=8NLlVN9LtfODbvKJ6jpvk9W3a8pfMDep node
+  scripts/e2e-analyze.mjs "<addr>" --api http://localhost:8793`.
+
+**Last Handoff:** all 6 planned front-end steps complete + verified.
+Branch swe-2-eval ahead of main by the eval work (already deployed) +
+6 perf commits. Perf commits NOT merged/deployed — dev-only so far.
+Open calls unchanged: suppress rules-fallback ARV in handoff runs?
+
+## 2026-10-06 (later 5) — perf pass MERGED + DEPLOYED
+
+`swe-2-eval` fast-forwarded `10eae9b..d5881dc` onto main; deploy run
+35967010908 green end-to-end (API + dashboard). Prod smoke:
+api /health 200, flowstate.homes 200. Live: memoized comp cards,
+isolated eval-progress atom, derived sidebar boolean, loading.tsx ×5,
+react-query removed, @types/react@19 unified via dedupe.
+
+## 2026-10-06 (later 6) — comp photo verification idea recorded
+
+User flagged report job_1790233689475_049295ac3f1d47cd (3249 54th St N,
+St Pete) as "improve": top-10%-by-price rule picked 1 ARV comp ($565k),
+and comp `classification` is circular (after_renovation inferred FROM
+price). Discussed ARV-group options (top-cluster + outlier guard /
+min-count / condition-verified) — no decision yet.
+
+Idea recorded in `docs/comp-photo-verification.md` (NOTE-ONLY, not
+read by eval, no runtime execution): fetch comp photos via Firecrawl/
+Zillow + Playwright/Browser Rendering fallback, vision-score curb
+appeal + style match → real after_renovation evidence instead of the
+price-derived label. Key finding: vision comp APIs
+(`compareCompToSubject`, `analyzeCompQuality`) are defined but unwired;
+Firecrawl fetcher, rate-limiter DO, KV/R2 caching all exist.
+
+Requirement added to the same doc: subject-property condition fetch is
+REQUIRED for eval completion on both entry paths (dashboard + API key).
+Today it's best-effort — no photos or a vision failure silently yields
+visionAssessment:null. Open spec Qs noted: no-photos behavior (fail vs
+handoff vs explicit-unverifiable) and whether subject condition feeds
+comp selection or stays report-only.

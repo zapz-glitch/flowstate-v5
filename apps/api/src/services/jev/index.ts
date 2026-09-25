@@ -1433,15 +1433,14 @@ const hasEvidence = (v: unknown): boolean =>
 // ─── Test 1 — raw-field nouls ───────────────────────────────────────────────
 
 export type CompTest1Field =
-  | 'bathrooms' | 'squareFeet' | 'lotSize'
+  | 'squareFeet' | 'lotSize'
   | 'yearBuilt' | 'salePrice' | 'saleDate'
 
 export const COMP_TEST1_FIELDS: CompTest1Field[] = [
-  'bathrooms', 'squareFeet', 'lotSize', 'yearBuilt', 'salePrice', 'saleDate',
+  'squareFeet', 'lotSize', 'yearBuilt', 'salePrice', 'saleDate',
 ]
 
 export const COMP_TEST1_LABELS: Record<CompTest1Field, string> = {
-  bathrooms: 'Bathrooms',
   squareFeet: 'Square footage',
   lotSize: 'Lot size',
   yearBuilt: 'Year built',
@@ -1466,12 +1465,6 @@ export function buildTest1Defs(filters: AppraisalFilter[], subject: NormalizedPr
       : null
 
   return [
-    {
-      key: 'bathrooms',
-      label: COMP_TEST1_LABELS.bathrooms,
-      question: (i) => `Does state.comparables[${i}] match the subject's bathroom count — a comparable with the same number of bathrooms as the subject? Judge bathrooms.`,
-      verifiable: (s, c) => hasEvidence(s.bathrooms) && hasEvidence(c.bathrooms),
-    },
     {
       key: 'squareFeet',
       label: COMP_TEST1_LABELS.squareFeet,
@@ -1519,13 +1512,14 @@ export function buildTest1Defs(filters: AppraisalFilter[], subject: NormalizedPr
 
 // ─── Test 2 — enriched nouls + distance score ───────────────────────────────
 
-export type CompTest2Noul = 'subdivision' | 'neighborhood' | 'physicalCharacter' | 'material'
+export type CompTest2Noul = 'subdivision' | 'neighborhood' | 'physicalCharacter' | 'material' | 'foundation'
 
 export const COMP_TEST2_NOUL_LABELS: Record<CompTest2Noul, string> = {
   subdivision: 'Subdivision',
   neighborhood: 'Neighborhood',
   physicalCharacter: 'Physical character',
   material: 'Material match',
+  foundation: 'Foundation type',
 }
 
 /** Ordered level descriptions for the distance-dominant Score question — index = level. */
@@ -1555,6 +1549,10 @@ function test2Questions(index: number): Record<string, Question> {
     [`t2_${index}_material`]: {
       type: 'noul',
       instructions: `Do ${c}'s construction materials match the subject's — frame/block/brick, exterior walls, roof? This match is preferred but not required. Judge construction.type/exteriorWalls/roofCover.`,
+    },
+    [`t2_${index}_foundation`]: {
+      type: 'noul',
+      instructions: `Does ${c} share the subject's foundation type — slab vs crawl/pier vs basement? This match is preferred but not required. Judge construction.foundationType/foundation.`,
     },
     [`t2_${index}_score`]: {
       type: 'score',
@@ -1795,7 +1793,7 @@ function parseTest2Response(
   const results: JevCompTest2Result['results'] = Object.create(null)
   batch.ids.forEach((id, index) => {
     const nouls: Record<CompTest2Noul, number> = Object.create(null)
-    for (const key of ['subdivision', 'neighborhood', 'physicalCharacter', 'material'] as CompTest2Noul[]) {
+    for (const key of ['subdivision', 'neighborhood', 'physicalCharacter', 'material', 'foundation'] as CompTest2Noul[]) {
       const answer = answers[`t2_${index}_${key}`]
       if (!object(answer) || answer.type !== 'noul' || !probability(answer.noul)) throw malformed()
       nouls[key] = answer.noul

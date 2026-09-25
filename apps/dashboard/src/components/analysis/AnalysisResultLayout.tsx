@@ -19,7 +19,7 @@ export interface AnalysisResultLayoutProps {
   /** Valuation card ref for sticky/intersection observer */
   valuationCardRef?: React.RefObject<HTMLDivElement | null>
   /** Streaming step label — rendered near the comparables section */
-  statusLabel?: string | null
+  statusLabel?: React.ReactNode
   /** Optional footer (e.g. Raw JSON toggle) */
   footer?: React.ReactNode
 }

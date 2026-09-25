@@ -28,8 +28,17 @@ export const activeAnalysisAtom = atom<ActiveAnalysis | null>(null)
 export const analysisResultAtom = atom<AnalyzeData | null>(null)
 export const analysisStateAtom = atom<AnalysisState>(initialAnalysisState)
 export const analysisActionsAtom = atom<AnalysisActions>(noopActions)
+/** Per-tick eval progress label — atom so SSE ticks re-render only the label, not the page */
+export const evalProgressAtom = atom<string | null>(null)
 
 // ─── Derived Atoms (read-only) ──────────────────────────────────────────────
+
+/** Boolean-flip subscription — consumers re-render only when a run starts/ends */
+export const isAnalysisRunningAtom = atom((get) =>
+  get(activeAnalysisAtom) !== null &&
+  get(analysisStateAtom).status !== 'completed' &&
+  get(analysisStateAtom).status !== 'failed'
+)
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const partialResultAtom = atom<Record<string, any> | null>((get) => {

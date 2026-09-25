@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import {
   activateShadow, buildDataset, deactivateShadow, trainModel,
 } from '../actions'
+import { reloadForStaleAction } from '@/lib/server-action'
 
 export function ModelActions({
   kind, enabled, modelId, datasetId,
@@ -19,8 +20,12 @@ export function ModelActions({
 
   const run = (fn: () => Promise<{ ok: boolean; message?: string }>) =>
     startTransition(async () => {
-      const r = await fn()
-      setMessage(r.message ?? null)
+      try {
+        const r = await fn()
+        setMessage(r.message ?? null)
+      } catch (err) {
+        if (!reloadForStaleAction(err)) setMessage('Failed')
+      }
     })
 
   if (kind === 'build-dataset') {

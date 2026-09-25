@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, type FormEvent } from 'react'
+import { useState, useEffect, useCallback, useMemo, type FormEvent } from 'react'
 import Link from 'next/link'
 import { ArrowLeft, Share2, Lock } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
@@ -132,25 +132,34 @@ export default function ReportPage({ params }: { params: Promise<{ jobId: string
     (analyzeData?.comps?.items ?? []) as CompItem[]
   )
 
-  // Sync evaluation state to Jotai atoms for child components
+  // Sync evaluation state to Jotai atoms for child components.
+  // Stable props — inline objects/callbacks would retrigger the sync effect
+  // on every render and rewrite the atom.
+  const evalFeedback = useMemo(() => ({
+    appliedFilters: analyzeData?.appliedSettings?.filters ?? null,
+    fallbackUsed: analyzeData?.report?.arv?.compPool?.fallbackUsed ?? null,
+    fallbackReason: analyzeData?.report?.arv?.compPool?.fallbackReason ?? null,
+    jobId: resolvedJobId,
+    subjectAddress: report?.address ?? analyzeData?.subject?.address ?? null,
+  }), [analyzeData, resolvedJobId, report?.address])
+  const openSettings = useCallback(() => setSettingsOpen(true), [setSettingsOpen])
+  const handleCompClick = useCallback((comp: CompItem) => {
+    setComparisonComp(comp)
+    setComparisonOpen(true)
+  }, [setComparisonComp, setComparisonOpen])
+
   useEvaluationSync({
     evaluation: { isRecalculated, recalcData, compOverride, handleToggleComp, handleResetComps },
     subject: analyzeData?.subject,
     displayValuation,
     effectiveComps,
-    feedback: {
-      appliedFilters: analyzeData?.appliedSettings?.filters ?? null,
-      fallbackUsed: analyzeData?.report?.arv?.compPool?.fallbackUsed ?? null,
-      fallbackReason: analyzeData?.report?.arv?.compPool?.fallbackReason ?? null,
-      jobId: resolvedJobId,
-      subjectAddress: report?.address ?? analyzeData?.subject?.address ?? null,
-    },
+    feedback: evalFeedback,
     jevOutcome: analyzeData?.jevOutcome ?? null,
     jevCompClassification: analyzeData?.jevCompClassification ?? null,
     jevAttributeScreen: analyzeData?.jevAttributeScreen ?? null,
     jevHybrid: analyzeData?.jevHybrid ?? null,
-    onOpenSettings: () => setSettingsOpen(true),
-    onCompClick: (comp) => { setComparisonComp(comp as CompItem); setComparisonOpen(true) },
+    onOpenSettings: openSettings,
+    onCompClick: handleCompClick,
   })
 
   const fetchReport = useCallback((jobId: string) => {

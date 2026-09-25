@@ -2,10 +2,10 @@
 
 import { isValidCoordinate } from '@/lib/property-map-geometry'
 
-import { useState, useCallback, useEffect, useRef } from 'react'
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import dynamic from 'next/dynamic'
-import { useSetAtom } from 'jotai'
-import { activeAnalysisAtom, analysisResultAtom, analysisStateAtom } from '@/atoms/analysis'
+import { useAtomValue, useSetAtom } from 'jotai'
+import { activeAnalysisAtom, analysisResultAtom, analysisStateAtom, evalProgressAtom } from '@/atoms/analysis'
 import { initialAnalysisState } from '@/types/analysis'
 import {
   Search,
@@ -22,6 +22,7 @@ import { AddressAutocomplete } from '@/components/AddressAutocomplete'
 import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
 import { queueAnalysis, type AnalyzeData } from './actions'
+import { reloadForStaleAction } from '@/lib/server-action'
 import { getArvThreshold, getLatestReport, getReportsByProperty, getSavedReport, runCompSelection, type ExistingReport } from '@/lib/client-api'
 import { useAutoSave } from '@/hooks/use-auto-save'
 // cn is used in the outer wrapper
@@ -72,6 +73,12 @@ const FRIENDLY_LABELS: Record<AnalysisStep, string> = {
 function getStatusLabel(step: AnalysisStep | null): string {
   if (!step) return 'Starting analysis'
   return FRIENDLY_LABELS[step] ?? 'Processing'
+}
+
+/** Reads evalProgressAtom — SSE ticks re-render this leaf, not the whole page. */
+function EvalProgressLabel() {
+  const evalProgress = useAtomValue(evalProgressAtom)
+  return <>{evalProgress ?? 'Evaluating comparables...'}</>
 }
 
 function TypewriterText({ text, typeSpeed = 30 }: { text: string; typeSpeed?: number }) {
@@ -163,7 +170,8 @@ export default function AnalyzePage() {
   const [phase, setPhase] = useState<AnalysisPhase>(analysisResult ? 'ready' : 'idle')
   const [aiAnalyzing, setAiAnalyzing] = useState(false)
   const [streamingStep, setStreamingStep] = useState<'idle' | 'searching' | 'subject' | 'comps' | 'evaluating' | 'done'>('idle')
-  const [evalProgress, setEvalProgress] = useState<string | null>(null)
+  // Atom, not useState — eval_progress SSE ticks re-render only the label leaf.
+  const setEvalProgress = useSetAtom(evalProgressAtom)
   const [enrichmentStreamUrl, setEnrichmentStreamUrl] = useState<string | null>(null)
   const [enrichmentToken, setEnrichmentToken] = useState<string | null>(null)
 
@@ -496,18 +504,28 @@ export default function AnalyzePage() {
     setAiAnalysisDone(false)
   }, [handleResetComps, setAnalysisResult])
 
+  // Stable props for the evaluation atom — inline objects/callbacks would
+  // retrigger the sync effect on every render and rewrite the atom.
+  const evalFeedback = useMemo(() => isReady ? {
+    appliedFilters: analysisResult?.appliedSettings?.filters ?? null,
+    fallbackUsed: analysisResult?.report?.arv?.compPool?.fallbackUsed ?? null,
+    fallbackReason: analysisResult?.report?.arv?.compPool?.fallbackReason ?? null,
+    jobId: analysisResult?.meta?.analysisId ?? null,
+    subjectAddress: analysisResult?.subject?.address ?? null,
+  } : null, [isReady, analysisResult])
+  const openSettings = useCallback(() => setSettingsOpen(true), [setSettingsOpen])
+  const handleCompClick = useCallback((comp: CompItem) => {
+    setComparisonComp(comp)
+    setComparisonOpen(true)
+  }, [setComparisonComp, setComparisonOpen])
+  const handlePermitsPulled = useCallback((a: AnalyzeData) => setAnalysisResult(a), [setAnalysisResult])
+
   useEvaluationSync({
     evaluation: { isRecalculated, recalcData, compOverride, handleToggleComp, handleResetComps },
     subject: renderData?.subject,
     displayValuation: isReady ? displayValuation : undefined,
     effectiveComps: isReady ? effectiveComps : undefined,
-    feedback: isReady ? {
-      appliedFilters: analysisResult?.appliedSettings?.filters ?? null,
-      fallbackUsed: analysisResult?.report?.arv?.compPool?.fallbackUsed ?? null,
-      fallbackReason: analysisResult?.report?.arv?.compPool?.fallbackReason ?? null,
-      jobId: analysisResult?.meta?.analysisId ?? null,
-      subjectAddress: analysisResult?.subject?.address ?? null,
-    } : null,
+    feedback: evalFeedback,
     aiAnalyzing,
     isStreaming: streamingStep !== 'idle' && streamingStep !== 'done',
     marketContext,
@@ -516,11 +534,11 @@ export default function AnalyzePage() {
     jevCompClassification: renderData?.jevCompClassification ?? null,
     jevAttributeScreen: renderData?.jevAttributeScreen ?? null,
     jevHybrid: renderData?.jevHybrid ?? null,
-    onOpenSettings: () => setSettingsOpen(true),
-    onCompClick: (comp) => { setComparisonComp(comp as CompItem); setComparisonOpen(true) },
+    onOpenSettings: openSettings,
+    onCompClick: handleCompClick,
     onRunAiAnalysis: handleRunAiAnalysis,
     onUndoAiSelection: aiAnalysisDone ? handleUndoAiSelection : undefined,
-    onPermitsPulled: (a) => setAnalysisResult(a),
+    onPermitsPulled: handlePermitsPulled,
   })
 
   // ─── Analysis Handler ────────────────────────────────────────────────────
@@ -596,6 +614,7 @@ export default function AnalyzePage() {
         }
       }
     } catch (err) {
+      if (reloadForStaleAction(err)) return
       setPhase('idle')
       setError(err instanceof Error ? err.message : 'Failed to start analysis')
     }
@@ -893,7 +912,7 @@ export default function AnalyzePage() {
             streamingStep === 'searching' ? 'Searching property...'
             : streamingStep === 'subject' ? 'Loading comparables...'
             : streamingStep === 'comps' ? 'Enriching comp details...'
-            : streamingStep === 'evaluating' ? (evalProgress ?? 'Evaluating comparables...')
+            : streamingStep === 'evaluating' ? <EvalProgressLabel />
             : null
           }
           footer={

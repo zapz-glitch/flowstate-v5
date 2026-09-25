@@ -33,7 +33,8 @@ import {
 } from '../utils/eval-cache';
 import { drizzle } from 'drizzle-orm/d1';
 import { eq, and } from 'drizzle-orm';
-import { analysisRuns, savedReports } from '../db/schema';
+import { analysisRuns, savedReports, compTierOverrides } from '../db/schema';
+import { applyCompTierOverrides } from '../utils/comp-tier-overrides';
 
 type Variables = { auth: AuthContext };
 
@@ -460,6 +461,7 @@ analyze.get('/jobs/:jobId', async (c) => {
     }
     if (!result) result = await reportResult();
     if (result) {
+      await applyCompTierOverrides(c.env, auth.userId, jobId, result);
       return c.json({ success: true, data: { jobId, status: 'complete', result } });
     }
     return c.json({
@@ -484,9 +486,81 @@ analyze.get('/jobs/:jobId', async (c) => {
   // DO state missing ('not_found') — the saved report outlives it.
   const result = await reportResult();
   if (result) {
+    await applyCompTierOverrides(c.env, auth.userId, jobId, result);
     return c.json({ success: true, data: { jobId, status: 'complete', result } });
   }
   return c.json({ success: false, error: 'Job not found' }, 404);
+});
+
+/**
+ * PUT /analyze/jobs/:jobId/comp-tier
+ *
+ * Manual comp-tier assignment — pin a comparable to 'arv' or 'as_is', or
+ * clear the pin with tier null. Stored per (job, comp) and applied onto
+ * the report at read time, so Jev's automatic classification is never
+ * rewritten — the override rides alongside it on the card and report.
+ */
+analyze.put('/jobs/:jobId/comp-tier', async (c) => {
+  const auth = c.get('auth');
+  const jobId = c.req.param('jobId');
+  const body = await c.req
+    .json<{ compId?: string; tier?: string | null }>()
+    .catch(() => ({}) as { compId?: string; tier?: string | null });
+  const compId = typeof body.compId === 'string' && body.compId.length > 0 ? body.compId : null;
+  const tier = body.tier ?? null;
+  if (!compId || (tier !== 'arv' && tier !== 'as_is' && tier !== null)) {
+    return c.json(
+      { success: false, error: 'Invalid assignment — compId plus tier "arv"|"as_is"|null required' },
+      400,
+    );
+  }
+
+  // Same ownership check as GET — live DO state carries the owner; an
+  // evicted DO falls back to the userId-scoped saved report.
+  const doId = c.env.ANALYSIS_JOB.idFromName(jobId);
+  const stub = c.env.ANALYSIS_JOB.get(doId);
+  const resp = await stub.fetch('http://internal/state');
+  const state = (await resp.json().catch(() => null)) as {
+    userId?: string
+    status?: string
+  } | null;
+
+  const db = drizzle(c.env.DB);
+  const liveJob = state?.status === 'processing' || state?.status === 'idle'
+    || state?.status === 'complete' || state?.status === 'error';
+  if (state?.userId ? state.userId !== auth.userId : liveJob) {
+    return c.json({ success: false, error: 'Job not found' }, 404);
+  }
+  if (!liveJob && !state?.userId) {
+    const [report] = await db
+      .select({ id: savedReports.id })
+      .from(savedReports)
+      .where(and(eq(savedReports.userId, auth.userId), eq(savedReports.jobId, jobId)))
+      .limit(1);
+    if (!report) return c.json({ success: false, error: 'Job not found' }, 404);
+  }
+
+  const now = new Date().toISOString();
+  if (tier === null) {
+    await db
+      .delete(compTierOverrides)
+      .where(
+        and(
+          eq(compTierOverrides.jobId, jobId),
+          eq(compTierOverrides.compId, compId),
+          eq(compTierOverrides.userId, auth.userId),
+        ),
+      );
+  } else {
+    await db
+      .insert(compTierOverrides)
+      .values({ userId: auth.userId, jobId, compId, tier, createdAt: now, updatedAt: now })
+      .onConflictDoUpdate({
+        target: [compTierOverrides.jobId, compTierOverrides.compId],
+        set: { tier, updatedAt: now },
+      });
+  }
+  return c.json({ success: true });
 });
 
 /**

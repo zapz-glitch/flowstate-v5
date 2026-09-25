@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo } from 'react'
+import { memo, useMemo } from 'react'
 import { Check, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { subdivisionsMatch } from '@flowstate-api/shared'
@@ -16,20 +16,28 @@ export interface CompGridCardProps {
   index: number
   subject?: SubjectData | null
   isSelectedForArv?: boolean
-  onToggleArv?: () => void
-  onClick?: () => void
-  onHover?: (hovering: boolean) => void
+  /** Called with the card's comp key — stable identity lets the card memoize */
+  onToggleArv?: (key: string) => void
+  /** Pin this comp to a tier — 'arv' | 'as_is' | null clears. Present only when a jobId is available (Property Search). */
+  onAssignTier?: (comp: CompItem, tier: 'arv' | 'as_is' | null) => void
+  /** A tier assignment is in flight */
+  tierPending?: boolean
+  onCompClick?: (comp: CompItem) => void
+  /** Called with the card's comp key on enter, null on leave */
+  onHover?: (key: string | null) => void
   isHighlighted?: boolean
 }
 
 
-export function CompGridCard({
+function CompGridCardInner({
   comp,
   index,
   subject,
   isSelectedForArv,
   onToggleArv,
-  onClick,
+  onAssignTier,
+  tierPending,
+  onCompClick,
   onHover,
   isHighlighted,
 }: CompGridCardProps) {
@@ -75,8 +83,8 @@ export function CompGridCard({
   return (
     <div
       data-card-key={cardKey}
-      onMouseEnter={() => onHover?.(true)}
-      onMouseLeave={() => onHover?.(false)}
+      onMouseEnter={() => onHover?.(cardKey)}
+      onMouseLeave={() => onHover?.(null)}
       className={cn(
         'border border-border rounded-sm overflow-hidden transition-all duration-200 group',
         isEnabled ? 'hover:border-foreground/20' : 'opacity-50 hover:opacity-70',
@@ -147,6 +155,17 @@ export function CompGridCard({
               FLIP
             </div>
           )}
+          {comp.userTier && (
+            <div
+              className={cn(
+                'h-6 px-1.5 rounded-sm flex items-center text-[10px] font-bold',
+                comp.userTier === 'arv' ? 'bg-emerald-500/90 text-white' : 'bg-amber-500/90 text-white'
+              )}
+              title={`You pinned this comp as ${comp.userTier === 'arv' ? 'ARV' : 'as-is'} — Jev classified it ${comp.jevHybrid?.priceTier === 'arv' ? 'ARV' : comp.jevHybrid?.priceTier === 'as_is' ? 'as-is' : 'unclassified'}`}
+            >
+              {comp.userTier === 'arv' ? 'ARV' : 'AS-IS'}·YOU
+            </div>
+          )}
         </div>
         {/* Bottom: price + date */}
         <div className="absolute bottom-0 left-0 right-0 px-2 py-1.5 bg-gradient-to-t from-black/70 to-transparent flex items-end justify-between pointer-events-none">
@@ -161,7 +180,7 @@ export function CompGridCard({
         {hasArvSelection && onToggleArv && (
           <button
             type="button"
-            onClick={(e) => { e.stopPropagation(); onToggleArv() }}
+            onClick={(e) => { e.stopPropagation(); onToggleArv(cardKey) }}
             title={isSelectedForArv ? 'Remove from ARV' : 'Add to ARV'}
             aria-label={comp.selectionPending ? 'Updating ARV selection' : isSelectedForArv ? 'Remove from ARV' : 'Add to ARV'}
             aria-pressed={isSelectedForArv}
@@ -181,7 +200,7 @@ export function CompGridCard({
       </div>
 
       {/* Body — bottom section clicks to open detail modal */}
-      <div className="px-3 py-2.5 cursor-pointer" onClick={onClick}>
+      <div className="px-3 py-2.5 cursor-pointer" onClick={() => onCompClick?.(comp)}>
         {/* Address line with $/sf right-aligned */}
         <div className="flex items-baseline justify-between gap-2">
           {zillowUrl ? (
@@ -240,6 +259,40 @@ export function CompGridCard({
           )}
         </div>
 
+        {/* Manual tier pin — reviewer's call, rides alongside Jev's */}
+        {onAssignTier && comp.id && (
+          <div
+            className="flex items-center gap-1 mt-1.5"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {(['arv', 'as_is'] as const).map((tier) => {
+              const active = comp.userTier === tier
+              return (
+                <button
+                  key={tier}
+                  type="button"
+                  disabled={tierPending}
+                  onClick={() => onAssignTier(comp, active ? null : tier)}
+                  title={active ? 'Clear your pin' : `Pin as ${tier === 'arv' ? 'ARV' : 'as-is'}${comp.id ? ` — comp ${comp.id}` : ''}`}
+                  className={cn(
+                    'h-5 px-1.5 rounded text-[9px] font-bold transition-colors disabled:opacity-50',
+                    active
+                      ? tier === 'arv' ? 'bg-emerald-500 text-white' : 'bg-amber-500 text-white'
+                      : 'bg-foreground/8 text-foreground-tertiary hover:bg-foreground/15'
+                  )}
+                >
+                  {tier === 'arv' ? 'ARV' : 'AS-IS'}
+                </button>
+              )
+            })}
+            {comp.id && (
+              <span className="text-[8px] text-foreground-tertiary tabular-nums ml-auto" title="Provider comp ID">
+                #{comp.id}
+              </span>
+            )}
+          </div>
+        )}
+
         <RuleMatchDetails comp={comp} />
 
         {/* Stats grid — collapsed essentials; full detail in the expand dialog */}
@@ -293,3 +346,7 @@ export function CompGridCard({
     </div>
   )
 }
+
+// Memoized — a comp list can hold ~100 cards; without this any parent state
+// change (pin, hover, sort) re-renders every card's image/detail subtree.
+export const CompGridCard = memo(CompGridCardInner)
