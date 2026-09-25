@@ -391,6 +391,7 @@ export interface ValuationResult {
   projectedProfit: number
   projectedROI: number
   wholesalePrice: number
+  wholesaleFee: number
   /** Positional proximity deduction applied to buy price (0 when none) */
   locationPenalty?: number
   locationPenaltyPercent?: number
@@ -718,6 +719,18 @@ export interface AnalysisResponse {
     projectedProfit: number
     projectedROI: number
     wholesalePrice: number
+    /** Wholesale fee deducted from buy price to reach the wholesale ceiling */
+    wholesaleFee: number
+    /** Ask-vs-wholesale-ceiling realism — null when the subject has no list price */
+    listPriceRealism: {
+      listPrice: number
+      wholesalePrice: number
+      /** listPrice − wholesalePrice (negative = ask below the ceiling) */
+      gapDollars: number
+      /** Gap as % of ask — ≤10% high, ≤20% medium, else low */
+      gapPercent: number
+      verdict: 'high' | 'medium' | 'low'
+    } | null
     recommendation?: 'strong-buy' | 'buy' | 'hold' | 'pass' | 'manual-review'
     recommendationReason?: string
     /** Confidence gate on the comps driving the ARV */
@@ -1107,6 +1120,34 @@ function detectLocationRisks(property: NormalizedProperty): string[] {
 }
 
 /**
+ * How far the seller's ask sits above the wholesale ceiling (buyPrice − fee).
+ * Bands are percent-of-ask so they scale with price point — ≤10% = high
+ * realism, ≤20% = medium, above = low. An ask at/below the ceiling is a
+ * negative gap and always reads high.
+ */
+function listPriceRealismVerdict(
+  listPrice: number | null | undefined,
+  wholesalePrice: number | null | undefined
+): {
+  listPrice: number
+  wholesalePrice: number
+  gapDollars: number
+  gapPercent: number
+  verdict: 'high' | 'medium' | 'low'
+} | null {
+  if (listPrice == null || !(listPrice > 0) || wholesalePrice == null) return null
+  const gapDollars = Math.round(listPrice - wholesalePrice)
+  const gapPercent = Math.round((gapDollars / listPrice) * 1000) / 10
+  return {
+    listPrice,
+    wholesalePrice: Math.round(wholesalePrice),
+    gapDollars,
+    gapPercent,
+    verdict: gapPercent <= 10 ? 'high' : gapPercent <= 20 ? 'medium' : 'low',
+  }
+}
+
+/**
  * Build streamlined underwriter-focused response
  * Returns only essential data for investment decisions
  *
@@ -1432,6 +1473,8 @@ export function buildAnalysisResponse(
       projectedProfit: valuation.projectedProfit,
       projectedROI: valuation.projectedROI,
       wholesalePrice: valuation.wholesalePrice,
+      wholesaleFee: valuation.wholesaleFee,
+      listPriceRealism: listPriceRealismVerdict(ctx.subjectListPrice, valuation.wholesalePrice),
       // Position-tiered proximity deduction (fronting/backing/siding a busy
       // road/commercial) — deducted from buy price inside calculateValuation
       locationPenalty: valuation.locationPenalty ?? 0,
