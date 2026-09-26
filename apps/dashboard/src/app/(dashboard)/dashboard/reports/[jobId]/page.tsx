@@ -40,7 +40,6 @@ import { useEvaluationSync } from '@/hooks/use-evaluation-sync'
 import { useEnrichmentSSE, type EnrichmentEvent } from '@/hooks/use-enrichment-sse'
 import { useSidebar } from '@/components/SidebarProvider'
 import { getBatchStatus } from '@/lib/batch-client'
-import { SendToCdarvButton } from '@/components/SendToCdarvButton'
 
 const EvaluationSettingsSheet = dynamic(() => import('@/components/report/EvaluationSettingsSheet').then((mod) => mod.EvaluationSettingsSheet))
 const ShareReportDialog = dynamic(() => import('@/components/report/ShareReportDialog').then((mod) => mod.ShareReportDialog))
@@ -585,7 +584,6 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
             <button type="button" onClick={() => setShareOpen(true)} className="p-1.5 rounded-lg text-foreground-tertiary hover:text-foreground hover:bg-secondary transition-colors" title="Share">
               <Share2 className="w-3.5 h-3.5" />
             </button>
-            <SendToCdarvButton jobId={jobId} />
             <UpdateCrmButton
               jobId={jobId}
               leadId={analyzeData?.leadId}
