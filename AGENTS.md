@@ -29,6 +29,27 @@
 - **Stale branches:** anything unmerged older than ~2 weeks needs
   justification or gets deleted. Branches are cheap; confusion is not.
 
+## Local dev environment (lives only in this checkout)
+
+The dev environment is provisioned exactly once, in
+`~/src/flowstate-v5`, via untracked files that persist across branch
+switches:
+
+- `apps/api/.dev.vars` — all provider keys (CoreLogic, Firecrawl,
+  OpenAI/OpenRouter, Close, CDARV) + `DASHBOARD_URL=http://localhost:3000`
+  for CORS
+- `apps/dashboard/.env.local` — `NEXT_PUBLIC_API_URL`, Google Maps key,
+  auth secrets
+- `apps/api/.wrangler/` — local D1 with your dev user/settings
+- `node_modules/` — installed deps
+
+These are gitignored — they survive `git checkout` but do NOT exist in a
+fresh clone/worktree. This is why branches opened in separate worktrees
+had no keys, no maps, no local DB. Under the one-worktree rule this
+never happens again: branch in place, `npm run dev`, everything works.
+
+If a new checkout is ever unavoidable, copy those four paths into it.
+
 ## Test-based implementation workflow
 
 1. **Summary** — state what is being built and why, in plain language.
