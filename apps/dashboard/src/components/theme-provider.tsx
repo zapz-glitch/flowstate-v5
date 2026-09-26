@@ -30,7 +30,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     setMounted(true)
-    const stored = normalizeTheme(localStorage.getItem('theme'))
+    const stored = normalizeTheme(localStorage.getItem('fs-theme'))
     if (stored) {
       setThemeState(stored)
     }
@@ -43,7 +43,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     root.classList.toggle('dark', isDark)
     root.classList.toggle('light', !isDark)
     root.dataset.preset = theme
-    localStorage.setItem('theme', theme)
+    localStorage.setItem('fs-theme', theme)
   }, [theme, mounted])
 
   const setTheme = (next: Theme) => setThemeState(next)
