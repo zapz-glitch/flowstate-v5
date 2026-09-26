@@ -3,7 +3,7 @@
 import { SlidersHorizontal } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { ValuationData } from './shared-types'
-import { formatValuationNumber as fmt } from './valuation-number'
+import { formatValuationNumber as fmt, formatMoneyThousands as fmtK } from './valuation-number'
 import { formatHeadlineMoney } from './headline-money'
 
 interface DealSummaryHeroProps {
@@ -59,7 +59,7 @@ export function DealSummaryHero({ valuation, isRecalculated, onOpenSettings }: D
         >
           <div className="text-[11px] text-foreground-tertiary uppercase tracking-wider">As-is AVG</div>
           <div className="text-base font-bold tabular-nums mt-0.5">
-            {valuation.asIsMarketIntel?.asIsMarketPrice != null ? `$${fmt(valuation.asIsMarketIntel.asIsMarketPrice)}` : '—'}
+            {valuation.asIsMarketIntel?.asIsMarketPrice != null ? `$${fmtK(valuation.asIsMarketIntel.asIsMarketPrice)}` : '—'}
           </div>
           <div className="text-[10px] text-foreground-tertiary tabular-nums mt-0.5">
             {valuation.asIsMarketIntel?.avgPricePerSqft != null
@@ -74,14 +74,16 @@ export function DealSummaryHero({ valuation, isRecalculated, onOpenSettings }: D
           <div
             className="px-3 py-2.5 border-r border-border/20"
             title={valuation.listPriceRealism
-              ? `Asking $${fmt(Math.abs(valuation.listPriceRealism.gapDollars))} (${fmt(Math.abs(valuation.listPriceRealism.gapPercent))}%) ${valuation.listPriceRealism.gapDollars > 0 ? 'above' : 'below'} the $${fmt(valuation.listPriceRealism.wholesalePrice)} wholesale ceiling`
+              ? `Asking $${fmtK(Math.abs(valuation.listPriceRealism.gapDollars))} (${fmt(Math.abs(valuation.listPriceRealism.gapPercent))}%) ${valuation.listPriceRealism.gapDollars > 0 ? 'above' : 'below'} the $${fmtK(valuation.listPriceRealism.wholesalePrice)} wholesale ceiling`
               : "Seller's asking price, scraped from the active listing"}
           >
             <div className="text-[11px] text-foreground-tertiary uppercase tracking-wider">List</div>
-            <div className="text-base font-bold tabular-nums mt-0.5">${fmt(valuation.listPrice)}</div>
+            <div className="text-base font-bold tabular-nums mt-0.5">${fmtK(valuation.listPrice)}</div>
             <div className="text-[10px] tabular-nums mt-0.5 text-foreground-tertiary">
               {valuation.wholesalePrice != null
-                ? `Wholesale ${Math.round((valuation.wholesalePrice / valuation.listPrice) * 100)}% of list`
+                ? valuation.listPrice === valuation.wholesalePrice
+                  ? 'Same as wholesale'
+                  : `$${fmtK(Math.abs(valuation.listPrice - valuation.wholesalePrice))} ${valuation.listPrice > valuation.wholesalePrice ? 'more' : 'less'} than wholesale`
                 : 'Asking price'}
             </div>
           </div>
@@ -98,22 +100,22 @@ export function DealSummaryHero({ valuation, isRecalculated, onOpenSettings }: D
         </div>
         <div className="px-3 py-2.5 border-r border-border/20">
           <div className="text-[11px] text-foreground-tertiary uppercase tracking-wider">Rehab</div>
-          <div className="text-base font-bold tabular-nums mt-0.5">${fmt(valuation.rehabCost)}</div>
+          <div className="text-base font-bold tabular-nums mt-0.5">${fmtK(valuation.rehabCost)}</div>
           {valuation.rehabLevel && <div className="text-[10px] text-foreground-tertiary mt-0.5">{valuation.rehabLevel}</div>}
         </div>
         <div className="px-3 py-2.5 border-r border-border/20">
           <div className="text-[11px] text-foreground-tertiary uppercase tracking-wider">Profit</div>
-          <div className={cn('text-base font-bold tabular-nums mt-0.5', (valuation.projectedProfit ?? 0) > 0 ? 'text-emerald-500' : 'text-red-500')}>${fmt(valuation.projectedProfit)}</div>
+          <div className={cn('text-base font-bold tabular-nums mt-0.5', (valuation.projectedProfit ?? 0) > 0 ? 'text-emerald-500' : 'text-red-500')}>${fmtK(valuation.projectedProfit)}</div>
           {valuation.projectedROI != null && <div className="text-[10px] text-foreground-tertiary tabular-nums mt-0.5">{fmt(valuation.projectedROI)}% ROI</div>}
         </div>
       </div>
 
       {/* Footer: secondary costs */}
       <div className="px-3 py-1.5 border-t border-border/30 flex items-center gap-3 text-[10px] tabular-nums text-foreground-tertiary/70">
-        {valuation.closingCosts != null && <span>Close ${fmt(valuation.closingCosts)}</span>}
-        {valuation.carryingCosts != null && <span>Carry ${fmt(valuation.carryingCosts)}</span>}
-        {valuation.totalInvestment != null && <span>Invest ${fmt(valuation.totalInvestment)}</span>}
-        {valuation.listPrice != null && <span>List ${fmt(valuation.listPrice)}</span>}
+        {valuation.closingCosts != null && <span>Close ${fmtK(valuation.closingCosts)}</span>}
+        {valuation.carryingCosts != null && <span>Carry ${fmtK(valuation.carryingCosts)}</span>}
+        {valuation.totalInvestment != null && <span>Invest ${fmtK(valuation.totalInvestment)}</span>}
+        {valuation.listPrice != null && <span>List ${fmtK(valuation.listPrice)}</span>}
         {valuation.wholesalePrice != null && <span>Wholesale ${formatHeadlineMoney(valuation.wholesalePrice, valuation.displayedWholesalePrice, valuation.displayRounding)}</span>}
       </div>
     </div>
