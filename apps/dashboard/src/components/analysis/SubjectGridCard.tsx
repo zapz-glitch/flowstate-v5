@@ -53,6 +53,13 @@ export function SubjectGridCard({ subject, isLoading }: SubjectGridCardProps) {
                 ) : (
                   <span className="text-body-sm font-semibold">Unknown Address</span>
                 )}
+                {subject.subdivision && (
+                  <div className="flex items-center gap-1 mt-1 flex-wrap">
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-medium bg-primary/10 text-primary border border-primary/20">
+                      {subject.subdivision}
+                    </span>
+                  </div>
+                )}
               </div>
               {(subject.listPrice != null || subject.lastSale?.price) && (
                 <div className="text-right flex-shrink-0">
@@ -74,16 +81,6 @@ export function SubjectGridCard({ subject, isLoading }: SubjectGridCardProps) {
                 </div>
               )}
             </div>
-
-            {/* Subdivision badge — own full-width line under the address,
-                mirroring the comp-card layout */}
-            {subject.subdivision && (
-              <div className="flex items-center gap-1 mt-1 flex-wrap">
-                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-medium bg-primary/10 text-primary border border-primary/20">
-                  {subject.subdivision}
-                </span>
-              </div>
-            )}
 
             {/* Property stats — 3-column grid keeps the subject card ratio closer to comp cards */}
             <div className="subject-stats mt-2.5">
