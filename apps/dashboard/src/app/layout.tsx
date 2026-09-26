@@ -24,7 +24,7 @@ import { StaleActionGuard } from '@/components/StaleActionGuard'
 import './globals.css'
 
 export const viewport: Viewport = {
-  themeColor: '#161511',
+  themeColor: '#edeae5',
   width: 'device-width',
   initialScale: 1,
   maximumScale: 1,
@@ -62,13 +62,13 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="en" className="dark" suppressHydrationWarning>
+    <html lang="en" className="light" suppressHydrationWarning>
       <head>
-        {/* Apply stored theme pre-paint — prevents dark→light flash on load.
-            Default is night (dark); light only when explicitly stored. */}
+        {/* Apply stored theme pre-paint — prevents light→dark flash on load.
+            Default is led (bright indoor); dark only when explicitly stored. */}
         <script
           dangerouslySetInnerHTML={{
-            __html: `(function(){try{var t=localStorage.getItem('fs-theme');if(t==='dark')t='night';if(t==='light')t='led';var light=t==='outdoor'||t==='led';var r=document.documentElement;r.classList.toggle('dark',!light);r.classList.toggle('light',light);if(t)r.dataset.preset=t;}catch(e){}})()`,
+            __html: `(function(){try{var t=localStorage.getItem('fs-theme');if(t==='dark')t='night';if(t==='light')t='led';var dark=t==='night'||t==='dawn';var r=document.documentElement;r.classList.toggle('dark',dark);r.classList.toggle('light',!dark);r.dataset.preset=t||'led';}catch(e){}})()`,
           }}
         />
       </head>
