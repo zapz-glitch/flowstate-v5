@@ -37,20 +37,20 @@ export function MapOverlay({ riskFlags, floodZone }: MapOverlayProps) {
   if (!hasRiskFlags) return null
 
   return (
-    <div className="shrink-0 bg-black/60 backdrop-blur-sm no-print">
+    <div className="shrink-0 bg-background/80 backdrop-blur-sm no-print">
       {/* Risk flags row */}
       {hasRiskFlags && (
         <div className="px-4 py-2 flex items-center gap-3 overflow-x-auto scrollbar-none whitespace-nowrap">
           {floodZone && (
             floodZone.inFloodZone ? (
-              <span className="inline-flex items-center gap-1.5 text-xs font-medium text-red-400">
+              <span className="inline-flex items-center gap-1.5 text-xs font-medium text-red-600 dark:text-red-400">
                 <Droplets className="w-3.5 h-3.5 flex-shrink-0" />
                 {floodZone.source === 'listing'
                   ? `Flood risk: ${floodZone.zone ?? 'elevated'}`
                   : `Flood Zone${floodZone.zone ? ` ${floodZone.zone}` : ''}`}
               </span>
             ) : (
-              <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-400">
+              <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-600 dark:text-emerald-400">
                 <ShieldCheck className="w-3.5 h-3.5 flex-shrink-0" />
                 {floodZone.source === 'listing'
                   ? `Flood risk: ${floodZone.zone ?? 'low'}`
@@ -59,7 +59,7 @@ export function MapOverlay({ riskFlags, floodZone }: MapOverlayProps) {
             )
           )}
           {mapFlags?.map((flag, i) => (
-            <span key={i} className="inline-flex items-center gap-1.5 text-xs font-medium text-amber-400">
+            <span key={i} className="inline-flex items-center gap-1.5 text-xs font-medium text-amber-600 dark:text-amber-400">
               <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
               {flag}
             </span>
