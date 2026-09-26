@@ -22,6 +22,14 @@ export interface AnalysisResultLayoutProps {
   statusLabel?: React.ReactNode
   /** Optional footer (e.g. Raw JSON toggle) */
   footer?: React.ReactNode
+  /** Re-run the analysis for the current property */
+  onRerun?: () => void
+  /** True while a rerun is in flight */
+  rerunning?: boolean
+  /** Fire an offer workflow Devin session (prep offer / no margin) */
+  onOfferWorkflow?: (workflow: 'prep_offer' | 'no_margin') => void
+  /** The workflow currently being triggered, if any */
+  offerBusy?: 'prep_offer' | 'no_margin' | null
 }
 
 export function AnalysisResultLayout({
@@ -29,6 +37,10 @@ export function AnalysisResultLayout({
   valuationCardRef,
   statusLabel,
   footer,
+  onRerun,
+  rerunning,
+  onOfferWorkflow,
+  offerBusy,
 }: AnalysisResultLayoutProps) {
   const {
     subject,
@@ -62,6 +74,10 @@ export function AnalysisResultLayout({
             valuation={valuation}
             isRecalculated={isRecalculated}
             onOpenSettings={onOpenSettings}
+            onRerun={onRerun}
+            rerunning={rerunning}
+            onOfferWorkflow={onOfferWorkflow}
+            offerBusy={offerBusy}
           />
         </div>
       ) : subject && isStreaming ? (

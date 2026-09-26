@@ -36,6 +36,15 @@ export interface AnalysisPageLayoutProps {
 
   // Optional footer (e.g. Raw JSON)
   footer?: ReactNode
+
+  /** Re-run the analysis for the current property */
+  onRerun?: () => void
+  /** True while a rerun is in flight */
+  rerunning?: boolean
+  /** Fire an offer workflow Devin session (prep offer / no margin) */
+  onOfferWorkflow?: (workflow: 'prep_offer' | 'no_margin') => void
+  /** The workflow currently being triggered, if any */
+  offerBusy?: 'prep_offer' | 'no_margin' | null
 }
 
 export function AnalysisPageLayout({
@@ -48,6 +57,10 @@ export function AnalysisPageLayout({
   loading = false,
   statusLabel,
   footer,
+  onRerun,
+  rerunning,
+  onOfferWorkflow,
+  offerBusy,
 }: AnalysisPageLayoutProps) {
   const { subject, displayComps: comps, compOverride } = useEvaluation()
   const selectedCompKeys = compOverride?.selectedCompKeys
@@ -65,6 +78,10 @@ export function AnalysisPageLayout({
     valuationCardRef,
     statusLabel,
     footer,
+    onRerun,
+    rerunning,
+    onOfferWorkflow,
+    offerBusy,
   }
 
   const loadingSkeleton = (

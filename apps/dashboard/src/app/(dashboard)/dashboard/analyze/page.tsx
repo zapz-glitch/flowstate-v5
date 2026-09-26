@@ -23,10 +23,11 @@ import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
 import { queueAnalysis, type AnalyzeData } from './actions'
 import { reloadForStaleAction } from '@/lib/server-action'
-import { getArvThreshold, getLatestReport, getReportsByProperty, getSavedReport, runCompSelection, type ExistingReport } from '@/lib/client-api'
+import { getArvThreshold, getLatestReport, getReportsByProperty, getSavedReport, runCompSelection, startOfferWorkflow, type ExistingReport, type OfferWorkflow } from '@/lib/client-api'
 import { useAutoSave } from '@/hooks/use-auto-save'
 // cn is used in the outer wrapper
 import { cn } from '@/lib/utils'
+import { toast } from 'sonner'
 import { useAnalysis } from '@/hooks/use-analysis'
 import { useAnalysisEvaluation } from '@/hooks/use-analysis-evaluation'
 import type { AnalysisStep } from '@/types/analysis'
@@ -243,7 +244,9 @@ export default function AnalyzePage() {
 
   // ─── SSE Event Handler ────────────────────────────────────────────────────
 
+  const lastEventAtRef = useRef(0)
   const handleEnrichmentEvent = useCallback((event: EnrichmentEvent) => {
+    lastEventAtRef.current = Date.now()
     const { event: eventType, data } = event
     const isAiOnly = aiOnlyModeRef.current
 
@@ -386,6 +389,21 @@ export default function AnalyzePage() {
       setPhase((prev) => prev === 'fetching' ? 'ready' : prev)
     }
   }, [sseStatus])
+
+  // Stall watchdog — if the pipeline goes silent mid-run (e.g. a dev-server
+  // reload killed the worker isolate), surface an error instead of spinning
+  // forever. 4 min silence is comfortably past any single step's duration.
+  useEffect(() => {
+    if (phase !== 'fetching') return
+    const id = setInterval(() => {
+      if (lastEventAtRef.current > 0 && Date.now() - lastEventAtRef.current > 4 * 60_000) {
+        setPhase('idle')
+        setEnrichmentStreamUrl(null)
+        setError('Analysis stalled — the run may have been interrupted. Re-run to retry.')
+      }
+    }, 30_000)
+    return () => clearInterval(id)
+  }, [phase])
 
   // ─── Evaluation Hook ─────────────────────────────────────────────────────
 
@@ -547,7 +565,13 @@ export default function AnalyzePage() {
   // used when the user explicitly picks "New Analysis" on a known address.
   const runAnalysis = useCallback(async (forceFresh = false) => {
     cancelRestore()
-    clearAnalysis()
+    // Explicit rerun with results on screen: keep them mounted so the page
+    // doesn't blank for the whole pipeline — SSE events overwrite them
+    // progressively as fresh data arrives.
+    const keepResults = forceFresh && analysisResult !== null
+    if (!keepResults) {
+      clearAnalysis()
+    }
     setError(null)
     setDurationMs(null)
     setEnrichmentStreamUrl(null)
@@ -561,6 +585,7 @@ export default function AnalyzePage() {
     setStreamingStep('idle')
     setEvalProgress(null)
     setPhase('fetching')
+    lastEventAtRef.current = Date.now()
 
     const t0 = Date.now()
     try {
@@ -618,7 +643,39 @@ export default function AnalyzePage() {
       setPhase('idle')
       setError(err instanceof Error ? err.message : 'Failed to start analysis')
     }
-  }, [address, skipCache, arvThreshold, asIsThreshold, appraisalFilters, appraisalAdjustments, cancelRestore, clearAnalysis, setActiveAnalysis, setAnalysisResult, setAnalysisState])
+  }, [address, skipCache, arvThreshold, asIsThreshold, appraisalFilters, appraisalAdjustments, cancelRestore, clearAnalysis, setActiveAnalysis, setAnalysisResult, setAnalysisState, analysisResult])
+
+  // ─── Offer workflows (Devin Cloud) ────────────────────────────────────
+  const [offerBusy, setOfferBusy] = useState<OfferWorkflow | null>(null)
+  const handleOfferWorkflow = useCallback(async (workflow: OfferWorkflow) => {
+    const jobId = activeAnalysis?.jobId
+    const subjectAddress = analysisResult?.subject?.address ?? address
+    if (!jobId || !subjectAddress) return
+    setOfferBusy(workflow)
+    try {
+      const res = await startOfferWorkflow({
+        jobId,
+        workflow,
+        address: { street: subjectAddress },
+        metrics: displayValuation ? {
+          listPrice: displayValuation.listPrice,
+          arv: displayValuation.arv,
+          buyPrice: displayValuation.buyPrice,
+          wholesalePrice: displayValuation.wholesalePrice,
+          rehabCost: displayValuation.rehabCost,
+          projectedProfit: displayValuation.projectedProfit,
+        } : undefined,
+      })
+      toast.success(`${workflow === 'prep_offer' ? 'Prep offer' : 'No margin'} session started`, {
+        action: { label: 'Open Devin', onClick: () => window.open(res.url, '_blank') },
+        duration: 8000,
+      })
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to start offer session')
+    } finally {
+      setOfferBusy(null)
+    }
+  }, [activeAnalysis?.jobId, analysisResult?.subject?.address, address, displayValuation])
 
   // Entry point — checks for existing reports first
   const handleAnalyze = useCallback(async () => {
@@ -895,11 +952,14 @@ export default function AnalyzePage() {
       })()}
       </div>{/* end search wrapper */}
 
-      {/* Loading skeleton — two-column layout matching the final result */}
-      {isFetching && <AnalysisPageSkeleton />}
+      {/* Loading skeleton — two-column layout matching the final result.
+          Suppressed during reruns that keep prior results on screen. */}
+      {isFetching && !hasResult && <AnalysisPageSkeleton />}
 
-      {/* Analysis layout — map + valuation on left, comps on right */}
-      {isReady && (
+      {/* Analysis layout — map + valuation on left, comps on right.
+          During an explicit rerun the previous result stays mounted
+          (fetching + hasResult) while SSE streams the fresh data in. */}
+      {(isReady || (isFetching && hasResult)) && (
         <AnalysisPageLayout
           mapComps={effectiveComps ?? analysisResult?.comps}
           onMarkerSelect={handleMarkerSelect}
@@ -908,6 +968,10 @@ export default function AnalyzePage() {
           floodZone={authoritativeData?.floodZone ?? renderData?.floodZone}
 
           valuationCardRef={valuationCardRef}
+          onRerun={() => runAnalysis(true)}
+          rerunning={isFetching}
+          onOfferWorkflow={handleOfferWorkflow}
+          offerBusy={offerBusy}
           statusLabel={
             streamingStep === 'searching' ? 'Searching property...'
             : streamingStep === 'subject' ? 'Loading comparables...'

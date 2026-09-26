@@ -1,6 +1,6 @@
 'use client'
 
-import { SlidersHorizontal } from 'lucide-react'
+import { SlidersHorizontal, RefreshCw, FileSignature, CircleSlash } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { ValuationData } from './shared-types'
 import { formatValuationNumber as fmt } from './valuation-number'
@@ -10,9 +10,17 @@ interface DealSummaryHeroProps {
   valuation: ValuationData
   isRecalculated?: boolean
   onOpenSettings?: () => void
+  /** Re-run the analysis for this property (fresh data, cache bypassed) */
+  onRerun?: () => void
+  /** True while a rerun is in flight */
+  rerunning?: boolean
+  /** Fire an offer workflow Devin session (prep offer / no margin) */
+  onOfferWorkflow?: (workflow: 'prep_offer' | 'no_margin') => void
+  /** The workflow currently being triggered, if any */
+  offerBusy?: 'prep_offer' | 'no_margin' | null
 }
 
-export function DealSummaryHero({ valuation, isRecalculated, onOpenSettings }: DealSummaryHeroProps) {
+export function DealSummaryHero({ valuation, isRecalculated, onOpenSettings, onRerun, rerunning, onOfferWorkflow, offerBusy }: DealSummaryHeroProps) {
 
   return (
     <div className="border border-border rounded-sm bg-background/95 backdrop-blur-sm">
@@ -41,12 +49,54 @@ export function DealSummaryHero({ valuation, isRecalculated, onOpenSettings }: D
             </span>
           )}
         </div>
-        {onOpenSettings && (
-          <button type="button" onClick={onOpenSettings} className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] text-foreground-tertiary hover:text-foreground hover:bg-secondary transition-colors no-print">
-            <SlidersHorizontal className="w-3 h-3" />
-            Evaluation Settings
-          </button>
-        )}
+        <div className="flex items-center gap-1">
+          {onOfferWorkflow && (
+            <>
+              <button
+                type="button"
+                onClick={() => onOfferWorkflow('prep_offer')}
+                disabled={offerBusy != null}
+                className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium text-emerald-600 hover:bg-emerald-500/10 transition-colors no-print disabled:opacity-50 dark:text-emerald-400"
+                title="Prep offer — Devin session finds the contact in Close and prepares the offer"
+              >
+                {offerBusy === 'prep_offer'
+                  ? <RefreshCw className="w-3 h-3 animate-spin" />
+                  : <FileSignature className="w-3 h-3" />}
+                {offerBusy === 'prep_offer' ? 'Starting…' : 'Prep offer'}
+              </button>
+              <button
+                type="button"
+                onClick={() => onOfferWorkflow('no_margin')}
+                disabled={offerBusy != null}
+                className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] text-foreground-tertiary hover:text-foreground hover:bg-secondary transition-colors no-print disabled:opacity-50"
+                title="No margin — Devin session runs the no-margin workflow on this lead in Close"
+              >
+                {offerBusy === 'no_margin'
+                  ? <RefreshCw className="w-3 h-3 animate-spin" />
+                  : <CircleSlash className="w-3 h-3" />}
+                {offerBusy === 'no_margin' ? 'Starting…' : 'No margin'}
+              </button>
+            </>
+          )}
+          {onRerun && (
+            <button
+              type="button"
+              onClick={onRerun}
+              disabled={rerunning}
+              className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] text-foreground-tertiary hover:text-foreground hover:bg-secondary transition-colors no-print disabled:opacity-50"
+              title="Re-run this analysis with fresh data"
+            >
+              <RefreshCw className={cn('w-3 h-3', rerunning && 'animate-spin')} />
+              {rerunning ? 'Running…' : 'Re-run'}
+            </button>
+          )}
+          {onOpenSettings && (
+            <button type="button" onClick={onOpenSettings} className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] text-foreground-tertiary hover:text-foreground hover:bg-secondary transition-colors no-print">
+              <SlidersHorizontal className="w-3 h-3" />
+              Evaluation Settings
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Primary metrics grid */}
