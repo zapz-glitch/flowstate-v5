@@ -120,6 +120,7 @@ export function DealSummaryHero({ valuation, isRecalculated, onOpenSettings }: D
         {valuation.closingCosts != null && <span>Close ${fmt(valuation.closingCosts)}</span>}
         {valuation.carryingCosts != null && <span>Carry ${fmt(valuation.carryingCosts)}</span>}
         {valuation.totalInvestment != null && <span>Invest ${fmt(valuation.totalInvestment)}</span>}
+        {valuation.listPrice != null && <span>List ${fmt(valuation.listPrice)}</span>}
         {valuation.wholesalePrice != null && <span>Wholesale ${formatHeadlineMoney(valuation.wholesalePrice, valuation.displayedWholesalePrice, valuation.displayRounding)}</span>}
       </div>
     </div>

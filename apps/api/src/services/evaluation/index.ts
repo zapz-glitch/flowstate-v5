@@ -554,7 +554,13 @@ export async function performAnalysis(
         'photo_fetch',
         photoBundle?.subject ? 'completed' : 'fallback',
         photoBundle?.subject
-          ? `${photoBundle.subject.photos.length} subject photos via ${photoBundle.subject.source}`
+          ? photoBundle.subject.photos.length > 0
+            ? `${photoBundle.subject.photos.length} subject photos via ${photoBundle.subject.source}`
+            : `Listing metadata via ${photoBundle.subject.source} (no photos${
+                typeof photoBundle.subject.metadata?.listPrice === 'number'
+                  ? `; list price $${photoBundle.subject.metadata.listPrice.toLocaleString()}`
+                  : ''
+              })`
           : 'No subject photos found'
       )
     } else {
