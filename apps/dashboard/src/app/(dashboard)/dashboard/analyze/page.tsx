@@ -564,7 +564,13 @@ export default function AnalyzePage() {
   // used when the user explicitly picks "New Analysis" on a known address.
   const runAnalysis = useCallback(async (forceFresh = false) => {
     cancelRestore()
-    clearAnalysis()
+    // Explicit rerun with results on screen: keep them mounted so the page
+    // doesn't blank for the whole pipeline — SSE events overwrite them
+    // progressively as fresh data arrives.
+    const keepResults = forceFresh && analysisResult !== null
+    if (!keepResults) {
+      clearAnalysis()
+    }
     setError(null)
     setDurationMs(null)
     setEnrichmentStreamUrl(null)
@@ -636,7 +642,7 @@ export default function AnalyzePage() {
       setPhase('idle')
       setError(err instanceof Error ? err.message : 'Failed to start analysis')
     }
-  }, [address, skipCache, arvThreshold, asIsThreshold, appraisalFilters, appraisalAdjustments, cancelRestore, clearAnalysis, setActiveAnalysis, setAnalysisResult, setAnalysisState])
+  }, [address, skipCache, arvThreshold, asIsThreshold, appraisalFilters, appraisalAdjustments, cancelRestore, clearAnalysis, setActiveAnalysis, setAnalysisResult, setAnalysisState, analysisResult])
 
   // Entry point — checks for existing reports first
   const handleAnalyze = useCallback(async () => {
@@ -913,11 +919,14 @@ export default function AnalyzePage() {
       })()}
       </div>{/* end search wrapper */}
 
-      {/* Loading skeleton — two-column layout matching the final result */}
-      {isFetching && <AnalysisPageSkeleton />}
+      {/* Loading skeleton — two-column layout matching the final result.
+          Suppressed during reruns that keep prior results on screen. */}
+      {isFetching && !hasResult && <AnalysisPageSkeleton />}
 
-      {/* Analysis layout — map + valuation on left, comps on right */}
-      {isReady && (
+      {/* Analysis layout — map + valuation on left, comps on right.
+          During an explicit rerun the previous result stays mounted
+          (fetching + hasResult) while SSE streams the fresh data in. */}
+      {(isReady || (isFetching && hasResult)) && (
         <AnalysisPageLayout
           mapComps={effectiveComps ?? analysisResult?.comps}
           onMarkerSelect={handleMarkerSelect}
