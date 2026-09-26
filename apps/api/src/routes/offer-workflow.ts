@@ -110,6 +110,7 @@ offerWorkflow.post('/offer-workflow', async (c) => {
     body: JSON.stringify({
       prompt: buildPrompt(body),
       idempotent: false,
+      ...(c.env.DEVIN_PLAYBOOK_ID ? { playbook_id: c.env.DEVIN_PLAYBOOK_ID } : {}),
       ...(sessionSecrets.length ? { session_secrets: sessionSecrets } : {}),
     }),
   })
