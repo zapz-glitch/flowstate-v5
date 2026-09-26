@@ -184,7 +184,10 @@ export class ListingPhotoScraper {
     const slug = `${property.address}-${property.city}-${property.state}-${property.zipCode}`
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, '-')
-    return `listing-photos:${adapter.name}:${slug}`
+    // v2 — entries cached before the listPrice/rawHtml extraction carried
+    // no ask price; the bump refetches them once instead of serving
+    // listPrice:null for the 30-day TTL.
+    return `listing-photos-v2:${adapter.name}:${slug}`
   }
 
   /** Scrape a listing page through Firecrawl */
@@ -433,15 +436,20 @@ export class ListingPhotoScraper {
         }
       }
 
-      if (photos.length === 0) {
-        console.warn(`${tag} scrape produced no photos: ${listingUrl}`)
-        return null
-      }
-
       const floodRisk = this.extractFloodSignal(content)
       if (floodRisk) console.log(`${tag} flood signal: ${floodRisk.level} (${floodRisk.source})`)
       const listPrice = this.extractListPrice(content)
       if (listPrice) console.log(`${tag} list price: $${listPrice.toLocaleString()}`)
+
+      if (photos.length === 0) {
+        console.warn(`${tag} scrape produced no photos: ${listingUrl}`)
+        // The listing resolved and may carry list price / flood signal —
+        // return it so metadata survives even though photo extraction failed.
+        if (floodRisk || listPrice) {
+          return { photos: [], sourceUrl: listingUrl, floodRisk, listPrice }
+        }
+        return null
+      }
 
       const result = { photos, sourceUrl: listingUrl, floodRisk, listPrice }
       if (this.cache) {
