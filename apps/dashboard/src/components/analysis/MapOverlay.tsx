@@ -26,8 +26,13 @@ export function MapLegend() {
   )
 }
 
+// The valuation gap vs list price already lives in the valuation box —
+// dropping it here keeps the map strip to real location/flood risks.
+const ARV_LIST_FLAG = /^ARV (\$[\d,]+ (above|below) list price|at list price)$/
+
 export function MapOverlay({ riskFlags, floodZone }: MapOverlayProps) {
-  const hasRiskFlags = !!(riskFlags?.length || floodZone)
+  const mapFlags = riskFlags?.filter((flag) => !ARV_LIST_FLAG.test(flag))
+  const hasRiskFlags = !!(mapFlags?.length || floodZone)
 
   if (!hasRiskFlags) return null
 
@@ -53,7 +58,7 @@ export function MapOverlay({ riskFlags, floodZone }: MapOverlayProps) {
               </span>
             )
           )}
-          {riskFlags?.map((flag, i) => (
+          {mapFlags?.map((flag, i) => (
             <span key={i} className="inline-flex items-center gap-1.5 text-xs font-medium text-amber-400">
               <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
               {flag}
