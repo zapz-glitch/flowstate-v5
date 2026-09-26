@@ -68,6 +68,8 @@ export function AnalysisResultLayout({
             valuation={valuation}
             isRecalculated={isRecalculated}
             onOpenSettings={onOpenSettings}
+            onRerun={onRerun}
+            rerunning={rerunning}
           />
         </div>
       ) : subject && isStreaming ? (
@@ -128,8 +130,6 @@ export function AnalysisResultLayout({
           onCompHover={onCompHover}
           feedbackContext={feedbackContext}
           onFeedbackSubmitted={onFeedbackSubmitted}
-          onRerun={onRerun}
-          rerunning={rerunning}
         />
       ) : subject && isStreaming ? (
         /* Comps loading skeleton — only while streaming */
