@@ -1192,18 +1192,8 @@ export function buildAnalysisResponse(
   const zoningRisks = detectLocationRisks(property)
   riskFlags.push(...zoningRisks)
 
-  // ARV vs asking price — flag when the ARV clears below the seller's ask
-  // (negotiation room) or lands above it (seller underpriced).
-  if (ctx.subjectListPrice != null && finalArv != null) {
-    const delta = finalArv - ctx.subjectListPrice
-    riskFlags.push(
-      delta < 0
-        ? `ARV $${Math.abs(delta).toLocaleString()} below list price`
-        : delta > 0
-          ? `ARV $${delta.toLocaleString()} above list price`
-          : 'ARV at list price'
-    )
-  }
+  // ARV vs asking price is surfaced on the valuation hero (list price cell
+  // + realism verdict) — not emitted as a risk flag.
 
   // Get enabled and disabled comp counts
   const enabledComps = appraisalResult.comparables.filter((c) => c.isEnabled)

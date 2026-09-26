@@ -40,7 +40,7 @@ export function MapOverlay({ riskFlags, floodZone }: MapOverlayProps) {
     <div className="shrink-0 bg-black/60 backdrop-blur-sm no-print">
       {/* Risk flags row */}
       {hasRiskFlags && (
-        <div className="px-4 py-2 flex items-center gap-3 overflow-x-auto scrollbar-none whitespace-nowrap border-b border-white/10">
+        <div className="px-4 py-2 flex items-center gap-3 overflow-x-auto scrollbar-none whitespace-nowrap">
           {floodZone && (
             floodZone.inFloodZone ? (
               <span className="inline-flex items-center gap-1.5 text-xs font-medium text-red-400">
