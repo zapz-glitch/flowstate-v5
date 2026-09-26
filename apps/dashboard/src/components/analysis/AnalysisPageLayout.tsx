@@ -36,6 +36,11 @@ export interface AnalysisPageLayoutProps {
 
   // Optional footer (e.g. Raw JSON)
   footer?: ReactNode
+
+  /** Re-run the analysis for the current property */
+  onRerun?: () => void
+  /** True while a rerun is in flight */
+  rerunning?: boolean
 }
 
 export function AnalysisPageLayout({
@@ -48,6 +53,8 @@ export function AnalysisPageLayout({
   loading = false,
   statusLabel,
   footer,
+  onRerun,
+  rerunning,
 }: AnalysisPageLayoutProps) {
   const { subject, displayComps: comps, compOverride } = useEvaluation()
   const selectedCompKeys = compOverride?.selectedCompKeys
@@ -65,6 +72,8 @@ export function AnalysisPageLayout({
     valuationCardRef,
     statusLabel,
     footer,
+    onRerun,
+    rerunning,
   }
 
   const loadingSkeleton = (

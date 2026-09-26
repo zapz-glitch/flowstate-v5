@@ -22,6 +22,10 @@ export interface AnalysisResultLayoutProps {
   statusLabel?: React.ReactNode
   /** Optional footer (e.g. Raw JSON toggle) */
   footer?: React.ReactNode
+  /** Re-run the analysis for the current property */
+  onRerun?: () => void
+  /** True while a rerun is in flight */
+  rerunning?: boolean
 }
 
 export function AnalysisResultLayout({
@@ -29,6 +33,8 @@ export function AnalysisResultLayout({
   valuationCardRef,
   statusLabel,
   footer,
+  onRerun,
+  rerunning,
 }: AnalysisResultLayoutProps) {
   const {
     subject,
@@ -62,6 +68,8 @@ export function AnalysisResultLayout({
             valuation={valuation}
             isRecalculated={isRecalculated}
             onOpenSettings={onOpenSettings}
+            onRerun={onRerun}
+            rerunning={rerunning}
           />
         </div>
       ) : subject && isStreaming ? (
