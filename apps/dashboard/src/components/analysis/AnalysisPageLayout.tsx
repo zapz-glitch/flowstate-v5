@@ -41,10 +41,8 @@ export interface AnalysisPageLayoutProps {
   onRerun?: () => void
   /** True while a rerun is in flight */
   rerunning?: boolean
-  /** Fire an offer workflow Devin session (prep offer / no margin) */
-  onOfferWorkflow?: (workflow: 'prep_offer' | 'no_margin') => void
-  /** The workflow currently being triggered, if any */
-  offerBusy?: 'prep_offer' | 'no_margin' | null
+  /** Fire an offer workflow — returns the outcome the hero flashes */
+  onOfferWorkflow?: (workflow: 'prep_offer' | 'no_margin') => Promise<{ ok: boolean; label: string }>
 }
 
 export function AnalysisPageLayout({
@@ -60,7 +58,6 @@ export function AnalysisPageLayout({
   onRerun,
   rerunning,
   onOfferWorkflow,
-  offerBusy,
 }: AnalysisPageLayoutProps) {
   const { subject, displayComps: comps, compOverride } = useEvaluation()
   const selectedCompKeys = compOverride?.selectedCompKeys
@@ -81,7 +78,6 @@ export function AnalysisPageLayout({
     onRerun,
     rerunning,
     onOfferWorkflow,
-    offerBusy,
   }
 
   const loadingSkeleton = (

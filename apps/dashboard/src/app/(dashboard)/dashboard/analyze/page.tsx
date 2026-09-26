@@ -646,37 +646,24 @@ export default function AnalyzePage() {
   }, [address, skipCache, arvThreshold, asIsThreshold, appraisalFilters, appraisalAdjustments, cancelRestore, clearAnalysis, setActiveAnalysis, setAnalysisResult, setAnalysisState, analysisResult])
 
   // ─── Offer workflows (Devin listener session + engine) ───────────────
-  const [offerBusy, setOfferBusy] = useState<OfferWorkflow | null>(null)
-  const handleOfferWorkflow = useCallback(async (workflow: OfferWorkflow) => {
-    const leadId = analysisResult?.leadId ?? undefined
+  // The hero owns the busy→result animation; this just returns the outcome.
+  const handleOfferWorkflow = useCallback(async (workflow: OfferWorkflow): Promise<{ ok: boolean; label: string }> => {
     const propertyAddress = analysisResult?.subject?.address ?? address
-    if (!propertyAddress) return
+    if (!propertyAddress) return { ok: false, label: 'No address' }
     const purchasePrice = displayValuation?.wholesalePrice ?? displayValuation?.buyPrice
-    if (workflow === 'prep_offer' && !purchasePrice) {
-      toast.error('No offer amount — valuation incomplete')
-      return
-    }
-    setOfferBusy(workflow)
-    try {
-      const res = workflow === 'prep_offer'
-        ? await dispatchOfferPrep({
-            leadId,
-            propertyAddress,
-            purchasePrice: purchasePrice!,
-            opportunityId: analysisResult?.opportunityId ?? undefined,
-          })
-        : await declineOffer({ leadId, propertyAddress })
-      if (!res.ok) throw new Error(res.error ?? 'Dispatch failed')
-      toast.success(
-        workflow === 'prep_offer'
-          ? res.idempotent ? 'Offer prep already dispatched for this lead' : 'Prep offer dispatched'
-          : 'Decline recorded',
-      )
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to dispatch offer')
-    } finally {
-      setOfferBusy(null)
-    }
+    if (workflow === 'prep_offer' && !purchasePrice) return { ok: false, label: 'Valuation incomplete' }
+    const res = workflow === 'prep_offer'
+      ? await dispatchOfferPrep({
+          leadId: analysisResult?.leadId ?? undefined,
+          propertyAddress,
+          purchasePrice: purchasePrice!,
+          opportunityId: analysisResult?.opportunityId ?? undefined,
+        })
+      : await declineOffer({ leadId: analysisResult?.leadId ?? undefined, propertyAddress })
+    if (!res.ok) return { ok: false, label: res.error ?? 'Dispatch failed' }
+    return workflow === 'prep_offer'
+      ? { ok: true, label: res.idempotent ? 'Already dispatched' : 'Offer prep dispatched' }
+      : { ok: true, label: 'Decline recorded' }
   }, [analysisResult, address, displayValuation])
 
   // Entry point — checks for existing reports first
@@ -973,7 +960,6 @@ export default function AnalyzePage() {
           onRerun={() => runAnalysis(true)}
           rerunning={isFetching}
           onOfferWorkflow={handleOfferWorkflow}
-          offerBusy={offerBusy}
           statusLabel={
             streamingStep === 'searching' ? 'Searching property...'
             : streamingStep === 'subject' ? 'Loading comparables...'

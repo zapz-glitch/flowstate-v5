@@ -1,6 +1,7 @@
 'use client'
 
-import { SlidersHorizontal, RefreshCw, FileSignature, CircleSlash } from 'lucide-react'
+import { useState } from 'react'
+import { SlidersHorizontal, RefreshCw, FileSignature, CircleSlash, Check, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { ValuationData } from './shared-types'
 import { formatValuationNumber as fmt, formatMoneyThousands as fmtK } from './valuation-number'
@@ -14,13 +15,31 @@ interface DealSummaryHeroProps {
   onRerun?: () => void
   /** True while a rerun is in flight */
   rerunning?: boolean
-  /** Fire an offer workflow Devin session (prep offer / no margin) */
-  onOfferWorkflow?: (workflow: 'prep_offer' | 'no_margin') => void
-  /** The workflow currently being triggered, if any */
-  offerBusy?: 'prep_offer' | 'no_margin' | null
+  /** Fire an offer workflow — returns the outcome the header flashes */
+  onOfferWorkflow?: (workflow: 'prep_offer' | 'no_margin') => Promise<{ ok: boolean; label: string }>
 }
 
-export function DealSummaryHero({ valuation, isRecalculated, onOpenSettings, onRerun, rerunning, onOfferWorkflow, offerBusy }: DealSummaryHeroProps) {
+export function DealSummaryHero({ valuation, isRecalculated, onOpenSettings, onRerun, rerunning, onOfferWorkflow }: DealSummaryHeroProps) {
+
+  // Offer-button state machine: idle (buttons) → busy → done (result chip)
+  // → back to idle. Everything crossfades via animate-in/fade-in.
+  const [offerPhase, setOfferPhase] = useState<'idle' | 'busy' | 'done'>('idle')
+  const [offerOutcome, setOfferOutcome] = useState<{ ok: boolean; label: string } | null>(null)
+
+  const fireOffer = async (workflow: 'prep_offer' | 'no_margin') => {
+    if (!onOfferWorkflow || offerPhase !== 'idle') return
+    setOfferPhase('busy')
+    try {
+      setOfferOutcome(await onOfferWorkflow(workflow))
+    } catch {
+      setOfferOutcome({ ok: false, label: 'Dispatch failed' })
+    }
+    setOfferPhase('done')
+    setTimeout(() => {
+      setOfferPhase('idle')
+      setOfferOutcome(null)
+    }, 3500)
+  }
 
   return (
     <div className="border border-border rounded-sm bg-background/95 backdrop-blur-sm">
@@ -51,32 +70,44 @@ export function DealSummaryHero({ valuation, isRecalculated, onOpenSettings, onR
         </div>
         <div className="flex items-center gap-1">
           {onOfferWorkflow && (
-            <>
-              <button
-                type="button"
-                onClick={() => onOfferWorkflow('prep_offer')}
-                disabled={offerBusy != null}
-                className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium text-emerald-600 hover:bg-emerald-500/10 transition-colors no-print disabled:opacity-50 dark:text-emerald-400"
-                title="Prep offer — Devin session finds the contact in Close and prepares the offer"
+            offerPhase === 'idle' ? (
+              <div key="offer-buttons" className="flex items-center gap-1 animate-in fade-in duration-300">
+                <button
+                  type="button"
+                  onClick={() => fireOffer('prep_offer')}
+                  className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium text-emerald-600 hover:bg-emerald-500/10 transition-colors no-print dark:text-emerald-400"
+                  title="Prep offer — dispatches to the Devin listener + engine"
+                >
+                  <FileSignature className="w-3 h-3" />
+                  Prep offer
+                </button>
+                <button
+                  type="button"
+                  onClick={() => fireOffer('no_margin')}
+                  className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] text-foreground-tertiary hover:text-foreground hover:bg-secondary transition-colors no-print"
+                  title="No margin — records the decline and notifies the listener"
+                >
+                  <CircleSlash className="w-3 h-3" />
+                  No margin
+                </button>
+              </div>
+            ) : offerPhase === 'busy' ? (
+              <span key="offer-busy" className="flex items-center gap-1 px-2 py-0.5 text-[10px] text-foreground-tertiary animate-in fade-in duration-300">
+                <RefreshCw className="w-3 h-3 animate-spin" />
+                Dispatching…
+              </span>
+            ) : (
+              <span
+                key="offer-done"
+                className={cn(
+                  'flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium animate-in fade-in duration-300',
+                  offerOutcome?.ok ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500',
+                )}
               >
-                {offerBusy === 'prep_offer'
-                  ? <RefreshCw className="w-3 h-3 animate-spin" />
-                  : <FileSignature className="w-3 h-3" />}
-                {offerBusy === 'prep_offer' ? 'Starting…' : 'Prep offer'}
-              </button>
-              <button
-                type="button"
-                onClick={() => onOfferWorkflow('no_margin')}
-                disabled={offerBusy != null}
-                className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] text-foreground-tertiary hover:text-foreground hover:bg-secondary transition-colors no-print disabled:opacity-50"
-                title="No margin — Devin session runs the no-margin workflow on this lead in Close"
-              >
-                {offerBusy === 'no_margin'
-                  ? <RefreshCw className="w-3 h-3 animate-spin" />
-                  : <CircleSlash className="w-3 h-3" />}
-                {offerBusy === 'no_margin' ? 'Starting…' : 'No margin'}
-              </button>
-            </>
+                {offerOutcome?.ok ? <Check className="w-3 h-3" /> : <X className="w-3 h-3" />}
+                {offerOutcome?.label}
+              </span>
+            )
           )}
           {onRerun && (
             <button
