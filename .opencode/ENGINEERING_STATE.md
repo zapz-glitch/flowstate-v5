@@ -3634,3 +3634,28 @@ Today it's best-effort — no photos or a vision failure silently yields
 visionAssessment:null. Open spec Qs noted: no-photos behavior (fail vs
 handoff vs explicit-unverifiable) and whether subject condition feeds
 comp selection or stays report-only.
+
+## Session — main-line UI fixes + Close CRM update (all on origin/main, deployed)
+
+Commits: ed39f9c, 758cf0b, 2fc9888, 2974264, 43499fd, 278f645, 83027d6
+
+- Subject card subdivision spacing mt-3; Property Search header parity; proximity
+  toggles now drive ARV via recalculateReport (verified -$160,612 backing deduction
+  on Wenham fixture); ChatGPT-style dark palette (#212121/#262626/#ececec).
+- List price cell added to DealSummaryHero (live hero — ValuationCard is dead code);
+  hero-stats grid now auto-fit. Verified on prod: LIST $285,000 + ARV delta.
+- Close CRM: POST /v1/analyze persists leadId/opportunityId into full_response_json;
+  POST /user/reports/:jobId/update-crm PUTs field map to Close (server-side key).
+  UpdateCrmButton renders always — disabled w/ tooltip when no leadId.
+  CLOSE_API_KEY set locally AND as prod worker secret (verified GET /me auth).
+- Dark-mode prod bug: SiteShell forced led preset + stored it; pre-paint script
+  added to layout; default is now night. Verified prod: dark/night/rgb(33,33,33).
+- ISR stale-cache bug: prerendered / and /dashboard emitted s-maxage=31536000
+  (1-year edge pin). Added revalidate=300 (dashboard via new server layout.tsx).
+  Old chunk URLs 404 after deploy — stale HTML yields blank page.
+
+**Last Handoff:** prod verified headless-Chrome dark+list price (temp share set
+and reverted on job_1790379233353_096ab276163d4eb9). User still sees stale prod —
+diagnosis points at client-side/PoP stale HTML; if blank page persists for user,
+purge zone cache in CF dashboard (no local zone scope). Close e2e pending a real
+leadId reaching POST /v1/analyze — ask user how Close triggers evals.
