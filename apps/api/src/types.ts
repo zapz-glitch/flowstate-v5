@@ -130,6 +130,11 @@ export interface Env {
   // exposed to the client.
   CLOSE_API_KEY?: string
 
+  // ─── Devin Cloud ────────────────────────────────────────────────────────────
+  // Service-user key for POST /v1/sessions — offer workflows (prep offer /
+  // no margin) run as Devin Cloud sessions. Server-side only.
+  DEVIN_API_KEY?: string
+
   // ─── Better Auth ─────────────────────────────────────────────────────────────
   BETTER_AUTH_SECRET?: string
 

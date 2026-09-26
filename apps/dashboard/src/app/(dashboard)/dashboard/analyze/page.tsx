@@ -23,10 +23,11 @@ import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
 import { queueAnalysis, type AnalyzeData } from './actions'
 import { reloadForStaleAction } from '@/lib/server-action'
-import { getArvThreshold, getLatestReport, getReportsByProperty, getSavedReport, runCompSelection, type ExistingReport } from '@/lib/client-api'
+import { getArvThreshold, getLatestReport, getReportsByProperty, getSavedReport, runCompSelection, startOfferWorkflow, type ExistingReport, type OfferWorkflow } from '@/lib/client-api'
 import { useAutoSave } from '@/hooks/use-auto-save'
 // cn is used in the outer wrapper
 import { cn } from '@/lib/utils'
+import { toast } from 'sonner'
 import { useAnalysis } from '@/hooks/use-analysis'
 import { useAnalysisEvaluation } from '@/hooks/use-analysis-evaluation'
 import type { AnalysisStep } from '@/types/analysis'
@@ -644,6 +645,38 @@ export default function AnalyzePage() {
     }
   }, [address, skipCache, arvThreshold, asIsThreshold, appraisalFilters, appraisalAdjustments, cancelRestore, clearAnalysis, setActiveAnalysis, setAnalysisResult, setAnalysisState, analysisResult])
 
+  // ─── Offer workflows (Devin Cloud) ────────────────────────────────────
+  const [offerBusy, setOfferBusy] = useState<OfferWorkflow | null>(null)
+  const handleOfferWorkflow = useCallback(async (workflow: OfferWorkflow) => {
+    const jobId = activeAnalysis?.jobId
+    const subjectAddress = analysisResult?.subject?.address ?? address
+    if (!jobId || !subjectAddress) return
+    setOfferBusy(workflow)
+    try {
+      const res = await startOfferWorkflow({
+        jobId,
+        workflow,
+        address: { street: subjectAddress },
+        metrics: displayValuation ? {
+          listPrice: displayValuation.listPrice,
+          arv: displayValuation.arv,
+          buyPrice: displayValuation.buyPrice,
+          wholesalePrice: displayValuation.wholesalePrice,
+          rehabCost: displayValuation.rehabCost,
+          projectedProfit: displayValuation.projectedProfit,
+        } : undefined,
+      })
+      toast.success(`${workflow === 'prep_offer' ? 'Prep offer' : 'No margin'} session started`, {
+        action: { label: 'Open Devin', onClick: () => window.open(res.url, '_blank') },
+        duration: 8000,
+      })
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to start offer session')
+    } finally {
+      setOfferBusy(null)
+    }
+  }, [activeAnalysis?.jobId, analysisResult?.subject?.address, address, displayValuation])
+
   // Entry point — checks for existing reports first
   const handleAnalyze = useCallback(async () => {
     if (!address.trim()) return
@@ -937,6 +970,8 @@ export default function AnalyzePage() {
           valuationCardRef={valuationCardRef}
           onRerun={() => runAnalysis(true)}
           rerunning={isFetching}
+          onOfferWorkflow={handleOfferWorkflow}
+          offerBusy={offerBusy}
           statusLabel={
             streamingStep === 'searching' ? 'Searching property...'
             : streamingStep === 'subject' ? 'Loading comparables...'

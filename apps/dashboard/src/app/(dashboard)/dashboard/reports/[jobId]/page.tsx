@@ -27,8 +27,9 @@ import {
 import { cn } from '@/lib/utils'
 import { getReportHistory, type ReportHistoryEntry } from '@/lib/client-api'
 import { useAutoSave } from '@/hooks/use-auto-save'
-import { getSavedReport, runCompSelection } from '@/lib/client-api'
+import { getSavedReport, runCompSelection, startOfferWorkflow, type OfferWorkflow } from '@/lib/client-api'
 import { useAnalysisEvaluation } from '@/hooks/use-analysis-evaluation'
+import { toast } from 'sonner'
 import { DownloadReportButton } from '@/components/report/DownloadReportButton'
 import { UpdateCrmButton } from '@/components/report/UpdateCrmButton'
 import { AnalysisPageLayout } from '@/components/analysis/AnalysisPageLayout'
@@ -337,6 +338,36 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
     token: refreshToken,
     onEvent: handleRefreshEvent,
   })
+
+  // ─── Offer workflows (Devin Cloud) ────────────────────────────────────
+  const [offerBusy, setOfferBusy] = useState<OfferWorkflow | null>(null)
+  const handleOfferWorkflow = useCallback(async (workflow: OfferWorkflow) => {
+    if (!report?.address) return
+    setOfferBusy(workflow)
+    try {
+      const res = await startOfferWorkflow({
+        jobId,
+        workflow,
+        address: { street: report.address },
+        metrics: displayValuation ? {
+          listPrice: displayValuation.listPrice,
+          arv: displayValuation.arv,
+          buyPrice: displayValuation.buyPrice,
+          wholesalePrice: displayValuation.wholesalePrice,
+          rehabCost: displayValuation.rehabCost,
+          projectedProfit: displayValuation.projectedProfit,
+        } : undefined,
+      })
+      toast.success(`${workflow === 'prep_offer' ? 'Prep offer' : 'No margin'} session started`, {
+        action: { label: 'Open Devin', onClick: () => window.open(res.url, '_blank') },
+        duration: 8000,
+      })
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to start offer session')
+    } finally {
+      setOfferBusy(null)
+    }
+  }, [jobId, report?.address, displayValuation])
 
   const handleRefresh = useCallback(async () => {
     if (!report?.address) return
@@ -673,6 +704,8 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
           valuationCardRef={valuationCardRef}
           onRerun={() => setRefreshOpen(true)}
           rerunning={refreshing}
+          onOfferWorkflow={handleOfferWorkflow}
+          offerBusy={offerBusy}
         />
 
       {/* Evaluation Settings Sheet */}
