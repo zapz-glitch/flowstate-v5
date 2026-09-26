@@ -1,0 +1,3 @@
+# Session-state log is append/prepend-only across branches — union merge
+# keeps both sides' entries instead of conflicting.
+.opencode/ENGINEERING_STATE.md merge=union
