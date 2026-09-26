@@ -184,7 +184,10 @@ export class ListingPhotoScraper {
     const slug = `${property.address}-${property.city}-${property.state}-${property.zipCode}`
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, '-')
-    return `listing-photos:${adapter.name}:${slug}`
+    // v2 — entries cached before the listPrice/rawHtml extraction carried
+    // no ask price; the bump refetches them once instead of serving
+    // listPrice:null for the 30-day TTL.
+    return `listing-photos-v2:${adapter.name}:${slug}`
   }
 
   /** Scrape a listing page through Firecrawl */
