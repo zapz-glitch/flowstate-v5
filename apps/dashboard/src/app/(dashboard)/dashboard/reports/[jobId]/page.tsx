@@ -341,36 +341,23 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
   })
 
   // ─── Offer workflows (Devin listener session + engine) ───────────────
-  const [offerBusy, setOfferBusy] = useState<OfferWorkflow | null>(null)
-  const handleOfferWorkflow = useCallback(async (workflow: OfferWorkflow) => {
-    const leadId = analyzeData?.leadId ?? undefined
-    if (!report?.address) return
+  // The hero owns the busy→result animation; this just returns the outcome.
+  const handleOfferWorkflow = useCallback(async (workflow: OfferWorkflow): Promise<{ ok: boolean; label: string }> => {
+    if (!report?.address) return { ok: false, label: 'No address' }
     const purchasePrice = displayValuation?.wholesalePrice ?? displayValuation?.buyPrice
-    if (workflow === 'prep_offer' && !purchasePrice) {
-      toast.error('No offer amount — valuation incomplete')
-      return
-    }
-    setOfferBusy(workflow)
-    try {
-      const res = workflow === 'prep_offer'
-        ? await dispatchOfferPrep({
-            leadId,
-            propertyAddress: report.address,
-            purchasePrice: purchasePrice!,
-            opportunityId: analyzeData?.opportunityId ?? undefined,
-          })
-        : await declineOffer({ leadId, propertyAddress: report.address })
-      if (!res.ok) throw new Error(res.error ?? 'Dispatch failed')
-      toast.success(
-        workflow === 'prep_offer'
-          ? res.idempotent ? 'Offer prep already dispatched for this lead' : 'Prep offer dispatched'
-          : 'Decline recorded',
-      )
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to dispatch offer')
-    } finally {
-      setOfferBusy(null)
-    }
+    if (workflow === 'prep_offer' && !purchasePrice) return { ok: false, label: 'Valuation incomplete' }
+    const res = workflow === 'prep_offer'
+      ? await dispatchOfferPrep({
+          leadId: analyzeData?.leadId ?? undefined,
+          propertyAddress: report.address,
+          purchasePrice: purchasePrice!,
+          opportunityId: analyzeData?.opportunityId ?? undefined,
+        })
+      : await declineOffer({ leadId: analyzeData?.leadId ?? undefined, propertyAddress: report.address })
+    if (!res.ok) return { ok: false, label: res.error ?? 'Dispatch failed' }
+    return workflow === 'prep_offer'
+      ? { ok: true, label: res.idempotent ? 'Already dispatched' : 'Offer prep dispatched' }
+      : { ok: true, label: 'Decline recorded' }
   }, [report?.address, analyzeData, displayValuation])
 
   const handleRefresh = useCallback(async () => {
@@ -709,7 +696,6 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
           onRerun={() => setRefreshOpen(true)}
           rerunning={refreshing}
           onOfferWorkflow={handleOfferWorkflow}
-          offerBusy={offerBusy}
         />
 
       {/* Evaluation Settings Sheet */}
