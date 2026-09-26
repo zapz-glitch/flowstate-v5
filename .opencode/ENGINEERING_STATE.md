@@ -1,5 +1,44 @@
 # Engineering State — flowstate-v5
 
+### 2026-09-26 — UI batch merged to main: theme, list price, rerun UX, offer buttons, map fixes
+
+Merged (all to main, deployed via auto-deploy):
+- #14 theme: bright-indoor (led) default, near-black night preset, `npm run dev:check`
+  healthcheck + docs/dev-environment.md
+- #13 subject list price: survives no-photo scrapes, metadata merges across
+  provider fallback chain, shown beside Wholesale in the hero; scrape cache
+  key bumped to listing-photos-v2 (stale entries had no listPrice);
+  hero rounds all dollars to nearest $1,000 (fmtK + formatHeadlineMoney
+  normalize); List cell sits between As-is AVG and ARV with a dollar-gap
+  subtitle ("$X less/more than wholesale")
+- #15 rerun: Re-run button in the valuation hero header; prior results stay
+  mounted during rerun (stale-while-revalidate); 4-min SSE silence watchdog
+  surfaces "Analysis stalled" instead of infinite spinner
+- #16 offer workflows: Prep offer / No margin buttons in the hero →
+  POST /user/offer-workflow → Devin Cloud session via POST /v1/sessions
+  (workflow parameter + property + metrics; CLOSE_API_KEY as session
+  secret; DEVIN_PLAYBOOK_ID optional). DEVIN_API_KEY set in .dev.vars +
+  prod worker secret.
+- #17 subject card subdivision pill alignment (own line under address, mt-1)
+- #18 map flag strip: ARV-vs-list flag killed API-side (still filtered
+  client-side for old saved reports), strip is theme-aware (was a grey
+  slab on light mode), px-2 aligns with map footer
+
+Verified: tsc clean both apps on main; dashboard regression suite 9/9
+files pass; API tests pass; endpoint 401s unauthenticated.
+
+Open items:
+- Google Maps key still lacks a localhost referrer — user must add
+  http://localhost:3000/* in GCP console (dev:check reports it).
+- Devin offer playbook: user creates the playbook in Devin UI, then set
+  DEVIN_PLAYBOOK_ID in .dev.vars + prod secret to attach it.
+- Offer workflow buttons untested end-to-end (real click = real Devin
+  session + Close write).
+
+Last handoff: everything merged; back on main at ba8b737. Next session
+should verify the offer buttons fire a Devin session and the playbook
+lands.
+
 
 ### 2026-09-25 — Vision rehab level was being overridden by curb appeal: `8bfd16d` on `fix/vision-renovated-gate`
 
