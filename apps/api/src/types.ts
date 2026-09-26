@@ -137,6 +137,12 @@ export interface Env {
   // Optional playbook that defines the prep-offer/no-margin procedures —
   // sessions attach it so the agent knows the workflow steps.
   DEVIN_PLAYBOOK_ID?: string
+  // Devin org id — used for POST /v3/organizations/{org}/sessions messages
+  // to the persistent offer listener session.
+  DEVIN_ORG_ID?: string
+  // Auth key for the conversation-intelligence engine worker
+  // (offer-draft notifications on offer dispatch).
+  ENGINE_API_KEY?: string
 
   // ─── Better Auth ─────────────────────────────────────────────────────────────
   BETTER_AUTH_SECRET?: string

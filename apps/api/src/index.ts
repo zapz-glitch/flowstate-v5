@@ -27,7 +27,6 @@ import reportsRoute from './routes/reports'
 import batchRoute from './routes/batch'
 import ghlSettingsRoute from './routes/ghl-settings'
 import userReportsRoute from './routes/user-reports'
-import offerWorkflowRoute from './routes/offer-workflow'
 import reportAssetsRoute from './routes/report-assets'
 import waitlistRoute from './routes/waitlist'
 import adminRoute from './routes/admin'
@@ -37,6 +36,7 @@ import proximityConfigRoute from './routes/proximity-config'
 import typeaheadRoute from './routes/typeahead'
 import compSelectionRoute from './routes/comp-selection'
 import mlExportRoute from './routes/ml-export'
+import offersRoute from './routes/offers'
 import { cdarv, cdarvInternal } from './routes/cdarv'
 import sseStream from './routes/sse-stream'
 import ghlWebhook from './routes/webhooks/ghl'
@@ -127,7 +127,6 @@ app.route('/ghl-settings', ghlSettingsRoute)
 // User reports routes (session auth via Better Auth cookies)
 app.route('/user/reports', userReportsRoute)
 app.route('/user/reports', reportAssetsRoute)
-app.route('/user', offerWorkflowRoute)
 
 // Waitlist routes (no auth)
 app.route('/waitlist', waitlistRoute)
@@ -163,6 +162,7 @@ const v1 = new Hono<{ Bindings: Env; Variables: Variables }>()
 v1.use('*', authMiddleware)
 v1.route('/analyze', analyze)
 v1.route('/ml', mlExportRoute)
+v1.route('/offers', offersRoute)
 
 app.route('/v1', v1)
 

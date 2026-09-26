@@ -12,6 +12,8 @@ port = 8787
 ENVIRONMENT = "development"
 DASHBOARD_URL = "http://localhost:3000"
 PROPERTY_PROVIDER = "corelogic"
+# Devin org for offer-workflow session messages
+DEVIN_ORG_ID = "org-6c0122ecb67544ccb259ae9b1e9cc4dc"
 # Comp price classifier v2 in shadow mode locally (matches wrangler.toml):
 # Baseline A routes comps; v2 records alongside. Set "true" to promote v2.
 JEV_COMP_CLASSIFIER_V2_ENABLED = "false"
