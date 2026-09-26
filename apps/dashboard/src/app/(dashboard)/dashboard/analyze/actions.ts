@@ -998,7 +998,8 @@ export async function assignCompTier(
 // ─── Offer dispatch (Devin listener session + engine) ────────────────────────
 
 export interface OfferPrepInput {
-  leadId: string
+  /** Optional — the listener resolves the lead in Close by address */
+  leadId?: string
   propertyAddress: string
   purchasePrice: number
   opportunityId?: string
@@ -1037,8 +1038,8 @@ export async function dispatchOfferPrep(input: OfferPrepInput): Promise<OfferDis
   }
 }
 
-/** Record a no-margin decline for a lead. */
-export async function declineOffer(input: { leadId: string }): Promise<OfferDispatchResult> {
+/** Record a no-margin decline for a lead (identified by leadId or address). */
+export async function declineOffer(input: { leadId?: string; propertyAddress?: string }): Promise<OfferDispatchResult> {
   const session = await getSession()
   if (!session?.user) return { ok: false, error: 'Not authenticated' }
   const dashboardSecret = await getDashboardSecret()

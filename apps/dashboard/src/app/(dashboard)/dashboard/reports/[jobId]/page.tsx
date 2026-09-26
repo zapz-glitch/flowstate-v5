@@ -343,11 +343,7 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
   // ─── Offer workflows (Devin listener session + engine) ───────────────
   const [offerBusy, setOfferBusy] = useState<OfferWorkflow | null>(null)
   const handleOfferWorkflow = useCallback(async (workflow: OfferWorkflow) => {
-    const leadId = analyzeData?.leadId
-    if (!leadId) {
-      toast.error('No CRM lead linked — this report has no leadId')
-      return
-    }
+    const leadId = analyzeData?.leadId ?? undefined
     if (!report?.address) return
     const purchasePrice = displayValuation?.wholesalePrice ?? displayValuation?.buyPrice
     if (workflow === 'prep_offer' && !purchasePrice) {
@@ -363,7 +359,7 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
             purchasePrice: purchasePrice!,
             opportunityId: analyzeData?.opportunityId ?? undefined,
           })
-        : await declineOffer({ leadId })
+        : await declineOffer({ leadId, propertyAddress: report.address })
       if (!res.ok) throw new Error(res.error ?? 'Dispatch failed')
       toast.success(
         workflow === 'prep_offer'
