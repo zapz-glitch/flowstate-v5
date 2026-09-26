@@ -24,7 +24,9 @@ const DISPATCH_TTL = 30 * 24 * 60 * 60 // 30 days
 const FOLLOW = 'follow offer-prep.md in zapz-glitch/conversation-intelligence'
 
 const prepSchema = z.object({
-  leadId: z.string().min(1).max(200),
+  // Optional — the listener agent resolves the lead in Close by address
+  // when no leadId was captured at analysis time (dashboard runs).
+  leadId: z.string().max(200).optional(),
   propertyAddress: z.string().min(1).max(300),
   purchasePrice: z.number().positive(),
   opportunityId: z.string().max(200).optional(),
@@ -56,7 +58,10 @@ offers.post('/prep', async (c) => {
     return c.json({ ok: false, error: 'Invalid request body' }, 400)
   }
 
-  const dispatchKey = `offer-dispatch:${body.leadId}`
+  // Idempotency key — leadId when present, normalized address otherwise.
+  const dispatchId = body.leadId
+    ?? `addr:${body.propertyAddress.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`
+  const dispatchKey = `offer-dispatch:${dispatchId}`
   const existing = await c.env.API_CACHE.get(dispatchKey, 'json')
   if (existing) {
     return c.json({ ok: true, dispatched: true, idempotent: true, dispatch: existing })
@@ -65,7 +70,7 @@ offers.post('/prep', async (c) => {
   // (a) Message the persistent Devin session — the listener agent does
   // the Close lookup and preps the offer.
   const message =
-    `PREP OFFER: leadId=${body.leadId} propertyAddress=${body.propertyAddress} ` +
+    `PREP OFFER: leadId=${body.leadId ?? '(resolve by address)'} propertyAddress=${body.propertyAddress} ` +
     `purchasePrice=${body.purchasePrice} opportunityId=${body.opportunityId ?? ''} — ${FOLLOW}`
   const devinSent = await postDevinMessage(c.env, message)
   if (!devinSent) {
@@ -84,7 +89,7 @@ offers.post('/prep', async (c) => {
         Authorization: `Bearer ${c.env.ENGINE_API_KEY}`,
       },
       body: JSON.stringify({
-        leadId: body.leadId,
+        leadId: body.leadId ?? null,
         sessionId: DEVIN_SESSION_ID,
         address: body.propertyAddress,
       }),
@@ -105,7 +110,12 @@ offers.post('/prep', async (c) => {
   return c.json({ ok: true, dispatched: true, engine: engineSent })
 })
 
-const declineSchema = z.object({ leadId: z.string().min(1).max(200) })
+const declineSchema = z
+  .object({
+    leadId: z.string().max(200).optional(),
+    propertyAddress: z.string().max(300).optional(),
+  })
+  .refine((b) => b.leadId || b.propertyAddress, { message: 'leadId or propertyAddress required' })
 
 offers.post('/decline', async (c) => {
   let body: z.infer<typeof declineSchema>
@@ -115,14 +125,17 @@ offers.post('/decline', async (c) => {
     return c.json({ ok: false, error: 'Invalid request body' }, 400)
   }
 
+  const declineId = body.leadId
+    ?? `addr:${(body.propertyAddress ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '-')}`
   await c.env.API_CACHE.put(
-    `offer-decline:${body.leadId}`,
-    JSON.stringify({ leadId: body.leadId, declinedAt: new Date().toISOString() }),
+    `offer-decline:${declineId}`,
+    JSON.stringify({ ...body, declinedAt: new Date().toISOString() }),
     { expirationTtl: DISPATCH_TTL },
   )
 
   // Same listener channel — the agent's no-margin workflow.
-  await postDevinMessage(c.env, `NO MARGIN: leadId=${body.leadId} — ${FOLLOW}`)
+  const idPart = body.leadId ? `leadId=${body.leadId}` : `propertyAddress=${body.propertyAddress}`
+  await postDevinMessage(c.env, `NO MARGIN: ${idPart} — ${FOLLOW}`)
 
   return c.json({ ok: true })
 })

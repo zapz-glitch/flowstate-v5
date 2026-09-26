@@ -648,12 +648,8 @@ export default function AnalyzePage() {
   // ─── Offer workflows (Devin listener session + engine) ───────────────
   const [offerBusy, setOfferBusy] = useState<OfferWorkflow | null>(null)
   const handleOfferWorkflow = useCallback(async (workflow: OfferWorkflow) => {
-    const leadId = analysisResult?.leadId
+    const leadId = analysisResult?.leadId ?? undefined
     const propertyAddress = analysisResult?.subject?.address ?? address
-    if (!leadId) {
-      toast.error('No CRM lead linked — this analysis has no leadId')
-      return
-    }
     if (!propertyAddress) return
     const purchasePrice = displayValuation?.wholesalePrice ?? displayValuation?.buyPrice
     if (workflow === 'prep_offer' && !purchasePrice) {
@@ -669,7 +665,7 @@ export default function AnalyzePage() {
             purchasePrice: purchasePrice!,
             opportunityId: analysisResult?.opportunityId ?? undefined,
           })
-        : await declineOffer({ leadId })
+        : await declineOffer({ leadId, propertyAddress })
       if (!res.ok) throw new Error(res.error ?? 'Dispatch failed')
       toast.success(
         workflow === 'prep_offer'
