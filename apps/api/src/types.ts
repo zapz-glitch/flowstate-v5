@@ -125,6 +125,11 @@ export interface Env {
   CDARV_API_URL?: string
   CDARV_INTERNAL_API_TOKEN?: string
 
+  // ─── Close CRM ────────────────────────────────────────────────────────────
+  // API key for lead updates (PUT /lead/{id}). Server-side only — never
+  // exposed to the client.
+  CLOSE_API_KEY?: string
+
   // ─── Better Auth ─────────────────────────────────────────────────────────────
   BETTER_AUTH_SECRET?: string
 

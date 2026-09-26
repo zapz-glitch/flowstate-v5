@@ -106,6 +106,10 @@ export interface StartStreamingRequest {
   llmEnabled: boolean
   /** Whether this is updating an existing report (refresh) */
   isRefresh?: boolean
+  /** Close CRM lead/opportunity this evaluation belongs to — stamped onto the
+   *  persisted report so it can be written back to the CRM */
+  leadId?: string
+  opportunityId?: string
   llmOptions?: {
     includePhotos?: boolean
     compSelectionModel?: string
@@ -736,6 +740,11 @@ export class AnalysisJobDO {
     }
 
     let analysisResult = evalResult.response as unknown as Record<string, unknown>
+
+    // Stamp the CRM link onto the persisted response — the report's
+    // Update CRM action resolves the lead from full_response_json.
+    if (config.leadId) analysisResult.leadId = config.leadId
+    if (config.opportunityId) analysisResult.opportunityId = config.opportunityId
 
     // Rule-based comp selection stays intact — AI will override later if enabled
 

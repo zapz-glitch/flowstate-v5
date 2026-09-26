@@ -132,6 +132,13 @@ interface AnalyzeRequest {
     /** Override model for market context search */
     marketSearchModel?: string;
   };
+
+  /** Close CRM lead this evaluation belongs to — persisted on the report so
+   *  the report's "Update CRM" action can write back to the lead */
+  leadId?: string;
+
+  /** Close CRM opportunity linked to the lead (stored alongside leadId) */
+  opportunityId?: string;
 }
 
 const ALLOWED_MODELS = new Set([
@@ -286,11 +293,23 @@ analyze.post('/', async (c) => {
             .where(and(eq(savedReports.userId, auth.userId), eq(savedReports.jobId, cachedJobId)))
             .limit(1)
           if (cached?.fullResponseJson) {
+            const cachedResult = JSON.parse(cached.fullResponseJson) as Record<string, unknown>
+            // Attach a newly supplied CRM link onto the stored report so the
+            // Update CRM action works even when the run was served from cache.
+            if ((typeof body.leadId === 'string' && body.leadId && cachedResult.leadId !== body.leadId) ||
+                (typeof body.opportunityId === 'string' && body.opportunityId && cachedResult.opportunityId !== body.opportunityId)) {
+              if (body.leadId) cachedResult.leadId = body.leadId
+              if (body.opportunityId) cachedResult.opportunityId = body.opportunityId
+              await db.update(savedReports)
+                .set({ fullResponseJson: JSON.stringify(cachedResult) })
+                .where(eq(savedReports.jobId, cachedJobId))
+                .catch(() => {})
+            }
             return c.json({
               success: true,
               data: {
                 jobId: cachedJobId,
-                result: JSON.parse(cached.fullResponseJson),
+                result: cachedResult,
                 cached: true,
                 enrichment: null,
               },
@@ -330,6 +349,8 @@ analyze.post('/', async (c) => {
         llmEnabled:
           body.llmAnalysis?.enabled === true && !!c.env.OPENROUTER_API_KEY,
         isRefresh,
+        leadId: typeof body.leadId === 'string' ? body.leadId.slice(0, 128) : undefined,
+        opportunityId: typeof body.opportunityId === 'string' ? body.opportunityId.slice(0, 128) : undefined,
         llmOptions: {
           includePhotos: body.llmAnalysis?.includePhotos,
           compSelectionModel: validateModel(

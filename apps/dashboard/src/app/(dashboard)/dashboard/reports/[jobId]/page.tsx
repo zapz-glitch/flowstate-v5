@@ -30,6 +30,7 @@ import { useAutoSave } from '@/hooks/use-auto-save'
 import { getSavedReport, runCompSelection } from '@/lib/client-api'
 import { useAnalysisEvaluation } from '@/hooks/use-analysis-evaluation'
 import { DownloadReportButton } from '@/components/report/DownloadReportButton'
+import { UpdateCrmButton } from '@/components/report/UpdateCrmButton'
 import { AnalysisPageLayout } from '@/components/analysis/AnalysisPageLayout'
 import type { AnalyzeData, CompItem } from '@/components/analysis'
 import { queueAnalysis, type AnalyzeData as ActionAnalyzeData } from '@/app/(dashboard)/dashboard/analyze/actions'
@@ -585,6 +586,24 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
               <Share2 className="w-3.5 h-3.5" />
             </button>
             <SendToCdarvButton jobId={jobId} />
+            <UpdateCrmButton
+              jobId={jobId}
+              leadId={analyzeData?.leadId}
+              values={displayValuation ? {
+                listPrice: displayValuation.listPrice,
+                arv: displayValuation.arv,
+                wholesalePrice: displayValuation.wholesalePrice,
+                rehabCost: displayValuation.rehabCost,
+                buyPrice: displayValuation.buyPrice,
+                asIsValue: displayValuation.asIsValue,
+                listPriceRealism: displayValuation.listPriceRealism?.verdict ?? null,
+                confidence: displayValuation.confidence,
+                recommendation: displayValuation.recommendation,
+                recommendationReason: displayValuation.recommendationReason,
+                condition: analyzeData?.subject?.condition,
+                riskFlags: analyzeData?.riskFlags,
+              } : null}
+            />
             <DownloadReportButton
               reportProps={{
                 address: report.address || 'Property Report',

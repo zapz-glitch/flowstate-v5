@@ -786,4 +786,108 @@ userReports.delete('/:jobId', async (c) => {
   return c.json({ success: true })
 })
 
+// ─── Update CRM ─────────────────────────────────────────────────────────────
+
+/** Report field → Close custom field ID. Write-only to these IDs. */
+const CLOSE_FIELD_MAP = {
+  listPrice: 'cf_fFjqfj5kiA6tS48NtbmRxhmBQegezJQKvk73HB0085J',
+  arv: 'cf_FEPN1TAYdaUppGedUmBLJagnP1qE8m3DgRd2HcAGilu',
+  wholesalePrice: 'cf_7f9yvgZ8xnYXgy9ZRhFq6EfoqS709TWPt8RfIeiAcnS',
+  rehabCost: 'cf_wqgDg6zHGgBUVxaxMSTKt9ZKjLyXXgiMlt6G8RlkVIa',
+  buyPrice: 'cf_Ifz7nLCLuAd1rEYZkqfDFzopfPsAEZrdRLiozaHKsZJ',
+  asIsValue: 'cf_pLvYBFFCB1knCiM6r27vniSXanlv0L2DWaDhYTm6ipw',
+  listPriceRealism: 'cf_2oJeoWgZBGUczJOcdpiBJGYNabtDmjH1FZT0zQyZXTT',
+  confidence: 'cf_1b4Z1bR1l6buIXBOkeJVoG1Xj8cPfOj6G5vTYVjqEsr',
+  recommendation: 'cf_THdTs7Rrz5sLf0ZSxGxMdGUjhKTXfnEygDu8eciAiEg',
+  condition: 'cf_y32NcD168YoLdiAefdfGj85xN1lkAtNvHvzKmqTbqsk',
+  riskFlags: 'cf_ExHttcn3aV8WGcouIunlIgNr4TYvtjJuCpVo0j5Nahf',
+  evaluationId: 'cf_ixk9FeHiPslHD7ybxF4nzkfwVx5cOT2BQVET825i5X2',
+  reportUrl: 'cf_xtKAekg1zerxKfzvdKw3HD7AFcvD0nFI9r3k9hBkaxJ',
+} as const
+
+const CRM_NUMBER_FIELDS = new Set(['listPrice', 'arv', 'wholesalePrice', 'rehabCost', 'buyPrice', 'asIsValue'])
+// recommendationReason merges into the recommendation field ("rec: reason") —
+// allowed in the body but has no field ID of its own.
+const CRM_ALLOWED_KEYS = new Set([...Object.keys(CLOSE_FIELD_MAP), 'recommendationReason'])
+
+/**
+ * POST /user/reports/:jobId/update-crm
+ *
+ * Pushes the report's current (post-edit) evaluation values to the Close CRM
+ * lead stored on the report (leadId, captured from POST /v1/analyze).
+ * Idempotent — a PUT on the same lead overwrites the same custom fields.
+ */
+userReports.post('/:jobId/update-crm', bodyLimit({ maxSize: 20000 }), async (c) => {
+  const session = await getSession(c)
+  if (!session?.user) return c.json({ error: 'Not authenticated' }, 401)
+  const origin = c.req.header('Origin')
+  if (origin != null && origin !== (c.env.DASHBOARD_URL ? new URL(c.env.DASHBOARD_URL).origin : null)) return c.json({ error: 'Untrusted origin' }, 403)
+  if (!c.req.header('Content-Type')?.toLowerCase().startsWith('application/json')) return c.json({ error: 'JSON request required' }, 415)
+
+  const body = await c.req.json().catch(() => null)
+  const values = body?.values
+  if (!values || typeof values !== 'object' || Array.isArray(values) ||
+      Object.keys(values).some((k) => !CRM_ALLOWED_KEYS.has(k))) {
+    return c.json({ error: 'Body must be { values: { <report fields> } }' }, 400)
+  }
+
+  const jobId = c.req.param('jobId')
+  const db = drizzle(c.env.DB)
+  const [report] = await db
+    .select({ fullResponseJson: savedReports.fullResponseJson })
+    .from(savedReports)
+    .where(and(eq(savedReports.jobId, jobId), eq(savedReports.userId, session.user.id)))
+    .limit(1)
+  if (!report) return c.json({ error: 'Report not found' }, 404)
+
+  let saved: Record<string, unknown>
+  try { saved = JSON.parse(report.fullResponseJson ?? '{}') } catch { return c.json({ error: 'Report data is corrupted' }, 409) }
+  const leadId = typeof saved.leadId === 'string' && saved.leadId ? saved.leadId : null
+  if (!leadId) return c.json({ error: 'This report has no CRM lead. Run the analysis with a leadId to enable CRM updates.' }, 400)
+
+  if (!c.env.CLOSE_API_KEY) return c.json({ error: 'Close CRM is not configured on this environment' }, 500)
+
+  // Build the Close payload — only fields that carry a value.
+  const payload: Record<string, number | string> = {}
+  for (const [key, fieldId] of Object.entries(CLOSE_FIELD_MAP)) {
+    let v: unknown = key === 'evaluationId' ? jobId
+      : key === 'reportUrl' ? `https://flowstate.homes/dashboard/reports/${jobId}`
+      : values[key]
+
+    if (v == null || v === '') continue
+    if (CRM_NUMBER_FIELDS.has(key)) {
+      const n = typeof v === 'number' ? v : Number(v)
+      if (!Number.isFinite(n)) continue
+      payload[`custom.${fieldId}`] = Math.round(n)
+      continue
+    }
+    // Text fields: stringify objects; join flags; "rec: reason" pairing.
+    if (key === 'recommendation' && typeof v === 'string' && typeof values.recommendationReason === 'string' && values.recommendationReason) {
+      v = `${v}: ${values.recommendationReason}`
+    }
+    if (key === 'riskFlags' && Array.isArray(v)) v = v.join('; ')
+    let s = typeof v === 'string' ? v : JSON.stringify(v)
+    if (key === 'riskFlags') s = s.slice(0, 500)
+    if (s) payload[`custom.${fieldId}`] = s
+  }
+
+  const resp = await fetch(`https://api.close.com/api/v1/lead/${encodeURIComponent(leadId)}/`, {
+    method: 'PUT',
+    headers: {
+      Authorization: `Basic ${btoa(`${c.env.CLOSE_API_KEY}:`)}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  }).catch(() => null)
+
+  if (!resp) return c.json({ error: 'Could not reach Close CRM — try again' }, 502)
+  if (!resp.ok) {
+    const errBody = await resp.json().catch(() => null) as { error?: string; errors?: Record<string, string> } | null
+    const msg = errBody?.error ?? (errBody?.errors ? Object.values(errBody.errors).join('; ') : null) ?? `Close API error ${resp.status}`
+    return c.json({ error: msg }, 502)
+  }
+
+  return c.json({ success: true, leadId, fieldsWritten: Object.keys(payload).length })
+})
+
 export default userReports

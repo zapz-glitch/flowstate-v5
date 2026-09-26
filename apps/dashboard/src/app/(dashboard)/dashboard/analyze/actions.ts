@@ -88,6 +88,10 @@ export interface AnalyzeData {
   evaluationRevision?: number
   manualCompSelection?: string[] | null
   evaluationEngine?: 'python-v4' | 'typescript'
+  /** Close CRM lead this report belongs to (from POST /v1/analyze leadId) — enables the Update CRM action */
+  leadId?: string | null
+  /** Close CRM opportunity linked to the lead */
+  opportunityId?: string | null
   subject?: SubjectData
   valuation?: ValuationData
   comps?: CompsData
@@ -553,6 +557,8 @@ export interface ValuationData {
     priceCeiling?: number
     noDataReason?: string
   } | null
+  /** As-is (unrenovated) market value estimate */
+  asIsValue?: number | null
   /** Asking/list price scraped from the subject's listing */
   listPrice?: number | null
   /** ARV minus list price — negative = ARV below asking (negotiation room) */

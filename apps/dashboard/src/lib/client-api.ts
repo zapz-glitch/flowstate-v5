@@ -890,6 +890,32 @@ export async function pullReportPermits(jobId: string): Promise<AnalyzeData> {
   return result.analysis
 }
 
+// ─── Close CRM ───────────────────────────────────────────────────────────────
+
+/** Edited (post-recalc) report values pushed to the Close lead. The API maps
+ *  these to custom.* field IDs and PUTs the lead — idempotent per click. */
+export interface CrmUpdateValues {
+  listPrice?: number | null
+  arv?: number | null
+  wholesalePrice?: number | null
+  rehabCost?: number | null
+  buyPrice?: number | null
+  asIsValue?: number | null
+  listPriceRealism?: unknown
+  confidence?: string | null
+  recommendation?: string | null
+  recommendationReason?: string | null
+  condition?: string | null
+  riskFlags?: string[] | null
+}
+
+export async function updateCrm(jobId: string, values: CrmUpdateValues): Promise<{ success: boolean; leadId: string; fieldsWritten: number }> {
+  return fetchApi(`/user/reports/${encodeURIComponent(jobId)}/update-crm`, {
+    method: 'POST',
+    body: JSON.stringify({ values }),
+  })
+}
+
 // ─── Report Sharing ──────────────────────────────────────────────────────────
 
 export interface ShareSettings {
