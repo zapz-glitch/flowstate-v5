@@ -27,7 +27,8 @@ import {
 import { cn } from '@/lib/utils'
 import { getReportHistory, type ReportHistoryEntry } from '@/lib/client-api'
 import { useAutoSave } from '@/hooks/use-auto-save'
-import { getSavedReport, runCompSelection, startOfferWorkflow, type OfferWorkflow } from '@/lib/client-api'
+import { getSavedReport, runCompSelection, type OfferWorkflow } from '@/lib/client-api'
+import { dispatchOfferPrep, declineOffer } from '../../analyze/actions'
 import { useAnalysisEvaluation } from '@/hooks/use-analysis-evaluation'
 import { toast } from 'sonner'
 import { DownloadReportButton } from '@/components/report/DownloadReportButton'
@@ -339,35 +340,42 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
     onEvent: handleRefreshEvent,
   })
 
-  // ─── Offer workflows (Devin Cloud) ────────────────────────────────────
+  // ─── Offer workflows (Devin listener session + engine) ───────────────
   const [offerBusy, setOfferBusy] = useState<OfferWorkflow | null>(null)
   const handleOfferWorkflow = useCallback(async (workflow: OfferWorkflow) => {
+    const leadId = analyzeData?.leadId
+    if (!leadId) {
+      toast.error('No CRM lead linked — this report has no leadId')
+      return
+    }
     if (!report?.address) return
+    const purchasePrice = displayValuation?.wholesalePrice ?? displayValuation?.buyPrice
+    if (workflow === 'prep_offer' && !purchasePrice) {
+      toast.error('No offer amount — valuation incomplete')
+      return
+    }
     setOfferBusy(workflow)
     try {
-      const res = await startOfferWorkflow({
-        jobId,
-        workflow,
-        address: { street: report.address },
-        metrics: displayValuation ? {
-          listPrice: displayValuation.listPrice,
-          arv: displayValuation.arv,
-          buyPrice: displayValuation.buyPrice,
-          wholesalePrice: displayValuation.wholesalePrice,
-          rehabCost: displayValuation.rehabCost,
-          projectedProfit: displayValuation.projectedProfit,
-        } : undefined,
-      })
-      toast.success(`${workflow === 'prep_offer' ? 'Prep offer' : 'No margin'} session started`, {
-        action: { label: 'Open Devin', onClick: () => window.open(res.url, '_blank') },
-        duration: 8000,
-      })
+      const res = workflow === 'prep_offer'
+        ? await dispatchOfferPrep({
+            leadId,
+            propertyAddress: report.address,
+            purchasePrice: purchasePrice!,
+            opportunityId: analyzeData?.opportunityId ?? undefined,
+          })
+        : await declineOffer({ leadId })
+      if (!res.ok) throw new Error(res.error ?? 'Dispatch failed')
+      toast.success(
+        workflow === 'prep_offer'
+          ? res.idempotent ? 'Offer prep already dispatched for this lead' : 'Prep offer dispatched'
+          : 'Decline recorded',
+      )
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to start offer session')
+      toast.error(err instanceof Error ? err.message : 'Failed to dispatch offer')
     } finally {
       setOfferBusy(null)
     }
-  }, [jobId, report?.address, displayValuation])
+  }, [report?.address, analyzeData, displayValuation])
 
   const handleRefresh = useCallback(async () => {
     if (!report?.address) return

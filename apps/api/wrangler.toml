@@ -12,6 +12,8 @@ port = 8787
 ENVIRONMENT = "production"
 DASHBOARD_URL = "https://flowstate.homes"
 PROPERTY_PROVIDER = "corelogic"
+# Devin org for offer-workflow session messages
+DEVIN_ORG_ID = "org-6c0122ecb67544ccb259ae9b1e9cc4dc"
 # Comparable candidate-pool size — system config, NOT an owner Appraisal
 # Rule. CoreLogic maxComps documented max is 100 (no pagination).
 COMPARABLE_CANDIDATE_LIMIT = "100"

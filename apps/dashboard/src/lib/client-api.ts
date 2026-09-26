@@ -1050,31 +1050,6 @@ export async function runCompSelection(params: {
   })
 }
 
-// ─── Offer Workflows (Devin Cloud) ────────────────────────────────────────────
+// ─── Offer Workflows ────────────────────────────────────────────────────────
 
 export type OfferWorkflow = 'prep_offer' | 'no_margin'
-
-export interface OfferWorkflowResult {
-  sessionId: string
-  url: string
-}
-
-/** Start a Devin Cloud session for the offer workflow on this analysis. */
-export async function startOfferWorkflow(input: {
-  jobId: string
-  workflow: OfferWorkflow
-  address: { street: string; city?: string; state?: string; zipCode?: string }
-  metrics?: {
-    listPrice?: number | null
-    arv?: number | null
-    buyPrice?: number | null
-    wholesalePrice?: number | null
-    rehabCost?: number | null
-    projectedProfit?: number | null
-  }
-}): Promise<OfferWorkflowResult> {
-  return fetchApi<OfferWorkflowResult>('/user/offer-workflow', {
-    method: 'POST',
-    body: JSON.stringify(input),
-  })
-}

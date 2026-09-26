@@ -21,9 +21,9 @@ import { Button } from '@/components/ui/button'
 import { AddressAutocomplete } from '@/components/AddressAutocomplete'
 import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
-import { queueAnalysis, type AnalyzeData } from './actions'
+import { queueAnalysis, dispatchOfferPrep, declineOffer, type AnalyzeData } from './actions'
 import { reloadForStaleAction } from '@/lib/server-action'
-import { getArvThreshold, getLatestReport, getReportsByProperty, getSavedReport, runCompSelection, startOfferWorkflow, type ExistingReport, type OfferWorkflow } from '@/lib/client-api'
+import { getArvThreshold, getLatestReport, getReportsByProperty, getSavedReport, runCompSelection, type ExistingReport, type OfferWorkflow } from '@/lib/client-api'
 import { useAutoSave } from '@/hooks/use-auto-save'
 // cn is used in the outer wrapper
 import { cn } from '@/lib/utils'
@@ -645,37 +645,43 @@ export default function AnalyzePage() {
     }
   }, [address, skipCache, arvThreshold, asIsThreshold, appraisalFilters, appraisalAdjustments, cancelRestore, clearAnalysis, setActiveAnalysis, setAnalysisResult, setAnalysisState, analysisResult])
 
-  // ─── Offer workflows (Devin Cloud) ────────────────────────────────────
+  // ─── Offer workflows (Devin listener session + engine) ───────────────
   const [offerBusy, setOfferBusy] = useState<OfferWorkflow | null>(null)
   const handleOfferWorkflow = useCallback(async (workflow: OfferWorkflow) => {
-    const jobId = activeAnalysis?.jobId
-    const subjectAddress = analysisResult?.subject?.address ?? address
-    if (!jobId || !subjectAddress) return
+    const leadId = analysisResult?.leadId
+    const propertyAddress = analysisResult?.subject?.address ?? address
+    if (!leadId) {
+      toast.error('No CRM lead linked — this analysis has no leadId')
+      return
+    }
+    if (!propertyAddress) return
+    const purchasePrice = displayValuation?.wholesalePrice ?? displayValuation?.buyPrice
+    if (workflow === 'prep_offer' && !purchasePrice) {
+      toast.error('No offer amount — valuation incomplete')
+      return
+    }
     setOfferBusy(workflow)
     try {
-      const res = await startOfferWorkflow({
-        jobId,
-        workflow,
-        address: { street: subjectAddress },
-        metrics: displayValuation ? {
-          listPrice: displayValuation.listPrice,
-          arv: displayValuation.arv,
-          buyPrice: displayValuation.buyPrice,
-          wholesalePrice: displayValuation.wholesalePrice,
-          rehabCost: displayValuation.rehabCost,
-          projectedProfit: displayValuation.projectedProfit,
-        } : undefined,
-      })
-      toast.success(`${workflow === 'prep_offer' ? 'Prep offer' : 'No margin'} session started`, {
-        action: { label: 'Open Devin', onClick: () => window.open(res.url, '_blank') },
-        duration: 8000,
-      })
+      const res = workflow === 'prep_offer'
+        ? await dispatchOfferPrep({
+            leadId,
+            propertyAddress,
+            purchasePrice: purchasePrice!,
+            opportunityId: analysisResult?.opportunityId ?? undefined,
+          })
+        : await declineOffer({ leadId })
+      if (!res.ok) throw new Error(res.error ?? 'Dispatch failed')
+      toast.success(
+        workflow === 'prep_offer'
+          ? res.idempotent ? 'Offer prep already dispatched for this lead' : 'Prep offer dispatched'
+          : 'Decline recorded',
+      )
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to start offer session')
+      toast.error(err instanceof Error ? err.message : 'Failed to dispatch offer')
     } finally {
       setOfferBusy(null)
     }
-  }, [activeAnalysis?.jobId, analysisResult?.subject?.address, address, displayValuation])
+  }, [analysisResult, address, displayValuation])
 
   // Entry point — checks for existing reports first
   const handleAnalyze = useCallback(async () => {

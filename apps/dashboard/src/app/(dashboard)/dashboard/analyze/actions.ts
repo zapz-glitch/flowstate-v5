@@ -994,3 +994,72 @@ export async function assignCompTier(
     return { success: false, error: error instanceof Error ? error.message : 'Failed to assign comp tier' }
   }
 }
+
+// ─── Offer dispatch (Devin listener session + engine) ────────────────────────
+
+export interface OfferPrepInput {
+  leadId: string
+  propertyAddress: string
+  purchasePrice: number
+  opportunityId?: string
+}
+
+export interface OfferDispatchResult {
+  ok: boolean
+  error?: string
+  idempotent?: boolean
+}
+
+/** Dispatch a PREP OFFER to the persistent Devin session + engine. */
+export async function dispatchOfferPrep(input: OfferPrepInput): Promise<OfferDispatchResult> {
+  const session = await getSession()
+  if (!session?.user) return { ok: false, error: 'Not authenticated' }
+  const dashboardSecret = await getDashboardSecret()
+  if (!dashboardSecret) return { ok: false, error: 'Dashboard configuration error' }
+  try {
+    const apiUrl = await getApiUrl()
+    const response = await fetch(`${apiUrl}/v1/offers/prep`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Dashboard-User-Id': session.user.id,
+        'X-Dashboard-Secret': dashboardSecret,
+      },
+      body: JSON.stringify(input),
+    })
+    const data = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string; idempotent?: boolean }
+    if (!response.ok || data?.ok !== true) {
+      return { ok: false, error: data?.error ?? `API request failed with status ${response.status}` }
+    }
+    return { ok: true, idempotent: data.idempotent }
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : 'Failed to dispatch offer prep' }
+  }
+}
+
+/** Record a no-margin decline for a lead. */
+export async function declineOffer(input: { leadId: string }): Promise<OfferDispatchResult> {
+  const session = await getSession()
+  if (!session?.user) return { ok: false, error: 'Not authenticated' }
+  const dashboardSecret = await getDashboardSecret()
+  if (!dashboardSecret) return { ok: false, error: 'Dashboard configuration error' }
+  try {
+    const apiUrl = await getApiUrl()
+    const response = await fetch(`${apiUrl}/v1/offers/decline`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Dashboard-User-Id': session.user.id,
+        'X-Dashboard-Secret': dashboardSecret,
+      },
+      body: JSON.stringify(input),
+    })
+    const data = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string }
+    if (!response.ok || data?.ok !== true) {
+      return { ok: false, error: data?.error ?? `API request failed with status ${response.status}` }
+    }
+    return { ok: true }
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : 'Failed to record decline' }
+  }
+}
