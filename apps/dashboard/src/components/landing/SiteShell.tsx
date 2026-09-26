@@ -31,9 +31,9 @@ export function SiteShell({ children }: { children: React.ReactNode }) {
 
   // Public site offers just night (dark) and led (bright indoor); normalize
   // any dashboard-only stored preset on entry. First-time visitors default to
-  // the light 'led' preset (editorial look); the theme toggle stays available.
+  // night (dark); the theme toggle stays available.
   useEffect(() => {
-    if (!localStorage.getItem('theme')) setTheme('led')
+    if (!localStorage.getItem('theme')) setTheme('night')
     else if (theme === 'dawn') setTheme('night')
     else if (theme === 'outdoor') setTheme('led')
     document.documentElement.classList.add('scroll-smooth')
