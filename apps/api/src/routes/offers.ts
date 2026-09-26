@@ -77,29 +77,30 @@ offers.post('/prep', async (c) => {
     return c.json({ ok: false, error: 'Failed to dispatch offer prep' }, 502)
   }
 
-  // (b) Notify the conversation-intelligence engine. Non-fatal — the
-  // Devin listener is the primary channel.
-  let engineSent = false
+  // (b) Notify the conversation-intelligence engine — fire-and-forget via
+  // waitUntil so its latency never gates the response.
   if (c.env.ENGINE_API_KEY) {
-    const resp = await fetch(ENGINE_OFFER_DRAFT_URL, {
-      method: 'POST',
-      signal: AbortSignal.timeout(15000),
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${c.env.ENGINE_API_KEY}`,
-      },
-      body: JSON.stringify({
-        leadId: body.leadId ?? null,
-        sessionId: DEVIN_SESSION_ID,
-        address: body.propertyAddress,
-      }),
-    }).catch(() => null)
-    engineSent = resp?.ok ?? false
-    if (!engineSent) console.error('[Offers] engine offer-draft failed:', resp?.status)
+    c.executionCtx.waitUntil(
+      fetch(ENGINE_OFFER_DRAFT_URL, {
+        method: 'POST',
+        signal: AbortSignal.timeout(15000),
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${c.env.ENGINE_API_KEY}`,
+        },
+        body: JSON.stringify({
+          leadId: body.leadId ?? null,
+          sessionId: DEVIN_SESSION_ID,
+          address: body.propertyAddress,
+        }),
+      }).then((r) => {
+        if (!r.ok) console.error('[Offers] engine offer-draft failed:', r.status)
+      }).catch((e) => console.error('[Offers] engine offer-draft failed:', e)),
+    )
   }
 
   const dispatch = {
-    leadId: body.leadId,
+    leadId: body.leadId ?? null,
     propertyAddress: body.propertyAddress,
     purchasePrice: body.purchasePrice,
     opportunityId: body.opportunityId ?? null,
@@ -107,7 +108,7 @@ offers.post('/prep', async (c) => {
   }
   await c.env.API_CACHE.put(dispatchKey, JSON.stringify(dispatch), { expirationTtl: DISPATCH_TTL })
 
-  return c.json({ ok: true, dispatched: true, engine: engineSent })
+  return c.json({ ok: true, dispatched: true })
 })
 
 const declineSchema = z
@@ -133,9 +134,11 @@ offers.post('/decline', async (c) => {
     { expirationTtl: DISPATCH_TTL },
   )
 
-  // Same listener channel — the agent's no-margin workflow.
+  // Same listener channel — the agent's no-margin workflow. The decline
+  // is recorded already; the Devin message runs via waitUntil so its
+  // latency doesn't gate the response.
   const idPart = body.leadId ? `leadId=${body.leadId}` : `propertyAddress=${body.propertyAddress}`
-  await postDevinMessage(c.env, `NO MARGIN: ${idPart} — ${FOLLOW}`)
+  c.executionCtx.waitUntil(postDevinMessage(c.env, `NO MARGIN: ${idPart} — ${FOLLOW}`))
 
   return c.json({ ok: true })
 })
