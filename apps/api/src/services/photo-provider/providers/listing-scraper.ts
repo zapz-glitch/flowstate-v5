@@ -148,7 +148,7 @@ export interface ListingScraperConfig {
 
 interface FirecrawlResponse {
   success: boolean
-  data?: { html?: string; markdown?: string }
+  data?: { html?: string; rawHtml?: string; markdown?: string }
   error?: string
 }
 
@@ -197,7 +197,7 @@ export class ListingPhotoScraper {
       },
       body: JSON.stringify({
         url,
-        formats: ['html', 'markdown'],
+        formats: ['rawHtml', 'html', 'markdown'],
         onlyMainContent: false,
         waitFor: 3000,
       }),
@@ -208,10 +208,12 @@ export class ListingPhotoScraper {
       throw new Error(`Firecrawl API failed: ${response.status} ${(await response.text()).slice(0, 200)}`)
     }
     const data = (await response.json()) as FirecrawlResponse
-    if (!data.success || (!data.data?.html && !data.data?.markdown)) {
+    if (!data.success || (!data.data?.html && !data.data?.markdown && !data.data?.rawHtml)) {
       throw new Error(`Firecrawl error: ${data.error || 'no content'}`)
     }
-    return { html: data.data.html || '', markdown: data.data.markdown || '' }
+    // Prefer rawHtml — Firecrawl's sanitized `html` strips <script> blocks,
+    // which is where Redfin/Realtor embed listPrice + JSON-LD offers.price.
+    return { html: data.data.rawHtml || data.data.html || '', markdown: data.data.markdown || '' }
   }
 
   /** LLM extraction fallback when CDN patterns yield too few photos */
