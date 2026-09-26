@@ -243,7 +243,9 @@ export default function AnalyzePage() {
 
   // ─── SSE Event Handler ────────────────────────────────────────────────────
 
+  const lastEventAtRef = useRef(0)
   const handleEnrichmentEvent = useCallback((event: EnrichmentEvent) => {
+    lastEventAtRef.current = Date.now()
     const { event: eventType, data } = event
     const isAiOnly = aiOnlyModeRef.current
 
@@ -386,6 +388,21 @@ export default function AnalyzePage() {
       setPhase((prev) => prev === 'fetching' ? 'ready' : prev)
     }
   }, [sseStatus])
+
+  // Stall watchdog — if the pipeline goes silent mid-run (e.g. a dev-server
+  // reload killed the worker isolate), surface an error instead of spinning
+  // forever. 4 min silence is comfortably past any single step's duration.
+  useEffect(() => {
+    if (phase !== 'fetching') return
+    const id = setInterval(() => {
+      if (lastEventAtRef.current > 0 && Date.now() - lastEventAtRef.current > 4 * 60_000) {
+        setPhase('idle')
+        setEnrichmentStreamUrl(null)
+        setError('Analysis stalled — the run may have been interrupted. Re-run to retry.')
+      }
+    }, 30_000)
+    return () => clearInterval(id)
+  }, [phase])
 
   // ─── Evaluation Hook ─────────────────────────────────────────────────────
 
@@ -561,6 +578,7 @@ export default function AnalyzePage() {
     setStreamingStep('idle')
     setEvalProgress(null)
     setPhase('fetching')
+    lastEventAtRef.current = Date.now()
 
     const t0 = Date.now()
     try {
@@ -908,6 +926,8 @@ export default function AnalyzePage() {
           floodZone={authoritativeData?.floodZone ?? renderData?.floodZone}
 
           valuationCardRef={valuationCardRef}
+          onRerun={() => runAnalysis(true)}
+          rerunning={isFetching}
           statusLabel={
             streamingStep === 'searching' ? 'Searching property...'
             : streamingStep === 'subject' ? 'Loading comparables...'
