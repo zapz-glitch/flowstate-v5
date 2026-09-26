@@ -27,6 +27,7 @@ import reportsRoute from './routes/reports'
 import batchRoute from './routes/batch'
 import ghlSettingsRoute from './routes/ghl-settings'
 import userReportsRoute from './routes/user-reports'
+import offerWorkflowRoute from './routes/offer-workflow'
 import reportAssetsRoute from './routes/report-assets'
 import waitlistRoute from './routes/waitlist'
 import adminRoute from './routes/admin'
@@ -126,6 +127,7 @@ app.route('/ghl-settings', ghlSettingsRoute)
 // User reports routes (session auth via Better Auth cookies)
 app.route('/user/reports', userReportsRoute)
 app.route('/user/reports', reportAssetsRoute)
+app.route('/user', offerWorkflowRoute)
 
 // Waitlist routes (no auth)
 app.route('/waitlist', waitlistRoute)

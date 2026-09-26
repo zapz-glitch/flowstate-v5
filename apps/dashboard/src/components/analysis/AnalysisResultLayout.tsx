@@ -26,6 +26,10 @@ export interface AnalysisResultLayoutProps {
   onRerun?: () => void
   /** True while a rerun is in flight */
   rerunning?: boolean
+  /** Fire an offer workflow Devin session (prep offer / no margin) */
+  onOfferWorkflow?: (workflow: 'prep_offer' | 'no_margin') => void
+  /** The workflow currently being triggered, if any */
+  offerBusy?: 'prep_offer' | 'no_margin' | null
 }
 
 export function AnalysisResultLayout({
@@ -35,6 +39,8 @@ export function AnalysisResultLayout({
   footer,
   onRerun,
   rerunning,
+  onOfferWorkflow,
+  offerBusy,
 }: AnalysisResultLayoutProps) {
   const {
     subject,
@@ -70,6 +76,8 @@ export function AnalysisResultLayout({
             onOpenSettings={onOpenSettings}
             onRerun={onRerun}
             rerunning={rerunning}
+            onOfferWorkflow={onOfferWorkflow}
+            offerBusy={offerBusy}
           />
         </div>
       ) : subject && isStreaming ? (
