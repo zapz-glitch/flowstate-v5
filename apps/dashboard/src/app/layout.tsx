@@ -63,6 +63,15 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className="dark" suppressHydrationWarning>
+      <head>
+        {/* Apply stored theme pre-paint — prevents dark→light flash on load.
+            Default is night (dark); light only when explicitly stored. */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(function(){try{var t=localStorage.getItem('theme');if(t==='dark')t='night';if(t==='light')t='led';var light=t==='outdoor'||t==='led';var r=document.documentElement;r.classList.toggle('dark',!light);r.classList.toggle('light',light);if(t)r.dataset.preset=t;}catch(e){}})()`,
+          }}
+        />
+      </head>
       <body className={`${inter.variable} ${sourceSerif.variable} font-sans antialiased`}>
         <ThemeProvider>
           {children}

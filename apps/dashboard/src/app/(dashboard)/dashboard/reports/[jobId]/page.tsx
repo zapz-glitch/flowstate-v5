@@ -561,7 +561,7 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
     <div className={cn(hasMapData ? '-m-4 sm:-m-6 lg:-m-8 min-h-screen lg:h-[100dvh] flex flex-col lg:overflow-hidden' : 'max-w-[1600px] mx-auto space-y-6')}>
       {/* Header toolbar — address + actions only */}
       <div className="sticky z-20 no-print border-b border-border bg-background/95 backdrop-blur-xl top-[calc(3.5rem+var(--sat))] lg:top-0">
-        <div className="px-3 sm:px-5 py-2 flex items-center gap-2 sm:gap-4">
+        <div className={cn('px-3 sm:px-5 py-2 flex items-center gap-2 sm:gap-4', hasMapData ? 'lg:h-20 lg:py-0' : 'lg:h-12 lg:py-0')}>
           <Link href="/dashboard/reports" className="p-1 rounded-lg hover:bg-secondary transition-colors flex-shrink-0">
             <ArrowLeft className="w-4 h-4 text-foreground-tertiary" />
           </Link>

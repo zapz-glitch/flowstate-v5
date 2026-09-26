@@ -33,8 +33,6 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     const stored = normalizeTheme(localStorage.getItem('theme'))
     if (stored) {
       setThemeState(stored)
-    } else if (!window.matchMedia('(prefers-color-scheme: dark)').matches) {
-      setThemeState('led')
     }
   }, [])
 
