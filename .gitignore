@@ -46,3 +46,4 @@ coverage/
 .data/
 .dev.vars.*
 e2e/artifacts/
+*.tsbuildinfo

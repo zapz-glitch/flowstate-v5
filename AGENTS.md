@@ -49,6 +49,13 @@ had no keys, no maps, no local DB. Under the one-worktree rule this
 never happens again: branch in place, `npm run dev`, everything works.
 
 If a new checkout is ever unavoidable, copy those four paths into it.
+Full details: `docs/dev-environment.md`.
+
+**Verify before debugging**: after `npm run dev`, run `npm run dev:check`.
+It verifies env files, both servers, the local login, the Google Maps
+referrer authorization, and CoreLogic credentials — and names the fix.
+`node scripts/dev-check.mjs --fix-login` repairs the local account and
+clears the IP lockout.
 
 ## Test-based implementation workflow
 

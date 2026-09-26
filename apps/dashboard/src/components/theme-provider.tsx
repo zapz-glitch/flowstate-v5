@@ -25,7 +25,7 @@ function normalizeTheme(stored: string | null): Theme | null {
 }
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [theme, setThemeState] = useState<Theme>('night')
+  const [theme, setThemeState] = useState<Theme>('led')
   const [mounted, setMounted] = useState(false)
 
   useEffect(() => {
