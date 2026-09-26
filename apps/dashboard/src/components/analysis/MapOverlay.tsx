@@ -26,26 +26,31 @@ export function MapLegend() {
   )
 }
 
+// The valuation gap vs list price already lives in the valuation box —
+// dropping it here keeps the map strip to real location/flood risks.
+const ARV_LIST_FLAG = /^ARV (\$[\d,]+ (above|below) list price|at list price)$/
+
 export function MapOverlay({ riskFlags, floodZone }: MapOverlayProps) {
-  const hasRiskFlags = !!(riskFlags?.length || floodZone)
+  const mapFlags = riskFlags?.filter((flag) => !ARV_LIST_FLAG.test(flag))
+  const hasRiskFlags = !!(mapFlags?.length || floodZone)
 
   if (!hasRiskFlags) return null
 
   return (
-    <div className="shrink-0 bg-black/60 backdrop-blur-sm no-print">
+    <div className="shrink-0 bg-background/80 backdrop-blur-sm no-print">
       {/* Risk flags row */}
       {hasRiskFlags && (
-        <div className="px-4 py-2 flex items-center gap-3 overflow-x-auto scrollbar-none whitespace-nowrap border-b border-white/10">
+        <div className="px-2 py-2 flex items-center gap-3 overflow-x-auto scrollbar-none whitespace-nowrap">
           {floodZone && (
             floodZone.inFloodZone ? (
-              <span className="inline-flex items-center gap-1.5 text-xs font-medium text-red-400">
+              <span className="inline-flex items-center gap-1.5 text-xs font-medium text-red-600 dark:text-red-400">
                 <Droplets className="w-3.5 h-3.5 flex-shrink-0" />
                 {floodZone.source === 'listing'
                   ? `Flood risk: ${floodZone.zone ?? 'elevated'}`
                   : `Flood Zone${floodZone.zone ? ` ${floodZone.zone}` : ''}`}
               </span>
             ) : (
-              <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-400">
+              <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-600 dark:text-emerald-400">
                 <ShieldCheck className="w-3.5 h-3.5 flex-shrink-0" />
                 {floodZone.source === 'listing'
                   ? `Flood risk: ${floodZone.zone ?? 'low'}`
@@ -53,8 +58,8 @@ export function MapOverlay({ riskFlags, floodZone }: MapOverlayProps) {
               </span>
             )
           )}
-          {riskFlags?.map((flag, i) => (
-            <span key={i} className="inline-flex items-center gap-1.5 text-xs font-medium text-amber-400">
+          {mapFlags?.map((flag, i) => (
+            <span key={i} className="inline-flex items-center gap-1.5 text-xs font-medium text-amber-600 dark:text-amber-400">
               <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
               {flag}
             </span>
