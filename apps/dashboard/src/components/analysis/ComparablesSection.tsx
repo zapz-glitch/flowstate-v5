@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useMemo, useCallback } from 'react'
-import { SlidersHorizontal, RotateCcw, Loader2, LayoutGrid, List, ArrowUpDown, Bell, Check, RefreshCw } from 'lucide-react'
+import { SlidersHorizontal, RotateCcw, Loader2, LayoutGrid, List, ArrowUpDown, Bell, Check } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { CopyButton } from '@/components/ui/copy-button'
@@ -56,10 +56,6 @@ export interface ComparablesSectionProps {
   feedbackContext?: FeedbackContext | null
   /** Called after a feedback stamp is submitted — batch review uses it to advance */
   onFeedbackSubmitted?: (type: 'validate' | 'improve') => void
-  /** Re-run the analysis for this property (fresh data, cache bypassed) */
-  onRerun?: () => void
-  /** True while a rerun is in flight */
-  rerunning?: boolean
 }
 
 type SortOption = 'default' | 'subdivision' | 'neighborhood' | 'distance' | 'price' | 'psf' | 'score'
@@ -116,8 +112,6 @@ export function ComparablesSection({
   onCompHover,
   feedbackContext,
   onFeedbackSubmitted,
-  onRerun,
-  rerunning = false,
 }: ComparablesSectionProps) {
   const [expandedComps, setExpandedComps] = useState<Set<string>>(new Set())
   const [excludedOpen, setExcludedOpen] = useState(false)
@@ -340,19 +334,6 @@ export function ComparablesSection({
             </span>
           </div>
           <div className="flex items-center gap-2">
-            {/* Re-run — fresh analysis for the same address (cache bypassed) */}
-            {onRerun && (
-              <button
-                type="button"
-                onClick={onRerun}
-                disabled={rerunning}
-                className="flex items-center gap-1 text-caption text-foreground-tertiary hover:text-foreground font-medium transition-colors no-print disabled:opacity-50"
-                title="Re-run this analysis with fresh data"
-              >
-                <RefreshCw className={cn('w-3 h-3', rerunning && 'animate-spin')} />
-                {rerunning ? 'Running…' : 'Re-run'}
-              </button>
-            )}
             {/* Notify — comp-selection feedback report (always available) */}
             <button
               type="button"
