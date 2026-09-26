@@ -20,6 +20,7 @@ import { StreetViewImage } from './StreetViewImage'
 import { RuleMatchDetails } from './RuleMatchDetails'
 import type { ProximityConfig } from '@/lib/client-api'
 import { PROXIMITY_DEFAULTS } from '@/lib/client-api'
+import type { ProximityToggles } from '@/lib/recalc/types'
 
 interface CompComparisonDialogProps {
   open: boolean
@@ -30,6 +31,9 @@ interface CompComparisonDialogProps {
   onToggleSelection?: () => void
   arv?: number | null
   proximityConfig?: ProximityConfig | null
+  /** Controlled proximity toggles — when provided with onProximityChange, switches drive the report's proximity deduction (updates ARV) */
+  proximityToggles?: ProximityToggles | null
+  onProximityChange?: (toggles: ProximityToggles) => void
 }
 
 // ─── Stat cell ──────────────────────────────────────────────────────────────
@@ -47,8 +51,14 @@ function StatCell({ label, value, highlight }: { label: string; value: string | 
 
 // ─── Main Dialog ─────────────────────────────────────────────────────────────
 
-export function CompComparisonDialog({ open, onOpenChange, subject, comp, isSelected, onToggleSelection, arv, proximityConfig }: CompComparisonDialogProps) {
-  const [proximityToggles, setProximityToggles] = useState({ siding: false, backing: false, fronting: false })
+export function CompComparisonDialog({ open, onOpenChange, subject, comp, isSelected, onToggleSelection, arv, proximityConfig, proximityToggles: controlledToggles, onProximityChange }: CompComparisonDialogProps) {
+  const [localToggles, setLocalToggles] = useState<ProximityToggles>({ siding: false, backing: false, fronting: false })
+  const proximityToggles = controlledToggles ?? localToggles
+  const setProximityToggle = (pos: keyof ProximityToggles, checked: boolean) => {
+    const next = { ...proximityToggles, [pos]: checked }
+    if (onProximityChange) onProximityChange(next)
+    else setLocalToggles(next)
+  }
 
   if (!comp) return null
 
@@ -358,7 +368,7 @@ export function CompComparisonDialog({ open, onOpenChange, subject, comp, isSele
                       </div>
                       <Switch
                         checked={proximityToggles[pos]}
-                        onCheckedChange={(checked) => setProximityToggles((prev) => ({ ...prev, [pos]: checked }))}
+                        onCheckedChange={(checked) => setProximityToggle(pos, checked)}
                       />
                     </div>
                   )

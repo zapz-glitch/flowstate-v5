@@ -54,7 +54,7 @@ export function SubjectGridCard({ subject, isLoading }: SubjectGridCardProps) {
                   <span className="text-body-sm font-semibold">Unknown Address</span>
                 )}
                 {subject.subdivision && (
-                  <span className="inline-flex items-center gap-1 mt-0.5 px-1.5 py-0.5 rounded-full text-[9px] font-medium bg-primary/10 text-primary border border-primary/20">
+                  <span className="inline-flex items-center gap-1 mt-1.5 px-1.5 py-0.5 rounded-full text-[9px] font-medium bg-primary/10 text-primary border border-primary/20">
                     {subject.subdivision}
                   </span>
                 )}

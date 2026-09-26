@@ -691,9 +691,9 @@ export default function AnalyzePage() {
           : 'space-y-6'
       )}>
       {phase === 'idle' && !error && (
-        <div>
+        <div className="space-y-1">
           <h1 className="text-heading-lg text-foreground tracking-tight">Property Search</h1>
-          <p className="text-body text-foreground-tertiary mt-1">Search an address. Underwrite the deal.</p>
+          <p className="text-body text-foreground-tertiary">Search an address. Underwrite the deal.</p>
         </div>
       )}
 
@@ -984,6 +984,8 @@ export default function AnalyzePage() {
         } : undefined}
         arv={displayValuation?.arv}
         proximityConfig={settingsHook.settings.proximityConfig}
+        proximityToggles={settingsHook.settings.proximityAdjustments}
+        onProximityChange={settingsHook.updateProximityAdjustments}
       />}
 
       {/* Existing Reports Dialog */}

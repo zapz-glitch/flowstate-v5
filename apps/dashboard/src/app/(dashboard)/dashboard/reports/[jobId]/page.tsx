@@ -703,6 +703,8 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
         } : undefined}
         arv={displayValuation?.arv}
         proximityConfig={settingsHook.settings.proximityConfig}
+        proximityToggles={settingsHook.settings.proximityAdjustments}
+        onProximityChange={settingsHook.updateProximityAdjustments}
       />}
 
       {/* Refresh Confirmation Dialog */}
