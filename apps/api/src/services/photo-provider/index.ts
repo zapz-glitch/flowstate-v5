@@ -231,18 +231,67 @@ class MultiPhotoService implements PhotoService {
     }
 
     const errors: string[] = []
+    // Listing metadata (list price, flood signal) extracted along the way —
+    // an attempt that finds a listing but no photos still carries it.
+    let partialListPrice: number | undefined
+    let partialFloodRisk: { level: string; source: string } | undefined
+    let partialSourceUrl: string | undefined
+    let partialSource: string | undefined
     for (const name of order) {
       const provider = this.providers.get(name)
       if (!provider?.isAvailable()) continue
 
       const result = await provider.fetchPhotos(property, options)
+      if (result.success) {
+        const meta = result.data.metadata as
+          | { listPrice?: number; floodRisk?: { level: string; source: string } }
+          | undefined
+        if (partialListPrice == null && meta?.listPrice != null) {
+          partialListPrice = meta.listPrice
+          partialSource ??= name
+        }
+        if (partialFloodRisk == null && meta?.floodRisk != null) {
+          partialFloodRisk = meta.floodRisk
+          partialSource ??= name
+        }
+        if (!partialSourceUrl && result.data.sourceUrl) partialSourceUrl = result.data.sourceUrl
+      }
       if (result.success && result.data.photos.length > 0) {
+        // Winner — backfill any metadata earlier attempts found that it missed
+        if (partialListPrice != null || partialFloodRisk != null) {
+          result.data.metadata = {
+            ...(partialListPrice != null ? { listPrice: partialListPrice } : {}),
+            ...(partialFloodRisk != null ? { floodRisk: partialFloodRisk } : {}),
+            ...(result.data.metadata ?? {}),
+          }
+          if (!result.data.sourceUrl && partialSourceUrl) result.data.sourceUrl = partialSourceUrl
+        }
         if (errors.length > 0) {
           console.log(`[PhotoService] ${name} succeeded after fallbacks: ${errors.join(' → ')}`)
         }
         return result
       }
       errors.push(`${name}: ${result.success ? 'no photos' : result.error}`)
+    }
+
+    // Chain exhausted — a listing resolved somewhere but photo extraction
+    // produced nothing. Still surface the metadata so downstream (list
+    // price, flood signal) gets it.
+    if (partialListPrice != null || partialFloodRisk != null) {
+      return {
+        success: true,
+        data: {
+          propertyId: property.propertyId,
+          photos: [],
+          source: partialSource ?? 'unknown',
+          sourceUrl: partialSourceUrl,
+          fetchedAt: new Date().toISOString(),
+          metadata: {
+            ...(partialListPrice != null ? { listPrice: partialListPrice } : {}),
+            ...(partialFloodRisk != null ? { floodRisk: partialFloodRisk } : {}),
+          },
+        },
+      }
     }
 
     return {
