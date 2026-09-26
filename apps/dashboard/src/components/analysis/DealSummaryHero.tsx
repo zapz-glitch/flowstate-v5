@@ -51,29 +51,6 @@ export function DealSummaryHero({ valuation, isRecalculated, onOpenSettings }: D
 
       {/* Primary metrics grid */}
       <div className="hero-stats">
-        {valuation.listPrice != null && (
-          <div
-            className="px-3 py-2.5 border-r border-border/20"
-            title={valuation.listPriceRealism
-              ? `Asking $${fmt(Math.abs(valuation.listPriceRealism.gapDollars))} (${fmt(Math.abs(valuation.listPriceRealism.gapPercent))}%) ${valuation.listPriceRealism.gapDollars > 0 ? 'above' : 'below'} the $${fmt(valuation.listPriceRealism.wholesalePrice)} wholesale ceiling`
-              : "Seller's asking price, scraped from the active listing"}
-          >
-            <div className="text-[11px] text-foreground-tertiary uppercase tracking-wider">List</div>
-            <div className="text-base font-bold tabular-nums mt-0.5">${fmt(valuation.listPrice)}</div>
-            <div className={cn(
-              'text-[10px] tabular-nums mt-0.5',
-              valuation.arvVsListPrice != null && valuation.arvVsListPrice !== 0
-                ? valuation.arvVsListPrice < 0 ? 'text-emerald-500' : 'text-amber-500'
-                : 'text-foreground-tertiary'
-            )}>
-              {valuation.arvVsListPrice != null && valuation.arvVsListPrice !== 0
-                ? `ARV $${fmt(Math.abs(valuation.arvVsListPrice))} ${valuation.arvVsListPrice < 0 ? 'below' : 'above'} list`
-                : valuation.listPriceRealism
-                  ? valuation.listPriceRealism.verdict === 'high' ? 'Realistic ask' : valuation.listPriceRealism.verdict === 'medium' ? 'Negotiable gap' : 'Unrealistic ask'
-                  : 'Asking price'}
-            </div>
-          </div>
-        )}
         <div
           className="px-3 py-2.5 border-r border-border/20"
           title={valuation.asIsMarketIntel?.asIsMarketPrice != null
@@ -93,6 +70,22 @@ export function DealSummaryHero({ valuation, isRecalculated, onOpenSettings }: D
             )}
           </div>
         </div>
+        {valuation.listPrice != null && (
+          <div
+            className="px-3 py-2.5 border-r border-border/20"
+            title={valuation.listPriceRealism
+              ? `Asking $${fmt(Math.abs(valuation.listPriceRealism.gapDollars))} (${fmt(Math.abs(valuation.listPriceRealism.gapPercent))}%) ${valuation.listPriceRealism.gapDollars > 0 ? 'above' : 'below'} the $${fmt(valuation.listPriceRealism.wholesalePrice)} wholesale ceiling`
+              : "Seller's asking price, scraped from the active listing"}
+          >
+            <div className="text-[11px] text-foreground-tertiary uppercase tracking-wider">List</div>
+            <div className="text-base font-bold tabular-nums mt-0.5">${fmt(valuation.listPrice)}</div>
+            <div className="text-[10px] tabular-nums mt-0.5 text-foreground-tertiary">
+              {valuation.wholesalePrice != null
+                ? `Wholesale ${Math.round((valuation.wholesalePrice / valuation.listPrice) * 100)}% of list`
+                : 'Asking price'}
+            </div>
+          </div>
+        )}
         <div className="px-3 py-2.5 border-r border-border/20">
           <div className="text-[11px] text-foreground-tertiary uppercase tracking-wider">ARV</div>
           <div className="text-base font-bold tabular-nums text-primary mt-0.5">${formatHeadlineMoney(valuation.arv, valuation.displayedArv, valuation.displayRounding)}</div>
