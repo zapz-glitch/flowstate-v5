@@ -32,6 +32,41 @@ const prepSchema = z.object({
   opportunityId: z.string().max(200).optional(),
 })
 
+/** Resolve a Close lead id by address — the engine requires leadId. */
+async function resolveLeadId(env: Env, address: string): Promise<string | null> {
+  if (!env.CLOSE_API_KEY) return null
+  const street = (address.split(',')[0] ?? address).trim()
+  if (!street) return null
+  try {
+    const resp = await fetch(
+      `https://api.close.com/api/v1/lead/?query=${encodeURIComponent(street)}`,
+      {
+        signal: AbortSignal.timeout(10000),
+        headers: { Authorization: `Bearer ${env.CLOSE_API_KEY}` },
+      },
+    )
+    if (!resp.ok) {
+      console.error('[Offers] Close lead lookup failed:', resp.status)
+      return null
+    }
+    const data = (await resp.json()) as {
+      data?: Array<{ id?: string; addresses?: Array<{ address_1?: string }> }>
+    }
+    const leads = data?.data ?? []
+    if (leads.length === 0) return null
+    if (leads.length === 1 && leads[0].id) return leads[0].id
+    // Multiple candidates — pick the one whose street line matches.
+    const num = street.split(/\s+/)[0]
+    const match = leads.find((l) =>
+      (l.addresses ?? []).some((a) => (a.address_1 ?? '').includes(num)),
+    )
+    return match?.id ?? null
+  } catch (e) {
+    console.error('[Offers] Close lead lookup failed:', e)
+    return null
+  }
+}
+
 async function postDevinMessage(env: Env, message: string): Promise<boolean> {
   if (!env.DEVIN_API_KEY || !env.DEVIN_ORG_ID) return false
   const resp = await fetch(DEVIN_MESSAGE_URL(env.DEVIN_ORG_ID), {
@@ -58,8 +93,12 @@ offers.post('/prep', async (c) => {
     return c.json({ ok: false, error: 'Invalid request body' }, 400)
   }
 
-  // Idempotency key — leadId when present, normalized address otherwise.
-  const dispatchId = body.leadId
+  // Resolve the Close lead when the caller didn't pass one — the engine
+  // requires leadId and the idempotency key is more stable on it.
+  const leadId = body.leadId ?? (await resolveLeadId(c.env, body.propertyAddress))
+
+  // Idempotency key — leadId when resolvable, normalized address otherwise.
+  const dispatchId = leadId
     ?? `addr:${body.propertyAddress.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`
   const dispatchKey = `offer-dispatch:${dispatchId}`
   const existing = await c.env.API_CACHE.get(dispatchKey, 'json')
@@ -70,7 +109,7 @@ offers.post('/prep', async (c) => {
   // (a) Message the persistent Devin session — the listener agent does
   // the Close lookup and preps the offer.
   const message =
-    `PREP OFFER: leadId=${body.leadId ?? '(resolve by address)'} propertyAddress=${body.propertyAddress} ` +
+    `PREP OFFER: leadId=${leadId ?? '(resolve by address)'} propertyAddress=${body.propertyAddress} ` +
     `purchasePrice=${body.purchasePrice} opportunityId=${body.opportunityId ?? ''} — ${FOLLOW}`
   const devinSent = await postDevinMessage(c.env, message)
   if (!devinSent) {
@@ -78,8 +117,9 @@ offers.post('/prep', async (c) => {
   }
 
   // (b) Notify the conversation-intelligence engine — fire-and-forget via
-  // waitUntil so its latency never gates the response.
-  if (c.env.ENGINE_API_KEY) {
+  // waitUntil so its latency never gates the response. The engine requires
+  // leadId; when none resolves the listener carries the flow alone.
+  if (c.env.ENGINE_API_KEY && leadId) {
     c.executionCtx.waitUntil(
       fetch(ENGINE_OFFER_DRAFT_URL, {
         method: 'POST',
@@ -89,9 +129,11 @@ offers.post('/prep', async (c) => {
           Authorization: `Bearer ${c.env.ENGINE_API_KEY}`,
         },
         body: JSON.stringify({
-          leadId: body.leadId ?? null,
+          leadId,
           sessionId: DEVIN_SESSION_ID,
           address: body.propertyAddress,
+          wholesalePrice: body.purchasePrice,
+          status: 'pending',
         }),
       }).then((r) => {
         if (!r.ok) console.error('[Offers] engine offer-draft failed:', r.status)
@@ -100,7 +142,7 @@ offers.post('/prep', async (c) => {
   }
 
   const dispatch = {
-    leadId: body.leadId ?? null,
+    leadId: leadId ?? null,
     propertyAddress: body.propertyAddress,
     purchasePrice: body.purchasePrice,
     opportunityId: body.opportunityId ?? null,
