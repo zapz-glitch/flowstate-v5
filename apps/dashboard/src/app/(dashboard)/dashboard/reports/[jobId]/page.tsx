@@ -671,6 +671,8 @@ export default function DashboardReportPage({ params }: { params: Promise<{ jobI
           floodZone={analysis.floodZone}
 
           valuationCardRef={valuationCardRef}
+          onRerun={() => setRefreshOpen(true)}
+          rerunning={refreshing}
         />
 
       {/* Evaluation Settings Sheet */}
