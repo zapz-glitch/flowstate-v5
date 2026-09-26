@@ -21,24 +21,27 @@ const { formatHeadlineMoney } = money
 const thousand = { increment: 1000, mode: 'half_up' }
 const fiveHundred = { increment: 500, mode: 'half_up' }
 
-test('authoritative rounded amounts win without altering the exact amount or configured $500 output', () => {
+// The valuation box normalizes every headline to the nearest $1,000 —
+// configured policy/displayed values apply their increment first, then the
+// final figure is rounded to the thousand.
+test('headline amounts normalize to the nearest $1,000', () => {
   assert.equal(formatHeadlineMoney(612345.67, 612000, thousand), '612,000')
-  assert.equal(formatHeadlineMoney(450123.45, 450500, thousand), '450,500')
+  assert.equal(formatHeadlineMoney(450123.45, 450500, thousand), '451,000')
   assert.equal(formatHeadlineMoney(440123.45, 440000, fiveHundred), '440,000')
   assert.equal(formatHeadlineMoney(1, 0, thousand), '0')
 })
 
-test('configured display fallback uses half-up ties for positive and negative amounts', () => {
+test('configured display fallback uses half-up ties then normalizes to $1,000', () => {
   assert.equal(formatHeadlineMoney(612499.99, null, thousand), '612,000')
   assert.equal(formatHeadlineMoney(612500, null, thousand), '613,000')
   assert.equal(formatHeadlineMoney(-612500, null, thousand), '-613,000')
-  assert.equal(formatHeadlineMoney(612250, null, fiveHundred), '612,500')
-  assert.equal(formatHeadlineMoney(-612250, null, fiveHundred), '-612,500')
+  assert.equal(formatHeadlineMoney(612250, null, fiveHundred), '613,000')
+  assert.equal(formatHeadlineMoney(-612250, null, fiveHundred), '-613,000')
 })
 
-test('old reports keep whole-dollar fallback without assuming an absent rounding policy', () => {
-  assert.equal(formatHeadlineMoney(612345.67), '612,346')
-  assert.equal(formatHeadlineMoney(612345.67, NaN), '612,346')
+test('exact amounts without a policy still round to the thousand', () => {
+  assert.equal(formatHeadlineMoney(612345.67), '612,000')
+  assert.equal(formatHeadlineMoney(612345.67, NaN), '612,000')
   for (const amount of [undefined, null, NaN, Infinity, -Infinity]) assert.equal(formatHeadlineMoney(amount), '-')
 })
 
