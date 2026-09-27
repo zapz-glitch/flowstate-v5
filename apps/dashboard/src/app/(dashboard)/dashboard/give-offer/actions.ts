@@ -32,6 +32,8 @@ export interface PipelineItem {
   listPrice?: number | null
   evalReportUrl: string | null
   draft: unknown
+  /** Realtor conversation-log notes shipped by the engine (latest entries first) */
+  conditionNotes?: string[]
   /** SQLite timestamp "YYYY-MM-DD HH:MM:SS" (UTC) */
   queuedAt: string
 }

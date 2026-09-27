@@ -37,6 +37,9 @@ export interface AnalysisPageLayoutProps {
   // Optional footer (e.g. Raw JSON)
   footer?: ReactNode
 
+  /** Realtor-notes card — rendered between the deal hero and analysis readouts */
+  notesSlot?: ReactNode
+
   /** Re-run the analysis for the current property */
   onRerun?: () => void
   /** True while a rerun is in flight */
@@ -55,6 +58,7 @@ export function AnalysisPageLayout({
   loading = false,
   statusLabel,
   footer,
+  notesSlot,
   onRerun,
   rerunning,
   onOfferWorkflow,
@@ -75,6 +79,7 @@ export function AnalysisPageLayout({
     valuationCardRef,
     statusLabel,
     footer,
+    notesSlot,
     onRerun,
     rerunning,
     onOfferWorkflow,

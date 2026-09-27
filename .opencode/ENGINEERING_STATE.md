@@ -1,5 +1,41 @@
 # Engineering State — flowstate-v5
 
+### 2026-09-28 — realtor/seller-condition notes → Give Offer + rehab model
+
+The conversation-intelligence engine (Cloud session) already ships
+`conditionNotes: string[]` per `/engine/queue` item — verified live
+(Moselle: 3 entries incl. "move-in ready, no known issues"). Our
+pipeline proxy passes items through untouched, so the planned
+`/internal/leads/:leadId/notes` route was NOT needed.
+
+What was built instead (`feat/realtor-notes`):
+- `services/seller-notes/` — `fetchSellerNotes` (Close `activity/note/`
+  by leadId, `FLOWSTATE CONVERSATION LOG`/`[flowstate-conversation-log:v1]`
+  marker filter, dated-entry split, never throws) + `classifyRehabIntel`
+  (OpenRouter: notes × enabled major items → additions + advisories).
+- Eval pipeline: `EvaluationParams.leadId` → notes fetch starts in
+  parallel; after `deriveBuybox`, additions are PUSHED INTO
+  `derivedBuybox.majorItems` so they flow through `calculateValuation`,
+  `rehabLevelEstimates`, and `report.rehab.ledger` (new `seller_note`
+  source tag) — true auto-add, not a display patch. Removal signals are
+  advisory-only (`rehabAdvisories`) — notes never shrink the ledger.
+- Response carries `sellerNotes`, `rehabAdditions`, `rehabAdvisories`;
+  persisted in `full_response_json` → Refresh/Rerun re-fetches (analyze
+  route recovers `leadId` from the stored report when caller omits it).
+- Dashboard: `PipelineItem.conditionNotes`, `AnalyzeData.sellerNotes/
+  rehabAdditions/rehabAdvisories`, `RealtorNotesCard` (notes list +
+  emerald addition lines + amber consider_removing callouts), threaded
+  queue.notes → reports page → `notesSlot` on AnalysisPageLayout →
+  rendered under the deal hero. `queueAnalysis` passes `leadId` on
+  refresh (server also recovers it).
+- Live-verified: real Close fetch (Moselle 5 entries, Felch 9) + real
+  OpenRouter classify — Felch produced 3 correct consider_removing
+  advisories (roof 2009/no leaks, AC 2012, WH 2004); Dunn Creek's
+  "needs roof" produced a roof +$10,000 addition. `tests/seller-notes.test.ts`
+  7/7; full API suite 26 files pass; tsc clean both apps.
+- `CLOSE_API_KEY` is already a prod secret (Update CRM + offer lead
+  lookup use it) — no new secret needed.
+
 ### 2026-09-28 — census block-group signal in comp selection
 
 New lateral market-area metric beside the tract proxy. Free Census

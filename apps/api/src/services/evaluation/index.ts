@@ -51,6 +51,13 @@ import { assessRenovationFromPhotos, unavailableAssessment, type RenovationAsses
 import { PROXIMITY_DEFAULTS } from '../../routes/proximity-config'
 import { deriveBuybox } from './derivation'
 import { buildEvaluationReport } from './report'
+import {
+  fetchSellerNotes,
+  classifyRehabIntel,
+  additionToMajorItem,
+  type RehabAddition,
+  type RehabAdvisory,
+} from '../seller-notes'
 import { classifyOutcomeWithJev } from '../jev'
 import type { ReportStep } from './types'
 import { AnalysisError } from '../../utils/analysis-error'
@@ -113,6 +120,12 @@ export interface EvaluationParams {
    * refetch.
    */
   prefetchedPhotoBundle?: PhotoBundle | null
+  /**
+   * Close CRM lead this eval belongs to — when present, realtor
+   * conversation-log notes are fetched and folded into the rehab model
+   * (additive items apply; removals become advisories only).
+   */
+  leadId?: string
 }
 
 export interface GroupBResult {
@@ -453,6 +466,10 @@ export async function performAnalysis(
   const step = (name: string, status: ReportStep['status'], detail?: string) => {
     steps.push({ step: name, label: name, status, detail })
   }
+
+  // Realtor conversation-log notes — fetched in parallel with the eval so a
+  // Rerun always re-reads the CRM. Never blocks: failure resolves to [].
+  const sellerNotesPromise = fetchSellerNotes(env.CLOSE_API_KEY, params.leadId)
 
   // ── 1. Appraisal: filter comps, apply adjustments, select ARV comps ────────
   let appraisalResult = appraisalService.evaluateWithFallback(
@@ -928,6 +945,41 @@ export async function performAnalysis(
     `${derivedBuybox.majorItems.filter((m) => m.enabled).length} major items charged`
   )
 
+  // ── 5b. Seller notes → rehab intel ─────────────────────────────────────────
+  // Notes can only ADD to the renovation ledger — a realtor mentioning work
+  // the permit engine missed gets charged in. Removal signals become
+  // advisory-only callouts; a human decides whether to drop the item.
+  const sellerNotes = await sellerNotesPromise
+  let rehabAdditions: RehabAddition[] = []
+  let rehabAdvisories: RehabAdvisory[] = []
+  if (sellerNotes.length > 0) {
+    const intel = await classifyRehabIntel(
+      env,
+      sellerNotes,
+      derivedBuybox.majorItems
+        .filter((m) => m.enabled)
+        .map((m) => ({ id: m.id, name: m.id, cost: m.cost, reason: m.reason })),
+    )
+    rehabAdditions = intel.additions
+    rehabAdvisories = intel.advisories
+    for (const a of rehabAdditions) {
+      const item = additionToMajorItem(a)
+      if (!item) continue
+      derivedBuybox.majorItems.push(item)
+      derivedBuybox.notes.push(
+        `Realtor note added ${item.id} (+$${item.cost}): ${a.evidence}`,
+      )
+    }
+    if (rehabAdditions.length > 0) {
+      fallbacksUsed.push(`seller_note_additions:${rehabAdditions.length}`)
+    }
+    step(
+      'seller_notes',
+      'completed',
+      `${sellerNotes.length} note(s) — ${rehabAdditions.length} item(s) added, ${rehabAdvisories.length} advisory(ies)`,
+    )
+  }
+
   // ── 6. Valuation ────────────────────────────────────────────────────────────
   const buybox = params.buybox ?? {}
   const subjectSqft = bundle.property.squareFeet || 0
@@ -1085,6 +1137,11 @@ export async function performAnalysis(
   }
   response.visionAssessment = renovation
   response.renovationLevelSource = derivedBuybox.rehabLevelSource
+  if (sellerNotes.length > 0) {
+    response.sellerNotes = { fetchedAt: new Date().toISOString(), notes: sellerNotes }
+    if (rehabAdditions.length > 0) response.rehabAdditions = rehabAdditions
+    if (rehabAdvisories.length > 0) response.rehabAdvisories = rehabAdvisories
+  }
   response.evaluationEngine = 'ts-v5'
   if (photoBundle) response.photoProvider = photoBundle.provider
 

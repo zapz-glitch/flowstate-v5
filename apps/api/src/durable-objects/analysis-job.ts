@@ -64,6 +64,8 @@ export interface StartEnrichmentRequest {
   evalParams: Omit<EvaluationParams, 'jobId' | 'bundle'>
   /** KV key under which to store this run's report pointer (21-day eval cache) */
   evalResultCacheKey?: string
+  /** Close CRM lead — folds realtor notes into the rehab model */
+  leadId?: string
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   analysisResult: Record<string, any>
   llmOptions?: {
@@ -716,7 +718,7 @@ export class AnalysisJobDO {
 
     let evalResult
     try {
-      evalResult = await performAnalysis({ jobId: config.jobId, bundle, ...evalParams, userId: config.userId }, this.env,
+      evalResult = await performAnalysis({ jobId: config.jobId, bundle, ...evalParams, userId: config.userId, leadId: config.leadId }, this.env,
         (message, data) => { void this.pushEvent('eval_progress', { message, ...data }) })
     } catch (evalError) {
       const msg = evalError instanceof Error ? evalError.message : 'Evaluation failed'
@@ -856,6 +858,7 @@ export class AnalysisJobDO {
           bundle: config.bundle,
           ...config.evalParams,
           userId: config.userId,
+          leadId: config.leadId,
         }, this.env,
           (message, data) => { void this.pushEvent('eval_progress', { message, ...data }) })
 

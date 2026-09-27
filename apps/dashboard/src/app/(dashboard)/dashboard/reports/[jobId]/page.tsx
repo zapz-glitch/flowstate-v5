@@ -34,6 +34,7 @@ import { toast } from 'sonner'
 import { DownloadReportButton } from '@/components/report/DownloadReportButton'
 import { UpdateCrmButton } from '@/components/report/UpdateCrmButton'
 import { AnalysisPageLayout } from '@/components/analysis/AnalysisPageLayout'
+import { RealtorNotesCard } from '@/components/analysis/RealtorNotesCard'
 import type { AnalyzeData, CompItem } from '@/components/analysis'
 import { queueAnalysis, type AnalyzeData as ActionAnalyzeData } from '@/app/(dashboard)/dashboard/analyze/actions'
 import { reloadForStaleAction } from '@/lib/server-action'
@@ -167,6 +168,9 @@ export default function DashboardReportPage({ params, queue }: {
     /** Where the card's back tile points in queue context */
     backHref?: string
     fallback?: { leadId: string | null; address: string; wholesalePrice: number | null; listPrice?: number | null; opportunityId?: string | null }
+    /** Live realtor notes from the queue item — fallback until the report
+     *  carries its own `sellerNotes` snapshot. */
+    notes?: string[] | null
   }
 }) {
   const { jobId } = use(params)
@@ -200,6 +204,31 @@ export default function DashboardReportPage({ params, queue }: {
   const preAiCompsRef = useRef<unknown>(null)
 
   const analyzeData = report?.jobId === jobId ? report.analysis : null
+
+  // Realtor notes — persisted snapshot wins (it carries classified rehab
+  // intel); the live queue item's notes fill in for reports that predate
+  // the sellerNotes field.
+  const realtorNotesCard = useMemo(() => {
+    const persisted = analyzeData?.sellerNotes?.notes ?? null
+    const queued = queue?.notes ?? null
+    const entries = persisted ?? (queued ?? [])
+      .map((t, i) => ({
+        id: `queue-${i}`,
+        createdAt: '',
+        text: t.replace(/^\s*FLOWSTATE CONVERSATION LOG\s*-?\s*/, ''),
+      }))
+    if (!entries.length && !analyzeData?.rehabAdvisories?.length && !analyzeData?.rehabAdditions?.length) {
+      return null
+    }
+    return (
+      <RealtorNotesCard
+        notes={entries}
+        advisories={analyzeData?.rehabAdvisories}
+        additions={analyzeData?.rehabAdditions}
+        fetchedAt={analyzeData?.sellerNotes?.fetchedAt}
+      />
+    )
+  }, [analyzeData, queue?.notes])
 
   // ─── Batch review mode — ?batch=<id>&conf=<bucket> ──────────────────────
   // When opened from the batch list, load that batch's review queue so the
@@ -477,6 +506,7 @@ export default function DashboardReportPage({ params, queue }: {
       const response = await queueAnalysis({
         address: report.address,
         existingJobId: jobId,
+        leadId: analyzeData?.leadId ?? undefined,
         // maxComps omitted — API applies the configured provider-max limit.
         searchOptions: { radiusMiles: 1, monthsBack: 12 },
         skipCache: true,
@@ -830,6 +860,7 @@ export default function DashboardReportPage({ params, queue }: {
           onRerun={() => setRefreshOpen(true)}
           rerunning={refreshing}
           onOfferWorkflow={handleOfferWorkflow}
+          notesSlot={realtorNotesCard}
         />
 
       {/* Evaluation Settings Sheet */}
