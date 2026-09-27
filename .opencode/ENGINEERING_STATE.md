@@ -1,5 +1,31 @@
 # Engineering State — flowstate-v5
 
+### 2026-09-27 — Give Offer pipeline, engine-canonical (#24 merged)
+
+Conversation-intelligence engine owns the funnel (queue + metrics,
+webhook-receipt real-time). Flowstate's role:
+
+- GET /v1/pipeline/queue|metrics — thin proxies to /engine/queue +
+  /engine/dashboard (ENGINE_API_KEY server-side).
+- DO recordRun → POST /engine/eval/complete {jobId} on every terminal
+  analysis state via waitUntil — underwriting→give_offer same-tick.
+  Non-engine jobIds 404 harmlessly.
+- /v1/offers/prep → Devin listener PREP OFFER + engine offer-draft
+  {leadId, sessionId, address, wholesalePrice, status:'pending'}.
+- /v1/offers/decline → draft resolve {status:'declined'} + listener
+  'NO MARGIN: leadId=<> address=<> — move to No margin'.
+- /dashboard/give-offer page: metrics strip (reach-outs→responses→conv%,
+  reactivations, to-underwrite, offers prepped/sent, avgPrepMinutes),
+  queue list + per-item elapsed timer, Prep offer/No margin with
+  outcome-chip crossfade + auto-advance. Sidebar 'Give Offer' item.
+- FS_EVENTS_KEY provisioned (superseded by engine-canonical design —
+  kept provisioned in case direct event ingress returns).
+- Local D1 still has dormant pipeline_items/pipeline_events tables
+  (migration was deleted pre-merge; drop locally if ever needed).
+
+Open: prod CLOSE_API_KEY rotation (401 locally too); Duncreek item
+shows address/wholesalePrice null — engine-side data gap.
+
 ### 2026-09-26 — UI batch merged to main: theme, list price, rerun UX, offer buttons, map fixes
 
 Merged (all to main, deployed via auto-deploy):
