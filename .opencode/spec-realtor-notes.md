@@ -80,6 +80,53 @@ strict schema; treat lines after the marker as entries.
 - Removals: advisory callout ONLY — never applied without a human.
 - Notes card lives in Give Offer; reports may share it if trivial.
 
+## Interface contract — build against these shapes
+
+Work is split so neither side guesses: **cloud agent owns `apps/api`
+(the data layer); the local session owns `apps/dashboard` (the
+presentation layer).** Land exactly these shapes.
+
+### Notes route
+
+```
+GET /internal/leads/:leadId/notes
+→ 200 { "success": true, "data": { "leadId": string, "notes": LeadNote[] } }
+→ 4xx/5xx { "success": false, "error": string }
+```
+
+```ts
+interface LeadNote {
+  id: string
+  createdAt: string   // ISO
+  /** Plain text, HTML stripped */
+  text: string
+  /** Carries the FLOWSTATE CONVERSATION LOG / [flowstate-conversation-log:v1] marker */
+  tagged: boolean
+}
+```
+
+### Eval-time capture (into `full_response_json` / `analysis`)
+
+```ts
+analysis.sellerNotes?: {
+  fetchedAt: string
+  notes: LeadNote[]
+}
+analysis.rehabAdditions?: Array<{
+  item: string            // rehab line item name
+  estimatedCost: number
+  evidence: string        // the note quote it came from
+}>
+analysis.rehabAdvisories?: Array<{
+  target: string          // the rehab line it questions
+  note: string            // human-readable advisory
+  evidence: string        // the note quote
+}>
+```
+
+`rehabAdditions` merge additively only; `rehabAdvisories` are display
+callouts — never applied without a human.
+
 ## Verification
 
 - Close note fetch verified live for Moselle's leadId (3+ notes,
