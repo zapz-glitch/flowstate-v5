@@ -79,9 +79,10 @@ export default function GiveOfferReportPage({ params }: { params: Promise<{ jobI
     }, 1400)
   }, [current, items, index, goTo])
 
-  const bar = (
-    <div className="shrink-0 no-print border-b border-border bg-background px-4 sm:px-6 lg:px-4 py-1.5 flex items-center gap-3 text-[11px]">
-      <Link href="/dashboard/give-offer" className="font-semibold hover:text-foreground-secondary transition-colors" title="Back to the offer queue">Give Offer</Link>
+  // Queue controls shared by the standalone strip (fallback/loading
+  // states) and the compact cluster rendered inside the header card.
+  const controls = (
+    <>
       <span className="text-foreground-tertiary tabular-nums">
         {index >= 0 ? `${index + 1} of ${items.length}` : `${items.length} queued`}
       </span>
@@ -93,10 +94,10 @@ export default function GiveOfferReportPage({ params }: { params: Promise<{ jobI
       )}
       {current?.listPrice != null && (
         <span className="text-foreground-secondary tabular-nums">
-          List <b>${fmtK(current.listPrice)}</b>
+          List <b className="text-foreground">${fmtK(current.listPrice)}</b>
         </span>
       )}
-      <span className="flex items-center gap-1 ml-auto">
+      <span className="flex items-center gap-1">
         <ListFilter size={11} className="text-foreground-tertiary" />
         <select
           value={filter}
@@ -130,7 +131,25 @@ export default function GiveOfferReportPage({ params }: { params: Promise<{ jobI
       >
         <ChevronRight size={14} />
       </button>
+    </>
+  )
+
+  // Standalone strip — only used where the header card isn't rendered
+  // (QueueFallback + loading states).
+  const bar = (
+    <div className="shrink-0 no-print border-b border-border bg-background px-4 sm:px-6 lg:px-4 py-1.5 flex items-center gap-3 text-[11px]">
+      <Link href="/dashboard/give-offer" className="font-semibold hover:text-foreground-secondary transition-colors" title="Back to the offer queue">Give Offer</Link>
+      {controls}
+      <span className="flex-1" />
     </div>
+  )
+
+  // Compact cluster — lives inside the header card so queue navigation
+  // stays inside the shared 64px band baseline instead of a separate bar.
+  const inline = (
+    <span className="flex items-center gap-2.5 text-[11px] text-foreground-tertiary flex-shrink-0">
+      {controls}
+    </span>
   )
 
   return (
@@ -138,6 +157,8 @@ export default function GiveOfferReportPage({ params }: { params: Promise<{ jobI
       params={reportParams}
       queue={{
         node: bar,
+        inline,
+        backHref: '/dashboard/give-offer',
         loaded: queueLoaded,
         onDecided: advance,
         fallback: current

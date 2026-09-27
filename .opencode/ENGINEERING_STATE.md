@@ -10,6 +10,21 @@ imports), React replays → fresh thenable → suspends again → crash.
 Race-dependent: explains "was working, now it's not" across deploys.
 Fixed with useMemo on jobId. Verified only occurrence of the pattern.
 
+### 2026-09-27 — Queue controls folded INTO the header card (round 2)
+
+User's real complaint persisted: the standalone queue strip (Give Offer
+| position | timer | Longest waiting | prev/next) was itself the
+problem — as a separate bar it's either clipped or off the logo
+baseline no matter where it sits. "Find a new place for that item."
+
+Fix: queue controls now render INSIDE the header card (queue.inline)
+— same 64px band, same card row as the address/actions. Back tile on
+give-offer items now correctly points to /dashboard/give-offer (was
+/dashboard/reports — real bug). Card row gained flex-wrap for mobile.
+The standalone strip (queue.node) now only serves QueueFallback +
+loading states, which use -mx bleed (no clip possible). List $X stays
+in the cluster.
+
 ### 2026-09-27 — Give Offer queue bar clipped + baseline rule (fix/give-offer-baseline)
 
 Root cause of "can't access it": the page's -m-8 intentionally pulls
