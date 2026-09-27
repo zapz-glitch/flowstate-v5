@@ -63,6 +63,7 @@ import type {
   JevCompTest2Result,
   JevEnv,
 } from '../jev'
+import { fetchCensusGeography, type CensusGeography } from '../geo/census-geocoder'
 
 /** Pipeline identifier — bump when the stage contract changes. */
 export const COMP_HYBRID_VERSION = COMP_EVAL_VERSION
@@ -160,6 +161,13 @@ export interface HybridCompScore {
    * subdivision-matching test-2 passer out of the premium score tier.
    */
   crossesMajorRoad: boolean | null
+  /**
+   * Census block-group match — the comp shares the subject's block group,
+   * a tighter same-micro-market signal than tract (block groups subdivide
+   * tracts). null = geography lookup unavailable (not verified). A true
+   * match can substitute for a subdivision noul toward the premium tier.
+   */
+  sameBlockGroup: boolean | null
   test1: HybridCompTest1 | null
   test2: HybridCompTest2 | null
   /**
@@ -295,6 +303,9 @@ export async function runJevEvaluation(
     test1?: Test1Fn
     test2?: Test2Fn
     enrich?: EnrichFn
+    /** Census block-group lookup — injectable for tests; defaults to the
+     *  public geocoder with env.API_CACHE caching. */
+    geo?: (latitude: number, longitude: number) => Promise<CensusGeography | null>
     /** Stage progress for live UI updates — fires at each funnel boundary. */
     onProgress?: (message: string, data?: Record<string, unknown>) => void
   },
@@ -322,6 +333,7 @@ export async function runJevEvaluation(
       saleAgeDays: days,
       enriched: comp.isEnriched === true,
       crossesMajorRoad: comp.crossesMajorRoad ?? null,
+      sameBlockGroup: comp.sameBlockGroup ?? null,
       test1: null,
       test2: null,
       score: null,
@@ -438,19 +450,50 @@ export async function runJevEvaluation(
     }
   }
 
-  // Road-barrier proxy — census tract boundaries follow major roads, so a
-  // comp in a different tract than the subject likely sits across a
-  // barrier. Derived deterministically from enriched detail; missing tract
-  // data leaves the field unset (not verified, no penalty).
-  const subjectTract = subject.censusTract
+  // Market-area geography — two derived signals on the enriched set:
+  //   1. crossesMajorRoad: census tract boundaries follow major roads, so a
+  //      comp in a different tract likely sits across a barrier. When the
+  //      property provider returned no tract, the census geocoder's tract
+  //      GEOID backfills — compared only when both sides resolve from the
+  //      same source (provider vs census formats can't be mixed).
+  //   2. sameBlockGroup: block groups subdivide tracts (~1.5k people) — a
+  //      comp in the subject's own block group is affirmative same-micro-
+  //      market evidence, tighter than tract. A match can lift a test-2
+  //      passer into the premium tier; a mismatch or missing lookup carries
+  //      no penalty (boundaries split within neighborhoods all the time).
+  const geoFn = opts?.geo ?? ((la: number, lo: number) => fetchCensusGeography(la, lo, env.API_CACHE))
+  const subjectGeo = subject.latitude != null && subject.longitude != null
+    ? await geoFn(subject.latitude, subject.longitude)
+    : null
+  const compGeos = new Map<string, CensusGeography | null>()
+  await Promise.all(examComps.map(async (c) => {
+    compGeos.set(c.id, c.latitude != null && c.longitude != null ? await geoFn(c.latitude, c.longitude) : null)
+  }))
+
   for (const c of examComps) {
-    const cr = subjectTract != null && c.censusTract != null ? c.censusTract !== subjectTract : null
-    if (cr != null) {
-      c.crossesMajorRoad = cr
-      const en = entries.find((e) => e.compId === c.id)
-      if (en) en.crossesMajorRoad = cr
-      const raw = enrichedComps.get(c.id)
-      if (raw) raw.crossesMajorRoad = cr
+    const cg = compGeos.get(c.id)
+    // Provider tract ids and census GEOIDs can't be mixed — prefer
+    // provider-vs-provider, else compare the census lookups when both
+    // resolved (they're always present together since one call yields both).
+    let cr: boolean | null = null
+    if (subject.censusTract != null && c.censusTract != null) {
+      cr = c.censusTract !== subject.censusTract
+    } else if (subjectGeo?.tract != null && cg?.tract != null) {
+      cr = cg.tract !== subjectGeo.tract
+    }
+    const bg = subjectGeo != null && cg != null ? cg.blockGroup === subjectGeo.blockGroup : null
+    if (cr == null && bg == null) continue
+    if (cr != null) c.crossesMajorRoad = cr
+    if (bg != null) c.sameBlockGroup = bg
+    const en = entries.find((e) => e.compId === c.id)
+    if (en) {
+      if (cr != null) en.crossesMajorRoad = cr
+      if (bg != null) en.sameBlockGroup = bg
+    }
+    const raw = enrichedComps.get(c.id)
+    if (raw) {
+      if (cr != null) raw.crossesMajorRoad = cr
+      if (bg != null) raw.sameBlockGroup = bg
     }
   }
 
@@ -477,7 +520,10 @@ export async function runJevEvaluation(
       // counts 0 — penalized in the boost, never a fail.
       const phys = ((t2.nouls.physicalCharacter ?? 0) + (t2.nouls.material ?? 0) + (t2.nouls.foundation ?? 0)) / 3
       const prox = proximityOf(entry.compId)
-      const premium = t2.nouls.subdivision >= noulGate && entry.crossesMajorRoad !== true
+      // Premium tier: subdivision match OR a verified census block-group
+      // match (hard geography stands in for the LLM-judged subdivision
+      // noul) — but never across a major road.
+      const premium = (t2.nouls.subdivision >= noulGate || entry.sameBlockGroup === true) && entry.crossesMajorRoad !== true
       entry.test2 = {
         nouls: t2.nouls,
         passed,

@@ -168,8 +168,16 @@ function TestedCompRow({ comp, role, questionSet }: { comp: CompItem | undefined
                       </span>
                     </div>
                   )}
+                  {h.sameBlockGroup != null && (
+                    <div className="flex items-baseline justify-between gap-2 text-[10px] tabular-nums">
+                      <span className="text-foreground-tertiary">Census block group</span>
+                      <span className={h.sameBlockGroup ? 'text-emerald-500' : 'text-foreground-secondary'}>
+                        {h.sameBlockGroup ? 'same block group as subject' : 'different block group'}
+                      </span>
+                    </div>
+                  )}
                   <p className="text-[9px] text-foreground-tertiary/70">
-                    subdivision yes, else neighborhood yes → passed test 2 · fresh score — subdivision + same tract 95–100, hood-only or road crossing 90–95 (distance-led) · style/material/foundation lift the score, missing data penalizes
+                    subdivision yes, else neighborhood yes → passed test 2 · fresh score — subdivision or same block group with no road crossing 95–100, hood-only or crossing 90–95 (distance-led) · style/material/foundation lift the score, missing data penalizes
                   </p>
                   <div className="flex items-baseline justify-between gap-2 text-[10px] tabular-nums pt-0.5">
                     <span className="text-foreground-tertiary">Test-2 score</span>

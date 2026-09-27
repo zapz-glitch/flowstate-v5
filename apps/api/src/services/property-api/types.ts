@@ -249,6 +249,8 @@ export interface NormalizedComparable {
 
   /** True when the comp sits across a major road from the subject (not_verified when unknown) */
   crossesMajorRoad?: boolean
+  /** True when the comp shares the subject's census block group (not_verified when unknown) */
+  sameBlockGroup?: boolean | null
   /** Site/influence quality flag from provider (e.g. traffic influence) */
   siteInfluence?: string | null
 
