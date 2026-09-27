@@ -1,5 +1,46 @@
 # Engineering State — flowstate-v5
 
+### 2026-09-27 — Session handoff pick-up: listener transcript audit + fallback dispatch fix (PR #29)
+
+Verified live state (local dev, main @ 2891fc6):
+- Queue proxy live: 24 items. Dunn Creek (12717 Dunn Creek Rd) null
+  address/wholesalePrice EXPLAINED — not an engine gap: its eval came back
+  INSUFFICIENT_COMPS so no ARV/MAO exists; listener flagged it HUMAN_OFFER
+  (see Devin listener transcript 02:29Z). displayName carries the address;
+  give-offer/[jobId] falls back address → displayName → leadId.
+- Listener session devin-fbfcfad371534372bff22b123657c41f ("Conversation
+  Engine") is healthy — status suspended (wakes on message), 1351 msgs.
+  Already processed REAL dispatches 9/26: PREP OFFER 4330 31st St S (lead
+  created, REVIEW email to owner), 603 Gove St (REVIEW x3, PoF worked
+  through doubleclose), 6415 Wenham Ct (REVIEW sent); NO MARGIN 276
+  Colewood Way (exit text sent) + test lead_test_e2e123 ok. The
+  route→listener→Close path is PROVEN. The unexercised seam: engine
+  offer-draft {status:pending} — every past dispatch lacked leadId
+  (`resolve by address`) since the dead CLOSE_API_KEY makes resolveLeadId
+  401. Queue clicks DO carry leadId+opportunityId, so they exercise it.
+- CLOSE_API_KEY still dead (verified 401 on close.com /me/). Only affects
+  worker-side leadId resolution — dispatches fall back to address
+  resolution and the listener's own Close creds work fine. Still blocks
+  engine offer-draft for non-queue (analyze-page) dispatches.
+  Needs: new key from user → .dev.vars + `wrangler secret put` + update
+  the Devin listener's session secret.
+
+Bug found + fixed on fix/give-offer-fallback-dispatch (PR #29):
+- QueueFallback Prep was enabled on NEGATIVE wholesalePrice (1775 E 23rd
+  St -$29,101; 481 Golfair Blvd -$8,220) → API z.positive() 400. Now
+  disabled unless wp > 0. Null-wp items were already disabled.
+- Fallback dispatch now passes opportunityId (was dropped; queue items
+  carry it — lets the listener correlate the Close opp directly).
+- tsc --noEmit clean.
+
+Also observed (engine-side data quality, flag if it matters): 3 more
+null-wholesalePrice items (2295 Lake Dr, 5851 Dunmire Ave, 10090 Alvin
+Ct) and the 2 negatives above; metrics.show offersPrepped=1.
+
+Next: merge #29 after review; live Prep click on a queue item (proposed:
+9102 6th Ave — top of queue, agent already asked for a formal offer by
+email); CLOSE_API_KEY rotation when user supplies the new key.
+
 ### 2026-09-27 — Give Offer queue UX: report-first flow (#25-#28 merged)
 
 - Sidebar 'Give Offer' → /dashboard/give-offer redirects into the FIRST
