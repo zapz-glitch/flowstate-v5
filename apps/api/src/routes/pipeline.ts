@@ -69,10 +69,13 @@ async function engineJsonCached(
 
 /** Attach each queue item's asking price — the engine only sends
  * wholesalePrice; listPrice lives in our saved report's analysis JSON
- * (subject.listPrice / valuation.listPrice), keyed by the jobId inside
- * evalReportUrl. Runs once per cache refresh, not per request. */
+ * (subject.listPrice / valuation.listPrice). Primary key is the jobId
+ * inside evalReportUrl; when that yields nothing (the queued re-eval's
+ * report never persisted, or points at another env), fall back to the
+ * newest saved report carrying the item's leadId — the engine passes
+ * leadId into the eval so sibling reports share it. */
 async function enrichQueueListPrices(env: Env, body: unknown): Promise<unknown> {
-  const items = (body as { items?: Array<{ evalReportUrl?: string | null; listPrice?: number | null }> })?.items
+  const items = (body as { items?: Array<{ evalReportUrl?: string | null; leadId?: string | null; listPrice?: number | null }> })?.items
   if (!Array.isArray(items) || items.length === 0) return body
   const jobIdOf = (item: { evalReportUrl?: string | null }) =>
     item.evalReportUrl?.match(/\/reports\/(job_[^/?#]+)/)?.[1] ?? null
@@ -102,6 +105,42 @@ async function enrichQueueListPrices(env: Env, body: unknown): Promise<unknown> 
   for (const item of items) {
     const jobId = jobIdOf(item)
     item.listPrice = jobId ? (priceByJob.get(jobId) ?? null) : null
+  }
+
+  // LeadId fallback for items still null — a sibling report under the
+  // same lead may carry the ask (queue jobIds occasionally reference
+  // evals that never persisted a saved report).
+  const missingLeads = [...new Set(
+    items.filter((i) => i.listPrice == null && i.leadId).map((i) => i.leadId as string),
+  )]
+  if (missingLeads.length > 0) {
+    const lrows = await env.DB.prepare(
+      `SELECT json_extract(full_response_json, '$.leadId') AS lead_id,
+              COALESCE(json_extract(full_response_json, '$.subject.listPrice'),
+                       json_extract(full_response_json, '$.valuation.listPrice')) AS lp
+         FROM saved_reports
+        WHERE json_extract(full_response_json, '$.leadId') IN (${missingLeads.map(() => '?').join(',')})
+          AND COALESCE(json_extract(full_response_json, '$.subject.listPrice'),
+                       json_extract(full_response_json, '$.valuation.listPrice')) IS NOT NULL
+        ORDER BY created_at DESC`,
+    ).bind(...missingLeads).all<{ lead_id: string | null; lp: number | null }>()
+      .catch((e) => {
+        console.error('[Pipeline] listPrice leadId fallback failed:', e)
+        return null
+      })
+
+    const priceByLead = new Map<string, number>()
+    for (const r of lrows?.results ?? []) {
+      // Rows arrive newest-first — keep the first hit per lead.
+      if (r.lead_id && typeof r.lp === 'number' && r.lp > 0 && !priceByLead.has(r.lead_id)) {
+        priceByLead.set(r.lead_id, r.lp)
+      }
+    }
+    for (const item of items) {
+      if (item.listPrice == null && item.leadId) {
+        item.listPrice = priceByLead.get(item.leadId) ?? null
+      }
+    }
   }
   return body
 }

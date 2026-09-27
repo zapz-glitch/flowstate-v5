@@ -10,6 +10,18 @@ imports), React replays → fresh thenable → suspends again → crash.
 Race-dependent: explains "was working, now it's not" across deploys.
 Fixed with useMemo on jobId. Verified only occurrence of the pattern.
 
+### 2026-09-27 — listPrice leadId fallback (root-cause traced)
+
+User: List shows on Property Search + Reports but not Give Offer.
+Full trace: 15/24 queue items enrich via evalReportUrl jobId; of the
+9 nulls, Close leads/props carry no ask either — EXCEPT Moon Lake,
+whose Close lead has List Price Realism=medium. Its queue jobId
+(job_1790464132326) never persisted a saved_report, but a sibling
+report under the SAME leadId exists with lp=$220,000. Reports store
+leadId inside full_response_json → exact-join fallback when the jobId
+lookup yields nothing. Remaining 7 nulls genuinely have no ask
+anywhere (verified: report JSON, lead custom fields, opp value=0).
+
 ### 2026-09-27 — One-click offers + VersionGuard (stale-bundle root cause)
 
 User kept reporting shipped fixes as "not working" — verified the
