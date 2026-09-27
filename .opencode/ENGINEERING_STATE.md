@@ -1,5 +1,13 @@
 # Engineering State — flowstate-v5
 
+### 2026-09-27 — Landing chrome opaque too (PR #35)
+
+Completes the translucency sweep: landing SiteHeader scrolled state +
+SiteShell floating button → solid bg-background. Verified all theme
+tokens are solid HSL (no alpha), so bg-background/bg-popover/bg-card
+match the active preset exactly — bright-indoor included. Nothing
+translucent remains outside modal scrims + map badges.
+
 ### 2026-09-27 — "Page couldn't load" = deploy-window staleness; chunk-load self-heal added (PR #34)
 
 User report: /dashboard/give-offer showed the browser's "This page
