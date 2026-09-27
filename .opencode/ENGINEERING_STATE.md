@@ -1,5 +1,16 @@
 # Engineering State — flowstate-v5
 
+### 2026-09-28 — comp Street View thumbnails: radius fix
+
+Some comps showed blank insignia while others had imagery. Verified
+live against Moselle report's comps (Saint Johns FL): Street View
+Static API default 50m radius → ZERO_RESULTS for half the comps —
+newer subdivision streets lack coverage near the pin. radius=500
+resolves all 10 (nearest covered street a block or two over is still
+representative). True no-coverage keeps the insignia fallback.
+Maps Static (satellite) is NOT enabled on the project — no aerial
+fallback available without enabling it in Cloud Console.
+
 ### 2026-09-28 — listPrice rerun recovery + valuation-box placement
 
 Root cause of "rerun doesn't bring list price": `listing-scraper.ts`
