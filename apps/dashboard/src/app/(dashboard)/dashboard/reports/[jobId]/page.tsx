@@ -54,7 +54,7 @@ function QueueFallback({ queue }: {
   queue: {
     node: React.ReactNode
     onDecided: () => void
-    fallback?: { leadId: string | null; address: string; wholesalePrice: number | null }
+    fallback?: { leadId: string | null; address: string; wholesalePrice: number | null; opportunityId?: string | null }
   }
 }) {
   const item = queue.fallback!
@@ -70,6 +70,7 @@ function QueueFallback({ queue }: {
             leadId: item.leadId ?? undefined,
             propertyAddress: item.address,
             purchasePrice: item.wholesalePrice ?? 0,
+            opportunityId: item.opportunityId ?? undefined,
           })
         : await declineOffer({ leadId: item.leadId ?? undefined, propertyAddress: item.address })
       if (!res.ok) {
@@ -117,7 +118,7 @@ function QueueFallback({ queue }: {
                 <button
                   type="button"
                   onClick={() => decide('prep_offer')}
-                  disabled={busy != null || !item.wholesalePrice}
+                  disabled={busy != null || !(item.wholesalePrice != null && item.wholesalePrice > 0)}
                   className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded border border-emerald-600/40 text-xs font-medium text-emerald-600 hover:bg-emerald-500/10 transition-colors disabled:opacity-50 dark:text-emerald-400"
                 >
                   {busy === 'prep_offer' ? <RefreshCw size={13} className="animate-spin" /> : <FileSignature size={13} />}
@@ -151,7 +152,7 @@ export default function DashboardReportPage({ params, queue }: {
   queue?: {
     node: React.ReactNode
     onDecided: () => void
-    fallback?: { leadId: string | null; address: string; wholesalePrice: number | null }
+    fallback?: { leadId: string | null; address: string; wholesalePrice: number | null; opportunityId?: string | null }
   }
 }) {
   const { jobId } = use(params)
