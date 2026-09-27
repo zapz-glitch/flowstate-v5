@@ -59,10 +59,11 @@ function QueueFallback({ queue }: {
   const item = queue.fallback!
   const [busy, setBusy] = useState<'prep_offer' | 'no_margin' | null>(null)
   const [result, setResult] = useState<{ ok: boolean; label: string } | null>(null)
-  const [priceEntry, setPriceEntry] = useState(false)
-  const [offerAmount, setOfferAmount] = useState('')
 
-  const decide = async (workflow: 'prep_offer' | 'no_margin', price?: number) => {
+  // Offers dispatch at the queue's computed price only — no overrides.
+  const canOffer = item.wholesalePrice != null && item.wholesalePrice > 0
+
+  const decide = async (workflow: 'prep_offer' | 'no_margin') => {
     if (busy) return
     setBusy(workflow)
     try {
@@ -70,7 +71,7 @@ function QueueFallback({ queue }: {
         ? await dispatchOfferPrep({
             leadId: item.leadId ?? undefined,
             propertyAddress: item.address,
-            purchasePrice: price ?? item.wholesalePrice ?? 0,
+            purchasePrice: item.wholesalePrice ?? 0,
             opportunityId: item.opportunityId ?? undefined,
           })
         : await declineOffer({ leadId: item.leadId ?? undefined, propertyAddress: item.address })
@@ -98,11 +99,9 @@ function QueueFallback({ queue }: {
           <div className="px-4 pt-4 pb-3 border-b border-border">
             <div className="text-[9px] uppercase tracking-wider text-foreground-tertiary mb-1">Ready for offer</div>
             <div className="text-base font-semibold">{item.address}</div>
-            {item.listPrice != null && (
-              <div className="text-xs text-foreground-secondary mt-1 tabular-nums">
-                List <b className="text-foreground">${item.listPrice.toLocaleString('en-US')}</b>
-              </div>
-            )}
+            <div className="text-xs text-foreground-secondary mt-1 tabular-nums">
+              List <b className="text-foreground">{item.listPrice != null ? `$${item.listPrice.toLocaleString('en-US')}` : '—'}</b>
+            </div>
             {item.wholesalePrice != null && (
               <div className="text-xs text-foreground-secondary mt-1 tabular-nums">
                 Wholesale <b className="text-foreground">${item.wholesalePrice.toLocaleString('en-US')}</b>
@@ -119,46 +118,14 @@ function QueueFallback({ queue }: {
                 {result.ok ? <Check size={14} /> : <X size={14} />}
                 {result.label}
               </div>
-            ) : priceEntry ? (
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-foreground-tertiary">Offer $</span>
-                <input
-                  autoFocus
-                  inputMode="numeric"
-                  value={offerAmount}
-                  onChange={(e) => setOfferAmount(e.target.value.replace(/[^0-9]/g, ''))}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && parseInt(offerAmount, 10) > 0) { setPriceEntry(false); decide('prep_offer', parseInt(offerAmount, 10)) }
-                    if (e.key === 'Escape') setPriceEntry(false)
-                  }}
-                  placeholder="amount"
-                  className="flex-1 min-w-0 px-2 py-1.5 rounded border border-border bg-background text-xs tabular-nums outline-none focus:border-emerald-600/60"
-                />
-                <button
-                  type="button"
-                  onClick={() => { const amt = parseInt(offerAmount, 10); if (amt > 0) { setPriceEntry(false); decide('prep_offer', amt) } }}
-                  disabled={busy != null || !(parseInt(offerAmount, 10) > 0)}
-                  className="flex items-center justify-center gap-1.5 px-3 py-1.5 rounded border border-emerald-600/40 text-xs font-medium text-emerald-600 hover:bg-emerald-500/10 transition-colors disabled:opacity-50 dark:text-emerald-400"
-                >
-                  {busy === 'prep_offer' ? <RefreshCw size={13} className="animate-spin" /> : <Check size={13} />}
-                  Send
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPriceEntry(false)}
-                  className="p-1.5 rounded text-foreground-tertiary hover:text-foreground hover:bg-secondary transition-colors"
-                  title="Cancel"
-                >
-                  <X size={13} />
-                </button>
-              </div>
             ) : (
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => { setOfferAmount(item.wholesalePrice != null && item.wholesalePrice > 0 ? String(Math.round(item.wholesalePrice)) : ''); setPriceEntry(true) }}
-                  disabled={busy != null}
+                  onClick={() => decide('prep_offer')}
+                  disabled={busy != null || !canOffer}
                   className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded border border-emerald-600/40 text-xs font-medium text-emerald-600 hover:bg-emerald-500/10 transition-colors disabled:opacity-50 dark:text-emerald-400"
+                  title={canOffer ? `Prep offer at $${item.wholesalePrice!.toLocaleString('en-US')}` : 'No computed offer price'}
                 >
                   {busy === 'prep_offer' ? <RefreshCw size={13} className="animate-spin" /> : <FileSignature size={13} />}
                   Prep offer
