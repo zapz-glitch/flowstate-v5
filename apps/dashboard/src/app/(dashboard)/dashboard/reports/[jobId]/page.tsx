@@ -91,7 +91,7 @@ function QueueFallback({ queue }: {
   }
 
   return (
-    <div className="playground-bg -m-4 sm:-m-6 lg:-m-8 min-h-screen flex flex-col">
+    <div className="playground-bg -mx-4 sm:-mx-6 lg:-mx-8 min-h-screen flex flex-col">
       {queue.node}
       <div className="flex-1 flex items-center justify-center p-6">
         <div className="w-full max-w-md border border-border/60 bg-background shadow-sm corner-accents corner-accents-bottom">
@@ -692,10 +692,10 @@ export default function DashboardReportPage({ params, queue }: {
 
   if (loading || (report && report.jobId !== jobId && !error)) {
     return (
-      <>
+      <div className="playground-bg -mx-4 sm:-mx-6 lg:-mx-8 min-h-screen">
         {queue?.node}
         <ReportLoading />
-      </>
+      </div>
     )
   }
 
@@ -709,10 +709,10 @@ export default function DashboardReportPage({ params, queue }: {
     // lands; keep the skeleton up instead of flashing "Report Not Found".
     if (queue && queue.loaded === false) {
       return (
-        <>
+        <div className="playground-bg -mx-4 sm:-mx-6 lg:-mx-8 min-h-screen">
           {queue.node}
           <ReportLoading />
-        </>
+        </div>
       )
     }
     return (
@@ -736,14 +736,12 @@ export default function DashboardReportPage({ params, queue }: {
 
   return (
     <div className={cn('playground-bg -m-4 sm:-m-6 lg:-m-8', hasMapData ? 'min-h-screen lg:h-[100dvh] flex flex-col lg:overflow-hidden' : 'min-h-screen p-4 sm:p-6 lg:p-8 space-y-6')}>
-      {/* Give Offer queue bar — only when viewed through the queue */}
-      {queue?.node}
       {/* Header toolbar — same band geometry + card chrome as Property Search */}
       <div className={cn(
         'no-print z-20',
         hasMapData && 'sticky top-[calc(3.5rem+var(--sat))] lg:top-0 bg-background lg:bg-transparent px-4 sm:px-6 lg:px-4 pt-3 pb-1 lg:pt-4 lg:pb-0 lg:h-20 lg:flex lg:items-center lg:border-b lg:border-border flex-shrink-0',
       )}>
-        <div className="w-full border border-border/60 bg-background shadow-sm corner-accents corner-accents-bottom">
+        <div className="w-full border border-border/60 overflow-hidden bg-background shadow-sm corner-accents corner-accents-bottom">
           <div className="px-4 py-3 flex items-center gap-3">
             <Link href="/dashboard/reports" className="w-7 h-7 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0 hover:bg-primary/20 transition-colors" title="Back to reports">
               <ArrowLeft className="w-3.5 h-3.5 text-primary" />
@@ -812,6 +810,11 @@ export default function DashboardReportPage({ params, queue }: {
             </div>
         </div>
       </div>
+
+      {/* Give Offer queue bar — sits below the header band; the page's
+          -m-8 pulls the band's bottom border to the sidebar-divider
+          baseline, which would clip a thin strip rendered above it. */}
+      {queue?.node}
 
       {/* Refresh result banner */}
       {refreshResult && (

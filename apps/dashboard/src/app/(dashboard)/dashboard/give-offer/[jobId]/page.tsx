@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import { ChevronLeft, ChevronRight, Timer, ListFilter } from 'lucide-react'
 import DashboardReportPage from '../../reports/[jobId]/page'
 import { getOfferQueue, type PipelineItem } from '../actions'
+import { formatMoneyThousands as fmtK } from '@/components/analysis/valuation-number'
 import { decidedIds, jobIdForItem, parseQueuedAt, sortedQueue, formatWait, WAIT_FILTER_LABELS, type WaitFilter, getCachedQueue, setCachedQueue } from '../queue'
 
 const POLL_MS = 5000
@@ -88,6 +89,11 @@ export default function GiveOfferReportPage({ params }: { params: Promise<{ jobI
         <span className="flex items-center gap-1 text-foreground-secondary tabular-nums">
           <Timer size={11} className="text-foreground-tertiary" />
           {formatWait(Math.floor((now - parseQueuedAt(current.queuedAt)) / 1000))}
+        </span>
+      )}
+      {current?.listPrice != null && (
+        <span className="text-foreground-secondary tabular-nums">
+          List <b>${fmtK(current.listPrice)}</b>
         </span>
       )}
       <span className="flex items-center gap-1 ml-auto">
