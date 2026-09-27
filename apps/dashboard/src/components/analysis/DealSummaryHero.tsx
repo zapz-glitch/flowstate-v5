@@ -15,22 +15,25 @@ interface DealSummaryHeroProps {
   onRerun?: () => void
   /** True while a rerun is in flight */
   rerunning?: boolean
-  /** Fire an offer workflow — returns the outcome the header flashes */
-  onOfferWorkflow?: (workflow: 'prep_offer' | 'no_margin') => Promise<{ ok: boolean; label: string }>
+  /** Fire an offer workflow — returns the outcome the header flashes.
+   *  prep_offer accepts an offerPrice override (defaults to wholesale). */
+  onOfferWorkflow?: (workflow: 'prep_offer' | 'no_margin', offerPrice?: number) => Promise<{ ok: boolean; label: string }>
 }
 
 export function DealSummaryHero({ valuation, isRecalculated, onOpenSettings, onRerun, rerunning, onOfferWorkflow }: DealSummaryHeroProps) {
 
-  // Offer-button state machine: idle (buttons) → busy → done (result chip)
-  // → back to idle. Everything crossfades via animate-in/fade-in.
-  const [offerPhase, setOfferPhase] = useState<'idle' | 'busy' | 'done'>('idle')
+  // Offer-button state machine: idle (buttons) → confirm (price input,
+  // prep only) → busy → done (result chip) → back to idle.
+  // Everything crossfades via animate-in/fade-in.
+  const [offerPhase, setOfferPhase] = useState<'idle' | 'confirm' | 'busy' | 'done'>('idle')
   const [offerOutcome, setOfferOutcome] = useState<{ ok: boolean; label: string } | null>(null)
+  const [offerAmount, setOfferAmount] = useState('')
 
-  const fireOffer = async (workflow: 'prep_offer' | 'no_margin') => {
-    if (!onOfferWorkflow || offerPhase !== 'idle') return
+  const fireOffer = async (workflow: 'prep_offer' | 'no_margin', offerPrice?: number) => {
+    if (!onOfferWorkflow || (offerPhase !== 'idle' && offerPhase !== 'confirm')) return
     setOfferPhase('busy')
     try {
-      setOfferOutcome(await onOfferWorkflow(workflow))
+      setOfferOutcome(await onOfferWorkflow(workflow, offerPrice))
     } catch {
       setOfferOutcome({ ok: false, label: 'Dispatch failed' })
     }
@@ -39,6 +42,18 @@ export function DealSummaryHero({ valuation, isRecalculated, onOpenSettings, onR
       setOfferPhase('idle')
       setOfferOutcome(null)
     }, 3500)
+  }
+
+  const openPrepConfirm = () => {
+    const p = valuation.wholesalePrice ?? valuation.buyPrice
+    setOfferAmount(p != null && p > 0 ? String(Math.round(p)) : '')
+    setOfferPhase('confirm')
+  }
+
+  const confirmPrep = () => {
+    const amt = parseInt(offerAmount, 10)
+    if (!(amt > 0)) return
+    fireOffer('prep_offer', amt)
   }
 
   return (
@@ -74,9 +89,9 @@ export function DealSummaryHero({ valuation, isRecalculated, onOpenSettings, onR
               <div key="offer-buttons" className="flex items-center gap-1 animate-in fade-in duration-300">
                 <button
                   type="button"
-                  onClick={() => fireOffer('prep_offer')}
+                  onClick={openPrepConfirm}
                   className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium text-emerald-600 hover:bg-emerald-500/10 transition-colors no-print dark:text-emerald-400"
-                  title="Prep offer — dispatches to the Devin listener + engine"
+                  title="Prep offer — set the offer amount, then dispatch"
                 >
                   <FileSignature className="w-3 h-3" />
                   Prep offer
@@ -89,6 +104,40 @@ export function DealSummaryHero({ valuation, isRecalculated, onOpenSettings, onR
                 >
                   <CircleSlash className="w-3 h-3" />
                   No margin
+                </button>
+              </div>
+            ) : offerPhase === 'confirm' ? (
+              <div key="offer-confirm" className="flex items-center gap-1 animate-in fade-in duration-300">
+                <span className="text-[10px] text-foreground-tertiary">Offer $</span>
+                <input
+                  autoFocus
+                  inputMode="numeric"
+                  value={offerAmount}
+                  onChange={(e) => setOfferAmount(e.target.value.replace(/[^0-9]/g, ''))}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') confirmPrep()
+                    if (e.key === 'Escape') setOfferPhase('idle')
+                  }}
+                  placeholder="amount"
+                  className="w-20 px-1.5 py-0.5 rounded border border-border bg-background text-[10px] tabular-nums outline-none focus:border-emerald-600/60"
+                />
+                <button
+                  type="button"
+                  onClick={confirmPrep}
+                  disabled={!(parseInt(offerAmount, 10) > 0)}
+                  className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium text-emerald-600 hover:bg-emerald-500/10 transition-colors disabled:opacity-40 no-print dark:text-emerald-400"
+                  title="Dispatch offer prep at this price"
+                >
+                  <Check className="w-3 h-3" />
+                  Send
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setOfferPhase('idle')}
+                  className="p-0.5 rounded text-foreground-tertiary hover:text-foreground hover:bg-secondary transition-colors"
+                  title="Cancel"
+                >
+                  <X className="w-3 h-3" />
                 </button>
               </div>
             ) : offerPhase === 'busy' ? (

@@ -647,11 +647,11 @@ export default function AnalyzePage() {
 
   // ─── Offer workflows (Devin listener session + engine) ───────────────
   // The hero owns the busy→result animation; this just returns the outcome.
-  const handleOfferWorkflow = useCallback(async (workflow: OfferWorkflow): Promise<{ ok: boolean; label: string }> => {
+  const handleOfferWorkflow = useCallback(async (workflow: OfferWorkflow, offerPrice?: number): Promise<{ ok: boolean; label: string }> => {
     const propertyAddress = analysisResult?.subject?.address ?? address
     if (!propertyAddress) return { ok: false, label: 'No address' }
-    const purchasePrice = displayValuation?.wholesalePrice ?? displayValuation?.buyPrice
-    if (workflow === 'prep_offer' && !purchasePrice) return { ok: false, label: 'Valuation incomplete' }
+    const purchasePrice = offerPrice ?? displayValuation?.wholesalePrice ?? displayValuation?.buyPrice
+    if (workflow === 'prep_offer' && !(purchasePrice && purchasePrice > 0)) return { ok: false, label: 'Valuation incomplete' }
     const res = workflow === 'prep_offer'
       ? await dispatchOfferPrep({
           leadId: analysisResult?.leadId ?? undefined,
