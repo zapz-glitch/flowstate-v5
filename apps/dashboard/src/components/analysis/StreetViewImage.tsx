@@ -91,5 +91,8 @@ export function getStreetViewUrl(opts: {
 
   const w = opts.width ?? 400
   const h = opts.height ?? 300
-  return `https://maps.googleapis.com/maps/api/streetview?location=${location}&size=${w}x${h}&key=${key}&source=outdoor&return_error_code=true`
+  // radius=500 — the default 50m misses comps inside newer subdivisions
+  // whose streets the Street View car never drove; the nearest pano a
+  // few streets over is still representative imagery.
+  return `https://maps.googleapis.com/maps/api/streetview?location=${location}&size=${w}x${h}&key=${key}&source=outdoor&radius=500&return_error_code=true`
 }
