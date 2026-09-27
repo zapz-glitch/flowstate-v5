@@ -139,6 +139,7 @@ export default function GiveOfferReportPage({ params }: { params: Promise<{ jobI
               leadId: current.leadId,
               address: current.address ?? current.displayName ?? current.leadId,
               wholesalePrice: current.wholesalePrice,
+              listPrice: current.listPrice ?? null,
               opportunityId: current.opportunityId,
             }
           : undefined,

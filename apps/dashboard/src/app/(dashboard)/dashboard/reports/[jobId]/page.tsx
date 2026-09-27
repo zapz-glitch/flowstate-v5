@@ -53,7 +53,7 @@ function QueueFallback({ queue }: {
   queue: {
     node: React.ReactNode
     onDecided: () => void
-    fallback?: { leadId: string | null; address: string; wholesalePrice: number | null; opportunityId?: string | null }
+    fallback?: { leadId: string | null; address: string; wholesalePrice: number | null; listPrice?: number | null; opportunityId?: string | null }
   }
 }) {
   const item = queue.fallback!
@@ -98,6 +98,11 @@ function QueueFallback({ queue }: {
           <div className="px-4 pt-4 pb-3 border-b border-border">
             <div className="text-[9px] uppercase tracking-wider text-foreground-tertiary mb-1">Ready for offer</div>
             <div className="text-base font-semibold">{item.address}</div>
+            {item.listPrice != null && (
+              <div className="text-xs text-foreground-secondary mt-1 tabular-nums">
+                List <b className="text-foreground">${item.listPrice.toLocaleString('en-US')}</b>
+              </div>
+            )}
             {item.wholesalePrice != null && (
               <div className="text-xs text-foreground-secondary mt-1 tabular-nums">
                 Wholesale <b className="text-foreground">${item.wholesalePrice.toLocaleString('en-US')}</b>
@@ -189,7 +194,7 @@ export default function DashboardReportPage({ params, queue }: {
     /** False while the queue fetch is still in flight — an unresolved
      *  fallback doesn't mean "not found" yet. */
     loaded?: boolean
-    fallback?: { leadId: string | null; address: string; wholesalePrice: number | null; opportunityId?: string | null }
+    fallback?: { leadId: string | null; address: string; wholesalePrice: number | null; listPrice?: number | null; opportunityId?: string | null }
   }
 }) {
   const { jobId } = use(params)
