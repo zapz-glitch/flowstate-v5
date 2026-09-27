@@ -1,5 +1,18 @@
 # Engineering State — flowstate-v5
 
+### 2026-09-27 — Opaque chrome sweep (PR #32)
+
+User report: menu bar translucent — items unreadable over page content,
+worst on small/minimized windows and light theme.
+
+Fixed: mobile top bar + bottom tab bar (bg-background/80 + blur → solid
+bg-background), report sticky toolbar, batch review bar, docs header,
+analyze search cards, valuation hero, map overlay strip, map buttons.
+Modal scrims (bg-black/50) + floating map badges keep intentional
+translucency. Landing site header untouched (marketing aesthetic).
+Note: commit briefly landed on local main by accident — moved to
+fix/opaque-chrome and main reset before push; no push of main occurred.
+
 ### 2026-09-27 — Editable offer amount on Prep dispatch (PR #31)
 
 User requirement: review + edit the report before firing Prep; the
