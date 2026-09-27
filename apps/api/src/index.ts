@@ -37,6 +37,7 @@ import typeaheadRoute from './routes/typeahead'
 import compSelectionRoute from './routes/comp-selection'
 import mlExportRoute from './routes/ml-export'
 import offersRoute from './routes/offers'
+import { pipelineReads } from './routes/pipeline'
 import { cdarv, cdarvInternal } from './routes/cdarv'
 import sseStream from './routes/sse-stream'
 import ghlWebhook from './routes/webhooks/ghl'
@@ -163,6 +164,7 @@ v1.use('*', authMiddleware)
 v1.route('/analyze', analyze)
 v1.route('/ml', mlExportRoute)
 v1.route('/offers', offersRoute)
+v1.route('/pipeline', pipelineReads)
 
 app.route('/v1', v1)
 

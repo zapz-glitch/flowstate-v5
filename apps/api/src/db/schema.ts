@@ -792,3 +792,4 @@ export const tasks = sqliteTable(
     index('idx_tasks_done').on(table.userId, table.done),
   ]
 )
+

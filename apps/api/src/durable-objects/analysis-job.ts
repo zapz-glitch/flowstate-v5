@@ -35,6 +35,7 @@ import type { NormalizedProperty, NormalizedComparable } from '../services/prope
 import { drizzle } from 'drizzle-orm/d1'
 import { and, eq } from 'drizzle-orm'
 import { upsertPropertyReport } from '../services/report-upsert'
+import { notifyEvalComplete } from '../routes/offers'
 import { analysisRuns, savedReports } from '../db/schema'
 import {
   EVAL_ERROR_TTL_SECONDS,
@@ -775,6 +776,7 @@ export class AnalysisJobDO {
         propertyZip: property.zipCode || '',
         propertyClip: property.id || null,
       }, reportData)
+
       if (config.evalResultCacheKey) {
         await this.env.API_CACHE.put(config.evalResultCacheKey, config.jobId, {
           expirationTtl: 21 * 24 * 60 * 60, // 21 days
@@ -1003,6 +1005,13 @@ export class AnalysisJobDO {
     } catch (err) {
       console.warn('[AnalysisJobDO] recordRun failed (non-fatal):', err instanceof Error ? err.message : err)
     }
+
+    // Terminal state → tell the engine so underwriting→Give Offer moves
+    // in the same tick. The worker pulls the result by jobId; unknown
+    // (dashboard-run) jobIds 404, which is fine. Fire-and-forget.
+    this.state.waitUntil(
+      notifyEvalComplete(this.env, config.jobId).catch(() => { /* best-effort */ }),
+    )
   }
 
   private async pushEvent(event: string, data: unknown): Promise<void> {
