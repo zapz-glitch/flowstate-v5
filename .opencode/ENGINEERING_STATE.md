@@ -1,5 +1,22 @@
 # Engineering State — flowstate-v5
 
+### 2026-09-27 — Give Offer is now a landing page, not an auto-redirect (PR #36)
+
+User hit "This page couldn't load" on /dashboard/give-offer/job_1790…
+(reported while deploys were rolling; prod serves the URL 200, worker
+tail clean, report row verified complete in prod D1 — the visible
+failure was deploy-window staleness, #34 covers the reload path).
+
+Per user direction, Give Offer no longer auto-redirects into the first
+queued report. /dashboard/give-offer is a stable landing: metrics strip
++ reports-style queue list (position, live wait, wholesale, Review →)
++ Start offers button → longest-waiting item. Rows link to
+give-offer/[jobId] directly. decidedIds moved to queue.ts (shared
+session hide). Queue bar label links back to the list.
+
+Verified: tsc clean; local authed page 200; real getOfferQueue action
+POST returns live queue.
+
 ### 2026-09-27 — Landing chrome opaque too (PR #35)
 
 Completes the translucency sweep: landing SiteHeader scrolled state +
