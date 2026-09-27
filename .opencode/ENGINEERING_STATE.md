@@ -1,5 +1,25 @@
 # Engineering State — flowstate-v5
 
+### 2026-09-27 — Queue latency + not-found flash fixed (PR #33)
+
+User report: Give Offer queue loads slowly; "page couldn't load" flashes
+~1s before the property record. Root causes found + fixed:
+
+- Engine /engine/queue + /engine/dashboard fan out ONE Close getLead per
+  queued opp SEQUENTIALLY — 3.5–4.9s measured for 24 items. Our proxies
+  now serve a shared KV copy stale-while-revalidate (30s): 4.8s cold →
+  7ms warm; dashboard polls no longer hammer the engine. ENGINE-SIDE
+  follow-up still open: parallelize those getLead calls (engine repo
+  zapz-glitch/conversation-intelligence, index.ts ~L1041).
+- Flash: report-less queue items (Dunn Creek INSUFFICIENT_COMPS, Moon
+  Lake failed eval) 404 fast while the 4s queue fetch is in flight →
+  generic "Report Not Found" rendered until the poll landed.
+  give-offer/[jobId] now passes queue.loaded; error branch keeps
+  skeleton+queue bar until loaded, then QueueFallback.
+
+Verified: tsc both apps; live queue 4.8s→7ms after cache;
+engine-proxy KV keys populate.
+
 ### 2026-09-27 — Opaque chrome sweep (PR #32)
 
 User report: menu bar translucent — items unreadable over page content,
