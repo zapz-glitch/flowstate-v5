@@ -95,7 +95,7 @@ function QueueFallback({ queue }: {
     <div className="min-h-screen flex flex-col">
       {queue.node}
       <div className="flex-1 flex items-center justify-center p-6">
-        <div className="w-full max-w-md border border-border rounded-sm bg-background/95">
+        <div className="w-full max-w-md border border-border rounded-sm bg-background">
           <div className="px-4 pt-4 pb-3 border-b border-border">
             <div className="text-[9px] uppercase tracking-wider text-foreground-tertiary mb-1">Ready for offer</div>
             <div className="text-base font-semibold">{item.address}</div>
@@ -734,7 +734,7 @@ export default function DashboardReportPage({ params, queue }: {
       {/* Give Offer queue bar — only when viewed through the queue */}
       {queue?.node}
       {/* Header toolbar — address + actions only */}
-      <div className="sticky z-20 no-print border-b border-border bg-background/95 backdrop-blur-xl top-[calc(3.5rem+var(--sat))] lg:top-0">
+      <div className="sticky z-20 no-print border-b border-border bg-background top-[calc(3.5rem+var(--sat))] lg:top-0">
         <div className={cn('px-3 sm:px-5 py-2 flex items-center gap-2 sm:gap-4', hasMapData ? 'lg:h-20 lg:py-0' : 'lg:h-12 lg:py-0')}>
           <Link href="/dashboard/reports" className="p-1 rounded-lg hover:bg-secondary transition-colors flex-shrink-0">
             <ArrowLeft className="w-4 h-4 text-foreground-tertiary" />
@@ -828,7 +828,7 @@ export default function DashboardReportPage({ params, queue }: {
       {/* Refresh/AI status pill */}
       {(refreshing || aiAnalyzing) && (
         <div className="flex justify-center py-1.5 flex-shrink-0 no-print">
-          <div className="flex items-center gap-2 px-4 py-1.5 rounded-full bg-background/90 border border-border shadow-sm">
+          <div className="flex items-center gap-2 px-4 py-1.5 rounded-full bg-background border border-border shadow-sm">
             <Loader2 className="w-3.5 h-3.5 text-primary animate-spin" />
             <span className="text-xs font-medium text-foreground-secondary">
               {refreshing ? 'Refreshing data...' : 'AI selecting comps...'}
@@ -938,7 +938,7 @@ export default function DashboardReportPage({ params, queue }: {
 
       {/* Batch review bar — prev / queue position / next, fixed at bottom */}
       {batchQueue && navIndex >= 0 && (
-        <div className="fixed inset-x-0 z-30 no-print border-t border-border bg-background/95 backdrop-blur-xl bottom-[calc(3.5rem+var(--sab))] lg:bottom-0">
+        <div className="fixed inset-x-0 z-30 no-print border-t border-border bg-background bottom-[calc(3.5rem+var(--sab))] lg:bottom-0">
           <div className="px-3 sm:px-5 py-2 flex items-center justify-between gap-3">
             <div className="flex-1 min-w-0">
               {prevItem ? (
