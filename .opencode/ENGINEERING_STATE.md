@@ -1,5 +1,22 @@
 # Engineering State — flowstate-v5
 
+### 2026-09-27 — CLOSE_API_KEY rotated + Bearer→Basic fix (PR #30)
+
+- Root cause was TWO stacked bugs: every stored key was dead AND
+  resolveLeadId sent `Authorization: Bearer` — Close rejects Bearer even
+  for valid keys (verified live: valid key + Bearer 401, + Basic 200).
+  So leadId resolution NEVER worked; all dispatches fell back to
+  "resolve by address" and skipped engine offer-draft.
+- Fix: Basic auth `btoa(key + ':')` matching user-reports.ts + engine's
+  close.ts. Multi-match disambiguation now checks display_name too —
+  /lead/?query= doesn't expand `addresses` (verified: returns []).
+- New key (from Close UI) installed in .dev.vars + `wrangler secret put
+  CLOSE_API_KEY` (prod). Listener org secret untouched — its creds work.
+- Verified: `GET /lead/?query=9102 6th Ave` resolves to
+  lead_dcuIQEV5FzyLftu... = the queue item's leadId.
+- Prod now has working leadId resolution → engine offer-draft fires on
+  non-queue dispatches too.
+
 ### 2026-09-27 — Session handoff pick-up: listener transcript audit + fallback dispatch fix (PR #29)
 
 Verified live state (local dev, main @ 2891fc6):
