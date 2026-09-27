@@ -8,8 +8,10 @@
 
 import { Hono } from 'hono'
 import { z } from 'zod'
+import { drizzle } from 'drizzle-orm/d1'
 import type { Env } from '../types'
 import type { AuthContext } from '../middleware/auth'
+import { pipelineItemId, recordPipelineDecision } from '../services/pipeline'
 
 const offers = new Hono<{ Bindings: Env; Variables: { auth: AuthContext } }>()
 
@@ -150,6 +152,11 @@ offers.post('/prep', async (c) => {
   }
   await c.env.API_CACHE.put(dispatchKey, JSON.stringify(dispatch), { expirationTtl: DISPATCH_TTL })
 
+  // Advance the pipeline — Prep offer moves the item out of give_offer.
+  const db = drizzle(c.env.DB)
+  await recordPipelineDecision(db, dispatchId, 'prep_offer', body.propertyAddress)
+    .catch((e) => console.error('[Offers] pipeline decision failed:', e))
+
   return c.json({ ok: true, dispatched: true })
 })
 
@@ -169,12 +176,15 @@ offers.post('/decline', async (c) => {
   }
 
   const declineId = body.leadId
+    ?? (await resolveLeadId(c.env, body.propertyAddress ?? ''))
     ?? `addr:${(body.propertyAddress ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '-')}`
   await c.env.API_CACHE.put(
     `offer-decline:${declineId}`,
     JSON.stringify({ ...body, declinedAt: new Date().toISOString() }),
     { expirationTtl: DISPATCH_TTL },
   )
+  await recordPipelineDecision(drizzle(c.env.DB), declineId, 'no_margin', body.propertyAddress ?? '(unknown)')
+    .catch((e) => console.error('[Offers] pipeline decision failed:', e))
 
   // Same listener channel — the agent's no-margin workflow. The decline
   // is recorded already; the Devin message runs via waitUntil so its

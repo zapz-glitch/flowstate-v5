@@ -143,6 +143,9 @@ export interface Env {
   // Auth key for the conversation-intelligence engine worker
   // (offer-draft notifications on offer dispatch).
   ENGINE_API_KEY?: string
+  // Shared secret for POST /pipeline/events — the Devin listener and
+  // engine authenticate funnel telemetry with this bearer token.
+  FS_EVENTS_KEY?: string
 
   // ─── Better Auth ─────────────────────────────────────────────────────────────
   BETTER_AUTH_SECRET?: string

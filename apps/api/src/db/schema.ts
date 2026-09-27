@@ -792,3 +792,50 @@ export const tasks = sqliteTable(
     index('idx_tasks_done').on(table.userId, table.done),
   ]
 )
+
+// ==========================================
+// Offer pipeline — funnel events + live queue
+// ==========================================
+
+export const pipelineItems = sqliteTable(
+  'pipeline_items',
+  {
+    /** leadId when known, else `addr:<normalized>` */
+    id: text('id').primaryKey(),
+    address: text('address').notNull(),
+    /** underwriting | give_offer | offer_prepared | offer_sent | no_margin | declined */
+    stage: text('stage').notNull(),
+    stageEnteredAt: text('stage_entered_at').notNull(),
+    leadId: text('lead_id'),
+    opportunityId: text('opportunity_id'),
+    jobId: text('job_id'),
+    wholesalePrice: real('wholesale_price'),
+    decidedAt: text('decided_at'),
+    decision: text('decision'), // 'prep_offer' | 'no_margin'
+    /** seconds from give_offer entry to user decision */
+    decisionSeconds: integer('decision_seconds'),
+    createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
+    updatedAt: text('updated_at').notNull().$defaultFn(() => new Date().toISOString()),
+  },
+  (table) => [
+    index('idx_pipeline_items_stage').on(table.stage, table.stageEnteredAt),
+  ]
+)
+
+export const pipelineEvents = sqliteTable(
+  'pipeline_events',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    itemId: text('item_id'),
+    leadId: text('lead_id'),
+    /** reach_out | response | reactivated | sent_to_underwriting | underwriting_complete | offer_ready | offer_prepared | offer_sent | no_margin | declined | stage_change */
+    type: text('type').notNull(),
+    payloadJson: text('payload_json'),
+    at: text('at').notNull(),
+    createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
+  },
+  (table) => [
+    index('idx_pipeline_events_type').on(table.type, table.at),
+    index('idx_pipeline_events_item').on(table.itemId),
+  ]
+)
