@@ -10,6 +10,33 @@ imports), React replays → fresh thenable → suspends again → crash.
 Race-dependent: explains "was working, now it's not" across deploys.
 Fixed with useMemo on jobId. Verified only occurrence of the pattern.
 
+### 2026-09-27 — Unify report + give-offer chrome with Property Search
+
+User direction: Property Search is the reference layout — map its
+dimensions onto the report view and give offer view, top to bottom;
+page-specific buttons/functionality stay.
+
+Branch feat/unify-report-offer-chrome:
+- reports/[jobId]: outer wrapper gains playground-bg + same -m cancel;
+  no-map branch now matches analyze's single-column wrapper
+  (p-4 sm:p-6 lg:p-8 space-y-6). Toolbar rebuilt as the Property
+  Search header band — lg:h-20 border-b band (px-4 sm:px-6 lg:px-4)
+  containing a corner-accents card row (icon-tile back button,
+  address, autosave, History/Share/CRM/Download/Refresh actions).
+  Sticky kept on mobile under the top bar. Removed the forced sidebar
+  collapse — sidebar state now consistent with Property Search.
+  QueueFallback card gets the same chrome.
+- give-offer/[jobId]: queue bar gutters aligned to the same px
+  (px-4 sm:px-6 lg:px-4).
+- give-offer landing: full chrome — playground-bg full-bleed wrapper,
+  h-20 band + corner-accents header card (icon tile, title, queue
+  count, wait filter, Start offers), metrics strip + queue list in
+  matching bordered containers at the same content gutters.
+
+Verified: tsc --noEmit clean; eslint clean on the three files; all
+four routes (analyze, reports/[jobId], give-offer, give-offer/[jobId])
+return 200 on local dev with authed cookies.
+
 ### 2026-09-27 — Prod verification: #482 fix confirmed live; Prep click not yet fired
 
 Verification results (main @ 86f3576):

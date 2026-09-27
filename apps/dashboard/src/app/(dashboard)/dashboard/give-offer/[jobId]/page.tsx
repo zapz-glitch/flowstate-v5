@@ -79,7 +79,7 @@ export default function GiveOfferReportPage({ params }: { params: Promise<{ jobI
   }, [current, items, index, goTo])
 
   const bar = (
-    <div className="shrink-0 no-print border-b border-border bg-background px-3 sm:px-5 py-1.5 flex items-center gap-3 text-[11px]">
+    <div className="shrink-0 no-print border-b border-border bg-background px-4 sm:px-6 lg:px-4 py-1.5 flex items-center gap-3 text-[11px]">
       <Link href="/dashboard/give-offer" className="font-semibold hover:text-foreground-secondary transition-colors" title="Back to the offer queue">Give Offer</Link>
       <span className="text-foreground-tertiary tabular-nums">
         {index >= 0 ? `${index + 1} of ${items.length}` : `${items.length} queued`}
