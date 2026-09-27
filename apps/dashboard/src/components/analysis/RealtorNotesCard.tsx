@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { AlertTriangle, ChevronDown, PlusCircle, StickyNote } from 'lucide-react'
+import { AlertTriangle, ChevronDown, PlusCircle } from 'lucide-react'
 
 // ─── Realtor notes ───────────────────────────────────────────────────────────
 //
@@ -72,10 +72,7 @@ export function RealtorNotesCard({
   return (
     <section className="border border-border rounded-sm px-4 py-3 space-y-2 text-foreground break-words">
       <div className="flex items-baseline justify-between gap-2">
-        <h3 className="text-body-sm font-semibold flex items-center gap-1.5">
-          <StickyNote className="w-3.5 h-3.5 text-foreground-tertiary" />
-          Realtor notes
-        </h3>
+        <h3 className="text-body-sm font-semibold">Realtor notes</h3>
         <div className="flex items-center gap-2">
           {notes.length > 5 && (
             <button
