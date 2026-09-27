@@ -1,5 +1,75 @@
 # Engineering State — flowstate-v5
 
+### 2026-09-27 — ROOT CAUSE of "couldn't load": React #482 suspend loop (PR #37) + SESSION HANDOFF
+
+The user's Edge console captured it: `Uncaught Minified React error
+#482` thrown inside `use()`. #482 = >100 suspensions in one render pass.
+`give-offer/[jobId]` passed `params={Promise.resolve({jobId})}` — a new
+promise identity every render; when any child suspends (dynamic()
+imports), React replays → fresh thenable → suspends again → crash.
+Race-dependent: explains "was working, now it's not" across deploys.
+Fixed with useMemo on jobId. Verified only occurrence of the pattern.
+
+## LAST HANDOFF — resume here
+
+Session state: main @ 3359110, all 9 PRs (#29–#37) merged + deployed,
+working tree clean, no open branches. Local dev running: api=wrangler
+dev :8787 (PID 43675ish), dashboard=next dev :3000 (restarted once —
+previous server wedged; if :3000 stalls again, kill next-server and
+`cd apps/dashboard && npm run dev`).
+
+DONE this session:
+- CLOSE_API_KEY rotated (new key in .dev.vars + `wrangler secret put`)
+  AND the real bug fixed: resolveLeadId used Bearer auth — Close requires
+  Basic (`btoa(key+':')`). It never worked; dispatches always fell back
+  to address resolution. Now resolves — verified live.
+- Offer price override: Prep offer → inline `Offer $` input prefilled
+  with wholesale, editable, Enter/Send dispatches at that price. Works
+  on report page + QueueFallback (unblocks null/negative-wholesale items
+  like Dunn Creek INSUFFICIENT_COMPS).
+- Queue proxy KV-cached SWR (30s): /engine/queue is 3.5-4.9s (engine does
+  serial Close getLead per opp!) → our cache serves 7ms warm.
+- Fallback dispatch: negative wholesalePrice no longer enables Prep;
+  opportunityId now passed through.
+- Opaque chrome: all menus/bars solid bg-background (theme-matched);
+  landing header + floating button included.
+- "Report Not Found" flash: queue.loaded flag keeps skeleton until the
+  queue poll resolves.
+- Chunk-load self-heal: StaleActionGuard now also reloads on
+  ChunkLoadError/dynamic-import failures (server-action.test.mjs).
+- Give Offer is a LANDING page now (metrics strip + queue list + Start
+  offers button), not an auto-redirect. Rows link to give-offer/[jobId].
+- React #482 params-promise fix (above).
+
+KEY CONTEXT FOR NEXT SESSION:
+- Engine repo (zapz-glitch/conversation-intelligence, gh-accessible):
+  /engine/queue does SERIAL close.getLead per queued opp (~L1041 in
+  apps/conversation-intelligence/src/index.ts) — parallelize when
+  convenient; our SWR cache hides it for now.
+- Listener session devin-fbfcfad371534372bff22b123657c41f ("Conversation
+  Engine") is healthy, org org-6c0122ecb67544ccb259ae9b1e9cc4dc. Its
+  secrets are write-only — CLOSE_API_KEY exists as org secret
+  secret-a7058ea65e1c4644af6e39ffd5c49415. Messages via Devin API
+  paginate with `?after=<end_cursor>`.
+- Queue items: 24 queued. Dunn Creek (12717 Dunn Creek Rd) + Moon Lake
+  have NO saved report (INSUFFICIENT_COMPS / failed eval) → QueueFallback
+  card + manual price entry — by design.
+- 2 queue items have NEGATIVE wholesalePrice (1775 E 23rd -29,101;
+  481 Golfair -8,220) — engine-side data quality, flagged.
+- No headless browser locally (libnspr4/nss3 missing) — e2e via authed
+  curl + real Next-Action POSTs works (session: sign in at
+  /auth/sign-in/email with .data/local-candidate/login.json creds).
+
+PENDING / NEXT:
+1. USER's live Prep click on prod — landing page → pick item → review/
+   edit report → Prep offer → confirm/edit price → Send. Then verify in
+   the listener transcript: PREP OFFER received → child session →
+   engine offer-draft pending → REVIEW email. THIS WAS THE WHOLE POINT.
+2. Confirm the #482 fix loads deep links on prod for the user.
+
+Git rules reminder: feature branch + PR + tsc --noEmit per change;
+never push directly to main; ENGINEERING_STATE.md rides with work.
+
 ### 2026-09-27 — Give Offer is now a landing page, not an auto-redirect (PR #36)
 
 User hit "This page couldn't load" on /dashboard/give-offer/job_1790…
