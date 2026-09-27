@@ -11,7 +11,7 @@ import type { MapMarker } from './PropertyMap'
 
 type Panorama = NonNullable<Awaited<ReturnType<typeof resolveSubjectPanorama>>>
 const colors = { subject: '#3b82f6', 'comp-enabled': '#10b981', 'comp-disabled': '#6b7280' }
-const buttonClass = 'flex h-8 items-center justify-center gap-1 rounded-md border border-border bg-background/95 px-2 text-xs text-foreground shadow-sm hover:bg-secondary disabled:opacity-40'
+const buttonClass = 'flex h-8 items-center justify-center gap-1 rounded-md border border-border bg-background px-2 text-xs text-foreground shadow-sm hover:bg-secondary disabled:opacity-40'
 
 // Optional Google libraries must fail independently; a missing 3D library must
 // never prevent Street View or a conventional satellite map from working.
@@ -124,7 +124,7 @@ function SubjectStreetView({ panorama, subject, onBack, onFailure, viewRef }: { 
       element.replaceChildren()
     }
   }, [panorama, subject.lat, subject.lng, viewRef])
-  return <><div ref={container} className="absolute inset-0" aria-label="Street View facing the subject property" />{pending && <div role="status" className="pointer-events-none absolute left-2 top-2 rounded bg-background/95 p-2 text-xs">Loading Street View…</div>}</>
+  return <><div ref={container} className="absolute inset-0" aria-label="Street View facing the subject property" />{pending && <div role="status" className="pointer-events-none absolute left-2 top-2 rounded bg-background p-2 text-xs">Loading Street View…</div>}</>
 }
 
 interface PropertyMapInnerProps {

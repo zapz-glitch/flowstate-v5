@@ -339,10 +339,10 @@ export default function Sidebar() {
         </div>
       </div>
 
-      {/* Mobile Header — translucent bar that extends behind the iPhone
+      {/* Mobile Header — solid bar that extends behind the iPhone
           status bar; padding keeps content below the safe area */}
       <div
-        className="lg:hidden fixed top-0 left-0 right-0 z-40 bg-background/80 backdrop-blur-xl border-b border-border flex items-center justify-between px-4"
+        className="lg:hidden fixed top-0 left-0 right-0 z-40 bg-background border-b border-border flex items-center justify-between px-4"
         style={{ height: 'calc(3.5rem + var(--sat))', paddingTop: 'var(--sat)' }}
       >
         <Link href="/dashboard">
@@ -396,9 +396,9 @@ export default function Sidebar() {
       </div>
 
       {/* Mobile Navigation Bottom Bar — tab bar clears the home indicator
-          via safe-area padding; bar extends behind it for a native look */}
+          via safe-area padding */}
       <div
-        className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-background/80 backdrop-blur-xl border-t border-border"
+        className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-background border-t border-border"
         style={{ paddingBottom: 'var(--sab)' }}
       >
         <nav className="flex items-stretch justify-around h-14 px-1">
