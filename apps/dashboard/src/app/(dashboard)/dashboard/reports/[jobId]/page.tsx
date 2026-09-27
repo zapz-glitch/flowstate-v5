@@ -187,6 +187,9 @@ export default function DashboardReportPage({ params, queue }: {
   queue?: {
     node: React.ReactNode
     onDecided: () => void
+    /** False while the queue fetch is still in flight — an unresolved
+     *  fallback doesn't mean "not found" yet. */
+    loaded?: boolean
     fallback?: { leadId: string | null; address: string; wholesalePrice: number | null; opportunityId?: string | null }
   }
 }) {
@@ -709,6 +712,16 @@ export default function DashboardReportPage({ params, queue }: {
     // still let the user disposition the lead from its queue fields.
     if (queue?.fallback) {
       return <QueueFallback queue={queue} />
+    }
+    // Queue still loading — the item may resolve to a fallback once it
+    // lands; keep the skeleton up instead of flashing "Report Not Found".
+    if (queue && queue.loaded === false) {
+      return (
+        <>
+          {queue.node}
+          <ReportLoading />
+        </>
+      )
     }
     return (
       <div className="flex items-center justify-center py-32">
