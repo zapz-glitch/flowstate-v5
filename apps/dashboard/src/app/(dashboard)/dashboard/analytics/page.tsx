@@ -61,6 +61,7 @@ const KIND_LABELS: Record<string, string> = {
   reachout: 'Reach-out',
   outbound_msg: 'Outbound SMS',
   inbound_msg: 'Inbound SMS',
+  msg_activity: 'Message activity',
   response: 'Response',
   reactivation: 'Reactivation',
   stage_move: 'Stage move',
@@ -178,24 +179,29 @@ export default function AnalyticsPage() {
 
   const hasActivity = useMemo(() => !!counts && Object.values(counts).some((n) => n > 0), [counts])
 
+  // Engine funnel metrics are authoritative for the headline counts
+  // (they dedupe per-lead); our D1 store powers the drill-down rows and
+  // fills in when the engine has no equivalent metric (or is down).
   const tileCount = useCallback(
     (t: Tile): number | null => {
+      const v = t.engine != null ? metrics?.[t.engine] : null
+      if (typeof v === 'number') return v
       if (hasActivity && counts) {
         return t.kinds.reduce((sum, k) => sum + (counts[k] ?? 0), 0)
       }
-      const v = t.engine != null ? metrics?.[t.engine] : null
-      return typeof v === 'number' ? v : null
+      return null
     },
     [counts, hasActivity, metrics],
   )
 
   const convRate = useMemo(() => {
+    if (metrics?.responseRatePct != null) return Math.round(metrics.responseRatePct)
     if (hasActivity && counts) {
       const sent = (counts['reachout'] ?? 0) + (counts['outbound_msg'] ?? 0)
       const got = (counts['response'] ?? 0) + (counts['inbound_msg'] ?? 0)
       return sent > 0 ? Math.round((got / sent) * 100) : null
     }
-    return metrics?.responseRatePct ?? null
+    return null
   }, [counts, hasActivity, metrics])
 
   const select = (t: Tile) => {
