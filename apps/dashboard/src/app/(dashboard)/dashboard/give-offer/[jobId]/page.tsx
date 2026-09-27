@@ -22,6 +22,9 @@ function useNow(): number {
 
 export default function GiveOfferReportPage({ params }: { params: Promise<{ jobId: string }> }) {
   const { jobId } = use(params)
+  // Stable identity — a fresh Promise per render makes the inner use()
+  // suspend on every replay, which trips React error #482 (>100 suspends).
+  const reportParams = useMemo(() => Promise.resolve({ jobId }), [jobId])
   const router = useRouter()
   const [raw, setRaw] = useState<PipelineItem[]>(getCachedQueue() ?? [])
   const [queueLoaded, setQueueLoaded] = useState(getCachedQueue() != null)
@@ -126,7 +129,7 @@ export default function GiveOfferReportPage({ params }: { params: Promise<{ jobI
 
   return (
     <DashboardReportPage
-      params={Promise.resolve({ jobId })}
+      params={reportParams}
       queue={{
         node: bar,
         loaded: queueLoaded,
