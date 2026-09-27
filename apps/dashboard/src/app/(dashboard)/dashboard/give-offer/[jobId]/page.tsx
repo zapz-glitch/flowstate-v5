@@ -1,19 +1,15 @@
 'use client'
 
 import { use, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { ChevronLeft, ChevronRight, Timer, ListFilter } from 'lucide-react'
 import DashboardReportPage from '../../reports/[jobId]/page'
 import { getOfferQueue, type PipelineItem } from '../actions'
-import { jobIdForItem, parseQueuedAt, sortedQueue, formatWait, WAIT_FILTER_LABELS, type WaitFilter, getCachedQueue, setCachedQueue } from '../queue'
+import { decidedIds, jobIdForItem, parseQueuedAt, sortedQueue, formatWait, WAIT_FILTER_LABELS, type WaitFilter, getCachedQueue, setCachedQueue } from '../queue'
 
 const POLL_MS = 5000
 const SORT_PREF_KEY = 'giveOffer.waitFilter'
-
-/** Decided items stay out of the queue for this SPA session even if the
- * engine hasn't dequeued them yet on the next poll. */
-const decidedIds = new Set<string>()
-
 
 function useNow(): number {
   const [now, setNow] = useState(Date.now())
@@ -81,7 +77,7 @@ export default function GiveOfferReportPage({ params }: { params: Promise<{ jobI
 
   const bar = (
     <div className="shrink-0 no-print border-b border-border bg-background px-3 sm:px-5 py-1.5 flex items-center gap-3 text-[11px]">
-      <span className="font-semibold">Give Offer</span>
+      <Link href="/dashboard/give-offer" className="font-semibold hover:text-foreground-secondary transition-colors" title="Back to the offer queue">Give Offer</Link>
       <span className="text-foreground-tertiary tabular-nums">
         {index >= 0 ? `${index + 1} of ${items.length}` : `${items.length} queued`}
       </span>

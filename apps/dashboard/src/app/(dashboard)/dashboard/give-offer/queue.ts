@@ -50,6 +50,10 @@ export function formatWait(seconds: number): string {
   return `${h}h ${m % 60}m`
 }
 
+/** Items dispositioned this SPA session — stays out of the queue on the
+ *  landing list and item pages even if the engine hasn't dequeued yet. */
+export const decidedIds = new Set<string>()
+
 /** Shared queue cache — landing redirect and report pages read it
  *  instantly instead of re-fetching the engine on every navigation. */
 let queueCache: { items: PipelineItem[]; fetchedAt: number } | null = null
