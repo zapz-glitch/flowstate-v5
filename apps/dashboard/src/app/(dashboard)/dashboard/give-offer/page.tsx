@@ -274,8 +274,8 @@ export default function GiveOfferPage() {
                 )}
               </div>
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
     </div>
   )
