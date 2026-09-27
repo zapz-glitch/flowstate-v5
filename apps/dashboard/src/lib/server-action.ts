@@ -24,6 +24,21 @@ export function isStaleServerActionError(err: unknown): boolean {
 }
 
 /**
+ * The other half of deploy-window staleness: a tab holding the previous
+ * bundle requests content-hashed chunks that no longer exist. Browsers
+ * surface this as ChunkLoadError / "Loading chunk N failed" /
+ * "Failed to fetch dynamically imported module" — the fix is the same:
+ * reload once onto the new bundle.
+ */
+export function isChunkLoadError(err: unknown): boolean {
+  const msg =
+    err instanceof Error
+      ? `${err.name} ${err.message} ${(err as { digest?: string }).digest ?? ''}`
+      : String(err ?? '')
+  return /chunkloaderror|loading chunk [\d]+ failed|failed to fetch dynamically imported module|error loading dynamically imported module|importing a module script failed/i.test(msg)
+}
+
+/**
  * Reloads the page once when `err` is a stale-action error. Returns true when
  * a reload was triggered (caller should bail — the page is going away) or
  * false when this isn't a stale-action error / a reload already happened
@@ -31,7 +46,7 @@ export function isStaleServerActionError(err: unknown): boolean {
  * surfaces instead of looping forever).
  */
 export function reloadForStaleAction(err: unknown): boolean {
-  if (!isStaleServerActionError(err) || typeof window === 'undefined' || reloadFired) return false
+  if ((!isStaleServerActionError(err) && !isChunkLoadError(err)) || typeof window === 'undefined' || reloadFired) return false
   try {
     const last = Number(sessionStorage.getItem(RELOAD_KEY) ?? 0)
     if (Date.now() - last < RELOAD_WINDOW_MS) return false
