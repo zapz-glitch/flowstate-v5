@@ -22,6 +22,8 @@ export interface AnalysisResultLayoutProps {
   statusLabel?: React.ReactNode
   /** Optional footer (e.g. Raw JSON toggle) */
   footer?: React.ReactNode
+  /** Realtor-notes card — rendered between the deal hero and analysis readouts */
+  notesSlot?: React.ReactNode
   /** Re-run the analysis for the current property */
   onRerun?: () => void
   /** True while a rerun is in flight */
@@ -35,6 +37,7 @@ export function AnalysisResultLayout({
   valuationCardRef,
   statusLabel,
   footer,
+  notesSlot,
   onRerun,
   rerunning,
   onOfferWorkflow,
@@ -93,6 +96,8 @@ export function AnalysisResultLayout({
           </div>
         </div>
       ) : null}
+
+      {notesSlot}
 
       <InvestorAnalysisSummary analysis={valuation?.investorAnalysis} />
 

@@ -187,10 +187,11 @@ analyze.post('/', async (c) => {
     // Re-runs attach to an existing job — verify the caller owns it, else an
     // authed user could hijack another user's job DO (jobIds leak via shared
     // report URLs) or collide with their saved_reports row.
+    let existingCrmLink: { leadId?: string; opportunityId?: string } | null = null;
     if (isRefresh) {
       const ownerDb = drizzle(c.env.DB);
       const [owner] = await ownerDb
-        .select({ userId: savedReports.userId })
+        .select({ userId: savedReports.userId, fullResponseJson: savedReports.fullResponseJson })
         .from(savedReports)
         .where(eq(savedReports.jobId, jobId))
         .limit(1);
@@ -204,6 +205,20 @@ analyze.post('/', async (c) => {
       const ownerId = owner?.userId ?? runOwner?.userId;
       if (!ownerId || ownerId !== auth.userId) {
         return c.json({ success: false, error: 'Job not found' }, 404);
+      }
+      // Recover the CRM link from the stored report so a Refresh keeps
+      // fetching realtor notes even when the caller didn't send leadId.
+      if (owner?.fullResponseJson) {
+        try {
+          const prior = JSON.parse(owner.fullResponseJson) as {
+            leadId?: unknown
+            opportunityId?: unknown
+          };
+          existingCrmLink = {
+            leadId: typeof prior.leadId === 'string' ? prior.leadId : undefined,
+            opportunityId: typeof prior.opportunityId === 'string' ? prior.opportunityId : undefined,
+          };
+        } catch { /* unparsable report JSON — treat as no CRM link */ }
       }
     }
 
@@ -349,8 +364,10 @@ analyze.post('/', async (c) => {
         llmEnabled:
           body.llmAnalysis?.enabled === true && !!c.env.OPENROUTER_API_KEY,
         isRefresh,
-        leadId: typeof body.leadId === 'string' ? body.leadId.slice(0, 128) : undefined,
-        opportunityId: typeof body.opportunityId === 'string' ? body.opportunityId.slice(0, 128) : undefined,
+        leadId: (typeof body.leadId === 'string' ? body.leadId.slice(0, 128) : undefined)
+          ?? existingCrmLink?.leadId?.slice(0, 128),
+        opportunityId: (typeof body.opportunityId === 'string' ? body.opportunityId.slice(0, 128) : undefined)
+          ?? existingCrmLink?.opportunityId?.slice(0, 128),
         llmOptions: {
           includePhotos: body.llmAnalysis?.includePhotos,
           compSelectionModel: validateModel(

@@ -150,7 +150,7 @@ export interface EvaluationReport {
     ledger?: Array<{
       label: string
       amount: number
-      source: 'rehab_tier' | 'major_item_permit' | 'major_item_manual' | 'addition' | 'other'
+      source: 'rehab_tier' | 'major_item_permit' | 'major_item_manual' | 'seller_note' | 'addition' | 'other'
       reason: string
       deduplicated?: boolean
       evidenceStatus?: string

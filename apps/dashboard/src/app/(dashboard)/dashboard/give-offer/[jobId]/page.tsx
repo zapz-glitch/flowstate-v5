@@ -164,6 +164,9 @@ export default function GiveOfferReportPage({ params }: { params: Promise<{ jobI
               opportunityId: current.opportunityId,
             }
           : undefined,
+        /** Live realtor notes riding the queue item — shown while the
+         *  persisted report snapshot (sellerNotes) is absent. */
+        notes: current?.conditionNotes ?? null,
       }}
     />
   )

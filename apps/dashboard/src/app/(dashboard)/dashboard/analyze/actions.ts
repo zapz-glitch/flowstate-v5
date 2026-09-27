@@ -46,6 +46,8 @@ export interface AnalyzeRequest {
   address: string
   /** Existing job ID — when set, updates existing report instead of creating new */
   existingJobId?: string
+  /** Close CRM lead — lets reruns keep fetching realtor notes */
+  leadId?: string
   searchOptions?: {
     radiusMiles?: number
     maxComps?: number
@@ -92,6 +94,26 @@ export interface AnalyzeData {
   leadId?: string | null
   /** Close CRM opportunity linked to the lead */
   opportunityId?: string | null
+  /** Realtor conversation-log notes fetched from Close at eval time */
+  sellerNotes?: {
+    fetchedAt: string
+    notes: Array<{ id: string; createdAt: string; text: string }>
+  } | null
+  /** Note-derived items ADDED to the rehab ledger this run (additive only) */
+  rehabAdditions?: Array<{
+    itemId: string | null
+    item: string
+    estimatedCost: number
+    evidence: string
+  }> | null
+  /** Notes suggesting a charged rehab item may be unneeded — display-only */
+  rehabAdvisories?: Array<{
+    itemId: string | null
+    item: string
+    suggestion: 'consider_removing' | 'informational'
+    note: string
+    evidence: string
+  }> | null
   subject?: SubjectData
   valuation?: ValuationData
   comps?: CompsData
@@ -885,6 +907,7 @@ export async function queueAnalysis(request: AnalyzeRequest): Promise<QueueAnaly
     const requestBody = {
       address: request.address,
       existingJobId: request.existingJobId,
+      leadId: request.leadId,
       searchOptions: request.searchOptions ?? {
         radiusMiles: 1,
         monthsBack: 12,

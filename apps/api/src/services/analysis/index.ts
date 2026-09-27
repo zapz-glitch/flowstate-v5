@@ -1009,6 +1009,21 @@ export interface AnalysisResponse {
   renovationLevelSource?: 'manual_override' | 'vision' | 'classification' | 'default'
   /** Photo provider that delivered the subject photos (zillow/redfin/realtor) */
   photoProvider?: string
+  /**
+   * Realtor conversation-log notes fetched from Close at eval time — the raw
+   * property-condition intel for the Give Offer review card.
+   */
+  sellerNotes?: import('../seller-notes').SellerNotesResult
+  /**
+   * Note-derived rehab items that were ADDED to the valuation ledger this
+   * run (additive only — notes never remove cost automatically).
+   */
+  rehabAdditions?: import('../seller-notes').RehabAddition[]
+  /**
+   * Notes suggesting a charged rehab item may be unneeded — advisory
+   * callouts for human review, never applied automatically.
+   */
+  rehabAdvisories?: import('../seller-notes').RehabAdvisory[]
   /** Evaluation engine that produced this response */
   evaluationEngine?: string
   /**

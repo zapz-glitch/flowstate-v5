@@ -344,12 +344,17 @@ export function buildEvaluationReport(input: BuildReportInput): EvaluationReport
   const manualIds = new Set(
     derivedBuybox.majorItems.filter((m) => m.reason.startsWith('Caller-specified')).map((m) => m.id)
   )
+  const noteIds = new Set(
+    derivedBuybox.majorItems.filter((m) => m.reason.startsWith('Realtor note:')).map((m) => m.id)
+  )
   for (const item of derivedBuybox.majorItems.filter((m) => m.enabled)) {
     const assessment = derivedBuybox.majorItemAssessments?.find((a) => a.id === item.id)
     ledger.push({
       label: item.id,
       amount: item.cost,
-      source: manualIds.has(item.id) ? 'major_item_manual' : 'major_item_permit',
+      source: manualIds.has(item.id)
+        ? 'major_item_manual'
+        : noteIds.has(item.id) ? 'seller_note' : 'major_item_permit',
       reason: item.reason,
       deduplicated: assessment?.deduplicated ?? false,
       evidenceStatus: assessment?.evidenceStatus,
