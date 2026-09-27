@@ -158,24 +158,26 @@ export function DealSummaryHero({ valuation, isRecalculated, onOpenSettings, onR
             )}
           </div>
         </div>
-        {valuation.listPrice != null && (
-          <div
-            className="px-3 py-2.5 border-r border-border/20"
-            title={valuation.listPriceRealism
-              ? `Asking $${fmtK(Math.abs(valuation.listPriceRealism.gapDollars))} (${fmt(Math.abs(valuation.listPriceRealism.gapPercent))}%) ${valuation.listPriceRealism.gapDollars > 0 ? 'above' : 'below'} the $${fmtK(valuation.listPriceRealism.wholesalePrice)} wholesale ceiling`
-              : "Seller's asking price, scraped from the active listing"}
-          >
-            <div className="text-[11px] text-foreground-tertiary uppercase tracking-wider">List</div>
-            <div className="text-base font-bold tabular-nums mt-0.5">${fmtK(valuation.listPrice)}</div>
-            <div className="text-[10px] tabular-nums mt-0.5 text-foreground-tertiary">
-              {valuation.wholesalePrice != null
+        <div
+          className="px-3 py-2.5 border-r border-border/20"
+          title={valuation.listPriceRealism
+            ? `Asking $${fmtK(Math.abs(valuation.listPriceRealism.gapDollars))} (${fmt(Math.abs(valuation.listPriceRealism.gapPercent))}%) ${valuation.listPriceRealism.gapDollars > 0 ? 'above' : 'below'} the $${fmtK(valuation.listPriceRealism.wholesalePrice)} wholesale ceiling`
+            : valuation.listPrice != null
+              ? "Seller's asking price, scraped from the active listing"
+              : 'No asking price — no active listing found at eval time'}
+        >
+          <div className="text-[11px] text-foreground-tertiary uppercase tracking-wider">List</div>
+          <div className="text-base font-bold tabular-nums mt-0.5">{valuation.listPrice != null ? `$${fmtK(valuation.listPrice)}` : '—'}</div>
+          <div className="text-[10px] tabular-nums mt-0.5 text-foreground-tertiary">
+            {valuation.listPrice == null
+              ? 'No ask recorded'
+              : valuation.wholesalePrice != null
                 ? valuation.listPrice === valuation.wholesalePrice
                   ? 'Same as wholesale'
                   : `$${fmtK(Math.abs(valuation.listPrice - valuation.wholesalePrice))} ${valuation.listPrice > valuation.wholesalePrice ? 'more' : 'less'} than wholesale`
                 : 'Asking price'}
-            </div>
           </div>
-        )}
+        </div>
         <div className="px-3 py-2.5 border-r border-border/20">
           <div className="text-[11px] text-foreground-tertiary uppercase tracking-wider">ARV</div>
           <div className="text-base font-bold tabular-nums text-primary mt-0.5">${formatHeadlineMoney(valuation.arv, valuation.displayedArv, valuation.displayRounding)}</div>
