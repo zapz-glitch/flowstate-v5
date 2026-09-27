@@ -1,5 +1,21 @@
 # Engineering State — flowstate-v5
 
+### 2026-09-28 — listPrice rerun recovery + valuation-box placement
+
+Root cause of "rerun doesn't bring list price": `listing-scraper.ts`
+served KV entries with `listPrice:null` as cache hits (only required
+`photos.length>0`), so once a scrape missed the ask it stayed null for
+the whole TTL — reruns could never retry. Verified live: scraping
+Moselle's Redfin URL today extracts `offers.price=$559,999` via the
+existing JSON-LD path (listingStatus=active). Fix: cache hit now
+requires `listPrice != null`; stale entry kept as photo fallback on
+re-scrape failure/empty. Refresh uses `existingJobId` so the same
+saved_reports row updates → queue enrichment picks up the new price
+within 30s. Dashboard: `List` removed from the give-offer header
+cluster (per user — belongs in the valuation box); hero `List` stat
+now always renders with `—`/"No ask recorded" fallback instead of
+disappearing. Landing rows keep `List` for queue triage.
+
 ### 2026-09-27 — ROOT CAUSE of "couldn't load": React #482 suspend loop (PR #37) + SESSION HANDOFF
 
 The user's Edge console captured it: `Uncaught Minified React error

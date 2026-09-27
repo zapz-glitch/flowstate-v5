@@ -393,13 +393,15 @@ export class ListingPhotoScraper {
     adapter: ListingSiteAdapter,
   ): Promise<{ photos: string[]; sourceUrl: string; floodRisk: { level: string; source: string } | null; listPrice: number | null } | null> {
     const tag = `[${adapter.name}]`
+    let cached: { photos: string[]; sourceUrl: string; floodRisk: { level: string; source: string } | null; listPrice: number | null } | null = null
     try {
-      // Cache check
+      // Cache check — entries that never extracted an ask price do not
+      // count as hits so a rerun re-scrapes and can recover the price.
       if (this.cache) {
         try {
-          const cached = await this.cache.get<{ photos: string[]; sourceUrl: string; floodRisk: { level: string; source: string } | null; listPrice: number | null }>(
+          cached = await this.cache.get<{ photos: string[]; sourceUrl: string; floodRisk: { level: string; source: string } | null; listPrice: number | null }>(
             this.cacheKey(adapter, property), 'json')
-          if (cached && cached.photos.length > 0) {
+          if (cached && cached.photos.length > 0 && cached.listPrice != null) {
             console.log(`${tag} cache hit: ${cached.photos.length} photos`)
             return cached
           }
@@ -446,9 +448,10 @@ export class ListingPhotoScraper {
         // The listing resolved and may carry list price / flood signal —
         // return it so metadata survives even though photo extraction failed.
         if (floodRisk || listPrice) {
-          return { photos: [], sourceUrl: listingUrl, floodRisk, listPrice }
+          return { photos: cached?.photos ?? [], sourceUrl: listingUrl, floodRisk, listPrice }
         }
-        return null
+        // Serve the stale photo set rather than lose photos on a bad re-scrape.
+        return cached
       }
 
       const result = { photos, sourceUrl: listingUrl, floodRisk, listPrice }
@@ -463,7 +466,7 @@ export class ListingPhotoScraper {
       return result
     } catch (error) {
       console.warn(`${tag} fetch failed:`, error instanceof Error ? error.message : error)
-      return null
+      return cached
     }
   }
 }
