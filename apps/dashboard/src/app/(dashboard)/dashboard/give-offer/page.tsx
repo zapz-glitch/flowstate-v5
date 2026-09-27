@@ -76,7 +76,7 @@ export default function GiveOfferPage() {
     <div className="playground-bg -m-4 sm:-m-6 lg:-m-8 min-h-screen lg:h-[100dvh] flex flex-col lg:overflow-hidden">
       {/* Header band — same geometry + card chrome as Property Search */}
       <div className="px-4 sm:px-6 lg:px-4 pt-3 pb-1 lg:pt-4 lg:pb-0 lg:h-20 lg:flex lg:items-center lg:border-b lg:border-border space-y-3 flex-shrink-0">
-        <div className="w-full border border-border/60 bg-background shadow-sm corner-accents corner-accents-bottom">
+        <div className="w-full border border-border/60 overflow-hidden bg-background shadow-sm corner-accents corner-accents-bottom">
           <div className="px-4 py-3 flex items-center gap-3">
             <div className="w-7 h-7 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
               <FileSignature className="w-3.5 h-3.5 text-primary" />

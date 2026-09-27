@@ -10,6 +10,29 @@ imports), React replays → fresh thenable → suspends again → crash.
 Race-dependent: explains "was working, now it's not" across deploys.
 Fixed with useMemo on jobId. Verified only occurrence of the pattern.
 
+### 2026-09-27 — Give Offer queue bar clipped + baseline rule (fix/give-offer-baseline)
+
+Root cause of "can't access it": the page's -m-8 intentionally pulls
+the top band up ~16px past the viewport so its bottom border lands at
+64px — exactly the sidebar logo divider (h-16). That IS the baseline
+the user means by "nothing should surpass the logo". A THIN strip
+rendered above the band gets its top half clipped → give-offer/[jobId]
+queue bar (wait timer + prev/next) was unreachable and the band's
+border landed at ~94px, breaking symmetry.
+
+Fix:
+- queue.node now renders BELOW the header band in the report page —
+  band keeps the shared 64px baseline on all three views, strip is
+  fully visible (64–94px).
+- QueueFallback + loading branches: -mx (horizontal bleed) instead of
+  -m — no vertical overshoot, strip never clipped there either.
+- List $X added to the queue strip next to the wait timer (same fmtK
+  display as report hero + landing rows).
+- Cards gain overflow-hidden — analyze's card clips corner-accent
+  diamonds to notches; unclipped cards rendered full diamonds.
+
+Verified: tsc + eslint clean; routes 200 local.
+
 ### 2026-09-27 — Give Offer rows gain List price (feat/give-offer-list-price)
 
 User ask: show the asking/list price on give-offer views the same way
