@@ -64,7 +64,7 @@ async function resolveLeadId(env: Env, address: string): Promise<string | null> 
       `https://api.close.com/api/v1/lead/?query=${encodeURIComponent(street)}`,
       {
         signal: AbortSignal.timeout(10000),
-        headers: { Authorization: `Bearer ${env.CLOSE_API_KEY}` },
+        headers: { Authorization: `Basic ${btoa(`${env.CLOSE_API_KEY}:`)}` },
       },
     )
     if (!resp.ok) {
@@ -72,14 +72,21 @@ async function resolveLeadId(env: Env, address: string): Promise<string | null> 
       return null
     }
     const data = (await resp.json()) as {
-      data?: Array<{ id?: string; addresses?: Array<{ address_1?: string }> }>
+      data?: Array<{
+        id?: string
+        display_name?: string
+        addresses?: Array<{ address_1?: string }>
+      }>
     }
     const leads = data?.data ?? []
     if (leads.length === 0) return null
     if (leads.length === 1 && leads[0].id) return leads[0].id
-    // Multiple candidates — pick the one whose street line matches.
+    // Multiple candidates — pick the one whose street line matches. The
+    // query endpoint doesn't expand addresses, so display_name (the street
+    // for list-uploaded leads) is the reliable discriminator.
     const num = street.split(/\s+/)[0]
     const match = leads.find((l) =>
+      (l.display_name ?? '').includes(num) ||
       (l.addresses ?? []).some((a) => (a.address_1 ?? '').includes(num)),
     )
     return match?.id ?? null
