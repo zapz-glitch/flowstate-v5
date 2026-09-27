@@ -49,3 +49,17 @@ export function formatWait(seconds: number): string {
   const h = Math.floor(m / 60)
   return `${h}h ${m % 60}m`
 }
+
+/** Shared queue cache — landing redirect and report pages read it
+ *  instantly instead of re-fetching the engine on every navigation. */
+let queueCache: { items: PipelineItem[]; fetchedAt: number } | null = null
+const QUEUE_CACHE_TTL = 30_000
+
+export function getCachedQueue(): PipelineItem[] | null {
+  if (!queueCache || Date.now() - queueCache.fetchedAt > QUEUE_CACHE_TTL) return null
+  return queueCache.items
+}
+
+export function setCachedQueue(items: PipelineItem[]): void {
+  queueCache = { items, fetchedAt: Date.now() }
+}

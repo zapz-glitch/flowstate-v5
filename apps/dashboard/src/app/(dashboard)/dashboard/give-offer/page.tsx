@@ -4,13 +4,20 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Card } from '@/components/ui/card'
 import { getOfferQueue } from './actions'
-import { jobIdForItem, sortedQueue } from './queue'
+import { jobIdForItem, sortedQueue, getCachedQueue } from './queue'
 
 export default function GiveOfferPage() {
   const router = useRouter()
   const [state, setState] = useState<'loading' | 'empty' | 'error'>('loading')
 
   useEffect(() => {
+    // Instant redirect when a recent queue is already cached.
+    const cached = getCachedQueue()
+    if (cached) {
+      const first = sortedQueue(cached, 'longest')[0]
+      const jobId = first ? jobIdForItem(first) : null
+      if (jobId) { router.replace(`/dashboard/give-offer/${jobId}`); return }
+    }
     let cancelled = false
     getOfferQueue().then((q) => {
       if (cancelled) return
