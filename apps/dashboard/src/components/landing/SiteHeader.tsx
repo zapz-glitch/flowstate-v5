@@ -61,7 +61,7 @@ export function SiteHeader() {
         className={cn(
           'fixed top-0 left-0 right-0 z-[70] transition-colors duration-300 pt-[var(--sat)]',
           open || isScrolled
-            ? 'bg-background/90 backdrop-blur-xl border-b border-border'
+            ? 'bg-background border-b border-border'
             : 'bg-transparent'
         )}
       >

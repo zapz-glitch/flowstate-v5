@@ -62,7 +62,7 @@ export function SiteShell({ children }: { children: React.ReactNode }) {
       <button
         onClick={toggleTheme}
         aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
-        className="fixed bottom-5 right-5 z-[80] p-3 rounded-full border border-border bg-background/80 backdrop-blur-xl text-muted-foreground hover:text-foreground hover:border-foreground/30 active:scale-90 transition-all duration-150"
+        className="fixed bottom-5 right-5 z-[80] p-3 rounded-full border border-border bg-background text-muted-foreground hover:text-foreground hover:border-foreground/30 active:scale-90 transition-all duration-150"
       >
         {isDark ? <Moon className="h-5 w-5" /> : <Sun className="h-5 w-5" />}
       </button>
