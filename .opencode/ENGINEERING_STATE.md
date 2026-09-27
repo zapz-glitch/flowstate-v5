@@ -10,6 +10,27 @@ imports), React replays → fresh thenable → suspends again → crash.
 Race-dependent: explains "was working, now it's not" across deploys.
 Fixed with useMemo on jobId. Verified only occurrence of the pattern.
 
+### 2026-09-27 — Transparent menus root cause: `popover` missing from Tailwind colors
+
+User report: left sidebar's dropdown menus show page content THROUGH
+the menu; the Longest-waiting <select> dropdown doesn't match theme.
+
+Root cause: tailwind.config colors map never defined `popover` — so
+bg-popover/text-popover-foreground generated NO CSS and every Radix
+DropdownMenuContent was transparent + unthemed. (The #32 opaque sweep
+checked bg-* class usage but not whether the color token existed.)
+
+Fix:
+- tailwind.config: popover { DEFAULT: hsl(var(--popover)), foreground }
+  → menus now render the solid themed popover surface.
+- globals.css: color-scheme light/dark per mode → native select popups
+  follow the theme; select option pinned to popover tokens.
+
+List price: confirmed live — deployed chunks render `List $X`, prod KV
+queue carries it on 15/24 items; the 9 nulls genuinely have no asking
+price in their reports (off-market/unlisted — report hero shows none
+either). If it still looks absent → stale bundle, hard refresh.
+
 ### 2026-09-27 — Queue controls folded INTO the header card (round 2)
 
 User's real complaint persisted: the standalone queue strip (Give Offer

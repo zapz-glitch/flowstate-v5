@@ -67,6 +67,10 @@ const config: Config = {
           hover: 'hsl(var(--card-hover))',
           foreground: 'hsl(var(--card-foreground))',
         },
+        popover: {
+          DEFAULT: 'hsl(var(--popover))',
+          foreground: 'hsl(var(--popover-foreground))',
+        },
         border: 'hsl(var(--border))',
         accent: {
           DEFAULT: 'hsl(var(--accent))',
