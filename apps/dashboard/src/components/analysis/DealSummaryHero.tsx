@@ -22,10 +22,10 @@ interface DealSummaryHeroProps {
 
 export function DealSummaryHero({ valuation, isRecalculated, onOpenSettings, onRerun, rerunning, onOfferWorkflow }: DealSummaryHeroProps) {
 
-  // Offer-button state machine: idle (buttons) → confirm (shows the
-  // computed offer, prep only) → busy → done (result chip) → back to
-  // idle. Everything crossfades via animate-in/fade-in.
-  const [offerPhase, setOfferPhase] = useState<'idle' | 'confirm' | 'busy' | 'done'>('idle')
+  // Offer-button state machine: idle (buttons) → busy → done (result
+  // chip) → back to idle. Everything crossfades via animate-in/fade-in.
+  // Both workflows dispatch immediately — no price editing.
+  const [offerPhase, setOfferPhase] = useState<'idle' | 'busy' | 'done'>('idle')
   const [offerOutcome, setOfferOutcome] = useState<{ ok: boolean; label: string } | null>(null)
 
   // Offers go out at the computed price only — no manual overrides.
@@ -33,7 +33,7 @@ export function DealSummaryHero({ valuation, isRecalculated, onOpenSettings, onR
   const canOffer = offerPrice != null && offerPrice > 0
 
   const fireOffer = async (workflow: 'prep_offer' | 'no_margin') => {
-    if (!onOfferWorkflow || (offerPhase !== 'idle' && offerPhase !== 'confirm')) return
+    if (!onOfferWorkflow || offerPhase !== 'idle') return
     setOfferPhase('busy')
     try {
       setOfferOutcome(await onOfferWorkflow(workflow))
@@ -80,7 +80,7 @@ export function DealSummaryHero({ valuation, isRecalculated, onOpenSettings, onR
               <div key="offer-buttons" className="flex items-center gap-1 animate-in fade-in duration-300">
                 <button
                   type="button"
-                  onClick={() => setOfferPhase('confirm')}
+                  onClick={() => fireOffer('prep_offer')}
                   disabled={!canOffer}
                   className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium text-emerald-600 hover:bg-emerald-500/10 transition-colors disabled:opacity-40 no-print dark:text-emerald-400"
                   title={canOffer ? `Prep offer at $${fmtK(offerPrice)}` : 'Valuation incomplete — no offer price'}
@@ -96,29 +96,6 @@ export function DealSummaryHero({ valuation, isRecalculated, onOpenSettings, onR
                 >
                   <CircleSlash className="w-3 h-3" />
                   No margin
-                </button>
-              </div>
-            ) : offerPhase === 'confirm' ? (
-              <div key="offer-confirm" className="flex items-center gap-1.5 animate-in fade-in duration-300">
-                <span className="text-[10px] text-foreground-tertiary">
-                  Offer <b className="text-foreground tabular-nums">${fmtK(offerPrice)}</b>
-                </span>
-                <button
-                  type="button"
-                  onClick={() => fireOffer('prep_offer')}
-                  className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium text-emerald-600 hover:bg-emerald-500/10 transition-colors no-print dark:text-emerald-400"
-                  title="Dispatch offer prep at this price"
-                >
-                  <Check className="w-3 h-3" />
-                  Send
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setOfferPhase('idle')}
-                  className="p-0.5 rounded text-foreground-tertiary hover:text-foreground hover:bg-secondary transition-colors"
-                  title="Cancel"
-                >
-                  <X className="w-3 h-3" />
                 </button>
               </div>
             ) : offerPhase === 'busy' ? (

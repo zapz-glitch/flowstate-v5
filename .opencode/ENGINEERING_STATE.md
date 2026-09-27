@@ -10,6 +10,25 @@ imports), React replays → fresh thenable → suspends again → crash.
 Race-dependent: explains "was working, now it's not" across deploys.
 Fixed with useMemo on jobId. Verified only occurrence of the pattern.
 
+### 2026-09-27 — One-click offers + VersionGuard (stale-bundle root cause)
+
+User kept reporting shipped fixes as "not working" — verified the
+deployed prod chunks DO contain the new code (Prep-offer tooltip, no
+inputMode, List rendering). The tab runs a stale bundle — the day's
+recurring failure mode.
+
+- DealSummaryHero: removed the confirm phase entirely — Prep offer and
+  No margin both dispatch in one click at the computed price.
+- New VersionGuard (root layout): polls the current page's HTML every
+  120s + on tab regain, compares <script src> chunk URLs against loaded
+  scripts (content-hashed names rotate per deploy). Unknown chunk →
+  reload once (sessionStorage-throttled, deferred while an input is
+  focused). This ends the stale-tab problem — every deploy now reaches
+  open tabs within ~2 min.
+- listPrice path fully traced: analyzeData.valuation spreads into
+  displayValuation, hero renders List when non-null — identical on all
+  three views. The remaining "can't see it" was the stale bundle.
+
 ### 2026-09-27 — Offer price locked to computed value; List always visible
 
 User: "remove the ability to change offer number — we're going to
