@@ -1,5 +1,50 @@
 # Engineering State — flowstate-v5
 
+### 2026-09-28 — Offers rename + Analytics dashboard + CI activity ingest (feat/offers-analytics)
+
+Architect session (…507f1b) contract confirmed:
+- Worker pushes {kind,value,leadId,propertyAddress,ts,meta} → POST
+  /v1/activity (Bearer CI_INGEST_KEY). Needs URL + key from us.
+- Kind list: inbound/outbound_msg, reachout, response, stage_move,
+  contacting, sent_to_underwriting, offer_prepped, offer_sent,
+  terms_prep, under_contract, assigned, closed, offer_declined,
+  no_motivation, no_margin, offer_held, offer_followup, delivery_check,
+  eval_completed/failed, owner_relay_*, *_followup, intake_sent,
+  hot_lead, reactivation, opt_out, human_attention, convo.
+- Backfill: GET /engine/events?since&until&cursor&limit (2000/page) —
+  deployed but 404ing at check time; architect fixing route wiring.
+  ~2 days depth = entire campaign history.
+
+Built (commit 1609aac):
+- activity_events D1 table (migration 0033, applied locally).
+- POST /v1/activity — own Bearer CI_INGEST_KEY auth mounted BEFORE the
+  v1 group so authMiddleware doesn't intercept; verified locally:
+  bad key→401, good→200+id, missing kind→400.
+- GET /v1/activity?kind&since&until&limit (rows, ≤500) + GET
+  /v1/activity/summary (per-kind counts) inside v1 dashboard auth.
+- /v1/pipeline/metrics now forwards ?since (per-window KV cache keys).
+- Sidebar: 'Give Offer'→'Offers'; new 'Analytics' item (BarChart3).
+- give-offer landing: loads queue, router.replace into top-priority
+  item (sortedQueue + saved wait filter + decidedIds); empty/failed
+  states. Queue list removed. Item back-tile relabeled Offers.
+- /dashboard/analytics: Today/24h/7d/30d buttons (Today default),
+  10 clickable tiles + derived conv-rate tile; drill-down rows show
+  ts/kind/address/meta.stage + Close link (app.close.com/lead/<leadId>)
+  + Offer link via leadId→queue jobId map. Counts prefer D1 summary
+  (self-consistent w/ rows), engine metrics fallback; polls rows 10s,
+  metrics+queue 60s.
+
+Verified: local E2E (ingest→summary→rows), 401s, 26/26 API regression
+files, tsc clean both apps.
+
+DEPLOY PREREQS (need Cloudflare auth — token lacked secrets scope):
+- wrangler secret put CI_INGEST_KEY (value in apps/api/.dev.vars)
+- npm run db:migrate:remote (migration 0033) — deploy.yml does NOT run
+  migrations
+- then merge PR → backfill /engine/events → send architect the URL+key
+- NOTE: local DASHBOARD_INTERNAL_SECRET in api/.dev.vars was aligned to
+  dashboard's value (was mismatched — local internal auth never worked)
+
 ### 2026-09-28 — realtor/seller-condition notes → Give Offer + rehab model
 
 The conversation-intelligence engine (Cloud session) already ships
