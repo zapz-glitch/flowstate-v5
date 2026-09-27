@@ -27,6 +27,11 @@ formatMoneyThousands).
   card shows `List $X` too.
 - Verified: tsc both apps; local D1 join resolves lp for local jobIds
   (queue items are prod jobIds → null locally; prod D1 has them).
+- PROD VERIFIED (PR #39 deployed 05:47Z): refreshed engine-proxy queue
+  cache carries listPrice on 15/24 items (9102 6th Ave $79,250, Acorn
+  Cir $205,000, S Washington $639,000, 651 69th Ave S $379,000…).
+  Nulls = reports with no asking price (off-market) or missing rows —
+  correct, matches what the report view itself shows.
 
 ### 2026-09-27 — Unify report + give-offer chrome with Property Search
 
