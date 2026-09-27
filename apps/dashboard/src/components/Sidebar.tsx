@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type DragEvent } from 'react'
 import { useAtomValue } from 'jotai'
 import {
   Key,
@@ -27,6 +27,7 @@ import {
   ListTodo,
   Handshake,
   BarChart3,
+  GripVertical,
 } from 'lucide-react'
 import { signOut } from '@/lib/auth-client'
 import { Logo, LogoIcon } from '@/components/ui/Logo'
@@ -35,7 +36,7 @@ import { useUser } from '@/components/auth/UserProvider'
 import { useTheme } from '@/components/theme-provider'
 import { useSidebar } from '@/components/SidebarProvider'
 import { isAnalysisRunningAtom } from '@/atoms/analysis'
-import { getUiPrefs, getTasks, type UiPrefs } from '@/lib/client-api'
+import { getUiPrefs, saveUiPrefs, getTasks, type UiPrefs } from '@/lib/client-api'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import {
   DropdownMenu,
@@ -136,8 +137,71 @@ export default function Sidebar() {
     : builtins
   ).filter((i) => !hidden.has(i.href))
 
+  // Drag-to-reorder: rows shuffle live under the pointer (liveOrder) and
+  // the final order persists to ui-prefs on drop/drag-end.
+  const [dragHref, setDragHref] = useState<string | null>(null)
+  const [liveOrder, setLiveOrder] = useState<string[] | null>(null)
+
+  const displayBuiltins = liveOrder
+    ? liveOrder
+        .map((href) => orderedBuiltins.find((i) => i.href === href))
+        .filter((i): i is (typeof orderedBuiltins)[number] => !!i)
+    : orderedBuiltins
+
+  const persistOrder = (visibleHrefs: string[]) => {
+    const base: UiPrefs = prefs ?? {
+      navLabels: {},
+      navOrder: [],
+      navHidden: [],
+      customLinks: [],
+      faviconUrl: null,
+    }
+    const hiddenSet = new Set(base.navHidden ?? [])
+    const hiddenHrefs = (base.navOrder ?? []).filter(
+      (h) => hiddenSet.has(h) && !visibleHrefs.includes(h),
+    )
+    const next: UiPrefs = { ...base, navOrder: [...visibleHrefs, ...hiddenHrefs] }
+    saveUiPrefs(next)
+      .then(() => {
+        setPrefs(next)
+        window.dispatchEvent(new CustomEvent<UiPrefs>('ui-prefs-updated', { detail: next }))
+      })
+      .catch(() => {})
+  }
+
+  const handleNavDragStart = (e: DragEvent, href: string) => {
+    e.dataTransfer.effectAllowed = 'move'
+    e.dataTransfer.setData('text/plain', href)
+    setDragHref(href)
+    setLiveOrder(orderedBuiltins.map((i) => i.href))
+  }
+
+  const handleNavDragOver = (e: DragEvent, href: string) => {
+    if (!dragHref) return
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+    if (href === dragHref) return
+    const rect = e.currentTarget.getBoundingClientRect()
+    const after = e.clientY > rect.top + rect.height / 2
+    setLiveOrder((cur) => {
+      if (!cur) return cur
+      const next = cur.filter((h) => h !== dragHref)
+      let to = next.indexOf(href)
+      if (to < 0) return cur
+      if (after) to += 1
+      next.splice(to, 0, dragHref)
+      return next
+    })
+  }
+
+  const handleNavDragEnd = () => {
+    if (liveOrder) persistOrder(liveOrder)
+    setDragHref(null)
+    setLiveOrder(null)
+  }
+
   const navigation = [
-    ...orderedBuiltins,
+    ...displayBuiltins,
     ...(prefs?.customLinks ?? [])
       .filter((l) => l.label && l.url)
       .map((l) => ({ name: l.label, short: l.label.split(' ')[0], href: l.url, icon: ExternalLink, external: true, favicon: faviconFor(l.url) as string | null })),
@@ -227,25 +291,36 @@ export default function Sidebar() {
                 <Link
                   key={item.name}
                   href={item.href}
-                  className={cn(linkClasses, 'relative')}
+                  draggable
+                  onDragStart={(e) => handleNavDragStart(e, item.href)}
+                  onDragOver={(e) => handleNavDragOver(e, item.href)}
+                  onDragEnd={handleNavDragEnd}
+                  className={cn(
+                    linkClasses,
+                    'relative group cursor-grab active:cursor-grabbing',
+                    dragHref === item.href && 'opacity-50',
+                  )}
                   title={collapsed ? item.name : undefined}
                 >
                   <item.icon
                     className={cn('w-[18px] h-[18px] flex-shrink-0', isActive && 'text-primary')}
                   />
-                  {!collapsed && <span>{item.name}</span>}
+                  {!collapsed && <span className="truncate">{item.name}</span>}
+                  {!collapsed && (
+                    <GripVertical className="w-3 h-3 ml-auto flex-shrink-0 text-foreground-tertiary opacity-0 group-hover:opacity-60 transition-opacity" />
+                  )}
                   {item.href === '/dashboard/tasks' && openTaskCount > 0 && (
                     <span
                       className={cn(
                         'flex items-center justify-center rounded-full bg-red-500 text-white text-[10px] font-semibold min-w-[18px] h-[18px] px-1',
-                        collapsed ? 'absolute top-1 right-1' : 'ml-auto'
+                        collapsed && 'absolute top-1 right-1'
                       )}
                     >
                       {openTaskCount > 99 ? '99+' : openTaskCount}
                     </span>
                   )}
                   {showAnalysisIndicator && (
-                    <span className={cn('relative flex h-1.5 w-1.5 ml-auto', collapsed && 'absolute top-1.5 right-1.5')}>
+                    <span className={cn('relative flex h-1.5 w-1.5', collapsed && 'absolute top-1.5 right-1.5')}>
                       <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
                       <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500" />
                     </span>
