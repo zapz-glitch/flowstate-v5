@@ -92,9 +92,9 @@ export default function GiveOfferReportPage({ params }: { params: Promise<{ jobI
           {formatWait(Math.floor((now - parseQueuedAt(current.queuedAt)) / 1000))}
         </span>
       )}
-      {current?.listPrice != null && (
+      {current && (
         <span className="text-foreground-secondary tabular-nums">
-          List <b className="text-foreground">${fmtK(current.listPrice)}</b>
+          List <b className="text-foreground">{current.listPrice != null ? `$${fmtK(current.listPrice)}` : '—'}</b>
         </span>
       )}
       <span className="flex items-center gap-1">

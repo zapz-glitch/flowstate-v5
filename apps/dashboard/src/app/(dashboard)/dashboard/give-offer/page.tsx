@@ -160,11 +160,9 @@ export default function GiveOfferPage() {
                           <Timer size={10} />
                           {formatWait(wait)} in queue
                         </span>
-                        {item.listPrice != null && (
-                          <span className="tabular-nums">
-                            List <b className="text-foreground-secondary">${fmtK(item.listPrice)}</b>
-                          </span>
-                        )}
+                        <span className="tabular-nums">
+                          List <b className="text-foreground-secondary">{item.listPrice != null ? `$${fmtK(item.listPrice)}` : '—'}</b>
+                        </span>
                         {item.wholesalePrice != null && (
                           <span className="tabular-nums">
                             Wholesale <b className="text-foreground-secondary">${item.wholesalePrice.toLocaleString('en-US')}</b>

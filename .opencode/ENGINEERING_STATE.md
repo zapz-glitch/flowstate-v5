@@ -10,6 +10,23 @@ imports), React replays → fresh thenable → suspends again → crash.
 Race-dependent: explains "was working, now it's not" across deploys.
 Fixed with useMemo on jobId. Verified only occurrence of the pattern.
 
+### 2026-09-27 — Offer price locked to computed value; List always visible
+
+User: "remove the ability to change offer number — we're going to
+practice discipline in giving offers." And list price still not
+visible in give-offer.
+
+- DealSummaryHero: Prep offer → confirm shows the computed offer as
+  read-only text (Offer $X + Send/Cancel); the editable Offer-$ input
+  is gone. Prep disabled when no positive computed price.
+- QueueFallback: same — no manual price entry; dispatches at the
+  queue's wholesalePrice, disabled when null/negative.
+- List now ALWAYS renders on give-offer surfaces (landing rows, item
+  card cluster, fallback card) — `List —` when the property has no
+  asking price, so the field's presence is unmistakable. Verified the
+  9 nulls have no ask anywhere (report JSON AND the Close lead — e.g.
+  Moselle: off-market, ARV/MAO/wholesale only).
+
 ### 2026-09-27 — Transparent menus root cause: `popover` missing from Tailwind colors
 
 User report: left sidebar's dropdown menus show page content THROUGH
