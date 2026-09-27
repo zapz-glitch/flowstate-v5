@@ -26,6 +26,7 @@ import {
   ExternalLink,
   ListTodo,
   Handshake,
+  BarChart3,
 } from 'lucide-react'
 import { signOut } from '@/lib/auth-client'
 import { Logo, LogoIcon } from '@/components/ui/Logo'
@@ -54,7 +55,8 @@ const baseNavigation: Array<{
 }> = [
   { name: 'Overview', short: 'Home', href: '/dashboard', icon: Home },
   { name: 'Property Search', short: 'Search', href: '/dashboard/analyze', icon: Search },
-  { name: 'Give Offer', short: 'Offers', href: '/dashboard/give-offer', icon: Handshake },
+  { name: 'Offers', short: 'Offers', href: '/dashboard/give-offer', icon: Handshake },
+  { name: 'Analytics', short: 'Analytics', href: '/dashboard/analytics', icon: BarChart3 },
   { name: 'Batch Import', short: 'Batch', href: '/dashboard/batch', icon: Upload },
   { name: 'Property Reports', short: 'Reports', href: '/dashboard/reports', icon: ClipboardList },
   { name: 'Evaluation Settings', short: 'Settings', href: '/dashboard/evaluation-settings', icon: Settings2 },

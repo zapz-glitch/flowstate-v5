@@ -38,6 +38,7 @@ import compSelectionRoute from './routes/comp-selection'
 import mlExportRoute from './routes/ml-export'
 import offersRoute from './routes/offers'
 import { pipelineReads } from './routes/pipeline'
+import { activityIngest, activityReads } from './routes/activity'
 import { cdarv, cdarvInternal } from './routes/cdarv'
 import sseStream from './routes/sse-stream'
 import ghlWebhook from './routes/webhooks/ghl'
@@ -158,6 +159,10 @@ app.route('/webhooks/ghl', ghlWebhook)
 // Public reports (no auth - jobId is unguessable)
 app.route('/reports', reportsRoute)
 
+// CI engine activity ingest — self-authenticates with Bearer CI_INGEST_KEY.
+// Mounted BEFORE the v1 group so the API-key middleware does not intercept.
+app.route('/v1/activity', activityIngest)
+
 // API v1 routes (require API key auth)
 const v1 = new Hono<{ Bindings: Env; Variables: Variables }>()
 v1.use('*', authMiddleware)
@@ -165,6 +170,7 @@ v1.route('/analyze', analyze)
 v1.route('/ml', mlExportRoute)
 v1.route('/offers', offersRoute)
 v1.route('/pipeline', pipelineReads)
+v1.route('/activity', activityReads)
 
 app.route('/v1', v1)
 

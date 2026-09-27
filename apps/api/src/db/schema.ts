@@ -793,3 +793,31 @@ export const tasks = sqliteTable(
   ]
 )
 
+
+// ==========================================
+// Activity Events (conversation-intelligence engine ingest)
+// ==========================================
+
+export const activityEvents = sqliteTable(
+  'activity_events',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    /** Event kind from the engine contract (reachout, response, stage_move, offer_sent, …) */
+    kind: text('kind').notNull(),
+    /** Event value — Close activity id, stage name, checkin type, etc. */
+    value: text('value'),
+    /** Close lead id when the event is lead-scoped */
+    leadId: text('lead_id'),
+    propertyAddress: text('property_address'),
+    /** Event time from the engine (ISO); falls back to receivedAt */
+    ts: text('ts').notNull(),
+    /** Free-form JSON payload (stage, contact_hour, contactTz, …) */
+    meta: text('meta'),
+    receivedAt: text('received_at').notNull().$defaultFn(() => new Date().toISOString()),
+  },
+  (table) => [
+    index('idx_activity_events_kind_ts').on(table.kind, table.ts),
+    index('idx_activity_events_ts').on(table.ts),
+    index('idx_activity_events_lead_id').on(table.leadId),
+  ]
+)
