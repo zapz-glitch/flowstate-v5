@@ -194,6 +194,11 @@ export default function DashboardReportPage({ params, queue }: {
     /** False while the queue fetch is still in flight — an unresolved
      *  fallback doesn't mean "not found" yet. */
     loaded?: boolean
+    /** Queue controls rendered inside the header card (loaded view) —
+     *  a standalone strip sits off the shared band baseline. */
+    inline?: React.ReactNode
+    /** Where the card's back tile points in queue context */
+    backHref?: string
     fallback?: { leadId: string | null; address: string; wholesalePrice: number | null; listPrice?: number | null; opportunityId?: string | null }
   }
 }) {
@@ -742,8 +747,8 @@ export default function DashboardReportPage({ params, queue }: {
         hasMapData && 'sticky top-[calc(3.5rem+var(--sat))] lg:top-0 bg-background lg:bg-transparent px-4 sm:px-6 lg:px-4 pt-3 pb-1 lg:pt-4 lg:pb-0 lg:h-20 lg:flex lg:items-center lg:border-b lg:border-border flex-shrink-0',
       )}>
         <div className="w-full border border-border/60 overflow-hidden bg-background shadow-sm corner-accents corner-accents-bottom">
-          <div className="px-4 py-3 flex items-center gap-3">
-            <Link href="/dashboard/reports" className="w-7 h-7 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0 hover:bg-primary/20 transition-colors" title="Back to reports">
+          <div className="px-4 py-3 flex items-center gap-3 flex-wrap">
+            <Link href={queue?.backHref ?? '/dashboard/reports'} className="w-7 h-7 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0 hover:bg-primary/20 transition-colors" title={queue?.backHref ? 'Back to the offer queue' : 'Back to reports'}>
               <ArrowLeft className="w-3.5 h-3.5 text-primary" />
             </Link>
             <span className="text-body-sm text-foreground-secondary truncate flex-1 min-w-0" title={report.address || undefined}>
@@ -758,6 +763,7 @@ export default function DashboardReportPage({ params, queue }: {
             {autoSaveStatus === 'saved' && (
               <span className="text-[10px] text-emerald-500 flex-shrink-0">Saved</span>
             )}
+            {queue?.inline}
             <div className="flex items-center gap-1.5 flex-shrink-0">
               <button type="button" onClick={() => setHistoryOpen(true)} className="p-1.5 rounded-lg text-foreground-tertiary hover:text-foreground hover:bg-secondary transition-colors" title="History">
                 <History className="w-3.5 h-3.5" />
@@ -810,11 +816,6 @@ export default function DashboardReportPage({ params, queue }: {
             </div>
         </div>
       </div>
-
-      {/* Give Offer queue bar — sits below the header band; the page's
-          -m-8 pulls the band's bottom border to the sidebar-divider
-          baseline, which would clip a thin strip rendered above it. */}
-      {queue?.node}
 
       {/* Refresh result banner */}
       {refreshResult && (
