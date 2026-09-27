@@ -40,7 +40,6 @@ import { reloadForStaleAction } from '@/lib/server-action'
 import { useMapInteraction } from '@/hooks/use-map-interaction'
 import { useEvaluationSync } from '@/hooks/use-evaluation-sync'
 import { useEnrichmentSSE, type EnrichmentEvent } from '@/hooks/use-enrichment-sse'
-import { useSidebar } from '@/components/SidebarProvider'
 import { getBatchStatus } from '@/lib/batch-client'
 
 const EvaluationSettingsSheet = dynamic(() => import('@/components/report/EvaluationSettingsSheet').then((mod) => mod.EvaluationSettingsSheet))
@@ -92,10 +91,10 @@ function QueueFallback({ queue }: {
   }
 
   return (
-    <div className="min-h-screen flex flex-col">
+    <div className="playground-bg -m-4 sm:-m-6 lg:-m-8 min-h-screen flex flex-col">
       {queue.node}
       <div className="flex-1 flex items-center justify-center p-6">
-        <div className="w-full max-w-md border border-border rounded-sm bg-background">
+        <div className="w-full max-w-md border border-border/60 bg-background shadow-sm corner-accents corner-accents-bottom">
           <div className="px-4 pt-4 pb-3 border-b border-border">
             <div className="text-[9px] uppercase tracking-wider text-foreground-tertiary mb-1">Ready for offer</div>
             <div className="text-base font-semibold">{item.address}</div>
@@ -194,18 +193,6 @@ export default function DashboardReportPage({ params, queue }: {
   }
 }) {
   const { jobId } = use(params)
-
-  // Collapse sidebar on mount, restore on unmount
-  const { collapsed: sidebarCollapsed, setCollapsed: setSidebarCollapsed } = useSidebar()
-  const prevCollapsedRef = useRef(sidebarCollapsed)
-  useEffect(() => {
-    prevCollapsedRef.current = sidebarCollapsed
-    if (!sidebarCollapsed) setSidebarCollapsed(true)
-    return () => {
-      if (!prevCollapsedRef.current) setSidebarCollapsed(false)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
 
   const [report, setReport] = useState<{
     jobId: string
@@ -743,83 +730,89 @@ export default function DashboardReportPage({ params, queue }: {
   const hasMapData = isValidCoordinate({ lat: analysis.subject?.latitude, lng: analysis.subject?.longitude })
 
   return (
-    <div className={cn(hasMapData ? '-m-4 sm:-m-6 lg:-m-8 min-h-screen lg:h-[100dvh] flex flex-col lg:overflow-hidden' : 'max-w-[1600px] mx-auto space-y-6')}>
+    <div className={cn('playground-bg -m-4 sm:-m-6 lg:-m-8', hasMapData ? 'min-h-screen lg:h-[100dvh] flex flex-col lg:overflow-hidden' : 'min-h-screen p-4 sm:p-6 lg:p-8 space-y-6')}>
       {/* Give Offer queue bar — only when viewed through the queue */}
       {queue?.node}
-      {/* Header toolbar — address + actions only */}
-      <div className="sticky z-20 no-print border-b border-border bg-background top-[calc(3.5rem+var(--sat))] lg:top-0">
-        <div className={cn('px-3 sm:px-5 py-2 flex items-center gap-2 sm:gap-4', hasMapData ? 'lg:h-20 lg:py-0' : 'lg:h-12 lg:py-0')}>
-          <Link href="/dashboard/reports" className="p-1 rounded-lg hover:bg-secondary transition-colors flex-shrink-0">
-            <ArrowLeft className="w-4 h-4 text-foreground-tertiary" />
-          </Link>
-          <span className="text-body-sm font-medium truncate flex-1 min-w-0" title={report.address || undefined}>
-            {report.address || 'Property Report'}
-            {report.address && <CopyButton text={report.address} title="Copy address" className="ml-1.5" />}
-          </span>
-          {autoSaveStatus === 'saving' && (
-            <span className="text-[10px] text-foreground-tertiary flex items-center gap-1 flex-shrink-0">
-              <RefreshCw className="w-3 h-3 animate-spin" /> Saving...
+      {/* Header toolbar — same band geometry + card chrome as Property Search */}
+      <div className={cn(
+        'no-print z-20',
+        hasMapData && 'sticky top-[calc(3.5rem+var(--sat))] lg:top-0 bg-background lg:bg-transparent px-4 sm:px-6 lg:px-4 pt-3 pb-1 lg:pt-4 lg:pb-0 lg:h-20 lg:flex lg:items-center lg:border-b lg:border-border flex-shrink-0',
+      )}>
+        <div className="w-full border border-border/60 bg-background shadow-sm corner-accents corner-accents-bottom">
+          <div className="px-4 py-3 flex items-center gap-3">
+            <Link href="/dashboard/reports" className="w-7 h-7 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0 hover:bg-primary/20 transition-colors" title="Back to reports">
+              <ArrowLeft className="w-3.5 h-3.5 text-primary" />
+            </Link>
+            <span className="text-body-sm text-foreground-secondary truncate flex-1 min-w-0" title={report.address || undefined}>
+              {report.address || 'Property Report'}
+              {report.address && <CopyButton text={report.address} title="Copy address" className="ml-1.5" />}
             </span>
-          )}
-          {autoSaveStatus === 'saved' && (
-            <span className="text-[10px] text-emerald-500 flex-shrink-0">Saved</span>
-          )}
-          <div className="flex items-center gap-1.5 flex-shrink-0">
-            <button type="button" onClick={() => setHistoryOpen(true)} className="p-1.5 rounded-lg text-foreground-tertiary hover:text-foreground hover:bg-secondary transition-colors" title="History">
-              <History className="w-3.5 h-3.5" />
-            </button>
-            <button type="button" onClick={() => setShareOpen(true)} className="p-1.5 rounded-lg text-foreground-tertiary hover:text-foreground hover:bg-secondary transition-colors" title="Share">
-              <Share2 className="w-3.5 h-3.5" />
-            </button>
-            <UpdateCrmButton
-              jobId={jobId}
-              leadId={analyzeData?.leadId}
-              values={displayValuation ? {
-                listPrice: displayValuation.listPrice,
-                arv: displayValuation.arv,
-                wholesalePrice: displayValuation.wholesalePrice,
-                rehabCost: displayValuation.rehabCost,
-                buyPrice: displayValuation.buyPrice,
-                asIsValue: displayValuation.asIsValue,
-                listPriceRealism: displayValuation.listPriceRealism?.verdict ?? null,
-                confidence: displayValuation.confidence,
-                recommendation: displayValuation.recommendation,
-                recommendationReason: displayValuation.recommendationReason,
-                condition: analyzeData?.subject?.condition,
-                riskFlags: analyzeData?.riskFlags,
-              } : null}
-            />
-            <DownloadReportButton
-              reportProps={{
-                address: report.address || 'Property Report',
-                date: report.createdAt,
-                reportId: report.jobId,
-                subject: analysis.subject,
-                valuation: displayValuation,
-                comps: effectiveComps,
-                riskFlags: analysis.riskFlags,
-                floodZone: analysis.floodZone,
-                isRecalculated,
-              }}
-            />
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setRefreshOpen(true)}
-              disabled={refreshing}
-              className="gap-1.5"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin' : ''}`} />
-              {refreshing ? 'Refreshing...' : 'Refresh'}
-            </Button>
-          </div>
+            {autoSaveStatus === 'saving' && (
+              <span className="text-[10px] text-foreground-tertiary flex items-center gap-1 flex-shrink-0">
+                <RefreshCw className="w-3 h-3 animate-spin" /> Saving...
+              </span>
+            )}
+            {autoSaveStatus === 'saved' && (
+              <span className="text-[10px] text-emerald-500 flex-shrink-0">Saved</span>
+            )}
+            <div className="flex items-center gap-1.5 flex-shrink-0">
+              <button type="button" onClick={() => setHistoryOpen(true)} className="p-1.5 rounded-lg text-foreground-tertiary hover:text-foreground hover:bg-secondary transition-colors" title="History">
+                <History className="w-3.5 h-3.5" />
+              </button>
+              <button type="button" onClick={() => setShareOpen(true)} className="p-1.5 rounded-lg text-foreground-tertiary hover:text-foreground hover:bg-secondary transition-colors" title="Share">
+                <Share2 className="w-3.5 h-3.5" />
+              </button>
+              <UpdateCrmButton
+                jobId={jobId}
+                leadId={analyzeData?.leadId}
+                values={displayValuation ? {
+                  listPrice: displayValuation.listPrice,
+                  arv: displayValuation.arv,
+                  wholesalePrice: displayValuation.wholesalePrice,
+                  rehabCost: displayValuation.rehabCost,
+                  buyPrice: displayValuation.buyPrice,
+                  asIsValue: displayValuation.asIsValue,
+                  listPriceRealism: displayValuation.listPriceRealism?.verdict ?? null,
+                  confidence: displayValuation.confidence,
+                  recommendation: displayValuation.recommendation,
+                  recommendationReason: displayValuation.recommendationReason,
+                  condition: analyzeData?.subject?.condition,
+                  riskFlags: analyzeData?.riskFlags,
+                } : null}
+              />
+              <DownloadReportButton
+                reportProps={{
+                  address: report.address || 'Property Report',
+                  date: report.createdAt,
+                  reportId: report.jobId,
+                  subject: analysis.subject,
+                  valuation: displayValuation,
+                  comps: effectiveComps,
+                  riskFlags: analysis.riskFlags,
+                  floodZone: analysis.floodZone,
+                  isRecalculated,
+                }}
+              />
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setRefreshOpen(true)}
+                disabled={refreshing}
+                className="gap-1.5"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin' : ''}`} />
+                {refreshing ? 'Refreshing...' : 'Refresh'}
+              </Button>
+            </div>
+            </div>
         </div>
       </div>
 
       {/* Refresh result banner */}
       {refreshResult && (
         <div className={cn(
-          'mx-4 sm:mx-6 mt-2 px-4 py-3 border text-sm flex items-start justify-between gap-3 no-print',
+          'px-4 py-3 border text-sm flex items-start justify-between gap-3 no-print',
+          hasMapData && 'mx-4 sm:mx-6 mt-2',
           refreshResult.type === 'success' && 'border-emerald-500/20 bg-emerald-500/5 text-emerald-700 dark:text-emerald-400',
           refreshResult.type === 'no_change' && 'border-blue-500/20 bg-blue-500/5 text-blue-700 dark:text-blue-400',
           refreshResult.type === 'error' && 'border-red-500/20 bg-red-500/5 text-red-700 dark:text-red-400',
