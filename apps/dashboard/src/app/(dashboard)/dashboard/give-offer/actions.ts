@@ -28,6 +28,8 @@ export interface PipelineItem {
   displayName: string | null
   address: string | null
   wholesalePrice: number | null
+  /** Asking price — enriched server-side from the saved report */
+  listPrice?: number | null
   evalReportUrl: string | null
   draft: unknown
   /** SQLite timestamp "YYYY-MM-DD HH:MM:SS" (UTC) */

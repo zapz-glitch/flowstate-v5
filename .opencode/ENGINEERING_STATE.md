@@ -10,6 +10,24 @@ imports), React replays → fresh thenable → suspends again → crash.
 Race-dependent: explains "was working, now it's not" across deploys.
 Fixed with useMemo on jobId. Verified only occurrence of the pattern.
 
+### 2026-09-27 — Give Offer rows gain List price (feat/give-offer-list-price)
+
+User ask: show the asking/list price on give-offer views the same way
+the property report view does (hero shows `List $X` via
+formatMoneyThousands).
+
+- Engine /engine/queue has no listPrice field — items only carry
+  wholesalePrice. Enrichment added inside the /v1/pipeline/queue proxy:
+  on each KV refresh (30s SWR, not per request) it extracts jobIds from
+  evalReportUrl, batch-queries saved_reports.full_response_json, and
+  attaches item.listPrice = subject.listPrice ?? valuation.listPrice.
+  Hot path unchanged (~7ms cache reads).
+- PipelineItem.listPrice?: number | null; landing rows show
+  `List $X` (fmtK, matches report display) beside Wholesale; fallback
+  card shows `List $X` too.
+- Verified: tsc both apps; local D1 join resolves lp for local jobIds
+  (queue items are prod jobIds → null locally; prod D1 has them).
+
 ### 2026-09-27 — Unify report + give-offer chrome with Property Search
 
 User direction: Property Search is the reference layout — map its

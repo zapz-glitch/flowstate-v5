@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { ChevronRight, FileSignature, ListFilter, Play, Timer } from 'lucide-react'
 import { getOfferQueue, getPipelineMetrics, type PipelineItem, type PipelineMetrics } from './actions'
+import { formatMoneyThousands as fmtK } from '@/components/analysis/valuation-number'
 import { decidedIds, formatWait, jobIdForItem, parseQueuedAt, sortedQueue, getCachedQueue, setCachedQueue, WAIT_FILTER_LABELS, type WaitFilter } from './queue'
 
 const POLL_MS = 5000
@@ -159,6 +160,11 @@ export default function GiveOfferPage() {
                           <Timer size={10} />
                           {formatWait(wait)} in queue
                         </span>
+                        {item.listPrice != null && (
+                          <span className="tabular-nums">
+                            List <b className="text-foreground-secondary">${fmtK(item.listPrice)}</b>
+                          </span>
+                        )}
                         {item.wholesalePrice != null && (
                           <span className="tabular-nums">
                             Wholesale <b className="text-foreground-secondary">${item.wholesalePrice.toLocaleString('en-US')}</b>
