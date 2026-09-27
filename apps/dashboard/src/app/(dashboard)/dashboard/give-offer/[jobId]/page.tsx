@@ -28,6 +28,7 @@ export default function GiveOfferReportPage({ params }: { params: Promise<{ jobI
   const { jobId } = use(params)
   const router = useRouter()
   const [raw, setRaw] = useState<PipelineItem[]>(getCachedQueue() ?? [])
+  const [queueLoaded, setQueueLoaded] = useState(getCachedQueue() != null)
   const [filter, setFilter] = useState<WaitFilter>('longest')
   const now = useNow()
 
@@ -40,9 +41,12 @@ export default function GiveOfferReportPage({ params }: { params: Promise<{ jobI
     let cancelled = false
     const load = () =>
       getOfferQueue().then((q) => {
-        if (cancelled || !q.ok) return
-        setCachedQueue(q.items)
-        setRaw(q.items)
+        if (cancelled) return
+        if (q.ok) {
+          setCachedQueue(q.items)
+          setRaw(q.items)
+        }
+        setQueueLoaded(true)
       })
     load()
     const t = setInterval(load, POLL_MS)
@@ -129,6 +133,7 @@ export default function GiveOfferReportPage({ params }: { params: Promise<{ jobI
       params={Promise.resolve({ jobId })}
       queue={{
         node: bar,
+        loaded: queueLoaded,
         onDecided: advance,
         fallback: current
           ? {
