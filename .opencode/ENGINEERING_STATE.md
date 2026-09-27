@@ -1,5 +1,25 @@
 # Engineering State — flowstate-v5
 
+### 2026-09-27 — Editable offer amount on Prep dispatch (PR #31)
+
+User requirement: review + edit the report before firing Prep; the
+dispatched price must be overridable. Report-page editing (comps,
+settings, recalc, auto-save) already exists — the gap was price entry
+at dispatch time.
+
+- DealSummaryHero: Prep offer → inline `Offer $` input prefilled with
+  wholesalePrice ?? buyPrice (>0 only), Enter/Send dispatches at the
+  typed amount, Esc cancels. No margin stays one-click.
+- onOfferWorkflow widened to (workflow, offerPrice?) through
+  AnalysisResultLayout + AnalysisPageLayout; report + analyze handlers
+  use offerPrice ?? wholesale ?? buyPrice.
+- QueueFallback: same amount entry; Prep no longer requires positive
+  wholesalePrice — manual amount unblocks null/negative-price items
+  (Dunn Creek INSUFFICIENT_COMPS etc).
+
+Verified: tsc clean. Prod needs the merge deploy before the user's
+live click-through.
+
 ### 2026-09-27 — CLOSE_API_KEY rotated + Bearer→Basic fix (PR #30)
 
 - Root cause was TWO stacked bugs: every stored key was dead AND
