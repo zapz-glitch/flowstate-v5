@@ -7,16 +7,9 @@ import Link from 'next/link'
 import dynamic from 'next/dynamic'
 import ReportLoading from './loading'
 import { useRouter } from 'next/navigation'
-import { ArrowLeft, ArrowRight, Share2, RefreshCw, AlertTriangle, History, Loader2, ListChecks, FileSignature, CircleSlash, Check, X } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Share2, RefreshCw, History, Loader2, ListChecks, FileSignature, CircleSlash, Check, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { CopyButton } from '@/components/ui/copy-button'
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from '@/components/ui/dialog'
 import {
   Sheet,
   SheetContent,
@@ -184,7 +177,6 @@ export default function DashboardReportPage({ params, queue }: {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [shareOpen, setShareOpen] = useState(false)
-  const [refreshOpen, setRefreshOpen] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [historyEntries, setHistoryEntries] = useState<ReportHistoryEntry[]>([])
@@ -499,7 +491,6 @@ export default function DashboardReportPage({ params, queue }: {
   const handleRefresh = useCallback(async () => {
     if (!report?.address) return
     setRefreshing(true)
-    setRefreshOpen(false)
     setRefreshResult(null)
 
     try {
@@ -560,14 +551,12 @@ export default function DashboardReportPage({ params, queue }: {
     overlayClosersRef.current = {
       comparison: () => setComparisonOpen(false),
       share: () => setShareOpen(false),
-      refresh: () => setRefreshOpen(false),
       history: () => setHistoryOpen(false),
       settings: () => setSettingsOpen(false),
     }
     const flags: Array<[string, boolean]> = [
       ['comparison', comparisonOpen],
       ['share', shareOpen],
-      ['refresh', refreshOpen],
       ['history', historyOpen],
       ['settings', settingsOpen],
     ]
@@ -584,7 +573,7 @@ export default function DashboardReportPage({ params, queue }: {
         window.history.back()
       }
     }
-  }, [comparisonOpen, shareOpen, refreshOpen, historyOpen, settingsOpen])
+  }, [comparisonOpen, shareOpen, historyOpen, settingsOpen])
 
   // Run AI comp selection on existing report — lightweight LLM-only call
   const handleRunAiAnalysis = useCallback(async () => {
@@ -802,7 +791,7 @@ export default function DashboardReportPage({ params, queue }: {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => setRefreshOpen(true)}
+                onClick={handleRefresh}
                 disabled={refreshing}
                 className="gap-1.5"
               >
@@ -857,7 +846,7 @@ export default function DashboardReportPage({ params, queue }: {
           floodZone={analysis.floodZone}
 
           valuationCardRef={valuationCardRef}
-          onRerun={() => setRefreshOpen(true)}
+          onRerun={handleRefresh}
           rerunning={refreshing}
           onOfferWorkflow={handleOfferWorkflow}
           notesSlot={realtorNotesCard}
@@ -914,40 +903,6 @@ export default function DashboardReportPage({ params, queue }: {
         onProximityChange={settingsHook.updateProximityAdjustments}
       />}
 
-      {/* Refresh Confirmation Dialog */}
-      <Dialog open={refreshOpen} onOpenChange={setRefreshOpen}>
-        <DialogContent className="max-w-sm p-0 gap-0">
-          <DialogHeader className="px-5 pt-5 pb-3">
-            <DialogTitle className="text-body font-semibold flex items-center gap-2">
-              <AlertTriangle className="w-4 h-4 text-amber-500" />
-              Refresh Report Data
-            </DialogTitle>
-          </DialogHeader>
-          <div className="px-5 pb-4 space-y-3">
-            <p className="text-caption text-foreground-secondary">
-              This will fetch fresh property and comparable sales data from CoreLogic. The new analysis may produce different results than the current report.
-            </p>
-            <div className="rounded-lg bg-amber-500/5 border border-amber-500/20 px-3 py-2.5 text-[11px] text-amber-600 dark:text-amber-400 space-y-1">
-              <p>What changes:</p>
-              <ul className="list-disc pl-4 space-y-0.5">
-                <li>New comparable sales may be available</li>
-                <li>Sale prices and dates will be updated</li>
-                <li>ARV and valuation may differ from previous analysis</li>
-                <li>Comp selection will be re-evaluated</li>
-              </ul>
-            </div>
-          </div>
-          <DialogFooter className="px-5 pb-4 pt-0">
-            <Button variant="outline" size="sm" onClick={() => setRefreshOpen(false)}>
-              Cancel
-            </Button>
-            <Button size="sm" onClick={handleRefresh} className="gap-1.5">
-              <RefreshCw className="w-3.5 h-3.5" />
-              Refresh Data
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       {/* Batch review bar — prev / queue position / next, fixed at bottom */}
       {batchQueue && navIndex >= 0 && (
