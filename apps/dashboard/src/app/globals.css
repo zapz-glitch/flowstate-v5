@@ -5,6 +5,7 @@
 @layer base {
   /* Light mode (default) — monochrome, inverted-contrast actions */
   :root {
+    color-scheme: light;
     --background: 0 0% 100%;
     --foreground: 0 0% 7%;
     --foreground-secondary: 0 0% 30%;
@@ -36,6 +37,7 @@
      #141414 surfaces, #1f1f1f hover, hairline borders.
      Zero hue — neutral grays only. */
   .dark {
+    color-scheme: dark;
     --background: 0 0% 4%;
     --foreground: 0 0% 92%;
     --foreground-secondary: 0 0% 71%;
@@ -312,6 +314,14 @@ body {
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: hsl(var(--muted-foreground));
+}
+
+/* Native <select> option lists — color-scheme (set above) handles the OS
+   popup's base palette; these pin the exact theme tokens where the browser
+   honors them (Edge/Chrome/Firefox). */
+select option {
+  background-color: hsl(var(--popover));
+  color: hsl(var(--popover-foreground));
 }
 
 /* ─── Playground-specific styles (analysis page) ─────────────────────────────*/
