@@ -1,5 +1,31 @@
 # Engineering State — flowstate-v5
 
+### 2026-09-27 — "Page couldn't load" = deploy-window staleness; chunk-load self-heal added (PR #34)
+
+User report: /dashboard/give-offer showed the browser's "This page
+couldn't load" right after the #31–#33 deploy roll. Verified the stack
+end-to-end — nothing in the code path is broken:
+
+- Local (authed session via .data/local-candidate creds): give-offer +
+  give-offer/[jobId] both 200; real server-action POST for
+  getOfferQueue returned the live 24-item queue.
+- Prod: page 200, API healthy, `wrangler tail flowstate-dashboard`
+  clean — zero exceptions on the requests.
+- ALSO fixed earlier in the session: the local next-server had wedged
+  (accepted connections, never responded) — restarted, 200s.
+
+Root cause of the visible failure: deploy-window staleness — old tab +
+rotated Server Action IDs / deleted content-hashed chunks. Guard existed
+for action errors only; chunk-load errors now hit the same reload-once
+path (isChunkLoadError covers Chrome/Firefox/Safari strings; regression
+test server-action.test.mjs). If the failure persists for the user AFTER
+a hard refresh, it needs their browser console output — everything
+measurable from here is green.
+
+Env note: no headless browser possible locally (libnspr4/nss3 missing,
+playwright chromium won't launch) — e2e verified at the HTTP/RSC layer
+with real cookies + real Next-Action POSTs instead.
+
 ### 2026-09-27 — Queue latency + not-found flash fixed (PR #33)
 
 User report: Give Offer queue loads slowly; "page couldn't load" flashes
