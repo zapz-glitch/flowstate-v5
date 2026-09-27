@@ -1,5 +1,31 @@
 # Engineering State — flowstate-v5
 
+### 2026-09-27 — Give Offer queue UX: report-first flow (#25-#28 merged)
+
+- Sidebar 'Give Offer' → /dashboard/give-offer redirects into the FIRST
+  queued report (longest-wait). /dashboard/give-offer/[jobId] renders the
+  real report page (reports/[jobId] client component) with an injected
+  queue bar: position, live wait timer, wait filter (longest/newest/
+  1h+/4h+/24h+, localStorage), prev/skip arrows. Disposition in the hero
+  auto-advances to the next queued item (decidedIds session set).
+- QueueFallback on the report page when the jobId's report is absent
+  from the local DB — disposition still dispatches (leadId+address).
+- Shared 30s module-level queue cache (give-offer/queue.ts) → instant
+  menu redirect + nav between items.
+- Dropdown menus are now opaque bg-popover (was popover/95 + blur).
+- PR #24's first iteration had an unclosed JSX paren that broke the
+  whole dashboard tree (dev 500s, prod build failed) — fixed in #25.
+  Watch for that pattern when merging UI fast.
+
+Verified: all routes 200 locally post-restart; queue proxy returns the
+live 24-item engine queue incl. 12717 Dunn Creek Rd (address/wholesale
+null — engine-side gap). The stale Next dev server was the 'couldn't
+load' culprit after the JSX fix — restart fixed it.
+
+Last handoff: on main @ bc9a61d+. Local dev: api=wrangler shell
+060c86, dash=next-server (restarted). Next: live-test a Prep offer
+decision on a real queue item; watch the listener process it end-to-end.
+
 ### 2026-09-27 — Give Offer pipeline, engine-canonical (#24 merged)
 
 Conversation-intelligence engine owns the funnel (queue + metrics,
