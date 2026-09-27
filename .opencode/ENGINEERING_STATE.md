@@ -10,13 +10,37 @@ imports), React replays → fresh thenable → suspends again → crash.
 Race-dependent: explains "was working, now it's not" across deploys.
 Fixed with useMemo on jobId. Verified only occurrence of the pattern.
 
+### 2026-09-27 — Prod verification: #482 fix confirmed live; Prep click not yet fired
+
+Verification results (main @ 86f3576):
+- #482 fix LIVE on prod. flowstate-dashboard deployed 05:25:36Z
+  (post-merge of #37 @ 05:22Z + docs @ 05:23Z). Deep link
+  /dashboard/give-offer/job_1790462773802 -> 200, and the deployed
+  client chunk (1g3sfybz_piiq.js) contains the memoized params:
+  `useMemo(()=>Promise.resolve({jobId:f}),[f])`. Confirmed at the
+  bundle level, not just HTTP.
+- Prep click: NOT fired yet on prod. Listener transcript
+  (devin-fbfcfad371534372bff22b123657c41f) ends at 02:29:29Z — the
+  Dunn Creek HUMAN_OFFER move. Zero `offer-dispatch:*` keys in prod
+  API_CACHE (30-day TTL — none ever written). Dispatch path:
+  dashboard server action dispatchOfferPrep -> POST /v1/offers/prep
+  -> offers.ts posts "PREP OFFER: ..." to the Devin session + KV
+  record + engine offer-draft fire-and-forget. If a click had
+  succeeded, both artifacts would exist — neither does.
+- wrangler tail flowstate-api running to catch the click live.
+
 ## LAST HANDOFF — resume here
 
-Session state: main @ 3359110, all 9 PRs (#29–#37) merged + deployed,
+Session state: main @ 86f3576, all 9 PRs (#29–#37) merged + deployed,
 working tree clean, no open branches. Local dev running: api=wrangler
-dev :8787 (PID 43675ish), dashboard=next dev :3000 (restarted once —
-previous server wedged; if :3000 stalls again, kill next-server and
-`cd apps/dashboard && npm run dev`).
+dev :8787, dashboard=next dev :3000 (if :3000 stalls, kill next-server
+and `cd apps/dashboard && npm run dev`).
+
+VERIFIED THIS SESSION:
+- #482 fix live on prod — deployment 05:25:36Z, deep link 200,
+  memoized-params confirmed inside the deployed client chunk.
+- Prep click not yet fired on prod (zero offer-dispatch KV keys,
+  listener transcript ends 02:29Z). Prod API tail running.
 
 DONE this session:
 - CLOSE_API_KEY rotated (new key in .dev.vars + `wrangler secret put`)
@@ -65,7 +89,10 @@ PENDING / NEXT:
    edit report → Prep offer → confirm/edit price → Send. Then verify in
    the listener transcript: PREP OFFER received → child session →
    engine offer-draft pending → REVIEW email. THIS WAS THE WHOLE POINT.
-2. Confirm the #482 fix loads deep links on prod for the user.
+   As of 05:30Z no dispatch has landed — if the user believes they
+   clicked, the failure is client-side / before /v1/offers/prep.
+2. ~~Confirm the #482 fix loads deep links on prod for the user.~~
+   DONE — verified at the bundle level 05:30Z (see entry above).
 
 Git rules reminder: feature branch + PR + tsc --noEmit per change;
 never push directly to main; ENGINEERING_STATE.md rides with work.
