@@ -1,17 +1,27 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { FileSignature, CircleSlash, Check, X, Timer, RefreshCw, ArrowRight, ExternalLink } from 'lucide-react'
+import { FileSignature, CircleSlash, Check, X, RefreshCw, ExternalLink } from 'lucide-react'
+import { Card } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
 import { getOfferQueue, getPipelineMetrics, type PipelineItem, type PipelineMetrics } from './actions'
 import { dispatchOfferPrep, declineOffer } from '../analyze/actions'
 
 const POLL_MS = 5000
 
+function formatCurrency(amount: number): string {
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  }).format(amount)
+}
+
 function formatElapsed(seconds: number): string {
   if (seconds < 60) return `${seconds}s`
   const m = Math.floor(seconds / 60)
-  if (m < 60) return `${m}m ${seconds % 60}s`
+  if (m < 60) return `${m}m`
   const h = Math.floor(m / 60)
   return `${h}h ${m % 60}m`
 }
@@ -19,19 +29,6 @@ function formatElapsed(seconds: number): string {
 /** Engine timestamps arrive as "YYYY-MM-DD HH:MM:SS" UTC. */
 function parseQueuedAt(s: string): number {
   return Date.parse(s.includes('T') ? s : s.replace(' ', 'T') + 'Z')
-}
-
-/** Live seconds elapsed since a timestamp — re-renders every second. */
-function useElapsed(sinceMs: number | null): number {
-  const [elapsed, setElapsed] = useState(0)
-  useEffect(() => {
-    if (sinceMs == null) return
-    const tick = () => setElapsed(Math.max(0, Math.floor((Date.now() - sinceMs) / 1000)))
-    tick()
-    const t = setInterval(tick, 1000)
-    return () => clearInterval(t)
-  }, [sinceMs])
-  return elapsed
 }
 
 function MetricCell({ label, value }: { label: string; value: string }) {
@@ -44,21 +41,19 @@ function MetricCell({ label, value }: { label: string; value: string }) {
 }
 
 const itemKey = (i: PipelineItem) => i.leadId
+const itemName = (i: PipelineItem) => i.address ?? i.displayName ?? i.leadId
 
 export default function GiveOfferPage() {
   const [items, setItems] = useState<PipelineItem[]>([])
   const [metrics, setMetrics] = useState<PipelineMetrics | null>(null)
-  const [currentId, setCurrentId] = useState<string | null>(null)
-  const [outcome, setOutcome] = useState<{ ok: boolean; label: string } | null>(null)
-  const [busy, setBusy] = useState(false)
+  const [busyId, setBusyId] = useState<string | null>(null)
+  const [results, setResults] = useState<Record<string, { ok: boolean; label: string }>>({})
   const decidedIds = useRef(new Set<string>())
 
   const refresh = useCallback(async () => {
     const [q, m] = await Promise.all([getOfferQueue(), getPipelineMetrics()])
     if (q.ok) {
-      const visible = q.items.filter((i) => !decidedIds.current.has(itemKey(i)))
-      setItems(visible)
-      setCurrentId((prev) => (prev && visible.some((i) => itemKey(i) === prev) ? prev : visible[0] ? itemKey(visible[0]) : null))
+      setItems(q.items.filter((i) => !decidedIds.current.has(itemKey(i))))
     }
     if (m.ok) setMetrics(m.metrics)
   }, [])
@@ -69,73 +64,74 @@ export default function GiveOfferPage() {
     return () => clearInterval(t)
   }, [refresh])
 
-  const current = items.find((i) => itemKey(i) === currentId) ?? items[0] ?? null
-  const elapsed = useElapsed(current ? parseQueuedAt(current.queuedAt) : null)
-  const displayAddress = current ? current.address ?? current.displayName ?? current.leadId : ''
-
   const decide = useCallback(
-    async (workflow: 'prep_offer' | 'no_margin') => {
-      if (!current || busy) return
-      setBusy(true)
-      setOutcome(null)
+    async (item: PipelineItem, workflow: 'prep_offer' | 'no_margin') => {
+      const id = itemKey(item)
+      if (busyId) return
+      setBusyId(id)
       try {
         const res =
           workflow === 'prep_offer'
             ? await dispatchOfferPrep({
-                leadId: current.leadId ?? undefined,
-                propertyAddress: displayAddress,
-                purchasePrice: current.wholesalePrice ?? 0,
-                opportunityId: current.opportunityId ?? undefined,
+                leadId: item.leadId ?? undefined,
+                propertyAddress: itemName(item),
+                purchasePrice: item.wholesalePrice ?? 0,
+                opportunityId: item.opportunityId ?? undefined,
               })
-            : await declineOffer({ leadId: current.leadId ?? undefined, propertyAddress: displayAddress })
-        if (!res.ok) {
-          setOutcome({ ok: false, label: res.error ?? 'Dispatch failed' })
-          return
+            : await declineOffer({ leadId: item.leadId ?? undefined, propertyAddress: itemName(item) })
+        setResults((prev) => ({
+          ...prev,
+          [id]: res.ok
+            ? {
+                ok: true,
+                label: workflow === 'prep_offer' ? (res.idempotent ? 'Already dispatched' : 'Offer prep dispatched') : 'Decline recorded',
+              }
+            : { ok: false, label: res.error ?? 'Dispatch failed' },
+        }))
+        if (res.ok) {
+          decidedIds.current.add(id)
+          // Fade the outcome briefly, then the row clears and the queue rolls up.
+          setTimeout(() => {
+            setItems((prev) => prev.filter((i) => itemKey(i) !== id))
+            setResults((prev) => {
+              const next = { ...prev }
+              delete next[id]
+              return next
+            })
+          }, 1500)
         }
-        setOutcome({
-          ok: true,
-          label:
-            workflow === 'prep_offer'
-              ? res.idempotent
-                ? 'Already dispatched'
-                : 'Offer prep dispatched'
-              : 'Decline recorded',
-        })
-        // Remove from local queue immediately — the engine advances the item.
-        decidedIds.current.add(itemKey(current))
-        setTimeout(() => {
-          setItems((prev) => {
-            const next = prev.filter((i) => itemKey(i) !== itemKey(current))
-            setCurrentId(next[0] ? itemKey(next[0]) : null)
-            return next
-          })
-          setOutcome(null)
-        }, 1200)
       } catch {
-        setOutcome({ ok: false, label: 'Dispatch failed' })
+        setResults((prev) => ({ ...prev, [id]: { ok: false, label: 'Dispatch failed' } }))
       } finally {
-        setBusy(false)
+        setBusyId(null)
       }
     },
-    [current, busy, displayAddress],
+    [busyId],
   )
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Header + metrics */}
-      <div className="shrink-0 border-b border-border px-4 sm:px-6 py-3">
-        <div className="flex items-center gap-3 mb-2">
-          <h1 className="text-sm font-semibold">Give Offer</h1>
-          <span className="text-[10px] px-1.5 py-0.5 rounded bg-secondary text-foreground-secondary tabular-nums">
-            {items.length} in queue
-          </span>
-          <button
-            type="button"
-            onClick={refresh}
-            className="ml-auto flex items-center gap-1 text-[10px] text-foreground-tertiary hover:text-foreground"
-          >
-            <RefreshCw size={11} /> Refresh
-          </button>
+    <div className="space-y-10 animate-in fade-in duration-500">
+      {/* Header */}
+      <div className="space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-2">
+          <div>
+            <h1 className="text-title font-bold text-foreground tracking-tight">Give Offer</h1>
+            <p className="text-body-sm text-foreground-secondary mt-1">
+              Properties cleared for an offer — disposition each one and the queue rolls forward.
+            </p>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="text-caption text-foreground-secondary tabular-nums">
+              {items.length} waiting
+            </span>
+            <button
+              type="button"
+              onClick={refresh}
+              className="flex items-center gap-1 text-caption text-foreground-tertiary hover:text-foreground transition-colors"
+            >
+              <RefreshCw size={12} /> Refresh
+            </button>
+          </div>
         </div>
         {metrics && (
           <div className="grid grid-cols-4 sm:grid-cols-8 divide-x divide-border border border-border rounded-sm bg-background/60">
@@ -157,126 +153,91 @@ export default function GiveOfferPage() {
         )}
       </div>
 
-      <div className="flex-1 min-h-0 flex">
-        {/* Queue list */}
-        <div className="w-56 shrink-0 border-r border-border overflow-y-auto">
-          {items.length === 0 && (
-            <div className="p-4 text-xs text-foreground-tertiary">Queue is empty — properties land here when underwriting completes.</div>
-          )}
-          {items.map((item, i) => (
-            <button
-              key={itemKey(item)}
-              type="button"
-              onClick={() => setCurrentId(itemKey(item))}
-              className={cn(
-                'w-full text-left px-3 py-2.5 border-b border-border/50 text-xs transition-colors',
-                itemKey(item) === (current ? itemKey(current) : null) ? 'bg-secondary/60' : 'hover:bg-secondary/30',
-              )}
-            >
-              <div className="font-medium truncate">{item.address ?? item.displayName ?? item.leadId}</div>
-              <div className="flex items-center justify-between mt-0.5">
-                <span className="text-[10px] text-foreground-tertiary tabular-nums">
-                  #{i + 1} · {formatElapsed(Math.floor((Date.now() - parseQueuedAt(item.queuedAt)) / 1000))}
-                </span>
-                {item.wholesalePrice != null && (
-                  <span className="text-[10px] text-foreground-secondary tabular-nums">
-                    ${Math.round(item.wholesalePrice / 1000)}K
-                  </span>
-                )}
-              </div>
-            </button>
-          ))}
-        </div>
-
-        {/* Current item */}
-        <div className="flex-1 flex items-center justify-center p-6">
-          {!current ? (
-            <div className="text-center text-sm text-foreground-tertiary">
-              {items.length === 0 ? 'Nothing waiting on an offer.' : 'Select a property'}
-            </div>
-          ) : (
-            <div className="w-full max-w-md border border-border rounded-sm bg-background/95 backdrop-blur-sm">
-              <div className="px-4 pt-4 pb-3 border-b border-border">
-                <div className="text-[9px] uppercase tracking-wider text-foreground-tertiary mb-1">Ready for offer</div>
-                <div className="text-base font-semibold">{displayAddress}</div>
-                <div className="flex items-center gap-3 mt-2 text-xs text-foreground-secondary">
-                  <span className="flex items-center gap-1 tabular-nums">
-                    <Timer size={12} className="text-foreground-tertiary" />
-                    {formatElapsed(elapsed)} in queue
-                  </span>
-                  {current.wholesalePrice != null && (
-                    <span className="tabular-nums">
-                      Wholesale <b className="text-foreground">${current.wholesalePrice.toLocaleString('en-US')}</b>
-                    </span>
-                  )}
-                  {current.evalReportUrl && (
-                    <a
-                      href={current.evalReportUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-center gap-0.5 text-primary hover:underline"
-                    >
-                      Report <ExternalLink size={11} />
-                    </a>
-                  )}
-                </div>
-              </div>
-              <div className="px-4 py-3">
-                <div className="text-xs text-foreground-secondary mb-3">Dispatch the offer workflow or mark this property no-margin.</div>
-                <div className="relative min-h-[34px]">
-                  {outcome ? (
-                    <div
-                      key="outcome"
-                      className={cn(
-                        'flex items-center gap-1.5 text-xs font-medium animate-in fade-in duration-300',
-                        outcome.ok ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500',
+      {items.length === 0 ? (
+        <Card className="px-6 py-12 text-center">
+          <p className="text-body-sm text-foreground-secondary">Nothing waiting on an offer.</p>
+          <p className="text-caption text-foreground-tertiary mt-1">
+            Properties land here the moment underwriting completes.
+          </p>
+        </Card>
+      ) : (
+        <div className="space-y-3">
+          {items.map((item, i) => {
+            const id = itemKey(item)
+            const waiting = Math.floor((Date.now() - parseQueuedAt(item.queuedAt)) / 1000)
+            const result = results[id]
+            const isBusy = busyId === id
+            return (
+              <Card key={id} className="px-4 py-3">
+                <div className="flex items-center gap-4">
+                  <span className="text-caption text-foreground-tertiary tabular-nums w-5 shrink-0">#{i + 1}</span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <p className="text-body-sm font-medium text-foreground truncate">{itemName(item)}</p>
+                      {item.evalReportUrl && (
+                        <a
+                          href={item.evalReportUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-0.5 text-caption text-primary hover:underline shrink-0"
+                        >
+                          Report <ExternalLink size={11} />
+                        </a>
                       )}
-                    >
-                      {outcome.ok ? <Check size={14} /> : <X size={14} />}
-                      {outcome.label}
                     </div>
-                  ) : (
-                    <div key="buttons" className="flex items-center gap-2 animate-in fade-in duration-300">
-                      <button
-                        type="button"
-                        onClick={() => decide('prep_offer')}
-                        disabled={busy || !current.wholesalePrice || !displayAddress}
-                        className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded border border-emerald-600/40 text-xs font-medium text-emerald-600 hover:bg-emerald-500/10 transition-colors disabled:opacity-50 dark:text-emerald-400"
-                        title={current.wholesalePrice ? 'Prep offer — dispatch to the Devin listener + engine' : 'No wholesale price on record'}
-                      >
-                        {busy ? <RefreshCw size={13} className="animate-spin" /> : <FileSignature size={13} />}
-                        Prep offer
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => decide('no_margin')}
-                        disabled={busy}
-                        className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded border border-border text-xs text-foreground-secondary hover:bg-secondary transition-colors disabled:opacity-50"
-                      >
-                        <CircleSlash size={13} />
-                        No margin
-                      </button>
+                    <div className="flex items-center gap-4 text-caption mt-0.5">
+                      {item.wholesalePrice != null && (
+                        <span className="text-foreground-secondary">
+                          <span className="text-foreground-tertiary">Wholesale</span>{' '}
+                          {formatCurrency(item.wholesalePrice)}
+                        </span>
+                      )}
+                      <span className="text-foreground-tertiary tabular-nums">
+                        waiting {formatElapsed(waiting)}
+                      </span>
                     </div>
-                  )}
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    {result ? (
+                      <span
+                        className={cn(
+                          'flex items-center gap-1 text-caption font-medium animate-in fade-in duration-300',
+                          result.ok ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500',
+                        )}
+                      >
+                        {result.ok ? <Check size={13} /> : <X size={13} />}
+                        {result.label}
+                      </span>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => decide(item, 'prep_offer')}
+                          disabled={busyId != null || !item.wholesalePrice}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded border border-emerald-600/40 text-caption font-medium text-emerald-600 hover:bg-emerald-500/10 transition-colors disabled:opacity-50 dark:text-emerald-400"
+                          title={item.wholesalePrice ? 'Prep offer — dispatch to the listener + engine' : 'No wholesale price on record'}
+                        >
+                          {isBusy ? <RefreshCw size={12} className="animate-spin" /> : <FileSignature size={12} />}
+                          Prep offer
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => decide(item, 'no_margin')}
+                          disabled={busyId != null}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded border border-border text-caption text-foreground-secondary hover:bg-secondary transition-colors disabled:opacity-50"
+                        >
+                          {isBusy ? <RefreshCw size={12} className="animate-spin" /> : <CircleSlash size={12} />}
+                          No margin
+                        </button>
+                      </>
+                    )}
+                  </div>
                 </div>
-                {items.length > 1 && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const idx = items.findIndex((i) => itemKey(i) === itemKey(current))
-                      setCurrentId(itemKey(items[(idx + 1) % items.length]))
-                      setOutcome(null)
-                    }}
-                    className="mt-3 flex items-center gap-1 text-[10px] text-foreground-tertiary hover:text-foreground"
-                  >
-                    Next property <ArrowRight size={11} />
-                  </button>
-                )}
-              </div>
-            </div>
-          )}
+              </Card>
+            )
+          })}
         </div>
-      </div>
+      )}
     </div>
   )
 }
