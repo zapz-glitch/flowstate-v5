@@ -157,6 +157,8 @@ const evaluate = (
     now: NOW,
     test1: tester1(t1Fields ?? {}),
     test2: tester2(t2Entries ?? {}),
+    // Deterministic — no live census lookups unless a test injects one.
+    geo: async () => null,
     ...opts,
   })
 
@@ -436,6 +438,45 @@ describe('runJevEvaluation — test 2', () => {
     assert.ok(cross.test2!.score! >= 90 && cross.test2!.score! <= 95,
       `crossing scored ${cross.test2!.score} — lower tier, not premium`)
     assert.ok(same.test2!.score! >= 95, `unverified stays premium — scored ${same.test2!.score}`)
+  })
+
+  it('a same-block-group match lifts a subdivision miss into the premium tier', async () => {
+    const result = await evaluate(
+      [comp('bg')],
+      {},
+      { bg: t2(4, { nouls: { subdivision: 0.2, neighborhood: 0.9, physicalCharacter: 0, material: 0, foundation: 0 } }) },
+      // Subject and comp share coords here → one geography serves both.
+      { geo: async () => ({ blockGroup: '121090208112', tract: '12109020811' }) },
+    )
+    const bg = result.entries[0]!
+    assert.equal(bg.sameBlockGroup, true, 'same census block group resolved')
+    assert.equal(bg.test2!.passed, true, 'neighborhood noul still carries the pass')
+    assert.ok(bg.test2!.score! >= 95, `same block group earns premium — scored ${bg.test2!.score}`)
+  })
+
+  it('census tract backfills a missing provider tract — same-source compare only', async () => {
+    const saved = subject.censusTract
+    subject.censusTract = undefined
+    try {
+      const result = await evaluate(
+        [comp('elsewhere', { latitude: 27.96 })],
+        {},
+        { elsewhere: t2(4, {}) },
+        // Subject resolves tract A; the off-coord comp resolves tract B —
+        // both from the census fallback, so the compare is legal.
+        {
+          geo: async (lat: number) =>
+            lat === 27.95
+              ? { blockGroup: '111111111111', tract: '11111111111' }
+              : { blockGroup: '222222222222', tract: '22222222222' },
+        },
+      )
+      const c = result.entries.find((e) => e.compId === 'elsewhere')!
+      assert.equal(c.crossesMajorRoad, true, 'census tracts differ → crossing verified via fallback')
+      assert.equal(c.sameBlockGroup, false, 'different block group → match resolved as false, not null')
+    } finally {
+      subject.censusTract = saved
+    }
   })
 
   it('physical character, material, and foundation are preferred — they never gate', async () => {

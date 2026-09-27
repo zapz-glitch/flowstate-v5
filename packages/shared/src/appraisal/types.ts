@@ -134,6 +134,9 @@ export interface CompLike extends PropertyLike {
   distanceMiles?: number | null
   /** True when the comp sits across a major road from the subject */
   crossesMajorRoad?: boolean
+  /** True when the comp shares the subject's census block group — same
+   *  micro-market evidence, tighter than tract. null/undefined = unverified */
+  sameBlockGroup?: boolean | null
   /** Site/influence quality flag (traffic influence) */
   siteInfluence?: string | null
 }

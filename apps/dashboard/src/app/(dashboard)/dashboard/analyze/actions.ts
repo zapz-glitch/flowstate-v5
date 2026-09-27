@@ -330,6 +330,12 @@ export interface JevHybridCompScore {
    * A crossing demotes a subdivision matcher out of the premium score tier.
    */
   crossesMajorRoad?: boolean | null
+  /**
+   * Census block-group match — the comp shares the subject's block group,
+   * a tighter same-micro-market signal than tract. null = unverified. A
+   * match can substitute for a subdivision noul toward the premium tier.
+   */
+  sameBlockGroup?: boolean | null
 }
 
 /** Jev read-only outcome classification attached to a completed analysis */
@@ -665,6 +671,8 @@ export interface CompItem {
   userTier?: 'arv' | 'as_is' | null
   /** Road-barrier proxy — census tract differs from the subject's. Absent = unverified. */
   crossesMajorRoad?: boolean
+  /** Same census block group as the subject — same micro-market evidence. Absent/null = unverified. */
+  sameBlockGroup?: boolean | null
   /** Visual ARV-candidacy check on listing photos (ARV-selected comps only) */
   curbAppeal?: {
     condition: 'renovated' | 'dated' | 'distressed' | 'unknown'

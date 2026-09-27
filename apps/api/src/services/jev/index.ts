@@ -23,6 +23,8 @@ import { DEFAULT_FILTERS } from '../appraisal/types'
 export interface JevEnv {
   TYPESAFE_API_KEY?: string
   TYPESAFE_MODEL?: string
+  /** KV namespace — caches census block-group lookups for comp selection */
+  API_CACHE?: KVNamespace
   /** 'true' → Candidate B structured choice drives comp routing (default false = Baseline A) */
   JEV_COMP_CLASSIFIER_V2_ENABLED?: string
   /** 'false' disables the Candidate B shadow run (default on — measures B beside A) */

@@ -1,5 +1,22 @@
 # Engineering State — flowstate-v5
 
+### 2026-09-28 — census block-group signal in comp selection
+
+New lateral market-area metric beside the tract proxy. Free Census
+Geocoder API (geographies/coordinates, no key) → block GEOID → block
+group = first 12 digits, tract = first 11. Runs post-enrichment on the
+top-10 set: subject once + comps in parallel, KV-cached ~6mo, every
+failure resolves null (unverified, no penalty — same pattern as tract).
+Score effect: sameBlockGroup === true can substitute for a subdivision
+noul miss toward the premium tier (still blocked by crossesMajorRoad);
+mismatch is neutral — BG splits inside neighborhoods are common. Same
+response also backfills crossesMajorRoad's coverage: provider-vs-provider
+tract compare preferred, census-vs-census fallback when the provider
+omitted one side (formats never mixed). Audit panel + entry/comp types
+carry sameBlockGroup. Injectable `geo` seam keeps tests deterministic
+(harness stubs it; two new tests cover both paths). 33/33 comp-hybrid
+tests pass; tsc clean both apps.
+
 ### 2026-09-28 — comp Street View thumbnails: radius fix
 
 Some comps showed blank insignia while others had imagery. Verified
