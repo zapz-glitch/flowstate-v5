@@ -1,12 +1,12 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { FileSignature, CircleSlash, Check, X, Timer, RefreshCw, ArrowRight } from 'lucide-react'
+import { FileSignature, CircleSlash, Check, X, Timer, RefreshCw, ArrowRight, ExternalLink } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { getOfferQueue, getPipelineMetrics, type PipelineItem, type PipelineMetrics } from './actions'
 import { dispatchOfferPrep, declineOffer } from '../analyze/actions'
 
-const POLL_MS = 4000
+const POLL_MS = 5000
 
 function formatElapsed(seconds: number): string {
   if (seconds < 60) return `${seconds}s`
@@ -16,17 +16,21 @@ function formatElapsed(seconds: number): string {
   return `${h}h ${m % 60}m`
 }
 
-/** Live seconds elapsed since an ISO timestamp — re-renders every second. */
-function useElapsed(sinceIso: string | null): number {
+/** Engine timestamps arrive as "YYYY-MM-DD HH:MM:SS" UTC. */
+function parseQueuedAt(s: string): number {
+  return Date.parse(s.includes('T') ? s : s.replace(' ', 'T') + 'Z')
+}
+
+/** Live seconds elapsed since a timestamp — re-renders every second. */
+function useElapsed(sinceMs: number | null): number {
   const [elapsed, setElapsed] = useState(0)
   useEffect(() => {
-    if (!sinceIso) return
-    const start = Date.parse(sinceIso)
-    const tick = () => setElapsed(Math.max(0, Math.floor((Date.now() - start) / 1000)))
+    if (sinceMs == null) return
+    const tick = () => setElapsed(Math.max(0, Math.floor((Date.now() - sinceMs) / 1000)))
     tick()
     const t = setInterval(tick, 1000)
     return () => clearInterval(t)
-  }, [sinceIso])
+  }, [sinceMs])
   return elapsed
 }
 
@@ -39,6 +43,8 @@ function MetricCell({ label, value }: { label: string; value: string }) {
   )
 }
 
+const itemKey = (i: PipelineItem) => i.leadId
+
 export default function GiveOfferPage() {
   const [items, setItems] = useState<PipelineItem[]>([])
   const [metrics, setMetrics] = useState<PipelineMetrics | null>(null)
@@ -50,9 +56,9 @@ export default function GiveOfferPage() {
   const refresh = useCallback(async () => {
     const [q, m] = await Promise.all([getOfferQueue(), getPipelineMetrics()])
     if (q.ok) {
-      const visible = q.items.filter((i) => !decidedIds.current.has(i.id))
+      const visible = q.items.filter((i) => !decidedIds.current.has(itemKey(i)))
       setItems(visible)
-      setCurrentId((prev) => (prev && visible.some((i) => i.id === prev) ? prev : visible[0]?.id ?? null))
+      setCurrentId((prev) => (prev && visible.some((i) => itemKey(i) === prev) ? prev : visible[0] ? itemKey(visible[0]) : null))
     }
     if (m.ok) setMetrics(m.metrics)
   }, [])
@@ -63,8 +69,9 @@ export default function GiveOfferPage() {
     return () => clearInterval(t)
   }, [refresh])
 
-  const current = items.find((i) => i.id === currentId) ?? items[0] ?? null
-  const elapsed = useElapsed(current?.stageEnteredAt ?? null)
+  const current = items.find((i) => itemKey(i) === currentId) ?? items[0] ?? null
+  const elapsed = useElapsed(current ? parseQueuedAt(current.queuedAt) : null)
+  const displayAddress = current ? current.address ?? current.displayName ?? current.leadId : ''
 
   const decide = useCallback(
     async (workflow: 'prep_offer' | 'no_margin') => {
@@ -76,11 +83,11 @@ export default function GiveOfferPage() {
           workflow === 'prep_offer'
             ? await dispatchOfferPrep({
                 leadId: current.leadId ?? undefined,
-                propertyAddress: current.address,
+                propertyAddress: displayAddress,
                 purchasePrice: current.wholesalePrice ?? 0,
                 opportunityId: current.opportunityId ?? undefined,
               })
-            : await declineOffer({ leadId: current.leadId ?? undefined, propertyAddress: current.address })
+            : await declineOffer({ leadId: current.leadId ?? undefined, propertyAddress: displayAddress })
         if (!res.ok) {
           setOutcome({ ok: false, label: res.error ?? 'Dispatch failed' })
           return
@@ -94,12 +101,12 @@ export default function GiveOfferPage() {
                 : 'Offer prep dispatched'
               : 'Decline recorded',
         })
-        // Remove from local queue immediately; the API already advanced it.
-        decidedIds.current.add(current.id)
+        // Remove from local queue immediately — the engine advances the item.
+        decidedIds.current.add(itemKey(current))
         setTimeout(() => {
           setItems((prev) => {
-            const next = prev.filter((i) => i.id !== current.id)
-            setCurrentId(next[0]?.id ?? null)
+            const next = prev.filter((i) => itemKey(i) !== itemKey(current))
+            setCurrentId(next[0] ? itemKey(next[0]) : null)
             return next
           })
           setOutcome(null)
@@ -110,7 +117,7 @@ export default function GiveOfferPage() {
         setBusy(false)
       }
     },
-    [current, busy],
+    [current, busy, displayAddress],
   )
 
   return (
@@ -132,19 +139,19 @@ export default function GiveOfferPage() {
         </div>
         {metrics && (
           <div className="grid grid-cols-4 sm:grid-cols-8 divide-x divide-border border border-border rounded-sm bg-background/60">
-            <MetricCell label="Reach-outs" value={String(metrics.reachOuts)} />
+            <MetricCell label="Reach-outs" value={String(metrics.newReachouts)} />
             <MetricCell label="Responses" value={String(metrics.responses)} />
             <MetricCell
               label="Conv."
-              value={metrics.reachToResponseRate == null ? '—' : `${Math.round(metrics.reachToResponseRate * 100)}%`}
+              value={metrics.responseRatePct == null ? '—' : `${Math.round(metrics.responseRatePct)}%`}
             />
             <MetricCell label="Reactivated" value={String(metrics.reactivations)} />
             <MetricCell label="To underwrite" value={String(metrics.sentToUnderwriting)} />
-            <MetricCell label="Offers prepped" value={String(metrics.offersPrepared)} />
+            <MetricCell label="Offers prepped" value={String(metrics.offersPrepped)} />
             <MetricCell label="Sent" value={String(metrics.offersSent)} />
             <MetricCell
-              label="Avg decision"
-              value={metrics.avgDecisionSeconds == null ? '—' : formatElapsed(Math.round(metrics.avgDecisionSeconds))}
+              label="Avg prep"
+              value={metrics.avgPrepMinutes == null ? '—' : `${Math.round(metrics.avgPrepMinutes)}m`}
             />
           </div>
         )}
@@ -158,18 +165,18 @@ export default function GiveOfferPage() {
           )}
           {items.map((item, i) => (
             <button
-              key={item.id}
+              key={itemKey(item)}
               type="button"
-              onClick={() => setCurrentId(item.id)}
+              onClick={() => setCurrentId(itemKey(item))}
               className={cn(
                 'w-full text-left px-3 py-2.5 border-b border-border/50 text-xs transition-colors',
-                item.id === current?.id ? 'bg-secondary/60' : 'hover:bg-secondary/30',
+                itemKey(item) === (current ? itemKey(current) : null) ? 'bg-secondary/60' : 'hover:bg-secondary/30',
               )}
             >
-              <div className="font-medium truncate">{item.address}</div>
+              <div className="font-medium truncate">{item.address ?? item.displayName ?? item.leadId}</div>
               <div className="flex items-center justify-between mt-0.5">
                 <span className="text-[10px] text-foreground-tertiary tabular-nums">
-                  #{i + 1} · waiting {formatElapsed(Math.floor((Date.now() - Date.parse(item.stageEnteredAt)) / 1000))}
+                  #{i + 1} · {formatElapsed(Math.floor((Date.now() - parseQueuedAt(item.queuedAt)) / 1000))}
                 </span>
                 {item.wholesalePrice != null && (
                   <span className="text-[10px] text-foreground-secondary tabular-nums">
@@ -191,7 +198,7 @@ export default function GiveOfferPage() {
             <div className="w-full max-w-md border border-border rounded-sm bg-background/95 backdrop-blur-sm">
               <div className="px-4 pt-4 pb-3 border-b border-border">
                 <div className="text-[9px] uppercase tracking-wider text-foreground-tertiary mb-1">Ready for offer</div>
-                <div className="text-base font-semibold">{current.address}</div>
+                <div className="text-base font-semibold">{displayAddress}</div>
                 <div className="flex items-center gap-3 mt-2 text-xs text-foreground-secondary">
                   <span className="flex items-center gap-1 tabular-nums">
                     <Timer size={12} className="text-foreground-tertiary" />
@@ -202,7 +209,16 @@ export default function GiveOfferPage() {
                       Wholesale <b className="text-foreground">${current.wholesalePrice.toLocaleString('en-US')}</b>
                     </span>
                   )}
-                  {current.leadId && <span className="text-[10px] text-foreground-tertiary truncate">{current.leadId}</span>}
+                  {current.evalReportUrl && (
+                    <a
+                      href={current.evalReportUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-0.5 text-primary hover:underline"
+                    >
+                      Report <ExternalLink size={11} />
+                    </a>
+                  )}
                 </div>
               </div>
               <div className="px-4 py-3">
@@ -224,7 +240,7 @@ export default function GiveOfferPage() {
                       <button
                         type="button"
                         onClick={() => decide('prep_offer')}
-                        disabled={busy || !current.wholesalePrice}
+                        disabled={busy || !current.wholesalePrice || !displayAddress}
                         className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded border border-emerald-600/40 text-xs font-medium text-emerald-600 hover:bg-emerald-500/10 transition-colors disabled:opacity-50 dark:text-emerald-400"
                         title={current.wholesalePrice ? 'Prep offer — dispatch to the Devin listener + engine' : 'No wholesale price on record'}
                       >
@@ -247,8 +263,8 @@ export default function GiveOfferPage() {
                   <button
                     type="button"
                     onClick={() => {
-                      const idx = items.findIndex((i) => i.id === current.id)
-                      setCurrentId(items[(idx + 1) % items.length].id)
+                      const idx = items.findIndex((i) => itemKey(i) === itemKey(current))
+                      setCurrentId(itemKey(items[(idx + 1) % items.length]))
                       setOutcome(null)
                     }}
                     className="mt-3 flex items-center gap-1 text-[10px] text-foreground-tertiary hover:text-foreground"
@@ -258,8 +274,8 @@ export default function GiveOfferPage() {
                 )}
               </div>
             </div>
-          )}
-        </div>
+          </div>
+        )}
       </div>
     </div>
   )

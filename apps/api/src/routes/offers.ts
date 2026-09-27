@@ -8,10 +8,8 @@
 
 import { Hono } from 'hono'
 import { z } from 'zod'
-import { drizzle } from 'drizzle-orm/d1'
 import type { Env } from '../types'
 import type { AuthContext } from '../middleware/auth'
-import { pipelineItemId, recordPipelineDecision } from '../services/pipeline'
 
 const offers = new Hono<{ Bindings: Env; Variables: { auth: AuthContext } }>()
 
@@ -19,8 +17,30 @@ const offers = new Hono<{ Bindings: Env; Variables: { auth: AuthContext } }>()
 const DEVIN_SESSION_ID = 'devin-fbfcfad371534372bff22b123657c41f'
 const DEVIN_MESSAGE_URL = (orgId: string) =>
   `https://api.devin.ai/v3/organizations/${orgId}/sessions/${DEVIN_SESSION_ID}/messages`
-const ENGINE_OFFER_DRAFT_URL =
-  'https://conversation-intelligence.weareflowstate1.workers.dev/engine/offer-draft'
+const ENGINE_BASE = 'https://conversation-intelligence.weareflowstate1.workers.dev'
+const ENGINE_OFFER_DRAFT_URL = `${ENGINE_BASE}/engine/offer-draft`
+
+/** Notify the engine that a flowstate analyze job hit a terminal state —
+ * it pulls the result from /v1/analyze/jobs/{jobId} itself. Fire-and-forget. */
+export async function notifyEvalComplete(env: Env, jobId: string): Promise<void> {
+  if (!env.ENGINE_API_KEY) return
+  const resp = await fetch(`${ENGINE_BASE}/engine/eval/complete`, {
+    method: 'POST',
+    signal: AbortSignal.timeout(10000),
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${env.ENGINE_API_KEY}`,
+    },
+    body: JSON.stringify({ jobId }),
+  }).catch((e) => {
+    console.error('[Offers] engine eval/complete failed:', e)
+    return null
+  })
+  // 404 = job not engine-initiated — expected for dashboard-run analyses.
+  if (resp && !resp.ok && resp.status !== 404) {
+    console.error('[Offers] engine eval/complete failed:', resp.status)
+  }
+}
 
 const DISPATCH_TTL = 30 * 24 * 60 * 60 // 30 days
 const FOLLOW = 'follow offer-prep.md in zapz-glitch/conversation-intelligence'
@@ -152,11 +172,6 @@ offers.post('/prep', async (c) => {
   }
   await c.env.API_CACHE.put(dispatchKey, JSON.stringify(dispatch), { expirationTtl: DISPATCH_TTL })
 
-  // Advance the pipeline — Prep offer moves the item out of give_offer.
-  const db = drizzle(c.env.DB)
-  await recordPipelineDecision(db, dispatchId, 'prep_offer', body.propertyAddress)
-    .catch((e) => console.error('[Offers] pipeline decision failed:', e))
-
   return c.json({ ok: true, dispatched: true })
 })
 
@@ -183,14 +198,30 @@ offers.post('/decline', async (c) => {
     JSON.stringify({ ...body, declinedAt: new Date().toISOString() }),
     { expirationTtl: DISPATCH_TTL },
   )
-  await recordPipelineDecision(drizzle(c.env.DB), declineId, 'no_margin', body.propertyAddress ?? '(unknown)')
-    .catch((e) => console.error('[Offers] pipeline decision failed:', e))
+  const leadId = declineId.startsWith('lead_') ? declineId : null
 
-  // Same listener channel — the agent's no-margin workflow. The decline
-  // is recorded already; the Devin message runs via waitUntil so its
-  // latency doesn't gate the response.
-  const idPart = body.leadId ? `leadId=${body.leadId}` : `propertyAddress=${body.propertyAddress}`
-  c.executionCtx.waitUntil(postDevinMessage(c.env, `NO MARGIN: ${idPart} — ${FOLLOW}`))
+  // If a pending offer draft exists for the lead, resolve it as declined —
+  // fire-and-forget; the engine no-ops when there's no draft.
+  if (c.env.ENGINE_API_KEY && leadId) {
+    c.executionCtx.waitUntil(
+      fetch(ENGINE_OFFER_DRAFT_URL, {
+        method: 'POST',
+        signal: AbortSignal.timeout(15000),
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${c.env.ENGINE_API_KEY}`,
+        },
+        body: JSON.stringify({ leadId, sessionId: DEVIN_SESSION_ID, status: 'declined' }),
+      }).catch((e) => console.error('[Offers] engine decline-draft failed:', e)),
+    )
+  }
+
+  // Stage move + cleanup go through the listener session — exact format
+  // the engine has already processed live.
+  const idPart = leadId ? `leadId=${leadId}` : `leadId=`
+  c.executionCtx.waitUntil(
+    postDevinMessage(c.env, `NO MARGIN: ${idPart} address=${body.propertyAddress ?? ''} — move to No margin`),
+  )
 
   return c.json({ ok: true })
 })
