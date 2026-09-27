@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { ChevronLeft, ChevronRight, Timer, ListFilter } from 'lucide-react'
 import DashboardReportPage from '../../reports/[jobId]/page'
 import { getOfferQueue, type PipelineItem } from '../actions'
-import { jobIdForItem, parseQueuedAt, sortedQueue, formatWait, WAIT_FILTER_LABELS, type WaitFilter } from '../queue'
+import { jobIdForItem, parseQueuedAt, sortedQueue, formatWait, WAIT_FILTER_LABELS, type WaitFilter, getCachedQueue, setCachedQueue } from '../queue'
 
 const POLL_MS = 5000
 const SORT_PREF_KEY = 'giveOffer.waitFilter'
@@ -13,6 +13,7 @@ const SORT_PREF_KEY = 'giveOffer.waitFilter'
 /** Decided items stay out of the queue for this SPA session even if the
  * engine hasn't dequeued them yet on the next poll. */
 const decidedIds = new Set<string>()
+
 
 function useNow(): number {
   const [now, setNow] = useState(Date.now())
@@ -26,7 +27,7 @@ function useNow(): number {
 export default function GiveOfferReportPage({ params }: { params: Promise<{ jobId: string }> }) {
   const { jobId } = use(params)
   const router = useRouter()
-  const [raw, setRaw] = useState<PipelineItem[]>([])
+  const [raw, setRaw] = useState<PipelineItem[]>(getCachedQueue() ?? [])
   const [filter, setFilter] = useState<WaitFilter>('longest')
   const now = useNow()
 
@@ -40,6 +41,7 @@ export default function GiveOfferReportPage({ params }: { params: Promise<{ jobI
     const load = () =>
       getOfferQueue().then((q) => {
         if (cancelled || !q.ok) return
+        setCachedQueue(q.items)
         setRaw(q.items)
       })
     load()
@@ -125,7 +127,17 @@ export default function GiveOfferReportPage({ params }: { params: Promise<{ jobI
   return (
     <DashboardReportPage
       params={Promise.resolve({ jobId })}
-      queue={{ node: bar, onDecided: advance }}
+      queue={{
+        node: bar,
+        onDecided: advance,
+        fallback: current
+          ? {
+              leadId: current.leadId,
+              address: current.address ?? current.displayName ?? current.leadId,
+              wholesalePrice: current.wholesalePrice,
+            }
+          : undefined,
+      }}
     />
   )
 }

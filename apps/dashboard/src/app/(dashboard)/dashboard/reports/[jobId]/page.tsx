@@ -7,7 +7,7 @@ import Link from 'next/link'
 import dynamic from 'next/dynamic'
 import ReportLoading from './loading'
 import { useRouter } from 'next/navigation'
-import { ArrowLeft, ArrowRight, Share2, RefreshCw, AlertTriangle, History, Loader2, ListChecks } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Share2, RefreshCw, AlertTriangle, History, Loader2, ListChecks, FileSignature, CircleSlash, Check, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { CopyButton } from '@/components/ui/copy-button'
 import {
@@ -48,12 +48,111 @@ const ShareReportDialog = dynamic(() => import('@/components/report/ShareReportD
 const ReportHistoryTimeline = dynamic(() => import('@/components/report/ReportHistoryTimeline').then((mod) => mod.ReportHistoryTimeline))
 const CompComparisonDialog = dynamic(() => import('@/components/analysis/CompComparisonDialog').then((mod) => mod.CompComparisonDialog))
 
+// ─── Give Offer fallback — queue disposition when the report can't load ────
+
+function QueueFallback({ queue }: {
+  queue: {
+    node: React.ReactNode
+    onDecided: () => void
+    fallback?: { leadId: string | null; address: string; wholesalePrice: number | null }
+  }
+}) {
+  const item = queue.fallback!
+  const [busy, setBusy] = useState<'prep_offer' | 'no_margin' | null>(null)
+  const [result, setResult] = useState<{ ok: boolean; label: string } | null>(null)
+
+  const decide = async (workflow: 'prep_offer' | 'no_margin') => {
+    if (busy) return
+    setBusy(workflow)
+    try {
+      const res = workflow === 'prep_offer'
+        ? await dispatchOfferPrep({
+            leadId: item.leadId ?? undefined,
+            propertyAddress: item.address,
+            purchasePrice: item.wholesalePrice ?? 0,
+          })
+        : await declineOffer({ leadId: item.leadId ?? undefined, propertyAddress: item.address })
+      if (!res.ok) {
+        setResult({ ok: false, label: res.error ?? 'Dispatch failed' })
+        return
+      }
+      setResult({
+        ok: true,
+        label: workflow === 'prep_offer' ? (res.idempotent ? 'Already dispatched' : 'Offer prep dispatched') : 'Decline recorded',
+      })
+      queue.onDecided()
+    } catch {
+      setResult({ ok: false, label: 'Dispatch failed' })
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  return (
+    <div className="min-h-screen flex flex-col">
+      {queue.node}
+      <div className="flex-1 flex items-center justify-center p-6">
+        <div className="w-full max-w-md border border-border rounded-sm bg-background/95">
+          <div className="px-4 pt-4 pb-3 border-b border-border">
+            <div className="text-[9px] uppercase tracking-wider text-foreground-tertiary mb-1">Ready for offer</div>
+            <div className="text-base font-semibold">{item.address}</div>
+            {item.wholesalePrice != null && (
+              <div className="text-xs text-foreground-secondary mt-1 tabular-nums">
+                Wholesale <b className="text-foreground">${item.wholesalePrice.toLocaleString('en-US')}</b>
+              </div>
+            )}
+            <div className="text-[10px] text-foreground-tertiary mt-1">
+              Report data unavailable in this environment — the disposition still dispatches normally.
+            </div>
+          </div>
+          <div className="px-4 py-3">
+            {result ? (
+              <div className={cn('flex items-center gap-1.5 text-xs font-medium animate-in fade-in duration-300',
+                result.ok ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500')}>
+                {result.ok ? <Check size={14} /> : <X size={14} />}
+                {result.label}
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => decide('prep_offer')}
+                  disabled={busy != null || !item.wholesalePrice}
+                  className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded border border-emerald-600/40 text-xs font-medium text-emerald-600 hover:bg-emerald-500/10 transition-colors disabled:opacity-50 dark:text-emerald-400"
+                >
+                  {busy === 'prep_offer' ? <RefreshCw size={13} className="animate-spin" /> : <FileSignature size={13} />}
+                  Prep offer
+                </button>
+                <button
+                  type="button"
+                  onClick={() => decide('no_margin')}
+                  disabled={busy != null}
+                  className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded border border-border text-xs text-foreground-secondary hover:bg-secondary transition-colors disabled:opacity-50"
+                >
+                  {busy === 'no_margin' ? <RefreshCw size={13} className="animate-spin" /> : <CircleSlash size={13} />}
+                  No margin
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── Main Page ──────────────────────────────────────────────────────────────
 
 export default function DashboardReportPage({ params, queue }: {
   params: Promise<{ jobId: string }>
-  /** Give Offer queue chrome — toolbar node + advance callback after disposition */
-  queue?: { node: React.ReactNode; onDecided: () => void }
+  /** Give Offer queue chrome — toolbar node + advance callback after disposition.
+   *  `fallback` renders a disposition card when the report itself can't load
+   *  (e.g. queue item's jobId lives in a different env's DB). */
+  queue?: {
+    node: React.ReactNode
+    onDecided: () => void
+    fallback?: { leadId: string | null; address: string; wholesalePrice: number | null }
+  }
 }) {
   const { jobId } = use(params)
 
@@ -561,10 +660,20 @@ export default function DashboardReportPage({ params, queue }: {
   })
 
   if (loading || (report && report.jobId !== jobId && !error)) {
-    return <ReportLoading />
+    return (
+      <>
+        {queue?.node}
+        <ReportLoading />
+      </>
+    )
   }
 
   if (error || !report) {
+    // In the Give Offer flow, the report row may live in another env's DB —
+    // still let the user disposition the lead from its queue fields.
+    if (queue?.fallback) {
+      return <QueueFallback queue={queue} />
+    }
     return (
       <div className="flex items-center justify-center py-32">
         <div className="text-center space-y-2">
