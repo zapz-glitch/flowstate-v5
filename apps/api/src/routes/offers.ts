@@ -19,6 +19,7 @@ const DEVIN_MESSAGE_URL = (orgId: string) =>
   `https://api.devin.ai/v3/organizations/${orgId}/sessions/${DEVIN_SESSION_ID}/messages`
 const ENGINE_BASE = 'https://conversation-intelligence.weareflowstate1.workers.dev'
 const ENGINE_OFFER_DRAFT_URL = `${ENGINE_BASE}/engine/offer-draft`
+const ENGINE_NO_OFFER_URL = `${ENGINE_BASE}/engine/no-offer`
 
 /** Notify the engine that a flowstate analyze job hit a terminal state —
  * it pulls the result from /v1/analyze/jobs/{jobId} itself. Fire-and-forget. */
@@ -260,10 +261,30 @@ offers.post('/decline', async (c) => {
     { expirationTtl: DISPATCH_TTL },
   )
   const leadId = declineId.startsWith('lead_') ? declineId : null
+
+  // no_offer goes straight to the engine — it owns the stage move. When no
+  // leadId resolves or the engine call fails, the listener message remains
+  // the fallback channel.
+  let engineHandled = false
+  if (body.workflow === 'no_offer' && leadId && c.env.ENGINE_API_KEY) {
+    const resp = await fetch(ENGINE_NO_OFFER_URL, {
+      method: 'POST',
+      signal: AbortSignal.timeout(15000),
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${c.env.ENGINE_API_KEY}`,
+      },
+      body: JSON.stringify({ leadId, address: body.propertyAddress ?? null }),
+    }).catch(() => null)
+    engineHandled = !!resp?.ok
+    if (!engineHandled) console.error('[Offers] engine no-offer failed:', resp?.status)
+  }
+
   c.executionCtx.waitUntil(
     recordDisposition(c.env, {
       key: declineId, leadId, address: body.propertyAddress ?? null, jobId: body.jobId,
-      workflow: body.workflow, ok: true,
+      workflow: body.workflow,
+      ok: body.workflow !== 'no_offer' || engineHandled || !c.env.ENGINE_API_KEY,
     }),
   )
 
@@ -285,13 +306,20 @@ offers.post('/decline', async (c) => {
 
   // Stage move + cleanup go through the listener session — exact format
   // the engine has already processed live.
-  const idPart = leadId ? `leadId=${leadId}` : `leadId=`
-  const stage = body.workflow === 'no_offer' ? 'No offer' : 'No margin'
-  const verb = body.workflow === 'no_offer' ? 'NO OFFER' : 'NO MARGIN'
-  c.executionCtx.waitUntil(
-    postDevinMessage(c.env, `${verb}: ${idPart} address=${body.propertyAddress ?? ''} — move to ${stage}`),
-  )
+  // Listener message — the no_margin channel, and the no_offer fallback
+  // when the engine endpoint couldn't take it (no leadId / call failed).
+  if (body.workflow !== 'no_offer' || !engineHandled) {
+    const idPart = leadId ? `leadId=${leadId}` : `leadId=`
+    const stage = body.workflow === 'no_offer' ? 'No offer' : 'No margin'
+    const verb = body.workflow === 'no_offer' ? 'NO OFFER' : 'NO MARGIN'
+    c.executionCtx.waitUntil(
+      postDevinMessage(c.env, `${verb}: ${idPart} address=${body.propertyAddress ?? ''} — move to ${stage}`),
+    )
+  }
 
+  if (body.workflow === 'no_offer' && !engineHandled && leadId && c.env.ENGINE_API_KEY) {
+    return c.json({ ok: false, error: 'Engine no-offer failed — listener fallback dispatched' }, 502)
+  }
   return c.json({ ok: true })
 })
 
