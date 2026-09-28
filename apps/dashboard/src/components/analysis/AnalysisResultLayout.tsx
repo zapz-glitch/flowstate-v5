@@ -30,6 +30,8 @@ export interface AnalysisResultLayoutProps {
   rerunning?: boolean
   /** Fire an offer workflow — returns the outcome the hero flashes */
   onOfferWorkflow?: (workflow: 'prep_offer' | 'no_margin', offerPrice?: number) => Promise<{ ok: boolean }>
+  /** Prior session disposition — hero renders a dated warning chip */
+  disposition?: { workflow: 'prep_offer' | 'no_margin'; at: number } | null
 }
 
 export function AnalysisResultLayout({
@@ -41,6 +43,7 @@ export function AnalysisResultLayout({
   onRerun,
   rerunning,
   onOfferWorkflow,
+  disposition,
 }: AnalysisResultLayoutProps) {
   const {
     subject,
@@ -77,6 +80,7 @@ export function AnalysisResultLayout({
             onRerun={onRerun}
             rerunning={rerunning}
             onOfferWorkflow={onOfferWorkflow}
+            disposition={disposition}
           />
         </div>
       ) : subject && isStreaming ? (

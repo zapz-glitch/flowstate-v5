@@ -163,3 +163,13 @@ export function getLastViewed(): { jobId: string; address: string | null } | nul
     return raw ? JSON.parse(raw) : null
   } catch { return null }
 }
+
+/** Recorded disposition for a report — matches by jobId first (decided
+ *  items drop out of the queue, so leadId lookup alone misses them),
+ *  falling back to leadId. */
+export function decisionFor(jobId: string, leadId?: string | null): DecidedEntry | null {
+  const list = loadDecided()
+  return list.find((d) => d.jobId === jobId)
+    ?? (leadId ? list.find((d) => d.leadId === leadId) : undefined)
+    ?? null
+}
