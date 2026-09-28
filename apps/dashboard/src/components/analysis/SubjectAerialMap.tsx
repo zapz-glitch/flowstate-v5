@@ -290,7 +290,9 @@ export const SubjectAerialMap = forwardRef<SubjectAerialMapHandle, SubjectAerial
   let compNumber = 0
   return (
     <div className="relative h-full w-full" data-testid="subject-aerial-map">
-      <Map3D key={`${subject.lat},${subject.lng}`} mode={MapMode.HYBRID} gestureHandling="GREEDY" defaultRange={INITIAL_RANGE} defaultHeading={0} defaultTilt={45} minTilt={45} maxTilt={45} defaultRoll={0} onError={handleUnavailable} style={{ width: '100%', height: '100%' }}>
+      {/* SATELLITE = pure photorealistic imagery — HYBRID's transparent
+          street-overlay layer is what tinted the tiles blue. */}
+      <Map3D key={`${subject.lat},${subject.lng}`} mode={MapMode.SATELLITE} gestureHandling="GREEDY" defaultRange={INITIAL_RANGE} defaultHeading={0} defaultTilt={45} minTilt={45} maxTilt={45} defaultRoll={0} onError={handleUnavailable} style={{ width: '100%', height: '100%' }}>
         <CameraController subject={subject} actions={actions} onReady={handleReady} onStreetView={onStreetView} onUnavailable={handleUnavailable} />
         {markers.map(marker => {
           const isSubject = marker.type === 'subject'
