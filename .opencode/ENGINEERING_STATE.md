@@ -772,3 +772,48 @@ Remaining/limitations:
 
 Remaining: listener-session reply is informational only now — D1 is the
 source of truth. KV dispatch/decline keys remain for idempotency.
+
+## 2026-09-28 (cont. 2) — Request-shape perf pass (PR #72, deployed)
+
+### Philosophy — the rules this pass established (follow them on all future work)
+
+1. **One navigation → one authenticated view request → parallel internal reads → one response.**
+   Never one server action per widget. If a page needs N related datasets, write a
+   view-scoped composite action (`getAnalyticsView`, `getOffersView`) that resolves
+   session + dashboard-secret once, then runs the internal fetches concurrently.
+2. **Reduce auth *repetition*, never auth *verification*.** Every request still
+   validates. The win is fewer POSTs, not weaker checks. A cookie existing is not
+   authentication — the trusted boundary is the server action validating the
+   session, then the API verifying the internal dashboard credential.
+3. **Every cache declares scope, key, TTL, and invalidation before it ships.**
+   - In-flight dedupe (`inflightGet` in client-api): concurrent GETs share one
+     promise; nothing survives settle — zero staleness risk, kills StrictMode
+     double-mount + prefetch→nav dupes.
+   - TTL cache (`TTL_GET`): 30s, tab-scoped, impersonation-aware key, whitelisted
+     settings paths only; any non-GET to the same path invalidates immediately.
+   - `getOffersViewCached`: 30s module cache; `clearOffersViewCache()` is called
+     on every disposition dispatch — mutation must always invalidate.
+   - `takeReportPrefetch`: entries kept 60s after settle so remounts/revisits
+     reuse the resolved read.
+4. **Prefetch and navigation must share the same promise/entry** — prefetch that
+   a mount can't consume is a wasted request, and a mount that refetches what
+   prefetch already fetched is a duplicate. Both bugs existed; both fixed.
+5. **Measure with `scripts/perf-audit.mjs` before claiming "faster".** It records
+   per-journey server-action POSTs, API calls, duplicate requests, and
+   click-to-useful time, and exits non-zero past budgets. Run it before/after any
+   navigation or data-loading change. Artifacts land in `scripts/artifacts/`.
+6. **Observability spend should match value.** `api_usage_logs` still logs every
+   request (endpoint, status, timing, user) but only captures request/response
+   bodies for external API-key traffic and non-2xx responses — dashboard-internal
+   2xx bodies were pure overhead.
+7. **In dev-mode measurements, ignore absolute latency** (Turbopack recompiles
+   dominate it). The metrics that transfer to prod are request counts, duplicate
+   counts, and navigation type (SPA vs reload).
+
+### Results
+- Analytics mount: 8 server-action POSTs → 1. Offers landing/item mount: 4-6 → 1.
+- arv-threshold 3× / user-reports 2× / saved-report 3× duplicate fetches → 0.
+- Fixed crash: ResizeObserver.observe on unresolved maps3d element.
+- Remaining: item-page queue poll is still a 5s POST cadence (intentional —
+  live queue), and IntersectionObserver error inside the Maps lib on Firefox
+  is unverified in Chromium.
