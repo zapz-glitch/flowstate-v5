@@ -104,6 +104,9 @@ export interface DecidedEntry {
   jobId: string | null
   address: string
   workflow: 'prep_offer' | 'no_margin'
+  /** false = dispatch failed — surfaces under the Failed category and
+   *  does NOT remove the item from the queue (retry stays possible). */
+  ok: boolean
   at: number
 }
 
@@ -117,9 +120,10 @@ function loadDecided(): DecidedEntry[] {
   if (typeof window !== 'undefined') {
     try {
       const raw = window.sessionStorage.getItem(DECIDED_KEY)
-      if (raw) loaded = JSON.parse(raw)
+      // Entries written before the `ok` flag existed are successful.
+      if (raw) loaded = (JSON.parse(raw) as DecidedEntry[]).map((d) => ({ ...d, ok: d.ok ?? true }))
     } catch { /* corrupt storage — start clean */ }
-    for (const d of loaded) decidedIds.add(d.leadId)
+    for (const d of loaded) if (d.ok) decidedIds.add(d.leadId)
   }
   decidedItems = loaded
   return decidedItems
@@ -129,16 +133,20 @@ export function recordDecision(
   item: { leadId: string; address?: string | null; displayName?: string | null },
   workflow: 'prep_offer' | 'no_margin',
   jobId: string | null,
+  ok = true,
 ): void {
   const list = loadDecided()
-  decidedIds.add(item.leadId)
+  if (ok) decidedIds.add(item.leadId)
   const entry: DecidedEntry = {
     leadId: item.leadId,
     jobId,
     address: item.address ?? item.displayName ?? item.leadId,
     workflow,
+    ok,
     at: Date.now(),
   }
+  // Latest disposition wins per lead — a retry after a failed dispatch
+  // replaces the failure row rather than stacking duplicates.
   decidedItems = [entry, ...list.filter((d) => d.leadId !== item.leadId)]
   try { window.sessionStorage.setItem(DECIDED_KEY, JSON.stringify(decidedItems)) } catch { /* quota — session list degrades */ }
 }
@@ -168,7 +176,7 @@ export function getLastViewed(): { jobId: string; address: string | null } | nul
  *  items drop out of the queue, so leadId lookup alone misses them),
  *  falling back to leadId. */
 export function decisionFor(jobId: string, leadId?: string | null): DecidedEntry | null {
-  const list = loadDecided()
+  const list = loadDecided().filter((d) => d.ok)
   return list.find((d) => d.jobId === jobId)
     ?? (leadId ? list.find((d) => d.leadId === leadId) : undefined)
     ?? null
