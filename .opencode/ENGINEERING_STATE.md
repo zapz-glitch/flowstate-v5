@@ -734,3 +734,10 @@ never push directly to main; ENGINEERING_STATE.md rides with work.
 > User flagged report job_1790233689475_049295ac3f1d47cd (3249 54th St N,
 ## Session — main-line UI fixes + Close CRM update (all on origin/main, deployed)
 > Commits: ed39f9c, 758cf0b, 2fc9888, 2974264, 43499fd, 278f645, 83027d6
+
+## 2026-09-28 — PR #56: map + sidebar UX polish (deployed)
+- SubjectMap defaults to satellite aerial (was auto-opening Street View); Street View still available via button once panorama resolves
+- Fixed satellite flicker: correctedMarkers memoized + marker click handler ref-stable — status/state re-renders no longer rebuild Google markers
+- Sidebar collapse toggle moved to top logo row (right side, ChatGPT-style); bottom toggle removed; nav rows no longer force cursor-grab
+- Census block-group comp signal confirmed merged earlier (PR #50)
+- Deploy run 36363389577: API 45s + Dashboard 1m33s, success
