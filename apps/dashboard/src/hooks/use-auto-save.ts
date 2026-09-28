@@ -59,8 +59,11 @@ export function useAutoSave({
   onSavedRef.current = onSaved
 
   useEffect(() => {
-    if ((analysisData as { evaluationEngine?: string } | null)?.evaluationEngine === 'python-v4') return
-    if (!jobId || !analysisData || !displayValuation || !recalcData) return
+    const pythonAuth = (analysisData as { evaluationEngine?: string } | null)?.evaluationEngine === 'python-v4'
+    if (!jobId || !analysisData || !displayValuation) return
+    // python-v4 reports skip recalcData — but report-local ARV overrides /
+    // adjustments still need persisting (that's the whole point of the edit).
+    if (!pythonAuth && !recalcData) return
 
     const fingerprint = JSON.stringify({
       arv: displayValuation.arv,
@@ -68,7 +71,7 @@ export function useAutoSave({
       rehabCost: displayValuation.rehabCost,
       rehabLevel: displayValuation.rehabLevel,
       projectedROI: displayValuation.projectedROI,
-      proximityDeduction: recalcData.valuation.proximityDeduction,
+      proximityDeduction: recalcData?.valuation.proximityDeduction ?? 0,
       comps: compOverride?.selectedCompKeys ? Array.from(compOverride.selectedCompKeys).sort() : null,
       settings: JSON.stringify(settingsHook.settings),
       aiReport: aiReport ? JSON.stringify(aiReport) : null,
@@ -91,14 +94,16 @@ export function useAutoSave({
 
       const changes: string[] = []
       if (compOverride?.isManual) changes.push('Comp selection changed')
+      if (settingsHook.settings.arvOverride != null) changes.push('Manual ARV applied')
       if (settingsHook.settingsChanged) changes.push('Evaluation settings adjusted')
-      if (recalcData.valuation.proximityDeduction > 0) changes.push('Proximity adjustment applied')
+      if ((recalcData?.valuation.proximityDeduction ?? 0) > 0) changes.push('Proximity adjustment applied')
 
       const description = changes.length > 0 ? changes.join(', ') : 'Evaluation updated'
 
       try {
         // Patch fullResponseJson with updated settings
         let updatedJson: string | undefined
+        let patchedApplied: unknown
         if (analysisData) {
           const patched = { ...(analysisData as Record<string, unknown>) }
 
@@ -133,6 +138,7 @@ export function useAutoSave({
             arvOverride: s.arvOverride ?? null,
             arvAdjustments: s.arvAdjustments ?? {},
           }
+          patchedApplied = patched.appliedSettings
 
           // Persist AI analysis report and pre-AI comps for undo
           if (aiReport) {
@@ -158,9 +164,15 @@ export function useAutoSave({
             buyPrice: displayValuation.buyPrice,
             rehabCost: displayValuation.rehabCost,
             selectedComps: compOverride?.selectedCompKeys ? Array.from(compOverride.selectedCompKeys) : null,
-            proximityDeduction: recalcData.valuation.proximityDeduction,
+            proximityDeduction: recalcData?.valuation.proximityDeduction ?? 0,
           },
         })
+        // Keep the in-memory report coherent with what we just wrote —
+        // a settings reload (data identity change) would otherwise re-read
+        // a stale appliedSettings and silently drop report-local overrides.
+        if (analysisData && patchedApplied) {
+          ;(analysisData as Record<string, unknown>).appliedSettings = patchedApplied
+        }
         lastSavedRef.current = fingerprint
         setStatus('saved')
         setTimeout(() => setStatus('idle'), 2000)

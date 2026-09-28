@@ -254,7 +254,13 @@ export function useReportSettings(data: AnalyzeData | null): UseReportSettingsRe
         }
 
         if (!cancelled) {
-          setSettings(loaded)
+          // User edits that landed while settings were still loading win —
+          // otherwise a late-arriving load silently reverts the ARV override.
+          setSettings((prev) => ({
+            ...loaded,
+            arvOverride: prev.arvOverride ?? loaded.arvOverride,
+            arvAdjustments: { ...loaded.arvAdjustments, ...prev.arvAdjustments },
+          }))
           savedDefaultsObjRef.current = loaded
           // Store serialized snapshot once for cheap change detection
           savedDefaultsRef.current = JSON.stringify(loaded, (_k, v) => v === undefined ? null : v)
