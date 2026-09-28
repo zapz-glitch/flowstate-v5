@@ -1,5 +1,23 @@
 # Engineering State — flowstate-v5
 
+### 2026-09-28 — Analytics feed fixes (PR #54, live)
+
+User saw only 200 events → root cause was the client row cap (200), not
+missing data. Prod D1 verified complete: 897 events / 159 leads, all 7
+engine kinds (outbound_msg 287, msg_activity 256, inbound_msg 204,
+convo 96, stage_move 40, hot_lead 7, human_attention 7). Engine has no
+more data — typed stage kinds only exist from push-go-live forward;
+history lives in stage_move.value ("From->To", e.g. Contacting->
+Underwriting) + meta.reason/note. stat_* values = intake bookkeeping.
+
+Changes live on prod (cd4ea29):
+- 'All' window button; row caps raised (client 1000 / server 2000).
+- Feed = "Latest activity by property": per-lead last step, address
+  resolved propertyAddress→meta.addr→queue item; stage targets render
+  "→ Stage"; reason/note inline. msg_activity hidden (dup of inbound).
+- Tile drill-downs additionally match stage_move rows by target stage,
+  so e.g. 'To underwriting' shows historical transitions too.
+
 ### 2026-09-28 — SHIPPED + LIVE: PR #53 merged (69be42a)
 
 Prod verification:
