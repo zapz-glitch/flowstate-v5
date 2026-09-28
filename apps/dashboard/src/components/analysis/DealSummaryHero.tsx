@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { SlidersHorizontal, RefreshCw, FileSignature, CircleSlash, Check, X, Ban} from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { OfferWorkflow } from '@/lib/client-api'
+import { useEvaluation } from '@/hooks/use-evaluation'
 import type { ValuationData } from './shared-types'
 import { formatValuationNumber as fmt, formatMoneyThousands as fmtK } from './valuation-number'
 import { formatHeadlineMoney } from './headline-money'
@@ -24,6 +25,12 @@ interface DealSummaryHeroProps {
 }
 
 export function DealSummaryHero({ valuation, isRecalculated, onOpenSettings, onRerun, rerunning, onOfferWorkflow, disposition }: DealSummaryHeroProps) {
+  const { arvOverride, onArvOverride } = useEvaluation()
+
+  // Inline ARV edit — click the value, type a new ARV, Enter/blur commits
+  // (auto-recalcs + autosaves via the settings → recalc pipeline).
+  const [arvEditing, setArvEditing] = useState(false)
+  const [arvDraft, setArvDraft] = useState('')
 
   // Offer-button state machine: idle (buttons) → busy → done (result
   // chip) → back to idle. Everything crossfades via animate-in/fade-in.
@@ -202,8 +209,46 @@ export function DealSummaryHero({ valuation, isRecalculated, onOpenSettings, onR
           </div>
         </div>
         <div className="px-3 py-2.5 border-r border-border/20">
-          <div className="text-[11px] text-foreground-tertiary uppercase tracking-wider">ARV</div>
-          <div className="text-base font-bold tabular-nums text-primary mt-0.5">${formatHeadlineMoney(valuation.arv, valuation.displayedArv, valuation.displayRounding)}</div>
+          <div className="text-[11px] text-foreground-tertiary uppercase tracking-wider flex items-center gap-1">
+            ARV
+            {arvOverride != null && (
+              <button
+                type="button"
+                onClick={() => onArvOverride?.(null)}
+                className="text-[8px] px-1 rounded bg-amber-500/20 text-amber-600 dark:text-amber-400 hover:bg-amber-500/30 no-print"
+                title="Manual ARV in force — click to restore the computed value"
+              >
+                manual ✕
+              </button>
+            )}
+          </div>
+          {arvEditing ? (
+            <input
+              autoFocus
+              type="number"
+              inputMode="numeric"
+              value={arvDraft}
+              onChange={(e) => setArvDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === 'Escape') (e.target as HTMLInputElement).blur()
+              }}
+              onBlur={() => {
+                const v = parseFloat(arvDraft)
+                onArvOverride?.(Number.isFinite(v) && v > 0 ? Math.round(v) : null)
+                setArvEditing(false)
+              }}
+              className="text-base font-bold tabular-nums text-primary mt-0.5 w-28 bg-transparent border-b border-primary outline-none"
+            />
+          ) : (
+            <button
+              type="button"
+              onClick={() => { setArvDraft(String(arvOverride ?? valuation.arv ?? '')); setArvEditing(true) }}
+              className="text-base font-bold tabular-nums text-primary mt-0.5 hover:underline decoration-dotted underline-offset-4 no-print"
+              title="Click to set a manual ARV — recalculates the whole deal"
+            >
+              ${formatHeadlineMoney(valuation.arv, valuation.displayedArv, valuation.displayRounding)}
+            </button>
+          )}
           {valuation.arvPerSqft != null && <div className="text-[10px] text-foreground-tertiary tabular-nums mt-0.5">${valuation.arvPerSqft.toFixed(0)}/sf</div>}
         </div>
         <div className="px-3 py-2.5 border-r border-border/20">

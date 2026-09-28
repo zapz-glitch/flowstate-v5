@@ -33,6 +33,7 @@ import adminRoute from './routes/admin'
 // Vision analysis removed
 import arvThresholdRoute from './routes/arv-threshold'
 import proximityConfigRoute from './routes/proximity-config'
+import arvAdjustmentsRoute from './routes/arv-adjustments'
 import typeaheadRoute from './routes/typeahead'
 import compSelectionRoute from './routes/comp-selection'
 import mlExportRoute from './routes/ml-export'
@@ -113,6 +114,7 @@ app.route('/major-item-costs', majorItemCostsRoute)
 
 // Proximity adjustment config routes (session auth via Better Auth cookies)
 app.route('/proximity-config', proximityConfigRoute)
+app.route('/arv-adjustments', arvAdjustmentsRoute)
 
 // UI prefs routes (session auth via Better Auth cookies)
 app.route('/ui-prefs', uiPrefsRoute)

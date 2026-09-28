@@ -22,7 +22,7 @@ const inflightGet = new Map<string, Promise<unknown>>()
 // any non-GET to the same path clears it immediately.
 const TTL_GET = new Map<string, { at: number; data: unknown }>()
 const TTL_MS = 30_000
-const TTL_PATHS = new Set(['/arv-threshold', '/rehab-config', '/deal-params', '/major-item-costs', '/proximity-config', '/appraisal-presets', '/appraisal-presets/defaults'])
+const TTL_PATHS = new Set(['/arv-threshold', '/rehab-config', '/deal-params', '/major-item-costs', '/proximity-config', '/appraisal-presets', '/appraisal-presets/defaults', '/arv-adjustments'])
 const ttlKey = (path: string) => path.split('?')[0]
 function invalidateGetCache(path: string): void {
   const base = ttlKey(path)
@@ -128,6 +128,43 @@ export interface ArvThresholdResponse {
   config: ArvThresholdConfig
   isCustom: boolean
   updatedAt?: string
+}
+
+// ─── ARV Adjustment Rules (global defaults; per-report application lives
+// in appliedSettings.arvAdjustments) ─────────────────────────────────────
+
+export type ArvAdjustmentField =
+  | 'foundationType' | 'pool' | 'garage' | 'carport' | 'storiesType'
+  | 'propertyType' | 'condition' | 'bedrooms' | 'bathrooms'
+  | 'squareFeet' | 'yearBuilt' | 'lotSizeAcres'
+
+export interface ArvAdjustmentRule {
+  id: string
+  label: string
+  field: ArvAdjustmentField
+  op: 'eq' | 'neq' | 'contains' | 'missing' | 'present' | 'lt' | 'gt'
+  value?: string | number | null
+  percent: number
+  direction: 'deduction' | 'addition'
+}
+
+export interface ArvAdjustmentOverride {
+  applied: boolean
+  percent?: number
+  direction?: 'deduction' | 'addition'
+}
+
+interface ArvAdjustmentsResponse {
+  rules: ArvAdjustmentRule[]
+  isCustom?: boolean
+}
+
+export async function getArvAdjustments(): Promise<ArvAdjustmentsResponse> {
+  return fetchApi<ArvAdjustmentsResponse>('/arv-adjustments')
+}
+
+export async function setArvAdjustments(rules: ArvAdjustmentRule[]): Promise<ArvAdjustmentsResponse> {
+  return fetchApi('/arv-adjustments', { method: 'PUT', body: JSON.stringify({ rules }) })
 }
 
 export async function getArvThreshold(): Promise<ArvThresholdResponse> {

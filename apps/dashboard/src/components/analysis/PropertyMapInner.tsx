@@ -105,8 +105,11 @@ function SubjectStreetView({ panorama, subject, onBack, onFailure, viewRef }: { 
       event.preventDefault()
       if (event.deltaY === 0) return
       const zoom = view.getZoom() ?? 0
+      // Proportional zoom — fixed ±0.25 steps jumped a whole zoom notch per
+      // wheel tick; scale by pixels scrolled instead (line/page aware).
+      const pixels = event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? 400 : 1)
       if (event.deltaY > 0 && zoom <= 0) back.current()
-      else view.setZoom(Math.max(0, Math.min(3, zoom + (event.deltaY < 0 ? 0.25 : -0.25))))
+      else view.setZoom(Math.max(0, Math.min(3, zoom - Math.max(-0.35, Math.min(0.35, pixels * 0.0012)))))
     }
     element.addEventListener('wheel', wheel, { passive: false })
     const resize = new ResizeObserver(() => google.maps.event.trigger(view, 'resize'))

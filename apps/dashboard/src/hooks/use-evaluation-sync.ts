@@ -10,6 +10,7 @@
 
 import { useEffect } from 'react'
 import { useSetAtom } from 'jotai'
+import type { ArvAdjustmentRule, ArvAdjustmentOverride } from '@/lib/client-api'
 import type { AnalyzeData, JevOutcomeData, JevCompClassificationData, JevAttributeScreenData, JevHybridData, SubjectData, ValuationData, CompsData, CompItem } from '@/app/(dashboard)/dashboard/analyze/actions'
 import type { UseAnalysisEvaluationReturn } from '@/hooks/use-analysis-evaluation'
 import { evaluationStateAtom } from '@/atoms/evaluation'
@@ -46,6 +47,11 @@ interface SyncOptions {
   onUndoAiSelection?: () => void
   onFeedbackSubmitted?: (type: 'validate' | 'improve') => void
   onPermitsPulled?: (analysis: AnalyzeData) => void
+  arvOverride?: number | null
+  arvAdjustmentRules?: ArvAdjustmentRule[]
+  arvAdjustments?: Record<string, ArvAdjustmentOverride>
+  onArvOverride?: (v: number | null) => void
+  onArvAdjustment?: (ruleId: string, override: ArvAdjustmentOverride) => void
 }
 
 export function useEvaluationSync({
@@ -68,6 +74,11 @@ export function useEvaluationSync({
   onUndoAiSelection,
   onFeedbackSubmitted,
   onPermitsPulled,
+  arvOverride,
+  arvAdjustmentRules,
+  arvAdjustments,
+  onArvOverride,
+  onArvAdjustment,
 }: SyncOptions) {
   const setState = useSetAtom(evaluationStateAtom)
 
@@ -88,6 +99,9 @@ export function useEvaluationSync({
       jevHybrid,
       aiAnalyzing,
       isStreaming,
+      arvOverride,
+      arvAdjustmentRules,
+      arvAdjustments,
       callbacks: {
         onToggleComp: evaluation.handleToggleComp,
         onResetComps: evaluation.handleResetComps,
@@ -97,6 +111,8 @@ export function useEvaluationSync({
         onUndoAiSelection,
         onFeedbackSubmitted,
         onPermitsPulled,
+        onArvOverride,
+        onArvAdjustment,
       },
     })
   }, [
@@ -104,6 +120,7 @@ export function useEvaluationSync({
     evaluation.isRecalculated, evaluation.recalcData, evaluation.compOverride,
     evaluation.handleToggleComp, evaluation.handleResetComps,
     feedback,
+    arvOverride, arvAdjustmentRules, arvAdjustments, onArvOverride, onArvAdjustment,
     aiAnalyzing, isStreaming, marketContext, aiReport, jevOutcome, jevCompClassification, jevAttributeScreen, jevHybrid, onOpenSettings, onCompClick, onRunAiAnalysis, onUndoAiSelection, onFeedbackSubmitted, onPermitsPulled, setState,
   ])
 }

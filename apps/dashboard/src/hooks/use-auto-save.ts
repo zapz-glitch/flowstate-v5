@@ -130,6 +130,8 @@ export function useAutoSave({
             majorItems: s.majorItems.map((m) => ({ id: m.id, enabled: m.enabled, cost: m.cost })),
             arvThresholdPercent: s.dealParams.arvThresholdPercent,
             asIsThresholdPercent: s.asIsThresholdPercent,
+            arvOverride: s.arvOverride ?? null,
+            arvAdjustments: s.arvAdjustments ?? {},
           }
 
           // Persist AI analysis report and pre-AI comps for undo

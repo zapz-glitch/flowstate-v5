@@ -719,6 +719,11 @@ export default function DashboardReportPage({ params, queue }: {
     onUndoAiSelection: aiAnalysisDone ? handleUndoAiSelection : undefined,
     onFeedbackSubmitted: batchQueue ? handleFeedbackSubmitted : undefined,
     onPermitsPulled: handlePermitsPulled,
+    arvOverride: settingsHook.settings.arvOverride,
+    arvAdjustmentRules: settingsHook.settings.arvAdjustmentRules,
+    arvAdjustments: settingsHook.settings.arvAdjustments,
+    onArvOverride: settingsHook.setArvOverride,
+    onArvAdjustment: settingsHook.setArvAdjustment,
   })
 
   if (loading || (report && report.jobId !== jobId && !error)) {

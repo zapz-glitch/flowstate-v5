@@ -10,6 +10,10 @@ import {
 } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import type { ValuationData } from './shared-types'
+import { useEvaluation } from '@/hooks/use-evaluation'
+import { arvRuleMatches } from '@/lib/recalc'
+import { ChevronDown, ChevronUp } from 'lucide-react'
+import { useState } from 'react'
 import { formatHeadlineMoney } from './headline-money'
 import { formatValuationNumber as safeFmt } from './valuation-number'
 
@@ -37,6 +41,13 @@ export function ValuationCard({
   isRecalculated?: boolean
   onOpenSettings?: () => void
 }) {
+  const { subject, arvAdjustmentRules, arvAdjustments: arvOverrides, onArvAdjustment } = useEvaluation()
+  const [adjOpen, setAdjOpen] = useState(false)
+  const rules = arvAdjustmentRules ?? []
+  const overrides = arvOverrides ?? {}
+  const appliedLines = valuation.arvAdjustments ?? []
+  const netAdj = appliedLines.reduce((sum, l) => sum + (l.direction === 'addition' ? l.amount : -l.amount), 0)
+
   const getRecommendationStyle = (rec?: string) => {
     if (!rec) return 'default'
     const upper = rec.toUpperCase()
@@ -240,6 +251,87 @@ export function ValuationCard({
               </div>
             )}
           </div>
+
+          {/* ARV additions / deductions — characteristic rules; per-report
+              apply + direction + % changes recalc and autosave */}
+          {rules.length > 0 && onArvAdjustment && (
+            <div className="mt-2 px-1 no-print">
+              <button
+                type="button"
+                onClick={() => setAdjOpen((o) => !o)}
+                className="flex items-center gap-1.5 text-[11px] text-foreground-tertiary hover:text-foreground transition-colors"
+              >
+                {adjOpen ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                ARV adjustments
+                {appliedLines.length > 0 && (
+                  <span className={cn('tabular-nums font-medium', netAdj < 0 ? 'text-red-500' : 'text-emerald-600')}>
+                    {appliedLines.length} · {netAdj < 0 ? '−' : '+'}${safeFmt(Math.abs(netAdj))} net
+                  </span>
+                )}
+              </button>
+              {adjOpen && (
+                <div className="mt-1.5 space-y-1">
+                  {rules.map((rule) => {
+                    const o = overrides[rule.id]
+                    const applied = o?.applied ?? arvRuleMatches(rule, subject)
+                    const direction = o?.direction ?? rule.direction
+                    const percent = o?.percent ?? rule.percent
+                    const line = appliedLines.find((l) => l.id === rule.id)
+                    return (
+                      <div key={rule.id} className="flex items-center gap-2 text-caption">
+                        <button
+                          type="button"
+                          aria-pressed={applied}
+                          onClick={() => onArvAdjustment(rule.id, { ...o, applied: !applied })}
+                          className={cn(
+                            'w-1.5 h-1.5 rounded-full flex-shrink-0 transition-colors',
+                            applied ? 'bg-primary' : 'bg-foreground-tertiary/30 hover:bg-foreground-tertiary/60'
+                          )}
+                          title={applied ? 'Remove this adjustment' : 'Apply this adjustment'}
+                        />
+                        <span className={cn('min-w-[130px] truncate', !applied && 'text-foreground-tertiary/60')}>{rule.label}</span>
+                        {applied && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => onArvAdjustment(rule.id, { ...o, applied: true, direction: direction === 'deduction' ? 'addition' : 'deduction' })}
+                              className={cn(
+                                'px-1.5 py-0 rounded text-[10px] font-medium transition-colors',
+                                direction === 'deduction' ? 'bg-red-500/15 text-red-500 hover:bg-red-500/25' : 'bg-emerald-500/15 text-emerald-600 hover:bg-emerald-500/25'
+                              )}
+                              title="Click to flip deduction ↔ addition"
+                            >
+                              {direction === 'deduction' ? '−' : '+'}
+                            </button>
+                            <input
+                              type="number"
+                              inputMode="decimal"
+                              step={0.5}
+                              min={0}
+                              max={100}
+                              defaultValue={percent}
+                              key={`${rule.id}-${percent}`}
+                              onBlur={(e) => {
+                                const v = parseFloat(e.target.value)
+                                if (Number.isFinite(v) && v >= 0 && v !== percent) onArvAdjustment(rule.id, { ...o, applied: true, percent: v })
+                              }}
+                              className="w-12 bg-transparent border-b border-border text-right tabular-nums text-caption outline-none focus:border-primary"
+                            />
+                            <span className="text-foreground-tertiary">%</span>
+                            {line && (
+                              <span className={cn('tabular-nums ml-auto', line.direction === 'deduction' ? 'text-red-500' : 'text-emerald-600')}>
+                                {line.direction === 'deduction' ? '−' : '+'}${safeFmt(line.amount)}
+                              </span>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          )}
 
           {(valuation.closingCosts != null || valuation.carryingCosts != null || valuation.totalInvestment != null || (valuation.locationPenalty ?? 0) > 0) && (
             <div className="flex items-center flex-wrap gap-x-6 gap-y-1 mt-3 text-body-sm px-1">

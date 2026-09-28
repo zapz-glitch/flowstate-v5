@@ -16,7 +16,7 @@ import type { AnalyzeData, CompItem, SubjectData, ValuationData } from '@/app/(d
 import type { DealParamsConfig, TierRangeDefinition } from '@/lib/client-api'
 import { getCompKey } from '@/components/analysis/format-helpers'
 import type { EvaluationSettings, RecalcResult, CompEvaluation, RecalcValuationResult } from './types'
-import { PROXIMITY_DEFAULTS, type ProximityConfig } from '../client-api'
+import { PROXIMITY_DEFAULTS, type ProximityConfig, type ArvAdjustmentRule, type ArvAdjustmentOverride } from '../client-api'
 import {
   evaluateComparable,
   calculateARV,
@@ -88,7 +88,7 @@ export function recalculateReport(
       disabledCount: 0,
       avgPricePerSqft: null,
       medianPrice: null,
-      valuation: mapValuationResult(valResult, settings.rehabLevelIndex, rehabTable, settings, settings.tierRanges, subject?.squareFeet ?? 0),
+      valuation: mapValuationResult(valResult, settings.rehabLevelIndex, rehabTable, settings, settings.tierRanges, subject?.squareFeet ?? 0, undefined, subject),
       hasChanges: false,
     }
   }
@@ -282,7 +282,7 @@ export function recalculateReport(
     disabledCount,
     avgPricePerSqft,
     medianPrice,
-    valuation: mapValuationResult(valResult, settings.rehabLevelIndex, rehabTable, settings, settings.tierRanges, subject.squareFeet ?? 0, compAvgSqft),
+    valuation: mapValuationResult(valResult, settings.rehabLevelIndex, rehabTable, settings, settings.tierRanges, subject.squareFeet ?? 0, compAvgSqft, subject),
     hasChanges,
   }
 }
@@ -298,6 +298,7 @@ function mapValuationResult(
   tierRanges?: TierRangeDefinition[],
   subjectSqft?: number,
   compAvgSqft?: number,
+  subject?: SubjectData | null,
 ) {
   const majorItems = settings.majorItems
     .map((item) => ({ id: item.id as 'roof', enabled: item.enabled, cost: item.cost }))
@@ -322,9 +323,13 @@ function mapValuationResult(
     tierRanges
   )
 
-  // Calculate proximity deduction from toggles — reduces ARV
-  const proximityDeduction = calculateProximityDeduction(v.arv, settings)
-  const adjustedArv = v.arv - proximityDeduction
+  // Base ARV: manual per-report override wins over the computed value —
+  // characteristic adjustments and proximity deductions apply to whichever
+  // base is in force so the math stays honest either way.
+  const baseArv = settings.arvOverride != null && settings.arvOverride > 0 ? settings.arvOverride : v.arv
+  const proximityDeduction = calculateProximityDeduction(baseArv, settings)
+  const arvAdj = calculateArvAdjustmentDelta(baseArv, subject as Record<string, unknown> | null | undefined, settings)
+  const adjustedArv = baseArv - proximityDeduction + arvAdj.delta
 
   // Recalculate everything from adjusted ARV
   const adjustedClosing = adjustedArv * (settings.dealParams.closingCostsPercent / 100)
@@ -359,6 +364,7 @@ function mapValuationResult(
     closingCosts: adjustedClosing,
     carryingCosts: adjustedCarrying,
     proximityDeduction,
+    arvAdjustments: arvAdj.lines,
     totalCosts: adjustedClosing + adjustedCarrying,
     totalInvestment: adjustedTotalInvestment,
     projectedProfit: adjustedProfit,
@@ -366,6 +372,52 @@ function mapValuationResult(
     wholesalePrice: adjustedWholesalePrice,
     rehabLevelEstimates: adjustedEstimates,
   } satisfies RecalcValuationResult
+}
+
+/** Does a rule's characteristic trigger match the subject? Absent/blank
+ *  values read as 'missing'; 'None'/'N/A' strings count as missing too. */
+export function arvRuleMatches(rule: ArvAdjustmentRule, subject: object | null | undefined): boolean {
+  if (!subject) return false
+  const raw = (subject as Record<string, unknown>)[rule.field]
+  const missing = raw == null || raw === '' || (typeof raw === 'string' && /^(none|n\/a|na|no)$/i.test(raw.trim()))
+  switch (rule.op) {
+    case 'missing': return missing
+    case 'present': return !missing
+    case 'eq': return !missing && String(raw).toLowerCase() === String(rule.value ?? '').toLowerCase()
+    case 'neq': return !missing && String(raw).toLowerCase() !== String(rule.value ?? '').toLowerCase()
+    case 'contains': return !missing && String(raw).toLowerCase().includes(String(rule.value ?? '').toLowerCase())
+    case 'lt': return typeof raw === 'number' && raw < Number(rule.value)
+    case 'gt': return typeof raw === 'number' && raw > Number(rule.value)
+    default: return false
+  }
+}
+
+export interface ArvAdjustmentLine { id: string; label: string; amount: number; direction: 'deduction' | 'addition' }
+
+/** Signed dollar delta of ARV adjustments on this subject. A rule applies
+ *  when the characteristic matches — or when the per-report override forces
+ *  it on; overrides can also flip direction or value. */
+export function calculateArvAdjustmentDelta(
+  arv: number,
+  subject: object | null | undefined,
+  settings: EvaluationSettings,
+): { delta: number; lines: ArvAdjustmentLine[] } {
+  const rules = settings.arvAdjustmentRules ?? []
+  const overrides = settings.arvAdjustments ?? {}
+  let delta = 0
+  const lines: ArvAdjustmentLine[] = []
+  for (const rule of rules) {
+    const o = overrides[rule.id]
+    const applied = o?.applied ?? arvRuleMatches(rule, subject)
+    if (!applied) continue
+    const pct = o?.percent ?? rule.percent
+    const direction = o?.direction ?? rule.direction
+    if (!(pct > 0)) continue
+    const amount = Math.round(arv * pct / 100)
+    delta += direction === 'addition' ? amount : -amount
+    lines.push({ id: rule.id, label: rule.label, amount, direction })
+  }
+  return { delta, lines }
 }
 
 /**

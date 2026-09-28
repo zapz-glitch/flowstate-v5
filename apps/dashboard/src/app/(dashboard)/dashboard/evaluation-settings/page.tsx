@@ -35,6 +35,7 @@ import { Badge } from '@/components/ui/badge'
 import { Switch } from '@/components/ui/switch'
 import { Card, CardContent, CardTitle } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { cn } from '@/lib/utils'
 import {
   Dialog,
   DialogContent,
@@ -100,6 +101,9 @@ import {
   PROXIMITY_DEFAULTS,
   type ProximityConfig,
   type ProximityPosition,
+  getArvAdjustments,
+  setArvAdjustments,
+  type ArvAdjustmentRule,
 } from '@/lib/client-api'
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -792,15 +796,21 @@ function AppraisalRulesTab() {
   const [proximityConfig, setProximityConfig] = useState<ProximityConfig>(PROXIMITY_DEFAULTS)
   const [proximityOriginal, setProximityOriginal] = useState<ProximityConfig>(PROXIMITY_DEFAULTS)
 
+  // ARV characteristic adjustment rules (global defaults — per-report
+  // application/direction overrides live on each report)
+  const [arvRules, setArvRules] = useState<ArvAdjustmentRule[]>([])
+  const [arvRulesOriginal, setArvRulesOriginal] = useState<ArvAdjustmentRule[]>([])
+
   const load = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
-      const [presetData, defaultsData, settingsData, proxRes] = await Promise.all([
+      const [presetData, defaultsData, settingsData, proxRes, arvRes] = await Promise.all([
         getOrCreateDefaultPreset(),
         getAppraisalDefaults(),
         getLocationSettings('appraisal'),
         getProximityConfig().catch(() => ({ config: PROXIMITY_DEFAULTS, isCustom: false })),
+        getArvAdjustments().catch(() => ({ rules: [] as ArvAdjustmentRule[], isCustom: false })),
       ])
       setDefaults(defaultsData)
       setPreset(presetData)
@@ -810,7 +820,9 @@ function AppraisalRulesTab() {
       setLocSettings(settingsData)
       setProximityConfig(proxRes.config)
       setProximityOriginal(proxRes.config)
-      savedSnapshot.current = JSON.stringify({ filters: f, adjustments: a, proximityConfig: proxRes.config })
+      setArvRules(arvRes.rules)
+      setArvRulesOriginal(arvRes.rules)
+      savedSnapshot.current = JSON.stringify({ filters: f, adjustments: a, proximityConfig: proxRes.config, arvRules: arvRes.rules })
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load')
     } finally {
@@ -832,14 +844,15 @@ function AppraisalRulesTab() {
   }
 
   const proximityDirty = JSON.stringify(proximityConfig) !== JSON.stringify(proximityOriginal)
+  const arvRulesDirty = JSON.stringify(arvRules) !== JSON.stringify(arvRulesOriginal)
   const dirty = savedSnapshot.current !== '' &&
-    JSON.stringify({ filters, adjustments, proximityConfig }) !== savedSnapshot.current
+    JSON.stringify({ filters, adjustments, proximityConfig, arvRules }) !== savedSnapshot.current
 
   const handleSave = async () => {
     if (!preset) return
     setSaving(true)
     setError(null)
-    const sentJson = JSON.stringify({ filters, adjustments, proximityConfig })
+    const sentJson = JSON.stringify({ filters, adjustments, proximityConfig, arvRules })
     try {
       const [saved] = await Promise.all([
         updateAppraisalPreset(preset.id, {
@@ -847,9 +860,11 @@ function AppraisalRulesTab() {
           adjustments: adjustments.map((a) => ({ adjustmentType: a.adjustmentType, enabled: a.enabled, amount: a.amount, percentage: a.percentage })),
         }),
         proximityDirty ? saveProximityConfig(proximityConfig) : Promise.resolve(null),
+        arvRulesDirty ? setArvAdjustments(arvRules) : Promise.resolve(null),
       ])
       setPreset(saved)
       setProximityOriginal(proximityConfig)
+      setArvRulesOriginal(arvRules)
       // Mark persisted at the dispatched snapshot — edits made during the
       // flight keep the form dirty and trigger a follow-up auto-save.
       savedSnapshot.current = sentJson
@@ -862,7 +877,7 @@ function AppraisalRulesTab() {
       setSaving(false)
     }
   }
-  const autoSaveState = useAutoSave(dirty, handleSave, [filters, adjustments, proximityConfig])
+  const autoSaveState = useAutoSave(dirty, handleSave, [filters, adjustments, proximityConfig, arvRules])
 
   const handleReset = () => {
     if (!defaults) return
@@ -1038,6 +1053,16 @@ function AppraisalRulesTab() {
               <span className="text-[10px] text-muted-foreground">— deductions for traffic or commercial exposure</span>
             </div>
             <ProximitySection config={proximityConfig} onChange={updateProximity} />
+          </div>
+
+          {/* ── ARV Adjustments ── */}
+          <div className="space-y-2 pt-2">
+            <div className="flex items-center gap-2">
+              <span className="inline-block w-2 h-2 rounded-full bg-primary" />
+              <span className="text-xs font-semibold text-foreground">ARV Adjustments</span>
+              <span className="text-[10px] text-muted-foreground">— characteristic-based % additions/deductions on the subject's ARV</span>
+            </div>
+            <ArvAdjustmentsSection rules={arvRules} onChange={setArvRules} />
           </div>
 
           {/* ── Auto-save status / Reset ── */}
@@ -3531,6 +3556,89 @@ const POSITIONS = [
   { key: 'backing' as const, label: 'Backing', description: 'Property\'s backyard faces the feature', impact: 'Medium', Icon: ArrowUp, color: 'text-orange-500', bg: 'bg-orange-500/10', border: 'border-orange-500/20' },
   { key: 'fronting' as const, label: 'Fronting', description: 'Property\'s front door faces the feature directly', impact: 'Highest', Icon: ArrowLeft, color: 'text-red-500', bg: 'bg-red-500/10', border: 'border-red-500/20' },
 ]
+
+const ARV_RULE_FIELDS = [
+  'foundationType', 'pool', 'garage', 'carport', 'storiesType', 'propertyType',
+  'condition', 'bedrooms', 'bathrooms', 'squareFeet', 'yearBuilt', 'lotSizeAcres',
+] as const
+const ARV_RULE_OPS = ['eq', 'neq', 'contains', 'missing', 'present', 'lt', 'gt'] as const
+
+function ArvAdjustmentsSection({ rules, onChange }: { rules: ArvAdjustmentRule[]; onChange: (r: ArvAdjustmentRule[]) => void }) {
+  const update = (i: number, patch: Partial<ArvAdjustmentRule>) =>
+    onChange(rules.map((r, idx) => (idx === i ? { ...r, ...patch } : r)))
+  const needsValue = (op: ArvAdjustmentRule['op']) => !['missing', 'present'].includes(op)
+  return (
+    <div className="space-y-1.5">
+      {rules.map((rule, i) => (
+        <div key={rule.id} className="flex items-center gap-2 text-xs">
+          <input
+            value={rule.label}
+            onChange={(e) => update(i, { label: e.target.value })}
+            className="w-40 h-7 px-2 rounded bg-secondary/30 border-0 text-[11px] outline-none focus:ring-1 focus:ring-primary"
+            placeholder="Label"
+          />
+          <select
+            value={rule.field}
+            onChange={(e) => update(i, { field: e.target.value as ArvAdjustmentRule['field'] })}
+            className="h-7 px-1 rounded bg-secondary/30 border-0 text-[11px]"
+          >
+            {ARV_RULE_FIELDS.map((fd) => <option key={fd} value={fd}>{fd}</option>)}
+          </select>
+          <select
+            value={rule.op}
+            onChange={(e) => update(i, { op: e.target.value as ArvAdjustmentRule['op'] })}
+            className="h-7 px-1 rounded bg-secondary/30 border-0 text-[11px]"
+          >
+            {ARV_RULE_OPS.map((op) => <option key={op} value={op}>{op}</option>)}
+          </select>
+          {needsValue(rule.op) && (
+            <input
+              value={String(rule.value ?? '')}
+              onChange={(e) => update(i, { value: e.target.value })}
+              className="w-24 h-7 px-2 rounded bg-secondary/30 border-0 text-[11px] outline-none focus:ring-1 focus:ring-primary"
+              placeholder="value"
+            />
+          )}
+          <input
+            type="number" step={0.5} min={0} max={100}
+            value={rule.percent}
+            onChange={(e) => update(i, { percent: parseFloat(e.target.value) || 0 })}
+            className="w-14 h-7 px-1 rounded bg-secondary/30 border-0 text-[11px] text-right tabular-nums outline-none focus:ring-1 focus:ring-primary"
+          />
+          <span className="text-muted-foreground">%</span>
+          <button
+            type="button"
+            onClick={() => update(i, { direction: rule.direction === 'deduction' ? 'addition' : 'deduction' })}
+            className={cn(
+              'h-7 px-2 rounded text-[10px] font-medium',
+              rule.direction === 'deduction' ? 'bg-red-500/15 text-red-500' : 'bg-emerald-500/15 text-emerald-600'
+            )}
+          >
+            {rule.direction}
+          </button>
+          <button
+            type="button"
+            onClick={() => onChange(rules.filter((_, idx) => idx !== i))}
+            className="h-7 w-7 rounded text-muted-foreground hover:text-red-500"
+            title="Remove rule"
+          >
+            <Trash2 className="w-3.5 h-3.5 mx-auto" />
+          </button>
+        </div>
+      ))}
+      <button
+        type="button"
+        onClick={() => onChange([...rules, { id: `rule_${Date.now()}`, label: '', field: 'foundationType', op: 'eq', value: '', percent: 0, direction: 'deduction' }])}
+        className="text-[11px] text-primary hover:underline"
+      >
+        + Add rule
+      </button>
+      <p className="text-[10px] text-muted-foreground">
+        Rules match the subject property's characteristics — a matching rule auto-applies on reports; flip direction or value per report in the valuation card.
+      </p>
+    </div>
+  )
+}
 
 function ProximitySection({ config, onChange }: { config: ProximityConfig; onChange: (c: ProximityConfig) => void }) {
   const updatePosition = (key: 'siding' | 'backing' | 'fronting', field: keyof ProximityPosition, value: number) => {

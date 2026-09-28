@@ -176,6 +176,10 @@ export interface AnalyzeData {
     additionPlay: number
     arvThresholdPercent?: number
     asIsThresholdPercent?: number
+    /** Per-report manual ARV override (null/absent = computed) */
+    arvOverride?: number | null
+    /** Per-report ARV adjustment application/overrides keyed by rule id */
+    arvAdjustments?: Record<string, { applied: boolean; percent?: number; direction?: 'deduction' | 'addition' }>
   }
 }
 
@@ -532,7 +536,7 @@ export interface ValuationData {
   rehabCost?: number
   baseRehabCost?: number
   majorItemsCost?: number
-  rehabLevel?: string
+  rehabLevel?: string | null
   rehabPerSqft?: number
   /** All rehab level estimates with costs calculated for the current ARV */
   rehabLevelEstimates?: RehabLevelEstimate[]
@@ -558,6 +562,8 @@ export interface ValuationData {
   /** Location-risk deduction applied to buy price (positional proximity) */
   locationPenalty?: number
   locationPenaltyPercent?: number
+  /** Characteristic additions/deductions applied to ARV this render */
+  arvAdjustments?: Array<{ id: string; label: string; amount: number; direction: 'deduction' | 'addition' }>
   recommendation?: string
   recommendationReason?: string
   /** Confidence gate on the comps driving the ARV */

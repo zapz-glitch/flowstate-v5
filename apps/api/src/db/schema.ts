@@ -512,6 +512,22 @@ export const arvThreshold = sqliteTable(
 // Proximity Adjustments (traffic/commercial deductions)
 // ==========================================
 
+export const arvAdjustments = sqliteTable(
+  'arv_adjustments',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    userId: text('user_id')
+      .notNull()
+      .unique()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    /** JSON: ArvAdjustmentRule[] — characteristic → percent direction rules */
+    configJson: text('config_json').notNull(),
+    createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
+    updatedAt: text('updated_at').notNull().$defaultFn(() => new Date().toISOString()),
+  },
+  (table) => [index('idx_arv_adjustments_user_id').on(table.userId)]
+)
+
 export const proximityConfig = sqliteTable(
   'proximity_config',
   {

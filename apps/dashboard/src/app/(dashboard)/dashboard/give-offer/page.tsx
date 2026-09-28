@@ -170,7 +170,7 @@ export default function GiveOfferPage() {
     const match = (addr: string) => !q || addr.toLowerCase().includes(q)
     const queueRow = (item: PipelineItem, tag?: string): RowData => ({
       key: `q:${item.leadId}`,
-      address: item.address ?? item.displayName ?? item.leadId,
+      address: item.fullAddress ?? item.address ?? item.displayName ?? item.leadId,
       meta: [tag, `waiting ${formatWait(Math.floor((now - parseQueuedAt(item.queuedAt)) / 1000))}`, fmtPrice(item.listPrice ?? item.wholesalePrice)]
         .filter(Boolean).join(' · '),
       jobId: jobIdForItem(item),
@@ -190,8 +190,8 @@ export default function GiveOfferPage() {
 
     if (q) {
       return [
-        ...queueItems.filter((i) => match(i.address ?? i.displayName ?? i.leadId)).map((i) => queueRow(i, 'in queue')),
-        ...hotItems.filter((i) => match(i.address ?? i.displayName ?? i.leadId)).filter((i) => !queueItems.includes(i)).map((i) => queueRow(i, 'hot lead')),
+        ...queueItems.filter((i) => match(i.fullAddress ?? i.address ?? i.displayName ?? i.leadId)).map((i) => queueRow(i, 'in queue')),
+        ...hotItems.filter((i) => match(i.fullAddress ?? i.address ?? i.displayName ?? i.leadId)).filter((i) => !queueItems.includes(i)).map((i) => queueRow(i, 'hot lead')),
         ...decided.filter((d) => match(d.address)).map(decidedRow),
       ]
     }
@@ -264,7 +264,7 @@ export default function GiveOfferPage() {
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary/10 text-primary text-xs font-medium hover:bg-primary/20 transition-colors"
                 >
                   <Play size={12} />
-                  Next up — {next!.address ?? 'top of queue'}
+                  Next up — {next!.fullAddress ?? next!.address ?? 'top of queue'}
                 </Link>
               )}
               {resume && (

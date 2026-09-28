@@ -90,7 +90,9 @@ export interface RecalcValuationResult {
   arvPerSqft: number
   buyPrice: number
   buyPricePercent: number
-  rehabLevel: string
+  rehabLevel: string | null
+  /** Characteristic adjustments applied to ARV this render (audit trail) */
+  arvAdjustments?: Array<{ id: string; label: string; amount: number; direction: 'deduction' | 'addition' }>
   rehabPerSqft: number
   baseRehabCost: number
   majorItemsCost: number
@@ -124,6 +126,8 @@ export interface ProximityToggles {
   fronting: boolean
 }
 
+import type { ArvAdjustmentRule, ArvAdjustmentOverride } from '../client-api'
+
 export interface EvaluationSettings {
   filters: RecalcFilter[]
   adjustments: RecalcAdjustment[]
@@ -137,6 +141,13 @@ export interface EvaluationSettings {
   proximityConfig?: ProximityConfig
   /** As-is threshold: comps with salePrice ≤ X% of ARV are "below threshold" (default 70) */
   asIsThresholdPercent?: number
+  /** Manual ARV override for this report — null = use the computed ARV */
+  arvOverride?: number | null
+  /** Global ARV adjustment rules (from /arv-adjustments) */
+  arvAdjustmentRules?: ArvAdjustmentRule[]
+  /** Per-report application/overrides keyed by rule id — applied flag,
+   *  optional percent + direction flips */
+  arvAdjustments?: Record<string, ArvAdjustmentOverride>
 }
 
 // ─── Recalc Result (full output from recalculateReport) ─────────────────────

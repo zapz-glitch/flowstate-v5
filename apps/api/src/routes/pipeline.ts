@@ -83,15 +83,17 @@ async function enrichQueueListPrices(env: Env, body: unknown): Promise<unknown> 
   if (jobIds.length === 0) return body
 
   const rows = await env.DB.prepare(
-    `SELECT job_id, full_response_json FROM saved_reports WHERE job_id IN (${jobIds.map(() => '?').join(',')})`,
-  ).bind(...jobIds).all<{ job_id: string; full_response_json: string | null }>()
+    `SELECT job_id, property_address, full_response_json FROM saved_reports WHERE job_id IN (${jobIds.map(() => '?').join(',')})`,
+  ).bind(...jobIds).all<{ job_id: string; property_address: string | null; full_response_json: string | null }>()
     .catch((e) => {
       console.error('[Pipeline] listPrice enrichment failed:', e)
       return null
     })
 
   const priceByJob = new Map<string, number>()
+  const addrByJob = new Map<string, string>()
   for (const r of rows?.results ?? []) {
+    if (r.property_address) addrByJob.set(r.job_id, r.property_address)
     try {
       const a = JSON.parse(r.full_response_json ?? '{}') as {
         subject?: { listPrice?: number | null }
@@ -105,6 +107,10 @@ async function enrichQueueListPrices(env: Env, body: unknown): Promise<unknown> 
   for (const item of items) {
     const jobId = jobIdOf(item)
     item.listPrice = jobId ? (priceByJob.get(jobId) ?? null) : null
+    // Engine queue addresses are street-only — the saved report carries the
+    // full resolved address incl. ZIP; surface it for display.
+    const addr = jobId ? addrByJob.get(jobId) : undefined
+    if (addr) (item as { fullAddress?: string }).fullAddress = addr
   }
 
   // LeadId fallback for items still null — a sibling report under the

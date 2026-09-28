@@ -31,6 +31,9 @@ export interface PipelineItem {
   wholesalePrice: number | null
   /** Asking price — enriched server-side from the saved report */
   listPrice?: number | null
+  /** Full resolved address incl. ZIP — enriched server-side from the saved
+   *  report; the engine only ships a street. */
+  fullAddress?: string | null
   evalReportUrl: string | null
   draft: unknown
   /** Realtor conversation-log notes shipped by the engine (latest entries first) */

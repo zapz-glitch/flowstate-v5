@@ -242,6 +242,7 @@ export function useAnalysisEvaluation({
         closingCosts: v.closingCosts,
         carryingCosts: v.carryingCosts,
         rehabLevelEstimates: v.rehabLevelEstimates,
+        arvAdjustments: v.arvAdjustments,
       }
     } else {
       base = data.valuation

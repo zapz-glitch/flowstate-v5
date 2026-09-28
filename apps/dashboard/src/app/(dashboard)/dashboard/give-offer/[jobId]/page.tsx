@@ -164,8 +164,8 @@ export default function GiveOfferReportPage({ params }: { params: Promise<{ jobI
   // Remember where we were — the Offers dashboard's Resume button jumps
   // straight back here.
   useEffect(() => {
-    setLastViewed(jobId, current?.address ?? current?.displayName ?? null)
-  }, [jobId, current?.address, current?.displayName])
+    setLastViewed(jobId, current?.fullAddress ?? current?.address ?? current?.displayName ?? null)
+  }, [jobId, current?.fullAddress, current?.address, current?.displayName])
 
   const advance = useCallback((workflow: OfferWorkflow) => {
     if (current) recordDecision(current, workflow, jobId)
@@ -294,7 +294,7 @@ export default function GiveOfferReportPage({ params }: { params: Promise<{ jobI
         fallback: current
           ? {
               leadId: current.leadId,
-              address: current.address ?? current.displayName ?? current.leadId,
+              address: current.fullAddress ?? current.address ?? current.displayName ?? current.leadId,
               wholesalePrice: current.wholesalePrice,
               listPrice: current.listPrice ?? null,
               opportunityId: current.opportunityId,
