@@ -756,3 +756,19 @@ E2E (Playwright + vendored system libs, local env): tiles 619ms, category switch
 Remaining/limitations:
 - Session-only Failed bucket (failed dispatches aren't persisted server-side).
 - Once a dispositioned lead leaves the engine queue, its report link resolves only via session entry's jobId.
+
+## 2026-09-28 (cont.) — Durable dispositions in D1 (PR #67, deployed)
+
+- `offer_dispositions` D1 table (migration 0034, applied local+remote):
+  upserted on every /v1/offers/prep + /decline attempt — re-dispatch
+  overrides workflow/date. Stores jobId + ok → durable Failed bucket and
+  report links that survive queue dequeues.
+- `/v1/offers/history` now reads D1 (one indexed SELECT vs KV list+gets).
+- Backfilled tonight's 4 KV markers (3 no-margin, 1 prep @ $239k) w/ jobIds.
+- Perf pass (PR #66): killed the 1s full-report re-render (WaitChip owns
+  its own ticker), poll fingerprint dedupe, module-cached history/hot-ids.
+- Messaged listener session devin-fbfcfad371534372bff22b123657c41f for
+  its disposition list — still running at handoff, reply pending.
+
+Remaining: listener-session reply is informational only now — D1 is the
+source of truth. KV dispatch/decline keys remain for idempotency.
