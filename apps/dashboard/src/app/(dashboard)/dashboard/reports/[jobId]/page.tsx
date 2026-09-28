@@ -221,7 +221,19 @@ export default function DashboardReportPage({ params, queue }: {
         text: t.replace(/^\s*FLOWSTATE CONVERSATION LOG\s*-?\s*/, ''),
       }))
     if (!entries.length && !analyzeData?.rehabAdvisories?.length && !analyzeData?.rehabAdditions?.length) {
-      return null
+      // Offers context gets an explicit empty state — otherwise a lead
+      // with no conversation intel looks identical to a broken fetch.
+      return queue ? (
+        <section className="border border-border rounded-sm px-4 py-3">
+          <div className="flex items-baseline justify-between gap-2">
+            <h3 className="text-body-sm font-semibold">Realtor notes</h3>
+            <span className="text-[10px] text-foreground-tertiary">none on file</span>
+          </div>
+          <p className="text-[11px] text-foreground-tertiary">
+            No conversation-log intel — the engine has no condition notes for this lead yet.
+          </p>
+        </section>
+      ) : null
     }
     return (
       <RealtorNotesCard

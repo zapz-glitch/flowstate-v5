@@ -465,12 +465,19 @@ export async function runJevEvaluation(
   const subjectGeo = subject.latitude != null && subject.longitude != null
     ? await geoFn(subject.latitude, subject.longitude)
     : null
+  // Geocode EVERY comp, not just the enriched test-2 subset — the free
+  // Census geocoder + 180-day KV cache make this near-zero marginal cost,
+  // and tract/block-group flags on the full set give comp classification a
+  // deterministic geographic consensus layer beyond the LLM nouls.
   const compGeos = new Map<string, CensusGeography | null>()
-  await Promise.all(examComps.map(async (c) => {
-    compGeos.set(c.id, c.latitude != null && c.longitude != null ? await geoFn(c.latitude, c.longitude) : null)
-  }))
+  const geoTargets = comps.filter((c) => c.latitude != null && c.longitude != null)
+  for (let i = 0; i < geoTargets.length; i += 8) {
+    await Promise.all(geoTargets.slice(i, i + 8).map(async (c) => {
+      compGeos.set(c.id, await geoFn(c.latitude!, c.longitude!))
+    }))
+  }
 
-  for (const c of examComps) {
+  for (const c of comps) {
     const cg = compGeos.get(c.id)
     // Provider tract ids and census GEOIDs can't be mixed — prefer
     // provider-vs-provider, else compare the census lookups when both
