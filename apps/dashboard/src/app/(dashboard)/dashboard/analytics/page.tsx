@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
-import { BarChart3, ExternalLink, Inbox } from 'lucide-react'
+import { BarChart3, Inbox } from 'lucide-react'
+import { FlowGlyph } from '@/components/ui/Logo'
 import {
   getActivityRows,
   getActivitySummary,
@@ -406,35 +407,40 @@ export default function AnalyticsPage() {
                         <div>{fmtTime(r.ts)}</div>
                         <div className="text-[9px]">{fmtDay(r.ts)}</div>
                       </div>
+                      {jobId ? (
+                        <Link
+                          href={`/dashboard/give-offer/${jobId}`}
+                          className="w-5 h-5 rounded bg-foreground flex items-center justify-center flex-shrink-0 hover:opacity-80 transition-opacity"
+                          title="Open property in Offers"
+                        >
+                          <FlowGlyph className="w-3 h-3 text-background" />
+                        </Link>
+                      ) : (
+                        <span
+                          className="w-5 h-5 rounded bg-secondary/60 flex items-center justify-center flex-shrink-0"
+                          title="Not underwritten yet"
+                        >
+                          <FlowGlyph className="w-3 h-3 text-foreground-tertiary" />
+                        </span>
+                      )}
                       <div className="flex-1 min-w-0">
-                        <div className="truncate text-foreground-primary font-medium">
-                          {addr ?? '—'}
-                        </div>
-                        <div className="text-[10px] text-foreground-tertiary truncate" title={detail ?? undefined}>
-                          {stepLabel(r)}
-                          {detail && detail !== stepLabel(r) ? ` · ${detail.slice(0, 70)}` : ''}
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2 flex-shrink-0">
-                        {jobId && (
-                          <Link
-                            href={`/dashboard/give-offer/${jobId}`}
-                            className="text-[10px] text-primary hover:underline"
-                          >
-                            Offer
-                          </Link>
-                        )}
-                        {r.leadId && (
+                        {r.leadId ? (
                           <a
                             href={`https://app.close.com/lead/${r.leadId}`}
                             target="_blank"
                             rel="noreferrer"
-                            className="flex items-center gap-1 text-[10px] text-primary hover:underline"
+                            className="truncate block text-foreground-primary font-medium hover:text-primary hover:underline"
+                            title="Open in Close"
                           >
-                            Close
-                            <ExternalLink size={10} />
+                            {addr ?? '—'}
                           </a>
+                        ) : (
+                          <div className="truncate text-foreground-primary font-medium">{addr ?? '—'}</div>
                         )}
+                        <div className="text-[10px] text-foreground-tertiary truncate" title={detail ?? undefined}>
+                          {stepLabel(r)}
+                          {detail && detail !== stepLabel(r) ? ` · ${detail.slice(0, 70)}` : ''}
+                        </div>
                       </div>
                     </div>
                   )
