@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation'
 import { ChevronLeft, ChevronRight, Timer, ListFilter } from 'lucide-react'
 import DashboardReportPage from '../../reports/[jobId]/page'
 import { getOfferQueue, type PipelineItem } from '../actions'
-import { decidedIds, jobIdForItem, parseQueuedAt, sortedQueue, formatWait, WAIT_FILTER_LABELS, type WaitFilter, getCachedQueue, setCachedQueue, prefetchReport } from '../queue'
+import { decidedIds, jobIdForItem, parseQueuedAt, sortedQueue, formatWait, WAIT_FILTER_LABELS, type WaitFilter, getCachedQueue, setCachedQueue, prefetchReport, recordDecision, setLastViewed } from '../queue'
 import { useSidebar } from '@/components/SidebarProvider'
 import { cn } from '@/lib/utils'
 
@@ -77,8 +77,14 @@ export default function GiveOfferReportPage({ params }: { params: Promise<{ jobI
     [router],
   )
 
-  const advance = useCallback(() => {
-    if (current) decidedIds.add(current.leadId)
+  // Remember where we were — the Offers dashboard's Resume button jumps
+  // straight back here.
+  useEffect(() => {
+    setLastViewed(jobId, current?.address ?? current?.displayName ?? null)
+  }, [jobId, current?.address, current?.displayName])
+
+  const advance = useCallback((workflow: 'prep_offer' | 'no_margin') => {
+    if (current) recordDecision(current, workflow, jobId)
     // Warm the next report during the outcome-chip window so the report
     // page lands on content — no skeleton flash a beat after navigation.
     const next = items[index + 1] ?? items[0]

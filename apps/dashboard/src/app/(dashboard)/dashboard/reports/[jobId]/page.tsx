@@ -47,7 +47,7 @@ const CompComparisonDialog = dynamic(() => import('@/components/analysis/CompCom
 function QueueFallback({ queue }: {
   queue: {
     node: React.ReactNode
-    onDecided: () => void
+    onDecided: (workflow: 'prep_offer' | 'no_margin') => void
     fallback?: { leadId: string | null; address: string; wholesalePrice: number | null; listPrice?: number | null; opportunityId?: string | null }
   }
 }) {
@@ -78,7 +78,7 @@ function QueueFallback({ queue }: {
         ok: true,
         label: workflow === 'prep_offer' ? (res.idempotent ? 'Already dispatched' : 'Offer prep dispatched') : 'Decline recorded',
       })
-      queue.onDecided()
+      queue.onDecided(workflow)
     } catch {
       setResult({ ok: false, label: 'Dispatch failed' })
     } finally {
@@ -152,7 +152,7 @@ export default function DashboardReportPage({ params, queue }: {
    *  (e.g. queue item's jobId lives in a different env's DB). */
   queue?: {
     node: React.ReactNode
-    onDecided: () => void
+    onDecided: (workflow: 'prep_offer' | 'no_margin') => void
     /** False while the queue fetch is still in flight — an unresolved
      *  fallback doesn't mean "not found" yet. */
     loaded?: boolean
@@ -486,7 +486,7 @@ export default function DashboardReportPage({ params, queue }: {
           opportunityId: analyzeData?.opportunityId ?? undefined,
         })
       : await declineOffer({ leadId: analyzeData?.leadId ?? undefined, propertyAddress: report.address })
-    if (res.ok) queue?.onDecided()
+    if (res.ok) queue?.onDecided(workflow)
     return { ok: res.ok }
   }, [report?.address, analyzeData, displayValuation, queue])
 
