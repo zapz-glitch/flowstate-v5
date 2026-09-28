@@ -1,4 +1,4 @@
-import type { PipelineItem } from './actions'
+import type { PipelineItem, ServerDisposition } from './actions'
 import { getSavedReport } from '@/lib/client-api'
 
 /** Engine timestamps arrive as "YYYY-MM-DD HH:MM:SS" UTC. */
@@ -180,4 +180,52 @@ export function decisionFor(jobId: string, leadId?: string | null): DecidedEntry
   return list.find((d) => d.jobId === jobId)
     ?? (leadId ? list.find((d) => d.leadId === leadId) : undefined)
     ?? null
+}
+
+/** Merge server dispositions with the session log into one decided list.
+ *  Session entries win (they carry jobId + failures); server rows fill the
+ *  gaps — including decisions made in earlier sessions. `jobIdForLead`
+ *  maps a still-queued lead to its report. */
+export function mergeDispositions(
+  server: ServerDisposition[],
+  jobIdForLead: Map<string, string | null>,
+): DecidedEntry[] {
+  const merged = new Map<string, DecidedEntry>()
+  for (const s of server) {
+    const key = s.leadId ?? `addr:${(s.propertyAddress ?? '').toLowerCase()}`
+    merged.set(key, {
+      leadId: s.leadId ?? '',
+      jobId: (s.leadId ? jobIdForLead.get(s.leadId) : null) ?? null,
+      address: s.propertyAddress ?? s.leadId ?? 'Unknown',
+      workflow: s.workflow,
+      ok: true,
+      at: s.at ? Date.parse(s.at) : 0,
+    })
+  }
+  for (const d of loadDecided()) {
+    const key = d.leadId || `addr:${d.address.toLowerCase()}`
+    const existing = merged.get(key)
+    merged.set(key, existing ? { ...d, jobId: d.jobId ?? existing.jobId } : d)
+  }
+  return [...merged.values()].sort((a, b) => b.at - a.at)
+}
+
+/** LeadIds that are dispositioned anywhere (session log + server markers)
+ *  — the Waiting category excludes all of them. */
+export function decidedLeadSet(server: ServerDisposition[]): Set<string> {
+  loadDecided() // hydrates decidedIds
+  const set = new Set(decidedIds)
+  for (const d of server) if (d.leadId) set.add(d.leadId)
+  return set
+}
+
+/** One-shot nav veil — armed when the dashboard opens a report so the
+ *  route swap happens under the same covered crossfade as auto-advance.
+ *  Module state survives the SPA navigation; consumed once on mount. */
+let navVeilPending = false
+export function armNavVeil(): void { navVeilPending = true }
+export function consumeNavVeil(): boolean {
+  const v = navVeilPending
+  navVeilPending = false
+  return v
 }

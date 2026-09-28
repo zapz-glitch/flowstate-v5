@@ -101,3 +101,19 @@ export async function getPipelineMetrics(): Promise<{ ok: boolean; metrics: Pipe
     },
   }
 }
+
+export interface ServerDisposition {
+  leadId: string | null
+  propertyAddress: string | null
+  workflow: 'prep_offer' | 'no_margin'
+  at: string | null
+}
+
+/** Durable disposition history — server-side dispatch/decline markers.
+ *  Recovers decisions made in prior sessions/devices. */
+export async function getOfferHistory(): Promise<{ ok: boolean; dispositions: ServerDisposition[] }> {
+  const res = await internalFetch('/v1/offers/history')
+  if (!res?.ok) return { ok: false, dispositions: [] }
+  const data = (await res.json()) as { dispositions?: ServerDisposition[] }
+  return { ok: true, dispositions: data.dispositions ?? [] }
+}

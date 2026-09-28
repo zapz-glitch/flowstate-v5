@@ -233,4 +233,38 @@ offers.post('/decline', async (c) => {
   return c.json({ ok: true })
 })
 
+/** Disposition history — the dispatch/decline markers written by /prep and
+ *  /decline. Powers the Offers dashboard categories durably (survives
+ *  sessions/devices), not just the browser's session log. */
+offers.get('/history', async (c) => {
+  interface DispatchValue {
+    leadId?: string | null
+    propertyAddress?: string | null
+    dispatchedAt?: string
+    declinedAt?: string
+  }
+  const out: Array<{
+    leadId: string | null
+    propertyAddress: string | null
+    workflow: 'prep_offer' | 'no_margin'
+    at: string | null
+  }> = []
+  for (const [prefix, workflow] of [['offer-dispatch:', 'prep_offer'], ['offer-decline:', 'no_margin']] as const) {
+    const listed = await c.env.API_CACHE.list({ prefix })
+    for (const k of listed.keys) {
+      const v = (await c.env.API_CACHE.get<DispatchValue>(k.name, 'json').catch(() => null)) ?? null
+      if (!v) continue
+      const idPart = k.name.slice(prefix.length)
+      out.push({
+        leadId: v.leadId ?? (idPart.startsWith('lead_') ? idPart : null),
+        propertyAddress: v.propertyAddress ?? null,
+        workflow,
+        at: v.dispatchedAt ?? v.declinedAt ?? null,
+      })
+    }
+  }
+  out.sort((a, b) => (b.at ?? '').localeCompare(a.at ?? ''))
+  return c.json({ ok: true, dispositions: out })
+})
+
 export default offers
