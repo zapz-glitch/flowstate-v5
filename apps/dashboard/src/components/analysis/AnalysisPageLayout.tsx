@@ -1,5 +1,6 @@
 'use client'
 
+import type { OfferWorkflow } from '@/lib/client-api'
 import { isValidCoordinate } from '@/lib/property-map-geometry'
 
 import { useState, useCallback, type ReactNode } from 'react'
@@ -45,9 +46,9 @@ export interface AnalysisPageLayoutProps {
   /** True while a rerun is in flight */
   rerunning?: boolean
   /** Fire an offer workflow — returns the outcome the hero flashes */
-  onOfferWorkflow?: (workflow: 'prep_offer' | 'no_margin', offerPrice?: number) => Promise<{ ok: boolean }>
+  onOfferWorkflow?: (workflow: OfferWorkflow, offerPrice?: number) => Promise<{ ok: boolean }>
   /** Prior session disposition — hero renders a dated warning chip */
-  disposition?: { workflow: 'prep_offer' | 'no_margin'; at: number } | null
+  disposition?: { workflow: OfferWorkflow; at: number } | null
 }
 
 export function AnalysisPageLayout({

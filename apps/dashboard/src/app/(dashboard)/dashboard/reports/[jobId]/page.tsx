@@ -7,7 +7,7 @@ import Link from 'next/link'
 import dynamic from 'next/dynamic'
 import ReportLoading from './loading'
 import { useRouter } from 'next/navigation'
-import { ArrowLeft, ArrowRight, Share2, RefreshCw, History, Loader2, ListChecks, FileSignature, CircleSlash, Check, X } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Share2, RefreshCw, History, Loader2, ListChecks, FileSignature, CircleSlash, Check, X, Ban } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { CopyButton } from '@/components/ui/copy-button'
 import {
@@ -47,21 +47,21 @@ const CompComparisonDialog = dynamic(() => import('@/components/analysis/CompCom
 function QueueFallback({ queue }: {
   queue: {
     node: React.ReactNode
-    onDecided: (workflow: 'prep_offer' | 'no_margin') => void
+    onDecided: (workflow: OfferWorkflow) => void
     /** Dispatch failed — records it under the Failed category; stays put. */
-    onFailed?: (workflow: 'prep_offer' | 'no_margin') => void
+    onFailed?: (workflow: OfferWorkflow) => void
     jobId?: string
     fallback?: { leadId: string | null; address: string; wholesalePrice: number | null; listPrice?: number | null; opportunityId?: string | null }
   }
 }) {
   const item = queue.fallback!
-  const [busy, setBusy] = useState<'prep_offer' | 'no_margin' | null>(null)
+  const [busy, setBusy] = useState<OfferWorkflow | null>(null)
   const [result, setResult] = useState<{ ok: boolean; label: string } | null>(null)
 
   // Offers dispatch at the queue's computed price only — no overrides.
   const canOffer = item.wholesalePrice != null && item.wholesalePrice > 0
 
-  const decide = async (workflow: 'prep_offer' | 'no_margin') => {
+  const decide = async (workflow: OfferWorkflow) => {
     if (busy) return
     setBusy(workflow)
     try {
@@ -73,7 +73,7 @@ function QueueFallback({ queue }: {
             opportunityId: item.opportunityId ?? undefined,
             jobId: queue.jobId,
           })
-        : await declineOffer({ leadId: item.leadId ?? undefined, propertyAddress: item.address, jobId: queue.jobId })
+        : await declineOffer({ leadId: item.leadId ?? undefined, propertyAddress: item.address, jobId: queue.jobId, workflow })
       if (!res.ok) {
         setResult({ ok: false, label: res.error ?? 'Dispatch failed' })
         queue.onFailed?.(workflow)
@@ -139,6 +139,15 @@ function QueueFallback({ queue }: {
                   {busy === 'no_margin' ? <RefreshCw size={13} className="animate-spin" /> : <CircleSlash size={13} />}
                   No margin
                 </button>
+                <button
+                  type="button"
+                  onClick={() => decide('no_offer')}
+                  disabled={busy != null}
+                  className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded border border-border text-xs text-foreground-secondary hover:bg-secondary transition-colors disabled:opacity-50"
+                >
+                  {busy === 'no_offer' ? <RefreshCw size={13} className="animate-spin" /> : <Ban size={13} />}
+                  No offer
+                </button>
               </div>
             )}
           </div>
@@ -157,9 +166,9 @@ export default function DashboardReportPage({ params, queue }: {
    *  (e.g. queue item's jobId lives in a different env's DB). */
   queue?: {
     node: React.ReactNode
-    onDecided: (workflow: 'prep_offer' | 'no_margin') => void
+    onDecided: (workflow: OfferWorkflow) => void
     /** Dispatch failed — records it under the Failed category; stays put. */
-    onFailed?: (workflow: 'prep_offer' | 'no_margin') => void
+    onFailed?: (workflow: OfferWorkflow) => void
     jobId?: string
     /** False while the queue fetch is still in flight — an unresolved
      *  fallback doesn't mean "not found" yet. */
@@ -174,7 +183,7 @@ export default function DashboardReportPage({ params, queue }: {
      *  carries its own `sellerNotes` snapshot. */
     notes?: string[] | null
     /** Prior session disposition — hero shows a dated warning chip */
-    disposition?: { workflow: 'prep_offer' | 'no_margin'; at: number } | null
+    disposition?: { workflow: OfferWorkflow; at: number } | null
   }
 }) {
   const { jobId } = use(params)
@@ -508,7 +517,7 @@ export default function DashboardReportPage({ params, queue }: {
           opportunityId: analyzeData?.opportunityId ?? undefined,
           jobId,
         })
-      : await declineOffer({ leadId: analyzeData?.leadId ?? undefined, propertyAddress: report.address, jobId })
+      : await declineOffer({ leadId: analyzeData?.leadId ?? undefined, propertyAddress: report.address, jobId, workflow })
     if (res.ok) queue?.onDecided(workflow)
     else queue?.onFailed?.(workflow)
     return { ok: res.ok }

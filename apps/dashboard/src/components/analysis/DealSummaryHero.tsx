@@ -1,8 +1,9 @@
 'use client'
 
 import { useState } from 'react'
-import { SlidersHorizontal, RefreshCw, FileSignature, CircleSlash, Check, X } from 'lucide-react'
+import { SlidersHorizontal, RefreshCw, FileSignature, CircleSlash, Check, X, Ban} from 'lucide-react'
 import { cn } from '@/lib/utils'
+import type { OfferWorkflow } from '@/lib/client-api'
 import type { ValuationData } from './shared-types'
 import { formatValuationNumber as fmt, formatMoneyThousands as fmtK } from './valuation-number'
 import { formatHeadlineMoney } from './headline-money'
@@ -17,9 +18,9 @@ interface DealSummaryHeroProps {
   rerunning?: boolean
   /** Fire an offer workflow — returns the outcome the header flashes.
    *  prep_offer accepts an offerPrice override (defaults to wholesale). */
-  onOfferWorkflow?: (workflow: 'prep_offer' | 'no_margin', offerPrice?: number) => Promise<{ ok: boolean }>
+  onOfferWorkflow?: (workflow: OfferWorkflow, offerPrice?: number) => Promise<{ ok: boolean }>
   /** Prior disposition this session — renders a dated warning chip */
-  disposition?: { workflow: 'prep_offer' | 'no_margin'; at: number } | null
+  disposition?: { workflow: OfferWorkflow; at: number } | null
 }
 
 export function DealSummaryHero({ valuation, isRecalculated, onOpenSettings, onRerun, rerunning, onOfferWorkflow, disposition }: DealSummaryHeroProps) {
@@ -34,7 +35,7 @@ export function DealSummaryHero({ valuation, isRecalculated, onOpenSettings, onR
   const offerPrice = valuation.wholesalePrice ?? valuation.buyPrice
   const canOffer = offerPrice != null && offerPrice > 0
 
-  const fireOffer = async (workflow: 'prep_offer' | 'no_margin') => {
+  const fireOffer = async (workflow: OfferWorkflow) => {
     if (!onOfferWorkflow || offerPhase !== 'idle') return
     setOfferPhase('busy')
     try {
@@ -62,11 +63,11 @@ export function DealSummaryHero({ valuation, isRecalculated, onOpenSettings, onR
             <span
               className={cn(
                 'text-[8px] font-medium px-1.5 py-0.5 rounded',
-                disposition.workflow === 'prep_offer' ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400' : 'bg-amber-500/20 text-amber-600 dark:text-amber-400',
+                disposition.workflow === 'prep_offer' ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400' : disposition.workflow === 'no_offer' ? 'bg-red-500/20 text-red-600 dark:text-red-400' : 'bg-amber-500/20 text-amber-600 dark:text-amber-400',
               )}
               title="This property was already dispositioned this session"
             >
-              {disposition.workflow === 'prep_offer' ? 'Offer prepped' : 'No margin'} · {new Date(disposition.at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} {new Date(disposition.at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+              {disposition.workflow === 'prep_offer' ? 'Offer prepped' : disposition.workflow === 'no_offer' ? 'No offer' : 'No margin'} · {new Date(disposition.at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} {new Date(disposition.at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
             </span>
           )}
           {valuation.confidence && (
@@ -109,6 +110,15 @@ export function DealSummaryHero({ valuation, isRecalculated, onOpenSettings, onR
                 >
                   <CircleSlash className="w-3 h-3" />
                   No margin
+                </button>
+                <button
+                  type="button"
+                  onClick={() => fireOffer('no_offer')}
+                  className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] text-foreground-tertiary hover:text-foreground hover:bg-secondary transition-colors no-print"
+                  title="No offer — decline without an offer and notify the listener"
+                >
+                  <Ban className="w-3 h-3" />
+                  No offer
                 </button>
               </div>
             ) : offerPhase === 'busy' ? (

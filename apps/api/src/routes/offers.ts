@@ -65,7 +65,7 @@ async function recordDisposition(
     leadId: string | null
     address: string | null
     jobId?: string | null
-    workflow: 'prep_offer' | 'no_margin'
+    workflow: 'prep_offer' | 'no_margin' | 'no_offer'
     ok: boolean
     purchasePrice?: number | null
     opportunityId?: string | null
@@ -239,6 +239,7 @@ const declineSchema = z
     leadId: z.string().max(200).optional(),
     propertyAddress: z.string().max(300).optional(),
     jobId: z.string().max(200).optional(),
+    workflow: z.enum(['no_margin', 'no_offer']).default('no_margin'),
   })
   .refine((b) => b.leadId || b.propertyAddress, { message: 'leadId or propertyAddress required' })
 
@@ -262,7 +263,7 @@ offers.post('/decline', async (c) => {
   c.executionCtx.waitUntil(
     recordDisposition(c.env, {
       key: declineId, leadId, address: body.propertyAddress ?? null, jobId: body.jobId,
-      workflow: 'no_margin', ok: true,
+      workflow: body.workflow, ok: true,
     }),
   )
 
@@ -285,8 +286,10 @@ offers.post('/decline', async (c) => {
   // Stage move + cleanup go through the listener session — exact format
   // the engine has already processed live.
   const idPart = leadId ? `leadId=${leadId}` : `leadId=`
+  const stage = body.workflow === 'no_offer' ? 'No offer' : 'No margin'
+  const verb = body.workflow === 'no_offer' ? 'NO OFFER' : 'NO MARGIN'
   c.executionCtx.waitUntil(
-    postDevinMessage(c.env, `NO MARGIN: ${idPart} address=${body.propertyAddress ?? ''} — move to No margin`),
+    postDevinMessage(c.env, `${verb}: ${idPart} address=${body.propertyAddress ?? ''} — move to ${stage}`),
   )
 
   return c.json({ ok: true })

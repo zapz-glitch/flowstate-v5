@@ -1,4 +1,7 @@
 import { getOfferHistory, type PipelineItem, type ServerDisposition } from './actions'
+import type { OfferWorkflow } from '@/lib/client-api'
+
+export type { OfferWorkflow }
 import { getSavedReport } from '@/lib/client-api'
 
 /** Engine timestamps arrive as "YYYY-MM-DD HH:MM:SS" UTC. */
@@ -103,7 +106,7 @@ export interface DecidedEntry {
   leadId: string
   jobId: string | null
   address: string
-  workflow: 'prep_offer' | 'no_margin'
+  workflow: OfferWorkflow
   /** false = dispatch failed — surfaces under the Failed category and
    *  does NOT remove the item from the queue (retry stays possible). */
   ok: boolean
@@ -131,7 +134,7 @@ function loadDecided(): DecidedEntry[] {
 
 export function recordDecision(
   item: { leadId: string; address?: string | null; displayName?: string | null },
-  workflow: 'prep_offer' | 'no_margin',
+  workflow: OfferWorkflow,
   jobId: string | null,
   ok = true,
 ): void {
