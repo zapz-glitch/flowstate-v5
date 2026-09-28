@@ -21,8 +21,7 @@ import {
   armNavVeil,
   mergeDispositions,
   decidedLeadSet,
-  getOfferHistoryCached,
-  getHotLeadIdsCached,
+  getOffersViewCached,
   type ServerDisposition,
   type WaitFilter,
   type DecidedEntry,
@@ -105,10 +104,19 @@ export default function GiveOfferPage() {
     if (saved && saved in CAT_SAFE_FILTERS) setFilterPref(saved as WaitFilter)
     setSessionDecided(getDecidedToday())
     setLastViewedState(getLastViewed())
-    // Durable dispositions — recovers decisions from earlier sessions/devices.
-    getOfferHistoryCached().then(setServerDisp).catch(() => {})
-    // Hot-lead set for the Hot category — hot_lead events carry leadId.
-    getHotLeadIdsCached().then(setHotIds).catch(() => {})
+    // One composite action: durable dispositions + hot-lead ids (and a
+    // warm queue snapshot) in a single server-action POST.
+    getOffersViewCached().then((v) => {
+      setServerDisp(v.dispositions)
+      setHotIds(v.hotIds)
+      if (v.items.length) {
+        setCachedQueue(v.items)
+        // Seed the queue from the composite so mount doesn't fire a second
+        // POST just for items — the interval below keeps it fresh.
+        setRaw((prev) => prev.length ? prev : v.items)
+        setLoaded(true)
+      }
+    }).catch(() => {})
   }, [])
 
   useEffect(() => {

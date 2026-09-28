@@ -225,7 +225,9 @@ function CameraController({ subject, actions, onReady, onStreetView, onUnavailab
     window.addEventListener('pointerup', pointerUp, true)
     window.addEventListener('pointercancel', pointerUp, true)
     const resize = new ResizeObserver(scheduleCorrection)
-    resize.observe(map)
+    // map is the gmp-map-3d custom element — before the maps3d library
+    // resolves it can be a detached stub; observe only real Elements.
+    if (map instanceof Element) resize.observe(map)
     // Wait until the wrapper has applied its initial camera options.
     initFrame = requestAnimationFrame(() => {
       if (disposed) return

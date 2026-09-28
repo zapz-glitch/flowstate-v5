@@ -6,7 +6,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { ChevronLeft, ChevronRight, Timer, ListFilter } from 'lucide-react'
 import DashboardReportPage from '../../reports/[jobId]/page'
 import { getOfferQueue, type PipelineItem } from '../actions'
-import { jobIdForItem, parseQueuedAt, sortedQueue, formatWait, WAIT_FILTER_LABELS, type WaitFilter, getCachedQueue, setCachedQueue, prefetchReport, recordDecision, setLastViewed, decisionFor, getDecidedToday, mergeDispositions, decidedLeadSet, consumeNavVeil, getOfferHistoryCached, getHotLeadIdsCached, type DecidedEntry, type ServerDisposition, type OfferWorkflow } from '../queue'
+import { jobIdForItem, parseQueuedAt, sortedQueue, formatWait, WAIT_FILTER_LABELS, type WaitFilter, getCachedQueue, setCachedQueue, prefetchReport, recordDecision, setLastViewed, decisionFor, getDecidedToday, mergeDispositions, decidedLeadSet, consumeNavVeil, getOffersViewCached, type DecidedEntry, type ServerDisposition, type OfferWorkflow } from '../queue'
 import { useSidebar } from '@/components/SidebarProvider'
 import { cn } from '@/lib/utils'
 
@@ -71,14 +71,19 @@ export default function GiveOfferReportPage({ params }: { params: Promise<{ jobI
     const saved = window.localStorage.getItem(SORT_PREF_KEY)
     if (saved && saved in WAIT_FILTER_LABELS) setFilter(saved as WaitFilter)
     setSessionDecided(getDecidedToday())
-    getOfferHistoryCached().then(setServerDisp).catch(() => {})
+    getOffersViewCached().then((v) => {
+      setServerDisp(v.dispositions)
+      setHotIds(v.hotIds)
+      // Seed from the composite — avoids a duplicate queue POST on mount.
+      if (v.items.length) { setCachedQueue(v.items); setRaw((prev) => prev.length ? prev : v.items) }
+    }).catch(() => {})
   }, [])
 
   // Hot-lead set only needed while browsing that category.
   useEffect(() => {
     if (cat !== 'hot' || hotIds.size) return
     let cancelled = false
-    getHotLeadIdsCached().then((ids) => { if (!cancelled) setHotIds(ids) }).catch(() => {})
+
     return () => { cancelled = true }
   }, [cat, hotIds.size])
 

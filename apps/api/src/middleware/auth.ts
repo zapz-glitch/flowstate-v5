@@ -208,7 +208,11 @@ export async function authMiddleware(
     c.executionCtx.waitUntil(
       (async () => {
         try {
-          const dashboardResponseBody = await captureResponseBody(res)
+          // Dashboard-internal requests already carry a trusted identity —
+          // bodies are only useful when something failed. Full body capture
+          // stays on for external API-key traffic (billing/abuse auditing).
+          const dashboardResponseBody = status >= 400 ? await captureResponseBody(res) : null
+          const dashboardRequestBody = status >= 400 ? requestBody : null
           const dashboardLogId = crypto.randomUUID()
           await c.env.DB.prepare(`
             INSERT INTO api_usage_logs (
@@ -231,7 +235,7 @@ export async function authMiddleware(
               dashboardPropertyInfo.state,
               ip,
               userAgent,
-              requestBody,
+              dashboardRequestBody,
               dashboardResponseBody,
               requestHeaders,
               new Date().toISOString()

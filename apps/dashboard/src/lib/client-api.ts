@@ -11,7 +11,49 @@ import type { AnalyzeData } from '@/app/(dashboard)/dashboard/analyze/actions'
 // API URL - inlined at build time via next.config.js
 const API_URL = process.env.NEXT_PUBLIC_API_URL!
 
+// In-flight dedupe for concurrent GETs — StrictMode double-mounts,
+// hover-prefetch + mount, and parallel hooks all share one promise.
+// Nothing is retained after settle, so mutations never read stale data.
+const inflightGet = new Map<string, Promise<unknown>>()
+
+// Settings-style GETs get a 30s TTL cache — these change only through the
+// mutating endpoints below, which invalidate on write. Scope: this tab's
+// module lifetime. Key: impersonation-aware path. Stale window: ≤30s, and
+// any non-GET to the same path clears it immediately.
+const TTL_GET = new Map<string, { at: number; data: unknown }>()
+const TTL_MS = 30_000
+const TTL_PATHS = new Set(['/arv-threshold', '/rehab-config', '/deal-params', '/major-item-costs', '/proximity-config', '/appraisal-presets', '/appraisal-presets/defaults'])
+const ttlKey = (path: string) => path.split('?')[0]
+function invalidateGetCache(path: string): void {
+  const base = ttlKey(path)
+  for (const k of [...TTL_GET.keys()]) if (k.endsWith(base)) TTL_GET.delete(k)
+}
+
 async function fetchApi<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const method = options.method ?? 'GET'
+  if (method !== 'GET') {
+    invalidateGetCache(path)
+    return fetchApiInner<T>(path, options)
+  }
+  const ck = `${getImpersonatedUserId() ?? ''}:${ttlKey(path)}`
+  if (TTL_PATHS.has(ttlKey(path))) {
+    const hit = TTL_GET.get(ck)
+    if (hit && Date.now() - hit.at < TTL_MS) return hit.data as T
+  }
+  const key = `${getImpersonatedUserId() ?? ''}:${path}`
+  const existing = inflightGet.get(key)
+  if (existing) return existing as Promise<T>
+  const p = fetchApiInner<T>(path, options).then((data) => {
+    if (TTL_PATHS.has(ttlKey(path))) TTL_GET.set(ck, { at: Date.now(), data })
+    return data
+  }).finally(() => {
+    if (inflightGet.get(key) === p) inflightGet.delete(key)
+  })
+  inflightGet.set(key, p)
+  return p
+}
+
+async function fetchApiInner<T>(path: string, options: RequestInit): Promise<T> {
   // Inject impersonation header if admin is impersonating a user
   const impersonateId = getImpersonatedUserId()
   const impersonateHeaders: Record<string, string> = impersonateId
