@@ -46,6 +46,8 @@ export interface AnalysisPageLayoutProps {
   rerunning?: boolean
   /** Fire an offer workflow — returns the outcome the hero flashes */
   onOfferWorkflow?: (workflow: 'prep_offer' | 'no_margin', offerPrice?: number) => Promise<{ ok: boolean }>
+  /** Prior session disposition — hero renders a dated warning chip */
+  disposition?: { workflow: 'prep_offer' | 'no_margin'; at: number } | null
 }
 
 export function AnalysisPageLayout({
@@ -62,6 +64,7 @@ export function AnalysisPageLayout({
   onRerun,
   rerunning,
   onOfferWorkflow,
+  disposition,
 }: AnalysisPageLayoutProps) {
   const { subject, displayComps: comps, compOverride } = useEvaluation()
   const selectedCompKeys = compOverride?.selectedCompKeys
@@ -83,6 +86,7 @@ export function AnalysisPageLayout({
     onRerun,
     rerunning,
     onOfferWorkflow,
+    disposition,
   }
 
   const loadingSkeleton = (

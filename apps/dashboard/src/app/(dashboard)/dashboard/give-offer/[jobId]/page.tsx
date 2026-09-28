@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation'
 import { ChevronLeft, ChevronRight, Timer, ListFilter } from 'lucide-react'
 import DashboardReportPage from '../../reports/[jobId]/page'
 import { getOfferQueue, type PipelineItem } from '../actions'
-import { decidedIds, jobIdForItem, parseQueuedAt, sortedQueue, formatWait, WAIT_FILTER_LABELS, type WaitFilter, getCachedQueue, setCachedQueue, prefetchReport, recordDecision, setLastViewed } from '../queue'
+import { decidedIds, jobIdForItem, parseQueuedAt, sortedQueue, formatWait, WAIT_FILTER_LABELS, type WaitFilter, getCachedQueue, setCachedQueue, prefetchReport, recordDecision, setLastViewed, decisionFor } from '../queue'
 import { useSidebar } from '@/components/SidebarProvider'
 import { cn } from '@/lib/utils'
 
@@ -65,6 +65,14 @@ export default function GiveOfferReportPage({ params }: { params: Promise<{ jobI
   )
   const index = items.findIndex((i) => jobIdForItem(i) === jobId)
   const current = index >= 0 ? items[index] : null
+  // Session disposition — when this property was already decided this
+  // session the hero shows a dated warning chip instead of pretending
+  // it's untouched. Read post-mount: sessionStorage is client-only and
+  // would diverge between SSR and hydration.
+  const [disposition, setDisposition] = useState<{ workflow: 'prep_offer' | 'no_margin'; at: number } | null>(null)
+  useEffect(() => {
+    setDisposition(decisionFor(jobId, current?.leadId))
+  }, [jobId, current?.leadId])
 
   const goTo = useCallback(
     (item: PipelineItem | undefined) => {
@@ -200,6 +208,7 @@ export default function GiveOfferReportPage({ params }: { params: Promise<{ jobI
         /** Live realtor notes riding the queue item — shown while the
          *  persisted report snapshot (sellerNotes) is absent. */
         notes: current?.conditionNotes ?? null,
+        disposition,
       }}
     />
       {/* Disposition transition veil — opaque page-colored cover that

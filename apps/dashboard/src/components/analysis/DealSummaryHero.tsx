@@ -18,9 +18,11 @@ interface DealSummaryHeroProps {
   /** Fire an offer workflow — returns the outcome the header flashes.
    *  prep_offer accepts an offerPrice override (defaults to wholesale). */
   onOfferWorkflow?: (workflow: 'prep_offer' | 'no_margin', offerPrice?: number) => Promise<{ ok: boolean }>
+  /** Prior disposition this session — renders a dated warning chip */
+  disposition?: { workflow: 'prep_offer' | 'no_margin'; at: number } | null
 }
 
-export function DealSummaryHero({ valuation, isRecalculated, onOpenSettings, onRerun, rerunning, onOfferWorkflow }: DealSummaryHeroProps) {
+export function DealSummaryHero({ valuation, isRecalculated, onOpenSettings, onRerun, rerunning, onOfferWorkflow, disposition }: DealSummaryHeroProps) {
 
   // Offer-button state machine: idle (buttons) → busy → done (result
   // chip) → back to idle. Everything crossfades via animate-in/fade-in.
@@ -55,6 +57,17 @@ export function DealSummaryHero({ valuation, isRecalculated, onOpenSettings, onR
           <span className="text-[10px] font-semibold text-foreground-tertiary uppercase tracking-wider">Valuation</span>
           {isRecalculated && (
             <span className="text-[8px] font-medium px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-500">Recalculated</span>
+          )}
+          {disposition && (
+            <span
+              className={cn(
+                'text-[8px] font-medium px-1.5 py-0.5 rounded',
+                disposition.workflow === 'prep_offer' ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400' : 'bg-amber-500/20 text-amber-600 dark:text-amber-400',
+              )}
+              title="This property was already dispositioned this session"
+            >
+              {disposition.workflow === 'prep_offer' ? 'Offer prepped' : 'No margin'} · {new Date(disposition.at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} {new Date(disposition.at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+            </span>
           )}
           {valuation.confidence && (
             <span

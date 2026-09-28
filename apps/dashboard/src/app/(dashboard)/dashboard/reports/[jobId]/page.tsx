@@ -165,6 +165,8 @@ export default function DashboardReportPage({ params, queue }: {
     /** Live realtor notes from the queue item — fallback until the report
      *  carries its own `sellerNotes` snapshot. */
     notes?: string[] | null
+    /** Prior session disposition — hero shows a dated warning chip */
+    disposition?: { workflow: 'prep_offer' | 'no_margin'; at: number } | null
   }
 }) {
   const { jobId } = use(params)
@@ -841,6 +843,7 @@ export default function DashboardReportPage({ params, queue }: {
           rerunning={refreshing}
           onOfferWorkflow={handleOfferWorkflow}
           notesSlot={realtorNotesCard}
+          disposition={queue?.disposition ?? null}
         />
 
       {/* Evaluation Settings Sheet */}
