@@ -123,3 +123,49 @@ export async function getOfferHistory(): Promise<{ ok: boolean; dispositions: Se
   const data = (await res.json()) as { dispositions?: ServerDisposition[] }
   return { ok: true, dispositions: data.dispositions ?? [] }
 }
+
+export interface ActivityRowLite {
+  leadId: string | null
+}
+
+/** One authenticated view request for the Offers surface — session + secret
+ *  resolved once, then queue + disposition history + hot-lead activity read
+ *  concurrently. Replaces three separate server-action POSTs on every
+ *  landing/item mount. */
+export async function getOffersView(): Promise<{
+  ok: boolean
+  items: PipelineItem[]
+  dispositions: ServerDisposition[]
+  hotIds: string[]
+  _perf: { authMs: number; readsMs: number; totalMs: number }
+}> {
+  const t0 = Date.now()
+  const session = await getSession()
+  const secret = session?.user ? await getDashboardSecret() : null
+  const authMs = Date.now() - t0
+  if (!session?.user || !secret) {
+    return { ok: false, items: [], dispositions: [], hotIds: [], _perf: { authMs, readsMs: 0, totalMs: authMs } }
+  }
+  const headers = { 'X-Dashboard-User-Id': session.user.id, 'X-Dashboard-Secret': secret }
+  const api = process.env.NEXT_PUBLIC_API_URL!
+  const t1 = Date.now()
+  const [queueRes, histRes, hotRes] = await Promise.all([
+    fetch(`${api}/v1/pipeline/queue`, { headers }).catch(() => null),
+    fetch(`${api}/v1/offers/history`, { headers }).catch(() => null),
+    fetch(`${api}/v1/activity?kind=hot_lead&limit=500`, { headers }).catch(() => null),
+  ])
+  const readsMs = Date.now() - t1
+  const [queueData, histData, hotData] = await Promise.all([
+    queueRes?.ok ? queueRes.json() as Promise<{ items?: PipelineItem[]; queue?: { items?: PipelineItem[] } }> : null,
+    histRes?.ok ? histRes.json() as Promise<{ dispositions?: ServerDisposition[] }> : null,
+    hotRes?.ok ? hotRes.json() as Promise<{ rows?: ActivityRowLite[] }> : null,
+  ])
+  const q = queueData?.queue ?? queueData
+  return {
+    ok: !!queueRes?.ok,
+    items: q?.items ?? [],
+    dispositions: histData?.dispositions ?? [],
+    hotIds: (hotData?.rows ?? []).map((r) => r.leadId).filter((l): l is string => !!l),
+    _perf: { authMs, readsMs, totalMs: Date.now() - t0 },
+  }
+}

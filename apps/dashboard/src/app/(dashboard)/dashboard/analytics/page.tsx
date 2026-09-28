@@ -5,18 +5,25 @@ import Link from 'next/link'
 import { BarChart3, Inbox } from 'lucide-react'
 import { FlowGlyph } from '@/components/ui/Logo'
 import {
-  getActivityRows,
-  getActivitySummary,
-  getEngineMetrics,
+  getAnalyticsView,
   type ActivityRow,
   type EngineMetrics,
 } from './actions'
-import { getOfferQueue, type PipelineItem } from '../give-offer/actions'
+import type { PipelineItem } from '../give-offer/actions'
 import { jobIdForItem } from '../give-offer/queue'
 import { cn } from '@/lib/utils'
 
 const ROW_POLL_MS = 10_000
-const METRICS_POLL_MS = 60_000
+
+// Share one in-flight view request across mounts/StrictMode remounts —
+// the action itself runs once per POST otherwise.
+let viewInflight: ReturnType<typeof getAnalyticsView> | null = null
+function analyticsView(since: string | undefined): ReturnType<typeof getAnalyticsView> {
+  if (viewInflight) return viewInflight
+  const p = getAnalyticsView(since).finally(() => { if (viewInflight === p) viewInflight = null })
+  viewInflight = p
+  return p
+}
 
 type WindowKey = 'today' | '24h' | '7d' | '30d' | 'all'
 const WINDOWS: { key: WindowKey; label: string }[] = [
@@ -153,30 +160,19 @@ export default function AnalyticsPage() {
 
   const since = useMemo(() => sinceFor(win), [win])
 
-  // Engine funnel metrics — authoritative headline counts (60s).
+  // One composite action per poll — a single server-action POST resolves
+  // metrics + activity summary + rows + queue concurrently (previously
+  // four separate POSTs each re-validating the session).
   useEffect(() => {
     let cancelled = false
     const load = () =>
-      getEngineMetrics(since).then((r) => {
-        if (!cancelled && r.ok) setMetrics(r.metrics)
+      analyticsView(since).then((r) => {
+        if (cancelled || !r.ok) return
+        setMetrics(r.metrics)
+        setCounts(r.counts)
+        setRows(r.rows)
+        setQueue(r.queueItems)
       })
-    load()
-    const t = setInterval(load, METRICS_POLL_MS)
-    return () => {
-      cancelled = true
-      clearInterval(t)
-    }
-  }, [since])
-
-  // Our activity store — all rows for the window; tiles filter client-side (10s).
-  useEffect(() => {
-    let cancelled = false
-    const load = async () => {
-      const s = await getActivitySummary(since)
-      if (!cancelled && s.ok) setCounts(s.counts)
-      const r = await getActivityRows([], since)
-      if (!cancelled && r.ok) setRows(r.rows)
-    }
     load()
     const t = setInterval(load, ROW_POLL_MS)
     return () => {
@@ -184,21 +180,6 @@ export default function AnalyticsPage() {
       clearInterval(t)
     }
   }, [since])
-
-  // Queue items — map leadId → give-offer jobId for report links (60s).
-  useEffect(() => {
-    let cancelled = false
-    const load = () =>
-      getOfferQueue().then((q) => {
-        if (!cancelled && q.ok) setQueue(q.items)
-      })
-    load()
-    const t = setInterval(load, METRICS_POLL_MS)
-    return () => {
-      cancelled = true
-      clearInterval(t)
-    }
-  }, [])
 
   const jobByLead = useMemo(() => {
     const m = new Map<string, string>()

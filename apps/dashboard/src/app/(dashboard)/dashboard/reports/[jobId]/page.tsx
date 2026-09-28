@@ -21,6 +21,7 @@ import { cn } from '@/lib/utils'
 import { getReportHistory, type ReportHistoryEntry } from '@/lib/client-api'
 import { useAutoSave } from '@/hooks/use-auto-save'
 import { getSavedReport, runCompSelection, type OfferWorkflow } from '@/lib/client-api'
+import { clearOffersViewCache } from '../../give-offer/queue'
 import { dispatchOfferPrep, declineOffer } from '../../analyze/actions'
 import { takeReportPrefetch } from '../../give-offer/queue'
 import { useAnalysisEvaluation } from '@/hooks/use-analysis-evaluation'
@@ -84,6 +85,7 @@ function QueueFallback({ queue }: {
         label: workflow === 'prep_offer' ? (res.idempotent ? 'Already dispatched' : 'Offer prep dispatched') : 'Decline recorded',
       })
       queue.onDecided(workflow)
+      clearOffersViewCache()
     } catch {
       setResult({ ok: false, label: 'Dispatch failed' })
     } finally {
@@ -518,6 +520,9 @@ export default function DashboardReportPage({ params, queue }: {
           jobId,
         })
       : await declineOffer({ leadId: analyzeData?.leadId ?? undefined, propertyAddress: report.address, jobId, workflow })
+    // Disposition changed server-side history — drop the cached offers
+    // view so the next dashboard mount refetches instead of serving stale.
+    clearOffersViewCache()
     if (res.ok) queue?.onDecided(workflow)
     else queue?.onFailed?.(workflow)
     return { ok: res.ok }

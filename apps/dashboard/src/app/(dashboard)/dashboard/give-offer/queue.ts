@@ -1,4 +1,4 @@
-import { getOfferHistory, type PipelineItem, type ServerDisposition } from './actions'
+import { getOffersView, type PipelineItem, type ServerDisposition } from './actions'
 import type { OfferWorkflow } from '@/lib/client-api'
 
 export type { OfferWorkflow }
@@ -237,47 +237,43 @@ export function consumeNavVeil(): boolean {
 // The landing page and item view both need disposition history + the hot-lead
 // set — navigating between them shouldn't refetch what just arrived.
 
-import { getActivityRows } from '../analytics/actions'
 
 export type { ServerDisposition }
 
 const REMOTE_CACHE_TTL = 30_000
 
-let dispCache: { at: number; data: ServerDisposition[] } | null = null
-let dispInflight: Promise<ServerDisposition[]> | null = null
+export interface OffersView {
+  items: PipelineItem[]
+  dispositions: ServerDisposition[]
+  hotIds: Set<string>
+}
 
-export function getOfferHistoryCached(): Promise<ServerDisposition[]> {
-  if (dispCache && Date.now() - dispCache.at < REMOTE_CACHE_TTL) {
-    return Promise.resolve(dispCache.data)
+let viewCache: { at: number; data: OffersView } | null = null
+let viewInflight: Promise<OffersView> | null = null
+
+/** Module-scoped cache of the composite offers view — one server action
+ *  feeds queue + history + hot-leads; TTL 30s, shared in-flight promise so
+ *  concurrent mounts can't fan out. After a disposition dispatch the caller
+ *  should invalidate via clearOffersViewCache() so the next mount refetches. */
+export function getOffersViewCached(): Promise<OffersView> {
+  if (viewCache && Date.now() - viewCache.at < REMOTE_CACHE_TTL) {
+    return Promise.resolve(viewCache.data)
   }
-  if (dispInflight) return dispInflight
-  const p: Promise<ServerDisposition[]> = getOfferHistory()
+  if (viewInflight) return viewInflight
+  const p: Promise<OffersView> = getOffersView()
     .then((r) => {
-      if (r.ok) dispCache = { at: Date.now(), data: r.dispositions }
-      return dispCache?.data ?? []
+      const data: OffersView = { items: r.items, dispositions: r.dispositions, hotIds: new Set(r.hotIds) }
+      if (r.ok) viewCache = { at: Date.now(), data }
+      return viewCache?.data ?? data
     })
-    .catch(() => dispCache?.data ?? [])
-  dispInflight = p
-  void p.finally(() => { if (dispInflight === p) dispInflight = null })
+    .catch(() => viewCache?.data ?? { items: [], dispositions: [], hotIds: new Set<string>() })
+  viewInflight = p
+  void p.finally(() => { if (viewInflight === p) viewInflight = null })
   return p
 }
 
-let hotCache: { at: number; ids: Set<string> } | null = null
-let hotInflight: Promise<Set<string>> | null = null
-
-export function getHotLeadIdsCached(): Promise<Set<string>> {
-  if (hotCache && Date.now() - hotCache.at < REMOTE_CACHE_TTL) {
-    return Promise.resolve(hotCache.ids)
-  }
-  if (hotInflight) return hotInflight
-  const p: Promise<Set<string>> = getActivityRows(['hot_lead'])
-    .then((r) => {
-      const ids = new Set<string>(r.rows.map((row) => row.leadId).filter((l): l is string => !!l))
-      if (r.ok) hotCache = { at: Date.now(), ids }
-      return ids
-    })
-    .catch(() => hotCache?.ids ?? new Set<string>())
-  hotInflight = p
-  void p.finally(() => { if (hotInflight === p) hotInflight = null })
-  return p
+/** Invalidate the composite view cache — call after a disposition dispatch
+ *  so the next mount/report picks up the new history row. */
+export function clearOffersViewCache(): void {
+  viewCache = null
 }

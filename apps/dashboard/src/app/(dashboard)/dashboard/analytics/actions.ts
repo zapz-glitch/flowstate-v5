@@ -98,3 +98,64 @@ export async function getActivityRows(kinds: string[], since?: string, until?: s
   const data = (await res.json()) as { rows?: ActivityRow[] }
   return { ok: true, rows: data.rows ?? [] }
 }
+
+/** One authenticated view request for the Analytics page — session + secret
+ *  resolved once, then the four backing reads run concurrently. Each call
+ *  to a separate server action used to repeat getSession() + dashboard-auth
+ *  verification per POST; this collapses the mount to a single POST. */
+export async function getAnalyticsView(since?: string): Promise<{
+  ok: boolean
+  metrics: EngineMetrics | null
+  counts: Record<string, number>
+  rows: ActivityRow[]
+  queueItems: import('../give-offer/actions').PipelineItem[]
+  /** Timing breakdown for perf auditing — auth vs internal API reads. */
+  _perf: { authMs: number; readsMs: number; totalMs: number }
+}> {
+  const t0 = Date.now()
+  const session = await getSession()
+  const secret = session?.user ? await getDashboardSecret() : null
+  const authMs = Date.now() - t0
+  if (!session?.user || !secret) {
+    return { ok: false, metrics: null, counts: {}, rows: [], queueItems: [], _perf: { authMs, readsMs: 0, totalMs: authMs } }
+  }
+  const headers = { 'X-Dashboard-User-Id': session.user.id, 'X-Dashboard-Secret': secret }
+  const api = process.env.NEXT_PUBLIC_API_URL!
+  const qs = since ? `?since=${encodeURIComponent(since)}` : ''
+  const t1 = Date.now()
+  const [metricsRes, summaryRes, rowsRes, queueRes] = await Promise.all([
+    fetch(`${api}/v1/pipeline/metrics${qs}`, { headers }).catch(() => null),
+    fetch(`${api}/v1/activity/summary${qs}`, { headers }).catch(() => null),
+    fetch(`${api}/v1/activity?limit=1000${since ? `&since=${encodeURIComponent(since)}` : ''}`, { headers }).catch(() => null),
+    fetch(`${api}/v1/pipeline/queue`, { headers }).catch(() => null),
+  ])
+  const readsMs = Date.now() - t1
+  const [metricsData, summaryData, rowsData, queueData] = await Promise.all([
+    metricsRes?.ok ? metricsRes.json() as Promise<{ metrics?: Partial<EngineMetrics>; queue?: { avgPrepMinutes?: number | null; count?: number; items?: unknown[] } }> : null,
+    summaryRes?.ok ? summaryRes.json() as Promise<{ counts?: Record<string, number> }> : null,
+    rowsRes?.ok ? rowsRes.json() as Promise<{ rows?: ActivityRow[] }> : null,
+    queueRes?.ok ? queueRes.json() as Promise<{ items?: import('../give-offer/actions').PipelineItem[] }> : null,
+  ])
+  const m = metricsData?.metrics
+  const metrics: EngineMetrics | null = m ? {
+    newReachouts: m.newReachouts ?? 0,
+    responses: m.responses ?? 0,
+    responseRatePct: m.responseRatePct ?? null,
+    reactivations: m.reactivations ?? 0,
+    sentToUnderwriting: m.sentToUnderwriting ?? 0,
+    offersPrepped: m.offersPrepped ?? 0,
+    offersSent: m.offersSent ?? 0,
+    hotLeads: m.hotLeads ?? 0,
+    evalsFailed: m.evalsFailed ?? 0,
+    avgPrepMinutes: metricsData?.queue?.avgPrepMinutes ?? null,
+    queueDepth: metricsData?.queue?.count ?? metricsData?.queue?.items?.length ?? 0,
+  } : null
+  return {
+    ok: !!(metricsRes?.ok || summaryRes?.ok),
+    metrics,
+    counts: summaryData?.counts ?? {},
+    rows: rowsData?.rows ?? [],
+    queueItems: queueData?.items ?? [],
+    _perf: { authMs, readsMs, totalMs: Date.now() - t0 },
+  }
+}
