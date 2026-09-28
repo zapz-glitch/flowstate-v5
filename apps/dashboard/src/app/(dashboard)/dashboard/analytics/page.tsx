@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { BarChart3, ExternalLink, Inbox } from 'lucide-react'
 import {
@@ -17,15 +17,17 @@ import { cn } from '@/lib/utils'
 const ROW_POLL_MS = 10_000
 const METRICS_POLL_MS = 60_000
 
-type WindowKey = 'today' | '24h' | '7d' | '30d'
+type WindowKey = 'today' | '24h' | '7d' | '30d' | 'all'
 const WINDOWS: { key: WindowKey; label: string }[] = [
   { key: 'today', label: 'Today' },
   { key: '24h', label: '24h' },
   { key: '7d', label: '7d' },
   { key: '30d', label: '30d' },
+  { key: 'all', label: 'All' },
 ]
 
-function sinceFor(w: WindowKey): string {
+function sinceFor(w: WindowKey): string | undefined {
+  if (w === 'all') return undefined
   const d = new Date()
   if (w === 'today') {
     d.setHours(0, 0, 0, 0)
@@ -42,19 +44,22 @@ interface Tile {
   kinds: string[]
   /** Engine fallback metric when no activity rows exist yet */
   engine?: keyof EngineMetrics
+  /** Historical events arrive as stage_move rows — value "From->To";
+   *  this matches rows whose target stage is this label */
+  stageTarget?: string
 }
 
 const TILES: Tile[] = [
   { key: 'reachouts', label: 'Reach-outs', kinds: ['reachout', 'outbound_msg'], engine: 'newReachouts' },
   { key: 'responses', label: 'Responses', kinds: ['response', 'inbound_msg'], engine: 'responses' },
   { key: 'reactivated', label: 'Reactivated', kinds: ['reactivation'], engine: 'reactivations' },
-  { key: 'underwrite', label: 'To underwriting', kinds: ['sent_to_underwriting'], engine: 'sentToUnderwriting' },
-  { key: 'prepped', label: 'Offers prepped', kinds: ['offer_prepped'], engine: 'offersPrepped' },
-  { key: 'sent', label: 'Offers sent', kinds: ['offer_sent'], engine: 'offersSent' },
+  { key: 'underwrite', label: 'To underwriting', kinds: ['sent_to_underwriting'], stageTarget: 'Underwriting', engine: 'sentToUnderwriting' },
+  { key: 'prepped', label: 'Offers prepped', kinds: ['offer_prepped'], stageTarget: 'Give offer', engine: 'offersPrepped' },
+  { key: 'sent', label: 'Offers sent', kinds: ['offer_sent'], stageTarget: 'Offer sent', engine: 'offersSent' },
   { key: 'hot', label: 'Hot leads', kinds: ['hot_lead'], engine: 'hotLeads' },
   { key: 'evalfailed', label: 'Evals failed', kinds: ['eval_failed'], engine: 'evalsFailed' },
-  { key: 'contract', label: 'Under contract', kinds: ['under_contract'] },
-  { key: 'assigned', label: 'Assigned', kinds: ['assigned'] },
+  { key: 'contract', label: 'Under contract', kinds: ['under_contract'], stageTarget: 'Under contract' },
+  { key: 'assigned', label: 'Assigned', kinds: ['assigned'], stageTarget: 'Assigned' },
 ]
 
 const KIND_LABELS: Record<string, string> = {
@@ -96,6 +101,37 @@ function kindLabel(k: string): string {
   return KIND_LABELS[k] ?? k.replace(/_/g, ' ')
 }
 
+function metaOf(meta: string | null): Record<string, unknown> | null {
+  if (!meta) return null
+  try {
+    const m = JSON.parse(meta) as Record<string, unknown>
+    return m && typeof m === 'object' ? m : null
+  } catch {
+    return null
+  }
+}
+
+function metaAddr(meta: string | null): string | null {
+  const a = metaOf(meta)?.addr
+  return typeof a === 'string' && a ? a : null
+}
+
+/** Human-readable "what happened" for a row — stage targets parsed from
+ *  stage_move values ("From->To"), stat_* ids are intake bookkeeping. */
+function stepLabel(r: ActivityRow): string {
+  if (r.kind === 'stage_move' && r.value) {
+    if (r.value.includes('->')) {
+      const target = r.value.split('->').pop()!.trim()
+      return `→ ${target}`
+    }
+    if (r.value.startsWith('stat_')) return 'Status update'
+    return `→ ${r.value}`
+  }
+  if (r.kind === 'convo' && r.value) return `Conversation: ${r.value}`
+  if (r.kind === 'human_attention' && r.value) return r.value.slice(0, 80)
+  return kindLabel(r.kind)
+}
+
 function fmtTime(iso: string): string {
   const d = new Date(iso)
   return d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
@@ -113,9 +149,6 @@ export default function AnalyticsPage() {
   const [queue, setQueue] = useState<PipelineItem[]>([])
   const [selected, setSelected] = useState<Tile | null>(null)
   const [rows, setRows] = useState<ActivityRow[] | null>(null)
-  const [rowsLoading, setRowsLoading] = useState(false)
-  const selectedRef = useRef<Tile | null>(null)
-  selectedRef.current = selected
 
   const since = useMemo(() => sinceFor(win), [win])
 
@@ -134,15 +167,13 @@ export default function AnalyticsPage() {
     }
   }, [since])
 
-  // Our activity store — tile counts + drill-down rows (10s).
+  // Our activity store — all rows for the window; tiles filter client-side (10s).
   useEffect(() => {
     let cancelled = false
     const load = async () => {
       const s = await getActivitySummary(since)
-      if (cancelled || !s.ok) return
-      setCounts(s.counts)
-      const sel = selectedRef.current
-      const r = await getActivityRows(sel ? sel.kinds : [], since)
+      if (!cancelled && s.ok) setCounts(s.counts)
+      const r = await getActivityRows([], since)
       if (!cancelled && r.ok) setRows(r.rows)
     }
     load()
@@ -177,6 +208,30 @@ export default function AnalyticsPage() {
     return m
   }, [queue])
 
+  const queueAddrByLead = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const i of queue) if (i.leadId && i.address) m.set(i.leadId, i.address)
+    return m
+  }, [queue])
+
+  // Resolve the best property address per lead: event's propertyAddress
+  // or meta.addr first (any event for the lead), queue address as fallback.
+  const addrByLead = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const r of rows ?? []) {
+      if (!r.leadId || m.has(r.leadId)) continue
+      const addr = r.propertyAddress ?? metaAddr(r.meta)
+      if (addr) m.set(r.leadId, addr)
+    }
+    for (const r of rows ?? []) {
+      if (r.leadId && !m.has(r.leadId)) {
+        const addr = queueAddrByLead.get(r.leadId)
+        if (addr) m.set(r.leadId, addr)
+      }
+    }
+    return m
+  }, [rows, queueAddrByLead])
+
   const hasActivity = useMemo(() => !!counts && Object.values(counts).some((n) => n > 0), [counts])
 
   // Engine funnel metrics are authoritative for the headline counts
@@ -204,15 +259,39 @@ export default function AnalyticsPage() {
     return null
   }, [counts, hasActivity, metrics])
 
-  const select = (t: Tile) => {
-    const next = selected?.key === t.key ? null : t
-    setSelected(next)
-    setRowsLoading(true)
-    getActivityRows(next ? next.kinds : [], since).then((r) => {
-      if (r.ok) setRows(r.rows)
-      setRowsLoading(false)
+  const select = (t: Tile) => setSelected(selected?.key === t.key ? null : t)
+
+  // msg_activity is the raw per-message timestamp feed — duplicates the
+  // msg rows (same acti_ id) and is excluded from display.
+  const displayRows = useMemo(
+    () => (rows ?? []).filter((r) => r.kind !== 'msg_activity'),
+    [rows],
+  )
+
+  // Tile drill-down: matching kinds + stage_move rows landing on the
+  // tile's target stage.
+  const drillRows = useMemo(() => {
+    if (!selected) return null
+    return displayRows.filter((r) => {
+      if (selected.kinds.includes(r.kind)) return true
+      if (selected.stageTarget && r.kind === 'stage_move') {
+        return (r.value ?? '').split('->').pop()?.trim() === selected.stageTarget
+      }
+      return false
     })
-  }
+  }, [displayRows, selected])
+
+  // Default feed: one row per property — address + the last step that
+  // occurred. Keyed by leadId (deduped by address when no leadId).
+  const latestByProperty = useMemo(() => {
+    const map = new Map<string, ActivityRow>()
+    for (const r of displayRows) {
+      const key = r.leadId ?? r.propertyAddress ?? r.id
+      const cur = map.get(key)
+      if (!cur || r.ts > cur.ts) map.set(key, r)
+    }
+    return [...map.values()].sort((a, b) => b.ts.localeCompare(a.ts))
+  }, [displayRows])
 
   return (
     <div className="playground-bg -m-4 sm:-m-6 lg:-m-8 min-h-screen lg:h-[100dvh] flex flex-col lg:overflow-hidden">
@@ -281,54 +360,60 @@ export default function AnalyticsPage() {
             </div>
           </div>
 
-          {/* Drill-down — recent activity or the selected tile's rows */}
+          {/* Drill-down — per-property latest step, or the selected tile's events */}
           <div className="border border-border/60 bg-background shadow-sm">
             <div className="px-4 py-2.5 border-b border-border/50 flex items-center justify-between">
               <div className="text-xs font-medium text-foreground-secondary">
-                {selected ? `${selected.label} — event detail` : 'Recent activity'}
+                {selected ? `${selected.label} — event detail` : 'Latest activity by property'}
               </div>
               <div className="text-[10px] text-foreground-tertiary">
                 {WINDOWS.find((w) => w.key === win)?.label}
-                {rows ? ` · ${rows.length} event${rows.length === 1 ? '' : 's'}` : ''}
+                {rows
+                  ? selected
+                    ? ` · ${drillRows?.length ?? 0} events`
+                    : ` · ${latestByProperty.length} properties`
+                  : ''}
               </div>
             </div>
             <div className="divide-y divide-border/50">
-              {rowsLoading ? (
+              {rows == null ? (
                 <div className="px-4 py-8 text-center text-xs text-foreground-tertiary">Loading…</div>
-              ) : rows && rows.length === 0 ? (
+              ) : (selected ? (drillRows ?? []) : latestByProperty).length === 0 ? (
                 <div className="px-4 py-8 flex flex-col items-center gap-2 text-center">
                   <Inbox className="w-4 h-4 text-foreground-tertiary" />
                   <div className="text-xs text-foreground-tertiary">
-                    {hasActivity || counts
-                      ? `No ${selected ? selected.label.toLowerCase() : ''} events in this window yet.`
-                      : 'No activity ingested yet — the engine starts pushing once the ingest endpoint is wired.'}
+                    {rows.length > 0
+                      ? `No ${selected ? selected.label.toLowerCase() : ''} events captured in this window — detailed per-event capture began when push went live (Sep 28).`
+                      : 'No activity ingested in this window.'}
                   </div>
                 </div>
-              ) : rows ? (
-                rows.map((r) => {
+              ) : (
+                (selected ? (drillRows ?? []) : latestByProperty).map((r) => {
                   const jobId = r.leadId ? jobByLead.get(r.leadId) : undefined
-                  const meta = (() => {
-                    try {
-                      return r.meta ? (JSON.parse(r.meta) as Record<string, unknown>) : null
-                    } catch {
-                      return null
-                    }
-                  })()
-                  const stage = typeof meta?.stage === 'string' ? meta.stage : null
+                  const addr = r.propertyAddress ?? (r.leadId ? addrByLead.get(r.leadId) : null) ?? metaAddr(r.meta)
+                  const meta = metaOf(r.meta)
+                  const detail =
+                    r.kind === 'stage_move' && r.value?.includes('->')
+                      ? r.value
+                      : typeof meta?.reason === 'string'
+                        ? meta.reason
+                        : typeof meta?.note === 'string'
+                          ? meta.note
+                          : null
                   return (
                     <div key={r.id} className="px-4 py-2 flex items-center gap-3 text-xs">
                       <div className="w-20 flex-shrink-0 text-foreground-tertiary tabular-nums">
                         <div>{fmtTime(r.ts)}</div>
                         <div className="text-[9px]">{fmtDay(r.ts)}</div>
                       </div>
-                      <span className="px-1.5 py-0.5 rounded bg-secondary/60 text-foreground-secondary text-[10px] flex-shrink-0">
-                        {kindLabel(r.kind)}
-                      </span>
                       <div className="flex-1 min-w-0">
-                        <div className="truncate text-foreground-primary">
-                          {r.propertyAddress ?? r.value ?? '—'}
+                        <div className="truncate text-foreground-primary font-medium">
+                          {addr ?? '—'}
                         </div>
-                        {stage && <div className="text-[10px] text-foreground-tertiary">→ {stage}</div>}
+                        <div className="text-[10px] text-foreground-tertiary truncate" title={detail ?? undefined}>
+                          {stepLabel(r)}
+                          {detail && detail !== stepLabel(r) ? ` · ${detail.slice(0, 70)}` : ''}
+                        </div>
                       </div>
                       <div className="flex items-center gap-2 flex-shrink-0">
                         {jobId && (
@@ -354,8 +439,6 @@ export default function AnalyticsPage() {
                     </div>
                   )
                 })
-              ) : (
-                <div className="px-4 py-8 text-center text-xs text-foreground-tertiary">Loading…</div>
               )}
             </div>
           </div>

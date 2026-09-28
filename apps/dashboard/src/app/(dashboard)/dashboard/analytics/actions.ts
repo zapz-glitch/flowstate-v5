@@ -92,7 +92,7 @@ export async function getActivityRows(kinds: string[], since?: string, until?: s
   if (kinds.length) qs.set('kind', kinds.join(','))
   if (since) qs.set('since', since)
   if (until) qs.set('until', until)
-  qs.set('limit', '200')
+  qs.set('limit', '1000')
   const res = await internalFetch(`/v1/activity?${qs}`)
   if (!res?.ok) return { ok: false, rows: [] }
   const data = (await res.json()) as { rows?: ActivityRow[] }

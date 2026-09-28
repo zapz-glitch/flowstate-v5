@@ -27,7 +27,7 @@ interface ActivityEventBody {
   meta?: unknown
 }
 
-const MAX_ROWS = 500
+const MAX_ROWS = 2000
 
 function asString(v: unknown, max = 500): string | null {
   if (typeof v !== 'string') return null
