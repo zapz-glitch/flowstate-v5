@@ -9,7 +9,7 @@ interface LogoProps {
 }
 
 // Flow mark: house outline whose base dissolves into a wave — home + flow
-function FlowGlyph({ className }: { className?: string }) {
+export function FlowGlyph({ className }: { className?: string }) {
   return (
     <svg
       className={className}
