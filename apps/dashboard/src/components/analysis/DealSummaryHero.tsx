@@ -216,7 +216,7 @@ export function DealSummaryHero({ valuation, isRecalculated, onOpenSettings, onR
                 type="button"
                 onClick={() => onArvOverride?.(null)}
                 className="text-[8px] px-1 rounded bg-amber-500/20 text-amber-600 dark:text-amber-400 hover:bg-amber-500/30 no-print"
-                title="Manual ARV in force — click to restore the computed value"
+                title="Manual ARV in force (adjustments paused) — click to restore the computed value"
               >
                 manual ✕
               </button>
@@ -237,7 +237,7 @@ export function DealSummaryHero({ valuation, isRecalculated, onOpenSettings, onR
                 onArvOverride?.(Number.isFinite(v) && v > 0 ? Math.round(v) : null)
                 setArvEditing(false)
               }}
-              className="text-base font-bold tabular-nums text-primary mt-0.5 w-28 bg-transparent border-b border-primary outline-none"
+              className="text-base font-bold tabular-nums text-primary mt-0.5 w-28 bg-secondary/50 rounded-md px-2 py-0.5 border border-border/60 outline-none focus:border-primary focus:ring-1 focus:ring-primary/40 transition-colors"
             />
           ) : (
             <button

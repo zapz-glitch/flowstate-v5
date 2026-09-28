@@ -229,7 +229,9 @@ export function useAnalysisEvaluation({
       if (!hasOverride) return data.valuation
       const v0 = data.valuation
       const base0 = ov != null && ov > 0 ? ov : (v0.arv ?? 0)
-      const { delta, lines } = calculateArvAdjustmentDelta(base0, data.subject as unknown as Record<string, unknown>, settingsHook.settings)
+      const { delta, lines } = ov != null && ov > 0
+        ? { delta: 0, lines: [] as Array<{ id: string; label: string; amount: number; direction: 'deduction' | 'addition' }> }
+        : calculateArvAdjustmentDelta(base0, data.subject as unknown as Record<string, unknown>, settingsHook.settings)
       const newArv = Math.max(0, Math.round(base0 + delta))
       const ref = Math.max(1, v0.arv ?? 0)
       const closingPct = (v0.closingCosts ?? 0) / ref
