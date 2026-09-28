@@ -358,7 +358,9 @@ analyze.post('/', async (c) => {
         },
         searchOptions: body.searchOptions ?? {},
         enrichment: body.enrichment,
-        skipCache: body.skipCache,
+        // A refresh is definitionally a cache-bust: skipCache must apply
+        // even when the caller didn't pass the flag explicitly.
+        skipCache: body.skipCache || isRefresh,
         evalResultCacheKey: resultCacheKey,
         evalParams,
         llmEnabled:

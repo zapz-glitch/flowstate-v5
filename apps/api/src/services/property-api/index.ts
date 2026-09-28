@@ -177,6 +177,10 @@ export interface PropertyApiService {
   /** Update configuration */
   configure(config: Partial<PropertyApiConfig>): void;
 
+  /** Bypass KV caches for all subsequent calls on this instance —
+   *  set for explicit reruns so fresh comps/photos/list price come back. */
+  setSkipCache(skip: boolean): void;
+
   /** Search for a property by address */
   searchProperty(params: PropertySearchParams): Promise<PropertySearchResponse>;
   /** Get property details by ID */
@@ -298,6 +302,10 @@ class PropertyApi implements PropertyApiService {
   configure(config: Partial<PropertyApiConfig>): void {
     this.currentConfig = { ...this.currentConfig, ...config };
     console.log('PropertyAPI: Configuration updated', this.currentConfig);
+  }
+
+  setSkipCache(skip: boolean): void {
+    this._skipCache = skip;
   }
 
   getCallStats(): PropertyApiCallStats {

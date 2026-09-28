@@ -790,16 +790,6 @@ export default function DashboardReportPage({ params, queue }: {
                   isRecalculated,
                 }}
               />
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleRefresh}
-                disabled={refreshing}
-                className="gap-1.5"
-              >
-                <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin' : ''}`} />
-                {refreshing ? 'Refreshing...' : 'Refresh'}
-              </Button>
             </div>
             </div>
         </div>
@@ -828,14 +818,13 @@ export default function DashboardReportPage({ params, queue }: {
         </div>
       )}
 
-      {/* Refresh/AI status pill */}
-      {(refreshing || aiAnalyzing) && (
+      {/* AI comp-selection status pill — the rerun progress itself lives
+          on the hero's Rerun button, no mid-page indicator. */}
+      {aiAnalyzing && (
         <div className="flex justify-center py-1.5 flex-shrink-0 no-print">
           <div className="flex items-center gap-2 px-4 py-1.5 rounded-full bg-background border border-border shadow-sm">
             <Loader2 className="w-3.5 h-3.5 text-primary animate-spin" />
-            <span className="text-xs font-medium text-foreground-secondary">
-              {refreshing ? 'Refreshing data...' : 'AI selecting comps...'}
-            </span>
+            <span className="text-xs font-medium text-foreground-secondary">AI selecting comps...</span>
           </div>
         </div>
       )}
