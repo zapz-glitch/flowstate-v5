@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import {
+  Ban,
   FileSignature, Inbox, ListChecks, Flame, Play, RotateCcw, CircleSlash,
   ChevronRight, Copy, Check, Search, AlertTriangle,
 } from 'lucide-react'
@@ -30,13 +31,14 @@ import {
 const SORT_PREF_KEY = 'giveOffer.waitFilter'
 const POLL_MS = 10000
 
-type Cat = 'waiting' | 'hot' | 'prep_offer' | 'no_margin' | 'failed'
+type Cat = 'waiting' | 'hot' | 'prep_offer' | 'no_margin' | 'no_offer' | 'failed'
 
 const CAT_LABELS: Record<Cat, string> = {
   waiting: 'Waiting',
   hot: 'Hot leads',
   prep_offer: 'Prep offers',
   no_margin: 'No margin',
+  no_offer: 'No offer',
   failed: 'Failed',
 }
 
@@ -142,6 +144,7 @@ export default function GiveOfferPage() {
   const hotItems = useMemo(() => queueItems.filter((i) => hotIds.has(i.leadId)), [queueItems, hotIds])
   const prepDecided = useMemo(() => decided.filter((d) => d.ok && d.workflow === 'prep_offer'), [decided])
   const marginDecided = useMemo(() => decided.filter((d) => d.ok && d.workflow === 'no_margin'), [decided])
+  const noOfferDecided = useMemo(() => decided.filter((d) => d.ok && d.workflow === 'no_offer'), [decided])
   const failedDecided = useMemo(() => decided.filter((d) => !d.ok), [decided])
 
   const counts: Record<Cat, number> = {
@@ -149,6 +152,7 @@ export default function GiveOfferPage() {
     hot: hotItems.length,
     prep_offer: prepDecided.length,
     no_margin: marginDecided.length,
+    no_offer: noOfferDecided.length,
     failed: failedDecided.length,
   }
 
@@ -171,7 +175,9 @@ export default function GiveOfferPage() {
       jobId: d.jobId ?? jobIdByLead.get(d.leadId) ?? null,
       icon: d.workflow === 'prep_offer'
         ? <FileSignature size={13} className={d.ok ? 'text-emerald-500' : 'text-red-500'} />
-        : <CircleSlash size={13} className={d.ok ? 'text-foreground-tertiary' : 'text-red-500'} />,
+        : d.workflow === 'no_offer'
+          ? <Ban size={13} className={d.ok ? 'text-foreground-tertiary' : 'text-red-500'} />
+          : <CircleSlash size={13} className={d.ok ? 'text-foreground-tertiary' : 'text-red-500'} />,
     })
 
     if (q) {
@@ -187,6 +193,7 @@ export default function GiveOfferPage() {
       case 'hot': return hotItems.map((i) => queueRow(i, 'hot lead'))
       case 'prep_offer': return prepDecided.map(decidedRow)
       case 'no_margin': return marginDecided.map(decidedRow)
+      case 'no_offer': return noOfferDecided.map(decidedRow)
       case 'failed': return failedDecided.map(decidedRow)
     }
   }, [cat, query, queueItems, hotItems, prepDecided, marginDecided, failedDecided, decided, now])
@@ -200,9 +207,10 @@ export default function GiveOfferPage() {
     hot: <Flame size={14} />,
     prep_offer: <FileSignature size={14} />,
     no_margin: <CircleSlash size={14} />,
+    no_offer: <Ban size={14} />,
     failed: <AlertTriangle size={14} />,
   }
-  const visibleCats: Cat[] = (['waiting', 'hot', 'prep_offer', 'no_margin', 'failed'] as Cat[])
+  const visibleCats: Cat[] = (['waiting', 'hot', 'prep_offer', 'no_margin', 'no_offer', 'failed'] as Cat[])
     .filter((c) => c !== 'hot' || counts.hot > 0)
 
   return (

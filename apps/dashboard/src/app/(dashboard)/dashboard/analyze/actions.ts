@@ -1073,7 +1073,7 @@ export async function dispatchOfferPrep(input: OfferPrepInput): Promise<OfferDis
 }
 
 /** Record a no-margin decline for a lead (identified by leadId or address). */
-export async function declineOffer(input: { leadId?: string; propertyAddress?: string; jobId?: string }): Promise<OfferDispatchResult> {
+export async function declineOffer(input: { leadId?: string; propertyAddress?: string; jobId?: string; workflow?: 'no_margin' | 'no_offer' }): Promise<OfferDispatchResult> {
   const session = await getSession()
   if (!session?.user) return { ok: false, error: 'Not authenticated' }
   const dashboardSecret = await getDashboardSecret()

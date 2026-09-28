@@ -1,5 +1,6 @@
 'use client'
 
+import type { OfferWorkflow } from '@/lib/client-api'
 import { Loader2 } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useEvaluation } from '@/hooks/use-evaluation'
@@ -29,9 +30,9 @@ export interface AnalysisResultLayoutProps {
   /** True while a rerun is in flight */
   rerunning?: boolean
   /** Fire an offer workflow — returns the outcome the hero flashes */
-  onOfferWorkflow?: (workflow: 'prep_offer' | 'no_margin', offerPrice?: number) => Promise<{ ok: boolean }>
+  onOfferWorkflow?: (workflow: OfferWorkflow, offerPrice?: number) => Promise<{ ok: boolean }>
   /** Prior session disposition — hero renders a dated warning chip */
-  disposition?: { workflow: 'prep_offer' | 'no_margin'; at: number } | null
+  disposition?: { workflow: OfferWorkflow; at: number } | null
 }
 
 export function AnalysisResultLayout({

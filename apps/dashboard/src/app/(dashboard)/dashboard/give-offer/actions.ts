@@ -1,6 +1,7 @@
 'use server'
 
 import { getSession } from '@/lib/api'
+import type { OfferWorkflow } from '@/lib/client-api'
 import { getCloudflareEnv } from '@/lib/cloudflare'
 
 async function getDashboardSecret(): Promise<string> {
@@ -108,7 +109,7 @@ export interface ServerDisposition {
   /** Report jobId persisted at dispatch time — revisit links survive
    *  even after the lead leaves the queue. */
   jobId: string | null
-  workflow: 'prep_offer' | 'no_margin'
+  workflow: OfferWorkflow
   /** false = the dispatch attempt failed (durable Failed bucket). */
   ok: boolean
   at: string | null

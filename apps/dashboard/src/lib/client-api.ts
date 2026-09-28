@@ -1052,4 +1052,4 @@ export async function runCompSelection(params: {
 
 // ─── Offer Workflows ────────────────────────────────────────────────────────
 
-export type OfferWorkflow = 'prep_offer' | 'no_margin'
+export type OfferWorkflow = 'prep_offer' | 'no_margin' | 'no_offer'

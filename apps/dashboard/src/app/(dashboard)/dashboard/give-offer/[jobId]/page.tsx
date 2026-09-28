@@ -6,16 +6,16 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { ChevronLeft, ChevronRight, Timer, ListFilter } from 'lucide-react'
 import DashboardReportPage from '../../reports/[jobId]/page'
 import { getOfferQueue, type PipelineItem } from '../actions'
-import { jobIdForItem, parseQueuedAt, sortedQueue, formatWait, WAIT_FILTER_LABELS, type WaitFilter, getCachedQueue, setCachedQueue, prefetchReport, recordDecision, setLastViewed, decisionFor, getDecidedToday, mergeDispositions, decidedLeadSet, consumeNavVeil, getOfferHistoryCached, getHotLeadIdsCached, type DecidedEntry, type ServerDisposition } from '../queue'
+import { jobIdForItem, parseQueuedAt, sortedQueue, formatWait, WAIT_FILTER_LABELS, type WaitFilter, getCachedQueue, setCachedQueue, prefetchReport, recordDecision, setLastViewed, decisionFor, getDecidedToday, mergeDispositions, decidedLeadSet, consumeNavVeil, getOfferHistoryCached, getHotLeadIdsCached, type DecidedEntry, type ServerDisposition, type OfferWorkflow } from '../queue'
 import { useSidebar } from '@/components/SidebarProvider'
 import { cn } from '@/lib/utils'
 
 const POLL_MS = 5000
 const SORT_PREF_KEY = 'giveOffer.waitFilter'
 
-type Cat = 'waiting' | 'hot' | 'prep_offer' | 'no_margin' | 'failed'
+type Cat = 'waiting' | 'hot' | OfferWorkflow | 'failed'
 const QUEUE_CATS = new Set<Cat>(['waiting', 'hot'])
-const CATS = new Set<Cat>([...QUEUE_CATS, 'prep_offer', 'no_margin', 'failed'] as Cat[])
+const CATS = new Set<Cat>([...QUEUE_CATS, 'prep_offer', 'no_margin', 'no_offer', 'failed'] as Cat[])
 
 function useNow(): number {
   const [now, setNow] = useState(Date.now())
@@ -135,7 +135,7 @@ export default function GiveOfferReportPage({ params }: { params: Promise<{ jobI
   // session the hero shows a dated warning chip instead of pretending
   // it's untouched. Read post-mount: sessionStorage is client-only and
   // would diverge between SSR and hydration.
-  const [disposition, setDisposition] = useState<{ workflow: 'prep_offer' | 'no_margin'; at: number } | null>(null)
+  const [disposition, setDisposition] = useState<{ workflow: OfferWorkflow; at: number } | null>(null)
   useEffect(() => {
     const merged = decided.find((d) => d.ok && d.jobId === jobId)
       ?? decided.find((d) => d.ok && d.leadId === (current?.leadId ?? ''))
@@ -162,7 +162,7 @@ export default function GiveOfferReportPage({ params }: { params: Promise<{ jobI
     setLastViewed(jobId, current?.address ?? current?.displayName ?? null)
   }, [jobId, current?.address, current?.displayName])
 
-  const advance = useCallback((workflow: 'prep_offer' | 'no_margin') => {
+  const advance = useCallback((workflow: OfferWorkflow) => {
     if (current) recordDecision(current, workflow, jobId)
     const nextId = orderedJobIds[index + 1] ?? orderedJobIds[0]
     // Warm the next report during the outcome-chip window so the report
@@ -181,7 +181,7 @@ export default function GiveOfferReportPage({ params }: { params: Promise<{ jobI
 
   // A failed dispatch is recorded (Failed category) but never advances —
   // the operator stays on the report to retry.
-  const recordFailed = useCallback((workflow: 'prep_offer' | 'no_margin') => {
+  const recordFailed = useCallback((workflow: OfferWorkflow) => {
     if (current) recordDecision(current, workflow, jobId, false)
   }, [current, jobId])
 
