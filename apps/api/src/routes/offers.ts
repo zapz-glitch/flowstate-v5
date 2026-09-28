@@ -20,6 +20,7 @@ const DEVIN_MESSAGE_URL = (orgId: string) =>
 const ENGINE_BASE = 'https://conversation-intelligence.weareflowstate1.workers.dev'
 const ENGINE_OFFER_DRAFT_URL = `${ENGINE_BASE}/engine/offer-draft`
 const ENGINE_NO_OFFER_URL = `${ENGINE_BASE}/engine/no-offer`
+const ENGINE_NO_MARGIN_URL = `${ENGINE_BASE}/engine/no-margin`
 
 /** Notify the engine that a flowstate analyze job hit a terminal state —
  * it pulls the result from /v1/analyze/jobs/{jobId} itself. Fire-and-forget. */
@@ -262,12 +263,14 @@ offers.post('/decline', async (c) => {
   )
   const leadId = declineId.startsWith('lead_') ? declineId : null
 
-  // no_offer goes straight to the engine — it owns the stage move. When no
-  // leadId resolves or the engine call fails, the listener message remains
-  // the fallback channel.
+  // Both terminal workflows go straight to the engine — it owns the stage
+  // move and relays the typed event to the offers Devin session. The direct
+  // postDevinMessage to the conversations session is only a fallback — those
+  // posts return 200 but demonstrably never reach that session.
   let engineHandled = false
-  if (body.workflow === 'no_offer' && leadId && c.env.ENGINE_API_KEY) {
-    const resp = await fetch(ENGINE_NO_OFFER_URL, {
+  if (leadId && c.env.ENGINE_API_KEY) {
+    const url = body.workflow === 'no_offer' ? ENGINE_NO_OFFER_URL : ENGINE_NO_MARGIN_URL
+    const resp = await fetch(url, {
       method: 'POST',
       signal: AbortSignal.timeout(15000),
       headers: {
@@ -277,16 +280,10 @@ offers.post('/decline', async (c) => {
       body: JSON.stringify({ leadId, address: body.propertyAddress ?? null }),
     }).catch(() => null)
     engineHandled = !!resp?.ok
-    if (!engineHandled) console.error('[Offers] engine no-offer failed:', resp?.status)
+    if (!engineHandled) console.error(`[Offers] engine ${body.workflow} failed:`, resp?.status)
   }
 
-  c.executionCtx.waitUntil(
-    recordDisposition(c.env, {
-      key: declineId, leadId, address: body.propertyAddress ?? null, jobId: body.jobId,
-      workflow: body.workflow,
-      ok: body.workflow !== 'no_offer' || engineHandled || !c.env.ENGINE_API_KEY,
-    }),
-  )
+
 
   // If a pending offer draft exists for the lead, resolve it as declined —
   // fire-and-forget; the engine no-ops when there's no draft.
@@ -306,19 +303,32 @@ offers.post('/decline', async (c) => {
 
   // Stage move + cleanup go through the listener session — exact format
   // the engine has already processed live.
-  // Listener message — the no_margin channel, and the no_offer fallback
-  // when the engine endpoint couldn't take it (no leadId / call failed).
-  if (body.workflow !== 'no_offer' || !engineHandled) {
+  // Listener message — only as the fallback when the engine couldn't take
+  // it (no leadId resolved or the engine call failed). Awaited so the
+  // disposition row records the real outcome.
+  let listenerSent = false
+  if (!engineHandled) {
     const idPart = leadId ? `leadId=${leadId}` : `leadId=`
     const stage = body.workflow === 'no_offer' ? 'No offer' : 'No margin'
     const verb = body.workflow === 'no_offer' ? 'NO OFFER' : 'NO MARGIN'
-    c.executionCtx.waitUntil(
-      postDevinMessage(c.env, `${verb}: ${idPart} address=${body.propertyAddress ?? ''} — move to ${stage}`),
+    listenerSent = await postDevinMessage(
+      c.env, `${verb}: ${idPart} address=${body.propertyAddress ?? ''} — move to ${stage}`,
     )
   }
 
-  if (body.workflow === 'no_offer' && !engineHandled && leadId && c.env.ENGINE_API_KEY) {
-    return c.json({ ok: false, error: 'Engine no-offer failed — listener fallback dispatched' }, 502)
+  c.executionCtx.waitUntil(
+    recordDisposition(c.env, {
+      key: declineId, leadId, address: body.propertyAddress ?? null, jobId: body.jobId,
+      workflow: body.workflow,
+      // ok = reached the engine (offers session) or the listener fallback
+      // accepted it — failures land in the Failed bucket, not silently.
+      ok: engineHandled || listenerSent,
+    }),
+  )
+
+
+  if (!engineHandled && leadId && c.env.ENGINE_API_KEY) {
+    return c.json({ ok: false, error: `Engine ${body.workflow} dispatch failed — listener fallback sent` }, 502)
   }
   return c.json({ ok: true })
 })
