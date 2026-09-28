@@ -393,8 +393,10 @@ export function useReportSettings(data: AnalyzeData | null): UseReportSettingsRe
     updateMajorItem: pythonAuthoritative ? requireServerEvaluation : updateMajorItem,
     updateAsIsThreshold: pythonAuthoritative ? requireServerEvaluation : updateAsIsThreshold,
     updateProximityAdjustments: pythonAuthoritative ? requireServerEvaluation : updateProximityAdjustments,
-    setArvOverride: pythonAuthoritative ? requireServerEvaluation : setArvOverride,
-    setArvAdjustment: pythonAuthoritative ? requireServerEvaluation : setArvAdjustment,
+    // ARV override + adjustments are report-local post-math (no re-eval),
+    // so they stay live even on python-authoritative reports.
+    setArvOverride,
+    setArvAdjustment,
     resetToDefaults,
   }
 }

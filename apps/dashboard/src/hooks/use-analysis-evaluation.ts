@@ -19,7 +19,7 @@ import type {
 } from '@/app/(dashboard)/dashboard/analyze/actions'
 import { getCompKey } from '@/components/analysis/format-helpers'
 import { useReportSettings, type UseReportSettingsReturn } from '@/hooks/use-report-settings'
-import { recalculateValuationFromComps, type RecalcResult } from '@/lib/recalc'
+import { calculateArvAdjustmentDelta, recalculateValuationFromComps, type RecalcResult } from '@/lib/recalc'
 import { recalculateReportComps } from '@/lib/client-api'
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -217,7 +217,49 @@ export function useAnalysisEvaluation({
   // Build display valuation: always use recalcData, then apply manual comp override
   const computedValuation = useMemo((): ValuationData | undefined => {
     if (!data?.valuation) return undefined
-    if (pythonAuthoritative) return data.valuation
+    if (pythonAuthoritative) {
+      // Server-authoritative report — full recalc is disabled, but a manual
+      // ARV / adjustment override is pure deterministic math on top of the
+      // displayed deal: new ARV flows through rehab/closing/carrying/fee
+      // exactly like the JS recalc path.
+      const ov = settingsHook.settings.arvOverride
+      const rules = settingsHook.settings.arvAdjustmentRules ?? []
+      const overrides = settingsHook.settings.arvAdjustments ?? {}
+      const hasOverride = (ov != null && ov > 0) || rules.some((r) => overrides[r.id] !== undefined)
+      if (!hasOverride) return data.valuation
+      const v0 = data.valuation
+      const base0 = ov != null && ov > 0 ? ov : (v0.arv ?? 0)
+      const { delta, lines } = calculateArvAdjustmentDelta(base0, data.subject as unknown as Record<string, unknown>, settingsHook.settings)
+      const newArv = Math.max(0, Math.round(base0 + delta))
+      const ref = Math.max(1, v0.arv ?? 0)
+      const closingPct = (v0.closingCosts ?? 0) / ref
+      const carryingPct = (v0.carryingCosts ?? 0) / ref
+      const rehab = v0.rehabCost ?? 0
+      const fee = v0.buyPrice != null && v0.wholesalePrice != null ? v0.buyPrice - v0.wholesalePrice : 0
+      const selLevel = v0.rehabLevelEstimates?.find((l) => l.isSelected)
+      const minProfit = selLevel?.projectedProfit ?? v0.projectedProfit ?? 0
+      const closing = Math.round(newArv * closingPct)
+      const carrying = Math.round(newArv * carryingPct)
+      const buyPrice = newArv - rehab - closing - carrying - minProfit
+      const wholesale = buyPrice - fee
+      const totalInv = buyPrice + rehab
+      const profit = newArv - totalInv - closing - carrying
+      return {
+        ...v0,
+        arv: newArv,
+        arvPerSqft: v0.arvPerSqft != null && data.subject?.squareFeet ? Math.round(newArv / data.subject.squareFeet) : v0.arvPerSqft,
+        buyPrice,
+        buyPricePercent: newArv > 0 ? Math.round((buyPrice / newArv) * 100) : v0.buyPricePercent,
+        wholesalePrice: wholesale,
+        closingCosts: closing,
+        carryingCosts: carrying,
+        totalCosts: closing + carrying,
+        totalInvestment: totalInv,
+        projectedProfit: profit,
+        projectedROI: totalInv > 0 ? Math.round((profit / totalInv) * 1000) / 10 : v0.projectedROI,
+        arvAdjustments: lines,
+      }
+    }
 
     // Start from recalcData (always available once data loads) or original
     let base: ValuationData
