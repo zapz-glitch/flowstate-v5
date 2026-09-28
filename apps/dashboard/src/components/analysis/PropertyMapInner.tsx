@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react'
 import { APIProvider, Map, useApiIsLoaded, useMap } from '@vis.gl/react-google-maps'
 import { Crosshair, PersonStanding, Plus, Minus, RotateCcw, ArrowLeft } from 'lucide-react'
 import { resolvePropertyLocation, resolveSubjectPanorama } from '@/lib/resolve-property-map'
@@ -163,12 +163,14 @@ function SubjectMap({ markers, onMarkerClick, activeMarkerKey }: PropertyMapInne
       const resolved = geocoding ? await resolvePropertyLocation(original.label, coordinate) : { coordinate, addressMatched: false }
       if (cancelled) return
       setLocation(resolved)
+      // Satellite map is the standard view — Street View stays one click away
+      // once the panorama resolves below.
+      if (!viewChoice.current) setView('aerial')
       setStreetStatus('Looking for nearby Street View…')
       const nearby = await streetLibrary ? await resolveSubjectPanorama(resolved.coordinate) : null
       if (cancelled) return
       setPanorama(nearby)
       setStreetStatus(nearby ? `Nearby Street View · ${Math.round(nearby.distanceMeters)} m from subject · facing subject` : 'No nearby Street View available for this subject.')
-      if (!viewChoice.current) setView(nearby ? 'street' : 'aerial')
     })()
     return () => { cancelled = true }
   }, [loaded, original.label, original.lat, original.lng])
@@ -195,8 +197,18 @@ function SubjectMap({ markers, onMarkerClick, activeMarkerKey }: PropertyMapInne
     backToMap()
   }, [backToMap])
   const mark3DUnavailable = useCallback(() => setThreeD('unavailable'), [])
-  const selectMarker = useCallback((marker: MapMarker) => onMarkerClick?.(marker.type === 'subject' ? 'subject' : 'comp', marker.compKey), [onMarkerClick])
-  const correctedMarkers = markers.map(marker => marker.type === 'subject' && location ? { ...marker, ...location.coordinate } : marker)
+  // Stable callback + memoized marker list — without these every status/state
+  // change rebuilt all Google markers, which is the visible map flicker.
+  const onMarkerClickRef = useRef(onMarkerClick)
+  onMarkerClickRef.current = onMarkerClick
+  const selectMarker = useCallback(
+    (marker: MapMarker) => onMarkerClickRef.current?.(marker.type === 'subject' ? 'subject' : 'comp', marker.compKey),
+    [],
+  )
+  const correctedMarkers = useMemo(
+    () => markers.map(marker => marker.type === 'subject' && location ? { ...marker, ...location.coordinate } : marker),
+    [markers, location],
+  )
   const zoomBy = (direction: 1 | -1) => {
     if (view === 'street') {
       const zoom = streetView.current?.getZoom() ?? 0
