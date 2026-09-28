@@ -52,7 +52,47 @@ const prepSchema = z.object({
   propertyAddress: z.string().min(1).max(300),
   purchasePrice: z.number().positive(),
   opportunityId: z.string().max(200).optional(),
+  jobId: z.string().max(200).optional(),
 })
+
+/** Upsert the disposition row — latest attempt wins. A re-dispatch
+ *  overwrites workflow/date, so the dashboard always shows the current
+ *  disposition and when it last happened. */
+async function recordDisposition(
+  env: Env,
+  d: {
+    key: string
+    leadId: string | null
+    address: string | null
+    jobId?: string | null
+    workflow: 'prep_offer' | 'no_margin'
+    ok: boolean
+    purchasePrice?: number | null
+    opportunityId?: string | null
+  },
+): Promise<void> {
+  const now = new Date().toISOString()
+  await env.DB.prepare(
+    `INSERT INTO offer_dispositions
+       (disposition_key, lead_id, property_address, job_id, workflow, ok, purchase_price, opportunity_id, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(disposition_key) DO UPDATE SET
+       lead_id = COALESCE(excluded.lead_id, offer_dispositions.lead_id),
+       property_address = COALESCE(excluded.property_address, offer_dispositions.property_address),
+       job_id = COALESCE(excluded.job_id, offer_dispositions.job_id),
+       workflow = excluded.workflow,
+       ok = excluded.ok,
+       purchase_price = COALESCE(excluded.purchase_price, offer_dispositions.purchase_price),
+       opportunity_id = COALESCE(excluded.opportunity_id, offer_dispositions.opportunity_id),
+       updated_at = excluded.updated_at`,
+  )
+    .bind(
+      d.key, d.leadId, d.address, d.jobId ?? null, d.workflow, d.ok ? 1 : 0,
+      d.purchasePrice ?? null, d.opportunityId ?? null, now, now,
+    )
+    .run()
+    .catch((e) => console.error('[Offers] disposition write failed:', e))
+}
 
 /** Resolve a Close lead id by address — the engine requires leadId. */
 async function resolveLeadId(env: Env, address: string): Promise<string | null> {
@@ -142,8 +182,20 @@ offers.post('/prep', async (c) => {
     `purchasePrice=${body.purchasePrice} opportunityId=${body.opportunityId ?? ''} — ${FOLLOW}`
   const devinSent = await postDevinMessage(c.env, message)
   if (!devinSent) {
+    c.executionCtx.waitUntil(
+      recordDisposition(c.env, {
+        key: dispatchId, leadId, address: body.propertyAddress, jobId: body.jobId,
+        workflow: 'prep_offer', ok: false, purchasePrice: body.purchasePrice, opportunityId: body.opportunityId,
+      }),
+    )
     return c.json({ ok: false, error: 'Failed to dispatch offer prep' }, 502)
   }
+  c.executionCtx.waitUntil(
+    recordDisposition(c.env, {
+      key: dispatchId, leadId, address: body.propertyAddress, jobId: body.jobId,
+      workflow: 'prep_offer', ok: true, purchasePrice: body.purchasePrice, opportunityId: body.opportunityId,
+    }),
+  )
 
   // (b) Notify the conversation-intelligence engine — fire-and-forget via
   // waitUntil so its latency never gates the response. The engine requires
@@ -186,6 +238,7 @@ const declineSchema = z
   .object({
     leadId: z.string().max(200).optional(),
     propertyAddress: z.string().max(300).optional(),
+    jobId: z.string().max(200).optional(),
   })
   .refine((b) => b.leadId || b.propertyAddress, { message: 'leadId or propertyAddress required' })
 
@@ -206,6 +259,12 @@ offers.post('/decline', async (c) => {
     { expirationTtl: DISPATCH_TTL },
   )
   const leadId = declineId.startsWith('lead_') ? declineId : null
+  c.executionCtx.waitUntil(
+    recordDisposition(c.env, {
+      key: declineId, leadId, address: body.propertyAddress ?? null, jobId: body.jobId,
+      workflow: 'no_margin', ok: true,
+    }),
+  )
 
   // If a pending offer draft exists for the lead, resolve it as declined —
   // fire-and-forget; the engine no-ops when there's no draft.
@@ -237,34 +296,26 @@ offers.post('/decline', async (c) => {
  *  /decline. Powers the Offers dashboard categories durably (survives
  *  sessions/devices), not just the browser's session log. */
 offers.get('/history', async (c) => {
-  interface DispatchValue {
-    leadId?: string | null
-    propertyAddress?: string | null
-    dispatchedAt?: string
-    declinedAt?: string
-  }
-  const out: Array<{
-    leadId: string | null
-    propertyAddress: string | null
-    workflow: 'prep_offer' | 'no_margin'
-    at: string | null
-  }> = []
-  for (const [prefix, workflow] of [['offer-dispatch:', 'prep_offer'], ['offer-decline:', 'no_margin']] as const) {
-    const listed = await c.env.API_CACHE.list({ prefix })
-    for (const k of listed.keys) {
-      const v = (await c.env.API_CACHE.get<DispatchValue>(k.name, 'json').catch(() => null)) ?? null
-      if (!v) continue
-      const idPart = k.name.slice(prefix.length)
-      out.push({
-        leadId: v.leadId ?? (idPart.startsWith('lead_') ? idPart : null),
-        propertyAddress: v.propertyAddress ?? null,
-        workflow,
-        at: v.dispatchedAt ?? v.declinedAt ?? null,
-      })
-    }
-  }
-  out.sort((a, b) => (b.at ?? '').localeCompare(a.at ?? ''))
-  return c.json({ ok: true, dispositions: out })
+  const { results } = await c.env.DB.prepare(
+    `SELECT lead_id, property_address, job_id, workflow, ok, updated_at
+       FROM offer_dispositions ORDER BY updated_at DESC LIMIT 500`,
+  ).all<{
+    lead_id: string | null
+    property_address: string | null
+    job_id: string | null
+    workflow: string
+    ok: number
+    updated_at: string
+  }>()
+  const dispositions = results.map((r) => ({
+    leadId: r.lead_id,
+    propertyAddress: r.property_address,
+    jobId: r.job_id,
+    workflow: r.workflow,
+    ok: r.ok === 1,
+    at: r.updated_at,
+  }))
+  return c.json({ ok: true, dispositions })
 })
 
 export default offers

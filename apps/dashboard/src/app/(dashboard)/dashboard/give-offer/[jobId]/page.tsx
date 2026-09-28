@@ -282,6 +282,7 @@ export default function GiveOfferReportPage({ params }: { params: Promise<{ jobI
         node: bar,
         inline,
         backHref: '/dashboard/give-offer',
+        jobId,
         loaded: queueLoaded,
         onDecided: advance,
         onFailed: recordFailed,

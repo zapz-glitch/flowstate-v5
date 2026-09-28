@@ -50,6 +50,7 @@ function QueueFallback({ queue }: {
     onDecided: (workflow: 'prep_offer' | 'no_margin') => void
     /** Dispatch failed — records it under the Failed category; stays put. */
     onFailed?: (workflow: 'prep_offer' | 'no_margin') => void
+    jobId?: string
     fallback?: { leadId: string | null; address: string; wholesalePrice: number | null; listPrice?: number | null; opportunityId?: string | null }
   }
 }) {
@@ -70,8 +71,9 @@ function QueueFallback({ queue }: {
             propertyAddress: item.address,
             purchasePrice: item.wholesalePrice ?? 0,
             opportunityId: item.opportunityId ?? undefined,
+            jobId: queue.jobId,
           })
-        : await declineOffer({ leadId: item.leadId ?? undefined, propertyAddress: item.address })
+        : await declineOffer({ leadId: item.leadId ?? undefined, propertyAddress: item.address, jobId: queue.jobId })
       if (!res.ok) {
         setResult({ ok: false, label: res.error ?? 'Dispatch failed' })
         queue.onFailed?.(workflow)
@@ -158,6 +160,7 @@ export default function DashboardReportPage({ params, queue }: {
     onDecided: (workflow: 'prep_offer' | 'no_margin') => void
     /** Dispatch failed — records it under the Failed category; stays put. */
     onFailed?: (workflow: 'prep_offer' | 'no_margin') => void
+    jobId?: string
     /** False while the queue fetch is still in flight — an unresolved
      *  fallback doesn't mean "not found" yet. */
     loaded?: boolean
@@ -491,8 +494,9 @@ export default function DashboardReportPage({ params, queue }: {
           propertyAddress: report.address,
           purchasePrice: purchasePrice!,
           opportunityId: analyzeData?.opportunityId ?? undefined,
+          jobId,
         })
-      : await declineOffer({ leadId: analyzeData?.leadId ?? undefined, propertyAddress: report.address })
+      : await declineOffer({ leadId: analyzeData?.leadId ?? undefined, propertyAddress: report.address, jobId })
     if (res.ok) queue?.onDecided(workflow)
     else queue?.onFailed?.(workflow)
     return { ok: res.ok }
