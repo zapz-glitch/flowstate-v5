@@ -48,6 +48,8 @@ function QueueFallback({ queue }: {
   queue: {
     node: React.ReactNode
     onDecided: (workflow: 'prep_offer' | 'no_margin') => void
+    /** Dispatch failed — records it under the Failed category; stays put. */
+    onFailed?: (workflow: 'prep_offer' | 'no_margin') => void
     fallback?: { leadId: string | null; address: string; wholesalePrice: number | null; listPrice?: number | null; opportunityId?: string | null }
   }
 }) {
@@ -72,6 +74,7 @@ function QueueFallback({ queue }: {
         : await declineOffer({ leadId: item.leadId ?? undefined, propertyAddress: item.address })
       if (!res.ok) {
         setResult({ ok: false, label: res.error ?? 'Dispatch failed' })
+        queue.onFailed?.(workflow)
         return
       }
       setResult({
@@ -153,6 +156,8 @@ export default function DashboardReportPage({ params, queue }: {
   queue?: {
     node: React.ReactNode
     onDecided: (workflow: 'prep_offer' | 'no_margin') => void
+    /** Dispatch failed — records it under the Failed category; stays put. */
+    onFailed?: (workflow: 'prep_offer' | 'no_margin') => void
     /** False while the queue fetch is still in flight — an unresolved
      *  fallback doesn't mean "not found" yet. */
     loaded?: boolean
@@ -489,6 +494,7 @@ export default function DashboardReportPage({ params, queue }: {
         })
       : await declineOffer({ leadId: analyzeData?.leadId ?? undefined, propertyAddress: report.address })
     if (res.ok) queue?.onDecided(workflow)
+    else queue?.onFailed?.(workflow)
     return { ok: res.ok }
   }, [report?.address, analyzeData, displayValuation, queue])
 

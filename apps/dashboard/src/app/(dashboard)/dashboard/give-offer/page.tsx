@@ -2,8 +2,12 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
-import { FileSignature, Inbox, ListFilter, Play, RotateCcw, CircleSlash, ChevronRight, Copy, Check } from 'lucide-react'
+import {
+  FileSignature, Inbox, ListChecks, Flame, Play, RotateCcw, CircleSlash,
+  ChevronRight, Copy, Check, Search, AlertTriangle,
+} from 'lucide-react'
 import { getOfferQueue, type PipelineItem } from './actions'
+import { getActivityRows } from '../analytics/actions'
 import {
   getCachedQueue,
   getDecidedToday,
@@ -13,7 +17,7 @@ import {
   setCachedQueue,
   sortedQueue,
   formatWait,
-  WAIT_FILTER_LABELS,
+  prefetchReport,
   decidedIds,
   type WaitFilter,
   type DecidedEntry,
@@ -21,6 +25,16 @@ import {
 
 const SORT_PREF_KEY = 'giveOffer.waitFilter'
 const POLL_MS = 10000
+
+type Cat = 'waiting' | 'hot' | 'prep_offer' | 'no_margin' | 'failed'
+
+const CAT_LABELS: Record<Cat, string> = {
+  waiting: 'Waiting',
+  hot: 'Hot leads',
+  prep_offer: 'Prep offers',
+  no_margin: 'No margin',
+  failed: 'Failed',
+}
 
 function useNow(): number {
   const [now, setNow] = useState(Date.now())
@@ -59,20 +73,35 @@ function CopyAddr({ text }: { text: string }) {
   )
 }
 
+interface RowData {
+  key: string
+  address: string
+  meta: string
+  jobId: string | null
+  icon: React.ReactNode
+}
+
 export default function GiveOfferPage() {
   const [raw, setRaw] = useState<PipelineItem[]>(getCachedQueue() ?? [])
   const [loaded, setLoaded] = useState(getCachedQueue() != null)
-  const [failed, setFailed] = useState(false)
-  const [filter, setFilter] = useState<WaitFilter>('longest')
+  const [failedFetch, setFailedFetch] = useState(false)
   const [decided, setDecided] = useState<DecidedEntry[]>([])
+  const [hotIds, setHotIds] = useState<Set<string>>(new Set())
   const [lastViewed, setLastViewedState] = useState<{ jobId: string; address: string | null } | null>(null)
+  const [cat, setCat] = useState<Cat>('waiting')
+  const [query, setQuery] = useState('')
+  const [filterPref, setFilterPref] = useState<WaitFilter>('longest')
   const now = useNow()
 
   useEffect(() => {
     const saved = window.localStorage.getItem(SORT_PREF_KEY)
-    if (saved && saved in WAIT_FILTER_LABELS) setFilter(saved as WaitFilter)
+    if (saved && saved in CAT_SAFE_FILTERS) setFilterPref(saved as WaitFilter)
     setDecided(getDecidedToday())
     setLastViewedState(getLastViewed())
+    // Hot-lead set for the Hot category — hot_lead events carry leadId.
+    getActivityRows(['hot_lead']).then((res) => {
+      if (res.ok) setHotIds(new Set(res.rows.map((r) => r.leadId).filter((l): l is string => !!l)))
+    }).catch(() => {})
   }, [])
 
   useEffect(() => {
@@ -83,9 +112,9 @@ export default function GiveOfferPage() {
         if (q.ok) {
           setCachedQueue(q.items)
           setRaw(q.items)
-          setFailed(false)
+          setFailedFetch(false)
         } else {
-          setFailed(true)
+          setFailedFetch(true)
         }
         setLoaded(true)
       })
@@ -94,16 +123,76 @@ export default function GiveOfferPage() {
     return () => { cancelled = true; clearInterval(t) }
   }, [])
 
-  const items = useMemo(
-    () => {
-      getDecidedToday() // hydrates decidedIds from sessionStorage pre-paint
-      return sortedQueue(raw, filter).filter((i) => !decidedIds.has(i.leadId))
-    },
-    [raw, filter],
-  )
-  const next = items[0]
+  const queueItems = useMemo(() => {
+    getDecidedToday() // hydrates decidedIds from sessionStorage pre-paint
+    return sortedQueue(raw, filterPref).filter((i) => !decidedIds.has(i.leadId))
+  }, [raw, filterPref])
+
+  const hotItems = useMemo(() => queueItems.filter((i) => hotIds.has(i.leadId)), [queueItems, hotIds])
+  const prepDecided = useMemo(() => decided.filter((d) => d.ok && d.workflow === 'prep_offer'), [decided])
+  const marginDecided = useMemo(() => decided.filter((d) => d.ok && d.workflow === 'no_margin'), [decided])
+  const failedDecided = useMemo(() => decided.filter((d) => !d.ok), [decided])
+
+  const counts: Record<Cat, number> = {
+    waiting: queueItems.length,
+    hot: hotItems.length,
+    prep_offer: prepDecided.length,
+    no_margin: marginDecided.length,
+    failed: failedDecided.length,
+  }
+
+  // Rows for the selected category (or the global search results).
+  const rows = useMemo<RowData[]>(() => {
+    const q = query.trim().toLowerCase()
+    const match = (addr: string) => !q || addr.toLowerCase().includes(q)
+    const queueRow = (item: PipelineItem, tag?: string): RowData => ({
+      key: `q:${item.leadId}`,
+      address: item.address ?? item.displayName ?? item.leadId,
+      meta: [tag, `waiting ${formatWait(Math.floor((now - parseQueuedAt(item.queuedAt)) / 1000))}`, fmtPrice(item.listPrice ?? item.wholesalePrice)]
+        .filter(Boolean).join(' · '),
+      jobId: jobIdForItem(item),
+      icon: <ChevronRight size={13} className="text-foreground-tertiary flex-shrink-0" />,
+    })
+    const decidedRow = (d: DecidedEntry): RowData => ({
+      key: `d:${d.leadId}:${d.at}`,
+      address: d.address,
+      meta: `${d.ok ? CAT_LABELS[d.workflow] : `${CAT_LABELS[d.workflow]} failed`} · ${fmtTime(d.at)}`,
+      jobId: d.jobId,
+      icon: d.workflow === 'prep_offer'
+        ? <FileSignature size={13} className={d.ok ? 'text-emerald-500' : 'text-red-500'} />
+        : <CircleSlash size={13} className={d.ok ? 'text-foreground-tertiary' : 'text-red-500'} />,
+    })
+
+    if (q) {
+      return [
+        ...queueItems.filter((i) => match(i.address ?? i.displayName ?? i.leadId)).map((i) => queueRow(i, 'in queue')),
+        ...hotItems.filter((i) => match(i.address ?? i.displayName ?? i.leadId)).filter((i) => !queueItems.includes(i)).map((i) => queueRow(i, 'hot lead')),
+        ...decided.filter((d) => match(d.address)).map(decidedRow),
+      ]
+    }
+
+    switch (cat) {
+      case 'waiting': return queueItems.map((i) => queueRow(i))
+      case 'hot': return hotItems.map((i) => queueRow(i, 'hot lead'))
+      case 'prep_offer': return prepDecided.map(decidedRow)
+      case 'no_margin': return marginDecided.map(decidedRow)
+      case 'failed': return failedDecided.map(decidedRow)
+    }
+  }, [cat, query, queueItems, hotItems, prepDecided, marginDecided, failedDecided, decided, now])
+
+  const next = queueItems[0]
   const nextJobId = next ? jobIdForItem(next) : null
   const resume = lastViewed && lastViewed.jobId !== nextJobId ? lastViewed : null
+
+  const catIcons: Record<Cat, React.ReactNode> = {
+    waiting: <ListChecks size={14} />,
+    hot: <Flame size={14} />,
+    prep_offer: <FileSignature size={14} />,
+    no_margin: <CircleSlash size={14} />,
+    failed: <AlertTriangle size={14} />,
+  }
+  const visibleCats: Cat[] = (['waiting', 'hot', 'prep_offer', 'no_margin', 'failed'] as Cat[])
+    .filter((c) => c !== 'hot' || counts.hot > 0)
 
   return (
     <div className="playground-bg -m-4 sm:-m-6 lg:-m-8 min-h-screen lg:h-[100dvh] flex flex-col lg:overflow-hidden">
@@ -118,26 +207,19 @@ export default function GiveOfferPage() {
               <div className="text-body-sm text-foreground-secondary">Offers</div>
               <div className="text-xs text-foreground-tertiary">
                 {loaded
-                  ? `${items.length} in queue${decided.length ? ` · ${decided.length} decided today` : ''}`
+                  ? `${counts.waiting} waiting${decided.length ? ` · ${decided.filter((d) => d.ok).length} decided today` : ''}`
                   : 'Loading queue…'}
               </div>
             </div>
-            <span className="flex items-center gap-1 text-foreground-tertiary text-[11px]">
-              <ListFilter size={11} />
-              <select
-                value={filter}
-                onChange={(e) => {
-                  const v = e.target.value as WaitFilter
-                  setFilter(v)
-                  window.localStorage.setItem(SORT_PREF_KEY, v)
-                }}
-                className="bg-transparent text-foreground-secondary text-[11px] outline-none cursor-pointer"
-              >
-                {Object.entries(WAIT_FILTER_LABELS).map(([v, label]) => (
-                  <option key={v} value={v}>{label}</option>
-                ))}
-              </select>
-            </span>
+            <div className="relative flex-shrink-0">
+              <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-foreground-tertiary pointer-events-none" />
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search address…"
+                className="w-44 sm:w-56 bg-secondary/50 border border-border/50 rounded-md pl-7 pr-2 py-1.5 text-xs text-foreground placeholder:text-foreground-tertiary outline-none focus:border-primary/50"
+              />
+            </div>
           </div>
         </div>
       </div>
@@ -145,11 +227,13 @@ export default function GiveOfferPage() {
       <div className="flex-1 min-h-0 overflow-y-auto">
         <div className="px-4 sm:px-6 lg:px-4 pt-3 pb-6 space-y-3">
           {/* Actions row — continue the queue or jump back to the last report */}
-          {(nextJobId || resume) && (
+          {(nextJobId || resume) && !query && (
             <div className="border border-border/60 bg-background shadow-sm px-3 py-2 flex items-center gap-2 flex-wrap">
               {nextJobId && (
                 <Link
-                  href={`/dashboard/give-offer/${nextJobId}`}
+                  href={`/dashboard/give-offer/${nextJobId}?cat=waiting`}
+                  onMouseEnter={() => prefetchReport(nextJobId)}
+                  onClick={() => prefetchReport(nextJobId)}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary/10 text-primary text-xs font-medium hover:bg-primary/20 transition-colors"
                 >
                   <Play size={12} />
@@ -159,6 +243,8 @@ export default function GiveOfferPage() {
               {resume && (
                 <Link
                   href={`/dashboard/give-offer/${resume.jobId}`}
+                  onMouseEnter={() => prefetchReport(resume.jobId)}
+                  onClick={() => prefetchReport(resume.jobId)}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-border text-xs text-foreground-secondary hover:bg-secondary transition-colors"
                 >
                   <RotateCcw size={12} />
@@ -168,12 +254,36 @@ export default function GiveOfferPage() {
             </div>
           )}
 
-          {/* Pending queue */}
+          {/* Category tiles — click into a bucket */}
+          {!query && (
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
+              {visibleCats.map((c) => (
+                <button
+                  key={c}
+                  type="button"
+                  onClick={() => setCat(c)}
+                  className={`border rounded-md px-3 py-2.5 text-left transition-colors ${
+                    cat === c
+                      ? 'border-primary/60 bg-primary/10'
+                      : 'border-border/60 bg-background hover:bg-secondary/50'
+                  }`}
+                >
+                  <div className={`flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider ${cat === c ? 'text-primary' : 'text-foreground-tertiary'}`}>
+                    {catIcons[c]}
+                    {CAT_LABELS[c]}
+                  </div>
+                  <div className="text-lg font-semibold text-foreground mt-1 tabular-nums">{counts[c]}</div>
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Rows for the selected category / search results */}
           <div className="border border-border/60 bg-background shadow-sm overflow-hidden">
             <div className="px-3 py-2 border-b border-border/50 text-[10px] font-semibold uppercase tracking-wider text-foreground-tertiary">
-              Queue
+              {query ? `Search — ${rows.length} match${rows.length === 1 ? '' : 'es'}` : CAT_LABELS[cat]}
             </div>
-            {failed ? (
+            {failedFetch ? (
               <div className="px-4 py-8 flex flex-col items-center gap-2 text-center">
                 <Inbox className="w-5 h-5 text-foreground-tertiary" />
                 <div className="text-body-sm text-foreground-secondary">Queue unavailable</div>
@@ -184,83 +294,58 @@ export default function GiveOfferPage() {
                 <div className="w-4 h-4 rounded-full border-2 border-primary/30 border-t-primary animate-spin" />
                 <span className="text-xs text-foreground-tertiary">Loading queue…</span>
               </div>
-            ) : items.length === 0 ? (
+            ) : rows.length === 0 ? (
               <div className="px-4 py-8 flex flex-col items-center gap-2 text-center">
                 <Inbox className="w-5 h-5 text-foreground-tertiary" />
-                <div className="text-body-sm text-foreground-secondary">Queue is clear</div>
+                <div className="text-body-sm text-foreground-secondary">
+                  {query ? 'No matches' : cat === 'waiting' ? 'Queue is clear' : `Nothing in ${CAT_LABELS[cat].toLowerCase()} yet`}
+                </div>
                 <div className="text-xs text-foreground-tertiary">
-                  Every queued property has been dispositioned — new ones land here as they reach underwriting.
+                  {query
+                    ? 'No queued or decided address matches.'
+                    : cat === 'waiting'
+                      ? 'Every queued property has been dispositioned — new ones land here as they reach underwriting.'
+                      : 'Dispositions land here as you work the queue.'}
                 </div>
               </div>
             ) : (
               <div className="divide-y divide-border/40">
-                {items.map((item) => {
-                  const jid = jobIdForItem(item)!
-                  const addr = item.address ?? item.displayName ?? item.leadId
-                  const wait = formatWait(Math.floor((now - parseQueuedAt(item.queuedAt)) / 1000))
-                  const price = fmtPrice(item.listPrice ?? item.wholesalePrice)
-                  return (
-                    <Link
-                      key={item.leadId}
-                      href={`/dashboard/give-offer/${jid}`}
-                      className="flex items-center gap-3 px-3 py-2 hover:bg-secondary/50 transition-colors group"
-                    >
-                      <ChevronRight size={13} className="text-foreground-tertiary flex-shrink-0 group-hover:text-foreground-secondary" />
-                      <div className="flex-1 min-w-0">
-                        <div className="text-xs text-foreground truncate">{addr}</div>
-                        <div className="text-[10px] text-foreground-tertiary">waiting {wait}{price ? ` · ${price}` : ''}</div>
-                      </div>
-                      <CopyAddr text={addr} />
-                    </Link>
-                  )
-                })}
-              </div>
-            )}
-          </div>
-
-          {/* Decided today — revisit any disposition, copy the address */}
-          {decided.length > 0 && (
-            <div className="border border-border/60 bg-background shadow-sm overflow-hidden">
-              <div className="px-3 py-2 border-b border-border/50 text-[10px] font-semibold uppercase tracking-wider text-foreground-tertiary">
-                Decided today
-              </div>
-              <div className="divide-y divide-border/40">
-                {decided.map((d) => {
+                {rows.map((row) => {
                   const inner = (
                     <>
-                      {d.workflow === 'prep_offer' ? (
-                        <FileSignature size={13} className="text-emerald-500 flex-shrink-0" />
-                      ) : (
-                        <CircleSlash size={13} className="text-foreground-tertiary flex-shrink-0" />
-                      )}
+                      {row.icon}
                       <div className="flex-1 min-w-0">
-                        <div className="text-xs text-foreground truncate">{d.address}</div>
-                        <div className="text-[10px] text-foreground-tertiary">
-                          {d.workflow === 'prep_offer' ? 'Offer prep' : 'No margin'} · {fmtTime(d.at)}
-                        </div>
+                        <div className="text-xs text-foreground truncate">{row.address}</div>
+                        <div className="text-[10px] text-foreground-tertiary">{row.meta}</div>
                       </div>
-                      <CopyAddr text={d.address} />
+                      <CopyAddr text={row.address} />
                     </>
                   )
-                  return d.jobId ? (
+                  return row.jobId ? (
                     <Link
-                      key={d.leadId + d.at}
-                      href={`/dashboard/give-offer/${d.jobId}`}
+                      key={row.key}
+                      href={`/dashboard/give-offer/${row.jobId}${!query ? `?cat=${cat}` : ''}`}
+                      onMouseEnter={() => prefetchReport(row.jobId!)}
+                      onClick={() => prefetchReport(row.jobId!)}
                       className="flex items-center gap-3 px-3 py-2 hover:bg-secondary/50 transition-colors"
                     >
                       {inner}
                     </Link>
                   ) : (
-                    <div key={d.leadId + d.at} className="flex items-center gap-3 px-3 py-2">
+                    <div key={row.key} className="flex items-center gap-3 px-3 py-2">
                       {inner}
                     </div>
                   )
                 })}
               </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       </div>
     </div>
   )
+}
+
+const CAT_SAFE_FILTERS: Record<string, true> = {
+  longest: true, newest: true, '1h': true, '4h': true, '24h': true,
 }
