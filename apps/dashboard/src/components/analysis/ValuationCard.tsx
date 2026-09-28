@@ -41,7 +41,7 @@ export function ValuationCard({
   isRecalculated?: boolean
   onOpenSettings?: () => void
 }) {
-  const { subject, arvAdjustmentRules, arvAdjustments: arvOverrides, onArvAdjustment } = useEvaluation()
+  const { subject, arvOverride, arvAdjustmentRules, arvAdjustments: arvOverrides, onArvAdjustment } = useEvaluation()
   const [adjOpen, setAdjOpen] = useState(false)
   const rules = arvAdjustmentRules ?? []
   const overrides = arvOverrides ?? {}
@@ -263,7 +263,9 @@ export function ValuationCard({
               >
                 {adjOpen ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
                 ARV adjustments
-                {appliedLines.length > 0 && (
+                {arvOverride != null ? (
+                  <span className="text-[10px] text-amber-600 dark:text-amber-400">paused under manual ARV</span>
+                ) : appliedLines.length > 0 && (
                   <span className={cn('tabular-nums font-medium', netAdj < 0 ? 'text-red-500' : 'text-emerald-600')}>
                     {appliedLines.length} · {netAdj < 0 ? '−' : '+'}${safeFmt(Math.abs(netAdj))} net
                   </span>

@@ -323,12 +323,15 @@ function mapValuationResult(
     tierRanges
   )
 
-  // Base ARV: manual per-report override wins over the computed value —
-  // characteristic adjustments and proximity deductions apply to whichever
-  // base is in force so the math stays honest either way.
-  const baseArv = settings.arvOverride != null && settings.arvOverride > 0 ? settings.arvOverride : v.arv
-  const proximityDeduction = calculateProximityDeduction(baseArv, settings)
-  const arvAdj = calculateArvAdjustmentDelta(baseArv, subject as Record<string, unknown> | null | undefined, settings)
+  // Base ARV: a manual per-report override is the FINAL value — proximity
+  // and characteristic adjustments exist to correct the *computed* ARV and
+  // must not shave a number the user typed in themselves.
+  const manualArv = settings.arvOverride != null && settings.arvOverride > 0 ? settings.arvOverride : null
+  const baseArv = manualArv ?? v.arv
+  const proximityDeduction = manualArv != null ? 0 : calculateProximityDeduction(baseArv, settings)
+  const arvAdj = manualArv != null
+    ? { delta: 0, lines: [] as ArvAdjustmentLine[] }
+    : calculateArvAdjustmentDelta(baseArv, subject as Record<string, unknown> | null | undefined, settings)
   const adjustedArv = baseArv - proximityDeduction + arvAdj.delta
 
   // Recalculate everything from adjusted ARV
