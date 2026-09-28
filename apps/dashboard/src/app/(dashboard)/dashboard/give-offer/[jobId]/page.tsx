@@ -7,6 +7,8 @@ import { ChevronLeft, ChevronRight, Timer, ListFilter } from 'lucide-react'
 import DashboardReportPage from '../../reports/[jobId]/page'
 import { getOfferQueue, type PipelineItem } from '../actions'
 import { decidedIds, jobIdForItem, parseQueuedAt, sortedQueue, formatWait, WAIT_FILTER_LABELS, type WaitFilter, getCachedQueue, setCachedQueue, prefetchReport } from '../queue'
+import { useSidebar } from '@/components/SidebarProvider'
+import { cn } from '@/lib/utils'
 
 const POLL_MS = 5000
 const SORT_PREF_KEY = 'giveOffer.waitFilter'
@@ -29,6 +31,11 @@ export default function GiveOfferReportPage({ params }: { params: Promise<{ jobI
   const [raw, setRaw] = useState<PipelineItem[]>(getCachedQueue() ?? [])
   const [queueLoaded, setQueueLoaded] = useState(getCachedQueue() != null)
   const [filter, setFilter] = useState<WaitFilter>('longest')
+  // Transition veil — covers the chip→nav→mount swap so the disposition
+  // advance reads as one smooth crossfade, not a page teardown.
+  const [veil, setVeil] = useState(false)
+  const veilFromJob = useRef<string | null>(null)
+  const { collapsed } = useSidebar()
   const now = useNow()
 
   useEffect(() => {
@@ -76,11 +83,26 @@ export default function GiveOfferReportPage({ params }: { params: Promise<{ jobI
     // page lands on content — no skeleton flash a beat after navigation.
     const next = items[index + 1] ?? items[0]
     prefetchReport(next ? jobIdForItem(next) : null)
+    // Let the chip read, veil in, swap the route under cover, reveal.
     setTimeout(() => {
-      setRaw((prev) => prev.filter((i) => i.leadId !== current?.leadId))
-      goTo(next)
+      veilFromJob.current = jobId
+      setVeil(true)
+      setTimeout(() => {
+        setRaw((prev) => prev.filter((i) => i.leadId !== current?.leadId))
+        goTo(next)
+      }, 240)
     }, 1400)
-  }, [current, items, index, goTo])
+  }, [current, items, index, goTo, jobId])
+
+  // Reveal once the destination has mounted and painted a frame — the
+  // jobId dep restarts the short reveal timer when the route swaps; if
+  // the swap never lands the long timer drops the veil anyway.
+  useEffect(() => {
+    if (!veil) return
+    const swapped = veilFromJob.current !== jobId
+    const t = setTimeout(() => setVeil(false), swapped ? 320 : 2500)
+    return () => clearTimeout(t)
+  }, [jobId, veil])
 
   // Queue controls shared by the standalone strip (fallback/loading
   // states) and the compact cluster rendered inside the header card.
@@ -151,7 +173,8 @@ export default function GiveOfferReportPage({ params }: { params: Promise<{ jobI
   )
 
   return (
-    <DashboardReportPage
+    <>
+      <DashboardReportPage
       params={reportParams}
       queue={{
         node: bar,
@@ -173,5 +196,17 @@ export default function GiveOfferReportPage({ params }: { params: Promise<{ jobI
         notes: current?.conditionNotes ?? null,
       }}
     />
+      {/* Disposition transition veil — opaque page-colored cover that
+          fades in over the chip, the route swap happens beneath it, then
+          it fades out on the settled next report. */}
+      <div
+        aria-hidden
+        className={cn(
+          'fixed inset-y-0 right-0 left-0 z-[90] bg-background transition-opacity duration-300 ease-out pointer-events-none',
+          collapsed ? 'lg:left-[72px]' : 'lg:left-64',
+          veil ? 'opacity-100' : 'opacity-0',
+        )}
+      />
+    </>
   )
 }
