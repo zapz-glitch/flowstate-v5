@@ -5,9 +5,9 @@ import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { ChevronLeft, ChevronRight, Timer, ListFilter } from 'lucide-react'
 import DashboardReportPage from '../../reports/[jobId]/page'
-import { getOfferQueue, type PipelineItem } from '../actions'
+import { getOfferQueue, getOfferHistory, type PipelineItem, type ServerDisposition } from '../actions'
 import { getActivityRows } from '../../analytics/actions'
-import { decidedIds, jobIdForItem, parseQueuedAt, sortedQueue, formatWait, WAIT_FILTER_LABELS, type WaitFilter, getCachedQueue, setCachedQueue, prefetchReport, recordDecision, setLastViewed, decisionFor, getDecidedToday, type DecidedEntry } from '../queue'
+import { decidedIds, jobIdForItem, parseQueuedAt, sortedQueue, formatWait, WAIT_FILTER_LABELS, type WaitFilter, getCachedQueue, setCachedQueue, prefetchReport, recordDecision, setLastViewed, decisionFor, getDecidedToday, mergeDispositions, decidedLeadSet, consumeNavVeil, type DecidedEntry } from '../queue'
 import { useSidebar } from '@/components/SidebarProvider'
 import { cn } from '@/lib/utils'
 
@@ -41,7 +41,8 @@ export default function GiveOfferReportPage({ params }: { params: Promise<{ jobI
   const [raw, setRaw] = useState<PipelineItem[]>(getCachedQueue() ?? [])
   const [queueLoaded, setQueueLoaded] = useState(getCachedQueue() != null)
   const [filter, setFilter] = useState<WaitFilter>('longest')
-  const [decided, setDecided] = useState<DecidedEntry[]>([])
+  const [sessionDecided, setSessionDecided] = useState<DecidedEntry[]>([])
+  const [serverDisp, setServerDisp] = useState<ServerDisposition[]>([])
   const [hotIds, setHotIds] = useState<Set<string>>(new Set())
   // Transition veil — covers the chip→nav→mount swap so the disposition
   // advance reads as one smooth crossfade, not a page teardown.
@@ -53,7 +54,8 @@ export default function GiveOfferReportPage({ params }: { params: Promise<{ jobI
   useEffect(() => {
     const saved = window.localStorage.getItem(SORT_PREF_KEY)
     if (saved && saved in WAIT_FILTER_LABELS) setFilter(saved as WaitFilter)
-    setDecided(getDecidedToday())
+    setSessionDecided(getDecidedToday())
+    getOfferHistory().then((res) => { if (res.ok) setServerDisp(res.dispositions) }).catch(() => {})
   }, [])
 
   // Hot-lead set only needed while browsing that category.
@@ -83,10 +85,16 @@ export default function GiveOfferReportPage({ params }: { params: Promise<{ jobI
   }, [])
 
   // Live queue ordering (saved wait filter), minus session-decided leads.
+  const jobIdByLead = useMemo(
+    () => new Map(raw.map((i) => [i.leadId, jobIdForItem(i)] as const)),
+    [raw],
+  )
+  // Merged decided list — durable server markers + this session's log.
+  const decided = useMemo(() => mergeDispositions(serverDisp, jobIdByLead), [serverDisp, jobIdByLead, sessionDecided])
   const queueItems = useMemo(() => {
-    getDecidedToday() // hydrates decidedIds from sessionStorage pre-paint
-    return sortedQueue(raw, filter).filter((i) => !decidedIds.has(i.leadId))
-  }, [raw, filter])
+    const excluded = decidedLeadSet(serverDisp)
+    return sortedQueue(raw, filter).filter((i) => !excluded.has(i.leadId))
+  }, [raw, filter, serverDisp])
 
   // The active category's nav order — prev/next, position, and auto-advance
   // all walk this list. Queue categories sort by the wait filter; outcome
@@ -98,9 +106,9 @@ export default function GiveOfferReportPage({ params }: { params: Promise<{ jobI
     }
     return decided
       .filter((d) => (cat === 'failed' ? !d.ok : d.ok && d.workflow === cat))
-      .map((d) => d.jobId)
+      .map((d) => d.jobId ?? jobIdByLead.get(d.leadId) ?? null)
       .filter((j): j is string => !!j)
-  }, [queueItems, decided, cat, hotIds, isQueueCat])
+  }, [queueItems, decided, cat, hotIds, isQueueCat, jobIdByLead])
 
   const index = orderedJobIds.indexOf(jobId)
   // Queue fields (fallback card, notes, wait timer) resolve against the raw
@@ -113,17 +121,23 @@ export default function GiveOfferReportPage({ params }: { params: Promise<{ jobI
   // would diverge between SSR and hydration.
   const [disposition, setDisposition] = useState<{ workflow: 'prep_offer' | 'no_margin'; at: number } | null>(null)
   useEffect(() => {
-    setDisposition(decisionFor(jobId, current?.leadId))
-  }, [jobId, current?.leadId])
+    const merged = decided.find((d) => d.ok && d.jobId === jobId)
+      ?? decided.find((d) => d.ok && d.leadId === (current?.leadId ?? ''))
+    const d = merged ?? decisionFor(jobId, current?.leadId)
+    setDisposition(d ? { workflow: d.workflow, at: d.at } : null)
+  }, [jobId, current?.leadId, decided])
 
   const goToId = useCallback(
     (jid: string | null | undefined) => {
       if (jid) {
         prefetchReport(jid)
+        // Same covered swap as auto-advance — arrows read as a crossfade.
+        veilFromJob.current = jobId
+        setVeil(true)
         router.push(`/dashboard/give-offer/${jid}?cat=${cat}`)
       } else router.push('/dashboard/give-offer')
     },
-    [router, cat],
+    [router, cat, jobId],
   )
 
   // Remember where we were — the Offers dashboard's Resume button jumps
@@ -154,6 +168,15 @@ export default function GiveOfferReportPage({ params }: { params: Promise<{ jobI
   const recordFailed = useCallback((workflow: 'prep_offer' | 'no_margin') => {
     if (current) recordDecision(current, workflow, jobId, false)
   }, [current, jobId])
+
+  // Dashboard click-in arms the veil — cover up immediately, then let
+  // the normal reveal timer drop it once content settles.
+  useEffect(() => {
+    if (consumeNavVeil()) {
+      veilFromJob.current = '__nav'
+      setVeil(true)
+    }
+  }, [])
 
   // Reveal once the destination has mounted and painted a frame — the
   // jobId dep restarts the short reveal timer when the route swaps; if

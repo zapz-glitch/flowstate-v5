@@ -6,7 +6,7 @@ import {
   FileSignature, Inbox, ListChecks, Flame, Play, RotateCcw, CircleSlash,
   ChevronRight, Copy, Check, Search, AlertTriangle,
 } from 'lucide-react'
-import { getOfferQueue, type PipelineItem } from './actions'
+import { getOfferQueue, getOfferHistory, type PipelineItem, type ServerDisposition } from './actions'
 import { getActivityRows } from '../analytics/actions'
 import {
   getCachedQueue,
@@ -18,7 +18,9 @@ import {
   sortedQueue,
   formatWait,
   prefetchReport,
-  decidedIds,
+  armNavVeil,
+  mergeDispositions,
+  decidedLeadSet,
   type WaitFilter,
   type DecidedEntry,
 } from './queue'
@@ -85,7 +87,8 @@ export default function GiveOfferPage() {
   const [raw, setRaw] = useState<PipelineItem[]>(getCachedQueue() ?? [])
   const [loaded, setLoaded] = useState(getCachedQueue() != null)
   const [failedFetch, setFailedFetch] = useState(false)
-  const [decided, setDecided] = useState<DecidedEntry[]>([])
+  const [sessionDecided, setSessionDecided] = useState<DecidedEntry[]>([])
+  const [serverDisp, setServerDisp] = useState<ServerDisposition[]>([])
   const [hotIds, setHotIds] = useState<Set<string>>(new Set())
   const [lastViewed, setLastViewedState] = useState<{ jobId: string; address: string | null } | null>(null)
   const [cat, setCat] = useState<Cat>('waiting')
@@ -96,8 +99,10 @@ export default function GiveOfferPage() {
   useEffect(() => {
     const saved = window.localStorage.getItem(SORT_PREF_KEY)
     if (saved && saved in CAT_SAFE_FILTERS) setFilterPref(saved as WaitFilter)
-    setDecided(getDecidedToday())
+    setSessionDecided(getDecidedToday())
     setLastViewedState(getLastViewed())
+    // Durable dispositions — recovers decisions from earlier sessions/devices.
+    getOfferHistory().then((res) => { if (res.ok) setServerDisp(res.dispositions) }).catch(() => {})
     // Hot-lead set for the Hot category — hot_lead events carry leadId.
     getActivityRows(['hot_lead']).then((res) => {
       if (res.ok) setHotIds(new Set(res.rows.map((r) => r.leadId).filter((l): l is string => !!l)))
@@ -123,10 +128,16 @@ export default function GiveOfferPage() {
     return () => { cancelled = true; clearInterval(t) }
   }, [])
 
+  const jobIdByLead = useMemo(
+    () => new Map(raw.map((i) => [i.leadId, jobIdForItem(i)] as const)),
+    [raw],
+  )
+  // Merged decided list — server markers + this session's log, deduped.
+  const decided = useMemo(() => mergeDispositions(serverDisp, jobIdByLead), [serverDisp, jobIdByLead, sessionDecided])
   const queueItems = useMemo(() => {
-    getDecidedToday() // hydrates decidedIds from sessionStorage pre-paint
-    return sortedQueue(raw, filterPref).filter((i) => !decidedIds.has(i.leadId))
-  }, [raw, filterPref])
+    const excluded = decidedLeadSet(serverDisp)
+    return sortedQueue(raw, filterPref).filter((i) => !excluded.has(i.leadId))
+  }, [raw, filterPref, serverDisp])
 
   const hotItems = useMemo(() => queueItems.filter((i) => hotIds.has(i.leadId)), [queueItems, hotIds])
   const prepDecided = useMemo(() => decided.filter((d) => d.ok && d.workflow === 'prep_offer'), [decided])
@@ -157,7 +168,7 @@ export default function GiveOfferPage() {
       key: `d:${d.leadId}:${d.at}`,
       address: d.address,
       meta: `${d.ok ? CAT_LABELS[d.workflow] : `${CAT_LABELS[d.workflow]} failed`} · ${fmtTime(d.at)}`,
-      jobId: d.jobId,
+      jobId: d.jobId ?? jobIdByLead.get(d.leadId) ?? null,
       icon: d.workflow === 'prep_offer'
         ? <FileSignature size={13} className={d.ok ? 'text-emerald-500' : 'text-red-500'} />
         : <CircleSlash size={13} className={d.ok ? 'text-foreground-tertiary' : 'text-red-500'} />,
@@ -233,7 +244,7 @@ export default function GiveOfferPage() {
                 <Link
                   href={`/dashboard/give-offer/${nextJobId}?cat=waiting`}
                   onMouseEnter={() => prefetchReport(nextJobId)}
-                  onClick={() => prefetchReport(nextJobId)}
+                  onClick={() => { armNavVeil(); prefetchReport(nextJobId) }}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary/10 text-primary text-xs font-medium hover:bg-primary/20 transition-colors"
                 >
                   <Play size={12} />
@@ -244,7 +255,7 @@ export default function GiveOfferPage() {
                 <Link
                   href={`/dashboard/give-offer/${resume.jobId}`}
                   onMouseEnter={() => prefetchReport(resume.jobId)}
-                  onClick={() => prefetchReport(resume.jobId)}
+                  onClick={() => { armNavVeil(); prefetchReport(resume.jobId) }}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-border text-xs text-foreground-secondary hover:bg-secondary transition-colors"
                 >
                   <RotateCcw size={12} />
@@ -326,7 +337,7 @@ export default function GiveOfferPage() {
                       key={row.key}
                       href={`/dashboard/give-offer/${row.jobId}${!query ? `?cat=${cat}` : ''}`}
                       onMouseEnter={() => prefetchReport(row.jobId!)}
-                      onClick={() => prefetchReport(row.jobId!)}
+                      onClick={() => { armNavVeil(); prefetchReport(row.jobId!) }}
                       className="flex items-center gap-3 px-3 py-2 hover:bg-secondary/50 transition-colors"
                     >
                       {inner}
