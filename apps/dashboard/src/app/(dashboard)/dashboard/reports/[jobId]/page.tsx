@@ -22,6 +22,7 @@ import { getReportHistory, type ReportHistoryEntry } from '@/lib/client-api'
 import { useAutoSave } from '@/hooks/use-auto-save'
 import { getSavedReport, runCompSelection, type OfferWorkflow } from '@/lib/client-api'
 import { dispatchOfferPrep, declineOffer } from '../../analyze/actions'
+import { takeReportPrefetch } from '../../give-offer/queue'
 import { useAnalysisEvaluation } from '@/hooks/use-analysis-evaluation'
 import { toast } from 'sonner'
 import { DownloadReportButton } from '@/components/report/DownloadReportButton'
@@ -341,10 +342,14 @@ export default function DashboardReportPage({ params, queue }: {
   const reportRequestRef = useRef(0)
   const fetchReport = useCallback(async () => {
     const requestId = ++reportRequestRef.current
+    // Offers queue prefetches the next report during the chip window —
+    // a hit skips the loading flag entirely so the page doesn't flash
+    // a skeleton a beat after navigation.
+    const prefetched = takeReportPrefetch(jobId)
     try {
-      setLoading(true)
+      if (!prefetched) setLoading(true)
       setError(null)
-      const data = await getSavedReport(jobId)
+      const data = (prefetched ? await prefetched : null) ?? (await getSavedReport(jobId))
       if (requestId !== reportRequestRef.current) return
       const analysis = data.analysis as AnalyzeData & {
         aiReport?: { summary: string; selected: number; total: number; model: string }

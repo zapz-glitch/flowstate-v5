@@ -1,4 +1,5 @@
 import type { PipelineItem } from './actions'
+import { getSavedReport } from '@/lib/client-api'
 
 /** Engine timestamps arrive as "YYYY-MM-DD HH:MM:SS" UTC. */
 export function parseQueuedAt(s: string | null | undefined): number {
@@ -66,4 +67,30 @@ export function getCachedQueue(): PipelineItem[] | null {
 
 export function setCachedQueue(items: PipelineItem[]): void {
   queueCache = { items, fetchedAt: Date.now() }
+}
+
+/** Prefetch cache — the item page warms the *next* report during the
+ *  outcome-chip window so navigation lands on content instead of a
+ *  skeleton flash. Entries are consumed once and capped to keep the
+ *  map from growing unbounded over a long queue session. */
+const reportPrefetch = new Map<string, Promise<unknown>>()
+const PREFETCH_CAP = 10
+
+export function prefetchReport(jobId: string | null | undefined): void {
+  if (!jobId || reportPrefetch.has(jobId)) return
+  if (reportPrefetch.size >= PREFETCH_CAP) {
+    const oldest = reportPrefetch.keys().next().value
+    if (oldest) reportPrefetch.delete(oldest)
+  }
+  // Swallow errors — the real fetchReport retry owns error reporting.
+  reportPrefetch.set(jobId, getSavedReport(jobId).catch(() => null))
+}
+
+export function takeReportPrefetch(
+  jobId: string,
+): Promise<{ jobId: string; address: string; createdAt: string; analysis: unknown } | null> | null {
+  const p = reportPrefetch.get(jobId)
+  if (!p) return null
+  reportPrefetch.delete(jobId)
+  return p as Promise<{ jobId: string; address: string; createdAt: string; analysis: unknown } | null>
 }

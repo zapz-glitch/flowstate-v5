@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation'
 import { ChevronLeft, ChevronRight, Timer, ListFilter } from 'lucide-react'
 import DashboardReportPage from '../../reports/[jobId]/page'
 import { getOfferQueue, type PipelineItem } from '../actions'
-import { decidedIds, jobIdForItem, parseQueuedAt, sortedQueue, formatWait, WAIT_FILTER_LABELS, type WaitFilter, getCachedQueue, setCachedQueue } from '../queue'
+import { decidedIds, jobIdForItem, parseQueuedAt, sortedQueue, formatWait, WAIT_FILTER_LABELS, type WaitFilter, getCachedQueue, setCachedQueue, prefetchReport } from '../queue'
 
 const POLL_MS = 5000
 const SORT_PREF_KEY = 'giveOffer.waitFilter'
@@ -62,18 +62,22 @@ export default function GiveOfferReportPage({ params }: { params: Promise<{ jobI
   const goTo = useCallback(
     (item: PipelineItem | undefined) => {
       const next = item ? jobIdForItem(item) : null
-      if (next) router.push(`/dashboard/give-offer/${next}`)
-      else router.push('/dashboard/give-offer')
+      if (next) {
+        prefetchReport(next)
+        router.push(`/dashboard/give-offer/${next}`)
+      } else router.push('/dashboard/give-offer')
     },
     [router],
   )
 
   const advance = useCallback(() => {
     if (current) decidedIds.add(current.leadId)
-    // Let the hero's outcome chip read first, then roll to the next deal.
+    // Warm the next report during the outcome-chip window so the report
+    // page lands on content — no skeleton flash a beat after navigation.
+    const next = items[index + 1] ?? items[0]
+    prefetchReport(next ? jobIdForItem(next) : null)
     setTimeout(() => {
       setRaw((prev) => prev.filter((i) => i.leadId !== current?.leadId))
-      const next = items[index + 1] ?? items[0]
       goTo(next)
     }, 1400)
   }, [current, items, index, goTo])
