@@ -94,3 +94,72 @@ export function takeReportPrefetch(
   reportPrefetch.delete(jobId)
   return p as Promise<{ jobId: string; address: string; createdAt: string; analysis: unknown } | null>
 }
+
+// ─── Offers session bookkeeping ─────────────────────────────────────────────
+// Dispositions + last-viewed report, persisted to sessionStorage so they
+// survive reloads within the tab session and vanish with it.
+
+export interface DecidedEntry {
+  leadId: string
+  jobId: string | null
+  address: string
+  workflow: 'prep_offer' | 'no_margin'
+  at: number
+}
+
+const DECIDED_KEY = 'giveOffer.decided'
+const LAST_VIEWED_KEY = 'giveOffer.lastViewed'
+let decidedItems: DecidedEntry[] | null = null
+
+function loadDecided(): DecidedEntry[] {
+  if (decidedItems) return decidedItems
+  let loaded: DecidedEntry[] = []
+  if (typeof window !== 'undefined') {
+    try {
+      const raw = window.sessionStorage.getItem(DECIDED_KEY)
+      if (raw) loaded = JSON.parse(raw)
+    } catch { /* corrupt storage — start clean */ }
+    for (const d of loaded) decidedIds.add(d.leadId)
+  }
+  decidedItems = loaded
+  return decidedItems
+}
+
+export function recordDecision(
+  item: { leadId: string; address?: string | null; displayName?: string | null },
+  workflow: 'prep_offer' | 'no_margin',
+  jobId: string | null,
+): void {
+  const list = loadDecided()
+  decidedIds.add(item.leadId)
+  const entry: DecidedEntry = {
+    leadId: item.leadId,
+    jobId,
+    address: item.address ?? item.displayName ?? item.leadId,
+    workflow,
+    at: Date.now(),
+  }
+  decidedItems = [entry, ...list.filter((d) => d.leadId !== item.leadId)]
+  try { window.sessionStorage.setItem(DECIDED_KEY, JSON.stringify(decidedItems)) } catch { /* quota — session list degrades */ }
+}
+
+export function getDecidedToday(): DecidedEntry[] {
+  const midnight = new Date()
+  midnight.setHours(0, 0, 0, 0)
+  return loadDecided().filter((d) => d.at >= midnight.getTime())
+}
+
+export function setLastViewed(jobId: string, address?: string | null): void {
+  if (typeof window === 'undefined') return
+  try {
+    window.sessionStorage.setItem(LAST_VIEWED_KEY, JSON.stringify({ jobId, address: address ?? null }))
+  } catch { /* best-effort */ }
+}
+
+export function getLastViewed(): { jobId: string; address: string | null } | null {
+  if (typeof window === 'undefined') return null
+  try {
+    const raw = window.sessionStorage.getItem(LAST_VIEWED_KEY)
+    return raw ? JSON.parse(raw) : null
+  } catch { return null }
+}
