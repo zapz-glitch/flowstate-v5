@@ -62,6 +62,8 @@ export interface StartEnrichmentRequest {
   bundle: import('../services/property-api/types').PropertyBundle
   /** Original evaluation params (for re-evaluation after enrichment) */
   evalParams: Omit<EvaluationParams, 'jobId' | 'bundle'>
+  /** Bypass caches on re-evaluation (explicit refresh/rerun) */
+  skipCache?: boolean
   /** KV key under which to store this run's report pointer (21-day eval cache) */
   evalResultCacheKey?: string
   /** Close CRM lead — folds realtor notes into the rehab model */
@@ -274,6 +276,9 @@ export class AnalysisJobDO {
     console.log(`[AnalysisJobDO] ── Streaming analysis started ──`)
 
     const propertyApi = createPropertyApi(this.env)
+    // Explicit reruns bypass every KV cache on this instance — the point
+    // of Rerun is fresh comps, fresh property fields, fresh photos.
+    propertyApi.setSkipCache(!!config.skipCache)
     const filters = [...(config.evalParams.appraisalRules?.filters ?? DEFAULT_FILTERS)] as AppraisalFilter[]
     // Inject defaults for filter types the preset doesn't define — same
     // merge performAnalysis does, so pruning/params see the identical
@@ -438,7 +443,7 @@ export class AnalysisJobDO {
             city: property.city,
             state: property.state,
             zipCode: property.zipCode,
-          }, [], { maxComps: 0 })
+          }, [], { maxComps: 0, skipCache: !!config.skipCache })
         } catch { return null }
       })(),
     ])
@@ -714,6 +719,7 @@ export class AnalysisJobDO {
       enrichComparables: (comps: NormalizedComparable[]) =>
         propertyApi.enrichComparables(comps, { concurrency: 10 }),
       prefetchedPhotoBundle,
+      skipCache: !!config.skipCache,
     }
 
     let evalResult
@@ -859,6 +865,7 @@ export class AnalysisJobDO {
           ...config.evalParams,
           userId: config.userId,
           leadId: config.leadId,
+          skipCache: !!config.skipCache,
         }, this.env,
           (message, data) => { void this.pushEvent('eval_progress', { message, ...data }) })
 

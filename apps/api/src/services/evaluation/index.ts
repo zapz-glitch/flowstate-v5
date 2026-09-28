@@ -126,6 +126,9 @@ export interface EvaluationParams {
    * (additive items apply; removals become advisories only).
    */
   leadId?: string
+  /** Explicit rerun — bypass photo/listing caches so the subject
+   *  condition read and list price come back fresh. */
+  skipCache?: boolean
 }
 
 export interface GroupBResult {
@@ -564,7 +567,7 @@ export async function performAnalysis(
       // the comp price-history supplement used for stale-sale
       // reconciliation; subject listing data still fills subject gaps
       // and carries the flood signal.)
-      photoBundle = await photoService.fetchPhotoBundle(subjectIdent, [], { maxComps: 0 })
+      photoBundle = await photoService.fetchPhotoBundle(subjectIdent, [], { maxComps: 0, skipCache: params.skipCache })
     }
     if (params.prefetchedPhotoBundle !== undefined || photoService.isAvailable()) {
       step(
