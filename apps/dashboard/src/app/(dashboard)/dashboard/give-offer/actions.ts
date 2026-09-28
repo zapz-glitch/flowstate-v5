@@ -105,7 +105,12 @@ export async function getPipelineMetrics(): Promise<{ ok: boolean; metrics: Pipe
 export interface ServerDisposition {
   leadId: string | null
   propertyAddress: string | null
+  /** Report jobId persisted at dispatch time — revisit links survive
+   *  even after the lead leaves the queue. */
+  jobId: string | null
   workflow: 'prep_offer' | 'no_margin'
+  /** false = the dispatch attempt failed (durable Failed bucket). */
+  ok: boolean
   at: string | null
 }
 

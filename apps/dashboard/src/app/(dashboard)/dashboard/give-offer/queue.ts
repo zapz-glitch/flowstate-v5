@@ -195,10 +195,10 @@ export function mergeDispositions(
     const key = s.leadId ?? `addr:${(s.propertyAddress ?? '').toLowerCase()}`
     merged.set(key, {
       leadId: s.leadId ?? '',
-      jobId: (s.leadId ? jobIdForLead.get(s.leadId) : null) ?? null,
+      jobId: s.jobId ?? (s.leadId ? jobIdForLead.get(s.leadId) : null) ?? null,
       address: s.propertyAddress ?? s.leadId ?? 'Unknown',
       workflow: s.workflow,
-      ok: true,
+      ok: s.ok,
       at: s.at ? Date.parse(s.at) : 0,
     })
   }
@@ -215,7 +215,7 @@ export function mergeDispositions(
 export function decidedLeadSet(server: ServerDisposition[]): Set<string> {
   loadDecided() // hydrates decidedIds
   const set = new Set(decidedIds)
-  for (const d of server) if (d.leadId) set.add(d.leadId)
+  for (const d of server) if (d.leadId && d.ok) set.add(d.leadId)
   return set
 }
 

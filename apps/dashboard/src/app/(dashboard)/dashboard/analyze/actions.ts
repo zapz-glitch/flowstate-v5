@@ -1034,6 +1034,9 @@ export interface OfferPrepInput {
   propertyAddress: string
   purchasePrice: number
   opportunityId?: string
+  /** Report jobId — persisted with the disposition so revisit links
+   *  survive even after the lead leaves the queue. */
+  jobId?: string
 }
 
 export interface OfferDispatchResult {
@@ -1070,7 +1073,7 @@ export async function dispatchOfferPrep(input: OfferPrepInput): Promise<OfferDis
 }
 
 /** Record a no-margin decline for a lead (identified by leadId or address). */
-export async function declineOffer(input: { leadId?: string; propertyAddress?: string }): Promise<OfferDispatchResult> {
+export async function declineOffer(input: { leadId?: string; propertyAddress?: string; jobId?: string }): Promise<OfferDispatchResult> {
   const session = await getSession()
   if (!session?.user) return { ok: false, error: 'Not authenticated' }
   const dashboardSecret = await getDashboardSecret()
