@@ -557,6 +557,11 @@ export default function AnalyzePage() {
     onRunAiAnalysis: handleRunAiAnalysis,
     onUndoAiSelection: aiAnalysisDone ? handleUndoAiSelection : undefined,
     onPermitsPulled: handlePermitsPulled,
+    arvOverride: settingsHook.settings.arvOverride,
+    arvAdjustmentRules: settingsHook.settings.arvAdjustmentRules,
+    arvAdjustments: settingsHook.settings.arvAdjustments,
+    onArvOverride: settingsHook.setArvOverride,
+    onArvAdjustment: settingsHook.setArvAdjustment,
   })
 
   // ─── Analysis Handler ────────────────────────────────────────────────────

@@ -40,10 +40,14 @@ export function calculateValuation(
   } = params
 
   const arvTier = getArvTier(arv, tierRanges)
-  const rehabEstimate = getRehabEstimate(rehabTable, arv, rehabLevelIndex, tierRanges)
+  // rehabLevelIndex -1 = no renovation level — zero base rehab, keep the
+  // default level's minProfit floor so the offer math still has a gate.
+  const rehabEstimate = rehabLevelIndex >= 0
+    ? getRehabEstimate(rehabTable, arv, rehabLevelIndex, tierRanges)
+    : { ...getRehabEstimate(rehabTable, arv, 2, tierRanges), perSqft: 0 }
   // Vision-verified renovated subjects carry no base rehab — major items
   // (permit thresholds) still charge below.
-  const rehabLevel = skipBaseRehab ? 'Renovated' : REHAB_LEVELS[rehabLevelIndex]
+  const rehabLevel = skipBaseRehab ? 'Renovated' : rehabLevelIndex >= 0 ? REHAB_LEVELS[rehabLevelIndex] : null
 
   // Calculate costs
   const pricePerSqft = subjectSqft > 0 ? Math.round(arv / subjectSqft) : (compAvgSqft > 0 ? Math.round(arv / compAvgSqft) : 0)

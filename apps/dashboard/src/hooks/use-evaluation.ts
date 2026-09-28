@@ -40,6 +40,11 @@ export function useEvaluation() {
     jevAttributeScreen: state.jevAttributeScreen,
     jevHybrid: state.jevHybrid,
 
+    // ARV editing
+    arvOverride: state.arvOverride,
+    arvAdjustmentRules: state.arvAdjustmentRules,
+    arvAdjustments: state.arvAdjustments,
+
     // UI state
     aiAnalyzing: state.aiAnalyzing,
     isStreaming: state.isStreaming,
@@ -53,5 +58,7 @@ export function useEvaluation() {
     onUndoAiSelection: state.callbacks.onUndoAiSelection,
     onFeedbackSubmitted: state.callbacks.onFeedbackSubmitted,
     onPermitsPulled: state.callbacks.onPermitsPulled,
+    onArvOverride: state.callbacks.onArvOverride,
+    onArvAdjustment: state.callbacks.onArvAdjustment,
   }
 }

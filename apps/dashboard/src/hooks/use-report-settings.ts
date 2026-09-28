@@ -22,6 +22,8 @@ import {
   getMajorItemCosts,
   getProximityConfig,
   getArvThreshold,
+  getArvAdjustments,
+  type ArvAdjustmentOverride,
   PROXIMITY_DEFAULTS,
   type AppraisalDefaults,
   type DealParamsConfig,
@@ -103,6 +105,8 @@ export interface UseReportSettingsReturn {
   updateMajorItem: (id: string, updates: Partial<MajorItemSetting>) => void
   updateAsIsThreshold: (percent: number) => void
   updateProximityAdjustments: (toggles: ProximityToggles) => void
+  setArvOverride: (v: number | null) => void
+  setArvAdjustment: (ruleId: string, override: ArvAdjustmentOverride) => void
   resetToDefaults: () => void
 }
 
@@ -139,7 +143,7 @@ export function useReportSettings(data: AnalyzeData | null): UseReportSettingsRe
       try {
         const applied = data?.appliedSettings
 
-        const [preset, defaults, rehabResponse, dealResponse, majorItemsResponse, proximityResponse, arvThresholdResponse] = await Promise.all([
+        const [preset, defaults, rehabResponse, dealResponse, majorItemsResponse, proximityResponse, arvThresholdResponse, arvAdjResponse] = await Promise.all([
           getOrCreateDefaultPreset().catch(() => null),
           getAppraisalDefaults().catch(() => null),
           getRehabConfig().catch(() => null),
@@ -147,6 +151,7 @@ export function useReportSettings(data: AnalyzeData | null): UseReportSettingsRe
           getMajorItemCosts().catch(() => null),
           getProximityConfig().catch(() => null),
           getArvThreshold().catch(() => null),
+          getArvAdjustments().catch(() => null),
         ])
 
         if (cancelled) return
@@ -242,6 +247,9 @@ export function useReportSettings(data: AnalyzeData | null): UseReportSettingsRe
           majorItems,
           additionPlay,
           proximityConfig,
+          arvAdjustmentRules: arvAdjResponse?.rules,
+          arvOverride: (applied?.arvOverride as number | null | undefined) ?? null,
+          arvAdjustments: (applied?.arvAdjustments as Record<string, ArvAdjustmentOverride> | undefined) ?? {},
           asIsThresholdPercent: applied?.asIsThresholdPercent ?? (dealParams as DealParamsConfig).asIsThresholdPercent ?? arvThresholdResponse?.config?.asIsThresholdPercent ?? 70,
         }
 
@@ -308,9 +316,10 @@ export function useReportSettings(data: AnalyzeData | null): UseReportSettingsRe
   }, [])
 
   const selectRehabLevel = useCallback((index: number) => {
+    // Click the selected level again to deselect — -1 = no renovation level.
     setSettings((prev) => ({
       ...prev,
-      rehabLevelIndex: index,
+      rehabLevelIndex: prev.rehabLevelIndex === index ? -1 : index,
     }))
   }, [])
 
@@ -346,6 +355,20 @@ export function useReportSettings(data: AnalyzeData | null): UseReportSettingsRe
     }))
   }, [])
 
+  /** Manual ARV override — null restores the computed value. */
+  const setArvOverride = useCallback((v: number | null) => {
+    setSettings((prev) => ({ ...prev, arvOverride: v }))
+  }, [])
+
+  /** Per-report rule application/override — merge by rule id; pass
+   *  { applied:false } to force-off a matching rule. */
+  const setArvAdjustment = useCallback((ruleId: string, override: ArvAdjustmentOverride) => {
+    setSettings((prev) => ({
+      ...prev,
+      arvAdjustments: { ...prev.arvAdjustments, [ruleId]: override },
+    }))
+  }, [])
+
   const resetToDefaults = useCallback(() => {
     if (savedDefaultsObjRef.current) {
       setSettings(savedDefaultsObjRef.current)
@@ -370,6 +393,8 @@ export function useReportSettings(data: AnalyzeData | null): UseReportSettingsRe
     updateMajorItem: pythonAuthoritative ? requireServerEvaluation : updateMajorItem,
     updateAsIsThreshold: pythonAuthoritative ? requireServerEvaluation : updateAsIsThreshold,
     updateProximityAdjustments: pythonAuthoritative ? requireServerEvaluation : updateProximityAdjustments,
+    setArvOverride: pythonAuthoritative ? requireServerEvaluation : setArvOverride,
+    setArvAdjustment: pythonAuthoritative ? requireServerEvaluation : setArvAdjustment,
     resetToDefaults,
   }
 }

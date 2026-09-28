@@ -15,6 +15,7 @@ import type {
   CompItem,
 } from '@/app/(dashboard)/dashboard/analyze/actions'
 import type { RecalcResult } from '@/lib/recalc'
+import type { ArvAdjustmentRule, ArvAdjustmentOverride } from '@/lib/client-api'
 import type { AnalyzeData, JevOutcomeData, JevCompClassificationData, JevAttributeScreenData, JevHybridData } from '@/app/(dashboard)/dashboard/analyze/actions'
 
 // ─── Comp Override ─────────────────────────────────────────────────────────
@@ -37,6 +38,10 @@ export interface EvaluationCallbacks {
   onFeedbackSubmitted?: (type: 'validate' | 'improve') => void
   /** Called after an on-demand permit pull returns the updated analysis */
   onPermitsPulled?: (analysis: AnalyzeData) => void
+  /** Manual ARV override — null clears back to the computed value */
+  onArvOverride?: (v: number | null) => void
+  /** Per-report ARV adjustment application/override by rule id */
+  onArvAdjustment?: (ruleId: string, override: ArvAdjustmentOverride) => void
 }
 
 // ─── Consolidated State ────────────────────────────────────────────────────
@@ -48,6 +53,13 @@ export interface EvaluationState {
   displayComps: CompsData | undefined
   isRecalculated: boolean
   recalcData: RecalcResult | null
+
+  // ARV editing — manual override + characteristic adjustments
+  arvOverride?: number | null
+  arvAdjustmentRules?: ArvAdjustmentRule[]
+  /** Subject fields the rules already match (auto-applied) */
+  arvMatchedRuleIds?: Set<string>
+  arvAdjustments?: Record<string, ArvAdjustmentOverride>
 
   // Comp selection
   compOverride: CompOverrideState | null
