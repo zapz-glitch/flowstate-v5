@@ -6,8 +6,7 @@ import {
   FileSignature, Inbox, ListChecks, Flame, Play, RotateCcw, CircleSlash,
   ChevronRight, Copy, Check, Search, AlertTriangle,
 } from 'lucide-react'
-import { getOfferQueue, getOfferHistory, type PipelineItem, type ServerDisposition } from './actions'
-import { getActivityRows } from '../analytics/actions'
+import { getOfferQueue, type PipelineItem } from './actions'
 import {
   getCachedQueue,
   getDecidedToday,
@@ -21,6 +20,9 @@ import {
   armNavVeil,
   mergeDispositions,
   decidedLeadSet,
+  getOfferHistoryCached,
+  getHotLeadIdsCached,
+  type ServerDisposition,
   type WaitFilter,
   type DecidedEntry,
 } from './queue'
@@ -102,11 +104,9 @@ export default function GiveOfferPage() {
     setSessionDecided(getDecidedToday())
     setLastViewedState(getLastViewed())
     // Durable dispositions — recovers decisions from earlier sessions/devices.
-    getOfferHistory().then((res) => { if (res.ok) setServerDisp(res.dispositions) }).catch(() => {})
+    getOfferHistoryCached().then(setServerDisp).catch(() => {})
     // Hot-lead set for the Hot category — hot_lead events carry leadId.
-    getActivityRows(['hot_lead']).then((res) => {
-      if (res.ok) setHotIds(new Set(res.rows.map((r) => r.leadId).filter((l): l is string => !!l)))
-    }).catch(() => {})
+    getHotLeadIdsCached().then(setHotIds).catch(() => {})
   }, [])
 
   useEffect(() => {
@@ -116,7 +116,7 @@ export default function GiveOfferPage() {
         if (cancelled) return
         if (q.ok) {
           setCachedQueue(q.items)
-          setRaw(q.items)
+          setRaw((prev) => (JSON.stringify(prev.map((i) => i.leadId)) === JSON.stringify(q.items.map((i) => i.leadId)) ? prev : q.items))
           setFailedFetch(false)
         } else {
           setFailedFetch(true)

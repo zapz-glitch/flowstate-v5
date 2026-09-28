@@ -1,4 +1,4 @@
-import type { PipelineItem, ServerDisposition } from './actions'
+import { getOfferHistory, type PipelineItem, type ServerDisposition } from './actions'
 import { getSavedReport } from '@/lib/client-api'
 
 /** Engine timestamps arrive as "YYYY-MM-DD HH:MM:SS" UTC. */
@@ -228,4 +228,53 @@ export function consumeNavVeil(): boolean {
   const v = navVeilPending
   navVeilPending = false
   return v
+}
+
+// ─── Shared remote fetches (module-cached, inflight-deduped) ────────────────
+// The landing page and item view both need disposition history + the hot-lead
+// set — navigating between them shouldn't refetch what just arrived.
+
+import { getActivityRows } from '../analytics/actions'
+
+export type { ServerDisposition }
+
+const REMOTE_CACHE_TTL = 30_000
+
+let dispCache: { at: number; data: ServerDisposition[] } | null = null
+let dispInflight: Promise<ServerDisposition[]> | null = null
+
+export function getOfferHistoryCached(): Promise<ServerDisposition[]> {
+  if (dispCache && Date.now() - dispCache.at < REMOTE_CACHE_TTL) {
+    return Promise.resolve(dispCache.data)
+  }
+  if (dispInflight) return dispInflight
+  const p: Promise<ServerDisposition[]> = getOfferHistory()
+    .then((r) => {
+      if (r.ok) dispCache = { at: Date.now(), data: r.dispositions }
+      return dispCache?.data ?? []
+    })
+    .catch(() => dispCache?.data ?? [])
+  dispInflight = p
+  void p.finally(() => { if (dispInflight === p) dispInflight = null })
+  return p
+}
+
+let hotCache: { at: number; ids: Set<string> } | null = null
+let hotInflight: Promise<Set<string>> | null = null
+
+export function getHotLeadIdsCached(): Promise<Set<string>> {
+  if (hotCache && Date.now() - hotCache.at < REMOTE_CACHE_TTL) {
+    return Promise.resolve(hotCache.ids)
+  }
+  if (hotInflight) return hotInflight
+  const p: Promise<Set<string>> = getActivityRows(['hot_lead'])
+    .then((r) => {
+      const ids = new Set<string>(r.rows.map((row) => row.leadId).filter((l): l is string => !!l))
+      if (r.ok) hotCache = { at: Date.now(), ids }
+      return ids
+    })
+    .catch(() => hotCache?.ids ?? new Set<string>())
+  hotInflight = p
+  void p.finally(() => { if (hotInflight === p) hotInflight = null })
+  return p
 }
