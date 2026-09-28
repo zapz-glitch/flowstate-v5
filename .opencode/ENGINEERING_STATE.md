@@ -741,3 +741,18 @@ never push directly to main; ENGINEERING_STATE.md rides with work.
 - Sidebar collapse toggle moved to top logo row (right side, ChatGPT-style); bottom toggle removed; nav rows no longer force cursor-grab
 - Census block-group comp signal confirmed merged earlier (PR #50)
 - Deploy run 36363389577: API 45s + Dashboard 1m33s, success
+
+---
+## 2026-09-28 — Offers categories + durable dispositions + E2E
+
+Completed (PR #63, #64, #65 — all merged & deployed):
+- Offers dashboard → category tiles (Waiting / Hot leads / Prep offers / No margin / Failed), search, Next up + Last report actions.
+- Item view: `?cat=` scopes prev/next + auto-advance to the category; sort select moved to item header; changing sort jumps to the new ordering's first item; failed dispatches recorded under Failed (stay in queue).
+- `GET /v1/offers/history` lists KV `offer-dispatch:`/`offer-decline:` markers (30d TTL) → dispositions durable across sessions. Dashboard merges server + session; Waiting excludes server-decided leads. Recovered 3 no-margin + 1 prep from tonight.
+- Covered transitions: dashboard click-in + prev/next arrows now run the veil crossfade; report prefetch on hover/click.
+
+E2E (Playwright + vendored system libs, local env): tiles 619ms, category switch ~420ms, click-in to item ~60ms (prefetch hit), back→dashboard ~125ms. Local item view shows QueueFallback (reports live in prod D1) — expected.
+
+Remaining/limitations:
+- Session-only Failed bucket (failed dispatches aren't persisted server-side).
+- Once a dispositioned lead leaves the engine queue, its report link resolves only via session entry's jobId.
