@@ -283,7 +283,9 @@ export default function GiveOfferPage() {
                     {catIcons[c]}
                     {CAT_LABELS[c]}
                   </div>
-                  <div className="text-lg font-semibold text-foreground mt-1 tabular-nums">{counts[c]}</div>
+                  <div className="text-lg font-semibold text-foreground mt-1 tabular-nums">
+                    {loaded ? counts[c] : <span className="text-foreground-tertiary">–</span>}
+                  </div>
                 </button>
               ))}
             </div>
