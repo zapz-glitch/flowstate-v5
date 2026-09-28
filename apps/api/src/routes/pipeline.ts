@@ -155,9 +155,11 @@ pipelineReads.get('/queue', async (c) => {
   return c.json(r.body)
 })
 
-// GET /v1/pipeline/metrics → GET /engine/dashboard (KV-cached, SWR)
+// GET /v1/pipeline/metrics?since=<ISO> → GET /engine/dashboard (KV-cached, SWR)
 pipelineReads.get('/metrics', async (c) => {
-  const r = await engineJsonCached(c, '/engine/dashboard')
+  const since = c.req.query('since')
+  const path = `/engine/dashboard${since ? `?since=${encodeURIComponent(since)}` : ''}`
+  const r = await engineJsonCached(c, path)
   if (!r) return c.json({ ok: false, error: 'Engine unavailable' }, 502)
   if (!r.ok) return c.json({ ok: false, error: 'Engine fetch failed' }, 502)
   return c.json(r.body)
