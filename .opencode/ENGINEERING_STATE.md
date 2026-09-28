@@ -1,5 +1,36 @@
 # Engineering State — flowstate-v5
 
+### 2026-09-28 — SHIPPED + LIVE: PR #53 merged (69be42a)
+
+Prod verification:
+- POST /v1/activity live: bad key→401, good key→200+row; CI_INGEST_KEY
+  set via wrangler secret put (wrangler login OAuth approved by user).
+- Migration 0033 applied remote. NOTE: prod d1_migrations missed 0032
+  (comp_tier_overrides applied out-of-band) — recorded manually, then
+  0033 applied cleanly. Future remote migrations now flow normally.
+- Backfill: GET /engine/activity (architect renamed — /engine/events
+  collides with idempotency routes; limit≤200, cursor=numeric offset)
+  → POST /v1/activity: 897/897 events, 0 errors. ~2d campaign history
+  now in activity_events.
+- Push LIVE: architect set FLOWSTATE_ACTIVITY_URL + CI_INGEST_KEY as
+  worker secrets — no engine redeploy needed. Canary 'push_verify'
+  landed in prod D1 minutes later; live inbound_msg/outbound_msg/
+  msg_activity rows arriving continuously.
+- msg_activity = raw per-message timestamp feed (contact-local hour)
+  powering best-contact-time analytics — expected kind.
+- prod-only note: CF edge blocks Python-urllib UA on POST (403) — use
+  curl or set a browser UA for scripted ingests.
+- Sidebar drag-to-reorder shipped in same PR: rows live-shuffle on
+  hover-drag, persist via ui-prefs.navOrder (same store as Settings
+  arrows — they stay in sync). Hidden items keep slots; custom links
+  append last.
+- Backfill artifacts cleaned: deleted verify + push_verify test rows.
+
+Remaining/none-blocking:
+- SSE push-to-UI not built — client polls rows 10s / metrics 60s.
+- Reach-outs tile counts engine's newReachouts (deduped first-touches);
+  drill-down shows raw outbound_msg+reachout rows (superset by design).
+
 ### 2026-09-28 — Offers rename + Analytics dashboard + CI activity ingest (feat/offers-analytics)
 
 Architect session (…507f1b) contract confirmed:
