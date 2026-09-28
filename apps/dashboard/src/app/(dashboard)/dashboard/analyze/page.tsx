@@ -647,11 +647,11 @@ export default function AnalyzePage() {
 
   // ─── Offer workflows (Devin listener session + engine) ───────────────
   // The hero owns the busy→result animation; this just returns the outcome.
-  const handleOfferWorkflow = useCallback(async (workflow: OfferWorkflow, offerPrice?: number): Promise<{ ok: boolean; label: string }> => {
+  const handleOfferWorkflow = useCallback(async (workflow: OfferWorkflow, offerPrice?: number): Promise<{ ok: boolean }> => {
     const propertyAddress = analysisResult?.subject?.address ?? address
-    if (!propertyAddress) return { ok: false, label: 'No address' }
+    if (!propertyAddress) return { ok: false }
     const purchasePrice = offerPrice ?? displayValuation?.wholesalePrice ?? displayValuation?.buyPrice
-    if (workflow === 'prep_offer' && !(purchasePrice && purchasePrice > 0)) return { ok: false, label: 'Valuation incomplete' }
+    if (workflow === 'prep_offer' && !(purchasePrice && purchasePrice > 0)) return { ok: false }
     const res = workflow === 'prep_offer'
       ? await dispatchOfferPrep({
           leadId: analysisResult?.leadId ?? undefined,
@@ -660,10 +660,7 @@ export default function AnalyzePage() {
           opportunityId: analysisResult?.opportunityId ?? undefined,
         })
       : await declineOffer({ leadId: analysisResult?.leadId ?? undefined, propertyAddress })
-    if (!res.ok) return { ok: false, label: res.error ?? 'Dispatch failed' }
-    return workflow === 'prep_offer'
-      ? { ok: true, label: res.idempotent ? 'Already dispatched' : 'Offer prep dispatched' }
-      : { ok: true, label: 'Decline recorded' }
+    return { ok: res.ok }
   }, [analysisResult, address, displayValuation])
 
   // Entry point — checks for existing reports first

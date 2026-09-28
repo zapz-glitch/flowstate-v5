@@ -17,7 +17,7 @@ interface DealSummaryHeroProps {
   rerunning?: boolean
   /** Fire an offer workflow — returns the outcome the header flashes.
    *  prep_offer accepts an offerPrice override (defaults to wholesale). */
-  onOfferWorkflow?: (workflow: 'prep_offer' | 'no_margin', offerPrice?: number) => Promise<{ ok: boolean; label: string }>
+  onOfferWorkflow?: (workflow: 'prep_offer' | 'no_margin', offerPrice?: number) => Promise<{ ok: boolean }>
 }
 
 export function DealSummaryHero({ valuation, isRecalculated, onOpenSettings, onRerun, rerunning, onOfferWorkflow }: DealSummaryHeroProps) {
@@ -26,7 +26,7 @@ export function DealSummaryHero({ valuation, isRecalculated, onOpenSettings, onR
   // chip) → back to idle. Everything crossfades via animate-in/fade-in.
   // Both workflows dispatch immediately — no price editing.
   const [offerPhase, setOfferPhase] = useState<'idle' | 'busy' | 'done'>('idle')
-  const [offerOutcome, setOfferOutcome] = useState<{ ok: boolean; label: string } | null>(null)
+  const [offerOutcome, setOfferOutcome] = useState<{ ok: boolean } | null>(null)
 
   // Offers go out at the computed price only — no manual overrides.
   const offerPrice = valuation.wholesalePrice ?? valuation.buyPrice
@@ -38,7 +38,7 @@ export function DealSummaryHero({ valuation, isRecalculated, onOpenSettings, onR
     try {
       setOfferOutcome(await onOfferWorkflow(workflow))
     } catch {
-      setOfferOutcome({ ok: false, label: 'Dispatch failed' })
+      setOfferOutcome({ ok: false })
     }
     setOfferPhase('done')
     setTimeout(() => {
@@ -112,7 +112,7 @@ export function DealSummaryHero({ valuation, isRecalculated, onOpenSettings, onR
                 )}
               >
                 {offerOutcome?.ok ? <Check className="w-3 h-3" /> : <X className="w-3 h-3" />}
-                {offerOutcome?.label}
+                {offerOutcome?.ok ? 'Success' : 'Fail'}
               </span>
             )
           )}

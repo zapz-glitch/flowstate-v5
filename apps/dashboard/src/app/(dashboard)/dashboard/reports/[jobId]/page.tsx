@@ -469,10 +469,10 @@ export default function DashboardReportPage({ params, queue }: {
 
   // ─── Offer workflows (Devin listener session + engine) ───────────────
   // The hero owns the busy→result animation; this just returns the outcome.
-  const handleOfferWorkflow = useCallback(async (workflow: OfferWorkflow, offerPrice?: number): Promise<{ ok: boolean; label: string }> => {
-    if (!report?.address) return { ok: false, label: 'No address' }
+  const handleOfferWorkflow = useCallback(async (workflow: OfferWorkflow, offerPrice?: number): Promise<{ ok: boolean }> => {
+    if (!report?.address) return { ok: false }
     const purchasePrice = offerPrice ?? displayValuation?.wholesalePrice ?? displayValuation?.buyPrice
-    if (workflow === 'prep_offer' && !(purchasePrice && purchasePrice > 0)) return { ok: false, label: 'Valuation incomplete' }
+    if (workflow === 'prep_offer' && !(purchasePrice && purchasePrice > 0)) return { ok: false }
     const res = workflow === 'prep_offer'
       ? await dispatchOfferPrep({
           leadId: analyzeData?.leadId ?? undefined,
@@ -481,11 +481,8 @@ export default function DashboardReportPage({ params, queue }: {
           opportunityId: analyzeData?.opportunityId ?? undefined,
         })
       : await declineOffer({ leadId: analyzeData?.leadId ?? undefined, propertyAddress: report.address })
-    if (!res.ok) return { ok: false, label: res.error ?? 'Dispatch failed' }
-    queue?.onDecided()
-    return workflow === 'prep_offer'
-      ? { ok: true, label: res.idempotent ? 'Already dispatched' : 'Offer prep dispatched' }
-      : { ok: true, label: 'Decline recorded' }
+    if (res.ok) queue?.onDecided()
+    return { ok: res.ok }
   }, [report?.address, analyzeData, displayValuation, queue])
 
   const handleRefresh = useCallback(async () => {
