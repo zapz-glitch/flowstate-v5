@@ -29,7 +29,7 @@ export interface AnalysisResultLayoutProps {
   /** True while a rerun is in flight */
   rerunning?: boolean
   /** Fire an offer workflow — returns the outcome the hero flashes */
-  onOfferWorkflow?: (workflow: 'prep_offer' | 'no_margin', offerPrice?: number) => Promise<{ ok: boolean; label: string }>
+  onOfferWorkflow?: (workflow: 'prep_offer' | 'no_margin', offerPrice?: number) => Promise<{ ok: boolean }>
 }
 
 export function AnalysisResultLayout({
