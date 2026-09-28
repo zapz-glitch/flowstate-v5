@@ -5,9 +5,8 @@ import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { ChevronLeft, ChevronRight, Timer, ListFilter } from 'lucide-react'
 import DashboardReportPage from '../../reports/[jobId]/page'
-import { getOfferQueue, getOfferHistory, type PipelineItem, type ServerDisposition } from '../actions'
-import { getActivityRows } from '../../analytics/actions'
-import { decidedIds, jobIdForItem, parseQueuedAt, sortedQueue, formatWait, WAIT_FILTER_LABELS, type WaitFilter, getCachedQueue, setCachedQueue, prefetchReport, recordDecision, setLastViewed, decisionFor, getDecidedToday, mergeDispositions, decidedLeadSet, consumeNavVeil, type DecidedEntry } from '../queue'
+import { getOfferQueue, type PipelineItem } from '../actions'
+import { jobIdForItem, parseQueuedAt, sortedQueue, formatWait, WAIT_FILTER_LABELS, type WaitFilter, getCachedQueue, setCachedQueue, prefetchReport, recordDecision, setLastViewed, decisionFor, getDecidedToday, mergeDispositions, decidedLeadSet, consumeNavVeil, getOfferHistoryCached, getHotLeadIdsCached, type DecidedEntry, type ServerDisposition } from '../queue'
 import { useSidebar } from '@/components/SidebarProvider'
 import { cn } from '@/lib/utils'
 
@@ -21,10 +20,28 @@ const CATS = new Set<Cat>([...QUEUE_CATS, 'prep_offer', 'no_margin', 'failed'] a
 function useNow(): number {
   const [now, setNow] = useState(Date.now())
   useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 1000)
+    const t = setInterval(() => setNow(Date.now()), 30000)
     return () => clearInterval(t)
   }, [])
   return now
+}
+
+/** Isolated wait-time chip — owns its own ticker so the parent page (the
+ *  heavy report tree: map, comps, photos) never re-renders on a timer. */
+function WaitChip({ queuedAt }: { queuedAt: string }) {
+  const now = useNow()
+  return (
+    <span className="flex items-center gap-1 text-foreground-secondary tabular-nums">
+      <Timer size={11} className="text-foreground-tertiary" />
+      {formatWait(Math.floor((now - parseQueuedAt(queuedAt)) / 1000))}
+    </span>
+  )
+}
+
+/** Queue items only re-render dependents when the queue actually changed —
+ *  the 5s poll returns the same items most of the time. */
+function queueFingerprint(items: PipelineItem[]): string {
+  return items.map((i) => `${i.leadId}:${i.queuedAt}`).join('|')
 }
 
 export default function GiveOfferReportPage({ params }: { params: Promise<{ jobId: string }> }) {
@@ -49,22 +66,19 @@ export default function GiveOfferReportPage({ params }: { params: Promise<{ jobI
   const [veil, setVeil] = useState(false)
   const veilFromJob = useRef<string | null>(null)
   const { collapsed } = useSidebar()
-  const now = useNow()
 
   useEffect(() => {
     const saved = window.localStorage.getItem(SORT_PREF_KEY)
     if (saved && saved in WAIT_FILTER_LABELS) setFilter(saved as WaitFilter)
     setSessionDecided(getDecidedToday())
-    getOfferHistory().then((res) => { if (res.ok) setServerDisp(res.dispositions) }).catch(() => {})
+    getOfferHistoryCached().then(setServerDisp).catch(() => {})
   }, [])
 
   // Hot-lead set only needed while browsing that category.
   useEffect(() => {
     if (cat !== 'hot' || hotIds.size) return
     let cancelled = false
-    getActivityRows(['hot_lead']).then((res) => {
-      if (!cancelled && res.ok) setHotIds(new Set(res.rows.map((r) => r.leadId).filter((l): l is string => !!l)))
-    }).catch(() => {})
+    getHotLeadIdsCached().then((ids) => { if (!cancelled) setHotIds(ids) }).catch(() => {})
     return () => { cancelled = true }
   }, [cat, hotIds.size])
 
@@ -75,7 +89,9 @@ export default function GiveOfferReportPage({ params }: { params: Promise<{ jobI
         if (cancelled) return
         if (q.ok) {
           setCachedQueue(q.items)
-          setRaw(q.items)
+          setRaw((prev) =>
+            queueFingerprint(prev) === queueFingerprint(q.items) ? prev : q.items,
+          )
         }
         setQueueLoaded(true)
       })
@@ -195,12 +211,7 @@ export default function GiveOfferReportPage({ params }: { params: Promise<{ jobI
       <span className="text-foreground-tertiary tabular-nums">
         {index >= 0 ? `${index + 1} of ${orderedJobIds.length}` : `${orderedJobIds.length} in ${cat}`}
       </span>
-      {isQueueCat && current && (
-        <span className="flex items-center gap-1 text-foreground-secondary tabular-nums">
-          <Timer size={11} className="text-foreground-tertiary" />
-          {formatWait(Math.floor((now - parseQueuedAt(current.queuedAt)) / 1000))}
-        </span>
-      )}
+      {isQueueCat && current && <WaitChip queuedAt={current.queuedAt} />}
       {/* Sort lives in the item view — changing it re-orders the queue and
           lands on the new front of the line. */}
       {isQueueCat && (
@@ -212,7 +223,7 @@ export default function GiveOfferReportPage({ params }: { params: Promise<{ jobI
               const v = e.target.value as WaitFilter
               setFilter(v)
               window.localStorage.setItem(SORT_PREF_KEY, v)
-              const reordered = sortedQueue(raw, v).filter((i) => !decidedIds.has(i.leadId))
+              const reordered = sortedQueue(raw, v).filter((i) => !decidedLeadSet(serverDisp).has(i.leadId))
               const scoped = cat === 'hot' ? reordered.filter((i) => hotIds.has(i.leadId)) : reordered
               goToId(scoped[0] ? jobIdForItem(scoped[0]) : null)
             }}
