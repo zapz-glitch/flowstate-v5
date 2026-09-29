@@ -60,7 +60,6 @@ import {
 } from '../seller-notes'
 import { classifyOutcomeWithJev } from '../jev'
 import type { ReportStep } from './types'
-import { AnalysisError } from '../../utils/analysis-error'
 
 function formatUsd(amount: number): string {
   return `$${Math.round(amount).toLocaleString()}`
@@ -437,7 +436,8 @@ export function computeLocationPenalty(
  * renovation assessment → permit-derived major items → valuation → report.
  *
  * - Appraisal: filters + adjustments with expansion fallback; insufficient
- *   comps produces a BAD_DEAL AnalysisError (never a fabricated ARV).
+ *   comps degrades to a valuation:null report (never a fabricated ARV) so
+ *   the comp pool and its per-rule evidence stay viewable.
  * - Photos: Zillow → Redfin → Realtor.com fallback; all-fail is non-fatal.
  * - Vision: subject-photo renovation level drives the rehab tier (falls back
  *   to the caller's buybox or defaults when no evidence exists).
@@ -820,21 +820,22 @@ export async function performAnalysis(
   }
 
   const enabledComps = appraisalResult.comparables.filter((c) => c.isEnabled)
-  if (appraisalResult.insufficientComps || enabledComps.length === 0) {
+  // Insufficient comps degrades to a report-only result — the run completes
+  // with valuation null so the subject, the evaluated comp pool, and the
+  // Jev test evidence are saved and viewable instead of erroring the search.
+  const insufficient = appraisalResult.insufficientComps === true || enabledComps.length === 0
+  if (insufficient) {
     step('appraisal_rules', 'failed', appraisalResult.fallbackReason ?? 'insufficient comps')
-    throw new AnalysisError(
-      appraisalResult.fallbackReason ??
-        `Only ${enabledComps.length} comps satisfy appraisal rules (required: 3). Try adjusting your appraisal filters.`,
-      { code: 'INSUFFICIENT_COMPS' }
+    fallbacksUsed.push('insufficient_comps')
+  } else {
+    step(
+      'appraisal_rules',
+      appraisalResult.fallbackUsed === 'none' ? 'completed' : 'fallback',
+      `${enabledComps.length}/${bundle.comparables.length} comps passed` +
+        (appraisalResult.fallbackUsed !== 'none' ? ` (${appraisalResult.fallbackUsed})` : '')
     )
   }
-  step(
-    'appraisal_rules',
-    appraisalResult.fallbackUsed === 'none' ? 'completed' : 'fallback',
-    `${enabledComps.length}/${bundle.comparables.length} comps passed` +
-      (appraisalResult.fallbackUsed !== 'none' ? ` (${appraisalResult.fallbackUsed})` : '')
-  )
-  let finalArv = appraisalResult.arv
+  let finalArv = insufficient ? null : (appraisalResult.arv ?? null)
 
   // ── 3. Vision: subject renovation + curb appeal (one merged LLM call) ─────
   // Subject-only — comps are never photo-scraped, so there is no per-comp
@@ -883,42 +884,46 @@ export async function performAnalysis(
     return 'average' // 'average' and unmapped values — usable, no boost
   }
 
-  const unverifiable: string[] = []
-  const prunedFromArv: string[] = []
-  let verifiedPositiveCount = 0
-  for (const id of appraisalResult.selectedCompIds ?? []) {
-    const assessor = assessorSignal(id)
-    if (assessor === 'negative') {
-      prunedFromArv.push(id)
-    } else if (assessor === 'positive') {
-      verifiedPositiveCount++
-    } else if (assessor !== 'average') {
-      // No signal at all — kept in the ARV set, counted for confidence
-      unverifiable.push(id)
+  // The gate only prunes/recomputes a real ARV set — skipped entirely when
+  // the pool was insufficient (finalArv is null on the degraded path).
+  if (!insufficient) {
+    const unverifiable: string[] = []
+    const prunedFromArv: string[] = []
+    let verifiedPositiveCount = 0
+    for (const id of appraisalResult.selectedCompIds ?? []) {
+      const assessor = assessorSignal(id)
+      if (assessor === 'negative') {
+        prunedFromArv.push(id)
+      } else if (assessor === 'positive') {
+        verifiedPositiveCount++
+      } else if (assessor !== 'average') {
+        // No signal at all — kept in the ARV set, counted for confidence
+        unverifiable.push(id)
+      }
     }
-  }
-  if (prunedFromArv.length > 0) {
-    const remaining = (appraisalResult.selectedCompIds ?? []).filter((id) => !prunedFromArv.includes(id))
-    const remainingComps = appraisalResult.comparables.filter((c) => remaining.includes(c.id))
-    if (remainingComps.length >= 3) {
-      appraisalResult.arv = appraisalService.calculateARV(remainingComps)
-      appraisalResult.selectedCompIds = remaining
-      finalArv = appraisalResult.arv
-      fallbacksUsed.push(`arv_condition_pruned:${prunedFromArv.length}`)
-      step('arv_condition_gate', 'fallback',
-        `${prunedFromArv.length} comp(s) excluded — verified below ARV spec (poor assessor condition); ARV recomputed on ${remainingComps.length}`)
-    } else {
-      // Can't recompose a 3-comp ARV — keep the set but mark the evidence
-      fallbacksUsed.push('arv_condition_thin')
-      step('arv_condition_gate', 'fallback',
-        `${prunedFromArv.length} comp(s) verified below ARV spec — ARV kept on ${remainingComps.length + prunedFromArv.length} comps, fewer than 3 verified`)
+    if (prunedFromArv.length > 0) {
+      const remaining = (appraisalResult.selectedCompIds ?? []).filter((id) => !prunedFromArv.includes(id))
+      const remainingComps = appraisalResult.comparables.filter((c) => remaining.includes(c.id))
+      if (remainingComps.length >= 3) {
+        appraisalResult.arv = appraisalService.calculateARV(remainingComps)
+        appraisalResult.selectedCompIds = remaining
+        finalArv = appraisalResult.arv
+        fallbacksUsed.push(`arv_condition_pruned:${prunedFromArv.length}`)
+        step('arv_condition_gate', 'fallback',
+          `${prunedFromArv.length} comp(s) excluded — verified below ARV spec (poor assessor condition); ARV recomputed on ${remainingComps.length}`)
+      } else {
+        // Can't recompose a 3-comp ARV — keep the set but mark the evidence
+        fallbacksUsed.push('arv_condition_thin')
+        step('arv_condition_gate', 'fallback',
+          `${prunedFromArv.length} comp(s) verified below ARV spec — ARV kept on ${remainingComps.length + prunedFromArv.length} comps, fewer than 3 verified`)
+      }
+    } else if (appraisalResult.selectedCompIds?.length) {
+      step('arv_condition_gate', 'completed',
+        `${appraisalResult.selectedCompIds.length} comp(s) selected — ${verifiedPositiveCount} verified AR-quality${unverifiable.length ? `, ${unverifiable.length} unverified (kept: rules-matched)` : ''}`)
     }
-  } else if (appraisalResult.selectedCompIds?.length) {
-    step('arv_condition_gate', 'completed',
-      `${appraisalResult.selectedCompIds.length} comp(s) selected — ${verifiedPositiveCount} verified AR-quality${unverifiable.length ? `, ${unverifiable.length} unverified (kept: rules-matched)` : ''}`)
-  }
-  if (unverifiable.length > 0) {
-    fallbacksUsed.push(`arv_condition_unverified:${unverifiable.length}`)
+    if (unverifiable.length > 0) {
+      fallbacksUsed.push(`arv_condition_unverified:${unverifiable.length}`)
+    }
   }
 
   // ── 4. Classifications (price percentile, display grouping) ─────────────────
@@ -992,7 +997,9 @@ export async function performAnalysis(
       : subjectSqft
 
   const valuationService = createValuationService(params.customRehabTable, params.customTierRanges)
-  const valuation = valuationService.calculateValuation({
+  // No ARV → no valuation. The report still carries the evaluated comp pool,
+  // the step log, and the Jev test evidence — valuation stays null.
+  const valuation = finalArv != null ? valuationService.calculateValuation({
     arv: finalArv,
     subjectSqft,
     compAvgSqft,
@@ -1005,9 +1012,9 @@ export async function performAnalysis(
     carryingCostsPercent: buybox.carryingCostsPercent ?? 2,
     wholesaleFee: buybox.wholesaleFee ?? 10000,
     desiredProfit: buybox.desiredProfit,
-  })
+  }) : null
 
-  const rehabLevelEstimates = calculateAllRehabLevelEstimates(valuationService, {
+  const rehabLevelEstimates = finalArv != null ? calculateAllRehabLevelEstimates(valuationService, {
     arv: finalArv,
     subjectSqft,
     compAvgSqft,
@@ -1017,15 +1024,16 @@ export async function performAnalysis(
     closingCostsPercent: buybox.closingCostsPercent ?? 8,
     carryingCostsPercent: buybox.carryingCostsPercent ?? 2,
     wholesaleFee: buybox.wholesaleFee ?? 10000,
-  })
-  step('valuation', 'completed', `ARV ${formatUsd(finalArv)} · rehab ${formatUsd(valuation.totalRehabCost)}`)
+  }) : []
+  step('valuation', valuation ? 'completed' : 'skipped',
+    valuation ? `ARV ${formatUsd(valuation.arv)} · rehab ${formatUsd(valuation.totalRehabCost)}` : 'Skipped — insufficient comps for an ARV')
 
   // ── 7. Group B as-is market intelligence ────────────────────────────────────
   const asIsThresholdPercent = params.asIsThresholdPercent ?? 70
   const groupACompIds = new Set(appraisalResult.selectedCompIds ?? [])
   // Jev's investment-truth picks are the investment set when available;
   // otherwise fall back to the price-threshold Group B.
-  const groupBResult = jevInvestmentCompIds.length > 0
+  const groupBResult = finalArv == null ? null : jevInvestmentCompIds.length > 0
     ? summarizeGroupB(
         appraisalResult.comparables.filter(
           (c) => jevInvestmentCompIds.includes(c.id) && c.salePrice != null && c.salePrice > 0,
@@ -1128,15 +1136,17 @@ export async function performAnalysis(
   // Confidence gate on the comps that drive the ARV — surfaces onto the
   // valuation block. There is no human reviewer, so the formula call
   // always stands; confidence + reasons carry the reliability signal.
-  response.valuation.confidence = response.report.confidence
-  response.valuation.confidenceReasons = response.report.confidenceReasons
-  response.valuation.requiresHumanReview = response.report.requiresHumanReview
-  if (response.report.confidence === 'low') {
-    response.valuation.recommendationReason =
-      `${valuation.recommendationReason ?? ''} — LOW confidence: comp evidence is thin or stale`.trim()
-  } else if (response.report.confidence === 'medium') {
-    response.valuation.recommendationReason =
-      `${valuation.recommendationReason ?? ''} — medium confidence: some dimensions unverified`.trim()
+  if (response.valuation && valuation) {
+    response.valuation.confidence = response.report.confidence
+    response.valuation.confidenceReasons = response.report.confidenceReasons
+    response.valuation.requiresHumanReview = response.report.requiresHumanReview
+    if (response.report.confidence === 'low') {
+      response.valuation.recommendationReason =
+        `${valuation.recommendationReason ?? ''} — LOW confidence: comp evidence is thin or stale`.trim()
+    } else if (response.report.confidence === 'medium') {
+      response.valuation.recommendationReason =
+        `${valuation.recommendationReason ?? ''} — medium confidence: some dimensions unverified`.trim()
+    }
   }
   response.visionAssessment = renovation
   response.renovationLevelSource = derivedBuybox.rehabLevelSource
@@ -1150,11 +1160,16 @@ export async function performAnalysis(
 
   // ── 11. Jev outcome classification (read-only; never affects the result) ──
   // Assesses the Jev-driven production outcome — the only scenario left.
-  try {
-    response.jevOutcome = await classifyOutcomeWithJev(response, env)
-  } catch (jevError) {
-    console.warn('[Evaluation] Jev outcome classification failed:', jevError instanceof Error ? jevError.message : jevError)
-    response.jevOutcome = { status: 'unavailable', reason: 'classification_failed' }
+  // No valuation → nothing for the outcome classifier to judge.
+  if (insufficient) {
+    response.jevOutcome = { status: 'unavailable', reason: 'insufficient_comps' }
+  } else {
+    try {
+      response.jevOutcome = await classifyOutcomeWithJev(response, env)
+    } catch (jevError) {
+      console.warn('[Evaluation] Jev outcome classification failed:', jevError instanceof Error ? jevError.message : jevError)
+      response.jevOutcome = { status: 'unavailable', reason: 'classification_failed' }
+    }
   }
   if (hybridRun) response.jevHybrid = hybridRun
 

@@ -419,7 +419,8 @@ export interface RehabLevelEstimate {
  */
 export interface ResponseContext {
   arvSource: 'appraisal' | 'comp-selection'
-  finalArv: number
+  /** Null on insufficient-comps runs — no ARV was produced */
+  finalArv: number | null
   zillowUrls?: Map<string, { searchUrl: string; directUrl?: string }>
   photoProvider?: string | null
   analysisId?: string
@@ -660,7 +661,7 @@ export interface AnalysisResponse {
       value: number | null
       limitations: string[]
     }
-    arv: number
+    arv: number | null
     arvSource: 'appraisal' | 'comp-selection'
     /** Methodology used to calculate ARV */
     arvMethodology: string
@@ -738,7 +739,7 @@ export interface AnalysisResponse {
     confidenceReasons?: string[]
     /** True unless HIGH — medium flags for review, low withholds the call */
     requiresHumanReview?: boolean
-  }
+  } | null
   comps: {
     /** Total number of comps returned from API */
     total: number
@@ -748,6 +749,8 @@ export interface AnalysisResponse {
     enabledCount: number
     /** Number of comps that failed filters (disabled) */
     disabledCount: number
+    /** True when the pool couldn't support a valuation — valuation is null */
+    insufficientComps?: boolean
     avgPricePerSqft: number | null
     medianPrice: number | null
     /** IDs of comps classified as As-Is */
@@ -1173,7 +1176,7 @@ export function buildAnalysisResponse(
   bundle: PropertyBundle,
   appraisalResult: AppraisalResultWithFallback,
   photoBundle: PhotoBundle | null,
-  valuation: ValuationResult,
+  valuation: ValuationResult | null,
   ctx: ResponseContext
 ): AnalysisResponse {
   const { property, enrichment } = bundle
@@ -1364,7 +1367,7 @@ export function buildAnalysisResponse(
     asIsValue !== null && afterRenovationValue !== null
       ? {
           asIsToArv: afterRenovationValue - asIsValue,
-          potentialProfit: afterRenovationValue - asIsValue - valuation.totalRehabCost,
+          potentialProfit: valuation ? afterRenovationValue - asIsValue - valuation.totalRehabCost : null,
         }
       : null
 
@@ -1460,7 +1463,9 @@ export function buildAnalysisResponse(
     },
 
     // ═══ VALUATION SUMMARY ══════════════════════════════════════════════════
-    valuation: {
+    // Null on insufficient-comps runs — the report still renders the
+    // evaluated comp pool and audit trail, just without a valuation.
+    valuation: valuation ? {
       arv: finalArv,
       arvSource: arvSource,
       arvMethodology,
@@ -1505,7 +1510,7 @@ export function buildAnalysisResponse(
         ctx.subjectListPrice != null && finalArv != null
           ? finalArv - ctx.subjectListPrice
           : null,
-    },
+    } : null,
 
     // ═══ COMPARABLE SALES (All comps with enable/disable status) ═══════════════
     comps: {
@@ -1514,6 +1519,7 @@ export function buildAnalysisResponse(
       retrieval: bundle.metadata?.retrieval ?? null,
       enabledCount: enabledComps.length,
       disabledCount: disabledComps.length,
+      insufficientComps: appraisalResult.insufficientComps === true || enabledComps.length === 0,
       avgPricePerSqft: appraisalResult.avgPricePerSqft,
       medianPrice: appraisalResult.medianSalePrice,
       asIsCompIds: ctx.classificationSummary?.asIsCompIds ?? [],

@@ -1,5 +1,47 @@
 # Engineering State — flowstate-v5
 
+### 2026-09-28 (later) — INSUFFICIENT_COMPS degrades to a report, not an error (fix/insufficient-comps-report)
+
+User report: an insufficient-comps eval broke the whole analysis and
+dead-ended Property Search on a red error card — no report, no comps.
+
+Change: `performAnalysis` no longer throws INSUFFICIENT_COMPS. When the
+appraisal ladder ends insufficient (or zero comps are fetched) the run
+completes with `valuation: null` + `comps.insufficientComps: true` —
+the subject, the full evaluated pool with per-rule evidence, Jev test
+records (jevHybrid), the step log (appraisal_rules failed, valuation
+skipped), and fallbacksUsed 'insufficient_comps' all persist as a normal
+saved report. The DO saves it, pushes `evaluation_complete`, and caches
+the jobId like any success — retries replay the stored report instead of
+re-spending provider calls.
+
+- `buildAnalysisResponse` + `buildEvaluationReport` accept
+  `valuation: null` (response `valuation`, `report.arv.value`,
+  `report.rehab.*`, `report.outcome.*` widened to `| null`).
+- ARV condition gate + Group B + Jev outcome classify skip on the
+  degraded path (no ARV exists to gate/classify).
+- Null-safety swept: GHL webhook + field builders, Jev outcome
+  projector, permits pull now 409s on a null-ARV report (was about to
+  write a zero-ARV valuation over it).
+- Dashboard: `EvaluationProcessAudit` renders without a valuation (the
+  test1/test2 comp rows are the point of these reports); an amber
+  "Insufficient comps" banner replaces the deal hero when
+  `comps.insufficientComps` and not streaming; batch "insufficient"
+  bucket also catches completed-with-null-ARV rows. Auto-save and the
+  recalc route already no-op/422 on these reports.
+
+Verified: `insufficient-comps-report.test.ts` (stale pool + empty pool →
+degraded report, all assertions), all 27 API regression files pass, tsc
+clean in both apps. Dashboard suite has ONE pre-existing failure
+(headline-money.test.mjs — `@/hooks/use-evaluation` module resolution,
+fails identically on main, unrelated).
+
+Contract note for API consumers: `/v1/analyze/jobs/:id` now returns
+status `complete` with `result.valuation === null` +
+`result.comps.insufficientComps === true` for these runs — previously a
+terminal `error` + `INSUFFICIENT_COMPS` code. Old KV verdicts still
+replay as errors until their 24h TTL expires.
+
 ### 2026-09-28 — Analytics feed fixes (PR #54, live)
 
 User saw only 200 events → root cause was the client row cap (200), not

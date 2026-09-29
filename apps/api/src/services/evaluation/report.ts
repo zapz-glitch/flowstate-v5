@@ -21,7 +21,8 @@ export interface BuildReportInput {
   subjectClassification: ClassificationResult | undefined
   weightedARVResult: WeightedARVResult | undefined
   derivedBuybox: DerivedBuybox
-  valuation: ValuationResult
+  /** Null on insufficient-comps runs — the report then carries null money fields */
+  valuation: ValuationResult | null
   /** Ordered step log collected during workflow execution */
   steps: ReportStep[]
   /** Fallbacks that fired during this run */
@@ -295,14 +296,16 @@ export function buildEvaluationReport(input: BuildReportInput): EvaluationReport
       }
     })
 
-  // Itemized deductions between ARV and max buy price
-  const deductions: ReportDeduction[] = [
-    {
+  // Itemized deductions between ARV and max buy price — the ARV-derived
+  // lines only exist when a valuation was produced.
+  const deductions: ReportDeduction[] = []
+  if (valuation) {
+    deductions.push({
       label: 'Base Rehab',
       amount: -valuation.baseRehabCost,
       reason: `${valuation.rehabLevel} at $${valuation.rehabPerSqft}/sqft — ${derivedBuybox.rehabReason}`,
-    },
-  ]
+    })
+  }
   for (const item of derivedBuybox.majorItems.filter((m) => m.enabled)) {
     deductions.push({ label: item.id, amount: -item.cost, reason: item.reason })
   }
@@ -313,34 +316,37 @@ export function buildEvaluationReport(input: BuildReportInput): EvaluationReport
       reason: 'Additional improvement budget',
     })
   }
-  deductions.push(
-    {
-      label: 'Closing Costs',
-      amount: -valuation.closingCosts,
-      reason: `${valuation.closingCostsPercent}% of ARV — purchase + resale transaction costs`,
-    },
-    {
-      label: 'Carrying Costs',
-      amount: -valuation.carryingCosts,
-      reason: `${valuation.carryingCostsPercent}% of ARV — holding costs during rehab`,
-    },
-    {
-      label: 'Minimum Profit',
-      amount: -valuation.desiredProfit,
-      reason: `Required margin for ${valuation.arvTier} price tier`,
-    }
-  )
+  if (valuation) {
+    deductions.push(
+      {
+        label: 'Closing Costs',
+        amount: -valuation.closingCosts,
+        reason: `${valuation.closingCostsPercent}% of ARV — purchase + resale transaction costs`,
+      },
+      {
+        label: 'Carrying Costs',
+        amount: -valuation.carryingCosts,
+        reason: `${valuation.carryingCostsPercent}% of ARV — holding costs during rehab`,
+      },
+      {
+        label: 'Minimum Profit',
+        amount: -valuation.desiredProfit,
+        reason: `Required margin for ${valuation.arvTier} price tier`,
+      }
+    )
+  }
 
   // Renovation cost ledger — every line explains source + dedup status so
   // the same work is never charged twice.
-  const ledger: NonNullable<EvaluationReport['rehab']['ledger']> = [
-    {
+  const ledger: NonNullable<EvaluationReport['rehab']['ledger']> = []
+  if (valuation) {
+    ledger.push({
       label: `Base ${valuation.rehabLevel}`,
       amount: valuation.baseRehabCost,
       source: 'rehab_tier',
       reason: `${valuation.rehabLevel} at $${valuation.rehabPerSqft}/sqft — ${derivedBuybox.rehabReason}`,
-    },
-  ]
+    })
+  }
   const manualIds = new Set(
     derivedBuybox.majorItems.filter((m) => m.reason.startsWith('Caller-specified')).map((m) => m.id)
   )
@@ -420,9 +426,9 @@ export function buildEvaluationReport(input: BuildReportInput): EvaluationReport
     renovationLevelSource: derivedBuybox.rehabLevelSource,
 
     arv: {
-      value: valuation.arv,
+      value: valuation?.arv ?? null,
       methodology: weightedARVResult?.methodology ?? 'Simple average of enabled comps',
-      pricePerSqft: valuation.pricePerSqft,
+      pricePerSqft: valuation?.pricePerSqft ?? null,
       drivers,
       asIsValue: weightedARVResult?.asIsValue ?? null,
       afterRenovationValue: weightedARVResult?.afterRenovationValue ?? null,
@@ -438,16 +444,16 @@ export function buildEvaluationReport(input: BuildReportInput): EvaluationReport
     },
 
     rehab: {
-      level: valuation.rehabLevel,
+      level: valuation?.rehabLevel ?? null,
       levelIndex: derivedBuybox.rehabLevelIndex,
-      perSqft: valuation.rehabPerSqft,
-      baseCost: valuation.baseRehabCost,
+      perSqft: valuation?.rehabPerSqft ?? null,
+      baseCost: valuation?.baseRehabCost ?? null,
       majorItems: derivedBuybox.majorItems
         .filter((m) => m.enabled)
         .map((m) => ({ name: m.id, cost: m.cost, reason: m.reason })),
-      majorItemsCost: valuation.majorItemsCost,
+      majorItemsCost: valuation?.majorItemsCost ?? null,
       additionPlay: derivedBuybox.additionPlay,
-      totalCost: valuation.totalRehabCost,
+      totalCost: valuation?.totalRehabCost ?? null,
       derived: derivedBuybox.derived,
       reason: derivedBuybox.rehabReason,
       levelSource: derivedBuybox.rehabLevelSource,
@@ -457,18 +463,19 @@ export function buildEvaluationReport(input: BuildReportInput): EvaluationReport
     deductions,
 
     outcome: {
-      maxBuyPrice: valuation.buyPrice,
-      buyPricePercent: valuation.buyPricePercent,
-      wholesalePrice: valuation.wholesalePrice,
-      projectedProfit: valuation.projectedProfit,
-      projectedROI: valuation.projectedROI,
-      totalInvestment: valuation.totalInvestment,
+      maxBuyPrice: valuation?.buyPrice ?? null,
+      buyPricePercent: valuation?.buyPricePercent ?? null,
+      wholesalePrice: valuation?.wholesalePrice ?? null,
+      projectedProfit: valuation?.projectedProfit ?? null,
+      projectedROI: valuation?.projectedROI ?? null,
+      totalInvestment: valuation?.totalInvestment ?? null,
       // The formula call always stands — there is no human reviewer, so
       // confidence is communicated via the confidence field + reasons
       // instead of withholding the recommendation.
-      recommendation: valuation.recommendation,
-      recommendationReason:
-        confidence.level === 'low'
+      recommendation: valuation?.recommendation ?? null,
+      recommendationReason: valuation == null
+        ? appraisalResult.fallbackReason ?? 'Insufficient comps — no valuation produced'
+        : confidence.level === 'low'
           ? `${valuation.recommendationReason} — LOW confidence: comp evidence is thin or stale`
           : confidence.level === 'medium'
             ? `${valuation.recommendationReason} — medium confidence: some dimensions unverified`

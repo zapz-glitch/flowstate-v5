@@ -365,10 +365,10 @@ ghlWebhook.post('/:webhookSecret', async (c) => {
           propertyClip: analysisResult.subject.id || null,
         }, {
           fullResponseJson: JSON.stringify(analysisResult),
-          arv: analysisResult.valuation.arv,
-          asIsValue: analysisResult.valuation.asIsValue ?? null,
-          maxAllowableOffer: analysisResult.valuation.buyPrice,
-          estimatedRepairs: analysisResult.valuation.rehabCost,
+          arv: analysisResult.valuation?.arv ?? null,
+          asIsValue: analysisResult.valuation?.asIsValue ?? null,
+          maxAllowableOffer: analysisResult.valuation?.buyPrice ?? null,
+          estimatedRepairs: analysisResult.valuation?.rehabCost ?? null,
         })
         console.log(`[GHL Webhook] Report saved for job ${jobId}`)
       } catch (error) {
@@ -384,9 +384,9 @@ ghlWebhook.post('/:webhookSecret', async (c) => {
         jobId,
         opportunityId,
         address: fullAddress,
-        arv: analysisResult.valuation.arv,
-        buyPrice: analysisResult.valuation.buyPrice,
-        projectedROI: analysisResult.valuation.projectedROI,
+        arv: analysisResult.valuation?.arv ?? null,
+        buyPrice: analysisResult.valuation?.buyPrice ?? null,
+        projectedROI: analysisResult.valuation?.projectedROI ?? null,
       },
     })
   } catch (error) {

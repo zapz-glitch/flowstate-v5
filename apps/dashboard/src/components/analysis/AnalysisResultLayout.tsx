@@ -100,6 +100,16 @@ export function AnalysisResultLayout({
             ))}
           </div>
         </div>
+      ) : subject && !isStreaming && comps?.insufficientComps === true ? (
+        /* Insufficient comps — the run completed with no valuation. The comp
+           pool and its Jev test evidence still render below. */
+        <div className="border border-amber-500/30 bg-amber-500/5 rounded-sm px-4 py-3">
+          <div className="text-sm font-semibold text-amber-500">Insufficient comps</div>
+          <p className="text-xs text-foreground-secondary mt-0.5">
+            No comparables qualified under the appraisal rules, so no ARV or offer math was produced.
+            The evaluated pool and per-comp test results are below — widen the rules or pick a nearby market and rerun.
+          </p>
+        </div>
       ) : null}
 
       {notesSlot}
