@@ -47,6 +47,17 @@ export async function notifyEvalComplete(env: Env, jobId: string): Promise<void>
 const DISPATCH_TTL = 30 * 24 * 60 * 60 // 30 days
 const FOLLOW = 'follow offer-prep.md in zapz-glitch/conversation-intelligence'
 
+const dealSchema = z.object({
+  disposition: z.enum(['prep_offer', 'no_margin', 'no_offer']),
+  wholesalePrice: z.number().nullish(),
+  arv: z.number().nullish(),
+  renovationTier: z.string().max(40).nullish(),
+  comps: z.array(z.object({
+    address: z.string().max(300),
+    arv: z.number().nullish(),
+  })).max(40).nullish(),
+}).nullish()
+
 const prepSchema = z.object({
   // Optional — the listener agent resolves the lead in Close by address
   // when no leadId was captured at analysis time (dashboard runs).
@@ -55,6 +66,8 @@ const prepSchema = z.object({
   purchasePrice: z.number().positive(),
   opportunityId: z.string().max(200).optional(),
   jobId: z.string().max(200).optional(),
+  // Full deal context the UI decided on — forwarded verbatim to the engine.
+  deal: dealSchema,
 })
 
 /** Upsert the disposition row — latest attempt wins. A re-dispatch
@@ -241,7 +254,10 @@ const declineSchema = z
     leadId: z.string().max(200).optional(),
     propertyAddress: z.string().max(300).optional(),
     jobId: z.string().max(200).optional(),
+    purchasePrice: z.number().positive().optional(),
     workflow: z.enum(['no_margin', 'no_offer']).default('no_margin'),
+    // Full deal context — forwarded verbatim to the engine.
+    deal: dealSchema,
   })
   .refine((b) => b.leadId || b.propertyAddress, { message: 'leadId or propertyAddress required' })
 
@@ -277,7 +293,7 @@ offers.post('/decline', async (c) => {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${c.env.ENGINE_API_KEY}`,
       },
-      body: JSON.stringify({ leadId, address: body.propertyAddress ?? null }),
+      body: JSON.stringify({ leadId, address: body.propertyAddress ?? null, deal: body.deal ?? null }),
     }).catch(() => null)
     engineHandled = !!resp?.ok
     if (!engineHandled) console.error(`[Offers] engine ${body.workflow} failed:`, resp?.status)
@@ -296,7 +312,7 @@ offers.post('/decline', async (c) => {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${c.env.ENGINE_API_KEY}`,
         },
-        body: JSON.stringify({ leadId, sessionId: DEVIN_SESSION_ID, status: 'declined' }),
+        body: JSON.stringify({ leadId, sessionId: DEVIN_SESSION_ID, status: 'declined', deal: body.deal ?? null }),
       }).catch((e) => console.error('[Offers] engine decline-draft failed:', e)),
     )
   }
@@ -320,6 +336,7 @@ offers.post('/decline', async (c) => {
     recordDisposition(c.env, {
       key: declineId, leadId, address: body.propertyAddress ?? null, jobId: body.jobId,
       workflow: body.workflow,
+      purchasePrice: body.purchasePrice ?? body.deal?.wholesalePrice ?? null,
       // ok = reached the engine (offers session) or the listener fallback
       // accepted it — failures land in the Failed bucket, not silently.
       ok: engineHandled || listenerSent,

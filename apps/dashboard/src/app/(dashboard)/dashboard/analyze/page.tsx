@@ -22,6 +22,7 @@ import { AddressAutocomplete } from '@/components/AddressAutocomplete'
 import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
 import { queueAnalysis, dispatchOfferPrep, declineOffer, type AnalyzeData } from './actions'
+import { buildDealContext } from '@/lib/deal-context'
 import { reloadForStaleAction } from '@/lib/server-action'
 import { getArvThreshold, getLatestReport, getReportsByProperty, getSavedReport, runCompSelection, type ExistingReport, type OfferWorkflow } from '@/lib/client-api'
 import { useAutoSave } from '@/hooks/use-auto-save'
@@ -657,16 +658,23 @@ export default function AnalyzePage() {
     if (!propertyAddress) return { ok: false }
     const purchasePrice = offerPrice ?? displayValuation?.wholesalePrice ?? displayValuation?.buyPrice
     if (workflow === 'prep_offer' && !(purchasePrice && purchasePrice > 0)) return { ok: false }
+    const deal = buildDealContext(
+      workflow,
+      displayValuation ? { ...displayValuation, wholesalePrice: purchasePrice ?? displayValuation.wholesalePrice } : null,
+      analysisResult?.comps?.items,
+      compOverride?.isManual ? compOverride.selectedCompKeys : undefined,
+    )
     const res = workflow === 'prep_offer'
       ? await dispatchOfferPrep({
           leadId: analysisResult?.leadId ?? undefined,
           propertyAddress,
           purchasePrice: purchasePrice!,
           opportunityId: analysisResult?.opportunityId ?? undefined,
+          deal,
         })
-      : await declineOffer({ leadId: analysisResult?.leadId ?? undefined, propertyAddress })
+      : await declineOffer({ leadId: analysisResult?.leadId ?? undefined, propertyAddress, purchasePrice: purchasePrice ?? undefined, deal })
     return { ok: res.ok }
-  }, [analysisResult, address, displayValuation])
+  }, [analysisResult, address, displayValuation, compOverride])
 
   // Entry point — checks for existing reports first
   const handleAnalyze = useCallback(async () => {

@@ -2,6 +2,7 @@
 
 import { getSession } from '@/lib/api'
 import { getCloudflareEnv } from '@/lib/cloudflare'
+import type { DealContext } from '@/lib/deal-context'
 
 // ─── Logging Utilities ───────────────────────────────────────────────────────
 
@@ -1043,6 +1044,8 @@ export interface OfferPrepInput {
   /** Report jobId — persisted with the disposition so revisit links
    *  survive even after the lead leaves the queue. */
   jobId?: string
+  /** Full deal context the UI decided on — forwarded to the engine. */
+  deal?: DealContext | null
 }
 
 export interface OfferDispatchResult {
@@ -1079,7 +1082,7 @@ export async function dispatchOfferPrep(input: OfferPrepInput): Promise<OfferDis
 }
 
 /** Record a no-margin decline for a lead (identified by leadId or address). */
-export async function declineOffer(input: { leadId?: string; propertyAddress?: string; jobId?: string; workflow?: 'no_margin' | 'no_offer' }): Promise<OfferDispatchResult> {
+export async function declineOffer(input: { leadId?: string; propertyAddress?: string; jobId?: string; purchasePrice?: number; workflow?: 'no_margin' | 'no_offer'; deal?: DealContext | null }): Promise<OfferDispatchResult> {
   const session = await getSession()
   if (!session?.user) return { ok: false, error: 'Not authenticated' }
   const dashboardSecret = await getDashboardSecret()
