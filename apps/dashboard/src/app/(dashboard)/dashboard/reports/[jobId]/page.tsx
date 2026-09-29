@@ -23,6 +23,7 @@ import { useAutoSave } from '@/hooks/use-auto-save'
 import { getSavedReport, runCompSelection, type OfferWorkflow } from '@/lib/client-api'
 import { clearOffersViewCache } from '../../give-offer/queue'
 import { dispatchOfferPrep, declineOffer } from '../../analyze/actions'
+import { buildDealContext } from '@/lib/deal-context'
 import { takeReportPrefetch } from '../../give-offer/queue'
 import { useAnalysisEvaluation } from '@/hooks/use-analysis-evaluation'
 import { toast } from 'sonner'
@@ -66,6 +67,7 @@ function QueueFallback({ queue }: {
     if (busy) return
     setBusy(workflow)
     try {
+      const fbDeal = { disposition: workflow, wholesalePrice: item.wholesalePrice ?? null, arv: null, renovationTier: null, comps: [] }
       const res = workflow === 'prep_offer'
         ? await dispatchOfferPrep({
             leadId: item.leadId ?? undefined,
@@ -73,8 +75,10 @@ function QueueFallback({ queue }: {
             purchasePrice: item.wholesalePrice ?? 0,
             opportunityId: item.opportunityId ?? undefined,
             jobId: queue.jobId,
+            deal: fbDeal,
           })
-        : await declineOffer({ leadId: item.leadId ?? undefined, propertyAddress: item.address, jobId: queue.jobId, workflow })
+        : await declineOffer({ leadId: item.leadId ?? undefined, propertyAddress: item.address, jobId: queue.jobId, workflow,
+            purchasePrice: item.wholesalePrice ?? undefined, deal: fbDeal })
       if (!res.ok) {
         setResult({ ok: false, label: res.error ?? 'Dispatch failed' })
         queue.onFailed?.(workflow)
@@ -511,6 +515,12 @@ export default function DashboardReportPage({ params, queue }: {
     if (!report?.address) return { ok: false }
     const purchasePrice = offerPrice ?? displayValuation?.wholesalePrice ?? displayValuation?.buyPrice
     if (workflow === 'prep_offer' && !(purchasePrice && purchasePrice > 0)) return { ok: false }
+    const deal = buildDealContext(
+      workflow,
+      displayValuation ? { ...displayValuation, wholesalePrice: purchasePrice ?? displayValuation.wholesalePrice } : null,
+      analyzeData?.comps?.items,
+      compOverride?.isManual ? compOverride.selectedCompKeys : undefined,
+    )
     const res = workflow === 'prep_offer'
       ? await dispatchOfferPrep({
           leadId: analyzeData?.leadId ?? undefined,
@@ -518,15 +528,16 @@ export default function DashboardReportPage({ params, queue }: {
           purchasePrice: purchasePrice!,
           opportunityId: analyzeData?.opportunityId ?? undefined,
           jobId,
+          deal,
         })
-      : await declineOffer({ leadId: analyzeData?.leadId ?? undefined, propertyAddress: report.address, jobId, workflow })
+      : await declineOffer({ leadId: analyzeData?.leadId ?? undefined, propertyAddress: report.address, jobId, workflow, purchasePrice: purchasePrice ?? undefined, deal })
     // Disposition changed server-side history — drop the cached offers
     // view so the next dashboard mount refetches instead of serving stale.
     clearOffersViewCache()
     if (res.ok) queue?.onDecided(workflow)
     else queue?.onFailed?.(workflow)
     return { ok: res.ok }
-  }, [report?.address, analyzeData, displayValuation, queue])
+  }, [report?.address, analyzeData, displayValuation, compOverride, queue])
 
   const handleRefresh = useCallback(async () => {
     if (!report?.address) return
