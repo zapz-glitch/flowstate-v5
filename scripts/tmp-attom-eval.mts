@@ -35,6 +35,8 @@ type McpSubject = {
   fullBathrooms?: number | null
   partialBathrooms?: number | null
   garageSpaces?: number | null
+  subdivision?: string | null
+  geoIds?: Record<string, string>
 }
 type McpComp = McpSubject & {
   salePrice?: number | null
@@ -51,8 +53,8 @@ function toProperty(p: McpSubject): PropertyLike {
     bathrooms: (p.fullBathrooms ?? 0) + 0.5 * (p.partialBathrooms ?? 0) || null,
     yearBuilt: p.yearBuilt ?? null,
     lotSizeSquareFeet: p.lotSquareFootage ?? null,
-    // ATTOM N4 is a micro-neighborhood, NOT the legal subdivision —
-    // leaving subdivision unmapped keeps subdivision_match at not_verified.
+    // SD (legal plat) when enriched; N4 is the micro-neighborhood layer.
+    subdivision: p.subdivision ?? null,
     neighborhoodName: p.neighborhoodN4 ?? null,
     propertyType: p.propertyUse ?? null,
     features: {
@@ -86,7 +88,7 @@ const pd = await rpc(token, 'tools/call', {
   name: 'get_property_data',
   arguments: {
     property: { lookupMode: 'address', address },
-    datasets: ['identity', 'overview', 'valuation'],
+    datasets: ['identity', 'overview', 'valuation', 'geography-context'],
   },
 })
 const get = (name: string) =>
@@ -94,10 +96,16 @@ const get = (name: string) =>
 const identity = get('identity')
 const overview = get('overview')
 const valuation = get('valuation')
+const geoCtx = get('geography-context')
 const attomId = String(identity?.attomId ?? pd.structuredContent?.property?.attomId)
 if (!attomId) throw new Error(`no attomId resolved for "${address}"`)
 
 const ch = overview?.characteristics ?? {}
+// geography-context geographies → { scope: {name, geoId} }
+const geoScopes: Record<string, { name: string; id?: string }> = {}
+for (const g of geoCtx?.subject?.geographies ?? []) {
+  geoScopes[g.geographyType] = { name: g.geographyName, id: g.geographyId }
+}
 const subject: McpSubject = {
   attomId,
   address: identity?.address ? `${identity.address.line1}, ${identity.address.city}, ${identity.address.state} ${identity.address.postalCode}` : address,
@@ -109,6 +117,9 @@ const subject: McpSubject = {
   partialBathrooms: ch.partialBathrooms,
   garageSpaces: ch.garageSpaces,
   propertyUse: ch.propertyUse ?? overview?.summary?.propertyType,
+  subdivision: geoCtx?.subject?.subdivision ?? geoScopes['SD']?.name ?? null,
+  neighborhoodN4: geoScopes['N4']?.name ?? null,
+  geoIds: Object.fromEntries(Object.entries(geoScopes).map(([k, v]) => [k, v.id ?? v.name])),
 }
 
 // comp pool at the WIDEST ladder window (548d — sale_age_expansion_2
@@ -145,9 +156,12 @@ const TIERS: Array<[number, boolean]> = [
   [548, isVintage],
 ]
 
+// subdivision_match + neighborhood_match come OUT of the per-comp set —
+// geo verification is a combined OR below (either one matching verifies).
 function tierFilters(days: number, vintage: boolean) {
   return DEFAULT_FILTERS
-    .filter((f) => !['sale_age_expansion', 'sale_age_expansion_2', 'vintage_year_cap'].includes(f.type))
+    .filter((f) => !['sale_age_expansion', 'sale_age_expansion_2', 'vintage_year_cap',
+                     'subdivision_match', 'neighborhood_match'].includes(f.type))
     .map((f) => {
       if (f.type === 'sale_age') return { ...f, value: days }
       if (f.type === 'year_built_diff' && vintage) return { ...f, value: 999 } // custom check below
@@ -155,17 +169,105 @@ function tierFilters(days: number, vintage: boolean) {
     })
 }
 
+const norm = (s?: string | null) => (s ?? '').trim().toUpperCase().replace(/\s+/g, ' ')
+
+// Comp geography enrichment cache — geography-context per attomId,
+// fetched only for comps that survive the non-geo hard filters.
+// Carries geoIds AND per-scope market stats (medianPPSF365d) for the
+// value-equivalence fallback.
+type CompGeo = {
+  sd?: string; sdId?: string
+  n4?: string; n4Id?: string
+  n3?: string; n3Id?: string
+  // scope → medianPricePerSqFt365d (null = no stats coverage)
+  ppsf: { SD?: number | null; N4?: number | null; N3?: number | null }
+}
+const compGeoCache = new Map<string, CompGeo>()
+async function enrichCompGeo(attomId: string): Promise<CompGeo> {
+  if (compGeoCache.has(attomId)) return compGeoCache.get(attomId)!
+  try {
+    const r = await rpc(token, 'tools/call', {
+      name: 'get_property_data',
+      arguments: { property: { lookupMode: 'attomId', attomId }, datasets: ['geography-context'] },
+    })
+    const d = r.structuredContent?.results?.find((x: any) => x.dataset === 'geography-context')?.data
+    const s = d?.subject
+    const geos = Object.fromEntries((s?.geographies ?? []).map((g: any) => [g.geographyType, g]))
+    const ppsf: CompGeo['ppsf'] = {}
+    for (const l of d?.layers ?? []) {
+      if (['SD', 'N4', 'N3'].includes(l.geographyType)) ppsf[l.geographyType as 'SD' | 'N4' | 'N3'] = l.medianPricePerSqFt365d ?? null
+    }
+    const entry: CompGeo = {
+      sd: s?.subdivision ?? geos['SD']?.geographyName,
+      sdId: geos['SD']?.geographyId,
+      n4: geos['N4']?.geographyName,
+      n4Id: geos['N4']?.geographyId,
+      n3: geos['N3']?.geographyName,
+      n3Id: geos['N3']?.geographyId,
+      ppsf,
+    }
+    compGeoCache.set(attomId, entry)
+    return entry
+  } catch {
+    compGeoCache.set(attomId, { ppsf: {} })
+    return { ppsf: {} }
+  }
+}
+
+const subjSd = { name: subject.subdivision, id: subject.geoIds?.['SD'] }
+const subjN4 = { name: subject.neighborhoodN4, id: subject.geoIds?.['N4'] }
+const subjN3 = { name: geoScopes['N3']?.name, id: geoScopes['N3']?.id }
+// subject per-scope market stats from its own geography layers
+const subjPpsf: CompGeo['ppsf'] = {}
+for (const l of geoCtx?.layers ?? []) {
+  if (['SD', 'N4', 'N3'].includes(l.geographyType)) subjPpsf[l.geographyType as 'SD' | 'N4' | 'N3'] = l.medianPricePerSqFt365d ?? null
+}
+
+// Value-equivalence band: comp scope median $/sqft within ±25% of the
+// subject's same-scope median counts as a value-equivalent neighborhood.
+const VALUE_EQ_PCT = 0.25
+
+// Geo verification ladder: SD match → N4 match → N3 match → value
+// equivalence on the tightest scope with stats on both sides.
+// 'fail' only when data exists and nothing matches/equates.
+function geoVerdict(geo: CompGeo, compN4?: string | null) {
+  const n4 = geo.n4 ?? compN4 ?? undefined
+  const hasData = !!(geo.sd || n4 || geo.n3)
+  if (!hasData) return { verdict: 'not_verified' as const, detail: 'no comp geo data' }
+
+  const scope = (cName: string | undefined, cId: string | undefined, s: { name?: string | null; id?: string }) =>
+    (cId && s.id && cId === s.id) || (cName && s.name && norm(cName) === norm(s.name))
+
+  if (scope(geo.sd, geo.sdId, subjSd)) return { verdict: 'pass' as const, detail: 'same subdivision' }
+  if (scope(n4, geo.n4Id, subjN4)) return { verdict: 'pass' as const, detail: 'same neighborhood (N4)' }
+  if (scope(geo.n3, geo.n3Id, subjN3)) return { verdict: 'pass' as const, detail: 'same broad neighborhood (N3)' }
+
+  // value equivalence — tightest scope with stats on both sides
+  for (const s of ['SD', 'N4', 'N3'] as const) {
+    const c = geo.ppsf[s]; const j = subjPpsf[s]
+    if (c != null && j != null && j > 0) {
+      const diff = Math.abs(c - j) / j
+      if (diff <= VALUE_EQ_PCT) {
+        return { verdict: 'pass' as const, detail: `value-equivalent ${s}: $${Math.round(c)}/sf vs $${Math.round(j)}/sf (${Math.round(diff * 100)}%)` }
+      }
+      // stats exist and are out of band → verified mismatch at this scope
+      return { verdict: 'fail' as const, detail: `not value-equivalent ${s}: $${Math.round(c)}/sf vs $${Math.round(j)}/sf (+${Math.round(diff * 100)}%) · SD:${geo.sd ?? '—'}·N4:${n4 ?? '—'}` }
+    }
+  }
+  return { verdict: 'fail' as const, detail: `SD:${geo.sd ?? '—'} vs ${subjSd.name ?? '—'} · N4:${n4 ?? '—'} vs ${subjN4.name ?? '—'} · N3:${geo.n3 ?? '—'} vs ${subjN3.name ?? '—'} (no stats)` }
+}
+
 let tierUsed = TIERS[0]
 let evaluated: any[] = []
 let enabled: any[] = []
 for (const [days, vintage] of TIERS) {
   const filters = tierFilters(days, vintage)
+  // phase 1: non-geo rules
   evaluated = rawComps.map((c) => {
     const comp = toComp(c)
     const ev = evaluateComparable(subjectLike, comp, filters, DEFAULT_ADJUSTMENTS)
     let disabled = ev.shouldDisable
     let reasons = [...ev.disableReasons]
-    // vintage rule: comp must be built on/before the cap year
     if (vintage && !disabled && comp.yearBuilt != null && comp.yearBuilt > VINTAGE_CAP) {
       disabled = true
       reasons.push(`Post-${VINTAGE_CAP} build vs vintage subject`)
@@ -174,7 +276,10 @@ for (const [days, vintage] of TIERS) {
     return {
       ...comp,
       _addr: c.address,
+      _attomId: c.attomId,
+      _n4: c.neighborhoodN4,
       _score: c.normalizedScore,
+      _geoNote: '',
       isEnabled: !disabled,
       adjustedPrice: ev.adjustedPrice,
       filterResults: ev.filterResults,
@@ -182,6 +287,20 @@ for (const [days, vintage] of TIERS) {
       totalAdjustment: ev.totalAdjustment,
     }
   })
+  // phase 2: enrich survivors with geography-context, then OR geo verdict
+  const survivors = evaluated.filter((c) => c.isEnabled)
+  await Promise.all(survivors.map(async (c) => {
+    const geo = c._attomId ? await enrichCompGeo(String(c._attomId)) : {}
+    const v = geoVerdict(geo, c._n4)
+    c._geoNote = v.detail ?? ''
+    if (v.verdict === 'fail') {
+      c.isEnabled = false
+      c.disableReasons.push(`geo mismatch (${v.detail})`)
+      c.filterResults.push({ type: 'subdivision_match', passed: false, status: 'failed', reason: `geo: ${v.detail}` })
+    } else {
+      c.filterResults.push({ type: 'subdivision_match', passed: v.verdict === 'pass', status: v.verdict === 'pass' ? 'passed' : 'not_verified', reason: v.detail })
+    }
+  }))
   enabled = evaluated.filter((c) => c.isEnabled)
   tierUsed = [days, vintage]
   if (enabled.length >= BEST_N) break
@@ -201,13 +320,17 @@ const days = (d?: string | null) => (d ? Math.round((Date.now() - new Date(d).ge
 
 console.log(`\nSUBJECT  ${subject.address}`)
 console.log(`  attomId ${attomId} · ${subject.bedrooms ?? '?'}bd/${((subject.fullBathrooms ?? 0) + 0.5 * (subject.partialBathrooms ?? 0)) || '?'}ba · ${subject.squareFootage ?? '?'} sqft · built ${subject.yearBuilt ?? '?'} · lot ${subject.lotSquareFootage ?? '?'} sf`)
+const geoLine = Object.entries(geoScopes).map(([k, v]) => `${k}=${v.name}`).join('  ')
+console.log(`  geographies: ${geoLine || 'none'}${geoScopes['CT'] || geoScopes['CB'] ? '' : '  (no census tract/block in MCP surface)'}`)
+console.log(`  geo verify: subdivision(SD)=${subjSd.name ?? '—'} · neighborhood(N4)=${subjN4.name ?? '—'} — either matching verifies`)
 console.log(`  ladder used: sale_age ≤${tierUsed[0]}d${tierUsed[1] ? ` + vintage ≤${VINTAGE_CAP} year rule` : ''} · pool ${SEARCH_MILES}mi / strict type / limit ${COMP_LIMIT}`)
 
 console.log(`\nCOMPS (${evaluated.length} returned, ${enabled.length} pass filters at this tier)`)
 for (const c of evaluated) {
   const fails = c.filterResults.filter((f) => f.passed === false && f.status !== 'not_verified').map((f) => f.type).join(',')
   const mark = selected.includes(c) ? '★' : c.isEnabled ? '✓' : '✗'
-  console.log(`  ${mark} ${(c._addr ?? '').padEnd(46)} ${money(c.salePrice).padStart(9)} ${String(c.squareFeet ?? '?').padStart(5)}sf ${(c.distanceMiles ?? 0).toFixed(2)}mi ${String(days(c.saleDate)).padStart(4)}d adj ${money(c.adjustedPrice).padStart(9)}${fails ? `  ✗${fails}` : ''}`)
+  const geo = c._geoNote ? ` [geo:${c._geoNote}]` : ''
+  console.log(`  ${mark} ${(c._addr ?? '').padEnd(46)} ${money(c.salePrice).padStart(9)} ${String(c.squareFeet ?? '?').padStart(5)}sf ${(c.distanceMiles ?? 0).toFixed(2)}mi ${String(days(c.saleDate)).padStart(4)}d adj ${money(c.adjustedPrice).padStart(9)}${fails ? `  ✗${fails}` : ''}${geo}`)
 }
 
 console.log(`\nRESULT`)
