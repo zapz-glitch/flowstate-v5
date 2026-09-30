@@ -104,6 +104,17 @@
 - `get_property_data` datasets verified live: identity, overview,
   valuation (AVM + confidence), comparables, permits, fema-context,
   sales-history, tax-history — all `status: ok` on Magnolia.
+- ATTOM-MCP PROVIDER INTEGRATED (2026-09-30): `providers/attom-mcp.ts`
+  implements PropertyProviderAdapter over MCP JSON-RPC — full pipeline
+  runs on MCP, no ATTOM_API_KEY. OAuth pair injected via ATTOM_MCP_* in
+  .dev.vars (run `node scripts/sync-attom-token.mjs` before `npm run dev`
+  — refresh token rotates, stale pair → resync). property provider union
+  gained 'attom-mcp'; find_comparable_sales limit caps at 25 (tool max).
+  E2E verified: POST /v1/analyze "3509 E Chelsea St Tampa" → ARV
+  $319,878, 25 comps w/ subdivision+N4+tract enrichment, AVM $248,864/93,
+  flood via listing scrape. Artifacts: .data/attom-mcp/pipeline-*.
+  Census: pipeline already had fetchCensusGeography (same endpoint the
+  user's PDF documents) — comp-hybrid derives sameBlockGroup/crossesMajorRoad.
 - Temp eval harness: `npx tsx scripts/tmp-attom-eval.mts "<address>"` —
   MCP data → CompLike/PropertyLike → real DEFAULT_FILTERS/ADJUSTMENTS +
   pickBestComps/calculateARV. Features: sale-age ladder + vintage cap,
