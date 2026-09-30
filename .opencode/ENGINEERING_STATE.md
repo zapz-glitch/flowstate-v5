@@ -110,7 +110,13 @@
   geo verification (SD→N4→N3 match via geography-context, then ±25%
   medianPPSF value-equivalence per scope), ARV/as-is price bands
   (splitPriceBands-equivalent), DEGRADED nearest-miss fallback so it
-  always emits an estimate. artifacts → .data/attom-mcp/.
+  always emits an estimate. Evidence classifier replaces price bands:
+  flip chain (buy 30–365d prior + profit) → investor-buy + ARV-sell pair;
+  distressed flag → as-is; >15% over own scope median $/sf or >own AVM →
+  ARV; permits w/o flip timing → market. Survivor enrichment is ONE call
+  per comp (geography-context+sales-history+permits+valuation). Note:
+  permits have no date field — flip permit timing unverifiable.
+  artifacts → .data/attom-mcp/.
 - MCP geo surface: geography-context gives CO/CS/DB/N3/N4/PZ/SD scopes
   with geoIdv4 + per-scope market stats (saleCount, median price/PPSF
   90/180/365d); geo://{id}/community has demographics. NO census
