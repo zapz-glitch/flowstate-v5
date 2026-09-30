@@ -306,11 +306,72 @@ for (const [days, vintage] of TIERS) {
   if (enabled.length >= BEST_N) break
 }
 
-const selected = pickBestComps(enabled, BEST_N)
+// hard-fail count per comp (verified hard-rule failures only) — used to
+// rank "nearest miss" fallbacks so a thin pool still returns the closest
+// evidence instead of a bare insufficient.
+const hardTypes = new Set(DEFAULT_FILTERS.filter((f) => (f.priority ?? 'hard') === 'hard').map((f) => f.type))
+for (const c of evaluated) {
+  c._hardFails = c.filterResults.filter(
+    (f) => f.passed === false && f.status !== 'not_verified' && hardTypes.has(f.type)
+  ).length
+}
+
+// Price bands (mirrors services/comp-screen splitPriceBands): ARV band =
+// within 10% under pool top; as-is band = within 10% over pool floor.
+// Overlap → assigned to the relatively closer anchor.
+const ARV_BAND_PCT = 0.10
+const AS_IS_BAND_PCT = 0.10
+const priced = enabled.filter((c) => (c.adjustedPrice ?? c.salePrice) != null && (c.adjustedPrice ?? c.salePrice) > 0)
+const arvAnchor = priced.length ? Math.max(...priced.map((c) => c.adjustedPrice ?? c.salePrice)) : null
+const asIsAnchor = priced.length ? Math.min(...priced.map((c) => c.adjustedPrice ?? c.salePrice)) : null
+let arvBand: typeof evaluated = []
+let asIsBand: typeof evaluated = []
+if (arvAnchor != null && asIsAnchor != null) {
+  const inArv = priced.filter((c) => (c.adjustedPrice ?? c.salePrice) >= arvAnchor * (1 - ARV_BAND_PCT))
+  const inAsIs = priced.filter((c) => (c.adjustedPrice ?? c.salePrice) <= asIsAnchor * (1 + AS_IS_BAND_PCT))
+  const arvIds = new Set(inArv.map((c) => c._attomId))
+  for (const c of inAsIs) {
+    if (!arvIds.has(c._attomId)) continue
+    const p = c.adjustedPrice ?? c.salePrice
+    if ((p - asIsAnchor) / asIsAnchor < (arvAnchor - p) / arvAnchor) arvIds.delete(c._attomId)
+  }
+  const overlapIds = arvIds
+  arvBand = inArv.filter((c) => overlapIds.has(c._attomId))
+  asIsBand = inAsIs.filter((c) => !overlapIds.has(c._attomId))
+  for (const c of evaluated) c._band = arvBand.includes(c) ? 'ARV' : asIsBand.includes(c) ? 'AS-IS' : ''
+}
+
+// Degradation contract: never return empty. When the verified pool is
+// thin, top it up with nearest misses (fewest hard fails, then distance)
+// and mark every number DEGRADED so the operator decides sufficiency.
+const nearestMissesAll = evaluated
+  .filter((c) => !c.isEnabled)
+  .sort((a, b) => (a._hardFails - b._hardFails) || ((a.distanceMiles ?? 99) - (b.distanceMiles ?? 99)))
+const degraded = enabled.length < BEST_N
+if (degraded) {
+  for (const c of nearestMissesAll.slice(0, BEST_N - enabled.length)) c._degradedPick = true
+}
+const effectivePool = degraded ? [...enabled, ...nearestMissesAll.slice(0, BEST_N - enabled.length)] : enabled
+const effPriced = effectivePool.filter((c) => (c.adjustedPrice ?? c.salePrice) != null && (c.adjustedPrice ?? c.salePrice) > 0)
+if (degraded && effPriced.length) {
+  // rebuild bands over the topped-up pool
+  const aTop = Math.max(...effPriced.map((c) => c.adjustedPrice ?? c.salePrice))
+  const aFloor = Math.min(...effPriced.map((c) => c.adjustedPrice ?? c.salePrice))
+  arvBand = effPriced.filter((c) => (c.adjustedPrice ?? c.salePrice) >= aTop * (1 - ARV_BAND_PCT))
+  asIsBand = effPriced.filter((c) => (c.adjustedPrice ?? c.salePrice) <= aFloor * (1 + AS_IS_BAND_PCT) && !arvBand.includes(c))
+  for (const c of evaluated) c._band = arvBand.includes(c) ? 'ARV' : asIsBand.includes(c) ? 'AS-IS' : ''
+}
+
+const selected = pickBestComps(arvBand.length ? arvBand : effectivePool, BEST_N)
 const arv = calculateARV(
   evaluated.map((c) => ({ ...c, isEnabled: selected.includes(c) })),
   subjectLike.squareFeet
 )
+const asIsValue = calculateARV(
+  evaluated.map((c) => ({ ...c, isEnabled: asIsBand.includes(c) })),
+  subjectLike.squareFeet
+)
+const nearestMisses = nearestMissesAll.slice(0, 3)
 const attomAvm = valuation?.valuation?.value ?? null
 
 // --- readout ---------------------------------------------------------------
@@ -329,14 +390,24 @@ console.log(`\nCOMPS (${evaluated.length} returned, ${enabled.length} pass filte
 for (const c of evaluated) {
   const fails = c.filterResults.filter((f) => f.passed === false && f.status !== 'not_verified').map((f) => f.type).join(',')
   const mark = selected.includes(c) ? '★' : c.isEnabled ? '✓' : '✗'
+  const band = (c._band ? ` ${c._band}` : '').padEnd(6)
   const geo = c._geoNote ? ` [geo:${c._geoNote}]` : ''
-  console.log(`  ${mark} ${(c._addr ?? '').padEnd(46)} ${money(c.salePrice).padStart(9)} ${String(c.squareFeet ?? '?').padStart(5)}sf ${(c.distanceMiles ?? 0).toFixed(2)}mi ${String(days(c.saleDate)).padStart(4)}d adj ${money(c.adjustedPrice).padStart(9)}${fails ? `  ✗${fails}` : ''}${geo}`)
+  console.log(`  ${mark}${band} ${(c._addr ?? '').padEnd(44)} ${money(c.salePrice).padStart(9)} ${String(c.squareFeet ?? '?').padStart(5)}sf ${(c.distanceMiles ?? 0).toFixed(2)}mi ${String(days(c.saleDate)).padStart(4)}d adj ${money(c.adjustedPrice).padStart(9)}${fails ? `  ✗${fails}` : ''}${geo}`)
 }
 
-console.log(`\nRESULT`)
-console.log(`  selected: ${selected.map((c) => c._addr).join(' | ') || 'none — insufficient comps'}`)
-console.log(`  ARV (rules engine): ${money(arv) || '— insufficient'}`)
-console.log(`  ATTOM AVM:          ${money(attomAvm)}  (confidence ${valuation?.valuation?.confidenceScore ?? '?'})`)
+console.log(`\nRESULT${degraded ? '  ⚠ thin pool — nearest misses below' : ''}`)
+console.log(`  ARV band comps:  ${selected.map((c) => c._addr).join(' | ') || 'none'}`)
+console.log(`  ARV (after-repair):   ${money(arv) || '—'}   ${degraded ? '(DEGRADED — computed on nearest misses)' : `(${arvBand.length} comp${arvBand.length === 1 ? '' : 's'} in band)`}`)
+console.log(`  AS-IS (inv floor):    ${money(asIsValue) || '—'}   ${asIsBand.length ? `(${asIsBand.length} comp${asIsBand.length === 1 ? '' : 's'} in band)` : '(no floor comps in pool)'}`)
+if (arv && asIsValue) console.log(`  spread ARV vs as-is:  ${money(arv - asIsValue)} (${Math.round(((arv - asIsValue) / asIsValue) * 100)}%)`)
+console.log(`  ATTOM AVM (as-is):    ${money(attomAvm)}  (confidence ${valuation?.valuation?.confidenceScore ?? '?'})`)
+if (nearestMisses.length) {
+  console.log(`\nNEAREST MISSES (closest evidence that failed):`)
+  for (const c of nearestMisses) {
+    const reasons = c.disableReasons.join('; ') || '—'
+    console.log(`  ~ ${c._addr}  ${money(c.adjustedPrice)}  ${(c.distanceMiles ?? 0).toFixed(2)}mi — ${reasons}`)
+  }
+}
 
 mkdirSync(OUT_DIR, { recursive: true })
 const slug = String(address).toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 50)
