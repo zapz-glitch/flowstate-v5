@@ -604,6 +604,8 @@ export interface CompsData {
   count?: number
   enabledCount?: number
   disabledCount?: number
+  /** True when the pool couldn't support a valuation — valuation is null */
+  insufficientComps?: boolean
   avgPricePerSqft?: number | null
   medianPrice?: number | null
   items?: CompItem[]

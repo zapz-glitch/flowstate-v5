@@ -93,6 +93,11 @@ userReports.post('/:jobId/permits', async (c) => {
 
   const subject = saved.subject
   if (!subject?.id) return c.json({ error: 'Report has no subject property to pull permits for' }, 409)
+  // Insufficient-comps reports carry valuation:null — re-running valuation
+  // on a null ARV would write a garbage zero-ARV deal over the report.
+  if (saved.valuation?.arv == null) {
+    return c.json({ error: 'This report has no valuation to reprice — rerun the analysis with a comp pool that qualifies.' }, 409)
+  }
 
   const address = typeof subject.address === 'string' ? subject.address : ''
   const comma = address.indexOf(',')

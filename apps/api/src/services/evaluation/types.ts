@@ -113,7 +113,8 @@ export interface EvaluationReport {
 
   /** ARV justification */
   arv: {
-    value: number
+    /** Null on insufficient-comps runs — no ARV was produced */
+    value: number | null
     methodology: string
     pricePerSqft: number | null
     /** Comps that drove the valuation, highest weight first */
@@ -134,14 +135,14 @@ export interface EvaluationReport {
 
   /** Rehab justification — full renovation cost ledger */
   rehab: {
-    level: RehabLevel | 'Renovated'
+    level: RehabLevel | 'Renovated' | null
     levelIndex: number
-    perSqft: number
-    baseCost: number
+    perSqft: number | null
+    baseCost: number | null
     majorItems: Array<{ name: string; cost: number; reason: string }>
-    majorItemsCost: number
+    majorItemsCost: number | null
     additionPlay: number
-    totalCost: number
+    totalCost: number | null
     derived: boolean
     reason: string
     /** Source of the final level */
@@ -160,15 +161,15 @@ export interface EvaluationReport {
   /** Itemized deductions applied between ARV and max buy price */
   deductions: ReportDeduction[]
 
-  /** Final numbers */
+  /** Final numbers — null on insufficient-comps runs */
   outcome: {
-    maxBuyPrice: number
-    buyPricePercent: number
-    wholesalePrice: number
-    projectedProfit: number
-    projectedROI: number
-    totalInvestment: number
-    recommendation: string
+    maxBuyPrice: number | null
+    buyPricePercent: number | null
+    wholesalePrice: number | null
+    projectedProfit: number | null
+    projectedROI: number | null
+    totalInvestment: number | null
+    recommendation: string | null
     recommendationReason: string
   }
 

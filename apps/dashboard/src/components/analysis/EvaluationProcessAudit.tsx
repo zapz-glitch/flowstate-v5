@@ -225,7 +225,9 @@ export function EvaluationProcessAudit({
   run: JevHybridData | null | undefined
 }) {
   const [open, setOpen] = useState(false)
-  if (!valuation || !comps) return null
+  // Renders without a valuation too — on insufficient-comps reports the
+  // audit trail (test 1 / test 2 per comp) is the whole point of the page.
+  if (!comps) return null
   const items = comps.items ?? []
 
   // 'arv'/'fill' selected values tolerated for pre-two-test saved reports.
@@ -302,7 +304,7 @@ export function EvaluationProcessAudit({
             </Group>
           )}
           <p className="text-[10px] text-foreground-secondary tabular-nums">
-            ARV = {equation(arvPrices, valuation.arv ?? null)}
+            ARV = {equation(arvPrices, valuation?.arv ?? null)}
           </p>
         </>
       )}

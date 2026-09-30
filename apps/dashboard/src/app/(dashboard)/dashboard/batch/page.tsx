@@ -547,7 +547,11 @@ export default function BatchPage() {
     return b
   }, [completedRows])
 
-  const isInsufficient = (r: BatchResult) => r.status === 'failed' && (r.error ?? '').includes('INSUFFICIENT_COMPS')
+  // Insufficient-comps runs now complete with a report (valuation null) —
+  // count both the legacy error shape and the new completed-without-ARV one.
+  const isInsufficient = (r: BatchResult) =>
+    (r.status === 'failed' && (r.error ?? '').includes('INSUFFICIENT_COMPS')) ||
+    (r.status === 'completed' && r.arv == null)
 
   const filteredRows = useMemo(() => {
     switch (confFilter) {

@@ -61,29 +61,29 @@ export function extractAnalysisFieldValue(
 ): string | number | null {
   switch (field) {
     case 'arv':
-      return response.valuation.arv
+      return response.valuation?.arv ?? null
     case 'buyPrice':
-      return response.valuation.buyPrice
+      return response.valuation?.buyPrice ?? null
     case 'rehabCost':
-      return response.valuation.rehabCost
+      return response.valuation?.rehabCost ?? null
     case 'projectedProfit':
-      return response.valuation.projectedProfit
+      return response.valuation?.projectedProfit ?? null
     case 'projectedROI':
-      return Math.round(response.valuation.projectedROI * 100) / 100
+      return response.valuation != null ? Math.round(response.valuation.projectedROI * 100) / 100 : null
     case 'wholesalePrice':
-      return response.valuation.wholesalePrice
+      return response.valuation?.wholesalePrice ?? null
     case 'rehabLevel':
-      return response.valuation.rehabLevel
+      return response.valuation?.rehabLevel ?? null
     case 'recommendation':
       return deriveRecommendation(response)
     case 'spread':
-      return response.valuation.spread
+      return response.valuation?.spread ?? null
     case 'classification':
       return response.subject.classification?.type ?? null
     case 'compsUsed':
       return response.comps.enabledCount
     case 'arvPerSqft':
-      return response.valuation.arvPerSqft
+      return response.valuation?.arvPerSqft ?? null
     case 'topComps':
       return formatTopComps(response)
     case 'fullSummary':
@@ -96,7 +96,8 @@ export function extractAnalysisFieldValue(
 /**
  * Derive recommendation from valuation data
  */
-function deriveRecommendation(response: AnalysisResponse): string {
+function deriveRecommendation(response: AnalysisResponse): string | null {
+  if (!response.valuation) return null
   const roi = response.valuation.projectedROI
   if (roi >= 30) return 'Strong Buy'
   if (roi >= 15) return 'Buy'
@@ -133,19 +134,24 @@ export function buildAnalysisSummary(response: AnalysisResponse): string {
   if (s.classification?.type) {
     lines.push(`Classification: ${s.classification.type.replace('_', ' ')}`)
   }
-  lines.push('')
-  lines.push(`ARV: $${v.arv.toLocaleString()} ($${v.arvPerSqft}/sqft)`)
-  lines.push(`Buy Price: $${v.buyPrice.toLocaleString()}`)
-  lines.push(`Rehab: $${v.rehabCost.toLocaleString()} (${v.rehabLevel})`)
-  lines.push(`Profit: $${v.projectedProfit.toLocaleString()} (${Math.round(v.projectedROI)}% ROI)`)
-  lines.push(`Wholesale: $${v.wholesalePrice.toLocaleString()}`)
+  if (v) {
+    lines.push('')
+    lines.push(`ARV: $${v.arv?.toLocaleString() ?? '—'} ($${v.arvPerSqft}/sqft)`)
+    lines.push(`Buy Price: $${v.buyPrice.toLocaleString()}`)
+    lines.push(`Rehab: $${v.rehabCost.toLocaleString()} (${v.rehabLevel})`)
+    lines.push(`Profit: $${v.projectedProfit.toLocaleString()} (${Math.round(v.projectedROI)}% ROI)`)
+    lines.push(`Wholesale: $${v.wholesalePrice.toLocaleString()}`)
 
-  if (v.spread != null) {
-    lines.push(`Spread: $${v.spread.toLocaleString()}`)
+    if (v.spread != null) {
+      lines.push(`Spread: $${v.spread.toLocaleString()}`)
+    }
+  } else {
+    lines.push('')
+    lines.push('Valuation: not produced — insufficient comps')
   }
 
   lines.push('')
-  lines.push(`Recommendation: ${deriveRecommendation(response)}`)
+  lines.push(`Recommendation: ${deriveRecommendation(response) ?? 'n/a'}`)
   lines.push(`Comps Used: ${response.comps.enabledCount} of ${response.comps.total}`)
 
   const topComps = formatTopComps(response)
