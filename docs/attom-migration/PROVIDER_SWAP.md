@@ -103,6 +103,35 @@ Known ATTOM quirks already encoded (see header comment in `attom.ts`):
 - `types.ts` — `ATTOM_API_KEY` declared; CoreLogic key-pair block stays
   until removal is approved.
 
+## ATTOM endpoint map (from api.developer.attomdata.com/docs)
+
+Base: `https://api.gateway.attomdata.com`. Auth: `apikey` header on every
+request; `Accept: application/json`. No-match returns `400` +
+`status.msg = "SuccessWithoutResult"` (uncharged). Legacy param `id` is
+an accepted alias for `attomid`.
+
+### Proposed call-for-call mapping
+
+| Adapter method | Cotality call (today) | ATTOM replacement |
+|---|---|---|
+| `searchProperty` | `/v2/properties/search` + `/{clip}/property-detail` | `/propertyapi/v1.0.0/property/expandedprofile?address1&address2` + `/propertyapi/v1.0.0/attomavm/detail` (already implemented) |
+| `getPropertyById` | `/v2/properties/{clip}/property-detail` | `/propertyapi/v1.0.0/property/detail?attomid={id}` (implemented) |
+| `getComparables` | `/v2/properties/{clip}/comparables` | `/property/v2/salescomparables/propid/{id}` (implemented; also `/salescomparables/apn/{apn}/{county}/{state}` variant) |
+| `getBuildingPermits` | `/v2/properties/{clip}/building-permits` | `/propertyapi/v1.0.0/property/buildingpermits?address1&address2` (implemented; also accepts `attomid`) |
+| `getAvm` | `/property/{parcelId}/avm/thv/{model}` | `/propertyapi/v1.0.0/attomavm/detail?attomid={id}` or `/propertyapi/v1.0.0/avm/detail` — attomid/address keyed, replaces parcel key. `attomavm` = cascaded multi-model; `avm` = single model with high/low/scr |
+| `getBuildingDetail` | `/property/{parcelId}/building` | `/propertyapi/v1.0.0/property/detail?attomid={id}` — construction/utilities/levels live on the same payload as `getPropertyById`; verify condition/style coverage on real responses, else `/allevents/detail` or `expandedprofile` |
+| `getFloodZone` / `getFloodZoneByParcel` | `/spatial-api/flood-zone-determination` + `/property/{parcelId}/flood-zone` | **No dedicated ATTOM flood endpoint found.** Options: (a) keep `NOT_SUPPORTED` (listing-scrape First Street signal is the effective path today); (b) `geoIdV4` flood-zone area type + `areaapi`/`v4` lookups; (c) `/v4/neighborhood/community` natural-disaster section. **Needs product decision** |
+| `corelogicTypeahead` | `/v2/properties/typeahead` | **No ATTOM autocomplete/typeahead endpoint.** Closest: `/property/snapshot`, `/property/address` radius, or `poisearch/v2.0.0/poi/Street+Address`. **Needs product decision** (e.g. Google Places, which the dashboard already keys) |
+
+### Other ATTOM resources available (not currently called — for reference)
+
+- `/assessment/detail|snapshot`, `/assessmenthistory/detail` — tax/assessment
+- `/sale/detail|snapshot`, `/saleshistory/detail|expandedhistory|basichistory|snapshot` — transaction flags (foreclosure, cash, interfamily) for comp enrichment
+- `/avm/snapshot`, `/avmhistory/detail`, `/valuation/rentalavm`, `/valuation/homeequity`
+- `/allevents/detail|snapshot` — consolidated property event history (single property per request)
+- `/school/*`, `/v4/neighborhood/community` (crime/demographics/climate/natural disasters), `/v4/neighborhood/poi*`, `/transaction/salestrend`
+- `/geoid/lookup`, `/geoid/legacyLookup`, `/areaapi/v2.0.0/*`, `/enumerations/detail`
+
 ## Semantic gaps a clean swap must resolve
 
 1. **Property ID model.** Cotality `id` = CLIP; ATTOM `id` = attomId.
