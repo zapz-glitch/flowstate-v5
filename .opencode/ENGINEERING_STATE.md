@@ -81,14 +81,27 @@
   env; ATTOM adapter exists but is partial (no parcel flood/AVM/building
   detail, no typeahead, no throttle/rotation).
 - `ATTOM_API_KEY` is declared in `types.ts` but NOT in
-  `apps/api/.dev.vars` — needed before local verification.
-- Blocked on user-supplied ATTOM API docs + MCP server docs before
-  implementation. User will supply corrected endpoints for any call that
+  `apps/api/.dev.vars` — needed before local verification of the REST
+  adapter. (MCP path does not use it — OAuth instead.)
+- ATTOM MCP server is LIVE and verified: `https://mcp.intelligence.attomdata.com`
+  (streamable HTTP, OAuth/Descope via `devin mcp login attom` — token in
+  `~/.local/share/devin/mcp/oauth/`). Configured in `.devin/mcp_config.json`.
+  Tool surface: `get_property_data`, `resolve_property_identity`,
+  `find_property_candidates`, `find_comparable_sales`,
+  `resolve_area_geo`, `get_community_data`, `find_nearby_poi`,
+  `search_taxonomy`. Resource-first: tools return `property://{attomId}/*`
+  resource links; catalog at `mcp://catalog`.
+- Verified call: `resolve_property_identity` on test address
+  16049 Magnolia Hill St, Clermont, FL 34714 → attomId 291488
+  (rooftop match, FIPS 12069, APN 22-24-26-1500-000-02700).
+- Still blocked on user-supplied ATTOM REST API docs for the provider
+  swap itself. User will supply corrected endpoints for any call that
   errors during the swap.
 
 ## Last handoff
 
-PR #79 merged and deployed. New objective started: read-only provider
-scan complete, migration doc committed on `feat/attom-provider-swap`.
-Resume at the swap once ATTOM/MCP docs arrive — start with the doc's
-"Semantic gaps" list.
+PR #79 merged and deployed. ATTOM MCP server connected + authenticated +
+verified end-to-end against the Magnolia test address (attomId 291488).
+`attom` tools appear in new sessions in this repo. Resume: REST adapter
+swap per `docs/attom-migration/PROVIDER_SWAP.md` "Semantic gaps" once
+ATTOM API docs/key arrive; MCP tools can serve as live schema reference.
