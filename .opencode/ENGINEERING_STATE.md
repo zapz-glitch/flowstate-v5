@@ -67,14 +67,28 @@
 
 ## Current state
 
-- `main` is production (auto-deploys on push). Merged through PR #78.
-- Open: PR #79 (`fix/insufficient-comps-report`) — insufficient comps
-  degrade to a saved report. Test + full API suite verified; awaiting
-  merge. After deploy, retry a known-insufficient address on prod
-  (e.g. 12717 Dunn Creek Rd, or 1802 Hunters Gln NE, Marietta GA).
+- `main` is production (auto-deploys on push). Merged through PR #79 —
+  insufficient comps degrade to a saved report. Prod verification of a
+  known-insufficient address (12717 Dunn Creek Rd / 1802 Hunters Gln NE,
+  Marietta GA) still pending after that deploy.
+- Objective: swap data provider Cotality → ATTOM for all property API
+  calls (clean per-call swaps; nothing removed unless told) + add an
+  ATTOM MCP server for tool calling. Working branch:
+  `feat/attom-provider-swap`.
+- Inventory + gap map lives in `docs/attom-migration/PROVIDER_SWAP.md`.
+  Read-only scan done: adapter boundary is `PropertyProviderAdapter`
+  (`services/property-api/types.ts`), selected by `PROPERTY_PROVIDER`
+  env; ATTOM adapter exists but is partial (no parcel flood/AVM/building
+  detail, no typeahead, no throttle/rotation).
+- `ATTOM_API_KEY` is declared in `types.ts` but NOT in
+  `apps/api/.dev.vars` — needed before local verification.
+- Blocked on user-supplied ATTOM API docs + MCP server docs before
+  implementation. User will supply corrected endpoints for any call that
+  errors during the swap.
 
 ## Last handoff
 
-PR #79 pushed and open. Next: merge, deploy (auto on merge), retry an
-insufficient address to confirm the report renders. Nothing else is
-pending from prior sessions.
+PR #79 merged and deployed. New objective started: read-only provider
+scan complete, migration doc committed on `feat/attom-provider-swap`.
+Resume at the swap once ATTOM/MCP docs arrive — start with the doc's
+"Semantic gaps" list.
