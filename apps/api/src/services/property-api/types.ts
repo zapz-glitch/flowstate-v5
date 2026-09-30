@@ -7,7 +7,7 @@
 
 // ─── Provider Types ─────────────────────────────────────────────────────────
 
-export type PropertyProvider = 'corelogic' | 'attom'
+export type PropertyProvider = 'corelogic' | 'attom' | 'attom-mcp'
 
 // ─── Search Parameters ──────────────────────────────────────────────────────
 

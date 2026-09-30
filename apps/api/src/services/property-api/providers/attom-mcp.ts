@@ -1,0 +1,562 @@
+/**
+ * ATTOM MCP Provider (experimental — feat/attom-provider-swap)
+ *
+ * Implements PropertyProviderAdapter over the ATTOM intelligence MCP server
+ * (Streamable HTTP JSON-RPC) instead of the REST gateway. Used when
+ * PROPERTY_PROVIDER=attom-mcp.
+ *
+ * Auth: Descope OAuth. Access tokens live ~10 min; refresh tokens rotate on
+ * every use. The pair is injected via env vars (ATTOM_MCP_ACCESS_TOKEN /
+ * ATTOM_MCP_REFRESH_TOKEN / ATTOM_MCP_CLIENT_ID / ATTOM_MCP_EXPIRES_AT) —
+ * Workers can't read the Devin OAuth file, so `scripts/sync-attom-token.mjs`
+ * refreshes the CLI creds and writes them into .dev.vars before boot.
+ * In-worker refreshes hold the rotated pair in module memory for the life
+ * of the isolate; if env creds go stale, re-run the sync script.
+ *
+ * Field notes from live MCP probing (2026-09-30):
+ *   - get_property_data: { property: { lookupMode: 'address'|'attomId', ... },
+ *     datasets: [...] } → structuredContent.results[] keyed by dataset
+ *   - find_comparable_sales: subjectAttomId, limit, saleDateFrom,
+ *     maxDistanceMiles, propertyTypeStrict → records carry attomId,
+ *     centerPoint, neighborhoodN4 (micro-neighborhood, NOT legal subdivision)
+ *   - geography-context: subject.subdivision (legal SD) + geographies[]
+ *     (CO/CS/DB/N3/N4/PZ/SD scopes with geoIdv4) + layers[] (per-scope
+ *     saleCount/medianPrice/medianPPSF over 90/180/365d)
+ *   - sales-history: per-transaction flip/distressed flags, buyers/sellers
+ *   - valuation: AVM value + confidenceScore + range
+ *   - NO census tract/block — comp-hybrid's fetchCensusGeography covers that
+ *   - permits carry no date field
+ */
+
+import type { Env } from '../../../types'
+import type {
+  PropertyProviderAdapter,
+  PropertySearchParams,
+  PropertySearchResponse,
+  ComparablesSearchParams,
+  ComparablesSearchResponse,
+  PermitsResponse,
+  FloodZoneResponse,
+  AvmResponse,
+  BuildingDetailResponse,
+  NormalizedProperty,
+  NormalizedComparable,
+  NormalizedPermit,
+  NormalizedFloodZone,
+  NormalizedAvm,
+  NormalizedBuildingDetail,
+} from '../types'
+import { fetchCensusGeography } from '../../geo/census-geocoder'
+import { buildRetrievalMeta } from '../retrieval-policy'
+
+// ─── MCP transport ────────────────────────────────────────────────────────────
+
+const MCP_URL = 'https://mcp.intelligence.attomdata.com'
+const TOKEN_URL = 'https://auth.intelligence.attomdata.com/oauth2/v1/apps/token'
+const UA = 'flowstate-api/attom-mcp-provider (experimental)'
+
+interface McpCreds {
+  accessToken: string
+  refreshToken: string
+  clientId: string
+  /** epoch seconds */
+  expiresAt: number
+}
+
+// Isolate-scoped: rotated tokens live here for the lifetime of the isolate.
+let credsCache: McpCreds | null = null
+let refreshInFlight: Promise<string> | null = null
+
+function envCreds(env: Env): McpCreds | null {
+  if (!env.ATTOM_MCP_ACCESS_TOKEN || !env.ATTOM_MCP_REFRESH_TOKEN || !env.ATTOM_MCP_CLIENT_ID) return null
+  return {
+    accessToken: env.ATTOM_MCP_ACCESS_TOKEN,
+    refreshToken: env.ATTOM_MCP_REFRESH_TOKEN,
+    clientId: env.ATTOM_MCP_CLIENT_ID,
+    expiresAt: Number(env.ATTOM_MCP_EXPIRES_AT ?? 0),
+  }
+}
+
+async function refreshCreds(env: Env): Promise<string> {
+  if (!credsCache?.refreshToken) throw new Error('ATTOM_MCP: no refresh token configured')
+  const resp = await fetch(TOKEN_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': UA },
+    body: new URLSearchParams({
+      grant_type: 'refresh_token',
+      refresh_token: credsCache.refreshToken,
+      client_id: credsCache.clientId,
+    }),
+    signal: AbortSignal.timeout(15000),
+  })
+  const body = (await resp.json()) as {
+    access_token?: string
+    refresh_token?: string
+    expires_in?: number
+    error?: string
+    error_description?: string
+  }
+  if (!resp.ok || !body.access_token) {
+    throw new Error(
+      `ATTOM_MCP token refresh failed ${resp.status}: ${body.error ?? ''} ${body.error_description ?? ''}`.trim(),
+    )
+  }
+  credsCache = {
+    ...credsCache,
+    accessToken: body.access_token,
+    refreshToken: body.refresh_token ?? credsCache.refreshToken,
+    expiresAt: Math.floor(Date.now() / 1000) + (body.expires_in ?? 600),
+  }
+  console.log('ATTOM_MCP: token refreshed in-worker (env pair is now stale — run scripts/sync-attom-token.mjs before next boot)')
+  return credsCache.accessToken
+}
+
+async function ensureToken(env: Env): Promise<string> {
+  if (!credsCache) credsCache = envCreds(env)
+  if (!credsCache) throw new Error('ATTOM_MCP: credentials not configured (ATTOM_MCP_ACCESS_TOKEN/REFRESH_TOKEN/CLIENT_ID)')
+  if (credsCache.expiresAt > Date.now() / 1000 + 30) return credsCache.accessToken
+  // De-dupe concurrent refreshes within the isolate
+  if (!refreshInFlight) {
+    refreshInFlight = refreshCreds(env).finally(() => { refreshInFlight = null })
+  }
+  return refreshInFlight
+}
+
+async function mcpRpc(env: Env, method: string, params: unknown, depth = 0): Promise<any> {
+  const token = await ensureToken(env)
+  const resp = await fetch(env.ATTOM_MCP_ENDPOINT ?? MCP_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json, text/event-stream',
+      Authorization: `Bearer ${token}`,
+      'User-Agent': UA,
+    },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+    signal: AbortSignal.timeout(30000),
+  })
+  const text = await resp.text()
+
+  // One retry after a forced refresh — covers stale clock / revoked session
+  if (resp.status === 401 && depth === 0) {
+    console.log('ATTOM_MCP: 401 — forcing token refresh and retrying once')
+    if (credsCache) credsCache.expiresAt = 0
+    refreshInFlight = null
+    return mcpRpc(env, method, params, depth + 1)
+  }
+
+  if (!resp.ok) throw new Error(`ATTOM_MCP ${method} → HTTP ${resp.status}: ${text.slice(0, 300)}`)
+  // Streamable HTTP may answer SSE — take the last data: payload
+  const dataLine = text.split('\n').filter((l) => l.startsWith('data:')).pop()
+  const json = JSON.parse(dataLine ? dataLine.slice(5).trim() : text)
+  if (json.error) throw new Error(`ATTOM_MCP ${method} → ${json.error.code}: ${json.error.message}`)
+  return json.result
+}
+
+async function callTool(env: Env, name: string, args: Record<string, unknown>): Promise<any> {
+  return mcpRpc(env, 'tools/call', { name, arguments: args })
+}
+
+function dataset<T = any>(results: any[] | undefined, name: string): T | null {
+  const r = results?.find((x: any) => x.dataset === name)
+  return r?.status === 'ok' || r?.data != null ? (r?.data ?? null) : null
+}
+
+// ─── parcelId ↔ attomId bridge ────────────────────────────────────────────────
+// The pipeline keys flood/AVM/building calls on composite parcelId
+// (fips:apn). We synthesize the same shape and keep a map so those calls can
+// resolve back to the attomId.
+
+const parcelToAttom = new Map<string, string>()
+
+function registerParcel(attomId: string | null | undefined, fips?: string | null, apn?: string | null): string | null {
+  if (!attomId || !fips || !apn) return null
+  const parcelId = `${fips}:${apn}`
+  parcelToAttom.set(parcelId, attomId)
+  return parcelId
+}
+
+// ─── MCP record types (loose — surface is still evolving) ─────────────────────
+
+interface McpCompRecord {
+  attomId?: string | number
+  address?: string
+  centerPoint?: { latitude?: number; longitude?: number } | null
+  distanceMiles?: number | null
+  salePrice?: number | null
+  saleDate?: string | null
+  recordedDate?: string | null
+  pricePerSqFt?: number | null
+  squareFootage?: number | null
+  lotSquareFootage?: number | null
+  yearBuilt?: number | null
+  bedrooms?: number | null
+  fullBathrooms?: number | null
+  partialBathrooms?: number | null
+  garageSpaces?: number | null
+  propertyUse?: string | null
+  propertyTypeKey?: string | null
+  neighborhoodN4?: string | null
+  distressedStatus?: boolean | null
+  normalizedScore?: number | null
+  saleId?: string | number | null
+}
+
+// ─── Normalizers ──────────────────────────────────────────────────────────────
+
+function parseOneLine(addr?: string | null): { line1: string; city: string; state: string; zip: string } {
+  const m = (addr ?? '').match(/^(.+?),\s*([^,]+),\s*([A-Z]{2})\s+(\d{5})/i)
+  if (!m) return { line1: addr ?? '', city: '', state: '', zip: '' }
+  return { line1: m[1], city: m[2], state: m[3].toUpperCase(), zip: m[4] }
+}
+
+function latestPricedSale(sales: any[] | null): any | null {
+  return (sales ?? []).find((s) => s.price != null && s.price > 1000 && s.saleDate) ?? null
+}
+
+async function normalizeMcpProperty(results: any[], env: Env): Promise<NormalizedProperty> {
+  const identity = dataset<any>(results, 'identity')
+  const overview = dataset<any>(results, 'overview')
+  const geo = dataset<any>(results, 'geography-context')
+  const valuation = dataset<any>(results, 'valuation')
+  const sales = dataset<any[]>(results, 'sales-history') ?? []
+  const taxHist = dataset<any[]>(results, 'tax-history') ?? []
+
+  const ch = overview?.characteristics ?? {}
+  const attomId = String(identity?.attomId ?? geo?.attomId ?? '')
+  const addr = identity?.address ?? geo?.address ?? {}
+  const ids = identity?.identifiers ?? {}
+  const center = geo?.subject?.centerPoint
+    ?? (identity?.location ? { latitude: identity.location.latitude, longitude: identity.location.longitude } : null)
+    ?? identity?.centerPoint
+    ?? {}
+  const geos: any[] = geo?.subject?.geographies ?? []
+  const geoByType = (t: string) => geos.find((g) => g.geographyType === t)
+  const lastSale = latestPricedSale(sales)
+  const latestTax = taxHist[0] ?? null
+  const baths = (ch.fullBathrooms ?? 0) + 0.5 * (ch.partialBathrooms ?? 0)
+
+  const census = center.latitude != null && center.longitude != null
+    ? await fetchCensusGeography(center.latitude, center.longitude, env.API_CACHE).catch(() => null)
+    : null
+
+  const property: NormalizedProperty = {
+    id: attomId,
+    provider: 'attom-mcp',
+
+    address: addr.line1 ?? '',
+    city: addr.city ?? '',
+    state: addr.state ?? '',
+    zipCode: addr.postalCode ?? '',
+    county: addr.county,
+
+    latitude: center.latitude ?? null,
+    longitude: center.longitude ?? null,
+
+    bedrooms: ch.bedrooms ?? null,
+    bathrooms: baths || null,
+    fullBathrooms: ch.fullBathrooms ?? null,
+    halfBathrooms: ch.partialBathrooms ?? null,
+    squareFeet: ch.livingAreaSquareFeet ?? null,
+    lotSizeAcres: ch.lotSquareFeet ? ch.lotSquareFeet / 43560 : null,
+    lotSizeSquareFeet: ch.lotSquareFeet ?? null,
+    yearBuilt: ch.yearBuilt ?? null,
+    propertyType: ch.propertyUse ?? overview?.summary?.propertyType ?? null,
+    stories: ch.stories ?? ch.levels ?? null,
+
+    lastSalePrice: lastSale?.price ?? null,
+    lastSaleDate: lastSale?.saleDate ? String(lastSale.saleDate).slice(0, 10) : null,
+    pricePerSqft: lastSale?.price && ch.livingAreaSquareFeet ? Math.round(lastSale.price / ch.livingAreaSquareFeet) : null,
+
+    assessedValue: latestTax?.totalValue ?? null,
+    landAssessedValue: latestTax?.landValue ?? null,
+    improvementAssessedValue: latestTax?.improvementValue ?? null,
+    marketValue: latestTax?.totalValue ?? null,
+    taxAmount: latestTax?.tax ?? null,
+    taxYear: latestTax?.taxYear ?? undefined,
+
+    avmValue: valuation?.valuation?.value ?? null,
+    avmConfidence: valuation?.valuation?.confidenceScore ?? null,
+
+    subdivision: geo?.subject?.subdivision ?? geoByType('SD')?.geographyName ?? undefined,
+    neighborhoodName: geoByType('N4')?.geographyName ?? geoByType('N3')?.geographyName ?? undefined,
+    neighborhoodCode: geoByType('N4')?.geographyId ?? geoByType('N3')?.geographyId ?? undefined,
+    censusTract: census?.tract ?? undefined,
+    zoning: ch.zoning ?? identity?.zoning ?? undefined,
+
+    parcelId: registerParcel(attomId, ids.fips ?? addr.fips, ids.apn ?? identity?.parcelId),
+    apnFormatted: ids.apn ?? identity?.parcelId ?? undefined,
+
+    construction: {
+      type: ch.constructionType ?? undefined,
+      buildingStyle: ch.architecturalStyle ?? undefined,
+      roofCover: ch.roofCover ?? undefined,
+      foundationType: ch.foundationType ?? undefined,
+      exteriorWalls: ch.exteriorWalls ?? undefined,
+    },
+    features: {
+      garageType: ch.garageSpaces ? 'garage' : undefined,
+      garageSquareFeet: (ch.garageSpaces ?? 0) > 20 ? ch.garageSpaces : undefined,
+      heating: ch.heating ?? undefined,
+      cooling: ch.cooling ?? undefined,
+      poolType: ch.poolType ?? (ch.pool ? 'pool' : undefined),
+      fireplacesCount: ch.fireplaces ?? undefined,
+    },
+
+    transaction: lastSale ? {
+      buyerNames: lastSale.buyers ? [String(lastSale.buyers)] : undefined,
+      sellerNames: lastSale.sellers ? [String(lastSale.sellers)] : undefined,
+      isForeclosure: lastSale.distressed === true || undefined,
+    } : undefined,
+
+    raw: { results },
+  }
+  return property
+}
+
+function normalizeMcpComp(c: McpCompRecord): NormalizedComparable {
+  const a = parseOneLine(c.address)
+  const baths = (c.fullBathrooms ?? 0) + 0.5 * (c.partialBathrooms ?? 0)
+  const attomId = String(c.attomId ?? '')
+  return {
+    id: attomId,
+    provider: 'attom-mcp',
+
+    address: a.line1,
+    city: a.city,
+    state: a.state,
+    zipCode: a.zip,
+
+    latitude: c.centerPoint?.latitude ?? null,
+    longitude: c.centerPoint?.longitude ?? null,
+    distanceMiles: c.distanceMiles ?? null,
+
+    bedrooms: c.bedrooms ?? null,
+    bathrooms: baths || null,
+    squareFeet: c.squareFootage ?? null,
+    lotSizeAcres: c.lotSquareFootage ? c.lotSquareFootage / 43560 : null,
+    lotSizeSquareFeet: c.lotSquareFootage ?? null,
+    yearBuilt: c.yearBuilt ?? null,
+    propertyType: c.propertyUse ?? c.propertyTypeKey ?? null,
+
+    salePrice: c.salePrice ?? null,
+    saleDate: c.saleDate ? String(c.saleDate).slice(0, 10) : null,
+    pricePerSqft: c.pricePerSqFt ?? (c.salePrice && c.squareFootage ? Math.round(c.salePrice / c.squareFootage) : null),
+
+    // N4 is ATTOM's micro-neighborhood layer — NOT the legal subdivision.
+    // subdivision fills in via getPropertyById (geography-context) during
+    // enrichComparables; N4 maps to neighborhoodName.
+    neighborhoodName: c.neighborhoodN4 ?? null,
+
+    transaction: c.distressedStatus ? { isForeclosure: true } : undefined,
+
+    raw: c,
+  }
+}
+
+function normalizeMcpPermit(attomId: string, p: any): NormalizedPermit {
+  return {
+    permitId: `${attomId}:${p.permitNumber ?? ''}`,
+    permitNumber: p.permitNumber ?? null,
+    status: p.status ?? null,
+    effectiveDate: null, // MCP permits carry no dates
+    expirationDate: null,
+    projectType: p.permitType ?? null,
+    projectCategory: null,
+    classificationTypes: [],
+    description: p.description ?? null,
+    jobValue: typeof p.jobValue === 'number' ? p.jobValue : null,
+    contractorName: null,
+    areaSquareFeet: null,
+    raw: p,
+  }
+}
+
+function femaToFloodZone(fema: any): NormalizedFloodZone {
+  const panel = fema?.panelContext ?? {}
+  return {
+    floodZone: panel.zoneCode ?? null,
+    floodZoneDescription: panel.zoneDescription ?? null,
+    isInFloodZone: panel.zoneCode ? !/^X$/i.test(panel.zoneCode) : false,
+    isNearFloodZone: false,
+    communityName: null,
+    communityNumber: panel.communityId ?? null,
+    firmMapNumber: panel.firmPanel ?? panel.mapNumber ?? null,
+    mapPanel: panel.panel ?? null,
+    mapDate: panel.panelDate ? String(panel.panelDate).slice(0, 10) : null,
+    participationStatus: null,
+    specialFloodHazardArea: panel.zoneCode ? (/^X$/i.test(panel.zoneCode) ? 'Out' : 'In') : null,
+    source: 'parcel',
+  }
+}
+
+// ─── Provider ─────────────────────────────────────────────────────────────────
+
+const SUBJECT_DATASETS = ['identity', 'overview', 'geography-context', 'valuation', 'sales-history', 'tax-history']
+const COMP_DETAIL_DATASETS = ['identity', 'overview', 'geography-context', 'sales-history', 'valuation']
+const MCP_COMP_LIMIT_CAP = 25 // find_comparable_sales limit param max is 25
+
+class AttomMcpProvider implements PropertyProviderAdapter {
+  readonly name = 'attom-mcp' as const
+  private env: Env
+
+  constructor(env: Env) {
+    this.env = env
+  }
+
+  private async propertyData(lookup: Record<string, unknown>, datasets: string[]): Promise<any[]> {
+    const result = await callTool(this.env, 'get_property_data', { property: lookup, datasets })
+    return result?.structuredContent?.results ?? []
+  }
+
+  async searchProperty(params: PropertySearchParams): Promise<PropertySearchResponse> {
+    const address =
+      params.address ??
+      [params.streetAddress, params.city, params.state, params.zipCode].filter(Boolean).join(', ')
+    if (!address) return { success: false, error: 'Address is required', code: 'INVALID_PARAMS' }
+    try {
+      const results = await this.propertyData({ lookupMode: 'address', address }, SUBJECT_DATASETS)
+      const property = await normalizeMcpProperty(results, this.env)
+      if (!property.id) return { success: false, error: 'Property not found', code: 'NOT_FOUND' }
+      return { success: true, data: property }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'MCP property search failed', code: 'API_ERROR' }
+    }
+  }
+
+  async getPropertyById(propertyId: string): Promise<PropertySearchResponse> {
+    try {
+      const results = await this.propertyData(
+        { lookupMode: 'attomId', attomId: propertyId },
+        COMP_DETAIL_DATASETS,
+      )
+      const property = await normalizeMcpProperty(results, this.env)
+      if (!property.id) return { success: false, error: 'Property not found', code: 'NOT_FOUND' }
+      return { success: true, data: property }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'MCP property lookup failed', code: 'API_ERROR' }
+    }
+  }
+
+  async getComparables(params: ComparablesSearchParams): Promise<ComparablesSearchResponse> {
+    try {
+      const saleDateFrom = new Date(Date.now() - (params.monthsBack ?? 12) * 30.44 * 864e5)
+        .toISOString()
+        .slice(0, 10)
+      const result = await callTool(this.env, 'find_comparable_sales', {
+        subjectAttomId: params.propertyId,
+        limit: Math.min(params.maxComps ?? 25, MCP_COMP_LIMIT_CAP),
+        saleDateFrom,
+        maxDistanceMiles: params.radiusMiles ?? 1,
+        propertyTypeStrict: true,
+        includeScoringBreakdown: false,
+      })
+      const sc = result?.structuredContent
+      const comps: McpCompRecord[] = sc?.results ?? sc?.comparables ?? []
+      const comparables = comps.map(normalizeMcpComp).filter((c) => c.id && c.salePrice)
+      const requested = params.maxComps ?? 25
+      const effective = Math.min(requested, MCP_COMP_LIMIT_CAP)
+      return {
+        success: true,
+        data: {
+          subject: { id: params.propertyId, address: sc?.subject?.address },
+          comparables,
+          count: comparables.length,
+          retrieval: buildRetrievalMeta({
+            requested,
+            effectiveLimit: effective,
+            received: comparables.length,
+            ordering: 'distance',
+            radiusMiles: params.radiusMiles ?? 1,
+            monthsBack: params.monthsBack ?? 12,
+          }),
+        },
+      }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'MCP comparables failed', code: 'API_ERROR' }
+    }
+  }
+
+  async getBuildingPermits(propertyId: string): Promise<PermitsResponse> {
+    try {
+      const results = await this.propertyData({ lookupMode: 'attomId', attomId: propertyId }, ['permits'])
+      const data = dataset<any>(results, 'permits')
+      const permits = (data?.permits ?? []).map((p: any) => normalizeMcpPermit(propertyId, p))
+      return { success: true, data: { propertyId, permits, count: permits.length } }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'MCP permits failed', code: 'API_ERROR' }
+    }
+  }
+
+  async getFloodZoneByParcel(parcelId: string): Promise<FloodZoneResponse> {
+    const attomId = parcelToAttom.get(parcelId)
+    if (!attomId) return { success: false, error: 'Unknown parcelId for MCP provider', code: 'NOT_FOUND' }
+    try {
+      const results = await this.propertyData({ lookupMode: 'attomId', attomId }, ['fema-context'])
+      const fema = dataset<any>(results, 'fema-context')
+      if (!fema?.panelContext) return { success: false, error: 'No FEMA context for property', code: 'NOT_FOUND' }
+      return { success: true, data: femaToFloodZone(fema) }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'MCP fema-context failed', code: 'API_ERROR' }
+    }
+  }
+
+  // Coordinate flood lookup isn't a per-property resource — the fema-context
+  // path above covers it via parcelId resolution.
+  async getFloodZone(): Promise<FloodZoneResponse> {
+    return { success: false, error: 'attom-mcp flood lookup is parcel-scoped (fema-context)', code: 'NOT_SUPPORTED' }
+  }
+
+  async getAvm(parcelId: string): Promise<AvmResponse> {
+    const attomId = parcelToAttom.get(parcelId)
+    if (!attomId) return { success: false, error: 'Unknown parcelId for MCP provider', code: 'NOT_FOUND' }
+    try {
+      const results = await this.propertyData({ lookupMode: 'attomId', attomId }, ['valuation'])
+      const v = dataset<any>(results, 'valuation')?.valuation
+      if (!v) return { success: false, error: 'No valuation for property', code: 'NOT_FOUND' }
+      const avm: NormalizedAvm = {
+        value: v.value ?? null,
+        confidence: v.confidenceScore ?? null,
+        valueRangeLow: v.valueMin ?? null,
+        valueRangeHigh: v.valueMax ?? null,
+        fsd: null,
+        model: 'attomAvm',
+        asOfDate: v.estimatedDate ? String(v.estimatedDate).slice(0, 10) : null,
+      }
+      return { success: true, data: avm }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'MCP valuation failed', code: 'API_ERROR' }
+    }
+  }
+
+  async getBuildingDetail(parcelId: string): Promise<BuildingDetailResponse> {
+    const attomId = parcelToAttom.get(parcelId)
+    if (!attomId) return { success: false, error: 'Unknown parcelId for MCP provider', code: 'NOT_FOUND' }
+    try {
+      const results = await this.propertyData({ lookupMode: 'attomId', attomId }, ['overview'])
+      const ch = dataset<any>(results, 'overview')?.characteristics ?? {}
+      const detail: NormalizedBuildingDetail = {
+        condition: ch.condition ?? null,
+        buildingStyle: ch.architecturalStyle ?? null,
+        foundation: ch.foundationType ?? null,
+        constructionType: ch.constructionType ?? null,
+        exteriorWalls: ch.exteriorWalls ?? null,
+        roofCover: ch.roofCover ?? null,
+        stories: ch.stories ?? ch.levels ?? null,
+        heating: ch.heating ?? null,
+        cooling: ch.cooling ?? null,
+        parkingType: ch.garageSpaces ? 'garage' : null,
+        garageSquareFeet: (ch.garageSpaces ?? 0) > 20 ? ch.garageSpaces : null,
+        pool: ch.poolType ?? null,
+        yearBuilt: ch.yearBuilt ?? null,
+      }
+      return { success: true, data: detail }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'MCP overview failed', code: 'API_ERROR' }
+    }
+  }
+}
+
+export function createAttomMcpProvider(env: Env): PropertyProviderAdapter {
+  return new AttomMcpProvider(env)
+}

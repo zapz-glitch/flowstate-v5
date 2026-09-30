@@ -58,6 +58,16 @@ export interface Env {
   // ─── Property Data (ATTOM) ─────────────────────────────────────────────────
   ATTOM_API_KEY?: string
 
+  // ─── ATTOM MCP provider (experimental — PROPERTY_PROVIDER=attom-mcp) ───────
+  // OAuth pair injected by scripts/sync-attom-token.mjs from the Devin CLI
+  // creds file. Refresh rotates the pair in-isolate; stale env pair → resync.
+  ATTOM_MCP_ACCESS_TOKEN?: string
+  ATTOM_MCP_REFRESH_TOKEN?: string
+  ATTOM_MCP_CLIENT_ID?: string
+  /** epoch seconds */
+  ATTOM_MCP_EXPIRES_AT?: string
+  ATTOM_MCP_ENDPOINT?: string
+
   // ─── Vision Analysis (OpenRouter LLM) ──────────────────────────────────────
   // OpenRouter provides access to multiple models via single API
   OPENROUTER_API_KEY?: string

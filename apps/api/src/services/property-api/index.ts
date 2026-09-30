@@ -22,6 +22,7 @@
 import type { Env } from '../../types';
 import { createCoreLogicProvider } from './providers/corelogic';
 import { createAttomProvider } from './providers/attom';
+import { createAttomMcpProvider } from './providers/attom-mcp';
 import {
   createCacheService,
   propertyKey,
@@ -269,6 +270,7 @@ class PropertyApi implements PropertyApiService {
     this.providers = new Map();
     this.providers.set('corelogic', createCoreLogicProvider(env));
     this.providers.set('attom', createAttomProvider(env));
+    this.providers.set('attom-mcp', createAttomMcpProvider(env));
   }
 
   private getProvider(): PropertyProviderAdapter {
