@@ -94,6 +94,16 @@
 - Verified call: `resolve_property_identity` on test address
   16049 Magnolia Hill St, Clermont, FL 34714 → attomId 291488
   (rooftop match, FIPS 12069, APN 22-24-26-1500-000-02700).
+- CLI harness: `node scripts/attom-mcp.mjs "<address>" [--datasets a,b]
+  [--raw]` — resolves + pulls datasets in one `get_property_data` call,
+  saves artifacts to `.data/attom-mcp/`. Token quirks: access token
+  ~10 min; refresh hits Descope at
+  `auth.intelligence.attomdata.com/oauth2/v1/apps/token` (NOT the MCP
+  host's /token, which rejects the public client); refresh token rotates
+  per refresh — script persists it back to the Devin creds file.
+- `get_property_data` datasets verified live: identity, overview,
+  valuation (AVM + confidence), comparables, permits, fema-context,
+  sales-history, tax-history — all `status: ok` on Magnolia.
 - Still blocked on user-supplied ATTOM REST API docs for the provider
   swap itself. User will supply corrected endpoints for any call that
   errors during the swap.
