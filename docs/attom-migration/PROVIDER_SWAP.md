@@ -108,7 +108,17 @@ Known ATTOM quirks already encoded (see header comment in `attom.ts`):
 Base: `https://api.gateway.attomdata.com`. Auth: `apikey` header on every
 request; `Accept: application/json`. No-match returns `400` +
 `status.msg = "SuccessWithoutResult"` (uncharged). Legacy param `id` is
-an accepted alias for `attomid`.
+an accepted alias for `attomid`. Base paths in use:
+`/propertyapi/v1.0.0`, `/property/v2` (salescomparables),
+`/propertyapi/v4`, `/v4` (community/location), `/areaapi/v2.0.0`,
+`/poisearch/v2.0.0`.
+
+Source: 57-page PDF export of the developer docs
+(`ATTOM API Documentation.pdf`, verified 2026-09-29) + context7 mirror.
+Flood boundary types confirmed absent from the Area API geoType list
+(ST/CO/CS/PL/ZI/N1–N4/DB/SB/PZ/CI); flood data only exists inside
+`/v4/neighborhood/community` natural-disaster attributes. No
+autocomplete/typeahead endpoint exists anywhere in the catalog.
 
 ### Proposed call-for-call mapping
 
