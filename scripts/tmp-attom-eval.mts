@@ -14,7 +14,7 @@
 import { writeFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { getToken, rpc } from './attom-mcp.mjs'
-import { evaluateComparable, pickBestComps, calculateARV } from '@flowstate-api/shared/appraisal'
+import { evaluateComparable, pickBestComps } from '@flowstate-api/shared/appraisal'
 import { DEFAULT_FILTERS, DEFAULT_ADJUSTMENTS } from '../apps/api/src/services/appraisal/types'
 import type { CompLike, PropertyLike } from '@flowstate-api/shared/appraisal'
 
@@ -37,6 +37,7 @@ type McpSubject = {
   garageSpaces?: number | null
   subdivision?: string | null
   geoIds?: Record<string, string>
+  distressedStatus?: boolean | null
 }
 type McpComp = McpSubject & {
   salePrice?: number | null
@@ -171,16 +172,20 @@ function tierFilters(days: number, vintage: boolean) {
 
 const norm = (s?: string | null) => (s ?? '').trim().toUpperCase().replace(/\s+/g, ' ')
 
-// Comp geography enrichment cache — geography-context per attomId,
-// fetched only for comps that survive the non-geo hard filters.
-// Carries geoIds AND per-scope market stats (medianPPSF365d) for the
-// value-equivalence fallback.
+const FLIP_MIN_DAYS = 30
+const FLIP_MAX_DAYS = 365
+const ARV_PPSF_PREMIUM = 1.15
+
+// Comp enrichment — ONE call per survivor pulls all classification inputs.
+type CompSale = { saleDate?: string; price?: number; flip?: boolean; distressed?: boolean; buyers?: string; sellers?: string }
 type CompGeo = {
   sd?: string; sdId?: string
   n4?: string; n4Id?: string
   n3?: string; n3Id?: string
-  // scope → medianPricePerSqFt365d (null = no stats coverage)
   ppsf: { SD?: number | null; N4?: number | null; N3?: number | null }
+  sales: CompSale[]
+  permits: number
+  ownAvm?: number | null
 }
 const compGeoCache = new Map<string, CompGeo>()
 async function enrichCompGeo(attomId: string): Promise<CompGeo> {
@@ -188,15 +193,23 @@ async function enrichCompGeo(attomId: string): Promise<CompGeo> {
   try {
     const r = await rpc(token, 'tools/call', {
       name: 'get_property_data',
-      arguments: { property: { lookupMode: 'attomId', attomId }, datasets: ['geography-context'] },
+      arguments: {
+        property: { lookupMode: 'attomId', attomId },
+        datasets: ['geography-context', 'sales-history', 'permits', 'valuation'],
+      },
     })
-    const d = r.structuredContent?.results?.find((x: any) => x.dataset === 'geography-context')?.data
+    const res = r.structuredContent?.results ?? []
+    const d = res.find((x: any) => x.dataset === 'geography-context')?.data
     const s = d?.subject
     const geos = Object.fromEntries((s?.geographies ?? []).map((g: any) => [g.geographyType, g]))
     const ppsf: CompGeo['ppsf'] = {}
     for (const l of d?.layers ?? []) {
       if (['SD', 'N4', 'N3'].includes(l.geographyType)) ppsf[l.geographyType as 'SD' | 'N4' | 'N3'] = l.medianPricePerSqFt365d ?? null
     }
+    const salesData = res.find((x: any) => x.dataset === 'sales-history')?.data
+    const sales: CompSale[] = Array.isArray(salesData) ? salesData : salesData?.sales ?? salesData?.salesHistory ?? []
+    const permitsData = res.find((x: any) => x.dataset === 'permits')?.data
+    const ownAvm = res.find((x: any) => x.dataset === 'valuation')?.data?.valuation?.value ?? null
     const entry: CompGeo = {
       sd: s?.subdivision ?? geos['SD']?.geographyName,
       sdId: geos['SD']?.geographyId,
@@ -205,12 +218,15 @@ async function enrichCompGeo(attomId: string): Promise<CompGeo> {
       n3: geos['N3']?.geographyName,
       n3Id: geos['N3']?.geographyId,
       ppsf,
+      sales,
+      permits: permitsData?.permits?.length ?? 0,
+      ownAvm,
     }
     compGeoCache.set(attomId, entry)
     return entry
   } catch {
-    compGeoCache.set(attomId, { ppsf: {} })
-    return { ppsf: {} }
+    compGeoCache.set(attomId, { ppsf: {}, sales: [], permits: 0 })
+    return { ppsf: {}, sales: [], permits: 0 }
   }
 }
 
@@ -279,6 +295,7 @@ for (const [days, vintage] of TIERS) {
       _attomId: c.attomId,
       _n4: c.neighborhoodN4,
       _score: c.normalizedScore,
+      _distressed: c.distressedStatus === true,
       _geoNote: '',
       isEnabled: !disabled,
       adjustedPrice: ev.adjustedPrice,
@@ -287,18 +304,24 @@ for (const [days, vintage] of TIERS) {
       totalAdjustment: ev.totalAdjustment,
     }
   })
-  // phase 2: enrich survivors with geography-context, then OR geo verdict
+  // phase 2: enrich survivors (geo + sales-history + permits + own AVM),
+  // then geo verdict AND evidence classification
   const survivors = evaluated.filter((c) => c.isEnabled)
   await Promise.all(survivors.map(async (c) => {
-    const geo = c._attomId ? await enrichCompGeo(String(c._attomId)) : {}
+    const geo = c._attomId ? await enrichCompGeo(String(c._attomId)) : { ppsf: {}, sales: [], permits: 0 }
     const v = geoVerdict(geo, c._n4)
     c._geoNote = v.detail ?? ''
+    c._geo = geo
     if (v.verdict === 'fail') {
       c.isEnabled = false
       c.disableReasons.push(`geo mismatch (${v.detail})`)
       c.filterResults.push({ type: 'subdivision_match', passed: false, status: 'failed', reason: `geo: ${v.detail}` })
     } else {
       c.filterResults.push({ type: 'subdivision_match', passed: v.verdict === 'pass', status: v.verdict === 'pass' ? 'passed' : 'not_verified', reason: v.detail })
+      const cls = classifyComp(c, geo)
+      c._class = cls.class
+      c._classNote = cls.note
+      c._flipBuy = cls.flipBuy ?? null
     }
   }))
   enabled = evaluated.filter((c) => c.isEnabled)
@@ -316,29 +339,55 @@ for (const c of evaluated) {
   ).length
 }
 
-// Price bands (mirrors services/comp-screen splitPriceBands): ARV band =
-// within 10% under pool top; as-is band = within 10% over pool floor.
-// Overlap → assigned to the relatively closer anchor.
-const ARV_BAND_PCT = 0.10
-const AS_IS_BAND_PCT = 0.10
-const priced = enabled.filter((c) => (c.adjustedPrice ?? c.salePrice) != null && (c.adjustedPrice ?? c.salePrice) > 0)
-const arvAnchor = priced.length ? Math.max(...priced.map((c) => c.adjustedPrice ?? c.salePrice)) : null
-const asIsAnchor = priced.length ? Math.min(...priced.map((c) => c.adjustedPrice ?? c.salePrice)) : null
-let arvBand: typeof evaluated = []
-let asIsBand: typeof evaluated = []
-if (arvAnchor != null && asIsAnchor != null) {
-  const inArv = priced.filter((c) => (c.adjustedPrice ?? c.salePrice) >= arvAnchor * (1 - ARV_BAND_PCT))
-  const inAsIs = priced.filter((c) => (c.adjustedPrice ?? c.salePrice) <= asIsAnchor * (1 + AS_IS_BAND_PCT))
-  const arvIds = new Set(inArv.map((c) => c._attomId))
-  for (const c of inAsIs) {
-    if (!arvIds.has(c._attomId)) continue
-    const p = c.adjustedPrice ?? c.salePrice
-    if ((p - asIsAnchor) / asIsAnchor < (arvAnchor - p) / arvAnchor) arvIds.delete(c._attomId)
+// ─── Evidence classification ──────────────────────────────────────────────
+// Per-comp classification from transaction evidence — replaces price bands.
+//   flip:    prior buy 30–365d before this sale, resold for profit →
+//            buy side = investor price, sell side = ARV evidence
+//   asis:    distressed-flagged sale → investor-floor evidence
+//   arv:     sold ≥15% over own scope median $/sf, OR sold above own AVM
+//   market:  everything else (permits on file without flip timing = value
+//            added but not an ARV sale → stays market tier)
+type CompClass = 'flip' | 'arv' | 'asis' | 'market'
+
+function classifyComp(c: any, geo: CompGeo): { class: CompClass; note: string; flipBuy?: { price: number; date: string; holdDays: number } } {
+  const saleDate = c.saleDate ? new Date(c.saleDate).getTime() : null
+  const salePrice = c.adjustedPrice ?? c.salePrice ?? null
+  const ppsf = c.pricePerSqft ?? (c.salePrice && c.squareFeet ? c.salePrice / c.squareFeet : null)
+  const scopeMed = geo.ppsf?.SD ?? geo.ppsf?.N4 ?? geo.ppsf?.N3
+  const sales = (geo.sales ?? [])
+    .filter((s) => s.saleDate && s.price && s.price > 1000)
+    .sort((a, b) => new Date(b.saleDate!).getTime() - new Date(a.saleDate!).getTime())
+
+  if (saleDate && salePrice) {
+    for (const s of sales) {
+      const d = new Date(s.saleDate!).getTime()
+      const gap = (saleDate - d) / 864e5
+      if (gap >= FLIP_MIN_DAYS && gap <= FLIP_MAX_DAYS && s.price! < salePrice) {
+        const gain = Math.round(((salePrice - s.price!) / s.price!) * 100)
+        return {
+          class: 'flip',
+          flipBuy: { price: s.price!, date: s.saleDate!, holdDays: Math.round(gap) },
+          note: `flip: bought $${Math.round(s.price! / 1000)}k ${Math.round(gap)}d prior, +${gain}%${geo.permits ? `, ${geo.permits} permits on file` : ''}`,
+        }
+      }
+    }
   }
-  const overlapIds = arvIds
-  arvBand = inArv.filter((c) => overlapIds.has(c._attomId))
-  asIsBand = inAsIs.filter((c) => !overlapIds.has(c._attomId))
-  for (const c of evaluated) c._band = arvBand.includes(c) ? 'ARV' : asIsBand.includes(c) ? 'AS-IS' : ''
+
+  const poolSaleDistressed = sales.some(
+    (s) => saleDate && Math.abs(new Date(s.saleDate!).getTime() - saleDate) < 864e5 * 7 && s.distressed
+  )
+  if (c._distressed || poolSaleDistressed) return { class: 'asis', note: 'distressed-flagged sale' }
+
+  if (ppsf != null && scopeMed != null && scopeMed > 0 && ppsf >= scopeMed * ARV_PPSF_PREMIUM)
+    return { class: 'arv', note: `sold ${Math.round((ppsf / scopeMed) * 100 - 100)}% above scope median $/sf` }
+
+  if (salePrice && geo.ownAvm && salePrice > geo.ownAvm)
+    return { class: 'arv', note: `sold $${Math.round((salePrice - geo.ownAvm) / 1000)}k above own AVM` }
+
+  if (geo.permits > 0)
+    return { class: 'market', note: `${geo.permits} permits on file — value added, not a flip` }
+
+  return { class: 'market', note: 'market-rate sale' }
 }
 
 // Degradation contract: never return empty. When the verified pool is
@@ -348,29 +397,30 @@ const nearestMissesAll = evaluated
   .filter((c) => !c.isEnabled)
   .sort((a, b) => (a._hardFails - b._hardFails) || ((a.distanceMiles ?? 99) - (b.distanceMiles ?? 99)))
 const degraded = enabled.length < BEST_N
-if (degraded) {
-  for (const c of nearestMissesAll.slice(0, BEST_N - enabled.length)) c._degradedPick = true
-}
 const effectivePool = degraded ? [...enabled, ...nearestMissesAll.slice(0, BEST_N - enabled.length)] : enabled
-const effPriced = effectivePool.filter((c) => (c.adjustedPrice ?? c.salePrice) != null && (c.adjustedPrice ?? c.salePrice) > 0)
-if (degraded && effPriced.length) {
-  // rebuild bands over the topped-up pool
-  const aTop = Math.max(...effPriced.map((c) => c.adjustedPrice ?? c.salePrice))
-  const aFloor = Math.min(...effPriced.map((c) => c.adjustedPrice ?? c.salePrice))
-  arvBand = effPriced.filter((c) => (c.adjustedPrice ?? c.salePrice) >= aTop * (1 - ARV_BAND_PCT))
-  asIsBand = effPriced.filter((c) => (c.adjustedPrice ?? c.salePrice) <= aFloor * (1 + AS_IS_BAND_PCT) && !arvBand.includes(c))
-  for (const c of evaluated) c._band = arvBand.includes(c) ? 'ARV' : asIsBand.includes(c) ? 'AS-IS' : ''
-}
 
-const selected = pickBestComps(arvBand.length ? arvBand : effectivePool, BEST_N)
-const arv = calculateARV(
-  evaluated.map((c) => ({ ...c, isEnabled: selected.includes(c) })),
-  subjectLike.squareFeet
-)
-const asIsValue = calculateARV(
-  evaluated.map((c) => ({ ...c, isEnabled: asIsBand.includes(c) })),
-  subjectLike.squareFeet
-)
+// ─── Value pools by evidence class ──────────────────────────────────────────
+// sqft-normalize every price to the subject (same math as calculateARV).
+const subjSqft = subjectLike.squareFeet ?? null
+const normPrice = (price: number | null | undefined, compSqft: number | null | undefined) =>
+  price != null && compSqft != null && compSqft > 0 ? Math.round((price / compSqft) * (subjSqft ?? compSqft)) : null
+const avg = (xs: number[]) => (xs.length ? Math.round(xs.reduce((a, b) => a + b, 0) / xs.length) : 0)
+
+const effectivePoolC = effectivePool
+const arvComps = effectivePoolC.filter((c) => c._class === 'arv' || c._class === 'flip')
+const asisComps = effectivePoolC.filter((c) => c._class === 'asis')
+const marketComps = effectivePoolC.filter((c) => c._class === 'market')
+const flippers = effectivePoolC.filter((c) => c._flipBuy)
+
+const arv = avg(arvComps.map((c) => normPrice(c.adjustedPrice ?? c.salePrice, c.squareFeet)).filter((x): x is number => x != null))
+const marketValue = avg(marketComps.map((c) => normPrice(c.adjustedPrice ?? c.salePrice, c.squareFeet)).filter((x): x is number => x != null))
+// investor floor = as-is sales + flip-chain acquisition prices
+const asIsValue = avg([
+  ...asisComps.map((c) => normPrice(c.adjustedPrice ?? c.salePrice, c.squareFeet)),
+  ...flippers.map((c) => normPrice(c._flipBuy.price, c.squareFeet)),
+].filter((x): x is number => x != null))
+
+const selected = arvComps.length ? pickBestComps(arvComps, BEST_N) : pickBestComps(effectivePoolC, BEST_N)
 const nearestMisses = nearestMissesAll.slice(0, 3)
 const attomAvm = valuation?.valuation?.value ?? null
 
@@ -390,15 +440,18 @@ console.log(`\nCOMPS (${evaluated.length} returned, ${enabled.length} pass filte
 for (const c of evaluated) {
   const fails = c.filterResults.filter((f) => f.passed === false && f.status !== 'not_verified').map((f) => f.type).join(',')
   const mark = selected.includes(c) ? '★' : c.isEnabled ? '✓' : '✗'
-  const band = (c._band ? ` ${c._band}` : '').padEnd(6)
-  const geo = c._geoNote ? ` [geo:${c._geoNote}]` : ''
-  console.log(`  ${mark}${band} ${(c._addr ?? '').padEnd(44)} ${money(c.salePrice).padStart(9)} ${String(c.squareFeet ?? '?').padStart(5)}sf ${(c.distanceMiles ?? 0).toFixed(2)}mi ${String(days(c.saleDate)).padStart(4)}d adj ${money(c.adjustedPrice).padStart(9)}${fails ? `  ✗${fails}` : ''}${geo}`)
+  const cls = c._class ? ` ${c._class.toUpperCase()}` : ''
+  const band = cls.padEnd(7)
+  const geo = [c._geoNote, c._classNote].filter(Boolean).join(' · ')
+  const geoStr = geo ? ` [${geo}]` : ''
+  console.log(`  ${mark}${band} ${(c._addr ?? '').padEnd(44)} ${money(c.salePrice).padStart(9)} ${String(c.squareFeet ?? '?').padStart(5)}sf ${(c.distanceMiles ?? 0).toFixed(2)}mi ${String(days(c.saleDate)).padStart(4)}d adj ${money(c.adjustedPrice).padStart(9)}${fails ? `  ✗${fails}` : ''}${geoStr}`)
 }
 
 console.log(`\nRESULT${degraded ? '  ⚠ thin pool — nearest misses below' : ''}`)
 console.log(`  ARV band comps:  ${selected.map((c) => c._addr).join(' | ') || 'none'}`)
-console.log(`  ARV (after-repair):   ${money(arv) || '—'}   ${degraded ? '(DEGRADED — computed on nearest misses)' : `(${arvBand.length} comp${arvBand.length === 1 ? '' : 's'} in band)`}`)
-console.log(`  AS-IS (inv floor):    ${money(asIsValue) || '—'}   ${asIsBand.length ? `(${asIsBand.length} comp${asIsBand.length === 1 ? '' : 's'} in band)` : '(no floor comps in pool)'}`)
+console.log(`  ARV (after-repair):   ${money(arv) || '—'}   (${arvComps.length} comp${arvComps.length === 1 ? '' : 's'}: flip sales + premium evidence${degraded ? ' · DEGRADED pool' : ''})`)
+console.log(`  MARKET (current):     ${money(marketValue) || '—'}   (${marketComps.length} market-rate comps)`)
+console.log(`  AS-IS (inv floor):    ${money(asIsValue) || '—'}   (${asisComps.length} distressed + ${flippers.length} flip buys)`)
 if (arv && asIsValue) console.log(`  spread ARV vs as-is:  ${money(arv - asIsValue)} (${Math.round(((arv - asIsValue) / asIsValue) * 100)}%)`)
 console.log(`  ATTOM AVM (as-is):    ${money(attomAvm)}  (confidence ${valuation?.valuation?.confidenceScore ?? '?'})`)
 if (nearestMisses.length) {
