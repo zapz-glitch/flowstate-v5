@@ -45,6 +45,7 @@ type McpComp = McpSubject & {
   pricePerSqFt?: number | null
   distanceMiles?: number | null
   normalizedScore?: number | null
+  centerPoint?: { latitude?: number; longitude?: number } | null
 }
 
 function toProperty(p: McpSubject): PropertyLike {
@@ -176,6 +177,30 @@ const FLIP_MIN_DAYS = 30
 const FLIP_MAX_DAYS = 365
 const ARV_PPSF_PREMIUM = 1.15
 
+// Census Geocoder (free, no key) — coordinates → tract / block group /
+// block GEOIDs for sameBlockGroup + sameTract verification.
+type CensusGeo = { tract?: string; blockGroup?: string; block?: string }
+const censusCache = new Map<string, CensusGeo>()
+async function censusGeo(lat?: number | null, lng?: number | null): Promise<CensusGeo> {
+  if (lat == null || lng == null) return {}
+  const key = `${lat.toFixed(6)},${lng.toFixed(6)}`
+  if (censusCache.has(key)) return censusCache.get(key)!
+  try {
+    const url = `https://geocoding.geo.census.gov/geocoder/geographies/coordinates?x=${lng}&y=${lat}&benchmark=Public_AR_Current&vintage=Current_Current&layers=Census%20Tracts,Census%20Block%20Groups,2020%20Census%20Blocks&format=json`
+    const res = await fetch(url, { signal: AbortSignal.timeout(10000) })
+    const g = (await res.json())?.result?.geographies ?? {}
+    const tract = g['Census Tracts']?.[0]?.GEOID
+    const blockGroup = g['Census Block Groups']?.[0]?.GEOID
+    const block = g['2020 Census Blocks']?.[0]?.GEOID
+    const entry = { tract, blockGroup, block }
+    censusCache.set(key, entry)
+    return entry
+  } catch {
+    censusCache.set(key, {})
+    return {}
+  }
+}
+
 // Comp enrichment — ONE call per survivor pulls all classification inputs.
 type CompSale = { saleDate?: string; price?: number; flip?: boolean; distressed?: boolean; buyers?: string; sellers?: string }
 type CompGeo = {
@@ -186,9 +211,10 @@ type CompGeo = {
   sales: CompSale[]
   permits: number
   ownAvm?: number | null
+  tract?: string; blockGroup?: string; block?: string
 }
 const compGeoCache = new Map<string, CompGeo>()
-async function enrichCompGeo(attomId: string): Promise<CompGeo> {
+async function enrichCompGeo(attomId: string, center?: { latitude?: number; longitude?: number }): Promise<CompGeo> {
   if (compGeoCache.has(attomId)) return compGeoCache.get(attomId)!
   try {
     const r = await rpc(token, 'tools/call', {
@@ -221,6 +247,7 @@ async function enrichCompGeo(attomId: string): Promise<CompGeo> {
       sales,
       permits: permitsData?.permits?.length ?? 0,
       ownAvm,
+      ...(await censusGeo(center?.latitude, center?.longitude)),
     }
     compGeoCache.set(attomId, entry)
     return entry
@@ -233,6 +260,10 @@ async function enrichCompGeo(attomId: string): Promise<CompGeo> {
 const subjSd = { name: subject.subdivision, id: subject.geoIds?.['SD'] }
 const subjN4 = { name: subject.neighborhoodN4, id: subject.geoIds?.['N4'] }
 const subjN3 = { name: geoScopes['N3']?.name, id: geoScopes['N3']?.id }
+const subjCensus = await censusGeo(
+  geoCtx?.subject?.centerPoint?.latitude,
+  geoCtx?.subject?.centerPoint?.longitude
+)
 // subject per-scope market stats from its own geography layers
 const subjPpsf: CompGeo['ppsf'] = {}
 for (const l of geoCtx?.layers ?? []) {
@@ -255,8 +286,12 @@ function geoVerdict(geo: CompGeo, compN4?: string | null) {
     (cId && s.id && cId === s.id) || (cName && s.name && norm(cName) === norm(s.name))
 
   if (scope(geo.sd, geo.sdId, subjSd)) return { verdict: 'pass' as const, detail: 'same subdivision' }
+  if (geo.blockGroup && subjCensus.blockGroup && geo.blockGroup === subjCensus.blockGroup)
+    return { verdict: 'pass' as const, detail: `same block group (${geo.blockGroup})` }
   if (scope(n4, geo.n4Id, subjN4)) return { verdict: 'pass' as const, detail: 'same neighborhood (N4)' }
   if (scope(geo.n3, geo.n3Id, subjN3)) return { verdict: 'pass' as const, detail: 'same broad neighborhood (N3)' }
+  if (geo.tract && subjCensus.tract && geo.tract === subjCensus.tract)
+    return { verdict: 'pass' as const, detail: `same census tract (${geo.tract})` }
 
   // value equivalence — tightest scope with stats on both sides
   for (const s of ['SD', 'N4', 'N3'] as const) {
@@ -296,6 +331,7 @@ for (const [days, vintage] of TIERS) {
       _n4: c.neighborhoodN4,
       _score: c.normalizedScore,
       _distressed: c.distressedStatus === true,
+      _center: c.centerPoint,
       _geoNote: '',
       isEnabled: !disabled,
       adjustedPrice: ev.adjustedPrice,
@@ -308,7 +344,7 @@ for (const [days, vintage] of TIERS) {
   // then geo verdict AND evidence classification
   const survivors = evaluated.filter((c) => c.isEnabled)
   await Promise.all(survivors.map(async (c) => {
-    const geo = c._attomId ? await enrichCompGeo(String(c._attomId)) : { ppsf: {}, sales: [], permits: 0 }
+    const geo = c._attomId ? await enrichCompGeo(String(c._attomId), c._center) : { ppsf: {}, sales: [], permits: 0 }
     const v = geoVerdict(geo, c._n4)
     c._geoNote = v.detail ?? ''
     c._geo = geo
@@ -404,7 +440,7 @@ const effectivePool = degraded ? [...enabled, ...degradedPicks] : enabled
 // evidence class even though they failed the hard rules
 if (degradedPicks.length) {
   await Promise.all(degradedPicks.map(async (c) => {
-    const geo = c._attomId ? await enrichCompGeo(String(c._attomId)) : { ppsf: {}, sales: [], permits: 0 }
+    const geo = c._attomId ? await enrichCompGeo(String(c._attomId), c._center) : { ppsf: {}, sales: [], permits: 0 }
     c._geo = geo
     const v = geoVerdict(geo, c._n4)
     c._geoNote = v.detail ?? ''
@@ -448,7 +484,8 @@ const days = (d?: string | null) => (d ? Math.round((Date.now() - new Date(d).ge
 console.log(`\nSUBJECT  ${subject.address}`)
 console.log(`  attomId ${attomId} · ${subject.bedrooms ?? '?'}bd/${((subject.fullBathrooms ?? 0) + 0.5 * (subject.partialBathrooms ?? 0)) || '?'}ba · ${subject.squareFootage ?? '?'} sqft · built ${subject.yearBuilt ?? '?'} · lot ${subject.lotSquareFootage ?? '?'} sf`)
 const geoLine = Object.entries(geoScopes).map(([k, v]) => `${k}=${v.name}`).join('  ')
-console.log(`  geographies: ${geoLine || 'none'}${geoScopes['CT'] || geoScopes['CB'] ? '' : '  (no census tract/block in MCP surface)'}`)
+console.log(`  geographies: ${geoLine || 'none'}`)
+console.log(`  census: tract=${subjCensus.tract ?? '—'}  blockGroup=${subjCensus.blockGroup ?? '—'}  block=${subjCensus.block ?? '—'}  (Census geocoder, free/no key)`)
 console.log(`  geo verify: subdivision(SD)=${subjSd.name ?? '—'} · neighborhood(N4)=${subjN4.name ?? '—'} — either matching verifies`)
 console.log(`  ladder used: sale_age ≤${tierUsed[0]}d${tierUsed[1] ? ` + vintage ≤${VINTAGE_CAP} year rule` : ''} · pool ${SEARCH_MILES}mi / strict type / limit ${COMP_LIMIT}`)
 
