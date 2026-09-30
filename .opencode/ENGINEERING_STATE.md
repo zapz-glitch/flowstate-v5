@@ -104,6 +104,15 @@
 - `get_property_data` datasets verified live: identity, overview,
   valuation (AVM + confidence), comparables, permits, fema-context,
   sales-history, tax-history — all `status: ok` on Magnolia.
+- Temp eval harness: `npx tsx scripts/tmp-attom-eval.mts "<address>"` —
+  MCP data → CompLike/PropertyLike → real DEFAULT_FILTERS/ADJUSTMENTS +
+  pickBestComps/calculateARV (emulates sale-age ladder + vintage year
+  cap). Verified on 12312 N 27th St Tampa (ARV $261,945 vs AVM $223,023).
+- Swap finding: ATTOM `neighborhoodN4` is a micro-neighborhood name, NOT
+  the legal subdivision — mapping it into `subdivision` makes the hard
+  `subdivision_match` filter disqualify nearly every comp. Leave
+  subdivision unmapped (→ not_verified) unless a real legal-subdivision
+  field is found in ATTOM payloads.
 - Still blocked on user-supplied ATTOM REST API docs for the provider
   swap itself. User will supply corrected endpoints for any call that
   errors during the swap.

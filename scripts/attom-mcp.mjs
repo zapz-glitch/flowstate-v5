@@ -30,7 +30,7 @@ const DEFAULT_DATASETS = [
 
 // --- auth ------------------------------------------------------------------
 
-function loadCreds() {
+export function loadCreds() {
   for (const f of readdirSync(OAUTH_DIR)) {
     if (!f.endsWith('.json')) continue
     const p = join(OAUTH_DIR, f)
@@ -42,7 +42,7 @@ function loadCreds() {
   throw new Error(`No ATTOM OAuth creds in ${OAUTH_DIR} — run: devin mcp login attom`)
 }
 
-async function refreshToken(creds) {
+export async function refreshToken(creds) {
   const resp = await fetch(TOKEN_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': UA },
@@ -65,7 +65,7 @@ async function refreshToken(creds) {
   return next
 }
 
-async function getToken() {
+export async function getToken() {
   const creds = loadCreds()
   if (creds.expires_at > Date.now() / 1000 + 30) return creds.access_token
   console.error('access token expired — refreshing via Descope')
@@ -74,7 +74,7 @@ async function getToken() {
 
 // --- mcp -------------------------------------------------------------------
 
-async function rpc(token, method, params) {
+export async function rpc(token, method, params) {
   const resp = await fetch(MCP_URL, {
     method: 'POST',
     headers: {
@@ -96,6 +96,11 @@ async function rpc(token, method, params) {
 
 // --- main ------------------------------------------------------------------
 
+import { fileURLToPath } from 'node:url'
+const isMain = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]
+if (isMain) main()
+
+async function main() {
 const args = process.argv.slice(2)
 const raw = args.includes('--raw')
 const dsFlag = args.indexOf('--datasets')
@@ -136,3 +141,4 @@ if (raw) {
   }
 }
 console.error(`\nartifact: ${outPath}`)
+}
