@@ -397,7 +397,23 @@ const nearestMissesAll = evaluated
   .filter((c) => !c.isEnabled)
   .sort((a, b) => (a._hardFails - b._hardFails) || ((a.distanceMiles ?? 99) - (b.distanceMiles ?? 99)))
 const degraded = enabled.length < BEST_N
-const effectivePool = degraded ? [...enabled, ...nearestMissesAll.slice(0, BEST_N - enabled.length)] : enabled
+const degradedPicks = degraded ? nearestMissesAll.slice(0, BEST_N - enabled.length) : []
+const effectivePool = degraded ? [...enabled, ...degradedPicks] : enabled
+
+// enrich + classify degraded picks too — the report still needs their
+// evidence class even though they failed the hard rules
+if (degradedPicks.length) {
+  await Promise.all(degradedPicks.map(async (c) => {
+    const geo = c._attomId ? await enrichCompGeo(String(c._attomId)) : { ppsf: {}, sales: [], permits: 0 }
+    c._geo = geo
+    const v = geoVerdict(geo, c._n4)
+    c._geoNote = v.detail ?? ''
+    const cls = classifyComp(c, geo)
+    c._class = cls.class
+    c._classNote = `DEGRADED · ${cls.note}`
+    c._flipBuy = cls.flipBuy ?? null
+  }))
+}
 
 // ─── Value pools by evidence class ──────────────────────────────────────────
 // sqft-normalize every price to the subject (same math as calculateARV).
