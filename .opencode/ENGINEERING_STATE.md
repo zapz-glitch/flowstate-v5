@@ -106,8 +106,21 @@
   sales-history, tax-history — all `status: ok` on Magnolia.
 - Temp eval harness: `npx tsx scripts/tmp-attom-eval.mts "<address>"` —
   MCP data → CompLike/PropertyLike → real DEFAULT_FILTERS/ADJUSTMENTS +
-  pickBestComps/calculateARV (emulates sale-age ladder + vintage year
-  cap). Verified on 12312 N 27th St Tampa (ARV $261,945 vs AVM $223,023).
+  pickBestComps/calculateARV. Features: sale-age ladder + vintage cap,
+  geo verification (SD→N4→N3 match via geography-context, then ±25%
+  medianPPSF value-equivalence per scope), ARV/as-is price bands
+  (splitPriceBands-equivalent), DEGRADED nearest-miss fallback so it
+  always emits an estimate. artifacts → .data/attom-mcp/.
+- MCP geo surface: geography-context gives CO/CS/DB/N3/N4/PZ/SD scopes
+  with geoIdv4 + per-scope market stats (saleCount, median price/PPSF
+  90/180/365d); geo://{id}/community has demographics. NO census
+  tract/block anywhere — sameBlockGroup needs external API. Comps carry
+  N4 inline; SD/geoIds need per-comp enrichment call.
+- Verified evals: 12312 N 27th Tampa ARV $261,945 (AVM $223k); 3509 E
+  Chelsea Tampa ARV $319,519/AS-IS $243,200 (AVM $248,864 — 2% off our
+  floor); 1028 Sunshine Lakeland geo-verify cut ARV $256k→$159k (comps
+  were in +35–73% pricier pockets — correct rejection); 7230 Toledo
+  Spring Hill degraded ARV $179,840/AS-IS $127,076 (AVM $293,750).
 - Swap finding: ATTOM `neighborhoodN4` is a micro-neighborhood name, NOT
   the legal subdivision — mapping it into `subdivision` makes the hard
   `subdivision_match` filter disqualify nearly every comp. Leave
