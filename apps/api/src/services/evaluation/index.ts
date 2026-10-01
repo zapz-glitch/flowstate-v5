@@ -955,7 +955,11 @@ export async function performAnalysis(
 
   // The gate only prunes/recomputes a real ARV set — skipped entirely when
   // the pool was insufficient (finalArv is null on the degraded path).
-  if (!insufficient) {
+  // attom-mcp: skip outright — the provider exposes no assessor condition,
+  // so every comp is "unverifiable" noise; the evidence model (flip/
+  // distressed transactions) already proves renovation better than a
+  // condition string does.
+  if (!insufficient && !isAttomMcp) {
     const unverifiable: string[] = []
     const prunedFromArv: string[] = []
     let verifiedPositiveCount = 0
