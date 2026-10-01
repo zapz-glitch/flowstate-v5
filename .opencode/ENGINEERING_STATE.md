@@ -127,6 +127,15 @@
   investor floor $176,798 (1 distressed + 3 flip buys). Local API key
   for testing: fs_35fd82dfcc3849c37a4e42347ee79bf0350503117d46cc8d
   (local@flowstate.test, inserted directly into local D1).
+- JEV REMOVED from attom-mcp path (2026-10-01): runJevEvaluation +
+  classifyOutcomeWithJev + comp jevHybrid all gated off
+  bundle.metadata.provider==='attom-mcp' — deterministic rules + flip/
+  distressed evidence drive selection; Jev UI cards self-hide on null.
+  ARV set = enabled flip-resale comps when present else rules selection.
+  Group B = distressed-transaction comps (not price ceiling).
+  SEMANTIC FIX: pool distressedStatus is property-level (distress on
+  file) — NOT a distressed sale; only sales-history transaction flag
+  counts now. Verified job_1790817380644 Hubert.
 - Temp eval harness: `npx tsx scripts/tmp-attom-eval.mts "<address>"` —
   MCP data → CompLike/PropertyLike → real DEFAULT_FILTERS/ADJUSTMENTS +
   pickBestComps/calculateARV. Features: sale-age ladder + vintage cap,
