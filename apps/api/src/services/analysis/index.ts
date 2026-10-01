@@ -1287,6 +1287,7 @@ export function buildAnalysisResponse(
       saleDate: formatDate(comp.saleDate),
       saleReconciled: comp.saleReconciled ?? null,
       flip: comp.flip ?? null,
+      distressedSale: comp.distressedSale ?? null,
       squareFeet,
       pricePerSqft: squareFeet && squareFeet > 0 && (comp.adjustedSalePrice ?? comp.salePrice) != null
         ? Math.round((comp.adjustedSalePrice ?? comp.salePrice)! / squareFeet)
@@ -1306,6 +1307,7 @@ export function buildAnalysisResponse(
       censusTract: comp.censusTract ?? null,
       // Road-barrier proxy (census tract) — absent when unverified
       ...(comp.crossesMajorRoad != null ? { crossesMajorRoad: comp.crossesMajorRoad } : {}),
+      ...(comp.sameBlockGroup != null ? { sameBlockGroup: comp.sameBlockGroup } : {}),
       buildingCondition: comp.buildingCondition ?? null,
       buildingGrade: comp.buildingGrade ?? null,
       stories: comp.stories ?? null,

@@ -631,6 +631,8 @@ export interface CompItem {
   saleDate?: string | null
   saleReconciled?: { previousPrice: number | null; previousDate: string | null; source: 'zillow' } | null
   flip?: { priorSalePrice: number; priorSaleDate: string; daysHeld: number; gainPct: number } | null
+  /** Provider-flagged distressed sale (e.g. ATTOM distressedStatus) — investor/as-is evidence */
+  distressedSale?: boolean | null
   squareFeet?: number | null
   pricePerSqft?: number | null
   distanceMiles?: number | null
@@ -700,6 +702,8 @@ export interface CompItem {
    * card. Rides alongside Jev's automatic priceTier; never rewrites it.
    */
   userTier?: 'arv' | 'as_is' | null
+  /** Census tract GEOID (Census geocoder, free tier) */
+  censusTract?: string | null
   /** Road-barrier proxy — census tract differs from the subject's. Absent = unverified. */
   crossesMajorRoad?: boolean
   /** Same census block group as the subject — same micro-market evidence. Absent/null = unverified. */

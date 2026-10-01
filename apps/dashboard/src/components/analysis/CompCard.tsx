@@ -130,6 +130,14 @@ function CompCardInner({
                 FLIP
               </div>
             )}
+            {comp.distressedSale && (
+              <div
+                className="h-6 px-1.5 rounded flex items-center text-[10px] font-bold bg-red-500/15 text-red-500 flex-shrink-0"
+                title="Distressed sale — provider-flagged; investor/as-is market evidence"
+              >
+                DISTRESSED
+              </div>
+            )}
             {comp.userTier && (
               <div
                 className={cn(
@@ -217,6 +225,15 @@ function CompCardInner({
             <><span className="text-border">·</span><span className="text-emerald-600">Adj: ${comp.adjustedPrice.toLocaleString()}</span></>
           )}
           {hasSubdivisionMatch && <span className="text-emerald-500">✓ Subdivision</span>}
+          {comp.sameBlockGroup === true && (
+            <><span className="text-border">·</span><span className="text-emerald-500" title="Same census block group as the subject — same micro-market">✓ Block Group</span></>
+          )}
+          {comp.crossesMajorRoad === false && comp.sameBlockGroup === false && (
+            <><span className="text-border">·</span><span className="text-emerald-500" title={`Same census tract as the subject${comp.censusTract ? ` (${comp.censusTract})` : ''}`}>✓ Tract</span></>
+          )}
+          {comp.crossesMajorRoad === true && (
+            <><span className="text-border">·</span><span className="text-amber-500" title="Different census tract — tract boundaries follow major roads">⚠ Crosses tract</span></>
+          )}
         </div>
         <RuleMatchDetails comp={comp} />
       </div>

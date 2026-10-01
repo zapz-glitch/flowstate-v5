@@ -594,24 +594,59 @@ export async function runJevEvaluation(
   }
 
   // Stage 6 — classification: passing test 2 means the comp matched the
-  // rules, not that it's an ARV comp. Split the passers by adjusted price —
-  // the top 15% become the ARV set (variable count, not capped at 3), the
-  // rest become the as-is market reference. No fill: a short passer set
-  // stays short, and zero passers flags the run for human handoff.
+  // rules, not that it's an ARV comp.
+  //
+  // Evidence-based split when provider evidence is present (attom-mcp):
+  // a verified flip chain (buy→resell 30–365d, profitable) is ARV evidence;
+  // everything else — distressed-flagged or ordinary — is the as-is
+  // market reference. This replaces the pool-relative price-percentile
+  // split, which a single outlier premium can corrupt. Under corelogic the
+  // fields are unset at this stage (Zillow reconciliation runs later), so
+  // the percentile path is preserved byte-for-byte.
   const core = evaluated.filter((e) => e.stage === 'test2_pass')
-  const arvCount = core.length > 0
-    ? Math.max(1, Math.ceil(core.length * (COMP_ARV_TOP_PERCENT / 100)))
-    : 0
-  const byPrice = [...core].sort((a, b) => {
-    const pa = a.adjustedPrice ?? -Infinity
-    const pb = b.adjustedPrice ?? -Infinity
-    if (pb !== pa) return pb - pa
-    return (b.test2?.score ?? 0) - (a.test2?.score ?? 0)
-  })
-  const arvSet = new Set(byPrice.slice(0, arvCount).map((e) => e.compId))
-  for (const e of core) {
-    e.priceTier = arvSet.has(e.compId) ? 'arv' : 'as_is'
-    e.selected = arvSet.has(e.compId) ? 'core' : null
+  const hasEvidence = core.some(
+    (e) => byId.get(e.compId)?.flip || byId.get(e.compId)?.distressedSale || byId.get(e.compId)?.transaction?.isForeclosure,
+  )
+  let arvSet: Set<string>
+  if (hasEvidence) {
+    arvSet = new Set(
+      core.filter((e) => byId.get(e.compId)?.flip != null).map((e) => e.compId),
+    )
+    for (const e of core) {
+      e.priceTier = arvSet.has(e.compId) ? 'arv' : 'as_is'
+      e.selected = arvSet.has(e.compId) ? 'core' : null
+    }
+    // No flip evidence at all → fall back to the percentile split so ARV
+    // never collapses to a single price-representative guess.
+    if (arvSet.size === 0) {
+      const fallbackCount = Math.max(1, Math.ceil(core.length * (COMP_ARV_TOP_PERCENT / 100)))
+      const byPrice = [...core].sort((a, b) => {
+        const pa = a.adjustedPrice ?? -Infinity
+        const pb = b.adjustedPrice ?? -Infinity
+        if (pb !== pa) return pb - pa
+        return (b.test2?.score ?? 0) - (a.test2?.score ?? 0)
+      })
+      arvSet = new Set(byPrice.slice(0, fallbackCount).map((e) => e.compId))
+      for (const e of core) {
+        e.priceTier = arvSet.has(e.compId) ? 'arv' : 'as_is'
+        e.selected = arvSet.has(e.compId) ? 'core' : null
+      }
+    }
+  } else {
+    const arvCount = core.length > 0
+      ? Math.max(1, Math.ceil(core.length * (COMP_ARV_TOP_PERCENT / 100)))
+      : 0
+    const byPrice = [...core].sort((a, b) => {
+      const pa = a.adjustedPrice ?? -Infinity
+      const pb = b.adjustedPrice ?? -Infinity
+      if (pb !== pa) return pb - pa
+      return (b.test2?.score ?? 0) - (a.test2?.score ?? 0)
+    })
+    arvSet = new Set(byPrice.slice(0, arvCount).map((e) => e.compId))
+    for (const e of core) {
+      e.priceTier = arvSet.has(e.compId) ? 'arv' : 'as_is'
+      e.selected = arvSet.has(e.compId) ? 'core' : null
+    }
   }
   const arvCompIds = [...arvSet]
   const asIsCompIds = core.filter((e) => e.priceTier === 'as_is').map((e) => e.compId)

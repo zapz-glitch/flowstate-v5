@@ -182,6 +182,13 @@ export interface NormalizedProperty {
   censusTract?: string
   legalDescription?: string
 
+  /** Verified flip on the latest sale: prior buy 30–365d before, resold for
+   *  profit. Provider sales-history source (attom-mcp); comps also get this
+   *  via Zillow price-history reconciliation downstream. */
+  flip?: { priorSalePrice: number; priorSaleDate: string; daysHeld: number; gainPct: number } | null
+  /** Latest priced sale flagged distressed by the provider */
+  distressedSale?: boolean | null
+
   /** Raw API response for debugging */
   raw?: unknown
 }
@@ -229,8 +236,10 @@ export interface NormalizedComparable {
    */
   saleReconciled?: { previousPrice: number | null; previousDate: string | null; source: 'zillow' }
 
-  /** Verified flip: prior sold event 30–365 days before saleDate at a lower price (from Zillow price history) */
-  flip?: { priorSalePrice: number; priorSaleDate: string; daysHeld: number; gainPct: number }
+  /** Verified flip: prior sold event 30–365 days before saleDate at a lower price (from Zillow price history, or provider sales-history under attom-mcp) */
+  flip?: { priorSalePrice: number; priorSaleDate: string; daysHeld: number; gainPct: number } | null
+  /** Provider-flagged distressed sale on this comp (e.g. ATTOM distressedStatus) */
+  distressedSale?: boolean | null
 
   // Location details (from enrichment)
   subdivision?: string | null

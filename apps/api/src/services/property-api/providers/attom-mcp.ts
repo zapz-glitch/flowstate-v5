@@ -214,6 +214,35 @@ function latestPricedSale(sales: any[] | null): any | null {
   return (sales ?? []).find((s) => s.price != null && s.price > 1000 && s.saleDate) ?? null
 }
 
+// Flip chain: prior priced sale 30–365d before the latest sale at a lower
+// price — same rule as the Zillow reconciliation flip detection in
+// services/analysis, sourced here from ATTOM sales-history.
+const FLIP_MIN_DAYS = 30
+const FLIP_MAX_DAYS = 365
+
+function detectFlip(sales: any[] | null): NonNullable<NormalizedProperty['flip']> | null {
+  const priced = (sales ?? [])
+    .filter((s) => s.price != null && s.price > 1000 && s.saleDate)
+    .sort((a, b) => new Date(b.saleDate).getTime() - new Date(a.saleDate).getTime())
+  const newest = priced[0]
+  if (!newest) return null
+  for (const prior of priced.slice(1)) {
+    const daysHeld = Math.round(
+      (new Date(newest.saleDate).getTime() - new Date(prior.saleDate).getTime()) / 86_400_000,
+    )
+    if (daysHeld > FLIP_MAX_DAYS) break // sorted desc — nothing earlier qualifies
+    if (daysHeld >= FLIP_MIN_DAYS && newest.price > prior.price) {
+      return {
+        priorSalePrice: prior.price,
+        priorSaleDate: String(prior.saleDate).slice(0, 10),
+        daysHeld,
+        gainPct: Math.round(((newest.price - prior.price) / prior.price) * 1000) / 10,
+      }
+    }
+  }
+  return null
+}
+
 async function normalizeMcpProperty(results: any[], env: Env): Promise<NormalizedProperty> {
   const identity = dataset<any>(results, 'identity')
   const overview = dataset<any>(results, 'overview')
@@ -303,6 +332,9 @@ async function normalizeMcpProperty(results: any[], env: Env): Promise<Normalize
       fireplacesCount: ch.fireplaces ?? undefined,
     },
 
+    flip: detectFlip(sales),
+    distressedSale: lastSale?.distressed === true || null,
+
     transaction: lastSale ? {
       buyerNames: lastSale.buyers ? [String(lastSale.buyers)] : undefined,
       sellerNames: lastSale.sellers ? [String(lastSale.sellers)] : undefined,
@@ -348,6 +380,7 @@ function normalizeMcpComp(c: McpCompRecord): NormalizedComparable {
     // enrichComparables; N4 maps to neighborhoodName.
     neighborhoodName: c.neighborhoodN4 ?? null,
 
+    distressedSale: c.distressedStatus ?? null,
     transaction: c.distressedStatus ? { isForeclosure: true } : undefined,
 
     raw: c,

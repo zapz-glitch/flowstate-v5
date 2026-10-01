@@ -33,6 +33,7 @@ import {
   type CacheService,
 } from '../cache';
 import { resolveCandidateLimit } from './retrieval-policy';
+import { fetchCensusGeography } from '../geo/census-geocoder';
 import type {
   PropertyProvider,
   PropertyProviderAdapter,
@@ -884,11 +885,61 @@ class PropertyApi implements PropertyApiService {
 
     // ─── Step 3: Enrich comparables with full property details ─────────────────
     // This fetches subdivision data for each comp (needed for subdivision matching)
-    const enrichedComparables = await this.enrichComparables(
-      compsResult.data.comparables,
-      {
-        concurrency: 10,
-      },
+    //
+    // attom-mcp: free-first ordering — census-geocode every comp (no cost)
+    // and only pay a provider detail call for comps sharing the subject's
+    // census block group or tract. Non-passers stay in the pool unenriched;
+    // the geo signals are stamped so downstream rules (road_barrier,
+    // sameBlockGroup) and the UI see them.
+    let compsToEnrich = compsResult.data.comparables;
+    if (
+      this.currentConfig.provider === 'attom-mcp' &&
+      property.latitude != null &&
+      property.longitude != null
+    ) {
+      const subjectGeo = await fetchCensusGeography(
+        property.latitude,
+        property.longitude,
+        this.env.API_CACHE ?? undefined,
+      );
+      if (subjectGeo) {
+        const lookup = async (lat: number, lng: number) => {
+          const cache = this.env.API_CACHE ?? undefined;
+          const g = await fetchCensusGeography(lat, lng, cache).catch(() => null);
+          // One retry — a null geo silently drops an otherwise-valid comp
+          return g ?? fetchCensusGeography(lat, lng, cache).catch(() => null);
+        };
+        const geos = await Promise.all(
+          compsToEnrich.map((c) =>
+            c.latitude != null && c.longitude != null
+              ? lookup(c.latitude, c.longitude)
+              : Promise.resolve(null),
+          ),
+        );
+        compsToEnrich = compsToEnrich.filter((c, i) => {
+          const g = geos[i];
+          if (!g) {
+            c.isEnriched = false;
+            return false;
+          }
+          c.censusTract ??= g.tract;
+          c.sameBlockGroup ??= g.blockGroup === subjectGeo.blockGroup;
+          c.crossesMajorRoad ??= g.tract !== subjectGeo.tract;
+          const pass =
+            g.blockGroup === subjectGeo.blockGroup || g.tract === subjectGeo.tract;
+          if (!pass) c.isEnriched = false;
+          return pass;
+        });
+      }
+    }
+    const enrichedOnly = await this.enrichComparables(compsToEnrich, {
+      concurrency: 10,
+    });
+    // Merge enriched passers back over the full pool so non-passers still
+    // appear (unenriched) in the response.
+    const enrichedById = new Map(enrichedOnly.map((c) => [c.id, c]));
+    const enrichedComparables = compsResult.data.comparables.map(
+      (c) => enrichedById.get(c.id) ?? c,
     );
 
     // ─── Step 4: Build enrichment data ─────────────────────────────────────────
@@ -1094,10 +1145,14 @@ class PropertyApi implements PropertyApiService {
                 buildingCondition: result.data.buildingCondition ?? null,
                 buildingGrade: result.data.buildingGrade ?? null,
                 stories: result.data.stories ?? null,
+                flip: result.data.flip ?? null,
+                distressedSale: result.data.distressedSale ?? null,
                 construction: mergedConstruction,
                 transaction: result.data.transaction ? {
                   buyerNames: result.data.transaction.buyerNames,
                   buyerIsCorporate: result.data.transaction.buyerIsCorporate,
+                  isForeclosure: result.data.transaction.isForeclosure,
+                  isShortSale: result.data.transaction.isShortSale,
                 } : undefined,
                 features: (result.data.features || buildingDetail) ? {
                   poolType: result.data.features?.poolType ?? buildingDetail?.pool ?? undefined,
