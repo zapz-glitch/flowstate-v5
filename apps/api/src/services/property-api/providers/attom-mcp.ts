@@ -380,8 +380,9 @@ function normalizeMcpComp(c: McpCompRecord): NormalizedComparable {
     // enrichComparables; N4 maps to neighborhoodName.
     neighborhoodName: c.neighborhoodN4 ?? null,
 
-    distressedSale: c.distressedStatus ?? null,
-    transaction: c.distressedStatus ? { isForeclosure: true } : undefined,
+    // NOTE: pool `distressedStatus` is property-level (distress on file),
+    // NOT a distressed-transaction flag — do not map it to distressedSale.
+    // Transaction distress only arrives via sales-history enrichment.
 
     raw: c,
   }

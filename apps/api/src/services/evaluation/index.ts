@@ -727,7 +727,10 @@ export async function performAnalysis(
     asIsCompIds: string[]
     topCompId: string | null
   } | null = null
-  if (appraisalResult.comparables.length > 0) {
+  // attom-mcp excludes Jev entirely — the deterministic rules path plus
+  // evidence (flip/distressed) drives selection; no LLM touches the eval.
+  const isAttomMcp = bundle.metadata?.provider === 'attom-mcp'
+  if (!isAttomMcp && appraisalResult.comparables.length > 0) {
     try {
       const jev = await runJevEvaluation(bundle.property, appraisalResult.comparables, filters, adjustments, env, {
         rules: { filters, adjustments },
@@ -816,6 +819,30 @@ export async function performAnalysis(
       step('jev_evaluation', 'fallback', 'Jev evaluation unavailable — appraisal-rules selection used')
       fallbacksUsed.push('jev_evaluation:unavailable')
       hybridRun = { status: 'unavailable', mode: 'enabled', questionVersion: COMP_HYBRID_VERSION, reason: 'jev_failed' }
+    }
+  }
+
+  // attom-mcp evidence selection: verified flip resales are the ARV set —
+  // a flip's resale IS the after-repair evidence (its acquisition price is
+  // folded into the investor floor by summarizeGroupB). No flips → the
+  // rules-based selection stands.
+  if (isAttomMcp) {
+    const flips = appraisalResult.comparables.filter((c) => c.isEnabled && c.flip?.priorSalePrice)
+    if (flips.length > 0) {
+      const flipIds = new Set(flips.map((c) => c.id))
+      appraisalResult.comparables = appraisalResult.comparables.map((comp) => ({
+        ...comp,
+        arvStatus: flipIds.has(comp.id)
+          ? 'selected' as const
+          : comp.arvStatus === 'selected' ? 'not_examined' as const : comp.arvStatus,
+      }))
+      appraisalResult.selectedCompIds = [...flipIds]
+      appraisalResult.arv = appraisalService.calculateARV(flips)
+      appraisalResult.insufficientComps = false
+      step('jev_evaluation', 'skipped',
+        `Jev excluded (attom-mcp) — ARV from ${flips.length} verified flip resale(s)`)
+    } else {
+      step('jev_evaluation', 'skipped', 'Jev excluded (attom-mcp) — rules selection stands (no flip evidence)')
     }
   }
 
@@ -1033,7 +1060,21 @@ export async function performAnalysis(
   const groupACompIds = new Set(appraisalResult.selectedCompIds ?? [])
   // Jev's investment-truth picks are the investment set when available;
   // otherwise fall back to the price-threshold Group B.
-  const groupBResult = finalArv == null ? null : jevInvestmentCompIds.length > 0
+  const groupBResult = finalArv == null ? null : isAttomMcp
+    // attom-mcp: as-is set is evidence, not a price ceiling — distressed
+    // sales qualify; flip acquisitions are folded in by summarizeGroupB
+    // regardless of bucket membership.
+    ? summarizeGroupB(
+        appraisalResult.comparables.filter(
+          (c) => (c.distressedSale === true || c.transaction?.isForeclosure === true) && c.salePrice != null && c.salePrice > 0,
+        ),
+        bundle.property,
+        finalArv,
+        asIsThresholdPercent,
+        Math.round((finalArv * asIsThresholdPercent) / 100),
+        appraisalResult.comparables,
+      )
+    : jevInvestmentCompIds.length > 0
     ? summarizeGroupB(
         appraisalResult.comparables.filter(
           (c) => jevInvestmentCompIds.includes(c.id) && c.salePrice != null && c.salePrice > 0,
@@ -1161,6 +1202,8 @@ export async function performAnalysis(
   // ── 11. Jev outcome classification (read-only; never affects the result) ──
   // Assesses the Jev-driven production outcome — the only scenario left.
   // No valuation → nothing for the outcome classifier to judge.
+  // attom-mcp excludes Jev entirely — no outcome classification either.
+  if (!isAttomMcp) {
   if (insufficient) {
     response.jevOutcome = { status: 'unavailable', reason: 'insufficient_comps' }
   } else {
@@ -1170,6 +1213,7 @@ export async function performAnalysis(
       console.warn('[Evaluation] Jev outcome classification failed:', jevError instanceof Error ? jevError.message : jevError)
       response.jevOutcome = { status: 'unavailable', reason: 'classification_failed' }
     }
+  }
   }
   if (hybridRun) response.jevHybrid = hybridRun
 

@@ -430,10 +430,13 @@ function classifyComp(c: any, geo: CompGeo): { class: CompClass; note: string; f
     }
   }
 
+  // distressed evidence must come from the SALES-HISTORY transaction flag
+  // (pool `distressedStatus` is property-level — distress on file, not a
+  // distressed sale; every Hubert comp carries it).
   const poolSaleDistressed = sales.some(
     (s) => saleDate && Math.abs(new Date(s.saleDate!).getTime() - saleDate) < 864e5 * 7 && s.distressed
   )
-  if (c._distressed || poolSaleDistressed) return { class: 'asis', note: 'distressed-flagged sale' }
+  if (poolSaleDistressed) return { class: 'asis', note: 'distressed-flagged sale' }
 
   if (ppsf != null && scopeMed != null && scopeMed > 0 && ppsf >= scopeMed * ARV_PPSF_PREMIUM)
     return { class: 'arv', note: `sold ${Math.round((ppsf / scopeMed) * 100 - 100)}% above scope median $/sf` }
