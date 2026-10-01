@@ -217,6 +217,35 @@
   swap itself. User will supply corrected endpoints for any call that
   errors during the swap.
 
+- TOMORROW'S WORK PACKAGE — "trade tricks" (user-named appraiser rules
+  module): implement as packages/shared/src/appraisal/trade-tricks.ts so
+  server + client recalc share one implementation. Spec agreed with user:
+  (1) marginal-rate sqft scaling — compARV = adjustedPrice + (subjSqft −
+  compSqft) × compPpsf × 0.5 (symmetric, tunable via settings
+  marginalSqftFactor); (2) market-conditions time adjustment from comp
+  ppsfMedians 90d-vs-365d drift, downward-only (conservative in soft
+  market); (3) total-adjustment cap — >25% net adj → downweight/flag;
+  (4) bracketing check — all-smaller/all-bigger ARV set → confidence
+  downgrade; (5) outlier ceiling — ARV may exceed pool's top actual sale
+  only if ≥2 evidence comps support it; (6) least-adjustment weighting —
+  weight ∝ 1/(1+adjPct). Calibration goal per user: conservative
+  risk-adjusted ARV, "99% calibrated" = engine knows when evidence is
+  thin. Extend provider ppsfMedians to carry 90d/365d trend per scope.
+- DATASET ENRICHMENT QUEUE (user approved, not started): timeline/
+  ownership-periods → stronger flip evidence; mortgage-history/
+  foreclosure-history → separate estate-sales from investor buys (fixes
+  floor≈ARV collision); property/{id}/comparables → scarce-pool backstop;
+  rental-valuation → hold-vs-flip output; equity/ownership → negotiation
+  signal; schools/market-context → report richness. Provider note:
+  get_property_data caps at 524KB → response_too_large must retry with
+  fewer datasets (not handled yet).
+- M2M AUTH — WAITING ON ATTOM ADMIN ACTIVATION: creds staged in
+  .dev.vars (ATTOM_MCP_M2M_CLIENT_ID + ATTOM_MCP_CLIENT_SECRET),
+  client_credentials exchange verified working at
+  mcp.intelligence.attomdata.com/token — surface still 403s ("missing
+  allow grant") until admin enables MCP access on the access key.
+  When activated: restart wrangler, run Sterling E2E to confirm.
+
 ## Last handoff
 
 PR #79 merged and deployed. ATTOM MCP server connected + authenticated +
