@@ -151,7 +151,10 @@ export function recalculateReport(
   // 2. Build ArvCompLike array for ARV calculation
   const arvComps: ArvCompLike[] = compEvaluations.map((ev, i) => ({
     isEnabled: ev.isEnabled,
-    adjustedPrice: ev.adjustedPrice,
+    // Server-adjusted price is authoritative — it was computed against the
+    // enriched comp data; the client re-derivation can drift (missing/extra
+    // adjustment signals). Fall back to the client's own eval when absent.
+    adjustedPrice: comps[i].adjustedPrice ?? ev.adjustedPrice,
     salePrice: comps[i].salePrice ?? null,
     squareFeet: comps[i].squareFeet ?? null,
     distanceMiles: comps[i].distanceMiles ?? null,

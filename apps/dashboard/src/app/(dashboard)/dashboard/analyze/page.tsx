@@ -967,7 +967,8 @@ export default function AnalyzePage() {
           rerunning={isFetching}
           onOfferWorkflow={handleOfferWorkflow}
           statusLabel={
-            streamingStep === 'searching' ? 'Searching property...'
+            streamingStep === 'idle' && isFetching ? 'Starting analysis...'
+            : streamingStep === 'searching' ? 'Searching property...'
             : streamingStep === 'subject' ? 'Loading comparables...'
             : streamingStep === 'comps' ? 'Enriching comp details...'
             : streamingStep === 'evaluating' ? <EvalProgressLabel />

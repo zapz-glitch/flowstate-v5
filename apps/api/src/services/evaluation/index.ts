@@ -707,7 +707,7 @@ export async function performAnalysis(
   }))
   appraisalResult.selectedCompIds = [...arvIds]
   if (arvComps.length > 0) {
-    appraisalResult.arv = appraisalService.calculateARV(arvComps)
+    appraisalResult.arv = appraisalService.calculateARV(arvComps, bundle.property.squareFeet)
     appraisalResult.insufficientComps = false
     step('appraisal_rules', 'completed',
       `Evidence selection — ARV from ${arvComps.length} evidence comp(s)`)

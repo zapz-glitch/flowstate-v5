@@ -172,7 +172,7 @@ export interface AppraisalService {
   /**
    * Calculate ARV from appraised comparables
    */
-  calculateARV(comparables: AppraisedComparable[]): number
+  calculateARV(comparables: AppraisedComparable[], subjectSqft?: number | null): number
 
   /**
    * Calculate weighted ARV based on property classifications
@@ -781,17 +781,26 @@ class PropertyAppraisalService implements AppraisalService {
     }
   }
 
-  calculateARV(comparables: AppraisedComparable[]): number {
-    // Use adjustedSalePrice if available, otherwise fall back to salePrice
-    // This ensures ARV is calculated even if adjustments couldn't be applied
-    const validPrices = comparables
-      .filter((c) => c.isEnabled)
-      .map((c) => c.adjustedSalePrice ?? c.salePrice)
-      .filter((p): p is number => p != null && p > 0)
-
-    if (validPrices.length === 0) return 0
-
-    return Math.round(validPrices.reduce((sum, p) => sum + p, 0) / validPrices.length)
+  calculateARV(comparables: AppraisedComparable[], subjectSqft?: number | null): number {
+    // Canonical formula (same as shared calculateARV): normalize each comp's
+    // adjusted price to the subject's size — a comp of a different size must
+    // scale, not average raw. avg(adjustedPrice/compSqft × subjectSqft).
+    const valid: Array<{ value: number; weight: number }> = []
+    for (const c of comparables.filter((x) => x.isEnabled)) {
+      const price = c.adjustedSalePrice ?? c.salePrice
+      if (price == null || price <= 0) continue
+      if (c.squareFeet != null && c.squareFeet > 0 && subjectSqft != null && subjectSqft > 0) {
+        // Sqft-proximity weight — in-band comps carry more weight; smaller
+        // homes' inflated $/sf shouldn't dominate the average.
+        const weight = 1 / (1 + Math.abs(c.squareFeet - subjectSqft) / subjectSqft)
+        valid.push({ value: (price / c.squareFeet) * subjectSqft, weight })
+      } else {
+        valid.push({ value: price, weight: 1 })
+      }
+    }
+    if (valid.length === 0) return 0
+    const totalWeight = valid.reduce((s, v) => s + v.weight, 0)
+    return Math.round(valid.reduce((sum, v) => sum + v.value * v.weight, 0) / totalWeight)
   }
 
   getDefaultFilters(): AppraisalFilter[] {
@@ -915,7 +924,7 @@ class PropertyAppraisalService implements AppraisalService {
       asIsValue,
       afterRenovationValue,
       transitionalValue,
-      this.calculateARV(enabledComps)
+      this.calculateARV(enabledComps, subject.squareFeet)
     )
 
     // Find best comp (highest weight in primary tier)
