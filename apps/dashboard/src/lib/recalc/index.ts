@@ -458,7 +458,14 @@ export function recalculateValuationFromComps(
   const subjectSqft = subject.squareFeet ?? 0
   const selectedComps = allComps.filter((c, i) => selectedCompKeys.has(getCompKey(c, i)))
 
-  const arvComps: ArvCompLike[] = selectedComps.map((c) => ({
+  // ARV pool = ARV-evidence comps only — selecting a median or investor-floor
+  // comp must not leak its price into ARV. An operator ARV pin (userTier) is
+  // the explicit override that admits a non-evidence comp.
+  const arvEligibleComps = selectedComps.filter(
+    (c) => c.classification?.type === 'after_renovation' || c.userTier === 'arv'
+  )
+
+  const arvComps: ArvCompLike[] = arvEligibleComps.map((c) => ({
     isEnabled: true,
     adjustedPrice: c.adjustedPrice ?? c.salePrice ?? null,
     salePrice: c.salePrice ?? null,
