@@ -144,6 +144,15 @@
   grouping for attom-mcp (flip→after_renovation, distressed→as_is,
   else transitional). E2E job_1790818674653: ARV $308,356 (flip resales
   only), investor floor $194,991, 14/32 enriched, no Jev.
+- OLD HARNESS EXCISED (2026-10-01): services/jev, comp-hybrid,
+  comp-screen deleted; Zillow reconcile + assessor condition gate +
+  condition_match default filter removed; classifyCompsByEvidence is the
+  only comp classifier; ARV = verified flip resales only (no evidence →
+  report-only, no fabricated ARV); Group B = distressed + flip buys
+  (no ARV dependency); confidence grades flip count/staleness; all jev*
+  response/comp/UI fields + 5 dashboard Jev components + score
+  sort/filter deleted; subdivision_match passes on census tract/BG
+  verification. E2E job_1790820587972: ARV $307,000, floor $194,991.
 - Temp eval harness: `npx tsx scripts/tmp-attom-eval.mts "<address>"` —
   MCP data → CompLike/PropertyLike → real DEFAULT_FILTERS/ADJUSTMENTS +
   pickBestComps/calculateARV. Features: sale-age ladder + vintage cap,
