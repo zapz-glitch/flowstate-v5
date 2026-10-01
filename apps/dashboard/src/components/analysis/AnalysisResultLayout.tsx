@@ -115,6 +115,12 @@ export function AnalysisResultLayout({
               Every census-verified comp was evaluated and none carried ARV evidence
               (flip resale, premium over scope median, or above AVM). The comp pool
               and per-comp results are below.
+              {comps?.asIsMarketIntel?.asIsMarketPrice != null && (
+                <span className="block mt-1 font-medium text-foreground">
+                  Investor floor: ${comps.asIsMarketIntel.asIsMarketPrice.toLocaleString()}
+                  {' '}({comps.asIsMarketIntel.compCount} distressed + {comps.asIsMarketIntel.flipSaleCount} flip buy(s))
+                </span>
+              )}
             </p>
           </div>
         )

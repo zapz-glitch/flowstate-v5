@@ -117,6 +117,17 @@ export interface AnalyzeData {
   }> | null
   subject?: SubjectData
   valuation?: ValuationData
+  /** Investor floor (Group B evidence) — survives a no-ARV run */
+  asIsMarketIntel?: {
+    asIsMarketPrice?: number | null
+    avgPricePerSqft?: number | null
+    compCount?: number
+    flipSaleCount?: number
+    compIds?: string[]
+    thresholdPercent?: number
+    priceCeiling?: number
+    noDataReason?: string
+  } | null
   comps?: CompsData
   riskFlags?: string[] | null
   permits?: PermitsData | null
@@ -373,6 +384,14 @@ export interface CompsData {
   retrieval?: {
     paramFlex?: { extensions: number; factor: number } | null
   } | null
+  /** Investor floor (Group B evidence) — survives a no-ARV run */
+  asIsMarketIntel?: {
+    asIsMarketPrice?: number | null
+    avgPricePerSqft?: number | null
+    compCount?: number
+    flipSaleCount?: number
+    compIds?: string[]
+  } | null
   items?: CompItem[]
 }
 
@@ -589,6 +608,14 @@ export interface CompsData {
   /** Provider retrieval audit — includes paramFlex escalation record */
   retrieval?: {
     paramFlex?: { extensions: number; factor: number } | null
+  } | null
+  /** Investor floor (Group B evidence) — survives a no-ARV run */
+  asIsMarketIntel?: {
+    asIsMarketPrice?: number | null
+    avgPricePerSqft?: number | null
+    compCount?: number
+    flipSaleCount?: number
+    compIds?: string[]
   } | null
   items?: CompItem[]
 }

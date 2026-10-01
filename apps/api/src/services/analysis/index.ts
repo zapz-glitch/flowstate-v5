@@ -751,6 +751,14 @@ export interface AnalysisResponse {
     disabledCount: number
     /** True when the pool couldn't support a valuation — valuation is null */
     insufficientComps?: boolean
+    /** Investor floor (Group B evidence) — survives a no-ARV run */
+    asIsMarketIntel?: {
+      asIsMarketPrice: number | null
+      avgPricePerSqft: number | null
+      compCount: number
+      flipSaleCount: number
+      compIds: string[]
+    } | null
     avgPricePerSqft: number | null
     medianPrice: number | null
     /** IDs of comps classified as As-Is */
@@ -1442,7 +1450,6 @@ export function buildAnalysisResponse(
           ? finalArv - ctx.subjectListPrice
           : null,
     } : null,
-
     // ═══ COMPARABLE SALES (All comps with enable/disable status) ═══════════════
     comps: {
       total: appraisalResult.comparables.length,
@@ -1451,6 +1458,14 @@ export function buildAnalysisResponse(
       enabledCount: enabledComps.length,
       disabledCount: disabledComps.length,
       insufficientComps: appraisalResult.insufficientComps === true || enabledComps.length === 0,
+      // Investor floor — survives a no-ARV run (also inside valuation).
+      asIsMarketIntel: ctx.groupBResult ? {
+        asIsMarketPrice: ctx.groupBResult.asIsMarketPrice,
+        avgPricePerSqft: ctx.groupBResult.avgPricePerSqft,
+        compCount: ctx.groupBResult.count,
+        flipSaleCount: ctx.groupBResult.flipSaleCount,
+        compIds: ctx.groupBResult.compIds,
+      } : null,
       avgPricePerSqft: appraisalResult.avgPricePerSqft,
       medianPrice: appraisalResult.medianSalePrice,
       asIsCompIds: ctx.classificationSummary?.asIsCompIds ?? [],

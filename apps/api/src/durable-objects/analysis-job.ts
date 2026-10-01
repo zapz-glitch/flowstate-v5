@@ -389,7 +389,13 @@ export class AnalysisJobDO {
         propertyId: property.id,
         radiusMiles: config.searchOptions.radiusMiles ?? apiFilterParams.radiusMiles ?? 1,
         maxComps: candidateLimit,
-        monthsBack: config.searchOptions.monthsBack ?? apiFilterParams.monthsBack ?? 12,
+        // attom-mcp: the sale-age ladder (expansion tiers + param flex) can
+        // reach ~18 months — the configured window (often ~6mo, derived
+        // from sale_age) truncates the exact comps the rules are built to
+        // admit. Floor the fetch at the deepest reachable tier.
+        monthsBack: propertyApi.providerName === 'attom-mcp'
+          ? Math.max(18, config.searchOptions.monthsBack ?? apiFilterParams.monthsBack ?? 0)
+          : (config.searchOptions.monthsBack ?? apiFilterParams.monthsBack ?? 12),
         // Sub-1,000sf subjects: evaluation replaces the ±diff band with an
         // absolute 1,000sf ceiling — widen the provider-side diff so
         // qualifying comps aren't culled upstream.
