@@ -17,6 +17,7 @@
  */
 
 import { createLLMProvider } from '../llm'
+import { fetchImageAsBase64, type FetchedImage } from '../llm/image-utils'
 import { REHAB_LEVELS } from '../valuation/types'
 
 // ─── Renovation Level Definitions (Evaluation Settings criteria) ──────────────
@@ -267,6 +268,23 @@ export async function assessRenovationFromPhotos(
     })
 
   const photos = uniquePhotos.slice(0, MAX_PHOTOS)
+
+  // Fetch photos server-side — a single dead/expired CDN link fails the
+  // whole provider call when passed as a URL (Observed: Redfin genMid
+  // links 404 to Google). Base64 payloads skip provider-side fetching and
+  // silently drop rotten links; if too few survive, it's honest
+  // insufficient evidence — not an unparseable-provider failure.
+  const fetched = await Promise.all(photos.map((u) => fetchImageAsBase64(u).catch(() => null)))
+  const live = fetched.filter((f): f is FetchedImage => f != null && f.size > 0)
+  if (live.length < MIN_UNIQUE_PHOTOS) {
+    return {
+      ...base,
+      status: 'insufficient_photo_evidence',
+      photosExamined: live.length,
+      limitations: [`Only ${live.length} of ${photos.length} photo URL(s) were fetchable`],
+    }
+  }
+
   let prompt = ''
   if (propertyContext) {
     prompt = 'Property context:\n'
@@ -277,7 +295,7 @@ export async function assessRenovationFromPhotos(
   }
   prompt += RENOVATION_PROMPT
 
-  const imagePayload = photos.map((url) => ({ url }))
+  const imagePayload = live.map((f) => ({ base64: f.base64, mimeType: f.mimeType }))
 
   // Retry once on unparseable output — LLM formatting is nondeterministic
   let parsed: Record<string, unknown> | null = null
@@ -287,6 +305,10 @@ export async function assessRenovationFromPhotos(
       prompt,
       images: imagePayload,
       responseFormat: 'json',
+      // The assessment JSON (per-room conditions + evidence arrays +
+      // rationale) runs past the 1024 default — truncation mid-object was
+      // the "malformed response" failure.
+      maxTokens: 8192,
     })
 
     if (!result.success || !result.data?.content) {
@@ -418,12 +440,17 @@ export async function assessCompCurbAppeal(
     model: env.OPENROUTER_MODEL || 'google/gemini-2.5-flash',
   })
 
+  const fetched = await Promise.all(photos.map((u) => fetchImageAsBase64(u).catch(() => null)))
+  const live = fetched.filter((f): f is FetchedImage => f != null && f.size > 0)
+  if (live.length < CURB_APPEAL_MIN_PHOTOS) return { ...base, summary: 'Insufficient fetchable photos', photosExamined: live.length }
+
   const result = await provider.execute({
     prompt: CURB_APPEAL_PROMPT,
-    images: photos.map((url) => ({ url })),
+    images: live.map((f) => ({ base64: f.base64, mimeType: f.mimeType })),
     responseFormat: 'json',
+    maxTokens: 2048,
   })
-  if (!result.success || !result.data?.content) return { ...base, summary: 'Vision call failed' }
+  if (!result.success || !result.data?.content) return { ...base, summary: 'Vision call failed', photosExamined: live.length }
 
   const parsed = parseVisionJson(result.data.content)
   if (!parsed) return { ...base, summary: 'Unparseable vision response' }

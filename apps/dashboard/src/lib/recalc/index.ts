@@ -165,43 +165,41 @@ export function recalculateReport(
     })),
   }))
 
-  // 3. Use all enabled comps for ARV (no cap — users can enable/disable comps freely)
+  // 3. ARV pool = evidence-classified comps only — 'after_renovation'
+  //    (flip/premium/above-AVM) or an explicit operator ARV pin. Median
+  //    (transitional) comps never feed ARV; investor floor comps never can.
+  const subjectAvm = (subject as { avm?: { value?: number | null } | null }).avm?.value ?? null
+  const isArvComp = (i: number) =>
+    comps[i].classification?.type === 'after_renovation' || comps[i].userTier === 'arv'
+  const isAsIsComp = (i: number) => {
+    const c = comps[i]
+    if (c.classification?.type !== 'as_is' && c.userTier !== 'as_is') return false
+    // Investor-priced only — a distressed deed priced at/above the subject's
+    // AVM is not an investor purchase.
+    return subjectAvm == null || (c.salePrice != null && c.salePrice <= subjectAvm)
+  }
+
+  const arvCompsForCalc = arvComps.map((c, i) => ({ ...c, isEnabled: c.isEnabled && isArvComp(i) }))
   const enabledCount = arvComps.filter((c) => c.isEnabled).length
   const disabledCount = comps.length - enabledCount
 
-  // 4. Calculate ARV using shared function
-  const arv = calculateARV(arvComps, subject.squareFeet)
+  // 4. Calculate ARV from the evidence pool
+  const arv = calculateARV(arvCompsForCalc, subject.squareFeet)
 
-  // 4b. Classify comps into groups:
-  //   1. Among ALL comps, find top arvThresholdPercent% by sale price
-  //   2. Comps that pass filters AND are in top price percentile = 'arv'
-  //   3. Remaining comps with salePrice ≤ ARV × asIsThreshold% = 'as_is'
-  const arvThresholdPct = settings.dealParams.arvThresholdPercent ?? 15
-  const asIsThreshold = settings.asIsThresholdPercent ?? settings.dealParams.asIsThresholdPercent ?? 70
-  const priceCeiling = arv * asIsThreshold / 100
-
-  // Rank ALL comps by sale price for percentile display
+  // 4b. Groups come from evidence classification — not price percentile.
+  //     'arv' = after_renovation evidence; 'as_is' = investor-priced
+  //     distressed; transitional stays ungrouped (market tier).
+  const rankMap = new Map<number, number>()
   const allWithPrice = comps
     .map((c, i) => ({ i, price: c.salePrice ?? 0 }))
     .filter((c) => c.price > 0)
     .sort((a, b) => b.price - a.price)
-
-  const topCount = Math.max(1, Math.ceil(allWithPrice.length * arvThresholdPct / 100))
-  const topPriceIndices = new Set(allWithPrice.slice(0, topCount).map((c) => c.i))
-
-  const rankMap = new Map<number, number>()
   allWithPrice.forEach((c, rank) => rankMap.set(c.i, rank))
 
   compEvaluations.forEach((ev, i) => {
-    const salePrice = comps[i].salePrice ?? 0
-
-    if (ev.isEnabled && topPriceIndices.has(i)) {
-      ev.compGroup = 'arv'
-    } else if (salePrice > 0 && salePrice <= priceCeiling) {
-      ev.compGroup = 'as_is'
-    } else {
-      ev.compGroup = null
-    }
+    ev.compGroup = ev.isEnabled && isArvComp(i) ? 'arv'
+      : ev.isEnabled && isAsIsComp(i) ? 'as_is'
+      : null
 
     // Percentile among ALL comps by sale price
     const rank = rankMap.get(i)

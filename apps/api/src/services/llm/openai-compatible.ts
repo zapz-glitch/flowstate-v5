@@ -58,7 +58,7 @@ export abstract class OpenAICompatibleProvider extends BaseLLMProvider {
           type: 'image_url',
           image_url: {
             url: imageUrl,
-            detail: 'high',
+            detail: 'auto',
           },
         })
       }

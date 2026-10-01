@@ -100,6 +100,7 @@ export function ComparablesSection({
   const [excludedOpen, setExcludedOpen] = useState(false)
   const [layout, setLayout] = useState<'grid' | 'list'>('grid')
   const [sortBy, setSortBy] = useState<SortOption>('default')
+  const [tierFilter, setTierFilter] = useState<'all' | 'arv' | 'market' | 'floor'>('all')
   const [sortDesc, setSortDesc] = useState(true)
   const [notifyOpen, setNotifyOpen] = useState(false)
   const [notifyNotes, setNotifyNotes] = useState('')
@@ -159,9 +160,20 @@ export function ComparablesSection({
   // Stacked ordering: selected block pinned first → geo grouping (subdivision/
   // neighborhood modes) → appraisal-rule closeness (constant across every sort)
   // → directional key (price under geo modes, own key for distance/price/psf).
+  // Evidence-tier filter — ARV (after_renovation) / Median (transitional)
+  // / Investor (as_is). Drives the card list, not the map colors.
+  const tierOf = (c: CompItem) =>
+    c.classification?.type === 'after_renovation' ? 'arv'
+      : c.classification?.type === 'as_is' ? 'floor'
+      : 'market'
+  const filteredCompItems = useMemo(
+    () => tierFilter === 'all' ? compItems : compItems.filter((c) => tierOf(c) === tierFilter),
+    [compItems, tierFilter]
+  )
+
   const sortedItems = useMemo(() => {
-    const indexed = compItems
-      .map((comp, i) => ({ comp, originalIndex: i }))
+    const indexed = filteredCompItems
+      .map((comp, i) => ({ comp, originalIndex: compItems.indexOf(comp) }))
     const isSel = (c: CompItem, i: number) =>
       hasInteractiveSelection ? selectedCompKeys!.has(getCompKey(c, i)) : (c.compGroup === 'arv' || c.isEnabled === true)
     const subdivMatch = (c: CompItem) =>
@@ -205,7 +217,7 @@ export function ComparablesSection({
       if (ga !== gb) return gb - ga
       return dir * (numKey(a.comp) - numKey(b.comp)) || (a.originalIndex - b.originalIndex)
     })
-  }, [compItems, sortBy, sortDesc, subjectSubdivision, subject, selectedCompKeys, hasInteractiveSelection])
+  }, [filteredCompItems, compItems, sortBy, sortDesc, subjectSubdivision, subject, selectedCompKeys, hasInteractiveSelection])
 
   // Functional update keeps the identity stable for memoized cards.
   const toggleExpand = useCallback((key: string) => {
@@ -219,11 +231,11 @@ export function ComparablesSection({
 
   // Group comps based on selection mode
   const arvComps = hasInteractiveSelection
-    ? compItems.filter((_c, i) => selectedCompKeys!.has(getCompKey(_c, i)))
-    : compItems.filter((c) => c.isEnabled === true)
+    ? filteredCompItems.filter((c) => selectedCompKeys!.has(getCompKey(c, compItems.indexOf(c))))
+    : filteredCompItems.filter((c) => c.isEnabled === true)
   const excludedComps = hasInteractiveSelection
-    ? compItems.filter((_c, i) => !selectedCompKeys!.has(getCompKey(_c, i)))
-    : compItems.filter((c) => c.isEnabled !== true)
+    ? filteredCompItems.filter((c) => !selectedCompKeys!.has(getCompKey(c, compItems.indexOf(c))))
+    : filteredCompItems.filter((c) => c.isEnabled !== true)
   // If no comps are selected (e.g. streaming, before evaluation), show all in main section
   const showAllFlat = arvComps.length === 0 && excludedComps.length > 0
 
@@ -329,8 +341,29 @@ export function ComparablesSection({
           </div>
         </div>
 
-        {/* Row 2: Sort controls */}
+        {/* Row 2: Evidence-tier filter + sort controls */}
         <div className="flex items-center gap-1 no-print flex-wrap">
+          {/* Tier filter — ARV evidence / median / investor floor */}
+          {(['all', 'arv', 'market', 'floor'] as const).map((t) => {
+            const labels = { all: 'All', arv: 'ARV', market: 'Median', floor: 'Investor' }
+            const colors = {
+              all: tierFilter === t ? 'bg-secondary text-foreground font-medium' : 'text-foreground-tertiary hover:text-foreground hover:bg-secondary',
+              arv: tierFilter === t ? 'bg-emerald-500/15 text-emerald-600 font-medium' : 'text-foreground-tertiary hover:text-foreground hover:bg-secondary',
+              market: tierFilter === t ? 'bg-orange-500/15 text-orange-500 font-medium' : 'text-foreground-tertiary hover:text-foreground hover:bg-secondary',
+              floor: tierFilter === t ? 'bg-red-500/15 text-red-400 font-medium' : 'text-foreground-tertiary hover:text-foreground hover:bg-secondary',
+            }
+            return (
+              <button
+                key={t}
+                type="button"
+                onClick={() => setTierFilter(t)}
+                className={cn('text-[10px] px-2 py-0.5 rounded transition-colors', colors[t])}
+              >
+                {labels[t]}
+              </button>
+            )
+          })}
+          <span className="w-px h-3 bg-border mx-1" />
           <ArrowUpDown className="w-3 h-3 text-foreground-tertiary mr-0.5" />
           {(['default', 'subdivision', 'neighborhood', 'distance', 'price', 'psf'] as const).map((opt) => (
             <button
