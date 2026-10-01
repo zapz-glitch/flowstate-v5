@@ -304,12 +304,11 @@ await Promise.all(rawComps.map(async (c: any) => {
   c._census = await censusGeo(c.centerPoint?.latitude, c.centerPoint?.longitude)
 }))
 const freeGeo = (c: any): string | null => {
+  // Census-only gate — N4 is ATTOM-derived data, not part of the free pass
   if (c._census?.blockGroup && subjCensus.blockGroup && c._census.blockGroup === subjCensus.blockGroup)
     return `same block group ${subjCensus.blockGroup}`
   if (c._census?.tract && subjCensus.tract && c._census.tract === subjCensus.tract)
     return `same census tract ${subjCensus.tract}`
-  if (c.neighborhoodN4 && subjN4.name && norm(c.neighborhoodN4) === norm(subjN4.name))
-    return 'same neighborhood (N4)'
   return null
 }
 
