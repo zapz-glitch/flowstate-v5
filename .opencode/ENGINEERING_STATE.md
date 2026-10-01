@@ -136,6 +136,14 @@
   SEMANTIC FIX: pool distressedStatus is property-level (distress on
   file) — NOT a distressed sale; only sales-history transaction flag
   counts now. Verified job_1790817380644 Hubert.
+- DO-PATH GATE (2026-10-01): the analyze pipeline orchestrates inside
+  AnalysisJobDO — getPropertyBundle is just the prefetch warmer. Census
+  gate + gated enrichment now live in the DO (initial pool AND expansion
+  refetch; enrichment overlay survives mergeComparablePools' expanded-
+  pool preference). classifyCompsByEvidence replaces price-percentile
+  grouping for attom-mcp (flip→after_renovation, distressed→as_is,
+  else transitional). E2E job_1790818674653: ARV $308,356 (flip resales
+  only), investor floor $194,991, 14/32 enriched, no Jev.
 - Temp eval harness: `npx tsx scripts/tmp-attom-eval.mts "<address>"` —
   MCP data → CompLike/PropertyLike → real DEFAULT_FILTERS/ADJUSTMENTS +
   pickBestComps/calculateARV. Features: sale-age ladder + vintage cap,
