@@ -903,18 +903,26 @@ class PropertyApi implements PropertyApiService {
         this.env.API_CACHE ?? undefined,
       );
       if (subjectGeo) {
+        const cache = this.env.API_CACHE ?? undefined;
         const lookup = async (lat: number, lng: number) => {
-          const cache = this.env.API_CACHE ?? undefined;
           const g = await fetchCensusGeography(lat, lng, cache).catch(() => null);
           // One retry — a null geo silently drops an otherwise-valid comp
           return g ?? fetchCensusGeography(lat, lng, cache).catch(() => null);
         };
-        const geos = await Promise.all(
-          compsToEnrich.map((c) =>
-            c.latitude != null && c.longitude != null
-              ? lookup(c.latitude, c.longitude)
-              : Promise.resolve(null),
-          ),
+        // Bounded concurrency — the Census endpoint throttles big bursts
+        // (25 parallel calls returned ~90% nulls in testing).
+        const GEO_CONCURRENCY = 5;
+        const geos: (Awaited<ReturnType<typeof lookup>> | null)[] = new Array(compsToEnrich.length).fill(null);
+        const queue = compsToEnrich.map((c, i) => ({ c, i }));
+        await Promise.all(
+          Array.from({ length: GEO_CONCURRENCY }, async () => {
+            for (let item = queue.shift(); item; item = queue.shift()) {
+              const { c, i } = item;
+              if (c.latitude != null && c.longitude != null) {
+                geos[i] = await lookup(c.latitude, c.longitude);
+              }
+            }
+          }),
         );
         compsToEnrich = compsToEnrich.filter((c, i) => {
           const g = geos[i];
