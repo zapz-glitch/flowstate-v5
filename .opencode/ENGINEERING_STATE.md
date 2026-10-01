@@ -186,6 +186,26 @@
   `subdivision_match` filter disqualify nearly every comp. Leave
   subdivision unmapped (→ not_verified) unless a real legal-subdivision
   field is found in ATTOM payloads.
+- FLEX LADDER + VALUE-EQUIVALENCE (2026-10-01): numeric filters stretch
+  ×1.15→×5 until ARV evidence or pool exhaustion; geo stays census-hard
+  at strict, then value-equivalent (±10% $/sf vs subject ref) cross-road
+  comps admit under flex. road_barrier/subdivision_match/
+  neighborhood_match carry a flex marker (value>1). Pool fetch floored
+  at 18mo for attom-mcp (was truncating at ~6mo from sale_age). ARV =
+  after_renovation evidence only; floor = distressed ≤subject AVM +
+  flip acquisitions; transitional = display-only everywhere including
+  the client recalc (was averaging all enabled comps → phantom $294k).
+  Default UI selection = ARV comps only; card list has All/ARV/Median/
+  Investor tier chips; map colors by class; DISTRESSED chip removed;
+  paramFlex.concessions renders plain-English ("sale age to 720 days").
+  Subject classification restored via vision level (0-1→after_renovation,
+  2→transitional, 3+→as_is).
+- VISION FIX (2026-10-01): dead CDN photo URLs killed the whole batch
+  (provider-side fetch); photos now fetched server-side via
+  fetchImageAsBase64 → dead links drop, live go as base64. Also
+  detail:'high'×12 images + Gemini reasoning ate the 1024-token output
+  cap → detail:'auto', maxTokens 8192/2048. Verified job_1790829852024:
+  vision ok, subject=transitional, ARV $255k/floor $251.7k on Sterling.
 - Still blocked on user-supplied ATTOM REST API docs for the provider
   swap itself. User will supply corrected endpoints for any call that
   errors during the swap.
