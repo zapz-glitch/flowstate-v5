@@ -153,6 +153,11 @@
   response/comp/UI fields + 5 dashboard Jev components + score
   sort/filter deleted; subdivision_match passes on census tract/BG
   verification. E2E job_1790820587972: ARV $307,000, floor $194,991.
+- CONDITION_MATCH DELETED + E2E (2026-10-01): filter type, evaluator,
+  tiers, defaults all removed — comp condition is never verifiable under
+  ATTOM; subject vision reno stays subject-only. Verified
+  job_1790820852548 (3111 N 18th St): 5 reports, 3/25 census-gated, 2
+  flips + 1 distressed, ARV $95,100, floor $76,501.
 - Temp eval harness: `npx tsx scripts/tmp-attom-eval.mts "<address>"` —
   MCP data → CompLike/PropertyLike → real DEFAULT_FILTERS/ADJUSTMENTS +
   pickBestComps/calculateARV. Features: sale-age ladder + vintage cap,
