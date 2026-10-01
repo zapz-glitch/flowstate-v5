@@ -55,7 +55,9 @@ const MCP_URL = 'https://mcp.intelligence.attomdata.com'
 const TOKEN_URL = 'https://auth.intelligence.attomdata.com/oauth2/v1/apps/token'
 // M2M (client_credentials) exchanges at the root token endpoint; the token
 // must carry the MCP audience + scope or the surface rejects its iss/aud.
-const M2M_TOKEN_URL = 'https://auth.intelligence.attomdata.com/oauth2/v1/token'
+// Documented M2M endpoint lives on the MCP host itself (ATTOM Workbench docs:
+// POST /token with Basic client_id:access_key_secret + resource param).
+const M2M_TOKEN_URL = 'https://mcp.intelligence.attomdata.com/token'
 const MCP_AUDIENCE = 'https://mcp.intelligence.attomdata.com'
 const UA = 'flowstate-api/attom-mcp-provider (experimental)'
 
