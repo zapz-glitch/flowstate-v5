@@ -158,18 +158,7 @@ const TIERS: Array<[number, boolean]> = [
   [548, isVintage],
 ]
 
-// subdivision_match + neighborhood_match come OUT of the per-comp set —
-// geo verification is a combined OR below (either one matching verifies).
-function tierFilters(days: number, vintage: boolean) {
-  return DEFAULT_FILTERS
-    .filter((f) => !['sale_age_expansion', 'sale_age_expansion_2', 'vintage_year_cap',
-                     'subdivision_match', 'neighborhood_match'].includes(f.type))
-    .map((f) => {
-      if (f.type === 'sale_age') return { ...f, value: days }
-      if (f.type === 'year_built_diff' && vintage) return { ...f, value: 999 } // custom check below
-      return f
-    })
-}
+
 
 const norm = (s?: string | null) => (s ?? '').trim().toUpperCase().replace(/\s+/g, ' ')
 
@@ -308,62 +297,104 @@ function geoVerdict(geo: CompGeo, compN4?: string | null) {
   return { verdict: 'fail' as const, detail: `SD:${geo.sd ?? '—'} vs ${subjSd.name ?? '—'} · N4:${n4 ?? '—'} vs ${subjN4.name ?? '—'} · N3:${geo.n3 ?? '—'} vs ${subjN3.name ?? '—'} (no stats)` }
 }
 
-let tierUsed = TIERS[0]
+// ── Phase 2/3 (FREE): census-geocode every comp + geo gate ───────────────
+// Same block group | same tract | same N4 (inline in pool) verifies the
+// location — $0 spent. Only passers earn paid enrichment.
+await Promise.all(rawComps.map(async (c: any) => {
+  c._census = await censusGeo(c.centerPoint?.latitude, c.centerPoint?.longitude)
+}))
+const freeGeo = (c: any): string | null => {
+  if (c._census?.blockGroup && subjCensus.blockGroup && c._census.blockGroup === subjCensus.blockGroup)
+    return `same block group ${subjCensus.blockGroup}`
+  if (c._census?.tract && subjCensus.tract && c._census.tract === subjCensus.tract)
+    return `same census tract ${subjCensus.tract}`
+  if (c.neighborhoodN4 && subjN4.name && norm(c.neighborhoodN4) === norm(subjN4.name))
+    return 'same neighborhood (N4)'
+  return null
+}
+
+// ── Phase 4 (FREE): numeric ladder — flex tolerances for geo-verified ────
+// User rule: geo-verified comps get numeric flex, +15% then +25%.
+const FLEX_TIERS = [1.0, 1.15, 1.25]
+const NUMERIC_RULES = new Set(['sqft_diff', 'year_built_diff', 'distance', 'lot_size_diff'])
+
+function tierFilters(days: number, vintage: boolean, flex: number) {
+  return DEFAULT_FILTERS
+    .filter((f) => !['sale_age_expansion', 'sale_age_expansion_2', 'vintage_year_cap',
+                     'subdivision_match', 'neighborhood_match'].includes(f.type))
+    .map((f) => {
+      if (f.type === 'sale_age') return { ...f, value: days }
+      if (NUMERIC_RULES.has(f.type) && typeof f.value === 'number')
+        return { ...f, value: Math.round(f.value * flex * 100) / 100 }
+      if (f.type === 'year_built_diff' && vintage) return { ...f, value: 999 } // custom check below
+      return f
+    })
+}
+
+let tierUsed: [number, boolean] = TIERS[0]
+let flexUsed = 1.0
 let evaluated: any[] = []
 let enabled: any[] = []
-for (const [days, vintage] of TIERS) {
-  const filters = tierFilters(days, vintage)
-  // phase 1: non-geo rules
-  evaluated = rawComps.map((c) => {
-    const comp = toComp(c)
-    const ev = evaluateComparable(subjectLike, comp, filters, DEFAULT_ADJUSTMENTS)
-    let disabled = ev.shouldDisable
-    let reasons = [...ev.disableReasons]
-    if (vintage && !disabled && comp.yearBuilt != null && comp.yearBuilt > VINTAGE_CAP) {
-      disabled = true
-      reasons.push(`Post-${VINTAGE_CAP} build vs vintage subject`)
-      ev.filterResults.push({ type: 'year_built_diff', passed: false, status: 'failed', reason: `post-${VINTAGE_CAP} build` })
-    }
-    return {
-      ...comp,
-      _addr: c.address,
-      _attomId: c.attomId,
-      _n4: c.neighborhoodN4,
-      _score: c.normalizedScore,
-      _distressed: c.distressedStatus === true,
-      _center: c.centerPoint,
-      _geoNote: '',
-      isEnabled: !disabled,
-      adjustedPrice: ev.adjustedPrice,
-      filterResults: ev.filterResults,
-      disableReasons: reasons,
-      totalAdjustment: ev.totalAdjustment,
-    }
-  })
-  // phase 2: enrich survivors (geo + sales-history + permits + own AVM),
-  // then geo verdict AND evidence classification
-  const survivors = evaluated.filter((c) => c.isEnabled)
-  await Promise.all(survivors.map(async (c) => {
-    const geo = c._attomId ? await enrichCompGeo(String(c._attomId), c._center) : { ppsf: {}, sales: [], permits: 0 }
-    const v = geoVerdict(geo, c._n4)
-    c._geoNote = v.detail ?? ''
-    c._geo = geo
-    if (v.verdict === 'fail') {
-      c.isEnabled = false
-      c.disableReasons.push(`geo mismatch (${v.detail})`)
-      c.filterResults.push({ type: 'subdivision_match', passed: false, status: 'failed', reason: `geo: ${v.detail}` })
-    } else {
-      c.filterResults.push({ type: 'subdivision_match', passed: v.verdict === 'pass', status: v.verdict === 'pass' ? 'passed' : 'not_verified', reason: v.detail })
-      const cls = classifyComp(c, geo)
-      c._class = cls.class
-      c._classNote = cls.note
-      c._flipBuy = cls.flipBuy ?? null
-    }
-  }))
-  enabled = evaluated.filter((c) => c.isEnabled)
-  tierUsed = [days, vintage]
-  if (enabled.length >= BEST_N) break
+outer:
+for (const flex of FLEX_TIERS) {
+  for (const [days, vintage] of TIERS) {
+    const filters = tierFilters(days, vintage, flex)
+    evaluated = rawComps.map((c) => {
+      const comp = toComp(c)
+      const ev = evaluateComparable(subjectLike, comp, filters, DEFAULT_ADJUSTMENTS)
+      let disabled = ev.shouldDisable
+      let reasons = [...ev.disableReasons]
+      if (vintage && !disabled && comp.yearBuilt != null && comp.yearBuilt > VINTAGE_CAP) {
+        disabled = true
+        reasons.push(`Post-${VINTAGE_CAP} build vs vintage subject`)
+        ev.filterResults.push({ type: 'year_built_diff', passed: false, status: 'failed', reason: `post-${VINTAGE_CAP} build` })
+      }
+      const geoTag = freeGeo(c)
+      if (!geoTag && !disabled) {
+        disabled = true
+        reasons.push('geo gate: no block-group/tract/N4 match')
+        ev.filterResults.push({ type: 'subdivision_match', passed: false, status: 'failed', reason: 'no free geo verification (BG/tract/N4)' })
+      }
+      return {
+        ...comp,
+        _addr: c.address,
+        _attomId: c.attomId,
+        _n4: c.neighborhoodN4,
+        _score: c.normalizedScore,
+        _distressed: c.distressedStatus === true,
+        _center: c.centerPoint,
+        _geoFree: geoTag,
+        _geoNote: '',
+        isEnabled: !disabled,
+        adjustedPrice: ev.adjustedPrice,
+        filterResults: ev.filterResults,
+        disableReasons: reasons,
+        totalAdjustment: ev.totalAdjustment,
+      }
+    })
+    enabled = evaluated.filter((c) => c.isEnabled)
+    tierUsed = [days, vintage]
+    flexUsed = flex
+    if (enabled.length >= BEST_N) break outer
+  }
 }
+
+// ── Phase 5 (PAID — 1 report/comp): enrich geo-verified survivors ────────
+// geography-context + sales-history + permits + valuation in ONE call.
+await Promise.all(enabled.map(async (c) => {
+  const geo = c._attomId ? await enrichCompGeo(String(c._attomId), c._center) : { ppsf: {}, sales: [], permits: 0 }
+  c._geo = geo
+  const v = geoVerdict(geo, c._n4)
+  c._geoNote = v.detail ?? c._geoFree ?? ''
+  // Free-gate verified stays in; enriched value-mismatch becomes a WARN
+  // (keep-an-eye flag), not a disqualifier — user call on tightness.
+  if (v.verdict === 'fail') c._geoNote = `WARN value-mismatch: ${v.detail}`
+  c.filterResults.push({ type: 'subdivision_match', passed: v.verdict !== 'fail', status: v.verdict === 'fail' ? 'not_verified' : 'passed', reason: v.detail ?? c._geoFree ?? '' })
+  const cls = classifyComp(c, geo)
+  c._class = cls.class
+  c._classNote = cls.note
+  c._flipBuy = cls.flipBuy ?? null
+}))
 
 // hard-fail count per comp (verified hard-rule failures only) — used to
 // rank "nearest miss" fallbacks so a thin pool still returns the closest
@@ -431,7 +462,7 @@ function classifyComp(c: any, geo: CompGeo): { class: CompClass; note: string; f
 // and mark every number DEGRADED so the operator decides sufficiency.
 const nearestMissesAll = evaluated
   .filter((c) => !c.isEnabled)
-  .sort((a, b) => (a._hardFails - b._hardFails) || ((a.distanceMiles ?? 99) - (b.distanceMiles ?? 99)))
+  .sort((a, b) => ((b._geoFree ? 1 : 0) - (a._geoFree ? 1 : 0)) || (a._hardFails - b._hardFails) || ((a.distanceMiles ?? 99) - (b.distanceMiles ?? 99)))
 const degraded = enabled.length < BEST_N
 const degradedPicks = degraded ? nearestMissesAll.slice(0, BEST_N - enabled.length) : []
 const effectivePool = degraded ? [...enabled, ...degradedPicks] : enabled
@@ -487,7 +518,7 @@ const geoLine = Object.entries(geoScopes).map(([k, v]) => `${k}=${v.name}`).join
 console.log(`  geographies: ${geoLine || 'none'}`)
 console.log(`  census: tract=${subjCensus.tract ?? '—'}  blockGroup=${subjCensus.blockGroup ?? '—'}  block=${subjCensus.block ?? '—'}  (Census geocoder, free/no key)`)
 console.log(`  geo verify: subdivision(SD)=${subjSd.name ?? '—'} · neighborhood(N4)=${subjN4.name ?? '—'} — either matching verifies`)
-console.log(`  ladder used: sale_age ≤${tierUsed[0]}d${tierUsed[1] ? ` + vintage ≤${VINTAGE_CAP} year rule` : ''} · pool ${SEARCH_MILES}mi / strict type / limit ${COMP_LIMIT}`)
+console.log(`  ladder used: sale_age ≤${tierUsed[0]}d${tierUsed[1] ? ` + vintage ≤${VINTAGE_CAP} year rule` : ''} · numeric flex ×${flexUsed} · pool ${SEARCH_MILES}mi / strict type / limit ${COMP_LIMIT}`)
 
 console.log(`\nCOMPS (${evaluated.length} returned, ${enabled.length} pass filters at this tier)`)
 for (const c of evaluated) {
