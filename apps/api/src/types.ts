@@ -61,6 +61,8 @@ export interface Env {
   // ─── ATTOM MCP provider (experimental — PROPERTY_PROVIDER=attom-mcp) ───────
   // OAuth pair injected by scripts/sync-attom-token.mjs from the Devin CLI
   // creds file. Refresh rotates the pair in-isolate; stale env pair → resync.
+  /** Static API key — production auth path; bypasses OAuth when set */
+  ATTOM_MCP_API_KEY?: string
   ATTOM_MCP_ACCESS_TOKEN?: string
   ATTOM_MCP_REFRESH_TOKEN?: string
   ATTOM_MCP_CLIENT_ID?: string

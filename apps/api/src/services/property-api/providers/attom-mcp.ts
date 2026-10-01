@@ -139,6 +139,11 @@ async function refreshCreds(env: Env): Promise<string> {
 }
 
 async function ensureToken(env: Env): Promise<string> {
+  // Production path — a static API key bypasses the entire OAuth
+  // lifecycle (no grants, no refresh, no expiry). Same endpoint,
+  // same protocol; the Authorization header just carries the key.
+  const apiKey = (env as Env & { ATTOM_MCP_API_KEY?: string }).ATTOM_MCP_API_KEY
+  if (apiKey) return apiKey
   if (!credsCache) {
     credsCache = envCreds(env)
     // A KV-persisted pair is fresher than the boot-time env pair
