@@ -206,6 +206,13 @@
   detail:'high'×12 images + Gemini reasoning ate the 1024-token output
   cap → detail:'auto', maxTokens 8192/2048. Verified job_1790829852024:
   vision ok, subject=transitional, ARV $255k/floor $251.7k on Sterling.
+- ATTOM MCP AUTH HARDENING (2026-10-01): rotated creds persist to KV
+  (`API_CACHE` key `attom-mcp:creds`) so all isolates share the latest
+  pair — rotation races resolved by KV reload on refresh failure.
+  401/403 → forced refresh + single retry; "missing allow grant"
+  surfaces a re-login instruction (consent revocation can't self-heal).
+  Prod-scale path still unresolved: ask ATTOM for client_credentials
+  grant on MCP, or fall back to REST API key.
 - Still blocked on user-supplied ATTOM REST API docs for the provider
   swap itself. User will supply corrected endpoints for any call that
   errors during the swap.

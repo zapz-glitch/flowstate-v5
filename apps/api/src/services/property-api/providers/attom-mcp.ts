@@ -63,9 +63,28 @@ interface McpCreds {
   expiresAt: number
 }
 
-// Isolate-scoped: rotated tokens live here for the lifetime of the isolate.
+// Isolate-scoped fast path; KV holds the rotated pair across isolates —
+// every refresh rotates the refresh token, so an isolate that refreshes
+// invalidates everyone else's copy. KV is the shared source of truth.
+const CREDS_KV_KEY = 'attom-mcp:creds'
 let credsCache: McpCreds | null = null
 let refreshInFlight: Promise<string> | null = null
+
+async function kvCreds(env: Env): Promise<McpCreds | null> {
+  try {
+    const kv = (await env.API_CACHE.get(CREDS_KV_KEY, 'json')) as McpCreds | null
+    if (kv?.refreshToken) return kv
+  } catch {}
+  return null
+}
+
+function persistCreds(env: Env): void {
+  // Refresh tokens can outlive the access token by days; refresh rewrites
+  // this each rotation. Best-effort — never block the call on it.
+  if (credsCache) {
+    void env.API_CACHE.put(CREDS_KV_KEY, JSON.stringify(credsCache), { expirationTtl: 30 * 86400 }).catch(() => {})
+  }
+}
 
 function envCreds(env: Env): McpCreds | null {
   if (!env.ATTOM_MCP_ACCESS_TOKEN || !env.ATTOM_MCP_REFRESH_TOKEN || !env.ATTOM_MCP_CLIENT_ID) return null
@@ -97,6 +116,13 @@ async function refreshCreds(env: Env): Promise<string> {
     error_description?: string
   }
   if (!resp.ok || !body.access_token) {
+    // Our refresh token may be stale because another isolate rotated it —
+    // reload the shared pair from KV and retry once before giving up.
+    const kv = await kvCreds(env)
+    if (kv && kv.refreshToken !== credsCache.refreshToken) {
+      credsCache = kv
+      return refreshCreds(env)
+    }
     throw new Error(
       `ATTOM_MCP token refresh failed ${resp.status}: ${body.error ?? ''} ${body.error_description ?? ''}`.trim(),
     )
@@ -107,12 +133,18 @@ async function refreshCreds(env: Env): Promise<string> {
     refreshToken: body.refresh_token ?? credsCache.refreshToken,
     expiresAt: Math.floor(Date.now() / 1000) + (body.expires_in ?? 600),
   }
-  console.log('ATTOM_MCP: token refreshed in-worker (env pair is now stale — run scripts/sync-attom-token.mjs before next boot)')
+  persistCreds(env)
+  console.log('ATTOM_MCP: token refreshed (pair persisted to KV — other isolates pick it up)')
   return credsCache.accessToken
 }
 
 async function ensureToken(env: Env): Promise<string> {
-  if (!credsCache) credsCache = envCreds(env)
+  if (!credsCache) {
+    credsCache = envCreds(env)
+    // A KV-persisted pair is fresher than the boot-time env pair
+    const kv = await kvCreds(env)
+    if (kv && (!credsCache || kv.expiresAt >= credsCache.expiresAt)) credsCache = kv
+  }
   if (!credsCache) throw new Error('ATTOM_MCP: credentials not configured (ATTOM_MCP_ACCESS_TOKEN/REFRESH_TOKEN/CLIENT_ID)')
   if (credsCache.expiresAt > Date.now() / 1000 + 30) return credsCache.accessToken
   // De-dupe concurrent refreshes within the isolate
@@ -137,14 +169,24 @@ async function mcpRpc(env: Env, method: string, params: unknown, depth = 0): Pro
   })
   const text = await resp.text()
 
-  // One retry after a forced refresh — covers stale clock / revoked session
-  if (resp.status === 401 && depth === 0) {
-    console.log('ATTOM_MCP: 401 — forcing token refresh and retrying once')
+  // One retry after a forced refresh — covers expired/revoked access tokens.
+  // A 403 "Missing active allow grant" means the OAuth consent itself is gone
+  // — refresh can't fix that; surface it plainly so re-login is obvious.
+  if ((resp.status === 401 || resp.status === 403) && depth === 0) {
+    console.log(`ATTOM_MCP: ${resp.status} — forcing token refresh and retrying once`)
     if (credsCache) credsCache.expiresAt = 0
     refreshInFlight = null
     return mcpRpc(env, method, params, depth + 1)
   }
 
+  if (resp.status === 401 || resp.status === 403) {
+    const grantMissing = /allow grant|unauthorized/i.test(text)
+    throw new Error(
+      grantMissing
+        ? `ATTOM_MCP ${method} → auth grant revoked — re-run 'devin mcp login attom' + scripts/sync-attom-token.mjs`
+        : `ATTOM_MCP ${method} → HTTP ${resp.status}: ${text.slice(0, 300)}`,
+    )
+  }
   if (!resp.ok) throw new Error(`ATTOM_MCP ${method} → HTTP ${resp.status}: ${text.slice(0, 300)}`)
   // Streamable HTTP may answer SSE — take the last data: payload
   const dataLine = text.split('\n').filter((l) => l.startsWith('data:')).pop()
