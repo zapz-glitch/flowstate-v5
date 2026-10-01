@@ -575,13 +575,21 @@ export class AnalysisJobDO {
           }
         }),
       )
-      const passers = comps.filter((c, i) => {
+      const geoPassers = comps.filter((c, i) => {
         const g = geos[i]
         if (!g) return false
         c.censusTract ??= g.tract
         c.sameBlockGroup ??= g.blockGroup === subjectGeo.blockGroup
         c.crossesMajorRoad ??= g.tract !== subjectGeo.tract
         return g.blockGroup === subjectGeo.blockGroup || g.tract === subjectGeo.tract
+      })
+      // Base appraisal rules run BEFORE paid enrichment — a comp that is
+      // geo-verified but dead on hard rules (sqft/year/sale-age/type) never
+      // earns a report call. Geo filters read as not_verified pre-enrichment
+      // and pass; only hard field failures drop the comp here.
+      const passers = geoPassers.filter((c) => {
+        const evaluation = evaluateComparable(property, c, filters, [])
+        return !evaluation.shouldDisable
       })
       if (passers.length === 0) return comps
       const enriched = await propertyApi.enrichComparables(passers, { concurrency: 10 })

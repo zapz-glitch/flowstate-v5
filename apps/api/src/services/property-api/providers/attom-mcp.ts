@@ -426,13 +426,18 @@ function femaToFloodZone(fema: any): NormalizedFloodZone {
 
 // ─── Provider ─────────────────────────────────────────────────────────────────
 
-const SUBJECT_DATASETS = ['identity', 'overview', 'geography-context', 'valuation', 'sales-history', 'tax-history']
+const SUBJECT_DATASETS = ['identity', 'overview', 'geography-context', 'valuation', 'sales-history', 'tax-history', 'permits']
 const COMP_DETAIL_DATASETS = ['identity', 'overview', 'geography-context', 'sales-history', 'valuation']
 const MCP_COMP_LIMIT_CAP = 25 // find_comparable_sales limit param max is 25
 
 class AttomMcpProvider implements PropertyProviderAdapter {
   readonly name = 'attom-mcp' as const
   private env: Env
+  // Subject payload stash — the get_property_data subject call already
+  // carries valuation/overview/permits; downstream getAvm/
+  // getBuildingDetail/getBuildingPermits serve from it so the subject
+  // stays ONE MCP call (1 Intelligence Report), not four.
+  private subjectResults = new Map<string, any[]>()
 
   constructor(env: Env) {
     this.env = env
@@ -452,6 +457,7 @@ class AttomMcpProvider implements PropertyProviderAdapter {
       const results = await this.propertyData({ lookupMode: 'address', address }, SUBJECT_DATASETS)
       const property = await normalizeMcpProperty(results, this.env)
       if (!property.id) return { success: false, error: 'Property not found', code: 'NOT_FOUND' }
+      this.subjectResults.set(property.id, results)
       return { success: true, data: property }
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : 'MCP property search failed', code: 'API_ERROR' }
@@ -513,7 +519,9 @@ class AttomMcpProvider implements PropertyProviderAdapter {
 
   async getBuildingPermits(propertyId: string): Promise<PermitsResponse> {
     try {
-      const results = await this.propertyData({ lookupMode: 'attomId', attomId: propertyId }, ['permits'])
+      const results =
+        this.subjectResults.get(propertyId) ??
+        await this.propertyData({ lookupMode: 'attomId', attomId: propertyId }, ['permits'])
       const data = dataset<any>(results, 'permits')
       const permits = (data?.permits ?? []).map((p: any) => normalizeMcpPermit(propertyId, p))
       return { success: true, data: { propertyId, permits, count: permits.length } }
@@ -545,7 +553,9 @@ class AttomMcpProvider implements PropertyProviderAdapter {
     const attomId = parcelToAttom.get(parcelId)
     if (!attomId) return { success: false, error: 'Unknown parcelId for MCP provider', code: 'NOT_FOUND' }
     try {
-      const results = await this.propertyData({ lookupMode: 'attomId', attomId }, ['valuation'])
+      const results =
+        this.subjectResults.get(attomId) ??
+        await this.propertyData({ lookupMode: 'attomId', attomId }, ['valuation'])
       const v = dataset<any>(results, 'valuation')?.valuation
       if (!v) return { success: false, error: 'No valuation for property', code: 'NOT_FOUND' }
       const avm: NormalizedAvm = {
@@ -567,7 +577,9 @@ class AttomMcpProvider implements PropertyProviderAdapter {
     const attomId = parcelToAttom.get(parcelId)
     if (!attomId) return { success: false, error: 'Unknown parcelId for MCP provider', code: 'NOT_FOUND' }
     try {
-      const results = await this.propertyData({ lookupMode: 'attomId', attomId }, ['overview'])
+      const results =
+        this.subjectResults.get(attomId) ??
+        await this.propertyData({ lookupMode: 'attomId', attomId }, ['overview'])
       const ch = dataset<any>(results, 'overview')?.characteristics ?? {}
       const detail: NormalizedBuildingDetail = {
         condition: ch.condition ?? null,
