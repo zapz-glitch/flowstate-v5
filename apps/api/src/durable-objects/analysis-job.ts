@@ -553,6 +553,30 @@ export class AnalysisJobDO {
     retrieval.candidatesPrunedBeforeEnrichment = candidatesPruned
     retrieval.candidatesEnriched = candidatesEnriched
 
+    // Human-readable concessions the winning flex tier made — only the
+    // numeric filters that actually moved.
+    const describeFlexConcessions = (base: AppraisalFilter[], factor: number): string[] => {
+      if (factor <= 1) return []
+      const label: Record<string, (v: number) => string> = {
+        sale_age: (v) => `sale age to ${Math.round(v)} days`,
+        sale_age_expansion: () => null as unknown as string,
+        sale_age_expansion_2: () => null as unknown as string,
+        sqft_diff: (v) => `sqft tolerance to ±${Math.round(v)}`,
+        year_built_diff: (v) => `year built to ±${Math.round(v)} yrs`,
+        lot_size_diff: (v) => `lot size to ±${Math.round(v)} sqft`,
+        distance: (v) => `distance to ${Math.round(v * 10) / 10}mi`,
+      }
+      const out: string[] = []
+      for (const f of base) {
+        const fmt = label[f.type]
+        if (!fmt || !f.enabled || typeof f.value !== 'number') continue
+        const stretched = f.value * factor
+        const txt = fmt(stretched)
+        if (txt) out.push(`${txt} (was ${fmt(f.value)})`)
+      }
+      return out
+    }
+
     // ── attom-mcp: free-first census gate + gated enrichment ──────────────────
     // Census-geocode every comp (free, no key) and only spend a provider
     // detail call (1 AI Intelligence Report each) on comps sharing the
@@ -632,7 +656,11 @@ export class AnalysisJobDO {
         if (enrichedSoFar.some((c) => arvEvidence(c, property.avmValue) != null)) break
         if (enrichedSoFar.length >= geoPassers.length + flexCrossers.length) break
       }
-      retrieval.paramFlex = { extensions: paramFlexExtensions, factor: paramFlexFactor }
+      retrieval.paramFlex = {
+        extensions: paramFlexExtensions,
+        factor: paramFlexFactor,
+        concessions: describeFlexConcessions(filters, paramFlexFactor),
+      }
       if (enrichedById.size === 0) return comps
       return comps.map((c) => enrichedById.get(c.id) ?? c)
     }

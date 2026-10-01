@@ -112,7 +112,7 @@ export interface ComparablesRetrievalMeta {
    * escalations were needed to admit ARV evidence (0 = strict pass), and
    * the winning factor. Geo filters never flex.
    */
-  paramFlex?: { extensions: number; factor: number } | null
+  paramFlex?: { extensions: number; factor: number; concessions?: string[] } | null
 }
 
 export function buildRetrievalMeta(args: {

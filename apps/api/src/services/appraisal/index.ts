@@ -1273,19 +1273,26 @@ export interface ClassificationSummaryResult {
  */
 export function summarizeClassifications(
   comparables: AppraisedComparable[],
-  compClassifications: Map<string, ClassificationResult>
+  compClassifications: Map<string, ClassificationResult>,
+  subjectAvm?: number | null,
 ): ClassificationSummaryResult {
   const enabledComps = comparables.filter((c) => c.isEnabled)
   const asIsCompIds: string[] = []
   const afterRenovationCompIds: string[] = []
 
   for (const comp of enabledComps) {
-    const cls = compClassifications.get(comp.id)?.classification ?? 'as_is'
-    if (cls === 'as_is') {
-      asIsCompIds.push(comp.id)
-    } else {
+    const cls = compClassifications.get(comp.id)?.classification
+    if (cls === 'after_renovation') {
       afterRenovationCompIds.push(comp.id)
+    } else if (
+      cls === 'as_is' &&
+      // Investor-priced only — a distressed deed priced at market isn't an
+      // investor purchase; it reads as as-is but doesn't feed the floor.
+      (subjectAvm == null || (comp.salePrice != null && comp.salePrice <= subjectAvm))
+    ) {
+      asIsCompIds.push(comp.id)
     }
+    // transitional → market tier: display only, feeds neither bucket
   }
 
   const avgPrice = (ids: string[]): number | null => {

@@ -382,7 +382,7 @@ export interface CompsData {
   medianPrice?: number | null
   /** Provider retrieval audit — includes paramFlex escalation record */
   retrieval?: {
-    paramFlex?: { extensions: number; factor: number } | null
+    paramFlex?: { extensions: number; factor: number; concessions?: string[] } | null
   } | null
   /** Investor floor (Group B evidence) — survives a no-ARV run */
   asIsMarketIntel?: {
@@ -607,7 +607,7 @@ export interface CompsData {
   medianPrice?: number | null
   /** Provider retrieval audit — includes paramFlex escalation record */
   retrieval?: {
-    paramFlex?: { extensions: number; factor: number } | null
+    paramFlex?: { extensions: number; factor: number; concessions?: string[] } | null
   } | null
   /** Investor floor (Group B evidence) — survives a no-ARV run */
   asIsMarketIntel?: {

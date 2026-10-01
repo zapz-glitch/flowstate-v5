@@ -109,12 +109,14 @@ export function AnalysisResultLayout({
             <div className="text-sm font-semibold">
               {extensions === 0
                 ? 'No ARV evidence in the verified pool'
-                : `No ARV evidence — parameters stretched ${extensions}× (to ×${factor})`}
+                : 'No ARV evidence — rules had to be widened'}
             </div>
             <p className="text-xs text-foreground-secondary mt-0.5">
+              {comps?.retrieval?.paramFlex?.concessions?.length
+                ? `To reach comps we extended ${comps.retrieval.paramFlex.concessions.join(', ')}. `
+                : ''}
               Every census-verified comp was evaluated and none carried ARV evidence
-              (flip resale, premium over scope median, or above AVM). The comp pool
-              and per-comp results are below.
+              (flip resale, premium over scope median, or above AVM).
               {comps?.asIsMarketIntel?.asIsMarketPrice != null && (
                 <span className="block mt-1 font-medium text-foreground">
                   Investor floor: ${comps.asIsMarketIntel.asIsMarketPrice.toLocaleString()}
@@ -137,7 +139,9 @@ export function AnalysisResultLayout({
           <div className={`inline-flex border rounded-sm px-2 py-1 text-[10px] font-semibold ${tone}`}>
             {extensions === 0
               ? 'Comps qualified on strict rules'
-              : `Comp rules extended ${extensions}× — numeric tolerances at ×${factor}`}
+              : comps?.retrieval?.paramFlex?.concessions?.length
+                ? `Comp rules widened: ${comps.retrieval.paramFlex.concessions.join('; ')}`
+                : `Comp rules extended ${extensions}× (to ×${factor})`}
           </div>
         )
       })()}

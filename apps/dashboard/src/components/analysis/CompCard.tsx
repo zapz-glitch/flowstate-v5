@@ -104,14 +104,6 @@ function CompCardInner({
                 FLIP
               </div>
             )}
-            {comp.distressedSale && (
-              <div
-                className="h-6 px-1.5 rounded flex items-center text-[10px] font-bold bg-red-500/15 text-red-500 flex-shrink-0"
-                title="Distressed sale — provider-flagged; investor/as-is market evidence"
-              >
-                DISTRESSED
-              </div>
-            )}
             {comp.userTier && (
               <div
                 className={cn(

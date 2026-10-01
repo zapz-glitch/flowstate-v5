@@ -767,7 +767,8 @@ export async function performAnalysis(
   const compClassifications = classifyCompsByEvidence(bundle.comparables, subjectAvm)
   const classificationSummary = summarizeClassifications(
     appraisalResult.comparables,
-    compClassifications
+    compClassifications,
+    subjectAvm
   )
 
   // ── 5. Derive buybox: vision level → rehab tier, permits → major items ──────
@@ -871,10 +872,14 @@ export async function performAnalysis(
   // on its own.
   const asIsThresholdPercent = params.asIsThresholdPercent ?? 70
   const groupACompIds = new Set(appraisalResult.selectedCompIds ?? [])
+  // Investor-priced evidence only — a distressed deed at a market-level
+  // price (estate sale priced at retail) is not an investor purchase; the
+  // floor is built from distressed sales at or below the subject's AVM.
   const groupBResult = summarizeGroupB(
     appraisalResult.comparables.filter(
       (c) => (c.distressedSale === true || c.transaction?.isForeclosure === true)
-        && c.salePrice != null && c.salePrice > 0,
+        && c.salePrice != null && c.salePrice > 0
+        && (subjectAvm == null || c.salePrice <= subjectAvm),
     ),
     bundle.property,
     finalArv ?? 0,
@@ -929,7 +934,18 @@ export async function performAnalysis(
       arvSource: 'appraisal',
       finalArv,
       analysisId: jobId,
-      subjectClassification: undefined,
+      // Subject condition tier — vision-derived (subject only; comps are
+      // evidence-classified, never condition-guessed).
+      subjectClassification: renovation.renovationLevelIndex != null ? {
+        classification:
+          renovation.renovationLevelIndex <= 1 ? 'after_renovation' as const
+          : renovation.renovationLevelIndex === 2 ? 'transitional' as const
+          : 'as_is' as const,
+        confidence: renovation.confidence ?? 60,
+        method: 'batch_photo_analysis' as const,
+        reasoning: `Vision renovation assessment: ${renovation.renovationLevel}`,
+        indicators: {},
+      } : undefined,
       compClassifications,
       classificationSummary,
       subjectSupplementedFields: [],
@@ -955,7 +971,16 @@ export async function performAnalysis(
   response.report = buildEvaluationReport({
     bundle,
     appraisalResult,
-    subjectClassification: undefined,
+    subjectClassification: renovation.renovationLevelIndex != null ? {
+      classification:
+        renovation.renovationLevelIndex <= 1 ? 'after_renovation' as const
+        : renovation.renovationLevelIndex === 2 ? 'transitional' as const
+        : 'as_is' as const,
+      confidence: renovation.confidence ?? 60,
+      method: 'batch_photo_analysis' as const,
+      reasoning: `Vision renovation assessment: ${renovation.renovationLevel}`,
+      indicators: {},
+    } : undefined,
     weightedARVResult: undefined,
     derivedBuybox,
     valuation,
