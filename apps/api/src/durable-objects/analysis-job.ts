@@ -498,8 +498,8 @@ export class AnalysisJobDO {
       })),
     })
 
-    // ── Step 3: Dead-comp pruning only — enrichment moved inside the Jev ──────
-    // funnel. Provider detail calls now run on test-1 passers only (nearest +
+    // ── Step 3: Dead-comp pruning — enrichment lives in the census gate ─────────
+    // for attom-mcp — provider detail calls run on census-verified comps only.
     // strongest first, capped) inside evaluation — mass-enriching the raw
     // pool here spent ~80 detail calls per run on comps that mostly fail
     // test 1. Pruning is pure field checks (no calls) and feeds retrieval
@@ -653,7 +653,7 @@ export class AnalysisJobDO {
         evidenceLimitations.push(`${id}: Provider comparable pools disagree on the same sale date; price is quarantined from evaluation`)
       }
       // New candidates join the raw pool — enrichment is deferred to the
-      // Jev funnel (test-1 passers only), same as the initial pool.
+      // census gate for attom-mcp, same as the initial pool.
       // attom-mcp: same census gate + gated enrichment as the initial pool.
       let newCandidates = merged.comparables.filter((c) => !poolCompIds.has(c.id))
       for (const c of newCandidates) poolCompIds.add(c.id)
@@ -803,11 +803,8 @@ export class AnalysisJobDO {
       // Radius-bound expansion tiers refetch instead of pretending the
       // fetched-radius pool contains candidates it never had.
       expandComparablesPool,
-      // Jev evaluation enriches its top-screened candidates before the
-      // cross-examination — provider detail: style, foundation,
-      // construction, features, transaction.
-      enrichComparables: (comps: NormalizedComparable[]) =>
-        propertyApi.enrichComparables(comps, { concurrency: 10 }),
+      // attom-mcp comp enrichment happens in the census gate above —
+      // passers only, 1 provider call each.
       prefetchedPhotoBundle,
       skipCache: !!config.skipCache,
     }
@@ -891,7 +888,7 @@ export class AnalysisJobDO {
     await this.pushEvent('evaluation_complete', { updatedResult: analysisResult })
     await this.recordRun(config, { status: 'completed', durationMs: Date.now() - startTime, response: analysisResult })
 
-    // LLM comp annotation removed — Jev is the selection/evaluation logic;
+    // LLM comp annotation removed — evidence classification drives the eval;
     // the separate annotate pass only wrote prose onto cards.
 
     // Wait for parallel tasks before closing SSE (so client receives them)
@@ -1016,7 +1013,7 @@ export class AnalysisJobDO {
       }
     }
 
-    // LLM comp annotation removed — Jev is the selection/evaluation logic.
+    // LLM comp annotation removed — evidence classification drives the eval.
 
     // Wait for OSM risk flags if still running
     await osmPromise

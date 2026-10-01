@@ -68,7 +68,6 @@ export const DEFAULT_FILTERS: AppraisalFilter[] = [
   { type: 'construction_material_match', enabled: true, value: 1, priority: 'soft' },
   { type: 'pool_match', enabled: true, value: 1, priority: 'soft' },
   { type: 'garage_match', enabled: true, value: 1, priority: 'soft' },
-  { type: 'condition_match', enabled: true, value: 1, priority: 'soft' }, // assessor condition — comp at/above subject tier scores higher
   { type: 'stories_match', enabled: true, value: 1, priority: 'hard' }, // 1-story vs 1-story, 2-story vs 2-story — verified mismatches disqualify
   { type: 'roof_material_match', enabled: true, value: 1, priority: 'soft' },
   // Size/recency/geography thresholds (relaxable in expansion tiers)
@@ -509,42 +508,9 @@ export interface AppraisedComparable extends NormalizedComparable {
   arvStatus?: 'selected' | 'not_examined' | 'disqualified'
   /** Adjusted price after applying rules */
   adjustedSalePrice: number | null
-  /**
-   * Jev truth scores (0–1). arvTruth: reliable evidence of the subject's
-   * after-renovation retail value. investmentTruth: reliable evidence of
-   * the subject's as-is investor value. Present when Jev comp selection ran.
-   */
-  jevArvTruth?: number | null
-  jevInvestmentTruth?: number | null
-  /**
-   * Candidate B structured price classification (ARV | AS_IS |
-   * UNIDENTIFIED) with probabilities + confidence. Present when the v2
-   * classifier ran (shadow or enabled); absent for comps that never
-   * reached classification. Observability only under shadow mode.
-   */
-  jevPriceClassification?: import('../jev').JevCompPriceClass | null
-  /**
-   * Attribute screen (services/jev attribute screen): Jev's 0–1 match per
-   * comparability attribute (same neighborhood/subdivision, sqft & lot
-   * range, style/construction/foundation, year built). Present when the
-   * screen ran (shadow or enabled).
-   */
-  jevAttributeScores?: Partial<Record<import('../jev').CompAttributeKey, number>> | null
   /** Weighted closeness score (0–1) from the deterministic exception screen */
-  jevScreenScore?: number | null
   /** Whether the comp made the exception screen's top-N candidate pool */
-  jevScreenPool?: boolean
   /** Price-band bucket the screened comp landed in — 'arv' or 'as_is', mutually exclusive */
-  jevScreenBand?: 'arv' | 'as_is' | null
-  jevScreenRank?: number | null
-  jevScreenBandRank?: number | null
-  /**
-   * V4 hybrid audit record (services/comp-hybrid): Jev's price-regime class
-   * over the UNGATED pool, hard-gate outcome, per-dimension recoverability
-   * scores against the appraisal preset, pool rank, and selection role.
-   * Present when the v4 hybrid ran (shadow or enabled).
-   */
-  jevHybrid?: import('../comp-hybrid').HybridCompScore | null
 }
 
 // ─── Appraisal Result ──────────────────────────────────────────────────────────

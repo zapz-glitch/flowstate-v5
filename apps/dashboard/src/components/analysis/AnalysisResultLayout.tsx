@@ -8,9 +8,6 @@ import { ComparablesSection } from './ComparablesSection'
 import { DealSummaryHero } from './DealSummaryHero'
 import { SubjectGridCard } from './SubjectGridCard'
 import { InvestorAnalysisSummary } from './InvestorAnalysisSummary'
-import { JevOutcomeCard } from './JevOutcomeCard'
-import { JevHybridCard } from './JevHybridCard'
-import { EvaluationProcessAudit } from './EvaluationProcessAudit'
 
 // ─── Analysis Result Layout ──────────────────────────────────────────────────
 
@@ -59,8 +56,6 @@ export function AnalysisResultLayout({
     onOpenSettings,
     onCompClick,
     onFeedbackSubmitted,
-    jevOutcome,
-    jevHybrid,
   } = useEvaluation()
 
   const selectedCompKeys = compOverride?.selectedCompKeys
@@ -102,7 +97,7 @@ export function AnalysisResultLayout({
         </div>
       ) : subject && !isStreaming && comps?.insufficientComps === true ? (
         /* Insufficient comps — the run completed with no valuation. The comp
-           pool and its Jev test evidence still render below. */
+           pool and its geo stamps still render below. */
         <div className="border border-amber-500/30 bg-amber-500/5 rounded-sm px-4 py-3">
           <div className="text-sm font-semibold text-amber-500">Insufficient comps</div>
           <p className="text-xs text-foreground-secondary mt-0.5">
@@ -115,20 +110,6 @@ export function AnalysisResultLayout({
       {notesSlot}
 
       <InvestorAnalysisSummary analysis={valuation?.investorAnalysis} />
-
-      <JevOutcomeCard
-        outcome={jevOutcome}
-        title="Jev assessment"
-        footnote="Jev's read-only assessment of the completed valuation."
-      />
-
-      <JevHybridCard run={jevHybrid} />
-
-      <EvaluationProcessAudit
-        valuation={valuation}
-        comps={comps}
-        run={jevHybrid}
-      />
 
       {/* Streaming status — lives near the comps section, not the search bar */}
       {statusLabel && isStreaming && (

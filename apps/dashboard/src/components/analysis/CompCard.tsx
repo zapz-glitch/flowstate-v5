@@ -65,11 +65,6 @@ function CompCardInner({
   const hasArvSelection = isSelectedForArv !== undefined
   const isEnabled = hasArvSelection ? isSelectedForArv : comp.isEnabled !== false
 
-  // Jev score /100 — the exam score when the comp was cross-examined, else
-  // the raw-data screen score. poolRank 1 = closest to the rule truth.
-  const jevScore = comp.jevHybrid?.score ?? null
-  const isTopMatch = comp.jevHybrid?.poolRank === 1
-
   const subjectSubdiv = subject?.subdivision ?? subjectSubdivision
   const hasSubdivisionMatch = !!(
     subjectSubdiv &&
@@ -100,27 +95,6 @@ function CompCardInner({
             )}>
               {index + 1}
             </div>
-            {jevScore != null && (
-              <div
-                className={cn(
-                  'h-6 px-1.5 rounded flex items-center text-[10px] font-bold tabular-nums flex-shrink-0',
-                  jevScore >= 70 ? 'bg-emerald-500/15 text-emerald-600'
-                    : jevScore >= 40 ? 'bg-amber-500/15 text-amber-600'
-                    : 'bg-red-500/15 text-red-500'
-                )}
-                title={`Jev score ${jevScore}/100 — ${comp.jevHybrid?.test2 ? (comp.jevHybrid.test2.passed ? 'passed test 2 — eligible for the core set' : 'failed test 2 — scored on distance to subject') : comp.jevHybrid?.test1 ? 'failed test 1' : 'not tested'}${comp.jevHybrid?.test2?.confidence != null ? ` · confidence ${Math.round(comp.jevHybrid.test2.confidence * 100)}%` : ''}`}
-              >
-                {jevScore}
-              </div>
-            )}
-            {isTopMatch && (
-              <div
-                className="h-6 px-1.5 rounded flex items-center text-[10px] font-bold bg-primary/15 text-primary flex-shrink-0"
-                title="Highest-scoring comp in the Jev cross-examination — closest to the appraisal-rule truth"
-              >
-                TOP
-              </div>
-            )}
 
             {comp.flip && (
               <div
@@ -144,7 +118,7 @@ function CompCardInner({
                   'h-6 px-1.5 rounded flex items-center text-[10px] font-bold flex-shrink-0',
                   comp.userTier === 'arv' ? 'bg-emerald-500/15 text-emerald-600' : 'bg-amber-500/15 text-amber-600'
                 )}
-                title={`You pinned this comp as ${comp.userTier === 'arv' ? 'ARV' : 'as-is'} — Jev classified it ${comp.jevHybrid?.priceTier === 'arv' ? 'ARV' : comp.jevHybrid?.priceTier === 'as_is' ? 'as-is' : 'unclassified'}`}
+                title={`You pinned this comp as ${comp.userTier === 'arv' ? 'ARV' : 'as-is'}`}
               >
                 {comp.userTier === 'arv' ? 'ARV' : 'AS-IS'}·YOU
               </div>
@@ -258,7 +232,7 @@ function CompCardInner({
 
       {isExpanded && (
         <div className="px-5 pb-4 pt-2 space-y-4">
-          {/* Manual tier pin — reviewer's call, rides alongside Jev's */}
+          {/* Manual tier pin — reviewer's call */}
           {comp.id && (
             <div className="flex items-center justify-between gap-3">
               {onAssignTier ? (

@@ -16,7 +16,7 @@ import type {
 } from '@/app/(dashboard)/dashboard/analyze/actions'
 import type { RecalcResult } from '@/lib/recalc'
 import type { ArvAdjustmentRule, ArvAdjustmentOverride } from '@/lib/client-api'
-import type { AnalyzeData, JevOutcomeData, JevCompClassificationData, JevAttributeScreenData, JevHybridData } from '@/app/(dashboard)/dashboard/analyze/actions'
+import type { AnalyzeData } from '@/app/(dashboard)/dashboard/analyze/actions'
 
 // ─── Comp Override ─────────────────────────────────────────────────────────
 
@@ -80,14 +80,6 @@ export interface EvaluationState {
   // AI analysis report
   aiReport: { summary: string; selected: number; total: number; model: string } | null
 
-  /** Jev read-only outcome classification for the displayed result */
-  jevOutcome: JevOutcomeData | null | undefined
-
-  /** Candidate B comp-classification run + shadow counterfactual valuation */
-  jevCompClassification: JevCompClassificationData | null | undefined
-  jevAttributeScreen: JevAttributeScreenData | null | undefined
-  /** V4 hybrid run + shadow counterfactual valuation */
-  jevHybrid: JevHybridData | null | undefined
 
   // UI state
   aiAnalyzing: boolean
@@ -115,10 +107,6 @@ export const evaluationStateAtom = atom<EvaluationState>({
   feedbackContext: null,
   marketContext: null,
   aiReport: null,
-  jevOutcome: undefined,
-  jevCompClassification: undefined,
-  jevAttributeScreen: undefined,
-  jevHybrid: undefined,
   aiAnalyzing: false,
   isStreaming: false,
   callbacks: defaultCallbacks,

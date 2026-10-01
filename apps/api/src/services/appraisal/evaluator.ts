@@ -39,6 +39,24 @@ function evaluateSubdivisionMatch(
   }
 
   const passed = subdivisionsMatch(subjectSub, compSub)
+  if (!passed) {
+    // Census verification overrides the plat-name mismatch — legal
+    // subdivision names routinely diverge from the actual market area; a
+    // comp in the subject's census block group or tract is geographically
+    // verified regardless of its plat.
+    const censusVerified =
+      comp.sameBlockGroup === true ||
+      (comp.censusTract != null && subject.censusTract != null && comp.censusTract === subject.censusTract)
+    if (censusVerified) {
+      return {
+        type: 'subdivision_match',
+        passed: true,
+        reason: `Legal subdivision differs ("${compSub}") — census tract/BG match verifies the geography`,
+        actualValue: compSub,
+        threshold: subjectSub,
+      }
+    }
+  }
   return {
     type: 'subdivision_match',
     passed,

@@ -1,8 +1,7 @@
 /**
  * Manual comp-tier overrides — reviewer's ARV/as-is pins on a job's comps.
- * Applied at read time onto each comp (`userTier`) and the report's jev
- * block (`userOverrides`) so the assignment is visible on cache hits and
- * saved reports; Jev's classification itself is never rewritten.
+ * Applied at read time onto each comp (`userTier`) so the assignment is
+ * visible on cache hits and saved reports.
  */
 import { drizzle } from 'drizzle-orm/d1';
 import { eq, and } from 'drizzle-orm';
@@ -22,8 +21,6 @@ export async function applyCompTierOverrides(
     .from(compTierOverrides)
     .where(and(eq(compTierOverrides.jobId, jobId), eq(compTierOverrides.userId, userId)));
   const r = result as Record<string, unknown>;
-  const jev = (r.report as { jev?: Record<string, unknown> } | undefined)?.jev;
-  if (jev && typeof jev === 'object') jev.userOverrides = overrides;
   if (overrides.length === 0) return;
   const byComp = new Map(overrides.map((o) => [o.compId, o.tier]));
   const items =

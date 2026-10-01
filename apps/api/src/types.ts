@@ -78,45 +78,10 @@ export interface Env {
   /** Model for market context web search — fast/cheap (e.g., 'google/gemini-2.0-flash-001') */
   MARKET_SEARCH_MODEL?: string
 
-  // ─── Jev Outcome Classification (Typesafe SystemOne) ───────────────────────
+  // ─── Provider selection ──────────────────────────────────────────────────
   // Read-only post-analysis labeling; absence disables classification only.
   TYPESAFE_API_KEY?: string
   TYPESAFE_MODEL?: string
-  /**
-   * 'true' → Candidate B (structured ARV/AS_IS/UNIDENTIFIED choice) drives
-   * comp routing. Default false — Baseline A dual-noul argmax is production.
-   */
-  JEV_COMP_CLASSIFIER_V2_ENABLED?: string
-  /**
-   * 'false' disables the Candidate B shadow run. Default on: B classifies
-   * gate-eligible comps alongside Baseline A and records the result on the
-   * response without affecting routing, valuation, or recommendation.
-   */
-  JEV_COMP_CLASSIFIER_V2_SHADOW?: string
-  /**
-   * 'true' → the attribute screen (Jev 8-axis similarity → deterministic
-   * exception pool → ARV/as-is price bands) drives comp routing.
-   * Default false — runs as a shadow alongside production.
-   */
-  JEV_ATTRIBUTE_SCREEN_ENABLED?: string
-  /**
-   * 'false' disables the attribute-screen shadow run entirely. Default on:
-   * records screened pool, bands, and a counterfactual valuation on the
-   * response without affecting routing, valuation, or recommendation.
-   */
-  JEV_ATTRIBUTE_SCREEN_SHADOW?: string
-  /**
-   * 'true' → the v4 hybrid (Jev classifies the raw pool → deterministic
-   * hard gates → weighted recoverability scoring) drives comp routing.
-   * Default false — runs as a shadow alongside production.
-   */
-  JEV_HYBRID_V4_ENABLED?: string
-  /**
-   * 'false' disables the v4 hybrid shadow run entirely. Default on:
-   * records per-comp gates/scores/roles and a counterfactual valuation on
-   * the response without affecting routing, valuation, or recommendation.
-   */
-  JEV_HYBRID_V4_SHADOW?: string
 
   // ─── Google AI (Gemini) ──────────────────────────────────────────────────────
   // Direct Google AI API key for Gemini URL context and Zillow data fetching

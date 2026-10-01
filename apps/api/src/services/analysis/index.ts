@@ -849,22 +849,9 @@ export interface AnalysisResponse {
       classification: ClassificationSummary | null
       /** Whether this comp is the LLM/rule-selected best match */
       isBestMatch?: boolean
-      /** Jev truth score (0–1): reliable evidence of the subject's after-renovation retail value */
-      jevArvTruth?: number | null
-      /** Jev truth score (0–1): reliable evidence of the subject's as-is investor value */
-      jevInvestmentTruth?: number | null
       /** Candidate B structured price class (ARV | AS_IS | UNIDENTIFIED) — present when the v2 classifier ran */
-      jevPriceClassification?: import('../jev').JevCompPriceClass | null
-      /** Jev per-attribute match scores (0–1 per comparability axis) — present when the attribute screen ran */
-      jevAttributeScores?: Partial<Record<import('../jev').CompAttributeKey, number>> | null
       /** Deterministic exception-screen closeness score (0–1) and pool/band membership */
-      jevScreenScore?: number | null
-      jevScreenPool?: boolean
-      jevScreenBand?: 'arv' | 'as_is' | null
-      jevScreenRank?: number | null
-      jevScreenBandRank?: number | null
       /** V4 hybrid audit record — class, gates, dimension scores, rank, role */
-      jevHybrid?: import('../comp-hybrid').HybridCompScore | null
       /** Appraisal rule evaluation details */
       appraisalRules: {
         /** Whether this comp passed all filters */
@@ -1000,11 +987,6 @@ export interface AnalysisResponse {
   } | null
   /** External API call statistics for this analysis */
   apiCallStats?: ApiCallStats | null
-  /**
-   * Justified end-to-end evaluation report: ordered pipeline steps,
-   * fallbacks used, ARV drivers, rehab derivation, itemized deductions,
-   * and final verdict.
-   */
   report?: import('../evaluation/types').EvaluationReport
   /** Full computer-vision renovation assessment (subject photos) */
   visionAssessment?: import('../vision/renovation').RenovationAssessment | null
@@ -1012,54 +994,11 @@ export interface AnalysisResponse {
   renovationLevelSource?: 'manual_override' | 'vision' | 'classification' | 'default'
   /** Photo provider that delivered the subject photos (zillow/redfin/realtor) */
   photoProvider?: string
-  /**
-   * Realtor conversation-log notes fetched from Close at eval time — the raw
-   * property-condition intel for the Give Offer review card.
-   */
   sellerNotes?: import('../seller-notes').SellerNotesResult
-  /**
-   * Note-derived rehab items that were ADDED to the valuation ledger this
-   * run (additive only — notes never remove cost automatically).
-   */
   rehabAdditions?: import('../seller-notes').RehabAddition[]
-  /**
-   * Notes suggesting a charged rehab item may be unneeded — advisory
-   * callouts for human review, never applied automatically.
-   */
   rehabAdvisories?: import('../seller-notes').RehabAdvisory[]
   /** Evaluation engine that produced this response */
   evaluationEngine?: string
-  /**
-   * Jev read-only classification of this completed outcome. Attached after the
-   * pipeline finishes; it never influences comp selection, ARV, or the
-   * recommendation.
-   */
-  jevOutcome?: import('../jev').JevOutcomeClassification | null
-  /**
-   * Baseline A comp-truth run metadata (dual nouls) — model, latency,
-   * tokens. A/B observability for the comp classifier.
-   */
-  jevCompTruth?: { model: string; latencyMs: number; inputTokens: number; scored: number } | null
-  /**
-   * Candidate B comp price-classification run metadata — mode (shadow or
-   * enabled), per-class counts, disagreement count vs Baseline A, cost.
-   * Read-only; routing facts live on each comp's jevPriceClassification.
-   */
-  jevCompClassification?: import('../jev').JevCompClassificationRun | null
-  /**
-   * Comp screen run metadata — Jev 8-axis attribute scores, screened pool
-   * count, ARV/as-is band counts and anchors, plus the shadow counterfactual
-   * valuation. Read-only under shadow mode; per-comp scores live on each
-   * comp's jevAttributeScores/jevScreenScore/jevScreenBand.
-   */
-  jevAttributeScreen?: import('../comp-screen').AttributeScreenRun | null
-  /**
-   * V4 hybrid run metadata — Jev classified the raw pool, deterministic
-   * gates rejected non-recoverable comps, weighted proximity scoring picked
-   * the ARV/as-is sets, plus the shadow counterfactual valuation. Read-only
-   * under shadow mode; per-comp audit lives on each comp's jevHybrid.
-   */
-  jevHybrid?: import('../comp-hybrid').HybridRun | null
 }
 export interface ApiCallStats {
   corelogic: {
@@ -1334,16 +1273,6 @@ export function buildAnalysisResponse(
       disableReasons: evaluation?.disableReasons ?? [],
       classification: classificationSummary,
       isBestMatch: ctx.bestMatch?.compId === comp.id,
-      jevArvTruth: comp.jevArvTruth ?? null,
-      jevInvestmentTruth: comp.jevInvestmentTruth ?? null,
-      jevPriceClassification: comp.jevPriceClassification ?? null,
-      jevAttributeScores: comp.jevAttributeScores ?? null,
-      jevScreenScore: comp.jevScreenScore ?? null,
-      jevScreenPool: comp.jevScreenPool ?? false,
-      jevScreenBand: comp.jevScreenBand ?? null,
-      jevScreenRank: comp.jevScreenRank ?? null,
-      jevScreenBandRank: comp.jevScreenBandRank ?? null,
-      jevHybrid: comp.jevHybrid ?? null,
       appraisalRules,
     }
   })
