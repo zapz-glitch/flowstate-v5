@@ -228,7 +228,13 @@
   (4) bracketing check — all-smaller/all-bigger ARV set → confidence
   downgrade; (5) outlier ceiling — ARV may exceed pool's top actual sale
   only if ≥2 evidence comps support it; (6) least-adjustment weighting —
-  weight ∝ 1/(1+adjPct). Calibration goal per user: conservative
+  weight ∝ 1/(1+adjPct), WITHIN-TIER ONLY: user clarification —
+  tier delineation dominates weighting. A $150k investor-priced comp
+  needing zero adjustment is floor evidence and must never pull weight
+  in ARV; a $300k ARV comp needing slight adjustment still outranks it
+  for ARV because it evidences the exit price. Least-adjustment applies
+  between comps inside the ARV-evidence set (and separately inside the
+  as-is set), never across tiers. Calibration goal per user: conservative
   risk-adjusted ARV, "99% calibrated" = engine knows when evidence is
   thin. Extend provider ppsfMedians to carry 90d/365d trend per scope.
 - DATASET ENRICHMENT QUEUE (user approved, not started): timeline/
