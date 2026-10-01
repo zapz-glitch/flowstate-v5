@@ -631,57 +631,6 @@ function evaluateRoofMaterialMatch(
   }
 }
 
-// Assessor condition tiers, best → worst. Unknown labels get no tier.
-const CONDITION_TIERS: Record<string, number> = {
-  excellent: 7,
-  verygood: 6,
-  good: 5,
-  average: 4,
-  fair: 3,
-  poor: 2,
-  verypoor: 1,
-}
-
-function conditionTier(v?: string | null): number | null {
-  if (!v) return null
-  return CONDITION_TIERS[v.toLowerCase().replace(/[^a-z]/g, '')] ?? null
-}
-
-/**
- * Assessor condition match — the comp cannot be in a worse assessor
- * condition tier than the subject (a distressed comp never anchors ARV).
- * Replaces the LLM/Firecrawl condition classification with provider data.
- */
-function evaluateConditionMatch(
-  subject: NormalizedProperty,
-  comp: NormalizedComparable,
-  _filter: AppraisalFilter
-): FilterResult {
-  const subjectTier = conditionTier(subject.buildingCondition)
-  const compTier = conditionTier(comp.buildingCondition)
-
-  if (subjectTier == null || compTier == null) {
-    return {
-      type: 'condition_match',
-      passed: true,
-      status: 'not_verified',
-      reason: 'Assessor condition data not available — rule not verified',
-    }
-  }
-
-  const passed = compTier >= subjectTier
-  return {
-    type: 'condition_match',
-    passed,
-    status: passed ? 'passed' : 'failed',
-    reason: passed
-      ? undefined
-      : `Condition mismatch: comp "${comp.buildingCondition}" below subject "${subject.buildingCondition}"`,
-    actualValue: comp.buildingCondition ?? undefined,
-    threshold: subject.buildingCondition ?? undefined,
-  }
-}
-
 const FILTER_EVALUATORS: Partial<Record<
   FilterType,
   (subject: NormalizedProperty, comp: NormalizedComparable, filter: AppraisalFilter) => FilterResult
@@ -695,7 +644,6 @@ const FILTER_EVALUATORS: Partial<Record<
   garage_match: evaluateGarageMatch,
   stories_match: evaluateStoriesMatch,
   roof_material_match: evaluateRoofMaterialMatch,
-  condition_match: evaluateConditionMatch,
   sale_age: evaluateSaleAge,
   sqft_diff: evaluateSqftDiff,
   year_built_diff: evaluateYearBuiltDiff,

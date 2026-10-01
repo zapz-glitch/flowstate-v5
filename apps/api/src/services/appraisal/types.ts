@@ -19,7 +19,6 @@ export type FilterType =
   | 'garage_match'
   | 'stories_match'
   | 'roof_material_match'
-  | 'condition_match'
   | 'sale_age'
   | 'sqft_diff'
   | 'year_built_diff'
@@ -188,12 +187,6 @@ export const FILTER_LABELS: Record<FilterType, {
     shortLabel: 'Roof',
     unit: '',
     description: 'Roof cover material should match the subject (preferred — matters in some markets)',
-  },
-  condition_match: {
-    label: 'Assessor Condition Match',
-    shortLabel: 'Condition',
-    unit: '',
-    description: 'Comp assessor condition must be at or above the subject tier (e.g. comp cannot be worse condition)',
   },
   sale_age: {
     label: 'Sale Age',
