@@ -46,7 +46,10 @@ function evaluateSubdivisionMatch(
     // verified regardless of its plat.
     const censusVerified =
       comp.sameBlockGroup === true ||
-      (comp.censusTract != null && subject.censusTract != null && comp.censusTract === subject.censusTract)
+      (comp.censusTract != null && subject.censusTract != null && comp.censusTract === subject.censusTract) ||
+      // Flex exception — under stretch, a plat-name mismatch survives when
+      // the pocket is value-equivalent to the subject's.
+      (typeof _filter.value === 'number' && _filter.value > 1 && isValueEquivalent(subject, comp))
     if (censusVerified) {
       return {
         type: 'subdivision_match',
@@ -293,13 +296,27 @@ function evaluateRoadBarrier(
     }
   }
 
-  const passed = comp.crossesMajorRoad === false
+  if (comp.crossesMajorRoad === false) {
+    return { type: 'road_barrier', passed: true, actualValue: 'same_side', threshold: 'same_side' }
+  }
+  // Flex exception — under stretched parameters a crossing comp survives
+  // when its pocket is value-equivalent to the subject's (±10% $/sf).
+  const flexed = typeof _filter.value === 'number' && _filter.value > 1
+  if (flexed && isValueEquivalent(_subject, comp)) {
+    return {
+      type: 'road_barrier',
+      passed: true,
+      reason: 'Crosses major road — pocket is value-equivalent to subject (flex)',
+      actualValue: 'crosses',
+      threshold: 'same_side',
+    }
+  }
   return {
     type: 'road_barrier',
-    passed,
-    status: passed ? 'passed' : 'failed',
-    reason: passed ? undefined : 'Comparable is across a major road from subject',
-    actualValue: comp.crossesMajorRoad ? 'crosses' : 'same_side',
+    passed: false,
+    status: 'failed',
+    reason: 'Comparable is across a major road from subject',
+    actualValue: 'crosses',
     threshold: 'same_side',
   }
 }
@@ -1187,11 +1204,45 @@ const FLEXIBLE_FILTERS = new Set<FilterType>([
   'distance',
 ])
 
+// Geo-adjacent filters carry a flex MARKER (value > 1) rather than a scaled
+// threshold — under stretch, a crossing/mismatch survives when the comp's
+// pocket is value-equivalent to the subject's (±10% $/sf).
+const FLEX_MARKER_FILTERS = new Set<FilterType>([
+  'road_barrier',
+  'subdivision_match',
+  'neighborhood_match',
+])
+
 export function flexNumericFilters(filters: AppraisalFilter[], factor: number): AppraisalFilter[] {
   if (factor <= 1) return filters
   return filters.map((f) =>
     FLEXIBLE_FILTERS.has(f.type) && typeof f.value === 'number'
       ? { ...f, value: Math.round(f.value * factor * 100) / 100 }
-      : f,
+      : FLEX_MARKER_FILTERS.has(f.type)
+        ? { ...f, value: factor }
+        : f,
   )
+}
+
+/** Subject reference $/sqft for value equivalence — scope median first,
+ *  then AVM-implied ppsf as the always-available floor. */
+function subjectRefPpsf(subject: NormalizedProperty): number | null {
+  const med = subject.ppsfMedians?.SD ?? subject.ppsfMedians?.N4 ?? subject.ppsfMedians?.N3
+  if (med != null && med > 0) return med
+  if (subject.avmValue != null && subject.squareFeet) return subject.avmValue / subject.squareFeet
+  return null
+}
+
+function compPpsf(c: { pricePerSqft?: number | null; salePrice?: number | null; squareFeet?: number | null }): number | null {
+  return c.pricePerSqft ?? (c.salePrice != null && c.squareFeet ? c.salePrice / c.squareFeet : null)
+}
+
+/** ±10% pocket value equivalence — a comp across a boundary counts as the
+ *  same market when its price per sqft sits within 10% of the subject's
+ *  reference. Only consulted under flex (marker value > 1). */
+export function isValueEquivalent(subject: NormalizedProperty, comp: NormalizedComparable): boolean {
+  const ref = subjectRefPpsf(subject)
+  const ppsf = compPpsf(comp)
+  if (ref == null || ppsf == null) return false
+  return Math.abs(ppsf - ref) / ref <= 0.10
 }

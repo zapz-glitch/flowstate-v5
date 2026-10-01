@@ -28,7 +28,7 @@ import {
   type ComparablesRetrievalMeta,
 } from '../services/property-api/retrieval-policy'
 import { DEFAULT_FILTERS, evaluateComparable, type AppraisalFilter } from '../services/appraisal'
-import { flexNumericFilters } from '../services/appraisal/evaluator'
+import { flexNumericFilters, isValueEquivalent } from '../services/appraisal/evaluator'
 import { arvEvidence } from '../services/evaluation'
 import { DEFAULT_EXPANSION_POLICY, saleAgeExpansionSteps, vintageYearCap } from '../services/appraisal/types'
 import { filtersToApiParams } from '../services/appraisal/types'
@@ -601,7 +601,16 @@ export class AnalysisJobDO {
       // ×1.35 → … until a passer carries ARV evidence or every geo-verified
       // comp has been enriched. First admission stops the stretch, enriches
       // the cohort, checks evidence; no ARV evidence → stretch again.
-      const FLEX_TIERS = [1, 1.15, 1.25, 1.35, 1.5, 1.75, 2, 2.5, 3]
+      // Value-equivalent crossers — geocoded comps in a different tract
+      // whose pocket sits within ±10% $/sf of the subject's. Census is
+      // preferred; under flex (i≥1) these become enrichment candidates.
+      const geoPasserIds = new Set(geoPassers.map((c) => c.id))
+      const flexCrossers = comps.filter((c, i) => {
+        const g = geos[i]
+        if (!g || geoPasserIds.has(c.id)) return false
+        return isValueEquivalent(property, c)
+      })
+      const FLEX_TIERS = [1, 1.15, 1.25, 1.35, 1.5, 1.75, 2, 2.5, 3, 4, 5]
       const enrichedById = new Map<string, NormalizedComparable>()
       for (let i = 0; i < FLEX_TIERS.length; i++) {
         // Deepest stretch wins across gate invocations (initial pool and
@@ -609,7 +618,8 @@ export class AnalysisJobDO {
         paramFlexFactor = Math.max(paramFlexFactor, FLEX_TIERS[i])
         paramFlexExtensions = Math.max(paramFlexExtensions, i)
         const tierFilters = flexNumericFilters(filters, FLEX_TIERS[i])
-        const newPassers = geoPassers.filter((c) => {
+        const candidates = i === 0 ? geoPassers : [...geoPassers, ...flexCrossers]
+        const newPassers = candidates.filter((c) => {
           if (enrichedById.has(c.id)) return false
           return !evaluateComparable(property, c, tierFilters, []).shouldDisable
         })
@@ -618,9 +628,9 @@ export class AnalysisJobDO {
           for (const e of enriched) enrichedById.set(e.id, e)
           candidatesEnriched += enriched.filter((c) => c.isEnriched).length
         }
-        const enrichedSoFar = geoPassers.filter((c) => enrichedById.has(c.id))
+        const enrichedSoFar = [...geoPassers, ...flexCrossers].filter((c) => enrichedById.has(c.id))
         if (enrichedSoFar.some((c) => arvEvidence(c, property.avmValue) != null)) break
-        if (enrichedById.size >= geoPassers.length) break
+        if (enrichedSoFar.length >= geoPassers.length + flexCrossers.length) break
       }
       retrieval.paramFlex = { extensions: paramFlexExtensions, factor: paramFlexFactor }
       if (enrichedById.size === 0) return comps
