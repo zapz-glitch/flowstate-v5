@@ -66,6 +66,9 @@ export interface Env {
   ATTOM_MCP_ACCESS_TOKEN?: string
   ATTOM_MCP_REFRESH_TOKEN?: string
   ATTOM_MCP_CLIENT_ID?: string
+  /** M2M client_credentials pair — production auth path */
+  ATTOM_MCP_M2M_CLIENT_ID?: string
+  ATTOM_MCP_CLIENT_SECRET?: string
   /** epoch seconds */
   ATTOM_MCP_EXPIRES_AT?: string
   ATTOM_MCP_ENDPOINT?: string

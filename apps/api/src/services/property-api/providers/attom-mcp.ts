@@ -53,6 +53,10 @@ import { buildRetrievalMeta } from '../retrieval-policy'
 
 const MCP_URL = 'https://mcp.intelligence.attomdata.com'
 const TOKEN_URL = 'https://auth.intelligence.attomdata.com/oauth2/v1/apps/token'
+// M2M (client_credentials) exchanges at the root token endpoint; the token
+// must carry the MCP audience + scope or the surface rejects its iss/aud.
+const M2M_TOKEN_URL = 'https://auth.intelligence.attomdata.com/oauth2/v1/token'
+const MCP_AUDIENCE = 'https://mcp.intelligence.attomdata.com'
 const UA = 'flowstate-api/attom-mcp-provider (experimental)'
 
 interface McpCreds {
@@ -138,12 +142,56 @@ async function refreshCreds(env: Env): Promise<string> {
   return credsCache.accessToken
 }
 
+let m2mTokenCache: { accessToken: string; expiresAt: number } | null = null
+let m2mInFlight: Promise<string> | null = null
+
+/** Machine-to-machine client_credentials — no user consent, no grants.
+ *  Exchanges client_id/secret for a ~10-min bearer at the root token
+ *  endpoint; aud + scope=mcp:* are required or the surface 401s. */
+async function m2mToken(env: Env): Promise<string> {
+  const id = (env as Env & { ATTOM_MCP_M2M_CLIENT_ID?: string }).ATTOM_MCP_M2M_CLIENT_ID
+  const secret = (env as Env & { ATTOM_MCP_CLIENT_SECRET?: string }).ATTOM_MCP_CLIENT_SECRET
+  if (!id || !secret) throw new Error('ATTOM_MCP: M2M requires ATTOM_MCP_M2M_CLIENT_ID + ATTOM_MCP_CLIENT_SECRET')
+  if (m2mTokenCache && m2mTokenCache.expiresAt > Date.now() / 1000 + 30) return m2mTokenCache.accessToken
+  if (m2mInFlight) return m2mInFlight
+  m2mInFlight = (async () => {
+    const resp = await fetch(M2M_TOKEN_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        Authorization: `Basic ${btoa(`${id}:${secret}`)}`,
+        'User-Agent': UA,
+      },
+      body: new URLSearchParams({
+        grant_type: 'client_credentials',
+        audience: MCP_AUDIENCE,
+        scope: 'mcp:*',
+      }),
+      signal: AbortSignal.timeout(15000),
+    })
+    const body = (await resp.json()) as { access_token?: string; expires_in?: number; error?: string }
+    if (!resp.ok || !body.access_token) {
+      throw new Error(`ATTOM_MCP M2M token failed ${resp.status}: ${body.error ?? ''}`)
+    }
+    m2mTokenCache = {
+      accessToken: body.access_token,
+      expiresAt: Math.floor(Date.now() / 1000) + (body.expires_in ?? 600),
+    }
+    return m2mTokenCache.accessToken
+  })().finally(() => { m2mInFlight = null })
+  return m2mInFlight
+}
+
 async function ensureToken(env: Env): Promise<string> {
   // Production path — a static API key bypasses the entire OAuth
   // lifecycle (no grants, no refresh, no expiry). Same endpoint,
   // same protocol; the Authorization header just carries the key.
   const apiKey = (env as Env & { ATTOM_MCP_API_KEY?: string }).ATTOM_MCP_API_KEY
   if (apiKey) return apiKey
+  // M2M client_credentials — preferred server-side path when provisioned.
+  if ((env as Env & { ATTOM_MCP_CLIENT_SECRET?: string }).ATTOM_MCP_CLIENT_SECRET) {
+    return m2mToken(env)
+  }
   if (!credsCache) {
     credsCache = envCreds(env)
     // A KV-persisted pair is fresher than the boot-time env pair
