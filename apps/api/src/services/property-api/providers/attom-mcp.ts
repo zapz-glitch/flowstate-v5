@@ -228,6 +228,7 @@ async function mcpRpc(env: Env, method: string, params: unknown, depth = 0): Pro
   if ((resp.status === 401 || resp.status === 403) && depth === 0) {
     console.log(`ATTOM_MCP: ${resp.status} — forcing token refresh and retrying once`)
     if (credsCache) credsCache.expiresAt = 0
+    if (m2mTokenCache) m2mTokenCache.expiresAt = 0
     refreshInFlight = null
     return mcpRpc(env, method, params, depth + 1)
   }
