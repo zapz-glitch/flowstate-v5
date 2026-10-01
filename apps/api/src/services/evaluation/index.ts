@@ -198,6 +198,48 @@ export function classifyCompsByPrice(
   return classifications
 }
 
+/**
+ * Evidence classification (attom-mcp) — replaces condition/price-percentile
+ * classification with transaction evidence:
+ *   flip resale          → after_renovation (bought 30–365d prior, profitable)
+ *   distressed sale      → as_is (provider transaction flag — investor evidence)
+ *   everything else      → transitional (ordinary market sale — no evidence
+ *                          either way; market/current tier)
+ */
+export function classifyCompsByEvidence(
+  comparables: NormalizedComparable[]
+): Map<string, ClassificationResult> {
+  const classifications = new Map<string, ClassificationResult>()
+  for (const comp of comparables) {
+    if (comp.flip && comp.flip.priorSalePrice > 0) {
+      classifications.set(comp.id, {
+        classification: 'after_renovation',
+        confidence: 90,
+        method: 'evidence_flip_chain',
+        reasoning: `Verified flip — bought $${comp.flip.priorSalePrice.toLocaleString()} ${comp.flip.daysHeld}d prior, resold +${comp.flip.gainPct}%`,
+        indicators: {},
+      })
+    } else if (comp.distressedSale === true || comp.transaction?.isForeclosure === true) {
+      classifications.set(comp.id, {
+        classification: 'as_is',
+        confidence: 85,
+        method: 'evidence_distressed',
+        reasoning: 'Distressed-flagged transaction — investor/as-is evidence',
+        indicators: {},
+      })
+    } else {
+      classifications.set(comp.id, {
+        classification: 'transitional',
+        confidence: 50,
+        method: 'evidence_market',
+        reasoning: 'Ordinary sale — no flip or distress evidence; market-rate reference',
+        indicators: {},
+      })
+    }
+  }
+  return classifications
+}
+
 // ─── Best Match Selection ────────────────────────────────────────────────────
 
 function selectBestMatch(
@@ -953,9 +995,14 @@ export async function performAnalysis(
     }
   }
 
-  // ── 4. Classifications (price percentile, display grouping) ─────────────────
+  // ── 4. Classifications ─────────────────────────────────────────────────────
+  // attom-mcp: transaction evidence (flip chain / distressed) classifies
+  // comps — no condition guessing, no pool-percentile banding. Other
+  // providers keep the price-percentile grouping.
   const arvThreshold = params.arvThreshold ?? { percent: 15 }
-  const compClassifications = classifyCompsByPrice(bundle.comparables, arvThreshold.percent)
+  const compClassifications = isAttomMcp
+    ? classifyCompsByEvidence(bundle.comparables)
+    : classifyCompsByPrice(bundle.comparables, arvThreshold.percent)
   const classificationSummary = summarizeClassifications(
     appraisalResult.comparables,
     compClassifications

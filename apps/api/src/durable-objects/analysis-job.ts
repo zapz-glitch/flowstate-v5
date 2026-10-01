@@ -32,6 +32,7 @@ import { DEFAULT_EXPANSION_POLICY, saleAgeExpansionSteps, vintageYearCap } from 
 import { filtersToApiParams } from '../services/appraisal/types'
 import type { Env } from '../types'
 import type { NormalizedProperty, NormalizedComparable } from '../services/property-api/types'
+import { fetchCensusGeography } from '../services/geo/census-geocoder'
 import { drizzle } from 'drizzle-orm/d1'
 import { and, eq } from 'drizzle-orm'
 import { upsertPropertyReport } from '../services/report-upsert'
@@ -540,6 +541,60 @@ export class AnalysisJobDO {
     retrieval.candidatesPrunedBeforeEnrichment = candidatesPruned
     retrieval.candidatesEnriched = candidatesEnriched
 
+    // ── attom-mcp: free-first census gate + gated enrichment ──────────────────
+    // Census-geocode every comp (free, no key) and only spend a provider
+    // detail call (1 AI Intelligence Report each) on comps sharing the
+    // subject's census block group or tract. Non-passers stay in the pool
+    // unenriched with sameBlockGroup/crossesMajorRoad/censusTract stamped.
+    const isAttomMcp = propertyApi.providerName === 'attom-mcp'
+    const gateAndEnrich = async (
+      comps: NormalizedComparable[],
+    ): Promise<NormalizedComparable[]> => {
+      if (!isAttomMcp || property.latitude == null || property.longitude == null) return comps
+      const subjectGeo = await fetchCensusGeography(
+        property.latitude,
+        property.longitude,
+        this.env.API_CACHE,
+      )
+      if (!subjectGeo) return comps
+      const cache = this.env.API_CACHE ?? undefined
+      const lookup = async (lat: number, lng: number) => {
+        const g = await fetchCensusGeography(lat, lng, cache).catch(() => null)
+        // One retry — a transient null silently drops an otherwise-valid comp
+        return g ?? fetchCensusGeography(lat, lng, cache).catch(() => null)
+      }
+      // Bounded concurrency — the Census endpoint throttles big bursts.
+      const geos: (Awaited<ReturnType<typeof lookup>> | null)[] = new Array(comps.length).fill(null)
+      const queue = comps.map((c, i) => ({ c, i }))
+      await Promise.all(
+        Array.from({ length: 5 }, async () => {
+          for (let item = queue.shift(); item; item = queue.shift()) {
+            if (item.c.latitude != null && item.c.longitude != null) {
+              geos[item.i] = await lookup(item.c.latitude, item.c.longitude)
+            }
+          }
+        }),
+      )
+      const passers = comps.filter((c, i) => {
+        const g = geos[i]
+        if (!g) return false
+        c.censusTract ??= g.tract
+        c.sameBlockGroup ??= g.blockGroup === subjectGeo.blockGroup
+        c.crossesMajorRoad ??= g.tract !== subjectGeo.tract
+        return g.blockGroup === subjectGeo.blockGroup || g.tract === subjectGeo.tract
+      })
+      if (passers.length === 0) return comps
+      const enriched = await propertyApi.enrichComparables(passers, { concurrency: 10 })
+      const byId = new Map(enriched.map((c) => [c.id, c]))
+      candidatesEnriched += enriched.filter((c) => c.isEnriched).length
+      return comps.map((c) => byId.get(c.id) ?? c)
+    }
+    if (isAttomMcp) {
+      enrichedComps = await gateAndEnrich(rawComps)
+      retrieval.candidatesEnriched = candidatesEnriched
+      console.log(`[AnalysisJobDO] attom-mcp census gate: ${enrichedComps.filter((c) => c.isEnriched).length}/${rawComps.length} comps share the subject's tract/BG — enriched those only`)
+    }
+
     // ── Expansion refetch ─────────────────────────────────────────────────────
     // The pool fetched at radius R provably contains zero candidates beyond R.
     // When the appraisal ladder reaches a radius-bound tier (subdivision 2x,
@@ -563,17 +618,52 @@ export class AnalysisJobDO {
         console.warn(`[AnalysisJobDO] Expansion refetch failed: ${wider.error}`)
         return null
       }
-      const merged = mergeComparablePools(rawComps, wider.data.comparables)
+      // Merge against the CURRENT pool (enrichedComps), not rawComps — the
+      // attom-mcp census gate has already enriched passers; merging from
+      // rawComps would clobber the enriched records.
+      const merged = mergeComparablePools(enrichedComps, wider.data.comparables)
+      if (isAttomMcp) {
+        // mergeComparablePools prefers the expanded pool's copy of a duped
+        // comp — which is the unenriched variant. Overlay the enrichment
+        // fields the gate paid for onto the winner.
+        const ENRICHED_KEYS = [
+          'subdivision', 'neighborhoodName', 'neighborhoodCode', 'censusTract',
+          'sameBlockGroup', 'crossesMajorRoad',
+          'buildingCondition', 'buildingGrade', 'stories', 'construction',
+          'transaction', 'features', 'flip', 'distressedSale', 'isEnriched',
+        ] as const
+        const enrichedById = new Map(
+          enrichedComps.filter((c) => c.isEnriched).map((c) => [c.id, c]),
+        )
+        merged.comparables = merged.comparables.map((c) => {
+          const prior = enrichedById.get(c.id)
+          if (!prior || c.isEnriched) return c
+          const out = { ...c } as unknown as Record<string, unknown>
+          const src = prior as unknown as Record<string, unknown>
+          for (const k of ENRICHED_KEYS) {
+            if (out[k] == null && src[k] != null) {
+              out[k] = src[k]
+            }
+          }
+          return out as unknown as NormalizedComparable
+        })
+      }
       for (const id of merged.conflictIds) {
         pools.conflictIds.push(id)
         evidenceLimitations.push(`${id}: Provider comparable pools disagree on the same sale date; price is quarantined from evaluation`)
       }
       // New candidates join the raw pool — enrichment is deferred to the
       // Jev funnel (test-1 passers only), same as the initial pool.
-      const newCandidates = merged.comparables.filter((c) => !poolCompIds.has(c.id))
+      // attom-mcp: same census gate + gated enrichment as the initial pool.
+      let newCandidates = merged.comparables.filter((c) => !poolCompIds.has(c.id))
       for (const c of newCandidates) poolCompIds.add(c.id)
       candidatesPruned += newCandidates.filter((c) => isDeadComp(c)).length
-      enrichedComps = merged.comparables
+      if (isAttomMcp) {
+        newCandidates = await gateAndEnrich(newCandidates)
+        retrieval.candidatesEnriched = candidatesEnriched
+      }
+      const newById = new Map(newCandidates.map((c) => [c.id, c]))
+      enrichedComps = merged.comparables.map((c) => newById.get(c.id) ?? c)
       retrieval.providerCallsUsed += 1
       retrieval.pagesRequested += 1
       if (monthsBack != null) retrieval.monthsBack = monthsBack
