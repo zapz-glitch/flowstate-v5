@@ -639,6 +639,7 @@ export class AnalysisJobDO {
           'sameBlockGroup', 'crossesMajorRoad',
           'buildingCondition', 'buildingGrade', 'stories', 'construction',
           'transaction', 'features', 'flip', 'distressedSale', 'isEnriched',
+          'latestSale', 'ppsfMedians', 'avmValue',
         ] as const
         const enrichedById = new Map(
           enrichedComps.filter((c) => c.isEnriched).map((c) => [c.id, c]),
@@ -652,6 +653,14 @@ export class AnalysisJobDO {
             if (out[k] == null && src[k] != null) {
               out[k] = src[k]
             }
+          }
+          // The widened winner can hold the flip's stale acquisition leg —
+          // re-apply the sales-history price correction on the merged comp.
+          const ls = src.latestSale as { price: number; date: string } | null | undefined
+          if (ls && (!out.saleDate || ls.date > (out.saleDate as string))) {
+            out.salePrice = ls.price
+            out.saleDate = ls.date
+            out.pricePerSqft = out.squareFeet ? Math.round(ls.price / (out.squareFeet as number)) : out.pricePerSqft
           }
           return out as unknown as NormalizedComparable
         })

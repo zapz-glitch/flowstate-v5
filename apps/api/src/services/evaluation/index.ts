@@ -145,25 +145,68 @@ export interface EvaluationResult {
 
 // ─── Price Classification ────────────────────────────────────────────────────
 
+/** Sold ≥15% over the comp's own scope median $/sf → premium sale = ARV evidence */
+const ARV_PPSF_PREMIUM = 1.15
+
+function compPpsf(c: { pricePerSqft?: number | null; salePrice?: number | null; squareFeet?: number | null }): number | null {
+  return c.pricePerSqft ?? (c.salePrice != null && c.squareFeet ? c.salePrice / c.squareFeet : null)
+}
+
 /**
- * Evidence classification (attom-mcp) — replaces condition/price-percentile
- * classification with transaction evidence:
- *   flip resale          → after_renovation (bought 30–365d prior, profitable)
- *   distressed sale      → as_is (provider transaction flag — investor evidence)
- *   everything else      → transitional (ordinary market sale — no evidence
- *                          either way; market/current tier)
+ * ARV evidence — three peer signals, any one qualifies the comp for the
+ * ARV set (they cooperate; multiple qualifying comps average together):
+ *   1. flip resale      — verified flip chain (resale leg)
+ *   2. premium sale     — ≥15% over the comp's scope median $/sf
+ *   3. above-own-AVM    — sale price above the comp's own AVM
+ * Returns the evidence note, or null when no signal fires.
+ */
+function arvEvidence(
+  c: NormalizedComparable,
+): { note: string; method: 'evidence_flip_chain' | 'evidence_premium' | 'evidence_avm' } | null {
+  if (c.flip && c.flip.priorSalePrice > 0) {
+    return {
+      method: 'evidence_flip_chain',
+      note: `Verified flip — bought $${c.flip.priorSalePrice.toLocaleString()} ${c.flip.daysHeld}d prior, resold +${c.flip.gainPct}%`,
+    }
+  }
+  // Distressed transactions are investor/as-is evidence — never ARV,
+  // even when the price reads premium.
+  if (c.distressedSale === true || c.transaction?.isForeclosure === true) return null
+  const ppsf = compPpsf(c)
+  const scopeMed = c.ppsfMedians?.SD ?? c.ppsfMedians?.N4 ?? c.ppsfMedians?.N3
+  if (ppsf != null && scopeMed != null && scopeMed > 0 && ppsf >= scopeMed * ARV_PPSF_PREMIUM) {
+    return {
+      method: 'evidence_premium',
+      note: `Sold ${Math.round((ppsf / scopeMed) * 100 - 100)}% above scope median $/sf`,
+    }
+  }
+  if (c.salePrice != null && c.avmValue != null && c.salePrice > c.avmValue) {
+    return {
+      method: 'evidence_avm',
+      note: `Sold $${Math.round((c.salePrice - c.avmValue) / 1000)}k above own AVM`,
+    }
+  }
+  return null
+}
+
+/**
+ * Evidence classification — transaction evidence only:
+ *   flip resale / premium / above-AVM → after_renovation (ARV evidence)
+ *   distressed sale                   → as_is (investor evidence)
+ *   everything else                   → transitional (market tier)
  */
 export function classifyCompsByEvidence(
   comparables: NormalizedComparable[]
 ): Map<string, ClassificationResult> {
   const classifications = new Map<string, ClassificationResult>()
   for (const comp of comparables) {
-    if (comp.flip && comp.flip.priorSalePrice > 0) {
+    const ev = arvEvidence(comp)
+    if (ev) {
       classifications.set(comp.id, {
         classification: 'after_renovation',
-        confidence: 90,
-        method: 'evidence_flip_chain',
-        reasoning: `Verified flip — bought $${comp.flip.priorSalePrice.toLocaleString()} ${comp.flip.daysHeld}d prior, resold +${comp.flip.gainPct}%`,
+        confidence: ev.method === 'evidence_flip_chain' ? 90 : 80,
+        method: ev.method,
+        reasoning: ev.note,
         indicators: {},
       })
     } else if (comp.distressedSale === true || comp.transaction?.isForeclosure === true) {
@@ -179,7 +222,7 @@ export function classifyCompsByEvidence(
         classification: 'transitional',
         confidence: 50,
         method: 'evidence_market',
-        reasoning: 'Ordinary sale — no flip or distress evidence; market-rate reference',
+        reasoning: 'Ordinary sale — no ARV or distress evidence; market-rate reference',
         indicators: {},
       })
     }
@@ -634,33 +677,33 @@ export async function performAnalysis(
   })()
 
   // ── Comp selection — evidence-driven ──────────────────────────────────────
-  // Verified flip resales are the ARV set: a flip's resale IS the after-
-  // repair evidence (its acquisition price folds into the investor floor via
-  // summarizeGroupB). No flip evidence → no ARV claim; the run degrades to a
-  // report-only result rather than fabricating a number from a pool-relative
-  // price band.
-  const flipComps = appraisalResult.comparables.filter(
-    (c) => c.isEnabled && c.flip?.priorSalePrice,
+  // The ARV set is every enabled comp carrying ARV evidence — verified flip
+  // resale, premium over its scope median $/sf, or sale above its own AVM.
+  // The three signals cooperate: multiple qualifying comps average into the
+  // ARV. Flip acquisitions fold into the investor floor via summarizeGroupB.
+  // Zero evidence → ARV withheld; the run degrades to report-only.
+  const arvComps = appraisalResult.comparables.filter(
+    (c) => c.isEnabled && arvEvidence(c) != null,
   )
-  const flipIds = new Set(flipComps.map((c) => c.id))
+  const arvIds = new Set(arvComps.map((c) => c.id))
   appraisalResult.comparables = appraisalResult.comparables.map((comp) => ({
     ...comp,
-    arvStatus: flipIds.has(comp.id)
+    arvStatus: arvIds.has(comp.id)
       ? 'selected' as const
       : comp.arvStatus === 'selected' ? 'not_examined' as const : comp.arvStatus,
   }))
-  appraisalResult.selectedCompIds = [...flipIds]
-  if (flipComps.length > 0) {
-    appraisalResult.arv = appraisalService.calculateARV(flipComps)
+  appraisalResult.selectedCompIds = [...arvIds]
+  if (arvComps.length > 0) {
+    appraisalResult.arv = appraisalService.calculateARV(arvComps)
     appraisalResult.insufficientComps = false
     step('appraisal_rules', 'completed',
-      `Evidence selection — ARV from ${flipComps.length} verified flip resale(s)`)
+      `Evidence selection — ARV from ${arvComps.length} evidence comp(s)`)
   } else {
     // finalArv reads `insufficient`, so the ladder's banded number is dead
     // weight — withholding it is what makes the run report-only.
     appraisalResult.insufficientComps = true
     step('appraisal_rules', 'completed',
-      'Evidence selection — no verified flip resales; ARV withheld (report-only)')
+      'Evidence selection — no ARV evidence found; ARV withheld (report-only)')
   }
 
   const enabledComps = appraisalResult.comparables.filter((c) => c.isEnabled)

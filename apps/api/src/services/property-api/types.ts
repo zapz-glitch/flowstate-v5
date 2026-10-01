@@ -180,11 +180,16 @@ export interface NormalizedProperty {
   neighborhoodCode?: string
   cbsaCode?: string
   censusTract?: string
+  /** Median $/sqft over trailing 365d per geography scope (SD/N4/N3) — geography-context */
+  ppsfMedians?: { SD?: number | null; N4?: number | null; N3?: number | null } | null
   legalDescription?: string
 
+  /** Newest priced sale in the record — sales-history can carry a newer
+   *  transaction than the comparables pool returned (pool sometimes holds
+   *  the acquisition leg of a flip, not the resale) */
+  latestSale?: { price: number; date: string } | null
   /** Verified flip on the latest sale: prior buy 30–365d before, resold for
-   *  profit. Provider sales-history source (attom-mcp); comps also get this
-   *  via Zillow price-history reconciliation downstream. */
+   *  profit. Provider sales-history source (attom-mcp). */
   flip?: { priorSalePrice: number; priorSaleDate: string; daysHeld: number; gainPct: number } | null
   /** Latest priced sale flagged distressed by the provider */
   distressedSale?: boolean | null
@@ -236,9 +241,13 @@ export interface NormalizedComparable {
    */
   saleReconciled?: { previousPrice: number | null; previousDate: string | null; source: 'zillow' }
 
-  /** Verified flip: prior sold event 30–365 days before saleDate at a lower price (from Zillow price history, or provider sales-history under attom-mcp) */
+  /** Newest priced sale in the comp's record — enrichment can surface a
+   *  newer transaction than the pool carried (pool may hold a flip's
+   *  acquisition leg, not the resale) */
+  latestSale?: { price: number; date: string } | null
+  /** Verified flip: prior sold event 30–365 days before saleDate at a lower price (provider sales-history under attom-mcp) */
   flip?: { priorSalePrice: number; priorSaleDate: string; daysHeld: number; gainPct: number } | null
-  /** Provider-flagged distressed sale on this comp (e.g. ATTOM distressedStatus) */
+  /** Provider-flagged distressed sale on this comp */
   distressedSale?: boolean | null
 
   // Location details (from enrichment)
@@ -249,6 +258,10 @@ export interface NormalizedComparable {
   neighborhoodCode?: string | null
   /** Census tract ID — boundaries follow major roads; proxy for road-barrier checks */
   censusTract?: string | null
+  /** Median $/sqft over trailing 365d for the comp's geography scopes (ATTOM geography-context, enriched comps only) */
+  ppsfMedians?: { SD?: number | null; N4?: number | null; N3?: number | null } | null
+  /** Comp's own ATTOM AVM value (valuation dataset, enriched comps only) */
+  avmValue?: number | null
 
   /** Assessor building improvement condition (e.g. "Average") */
   buildingCondition?: string | null

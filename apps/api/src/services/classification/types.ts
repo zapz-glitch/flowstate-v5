@@ -24,9 +24,11 @@ export type ClassificationMethod =
   | 'data_only'
   | 'fallback'
   | 'parse_error_fallback'
-  // Evidence classification (attom-mcp): transaction evidence, not
-  // condition/price percentile
+  // Evidence classification: transaction/price evidence, not
+  // condition or pool-percentile guessing
   | 'evidence_flip_chain'
+  | 'evidence_premium'
+  | 'evidence_avm'
   | 'evidence_distressed'
   | 'evidence_market'
 

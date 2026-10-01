@@ -220,6 +220,14 @@ function latestPricedSale(sales: any[] | null): any | null {
 const FLIP_MIN_DAYS = 30
 const FLIP_MAX_DAYS = 365
 
+function newestPricedSale(sales: any[] | null): { price: number; date: string } | null {
+  const priced = (sales ?? [])
+    .filter((s) => s.price != null && s.price > 1000 && s.saleDate)
+    .sort((a, b) => new Date(b.saleDate).getTime() - new Date(a.saleDate).getTime())
+  const newest = priced[0]
+  return newest ? { price: newest.price, date: String(newest.saleDate).slice(0, 10) } : null
+}
+
 function detectFlip(sales: any[] | null): NonNullable<NormalizedProperty['flip']> | null {
   const priced = (sales ?? [])
     .filter((s) => s.price != null && s.price > 1000 && s.saleDate)
@@ -310,6 +318,12 @@ async function normalizeMcpProperty(results: any[], env: Env): Promise<Normalize
     subdivision: geo?.subject?.subdivision ?? geoByType('SD')?.geographyName ?? undefined,
     neighborhoodName: geoByType('N4')?.geographyName ?? geoByType('N3')?.geographyName ?? undefined,
     neighborhoodCode: geoByType('N4')?.geographyId ?? geoByType('N3')?.geographyId ?? undefined,
+    // Median $/sqft per geography scope — the premium-ARV evidence signal
+    ppsfMedians: {
+      SD: geoByType('SD')?.medianPricePerSqFt365d ?? null,
+      N4: geoByType('N4')?.medianPricePerSqFt365d ?? null,
+      N3: geoByType('N3')?.medianPricePerSqFt365d ?? null,
+    },
     censusTract: census?.tract ?? undefined,
     zoning: ch.zoning ?? identity?.zoning ?? undefined,
 
@@ -333,6 +347,10 @@ async function normalizeMcpProperty(results: any[], env: Env): Promise<Normalize
     },
 
     flip: detectFlip(sales),
+    // Newest priced sale in the record — find_comparable_sales sometimes
+    // returns the ACQUISITION leg of a flip as the comp's sale; the merge
+    // uses this to correct the comp's salePrice/saleDate to the resale.
+    latestSale: newestPricedSale(sales),
     distressedSale: lastSale?.distressed === true || null,
 
     transaction: lastSale ? {

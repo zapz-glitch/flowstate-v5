@@ -1155,6 +1155,22 @@ class PropertyApi implements PropertyApiService {
                 stories: result.data.stories ?? null,
                 flip: result.data.flip ?? null,
                 distressedSale: result.data.distressedSale ?? null,
+                latestSale: result.data.latestSale ?? null,
+                // Pool records can carry the flip's ACQUISITION leg — when
+                // sales-history shows a newer priced sale, correct the comp
+                // sale to the true resale so ARV prices the right transaction.
+                ...(result.data.latestSale && (!comp.saleDate || result.data.latestSale.date > comp.saleDate)
+                  ? {
+                      salePrice: result.data.latestSale.price,
+                      saleDate: result.data.latestSale.date,
+                      pricePerSqft: result.data.latestSale.price && comp.squareFeet
+                        ? Math.round(result.data.latestSale.price / comp.squareFeet)
+                        : comp.pricePerSqft,
+                    }
+                  : {}),
+                // ARV-evidence signals: comp's own AVM + scope medians
+                avmValue: result.data.avmValue ?? null,
+                ppsfMedians: result.data.ppsfMedians ?? null,
                 construction: mergedConstruction,
                 transaction: result.data.transaction ? {
                   buyerNames: result.data.transaction.buyerNames,
