@@ -28,6 +28,8 @@ import {
   type ComparablesRetrievalMeta,
 } from '../services/property-api/retrieval-policy'
 import { DEFAULT_FILTERS, evaluateComparable, type AppraisalFilter } from '../services/appraisal'
+import { flexNumericFilters } from '../services/appraisal/evaluator'
+import { arvEvidence } from '../services/evaluation'
 import { DEFAULT_EXPANSION_POLICY, saleAgeExpansionSteps, vintageYearCap } from '../services/appraisal/types'
 import { filtersToApiParams } from '../services/appraisal/types'
 import type { Env } from '../types'
@@ -538,6 +540,10 @@ export class AnalysisJobDO {
 
     let enrichedComps = rawComps
     const poolCompIds = new Set(rawComps.map((c) => c.id))
+    // Param-flex ladder record — how far numeric tolerances stretched to
+    // admit evidence (0 = strict tier admitted it).
+    let paramFlexExtensions = 0
+    let paramFlexFactor = 1
     retrieval.candidatesPrunedBeforeEnrichment = candidatesPruned
     retrieval.candidatesEnriched = candidatesEnriched
 
@@ -583,19 +589,36 @@ export class AnalysisJobDO {
         c.crossesMajorRoad ??= g.tract !== subjectGeo.tract
         return g.blockGroup === subjectGeo.blockGroup || g.tract === subjectGeo.tract
       })
-      // Base appraisal rules run BEFORE paid enrichment — a comp that is
-      // geo-verified but dead on hard rules (sqft/year/sale-age/type) never
-      // earns a report call. Geo filters read as not_verified pre-enrichment
-      // and pass; only hard field failures drop the comp here.
-      const passers = geoPassers.filter((c) => {
-        const evaluation = evaluateComparable(property, c, filters, [])
-        return !evaluation.shouldDisable
-      })
-      if (passers.length === 0) return comps
-      const enriched = await propertyApi.enrichComparables(passers, { concurrency: 10 })
-      const byId = new Map(enriched.map((c) => [c.id, c]))
-      candidatesEnriched += enriched.filter((c) => c.isEnriched).length
-      return comps.map((c) => byId.get(c.id) ?? c)
+      if (geoPassers.length === 0) return comps
+      // Thin-pool flex ladder — geo stays required; numeric tolerances
+      // (sqft, year built, lot, sale age, distance) stretch ×1.15 → ×1.25 →
+      // ×1.35 → … until a passer carries ARV evidence or every geo-verified
+      // comp has been enriched. First admission stops the stretch, enriches
+      // the cohort, checks evidence; no ARV evidence → stretch again.
+      const FLEX_TIERS = [1, 1.15, 1.25, 1.35, 1.5, 1.75, 2, 2.5, 3]
+      const enrichedById = new Map<string, NormalizedComparable>()
+      for (let i = 0; i < FLEX_TIERS.length; i++) {
+        // Deepest stretch wins across gate invocations (initial pool and
+        // expansion refetch share the record).
+        paramFlexFactor = Math.max(paramFlexFactor, FLEX_TIERS[i])
+        paramFlexExtensions = Math.max(paramFlexExtensions, i)
+        const tierFilters = flexNumericFilters(filters, FLEX_TIERS[i])
+        const newPassers = geoPassers.filter((c) => {
+          if (enrichedById.has(c.id)) return false
+          return !evaluateComparable(property, c, tierFilters, []).shouldDisable
+        })
+        if (newPassers.length > 0) {
+          const enriched = await propertyApi.enrichComparables(newPassers, { concurrency: 10 })
+          for (const e of enriched) enrichedById.set(e.id, e)
+          candidatesEnriched += enriched.filter((c) => c.isEnriched).length
+        }
+        const enrichedSoFar = geoPassers.filter((c) => enrichedById.has(c.id))
+        if (enrichedSoFar.some((c) => arvEvidence(c, property.avmValue) != null)) break
+        if (enrichedById.size >= geoPassers.length) break
+      }
+      retrieval.paramFlex = { extensions: paramFlexExtensions, factor: paramFlexFactor }
+      if (enrichedById.size === 0) return comps
+      return comps.map((c) => enrichedById.get(c.id) ?? c)
     }
     if (isAttomMcp) {
       enrichedComps = await gateAndEnrich(rawComps)
@@ -813,6 +836,17 @@ export class AnalysisJobDO {
     const propertyCallStats = propertyApi.getCallStats()
     const evalParams = {
       ...config.evalParams,
+      // attom-mcp: when the flex ladder stretched numeric tolerances to
+      // admit evidence, evaluate the pool under the winning tier — comps
+      // admitted by flex must stay enabled through evaluation.
+      ...(isAttomMcp && paramFlexFactor > 1
+        ? {
+            appraisalRules: {
+              ...(config.evalParams.appraisalRules ?? {}),
+              filters: flexNumericFilters(filters, paramFlexFactor),
+            },
+          }
+        : {}),
       apiCallStats: {
         corelogic: { total: propertyCallStats.total, cached: propertyCallStats.cached, endpoints: propertyCallStats.endpoints },
         totalExternalCalls: propertyCallStats.total,

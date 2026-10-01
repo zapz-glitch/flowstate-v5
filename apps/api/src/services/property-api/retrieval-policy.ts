@@ -107,6 +107,12 @@ export interface ComparablesRetrievalMeta {
   candidatesPrunedBeforeEnrichment?: number
   /** Candidates that received paid property-detail enrichment. */
   candidatesEnriched?: number
+  /**
+   * Param-flex ladder record (thin-pool path): how many numeric tolerance
+   * escalations were needed to admit ARV evidence (0 = strict pass), and
+   * the winning factor. Geo filters never flex.
+   */
+  paramFlex?: { extensions: number; factor: number } | null
 }
 
 export function buildRetrievalMeta(args: {

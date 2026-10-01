@@ -147,6 +147,8 @@ export interface EvaluationResult {
 
 /** Sold ≥15% over the comp's own scope median $/sf → premium sale = ARV evidence */
 const ARV_PPSF_PREMIUM = 1.15
+/** Sold ≥15% over the subject's AVM → renovated-tier sale = ARV evidence */
+const ARV_SUBJECT_AVM_PREMIUM = 1.15
 
 function compPpsf(c: { pricePerSqft?: number | null; salePrice?: number | null; squareFeet?: number | null }): number | null {
   return c.pricePerSqft ?? (c.salePrice != null && c.squareFeet ? c.salePrice / c.squareFeet : null)
@@ -160,8 +162,9 @@ function compPpsf(c: { pricePerSqft?: number | null; salePrice?: number | null; 
  *   3. above-own-AVM    — sale price above the comp's own AVM
  * Returns the evidence note, or null when no signal fires.
  */
-function arvEvidence(
+export function arvEvidence(
   c: NormalizedComparable,
+  subjectAvm?: number | null,
 ): { note: string; method: 'evidence_flip_chain' | 'evidence_premium' | 'evidence_avm' } | null {
   if (c.flip && c.flip.priorSalePrice > 0) {
     return {
@@ -186,6 +189,14 @@ function arvEvidence(
       note: `Sold $${Math.round((c.salePrice - c.avmValue) / 1000)}k above own AVM`,
     }
   }
+  // Fallback ARV check per spec — comp sold above the SUBJECT's AVM
+  // (the subject's modeled as-is value): the premium implies renovation.
+  if (c.salePrice != null && subjectAvm != null && c.salePrice > subjectAvm * ARV_SUBJECT_AVM_PREMIUM) {
+    return {
+      method: 'evidence_avm',
+      note: `Sold ${Math.round((c.salePrice / subjectAvm) * 100 - 100)}% above subject AVM`,
+    }
+  }
   return null
 }
 
@@ -196,11 +207,12 @@ function arvEvidence(
  *   everything else                   → transitional (market tier)
  */
 export function classifyCompsByEvidence(
-  comparables: NormalizedComparable[]
+  comparables: NormalizedComparable[],
+  subjectAvm?: number | null
 ): Map<string, ClassificationResult> {
   const classifications = new Map<string, ClassificationResult>()
   for (const comp of comparables) {
-    const ev = arvEvidence(comp)
+    const ev = arvEvidence(comp, subjectAvm)
     if (ev) {
       classifications.set(comp.id, {
         classification: 'after_renovation',
@@ -682,8 +694,9 @@ export async function performAnalysis(
   // The three signals cooperate: multiple qualifying comps average into the
   // ARV. Flip acquisitions fold into the investor floor via summarizeGroupB.
   // Zero evidence → ARV withheld; the run degrades to report-only.
+  const subjectAvm = bundle.enrichment?.avm?.value ?? bundle.property.avmValue ?? null
   const arvComps = appraisalResult.comparables.filter(
-    (c) => c.isEnabled && arvEvidence(c) != null,
+    (c) => c.isEnabled && arvEvidence(c, subjectAvm) != null,
   )
   const arvIds = new Set(arvComps.map((c) => c.id))
   appraisalResult.comparables = appraisalResult.comparables.map((comp) => ({
@@ -751,7 +764,7 @@ export async function performAnalysis(
   // ── 4. Classifications — transaction evidence, not condition guessing ────
   // flip resale → after_renovation; distressed sale → as_is; ordinary sale
   // → transitional (market tier).
-  const compClassifications = classifyCompsByEvidence(bundle.comparables)
+  const compClassifications = classifyCompsByEvidence(bundle.comparables, subjectAvm)
   const classificationSummary = summarizeClassifications(
     appraisalResult.comparables,
     compClassifications

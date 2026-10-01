@@ -95,17 +95,46 @@ export function AnalysisResultLayout({
             ))}
           </div>
         </div>
-      ) : subject && !isStreaming && comps?.insufficientComps === true ? (
-        /* Insufficient comps — the run completed with no valuation. The comp
-           pool and its geo stamps still render below. */
-        <div className="border border-amber-500/30 bg-amber-500/5 rounded-sm px-4 py-3">
-          <div className="text-sm font-semibold text-amber-500">Insufficient comps</div>
-          <p className="text-xs text-foreground-secondary mt-0.5">
-            No comparables qualified under the appraisal rules, so no ARV or offer math was produced.
-            The evaluated pool and per-comp test results are below — widen the rules or pick a nearby market and rerun.
-          </p>
-        </div>
-      ) : null}
+      ) : subject && !isStreaming && comps?.insufficientComps === true ? (() => {
+        /* Thin-pocket disclosure — the param-flex ladder stretched numeric
+           tolerances (geo stayed required) hunting ARV evidence. Green =
+           strict pass, yellow = extended once or twice, red = deeper. */
+        const extensions = comps?.retrieval?.paramFlex?.extensions ?? 0
+        const factor = comps?.retrieval?.paramFlex?.factor ?? 1
+        const tone = extensions === 0 ? 'text-emerald-500 border-emerald-500/30 bg-emerald-500/5'
+          : extensions <= 2 ? 'text-amber-500 border-amber-500/30 bg-amber-500/5'
+          : 'text-red-400 border-red-400/30 bg-red-400/5'
+        return (
+          <div className={`border rounded-sm px-4 py-3 ${tone}`}>
+            <div className="text-sm font-semibold">
+              {extensions === 0
+                ? 'No ARV evidence in the verified pool'
+                : `No ARV evidence — parameters stretched ${extensions}× (to ×${factor})`}
+            </div>
+            <p className="text-xs text-foreground-secondary mt-0.5">
+              Every census-verified comp was evaluated and none carried ARV evidence
+              (flip resale, premium over scope median, or above AVM). The comp pool
+              and per-comp results are below.
+            </p>
+          </div>
+        )
+      })() : null}
+
+      {/* Param-flex disclosure on successful runs — how far the rules
+          stretched to admit ARV evidence (geo stayed required). */}
+      {subject && !isStreaming && comps?.insufficientComps !== true && comps?.retrieval?.paramFlex != null && (() => {
+        const { extensions, factor } = comps.retrieval.paramFlex
+        const tone = extensions === 0 ? 'text-emerald-500 border-emerald-500/30'
+          : extensions <= 2 ? 'text-amber-500 border-amber-500/30'
+          : 'text-red-400 border-red-400/30'
+        return (
+          <div className={`inline-flex border rounded-sm px-2 py-1 text-[10px] font-semibold ${tone}`}>
+            {extensions === 0
+              ? 'Comps qualified on strict rules'
+              : `Comp rules extended ${extensions}× — numeric tolerances at ×${factor}`}
+          </div>
+        )
+      })()}
 
       {notesSlot}
 

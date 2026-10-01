@@ -1170,3 +1170,28 @@ export function evaluateComparables(
 
   return evaluations
 }
+
+/**
+ * Percentage flex on numeric tolerances — sqft, year built, lot size,
+ * sale age, distance scale by `factor`; geo/exact-match filters never
+ * flex (census/SD/road barriers stay hard). Powers the thin-pool
+ * fallback ladder: strict → ×1.15 → ×1.25 → ×1.35 → … until evidence.
+ */
+const FLEXIBLE_FILTERS = new Set<FilterType>([
+  'sale_age',
+  'sale_age_expansion',
+  'sale_age_expansion_2',
+  'sqft_diff',
+  'year_built_diff',
+  'lot_size_diff',
+  'distance',
+])
+
+export function flexNumericFilters(filters: AppraisalFilter[], factor: number): AppraisalFilter[] {
+  if (factor <= 1) return filters
+  return filters.map((f) =>
+    FLEXIBLE_FILTERS.has(f.type) && typeof f.value === 'number'
+      ? { ...f, value: Math.round(f.value * factor * 100) / 100 }
+      : f,
+  )
+}

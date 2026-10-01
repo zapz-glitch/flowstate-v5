@@ -369,6 +369,10 @@ export interface CompsData {
   insufficientComps?: boolean
   avgPricePerSqft?: number | null
   medianPrice?: number | null
+  /** Provider retrieval audit — includes paramFlex escalation record */
+  retrieval?: {
+    paramFlex?: { extensions: number; factor: number } | null
+  } | null
   items?: CompItem[]
 }
 
@@ -582,6 +586,10 @@ export interface CompsData {
   insufficientComps?: boolean
   avgPricePerSqft?: number | null
   medianPrice?: number | null
+  /** Provider retrieval audit — includes paramFlex escalation record */
+  retrieval?: {
+    paramFlex?: { extensions: number; factor: number } | null
+  } | null
   items?: CompItem[]
 }
 
