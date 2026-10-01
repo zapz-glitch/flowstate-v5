@@ -115,6 +115,18 @@
   flood via listing scrape. Artifacts: .data/attom-mcp/pipeline-*.
   Census: pipeline already had fetchCensusGeography (same endpoint the
   user's PDF documents) — comp-hybrid derives sameBlockGroup/crossesMajorRoad.
+- PIPELINE PARITY (2026-10-01): census-first ordering + evidence
+  classification now in the real path under attom-mcp only.
+  getPropertyBundle geo-gates enrichment on census BG/tract (free-first);
+  comps carry flip (provider sales-history, 30-365d profit rule) +
+  distressedSale + censusTract; comp-hybrid stage 6 splits ARV/as-is on
+  flip evidence instead of top-15% price band (corelogic unchanged);
+  asIsMarketIntel folds flip acquisitions into the investor floor.
+  CompCard/CompGridCard gained DISTRESSED chip + BG/tract geo chips.
+  E2E job_1790815961481 Chelsea: 7/25 enriched, 3 flips, ARV $319,878,
+  investor floor $176,798 (1 distressed + 3 flip buys). Local API key
+  for testing: fs_35fd82dfcc3849c37a4e42347ee79bf0350503117d46cc8d
+  (local@flowstate.test, inserted directly into local D1).
 - Temp eval harness: `npx tsx scripts/tmp-attom-eval.mts "<address>"` —
   MCP data → CompLike/PropertyLike → real DEFAULT_FILTERS/ADJUSTMENTS +
   pickBestComps/calculateARV. Features: sale-age ladder + vintage cap,
