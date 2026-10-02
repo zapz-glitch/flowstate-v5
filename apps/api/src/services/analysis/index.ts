@@ -790,6 +790,7 @@ export interface AnalysisResponse {
       bedsBaths: string
       yearBuilt: number | null
       lotSizeAcres: number | null
+      lotSizeSquareFeet: number | null
       adjustedPrice: number | null
       photos: string[]
       /** Subdivision name (if available) */
@@ -1248,6 +1249,7 @@ export function buildAnalysisResponse(
       bedsBaths: `${bedrooms ?? '-'}/${bathrooms ?? '-'}`,
       yearBuilt,
       lotSizeAcres: comp.lotSizeAcres ?? null,
+      lotSizeSquareFeet: comp.lotSizeSquareFeet ?? null,
       adjustedPrice: comp.adjustedSalePrice,
       photos: compPhotos,
       subdivision: comp.subdivision ?? null,

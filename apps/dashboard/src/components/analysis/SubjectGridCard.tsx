@@ -2,6 +2,7 @@
 
 import { MapPin } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { CopyButton } from '@/components/ui/copy-button'
 import type { SubjectData } from './shared-types'
 import { StreetViewImage } from './StreetViewImage'
 import { formatShortDate, formatLotSize } from './format-helpers'
@@ -40,19 +41,22 @@ export function SubjectGridCard({ subject, isLoading }: SubjectGridCardProps) {
           <div>
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                {subject.address ? (
-                  <a
-                    href={subject.listingUrl ?? `https://www.zillow.com/homes/${encodeURIComponent(subject.address)}_rb/`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-body-sm font-semibold hover:text-primary hover:underline"
-                    title={subject.listingUrl ? 'Open listing' : 'Search on Zillow'}
-                  >
-                    {subject.address}
-                  </a>
-                ) : (
-                  <span className="text-body-sm font-semibold">Unknown Address</span>
-                )}
+                <div className="flex items-center gap-1.5">
+                  {subject.address ? (
+                    <a
+                      href={subject.listingUrl ?? `https://www.zillow.com/homes/${encodeURIComponent(subject.address)}_rb/`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-body-sm font-semibold hover:text-primary hover:underline truncate"
+                      title={subject.listingUrl ? 'Open listing' : 'Search on Zillow'}
+                    >
+                      {subject.address}
+                    </a>
+                  ) : (
+                    <span className="text-body-sm font-semibold">Unknown Address</span>
+                  )}
+                  {subject.address && <CopyButton text={subject.address} title="Copy address" />}
+                </div>
                 {subject.subdivision && (
                   <div className="flex items-center gap-1 mt-1 flex-wrap">
                     <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-medium bg-primary/10 text-primary border border-primary/20">

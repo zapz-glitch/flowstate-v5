@@ -204,6 +204,7 @@ export interface SubjectData {
   bedsBaths?: string
   squareFeet?: number | null
   lotSizeAcres?: number | null
+  lotSizeSquareFeet?: number | null
   yearBuilt?: number | null
   propertyType?: string | null
   /** Subdivision name (if available) */
@@ -426,6 +427,7 @@ export interface CompItem {
   bedsBaths?: string
   yearBuilt?: number | null
   lotSizeAcres?: number | null
+  lotSizeSquareFeet?: number | null
   adjustedPrice?: number | null
   qualityScore?: number | null
   condition?: string | null
@@ -651,6 +653,7 @@ export interface CompItem {
   bedsBaths?: string
   yearBuilt?: number | null
   lotSizeAcres?: number | null
+  lotSizeSquareFeet?: number | null
   adjustedPrice?: number | null
   qualityScore?: number | null
   condition?: string | null

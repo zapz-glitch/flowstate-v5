@@ -220,6 +220,7 @@ function CompCardInner({
           }
         />
         <StatCell label="Style" value={comp.buildingStyle || '-'} match={fm('style')} />
+        <StatCell label="Lot SqFt" value={comp.lotSizeSquareFeet != null ? comp.lotSizeSquareFeet.toLocaleString('en-US') : '-'} match={fm('lot')} />
       </div>
 
       {isExpanded && (

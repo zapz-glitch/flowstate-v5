@@ -301,6 +301,26 @@ function CompGridCardInner({
             <span className="text-foreground-tertiary">Style</span>
             <span className={cn('font-medium truncate ml-2', matchTextClass(featureState(featureMatches, 'style')))}>{comp.buildingStyle || '-'}</span>
           </div>
+          <div className="flex items-center justify-between text-[11px]">
+            <span className="text-foreground-tertiary">Lot SqFt</span>
+            <span className="font-medium tabular-nums">{comp.lotSizeSquareFeet != null ? comp.lotSizeSquareFeet.toLocaleString('en-US') : '-'}</span>
+          </div>
+          {comp.curbAppeal?.condition && comp.curbAppeal.condition !== 'unknown' && (
+            <div className="flex items-center justify-between text-[11px]">
+              <span className="text-foreground-tertiary">Condition</span>
+              <span
+                className={cn(
+                  'font-medium capitalize',
+                  comp.curbAppeal.condition === 'renovated' && 'text-emerald-500',
+                  comp.curbAppeal.condition === 'dated' && 'text-amber-500',
+                  comp.curbAppeal.condition === 'distressed' && 'text-red-400',
+                )}
+                title={comp.curbAppeal.summary ?? undefined}
+              >
+                {comp.curbAppeal.condition}
+              </span>
+            </div>
+          )}
         </div>
 
         {/* Feature-match strip — one dot per compared feature vs subject.
