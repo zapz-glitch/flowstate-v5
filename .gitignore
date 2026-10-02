@@ -48,3 +48,6 @@ coverage/
 e2e/artifacts/
 *.tsbuildinfo
 scripts/artifacts/
+
+# e2e runner output (reports, screenshots, cache)
+.e2e/
