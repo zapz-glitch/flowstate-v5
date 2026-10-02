@@ -333,6 +333,15 @@
   Orphan "flowstate-v5" project deleted. NOTE: preview builds need the
   config in the pushed branch — branches cut before these commits fail
   until rebased.
+- ATTOM PRODUCTION LIVE (2026-10-02): M2M client_credentials work —
+  client_id + secret in .dev.vars (ATTOM_MCP_M2M_CLIENT_ID /
+  ATTOM_MCP_CLIENT_SECRET) → token at mcp.intelligence.attomdata.com/token
+  (audience + scope=mcp:*), ~10min bearer, isolate-cached. PROPERTY_PROVIDER
+  =attom-mcp. First live eval: 1103 La Mesa Ave Spring Valley CA → 25
+  comps, ARV $1.134M, Clef classified 24/25 comps (all-comps change live),
+  stamps on comp.curbAppeal incl tier+renovated/as-is/investor probs.
+  Subject vision skipped — no listing photos for that address (expected:
+  vision needs an active listing).
 - BASIN LAKE LIVE (2026-10-02): stream flowstate_analysis_events (HTTP
   ingest adbb75b369b645cc930401161827d832.ingest.cloudflare.com, schema
   .data/basin/analysis-events-schema.json) → pipeline → basin-catalog
