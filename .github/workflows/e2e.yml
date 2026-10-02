@@ -1,0 +1,34 @@
+name: e2e (tester.army)
+
+# Agentic UI smoke suite against the production dashboard. Deterministic
+# locators for what we know, agent steps for navigation. Read-only except one
+# intentionally-invalid sign-in submission.
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    name: dashboard smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install chromium --with-deps
+      - run: npx e2e run
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-report
+          path: .e2e/report.json
+          if-no-files-found: ignore
