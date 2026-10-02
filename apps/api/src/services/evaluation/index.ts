@@ -900,10 +900,11 @@ export async function performAnalysis(
   )
 
   // ── 8b. Clef comp curb-appeal (flag-gated, input-side evidence) ─────────────
-  // For ARV-selected comps, fetch each comp's listing (Zillow→Redfin→Realtor:
-  // photos + description persist post-sale) and classify condition with Clef.
-  // Shadow evidence only — stamped on comp.curbAppeal for the report/UI, never
-  // fed to classifyCompsByEvidence or the appraisal math until live-verified.
+  // For every comp the provider returned, fetch the listing (Zillow→Redfin→
+  // Realtor: photos + description persist post-sale) and classify condition
+  // with Clef. Shadow evidence only — stamped on comp.curbAppeal for the
+  // report/UI, never fed to classifyCompsByEvidence or the appraisal math
+  // until live-verified.
   let compCurbAppeal: Record<string, {
     condition: 'renovated' | 'dated' | 'distressed' | 'unknown'
     source: 'vision'
@@ -912,15 +913,15 @@ export async function performAnalysis(
     photosExamined: number
   }> | undefined
   if (env.CLEF_COMP_CONDITION_ENABLED === 'true' && isClefAvailable(env)) {
-    const CLEF_COMP_MAX = 8
+    const CLEF_COMP_MAX = Number(env.CLEF_COMP_MAX) || Infinity
     const CLEF_COMP_TIMEOUT_MS = 45_000
-    // Evidence-relevant comps = the enabled set (geo-gate + rule survivors).
-    // ARV-selected first — curb appeal matters most for ARV candidacy —
-    // then remaining enabled comps closest to the subject.
+    // All provider-returned comps — ARV-selected first (curb appeal matters
+    // most for ARV candidacy), then enabled, then closest to the subject.
+    // Ordering only matters if CLEF_COMP_MAX truncates.
     const targets = appraisalResult.comparables
-      .filter((c) => c.isEnabled)
       .sort((a, b) =>
         Number(b.isEnabled && groupACompIds.has(b.id)) - Number(a.isEnabled && groupACompIds.has(a.id))
+        || Number(b.isEnabled) - Number(a.isEnabled)
         || (a.distanceMiles ?? 999) - (b.distanceMiles ?? 999))
       .slice(0, CLEF_COMP_MAX)
     const settled = await Promise.all(
@@ -967,8 +968,8 @@ export async function performAnalysis(
       'comp_curb_appeal',
       Object.keys(compCurbAppeal).length > 0 ? 'completed' : 'skipped',
       targets.length === 0
-        ? 'Clef enabled but no enabled comps to classify'
-        : `${Object.keys(compCurbAppeal).length}/${targets.length} enabled comps condition-classified via Clef`,
+        ? 'Clef enabled but no comps to classify'
+        : `${Object.keys(compCurbAppeal).length}/${targets.length} comps condition-classified via Clef`,
     )
   }
 

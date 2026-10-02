@@ -87,6 +87,8 @@ export interface Env {
   CLEF_MODEL?: string
   /** 'true' enables comp curb-appeal evidence in the pipeline */
   CLEF_COMP_CONDITION_ENABLED?: string
+  /** Optional cap on comps per run that get Clef classification (default: all returned) */
+  CLEF_COMP_MAX?: string
 
   // ─── Vision Analysis (OpenRouter LLM) ──────────────────────────────────────
   // OpenRouter provides access to multiple models via single API

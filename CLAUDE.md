@@ -54,6 +54,14 @@ cd apps/api && npm run deploy       # Deploy API to Cloudflare Workers
 cd apps/dashboard && npm run build && npm run deploy  # Build with OpenNext, deploy dashboard
 ```
 
+### Deploy env checklist (production vars/secrets)
+
+| Var | Where | Notes |
+|-----|-------|-------|
+| `VISION_MODEL` | api | Subject reno-tier vision model — set `openai/gpt-6-luna` for prod |
+| `CLEF_COMP_CONDITION_ENABLED` | api | `true` to stamp comp curb-appeal evidence (shadow mode — display only) |
+| `CLEF_COMP_MAX` | api | Optional cap on comps classified per run (default: all returned) |
+
 ---
 
 ## Turborepo Monorepo Setup
