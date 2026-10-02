@@ -11,7 +11,7 @@ import { Hono } from 'hono'
 import type { Env } from '../types'
 import type { AuthContext } from '../middleware/auth'
 
-const ENGINE_BASE = 'https://conversation-intelligence.weareflowstate1.workers.dev'
+const ENGINE_BASE = 'https://flowstate-workers.weareflowstate1.workers.dev'
 
 async function engineGet(env: Env, path: string): Promise<Response | null> {
   if (!env.ENGINE_API_KEY) return null
