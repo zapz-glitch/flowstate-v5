@@ -58,7 +58,7 @@ export const RENOVATION_LEVEL_DEFINITIONS: Array<{ index: number; name: string; 
     index: 4,
     name: 'Full Gut',
     criteria:
-      'Property is substantially stripped/rebuilt, with major interior reconstruction and potentially extensive structural, mechanical, electrical, plumbing, roof, and layout work.',
+      'Entire property stripped to the studs with no drywall up anywhere — total interior reconstruction (owner-calibrated boundary 2026-10-02: partial demo or exposed studs in some areas is still Heavy Rehab, not Full Gut).',
   },
 ]
 
@@ -202,6 +202,7 @@ ${RENOVATION_LEVEL_DEFINITIONS.map((d) => `- ${d.name}: ${d.criteria}`).join('\n
 Reason about the property AS A WHOLE:
 - A dated kitchen alone does NOT make the property Heavy Rehab.
 - Fresh paint in one room does NOT make a distressed property Lipstick.
+- Exposed studs or demo in some rooms does NOT make it Full Gut — Full Gut means the ENTIRE interior is down to studs with no drywall remaining.
 - Weight the majority-condition and the most expensive required work.
 
 Evaluate, where observable: kitchen, bathrooms, cabinets, counters, appliances, flooring, walls, ceilings, paint, doors, windows, fixtures, visible electrical/plumbing/HVAC condition, roof/exterior, siding/stucco/brick, landscaping (where renovation-relevant), water damage, fire damage, structural distress, outdated finishes, unfinished construction, layout/demo evidence, and overall condition.
