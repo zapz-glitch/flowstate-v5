@@ -418,9 +418,12 @@ export interface RehabLevelEstimate {
  * Context required for building analysis response
  */
 export interface ResponseContext {
-  arvSource: 'appraisal' | 'comp-selection'
+  arvSource: 'appraisal' | 'comp-selection' | 'avm' | 'assessed'
   /** Null on insufficient-comps runs — no ARV was produced */
   finalArv: number | null
+  /** The number the valuation was computed against — finalArv when present,
+   *  else the subject-AVM anchor on AVM-fallback runs (finalArv stays null). */
+  valuationAnchor?: number | null
   zillowUrls?: Map<string, { searchUrl: string; directUrl?: string }>
   photoProvider?: string | null
   analysisId?: string
@@ -662,7 +665,7 @@ export interface AnalysisResponse {
       limitations: string[]
     }
     arv: number | null
-    arvSource: 'appraisal' | 'comp-selection'
+    arvSource: 'appraisal' | 'comp-selection' | 'avm' | 'assessed'
     /** Methodology used to calculate ARV */
     arvMethodology: string
     arvPerSqft: number
@@ -1316,7 +1319,11 @@ export function buildAnalysisResponse(
         }
       : null
 
-  const arvMethodology = ctx.classificationSummary?.methodology ?? `avg price/sqft of ${enabledComps.length} comp${enabledComps.length !== 1 ? 's' : ''} × subject sqft`
+  const arvMethodology = arvSource === 'avm'
+    ? 'subject AVM — no comp ARV evidence (conservative anchor)'
+    : arvSource === 'assessed'
+      ? 'county assessed value — no comp ARV evidence (conservative anchor)'
+    : ctx.classificationSummary?.methodology ?? `avg price/sqft of ${enabledComps.length} comp${enabledComps.length !== 1 ? 's' : ''} × subject sqft`
 
   return {
     // ═══ SUBJECT PROPERTY ═══════════════════════════════════════════════════
@@ -1412,7 +1419,7 @@ export function buildAnalysisResponse(
     // Null on insufficient-comps runs — the report still renders the
     // evaluated comp pool and audit trail, just without a valuation.
     valuation: valuation ? {
-      arv: finalArv,
+      arv: ctx.valuationAnchor ?? finalArv,
       arvSource: arvSource,
       arvMethodology,
       arvPerSqft: valuation.pricePerSqft,
@@ -1453,8 +1460,8 @@ export function buildAnalysisResponse(
       } : null,
       listPrice: ctx.subjectListPrice ?? null,
       arvVsListPrice:
-        ctx.subjectListPrice != null && finalArv != null
-          ? finalArv - ctx.subjectListPrice
+        ctx.subjectListPrice != null && (ctx.valuationAnchor ?? finalArv) != null
+          ? (ctx.valuationAnchor ?? finalArv)! - ctx.subjectListPrice
           : null,
     } : null,
     // ═══ COMPARABLE SALES (All comps with enable/disable status) ═══════════════

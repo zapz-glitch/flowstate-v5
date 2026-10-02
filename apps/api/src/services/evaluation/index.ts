@@ -836,15 +836,23 @@ export async function performAnalysis(
       : subjectSqft
 
   const valuationService = createValuationService(params.customRehabTable, params.customTierRanges)
-  // No ARV → no valuation. The report still carries the evaluated comp pool,
-  // the step log, and the geo stamps — valuation stays null.
-  const valuation = finalArv != null ? valuationService.calculateValuation({
-    arv: finalArv,
+  // Anchor ladder — when the comp pool yields no ARV evidence, a modeled
+  // value still supports a conservative valuation: the eval box stays
+  // interactive (renovation tier, manual ARV, rehab math) instead of hiding.
+  // AVM first, county assessment second (both run below ARV = conservative).
+  // insufficientComps stays true — the report marks the anchor, never calls
+  // it comp-verified. Neither present → valuation stays null (report-only).
+  const avmAnchor = finalArv == null && subjectAvm != null && subjectAvm > 0 ? Math.round(subjectAvm) : null
+  const assessedAnchor = finalArv == null && avmAnchor == null && (bundle.property.assessedValue ?? 0) > 0
+    ? Math.round(bundle.property.assessedValue!) : null
+  const valuationAnchor = finalArv ?? avmAnchor ?? assessedAnchor
+  const valuation = valuationAnchor != null ? valuationService.calculateValuation({
+    arv: valuationAnchor,
     subjectSqft,
     compAvgSqft,
     rehabLevelIndex: derivedBuybox.rehabLevelIndex,
     skipBaseRehab: derivedBuybox.renovatedVerified === true,
-    locationPenaltyAmount: computeLocationPenalty(bundle.enrichment.locationRisks, finalArv, params.proximityConfig),
+    locationPenaltyAmount: computeLocationPenalty(bundle.enrichment.locationRisks, valuationAnchor, params.proximityConfig),
     majorItems: derivedBuybox.majorItems,
     additionPlay: derivedBuybox.additionPlay ?? buybox.additionPlay ?? 0,
     closingCostsPercent: buybox.closingCostsPercent ?? 8,
@@ -853,8 +861,8 @@ export async function performAnalysis(
     desiredProfit: buybox.desiredProfit,
   }) : null
 
-  const rehabLevelEstimates = finalArv != null ? calculateAllRehabLevelEstimates(valuationService, {
-    arv: finalArv,
+  const rehabLevelEstimates = valuationAnchor != null ? calculateAllRehabLevelEstimates(valuationService, {
+    arv: valuationAnchor,
     subjectSqft,
     compAvgSqft,
     selectedRehabLevelIndex: derivedBuybox.rehabLevelIndex,
@@ -865,7 +873,13 @@ export async function performAnalysis(
     wholesaleFee: buybox.wholesaleFee ?? 10000,
   }) : []
   step('valuation', valuation ? 'completed' : 'skipped',
-    valuation ? `ARV ${formatUsd(valuation.arv)} · rehab ${formatUsd(valuation.totalRehabCost)}` : 'Skipped — insufficient comps for an ARV')
+    valuation
+      ? avmAnchor != null
+        ? `AVM-anchored ${formatUsd(valuation.arv)} · rehab ${formatUsd(valuation.totalRehabCost)} (no ARV evidence)`
+        : assessedAnchor != null
+          ? `Assessment-anchored ${formatUsd(valuation.arv)} · rehab ${formatUsd(valuation.totalRehabCost)} (no ARV evidence)`
+          : `ARV ${formatUsd(valuation.arv)} · rehab ${formatUsd(valuation.totalRehabCost)}`
+      : 'Skipped — insufficient comps for an ARV')
 
   // ── 7. Group B as-is market intelligence — evidence-driven ────────────────
   // The as-is set is evidence, not a price ceiling: distressed-transaction
@@ -1007,8 +1021,9 @@ export async function performAnalysis(
     photoBundle,
     valuation,
     {
-      arvSource: 'appraisal',
+      arvSource: finalArv != null ? 'appraisal' : avmAnchor != null ? 'avm' : assessedAnchor != null ? 'assessed' : 'appraisal',
       finalArv,
+      valuationAnchor,
       analysisId: jobId,
       // Subject condition tier — vision-derived (subject only; comps are
       // evidence-classified, never condition-guessed).

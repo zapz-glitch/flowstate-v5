@@ -438,12 +438,14 @@ async function normalizeMcpProperty(results: any[], env: Env): Promise<Normalize
     lastSaleDate: lastSale?.saleDate ? String(lastSale.saleDate).slice(0, 10) : null,
     pricePerSqft: lastSale?.price && ch.livingAreaSquareFeet ? Math.round(lastSale.price / ch.livingAreaSquareFeet) : null,
 
-    assessedValue: latestTax?.totalValue ?? null,
+    // assessedValueTrend rides inside the valuation dataset (verified live
+    // 2026-10-02 — Westella) — the tax-history array shape kept as fallback.
+    assessedValue: valuation?.assessedValueTrend?.latestAssessedValue ?? latestTax?.totalValue ?? null,
     landAssessedValue: latestTax?.landValue ?? null,
     improvementAssessedValue: latestTax?.improvementValue ?? null,
-    marketValue: latestTax?.totalValue ?? null,
-    taxAmount: latestTax?.tax ?? null,
-    taxYear: latestTax?.taxYear ?? undefined,
+    marketValue: valuation?.assessedValueTrend?.latestAssessedValue ?? latestTax?.totalValue ?? null,
+    taxAmount: valuation?.assessedValueTrend?.latestTax ?? latestTax?.tax ?? null,
+    taxYear: valuation?.assessedValueTrend?.latestTaxYear ?? latestTax?.taxYear ?? undefined,
 
     avmValue: valuation?.valuation?.value ?? null,
     avmConfidence: valuation?.valuation?.confidenceScore ?? null,

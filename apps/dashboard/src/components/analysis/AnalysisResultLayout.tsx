@@ -95,7 +95,11 @@ export function AnalysisResultLayout({
             ))}
           </div>
         </div>
-      ) : subject && !isStreaming && comps?.insufficientComps === true ? (() => {
+      ) : null}
+
+      {/* Insufficient-comps disclosure — renders whether or not a valuation
+          exists (AVM-anchored runs show the hero AND this note). */}
+      {subject && !isStreaming && comps?.insufficientComps === true ? (() => {
         /* Thin-pocket disclosure — the param-flex ladder stretched numeric
            tolerances (geo stayed required) hunting ARV evidence. Green =
            strict pass, yellow = extended once or twice, red = deeper. */
@@ -117,6 +121,12 @@ export function AnalysisResultLayout({
                 : ''}
               Every census-verified comp was evaluated and none carried ARV evidence
               (flip resale, premium over scope median, or above AVM).
+              {(valuation?.arvSource === 'avm' || valuation?.arvSource === 'assessed') && valuation?.arv != null && (
+                <span className="block mt-1 font-medium text-foreground">
+                  Valuation is anchored on the {valuation.arvSource === 'avm' ? 'subject AVM' : 'county assessment'} — ${valuation.arv.toLocaleString()}
+                  {' '}— a conservative estimate until comp evidence exists.
+                </span>
+              )}
               {comps?.asIsMarketIntel?.asIsMarketPrice != null && (
                 <span className="block mt-1 font-medium text-foreground">
                   Investor floor: ${comps.asIsMarketIntel.asIsMarketPrice.toLocaleString()}
