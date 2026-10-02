@@ -264,6 +264,26 @@
   `npm run dev` clean, `dev:check` all-green — login local@flowstate.test,
   Google Maps key authorized for :3000, provider creds mint. Auth/log
   spot-checked: 401 unauthed, API key 404s clean, api_usage_logs writing.
+- CLOUDFLARE LEVERAGE PLAN (2026-10-01): Birthday Week picks mapped in
+  docs/attom-migration/CLOUDFLARE-LEVERAGE-PLAN.md. Owner constraint:
+  comp condition = curb-appeal photos + listing description (Zillow
+  persists both post-sale); Clef (Jev-API-compatible, Workers AI) is the
+  target classifier. Eval-logic changes stay parked until live data.
+- REPLAY HARNESS (2026-10-01): `npx tsx scripts/replay-pipeline.mts
+  <pipeline-artifact.json|--all>` — rebuilds PropertyBundle from a saved
+  response, re-applies recorded retrieval.paramFlex.factor via
+  flexNumericFilters (the flex ladder lives in AnalysisJobDO, NOT
+  performAnalysis — a replay boundary), reruns the real eval, diffs vs
+  recorded → .data/replay/. Serializer gained comp ppsfMedians/avmValue/
+  transaction + subject ppsfMedians — pre-change artifacts replay with
+  known field loss. ATTOM_MCP_RECORD=1 in .dev.vars logs every tools/call
+  ([MCP_RECORD] lines → harvest for wire-level fixtures). Regression
+  sweep: removed 5 orphan tests (deleted jev/comp-hybrid/comp-screen),
+  fixed insufficient-comps (last appraisal_rules step) + headline-money
+  (useEvaluation mock) — api 22 + dashboard 10 green, tsc clean.
+- KV INSTANT + AI GATEWAY gated on user: KV Instant = private beta
+  (dashboard signup); AI Gateway needs a gateway instance configured
+  before vision/LLM calls can route through it.
 
 ## Last handoff
 
