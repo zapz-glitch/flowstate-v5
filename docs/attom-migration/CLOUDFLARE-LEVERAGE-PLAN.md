@@ -66,7 +66,10 @@ verified against live data (owner directive, 2026-10-01).
 
 ## Phase 2 — data moat
 
-8. Basin lake — land provider payloads (CoreLogic now, ATTOM on return),
+8. Basin lake — DONE 2026-10-02: stream flowstate_analysis_events
+   → Iceberg table flowstate.analysis_events on R2 bucket
+   flowstate-data-lake. recordRun emits every analysis outcome incl.
+   Clef curb-appeal evidence. Land provider payloads (CoreLogic now, ATTOM on return),
    comp evidence labels, ARVs, vision scores into Iceberg on R2 via Basin
    Pipelines. Uses: scarce-pool backstop (queued), trade-tricks
    calibration corpus, Clef fine-tune corpus, market-intel product.
