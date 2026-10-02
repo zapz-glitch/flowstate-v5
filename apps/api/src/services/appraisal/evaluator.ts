@@ -46,7 +46,11 @@ function evaluateSubdivisionMatch(
     // verified regardless of its plat.
     const censusVerified =
       comp.sameBlockGroup === true ||
-      (comp.censusTract != null && subject.censusTract != null && comp.censusTract === subject.censusTract) ||
+      // Tract rescue needs proximity too — a tract can span multiple
+      // market pockets; same-tract at 2mi is not verified geography.
+      // Block groups are the pocket-sized unit and rescue on their own.
+      (comp.censusTract != null && subject.censusTract != null && comp.censusTract === subject.censusTract &&
+        (comp.distanceMiles == null || comp.distanceMiles <= 0.75)) ||
       // Flex exception — under stretch, a plat-name mismatch survives when
       // the pocket is value-equivalent to the subject's.
       (typeof _filter.value === 'number' && _filter.value > 1 && isValueEquivalent(subject, comp))
@@ -1117,11 +1121,17 @@ export function evaluateComparable(
   }
   // Rural acreage vs a suburban lot is a category mismatch — the ±lot_size
   // tolerance (even flexed) is for same-pocket variance, not acreage.
-  if (comp.lotSizeAcres != null && subject.lotSizeAcres != null
-    && comp.lotSizeAcres > 1 && comp.lotSizeAcres > subject.lotSizeAcres * 3) {
-    disableReasons.push(
-      `Rural lot (${comp.lotSizeAcres.toFixed(2)} ac vs subject ${subject.lotSizeAcres.toFixed(2)} ac) — not comparable`,
-    )
+  // Symmetric: comp 3×+ bigger on acreage, or a rural subject against a
+  // comp on a fraction of its land — neither reconciles.
+  if (comp.lotSizeAcres != null && subject.lotSizeAcres != null) {
+    const [big, small] = comp.lotSizeAcres >= subject.lotSizeAcres
+      ? [comp.lotSizeAcres, subject.lotSizeAcres]
+      : [subject.lotSizeAcres, comp.lotSizeAcres]
+    if (big > 1 && big > small * 3) {
+      disableReasons.push(
+        `Lot category mismatch (${comp.lotSizeAcres.toFixed(2)} ac vs subject ${subject.lotSizeAcres.toFixed(2)} ac) — not comparable`,
+      )
+    }
   }
 
   for (const filter of filters) {

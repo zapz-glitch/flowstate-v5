@@ -32,11 +32,15 @@ export function evaluateComparable(
   if (comp.salePrice != null && comp.salePrice < 10_000) {
     disableReasons.push(`Non-market sale — nominal price $${comp.salePrice.toLocaleString()}`)
   }
-  if (comp.lotSizeSquareFeet != null && subject.lotSizeSquareFeet != null
-    && comp.lotSizeSquareFeet > 43560 && comp.lotSizeSquareFeet > subject.lotSizeSquareFeet * 3) {
-    disableReasons.push(
-      `Rural lot (${Math.round(comp.lotSizeSquareFeet).toLocaleString()} sqft vs subject ${Math.round(subject.lotSizeSquareFeet).toLocaleString()} sqft) — not comparable`,
-    )
+  if (comp.lotSizeSquareFeet != null && subject.lotSizeSquareFeet != null) {
+    const [big, small] = comp.lotSizeSquareFeet >= subject.lotSizeSquareFeet
+      ? [comp.lotSizeSquareFeet, subject.lotSizeSquareFeet]
+      : [subject.lotSizeSquareFeet, comp.lotSizeSquareFeet]
+    if (big > 43560 && big > small * 3) {
+      disableReasons.push(
+        `Lot category mismatch (${Math.round(comp.lotSizeSquareFeet).toLocaleString()} sqft vs subject ${Math.round(subject.lotSizeSquareFeet).toLocaleString()} sqft) — not comparable`,
+      )
+    }
   }
 
   for (const filter of filters) {
