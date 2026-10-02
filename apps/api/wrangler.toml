@@ -126,6 +126,10 @@ bucket_name = "flowstate-report-assets"
 [previews.ai]
 binding = "AI"
 
+[[previews.pipelines]]
+stream = "adbb75b369b645cc930401161827d832"
+binding = "FLOWSTATE_ANALYSIS_EVENTS_STREAM"
+
 # Basin lake — analysis outcomes → Iceberg on flowstate-data-lake
 [[pipelines]]
 stream = "adbb75b369b645cc930401161827d832"
