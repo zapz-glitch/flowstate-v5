@@ -306,6 +306,22 @@
   TOO_LARGE_RE); a single overflowing dataset returns a status:'error'
   entry so dataset() degrades to absent. tsc clean; live-verify pending
   grant restore — wire shape is speculated, not yet observed.
+- CLEF COMP-CONDITION LIVE (2026-10-02): services/clef (Workers AI
+  clef-flash; noul/score answers observed on the wire — parse via
+  o.noul / probabilities-argmax) + services/comp-evidence (Zillow→Redfin
+  listing fetch, photos embedded at cc_ft_384 — full-res images blow the
+  65k context at ~60k tokens each). Dev routes /dev/clef-status +
+  /dev/comp-condition for chain verification. Pipeline wiring: when
+  CLEF_COMP_CONDITION_ENABLED=true (set in .dev.vars, off in prod), the
+  enabled comp set (ARV-selected first, then closest, max 8, 45s/comp
+  timeout) gets classified and stamped onto comp.curbAppeal — the
+  pre-existing UI slot (comp-feedback.ts ARV-condition-gate rendering).
+  SHADOW MODE: evidence lands on the report, never feeds the classifier.
+  Verified live: 8/8 enabled comps classified on Sterling run
+  (renovated 90%/dated 30%-as-is variance). Local wrangler: AI binding
+  needs remote=true AND wrangler dev without --local (--local forces ALL
+  bindings local incl. AI). Local test key quota bumped to 50k (was
+  exhausted at 100/mo).
 
 ## Last handoff
 

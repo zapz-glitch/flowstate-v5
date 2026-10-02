@@ -42,6 +42,7 @@ import { pipelineReads } from './routes/pipeline'
 import { activityIngest, activityReads } from './routes/activity'
 import { cdarv, cdarvInternal } from './routes/cdarv'
 import sseStream from './routes/sse-stream'
+import devRoute from './routes/dev'
 import ghlWebhook from './routes/webhooks/ghl'
 import { sweepStaleBatches } from './services/batch-queue'
 
@@ -160,6 +161,9 @@ app.route('/webhooks/ghl', ghlWebhook)
 
 // Public reports (no auth - jobId is unguessable)
 app.route('/reports', reportsRoute)
+
+// Dev verification routes — 404 outside ENVIRONMENT=development
+app.route('/dev', devRoute)
 
 // CI engine activity ingest — self-authenticates with Bearer CI_INGEST_KEY.
 // Mounted BEFORE the v1 group so the API-key middleware does not intercept.

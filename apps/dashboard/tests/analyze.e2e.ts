@@ -20,10 +20,8 @@ test('analyze produces a report with comps', { session: 'local', platforms: ['we
   // and only spends a model call when the observation changes.
   await agent.waitFor('the analysis has finished and a results report is showing', { interval: 2000, timeout: 360_000 })
   await expect(screen.getByRole('heading', 'Comparables')).toBeVisible({ timeout: 30_000 })
-  // A completed run renders either the Valuation hero (ARV found) or the
-  // report-only notice ("No ARV evidence in the verified pool") — both are
-  // correct terminal states; match whichever the pipeline produced.
-  const outcome = screen.getByText(/Valuation|No ARV evidence/).first()
-  await outcome.scrollIntoView()
-  await expect(outcome).toBeVisible()
+  // A finished report renders actionable comp cards — the 'Add to ARV'
+  // buttons only exist on a completed comp list (layout text varies across
+  // report variants: Valuation hero, report-only notice, manual-selection).
+  await expect(screen.getByRole('button', 'Add to ARV').first()).toBeVisible({ timeout: 30_000 })
 })

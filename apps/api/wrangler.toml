@@ -44,6 +44,10 @@ id = "076d6c5a242c4b5d9765d04b8b8755b6"
 binding = "REPORT_ASSETS"
 bucket_name = "flowstate-report-assets"
 
+# Workers AI — Clef decision models (comp curb-appeal classification)
+[ai]
+binding = "AI"
+
 [[durable_objects.bindings]]
 name = "ANALYSIS_JOB"
 class_name = "AnalysisJobDO"

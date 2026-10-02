@@ -6,6 +6,8 @@ export interface Env {
   DB: D1Database
   API_CACHE: KVNamespace
   REPORT_ASSETS?: R2Bucket
+  /** Workers AI binding — Clef decision models (comp curb-appeal classification) */
+  AI?: Ai
   ANALYSIS_JOB: DurableObjectNamespace
   BATCH_JOB: DurableObjectNamespace
   /** Global Cotality request throttle (50 req/min sliding window) */
@@ -72,6 +74,12 @@ export interface Env {
   /** epoch seconds */
   ATTOM_MCP_EXPIRES_AT?: string
   ATTOM_MCP_ENDPOINT?: string
+
+  // ─── Clef comp-condition classification (input-side evidence, off by default)
+  /** 'clef' (27B) or 'clef-flash' (9B, default) */
+  CLEF_MODEL?: string
+  /** 'true' enables comp curb-appeal evidence in the pipeline */
+  CLEF_COMP_CONDITION_ENABLED?: string
 
   // ─── Vision Analysis (OpenRouter LLM) ──────────────────────────────────────
   // OpenRouter provides access to multiple models via single API

@@ -37,6 +37,8 @@ import {
   type ResponseContext,
 } from '../analysis'
 import { createPhotoService, type PhotoBundle, type PropertyIdentifier, type PropertyPhotos } from '../photo-provider'
+import { gatherCompConditionEvidence } from '../comp-evidence'
+import { isClefAvailable } from '../clef'
 
 import { persistReportAssets } from '../report-assets'
 import { expansionRefetchRadius } from '../property-api/retrieval-policy'
@@ -897,6 +899,75 @@ export async function performAnalysis(
     appraisalResult.comparables.filter((c) => groupACompIds.has(c.id)),
   )
 
+  // ── 8b. Clef comp curb-appeal (flag-gated, input-side evidence) ─────────────
+  // For ARV-selected comps, fetch each comp's listing (Zillow→Redfin→Realtor:
+  // photos + description persist post-sale) and classify condition with Clef.
+  // Shadow evidence only — stamped on comp.curbAppeal for the report/UI, never
+  // fed to classifyCompsByEvidence or the appraisal math until live-verified.
+  let compCurbAppeal: Record<string, {
+    condition: 'renovated' | 'dated' | 'distressed' | 'unknown'
+    source: 'vision'
+    confidence: number | null
+    summary: string | null
+    photosExamined: number
+  }> | undefined
+  if (env.CLEF_COMP_CONDITION_ENABLED === 'true' && isClefAvailable(env)) {
+    const CLEF_COMP_MAX = 8
+    const CLEF_COMP_TIMEOUT_MS = 45_000
+    // Evidence-relevant comps = the enabled set (geo-gate + rule survivors).
+    // ARV-selected first — curb appeal matters most for ARV candidacy —
+    // then remaining enabled comps closest to the subject.
+    const targets = appraisalResult.comparables
+      .filter((c) => c.isEnabled)
+      .sort((a, b) =>
+        Number(b.isEnabled && groupACompIds.has(b.id)) - Number(a.isEnabled && groupACompIds.has(a.id))
+        || (a.distanceMiles ?? 999) - (b.distanceMiles ?? 999))
+      .slice(0, CLEF_COMP_MAX)
+    const settled = await Promise.all(
+      targets.map((comp) =>
+        Promise.race([
+          gatherCompConditionEvidence(env, {
+            propertyId: comp.id,
+            address: comp.address,
+            city: comp.city,
+            state: comp.state,
+            zipCode: comp.zipCode,
+            salePrice: comp.salePrice ?? undefined,
+            saleDate: comp.saleDate ? String(comp.saleDate) : undefined,
+            yearBuilt: comp.yearBuilt ?? undefined,
+            squareFeet: comp.squareFeet ?? undefined,
+          }),
+          new Promise<null>((r) => setTimeout(() => r(null), CLEF_COMP_TIMEOUT_MS)),
+        ]).catch(() => null),
+      ),
+    )
+    compCurbAppeal = {}
+    for (const ev of settled) {
+      if (!ev?.condition || !ev.listing) continue
+      const c = ev.condition
+      const condition =
+        c.renovated || c.conditionLabel === 'Renovated' || c.conditionLabel === 'Updated'
+          ? 'renovated' as const
+          : c.asIs || c.conditionLabel === 'Poor'
+            ? 'distressed' as const
+            : 'dated' as const
+      compCurbAppeal[ev.propertyId] = {
+        condition,
+        source: 'vision',
+        confidence: c.confidence != null ? Math.round(c.confidence * 100) : Math.round(Math.max(c.renovatedProbability, c.asIsProbability, 0.5) * 100),
+        summary: `${c.conditionLabel} (${c.conditionScore.toFixed(1)}/4) · renovated ${(c.renovatedProbability * 100).toFixed(0)}% · as-is ${(c.asIsProbability * 100).toFixed(0)}% · via ${ev.listing.source}${ev.listing.description ? ' · listing text available' : ''}`,
+        photosExamined: ev.listing.photoCount,
+      }
+    }
+    step(
+      'comp_curb_appeal',
+      Object.keys(compCurbAppeal).length > 0 ? 'completed' : 'skipped',
+      targets.length === 0
+        ? 'Clef enabled but no enabled comps to classify'
+        : `${Object.keys(compCurbAppeal).length}/${targets.length} enabled comps condition-classified via Clef`,
+    )
+  }
+
   const appliedSettings = {
     filters: filters.map((f) => ({
       type: f.type,
@@ -963,6 +1034,7 @@ export async function performAnalysis(
       groupBResult,
       groupACompIds,
       groupBCompIds: new Set(groupBResult?.compIds ?? []),
+      compCurbAppeal,
     }
   )
 
