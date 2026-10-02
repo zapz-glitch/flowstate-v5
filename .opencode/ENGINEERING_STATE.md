@@ -245,17 +245,34 @@
   signal; schools/market-context → report richness. Provider note:
   get_property_data caps at 524KB → response_too_large must retry with
   fewer datasets (not handled yet).
-- M2M AUTH — WAITING ON ATTOM ADMIN ACTIVATION: creds staged in
-  .dev.vars (ATTOM_MCP_M2M_CLIENT_ID + ATTOM_MCP_CLIENT_SECRET),
-  client_credentials exchange verified working at
-  mcp.intelligence.attomdata.com/token — surface still 403s ("missing
-  allow grant") until admin enables MCP access on the access key.
-  When activated: restart wrangler, run Sterling E2E to confirm.
+- ATTOM MCP ACCESS REVOKED (2026-10-01 regression — was working same
+  day): BOTH auth paths dead. PKCE OAuth for hello@flowstate.homes:
+  fresh `devin mcp login attom` completes and mints a valid JWT, but
+  the surface 403s EVERY method incl. initialize — "Missing active
+  allow grant for mcp:mcp:* access" (Descope grant, admin-side, not
+  user consent). M2M client_credentials now worse than before:
+  mcp.intelligence.attomdata.com/token returns invalid_grant "access
+  key rejected" (previously minted). Each `devin mcp login` registers
+  a NEW dynamic client_id — grants may be per-client. ACTION NEEDED:
+  ATTOM admin must re-enable mcp:* grant for hello@flowstate.homes /
+  tenant T3K1bLuvqCHNzsYz8r4BW9Zr2MPE (and the access key). When
+  enabled: `node scripts/sync-attom-token.mjs`, restart wrangler,
+  rerun Sterling E2E. Local pipeline still works meanwhile —
+  attom-mcp failures fall back to CoreLogic
+  (searchPropertyWithFallback/getComparablesWithFallback).
+- DEV ENV VERIFIED (2026-10-01): attom token synced (rotated),
+  `npm run dev` clean, `dev:check` all-green — login local@flowstate.test,
+  Google Maps key authorized for :3000, provider creds mint. Auth/log
+  spot-checked: 401 unauthed, API key 404s clean, api_usage_logs writing.
 
 ## Last handoff
 
-PR #79 merged and deployed. ATTOM MCP server connected + authenticated +
-verified end-to-end against the Magnolia test address (attomId 291488).
-`attom` tools appear in new sessions in this repo. Resume: REST adapter
-swap per `docs/attom-migration/PROVIDER_SWAP.md` "Semantic gaps" once
-ATTOM API docs/key arrive; MCP tools can serve as live schema reference.
+Dev env re-verified 2026-10-01 evening: repo on feat/attom-provider-swap,
+`npm run dev` up (dashboard :3000, API :8787), dev:check all-green —
+login local@flowstate.test, Google Maps key authorized for :3000,
+CoreLogic creds mint. ATTOM MCP is BLOCKED externally: OAuth login +
+refresh work but ATTOM revoked the mcp:* allow grant (see "ATTOM MCP
+ACCESS REVOKED" above) — needs ATTOM admin re-activation before any
+attom-mcp work can proceed. Resume: REST adapter swap per
+`docs/attom-migration/PROVIDER_SWAP.md` "Semantic gaps" once ATTOM API
+docs/key arrive.
