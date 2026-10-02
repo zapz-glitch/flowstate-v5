@@ -56,10 +56,12 @@ app.use(
   cors({
     origin: (origin, c) => {
       if (!origin) return ''
-      if (c.env.DASHBOARD_URL) return origin === c.env.DASHBOARD_URL ? origin : ''
-      // Allow localhost, any *.flowstate.homes subdomain, and flowstate.homes itself
+      // Allow localhost, any *.flowstate.homes subdomain (incl. Workers
+      // Builds preview subdomains like <branch>.flowstate.homes), and the
+      // configured dashboard origin.
       if (origin === 'http://localhost:3000') return origin
       if (/^https:\/\/([\w-]+\.)?flowstate\.homes$/.test(origin)) return origin
+      if (c.env.DASHBOARD_URL && origin === c.env.DASHBOARD_URL) return origin
       return ''
     },
     allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
