@@ -945,17 +945,21 @@ export async function performAnalysis(
     for (const ev of settled) {
       if (!ev?.condition || !ev.listing) continue
       const c = ev.condition
-      const condition =
-        c.renovated || c.conditionLabel === 'Renovated' || c.conditionLabel === 'Updated'
-          ? 'renovated' as const
-          : c.asIs || c.conditionLabel === 'Poor'
-            ? 'distressed' as const
+      let condition =
+        c.asIs || c.conditionLabel === 'Poor'
+          ? 'distressed' as const
+          : c.renovated || c.conditionLabel === 'Renovated' || c.conditionLabel === 'Updated'
+            ? 'renovated' as const
             : 'dated' as const
+      // Owner rule: investor-marketed listings are median/lower-tier sales —
+      // the curb-appeal stamp can never claim 'renovated' for ARV candidacy
+      // on an investor-tier comp no matter how updated it looks.
+      if (ev.investorSignal && condition === 'renovated') condition = 'dated'
       compCurbAppeal[ev.propertyId] = {
         condition,
         source: 'vision',
         confidence: c.confidence != null ? Math.round(c.confidence * 100) : Math.round(Math.max(c.renovatedProbability, c.asIsProbability, 0.5) * 100),
-        summary: `${c.conditionLabel} (${c.conditionScore.toFixed(1)}/4) · renovated ${(c.renovatedProbability * 100).toFixed(0)}% · as-is ${(c.asIsProbability * 100).toFixed(0)}% · via ${ev.listing.source}${ev.listing.description ? ' · listing text available' : ''}`,
+        summary: `${c.conditionLabel} (${c.conditionScore.toFixed(1)}/4) · tier:${c.tier} · renovated ${(c.renovatedProbability * 100).toFixed(0)}% · as-is ${(c.asIsProbability * 100).toFixed(0)}% · investor ${(c.investorLanguageProbability * 100).toFixed(0)}% · via ${ev.listing.source}${ev.listing.description ? ' · listing text available' : ''}`,
         photosExamined: ev.listing.photoCount,
       }
     }

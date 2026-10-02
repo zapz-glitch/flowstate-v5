@@ -42,6 +42,8 @@ export interface CompConditionInput {
   images?: ClefImage[]
 }
 
+export type CompTier = 'investor' | 'median' | 'arv'
+
 export interface CompConditionResult {
   /** The model's answer set, verbatim — useful for calibration forensics */
   raw: Record<string, unknown>
@@ -49,6 +51,11 @@ export interface CompConditionResult {
   renovatedProbability: number
   asIs: boolean
   asIsProbability: number
+  /** Probability the listing is marketed to investors ("investment property", "rental income", "tenant occupied", …) */
+  investorLanguageProbability: number
+  /** Comp-selection tier the model places the sale in — separate axis from physical condition */
+  tier: CompTier
+  tierProbabilities: Record<CompTier, number>
   /** Weighted score on the 0–4 condition scale */
   conditionScore: number
   /** Argmax bucket label — 'Poor' | 'Dated' | 'Maintained' | 'Updated' | 'Renovated' */
@@ -92,6 +99,31 @@ const CONDITION_QUESTIONS: Record<string, Question> = {
       'appraiser would.',
     criteria: [...CONDITION_SCALE],
   },
+  investor_language: {
+    type: 'noul',
+    instructions:
+      'Does the listing description market this property to investors ' +
+      'rather than owner-occupants? Signals: "investment property", ' +
+      '"investor special", "rental income", "cash flow", "tenant occupied", ' +
+      '"turnkey rental", "add to your portfolio", "great rental".',
+  },
+  // Tier is the comp-SELECTION axis (mirrors the numerical sale tiers):
+  // an investor-marketed listing can't be ARV evidence no matter how
+  // updated it looks — the description tells you who the sale was for.
+  tier: {
+    type: 'choice',
+    instructions:
+      'Which sale tier does this comp belong to — the bucket an appraiser ' +
+      'uses for comp selection? Investor-marketed or as-is/wholesale sales ' +
+      'are never ARV evidence even if the photos look updated.',
+    criteria: {
+      investor:
+        'Investor-grade sale — marketed to investors/landlords/flippers, sold as-is, fixer, or at wholesale/below-market pricing',
+      median:
+        'Median retail sale — typical owner-occupant purchase in mid-range condition and price for the neighborhood',
+      arv: 'After-repair-value evidence — genuinely renovated sale at or near the top of the market',
+    },
+  },
 }
 
 // Answer shapes (observed on the wire, clef-flash 2026-10-02):
@@ -108,6 +140,21 @@ function prob(v: unknown): number {
     }
   }
   return 0
+}
+
+/** Choice answers: {choice: key, probabilities: {key: p}} — argmax wins. */
+function parseTier(v: unknown): { tier: CompTier; probabilities: Record<CompTier, number> } {
+  const o = (v && typeof v === 'object' ? v : {}) as Record<string, unknown>
+  const probs = (o.probabilities ?? {}) as Record<string, number>
+  const out: Record<CompTier, number> = { investor: 0, median: 0, arv: 0 }
+  for (const k of Object.keys(out)) if (typeof probs[k] === 'number') out[k as CompTier] = probs[k]
+  const choice = typeof o.choice === 'string' ? o.choice : null
+  let tier: CompTier = choice && choice in out ? (choice as CompTier) : 'median'
+  if (!choice || !(choice in out)) {
+    let best = -1
+    for (const [k, p] of Object.entries(out)) if (p > best) { best = p; tier = k as CompTier }
+  }
+  return { tier, probabilities: out }
 }
 
 /** Argmax over a score question's per-option probabilities → scale index. */
@@ -169,6 +216,7 @@ export async function classifyCompCondition(
   const renP = prob(answers.renovated)
   const asisP = prob(answers.as_is)
   const conf = (answers.condition as Record<string, unknown> | undefined)?.confidence
+  const tier = parseTier(answers.tier)
 
   return {
     raw: answers,
@@ -176,6 +224,9 @@ export async function classifyCompCondition(
     renovatedProbability: renP,
     asIs: asisP >= 0.5,
     asIsProbability: asisP,
+    investorLanguageProbability: prob(answers.investor_language),
+    tier: tier.tier,
+    tierProbabilities: tier.probabilities,
     conditionScore: score,
     conditionLabel: CONDITION_SCALE[clamped].split(' — ')[0],
     confidence: typeof conf === 'number' ? conf : undefined,

@@ -41,13 +41,28 @@ verified against live data (owner directive, 2026-10-01).
    listing: exterior photos + listing description text. Gate to
    evidence-relevant comps (census geo-gate survivors), not the full 25.
 6. Clef client — Jev-API-compatible decision model on Workers AI
-   (`services/` adapter mirroring the removed Jev shape). One
-   schema-bound call per comp: curb photos + description →
-   `{condition_level, renovation_signals, distressed_signals,
-   probabilities}`. Clef for accuracy, Clef-flash (38.8ms median) for
-   latency-critical paths.
-7. Evidence fusion — curb-appeal classification stamps comp condition
-   evidence into `classifyCompsByEvidence`. Verify live before merge.
+   (`services/clef`). One schema-bound call per comp: curb photos +
+   description → **two axes** (owner directive, 2026-10-02):
+   - `condition` — physical state: 5-point score (Poor→Renovated) +
+     renovated/as-is nouls
+   - `tier` — sale-classification axis mirroring the numerical comp
+     tiers: `investor | median | arv`, plus an `investor_language` noul.
+   **Owner rule**: listings marketed with investor keywords ("investment
+   property", "rental income", "cash flow", "tenant occupied", "turnkey
+   rental", "cap rate", "handyman special", …) are median/lower-tier
+   sales — the comp can NEVER be stamped 'updated'/'renovated' for ARV
+   purposes regardless of what the photos show. Implemented as a
+   deterministic keyword check in `services/comp-evidence` + Clef's
+   investor/tier answers; the curbAppeal stamp caps 'renovated' → 'dated'
+   when the investor signal fires.
+7. Evidence fusion (PARKED — do not wire into evaluation): condition +
+   tier stamp `comp.curbAppeal` (shadow data, UI-visible) but must NOT
+   feed `classifyCompsByEvidence` or comp selection until verified on
+   live data. Future wiring: tier axis feeds comp selection the same way
+   the numerical price rules delineate sale tiers; condition axis informs
+   the ARV-candidacy gate. Where exactly the condition classification
+   slots alongside the numerical rules is still open — decide after
+   seeing classification behavior across a corpus of real runs.
 
 ## Phase 2 — data moat
 

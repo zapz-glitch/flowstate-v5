@@ -41,8 +41,24 @@ export interface CompConditionEvidence {
     photoCount: number
   } | null
   condition: CompConditionResult | null
-  /** Why classification didn't run — 'no_listing' | 'no_photos_ok' | 'clef_unavailable' | fetch error */
+  /** Investor-marketed listing — deterministic keyword hit OR Clef agrees.
+   *  Per owner rule: investor language disqualifies the 'updated'/'renovated'
+   *  ARV stamp — these are median/lower-tier sales, whatever they look like. */
+  investorSignal: boolean
+  /** Which signals fired — 'keyword' | 'clef_noul' | 'clef_tier' */
+  investorSignalSources: string[]
+  /** Why classification didn't run — 'no_listing' | 'clef_unavailable' | fetch error */
   skippedReason?: string
+}
+
+// Owner-calibrated keyword set — investor-marketed language in the listing
+// description means median/lower-tier sale, never ARV evidence.
+const INVESTOR_KEYWORDS_RE =
+  /investment property|investor special|rental income|cash ?flow|tenant[- ]occupied|turnkey rental|add to (your )?portfolio|great rental|rental opportunity|income[- ]producing|cap rate|handyman special/i
+
+function detectInvestorLanguage(listing: { description?: string; whatsSpecial?: string[]; features?: string[] }): boolean {
+  const haystack = [listing.description ?? '', ...(listing.whatsSpecial ?? []), ...(listing.features ?? [])].join(' ')
+  return INVESTOR_KEYWORDS_RE.test(haystack)
 }
 
 /**
@@ -103,7 +119,13 @@ export async function gatherCompConditionEvidence(
   env: Env,
   comp: CompEvidenceInput,
 ): Promise<CompConditionEvidence> {
-  const evidence: CompConditionEvidence = { propertyId: comp.propertyId, listing: null, condition: null }
+  const evidence: CompConditionEvidence = {
+    propertyId: comp.propertyId,
+    listing: null,
+    condition: null,
+    investorSignal: false,
+    investorSignalSources: [],
+  }
 
   let photos: PropertyPhotos | null = null
   try {
@@ -135,6 +157,13 @@ export async function gatherCompConditionEvidence(
     photoCount: photos.photos.length,
   }
 
+  // The keyword check never misses a literal "investment property" and runs
+  // even when Clef is unavailable.
+  if (detectInvestorLanguage(evidence.listing)) {
+    evidence.investorSignalSources.push('keyword')
+    evidence.investorSignal = true
+  }
+
   if (!isClefAvailable(env)) {
     evidence.skippedReason = 'clef_unavailable'
     return evidence
@@ -156,8 +185,16 @@ export async function gatherCompConditionEvidence(
       squareFeet: comp.squareFeet ?? photos.squareFeet,
       images,
     })
+    if (evidence.condition.investorLanguageProbability >= 0.5) {
+      evidence.investorSignalSources.push('clef_noul')
+    }
+    if (evidence.condition.tier === 'investor') {
+      evidence.investorSignalSources.push('clef_tier')
+    }
+    evidence.investorSignal ||= evidence.investorSignalSources.length > 0
   } catch (error) {
     evidence.skippedReason = error instanceof Error ? error.message : 'clef failed'
   }
+
   return evidence
 }
