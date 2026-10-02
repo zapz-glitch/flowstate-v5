@@ -42,6 +42,7 @@ import { pipelineReads } from './routes/pipeline'
 import { activityIngest, activityReads } from './routes/activity'
 import { cdarv, cdarvInternal } from './routes/cdarv'
 import sseStream from './routes/sse-stream'
+import devRoute from './routes/dev'
 import ghlWebhook from './routes/webhooks/ghl'
 import { sweepStaleBatches } from './services/batch-queue'
 
@@ -56,10 +57,12 @@ app.use(
   cors({
     origin: (origin, c) => {
       if (!origin) return ''
-      if (c.env.DASHBOARD_URL) return origin === c.env.DASHBOARD_URL ? origin : ''
-      // Allow localhost, any *.flowstate.homes subdomain, and flowstate.homes itself
+      // Allow localhost, any *.flowstate.homes subdomain (incl. Workers
+      // Builds preview subdomains like <branch>.flowstate.homes), and the
+      // configured dashboard origin.
       if (origin === 'http://localhost:3000') return origin
       if (/^https:\/\/([\w-]+\.)?flowstate\.homes$/.test(origin)) return origin
+      if (c.env.DASHBOARD_URL && origin === c.env.DASHBOARD_URL) return origin
       return ''
     },
     allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
@@ -160,6 +163,9 @@ app.route('/webhooks/ghl', ghlWebhook)
 
 // Public reports (no auth - jobId is unguessable)
 app.route('/reports', reportsRoute)
+
+// Dev verification routes — 404 outside ENVIRONMENT=development
+app.route('/dev', devRoute)
 
 // CI engine activity ingest — self-authenticates with Bearer CI_INGEST_KEY.
 // Mounted BEFORE the v1 group so the API-key middleware does not intercept.

@@ -154,10 +154,6 @@ export default function ReportPage({ params }: { params: Promise<{ jobId: string
     displayValuation,
     effectiveComps,
     feedback: evalFeedback,
-    jevOutcome: analyzeData?.jevOutcome ?? null,
-    jevCompClassification: analyzeData?.jevCompClassification ?? null,
-    jevAttributeScreen: analyzeData?.jevAttributeScreen ?? null,
-    jevHybrid: analyzeData?.jevHybrid ?? null,
     onOpenSettings: openSettings,
     onCompClick: handleCompClick,
   })

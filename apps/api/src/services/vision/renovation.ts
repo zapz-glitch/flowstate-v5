@@ -17,6 +17,7 @@
  */
 
 import { createLLMProvider } from '../llm'
+import { fetchImageAsBase64, type FetchedImage } from '../llm/image-utils'
 import { REHAB_LEVELS } from '../valuation/types'
 
 // ─── Renovation Level Definitions (Evaluation Settings criteria) ──────────────
@@ -144,6 +145,47 @@ export interface RenovationAssessment {
 export interface RenovationEnv {
   OPENROUTER_API_KEY?: string
   OPENROUTER_MODEL?: string
+  /** Scoped override for vision-only calls — keeps OPENROUTER_MODEL free for non-vision services (listing extraction, seller notes). */
+  VISION_MODEL?: string
+  /** Reasoning effort for the vision call (low|medium|high|xhigh|max) — default medium. */
+  VISION_REASONING_EFFORT?: string
+}
+
+const ROOM_CONDITIONS = ['excellent', 'good', 'dated', 'poor', 'failed', 'not_visible']
+
+/** Strict Structured Outputs schema — kills the malformed-JSON retry path. */
+const RENOVATION_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'renovation_level', 'confidence', 'major_observations',
+    'kitchen_condition', 'bathroom_condition', 'flooring_condition',
+    'wall_ceiling_condition', 'exterior_condition',
+    'visible_major_system_concerns', 'structural_concerns',
+    'rationale', 'evidence_for_classification',
+    'evidence_against_more_severe_level', 'evidence_against_less_severe_level',
+    'limitations', 'curb_appeal_condition', 'curb_appeal_confidence', 'curb_appeal_summary',
+  ],
+  properties: {
+    renovation_level: { type: 'string', enum: RENOVATION_LEVEL_DEFINITIONS.map((d) => d.name) },
+    confidence: { type: 'integer', minimum: 0, maximum: 100 },
+    major_observations: { type: 'array', items: { type: 'string' } },
+    kitchen_condition: { type: 'string', enum: ROOM_CONDITIONS },
+    bathroom_condition: { type: 'string', enum: ROOM_CONDITIONS },
+    flooring_condition: { type: 'string', enum: ROOM_CONDITIONS },
+    wall_ceiling_condition: { type: 'string', enum: ROOM_CONDITIONS },
+    exterior_condition: { type: 'string', enum: ROOM_CONDITIONS },
+    visible_major_system_concerns: { type: 'array', items: { type: 'string' } },
+    structural_concerns: { type: 'array', items: { type: 'string' } },
+    rationale: { type: 'string' },
+    evidence_for_classification: { type: 'array', items: { type: 'string' } },
+    evidence_against_more_severe_level: { type: 'array', items: { type: 'string' } },
+    evidence_against_less_severe_level: { type: 'array', items: { type: 'string' } },
+    limitations: { type: 'array', items: { type: 'string' } },
+    curb_appeal_condition: { type: 'string', enum: ['renovated', 'dated', 'distressed', 'unknown'] },
+    curb_appeal_confidence: { type: 'integer', minimum: 0, maximum: 100 },
+    curb_appeal_summary: { type: 'string' },
+  },
 }
 
 const MIN_UNIQUE_PHOTOS = 2
@@ -263,10 +305,27 @@ export async function assessRenovationFromPhotos(
     createLLMProvider({
       provider: 'openrouter',
       apiKey: env.OPENROUTER_API_KEY as string,
-      model: env.OPENROUTER_MODEL || 'google/gemini-2.5-flash',
+      model: env.VISION_MODEL || env.OPENROUTER_MODEL || 'google/gemini-2.5-flash',
     })
 
   const photos = uniquePhotos.slice(0, MAX_PHOTOS)
+
+  // Fetch photos server-side — a single dead/expired CDN link fails the
+  // whole provider call when passed as a URL (Observed: Redfin genMid
+  // links 404 to Google). Base64 payloads skip provider-side fetching and
+  // silently drop rotten links; if too few survive, it's honest
+  // insufficient evidence — not an unparseable-provider failure.
+  const fetched = await Promise.all(photos.map((u) => fetchImageAsBase64(u).catch(() => null)))
+  const live = fetched.filter((f): f is FetchedImage => f != null && f.size > 0)
+  if (live.length < MIN_UNIQUE_PHOTOS) {
+    return {
+      ...base,
+      status: 'insufficient_photo_evidence',
+      photosExamined: live.length,
+      limitations: [`Only ${live.length} of ${photos.length} photo URL(s) were fetchable`],
+    }
+  }
+
   let prompt = ''
   if (propertyContext) {
     prompt = 'Property context:\n'
@@ -277,7 +336,7 @@ export async function assessRenovationFromPhotos(
   }
   prompt += RENOVATION_PROMPT
 
-  const imagePayload = photos.map((url) => ({ url }))
+  const imagePayload = live.map((f) => ({ base64: f.base64, mimeType: f.mimeType }))
 
   // Retry once on unparseable output — LLM formatting is nondeterministic
   let parsed: Record<string, unknown> | null = null
@@ -287,6 +346,15 @@ export async function assessRenovationFromPhotos(
       prompt,
       images: imagePayload,
       responseFormat: 'json',
+      jsonSchema: { name: 'renovation_assessment', schema: RENOVATION_SCHEMA },
+      reasoning: {
+        enabled: true,
+        effort: (env.VISION_REASONING_EFFORT ?? 'medium') as 'low' | 'medium' | 'high' | 'xhigh',
+      },
+      // The assessment JSON (per-room conditions + evidence arrays +
+      // rationale) runs past the 1024 default — truncation mid-object was
+      // the "malformed response" failure.
+      maxTokens: 8192,
     })
 
     if (!result.success || !result.data?.content) {
@@ -415,15 +483,20 @@ export async function assessCompCurbAppeal(
   const provider = createLLMProvider({
     provider: 'openrouter',
     apiKey: env.OPENROUTER_API_KEY as string,
-    model: env.OPENROUTER_MODEL || 'google/gemini-2.5-flash',
+    model: env.VISION_MODEL || env.OPENROUTER_MODEL || 'google/gemini-2.5-flash',
   })
+
+  const fetched = await Promise.all(photos.map((u) => fetchImageAsBase64(u).catch(() => null)))
+  const live = fetched.filter((f): f is FetchedImage => f != null && f.size > 0)
+  if (live.length < CURB_APPEAL_MIN_PHOTOS) return { ...base, summary: 'Insufficient fetchable photos', photosExamined: live.length }
 
   const result = await provider.execute({
     prompt: CURB_APPEAL_PROMPT,
-    images: photos.map((url) => ({ url })),
+    images: live.map((f) => ({ base64: f.base64, mimeType: f.mimeType })),
     responseFormat: 'json',
+    maxTokens: 2048,
   })
-  if (!result.success || !result.data?.content) return { ...base, summary: 'Vision call failed' }
+  if (!result.success || !result.data?.content) return { ...base, summary: 'Vision call failed', photosExamined: live.length }
 
   const parsed = parseVisionJson(result.data.content)
   if (!parsed) return { ...base, summary: 'Unparseable vision response' }

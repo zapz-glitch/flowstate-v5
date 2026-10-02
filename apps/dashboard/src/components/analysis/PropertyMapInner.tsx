@@ -10,7 +10,7 @@ import { MapLegend } from './MapOverlay'
 import type { MapMarker } from './PropertyMap'
 
 type Panorama = NonNullable<Awaited<ReturnType<typeof resolveSubjectPanorama>>>
-const colors = { subject: '#3b82f6', 'comp-enabled': '#10b981', 'comp-disabled': '#6b7280' }
+const colors = { subject: '#3b82f6', 'comp-arv': '#10b981', 'comp-market': '#f97316', 'comp-floor': '#ef4444', 'comp-disabled': '#6b7280' }
 const buttonClass = 'flex h-8 items-center justify-center gap-1 rounded-md border border-border bg-background px-2 text-xs text-foreground shadow-sm hover:bg-secondary disabled:opacity-40'
 
 // Optional Google libraries must fail independently; a missing 3D library must

@@ -470,7 +470,7 @@ export default function AnalyzePage() {
       const s = settingsHook.settings
       const response = await runCompSelection({
         subject: analysisResult.subject as Record<string, unknown>,
-        comps: analysisResult.comps as { items: Array<Record<string, unknown>> },
+        comps: analysisResult.comps as unknown as { items: Array<Record<string, unknown>> },
         riskFlags: (analysisResult as Record<string, unknown>).riskFlags as string[] | undefined,
         settings: {
           filters: s.filters.map((f) => ({ type: f.type, enabled: f.enabled, value: f.value })),
@@ -549,10 +549,6 @@ export default function AnalyzePage() {
     isStreaming: streamingStep !== 'idle' && streamingStep !== 'done',
     marketContext,
     aiReport,
-    jevOutcome: renderData?.jevOutcome ?? null,
-    jevCompClassification: renderData?.jevCompClassification ?? null,
-    jevAttributeScreen: renderData?.jevAttributeScreen ?? null,
-    jevHybrid: renderData?.jevHybrid ?? null,
     onOpenSettings: openSettings,
     onCompClick: handleCompClick,
     onRunAiAnalysis: handleRunAiAnalysis,
@@ -971,7 +967,8 @@ export default function AnalyzePage() {
           rerunning={isFetching}
           onOfferWorkflow={handleOfferWorkflow}
           statusLabel={
-            streamingStep === 'searching' ? 'Searching property...'
+            streamingStep === 'idle' && isFetching ? 'Starting analysis...'
+            : streamingStep === 'searching' ? 'Searching property...'
             : streamingStep === 'subject' ? 'Loading comparables...'
             : streamingStep === 'comps' ? 'Enriching comp details...'
             : streamingStep === 'evaluating' ? <EvalProgressLabel />

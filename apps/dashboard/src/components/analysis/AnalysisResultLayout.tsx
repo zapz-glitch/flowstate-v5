@@ -8,9 +8,6 @@ import { ComparablesSection } from './ComparablesSection'
 import { DealSummaryHero } from './DealSummaryHero'
 import { SubjectGridCard } from './SubjectGridCard'
 import { InvestorAnalysisSummary } from './InvestorAnalysisSummary'
-import { JevOutcomeCard } from './JevOutcomeCard'
-import { JevHybridCard } from './JevHybridCard'
-import { EvaluationProcessAudit } from './EvaluationProcessAudit'
 
 // ─── Analysis Result Layout ──────────────────────────────────────────────────
 
@@ -59,8 +56,6 @@ export function AnalysisResultLayout({
     onOpenSettings,
     onCompClick,
     onFeedbackSubmitted,
-    jevOutcome,
-    jevHybrid,
   } = useEvaluation()
 
   const selectedCompKeys = compOverride?.selectedCompKeys
@@ -100,35 +95,60 @@ export function AnalysisResultLayout({
             ))}
           </div>
         </div>
-      ) : subject && !isStreaming && comps?.insufficientComps === true ? (
-        /* Insufficient comps — the run completed with no valuation. The comp
-           pool and its Jev test evidence still render below. */
-        <div className="border border-amber-500/30 bg-amber-500/5 rounded-sm px-4 py-3">
-          <div className="text-sm font-semibold text-amber-500">Insufficient comps</div>
-          <p className="text-xs text-foreground-secondary mt-0.5">
-            No comparables qualified under the appraisal rules, so no ARV or offer math was produced.
-            The evaluated pool and per-comp test results are below — widen the rules or pick a nearby market and rerun.
-          </p>
-        </div>
-      ) : null}
+      ) : subject && !isStreaming && comps?.insufficientComps === true ? (() => {
+        /* Thin-pocket disclosure — the param-flex ladder stretched numeric
+           tolerances (geo stayed required) hunting ARV evidence. Green =
+           strict pass, yellow = extended once or twice, red = deeper. */
+        const extensions = comps?.retrieval?.paramFlex?.extensions ?? 0
+        const factor = comps?.retrieval?.paramFlex?.factor ?? 1
+        const tone = extensions === 0 ? 'text-emerald-500 border-emerald-500/30 bg-emerald-500/5'
+          : extensions <= 2 ? 'text-amber-500 border-amber-500/30 bg-amber-500/5'
+          : 'text-red-400 border-red-400/30 bg-red-400/5'
+        return (
+          <div className={`border rounded-sm px-4 py-3 ${tone}`}>
+            <div className="text-sm font-semibold">
+              {extensions === 0
+                ? 'No ARV evidence in the verified pool'
+                : 'No ARV evidence — rules had to be widened'}
+            </div>
+            <p className="text-xs text-foreground-secondary mt-0.5">
+              {comps?.retrieval?.paramFlex?.concessions?.length
+                ? `To reach comps we extended ${comps.retrieval.paramFlex.concessions.join(', ')}. `
+                : ''}
+              Every census-verified comp was evaluated and none carried ARV evidence
+              (flip resale, premium over scope median, or above AVM).
+              {comps?.asIsMarketIntel?.asIsMarketPrice != null && (
+                <span className="block mt-1 font-medium text-foreground">
+                  Investor floor: ${comps.asIsMarketIntel.asIsMarketPrice.toLocaleString()}
+                  {' '}({comps.asIsMarketIntel.compCount} distressed + {comps.asIsMarketIntel.flipSaleCount} flip buy(s))
+                </span>
+              )}
+            </p>
+          </div>
+        )
+      })() : null}
+
+      {/* Param-flex disclosure on successful runs — how far the rules
+          stretched to admit ARV evidence (geo stayed required). */}
+      {subject && !isStreaming && comps?.insufficientComps !== true && comps?.retrieval?.paramFlex != null && (() => {
+        const { extensions, factor } = comps.retrieval.paramFlex
+        const tone = extensions === 0 ? 'text-emerald-500 border-emerald-500/30'
+          : extensions <= 2 ? 'text-amber-500 border-amber-500/30'
+          : 'text-red-400 border-red-400/30'
+        return (
+          <div className={`inline-flex border rounded-sm px-2 py-1 text-[10px] font-semibold ${tone}`}>
+            {extensions === 0
+              ? 'Comps qualified on strict rules'
+              : comps?.retrieval?.paramFlex?.concessions?.length
+                ? `Comp rules widened: ${comps.retrieval.paramFlex.concessions.join('; ')}`
+                : `Comp rules extended ${extensions}× (to ×${factor})`}
+          </div>
+        )
+      })()}
 
       {notesSlot}
 
       <InvestorAnalysisSummary analysis={valuation?.investorAnalysis} />
-
-      <JevOutcomeCard
-        outcome={jevOutcome}
-        title="Jev assessment"
-        footnote="Jev's read-only assessment of the completed valuation."
-      />
-
-      <JevHybridCard run={jevHybrid} />
-
-      <EvaluationProcessAudit
-        valuation={valuation}
-        comps={comps}
-        run={jevHybrid}
-      />
 
       {/* Streaming status — lives near the comps section, not the search bar */}
       {statusLabel && isStreaming && (

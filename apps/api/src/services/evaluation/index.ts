@@ -32,18 +32,13 @@ import type { RehabTable, TierRangeDefinition } from '@flowstate-api/shared/valu
 import {
   buildAnalysisResponse,
   calculateAllRehabLevelEstimates,
-  mergeZillowDataIntoBundle,
   type AnalysisResponse,
   type ApiCallStats,
   type ResponseContext,
 } from '../analysis'
 import { createPhotoService, type PhotoBundle, type PropertyIdentifier, type PropertyPhotos } from '../photo-provider'
-import {
-  COMP_ARV_TOP_PERCENT,
-  COMP_HYBRID_VERSION,
-  runJevEvaluation,
-  type HybridRun,
-} from '../comp-hybrid'
+import { gatherCompConditionEvidence } from '../comp-evidence'
+import { isClefAvailable } from '../clef'
 
 import { persistReportAssets } from '../report-assets'
 import { expansionRefetchRadius } from '../property-api/retrieval-policy'
@@ -58,7 +53,6 @@ import {
   type RehabAddition,
   type RehabAdvisory,
 } from '../seller-notes'
-import { classifyOutcomeWithJev } from '../jev'
 import type { ReportStep } from './types'
 
 function formatUsd(amount: number): string {
@@ -95,8 +89,6 @@ export interface EvaluationParams {
   arvThreshold?: { percent: number }
   /** Threshold for Group B: comps with salePrice <= X% of ARV (default: 70) */
   asIsThresholdPercent?: number
-  /** Max age (days) for a Zillow sale event to reconcile a stale comp price (default: 365) */
-  reconciliationSaleAgeDays?: number
   apiCallStats?: ApiCallStats
   /**
    * Expansion refetch seam. When the appraisal ladder reaches a tier that
@@ -106,12 +98,6 @@ export interface EvaluationParams {
    * selection always runs after retrieval; this never picks comps itself.
    */
   expandComparablesPool?: (radiusMiles: number, monthsBack?: number) => Promise<NormalizedComparable[] | null>
-  /**
-   * Property-detail seam for the Jev evaluation — enriches the
-   * top-screened candidates (building style, foundation, construction,
-   * features, transaction) before the cross-examination.
-   */
-  enrichComparables?: (comps: NormalizedComparable[]) => Promise<NormalizedComparable[]>
   /**
    * Subject photo bundle prefetched by the caller so the scrape overlaps the
    * comparables fetch. `undefined` = not prefetched — fetch inline.
@@ -161,40 +147,100 @@ export interface EvaluationResult {
 
 // ─── Price Classification ────────────────────────────────────────────────────
 
+/** Sold ≥15% over the comp's own scope median $/sf → premium sale = ARV evidence */
+const ARV_PPSF_PREMIUM = 1.15
+/** Sold ≥15% over the subject's AVM → renovated-tier sale = ARV evidence */
+const ARV_SUBJECT_AVM_PREMIUM = 1.15
+
+function compPpsf(c: { pricePerSqft?: number | null; salePrice?: number | null; squareFeet?: number | null }): number | null {
+  return c.pricePerSqft ?? (c.salePrice != null && c.squareFeet ? c.salePrice / c.squareFeet : null)
+}
+
 /**
- * Classify comps by sale price percentile.
- * Top X% by sale price are considered "renovated" (higher price = better condition).
+ * ARV evidence — three peer signals, any one qualifies the comp for the
+ * ARV set (they cooperate; multiple qualifying comps average together):
+ *   1. flip resale      — verified flip chain (resale leg)
+ *   2. premium sale     — ≥15% over the comp's scope median $/sf
+ *   3. above-own-AVM    — sale price above the comp's own AVM
+ * Returns the evidence note, or null when no signal fires.
  */
-export function classifyCompsByPrice(
+export function arvEvidence(
+  c: NormalizedComparable,
+  subjectAvm?: number | null,
+): { note: string; method: 'evidence_flip_chain' | 'evidence_premium' | 'evidence_avm' } | null {
+  if (c.flip && c.flip.priorSalePrice > 0) {
+    return {
+      method: 'evidence_flip_chain',
+      note: `Verified flip — bought $${c.flip.priorSalePrice.toLocaleString()} ${c.flip.daysHeld}d prior, resold +${c.flip.gainPct}%`,
+    }
+  }
+  // Distressed transactions are investor/as-is evidence — never ARV,
+  // even when the price reads premium.
+  if (c.distressedSale === true || c.transaction?.isForeclosure === true) return null
+  const ppsf = compPpsf(c)
+  const scopeMed = c.ppsfMedians?.SD ?? c.ppsfMedians?.N4 ?? c.ppsfMedians?.N3
+  if (ppsf != null && scopeMed != null && scopeMed > 0 && ppsf >= scopeMed * ARV_PPSF_PREMIUM) {
+    return {
+      method: 'evidence_premium',
+      note: `Sold ${Math.round((ppsf / scopeMed) * 100 - 100)}% above scope median $/sf`,
+    }
+  }
+  if (c.salePrice != null && c.avmValue != null && c.salePrice > c.avmValue) {
+    return {
+      method: 'evidence_avm',
+      note: `Sold $${Math.round((c.salePrice - c.avmValue) / 1000)}k above own AVM`,
+    }
+  }
+  // Fallback ARV check per spec — comp sold above the SUBJECT's AVM
+  // (the subject's modeled as-is value): the premium implies renovation.
+  if (c.salePrice != null && subjectAvm != null && c.salePrice > subjectAvm * ARV_SUBJECT_AVM_PREMIUM) {
+    return {
+      method: 'evidence_avm',
+      note: `Sold ${Math.round((c.salePrice / subjectAvm) * 100 - 100)}% above subject AVM`,
+    }
+  }
+  return null
+}
+
+/**
+ * Evidence classification — transaction evidence only:
+ *   flip resale / premium / above-AVM → after_renovation (ARV evidence)
+ *   distressed sale                   → as_is (investor evidence)
+ *   everything else                   → transitional (market tier)
+ */
+export function classifyCompsByEvidence(
   comparables: NormalizedComparable[],
-  topPercentile: number
+  subjectAvm?: number | null
 ): Map<string, ClassificationResult> {
   const classifications = new Map<string, ClassificationResult>()
-
-  const withPrice = comparables
-    .filter(c => c.salePrice != null && c.salePrice > 0)
-    .map(c => ({ id: c.id, salePrice: c.salePrice! }))
-    .sort((a, b) => b.salePrice - a.salePrice)
-
-  if (withPrice.length === 0) return classifications
-
-  const topCount = Math.max(1, Math.ceil(withPrice.length * topPercentile / 100))
-  const topIds = new Set(withPrice.slice(0, topCount).map(c => c.id))
-  const threshold = withPrice[topCount - 1]?.salePrice ?? 0
-
   for (const comp of comparables) {
-    const isRenovated = topIds.has(comp.id)
-    classifications.set(comp.id, {
-      classification: isRenovated ? 'after_renovation' : 'as_is',
-      confidence: isRenovated ? 75 : 60,
-      method: 'price_analysis',
-      reasoning: isRenovated
-        ? `Sale price in top ${topPercentile}% (≥$${Math.round(threshold).toLocaleString()})`
-        : `Sale price below top ${topPercentile}% threshold`,
-      indicators: {},
-    })
+    const ev = arvEvidence(comp, subjectAvm)
+    if (ev) {
+      classifications.set(comp.id, {
+        classification: 'after_renovation',
+        confidence: ev.method === 'evidence_flip_chain' ? 90 : 80,
+        method: ev.method,
+        reasoning: ev.note,
+        indicators: {},
+      })
+    } else if (comp.distressedSale === true || comp.transaction?.isForeclosure === true) {
+      classifications.set(comp.id, {
+        classification: 'as_is',
+        confidence: 85,
+        method: 'evidence_distressed',
+        reasoning: 'Distressed-flagged transaction — investor/as-is evidence',
+        indicators: {},
+      })
+    } else {
+      classifications.set(comp.id, {
+        classification: 'transitional',
+        confidence: 50,
+        method: 'evidence_market',
+        reasoning: 'Ordinary sale — no ARV or distress evidence; market-rate reference',
+        indicators: {},
+      })
+    }
   }
-
   return classifications
 }
 
@@ -259,45 +305,9 @@ function selectBestMatch(
  * Select as-is market comps: enabled comps that didn't make the ARV group and
  * sold at or below `thresholdPercent` of ARV. Display-only market intelligence.
  */
-function selectGroupBComps(
-  subject: NormalizedProperty,
-  appraisalResult: AppraisalResultWithFallback,
-  arv: number,
-  thresholdPercent: number,
-  groupACompIds: Set<string>,
-): GroupBResult | null {
-  const priceCeiling = Math.round((arv * thresholdPercent) / 100)
-
-  const qualifying = appraisalResult.comparables.filter(
-    (c) =>
-      c.isEnabled &&
-      !groupACompIds.has(c.id) &&
-      c.salePrice != null &&
-      c.salePrice > 0 &&
-      c.salePrice <= priceCeiling
-  )
-
-  const hasFlips = appraisalResult.comparables.some((c) => c.flip != null)
-  if (qualifying.length === 0 && !hasFlips) {
-    return {
-      compIds: [],
-      asIsMarketPrice: null,
-      avgPricePerSqft: null,
-      count: 0,
-      flipSaleCount: 0,
-      thresholdPercent,
-      arvUsed: arv,
-      priceCeiling,
-      noDataReason: `No enabled comps sold at or below ${thresholdPercent}% of ARV (${formatUsd(priceCeiling)})`,
-    }
-  }
-
-  return summarizeGroupB(qualifying, subject, arv, thresholdPercent, priceCeiling, appraisalResult.comparables)
-}
-
 /**
  * Sqft-scale each comp's sale price to the subject's sqft, then average —
- * shared by the price-threshold Group B and Jev's investment selection.
+ * shared by the evidence Group B path.
  */
 function summarizeGroupB(
   qualifying: AppraisedComparable[],
@@ -592,34 +602,7 @@ export async function performAnalysis(
   }
   onProgress?.('Photos fetched')
 
-  // ── 2b. Zillow fallback fills: provider building data takes priority, ──────
-  // but when a field is missing we fill it from the Zillow listing we already
-  // fetched for photos (style, foundation, construction, roof, stories,
-  // heating/cooling, parking, pool). Re-run the appraisal when fills landed —
-  // a comp that was not_verified may now verify (or disqualify) for real.
-  if (photoBundle) {
-    const mergeResult = mergeZillowDataIntoBundle(bundle, photoBundle, {
-      maxSaleAgeDays: params.reconciliationSaleAgeDays ?? 365,
-    })
-    const filledCount =
-      mergeResult.subjectSupplementedFields.length +
-      [...mergeResult.compSupplementedFields.values()].reduce((n, f) => n + f.length, 0)
-    if (filledCount > 0) {
-      bundle = mergeResult.bundle
-      appraisalResult = appraisalService.evaluateWithFallback(
-        bundle.property,
-        bundle.comparables,
-        { filters, adjustments, expansion: DEFAULT_EXPANSION_POLICY }
-      )
-      if (appraisalResult.fallbackUsed && appraisalResult.fallbackUsed !== 'none'
-          && !fallbacksUsed.includes(`comp_fallback:${appraisalResult.fallbackUsed}`)) {
-        fallbacksUsed.push(`comp_fallback:${appraisalResult.fallbackUsed}`)
-      }
-      step('zillow_supplement', 'completed', `${filledCount} field(s) supplemented from Zillow listings`)
-    }
-  }
-
-  // ── 2c. Flood signal from the listing scrape — the subject photo fetch
+  // ── 2b. Flood signal from the listing scrape — the subject photo fetch
   // already resolves the Redfin/Realtor page, which embeds First Street
   // "Flood Factor" data. Free (Firecrawl, not the property provider), so it
   // replaces the paid flood-zone call. Provider data wins when present.
@@ -648,9 +631,9 @@ export async function performAnalysis(
     }
   }
 
-  // ── Vision + photo persistence — concurrent with the Jev funnel ───────────
+  // ── Vision + photo persistence ────────────────────────────────────────────
   // Neither feeds comp selection; the renovation level is needed only at
-  // deriveBuybox, so this branch is awaited after Jev completes. The photo
+  // deriveBuybox. The photo
   // URLs are captured up front so R2 persistence can rewrite them while
   // vision reads the live CDN links.
   const visionAndPersist = (async (): Promise<RenovationAssessment> => {
@@ -707,122 +690,41 @@ export async function performAnalysis(
     return renovationPromise
   })()
 
-  // ── Jev comp evaluation — the only selection logic ────────────────────────
-  // Test 1 asks Jev's raw-field nouls — squareFeet, lotSize, yearBuilt,
-  // salePrice, saleDate — "does this comp match the subject on this field
-  // per the appraisal rules?" Passers get a composite score (proximity +
-  // field strength) and the top-10 get enriched.
-  // Test 2 asks the enriched nouls — subdivision yes, else neighborhood
-  // yes — plus advisory physical-character/material/foundation nouls that
-  // lift the score from a 90 baseline toward 100. Passers split by price:
-  // the top 15% become the ARV set (variable count), the rest the as-is
-  // reference. No fill — zero passers flags human handoff. ARV = mean
-  // adjusted price of the ARV set — the only non-Jev step.
-  let jevInvestmentCompIds: string[] = []
-  let hybridRun: HybridRun | null = null
-  let jevSelection: {
-    selected: { compId: string; score: number | null; fullMatch: boolean; verdict: string; confidence: number | null }[]
-    counts: NonNullable<HybridRun['counts']> | null
-    humanHandoff: boolean
-    asIsCompIds: string[]
-    topCompId: string | null
-  } | null = null
-  if (appraisalResult.comparables.length > 0) {
-    try {
-      const jev = await runJevEvaluation(bundle.property, appraisalResult.comparables, filters, adjustments, env, {
-        rules: { filters, adjustments },
-        enrich: params.enrichComparables,
-        onProgress,
-      })
-
-      // Fold enriched detail back onto the pool so cards/audit see the
-      // property data test 2 used (subdivision, neighborhood, style…) —
-      // and so ARV prices adjustments off the enriched record: the entry's
-      // adjustedPrice was recomputed on the merged data inside the funnel.
-      const entryById = new Map(jev.entries.map((e) => [e.compId, e]))
-      if (jev.enrichedComps.size > 0) {
-        appraisalResult.comparables = appraisalResult.comparables.map((comp) => {
-          const e = jev.enrichedComps.get(comp.id)
-          if (!e) return comp
-          const adjusted = entryById.get(comp.id)?.adjustedPrice
-          return {
-            ...comp,
-            ...e,
-            adjustedSalePrice: adjusted ?? comp.adjustedSalePrice,
-          }
-        })
-      }
-
-      appraisalResult.comparables = appraisalResult.comparables.map((comp) => ({
-        ...comp,
-        jevHybrid: entryById.get(comp.id) ?? null,
-      }))
-
-      const humanHandoff = jev.humanHandoff
-      hybridRun = {
-        status: 'completed', mode: 'enabled', questionVersion: COMP_HYBRID_VERSION,
-        model: jev.test2?.model ?? jev.test1?.model,
-        latencyMs: (jev.test1?.latencyMs ?? 0) + (jev.test2?.latencyMs ?? 0),
-        inputTokens: (jev.test1?.inputTokens ?? 0) + (jev.test2?.inputTokens ?? 0),
-        stateHashes: [...(jev.test1?.stateHashes ?? []), ...(jev.test2?.stateHashes ?? [])],
-        test1: jev.test1, test2: jev.test2,
-        counts: jev.counts,
-        selection: { noulGate: jev.noulGate, arvTopPercent: COMP_ARV_TOP_PERCENT, humanHandoff },
-        questionSet: jev.questionSet,
-        screenedAt: new Date().toISOString(),
-      }
-      jevSelection = {
-        selected: jev.arvCompIds.map((id) => {
-          const e = entryById.get(id)
-          return {
-            compId: id,
-            score: e?.score ?? null,
-            fullMatch: e?.stage === 'test2_pass',
-            verdict: e?.selected ?? 'core',
-            confidence: e?.scoreConfidence ?? null,
-          }
-        }),
-        counts: jev.counts,
-        humanHandoff,
-        asIsCompIds: jev.asIsCompIds,
-        topCompId: jev.entries.find((e) => e.poolRank === 1)?.compId ?? null,
-      }
-
-      if (jev.arvCompIds.length === 0) {
-        // Zero test-2 passers — human handoff. The rules selection stands
-        // as a reference number; the flag tells the consumer it is
-        // unexamined. Test results still attach for display.
-        step('jev_evaluation', 'fallback', `Jev tested ${jev.counts.pool} candidates — none passed both tests — human handoff (${jev.test1?.model ?? 'jev'})`)
-        fallbacksUsed.push('jev_evaluation:human_handoff')
-      } else {
-        const selectedIds = new Set(jev.arvCompIds)
-        appraisalResult.comparables = appraisalResult.comparables.map((comp) => ({
-          ...comp,
-          isEnabled: selectedIds.has(comp.id),
-          arvStatus: selectedIds.has(comp.id)
-            ? 'selected' as const
-            : comp.arvStatus === 'selected' ? 'not_examined' as const : comp.arvStatus,
-        }))
-        appraisalResult.selectedCompIds = jev.arvCompIds
-        appraisalResult.arv = appraisalService.calculateARV(
-          appraisalResult.comparables.filter((c) => selectedIds.has(c.id)),
-        )
-        appraisalResult.insufficientComps = false
-        step('jev_evaluation', 'completed',
-          `Jev tested ${jev.counts.pool} → ${jev.counts.test1Passed} passed test 1 → ${jev.counts.test2Passed} passed test 2 → ${jev.counts.arv} ARV / ${jev.counts.asIs} as-is · ${jev.counts.ineligible} ineligible (${jev.test2?.model ?? jev.test1?.model ?? 'jev'})`)
-      }
-    } catch (error) {
-      console.warn('[Evaluate] Jev evaluation failed:', error instanceof Error ? error.message : error)
-      step('jev_evaluation', 'fallback', 'Jev evaluation unavailable — appraisal-rules selection used')
-      fallbacksUsed.push('jev_evaluation:unavailable')
-      hybridRun = { status: 'unavailable', mode: 'enabled', questionVersion: COMP_HYBRID_VERSION, reason: 'jev_failed' }
-    }
+  // ── Comp selection — evidence-driven ──────────────────────────────────────
+  // The ARV set is every enabled comp carrying ARV evidence — verified flip
+  // resale, premium over its scope median $/sf, or sale above its own AVM.
+  // The three signals cooperate: multiple qualifying comps average into the
+  // ARV. Flip acquisitions fold into the investor floor via summarizeGroupB.
+  // Zero evidence → ARV withheld; the run degrades to report-only.
+  const subjectAvm = bundle.enrichment?.avm?.value ?? bundle.property.avmValue ?? null
+  const arvComps = appraisalResult.comparables.filter(
+    (c) => c.isEnabled && arvEvidence(c, subjectAvm) != null,
+  )
+  const arvIds = new Set(arvComps.map((c) => c.id))
+  appraisalResult.comparables = appraisalResult.comparables.map((comp) => ({
+    ...comp,
+    arvStatus: arvIds.has(comp.id)
+      ? 'selected' as const
+      : comp.arvStatus === 'selected' ? 'not_examined' as const : comp.arvStatus,
+  }))
+  appraisalResult.selectedCompIds = [...arvIds]
+  if (arvComps.length > 0) {
+    appraisalResult.arv = appraisalService.calculateARV(arvComps, bundle.property.squareFeet)
+    appraisalResult.insufficientComps = false
+    step('appraisal_rules', 'completed',
+      `Evidence selection — ARV from ${arvComps.length} evidence comp(s)`)
+  } else {
+    // finalArv reads `insufficient`, so the ladder's banded number is dead
+    // weight — withholding it is what makes the run report-only.
+    appraisalResult.insufficientComps = true
+    step('appraisal_rules', 'completed',
+      'Evidence selection — no ARV evidence found; ARV withheld (report-only)')
   }
 
   const enabledComps = appraisalResult.comparables.filter((c) => c.isEnabled)
   // Insufficient comps degrades to a report-only result — the run completes
   // with valuation null so the subject, the evaluated comp pool, and the
-  // Jev test evidence are saved and viewable instead of erroring the search.
+  // geo stamps are saved and viewable instead of erroring the search.
   const insufficient = appraisalResult.insufficientComps === true || enabledComps.length === 0
   if (insufficient) {
     step('appraisal_rules', 'failed', appraisalResult.fallbackReason ?? 'insufficient comps')
@@ -840,9 +742,7 @@ export async function performAnalysis(
   // ── 3. Vision: subject renovation + curb appeal (one merged LLM call) ─────
   // Subject-only — comps are never photo-scraped, so there is no per-comp
   // vision pass. The renovation level drives the rehab tier; the curb-appeal
-  // condition is the subject's detected condition. Launched alongside the
-  // Jev funnel above — the result is only needed here.
-  const compById = new Map(appraisalResult.comparables.map((c) => [c.id, c]))
+  // condition is the subject's detected condition.
   // Required step — the fetch always resolves a verdict object. Non-ok
   // statuses are recorded in fallbacksUsed so the report exposes that the
   // subject condition could not be verified from photos.
@@ -863,75 +763,14 @@ export async function performAnalysis(
   // both renovation level + curb-appeal condition).
   const subjectCurbAppeal: CurbAppealCheck | null = renovation.curbAppeal ?? null
 
-  // ── ARV condition evidence ────────────────────────────────────────────────
-  // Product spec: the rules already picked the comps — condition verification
-  // is the cherry on top that boosts confidence, NOT a selection gate.
-  //   • verified AR-quality (assessor Good+) → confidence +
-  //   • verified NOT AR-quality (assessor Fair/Poor/Very Poor) → excluded —
-  //     confirmed evidence it isn't ARV spec
-  //   • unverifiable → KEPT: top-of-market comps matching the rules are valid
-  //     ARV anchors; lack of condition data only lowers confidence.
-
-  // Assessor condition is the primary signal — Good/Very Good/Excellent are
-  // retail-ready; Fair/Poor/Very Poor are confirmed below ARV spec.
-  const ARV_POSITIVE_CONDITIONS = new Set(['excellent', 'verygood', 'good'])
-  const ARV_NEGATIVE_CONDITIONS = new Set(['fair', 'poor', 'verypoor'])
-  const assessorSignal = (compId: string): 'positive' | 'negative' | 'average' | null => {
-    const cond = compById.get(compId)?.buildingCondition?.toLowerCase().replace(/[^a-z]/g, '')
-    if (!cond) return null
-    if (ARV_POSITIVE_CONDITIONS.has(cond)) return 'positive'
-    if (ARV_NEGATIVE_CONDITIONS.has(cond)) return 'negative'
-    return 'average' // 'average' and unmapped values — usable, no boost
-  }
-
-  // The gate only prunes/recomputes a real ARV set — skipped entirely when
-  // the pool was insufficient (finalArv is null on the degraded path).
-  if (!insufficient) {
-    const unverifiable: string[] = []
-    const prunedFromArv: string[] = []
-    let verifiedPositiveCount = 0
-    for (const id of appraisalResult.selectedCompIds ?? []) {
-      const assessor = assessorSignal(id)
-      if (assessor === 'negative') {
-        prunedFromArv.push(id)
-      } else if (assessor === 'positive') {
-        verifiedPositiveCount++
-      } else if (assessor !== 'average') {
-        // No signal at all — kept in the ARV set, counted for confidence
-        unverifiable.push(id)
-      }
-    }
-    if (prunedFromArv.length > 0) {
-      const remaining = (appraisalResult.selectedCompIds ?? []).filter((id) => !prunedFromArv.includes(id))
-      const remainingComps = appraisalResult.comparables.filter((c) => remaining.includes(c.id))
-      if (remainingComps.length >= 3) {
-        appraisalResult.arv = appraisalService.calculateARV(remainingComps)
-        appraisalResult.selectedCompIds = remaining
-        finalArv = appraisalResult.arv
-        fallbacksUsed.push(`arv_condition_pruned:${prunedFromArv.length}`)
-        step('arv_condition_gate', 'fallback',
-          `${prunedFromArv.length} comp(s) excluded — verified below ARV spec (poor assessor condition); ARV recomputed on ${remainingComps.length}`)
-      } else {
-        // Can't recompose a 3-comp ARV — keep the set but mark the evidence
-        fallbacksUsed.push('arv_condition_thin')
-        step('arv_condition_gate', 'fallback',
-          `${prunedFromArv.length} comp(s) verified below ARV spec — ARV kept on ${remainingComps.length + prunedFromArv.length} comps, fewer than 3 verified`)
-      }
-    } else if (appraisalResult.selectedCompIds?.length) {
-      step('arv_condition_gate', 'completed',
-        `${appraisalResult.selectedCompIds.length} comp(s) selected — ${verifiedPositiveCount} verified AR-quality${unverifiable.length ? `, ${unverifiable.length} unverified (kept: rules-matched)` : ''}`)
-    }
-    if (unverifiable.length > 0) {
-      fallbacksUsed.push(`arv_condition_unverified:${unverifiable.length}`)
-    }
-  }
-
-  // ── 4. Classifications (price percentile, display grouping) ─────────────────
-  const arvThreshold = params.arvThreshold ?? { percent: 15 }
-  const compClassifications = classifyCompsByPrice(bundle.comparables, arvThreshold.percent)
+  // ── 4. Classifications — transaction evidence, not condition guessing ────
+  // flip resale → after_renovation; distressed sale → as_is; ordinary sale
+  // → transitional (market tier).
+  const compClassifications = classifyCompsByEvidence(bundle.comparables, subjectAvm)
   const classificationSummary = summarizeClassifications(
     appraisalResult.comparables,
-    compClassifications
+    compClassifications,
+    subjectAvm
   )
 
   // ── 5. Derive buybox: vision level → rehab tier, permits → major items ──────
@@ -998,7 +837,7 @@ export async function performAnalysis(
 
   const valuationService = createValuationService(params.customRehabTable, params.customTierRanges)
   // No ARV → no valuation. The report still carries the evaluated comp pool,
-  // the step log, and the Jev test evidence — valuation stays null.
+  // the step log, and the geo stamps — valuation stays null.
   const valuation = finalArv != null ? valuationService.calculateValuation({
     arv: finalArv,
     subjectSqft,
@@ -1028,31 +867,30 @@ export async function performAnalysis(
   step('valuation', valuation ? 'completed' : 'skipped',
     valuation ? `ARV ${formatUsd(valuation.arv)} · rehab ${formatUsd(valuation.totalRehabCost)}` : 'Skipped — insufficient comps for an ARV')
 
-  // ── 7. Group B as-is market intelligence ────────────────────────────────────
+  // ── 7. Group B as-is market intelligence — evidence-driven ────────────────
+  // The as-is set is evidence, not a price ceiling: distressed-transaction
+  // comps qualify; verified flip acquisitions fold in via summarizeGroupB.
+  // Runs whether or not an ARV exists — the investor floor is meaningful
+  // on its own.
   const asIsThresholdPercent = params.asIsThresholdPercent ?? 70
   const groupACompIds = new Set(appraisalResult.selectedCompIds ?? [])
-  // Jev's investment-truth picks are the investment set when available;
-  // otherwise fall back to the price-threshold Group B.
-  const groupBResult = finalArv == null ? null : jevInvestmentCompIds.length > 0
-    ? summarizeGroupB(
-        appraisalResult.comparables.filter(
-          (c) => jevInvestmentCompIds.includes(c.id) && c.salePrice != null && c.salePrice > 0,
-        ),
-        bundle.property,
-        finalArv,
-        asIsThresholdPercent,
-        Math.round((finalArv * asIsThresholdPercent) / 100),
-        appraisalResult.comparables,
-      )
-    : selectGroupBComps(
-        bundle.property,
-        appraisalResult,
-        finalArv,
-        asIsThresholdPercent,
-        groupACompIds
-      )
-  if (groupBResult && groupBResult.count > 0) {
-    console.log(`[Evaluate] Group B: ${groupBResult.count} as-is comps (${jevInvestmentCompIds.length > 0 ? 'Jev investment-truth selected' : `≤${formatUsd(groupBResult.priceCeiling)}, ${asIsThresholdPercent}% of ARV`})`)
+  // Investor-priced evidence only — a distressed deed at a market-level
+  // price (estate sale priced at retail) is not an investor purchase; the
+  // floor is built from distressed sales at or below the subject's AVM.
+  const groupBResult = summarizeGroupB(
+    appraisalResult.comparables.filter(
+      (c) => (c.distressedSale === true || c.transaction?.isForeclosure === true)
+        && c.salePrice != null && c.salePrice > 0
+        && (subjectAvm == null || c.salePrice <= subjectAvm),
+    ),
+    bundle.property,
+    finalArv ?? 0,
+    asIsThresholdPercent,
+    finalArv != null ? Math.round((finalArv * asIsThresholdPercent) / 100) : 0,
+    appraisalResult.comparables,
+  )
+  if (groupBResult && groupBResult.count + groupBResult.flipSaleCount > 0) {
+    console.log(`[Evaluate] Group B: ${groupBResult.count} distressed + ${groupBResult.flipSaleCount} flip acquisitions`)
   }
 
   // ── 8. Best match + applied settings snapshot ───────────────────────────────
@@ -1060,6 +898,80 @@ export async function performAnalysis(
     bundle.property,
     appraisalResult.comparables.filter((c) => groupACompIds.has(c.id)),
   )
+
+  // ── 8b. Clef comp curb-appeal (flag-gated, input-side evidence) ─────────────
+  // For every comp the provider returned, fetch the listing (Zillow→Redfin→
+  // Realtor: photos + description persist post-sale) and classify condition
+  // with Clef. Shadow evidence only — stamped on comp.curbAppeal for the
+  // report/UI, never fed to classifyCompsByEvidence or the appraisal math
+  // until live-verified.
+  let compCurbAppeal: Record<string, {
+    condition: 'renovated' | 'dated' | 'distressed' | 'unknown'
+    source: 'vision'
+    confidence: number | null
+    summary: string | null
+    photosExamined: number
+  }> | undefined
+  if (env.CLEF_COMP_CONDITION_ENABLED === 'true' && isClefAvailable(env)) {
+    const CLEF_COMP_MAX = Number(env.CLEF_COMP_MAX) || Infinity
+    const CLEF_COMP_TIMEOUT_MS = 45_000
+    // All provider-returned comps — ARV-selected first (curb appeal matters
+    // most for ARV candidacy), then enabled, then closest to the subject.
+    // Ordering only matters if CLEF_COMP_MAX truncates.
+    const targets = appraisalResult.comparables
+      .sort((a, b) =>
+        Number(b.isEnabled && groupACompIds.has(b.id)) - Number(a.isEnabled && groupACompIds.has(a.id))
+        || Number(b.isEnabled) - Number(a.isEnabled)
+        || (a.distanceMiles ?? 999) - (b.distanceMiles ?? 999))
+      .slice(0, CLEF_COMP_MAX)
+    const settled = await Promise.all(
+      targets.map((comp) =>
+        Promise.race([
+          gatherCompConditionEvidence(env, {
+            propertyId: comp.id,
+            address: comp.address,
+            city: comp.city,
+            state: comp.state,
+            zipCode: comp.zipCode,
+            salePrice: comp.salePrice ?? undefined,
+            saleDate: comp.saleDate ? String(comp.saleDate) : undefined,
+            yearBuilt: comp.yearBuilt ?? undefined,
+            squareFeet: comp.squareFeet ?? undefined,
+          }),
+          new Promise<null>((r) => setTimeout(() => r(null), CLEF_COMP_TIMEOUT_MS)),
+        ]).catch(() => null),
+      ),
+    )
+    compCurbAppeal = {}
+    for (const ev of settled) {
+      if (!ev?.condition || !ev.listing) continue
+      const c = ev.condition
+      let condition =
+        c.asIs || c.conditionLabel === 'Poor'
+          ? 'distressed' as const
+          : c.renovated || c.conditionLabel === 'Renovated' || c.conditionLabel === 'Updated'
+            ? 'renovated' as const
+            : 'dated' as const
+      // Owner rule: investor-marketed listings are median/lower-tier sales —
+      // the curb-appeal stamp can never claim 'renovated' for ARV candidacy
+      // on an investor-tier comp no matter how updated it looks.
+      if (ev.investorSignal && condition === 'renovated') condition = 'dated'
+      compCurbAppeal[ev.propertyId] = {
+        condition,
+        source: 'vision',
+        confidence: c.confidence != null ? Math.round(c.confidence * 100) : Math.round(Math.max(c.renovatedProbability, c.asIsProbability, 0.5) * 100),
+        summary: `${c.conditionLabel} (${c.conditionScore.toFixed(1)}/4) · tier:${c.tier} · renovated ${(c.renovatedProbability * 100).toFixed(0)}% · as-is ${(c.asIsProbability * 100).toFixed(0)}% · investor ${(c.investorLanguageProbability * 100).toFixed(0)}% · via ${ev.listing.source}${ev.listing.description ? ' · listing text available' : ''}`,
+        photosExamined: ev.listing.photoCount,
+      }
+    }
+    step(
+      'comp_curb_appeal',
+      Object.keys(compCurbAppeal).length > 0 ? 'completed' : 'skipped',
+      targets.length === 0
+        ? 'Clef enabled but no comps to classify'
+        : `${Object.keys(compCurbAppeal).length}/${targets.length} comps condition-classified via Clef`,
+    )
+  }
 
   const appliedSettings = {
     filters: filters.map((f) => ({
@@ -1084,7 +996,7 @@ export async function performAnalysis(
     rehabTable: valuationService.getRehabTable(),
     majorItems: derivedBuybox.majorItems,
     additionPlay: buybox.additionPlay ?? 0,
-    arvThresholdPercent: arvThreshold.percent,
+    arvThresholdPercent: (params.arvThreshold ?? { percent: 15 }).percent,
     asIsThresholdPercent,
   }
 
@@ -1098,7 +1010,18 @@ export async function performAnalysis(
       arvSource: 'appraisal',
       finalArv,
       analysisId: jobId,
-      subjectClassification: undefined,
+      // Subject condition tier — vision-derived (subject only; comps are
+      // evidence-classified, never condition-guessed).
+      subjectClassification: renovation.renovationLevelIndex != null ? {
+        classification:
+          renovation.renovationLevelIndex <= 1 ? 'after_renovation' as const
+          : renovation.renovationLevelIndex === 2 ? 'transitional' as const
+          : 'as_is' as const,
+        confidence: renovation.confidence ?? 60,
+        method: 'batch_photo_analysis' as const,
+        reasoning: `Vision renovation assessment: ${renovation.renovationLevel}`,
+        indicators: {},
+      } : undefined,
       compClassifications,
       classificationSummary,
       subjectSupplementedFields: [],
@@ -1116,6 +1039,7 @@ export async function performAnalysis(
       groupBResult,
       groupACompIds,
       groupBCompIds: new Set(groupBResult?.compIds ?? []),
+      compCurbAppeal,
     }
   )
 
@@ -1124,14 +1048,22 @@ export async function performAnalysis(
   response.report = buildEvaluationReport({
     bundle,
     appraisalResult,
-    subjectClassification: undefined,
+    subjectClassification: renovation.renovationLevelIndex != null ? {
+      classification:
+        renovation.renovationLevelIndex <= 1 ? 'after_renovation' as const
+        : renovation.renovationLevelIndex === 2 ? 'transitional' as const
+        : 'as_is' as const,
+      confidence: renovation.confidence ?? 60,
+      method: 'batch_photo_analysis' as const,
+      reasoning: `Vision renovation assessment: ${renovation.renovationLevel}`,
+      indicators: {},
+    } : undefined,
     weightedARVResult: undefined,
     derivedBuybox,
     valuation,
     steps,
     fallbacksUsed,
     renovationAssessment: renovation,
-    jev: jevSelection,
   })
   // Confidence gate on the comps that drive the ARV — surfaces onto the
   // valuation block. There is no human reviewer, so the formula call
@@ -1157,21 +1089,6 @@ export async function performAnalysis(
   }
   response.evaluationEngine = 'ts-v5'
   if (photoBundle) response.photoProvider = photoBundle.provider
-
-  // ── 11. Jev outcome classification (read-only; never affects the result) ──
-  // Assesses the Jev-driven production outcome — the only scenario left.
-  // No valuation → nothing for the outcome classifier to judge.
-  if (insufficient) {
-    response.jevOutcome = { status: 'unavailable', reason: 'insufficient_comps' }
-  } else {
-    try {
-      response.jevOutcome = await classifyOutcomeWithJev(response, env)
-    } catch (jevError) {
-      console.warn('[Evaluation] Jev outcome classification failed:', jevError instanceof Error ? jevError.message : jevError)
-      response.jevOutcome = { status: 'unavailable', reason: 'classification_failed' }
-    }
-  }
-  if (hybridRun) response.jevHybrid = hybridRun
 
   return {
     response,

@@ -16,6 +16,7 @@ import type {
   AnalyzeData,
   ValuationData,
   CompsData,
+  CompItem,
 } from '@/app/(dashboard)/dashboard/analyze/actions'
 import { getCompKey } from '@/components/analysis/format-helpers'
 import { useReportSettings, type UseReportSettingsReturn } from '@/hooks/use-report-settings'
@@ -128,16 +129,20 @@ export function useAnalysisEvaluation({
     }
   }, [data, inputData])
 
+  // Default selection = ARV evidence only — transitional/floor comps stay
+  // listed but unselected (they never feed the ARV number).
+  const arvDefaultKeys = (items: CompItem[]): Set<string> => new Set(
+    items
+      .map((c, i) => ({ c, i }))
+      .filter(({ c }) => c.isEnabled === true && (c.classification?.type === 'after_renovation' || c.userTier === 'arv'))
+      .map(({ c, i }) => getCompKey(c, i))
+  )
+
   // Initialize comp override when data arrives
   useEffect(() => {
     if (data?.comps?.items) {
-      const keys = new Set(
-        data.comps.items
-          .filter((c) => c.isEnabled === true)
-          .map((c, i) => getCompKey(c, i))
-      )
       isManualRef.current = false
-      setCompOverride({ selectedCompKeys: keys, isManual: false })
+      setCompOverride({ selectedCompKeys: arvDefaultKeys(data.comps.items), isManual: false })
     }
   }, [data?.comps?.items])
 
@@ -156,7 +161,7 @@ export function useAnalysisEvaluation({
     const keys = new Set<string>()
     data.comps.items.forEach((comp, i) => {
       const ev = recalcData.compEvaluations[i]
-      if (ev?.isEnabled) {
+      if (ev?.isEnabled && (comp.classification?.type === 'after_renovation' || comp.userTier === 'arv')) {
         keys.add(getCompKey(comp, i))
       }
     })
@@ -201,12 +206,7 @@ export function useAnalysisEvaluation({
     }
     isManualRef.current = false
     if (data?.comps?.items) {
-      const keys = new Set(
-        data.comps.items
-          .filter((c) => c.isEnabled === true)
-          .map((c, i) => getCompKey(c, i))
-      )
-      setCompOverride({ selectedCompKeys: keys, isManual: false })
+      setCompOverride({ selectedCompKeys: arvDefaultKeys(data.comps.items), isManual: false })
     }
   }, [data?.comps?.items, pythonAuthoritative, applyServerSelection])
 

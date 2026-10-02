@@ -117,6 +117,17 @@ export interface AnalyzeData {
   }> | null
   subject?: SubjectData
   valuation?: ValuationData
+  /** Investor floor (Group B evidence) — survives a no-ARV run */
+  asIsMarketIntel?: {
+    asIsMarketPrice?: number | null
+    avgPricePerSqft?: number | null
+    compCount?: number
+    flipSaleCount?: number
+    compIds?: string[]
+    thresholdPercent?: number
+    priceCeiling?: number
+    noDataReason?: string
+  } | null
   comps?: CompsData
   riskFlags?: string[] | null
   permits?: PermitsData | null
@@ -129,20 +140,6 @@ export interface AnalyzeData {
   }
   /** API call statistics from the analysis workflow */
   apiCallStats?: ApiCallStats | null
-  /**
-   * Jev read-only classification of this completed outcome. Display-only —
-   * never influenced comp selection, ARV, or the recommendation.
-   */
-  jevOutcome?: JevOutcomeData | null
-  /** Baseline A comp-truth run metadata (dual nouls) — A/B observability */
-  jevCompTruth?: { model: string; latencyMs: number; inputTokens: number; scored: number } | null
-  /**
-   * Candidate B comp price-classification run metadata — mode (shadow or
-   * enabled), per-class counts, disagreement count vs Baseline A.
-   */
-  jevCompClassification?: JevCompClassificationData | null
-  jevAttributeScreen?: JevAttributeScreenData | null
-  jevHybrid?: JevHybridData | null
   /** Justified evaluation report (subset used by comp feedback) */
   report?: {
     arv?: {
@@ -153,13 +150,6 @@ export interface AnalyzeData {
         fallbackReason?: string
       }
     }
-    /** Jev flagged zero test-2 passers — the report is for manual review */
-    humanHandoff?: boolean
-    /** Jev funnel record — selection, counts, and reviewer tier overrides */
-    jev?: {
-      /** Reviewer-pinned comp tiers — compId → 'arv'|'as_is', applied at read time */
-      userOverrides?: Array<{ compId: string; tier: 'arv' | 'as_is' }>
-    } | null
   }
   /** Settings used during this analysis (for client-side recalculation initialization) */
   appliedSettings?: {
@@ -184,224 +174,6 @@ export interface AnalyzeData {
   }
 }
 
-/** Candidate B comp-classification run metadata (shadow or enabled) */
-export interface JevCompClassificationData {
-  status: 'completed' | 'skipped' | 'unavailable'
-  reason?: string
-  mode: 'enabled' | 'shadow'
-  questionVersion: string
-  model?: string
-  latencyMs?: number
-  inputTokens?: number
-  eligibleCount?: number
-  counts?: { arv: number; asIs: number; unidentified: number }
-  disagreements?: number | null
-  stateHashes?: string[]
-  classifiedAt?: string
-  /**
-   * Counterfactual (shadow only): what B's pool routing would have produced
-   * through the same deterministic valuation math. Display-only.
-   */
-  shadowValuation?: {
-    arv: number | null
-    arvComps: number
-    arvPrunedBelowSpec: number
-    asIsValue: number | null
-    asIsComps: number
-    buyPrice: number | null
-    projectedProfit: number | null
-    projectedROI: number | null
-    recommendation: string | null
-    deltas: { arv: number | null; asIsValue: number | null; buyPrice: number | null }
-    assessment?: JevOutcomeData
-    arvCompIds?: string[]
-    asIsCompIds?: string[]
-    arvPrunedCompIds?: string[]
-  }
-}
-
-export interface JevAttributeScreenData {
-  status: 'completed' | 'skipped' | 'unavailable'
-  reason?: string
-  mode: 'enabled' | 'shadow'
-  questionVersion: string
-  model?: string
-  latencyMs?: number
-  inputTokens?: number
-  scoredCount?: number
-  poolCount?: number
-  counts?: { arv: number; asIs: number }
-  anchors?: { arvAnchor: number | null; asIsAnchor: number | null }
-  stateHashes?: string[]
-  classifiedAt?: string
-  shadowValuation?: {
-    arv: number | null
-    arvComps: number
-    asIsValue: number | null
-    asIsComps: number
-    buyPrice: number | null
-    projectedProfit: number | null
-    projectedROI: number | null
-    recommendation: string | null
-    deltas: { arv: number | null; asIsValue: number | null; buyPrice: number | null }
-    assessment?: JevOutcomeData
-    arvCompIds?: string[]
-    asIsCompIds?: string[]
-  }
-}
-
-/** Two-test Jev run metadata — test 1 (raw-field nouls) + test 2 (enriched nouls + distance score) */
-export interface JevHybridData {
-  status: 'completed' | 'skipped' | 'unavailable'
-  reason?: string
-  mode: 'enabled' | 'shadow'
-  questionVersion: string
-  /** Jev run metadata — test 1 + test 2 stages combined */
-  model?: string
-  latencyMs?: number
-  inputTokens?: number
-  stateHashes?: string[]
-  test1?: { model: string; latencyMs: number; inputTokens: number; stateHashes: string[] } | null
-  test2?: { model: string; latencyMs: number; inputTokens: number; stateHashes: string[] } | null
-  counts?: {
-    pool: number
-    ineligible: number
-    test1Passed: number
-    test1Failed: number
-    enriched: number
-    test2Passed: number
-    test2Failed: number
-    /** ARV-tier test-2 passers (top 15% by adjusted price) */
-    arv: number
-    /** Test-2 passers below the ARV tier — as-is reference */
-    asIs: number
-    selected: number
-  }
-  selection?: {
-    noulGate: number
-    /** The ARV tier fraction applied to test-2 passers */
-    arvTopPercent?: number
-    /** Zero comps passed test 2 — the run is flagged for manual review */
-    humanHandoff?: boolean
-  }
-  /** The questions this run asked — generated from the appraisal preset */
-  questionSet?: {
-    test1: { key: string; label: string }[]
-    test2: { key: string; label: string; advisory: boolean }[]
-    scoreLevels: string[]
-  }
-  screenedAt?: string
-}
-
-/** Per-comp Jev evaluation record — test 1 fields, test 2 nouls + score, selection */
-export interface JevHybridCompScore {
-  compId: string
-  /**
-   * 'ineligible'  = no usable price/date, never tested
-   * 'test1_fail'  = failed a test-1 field (or a field could not be verified)
-   * 'test1_pass'  = passed test 1 but beyond the enrich cap — never test-2'd
-   * 'test2_fail'  = passed test 1, failed test 2 — ineligible but scored
-   * 'test2_pass'  = passed both tests — eligible for the core set
-   */
-  stage: 'ineligible' | 'test1_fail' | 'test1_pass' | 'test2_fail' | 'test2_pass'
-  rejectReasons: string[]
-  saleAgeDays: number | null
-  /** Property-detail data was merged before test 2 */
-  enriched?: boolean
-  /** Test 1 — the five raw-field nouls plus the composite score */
-  test1: {
-    /** field → 0–1 probability the comp matches the subject on it */
-    nouls: Record<string, number | null>
-    /** Verifiable fields below the gate */
-    failedFields: string[]
-    /** Fields the data could not verify — noted, not failed */
-    unverifiableFields: string[]
-    /** All fields verified at/above the gate — the "passed test 1" bucket */
-    passed: boolean
-    /** Composite /100 — proximity-dominant, blended with field-match strength; orders the enrichment cohort */
-    score: number | null
-  } | null
-  /** Test 2 — the enriched nouls plus the score */
-  test2: {
-    nouls: {
-      subdivision: number
-      neighborhood: number
-      /** Advisory — preferred, never gating; feeds the 90→100 boost */
-      physicalCharacter: number
-      /** Advisory — preferred, never gating; feeds the 90→100 boost */
-      material: number
-      /** Advisory — preferred, never gating; feeds the 90→100 boost */
-      foundation: number
-    }
-    /** Subdivision yes, or neighborhood yes — eligible for classification */
-    passed: boolean
-    /** Passers: 90 baseline + up to 10 for matched physical characteristics. Fails: distance spectrum scaled below 90. */
-    score: number
-    confidence: number | null
-    /** Score level index → probability */
-    levelProbabilities: Record<string, number>
-  } | null
-  /** Score /100 for the card — the test-2 score */
-  score: number | null
-  scoreConfidence: number | null
-  /** 1-based rank among test-2-evaluated comps by score — #1 is closest */
-  poolRank: number | null
-  /** Price tier among test-2 passers — 'arv' = top-10% (the ARV set), 'as_is' = the rest */
-  priceTier: 'arv' | 'as_is' | null
-  /** 'core' = ARV-tier test-2 passer — the only comps feeding ARV */
-  selected: 'core' | null
-  adjustedPrice: number | null
-  /**
-   * Road-barrier proxy — the comp's census tract differs from the
-   * subject's (tract boundaries follow major roads). null = unverified.
-   * A crossing demotes a subdivision matcher out of the premium score tier.
-   */
-  crossesMajorRoad?: boolean | null
-  /**
-   * Census block-group match — the comp shares the subject's block group,
-   * a tighter same-micro-market signal than tract. null = unverified. A
-   * match can substitute for a subdivision noul toward the premium tier.
-   */
-  sameBlockGroup?: boolean | null
-}
-
-/** Jev read-only outcome classification attached to a completed analysis */
-export interface JevOutcomeData {
-  status: 'completed' | 'skipped' | 'unavailable'
-  reason?: string
-  classifications?: Partial<Record<JevOutcomeDimension, JevOutcomeSignal>>
-  /** Atomic yes/no sub-checks (0–1) exposing what drove each headline label */
-  drivers?: Partial<Record<JevOutcomeDimension, Record<string, number>>>
-  /** Every answer Jev returned, verbatim — survives question-type changes */
-  answers?: Record<string, JevOutcomeAnswer>
-  model?: string
-  latencyMs?: number
-  inputTokens?: number
-  classifiedAt?: string
-}
-
-export interface JevOutcomeAnswer {
-  /** 'choice' | 'score' | 'noul' today; future types pass through */
-  type: string
-  choice?: string
-  score?: number
-  noul?: number
-  confidence?: number
-  probabilities?: Record<string, number>
-  [key: string]: unknown
-}
-
-export type JevOutcomeDimension =
-  | 'evidence_sufficiency'
-  | 'comp_set_quality'
-  | 'deal_outlook'
-  | 'recommendation_agreement'
-  | 'risk_flags'
-
-/** A dimension's raw Jev answer — `choice`/`score`/`noul` or future types */
-export type JevOutcomeSignal = JevOutcomeAnswer
-
-/** Property classification (As-Is vs After-Renovation) */
 export interface ClassificationSummary {
   type: 'as_is' | 'after_renovation' | 'transitional'
   confidence: number
@@ -608,6 +380,18 @@ export interface CompsData {
   insufficientComps?: boolean
   avgPricePerSqft?: number | null
   medianPrice?: number | null
+  /** Provider retrieval audit — includes paramFlex escalation record */
+  retrieval?: {
+    paramFlex?: { extensions: number; factor: number; concessions?: string[] } | null
+  } | null
+  /** Investor floor (Group B evidence) — survives a no-ARV run */
+  asIsMarketIntel?: {
+    asIsMarketPrice?: number | null
+    avgPricePerSqft?: number | null
+    compCount?: number
+    flipSaleCount?: number
+    compIds?: string[]
+  } | null
   items?: CompItem[]
 }
 
@@ -631,6 +415,8 @@ export interface CompItem {
   saleDate?: string | null
   saleReconciled?: { previousPrice: number | null; previousDate: string | null; source: 'zillow' } | null
   flip?: { priorSalePrice: number; priorSaleDate: string; daysHeld: number; gainPct: number } | null
+  /** Provider-flagged distressed sale (e.g. ATTOM distressedStatus) — investor/as-is evidence */
+  distressedSale?: boolean | null
   squareFeet?: number | null
   pricePerSqft?: number | null
   distanceMiles?: number | null
@@ -697,9 +483,11 @@ export interface CompItem {
   compGroup?: 'arv' | 'as_is' | null
   /**
    * Reviewer's manual tier pin — 'arv' or 'as_is' — assigned on the comp
-   * card. Rides alongside Jev's automatic priceTier; never rewrites it.
+   * card. Rides alongside the automatic evidence class; never rewrites it.
    */
   userTier?: 'arv' | 'as_is' | null
+  /** Census tract GEOID (Census geocoder, free tier) */
+  censusTract?: string | null
   /** Road-barrier proxy — census tract differs from the subject's. Absent = unverified. */
   crossesMajorRoad?: boolean
   /** Same census block group as the subject — same micro-market evidence. Absent/null = unverified. */
@@ -717,39 +505,233 @@ export interface CompItem {
   pricePercentile?: number | null
   /** Reasons why this comp was disabled (if any) */
   disableReasons?: string[]
-  /** Jev truth score (0–1): reliable evidence of the subject's after-renovation retail value */
-  jevArvTruth?: number | null
-  /** Jev truth score (0–1): reliable evidence of the subject's as-is investor value */
-  jevInvestmentTruth?: number | null
-  /** Candidate B structured price class — present when the v2 classifier ran (shadow or enabled); observability only */
-  jevPriceClassification?: {
+  /** Property classification (as_is, after_renovation, transitional) */
+  classification?: ClassificationSummary | null
+}
+
+export interface RehabLevelEstimate {
+  index: number
+  name: string
+  perSqft: number
+  estimatedCost: number
+  buyPrice: number
+  wholesalePrice: number
+  projectedProfit: number
+  projectedROI: number
+  isSelected: boolean
+}
+
+export interface ValuationData {
+  displayedArv?: number
+  displayedBuyPrice?: number
+  displayedWholesalePrice?: number
+  displayRounding?: { increment: 500 | 1000; mode: 'half_up' }
+  arv?: number
+  arvSource?: string
+  arvPerSqft?: number
+  buyPrice?: number
+  buyPricePercent?: number
+  rehabCost?: number
+  baseRehabCost?: number
+  majorItemsCost?: number
+  rehabLevel?: string | null
+  rehabPerSqft?: number
+  /** All rehab level estimates with costs calculated for the current ARV */
+  rehabLevelEstimates?: RehabLevelEstimate[]
+  closingCosts?: number
+  carryingCosts?: number
+  totalCosts?: number
+  totalInvestment?: number
+  projectedProfit?: number
+  projectedROI?: number
+  wholesalePrice?: number
+  /** Wholesale fee deducted from buy price to reach the wholesale ceiling */
+  wholesaleFee?: number
+  /** Ask-vs-wholesale-ceiling realism — null when the subject has no list price */
+  listPriceRealism?: {
+    listPrice: number
+    wholesalePrice: number
+    /** listPrice − wholesalePrice (negative = ask below the ceiling) */
+    gapDollars: number
+    /** Gap as % of ask — ≤10% high, ≤20% medium, else low */
+    gapPercent: number
+    verdict: 'high' | 'medium' | 'low'
+  } | null
+  /** Location-risk deduction applied to buy price (positional proximity) */
+  locationPenalty?: number
+  locationPenaltyPercent?: number
+  /** Characteristic additions/deductions applied to ARV this render */
+  arvAdjustments?: Array<{ id: string; label: string; amount: number; direction: 'deduction' | 'addition' }>
+  recommendation?: string
+  recommendationReason?: string
+  /** Confidence gate on the comps driving the ARV */
+  confidence?: 'high' | 'medium' | 'low'
+  confidenceReasons?: string[]
+  /** True unless HIGH — medium flags for review, low withholds the call */
+  requiresHumanReview?: boolean
+  investorAnalysis?: {
+    status: string
+    methodLabel: string
+    sampleCount: number
+    eligibleCount?: number
+    value: number | null
+    limitations: string[]
+  } | null
+  /** As-Is market intelligence from Group B comps (display only) */
+  asIsMarketIntel?: {
+    asIsMarketPrice?: number | null
+    avgPricePerSqft?: number | null
+    compCount?: number
+    /** Verified flip acquisition (priorSale) data points folded into the average */
+    flipSaleCount?: number
+    compIds?: string[]
+    thresholdPercent?: number
+    priceCeiling?: number
+    noDataReason?: string
+  } | null
+  /** As-is (unrenovated) market value estimate */
+  asIsValue?: number | null
+  /** Asking/list price scraped from the subject's listing */
+  listPrice?: number | null
+  /** ARV minus list price — negative = ARV below asking (negotiation room) */
+  arvVsListPrice?: number | null
+}
+
+export interface CompsData {
+  count?: number
+  enabledCount?: number
+  disabledCount?: number
+  /** True when the pool couldn't support a valuation — valuation is null */
+  insufficientComps?: boolean
+  avgPricePerSqft?: number | null
+  medianPrice?: number | null
+  /** Provider retrieval audit — includes paramFlex escalation record */
+  retrieval?: {
+    paramFlex?: { extensions: number; factor: number; concessions?: string[] } | null
+  } | null
+  /** Investor floor (Group B evidence) — survives a no-ARV run */
+  asIsMarketIntel?: {
+    asIsMarketPrice?: number | null
+    avgPricePerSqft?: number | null
+    compCount?: number
+    flipSaleCount?: number
+    compIds?: string[]
+  } | null
+  items?: CompItem[]
+}
+
+export interface CompItem {
+  id?: string
+  selectionPending?: boolean
+  priorityRank?: number | null
+  rankingDetails?: string[]
+  matchPercent?: number | null
+  matchRuleCount?: number
+  matchRuleTotal?: number
+  matchReasons?: string[]
+  address?: string
+  city?: string | null
+  state?: string | null
+  zipCode?: string | null
+  latitude?: number | null
+  longitude?: number | null
+  zillowUrl?: string | null
+  salePrice?: number | null
+  saleDate?: string | null
+  saleReconciled?: { previousPrice: number | null; previousDate: string | null; source: 'zillow' } | null
+  flip?: { priorSalePrice: number; priorSaleDate: string; daysHeld: number; gainPct: number } | null
+  /** Provider-flagged distressed sale (e.g. ATTOM distressedStatus) — investor/as-is evidence */
+  distressedSale?: boolean | null
+  squareFeet?: number | null
+  pricePerSqft?: number | null
+  distanceMiles?: number | null
+  bedrooms?: number | null
+  bathrooms?: number | null
+  /** @deprecated Use bedrooms and bathrooms separately */
+  bedsBaths?: string
+  yearBuilt?: number | null
+  lotSizeAcres?: number | null
+  adjustedPrice?: number | null
+  qualityScore?: number | null
+  condition?: string | null
+  isBestComp?: boolean
+  photos?: string[]
+  /** Subdivision name (if available) */
+  subdivision?: string | null
+  /** Foundation type (e.g., Slab, Crawl Space, Basement) */
+  foundationType?: string | null
+  /** Building style (e.g., Colonial, Cape Cod, Ranch) */
+  buildingStyle?: string | null
+  /** Pool type */
+  pool?: string | null
+  /** Garage type */
+  garage?: string | null
+  /** Garage square footage */
+  garageSquareFeet?: number | null
+  /** Carport type */
+  carport?: string | null
+  /** Construction type (e.g., Frame, Masonry) */
+  constructionType?: string | null
+  /** Roof type */
+  roofType?: string | null
+  /** Exterior walls */
+  exteriorWalls?: string | null
+  /** Number of stories */
+  storiesType?: string | null
+  /** Stories count */
+  stories?: number | null
+  /** Roof cover material */
+  roofCover?: string | null
+  /** Heating system type */
+  heating?: string | null
+  /** Cooling system type */
+  cooling?: string | null
+  /** Fireplace count */
+  fireplacesCount?: number | null
+  /** Assessor building condition (e.g., Average, Good) */
+  buildingCondition?: string | null
+  /** Assessor construction grade */
+  buildingGrade?: string | null
+  /** Neighborhood name from site-location */
+  neighborhoodName?: string | null
+  /** Neighborhood code from site-location */
+  neighborhoodCode?: string | null
+  /** Building quality code */
+  qualityCode?: string | null
+  /** Reason this comp was selected/analyzed (LLM reasoning) */
+  selectionReason?: string | null
+  /** Key features identified by LLM analysis */
+  keyFeatures?: string[] | null
+  /** Whether this comp is enabled (passed all filters) */
+  isEnabled?: boolean
+  /** Which comp group: 'arv' (Group A, drives valuation), 'as_is' (Group B, market intel), or null */
+  compGroup?: 'arv' | 'as_is' | null
+  /**
+   * Reviewer's manual tier pin — 'arv' or 'as_is' — assigned on the comp
+   * card. Rides alongside the automatic evidence class; never rewrites it.
+   */
+  userTier?: 'arv' | 'as_is' | null
+  /** Census tract GEOID (Census geocoder, free tier) */
+  censusTract?: string | null
+  /** Road-barrier proxy — census tract differs from the subject's. Absent = unverified. */
+  crossesMajorRoad?: boolean
+  /** Same census block group as the subject — same micro-market evidence. Absent/null = unverified. */
+  sameBlockGroup?: boolean | null
+  /** Visual ARV-candidacy check on listing photos (ARV-selected comps only) */
+  curbAppeal?: {
+    condition: 'renovated' | 'dated' | 'distressed' | 'unknown'
+    confidence: number | null
+    summary: string | null
+    /** vision = verified from photos; price = inferred from top-of-market sale */
+    source?: 'vision' | 'price'
+    photosExamined: number
+  } | null
+  /** Price percentile among all comps (1 = highest, 100 = lowest) */
+  pricePercentile?: number | null
+  /** Reasons why this comp was disabled (if any) */
+  disableReasons?: string[]
     class: 'ARV' | 'AS_IS' | 'UNIDENTIFIED'
     probabilities: Record<string, number> | null
-    confidence: number | null
-    /** Largest / second-largest option probability and their margin — abstention analysis only, never routing */
-    top1?: number | null
-    top2?: number | null
-    margin?: number | null
-    rawChoice?: string | null
-  } | null
-  jevAttributeScores?: Partial<Record<
-    | 'same_neighborhood'
-    | 'same_subdivision'
-    | 'within_sqft_range'
-    | 'within_lot_sqft_range'
-    | 'same_property_style'
-    | 'same_construction'
-    | 'same_foundation'
-    | 'within_year_built_range',
-    number
-  >> | null
-  jevScreenScore?: number | null
-  jevScreenPool?: boolean
-  jevScreenBand?: 'arv' | 'as_is' | null
-  jevScreenRank?: number | null
-  jevScreenBandRank?: number | null
-  /** V4 hybrid audit — Jev class, hard-gate result, per-dimension proximity scores, pool rank, role */
-  jevHybrid?: JevHybridCompScore | null
   /** Property classification (as_is, after_renovation, transitional) */
   classification?: ClassificationSummary | null
   /** Weight contribution to ARV calculation (0-1) */
@@ -993,7 +975,7 @@ export async function queueAnalysis(request: AnalyzeRequest): Promise<QueueAnaly
 /**
  * Manual comp-tier assignment — pin a comparable to 'arv' or 'as_is' from the
  * comp card (Property Search), or clear the pin with null. Persisted per
- * (job, comp) on the API and applied onto the report at read time — Jev's
+ * (job, comp) on the API and applied onto the report at read time — the
  * automatic classification is never rewritten, the pin rides alongside it.
  */
 export async function assignCompTier(

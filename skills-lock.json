@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "skills": {
+    "babysit": {
+      "source": "tester-army/e2e",
+      "sourceType": "github",
+      "skillPath": ".claude/skills/babysit/SKILL.md",
+      "computedHash": "8795e0d12f5272d4b6d3b36a682852f6945d45d316e0a4ccb86b29a61a83ba5b"
+    },
+    "e2e": {
+      "source": "tester-army/e2e",
+      "sourceType": "github",
+      "skillPath": "skills/e2e/SKILL.md",
+      "computedHash": "d6fc293076f49227be01a6643a98fdbc194193ae26dfdecd95d073aa6111c9ab"
+    },
+    "ship-pr": {
+      "source": "tester-army/e2e",
+      "sourceType": "github",
+      "skillPath": ".claude/skills/ship-pr/SKILL.md",
+      "computedHash": "982000e4c223f24398d572d5387e6f6068e4648ec5958fa36ffb3cc9bef0e963"
+    },
+    "verify": {
+      "source": "tester-army/e2e",
+      "sourceType": "github",
+      "skillPath": ".claude/skills/verify/SKILL.md",
+      "computedHash": "579570bd3cfeaaca55220a5a415d8db64cc4ca9bfe1926651bcfbc17b791dea3"
+    },
+    "writing-pr": {
+      "source": "tester-army/e2e",
+      "sourceType": "github",
+      "skillPath": ".claude/skills/writing-pr/SKILL.md",
+      "computedHash": "0df20f3dbb5eb56f07a8a712efb88054844984bda9741a2544211ffe6e2179ed"
+    }
+  }
+}

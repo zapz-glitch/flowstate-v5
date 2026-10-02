@@ -18,7 +18,7 @@ const MapInner = dynamic(() => import('./PropertyMapInner'), {
 export interface MapMarker {
   lat: number
   lng: number
-  type: 'subject' | 'comp-enabled' | 'comp-disabled'
+  type: 'subject' | 'comp-arv' | 'comp-market' | 'comp-floor' | 'comp-disabled'
   label: string
   /** Comp key for toggling ARV selection (comp markers only) */
   compKey?: string
@@ -56,10 +56,16 @@ export function PropertyMap({ subject, comps, selectedCompKeys, onMarkerSelect, 
         if (isValidCoordinate({ lat: comp.latitude, lng: comp.longitude })) {
           const compKey = getCompKey(comp, i)
           const enabled = selectedCompKeys ? selectedCompKeys.has(compKey) : comp.isEnabled !== false
+          // Marker color = evidence class, not enabled state — green = ARV
+          // evidence, orange = market/median, red = investor floor.
+          const cls = comp.classification?.type
           m.push({
             lat: comp.latitude!,
             lng: comp.longitude!,
-            type: enabled ? 'comp-enabled' : 'comp-disabled',
+            type: !enabled ? 'comp-disabled'
+              : cls === 'after_renovation' ? 'comp-arv'
+              : cls === 'as_is' ? 'comp-floor'
+              : 'comp-market',
             label: comp.address ?? 'Comparable',
             compKey,
           })

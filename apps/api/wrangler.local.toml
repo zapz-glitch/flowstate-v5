@@ -35,6 +35,12 @@ id = "076d6c5a242c4b5d9765d04b8b8755b6"
 binding = "REPORT_ASSETS"
 bucket_name = "flowstate-v4-local-report-assets"
 
+# Workers AI — Clef decision models. AI can't run under --local, so the
+# binding proxies to the real account (wrangler OAuth covers it).
+[ai]
+binding = "AI"
+remote = true
+
 [[durable_objects.bindings]]
 name = "ANALYSIS_JOB"
 class_name = "AnalysisJobDO"
@@ -58,3 +64,8 @@ new_classes = ["BatchJobDO"]
 [[migrations]]
 tag = "v3"
 new_classes = ["RateLimitCoordinatorDO"]
+
+# Basin lake — analysis outcomes → Iceberg on flowstate-data-lake
+[[pipelines]]
+stream = "adbb75b369b645cc930401161827d832"
+binding = "FLOWSTATE_ANALYSIS_EVENTS_STREAM"

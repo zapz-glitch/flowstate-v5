@@ -203,7 +203,7 @@ export const savedReports = sqliteTable(
 
 // Manual comp tier assignments — a reviewer pins a comparable to 'arv' or
 // 'as_is' on the comp card or report. Keyed by (job_id, comp_id) so the
-// override survives cache hits and saved reports; Jev's automatic
+// override survives cache hits and saved reports; the automatic
 // classification stays alongside it.
 export const compTierOverrides = sqliteTable(
   'comp_tier_overrides',

@@ -659,7 +659,7 @@ userReports.get('/:jobId', async (c) => {
   }
 
   // Manual comp-tier assignments ride the stored payload — applied at read
-  // time so saved reports show the reviewer's pins next to Jev's.
+  // time so saved reports show the reviewer's pins next to the evidence class.
   await applyCompTierOverrides(c.env, session.user.id, jobId, analysis)
 
   return c.json({

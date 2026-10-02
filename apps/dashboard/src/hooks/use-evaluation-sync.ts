@@ -11,7 +11,7 @@
 import { useEffect } from 'react'
 import { useSetAtom } from 'jotai'
 import type { ArvAdjustmentRule, ArvAdjustmentOverride } from '@/lib/client-api'
-import type { AnalyzeData, JevOutcomeData, JevCompClassificationData, JevAttributeScreenData, JevHybridData, SubjectData, ValuationData, CompsData, CompItem } from '@/app/(dashboard)/dashboard/analyze/actions'
+import type { AnalyzeData, SubjectData, ValuationData, CompsData, CompItem } from '@/app/(dashboard)/dashboard/analyze/actions'
 import type { UseAnalysisEvaluationReturn } from '@/hooks/use-analysis-evaluation'
 import { evaluationStateAtom } from '@/atoms/evaluation'
 
@@ -37,10 +37,6 @@ interface SyncOptions {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   marketContext?: Record<string, any> | null
   aiReport?: { summary: string; selected: number; total: number; model: string } | null
-  jevOutcome?: JevOutcomeData | null
-  jevCompClassification?: JevCompClassificationData | null
-  jevAttributeScreen?: JevAttributeScreenData | null
-  jevHybrid?: JevHybridData | null
   onOpenSettings: () => void
   onCompClick?: (comp: CompItem) => void
   onRunAiAnalysis?: () => void
@@ -64,10 +60,6 @@ export function useEvaluationSync({
   isStreaming = false,
   marketContext = null,
   aiReport = null,
-  jevOutcome = null,
-  jevCompClassification = null,
-  jevAttributeScreen = null,
-  jevHybrid = null,
   onOpenSettings,
   onCompClick,
   onRunAiAnalysis,
@@ -93,10 +85,6 @@ export function useEvaluationSync({
       feedbackContext: feedback ?? null,
       marketContext,
       aiReport,
-      jevOutcome,
-      jevCompClassification,
-      jevAttributeScreen,
-      jevHybrid,
       aiAnalyzing,
       isStreaming,
       arvOverride,
@@ -121,6 +109,5 @@ export function useEvaluationSync({
     evaluation.handleToggleComp, evaluation.handleResetComps,
     feedback,
     arvOverride, arvAdjustmentRules, arvAdjustments, onArvOverride, onArvAdjustment,
-    aiAnalyzing, isStreaming, marketContext, aiReport, jevOutcome, jevCompClassification, jevAttributeScreen, jevHybrid, onOpenSettings, onCompClick, onRunAiAnalysis, onUndoAiSelection, onFeedbackSubmitted, onPermitsPulled, setState,
   ])
 }

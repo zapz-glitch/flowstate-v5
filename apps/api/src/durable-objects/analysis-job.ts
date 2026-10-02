@@ -28,10 +28,13 @@ import {
   type ComparablesRetrievalMeta,
 } from '../services/property-api/retrieval-policy'
 import { DEFAULT_FILTERS, evaluateComparable, type AppraisalFilter } from '../services/appraisal'
+import { flexNumericFilters, isValueEquivalent } from '../services/appraisal/evaluator'
+import { arvEvidence } from '../services/evaluation'
 import { DEFAULT_EXPANSION_POLICY, saleAgeExpansionSteps, vintageYearCap } from '../services/appraisal/types'
 import { filtersToApiParams } from '../services/appraisal/types'
 import type { Env } from '../types'
 import type { NormalizedProperty, NormalizedComparable } from '../services/property-api/types'
+import { fetchCensusGeography } from '../services/geo/census-geocoder'
 import { drizzle } from 'drizzle-orm/d1'
 import { and, eq } from 'drizzle-orm'
 import { upsertPropertyReport } from '../services/report-upsert'
@@ -386,7 +389,13 @@ export class AnalysisJobDO {
         propertyId: property.id,
         radiusMiles: config.searchOptions.radiusMiles ?? apiFilterParams.radiusMiles ?? 1,
         maxComps: candidateLimit,
-        monthsBack: config.searchOptions.monthsBack ?? apiFilterParams.monthsBack ?? 12,
+        // attom-mcp: the sale-age ladder (expansion tiers + param flex) can
+        // reach ~18 months — the configured window (often ~6mo, derived
+        // from sale_age) truncates the exact comps the rules are built to
+        // admit. Floor the fetch at the deepest reachable tier.
+        monthsBack: propertyApi.providerName === 'attom-mcp'
+          ? Math.max(18, config.searchOptions.monthsBack ?? apiFilterParams.monthsBack ?? 0)
+          : (config.searchOptions.monthsBack ?? apiFilterParams.monthsBack ?? 12),
         // Sub-1,000sf subjects: evaluation replaces the ±diff band with an
         // absolute 1,000sf ceiling — widen the provider-side diff so
         // qualifying comps aren't culled upstream.
@@ -497,8 +506,8 @@ export class AnalysisJobDO {
       })),
     })
 
-    // ── Step 3: Dead-comp pruning only — enrichment moved inside the Jev ──────
-    // funnel. Provider detail calls now run on test-1 passers only (nearest +
+    // ── Step 3: Dead-comp pruning — enrichment lives in the census gate ─────────
+    // for attom-mcp — provider detail calls run on census-verified comps only.
     // strongest first, capped) inside evaluation — mass-enriching the raw
     // pool here spent ~80 detail calls per run on comps that mostly fail
     // test 1. Pruning is pure field checks (no calls) and feeds retrieval
@@ -537,8 +546,129 @@ export class AnalysisJobDO {
 
     let enrichedComps = rawComps
     const poolCompIds = new Set(rawComps.map((c) => c.id))
+    // Param-flex ladder record — how far numeric tolerances stretched to
+    // admit evidence (0 = strict tier admitted it).
+    let paramFlexExtensions = 0
+    let paramFlexFactor = 1
     retrieval.candidatesPrunedBeforeEnrichment = candidatesPruned
     retrieval.candidatesEnriched = candidatesEnriched
+
+    // Human-readable concessions the winning flex tier made — only the
+    // numeric filters that actually moved.
+    const describeFlexConcessions = (base: AppraisalFilter[], factor: number): string[] => {
+      if (factor <= 1) return []
+      const label: Record<string, (v: number) => string> = {
+        sale_age: (v) => `sale age to ${Math.round(v)} days`,
+        sale_age_expansion: () => null as unknown as string,
+        sale_age_expansion_2: () => null as unknown as string,
+        sqft_diff: (v) => `sqft tolerance to ±${Math.round(v)}`,
+        year_built_diff: (v) => `year built to ±${Math.round(v)} yrs`,
+        lot_size_diff: (v) => `lot size to ±${Math.round(v)} sqft`,
+        distance: (v) => `distance to ${Math.round(v * 10) / 10}mi`,
+      }
+      const out: string[] = []
+      for (const f of base) {
+        const fmt = label[f.type]
+        if (!fmt || !f.enabled || typeof f.value !== 'number') continue
+        const stretched = f.value * factor
+        const txt = fmt(stretched)
+        if (txt) out.push(`${txt} (was ${fmt(f.value)})`)
+      }
+      return out
+    }
+
+    // ── attom-mcp: free-first census gate + gated enrichment ──────────────────
+    // Census-geocode every comp (free, no key) and only spend a provider
+    // detail call (1 AI Intelligence Report each) on comps sharing the
+    // subject's census block group or tract. Non-passers stay in the pool
+    // unenriched with sameBlockGroup/crossesMajorRoad/censusTract stamped.
+    const isAttomMcp = propertyApi.providerName === 'attom-mcp'
+    const gateAndEnrich = async (
+      comps: NormalizedComparable[],
+    ): Promise<NormalizedComparable[]> => {
+      if (!isAttomMcp || property.latitude == null || property.longitude == null) return comps
+      const subjectGeo = await fetchCensusGeography(
+        property.latitude,
+        property.longitude,
+        this.env.API_CACHE,
+      )
+      if (!subjectGeo) return comps
+      const cache = this.env.API_CACHE ?? undefined
+      const lookup = async (lat: number, lng: number) => {
+        const g = await fetchCensusGeography(lat, lng, cache).catch(() => null)
+        // One retry — a transient null silently drops an otherwise-valid comp
+        return g ?? fetchCensusGeography(lat, lng, cache).catch(() => null)
+      }
+      // Bounded concurrency — the Census endpoint throttles big bursts.
+      const geos: (Awaited<ReturnType<typeof lookup>> | null)[] = new Array(comps.length).fill(null)
+      const queue = comps.map((c, i) => ({ c, i }))
+      await Promise.all(
+        Array.from({ length: 5 }, async () => {
+          for (let item = queue.shift(); item; item = queue.shift()) {
+            if (item.c.latitude != null && item.c.longitude != null) {
+              geos[item.i] = await lookup(item.c.latitude, item.c.longitude)
+            }
+          }
+        }),
+      )
+      const geoPassers = comps.filter((c, i) => {
+        const g = geos[i]
+        if (!g) return false
+        c.censusTract ??= g.tract
+        c.sameBlockGroup ??= g.blockGroup === subjectGeo.blockGroup
+        c.crossesMajorRoad ??= g.tract !== subjectGeo.tract
+        return g.blockGroup === subjectGeo.blockGroup || g.tract === subjectGeo.tract
+      })
+      if (geoPassers.length === 0) return comps
+      // Thin-pool flex ladder — geo stays required; numeric tolerances
+      // (sqft, year built, lot, sale age, distance) stretch ×1.15 → ×1.25 →
+      // ×1.35 → … until a passer carries ARV evidence or every geo-verified
+      // comp has been enriched. First admission stops the stretch, enriches
+      // the cohort, checks evidence; no ARV evidence → stretch again.
+      // Value-equivalent crossers — geocoded comps in a different tract
+      // whose pocket sits within ±10% $/sf of the subject's. Census is
+      // preferred; under flex (i≥1) these become enrichment candidates.
+      const geoPasserIds = new Set(geoPassers.map((c) => c.id))
+      const flexCrossers = comps.filter((c, i) => {
+        const g = geos[i]
+        if (!g || geoPasserIds.has(c.id)) return false
+        return isValueEquivalent(property, c)
+      })
+      const FLEX_TIERS = [1, 1.15, 1.25, 1.35, 1.5, 1.75, 2, 2.5, 3, 4, 5]
+      const enrichedById = new Map<string, NormalizedComparable>()
+      for (let i = 0; i < FLEX_TIERS.length; i++) {
+        // Deepest stretch wins across gate invocations (initial pool and
+        // expansion refetch share the record).
+        paramFlexFactor = Math.max(paramFlexFactor, FLEX_TIERS[i])
+        paramFlexExtensions = Math.max(paramFlexExtensions, i)
+        const tierFilters = flexNumericFilters(filters, FLEX_TIERS[i])
+        const candidates = i === 0 ? geoPassers : [...geoPassers, ...flexCrossers]
+        const newPassers = candidates.filter((c) => {
+          if (enrichedById.has(c.id)) return false
+          return !evaluateComparable(property, c, tierFilters, []).shouldDisable
+        })
+        if (newPassers.length > 0) {
+          const enriched = await propertyApi.enrichComparables(newPassers, { concurrency: 10 })
+          for (const e of enriched) enrichedById.set(e.id, e)
+          candidatesEnriched += enriched.filter((c) => c.isEnriched).length
+        }
+        const enrichedSoFar = [...geoPassers, ...flexCrossers].filter((c) => enrichedById.has(c.id))
+        if (enrichedSoFar.some((c) => arvEvidence(c, property.avmValue) != null)) break
+        if (enrichedSoFar.length >= geoPassers.length + flexCrossers.length) break
+      }
+      retrieval.paramFlex = {
+        extensions: paramFlexExtensions,
+        factor: paramFlexFactor,
+        concessions: describeFlexConcessions(filters, paramFlexFactor),
+      }
+      if (enrichedById.size === 0) return comps
+      return comps.map((c) => enrichedById.get(c.id) ?? c)
+    }
+    if (isAttomMcp) {
+      enrichedComps = await gateAndEnrich(rawComps)
+      retrieval.candidatesEnriched = candidatesEnriched
+      console.log(`[AnalysisJobDO] attom-mcp census gate: ${enrichedComps.filter((c) => c.isEnriched).length}/${rawComps.length} comps share the subject's tract/BG — enriched those only`)
+    }
 
     // ── Expansion refetch ─────────────────────────────────────────────────────
     // The pool fetched at radius R provably contains zero candidates beyond R.
@@ -563,17 +693,61 @@ export class AnalysisJobDO {
         console.warn(`[AnalysisJobDO] Expansion refetch failed: ${wider.error}`)
         return null
       }
-      const merged = mergeComparablePools(rawComps, wider.data.comparables)
+      // Merge against the CURRENT pool (enrichedComps), not rawComps — the
+      // attom-mcp census gate has already enriched passers; merging from
+      // rawComps would clobber the enriched records.
+      const merged = mergeComparablePools(enrichedComps, wider.data.comparables)
+      if (isAttomMcp) {
+        // mergeComparablePools prefers the expanded pool's copy of a duped
+        // comp — which is the unenriched variant. Overlay the enrichment
+        // fields the gate paid for onto the winner.
+        const ENRICHED_KEYS = [
+          'subdivision', 'neighborhoodName', 'neighborhoodCode', 'censusTract',
+          'sameBlockGroup', 'crossesMajorRoad',
+          'buildingCondition', 'buildingGrade', 'stories', 'construction',
+          'transaction', 'features', 'flip', 'distressedSale', 'isEnriched',
+          'latestSale', 'ppsfMedians', 'avmValue',
+        ] as const
+        const enrichedById = new Map(
+          enrichedComps.filter((c) => c.isEnriched).map((c) => [c.id, c]),
+        )
+        merged.comparables = merged.comparables.map((c) => {
+          const prior = enrichedById.get(c.id)
+          if (!prior || c.isEnriched) return c
+          const out = { ...c } as unknown as Record<string, unknown>
+          const src = prior as unknown as Record<string, unknown>
+          for (const k of ENRICHED_KEYS) {
+            if (out[k] == null && src[k] != null) {
+              out[k] = src[k]
+            }
+          }
+          // The widened winner can hold the flip's stale acquisition leg —
+          // re-apply the sales-history price correction on the merged comp.
+          const ls = src.latestSale as { price: number; date: string } | null | undefined
+          if (ls && (!out.saleDate || ls.date > (out.saleDate as string))) {
+            out.salePrice = ls.price
+            out.saleDate = ls.date
+            out.pricePerSqft = out.squareFeet ? Math.round(ls.price / (out.squareFeet as number)) : out.pricePerSqft
+          }
+          return out as unknown as NormalizedComparable
+        })
+      }
       for (const id of merged.conflictIds) {
         pools.conflictIds.push(id)
         evidenceLimitations.push(`${id}: Provider comparable pools disagree on the same sale date; price is quarantined from evaluation`)
       }
       // New candidates join the raw pool — enrichment is deferred to the
-      // Jev funnel (test-1 passers only), same as the initial pool.
-      const newCandidates = merged.comparables.filter((c) => !poolCompIds.has(c.id))
+      // census gate for attom-mcp, same as the initial pool.
+      // attom-mcp: same census gate + gated enrichment as the initial pool.
+      let newCandidates = merged.comparables.filter((c) => !poolCompIds.has(c.id))
       for (const c of newCandidates) poolCompIds.add(c.id)
       candidatesPruned += newCandidates.filter((c) => isDeadComp(c)).length
-      enrichedComps = merged.comparables
+      if (isAttomMcp) {
+        newCandidates = await gateAndEnrich(newCandidates)
+        retrieval.candidatesEnriched = candidatesEnriched
+      }
+      const newById = new Map(newCandidates.map((c) => [c.id, c]))
+      enrichedComps = merged.comparables.map((c) => newById.get(c.id) ?? c)
       retrieval.providerCallsUsed += 1
       retrieval.pagesRequested += 1
       if (monthsBack != null) retrieval.monthsBack = monthsBack
@@ -706,6 +880,17 @@ export class AnalysisJobDO {
     const propertyCallStats = propertyApi.getCallStats()
     const evalParams = {
       ...config.evalParams,
+      // attom-mcp: when the flex ladder stretched numeric tolerances to
+      // admit evidence, evaluate the pool under the winning tier — comps
+      // admitted by flex must stay enabled through evaluation.
+      ...(isAttomMcp && paramFlexFactor > 1
+        ? {
+            appraisalRules: {
+              ...(config.evalParams.appraisalRules ?? {}),
+              filters: flexNumericFilters(filters, paramFlexFactor),
+            },
+          }
+        : {}),
       apiCallStats: {
         corelogic: { total: propertyCallStats.total, cached: propertyCallStats.cached, endpoints: propertyCallStats.endpoints },
         totalExternalCalls: propertyCallStats.total,
@@ -713,11 +898,8 @@ export class AnalysisJobDO {
       // Radius-bound expansion tiers refetch instead of pretending the
       // fetched-radius pool contains candidates it never had.
       expandComparablesPool,
-      // Jev evaluation enriches its top-screened candidates before the
-      // cross-examination — provider detail: style, foundation,
-      // construction, features, transaction.
-      enrichComparables: (comps: NormalizedComparable[]) =>
-        propertyApi.enrichComparables(comps, { concurrency: 10 }),
+      // attom-mcp comp enrichment happens in the census gate above —
+      // passers only, 1 provider call each.
       prefetchedPhotoBundle,
       skipCache: !!config.skipCache,
     }
@@ -801,7 +983,7 @@ export class AnalysisJobDO {
     await this.pushEvent('evaluation_complete', { updatedResult: analysisResult })
     await this.recordRun(config, { status: 'completed', durationMs: Date.now() - startTime, response: analysisResult })
 
-    // LLM comp annotation removed — Jev is the selection/evaluation logic;
+    // LLM comp annotation removed — evidence classification drives the eval;
     // the separate annotate pass only wrote prose onto cards.
 
     // Wait for parallel tasks before closing SSE (so client receives them)
@@ -926,7 +1108,7 @@ export class AnalysisJobDO {
       }
     }
 
-    // LLM comp annotation removed — Jev is the selection/evaluation logic.
+    // LLM comp annotation removed — evidence classification drives the eval.
 
     // Wait for OSM risk flags if still running
     await osmPromise
@@ -1012,6 +1194,51 @@ export class AnalysisJobDO {
         evalJson: JSON.stringify(runEval),
         apiCallStatsJson: resp?.apiCallStats ? JSON.stringify(resp.apiCallStats) : null,
       })
+
+      // Basin lake — land every analysis outcome as an Iceberg row for the
+      // calibration/fine-tune corpus. Non-fatal: a stream failure must never
+      // touch the analysis path.
+      const stream = this.env.FLOWSTATE_ANALYSIS_EVENTS_STREAM
+      if (stream) {
+        const compItems = Array.isArray(comps?.items) ? comps.items : []
+        const curbAppeals = compItems
+          .filter((c) => (c as Record<string, unknown>).curbAppeal)
+          .map((c) => {
+            const cc = c as Record<string, unknown>
+            const ca = cc.curbAppeal as Record<string, unknown>
+            return {
+              compId: cc.id,
+              condition: ca.condition,
+              confidence: ca.confidence,
+              summary: ca.summary,
+              photosExamined: ca.photosExamined,
+            }
+          })
+        try {
+          await stream.send([
+            {
+              ts: new Date().toISOString(),
+              job_id: config.jobId,
+              address: (subj?.address as string) ?? config.search.address ?? '',
+              provider: (resp?.retrieval as Record<string, unknown> | null)?.provider ?? 'corelogic',
+              status: outcome.status,
+              arv: (val?.arv as number) ?? null,
+              enabled_comps: (comps?.enabledCount as number) ?? null,
+              comp_conditions: curbAppeals.length > 0 ? curbAppeals : null,
+              payload: {
+                errorCode: outcome.errorCode ?? null,
+                errorMessage: outcome.errorMessage ?? null,
+                compCount: outcome.compCount ?? (comps?.total as number) ?? null,
+                durationMs: outcome.durationMs,
+                fallbacks: report?.fallbacksUsed ?? [],
+                steps: report?.steps ?? null,
+              },
+            },
+          ])
+        } catch (err) {
+          console.warn('[AnalysisJobDO] basin stream send failed (non-fatal):', err instanceof Error ? err.message : err)
+        }
+      }
     } catch (err) {
       console.warn('[AnalysisJobDO] recordRun failed (non-fatal):', err instanceof Error ? err.message : err)
     }

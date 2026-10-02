@@ -751,6 +751,14 @@ export interface AnalysisResponse {
     disabledCount: number
     /** True when the pool couldn't support a valuation — valuation is null */
     insufficientComps?: boolean
+    /** Investor floor (Group B evidence) — survives a no-ARV run */
+    asIsMarketIntel?: {
+      asIsMarketPrice: number | null
+      avgPricePerSqft: number | null
+      compCount: number
+      flipSaleCount: number
+      compIds: string[]
+    } | null
     avgPricePerSqft: number | null
     medianPrice: number | null
     /** IDs of comps classified as As-Is */
@@ -849,22 +857,9 @@ export interface AnalysisResponse {
       classification: ClassificationSummary | null
       /** Whether this comp is the LLM/rule-selected best match */
       isBestMatch?: boolean
-      /** Jev truth score (0–1): reliable evidence of the subject's after-renovation retail value */
-      jevArvTruth?: number | null
-      /** Jev truth score (0–1): reliable evidence of the subject's as-is investor value */
-      jevInvestmentTruth?: number | null
       /** Candidate B structured price class (ARV | AS_IS | UNIDENTIFIED) — present when the v2 classifier ran */
-      jevPriceClassification?: import('../jev').JevCompPriceClass | null
-      /** Jev per-attribute match scores (0–1 per comparability axis) — present when the attribute screen ran */
-      jevAttributeScores?: Partial<Record<import('../jev').CompAttributeKey, number>> | null
       /** Deterministic exception-screen closeness score (0–1) and pool/band membership */
-      jevScreenScore?: number | null
-      jevScreenPool?: boolean
-      jevScreenBand?: 'arv' | 'as_is' | null
-      jevScreenRank?: number | null
-      jevScreenBandRank?: number | null
       /** V4 hybrid audit record — class, gates, dimension scores, rank, role */
-      jevHybrid?: import('../comp-hybrid').HybridCompScore | null
       /** Appraisal rule evaluation details */
       appraisalRules: {
         /** Whether this comp passed all filters */
@@ -1000,11 +995,6 @@ export interface AnalysisResponse {
   } | null
   /** External API call statistics for this analysis */
   apiCallStats?: ApiCallStats | null
-  /**
-   * Justified end-to-end evaluation report: ordered pipeline steps,
-   * fallbacks used, ARV drivers, rehab derivation, itemized deductions,
-   * and final verdict.
-   */
   report?: import('../evaluation/types').EvaluationReport
   /** Full computer-vision renovation assessment (subject photos) */
   visionAssessment?: import('../vision/renovation').RenovationAssessment | null
@@ -1012,54 +1002,11 @@ export interface AnalysisResponse {
   renovationLevelSource?: 'manual_override' | 'vision' | 'classification' | 'default'
   /** Photo provider that delivered the subject photos (zillow/redfin/realtor) */
   photoProvider?: string
-  /**
-   * Realtor conversation-log notes fetched from Close at eval time — the raw
-   * property-condition intel for the Give Offer review card.
-   */
   sellerNotes?: import('../seller-notes').SellerNotesResult
-  /**
-   * Note-derived rehab items that were ADDED to the valuation ledger this
-   * run (additive only — notes never remove cost automatically).
-   */
   rehabAdditions?: import('../seller-notes').RehabAddition[]
-  /**
-   * Notes suggesting a charged rehab item may be unneeded — advisory
-   * callouts for human review, never applied automatically.
-   */
   rehabAdvisories?: import('../seller-notes').RehabAdvisory[]
   /** Evaluation engine that produced this response */
   evaluationEngine?: string
-  /**
-   * Jev read-only classification of this completed outcome. Attached after the
-   * pipeline finishes; it never influences comp selection, ARV, or the
-   * recommendation.
-   */
-  jevOutcome?: import('../jev').JevOutcomeClassification | null
-  /**
-   * Baseline A comp-truth run metadata (dual nouls) — model, latency,
-   * tokens. A/B observability for the comp classifier.
-   */
-  jevCompTruth?: { model: string; latencyMs: number; inputTokens: number; scored: number } | null
-  /**
-   * Candidate B comp price-classification run metadata — mode (shadow or
-   * enabled), per-class counts, disagreement count vs Baseline A, cost.
-   * Read-only; routing facts live on each comp's jevPriceClassification.
-   */
-  jevCompClassification?: import('../jev').JevCompClassificationRun | null
-  /**
-   * Comp screen run metadata — Jev 8-axis attribute scores, screened pool
-   * count, ARV/as-is band counts and anchors, plus the shadow counterfactual
-   * valuation. Read-only under shadow mode; per-comp scores live on each
-   * comp's jevAttributeScores/jevScreenScore/jevScreenBand.
-   */
-  jevAttributeScreen?: import('../comp-screen').AttributeScreenRun | null
-  /**
-   * V4 hybrid run metadata — Jev classified the raw pool, deterministic
-   * gates rejected non-recoverable comps, weighted proximity scoring picked
-   * the ARV/as-is sets, plus the shadow counterfactual valuation. Read-only
-   * under shadow mode; per-comp audit lives on each comp's jevHybrid.
-   */
-  jevHybrid?: import('../comp-hybrid').HybridRun | null
 }
 export interface ApiCallStats {
   corelogic: {
@@ -1287,6 +1234,7 @@ export function buildAnalysisResponse(
       saleDate: formatDate(comp.saleDate),
       saleReconciled: comp.saleReconciled ?? null,
       flip: comp.flip ?? null,
+      distressedSale: comp.distressedSale ?? null,
       squareFeet,
       pricePerSqft: squareFeet && squareFeet > 0 && (comp.adjustedSalePrice ?? comp.salePrice) != null
         ? Math.round((comp.adjustedSalePrice ?? comp.salePrice)! / squareFeet)
@@ -1304,8 +1252,15 @@ export function buildAnalysisResponse(
       neighborhoodName: comp.neighborhoodName ?? null,
       neighborhoodCode: comp.neighborhoodCode ?? null,
       censusTract: comp.censusTract ?? null,
+      // Enrichment signals serialized so reports/replays carry the same
+      // evidence the rules evaluated — value-equivalence (ppsfMedians),
+      // above-AVM (avmValue), transaction distress flags (transaction).
+      ...(comp.ppsfMedians != null ? { ppsfMedians: comp.ppsfMedians } : {}),
+      ...(comp.avmValue != null ? { avmValue: comp.avmValue } : {}),
+      ...(comp.transaction != null ? { transaction: comp.transaction } : {}),
       // Road-barrier proxy (census tract) — absent when unverified
       ...(comp.crossesMajorRoad != null ? { crossesMajorRoad: comp.crossesMajorRoad } : {}),
+      ...(comp.sameBlockGroup != null ? { sameBlockGroup: comp.sameBlockGroup } : {}),
       buildingCondition: comp.buildingCondition ?? null,
       buildingGrade: comp.buildingGrade ?? null,
       stories: comp.stories ?? null,
@@ -1332,16 +1287,6 @@ export function buildAnalysisResponse(
       disableReasons: evaluation?.disableReasons ?? [],
       classification: classificationSummary,
       isBestMatch: ctx.bestMatch?.compId === comp.id,
-      jevArvTruth: comp.jevArvTruth ?? null,
-      jevInvestmentTruth: comp.jevInvestmentTruth ?? null,
-      jevPriceClassification: comp.jevPriceClassification ?? null,
-      jevAttributeScores: comp.jevAttributeScores ?? null,
-      jevScreenScore: comp.jevScreenScore ?? null,
-      jevScreenPool: comp.jevScreenPool ?? false,
-      jevScreenBand: comp.jevScreenBand ?? null,
-      jevScreenRank: comp.jevScreenRank ?? null,
-      jevScreenBandRank: comp.jevScreenBandRank ?? null,
-      jevHybrid: comp.jevHybrid ?? null,
       appraisalRules,
     }
   })
@@ -1395,6 +1340,7 @@ export function buildAnalysisResponse(
       neighborhoodCode: property.neighborhoodCode ?? null,
       cbsaCode: property.cbsaCode ?? null,
       censusTract: property.censusTract ?? null,
+      ...(property.ppsfMedians != null ? { ppsfMedians: property.ppsfMedians } : {}),
       legalDescription: property.legalDescription ?? null,
       lastSale: property.lastSalePrice
         ? {
@@ -1511,7 +1457,6 @@ export function buildAnalysisResponse(
           ? finalArv - ctx.subjectListPrice
           : null,
     } : null,
-
     // ═══ COMPARABLE SALES (All comps with enable/disable status) ═══════════════
     comps: {
       total: appraisalResult.comparables.length,
@@ -1520,6 +1465,14 @@ export function buildAnalysisResponse(
       enabledCount: enabledComps.length,
       disabledCount: disabledComps.length,
       insufficientComps: appraisalResult.insufficientComps === true || enabledComps.length === 0,
+      // Investor floor — survives a no-ARV run (also inside valuation).
+      asIsMarketIntel: ctx.groupBResult ? {
+        asIsMarketPrice: ctx.groupBResult.asIsMarketPrice,
+        avgPricePerSqft: ctx.groupBResult.avgPricePerSqft,
+        compCount: ctx.groupBResult.count,
+        flipSaleCount: ctx.groupBResult.flipSaleCount,
+        compIds: ctx.groupBResult.compIds,
+      } : null,
       avgPricePerSqft: appraisalResult.avgPricePerSqft,
       medianPrice: appraisalResult.medianSalePrice,
       asIsCompIds: ctx.classificationSummary?.asIsCompIds ?? [],

@@ -22,6 +22,7 @@
 import type { Env } from '../../types';
 import { createCoreLogicProvider } from './providers/corelogic';
 import { createAttomProvider } from './providers/attom';
+import { createAttomMcpProvider } from './providers/attom-mcp';
 import {
   createCacheService,
   propertyKey,
@@ -32,6 +33,7 @@ import {
   type CacheService,
 } from '../cache';
 import { resolveCandidateLimit } from './retrieval-policy';
+import { fetchCensusGeography } from '../geo/census-geocoder';
 import type {
   PropertyProvider,
   PropertyProviderAdapter,
@@ -269,6 +271,7 @@ class PropertyApi implements PropertyApiService {
     this.providers = new Map();
     this.providers.set('corelogic', createCoreLogicProvider(env));
     this.providers.set('attom', createAttomProvider(env));
+    this.providers.set('attom-mcp', createAttomMcpProvider(env));
   }
 
   private getProvider(): PropertyProviderAdapter {
@@ -882,11 +885,69 @@ class PropertyApi implements PropertyApiService {
 
     // ─── Step 3: Enrich comparables with full property details ─────────────────
     // This fetches subdivision data for each comp (needed for subdivision matching)
-    const enrichedComparables = await this.enrichComparables(
-      compsResult.data.comparables,
-      {
-        concurrency: 10,
-      },
+    //
+    // attom-mcp: free-first ordering — census-geocode every comp (no cost)
+    // and only pay a provider detail call for comps sharing the subject's
+    // census block group or tract. Non-passers stay in the pool unenriched;
+    // the geo signals are stamped so downstream rules (road_barrier,
+    // sameBlockGroup) and the UI see them.
+    let compsToEnrich = compsResult.data.comparables;
+    if (
+      this.currentConfig.provider === 'attom-mcp' &&
+      property.latitude != null &&
+      property.longitude != null
+    ) {
+      const subjectGeo = await fetchCensusGeography(
+        property.latitude,
+        property.longitude,
+        this.env.API_CACHE ?? undefined,
+      );
+      if (subjectGeo) {
+        const cache = this.env.API_CACHE ?? undefined;
+        const lookup = async (lat: number, lng: number) => {
+          const g = await fetchCensusGeography(lat, lng, cache).catch(() => null);
+          // One retry — a null geo silently drops an otherwise-valid comp
+          return g ?? fetchCensusGeography(lat, lng, cache).catch(() => null);
+        };
+        // Bounded concurrency — the Census endpoint throttles big bursts
+        // (25 parallel calls returned ~90% nulls in testing).
+        const GEO_CONCURRENCY = 5;
+        const geos: (Awaited<ReturnType<typeof lookup>> | null)[] = new Array(compsToEnrich.length).fill(null);
+        const queue = compsToEnrich.map((c, i) => ({ c, i }));
+        await Promise.all(
+          Array.from({ length: GEO_CONCURRENCY }, async () => {
+            for (let item = queue.shift(); item; item = queue.shift()) {
+              const { c, i } = item;
+              if (c.latitude != null && c.longitude != null) {
+                geos[i] = await lookup(c.latitude, c.longitude);
+              }
+            }
+          }),
+        );
+        compsToEnrich = compsToEnrich.filter((c, i) => {
+          const g = geos[i];
+          if (!g) {
+            c.isEnriched = false;
+            return false;
+          }
+          c.censusTract ??= g.tract;
+          c.sameBlockGroup ??= g.blockGroup === subjectGeo.blockGroup;
+          c.crossesMajorRoad ??= g.tract !== subjectGeo.tract;
+          const pass =
+            g.blockGroup === subjectGeo.blockGroup || g.tract === subjectGeo.tract;
+          if (!pass) c.isEnriched = false;
+          return pass;
+        });
+      }
+    }
+    const enrichedOnly = await this.enrichComparables(compsToEnrich, {
+      concurrency: 10,
+    });
+    // Merge enriched passers back over the full pool so non-passers still
+    // appear (unenriched) in the response.
+    const enrichedById = new Map(enrichedOnly.map((c) => [c.id, c]));
+    const enrichedComparables = compsResult.data.comparables.map(
+      (c) => enrichedById.get(c.id) ?? c,
     );
 
     // ─── Step 4: Build enrichment data ─────────────────────────────────────────
@@ -1092,10 +1153,30 @@ class PropertyApi implements PropertyApiService {
                 buildingCondition: result.data.buildingCondition ?? null,
                 buildingGrade: result.data.buildingGrade ?? null,
                 stories: result.data.stories ?? null,
+                flip: result.data.flip ?? null,
+                distressedSale: result.data.distressedSale ?? null,
+                latestSale: result.data.latestSale ?? null,
+                // Pool records can carry the flip's ACQUISITION leg — when
+                // sales-history shows a newer priced sale, correct the comp
+                // sale to the true resale so ARV prices the right transaction.
+                ...(result.data.latestSale && (!comp.saleDate || result.data.latestSale.date > comp.saleDate)
+                  ? {
+                      salePrice: result.data.latestSale.price,
+                      saleDate: result.data.latestSale.date,
+                      pricePerSqft: result.data.latestSale.price && comp.squareFeet
+                        ? Math.round(result.data.latestSale.price / comp.squareFeet)
+                        : comp.pricePerSqft,
+                    }
+                  : {}),
+                // ARV-evidence signals: comp's own AVM + scope medians
+                avmValue: result.data.avmValue ?? null,
+                ppsfMedians: result.data.ppsfMedians ?? null,
                 construction: mergedConstruction,
                 transaction: result.data.transaction ? {
                   buyerNames: result.data.transaction.buyerNames,
                   buyerIsCorporate: result.data.transaction.buyerIsCorporate,
+                  isForeclosure: result.data.transaction.isForeclosure,
+                  isShortSale: result.data.transaction.isShortSale,
                 } : undefined,
                 features: (result.data.features || buildingDetail) ? {
                   poolType: result.data.features?.poolType ?? buildingDetail?.pool ?? undefined,

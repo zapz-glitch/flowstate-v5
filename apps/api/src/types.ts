@@ -2,10 +2,19 @@
  * API Types
  */
 
+/** Minimal shape of a Workers Pipelines stream binding (cloudflare:pipelines). */
+export interface PipelineStream<T = Record<string, unknown>> {
+  send(records: T[]): Promise<void>
+}
+
 export interface Env {
   DB: D1Database
   API_CACHE: KVNamespace
+  /** Basin lake — analysis outcome events → Iceberg on R2 */
+  FLOWSTATE_ANALYSIS_EVENTS_STREAM?: PipelineStream
   REPORT_ASSETS?: R2Bucket
+  /** Workers AI binding — Clef decision models (comp curb-appeal classification) */
+  AI?: Ai
   ANALYSIS_JOB: DurableObjectNamespace
   BATCH_JOB: DurableObjectNamespace
   /** Global Cotality request throttle (50 req/min sliding window) */
@@ -58,55 +67,44 @@ export interface Env {
   // ─── Property Data (ATTOM) ─────────────────────────────────────────────────
   ATTOM_API_KEY?: string
 
+  // ─── ATTOM MCP provider (experimental — PROPERTY_PROVIDER=attom-mcp) ───────
+  // OAuth pair injected by scripts/sync-attom-token.mjs from the Devin CLI
+  // creds file. Refresh rotates the pair in-isolate; stale env pair → resync.
+  /** Static API key — production auth path; bypasses OAuth when set */
+  ATTOM_MCP_API_KEY?: string
+  ATTOM_MCP_ACCESS_TOKEN?: string
+  ATTOM_MCP_REFRESH_TOKEN?: string
+  ATTOM_MCP_CLIENT_ID?: string
+  /** M2M client_credentials pair — production auth path */
+  ATTOM_MCP_M2M_CLIENT_ID?: string
+  ATTOM_MCP_CLIENT_SECRET?: string
+  /** epoch seconds */
+  ATTOM_MCP_EXPIRES_AT?: string
+  ATTOM_MCP_ENDPOINT?: string
+
+  // ─── Clef comp-condition classification (input-side evidence, off by default)
+  /** 'clef' (27B) or 'clef-flash' (9B, default) */
+  CLEF_MODEL?: string
+  /** 'true' enables comp curb-appeal evidence in the pipeline */
+  CLEF_COMP_CONDITION_ENABLED?: string
+  /** Optional cap on comps per run that get Clef classification (default: all returned) */
+  CLEF_COMP_MAX?: string
+
   // ─── Vision Analysis (OpenRouter LLM) ──────────────────────────────────────
   // OpenRouter provides access to multiple models via single API
   OPENROUTER_API_KEY?: string
   OPENAI_API_KEY?: string
   OPENROUTER_MODEL?: string // Default model for general LLM tasks
+  VISION_MODEL?: string // Vision-only override (subject reno tier) — defaults to OPENROUTER_MODEL
   /** Model for comp selection — stronger reasoning (e.g., 'anthropic/claude-sonnet-4', 'google/gemini-2.5-pro-preview') */
   COMP_SELECTION_MODEL?: string
   /** Model for market context web search — fast/cheap (e.g., 'google/gemini-2.0-flash-001') */
   MARKET_SEARCH_MODEL?: string
 
-  // ─── Jev Outcome Classification (Typesafe SystemOne) ───────────────────────
+  // ─── Provider selection ──────────────────────────────────────────────────
   // Read-only post-analysis labeling; absence disables classification only.
   TYPESAFE_API_KEY?: string
   TYPESAFE_MODEL?: string
-  /**
-   * 'true' → Candidate B (structured ARV/AS_IS/UNIDENTIFIED choice) drives
-   * comp routing. Default false — Baseline A dual-noul argmax is production.
-   */
-  JEV_COMP_CLASSIFIER_V2_ENABLED?: string
-  /**
-   * 'false' disables the Candidate B shadow run. Default on: B classifies
-   * gate-eligible comps alongside Baseline A and records the result on the
-   * response without affecting routing, valuation, or recommendation.
-   */
-  JEV_COMP_CLASSIFIER_V2_SHADOW?: string
-  /**
-   * 'true' → the attribute screen (Jev 8-axis similarity → deterministic
-   * exception pool → ARV/as-is price bands) drives comp routing.
-   * Default false — runs as a shadow alongside production.
-   */
-  JEV_ATTRIBUTE_SCREEN_ENABLED?: string
-  /**
-   * 'false' disables the attribute-screen shadow run entirely. Default on:
-   * records screened pool, bands, and a counterfactual valuation on the
-   * response without affecting routing, valuation, or recommendation.
-   */
-  JEV_ATTRIBUTE_SCREEN_SHADOW?: string
-  /**
-   * 'true' → the v4 hybrid (Jev classifies the raw pool → deterministic
-   * hard gates → weighted recoverability scoring) drives comp routing.
-   * Default false — runs as a shadow alongside production.
-   */
-  JEV_HYBRID_V4_ENABLED?: string
-  /**
-   * 'false' disables the v4 hybrid shadow run entirely. Default on:
-   * records per-comp gates/scores/roles and a counterfactual valuation on
-   * the response without affecting routing, valuation, or recommendation.
-   */
-  JEV_HYBRID_V4_SHADOW?: string
 
   // ─── Google AI (Gemini) ──────────────────────────────────────────────────────
   // Direct Google AI API key for Gemini URL context and Zillow data fetching

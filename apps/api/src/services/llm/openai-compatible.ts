@@ -58,7 +58,7 @@ export abstract class OpenAICompatibleProvider extends BaseLLMProvider {
           type: 'image_url',
           image_url: {
             url: imageUrl,
-            detail: 'high',
+            detail: 'auto',
           },
         })
       }
@@ -105,7 +105,16 @@ export abstract class OpenAICompatibleProvider extends BaseLLMProvider {
       messages,
       max_tokens: request.maxTokens ?? this.maxTokens,
       temperature: request.temperature,
-      ...(request.responseFormat === 'json' ? { response_format: { type: 'json_object' } } : {}),
+      ...(request.responseFormat === 'json'
+        ? request.jsonSchema
+          ? {
+              response_format: {
+                type: 'json_schema',
+                json_schema: { name: request.jsonSchema.name, strict: true, schema: request.jsonSchema.schema },
+              },
+            }
+          : { response_format: { type: 'json_object' } }
+        : {}),
     }
 
     // Add web search tool if configured

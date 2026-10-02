@@ -58,32 +58,15 @@ export interface ComparablesSectionProps {
   onFeedbackSubmitted?: (type: 'validate' | 'improve') => void
 }
 
-type SortOption = 'default' | 'subdivision' | 'neighborhood' | 'distance' | 'price' | 'psf' | 'score'
+type SortOption = 'default' | 'subdivision' | 'neighborhood' | 'distance' | 'price' | 'psf'
 
 const SORT_LABELS: Record<SortOption, string> = {
   default: 'Default',
-  score: 'Jev score',
   subdivision: 'Subdivision',
   neighborhood: 'Neighborhood',
   distance: 'Distance',
   price: 'Price',
   psf: '$/Sqft',
-}
-
-/** Minimum Jev score filter — null = show everything */
-type ScoreFloor = 0 | 25 | 50 | 75 | 90
-const SCORE_FLOORS: ScoreFloor[] = [0, 25, 50, 75, 90]
-
-/** Composite score /100 — test outcome sets the band (both tests pass → top,
- * test-1-pass/test-2-fail → middle, test-1 fail → bottom), proximity to the
- * subject sets the position inside the band. Every comp carries one. */
-function compScore(comp: CompItem): number | null {
-  return comp.jevHybrid?.score ?? null
-}
-
-/** Tier rank for the score sort — the test outcome, not the number. */
-function scoreTier(comp: CompItem): number {
-  return comp.jevHybrid?.stage === 'test2_pass' ? 2 : (comp.jevHybrid?.stage === 'test2_fail' || comp.jevHybrid?.stage === 'test1_pass') ? 1 : 0
 }
 
 /** Neighborhood match by normalized name OR provider code (mirrors server-side neighborhoodsMatch) */
@@ -117,8 +100,8 @@ export function ComparablesSection({
   const [excludedOpen, setExcludedOpen] = useState(false)
   const [layout, setLayout] = useState<'grid' | 'list'>('grid')
   const [sortBy, setSortBy] = useState<SortOption>('default')
+  const [tierFilter, setTierFilter] = useState<'all' | 'arv' | 'market' | 'floor'>('all')
   const [sortDesc, setSortDesc] = useState(true)
-  const [scoreFloor, setScoreFloor] = useState<ScoreFloor>(0)
   const [notifyOpen, setNotifyOpen] = useState(false)
   const [notifyNotes, setNotifyNotes] = useState('')
   const [notifySubmitting, setNotifySubmitting] = useState<FeedbackKind | null>(null)
@@ -177,10 +160,20 @@ export function ComparablesSection({
   // Stacked ordering: selected block pinned first → geo grouping (subdivision/
   // neighborhood modes) → appraisal-rule closeness (constant across every sort)
   // → directional key (price under geo modes, own key for distance/price/psf).
+  // Evidence-tier filter — ARV (after_renovation) / Median (transitional)
+  // / Investor (as_is). Drives the card list, not the map colors.
+  const tierOf = (c: CompItem) =>
+    c.classification?.type === 'after_renovation' ? 'arv'
+      : c.classification?.type === 'as_is' ? 'floor'
+      : 'market'
+  const filteredCompItems = useMemo(
+    () => tierFilter === 'all' ? compItems : compItems.filter((c) => tierOf(c) === tierFilter),
+    [compItems, tierFilter]
+  )
+
   const sortedItems = useMemo(() => {
-    const indexed = compItems
-      .map((comp, i) => ({ comp, originalIndex: i }))
-      .filter(({ comp }) => scoreFloor === 0 || (compScore(comp) ?? -1) >= scoreFloor)
+    const indexed = filteredCompItems
+      .map((comp, i) => ({ comp, originalIndex: compItems.indexOf(comp) }))
     const isSel = (c: CompItem, i: number) =>
       hasInteractiveSelection ? selectedCompKeys!.has(getCompKey(c, i)) : (c.compGroup === 'arv' || c.isEnabled === true)
     const subdivMatch = (c: CompItem) =>
@@ -202,22 +195,6 @@ export function ComparablesSection({
 
     const dir = sortDesc ? -1 : 1
 
-    if (sortBy === 'score') {
-      // Tier ordering follows the direction (desc = passed both tests first,
-      // asc = test-1 fails first); proximity is always nearest-first, so
-      // ascending shows the closest of the weakest comps — never far-away
-      // comps first. No selected-block pin: this sort is the pure ranking.
-      return [...indexed].sort((a, b) => {
-        const ta = scoreTier(a.comp)
-        const tb = scoreTier(b.comp)
-        if (ta !== tb) return dir * (ta - tb)
-        const da = a.comp.distanceMiles ?? Infinity
-        const db = b.comp.distanceMiles ?? Infinity
-        if (da !== db) return da - db
-        return (compScore(b.comp) ?? -1) - (compScore(a.comp) ?? -1) || (a.originalIndex - b.originalIndex)
-      })
-    }
-
     const geoMatch = (c: CompItem): number => {
       if (sortBy === 'subdivision') return subdivMatch(c)
       if (sortBy === 'neighborhood') return neighborhoodsMatchClient(c, subject) ? 1 : 0
@@ -238,11 +215,9 @@ export function ComparablesSection({
       if (sa !== sb) return sa - sb
       const ga = geoMatch(a.comp), gb = geoMatch(b.comp)
       if (ga !== gb) return gb - ga
-      const rs = (compScore(b.comp) ?? -1) - (compScore(a.comp) ?? -1)
-      if (rs !== 0) return rs
       return dir * (numKey(a.comp) - numKey(b.comp)) || (a.originalIndex - b.originalIndex)
     })
-  }, [compItems, sortBy, sortDesc, scoreFloor, subjectSubdivision, subject, selectedCompKeys, hasInteractiveSelection])
+  }, [filteredCompItems, compItems, sortBy, sortDesc, subjectSubdivision, subject, selectedCompKeys, hasInteractiveSelection])
 
   // Functional update keeps the identity stable for memoized cards.
   const toggleExpand = useCallback((key: string) => {
@@ -256,11 +231,11 @@ export function ComparablesSection({
 
   // Group comps based on selection mode
   const arvComps = hasInteractiveSelection
-    ? compItems.filter((_c, i) => selectedCompKeys!.has(getCompKey(_c, i)))
-    : compItems.filter((c) => c.isEnabled === true)
+    ? filteredCompItems.filter((c) => selectedCompKeys!.has(getCompKey(c, compItems.indexOf(c))))
+    : filteredCompItems.filter((c) => c.isEnabled === true)
   const excludedComps = hasInteractiveSelection
-    ? compItems.filter((_c, i) => !selectedCompKeys!.has(getCompKey(_c, i)))
-    : compItems.filter((c) => c.isEnabled !== true)
+    ? filteredCompItems.filter((c) => !selectedCompKeys!.has(getCompKey(c, compItems.indexOf(c))))
+    : filteredCompItems.filter((c) => c.isEnabled !== true)
   // If no comps are selected (e.g. streaming, before evaluation), show all in main section
   const showAllFlat = arvComps.length === 0 && excludedComps.length > 0
 
@@ -366,10 +341,31 @@ export function ComparablesSection({
           </div>
         </div>
 
-        {/* Row 2: Sort controls + Jev score filter */}
+        {/* Row 2: Evidence-tier filter + sort controls */}
         <div className="flex items-center gap-1 no-print flex-wrap">
+          {/* Tier filter — ARV evidence / median / investor floor */}
+          {(['all', 'arv', 'market', 'floor'] as const).map((t) => {
+            const labels = { all: 'All', arv: 'ARV', market: 'Median', floor: 'Investor' }
+            const colors = {
+              all: tierFilter === t ? 'bg-secondary text-foreground font-medium' : 'text-foreground-tertiary hover:text-foreground hover:bg-secondary',
+              arv: tierFilter === t ? 'bg-emerald-500/15 text-emerald-600 font-medium' : 'text-foreground-tertiary hover:text-foreground hover:bg-secondary',
+              market: tierFilter === t ? 'bg-orange-500/15 text-orange-500 font-medium' : 'text-foreground-tertiary hover:text-foreground hover:bg-secondary',
+              floor: tierFilter === t ? 'bg-red-500/15 text-red-400 font-medium' : 'text-foreground-tertiary hover:text-foreground hover:bg-secondary',
+            }
+            return (
+              <button
+                key={t}
+                type="button"
+                onClick={() => setTierFilter(t)}
+                className={cn('text-[10px] px-2 py-0.5 rounded transition-colors', colors[t])}
+              >
+                {labels[t]}
+              </button>
+            )
+          })}
+          <span className="w-px h-3 bg-border mx-1" />
           <ArrowUpDown className="w-3 h-3 text-foreground-tertiary mr-0.5" />
-          {(['default', 'score', 'subdivision', 'neighborhood', 'distance', 'price', 'psf'] as const).map((opt) => (
+          {(['default', 'subdivision', 'neighborhood', 'distance', 'price', 'psf'] as const).map((opt) => (
             <button
               key={opt}
               type="button"
@@ -390,28 +386,6 @@ export function ComparablesSection({
               )}
             </button>
           ))}
-          {compItems.some((c) => compScore(c) != null) && (
-            <>
-              <span className="w-px h-3 bg-border mx-1" />
-              <span className="text-[9px] text-foreground-tertiary uppercase tracking-wide mr-0.5">score</span>
-              {SCORE_FLOORS.map((floor) => (
-                <button
-                  key={floor}
-                  type="button"
-                  onClick={() => setScoreFloor(floor)}
-                  className={cn(
-                    'text-[10px] px-2 py-0.5 rounded transition-colors tabular-nums',
-                    scoreFloor === floor
-                      ? 'bg-primary/15 text-primary font-medium'
-                      : 'text-foreground-tertiary hover:text-foreground hover:bg-secondary'
-                  )}
-                  title={floor === 0 ? 'Show every comp' : `Show only comps with a Jev score of at least ${floor}/100`}
-                >
-                  {floor === 0 ? 'All' : `≥${floor}`}
-                </button>
-              ))}
-            </>
-          )}
         </div>
 
         {/* CDARV status — observational only; never gates evaluation */}

@@ -14,10 +14,12 @@
  *  2. `valuation === null`, `comps.insufficientComps === true`.
  *  3. Every comp item stays in the report with `isEnabled: false` and
  *     per-rule `appraisalRules` evidence.
- *  4. The step log records `appraisal_rules` failed + `valuation` skipped.
+ *  4. The step log records `appraisal_rules` failed + `valuation` skipped
+ *     (last `appraisal_rules` entry — an earlier `completed` entry records
+ *     the evidence-selection pass).
  *  5. `report.arv.value` / `report.outcome.*` are null — no fabricated ARV.
  *  6. Zero comps found → same degraded shape, empty pool.
- *  7. `jevOutcome` marks 'unavailable/insufficient_comps' — no LLM spend.
+ *  7. `jevOutcome` is absent — the Jev path was excised post-#79.
  */
 import assert from 'node:assert/strict'
 import { performAnalysis } from '../src/services/evaluation'
@@ -128,7 +130,7 @@ assert.ok(
 assert.equal(response.subject.address, '123 Subject St, Tampa, FL 33607')
 const steps = response.report?.steps ?? []
 assert.equal(
-  steps.find((s) => s.step === 'appraisal_rules')?.status,
+  steps.findLast((s) => s.step === 'appraisal_rules')?.status,
   'failed',
   'appraisal step records the failure',
 )
@@ -143,7 +145,11 @@ assert.ok(
   (response.report?.fallbacksUsed ?? []).includes('insufficient_comps'),
   'insufficient_comps is in the fallback ledger',
 )
-assert.deepEqual(response.jevOutcome, { status: 'unavailable', reason: 'insufficient_comps' })
+assert.equal(
+  'jevOutcome' in response,
+  false,
+  'jevOutcome field is gone — the Jev path was excised from this provider',
+)
 
 // ─── Empty pool → same degraded shape ───────────────────────────────────────
 
@@ -155,7 +161,7 @@ assert.equal(empty.response.valuation, null)
 assert.equal(empty.response.comps.insufficientComps, true)
 assert.equal(empty.response.comps.items.length, 0)
 assert.equal(
-  empty.response.report?.steps.find((s) => s.step === 'appraisal_rules')?.status,
+  empty.response.report?.steps.findLast((s) => s.step === 'appraisal_rules')?.status,
   'failed',
 )
 

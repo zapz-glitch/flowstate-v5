@@ -5,9 +5,16 @@
   "compatibility_flags": [
     "nodejs_compat"
   ],
+  "preview_urls": true,
   "main": ".open-next/worker.js",
+  "previews": {
+    "vars": {
+      "NEXT_PUBLIC_API_URL": "https://api.flowstate.homes",
+      "NEXT_PUBLIC_GOOGLE_MAP_KEY": "AIzaSyCQVFWXbhBwmp6mskH8ngBOLNbRds2LVDc"
+    }
+  },
   "routes": [
-    { "pattern": "flowstate.homes", "custom_domain": true }
+    { "pattern": "flowstate.homes", "custom_domain": true, "previews_enabled": true }
   ],
   "assets": {
     "directory": ".open-next/assets",

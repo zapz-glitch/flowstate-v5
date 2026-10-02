@@ -39,6 +39,27 @@ function evaluateSubdivisionMatch(
   }
 
   const passed = subdivisionsMatch(subjectSub, compSub)
+  if (!passed) {
+    // Census verification overrides the plat-name mismatch — legal
+    // subdivision names routinely diverge from the actual market area; a
+    // comp in the subject's census block group or tract is geographically
+    // verified regardless of its plat.
+    const censusVerified =
+      comp.sameBlockGroup === true ||
+      (comp.censusTract != null && subject.censusTract != null && comp.censusTract === subject.censusTract) ||
+      // Flex exception — under stretch, a plat-name mismatch survives when
+      // the pocket is value-equivalent to the subject's.
+      (typeof _filter.value === 'number' && _filter.value > 1 && isValueEquivalent(subject, comp))
+    if (censusVerified) {
+      return {
+        type: 'subdivision_match',
+        passed: true,
+        reason: `Legal subdivision differs ("${compSub}") — census tract/BG match verifies the geography`,
+        actualValue: compSub,
+        threshold: subjectSub,
+      }
+    }
+  }
   return {
     type: 'subdivision_match',
     passed,
@@ -275,13 +296,27 @@ function evaluateRoadBarrier(
     }
   }
 
-  const passed = comp.crossesMajorRoad === false
+  if (comp.crossesMajorRoad === false) {
+    return { type: 'road_barrier', passed: true, actualValue: 'same_side', threshold: 'same_side' }
+  }
+  // Flex exception — under stretched parameters a crossing comp survives
+  // when its pocket is value-equivalent to the subject's (±10% $/sf).
+  const flexed = typeof _filter.value === 'number' && _filter.value > 1
+  if (flexed && isValueEquivalent(_subject, comp)) {
+    return {
+      type: 'road_barrier',
+      passed: true,
+      reason: 'Crosses major road — pocket is value-equivalent to subject (flex)',
+      actualValue: 'crosses',
+      threshold: 'same_side',
+    }
+  }
   return {
     type: 'road_barrier',
-    passed,
-    status: passed ? 'passed' : 'failed',
-    reason: passed ? undefined : 'Comparable is across a major road from subject',
-    actualValue: comp.crossesMajorRoad ? 'crosses' : 'same_side',
+    passed: false,
+    status: 'failed',
+    reason: 'Comparable is across a major road from subject',
+    actualValue: 'crosses',
     threshold: 'same_side',
   }
 }
@@ -613,57 +648,6 @@ function evaluateRoofMaterialMatch(
   }
 }
 
-// Assessor condition tiers, best → worst. Unknown labels get no tier.
-const CONDITION_TIERS: Record<string, number> = {
-  excellent: 7,
-  verygood: 6,
-  good: 5,
-  average: 4,
-  fair: 3,
-  poor: 2,
-  verypoor: 1,
-}
-
-function conditionTier(v?: string | null): number | null {
-  if (!v) return null
-  return CONDITION_TIERS[v.toLowerCase().replace(/[^a-z]/g, '')] ?? null
-}
-
-/**
- * Assessor condition match — the comp cannot be in a worse assessor
- * condition tier than the subject (a distressed comp never anchors ARV).
- * Replaces the LLM/Firecrawl condition classification with provider data.
- */
-function evaluateConditionMatch(
-  subject: NormalizedProperty,
-  comp: NormalizedComparable,
-  _filter: AppraisalFilter
-): FilterResult {
-  const subjectTier = conditionTier(subject.buildingCondition)
-  const compTier = conditionTier(comp.buildingCondition)
-
-  if (subjectTier == null || compTier == null) {
-    return {
-      type: 'condition_match',
-      passed: true,
-      status: 'not_verified',
-      reason: 'Assessor condition data not available — rule not verified',
-    }
-  }
-
-  const passed = compTier >= subjectTier
-  return {
-    type: 'condition_match',
-    passed,
-    status: passed ? 'passed' : 'failed',
-    reason: passed
-      ? undefined
-      : `Condition mismatch: comp "${comp.buildingCondition}" below subject "${subject.buildingCondition}"`,
-    actualValue: comp.buildingCondition ?? undefined,
-    threshold: subject.buildingCondition ?? undefined,
-  }
-}
-
 const FILTER_EVALUATORS: Partial<Record<
   FilterType,
   (subject: NormalizedProperty, comp: NormalizedComparable, filter: AppraisalFilter) => FilterResult
@@ -677,7 +661,6 @@ const FILTER_EVALUATORS: Partial<Record<
   garage_match: evaluateGarageMatch,
   stories_match: evaluateStoriesMatch,
   roof_material_match: evaluateRoofMaterialMatch,
-  condition_match: evaluateConditionMatch,
   sale_age: evaluateSaleAge,
   sqft_diff: evaluateSqftDiff,
   year_built_diff: evaluateYearBuiltDiff,
@@ -1203,4 +1186,63 @@ export function evaluateComparables(
   }
 
   return evaluations
+}
+
+/**
+ * Percentage flex on numeric tolerances — sqft, year built, lot size,
+ * sale age, distance scale by `factor`; geo/exact-match filters never
+ * flex (census/SD/road barriers stay hard). Powers the thin-pool
+ * fallback ladder: strict → ×1.15 → ×1.25 → ×1.35 → … until evidence.
+ */
+const FLEXIBLE_FILTERS = new Set<FilterType>([
+  'sale_age',
+  'sale_age_expansion',
+  'sale_age_expansion_2',
+  'sqft_diff',
+  'year_built_diff',
+  'lot_size_diff',
+  'distance',
+])
+
+// Geo-adjacent filters carry a flex MARKER (value > 1) rather than a scaled
+// threshold — under stretch, a crossing/mismatch survives when the comp's
+// pocket is value-equivalent to the subject's (±10% $/sf).
+const FLEX_MARKER_FILTERS = new Set<FilterType>([
+  'road_barrier',
+  'subdivision_match',
+  'neighborhood_match',
+])
+
+export function flexNumericFilters(filters: AppraisalFilter[], factor: number): AppraisalFilter[] {
+  if (factor <= 1) return filters
+  return filters.map((f) =>
+    FLEXIBLE_FILTERS.has(f.type) && typeof f.value === 'number'
+      ? { ...f, value: Math.round(f.value * factor * 100) / 100 }
+      : FLEX_MARKER_FILTERS.has(f.type)
+        ? { ...f, value: factor }
+        : f,
+  )
+}
+
+/** Subject reference $/sqft for value equivalence — scope median first,
+ *  then AVM-implied ppsf as the always-available floor. */
+function subjectRefPpsf(subject: NormalizedProperty): number | null {
+  const med = subject.ppsfMedians?.SD ?? subject.ppsfMedians?.N4 ?? subject.ppsfMedians?.N3
+  if (med != null && med > 0) return med
+  if (subject.avmValue != null && subject.squareFeet) return subject.avmValue / subject.squareFeet
+  return null
+}
+
+function compPpsf(c: { pricePerSqft?: number | null; salePrice?: number | null; squareFeet?: number | null }): number | null {
+  return c.pricePerSqft ?? (c.salePrice != null && c.squareFeet ? c.salePrice / c.squareFeet : null)
+}
+
+/** ±10% pocket value equivalence — a comp across a boundary counts as the
+ *  same market when its price per sqft sits within 10% of the subject's
+ *  reference. Only consulted under flex (marker value > 1). */
+export function isValueEquivalent(subject: NormalizedProperty, comp: NormalizedComparable): boolean {
+  const ref = subjectRefPpsf(subject)
+  const ppsf = compPpsf(comp)
+  if (ref == null || ppsf == null) return false
+  return Math.abs(ppsf - ref) / ref <= 0.10
 }
