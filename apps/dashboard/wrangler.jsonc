@@ -14,7 +14,7 @@
     }
   },
   "routes": [
-    { "pattern": "flowstate.homes", "custom_domain": true }
+    { "pattern": "flowstate.homes", "custom_domain": true, "previews_enabled": true }
   ],
   "assets": {
     "directory": ".open-next/assets",
