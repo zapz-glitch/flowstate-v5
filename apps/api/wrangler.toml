@@ -98,3 +98,30 @@ invocation_logs = true
 # Cron: sweeps dead/stuck batch jobs so lists run unattended to completion
 [triggers]
 crons = ["*/5 * * * *"]
+
+# Worker Previews (Workers Builds branch builds) — intentionally shares
+# production resources; preview runs are smoke tests, not isolation.
+[previews.vars]
+ENVIRONMENT = "preview"
+DASHBOARD_URL = "https://flowstate.homes"
+PROPERTY_PROVIDER = "corelogic"
+DEVIN_ORG_ID = "org-6c0122ecb67544ccb259ae9b1e9cc4dc"
+COMPARABLE_CANDIDATE_LIMIT = "100"
+COMPARABLE_EXPANSION_RADIUS_MILES = "2"
+JEV_COMP_CLASSIFIER_V2_ENABLED = "false"
+JEV_ATTRIBUTE_SCREEN_ENABLED = "false"
+
+[[previews.kv_namespaces]]
+binding = "API_CACHE"
+id = "076d6c5a242c4b5d9765d04b8b8755b6"
+
+[[previews.d1_databases]]
+binding = "DB"
+database_id = "106d2645-8ec1-4ae9-8f72-7563ba8aa93f"
+
+[[previews.r2_buckets]]
+binding = "REPORT_ASSETS"
+bucket_name = "flowstate-report-assets"
+
+[previews.ai]
+binding = "AI"
