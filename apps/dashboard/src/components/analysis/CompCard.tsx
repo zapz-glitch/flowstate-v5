@@ -10,7 +10,7 @@ import { StatCell } from './StatCell'
 import { ClassificationBadge } from './ClassificationBadge'
 import { PhotoGallery } from './PhotoGallery'
 import { AddressDisplay } from './AddressDisplay'
-import { formatFilterType, formatAdjustmentType, formatCurrency, getCompKey, fmtLotDelta, formatLotSize } from './format-helpers'
+import { formatFilterType, formatAdjustmentType, formatCurrency, getCompKey, fmtDeltaWords, formatLotSize } from './format-helpers'
 import { compFeatureMatches, featureState, matchDotClass, matchTextClass } from './feature-match'
 import { StreetViewImage } from './StreetViewImage'
 import { RuleMatchDetails } from './RuleMatchDetails'
@@ -215,7 +215,7 @@ function CompCardInner({
           match={fm('lot')}
           value={
             comp.lotSizeAcres != null
-              ? `${formatLotSize(comp.lotSizeAcres)}${subjectLotAcres != null ? ` (${fmtLotDelta(comp.lotSizeAcres, subjectLotAcres)})` : ''}`
+              ? `${formatLotSize(comp.lotSizeAcres)}${subjectLotAcres != null ? ` (${fmtDeltaWords((comp.lotSizeAcres - subjectLotAcres) * 43560, 'sf')})` : ''}`
               : '-'
           }
         />

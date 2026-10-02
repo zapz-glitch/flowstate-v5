@@ -8,7 +8,7 @@ import { CopyButton } from '@/components/ui/copy-button'
 import type { CompItem, SubjectData } from './shared-types'
 import { StreetViewImage } from './StreetViewImage'
 import { RuleMatchDetails } from './RuleMatchDetails'
-import { sqftMatchColor, yearMatchColor, lotMatchColor, fmtDelta, fmtLotDelta, formatShortDate, formatLotSize } from './format-helpers'
+import { sqftMatchColor, yearMatchColor, lotMatchColor, fmtDeltaWords, formatShortDate, formatLotSize } from './format-helpers'
 import { compFeatureMatches, featureState, matchDotClass, matchTextClass } from './feature-match'
 
 export interface CompGridCardProps {
@@ -280,21 +280,21 @@ function CompGridCardInner({
             <span className="text-foreground-tertiary">Sq Ft</span>
             <span className="font-medium tabular-nums">
               {comp.squareFeet?.toLocaleString() || '-'}
-              {sqftDelta != null && <span className={cn('ml-1 text-[9px]', sqftColor)}>({fmtDelta(sqftDelta)})</span>}
+              {sqftDelta != null && <span className={cn('ml-1 text-[9px]', sqftColor)}>({fmtDeltaWords(sqftDelta, 'sf')})</span>}
             </span>
           </div>
           <div className="flex items-center justify-between text-[11px]">
             <span className="text-foreground-tertiary">Year</span>
             <span className="font-medium">
               {comp.yearBuilt ?? '-'}
-              {yearDelta != null && <span className={cn('ml-1 text-[9px]', yearColor)}>({fmtDelta(yearDelta)})</span>}
+              {yearDelta != null && <span className={cn('ml-1 text-[9px]', yearColor)}>({fmtDeltaWords(yearDelta, 'yrs', 'older', 'newer')})</span>}
             </span>
           </div>
           <div className="flex items-center justify-between text-[11px]">
             <span className="text-foreground-tertiary">Lot</span>
             <span className="font-medium tabular-nums">
               {formatLotSize(comp.lotSizeAcres)}
-              {lotDelta != null && <span className={cn('ml-1 text-[9px]', lotColor)}>({fmtLotDelta(comp.lotSizeAcres!, subject!.lotSizeAcres!)})</span>}
+              {lotDelta != null && <span className={cn('ml-1 text-[9px]', lotColor)}>({fmtDeltaWords(lotDelta! * 43560, 'sf')})</span>}
             </span>
           </div>
           <div className="flex items-center justify-between text-[11px]">

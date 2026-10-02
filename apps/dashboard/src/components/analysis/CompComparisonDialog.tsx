@@ -14,7 +14,7 @@ import { cn } from '@/lib/utils'
 import { subdivisionsMatch } from '@flowstate-api/shared'
 import type { SubjectData, CompItem } from './shared-types'
 import { AddressDisplay } from './AddressDisplay'
-import { formatFilterType, formatCurrency, formatLotSize, fmtLotDelta } from './format-helpers'
+import { formatFilterType, formatCurrency, formatLotSize, fmtDeltaWords } from './format-helpers'
 import { compFeatureMatches, featureState } from './feature-match'
 import { StreetViewImage } from './StreetViewImage'
 import { RuleMatchDetails } from './RuleMatchDetails'
@@ -99,7 +99,7 @@ export function CompComparisonDialog({ open, onOpenChange, subject, comp, isSele
   const yearDiff = comp.yearBuilt != null && subject?.yearBuilt != null
     ? comp.yearBuilt - subject.yearBuilt : null
   const lotDiff = comp.lotSizeAcres != null && subject?.lotSizeAcres != null
-    ? fmtLotDelta(comp.lotSizeAcres, subject.lotSizeAcres) : null
+    ? (comp.lotSizeAcres - subject.lotSizeAcres) * 43560 : null
 
   // External links
   const streetViewUrl = comp.latitude && comp.longitude
@@ -234,17 +234,17 @@ export function CompComparisonDialog({ open, onOpenChange, subject, comp, isSele
               <StatCell label="Baths" value={comp.bathrooms ?? '-'} highlight={fm('baths')} />
               <StatCell
                 label="Sq Ft"
-                value={`${fmt(comp.squareFeet)}${sqftDiff != null ? ` (${sqftDiff > 0 ? '+' : ''}${sqftDiff.toLocaleString()})` : ''}`}
+                value={`${fmt(comp.squareFeet)}${sqftDiff != null ? ` (${fmtDeltaWords(sqftDiff, 'sf')})` : ''}`}
                 highlight={sqftDiff != null ? (Math.abs(sqftDiff) <= 300 ? 'match' : 'mismatch') : undefined}
               />
               <StatCell
                 label="Year"
-                value={`${comp.yearBuilt ?? '-'}${yearDiff != null ? ` (${yearDiff > 0 ? '+' : ''}${yearDiff})` : ''}`}
+                value={`${comp.yearBuilt ?? '-'}${yearDiff != null ? ` (${fmtDeltaWords(yearDiff, 'yrs', 'older', 'newer')})` : ''}`}
                 highlight={yearDiff != null ? (Math.abs(yearDiff) <= 10 ? 'match' : 'mismatch') : undefined}
               />
             </div>
             <div className="grid grid-cols-3 bg-muted/40 border-b border-border/30">
-              <StatCell label="Lot" value={`${formatLotSize(comp.lotSizeAcres)}${lotDiff ? ` (${lotDiff})` : ''}`} highlight={fm('lot')} />
+              <StatCell label="Lot" value={`${formatLotSize(comp.lotSizeAcres)}${lotDiff != null ? ` (${fmtDeltaWords(lotDiff, 'sf')})` : ''}`} highlight={fm('lot')} />
               <StatCell label="Style" value={comp.buildingStyle || '-'} highlight={fm('style')} />
               <StatCell label="Foundation" value={comp.foundationType || '-'} highlight={fm('foundation')} />
             </div>

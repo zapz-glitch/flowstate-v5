@@ -75,6 +75,16 @@ export function fmtDelta(diff: number): string {
   return diff > 0 ? `+${diff.toLocaleString()}` : diff.toLocaleString()
 }
 
+/**
+ * Delta as plain words — "540 sf larger", "12 yrs older", "same size".
+ * Words read direction without a sign to misread against the match color.
+ */
+export function fmtDeltaWords(diff: number, unit: string, larger = 'larger', smaller = 'smaller'): string {
+  const abs = Math.abs(Math.round(diff))
+  if (abs === 0) return 'same'
+  return `${abs.toLocaleString()} ${unit} ${diff > 0 ? larger : smaller}`
+}
+
 /** Sqft match quality color class: green (≤10%), neutral (≤20%), red (>20%) */
 export function sqftMatchColor(compSf: number, subSf: number): string {
   const pct = Math.abs(compSf - subSf) / subSf
