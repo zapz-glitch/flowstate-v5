@@ -17,7 +17,7 @@ const offers = new Hono<{ Bindings: Env; Variables: { auth: AuthContext } }>()
 const DEVIN_SESSION_ID = 'devin-fbfcfad371534372bff22b123657c41f'
 const DEVIN_MESSAGE_URL = (orgId: string) =>
   `https://api.devin.ai/v3/organizations/${orgId}/sessions/${DEVIN_SESSION_ID}/messages`
-const ENGINE_BASE = 'https://conversation-intelligence.weareflowstate1.workers.dev'
+const ENGINE_BASE = 'https://flowstate-workers.weareflowstate1.workers.dev'
 // Disposition endpoints live on the acquisitions worker now (same bearer).
 const DISPOSITION_BASE = 'https://flowstate-workers.weareflowstate1.workers.dev'
 const ENGINE_OFFER_DRAFT_URL = `${DISPOSITION_BASE}/engine/offer-draft`

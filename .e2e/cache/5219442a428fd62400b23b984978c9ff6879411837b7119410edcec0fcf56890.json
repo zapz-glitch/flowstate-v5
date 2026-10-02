@@ -1,0 +1,55 @@
+{
+  "schemaVersion": "trace-1",
+  "createdAt": "2026-10-02T05:39:42.739Z",
+  "payload": {
+    "actions": [
+      {
+        "name": "tap",
+        "summary": "tap button \"Operator Login\"",
+        "target": {
+          "role": "button",
+          "name": "Operator Login"
+        }
+      }
+    ],
+    "executor": {
+      "name": "e2e-default-agent",
+      "version": "2"
+    },
+    "recordedFor": {
+      "testId": "tests/flowstate-dashboard.e2e.ts::sign-in%20modal%20opens%20and%20shows%20the%20credential%20form",
+      "targetId": "web",
+      "instructionDigest": "932b4d91449731f3966598f81564944befd52df9db1e6b1b3bd0f2e08e322388"
+    },
+    "summary": "Opened Operator Login; the sign-in form is displayed with username and password fields and a Sign In button.",
+    "startPath": "/",
+    "endPath": "/",
+    "endAnchors": [
+      {
+        "text": "Liquidity."
+      },
+      {
+        "role": "textbox",
+        "name": "Liquidity.",
+        "placeholder": "you@example.com"
+      },
+      {
+        "text": "Profitable Investments."
+      },
+      {
+        "role": "textbox",
+        "name": "Profitable Investments.",
+        "placeholder": "••••••••",
+        "inputPurpose": "password"
+      },
+      {
+        "text": "Sign In"
+      },
+      {
+        "role": "button",
+        "name": "Sign In"
+      }
+    ],
+    "endWaitMs": 11671
+  }
+}
