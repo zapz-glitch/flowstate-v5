@@ -284,6 +284,20 @@
 - KV INSTANT + AI GATEWAY gated on user: KV Instant = private beta
   (dashboard signup); AI Gateway needs a gateway instance configured
   before vision/LLM calls can route through it.
+- E2E HARNESS (2026-10-01): tester-army/e2e@0.15.1 in apps/dashboard —
+  `npm run test:e2e`. Targets: `web` (Chromium on :3000, reuseExisting
+  attaches to running dev) + engine-free `api` (fetch+zod). Session via
+  test.setup → `?signin=true` modal (locators: placeholders, the labels
+  read "Liquidity."/"Profitable Investments."). `?address=` deep-links
+  auto-run analysis; "Existing Reports Found" dialog needs a New Analysis
+  click-through. WSL2 chromium syslibs unpacked to
+  ~/.local/lib/playwright-deps via apt download+dpkg -x (no sudo),
+  wired through LD_LIBRARY_PATH in e2e.config.ts. Model: OpenRouter
+  gemini-2.5-flash, key from .dev.vars via process.loadEnvFile.
+  Findings: Geocoding API NOT activated on the maps key's GCP project
+  (maps JS works, geocoder 403s); attom-mcp dead grant fails analyze
+  outright — DO calls searchProperty() not the WithFallback variant, so
+  .dev.vars is on PROPERTY_PROVIDER=corelogic until the grant returns.
 
 ## Last handoff
 
