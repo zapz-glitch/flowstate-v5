@@ -145,6 +145,8 @@ export interface RenovationAssessment {
 export interface RenovationEnv {
   OPENROUTER_API_KEY?: string
   OPENROUTER_MODEL?: string
+  /** Scoped override for vision-only calls — keeps OPENROUTER_MODEL free for non-vision services (listing extraction, seller notes). */
+  VISION_MODEL?: string
 }
 
 const MIN_UNIQUE_PHOTOS = 2
@@ -264,7 +266,7 @@ export async function assessRenovationFromPhotos(
     createLLMProvider({
       provider: 'openrouter',
       apiKey: env.OPENROUTER_API_KEY as string,
-      model: env.OPENROUTER_MODEL || 'google/gemini-2.5-flash',
+      model: env.VISION_MODEL || env.OPENROUTER_MODEL || 'google/gemini-2.5-flash',
     })
 
   const photos = uniquePhotos.slice(0, MAX_PHOTOS)
@@ -437,7 +439,7 @@ export async function assessCompCurbAppeal(
   const provider = createLLMProvider({
     provider: 'openrouter',
     apiKey: env.OPENROUTER_API_KEY as string,
-    model: env.OPENROUTER_MODEL || 'google/gemini-2.5-flash',
+    model: env.VISION_MODEL || env.OPENROUTER_MODEL || 'google/gemini-2.5-flash',
   })
 
   const fetched = await Promise.all(photos.map((u) => fetchImageAsBase64(u).catch(() => null)))

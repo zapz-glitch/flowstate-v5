@@ -93,6 +93,7 @@ export interface Env {
   OPENROUTER_API_KEY?: string
   OPENAI_API_KEY?: string
   OPENROUTER_MODEL?: string // Default model for general LLM tasks
+  VISION_MODEL?: string // Vision-only override (subject reno tier) — defaults to OPENROUTER_MODEL
   /** Model for comp selection — stronger reasoning (e.g., 'anthropic/claude-sonnet-4', 'google/gemini-2.5-pro-preview') */
   COMP_SELECTION_MODEL?: string
   /** Model for market context web search — fast/cheap (e.g., 'google/gemini-2.0-flash-001') */
