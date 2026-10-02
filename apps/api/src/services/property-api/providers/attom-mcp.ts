@@ -268,6 +268,28 @@ async function callTool(env: Env, name: string, args: Record<string, unknown>): 
   return result
 }
 
+// A "response too large" failure can surface three ways depending on where
+// the gateway rejects it: an RPC error thrown by callTool, a tool-level
+// isError result, or an error marker inside structuredContent.
+const TOO_LARGE_RE = /too.large|response_too_large|524|payload.*exceed|size.*limit/i
+
+function isTooLargeError(error: unknown): boolean {
+  return error instanceof Error && TOO_LARGE_RE.test(error.message)
+}
+
+function isTooLargeResult(result: any): boolean {
+  if (!result) return false
+  const sc = result.structuredContent
+  if (sc?.error && TOO_LARGE_RE.test(JSON.stringify(sc.error))) return true
+  if (result.isError === true) {
+    const text = (result.content ?? [])
+      .map((c: any) => (c?.type === 'text' ? c.text : ''))
+      .join(' ')
+    if (TOO_LARGE_RE.test(text)) return true
+  }
+  return false
+}
+
 function dataset<T = any>(results: any[] | undefined, name: string): T | null {
   const r = results?.find((x: any) => x.dataset === name)
   return r?.status === 'ok' || r?.data != null ? (r?.data ?? null) : null
@@ -572,9 +594,37 @@ class AttomMcpProvider implements PropertyProviderAdapter {
     this.env = env
   }
 
+  // get_property_data caps the response at ~524KB. A big multi-dataset call
+  // can cross it, so on a size error bisect the dataset list and merge the
+  // results; a single dataset that still overflows returns an errored entry
+  // (dataset() treats it as absent) rather than failing the whole fetch.
   private async propertyData(lookup: Record<string, unknown>, datasets: string[]): Promise<any[]> {
-    const result = await callTool(this.env, 'get_property_data', { property: lookup, datasets })
-    return result?.structuredContent?.results ?? []
+    const result = await this.tryPropertyData(lookup, datasets)
+    if (result.tooLarge) {
+      if (datasets.length === 1) {
+        return [{ dataset: datasets[0], status: 'error', error: 'response_too_large' }]
+      }
+      const mid = Math.ceil(datasets.length / 2)
+      const [a, b] = await Promise.all([
+        this.propertyData(lookup, datasets.slice(0, mid)),
+        this.propertyData(lookup, datasets.slice(mid)),
+      ])
+      return [...a, ...b]
+    }
+    return result.results
+  }
+
+  private async tryPropertyData(
+    lookup: Record<string, unknown>,
+    datasets: string[],
+  ): Promise<{ results: any[]; tooLarge: boolean }> {
+    try {
+      const result = await callTool(this.env, 'get_property_data', { property: lookup, datasets })
+      return { results: result?.structuredContent?.results ?? [], tooLarge: isTooLargeResult(result) }
+    } catch (error) {
+      if (isTooLargeError(error)) return { results: [], tooLarge: true }
+      throw error
+    }
   }
 
   async searchProperty(params: PropertySearchParams): Promise<PropertySearchResponse> {

@@ -294,10 +294,18 @@
   ~/.local/lib/playwright-deps via apt download+dpkg -x (no sudo),
   wired through LD_LIBRARY_PATH in e2e.config.ts. Model: OpenRouter
   gemini-2.5-flash, key from .dev.vars via process.loadEnvFile.
-  Findings: Geocoding API NOT activated on the maps key's GCP project
-  (maps JS works, geocoder 403s); attom-mcp dead grant fails analyze
+  Findings: attom-mcp dead grant fails analyze
   outright — DO calls searchProperty() not the WithFallback variant, so
   .dev.vars is on PROPERTY_PROVIDER=corelogic until the grant returns.
+- GEOCODING FIXED (2026-10-02): maps key's GCP project is 600584575168 —
+  Geocoding API enabled in console; live probe returns OK + formatted
+  addresses. (Geolocation/Elevation still off; Places legacy deprecated.)
+- ATTOM_MCP SPLIT RETRY (2026-10-02): propertyData() bisects the datasets
+  list and merges results on a >524KB response (thrown RPC error, isError
+  tool result, or structuredContent error marker all detected via
+  TOO_LARGE_RE); a single overflowing dataset returns a status:'error'
+  entry so dataset() degrades to absent. tsc clean; live-verify pending
+  grant restore — wire shape is speculated, not yet observed.
 
 ## Last handoff
 
