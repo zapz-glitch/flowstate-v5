@@ -147,6 +147,45 @@ export interface RenovationEnv {
   OPENROUTER_MODEL?: string
   /** Scoped override for vision-only calls — keeps OPENROUTER_MODEL free for non-vision services (listing extraction, seller notes). */
   VISION_MODEL?: string
+  /** Reasoning effort for the vision call (low|medium|high|xhigh|max) — default medium. */
+  VISION_REASONING_EFFORT?: string
+}
+
+const ROOM_CONDITIONS = ['excellent', 'good', 'dated', 'poor', 'failed', 'not_visible']
+
+/** Strict Structured Outputs schema — kills the malformed-JSON retry path. */
+const RENOVATION_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'renovation_level', 'confidence', 'major_observations',
+    'kitchen_condition', 'bathroom_condition', 'flooring_condition',
+    'wall_ceiling_condition', 'exterior_condition',
+    'visible_major_system_concerns', 'structural_concerns',
+    'rationale', 'evidence_for_classification',
+    'evidence_against_more_severe_level', 'evidence_against_less_severe_level',
+    'limitations', 'curb_appeal_condition', 'curb_appeal_confidence', 'curb_appeal_summary',
+  ],
+  properties: {
+    renovation_level: { type: 'string', enum: RENOVATION_LEVEL_DEFINITIONS.map((d) => d.name) },
+    confidence: { type: 'integer', minimum: 0, maximum: 100 },
+    major_observations: { type: 'array', items: { type: 'string' } },
+    kitchen_condition: { type: 'string', enum: ROOM_CONDITIONS },
+    bathroom_condition: { type: 'string', enum: ROOM_CONDITIONS },
+    flooring_condition: { type: 'string', enum: ROOM_CONDITIONS },
+    wall_ceiling_condition: { type: 'string', enum: ROOM_CONDITIONS },
+    exterior_condition: { type: 'string', enum: ROOM_CONDITIONS },
+    visible_major_system_concerns: { type: 'array', items: { type: 'string' } },
+    structural_concerns: { type: 'array', items: { type: 'string' } },
+    rationale: { type: 'string' },
+    evidence_for_classification: { type: 'array', items: { type: 'string' } },
+    evidence_against_more_severe_level: { type: 'array', items: { type: 'string' } },
+    evidence_against_less_severe_level: { type: 'array', items: { type: 'string' } },
+    limitations: { type: 'array', items: { type: 'string' } },
+    curb_appeal_condition: { type: 'string', enum: ['renovated', 'dated', 'distressed', 'unknown'] },
+    curb_appeal_confidence: { type: 'integer', minimum: 0, maximum: 100 },
+    curb_appeal_summary: { type: 'string' },
+  },
 }
 
 const MIN_UNIQUE_PHOTOS = 2
@@ -307,6 +346,11 @@ export async function assessRenovationFromPhotos(
       prompt,
       images: imagePayload,
       responseFormat: 'json',
+      jsonSchema: { name: 'renovation_assessment', schema: RENOVATION_SCHEMA },
+      reasoning: {
+        enabled: true,
+        effort: (env.VISION_REASONING_EFFORT ?? 'medium') as 'low' | 'medium' | 'high' | 'xhigh',
+      },
       // The assessment JSON (per-room conditions + evidence arrays +
       // rationale) runs past the 1024 default — truncation mid-object was
       // the "malformed response" failure.
