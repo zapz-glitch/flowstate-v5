@@ -1194,6 +1194,51 @@ export class AnalysisJobDO {
         evalJson: JSON.stringify(runEval),
         apiCallStatsJson: resp?.apiCallStats ? JSON.stringify(resp.apiCallStats) : null,
       })
+
+      // Basin lake — land every analysis outcome as an Iceberg row for the
+      // calibration/fine-tune corpus. Non-fatal: a stream failure must never
+      // touch the analysis path.
+      const stream = this.env.FLOWSTATE_ANALYSIS_EVENTS_STREAM
+      if (stream) {
+        const compItems = Array.isArray(comps?.items) ? comps.items : []
+        const curbAppeals = compItems
+          .filter((c) => (c as Record<string, unknown>).curbAppeal)
+          .map((c) => {
+            const cc = c as Record<string, unknown>
+            const ca = cc.curbAppeal as Record<string, unknown>
+            return {
+              compId: cc.id,
+              condition: ca.condition,
+              confidence: ca.confidence,
+              summary: ca.summary,
+              photosExamined: ca.photosExamined,
+            }
+          })
+        try {
+          await stream.send([
+            {
+              ts: new Date().toISOString(),
+              job_id: config.jobId,
+              address: (subj?.address as string) ?? config.search.address ?? '',
+              provider: (resp?.retrieval as Record<string, unknown> | null)?.provider ?? 'corelogic',
+              status: outcome.status,
+              arv: (val?.arv as number) ?? null,
+              enabled_comps: (comps?.enabledCount as number) ?? null,
+              comp_conditions: curbAppeals.length > 0 ? curbAppeals : null,
+              payload: {
+                errorCode: outcome.errorCode ?? null,
+                errorMessage: outcome.errorMessage ?? null,
+                compCount: outcome.compCount ?? (comps?.total as number) ?? null,
+                durationMs: outcome.durationMs,
+                fallbacks: report?.fallbacksUsed ?? [],
+                steps: report?.steps ?? null,
+              },
+            },
+          ])
+        } catch (err) {
+          console.warn('[AnalysisJobDO] basin stream send failed (non-fatal):', err instanceof Error ? err.message : err)
+        }
+      }
     } catch (err) {
       console.warn('[AnalysisJobDO] recordRun failed (non-fatal):', err instanceof Error ? err.message : err)
     }

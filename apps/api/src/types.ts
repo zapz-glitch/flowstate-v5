@@ -2,9 +2,16 @@
  * API Types
  */
 
+/** Minimal shape of a Workers Pipelines stream binding (cloudflare:pipelines). */
+export interface PipelineStream<T = Record<string, unknown>> {
+  send(records: T[]): Promise<void>
+}
+
 export interface Env {
   DB: D1Database
   API_CACHE: KVNamespace
+  /** Basin lake — analysis outcome events → Iceberg on R2 */
+  FLOWSTATE_ANALYSIS_EVENTS_STREAM?: PipelineStream
   REPORT_ASSETS?: R2Bucket
   /** Workers AI binding — Clef decision models (comp curb-appeal classification) */
   AI?: Ai
