@@ -322,6 +322,27 @@
   needs remote=true AND wrangler dev without --local (--local forces ALL
   bindings local incl. AI). Local test key quota bumped to 50k (was
   exhausted at 100/mo).
+- WORKERS BUILDS PREVIEWS LIVE (2026-10-02): repo-level CI over git — every
+  push/PR builds an API preview (<branch>-flowstate-api.<sub>.workers.dev)
+  + dashboard preview (<branch>.flowstate.homes) on the REAL runtime.
+  Setup needed: [previews] blocks in both wrangler configs (vars+bindings
+  re-declared, sharing prod D1/KV/R2/AI — smoke tests, not isolation),
+  preview_urls=true, previews_enabled=true on the flowstate.homes domain
+  record (API: PUT /accounts/{id}/workers/domains/{id}), and
+  *.flowstate.homes in CORS + trustedOrigins so preview auth works.
+  Orphan "flowstate-v5" project deleted. NOTE: preview builds need the
+  config in the pushed branch — branches cut before these commits fail
+  until rebased.
+- BASIN LAKE LIVE (2026-10-02): stream flowstate_analysis_events (HTTP
+  ingest adbb75b369b645cc930401161827d832.ingest.cloudflare.com, schema
+  .data/basin/analysis-events-schema.json) → pipeline → basin-catalog
+  sink → Iceberg table flowstate.analysis_events in R2 bucket
+  flowstate-data-lake (catalog enabled, 300s rolls). recordRun emits each
+  outcome — status, arv, comp curb-appeal evidence (Clef labels), steps,
+  fallbacks — non-fatal. This is the calibration corpus for Clef +
+  trade-tricks. KV Instant NOT granted yet ("account is not allowed to
+  create Instant namespaces") — API_CACHE stays classic; binding swap is
+  a 1-line id change when access lands.
 
 ## Last handoff
 
