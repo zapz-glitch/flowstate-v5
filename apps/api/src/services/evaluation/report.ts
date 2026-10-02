@@ -77,7 +77,11 @@ function assessConfidence(input: BuildReportInput): {
     const flipCount = selectedComps.length
     reasons.unshift(`${flipCount} verified flip resale(s) drive the ARV — transaction evidence`)
     if (flipCount === 0) {
-      reasons.push('No verified flip resales — ARV is withheld, report is reference-only')
+      reasons.push(
+        input.valuation?.arv != null
+          ? 'No verified flip resales — valuation anchored on modeled value (AVM/assessment), not comp evidence'
+          : 'No verified flip resales — ARV is withheld, report is reference-only',
+      )
       return { level: 'low', reasons, requiresHumanReview: true }
     }
     if (flipCount < 3) {

@@ -28,6 +28,17 @@ export function evaluateComparable(
   const filterResults = []
   const disableReasons: string[] = []
 
+  // Data-quality gates — mirror of the server evaluator; hard, never flexed.
+  if (comp.salePrice != null && comp.salePrice < 10_000) {
+    disableReasons.push(`Non-market sale — nominal price $${comp.salePrice.toLocaleString()}`)
+  }
+  if (comp.lotSizeSquareFeet != null && subject.lotSizeSquareFeet != null
+    && comp.lotSizeSquareFeet > 43560 && comp.lotSizeSquareFeet > subject.lotSizeSquareFeet * 3) {
+    disableReasons.push(
+      `Rural lot (${Math.round(comp.lotSizeSquareFeet).toLocaleString()} sqft vs subject ${Math.round(subject.lotSizeSquareFeet).toLocaleString()} sqft) — not comparable`,
+    )
+  }
+
   for (const filter of filters) {
     if (!filter.enabled) continue
 

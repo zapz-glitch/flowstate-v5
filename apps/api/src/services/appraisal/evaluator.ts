@@ -1109,6 +1109,21 @@ export function evaluateComparable(
   const filterResults: FilterResult[] = []
   const disableReasons: string[] = []
 
+  // ── Data-quality gates — hard, never stretched by the flex ladder ────────
+  // A $1/$100 recorded price is a quit-claim/family/deed transfer, not a
+  // market sale — it can never be comparable evidence regardless of rules.
+  if (comp.salePrice != null && comp.salePrice < 10_000) {
+    disableReasons.push(`Non-market sale — nominal price $${comp.salePrice.toLocaleString()}`)
+  }
+  // Rural acreage vs a suburban lot is a category mismatch — the ±lot_size
+  // tolerance (even flexed) is for same-pocket variance, not acreage.
+  if (comp.lotSizeAcres != null && subject.lotSizeAcres != null
+    && comp.lotSizeAcres > 1 && comp.lotSizeAcres > subject.lotSizeAcres * 3) {
+    disableReasons.push(
+      `Rural lot (${comp.lotSizeAcres.toFixed(2)} ac vs subject ${subject.lotSizeAcres.toFixed(2)} ac) — not comparable`,
+    )
+  }
+
   for (const filter of filters) {
     if (!filter.enabled) continue
 
