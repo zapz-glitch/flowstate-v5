@@ -4,7 +4,7 @@ import { use, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { ChevronLeft, ChevronRight, Timer, ListFilter } from 'lucide-react'
-import DashboardReportPage from '../../reports/[jobId]/page'
+import { ReportPageView } from '../../reports/[jobId]/report-page-view'
 import { getOfferQueue, type PipelineItem } from '../actions'
 import { jobIdForItem, parseQueuedAt, sortedQueue, formatWait, WAIT_FILTER_LABELS, type WaitFilter, getCachedQueue, setCachedQueue, prefetchReport, recordDecision, setLastViewed, decisionFor, getDecidedToday, mergeDispositions, decidedLeadSet, consumeNavVeil, getOffersViewCached, type DecidedEntry, type ServerDisposition, type OfferWorkflow } from '../queue'
 import { useSidebar } from '@/components/SidebarProvider'
@@ -281,7 +281,7 @@ export default function GiveOfferReportPage({ params }: { params: Promise<{ jobI
 
   return (
     <>
-      <DashboardReportPage
+      <ReportPageView
       params={reportParams}
       queue={{
         node: bar,

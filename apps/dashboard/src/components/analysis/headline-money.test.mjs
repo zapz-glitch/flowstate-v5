@@ -51,6 +51,7 @@ test('valuation headline renders ARV, Buy and Wholesale from display fields and 
     './valuation-number': whole,
     './format-helpers': { fmtNumber: value => value?.toLocaleString('en-US') ?? '-' },
     '@/lib/utils': { cn: (...classes) => classes.filter(Boolean).join(' ') },
+    '@/hooks/use-evaluation': { useEvaluation: () => ({ arvOverride: null, onArvOverride: () => {} }) },
   })
   const valuation = Object.freeze({
     arv: 612345.67, buyPrice: 450123.45, wholesalePrice: 440123.45,
