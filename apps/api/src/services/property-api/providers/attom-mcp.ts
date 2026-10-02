@@ -252,7 +252,20 @@ async function mcpRpc(env: Env, method: string, params: unknown, depth = 0): Pro
 }
 
 async function callTool(env: Env, name: string, args: Record<string, unknown>): Promise<any> {
-  return mcpRpc(env, 'tools/call', { name, arguments: args })
+  const result = await mcpRpc(env, 'tools/call', { name, arguments: args })
+  // Wire-level fixture capture for offline replay (local dev only): every
+  // tools/call result lands on stdout as a greppable line — harvest with
+  //   grep '^\[MCP_RECORD\]' dev.log | cut -d']' -f2- > fixtures.jsonl
+  // Payloads >500KB are skipped (console may truncate; get_property_data
+  // already caps at 524KB server-side).
+  if ((env as Env & { ATTOM_MCP_RECORD?: string }).ATTOM_MCP_RECORD === '1') {
+    try {
+      const line = JSON.stringify({ t: Date.now(), name, args, result })
+      if (line.length < 500_000) console.log(`[MCP_RECORD]${line}`)
+      else console.log(`[MCP_RECORD_SKIPPED] ${name} ${line.length}B — too large to log`)
+    } catch { /* recording is best-effort */ }
+  }
+  return result
 }
 
 function dataset<T = any>(results: any[] | undefined, name: string): T | null {

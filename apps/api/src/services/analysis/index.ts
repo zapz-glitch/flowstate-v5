@@ -1252,6 +1252,12 @@ export function buildAnalysisResponse(
       neighborhoodName: comp.neighborhoodName ?? null,
       neighborhoodCode: comp.neighborhoodCode ?? null,
       censusTract: comp.censusTract ?? null,
+      // Enrichment signals serialized so reports/replays carry the same
+      // evidence the rules evaluated — value-equivalence (ppsfMedians),
+      // above-AVM (avmValue), transaction distress flags (transaction).
+      ...(comp.ppsfMedians != null ? { ppsfMedians: comp.ppsfMedians } : {}),
+      ...(comp.avmValue != null ? { avmValue: comp.avmValue } : {}),
+      ...(comp.transaction != null ? { transaction: comp.transaction } : {}),
       // Road-barrier proxy (census tract) — absent when unverified
       ...(comp.crossesMajorRoad != null ? { crossesMajorRoad: comp.crossesMajorRoad } : {}),
       ...(comp.sameBlockGroup != null ? { sameBlockGroup: comp.sameBlockGroup } : {}),
@@ -1334,6 +1340,7 @@ export function buildAnalysisResponse(
       neighborhoodCode: property.neighborhoodCode ?? null,
       cbsaCode: property.cbsaCode ?? null,
       censusTract: property.censusTract ?? null,
+      ...(property.ppsfMedians != null ? { ppsfMedians: property.ppsfMedians } : {}),
       legalDescription: property.legalDescription ?? null,
       lastSale: property.lastSalePrice
         ? {
