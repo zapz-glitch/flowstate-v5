@@ -1,0 +1,447 @@
+{
+  "schemaVersion": "report-1",
+  "run": {
+    "id": "01a0fb45-b212-7ef3-abcf-6247fab51165",
+    "specVersion": "0.1",
+    "runner": {
+      "name": "e2e",
+      "version": "0.15.1"
+    },
+    "status": "passed",
+    "exitCode": 0,
+    "startedAt": "2026-10-02T06:20:44.385Z",
+    "finishedAt": "2026-10-02T06:20:45.841Z",
+    "project": {
+      "id": "@flowstate-api/dashboard",
+      "configDigest": "ff25f2cd33b8ab05f3fb49df8d57f38319a793795a647a0f783762b6a41e7467"
+    },
+    "environment": {
+      "ci": false,
+      "trustNoticeShown": false,
+      "os": "linux 6.18.33.2-microsoft-standard-WSL2",
+      "arch": "x64",
+      "runtime": "node v22.23.2"
+    },
+    "vcs": {
+      "commit": "bab4310c6ba1948e1f98135d14bfe3bd8d3692f1",
+      "branch": "feat/attom-provider-swap",
+      "dirty": true
+    },
+    "targets": [
+      {
+        "id": "api",
+        "index": 0,
+        "platform": "api",
+        "environment": "test",
+        "engine": {
+          "name": "none",
+          "version": "unversioned",
+          "spiVersion": 1
+        },
+        "capabilities": [],
+        "artifactCapabilities": [],
+        "stateCapability": false
+      },
+      {
+        "id": "web",
+        "index": 1,
+        "platform": "web",
+        "baseOrigin": "http://localhost:3000",
+        "environment": "test",
+        "engine": {
+          "name": "web",
+          "version": "0.11.1",
+          "spiVersion": 1
+        },
+        "capabilities": [
+          "actions",
+          "artifacts",
+          "browser",
+          "keyboard",
+          "location",
+          "observation",
+          "pointer",
+          "state"
+        ],
+        "artifactCapabilities": [
+          "screenshot",
+          "trace",
+          "video"
+        ],
+        "stateCapability": true
+      }
+    ],
+    "serialGroups": [],
+    "results": [
+      {
+        "id": "74088543b9c15b6fa8672c8a253ec8edcfa15154196e2b4687a7c1992f01eee0",
+        "testId": "tests/analyze.e2e.ts::analyze%20produces%20a%20report%20with%20comps",
+        "kind": "test",
+        "declarationIndex": 0,
+        "titlePath": [
+          "analyze produces a report with comps"
+        ],
+        "file": "tests/analyze.e2e.ts",
+        "source": {
+          "file": "tests/analyze.e2e.ts",
+          "line": 9,
+          "column": 1
+        },
+        "targetId": "api",
+        "platform": "api",
+        "agent": "default",
+        "repeat": 0,
+        "tags": [],
+        "selected": false,
+        "status": "skipped",
+        "skip": {
+          "cause": "filtered",
+          "reason": "file not selected by a positional argument"
+        },
+        "attempts": []
+      },
+      {
+        "id": "d31120219ce06cd47fb3403ea1352ddedb4e8753402cf3f0d186f870b808cb57",
+        "testId": "tests/analyze.e2e.ts::analyze%20produces%20a%20report%20with%20comps",
+        "kind": "test",
+        "declarationIndex": 0,
+        "titlePath": [
+          "analyze produces a report with comps"
+        ],
+        "file": "tests/analyze.e2e.ts",
+        "source": {
+          "file": "tests/analyze.e2e.ts",
+          "line": 9,
+          "column": 1
+        },
+        "targetId": "web",
+        "platform": "web",
+        "agent": "default",
+        "repeat": 0,
+        "tags": [],
+        "selected": false,
+        "status": "skipped",
+        "skip": {
+          "cause": "filtered",
+          "reason": "file not selected by a positional argument"
+        },
+        "attempts": []
+      },
+      {
+        "id": "94b31fbdd6c0d0c2ffaeead3a8c0834027c09bdb82a2d3adf80abe8e76d0de63",
+        "testId": "tests/api.e2e.ts::health%20endpoints%20respond%20ok",
+        "kind": "test",
+        "declarationIndex": 0,
+        "titlePath": [
+          "health endpoints respond ok"
+        ],
+        "file": "tests/api.e2e.ts",
+        "source": {
+          "file": "tests/api.e2e.ts",
+          "line": 17,
+          "column": 1
+        },
+        "targetId": "api",
+        "platform": "api",
+        "agent": "default",
+        "repeat": 0,
+        "tags": [],
+        "selected": false,
+        "status": "skipped",
+        "skip": {
+          "cause": "filtered",
+          "reason": "file not selected by a positional argument"
+        },
+        "attempts": []
+      },
+      {
+        "id": "9fcff04979be07e8d9aaa01e44cdf088ad83158bda32cd515b4eee8097fba1fd",
+        "testId": "tests/api.e2e.ts::health%20endpoints%20respond%20ok",
+        "kind": "test",
+        "declarationIndex": 0,
+        "titlePath": [
+          "health endpoints respond ok"
+        ],
+        "file": "tests/api.e2e.ts",
+        "source": {
+          "file": "tests/api.e2e.ts",
+          "line": 17,
+          "column": 1
+        },
+        "targetId": "web",
+        "platform": "web",
+        "agent": "default",
+        "repeat": 0,
+        "tags": [],
+        "selected": false,
+        "status": "skipped",
+        "skip": {
+          "cause": "filtered",
+          "reason": "file not selected by a positional argument"
+        },
+        "attempts": []
+      },
+      {
+        "id": "fa46cd54c390f1ecd96ac9371a7543f8a1396bcc7d0a847d07e23b5a3bc4bed3",
+        "testId": "tests/api.e2e.ts::unauthenticated%20v1%20calls%20are%20rejected",
+        "kind": "test",
+        "declarationIndex": 1,
+        "titlePath": [
+          "unauthenticated v1 calls are rejected"
+        ],
+        "file": "tests/api.e2e.ts",
+        "source": {
+          "file": "tests/api.e2e.ts",
+          "line": 23,
+          "column": 1
+        },
+        "targetId": "api",
+        "platform": "api",
+        "agent": "default",
+        "repeat": 0,
+        "tags": [],
+        "selected": false,
+        "status": "skipped",
+        "skip": {
+          "cause": "filtered",
+          "reason": "file not selected by a positional argument"
+        },
+        "attempts": []
+      },
+      {
+        "id": "e6d65ae16a9aed55b3ab1b07dc5cbd5093ed010032a653efc254441840726ea5",
+        "testId": "tests/api.e2e.ts::unauthenticated%20v1%20calls%20are%20rejected",
+        "kind": "test",
+        "declarationIndex": 1,
+        "titlePath": [
+          "unauthenticated v1 calls are rejected"
+        ],
+        "file": "tests/api.e2e.ts",
+        "source": {
+          "file": "tests/api.e2e.ts",
+          "line": 23,
+          "column": 1
+        },
+        "targetId": "web",
+        "platform": "web",
+        "agent": "default",
+        "repeat": 0,
+        "tags": [],
+        "selected": false,
+        "status": "skipped",
+        "skip": {
+          "cause": "filtered",
+          "reason": "file not selected by a positional argument"
+        },
+        "attempts": []
+      },
+      {
+        "id": "59d909de4bdbc14a78dc43487f6ea6ee415658f82f2747b9e3e03d75e1706ead",
+        "testId": "tests/api.e2e.ts::POST%20%2Fv1%2Fanalyze%20runs%20a%20job%20to%20a%20completed%20report",
+        "kind": "test",
+        "declarationIndex": 2,
+        "titlePath": [
+          "POST /v1/analyze runs a job to a completed report"
+        ],
+        "file": "tests/api.e2e.ts",
+        "source": {
+          "file": "tests/api.e2e.ts",
+          "line": 28,
+          "column": 1
+        },
+        "targetId": "api",
+        "platform": "api",
+        "agent": "default",
+        "repeat": 0,
+        "tags": [],
+        "selected": false,
+        "status": "skipped",
+        "skip": {
+          "cause": "filtered",
+          "reason": "file not selected by a positional argument"
+        },
+        "attempts": []
+      },
+      {
+        "id": "c07132529a93fdcfb5c8bfdabbd987f3c4005ee1786f5021ed0822610f9358f9",
+        "testId": "tests/api.e2e.ts::POST%20%2Fv1%2Fanalyze%20runs%20a%20job%20to%20a%20completed%20report",
+        "kind": "test",
+        "declarationIndex": 2,
+        "titlePath": [
+          "POST /v1/analyze runs a job to a completed report"
+        ],
+        "file": "tests/api.e2e.ts",
+        "source": {
+          "file": "tests/api.e2e.ts",
+          "line": 28,
+          "column": 1
+        },
+        "targetId": "web",
+        "platform": "web",
+        "agent": "default",
+        "repeat": 0,
+        "tags": [],
+        "selected": false,
+        "status": "skipped",
+        "skip": {
+          "cause": "filtered",
+          "reason": "file not selected by a positional argument"
+        },
+        "attempts": []
+      },
+      {
+        "id": "1bb082a426f2618a0d1989fbb7373084871a9a5fe89bce2b18dea2644cd58d3b",
+        "testId": "tests/clef.e2e.ts::dev%20routes%20expose%20the%20Clef%20binding",
+        "kind": "test",
+        "declarationIndex": 0,
+        "titlePath": [
+          "dev routes expose the Clef binding"
+        ],
+        "file": "tests/clef.e2e.ts",
+        "source": {
+          "file": "tests/clef.e2e.ts",
+          "line": 10,
+          "column": 1
+        },
+        "targetId": "api",
+        "platform": "api",
+        "agent": "default",
+        "repeat": 0,
+        "tags": [],
+        "selected": true,
+        "status": "passed",
+        "attempts": [
+          {
+            "id": "01a0fb45-b616-74ef-8ac3-c7bd08554574",
+            "index": 0,
+            "status": "passed",
+            "startedAt": "2026-10-02T06:20:44.951Z",
+            "durationMs": 22,
+            "artifacts": [],
+            "secondaryErrors": [],
+            "cleanup": "complete",
+            "steps": []
+          }
+        ]
+      },
+      {
+        "id": "f656c2985b193f6773aef03c495034ff67aeee5b8a230d2e38787dfade006a12",
+        "testId": "tests/clef.e2e.ts::dev%20routes%20expose%20the%20Clef%20binding",
+        "kind": "test",
+        "declarationIndex": 0,
+        "titlePath": [
+          "dev routes expose the Clef binding"
+        ],
+        "file": "tests/clef.e2e.ts",
+        "source": {
+          "file": "tests/clef.e2e.ts",
+          "line": 10,
+          "column": 1
+        },
+        "targetId": "web",
+        "platform": "web",
+        "agent": "default",
+        "repeat": 0,
+        "tags": [],
+        "selected": false,
+        "status": "skipped",
+        "skip": {
+          "cause": "platform-unavailable",
+          "reason": "test declares platforms [api]"
+        },
+        "attempts": []
+      },
+      {
+        "id": "0aba6f528970566495966b36827e1965ccae9c079d952e9d682ba82f6fac2503",
+        "testId": "tests/clef.e2e.ts::comp%20listing%20evidence%20%2B%20Clef%20condition%20classification",
+        "kind": "test",
+        "declarationIndex": 1,
+        "titlePath": [
+          "comp listing evidence + Clef condition classification"
+        ],
+        "file": "tests/clef.e2e.ts",
+        "source": {
+          "file": "tests/clef.e2e.ts",
+          "line": 18,
+          "column": 1
+        },
+        "targetId": "api",
+        "platform": "api",
+        "agent": "default",
+        "repeat": 0,
+        "tags": [],
+        "selected": true,
+        "status": "passed",
+        "attempts": [
+          {
+            "id": "01a0fb45-b62e-7a4d-90e6-97438d08a73b",
+            "index": 0,
+            "status": "passed",
+            "startedAt": "2026-10-02T06:20:44.974Z",
+            "durationMs": 825,
+            "artifacts": [],
+            "secondaryErrors": [],
+            "cleanup": "complete",
+            "steps": []
+          }
+        ]
+      },
+      {
+        "id": "30125a378a2e770ab8f262041c93d4a4a60839e7c44dd12adad547ad7a7b414b",
+        "testId": "tests/clef.e2e.ts::comp%20listing%20evidence%20%2B%20Clef%20condition%20classification",
+        "kind": "test",
+        "declarationIndex": 1,
+        "titlePath": [
+          "comp listing evidence + Clef condition classification"
+        ],
+        "file": "tests/clef.e2e.ts",
+        "source": {
+          "file": "tests/clef.e2e.ts",
+          "line": 18,
+          "column": 1
+        },
+        "targetId": "web",
+        "platform": "web",
+        "agent": "default",
+        "repeat": 0,
+        "tags": [],
+        "selected": false,
+        "status": "skipped",
+        "skip": {
+          "cause": "platform-unavailable",
+          "reason": "test declares platforms [api]"
+        },
+        "attempts": []
+      }
+    ],
+    "errors": [],
+    "summary": {
+      "discovered": 12,
+      "selected": 2,
+      "executed": 2,
+      "passed": 2,
+      "failed": 0,
+      "flaky": 0,
+      "skipped": 10
+    },
+    "limits": {
+      "maxAgentContextBytes": 16384,
+      "maxLedgerBytes": 8192,
+      "maxObservationBytes": 262144,
+      "maxEventsPerStep": 1000,
+      "maxModelTokensPerCall": 64000
+    },
+    "usage": {
+      "discoveredResults": 12,
+      "maxAgentContextBytes": 0,
+      "maxLedgerBytes": 0,
+      "maxObservationBytes": 0,
+      "artifactBytes": 0,
+      "downloads": 0,
+      "events": 0,
+      "modelTokens": 0,
+      "maxModelCallsInStep": 0,
+      "maxActionStepsInStep": 0
+    }
+  }
+}
