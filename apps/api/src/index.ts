@@ -38,6 +38,7 @@ import typeaheadRoute from './routes/typeahead'
 import compSelectionRoute from './routes/comp-selection'
 import mlExportRoute from './routes/ml-export'
 import offersRoute from './routes/offers'
+import intakeRoute, { processIntake, parseIntakeEmail } from './routes/intake'
 import { pipelineReads } from './routes/pipeline'
 import { activityIngest, activityReads } from './routes/activity'
 import { cdarv, cdarvInternal } from './routes/cdarv'
@@ -174,6 +175,7 @@ v1.route('/analyze', analyze)
 v1.route('/ml', mlExportRoute)
 v1.route('/offers', offersRoute)
 v1.route('/pipeline', pipelineReads)
+v1.route('/intake', intakeRoute)
 v1.route('/activity', activityReads)
 
 app.route('/v1', v1)
@@ -213,5 +215,26 @@ export default {
   // run unattended to completion — no one needs the dashboard open
   scheduled: (_event: ScheduledEvent, env: Env, ctx: ExecutionContext) => {
     ctx.waitUntil(sweepStaleBatches(env))
+  },
+  // Email Worker — inbound form notifications at the intake inbox.
+  // Requires an Email Routing rule (CF dashboard → Email → Routing rules)
+  // pointing the intake address at this worker. Parses the form email and
+  // runs the same lead → opportunity → engine-eval path as POST /v1/intake.
+  email: async (message: ForwardableEmailMessage, env: Env, ctx: ExecutionContext) => {
+    ctx.waitUntil((async () => {
+      try {
+        const raw = await new Response(message.raw).text()
+        const input = parseIntakeEmail(raw)
+        if (!input) {
+          console.error('[Intake-email] unparseable form email from', message.from)
+          return
+        }
+        const result = await processIntake(env, { ...input, source: `email:${message.to}` })
+        if (!result.ok) console.error('[Intake-email] intake failed:', result.error)
+        else console.log(`[Intake-email] lead ${result.leadId} queued for eval (${input.propertyAddress})`)
+      } catch (e) {
+        console.error('[Intake-email] handler failed:', e)
+      }
+    })())
   },
 }
