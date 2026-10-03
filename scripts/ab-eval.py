@@ -91,7 +91,7 @@ def sub_avm(s):
     """Subject AVM — serialized as nested avm.value, avmValue on some paths."""
     return s.get('avmValue') or (s.get('avm') or {}).get('value')
 
-def set_b(subject, items):
+def set_b(subject, items, valuation=None):
     """Recompute ARV under trade-tricks over the same enabled pool as A.
     Conclusion cascade — B never refuses outright:
       T0 verified ARV anchor (enabled comps)
@@ -376,6 +376,37 @@ def set_b(subject, items):
         elif anchor['contrib'] < lo:
             flags.append('anchor below supporting range — check whether a better comp should drive')
 
+    # ── Condition adjustment — the URAR Condition line item ──────────────
+    # An all-median driver set prices MEDIAN condition; the subject's
+    # as-repaired condition earns the market's renovation premium:
+    #   T1 pool tier spread (≥2 premium-tier comps) scaled by rehab level
+    #   T2 contributory value — subject's rehab cost × 80%
+    #   T3 flag-only. The premium band is the upper bound — the outlier
+    #   ceiling still applies below.
+    REHAB_FRACTION = {'Full Gut': 0.95, 'Heavy Rehab': 0.85, 'Full Cosmetic': 0.75,
+                      'Light Cosmetic': 0.45, 'Lipstick': 0.30}
+    if drivers and all(cond_tier(x['c']) == 'median' for x in drivers):
+        premium = [x for x in contribs if cond_tier(x['c']) == 'premium']
+        cond_adj, cond_src = 0.0, None
+        if len(premium) >= 2 and median_comps:
+            prem_med = sorted(x['contrib'] for x in premium)[len(premium)//2]
+            med_med = sorted(x['contrib'] for x in median_comps)[len(median_comps)//2]
+            spread = prem_med/med_med - 1 if med_med else 0
+            if spread > 0:
+                frac = REHAB_FRACTION.get(subject.get('condition'), 0.5)
+                cond_adj = arv * spread * frac
+                cond_src = f'T1 tier spread {spread:.0%} × {frac:.2f} ({subject.get("condition")})'
+        else:
+            rehab = (valuation or {}).get('rehabCost')
+            if rehab:
+                cond_adj = rehab * 0.8
+                cond_src = f'T2 contributory — {fmt(rehab)} rehab cost × 80%'
+        if cond_adj >= 1000:
+            arv += cond_adj
+            flags.append(f'condition adj +{fmt(cond_adj)} [{cond_src}] — median-priced anchor → as-repaired value')
+        else:
+            flags.append('condition uplift unverified — ARV at median-tier anchor')
+
     # 5 — outlier ceiling: ARV above the pool's top sale needs ≥OUTLIER_SUPPORT
     # drivers above it — measured against the SIZE-ADJUSTED ceiling, not the
     # raw sale. A comp's raw price is the evidence for ITS size; size-scaled
@@ -426,7 +457,7 @@ def run_address(addr):
         d = req('GET', f'/v1/analyze/jobs/{job}')['data']['result'] or d
 
     s, val, comps = d['subject'], d.get('valuation') or {}, d['comps']
-    b = set_b(s, comps['items'])
+    b = set_b(s, comps['items'], d.get('valuation'))
     sel = [c for c in comps['items'] if c.get('arvStatus') == 'selected' or (c['isEnabled'] and c.get('salePrice'))]
 
     return {'addr': addr, 'elapsed': elapsed, 'subject': s,
