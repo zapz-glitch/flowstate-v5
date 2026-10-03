@@ -710,9 +710,7 @@ export interface AnalysisResponse {
     listPrice: number | null
     /** ARV minus list price — negative = ARV below asking (negotiation room), positive = above */
     arvVsListPrice: number | null
-    /** Legacy appraisal ARV — the pre-Set-B pipeline number (parity display) */
-    arvLegacy: number | null
-    /** Set-B parallel ARV — trade-tricks methodology (shared/appraisal set-b) */
+    /** Set-B ARV — trade-tricks methodology (shared/appraisal set-b) */
     arvB: number | null
     /** B mechanics trail — anchor, flags, ceiling, driver set for the UI panel */
     bMechanics: {
@@ -1425,12 +1423,6 @@ export function buildAnalysisResponse(
         }
       : null
 
-  const arvMethodology = arvSource === 'avm'
-    ? 'subject AVM — no comp ARV evidence (conservative anchor)'
-    : arvSource === 'assessed'
-      ? 'county assessed value — no comp ARV evidence (conservative anchor)'
-    : ctx.classificationSummary?.methodology ?? `avg price/sqft of ${enabledComps.length} comp${enabledComps.length !== 1 ? 's' : ''} × subject sqft`
-
   // ── Set-B ARV (trade-tricks methodology) ───────────────────────────────
   // The pipeline's post-retry result is canonical; serialization falls back
   // to a recompute over the serialized pool only when no result was passed.
@@ -1451,6 +1443,14 @@ export function buildAnalysisResponse(
     allComps,
     { rehabCost: valuation?.totalRehabCost ?? null },
   )
+
+  const arvMethodology = bResult.arv != null
+    ? `Set-B ${bResult.source}${bResult.anchorAddress ? ` — anchored ${bResult.anchorAddress}` : ''}`
+    : arvSource === 'avm'
+      ? 'subject AVM — no comp ARV evidence (conservative anchor)'
+      : arvSource === 'assessed'
+        ? 'county assessed value — no comp ARV evidence (conservative anchor)'
+        : 'Set-B produced no ARV on this evidence set'
 
   return {
     // ═══ SUBJECT PROPERTY ═══════════════════════════════════════════════════
@@ -1597,8 +1597,6 @@ export function buildAnalysisResponse(
           : null,
       // Set-B parallel output — trade-tricks ARV + mechanics trail (the
       // calibration harness methodology, ported to shared/appraisal)
-      /** Legacy appraisal ARV — the pre-swap pipeline number (parity display) */
-      arvLegacy: appraisalResult.arv ?? null,
       arvB: bResult.arv,
       bMechanics: {
         source: bResult.source,

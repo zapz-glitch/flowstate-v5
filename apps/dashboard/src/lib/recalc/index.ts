@@ -19,7 +19,6 @@ import type { EvaluationSettings, RecalcResult, CompEvaluation, RecalcValuationR
 import { PROXIMITY_DEFAULTS, type ProximityConfig, type ArvAdjustmentRule, type ArvAdjustmentOverride } from '../client-api'
 import {
   evaluateComparable,
-  calculateARV,
   getCompAvgSqft,
   calculateValuation,
   calculateAllRehabLevelEstimates,
@@ -183,13 +182,12 @@ export function recalculateReport(
     return subjectAvm == null || (c.salePrice != null && c.salePrice <= subjectAvm)
   }
 
-  const arvCompsForCalc = arvComps.map((c, i) => ({ ...c, isEnabled: c.isEnabled && isArvComp(i) }))
   const enabledCount = arvComps.filter((c) => c.isEnabled).length
   const disabledCount = comps.length - enabledCount
 
   // 4. ARV — the same Set-B engine the pipeline runs, on the serialized
-  //    (stamped) comps. Legacy mean math remains the fallback for reports
-  //    saved before stamps existed.
+  //    (stamped) comps. When B produces nothing (pre-stamp reports), the
+  //    stored ARV carries through unchanged — no retired math.
   const bComps: BComp[] = comps.map((c, i) => ({
     address: c.address ?? null,
     isEnabled: compEvaluations[i].isEnabled,
@@ -232,7 +230,7 @@ export function recalculateReport(
     condition: data.valuation?.rehabLevel ?? null,
   }
   const bResult = evaluateB(bSubject, bComps, { rehabCost: data.valuation?.rehabCost ?? null })
-  const arv = bResult.arv ?? calculateARV(arvCompsForCalc, subject.squareFeet)
+  const arv = bResult.arv ?? data.valuation?.arv ?? 0
 
   // 4b. Groups come from evidence classification — not price percentile.
   //     'arv' = after_renovation evidence; 'as_is' = investor-priced
@@ -492,7 +490,8 @@ function calculateProximityDeduction(arv: number, settings: EvaluationSettings):
 
 /**
  * Recalculate valuation when user manually toggles comps.
- * Uses shared calculateARV + calculateValuation for consistency with server.
+ * Runs Set-B on the stamped comp pool — the operator selection constrains
+ * which comps are enabled; B does the tiering/anchoring math itself.
  */
 export function recalculateValuationFromComps(
   allComps: CompItem[],
@@ -506,15 +505,54 @@ export function recalculateValuationFromComps(
   const subjectSqft = subject.squareFeet ?? 0
   const selectedComps = allComps.filter((c, i) => selectedCompKeys.has(getCompKey(c, i)))
 
-  // ARV pool = ARV-evidence comps only — selecting a median or investor-floor
-  // comp must not leak its price into ARV. An operator pin (userTier) is the
-  // explicit override BOTH ways: 'arv' admits a non-evidence comp, 'as_is'
-  // excludes an evidence-classified one.
-  const arvEligibleComps = selectedComps.filter(
-    (c) => c.userTier === 'arv' || (c.userTier == null && c.classification?.type === 'after_renovation')
+  // Operator selection = enabled evidence. B reads classification + stamps
+  // for tiering; 'as_is' pins re-class the comp out of the ARV pool.
+  const bComps: BComp[] = allComps.map((c, i) => ({
+    address: c.address ?? null,
+    isEnabled: selectedCompKeys.has(getCompKey(c, i)),
+    salePrice: c.salePrice ?? null,
+    saleDate: c.saleDate ?? null,
+    squareFeet: c.squareFeet ?? null,
+    pricePerSqft: c.pricePerSqft ?? null,
+    adjustedPrice: c.adjustedPrice ?? null,
+    distanceMiles: c.distanceMiles ?? null,
+    sameBlockGroup: c.sameBlockGroup ?? null,
+    censusTract: c.censusTract ?? null,
+    subdivision: c.subdivision ?? null,
+    yearBuilt: c.yearBuilt ?? null,
+    lotSizeAcres: c.lotSizeAcres ?? null,
+    lotSizeSquareFeet: c.lotSizeSquareFeet ?? null,
+    landAssessedValue: c.landAssessedValue ?? null,
+    propertyType: c.propertyType ?? null,
+    crossesMajorRoad: c.crossesMajorRoad ?? null,
+    disableReasons: (c.disableReasons as string[] | null) ?? null,
+    classification: c.userTier === 'as_is' ? { type: 'as_is' }
+      : c.userTier === 'arv' ? { type: 'after_renovation' }
+      : c.classification ?? null,
+    curbAppeal: (c.curbAppeal as BComp['curbAppeal']) ?? null,
+    evidenceVerification: (c.evidenceVerification as BComp['evidenceVerification']) ?? null,
+    appraisalRules: c.appraisalRules
+      ? { totalAdjustment: (c.appraisalRules as { totalAdjustment?: number | null }).totalAdjustment ?? null }
+      : null,
+  }))
+  const bResult = evaluateB(
+    {
+      squareFeet: subject.squareFeet ?? null,
+      yearBuilt: subject.yearBuilt ?? null,
+      censusTract: subject.censusTract ?? null,
+      subdivision: subject.subdivision ?? null,
+      landAssessedValue: subject.landAssessedValue ?? null,
+      taxAssessment: (subject as { taxAssessment?: number | null }).taxAssessment ?? (subject as { assessedValue?: number | null }).assessedValue ?? null,
+      assessedValue: (subject as { assessedValue?: number | null }).assessedValue ?? null,
+      avmValue: (subject as { avm?: { value?: number | null } | null }).avm?.value ?? null,
+      lotSizeAcres: subject.lotSizeAcres ?? null,
+      lotSizeSquareFeet: subject.lotSizeSquareFeet ?? null,
+      condition: originalValuation.rehabLevel ?? null,
+    },
+    bComps,
+    { rehabCost: originalValuation.rehabCost ?? null },
   )
-
-  const arvComps: ArvCompLike[] = arvEligibleComps.map((c) => ({
+  const arvComps = selectedComps.map((c) => ({
     isEnabled: true,
     adjustedPrice: c.adjustedPrice ?? c.salePrice ?? null,
     salePrice: c.salePrice ?? null,
@@ -522,8 +560,7 @@ export function recalculateValuationFromComps(
     distanceMiles: c.distanceMiles ?? null,
     filterResults: [],
   }))
-
-  const newArv = arvComps.length > 0 ? calculateARV(arvComps, subjectSqft) : (originalValuation.arv ?? 0)
+  const newArv = bResult.arv ?? (originalValuation.arv ?? 0)
   const compAvgSqft = arvComps.length > 0 ? getCompAvgSqft(arvComps) : subjectSqft
 
   const selectedLevel = originalValuation.rehabLevelEstimates?.find((l) => l.isSelected)

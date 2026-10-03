@@ -363,8 +363,6 @@ export interface ValuationData {
   arvPerSqft?: number
   /** Set-B trade-tricks ARV (the pipeline ARV post-swap) */
   arvB?: number | null
-  /** Legacy appraisal ARV — pre-swap pipeline number (parity display) */
-  arvLegacy?: number | null
   /** Set-B mechanics trail — anchor, drivers, ceiling, flags */
   bMechanics?: {
     source: string
@@ -618,8 +616,6 @@ export interface ValuationData {
   arvPerSqft?: number
   /** Set-B trade-tricks ARV (the pipeline ARV post-swap) */
   arvB?: number | null
-  /** Legacy appraisal ARV — pre-swap pipeline number (parity display) */
-  arvLegacy?: number | null
   /** Set-B mechanics trail — anchor, drivers, ceiling, flags */
   bMechanics?: {
     source: string

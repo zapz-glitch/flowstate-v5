@@ -163,27 +163,23 @@ export async function recalculateReport(
     { rehabCost: (savedVal.rehabCost as number) ?? null },
   )
 
-  // ARV = Set-B anchor when the verified evidence supports it; the legacy
-  // mean math remains the fallback for reports saved before stamps existed.
+  // ARV = Set-B on the stamped evidence. B is the only path — when it
+  // produces nothing, the stored ARV is retained rather than re-derived.
   let arv: number
   let arvSource: string
   if (bResult.arv != null) {
     arv = bResult.arv
     arvSource = bResult.source
+  } else if (typeof saved.valuation?.arv === 'number' && saved.valuation.arv > 0) {
+    // B produced no ARV — retain the stored value rather than re-derive
+    // it with the retired mean math.
+    arv = saved.valuation.arv
+    arvSource = 'retained'
   } else {
-    const withSqft = arvComps.filter((c) => (c.squareFeet ?? 0) > 0)
-    if (withSqft.length === arvComps.length && subjectSqft > 0) {
-      const meanPerSqft = arvComps.reduce(
-        (sum, c) => sum + (c.adjustedPrice ?? c.salePrice!) / (c.squareFeet as number),
-        0
-      ) / arvComps.length
-      arv = Math.round(meanPerSqft * subjectSqft)
-    } else {
-      arv = Math.round(
-        arvComps.reduce((sum, c) => sum + (c.adjustedPrice ?? c.salePrice!), 0) / arvComps.length
-      )
-    }
-    arvSource = 'legacy-mean'
+    throw Object.assign(
+      new Error('Set-B produced no ARV on this evidence set — the stored report is unchanged.'),
+      { status: 422 },
+    )
   }
 
   // Re-run valuation with the report's applied settings snapshot
@@ -238,7 +234,7 @@ export async function recalculateReport(
       arvB: bResult.arv,
       arvMethodology: bResult.arv != null
         ? `Set-B replay: ${bResult.source}${bResult.anchorAddress ? ` — anchored ${bResult.anchorAddress}` : ''}`
-        : `avg(adjustedPrice/compSqft × subjectSqft) across ${arvComps.length} operator-selected comp${arvComps.length !== 1 ? 's' : ''}`,
+        : `Set-B produced no ARV on replay — stored value retained`,
       bMechanics: bResult.arv != null
         ? {
             source: bResult.source,

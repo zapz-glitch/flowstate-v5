@@ -796,10 +796,9 @@ export async function performAnalysis(
         )
       : null
   if (arvComps.length > 0) {
-    appraisalResult.arv = appraisalService.calculateARV(arvComps, bundle.property.squareFeet)
     appraisalResult.insufficientComps = false
     step('appraisal_rules', 'completed',
-      `Evidence selection — ARV from ${arvComps.length} evidence comp(s)`)
+      `Evidence selection — ${arvComps.length} evidence comp(s) staged for Set-B`)
   } else {
     // finalArv reads `insufficient`, so the ladder's banded number is dead
     // weight — withholding it is what makes the run report-only.
@@ -824,7 +823,9 @@ export async function performAnalysis(
         (appraisalResult.fallbackUsed !== 'none' ? ` (${appraisalResult.fallbackUsed})` : '')
     )
   }
-  let finalArv = insufficient ? null : (appraisalResult.arv ?? null)
+  // Set-B is the only ARV path — it fills finalArv below; there is no
+  // legacy blend.
+  let finalArv: number | null = null
 
   // ── 3. Vision: subject renovation + curb appeal (one merged LLM call) ─────
   // Subject-only — comps are never photo-scraped, so there is no per-comp
@@ -1301,10 +1302,10 @@ export async function performAnalysis(
         'set_b_arv',
         'completed',
         `Set-B ARV ${formatUsd(bResult.arv)} (${bResult.source}${bResult.healed ? ', self-healed' : ''})` +
-          (prevArv != null && prevArv !== bResult.arv ? ` — replaces appraisal ${formatUsd(prevArv)}` : ''),
+          (prevArv != null && prevArv !== bResult.arv ? ` — replaces pre-B anchor ${formatUsd(prevArv)}` : ''),
       )
     } else if (bResult.arv == null && !insufficient) {
-      step('set_b_arv', 'skipped', 'Set-B produced no ARV — legacy anchor retained')
+      step('set_b_arv', 'skipped', 'Set-B produced no ARV — no anchor produced')
     }
   }
 
