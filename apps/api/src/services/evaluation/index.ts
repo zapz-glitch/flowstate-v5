@@ -1055,8 +1055,24 @@ export async function performAnalysis(
       const detailsById = new Map(compRes.map((x) => [x.id, x.r.details]))
       for (const comp of appraisalResult.comparables) {
         const d = detailsById.get(comp.id)
-        if (d) { comp.listingDetails = d; stamped++ }
+        if (d) {
+          comp.listingDetails = d
+          // Redfin supplement — MLS beds/baths fill provider gaps so the
+          // eval grid + feature matching see real counts (ATTOM misses
+          // beds on whole pools in some pockets).
+          comp.bedrooms ??= d.beds ?? null
+          comp.bathrooms ??= (d.bathsFull != null ? d.bathsFull + (d.bathsHalf ?? 0) * 0.5 : null)
+          stamped++
+        }
       }
+    }
+    // Same supplement on the subject — the provider misses beds entirely
+    // for some parcels; the listing carries them.
+    if (subjectRes?.details) {
+      bundle.property.bedrooms ??= subjectRes.details.beds ?? null
+      bundle.property.bathrooms ??= subjectRes.details.bathsFull != null
+        ? subjectRes.details.bathsFull + (subjectRes.details.bathsHalf ?? 0) * 0.5
+        : null
     }
     step(
       'listing_details',
