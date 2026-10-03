@@ -68,7 +68,7 @@ export function ValuationCard({
               <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
                 <DollarSign className="w-4 h-4 text-primary" />
               </div>
-              <h3 className="text-body font-semibold">Underwriter Valuation</h3>
+              <h3 className="mono-label">Underwriter Valuation</h3>
             </div>
             <div className="flex items-center gap-2">
               {isRecalculated && (
@@ -208,7 +208,7 @@ export function ValuationCard({
                   </div>
                 }
               />
-              <div className={cn('text-heading-sm font-semibold', (valuation.projectedProfit ?? 0) > 0 ? 'text-emerald-600' : 'text-red-600')}>
+              <div className={cn('text-heading-sm font-semibold', (valuation.projectedProfit ?? 0) > 0 ? 'text-brand' : 'text-red-600')}>
                 ${safeFmt(valuation.projectedProfit)}
               </div>
               {valuation.projectedROI != null && valuation.projectedROI !== 0 && (

@@ -302,7 +302,7 @@ export function ComparablesSection({
         {/* Row 1: Title + stats + actions */}
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-2">
-            <h3 className="text-body font-semibold">Comparables</h3>
+            <h3 className="mono-label">Comparables</h3>
             <span className="text-[10px] text-foreground-tertiary tabular-nums">
               {selectedCount} selected
               {excludedComps.length > 0 && ` · ${excludedComps.length} excluded`}
@@ -352,7 +352,7 @@ export function ComparablesSection({
             const labels = { all: 'All', arv: 'ARV', market: 'Median', floor: 'Investor' }
             const colors = {
               all: tierFilter === t ? 'bg-secondary text-foreground font-medium' : 'text-foreground-tertiary hover:text-foreground hover:bg-secondary',
-              arv: tierFilter === t ? 'bg-emerald-500/15 text-emerald-600 font-medium' : 'text-foreground-tertiary hover:text-foreground hover:bg-secondary',
+              arv: tierFilter === t ? 'bg-brand/15 text-brand font-medium' : 'text-foreground-tertiary hover:text-foreground hover:bg-secondary',
               market: tierFilter === t ? 'bg-orange-500/15 text-orange-500 font-medium' : 'text-foreground-tertiary hover:text-foreground hover:bg-secondary',
               floor: tierFilter === t ? 'bg-red-500/15 text-red-400 font-medium' : 'text-foreground-tertiary hover:text-foreground hover:bg-secondary',
             }

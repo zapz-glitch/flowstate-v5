@@ -745,7 +745,8 @@ export default function AnalyzePage() {
       )}>
       {phase === 'idle' && !error && (
         <div className="space-y-1">
-          <h1 className="text-heading-lg text-foreground tracking-tight">Property Search</h1>
+          <p className="mono-label mb-3">Flowstate | Property underwriting</p>
+          <h1 className="text-heading-lg text-foreground tracking-[-0.03em] font-medium">Property Search</h1>
           <p className="text-body text-foreground-tertiary">Search an address. Underwrite the deal.</p>
         </div>
       )}
