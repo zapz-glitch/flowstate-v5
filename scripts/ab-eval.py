@@ -240,13 +240,20 @@ def set_b(subject, items):
         elif anchor['contrib'] < lo:
             flags.append('anchor below supporting range — check whether a better comp should drive')
 
-    # 5 — outlier ceiling: ARV above pool's top actual sale needs ≥OUTLIER_SUPPORT drivers above it
+    # 5 — outlier ceiling: ARV above the pool's top sale needs ≥OUTLIER_SUPPORT
+    # drivers above it — measured against the SIZE-ADJUSTED ceiling, not the
+    # raw sale. A comp's raw price is the evidence for ITS size; size-scaled
+    # to the subject it's the right denominator. Size uplift is arithmetic,
+    # not speculation — the cap still catches non-size stretch.
+    size_adj_ceiling = max(
+        c['salePrice'] + max(0.0, (sub_sqft - c['squareFeet'])) * (c.get('pricePerSqft') or c['salePrice']/c['squareFeet']) * MARGINAL_FACTOR
+        for c in pool)
     top_sale = max(c['salePrice'] for c in pool)
-    supporters = sum(1 for x in drivers if x['contrib'] >= top_sale)
-    capped_outlier = arv > top_sale and supporters < OUTLIER_SUPPORT
+    supporters = sum(1 for x in drivers if x['contrib'] >= size_adj_ceiling)
+    capped_outlier = arv > size_adj_ceiling and supporters < OUTLIER_SUPPORT
     if capped_outlier:
-        flags.append(f'ARV {fmt(arv)} exceeds top sale {fmt(top_sale)} with {supporters} supporter(s) — capped')
-        arv = top_sale
+        flags.append(f'ARV {fmt(arv)} exceeds size-adjusted ceiling {fmt(size_adj_ceiling)} with {supporters} supporter(s) — capped')
+        arv = size_adj_ceiling
 
     # 4 — bracketing: all-smaller or all-bigger driver set → confidence flag
     sizes = [x['c']['squareFeet'] for x in drivers]
