@@ -16,6 +16,9 @@ export interface ParcelIdentity {
   apn: string
   /** County GIS display parcel number, if the county exposes one. */
   apnFormatted?: string
+  /** County's canonical site address (FULLADDR) — the official spelling,
+   *  useful when input-address variants miss on listing sites. */
+  siteAddress?: string
 }
 
 // ─── County registry ─────────────────────────────────────────────────────────
@@ -36,6 +39,8 @@ interface CountyParcelSource {
   outFields: string
   /** Extract the APN from a feature's attributes */
   apn: (attrs: Record<string, unknown>) => string | null
+  /** Extract the canonical site address, if the county returns one */
+  siteAddress?: (attrs: Record<string, unknown>) => string | null
 }
 
 const COUNTY_SOURCES: CountyParcelSource[] = [
@@ -47,6 +52,7 @@ const COUNTY_SOURCES: CountyParcelSource[] = [
     pinField: 'PIN_NUM',
     outFields: 'PIN_NUM,FULLADDR',
     apn: (a) => (typeof a.PIN_NUM === 'string' && a.PIN_NUM ? a.PIN_NUM : null),
+    siteAddress: (a) => (typeof a.FULLADDR === 'string' && a.FULLADDR ? a.FULLADDR : null),
   },
 ]
 
@@ -105,7 +111,7 @@ export async function resolveParcelApn(address: string): Promise<ParcelIdentity 
     const attrs = data.features?.[0]?.attributes
     const apn = attrs ? source.apn(attrs) : null
     if (!apn) return null
-    return { fips: geo.fips, apn }
+    return { fips: geo.fips, apn, siteAddress: attrs ? source.siteAddress?.(attrs) ?? undefined : undefined }
   } catch {
     return null
   }

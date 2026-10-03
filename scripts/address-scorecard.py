@@ -15,7 +15,7 @@ def fmt(n): return f"${n:,}" if isinstance(n, (int, float)) else '-'
 
 def scorecard(addr):
     t0 = time.time()
-    job = req('POST', '/v1/analyze', {'address': addr})['data']['jobId']
+    job = req('POST', '/v1/analyze', {'address': addr, 'skipCache': True})['data']['jobId']
     status = 'processing'
     while status not in ('complete', 'error'):
         time.sleep(5)

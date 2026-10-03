@@ -429,7 +429,7 @@ export class AnalysisJobDO {
         subjectSqft: property.squareFeet ?? undefined,
         subjectPropertyType: property.propertyType ?? undefined,
     }
-    const [compsResult, permitsResult, floodResult, avmResult, buildingDetailResult, osmResult, prefetchedPhotoBundle] = await Promise.all([
+    const [compsResult, permitsResult, floodResult, avmResult, buildingDetailResult, osmResult, prefetchedPhotoBundleRaw] = await Promise.all([
       propertyApi.getComparables(comparablesParams),
       // Permits: fetched on every run (KV-cached) — the permit-age
       // thresholds drive major-item additions in the buybox derivation.
@@ -480,6 +480,32 @@ export class AnalysisJobDO {
         } catch { return null }
       })(),
     ])
+
+    // Photo retry — the listing scrape keys on the address string and
+    // misses on odd spellings (same class of gap as the ATTOM address
+    // matcher). The county's canonical site address often matches what
+    // the listing sites index; retry once with it.
+    let prefetchedPhotoBundle = prefetchedPhotoBundleRaw
+    if (!prefetchedPhotoBundle?.subject?.photos?.length && propertyApi.providerName === 'attom-mcp') {
+      const parcel = await resolveParcelApn(
+        `${property.address}, ${property.city}, ${property.state} ${property.zipCode ?? ''}`.trim(),
+      ).catch(() => null)
+      if (parcel?.siteAddress && !property.address.toUpperCase().startsWith(parcel.siteAddress.slice(0, 12))) {
+        console.log('[AnalysisJobDO] subject photos empty — retrying scrape with county canonical address', parcel.siteAddress)
+        try {
+          const photoService = createPhotoService(this.env)
+          if (photoService.isAvailable()) {
+            prefetchedPhotoBundle = await photoService.fetchPhotoBundle({
+              propertyId: property.id,
+              address: parcel.siteAddress,
+              city: property.city,
+              state: property.state,
+              zipCode: property.zipCode,
+            }, [], { maxComps: 0, skipCache: true })
+          }
+        } catch { /* retry is best-effort */ }
+      }
+    }
 
     if (!compsResult.success) {
       const msg = ('error' in compsResult ? compsResult.error : null) || 'Failed to fetch comparables'
