@@ -601,6 +601,9 @@ export interface FirecrawlZillowFetcherConfig {
   cache?: KVNamespace
   /** Cache TTL in seconds (default: 24 hours) */
   cacheTtl?: number
+  /** Serper API key for Google listing-URL discovery when the generated
+   *  search URL misses (optional) */
+  serperApiKey?: string
 }
 
 export class FirecrawlZillowFetcher {
@@ -609,6 +612,7 @@ export class FirecrawlZillowFetcher {
   private openrouterModel: string
   private cache?: KVNamespace
   private cacheTtl: number
+  private serperApiKey?: string
 
   /** Tracks number of Firecrawl API calls (scrapes) */
   firecrawlCallCount = 0
@@ -623,6 +627,33 @@ export class FirecrawlZillowFetcher {
     this.openrouterModel = config.openrouterModel ?? 'google/gemini-2.0-flash-001'
     this.cache = config.cache
     this.cacheTtl = config.cacheTtl ?? DEFAULT_CACHE_TTL
+    this.serperApiKey = config.serperApiKey
+  }
+
+  /**
+   * Google discovery fallback — the generated Zillow URL targets a search
+   * results page, which can miss the listing entirely even when the
+   * homedetails page exists. Serper finds the real URL.
+   */
+  private async resolveListingUrlViaSearch(property: ZillowPropertyIdentifier): Promise<string | null> {
+    if (!this.serperApiKey) return null
+    try {
+      const q = `"${property.address}" ${property.city} ${property.state} site:zillow.com/homedetails`
+      const resp = await fetch('https://google.serper.dev/search', {
+        method: 'POST',
+        headers: { 'X-API-KEY': this.serperApiKey, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ q, num: 5 }),
+      })
+      if (!resp.ok) return null
+      const data = (await resp.json()) as { organic?: Array<{ link?: string }> }
+      const found = (data.organic ?? [])
+        .map((o) => o.link ?? '')
+        .find((l) => /zillow\.com\/homedetails\//.test(l))
+      if (found) console.log(`[FirecrawlZillow] Serper resolved listing URL: ${found}`)
+      return found ?? null
+    } catch {
+      return null
+    }
   }
 
   /** Reset call counters for a new analysis run */
@@ -1218,6 +1249,22 @@ ${content.html.slice(0, 80000)}
         }
       }
 
+      // Discovery fallback — the generated search-page URL missed, but the
+      // listing page may exist. Resolve the real homedetails URL via Serper
+      // and re-scrape that.
+      let resolvedUrl = zillowUrl
+      if (!isValidExtraction(extracted)) {
+        const found = await this.resolveListingUrlViaSearch(property)
+        if (found && found !== zillowUrl) {
+          const alt = await this.fetchAndExtract(found, extractOpts)
+          if (isValidExtraction(alt)) {
+            extracted = alt
+            resolvedUrl = found
+            await this.saveToCache(found, alt)
+          }
+        }
+      }
+
       // Normalize photo URLs
       const photos = this.normalizePhotoUrls(extracted.photos || [])
 
@@ -1238,7 +1285,7 @@ ${content.html.slice(0, 80000)}
       console.log(`[FirecrawlZillow] Structured data: beds=${bedrooms}, baths=${bathrooms}, sqft=${squareFeet}, year=${yearBuilt}, foundation=${foundationType}, hoa=${hoaFee}, lastSale=${lastSaleDate}`)
 
       const listing: ZillowListingData = {
-        zillowUrl,
+        zillowUrl: resolvedUrl,
         photos,
         description: extracted.description,
         price: extracted.price,

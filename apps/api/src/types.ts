@@ -113,6 +113,8 @@ export interface Env {
   // ─── Firecrawl ─────────────────────────────────────────────────────────────────
   // Firecrawl API for web scraping (Zillow photos)
   FIRECRAWL_API_KEY?: string
+  /** Serper — Google listing-URL discovery fallback for Zillow fetch misses */
+  SERPER_API_KEY?: string
   /** Geocodio — metered census-geography lookups (primary path; free 2.5k/day) */
   GEOCODIO_API_KEY?: string
 

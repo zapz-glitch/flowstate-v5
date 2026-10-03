@@ -376,14 +376,35 @@ export function evaluateB(
     return s
   }
 
-  // ── Tier discipline — renovated preferred → median fallback → retail ────
-  const medianComps = verifiedPool.filter((x) => bCondTier(x.comp) === 'median')
+  // ── Band discipline — Clef's condition verdict is preferred. When it
+  // can't classify (no listing/unavailable), price position in the
+  // verified pool stands in: top tercile = upper band, middle = median,
+  // bottom = floor. Geo/similarity + verification gates unchanged. ──────
+  const bandPpsfs = verifiedPool
+    .map((x) => bPpsfOf(x.comp))
+    .filter((p): p is number => p != null)
+    .sort((a, b) => a - b)
+  const bandQ = (f: number) =>
+    bandPpsfs.length ? bandPpsfs[Math.min(bandPpsfs.length - 1, Math.floor(bandPpsfs.length * f))] : null
+  const bandLo = bandQ(1 / 3)
+  const bandHi = bandQ(2 / 3)
+  const bandOf = (x: BContribution): 'upper' | 'median' | 'floor' => {
+    const ct = bCondTier(x.comp)
+    if (ct === 'renovated' || ct === 'premium') return 'upper'
+    if (ct === 'distressed') return 'floor'
+    if (ct === 'median') return 'median'
+    const p = bPpsfOf(x.comp)
+    if (p == null || bandLo == null || bandHi == null) return 'median'
+    return p >= bandHi ? 'upper' : p >= bandLo ? 'median' : 'floor'
+  }
+
+  const medianComps = verifiedPool.filter((x) => bandOf(x) === 'median')
   // Upper band = any comp not stamped as-is/distressed whose condition
   // isn't proven median — an unclassified or Clef-unidentified sale that
   // passed the rules is still evidence, just unverdicted. Only explicit
-  // as_is sales and proven-median conditions stay out.
+  // as_is sales and proven-median/floor conditions stay out.
   const preferred = verifiedPool.filter((x) =>
-    x.tier !== 'as_is' && bArvCondOk(x.comp) && bCondTier(x.comp) !== 'median' && similarity(x) >= B_MIN_SIM)
+    x.tier !== 'as_is' && bArvCondOk(x.comp) && bandOf(x) === 'upper' && similarity(x) >= B_MIN_SIM)
   let drivers: BContribution[]
   if (preferred.length) {
     drivers = preferred
@@ -391,13 +412,13 @@ export function evaluateB(
       if (x.tier === 'unidentified')
         flags.push(`${x.comp.address}: unclassified driver — rules passed, no sale-type verdict`)
       else if (bCondTier(x.comp) === 'unknown')
-        flags.push(`${x.comp.address}: no condition verdict — Clef/listing unavailable, driving on sale + rules evidence`)
+        flags.push(`${x.comp.address}: price-banded driver — no condition verdict, banded top-tercile of verified pool`)
   } else if (medianComps.length) {
     drivers = medianComps
     for (const x of medianComps)
       flags.push(`${x.comp.address}: median-tier driver — no high-similarity renovated evidence`)
   } else {
-    const weak = verifiedPool.filter((x) => x.tier !== 'as_is' && bArvCondOk(x.comp) && bCondTier(x.comp) !== 'median')
+    const weak = verifiedPool.filter((x) => x.tier !== 'as_is' && bArvCondOk(x.comp) && bandOf(x) === 'upper')
     if (weak.length) {
       flags.push(`non-median comps below similarity floor (${B_MIN_SIM}) — falling to median`)
       drivers = medianComps.length ? medianComps : weak
@@ -406,7 +427,7 @@ export function evaluateB(
         ? Math.max(...verifiedPool.map((x) => bPpsfOf(x.comp) ?? 0))
         : null
       const retail = verifiedPool.filter((x) =>
-        x.tier !== 'as_is' && bArvCondOk(x.comp) && bCondTier(x.comp) !== 'median' &&
+        x.tier !== 'as_is' && bArvCondOk(x.comp) && bandOf(x) === 'upper' &&
         topPpsf != null && (bPpsfOf(x.comp) ?? 0) >= B_RETAIL_BAND * topPpsf)
       if (!retail.length) {
         // Median-only evidence — similarity-gated ceiling + AVM uplift
@@ -481,7 +502,7 @@ export function evaluateB(
 
   // ── Condition adjustment — the URAR Condition line item ─────────────────
   let conditionAdj: number | null = null
-  if (drivers.length && drivers.every((x) => bCondTier(x.comp) === 'median')) {
+  if (drivers.length && drivers.every((x) => bandOf(x) === 'median')) {
     const premium = contribs.filter((x) => bCondTier(x.comp) === 'premium')
     let condAdj = 0
     let condSrc: string | null = null
