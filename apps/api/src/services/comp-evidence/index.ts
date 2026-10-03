@@ -39,6 +39,31 @@ export interface CompConditionEvidence {
     whatsSpecial?: string[]
     features?: string[]
     photoCount: number
+    /** Structured MLS/listing facts extracted from the listing page —
+     *  the fields an appraiser reads when verifying a sale (HOA, parking,
+     *  beds/baths, construction details). Absent fields were not on the page. */
+    details?: {
+      bedrooms?: number
+      bathrooms?: number
+      squareFeet?: number
+      yearBuilt?: number
+      foundationType?: string
+      style?: string
+      stories?: number
+      hoaFee?: number
+      roof?: string
+      construction?: string
+      heating?: string
+      cooling?: string
+      flooring?: string[]
+      appliances?: string[]
+      exteriorFeatures?: string[]
+      parking?: string
+      pool?: boolean
+      propertyType?: string
+      daysOnMarket?: number
+      status?: string
+    }
   } | null
   condition: CompConditionResult | null
   /** Investor-marketed listing — deterministic keyword hit OR Clef agrees.
@@ -155,6 +180,28 @@ export async function gatherCompConditionEvidence(
     whatsSpecial: photos.whatsSpecial,
     features: photos.features,
     photoCount: photos.photos.length,
+    details: {
+      bedrooms: photos.bedrooms,
+      bathrooms: photos.bathrooms,
+      squareFeet: photos.squareFeet,
+      yearBuilt: photos.yearBuilt,
+      foundationType: photos.foundationType,
+      style: photos.style,
+      stories: photos.stories,
+      hoaFee: photos.hoaFee,
+      roof: photos.roof,
+      construction: photos.construction,
+      heating: photos.heating,
+      cooling: photos.cooling,
+      flooring: photos.flooring,
+      appliances: photos.appliances,
+      exteriorFeatures: photos.exteriorFeatures,
+      parking: photos.parking,
+      pool: photos.pool,
+      propertyType: photos.propertyType,
+      daysOnMarket: photos.daysOnMarket,
+      status: photos.status,
+    },
   }
 
   // The keyword check never misses a literal "investment property" and runs

@@ -39,6 +39,7 @@ import {
 import { createPhotoService, type PhotoBundle, type PropertyIdentifier, type PropertyPhotos } from '../photo-provider'
 import { gatherCompConditionEvidence, type CompConditionEvidence } from '../comp-evidence'
 import { isClefAvailable } from '../clef'
+import { fetchRedfinPropertyDetails, type RedfinDetailsResult } from '../redfin-details'
 
 import { persistReportAssets } from '../report-assets'
 import { expansionRefetchRadius } from '../property-api/retrieval-policy'
@@ -712,6 +713,33 @@ export async function performAnalysis(
   }))
   appraisalResult.selectedCompIds = [...arvIds]
 
+  // Redfin MLS property-details — subject + top-15 comps, kicked off here so
+  // the search+scrape+extract chain overlaps vision/valuation. Shadow
+  // evidence only: stamped on comp.listingDetails / the subject's
+  // listingDetails for the report + comp cards; nothing reads it into math.
+  const redfinDetailsEnabled = !!(env.FIRECRAWL_API_KEY && env.OPENROUTER_API_KEY)
+  const redfinSubjectPromise = redfinDetailsEnabled
+    ? fetchRedfinPropertyDetails(env, bundle.property, env.API_CACHE).catch(
+        (): RedfinDetailsResult => ({ details: null, skippedReason: 'fetch_failed' }),
+      )
+    : null
+  const redfinCompPromise = redfinDetailsEnabled
+    ? Promise.all(
+        appraisalResult.comparables
+          .slice()
+          .sort((a, b) =>
+            Number(b.isEnabled && arvIds.has(b.id)) - Number(a.isEnabled && arvIds.has(a.id))
+            || Number(b.isEnabled) - Number(a.isEnabled)
+            || (a.distanceMiles ?? 999) - (b.distanceMiles ?? 999))
+          .slice(0, 15)
+          .map((comp) =>
+            fetchRedfinPropertyDetails(env, comp, env.API_CACHE)
+              .then((r): { id: string; r: RedfinDetailsResult } => ({ id: comp.id, r }))
+              .catch(() => ({ id: comp.id, r: { details: null, skippedReason: 'fetch_failed' } as RedfinDetailsResult })),
+          ),
+      )
+    : null
+
   // Clef comp-evidence batch — kicked off here so the listing scrapes +
   // classifications (the pipeline's longest wall-clock segment, up to ~45s)
   // overlap the vision assessment and valuation instead of serializing at
@@ -995,6 +1023,30 @@ export async function performAnalysis(
     )
   }
 
+  // Redfin MLS details — awaited here; the fetches started at evidence
+  // selection and ran parallel to vision/valuation.
+  let subjectListingDetails: RedfinDetailsResult | null = null
+  if (redfinSubjectPromise || redfinCompPromise) {
+    const [subjectRes, compRes] = await Promise.all([
+      redfinSubjectPromise ?? Promise.resolve(null),
+      redfinCompPromise ?? Promise.resolve([]),
+    ])
+    subjectListingDetails = subjectRes
+    let stamped = 0
+    if (compRes.length > 0) {
+      const detailsById = new Map(compRes.map((x) => [x.id, x.r.details]))
+      for (const comp of appraisalResult.comparables) {
+        const d = detailsById.get(comp.id)
+        if (d) { comp.listingDetails = d; stamped++ }
+      }
+    }
+    step(
+      'listing_details',
+      (subjectRes?.details || stamped > 0) ? 'completed' : 'skipped',
+      `Redfin details — subject ${subjectRes?.details ? 'yes' : subjectRes?.skippedReason ?? 'no'} · ${stamped} comp(s) enriched`,
+    )
+  }
+
   const appliedSettings = {
     filters: filters.map((f) => ({
       type: f.type,
@@ -1054,6 +1106,7 @@ export async function performAnalysis(
       visionAnalysis: mapRenovationToVision(renovation),
       subjectCurbAppeal,
       subjectListingUrl: photoBundle?.subject?.sourceUrl ?? null,
+      subjectListingDetails: subjectListingDetails?.details ?? null,
       subjectListPrice: typeof photoBundle?.subject?.metadata?.listPrice === 'number'
         ? photoBundle.subject.metadata.listPrice
         : null,

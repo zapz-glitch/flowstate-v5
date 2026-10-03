@@ -374,6 +374,18 @@ Shipped during calibration (all on feat/attom-provider-swap):
 - nominal-sale + symmetric rural-lot hard gates; tract rescue ≤0.75mi
 - word-form deltas ("540 sf larger") in comp cards
 - docs/attom-migration/ATTOM-MCP-ENDPOINTS.md — full surface reference
+- Geocodio census enrichment (GEOCODIO_API_KEY, 25k credits, 1k lookups/min):
+  Geocodio → Census direct → Firecrawl relay; 180d KV cache; geo-gate
+  concurrency 15. Stamp-loss fix: expansion merge overlay from all gated comps.
+- Redfin MLS property-details (services/redfin-details) — subject + top-15
+  comps: Firecrawl search/DuckDuckGo URL resolution (street-number
+  validated via ListingPhotoScraper.resolveUrl) → scrape → gpt-6-luna
+  structured extraction → comp.listingDetails / subject.listingDetails.
+  Shadow evidence only — comp cards + map hover card + subject card.
+  Verified live: Chenwood 14/15 comps enriched, all URLs number-checked;
+  sold comps retain full MLS details on Redfin pages.
+- Perf: ReportStep.durationMs; Clef comp batch + Redfin batch start at
+  evidence selection (overlap vision+valuation, ~15-25s saved/run).
 
 Known gaps: subject photo scrape can't surface low-footprint listings
 (site:search discovery); `crossesMajorRoad` proxy fires ~30% of pools.

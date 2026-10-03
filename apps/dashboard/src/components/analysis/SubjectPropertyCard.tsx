@@ -56,6 +56,43 @@ export function SubjectPropertyCard({ subject, children, footer }: SubjectProper
           <StatCell label="House Style" value={subject.buildingStyle || '-'} />
         </div>
 
+        {subject.listingDetails && (() => {
+          const ld = subject.listingDetails
+          const cells = [
+            ['MLS Bed/Bath', ld.beds != null || ld.bathsFull != null ? `${ld.beds ?? '-'}bd / ${ld.bathsFull ?? '-'}ba${ld.bathsHalf ? ` (+${ld.bathsHalf} half)` : ''}` : null],
+            ['HOA / mo', ld.hoaMonthly != null ? `$${ld.hoaMonthly.toLocaleString()}` : null],
+            ['Parking', ld.parking],
+            ['Garage', ld.garage],
+            ['Pool', ld.pool === true ? 'Yes' : ld.pool === false ? 'No' : null],
+            ['Stories', ld.stories != null ? String(ld.stories) : null],
+            ['Roof', ld.roof],
+            ['Foundation', ld.foundation],
+            ['Construction', ld.construction],
+            ['Heat / AC', [ld.heating, ld.cooling].filter(Boolean).join(' / ') || null],
+            ['Utilities', (ld.utilities ?? []).slice(0, 3).join(', ') || null],
+            ['Subdivision', ld.subdivision],
+            ['Zoning', ld.zoning],
+            ['Style', ld.style],
+          ].filter(([, v]) => v != null && v !== '' && v !== '-') as Array<[string, string]>
+          if (cells.length === 0) return null
+          return (
+            <div className="mt-4">
+              <div className="text-caption font-medium text-foreground-secondary mb-1.5 flex items-center gap-2">
+                MLS Details{ld.mlsSource ? ` — ${ld.mlsSource}` : ''}
+                {ld.sourceUrl && <a href={ld.sourceUrl} target="_blank" rel="noreferrer" className="text-primary text-[10px] underline">Redfin ↗</a>}
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1">
+                {cells.map(([label, value]) => (
+                  <div key={label} className="flex items-center justify-between text-[11px]">
+                    <span className="text-foreground-tertiary">{label}</span>
+                    <span className="font-medium truncate ml-2" title={value}>{value}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )
+        })()}
+
         {subject.lastSale?.price && (
           <div className="mt-4 flex items-center justify-between text-body-sm">
             <span className="text-foreground-tertiary">Last Sale</span>

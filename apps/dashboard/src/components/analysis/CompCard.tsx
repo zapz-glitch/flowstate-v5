@@ -324,6 +324,45 @@ function CompCardInner({
             </div>
           </div>
 
+          {/* MLS details from Redfin — shadow evidence, top-15 comps */}
+          {comp.listingDetails && (() => {
+            const ld = comp.listingDetails
+            const cells = [
+              ['MLS Bed/Bath', ld.beds != null || ld.bathsFull != null ? `${ld.beds ?? '-'}bd / ${ld.bathsFull ?? '-'}ba${ld.bathsHalf ? ` (+${ld.bathsHalf} half)` : ''}` : null],
+              ['HOA / mo', ld.hoaMonthly != null ? `$${ld.hoaMonthly.toLocaleString()}` : null],
+              ['Parking', ld.parking],
+              ['Garage', ld.garage],
+              ['Pool', ld.pool === true ? 'Yes' : ld.pool === false ? 'No' : null],
+              ['MLS Roof', ld.roof],
+              ['MLS Foundation', ld.foundation],
+              ['MLS Construction', ld.construction],
+              ['MLS Heat / AC', [ld.heating, ld.cooling].filter(Boolean).join(' / ') || null],
+              ['Utilities', (ld.utilities ?? []).slice(0, 3).join(', ') || null],
+              ['MLS Style', ld.style],
+              ['Subdivision', ld.subdivision],
+              ['Zoning', ld.zoning],
+              ['Flooring', (ld.flooring ?? []).slice(0, 3).join(', ') || null],
+              ['Appliances', (ld.appliances ?? []).slice(0, 3).join(', ') || null],
+            ].filter(([, v]) => v != null && v !== '' && v !== '-') as Array<[string, string]>
+            if (cells.length === 0) return null
+            return (
+              <div>
+                <div className="text-caption font-medium text-foreground-secondary mb-1.5 flex items-center gap-2">
+                  MLS Details{ld.mlsSource ? ` — ${ld.mlsSource}` : ''}
+                  {ld.sourceUrl && <a href={ld.sourceUrl} target="_blank" rel="noreferrer" className="text-primary text-[10px] underline">Redfin ↗</a>}
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1">
+                  {cells.map(([label, value]) => (
+                    <div key={label} className="flex items-center justify-between text-[11px]">
+                      <span className="text-foreground-tertiary">{label}</span>
+                      <span className="font-medium truncate ml-2" title={value}>{value}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )
+          })()}
+
           {comp.classification && (
             <div>
               <div className="text-caption text-foreground-tertiary flex items-center gap-2 mb-1">

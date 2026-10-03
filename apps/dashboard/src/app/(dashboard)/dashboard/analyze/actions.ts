@@ -181,6 +181,41 @@ export interface ClassificationSummary {
   method?: string
 }
 
+
+export interface ListingDetails {
+  beds?: number | null
+  bathsFull?: number | null
+  bathsHalf?: number | null
+  squareFeet?: number | null
+  yearBuilt?: number | null
+  stories?: number | null
+  lotSquareFeet?: number | null
+  style?: string | null
+  propertyType?: string | null
+  hoaMonthly?: number | null
+  listPrice?: number | null
+  daysOnRedfin?: number | null
+  mlsSource?: string | null
+  roof?: string | null
+  foundation?: string | null
+  construction?: string | null
+  heating?: string | null
+  cooling?: string | null
+  flooring?: string[]
+  appliances?: string[]
+  exteriorFeatures?: string[]
+  parking?: string | null
+  garage?: string | null
+  pool?: boolean | null
+  utilities?: string[]
+  subdivision?: string | null
+  zoning?: string | null
+  apn?: string | null
+  county?: string | null
+  saleHistory?: Array<{ date: string; event: string; price: number | null }>
+  sourceUrl?: string
+}
+
 export interface SubjectData {
   permits?: {
     status: 'available' | 'empty' | 'unavailable' | 'not_requested'
@@ -230,6 +265,8 @@ export interface SubjectData {
   } | null
   /** Direct listing URL from the provider that delivered photos */
   listingUrl?: string | null
+  /** Redfin MLS property-details — shadow evidence */
+  listingDetails?: ListingDetails | null
   /** Asking/list price scraped from the subject's listing (null when off-market) */
   listPrice?: number | null
   /** Foundation type (e.g., Slab, Crawl Space, Basement) */
@@ -509,6 +546,8 @@ export interface CompItem {
     source?: 'vision' | 'price'
     photosExamined: number
   } | null
+  /** Redfin MLS property-details — shadow evidence */
+  listingDetails?: ListingDetails | null
   /** Price percentile among all comps (1 = highest, 100 = lowest) */
   pricePercentile?: number | null
   /** Reasons why this comp was disabled (if any) */
@@ -739,6 +778,8 @@ export interface CompItem {
     source?: 'vision' | 'price'
     photosExamined: number
   } | null
+  /** Redfin MLS property-details — shadow evidence */
+  listingDetails?: ListingDetails | null
   /** Price percentile among all comps (1 = highest, 100 = lowest) */
   pricePercentile?: number | null
   /** Reasons why this comp was disabled (if any) */

@@ -135,6 +135,21 @@ function CompHoverCard({ comp, onMouseEnter, onMouseLeave }: { comp: CompItem; o
     ['Neighborhood', comp.neighborhoodName ?? '-'],
     ['Condition', (comp.curbAppeal?.condition ?? comp.condition ?? '-') as string],
   ]
+  const ld = comp.listingDetails
+  const mlsRows: Array<[string, string]> = ld ? [
+    ['MLS Bed/Bath', ld.beds != null || ld.bathsFull != null ? `${ld.beds ?? '-'}bd / ${ld.bathsFull ?? '-'}ba${ld.bathsHalf ? ` (+${ld.bathsHalf} half)` : ''}` : '-'],
+    ['HOA / mo', ld.hoaMonthly != null ? `$${ld.hoaMonthly.toLocaleString()}` : '-'],
+    ['Parking', ld.parking ?? '-'],
+    ['Garage', ld.garage ?? '-'],
+    ['Pool', ld.pool === true ? 'Yes' : ld.pool === false ? 'No' : '-'],
+    ['Roof', ld.roof ?? '-'],
+    ['Foundation', ld.foundation ?? '-'],
+    ['Construction', ld.construction ?? '-'],
+    ['Heating/Cooling', [ld.heating, ld.cooling].filter(Boolean).join(' / ') || '-'],
+    ['Utilities', (ld.utilities ?? []).slice(0, 3).join(', ') || '-'],
+    ['MLS Style', ld.style ?? '-'],
+    ['Zoning', ld.zoning ?? '-'],
+  ].filter(([, v]) => v !== '-') as Array<[string, string]> : []
   return (
     <div
       className="absolute left-2 top-2 z-20 w-80 max-h-[85%] overflow-y-auto rounded-lg border border-border bg-background/95 p-3 shadow-xl backdrop-blur-sm"
@@ -156,6 +171,19 @@ function CompHoverCard({ comp, onMouseEnter, onMouseLeave }: { comp: CompItem; o
           </div>
         ))}
       </div>
+      {mlsRows.length > 0 && (
+        <>
+          <div className="mt-2 border-t border-border/50 pt-1.5 text-[10px] font-semibold text-foreground-tertiary">MLS details{ld?.sourceUrl && <> · <a href={ld.sourceUrl} target="_blank" rel="noreferrer" className="text-primary underline">Redfin ↗</a></>}</div>
+          <div className="mt-0.5 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px]">
+            {mlsRows.map(([label, value]) => (
+              <div key={label} className="flex justify-between gap-2">
+                <span className="text-foreground-tertiary">{label}</span>
+                <span className="text-right text-foreground truncate" title={value}>{value}</span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
       <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-foreground-secondary">
         {comp.sameBlockGroup === true && <span className="text-emerald-500">✓ Block Group</span>}
         {comp.crossesMajorRoad === true && <span className="text-amber-500">⚠ Crosses tract</span>}

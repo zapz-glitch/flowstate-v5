@@ -463,6 +463,8 @@ export interface ResponseContext {
   subjectListingUrl?: string | null
   /** Asking price scraped from the subject's listing page */
   subjectListPrice?: number | null
+  /** Redfin MLS property-details for the subject — shadow evidence */
+  subjectListingDetails?: import('../redfin-details').RedfinPropertyDetails | null
   /** Visual ARV-candidacy check per ARV-selected comp (by comp ID) */
   compCurbAppeal?: Record<string, {
     condition: 'renovated' | 'dated' | 'distressed' | 'unknown'
@@ -599,6 +601,8 @@ export interface AnalysisResponse {
     } | null
     /** Direct listing URL from the provider that delivered photos */
     listingUrl: string | null
+    /** Redfin MLS property-details — shadow evidence, not used in math */
+    listingDetails: import('../redfin-details').RedfinPropertyDetails | null
     /** Asking/list price scraped from the subject's listing (null when off-market or unlisted) */
     listPrice: number | null
     /** Building permit records for the subject */
@@ -1269,6 +1273,8 @@ export function buildAnalysisResponse(
       // Computed at serialize-time — "no tract after both ladders" is the
       // honest signal; a stored flag would get dropped by pool merges.
       ...(comp.censusTract == null && comp.latitude != null ? { geographyUnverified: true } : {}),
+      // Redfin MLS details — shadow evidence, top-15 comps only
+      ...(comp.listingDetails ? { listingDetails: comp.listingDetails } : {}),
       buildingCondition: comp.buildingCondition ?? null,
       buildingGrade: comp.buildingGrade ?? null,
       stories: comp.stories ?? null,
@@ -1401,6 +1407,7 @@ export function buildAnalysisResponse(
       condition: ctx.visionAnalysis?.overallCondition ?? null,
       conditionSummary: ctx.visionAnalysis?.summary ?? null,
       curbAppeal: ctx.subjectCurbAppeal ?? null,
+      listingDetails: ctx.subjectListingDetails ?? null,
       listingUrl: ctx.subjectListingUrl ?? null,
       listPrice: ctx.subjectListPrice ?? null,
       classification: subjectClassificationSummary,

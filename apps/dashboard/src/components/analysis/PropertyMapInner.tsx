@@ -255,7 +255,10 @@ function SubjectMap({ markers, onMarkerClick, onMarkerHover, activeMarkerKey }: 
           <SubjectAerialMap ref={aerial} subject={location.coordinate} markers={correctedMarkers} activeMarkerKey={activeMarkerKey} onMarkerClick={selectMarker} onStreetView={panorama ? openStreet : undefined} onUnavailable={mark3DUnavailable} /> : mapStyle !== '3d' || threeD === 'unavailable' ?
           <Map defaultCenter={location.coordinate} defaultZoom={18} mapTypeId={mapStyle === 'roadmap' ? 'roadmap' : 'hybrid'}
             mapId={process.env.NEXT_PUBLIC_GOOGLE_MAP_ID || undefined}
-            renderingType="VECTOR" isFractionalZoomEnabled tilt={0} gestureHandling="greedy" clickableIcons keyboardShortcuts
+            // VECTOR tiles require a Map ID — without one the map fails to
+            // init entirely. Fall back to raster so the map works on any key.
+            renderingType={process.env.NEXT_PUBLIC_GOOGLE_MAP_ID ? 'VECTOR' : 'RASTER'}
+            isFractionalZoomEnabled tilt={0} gestureHandling="greedy" clickableIcons keyboardShortcuts
             zoomControl mapTypeControl={false} streetViewControl={false} fullscreenControl fullscreenControlOptions={{ position: google.maps.ControlPosition.LEFT_TOP }} scaleControl>
             <NativeMapCamera mapRef={nativeMap} />
             <FlatMarkers markers={correctedMarkers} activeMarkerKey={activeMarkerKey} onMarkerClick={selectMarker} onMarkerHover={onMarkerHover} />

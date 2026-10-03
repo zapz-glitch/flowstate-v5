@@ -201,6 +201,8 @@ export interface NormalizedProperty {
   /** Median $/sqft over trailing 365d per geography scope (SD/N4/N3) — geography-context */
   ppsfMedians?: { SD?: number | null; N4?: number | null; N3?: number | null } | null
   legalDescription?: string
+  /** Redfin MLS property-details enrichment (shadow evidence — not used in appraisal math) */
+  listingDetails?: import('../redfin-details').RedfinPropertyDetails | null
 
   /** Newest priced sale in the record — sales-history can carry a newer
    *  transaction than the comparables pool returned (pool sometimes holds
@@ -280,6 +282,8 @@ export interface NormalizedComparable {
   ppsfMedians?: { SD?: number | null; N4?: number | null; N3?: number | null } | null
   /** Comp's own ATTOM AVM value (valuation dataset, enriched comps only) */
   avmValue?: number | null
+  /** Redfin MLS property-details enrichment — shadow evidence (top-15 comps) */
+  listingDetails?: import('../redfin-details').RedfinPropertyDetails | null
 
   /** Assessor building improvement condition (e.g. "Average") */
   buildingCondition?: string | null
