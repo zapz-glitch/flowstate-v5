@@ -85,6 +85,9 @@ export interface BComp {
     flags?: string[] | null
   } | null
   appraisalRules?: { totalAdjustment?: number | null } | null
+  /** Listing sqft diverged >33% from provider — size normalization is
+   *  unreliable; the comp can bound but never anchors. */
+  sqftConflict?: string | null
 }
 
 export interface BContribution {
@@ -126,10 +129,15 @@ export function bTierOf(c: BComp): 'arv' | 'as_is' | 'unidentified' {
 
 export function bCondTier(c: BComp): 'renovated' | 'median' | 'premium' | 'distressed' | 'unknown' {
   const ca = c.curbAppeal ?? {}
+  // Physical condition only — the 'tier:' token in the Clef summary is the
+  // market/sale tier (arv/median/investor), NOT condition; reading it here
+  // conflates the two axes and banded renovated comps as 'median'.
+  // Parse the condition label that opens the summary ("Updated (3.2/4)").
   const summary = (ca.summary ?? '').toLowerCase()
-  if (summary.includes('tier:distressed') || summary.includes('tier:floor')) return 'distressed'
-  if (summary.includes('tier:median')) return 'median'
-  if (summary.includes('tier:premium') || summary.includes('tier:luxury')) return 'premium'
+  const condLabel = summary.split('(')[0].trim()
+  if (['poor'].includes(condLabel)) return 'distressed'
+  if (['renovated', 'updated'].includes(condLabel)) return 'renovated'
+  if (['dated', 'maintained', 'original'].includes(condLabel)) return 'median'
   const cond = (ca.condition ?? '').toLowerCase()
   if ((ca.confidence ?? 0) < B_COND_MIN_CONF) return 'unknown'
   if (['renovated', 'updated', 'turnkey', 'move-in ready'].includes(cond)) return 'renovated'
@@ -390,12 +398,22 @@ export function evaluateB(
   const bandHi = bandQ(2 / 3)
   const bandOf = (x: BContribution): 'upper' | 'median' | 'floor' => {
     const ct = bCondTier(x.comp)
-    if (ct === 'renovated' || ct === 'premium') return 'upper'
     if (ct === 'distressed') return 'floor'
-    if (ct === 'median') return 'median'
     const p = bPpsfOf(x.comp)
-    if (p == null || bandLo == null || bandHi == null) return 'median'
-    return p >= bandHi ? 'upper' : p >= bandLo ? 'median' : 'floor'
+    const priceBand =
+      p != null && bandLo != null && bandHi != null
+        ? p >= bandHi ? 'upper' : p >= bandLo ? 'median' : 'floor'
+        : null
+    if (priceBand != null && ct !== 'unknown') {
+      // Verdict + price disagree by a full band → the liquidity event wins:
+      // a "renovated" label that sold at floor prices isn't ARV evidence,
+      // and a "dated" comp buyers paid top-tercile for IS upper evidence.
+      if (priceBand === 'floor' && (ct === 'renovated' || ct === 'premium')) return 'floor'
+      if (priceBand === 'upper' && ct === 'median') return 'upper'
+    }
+    if (ct === 'renovated' || ct === 'premium') return 'upper'
+    if (ct === 'median') return 'median'
+    return priceBand ?? 'median'
   }
 
   const medianComps = verifiedPool.filter((x) => bandOf(x) === 'median')
@@ -457,7 +475,12 @@ export function evaluateB(
   // ── Reconciliation anchoring — most-similar comp drives, rest bounds ────
   const ranked = drivers.slice().sort((a, b) =>
     similarity(b) - similarity(a) || b.weight - a.weight)
-  let anchor = ranked[0] ?? null
+  // A comp whose sqft evidence conflicts (provider vs listing >33%) can't
+  // anchor — its size normalization is unreliable. It still bounds.
+  let anchor = ranked.find((x) => !x.comp.sqftConflict) ?? null
+  if (anchor == null && ranked.length) anchor = ranked[0]
+  if (ranked[0]?.comp.sqftConflict && anchor !== ranked[0])
+    flags.push(`${ranked[0].comp.address}: ${ranked[0].comp.sqftConflict} — bound-only, can't anchor`)
   if (!anchor) return { arv: null, flags, contribs, drivers: [], bracket: 'ok', conf: 'none', source,
     landRateSource: landSource, sqftRateSource }
   const anchorScore = similarity(anchor)
@@ -488,9 +511,12 @@ export function evaluateB(
     const suspect = anchor.contrib < 0.8 * driverMedian ||
       (support.length > 0 && anchor.contrib < Math.min(...support.map((x) => x.contrib)))
     if (suspect) {
-      const healedAnchor = drivers.reduce((a, b) =>
-        Math.abs(b.contrib - driverMedian) < Math.abs(a.contrib - driverMedian) ? b : a)
-      if (healedAnchor !== anchor) {
+      const unconflicted = drivers.filter((x) => !x.comp.sqftConflict)
+      const healedAnchor = unconflicted.length
+        ? unconflicted.reduce((a, b) =>
+            Math.abs(b.contrib - driverMedian) < Math.abs(a.contrib - driverMedian) ? b : a)
+        : null
+      if (healedAnchor != null && healedAnchor !== anchor) {
         flags.push(`self-heal: anchor ${(anchor.comp.address ?? '').slice(0, 30)} was the evidence floor ` +
           `(${usd(anchor.contrib)} vs driver median ${usd(driverMedian)}) — re-anchored to ${(healedAnchor.comp.address ?? '').slice(0, 30)}`)
         anchor = healedAnchor

@@ -46,6 +46,9 @@ export interface CompConditionEvidence {
       bedrooms?: number
       bathrooms?: number
       squareFeet?: number
+      /** Larger sqft the listing's own copy markets (finished basement etc.)
+       *  — recorded when it exceeds the structured figure by >33% */
+      marketedSqft?: number
       yearBuilt?: number
       foundationType?: string
       style?: string
@@ -74,6 +77,22 @@ export interface CompConditionEvidence {
   investorSignalSources: string[]
   /** Why classification didn't run — 'no_listing' | 'clef_unavailable' | fetch error */
   skippedReason?: string
+}
+
+/**
+ * Largest sqft figure the listing's own copy claims — description +
+ * highlights + features. Listings often show the tax-record sqft as the
+ * structured field while marketing a larger "finished living area" (e.g.
+ * a basement) — buyers price the marketed figure.
+ */
+function maxSqftClaim(listing: { description?: string | null; whatsSpecial?: string[] | null; features?: string[] | null }): number | null {
+  const haystack = [listing.description ?? '', ...(listing.whatsSpecial ?? []), ...(listing.features ?? [])].join(' ')
+  let max: number | null = null
+  for (const m of haystack.matchAll(/(\d{1,3}(?:,\d{3})+)\s*(?:sq\.?\s*ft|sqft|square\s*feet|sf\b)/gi)) {
+    const n = parseInt(m[1].replace(/,/g, ''), 10)
+    if (Number.isFinite(n) && n >= 200 && (max == null || n > max)) max = n
+  }
+  return max
 }
 
 // Owner-calibrated keyword set — investor-marketed language in the listing
@@ -153,7 +172,21 @@ export async function gatherCompConditionEvidence(
 ): Promise<CompConditionEvidence> {
   const key = evidenceKey(comp)
   const cached = await env.API_CACHE.get(key, 'json').catch(() => null) as CompConditionEvidence | null
-  if (cached?.condition || cached?.listing) return cached
+  if (cached?.condition || cached?.listing) {
+    // Backfill marketedSqft on evidence pinned before the scan existed —
+    // the listing copy is already in the cache.
+    if (cached.listing?.details && cached.listing.details.marketedSqft == null) {
+      const m = maxSqftClaim(cached.listing)
+      if (m != null) {
+        const primary = cached.listing.details.squareFeet
+        if (primary == null || m > primary * 1.33) {
+          if (primary != null) cached.listing.details.marketedSqft = m
+          else cached.listing.details.squareFeet = m
+        }
+      }
+    }
+    return cached
+  }
 
   const evidence: CompConditionEvidence = {
     propertyId: comp.propertyId,
@@ -213,6 +246,20 @@ export async function gatherCompConditionEvidence(
       daysOnMarket: photos.daysOnMarket,
       status: photos.status,
     },
+  }
+
+  // Marketed-size scan — Zillow shows tax sqft AND the marketed living
+  // area (finished basements/floors tax rolls miss). When the listing's
+  // own copy claims a larger sqft than the structured figure, the
+  // marketed size is the product buyers priced — record it so the comp's
+  // size math can flag the conflict instead of anchoring on tax data.
+  const marketedSqft = maxSqftClaim(evidence.listing)
+  if (marketedSqft != null && evidence.listing.details) {
+    const primary = evidence.listing.details.squareFeet
+    if (primary == null || marketedSqft > primary * 1.33) {
+      if (primary != null) evidence.listing.details.marketedSqft = marketedSqft
+      else evidence.listing.details.squareFeet = marketedSqft
+    }
   }
 
   // The keyword check never misses a literal "investment property" and runs

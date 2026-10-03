@@ -1035,6 +1035,26 @@ export async function performAnalysis(
           summary: `${c.conditionLabel} (${c.conditionScore.toFixed(1)}/4) · tier:${c.tier} · renovated ${(c.renovatedProbability * 100).toFixed(0)}% · as-is ${(c.asIsProbability * 100).toFixed(0)}% · investor ${(c.investorLanguageProbability * 100).toFixed(0)}% · via ${ev.listing.source}${ev.listing.description ? ' · listing text available' : ''}`,
           photosExamined: ev.listing.photoCount,
         }
+        // Sqft cross-check — Zillow counts finished basement/upper floors
+        // tax records miss. A >33% divergence means the comp's size math
+        // is unreliable: record the conflict; B treats it as unanchorable
+        // (bound-only) rather than trusting either figure.
+        const lsSf = ev.listing.details?.marketedSqft ?? ev.listing.details?.squareFeet
+        const compFor = appraisalResult.comparables.find((cc) => cc.id === ev.propertyId)
+        if (lsSf != null && compFor?.squareFeet != null) {
+          const ratio = lsSf / compFor.squareFeet
+          // >3× is a different field (lot sqft leaks into the extraction),
+          // not a living-area conflict — real basement/floor divergences
+          // run 1.4–3×.
+          if (lsSf >= 400 && ((ratio > 1.33 && ratio <= 3) || (ratio < 0.75 && ratio >= 0.33))) {
+            compFor.raw = {
+              ...(compFor.raw as Record<string, unknown> ?? {}),
+              providerSqft: compFor.squareFeet,
+              listingSqft: lsSf,
+              sqftConflict: `provider ${compFor.squareFeet}sf vs listing ${lsSf}sf`,
+            }
+          }
+        }
       }
       step(
         'comp_curb_appeal',
@@ -1069,6 +1089,23 @@ export async function performAnalysis(
           // beds on whole pools in some pockets).
           comp.bedrooms ??= d.beds ?? null
           comp.bathrooms ??= (d.bathsFull != null ? d.bathsFull + (d.bathsHalf ?? 0) * 0.5 : null)
+          // Sqft cross-check — provider living-area misses floors/duplexes
+          // (a 2-story can read half its real size). When the listing
+          // diverges >33%, the listing wins for size math and the conflict
+          // records on the comp — the eval grid ran on the stale figure.
+          if (d.squareFeet != null && comp.squareFeet != null) {
+            const ratio = d.squareFeet / comp.squareFeet
+            if (ratio > 1.33 || ratio < 0.75) {
+              comp.raw = {
+                ...(comp.raw as Record<string, unknown> ?? {}),
+                providerSqft: comp.squareFeet,
+                listingSqft: d.squareFeet,
+                sqftConflict: `provider ${comp.squareFeet}sf vs listing ${d.squareFeet}sf — listing used`,
+              }
+              comp.squareFeet = d.squareFeet
+              comp.pricePerSqft = comp.salePrice != null ? comp.salePrice / d.squareFeet : comp.pricePerSqft
+            }
+          }
           stamped++
         }
       }
@@ -1168,6 +1205,7 @@ export async function performAnalysis(
       curbAppeal: compCurbAppeal?.[comp.id] ?? null,
       evidenceVerification: comp.evidenceVerification ?? null,
       appraisalRules: comp.evaluation ? { totalAdjustment: comp.evaluation.totalAdjustment } : null,
+      sqftConflict: (comp.raw as Record<string, unknown> | undefined)?.sqftConflict as string | undefined ?? null,
     }))
 
     const verifyB = (r: ReturnType<typeof evaluateB>): string[] => {
