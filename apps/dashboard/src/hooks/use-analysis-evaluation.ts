@@ -28,6 +28,9 @@ import { recalculateReportComps } from '@/lib/client-api'
 interface OverrideState {
   selectedCompKeys: Set<string>
   isManual: boolean
+  /** Reviewer tier pins — compId → 'arv'|'as_is'. An ARV pin admits a
+   *  non-evidence comp into the ARV pool; an as_is pin excludes one. */
+  tierPins?: Record<string, 'arv' | 'as_is'>
 }
 
 export interface UseAnalysisEvaluationInput {
@@ -49,6 +52,8 @@ export interface UseAnalysisEvaluationReturn {
   compOverride: OverrideState | null
   handleToggleComp: (key: string) => void
   handleResetComps: () => void
+  /** Reviewer tier pin — feeds client recalc; persistence stays in the caller */
+  handlePinTier: (compId: string, tier: 'arv' | 'as_is' | null) => void
 
   // Computed display data
   displayValuation: ValuationData | undefined
@@ -210,6 +215,36 @@ export function useAnalysisEvaluation({
     }
   }, [data?.comps?.items, pythonAuthoritative, applyServerSelection])
 
+  // Reviewer tier pin — 'arv' admits the comp into the ARV pool (and selects
+  // it), 'as_is' excludes it from ARV evidence, null clears. Persistence to
+  // /comp-tier stays in the caller — this feeds the client-side recalc.
+  const handlePinTier = useCallback((compId: string, tier: 'arv' | 'as_is' | null) => {
+    const items = data?.comps?.items
+    if (!items) return
+    isManualRef.current = true
+    setCompOverride((prev) => {
+      const base = prev ?? {
+        selectedCompKeys: new Set(
+          items.map((c, i) => ({ c, i }))
+            .filter(({ c }) => c.isEnabled === true)
+            .map(({ c, i }) => getCompKey(c, i))
+        ),
+        isManual: false,
+        tierPins: {},
+      }
+      const tierPins = { ...(base.tierPins ?? {}) }
+      if (tier) tierPins[compId] = tier
+      else delete tierPins[compId]
+      const selectedCompKeys = new Set(base.selectedCompKeys)
+      if (tier === 'arv') {
+        const idx = items.findIndex((c) => c.id === compId)
+        if (idx >= 0) selectedCompKeys.add(getCompKey(items[idx], idx))
+      }
+      const hasPins = Object.keys(tierPins).length > 0
+      return { selectedCompKeys, isManual: base.isManual || hasPins, tierPins }
+    })
+  }, [data?.comps?.items])
+
   // Freeze valuation ref: snapshot the valuation when AI analysis starts
   const frozenValuationRef = useRef<ValuationData | undefined>(undefined)
   const wasAiAnalyzingRef = useRef(false)
@@ -294,8 +329,12 @@ export function useAnalysisEvaluation({
 
     // If comp override is manual, recalculate on top using user's full settings
     if (compOverride?.isManual && data?.comps?.items && data?.subject) {
+      const pins = compOverride.tierPins
+      const items = pins && Object.keys(pins).length > 0
+        ? data.comps.items.map((c) => (c.id && pins[c.id] ? { ...c, userTier: pins[c.id] } : c))
+        : data.comps.items
       return recalculateValuationFromComps(
-        data.comps.items,
+        items,
         data.subject,
         compOverride.selectedCompKeys,
         base,
@@ -443,6 +482,7 @@ export function useAnalysisEvaluation({
     compOverride: authoritativeOverride ?? compOverride,
     handleToggleComp,
     handleResetComps,
+    handlePinTier,
     displayValuation,
     displayComps,
     effectiveComps,

@@ -17,7 +17,7 @@ import { evaluationStateAtom } from '@/atoms/evaluation'
 
 type EvaluationFields = Pick<
   UseAnalysisEvaluationReturn,
-  'isRecalculated' | 'recalcData' | 'compOverride' | 'handleToggleComp' | 'handleResetComps'
+  'isRecalculated' | 'recalcData' | 'compOverride' | 'handleToggleComp' | 'handleResetComps' | 'handlePinTier'
 >
 
 interface SyncOptions {
@@ -93,6 +93,7 @@ export function useEvaluationSync({
       callbacks: {
         onToggleComp: evaluation.handleToggleComp,
         onResetComps: evaluation.handleResetComps,
+        onPinTier: evaluation.handlePinTier,
         onOpenSettings,
         onCompClick,
         onRunAiAnalysis,

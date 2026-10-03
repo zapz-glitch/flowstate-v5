@@ -462,10 +462,11 @@ export function recalculateValuationFromComps(
   const selectedComps = allComps.filter((c, i) => selectedCompKeys.has(getCompKey(c, i)))
 
   // ARV pool = ARV-evidence comps only — selecting a median or investor-floor
-  // comp must not leak its price into ARV. An operator ARV pin (userTier) is
-  // the explicit override that admits a non-evidence comp.
+  // comp must not leak its price into ARV. An operator pin (userTier) is the
+  // explicit override BOTH ways: 'arv' admits a non-evidence comp, 'as_is'
+  // excludes an evidence-classified one.
   const arvEligibleComps = selectedComps.filter(
-    (c) => c.classification?.type === 'after_renovation' || c.userTier === 'arv'
+    (c) => c.userTier === 'arv' || (c.userTier == null && c.classification?.type === 'after_renovation')
   )
 
   const arvComps: ArvCompLike[] = arvEligibleComps.map((c) => ({

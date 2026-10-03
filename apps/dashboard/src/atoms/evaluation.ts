@@ -30,6 +30,8 @@ export interface CompOverrideState {
 export interface EvaluationCallbacks {
   onToggleComp: (key: string) => void
   onResetComps: () => void
+  /** Reviewer tier pin — feeds the client-side ARV recalc (persistence is the caller's) */
+  onPinTier?: (compId: string, tier: 'arv' | 'as_is' | null) => void
   onOpenSettings: () => void
   onCompClick?: (comp: CompItem) => void
   onRunAiAnalysis?: () => void

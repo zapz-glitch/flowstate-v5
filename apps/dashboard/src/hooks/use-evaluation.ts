@@ -47,6 +47,7 @@ export function useEvaluation() {
     // Callbacks
     onToggleComp: state.callbacks.onToggleComp,
     onResetComps: state.callbacks.onResetComps,
+    onPinTier: state.callbacks.onPinTier,
     onOpenSettings: state.callbacks.onOpenSettings,
     onCompClick: state.callbacks.onCompClick,
     onRunAiAnalysis: state.callbacks.onRunAiAnalysis,

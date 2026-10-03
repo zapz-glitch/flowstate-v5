@@ -38,6 +38,8 @@ export interface ComparablesSectionProps {
   recalculatedArv?: number
   /** Called when a comp's ARV toggle is clicked */
   onToggleComp?: (key: string) => void
+  /** Reviewer tier pin — feeds the client-side ARV recalc alongside local persistence */
+  onPinTier?: (compId: string, tier: 'arv' | 'as_is' | null) => void
   /** Called when reset button is clicked */
   onReset?: () => void
   /** When set, auto-expands excluded section and highlights this comp key */
@@ -86,6 +88,7 @@ export function ComparablesSection({
   isManual = false,
   recalculatedArv,
   onToggleComp,
+  onPinTier,
   onReset,
   highlightedCompKey,
   isAnalyzing = false,
@@ -123,6 +126,7 @@ export function ComparablesSection({
       else delete next[compId]
       return next
     })
+    onPinTier?.(compId, tier)
     const res = await assignCompTier(jobId, compId, tier)
     if (!res.success) {
       setTierPins((p) => {

@@ -53,6 +53,7 @@ export function AnalysisResultLayout({
     isStreaming,
     onToggleComp,
     onResetComps,
+    onPinTier,
     onOpenSettings,
     onCompClick,
     onFeedbackSubmitted,
@@ -178,6 +179,7 @@ export function AnalysisResultLayout({
           isManual={isManual}
           recalculatedArv={isRecalculated ? valuation?.arv : undefined}
           onToggleComp={onToggleComp}
+          onPinTier={onPinTier}
           onReset={onResetComps}
           highlightedCompKey={null}
           onCompClick={onCompClick}

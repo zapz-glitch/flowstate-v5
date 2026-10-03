@@ -334,6 +334,7 @@ export default function DashboardReportPage({ params, queue }: {
     compOverride,
     handleToggleComp,
     handleResetComps,
+    handlePinTier,
     displayValuation,
     effectiveComps,
     isRecalculated,
@@ -712,7 +713,7 @@ export default function DashboardReportPage({ params, queue }: {
   )
 
   useEvaluationSync({
-    evaluation: { isRecalculated, recalcData, compOverride, handleToggleComp, handleResetComps },
+    evaluation: { isRecalculated, recalcData, compOverride, handleToggleComp, handleResetComps, handlePinTier },
     subject: analyzeData?.subject,
     displayValuation,
     effectiveComps,

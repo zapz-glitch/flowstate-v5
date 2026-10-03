@@ -415,6 +415,7 @@ export default function AnalyzePage() {
     compOverride,
     handleToggleComp,
     handleResetComps,
+    handlePinTier,
     displayValuation,
     effectiveComps,
     isRecalculated,
@@ -540,7 +541,7 @@ export default function AnalyzePage() {
   const handlePermitsPulled = useCallback((a: AnalyzeData) => setAnalysisResult(a), [setAnalysisResult])
 
   useEvaluationSync({
-    evaluation: { isRecalculated, recalcData, compOverride, handleToggleComp, handleResetComps },
+    evaluation: { isRecalculated, recalcData, compOverride, handleToggleComp, handleResetComps, handlePinTier },
     subject: renderData?.subject,
     displayValuation: isReady ? displayValuation : undefined,
     effectiveComps: isReady ? effectiveComps : undefined,
