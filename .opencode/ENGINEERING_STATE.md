@@ -478,3 +478,33 @@ with `node scripts/sync-attom-token.mjs`).
   field precision) — acceptable.
 - Remaining: scoreboard replay parity pass; B mechanics UI panel +
   zoning display (queued); evidence-state pinning between attempts.
+
+## Last handoff (localhost-verify session — 2026-10-04)
+
+**State:** Set-B IS production — `valuation.arv` = B output in-pipeline;
+`arvLegacy` + `arvB` + `bMechanics` serialized for parity/UI. Branch
+feat/attom-provider-swap (PR #83, draft) — ready-for-review once the user
+finishes localhost click-through. Scoreboard A=2, B=27.
+
+**Shipped this session:**
+- Set-B TS port (`shared/appraisal/set-b.ts`) — methodology lives in the
+  pipeline; Python ab-eval.py remains the calibration reference
+- Pipeline swap: evaluateB runs post-Clef post-verification; its ARV drives
+  buy/ROI/rehab; `set_b_arv` SSE step
+- UI: comp-card headline chips (ARV/AS-IS/PARTIAL + Clef RENO/DATED
+  condition), AVM cell moved left of As-is AVG + foreground color, cyan
+  formula line under ARV (source + anchor, flag trail on hover), sidebar
+  hover-expand (collapsed = logo mark only, chevron pins open), new bolder
+  favicon (SVG + regenerated PNGs/.ico), map marker hover = REAL card
+  overlay (SubjectGridCard / CompCard expanded, 250ms grace, leave-dismiss)
+- Redfin beds/baths supplement — fills provider gaps post-stamp (top-15
+  comps scope); subject got beds where ATTOM missed them
+- ATTOM token broker — 5-min cron warms the token (API key → M2M → OAuth
+  pair w/ KV rotation); /dev/attom-token-warm probes it (verified m2m)
+
+**Queued (unchanged):** zoning + HBU display under map; B mechanics panel
+in report/dashboard (bMechanics payload ready).
+
+**Known gaps:** comp eval grid reads pre-stamp beds (Redfin supplement is
+display/B-contribution level — grid reorder queued if needed); run-to-run
+evidence variance; missed-SSE recovery (fetch completed job if event drops).
