@@ -353,14 +353,35 @@
   create Instant namespaces") — API_CACHE stays classic; binding swap is
   a 1-line id change when access lands.
 
+## A/B calibration run (live, in progress)
+
+Sequential real-address calibration vs the "trade tricks" spec —
+Set A = live pipeline ARV; Set B = marginal-sqft scaling + within-tier
+least-adjustment weighting + bracketing/outlier flags (harness:
+`scripts/ab-eval.py`, untracked; scoreboard: `.data/ab-calibration/scoreboard.md`).
+
+| # | Address | A | B | Winner |
+|---|---------|---|---|--------|
+| 1 | 800 40th St S, St Pete | $159,107 | $175,956 | **B** — premium renovated comp was real evidence; all-bigger bracket flag was a false positive (comps better, not bigger) |
+
+Shipped during calibration (all on feat/attom-provider-swap):
+- parcel-GIS bridge (ATTOM-only identity rescue: Census geocode → county
+  ArcGIS → APN → fipsApn → attomId; Pinellas verified; registry:
+  `services/geo/parcel-gis.ts`)
+- CoreLogic fallback REMOVED (license ending) — `searchProperty` now
+  takes fips/apn; `apnSpellings()` handles punctuation variants
+- county canonical-address photo-scrape retry
+- nominal-sale + symmetric rural-lot hard gates; tract rescue ≤0.75mi
+- word-form deltas ("540 sf larger") in comp cards
+- docs/attom-migration/ATTOM-MCP-ENDPOINTS.md — full surface reference
+
+Known gaps: subject photo scrape can't surface low-footprint listings
+(site:search discovery); `crossesMajorRoad` proxy fires ~30% of pools.
+
 ## Last handoff
 
-Dev env re-verified 2026-10-01 evening: repo on feat/attom-provider-swap,
-`npm run dev` up (dashboard :3000, API :8787), dev:check all-green —
-login local@flowstate.test, Google Maps key authorized for :3000,
-CoreLogic creds mint. ATTOM MCP is BLOCKED externally: OAuth login +
-refresh work but ATTOM revoked the mcp:* allow grant (see "ATTOM MCP
-ACCESS REVOKED" above) — needs ATTOM admin re-activation before any
-attom-mcp work can proceed. Resume: REST adapter swap per
-`docs/attom-migration/PROVIDER_SWAP.md` "Semantic gaps" once ATTOM API
-docs/key arrive.
+2026-10-03: ATTOM MCP restored (access grant active — see prior note as
+stale). Calibration mode: user sends addresses one at a time; each gets
+scorecard (subject/comps/gates/Clef/valuation) + A/B card. B currently
+leads 1-0. Resume: next user-provided address → `scripts/ab-eval.py`
++ `scripts/address-scorecard.py` (both send skipCache).
