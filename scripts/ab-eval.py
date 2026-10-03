@@ -52,10 +52,28 @@ def set_b(subject, items):
         weight = (1 / (1 + adj_pct)) * (0.5 if capped else 1)   # 6 — least-adj weighting
         contribs.append({'c': c, 'contrib': contrib, 'weight': weight, 'tier': tier_of(c)})
 
-    # Within-tier: ARV-tier evidence drives ARV; as-is tier is floor evidence only
+    # Within-tier: ARV-tier evidence drives ARV. As-is/distressed-tier sales
+    # are floor evidence only — they NEVER contribute to after-repair value,
+    # label or no label: an as-is sale can't say what a renovated house
+    # sells for. When no comp carries the ARV label, best-evidence selection
+    # drives off the retail-marked comp(s) — the sale price itself is the
+    # evidence (ppsf within RETAIL_BAND of the pool top = retail-tier sale).
+    RETAIL_BAND = 0.70
+    ppsf_of = lambda x: x['c'].get('pricePerSqft') or (x['c']['salePrice'] / x['c']['squareFeet'])
     arv_tier = [x for x in contribs if x['tier'] == 'arv']
-    drivers = arv_tier if arv_tier else contribs
-    if not arv_tier: flags.append('no ARV-tier comps — weighting across all enabled (weaker evidence)')
+    if arv_tier:
+        drivers = arv_tier
+    else:
+        top_ppsf = max(ppsf_of(x) for x in contribs)
+        retail = [x for x in contribs
+                  if x['tier'] != 'as_is' and ppsf_of(x) >= RETAIL_BAND * top_ppsf]
+        excluded = len(contribs) - len(retail)
+        if not retail:
+            flags.append('no retail-priced evidence — ARV withheld (as-is sales are floor evidence only)')
+            return {'arv': None, 'flags': flags, 'contribs': contribs, 'conf': 'none',
+                    'drivers': [], 'bracket': 'ok'}
+        drivers = retail
+        flags.append(f'no ARV-tier labels — ARV driven on {len(drivers)} retail-marked comp(s); {excluded} as-is-priced sale(s) excluded from ARV')
 
     arv = sum(x['contrib']*x['weight'] for x in drivers) / max(1e-9, sum(x['weight'] for x in drivers))
 

@@ -650,6 +650,27 @@ export class AnalysisJobDO {
         this.env.GEOCODIO_API_KEY,
       )
       if (!subjectGeo) return comps
+
+      // market-context supplement — the second retrieval source: recent
+      // same-pocket sales the primary comp search missed entirely (e.g.
+      // same-street sales). Candidates arrive detail-enriched, then flow
+      // through the same census geo gate as everything else.
+      try {
+        const seenIds = new Set(comps.map((c) => String(c.id)))
+        const normAddr = (a?: string | null) => (a ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '')
+        const seenAddrs = new Set(comps.map((c) => normAddr(c.address)).filter(Boolean))
+        const supplement = await propertyApi.marketContextSupplement(String(property.id), {
+          ids: seenIds,
+          addresses: seenAddrs,
+        })
+        if (supplement.length > 0) {
+          console.log(`[AnalysisJobDO] market-context supplement: +${supplement.length} comp(s) added to pool`)
+          comps = [...comps, ...supplement]
+        }
+      } catch (e) {
+        console.warn('[AnalysisJobDO] market-context supplement failed (non-fatal):', e instanceof Error ? e.message : e)
+      }
+
       const cache = this.env.API_CACHE ?? undefined
       const lookup = async (lat: number, lng: number) => {
         for (let attempt = 0; attempt < 3; attempt++) {

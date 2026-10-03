@@ -191,6 +191,15 @@ export interface PropertyApiService {
   getComparables(
     params: ComparablesSearchParams,
   ): Promise<ComparablesSearchResponse>;
+  /**
+   * market-context supplement — the second retrieval source: recent sales
+   * around the subject that the primary comp search missed. attom-mcp only;
+   * returns [] on providers without the capability.
+   */
+  marketContextSupplement(
+    subjectAttomId: string,
+    existing: { ids: Set<string>; addresses: Set<string> },
+  ): Promise<NormalizedComparable[]>;
   /** Get building permits */
   getBuildingPermits(propertyId: string, address?: { address1: string; address2: string }): Promise<PermitsResponse>;
   /** Get flood zone data */
@@ -399,6 +408,22 @@ class PropertyApi implements PropertyApiService {
     }
 
     return result;
+  }
+
+  /**
+   * market-context supplement — the second retrieval source: recent sales
+   * around the subject that the primary comp search missed. Only exists on
+   * the attom-mcp provider; returns [] elsewhere.
+   */
+  async marketContextSupplement(
+    subjectAttomId: string,
+    existing: { ids: Set<string>; addresses: Set<string> },
+  ): Promise<NormalizedComparable[]> {
+    const provider = this.providers.get(this.currentConfig.provider)
+    const fn = (provider as { marketContextSupplement?: (id: string, e: typeof existing) => Promise<NormalizedComparable[]> })
+      ?.marketContextSupplement
+    if (!fn) return []
+    return fn.call(provider, subjectAttomId, existing)
   }
 
   async getComparables(

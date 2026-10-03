@@ -700,6 +700,88 @@ class AttomMcpProvider implements PropertyProviderAdapter {
     }
   }
 
+  /**
+   * market-context supplement — one MCP call returns `recentSales` near the
+   * subject: the second retrieval source that catches same-pocket sales the
+   * find_comparable_sales pool missed (verified: same-street sales absent
+   * from the primary pool). Each NEW candidate costs one detail call for
+   * physicals + geography — capped at 8.
+   */
+  async marketContextSupplement(
+    subjectAttomId: string,
+    existing: { ids: Set<string>; addresses: Set<string> },
+  ): Promise<NormalizedComparable[]> {
+    const results = await this.propertyData(
+      { lookupMode: 'attomId', attomId: subjectAttomId },
+      ['market-context'],
+    ).catch(() => [])
+    const data = results.find((r) => r.dataset === 'market-context')?.data
+    const sales = (data?.recentSales ?? []) as Array<{
+      attomId?: string | number
+      address?: string
+      distanceMiles?: number
+      saleDate?: string
+      salePrice?: number
+      pricePerSqFt?: number
+    }>
+    const normAddr = (a: string) => a.toUpperCase().replace(/[^A-Z0-9]/g, '')
+    const candidates = sales
+      .filter((s) =>
+        s.attomId != null &&
+        (s.salePrice ?? 0) >= 10_000 &&
+        !existing.ids.has(String(s.attomId)) &&
+        !existing.addresses.has(normAddr(s.address ?? '')))
+      .sort((a, b) => (a.distanceMiles ?? 99) - (b.distanceMiles ?? 99))
+      .slice(0, 8)
+
+    const out: NormalizedComparable[] = []
+    for (const s of candidates) {
+      try {
+        const detail = await this.propertyData(
+          { lookupMode: 'attomId', attomId: String(s.attomId) },
+          COMP_DETAIL_DATASETS,
+        )
+        const property = await normalizeMcpProperty(detail, this.env)
+        if (!property.id) continue
+        out.push({
+          id: property.id,
+          provider: 'attom-mcp',
+          address: property.address,
+          city: property.city,
+          state: property.state,
+          zipCode: property.zipCode,
+          latitude: property.latitude,
+          longitude: property.longitude,
+          distanceMiles: s.distanceMiles ?? null,
+          bedrooms: property.bedrooms,
+          bathrooms: property.bathrooms,
+          squareFeet: property.squareFeet,
+          lotSizeAcres: property.lotSizeAcres,
+          lotSizeSquareFeet: property.lotSizeSquareFeet,
+          yearBuilt: property.yearBuilt,
+          propertyType: property.propertyType,
+          salePrice: s.salePrice ?? null,
+          saleDate: s.saleDate ? String(s.saleDate).slice(0, 10) : null,
+          pricePerSqft: s.pricePerSqFt ?? (s.salePrice && property.squareFeet ? Math.round(s.salePrice / property.squareFeet) : null),
+          subdivision: property.subdivision ?? null,
+          neighborhoodName: property.neighborhoodName ?? null,
+          neighborhoodCode: property.neighborhoodCode ?? null,
+          censusTract: property.censusTract ?? null,
+          geoScopes: property.geoScopes ?? undefined,
+          buildingCondition: property.buildingCondition ?? null,
+          stories: property.stories ?? null,
+          flip: property.flip ?? null,
+          distressedSale: property.distressedSale ?? null,
+          latestSale: property.latestSale ?? null,
+          avmValue: property.avmValue ?? null,
+          ppsfMedians: property.ppsfMedians ?? null,
+          isEnriched: true,
+        })
+      } catch { /* skip a bad detail call — supplement is best-effort */ }
+    }
+    return out
+  }
+
   async getComparables(params: ComparablesSearchParams): Promise<ComparablesSearchResponse> {
     try {
       const saleDateFrom = new Date(Date.now() - (params.monthsBack ?? 12) * 30.44 * 864e5)
