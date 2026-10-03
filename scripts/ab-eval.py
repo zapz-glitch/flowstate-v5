@@ -8,6 +8,44 @@ from datetime import datetime, timezone
 API = 'http://localhost:8787'
 KEY = 'fs_35fd82dfcc3849c37a4e42347ee79bf0350503117d46cc8d'
 
+# ATTOM MCP — harness-local land lookups (rescued comps are unenriched, so
+# land data comes straight from the provider: tax-history → landValue)
+def _dev_vars():
+    env = {}
+    try:
+        for line in open('apps/api/.dev.vars'):
+            if '=' in line and not line.strip().startswith('#'):
+                k, v = line.split('=', 1)
+                env[k.strip()] = v.strip()
+    except FileNotFoundError: pass
+    return env
+
+_MCP = 'https://mcp.intelligence.attomdata.com'
+def mcp_tool(name, args):
+    token = _dev_vars().get('ATTOM_MCP_ACCESS_TOKEN')
+    if not token: return None
+    r = urllib.request.Request(_MCP, method='POST',
+        headers={'Content-Type': 'application/json', 'Accept': 'application/json, text/event-stream',
+                 'Authorization': f'Bearer {token}'},
+        data=json.dumps({'jsonrpc': '2.0', 'id': 1, 'method': 'tools/call',
+                         'params': {'name': name, 'arguments': args}}).encode())
+    try:
+        text = urllib.request.urlopen(r, timeout=30).read().decode()
+        line = [l for l in text.split('\n') if l.startswith('data:')]
+        return json.loads((line[-1][5:] if line else text))['result']
+    except Exception: return None
+
+def land_value_of(attom_id):
+    """Latest assessed landValue for a comp via tax-history."""
+    res = mcp_tool('get_property_data', {
+        'property': {'lookupMode': 'attomId', 'attomId': str(attom_id)},
+        'datasets': ['tax-history']})
+    try:
+        rows = res['structuredContent']['results'][0]['data']
+        return max(rows, key=lambda r: r.get('taxYear', 0)).get('landValue')
+    except Exception:
+        return None
+
 def req(method, path, body=None):
     r = urllib.request.Request(API + path, method=method,
         headers={'Authorization': f'Bearer {KEY}', 'Content-Type': 'application/json'},
@@ -88,28 +126,18 @@ def set_b(subject, items):
 
     contribs, flags = [], list(flags0)
 
-    # ── Land curve — market-derived marginal land rate for the tract ─────
-    # Least-squares slope of assessed landValue on lotSize across same-tract
-    # parcels (subject's own point included when carried). The slope IS the
-    # county's own marginal $/sqft for excess land — flat pockets fit ~$0/sf
-    # naturally; no assumed discount constants.
-    def lot_sf(x):
-        return x.get('lotSizeSquareFeet') or ((x.get('lotSizeAcres') or 0) * 43560) or None
-    land_pts = [
-        (lot_sf(c), c['landAssessedValue'])
-        for c in items
-        if lot_sf(c) and c.get('landAssessedValue')
-        and c.get('censusTract') and c.get('censusTract') == subject.get('censusTract')
-    ]
-    _sub_lot, _sub_land = lot_sf(subject), subject.get('landAssessedValue')
-    if _sub_lot and _sub_land: land_pts.append((_sub_lot, _sub_land))
-    land_rate = None
-    if _sub_lot and len(land_pts) >= 5:
-        mx = sum(p[0] for p in land_pts)/len(land_pts); my = sum(p[1] for p in land_pts)/len(land_pts)
-        cov = sum((x-mx)*(y-my) for x, y in land_pts); var = sum((x-mx)**2 for x, y in land_pts)
-        if var > 0:
-            land_rate = max(0.0, cov/var)
-            flags.append(f'land curve: {len(land_pts)} tract parcels → marginal land rate ${land_rate:.2f}/sf')
+    # ── Land premium — the county's per-parcel landValue IS the curve ────
+    # assessed land value already bakes in diminishing returns per parcel;
+    # the premium is just the subject−comp assessed delta scaled to market
+    # (subject's own AVM/assessed ratio). Missing comp land fetched lazily
+    # via MCP tax-history — rescued comps are unenriched by definition.
+    _sub_land = subject.get('landAssessedValue')
+    _mkt_ratio = (subject.get('avmValue') / subject.get('taxAssessment')
+                  if subject.get('avmValue') and subject.get('taxAssessment') else 1.4)
+    for c in pool:
+        if c.get('landAssessedValue') is None and c.get('id'):
+            lv = land_value_of(c['id'])
+            if lv is not None: c['landAssessedValue'] = lv
 
     for c in pool:
         comp_sqft = c['squareFeet']; ppsf = c.get('pricePerSqft') or c['salePrice']/comp_sqft
@@ -117,14 +145,13 @@ def set_b(subject, items):
         # 1 — marginal sqft scaling: size delta priced at MARGINAL_FACTOR×ppsf,
         # not full proportional — damps over-correction on big size gaps
         contrib = base + (sub_sqft - comp_sqft) * ppsf * MARGINAL_FACTOR
-        # land premium — excess-lot delta priced at the tract's fitted
-        # marginal land rate (positive when subject carries more land)
-        c_lot = lot_sf(c)
-        if land_rate is not None and c_lot:
-            land_adj = land_rate * (_sub_lot - c_lot)
+        # land premium — assessed land delta scaled to market
+        if _sub_land and c.get('landAssessedValue'):
+            assessed_delta = _sub_land - c['landAssessedValue']
+            land_adj = assessed_delta * _mkt_ratio
             if abs(land_adj) >= 1000:
                 contrib += land_adj
-                flags.append(f"{c['address']}: land Δ {_sub_lot - c_lot:+,.0f}sf × ${land_rate:.2f}/sf → {'+' if land_adj >= 0 else '−'}${abs(land_adj):,.0f}")
+                flags.append(f"{c['address']}: land Δ ${assessed_delta:+,} assessed × {_mkt_ratio:.2f} → {'+' if land_adj >= 0 else '−'}${abs(land_adj):,.0f}")
         # 2 — market-conditions time adj: needs 90d vs 365d ppsf trend; skip when absent
         # 3 — adjustment cap: >25% net adj → halve weight + flag
         adj_pct = abs((c.get('appraisalRules') or {}).get('totalAdjustment') or 0) / c['salePrice']
