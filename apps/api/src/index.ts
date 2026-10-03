@@ -63,6 +63,8 @@ app.use(
       // configured dashboard origin.
       if (origin === 'http://localhost:3000') return origin
       if (/^https:\/\/([\w-]+\.)?flowstate\.homes$/.test(origin)) return origin
+      // Account-scoped workers.dev previews (Workers Builds + subdomain)
+      if (/^https:\/\/[\w-]+\.weareflowstate1\.workers\.dev$/.test(origin)) return origin
       if (c.env.DASHBOARD_URL && origin === c.env.DASHBOARD_URL) return origin
       return ''
     },
