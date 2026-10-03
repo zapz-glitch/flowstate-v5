@@ -175,7 +175,7 @@ export function DealSummaryHero({ valuation, isRecalculated, onOpenSettings, onR
             title={`${subject.avm.model ?? 'AVM'} modeled value${subject.avm.confidence != null ? ` — ${subject.avm.confidence}% confidence` : ''}${subject.avm.valueRangeLow != null && subject.avm.valueRangeHigh != null ? ` (range $${fmtK(subject.avm.valueRangeLow)}–$${fmtK(subject.avm.valueRangeHigh)})` : ''} — reference only, not comp-verified`}
           >
             <div className="text-[11px] text-foreground-tertiary uppercase tracking-wider">AVM</div>
-            <div className="text-base font-bold tabular-nums mt-0.5 text-foreground-secondary">${fmtK(subject.avm.value)}</div>
+            <div className="text-base font-bold tabular-nums mt-0.5">${fmtK(subject.avm.value)}</div>
             {valuation.arv != null && subject.avm.value !== valuation.arv && (
               <div className="text-[10px] text-foreground-tertiary tabular-nums mt-0.5">
                 {((valuation.arv - subject.avm.value) / subject.avm.value * 100).toFixed(0)}% {valuation.arv > subject.avm.value ? 'below' : 'above'} ARV
