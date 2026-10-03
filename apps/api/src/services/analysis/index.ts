@@ -1255,6 +1255,22 @@ export function buildAnalysisResponse(
     }
   }
 
+  // Premium read on thin evidence — a single comp (or low-confidence set)
+  // carrying ARV well above the as-is estimate is a flag, not a failure:
+  // the answer may be right, but the underwriter needs to see that one
+  // sale is carrying the spread into a different submarket.
+  {
+    const avm = property.avmValue ?? enrichment.avm?.value ?? null
+    const b = ctx.pipelineBResult
+    if (b?.arv != null && avm != null && b.arv > avm * 1.2 && b.drivers.length <= 1) {
+      const pct = Math.round(((b.arv - avm) / avm) * 100)
+      const money = (n: number) => `$${Math.round(n).toLocaleString('en-US')}`
+      riskFlags.push(
+        `ARV ${money(b.arv)} rides a single comp (${b.anchorAddress ?? 'unidentified'}) — ${pct}% above the ${money(avm)} as-is estimate. Verify the anchor's pocket before trusting the spread.`,
+      )
+    }
+  }
+
   // ARV vs asking price is surfaced on the valuation hero (list price cell
   // + realism verdict) — not emitted as a risk flag.
 
