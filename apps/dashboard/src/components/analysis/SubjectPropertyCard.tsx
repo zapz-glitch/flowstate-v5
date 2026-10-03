@@ -73,6 +73,20 @@ export function SubjectPropertyCard({ subject, children, footer }: SubjectProper
             ['Subdivision', ld.subdivision],
             ['Zoning', ld.zoning],
             ['Style', ld.style],
+            ['Interior', (ld.interiorFeatures ?? []).slice(0, 3).join(', ') || null],
+            ['Community', (ld.communityFeatures ?? []).slice(0, 3).join(', ') || null],
+            ['Schools', (ld.schools ?? []).length > 0
+              ? ld.schools!.map((s) => `${s.name.split(' ')[0]}${s.rating != null ? ` ${s.rating}/10` : ''}`).join(', ')
+              : null],
+            ['Climate', ld.climateRisks
+              ? [
+                  ld.climateRisks.floodFactor != null ? `Flood ${ld.climateRisks.floodFactor}/10` : null,
+                  ld.climateRisks.fireFactor != null ? `Fire ${ld.climateRisks.fireFactor}/10` : null,
+                  ld.climateRisks.heatFactor != null ? `Heat ${ld.climateRisks.heatFactor}/10` : null,
+                  ld.climateRisks.windFactor != null ? `Wind ${ld.climateRisks.windFactor}/10` : null,
+                  ld.climateRisks.airFactor != null ? `Air ${ld.climateRisks.airFactor}/10` : null,
+                ].filter(Boolean).join(', ') || null
+              : null],
           ].filter(([, v]) => v != null && v !== '' && v !== '-') as Array<[string, string]>
           if (cells.length === 0) return null
           return (

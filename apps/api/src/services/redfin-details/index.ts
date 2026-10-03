@@ -53,6 +53,17 @@ export interface RedfinPropertyDetails {
   garage?: string | null
   pool?: boolean | null
   utilities?: string[]
+  interiorFeatures?: string[]
+  // Community / schools / risks
+  communityFeatures?: string[]
+  schools?: Array<{ name: string; level?: string | null; rating?: number | null; assigned?: boolean | null; distanceMi?: number | null }>
+  climateRisks?: {
+    floodFactor?: number | null
+    fireFactor?: number | null
+    heatFactor?: number | null
+    windFactor?: number | null
+    airFactor?: number | null
+  }
   // Records
   subdivision?: string | null
   zoning?: string | null
@@ -98,6 +109,35 @@ const EXTRACTION_SCHEMA = {
     garage: { type: ['string', 'null'] },
     pool: { type: ['boolean', 'null'] },
     utilities: { type: 'array', items: { type: 'string' } },
+    interiorFeatures: { type: 'array', items: { type: 'string' } },
+    communityFeatures: { type: 'array', items: { type: 'string' } },
+    schools: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          name: { type: 'string' },
+          level: { type: ['string', 'null'] },
+          rating: { type: ['number', 'null'] },
+          assigned: { type: ['boolean', 'null'] },
+          distanceMi: { type: ['number', 'null'] },
+        },
+        required: ['name', 'level', 'rating', 'assigned', 'distanceMi'],
+      },
+    },
+    climateRisks: {
+      type: ['object', 'null'],
+      additionalProperties: false,
+      properties: {
+        floodFactor: { type: ['number', 'null'] },
+        fireFactor: { type: ['number', 'null'] },
+        heatFactor: { type: ['number', 'null'] },
+        windFactor: { type: ['number', 'null'] },
+        airFactor: { type: ['number', 'null'] },
+      },
+      required: ['floodFactor', 'fireFactor', 'heatFactor', 'windFactor', 'airFactor'],
+    },
     subdivision: { type: ['string', 'null'] },
     zoning: { type: ['string', 'null'] },
     apn: { type: ['string', 'null'] },
@@ -121,8 +161,9 @@ const EXTRACTION_SCHEMA = {
     'lotSquareFeet', 'style', 'propertyType', 'hoaMonthly', 'listPrice',
     'daysOnRedfin', 'mlsSource', 'roof', 'foundation', 'construction',
     'heating', 'cooling', 'flooring', 'appliances', 'exteriorFeatures',
-    'parking', 'garage', 'pool', 'utilities', 'subdivision', 'zoning',
-    'apn', 'county', 'saleHistory',
+    'parking', 'garage', 'pool', 'utilities', 'interiorFeatures',
+    'communityFeatures', 'schools', 'climateRisks',
+    'subdivision', 'zoning', 'apn', 'county', 'saleHistory',
   ],
 }
 
@@ -135,6 +176,10 @@ Return JSON matching the schema. Rules:
 - parking/garage: short text (e.g. "Attached 2-car garage (approx. 20x20)", "2 car garage").
 - subdivision: legal subdivision name if shown in Property details/Public facts.
 - saleHistory: the "Sale history" table rows — date, event (Sold/Listed/etc), price (null when unpriced).
+- interiorFeatures: interior detail bullets (bedrooms/baths breakdown is separate — capture kitchen, laundry, interior finish items).
+- communityFeatures: HOA/community amenity items ("clubhouse, fitness center, pool", gated, playground, sidewalks, deed restrictions).
+- schools: the "Schools" section rows — name, level (Elementary/Middle/High), GreatSchools rating number, assigned flag, distance in miles.
+- climateRisks: the "Climate risks" block — "N/10 X Factor" scores for flood/fire/heat/wind/air; null for factors absent from the page.
 - Ignore the neighborhood/comparable-homes sections — extract only THIS property.
 
 MARKDOWN:
@@ -149,9 +194,9 @@ export async function fetchRedfinPropertyDetails(
   if (!env.OPENROUTER_API_KEY) return { details: null, skippedReason: 'no_openrouter_key' }
 
   const fullAddress = [ident.address, ident.city, ident.state, ident.zipCode].filter(Boolean).join(', ')
-  // v2 — v1 used the weak search resolver that could stamp a neighbor's
-  // details; entries cached under it must not be served.
-  const cacheKey = `redfin:details-v2:${fullAddress.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`
+  // v3 — schema bumps (schools, climate, interior/community) and resolver
+  // changes get a fresh key so stale entries aren't served.
+  const cacheKey = `redfin:details-v3:${fullAddress.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`
   if (cache) {
     try {
       const hit = await cache.get<RedfinDetailsResult>(cacheKey, 'json')

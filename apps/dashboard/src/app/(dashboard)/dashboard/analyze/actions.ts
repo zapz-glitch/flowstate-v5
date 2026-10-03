@@ -208,6 +208,16 @@ export interface ListingDetails {
   garage?: string | null
   pool?: boolean | null
   utilities?: string[]
+  interiorFeatures?: string[]
+  communityFeatures?: string[]
+  schools?: Array<{ name: string; level?: string | null; rating?: number | null; assigned?: boolean | null; distanceMi?: number | null }>
+  climateRisks?: {
+    floodFactor?: number | null
+    fireFactor?: number | null
+    heatFactor?: number | null
+    windFactor?: number | null
+    airFactor?: number | null
+  }
   subdivision?: string | null
   zoning?: string | null
   apn?: string | null
