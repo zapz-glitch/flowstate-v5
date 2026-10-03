@@ -418,3 +418,17 @@ leads 1-0. Resume: next user-provided address → `scripts/ab-eval.py`
   .flowstate.homes preview = Workers Builds, DNS NXDOMAIN so far.
 - A/B SCOREBOARD: A=1, B=4 (21st Ave → B, marginal-rate correctly
   prices small-home $/sf premium).
+
+## Queued (user-requested, not yet built)
+
+- **Zoning display — report + dashboard UI**: subject zoning code/description
+  (now resolved via county GIS → `subject.zoning`/`zoningDescription` in the
+  analysis payload + `developmentSignal` HBU flag) should render in the report
+  AND in the dashboard UI under the map, alongside the other location notes.
+  Requested 2026-10-03 during calibration; pending user-approved UI pass.
+- **B mechanics display — report + dashboard UI**: the Set-B reasoning must
+  surface in the product, not just the harness — anchor choice, contribution
+  math (size/land/condition deltas), tier stamps (median fallback etc.),
+  verification exclusions (stale/divergent), attempt trail (widen/deepen/
+  self-heal), and ceiling caps. Same queued UI pass as the zoning display.
+  Requested 2026-10-03.

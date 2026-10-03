@@ -462,15 +462,20 @@ def set_b(subject, items, valuation=None):
     return {'arv': round(arv), 'flags': flags, 'contribs': contribs, 'conf': conf,
             'drivers': drivers, 'bracket': bracket_flag, 'source': source}
 
-def verify_b(b):
+def verify_b(b, subject):
     """Verdict check — is the conclusion defensible against its own evidence?
-    Invariants, not outcomes — symmetric: heals low AND high anchors."""
+    Invariants, not outcomes — symmetric: heals low AND high anchors.
+    Retry triggers: no ARV produced, or ARV below the as-is AVM (a
+    renovation can't be worth less than the un-renovated property)."""
     fails = []
     drivers = b.get('drivers') or []
     if b.get('arv') is None:
-        return fails  # cascade already resolved — nothing to verify
+        return ['no ARV — evidence pool produced no defensible answer']
     if len(drivers) < 2:
         fails.append('thin evidence (<2 drivers)')
+    avm = sub_avm(subject)
+    if avm and b['arv'] < avm:
+        fails.append('below as-is AVM')
     for f in b.get('flags') or []:
         if 'uncorroborated' in f: fails.append('uncorroborated')
     # anchor-floor — test the condition, not the flag text: the flag prints
@@ -556,7 +561,7 @@ def run_address(addr):
     b, trail = None, []
     for attempt in (1, 2, 3):
         b = set_b(s, items, val)
-        fails = verify_b(b)
+        fails = verify_b(b, s)
         if not fails:
             if attempt > 1: b['flags'].append(f'attempt {attempt} verified clean')
             break
@@ -569,6 +574,12 @@ def run_address(addr):
             trail.append(f'attempt 3 prep: deepened enrichment +{n} fields')
     else:
         pass
+    # Fallback after the ladder: a withheld ARV cascades to the labeled
+    # AVM floor — never silent, never a bare refusal.
+    if b.get('arv') is None and sub_avm(s):
+        b['arv'] = round(sub_avm(s))
+        b['source'] = 'T3 AVM floor (post-retry)'
+        trail.append('all attempts failed — ARV set at as-is AVM floor (unverified, not ARV-tier)')
     b['flags'] = trail + b['flags']
     comps['items'] = items
     sel = [c for c in comps['items'] if c.get('arvStatus') == 'selected' or (c['isEnabled'] and c.get('salePrice'))]
