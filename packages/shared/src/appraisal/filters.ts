@@ -97,6 +97,32 @@ const evaluators: Record<FilterType, FilterEvaluator> = {
     }
   },
 
+  geo_scope_match(subject, comp, _filter) {
+    const s = subject.geoScopes
+    const c = comp.geoScopes
+    const norm = (v: string) => v.toUpperCase().replace(/[^A-Z0-9 ]/g, '').replace(/\s+/g, ' ').trim()
+    const pairs: Array<[string, string | undefined, string | undefined]> = [
+      ['subdivision', s?.subdivision ?? subject.subdivision ?? undefined, c?.subdivision ?? comp.subdivision ?? undefined],
+      ['neighborhood', s?.n4 ?? subject.neighborhoodName ?? undefined, c?.n4 ?? comp.neighborhoodName ?? undefined],
+      ['school district', s?.schoolDistrict ?? undefined, c?.schoolDistrict ?? undefined],
+      ['city', s?.city ?? undefined, c?.city ?? undefined],
+      ['county', s?.county ?? undefined, c?.county ?? undefined],
+      ['zip', s?.zip ?? undefined, c?.zip ?? undefined],
+    ]
+    const populated = pairs.filter(([, a, b]) => a && b)
+    if (populated.length === 0) {
+      return { type: 'geo_scope_match', passed: true, status: 'not_verified', reason: 'No geo-scope data' }
+    }
+    const mismatches = populated.filter(([, a, b]) => norm(a!) !== norm(b!))
+    const passed = mismatches.length === 0
+    return {
+      type: 'geo_scope_match',
+      passed,
+      reason: passed ? undefined : `Geo scope mismatch: ${mismatches.map(([n]) => n).join(', ')}`,
+      actualValue: `${populated.length - mismatches.length}/${populated.length} scopes match`,
+    }
+  },
+
   building_style_match(subject, comp, _filter) {
     const subjectStyle = subject.construction?.buildingStyle?.toLowerCase().trim()
     const compStyle = comp.construction?.buildingStyle?.toLowerCase().trim()

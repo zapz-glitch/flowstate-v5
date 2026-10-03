@@ -73,6 +73,53 @@ function evaluateSubdivisionMatch(
   }
 }
 
+/** Phase-1 scope requirement: every geography scope populated on BOTH
+ *  sides must match (county, city, zip, school district, subdivision, N4).
+ *  A scope absent on either side is unverifiable — not a mismatch. */
+function evaluateGeoScopeMatch(
+  subject: NormalizedProperty,
+  comp: NormalizedComparable,
+  filter: AppraisalFilter,
+): FilterResult {
+  const s = subject.geoScopes
+  const c = comp.geoScopes
+  const pairs: Array<[string, string | undefined, string | undefined]> = [
+    ['subdivision', s?.subdivision ?? subject.subdivision ?? undefined, c?.subdivision ?? comp.subdivision ?? undefined],
+    ['neighborhood', s?.n4 ?? subject.neighborhoodName ?? undefined, c?.n4 ?? comp.neighborhoodName ?? undefined],
+    ['school district', s?.schoolDistrict, c?.schoolDistrict],
+    ['city', s?.city ?? subject.city ?? undefined, c?.city ?? comp.city ?? undefined],
+    ['county', s?.county ?? subject.county ?? undefined, c?.county],
+    ['zip', s?.zip ?? subject.zipCode ?? undefined, c?.zip ?? comp.zipCode ?? undefined],
+  ]
+  const norm = (v: string) => v.toUpperCase().replace(/[^A-Z0-9 ]/g, '').replace(/\s+/g, ' ').trim()
+  const populated = pairs.filter(([, a, b]) => a && b)
+  if (populated.length === 0) {
+    return {
+      type: 'geo_scope_match',
+      passed: true,
+      status: 'not_verified',
+      reason: 'No geo-scope data — rule not verified',
+    }
+  }
+  const mismatches = populated.filter(([, a, b]) => norm(a!) !== norm(b!))
+  const passed = mismatches.length === 0
+  if (!passed && typeof filter.value === 'number' && filter.value > 1 && isValueEquivalent(subject, comp)) {
+    return {
+      type: 'geo_scope_match',
+      passed: true,
+      reason: `Scope mismatch (${mismatches.map(([n]) => n).join(', ')}) — value-equivalent pocket under flex`,
+      actualValue: `${populated.length - mismatches.length}/${populated.length} scopes match`,
+    }
+  }
+  return {
+    type: 'geo_scope_match',
+    passed,
+    reason: passed ? undefined : `Geo scope mismatch: ${mismatches.map(([n, a, b]) => `${n} "${b}" ≠ "${a}"`).join(', ')}`,
+    actualValue: `${populated.length - mismatches.length}/${populated.length} scopes match`,
+    threshold: 'all populated scopes',
+  }
+}
+
 function evaluateSaleAge(
   _subject: NormalizedProperty,
   comp: NormalizedComparable,
@@ -658,6 +705,7 @@ const FILTER_EVALUATORS: Partial<Record<
 >> = {
   subdivision_match: evaluateSubdivisionMatch,
   neighborhood_match: evaluateNeighborhoodMatch,
+  geo_scope_match: evaluateGeoScopeMatch,
   building_style_match: evaluateBuildingStyleMatch,
   foundation_match: evaluateFoundationMatch,
   construction_material_match: evaluateConstructionMaterialMatch,
@@ -1236,6 +1284,7 @@ const FLEX_MARKER_FILTERS = new Set<FilterType>([
   'road_barrier',
   'subdivision_match',
   'neighborhood_match',
+  'geo_scope_match',
 ])
 
 export function flexNumericFilters(filters: AppraisalFilter[], factor: number): AppraisalFilter[] {

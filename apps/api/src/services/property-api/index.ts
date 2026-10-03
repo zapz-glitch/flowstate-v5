@@ -901,13 +901,14 @@ class PropertyApi implements PropertyApiService {
         property.latitude,
         property.longitude,
         this.env.API_CACHE ?? undefined,
+        this.env.FIRECRAWL_API_KEY,
       );
       if (subjectGeo) {
         const cache = this.env.API_CACHE ?? undefined;
         const lookup = async (lat: number, lng: number) => {
-          const g = await fetchCensusGeography(lat, lng, cache).catch(() => null);
+          const g = await fetchCensusGeography(lat, lng, cache, this.env.FIRECRAWL_API_KEY).catch(() => null);
           // One retry — a null geo silently drops an otherwise-valid comp
-          return g ?? fetchCensusGeography(lat, lng, cache).catch(() => null);
+          return g ?? fetchCensusGeography(lat, lng, cache, this.env.FIRECRAWL_API_KEY).catch(() => null);
         };
         // Bounded concurrency — the Census endpoint throttles big bursts
         // (25 parallel calls returned ~90% nulls in testing).
@@ -1150,6 +1151,7 @@ class PropertyApi implements PropertyApiService {
                 neighborhoodName: result.data.neighborhoodName ?? null,
                 neighborhoodCode: result.data.neighborhoodCode ?? null,
                 censusTract: result.data.censusTract ?? null,
+                geoScopes: result.data.geoScopes ?? undefined,
                 buildingCondition: result.data.buildingCondition ?? null,
                 buildingGrade: result.data.buildingGrade ?? null,
                 stories: result.data.stories ?? null,

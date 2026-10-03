@@ -420,7 +420,7 @@ async function normalizeMcpProperty(results: any[], env: Env): Promise<Normalize
   const baths = (ch.fullBathrooms ?? 0) + 0.5 * (ch.partialBathrooms ?? 0)
 
   const census = center.latitude != null && center.longitude != null
-    ? await fetchCensusGeography(center.latitude, center.longitude, env.API_CACHE).catch(() => null)
+    ? await fetchCensusGeography(center.latitude, center.longitude, env.API_CACHE, env.FIRECRAWL_API_KEY).catch(() => null)
     : null
 
   const property: NormalizedProperty = {
@@ -473,6 +473,15 @@ async function normalizeMcpProperty(results: any[], env: Env): Promise<Normalize
       N3: geoByType('N3')?.medianPricePerSqFt365d ?? null,
     },
     censusTract: census?.tract ?? undefined,
+    geoScopes: {
+      county: geoByType('CO')?.geographyName ?? undefined,
+      city: geoByType('CS')?.geographyName ?? undefined,
+      zip: geoByType('PZ')?.geographyName ?? undefined,
+      schoolDistrict: geoByType('DB')?.geographyName ?? undefined,
+      subdivision: geo?.subject?.subdivision ?? geoByType('SD')?.geographyName ?? undefined,
+      n4: geoByType('N4')?.geographyName ?? undefined,
+      n3: geoByType('N3')?.geographyName ?? undefined,
+    },
     zoning: ch.zoning ?? identity?.zoning ?? undefined,
 
     parcelId: registerParcel(attomId, ids.fips ?? addr.fips, ids.apn ?? identity?.parcelId),

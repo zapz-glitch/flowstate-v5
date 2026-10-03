@@ -641,12 +641,13 @@ export class AnalysisJobDO {
         property.latitude,
         property.longitude,
         this.env.API_CACHE,
+        this.env.FIRECRAWL_API_KEY,
       )
       if (!subjectGeo) return comps
       const cache = this.env.API_CACHE ?? undefined
       const lookup = async (lat: number, lng: number) => {
         for (let attempt = 0; attempt < 3; attempt++) {
-          const g = await fetchCensusGeography(lat, lng, cache).catch(() => null)
+          const g = await fetchCensusGeography(lat, lng, cache, this.env.FIRECRAWL_API_KEY).catch(() => null)
           if (g) return g
           // Brief spacing between retries — the free endpoint throttles bursts
           if (attempt < 2) await new Promise((r) => setTimeout(r, 300 * (attempt + 1)))

@@ -12,6 +12,7 @@ import type { NormalizedProperty, NormalizedComparable } from '../property-api/t
 export type FilterType =
   | 'subdivision_match'
   | 'neighborhood_match'
+  | 'geo_scope_match'
   | 'building_style_match'
   | 'foundation_match'
   | 'construction_material_match'
@@ -60,6 +61,10 @@ export const DEFAULT_FILTERS: AppraisalFilter[] = [
   // the comp pool (name OR code).
   { type: 'subdivision_match', enabled: true, value: 1 },
   { type: 'neighborhood_match', enabled: true, value: 1, priority: 'soft' },
+  // Phase-1 scope requirement — every populated geography scope (county,
+  // city, zip, school district, subdivision, N4) must match. Soft so the
+  // ladder can go lenient when no all-scope comps exist.
+  { type: 'geo_scope_match', enabled: true, value: 1, priority: 'soft' },
   { type: 'building_style_match', enabled: true, value: 1, priority: 'hard' }, // Ranch vs Ranch, 2-story style vs same — verified mismatches disqualify
   // Foundation is a verified-hard match — slab vs pier/crawl comps carry
   // real value gaps (typically ~10%); a verified mismatch disqualifies.
@@ -145,6 +150,12 @@ export const FILTER_LABELS: Record<FilterType, {
     shortLabel: 'Neighborhood',
     unit: '',
     description: 'Must be in the same neighborhood — fallback geography when no subdivision exists',
+  },
+  geo_scope_match: {
+    label: 'Geo Scope Match',
+    shortLabel: 'Geo Scope',
+    unit: '',
+    description: 'All populated ATTOM geography scopes (county, city, zip, school district, subdivision, neighborhood) must match',
   },
   building_style_match: {
     label: 'Building Style Match',

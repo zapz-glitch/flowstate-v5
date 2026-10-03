@@ -9,6 +9,18 @@
 
 export type PropertyProvider = 'corelogic' | 'attom' | 'attom-mcp'
 
+/** ATTOM geography-context layers keyed by scope — each value is the
+ *  geographyName the property belongs to at that scope. */
+export interface GeoScopes {
+  county?: string
+  city?: string
+  zip?: string
+  schoolDistrict?: string
+  subdivision?: string
+  n4?: string
+  n3?: string
+}
+
 // ─── Search Parameters ──────────────────────────────────────────────────────
 
 export interface PropertySearchParams {
@@ -184,6 +196,8 @@ export interface NormalizedProperty {
   neighborhoodCode?: string
   cbsaCode?: string
   censusTract?: string
+  /** ATTOM geography-context layers keyed by scope */
+  geoScopes?: GeoScopes
   /** Median $/sqft over trailing 365d per geography scope (SD/N4/N3) — geography-context */
   ppsfMedians?: { SD?: number | null; N4?: number | null; N3?: number | null } | null
   legalDescription?: string
@@ -278,6 +292,9 @@ export interface NormalizedComparable {
   /** True when neither Census nor ATTOM geography-context produced a tract —
    *  "unverified" must not read as "passed" downstream. */
   geographyUnverified?: boolean
+  /** ATTOM geography-context layers (county/city/zip/school-district/
+   *  subdivision/N4) — the multi-scope match evidence for comp selection. */
+  geoScopes?: GeoScopes
   /** True when the comp shares the subject's census block group (not_verified when unknown) */
   sameBlockGroup?: boolean | null
   /** Site/influence quality flag from provider (e.g. traffic influence) */
