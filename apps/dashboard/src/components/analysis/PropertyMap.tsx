@@ -94,7 +94,7 @@ export function PropertyMap({ subject, comps, selectedCompKeys, onMarkerSelect, 
   if (!markers.some(marker => marker.type === 'subject')) return null
 
   return (
-    <div className="relative">
+    <div className="relative flex-1 min-h-0 flex flex-col">
     <MapInner
       key={`${subject?.address}|${subject?.latitude}|${subject?.longitude}`}
       markers={markers}
