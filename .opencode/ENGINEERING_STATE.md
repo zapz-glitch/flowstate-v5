@@ -508,3 +508,47 @@ in report/dashboard (bMechanics payload ready).
 **Known gaps:** comp eval grid reads pre-stamp beds (Redfin supplement is
 display/B-contribution level — grid reorder queued if needed); run-to-run
 evidence variance; missed-SSE recovery (fetch completed job if event drops).
+
+## Last handoff (hardening session — 2026-10-04, cont.)
+
+**State:** Set-B is the ONLY ARV path — legacy math removed end-to-end
+(pipeline, serialization, server recalc, client recalc). `arv`==`arvB`;
+`arvLegacy` field deleted. Branch feat/attom-provider-swap, all pushed.
+
+**Shipped this session:**
+- Verify-and-retry ladder in-pipeline (evaluation/index.ts): verifyB
+  (no-ARV / below-AVM / no drivers / no conf / single-driver premium
+  >120% AVM) → attempt 2 widen via expandComparablesPool (+1mi,+6mo;
+  new comps get pass-through evals + verification stamps) → attempt 3
+  deepen via params.enrichComparables (AVM/land backfill, ≤8 comps) →
+  honest trail in bMechanics.attemptTrail. Pipeline bResult serializes
+  directly (killed the arv/arvB recompute variance).
+- Soft-disable rescue in set-b.ts: grid-disabled comps compete when
+  reasons are ALL soft, verified (corroborated/plausible), in the
+  0.5–1.75× size band, and same-side of road barrier. Hard gates
+  (nominal sales, category/type mismatch) stay hard.
+- lot_size_diff no longer disqualifies (acreage gate handles real
+  category mismatches; the land curve prices deltas).
+- Distressed condition tier is floor-only — never ARV driver.
+- Similarity-gated outlier ceiling (≥60% of pool-best sim).
+- Evidence pinning: comp Clef/listing evidence KV-cached 30d keyed on
+  comp id + sale date + price — re-runs replay identical stamps.
+- Risk flags in underwriter voice: below-AVM delta + evidence read;
+  single-driver premium flag.
+- Saved reports queryable: arv_source / b_confidence / b_healed /
+  b_anchor_address / b_flag_count columns + recalc replays B on stamps.
+- Map hover reverted (original click-scroll); sidebar/favicon/hero
+  changes from prior session stand.
+- scripts/e2e-analyze.mjs — playwright drive of real localhost app
+  (login → autocomplete → Run → ARV render). Playwright browser libs
+  extracted to /tmp/pwlibs (LD_LIBRARY_PATH — no sudo on box).
+
+**Verification:** Rambla $335,039 (below-AVM flag); Anglewood $458,257
+deterministic across replays; Landing Way $671,667 (lot-rescued comp
+drove); Tyson $419,799 (soft-rescue + gates held); Nottingham $467,469
+(deepen fetched land data → −$42k land adj on anchor → re-priced,
+verified at attempt 3). Full browser E2E passed on Landing Way.
+
+**Open:** Atlanta + DFW corpus (10-15 each) for regional hardening;
+2 pre-existing rules.test.ts failures (expansion-ladder, predates
+session); 21st CLI installed but not logged in (deferred by user).
