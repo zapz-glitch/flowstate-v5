@@ -189,7 +189,7 @@ const bMedian = (xs: number[]) =>
 export function evaluateB(
   subject: BSubject,
   items: BComp[],
-  opts?: { rehabCost?: number | null },
+  opts?: { rehabCost?: number | null; devalueToMedian?: boolean },
 ): BResult {
   const subSqft = subject.squareFeet
   const flags: string[] = []
@@ -201,21 +201,30 @@ export function evaluateB(
   // (boundary sale_age, geo name variants, size deltas, road barrier)
   // still compete — verification + similarity do the ranking. Hard gates
   // (nominal transfers, category/type mismatches) stay hard.
-  const B_HARD_DISABLE = /non-market|category mismatch|type mismatch|nominal|not market/i
+  const B_HARD_DISABLE = /non-market|type mismatch|nominal|not market|property category/i
+  // 'Lot category mismatch' reads like a type gate but is a SIZE delta —
+  // the land/lot curves exist to price it. Only true property-type
+  // categories are hard.
+  const B_LOT_DELTA = /lot category|lot size/i
   // A soft-disable rescues adjustable deltas — not category differences.
   // A comp >~75% off the subject's size is a different product class, not
   // something the size curve can honestly extrapolate.
   const bSizeBand = (c: BComp) => {
     if (subject.squareFeet == null || c.squareFeet == null) return true
     const ratio = c.squareFeet / subject.squareFeet
-    return ratio >= 0.5 && ratio <= 1.75
+    // Devalue mode widens the rescue band — an oversized subject with no
+    // ARV evidence gets answered by verified comps at a relaxed fit
+    // (marginal-rate scaling prices the gap), never by hard refusal.
+    const lo = opts?.devalueToMedian ? 0.33 : 0.5
+    const hi = opts?.devalueToMedian ? 3 : 1.75
+    return ratio >= lo && ratio <= hi
   }
   // Rescues must earn it: verified sale (corroborated/plausible — an
   // uncorroborated rescue is a guess, not evidence) and same side of the
   // road barrier (a road crossing is a submarket boundary, not a soft delta).
   const bSoftDisabled = (c: BComp) => {
     if (c.isEnabled || !(c.disableReasons?.length ?? 0)) return false
-    if (!(c.disableReasons ?? []).every((r) => !B_HARD_DISABLE.test(r))) return false
+    if (!(c.disableReasons ?? []).every((r) => !B_HARD_DISABLE.test(r) || B_LOT_DELTA.test(r))) return false
     if (!bSizeBand(c)) return false
     const ver = c.evidenceVerification?.priceCheck
     if (ver !== 'corroborated' && ver !== 'plausible') return false
@@ -435,7 +444,14 @@ export function evaluateB(
   const preferred = verifiedPool.filter((x) =>
     x.tier !== 'as_is' && bArvCondOk(x.comp) && bandOf(x) === 'upper' && similarity(x) >= B_MIN_SIM)
   let drivers: BContribution[]
-  if (preferred.length) {
+  if (opts?.devalueToMedian) {
+    // Devalue rung — upper-band evidence couldn't verify (e.g. a lone
+    // premium comp >20% above AVM with no support). The ladder drops a
+    // tier and the median pool answers what it can support — flagged.
+    drivers = medianComps
+    if (medianComps.length)
+      flags.push('devalued — upper-band evidence unverifiable; median-tier pool answers')
+  } else if (preferred.length) {
     drivers = preferred
     for (const x of preferred)
       if (x.tier === 'unidentified')

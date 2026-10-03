@@ -1352,6 +1352,24 @@ export async function performAnalysis(
       bAttemptTrail.push(`attempt 3 deepen: +${deepened} field(s) — ${fails.length ? fails.join('; ') : 'verified'}`)
     }
 
+    // Attempt 4 — devalue. Upper-band evidence failed verification (lone
+    // premium comp, insufficient support). The ladder drops a tier: the
+    // verified median pool answers what it can support instead of the run
+    // collapsing to a model fallback. Only then is it truly unverified.
+    if (fails.length) {
+      const devalued = evaluateB(bSubjectFields, toBComps(), {
+        rehabCost: valuation?.totalRehabCost ?? null,
+        devalueToMedian: true,
+      })
+      const dFails = verifyB(devalued)
+      if (!dFails.length) {
+        bResult = devalued
+        fails = []
+      }
+      bAttemptTrail.push(
+        `attempt 4 devalue — ${dFails.length ? dFails.join('; ') : 'median-tier answer verified'}`)
+    }
+
     if (bAttemptTrail.length === 0 && fails.length === 0) bAttemptTrail.push('attempt 1 — verified')
     else if (fails.length) bAttemptTrail.push(`final — unverified (${fails.join('; ')})`)
     pipelineBResult = bResult
