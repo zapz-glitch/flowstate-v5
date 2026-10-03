@@ -54,3 +54,12 @@ dev.post('/comp-condition', async (c) => {
 })
 
 export default dev
+
+/** Geo probe — fetchCensusGeography against a coordinate inside the worker. */
+dev.get('/geo-probe', async (c) => {
+  const { fetchCensusGeography } = await import('../services/geo/census-geocoder')
+  const lat = Number(c.req.query('lat'))
+  const lng = Number(c.req.query('lng'))
+  const geo = await fetchCensusGeography(lat, lng, c.env.API_CACHE, c.env.FIRECRAWL_API_KEY, c.env.GEOCODIO_API_KEY)
+  return c.json({ lat, lng, geo, hasKey: !!c.env.GEOCODIO_API_KEY })
+})

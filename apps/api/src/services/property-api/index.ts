@@ -902,13 +902,14 @@ class PropertyApi implements PropertyApiService {
         property.longitude,
         this.env.API_CACHE ?? undefined,
         this.env.FIRECRAWL_API_KEY,
+        this.env.GEOCODIO_API_KEY,
       );
       if (subjectGeo) {
         const cache = this.env.API_CACHE ?? undefined;
         const lookup = async (lat: number, lng: number) => {
-          const g = await fetchCensusGeography(lat, lng, cache, this.env.FIRECRAWL_API_KEY).catch(() => null);
+          const g = await fetchCensusGeography(lat, lng, cache, this.env.FIRECRAWL_API_KEY, this.env.GEOCODIO_API_KEY).catch(() => null);
           // One retry — a null geo silently drops an otherwise-valid comp
-          return g ?? fetchCensusGeography(lat, lng, cache, this.env.FIRECRAWL_API_KEY).catch(() => null);
+          return g ?? fetchCensusGeography(lat, lng, cache, this.env.FIRECRAWL_API_KEY, this.env.GEOCODIO_API_KEY).catch(() => null);
         };
         // Bounded concurrency — the Census endpoint throttles big bursts
         // (25 parallel calls returned ~90% nulls in testing).

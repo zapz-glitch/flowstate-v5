@@ -14,7 +14,7 @@ import type { Env } from '../types'
 import type { AuthContext } from '../middleware/auth'
 
 const CLOSE_BASE = 'https://api.close.com/api/v1'
-const ENGINE_BASE = 'https://conversation-intelligence.weareflowstate1.workers.dev'
+const ENGINE_BASE = 'https://flowstate-workers.weareflowstate1.workers.dev'
 
 // On Market Listings/Referrals pipeline in Close — matches the
 // conversation-intelligence engine's constants.

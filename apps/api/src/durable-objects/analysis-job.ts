@@ -642,12 +642,13 @@ export class AnalysisJobDO {
         property.longitude,
         this.env.API_CACHE,
         this.env.FIRECRAWL_API_KEY,
+        this.env.GEOCODIO_API_KEY,
       )
       if (!subjectGeo) return comps
       const cache = this.env.API_CACHE ?? undefined
       const lookup = async (lat: number, lng: number) => {
         for (let attempt = 0; attempt < 3; attempt++) {
-          const g = await fetchCensusGeography(lat, lng, cache, this.env.FIRECRAWL_API_KEY).catch(() => null)
+          const g = await fetchCensusGeography(lat, lng, cache, this.env.FIRECRAWL_API_KEY, this.env.GEOCODIO_API_KEY).catch(() => null)
           if (g) return g
           // Brief spacing between retries — the free endpoint throttles bursts
           if (attempt < 2) await new Promise((r) => setTimeout(r, 300 * (attempt + 1)))
@@ -795,10 +796,27 @@ export class AnalysisJobDO {
         const enrichedById = new Map(
           enrichedComps.filter((c) => c.isEnriched).map((c) => [c.id, c]),
         )
+        // Geo stamps ride every gated comp, enriched or not — the merge
+        // prefers the expanded pool's clean copy, which would otherwise
+        // erase censusTract/sameBlockGroup/crossesMajorRoad/geoScopes and
+        // re-flag a verified comp as geographyUnverified.
+        const GEO_KEYS = [
+          'censusTract', 'sameBlockGroup', 'crossesMajorRoad',
+          'geoScopes', 'geographyUnverified',
+        ] as const
+        const gatedById = new Map(enrichedComps.map((c) => [c.id, c]))
         merged.comparables = merged.comparables.map((c) => {
           const prior = enrichedById.get(c.id)
-          if (!prior || c.isEnriched) return c
+          const gated = gatedById.get(c.id)
+          if ((!prior || c.isEnriched) && !gated) return c
           const out = { ...c } as unknown as Record<string, unknown>
+          if (gated) {
+            const gsrc = gated as unknown as Record<string, unknown>
+            for (const k of GEO_KEYS) {
+              if (out[k] == null && gsrc[k] != null) out[k] = gsrc[k]
+            }
+          }
+          if (!prior || c.isEnriched) return out as unknown as NormalizedComparable
           const src = prior as unknown as Record<string, unknown>
           for (const k of ENRICHED_KEYS) {
             if (out[k] == null && src[k] != null) {

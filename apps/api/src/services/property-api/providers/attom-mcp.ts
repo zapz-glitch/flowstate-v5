@@ -420,7 +420,7 @@ async function normalizeMcpProperty(results: any[], env: Env): Promise<Normalize
   const baths = (ch.fullBathrooms ?? 0) + 0.5 * (ch.partialBathrooms ?? 0)
 
   const census = center.latitude != null && center.longitude != null
-    ? await fetchCensusGeography(center.latitude, center.longitude, env.API_CACHE, env.FIRECRAWL_API_KEY).catch(() => null)
+    ? await fetchCensusGeography(center.latitude, center.longitude, env.API_CACHE, env.FIRECRAWL_API_KEY, env.GEOCODIO_API_KEY).catch(() => null)
     : null
 
   const property: NormalizedProperty = {
