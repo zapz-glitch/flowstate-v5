@@ -397,3 +397,24 @@ stale). Calibration mode: user sends addresses one at a time; each gets
 scorecard (subject/comps/gates/Clef/valuation) + A/B card. B currently
 leads 1-0. Resume: next user-provided address → `scripts/ab-eval.py`
 + `scripts/address-scorecard.py` (both send skipCache).
+
+- MAP ZERO-HEIGHT FIX (2026-10-03): black-map root cause — vis.gl <Map>
+  container height:100% collapsed to 548x0 inside min-h-[160px] flex
+  wrapper; zero-size viewport → map instance up (markers/legend live)
+  but ZERO tile requests → transparent.png placeholders. Fixed with
+  style={{position:absolute,inset:0}} on <Map> + renderingType only
+  passed when Map ID exists. Verified headless-playwright: 87 real
+  tiles + subject pin on live report.
+- VINTAGE ERA WINDOW (2026-10-03): year_built_diff hybrid — subjects
+  ≤1945 gate on era window (comp ≤1969 = same buyer class), modern
+  subjects keep symmetric band. API + shared evaluators.
+- GEO-NAME NORMALIZATION (2026-10-03): geo_scope_match normalizes
+  "Saint/St., Mount/Mt., Fort/Ft., directions, Hts, Bch" — killed a
+  23-comp false mismatch (Saint Petersburg ≠ St. Petersburg).
+- 21ST AVE AUTOPSY: 0/35 enabled → after both fixes, 1/31 enabled,
+  comp-driven ARV $427,137 (was assessed-anchor refusal).
+- PREVIEW INFRA: workers.dev URLs need *.weareflowstate1.workers.dev
+  in API CORS + trustedOrigins (committed). feat-attom-provider-swap
+  .flowstate.homes preview = Workers Builds, DNS NXDOMAIN so far.
+- A/B SCOREBOARD: A=1, B=4 (21st Ave → B, marginal-rate correctly
+  prices small-home $/sf premium).
