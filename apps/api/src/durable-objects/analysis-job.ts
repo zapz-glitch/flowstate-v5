@@ -655,11 +655,12 @@ export class AnalysisJobDO {
         }
         return null
       }
-      // Bounded concurrency — the Census endpoint throttles big bursts.
+      // Geocodio backs the lookups (1,000 lookups/min) — wide concurrency is
+      // safe; the Census/Firecrawl fallbacks only fire when Geocodio misses.
       const geos: (Awaited<ReturnType<typeof lookup>> | null)[] = new Array(comps.length).fill(null)
       const queue = comps.map((c, i) => ({ c, i }))
       await Promise.all(
-        Array.from({ length: 3 }, async () => {
+        Array.from({ length: 15 }, async () => {
           for (let item = queue.shift(); item; item = queue.shift()) {
             if (item.c.latitude != null && item.c.longitude != null) {
               geos[item.i] = await lookup(item.c.latitude, item.c.longitude)

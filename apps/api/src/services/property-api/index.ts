@@ -911,9 +911,9 @@ class PropertyApi implements PropertyApiService {
           // One retry — a null geo silently drops an otherwise-valid comp
           return g ?? fetchCensusGeography(lat, lng, cache, this.env.FIRECRAWL_API_KEY, this.env.GEOCODIO_API_KEY).catch(() => null);
         };
-        // Bounded concurrency — the Census endpoint throttles big bursts
-        // (25 parallel calls returned ~90% nulls in testing).
-        const GEO_CONCURRENCY = 5;
+        // Geocodio backs the lookups (1,000 lookups/min) — wide concurrency
+        // is safe; the Census/Firecrawl fallbacks only fire on a miss.
+        const GEO_CONCURRENCY = 15;
         const geos: (Awaited<ReturnType<typeof lookup>> | null)[] = new Array(compsToEnrich.length).fill(null);
         const queue = compsToEnrich.map((c, i) => ({ c, i }));
         await Promise.all(
