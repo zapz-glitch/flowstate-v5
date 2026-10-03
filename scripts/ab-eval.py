@@ -478,6 +478,10 @@ def card(r):
     if r.get('error'): print('ERROR'); return
     s, a, b = r['subject'], r['a'], r['b']
     print(f"subject: {s['squareFeet']}sf {s.get('yearBuilt')} | AVM {fmt((s.get('avm') or {}).get('value'))} | assessed {fmt(s.get('taxAssessment'))} | Luna: {a['condition']}")
+    if s.get('zoning'):
+        print(f"zoning:  {s['zoning']} — {s.get('zoningDescription') or ''}")
+    if s.get('developmentSignal'):
+        print(f"HBU:     {s['developmentSignal']}")
     print(f"SET A    ARV {fmt(a['arv'])} ({a['source']}) | buy {fmt(a['buy'])} | {a['enabled']}/{a['total']} enabled | insufficient={a['insufficient']}")
     if a['drivers']:
         print('  A comps:')

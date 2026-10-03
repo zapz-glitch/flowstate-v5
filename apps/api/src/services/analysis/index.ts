@@ -569,6 +569,9 @@ export interface AnalysisResponse {
     } | null
     taxAssessment: number | null
     landAssessedValue: number | null
+    zoning: string | null
+    zoningDescription: string | null
+    developmentSignal: string | null
     photos: string[]
     /** Foundation type (e.g., Slab, Crawl Space, Basement) */
     foundationType: string | null
@@ -1094,6 +1097,41 @@ function detectLocationRisks(property: NormalizedProperty): string[] {
 }
 
 /**
+ * Highest-and-best-use watch — a land-heavy parcel on a large lot or
+ * density-permitting zoning can be worth more as development dirt than
+ * as a renovated SFR. SFR comp evidence prices the house, not that
+ * potential — the flag tells the underwriter which track they're on.
+ * Land share ≥40% of assessed is the threshold for "the dirt is the deal."
+ */
+function detectDevelopmentSignal(
+  property: NormalizedProperty,
+  listPrice?: number | null,
+  arv?: number | null,
+): string | null {
+  const landShare = property.landAssessedValue && property.assessedValue
+    ? property.landAssessedValue / property.assessedValue
+    : 0
+  if (landShare < 0.4) return null
+  const zoningText = `${property.zoning ?? ''} ${property.zoningDescription ?? ''}`.toLowerCase()
+  const density = /multi|duplex|triplex|quad|\bmf\b|\brm\b|r-?[2-9]|planned|mixed|cluster/.test(zoningText)
+  const acres = property.lotSizeAcres ?? 0
+  const askOver = listPrice && arv && arv > 0 ? listPrice / arv : null
+  const share = `${Math.round(landShare * 100)}% of assessed`
+  if (density) {
+    return `Redevelopment candidate — land is ${share} and zoning permits density (${property.zoningDescription ?? property.zoning}); SFR comps may understate land value`
+  }
+  if (acres >= 1.0) {
+    return `Possible lot-split/development play — land is ${share} on ${acres.toFixed(2)}ac (zoned ${property.zoning ?? 'unknown'}); SFR comps may understate land value`
+  }
+  // The tell: a land-heavy parcel with an ask well above house evidence —
+  // the seller is pricing the dirt, not the structure.
+  if (askOver != null && askOver >= 1.25) {
+    return `Possible land-value play — land is ${share} and the ask is ${Math.round(askOver * 100)}% of ARV evidence; SFR comps may understate land value`
+  }
+  return null
+}
+
+/**
  * How far the seller's ask sits above the wholesale ceiling (buyPrice − fee).
  * Bands are percent-of-ask so they scale with price point — ≤10% = high
  * realism, ≤20% = medium, above = low. An ask at/below the ceiling is a
@@ -1165,6 +1203,10 @@ export function buildAnalysisResponse(
   // Location risk detection — zoning, busy road, commercial adjacency
   const zoningRisks = detectLocationRisks(property)
   riskFlags.push(...zoningRisks)
+
+  // Highest-and-best-use watch — land-heavy parcels / density zoning
+  const devSignal = detectDevelopmentSignal(property, ctx.subjectListPrice, ctx.finalArv)
+  if (devSignal) riskFlags.push(devSignal)
 
   // ARV vs asking price is surfaced on the valuation hero (list price cell
   // + realism verdict) — not emitted as a risk flag.
@@ -1373,6 +1415,9 @@ export function buildAnalysisResponse(
         : null,
       taxAssessment: property.assessedValue ?? null,
       landAssessedValue: property.landAssessedValue ?? null,
+      zoning: property.zoning ?? null,
+      zoningDescription: property.zoningDescription ?? null,
+      developmentSignal: devSignal,
       photos: subjectPhotos,
       ...resolveConstruction(property.construction),
       pool: property.features?.poolType ?? null,

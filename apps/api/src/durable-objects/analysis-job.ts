@@ -36,6 +36,7 @@ import type { Env } from '../types'
 import type { NormalizedProperty, NormalizedComparable } from '../services/property-api/types'
 import { fetchCensusGeography } from '../services/geo/census-geocoder'
 import { resolveParcelApn } from '../services/geo/parcel-gis'
+import { resolveZoning } from '../services/geo/zoning'
 import { drizzle } from 'drizzle-orm/d1'
 import { and, eq } from 'drizzle-orm'
 import { upsertPropertyReport } from '../services/report-upsert'
@@ -509,6 +510,22 @@ export class AnalysisJobDO {
             }, [], { maxComps: 0, skipCache: true })
           }
         } catch { /* retry is best-effort */ }
+      }
+    }
+
+    // Zoning — county GIS point-in-polygon on the subject. ATTOM carries
+    // no zoning dataset; the county layers populate the fields
+    // detectLocationRisks already reads (commercial/mixed-use flags) and
+    // feed the HBU/development signal downstream.
+    if (property.zoning == null && property.latitude != null && property.longitude != null) {
+      const z = await resolveZoning(
+        property.latitude,
+        property.longitude,
+        (property.censusTract ?? '').slice(0, 5) || null,
+      ).catch(() => null)
+      if (z) {
+        property.zoning = z.code
+        property.zoningDescription = z.description ?? property.zoningDescription
       }
     }
 
