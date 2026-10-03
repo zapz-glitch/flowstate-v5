@@ -97,8 +97,8 @@ export function ValuationCard({
                 tooltip={
                   <div className="space-y-1.5">
                     <p className="font-medium">After Repair Value</p>
-                    <p className="text-foreground-tertiary">Estimated market value of the property after renovations, based on weighted average of comparable sales.</p>
-                    <p className="font-mono text-[10px] text-foreground-tertiary mt-1">= Weighted Avg(Comp Adjusted Prices)</p>
+                    <p className="text-foreground-tertiary">Verified-evidence ARV — most-similar comp anchors, marginal size/land adjustments, condition uplift, ceiling-bounded.</p>
+                    <p className="font-mono text-[10px] text-foreground-tertiary mt-1">= anchor comp contribution + size/land/condition adj (capped at evidence top)</p>
                   </div>
                 }
               />
@@ -107,6 +107,14 @@ export function ValuationCard({
               </div>
               {valuation.arvPerSqft != null && (
                 <div className="text-caption-sm text-foreground-tertiary mt-1">${valuation.arvPerSqft.toFixed(0)}/sqft</div>
+              )}
+              {valuation.bMechanics?.anchorAddress && (
+                <div
+                  className="text-[10px] font-mono text-cyan-600 dark:text-cyan-400 mt-1 truncate"
+                  title={valuation.bMechanics.flags.join('\n')}
+                >
+                  → {valuation.bMechanics.source} · {valuation.bMechanics.anchorAddress.split(',')[0]}
+                </div>
               )}
             </div>
             {valuation.listPrice != null && (

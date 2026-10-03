@@ -169,6 +169,20 @@ export function DealSummaryHero({ valuation, isRecalculated, onOpenSettings, onR
 
       {/* Primary metrics grid */}
       <div className="hero-stats">
+        {subject?.avm?.value != null && (
+          <div
+            className="px-3 py-2.5 border-r border-border/20"
+            title={`${subject.avm.model ?? 'AVM'} modeled value${subject.avm.confidence != null ? ` — ${subject.avm.confidence}% confidence` : ''}${subject.avm.valueRangeLow != null && subject.avm.valueRangeHigh != null ? ` (range $${fmtK(subject.avm.valueRangeLow)}–$${fmtK(subject.avm.valueRangeHigh)})` : ''} — reference only, not comp-verified`}
+          >
+            <div className="text-[11px] text-foreground-tertiary uppercase tracking-wider">AVM</div>
+            <div className="text-base font-bold tabular-nums mt-0.5 text-foreground-secondary">${fmtK(subject.avm.value)}</div>
+            {valuation.arv != null && subject.avm.value !== valuation.arv && (
+              <div className="text-[10px] text-foreground-tertiary tabular-nums mt-0.5">
+                {((valuation.arv - subject.avm.value) / subject.avm.value * 100).toFixed(0)}% {valuation.arv > subject.avm.value ? 'below' : 'above'} ARV
+              </div>
+            )}
+          </div>
+        )}
         <div
           className="px-3 py-2.5 border-r border-border/20"
           title={valuation.asIsMarketIntel?.asIsMarketPrice != null
@@ -251,20 +265,6 @@ export function DealSummaryHero({ valuation, isRecalculated, onOpenSettings, onR
           )}
           {valuation.arvPerSqft != null && <div className="text-[10px] text-foreground-tertiary tabular-nums mt-0.5">${valuation.arvPerSqft.toFixed(0)}/sf</div>}
         </div>
-        {subject?.avm?.value != null && (
-          <div
-            className="px-3 py-2.5 border-r border-border/20"
-            title={`${subject.avm.model ?? 'AVM'} modeled value${subject.avm.confidence != null ? ` — ${subject.avm.confidence}% confidence` : ''}${subject.avm.valueRangeLow != null && subject.avm.valueRangeHigh != null ? ` (range $${fmtK(subject.avm.valueRangeLow)}–$${fmtK(subject.avm.valueRangeHigh)})` : ''} — reference only, not comp-verified`}
-          >
-            <div className="text-[11px] text-foreground-tertiary uppercase tracking-wider">AVM</div>
-            <div className="text-base font-bold tabular-nums mt-0.5 text-foreground-secondary">${fmtK(subject.avm.value)}</div>
-            {valuation.arv != null && subject.avm.value !== valuation.arv && (
-              <div className="text-[10px] text-foreground-tertiary tabular-nums mt-0.5">
-                {((valuation.arv - subject.avm.value) / subject.avm.value * 100).toFixed(0)}% {valuation.arv > subject.avm.value ? 'below' : 'above'} ARV
-              </div>
-            )}
-          </div>
-        )}
         <div className="px-3 py-2.5 border-r border-border/20">
           <div className="text-[11px] text-foreground-tertiary uppercase tracking-wider">Buy</div>
           <div className="text-base font-bold tabular-nums mt-0.5">${formatHeadlineMoney(valuation.buyPrice, valuation.displayedBuyPrice, valuation.displayRounding)}</div>

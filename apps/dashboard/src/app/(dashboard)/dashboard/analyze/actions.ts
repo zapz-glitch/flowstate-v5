@@ -354,6 +354,24 @@ export interface ValuationData {
   arv?: number
   arvSource?: string
   arvPerSqft?: number
+  /** Set-B trade-tricks ARV (the pipeline ARV post-swap) */
+  arvB?: number | null
+  /** Legacy appraisal ARV — pre-swap pipeline number (parity display) */
+  arvLegacy?: number | null
+  /** Set-B mechanics trail — anchor, drivers, ceiling, flags */
+  bMechanics?: {
+    source: string
+    confidence: 'high' | 'medium' | 'low' | 'none'
+    bracket: string
+    flags: string[]
+    anchorAddress: string | null
+    conditionAdj: number | null
+    ceiling: number | null
+    landRateSource: string | null
+    sqftRateSource: string | null
+    healed: boolean
+    drivers: { address: string | null; contribution: number; tier: string; conditionTier: string }[]
+  } | null
   buyPrice?: number
   buyPricePercent?: number
   rehabCost?: number
@@ -586,6 +604,24 @@ export interface ValuationData {
   arv?: number
   arvSource?: string
   arvPerSqft?: number
+  /** Set-B trade-tricks ARV (the pipeline ARV post-swap) */
+  arvB?: number | null
+  /** Legacy appraisal ARV — pre-swap pipeline number (parity display) */
+  arvLegacy?: number | null
+  /** Set-B mechanics trail — anchor, drivers, ceiling, flags */
+  bMechanics?: {
+    source: string
+    confidence: 'high' | 'medium' | 'low' | 'none'
+    bracket: string
+    flags: string[]
+    anchorAddress: string | null
+    conditionAdj: number | null
+    ceiling: number | null
+    landRateSource: string | null
+    sqftRateSource: string | null
+    healed: boolean
+    drivers: { address: string | null; contribution: number; tier: string; conditionTier: string }[]
+  } | null
   buyPrice?: number
   buyPricePercent?: number
   rehabCost?: number

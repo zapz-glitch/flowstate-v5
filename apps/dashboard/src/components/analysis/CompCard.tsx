@@ -128,7 +128,7 @@ function CompCardInner({
               >
                 {comp.classification.type === 'after_renovation' ? 'ARV'
                   : comp.classification.type === 'as_is' ? 'AS-IS'
-                  : comp.classification.type === 'transitional' ? 'TRANS'
+                  : comp.classification.type === 'transitional' ? 'PARTIAL'
                   : 'UNVERIFIED'}
               </div>
             )}
