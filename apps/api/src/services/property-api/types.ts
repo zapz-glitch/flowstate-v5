@@ -18,6 +18,10 @@ export interface PropertySearchParams {
   city?: string
   state?: string
   zipCode?: string
+  /** County FIPS + assessor parcel number — exact-identity lookup used by
+   *  the attom-mcp path when the address-string resolver misses. */
+  fips?: string
+  apn?: string
 }
 
 export interface ComparablesSearchParams {

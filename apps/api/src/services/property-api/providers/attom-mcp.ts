@@ -337,6 +337,19 @@ interface McpCompRecord {
 
 // ─── Normalizers ──────────────────────────────────────────────────────────────
 
+/** APN spellings to try for fipsApn lookup — counties record parcel numbers
+ *  in different punctuation (raw STRAP digits vs dashed form). */
+function apnSpellings(apn: string): string[] {
+  const out = [apn]
+  const digits = apn.replace(/[^0-9A-Za-z]/g, '')
+  if (digits !== apn) out.push(digits)
+  // Florida STRAP pattern on 18-digit parcel numbers: RR-TT-SS-PPPPP-BBB-SSSS
+  if (/^\d{18}$/.test(digits)) {
+    out.push(`${digits.slice(0, 2)}-${digits.slice(2, 4)}-${digits.slice(4, 6)}-${digits.slice(6, 11)}-${digits.slice(11, 14)}-${digits.slice(14)}`)
+  }
+  return out
+}
+
 function parseOneLine(addr?: string | null): { line1: string; city: string; state: string; zip: string } {
   const m = (addr ?? '').match(/^(.+?),\s*([^,]+),\s*([A-Z]{2})\s+(\d{5})/i)
   if (!m) return { line1: addr ?? '', city: '', state: '', zip: '' }
@@ -635,6 +648,25 @@ class AttomMcpProvider implements PropertyProviderAdapter {
       [params.streetAddress, params.city, params.state, params.zipCode].filter(Boolean).join(', ')
     if (!address) return { success: false, error: 'Address is required', code: 'INVALID_PARAMS' }
     try {
+      // Exact-identity first: parcel numbers bypass the address-string
+      // matcher entirely — the resolver misses on parcels whose recorded
+      // address diverges (verified: 800 40th St S resolves by fipsApn,
+      // not by address). Try APN spellings: recorded form, digits-only,
+      // and the FL STRAP pattern when the raw string is 18 digits.
+      if (params.fips && params.apn) {
+        const candidates = apnSpellings(params.apn)
+        for (const apn of candidates) {
+          const results = await this.propertyData(
+            { lookupMode: 'fipsApn', fips: params.fips, apn },
+            SUBJECT_DATASETS,
+          ).catch(() => [])
+          const property = await normalizeMcpProperty(results, this.env)
+          if (property.id) {
+            this.subjectResults.set(property.id, results)
+            return { success: true, data: property }
+          }
+        }
+      }
       const results = await this.propertyData({ lookupMode: 'address', address }, SUBJECT_DATASETS)
       const property = await normalizeMcpProperty(results, this.env)
       if (!property.id) return { success: false, error: 'Property not found', code: 'NOT_FOUND' }

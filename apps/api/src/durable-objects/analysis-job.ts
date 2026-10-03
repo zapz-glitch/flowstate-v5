@@ -35,6 +35,7 @@ import { filtersToApiParams } from '../services/appraisal/types'
 import type { Env } from '../types'
 import type { NormalizedProperty, NormalizedComparable } from '../services/property-api/types'
 import { fetchCensusGeography } from '../services/geo/census-geocoder'
+import { resolveParcelApn } from '../services/geo/parcel-gis'
 import { drizzle } from 'drizzle-orm/d1'
 import { and, eq } from 'drizzle-orm'
 import { upsertPropertyReport } from '../services/report-upsert'
@@ -326,13 +327,36 @@ export class AnalysisJobDO {
     // ── Step 1: Search subject property ─────────────────────────────────────
     await this.pushEvent('property_fetch', { message: 'Searching property...' })
 
-    const searchResult = await propertyApi.searchProperty({
+    let searchResult = await propertyApi.searchProperty({
       address: config.search.address,
       streetAddress: config.search.streetAddress,
       city: config.search.city,
       state: config.search.state,
       zipCode: config.search.zipCode,
     })
+
+    // ATTOM address-string miss → parcel-GIS bridge: Census geocode →
+    // county parcel lookup → APN → exact fipsApn resolve on ATTOM. 100%
+    // ATTOM — a parcel hit resumes the full pipeline; a miss fails the
+    // run as PROPERTY_NOT_FOUND below.
+    if (!searchResult.success && propertyApi.providerName === 'attom-mcp') {
+      console.log('[AnalysisJobDO] attom-mcp could not resolve subject — trying parcel-GIS bridge')
+      await this.pushEvent('property_fetch', { message: 'ATTOM address lookup missed — resolving parcel via county records...' })
+      const parcel = await resolveParcelApn(config.search.address ??
+        [config.search.streetAddress, config.search.city, config.search.state, config.search.zipCode].filter(Boolean).join(', '))
+      if (parcel) {
+        const byParcel = await propertyApi.searchProperty({
+          address: config.search.address,
+          fips: parcel.fips,
+          apn: parcel.apn,
+        })
+        if (byParcel.success) {
+          console.log('[AnalysisJobDO] parcel bridge succeeded — ATTOM pipeline resumes on attomId', byParcel.data?.id)
+          await this.pushEvent('property_fetch', { message: 'Parcel resolved — continuing on ATTOM...' })
+          searchResult = byParcel
+        }
+      }
+    }
 
     if (!searchResult.success) {
       const msg = ('error' in searchResult ? searchResult.error : null) || 'Property not found'
