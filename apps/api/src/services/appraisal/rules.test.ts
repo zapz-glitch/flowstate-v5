@@ -181,10 +181,12 @@ describe('lot_size_diff filter', () => {
     expect(r.shouldDisable).toBe(false)
   })
 
-  it('fails outside ±2500 sqft', () => {
+  it('records failure but never disables — lot deltas get land-adjusted, not discarded', () => {
     const r = evaluateComparable(subject(), comp('c1', { lotSizeSquareFeet: 10501 }), only(['lot_size_diff']), [])
-    expect(r.shouldDisable).toBe(true)
-    expect(r.disableReasons[0]).toContain('Lot size')
+    expect(r.shouldDisable).toBe(false)
+    expect(r.filterResults[0].passed).toBe(false)
+    expect(r.filterResults[0].reason).toContain('Lot size')
+    expect(r.disableReasons).toHaveLength(0)
   })
 
   it('uses acres when sqft missing', () => {
