@@ -1,9 +1,8 @@
 'use client'
 
-import { useMemo, useCallback, useRef, useState } from 'react'
+import { useMemo, useCallback } from 'react'
 import dynamic from 'next/dynamic'
 import type { SubjectData, CompItem } from './shared-types'
-import { CompCard } from './CompCard'
 import { getCompKey } from './format-helpers'
 import { isValidCoordinate } from '@/lib/property-map-geometry'
 
@@ -77,47 +76,9 @@ export function PropertyMap({ subject, comps, selectedCompKeys, onMarkerSelect, 
     return m
   }, [subject, comps, selectedCompKeys])
 
-  // Comp card overlay on the map — the real CompCard, expanded.
-  // Desktop: marker hover previews it (250ms grace to reach the card,
-  // leaves dismiss after a beat). Click/tap PINS it — mobile has no
-  // hover, so tap is the entry — and a tap/click on the empty map
-  // dismisses it.
-  const compByKey = useMemo(() => {
-    const map = new Map<string, { comp: CompItem; index: number }>()
-    comps?.items?.forEach((comp, i) => map.set(getCompKey(comp, i), { comp, index: i }))
-    return map
-  }, [comps])
-
-  const [hoveredComp, setHoveredComp] = useState<{ comp: CompItem; index: number } | null>(null)
-  const [pinnedComp, setPinnedComp] = useState<{ comp: CompItem; index: number } | null>(null)
-  const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const cancelHide = useCallback(() => {
-    if (hideTimer.current) { clearTimeout(hideTimer.current); hideTimer.current = null }
-  }, [])
-  const scheduleHide = useCallback((ms = 250) => {
-    cancelHide()
-    hideTimer.current = setTimeout(() => setHoveredComp(null), ms)
-  }, [cancelHide])
-
-  const handleMarkerHover = useCallback((marker: MapMarker | null) => {
-    const hit = marker && marker.type !== 'subject' && marker.compKey ? compByKey.get(marker.compKey) : undefined
-    if (hit) { cancelHide(); setHoveredComp(hit) }
-    else scheduleHide()
-  }, [compByKey, cancelHide, scheduleHide])
-
   const handleMarkerClick = useCallback((markerType: 'subject' | 'comp', compKey?: string) => {
-    const hit = markerType === 'comp' && compKey ? compByKey.get(compKey) : undefined
-    if (hit) { cancelHide(); setPinnedComp(hit) }
     onMarkerSelect?.(markerType, compKey)
-  }, [compByKey, onMarkerSelect, cancelHide])
-
-  const dismissCard = useCallback(() => {
-    cancelHide()
-    setPinnedComp(null)
-    setHoveredComp(null)
-  }, [cancelHide])
-
-  const shownComp = pinnedComp ?? hoveredComp
+  }, [onMarkerSelect])
 
   if (!markers.some(marker => marker.type === 'subject')) return null
 
@@ -127,19 +88,8 @@ export function PropertyMap({ subject, comps, selectedCompKeys, onMarkerSelect, 
       key={`${subject?.address}|${subject?.latitude}|${subject?.longitude}`}
       markers={markers}
       onMarkerClick={handleMarkerClick}
-      onMarkerHover={handleMarkerHover}
-      onMapClick={dismissCard}
       activeMarkerKey={activeMarkerKey}
     />
-      {shownComp && (
-        <div
-          className="absolute left-2 top-2 z-20 w-[22rem] max-h-[85%] overflow-y-auto rounded-lg border border-border bg-background/95 shadow-xl backdrop-blur-sm"
-          onMouseEnter={cancelHide}
-          onMouseLeave={() => { if (!pinnedComp) scheduleHide(150) }}
-        >
-          <CompCard comp={shownComp.comp} index={shownComp.index} subject={subject ?? undefined} isExpanded />
-        </div>
-      )}
     </div>
   )
 }

@@ -139,24 +139,10 @@ interface PropertyMapInnerProps {
   markers: MapMarker[]
   onMarkerClick?: (type: 'subject' | 'comp', compKey?: string) => void
   onMarkerHover?: (marker: MapMarker | null) => void
-  /** Background click/tap on the map canvas — dismisses overlays */
-  onMapClick?: () => void
   activeMarkerKey?: string | null
 }
 
-/** Map-background clicks — marker clicks don't propagate, so this fires
- * only on empty-canvas taps (mobile) and clicks (desktop). */
-function MapClickHandler({ onClick }: { onClick: () => void }) {
-  const map = useMap()
-  useEffect(() => {
-    if (!map) return
-    const listener = map.addListener('click', onClick)
-    return () => google.maps.event.removeListener(listener)
-  }, [map, onClick])
-  return null
-}
-
-function SubjectMap({ markers, onMarkerClick, onMarkerHover, onMapClick, activeMarkerKey }: PropertyMapInnerProps) {
+function SubjectMap({ markers, onMarkerClick, onMarkerHover, activeMarkerKey }: PropertyMapInnerProps) {
   const loaded = useApiIsLoaded()
   const original = markers.find(marker => marker.type === 'subject')!
   const [location, setLocation] = useState<{ coordinate: MapCoordinate; addressMatched: boolean } | null>(null)
@@ -279,7 +265,6 @@ function SubjectMap({ markers, onMarkerClick, onMarkerHover, onMapClick, activeM
             zoomControl mapTypeControl={false} streetViewControl={false} fullscreenControl fullscreenControlOptions={{ position: google.maps.ControlPosition.LEFT_TOP }} scaleControl>
             <NativeMapCamera mapRef={nativeMap} />
             <FlatMarkers markers={correctedMarkers} activeMarkerKey={activeMarkerKey} onMarkerClick={selectMarker} onMarkerHover={onMarkerHover} />
-            {onMapClick && <MapClickHandler onClick={onMapClick} />}
           </Map> : <div role="status" className="p-4 text-sm">Loading 3D map…</div>)}
         {view === 'aerial' && (mapStyle !== '3d' || threeD !== 'loading') && <MapLegend />}
         {view === 'loading' && <div role="status" className="p-4 text-sm">{streetStatus}</div>}
