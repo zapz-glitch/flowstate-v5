@@ -207,12 +207,47 @@ function evaluateSqftDiff(
   }
 }
 
-/** National era classes — appraisers evaluate every comp as same / adjacent /
- *  far era relative to the subject, regardless of subject age. Vintage is
- *  the only class that spans asymmetrically: pre-1970 stock is one buyer
- *  class. Adjacent era passes flagged (weaker evidence), 2+ gaps fail. */
+/** Vintage-era window — subjects ≤1945 comp to the whole pre-1970 buyer
+ *  class ("everything before 1970 is in play"). */
 const VINTAGE_SUBJECT_MAX_YEAR = 1945
 const VINTAGE_ERA_COMP_MAX_YEAR = 1969
+
+/** Era classes — same / adjacent / far relative to the subject. Vintage is
+ *  the only class spanning asymmetrically (pre-1970 = one buyer class). */
+const ERA_NAMES = ['vintage (≤1945)', 'post-war (1946-69)', 'late-20th (1970-89)', '90s-00s (1990-2009)', 'modern (2010+)'] as const
+const eraIndex = (yearBuilt: number) =>
+  yearBuilt <= 1945 ? 0 : yearBuilt <= 1969 ? 1 : yearBuilt <= 1989 ? 2 : yearBuilt <= 2009 ? 3 : 4
+
+/** The ladder's deepest year tier — a fallback catch, not a primary gate:
+ *  the strict band ran first and failed, so era-class rescues what it can.
+ *  Same or adjacent era passes flagged; 2+ era gaps fail. */
+function evaluateYearBuiltEra(
+  subject: NormalizedProperty,
+  comp: NormalizedComparable,
+  _filter: AppraisalFilter
+): FilterResult {
+  if (!subject.yearBuilt || !comp.yearBuilt) {
+    return {
+      type: 'year_built_era',
+      passed: true,
+      status: 'not_verified',
+      reason: 'Year built not available — rule not verified',
+    }
+  }
+  const sEra = eraIndex(subject.yearBuilt)
+  const cEra = eraIndex(comp.yearBuilt)
+  const eraGap = Math.abs(cEra - sEra)
+  const passed = eraGap <= 1
+  return {
+    type: 'year_built_era',
+    passed,
+    reason: passed
+      ? eraGap === 1 ? `Adjacent era: ${ERA_NAMES[cEra]} comp vs ${ERA_NAMES[sEra]} subject — fallback caught` : undefined
+      : `Era mismatch: ${ERA_NAMES[cEra]} comp vs ${ERA_NAMES[sEra]} subject`,
+    actualValue: eraGap,
+    threshold: 'same or adjacent era',
+  }
+}
 
 function evaluateYearBuiltDiff(
   subject: NormalizedProperty,
@@ -756,6 +791,7 @@ const FILTER_EVALUATORS: Partial<Record<
   sqft_diff: evaluateSqftDiff,
   year_built_diff: evaluateYearBuiltDiff,
   year_built_cap: evaluateYearBuiltCap,
+  year_built_era: evaluateYearBuiltEra,
   distance: evaluateDistance,
   property_type: evaluatePropertyType,
   lot_size_diff: evaluateLotSizeDiff,

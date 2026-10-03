@@ -38,6 +38,10 @@ export type FilterType =
   // year_built_diff: evaluates comp.yearBuilt <= filter.value. Never a
   // default filter row — the evaluator exists only for that tier.
   | 'year_built_cap'
+  // Injected by the ladder at the deepest year tier for ANY subject:
+  // when every band tier fails, era-class matching is the fallback catch —
+  // same or adjacent era passes flagged, 2+ era gaps fail.
+  | 'year_built_era'
 
 export interface AppraisalFilter {
   type: FilterType
@@ -264,6 +268,12 @@ export const FILTER_LABELS: Record<FilterType, {
     shortLabel: 'Year Cap',
     unit: 'year',
     description: 'Comp must be built on or before this year (vintage-subject fallback tier)',
+  },
+  year_built_era: {
+    label: 'Build Era Match',
+    shortLabel: 'Era Match',
+    unit: '',
+    description: 'Fallback catch at the deepest year tier — same or adjacent construction era as subject',
   },
 }
 

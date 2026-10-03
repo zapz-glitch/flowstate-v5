@@ -133,6 +133,11 @@ export class AnalysisJobDO {
   private sseClients: Set<WritableStreamDefaultWriter<Uint8Array>> = new Set()
   private encoder = new TextEncoder()
   private jobState: JobState | null = null
+  /** Clef comp curb-appeal map + the persisted result it patches. Set
+   *  independently because the batch resolves fire-and-forget — whichever
+   *  arrives second triggers applyCurbAppealWriteback. */
+  private curbAppealMap: import('../services/evaluation').CompCurbAppealMap | null = null
+  private curbAppealResult: Record<string, unknown> | null = null
   private persistence: ChunkedJobState<JobState>
   /** True while runStreamingAnalysis/runEnrichment is live in THIS isolate */
   private runActive = false
@@ -1005,6 +1010,15 @@ export class AnalysisJobDO {
       // passers only, 1 provider call each.
       prefetchedPhotoBundle,
       skipCache: !!config.skipCache,
+      // Clef comp-evidence resolves fire-and-forget — the callback patches
+      // comp curb-appeal stamps into the persisted report whenever it lands.
+      onCurbAppeal: (map: import('../services/evaluation').CompCurbAppealMap) => {
+        this.curbAppealMap = map
+        if (this.curbAppealResult) {
+          void this.applyCurbAppealWriteback(config).catch((e) =>
+            console.warn('[AnalysisJobDO] curb-appeal writeback failed:', e))
+        }
+      },
     }
 
     let evalResult
@@ -1082,6 +1096,15 @@ export class AnalysisJobDO {
       return
     }
 
+    // Clef writeback — if the batch resolved mid-eval (after the response
+    // serialized without stamps), patch the saved report now. If it lands
+    // later, onCurbAppeal calls the same helper.
+    this.curbAppealResult = analysisResult
+    if (this.curbAppealMap) {
+      await this.applyCurbAppealWriteback(config).catch((e) =>
+        console.warn('[AnalysisJobDO] curb-appeal writeback failed:', e))
+    }
+
     // Private image access checks the saved report owner before serving any bytes.
     await this.pushEvent('evaluation_complete', { updatedResult: analysisResult })
     await this.recordRun(config, { status: 'completed', durationMs: Date.now() - startTime, response: analysisResult })
@@ -1093,6 +1116,51 @@ export class AnalysisJobDO {
     await marketContextPromise
     await this.pushEvent('enrichment_done', { totalDurationMs: Date.now() - startTime })
     console.log(`[AnalysisJobDO] ── Streaming analysis complete in ${Date.now() - startTime}ms ──`)
+  }
+
+  /** Clef comp curb-appeal writeback — the comp-evidence batch resolves
+   *  fire-and-forget during/after evaluation. When the map and the persisted
+   *  result are both present this stamps missing curbAppeal fields onto
+   *  comps.items, re-saves the report, and emits an SSE event so live
+   *  clients can merge the stamps without a refresh. Idempotent. */
+  private async applyCurbAppealWriteback(config: StartStreamingRequest): Promise<void> {
+    const map = this.curbAppealMap
+    const result = this.curbAppealResult
+    if (!map || !result) return
+    const items = (result.comps as { items?: Array<{ id?: string; curbAppeal?: unknown }> } | undefined)?.items
+    let stamped = 0
+    if (Array.isArray(items)) {
+      for (const item of items) {
+        if (item?.id && !item.curbAppeal && map[item.id]) {
+          item.curbAppeal = map[item.id]
+          stamped++
+        }
+      }
+    }
+    await this.pushEvent('curb_appeal', { compCurbAppeal: map })
+    if (stamped === 0) return // response already carried the stamps
+    try {
+      const db = drizzle(this.env.DB)
+      const val = result.valuation as Record<string, unknown> | null
+      const subj = result.subject as Record<string, unknown>
+      await upsertPropertyReport(db, {
+        userId: config.userId,
+        jobId: config.jobId,
+        propertyAddress: (subj.address as string) || '',
+        propertyCity: (subj.city as string) || '',
+        propertyState: (subj.state as string) || '',
+        propertyZip: (subj.zipCode as string) || '',
+        propertyClip: (subj.id as string) || null,
+      }, {
+        fullResponseJson: JSON.stringify(result),
+        arv: (val?.arv as number) ?? null,
+        asIsValue: (val?.asIsValue as number) ?? null,
+        maxAllowableOffer: (val?.buyPrice as number) ?? null,
+        estimatedRepairs: (val?.rehabCost as number) ?? null,
+      })
+    } catch (e) {
+      console.warn('[AnalysisJobDO] curb-appeal re-save failed:', e instanceof Error ? e.message : e)
+    }
   }
 
   // ─── Start Enrichment (legacy — used when route returns result synchronously) ─

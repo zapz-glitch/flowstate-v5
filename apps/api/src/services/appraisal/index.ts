@@ -533,12 +533,15 @@ class PropertyAppraisalService implements AppraisalService {
     // ceiling — "no year-built comps found" → allow comps built on or
     // before the cap year. Tried inside every geography scope, after the
     // numeric tolerances.
-    type YearStep = number | 'vintage'
+    type YearStep = number | 'vintage' | 'era'
     const vintageCap = vintageYearCap(defaultFilters, subject.yearBuilt)
     const vintageSteps: YearStep[] =
       expansion.allowYearBuiltExpansion && vintageCap != null ? ['vintage'] : []
-    const yearLadder: YearStep[] = [strictYear, ...yearSteps, ...vintageSteps]
-    const expansionYearSteps: YearStep[] = [...yearSteps, ...vintageSteps]
+    // 'era' is the fallback catch at the ladder floor for every subject:
+    // the band and its widened tiers ran first and failed, so era-class
+    // matching (same/adjacent era) rescues what it can before giving up.
+    const yearLadder: YearStep[] = [strictYear, ...yearSteps, ...vintageSteps, 'era']
+    const expansionYearSteps: YearStep[] = [...yearSteps, ...vintageSteps, 'era']
     const maxYear = Math.max(strictYear, ...yearSteps)
     const subdivisionName = subject.subdivision || subject.neighborhoodName || 'subject area'
 
@@ -547,7 +550,9 @@ class PropertyAppraisalService implements AppraisalService {
         if (f.type === 'year_built_diff') {
           return yearLimit === 'vintage'
             ? { type: 'year_built_cap' as const, enabled: true, value: vintageCap!, priority: 'hard' as const }
-            : { ...f, value: yearLimit }
+            : yearLimit === 'era'
+              ? { type: 'year_built_era' as const, enabled: true, value: 0, priority: 'hard' as const }
+              : { ...f, value: yearLimit }
         }
         if (f.type === 'distance' && distanceMult !== 1) {
           return { ...f, value: f.value * distanceMult }
@@ -557,19 +562,23 @@ class PropertyAppraisalService implements AppraisalService {
     const yearDesc = (yearLimit: YearStep) =>
       yearLimit === 'vintage'
         ? `build-year cap ${vintageCap} (vintage subject)`
-        : `±${yearLimit}yr`
+        : yearLimit === 'era'
+          ? 'era-class match (fallback catch)'
+          : `±${yearLimit}yr`
     const yearNote = (yearLimit: YearStep) =>
       yearLimit === 'vintage'
         ? ` (pre-${vintageCap} subject — year-built relaxed to ≤${vintageCap})`
-        : yearLimit > strictYear
-          ? ` (year-built widened to ±${yearLimit}yr)`
-          : ''
+        : yearLimit === 'era'
+          ? ' (year-built fell back to era-class match)'
+          : yearLimit > strictYear
+            ? ` (year-built widened to ±${yearLimit}yr)`
+            : ''
     const appliedFor = (
       yearLimit: YearStep,
       scope: 'subdivision' | 'neighborhood' | 'geographic' | null
     ): NonNullable<AppraisalResult['expansionApplied']> => {
       const applied: NonNullable<AppraisalResult['expansionApplied']> = []
-      if (yearLimit === 'vintage' || yearLimit > strictYear) applied.push('year_built')
+      if (yearLimit === 'vintage' || yearLimit === 'era' || yearLimit > strictYear) applied.push('year_built')
       if (scope) applied.push(scope)
       return applied
     }

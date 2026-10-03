@@ -62,10 +62,27 @@ function formatUsd(amount: number): string {
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
+/** Clef comp curb-appeal stamps — the map keys on comp/property id.
+ *  Serialized onto `comps.items[].curbAppeal` when it lands in time; the
+ *  onCurbAppeal callback carries it for late persistence writebacks. */
+export type CompCurbAppealMap = Record<string, {
+  condition: 'renovated' | 'dated' | 'distressed' | 'unknown'
+  source: 'vision'
+  confidence: number | null
+  summary: string | null
+  photosExamined: number
+}>
+
 export interface EvaluationParams {
   jobId: string
   userId?: string
   bundle: PropertyBundle
+  /**
+   * Fires when the Clef comp-evidence batch resolves — which may be after
+   * the response is built and persisted. The caller uses this to patch the
+   * stored result so curb-appeal stamps reach saved reports.
+   */
+  onCurbAppeal?: (map: CompCurbAppealMap) => void
   appraisalRules?: {
     filters?: AppraisalFilter[]
     adjustments?: AppraisalAdjustment[]
@@ -488,6 +505,137 @@ export async function performAnalysis(
   // Rerun always re-reads the CRM. Never blocks: failure resolves to [].
   const sellerNotesPromise = fetchSellerNotes(env.CLOSE_API_KEY, params.leadId)
 
+  // ── Photos + vision start immediately ────────────────────────────────────
+  // Step 1 work: the subject listing scrape needs only the subject's
+  // identity, and vision needs only the photos — both overlap the entire
+  // appraisal path below. Resolved at the points the pipeline actually
+  // consumes them (photo stamps near comp selection, renovation level at
+  // deriveBuybox).
+  const photoService = createPhotoService(env)
+  const photoBundlePromise: Promise<PhotoBundle | null> = (async () => {
+    let photoBundle: PhotoBundle | null = null
+    try {
+      if (params.prefetchedPhotoBundle !== undefined) {
+        // Caller overlapped the scrape with the comps fetch — use it as-is.
+        photoBundle = params.prefetchedPhotoBundle
+      } else if (photoService.isAvailable()) {
+        const subjectIdent: PropertyIdentifier = {
+          propertyId: bundle.property.id,
+          address: bundle.property.address,
+          city: bundle.property.city,
+          state: bundle.property.state,
+          zipCode: bundle.property.zipCode,
+        }
+        // Subject-only scrape — comp cards render map imagery, so no
+        // Firecrawl/Zillow calls are spent on comparables.
+        photoBundle = await photoService.fetchPhotoBundle(subjectIdent, [], { maxComps: 0, skipCache: params.skipCache })
+      }
+      if (params.prefetchedPhotoBundle !== undefined || photoService.isAvailable()) {
+        step(
+          'photo_fetch',
+          photoBundle?.subject ? 'completed' : 'fallback',
+          photoBundle?.subject
+            ? photoBundle.subject.photos.length > 0
+              ? `${photoBundle.subject.photos.length} subject photos via ${photoBundle.subject.source}`
+              : `Listing metadata via ${photoBundle.subject.source} (no photos${
+                  typeof photoBundle.subject.metadata?.listPrice === 'number'
+                    ? `; list price $${photoBundle.subject.metadata.listPrice.toLocaleString()}`
+                    : ''
+                })`
+            : 'No subject photos found'
+        )
+      } else {
+        step('photo_fetch', 'fallback', 'No photo provider configured')
+      }
+    } catch (error) {
+      console.warn('[Evaluate] Photo fetch failed (non-fatal):', error)
+      step('photo_fetch', 'fallback', error instanceof Error ? error.message : 'photo fetch failed')
+    }
+    onProgress?.('Photos fetched')
+
+    // Flood signal from the listing scrape — the subject photo fetch already
+    // resolves the Redfin/Realtor page, which embeds First Street "Flood
+    // Factor" data. Free, so it replaces the paid flood-zone call. Provider
+    // data wins when present.
+    if (!bundle.enrichment.floodZone) {
+      const sig = photoBundle?.subject?.metadata?.floodRisk
+      if (sig && typeof sig === 'object' && typeof (sig as { level?: unknown }).level === 'string') {
+        const level = (sig as { level: string; source?: string }).level
+        const elevated = /moderate|major|severe|extreme|zone /i.test(level)
+        bundle.enrichment.floodZone = {
+          floodZone: level,
+          floodZoneDescription: `Flood risk signal from the ${photoBundle!.subject!.source} listing (First Street)`,
+          isInFloodZone: elevated,
+          isNearFloodZone: !elevated && !/minimal/i.test(level),
+          communityName: null,
+          communityNumber: null,
+          firmMapNumber: null,
+          mapPanel: null,
+          mapDate: null,
+          participationStatus: null,
+          specialFloodHazardArea: null,
+          source: 'listing',
+        }
+        bundle.enrichment.evidenceLimitations = (bundle.enrichment.evidenceLimitations ?? [])
+          .filter((m) => !/flood/i.test(m))
+        step('photo_fetch', 'completed', `Flood signal from listing: ${level}`)
+      }
+    }
+    return photoBundle
+  })()
+
+  // Vision + photo persistence chain — begins the moment subject photos
+  // land, long before the appraisal path finishes.
+  const visionAndPersist: Promise<RenovationAssessment> = photoBundlePromise.then(async (photoBundle) => {
+    const subjectPhotos = [...(photoBundle?.subject?.photos ?? [])]
+    // The subject condition fetch is required for eval completion — a thrown
+    // error still resolves as an explicit 'unavailable' verdict so the run
+    // records the outcome instead of silently completing without it.
+    const renovationPromise = (async (): Promise<RenovationAssessment> => {
+      try {
+        return await assessRenovationFromPhotos(env, subjectPhotos, {
+          address: bundle.property.address,
+          squareFeet: bundle.property.squareFeet,
+          yearBuilt: bundle.property.yearBuilt,
+        })
+      } catch (e) {
+        return unavailableAssessment({
+          error: e instanceof Error ? e.message : 'Vision assessment failed',
+          limitations: ['Assessment call threw — no level invented'],
+        })
+      }
+    })()
+
+    // ── Persist listing photos into private report storage ────────────────
+    if (photoBundle && env.REPORT_ASSETS) {
+      const persistPhotos = async (propertyId: string, entry: PropertyPhotos | null) => {
+        if (!entry || entry.photos.length === 0) return
+        try {
+          const src = entry.source
+          const { assets, rejected } = await persistReportAssets(env, jobId, propertyId,
+            entry.photos.map((url) => ({
+              url,
+              kind: 'photo' as const,
+              sourcePageUrl: entry.sourceUrl,
+              source: src === 'zillow' || src === 'redfin' || src === 'realtor' ? src : undefined,
+            })))
+          const dropped = new Set(rejected)
+          const persisted = new Set(assets.map((a) => a.sourceUrl))
+          entry.photos = [...assets.map((a) => a.url), ...entry.photos.filter((u) => !persisted.has(u) && !dropped.has(u))]
+        } catch { /* non-fatal — keep CDN URLs */ }
+      }
+      await Promise.race([
+        Promise.all([
+          persistPhotos(bundle.property.id, photoBundle.subject),
+          ...Object.entries(photoBundle.comps).map(([id, entry]) => persistPhotos(id, entry)),
+        ]),
+        new Promise<void>((resolve) => setTimeout(resolve, 15_000)),
+      ])
+    }
+
+    return renovationPromise
+  })
+
   // ── 1. Appraisal: filter comps, apply adjustments, select ARV comps ────────
   let appraisalResult = appraisalService.evaluateWithFallback(
     bundle.property,
@@ -560,139 +708,6 @@ export async function performAnalysis(
       step('comparables_fetch', 'failed', `Expansion refetch failed: ${refetchError instanceof Error ? refetchError.message : 'unknown'}`)
     }
   }
-
-  // ── 2. Photos: subject + comps via Zillow → Redfin → Realtor chain ─────────
-  let photoBundle: PhotoBundle | null = null
-  try {
-    const photoService = createPhotoService(env)
-    if (params.prefetchedPhotoBundle !== undefined) {
-      // Caller overlapped the scrape with the comps fetch — use it as-is.
-      photoBundle = params.prefetchedPhotoBundle
-    } else if (photoService.isAvailable()) {
-      const subjectIdent: PropertyIdentifier = {
-        propertyId: bundle.property.id,
-        address: bundle.property.address,
-        city: bundle.property.city,
-        state: bundle.property.state,
-        zipCode: bundle.property.zipCode,
-      }
-      // Subject-only scrape — comp cards render map imagery, so no
-      // Firecrawl/Zillow calls are spent on comparables. (This also ends
-      // the comp price-history supplement used for stale-sale
-      // reconciliation; subject listing data still fills subject gaps
-      // and carries the flood signal.)
-      photoBundle = await photoService.fetchPhotoBundle(subjectIdent, [], { maxComps: 0, skipCache: params.skipCache })
-    }
-    if (params.prefetchedPhotoBundle !== undefined || photoService.isAvailable()) {
-      step(
-        'photo_fetch',
-        photoBundle?.subject ? 'completed' : 'fallback',
-        photoBundle?.subject
-          ? photoBundle.subject.photos.length > 0
-            ? `${photoBundle.subject.photos.length} subject photos via ${photoBundle.subject.source}`
-            : `Listing metadata via ${photoBundle.subject.source} (no photos${
-                typeof photoBundle.subject.metadata?.listPrice === 'number'
-                  ? `; list price $${photoBundle.subject.metadata.listPrice.toLocaleString()}`
-                  : ''
-              })`
-          : 'No subject photos found'
-      )
-    } else {
-      step('photo_fetch', 'fallback', 'No photo provider configured')
-    }
-  } catch (error) {
-    console.warn('[Evaluate] Photo fetch failed (non-fatal):', error)
-    step('photo_fetch', 'fallback', error instanceof Error ? error.message : 'photo fetch failed')
-  }
-  onProgress?.('Photos fetched')
-
-  // ── 2b. Flood signal from the listing scrape — the subject photo fetch
-  // already resolves the Redfin/Realtor page, which embeds First Street
-  // "Flood Factor" data. Free (Firecrawl, not the property provider), so it
-  // replaces the paid flood-zone call. Provider data wins when present.
-  if (!bundle.enrichment.floodZone) {
-    const sig = photoBundle?.subject?.metadata?.floodRisk
-    if (sig && typeof sig === 'object' && typeof (sig as { level?: unknown }).level === 'string') {
-      const level = (sig as { level: string; source?: string }).level
-      const elevated = /moderate|major|severe|extreme|zone /i.test(level)
-      bundle.enrichment.floodZone = {
-        floodZone: level,
-        floodZoneDescription: `Flood risk signal from the ${photoBundle!.subject!.source} listing (First Street)`,
-        isInFloodZone: elevated,
-        isNearFloodZone: !elevated && !/minimal/i.test(level),
-        communityName: null,
-        communityNumber: null,
-        firmMapNumber: null,
-        mapPanel: null,
-        mapDate: null,
-        participationStatus: null,
-        specialFloodHazardArea: null,
-        source: 'listing',
-      }
-      bundle.enrichment.evidenceLimitations = (bundle.enrichment.evidenceLimitations ?? [])
-        .filter((m) => !/flood/i.test(m))
-      step('photo_fetch', 'completed', `Flood signal from listing: ${level}`)
-    }
-  }
-
-  // ── Vision + photo persistence ────────────────────────────────────────────
-  // Neither feeds comp selection; the renovation level is needed only at
-  // deriveBuybox. The photo
-  // URLs are captured up front so R2 persistence can rewrite them while
-  // vision reads the live CDN links.
-  const visionAndPersist = (async (): Promise<RenovationAssessment> => {
-    const subjectPhotos = [...(photoBundle?.subject?.photos ?? [])]
-    // The subject condition fetch is required for eval completion — a thrown
-    // error still resolves as an explicit 'unavailable' verdict so the run
-    // records the outcome instead of silently completing without it.
-    const renovationPromise = (async (): Promise<RenovationAssessment> => {
-      try {
-        return await assessRenovationFromPhotos(env, subjectPhotos, {
-          address: bundle.property.address,
-          squareFeet: bundle.property.squareFeet,
-          yearBuilt: bundle.property.yearBuilt,
-        })
-      } catch (e) {
-        return unavailableAssessment({
-          error: e instanceof Error ? e.message : 'Vision assessment failed',
-          limitations: ['Assessment call threw — no level invented'],
-        })
-      }
-    })()
-
-    // ── Persist listing photos into private report storage ────────────────
-    // Copy image bytes to R2 and rewrite CDN URLs to /user/reports/{jobId}/
-    // assets/{id} so saved reports keep working photos indefinitely — listing
-    // CDN links rot or get hotlink-blocked. Non-fatal: failures keep the
-    // original URLs.
-    if (photoBundle && env.REPORT_ASSETS) {
-      const persistPhotos = async (propertyId: string, entry: PropertyPhotos | null) => {
-        if (!entry || entry.photos.length === 0) return
-        try {
-          const src = entry.source
-          const { assets, rejected } = await persistReportAssets(env, jobId, propertyId,
-            entry.photos.map((url) => ({
-              url,
-              kind: 'photo' as const,
-              sourcePageUrl: entry.sourceUrl,
-              source: src === 'zillow' || src === 'redfin' || src === 'realtor' ? src : undefined,
-            })))
-          const dropped = new Set(rejected)
-          const persisted = new Set(assets.map((a) => a.sourceUrl))
-          entry.photos = [...assets.map((a) => a.url), ...entry.photos.filter((u) => !persisted.has(u) && !dropped.has(u))]
-        } catch { /* non-fatal — keep CDN URLs */ }
-      }
-      await Promise.race([
-        Promise.all([
-          persistPhotos(bundle.property.id, photoBundle.subject),
-          ...Object.entries(photoBundle.comps).map(([id, entry]) => persistPhotos(id, entry)),
-        ]),
-        new Promise<void>((resolve) => setTimeout(resolve, 15_000)),
-      ])
-    }
-
-    return renovationPromise
-  })()
 
   // ── Comp selection — evidence-driven ──────────────────────────────────────
   // The ARV set is every enabled comp carrying ARV evidence — verified flip
@@ -983,44 +998,45 @@ export async function performAnalysis(
   // with Clef. Shadow evidence only — stamped on comp.curbAppeal for the
   // report/UI, never fed to classifyCompsByEvidence or the appraisal math
   // until live-verified.
-  let compCurbAppeal: Record<string, {
-    condition: 'renovated' | 'dated' | 'distressed' | 'unknown'
-    source: 'vision'
-    confidence: number | null
-    summary: string | null
-    photosExamined: number
-  }> | undefined
+  // Clef resolve — fire-and-forget: stamps land in compCurbAppeal whenever
+  // the batch settles. If it lands before the response serializes the
+  // stamps ride the response; if it lands late, onCurbAppeal lets the
+  // caller patch the persisted result (cards populate on next fetch).
+  let compCurbAppeal: CompCurbAppealMap | undefined
   if (clefCompPromise) {
-    const settled = await clefCompPromise
-    compCurbAppeal = {}
-    for (const ev of settled) {
-      if (!ev?.condition || !ev.listing) continue
-      const c = ev.condition
-      let condition =
-        c.asIs || c.conditionLabel === 'Poor'
-          ? 'distressed' as const
-          : c.renovated || c.conditionLabel === 'Renovated' || c.conditionLabel === 'Updated'
-            ? 'renovated' as const
-            : 'dated' as const
-      // Owner rule: investor-marketed listings are median/lower-tier sales —
-      // the curb-appeal stamp can never claim 'renovated' for ARV candidacy
-      // on an investor-tier comp no matter how updated it looks.
-      if (ev.investorSignal && condition === 'renovated') condition = 'dated'
-      compCurbAppeal[ev.propertyId] = {
-        condition,
-        source: 'vision',
-        confidence: c.confidence != null ? Math.round(c.confidence * 100) : Math.round(Math.max(c.renovatedProbability, c.asIsProbability, 0.5) * 100),
-        summary: `${c.conditionLabel} (${c.conditionScore.toFixed(1)}/4) · tier:${c.tier} · renovated ${(c.renovatedProbability * 100).toFixed(0)}% · as-is ${(c.asIsProbability * 100).toFixed(0)}% · investor ${(c.investorLanguageProbability * 100).toFixed(0)}% · via ${ev.listing.source}${ev.listing.description ? ' · listing text available' : ''}`,
-        photosExamined: ev.listing.photoCount,
+    void clefCompPromise.then((settled) => {
+      const map: CompCurbAppealMap = {}
+      for (const ev of settled) {
+        if (!ev?.condition || !ev.listing) continue
+        const c = ev.condition
+        let condition =
+          c.asIs || c.conditionLabel === 'Poor'
+            ? 'distressed' as const
+            : c.renovated || c.conditionLabel === 'Renovated' || c.conditionLabel === 'Updated'
+              ? 'renovated' as const
+              : 'dated' as const
+        // Owner rule: investor-marketed listings are median/lower-tier sales —
+        // the curb-appeal stamp can never claim 'renovated' for ARV candidacy
+        // on an investor-tier comp no matter how updated it looks.
+        if (ev.investorSignal && condition === 'renovated') condition = 'dated'
+        map[ev.propertyId] = {
+          condition,
+          source: 'vision',
+          confidence: c.confidence != null ? Math.round(c.confidence * 100) : Math.round(Math.max(c.renovatedProbability, c.asIsProbability, 0.5) * 100),
+          summary: `${c.conditionLabel} (${c.conditionScore.toFixed(1)}/4) · tier:${c.tier} · renovated ${(c.renovatedProbability * 100).toFixed(0)}% · as-is ${(c.asIsProbability * 100).toFixed(0)}% · investor ${(c.investorLanguageProbability * 100).toFixed(0)}% · via ${ev.listing.source}${ev.listing.description ? ' · listing text available' : ''}`,
+          photosExamined: ev.listing.photoCount,
+        }
       }
-    }
-    step(
-      'comp_curb_appeal',
-      Object.keys(compCurbAppeal).length > 0 ? 'completed' : 'skipped',
-      settled.length === 0
-        ? 'Clef enabled but no comps to classify'
-        : `${Object.keys(compCurbAppeal).length}/${settled.length} comps condition-classified via Clef`,
-    )
+      step(
+        'comp_curb_appeal',
+        Object.keys(map).length > 0 ? 'completed' : 'skipped',
+        settled.length === 0
+          ? 'Clef enabled but no comps to classify'
+          : `${Object.keys(map).length}/${settled.length} comps condition-classified via Clef`,
+      )
+      compCurbAppeal = map
+      if (Object.keys(map).length > 0) params.onCurbAppeal?.(map)
+    })
   }
 
   // Redfin MLS details — awaited here; the fetches started at evidence
@@ -1075,6 +1091,7 @@ export async function performAnalysis(
   }
 
   // ── 9. Build response ───────────────────────────────────────────────────────
+  const photoBundle = await photoBundlePromise
   const response = buildAnalysisResponse(
     bundle,
     appraisalResult,
