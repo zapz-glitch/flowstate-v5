@@ -115,6 +115,38 @@ function CompCardInner({
                 {comp.userTier === 'arv' ? 'ARV' : 'AS-IS'}·YOU
               </div>
             )}
+            {comp.classification && (
+              <div
+                className={cn(
+                  'h-6 px-1.5 rounded flex items-center text-[10px] font-bold flex-shrink-0',
+                  comp.classification.type === 'after_renovation' ? 'bg-emerald-500/15 text-emerald-600'
+                    : comp.classification.type === 'as_is' ? 'bg-orange-500/15 text-orange-600'
+                    : comp.classification.type === 'transitional' ? 'bg-blue-500/15 text-blue-600'
+                    : 'bg-muted text-foreground-tertiary'
+                )}
+                title={comp.classification.reasoning || `Price classification: ${comp.classification.type}`}
+              >
+                {comp.classification.type === 'after_renovation' ? 'ARV'
+                  : comp.classification.type === 'as_is' ? 'AS-IS'
+                  : comp.classification.type === 'transitional' ? 'TRANS'
+                  : 'UNVERIFIED'}
+              </div>
+            )}
+            {comp.curbAppeal && comp.curbAppeal.condition && comp.curbAppeal.condition !== 'unknown' && (
+              <div
+                className={cn(
+                  'h-6 px-1.5 rounded flex items-center text-[10px] font-bold flex-shrink-0',
+                  comp.curbAppeal.condition === 'renovated' ? 'bg-emerald-500/15 text-emerald-600'
+                    : comp.curbAppeal.condition === 'dated' ? 'bg-amber-500/15 text-amber-600'
+                    : 'bg-red-500/15 text-red-400'
+                )}
+                title={comp.curbAppeal.summary ?? `Clef condition: ${comp.curbAppeal.condition}`}
+              >
+                {comp.curbAppeal.condition === 'renovated' ? 'RENO'
+                  : comp.curbAppeal.condition === 'dated' ? 'DATED'
+                  : 'DISTRESSED'}
+              </div>
+            )}
             <div className="flex-1 min-w-0">
               {comp.address ? (
                 <AddressDisplay address={comp.address} latitude={comp.latitude} longitude={comp.longitude} className="text-body-sm font-medium" />

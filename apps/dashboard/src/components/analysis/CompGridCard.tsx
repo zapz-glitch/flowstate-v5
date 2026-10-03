@@ -141,6 +141,38 @@ function CompGridCardInner({
               {comp.userTier === 'arv' ? 'ARV' : 'AS-IS'}·YOU
             </div>
           )}
+          {comp.classification && (
+            <div
+              className={cn(
+                'h-6 px-1.5 rounded-sm flex items-center text-[10px] font-bold',
+                comp.classification.type === 'after_renovation' ? 'bg-emerald-500/90 text-white'
+                  : comp.classification.type === 'as_is' ? 'bg-orange-500/90 text-white'
+                  : comp.classification.type === 'transitional' ? 'bg-blue-500/90 text-white'
+                  : 'bg-neutral-600 text-white/80'
+              )}
+              title={comp.classification.reasoning || `Price classification: ${comp.classification.type}`}
+            >
+              {comp.classification.type === 'after_renovation' ? 'ARV'
+                : comp.classification.type === 'as_is' ? 'AS-IS'
+                : comp.classification.type === 'transitional' ? 'TRANS'
+                : 'UNVERIFIED'}
+            </div>
+          )}
+          {comp.curbAppeal && comp.curbAppeal.condition && comp.curbAppeal.condition !== 'unknown' && (
+            <div
+              className={cn(
+                'h-6 px-1.5 rounded-sm flex items-center text-[10px] font-bold',
+                comp.curbAppeal.condition === 'renovated' ? 'bg-emerald-600/90 text-white'
+                  : comp.curbAppeal.condition === 'dated' ? 'bg-amber-600/90 text-white'
+                  : 'bg-red-600/90 text-white'
+              )}
+              title={comp.curbAppeal.summary ?? `Clef condition: ${comp.curbAppeal.condition}`}
+            >
+              {comp.curbAppeal.condition === 'renovated' ? 'RENO'
+                : comp.curbAppeal.condition === 'dated' ? 'DATED'
+                : 'DISTRESSED'}
+            </div>
+          )}
         </div>
         {/* Bottom: price + date */}
         <div className="absolute bottom-0 left-0 right-0 px-2 py-1.5 bg-gradient-to-t from-black/70 to-transparent flex items-end justify-between pointer-events-none">

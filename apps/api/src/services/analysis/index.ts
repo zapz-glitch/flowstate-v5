@@ -6,6 +6,7 @@
  */
 
 import type { PropertyBundle } from '../property-api'
+import { evaluateB, bCondTier } from '@flowstate-api/shared/appraisal'
 import type { NormalizedProperty, NormalizedComparable } from '../property-api/types'
 import type { AppraisedComparable, AppraisalResultWithFallback, ClassificationSummaryResult } from '../appraisal'
 import type { PhotoBundle, PropertyPhotos } from '../photo-provider'
@@ -704,6 +705,22 @@ export interface AnalysisResponse {
     listPrice: number | null
     /** ARV minus list price — negative = ARV below asking (negotiation room), positive = above */
     arvVsListPrice: number | null
+    /** Set-B parallel ARV — trade-tricks methodology (shared/appraisal set-b) */
+    arvB: number | null
+    /** B mechanics trail — anchor, flags, ceiling, driver set for the UI panel */
+    bMechanics: {
+      source: string
+      confidence: 'high' | 'medium' | 'low' | 'none'
+      bracket: 'ok' | 'all-smaller' | 'all-bigger'
+      flags: string[]
+      anchorAddress: string | null
+      conditionAdj: number | null
+      ceiling: number | null
+      landRateSource: string | null
+      sqftRateSource: string | null
+      healed: boolean
+      drivers: { address: string | null; contribution: number; tier: string; conditionTier: string }[]
+    } | null
     buyPrice: number
     buyPricePercent: number
     /** Positional proximity deduction applied to buy price (0 when none) */
@@ -1382,6 +1399,28 @@ export function buildAnalysisResponse(
       ? 'county assessed value — no comp ARV evidence (conservative anchor)'
     : ctx.classificationSummary?.methodology ?? `avg price/sqft of ${enabledComps.length} comp${enabledComps.length !== 1 ? 's' : ''} × subject sqft`
 
+  // ── Set-B parallel ARV (trade-tricks methodology) ──────────────────────
+  // Calibrated harness ported to shared/appraisal — runs over the same
+  // serialized comp pool, produces a parallel arvB + full mechanics trail.
+  // Parallel output for verification; not yet the pipeline ARV.
+  const bResult = evaluateB(
+    {
+      squareFeet: property.squareFeet ?? null,
+      yearBuilt: property.yearBuilt ?? null,
+      censusTract: property.censusTract ?? null,
+      subdivision: property.subdivision ?? null,
+      landAssessedValue: property.landAssessedValue ?? null,
+      taxAssessment: property.assessedValue ?? null,
+      assessedValue: property.assessedValue ?? null,
+      avmValue: property.avmValue ?? enrichment.avm?.value ?? null,
+      lotSizeAcres: property.lotSizeAcres ?? null,
+      lotSizeSquareFeet: property.lotSizeSquareFeet ?? null,
+      condition: valuation?.rehabLevel ?? null,
+    },
+    allComps,
+    { rehabCost: valuation?.totalRehabCost ?? null },
+  )
+
   return {
     // ═══ SUBJECT PROPERTY ═══════════════════════════════════════════════════
     subject: {
@@ -1525,6 +1564,27 @@ export function buildAnalysisResponse(
         ctx.subjectListPrice != null && (ctx.valuationAnchor ?? finalArv) != null
           ? (ctx.valuationAnchor ?? finalArv)! - ctx.subjectListPrice
           : null,
+      // Set-B parallel output — trade-tricks ARV + mechanics trail (the
+      // calibration harness methodology, ported to shared/appraisal)
+      arvB: bResult.arv,
+      bMechanics: {
+        source: bResult.source,
+        confidence: bResult.conf,
+        bracket: bResult.bracket,
+        flags: bResult.flags,
+        anchorAddress: bResult.anchorAddress ?? null,
+        conditionAdj: bResult.conditionAdj ?? null,
+        ceiling: bResult.ceiling ?? null,
+        landRateSource: bResult.landRateSource ?? null,
+        sqftRateSource: bResult.sqftRateSource ?? null,
+        healed: bResult.healed ?? false,
+        drivers: bResult.drivers.map((d) => ({
+          address: d.comp.address ?? null,
+          contribution: Math.round(d.contrib),
+          tier: d.tier,
+          conditionTier: bCondTier(d.comp),
+        })),
+      },
     } : null,
     // ═══ COMPARABLE SALES (All comps with enable/disable status) ═══════════════
     comps: {
