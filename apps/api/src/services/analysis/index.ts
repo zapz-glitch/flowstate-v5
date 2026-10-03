@@ -1266,6 +1266,9 @@ export function buildAnalysisResponse(
       // Road-barrier proxy (census tract) — absent when unverified
       ...(comp.crossesMajorRoad != null ? { crossesMajorRoad: comp.crossesMajorRoad } : {}),
       ...(comp.sameBlockGroup != null ? { sameBlockGroup: comp.sameBlockGroup } : {}),
+      // Computed at serialize-time — "no tract after both ladders" is the
+      // honest signal; a stored flag would get dropped by pool merges.
+      ...(comp.censusTract == null && comp.latitude != null ? { geographyUnverified: true } : {}),
       buildingCondition: comp.buildingCondition ?? null,
       buildingGrade: comp.buildingGrade ?? null,
       stories: comp.stories ?? null,

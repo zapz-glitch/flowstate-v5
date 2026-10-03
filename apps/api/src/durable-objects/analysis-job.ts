@@ -645,15 +645,19 @@ export class AnalysisJobDO {
       if (!subjectGeo) return comps
       const cache = this.env.API_CACHE ?? undefined
       const lookup = async (lat: number, lng: number) => {
-        const g = await fetchCensusGeography(lat, lng, cache).catch(() => null)
-        // One retry — a transient null silently drops an otherwise-valid comp
-        return g ?? fetchCensusGeography(lat, lng, cache).catch(() => null)
+        for (let attempt = 0; attempt < 3; attempt++) {
+          const g = await fetchCensusGeography(lat, lng, cache).catch(() => null)
+          if (g) return g
+          // Brief spacing between retries — the free endpoint throttles bursts
+          if (attempt < 2) await new Promise((r) => setTimeout(r, 300 * (attempt + 1)))
+        }
+        return null
       }
       // Bounded concurrency — the Census endpoint throttles big bursts.
       const geos: (Awaited<ReturnType<typeof lookup>> | null)[] = new Array(comps.length).fill(null)
       const queue = comps.map((c, i) => ({ c, i }))
       await Promise.all(
-        Array.from({ length: 5 }, async () => {
+        Array.from({ length: 3 }, async () => {
           for (let item = queue.shift(); item; item = queue.shift()) {
             if (item.c.latitude != null && item.c.longitude != null) {
               geos[item.i] = await lookup(item.c.latitude, item.c.longitude)
@@ -669,7 +673,34 @@ export class AnalysisJobDO {
         c.crossesMajorRoad ??= g.tract !== subjectGeo.tract
         return g.blockGroup === subjectGeo.blockGroup || g.tract === subjectGeo.tract
       })
-      if (geoPassers.length === 0) return comps
+      // ATTOM fallback for Census misses: geography-context ships censusTract
+      // on the detail call anyway — spend one provider call on comps that
+      // look competitive (dead comps don't merit it) so "unverified" can't
+      // silently read as "passes" downstream. Verified: half a pool failed
+      // Census and two cross-boundary comps enabled without geography.
+      const censusMisses = comps.filter((c, i) =>
+        !geos[i] && c.latitude != null && c.salePrice != null && c.salePrice >= 10_000 && c.squareFeet != null)
+      if (censusMisses.length > 0) {
+        const geoEnriched = await propertyApi.enrichComparables(censusMisses, { concurrency: 5 })
+          .catch(() => [] as NormalizedComparable[])
+        for (const e of geoEnriched) {
+          const comp = comps.find((c) => c.id === e.id)
+          if (!comp || !e.censusTract) continue
+          comp.censusTract ??= e.censusTract
+          comp.crossesMajorRoad ??= comp.censusTract !== subjectGeo.tract
+          if (comp.censusTract === subjectGeo.tract && !geoPassers.includes(comp)) geoPassers.push(comp)
+        }
+      }
+      // Still unstamped after both ladders → explicitly unverified so the
+      // evaluator/report can see "geography never checked" vs "passed".
+      // Runs at merge — enrichComparables returns fresh objects that would
+      // drop a flag set on the originals.
+      const flagUnverified = (list: NormalizedComparable[]) => {
+        let n = 0
+        list.forEach((c) => { if (c.censusTract == null && c.latitude != null) { c.geographyUnverified = true; n++ } })
+        if (n) console.log(`[AnalysisJobDO] geography unverified: ${n} comps`)
+      }
+      if (geoPassers.length === 0) { flagUnverified(comps); return comps }
       // Thin-pool flex ladder — geo stays required; numeric tolerances
       // (sqft, year built, lot, sale age, distance) stretch ×1.15 → ×1.25 →
       // ×1.35 → … until a passer carries ARV evidence or every geo-verified
@@ -711,8 +742,10 @@ export class AnalysisJobDO {
         factor: paramFlexFactor,
         concessions: describeFlexConcessions(filters, paramFlexFactor),
       }
-      if (enrichedById.size === 0) return comps
-      return comps.map((c) => enrichedById.get(c.id) ?? c)
+      if (enrichedById.size === 0) { flagUnverified(comps); return comps }
+      const merged = comps.map((c) => enrichedById.get(c.id) ?? c)
+      flagUnverified(merged)
+      return merged
     }
     if (isAttomMcp) {
       enrichedComps = await gateAndEnrich(rawComps)

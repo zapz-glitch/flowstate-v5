@@ -200,6 +200,9 @@ function CompCardInner({
           {comp.crossesMajorRoad === true && (
             <><span className="text-border">·</span><span className="text-amber-500" title="Different census tract — tract boundaries follow major roads">⚠ Crosses tract</span></>
           )}
+          {comp.geographyUnverified === true && (
+            <><span className="text-border">·</span><span className="text-amber-600" title="No census tract from Census or ATTOM — geography was never verified">? Geo unverified</span></>
+          )}
         </div>
         <RuleMatchDetails comp={comp} />
       </div>

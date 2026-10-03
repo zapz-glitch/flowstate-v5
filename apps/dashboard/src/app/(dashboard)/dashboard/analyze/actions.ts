@@ -494,6 +494,8 @@ export interface CompItem {
   crossesMajorRoad?: boolean
   /** Same census block group as the subject — same micro-market evidence. Absent/null = unverified. */
   sameBlockGroup?: boolean | null
+  /** Neither Census nor ATTOM produced a tract — geography never verified. */
+  geographyUnverified?: boolean
   /** Visual ARV-candidacy check on listing photos (ARV-selected comps only) */
   curbAppeal?: {
     condition: 'renovated' | 'dated' | 'distressed' | 'unknown'
@@ -720,6 +722,8 @@ export interface CompItem {
   crossesMajorRoad?: boolean
   /** Same census block group as the subject — same micro-market evidence. Absent/null = unverified. */
   sameBlockGroup?: boolean | null
+  /** Neither Census nor ATTOM produced a tract — geography never verified. */
+  geographyUnverified?: boolean
   /** Visual ARV-candidacy check on listing photos (ARV-selected comps only) */
   curbAppeal?: {
     condition: 'renovated' | 'dated' | 'distressed' | 'unknown'
