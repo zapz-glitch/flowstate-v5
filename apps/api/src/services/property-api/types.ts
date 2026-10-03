@@ -284,6 +284,10 @@ export interface NormalizedComparable {
   avmValue?: number | null
   /** Redfin MLS property-details enrichment — shadow evidence (top-15 comps) */
   listingDetails?: import('../redfin-details').RedfinPropertyDetails | null
+  /** ARV evidence verification — price cross-check (sale vs own AVM) +
+   *  staleness (sale $/sf vs current pocket median). Shadow evidence:
+   *  flags quality, never gates. */
+  evidenceVerification?: import('../appraisal/verification').CompEvidenceVerification | null
 
   /** Assessor building improvement condition (e.g. "Average") */
   buildingCondition?: string | null

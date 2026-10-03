@@ -1298,6 +1298,7 @@ export function buildAnalysisResponse(
         : ctx.groupBCompIds?.has(comp.id) ? 'as_is' as const
         : null,
       curbAppeal: ctx.compCurbAppeal?.[comp.id] ?? null,
+      evidenceVerification: comp.evidenceVerification ?? null,
       disableReasons: evaluation?.disableReasons ?? [],
       classification: classificationSummary,
       isBestMatch: ctx.bestMatch?.compId === comp.id,

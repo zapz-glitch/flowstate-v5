@@ -26,6 +26,7 @@ import {
   type AppraisalFilter,
   type AppraisalAdjustment,
 } from '../appraisal'
+import { verifyCompEvidence } from '../appraisal/verification'
 import { createValuationService, MAJOR_ITEMS, type MajorItem } from '../valuation'
 import type { ClassificationResult } from '../classification'
 import type { RehabTable, TierRangeDefinition } from '@flowstate-api/shared/valuation'
@@ -1060,6 +1061,32 @@ export async function performAnalysis(
       'listing_details',
       (subjectRes?.details || stamped > 0) ? 'completed' : 'skipped',
       `Redfin details — subject ${subjectRes?.details ? 'yes' : subjectRes?.skippedReason ?? 'no'} · ${stamped} comp(s) enriched`,
+    )
+  }
+
+  // ── ARV evidence verification — shadow stamps on every comp ─────────────
+  // Price cross-check (sale vs own AVM) + staleness (sale $/sf vs current
+  // pocket median). Flags evidence quality; never gates comp selection.
+  {
+    // Pool-derived pocket reference: median $/sf of same-tract comps IS the
+    // current pocket pricing — used when provider scope medians are absent.
+    const tractPpsfs = appraisalResult.comparables
+      .filter((c) => c.censusTract != null && c.censusTract === bundle.property.censusTract)
+      .map((c) => c.pricePerSqft ?? (c.salePrice != null && c.squareFeet ? c.salePrice / c.squareFeet : null))
+      .filter((v): v is number => v != null && v > 0)
+      .sort((a, b) => a - b)
+    const poolRefPpsf = tractPpsfs.length >= 3 ? tractPpsfs[Math.floor(tractPpsfs.length / 2)] : null
+    let verified = 0, stale = 0, divergent = 0
+    for (const comp of appraisalResult.comparables) {
+      comp.evidenceVerification = verifyCompEvidence(bundle.property, comp, poolRefPpsf)
+      if (comp.evidenceVerification.priceCheck === 'corroborated') verified++
+      if (comp.evidenceVerification.staleness === 'stale') stale++
+      if (comp.evidenceVerification.priceCheck === 'divergent') divergent++
+    }
+    step(
+      'evidence_verification',
+      verified + stale + divergent > 0 ? 'completed' : 'skipped',
+      `${verified} price-corroborated · ${stale} stale-evidence · ${divergent} price-divergent`,
     )
   }
 

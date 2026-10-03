@@ -60,13 +60,21 @@ def set_b(subject, items):
     # evidence (ppsf within RETAIL_BAND of the pool top = retail-tier sale).
     RETAIL_BAND = 0.70
     ppsf_of = lambda x: x['c'].get('pricePerSqft') or (x['c']['salePrice'] / x['c']['squareFeet'])
-    arv_tier = [x for x in contribs if x['tier'] == 'arv']
+    # Evidence verification (A-side stamps): stale/divergent comps never
+    # drive ARV — they're context, not evidence of today's renovated value.
+    unfit = [x for x in contribs
+             if (x['c'].get('evidenceVerification') or {}).get('staleness') == 'stale'
+             or (x['c'].get('evidenceVerification') or {}).get('priceCheck') == 'divergent']
+    for x in unfit:
+        flags.append(f"{x['c']['address']}: verification — {'; '.join((x['c'].get('evidenceVerification') or {}).get('flags') or [])[:90]}")
+    verified_pool = [x for x in contribs if x not in unfit]
+    arv_tier = [x for x in verified_pool if x['tier'] == 'arv']
     if arv_tier:
         drivers = arv_tier
     else:
-        top_ppsf = max(ppsf_of(x) for x in contribs)
-        retail = [x for x in contribs
-                  if x['tier'] != 'as_is' and ppsf_of(x) >= RETAIL_BAND * top_ppsf]
+        top_ppsf = max(ppsf_of(x) for x in verified_pool) if verified_pool else None
+        retail = [x for x in verified_pool
+                  if x['tier'] != 'as_is' and top_ppsf and ppsf_of(x) >= RETAIL_BAND * top_ppsf]
         excluded = len(contribs) - len(retail)
         if not retail:
             flags.append('no retail-priced evidence — ARV withheld (as-is sales are floor evidence only)')
