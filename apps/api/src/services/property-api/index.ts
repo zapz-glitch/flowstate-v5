@@ -1198,6 +1198,8 @@ class PropertyApi implements PropertyApiService {
                   : {}),
                 // ARV-evidence signals: comp's own AVM + scope medians
                 avmValue: result.data.avmValue ?? null,
+                assessedValue: result.data.assessedValue ?? null,
+                landAssessedValue: result.data.landAssessedValue ?? null,
                 ppsfMedians: result.data.ppsfMedians ?? null,
                 construction: mergedConstruction,
                 transaction: result.data.transaction ? {

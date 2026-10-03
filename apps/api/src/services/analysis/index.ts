@@ -568,6 +568,7 @@ export interface AnalysisResponse {
       pricePerSqft: number | null
     } | null
     taxAssessment: number | null
+    landAssessedValue: number | null
     photos: string[]
     /** Foundation type (e.g., Slab, Crawl Space, Basement) */
     foundationType: string | null
@@ -1299,6 +1300,8 @@ export function buildAnalysisResponse(
         : null,
       curbAppeal: ctx.compCurbAppeal?.[comp.id] ?? null,
       evidenceVerification: comp.evidenceVerification ?? null,
+      landAssessedValue: comp.landAssessedValue ?? null,
+      assessedValue: comp.assessedValue ?? null,
       disableReasons: evaluation?.disableReasons ?? [],
       classification: classificationSummary,
       isBestMatch: ctx.bestMatch?.compId === comp.id,
@@ -1369,6 +1372,7 @@ export function buildAnalysisResponse(
           }
         : null,
       taxAssessment: property.assessedValue ?? null,
+      landAssessedValue: property.landAssessedValue ?? null,
       photos: subjectPhotos,
       ...resolveConstruction(property.construction),
       pool: property.features?.poolType ?? null,

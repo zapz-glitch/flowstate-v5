@@ -282,6 +282,11 @@ export interface NormalizedComparable {
   ppsfMedians?: { SD?: number | null; N4?: number | null; N3?: number | null } | null
   /** Comp's own ATTOM AVM value (valuation dataset, enriched comps only) */
   avmValue?: number | null
+  /** County assessed total (tax-history, enriched comps only) */
+  assessedValue?: number | null
+  /** County assessed LAND value (tax-history) — feeds the market-derived
+   *  land curve: landValue vs lotSize fit per tract. */
+  landAssessedValue?: number | null
   /** Redfin MLS property-details enrichment — shadow evidence (top-15 comps) */
   listingDetails?: import('../redfin-details').RedfinPropertyDetails | null
   /** ARV evidence verification — price cross-check (sale vs own AVM) +
