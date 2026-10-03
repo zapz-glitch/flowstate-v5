@@ -37,7 +37,7 @@ import {
   type ResponseContext,
 } from '../analysis'
 import { createPhotoService, type PhotoBundle, type PropertyIdentifier, type PropertyPhotos } from '../photo-provider'
-import { gatherCompConditionEvidence } from '../comp-evidence'
+import { gatherCompConditionEvidence, type CompConditionEvidence } from '../comp-evidence'
 import { isClefAvailable } from '../clef'
 
 import { persistReportAssets } from '../report-assets'
@@ -476,8 +476,11 @@ export async function performAnalysis(
 
   const steps: ReportStep[] = []
   const fallbacksUsed: string[] = []
+  let prevStepAt = Date.now()
   const step = (name: string, status: ReportStep['status'], detail?: string) => {
-    steps.push({ step: name, label: name, status, detail })
+    const now = Date.now()
+    steps.push({ step: name, label: name, status, detail, durationMs: now - prevStepAt })
+    prevStepAt = now
   }
 
   // Realtor conversation-log notes — fetched in parallel with the eval so a
@@ -708,6 +711,39 @@ export async function performAnalysis(
       : comp.arvStatus === 'selected' ? 'not_examined' as const : comp.arvStatus,
   }))
   appraisalResult.selectedCompIds = [...arvIds]
+
+  // Clef comp-evidence batch — kicked off here so the listing scrapes +
+  // classifications (the pipeline's longest wall-clock segment, up to ~45s)
+  // overlap the vision assessment and valuation instead of serializing at
+  // step 8b. Awaited where the comp_curb_appeal step records.
+  const clefCompPromise: Promise<(CompConditionEvidence | null)[]> | null =
+    env.CLEF_COMP_CONDITION_ENABLED === 'true' && isClefAvailable(env)
+      ? Promise.all(
+          appraisalResult.comparables
+            .slice()
+            .sort((a, b) =>
+              Number(b.isEnabled && arvIds.has(b.id)) - Number(a.isEnabled && arvIds.has(a.id))
+              || Number(b.isEnabled) - Number(a.isEnabled)
+              || (a.distanceMiles ?? 999) - (b.distanceMiles ?? 999))
+            .slice(0, Number(env.CLEF_COMP_MAX) || Infinity)
+            .map((comp) =>
+              Promise.race([
+                gatherCompConditionEvidence(env, {
+                  propertyId: comp.id,
+                  address: comp.address,
+                  city: comp.city,
+                  state: comp.state,
+                  zipCode: comp.zipCode,
+                  salePrice: comp.salePrice ?? undefined,
+                  saleDate: comp.saleDate ? String(comp.saleDate) : undefined,
+                  yearBuilt: comp.yearBuilt ?? undefined,
+                  squareFeet: comp.squareFeet ?? undefined,
+                }),
+                new Promise<null>((r) => setTimeout(() => r(null), 45_000)),
+              ]).catch(() => null),
+            ),
+        )
+      : null
   if (arvComps.length > 0) {
     appraisalResult.arv = appraisalService.calculateARV(arvComps, bundle.property.squareFeet)
     appraisalResult.insufficientComps = false
@@ -926,36 +962,8 @@ export async function performAnalysis(
     summary: string | null
     photosExamined: number
   }> | undefined
-  if (env.CLEF_COMP_CONDITION_ENABLED === 'true' && isClefAvailable(env)) {
-    const CLEF_COMP_MAX = Number(env.CLEF_COMP_MAX) || Infinity
-    const CLEF_COMP_TIMEOUT_MS = 45_000
-    // All provider-returned comps — ARV-selected first (curb appeal matters
-    // most for ARV candidacy), then enabled, then closest to the subject.
-    // Ordering only matters if CLEF_COMP_MAX truncates.
-    const targets = appraisalResult.comparables
-      .sort((a, b) =>
-        Number(b.isEnabled && groupACompIds.has(b.id)) - Number(a.isEnabled && groupACompIds.has(a.id))
-        || Number(b.isEnabled) - Number(a.isEnabled)
-        || (a.distanceMiles ?? 999) - (b.distanceMiles ?? 999))
-      .slice(0, CLEF_COMP_MAX)
-    const settled = await Promise.all(
-      targets.map((comp) =>
-        Promise.race([
-          gatherCompConditionEvidence(env, {
-            propertyId: comp.id,
-            address: comp.address,
-            city: comp.city,
-            state: comp.state,
-            zipCode: comp.zipCode,
-            salePrice: comp.salePrice ?? undefined,
-            saleDate: comp.saleDate ? String(comp.saleDate) : undefined,
-            yearBuilt: comp.yearBuilt ?? undefined,
-            squareFeet: comp.squareFeet ?? undefined,
-          }),
-          new Promise<null>((r) => setTimeout(() => r(null), CLEF_COMP_TIMEOUT_MS)),
-        ]).catch(() => null),
-      ),
-    )
+  if (clefCompPromise) {
+    const settled = await clefCompPromise
     compCurbAppeal = {}
     for (const ev of settled) {
       if (!ev?.condition || !ev.listing) continue
@@ -981,9 +989,9 @@ export async function performAnalysis(
     step(
       'comp_curb_appeal',
       Object.keys(compCurbAppeal).length > 0 ? 'completed' : 'skipped',
-      targets.length === 0
+      settled.length === 0
         ? 'Clef enabled but no comps to classify'
-        : `${Object.keys(compCurbAppeal).length}/${targets.length} comps condition-classified via Clef`,
+        : `${Object.keys(compCurbAppeal).length}/${settled.length} comps condition-classified via Clef`,
     )
   }
 
