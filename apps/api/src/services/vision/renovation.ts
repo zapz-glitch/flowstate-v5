@@ -188,7 +188,7 @@ const RENOVATION_SCHEMA = {
   },
 }
 
-const MIN_UNIQUE_PHOTOS = 2
+const MIN_UNIQUE_PHOTOS = 1
 const MAX_PHOTOS = 12
 const LOW_CONFIDENCE = 40
 
@@ -229,7 +229,9 @@ Return ONLY a JSON object:
   "curb_appeal_summary": "one sentence describing visible condition"
 }
 
-For curb_appeal_condition: renovated = modern finishes/move-in ready, dated = livable but visibly dated finishes, distressed = obvious disrepair or heavy wear, unknown = photos insufficient to judge. Never guess — use "unknown".`
+For curb_appeal_condition: renovated = modern finishes/move-in ready, dated = livable but visibly dated finishes, distressed = obvious disrepair or heavy wear, unknown = photos insufficient to judge. Never guess — use "unknown".
+
+With a single photo (usually exterior): classify what is visible — a clean exterior can support Light Cosmetic or below, but never claim Heavy Rehab or Full Gut from curb appeal alone. Interior rooms not visible = "not_visible". Keep confidence ≤ 60 and list the missing interior evidence in limitations.`
 
 // ─── Assessment ───────────────────────────────────────────────────────────────
 
@@ -323,7 +325,7 @@ export async function assessRenovationFromPhotos(
       ...base,
       status: 'insufficient_photo_evidence',
       photosExamined: live.length,
-      limitations: [`Only ${live.length} of ${photos.length} photo URL(s) were fetchable`],
+      limitations: [live.length === 0 ? 'No photos fetchable' : `Only ${live.length} of ${photos.length} photo URL(s) were fetchable`],
     }
   }
 
