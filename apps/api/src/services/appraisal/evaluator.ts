@@ -213,9 +213,6 @@ function evaluateSqftDiff(
  *  class. Adjacent era passes flagged (weaker evidence), 2+ gaps fail. */
 const VINTAGE_SUBJECT_MAX_YEAR = 1945
 const VINTAGE_ERA_COMP_MAX_YEAR = 1969
-const ERA_NAMES = ['vintage (≤1945)', 'post-war (1946-69)', 'late-20th (1970-89)', '90s-00s (1990-2009)', 'modern (2010+)'] as const
-const eraIndex = (yearBuilt: number) =>
-  yearBuilt <= 1945 ? 0 : yearBuilt <= 1969 ? 1 : yearBuilt <= 1989 ? 2 : yearBuilt <= 2009 ? 3 : 4
 
 function evaluateYearBuiltDiff(
   subject: NormalizedProperty,
@@ -247,31 +244,15 @@ function evaluateYearBuiltDiff(
     }
   }
 
-  // Era-class match for all other subjects: same era → pass; adjacent era
-  // → pass flagged (appraiser keeps it as weaker evidence); 2+ era gaps →
-  // fail. The configured ±band is retained as the tight-tier preference via
-  // the ladder — era match is the acceptance floor.
-  const sEra = eraIndex(subject.yearBuilt)
-  const cEra = eraIndex(comp.yearBuilt)
-  const eraGap = Math.abs(cEra - sEra)
   const diff = Math.abs(comp.yearBuilt - subject.yearBuilt)
-  if (eraGap >= 2) {
-    return {
-      type: 'year_built_diff',
-      passed: false,
-      reason: `Era mismatch: ${ERA_NAMES[cEra]} comp vs ${ERA_NAMES[sEra]} subject`,
-      actualValue: diff,
-      threshold: 'same or adjacent era',
-    }
-  }
+  const passed = diff <= filter.value
+
   return {
     type: 'year_built_diff',
-    passed: true,
-    reason: eraGap === 1
-      ? `Adjacent era: ${ERA_NAMES[cEra]} comp vs ${ERA_NAMES[sEra]} subject — flagged`
-      : undefined,
+    passed,
+    reason: passed ? undefined : `Year built difference too large: ${diff} years (max: ${filter.value})`,
     actualValue: diff,
-    threshold: 'same or adjacent era',
+    threshold: filter.value,
   }
 }
 
