@@ -181,8 +181,32 @@ export function evaluateB(
     arv: null, flags, drivers: [], contribs: [], bracket: 'ok', conf: 'none', source,
   })
 
-  // Pool: enabled comps with sale + size evidence
-  let pool = items.filter((c) => c.isEnabled && c.salePrice && c.squareFeet)
+  // Pool: enabled comps with sale + size evidence. Soft-disabled comps
+  // (boundary sale_age, geo name variants, size deltas, road barrier)
+  // still compete — verification + similarity do the ranking. Hard gates
+  // (nominal transfers, category/type mismatches) stay hard.
+  const B_HARD_DISABLE = /non-market|category mismatch|type mismatch|nominal|not market/i
+  // A soft-disable rescues adjustable deltas — not category differences.
+  // A comp >~75% off the subject's size is a different product class, not
+  // something the size curve can honestly extrapolate.
+  const bSizeBand = (c: BComp) => {
+    if (subject.squareFeet == null || c.squareFeet == null) return true
+    const ratio = c.squareFeet / subject.squareFeet
+    return ratio >= 0.5 && ratio <= 1.75
+  }
+  // Rescues must earn it: verified sale (corroborated/plausible — an
+  // uncorroborated rescue is a guess, not evidence) and same side of the
+  // road barrier (a road crossing is a submarket boundary, not a soft delta).
+  const bSoftDisabled = (c: BComp) => {
+    if (c.isEnabled || !(c.disableReasons?.length ?? 0)) return false
+    if (!(c.disableReasons ?? []).every((r) => !B_HARD_DISABLE.test(r))) return false
+    if (!bSizeBand(c)) return false
+    const ver = c.evidenceVerification?.priceCheck
+    if (ver !== 'corroborated' && ver !== 'plausible') return false
+    if ((c.disableReasons ?? []).some((r) => /major road/i.test(r))) return false
+    return true
+  }
+  let pool = items.filter((c) => (c.isEnabled || bSoftDisabled(c)) && c.salePrice && c.squareFeet)
   let source = 'T0 anchor'
 
   // T1 — adjustable-delta rescue (lot size). Comps killed ONLY on an

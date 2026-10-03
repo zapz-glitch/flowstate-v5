@@ -35,7 +35,7 @@ const SUBDIVISION_DESIGNATORS = new Set([
   'vlg',
   'sub', 'subdiv', 'subdivision',
   'ncb', 'nb',
-  'the', 'of',
+  'the', 'of', 'no',
 ])
 
 export function subdivisionBase(value: string | null | undefined): string | null {
