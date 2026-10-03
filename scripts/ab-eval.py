@@ -83,7 +83,53 @@ def set_b(subject, items):
         drivers = retail
         flags.append(f'no ARV-tier labels — ARV driven on {len(drivers)} retail-marked comp(s); {excluded} as-is-priced sale(s) excluded from ARV')
 
-    arv = sum(x['contrib']*x['weight'] for x in drivers) / max(1e-9, sum(x['weight'] for x in drivers))
+    # ── Reconciliation anchoring ──────────────────────────────────────────
+    # Appraiser pattern: ARV anchors on the MOST-SIMILAR verified comp; the
+    # rest of the driver set bounds the range — it never blends across the
+    # evidence classes. The weighted blend only applies when no single comp
+    # dominates similarity (anchor-of-last-resort).
+    def similarity(x):
+        c = x['c']; s = 0.0
+        d = c.get('distanceMiles')
+        if d is not None: s += max(0, 1 - d) * 3.0
+        if c.get('sameBlockGroup'): s += 3.0
+        elif subject.get('censusTract') and c.get('censusTract') == subject.get('censusTract'): s += 2.0
+        if c.get('subdivision') and c.get('subdivision') == subject.get('subdivision'): s += 2.0
+        yd = abs((c.get('yearBuilt') or 0) - (subject.get('yearBuilt') or 0)) if c.get('yearBuilt') and subject.get('yearBuilt') else None
+        if yd is not None: s += 1.5 if yd <= 10 else 0.75 if yd <= 20 else 0.0
+        sd = abs((c.get('squareFeet') or 0) - (subject.get('squareFeet') or 0)) if c.get('squareFeet') and subject.get('squareFeet') else None
+        if sd is not None: s += 1.5 if sd <= 150 else 0.75 if sd <= 300 else 0.0
+        return s
+
+    ranked = sorted(drivers, key=similarity, reverse=True)
+    anchor = ranked[0] if ranked else None
+    runner_up_score = similarity(ranked[1]) if len(ranked) > 1 else -1.0
+    anchor_score = similarity(anchor) if anchor else -1.0
+    dominant = len(drivers) == 1 or anchor_score >= max(4.0, 1.5 * max(runner_up_score, 0.01))
+
+    # Similarity gate — drivers must score ≥60% of the anchor's similarity or
+    # they drop out entirely: a far/cross-pocket comp with a clean adjustment
+    # is still weak evidence (the 109th Ave case: w=0.93 purely on adj size).
+    SIM_GATE = 0.60
+    if anchor and len(drivers) > 1:
+        gated = [x for x in drivers if similarity(x) >= SIM_GATE * anchor_score]
+        dropped = [x for x in drivers if x not in gated]
+        for x in dropped:
+            flags.append(f"{x['c']['address']}: dropped from drivers — similarity {similarity(x):.1f} below gate ({SIM_GATE * anchor_score:.1f})")
+        if gated:
+            drivers = gated
+
+    if dominant and anchor:
+        arv = anchor['contrib']
+        flags.append(f"anchored to {anchor['c']['address']} (similarity {anchor_score:.1f})")
+        anchor_edge = anchor['contrib'] == max(x['contrib'] for x in drivers) or anchor['contrib'] == min(x['contrib'] for x in drivers)
+        if len(drivers) > 1 and anchor_edge:
+            flags.append('anchor sits at the range edge — supporting evidence bound only')
+    else:
+        # co-anchor blend — similarity × adjustment-quality weights
+        arv = sum(x['contrib'] * similarity(x) * x['weight'] for x in drivers) / max(1e-9, sum(similarity(x) * x['weight'] for x in drivers))
+        anchor = None
+        flags.append(f'co-anchor blend across {len(drivers)} similarity-gated drivers')
 
     # 5 — outlier ceiling: ARV above pool's top actual sale needs ≥OUTLIER_SUPPORT drivers above it
     top_sale = max(c['salePrice'] for c in pool)
