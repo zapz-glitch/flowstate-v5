@@ -420,6 +420,11 @@ export interface RehabLevelEstimate {
  */
 export interface ResponseContext {
   arvSource: 'appraisal' | 'comp-selection' | 'avm' | 'assessed'
+  /** Pipeline's canonical Set-B result (post verify-and-retry) — when
+   *  present it serializes instead of a recompute over the pool. */
+  pipelineBResult?: import('@flowstate-api/shared/appraisal').BResult | null
+  /** Verify-and-retry trail from the pipeline ladder */
+  bAttemptTrail?: string[]
   /** Null on insufficient-comps runs — no ARV was produced */
   finalArv: number | null
   /** The number the valuation was computed against — finalArv when present,
@@ -721,6 +726,8 @@ export interface AnalysisResponse {
       landRateSource: string | null
       sqftRateSource: string | null
       healed: boolean
+      /** Verify-and-retry trail — widen/deepen attempts + verdicts */
+      attemptTrail: string[]
       drivers: { address: string | null; contribution: number; tier: string; conditionTier: string }[]
     } | null
     buyPrice: number
@@ -1227,6 +1234,13 @@ export function buildAnalysisResponse(
   const devSignal = detectDevelopmentSignal(property, ctx.subjectListPrice, ctx.finalArv)
   if (devSignal) riskFlags.push(devSignal)
 
+  // B unverified — the retry ladder ran and the answer still failed an
+  // invariant (e.g. below as-is AVM). Flag it so the underwriter sees the
+  // evidence bound, not just the number.
+  if (ctx.bAttemptTrail?.length && ctx.bAttemptTrail[ctx.bAttemptTrail.length - 1].startsWith('final — unverified')) {
+    riskFlags.push(`Set-B evidence unverified after retry: ${ctx.bAttemptTrail[ctx.bAttemptTrail.length - 1].replace('final — unverified (', '').replace(')', '')}`)
+  }
+
   // ARV vs asking price is surfaced on the valuation hero (list price cell
   // + realism verdict) — not emitted as a risk flag.
 
@@ -1401,11 +1415,10 @@ export function buildAnalysisResponse(
       ? 'county assessed value — no comp ARV evidence (conservative anchor)'
     : ctx.classificationSummary?.methodology ?? `avg price/sqft of ${enabledComps.length} comp${enabledComps.length !== 1 ? 's' : ''} × subject sqft`
 
-  // ── Set-B parallel ARV (trade-tricks methodology) ──────────────────────
-  // Calibrated harness ported to shared/appraisal — runs over the same
-  // serialized comp pool, produces a parallel arvB + full mechanics trail.
-  // Parallel output for verification; not yet the pipeline ARV.
-  const bResult = evaluateB(
+  // ── Set-B ARV (trade-tricks methodology) ───────────────────────────────
+  // The pipeline's post-retry result is canonical; serialization falls back
+  // to a recompute over the serialized pool only when no result was passed.
+  const bResult = ctx.pipelineBResult ?? evaluateB(
     {
       squareFeet: property.squareFeet ?? null,
       yearBuilt: property.yearBuilt ?? null,
@@ -1582,6 +1595,7 @@ export function buildAnalysisResponse(
         landRateSource: bResult.landRateSource ?? null,
         sqftRateSource: bResult.sqftRateSource ?? null,
         healed: bResult.healed ?? false,
+        attemptTrail: ctx.bAttemptTrail ?? [],
         drivers: bResult.drivers.map((d) => ({
           address: d.comp.address ?? null,
           contribution: Math.round(d.contrib),

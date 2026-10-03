@@ -119,6 +119,12 @@ export interface EvaluationParams {
    */
   expandComparablesPool?: (radiusMiles: number, monthsBack?: number) => Promise<NormalizedComparable[] | null>
   /**
+   * Deepen seam — re-fetch comp details (valuation + tax-history for the
+   * ATTOM provider) for pool members lacking AVM/land evidence. Used by
+   * the B verify-and-retry ladder's third attempt.
+   */
+  enrichComparables?: (comps: NormalizedComparable[]) => Promise<NormalizedComparable[] | null>
+  /**
    * Subject photo bundle prefetched by the caller so the scrape overlaps the
    * comparables fetch. `undefined` = not prefetched — fetch inline.
    * `null` = prefetch ran and found nothing / provider unavailable — don't
@@ -1114,8 +1120,29 @@ export async function performAnalysis(
   // on the B anchor so every downstream dollar is priced off verified
   // evidence, not the blend.
   if (clefCompPromise) await clefCompPromise.catch(() => undefined)
+  let pipelineBResult: ReturnType<typeof evaluateB> | null = null
+  let bAttemptTrail: string[] = []
   {
-    const bComps: BComp[] = appraisalResult.comparables.map((comp) => ({
+    // Verify-and-retry — the harness ladder in-pipeline. Verification tests
+    // answer-level invariants (evidence coherence, never outcome appeal);
+    // retries add NEW evidence rather than re-rolling: A2 widens retrieval,
+    // A3 deepens enrichment for comps lacking AVM/land. Bounded at 3
+    // attempts — a persistently failing pool ships its honest fallback
+    // tier, never a forced number.
+    const bSubjectFields = {
+      squareFeet: bundle.property.squareFeet ?? null,
+      yearBuilt: bundle.property.yearBuilt ?? null,
+      censusTract: bundle.property.censusTract ?? null,
+      subdivision: bundle.property.subdivision ?? null,
+      landAssessedValue: bundle.property.landAssessedValue ?? null,
+      taxAssessment: bundle.property.assessedValue ?? null,
+      assessedValue: bundle.property.assessedValue ?? null,
+      avmValue: subjectAvm ?? null,
+      lotSizeAcres: bundle.property.lotSizeAcres ?? null,
+      lotSizeSquareFeet: bundle.property.lotSizeSquareFeet ?? null,
+      condition: valuation?.rehabLevel ?? null,
+    }
+    const toBComps = (): BComp[] => appraisalResult.comparables.map((comp) => ({
       address: comp.address ?? null,
       isEnabled: comp.isEnabled,
       salePrice: comp.salePrice ?? null,
@@ -1141,23 +1168,94 @@ export async function performAnalysis(
       evidenceVerification: comp.evidenceVerification ?? null,
       appraisalRules: comp.evaluation ? { totalAdjustment: comp.evaluation.totalAdjustment } : null,
     }))
-    const bResult = evaluateB(
-      {
-        squareFeet: bundle.property.squareFeet ?? null,
-        yearBuilt: bundle.property.yearBuilt ?? null,
-        censusTract: bundle.property.censusTract ?? null,
-        subdivision: bundle.property.subdivision ?? null,
-        landAssessedValue: bundle.property.landAssessedValue ?? null,
-        taxAssessment: bundle.property.assessedValue ?? null,
-        assessedValue: bundle.property.assessedValue ?? null,
-        avmValue: subjectAvm ?? null,
-        lotSizeAcres: bundle.property.lotSizeAcres ?? null,
-        lotSizeSquareFeet: bundle.property.lotSizeSquareFeet ?? null,
-        condition: valuation?.rehabLevel ?? null,
-      },
-      bComps,
-      { rehabCost: valuation?.totalRehabCost ?? null },
-    )
+
+    const verifyB = (r: ReturnType<typeof evaluateB>): string[] => {
+      const fails: string[] = []
+      if (r.arv == null) fails.push('no ARV — evidence pool produced no defensible answer')
+      else if (subjectAvm != null && r.arv < subjectAvm) fails.push('below as-is AVM')
+      if (r.drivers.length === 0) fails.push('no verified drivers')
+      if (r.conf === 'none') fails.push('no-confidence result')
+      return fails
+    }
+    const stampVerification = () => {
+      const tractPpsfs = appraisalResult.comparables
+        .filter((c) => c.censusTract != null && c.censusTract === bundle.property.censusTract)
+        .map((c) => c.pricePerSqft ?? (c.salePrice != null && c.squareFeet ? c.salePrice / c.squareFeet : null))
+        .filter((v): v is number => v != null && v > 0)
+        .sort((a, b) => a - b)
+      const ref = tractPpsfs.length >= 3 ? tractPpsfs[Math.floor(tractPpsfs.length / 2)] : null
+      for (const comp of appraisalResult.comparables) {
+        comp.evidenceVerification = verifyCompEvidence(bundle.property, comp, ref)
+      }
+    }
+
+    bAttemptTrail = []
+    let bResult = evaluateB(bSubjectFields, toBComps(), { rehabCost: valuation?.totalRehabCost ?? null })
+    let fails = verifyB(bResult)
+
+    // Attempt 2 — widen retrieval: fresh comps at a wider radius / longer
+    // window merge in, get verification-stamped, then B re-evaluates.
+    if (fails.length && params.expandComparablesPool) {
+      const baseRadius = bundle.metadata?.comparablesParams?.radiusMiles ?? 1
+      const widened = await params.expandComparablesPool(baseRadius + 1, (bundle.metadata?.comparablesParams?.monthsBack ?? 12) + 6)
+        .catch(() => null)
+      const existing = new Set(appraisalResult.comparables.map((c) => c.id))
+      const added = (widened ?? []).filter((c) => !existing.has(c.id))
+      if (added.length > 0) {
+        // Widened comps arrive un-appraised — stamp a pass-through
+        // evaluation so they join the pool as enabled evidence.
+        for (const c of added) {
+          appraisalResult.comparables.push({
+            ...c,
+            isEnabled: true,
+            adjustedSalePrice: c.salePrice ?? null,
+            evaluation: {
+              comparableId: c.id,
+              shouldDisable: false,
+              filterResults: [],
+              disableReasons: [],
+              totalAdjustment: 0,
+              adjustmentResults: [],
+              originalPrice: c.salePrice ?? null,
+              adjustedPrice: c.salePrice ?? null,
+            },
+          })
+        }
+        stampVerification()
+        bResult = evaluateB(bSubjectFields, toBComps(), { rehabCost: valuation?.totalRehabCost ?? null })
+        fails = verifyB(bResult)
+      }
+      bAttemptTrail.push(`attempt 2 widen: +${added.length} comp(s) — ${fails.length ? fails.join('; ') : 'verified'}`)
+    }
+
+    // Attempt 3 — deepen enrichment: fetch AVM/land evidence for pool
+    // members lacking it (the valuation + tax-history datasets), restamp,
+    // re-evaluate.
+    if (fails.length && params.enrichComparables) {
+      const thin = appraisalResult.comparables
+        .filter((c) => c.avmValue == null || c.landAssessedValue == null)
+        .sort((a, b) => (a.distanceMiles ?? 99) - (b.distanceMiles ?? 99))
+        .slice(0, 8)
+      const enriched = await params.enrichComparables(thin).catch(() => null)
+      const byId = new Map((enriched ?? []).map((c) => [c.id, c]))
+      let deepened = 0
+      for (const comp of appraisalResult.comparables) {
+        const e = byId.get(comp.id)
+        if (!e) continue
+        if (comp.avmValue == null && e.avmValue != null) { comp.avmValue = e.avmValue; deepened++ }
+        if (comp.landAssessedValue == null && e.landAssessedValue != null) { comp.landAssessedValue = e.landAssessedValue; deepened++ }
+      }
+      if (deepened > 0) {
+        stampVerification()
+        bResult = evaluateB(bSubjectFields, toBComps(), { rehabCost: valuation?.totalRehabCost ?? null })
+        fails = verifyB(bResult)
+      }
+      bAttemptTrail.push(`attempt 3 deepen: +${deepened} field(s) — ${fails.length ? fails.join('; ') : 'verified'}`)
+    }
+
+    if (bAttemptTrail.length === 0 && fails.length === 0) bAttemptTrail.push('attempt 1 — verified')
+    else if (fails.length) bAttemptTrail.push(`final — unverified (${fails.join('; ')})`)
+    pipelineBResult = bResult
     if (!insufficient && bResult.arv != null && bResult.arv !== finalArv) {
       const prevArv = finalArv
       finalArv = bResult.arv
@@ -1247,6 +1345,8 @@ export async function performAnalysis(
     {
       arvSource: finalArv != null ? 'appraisal' : avmAnchor != null ? 'avm' : assessedAnchor != null ? 'assessed' : 'appraisal',
       finalArv,
+      pipelineBResult,
+      bAttemptTrail,
       valuationAnchor,
       analysisId: jobId,
       // Subject condition tier — vision-derived (subject only; comps are

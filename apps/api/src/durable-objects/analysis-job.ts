@@ -1044,6 +1044,9 @@ export class AnalysisJobDO {
       // Radius-bound expansion tiers refetch instead of pretending the
       // fetched-radius pool contains candidates it never had.
       expandComparablesPool,
+      // B retry attempt 3 — per-comp valuation/tax-history fetch for pool
+      // members lacking AVM/land evidence.
+      enrichComparables: (comps: NormalizedComparable[]) => propertyApi.enrichComparables(comps, { concurrency: 8 }).catch(() => null),
       // attom-mcp comp enrichment happens in the census gate above —
       // passers only, 1 provider call each.
       prefetchedPhotoBundle,
