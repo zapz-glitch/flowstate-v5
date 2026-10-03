@@ -373,6 +373,17 @@ class PropertyAppraisalService implements AppraisalService {
   ): AppraisalResult {
     const filters = options?.filters ?? DEFAULT_FILTERS
     const adjustments = options?.adjustments ?? DEFAULT_ADJUSTMENTS
+
+    // One property = one comp — provider rows arrive per transaction, so
+    // the same parcel can enter twice (literal dupes, or a flip's buy +
+    // resale). The most recent valid sale is the comp's evidence.
+    const byParcel = new Map<string, NormalizedComparable>()
+    for (const c of comparables) {
+      const prev = byParcel.get(c.id)
+      if (!prev || (c.saleDate ?? '') > (prev.saleDate ?? '')) byParcel.set(c.id, c)
+    }
+    comparables = [...byParcel.values()]
+
     const evaluations = evaluateComparables(subject, comparables, filters, adjustments)
 
     // Build appraised comparables with enable/disable state based on rules

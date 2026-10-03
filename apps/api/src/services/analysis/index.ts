@@ -1268,6 +1268,12 @@ export function buildAnalysisResponse(
       riskFlags.push(
         `ARV ${money(b.arv)} rides a single comp (${b.anchorAddress ?? 'unidentified'}) — ${pct}% above the ${money(avm)} as-is estimate. Verify the anchor's pocket before trusting the spread.`,
       )
+    } else if (b?.arv != null && avm != null && b.arv > avm * 1.5) {
+      const pct = Math.round(((b.arv - avm) / avm) * 100)
+      const money = (n: number) => `$${Math.round(n).toLocaleString('en-US')}`
+      riskFlags.push(
+        `As-is AVM ${money(avm)} runs ${pct}% below comp-evidenced ARV ${money(b.arv)} — distressed/stale model read; the comps are the evidence here.`,
+      )
     }
   }
 
