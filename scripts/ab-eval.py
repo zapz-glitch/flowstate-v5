@@ -376,6 +376,24 @@ def set_b(subject, items, valuation=None):
         elif anchor['contrib'] < lo:
             flags.append('anchor below supporting range — check whether a better comp should drive')
 
+    # ── Self-verification & heal ──────────────────────────────────────────
+    # Don't just flag a suspect conclusion — fix it. The invariants:
+    # the anchor should be REPRESENTATIVE of its own driver set, not the
+    # floor. Most-similar ≠ most-representative when the nearest comp is
+    # also the cheapest product. Heal: re-anchor to the median-contribution
+    # driver (bounded — one heal, then the verdict stands with the trail).
+    if len(drivers) > 1:
+        driver_median = sorted(x['contrib'] for x in drivers)[len(drivers)//2]
+        suspect = anchor['contrib'] < 0.8 * driver_median or (support and anchor['contrib'] < lo)
+        if suspect:
+            healed = min(drivers, key=lambda x: abs(x['contrib'] - driver_median))
+            if healed is not anchor:
+                flags.append(
+                    f"self-heal: anchor {anchor['c']['address'][:30]} was the evidence floor "
+                    f"({fmt(anchor['contrib'])} vs driver median {fmt(driver_median)}) — "
+                    f"re-anchored to {healed['c']['address'][:30]}")
+                anchor, arv = healed, healed['contrib']
+
     # ── Condition adjustment — the URAR Condition line item ──────────────
     # An all-median driver set prices MEDIAN condition; the subject's
     # as-repaired condition earns the market's renovation premium:
@@ -444,6 +462,75 @@ def set_b(subject, items, valuation=None):
     return {'arv': round(arv), 'flags': flags, 'contribs': contribs, 'conf': conf,
             'drivers': drivers, 'bracket': bracket_flag, 'source': source}
 
+def verify_b(b):
+    """Verdict check — is the conclusion defensible against its own evidence?
+    Invariants, not outcomes — symmetric: heals low AND high anchors."""
+    fails = []
+    drivers = b.get('drivers') or []
+    if b.get('arv') is None:
+        return fails  # cascade already resolved — nothing to verify
+    if len(drivers) < 2:
+        fails.append('thin evidence (<2 drivers)')
+    for f in b.get('flags') or []:
+        if 'uncorroborated' in f: fails.append('uncorroborated')
+    # anchor-floor — test the condition, not the flag text: the flag prints
+    # before self-heal runs, so reading it would fail healed attempts forever
+    contribs = sorted(x['contrib'] for x in drivers)
+    if contribs and b['arv'] < 0.8 * contribs[len(contribs)//2]:
+        fails.append('below evidence median')
+    if contribs and b['arv'] > 1.25 * contribs[-1]:
+        fails.append('above evidence top')
+    return fails
+
+def widen_evidence(subject, items):
+    """A2 — expanded search: pull the subject's market-context recent sales
+    and merge any the comp fetch missed (dedupe by normalized address)."""
+    res = mcp_tool('get_property_data', {
+        'property': {'lookupMode': 'attomId', 'attomId': str(subject.get('id'))},
+        'datasets': ['market-context']})
+    try:
+        sales = (res['structuredContent']['results'][0]['data'].get('nearbySales')
+                 or res['structuredContent']['results'][0]['data'].get('recentSales') or [])
+    except Exception: return 0
+    have = {(c.get('address') or '').split(',')[0].strip().lower() for c in items}
+    added = 0
+    for s_ in sales:
+        addr = (s_.get('address') or s_.get('oneLine') or '').split(',')[0].strip().lower()
+        if not addr or addr in have: continue
+        if not (s_.get('salePrice') or s_.get('price')) or not s_.get('squareFootage'): continue
+        items.append({
+            'id': str(s_.get('attomId') or addr), 'address': s_.get('address') or addr,
+            'salePrice': s_.get('salePrice') or s_.get('price'),
+            'saleDate': s_.get('saleDate') or s_.get('recordingDate'),
+            'squareFeet': s_.get('squareFootage'),
+            'yearBuilt': s_.get('yearBuilt'), 'distanceMiles': s_.get('distanceMiles'),
+            'latitude': s_.get('latitude'), 'longitude': s_.get('longitude'),
+            'isEnabled': True, 'disableReasons': [], 'supplement': 'market-context retry',
+        })
+        have.add(addr); added += 1
+    return added
+
+def deepen_evidence(subject, items):
+    """A3 — verify transaction data: fill missing comp AVMs + land values."""
+    filled = 0
+    for c in items:
+        if not c.get('id'): continue
+        if c.get('avmValue') is None:
+            res = mcp_tool('get_property_data', {
+                'property': {'lookupMode': 'attomId', 'attomId': str(c['id'])},
+                'datasets': ['valuation']})
+            try:
+                rows = res['structuredContent']['results'][0]['data']
+                avm = (rows[0] if isinstance(rows, list) else rows).get('avm', {}).get('value') \
+                      or (rows[0] if isinstance(rows, list) else rows).get('avmValue')
+                if avm: c['avmValue'] = avm; filled += 1
+            except Exception: pass
+        if c.get('landAssessedValue') is None:
+            lv = land_value_of(c['id'])
+            if lv is not None: c['landAssessedValue'] = lv; filled += 1
+        if filled >= 12: break  # cap call volume per attempt
+    return filled
+
 def run_address(addr):
     t0 = time.time()
     job = req('POST', '/v1/analyze', {'address': addr, 'skipCache': True})['data']['jobId']
@@ -463,7 +550,27 @@ def run_address(addr):
         d = req('GET', f'/v1/analyze/jobs/{job}')['data']['result'] or d
 
     s, val, comps = d['subject'], d.get('valuation') or {}, d['comps']
-    b = set_b(s, comps['items'], d.get('valuation'))
+    items = list(comps['items'])
+
+    # ── Verify-and-retry loop — max 3 attempts, ship best-verified ──────
+    b, trail = None, []
+    for attempt in (1, 2, 3):
+        b = set_b(s, items, val)
+        fails = verify_b(b)
+        if not fails:
+            if attempt > 1: b['flags'].append(f'attempt {attempt} verified clean')
+            break
+        trail.append(f'attempt {attempt} fails: {", ".join(fails)}')
+        if attempt == 1:
+            n = widen_evidence(s, items)
+            trail.append(f'attempt 2 prep: widened evidence +{n} comps')
+        elif attempt == 2:
+            n = deepen_evidence(s, items)
+            trail.append(f'attempt 3 prep: deepened enrichment +{n} fields')
+    else:
+        pass
+    b['flags'] = trail + b['flags']
+    comps['items'] = items
     sel = [c for c in comps['items'] if c.get('arvStatus') == 'selected' or (c['isEnabled'] and c.get('salePrice'))]
 
     return {'addr': addr, 'elapsed': elapsed, 'subject': s,
