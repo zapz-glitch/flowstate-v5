@@ -279,6 +279,13 @@ export interface SubjectData {
   listingDetails?: ListingDetails | null
   /** Asking/list price scraped from the subject's listing (null when off-market) */
   listPrice?: number | null
+  /** Set-B evidence fields — serialized from the pipeline */
+  censusTract?: string | null
+  sameBlockGroup?: boolean | null
+  crossesMajorRoad?: boolean | null
+  landAssessedValue?: number | null
+  evidenceVerification?: { staleness?: string | null; priceCheck?: string | null; flags?: string[] | null } | null
+  disableReasons?: string[] | null
   /** Foundation type (e.g., Slab, Crawl Space, Basement) */
   foundationType?: string | null
   /** Building style (e.g., Colonial, Cape Cod, Ranch) */
@@ -496,6 +503,7 @@ export interface CompItem {
   yearBuilt?: number | null
   lotSizeAcres?: number | null
   lotSizeSquareFeet?: number | null
+  propertyType?: string | null
   adjustedPrice?: number | null
   qualityScore?: number | null
   condition?: string | null
@@ -503,6 +511,9 @@ export interface CompItem {
   photos?: string[]
   /** Subdivision name (if available) */
   subdivision?: string | null
+  /** Set-B evidence fields — serialized from the pipeline */
+  landAssessedValue?: number | null
+  evidenceVerification?: { staleness?: string | null; priceCheck?: string | null; flags?: string[] | null } | null
   /** Foundation type (e.g., Slab, Crawl Space, Basement) */
   foundationType?: string | null
   /** Building style (e.g., Colonial, Cape Cod, Ranch) */
@@ -747,6 +758,7 @@ export interface CompItem {
   yearBuilt?: number | null
   lotSizeAcres?: number | null
   lotSizeSquareFeet?: number | null
+  propertyType?: string | null
   adjustedPrice?: number | null
   qualityScore?: number | null
   condition?: string | null
@@ -754,6 +766,9 @@ export interface CompItem {
   photos?: string[]
   /** Subdivision name (if available) */
   subdivision?: string | null
+  /** Set-B evidence fields — serialized from the pipeline */
+  landAssessedValue?: number | null
+  evidenceVerification?: { staleness?: string | null; priceCheck?: string | null; flags?: string[] | null } | null
   /** Foundation type (e.g., Slab, Crawl Space, Basement) */
   foundationType?: string | null
   /** Building style (e.g., Colonial, Cape Cod, Ranch) */

@@ -32,6 +32,7 @@ import {
   passesHardFilters,
   scoreComp,
 } from '@flowstate-api/shared'
+import { evaluateB, type BComp } from '@flowstate-api/shared/appraisal'
 
 /**
  * Check whether the user has changed any filter or adjustment settings
@@ -186,8 +187,52 @@ export function recalculateReport(
   const enabledCount = arvComps.filter((c) => c.isEnabled).length
   const disabledCount = comps.length - enabledCount
 
-  // 4. Calculate ARV from the evidence pool
-  const arv = calculateARV(arvCompsForCalc, subject.squareFeet)
+  // 4. ARV — the same Set-B engine the pipeline runs, on the serialized
+  //    (stamped) comps. Legacy mean math remains the fallback for reports
+  //    saved before stamps existed.
+  const bComps: BComp[] = comps.map((c, i) => ({
+    address: c.address ?? null,
+    isEnabled: compEvaluations[i].isEnabled,
+    salePrice: c.salePrice ?? null,
+    saleDate: c.saleDate ?? null,
+    squareFeet: c.squareFeet ?? null,
+    pricePerSqft: c.pricePerSqft ?? null,
+    adjustedPrice: c.adjustedPrice ?? null,
+    distanceMiles: c.distanceMiles ?? null,
+    sameBlockGroup: c.sameBlockGroup ?? null,
+    censusTract: c.censusTract ?? null,
+    subdivision: c.subdivision ?? null,
+    yearBuilt: c.yearBuilt ?? null,
+    lotSizeAcres: c.lotSizeAcres ?? null,
+    lotSizeSquareFeet: c.lotSizeSquareFeet ?? null,
+    landAssessedValue: c.landAssessedValue ?? null,
+    propertyType: c.propertyType ?? null,
+    crossesMajorRoad: c.crossesMajorRoad ?? null,
+    disableReasons: (c.disableReasons as string[] | null) ?? null,
+    classification: c.userTier === 'as_is' ? { type: 'as_is' }
+      : c.userTier === 'arv' ? { type: 'after_renovation' }
+      : c.classification ?? null,
+    curbAppeal: (c.curbAppeal as BComp['curbAppeal']) ?? null,
+    evidenceVerification: (c.evidenceVerification as BComp['evidenceVerification']) ?? null,
+    appraisalRules: c.appraisalRules
+      ? { totalAdjustment: (c.appraisalRules as { totalAdjustment?: number | null }).totalAdjustment ?? null }
+      : null,
+  }))
+  const bSubject = {
+    squareFeet: subject.squareFeet ?? null,
+    yearBuilt: subject.yearBuilt ?? null,
+    censusTract: subject.censusTract ?? null,
+    subdivision: subject.subdivision ?? null,
+    landAssessedValue: subject.landAssessedValue ?? null,
+    taxAssessment: (subject as { taxAssessment?: number | null }).taxAssessment ?? (subject as { assessedValue?: number | null }).assessedValue ?? null,
+    assessedValue: (subject as { assessedValue?: number | null }).assessedValue ?? null,
+    avmValue: subjectAvm,
+    lotSizeAcres: subject.lotSizeAcres ?? null,
+    lotSizeSquareFeet: subject.lotSizeSquareFeet ?? null,
+    condition: data.valuation?.rehabLevel ?? null,
+  }
+  const bResult = evaluateB(bSubject, bComps, { rehabCost: data.valuation?.rehabCost ?? null })
+  const arv = bResult.arv ?? calculateARV(arvCompsForCalc, subject.squareFeet)
 
   // 4b. Groups come from evidence classification — not price percentile.
   //     'arv' = after_renovation evidence; 'as_is' = investor-priced
