@@ -36,6 +36,28 @@ export interface ReportMetrics {
   asIsValue: number | null
   maxAllowableOffer: number | null
   estimatedRepairs: number | null
+  /** Set-B mechanics — queryable without parsing full_response_json */
+  arvSource?: string | null
+  bConfidence?: string | null
+  bHealed?: boolean | null
+  bAnchorAddress?: string | null
+  bFlagCount?: number | null
+}
+
+/** Extract Set-B mechanics from the serialized valuation block. */
+export function bMetricsFromValuation(valuation: Record<string, unknown> | null | undefined) {
+  const m = valuation?.bMechanics as {
+    source?: string; confidence?: string; healed?: boolean;
+    anchorAddress?: string | null; flags?: string[]
+  } | null | undefined
+  if (!m) return {}
+  return {
+    arvSource: m.source ?? null,
+    bConfidence: m.confidence ?? null,
+    bHealed: m.healed ?? null,
+    bAnchorAddress: m.anchorAddress ?? null,
+    bFlagCount: Array.isArray(m.flags) ? m.flags.length : null,
+  }
 }
 
 export async function upsertPropertyReport(

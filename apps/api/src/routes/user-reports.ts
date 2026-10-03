@@ -64,8 +64,8 @@ userReports.post('/:jobId/comps', bodyLimit({ maxSize: 20000 }), async (c) => {
   const results = await c.env.DB.batch([
     c.env.DB.prepare('INSERT INTO report_history (id, report_id, user_id, action, description, changes_json, created_at) SELECT ?, id, user_id, ?, ?, ?, ? FROM saved_reports WHERE id = ? AND user_id = ? AND full_response_json = ?')
       .bind(crypto.randomUUID(), 'comp_selection', description, changes, new Date().toISOString(), report.id, session.user.id, report.fullResponseJson),
-    c.env.DB.prepare('UPDATE saved_reports SET full_response_json = ?, valuation_data = ?, comparables_data = ?, arv = ?, as_is_value = ?, max_allowable_offer = ?, estimated_repairs = ? WHERE id = ? AND user_id = ? AND full_response_json = ?')
-      .bind(nextJson, JSON.stringify(analysis.valuation), JSON.stringify(analysis.comps), analysis.valuation?.arv ?? null, analysis.valuation?.asIsValue ?? null, analysis.valuation?.buyPrice ?? null, analysis.valuation?.rehabCost ?? null, report.id, session.user.id, report.fullResponseJson),
+    c.env.DB.prepare('UPDATE saved_reports SET full_response_json = ?, valuation_data = ?, comparables_data = ?, arv = ?, as_is_value = ?, max_allowable_offer = ?, estimated_repairs = ?, arv_source = ?, b_confidence = ?, b_healed = ?, b_anchor_address = ?, b_flag_count = ? WHERE id = ? AND user_id = ? AND full_response_json = ?')
+      .bind(nextJson, JSON.stringify(analysis.valuation), JSON.stringify(analysis.comps), analysis.valuation?.arv ?? null, analysis.valuation?.asIsValue ?? null, analysis.valuation?.buyPrice ?? null, analysis.valuation?.rehabCost ?? null, analysis.valuation?.bMechanics?.source ?? null, analysis.valuation?.bMechanics?.confidence ?? null, analysis.valuation?.bMechanics?.healed ?? null, analysis.valuation?.bMechanics?.anchorAddress ?? null, Array.isArray(analysis.valuation?.bMechanics?.flags) ? analysis.valuation.bMechanics.flags.length : null, report.id, session.user.id, report.fullResponseJson),
   ])
   if (results[1].meta.changes !== 1) return c.json({ error: 'This report changed. Reload it before editing comparables.' }, 409)
   return c.json({ analysis })

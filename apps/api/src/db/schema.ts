@@ -175,6 +175,13 @@ export const savedReports = sqliteTable(
     asIsValue: real('as_is_value'),
     maxAllowableOffer: real('max_allowable_offer'),
     estimatedRepairs: real('estimated_repairs'),
+    // Set-B mechanics — extracted for queryable QA at volume (all T3
+    // fallbacks, all healed runs, etc.) without parsing full_response_json.
+    arvSource: text('arv_source'),
+    bConfidence: text('b_confidence'),
+    bHealed: integer('b_healed', { mode: 'boolean' }),
+    bAnchorAddress: text('b_anchor_address'),
+    bFlagCount: integer('b_flag_count'),
     // Workflow link
     jobId: text('job_id'), // Links to workflow job
     pdfKey: text('pdf_key'), // Reserved for future PDF support
@@ -194,6 +201,7 @@ export const savedReports = sqliteTable(
     index('idx_saved_reports_created_at').on(table.createdAt),
     index('idx_saved_reports_job_id').on(table.jobId),
     index('idx_saved_reports_address').on(table.userId, table.propertyAddress),
+    index('idx_saved_reports_arv_source').on(table.userId, table.arvSource),
   ]
 )
 

@@ -39,7 +39,7 @@ import { resolveParcelApn } from '../services/geo/parcel-gis'
 import { resolveZoning } from '../services/geo/zoning'
 import { drizzle } from 'drizzle-orm/d1'
 import { and, eq } from 'drizzle-orm'
-import { upsertPropertyReport } from '../services/report-upsert'
+import { upsertPropertyReport, bMetricsFromValuation } from '../services/report-upsert'
 import { notifyEvalComplete } from '../routes/offers'
 import { analysisRuns, savedReports } from '../db/schema'
 import {
@@ -1110,6 +1110,7 @@ export class AnalysisJobDO {
         asIsValue: (val?.asIsValue as number) ?? null,
         maxAllowableOffer: (val?.buyPrice as number) ?? null,
         estimatedRepairs: (val?.rehabCost as number) ?? null,
+        ...bMetricsFromValuation(val),
       }
 
       await upsertPropertyReport(db, {
@@ -1195,6 +1196,7 @@ export class AnalysisJobDO {
         asIsValue: (val?.asIsValue as number) ?? null,
         maxAllowableOffer: (val?.buyPrice as number) ?? null,
         estimatedRepairs: (val?.rehabCost as number) ?? null,
+        ...bMetricsFromValuation(val),
       })
     } catch (e) {
       console.warn('[AnalysisJobDO] curb-appeal re-save failed:', e instanceof Error ? e.message : e)
@@ -1300,6 +1302,7 @@ export class AnalysisJobDO {
             asIsValue: (valuation?.asIsValue as number) ?? null,
             maxAllowableOffer: (valuation?.buyPrice as number) ?? null,
             estimatedRepairs: (valuation?.rehabCost as number) ?? null,
+            ...bMetricsFromValuation(valuation),
           })
           if (config.evalResultCacheKey) {
             await this.env.API_CACHE.put(config.evalResultCacheKey, config.jobId, {

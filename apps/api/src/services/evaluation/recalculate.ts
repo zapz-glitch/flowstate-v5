@@ -16,6 +16,7 @@ import type { Env } from '../../types'
 import { createValuationService } from '../valuation'
 import type { ValuationResult, MajorItem } from '../valuation/types'
 import type { AnalysisResponse } from '../analysis'
+import { evaluateB, bCondTier, type BComp } from '@flowstate-api/shared/appraisal'
 
 const MAX_ARV_COMPS = 3
 
@@ -109,20 +110,80 @@ export async function recalculateReport(
     throw Object.assign(new Error('No comparable sales selected for ARV calculation.'), { status: 422 })
   }
 
-  // ARV = mean(adjustedPrice / compSqft) × subjectSqft, with a
-  // mean-adjusted-price fallback when sqft data is missing
-  const withSqft = arvComps.filter((c) => (c.squareFeet ?? 0) > 0)
+  // Set-B replay — saved comps carry their pinned evidence stamps
+  // (classification, curbAppeal, evidenceVerification) so the evaluation
+  // is deterministic: same stamps in, same ARV out. An operator selection
+  // constrains the enabled evidence set; the full pool still feeds pocket
+  // medians/verification context.
+  const enabledIds = selectedCompIds === null ? null : new Set(selectedCompIds)
+  const bComps: BComp[] = items.map((c) => ({
+    address: (c.address as string) ?? null,
+    isEnabled: enabledIds ? enabledIds.has(c.id) : c.isEnabled !== false,
+    salePrice: c.salePrice ?? null,
+    saleDate: (c.saleDate as string) ?? null,
+    squareFeet: c.squareFeet ?? null,
+    pricePerSqft: (c.pricePerSqft as number) ?? null,
+    adjustedPrice: c.adjustedPrice ?? null,
+    distanceMiles: (c.distanceMiles as number) ?? null,
+    sameBlockGroup: (c.sameBlockGroup as boolean) ?? null,
+    censusTract: (c.censusTract as string) ?? null,
+    subdivision: (c.subdivision as string) ?? null,
+    yearBuilt: (c.yearBuilt as number) ?? null,
+    lotSizeAcres: (c.lotSizeAcres as number) ?? null,
+    lotSizeSquareFeet: (c.lotSizeSquareFeet as number) ?? null,
+    landAssessedValue: (c.landAssessedValue as number) ?? null,
+    propertyType: (c.propertyType as string) ?? null,
+    crossesMajorRoad: (c.crossesMajorRoad as boolean) ?? null,
+    disableReasons: (c.disableReasons as string[]) ?? null,
+    classification: c.classification ?? null,
+    curbAppeal: (c.curbAppeal as BComp['curbAppeal']) ?? null,
+    evidenceVerification: (c.evidenceVerification as BComp['evidenceVerification']) ?? null,
+    appraisalRules: c.appraisalRules
+      ? { totalAdjustment: (c.appraisalRules as { totalAdjustment?: number | null }).totalAdjustment ?? null }
+      : null,
+  }))
+  const subject = (saved.subject ?? {}) as Record<string, unknown>
+  const savedVal = (saved.valuation ?? {}) as Record<string, unknown>
+  const subjectAvm = (subject.avm as { value?: number } | undefined)?.value ?? (subject.avmValue as number) ?? null
+  const bResult = evaluateB(
+    {
+      squareFeet: subjectSqft || null,
+      yearBuilt: (subject.yearBuilt as number) ?? null,
+      censusTract: (subject.censusTract as string) ?? null,
+      subdivision: (subject.subdivision as string) ?? null,
+      landAssessedValue: (subject.landAssessedValue as number) ?? null,
+      taxAssessment: (subject.assessedValue as number) ?? null,
+      assessedValue: (subject.assessedValue as number) ?? null,
+      avmValue: subjectAvm,
+      lotSizeAcres: (subject.lotSizeAcres as number) ?? null,
+      lotSizeSquareFeet: (subject.lotSizeSquareFeet as number) ?? null,
+      condition: (savedVal.rehabLevel as string) ?? null,
+    },
+    bComps,
+    { rehabCost: (savedVal.rehabCost as number) ?? null },
+  )
+
+  // ARV = Set-B anchor when the verified evidence supports it; the legacy
+  // mean math remains the fallback for reports saved before stamps existed.
   let arv: number
-  if (withSqft.length === arvComps.length && subjectSqft > 0) {
-    const meanPerSqft = arvComps.reduce(
-      (sum, c) => sum + (c.adjustedPrice ?? c.salePrice!) / (c.squareFeet as number),
-      0
-    ) / arvComps.length
-    arv = Math.round(meanPerSqft * subjectSqft)
+  let arvSource: string
+  if (bResult.arv != null) {
+    arv = bResult.arv
+    arvSource = bResult.source
   } else {
-    arv = Math.round(
-      arvComps.reduce((sum, c) => sum + (c.adjustedPrice ?? c.salePrice!), 0) / arvComps.length
-    )
+    const withSqft = arvComps.filter((c) => (c.squareFeet ?? 0) > 0)
+    if (withSqft.length === arvComps.length && subjectSqft > 0) {
+      const meanPerSqft = arvComps.reduce(
+        (sum, c) => sum + (c.adjustedPrice ?? c.salePrice!) / (c.squareFeet as number),
+        0
+      ) / arvComps.length
+      arv = Math.round(meanPerSqft * subjectSqft)
+    } else {
+      arv = Math.round(
+        arvComps.reduce((sum, c) => sum + (c.adjustedPrice ?? c.salePrice!), 0) / arvComps.length
+      )
+    }
+    arvSource = 'legacy-mean'
   }
 
   // Re-run valuation with the report's applied settings snapshot
@@ -173,8 +234,31 @@ export async function recalculateReport(
       ...(saved.valuation ?? {}),
       arv,
       arvPerSqft: subjectSqft > 0 ? Math.round(arv / subjectSqft) : null,
-      arvSource: 'appraisal',
-      arvMethodology: `avg(adjustedPrice/compSqft × subjectSqft) across ${arvComps.length} operator-selected comp${arvComps.length !== 1 ? 's' : ''}`,
+      arvSource,
+      arvB: bResult.arv,
+      arvMethodology: bResult.arv != null
+        ? `Set-B replay: ${bResult.source}${bResult.anchorAddress ? ` — anchored ${bResult.anchorAddress}` : ''}`
+        : `avg(adjustedPrice/compSqft × subjectSqft) across ${arvComps.length} operator-selected comp${arvComps.length !== 1 ? 's' : ''}`,
+      bMechanics: bResult.arv != null
+        ? {
+            source: bResult.source,
+            confidence: bResult.conf,
+            bracket: bResult.bracket,
+            flags: bResult.flags,
+            anchorAddress: bResult.anchorAddress ?? null,
+            conditionAdj: bResult.conditionAdj ?? null,
+            ceiling: bResult.ceiling ?? null,
+            landRateSource: bResult.landRateSource ?? null,
+            sqftRateSource: bResult.sqftRateSource ?? null,
+            healed: bResult.healed ?? false,
+            drivers: bResult.drivers.map((d) => ({
+              address: d.comp.address ?? null,
+              contribution: Math.round(d.contrib),
+              tier: d.tier,
+              conditionTier: bCondTier(d.comp),
+            })),
+          }
+        : null,
       buyPrice: valuation.buyPrice,
       buyPricePercent: valuation.buyPricePercent,
       rehabCost: valuation.totalRehabCost,
