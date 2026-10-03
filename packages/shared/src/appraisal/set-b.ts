@@ -494,7 +494,16 @@ export function evaluateB(
     if (subBase && cBase && cBase !== subBase) return false
     return true
   }
-  let anchor = ranked.find(anchorable) ?? null
+  // Pocket-ARV preference — a VERIFIED renovated comp on the subject's own
+  // block group is the going ARV rate for the block. It outranks every
+  // similarity score: same-BG + renovated-verdict anchors before any
+  // distance/size math ranks the rest.
+  let anchor = ranked.find((x) =>
+    anchorable(x) && x.comp.sameBlockGroup === true &&
+    (bCondTier(x.comp) === 'renovated' || bCondTier(x.comp) === 'premium')) ?? null
+  if (anchor)
+    flags.push(`${anchor.comp.address}: same-block renovated comp — the pocket's going ARV rate`)
+  if (anchor == null) anchor = ranked.find(anchorable) ?? null
   if (anchor == null && ranked.length) anchor = ranked[0]
   if (ranked[0] && !anchorable(ranked[0]) && anchor !== ranked[0])
     flags.push(`${ranked[0].comp.address}: ${ranked[0].comp.sqftConflict ??
@@ -532,10 +541,14 @@ export function evaluateB(
       (support.length > 0 && anchor.contrib < Math.min(...support.map((x) => x.contrib)))
     if (suspect) {
       const unconflicted = drivers.filter(anchorable)
-      const healedAnchor = unconflicted.length
-        ? unconflicted.reduce((a, b) =>
-            Math.abs(b.contrib - driverMedian) < Math.abs(a.contrib - driverMedian) ? b : a)
-        : null
+      const healedAnchor =
+        unconflicted.find((x) =>
+          x.comp.sameBlockGroup === true &&
+          (bCondTier(x.comp) === 'renovated' || bCondTier(x.comp) === 'premium')) ??
+        (unconflicted.length
+          ? unconflicted.reduce((a, b) =>
+              Math.abs(b.contrib - driverMedian) < Math.abs(a.contrib - driverMedian) ? b : a)
+          : null)
       if (healedAnchor != null && healedAnchor !== anchor) {
         flags.push(`self-heal: anchor ${(anchor.comp.address ?? '').slice(0, 30)} was the evidence floor ` +
           `(${usd(anchor.contrib)} vs driver median ${usd(driverMedian)}) — re-anchored to ${(healedAnchor.comp.address ?? '').slice(0, 30)}`)
