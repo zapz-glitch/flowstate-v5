@@ -1,8 +1,9 @@
 'use client'
 
-import { useMemo, useCallback } from 'react'
+import { useMemo, useCallback, useRef, useState } from 'react'
 import dynamic from 'next/dynamic'
 import type { SubjectData, CompItem } from './shared-types'
+import { CompCard } from './CompCard'
 import { getCompKey } from './format-helpers'
 import { isValidCoordinate } from '@/lib/property-map-geometry'
 
@@ -80,6 +81,31 @@ export function PropertyMap({ subject, comps, selectedCompKeys, onMarkerSelect, 
     onMarkerSelect?.(markerType, compKey)
   }, [onMarkerSelect])
 
+  // Marker hover → the real CompCard overlaid on the map. Hover-intent
+  // timing: 250ms grace when leaving the marker so the pointer can reach
+  // the card; leaving the card dismisses after a short delay.
+  const compByKey = useMemo(() => {
+    const map = new Map<string, { comp: CompItem; index: number }>()
+    comps?.items?.forEach((comp, i) => map.set(getCompKey(comp, i), { comp, index: i }))
+    return map
+  }, [comps])
+
+  const [hoveredComp, setHoveredComp] = useState<{ comp: CompItem; index: number } | null>(null)
+  const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const cancelHide = useCallback(() => {
+    if (hideTimer.current) { clearTimeout(hideTimer.current); hideTimer.current = null }
+  }, [])
+  const scheduleHide = useCallback((ms = 250) => {
+    cancelHide()
+    hideTimer.current = setTimeout(() => setHoveredComp(null), ms)
+  }, [cancelHide])
+
+  const handleMarkerHover = useCallback((marker: MapMarker | null) => {
+    const hit = marker && marker.type !== 'subject' && marker.compKey ? compByKey.get(marker.compKey) : undefined
+    if (hit) { cancelHide(); setHoveredComp(hit) }
+    else scheduleHide()
+  }, [compByKey, cancelHide, scheduleHide])
+
   if (!markers.some(marker => marker.type === 'subject')) return null
 
   return (
@@ -88,8 +114,18 @@ export function PropertyMap({ subject, comps, selectedCompKeys, onMarkerSelect, 
       key={`${subject?.address}|${subject?.latitude}|${subject?.longitude}`}
       markers={markers}
       onMarkerClick={handleMarkerClick}
+      onMarkerHover={handleMarkerHover}
       activeMarkerKey={activeMarkerKey}
     />
+      {hoveredComp && (
+        <div
+          className="absolute left-2 top-2 z-20 w-[22rem] max-h-[85%] overflow-y-auto rounded-lg border border-border bg-background/95 shadow-xl backdrop-blur-sm"
+          onMouseEnter={cancelHide}
+          onMouseLeave={() => scheduleHide(150)}
+        >
+          <CompCard comp={hoveredComp.comp} index={hoveredComp.index} subject={subject ?? undefined} isExpanded />
+        </div>
+      )}
     </div>
   )
 }
