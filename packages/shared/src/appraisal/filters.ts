@@ -293,15 +293,29 @@ const evaluators: Record<FilterType, FilterEvaluator> = {
       }
     }
 
+    // Era-class match for all other subjects: same era → pass; adjacent
+    // → pass flagged; 2+ gaps → fail (appraiser era-class semantics).
+    const ERA_NAMES = ['vintage (≤1945)', 'post-war (1946-69)', 'late-20th (1970-89)', '90s-00s (1990-2009)', 'modern (2010+)']
+    const eraIndex = (y: number) => y <= 1945 ? 0 : y <= 1969 ? 1 : y <= 1989 ? 2 : y <= 2009 ? 3 : 4
+    const sEra = eraIndex(subject.yearBuilt)
+    const cEra = eraIndex(comp.yearBuilt)
+    const eraGap = Math.abs(cEra - sEra)
     const diff = Math.abs(comp.yearBuilt - subject.yearBuilt)
-    const passed = diff <= filter.value
-
+    if (eraGap >= 2) {
+      return {
+        type: 'year_built_diff',
+        passed: false,
+        reason: `Era mismatch: ${ERA_NAMES[cEra]} comp vs ${ERA_NAMES[sEra]} subject`,
+        actualValue: diff,
+        threshold: 'same or adjacent era',
+      }
+    }
     return {
       type: 'year_built_diff',
-      passed,
-      reason: passed ? undefined : `Year built difference too large: ${diff} years (max: ${filter.value})`,
+      passed: true,
+      reason: eraGap === 1 ? `Adjacent era: ${ERA_NAMES[cEra]} comp vs ${ERA_NAMES[sEra]} subject — flagged` : undefined,
       actualValue: diff,
-      threshold: filter.value,
+      threshold: 'same or adjacent era',
     }
   },
 

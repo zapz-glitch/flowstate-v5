@@ -207,12 +207,15 @@ function evaluateSqftDiff(
   }
 }
 
-/** National vintage-era bounds — subjects ≤1945 comp to the whole pre-1970
- *  buyer class ("everything before 1970 is in play"). Era is a buyer-pool
- *  boundary, not a year count: a 1968 bungalow cross-shops a 1927 one,
- *  a 1972 ranch does not. Location overrides can relocate these later. */
+/** National era classes — appraisers evaluate every comp as same / adjacent /
+ *  far era relative to the subject, regardless of subject age. Vintage is
+ *  the only class that spans asymmetrically: pre-1970 stock is one buyer
+ *  class. Adjacent era passes flagged (weaker evidence), 2+ gaps fail. */
 const VINTAGE_SUBJECT_MAX_YEAR = 1945
 const VINTAGE_ERA_COMP_MAX_YEAR = 1969
+const ERA_NAMES = ['vintage (≤1945)', 'post-war (1946-69)', 'late-20th (1970-89)', '90s-00s (1990-2009)', 'modern (2010+)'] as const
+const eraIndex = (yearBuilt: number) =>
+  yearBuilt <= 1945 ? 0 : yearBuilt <= 1969 ? 1 : yearBuilt <= 1989 ? 2 : yearBuilt <= 2009 ? 3 : 4
 
 function evaluateYearBuiltDiff(
   subject: NormalizedProperty,
@@ -244,15 +247,31 @@ function evaluateYearBuiltDiff(
     }
   }
 
+  // Era-class match for all other subjects: same era → pass; adjacent era
+  // → pass flagged (appraiser keeps it as weaker evidence); 2+ era gaps →
+  // fail. The configured ±band is retained as the tight-tier preference via
+  // the ladder — era match is the acceptance floor.
+  const sEra = eraIndex(subject.yearBuilt)
+  const cEra = eraIndex(comp.yearBuilt)
+  const eraGap = Math.abs(cEra - sEra)
   const diff = Math.abs(comp.yearBuilt - subject.yearBuilt)
-  const passed = diff <= filter.value
-
+  if (eraGap >= 2) {
+    return {
+      type: 'year_built_diff',
+      passed: false,
+      reason: `Era mismatch: ${ERA_NAMES[cEra]} comp vs ${ERA_NAMES[sEra]} subject`,
+      actualValue: diff,
+      threshold: 'same or adjacent era',
+    }
+  }
   return {
     type: 'year_built_diff',
-    passed,
-    reason: passed ? undefined : `Year built difference too large: ${diff} years (max: ${filter.value})`,
+    passed: true,
+    reason: eraGap === 1
+      ? `Adjacent era: ${ERA_NAMES[cEra]} comp vs ${ERA_NAMES[sEra]} subject — flagged`
+      : undefined,
     actualValue: diff,
-    threshold: filter.value,
+    threshold: 'same or adjacent era',
   }
 }
 
