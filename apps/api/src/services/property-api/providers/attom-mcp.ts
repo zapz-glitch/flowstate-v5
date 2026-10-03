@@ -209,6 +209,31 @@ async function ensureToken(env: Env): Promise<string> {
   return refreshInFlight
 }
 
+/** Proactive token warm — called from the scheduled handler so requests
+ *  never pay a refresh (and the rotated pair is persisted well before
+ *  expiry). Walks the same auth ladder as ensureToken: static API key →
+ *  no-op; M2M → warms the client_credentials cache; OAuth pair → refreshes
+ *  when inside the expiry window and re-persists to KV. Never throws. */
+export async function warmAttomMcpToken(env: Env): Promise<void> {
+  try {
+    const now = Math.floor(Date.now() / 1000)
+    const m2m = (env as Env & { ATTOM_MCP_M2M_CLIENT_ID?: string }).ATTOM_MCP_M2M_CLIENT_ID
+      && (env as Env & { ATTOM_MCP_CLIENT_SECRET?: string }).ATTOM_MCP_CLIENT_SECRET
+    if (m2m) {
+      if (!m2mTokenCache || m2mTokenCache.expiresAt <= now + 120) await m2mToken(env)
+      return
+    }
+    const kv = await kvCreds(env)
+    const current = kv ?? credsCache ?? envCreds(env)
+    if (!current?.refreshToken) return
+    if (current.expiresAt > now + 120) return
+    credsCache = current
+    await refreshCreds(env)
+  } catch (err) {
+    console.warn('ATTOM_MCP: scheduled token warm failed —', err instanceof Error ? err.message : err)
+  }
+}
+
 async function mcpRpc(env: Env, method: string, params: unknown, depth = 0): Promise<any> {
   const token = await ensureToken(env)
   const resp = await fetch(env.ATTOM_MCP_ENDPOINT ?? MCP_URL, {

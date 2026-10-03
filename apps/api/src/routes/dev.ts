@@ -55,6 +55,20 @@ dev.post('/comp-condition', async (c) => {
 
 export default dev
 
+/** Token warm probe — runs the same scheduled-handler path live so token
+ *  health is verifiable without waiting for a cron tick. */
+dev.post('/attom-token-warm', async (c) => {
+  const { warmAttomMcpToken } = await import('../services/property-api/providers/attom-mcp')
+  await warmAttomMcpToken(c.env)
+  const kv = await c.env.API_CACHE.get('attom-mcp:creds', 'json') as { expiresAt?: number } | null
+  return c.json({
+    ok: true,
+    kvExpiry: kv?.expiresAt ? new Date(kv.expiresAt * 1000).toISOString() : null,
+    mode: c.env.ATTOM_MCP_API_KEY ? 'api-key'
+      : c.env.ATTOM_MCP_CLIENT_SECRET ? 'm2m' : 'oauth-pair',
+  })
+})
+
 /** Geo probe — fetchCensusGeography against a coordinate inside the worker. */
 dev.get('/geo-probe', async (c) => {
   const { fetchCensusGeography } = await import('../services/geo/census-geocoder')

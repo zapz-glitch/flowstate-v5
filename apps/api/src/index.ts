@@ -46,6 +46,7 @@ import sseStream from './routes/sse-stream'
 import devRoute from './routes/dev'
 import ghlWebhook from './routes/webhooks/ghl'
 import { sweepStaleBatches } from './services/batch-queue'
+import { warmAttomMcpToken } from './services/property-api/providers/attom-mcp'
 
 type Variables = { auth: AuthContext }
 
@@ -220,7 +221,11 @@ export default {
   // Cron (every 5 min): revive dead batch jobs and stranded queues so lists
   // run unattended to completion — no one needs the dashboard open
   scheduled: (_event: ScheduledEvent, env: Env, ctx: ExecutionContext) => {
-    ctx.waitUntil(sweepStaleBatches(env))
+    ctx.waitUntil(
+      // Batch sweep + ATTOM token warm — keeps the OAuth pair (or M2M
+      // token) refreshed so analyze requests never pay a refresh hop.
+      Promise.allSettled([sweepStaleBatches(env), warmAttomMcpToken(env)]),
+    )
   },
   // Email Worker — inbound form notifications at the intake inbox.
   // Requires an Email Routing rule (CF dashboard → Email → Routing rules)
