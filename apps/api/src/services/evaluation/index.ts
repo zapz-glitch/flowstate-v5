@@ -1174,6 +1174,8 @@ export async function performAnalysis(
       const fails: string[] = []
       if (r.arv == null) fails.push('no ARV — evidence pool produced no defensible answer')
       else if (subjectAvm != null && r.arv < subjectAvm) fails.push('below as-is AVM')
+      else if (subjectAvm != null && r.arv > subjectAvm * 1.2 && r.drivers.length <= 1)
+        fails.push('single-driver premium read — one comp carries ARV >20% above AVM')
       if (r.drivers.length === 0) fails.push('no verified drivers')
       if (r.conf === 'none') fails.push('no-confidence result')
       return fails
