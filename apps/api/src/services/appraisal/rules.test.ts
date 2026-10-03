@@ -581,7 +581,7 @@ describe('ARV comp selection', () => {
     const comps = [
       comp('in1', { subdivision: 'Oak Park', yearBuilt: 2008, salePrice: 300000 }),
       comp('in2', { subdivision: 'Oak Park', yearBuilt: 2008, salePrice: 310000 }),
-      comp('nb_old', { subdivision: 'Other', neighborhoodName: 'Arlington Hills', yearBuilt: 1975, salePrice: 320000 }), // 33yr off — beyond ±14
+      comp('nb_old', { subdivision: 'Other', neighborhoodName: 'Arlington Hills', yearBuilt: 1955, salePrice: 320000 }), // post-war vs 90s-00s — 2-era gap, dead at every tier
     ]
     const r = service.evaluateWithFallback(subj, comps, {
       filters: [
@@ -742,7 +742,7 @@ describe('ARV comp selection', () => {
       comp('in2', { subdivision: 'Oak Park', yearBuilt: 2008, salePrice: 310000 }),
       comp('new_out', {
         subdivision: 'Seaton Crk Reserve Ph 3',
-        yearBuilt: 2025, // 17yr off the 2008 subject — beyond ±14 max
+        yearBuilt: 1955, // post-war vs 90s-00s — 2-era gap, beyond every tier
         salePrice: 330000,
         distanceMiles: 1.2,
       }),
@@ -763,14 +763,14 @@ describe('ARV comp selection', () => {
       },
     })
 
-    // The 2025 comp is never enabled — 17yr breaches even the widest tier
+    // The 1955 comp is never enabled — 2-era gap breaches even the widest tier
     const newOut = r.comparables.find((c) => c.id === 'new_out')
     expect(newOut?.isEnabled).toBe(false)
     expect(r.selectedCompIds ?? []).not.toContain('new_out')
     // The failed hard rule stays on the audit trail
     expect(
       newOut?.evaluation?.filterResults.some(
-        (f) => f.type === 'year_built_diff' && !f.passed && f.status === 'failed'
+        (f) => (f.type === 'year_built_diff' || f.type === 'year_built_era') && !f.passed && f.status === 'failed'
       )
     ).toBe(true)
   })
