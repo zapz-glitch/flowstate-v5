@@ -148,11 +148,12 @@ def set_b(subject, items):
 
     contribs, flags = [], list(flags0)
 
-    # ── Land premium — the county's per-parcel landValue IS the curve ────
-    # assessed land value already bakes in diminishing returns per parcel;
-    # the premium is just the subject−comp assessed delta scaled to market
-    # (subject's own AVM/assessed ratio). Missing comp land fetched lazily
-    # via MCP tax-history — rescued comps are unenriched by definition.
+    # ── Marginal land rate — honest ladder ───────────────────────────────
+    # T1 vacant-land sales in the tract (market-context/pool land records)
+    #    → median sale $/lot sqft — the market's own marginal land price
+    # T2 assessed-land curve fit (≥5 same-tract parcels) → fitted slope
+    # T3 per-parcel delta × LAND_FACTOR + cap — conservative default
+    # T4 flag-only — no land data at all
     _sub_land = subject.get('landAssessedValue')
     _mkt_ratio = (sub_avm(subject) / subject.get('taxAssessment')
                   if sub_avm(subject) and subject.get('taxAssessment') else 1.4)
@@ -161,19 +162,60 @@ def set_b(subject, items):
             lv = land_value_of(c['id'])
             if lv is not None: c['landAssessedValue'] = lv
 
+    def lot_sf(x):
+        return x.get('lotSizeSquareFeet') or ((x.get('lotSizeAcres') or 0) * 43560) or None
+    _sl = lot_sf(subject)
+
+    # T1 — vacant land sales in the same tract
+    vacant = [
+        (c['salePrice'] / lot_sf(c)) for c in items
+        if 'land' in (c.get('propertyType') or '').lower()
+        and c.get('salePrice') and lot_sf(c)
+        and c.get('censusTract') and c.get('censusTract') == subject.get('censusTract')
+    ]
+    vacant.sort()
+    land_rate, land_source = None, None
+    if len(vacant) >= 2:
+        land_rate = vacant[len(vacant)//2]
+        land_source = f'T1 vacant-land median ${land_rate:.2f}/sf ({len(vacant)} sales)'
+    else:
+        # T2 — assessed-land regression over same-tract parcels
+        pts = [(lot_sf(c), c['landAssessedValue'])
+               for c in items
+               if lot_sf(c) and c.get('landAssessedValue')
+               and c.get('censusTract') and c.get('censusTract') == subject.get('censusTract')]
+        if _sl and _sub_land: pts.append((_sl, _sub_land))
+        if len(pts) >= 5:
+            mx = sum(p[0] for p in pts)/len(pts); my = sum(p[1] for p in pts)/len(pts)
+            cov = sum((x-mx)*(y-my) for x, y in pts); var = sum((x-mx)**2 for x, y in pts)
+            if var > 0:
+                land_rate = max(0.0, cov/var)
+                land_source = f'T2 assessed-curve slope ${land_rate:.2f}/sf ({len(pts)} parcels)'
+    if land_source: flags.append(f'land rate: {land_source}')
+
     for c in pool:
         comp_sqft = c['squareFeet']; ppsf = c.get('pricePerSqft') or c['salePrice']/comp_sqft
         base = c.get('adjustedPrice') or c['salePrice']
         # 1 — marginal sqft scaling: size delta priced at MARGINAL_FACTOR×ppsf,
         # not full proportional — damps over-correction on big size gaps
         contrib = base + (sub_sqft - comp_sqft) * ppsf * MARGINAL_FACTOR
-        # land premium — assessed land delta scaled to market
-        if _sub_land and c.get('landAssessedValue'):
+        # land premium — marginal-rate method when a rate was derived
+        # (T1 market-priced / T2 assessed-scaled); else per-parcel delta
+        # at the conservative factor. Always capped at ±20% of sale.
+        LAND_CAP_PCT = 0.20
+        c_lot = lot_sf(c)
+        land_adj = 0.0
+        if land_rate is not None and c_lot and _sl:
+            land_adj = land_rate * (_sl - c_lot)
+            if land_source.startswith('T2'):
+                land_adj *= _mkt_ratio  # assessed rate → market
+        elif _sub_land and c.get('landAssessedValue'):
             assessed_delta = _sub_land - c['landAssessedValue']
-            land_adj = assessed_delta * _mkt_ratio
-            if abs(land_adj) >= 1000:
-                contrib += land_adj
-                flags.append(f"{c['address']}: land Δ ${assessed_delta:+,} assessed × {_mkt_ratio:.2f} → {'+' if land_adj >= 0 else '−'}${abs(land_adj):,.0f}")
+            land_adj = assessed_delta * _mkt_ratio * 0.35
+        if abs(land_adj) >= 1000:
+            land_adj = max(-LAND_CAP_PCT * c['salePrice'], min(LAND_CAP_PCT * c['salePrice'], land_adj))
+            contrib += land_adj
+            flags.append(f"{c['address']}: land adj {'+' if land_adj >= 0 else '−'}${abs(land_adj):,.0f} [{land_source or 'T3 per-parcel'}] (cap ±${LAND_CAP_PCT * c['salePrice']:,.0f})")
         # 2 — market-conditions time adj: needs 90d vs 365d ppsf trend; skip when absent
         # 3 — adjustment cap: >25% net adj → halve weight + flag
         adj_pct = abs((c.get('appraisalRules') or {}).get('totalAdjustment') or 0) / c['salePrice']
@@ -214,15 +256,26 @@ def set_b(subject, items):
         return s
 
     verified_pool = [x for x in contribs if x not in unfit]
-    # Condition-tier discipline: Clef-dated/median comps are median evidence —
-    # they prove the pocket's typical level, they never anchor ARV. A Full
-    # Cosmetic subject prices ABOVE median tier.
+    # Condition-tier discipline — renovated-preferred, median as fallback:
+    # non-median comps need a similarity floor to drive (a lone dissimilar
+    # comp is weaker than the median set — the Marie St case). No high-sim
+    # renovated → median comps become the driver set, flagged.
+    MIN_SIM = 3.0
     median_comps = [x for x in verified_pool if cond_tier(x['c']) == 'median']
-    for x in median_comps:
-        flags.append(f"{x['c']['address']}: Clef median-condition — bounds range, does not drive ARV")
-    arv_tier = [x for x in verified_pool if x['tier'] == 'arv' and cond_tier(x['c']) != 'median']
-    if arv_tier:
-        drivers = arv_tier
+    preferred = [x for x in verified_pool
+                 if x['tier'] == 'arv' and cond_tier(x['c']) != 'median' and similarity(x) >= MIN_SIM]
+    if preferred:
+        drivers = preferred
+    elif median_comps:
+        drivers = median_comps
+        for x in median_comps:
+            flags.append(f"{x['c']['address']}: median-tier driver — no high-similarity renovated evidence")
+    elif [x for x in verified_pool if x['tier'] == 'arv' and cond_tier(x['c']) != 'median']:
+        # non-median comps exist but all below the similarity floor
+        weak = [x for x in verified_pool if x['tier'] == 'arv' and cond_tier(x['c']) != 'median']
+        flags.append(f'non-median comps below similarity floor ({MIN_SIM}) — falling to median')
+        drivers = median_comps if median_comps else weak
+        if not drivers: drivers = weak
     else:
         top_ppsf = max(ppsf_of(x) for x in verified_pool) if verified_pool else None
         retail = [x for x in verified_pool
