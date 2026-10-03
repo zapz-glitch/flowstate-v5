@@ -1235,10 +1235,26 @@ export function buildAnalysisResponse(
   if (devSignal) riskFlags.push(devSignal)
 
   // B unverified — the retry ladder ran and the answer still failed an
-  // invariant (e.g. below as-is AVM). Flag it so the underwriter sees the
-  // evidence bound, not just the number.
+  // invariant (e.g. below as-is AVM). Write the flag as the underwriter
+  // would say it: the delta, the evidence composition, the implication.
   if (ctx.bAttemptTrail?.length && ctx.bAttemptTrail[ctx.bAttemptTrail.length - 1].startsWith('final — unverified')) {
-    riskFlags.push(`Set-B evidence unverified after retry: ${ctx.bAttemptTrail[ctx.bAttemptTrail.length - 1].replace('final — unverified (', '').replace(')', '')}`)
+    const avm = property.avmValue ?? enrichment.avm?.value ?? null
+    const b = ctx.pipelineBResult
+    const renovatedDrivers = b?.drivers.filter((d) => d.tier === 'arv' && bCondTier(d.comp) === 'renovated').length ?? 0
+    const driverCount = b?.drivers.length ?? 0
+    if (avm != null && ctx.finalArv != null && ctx.finalArv < avm) {
+      const gap = avm - ctx.finalArv
+      const pct = ((gap / avm) * 100).toFixed(0)
+      const money = (n: number) => `$${Math.round(n).toLocaleString('en-US')}`
+      const compRead = driverCount > 0 && renovatedDrivers === 0
+        ? `no renovated-product sales verified in this pocket — ${driverCount} driver${driverCount !== 1 ? 's' : ''} price median-tier product`
+        : `${driverCount} verified driver${driverCount !== 1 ? 's' : ''} after the retry ladder`
+      riskFlags.push(
+        `ARV ${money(ctx.finalArv)} sits ${money(gap)} (${pct}%) below the ${money(avm)} as-is estimate — ${compRead}. Renovation uplift is unproven here; negotiate as if the spread doesn't exist.`,
+      )
+    } else {
+      riskFlags.push(`Set-B evidence unverified after retry: ${ctx.bAttemptTrail[ctx.bAttemptTrail.length - 1].replace('final — unverified (', '').replace(')', '')}`)
+    }
   }
 
   // ARV vs asking price is surfaced on the valuation hero (list price cell
