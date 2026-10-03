@@ -64,10 +64,32 @@ def tier_of(c):
     if t in ('as_is', 'investor', 'distressed'): return 'as_is'
     return 'unidentified'
 
+# Clef condition tier — what the comp's condition says its price MEANS:
+# renovated → can drive/anchor ARV · dated/maintained → median evidence:
+# bounds the range floor, never anchors ARV. Confidence-gated — a weak
+# stamp neither upgrades nor downgrades.
+COND_MIN_CONF = 30
+def cond_tier(c):
+    ca = c.get('curbAppeal') or {}
+    summary = (ca.get('summary') or '').lower()
+    # Clef's tier label is authoritative — tier:median = the pocket's typical
+    # level regardless of the condition guess.
+    if 'tier:median' in summary: return 'median'
+    if 'tier:premium' in summary or 'tier:luxury' in summary: return 'premium'
+    cond = (ca.get('condition') or '').lower()
+    if (ca.get('confidence') or 0) < COND_MIN_CONF: return 'unknown'
+    if cond in ('renovated', 'updated', 'turnkey', 'move-in ready'): return 'renovated'
+    if cond in ('dated', 'maintained', 'median', 'as_is', 'as-is', 'distressed', 'needs_work'): return 'median'
+    return 'unknown'
+
 def age_days(d):
     if not d: return None
     try: return (datetime.now(timezone.utc) - datetime.fromisoformat(d.replace('Z','+00:00'))).days
     except Exception: return None
+
+def sub_avm(s):
+    """Subject AVM — serialized as nested avm.value, avmValue on some paths."""
+    return s.get('avmValue') or (s.get('avm') or {}).get('value')
 
 def set_b(subject, items):
     """Recompute ARV under trade-tricks over the same enabled pool as A.
@@ -115,8 +137,8 @@ def set_b(subject, items):
 
     # T3 / T4 — AVM floor → assessed
     if not pool:
-        if subject.get('avmValue'):
-            return {'arv': subject['avmValue'], 'flags': ['T3 as-is AVM floor — ARV ≥ AVM, uplift unverified'],
+        if sub_avm(subject):
+            return {'arv': sub_avm(subject), 'flags': ['T3 as-is AVM floor — ARV ≥ AVM, uplift unverified'],
                     'contribs': [], 'conf': 'low', 'source': 'T3 AVM floor'}
         if subject.get('assessedValue') or subject.get('assessed'):
             v = subject.get('assessedValue') or subject.get('assessed')
@@ -132,8 +154,8 @@ def set_b(subject, items):
     # (subject's own AVM/assessed ratio). Missing comp land fetched lazily
     # via MCP tax-history — rescued comps are unenriched by definition.
     _sub_land = subject.get('landAssessedValue')
-    _mkt_ratio = (subject.get('avmValue') / subject.get('taxAssessment')
-                  if subject.get('avmValue') and subject.get('taxAssessment') else 1.4)
+    _mkt_ratio = (sub_avm(subject) / subject.get('taxAssessment')
+                  if sub_avm(subject) and subject.get('taxAssessment') else 1.4)
     for c in pool:
         if c.get('landAssessedValue') is None and c.get('id'):
             lv = land_value_of(c['id'])
@@ -175,27 +197,9 @@ def set_b(subject, items):
              or (x['c'].get('evidenceVerification') or {}).get('priceCheck') == 'divergent']
     for x in unfit:
         flags.append(f"{x['c']['address']}: verification — {'; '.join((x['c'].get('evidenceVerification') or {}).get('flags') or [])[:90]}")
-    verified_pool = [x for x in contribs if x not in unfit]
-    arv_tier = [x for x in verified_pool if x['tier'] == 'arv']
-    if arv_tier:
-        drivers = arv_tier
-    else:
-        top_ppsf = max(ppsf_of(x) for x in verified_pool) if verified_pool else None
-        retail = [x for x in verified_pool
-                  if x['tier'] != 'as_is' and top_ppsf and ppsf_of(x) >= RETAIL_BAND * top_ppsf]
-        excluded = len(contribs) - len(retail)
-        if not retail:
-            flags.append('no retail-priced evidence — ARV withheld (as-is sales are floor evidence only)')
-            return {'arv': None, 'flags': flags, 'contribs': contribs, 'conf': 'none',
-                    'drivers': [], 'bracket': 'ok', 'source': source}
-        drivers = retail
-        flags.append(f'no ARV-tier labels — ARV driven on {len(drivers)} retail-marked comp(s); {excluded} as-is-priced sale(s) excluded from ARV')
-
-    # ── Reconciliation anchoring ──────────────────────────────────────────
-    # Appraiser pattern: ARV anchors on the MOST-SIMILAR verified comp; the
-    # rest of the driver set bounds the range — it never blends across the
-    # evidence classes. The weighted blend only applies when no single comp
-    # dominates similarity (anchor-of-last-resort).
+    # Similarity scoring — distance + same-pocket (BG/tract/subdivision) +
+    # era proximity + size proximity. Used for the driver gate, anchoring,
+    # and the median-ceiling bound.
     def similarity(x):
         c = x['c']; s = 0.0
         d = c.get('distanceMiles')
@@ -209,6 +213,50 @@ def set_b(subject, items):
         if sd is not None: s += 1.5 if sd <= 150 else 0.75 if sd <= 300 else 0.0
         return s
 
+    verified_pool = [x for x in contribs if x not in unfit]
+    # Condition-tier discipline: Clef-dated/median comps are median evidence —
+    # they prove the pocket's typical level, they never anchor ARV. A Full
+    # Cosmetic subject prices ABOVE median tier.
+    median_comps = [x for x in verified_pool if cond_tier(x['c']) == 'median']
+    for x in median_comps:
+        flags.append(f"{x['c']['address']}: Clef median-condition — bounds range, does not drive ARV")
+    arv_tier = [x for x in verified_pool if x['tier'] == 'arv' and cond_tier(x['c']) != 'median']
+    if arv_tier:
+        drivers = arv_tier
+    else:
+        top_ppsf = max(ppsf_of(x) for x in verified_pool) if verified_pool else None
+        retail = [x for x in verified_pool
+                  if x['tier'] != 'as_is' and cond_tier(x['c']) != 'median'
+                  and top_ppsf and ppsf_of(x) >= RETAIL_BAND * top_ppsf]
+        excluded = len(contribs) - len(retail)
+        if not retail:
+            # Median-only evidence — ARV = median ceiling of the
+            # SIMILARITY-GATED set only (a far premium comp stamped
+            # 'tier:median' is still dissimilar evidence). Subject AVM
+            # corroborates uplift above the ceiling when higher.
+            if median_comps:
+                _top_sim = max(similarity(x) for x in median_comps)
+                gated_median = [x for x in median_comps if similarity(x) >= 0.6 * _top_sim]
+                median_ceiling = max(x['contrib'] for x in gated_median)
+                avm = sub_avm(subject)
+                if avm and avm > median_ceiling:
+                    flags.append(f'median-tier evidence only (ceiling {fmt(median_ceiling)}) — ARV set at subject AVM {fmt(avm)} (corroborated uplift)')
+                    return {'arv': round(avm), 'flags': flags, 'contribs': contribs, 'conf': 'low',
+                            'drivers': median_comps, 'bracket': 'ok', 'source': 'median+AVM uplift'}
+                flags.append(f'median-tier evidence only — ARV at median ceiling {fmt(median_ceiling)} (uplift unverified)')
+                return {'arv': round(median_ceiling), 'flags': flags, 'contribs': contribs, 'conf': 'low',
+                        'drivers': median_comps, 'bracket': 'ok', 'source': 'median ceiling'}
+            flags.append('no retail-priced evidence — ARV withheld (as-is sales are floor evidence only)')
+            return {'arv': None, 'flags': flags, 'contribs': contribs, 'conf': 'none',
+                    'drivers': [], 'bracket': 'ok', 'source': source}
+        drivers = retail
+        flags.append(f'no ARV-tier labels — ARV driven on {len(drivers)} retail-marked comp(s); {excluded} as-is-priced sale(s) excluded from ARV')
+
+    # ── Reconciliation anchoring ──────────────────────────────────────────
+    # Appraiser pattern: ARV anchors on the MOST-SIMILAR verified comp; the
+    # rest of the driver set bounds the range — it never blends across the
+    # evidence classes. The weighted blend only applies when no single comp
+    # dominates similarity (anchor-of-last-resort).
     ranked = sorted(drivers, key=lambda x: (similarity(x), x['weight']), reverse=True)
     anchor = ranked[0] if ranked else None
     anchor_score = similarity(anchor) if anchor else -1.0
@@ -276,7 +324,14 @@ def run_address(addr):
         status = req('GET', f'/v1/analyze/jobs/{job}')['data']['status']
     elapsed = time.time() - t0
     if status == 'error': return {'addr': addr, 'error': True, 'elapsed': elapsed}
+    # Clef stamps arrive via async writeback after the response — poll until
+    # curbAppeal lands (or ~40s) so condition tiering reads real signals.
     d = req('GET', f'/v1/analyze/jobs/{job}')['data']['result']
+    for _ in range(8):
+        items = ((d.get('comps') or {}).get('items') or [])
+        if any(c.get('curbAppeal') for c in items): break
+        time.sleep(5)
+        d = req('GET', f'/v1/analyze/jobs/{job}')['data']['result'] or d
 
     s, val, comps = d['subject'], d.get('valuation') or {}, d['comps']
     b = set_b(s, comps['items'])
