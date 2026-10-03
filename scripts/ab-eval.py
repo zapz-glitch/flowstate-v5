@@ -416,9 +416,15 @@ def set_b(subject, items, valuation=None):
         if sqft_rate is not None: return sqft_rate
         gap = abs(sub_sqft - c['squareFeet'])/c['squareFeet']
         return (c.get('pricePerSqft') or c['salePrice']/c['squareFeet']) * (0.50 if gap <= 0.10 else 0.40 if gap <= 0.25 else 0.30)
+    # Ceiling = the pool's top CONTRIBUTION — evidence priced in subject
+    # units, symmetric both directions. A bigger comp's raw sale is the
+    # price of MORE product; at subject units it's worth less, not more.
+    verified_contribs = [x for x in contribs if x not in unfit]
     size_adj_ceiling = max(
         c['salePrice'] + max(0.0, (sub_sqft - c['squareFeet'])) * _marg_rate(c)
         for c in pool)
+    top_contrib = max(x['contrib'] for x in verified_contribs)
+    size_adj_ceiling = min(size_adj_ceiling, top_contrib) if top_contrib < size_adj_ceiling else size_adj_ceiling
     top_sale = max(c['salePrice'] for c in pool)
     supporters = sum(1 for x in drivers if x['contrib'] >= size_adj_ceiling)
     capped_outlier = arv > size_adj_ceiling and supporters < OUTLIER_SUPPORT
