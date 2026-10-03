@@ -88,6 +88,10 @@ export interface BComp {
   /** Listing sqft diverged >33% from provider — size normalization is
    *  unreliable; the comp can bound but never anchors. */
   sqftConflict?: string | null
+  /** Unpermitted marketed-vs-tax divergence — buyers priced the marketed
+   *  product so neither figure normalizes the sale. An appraiser throws
+   *  it out: excluded from ARV evidence entirely. */
+  sqftExcluded?: boolean | null
 }
 
 export interface BContribution {
@@ -155,7 +159,11 @@ const bArvCondOk = (c: BComp) => bCondTier(c) !== 'distressed'
 
 const bIsUnfit = (c: BComp) =>
   c.evidenceVerification?.staleness === 'stale' ||
-  c.evidenceVerification?.priceCheck === 'divergent'
+  c.evidenceVerification?.priceCheck === 'divergent' ||
+  // Unpermitted marketed-vs-tax divergence — neither sqft figure normalizes
+  // the sale (buyers priced the marketed product; the extra area can't be
+  // verified). An appraiser throws it out — unusable as evidence at all.
+  c.sqftExcluded === true
 
 const bLotSf = (x: { lotSizeSquareFeet?: number | null; lotSizeAcres?: number | null }) =>
   x.lotSizeSquareFeet ?? (x.lotSizeAcres ? x.lotSizeAcres * 43560 : null)
@@ -364,7 +372,10 @@ export function evaluateB(
   // ── Evidence verification — stale/divergent never drive ARV ─────────────
   const unfit = contribs.filter((x) => bIsUnfit(x.comp))
   for (const x of unfit) {
-    flags.push(`${x.comp.address}: verification — ${(x.comp.evidenceVerification?.flags ?? []).join('; ').slice(0, 90)}`)
+    const reason = x.comp.sqftExcluded
+      ? 'unpermitted marketed-vs-tax sqft divergence — denominator unverifiable, excluded'
+      : (x.comp.evidenceVerification?.flags ?? []).join('; ').slice(0, 90)
+    flags.push(`${x.comp.address}: verification — ${reason}`)
   }
   const verifiedPool = contribs.filter((x) => !unfit.includes(x))
 

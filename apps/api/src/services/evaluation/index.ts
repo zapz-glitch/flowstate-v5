@@ -1093,8 +1093,13 @@ export async function performAnalysis(
             cc.pricePerSqft = cc.salePrice != null && cc.squareFeet ? cc.salePrice / cc.squareFeet : cc.pricePerSqft
             delete raw.sqftConflict
           } else {
+            // Unpermitted add — an appraiser throws this comp OUT of ARV:
+            // buyers priced the marketed product, so neither the tax sqft
+            // nor the listing sqft normalizes the sale. The denominator is
+            // unverifiable — excluded from ARV evidence entirely.
             raw.sqftResolution = 'unpermitted'
-            raw.permitNote = `no addition permit — tax-record ${cc.squareFeet}sf stands over marketed ${raw.listingSqft}sf`
+            raw.sqftExcluded = true
+            raw.permitNote = `marketed ${raw.listingSqft}sf vs tax ${cc.squareFeet}sf, no addition permit — denominator unverifiable, excluded from ARV`
             delete raw.sqftConflict
           }
         }))
@@ -1252,6 +1257,7 @@ export async function performAnalysis(
       evidenceVerification: comp.evidenceVerification ?? null,
       appraisalRules: comp.evaluation ? { totalAdjustment: comp.evaluation.totalAdjustment } : null,
       sqftConflict: (comp.raw as Record<string, unknown> | undefined)?.sqftConflict as string | undefined ?? null,
+      sqftExcluded: ((comp.raw as Record<string, unknown> | undefined)?.sqftExcluded as boolean | undefined) ?? null,
     }))
 
     const verifyB = (r: ReturnType<typeof evaluateB>): string[] => {
