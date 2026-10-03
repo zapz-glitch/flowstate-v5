@@ -370,6 +370,7 @@ export interface ValuationData {
     landRateSource: string | null
     sqftRateSource: string | null
     healed: boolean
+    attemptTrail: string[]
     drivers: { address: string | null; contribution: number; tier: string; conditionTier: string }[]
   } | null
   buyPrice?: number
@@ -620,6 +621,7 @@ export interface ValuationData {
     landRateSource: string | null
     sqftRateSource: string | null
     healed: boolean
+    attemptTrail: string[]
     drivers: { address: string | null; contribution: number; tier: string; conditionTier: string }[]
   } | null
   buyPrice?: number
