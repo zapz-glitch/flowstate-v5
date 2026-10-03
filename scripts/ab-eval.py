@@ -193,12 +193,47 @@ def set_b(subject, items):
                 land_source = f'T2 assessed-curve slope ${land_rate:.2f}/sf ({len(pts)} parcels)'
     if land_source: flags.append(f'land rate: {land_source}')
 
+    # ── Marginal sqft rate — appraiser ladder ────────────────────────────
+    # T1 pool-derived: price~sqft slope across verified same-tract comps
+    #    (verification-flagged sales excluded — junk distorts the fit)
+    # T2 standard taper on the comp's avg $/sf — 0.50/0.40/0.30 by gap
+    #    band, inside the appraiser 25–50% marginal range
+    def ppsf_of_c(c): return c.get('pricePerSqft') or c['salePrice']/c['squareFeet']
+    _unfit_c = [c for c in pool
+                if (c.get('evidenceVerification') or {}).get('staleness') == 'stale'
+                or (c.get('evidenceVerification') or {}).get('priceCheck') == 'divergent']
+    _fit = [c for c in pool if c not in _unfit_c and c.get('salePrice') and c.get('squareFeet')]
+    _fit_tract = [c for c in _fit
+                  if c.get('censusTract') and c.get('censusTract') == subject.get('censusTract')]
+    sqft_rate, sqft_rate_source = None, None
+    for pts_src in (_fit_tract, _fit):
+        if len(pts_src) >= 5:
+            mx = sum(c['squareFeet'] for c in pts_src)/len(pts_src)
+            my = sum(c['salePrice'] for c in pts_src)/len(pts_src)
+            cov = sum((c['squareFeet']-mx)*(c['salePrice']-my) for c in pts_src)
+            var = sum((c['squareFeet']-mx)**2 for c in pts_src)
+            avg_ppsf = sum(ppsf_of_c(c) for c in pts_src)/len(pts_src)
+            if var > 0:
+                slope = cov/var
+                if 0 < slope < avg_ppsf:
+                    sqft_rate = slope
+                    sqft_rate_source = f'T1 pool slope ${slope:.0f}/sf ({len(pts_src)} comps)'
+                    break
+    if sqft_rate_source: flags.append(f'size rate: {sqft_rate_source}')
+
     for c in pool:
-        comp_sqft = c['squareFeet']; ppsf = c.get('pricePerSqft') or c['salePrice']/comp_sqft
+        comp_sqft = c['squareFeet']; ppsf = ppsf_of_c(c)
         base = c.get('adjustedPrice') or c['salePrice']
-        # 1 — marginal sqft scaling: size delta priced at MARGINAL_FACTOR×ppsf,
-        # not full proportional — damps over-correction on big size gaps
-        contrib = base + (sub_sqft - comp_sqft) * ppsf * MARGINAL_FACTOR
+        # 1 — marginal sqft scaling: T1 fitted rate when derivable, else
+        # the taper — the marginal foot prices below the average and
+        # declines as the size gap grows
+        delta = sub_sqft - comp_sqft
+        if sqft_rate is not None:
+            contrib = base + delta * sqft_rate
+        else:
+            gap = abs(delta)/comp_sqft
+            mf = 0.50 if gap <= 0.10 else 0.40 if gap <= 0.25 else 0.30
+            contrib = base + delta * ppsf * mf
         # land premium — marginal-rate method when a rate was derived
         # (T1 market-priced / T2 assessed-scaled); else per-parcel delta
         # at the conservative factor. Always capped at ±20% of sale.
@@ -346,8 +381,12 @@ def set_b(subject, items):
     # raw sale. A comp's raw price is the evidence for ITS size; size-scaled
     # to the subject it's the right denominator. Size uplift is arithmetic,
     # not speculation — the cap still catches non-size stretch.
+    def _marg_rate(c):
+        if sqft_rate is not None: return sqft_rate
+        gap = abs(sub_sqft - c['squareFeet'])/c['squareFeet']
+        return (c.get('pricePerSqft') or c['salePrice']/c['squareFeet']) * (0.50 if gap <= 0.10 else 0.40 if gap <= 0.25 else 0.30)
     size_adj_ceiling = max(
-        c['salePrice'] + max(0.0, (sub_sqft - c['squareFeet'])) * (c.get('pricePerSqft') or c['salePrice']/c['squareFeet']) * MARGINAL_FACTOR
+        c['salePrice'] + max(0.0, (sub_sqft - c['squareFeet'])) * _marg_rate(c)
         for c in pool)
     top_sale = max(c['salePrice'] for c in pool)
     supporters = sum(1 for x in drivers if x['contrib'] >= size_adj_ceiling)
