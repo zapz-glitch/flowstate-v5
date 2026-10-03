@@ -378,17 +378,26 @@ export function evaluateB(
 
   // ── Tier discipline — renovated preferred → median fallback → retail ────
   const medianComps = verifiedPool.filter((x) => bCondTier(x.comp) === 'median')
+  // Upper band = any comp not stamped as-is/distressed whose condition
+  // isn't proven median — an unclassified or Clef-unidentified sale that
+  // passed the rules is still evidence, just unverdicted. Only explicit
+  // as_is sales and proven-median conditions stay out.
   const preferred = verifiedPool.filter((x) =>
-    x.tier === 'arv' && bArvCondOk(x.comp) && bCondTier(x.comp) !== 'median' && similarity(x) >= B_MIN_SIM)
+    x.tier !== 'as_is' && bArvCondOk(x.comp) && bCondTier(x.comp) !== 'median' && similarity(x) >= B_MIN_SIM)
   let drivers: BContribution[]
   if (preferred.length) {
     drivers = preferred
+    for (const x of preferred)
+      if (x.tier === 'unidentified')
+        flags.push(`${x.comp.address}: unclassified driver — rules passed, no sale-type verdict`)
+      else if (bCondTier(x.comp) === 'unknown')
+        flags.push(`${x.comp.address}: no condition verdict — Clef/listing unavailable, driving on sale + rules evidence`)
   } else if (medianComps.length) {
     drivers = medianComps
     for (const x of medianComps)
       flags.push(`${x.comp.address}: median-tier driver — no high-similarity renovated evidence`)
   } else {
-    const weak = verifiedPool.filter((x) => x.tier === 'arv' && bArvCondOk(x.comp) && bCondTier(x.comp) !== 'median')
+    const weak = verifiedPool.filter((x) => x.tier !== 'as_is' && bArvCondOk(x.comp) && bCondTier(x.comp) !== 'median')
     if (weak.length) {
       flags.push(`non-median comps below similarity floor (${B_MIN_SIM}) — falling to median`)
       drivers = medianComps.length ? medianComps : weak

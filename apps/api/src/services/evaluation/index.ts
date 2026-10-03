@@ -1225,6 +1225,12 @@ export async function performAnalysis(
           })
         }
         stampVerification()
+        // Classify the widened set too — sale-type evidence (flip resale /
+        // distressed) must stamp before B re-reads tiers, otherwise an
+        // unclassified flip buy could read as upper-band evidence.
+        for (const [id, cls] of classifyCompsByEvidence(added, subjectAvm)) {
+          compClassifications.set(id, cls)
+        }
         bResult = evaluateB(bSubjectFields, toBComps(), { rehabCost: valuation?.totalRehabCost ?? null })
         fails = verifyB(bResult)
       }
