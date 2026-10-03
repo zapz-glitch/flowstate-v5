@@ -247,18 +247,20 @@ export default function Sidebar() {
       >
         <div className="flex flex-col h-full">
           {/* Logo + collapse toggle — h-16 keeps the divider aligned with the topbar */}
-          <div className={cn('flex items-center h-16 px-4 border-b border-border', collapsed ? 'justify-center flex-col gap-0.5' : 'justify-between')}>
+          <div className={cn('flex items-center h-16 px-4 border-b border-border', collapsed ? 'justify-center' : 'justify-between')}>
             <Link href="/dashboard" className="flex items-center min-w-0">
-              <Logo size="sm" showText={false} />
+              <Logo size="sm" showText={!collapsed} />
             </Link>
-            <button
-              onClick={toggleCollapsed}
-              className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
-              aria-label={collapsedPref ? 'Pin sidebar open' : 'Collapse sidebar'}
-              title={collapsedPref ? 'Pin sidebar open' : 'Collapse sidebar'}
-            >
-              {collapsedPref ? <ChevronRight className="w-3.5 h-3.5" /> : <ChevronLeft className="w-4 h-4" />}
-            </button>
+            {!collapsed && (
+              <button
+                onClick={toggleCollapsed}
+                className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
+                aria-label="Collapse sidebar"
+                title="Collapse sidebar"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+            )}
           </div>
 
           {/* Navigation */}
