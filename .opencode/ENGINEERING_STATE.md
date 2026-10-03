@@ -462,3 +462,19 @@ same-tract points to engage.
 **Resume:** user sends address → `python3 scripts/ab-eval.py "<addr>"`
 (API on localhost:8787, wrangler dev running; refresh ATTOM token first
 with `node scripts/sync-attom-token.mjs`).
+
+## Set-B swap landed (2026-10-03)
+
+- `packages/shared/src/appraisal/set-b.ts` — full TS port of the harness
+  methodology (verification, tiering, marginal rates, land ladder, heal,
+  condition adj, ceiling, T0-T5 cascade).
+- `services/evaluation/index.ts` — evaluateB runs after Clef stamps +
+  evidenceVerification; `finalArv` = bResult.arv, then valuation +
+  rehabLevelEstimates + groupB recompute on the B anchor.
+- `services/analysis/index.ts` — valuation.arv = B output; arvLegacy +
+  arvB + bMechanics serialized for parity/UI.
+- Verified live on Butternut: arv $453,492 (B), legacy $451,919, full
+  mechanics trail. arvB-vs-arv variance ~$30 (serialized-vs-upstream
+  field precision) — acceptable.
+- Remaining: scoreboard replay parity pass; B mechanics UI panel +
+  zoning display (queued); evidence-state pinning between attempts.

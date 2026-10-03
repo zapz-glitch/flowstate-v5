@@ -27,6 +27,7 @@ import {
   type AppraisalAdjustment,
 } from '../appraisal'
 import { verifyCompEvidence } from '../appraisal/verification'
+import { evaluateB, type BComp } from '@flowstate-api/shared/appraisal'
 import { createValuationService, MAJOR_ITEMS, type MajorItem } from '../valuation'
 import type { ClassificationResult } from '../classification'
 import type { RehabTable, TierRangeDefinition } from '@flowstate-api/shared/valuation'
@@ -925,8 +926,8 @@ export async function performAnalysis(
   const avmAnchor = finalArv == null && subjectAvm != null && subjectAvm > 0 ? Math.round(subjectAvm) : null
   const assessedAnchor = finalArv == null && avmAnchor == null && (bundle.property.assessedValue ?? 0) > 0
     ? Math.round(bundle.property.assessedValue!) : null
-  const valuationAnchor = finalArv ?? avmAnchor ?? assessedAnchor
-  const valuation = valuationAnchor != null ? valuationService.calculateValuation({
+  let valuationAnchor = finalArv ?? avmAnchor ?? assessedAnchor
+  let valuation = valuationAnchor != null ? valuationService.calculateValuation({
     arv: valuationAnchor,
     subjectSqft,
     compAvgSqft,
@@ -941,7 +942,7 @@ export async function performAnalysis(
     desiredProfit: buybox.desiredProfit,
   }) : null
 
-  const rehabLevelEstimates = valuationAnchor != null ? calculateAllRehabLevelEstimates(valuationService, {
+  let rehabLevelEstimates = valuationAnchor != null ? calculateAllRehabLevelEstimates(valuationService, {
     arv: valuationAnchor,
     subjectSqft,
     compAvgSqft,
@@ -971,7 +972,7 @@ export async function performAnalysis(
   // Investor-priced evidence only — a distressed deed at a market-level
   // price (estate sale priced at retail) is not an investor purchase; the
   // floor is built from distressed sales at or below the subject's AVM.
-  const groupBResult = summarizeGroupB(
+  let groupBResult = summarizeGroupB(
     appraisalResult.comparables.filter(
       (c) => (c.distressedSale === true || c.transaction?.isForeclosure === true)
         && c.salePrice != null && c.salePrice > 0
@@ -1088,6 +1089,109 @@ export async function performAnalysis(
       verified + stale + divergent > 0 ? 'completed' : 'skipped',
       `${verified} price-corroborated · ${stale} stale-evidence · ${divergent} price-divergent`,
     )
+  }
+
+  // ── Set-B ARV — the calibrated trade-tricks methodology IS the ARV ──────
+  // Runs after the evidence lands: Clef curb-appeal stamps (driver tiering)
+  // + evidenceVerification (stale/divergent exclusion). When B produces an
+  // ARV it replaces the legacy appraisal blend; valuation/groupB recompute
+  // on the B anchor so every downstream dollar is priced off verified
+  // evidence, not the blend.
+  if (clefCompPromise) await clefCompPromise.catch(() => undefined)
+  {
+    const bComps: BComp[] = appraisalResult.comparables.map((comp) => ({
+      address: comp.address ?? null,
+      isEnabled: comp.isEnabled,
+      salePrice: comp.salePrice ?? null,
+      saleDate: comp.saleDate ?? null,
+      squareFeet: comp.squareFeet ?? null,
+      pricePerSqft: comp.pricePerSqft ?? null,
+      adjustedPrice: comp.adjustedSalePrice ?? null,
+      distanceMiles: comp.distanceMiles ?? null,
+      sameBlockGroup: comp.sameBlockGroup ?? null,
+      censusTract: comp.censusTract ?? null,
+      subdivision: comp.subdivision ?? null,
+      yearBuilt: comp.yearBuilt ?? null,
+      lotSizeAcres: comp.lotSizeAcres ?? null,
+      lotSizeSquareFeet: comp.lotSizeSquareFeet ?? null,
+      landAssessedValue: comp.landAssessedValue ?? null,
+      propertyType: comp.propertyType ?? null,
+      crossesMajorRoad: comp.crossesMajorRoad ?? null,
+      disableReasons: comp.evaluation?.disableReasons ?? null,
+      classification: compClassifications.get(comp.id)
+        ? { type: compClassifications.get(comp.id)!.classification }
+        : null,
+      curbAppeal: compCurbAppeal?.[comp.id] ?? null,
+      evidenceVerification: comp.evidenceVerification ?? null,
+      appraisalRules: comp.evaluation ? { totalAdjustment: comp.evaluation.totalAdjustment } : null,
+    }))
+    const bResult = evaluateB(
+      {
+        squareFeet: bundle.property.squareFeet ?? null,
+        yearBuilt: bundle.property.yearBuilt ?? null,
+        censusTract: bundle.property.censusTract ?? null,
+        subdivision: bundle.property.subdivision ?? null,
+        landAssessedValue: bundle.property.landAssessedValue ?? null,
+        taxAssessment: bundle.property.assessedValue ?? null,
+        assessedValue: bundle.property.assessedValue ?? null,
+        avmValue: subjectAvm ?? null,
+        lotSizeAcres: bundle.property.lotSizeAcres ?? null,
+        lotSizeSquareFeet: bundle.property.lotSizeSquareFeet ?? null,
+        condition: valuation?.rehabLevel ?? null,
+      },
+      bComps,
+      { rehabCost: valuation?.totalRehabCost ?? null },
+    )
+    if (!insufficient && bResult.arv != null && bResult.arv !== finalArv) {
+      const prevArv = finalArv
+      finalArv = bResult.arv
+      valuationAnchor = finalArv
+      valuation = valuationService.calculateValuation({
+        arv: valuationAnchor,
+        subjectSqft,
+        compAvgSqft,
+        rehabLevelIndex: derivedBuybox.rehabLevelIndex,
+        skipBaseRehab: derivedBuybox.renovatedVerified === true,
+        locationPenaltyAmount: computeLocationPenalty(bundle.enrichment.locationRisks, valuationAnchor, params.proximityConfig),
+        majorItems: derivedBuybox.majorItems,
+        additionPlay: derivedBuybox.additionPlay ?? buybox.additionPlay ?? 0,
+        closingCostsPercent: buybox.closingCostsPercent ?? 8,
+        carryingCostsPercent: buybox.carryingCostsPercent ?? 2,
+        wholesaleFee: buybox.wholesaleFee ?? 10000,
+        desiredProfit: buybox.desiredProfit,
+      })
+      rehabLevelEstimates = calculateAllRehabLevelEstimates(valuationService, {
+        arv: valuationAnchor,
+        subjectSqft,
+        compAvgSqft,
+        selectedRehabLevelIndex: derivedBuybox.rehabLevelIndex,
+        majorItems: derivedBuybox.majorItems,
+        additionPlay: buybox.additionPlay ?? 0,
+        closingCostsPercent: buybox.closingCostsPercent ?? 8,
+        carryingCostsPercent: buybox.carryingCostsPercent ?? 2,
+        wholesaleFee: buybox.wholesaleFee ?? 10000,
+      })
+      groupBResult = summarizeGroupB(
+        appraisalResult.comparables.filter(
+          (c) => (c.distressedSale === true || c.transaction?.isForeclosure === true)
+            && c.salePrice != null && c.salePrice > 0
+            && (subjectAvm == null || c.salePrice <= subjectAvm),
+        ),
+        bundle.property,
+        finalArv,
+        asIsThresholdPercent,
+        Math.round((finalArv * asIsThresholdPercent) / 100),
+        appraisalResult.comparables,
+      )
+      step(
+        'set_b_arv',
+        'completed',
+        `Set-B ARV ${formatUsd(bResult.arv)} (${bResult.source}${bResult.healed ? ', self-healed' : ''})` +
+          (prevArv != null && prevArv !== bResult.arv ? ` — replaces appraisal ${formatUsd(prevArv)}` : ''),
+      )
+    } else if (bResult.arv == null && !insufficient) {
+      step('set_b_arv', 'skipped', 'Set-B produced no ARV — legacy anchor retained')
+    }
   }
 
   const appliedSettings = {

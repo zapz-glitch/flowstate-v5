@@ -705,6 +705,8 @@ export interface AnalysisResponse {
     listPrice: number | null
     /** ARV minus list price — negative = ARV below asking (negotiation room), positive = above */
     arvVsListPrice: number | null
+    /** Legacy appraisal ARV — the pre-Set-B pipeline number (parity display) */
+    arvLegacy: number | null
     /** Set-B parallel ARV — trade-tricks methodology (shared/appraisal set-b) */
     arvB: number | null
     /** B mechanics trail — anchor, flags, ceiling, driver set for the UI panel */
@@ -1566,6 +1568,8 @@ export function buildAnalysisResponse(
           : null,
       // Set-B parallel output — trade-tricks ARV + mechanics trail (the
       // calibration harness methodology, ported to shared/appraisal)
+      /** Legacy appraisal ARV — the pre-swap pipeline number (parity display) */
+      arvLegacy: appraisalResult.arv ?? null,
       arvB: bResult.arv,
       bMechanics: {
         source: bResult.source,
