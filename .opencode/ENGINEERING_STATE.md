@@ -432,3 +432,33 @@ leads 1-0. Resume: next user-provided address → `scripts/ab-eval.py`
   verification exclusions (stale/divergent), attempt trail (widen/deepen/
   self-heal), and ceiling caps. Same queued UI pass as the zoning display.
   Requested 2026-10-03.
+
+## Last handoff (calibration session — 2026-10-03)
+
+**State:** Set-B harness fully operational on feat/attom-provider-swap.
+Scoreboard A=2, B=27 (B wins ~93% — pending user verdicts logged in
+.data/ab-calibration/scoreboard.md).
+
+**Toolbelt live:** marginal sqft (pool-slope / taper), land-rate ladder
+(vacant sales → assessed curve → per-parcel×0.35 capped 20%), URAR
+condition adj (tier spread / contributory 80%), Clef condition tiering
+(renovated→drivers, median→fallback, distressed→floor), verification
+(stale/divergent excluded), sim-gated pure anchoring, subject-units
+outlier ceiling (≥2 supporters), verify-and-retry loop (3 attempts:
+widen → deepen → heal; triggers: no-ARV / below-AVM / thin / floor /
+span / uncorroborated), labeled AVM-floor fallback, county-GIS zoning
++ HBU development flag.
+
+**Queued (user-requested):** (1) zoning code/desc + HBU flag rendered in
+report + dashboard UI under the map; (2) B mechanics display in product
+(anchor, contribution math, tier stamps, attempt trail, caps).
+
+**Known gaps:** beds/baths live in the appraisal grid (consumed via
+adjustedPrice — display split queued); evidence-state run-to-run
+variance (Clef/verification stamps not fully pinned); Tampa city zoning
+layers unverified vs county; land/sqft curve fits need ≥5 enriched
+same-tract points to engage.
+
+**Resume:** user sends address → `python3 scripts/ab-eval.py "<addr>"`
+(API on localhost:8787, wrangler dev running; refresh ATTOM token first
+with `node scripts/sync-attom-token.mjs`).
