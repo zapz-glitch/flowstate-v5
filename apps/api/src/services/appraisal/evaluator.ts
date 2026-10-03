@@ -91,7 +91,23 @@ function evaluateGeoScopeMatch(
     ['county', s?.county ?? subject.county ?? undefined, c?.county],
     ['zip', s?.zip ?? subject.zipCode ?? undefined, c?.zip ?? comp.zipCode ?? undefined],
   ]
-  const norm = (v: string) => v.toUpperCase().replace(/[^A-Z0-9 ]/g, '').replace(/\s+/g, ' ').trim()
+  // Geo-name normalization — ATTOM writes "Saint Petersburg" where USPS and
+  // county sources write "St. Petersburg"; a punctuation/abbreviation diff
+  // is the same scope, not a mismatch. Whole-word substitutions only.
+  const GEO_EQUIV: Record<string, string> = {
+    SAINT: 'ST', STE: 'STE', MOUNT: 'MT', FORT: 'FT',
+    NORTH: 'N', SOUTH: 'S', EAST: 'E', WEST: 'W',
+    NORTHEAST: 'NE', NORTHWEST: 'NW', SOUTHEAST: 'SE', SOUTHWEST: 'SW',
+    HEIGHTS: 'HTS', BEACH: 'BCH',
+  }
+  const norm = (v: string) =>
+    v.toUpperCase()
+      .replace(/[^A-Z0-9 ]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .split(' ')
+      .map((w) => GEO_EQUIV[w] ?? w)
+      .join(' ')
   const populated = pairs.filter(([, a, b]) => a && b)
   if (populated.length === 0) {
     return {
@@ -191,6 +207,13 @@ function evaluateSqftDiff(
   }
 }
 
+/** National vintage-era bounds — subjects ≤1945 comp to the whole pre-1970
+ *  buyer class ("everything before 1970 is in play"). Era is a buyer-pool
+ *  boundary, not a year count: a 1968 bungalow cross-shops a 1927 one,
+ *  a 1972 ranch does not. Location overrides can relocate these later. */
+const VINTAGE_SUBJECT_MAX_YEAR = 1945
+const VINTAGE_ERA_COMP_MAX_YEAR = 1969
+
 function evaluateYearBuiltDiff(
   subject: NormalizedProperty,
   comp: NormalizedComparable,
@@ -202,6 +225,22 @@ function evaluateYearBuiltDiff(
       passed: true,
       status: 'not_verified',
       reason: 'Year built not available — rule not verified',
+    }
+  }
+
+  // Vintage subjects → era window at tier-0: any comp ≤1969 is the same
+  // buyer class, whatever the year diff. Year proximity stays a ranking
+  // signal via the ladder's tight tiers, never a gate for vintage stock.
+  if (subject.yearBuilt <= VINTAGE_SUBJECT_MAX_YEAR) {
+    const passed = comp.yearBuilt <= VINTAGE_ERA_COMP_MAX_YEAR
+    return {
+      type: 'year_built_diff',
+      passed,
+      reason: passed
+        ? undefined
+        : `Modern-era comp (${comp.yearBuilt}) vs vintage subject (${subject.yearBuilt}) — era mismatch (vintage window ≤${VINTAGE_ERA_COMP_MAX_YEAR})`,
+      actualValue: comp.yearBuilt,
+      threshold: VINTAGE_ERA_COMP_MAX_YEAR,
     }
   }
 
