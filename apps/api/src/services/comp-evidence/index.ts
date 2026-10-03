@@ -140,10 +140,21 @@ async function embedPhotos(photoUrls: string[]): Promise<ClefImage[]> {
  * Gather a comp's listing evidence and classify its condition.
  * Never throws — a failed fetch or Clef call returns a partial result.
  */
+/** Evidence pin — comp stamps are cached by identity+sale so a re-run of
+ *  the same report replays the SAME classification instead of re-rolling
+ *  Clef + the listing scrape. A new sale produces a new key → re-stamp. */
+const EVIDENCE_TTL = 30 * 86400
+const evidenceKey = (c: CompEvidenceInput) =>
+  `clef-evidence:${c.propertyId}:${c.saleDate ?? 'nosale'}:${c.salePrice ?? 0}`
+
 export async function gatherCompConditionEvidence(
   env: Env,
   comp: CompEvidenceInput,
 ): Promise<CompConditionEvidence> {
+  const key = evidenceKey(comp)
+  const cached = await env.API_CACHE.get(key, 'json').catch(() => null) as CompConditionEvidence | null
+  if (cached?.condition || cached?.listing) return cached
+
   const evidence: CompConditionEvidence = {
     propertyId: comp.propertyId,
     listing: null,
@@ -241,6 +252,13 @@ export async function gatherCompConditionEvidence(
     evidence.investorSignal ||= evidence.investorSignalSources.length > 0
   } catch (error) {
     evidence.skippedReason = error instanceof Error ? error.message : 'clef failed'
+  }
+
+  // Pin the stamp — only persist meaningful evidence (a listing or a
+  // classification); 'no_listing'/'clef_unavailable' partials stay
+  // uncached so a retry can still find them.
+  if (evidence.condition || evidence.listing) {
+    void env.API_CACHE.put(key, JSON.stringify(evidence), { expirationTtl: EVIDENCE_TTL }).catch(() => {})
   }
 
   return evidence
