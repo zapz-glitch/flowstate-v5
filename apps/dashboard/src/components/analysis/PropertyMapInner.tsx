@@ -25,9 +25,8 @@ async function loadLibrary(name: string): Promise<boolean> {
   } finally { clearTimeout(timer) }
 }
 
-function FlatMarkers({ markers, activeMarkerKey, onMarkerClick, onMarkerHover }: {
+function FlatMarkers({ markers, activeMarkerKey, onMarkerClick }: {
   markers: MapMarker[]; activeMarkerKey?: string | null; onMarkerClick: (marker: MapMarker) => void
-  onMarkerHover?: (marker: MapMarker | null) => void
 }) {
   const map = useMap()
   useEffect(() => {
@@ -42,14 +41,10 @@ function FlatMarkers({ markers, activeMarkerKey, onMarkerClick, onMarkerHover }:
         zIndex: marker.type === 'subject' ? 100 : 10,
       })
       instance.addListener('click', () => onMarkerClick(marker))
-      if (onMarkerHover) {
-        instance.addListener('mouseover', () => onMarkerHover(marker))
-        instance.addListener('mouseout', () => onMarkerHover(null))
-      }
       return instance
     })
     return () => instances.forEach(marker => { google.maps.event.clearInstanceListeners(marker); marker.setMap(null) })
-  }, [map, markers, activeMarkerKey, onMarkerClick, onMarkerHover])
+  }, [map, markers, activeMarkerKey, onMarkerClick])
   return null
 }
 
@@ -138,11 +133,10 @@ function SubjectStreetView({ panorama, subject, onBack, onFailure, viewRef }: { 
 interface PropertyMapInnerProps {
   markers: MapMarker[]
   onMarkerClick?: (type: 'subject' | 'comp', compKey?: string) => void
-  onMarkerHover?: (marker: MapMarker | null) => void
   activeMarkerKey?: string | null
 }
 
-function SubjectMap({ markers, onMarkerClick, onMarkerHover, activeMarkerKey }: PropertyMapInnerProps) {
+function SubjectMap({ markers, onMarkerClick, activeMarkerKey }: PropertyMapInnerProps) {
   const loaded = useApiIsLoaded()
   const original = markers.find(marker => marker.type === 'subject')!
   const [location, setLocation] = useState<{ coordinate: MapCoordinate; addressMatched: boolean } | null>(null)
@@ -264,7 +258,7 @@ function SubjectMap({ markers, onMarkerClick, onMarkerHover, activeMarkerKey }: 
             isFractionalZoomEnabled tilt={0} gestureHandling="greedy" clickableIcons keyboardShortcuts
             zoomControl mapTypeControl={false} streetViewControl={false} fullscreenControl fullscreenControlOptions={{ position: google.maps.ControlPosition.LEFT_TOP }} scaleControl>
             <NativeMapCamera mapRef={nativeMap} />
-            <FlatMarkers markers={correctedMarkers} activeMarkerKey={activeMarkerKey} onMarkerClick={selectMarker} onMarkerHover={onMarkerHover} />
+            <FlatMarkers markers={correctedMarkers} activeMarkerKey={activeMarkerKey} onMarkerClick={selectMarker} />
           </Map> : <div role="status" className="p-4 text-sm">Loading 3D map…</div>)}
         {view === 'aerial' && (mapStyle !== '3d' || threeD !== 'loading') && <MapLegend />}
         {view === 'loading' && <div role="status" className="p-4 text-sm">{streetStatus}</div>}
