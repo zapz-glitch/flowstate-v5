@@ -475,12 +475,32 @@ export function evaluateB(
   // ── Reconciliation anchoring — most-similar comp drives, rest bounds ────
   const ranked = drivers.slice().sort((a, b) =>
     similarity(b) - similarity(a) || b.weight - a.weight)
-  // A comp whose sqft evidence conflicts (provider vs listing >33%) can't
-  // anchor — its size normalization is unreliable. It still bounds.
-  let anchor = ranked.find((x) => !x.comp.sqftConflict) ?? null
+  // Anchor eligibility — a comp BOUNDS but can't ANCHOR when its evidence
+  // is unreliable as the pocket's proxy:
+  //   sqftConflict      — size math untrusted (permit check unresolved)
+  //   sameBlockGroup===false — verified DIFFERENT block group; BG +
+  //     neighborhood are the strongest geo filters — a different BG is a
+  //     different pocket even inside the same tract.
+  //   subdivision mismatch (both populated, names differ) — verified
+  //     different neighborhood.
+  // null/unknown geo stays eligible — can't gate on missing evidence.
+  const subdivBase = (v?: string | null) =>
+    (v ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\b(unit|phase|ph|the|of|addition|add)\b/g, '').replace(/\s+/g, ' ').trim() || null
+  const subBase = subdivBase(subject.subdivision)
+  const anchorable = (x: BContribution) => {
+    if (x.comp.sqftConflict) return false
+    if (x.comp.sameBlockGroup === false) return false
+    const cBase = subdivBase(x.comp.subdivision)
+    if (subBase && cBase && cBase !== subBase) return false
+    return true
+  }
+  let anchor = ranked.find(anchorable) ?? null
   if (anchor == null && ranked.length) anchor = ranked[0]
-  if (ranked[0]?.comp.sqftConflict && anchor !== ranked[0])
-    flags.push(`${ranked[0].comp.address}: ${ranked[0].comp.sqftConflict} — bound-only, can't anchor`)
+  if (ranked[0] && !anchorable(ranked[0]) && anchor !== ranked[0])
+    flags.push(`${ranked[0].comp.address}: ${ranked[0].comp.sqftConflict ??
+      (ranked[0].comp.sameBlockGroup === false
+        ? 'verified different block group — different pocket'
+        : 'different neighborhood')} — bound-only, can't anchor`)
   if (!anchor) return { arv: null, flags, contribs, drivers: [], bracket: 'ok', conf: 'none', source,
     landRateSource: landSource, sqftRateSource }
   const anchorScore = similarity(anchor)
@@ -511,7 +531,7 @@ export function evaluateB(
     const suspect = anchor.contrib < 0.8 * driverMedian ||
       (support.length > 0 && anchor.contrib < Math.min(...support.map((x) => x.contrib)))
     if (suspect) {
-      const unconflicted = drivers.filter((x) => !x.comp.sqftConflict)
+      const unconflicted = drivers.filter(anchorable)
       const healedAnchor = unconflicted.length
         ? unconflicted.reduce((a, b) =>
             Math.abs(b.contrib - driverMedian) < Math.abs(a.contrib - driverMedian) ? b : a)

@@ -1411,6 +1411,21 @@ export function buildAnalysisResponse(
         : null,
       curbAppeal: ctx.compCurbAppeal?.[comp.id] ?? null,
       evidenceVerification: comp.evidenceVerification ?? null,
+      // Sqft-conflict evidence — provider-vs-listing divergence + permit
+      // resolution when one ran (permitted → listing adopted, unpermitted
+      // → tax stands, unknown → comp bound-only).
+      ...((comp.raw as Record<string, unknown> | undefined)?.sqftConflict != null ||
+          (comp.raw as Record<string, unknown> | undefined)?.sqftResolution != null
+        ? {
+            sqftEvidence: {
+              providerSqft: (comp.raw as Record<string, unknown>).providerSqft ?? null,
+              listingSqft: (comp.raw as Record<string, unknown>).listingSqft ?? null,
+              conflict: (comp.raw as Record<string, unknown>).sqftConflict ?? null,
+              resolution: (comp.raw as Record<string, unknown>).sqftResolution ?? 'unverified',
+              note: (comp.raw as Record<string, unknown>).permitNote ?? null,
+            },
+          }
+        : {}),
       landAssessedValue: comp.landAssessedValue ?? null,
       assessedValue: comp.assessedValue ?? null,
       disableReasons: evaluation?.disableReasons ?? [],

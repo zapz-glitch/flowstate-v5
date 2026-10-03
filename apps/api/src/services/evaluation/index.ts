@@ -12,7 +12,7 @@ import { drizzle } from 'drizzle-orm/d1'
 import { eq } from 'drizzle-orm'
 import { majorItemSetting, majorItemCosts } from '../../db/schema'
 import type { PropertyBundle } from '../property-api'
-import type { NormalizedComparable, NormalizedProperty } from '../property-api/types'
+import type { NormalizedComparable, NormalizedPermit, NormalizedProperty } from '../property-api/types'
 import {
   createAppraisalService,
   DEFAULT_FILTERS,
@@ -124,6 +124,14 @@ export interface EvaluationParams {
    * the B verify-and-retry ladder's third attempt.
    */
   enrichComparables?: (comps: NormalizedComparable[]) => Promise<NormalizedComparable[] | null>
+  /**
+   * Sqft-conflict permit check — provider permits for one comp (ATTOM
+   * permits dataset). Resolves marketed-vs-tax sqft divergences: a
+   * permitted addition/basement finish validates the marketed size; no
+   * matching permit → the tax record stands. Missing = conflicts stay
+   * bound-only.
+   */
+  getCompPermits?: (compId: string) => Promise<NormalizedPermit[] | null>
   /**
    * Subject photo bundle prefetched by the caller so the scrape overlaps the
    * comparables fetch. `undefined` = not prefetched — fetch inline.
@@ -1012,8 +1020,15 @@ export async function performAnalysis(
   // stamps ride the response; if it lands late, onCurbAppeal lets the
   // caller patch the persisted result (cards populate on next fetch).
   let compCurbAppeal: CompCurbAppealMap | undefined
+  // Permit types that validate added living area — county-dependent free
+  // text; a match means the marketed sqft is a permitted product.
+  const PERMIT_AREA_RE =
+    /addition|expand|extend|enlarg|basement|interior finish|finish(?:ed)? (?:basement|area|attic)|room add|second stor|2nd stor|conversion|garage conv|livable area|living area/i
+  // Clef resolve — the derived promise carries stamps + permit resolution;
+  // the await below targets IT (not the raw fetch) so B sees every stamp.
+  let clefResolvePromise: Promise<void> | null = null
   if (clefCompPromise) {
-    void clefCompPromise.then((settled) => {
+    clefResolvePromise = clefCompPromise.then(async (settled) => {
       const map: CompCurbAppealMap = {}
       for (const ev of settled) {
         if (!ev?.condition || !ev.listing) continue
@@ -1056,6 +1071,35 @@ export async function performAnalysis(
           }
         }
       }
+
+      // Permit-verify sqft conflicts — tax record is authoritative unless a
+      // permitted addition/finish validates the marketed figure.
+      //   permitted   → marketed sqft is the real product → adopt it
+      //   unpermitted → tax sqft stands → comp competes on provider size
+      //   no coverage → conflict stays → bound-only
+      if (params.getCompPermits) {
+        const conflicted = appraisalResult.comparables.filter(
+          (cc) => (cc.raw as Record<string, unknown> | undefined)?.sqftConflict && cc.id)
+        await Promise.all(conflicted.slice(0, 8).map(async (cc) => {
+          const raw = cc.raw as Record<string, unknown>
+          const permits = await params.getCompPermits!(cc.id!).catch(() => null)
+          if (!permits?.length) { raw.sqftResolution = 'unknown'; return }
+          const addition = permits.find((p) =>
+            PERMIT_AREA_RE.test(`${p.projectType ?? ''} ${p.description ?? ''}`))
+          if (addition) {
+            raw.sqftResolution = 'permitted'
+            raw.permitNote = `marketed ${raw.listingSqft}sf validated by permit ${addition.permitNumber ?? 'record'}`
+            cc.squareFeet = raw.listingSqft as number
+            cc.pricePerSqft = cc.salePrice != null && cc.squareFeet ? cc.salePrice / cc.squareFeet : cc.pricePerSqft
+            delete raw.sqftConflict
+          } else {
+            raw.sqftResolution = 'unpermitted'
+            raw.permitNote = `no addition permit — tax-record ${cc.squareFeet}sf stands over marketed ${raw.listingSqft}sf`
+            delete raw.sqftConflict
+          }
+        }))
+      }
+
       step(
         'comp_curb_appeal',
         Object.keys(map).length > 0 ? 'completed' : 'skipped',
@@ -1065,7 +1109,7 @@ export async function performAnalysis(
       )
       compCurbAppeal = map
       if (Object.keys(map).length > 0) params.onCurbAppeal?.(map)
-    })
+    }).catch(() => undefined)
   }
 
   // Redfin MLS details — awaited here; the fetches started at evidence
@@ -1157,7 +1201,9 @@ export async function performAnalysis(
   // ARV it replaces the legacy appraisal blend; valuation/groupB recompute
   // on the B anchor so every downstream dollar is priced off verified
   // evidence, not the blend.
-  if (clefCompPromise) await clefCompPromise.catch(() => undefined)
+  // Await the DERIVED promise — stamps + permit resolution must land
+  // before B evaluates.
+  if (clefResolvePromise) await clefResolvePromise
   let pipelineBResult: ReturnType<typeof evaluateB> | null = null
   let bAttemptTrail: string[] = []
   {

@@ -1047,6 +1047,11 @@ export class AnalysisJobDO {
       // B retry attempt 3 — per-comp valuation/tax-history fetch for pool
       // members lacking AVM/land evidence.
       enrichComparables: (comps: NormalizedComparable[]) => propertyApi.enrichComparables(comps, { concurrency: 8 }).catch(() => null),
+      // Sqft-conflict permit verification — ATTOM permits dataset per comp.
+      getCompPermits: (compId: string) =>
+        propertyApi.getBuildingPermits(compId)
+          .then((r) => (r.success ? r.data.permits : null))
+          .catch(() => null),
       // attom-mcp comp enrichment happens in the census gate above —
       // passers only, 1 provider call each.
       prefetchedPhotoBundle,
