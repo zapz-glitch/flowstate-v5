@@ -64,7 +64,7 @@ export const DEFAULT_FILTERS: AppraisalFilter[] = [
   // Phase-1 scope requirement — every populated geography scope (county,
   // city, zip, school district, subdivision, N4) must match. Soft so the
   // ladder can go lenient when no all-scope comps exist.
-  { type: 'geo_scope_match', enabled: true, value: 1, priority: 'soft' },
+  { type: 'geo_scope_match', enabled: true, value: 1, priority: 'hard' },
   { type: 'building_style_match', enabled: true, value: 1, priority: 'hard' }, // Ranch vs Ranch, 2-story style vs same — verified mismatches disqualify
   // Foundation is a verified-hard match — slab vs pier/crawl comps carry
   // real value gaps (typically ~10%); a verified mismatch disqualifies.

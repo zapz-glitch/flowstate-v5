@@ -272,6 +272,8 @@ export interface SubjectData {
   neighborhoodName?: string | null
   /** Neighborhood code from site-location */
   neighborhoodCode?: string | null
+  /** ATTOM AVM for the comparable */
+  avmValue?: number | null
   /** CoreLogic Automated Valuation Model — display only, never used in ARV math */
   avm?: {
     value?: number | null
@@ -473,6 +475,8 @@ export interface CompItem {
   neighborhoodName?: string | null
   /** Neighborhood code from site-location */
   neighborhoodCode?: string | null
+  /** ATTOM AVM for the comparable */
+  avmValue?: number | null
   /** Building quality code */
   qualityCode?: string | null
   /** Reason this comp was selected/analyzed (LLM reasoning) */
@@ -701,6 +705,8 @@ export interface CompItem {
   neighborhoodName?: string | null
   /** Neighborhood code from site-location */
   neighborhoodCode?: string | null
+  /** ATTOM AVM for the comparable */
+  avmValue?: number | null
   /** Building quality code */
   qualityCode?: string | null
   /** Reason this comp was selected/analyzed (LLM reasoning) */
