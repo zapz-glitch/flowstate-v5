@@ -124,18 +124,26 @@ export function bTierOf(c: BComp): 'arv' | 'as_is' | 'unidentified' {
   return 'unidentified'
 }
 
-export function bCondTier(c: BComp): 'renovated' | 'median' | 'premium' | 'unknown' {
+export function bCondTier(c: BComp): 'renovated' | 'median' | 'premium' | 'distressed' | 'unknown' {
   const ca = c.curbAppeal ?? {}
   const summary = (ca.summary ?? '').toLowerCase()
+  if (summary.includes('tier:distressed') || summary.includes('tier:floor')) return 'distressed'
   if (summary.includes('tier:median')) return 'median'
   if (summary.includes('tier:premium') || summary.includes('tier:luxury')) return 'premium'
   const cond = (ca.condition ?? '').toLowerCase()
   if ((ca.confidence ?? 0) < B_COND_MIN_CONF) return 'unknown'
   if (['renovated', 'updated', 'turnkey', 'move-in ready'].includes(cond)) return 'renovated'
-  if (['dated', 'maintained', 'median', 'as_is', 'as-is', 'distressed', 'needs_work'].includes(cond))
+  // Distressed is floor evidence — it can corroborate as-is pricing but
+  // NEVER drives or anchors ARV.
+  if (['distressed', 'needs_work', 'tear_down', 'teardown', 'fixer'].includes(cond)) return 'distressed'
+  if (['dated', 'maintained', 'median', 'as_is', 'as-is'].includes(cond))
     return 'median'
   return 'unknown'
 }
+
+/** ARV-eligible condition — distressed is the only condition explicitly
+ *  barred from ARV evidence (floor-only). */
+const bArvCondOk = (c: BComp) => bCondTier(c) !== 'distressed'
 
 const bIsUnfit = (c: BComp) =>
   c.evidenceVerification?.staleness === 'stale' ||
@@ -347,7 +355,7 @@ export function evaluateB(
   // ── Tier discipline — renovated preferred → median fallback → retail ────
   const medianComps = verifiedPool.filter((x) => bCondTier(x.comp) === 'median')
   const preferred = verifiedPool.filter((x) =>
-    x.tier === 'arv' && bCondTier(x.comp) !== 'median' && similarity(x) >= B_MIN_SIM)
+    x.tier === 'arv' && bArvCondOk(x.comp) && bCondTier(x.comp) !== 'median' && similarity(x) >= B_MIN_SIM)
   let drivers: BContribution[]
   if (preferred.length) {
     drivers = preferred
@@ -356,7 +364,7 @@ export function evaluateB(
     for (const x of medianComps)
       flags.push(`${x.comp.address}: median-tier driver — no high-similarity renovated evidence`)
   } else {
-    const weak = verifiedPool.filter((x) => x.tier === 'arv' && bCondTier(x.comp) !== 'median')
+    const weak = verifiedPool.filter((x) => x.tier === 'arv' && bArvCondOk(x.comp) && bCondTier(x.comp) !== 'median')
     if (weak.length) {
       flags.push(`non-median comps below similarity floor (${B_MIN_SIM}) — falling to median`)
       drivers = medianComps.length ? medianComps : weak
@@ -365,7 +373,7 @@ export function evaluateB(
         ? Math.max(...verifiedPool.map((x) => bPpsfOf(x.comp) ?? 0))
         : null
       const retail = verifiedPool.filter((x) =>
-        x.tier !== 'as_is' && bCondTier(x.comp) !== 'median' &&
+        x.tier !== 'as_is' && bArvCondOk(x.comp) && bCondTier(x.comp) !== 'median' &&
         topPpsf != null && (bPpsfOf(x.comp) ?? 0) >= B_RETAIL_BAND * topPpsf)
       if (!retail.length) {
         // Median-only evidence — similarity-gated ceiling + AVM uplift
@@ -470,14 +478,21 @@ export function evaluateB(
   }
 
   // ── Outlier ceiling — top verified contribution in subject units ────────
+  // Similarity-gated: a far-out comp can't stretch the ceiling into price
+  // territory its own evidence doesn't cover — the bound must come from
+  // comps that actually resemble the subject (same gate as the median-only
+  // path: within 60% of the pool's best similarity).
   const margRate = (c: BComp): number => {
     if (sqftRate != null) return sqftRate
     const gap = Math.abs(subSqft! - c.squareFeet!) / c.squareFeet!
     return (bPpsfOf(c) ?? 0) * (gap <= 0.10 ? 0.50 : gap <= 0.25 ? 0.40 : 0.30)
   }
-  const rawCeiling = Math.max(...pool.map((c) =>
-    c.salePrice! + Math.max(0, subSqft! - c.squareFeet!) * margRate(c)))
-  const topContrib = Math.max(...verifiedPool.map((x) => x.contrib))
+  const topSimPool = verifiedPool.length ? Math.max(...verifiedPool.map(similarity)) : 0
+  const gatedVerified = verifiedPool.filter((x) => similarity(x) >= 0.6 * topSimPool)
+  const ceilingPoolC = gatedVerified.length ? gatedVerified : verifiedPool
+  const rawCeiling = Math.max(...ceilingPoolC.map((x) =>
+    x.comp.salePrice! + Math.max(0, subSqft! - x.comp.squareFeet!) * margRate(x.comp)))
+  const topContrib = Math.max(...ceilingPoolC.map((x) => x.contrib))
   const ceiling = Math.min(rawCeiling, topContrib)
   const supporters = drivers.filter((x) => x.contrib >= ceiling).length
   const cappedOutlier = arv > ceiling && supporters < B_OUTLIER_SUPPORT
