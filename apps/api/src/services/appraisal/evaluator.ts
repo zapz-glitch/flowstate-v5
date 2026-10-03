@@ -73,6 +73,41 @@ function evaluateSubdivisionMatch(
   }
 }
 
+// Geo-name normalization — ATTOM writes "Saint Petersburg" where USPS and
+// county sources write "St. Petersburg"; a punctuation/abbreviation diff
+// is the same scope, not a mismatch. Whole-word substitutions only.
+const GEO_EQUIV: Record<string, string> = {
+  SAINT: 'ST', STE: 'STE', MOUNT: 'MT', FORT: 'FT',
+  NORTH: 'N', SOUTH: 'S', EAST: 'E', WEST: 'W',
+  NORTHEAST: 'NE', NORTHWEST: 'NW', SOUTHEAST: 'SE', SOUTHWEST: 'SW',
+  HEIGHTS: 'HTS', BEACH: 'BCH',
+}
+export function geoScopeNorm(v: string): string {
+  return v.toUpperCase()
+    .replace(/[^A-Z0-9 ]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .split(' ')
+    .map((w) => GEO_EQUIV[w] ?? w)
+    .join(' ')
+}
+
+/** Hard geo legs for the pocket catch — the name-label forgiveness covers
+ *  neighborhood/subdivision ONLY (enclave vs parent naming); city, county,
+ *  zip and school district must still literally match. */
+export function pocketHardScopesMatch(
+  subject: NormalizedProperty,
+  comp: NormalizedComparable,
+): boolean {
+  const pairs: Array<[string | undefined, string | undefined]> = [
+    [subject.geoScopes?.city ?? subject.city ?? undefined, comp.geoScopes?.city ?? comp.city ?? undefined],
+    [subject.geoScopes?.county ?? subject.county ?? undefined, comp.geoScopes?.county],
+    [subject.geoScopes?.zip ?? subject.zipCode ?? undefined, comp.geoScopes?.zip ?? comp.zipCode ?? undefined],
+    [subject.geoScopes?.schoolDistrict, comp.geoScopes?.schoolDistrict],
+  ]
+  return pairs.every(([a, b]) => !a || !b || geoScopeNorm(a) === geoScopeNorm(b))
+}
+
 /** Phase-1 scope requirement: every geography scope populated on BOTH
  *  sides must match (county, city, zip, school district, subdivision, N4).
  *  A scope absent on either side is unverifiable — not a mismatch. */
@@ -91,23 +126,6 @@ function evaluateGeoScopeMatch(
     ['county', s?.county ?? subject.county ?? undefined, c?.county],
     ['zip', s?.zip ?? subject.zipCode ?? undefined, c?.zip ?? comp.zipCode ?? undefined],
   ]
-  // Geo-name normalization — ATTOM writes "Saint Petersburg" where USPS and
-  // county sources write "St. Petersburg"; a punctuation/abbreviation diff
-  // is the same scope, not a mismatch. Whole-word substitutions only.
-  const GEO_EQUIV: Record<string, string> = {
-    SAINT: 'ST', STE: 'STE', MOUNT: 'MT', FORT: 'FT',
-    NORTH: 'N', SOUTH: 'S', EAST: 'E', WEST: 'W',
-    NORTHEAST: 'NE', NORTHWEST: 'NW', SOUTHEAST: 'SE', SOUTHWEST: 'SW',
-    HEIGHTS: 'HTS', BEACH: 'BCH',
-  }
-  const norm = (v: string) =>
-    v.toUpperCase()
-      .replace(/[^A-Z0-9 ]/g, '')
-      .replace(/\s+/g, ' ')
-      .trim()
-      .split(' ')
-      .map((w) => GEO_EQUIV[w] ?? w)
-      .join(' ')
   const populated = pairs.filter(([, a, b]) => a && b)
   if (populated.length === 0) {
     return {
@@ -117,7 +135,7 @@ function evaluateGeoScopeMatch(
       reason: 'No geo-scope data — rule not verified',
     }
   }
-  const mismatches = populated.filter(([, a, b]) => norm(a!) !== norm(b!))
+  const mismatches = populated.filter(([, a, b]) => geoScopeNorm(a!) !== geoScopeNorm(b!))
   const passed = mismatches.length === 0
   if (!passed && typeof filter.value === 'number' && filter.value > 1 && isValueEquivalent(subject, comp)) {
     return {
@@ -1375,7 +1393,7 @@ export function flexNumericFilters(filters: AppraisalFilter[], factor: number): 
 
 /** Subject reference $/sqft for value equivalence — scope median first,
  *  then AVM-implied ppsf as the always-available floor. */
-function subjectRefPpsf(subject: NormalizedProperty): number | null {
+export function subjectRefPpsf(subject: NormalizedProperty): number | null {
   const med = subject.ppsfMedians?.SD ?? subject.ppsfMedians?.N4 ?? subject.ppsfMedians?.N3
   if (med != null && med > 0) return med
   if (subject.avmValue != null && subject.squareFeet) return subject.avmValue / subject.squareFeet

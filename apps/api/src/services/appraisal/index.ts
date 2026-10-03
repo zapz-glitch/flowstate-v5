@@ -20,7 +20,7 @@
  */
 
 import type { NormalizedProperty, NormalizedComparable } from '../property-api/types'
-import { evaluateComparables, evaluateComparable, neighborhoodsMatch } from './evaluator'
+import { evaluateComparables, evaluateComparable, neighborhoodsMatch, isValueEquivalent, pocketHardScopesMatch, subjectRefPpsf } from './evaluator'
 import type {
   AppraisalFilter,
   AppraisalAdjustment,
@@ -211,6 +211,7 @@ export interface AppraisalResultWithFallback extends AppraisalResult {
     | 'geographic_expansion'
     | 'sale_age_expansion'
     | 'nearest_comps'
+    | 'pocket_catch'
     | 'insufficient'
   /** Message explaining the fallback */
   fallbackReason?: string
@@ -712,6 +713,50 @@ class PropertyAppraisalService implements AppraisalService {
             }
           }
         }
+
+      // Step 5b: pocket catch — the geo_scope_match label check kills on
+      // enclave-vs-parent naming (Eagle Run ⊂ Greenbrook): a close comp in
+      // the same tract wears the parent label and dies anyway. A comp whose
+      // ONLY hard failure is that label survives when the coordinate facts
+      // + a value check verify the pocket: same side of barriers, same
+      // tract/BG, ≤0.5mi, city/county/zip/school-district legs still hard,
+      // and sale $/sf within 10% of the subject's implied value.
+      {
+        const resultPocket = this.evaluate(subject, comparables, {
+          filters: filtersAt('era'),
+          adjustments,
+        })
+        // Value check only applies when a reference exists — an unanchored
+        // subject (no scope median, no AVM) can't prove pocket equivalence,
+        // so the coordinate facts carry it.
+        const refPpsf = subjectRefPpsf(subject)
+        const picked = rescue(resultPocket, new Set(['geo_scope_match']), (c) =>
+          c.crossesMajorRoad !== true
+          && (c.sameBlockGroup === true ||
+              (c.censusTract != null && subject.censusTract != null && c.censusTract === subject.censusTract))
+          && (c.distanceMiles ?? 99) <= 0.5
+          && pocketHardScopesMatch(subject, c)
+          && (refPpsf == null || isValueEquivalent(subject, c))
+        )
+        if (picked) {
+          if (picked.eligible.length >= REQUIRED_ARV_COMPS) {
+            console.log(`Appraisal: ${picked.selected.length} comps selected via pocket catch — geo_scope label mismatch rescued by coordinate+value proof`)
+            return {
+              ...applyRescued(resultPocket, picked),
+              fallbackUsed: 'pocket_catch',
+              fallbackReason: `Geo-scope label mismatch caught by pocket verification — same tract, same side of barriers, ≤0.5mi, hard scopes match, sale $/sf within 10% of subject implied value.`,
+              expansionApplied: appliedFor('era', null),
+            }
+          }
+          // Fewer than the ARV set needs — merge rescued comps into the
+          // pool so the enabled evidence survives for downstream paths.
+          resultGeo = {
+            ...resultGeo,
+            comparables: picked.comparables,
+            enabledCount: picked.comparables.filter((c) => c.isEnabled).length,
+          }
+        }
+      }
 
         // Step 6: No rule-qualified set exists. Final fallback — the most
         // recent sales that still satisfy every intrinsic hard rule (sale
