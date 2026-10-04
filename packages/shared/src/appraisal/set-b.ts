@@ -44,6 +44,7 @@ export interface BSubject {
   yearBuilt?: number | null
   censusTract?: string | null
   subdivision?: string | null
+  neighborhoodName?: string | null
   landAssessedValue?: number | null
   taxAssessment?: number | null
   assessedValue?: number | null
@@ -66,6 +67,7 @@ export interface BComp {
   sameBlockGroup?: boolean | null
   censusTract?: string | null
   subdivision?: string | null
+  neighborhoodName?: string | null
   yearBuilt?: number | null
   lotSizeAcres?: number | null
   lotSizeSquareFeet?: number | null
@@ -334,9 +336,11 @@ export function evaluateB(
     let s = 0
     const d = c.distanceMiles
     if (d != null) s += Math.max(0, 1 - d) * 3.0
-    if (c.sameBlockGroup) s += 3.0
-    else if (subject.censusTract && c.censusTract === subject.censusTract) s += 2.0
-    if (c.subdivision && c.subdivision === subject.subdivision) s += 2.0
+    if (subject.censusTract && c.censusTract === subject.censusTract) s += 3.0
+    if (c.sameBlockGroup) s += 2.0
+    if (c.subdivision && c.subdivision === subject.subdivision) s += 1.5
+    else if (c.neighborhoodName && subject.neighborhoodName
+        && c.neighborhoodName === subject.neighborhoodName) s += 1.0
     const yd = c.yearBuilt && subject.yearBuilt ? Math.abs(c.yearBuilt - subject.yearBuilt) : null
     if (yd != null) s += yd <= 10 ? 1.5 : yd <= 20 ? 0.75 : 0
     const sd = c.squareFeet && subject.squareFeet ? Math.abs(c.squareFeet - subject.squareFeet) : null

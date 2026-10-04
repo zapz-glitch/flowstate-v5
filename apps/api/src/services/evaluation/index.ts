@@ -1178,6 +1178,7 @@ export async function performAnalysis(
       squareFeet: bundle.property.squareFeet ?? null,
       yearBuilt: bundle.property.yearBuilt ?? null,
       censusTract: bundle.property.censusTract ?? null,
+      neighborhoodName: bundle.property.neighborhoodName ?? null,
       subdivision: bundle.property.subdivision ?? null,
       landAssessedValue: bundle.property.landAssessedValue ?? null,
       taxAssessment: bundle.property.assessedValue ?? null,
@@ -1198,6 +1199,7 @@ export async function performAnalysis(
       distanceMiles: comp.distanceMiles ?? null,
       sameBlockGroup: comp.sameBlockGroup ?? null,
       censusTract: comp.censusTract ?? null,
+      neighborhoodName: comp.neighborhoodName ?? null,
       subdivision: comp.subdivision ?? null,
       yearBuilt: comp.yearBuilt ?? null,
       lotSizeAcres: comp.lotSizeAcres ?? null,
@@ -1285,7 +1287,10 @@ export async function performAnalysis(
     if (fails.length && params.enrichComparables) {
       const thin = appraisalResult.comparables
         .filter((c) => c.avmValue == null || c.landAssessedValue == null)
-        .sort((a, b) => (a.distanceMiles ?? 99) - (b.distanceMiles ?? 99))
+        .sort((a, b) =>
+          Number((b.censusTract != null && b.censusTract === bundle.property.censusTract) || b.sameBlockGroup === true)
+          - Number((a.censusTract != null && a.censusTract === bundle.property.censusTract) || a.sameBlockGroup === true)
+          || (a.distanceMiles ?? 99) - (b.distanceMiles ?? 99))
         .slice(0, 8)
       const enriched = await params.enrichComparables(thin).catch(() => null)
       const byId = new Map((enriched ?? []).map((c) => [c.id, c]))

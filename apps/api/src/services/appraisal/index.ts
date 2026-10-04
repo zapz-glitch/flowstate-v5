@@ -206,6 +206,7 @@ export interface AppraisalResultWithFallback extends AppraisalResult {
   fallbackUsed:
     | 'none'
     | 'year_built_expansion'
+    | 'pocket_expansion'
     | 'neighborhood_expansion'
     | 'subdivision_expansion'
     | 'geographic_expansion'
@@ -576,7 +577,7 @@ class PropertyAppraisalService implements AppraisalService {
             : ''
     const appliedFor = (
       yearLimit: YearStep,
-      scope: 'subdivision' | 'neighborhood' | 'geographic' | null
+      scope: 'pocket' | 'subdivision' | 'neighborhood' | 'geographic' | null
     ): NonNullable<AppraisalResult['expansionApplied']> => {
       const applied: NonNullable<AppraisalResult['expansionApplied']> = []
       if (yearLimit === 'vintage' || yearLimit === 'era' || yearLimit > strictYear) applied.push('year_built')
@@ -643,6 +644,38 @@ class PropertyAppraisalService implements AppraisalService {
           fallbackUsed: 'year_built_expansion',
           fallbackReason: `Insufficient comps within ±${strictYear}yr of the subject's build year in "${subdivisionName}". Widened year-built tolerance to ${yearDesc(yearLimit)} — sale age, subdivision and all other hard rules still enforced.`,
           expansionApplied: ['year_built'],
+        }
+      }
+    }
+
+    // Pocket tier — census tract and/or block-group match outranks
+    // neighborhood-name matching (owner order: tract → block →
+    // neighborhood). Census membership is a coordinate fact, not a name
+    // label: a comp inside the subject's pocket is real evidence even when
+    // it wears another subdivision/neighborhood name, so the name-label
+    // filters may be rescued when the hard scopes still match and no
+    // major road separates it.
+    if (subject.censusTract || subject.censusBlockGroup) {
+      const pocketMatch = (c: AppraisedComparable) =>
+        ((subject.censusTract != null && c.censusTract != null && c.censusTract === subject.censusTract)
+          || c.sameBlockGroup === true
+          || (subject.censusBlockGroup != null && c.censusBlockGroup != null && c.censusBlockGroup === subject.censusBlockGroup))
+        && c.crossesMajorRoad !== true
+        && pocketHardScopesMatch(subject, c)
+      for (const yearLimit of yearLadder) {
+        const resultPocket = this.evaluate(subject, comparables, {
+          filters: filtersAt(yearLimit),
+          adjustments,
+        })
+        const picked = rescue(resultPocket, new Set(['subdivision_match', 'neighborhood_match', 'geo_scope_match']), pocketMatch)
+        if (picked && picked.eligible.length >= REQUIRED_ARV_COMPS) {
+          console.log(`Appraisal: ${picked.selected.length} comps selected via census pocket match${yearNote(yearLimit)}`)
+          return {
+            ...applyRescued(resultPocket, picked),
+            fallbackUsed: 'pocket_expansion',
+            fallbackReason: `Insufficient comps in subdivision "${subject.subdivision || 'unknown'}". Expanded within the subject's census pocket (tract/block-group match — tract first, block corroborates)${yearNote(yearLimit)} — all other rules apply at the tier's thresholds.`,
+            expansionApplied: appliedFor(yearLimit, 'pocket'),
+          }
         }
       }
     }
