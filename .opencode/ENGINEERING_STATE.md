@@ -71,10 +71,14 @@
   insufficient comps degrade to a saved report. Prod verification of a
   known-insufficient address (12717 Dunn Creek Rd / 1802 Hunters Gln NE,
   Marietta GA) still pending after that deploy.
-- Objective: swap data provider Cotality → ATTOM for all property API
-  calls (clean per-call swaps; nothing removed unless told) + add an
-  ATTOM MCP server for tool calling. Working branch:
-  `feat/attom-provider-swap`.
+- Objective: enrich every geographically matched comparable with Redfin
+  construction details and display subject/comp census tract, block group,
+  neighborhood, and construction values without changing Set-B valuation.
+  Working branch: `feat/attom-provider-swap`.
+- Completed locally, awaiting lead review: display-only physical-characteristic
+  source resolution, verified/conflict/unverified dashboard evidence, verbatim
+  server filter rows, and retirement of automatic percent-of-ARV rules. Set-B,
+  its retry ladder, and server appraisal inputs remain unchanged.
 - Inventory + gap map lives in `docs/attom-migration/PROVIDER_SWAP.md`.
   Read-only scan done: adapter boundary is `PropertyProviderAdapter`
   (`services/property-api/types.ts`), selected by `PROPERTY_PROVIDER`
@@ -552,3 +556,52 @@ verified at attempt 3). Full browser E2E passed on Landing Way.
 **Open:** Atlanta + DFW corpus (10-15 each) for regional hardening;
 2 pre-existing rules.test.ts failures (expansion-ladder, predates
 session); 21st CLI installed but not logged in (deferred by user).
+
+## Last handoff (geo construction display — 2026-10-04)
+
+**State:** Implementation complete and uncommitted for lead review. Subject and
+comps now serialize 12-digit Census block-group GEOIDs; all geo-matched comps
+are Redfin construction targets, while beds/baths/sqft mutations remain on the
+exact legacy top-15 IDs. Set-B files/retry calls were not changed.
+
+**Verification:** API/dashboard `npx tsc --noEmit` clean. Branchwood job
+`job_1791080623226_897c869977404e75` stayed exactly $409,227, anchor 2877
+Motts Cove Dr, attempt 1. 18/39 geo matches; Redfin requested 26 comps (11
+extra), stamped 22 total / 14 geo matches. Geo-match construction coverage:
+style 13, stories 14, construction 12, exterior 11, roof 9, foundation 8.
+Runtime 52.2s (warm caches) vs prior ~3.5m. Screenshots:
+`/tmp/geo-construction/{subject,comp-geo-matched,comp-not-matched}.png`.
+
+**External fact:** Branchwood geography-context currently has no N4/N3 layer;
+subject neighborhood therefore honestly renders `—` while subdivision remains
+`ARROWOD DRIVE`. The attempted `layers` fallback was reverted because those
+fields feed appraisal; only the pre-existing ATTOM geography path remains.
+
+**Resume:** Review the uncommitted diff; no implementation blocker remains.
+
+## Last handoff (physical characteristics — 2026-10-04)
+
+**State:** Follow-up complete and uncommitted. New
+`services/physical-characteristics` categorizes raw listing evidence before
+comparison. It resolves style/stories, structure (`constructionType`), exterior
+cladding, roof, foundation type, garage/carport count, and pool. Serialized
+`sources` retain raw listing strings for tooltips. Resolution is response-time
+only and never mutates normalized subject/comps before appraisal. The requested
+unit-test file was deleted; this repo verifies the pipeline through E2E.
+
+**Dashboard:** Subject/expanded comp lines show the eight categorized fields,
+including amber source-to-source conflicts and raw source-value tooltips.
+Feature matching reads verified resolver values only. Filters Applied renders
+plain server-status labels (`✓ passed`, `✗ failed`, `not verified`, or
+`not reported`) plus the server reason. Percent-of-ARV characteristic rules
+remain inert; explicit manual ARV remains supported.
+
+**Verification:** API/dashboard `npx tsc --noEmit` clean. Branchwood job
+`job_1791082161704_7e6f98c7f0d247f8` stayed exactly $409,227, anchor 2877 Motts
+Cove Dr, 7/7 pipeline checks. 18 geo matches. Full metrics and all seven
+remaining genuine conflicts are in `/tmp/physchar2/metrics.json`; screenshots
+are `/tmp/physchar2/{subject,geo-comp-filters}.png`. The two lead reverts remain
+untouched; Set-B and its attempt 2–5 ladder were not changed.
+
+**Resume:** Lead review of the uncommitted diff. No blocker remains; 21st CLI
+review is still unavailable because the local CLI is not authenticated.

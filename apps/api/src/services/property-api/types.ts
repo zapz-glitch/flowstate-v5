@@ -196,6 +196,8 @@ export interface NormalizedProperty {
   neighborhoodCode?: string
   cbsaCode?: string
   censusTract?: string
+  /** 12-digit Census block-group GEOID */
+  censusBlockGroup?: string
   /** ATTOM geography-context layers keyed by scope */
   geoScopes?: GeoScopes
   /** Median $/sqft over trailing 365d per geography scope (SD/N4/N3) — geography-context */
@@ -278,6 +280,8 @@ export interface NormalizedComparable {
   neighborhoodCode?: string | null
   /** Census tract ID — boundaries follow major roads; proxy for road-barrier checks */
   censusTract?: string | null
+  /** 12-digit Census block-group GEOID */
+  censusBlockGroup?: string | null
   /** Median $/sqft over trailing 365d for the comp's geography scopes (ATTOM geography-context, enriched comps only) */
   ppsfMedians?: { SD?: number | null; N4?: number | null; N3?: number | null } | null
   /** Comp's own ATTOM AVM value (valuation dataset, enriched comps only) */
@@ -290,7 +294,7 @@ export interface NormalizedComparable {
   /** County assessed IMPROVEMENT value (tax-history) — feeds land
    *  extraction: sale − improvement×mktRatio = implied land value. */
   improvementAssessedValue?: number | null
-  /** Redfin MLS property-details enrichment — shadow evidence (top-15 comps) */
+  /** Redfin MLS property-details enrichment — shadow display evidence */
   listingDetails?: import('../redfin-details').RedfinPropertyDetails | null
   /** ARV evidence verification — price cross-check (sale vs own AVM) +
    *  staleness (sale $/sf vs current pocket median). Shadow evidence:

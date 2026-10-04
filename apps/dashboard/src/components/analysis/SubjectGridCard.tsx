@@ -8,6 +8,17 @@ import { StreetViewImage } from './StreetViewImage'
 import { formatShortDate, formatLotSize } from './format-helpers'
 import { PropertyPermits } from './PropertyPermits'
 import { PhotoGallery } from './PhotoGallery'
+import { PhysicalCharacteristicsLine } from './PhysicalCharacteristicsLine'
+
+function formatCensusTract(value?: string | null): string {
+  if (!value) return '—'
+  const tract = value.length >= 6 ? value.slice(-6) : value.padStart(6, '0')
+  return `${tract.slice(0, 4)}.${tract.slice(4)}`
+}
+
+function formatBlockGroup(value?: string | null): string {
+  return value ? value.slice(-1) : '—'
+}
 
 interface SubjectGridCardProps {
   subject: SubjectData
@@ -64,6 +75,13 @@ export function SubjectGridCard({ subject, isLoading }: SubjectGridCardProps) {
                     </span>
                   </div>
                 )}
+                <div className="flex items-center gap-1.5 mt-1 text-[10px] text-foreground-tertiary flex-wrap" aria-label="Subject geography">
+                  <span title={subject.censusTract ?? 'Census tract unavailable'}>Tract {formatCensusTract(subject.censusTract)}</span>
+                  <span className="text-border">·</span>
+                  <span title={subject.censusBlockGroup ?? 'Census block group unavailable'}>BG {formatBlockGroup(subject.censusBlockGroup)}</span>
+                  <span className="text-border">·</span>
+                  <span>Neighborhood {subject.neighborhoodName || '—'}</span>
+                </div>
               </div>
               {(subject.listPrice != null || subject.lastSale?.price) && (
                 <div className="text-right flex-shrink-0">
@@ -105,16 +123,6 @@ export function SubjectGridCard({ subject, isLoading }: SubjectGridCardProps) {
                 <span className="font-medium">{formatLotSize(subject.lotSizeAcres)}</span>
               </div>
               <div className="flex items-center justify-between text-[11px]">
-                <span className="text-foreground-tertiary">Style</span>
-                <span className="font-medium truncate ml-2">{subject.buildingStyle || '-'}</span>
-              </div>
-              {subject.foundationType && (
-                <div className="flex items-center justify-between text-[11px]">
-                  <span className="text-foreground-tertiary">Foundation</span>
-                  <span className="font-medium truncate ml-2">{subject.foundationType}</span>
-                </div>
-              )}
-              <div className="flex items-center justify-between text-[11px]">
                 <span className="text-foreground-tertiary">Condition</span>
                 <span className={cn(
                   'font-medium truncate ml-2',
@@ -127,36 +135,6 @@ export function SubjectGridCard({ subject, isLoading }: SubjectGridCardProps) {
                   {subject.condition || 'NA'}
                 </span>
               </div>
-              <div className="flex items-center justify-between text-[11px]">
-                <span className="text-foreground-tertiary">Pool</span>
-                <span className="font-medium">{subject.pool ? 'Yes' : '-'}</span>
-              </div>
-              <div className="flex items-center justify-between text-[11px]">
-                <span className="text-foreground-tertiary">Garage</span>
-                <span className="font-medium truncate ml-2" title={[subject.garage, subject.carport].filter(Boolean).join(' + ') || undefined}>
-                  {subject.garage
-                    ? `${subject.garage}${subject.garageSquareFeet ? ` ${subject.garageSquareFeet} sf` : ''}${subject.carport ? ` + ${subject.carport}` : ''}`
-                    : subject.carport ?? '-'}
-                </span>
-              </div>
-              {(subject.constructionType || subject.exteriorWalls) && (
-                <div className="flex items-center justify-between text-[11px]">
-                  <span className="text-foreground-tertiary">Construction</span>
-                  <span className="font-medium truncate ml-2">{[subject.constructionType, subject.exteriorWalls].filter(Boolean).join(' / ')}</span>
-                </div>
-              )}
-              {(subject.roofCover || subject.roofType) && (
-                <div className="flex items-center justify-between text-[11px]">
-                  <span className="text-foreground-tertiary">Roof</span>
-                  <span className="font-medium truncate ml-2">{subject.roofCover || subject.roofType}</span>
-                </div>
-              )}
-              {subject.storiesType && (
-                <div className="flex items-center justify-between text-[11px]">
-                  <span className="text-foreground-tertiary">Stories</span>
-                  <span className="font-medium truncate ml-2">{subject.storiesType}</span>
-                </div>
-              )}
               {(subject.heating || subject.cooling) && (
                 <div className="flex items-center justify-between text-[11px]">
                   <span className="text-foreground-tertiary">Heat / AC</span>
@@ -175,6 +153,12 @@ export function SubjectGridCard({ subject, isLoading }: SubjectGridCardProps) {
                   <span className="font-medium tabular-nums">{subject.additionSquareFeet.toLocaleString()} sf</span>
                 </div>
               )}
+            </div>
+            <div className="mt-2">
+              <PhysicalCharacteristicsLine
+                characteristics={subject.physicalCharacteristics}
+                label="Subject construction"
+              />
             </div>
             <PropertyPermits permits={subject.permits} loading={isLoading} />
             {subject.photos && subject.photos.length > 0 && (

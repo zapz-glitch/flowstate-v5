@@ -27,7 +27,7 @@ import {
   type AppraisalAdjustment,
 } from '../appraisal'
 import { verifyCompEvidence } from '../appraisal/verification'
-import { evaluateB, type BComp } from '@flowstate-api/shared/appraisal'
+import { evaluateB, subdivisionsMatch, type BComp } from '@flowstate-api/shared/appraisal'
 import { createValuationService, MAJOR_ITEMS, type MajorItem } from '../valuation'
 import type { ClassificationResult } from '../classification'
 import type { RehabTable, TierRangeDefinition } from '@flowstate-api/shared/valuation'
@@ -42,6 +42,7 @@ import { createPhotoService, type PhotoBundle, type PropertyIdentifier, type Pro
 import { gatherCompConditionEvidence, type CompConditionEvidence } from '../comp-evidence'
 import { isClefAvailable } from '../clef'
 import { fetchRedfinPropertyDetails, type RedfinDetailsResult } from '../redfin-details'
+import type { PhysicalCharacteristicSourceData } from '../physical-characteristics'
 
 import { persistReportAssets } from '../report-assets'
 import { expansionRefetchRadius } from '../property-api/retrieval-policy'
@@ -744,10 +745,45 @@ export async function performAnalysis(
   }))
   appraisalResult.selectedCompIds = [...arvIds]
 
-  // Redfin MLS property-details — subject + top-15 comps, kicked off here so
-  // the search+scrape+extract chain overlaps vision/valuation. Shadow
-  // evidence only: stamped on comp.listingDetails / the subject's
-  // listingDetails for the report + comp cards; nothing reads it into math.
+  // Redfin MLS details run in parallel with vision/valuation. Construction
+  // evidence covers every geo match; the original top-15 cohort remains a
+  // separate set because only those comps may supplement appraisal inputs.
+  const legacyRedfinCompTargets = appraisalResult.comparables
+    .slice()
+    .sort((a, b) =>
+      Number(b.isEnabled && arvIds.has(b.id)) - Number(a.isEnabled && arvIds.has(a.id))
+      || Number(b.isEnabled) - Number(a.isEnabled)
+      || (a.distanceMiles ?? 999) - (b.distanceMiles ?? 999))
+    .slice(0, 15)
+  const legacyRedfinCompIds = new Set(legacyRedfinCompTargets.map((comp) => comp.id))
+  const normalizeGeoName = (value?: string | null) =>
+    value?.toLowerCase().replace(/[^a-z0-9]/g, '') || null
+  const subjectNeighborhood = normalizeGeoName(bundle.property.neighborhoodName)
+  const geoPriority = (comp: AppraisedComparable): number | null => {
+    if (bundle.property.censusTract && comp.censusTract === bundle.property.censusTract) return 0
+    if (comp.sameBlockGroup === true) return 1
+    const neighborhoodMatch = subjectNeighborhood != null
+      && normalizeGeoName(comp.neighborhoodName) === subjectNeighborhood
+    const subdivisionMatch = subdivisionsMatch(bundle.property.subdivision, comp.subdivision)
+    return neighborhoodMatch || subdivisionMatch ? 2 : null
+  }
+  const geoMatchedRedfinTargets = appraisalResult.comparables
+    .map((comp) => ({ comp, priority: geoPriority(comp) }))
+    .filter((entry): entry is { comp: AppraisedComparable; priority: number } => entry.priority != null)
+    .sort((a, b) => a.priority - b.priority
+      || (a.comp.distanceMiles ?? 999) - (b.comp.distanceMiles ?? 999))
+    .map(({ comp }) => comp)
+  const geoMatchedRedfinIds = new Set(geoMatchedRedfinTargets.map((comp) => comp.id))
+  const constructionFillTargets = appraisalResult.comparables
+    .filter((comp) => !geoMatchedRedfinIds.has(comp.id))
+    .sort((a, b) => (a.distanceMiles ?? 999) - (b.distanceMiles ?? 999))
+    .slice(0, Math.max(0, 15 - geoMatchedRedfinTargets.length))
+  const constructionRedfinTargets = [...geoMatchedRedfinTargets, ...constructionFillTargets]
+  const redfinTargetsById = new Map(
+    [...legacyRedfinCompTargets, ...constructionRedfinTargets].map((comp) => [comp.id, comp]),
+  )
+  const extraRedfinTargetCount = Math.max(0, redfinTargetsById.size - legacyRedfinCompTargets.length)
+
   const redfinDetailsEnabled = !!(env.FIRECRAWL_API_KEY && env.OPENROUTER_API_KEY)
   const redfinSubjectPromise = redfinDetailsEnabled
     ? fetchRedfinPropertyDetails(env, bundle.property, env.API_CACHE).catch(
@@ -756,18 +792,11 @@ export async function performAnalysis(
     : null
   const redfinCompPromise = redfinDetailsEnabled
     ? Promise.all(
-        appraisalResult.comparables
-          .slice()
-          .sort((a, b) =>
-            Number(b.isEnabled && arvIds.has(b.id)) - Number(a.isEnabled && arvIds.has(a.id))
-            || Number(b.isEnabled) - Number(a.isEnabled)
-            || (a.distanceMiles ?? 999) - (b.distanceMiles ?? 999))
-          .slice(0, 15)
-          .map((comp) =>
-            fetchRedfinPropertyDetails(env, comp, env.API_CACHE)
-              .then((r): { id: string; r: RedfinDetailsResult } => ({ id: comp.id, r }))
-              .catch(() => ({ id: comp.id, r: { details: null, skippedReason: 'fetch_failed' } as RedfinDetailsResult })),
-          ),
+        [...redfinTargetsById.values()].map((comp) =>
+          fetchRedfinPropertyDetails(env, comp, env.API_CACHE)
+            .then((r): { id: string; r: RedfinDetailsResult } => ({ id: comp.id, r }))
+            .catch(() => ({ id: comp.id, r: { details: null, skippedReason: 'fetch_failed' } as RedfinDetailsResult })),
+        ),
       )
     : null
 
@@ -1020,6 +1049,7 @@ export async function performAnalysis(
   // stamps ride the response; if it lands late, onCurbAppeal lets the
   // caller patch the persisted result (cards populate on next fetch).
   let compCurbAppeal: CompCurbAppealMap | undefined
+  const compListingPhysicalDetails: Record<string, PhysicalCharacteristicSourceData> = {}
   // Permit types that validate added living area — county-dependent free
   // text; a match means the marketed sqft is a permitted product.
   const PERMIT_AREA_RE =
@@ -1031,6 +1061,19 @@ export async function performAnalysis(
     clefResolvePromise = clefCompPromise.then(async (settled) => {
       const map: CompCurbAppealMap = {}
       for (const ev of settled) {
+        const details = ev?.listing?.details
+        if (details) {
+          compListingPhysicalDetails[ev.propertyId] = {
+            style: details.style,
+            stories: details.stories,
+            constructionType: details.construction,
+            exterior: details.construction,
+            roof: details.roof,
+            foundation: details.foundationType,
+            garage: details.parking,
+            pool: details.pool,
+          }
+        }
         if (!ev?.condition || !ev.listing) continue
         const c = ev.condition
         let condition =
@@ -1133,26 +1176,23 @@ export async function performAnalysis(
         const d = detailsById.get(comp.id)
         if (d) {
           comp.listingDetails = d
-          // Redfin supplement — MLS beds/baths fill provider gaps so the
-          // eval grid + feature matching see real counts (ATTOM misses
-          // beds on whole pools in some pockets).
-          comp.bedrooms ??= d.beds ?? null
-          comp.bathrooms ??= (d.bathsFull != null ? d.bathsFull + (d.bathsHalf ?? 0) * 0.5 : null)
-          // Sqft cross-check — provider living-area misses floors/duplexes
-          // (a 2-story can read half its real size). When the listing
-          // diverges >33%, the listing wins for size math and the conflict
-          // records on the comp — the eval grid ran on the stale figure.
-          if (d.squareFeet != null && comp.squareFeet != null) {
-            const ratio = d.squareFeet / comp.squareFeet
-            if (ratio > 1.33 || ratio < 0.75) {
-              comp.raw = {
-                ...(comp.raw as Record<string, unknown> ?? {}),
-                providerSqft: comp.squareFeet,
-                listingSqft: d.squareFeet,
-                sqftConflict: `provider ${comp.squareFeet}sf vs listing ${d.squareFeet}sf — listing used`,
+          if (legacyRedfinCompIds.has(comp.id)) {
+            // Keep every appraisal-input supplement on the exact pre-existing
+            // top-15 cohort; widened geo coverage is construction-only.
+            comp.bedrooms ??= d.beds ?? null
+            comp.bathrooms ??= (d.bathsFull != null ? d.bathsFull + (d.bathsHalf ?? 0) * 0.5 : null)
+            if (d.squareFeet != null && comp.squareFeet != null) {
+              const ratio = d.squareFeet / comp.squareFeet
+              if (ratio > 1.33 || ratio < 0.75) {
+                comp.raw = {
+                  ...(comp.raw as Record<string, unknown> ?? {}),
+                  providerSqft: comp.squareFeet,
+                  listingSqft: d.squareFeet,
+                  sqftConflict: `provider ${comp.squareFeet}sf vs listing ${d.squareFeet}sf — listing used`,
+                }
+                comp.squareFeet = d.squareFeet
+                comp.pricePerSqft = comp.salePrice != null ? comp.salePrice / d.squareFeet : comp.pricePerSqft
               }
-              comp.squareFeet = d.squareFeet
-              comp.pricePerSqft = comp.salePrice != null ? comp.salePrice / d.squareFeet : comp.pricePerSqft
             }
           }
           stamped++
@@ -1170,7 +1210,7 @@ export async function performAnalysis(
     step(
       'listing_details',
       (subjectRes?.details || stamped > 0) ? 'completed' : 'skipped',
-      `Redfin details — subject ${subjectRes?.details ? 'yes' : subjectRes?.skippedReason ?? 'no'} · ${stamped} comp(s) enriched`,
+      `Redfin details — subject ${subjectRes?.details ? 'yes' : subjectRes?.skippedReason ?? 'no'} · ${stamped}/${redfinTargetsById.size} comp(s) enriched · ${geoMatchedRedfinTargets.length} geo-matched target(s) · ${extraRedfinTargetCount} extra request(s)`,
     )
   }
 
@@ -1449,6 +1489,30 @@ export async function performAnalysis(
     }
   }
 
+  // A Set-B widen can append comps after the overlapping Redfin batch began.
+  // Catch up construction evidence only; no appraisal-input fields are changed.
+  if (redfinDetailsEnabled) {
+    const lateGeoTargets = appraisalResult.comparables.filter(
+      (comp) => geoPriority(comp) != null && !redfinTargetsById.has(comp.id),
+    )
+    if (lateGeoTargets.length > 0) {
+      const lateResults = await Promise.all(lateGeoTargets.map((comp) =>
+        fetchRedfinPropertyDetails(env, comp, env.API_CACHE)
+          .then((r): { id: string; r: RedfinDetailsResult } => ({ id: comp.id, r }))
+          .catch(() => ({ id: comp.id, r: { details: null, skippedReason: 'fetch_failed' } as RedfinDetailsResult })),
+      ))
+      const lateById = new Map(lateResults.map(({ id, r }) => [id, r.details]))
+      let lateStamped = 0
+      for (const comp of appraisalResult.comparables) {
+        const details = lateById.get(comp.id)
+        if (!details) continue
+        comp.listingDetails = details
+        lateStamped++
+      }
+      console.log(`[Evaluate] Redfin geo catch-up: ${lateStamped}/${lateGeoTargets.length} widened comp(s) enriched`)
+    }
+  }
+
   const appliedSettings = {
     filters: filters.map((f) => ({
       type: f.type,
@@ -1512,6 +1576,7 @@ export async function performAnalysis(
       subjectCurbAppeal,
       subjectListingUrl: photoBundle?.subject?.sourceUrl ?? null,
       subjectListingDetails: subjectListingDetails?.details ?? null,
+      compListingPhysicalDetails,
       subjectListPrice: typeof photoBundle?.subject?.metadata?.listPrice === 'number'
         ? photoBundle.subject.metadata.listPrice
         : null,

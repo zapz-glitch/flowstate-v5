@@ -498,6 +498,7 @@ async function normalizeMcpProperty(results: any[], env: Env): Promise<Normalize
       N3: geoByType('N3')?.medianPricePerSqFt365d ?? null,
     },
     censusTract: census?.tract ?? undefined,
+    censusBlockGroup: census?.blockGroup ?? undefined,
     geoScopes: {
       county: geoByType('CO')?.geographyName ?? undefined,
       city: geoByType('CS')?.geographyName ?? undefined,
@@ -792,6 +793,7 @@ class AttomMcpProvider implements PropertyProviderAdapter {
           neighborhoodName: property.neighborhoodName ?? null,
           neighborhoodCode: property.neighborhoodCode ?? null,
           censusTract: property.censusTract ?? null,
+          censusBlockGroup: property.censusBlockGroup ?? null,
           geoScopes: property.geoScopes ?? undefined,
           buildingCondition: property.buildingCondition ?? null,
           stories: property.stories ?? null,

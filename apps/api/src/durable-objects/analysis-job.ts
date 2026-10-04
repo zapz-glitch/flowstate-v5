@@ -390,8 +390,10 @@ export class AnalysisJobDO {
         yearBuilt: property.yearBuilt,
         subdivision: property.subdivision,
         parcelId: property.parcelId ?? null,
-        neighborhoodName: property.neighborhoodName ?? null,
+        neighborhoodName: property.neighborhoodName ?? property.geoScopes?.n4 ?? property.geoScopes?.n3 ?? null,
         cbsaCode: property.cbsaCode ?? null,
+        censusTract: property.censusTract ?? null,
+        censusBlockGroup: property.censusBlockGroup ?? null,
         lotSizeAcres: property.lotSizeAcres,
         propertyType: property.propertyType,
         lastSale: property.lastSalePrice ? {
@@ -667,6 +669,9 @@ export class AnalysisJobDO {
         this.env.GEOCODIO_API_KEY,
       )
       if (!subjectGeo) return comps
+      property.censusTract ??= subjectGeo.tract
+      property.censusBlockGroup ??= subjectGeo.blockGroup
+      property.neighborhoodName ??= property.geoScopes?.n4 ?? property.geoScopes?.n3
 
       // market-context supplement — the second retrieval source: recent
       // same-pocket sales the primary comp search missed entirely (e.g.
@@ -715,6 +720,7 @@ export class AnalysisJobDO {
         const g = geos[i]
         if (!g) return false
         c.censusTract ??= g.tract
+        c.censusBlockGroup ??= g.blockGroup
         c.sameBlockGroup ??= g.blockGroup === subjectGeo.blockGroup
         c.crossesMajorRoad ??= g.tract !== subjectGeo.tract
         return g.blockGroup === subjectGeo.blockGroup || g.tract === subjectGeo.tract
@@ -733,6 +739,7 @@ export class AnalysisJobDO {
           const comp = comps.find((c) => c.id === e.id)
           if (!comp || !e.censusTract) continue
           comp.censusTract ??= e.censusTract
+          comp.censusBlockGroup ??= e.censusBlockGroup
           comp.crossesMajorRoad ??= comp.censusTract !== subjectGeo.tract
           if (comp.censusTract === subjectGeo.tract && !geoPassers.includes(comp)) geoPassers.push(comp)
         }
@@ -832,7 +839,7 @@ export class AnalysisJobDO {
         // fields the gate paid for onto the winner.
         const ENRICHED_KEYS = [
           'subdivision', 'neighborhoodName', 'neighborhoodCode', 'censusTract',
-          'sameBlockGroup', 'crossesMajorRoad',
+          'censusBlockGroup', 'sameBlockGroup', 'crossesMajorRoad',
           'buildingCondition', 'buildingGrade', 'stories', 'construction',
           'transaction', 'features', 'flip', 'distressedSale', 'isEnriched',
           'latestSale', 'ppsfMedians', 'avmValue',
@@ -845,7 +852,7 @@ export class AnalysisJobDO {
         // erase censusTract/sameBlockGroup/crossesMajorRoad/geoScopes and
         // re-flag a verified comp as geographyUnverified.
         const GEO_KEYS = [
-          'censusTract', 'sameBlockGroup', 'crossesMajorRoad',
+          'censusTract', 'censusBlockGroup', 'sameBlockGroup', 'crossesMajorRoad',
           'geoScopes', 'geographyUnverified',
         ] as const
         const gatedById = new Map(enrichedComps.map((c) => [c.id, c]))

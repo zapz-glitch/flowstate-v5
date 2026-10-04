@@ -15,6 +15,13 @@ import { REHAB_LEVELS } from '../valuation'
 import type { ClassificationResult, PropertyClassification } from '../classification'
 import { generateZillowUrl } from '../photo-provider'
 import {
+  resolvePhysicalCharacteristics,
+  type PhysicalCharacteristic,
+  type PhysicalCharacteristics,
+  type PhysicalCharacteristicSourceData,
+  type PhysicalCharacteristicValue,
+} from '../physical-characteristics'
+import {
   lookupCode,
   BUILDING_STYLE,
   CONSTRUCTION_TYPE,
@@ -25,18 +32,92 @@ import {
   BUILDING_QUALITY,
 } from '../property-api/providers/corelogic-codes'
 
-/** Resolve construction codes to labels (safety net for cached data with raw codes) */
-function resolveConstruction(c?: { type?: string; qualityCode?: string; buildingStyle?: string; foundationType?: string; roofType?: string; exteriorWalls?: string; storiesType?: string; roofCover?: string }) {
-  if (!c) return { foundationType: null as string | null, buildingStyle: null as string | null, storiesType: null as string | null, constructionType: null as string | null, qualityCode: null as string | null, roofType: null as string | null, roofCover: null as string | null, exteriorWalls: null as string | null }
+function resolveProviderConstruction(
+  c?: { type?: string; qualityCode?: string; buildingStyle?: string; foundationType?: string; roofType?: string; exteriorWalls?: string; storiesType?: string; roofCover?: string },
+) {
   return {
-    foundationType: lookupCode(FOUNDATION_TYPE, c.foundationType) ?? null,
-    buildingStyle: lookupCode(BUILDING_STYLE, c.buildingStyle) ?? null,
-    storiesType: c.storiesType ?? null,
-    constructionType: lookupCode(CONSTRUCTION_TYPE, c.type) ?? null,
-    qualityCode: lookupCode(BUILDING_QUALITY, c.qualityCode) ?? null,
-    roofType: lookupCode(ROOF_TYPE, c.roofType) ?? null,
-    roofCover: lookupCode(ROOF_COVER, c.roofCover) ?? null,
-    exteriorWalls: lookupCode(EXTERIOR_WALLS, c.exteriorWalls) ?? null,
+    foundationType: lookupCode(FOUNDATION_TYPE, c?.foundationType) ?? null,
+    buildingStyle: lookupCode(BUILDING_STYLE, c?.buildingStyle) ?? null,
+    storiesType: c?.storiesType ?? null,
+    constructionType: lookupCode(CONSTRUCTION_TYPE, c?.type) ?? null,
+    qualityCode: lookupCode(BUILDING_QUALITY, c?.qualityCode) ?? null,
+    roofType: lookupCode(ROOF_TYPE, c?.roofType) ?? null,
+    roofCover: lookupCode(ROOF_COVER, c?.roofCover) ?? null,
+    exteriorWalls: lookupCode(EXTERIOR_WALLS, c?.exteriorWalls) ?? null,
+  }
+}
+
+function verifiedValue<T extends PhysicalCharacteristicValue>(field: PhysicalCharacteristic<T>): T | null {
+  return field.status === 'verified' ? field.value : null
+}
+
+function physicalDisplayFields(physical: PhysicalCharacteristics, qualityCode: string | null) {
+  const stories = verifiedValue(physical.stories)
+  return {
+    foundationType: verifiedValue(physical.foundation),
+    buildingStyle: verifiedValue(physical.style),
+    stories,
+    storiesType: stories != null ? String(stories) : null,
+    constructionType: verifiedValue(physical.constructionType),
+    exteriorWalls: verifiedValue(physical.exterior),
+    qualityCode,
+    roofType: verifiedValue(physical.roof),
+    roofCover: null,
+  }
+}
+
+function redfinPhysical(
+  listing?: import('../redfin-details').RedfinPropertyDetails | null,
+): PhysicalCharacteristicSourceData | null {
+  if (!listing) return null
+  return {
+    style: listing.style,
+    stories: listing.stories,
+    constructionType: listing.construction,
+    exterior: listing.construction,
+    roof: listing.roof,
+    foundation: listing.foundation,
+    garage: listing.garage ?? listing.parking,
+    pool: listing.pool,
+  }
+}
+
+function photoPhysical(listing?: PropertyPhotos | null): PhysicalCharacteristicSourceData | null {
+  if (!listing) return null
+  return {
+    style: listing.style,
+    stories: listing.stories,
+    constructionType: listing.construction,
+    exterior: listing.construction,
+    roof: listing.roof,
+    foundation: listing.foundationType,
+    garage: listing.parking,
+    pool: listing.pool,
+  }
+}
+
+function attomPhysical(
+  provider: ReturnType<typeof resolveProviderConstruction>,
+  stories: number | null | undefined,
+  garage: string | null | undefined,
+  pool: string | null | undefined,
+  zillow?: PhysicalCharacteristicSourceData | null,
+): PhysicalCharacteristicSourceData {
+  const differs = (value: PhysicalCharacteristicValue | null | undefined, listingValue: PhysicalCharacteristicValue | null | undefined) =>
+    value != null && String(value).trim().toLowerCase() !== String(listingValue ?? '').trim().toLowerCase()
+  const text = (value: string | null | undefined, listingValue: string | null | undefined) =>
+    differs(value, listingValue) ? value : null
+  const storyValue = stories ?? provider.storiesType
+  const providerPool = pool == null ? null : !/^(no|none|false)$/i.test(pool.trim())
+  return {
+    style: text(provider.buildingStyle, zillow?.style),
+    stories: differs(storyValue, zillow?.stories) ? storyValue : null,
+    constructionType: text(provider.constructionType, zillow?.constructionType),
+    exterior: text(provider.exteriorWalls, zillow?.exterior),
+    roof: text(provider.roofCover ?? provider.roofType, zillow?.roof),
+    foundation: text(provider.foundationType, zillow?.foundation),
+    garage: text(garage, zillow?.garage),
+    pool: differs(providerPool, zillow?.pool) ? providerPool : null,
   }
 }
 
@@ -471,6 +552,8 @@ export interface ResponseContext {
   subjectListPrice?: number | null
   /** Redfin MLS property-details for the subject — shadow evidence */
   subjectListingDetails?: import('../redfin-details').RedfinPropertyDetails | null
+  /** Zillow/listing-page physical fields from the pinned comp-evidence scrape. */
+  compListingPhysicalDetails?: Record<string, PhysicalCharacteristicSourceData>
   /** Visual ARV-candidacy check per ARV-selected comp (by comp ID) */
   compCurbAppeal?: Record<string, {
     condition: 'renovated' | 'dated' | 'distressed' | 'unknown'
@@ -553,6 +636,7 @@ export interface AnalysisResponse {
     squareFeet: number | null
     lotSizeAcres: number | null
     yearBuilt: number | null
+    stories: number | null
     propertyType: string | null
     /** Subdivision name (if available) */
     subdivision: string | null
@@ -566,6 +650,7 @@ export interface AnalysisResponse {
     /** Core Based Statistical Area code (metro geography for market analytics) */
     cbsaCode: string | null
     censusTract: string | null
+    censusBlockGroup: string | null
     /** Legal description from site-location (plat/block/lot) */
     legalDescription: string | null
     lastSale: {
@@ -655,6 +740,8 @@ export interface AnalysisResponse {
     cooling: string | null
     /** Fireplace count */
     fireplacesCount: number | null
+    /** Listing-source physical characteristics, resolved after valuation for display only. */
+    physicalCharacteristics: PhysicalCharacteristics
     /** Cotality THV AVM estimate (subject only, parcel-level, display-only — never enters valuation math) */
     avm: {
       value: number | null
@@ -849,6 +936,8 @@ export interface AnalysisResponse {
       neighborhoodName: string | null
       /** Cotality site-location neighborhood code */
       neighborhoodCode: string | null
+      censusTract: string | null
+      censusBlockGroup: string | null
       /** Assessor building improvement condition */
       buildingCondition: string | null
       /** Construction quality grade */
@@ -873,6 +962,8 @@ export interface AnalysisResponse {
       roofType: string | null
       /** Roof cover material (e.g. Composition Shingle, Tile) */
       roofCover: string | null
+      /** Listing-source physical characteristics, resolved after valuation for display only. */
+      physicalCharacteristics: PhysicalCharacteristics
       /** Visual ARV-candidacy check (photos) for ARV-selected comps */
       curbAppeal?: {
         condition: 'renovated' | 'dated' | 'distressed' | 'unknown'
@@ -922,6 +1013,7 @@ export interface AnalysisResponse {
         filters: Array<{
           type: string
           passed: boolean
+          status?: 'passed' | 'failed' | 'not_verified'
           reason?: string
           actualValue?: number | string | null
           threshold?: number | string | null
@@ -1360,6 +1452,19 @@ export function buildAnalysisResponse(
     const bathrooms = merged?.bathrooms ?? comp.bathrooms ?? null
     const squareFeet = merged?.squareFeet ?? comp.squareFeet
     const yearBuilt = merged?.yearBuilt ?? comp.yearBuilt
+    const providerConstruction = resolveProviderConstruction(comp.construction)
+    const zillowPhysical = ctx.compListingPhysicalDetails?.[comp.id] ?? null
+    const physicalCharacteristics = resolvePhysicalCharacteristics({
+      redfin: redfinPhysical(comp.listingDetails),
+      zillow: zillowPhysical,
+      attom: attomPhysical(
+        providerConstruction,
+        comp.stories,
+        comp.features?.garageType,
+        comp.features?.poolType,
+        zillowPhysical,
+      ),
+    })
 
     return {
       id: comp.id,
@@ -1389,6 +1494,7 @@ export function buildAnalysisResponse(
       neighborhoodName: comp.neighborhoodName ?? null,
       neighborhoodCode: comp.neighborhoodCode ?? null,
       censusTract: comp.censusTract ?? null,
+      censusBlockGroup: comp.censusBlockGroup ?? null,
       // Enrichment signals serialized so reports/replays carry the same
       // evidence the rules evaluated — value-equivalence (ppsfMedians),
       // above-AVM (avmValue), transaction distress flags (transaction).
@@ -1401,15 +1507,14 @@ export function buildAnalysisResponse(
       // Computed at serialize-time — "no tract after both ladders" is the
       // honest signal; a stored flag would get dropped by pool merges.
       ...(comp.censusTract == null && comp.latitude != null ? { geographyUnverified: true } : {}),
-      // Redfin MLS details — shadow evidence, top-15 comps only
       ...(comp.listingDetails ? { listingDetails: comp.listingDetails } : {}),
       buildingCondition: comp.buildingCondition ?? null,
       buildingGrade: comp.buildingGrade ?? null,
-      stories: comp.stories ?? null,
       heating: merged?.features?.heating ?? comp.features?.heating ?? null,
       cooling: merged?.features?.cooling ?? comp.features?.cooling ?? null,
       fireplacesCount: merged?.features?.fireplacesCount ?? comp.features?.fireplacesCount ?? null,
-      ...resolveConstruction(comp.construction),
+      ...physicalDisplayFields(physicalCharacteristics, providerConstruction.qualityCode),
+      physicalCharacteristics,
       pool: merged?.features?.poolType ?? null,
       garage: merged?.features?.garageType ?? null,
       garageSquareFeet: merged?.features?.garageSquareFeet ?? null,
@@ -1516,6 +1621,20 @@ export function buildAnalysisResponse(
         ? 'county assessed value — no comp ARV evidence (conservative anchor)'
         : 'Set-B produced no ARV on this evidence set'
 
+  const subjectProviderConstruction = resolveProviderConstruction(property.construction)
+  const subjectZillowPhysical = photoPhysical(photoBundle?.subject)
+  const subjectPhysicalCharacteristics = resolvePhysicalCharacteristics({
+    redfin: redfinPhysical(ctx.subjectListingDetails),
+    zillow: subjectZillowPhysical,
+    attom: attomPhysical(
+      subjectProviderConstruction,
+      property.stories,
+      property.features?.garageType,
+      property.features?.poolType,
+      subjectZillowPhysical,
+    ),
+  })
+
   return {
     // ═══ SUBJECT PROPERTY ═══════════════════════════════════════════════════
     subject: {
@@ -1534,10 +1653,11 @@ export function buildAnalysisResponse(
       subdivision: property.subdivision ?? null,
       parcelId: property.parcelId ?? null,
       apnFormatted: property.apnFormatted ?? null,
-      neighborhoodName: property.neighborhoodName ?? null,
+      neighborhoodName: property.neighborhoodName ?? property.geoScopes?.n4 ?? property.geoScopes?.n3 ?? null,
       neighborhoodCode: property.neighborhoodCode ?? null,
       cbsaCode: property.cbsaCode ?? null,
       censusTract: property.censusTract ?? null,
+      censusBlockGroup: property.censusBlockGroup ?? null,
       ...(property.ppsfMedians != null ? { ppsfMedians: property.ppsfMedians } : {}),
       legalDescription: property.legalDescription ?? null,
       lastSale: property.lastSalePrice
@@ -1553,7 +1673,8 @@ export function buildAnalysisResponse(
       zoningDescription: property.zoningDescription ?? null,
       developmentSignal: devSignal,
       photos: subjectPhotos,
-      ...resolveConstruction(property.construction),
+      ...physicalDisplayFields(subjectPhysicalCharacteristics, subjectProviderConstruction.qualityCode),
+      physicalCharacteristics: subjectPhysicalCharacteristics,
       pool: property.features?.poolType ?? null,
       garage: property.features?.garageType ?? null,
       garageSquareFeet: property.features?.garageSquareFeet ?? null,

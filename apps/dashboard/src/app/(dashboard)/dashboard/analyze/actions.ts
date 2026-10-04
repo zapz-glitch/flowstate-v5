@@ -226,6 +226,27 @@ export interface ListingDetails {
   sourceUrl?: string
 }
 
+export type PhysicalCharacteristicSource = 'redfin' | 'zillow' | 'attom'
+export type PhysicalCharacteristicStatus = 'verified' | 'conflict' | 'unverified'
+export type PhysicalCharacteristicValue = string | number | boolean
+
+export interface PhysicalCharacteristic<T extends PhysicalCharacteristicValue = PhysicalCharacteristicValue> {
+  value: T | null
+  status: PhysicalCharacteristicStatus
+  sources: Array<{ source: PhysicalCharacteristicSource; value: PhysicalCharacteristicValue }>
+}
+
+export interface PhysicalCharacteristics {
+  style: PhysicalCharacteristic<string>
+  stories: PhysicalCharacteristic<number>
+  constructionType: PhysicalCharacteristic<string>
+  exterior: PhysicalCharacteristic<string>
+  roof: PhysicalCharacteristic<string>
+  foundation: PhysicalCharacteristic<string>
+  garage: PhysicalCharacteristic<string>
+  pool: PhysicalCharacteristic<boolean>
+}
+
 export interface SubjectData {
   permits?: {
     status: 'available' | 'empty' | 'unavailable' | 'not_requested'
@@ -251,6 +272,7 @@ export interface SubjectData {
   lotSizeAcres?: number | null
   lotSizeSquareFeet?: number | null
   yearBuilt?: number | null
+  stories?: number | null
   propertyType?: string | null
   /** Subdivision name (if available) */
   subdivision?: string | null
@@ -277,10 +299,13 @@ export interface SubjectData {
   listingUrl?: string | null
   /** Redfin MLS property-details — shadow evidence */
   listingDetails?: ListingDetails | null
+  /** Listing-source physical fields resolved after valuation; display-only. */
+  physicalCharacteristics?: PhysicalCharacteristics
   /** Asking/list price scraped from the subject's listing (null when off-market) */
   listPrice?: number | null
   /** Set-B evidence fields — serialized from the pipeline */
   censusTract?: string | null
+  censusBlockGroup?: string | null
   sameBlockGroup?: boolean | null
   crossesMajorRoad?: boolean | null
   landAssessedValue?: number | null
@@ -592,6 +617,8 @@ export interface CompItem {
   userTier?: 'arv' | 'as_is' | null
   /** Census tract GEOID (Census geocoder, free tier) */
   censusTract?: string | null
+  /** 12-digit Census block-group GEOID */
+  censusBlockGroup?: string | null
   /** Road-barrier proxy — census tract differs from the subject's. Absent = unverified. */
   crossesMajorRoad?: boolean
   /** Same census block group as the subject — same micro-market evidence. Absent/null = unverified. */
@@ -609,6 +636,8 @@ export interface CompItem {
   } | null
   /** Redfin MLS property-details — shadow evidence */
   listingDetails?: ListingDetails | null
+  /** Listing-source physical fields resolved after valuation; display-only. */
+  physicalCharacteristics?: PhysicalCharacteristics
   /** Price percentile among all comps (1 = highest, 100 = lowest) */
   pricePercentile?: number | null
   /** Reasons why this comp was disabled (if any) */
@@ -863,6 +892,8 @@ export interface CompItem {
   userTier?: 'arv' | 'as_is' | null
   /** Census tract GEOID (Census geocoder, free tier) */
   censusTract?: string | null
+  /** 12-digit Census block-group GEOID */
+  censusBlockGroup?: string | null
   /** Road-barrier proxy — census tract differs from the subject's. Absent = unverified. */
   crossesMajorRoad?: boolean
   /** Same census block group as the subject — same micro-market evidence. Absent/null = unverified. */
@@ -880,6 +911,8 @@ export interface CompItem {
   } | null
   /** Redfin MLS property-details — shadow evidence */
   listingDetails?: ListingDetails | null
+  /** Listing-source physical fields resolved after valuation; display-only. */
+  physicalCharacteristics?: PhysicalCharacteristics
   /** Price percentile among all comps (1 = highest, 100 = lowest) */
   pricePercentile?: number | null
   /** Reasons why this comp was disabled (if any) */

@@ -930,6 +930,8 @@ class PropertyApi implements PropertyApiService {
         this.env.GEOCODIO_API_KEY,
       );
       if (subjectGeo) {
+        property.censusTract ??= subjectGeo.tract;
+        property.censusBlockGroup ??= subjectGeo.blockGroup;
         const cache = this.env.API_CACHE ?? undefined;
         const lookup = async (lat: number, lng: number) => {
           const g = await fetchCensusGeography(lat, lng, cache, this.env.FIRECRAWL_API_KEY, this.env.GEOCODIO_API_KEY).catch(() => null);
@@ -958,6 +960,7 @@ class PropertyApi implements PropertyApiService {
             return false;
           }
           c.censusTract ??= g.tract;
+          c.censusBlockGroup ??= g.blockGroup;
           c.sameBlockGroup ??= g.blockGroup === subjectGeo.blockGroup;
           c.crossesMajorRoad ??= g.tract !== subjectGeo.tract;
           const pass =
@@ -1177,6 +1180,7 @@ class PropertyApi implements PropertyApiService {
                 neighborhoodName: result.data.neighborhoodName ?? null,
                 neighborhoodCode: result.data.neighborhoodCode ?? null,
                 censusTract: result.data.censusTract ?? null,
+                censusBlockGroup: result.data.censusBlockGroup ?? null,
                 geoScopes: result.data.geoScopes ?? undefined,
                 buildingCondition: result.data.buildingCondition ?? null,
                 buildingGrade: result.data.buildingGrade ?? null,

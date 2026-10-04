@@ -20,7 +20,7 @@ import type {
 } from '@/app/(dashboard)/dashboard/analyze/actions'
 import { getCompKey } from '@/components/analysis/format-helpers'
 import { useReportSettings, type UseReportSettingsReturn } from '@/hooks/use-report-settings'
-import { calculateArvAdjustmentDelta, recalculateValuationFromComps, type RecalcResult } from '@/lib/recalc'
+import { recalculateValuationFromComps, type RecalcResult } from '@/lib/recalc'
 import { recalculateReportComps } from '@/lib/client-api'
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -253,21 +253,12 @@ export function useAnalysisEvaluation({
   const computedValuation = useMemo((): ValuationData | undefined => {
     if (!data?.valuation) return undefined
     if (pythonAuthoritative) {
-      // Server-authoritative report — full recalc is disabled, but a manual
-      // ARV / adjustment override is pure deterministic math on top of the
-      // displayed deal: new ARV flows through rehab/closing/carrying/fee
-      // exactly like the JS recalc path.
+      // Server-authoritative report — only an explicit manual ARV override
+      // may alter the displayed deal. Stored percent-of-ARV rules are inert.
       const ov = settingsHook.settings.arvOverride
-      const rules = settingsHook.settings.arvAdjustmentRules ?? []
-      const overrides = settingsHook.settings.arvAdjustments ?? {}
-      const hasOverride = (ov != null && ov > 0) || rules.some((r) => overrides[r.id] !== undefined)
-      if (!hasOverride) return data.valuation
+      if (ov == null || ov <= 0) return data.valuation
       const v0 = data.valuation
-      const base0 = ov != null && ov > 0 ? ov : (v0.arv ?? 0)
-      const { delta, lines } = ov != null && ov > 0
-        ? { delta: 0, lines: [] as Array<{ id: string; label: string; amount: number; direction: 'deduction' | 'addition' }> }
-        : calculateArvAdjustmentDelta(base0, data.subject as unknown as Record<string, unknown>, settingsHook.settings)
-      const newArv = Math.max(0, Math.round(base0 + delta))
+      const newArv = Math.max(0, Math.round(ov))
       const ref = Math.max(1, v0.arv ?? 0)
       const closingPct = (v0.closingCosts ?? 0) / ref
       const carryingPct = (v0.carryingCosts ?? 0) / ref
@@ -294,7 +285,7 @@ export function useAnalysisEvaluation({
         totalInvestment: totalInv,
         projectedProfit: profit,
         projectedROI: totalInv > 0 ? Math.round((profit / totalInv) * 1000) / 10 : v0.projectedROI,
-        arvAdjustments: lines,
+        arvAdjustments: [],
       }
     }
 

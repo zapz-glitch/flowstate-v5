@@ -14,4 +14,9 @@ export type {
   FloodZoneData,
   NeighbourhoodData,
   ApiCallStats,
+  PhysicalCharacteristic,
+  PhysicalCharacteristics,
+  PhysicalCharacteristicValue,
+  PhysicalCharacteristicStatus,
+  PhysicalCharacteristicSource,
 } from '@/app/(dashboard)/dashboard/analyze/actions'

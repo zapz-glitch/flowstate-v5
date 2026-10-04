@@ -371,16 +371,14 @@ function mapValuationResult(
     tierRanges
   )
 
-  // Base ARV: a manual per-report override is the FINAL value — proximity
-  // and characteristic adjustments exist to correct the *computed* ARV and
-  // must not shave a number the user typed in themselves.
+  // A manual per-report override is the final ARV. Percent-of-ARV physical
+  // characteristic rules are retained in settings for compatibility but are
+  // no longer applied to displayed valuation.
   const manualArv = settings.arvOverride != null && settings.arvOverride > 0 ? settings.arvOverride : null
   const baseArv = manualArv ?? v.arv
   const proximityDeduction = manualArv != null ? 0 : calculateProximityDeduction(baseArv, settings)
-  const arvAdj = manualArv != null
-    ? { delta: 0, lines: [] as ArvAdjustmentLine[] }
-    : calculateArvAdjustmentDelta(baseArv, subject as Record<string, unknown> | null | undefined, settings)
-  const adjustedArv = baseArv - proximityDeduction + arvAdj.delta
+  const arvAdj = { delta: 0, lines: [] as ArvAdjustmentLine[] }
+  const adjustedArv = baseArv - proximityDeduction
 
   // Recalculate everything from adjusted ARV
   const adjustedClosing = adjustedArv * (settings.dealParams.closingCostsPercent / 100)
