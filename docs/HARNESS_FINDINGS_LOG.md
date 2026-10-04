@@ -149,6 +149,8 @@ Status: `open` until resolved in the v2 design.
   long-term storage with retries), rather than failing runs.
 - **Storing provider data is allowed.** Saved runs can be checked into the
   repo as fixtures.
-- **Enrichment budget is open to suggestion.** Enrichment calls cost money,
-  so the most relevant comps are enriched first. 25 is a ceiling, not a
-  target.
+- **Enrichment runs in waves (approved).** Rank comps on free data first
+  (same block group, then same tract, then same neighborhood, then
+  nearest), drop noise before spending a call, enrich the top 6, and stop
+  once 3–6 good comps pass. If fewer pass, enrich the next 6. Ceiling 25.
+  The wave size of 6 is a starting value to tune on the address set.
