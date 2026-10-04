@@ -2,6 +2,13 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Operating Contract
+
+All valuation and harness work follows `SWE2_FLOWSTATE_FINISHING_GUIDE.md` at the
+repo root — the appraiser gate, address runs as read-only evaluations, bounded
+diagnosis before edits, server/dashboard symmetry, and the end-to-end approval
+gate. Read it before any evaluator work.
+
 ## Workflow Rules
 
 - **Do NOT build or deploy after each change.** Only deploy when explicitly instructed by the user.
