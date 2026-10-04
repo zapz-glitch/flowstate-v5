@@ -27,6 +27,8 @@ import {
   type AppraisalAdjustment,
 } from '../appraisal'
 import { verifyCompEvidence } from '../appraisal/verification'
+import { arvEvidence, classifyCompsByEvidence } from './comp-classification'
+export { arvEvidence, classifyCompsByEvidence }
 import { evaluateB, subdivisionsMatch, type BComp } from '@flowstate-api/shared/appraisal'
 import { createValuationService, MAJOR_ITEMS, type MajorItem } from '../valuation'
 import type { ClassificationResult } from '../classification'
@@ -183,102 +185,6 @@ export interface EvaluationResult {
 // ─── Price Classification ────────────────────────────────────────────────────
 
 /** Sold ≥15% over the comp's own scope median $/sf → premium sale = ARV evidence */
-const ARV_PPSF_PREMIUM = 1.15
-/** Sold ≥15% over the subject's AVM → renovated-tier sale = ARV evidence */
-const ARV_SUBJECT_AVM_PREMIUM = 1.15
-
-function compPpsf(c: { pricePerSqft?: number | null; salePrice?: number | null; squareFeet?: number | null }): number | null {
-  return c.pricePerSqft ?? (c.salePrice != null && c.squareFeet ? c.salePrice / c.squareFeet : null)
-}
-
-/**
- * ARV evidence — three peer signals, any one qualifies the comp for the
- * ARV set (they cooperate; multiple qualifying comps average together):
- *   1. flip resale      — verified flip chain (resale leg)
- *   2. premium sale     — ≥15% over the comp's scope median $/sf
- *   3. above-own-AVM    — sale price above the comp's own AVM
- * Returns the evidence note, or null when no signal fires.
- */
-export function arvEvidence(
-  c: NormalizedComparable,
-  subjectAvm?: number | null,
-): { note: string; method: 'evidence_flip_chain' | 'evidence_premium' | 'evidence_avm' } | null {
-  if (c.flip && c.flip.priorSalePrice > 0) {
-    return {
-      method: 'evidence_flip_chain',
-      note: `Verified flip — bought $${c.flip.priorSalePrice.toLocaleString()} ${c.flip.daysHeld}d prior, resold +${c.flip.gainPct}%`,
-    }
-  }
-  // Distressed transactions are investor/as-is evidence — never ARV,
-  // even when the price reads premium.
-  if (c.distressedSale === true || c.transaction?.isForeclosure === true) return null
-  const ppsf = compPpsf(c)
-  const scopeMed = c.ppsfMedians?.SD ?? c.ppsfMedians?.N4 ?? c.ppsfMedians?.N3
-  if (ppsf != null && scopeMed != null && scopeMed > 0 && ppsf >= scopeMed * ARV_PPSF_PREMIUM) {
-    return {
-      method: 'evidence_premium',
-      note: `Sold ${Math.round((ppsf / scopeMed) * 100 - 100)}% above scope median $/sf`,
-    }
-  }
-  if (c.salePrice != null && c.avmValue != null && c.salePrice > c.avmValue) {
-    return {
-      method: 'evidence_avm',
-      note: `Sold $${Math.round((c.salePrice - c.avmValue) / 1000)}k above own AVM`,
-    }
-  }
-  // Fallback ARV check per spec — comp sold above the SUBJECT's AVM
-  // (the subject's modeled as-is value): the premium implies renovation.
-  if (c.salePrice != null && subjectAvm != null && c.salePrice > subjectAvm * ARV_SUBJECT_AVM_PREMIUM) {
-    return {
-      method: 'evidence_avm',
-      note: `Sold ${Math.round((c.salePrice / subjectAvm) * 100 - 100)}% above subject AVM`,
-    }
-  }
-  return null
-}
-
-/**
- * Evidence classification — transaction evidence only:
- *   flip resale / premium / above-AVM → after_renovation (ARV evidence)
- *   distressed sale                   → as_is (investor evidence)
- *   everything else                   → transitional (market tier)
- */
-export function classifyCompsByEvidence(
-  comparables: NormalizedComparable[],
-  subjectAvm?: number | null
-): Map<string, ClassificationResult> {
-  const classifications = new Map<string, ClassificationResult>()
-  for (const comp of comparables) {
-    const ev = arvEvidence(comp, subjectAvm)
-    if (ev) {
-      classifications.set(comp.id, {
-        classification: 'after_renovation',
-        confidence: ev.method === 'evidence_flip_chain' ? 90 : 80,
-        method: ev.method,
-        reasoning: ev.note,
-        indicators: {},
-      })
-    } else if (comp.distressedSale === true || comp.transaction?.isForeclosure === true) {
-      classifications.set(comp.id, {
-        classification: 'as_is',
-        confidence: 85,
-        method: 'evidence_distressed',
-        reasoning: 'Distressed-flagged transaction — investor/as-is evidence',
-        indicators: {},
-      })
-    } else {
-      classifications.set(comp.id, {
-        classification: 'transitional',
-        confidence: 50,
-        method: 'evidence_market',
-        reasoning: 'Ordinary sale — no ARV or distress evidence; market-rate reference',
-        indicators: {},
-      })
-    }
-  }
-  return classifications
-}
-
 // ─── Best Match Selection ────────────────────────────────────────────────────
 
 function selectBestMatch(
@@ -891,8 +797,8 @@ export async function performAnalysis(
   // ── 4. Classifications — transaction evidence, not condition guessing ────
   // flip resale → after_renovation; distressed sale → as_is; ordinary sale
   // → transitional (market tier).
-  const compClassifications = classifyCompsByEvidence(bundle.comparables, subjectAvm)
-  const classificationSummary = summarizeClassifications(
+  let compClassifications = classifyCompsByEvidence(bundle.comparables, subjectAvm)
+  let classificationSummary = summarizeClassifications(
     appraisalResult.comparables,
     compClassifications,
     subjectAvm
@@ -1090,7 +996,7 @@ export async function performAnalysis(
           condition,
           source: 'vision',
           confidence: c.confidence != null ? Math.round(c.confidence * 100) : Math.round(Math.max(c.renovatedProbability, c.asIsProbability, 0.5) * 100),
-          summary: `${c.conditionLabel} (${c.conditionScore.toFixed(1)}/4) · tier:${c.tier} · renovated ${(c.renovatedProbability * 100).toFixed(0)}% · as-is ${(c.asIsProbability * 100).toFixed(0)}% · investor ${(c.investorLanguageProbability * 100).toFixed(0)}% · via ${ev.listing.source}${ev.listing.description ? ' · listing text available' : ''}`,
+          summary: `${c.conditionLabel} (${c.conditionScore.toFixed(1)}/4) · tier:${c.tier} · renovated ${(c.renovatedProbability * 100).toFixed(0)}% · as-is ${(c.asIsProbability * 100).toFixed(0)}% · investor ${(c.investorLanguageProbability * 100).toFixed(0)}% · via ${ev.listing.source}${c.model === 'openai/gpt-6-luna' ? ' · luna' : ''}${ev.listing.description ? ' · listing text available' : ''}`,
           photosExamined: ev.listing.photoCount,
         }
         // Sqft cross-check — Zillow counts finished basement/upper floors
@@ -1249,6 +1155,16 @@ export async function performAnalysis(
   // Await the DERIVED promise — stamps + permit resolution must land
   // before B evaluates.
   if (clefResolvePromise) await clefResolvePromise
+  // Re-classify with the vision reads now landed — the renovated-band
+  // corroboration check only works once Clef/Luna stamps exist.
+  if (compCurbAppeal && Object.keys(compCurbAppeal).length > 0) {
+    compClassifications = classifyCompsByEvidence(appraisalResult.comparables, subjectAvm, compCurbAppeal)
+    classificationSummary = summarizeClassifications(
+      appraisalResult.comparables,
+      compClassifications,
+      subjectAvm
+    )
+  }
   let pipelineBResult: ReturnType<typeof evaluateB> | null = null
   let bAttemptTrail: string[] = []
   {
@@ -1354,7 +1270,7 @@ export async function performAnalysis(
         // Classify the widened set too — sale-type evidence (flip resale /
         // distressed) must stamp before B re-reads tiers, otherwise an
         // unclassified flip buy could read as upper-band evidence.
-        for (const [id, cls] of classifyCompsByEvidence(added, subjectAvm)) {
+        for (const [id, cls] of classifyCompsByEvidence(added, subjectAvm, compCurbAppeal)) {
           compClassifications.set(id, cls)
         }
         bResult = evaluateB(bSubjectFields, toBComps(), { rehabCost: valuation?.totalRehabCost ?? null })

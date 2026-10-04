@@ -15,7 +15,7 @@
 
 import type { Env } from '../../types'
 
-export type ClefModel = 'clef' | 'clef-flash'
+export type ClefModel = 'clef' | 'clef-flash' | 'openai/gpt-6-luna'
 
 export interface ClefImage {
   content_type: 'image/png' | 'image/jpeg' | 'image/webp'
@@ -67,7 +67,7 @@ export interface CompConditionResult {
   durationMs: number
 }
 
-const CONDITION_SCALE = [
+export const CONDITION_SCALE = [
   'Poor — major deferred maintenance or obvious fixer condition',
   'Dated — original finishes, functional but visibly dated',
   'Maintained — typical owner-occupied condition, minor wear',
