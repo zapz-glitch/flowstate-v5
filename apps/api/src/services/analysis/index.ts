@@ -1401,6 +1401,31 @@ export function buildAnalysisResponse(
     bundle.comparables.map((c) => [c.id, c])
   )
 
+  // ── Set-B comp roles ───────────────────────────────────────────────────
+  // The pre-B enabled/ARV grid doesn't tell the reviewer which comps the
+  // verified answer actually used. Serialize the per-comp verdict from the
+  // pipeline's post-retry BResult so the dashboard can show the true
+  // anchor/drivers instead of inferring status from the appraisal grid.
+  // BComp carries no id — match on normalized street address.
+  const bRoleOf = (() => {
+    const b = ctx.pipelineBResult
+    if (!b) return () => null
+    const norm = (a?: string | null) => (a ?? '').trim().toLowerCase()
+    const driverKeys = new Set(b.drivers.map((d) => norm(d.comp.address)))
+    const contribKeys = new Set(b.contribs.map((x) => norm(x.comp.address)))
+    const anchorComp =
+      b.drivers.find((d) => norm(d.comp.address) === norm(b.anchorAddress))
+      ?? b.drivers[0]
+    const anchorKey = anchorComp ? norm(anchorComp.comp.address) : ''
+    return (address?: string | null): 'anchor' | 'driver' | 'pool' | 'excluded' => {
+      const k = norm(address)
+      if (k && k === anchorKey) return 'anchor'
+      if (driverKeys.has(k)) return 'driver'
+      if (contribKeys.has(k)) return 'pool'
+      return 'excluded'
+    }
+  })()
+
   // Return ALL comps: enabled first (closest → farthest), then disabled (same order)
   const allComps = [
     ...enabledComps.sort(byDistance),
@@ -1530,6 +1555,9 @@ export function buildAnalysisResponse(
       compGroup: ctx.groupACompIds?.has(comp.id) ? 'arv' as const
         : ctx.groupBCompIds?.has(comp.id) ? 'as_is' as const
         : null,
+      // Which comps the Set-B answer actually used — display-only, never
+      // feeds back into valuation.
+      bRole: bRoleOf(comp.address),
       curbAppeal: ctx.compCurbAppeal?.[comp.id] ?? null,
       evidenceVerification: comp.evidenceVerification ?? null,
       // Sqft-conflict evidence — provider-vs-listing divergence + permit

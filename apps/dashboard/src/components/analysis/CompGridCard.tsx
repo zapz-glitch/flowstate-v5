@@ -122,6 +122,29 @@ function CompGridCardInner({
             {index + 1}
           </div>
 
+          {comp.bRole && (
+            <div
+              className={cn(
+                'h-6 px-1.5 rounded-sm flex items-center text-[10px] font-bold',
+                comp.bRole === 'anchor' ? 'bg-amber-500/90 text-white ring-1 ring-amber-300/60'
+                  : comp.bRole === 'driver' ? 'bg-emerald-500/90 text-white'
+                  : comp.bRole === 'pool' ? 'bg-neutral-600/90 text-white/80'
+                  : 'bg-neutral-700/80 text-white/50'
+              )}
+              title={
+                comp.bRole === 'anchor' ? 'Set-B anchor — the verified sale the ARV is priced off'
+                  : comp.bRole === 'driver' ? 'Set-B driver — verified evidence in the ARV answer'
+                  : comp.bRole === 'pool' ? 'In the Set-B evidence pool — evaluated but not a driver'
+                  : 'Not in the Set-B evidence pool — excluded from the verified ARV'
+              }
+            >
+              {comp.bRole === 'anchor' ? 'ANCHOR'
+                : comp.bRole === 'driver' ? 'DRIVER'
+                : comp.bRole === 'pool' ? 'pool'
+                : 'excluded'}
+            </div>
+          )}
+
           {comp.flip && (
             <div
               className="h-6 px-1.5 rounded-sm flex items-center text-[10px] font-bold bg-violet-500/90 text-white"

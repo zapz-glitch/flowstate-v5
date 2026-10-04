@@ -611,6 +611,13 @@ export interface CompItem {
   /** Which comp group: 'arv' (Group A, drives valuation), 'as_is' (Group B, market intel), or null */
   compGroup?: 'arv' | 'as_is' | null
   /**
+   * Set-B verdict — which comps the server's verified ARV actually used.
+   * 'anchor' = the sale the ARV is priced off, 'driver' = verified evidence,
+   * 'pool' = evaluated but not a driver, 'excluded' = not in the Set-B pool.
+   * Display-only; separate from the appraisal-grid enabled/compGroup state.
+   */
+  bRole?: 'anchor' | 'driver' | 'pool' | 'excluded' | null
+  /**
    * Reviewer's manual tier pin — 'arv' or 'as_is' — assigned on the comp
    * card. Rides alongside the automatic evidence class; never rewrites it.
    */
@@ -885,6 +892,13 @@ export interface CompItem {
   isEnabled?: boolean
   /** Which comp group: 'arv' (Group A, drives valuation), 'as_is' (Group B, market intel), or null */
   compGroup?: 'arv' | 'as_is' | null
+  /**
+   * Set-B verdict — which comps the server's verified ARV actually used.
+   * 'anchor' = the sale the ARV is priced off, 'driver' = verified evidence,
+   * 'pool' = evaluated but not a driver, 'excluded' = not in the Set-B pool.
+   * Display-only; separate from the appraisal-grid enabled/compGroup state.
+   */
+  bRole?: 'anchor' | 'driver' | 'pool' | 'excluded' | null
   /**
    * Reviewer's manual tier pin — 'arv' or 'as_is' — assigned on the comp
    * card. Rides alongside the automatic evidence class; never rewrites it.
