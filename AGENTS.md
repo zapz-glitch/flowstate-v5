@@ -22,10 +22,6 @@
 - **Never re-merge a reverted branch.** If merged work was reverted on
   main, the fix lands as a NEW commit/PR. Git treats the old commits as
   already merged and will silently bring in nothing.
-- **ENGINEERING_STATE.md** is union-merged (see `.gitattributes`) so it
-  cannot conflict. Update it on the active branch and commit it with the
-  work — never leave it dirty across sessions or sessions end with
-  uncommitted state.
 - **Stale branches:** anything unmerged older than ~2 weeks needs
   justification or gets deleted. Branches are cheap; confusion is not.
 
@@ -35,7 +31,7 @@ The dev environment is provisioned exactly once, in
 `~/src/flowstate-v5`, via untracked files that persist across branch
 switches:
 
-- `apps/api/.dev.vars` — all provider keys (CoreLogic, Firecrawl,
+- `apps/api/.dev.vars` — all provider keys (ATTOM MCP, Firecrawl,
   OpenAI/OpenRouter, Close, CDARV) + `DASHBOARD_URL=http://localhost:3000`
   for CORS
 - `apps/dashboard/.env.local` — `NEXT_PUBLIC_API_URL`, Google Maps key,
@@ -53,7 +49,7 @@ Full details: `docs/dev-environment.md`.
 
 **Verify before debugging**: after `npm run dev`, run `npm run dev:check`.
 It verifies env files, both servers, the local login, the Google Maps
-referrer authorization, and CoreLogic credentials — and names the fix.
+referrer authorization, and the ATTOM MCP credentials — and names the fix.
 `node scripts/dev-check.mjs --fix-login` repairs the local account and
 clears the IP lockout.
 
