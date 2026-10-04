@@ -20,7 +20,7 @@
  */
 
 import type { NormalizedProperty, NormalizedComparable } from '../property-api/types'
-import { evaluateComparables, evaluateComparable, neighborhoodsMatch, isValueEquivalent, pocketHardScopesMatch, subjectRefPpsf } from './evaluator'
+import { evaluateComparables, evaluateComparable, neighborhoodsMatch, isValueEquivalent, pocketHardScopesMatch, subjectRefPpsf, subjectPocketRefPpsf, pocketValueEquivalent } from './evaluator'
 import type {
   AppraisalFilter,
   AppraisalAdjustment,
@@ -706,15 +706,22 @@ class PropertyAppraisalService implements AppraisalService {
     }
 
     // Step 4: leave the subdivision — radius ×mult, year ladder restarts at
-    // each scope. Rescue is subdivision_match-only: a comp failing any other
-    // hard rule at this tier's thresholds stays disqualified.
+    //   each scope. Rescue is subdivision_match-only: a comp failing any other
+    //   hard rule at this tier's thresholds stays disqualified.
+    // Rural gate: beyond the neighborhood the subject is probably rural, so
+    //   a far comp is selectable only when ITS pocket trades at the
+    //   subject's pocket level — value proof substitutes for scope match.
+    const ruralRef = subjectPocketRefPpsf(subject, comparables)
+    const ruralOk = (c: AppraisedComparable) =>
+      (ruralRef == null || pocketValueEquivalent(ruralRef, c)) &&
+      c.crossesMajorRoad !== true
     if (expansion.allowGeographicExpansion) {
       for (const yearLimit of yearLadder) {
         const resultSub = this.evaluate(subject, comparables, {
           filters: filtersAt(yearLimit, expansion.geographicDistanceMultiplier),
           adjustments,
         })
-        const picked = rescue(resultSub, new Set(['subdivision_match', 'neighborhood_match']))
+        const picked = rescue(resultSub, new Set(['subdivision_match', 'neighborhood_match', 'geo_scope_match']), ruralOk)
         if (picked && picked.eligible.length >= REQUIRED_ARV_COMPS) {
           console.log(`Appraisal: ${picked.selected.length} comps selected after subdivision expansion${yearNote(yearLimit)}`)
           return {
@@ -735,7 +742,7 @@ class PropertyAppraisalService implements AppraisalService {
             filters: filtersAt(yearLimit),
             adjustments,
           })
-          const picked = rescue(resultGeo, new Set(['subdivision_match', 'neighborhood_match', 'distance']))
+          const picked = rescue(resultGeo, new Set(['subdivision_match', 'neighborhood_match', 'geo_scope_match', 'distance']), ruralOk)
           if (picked && picked.eligible.length >= REQUIRED_ARV_COMPS) {
             console.log(`Appraisal: ${picked.selected.length} comps selected after geographic expansion${yearNote(yearLimit)}`)
             return {
@@ -819,7 +826,8 @@ class PropertyAppraisalService implements AppraisalService {
                 geoPriority.get(f.type) !== 'soft' &&
                 !LOCATION_FAILURES.has(f.type)
             )
-            return hardFailures.length === 0
+            return hardFailures.length === 0 &&
+              (ruralRef == null || pocketValueEquivalent(ruralRef, c))
           })
           .sort((a, b) =>
             proximityCompare(a, b, streetNameKey(subject.address)) ||

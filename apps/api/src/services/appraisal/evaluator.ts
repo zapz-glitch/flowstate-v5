@@ -1404,6 +1404,43 @@ function compPpsf(c: { pricePerSqft?: number | null; salePrice?: number | null; 
   return c.pricePerSqft ?? (c.salePrice != null && c.squareFeet ? c.salePrice / c.squareFeet : null)
 }
 
+/** Rural gate — a comp's pocket must trade within 15% of the subject's
+ *  pocket level for selection at the wide geo tiers. */
+export const RURAL_POCKET_PCT = 0.15
+
+/** The subject's pocket value for the rural check, per the owner order:
+ *  renovated-tier pool median (top half of same-tract sales) → scope
+ *  medians (median-tier pocket value) → AVM/sqft. */
+export function subjectPocketRefPpsf(
+  subject: NormalizedProperty,
+  pool: NormalizedComparable[],
+): number | null {
+  if (subject.censusTract) {
+    const tractPpsfs = pool
+      .filter((c) => c.censusTract === subject.censusTract && c.salePrice != null && c.squareFeet != null && c.squareFeet > 0)
+      .map((c) => c.salePrice! / c.squareFeet!)
+      .sort((a, b) => a - b)
+    if (tractPpsfs.length >= 4) {
+      const top = tractPpsfs.slice(Math.floor(tractPpsfs.length / 2))
+      return top[Math.floor(top.length / 2)]
+    }
+  }
+  return subjectRefPpsf(subject)
+}
+
+/** Is the comp's pocket priced like the subject's? Comp pocket ref = its
+ *  scope medians, else its own sale $/sf. Used at the wide geo tiers:
+ *  a market trading at a different level is a different market. */
+export function pocketValueEquivalent(
+  refPpsf: number | null,
+  comp: NormalizedComparable,
+): boolean {
+  if (refPpsf == null || refPpsf <= 0) return false
+  const compRef = comp.ppsfMedians?.SD ?? comp.ppsfMedians?.N4 ?? comp.ppsfMedians?.N3 ?? compPpsf(comp)
+  if (compRef == null || compRef <= 0) return false
+  return Math.abs(compRef - refPpsf) / refPpsf <= RURAL_POCKET_PCT
+}
+
 /** ±10% pocket value equivalence — a comp across a boundary counts as the
  *  same market when its price per sqft sits within 10% of the subject's
  *  reference. Only consulted under flex (marker value > 1). */
