@@ -126,3 +126,23 @@ Status: `open` until resolved in the v2 design.
   devalue/stale flags passed). — open
 - **F23. No unit tests on `evaluateB`.** Golden-case ranges were derived
   from the ruleset, not from closed sales. — open
+
+## Product-engineer decisions (2026-10-04)
+
+- **Official harness:** the original A/B-tested Set-B (`set-b.ts` at
+  `5953349`, Python reference `scripts/ab-eval.py`) plus its tricks of the
+  trade. Later additions are audited keep / drop, not assumed.
+- **Engine of record:** TypeScript (`ts-v5`). The Python engine in
+  `services/eval-engine` is not the live path.
+- **Dashboard recalcs move to the server.** The dashboard displays; it
+  does not compute.
+- **Weak evidence:** the target is an after-repair value. Worst case the
+  result is a range. Either way it must be evidence-backed, and the loops
+  run toward a buy price under the appraisal rules.
+- **The 25-comp cap is intentional.** Intent: enrich the comps that match
+  the subject's tract, block group, and neighborhood; when there are fewer
+  than 25 of those, fill with the closest by distance. Open question, not
+  yet checked in code: whether the 25 the provider returns are picked that
+  way, or simply the 25 nearest.
+- **Still open:** whether a run should fail when its record cannot be
+  saved ("no record, no result").
