@@ -233,8 +233,11 @@ const bIsUnfit = (c: BComp) =>
 const bLotSf = (x: { lotSizeSquareFeet?: number | null; lotSizeAcres?: number | null }) =>
   x.lotSizeSquareFeet ?? (x.lotSizeAcres ? x.lotSizeAcres * 43560 : null)
 
+// Raw sale $/sf is the liquidity signal — banding and price corroboration
+// must read what the market actually paid, not a stored adjusted figure
+// (serialized comps carry adjusted-price $/sf for display).
 const bPpsfOf = (c: BComp) =>
-  c.pricePerSqft ?? (c.salePrice && c.squareFeet ? c.salePrice / c.squareFeet : null)
+  c.salePrice && c.squareFeet ? c.salePrice / c.squareFeet : c.pricePerSqft
 
 /** OLS slope — price~size gradient across a point set. */
 function olsSlope(pts: { x: number; y: number }[]): number | null {
@@ -600,6 +603,10 @@ export function evaluateB(
       // a "renovated" label that sold at floor prices isn't ARV evidence,
       // and a "dated" comp buyers paid top-tercile for IS upper evidence.
       if (priceBand === 'floor' && (ct === 'renovated' || ct === 'premium')) return 'floor'
+      // Price corroboration — a renovated/premium claim that sold at
+      // median prices is median evidence. Vision hints at condition;
+      // the sale price is what the market actually paid for it.
+      if (priceBand === 'median' && (ct === 'renovated' || ct === 'premium')) return 'median'
       if (priceBand === 'upper' && ct === 'median') return 'upper'
     }
     if (ct === 'renovated' || ct === 'premium') return 'upper'
@@ -680,10 +687,7 @@ export function evaluateB(
       if (why) flags.push(`${x.comp.address}: outside the market area — ${why}; carries no weight`)
       return !why
     })
-    const verdict = (x: BContribution) => {
-      const ct = bCondTier(x.comp)
-      return ct === 'renovated' || ct === 'premium' ? 0 : 1
-    }
+    const verdict = (x: BContribution) => (verifiedUpper(x) ? 0 : 1)
     const saleTime = (x: BContribution) => (x.comp.saleDate ? Date.parse(x.comp.saleDate) || 0 : 0)
     const rank = (a: BContribution, b: BContribution) =>
       tierOf(a) - tierOf(b) || verdict(a) - verdict(b) ||
@@ -716,6 +720,19 @@ export function evaluateB(
   // evidence, just unverdicted.
   const upperEligible = verifiedPool.filter((x) =>
     x.tier !== 'as_is' && bArvCondOk(x.comp) && bandOf(x) === 'upper')
+  // Verified-renovated — a positive condition claim (renovated/premium)
+  // that the price corroborates. Band corroboration needs a real pool:
+  // a 2-comp "band" always crowns something upper, so degenerate pools
+  // fall back to the pocket rate — a renovated sale should clear the
+  // pocket's going $/sf (pocketRatio >= 1). This is the only evidence
+  // that earns the renovated verdict's ranking preference.
+  const verifiedUpper = (x: BContribution) => {
+    if (bCondTier(x.comp) !== 'renovated' && bCondTier(x.comp) !== 'premium') return false
+    if (bandVals.length >= 3) return bandOf(x) === 'upper'
+    const pr = x.comp.evidenceVerification?.pocketRatio
+    return pr != null ? pr >= 1.0 : bandOf(x) === 'upper'
+  }
+
   const medianComps = verifiedPool.filter((x) => bandOf(x) === 'median')
   let drivers: BContribution[]
   let medianTier = false
@@ -789,8 +806,7 @@ export function evaluateB(
   const primary = drivers[0]
   let arv = drivers.reduce((sum, x) => sum + x.weight * valueOf(x), 0)
   const thin = drivers.length < B_MIN_RECONCILED
-  if (primary.comp.sameBlockGroup === true &&
-      (bCondTier(primary.comp) === 'renovated' || bCondTier(primary.comp) === 'premium'))
+  if (primary.comp.sameBlockGroup === true && verifiedUpper(primary))
     flags.push(`${primary.comp.address}: same-block renovated comp — the pocket's going ARV rate`)
   flags.push(`reconciled ${drivers.length} sale(s): ` + drivers
     .map((x) => `${x.comp.address} ${(x.weight * 100).toFixed(0)}% @ ${usd(valueOf(x))}`).join(' · '))

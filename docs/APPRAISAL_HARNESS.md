@@ -45,7 +45,8 @@ assigned; it never appraises.
    tier, BG matches rank first.)
 2. **Pocket rate:** a verified renovated comp on the subject's block
    group is the going ARV rate for that pocket and carries the most
-   weight.
+   weight. "Verified" requires price corroboration — the condition
+   claim AND an upper-band sale price must agree (rule 4).
 3. **Verification:** stale or divergent sales never set value.
 4. **Price is the liquidity anchor:** the sale price confirms the band;
    condition labels are indications (≈80/20 price/condition weight).
@@ -125,8 +126,10 @@ Adjustments (per-comp dollars applied to `adjustedPrice`):
 Where the harness interprets evidence per subject, and what supports it:
 
 - **Band placement:** Clef verdict preferred; when Clef can't classify,
-  price position stands in. A verdict vs price disagreement by a full
-  band resolves to price (rule 4).
+  price position stands in. A verdict vs price disagreement resolves to
+  price (rule 4): a renovated/premium claim that sold at median or floor
+  prices is median/floor evidence — vision alone never confers ARV tier;
+  a dated claim buyers paid top-tercile for IS upper evidence.
 - **Soft-disable rescue:** grid-disabled comps may compete when every
   disable reason is soft (not nominal/type mismatch), size is inside the
   band, the sale is corroborated or plausible, and the comp is same-side
