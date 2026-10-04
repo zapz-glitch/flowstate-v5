@@ -115,9 +115,13 @@ Status: `open` until resolved in the v2 design.
   Rehab" on two runs and "Full Cosmetic" on one for the same 12 photos:
   rehab $93,175 vs $77,025, buy price $72,789 vs $98,939. ARV was
   identical. (Lithonia) — open
-- **F21. Served ARV does not replay from the saved report.** Live $513,299
-  vs offline replay $529,419; widened comps appear to be valued before
-  their major-road stamps land. Cause not confirmed. (Ashley Lake) — open
+- **F21. Served ARV does not replay from the saved report.** The pipeline
+  overwrites a comp's square footage with the listing size (or a permitted
+  addition) before `evaluateB` runs (`evaluation/index.ts:1184-1195`,
+  `:1135-1136`), but the response is built from the untouched originals
+  (`analysis/index.ts:1400-1402`, `:1478`). On Ashley Lake, 2106 Blaylock
+  Dr was 2,567 sf in the math and 1,743 sf in the saved report, so the
+  dashboard recalc cannot match the server. — open
 - **F22. Dashboard recalc cannot reproduce a rung 4–5 answer** (no
   devalue/stale flags passed). — open
 - **F23. No unit tests on `evaluateB`.** Golden-case ranges were derived
