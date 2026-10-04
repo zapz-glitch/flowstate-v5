@@ -611,6 +611,9 @@ export default function AnalyzePage() {
       })
 
       if (response.success) {
+        if (response.alreadyRunning) {
+          toast.info('Analysis already running — joining the live evaluation')
+        }
         setActiveAnalysis({ jobId: response.jobId ?? '', address: address.trim() })
         setAnalysisState({ ...initialAnalysisState, jobId: response.jobId ?? null, status: 'processing' })
         try {

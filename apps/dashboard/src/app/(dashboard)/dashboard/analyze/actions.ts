@@ -958,6 +958,8 @@ export type EnrichmentData = {
 export interface QueueAnalysisResult {
   success: boolean
   jobId?: string
+  /** The job was already live — this response attaches to it, not starts it */
+  alreadyRunning?: boolean
   error?: string
   /** Full analysis result (synchronous response — legacy) */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1047,6 +1049,7 @@ export async function queueAnalysis(request: AnalyzeRequest): Promise<QueueAnaly
       error?: string
       data?: {
         jobId: string
+        alreadyRunning?: boolean
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         result?: Record<string, any>
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1072,6 +1075,7 @@ export async function queueAnalysis(request: AnalyzeRequest): Promise<QueueAnaly
     return {
       success: true,
       jobId,
+      alreadyRunning: result.data?.alreadyRunning,
       result: result.data?.result,
       partialResult: result.data?.partialResult,
       enrichment: result.data?.enrichment,
