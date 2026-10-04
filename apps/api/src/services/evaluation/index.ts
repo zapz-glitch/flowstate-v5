@@ -1368,12 +1368,34 @@ export async function performAnalysis(
       }
       bAttemptTrail.push(
         `attempt 4 devalue — ${dFails.length ? dFails.join('; ') : 'median-tier answer verified'}`)
+
+      // Attempt 5 — devalue to stale sales: the pocket's only verified
+      // evidence is old transactions. An appraiser time-adjusts rather than
+      // discards — sales reprice by their pocket ratio to current dollars.
+      if (dFails.length) {
+        const staleAdjusted = evaluateB(bSubjectFields, toBComps(), {
+          rehabCost: valuation?.totalRehabCost ?? null,
+          devalueToMedian: true,
+          admitStale: true,
+        })
+        const sFails = verifyB(staleAdjusted)
+        if (!sFails.length) {
+          bResult = staleAdjusted
+          fails = []
+        }
+        bAttemptTrail.push(
+          `attempt 5 devalue+stale — ${sFails.length ? sFails.join('; ') : 'time-adjusted answer verified'}`)
+      }
     }
 
     if (bAttemptTrail.length === 0 && fails.length === 0) bAttemptTrail.push('attempt 1 — verified')
     else if (fails.length) bAttemptTrail.push(`final — unverified (${fails.join('; ')})`)
     pipelineBResult = bResult
-    if (!insufficient && bResult.arv != null && bResult.arv !== finalArv) {
+    // A verified ladder result applies even under insufficient — the whole
+    // point of the devalue rungs is to answer the question the pool CAN
+    // support. fails.length===0 means the ladder verified; insufficient
+    // still marks the report thin.
+    if ((!insufficient || fails.length === 0) && bResult.arv != null && bResult.arv !== finalArv) {
       const prevArv = finalArv
       finalArv = bResult.arv
       valuationAnchor = finalArv

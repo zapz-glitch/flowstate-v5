@@ -82,6 +82,9 @@ export interface BComp {
   evidenceVerification?: {
     staleness?: string | null
     priceCheck?: string | null
+    /** comp sale $/sf ÷ pocket reference $/sf — the stale-admission
+     *  time-adjustment factor source */
+    pocketRatio?: number | null
     flags?: string[] | null
   } | null
   appraisalRules?: { totalAdjustment?: number | null } | null
@@ -92,6 +95,9 @@ export interface BComp {
    *  product so neither figure normalizes the sale. An appraiser throws
    *  it out: excluded from ARV evidence entirely. */
   sqftExcluded?: boolean | null
+  /** Stale sale repriced to current pocket — the adjustment factor applied
+   *  (1/pocketRatio, capped 2×). Only set in devalue+admitStale mode. */
+  staleTimeAdjusted?: number
 }
 
 export interface BContribution {
@@ -189,10 +195,28 @@ const bMedian = (xs: number[]) =>
 export function evaluateB(
   subject: BSubject,
   items: BComp[],
-  opts?: { rehabCost?: number | null; devalueToMedian?: boolean },
+  opts?: { rehabCost?: number | null; devalueToMedian?: boolean; admitStale?: boolean },
 ): BResult {
   const subSqft = subject.squareFeet
   const flags: string[] = []
+  // Admit-stale rung — a comp too old to be 'current' isn't discarded, an
+  // appraiser time-adjusts it: its sale reprices by its pocket ratio (the
+  // gap between its $/sf and today's pocket), capped at 2× so a 50%-of-
+  // pocket sale can't become a 3× phantom. Devalue-mode only.
+  if (opts?.admitStale) {
+    items = items.map((c) => {
+      const ratio = c.evidenceVerification?.pocketRatio
+      if (c.evidenceVerification?.staleness !== 'stale' || !ratio || ratio >= 1 || !c.salePrice) return c
+      const adj = Math.min(1 / ratio, 2)
+      return {
+        ...c,
+        salePrice: c.salePrice * adj,
+        pricePerSqft: c.pricePerSqft != null ? c.pricePerSqft * adj : c.pricePerSqft,
+        evidenceVerification: { ...c.evidenceVerification, staleness: 'current' as const },
+        staleTimeAdjusted: adj,
+      }
+    })
+  }
   const empty = (source: string): BResult => ({
     arv: null, flags, drivers: [], contribs: [], bracket: 'ok', conf: 'none', source,
   })
@@ -375,6 +399,8 @@ export function evaluateB(
     const capped = adjPct > B_ADJ_CAP_PCT
     if (capped) flags.push(`${c.address}: ${(adjPct * 100).toFixed(0)}% adj > cap — downweighted`)
     const weight = (1 / (1 + adjPct)) * (capped ? 0.5 : 1)
+    if (c.staleTimeAdjusted)
+      flags.push(`${c.address}: stale sale time-adjusted +${((c.staleTimeAdjusted - 1) * 100).toFixed(0)}% to current pocket`)
     contribs.push({ comp: c, contrib, weight, tier: bTierOf(c) })
   }
 
