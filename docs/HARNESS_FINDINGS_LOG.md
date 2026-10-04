@@ -144,5 +144,11 @@ Status: `open` until resolved in the v2 design.
   than 25 of those, fill with the closest by distance. Open question, not
   yet checked in code: whether the 25 the provider returns are picked that
   way, or simply the 25 nearest.
-- **Still open:** whether a run should fail when its record cannot be
-  saved ("no record, no result").
+- **A run's record must not fail to save.** The storage design has to make
+  that true (save the record before the math answers, then copy it to
+  long-term storage with retries), rather than failing runs.
+- **Storing provider data is allowed.** Saved runs can be checked into the
+  repo as fixtures.
+- **Enrichment budget is open to suggestion.** Enrichment calls cost money,
+  so the most relevant comps are enriched first. 25 is a ceiling, not a
+  target.
