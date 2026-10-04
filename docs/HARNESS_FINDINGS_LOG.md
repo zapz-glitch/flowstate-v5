@@ -172,3 +172,23 @@ Status: `open` until resolved in the v2 design.
   nearest), drop noise before spending a call, enrich the top 6, and stop
   once 3–6 good comps pass. If fewer pass, enrich the next 6. Ceiling 25.
   The wave size of 6 is a starting value to tune on the address set.
+- **Classify first, then pick.** The harness does not just grab one
+  anchor — it classifies every usable comp into its evidence class:
+  renovated anchors, medians, and as-is. Selection happens inside the
+  class, never across it.
+- **Geo hierarchy holds in every phase: tract 1st, block 2nd,
+  neighborhood 3rd.** First try or retry, for renovated anchors, medians,
+  and as-is alike — tract matches first, then block matches, then
+  neighborhood matches. (Overrides audit K17's proposed block-first
+  ordering; matches ruleset R1.)
+- **Rural rule.** When neighborhood matches fail, the subject is likely
+  rural. A distant comp can still be eligible — by pocket equivalence:
+  find the comp's own pocket value (its renovated level, median level,
+  or AVM — whichever exists) and compare it to the subject's pocket value
+  (renovated comps, median comps, or AVM). If the pockets are priced
+  alike, the comp may be considered for selection.
+- **Comp condition classification: Clef first, GPT-6 Luna fallback.**
+  Comps get classified by Clef vision; if Clef fails, Luna classifies
+  instead — using the same classification fields (renovated, dated, …).
+  Subject classification and comp classification are separate paths and
+  must never mix — the Luna fallback fills the comp fields only.
