@@ -1309,6 +1309,7 @@ export async function performAnalysis(
       else if (subjectAvm != null && r.arv > subjectAvm * 1.2 && r.drivers.length <= 1)
         fails.push('single-driver premium read — one comp carries ARV >20% above AVM')
       if (r.drivers.length === 0) fails.push('no verified drivers')
+      else if (r.thin) fails.push(`thin evidence — ${r.drivers.length} reconciled sale(s), minimum 3`)
       if (r.conf === 'none') fails.push('no-confidence result')
       return fails
     }
