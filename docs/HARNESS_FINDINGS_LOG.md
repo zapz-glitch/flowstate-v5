@@ -83,6 +83,18 @@ Status: `open` until resolved in the v2 design.
   67% weight. It also sets the pocket rate, so normal sales ($365K, $420K)
   are thrown out as "55–67% below the pocket". Confirmed live: Dunseath
   ARV $1,110,927, buy price $769,714. — open
+- **F25. Outlier is flagged but not removed — and is promoted.** Bolton Rd
+  was stamped "423% of pocket — premium evidence, verify" and
+  "unverified" (no comp AVM), but only `divergent`/`stale` stamps block a
+  comp. The classifier then labeled it `after_renovation` because it
+  "sold 410% above subject AVM" — price alone made it ARV evidence. The
+  warning never reached the flag trail or risk flags. (Dunseath) — open
+- **F26. Geography tiers ran in order but on a poisoned rate.** All 7 pool
+  comps were same-tract; 4 same block group. The block-group tier went
+  first (correct), but its pocket rate was the midpoint of two sales
+  ($1.66M and $466K = $949K), so same-tract sales were rejected against
+  it. A third same-block-group, same-subdivision sale (1951 Sumter St,
+  $350,000, corroborated) was dropped with no flag. (Dunseath) — open
 - **F24. Subject condition unknown, rehab level assumed.** Dunseath had no
   condition read ("NA") yet priced Full Cosmetic ($130,120). — open
 
