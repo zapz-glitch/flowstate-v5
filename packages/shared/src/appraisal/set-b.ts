@@ -772,12 +772,23 @@ export function evaluateB(
     : drivers.length >= 3 && !flags.length ? 'high'
     : drivers.length >= 3 ? 'medium' : 'low'
 
-  // HBU check — when the extracted dirt outruns the improved answer, the
-  // land IS the deal regardless of the assessment split. Fires alongside
-  // the county-split detector, never instead of it.
-  if (land.mode == null && land.subjectLandValue != null && land.subjectLandValue > arv) {
-    land.mode = 'land_play'
-    flags.push(`land play — extracted land ${usd(land.subjectLandValue)} outruns the improved read ${usd(arv)}; the dirt is the deal`)
+  // HBU check — 'land_play' needs proof the dirt IS the deal, not just a
+  // valuable lot. Three legitimate triggers:
+  //   1. county split says the improvement is a rounding error (<25%)
+  //   2. dirt-dominance: extracted land outruns the improved read by 1.5×+
+  //      (a 1.0× read on a big maintained lot is context, not a teardown)
+  //   3. teardown-grade condition + land over the read
+  // Extraction evidence always serializes — only the verdict is gated.
+  if (land.mode == null && land.subjectLandValue != null) {
+    const dominates = arv > 0 && land.subjectLandValue > arv * 1.5
+    const teardownRead = /gut|teardown/i.test(subject.condition ?? '') &&
+      land.subjectLandValue > arv
+    if (dominates || teardownRead) {
+      land.mode = 'land_play'
+      flags.push(`land play — extracted land ${usd(land.subjectLandValue)} outruns the improved read ${usd(arv)}; the dirt is the deal`)
+    } else {
+      flags.push(`land context — extracted dirt ${usd(land.subjectLandValue)} (valuable lot, not a teardown signal)`)
+    }
   }
 
   return {

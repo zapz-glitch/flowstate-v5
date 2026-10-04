@@ -147,6 +147,34 @@ function CompCardInner({
                   : 'DISTRESSED'}
               </div>
             )}
+            {comp.evidenceVerification &&
+              (comp.evidenceVerification.priceCheck !== 'corroborated' || comp.evidenceVerification.staleness === 'stale') && (
+              <div
+                className={cn(
+                  'h-6 px-1.5 rounded flex items-center text-[10px] font-bold flex-shrink-0',
+                  comp.evidenceVerification.staleness === 'stale' ? 'bg-amber-500/15 text-amber-600'
+                    : 'bg-red-500/15 text-red-400'
+                )}
+                title={(comp.evidenceVerification.flags ?? []).join('\n') || `Evidence: ${comp.evidenceVerification.priceCheck ?? ''} ${comp.evidenceVerification.staleness ?? ''}`}
+              >
+                {comp.evidenceVerification.staleness === 'stale' ? 'STALE'
+                  : comp.evidenceVerification.priceCheck === 'divergent' ? 'DIVERGENT'
+                  : comp.evidenceVerification.priceCheck === 'below_pocket' ? 'LOW'
+                  : comp.evidenceVerification.priceCheck === 'above_pocket' ? 'HIGH'
+                  : 'UNVERIFIED'}
+              </div>
+            )}
+            {comp.sqftEvidence?.conflict && (
+              <div
+                className={cn(
+                  'h-6 px-1.5 rounded flex items-center text-[10px] font-bold flex-shrink-0',
+                  comp.sqftEvidence.resolution === 'unpermitted' ? 'bg-red-500/15 text-red-400' : 'bg-amber-500/15 text-amber-600'
+                )}
+                title={comp.sqftEvidence.note ?? `Sqft conflict: tax ${comp.sqftEvidence.provider ?? '?'}sf vs marketed ${comp.sqftEvidence.listing ?? '?'}sf`}
+              >
+                {comp.sqftEvidence.resolution === 'unpermitted' ? 'SQFT-EXCLUDED' : 'SQFT?'}
+              </div>
+            )}
             <div className="flex-1 min-w-0">
               {comp.address ? (
                 <AddressDisplay address={comp.address} latitude={comp.latitude} longitude={comp.longitude} className="text-body-sm font-medium" />

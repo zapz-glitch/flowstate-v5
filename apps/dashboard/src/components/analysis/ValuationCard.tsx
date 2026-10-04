@@ -116,6 +116,29 @@ export function ValuationCard({
                   → {valuation.bMechanics.source} · {valuation.bMechanics.anchorAddress.split(',')[0]}
                 </div>
               )}
+              {valuation.bMechanics && (valuation.bMechanics.drivers?.length ?? 0) > 0 && (
+                <div className="mt-1 space-y-0.5" title={(valuation.bMechanics.flags ?? []).join('\n')}>
+                  {valuation.bMechanics.drivers!.slice(0, 3).map((d, i) => (
+                    <div key={i} className="text-[9px] font-mono text-foreground-tertiary truncate">
+                      {d.address?.split(',')[0] ?? 'comp'} → ${d.contribution.toLocaleString()}
+                      {d.landAdj != null && d.landAdj !== 0 && ` (land ${d.landAdj > 0 ? '+' : ''}${d.landAdj.toLocaleString()})`}
+                    </div>
+                  ))}
+                  {(valuation.bMechanics.attemptTrail?.length ?? 0) > 0 && (
+                    <div className="text-[9px] font-mono text-foreground-tertiary/70 truncate" title={valuation.bMechanics.attemptTrail!.join('\n')}>
+                      {valuation.bMechanics.attemptTrail!.join(' · ')}
+                    </div>
+                  )}
+                  {valuation.bMechanics.land?.subjectLandValue != null && (
+                    <div className={cn(
+                      'text-[9px] font-mono truncate',
+                      valuation.bMechanics.land.mode === 'land_play' ? 'text-amber-500 font-bold' : 'text-foreground-tertiary/70'
+                    )} title={`Pocket land ${valuation.bMechanics.land.pocketRate?.toFixed(2)}/lot-sf (${valuation.bMechanics.land.source ?? 'no source'})`}>
+                      {valuation.bMechanics.land.mode === 'land_play' ? '⛏ LAND PLAY' : 'land'} ${valuation.bMechanics.land.subjectLandValue!.toLocaleString()} extracted
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
             {valuation.listPrice != null && (
               <div className="p-3 min-w-[120px] flex-1">

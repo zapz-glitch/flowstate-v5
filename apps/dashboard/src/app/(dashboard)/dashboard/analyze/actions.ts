@@ -284,7 +284,12 @@ export interface SubjectData {
   sameBlockGroup?: boolean | null
   crossesMajorRoad?: boolean | null
   landAssessedValue?: number | null
-  evidenceVerification?: { staleness?: string | null; priceCheck?: string | null; flags?: string[] | null } | null
+  evidenceVerification?: { staleness?: string | null; priceCheck?: string | null; pocketRatio?: number | null; flags?: string[] | null } | null
+  /** Sqft-conflict evidence — provider-vs-marketed divergence + permit verdict */
+  sqftEvidence?: { provider: number | null; listing: number | null; conflict: string | null; resolution: string | null; note: string | null } | null
+  /** Land extraction — sale − contributory improvement = implied land value */
+  landEvidence?: { address?: string | null; impliedLand: number; landPpsf: number; lotSf: number; basis: string } | null
+  improvementAssessedValue?: number | null
   disableReasons?: string[] | null
   /** Foundation type (e.g., Slab, Crawl Space, Basement) */
   foundationType?: string | null
@@ -375,8 +380,21 @@ export interface ValuationData {
     landRateSource: string | null
     sqftRateSource: string | null
     healed: boolean
+    /** Pool rates + band thresholds — replay inputs for client-side toggles */
+    landRate?: number | null
+    sqftRate?: number | null
+    bandLo?: number | null
+    bandHi?: number | null
+    /** Land-extraction evidence — implied land $/lot-sf + land_play mode */
+    land?: {
+      pocketRate: number | null
+      source: string | null
+      subjectLandValue: number | null
+      mode: 'land_play' | null
+      comps: Array<{ address?: string | null; impliedLand: number; landPpsf: number; lotSf: number; basis: string }>
+    } | null
     attemptTrail: string[]
-    drivers: { address: string | null; contribution: number; tier: string; conditionTier: string }[]
+    drivers: { address: string | null; contribution: number; landAdj?: number | null; tier: string; conditionTier: string }[]
   } | null
   buyPrice?: number
   buyPricePercent?: number
@@ -511,7 +529,12 @@ export interface CompItem {
   subdivision?: string | null
   /** Set-B evidence fields — serialized from the pipeline */
   landAssessedValue?: number | null
-  evidenceVerification?: { staleness?: string | null; priceCheck?: string | null; flags?: string[] | null } | null
+  evidenceVerification?: { staleness?: string | null; priceCheck?: string | null; pocketRatio?: number | null; flags?: string[] | null } | null
+  /** Sqft-conflict evidence — provider-vs-marketed divergence + permit verdict */
+  sqftEvidence?: { provider: number | null; listing: number | null; conflict: string | null; resolution: string | null; note: string | null } | null
+  /** Land extraction — sale − contributory improvement = implied land value */
+  landEvidence?: { address?: string | null; impliedLand: number; landPpsf: number; lotSf: number; basis: string } | null
+  improvementAssessedValue?: number | null
   /** Foundation type (e.g., Slab, Crawl Space, Basement) */
   foundationType?: string | null
   /** Building style (e.g., Colonial, Cape Cod, Ranch) */
@@ -628,8 +651,21 @@ export interface ValuationData {
     landRateSource: string | null
     sqftRateSource: string | null
     healed: boolean
+    /** Pool rates + band thresholds — replay inputs for client-side toggles */
+    landRate?: number | null
+    sqftRate?: number | null
+    bandLo?: number | null
+    bandHi?: number | null
+    /** Land-extraction evidence — implied land $/lot-sf + land_play mode */
+    land?: {
+      pocketRate: number | null
+      source: string | null
+      subjectLandValue: number | null
+      mode: 'land_play' | null
+      comps: Array<{ address?: string | null; impliedLand: number; landPpsf: number; lotSf: number; basis: string }>
+    } | null
     attemptTrail: string[]
-    drivers: { address: string | null; contribution: number; tier: string; conditionTier: string }[]
+    drivers: { address: string | null; contribution: number; landAdj?: number | null; tier: string; conditionTier: string }[]
   } | null
   buyPrice?: number
   buyPricePercent?: number
@@ -764,7 +800,12 @@ export interface CompItem {
   subdivision?: string | null
   /** Set-B evidence fields — serialized from the pipeline */
   landAssessedValue?: number | null
-  evidenceVerification?: { staleness?: string | null; priceCheck?: string | null; flags?: string[] | null } | null
+  evidenceVerification?: { staleness?: string | null; priceCheck?: string | null; pocketRatio?: number | null; flags?: string[] | null } | null
+  /** Sqft-conflict evidence — provider-vs-marketed divergence + permit verdict */
+  sqftEvidence?: { provider: number | null; listing: number | null; conflict: string | null; resolution: string | null; note: string | null } | null
+  /** Land extraction — sale − contributory improvement = implied land value */
+  landEvidence?: { address?: string | null; impliedLand: number; landPpsf: number; lotSf: number; basis: string } | null
+  improvementAssessedValue?: number | null
   /** Foundation type (e.g., Slab, Crawl Space, Basement) */
   foundationType?: string | null
   /** Building style (e.g., Colonial, Cape Cod, Ranch) */
