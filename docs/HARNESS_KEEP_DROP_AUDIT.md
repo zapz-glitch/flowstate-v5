@@ -91,6 +91,20 @@ new rule is needed. Nothing here is decided.
 | D7 | Noise screen | New step, not part of OG. | Approve the step; the first design needs another pass (section 5). |
 | D8 | Minimum evidence count | OG reaches 3 drivers in about 5% of runs because its driver list is trimmed by design. | Count screened supporting sales, not trimmed drivers. |
 
+
+### Decisions given so far (2026-10-04)
+
+- **D1 — decided: anchor.** The anchor sets the value. "Verified" needs at
+  least 2 other screened sales that bracket it.
+- **D2 — decided: keep a similarity cutoff.** The exact test still has to
+  be specified.
+- **D3 — decided: AVM is a flag only, to start.**
+- **D6 — intent stated:** the condition classifier can be wrong, so it must
+  not carry all the weight. When price says a sale is median-level or
+  ARV-level, price counts. Still to settle: how this works with the noise
+  screen, so a lot-value or inflated sale is set aside rather than promoted.
+- **D4, D5, D7, D8 — open.**
+
 ## 4. Defects in OG itself
 
 OG is the base, so these need fixing regardless of what is kept above.
