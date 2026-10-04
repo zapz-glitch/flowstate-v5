@@ -287,6 +287,9 @@ export interface NormalizedComparable {
   /** County assessed LAND value (tax-history) — feeds the market-derived
    *  land curve: landValue vs lotSize fit per tract. */
   landAssessedValue?: number | null
+  /** County assessed IMPROVEMENT value (tax-history) — feeds land
+   *  extraction: sale − improvement×mktRatio = implied land value. */
+  improvementAssessedValue?: number | null
   /** Redfin MLS property-details enrichment — shadow evidence (top-15 comps) */
   listingDetails?: import('../redfin-details').RedfinPropertyDetails | null
   /** ARV evidence verification — price cross-check (sale vs own AVM) +

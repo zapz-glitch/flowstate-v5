@@ -724,9 +724,25 @@ export interface AnalysisResponse {
       landRateSource: string | null
       sqftRateSource: string | null
       healed: boolean
+      /** Pool rates + band thresholds — replay inputs for client-side
+       *  comp-toggle math */
+      landRate: number | null
+      sqftRate: number | null
+      bandLo: number | null
+      bandHi: number | null
+      /** Land-extraction evidence — implied land $/lot-sf per verified
+       *  comp, pocket land rate, subject's extracted land value,
+       *  land_play mode flag. */
+      land: {
+        pocketRate: number | null
+        source: string | null
+        subjectLandValue: number | null
+        mode: 'land_play' | null
+        comps: Array<{ address?: string | null; impliedLand: number; landPpsf: number; lotSf: number }>
+      } | null
       /** Verify-and-retry trail — widen/deepen attempts + verdicts */
       attemptTrail: string[]
-      drivers: { address: string | null; contribution: number; tier: string; conditionTier: string }[]
+      drivers: { address: string | null; contribution: number; landAdj: number | null; tier: string; conditionTier: string }[]
     } | null
     buyPrice: number
     buyPricePercent: number
@@ -1426,7 +1442,17 @@ export function buildAnalysisResponse(
             },
           }
         : {}),
+      // Land-extraction evidence — implied land value per comp from the
+      // sale-minus-improvement split (replayable for comp toggles).
+      // Reads ctx.pipelineBResult directly — the local bResult below is
+      // defined after allComps (fallback path when B never ran).
+      ...((ctx.pipelineBResult?.land?.comps?.find((l) => l.address === comp.address) != null)
+        ? {
+            landEvidence: ctx.pipelineBResult.land.comps.find((l) => l.address === comp.address),
+          }
+        : {}),
       landAssessedValue: comp.landAssessedValue ?? null,
+      improvementAssessedValue: comp.improvementAssessedValue ?? null,
       assessedValue: comp.assessedValue ?? null,
       disableReasons: evaluation?.disableReasons ?? [],
       classification: classificationSummary,
@@ -1470,6 +1496,7 @@ export function buildAnalysisResponse(
       censusTract: property.censusTract ?? null,
       subdivision: property.subdivision ?? null,
       landAssessedValue: property.landAssessedValue ?? null,
+      improvementAssessedValue: property.improvementAssessedValue ?? null,
       taxAssessment: property.assessedValue ?? null,
       assessedValue: property.assessedValue ?? null,
       avmValue: property.avmValue ?? enrichment.avm?.value ?? null,
@@ -1645,11 +1672,17 @@ export function buildAnalysisResponse(
         ceiling: bResult.ceiling ?? null,
         landRateSource: bResult.landRateSource ?? null,
         sqftRateSource: bResult.sqftRateSource ?? null,
+        landRate: bResult.landRate ?? null,
+        sqftRate: bResult.sqftRate ?? null,
+        bandLo: bResult.bandLo ?? null,
+        bandHi: bResult.bandHi ?? null,
         healed: bResult.healed ?? false,
+        land: bResult.land ?? null,
         attemptTrail: ctx.bAttemptTrail ?? [],
         drivers: bResult.drivers.map((d) => ({
           address: d.comp.address ?? null,
           contribution: Math.round(d.contrib),
+          landAdj: d.landAdj != null ? Math.round(d.landAdj) : null,
           tier: d.tier,
           conditionTier: bCondTier(d.comp),
         })),

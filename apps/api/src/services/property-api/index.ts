@@ -1200,6 +1200,7 @@ class PropertyApi implements PropertyApiService {
                 avmValue: result.data.avmValue ?? null,
                 assessedValue: result.data.assessedValue ?? null,
                 landAssessedValue: result.data.landAssessedValue ?? null,
+                improvementAssessedValue: result.data.improvementAssessedValue ?? null,
                 ppsfMedians: result.data.ppsfMedians ?? null,
                 construction: mergedConstruction,
                 transaction: result.data.transaction ? {

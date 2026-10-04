@@ -45,6 +45,9 @@ export interface BSubject {
   censusTract?: string | null
   subdivision?: string | null
   landAssessedValue?: number | null
+  /** County assessed improvement — the extractable improvement basis:
+   *  sale − improvement×mktRatio = implied land value (land plays). */
+  improvementAssessedValue?: number | null
   taxAssessment?: number | null
   assessedValue?: number | null
   avmValue?: number | null
@@ -70,6 +73,9 @@ export interface BComp {
   lotSizeAcres?: number | null
   lotSizeSquareFeet?: number | null
   landAssessedValue?: number | null
+  /** County assessed improvement — the extractable improvement basis:
+   *  sale − improvement×mktRatio = implied land value (land plays). */
+  improvementAssessedValue?: number | null
   propertyType?: string | null
   crossesMajorRoad?: boolean | null
   disableReasons?: string[] | null
@@ -103,6 +109,9 @@ export interface BComp {
 export interface BContribution {
   comp: BComp
   contrib: number
+  /** The land-delta component of the contribution — serialized so the
+   *  dashboard replays the same math on comp toggles. */
+  landAdj?: number
   weight: number
   tier: 'arv' | 'as_is' | 'unidentified'
 }
@@ -117,10 +126,33 @@ export interface BResult {
   source: string
   landRateSource?: string | null
   sqftRateSource?: string | null
+  /** Pool rates + band thresholds — the shared inputs the client needs to
+   *  replay contributions identically on comp toggles. */
+  landRate?: number | null
+  sqftRate?: number | null
+  bandLo?: number | null
+  bandHi?: number | null
   anchorAddress?: string | null
   ceiling?: number | null
   conditionAdj?: number | null
   healed?: boolean
+  /** Land-extraction evidence — implied land $/lot-sf per verified comp,
+   *  the pocket land rate, and the subject's extracted land value.
+   *  mode:'land_play' when the improvement is a rounding error. */
+  land?: {
+    pocketRate: number | null
+    source: string | null
+    subjectLandValue: number | null
+    mode: 'land_play' | null
+    comps: Array<{
+      address?: string | null
+      impliedLand: number
+      landPpsf: number
+      lotSf: number
+      /** improvement basis — 'county' split or 'rcn-model' replacement estimate */
+      basis: string
+    }>
+  } | null
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────
@@ -401,7 +433,7 @@ export function evaluateB(
     const weight = (1 / (1 + adjPct)) * (capped ? 0.5 : 1)
     if (c.staleTimeAdjusted)
       flags.push(`${c.address}: stale sale time-adjusted +${((c.staleTimeAdjusted - 1) * 100).toFixed(0)}% to current pocket`)
-    contribs.push({ comp: c, contrib, weight, tier: bTierOf(c) })
+    contribs.push({ comp: c, contrib, weight, tier: bTierOf(c), landAdj })
   }
 
   // ── Evidence verification — stale/divergent never drive ARV ─────────────
@@ -413,6 +445,67 @@ export function evaluateB(
     flags.push(`${x.comp.address}: verification — ${reason}`)
   }
   const verifiedPool = contribs.filter((x) => !unfit.includes(x))
+
+  // ── Land extraction — sale − contributory improvement = implied land ────
+  // The appraiser's extraction method: each verified sale yields an implied
+  // $/lot-sf when the county splits land vs improvement assessments. The
+  // pocket land rate prices the subject's dirt independently of the
+  // improved-product comps — the answer a land play actually needs.
+  const impliedPts = verifiedPool
+    .map((x) => {
+      const lot = bLotSf(x.comp)
+      if (lot == null || lot <= 0 || x.comp.salePrice == null) return null
+      // Improvement basis: county split × market ratio preferred; fallback =
+      // replacement-cost model (sqft × $110 × (1 − 2%/yr depreciation, cap
+      // 80%) — the appraiser's substitute when the county doesn't split.
+      const impBasis =
+        x.comp.improvementAssessedValue != null && x.comp.improvementAssessedValue > 0
+          ? { value: x.comp.improvementAssessedValue * mktRatio, src: 'county' as const }
+          : x.comp.squareFeet != null && x.comp.yearBuilt != null
+            ? {
+                value: x.comp.squareFeet * 110 *
+                  (1 - Math.min(0.02 * Math.max(0, new Date().getFullYear() - x.comp.yearBuilt), 0.8)),
+                src: 'rcn-model' as const,
+              }
+            : null
+      if (!impBasis) return null
+      const implied = x.comp.salePrice - impBasis.value
+      // Sanity: land must be positive and the sale can't be >90% land
+      // (a near-total land share on an improved sale is a bad split).
+      if (implied <= 0 || implied > x.comp.salePrice * 0.9) return null
+      return {
+        address: x.comp.address,
+        impliedLand: Math.round(implied), landPpsf: implied / lot, lotSf: lot,
+        basis: impBasis.src,
+        sameBlockGroup: x.comp.sameBlockGroup === true,
+      }
+    })
+    .filter((p): p is NonNullable<typeof p> => p != null)
+  const bgLandPts = impliedPts.filter((p) => p.sameBlockGroup)
+  const landRatePts = bgLandPts.length >= 2 ? bgLandPts : impliedPts
+  const pocketLandRate = landRatePts.length >= 2 ? bMedian(landRatePts.map((p) => p.landPpsf)) : null
+  const slLotForLand = bLotSf(subject)
+  const subjectLandValue =
+    pocketLandRate != null && slLotForLand != null ? Math.round(pocketLandRate * slLotForLand) : null
+  // Land-play detection — the improvement is a rounding error on the parcel
+  // (<25% of assessment) or the extracted land value outruns the improved
+  // answer. The dirt is the product.
+  const impShare =
+    subject.improvementAssessedValue != null && subject.assessedValue != null && subject.assessedValue > 0
+      ? subject.improvementAssessedValue / subject.assessedValue
+      : null
+  const landMode =
+    impShare != null && impShare < 0.25 ? 'land_play' as const
+    : null
+  if (landMode && subjectLandValue != null)
+    flags.push(`land play — improvement is ${(impShare! * 100).toFixed(0)}% of assessment; extracted land value ${usd(subjectLandValue)} (${landRatePts.length} implied sales at ~$${pocketLandRate!.toFixed(0)}/lot-sf)`)
+  const land: BResult['land'] = {
+    pocketRate: pocketLandRate,
+    source: bgLandPts.length >= 2 ? `same-BG implied (${bgLandPts.length})` : impliedPts.length >= 2 ? `pool implied (${impliedPts.length})` : null,
+    subjectLandValue,
+    mode: landMode,
+    comps: impliedPts.map((p) => ({ address: p.address, impliedLand: p.impliedLand, landPpsf: p.landPpsf, lotSf: p.lotSf, basis: p.basis })),
+  }
 
   // ── Similarity scoring ──────────────────────────────────────────────────
   const similarity = (x: BContribution): number => {
@@ -679,9 +772,19 @@ export function evaluateB(
     : drivers.length >= 3 && !flags.length ? 'high'
     : drivers.length >= 3 ? 'medium' : 'low'
 
+  // HBU check — when the extracted dirt outruns the improved answer, the
+  // land IS the deal regardless of the assessment split. Fires alongside
+  // the county-split detector, never instead of it.
+  if (land.mode == null && land.subjectLandValue != null && land.subjectLandValue > arv) {
+    land.mode = 'land_play'
+    flags.push(`land play — extracted land ${usd(land.subjectLandValue)} outruns the improved read ${usd(arv)}; the dirt is the deal`)
+  }
+
   return {
     arv: Math.round(arv), flags, drivers, contribs, bracket, conf, source,
     landRateSource: landSource, sqftRateSource,
+    landRate, sqftRate, bandLo, bandHi,
     anchorAddress: anchor.comp.address ?? null, ceiling, conditionAdj, healed,
+    land,
   }
 }
