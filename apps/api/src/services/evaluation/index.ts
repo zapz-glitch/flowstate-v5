@@ -1264,7 +1264,6 @@ export async function performAnalysis(
       censusTract: bundle.property.censusTract ?? null,
       subdivision: bundle.property.subdivision ?? null,
       landAssessedValue: bundle.property.landAssessedValue ?? null,
-      improvementAssessedValue: bundle.property.improvementAssessedValue ?? null,
       taxAssessment: bundle.property.assessedValue ?? null,
       assessedValue: bundle.property.assessedValue ?? null,
       avmValue: subjectAvm ?? null,
@@ -1288,7 +1287,6 @@ export async function performAnalysis(
       lotSizeAcres: comp.lotSizeAcres ?? null,
       lotSizeSquareFeet: comp.lotSizeSquareFeet ?? null,
       landAssessedValue: comp.landAssessedValue ?? null,
-      improvementAssessedValue: comp.improvementAssessedValue ?? null,
       propertyType: comp.propertyType ?? null,
       crossesMajorRoad: comp.crossesMajorRoad ?? null,
       disableReasons: comp.evaluation?.disableReasons ?? null,
@@ -1298,18 +1296,13 @@ export async function performAnalysis(
       curbAppeal: compCurbAppeal?.[comp.id] ?? null,
       evidenceVerification: comp.evidenceVerification ?? null,
       appraisalRules: comp.evaluation ? { totalAdjustment: comp.evaluation.totalAdjustment } : null,
-      sqftConflict: (comp.raw as Record<string, unknown> | undefined)?.sqftConflict as string | undefined ?? null,
-      sqftExcluded: ((comp.raw as Record<string, unknown> | undefined)?.sqftExcluded as boolean | undefined) ?? null,
     }))
 
     const verifyB = (r: ReturnType<typeof evaluateB>): string[] => {
       const fails: string[] = []
       if (r.arv == null) fails.push('no ARV — evidence pool produced no defensible answer')
       else if (subjectAvm != null && r.arv < subjectAvm) fails.push('below as-is AVM')
-      else if (subjectAvm != null && r.arv > subjectAvm * 1.2 && r.drivers.length <= 1)
-        fails.push('single-driver premium read — one comp carries ARV >20% above AVM')
       if (r.drivers.length === 0) fails.push('no verified drivers')
-      else if (r.thin) fails.push(`thin evidence — ${r.drivers.length} reconciled sale(s), minimum 3`)
       if (r.conf === 'none') fails.push('no-confidence result')
       return fails
     }
@@ -1395,50 +1388,10 @@ export async function performAnalysis(
       bAttemptTrail.push(`attempt 3 deepen: +${deepened} field(s) — ${fails.length ? fails.join('; ') : 'verified'}`)
     }
 
-    // Attempt 4 — devalue. Upper-band evidence failed verification (lone
-    // premium comp, insufficient support). The ladder drops a tier: the
-    // verified median pool answers what it can support instead of the run
-    // collapsing to a model fallback. Only then is it truly unverified.
-    if (fails.length) {
-      const devalued = evaluateB(bSubjectFields, toBComps(), {
-        rehabCost: valuation?.totalRehabCost ?? null,
-        devalueToMedian: true,
-      })
-      const dFails = verifyB(devalued)
-      if (!dFails.length) {
-        bResult = devalued
-        fails = []
-      }
-      bAttemptTrail.push(
-        `attempt 4 devalue — ${dFails.length ? dFails.join('; ') : 'median-tier answer verified'}`)
-
-      // Attempt 5 — devalue to stale sales: the pocket's only verified
-      // evidence is old transactions. An appraiser time-adjusts rather than
-      // discards — sales reprice by their pocket ratio to current dollars.
-      if (dFails.length) {
-        const staleAdjusted = evaluateB(bSubjectFields, toBComps(), {
-          rehabCost: valuation?.totalRehabCost ?? null,
-          devalueToMedian: true,
-          admitStale: true,
-        })
-        const sFails = verifyB(staleAdjusted)
-        if (!sFails.length) {
-          bResult = staleAdjusted
-          fails = []
-        }
-        bAttemptTrail.push(
-          `attempt 5 devalue+stale — ${sFails.length ? sFails.join('; ') : 'time-adjusted answer verified'}`)
-      }
-    }
-
     if (bAttemptTrail.length === 0 && fails.length === 0) bAttemptTrail.push('attempt 1 — verified')
     else if (fails.length) bAttemptTrail.push(`final — unverified (${fails.join('; ')})`)
     pipelineBResult = bResult
-    // A verified ladder result applies even under insufficient — the whole
-    // point of the devalue rungs is to answer the question the pool CAN
-    // support. fails.length===0 means the ladder verified; insufficient
-    // still marks the report thin.
-    if ((!insufficient || fails.length === 0) && bResult.arv != null && bResult.arv !== finalArv) {
+    if (!insufficient && bResult.arv != null && bResult.arv !== finalArv) {
       const prevArv = finalArv
       finalArv = bResult.arv
       valuationAnchor = finalArv

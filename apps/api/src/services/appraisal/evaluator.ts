@@ -1289,11 +1289,7 @@ export function evaluateComparable(
 
     // Soft filters (stories, roof material) record the mismatch for
     // ranking/reporting but never disqualify the comp.
-    // lot_size_diff never disqualifies either — the acreage category gate
-    // above catches true mismatches, and a same-pocket lot delta is exactly
-    // what the per-parcel land adjustment prices (it isn't a reason to
-    // discard the comp's evidence).
-    if (!result.passed && result.reason && filter.priority !== 'soft' && filter.type !== 'lot_size_diff') {
+    if (!result.passed && result.reason && filter.priority !== 'soft') {
       disableReasons.push(result.reason)
     }
   }

@@ -110,20 +110,11 @@ export function ValuationCard({
                   {valuation.bMechanics.drivers!.slice(0, 3).map((d, i) => (
                     <div key={i} className="text-[9px] font-mono text-foreground-tertiary truncate">
                       {d.address?.split(',')[0] ?? 'comp'} → ${d.contribution.toLocaleString()}
-                      {d.landAdj != null && d.landAdj !== 0 && ` (land ${d.landAdj > 0 ? '+' : ''}${d.landAdj.toLocaleString()})`}
                     </div>
                   ))}
                   {(valuation.bMechanics.attemptTrail?.length ?? 0) > 0 && (
                     <div className="text-[9px] font-mono text-foreground-tertiary/70 truncate" title={valuation.bMechanics.attemptTrail!.join('\n')}>
                       {valuation.bMechanics.attemptTrail!.join(' · ')}
-                    </div>
-                  )}
-                  {valuation.bMechanics.land?.subjectLandValue != null && (
-                    <div className={cn(
-                      'text-[9px] font-mono truncate',
-                      valuation.bMechanics.land.mode === 'land_play' ? 'text-amber-500 font-bold' : 'text-foreground-tertiary/70'
-                    )} title={`Pocket land ${valuation.bMechanics.land.pocketRate?.toFixed(2)}/lot-sf (${valuation.bMechanics.land.source ?? 'no source'})`}>
-                      {valuation.bMechanics.land.mode === 'land_play' ? '⛏ LAND PLAY' : 'land'} ${valuation.bMechanics.land.subjectLandValue!.toLocaleString()} extracted
                     </div>
                   )}
                 </div>
