@@ -26,7 +26,8 @@ licensed appraisal and not ground truth.
 | 3 | 1176 Ashley Lake Dr, Marietta GA 30062 | min-3 | $513,299 | ≥$526K as-is; renovated higher, unproven | too low — ignored next-door sale |
 | 4 | 1643 Bagpipe Pl, Conley GA 30288 | min-3 | $205,963 | ~$225–250K | plausible, wrong method |
 | 5 | 2184 Dunseath Ave NW, Atlanta GA 30318 | min-3 | $1,110,927 (unverified, low) | ~$450–525K | badly wrong — one $1.6M sale at 67% weight |
-| 5 | same | current (saved replay) | $466,159 | same | in range |
+| 5 | same | current (saved replay) | $466,159 | same | in range — 21-day cache served pre-reconcile code; `skipCache` forces fresh |
+| 5 | same | min-3 + pocket/no-ARV fixes | $313,966 (AVM floor, "no verified drivers") | same | outlier caught — but size grid (±437sf) disabled every real comp too; floor ≠ value |
 
 ## Findings
 
@@ -97,6 +98,18 @@ Status: `open` until resolved in the v2 design.
   $350,000, corroborated) was dropped with no flag. (Dunseath) — open
 - **F24. Subject condition unknown, rehab level assumed.** Dunseath had no
   condition read ("NA") yet priced Full Cosmetic ($130,120). — open
+- **F27. Eval cache is harness-version-blind.** The 21-day result cache
+  keyed on address + params returned a report produced by the
+  pre-reconciliation code ($466K, anchor path) against the current
+  harness ($1.11M, reconcile path). Same address, two ARVs 2.4× apart
+  depending on when the cache wrote. `skipCache` bypasses; nothing stamps
+  the code version into the key. (Dunseath) — open
+- **F28. Size grid emptied the pocket.** After the outlier exclusion +
+  tract pocket landed, EVERY real comp on Dunseath was still disabled —
+  all ~950–1,400 sf vs the 1,566 sf subject, over the ±437 sf cap (grid,
+  not verification). Result fell to the AVM floor despite corroborated
+  pocket sales at 90–156%. A comp 600 sf smaller is still evidence —
+  size adjustment exists for exactly this. Related: F5, F26. — open
 
 ### Reporting
 - **F16. Confidence labels disagree.** `valuation.confidence` says "high"
@@ -141,7 +154,12 @@ Status: `open` until resolved in the v2 design.
   run toward a buy price under the appraisal rules.
 - **The 25-comp cap is intentional.** Intent: enrich the comps that match
   the subject's tract, block group, and neighborhood; when there are fewer
-  than 25 of those, fill with the closest by distance. Open question, not
+  than 25 of those, fill with the closest by distance.
+- **Pocket = tract match and/or block match.** The pocket reference rate
+  draws on the tract pool (block group + tract matches), never a 2-comp
+  closest-tier median — a single outlier must not be able to define the
+  pocket. Applies to the market-area check, pocketRatio verification, and
+  stale-adjust repricing alike. (Dunseath, F15/F26) Open question, not
   yet checked in code: whether the 25 the provider returns are picked that
   way, or simply the 25 nearest.
 - **A run's record must not fail to save.** The storage design has to make
