@@ -359,6 +359,19 @@ export function evaluateB(
     drivers = medianComps
     for (const x of medianComps)
       flags.push(`${x.comp.address}: median-tier driver — no high-similarity renovated evidence`)
+    // Median-only evidence — an AVM above the evidence ceiling gets
+    // half-trusted uplift (owner rule: 50% of uplift with no ARV
+    // evidence). Below or absent, the median anchor drives normally.
+    const topSim = Math.max(...medianComps.map(similarity))
+    const gatedMedian = medianComps.filter((x) => similarity(x) >= 0.6 * topSim)
+    const medianCeiling = Math.max(...gatedMedian.map((x) => x.contrib))
+    const avm = bSubjectAvm(subject)
+    if (avm && avm > medianCeiling) {
+      const halved = Math.round(medianCeiling + (avm - medianCeiling) * 0.5)
+      flags.push(`median-tier evidence only (ceiling ${usd(medianCeiling)}) — no ARV evidence; ARV at 50% uplift toward AVM ${usd(avm)}`)
+      return { arv: halved, flags, contribs, drivers, bracket: 'ok', conf: 'low',
+        source: 'median+50% AVM uplift', landRateSource: landSource, sqftRateSource }
+    }
   } else {
     const weak = verifiedPool.filter((x) => x.tier === 'arv' && bCondTier(x.comp) !== 'median')
     if (weak.length) {
@@ -372,21 +385,6 @@ export function evaluateB(
         x.tier !== 'as_is' && bCondTier(x.comp) !== 'median' &&
         topPpsf != null && (bPpsfOf(x.comp) ?? 0) >= B_RETAIL_BAND * topPpsf)
       if (!retail.length) {
-        // Median-only evidence — similarity-gated ceiling + AVM uplift
-        if (medianComps.length) {
-          const topSim = Math.max(...medianComps.map(similarity))
-          const gatedMedian = medianComps.filter((x) => similarity(x) >= 0.6 * topSim)
-          const medianCeiling = Math.max(...gatedMedian.map((x) => x.contrib))
-          const avm = bSubjectAvm(subject)
-          if (avm && avm > medianCeiling) {
-            flags.push(`median-tier evidence only (ceiling ${usd(medianCeiling)}) — ARV set at subject AVM ${usd(avm)} (corroborated uplift)`)
-            return { arv: Math.round(avm), flags, contribs, drivers: medianComps,
-              bracket: 'ok', conf: 'low', source: 'median+AVM uplift', landRateSource: landSource, sqftRateSource }
-          }
-          flags.push(`median-tier evidence only — ARV at median ceiling ${usd(medianCeiling)} (uplift unverified)`)
-          return { arv: Math.round(medianCeiling), flags, contribs, drivers: medianComps,
-            bracket: 'ok', conf: 'low', source: 'median ceiling', landRateSource: landSource, sqftRateSource }
-        }
         flags.push('no retail-priced evidence — ARV withheld (as-is sales are floor evidence only)')
         return { arv: null, flags, contribs, drivers: [], bracket: 'ok', conf: 'none', source,
           landRateSource: landSource, sqftRateSource }
