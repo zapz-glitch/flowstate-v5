@@ -230,7 +230,11 @@ export function recalculateReport(
     condition: data.valuation?.rehabLevel ?? null,
   }
   const bResult = evaluateB(bSubject, bComps, { rehabCost: data.valuation?.rehabCost ?? null })
-  const arv = bResult.arv ?? data.valuation?.arv ?? 0
+  // Server ARV is authoritative — the pipeline's evidence pool (rescues,
+  // widened comps, permit/geo/exclusion gates, devalue ladder) is richer
+  // than anything the browser can reconstruct. Client evaluateB stays as
+  // the fallback only when the server produced no ARV.
+  const arv = data.valuation?.arv ?? bResult.arv ?? 0
 
   // 4b. Groups come from evidence classification — not price percentile.
   //     'arv' = after_renovation evidence; 'as_is' = investor-priced
