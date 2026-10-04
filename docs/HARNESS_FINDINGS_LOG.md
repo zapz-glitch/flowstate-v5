@@ -25,6 +25,8 @@ licensed appraisal and not ground truth.
 | 2 | same | OG (replay) | $218,602 (1 comp) | ~$228K | close, single comp |
 | 3 | 1176 Ashley Lake Dr, Marietta GA 30062 | min-3 | $513,299 | ≥$526K as-is; renovated higher, unproven | too low — ignored next-door sale |
 | 4 | 1643 Bagpipe Pl, Conley GA 30288 | min-3 | $205,963 | ~$225–250K | plausible, wrong method |
+| 5 | 2184 Dunseath Ave NW, Atlanta GA 30318 | min-3 | $1,110,927 (unverified, low) | ~$450–525K | badly wrong — one $1.6M sale at 67% weight |
+| 5 | same | current (saved replay) | $466,159 | same | in range |
 
 ## Findings
 
@@ -76,8 +78,13 @@ Status: `open` until resolved in the v2 design.
   (AVM has zero influence). — open, needs policy call
 - **F14. Min-3 is rarely met.** Fewer than 3 sales on 40 of 45 saved
   pools at first try (offline replay). — open
-- **F15. In-tier outlier takes top weight.** One $1.6M sale gets 67% on a
-  saved Dunseath replay ($1.26M ARV). — open
+- **F15. In-tier outlier takes top weight.** 2360 Bolton Rd NW ($1.6M,
+  1,415 sf, 0.65 ac, $1,131/sf — 3–4x every other sale, no AVM check) gets
+  67% weight. It also sets the pocket rate, so normal sales ($365K, $420K)
+  are thrown out as "55–67% below the pocket". Confirmed live: Dunseath
+  ARV $1,110,927, buy price $769,714. — open
+- **F24. Subject condition unknown, rehab level assumed.** Dunseath had no
+  condition read ("NA") yet priced Full Cosmetic ($130,120). — open
 
 ### Reporting
 - **F16. Confidence labels disagree.** `valuation.confidence` says "high"
