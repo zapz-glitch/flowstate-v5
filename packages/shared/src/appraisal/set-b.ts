@@ -316,7 +316,7 @@ export function evaluateB(
     const normName = (v?: string | null) => v?.toLowerCase().replace(/[^a-z0-9]/g, '') ?? null
     const pocketFor = (keep: (c: BComp) => boolean) =>
       items.filter((c) =>
-        keep(c) && c.salePrice && c.squareFeet && bTierOf(c) !== 'as_is' && !bIsUnfit(c))
+        keep(c) && c.salePrice && c.squareFeet && !bIsUnfit(c))
     const scopes: { label: string; pool: BComp[] }[] = [
       { label: 'tract', pool: pocketFor((c) => !!subject.censusTract && c.censusTract === subject.censusTract) },
       { label: 'block group', pool: pocketFor((c) => c.sameBlockGroup === true) },
@@ -335,6 +335,20 @@ export function evaluateB(
       if (clean.length < 3) continue
       const dropped = ps.length - clean.length
       const med = (xs: typeof clean) => xs[Math.floor(xs.length / 2)].ppsf
+      // Condition bands — the pocket classifies itself by evidence, not
+      // blind price thirds: renovated curb reads / flip sales on top,
+      // maintained reads in the middle, distressed at the bottom.
+      const bandOf = (c: BComp): 'renovated' | 'maintained' | 'distressed' => {
+        if (bTierOf(c) === 'as_is' || /distress|as_is|as-is|investor/i.test(c.classification?.type ?? '')) return 'distressed'
+        if (bCondTier(c) === 'median') return 'maintained' // curb read is the condition vote
+        if (bCondTier(c) === 'renovated' || bCondTier(c) === 'premium' || bTierOf(c) === 'arv') return 'renovated'
+        return 'maintained'
+      }
+      const inBand = (band: 'renovated' | 'maintained' | 'distressed') =>
+        clean.filter((x) => bandOf(x.c) === band)
+      const distressed = inBand('distressed')
+      const maintained = inBand('maintained')
+      const renovated = inBand('renovated')
       // Marginal repricing — same taper as the driver contribution. A
       // band member's implied subject price is its sale plus the size
       // delta at a tapered rate, never flat $/sf.
@@ -360,24 +374,31 @@ export function evaluateB(
         }
         return v + landAdj
       }
-      const third = Math.floor(clean.length / 3)
-      const banded = clean.length >= 6
-      const bands = {
-        asIs: clean.slice(0, third),
-        median: clean.slice(third, clean.length - third),
-        arv: clean.slice(clean.length - third),
-      }
-      const arvPpsf = banded ? med(bands.arv) : med(clean)
       if (!subSqft) break
-      const carriers = banded ? bands.arv : clean
+      // Carriers: the renovated band is the ARV set — fix-flip sales or
+      // confident renovated reads. When the pocket has no renovated
+      // evidence, the whole maintained band carries the estimate —
+      // labeled maintained, never disguised as a flip read.
+      const carriers = renovated.length >= 2 ? renovated
+        : maintained.length ? maintained : clean
+      const bandNote = ' — ' + [
+        distressed.length ? `distressed $${med(distressed).toFixed(0)}/sf` : null,
+        maintained.length ? `maintained $${med(maintained).toFixed(0)}/sf` : null,
+        renovated.length ? `renovated $${med(renovated).toFixed(0)}/sf` : null,
+      ].filter(Boolean).join(' · ')
       const arvImplied = carriers.map((x) => implied(x)).sort((a, b) => a - b)
-      const arv = arvImplied[Math.floor(arvImplied.length / 2)]
+      let arv = arvImplied[Math.floor(arvImplied.length / 2)]
+      // ARV cannot sit below the maintained band — maintained homes
+      // selling above the answer means the band was read wrong.
+      const maintainedTop = maintained.length
+        ? Math.max(...maintained.map((x) => implied(x))) : null
+      if (renovated.length >= 2 && maintainedTop != null && arv < maintainedTop) {
+        flags.push(`ARV ${usd(arv)} below maintained band — floored at maintained ceiling ${usd(maintainedTop)}`)
+        arv = maintainedTop
+      }
       flags.push(
         `T2 pocket-tiers [${label}] — ${clean.length} cleaned sale(s)` +
-        (dropped ? ` (${dropped} outlier/bounded-low dropped)` : '') +
-        (banded
-          ? ` — as-is $${med(bands.asIs).toFixed(0)}/sf · median $${med(bands.median).toFixed(0)}/sf · ARV $${arvPpsf.toFixed(0)}/sf`
-          : ` — median $${arvPpsf.toFixed(0)}/sf (thin pocket)`))
+        (dropped ? ` (${dropped} outlier/bounded-low dropped)` : '') + bandNote)
       return {
         arv: Math.round(arv), contribs: [], bracket: 'ok', conf: 'low',
         source: `T2 pocket-tiers [${label}]`,
@@ -668,6 +689,15 @@ export function evaluateB(
   if (cappedOutlier) {
     flags.push(`ARV ${usd(arv)} exceeds size-adjusted ceiling ${usd(ceiling)} with ${supporters} supporter(s) — capped`)
     arv = ceiling
+  }
+
+  // ── Maintained-band floor — ARV can't sit below the band ────────────────
+  // Maintained homes selling above the answer means the anchor (or its
+  // renovated label) was read wrong — the floor is the band's median.
+  const maintainedVals = medianComps.map((x) => x.contrib)
+  if (maintainedVals.length >= 2 && arv != null && arv < bMedian(maintainedVals)!) {
+    flags.push(`ARV ${usd(arv)} below maintained band — floored at maintained median ${usd(bMedian(maintainedVals)!)}`)
+    arv = bMedian(maintainedVals)!
   }
 
   // ── Bracketing ───────────────────────────────────────────────────────────

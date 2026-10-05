@@ -97,16 +97,33 @@ assert.deepEqual(B_REHAB_FRACTION, {
   assert.equal(r.arv, 300_000) // 200/sf × 1500
   assert.ok(r.source.startsWith('T2 pocket-tiers'))
 }
-// Banded pocket: the ARV band (top third) carries the answer, not the
-// raw median — renovated pockets price above the tract median.
+// Evidence-banded pocket: the renovated band carries the answer when it
+// exists — curb read is the condition vote, not blind price thirds.
+{
+  const dead = (ppsf: number, opts: { cond?: string; cls?: string } = {}) => comp({
+    isEnabled: false, disableReasons: ['property type mismatch'],
+    salePrice: ppsf * 1500, squareFeet: 1500,
+    curbAppeal: opts.cond ? { condition: opts.cond, confidence: 60 } : null,
+    classification: opts.cls !== undefined ? { type: opts.cls } : null,
+  })
+  const r = evaluateB(subject(), [
+    dead(140, { cls: 'transitional' }), dead(150, { cls: 'transitional' }), dead(160, { cls: 'transitional' }),
+    dead(200, { cond: 'renovated' }), dead(210, { cond: 'renovated' }), dead(220, { cond: 'renovated' }),
+  ])
+  assert.equal(r.arv, 315_000) // renovated band median = 210/sf × 1500
+  assert.equal(r.drivers.length, 3)
+  assert.ok(r.flags.some((f) => f.includes('maintained') && f.includes('renovated')))
+}
+// Maintained band carries when nothing renovated exists — a real answer,
+// not a floor.
 {
   const dead = (ppsf: number) => comp({
     isEnabled: false, disableReasons: ['property type mismatch'],
     salePrice: ppsf * 1500, squareFeet: 1500,
+    classification: { type: 'transitional' },
   })
   const r = evaluateB(subject(), [dead(140), dead(150), dead(160), dead(200), dead(210), dead(220)])
-  assert.equal(r.arv, 330_000) // top-third median = 220/sf × 1500 — NOT the raw median 180
-  assert.equal(r.drivers.length, 2) // the two top-band sales stand behind it
+  assert.equal(r.arv, 300_000) // band median (upper-middle) = 200/sf × 1500 — no renovated tier to lift it
 }
 // Cleaning: as-is-labeled and IQR outlier sales don't pollute the pocket.
 {
@@ -120,8 +137,23 @@ assert.deepEqual(B_REHAB_FRACTION, {
     dead(40, 'as_is'),   // bounded-low — excluded before the fence
     dead(900),           // IQR outlier — excluded by the fence
   ])
-  assert.equal(r.arv, 330_000) // ARV band = 220/sf; the 40 and 900 sales never touched it
+  assert.equal(r.arv, 285_000) // maintained band median = 190/sf; the 40 and 900 sales never touched it
   assert.ok(r.flags.some((f) => f.includes('dropped')))
+}
+// Maintained-band floor — an anchor below the band's median gets
+// floored: a renovated product can't sell for less than maintained homes.
+{
+  const maintained = comp({ address: 'maint', salePrice: 300_000, distanceMiles: 0.4,
+    classification: { type: 'transitional' },
+    curbAppeal: { condition: 'maintained', confidence: 60 } })
+  const maintained2 = comp({ address: 'maint2', salePrice: 295_000, distanceMiles: 0.4,
+    classification: { type: 'transitional' },
+    curbAppeal: { condition: 'maintained', confidence: 60 } })
+  const weakArv = comp({ address: 'weak-arv', salePrice: 200_000, distanceMiles: 0.5,
+    classification: { type: 'after_renovation' } })
+  const r = evaluateB(subject(), [maintained, maintained2, weakArv])
+  assert.equal(r.arv, 300_000) // anchor was ~200k — floored at the maintained band
+  assert.ok(r.flags.some((f) => f.includes('below maintained band')))
 }
 // T1 lot-delta rescue (Ruskin — the cascade debut): killed ONLY on lot
 // size, close, same pocket → rescued, flagged not modeled
