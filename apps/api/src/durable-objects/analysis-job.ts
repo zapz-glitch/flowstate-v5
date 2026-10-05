@@ -49,6 +49,7 @@ import {
   isCacheableVerdict,
 } from '../utils/eval-cache'
 import { evaluateRun } from '../services/observability/evals'
+import { buildRunRecordPayload, insertRunRecord, linkRunRecordToReport } from '../services/evaluation/run-record'
 
 interface JobState {
   jobId: string
@@ -321,7 +322,7 @@ export class AnalysisJobDO {
           if (report?.fullResponseJson) {
             const analysisResult = JSON.parse(report.fullResponseJson)
             await this.pushEvent('evaluation_complete', { updatedResult: analysisResult })
-            await this.recordRun(config, { status: 'completed', durationMs: Date.now() - startTime, response: analysisResult })
+            await this.recordRun(config, { status: 'completed', durationMs: Date.now() - startTime, response: analysisResult, cachedJobId: cached })
             await this.pushEvent('enrichment_done', { totalDurationMs: Date.now() - startTime })
             return
           }
@@ -1114,7 +1115,9 @@ export class AnalysisJobDO {
     // OSM location risks now fetched during enrichment — they're already in
     // the response via bundle.enrichment.locationRisks (and feed valuation)
 
-    // Save/update report in DB
+    // Save/update report in DB — the immutable run evidence lands first so
+    // an overwrite can never erase what this run was computed from.
+    let completedRunRecordId: string | undefined
     try {
       const db = drizzle(this.env.DB)
       const subj = analysisResult.subject as Record<string, unknown>
@@ -1128,6 +1131,13 @@ export class AnalysisJobDO {
         ...bMetricsFromValuation(val),
       }
 
+      completedRunRecordId = await this.saveRunRecord(config, {
+        status: 'completed',
+        evidence: evalResult.runEvidence,
+        attempts: evalResult.runEvidence.attempts,
+        response: analysisResult,
+      })
+
       await upsertPropertyReport(db, {
         userId: config.userId,
         jobId: config.jobId,
@@ -1137,6 +1147,7 @@ export class AnalysisJobDO {
         propertyZip: property.zipCode || '',
         propertyClip: property.id || null,
       }, reportData)
+      await linkRunRecordToReport(db.$client, completedRunRecordId, config.jobId, config.userId)
 
       if (config.evalResultCacheKey) {
         await this.env.API_CACHE.put(config.evalResultCacheKey, config.jobId, {
@@ -1161,7 +1172,7 @@ export class AnalysisJobDO {
 
     // Private image access checks the saved report owner before serving any bytes.
     await this.pushEvent('evaluation_complete', { updatedResult: analysisResult })
-    await this.recordRun(config, { status: 'completed', durationMs: Date.now() - startTime, response: analysisResult })
+    await this.recordRun(config, { status: 'completed', durationMs: Date.now() - startTime, response: analysisResult, runRecordId: completedRunRecordId })
 
     // LLM comp annotation removed — evidence classification drives the eval;
     // the separate annotate pass only wrote prose onto cards.
@@ -1303,6 +1314,17 @@ export class AnalysisJobDO {
           const result = updatedResponse as Record<string, unknown>
           const subject = result.subject as Record<string, unknown>
           const valuation = result.valuation as Record<string, unknown> | null
+          const runRecordId = await this.saveRunRecord({
+            jobId: config.jobId,
+            userId: config.userId,
+            evalParams: config.evalParams,
+            skipCache: !!config.skipCache,
+          }, {
+            status: 'completed',
+            evidence: evalResult.runEvidence,
+            attempts: evalResult.runEvidence.attempts,
+            response: updatedResponse,
+          })
           await upsertPropertyReport(db, {
             userId: config.userId,
             jobId: config.jobId,
@@ -1319,6 +1341,7 @@ export class AnalysisJobDO {
             estimatedRepairs: (valuation?.rehabCost as number) ?? null,
             ...bMetricsFromValuation(valuation),
           })
+          await linkRunRecordToReport(db.$client, runRecordId, config.jobId, config.userId)
           if (config.evalResultCacheKey) {
             await this.env.API_CACHE.put(config.evalResultCacheKey, config.jobId, {
               expirationTtl: 21 * 24 * 60 * 60, // 21 days
@@ -1348,6 +1371,41 @@ export class AnalysisJobDO {
 
   // ─── Observability: record every run outcome (success AND failure) ────────
 
+  private async saveRunRecord(
+    config: Pick<StartStreamingRequest, 'jobId' | 'userId'> & Partial<StartStreamingRequest>,
+    input: {
+      status: 'completed' | 'error' | 'cached' | 'persistence_error'
+      evidence?: unknown
+      attempts?: unknown[]
+      response?: unknown
+      errorCode?: string | null
+      errorMessage?: string | null
+      cachedJobId?: string | null
+    },
+  ): Promise<string> {
+    const payload = buildRunRecordPayload({
+      jobId: config.jobId,
+      userId: config.userId,
+      status: input.status,
+      request: {
+        search: config.search,
+        searchOptions: config.searchOptions,
+        enrichment: config.enrichment,
+        evalParams: config.evalParams,
+        skipCache: !!config.skipCache,
+        isRefresh: !!config.isRefresh,
+        cachedJobId: input.cachedJobId ?? null,
+      },
+      evidence: input.evidence,
+      attempts: input.attempts,
+      response: input.response,
+      errorCode: input.errorCode,
+      errorMessage: input.errorMessage,
+    })
+    const saved = await insertRunRecord(this.env.DB, payload)
+    return saved.id
+  }
+
   /**
    * Persist a terminal verdict (insufficient comps / property not found) under
    * the eval-result key so retries of the same address+params replay the error
@@ -1369,6 +1427,8 @@ export class AnalysisJobDO {
       errorCode?: string
       errorMessage?: string
       compCount?: number
+      cachedJobId?: string
+      runRecordId?: string
     }
   ): Promise<void> {
     try {
@@ -1396,6 +1456,22 @@ export class AnalysisJobDO {
         steps: report?.steps ?? null,
       }
       const runEval = evaluateRun(evidence)
+
+      // Every terminal outcome gets an immutable record. Full evaluations are
+      // saved before report overwrite above; cached/error outcomes record the
+      // terminal response/verdict here.
+      await (outcome.runRecordId
+        ? Promise.resolve(outcome.runRecordId)
+        : this.saveRunRecord(config, {
+          status: outcome.cachedJobId ? 'cached' : outcome.status,
+          response: outcome.response,
+          errorCode: outcome.errorCode,
+          errorMessage: outcome.errorMessage,
+          cachedJobId: outcome.cachedJobId ?? null,
+        }).catch((err) => {
+          console.warn('[AnalysisJobDO] run record fallback failed:', err instanceof Error ? err.message : err)
+          return undefined
+        }))
 
       await db.insert(analysisRuns).values({
         jobId: config.jobId,

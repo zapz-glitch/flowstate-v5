@@ -791,6 +791,56 @@ export const analysisRuns = sqliteTable(
 )
 
 // ==========================================
+// Run Records (immutable evidence record per evaluation)
+// ==========================================
+
+export const runRecords = sqliteTable(
+  'run_records',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    jobId: text('job_id').notNull(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    reportId: text('report_id')
+      .references(() => savedReports.id, { onDelete: 'set null' }),
+    // Property identity
+    propertyAddress: text('property_address'),
+    propertyCity: text('property_city'),
+    propertyState: text('property_state'),
+    propertyZip: text('property_zip'),
+    propertyClip: text('property_clip'),
+    // Outcome and provenance
+    status: text('status').notNull(), // 'completed' | 'error' | 'cached' | 'persistence_error'
+    errorCode: text('error_code'),
+    errorMessage: text('error_message'),
+    arv: real('arv'),
+    resultGrade: text('result_grade'),
+    processGrade: text('process_grade'),
+    harnessVersion: text('harness_version'),
+    pipelineVersion: text('pipeline_version'),
+    requestHash: text('request_hash'),
+    evidenceHash: text('evidence_hash'),
+    payloadHash: text('payload_hash').notNull(),
+    attemptCount: integer('attempt_count').notNull().default(0),
+    compCount: integer('comp_count'),
+    enabledCompCount: integer('enabled_comp_count'),
+    // Canonical record: subject, comp evidence, effective rules/settings,
+    // every Set-B attempt input/output, and the final response.
+    payloadJson: text('payload_json').notNull(),
+    createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
+  },
+  (table) => [
+    index('idx_run_records_job_id').on(table.jobId),
+    index('idx_run_records_user_id').on(table.userId),
+    index('idx_run_records_report_id').on(table.reportId),
+    index('idx_run_records_payload_hash').on(table.payloadHash),
+    index('idx_run_records_property').on(table.userId, table.propertyAddress),
+    index('idx_run_records_created_at').on(table.createdAt),
+  ]
+)
+
+// ==========================================
 // Tasks (per-user to-do list)
 // ==========================================
 

@@ -29,7 +29,7 @@ import {
 import { verifyCompEvidence } from '../appraisal/verification'
 import { arvEvidence, classifyCompsByEvidence } from './comp-classification'
 export { arvEvidence, classifyCompsByEvidence }
-import { evaluateB, subdivisionsMatch, type BComp } from '@flowstate-api/shared/appraisal'
+import { evaluateB, subdivisionsMatch, type BComp, type BSubject } from '@flowstate-api/shared/appraisal'
 import { createValuationService, MAJOR_ITEMS, type MajorItem } from '../valuation'
 import type { ClassificationResult } from '../classification'
 import type { RehabTable, TierRangeDefinition } from '@flowstate-api/shared/valuation'
@@ -174,12 +174,40 @@ export interface GroupBResult {
   noDataReason?: string
 }
 
+export interface EvaluationAttemptRecord {
+  name: string
+  subject: BSubject
+  comps: BComp[]
+  options: { rehabCost?: number | null }
+  result: ReturnType<typeof evaluateB>
+  verificationFailures: string[]
+  detail?: Record<string, unknown>
+}
+
+export interface EvaluationRunEvidence {
+  /** The provider/evidence set handed to the appraisal pipeline. */
+  compPool: NormalizedComparable[]
+  subject: NormalizedProperty
+  /** Effective appraisal grid + valuation inputs used for this run. */
+  appliedSettings: unknown
+  filters: AppraisalFilter[]
+  adjustments: AppraisalAdjustment[]
+  fallbackUsed: string | null
+  expansionApplied: string[]
+  compClassifications: Record<string, ClassificationResult>
+  compCurbAppeal: CompCurbAppealMap | null
+  bAttemptTrail: string[]
+  attempts: EvaluationAttemptRecord[]
+}
+
 export interface EvaluationResult {
   response: AnalysisResponse
   appraisalResult: AppraisalResultWithFallback
   compClassifications: Map<string, ClassificationResult>
   /** Group B as-is market intelligence (display only) */
   groupB: GroupBResult | null
+  /** Frozen inputs/outputs for every harness attempt in this run. */
+  runEvidence: EvaluationRunEvidence
 }
 
 // ─── Price Classification ────────────────────────────────────────────────────
@@ -1168,6 +1196,7 @@ export async function performAnalysis(
   }
   let pipelineBResult: ReturnType<typeof evaluateB> | null = null
   let bAttemptTrail: string[] = []
+  const bAttempts: EvaluationAttemptRecord[] = []
   {
     // Verify-and-retry — the harness ladder in-pipeline. Verification tests
     // answer-level invariants (evidence coherence, never outcome appeal);
@@ -1238,8 +1267,25 @@ export async function performAnalysis(
     }
 
     bAttemptTrail = []
+    const recordBAttempt = (
+      name: string,
+      result: ReturnType<typeof evaluateB>,
+      verificationFailures: string[],
+      detail?: Record<string, unknown>,
+    ) => {
+      bAttempts.push({
+        name,
+        subject: { ...bSubjectFields },
+        comps: toBComps(),
+        options: { rehabCost: valuation?.totalRehabCost ?? null },
+        result,
+        verificationFailures: verificationFailures,
+        ...(detail ? { detail } : {}),
+      })
+    }
     let bResult = evaluateB(bSubjectFields, toBComps(), { rehabCost: valuation?.totalRehabCost ?? null })
     let fails = verifyB(bResult)
+    recordBAttempt('attempt 1', bResult, fails)
 
     // Attempt 2 — widen retrieval: fresh comps at a wider radius / longer
     // window merge in, get verification-stamped, then B re-evaluates.
@@ -1265,6 +1311,12 @@ export async function performAnalysis(
         }
         bResult = evaluateB(bSubjectFields, toBComps(), { rehabCost: valuation?.totalRehabCost ?? null })
         fails = verifyB(bResult)
+        recordBAttempt('attempt 2 widen', bResult, fails, {
+          radiusMiles: baseRadius + 1,
+          monthsBack: (bundle.metadata?.comparablesParams?.monthsBack ?? 12) + 6,
+          addedCompIds: added.map((c) => c.id),
+          addedCompCount: added.length,
+        })
       }
       bAttemptTrail.push(`attempt 2 widen: +${added.length} comp(s) — ${fails.length ? fails.join('; ') : 'verified'}`)
     }
@@ -1293,6 +1345,10 @@ export async function performAnalysis(
         stampVerification()
         bResult = evaluateB(bSubjectFields, toBComps(), { rehabCost: valuation?.totalRehabCost ?? null })
         fails = verifyB(bResult)
+        recordBAttempt('attempt 3 deepen', bResult, fails, {
+          deepenedCompIds: thin.map((c) => c.id),
+          deepenedFieldCount: deepened,
+        })
       }
       bAttemptTrail.push(`attempt 3 deepen: +${deepened} field(s) — ${fails.length ? fails.join('; ') : 'verified'}`)
     }
@@ -1506,6 +1562,19 @@ export async function performAnalysis(
     appraisalResult,
     compClassifications,
     groupB: groupBResult,
+    runEvidence: {
+      compPool: appraisalResult.comparables,
+      subject: bundle.property,
+      appliedSettings,
+      filters,
+      adjustments,
+      fallbackUsed: appraisalResult.fallbackUsed ?? null,
+      expansionApplied: appraisalResult.expansionApplied ?? [],
+      compClassifications: Object.fromEntries(compClassifications),
+      compCurbAppeal: compCurbAppeal ?? null,
+      bAttemptTrail,
+      attempts: bAttempts,
+    },
   }
 }
 
