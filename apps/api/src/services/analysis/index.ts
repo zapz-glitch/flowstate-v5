@@ -7,6 +7,7 @@
 
 import type { PropertyBundle } from '../property-api'
 import { evaluateB, bCondTier, HARNESS_VERSION } from '@flowstate-api/shared/appraisal'
+import { gradeResult } from './result-grade'
 import type { NormalizedProperty, NormalizedComparable } from '../property-api/types'
 import type { AppraisedComparable, AppraisalResultWithFallback, ClassificationSummaryResult } from '../appraisal'
 import type { PhotoBundle, PropertyPhotos } from '../photo-provider'
@@ -769,6 +770,10 @@ export interface AnalysisResponse {
     arvSource: 'appraisal' | 'comp-selection' | 'avm' | 'assessed'
     /** Methodology used to calculate ARV */
     arvMethodology: string
+    /** Run-level trust grade — verified/weak/floor/withheld (not comp classification) */
+    resultGrade?: import('./result-grade').ResultGrade
+    /** Did the run earn it — clean (attempt 1) / retried / unverified */
+    processGrade?: import('./result-grade').ProcessGrade
     arvPerSqft: number
     /** As-Is value (current market value based on as_is comps) */
     asIsValue: number | null
@@ -1621,6 +1626,8 @@ export function buildAnalysisResponse(
     { rehabCost: valuation?.totalRehabCost ?? null },
   )
 
+  const grades = gradeResult(bResult, appraisalResult.fallbackUsed, ctx.bAttemptTrail ?? [])
+
   const arvMethodology = bResult.arv != null
     ? `Set-B ${bResult.source}${bResult.anchorAddress ? ` — anchored ${bResult.anchorAddress}` : ''}`
     : arvSource === 'avm'
@@ -1747,6 +1754,8 @@ export function buildAnalysisResponse(
       arv: ctx.valuationAnchor ?? finalArv,
       arvSource: arvSource,
       arvMethodology,
+      resultGrade: grades.resultGrade,
+      processGrade: grades.processGrade,
       arvPerSqft: valuation.pricePerSqft,
       asIsValue,
       afterRenovationValue,

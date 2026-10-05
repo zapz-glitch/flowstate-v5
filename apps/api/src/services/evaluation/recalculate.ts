@@ -18,6 +18,7 @@ import type { ValuationResult, MajorItem } from '../valuation/types'
 import type { AnalysisResponse } from '../analysis'
 import { evaluateB, bCondTier, HARNESS_VERSION } from '@flowstate-api/shared/appraisal'
 import { savedToBComps, savedToBSubject } from './saved-pool'
+import { gradeResult } from '../analysis/result-grade'
 
 const MAX_ARV_COMPS = 3
 
@@ -194,6 +195,9 @@ export async function recalculateReport(
       arvPerSqft: subjectSqft > 0 ? Math.round(arv / subjectSqft) : null,
       arvSource,
       arvB: bResult.arv,
+      resultGrade: gradeResult(bResult,
+        (saved.valuation?.bMechanics as { fallbackUsed?: string } | undefined)?.fallbackUsed ?? null,
+        []).resultGrade,
       arvMethodology: bResult.arv != null
         ? `Set-B replay: ${bResult.source}${bResult.anchorAddress ? ` — anchored ${bResult.anchorAddress}` : ''}`
         : `Set-B produced no ARV on replay — stored value retained`,
