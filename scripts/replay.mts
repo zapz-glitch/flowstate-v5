@@ -187,9 +187,12 @@ function expectedMechanics(c: ReplayCase, attempt: Record<string, unknown> | nul
   const valuation = response.valuation as Record<string, unknown> | null | undefined
   const mechanics = valuation?.bMechanics as Record<string, unknown> | null | undefined
   return {
+    /** Last Set-B candidate, even when the terminal floor is AVM/assessed. */
     arv: numberOrNull((attempt?.result as Record<string, unknown> | undefined)?.arv)
       ?? numberOrNull(valuation?.arvB)
       ?? numberOrNull(valuation?.arv),
+    /** Number the saved valuation/offer math actually used. */
+    terminalArv: numberOrNull(valuation?.arv),
     source: (attempt?.result as Record<string, unknown> | undefined)?.source ?? mechanics?.source,
     confidence: (attempt?.result as Record<string, unknown> | undefined)?.conf ?? mechanics?.confidence,
     anchorAddress: (attempt?.result as Record<string, unknown> | undefined)?.anchorAddress ?? mechanics?.anchorAddress,
@@ -302,9 +305,16 @@ async function replayCase(c: ReplayCase): Promise<ReplayResult> {
       : []
   const fallbackUsed = String((evidence?.fallbackUsed ?? (valuation?.bMechanics as Record<string, unknown> | undefined)?.fallbackUsed) ?? '') || null
   const grades = gradeResult(replay, fallbackUsed, expectedTrail)
-  const valuationReplay = replayValuation(c, replay.arv)
+  const attemptSubject = (lastAttempt?.subject ?? {}) as Record<string, unknown>
+  const responseSubject = (response.subject ?? {}) as Record<string, unknown>
+  const subjectAvm = numberOrNull(attemptSubject.avmValue)
+    ?? numberOrNull((responseSubject.avm as Record<string, unknown> | undefined)?.value)
+  const assessed = numberOrNull(attemptSubject.assessedValue) ?? numberOrNull(responseSubject.assessedValue)
+  const terminalReplayArv = fallbackUsed === 'insufficient' ? subjectAvm ?? assessed ?? null : replay.arv
+  const valuationReplay = replayValuation(c, terminalReplayArv)
 
   pushDiff(diffs, 'arv', expected.arv, replay.arv, sameArv(expected.arv, replay.arv))
+  pushDiff(diffs, 'terminalArv', expected.terminalArv, terminalReplayArv, sameArv(expected.terminalArv, terminalReplayArv))
   pushDiff(diffs, 'arv.source', expected.source, replay.source, expected.source === replay.source)
   pushDiff(diffs, 'arv.confidence', expected.confidence, replay.conf, expected.confidence === replay.conf)
   pushDiff(diffs, 'arv.anchorAddress', expected.anchorAddress ?? null, replay.anchorAddress ?? null,

@@ -44,8 +44,8 @@ commits.
   - `apps/api/tests/comparable-retrieval.test.ts`
   - `apps/api/tests/rural-pocket.test.ts`
 - `npx tsc --noEmit -p apps/api/tsconfig.json`
-- `npm run replay:snapshots` — eight frozen run records pass strict replay.
-- `npm run audit:snapshots` — eight frozen run records pass the independent record audit.
+- `npm run replay:snapshots` — nine frozen run records pass strict replay.
+- `npm run audit:snapshots` — nine frozen run records pass the independent record audit.
 - Local D1:
   - `run_records` exists and stores separate rerun records.
   - `report_outcomes` exists and returned a Bagpipe outcome linked to a run record.
@@ -100,10 +100,11 @@ commits.
 ## Known local fixture
 
 `fixtures/snapshots/bagpipe-2026-10-05.run-record.json`,
-`charles-2026-10-05.run-record.json`, and
+`charles-2026-10-05.run-record.json`,
+`constitution-2026-10-05.run-record.json`, and
 `dunseath-2026-10-05.run-record.json` are live-data replay contracts. Five
 smaller synthetic fixtures cover verified, floor, package-deed,
-distressed-only, and withheld outcomes. Strict replay currently passes 8/8.
+distressed-only, and withheld outcomes. Strict replay currently passes 9/9.
 These prove deterministic replay and hash integrity;
 they do not prove appraisal accuracy against actual sales. `npm run
 audit:snapshots` audits the same six records without re-running Set-B.

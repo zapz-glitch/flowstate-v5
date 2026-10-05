@@ -59,7 +59,7 @@ console.log(`\nsubject: ${r.subject?.address} | ${r.subject?.squareFeet}sf | AVM
 console.log(`ARV: $${v.arv} | source: ${m.source} | anchor: ${m.anchorAddress} | conf: ${m.confidence}\n`)
 
 check('ARV produced', v.arv != null && v.arv > 0, `$${v.arv}`)
-check('B mechanics serialized', m.source != null && m.anchorAddress != null, m.source)
+check('B mechanics serialized', m.source != null && (m.source !== 'T0 anchor' || m.anchorAddress != null), m.source)
 check('attempt trail recorded', Array.isArray(m.attemptTrail) && m.attemptTrail.length >= 1, (m.attemptTrail ?? []).join(' | '))
 
 const ids = comps.map((c) => c.id)

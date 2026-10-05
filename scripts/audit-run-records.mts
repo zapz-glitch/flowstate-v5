@@ -70,6 +70,9 @@ function check(record: Record<string, unknown>, storedHash: string | null, file:
   }
   if (!subject?.address) fail('record.subject', 'missing subject address')
   if (!Array.isArray(evidence?.compPool)) fail('record.evidence.pool', 'missing compPool evidence')
+  const compIds = arr(evidence?.compPool).map((comp) => str(comp.id)).filter((id): id is string => id != null)
+  const duplicateIds = [...new Set(compIds.filter((id, i) => compIds.indexOf(id) !== i))]
+  if (duplicateIds.length) fail('record.evidence.pool', `duplicate comp IDs: ${duplicateIds.join(', ')}`)
   if (attempts.length === 0) fail('record.attempts', 'no Set-B attempts recorded')
   if (!result) fail('record.attempts', 'last attempt has no result')
   if (!Array.isArray(lastAttempt?.checks)) fail('record.checks', 'last attempt has no stable check IDs')
