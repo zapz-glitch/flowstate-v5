@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import { Suspense } from 'react'
 import { getSavedReports } from '@/lib/api'
-import { FileText, ChevronLeft, ChevronRight, Globe, Lock } from 'lucide-react'
+import { FileText, ChevronLeft, ChevronRight } from 'lucide-react'
 import { Card } from '@/components/ui/card'
 import { ReportSearchInput } from './search-input'
 import { DeleteReportButton } from './delete-report-button'
@@ -56,23 +56,21 @@ export default async function ReportsPage({
 
   return (
     <div className="space-y-10 animate-in fade-in duration-500">
-      {/* Header */}
+      {/* Header — same headline block as Property Search */}
       <div className="space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-2">
-          <div className="space-y-1">
-            <h1 className="text-heading-lg text-foreground tracking-tight">Property Reports</h1>
-            <p className="text-body text-foreground-tertiary">
-              View your saved property analysis reports
-            </p>
-          </div>
-          <p className="text-body-sm text-foreground-tertiary">
-            {data.pagination.total.toLocaleString()}{params.search ? ' matching' : ' total'} reports
-          </p>
+        <div className="space-y-1">
+          <p className="mono-label mb-3">Flowstate | Property underwriting</p>
+          <h1 className="text-heading-lg text-foreground tracking-[-0.03em] font-medium">Property Reports</h1>
         </div>
-        <div className="max-w-sm">
-          <Suspense>
-            <ReportSearchInput />
-          </Suspense>
+        <div className="flex items-center gap-3">
+          <div className="max-w-sm flex-1">
+            <Suspense>
+              <ReportSearchInput />
+            </Suspense>
+          </div>
+          <p className="text-body-sm text-foreground-tertiary flex-shrink-0">
+            {data.pagination.total.toLocaleString()}{params.search ? ' matching' : ' total'}
+          </p>
         </div>
       </div>
 
@@ -106,15 +104,10 @@ export default async function ReportsPage({
                         {report.propertyAddress}
                       </p>
                       <p className="text-caption text-foreground-tertiary">
-                        {[report.propertyCity, report.propertyState].filter(Boolean).join(', ') || '-'}
+                        {[report.propertyCity, report.propertyState?.toUpperCase()].filter(Boolean).join(', ') || '-'}
                       </p>
                     </div>
                     <div className="flex items-center gap-1.5 flex-shrink-0">
-                      {report.isShared ? (
-                        <Globe className="w-3.5 h-3.5 text-emerald-600" />
-                      ) : (
-                        <Lock className="w-3.5 h-3.5 text-foreground-tertiary" />
-                      )}
                       <DeleteReportButton jobId={report.jobId} address={report.propertyAddress} />
                       <ChevronRight className="w-4 h-4 text-foreground-tertiary" />
                     </div>
@@ -168,9 +161,7 @@ export default async function ReportsPage({
                     <th className="text-left px-6 py-3 text-caption font-medium text-foreground-tertiary">
                       Date
                     </th>
-                    <th className="text-center px-6 py-3 text-caption font-medium text-foreground-tertiary">
-                      Access
-                    </th>
+
                     <th className="text-left px-6 py-3 text-caption font-medium text-foreground-tertiary">
                       Details
                     </th>
@@ -188,7 +179,7 @@ export default async function ReportsPage({
                         {report.propertyAddress}
                       </td>
                       <td className="px-6 py-4 text-body-sm text-foreground-secondary whitespace-nowrap">
-                        {[report.propertyCity, report.propertyState]
+                        {[report.propertyCity, report.propertyState?.toUpperCase()]
                           .filter(Boolean)
                           .join(', ') || '-'}
                       </td>
@@ -208,17 +199,7 @@ export default async function ReportsPage({
                       <td className="px-6 py-4 text-body-sm text-foreground-secondary whitespace-nowrap">
                         {new Date(report.createdAt).toLocaleDateString()}
                       </td>
-                      <td className="px-6 py-4 text-center">
-                        {report.isShared ? (
-                          <span className="inline-flex items-center gap-1 text-caption text-emerald-600" title="Shared with password">
-                            <Globe className="w-3.5 h-3.5" />
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 text-caption text-foreground-tertiary" title="Private">
-                            <Lock className="w-3.5 h-3.5" />
-                          </span>
-                        )}
-                      </td>
+
                       <td className="px-6 py-4">
                         <Link
                           href={`/dashboard/reports/${report.jobId}`}

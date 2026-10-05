@@ -29,9 +29,11 @@ export function MapLegend() {
 // The valuation gap vs list price already lives in the valuation box —
 // dropping it here keeps the map strip to real location/flood risks.
 const ARV_LIST_FLAG = /^ARV (\$[\d,]+ (above|below) list price|at list price)$/
+// AVM-vs-ARV commentary is verdict meta, not a location risk — same rule.
+const AVM_FLAG = /as-is (AVM|estimate)|comp-evidenced ARV|as-is estimate/i
 
 export function MapOverlay({ riskFlags, floodZone }: MapOverlayProps) {
-  const mapFlags = riskFlags?.filter((flag) => !ARV_LIST_FLAG.test(flag))
+  const mapFlags = riskFlags?.filter((flag) => !ARV_LIST_FLAG.test(flag) && !AVM_FLAG.test(flag))
   const hasRiskFlags = !!(mapFlags?.length || floodZone)
 
   if (!hasRiskFlags) return null

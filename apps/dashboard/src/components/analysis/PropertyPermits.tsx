@@ -43,7 +43,7 @@ export function PropertyPermits({ permits, loading = false }: { permits: Subject
     return (
       <div className="mt-3 border-t border-border pt-2 text-xs">
         <div className="flex items-center justify-between gap-2">
-          <p className="font-medium">Permits — NA</p>
+          <p className="font-medium"><span className="text-foreground-tertiary">Permits</span>{' '}<span className="text-foreground">NA</span></p>
           {pullable && canPull && (
             <button
               type="button"

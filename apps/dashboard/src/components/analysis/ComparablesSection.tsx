@@ -310,17 +310,6 @@ export function ComparablesSection({
             </span>
           </div>
           <div className="flex items-center gap-2">
-            {/* Notify — comp-selection feedback report (always available) */}
-            <button
-              type="button"
-              onClick={() => { setNotifyNotes(''); setNotifySaveError(null); setNotifyOpen(true) }}
-              className="flex items-center gap-1 text-caption text-foreground-tertiary hover:text-foreground font-medium transition-colors no-print"
-              title="Generate a comp-selection feedback report for devin.ai"
-            >
-              <Bell className="w-3 h-3" />
-              Notify
-            </button>
-
           </div>
         </div>
 
@@ -346,6 +335,16 @@ export function ComparablesSection({
               </button>
             )
           })}
+          <span className="w-px h-3 bg-border mx-1" />
+          {/* Review — comp-selection feedback report, lives with the tiers */}
+          <button
+            type="button"
+            onClick={() => { setNotifyNotes(''); setNotifySaveError(null); setNotifyOpen(true) }}
+            className="text-[10px] px-2 py-0.5 rounded text-foreground-tertiary hover:text-foreground hover:bg-secondary transition-colors"
+            title="Stamp this report or flag it for a fix"
+          >
+            Report
+          </button>
         </div>
 
         {/* CDARV status — observational only; never gates evaluation */}
@@ -435,9 +434,17 @@ export function ComparablesSection({
         )}
       </div>
 
-      {/* All comps — grid only */}
+      {/* All comps — grid only. An empty tier renders a fixed-height stub so
+          the page doesn't collapse and yank the scroll position to the top. */}
       <div className="print:hidden">
-        {(
+        {sortedItems.length === 0 && tierFilter !== 'all' && (
+          <div className="comps-grid min-h-[16rem]">
+            <div className="col-span-full border border-dashed border-border rounded-lg flex items-center justify-center text-xs text-foreground-tertiary min-h-[16rem]">
+              No {tierFilter === 'arv' ? 'ARV evidence' : tierFilter === 'market' ? 'median sales' : 'investor comps'} in this report
+            </div>
+          </div>
+        )}
+        {sortedItems.length > 0 && (
           <div className="comps-grid">
             {sortedItems.map(({ comp, originalIndex }) => {
               const key = getCompKey(comp, originalIndex)
@@ -470,8 +477,8 @@ export function ComparablesSection({
           <DialogHeader>
             <DialogTitle>Review this report</DialogTitle>
             <DialogDescription>
-              Stamp this report as right or flag it for a fix. It saves to the
-              report&apos;s feedback trail — revisit it anytime.
+              Stamp this report as right or flag it for a fix. Saved on the
+              report&apos;s feedback trail.
             </DialogDescription>
           </DialogHeader>
 
@@ -486,7 +493,6 @@ export function ComparablesSection({
                   submitNotify('improve')
                 }
               }}
-              placeholder="Notes for later, e.g. '10321 Briarcliff is the right comp, same street renovated sale'&#10;&#10;Enter = Flag for improvement · Shift+Enter = new line"
               rows={4}
               className="w-full rounded-lg border border-border bg-background px-3 py-2 text-body-sm text-foreground placeholder:text-foreground-tertiary focus:outline-none focus:ring-1 focus:ring-primary resize-y"
             />
@@ -501,8 +507,7 @@ export function ComparablesSection({
                 disabled={notifySubmitting !== null}
                 className="text-emerald-600 border-emerald-500/30 hover:bg-emerald-500/10"
               >
-                {notifySubmitting === 'validate' ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <Check className="w-3.5 h-3.5 mr-1.5" />}
-                Validate
+                {notifySubmitting === 'validate' ? 'Saving…' : 'Validate'}
               </Button>
               <Button
                 size="sm"
@@ -510,8 +515,7 @@ export function ComparablesSection({
                 disabled={notifySubmitting !== null}
                 className="bg-amber-600 hover:bg-amber-700 text-white"
               >
-                {notifySubmitting === 'improve' ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <Bell className="w-3.5 h-3.5 mr-1.5" />}
-                Flag for improvement
+                {notifySubmitting === 'improve' ? 'Saving…' : 'Flag for improvement'}
               </Button>
             </div>
           </div>

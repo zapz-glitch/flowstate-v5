@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { Check, X, Minus, MapPin, ExternalLink } from 'lucide-react'
+import { Check, X, Minus, MapPin } from 'lucide-react'
 import {
   Dialog,
   DialogContent,
@@ -206,14 +206,8 @@ export function CompComparisonDialog({ open, onOpenChange, subject, comp, isSele
             <div className="flex items-center gap-2 mt-1.5 flex-wrap">
               {streetViewUrl && (
                 <a href={streetViewUrl} target="_blank" rel="noopener noreferrer"
-                  className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-500 hover:bg-blue-500/20 transition-colors inline-flex items-center gap-1">
-                  Street View <ExternalLink className="w-2.5 h-2.5" />
-                </a>
-              )}
-              {zillowUrl && (
-                <a href={zillowUrl} target="_blank" rel="noopener noreferrer"
-                  className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-secondary text-foreground-secondary hover:bg-accent transition-colors inline-flex items-center gap-1">
-                  Zillow <ExternalLink className="w-2.5 h-2.5" />
+                  className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-muted text-foreground-tertiary hover:text-foreground hover:bg-muted/70 transition-colors">
+                  Street View
                 </a>
               )}
               {comp.distanceMiles != null && (

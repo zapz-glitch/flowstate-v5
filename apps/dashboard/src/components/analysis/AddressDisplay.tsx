@@ -24,8 +24,6 @@ export function AddressDisplay({ address, latitude, longitude, className, showSt
     setTimeout(() => setCopied(false), 2000)
   }
 
-  const zillowUrl = `https://www.zillow.com/homes/${encodeURIComponent(address)}_rb/`
-
   // Google Street View URL — use coordinates if available for precise location
   const streetViewUrl = latitude && longitude
     ? `https://www.google.com/maps/@${latitude},${longitude},3a,75y,0h,90t/data=!3m4!1e1!3m2!1s!2e0?entry=ttu`
@@ -34,15 +32,8 @@ export function AddressDisplay({ address, latitude, longitude, className, showSt
   return (
     <span className={cn(className)}>
       <span>
-        <a
-          href={zillowUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="hover:text-primary hover:underline transition-colors"
-          onClick={(e) => e.stopPropagation()}
-        >
-          {address}
-        </a>
+        {/* Plain text — no outbound link; the card owns its clicks */}
+        <span>{formatAddressCasing(address)}</span>
         <button
           type="button"
           onClick={handleCopy}
@@ -57,7 +48,7 @@ export function AddressDisplay({ address, latitude, longitude, className, showSt
           href={streetViewUrl}
           target="_blank"
           rel="noopener noreferrer"
-          className="inline-flex ml-1.5 text-[10px] font-medium px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-500 hover:bg-blue-500/20 transition-colors align-middle"
+          className="inline-flex ml-1.5 text-[10px] font-medium px-1.5 py-0.5 rounded bg-muted text-foreground-tertiary hover:text-foreground hover:bg-muted/70 transition-colors align-middle"
           onClick={(e) => e.stopPropagation()}
         >
           Street View
@@ -65,4 +56,23 @@ export function AddressDisplay({ address, latitude, longitude, className, showSt
       )}
     </span>
   )
+}
+
+/** "1643 Bagpipe Pl, CONLEY, GA 30288" → "1643 Bagpipe Pl, Conley, GA 30288" —
+ *  title-cases every word except 2-letter state codes and numbers. */
+function formatAddressCasing(address: string): string {
+  return address
+    .split(',')
+    .map((part) =>
+      part
+        .trim()
+        .split(/\s+/)
+        .map((word) =>
+          /^[A-Z]{2}$/.test(word) || /\d/.test(word)
+            ? word.toUpperCase()
+            : word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
+        )
+        .join(' ')
+    )
+    .join(', ')
 }

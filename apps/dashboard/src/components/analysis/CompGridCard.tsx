@@ -223,13 +223,13 @@ function CompGridCardInner({
               target="_blank"
               rel="noopener noreferrer"
               onClick={(e) => e.stopPropagation()}
-              className="text-[11px] text-foreground-secondary truncate hover:text-primary hover:underline"
+              className="text-[12px] text-foreground-secondary truncate hover:text-primary hover:underline"
               title={comp.address || undefined}
             >
               {comp.address || 'Unknown'}
             </a>
           ) : (
-            <div className="text-[11px] text-foreground-secondary truncate" title={comp.address || undefined}>
+            <div className="text-[12px] text-foreground-secondary truncate" title={comp.address || undefined}>
               {comp.address || 'Unknown'}
             </div>
           )}
@@ -336,41 +336,41 @@ function CompGridCardInner({
 
         {/* Stats grid — collapsed essentials; full detail in the expand dialog */}
         <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 mt-2">
-          <div className="flex items-center justify-between text-[11px]">
+          <div className="flex items-center justify-between text-[12px]">
             <span className="text-foreground-tertiary">Bed/Bath</span>
             <span className="font-medium">{comp.bedrooms ?? '-'}/{comp.bathrooms ?? '-'}</span>
           </div>
-          <div className="flex items-center justify-between text-[11px]">
+          <div className="flex items-center justify-between text-[12px]">
             <span className="text-foreground-tertiary">Sq Ft</span>
             <span className="font-medium tabular-nums">
               {comp.squareFeet?.toLocaleString() || '-'}
               {sqftDelta != null && <span className={cn('ml-1 text-[9px]', sqftColor)}>({fmtDeltaWords(sqftDelta, 'sf')})</span>}
             </span>
           </div>
-          <div className="flex items-center justify-between text-[11px]">
+          <div className="flex items-center justify-between text-[12px]">
             <span className="text-foreground-tertiary">Year</span>
             <span className="font-medium">
               {comp.yearBuilt ?? '-'}
               {yearDelta != null && <span className={cn('ml-1 text-[9px]', yearColor)}>({fmtDeltaWords(yearDelta, 'yrs', 'older', 'newer')})</span>}
             </span>
           </div>
-          <div className="flex items-center justify-between text-[11px]">
+          <div className="flex items-center justify-between text-[12px]">
             <span className="text-foreground-tertiary">Lot</span>
             <span className="font-medium tabular-nums">
               {formatLotSize(comp.lotSizeAcres)}
               {lotDelta != null && <span className={cn('ml-1 text-[9px]', lotColor)}>({fmtDeltaWords(lotDelta! * 43560, 'sf')})</span>}
             </span>
           </div>
-          <div className="flex items-center justify-between text-[11px]">
+          <div className="flex items-center justify-between text-[12px]">
             <span className="text-foreground-tertiary">Style</span>
             <span className={cn('font-medium truncate ml-2', matchTextClass(featureState(featureMatches, 'style')))}>{comp.buildingStyle || '-'}</span>
           </div>
-          <div className="flex items-center justify-between text-[11px]">
+          <div className="flex items-center justify-between text-[12px]">
             <span className="text-foreground-tertiary">Lot SqFt</span>
             <span className="font-medium tabular-nums">{comp.lotSizeSquareFeet != null ? comp.lotSizeSquareFeet.toLocaleString('en-US') : '-'}</span>
           </div>
           {comp.curbAppeal?.condition && comp.curbAppeal.condition !== 'unknown' && (
-            <div className="flex items-center justify-between text-[11px]">
+            <div className="flex items-center justify-between text-[12px]">
               <span className="text-foreground-tertiary">Condition</span>
               <span
                 className={cn(
