@@ -165,10 +165,11 @@ const bIsUnfit = (c: BComp) =>
   c.evidenceVerification?.priceCheck === 'divergent'
 
 // ── Condition class — one resolved label per comp ─────────────────────────
-// The curve: renovated → maintained → dated → distressed. Curb read is the
-// condition vote; the sale-type label corroborates when photos are missing;
-// unlabeled comps sit in maintained (conservative middle of the curve).
-export function bConditionClass(c: BComp): 'renovated' | 'maintained' | 'dated' | 'distressed' {
+// The curve: renovated → maintained → dated → distressed → unclassified.
+// The Clef curb read (vision on listing photos + description) is the ONLY
+// condition vote — comps are never classified by sale-type label or guess.
+// Unclassified comps get slotted into bands by price at band time.
+export function bConditionClass(c: BComp): 'renovated' | 'maintained' | 'dated' | 'distressed' | 'unclassified' {
   const cond = (c.curbAppeal?.condition ?? '').toLowerCase()
   const conf = c.curbAppeal?.confidence ?? 0
   if (conf >= B_COND_MIN_CONF && cond) {
@@ -177,10 +178,7 @@ export function bConditionClass(c: BComp): 'renovated' | 'maintained' | 'dated' 
     if (['dated', 'original', 'needs_updates'].includes(cond)) return 'dated'
     return 'maintained'
   }
-  const type = (c.classification?.type ?? '').toLowerCase()
-  if (/as_is|as-is|investor|distress|teardown/.test(type)) return 'distressed'
-  if (/after_renovation|renovated|flip|arv/.test(type)) return 'renovated'
-  return 'maintained'
+  return 'unclassified'
 }
 
 const bLotSf = (x: { lotSizeSquareFeet?: number | null; lotSizeAcres?: number | null }) =>
@@ -356,13 +354,34 @@ export function evaluateB(
       const med = (xs: typeof clean) => xs[Math.floor(xs.length / 2)].ppsf
       // Condition bands — the curve: renovated → maintained → dated/
       // distressed. One member still makes a band. Curb read is the
-      // condition vote; unlabeled comps sit in maintained.
+      // ONLY condition vote; comps with no read slot into the band
+      // nearest their $/sf — filled by price, never guessed.
       const inBand = (band: 'renovated' | 'maintained' | 'dated' | 'distressed') =>
         clean.filter((x) => bConditionClass(x.c) === band)
       const distressed = [...inBand('dated'), ...inBand('distressed')]
         .sort((a, b) => a.ppsf - b.ppsf)
       const maintained = inBand('maintained')
       const renovated = inBand('renovated')
+      const unclassified = clean.filter((x) => bConditionClass(x.c) === 'unclassified')
+      // Price-fill only works when the pocket has at least one labeled
+      // comp to anchor a band; a fully unlabeled pocket keeps its own
+      // median rather than collapsing into one band. Slot by band edges:
+      // priced at/above the renovated zone → renovated; inside or above
+      // maintained → maintained; below everything → distressed.
+      const anyLabeled = distressed.length + maintained.length + renovated.length > 0
+      if (anyLabeled) for (const x of unclassified) {
+        const renovatedMin = renovated.length ? Math.min(...renovated.map((y) => y.ppsf)) : Infinity
+        const maintainedMin = maintained.length ? Math.min(...maintained.map((y) => y.ppsf)) : Infinity
+        const distressedMax = distressed.length ? Math.max(...distressed.map((y) => y.ppsf)) : -Infinity
+        const target =
+          x.ppsf >= renovatedMin ? renovated
+          : x.ppsf >= maintainedMin ? maintained
+          : x.ppsf <= distressedMax ? distressed
+          : x.ppsf < maintainedMin ? distressed
+          : maintained
+        target.push(x)
+        target.sort((a, b) => a.ppsf - b.ppsf)
+      }
       // Marginal repricing — same taper as the driver contribution. A
       // band member's implied subject price is its sale plus the size
       // delta at a tapered rate, never flat $/sf.
@@ -398,7 +417,7 @@ export function evaluateB(
       const carriers = renovated.length ? renovated
         : maintained.length ? maintained
         : distressed.length ? distressed.sort((a, b) => curbScore(b) - curbScore(a)).slice(0, Math.max(1, Math.ceil(distressed.length / 3)))
-        : clean
+        : clean // pocket with zero labeled comps — its own median carries
       const bandNote = ' — ' + [
         distressed.length ? `distressed $${med(distressed).toFixed(0)}/sf` : null,
         maintained.length ? `maintained $${med(maintained).toFixed(0)}/sf` : null,

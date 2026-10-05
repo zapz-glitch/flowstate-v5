@@ -112,7 +112,7 @@ assert.deepEqual(B_REHAB_FRACTION, {
   ])
   assert.equal(r.arv, 315_000) // renovated band median = 210/sf × 1500
   assert.equal(r.drivers.length, 3)
-  assert.ok(r.flags.some((f) => f.includes('maintained') && f.includes('renovated')))
+  assert.ok(r.flags.some((f) => f.includes('renovated')))
 }
 // Maintained band carries when nothing renovated exists — a real answer,
 // not a floor.
@@ -120,7 +120,7 @@ assert.deepEqual(B_REHAB_FRACTION, {
   const dead = (ppsf: number) => comp({
     isEnabled: false, disableReasons: ['property type mismatch'],
     salePrice: ppsf * 1500, squareFeet: 1500,
-    classification: { type: 'transitional' },
+    curbAppeal: { condition: 'maintained', confidence: 60 },
   })
   const r = evaluateB(subject(), [dead(140), dead(150), dead(160), dead(200), dead(210), dead(220)])
   assert.equal(r.arv, 300_000) // band median (upper-middle) = 200/sf × 1500 — no renovated tier to lift it
