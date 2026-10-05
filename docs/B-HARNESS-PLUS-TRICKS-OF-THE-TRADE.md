@@ -336,6 +336,13 @@ When no comp drives, the pocket's own sales classify themselves:
   per-parcel, ±20% cap) as driver contributions — the band's median
   *implied* price is the answer, named members stand behind it.
 
+### G5b — No modeled condition uplift (investor rule)
+`4c2e105`. The ship-time URAR uplift — rehab cost × 80%, or a tier-spread
+bump on all-median drivers — priced a premium the pocket never proved.
+Removed: a median-tier answer serves at maintained-market face value; if
+the pocket proves a renovated band, that band carries instead. An
+investor can't exit on modeled value.
+
 ### G6 — Maintained-band floor (the hierarchy invariant)
 `6d37f12`. **ARV cannot sit below the maintained band.** An anchor
 priced under what maintained homes fetch is floored at the band

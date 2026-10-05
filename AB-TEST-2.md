@@ -34,10 +34,11 @@ Ground re-run proves it: served $199,922 rescue answer, was $161,145 AVM.
 | 2184 Dunseath Ave NW, Atlanta | $313,966 → $421,427 → **$443,467** | T1b rescued 1956 Main St (v2's anchor) + Rando Ln past label vetoes; Rando anchored, uplift, ceiling $497k→$443k. Top of appraiser band | $402,294 | ~$450–525k |
 | 2973 Cascade Rd SW, Atlanta | $280,640 → $280,640 | unchanged verified anchor | ? | ? |
 | 3420 Coles Creek Dr, Buford | $471,346 → $471,346 | unchanged verified | ? | ? |
-| 2191 Camp Ground Rd SW, Atlanta | $161,145 → $199,922 → **$249,753** | +2 rescues → self-heal Rux→Dale Ln → contributory uplift; verified | AVM floor | ? |
+| 2191 Camp Ground Rd SW, Atlanta | $161,145 → $199,922 → $249,753 → **$201,305** (uplift removed) | +2 rescues → self-heal Rux→Dale Ln → contributory uplift; verified | AVM floor | ? |
 | 6225 Tennis Dr, Fairburn | $267,904 → $267,904 | honest AVM floor (below-AVM invariant held) | ? | ? |
-| 214 Taft St SW, Atlanta | $158,187 → **$244,820** | 4 stale rescues incl. both Upshaw + Aiken (anchored, time-adj −10%); uplift, ceiling $286k→$245k. Aiken ~1yr stale — watch | ? | ? |
+| 214 Taft St SW, Atlanta | $158,187 → **$244,820** (unchanged post-uplift — the number was anchor+ceiling, uplift capped away) | 4 stale rescues incl. both Upshaw + Aiken (anchored, time-adj −10%); uplift, ceiling $286k→$245k. Aiken ~1yr stale — watch | ? | ? |
 | 2782 Centerville Rosebud Rd | $254,524 → $408,002 → **$332,831** | Evidence bands replaced price thirds: maintained $152/sf · renovated $171/sf — lower but condition-honest | ? | ? |
+| 194 Cedar Mill Dr, Dallas GA | $462,903 → **$442,080** (uplift removed) | T0 anchor — self-heal to 108 Longwood Pl, +$77,120 uplift, ceiling cap at answer; full machinery, verified | ? | ? |
 
 **Verified-answer rate: 6/8 now (Tennis honest floor).** Dunseath headline —
 floored at AVM before hardening, now a verified pocket answer ~5% from
