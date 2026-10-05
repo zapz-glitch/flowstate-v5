@@ -23,7 +23,13 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx playwright install chromium --with-deps
-      - run: npx e2e run
+      - name: dashboard smoke tests
+        run: |
+          if [ -z "$OPENAI_API_KEY" ]; then
+            echo "OPENAI_API_KEY repo secret not set — skipping agent tests"
+            exit 0
+          fi
+          npx e2e run
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       - uses: actions/upload-artifact@v4
