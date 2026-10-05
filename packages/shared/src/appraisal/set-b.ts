@@ -411,6 +411,35 @@ export function evaluateB(
     }
   }
 
+  // ── Geo hierarchy — tract, then block group, then neighborhood ──────────
+  // Owner decision (findings log): every class pick looks for same-tract
+  // drivers first, then same-block-group, then same neighborhood name —
+  // renovated anchors, medians, and as-is alike. A comp outside all three
+  // drives only when nothing closer exists. Names are normalized —
+  // spelling variants ("ES SPINK PROP" vs "WHITLEY HEIGHTS") don't split
+  // a pocket.
+  const geoNorm = (v?: string | null) => v?.toLowerCase().replace(/[^a-z0-9]/g, '') ?? null
+  const geoTier = (c: BComp): 0 | 1 | 2 | 3 => {
+    if (subject.censusTract && c.censusTract && c.censusTract === subject.censusTract) return 0
+    if (c.sameBlockGroup === true) return 1
+    if (geoNorm(c.subdivision) && geoNorm(c.subdivision) === geoNorm(subject.subdivision)) return 2
+    return 3
+  }
+  const GEO_LABEL = ['tract', 'block group', 'neighborhood'] as const
+  const tightestGeo = (xs: BContribution[]): BContribution[] => {
+    if (!xs.length) return xs
+    const best = Math.min(...xs.map((x) => geoTier(x.comp))) as 0 | 1 | 2 | 3
+    if (best === 3) return xs
+    return xs.filter((x) => geoTier(x.comp) === best)
+  }
+  const geoKept = tightestGeo(drivers)
+  const geoTierName = GEO_LABEL[Math.min(...drivers.map((x) => geoTier(x.comp))) as 0 | 1 | 2]
+  if (geoKept.length !== drivers.length) {
+    for (const x of drivers.filter((x) => !geoKept.includes(x)))
+      flags.push(`${x.comp.address}: dropped from drivers — outside the ${geoTierName} scope`)
+    drivers = geoKept
+  }
+
   // ── Reconciliation anchoring — most-similar comp drives, rest bounds ────
   const ranked = drivers.slice().sort((a, b) =>
     similarity(b) - similarity(a) || b.weight - a.weight)

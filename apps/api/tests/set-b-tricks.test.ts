@@ -263,6 +263,41 @@ assert.deepEqual(B_REHAB_FRACTION, {
   assert.equal(r.conf, 'low')
 }
 
+// ── Geo hierarchy — tract first, block group second, neighborhood third ───
+// Owner decision (findings log, 2026-10-04): the class pick looks for
+// tract matches first, in every phase. A closer sale across the tract
+// line cannot out-drive a same-tract sale.
+{
+  // inTract is LESS similar (farther, different subdivision) but in-pocket;
+  // cross is nearer and pricier but outside every tier.
+  const inTract = comp({
+    address: 'tract', salePrice: 300_000, distanceMiles: 0.9,
+    subdivision: 'OTHER SUB',
+  })
+  const cross = comp({
+    address: 'cross', salePrice: 340_000, distanceMiles: 0.02,
+    censusTract: 'T9', subdivision: 'ELSEWHERE',
+  })
+  const r = evaluateB(subject(), [inTract, cross])
+  assert.equal(r.drivers.length, 1)
+  assert.equal(r.drivers[0].comp.address, 'tract')
+  assert.equal(r.arv, 300_000)
+  assert.ok(r.flags.some((f) => f.includes('outside the tract scope')))
+}
+// block group wins when no tract driver exists; neighborhood name third.
+{
+  const bg = comp({ address: 'bg', salePrice: 310_000, censusTract: 'T9',
+    sameBlockGroup: true, subdivision: 'ELSEWHERE' })
+  const hood = comp({ address: 'hood', salePrice: 330_000, censusTract: 'T8',
+    sameBlockGroup: false })
+  const out = comp({ address: 'out', salePrice: 350_000, censusTract: 'T7',
+    sameBlockGroup: false, subdivision: 'NOWHERE' })
+  const r = evaluateB(subject(), [bg, hood, out])
+  assert.equal(r.drivers.length, 1)
+  assert.equal(r.drivers[0].comp.address, 'bg')
+  assert.equal(r.arv, 310_000)
+}
+
 // ── Condition tier read — the confidence floor ────────────────────────────
 assert.equal(bCondTier(comp({ curbAppeal: { summary: 'tier:median' } })), 'median',
   'tier token beats the condition field')
