@@ -167,17 +167,7 @@ export function CompComparisonDialog({ open, onOpenChange, subject, comp, isSele
         <div className="space-y-0">
           {/* ── Comp card header ── */}
           <div className="px-4 py-3 border-b border-border">
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2 min-w-0">
-                <Badge variant="outline" className={`text-caption-sm font-normal p-1 ${isSelected !== false ? 'border-emerald-500/30 text-emerald-500' : 'border-border text-foreground-tertiary'}`}>
-                  <MapPin className="w-3 h-3" />
-                </Badge>
-                {isSelected !== false ? (
-                  <Badge variant="outline" className="text-[9px] px-1.5 py-0 border-emerald-500/30 text-emerald-500">Selected</Badge>
-                ) : (
-                  <Badge variant="outline" className="text-[9px] px-1.5 py-0 border-red-500/30 text-red-500">Excluded</Badge>
-                )}
-              </div>
+            <div className="flex items-center justify-end gap-2">
               {onToggleSelection && (
                 <button
                   type="button"
@@ -247,9 +237,10 @@ export function CompComparisonDialog({ open, onOpenChange, subject, comp, isSele
             </div>
           </div>
 
-          {/* ── Property Details (grid layout) ── */}
+          {/* ── Property Details — one flowing grid; empty cells hide,
+              populated fields pack to ~3 rows ── */}
           <div className="border-b border-border">
-            <div className="grid grid-cols-4 bg-muted/40 border-b border-border/30">
+            <div className="grid grid-cols-4 bg-muted/40">
               <StatCell label="Beds" value={comp.bedrooms ?? '-'} highlight={fm('beds')} />
               <StatCell label="Baths" value={comp.bathrooms ?? '-'} highlight={fm('baths')} />
               <StatCell
@@ -262,26 +253,17 @@ export function CompComparisonDialog({ open, onOpenChange, subject, comp, isSele
                 value={`${comp.yearBuilt ?? '-'}${yearDiff != null ? ` (${fmtDeltaWords(yearDiff, 'yrs', 'older', 'newer')})` : ''}`}
                 highlight={yearDiff != null ? (Math.abs(yearDiff) <= 10 ? 'match' : 'mismatch') : undefined}
               />
-            </div>
-            <div className="grid grid-cols-3 bg-muted/40 border-b border-border/30">
               <StatCell label="Lot" value={`${formatLotSize(comp.lotSizeAcres)}${lotDiff != null ? ` (${fmtDeltaWords(lotDiff, 'sf')})` : ''}`} highlight={fm('lot')} />
               <StatCell label="Style" value={comp.buildingStyle || '-'} highlight={fm('style')} />
               <StatCell label="Foundation" value={comp.foundationType || '-'} highlight={fm('foundation')} />
-            </div>
-            <div className="grid grid-cols-3 bg-muted/40 border-b border-border/30">
               <StatCell label="Construction" value={comp.constructionType || '-'} highlight={fm('construction')} />
               <StatCell label="Roof" value={comp.roofCover || comp.roofType || '-'} highlight={fm('roof')} />
               <StatCell label="Ext. Walls" value={comp.exteriorWalls || '-'} highlight={fm('construction')} />
-            </div>
-            <div className="grid grid-cols-4 bg-muted/40 border-b border-border/30">
               <StatCell label="Pool" value={comp.pool ? 'Yes' : '-'} highlight={fm('pool')} />
               <StatCell label="Garage" value={comp.garage ? (comp.garageSquareFeet ? `${comp.garageSquareFeet} sf` : 'Yes') : '-'} highlight={fm('garage')} />
               <StatCell label="Carport" value={comp.carport ? 'Yes' : '-'} highlight={fm('garage')} />
               <StatCell label="Stories" value={comp.storiesType || (comp.stories != null ? String(comp.stories) : '-')} highlight={fm('stories')} />
-            </div>
-            <div className="grid grid-cols-3 bg-muted/40">
               <StatCell label="Heat / AC" value={[comp.heating, comp.cooling].filter(Boolean).join(' / ') || '-'} highlight={fm('hvac')} />
-
               <StatCell
                 label="Condition"
                 value={
@@ -297,8 +279,6 @@ export function CompComparisonDialog({ open, onOpenChange, subject, comp, isSele
               />
             </div>
           </div>
-
-
 
           {/* ── Filters + Adjustments ── */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-0 sm:gap-0">
