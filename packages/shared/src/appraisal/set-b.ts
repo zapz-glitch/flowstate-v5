@@ -124,7 +124,7 @@ export interface BResult {
 // ── Helpers ───────────────────────────────────────────────────────────────
 const usd = (n: number) => `$${Math.round(n).toLocaleString('en-US')}`
 
-export const HARNESS_VERSION = 'og-2026.10.04.1'
+export const HARNESS_VERSION = 'og-2026.10.05.1'
 
 export function bSubjectAvm(s: BSubject): number | null {
   return s.avmValue ?? s.avm?.value ?? null
@@ -141,15 +141,15 @@ export function bCondTier(c: BComp): 'renovated' | 'median' | 'premium' | 'distr
   const ca = c.curbAppeal ?? {}
   const summary = (ca.summary ?? '').toLowerCase()
   const cond = (ca.condition ?? '').toLowerCase()
-  // Vision 'distressed' is floor evidence — a distressed read can never
-  // sit in the median tier even when the summary carries tier:median.
+  // Structured vision condition wins; legacy tier:* text is fallback only.
+  // A weak confidence score cannot be rescued by old summary text.
   if (['distressed', 'needs_work'].includes(cond)) return 'distressed'
-  if (summary.includes('tier:median')) return 'median'
-  if (summary.includes('tier:premium') || summary.includes('tier:luxury')) return 'premium'
-  if ((ca.confidence ?? 0) < B_COND_MIN_CONF) return 'unknown'
+  if (ca.condition != null && (ca.confidence ?? 0) < B_COND_MIN_CONF) return 'unknown'
   if (['renovated', 'updated', 'turnkey', 'move-in ready'].includes(cond)) return 'renovated'
-  if (['dated', 'maintained', 'median', 'as_is', 'as-is'].includes(cond))
-    return 'median'
+  if (['dated', 'maintained', 'median', 'as_is', 'as-is'].includes(cond)) return 'median'
+  if (['premium', 'luxury'].includes(cond)) return 'premium'
+  if (summary.includes('tier:premium') || summary.includes('tier:luxury')) return 'premium'
+  if (summary.includes('tier:median')) return 'median'
   return 'unknown'
 }
 

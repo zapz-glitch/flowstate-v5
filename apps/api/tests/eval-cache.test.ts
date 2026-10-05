@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { HARNESS_VERSION } from '@flowstate-api/shared/appraisal'
 import { AnalysisJobDO } from '../src/durable-objects/analysis-job'
 import type { Env } from '../src/types'
 import {
@@ -89,7 +90,7 @@ const stateOf = async (job: AnalysisJobDO) =>
   )
   assert.match(
     evalResultKey('u1', '123 Main St', 'h'),
-    /^eval-result:v4:og-2026\.10\.04\.1:/,
+    new RegExp(`^eval-result:v4:${HARNESS_VERSION.replace(/\./g, '\\.')}:`),
     'harness version is part of the result-cache key',
   )
 }

@@ -1,42 +1,35 @@
 {
-  "recordId": "0eff5a73-85fa-40cd-8a8d-5f7806e765b5",
+  "recordId": "79d92cd2-5567-4729-96a6-e384c95764bb",
   "jobId": "job_1791164799786_1ff81119533a41b4",
-  "payloadHash": "aac4a7272b53525cb3acfe4d015f324aaf51ce1b12909ec25b6a40d9a058e633",
+  "payloadHash": "b88803d25f448c2077894802a5228d17af460cd071f38e6c025b57cbbe43e09e",
+  "exportedAt": "2026-10-05T04:12:35.231Z",
   "payload": {
     "attempts": [
       {
         "checks": [
           {
-            "message": "1144 Elaine Dr: verification — Sale at $70/sf is 44% of current pocket $158/sf — stale or different-market evidence",
-            "ruleId": "evidence.verification"
+            "message": "1144 Elaine Dr: verification — Sale at $70/sf is 44% of current pocket $158/sf — below current pocket, verify market fit",
+            "ruleId": "evidence.market_fit.below_pocket"
           },
           {
-            "message": "4532 Richard Rd: median-tier driver — no high-similarity renovated evidence",
-            "ruleId": "evidence.median_driver"
+            "message": "1671 Lamont Ave: verification — No comp AVM — sale price uncorroborated; Sale is 315 days old — outside preferred 207-day ",
+            "ruleId": "evidence.sale_age.stale"
           },
           {
-            "message": "1671 Lamont Ave: median-tier driver — no high-similarity renovated evidence",
-            "ruleId": "evidence.median_driver"
+            "message": "4323 Edinburgh Way: verification — No comp AVM — sale price uncorroborated; Sale is 371 days old — outside preferred 207-day ",
+            "ruleId": "evidence.sale_age.stale"
           },
           {
-            "message": "4323 Edinburgh Way: median-tier driver — no high-similarity renovated evidence",
-            "ruleId": "evidence.median_driver"
+            "message": "no ARV-tier labels — ARV driven on 1 retail-marked comp(s); 3 as-is-priced sale(s) excluded from ARV",
+            "ruleId": "setb.unlabeled_retail_evidence"
           },
           {
-            "message": "anchored to 1671 Lamont Ave (similarity 11.0)",
+            "message": "anchored to 4532 Richard Rd (similarity 7.3)",
             "ruleId": "setb.anchor"
           },
           {
-            "message": "supporting range $178,458–$223,738 (2 comp(s) — bound, not blended)",
-            "ruleId": "setb.supporting_range"
-          },
-          {
-            "message": "anchor above supporting range — top of evidence",
-            "ruleId": "setb.support_bound.high"
-          },
-          {
-            "message": "condition uplift unverified — ARV at median-tier anchor",
-            "ruleId": "setb.condition_unverified"
+            "message": "bracketing: driver set is all-bigger — no size bracket",
+            "ruleId": "setb.size_bracket"
           }
         ],
         "comps": [
@@ -66,11 +59,14 @@
               "avmRatio": null,
               "flags": [
                 "No comp AVM — sale price uncorroborated",
-                "Sale at $105/sf is 66% of current pocket $158/sf — stale or different-market evidence"
+                "Sale at $105/sf is 66% of current pocket $158/sf — below current pocket, verify market fit"
               ],
+              "marketFit": "below_pocket",
               "pocketRatio": 0.6646265278406519,
+              "preferredSaleAgeDays": 207,
               "priceCheck": "unverified",
-              "staleness": "stale"
+              "saleAgeDays": 82,
+              "staleness": "current"
             },
             "isEnabled": false,
             "landAssessedValue": null,
@@ -113,8 +109,11 @@
               "flags": [
                 "No comp AVM — sale price uncorroborated"
               ],
+              "marketFit": "in_range",
               "pocketRatio": 1.3622749590834697,
+              "preferredSaleAgeDays": 207,
               "priceCheck": "unverified",
+              "saleAgeDays": 45,
               "staleness": "current"
             },
             "isEnabled": false,
@@ -157,11 +156,14 @@
               "avmRatio": null,
               "flags": [
                 "No comp AVM — sale price uncorroborated",
-                "Sale at $107/sf is 67% of current pocket $158/sf — stale or different-market evidence"
+                "Sale at $107/sf is 67% of current pocket $158/sf — below current pocket, verify market fit"
               ],
+              "marketFit": "below_pocket",
               "pocketRatio": 0.6749484696402064,
+              "preferredSaleAgeDays": 207,
               "priceCheck": "unverified",
-              "staleness": "stale"
+              "saleAgeDays": 80,
+              "staleness": "current"
             },
             "isEnabled": false,
             "landAssessedValue": null,
@@ -204,8 +206,11 @@
               "flags": [
                 "No comp AVM — sale price uncorroborated"
               ],
+              "marketFit": "in_range",
               "pocketRatio": 1.141571194762684,
+              "preferredSaleAgeDays": 207,
               "priceCheck": "unverified",
+              "saleAgeDays": 80,
               "staleness": "current"
             },
             "isEnabled": true,
@@ -250,8 +255,11 @@
               "flags": [
                 "No comp AVM — sale price uncorroborated"
               ],
+              "marketFit": "in_range",
               "pocketRatio": 1.253191489361702,
+              "preferredSaleAgeDays": 207,
               "priceCheck": "unverified",
+              "saleAgeDays": 84,
               "staleness": "current"
             },
             "isEnabled": false,
@@ -298,11 +306,15 @@
               "avmRatio": null,
               "flags": [
                 "No comp AVM — sale price uncorroborated",
-                "Sale at $9/sf is 6% of current pocket $158/sf — stale or different-market evidence"
+                "No usable sale date — sale age unverified",
+                "Sale at $9/sf is 6% of current pocket $158/sf — below current pocket, verify market fit"
               ],
+              "marketFit": "below_pocket",
               "pocketRatio": 0.055944629582158414,
+              "preferredSaleAgeDays": 207,
               "priceCheck": "unverified",
-              "staleness": "stale"
+              "saleAgeDays": null,
+              "staleness": "unverified"
             },
             "isEnabled": false,
             "landAssessedValue": null,
@@ -346,11 +358,14 @@
               "avmRatio": null,
               "flags": [
                 "No comp AVM — sale price uncorroborated",
-                "Sale at $105/sf is 67% of current pocket $158/sf — stale or different-market evidence"
+                "Sale at $105/sf is 67% of current pocket $158/sf — below current pocket, verify market fit"
               ],
+              "marketFit": "below_pocket",
               "pocketRatio": 0.6652206308469244,
+              "preferredSaleAgeDays": 207,
               "priceCheck": "unverified",
-              "staleness": "stale"
+              "saleAgeDays": 154,
+              "staleness": "current"
             },
             "isEnabled": false,
             "landAssessedValue": null,
@@ -394,8 +409,11 @@
               "flags": [
                 "No comp AVM — sale price uncorroborated"
               ],
+              "marketFit": "in_range",
               "pocketRatio": 0.7621749408983451,
+              "preferredSaleAgeDays": 207,
               "priceCheck": "unverified",
+              "saleAgeDays": 172,
               "staleness": "current"
             },
             "isEnabled": false,
@@ -442,8 +460,11 @@
               "flags": [
                 "No comp AVM — sale price uncorroborated"
               ],
+              "marketFit": "in_range",
               "pocketRatio": 0.898255721593256,
+              "preferredSaleAgeDays": 207,
               "priceCheck": "unverified",
+              "saleAgeDays": 82,
               "staleness": "current"
             },
             "isEnabled": false,
@@ -483,11 +504,14 @@
             "evidenceVerification": {
               "avmRatio": 0.010539931485392645,
               "flags": [
-                "Sale at $70/sf is 44% of current pocket $158/sf — stale or different-market evidence"
+                "Sale at $70/sf is 44% of current pocket $158/sf — below current pocket, verify market fit"
               ],
+              "marketFit": "below_pocket",
               "pocketRatio": 0.44403330249768735,
+              "preferredSaleAgeDays": 207,
               "priceCheck": "corroborated",
-              "staleness": "stale"
+              "saleAgeDays": 159,
+              "staleness": "current"
             },
             "isEnabled": true,
             "landAssessedValue": 16000,
@@ -528,11 +552,15 @@
             "evidenceVerification": {
               "avmRatio": null,
               "flags": [
-                "No comp AVM — sale price uncorroborated"
+                "No comp AVM — sale price uncorroborated",
+                "Sale is 315 days old — outside preferred 207-day window"
               ],
+              "marketFit": "in_range",
               "pocketRatio": 1.132316683407908,
+              "preferredSaleAgeDays": 207,
               "priceCheck": "unverified",
-              "staleness": "current"
+              "saleAgeDays": 315,
+              "staleness": "stale"
             },
             "isEnabled": true,
             "landAssessedValue": null,
@@ -576,8 +604,11 @@
               "flags": [
                 "No comp AVM — sale price uncorroborated"
               ],
+              "marketFit": "in_range",
               "pocketRatio": 1.0034954407294832,
+              "preferredSaleAgeDays": 207,
               "priceCheck": "unverified",
+              "saleAgeDays": 101,
               "staleness": "current"
             },
             "isEnabled": false,
@@ -621,11 +652,14 @@
               "avmRatio": null,
               "flags": [
                 "No comp AVM — sale price uncorroborated",
-                "Sale at $75/sf is 47% of current pocket $158/sf — stale or different-market evidence"
+                "Sale at $75/sf is 47% of current pocket $158/sf — below current pocket, verify market fit"
               ],
+              "marketFit": "below_pocket",
               "pocketRatio": 0.47225986010912946,
+              "preferredSaleAgeDays": 207,
               "priceCheck": "unverified",
-              "staleness": "stale"
+              "saleAgeDays": 112,
+              "staleness": "current"
             },
             "isEnabled": false,
             "landAssessedValue": null,
@@ -669,8 +703,11 @@
               "flags": [
                 "No comp AVM — sale price uncorroborated"
               ],
+              "marketFit": "in_range",
               "pocketRatio": 0.8559810874704492,
+              "preferredSaleAgeDays": 207,
               "priceCheck": "unverified",
+              "saleAgeDays": 125,
               "staleness": "current"
             },
             "isEnabled": false,
@@ -716,8 +753,11 @@
               "flags": [
                 "No comp AVM — sale price uncorroborated"
               ],
+              "marketFit": "in_range",
               "pocketRatio": 0.7143698854337152,
+              "preferredSaleAgeDays": 207,
               "priceCheck": "unverified",
+              "saleAgeDays": 166,
               "staleness": "current"
             },
             "isEnabled": false,
@@ -762,8 +802,11 @@
               "flags": [
                 "No comp AVM — sale price uncorroborated"
               ],
+              "marketFit": "in_range",
               "pocketRatio": 1.2176759410801965,
+              "preferredSaleAgeDays": 207,
               "priceCheck": "unverified",
+              "saleAgeDays": 131,
               "staleness": "current"
             },
             "isEnabled": false,
@@ -805,11 +848,15 @@
             "evidenceVerification": {
               "avmRatio": null,
               "flags": [
-                "No comp AVM — sale price uncorroborated"
+                "No comp AVM — sale price uncorroborated",
+                "Sale is 371 days old — outside preferred 207-day window"
               ],
+              "marketFit": "in_range",
               "pocketRatio": 1.0192838609237156,
+              "preferredSaleAgeDays": 207,
               "priceCheck": "unverified",
-              "staleness": "current"
+              "saleAgeDays": 371,
+              "staleness": "stale"
             },
             "isEnabled": true,
             "landAssessedValue": null,
@@ -854,8 +901,11 @@
               "flags": [
                 "No comp AVM — sale price uncorroborated"
               ],
+              "marketFit": "in_range",
               "pocketRatio": 0.9987247466272904,
+              "preferredSaleAgeDays": 207,
               "priceCheck": "unverified",
+              "saleAgeDays": 153,
               "staleness": "current"
             },
             "isEnabled": false,
@@ -897,11 +947,15 @@
             "evidenceVerification": {
               "avmRatio": null,
               "flags": [
-                "No comp AVM — sale price uncorroborated"
+                "No comp AVM — sale price uncorroborated",
+                "Sale is 216 days old — outside preferred 207-day window"
               ],
+              "marketFit": "in_range",
               "pocketRatio": 0.8278878805901425,
+              "preferredSaleAgeDays": 207,
               "priceCheck": "unverified",
-              "staleness": "current"
+              "saleAgeDays": 216,
+              "staleness": "stale"
             },
             "isEnabled": false,
             "landAssessedValue": null,
@@ -946,8 +1000,11 @@
               "flags": [
                 "No comp AVM — sale price uncorroborated"
               ],
+              "marketFit": "in_range",
               "pocketRatio": 1,
+              "preferredSaleAgeDays": 207,
               "priceCheck": "unverified",
+              "saleAgeDays": 56,
               "staleness": "current"
             },
             "isEnabled": false,
@@ -990,11 +1047,15 @@
             "evidenceVerification": {
               "avmRatio": null,
               "flags": [
-                "No comp AVM — sale price uncorroborated"
+                "No comp AVM — sale price uncorroborated",
+                "Sale is 536 days old — outside preferred 207-day window"
               ],
+              "marketFit": "in_range",
               "pocketRatio": 1.0192838609237156,
+              "preferredSaleAgeDays": 207,
               "priceCheck": "unverified",
-              "staleness": "current"
+              "saleAgeDays": 536,
+              "staleness": "stale"
             },
             "isEnabled": false,
             "landAssessedValue": null,
@@ -1038,11 +1099,14 @@
               "avmRatio": null,
               "flags": [
                 "No comp AVM — sale price uncorroborated",
-                "Sale at $72/sf is 45% of current pocket $158/sf — stale or different-market evidence"
+                "Sale at $72/sf is 45% of current pocket $158/sf — below current pocket, verify market fit"
               ],
+              "marketFit": "below_pocket",
               "pocketRatio": 0.4540861261762388,
+              "preferredSaleAgeDays": 207,
               "priceCheck": "unverified",
-              "staleness": "stale"
+              "saleAgeDays": 187,
+              "staleness": "current"
             },
             "isEnabled": false,
             "landAssessedValue": null,
@@ -1085,10 +1149,14 @@
               "avmRatio": null,
               "flags": [
                 "No comp AVM — sale price uncorroborated",
-                "Sale at $4/sf is 2% of current pocket $158/sf — stale or different-market evidence"
+                "Sale is 335 days old — outside preferred 207-day window",
+                "Sale at $4/sf is 2% of current pocket $158/sf — below current pocket, verify market fit"
               ],
+              "marketFit": "below_pocket",
               "pocketRatio": 0.02406127659574468,
+              "preferredSaleAgeDays": 207,
               "priceCheck": "unverified",
+              "saleAgeDays": 335,
               "staleness": "stale"
             },
             "isEnabled": false,
@@ -1131,10 +1199,14 @@
               "avmRatio": null,
               "flags": [
                 "No comp AVM — sale price uncorroborated",
-                "Sale at $105/sf is 66% of current pocket $158/sf — stale or different-market evidence"
+                "Sale is 300 days old — outside preferred 207-day window",
+                "Sale at $105/sf is 66% of current pocket $158/sf — below current pocket, verify market fit"
               ],
+              "marketFit": "below_pocket",
               "pocketRatio": 0.6632948720146759,
+              "preferredSaleAgeDays": 207,
               "priceCheck": "unverified",
+              "saleAgeDays": 300,
               "staleness": "stale"
             },
             "isEnabled": false,
@@ -1177,11 +1249,15 @@
             "evidenceVerification": {
               "avmRatio": null,
               "flags": [
-                "No comp AVM — sale price uncorroborated"
+                "No comp AVM — sale price uncorroborated",
+                "Sale is 255 days old — outside preferred 207-day window"
               ],
+              "marketFit": "in_range",
               "pocketRatio": 0.8697285399853265,
+              "preferredSaleAgeDays": 207,
               "priceCheck": "unverified",
-              "staleness": "current"
+              "saleAgeDays": 255,
+              "staleness": "stale"
             },
             "isEnabled": false,
             "landAssessedValue": null,
@@ -1222,11 +1298,15 @@
             "evidenceVerification": {
               "avmRatio": null,
               "flags": [
-                "No comp AVM — sale price uncorroborated"
+                "No comp AVM — sale price uncorroborated",
+                "Sale is 342 days old — outside preferred 207-day window"
               ],
+              "marketFit": "in_range",
               "pocketRatio": 0.8957343020238713,
+              "preferredSaleAgeDays": 207,
               "priceCheck": "unverified",
-              "staleness": "current"
+              "saleAgeDays": 342,
+              "staleness": "stale"
             },
             "isEnabled": false,
             "landAssessedValue": null,
@@ -1248,12 +1328,12 @@
           "rehabCost": 67190
         },
         "result": {
-          "anchorAddress": "1671 Lamont Ave",
-          "arv": 228269,
-          "bracket": "ok",
-          "ceiling": 228268.9556509299,
+          "anchorAddress": "4532 Richard Rd",
+          "arv": 223738,
+          "bracket": "all-bigger",
+          "ceiling": 223737.98076923078,
           "conditionAdj": null,
-          "conf": "medium",
+          "conf": "low",
           "contribs": [
             {
               "comp": {
@@ -1283,8 +1363,11 @@
                   "flags": [
                     "No comp AVM — sale price uncorroborated"
                   ],
+                  "marketFit": "in_range",
                   "pocketRatio": 1.141571194762684,
+                  "preferredSaleAgeDays": 207,
                   "priceCheck": "unverified",
+                  "saleAgeDays": 80,
                   "staleness": "current"
                 },
                 "isEnabled": true,
@@ -1329,11 +1412,14 @@
                 "evidenceVerification": {
                   "avmRatio": 0.010539931485392645,
                   "flags": [
-                    "Sale at $70/sf is 44% of current pocket $158/sf — stale or different-market evidence"
+                    "Sale at $70/sf is 44% of current pocket $158/sf — below current pocket, verify market fit"
                   ],
+                  "marketFit": "below_pocket",
                   "pocketRatio": 0.44403330249768735,
+                  "preferredSaleAgeDays": 207,
                   "priceCheck": "corroborated",
-                  "staleness": "stale"
+                  "saleAgeDays": 159,
+                  "staleness": "current"
                 },
                 "isEnabled": true,
                 "landAssessedValue": 16000,
@@ -1379,11 +1465,15 @@
                 "evidenceVerification": {
                   "avmRatio": null,
                   "flags": [
-                    "No comp AVM — sale price uncorroborated"
+                    "No comp AVM — sale price uncorroborated",
+                    "Sale is 315 days old — outside preferred 207-day window"
                   ],
+                  "marketFit": "in_range",
                   "pocketRatio": 1.132316683407908,
+                  "preferredSaleAgeDays": 207,
                   "priceCheck": "unverified",
-                  "staleness": "current"
+                  "saleAgeDays": 315,
+                  "staleness": "stale"
                 },
                 "isEnabled": true,
                 "landAssessedValue": null,
@@ -1429,11 +1519,15 @@
                 "evidenceVerification": {
                   "avmRatio": null,
                   "flags": [
-                    "No comp AVM — sale price uncorroborated"
+                    "No comp AVM — sale price uncorroborated",
+                    "Sale is 371 days old — outside preferred 207-day window"
                   ],
+                  "marketFit": "in_range",
                   "pocketRatio": 1.0192838609237156,
+                  "preferredSaleAgeDays": 207,
                   "priceCheck": "unverified",
-                  "staleness": "current"
+                  "saleAgeDays": 371,
+                  "staleness": "stale"
                 },
                 "isEnabled": true,
                 "landAssessedValue": null,
@@ -1483,8 +1577,11 @@
                   "flags": [
                     "No comp AVM — sale price uncorroborated"
                   ],
+                  "marketFit": "in_range",
                   "pocketRatio": 1.141571194762684,
+                  "preferredSaleAgeDays": 207,
                   "priceCheck": "unverified",
+                  "saleAgeDays": 80,
                   "staleness": "current"
                 },
                 "isEnabled": true,
@@ -1504,117 +1601,15 @@
               "contrib": 223737.98076923078,
               "tier": "unidentified",
               "weight": 1
-            },
-            {
-              "comp": {
-                "address": "1671 Lamont Ave",
-                "adjustedPrice": 240000,
-                "appraisalRules": {
-                  "totalAdjustment": -10000
-                },
-                "censusTract": "13063040410",
-                "classification": {
-                  "type": "transitional"
-                },
-                "crossesMajorRoad": false,
-                "curbAppeal": {
-                  "condition": "dated",
-                  "confidence": 40,
-                  "photosExamined": 8,
-                  "source": "vision",
-                  "summary": "Maintained (1.9/4) · tier:median · renovated 23% · as-is 2% · investor 2% · via zillow · listing text available"
-                },
-                "disableReasons": [
-                  "Geo scope mismatch: city \"Conley\" ≠ \"Forest Park-Morrow\""
-                ],
-                "distanceMiles": 0.07484278920028738,
-                "evidenceVerification": {
-                  "avmRatio": null,
-                  "flags": [
-                    "No comp AVM — sale price uncorroborated"
-                  ],
-                  "pocketRatio": 1.132316683407908,
-                  "priceCheck": "unverified",
-                  "staleness": "current"
-                },
-                "isEnabled": true,
-                "landAssessedValue": null,
-                "lotSizeAcres": null,
-                "lotSizeSquareFeet": null,
-                "neighborhoodName": "Scottish Manor",
-                "pricePerSqft": 178.826895565093,
-                "propertyType": "SINGLE FAMILY RESIDENCE",
-                "saleDate": "2025-11-24",
-                "salePrice": 250000,
-                "sameBlockGroup": true,
-                "squareFeet": 1398,
-                "subdivision": null,
-                "yearBuilt": 1968
-              },
-              "contrib": 228268.9556509299,
-              "tier": "unidentified",
-              "weight": 0.9615384615384615
-            },
-            {
-              "comp": {
-                "address": "4323 Edinburgh Way",
-                "adjustedPrice": 165000,
-                "appraisalRules": {
-                  "totalAdjustment": 0
-                },
-                "censusTract": "13063040410",
-                "classification": {
-                  "type": "after_renovation"
-                },
-                "crossesMajorRoad": false,
-                "curbAppeal": {
-                  "condition": "renovated",
-                  "confidence": 15,
-                  "photosExamined": 8,
-                  "source": "vision",
-                  "summary": "Updated (2.2/4) · tier:median · renovated 52% · as-is 9% · investor 1% · via zillow · listing text available"
-                },
-                "disableReasons": [
-                  "Geo scope mismatch: city \"Conley\" ≠ \"Forest Park-Morrow\""
-                ],
-                "distanceMiles": 0.1100689701345627,
-                "evidenceVerification": {
-                  "avmRatio": null,
-                  "flags": [
-                    "No comp AVM — sale price uncorroborated"
-                  ],
-                  "pocketRatio": 1.0192838609237156,
-                  "priceCheck": "unverified",
-                  "staleness": "current"
-                },
-                "isEnabled": true,
-                "landAssessedValue": null,
-                "lotSizeAcres": null,
-                "lotSizeSquareFeet": null,
-                "neighborhoodName": "Scottish Manor",
-                "pricePerSqft": 160.97560975609755,
-                "propertyType": "SINGLE FAMILY RESIDENCE",
-                "saleDate": "2025-09-29",
-                "salePrice": 165000,
-                "sameBlockGroup": true,
-                "squareFeet": 1025,
-                "subdivision": null,
-                "yearBuilt": 1965
-              },
-              "contrib": 178457.56097560975,
-              "tier": "arv",
-              "weight": 1
             }
           ],
           "flags": [
-            "1144 Elaine Dr: verification — Sale at $70/sf is 44% of current pocket $158/sf — stale or different-market evidence",
-            "4532 Richard Rd: median-tier driver — no high-similarity renovated evidence",
-            "1671 Lamont Ave: median-tier driver — no high-similarity renovated evidence",
-            "4323 Edinburgh Way: median-tier driver — no high-similarity renovated evidence",
-            "anchored to 1671 Lamont Ave (similarity 11.0)",
-            "supporting range $178,458–$223,738 (2 comp(s) — bound, not blended)",
-            "anchor above supporting range — top of evidence",
-            "condition uplift unverified — ARV at median-tier anchor"
+            "1144 Elaine Dr: verification — Sale at $70/sf is 44% of current pocket $158/sf — below current pocket, verify market fit",
+            "1671 Lamont Ave: verification — No comp AVM — sale price uncorroborated; Sale is 315 days old — outside preferred 207-day ",
+            "4323 Edinburgh Way: verification — No comp AVM — sale price uncorroborated; Sale is 371 days old — outside preferred 207-day ",
+            "no ARV-tier labels — ARV driven on 1 retail-marked comp(s); 3 as-is-priced sale(s) excluded from ARV",
+            "anchored to 4532 Richard Rd (similarity 7.3)",
+            "bracketing: driver set is all-bigger — no size bracket"
           ],
           "healed": false,
           "landRateSource": null,
@@ -2034,36 +2029,28 @@
         {
           "checks": [
             {
-              "message": "1144 Elaine Dr: verification — Sale at $70/sf is 44% of current pocket $158/sf — stale or different-market evidence",
-              "ruleId": "evidence.verification"
+              "message": "1144 Elaine Dr: verification — Sale at $70/sf is 44% of current pocket $158/sf — below current pocket, verify market fit",
+              "ruleId": "evidence.market_fit.below_pocket"
             },
             {
-              "message": "4532 Richard Rd: median-tier driver — no high-similarity renovated evidence",
-              "ruleId": "evidence.median_driver"
+              "message": "1671 Lamont Ave: verification — No comp AVM — sale price uncorroborated; Sale is 315 days old — outside preferred 207-day ",
+              "ruleId": "evidence.sale_age.stale"
             },
             {
-              "message": "1671 Lamont Ave: median-tier driver — no high-similarity renovated evidence",
-              "ruleId": "evidence.median_driver"
+              "message": "4323 Edinburgh Way: verification — No comp AVM — sale price uncorroborated; Sale is 371 days old — outside preferred 207-day ",
+              "ruleId": "evidence.sale_age.stale"
             },
             {
-              "message": "4323 Edinburgh Way: median-tier driver — no high-similarity renovated evidence",
-              "ruleId": "evidence.median_driver"
+              "message": "no ARV-tier labels — ARV driven on 1 retail-marked comp(s); 3 as-is-priced sale(s) excluded from ARV",
+              "ruleId": "setb.unlabeled_retail_evidence"
             },
             {
-              "message": "anchored to 1671 Lamont Ave (similarity 11.0)",
+              "message": "anchored to 4532 Richard Rd (similarity 7.3)",
               "ruleId": "setb.anchor"
             },
             {
-              "message": "supporting range $178,458–$223,738 (2 comp(s) — bound, not blended)",
-              "ruleId": "setb.supporting_range"
-            },
-            {
-              "message": "anchor above supporting range — top of evidence",
-              "ruleId": "setb.support_bound.high"
-            },
-            {
-              "message": "condition uplift unverified — ARV at median-tier anchor",
-              "ruleId": "setb.condition_unverified"
+              "message": "bracketing: driver set is all-bigger — no size bracket",
+              "ruleId": "setb.size_bracket"
             }
           ],
           "comps": [
@@ -2093,11 +2080,14 @@
                 "avmRatio": null,
                 "flags": [
                   "No comp AVM — sale price uncorroborated",
-                  "Sale at $105/sf is 66% of current pocket $158/sf — stale or different-market evidence"
+                  "Sale at $105/sf is 66% of current pocket $158/sf — below current pocket, verify market fit"
                 ],
+                "marketFit": "below_pocket",
                 "pocketRatio": 0.6646265278406519,
+                "preferredSaleAgeDays": 207,
                 "priceCheck": "unverified",
-                "staleness": "stale"
+                "saleAgeDays": 82,
+                "staleness": "current"
               },
               "isEnabled": false,
               "landAssessedValue": null,
@@ -2140,8 +2130,11 @@
                 "flags": [
                   "No comp AVM — sale price uncorroborated"
                 ],
+                "marketFit": "in_range",
                 "pocketRatio": 1.3622749590834697,
+                "preferredSaleAgeDays": 207,
                 "priceCheck": "unverified",
+                "saleAgeDays": 45,
                 "staleness": "current"
               },
               "isEnabled": false,
@@ -2184,11 +2177,14 @@
                 "avmRatio": null,
                 "flags": [
                   "No comp AVM — sale price uncorroborated",
-                  "Sale at $107/sf is 67% of current pocket $158/sf — stale or different-market evidence"
+                  "Sale at $107/sf is 67% of current pocket $158/sf — below current pocket, verify market fit"
                 ],
+                "marketFit": "below_pocket",
                 "pocketRatio": 0.6749484696402064,
+                "preferredSaleAgeDays": 207,
                 "priceCheck": "unverified",
-                "staleness": "stale"
+                "saleAgeDays": 80,
+                "staleness": "current"
               },
               "isEnabled": false,
               "landAssessedValue": null,
@@ -2231,8 +2227,11 @@
                 "flags": [
                   "No comp AVM — sale price uncorroborated"
                 ],
+                "marketFit": "in_range",
                 "pocketRatio": 1.141571194762684,
+                "preferredSaleAgeDays": 207,
                 "priceCheck": "unverified",
+                "saleAgeDays": 80,
                 "staleness": "current"
               },
               "isEnabled": true,
@@ -2277,8 +2276,11 @@
                 "flags": [
                   "No comp AVM — sale price uncorroborated"
                 ],
+                "marketFit": "in_range",
                 "pocketRatio": 1.253191489361702,
+                "preferredSaleAgeDays": 207,
                 "priceCheck": "unverified",
+                "saleAgeDays": 84,
                 "staleness": "current"
               },
               "isEnabled": false,
@@ -2325,11 +2327,15 @@
                 "avmRatio": null,
                 "flags": [
                   "No comp AVM — sale price uncorroborated",
-                  "Sale at $9/sf is 6% of current pocket $158/sf — stale or different-market evidence"
+                  "No usable sale date — sale age unverified",
+                  "Sale at $9/sf is 6% of current pocket $158/sf — below current pocket, verify market fit"
                 ],
+                "marketFit": "below_pocket",
                 "pocketRatio": 0.055944629582158414,
+                "preferredSaleAgeDays": 207,
                 "priceCheck": "unverified",
-                "staleness": "stale"
+                "saleAgeDays": null,
+                "staleness": "unverified"
               },
               "isEnabled": false,
               "landAssessedValue": null,
@@ -2373,11 +2379,14 @@
                 "avmRatio": null,
                 "flags": [
                   "No comp AVM — sale price uncorroborated",
-                  "Sale at $105/sf is 67% of current pocket $158/sf — stale or different-market evidence"
+                  "Sale at $105/sf is 67% of current pocket $158/sf — below current pocket, verify market fit"
                 ],
+                "marketFit": "below_pocket",
                 "pocketRatio": 0.6652206308469244,
+                "preferredSaleAgeDays": 207,
                 "priceCheck": "unverified",
-                "staleness": "stale"
+                "saleAgeDays": 154,
+                "staleness": "current"
               },
               "isEnabled": false,
               "landAssessedValue": null,
@@ -2421,8 +2430,11 @@
                 "flags": [
                   "No comp AVM — sale price uncorroborated"
                 ],
+                "marketFit": "in_range",
                 "pocketRatio": 0.7621749408983451,
+                "preferredSaleAgeDays": 207,
                 "priceCheck": "unverified",
+                "saleAgeDays": 172,
                 "staleness": "current"
               },
               "isEnabled": false,
@@ -2469,8 +2481,11 @@
                 "flags": [
                   "No comp AVM — sale price uncorroborated"
                 ],
+                "marketFit": "in_range",
                 "pocketRatio": 0.898255721593256,
+                "preferredSaleAgeDays": 207,
                 "priceCheck": "unverified",
+                "saleAgeDays": 82,
                 "staleness": "current"
               },
               "isEnabled": false,
@@ -2510,11 +2525,14 @@
               "evidenceVerification": {
                 "avmRatio": 0.010539931485392645,
                 "flags": [
-                  "Sale at $70/sf is 44% of current pocket $158/sf — stale or different-market evidence"
+                  "Sale at $70/sf is 44% of current pocket $158/sf — below current pocket, verify market fit"
                 ],
+                "marketFit": "below_pocket",
                 "pocketRatio": 0.44403330249768735,
+                "preferredSaleAgeDays": 207,
                 "priceCheck": "corroborated",
-                "staleness": "stale"
+                "saleAgeDays": 159,
+                "staleness": "current"
               },
               "isEnabled": true,
               "landAssessedValue": 16000,
@@ -2555,11 +2573,15 @@
               "evidenceVerification": {
                 "avmRatio": null,
                 "flags": [
-                  "No comp AVM — sale price uncorroborated"
+                  "No comp AVM — sale price uncorroborated",
+                  "Sale is 315 days old — outside preferred 207-day window"
                 ],
+                "marketFit": "in_range",
                 "pocketRatio": 1.132316683407908,
+                "preferredSaleAgeDays": 207,
                 "priceCheck": "unverified",
-                "staleness": "current"
+                "saleAgeDays": 315,
+                "staleness": "stale"
               },
               "isEnabled": true,
               "landAssessedValue": null,
@@ -2603,8 +2625,11 @@
                 "flags": [
                   "No comp AVM — sale price uncorroborated"
                 ],
+                "marketFit": "in_range",
                 "pocketRatio": 1.0034954407294832,
+                "preferredSaleAgeDays": 207,
                 "priceCheck": "unverified",
+                "saleAgeDays": 101,
                 "staleness": "current"
               },
               "isEnabled": false,
@@ -2648,11 +2673,14 @@
                 "avmRatio": null,
                 "flags": [
                   "No comp AVM — sale price uncorroborated",
-                  "Sale at $75/sf is 47% of current pocket $158/sf — stale or different-market evidence"
+                  "Sale at $75/sf is 47% of current pocket $158/sf — below current pocket, verify market fit"
                 ],
+                "marketFit": "below_pocket",
                 "pocketRatio": 0.47225986010912946,
+                "preferredSaleAgeDays": 207,
                 "priceCheck": "unverified",
-                "staleness": "stale"
+                "saleAgeDays": 112,
+                "staleness": "current"
               },
               "isEnabled": false,
               "landAssessedValue": null,
@@ -2696,8 +2724,11 @@
                 "flags": [
                   "No comp AVM — sale price uncorroborated"
                 ],
+                "marketFit": "in_range",
                 "pocketRatio": 0.8559810874704492,
+                "preferredSaleAgeDays": 207,
                 "priceCheck": "unverified",
+                "saleAgeDays": 125,
                 "staleness": "current"
               },
               "isEnabled": false,
@@ -2743,8 +2774,11 @@
                 "flags": [
                   "No comp AVM — sale price uncorroborated"
                 ],
+                "marketFit": "in_range",
                 "pocketRatio": 0.7143698854337152,
+                "preferredSaleAgeDays": 207,
                 "priceCheck": "unverified",
+                "saleAgeDays": 166,
                 "staleness": "current"
               },
               "isEnabled": false,
@@ -2789,8 +2823,11 @@
                 "flags": [
                   "No comp AVM — sale price uncorroborated"
                 ],
+                "marketFit": "in_range",
                 "pocketRatio": 1.2176759410801965,
+                "preferredSaleAgeDays": 207,
                 "priceCheck": "unverified",
+                "saleAgeDays": 131,
                 "staleness": "current"
               },
               "isEnabled": false,
@@ -2832,11 +2869,15 @@
               "evidenceVerification": {
                 "avmRatio": null,
                 "flags": [
-                  "No comp AVM — sale price uncorroborated"
+                  "No comp AVM — sale price uncorroborated",
+                  "Sale is 371 days old — outside preferred 207-day window"
                 ],
+                "marketFit": "in_range",
                 "pocketRatio": 1.0192838609237156,
+                "preferredSaleAgeDays": 207,
                 "priceCheck": "unverified",
-                "staleness": "current"
+                "saleAgeDays": 371,
+                "staleness": "stale"
               },
               "isEnabled": true,
               "landAssessedValue": null,
@@ -2881,8 +2922,11 @@
                 "flags": [
                   "No comp AVM — sale price uncorroborated"
                 ],
+                "marketFit": "in_range",
                 "pocketRatio": 0.9987247466272904,
+                "preferredSaleAgeDays": 207,
                 "priceCheck": "unverified",
+                "saleAgeDays": 153,
                 "staleness": "current"
               },
               "isEnabled": false,
@@ -2924,11 +2968,15 @@
               "evidenceVerification": {
                 "avmRatio": null,
                 "flags": [
-                  "No comp AVM — sale price uncorroborated"
+                  "No comp AVM — sale price uncorroborated",
+                  "Sale is 216 days old — outside preferred 207-day window"
                 ],
+                "marketFit": "in_range",
                 "pocketRatio": 0.8278878805901425,
+                "preferredSaleAgeDays": 207,
                 "priceCheck": "unverified",
-                "staleness": "current"
+                "saleAgeDays": 216,
+                "staleness": "stale"
               },
               "isEnabled": false,
               "landAssessedValue": null,
@@ -2973,8 +3021,11 @@
                 "flags": [
                   "No comp AVM — sale price uncorroborated"
                 ],
+                "marketFit": "in_range",
                 "pocketRatio": 1,
+                "preferredSaleAgeDays": 207,
                 "priceCheck": "unverified",
+                "saleAgeDays": 56,
                 "staleness": "current"
               },
               "isEnabled": false,
@@ -3017,11 +3068,15 @@
               "evidenceVerification": {
                 "avmRatio": null,
                 "flags": [
-                  "No comp AVM — sale price uncorroborated"
+                  "No comp AVM — sale price uncorroborated",
+                  "Sale is 536 days old — outside preferred 207-day window"
                 ],
+                "marketFit": "in_range",
                 "pocketRatio": 1.0192838609237156,
+                "preferredSaleAgeDays": 207,
                 "priceCheck": "unverified",
-                "staleness": "current"
+                "saleAgeDays": 536,
+                "staleness": "stale"
               },
               "isEnabled": false,
               "landAssessedValue": null,
@@ -3065,11 +3120,14 @@
                 "avmRatio": null,
                 "flags": [
                   "No comp AVM — sale price uncorroborated",
-                  "Sale at $72/sf is 45% of current pocket $158/sf — stale or different-market evidence"
+                  "Sale at $72/sf is 45% of current pocket $158/sf — below current pocket, verify market fit"
                 ],
+                "marketFit": "below_pocket",
                 "pocketRatio": 0.4540861261762388,
+                "preferredSaleAgeDays": 207,
                 "priceCheck": "unverified",
-                "staleness": "stale"
+                "saleAgeDays": 187,
+                "staleness": "current"
               },
               "isEnabled": false,
               "landAssessedValue": null,
@@ -3112,10 +3170,14 @@
                 "avmRatio": null,
                 "flags": [
                   "No comp AVM — sale price uncorroborated",
-                  "Sale at $4/sf is 2% of current pocket $158/sf — stale or different-market evidence"
+                  "Sale is 335 days old — outside preferred 207-day window",
+                  "Sale at $4/sf is 2% of current pocket $158/sf — below current pocket, verify market fit"
                 ],
+                "marketFit": "below_pocket",
                 "pocketRatio": 0.02406127659574468,
+                "preferredSaleAgeDays": 207,
                 "priceCheck": "unverified",
+                "saleAgeDays": 335,
                 "staleness": "stale"
               },
               "isEnabled": false,
@@ -3158,10 +3220,14 @@
                 "avmRatio": null,
                 "flags": [
                   "No comp AVM — sale price uncorroborated",
-                  "Sale at $105/sf is 66% of current pocket $158/sf — stale or different-market evidence"
+                  "Sale is 300 days old — outside preferred 207-day window",
+                  "Sale at $105/sf is 66% of current pocket $158/sf — below current pocket, verify market fit"
                 ],
+                "marketFit": "below_pocket",
                 "pocketRatio": 0.6632948720146759,
+                "preferredSaleAgeDays": 207,
                 "priceCheck": "unverified",
+                "saleAgeDays": 300,
                 "staleness": "stale"
               },
               "isEnabled": false,
@@ -3204,11 +3270,15 @@
               "evidenceVerification": {
                 "avmRatio": null,
                 "flags": [
-                  "No comp AVM — sale price uncorroborated"
+                  "No comp AVM — sale price uncorroborated",
+                  "Sale is 255 days old — outside preferred 207-day window"
                 ],
+                "marketFit": "in_range",
                 "pocketRatio": 0.8697285399853265,
+                "preferredSaleAgeDays": 207,
                 "priceCheck": "unverified",
-                "staleness": "current"
+                "saleAgeDays": 255,
+                "staleness": "stale"
               },
               "isEnabled": false,
               "landAssessedValue": null,
@@ -3249,11 +3319,15 @@
               "evidenceVerification": {
                 "avmRatio": null,
                 "flags": [
-                  "No comp AVM — sale price uncorroborated"
+                  "No comp AVM — sale price uncorroborated",
+                  "Sale is 342 days old — outside preferred 207-day window"
                 ],
+                "marketFit": "in_range",
                 "pocketRatio": 0.8957343020238713,
+                "preferredSaleAgeDays": 207,
                 "priceCheck": "unverified",
-                "staleness": "current"
+                "saleAgeDays": 342,
+                "staleness": "stale"
               },
               "isEnabled": false,
               "landAssessedValue": null,
@@ -3275,12 +3349,12 @@
             "rehabCost": 67190
           },
           "result": {
-            "anchorAddress": "1671 Lamont Ave",
-            "arv": 228269,
-            "bracket": "ok",
-            "ceiling": 228268.9556509299,
+            "anchorAddress": "4532 Richard Rd",
+            "arv": 223738,
+            "bracket": "all-bigger",
+            "ceiling": 223737.98076923078,
             "conditionAdj": null,
-            "conf": "medium",
+            "conf": "low",
             "contribs": [
               {
                 "comp": {
@@ -3310,8 +3384,11 @@
                     "flags": [
                       "No comp AVM — sale price uncorroborated"
                     ],
+                    "marketFit": "in_range",
                     "pocketRatio": 1.141571194762684,
+                    "preferredSaleAgeDays": 207,
                     "priceCheck": "unverified",
+                    "saleAgeDays": 80,
                     "staleness": "current"
                   },
                   "isEnabled": true,
@@ -3356,11 +3433,14 @@
                   "evidenceVerification": {
                     "avmRatio": 0.010539931485392645,
                     "flags": [
-                      "Sale at $70/sf is 44% of current pocket $158/sf — stale or different-market evidence"
+                      "Sale at $70/sf is 44% of current pocket $158/sf — below current pocket, verify market fit"
                     ],
+                    "marketFit": "below_pocket",
                     "pocketRatio": 0.44403330249768735,
+                    "preferredSaleAgeDays": 207,
                     "priceCheck": "corroborated",
-                    "staleness": "stale"
+                    "saleAgeDays": 159,
+                    "staleness": "current"
                   },
                   "isEnabled": true,
                   "landAssessedValue": 16000,
@@ -3406,11 +3486,15 @@
                   "evidenceVerification": {
                     "avmRatio": null,
                     "flags": [
-                      "No comp AVM — sale price uncorroborated"
+                      "No comp AVM — sale price uncorroborated",
+                      "Sale is 315 days old — outside preferred 207-day window"
                     ],
+                    "marketFit": "in_range",
                     "pocketRatio": 1.132316683407908,
+                    "preferredSaleAgeDays": 207,
                     "priceCheck": "unverified",
-                    "staleness": "current"
+                    "saleAgeDays": 315,
+                    "staleness": "stale"
                   },
                   "isEnabled": true,
                   "landAssessedValue": null,
@@ -3456,11 +3540,15 @@
                   "evidenceVerification": {
                     "avmRatio": null,
                     "flags": [
-                      "No comp AVM — sale price uncorroborated"
+                      "No comp AVM — sale price uncorroborated",
+                      "Sale is 371 days old — outside preferred 207-day window"
                     ],
+                    "marketFit": "in_range",
                     "pocketRatio": 1.0192838609237156,
+                    "preferredSaleAgeDays": 207,
                     "priceCheck": "unverified",
-                    "staleness": "current"
+                    "saleAgeDays": 371,
+                    "staleness": "stale"
                   },
                   "isEnabled": true,
                   "landAssessedValue": null,
@@ -3510,8 +3598,11 @@
                     "flags": [
                       "No comp AVM — sale price uncorroborated"
                     ],
+                    "marketFit": "in_range",
                     "pocketRatio": 1.141571194762684,
+                    "preferredSaleAgeDays": 207,
                     "priceCheck": "unverified",
+                    "saleAgeDays": 80,
                     "staleness": "current"
                   },
                   "isEnabled": true,
@@ -3531,117 +3622,15 @@
                 "contrib": 223737.98076923078,
                 "tier": "unidentified",
                 "weight": 1
-              },
-              {
-                "comp": {
-                  "address": "1671 Lamont Ave",
-                  "adjustedPrice": 240000,
-                  "appraisalRules": {
-                    "totalAdjustment": -10000
-                  },
-                  "censusTract": "13063040410",
-                  "classification": {
-                    "type": "transitional"
-                  },
-                  "crossesMajorRoad": false,
-                  "curbAppeal": {
-                    "condition": "dated",
-                    "confidence": 40,
-                    "photosExamined": 8,
-                    "source": "vision",
-                    "summary": "Maintained (1.9/4) · tier:median · renovated 23% · as-is 2% · investor 2% · via zillow · listing text available"
-                  },
-                  "disableReasons": [
-                    "Geo scope mismatch: city \"Conley\" ≠ \"Forest Park-Morrow\""
-                  ],
-                  "distanceMiles": 0.07484278920028738,
-                  "evidenceVerification": {
-                    "avmRatio": null,
-                    "flags": [
-                      "No comp AVM — sale price uncorroborated"
-                    ],
-                    "pocketRatio": 1.132316683407908,
-                    "priceCheck": "unverified",
-                    "staleness": "current"
-                  },
-                  "isEnabled": true,
-                  "landAssessedValue": null,
-                  "lotSizeAcres": null,
-                  "lotSizeSquareFeet": null,
-                  "neighborhoodName": "Scottish Manor",
-                  "pricePerSqft": 178.826895565093,
-                  "propertyType": "SINGLE FAMILY RESIDENCE",
-                  "saleDate": "2025-11-24",
-                  "salePrice": 250000,
-                  "sameBlockGroup": true,
-                  "squareFeet": 1398,
-                  "subdivision": null,
-                  "yearBuilt": 1968
-                },
-                "contrib": 228268.9556509299,
-                "tier": "unidentified",
-                "weight": 0.9615384615384615
-              },
-              {
-                "comp": {
-                  "address": "4323 Edinburgh Way",
-                  "adjustedPrice": 165000,
-                  "appraisalRules": {
-                    "totalAdjustment": 0
-                  },
-                  "censusTract": "13063040410",
-                  "classification": {
-                    "type": "after_renovation"
-                  },
-                  "crossesMajorRoad": false,
-                  "curbAppeal": {
-                    "condition": "renovated",
-                    "confidence": 15,
-                    "photosExamined": 8,
-                    "source": "vision",
-                    "summary": "Updated (2.2/4) · tier:median · renovated 52% · as-is 9% · investor 1% · via zillow · listing text available"
-                  },
-                  "disableReasons": [
-                    "Geo scope mismatch: city \"Conley\" ≠ \"Forest Park-Morrow\""
-                  ],
-                  "distanceMiles": 0.1100689701345627,
-                  "evidenceVerification": {
-                    "avmRatio": null,
-                    "flags": [
-                      "No comp AVM — sale price uncorroborated"
-                    ],
-                    "pocketRatio": 1.0192838609237156,
-                    "priceCheck": "unverified",
-                    "staleness": "current"
-                  },
-                  "isEnabled": true,
-                  "landAssessedValue": null,
-                  "lotSizeAcres": null,
-                  "lotSizeSquareFeet": null,
-                  "neighborhoodName": "Scottish Manor",
-                  "pricePerSqft": 160.97560975609755,
-                  "propertyType": "SINGLE FAMILY RESIDENCE",
-                  "saleDate": "2025-09-29",
-                  "salePrice": 165000,
-                  "sameBlockGroup": true,
-                  "squareFeet": 1025,
-                  "subdivision": null,
-                  "yearBuilt": 1965
-                },
-                "contrib": 178457.56097560975,
-                "tier": "arv",
-                "weight": 1
               }
             ],
             "flags": [
-              "1144 Elaine Dr: verification — Sale at $70/sf is 44% of current pocket $158/sf — stale or different-market evidence",
-              "4532 Richard Rd: median-tier driver — no high-similarity renovated evidence",
-              "1671 Lamont Ave: median-tier driver — no high-similarity renovated evidence",
-              "4323 Edinburgh Way: median-tier driver — no high-similarity renovated evidence",
-              "anchored to 1671 Lamont Ave (similarity 11.0)",
-              "supporting range $178,458–$223,738 (2 comp(s) — bound, not blended)",
-              "anchor above supporting range — top of evidence",
-              "condition uplift unverified — ARV at median-tier anchor"
+              "1144 Elaine Dr: verification — Sale at $70/sf is 44% of current pocket $158/sf — below current pocket, verify market fit",
+              "1671 Lamont Ave: verification — No comp AVM — sale price uncorroborated; Sale is 315 days old — outside preferred 207-day ",
+              "4323 Edinburgh Way: verification — No comp AVM — sale price uncorroborated; Sale is 371 days old — outside preferred 207-day ",
+              "no ARV-tier labels — ARV driven on 1 retail-marked comp(s); 3 as-is-priced sale(s) excluded from ARV",
+              "anchored to 4532 Richard Rd (similarity 7.3)",
+              "bracketing: driver set is all-bigger — no size bracket"
             ],
             "healed": false,
             "landRateSource": null,
@@ -4245,11 +4234,14 @@
             "avmRatio": null,
             "flags": [
               "No comp AVM — sale price uncorroborated",
-              "Sale at $105/sf is 66% of current pocket $158/sf — stale or different-market evidence"
+              "Sale at $105/sf is 66% of current pocket $158/sf — below current pocket, verify market fit"
             ],
+            "marketFit": "below_pocket",
             "pocketRatio": 0.6646265278406519,
+            "preferredSaleAgeDays": 207,
             "priceCheck": "unverified",
-            "staleness": "stale"
+            "saleAgeDays": 82,
+            "staleness": "current"
           },
           "id": "171537761",
           "isEnabled": false,
@@ -4685,8 +4677,11 @@
             "flags": [
               "No comp AVM — sale price uncorroborated"
             ],
+            "marketFit": "in_range",
             "pocketRatio": 1.3622749590834697,
+            "preferredSaleAgeDays": 207,
             "priceCheck": "unverified",
+            "saleAgeDays": 45,
             "staleness": "current"
           },
           "id": "171027426",
@@ -5126,11 +5121,14 @@
             "avmRatio": null,
             "flags": [
               "No comp AVM — sale price uncorroborated",
-              "Sale at $107/sf is 67% of current pocket $158/sf — stale or different-market evidence"
+              "Sale at $107/sf is 67% of current pocket $158/sf — below current pocket, verify market fit"
             ],
+            "marketFit": "below_pocket",
             "pocketRatio": 0.6749484696402064,
+            "preferredSaleAgeDays": 207,
             "priceCheck": "unverified",
-            "staleness": "stale"
+            "saleAgeDays": 80,
+            "staleness": "current"
           },
           "id": "54131408",
           "isEnabled": false,
@@ -5540,8 +5538,11 @@
             "flags": [
               "No comp AVM — sale price uncorroborated"
             ],
+            "marketFit": "in_range",
             "pocketRatio": 1.141571194762684,
+            "preferredSaleAgeDays": 207,
             "priceCheck": "unverified",
+            "saleAgeDays": 80,
             "staleness": "current"
           },
           "id": "25797849",
@@ -5909,8 +5910,11 @@
             "flags": [
               "No comp AVM — sale price uncorroborated"
             ],
+            "marketFit": "in_range",
             "pocketRatio": 1.253191489361702,
+            "preferredSaleAgeDays": 207,
             "priceCheck": "unverified",
+            "saleAgeDays": 84,
             "staleness": "current"
           },
           "id": "145790906",
@@ -6485,11 +6489,15 @@
             "avmRatio": null,
             "flags": [
               "No comp AVM — sale price uncorroborated",
-              "Sale at $9/sf is 6% of current pocket $158/sf — stale or different-market evidence"
+              "No usable sale date — sale age unverified",
+              "Sale at $9/sf is 6% of current pocket $158/sf — below current pocket, verify market fit"
             ],
+            "marketFit": "below_pocket",
             "pocketRatio": 0.055944629582158414,
+            "preferredSaleAgeDays": 207,
             "priceCheck": "unverified",
-            "staleness": "stale"
+            "saleAgeDays": null,
+            "staleness": "unverified"
           },
           "id": "1863923",
           "isEnabled": false,
@@ -6744,11 +6752,14 @@
             "avmRatio": null,
             "flags": [
               "No comp AVM — sale price uncorroborated",
-              "Sale at $105/sf is 67% of current pocket $158/sf — stale or different-market evidence"
+              "Sale at $105/sf is 67% of current pocket $158/sf — below current pocket, verify market fit"
             ],
+            "marketFit": "below_pocket",
             "pocketRatio": 0.6652206308469244,
+            "preferredSaleAgeDays": 207,
             "priceCheck": "unverified",
-            "staleness": "stale"
+            "saleAgeDays": 154,
+            "staleness": "current"
           },
           "id": "26871541",
           "isEnabled": false,
@@ -7005,8 +7016,11 @@
             "flags": [
               "No comp AVM — sale price uncorroborated"
             ],
+            "marketFit": "in_range",
             "pocketRatio": 0.7621749408983451,
+            "preferredSaleAgeDays": 207,
             "priceCheck": "unverified",
+            "saleAgeDays": 172,
             "staleness": "current"
           },
           "id": "171162153",
@@ -7265,8 +7279,11 @@
             "flags": [
               "No comp AVM — sale price uncorroborated"
             ],
+            "marketFit": "in_range",
             "pocketRatio": 0.898255721593256,
+            "preferredSaleAgeDays": 207,
             "priceCheck": "unverified",
+            "saleAgeDays": 82,
             "staleness": "current"
           },
           "id": "53202153",
@@ -7534,11 +7551,14 @@
           "evidenceVerification": {
             "avmRatio": 0.010539931485392645,
             "flags": [
-              "Sale at $70/sf is 44% of current pocket $158/sf — stale or different-market evidence"
+              "Sale at $70/sf is 44% of current pocket $158/sf — below current pocket, verify market fit"
             ],
+            "marketFit": "below_pocket",
             "pocketRatio": 0.44403330249768735,
+            "preferredSaleAgeDays": 207,
             "priceCheck": "corroborated",
-            "staleness": "stale"
+            "saleAgeDays": 159,
+            "staleness": "current"
           },
           "features": {
             "carportType": null,
@@ -7748,7 +7768,7 @@
                 {
                   "data": {
                     "attomId": "285261",
-                    "generatedAt": "2026-10-05T03:57:49.831Z",
+                    "generatedAt": "2026-10-05T04:11:57.590Z",
                     "layers": [
                       {
                         "averageSalePrice365d": 830346.1278996866,
@@ -7757,7 +7777,7 @@
                         "geographyType": "CO",
                         "latestSaleDate": "2026-08-21T00:00:00",
                         "medianPricePerSqFt365d": 129.80439041169942,
-                        "medianSalePrice365d": 226673.18619022367,
+                        "medianSalePrice365d": 226501.1960927165,
                         "saleCount180d": 2068,
                         "saleCount365d": 4453,
                         "saleCount90d": 807,
@@ -7770,7 +7790,7 @@
                         "geographyType": "CS",
                         "latestSaleDate": "2026-08-21T00:00:00",
                         "medianPricePerSqFt365d": 129.29047324440697,
-                        "medianSalePrice365d": 212764.32806153313,
+                        "medianSalePrice365d": 212753.07213443037,
                         "saleCount180d": 706,
                         "saleCount365d": 1434,
                         "saleCount90d": 286,
@@ -7783,7 +7803,7 @@
                         "geographyType": "DB",
                         "latestSaleDate": "2026-08-21T00:00:00",
                         "medianPricePerSqFt365d": 129.7856720143015,
-                        "medianSalePrice365d": 226466.211233052,
+                        "medianSalePrice365d": 226625.6799443266,
                         "saleCount180d": 2067,
                         "saleCount365d": 4452,
                         "saleCount90d": 805,
@@ -7965,7 +7985,7 @@
                       "medianSalePrice": 140000,
                       "topComparableAddress": "1035 Stoneybrook Rd, Forest Park, GA 30297"
                     },
-                    "generatedAt": "2026-10-05T03:57:49.890Z",
+                    "generatedAt": "2026-10-05T04:11:57.652Z",
                     "lastSale": {
                       "buyers": "MACMOR PROPERTIES LLC",
                       "documentNumber": "1422000455",
@@ -8388,11 +8408,15 @@
           "evidenceVerification": {
             "avmRatio": null,
             "flags": [
-              "No comp AVM — sale price uncorroborated"
+              "No comp AVM — sale price uncorroborated",
+              "Sale is 315 days old — outside preferred 207-day window"
             ],
+            "marketFit": "in_range",
             "pocketRatio": 1.132316683407908,
+            "preferredSaleAgeDays": 207,
             "priceCheck": "unverified",
-            "staleness": "current"
+            "saleAgeDays": 315,
+            "staleness": "stale"
           },
           "id": "148147854",
           "isEnabled": true,
@@ -8833,8 +8857,11 @@
             "flags": [
               "No comp AVM — sale price uncorroborated"
             ],
+            "marketFit": "in_range",
             "pocketRatio": 1.0034954407294832,
+            "preferredSaleAgeDays": 207,
             "priceCheck": "unverified",
+            "saleAgeDays": 101,
             "staleness": "current"
           },
           "id": "53454560",
@@ -9346,11 +9373,14 @@
             "avmRatio": null,
             "flags": [
               "No comp AVM — sale price uncorroborated",
-              "Sale at $75/sf is 47% of current pocket $158/sf — stale or different-market evidence"
+              "Sale at $75/sf is 47% of current pocket $158/sf — below current pocket, verify market fit"
             ],
+            "marketFit": "below_pocket",
             "pocketRatio": 0.47225986010912946,
+            "preferredSaleAgeDays": 207,
             "priceCheck": "unverified",
-            "staleness": "stale"
+            "saleAgeDays": 112,
+            "staleness": "current"
           },
           "id": "21794480",
           "isEnabled": false,
@@ -9776,8 +9806,11 @@
             "flags": [
               "No comp AVM — sale price uncorroborated"
             ],
+            "marketFit": "in_range",
             "pocketRatio": 0.8559810874704492,
+            "preferredSaleAgeDays": 207,
             "priceCheck": "unverified",
+            "saleAgeDays": 125,
             "staleness": "current"
           },
           "id": "4366470",
@@ -10033,8 +10066,11 @@
             "flags": [
               "No comp AVM — sale price uncorroborated"
             ],
+            "marketFit": "in_range",
             "pocketRatio": 0.7143698854337152,
+            "preferredSaleAgeDays": 207,
             "priceCheck": "unverified",
+            "saleAgeDays": 166,
             "staleness": "current"
           },
           "id": "12814225",
@@ -10290,8 +10326,11 @@
             "flags": [
               "No comp AVM — sale price uncorroborated"
             ],
+            "marketFit": "in_range",
             "pocketRatio": 1.2176759410801965,
+            "preferredSaleAgeDays": 207,
             "priceCheck": "unverified",
+            "saleAgeDays": 131,
             "staleness": "current"
           },
           "id": "25290619",
@@ -10657,11 +10696,15 @@
           "evidenceVerification": {
             "avmRatio": null,
             "flags": [
-              "No comp AVM — sale price uncorroborated"
+              "No comp AVM — sale price uncorroborated",
+              "Sale is 371 days old — outside preferred 207-day window"
             ],
+            "marketFit": "in_range",
             "pocketRatio": 1.0192838609237156,
+            "preferredSaleAgeDays": 207,
             "priceCheck": "unverified",
-            "staleness": "current"
+            "saleAgeDays": 371,
+            "staleness": "stale"
           },
           "id": "23821359",
           "isEnabled": true,
@@ -11006,8 +11049,11 @@
             "flags": [
               "No comp AVM — sale price uncorroborated"
             ],
+            "marketFit": "in_range",
             "pocketRatio": 0.9987247466272904,
+            "preferredSaleAgeDays": 207,
             "priceCheck": "unverified",
+            "saleAgeDays": 153,
             "staleness": "current"
           },
           "id": "2965062",
@@ -11260,11 +11306,15 @@
           "evidenceVerification": {
             "avmRatio": null,
             "flags": [
-              "No comp AVM — sale price uncorroborated"
+              "No comp AVM — sale price uncorroborated",
+              "Sale is 216 days old — outside preferred 207-day window"
             ],
+            "marketFit": "in_range",
             "pocketRatio": 0.8278878805901425,
+            "preferredSaleAgeDays": 207,
             "priceCheck": "unverified",
-            "staleness": "current"
+            "saleAgeDays": 216,
+            "staleness": "stale"
           },
           "id": "46579730",
           "isEnabled": false,
@@ -11675,8 +11725,11 @@
             "flags": [
               "No comp AVM — sale price uncorroborated"
             ],
+            "marketFit": "in_range",
             "pocketRatio": 1,
+            "preferredSaleAgeDays": 207,
             "priceCheck": "unverified",
+            "saleAgeDays": 56,
             "staleness": "current"
           },
           "id": "22166640",
@@ -12225,11 +12278,15 @@
           "evidenceVerification": {
             "avmRatio": null,
             "flags": [
-              "No comp AVM — sale price uncorroborated"
+              "No comp AVM — sale price uncorroborated",
+              "Sale is 536 days old — outside preferred 207-day window"
             ],
+            "marketFit": "in_range",
             "pocketRatio": 1.0192838609237156,
+            "preferredSaleAgeDays": 207,
             "priceCheck": "unverified",
-            "staleness": "current"
+            "saleAgeDays": 536,
+            "staleness": "stale"
           },
           "id": "52320570",
           "isEnabled": false,
@@ -12604,11 +12661,14 @@
             "avmRatio": null,
             "flags": [
               "No comp AVM — sale price uncorroborated",
-              "Sale at $72/sf is 45% of current pocket $158/sf — stale or different-market evidence"
+              "Sale at $72/sf is 45% of current pocket $158/sf — below current pocket, verify market fit"
             ],
+            "marketFit": "below_pocket",
             "pocketRatio": 0.4540861261762388,
+            "preferredSaleAgeDays": 207,
             "priceCheck": "unverified",
-            "staleness": "stale"
+            "saleAgeDays": 187,
+            "staleness": "current"
           },
           "id": "41098297",
           "isEnabled": false,
@@ -12861,10 +12921,14 @@
             "avmRatio": null,
             "flags": [
               "No comp AVM — sale price uncorroborated",
-              "Sale at $4/sf is 2% of current pocket $158/sf — stale or different-market evidence"
+              "Sale is 335 days old — outside preferred 207-day window",
+              "Sale at $4/sf is 2% of current pocket $158/sf — below current pocket, verify market fit"
             ],
+            "marketFit": "below_pocket",
             "pocketRatio": 0.02406127659574468,
+            "preferredSaleAgeDays": 207,
             "priceCheck": "unverified",
+            "saleAgeDays": 335,
             "staleness": "stale"
           },
           "id": "17449928",
@@ -13186,10 +13250,14 @@
             "avmRatio": null,
             "flags": [
               "No comp AVM — sale price uncorroborated",
-              "Sale at $105/sf is 66% of current pocket $158/sf — stale or different-market evidence"
+              "Sale is 300 days old — outside preferred 207-day window",
+              "Sale at $105/sf is 66% of current pocket $158/sf — below current pocket, verify market fit"
             ],
+            "marketFit": "below_pocket",
             "pocketRatio": 0.6632948720146759,
+            "preferredSaleAgeDays": 207,
             "priceCheck": "unverified",
+            "saleAgeDays": 300,
             "staleness": "stale"
           },
           "id": "25387449",
@@ -13553,11 +13621,15 @@
           "evidenceVerification": {
             "avmRatio": null,
             "flags": [
-              "No comp AVM — sale price uncorroborated"
+              "No comp AVM — sale price uncorroborated",
+              "Sale is 255 days old — outside preferred 207-day window"
             ],
+            "marketFit": "in_range",
             "pocketRatio": 0.8697285399853265,
+            "preferredSaleAgeDays": 207,
             "priceCheck": "unverified",
-            "staleness": "current"
+            "saleAgeDays": 255,
+            "staleness": "stale"
           },
           "id": "4365962",
           "isEnabled": false,
@@ -14191,11 +14263,15 @@
           "evidenceVerification": {
             "avmRatio": null,
             "flags": [
-              "No comp AVM — sale price uncorroborated"
+              "No comp AVM — sale price uncorroborated",
+              "Sale is 342 days old — outside preferred 207-day window"
             ],
+            "marketFit": "in_range",
             "pocketRatio": 0.8957343020238713,
+            "preferredSaleAgeDays": 207,
             "priceCheck": "unverified",
-            "staleness": "current"
+            "saleAgeDays": 342,
+            "staleness": "stale"
           },
           "flip": null,
           "geoScopes": {
@@ -14679,7 +14755,7 @@
             {
               "data": {
                 "attomId": "19057705",
-                "generatedAt": "2026-10-05T03:57:46.812Z",
+                "generatedAt": "2026-10-05T04:11:53.522Z",
                 "layers": [
                   {
                     "averageSalePrice365d": 830346.1278996866,
@@ -14701,7 +14777,7 @@
                     "geographyType": "CS",
                     "latestSaleDate": "2026-08-21T00:00:00",
                     "medianPricePerSqFt365d": 129.29047324440697,
-                    "medianSalePrice365d": 212742.95833333334,
+                    "medianSalePrice365d": 212753.07213443037,
                     "saleCount180d": 706,
                     "saleCount365d": 1434,
                     "saleCount90d": 286,
@@ -14714,7 +14790,7 @@
                     "geographyType": "DB",
                     "latestSaleDate": "2026-08-21T00:00:00",
                     "medianPricePerSqFt365d": 129.7856720143015,
-                    "medianSalePrice365d": 226466.211233052,
+                    "medianSalePrice365d": 226594.74423661904,
                     "saleCount180d": 2067,
                     "saleCount365d": 4452,
                     "saleCount90d": 805,
@@ -14739,7 +14815,7 @@
                     "geographyType": "PZ",
                     "latestSaleDate": "2026-08-21T00:00:00",
                     "medianPricePerSqFt365d": 128.8723602294922,
-                    "medianSalePrice365d": 225750,
+                    "medianSalePrice365d": 225666.66666666666,
                     "saleCount180d": 59,
                     "saleCount365d": 132,
                     "saleCount90d": 20,
@@ -14861,7 +14937,7 @@
                   "estimatedValue": 79490,
                   "loanToValueRatio": 62.67
                 },
-                "generatedAt": "2026-10-05T03:57:46.948Z",
+                "generatedAt": "2026-10-05T04:11:53.752Z",
                 "lastSale": {
                   "buyers": "SONTAY ADOLFINA",
                   "documentNumber": "1422000348",
@@ -15074,7 +15150,7 @@
                   "ATTOM permit data is included when available; absence of records is a coverage signal, not proof that no work occurred.",
                   "ATTOM returned no building permit records for this property in the current lookup."
                 ],
-                "generatedAt": "2026-10-05T03:57:46.740Z",
+                "generatedAt": "2026-10-05T04:11:53.466Z",
                 "permits": []
               },
               "dataset": "permits",
@@ -15113,7 +15189,7 @@
       "zipCode": null
     },
     "recordVersion": "run-record.v1",
-    "recordedAt": "2026-10-05T03:58:09.585Z",
+    "recordedAt": "2026-10-05T04:12:15.158Z",
     "request": {
       "cachedJobId": null,
       "enrichment": null,
@@ -15873,10 +15949,11 @@
                 "totalAdjustment": -10000
               },
               "assessedValue": null,
-              "bRole": "anchor",
+              "bRole": "pool",
               "badges": {
                 "checks": {
-                  "fresh": true,
+                  "fresh": false,
+                  "marketFit": true,
                   "pocket": true,
                   "priceFit": null,
                   "size": true
@@ -15885,7 +15962,7 @@
                 "pocket": "in",
                 "pocketVia": "block",
                 "price": "median",
-                "trust": "partial",
+                "trust": "unverified",
                 "widenedOn": []
               },
               "bathrooms": 2,
@@ -15922,11 +15999,15 @@
               "evidenceVerification": {
                 "avmRatio": null,
                 "flags": [
-                  "No comp AVM — sale price uncorroborated"
+                  "No comp AVM — sale price uncorroborated",
+                  "Sale is 315 days old — outside preferred 207-day window"
                 ],
+                "marketFit": "in_range",
                 "pocketRatio": 1.132316683407908,
+                "preferredSaleAgeDays": 207,
                 "priceCheck": "unverified",
-                "staleness": "current"
+                "saleAgeDays": 315,
+                "staleness": "stale"
               },
               "exteriorWalls": "brick",
               "fireplacesCount": null,
@@ -16396,10 +16477,11 @@
                 "totalAdjustment": 0
               },
               "assessedValue": null,
-              "bRole": "driver",
+              "bRole": "pool",
               "badges": {
                 "checks": {
-                  "fresh": true,
+                  "fresh": false,
+                  "marketFit": true,
                   "pocket": true,
                   "priceFit": null,
                   "size": true
@@ -16408,7 +16490,7 @@
                 "pocket": "in",
                 "pocketVia": "block",
                 "price": "renovated",
-                "trust": "partial",
+                "trust": "unverified",
                 "widenedOn": []
               },
               "bathrooms": 1,
@@ -16445,11 +16527,15 @@
               "evidenceVerification": {
                 "avmRatio": null,
                 "flags": [
-                  "No comp AVM — sale price uncorroborated"
+                  "No comp AVM — sale price uncorroborated",
+                  "Sale is 371 days old — outside preferred 207-day window"
                 ],
+                "marketFit": "in_range",
                 "pocketRatio": 1.0192838609237156,
+                "preferredSaleAgeDays": 207,
                 "priceCheck": "unverified",
-                "staleness": "current"
+                "saleAgeDays": 371,
+                "staleness": "stale"
               },
               "exteriorWalls": "brick",
               "fireplacesCount": null,
@@ -16817,10 +16903,11 @@
                 "totalAdjustment": 0
               },
               "assessedValue": null,
-              "bRole": "driver",
+              "bRole": "anchor",
               "badges": {
                 "checks": {
                   "fresh": true,
+                  "marketFit": true,
                   "pocket": true,
                   "priceFit": null,
                   "size": true
@@ -16868,8 +16955,11 @@
                 "flags": [
                   "No comp AVM — sale price uncorroborated"
                 ],
+                "marketFit": "in_range",
                 "pocketRatio": 1.141571194762684,
+                "preferredSaleAgeDays": 207,
                 "priceCheck": "unverified",
+                "saleAgeDays": 80,
                 "staleness": "current"
               },
               "exteriorWalls": "brick",
@@ -17269,6 +17359,7 @@
               "badges": {
                 "checks": {
                   "fresh": true,
+                  "marketFit": false,
                   "pocket": false,
                   "priceFit": true,
                   "size": true
@@ -17312,11 +17403,14 @@
               "evidenceVerification": {
                 "avmRatio": 0.010539931485392645,
                 "flags": [
-                  "Sale at $70/sf is 44% of current pocket $158/sf — stale or different-market evidence"
+                  "Sale at $70/sf is 44% of current pocket $158/sf — below current pocket, verify market fit"
                 ],
+                "marketFit": "below_pocket",
                 "pocketRatio": 0.44403330249768735,
+                "preferredSaleAgeDays": 207,
                 "priceCheck": "corroborated",
-                "staleness": "stale"
+                "saleAgeDays": 159,
+                "staleness": "current"
               },
               "exteriorWalls": "brick",
               "fireplacesCount": null,
@@ -17659,6 +17753,7 @@
               "badges": {
                 "checks": {
                   "fresh": false,
+                  "marketFit": true,
                   "pocket": true,
                   "priceFit": null,
                   "size": true
@@ -17667,7 +17762,7 @@
                 "pocket": "in",
                 "pocketVia": "block",
                 "price": "renovated",
-                "trust": "partial",
+                "trust": "unverified",
                 "widenedOn": [
                   "sale_age"
                 ]
@@ -17707,11 +17802,15 @@
               "evidenceVerification": {
                 "avmRatio": null,
                 "flags": [
-                  "No comp AVM — sale price uncorroborated"
+                  "No comp AVM — sale price uncorroborated",
+                  "Sale is 536 days old — outside preferred 207-day window"
                 ],
+                "marketFit": "in_range",
                 "pocketRatio": 1.0192838609237156,
+                "preferredSaleAgeDays": 207,
                 "priceCheck": "unverified",
-                "staleness": "current"
+                "saleAgeDays": 536,
+                "staleness": "stale"
               },
               "exteriorWalls": "brick",
               "fireplacesCount": null,
@@ -18112,7 +18211,8 @@
               "bRole": "excluded",
               "badges": {
                 "checks": {
-                  "fresh": true,
+                  "fresh": false,
+                  "marketFit": false,
                   "pocket": true,
                   "priceFit": null,
                   "size": true
@@ -18160,10 +18260,14 @@
                 "avmRatio": null,
                 "flags": [
                   "No comp AVM — sale price uncorroborated",
-                  "Sale at $4/sf is 2% of current pocket $158/sf — stale or different-market evidence"
+                  "Sale is 335 days old — outside preferred 207-day window",
+                  "Sale at $4/sf is 2% of current pocket $158/sf — below current pocket, verify market fit"
                 ],
+                "marketFit": "below_pocket",
                 "pocketRatio": 0.02406127659574468,
+                "preferredSaleAgeDays": 207,
                 "priceCheck": "unverified",
+                "saleAgeDays": 335,
                 "staleness": "stale"
               },
               "exteriorWalls": null,
@@ -18490,6 +18594,7 @@
               "badges": {
                 "checks": {
                   "fresh": true,
+                  "marketFit": true,
                   "pocket": true,
                   "priceFit": null,
                   "size": true
@@ -18537,8 +18642,11 @@
                 "flags": [
                   "No comp AVM — sale price uncorroborated"
                 ],
+                "marketFit": "in_range",
                 "pocketRatio": 1.3622749590834697,
+                "preferredSaleAgeDays": 207,
                 "priceCheck": "unverified",
+                "saleAgeDays": 45,
                 "staleness": "current"
               },
               "exteriorWalls": null,
@@ -18987,6 +19095,7 @@
               "badges": {
                 "checks": {
                   "fresh": true,
+                  "marketFit": false,
                   "pocket": true,
                   "priceFit": null,
                   "size": true
@@ -19033,11 +19142,14 @@
                 "avmRatio": null,
                 "flags": [
                   "No comp AVM — sale price uncorroborated",
-                  "Sale at $105/sf is 66% of current pocket $158/sf — stale or different-market evidence"
+                  "Sale at $105/sf is 66% of current pocket $158/sf — below current pocket, verify market fit"
                 ],
+                "marketFit": "below_pocket",
                 "pocketRatio": 0.6646265278406519,
+                "preferredSaleAgeDays": 207,
                 "priceCheck": "unverified",
-                "staleness": "stale"
+                "saleAgeDays": 82,
+                "staleness": "current"
               },
               "exteriorWalls": "brick",
               "fireplacesCount": null,
@@ -19469,7 +19581,8 @@
               "bRole": "excluded",
               "badges": {
                 "checks": {
-                  "fresh": true,
+                  "fresh": false,
+                  "marketFit": true,
                   "pocket": true,
                   "priceFit": null,
                   "size": true
@@ -19478,7 +19591,7 @@
                 "pocket": "in",
                 "pocketVia": "block",
                 "price": "median",
-                "trust": "partial",
+                "trust": "unverified",
                 "widenedOn": []
               },
               "bathrooms": 1,
@@ -19515,11 +19628,15 @@
               "evidenceVerification": {
                 "avmRatio": null,
                 "flags": [
-                  "No comp AVM — sale price uncorroborated"
+                  "No comp AVM — sale price uncorroborated",
+                  "Sale is 216 days old — outside preferred 207-day window"
                 ],
+                "marketFit": "in_range",
                 "pocketRatio": 0.8278878805901425,
+                "preferredSaleAgeDays": 207,
                 "priceCheck": "unverified",
-                "staleness": "current"
+                "saleAgeDays": 216,
+                "staleness": "stale"
               },
               "exteriorWalls": "brick",
               "fireplacesCount": null,
@@ -19970,6 +20087,7 @@
               "badges": {
                 "checks": {
                   "fresh": true,
+                  "marketFit": true,
                   "pocket": true,
                   "priceFit": null,
                   "size": true
@@ -20018,8 +20136,11 @@
                 "flags": [
                   "No comp AVM — sale price uncorroborated"
                 ],
+                "marketFit": "in_range",
                 "pocketRatio": 1.0034954407294832,
+                "preferredSaleAgeDays": 207,
                 "priceCheck": "unverified",
+                "saleAgeDays": 101,
                 "staleness": "current"
               },
               "exteriorWalls": "brick",
@@ -20567,6 +20688,7 @@
               "badges": {
                 "checks": {
                   "fresh": true,
+                  "marketFit": false,
                   "pocket": true,
                   "priceFit": null,
                   "size": false
@@ -20614,11 +20736,14 @@
                 "avmRatio": null,
                 "flags": [
                   "No comp AVM — sale price uncorroborated",
-                  "Sale at $75/sf is 47% of current pocket $158/sf — stale or different-market evidence"
+                  "Sale at $75/sf is 47% of current pocket $158/sf — below current pocket, verify market fit"
                 ],
+                "marketFit": "below_pocket",
                 "pocketRatio": 0.47225986010912946,
+                "preferredSaleAgeDays": 207,
                 "priceCheck": "unverified",
-                "staleness": "stale"
+                "saleAgeDays": 112,
+                "staleness": "current"
               },
               "exteriorWalls": "wood siding",
               "fireplacesCount": null,
@@ -21039,7 +21164,8 @@
               "bRole": "excluded",
               "badges": {
                 "checks": {
-                  "fresh": true,
+                  "fresh": false,
+                  "marketFit": false,
                   "pocket": true,
                   "priceFit": null,
                   "size": true
@@ -21086,10 +21212,14 @@
                 "avmRatio": null,
                 "flags": [
                   "No comp AVM — sale price uncorroborated",
-                  "Sale at $105/sf is 66% of current pocket $158/sf — stale or different-market evidence"
+                  "Sale is 300 days old — outside preferred 207-day window",
+                  "Sale at $105/sf is 66% of current pocket $158/sf — below current pocket, verify market fit"
                 ],
+                "marketFit": "below_pocket",
                 "pocketRatio": 0.6632948720146759,
+                "preferredSaleAgeDays": 207,
                 "priceCheck": "unverified",
+                "saleAgeDays": 300,
                 "staleness": "stale"
               },
               "exteriorWalls": "brick",
@@ -21495,6 +21625,7 @@
               "badges": {
                 "checks": {
                   "fresh": true,
+                  "marketFit": true,
                   "pocket": true,
                   "priceFit": null,
                   "size": true
@@ -21543,8 +21674,11 @@
                 "flags": [
                   "No comp AVM — sale price uncorroborated"
                 ],
+                "marketFit": "in_range",
                 "pocketRatio": 1.253191489361702,
+                "preferredSaleAgeDays": 207,
                 "priceCheck": "unverified",
+                "saleAgeDays": 84,
                 "staleness": "current"
               },
               "exteriorWalls": "brick",
@@ -22155,7 +22289,8 @@
               "bRole": "excluded",
               "badges": {
                 "checks": {
-                  "fresh": true,
+                  "fresh": false,
+                  "marketFit": true,
                   "pocket": true,
                   "priceFit": null,
                   "size": true
@@ -22164,7 +22299,7 @@
                 "pocket": "in",
                 "pocketVia": "tract",
                 "price": "median",
-                "trust": "partial",
+                "trust": "unverified",
                 "widenedOn": []
               },
               "bathrooms": 1.5,
@@ -22201,11 +22336,15 @@
               "evidenceVerification": {
                 "avmRatio": null,
                 "flags": [
-                  "No comp AVM — sale price uncorroborated"
+                  "No comp AVM — sale price uncorroborated",
+                  "Sale is 342 days old — outside preferred 207-day window"
                 ],
+                "marketFit": "in_range",
                 "pocketRatio": 0.8957343020238713,
+                "preferredSaleAgeDays": 207,
                 "priceCheck": "unverified",
-                "staleness": "current"
+                "saleAgeDays": 342,
+                "staleness": "stale"
               },
               "exteriorWalls": null,
               "fireplacesCount": null,
@@ -22662,6 +22801,7 @@
               "badges": {
                 "checks": {
                   "fresh": true,
+                  "marketFit": true,
                   "pocket": true,
                   "priceFit": null,
                   "size": true
@@ -22711,8 +22851,11 @@
                 "flags": [
                   "No comp AVM — sale price uncorroborated"
                 ],
+                "marketFit": "in_range",
                 "pocketRatio": 1,
+                "preferredSaleAgeDays": 207,
                 "priceCheck": "unverified",
+                "saleAgeDays": 56,
                 "staleness": "current"
               },
               "exteriorWalls": "fiber cement",
@@ -23285,7 +23428,8 @@
               "bRole": "excluded",
               "badges": {
                 "checks": {
-                  "fresh": true,
+                  "fresh": false,
+                  "marketFit": true,
                   "pocket": true,
                   "priceFit": null,
                   "size": false
@@ -23294,7 +23438,7 @@
                 "pocket": "in",
                 "pocketVia": "block",
                 "price": "median",
-                "trust": "partial",
+                "trust": "unverified",
                 "widenedOn": []
               },
               "bathrooms": 2,
@@ -23332,11 +23476,15 @@
               "evidenceVerification": {
                 "avmRatio": null,
                 "flags": [
-                  "No comp AVM — sale price uncorroborated"
+                  "No comp AVM — sale price uncorroborated",
+                  "Sale is 255 days old — outside preferred 207-day window"
                 ],
+                "marketFit": "in_range",
                 "pocketRatio": 0.8697285399853265,
+                "preferredSaleAgeDays": 207,
                 "priceCheck": "unverified",
-                "staleness": "current"
+                "saleAgeDays": 255,
+                "staleness": "stale"
               },
               "exteriorWalls": "brick",
               "fireplacesCount": null,
@@ -24000,6 +24148,7 @@
               "badges": {
                 "checks": {
                   "fresh": true,
+                  "marketFit": false,
                   "pocket": false,
                   "priceFit": null,
                   "size": true
@@ -24048,11 +24197,14 @@
                 "avmRatio": null,
                 "flags": [
                   "No comp AVM — sale price uncorroborated",
-                  "Sale at $72/sf is 45% of current pocket $158/sf — stale or different-market evidence"
+                  "Sale at $72/sf is 45% of current pocket $158/sf — below current pocket, verify market fit"
                 ],
+                "marketFit": "below_pocket",
                 "pocketRatio": 0.4540861261762388,
+                "preferredSaleAgeDays": 207,
                 "priceCheck": "unverified",
-                "staleness": "stale"
+                "saleAgeDays": 187,
+                "staleness": "current"
               },
               "exteriorWalls": null,
               "fireplacesCount": null,
@@ -24313,6 +24465,7 @@
               "badges": {
                 "checks": {
                   "fresh": true,
+                  "marketFit": true,
                   "pocket": false,
                   "priceFit": null,
                   "size": true
@@ -24362,8 +24515,11 @@
                 "flags": [
                   "No comp AVM — sale price uncorroborated"
                 ],
+                "marketFit": "in_range",
                 "pocketRatio": 0.9987247466272904,
+                "preferredSaleAgeDays": 207,
                 "priceCheck": "unverified",
+                "saleAgeDays": 153,
                 "staleness": "current"
               },
               "exteriorWalls": null,
@@ -24605,6 +24761,7 @@
               "badges": {
                 "checks": {
                   "fresh": true,
+                  "marketFit": true,
                   "pocket": false,
                   "priceFit": null,
                   "size": true
@@ -24654,8 +24811,11 @@
                 "flags": [
                   "No comp AVM — sale price uncorroborated"
                 ],
+                "marketFit": "in_range",
                 "pocketRatio": 0.7143698854337152,
+                "preferredSaleAgeDays": 207,
                 "priceCheck": "unverified",
+                "saleAgeDays": 166,
                 "staleness": "current"
               },
               "exteriorWalls": "brick",
@@ -24929,6 +25089,7 @@
               "badges": {
                 "checks": {
                   "fresh": true,
+                  "marketFit": false,
                   "pocket": true,
                   "priceFit": null,
                   "size": true
@@ -24975,11 +25136,14 @@
                 "avmRatio": null,
                 "flags": [
                   "No comp AVM — sale price uncorroborated",
-                  "Sale at $107/sf is 67% of current pocket $158/sf — stale or different-market evidence"
+                  "Sale at $107/sf is 67% of current pocket $158/sf — below current pocket, verify market fit"
                 ],
+                "marketFit": "below_pocket",
                 "pocketRatio": 0.6749484696402064,
+                "preferredSaleAgeDays": 207,
                 "priceCheck": "unverified",
-                "staleness": "stale"
+                "saleAgeDays": 80,
+                "staleness": "current"
               },
               "exteriorWalls": "brick",
               "fireplacesCount": null,
@@ -25412,6 +25576,7 @@
               "badges": {
                 "checks": {
                   "fresh": true,
+                  "marketFit": true,
                   "pocket": true,
                   "priceFit": null,
                   "size": true
@@ -25460,8 +25625,11 @@
                 "flags": [
                   "No comp AVM — sale price uncorroborated"
                 ],
+                "marketFit": "in_range",
                 "pocketRatio": 1.2176759410801965,
+                "preferredSaleAgeDays": 207,
                 "priceCheck": "unverified",
+                "saleAgeDays": 131,
                 "staleness": "current"
               },
               "exteriorWalls": "brick",
@@ -25860,6 +26028,7 @@
               "badges": {
                 "checks": {
                   "fresh": true,
+                  "marketFit": true,
                   "pocket": false,
                   "priceFit": null,
                   "size": true
@@ -25908,8 +26077,11 @@
                 "flags": [
                   "No comp AVM — sale price uncorroborated"
                 ],
+                "marketFit": "in_range",
                 "pocketRatio": 0.8559810874704492,
+                "preferredSaleAgeDays": 207,
                 "priceCheck": "unverified",
+                "saleAgeDays": 125,
                 "staleness": "current"
               },
               "exteriorWalls": null,
@@ -26141,6 +26313,7 @@
               "badges": {
                 "checks": {
                   "fresh": false,
+                  "marketFit": false,
                   "pocket": false,
                   "priceFit": null,
                   "size": true
@@ -26193,11 +26366,15 @@
                 "avmRatio": null,
                 "flags": [
                   "No comp AVM — sale price uncorroborated",
-                  "Sale at $9/sf is 6% of current pocket $158/sf — stale or different-market evidence"
+                  "No usable sale date — sale age unverified",
+                  "Sale at $9/sf is 6% of current pocket $158/sf — below current pocket, verify market fit"
                 ],
+                "marketFit": "below_pocket",
                 "pocketRatio": 0.055944629582158414,
+                "preferredSaleAgeDays": 207,
                 "priceCheck": "unverified",
-                "staleness": "stale"
+                "saleAgeDays": null,
+                "staleness": "unverified"
               },
               "exteriorWalls": null,
               "fireplacesCount": null,
@@ -26435,6 +26612,7 @@
               "badges": {
                 "checks": {
                   "fresh": true,
+                  "marketFit": true,
                   "pocket": false,
                   "priceFit": null,
                   "size": false
@@ -26485,8 +26663,11 @@
                 "flags": [
                   "No comp AVM — sale price uncorroborated"
                 ],
+                "marketFit": "in_range",
                 "pocketRatio": 0.898255721593256,
+                "preferredSaleAgeDays": 207,
                 "priceCheck": "unverified",
+                "saleAgeDays": 82,
                 "staleness": "current"
               },
               "exteriorWalls": "brick",
@@ -26753,6 +26934,7 @@
               "badges": {
                 "checks": {
                   "fresh": true,
+                  "marketFit": false,
                   "pocket": false,
                   "priceFit": null,
                   "size": true
@@ -26801,11 +26983,14 @@
                 "avmRatio": null,
                 "flags": [
                   "No comp AVM — sale price uncorroborated",
-                  "Sale at $105/sf is 67% of current pocket $158/sf — stale or different-market evidence"
+                  "Sale at $105/sf is 67% of current pocket $158/sf — below current pocket, verify market fit"
                 ],
+                "marketFit": "below_pocket",
                 "pocketRatio": 0.6652206308469244,
+                "preferredSaleAgeDays": 207,
                 "priceCheck": "unverified",
-                "staleness": "stale"
+                "saleAgeDays": 154,
+                "staleness": "current"
               },
               "exteriorWalls": null,
               "fireplacesCount": null,
@@ -27073,6 +27258,7 @@
               "badges": {
                 "checks": {
                   "fresh": true,
+                  "marketFit": true,
                   "pocket": false,
                   "priceFit": null,
                   "size": true
@@ -27121,8 +27307,11 @@
                 "flags": [
                   "No comp AVM — sale price uncorroborated"
                 ],
+                "marketFit": "in_range",
                 "pocketRatio": 0.7621749408983451,
+                "preferredSaleAgeDays": 207,
                 "priceCheck": "unverified",
+                "saleAgeDays": 172,
                 "staleness": "current"
               },
               "exteriorWalls": null,
@@ -27253,7 +27442,7 @@
         "meta": {
           "analysisId": "job_1791164799786_1ff81119533a41b4",
           "dataProvider": "attom-mcp",
-          "timestamp": "2026-10-05T03:58:09.583Z"
+          "timestamp": "2026-10-05T04:12:15.157Z"
         },
         "neighbourhood": null,
         "permits": {
@@ -27276,9 +27465,9 @@
             },
             "drivers": [],
             "methodology": "Simple average of enabled comps",
-            "pricePerSqft": 185,
+            "pricePerSqft": 181,
             "spread": null,
-            "value": 228269
+            "value": 223738
           },
           "confidence": "low",
           "confidenceReasons": [
@@ -27290,7 +27479,7 @@
             {
               "amount": -43190,
               "label": "Base Rehab",
-              "reason": "Full Cosmetic at $35/sqft — Computer-vision renovation assessment: Full Cosmetic (48% confidence)"
+              "reason": "Full Cosmetic at $35/sqft — Computer-vision renovation assessment: Full Cosmetic (38% confidence)"
             },
             {
               "amount": -10000,
@@ -27313,12 +27502,12 @@
               "reason": "No permit evidence — assumed original install (66y old ≥ threshold 30y) — replacement cost added"
             },
             {
-              "amount": -18262,
+              "amount": -17899,
               "label": "Closing Costs",
               "reason": "8% of ARV — purchase + resale transaction costs"
             },
             {
-              "amount": -4565,
+              "amount": -4475,
               "label": "Carrying Costs",
               "reason": "2% of ARV — holding costs during rehab"
             },
@@ -27329,18 +27518,19 @@
             }
           ],
           "fallbacksUsed": [
-            "comp_fallback:sale_age_expansion"
+            "comp_fallback:sale_age_expansion",
+            "vision:needs_review"
           ],
-          "generatedAt": "2026-10-05T03:58:09.584Z",
+          "generatedAt": "2026-10-05T04:12:15.157Z",
           "outcome": {
-            "buyPricePercent": 43,
-            "maxBuyPrice": 98252,
+            "buyPricePercent": 42,
+            "maxBuyPrice": 94174,
             "projectedProfit": 40000,
-            "projectedROI": 24.2,
+            "projectedROI": 24.8,
             "recommendation": "buy",
-            "recommendationReason": "Good ROI (24.2%) with acceptable buy price (43% of ARV) — LOW confidence: comp evidence is thin or stale",
-            "totalInvestment": 165442,
-            "wholesalePrice": 88252
+            "recommendationReason": "Good ROI (24.8%) with acceptable buy price (42% of ARV) — LOW confidence: comp evidence is thin or stale",
+            "totalInvestment": 161364,
+            "wholesalePrice": 84174
           },
           "pipelineVersion": "5.0",
           "rehab": {
@@ -27351,7 +27541,7 @@
               {
                 "amount": 43190,
                 "label": "Base Full Cosmetic",
-                "reason": "Full Cosmetic at $35/sqft — Computer-vision renovation assessment: Full Cosmetic (48% confidence)",
+                "reason": "Full Cosmetic at $35/sqft — Computer-vision renovation assessment: Full Cosmetic (38% confidence)",
                 "source": "rehab_tier"
               },
               {
@@ -27414,7 +27604,7 @@
             ],
             "majorItemsCost": 24000,
             "perSqft": 35,
-            "reason": "Computer-vision renovation assessment: Full Cosmetic (48% confidence)",
+            "reason": "Computer-vision renovation assessment: Full Cosmetic (38% confidence)",
             "totalCost": 67190
           },
           "renovationLevelSource": "vision",
@@ -27436,7 +27626,7 @@
             },
             {
               "detail": "Evidence selection — 4 evidence comp(s) staged for Set-B",
-              "durationMs": 77,
+              "durationMs": 79,
               "label": "appraisal_rules",
               "status": "completed",
               "step": "appraisal_rules"
@@ -27449,8 +27639,8 @@
               "step": "appraisal_rules"
             },
             {
-              "detail": "Full Cosmetic @ 48% (12 photos)",
-              "durationMs": 19235,
+              "detail": "Full Cosmetic @ 38% (12 photos)",
+              "durationMs": 16720,
               "label": "renovation_assessment",
               "status": "completed",
               "step": "renovation_assessment"
@@ -27471,7 +27661,7 @@
             },
             {
               "detail": "26/26 comps condition-classified via Clef",
-              "durationMs": 0,
+              "durationMs": 1,
               "label": "comp_curb_appeal",
               "status": "completed",
               "step": "comp_curb_appeal"
@@ -27484,14 +27674,14 @@
               "step": "listing_details"
             },
             {
-              "detail": "1 price-corroborated · 9 stale-evidence · 0 price-divergent",
-              "durationMs": 1,
+              "detail": "1 price-corroborated · 8 stale-evidence · 0 price-divergent",
+              "durationMs": 0,
               "label": "evidence_verification",
               "status": "completed",
               "step": "evidence_verification"
             },
             {
-              "detail": "Set-B ARV $228,269 (T0 anchor)",
+              "detail": "Set-B ARV $223,738 (T0 anchor)",
               "durationMs": 1,
               "label": "set_b_arv",
               "status": "completed",
@@ -27499,7 +27689,7 @@
             },
             {
               "detail": "Response assembled",
-              "durationMs": 3,
+              "durationMs": 4,
               "label": "response_build",
               "status": "completed",
               "step": "response_build"
@@ -27507,34 +27697,34 @@
           ],
           "subject": {
             "classification": "transitional",
-            "confidence": 48,
+            "confidence": 38,
             "method": "batch_photo_analysis"
           },
           "visionAssessment": {
-            "confidence": 48,
+            "confidence": 38,
             "evidenceForClassification": [
-              "The brick ranch exterior has openings that appear boarded or covered and may require window or entry repairs.",
-              "The overall photo set includes examples of updated kitchens and refreshed finishes, so the evidence does not support a property-wide gut renovation."
+              "The brick exterior in one photo has apparent boarded openings and visible perimeter neglect.",
+              "The renovated interiors shown would require little visible cosmetic work if they belong to the subject property."
             ],
             "limitations": [
-              "The images show markedly different buildings and architectural styles, so it is unclear which photos depict the subject property.",
-              "The bathroom and the subject property's interior finishes are not reliably identifiable.",
-              "Mechanical systems, plumbing, electrical, roof condition, and concealed damage cannot be assessed from these images."
+              "The photos appear to show several different homes and unrelated locations, so they cannot be confidently attributed to the stated property.",
+              "Bathrooms are not shown.",
+              "Interior condition, building systems, and the cause or extent of the boarded openings cannot be verified."
             ],
             "majorObservations": [
-              "The first exterior image shows a brick ranch with several openings apparently boarded or covered, suggesting notable exterior and window/entry work.",
-              "Other images show substantially updated kitchens, finished flooring, and generally refreshed interiors, but their architecture differs markedly from the brick ranch.",
-              "No clear evidence of structural failure, major system damage, or a fully stripped interior is visible."
+              "One exterior photo shows a brick house with apparent boarded openings and a neglected perimeter.",
+              "Other photos show modern, finished kitchens and multiple well-maintained or renovated exteriors that do not appear consistent with that house.",
+              "The images provide no reliable evidence of major structural or mechanical failures."
             ],
             "model": "openai/gpt-6-luna",
             "photosExamined": 12,
             "provider": "openrouter",
             "renovationLevel": "Full Cosmetic",
-            "status": "ok"
+            "status": "needs_review"
           }
         },
         "riskFlags": [
-          "As-is AVM $79,490 runs 187% below comp-evidenced ARV $228,269 — distressed/stale model read; the comps are the evidence here."
+          "ARV $223,738 rides a single comp (4532 Richard Rd) — 181% above the $79,490 as-is estimate. Verify the anchor's pocket before trusting the spread."
         ],
         "subject": {
           "additionSquareFeet": null,
@@ -27559,22 +27749,22 @@
           "censusBlockGroup": "130630404101",
           "censusTract": "13063040410",
           "classification": {
-            "confidence": 48,
+            "confidence": 38,
             "method": "batch_photo_analysis",
             "reasoning": "Vision renovation assessment: Full Cosmetic",
             "type": "transitional"
           },
           "condition": "Full Cosmetic",
-          "conditionSummary": "Full Cosmetic is the best fit given the apparent need for broad visual and opening repairs in the primary exterior image, balanced against updated interiors elsewhere and no visible evidence of major system or structural failure.",
+          "conditionSummary": "The apparent boarded openings and poor exterior suggest substantial visible updating and repair, but the conflicting polished interior photos and lack of confirmed system or structural failures do not support a Heavy Rehab classification.",
           "constructionType": null,
           "cooling": null,
           "county": "Clayton",
           "curbAppeal": {
             "condition": "distressed",
-            "confidence": 42,
+            "confidence": 35,
             "photosExamined": 12,
             "source": "vision",
-            "summary": "The brick ranch image shows apparently covered openings and an unrefined front entry, while other exterior images appear to depict different, better-maintained homes."
+            "summary": "One exterior appears distressed due to boarded openings and an unkempt perimeter, although other exterior photos look renovated and may depict different properties."
           },
           "developmentSignal": null,
           "exteriorWalls": "brick",
@@ -27716,9 +27906,9 @@
             "status": "empty"
           },
           "photos": [
-            "/user/reports/job_1791164799786_1ff81119533a41b4/assets/2bbec9c1-9edb-450f-8046-f5bd18932628",
-            "/user/reports/job_1791164799786_1ff81119533a41b4/assets/10fb6f56-0f5e-4408-9a0c-fd3149c50851",
-            "/user/reports/job_1791164799786_1ff81119533a41b4/assets/925106b7-a859-4e30-8dba-ba34c7e9a705",
+            "/user/reports/job_1791164799786_1ff81119533a41b4/assets/bc78727a-45c8-4986-8605-93bde269f5d1",
+            "/user/reports/job_1791164799786_1ff81119533a41b4/assets/2328c444-6f9f-4638-8145-714a29dfda5c",
+            "/user/reports/job_1791164799786_1ff81119533a41b4/assets/739c0dd1-0fbb-4763-a629-cc9b3d0d2382",
             "https://ssl.cdn-redfin.com/photo/82/bigphoto/432/genMid.7848432_0.jpg",
             "https://ssl.cdn-redfin.com/photo/82/mbphoto/829/genMid.7848829_1_2.jpg"
           ],
@@ -27806,12 +27996,12 @@
         },
         "valuation": {
           "afterRenovationValue": 165000,
-          "arv": 228269,
-          "arvB": 228269,
-          "arvMethodology": "Set-B T0 anchor — anchored 1671 Lamont Ave",
-          "arvPerSqft": 185,
+          "arv": 223738,
+          "arvB": 223738,
+          "arvMethodology": "Set-B T0 anchor — anchored 4532 Richard Rd",
+          "arvPerSqft": 181,
           "arvSource": "appraisal",
-          "arvVsListPrice": 103269,
+          "arvVsListPrice": 98738,
           "asIsMarketIntel": {
             "asIsMarketPrice": null,
             "avgPricePerSqft": null,
@@ -27819,71 +28009,51 @@
             "compIds": [],
             "flipSaleCount": 0,
             "noDataReason": null,
-            "priceCeiling": 159788,
+            "priceCeiling": 156617,
             "thresholdPercent": 70
           },
           "asIsValue": null,
           "bMechanics": {
-            "anchorAddress": "1671 Lamont Ave",
+            "anchorAddress": "4532 Richard Rd",
             "attemptTrail": [
               "attempt 1 — verified"
             ],
-            "bracket": "ok",
-            "ceiling": 228268.9556509299,
+            "bracket": "all-bigger",
+            "ceiling": 223737.98076923078,
             "checks": [
               {
-                "message": "1144 Elaine Dr: verification — Sale at $70/sf is 44% of current pocket $158/sf — stale or different-market evidence",
-                "ruleId": "evidence.verification"
+                "message": "1144 Elaine Dr: verification — Sale at $70/sf is 44% of current pocket $158/sf — below current pocket, verify market fit",
+                "ruleId": "evidence.market_fit.below_pocket"
               },
               {
-                "message": "4532 Richard Rd: median-tier driver — no high-similarity renovated evidence",
-                "ruleId": "evidence.median_driver"
+                "message": "1671 Lamont Ave: verification — No comp AVM — sale price uncorroborated; Sale is 315 days old — outside preferred 207-day ",
+                "ruleId": "evidence.sale_age.stale"
               },
               {
-                "message": "1671 Lamont Ave: median-tier driver — no high-similarity renovated evidence",
-                "ruleId": "evidence.median_driver"
+                "message": "4323 Edinburgh Way: verification — No comp AVM — sale price uncorroborated; Sale is 371 days old — outside preferred 207-day ",
+                "ruleId": "evidence.sale_age.stale"
               },
               {
-                "message": "4323 Edinburgh Way: median-tier driver — no high-similarity renovated evidence",
-                "ruleId": "evidence.median_driver"
+                "message": "no ARV-tier labels — ARV driven on 1 retail-marked comp(s); 3 as-is-priced sale(s) excluded from ARV",
+                "ruleId": "setb.unlabeled_retail_evidence"
               },
               {
-                "message": "anchored to 1671 Lamont Ave (similarity 11.0)",
+                "message": "anchored to 4532 Richard Rd (similarity 7.3)",
                 "ruleId": "setb.anchor"
               },
               {
-                "message": "supporting range $178,458–$223,738 (2 comp(s) — bound, not blended)",
-                "ruleId": "setb.supporting_range"
-              },
-              {
-                "message": "anchor above supporting range — top of evidence",
-                "ruleId": "setb.support_bound.high"
-              },
-              {
-                "message": "condition uplift unverified — ARV at median-tier anchor",
-                "ruleId": "setb.condition_unverified"
+                "message": "bracketing: driver set is all-bigger — no size bracket",
+                "ruleId": "setb.size_bracket"
               }
             ],
             "conditionAdj": null,
-            "confidence": "medium",
+            "confidence": "low",
             "drivers": [
               {
                 "address": "4532 Richard Rd",
-                "conditionTier": "median",
+                "conditionTier": "unknown",
                 "contribution": 223738,
                 "tier": "unidentified"
-              },
-              {
-                "address": "1671 Lamont Ave",
-                "conditionTier": "median",
-                "contribution": 228269,
-                "tier": "unidentified"
-              },
-              {
-                "address": "4323 Edinburgh Way",
-                "conditionTier": "median",
-                "contribution": 178458,
-                "tier": "arv"
               }
             ],
             "expansionApplied": [
@@ -27892,14 +28062,12 @@
             ],
             "fallbackUsed": "sale_age_expansion",
             "flags": [
-              "1144 Elaine Dr: verification — Sale at $70/sf is 44% of current pocket $158/sf — stale or different-market evidence",
-              "4532 Richard Rd: median-tier driver — no high-similarity renovated evidence",
-              "1671 Lamont Ave: median-tier driver — no high-similarity renovated evidence",
-              "4323 Edinburgh Way: median-tier driver — no high-similarity renovated evidence",
-              "anchored to 1671 Lamont Ave (similarity 11.0)",
-              "supporting range $178,458–$223,738 (2 comp(s) — bound, not blended)",
-              "anchor above supporting range — top of evidence",
-              "condition uplift unverified — ARV at median-tier anchor"
+              "1144 Elaine Dr: verification — Sale at $70/sf is 44% of current pocket $158/sf — below current pocket, verify market fit",
+              "1671 Lamont Ave: verification — No comp AVM — sale price uncorroborated; Sale is 315 days old — outside preferred 207-day ",
+              "4323 Edinburgh Way: verification — No comp AVM — sale price uncorroborated; Sale is 371 days old — outside preferred 207-day ",
+              "no ARV-tier labels — ARV driven on 1 retail-marked comp(s); 3 as-is-priced sale(s) excluded from ARV",
+              "anchored to 4532 Richard Rd (similarity 7.3)",
+              "bracketing: driver set is all-bigger — no size bracket"
             ],
             "harnessVersion": "og-2026.10.04.1",
             "healed": false,
@@ -27907,11 +28075,11 @@
             "source": "T0 anchor",
             "sqftRateSource": null
           },
-          "buyPrice": 98252,
-          "buyPricePercent": 43,
-          "carryingCosts": 4565,
-          "closingCosts": 18262,
-          "confidence": "medium",
+          "buyPrice": 94174,
+          "buyPricePercent": 42,
+          "carryingCosts": 4475,
+          "closingCosts": 17899,
+          "confidence": "low",
           "confidenceReasons": [
             "4 verified flip resale(s) drive the ARV — transaction evidence",
             "Stale sale: oldest selected comp sold 12 months ago",
@@ -27919,76 +28087,76 @@
           ],
           "listPrice": 125000,
           "listPriceRealism": {
-            "gapDollars": 36748,
-            "gapPercent": 29.4,
+            "gapDollars": 40826,
+            "gapPercent": 32.7,
             "listPrice": 125000,
             "verdict": "low",
-            "wholesalePrice": 88252
+            "wholesalePrice": 84174
           },
           "locationPenalty": 0,
           "locationPenaltyPercent": 0,
           "processGrade": "clean",
           "projectedProfit": 40000,
-          "projectedROI": 24.2,
+          "projectedROI": 24.8,
           "recommendation": "buy",
-          "recommendationReason": "Good ROI (24.2%) with acceptable buy price (43% of ARV) — LOW confidence: comp evidence is thin or stale",
+          "recommendationReason": "Good ROI (24.8%) with acceptable buy price (42% of ARV) — LOW confidence: comp evidence is thin or stale",
           "rehabCost": 67190,
           "rehabLevel": "Full Cosmetic",
           "rehabLevelEstimates": [
             {
-              "buyPrice": 120592,
+              "buyPrice": 116514,
               "estimatedCost": 54850,
               "index": 0,
               "isSelected": false,
               "name": "Lipstick",
               "perSqft": 25,
               "projectedProfit": 30000,
-              "projectedROI": 17.1,
-              "wholesalePrice": 110592
+              "projectedROI": 17.5,
+              "wholesalePrice": 106514
             },
             {
-              "buyPrice": 104422,
+              "buyPrice": 100344,
               "estimatedCost": 61020,
               "index": 1,
               "isSelected": false,
               "name": "Light Cosmetic",
               "perSqft": 30,
               "projectedProfit": 40000,
-              "projectedROI": 24.2,
-              "wholesalePrice": 94422
+              "projectedROI": 24.8,
+              "wholesalePrice": 90344
             },
             {
-              "buyPrice": 98252,
+              "buyPrice": 94174,
               "estimatedCost": 67190,
               "index": 2,
               "isSelected": true,
               "name": "Full Cosmetic",
               "perSqft": 35,
               "projectedProfit": 40000,
-              "projectedROI": 24.2,
-              "wholesalePrice": 88252
+              "projectedROI": 24.8,
+              "wholesalePrice": 84174
             },
             {
-              "buyPrice": 75912,
+              "buyPrice": 71834,
               "estimatedCost": 79530,
               "index": 3,
               "isSelected": false,
               "name": "Heavy Rehab",
               "perSqft": 45,
               "projectedProfit": 50000,
-              "projectedROI": 32.2,
-              "wholesalePrice": 65912
+              "projectedROI": 33,
+              "wholesalePrice": 61834
             },
             {
-              "buyPrice": 57402,
+              "buyPrice": 53324,
               "estimatedCost": 98040,
               "index": 4,
               "isSelected": false,
               "name": "Full Gut",
               "perSqft": 60,
               "projectedProfit": 50000,
-              "projectedROI": 32.2,
-              "wholesalePrice": 47402
+              "projectedROI": 33,
+              "wholesalePrice": 43324
             }
           ],
           "rehabPerSqft": 35,
@@ -27996,14 +28164,14 @@
           "resultGrade": "weak",
           "spread": null,
           "spreadAnalysis": null,
-          "totalCosts": 22827,
-          "totalInvestment": 165442,
+          "totalCosts": 22374,
+          "totalInvestment": 161364,
           "wholesaleFee": 10000,
-          "wholesalePrice": 88252
+          "wholesalePrice": 84174
         },
         "visionAnalysis": {
-          "confidence": 48,
-          "estimatedRehabNeeds": "The first exterior image shows a brick ranch with several openings apparently boarded or covered, suggesting notable exterior and window/entry work.; Other images show substantially updated kitchens, finished flooring, and generally refreshed interiors, but their architecture differs markedly from the brick ranch.; No clear evidence of structural failure, major system damage, or a fully stripped interior is visible.",
+          "confidence": 38,
+          "estimatedRehabNeeds": "One exterior photo shows a brick house with apparent boarded openings and a neglected perimeter.; Other photos show modern, finished kitchens and multiple well-maintained or renovated exteriors that do not appear consistent with that house.; The images provide no reliable evidence of major structural or mechanical failures.",
           "exterior": {
             "condition": "poor",
             "notes": []
@@ -28011,55 +28179,54 @@
           "interior": {
             "condition": "kitchen: good; bath: not_visible; flooring: good; walls: good",
             "notes": [
-              "The brick ranch exterior has openings that appear boarded or covered and may require window or entry repairs.",
-              "The overall photo set includes examples of updated kitchens and refreshed finishes, so the evidence does not support a property-wide gut renovation."
+              "The brick exterior in one photo has apparent boarded openings and visible perimeter neglect.",
+              "The renovated interiors shown would require little visible cosmetic work if they belong to the subject property."
             ]
           },
           "overallCondition": "Full Cosmetic",
-          "summary": "Full Cosmetic is the best fit given the apparent need for broad visual and opening repairs in the primary exterior image, balanced against updated interiors elsewhere and no visible evidence of major system or structural failure."
+          "summary": "The apparent boarded openings and poor exterior suggest substantial visible updating and repair, but the conflicting polished interior photos and lack of confirmed system or structural failures do not support a Heavy Rehab classification."
         },
         "visionAssessment": {
           "bathroomCondition": "not_visible",
-          "confidence": 48,
+          "confidence": 38,
           "curbAppeal": {
             "condition": "distressed",
-            "confidence": 42,
+            "confidence": 35,
             "photosExamined": 12,
             "source": "vision",
-            "summary": "The brick ranch image shows apparently covered openings and an unrefined front entry, while other exterior images appear to depict different, better-maintained homes."
+            "summary": "One exterior appears distressed due to boarded openings and an unkempt perimeter, although other exterior photos look renovated and may depict different properties."
           },
           "evidenceAgainstLessSevereLevel": [
-            "The apparent boarding or covering of multiple openings on the brick ranch suggests more than routine touch-ups.",
-            "The exterior evidence raises questions about window and entry condition that cannot be resolved as minor cosmetic work."
+            "The boarded openings and neglected appearance in the brick-house photo exceed routine touch-ups or minor curb-appeal work."
           ],
           "evidenceAgainstMoreSevereLevel": [
-            "No visible roof collapse, foundation distress, major water or fire damage, or failed mechanical systems.",
-            "No interior is shown stripped to the studs."
+            "No visible evidence confirms foundation, roof, HVAC, plumbing, or electrical failure.",
+            "There is no evidence that the entire interior has been stripped or extensively damaged."
           ],
           "evidenceForClassification": [
-            "The brick ranch exterior has openings that appear boarded or covered and may require window or entry repairs.",
-            "The overall photo set includes examples of updated kitchens and refreshed finishes, so the evidence does not support a property-wide gut renovation."
+            "The brick exterior in one photo has apparent boarded openings and visible perimeter neglect.",
+            "The renovated interiors shown would require little visible cosmetic work if they belong to the subject property."
           ],
           "exteriorCondition": "poor",
           "flooringCondition": "good",
           "kitchenCondition": "good",
           "limitations": [
-            "The images show markedly different buildings and architectural styles, so it is unclear which photos depict the subject property.",
-            "The bathroom and the subject property's interior finishes are not reliably identifiable.",
-            "Mechanical systems, plumbing, electrical, roof condition, and concealed damage cannot be assessed from these images."
+            "The photos appear to show several different homes and unrelated locations, so they cannot be confidently attributed to the stated property.",
+            "Bathrooms are not shown.",
+            "Interior condition, building systems, and the cause or extent of the boarded openings cannot be verified."
           ],
           "majorObservations": [
-            "The first exterior image shows a brick ranch with several openings apparently boarded or covered, suggesting notable exterior and window/entry work.",
-            "Other images show substantially updated kitchens, finished flooring, and generally refreshed interiors, but their architecture differs markedly from the brick ranch.",
-            "No clear evidence of structural failure, major system damage, or a fully stripped interior is visible."
+            "One exterior photo shows a brick house with apparent boarded openings and a neglected perimeter.",
+            "Other photos show modern, finished kitchens and multiple well-maintained or renovated exteriors that do not appear consistent with that house.",
+            "The images provide no reliable evidence of major structural or mechanical failures."
           ],
           "model": "openai/gpt-6-luna",
           "photosExamined": 12,
           "provider": "openrouter",
-          "rationale": "Full Cosmetic is the best fit given the apparent need for broad visual and opening repairs in the primary exterior image, balanced against updated interiors elsewhere and no visible evidence of major system or structural failure.",
+          "rationale": "The apparent boarded openings and poor exterior suggest substantial visible updating and repair, but the conflicting polished interior photos and lack of confirmed system or structural failures do not support a Heavy Rehab classification.",
           "renovationLevel": "Full Cosmetic",
           "renovationLevelIndex": 2,
-          "status": "ok",
+          "status": "needs_review",
           "structuralConcerns": [],
           "visibleMajorSystemConcerns": [],
           "wallCeilingCondition": "good"
