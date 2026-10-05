@@ -46,6 +46,58 @@ function driverEvidenceVerified(driver: unknown): boolean {
     verification.priceCheck !== 'divergent'
 }
 
+function lastFailure(attemptTrail: string[]): string | null {
+  const final = attemptTrail.findLast((t) => t.startsWith('final — unverified'))
+  const match = final?.match(/^final — unverified \((.*)\)$/)
+  return match?.[1] ?? null
+}
+
+function gradeWord(grade: ResultGrade): string {
+  return grade === 'withheld' ? 'Withheld' : grade === 'floor' ? 'Floor' : grade === 'weak' ? 'Weak' : 'Verified'
+}
+
+function floorBasis(source: string, arvSource: string | null | undefined): string {
+  if (arvSource === 'avm' || source === 'T3 AVM floor') return 'subject AVM'
+  if (arvSource === 'assessed' || source === 'T4 assessed') return 'county assessed value'
+  if (source === 'T2 pocket-implied') return 'pocket-implied value'
+  if (arvSource === 'nearest') return 'nearest-comp estimate'
+  return 'conservative floor value'
+}
+
+export function resultStatusReason(
+  b: { source: string; conf: 'high' | 'medium' | 'low' | 'none'; drivers: unknown[]; flags: string[]; arv?: number | null; bracket?: string },
+  fallbackUsed: string | null | undefined,
+  attemptTrail: string[],
+  grades: { resultGrade: ResultGrade; processGrade: ProcessGrade },
+  context?: { arvSource?: string | null },
+): string {
+  const failure = lastFailure(attemptTrail)
+  const conf = b.conf === 'none' ? 'no' : b.conf
+  const count = b.drivers.length
+
+  if (grades.resultGrade === 'withheld') {
+    return `Withheld — ${failure ?? 'evidence produced no defensible answer'}.`
+  }
+  if (grades.resultGrade === 'floor') {
+    return `Floor — no checked comp set; using ${floorBasis(b.source, context?.arvSource)}.`
+  }
+
+  let why: string
+  if (failure) why = `final check failed: ${failure}`
+  else if (b.bracket === 'all-smaller') why = 'all driver comps are smaller than the subject'
+  else if (b.bracket === 'all-bigger') why = 'all driver comps are bigger than the subject'
+  else if (b.flags.some((f) => f.includes('exceeds size-adjusted ceiling'))) why = 'the answer hit the evidence ceiling'
+  else if (b.source === 'median+50% AVM uplift') why = 'only median-tier comps were found'
+  else if (b.source === 'median ceiling') why = 'evidence stopped at the median ceiling'
+  else if (count < 3) why = `only ${count || 'no'} checked comp${count === 1 ? '' : 's'} support${count === 1 ? 's' : ''} it`
+  else if (fallbackUsed && RESCUE_RUNGS.has(fallbackUsed)) why = 'the answer needed widened evidence'
+  else if (b.flags.length) why = 'supporting evidence has caveats'
+  else why = `${count} checked comps support it`
+
+  const retried = grades.processGrade === 'retried' ? ' after retry' : ''
+  return `${gradeWord(grades.resultGrade)} · ${conf} confidence — ${why}${retried}.`
+}
+
 export function gradeResult(
   b: { source: string; conf: 'high' | 'medium' | 'low' | 'none'; drivers: unknown[]; flags: string[]; arv?: number | null },
   fallbackUsed: string | null | undefined,

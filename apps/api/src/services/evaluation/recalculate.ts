@@ -18,7 +18,7 @@ import type { ValuationResult, MajorItem } from '../valuation/types'
 import type { AnalysisResponse } from '../analysis'
 import { evaluateB, bCondTier, HARNESS_VERSION } from '@flowstate-api/shared/appraisal'
 import { savedToBComps, savedToBSubject } from './saved-pool'
-import { gradeResult } from '../analysis/result-grade'
+import { gradeResult, resultStatusReason } from '../analysis/result-grade'
 import { checksForFlags } from '../analysis/rule-registry'
 
 const MAX_ARV_COMPS = 3
@@ -164,6 +164,13 @@ export async function recalculateReport(
     (saved.valuation?.bMechanics as { fallbackUsed?: string } | undefined)?.fallbackUsed ?? null,
     [],
   )
+  const statusReason = resultStatusReason(
+    bResult,
+    (saved.valuation?.bMechanics as { fallbackUsed?: string } | undefined)?.fallbackUsed ?? null,
+    [],
+    grades,
+    { arvSource },
+  )
   const mechanics = {
     source: bResult.source,
     confidence: bResult.conf,
@@ -213,6 +220,7 @@ export async function recalculateReport(
       confidence: bResult.conf === 'none' ? null : bResult.conf,
       resultGrade: grades.resultGrade,
       processGrade: grades.processGrade,
+      statusReason,
       arvMethodology: bResult.arv != null
         ? `Set-B replay: ${bResult.source}${bResult.anchorAddress ? ` — anchored ${bResult.anchorAddress}` : ''}`
         : 'Set-B produced no ARV on this evidence set — valuation withheld',

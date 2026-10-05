@@ -395,6 +395,8 @@ export interface ValuationData {
   resultGrade?: 'verified' | 'weak' | 'floor' | 'withheld'
   /** Did the run earn it — clean / retried / unverified */
   processGrade?: 'clean' | 'retried' | 'unverified'
+  /** One-line server explanation for the result/confidence badge */
+  statusReason?: string
   /** Set-B trade-tricks ARV (the pipeline ARV post-swap) */
   arvB?: number | null
   /** Set-B mechanics trail — anchor, drivers, ceiling, flags */
@@ -700,6 +702,8 @@ export interface ValuationData {
   resultGrade?: 'verified' | 'weak' | 'floor' | 'withheld'
   /** Did the run earn it — clean / retried / unverified */
   processGrade?: 'clean' | 'retried' | 'unverified'
+  /** One-line server explanation for the result/confidence badge */
+  statusReason?: string
   /** Set-B trade-tricks ARV (the pipeline ARV post-swap) */
   arvB?: number | null
   /** Set-B mechanics trail — anchor, drivers, ceiling, flags */

@@ -13,7 +13,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { basename, resolve } from 'node:path'
 import { evaluateB, HARNESS_VERSION } from '@flowstate-api/shared/appraisal'
-import { gradeResult } from '../apps/api/src/services/analysis/result-grade'
+import { gradeResult, resultStatusReason } from '../apps/api/src/services/analysis/result-grade'
 import { ruleIdForFlag } from '../apps/api/src/services/analysis/rule-registry'
 import { savedToBComps, savedToBSubject } from '../apps/api/src/services/evaluation/saved-pool'
 import { canonicalJson, sha256Text } from '../apps/api/src/services/evaluation/run-record'
@@ -201,6 +201,7 @@ function expectedMechanics(c: ReplayCase, attempt: Record<string, unknown> | nul
     checks: (attempt as Record<string, unknown> | null)?.checks ?? mechanics?.checks,
     resultGrade: valuation?.resultGrade,
     processGrade: valuation?.processGrade,
+    statusReason: valuation?.statusReason,
     buyPrice: numberOrNull(valuation?.buyPrice),
     rehabCost: numberOrNull(valuation?.rehabCost),
     projectedROI: numberOrNull(valuation?.projectedROI),
@@ -333,6 +334,12 @@ async function replayCase(c: ReplayCase): Promise<ReplayResult> {
     canonicalJson(driverSignature(expected.drivers)) === canonicalJson(driverSignature(replay.drivers)))
   pushDiff(diffs, 'resultGrade', expected.resultGrade, grades.resultGrade, expected.resultGrade === grades.resultGrade)
   pushDiff(diffs, 'processGrade', expected.processGrade, grades.processGrade, expected.processGrade === grades.processGrade)
+  if (expected.statusReason != null) {
+    const replayReason = resultStatusReason(replay, fallbackUsed, expectedTrail, grades, {
+      arvSource: typeof valuation?.arvSource === 'string' ? valuation.arvSource : null,
+    })
+    pushDiff(diffs, 'statusReason', expected.statusReason, replayReason, expected.statusReason === replayReason)
+  }
   pushDiff(diffs, 'buyPrice', expected.buyPrice, valuationReplay?.buyPrice ?? null,
     sameNumber(expected.buyPrice, numberOrNull(valuationReplay?.buyPrice)))
   pushDiff(diffs, 'rehabCost', expected.rehabCost, valuationReplay?.totalRehabCost ?? null,

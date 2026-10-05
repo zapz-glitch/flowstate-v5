@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { gradeResult } from '../src/services/analysis/result-grade'
+import { gradeResult, resultStatusReason } from '../src/services/analysis/result-grade'
 
 /**
  * Result grade — the run-level label, separate from comp classification.

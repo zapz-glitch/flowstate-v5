@@ -7,7 +7,7 @@
 
 import type { PropertyBundle } from '../property-api'
 import { evaluateB, bCondTier, HARNESS_VERSION } from '@flowstate-api/shared/appraisal'
-import { gradeResult } from './result-grade'
+import { gradeResult, resultStatusReason } from './result-grade'
 import { checksForFlags, type RuleCheck } from './rule-registry'
 import { compBadges } from './comp-badges'
 import type { NormalizedProperty, NormalizedComparable } from '../property-api/types'
@@ -776,6 +776,8 @@ export interface AnalysisResponse {
     resultGrade?: import('./result-grade').ResultGrade
     /** Did the run earn it — clean (attempt 1) / retried / unverified */
     processGrade?: import('./result-grade').ProcessGrade
+    /** One-line server explanation for the result/confidence badge */
+    statusReason?: string
     arvPerSqft: number
     /** As-Is value (current market value based on as_is comps) */
     asIsValue: number | null
@@ -1646,6 +1648,13 @@ export function buildAnalysisResponse(
   )
 
   const grades = gradeResult(bResult, appraisalResult.fallbackUsed, ctx.bAttemptTrail ?? [])
+  const statusReason = resultStatusReason(
+    bResult,
+    appraisalResult.fallbackUsed,
+    ctx.bAttemptTrail ?? [],
+    grades,
+    { arvSource },
+  )
 
   const arvMethodology = bResult.arv != null
     ? `Set-B ${bResult.source}${bResult.anchorAddress ? ` — anchored ${bResult.anchorAddress}` : ''}`
@@ -1775,6 +1784,7 @@ export function buildAnalysisResponse(
       arvMethodology,
       resultGrade: grades.resultGrade,
       processGrade: grades.processGrade,
+      statusReason,
       // One confidence vocabulary — the hero badge reads this; 'none'
       // renders no badge (never a misleading default).
       confidence: bResult.conf === 'none' ? null : bResult.conf,
