@@ -86,8 +86,8 @@ assert.deepEqual(B_REHAB_FRACTION, {
   assert.equal(r.source, 'T3 AVM floor')
   assert.equal(r.conf, 'low')
 }
-// T2 pocket-implied: ≥3 same-tract sales but none rule-enabled →
-// tract median $/sf × subject sqft
+// T2 pocket tiers: ≥3 same-tract sales but none rule-enabled → the
+// pocket's own sales classify into bands; thin pocket → cleaned median.
 {
   const dead = (ppsf: number) => comp({
     isEnabled: false, disableReasons: ['property type mismatch'],
@@ -95,7 +95,33 @@ assert.deepEqual(B_REHAB_FRACTION, {
   })
   const r = evaluateB(subject(), [dead(180), dead(200), dead(220)])
   assert.equal(r.arv, 300_000) // 200/sf × 1500
-  assert.equal(r.source, 'T2 pocket-implied')
+  assert.ok(r.source.startsWith('T2 pocket-tiers'))
+}
+// Banded pocket: the ARV band (top third) carries the answer, not the
+// raw median — renovated pockets price above the tract median.
+{
+  const dead = (ppsf: number) => comp({
+    isEnabled: false, disableReasons: ['property type mismatch'],
+    salePrice: ppsf * 1500, squareFeet: 1500,
+  })
+  const r = evaluateB(subject(), [dead(140), dead(150), dead(160), dead(200), dead(210), dead(220)])
+  assert.equal(r.arv, 330_000) // top-third median = 220/sf × 1500 — NOT the raw median 180
+  assert.equal(r.drivers.length, 2) // the two top-band sales stand behind it
+}
+// Cleaning: as-is-labeled and IQR outlier sales don't pollute the pocket.
+{
+  const dead = (ppsf: number, type?: string) => comp({
+    isEnabled: false, disableReasons: ['property type mismatch'],
+    salePrice: ppsf * 1500, squareFeet: 1500,
+    classification: type ? { type } : null,
+  })
+  const r = evaluateB(subject(), [
+    dead(170), dead(180), dead(185), dead(190), dead(200), dead(210), dead(220),
+    dead(40, 'as_is'),   // bounded-low — excluded before the fence
+    dead(900),           // IQR outlier — excluded by the fence
+  ])
+  assert.equal(r.arv, 330_000) // ARV band = 220/sf; the 40 and 900 sales never touched it
+  assert.ok(r.flags.some((f) => f.includes('dropped')))
 }
 // T1 lot-delta rescue (Ruskin — the cascade debut): killed ONLY on lot
 // size, close, same pocket → rescued, flagged not modeled

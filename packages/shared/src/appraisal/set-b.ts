@@ -63,6 +63,7 @@ export interface BSubject {
   yearBuilt?: number | null
   censusTract?: string | null
   subdivision?: string | null
+  neighborhoodName?: string | null
   landAssessedValue?: number | null
   taxAssessment?: number | null
   assessedValue?: number | null
@@ -85,6 +86,7 @@ export interface BComp {
   sameBlockGroup?: boolean | null
   censusTract?: string | null
   subdivision?: string | null
+  neighborhoodName?: string | null
   yearBuilt?: number | null
   lotSizeAcres?: number | null
   lotSizeSquareFeet?: number | null
@@ -215,18 +217,59 @@ export function evaluateB(
     }
   }
 
-  // T2 — pocket-implied: same-tract median ppsf × subject sqft
+  // T2 — pocket tiers. The neighborhood's own sales classify themselves:
+  // pool same-scope sales (tract first, then block group, then
+  // neighborhood name), clean them — as-is/bounded-low and stale or
+  // divergent sales out, $/sf IQR outliers out — then split the survivors
+  // into three bands by price position: top = ARV evidence, middle =
+  // market median (sanity-checks the AVM), bottom = investor/as-is
+  // average. The ARV band carries the answer at subject size; the bands
+  // stay visible in the flag trail.
   if (!pool.length) {
-    const tractPpsf = items
-      .filter((c) => c.salePrice && c.squareFeet && c.censusTract && c.censusTract === subject.censusTract)
-      .map((c) => bPpsfOf(c)!)
-      .sort((a, b) => a - b)
-    if (subSqft && tractPpsf.length >= 3) {
-      const med = tractPpsf[Math.floor(tractPpsf.length / 2)]
+    const normName = (v?: string | null) => v?.toLowerCase().replace(/[^a-z0-9]/g, '') ?? null
+    const pocketFor = (keep: (c: BComp) => boolean) =>
+      items.filter((c) =>
+        keep(c) && c.salePrice && c.squareFeet && bTierOf(c) !== 'as_is' && !bIsUnfit(c))
+    const scopes: { label: string; pool: BComp[] }[] = [
+      { label: 'tract', pool: pocketFor((c) => !!subject.censusTract && c.censusTract === subject.censusTract) },
+      { label: 'block group', pool: pocketFor((c) => c.sameBlockGroup === true) },
+      { label: 'neighborhood', pool: pocketFor((c) =>
+        !!normName(c.subdivision) && normName(c.subdivision) === normName(subject.subdivision)
+        || !!normName(c.neighborhoodName) && normName(c.neighborhoodName) === normName(subject.neighborhoodName)) },
+    ]
+    for (const { label, pool: pocket } of scopes) {
+      const ps = pocket.map((c) => ({ c, ppsf: bPpsfOf(c)! }))
+        .filter((x) => x.ppsf > 0).sort((a, b) => a.ppsf - b.ppsf)
+      if (ps.length < 3) continue
+      const q1 = ps[Math.floor(ps.length * 0.25)].ppsf
+      const q3 = ps[Math.floor(ps.length * 0.75)].ppsf
+      const iqr = q3 - q1
+      const clean = iqr > 0 ? ps.filter((x) => x.ppsf >= q1 - 1.5 * iqr && x.ppsf <= q3 + 1.5 * iqr) : ps
+      if (clean.length < 3) continue
+      const dropped = ps.length - clean.length
+      const med = (xs: typeof clean) => xs[Math.floor(xs.length / 2)].ppsf
+      const third = Math.floor(clean.length / 3)
+      const banded = clean.length >= 6
+      const bands = {
+        asIs: clean.slice(0, third),
+        median: clean.slice(third, clean.length - third),
+        arv: clean.slice(clean.length - third),
+      }
+      const arvPpsf = banded ? med(bands.arv) : med(clean)
+      if (!subSqft) break
+      flags.push(
+        `T2 pocket-tiers [${label}] — ${clean.length} cleaned sale(s)` +
+        (dropped ? ` (${dropped} outlier/bounded-low dropped)` : '') +
+        (banded
+          ? ` — as-is $${med(bands.asIs).toFixed(0)}/sf · median $${med(bands.median).toFixed(0)}/sf · ARV $${arvPpsf.toFixed(0)}/sf`
+          : ` — median $${arvPpsf.toFixed(0)}/sf (thin pocket)`))
       return {
-        arv: Math.round(med * subSqft), contribs: [], drivers: [], bracket: 'ok', conf: 'low',
-        source: 'T2 pocket-implied',
-        flags: [`T2 pocket-implied — ${tractPpsf.length} same-tract sales, median $${med.toFixed(0)}/sf`],
+        arv: Math.round(arvPpsf * subSqft), contribs: [], bracket: 'ok', conf: 'low',
+        source: `T2 pocket-tiers [${label}]`,
+        drivers: (banded ? bands.arv : clean).map((x) => ({
+          comp: x.c, contrib: Math.round(x.ppsf * subSqft), weight: 0, tier: 'arv' as const,
+        })),
+        flags,
       }
     }
   }
