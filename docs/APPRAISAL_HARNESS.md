@@ -21,6 +21,7 @@ second valuation.
 | `evidenceVerification.marketFit` | Comp sale $/sf vs its pocket reference | `in_range` / `below_pocket` / `above_pocket` / `unverified` |
 | `evidenceVerification.priceCheck` | Sale price vs the comp's own AVM | `corroborated` / `plausible` / `divergent` / `unverified` |
 | `evidenceVerification.transactionCheck` | Nominal + same-day same-price package-deed screen | `clean` / `package_deed` / `nominal_sale` / `unverified` |
+| Rural market reference | Subject AVM → same-scope comp AVMs → subject scope medians | Required before an adjacent pocket can pass |
 | `curbAppeal` | Clef/Luna listing evidence | Structured condition signal, confidence-gated |
 | `classification` | Flip/distress/transaction evidence | `arv` / `as_is` / `transitional` |
 | `adjustedPrice` | User appraisal rules | Contribution base |
@@ -40,6 +41,12 @@ pool:
   market evidence.
 
 The comp remains in the trace and report. It just cannot set value.
+
+At wide geography tiers, a comp inside the subject's own scope stays eligible
+under the normal rules. A comp in an adjacent scope must prove it belongs to
+a similar market: the closest adjacent block-group/tract/neighborhood groups
+are checked first, no more than five groups are searched, and the comp needs
+a value reference within 15% of the subject pocket reference.
 
 ## 3. Pool and contributions
 
@@ -134,8 +141,6 @@ archive fields are checked separately.
 
 ## 9. Known open work
 
-- Rural wide-scope behavior when no subject pocket reference exists is an
-  open policy decision; current code preserves the old pass-through.
 - Broader bulk-sale detection beyond same-day same-price package deeds.
 - Best-six/next-six enrichment waves.
 - More frozen fixtures for rural, withheld, distressed, and failure paths.

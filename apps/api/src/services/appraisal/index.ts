@@ -20,7 +20,7 @@
  */
 
 import type { NormalizedProperty, NormalizedComparable } from '../property-api/types'
-import { evaluateComparables, evaluateComparable, neighborhoodsMatch, isValueEquivalent, pocketHardScopesMatch, subjectRefPpsf, subjectPocketRefPpsf, pocketValueEquivalent } from './evaluator'
+import { evaluateComparables, evaluateComparable, neighborhoodsMatch, isValueEquivalent, pocketHardScopesMatch, subjectRefPpsf, subjectPocketRefPpsf, pocketValueEquivalent, adjacentScopeKey, adjacentScopeRanks } from './evaluator'
 import type {
   AppraisalFilter,
   AppraisalAdjustment,
@@ -733,9 +733,21 @@ class PropertyAppraisalService implements AppraisalService {
     //   a far comp is selectable only when ITS pocket trades at the
     //   subject's pocket level — value proof substitutes for scope match.
     const ruralRef = subjectPocketRefPpsf(subject, comparables)
-    const ruralOk = (c: AppraisedComparable) =>
-      (ruralRef == null || pocketValueEquivalent(ruralRef, c)) &&
-      c.crossesMajorRoad !== true
+    const ruralScopeRanks = adjacentScopeRanks(subject, comparables)
+    const ruralOk = (c: AppraisedComparable) => {
+      if (c.crossesMajorRoad === true) return false
+      const inSubjectScope = c.sameBlockGroup === true ||
+        (subject.censusBlockGroup != null && c.censusBlockGroup === subject.censusBlockGroup) ||
+        (subject.censusTract != null && c.censusTract === subject.censusTract) ||
+        (subject.subdivision != null && c.subdivision === subject.subdivision) ||
+        (subject.neighborhoodName != null && c.neighborhoodName === subject.neighborhoodName)
+      if (inSubjectScope) return true
+      const scopeKey = adjacentScopeKey(subject, c)
+      const rank = scopeKey ? ruralScopeRanks.get(scopeKey) : null
+      return ruralRef != null &&
+        rank != null && rank <= 5 &&
+        pocketValueEquivalent(ruralRef, c)
+    }
     if (expansion.allowGeographicExpansion) {
       for (const sqftLimit of sqftSteps) {
         for (const yearLimit of yearLadder) {
@@ -851,8 +863,7 @@ class PropertyAppraisalService implements AppraisalService {
                 geoPriority.get(f.type) !== 'soft' &&
                 !LOCATION_FAILURES.has(f.type)
             )
-            return hardFailures.length === 0 &&
-              (ruralRef == null || pocketValueEquivalent(ruralRef, c))
+            return hardFailures.length === 0 && ruralOk(c)
           })
           .sort((a, b) =>
             proximityCompare(a, b, streetNameKey(subject.address)) ||

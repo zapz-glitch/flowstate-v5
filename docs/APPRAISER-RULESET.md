@@ -14,7 +14,9 @@ should withhold or weaken the result rather than invent support.
 
 1. **Geography uses the tightest proven scope.** Block group is the tightest
    match, then tract, then neighborhood name. A comp outside all three is
-   out-of-pocket evidence, not pocket evidence.
+   out-of-pocket evidence, not pocket evidence. Wide-scope evidence must prove
+   market equivalence from the closest adjacent block/tract/neighborhood
+   groups first.
 2. **Evidence is screened before it can drive.** A comp stamped stale,
    divergent, below-pocket, unexplained above-pocket, package-deed, or
    nominal-sale cannot set ARV.
@@ -26,7 +28,9 @@ should withhold or weaken the result rather than invent support.
    renovated evidence explains the premium.
 5. **Sale price is the final market anchor.** Clef/Luna condition and the
    classification can change whether a comp may drive, but they do not
-   replace the recorded transaction.
+   replace the recorded transaction. Rural market equivalence uses subject
+   AVM/sqft first; when the subject AVM is missing, same-scope comp AVMs can
+   establish the subject pocket, then tight scope medians may fill the gap.
 6. **Condition evidence is structured.** A confident structured condition
    read wins. Old `tier:*` summary text is fallback only. Low-confidence
    reads stay unverified.
@@ -72,8 +76,6 @@ should withhold or weaken the result rather than invent support.
 
 ## Open decisions / not yet built
 
-- Whether a missing rural reference should fail or pass at wide geography
-  tiers. Current code intentionally preserves the old pass-through behavior.
 - Broader bulk-sale variants and same-day different-price package patterns.
 - Independent rule auditor. Replay proves determinism; it does not prove
   every configured rule was followed.

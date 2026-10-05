@@ -1408,37 +1408,78 @@ function compPpsf(c: { pricePerSqft?: number | null; salePrice?: number | null; 
  *  pocket level for selection at the wide geo tiers. */
 export const RURAL_POCKET_PCT = 0.15
 
-/** The subject's pocket value for the rural check, per the owner order:
- *  renovated-tier pool median (top half of same-tract sales) → scope
- *  medians (median-tier pocket value) → AVM/sqft. */
+function median(values: number[]): number | null {
+  const sorted = values.filter((v) => Number.isFinite(v) && v > 0).sort((a, b) => a - b)
+  return sorted.length ? sorted[Math.floor(sorted.length / 2)] : null
+}
+
+const avmPpsf = (x: { avmValue?: number | null; squareFeet?: number | null }): number | null =>
+  x.avmValue != null && x.avmValue > 0 && x.squareFeet != null && x.squareFeet > 0
+    ? x.avmValue / x.squareFeet
+    : null
+
+/** The subject's rural market reference, per policy: subject AVM/sqft →
+ *  same-scope comp AVM/sqft → subject scope medians. A missing reference does
+ *  not prove value equivalence. */
 export function subjectPocketRefPpsf(
   subject: NormalizedProperty,
   pool: NormalizedComparable[],
 ): number | null {
-  if (subject.censusTract) {
-    const tractPpsfs = pool
-      .filter((c) => c.censusTract === subject.censusTract && c.salePrice != null && c.squareFeet != null && c.squareFeet > 0)
-      .map((c) => c.salePrice! / c.squareFeet!)
-      .sort((a, b) => a - b)
-    if (tractPpsfs.length >= 4) {
-      const top = tractPpsfs.slice(Math.floor(tractPpsfs.length / 2))
-      return top[Math.floor(top.length / 2)]
-    }
-  }
+  const subjectAvm = avmPpsf(subject)
+  if (subjectAvm != null) return subjectAvm
+
+  const sameScope = pool.filter((c) =>
+    c.sameBlockGroup === true ||
+    (subject.censusBlockGroup != null && c.censusBlockGroup === subject.censusBlockGroup) ||
+    (subject.censusTract != null && c.censusTract === subject.censusTract) ||
+    (subject.subdivision != null && c.subdivision === subject.subdivision) ||
+    (subject.neighborhoodName != null && c.neighborhoodName === subject.neighborhoodName))
+  const scopeAvm = median(sameScope.map(avmPpsf).filter((v): v is number => v != null))
+  if (scopeAvm != null) return scopeAvm
   return subjectRefPpsf(subject)
 }
 
-/** Is the comp's pocket priced like the subject's? Comp pocket ref = its
- *  scope medians, else its own sale $/sf. Used at the wide geo tiers:
- *  a market trading at a different level is a different market. */
+/** Comp-side market evidence for the rural value check: own AVM/sqft →
+ *  tightest scope median → own sale $/sf. */
+export function compPocketRefPpsf(comp: NormalizedComparable): number | null {
+  return avmPpsf(comp) ?? comp.ppsfMedians?.SD ?? comp.ppsfMedians?.N4 ?? comp.ppsfMedians?.N3 ?? compPpsf(comp)
+}
+
+/** Is the comp's pocket priced like the subject's? Used at the wide geo
+ *  tiers: missing references cannot prove equivalence. */
 export function pocketValueEquivalent(
   refPpsf: number | null,
   comp: NormalizedComparable,
 ): boolean {
   if (refPpsf == null || refPpsf <= 0) return false
-  const compRef = comp.ppsfMedians?.SD ?? comp.ppsfMedians?.N4 ?? comp.ppsfMedians?.N3 ?? compPpsf(comp)
+  const compRef = compPocketRefPpsf(comp)
   if (compRef == null || compRef <= 0) return false
   return Math.abs(compRef - refPpsf) / refPpsf <= RURAL_POCKET_PCT
+}
+
+/** Adjacent-scope key for wide-tier ordering. Tightest known scope wins. */
+export function adjacentScopeKey(subject: NormalizedProperty, comp: NormalizedComparable): string | null {
+  if (comp.censusBlockGroup && comp.censusBlockGroup !== subject.censusBlockGroup) return `BG:${comp.censusBlockGroup}`
+  if (comp.censusTract && comp.censusTract !== subject.censusTract) return `T:${comp.censusTract}`
+  if (comp.neighborhoodName && comp.neighborhoodName !== subject.neighborhoodName) return `N:${comp.neighborhoodName}`
+  return null
+}
+
+/** Rank adjacent markets by their nearest comp (1 = closest). The rural
+ *  ladder only searches the closest five adjacent scope groups. */
+export function adjacentScopeRanks(
+  subject: NormalizedProperty,
+  comps: NormalizedComparable[],
+): Map<string, number> {
+  const nearest = new Map<string, number>()
+  for (const comp of comps) {
+    const key = adjacentScopeKey(subject, comp)
+    if (!key) continue
+    const d = comp.distanceMiles ?? 99
+    if (d < (nearest.get(key) ?? Infinity)) nearest.set(key, d)
+  }
+  const ranked = [...nearest.entries()].sort((a, b) => a[1] - b[1] || a[0].localeCompare(b[0]))
+  return new Map(ranked.map(([key], i) => [key, i + 1]))
 }
 
 /** ±10% pocket value equivalence — a comp across a boundary counts as the
