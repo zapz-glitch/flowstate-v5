@@ -253,7 +253,8 @@ pipelineReads.get('/queue', async (c) => {
   const hidden = await hiddenOpps(c.env)
   const body = r.body as { items?: Array<{ opportunityId?: string; address?: string }>; count?: number }
   if (Array.isArray(body?.items) && hidden.size) {
-    body.items = body.items.filter((i) => !i.opportunityId || !hidden.has(i.opportunityId))
+    body.items = body.items.filter((i) =>
+      (!i.opportunityId || !hidden.has(i.opportunityId)) && !hidden.has((i as { leadId?: string }).leadId ?? ''))
   }
   const auth = c.get('auth') as AuthContext | undefined
   const [apiItems, inflight] = await Promise.all([
