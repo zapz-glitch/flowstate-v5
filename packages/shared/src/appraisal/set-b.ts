@@ -503,9 +503,14 @@ export function evaluateB(
   // a pocket.
   const geoNorm = (v?: string | null) => v?.toLowerCase().replace(/[^a-z0-9]/g, '') ?? null
   const geoTier = (c: BComp): 0 | 1 | 2 | 3 => {
-    if (subject.censusTract && c.censusTract && c.censusTract === subject.censusTract) return 0
-    if (c.sameBlockGroup === true) return 1
+    // Tract/BG membership requires no major-road crossing — a comp across
+    // the road may be in the census polygon but it isn't the same pocket.
+    // It can still fall back to a neighborhood-name match below.
+    const near = !c.crossesMajorRoad
+    if (near && subject.censusTract && c.censusTract && c.censusTract === subject.censusTract) return 0
+    if (near && c.sameBlockGroup === true) return 1
     if (geoNorm(c.subdivision) && geoNorm(c.subdivision) === geoNorm(subject.subdivision)) return 2
+    if (geoNorm(c.neighborhoodName) && geoNorm(c.neighborhoodName) === geoNorm(subject.neighborhoodName)) return 2
     return 3
   }
   const GEO_LABEL = ['tract', 'block group', 'neighborhood'] as const
