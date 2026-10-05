@@ -194,6 +194,43 @@ export function evaluateB(
     arv: null, flags, drivers: [], contribs: [], bracket: 'ok', conf: 'none', source,
   })
 
+  // ── Marginal land rate — honest ladder ─────────────────────────────────
+  const subLand = subject.landAssessedValue ?? null
+  const subAvm = bSubjectAvm(subject)
+  const mktRatio = subAvm && subject.taxAssessment ? subAvm / subject.taxAssessment : 1.4
+  const slLot = bLotSf(subject)
+
+  let landRate: number | null = null
+  let landSource: string | null = null
+
+  // T1 — vacant-land sales in the same tract
+  const vacant = items
+    .filter((c) =>
+      (c.propertyType ?? '').toLowerCase().includes('land') &&
+      c.salePrice && bLotSf(c) &&
+      c.censusTract && c.censusTract === subject.censusTract)
+    .map((c) => c.salePrice! / bLotSf(c)!)
+    .sort((a, b) => a - b)
+  if (vacant.length >= 2) {
+    landRate = vacant[Math.floor(vacant.length / 2)]
+    landSource = `T1 vacant-land median $${landRate.toFixed(2)}/sf (${vacant.length} sales)`
+  } else {
+    // T2 — assessed-land regression over same-tract parcels (≥5)
+    const pts = items
+      .filter((c) => bLotSf(c) && c.landAssessedValue &&
+        c.censusTract && c.censusTract === subject.censusTract)
+      .map((c) => ({ x: bLotSf(c)!, y: c.landAssessedValue! }))
+    if (slLot && subLand) pts.push({ x: slLot, y: subLand })
+    if (pts.length >= 5) {
+      const slope = olsSlope(pts)
+      if (slope != null) {
+        landRate = Math.max(0, slope)
+        landSource = `T2 assessed-curve slope $${landRate.toFixed(2)}/sf (${pts.length} parcels)`
+      }
+    }
+  }
+  if (landSource) flags.push(`land rate: ${landSource}`)
+
   // Pool: enabled comps with sale + size evidence
   let pool = items.filter((c) => c.isEnabled && c.salePrice && c.squareFeet)
   let source = 'T0 anchor'
@@ -252,10 +289,26 @@ export function evaluateB(
       // band member's implied subject price is its sale plus the size
       // delta at a tapered rate, never flat $/sf.
       const implied = (x: { c: BComp; ppsf: number }) => {
-        if (!subSqft || !x.c.squareFeet) return x.c.salePrice!
-        const gap = Math.abs(subSqft - x.c.squareFeet) / x.c.squareFeet
-        const mf = gap <= 0.10 ? 0.50 : gap <= 0.25 ? 0.40 : 0.30
-        return x.c.salePrice! + (subSqft - x.c.squareFeet) * x.ppsf * mf
+        let v = x.c.salePrice!
+        if (subSqft && x.c.squareFeet) {
+          const gap = Math.abs(subSqft - x.c.squareFeet) / x.c.squareFeet
+          const mf = gap <= 0.10 ? 0.50 : gap <= 0.25 ? 0.40 : 0.30
+          v += (subSqft - x.c.squareFeet) * x.ppsf * mf
+        }
+        // Land — same ladder + ±20% cap as the driver path. A pocket
+        // member on half the subject's acreage isn't the same value.
+        const cLot = bLotSf(x.c)
+        let landAdj = 0
+        if (landRate != null && cLot && slLot) {
+          landAdj = landRate * (slLot - cLot)
+          if (landSource?.startsWith('T2')) landAdj *= mktRatio
+        } else if (subLand && x.c.landAssessedValue) {
+          landAdj = (subLand - x.c.landAssessedValue) * mktRatio * B_LAND_FACTOR
+        }
+        if (Math.abs(landAdj) >= 1000) {
+          landAdj = Math.max(-B_LAND_CAP_PCT * x.c.salePrice!, Math.min(B_LAND_CAP_PCT * x.c.salePrice!, landAdj))
+        }
+        return v + landAdj
       }
       const third = Math.floor(clean.length / 3)
       const banded = clean.length >= 6
@@ -300,43 +353,6 @@ export function evaluateB(
     }
     return { ...empty('T5 report-only'), flags: ['T5 report-only — no comp evidence, no anchor'] }
   }
-
-  // ── Marginal land rate — honest ladder ─────────────────────────────────
-  const subLand = subject.landAssessedValue ?? null
-  const subAvm = bSubjectAvm(subject)
-  const mktRatio = subAvm && subject.taxAssessment ? subAvm / subject.taxAssessment : 1.4
-  const slLot = bLotSf(subject)
-
-  let landRate: number | null = null
-  let landSource: string | null = null
-
-  // T1 — vacant-land sales in the same tract
-  const vacant = items
-    .filter((c) =>
-      (c.propertyType ?? '').toLowerCase().includes('land') &&
-      c.salePrice && bLotSf(c) &&
-      c.censusTract && c.censusTract === subject.censusTract)
-    .map((c) => c.salePrice! / bLotSf(c)!)
-    .sort((a, b) => a - b)
-  if (vacant.length >= 2) {
-    landRate = vacant[Math.floor(vacant.length / 2)]
-    landSource = `T1 vacant-land median $${landRate.toFixed(2)}/sf (${vacant.length} sales)`
-  } else {
-    // T2 — assessed-land regression over same-tract parcels (≥5)
-    const pts = items
-      .filter((c) => bLotSf(c) && c.landAssessedValue &&
-        c.censusTract && c.censusTract === subject.censusTract)
-      .map((c) => ({ x: bLotSf(c)!, y: c.landAssessedValue! }))
-    if (slLot && subLand) pts.push({ x: slLot, y: subLand })
-    if (pts.length >= 5) {
-      const slope = olsSlope(pts)
-      if (slope != null) {
-        landRate = Math.max(0, slope)
-        landSource = `T2 assessed-curve slope $${landRate.toFixed(2)}/sf (${pts.length} parcels)`
-      }
-    }
-  }
-  if (landSource) flags.push(`land rate: ${landSource}`)
 
   // ── Marginal sqft rate — appraiser ladder ───────────────────────────────
   const fitPool = pool.filter((c) => !bIsUnfit(c) && c.salePrice && c.squareFeet)
