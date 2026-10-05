@@ -18,8 +18,8 @@ should withhold or weaken the result rather than invent support.
    market equivalence from the closest adjacent block/tract/neighborhood
    groups first.
 2. **Evidence is screened before it can drive.** A comp stamped stale,
-   divergent, below-pocket, unexplained above-pocket, package-deed, or
-   nominal-sale cannot set ARV.
+   divergent, below-pocket, unexplained above-pocket, package-deed,
+   nominal-sale, or extreme-outlier cannot set ARV.
 3. **Stale means old.** A sale is stale only when it is outside the
    configured preferred `sale_age` window. Price is a separate market-fit
    check.

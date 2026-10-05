@@ -88,7 +88,7 @@ function check(record: Record<string, unknown>, storedHash: string | null, file:
     const label = str(comp?.address) ?? 'unknown comp'
     if (!comp?.salePrice || !comp.squareFeet) fail('driver.evidence', `${label}: driver lacks sale price or size`)
     if (verification?.staleness === 'stale') fail('driver.sale_age', `${label}: stale sale drove ARV`)
-    if (verification?.transactionCheck === 'package_deed' || verification?.transactionCheck === 'nominal_sale') {
+    if (['package_deed', 'nominal_sale', 'extreme_outlier'].includes(String(verification?.transactionCheck))) {
       fail('driver.transaction', `${label}: transaction noise drove ARV`)
     }
     if (verification?.priceCheck === 'divergent') fail('driver.price', `${label}: divergent sale drove ARV`)

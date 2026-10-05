@@ -26,8 +26,9 @@ export interface CompEvidenceVerification {
   /** comp sale $/sf vs the CURRENT pocket median — a comp priced far below
    *  or above today's pocket is a market-fit problem, not an age problem. */
   marketFit: 'in_range' | 'below_pocket' | 'above_pocket' | 'unverified'
-  /** Transaction noise: package deed / nominal sale are not market evidence. */
-  transactionCheck: 'clean' | 'package_deed' | 'nominal_sale' | 'unverified'
+  /** Transaction noise: package deed / nominal sale / extreme outlier are
+   *  not independent market evidence. */
+  transactionCheck: 'clean' | 'package_deed' | 'nominal_sale' | 'extreme_outlier' | 'unverified'
   /** comp sale $/sf ÷ pocket reference $/sf — null when no reference */
   pocketRatio: number | null
   /** Human-readable flags for the audit/UI */
@@ -69,6 +70,18 @@ export function verifyCompEvidence(
     flags.push('Same-day, same-price package deed — not an independent market comp')
   } else if (comp.salePrice == null || comp.salePrice <= 0) {
     transactionCheck = 'unverified'
+  }
+
+  // Extreme price outliers are transaction noise even when a vision read
+  // labels the home nicely — a 3x-pocket sale is a different market.
+  const ppsfForNoise = compPpsf(comp)
+  const pocketRatioForNoise = ppsfForNoise != null && poolRefPpsf != null && poolRefPpsf > 0
+    ? ppsfForNoise / poolRefPpsf
+    : null
+  if (transactionCheck === 'clean' && pocketRatioForNoise != null &&
+      (pocketRatioForNoise <= 0.35 || pocketRatioForNoise >= 2.0)) {
+    transactionCheck = 'extreme_outlier'
+    flags.push(`Sale at $${Math.round(ppsfForNoise!)}/sf is ${Math.round(pocketRatioForNoise * 100)}% of current pocket $${Math.round(poolRefPpsf!)}/sf — extreme outlier, not market evidence`)
   }
 
   // Price cross-check — comp's recorded sale vs its own AVM. A big gap means

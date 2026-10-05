@@ -54,6 +54,11 @@ const comp = (saleDate: string | null, salePrice: number, squareFeet = 1000, id 
   const v = verifyCompEvidence(subject, comp(day, 747_000), 250, 180, { packageDeed: true })
   assert.equal(v.transactionCheck, 'package_deed')
   assert.ok(v.flags.some((f) => f.toLowerCase().includes('package deed')))
+
+  const extreme = verifyCompEvidence(subject, comp(daysAgo(20), 700_000), 250, 180)
+  assert.equal(extreme.marketFit, 'above_pocket')
+  assert.equal(extreme.transactionCheck, 'extreme_outlier')
+  assert.ok(extreme.flags.some((f) => f.toLowerCase().includes('extreme outlier')))
 }
 
 console.log('evidence-verification: sale age, pocket price, and transaction noise are separate checks')

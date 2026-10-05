@@ -72,8 +72,8 @@ commits.
   process grade does not claim that storage is complete.
 - **Structured condition wins.** Confident condition reads take precedence
   over legacy `tier:*` text; low-confidence reads stay unverified.
-- **Transaction noise is explicit.** Same-day same-price package deeds and
-  nominal sales are stamped and cannot drive ARV.
+- **Transaction noise is explicit.** Same-day same-price package deeds,
+  nominal sales, and extreme price outliers are stamped and cannot drive ARV.
 - **Rural wide-scope evidence must prove market fit.** Subject AVM/sqft is
   used first; same-scope comp AVMs can establish the reference when the
   subject AVM is missing; missing evidence cannot rescue an adjacent comp.
@@ -84,8 +84,8 @@ commits.
 ## Still open
 
 - Extend transaction-noise screening beyond the shipped same-day same-price
-  package-deed and nominal-sale checks; bulk-sale variants and broader
-  outlier policy remain open.
+  package-deed, nominal-sale, and extreme-outlier checks; broader
+  bulk-sale variants remain open.
 - Audit any remaining condition reads outside `bCondTier`; Set-B now trusts
   structured condition and confidence before legacy `tier:*` text.
 - After Claude's UI pass, verify server → dashboard → selection change →

@@ -29,6 +29,7 @@ export function ruleIdForFlag(flag: string): string {
   if (f.includes('sale price uncorroborated')) return 'evidence.price.unverified'
   if (f.includes('package deed')) return 'evidence.transaction.package_deed'
   if (f.includes('nominal sale')) return 'evidence.transaction.nominal_sale'
+  if (f.includes('extreme outlier')) return 'evidence.transaction.extreme_outlier'
   if (f.includes('verification —')) return 'evidence.verification'
   if (f.includes('median-tier driver')) return 'evidence.median_driver'
   if (f.includes('median-tier evidence only')) return 'setb.median_uplift'

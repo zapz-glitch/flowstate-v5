@@ -20,7 +20,7 @@ second valuation.
 | `evidenceVerification.staleness` | Sale date vs preferred `sale_age` | `current` / `stale` / `unverified` |
 | `evidenceVerification.marketFit` | Comp sale $/sf vs its pocket reference | `in_range` / `below_pocket` / `above_pocket` / `unverified` |
 | `evidenceVerification.priceCheck` | Sale price vs the comp's own AVM | `corroborated` / `plausible` / `divergent` / `unverified` |
-| `evidenceVerification.transactionCheck` | Nominal + same-day same-price package-deed screen | `clean` / `package_deed` / `nominal_sale` / `unverified` |
+| `evidenceVerification.transactionCheck` | Nominal + same-day same-price package-deed screen | `clean` / `package_deed` / `nominal_sale` / `extreme_outlier` / `unverified` |
 | Rural market reference | Subject AVM → same-scope comp AVMs → subject scope medians | Required before an adjacent pocket can pass |
 | `curbAppeal` | Clef/Luna listing evidence | Structured condition signal, confidence-gated |
 | `classification` | Flip/distress/transaction evidence | `arv` / `as_is` / `transitional` |
@@ -37,8 +37,8 @@ pool:
 - `marketFit: above_pocket` — premium sale cannot drive unless renovated or
   premium condition/class evidence explains it.
 - `priceCheck: divergent` — recorded sale conflicts with the comp's own AVM.
-- `transactionCheck: package_deed` or `nominal_sale` — not independent
-  market evidence.
+- `transactionCheck: package_deed`, `nominal_sale`, or `extreme_outlier` —
+  not independent market evidence.
 
 The comp remains in the trace and report. It just cannot set value.
 
@@ -57,8 +57,8 @@ a value reference within 15% of the subject pocket reference.
    If no reliable slope exists, a tapered $/sf share handles the size gap.
 4. Each comp contributes `adjustedPrice + size delta + land delta`.
 5. A total adjustment above 25% is downweighted and flagged.
-6. Stale, divergent, poor market-fit, package-deed, and nominal-sale
-   evidence stays out of the verified driver pool.
+6. Stale, divergent, poor market-fit, package-deed, nominal-sale, and
+   extreme-outlier evidence stays out of the verified driver pool.
 
 ## 4. Driver and anchor selection
 
