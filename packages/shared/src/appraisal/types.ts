@@ -10,6 +10,7 @@
 export type FilterType =
   | 'subdivision_match'
   | 'neighborhood_match'
+  | 'geo_scope_match'
   | 'building_style_match'
   | 'foundation_match'
   | 'construction_material_match'
@@ -96,6 +97,16 @@ export interface PropertyLike {
   bathrooms?: number | null
   yearBuilt?: number | null
   subdivision?: string | null
+  /** ATTOM geography-context layers keyed by scope */
+  geoScopes?: {
+    county?: string
+    city?: string
+    zip?: string
+    schoolDistrict?: string
+    subdivision?: string
+    n4?: string
+    n3?: string
+  } | null
   propertyType?: string | null
   lotSizeSquareFeet?: number | null
   basementSquareFeet?: number | null

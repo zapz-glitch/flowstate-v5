@@ -10,10 +10,6 @@ import {
 } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import type { ValuationData } from './shared-types'
-import { useEvaluation } from '@/hooks/use-evaluation'
-import { arvRuleMatches } from '@/lib/recalc'
-import { ChevronDown, ChevronUp } from 'lucide-react'
-import { useState } from 'react'
 import { formatHeadlineMoney } from './headline-money'
 import { formatValuationNumber as safeFmt } from './valuation-number'
 
@@ -41,13 +37,6 @@ export function ValuationCard({
   isRecalculated?: boolean
   onOpenSettings?: () => void
 }) {
-  const { subject, arvOverride, arvAdjustmentRules, arvAdjustments: arvOverrides, onArvAdjustment } = useEvaluation()
-  const [adjOpen, setAdjOpen] = useState(false)
-  const rules = arvAdjustmentRules ?? []
-  const overrides = arvOverrides ?? {}
-  const appliedLines = valuation.arvAdjustments ?? []
-  const netAdj = appliedLines.reduce((sum, l) => sum + (l.direction === 'addition' ? l.amount : -l.amount), 0)
-
   const getRecommendationStyle = (rec?: string) => {
     if (!rec) return 'default'
     const upper = rec.toUpperCase()
@@ -68,7 +57,7 @@ export function ValuationCard({
               <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
                 <DollarSign className="w-4 h-4 text-primary" />
               </div>
-              <h3 className="text-body font-semibold">Underwriter Valuation</h3>
+              <h3 className="mono-label">Underwriter Valuation</h3>
             </div>
             <div className="flex items-center gap-2">
               {isRecalculated && (
@@ -97,16 +86,59 @@ export function ValuationCard({
                 tooltip={
                   <div className="space-y-1.5">
                     <p className="font-medium">After Repair Value</p>
-                    <p className="text-foreground-tertiary">Estimated market value of the property after renovations, based on weighted average of comparable sales.</p>
-                    <p className="font-mono text-[10px] text-foreground-tertiary mt-1">= Weighted Avg(Comp Adjusted Prices)</p>
+                    <p className="text-foreground-tertiary">Verified-evidence ARV — priced off the most similar verified comp, with size/lot/condition adjustments, capped at the evidence top.</p>
+                    <p className="font-mono text-[10px] text-foreground-tertiary mt-1">= the comp the ARV is priced off + adjustments (capped at the evidence top)</p>
                   </div>
                 }
               />
-              <div className="text-heading-sm font-bold text-primary">
+              <div className="text-heading-sm font-bold text-primary flex items-center gap-2">
                 ${formatHeadlineMoney(valuation.arv, valuation.displayedArv, valuation.displayRounding)}
+                {valuation.resultGrade && (
+                  <span
+                    className={cn(
+                      'text-[9px] font-bold px-1.5 py-0.5 rounded-full',
+                      valuation.resultGrade === 'verified' ? 'bg-emerald-500/15 text-emerald-500'
+                        : valuation.resultGrade === 'weak' ? 'bg-amber-500/15 text-amber-600'
+                        : valuation.resultGrade === 'floor' ? 'bg-blue-500/15 text-blue-500'
+                        : 'bg-red-500/15 text-red-400'
+                    )}
+                    title={`Result: ${valuation.resultGrade} · process: ${valuation.processGrade ?? 'unknown'}`}
+                  >
+                    {valuation.resultGrade}
+                  </span>
+                )}
               </div>
               {valuation.arvPerSqft != null && (
                 <div className="text-caption-sm text-foreground-tertiary mt-1">${valuation.arvPerSqft.toFixed(0)}/sqft</div>
+              )}
+              {valuation.bMechanics?.anchorAddress && (
+                <div
+                  className="text-[10px] font-mono text-cyan-600 dark:text-cyan-400 mt-1 truncate"
+                  title={valuation.bMechanics.flags.join('\n')}
+                >
+                  → {({
+                    'T0 anchor': 'Comp-anchored',
+                    'T1 land-adjusted': 'Comp-anchored',
+                    'T2 pocket-implied': 'Pocket est.',
+                    'T3 AVM floor': 'AVM est.',
+                    'T4 assessed': 'County value',
+                    'median+50% AVM uplift': 'Median + AVM est.',
+                  }[valuation.bMechanics.source] ?? valuation.bMechanics.source)} · {valuation.bMechanics.anchorAddress.split(',')[0]}
+                </div>
+              )}
+              {valuation.bMechanics && (valuation.bMechanics.drivers?.length ?? 0) > 0 && (
+                <div className="mt-1 space-y-0.5" title={(valuation.bMechanics.flags ?? []).join('\n')}>
+                  {valuation.bMechanics.drivers!.slice(0, 3).map((d, i) => (
+                    <div key={i} className="text-[9px] font-mono text-foreground-tertiary truncate">
+                      {d.address?.split(',')[0] ?? 'comp'} → ${d.contribution.toLocaleString()}
+                    </div>
+                  ))}
+                  {(valuation.bMechanics.attemptTrail?.length ?? 0) > 0 && (
+                    <div className="text-[9px] font-mono text-foreground-tertiary/70 truncate" title={valuation.bMechanics.attemptTrail!.join('\n')}>
+                      {valuation.bMechanics.attemptTrail!.join(' · ')}
+                    </div>
+                  )}
+                </div>
               )}
             </div>
             {valuation.listPrice != null && (
@@ -208,7 +240,7 @@ export function ValuationCard({
                   </div>
                 }
               />
-              <div className={cn('text-heading-sm font-semibold', (valuation.projectedProfit ?? 0) > 0 ? 'text-emerald-600' : 'text-red-600')}>
+              <div className={cn('text-heading-sm font-semibold', (valuation.projectedProfit ?? 0) > 0 ? 'text-brand' : 'text-red-600')}>
                 ${safeFmt(valuation.projectedProfit)}
               </div>
               {valuation.projectedROI != null && valuation.projectedROI !== 0 && (
@@ -251,89 +283,6 @@ export function ValuationCard({
               </div>
             )}
           </div>
-
-          {/* ARV additions / deductions — characteristic rules; per-report
-              apply + direction + % changes recalc and autosave */}
-          {rules.length > 0 && onArvAdjustment && (
-            <div className="mt-2 px-1 no-print">
-              <button
-                type="button"
-                onClick={() => setAdjOpen((o) => !o)}
-                className="flex items-center gap-1.5 text-[11px] text-foreground-tertiary hover:text-foreground transition-colors"
-              >
-                {adjOpen ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-                ARV adjustments
-                {arvOverride != null ? (
-                  <span className="text-[10px] text-amber-600 dark:text-amber-400">paused under manual ARV</span>
-                ) : appliedLines.length > 0 && (
-                  <span className={cn('tabular-nums font-medium', netAdj < 0 ? 'text-red-500' : 'text-emerald-600')}>
-                    {appliedLines.length} · {netAdj < 0 ? '−' : '+'}${safeFmt(Math.abs(netAdj))} net
-                  </span>
-                )}
-              </button>
-              {adjOpen && (
-                <div className="mt-1.5 space-y-1">
-                  {rules.map((rule) => {
-                    const o = overrides[rule.id]
-                    const applied = o?.applied ?? arvRuleMatches(rule, subject)
-                    const direction = o?.direction ?? rule.direction
-                    const percent = o?.percent ?? rule.percent
-                    const line = appliedLines.find((l) => l.id === rule.id)
-                    return (
-                      <div key={rule.id} className="flex items-center gap-2 text-caption">
-                        <button
-                          type="button"
-                          aria-pressed={applied}
-                          onClick={() => onArvAdjustment(rule.id, { ...o, applied: !applied })}
-                          className={cn(
-                            'w-1.5 h-1.5 rounded-full flex-shrink-0 transition-colors',
-                            applied ? 'bg-primary' : 'bg-foreground-tertiary/30 hover:bg-foreground-tertiary/60'
-                          )}
-                          title={applied ? 'Remove this adjustment' : 'Apply this adjustment'}
-                        />
-                        <span className={cn('min-w-[130px] truncate', !applied && 'text-foreground-tertiary/60')}>{rule.label}</span>
-                        {applied && (
-                          <>
-                            <button
-                              type="button"
-                              onClick={() => onArvAdjustment(rule.id, { ...o, applied: true, direction: direction === 'deduction' ? 'addition' : 'deduction' })}
-                              className={cn(
-                                'px-1.5 py-0 rounded text-[10px] font-medium transition-colors',
-                                direction === 'deduction' ? 'bg-red-500/15 text-red-500 hover:bg-red-500/25' : 'bg-emerald-500/15 text-emerald-600 hover:bg-emerald-500/25'
-                              )}
-                              title="Click to flip deduction ↔ addition"
-                            >
-                              {direction === 'deduction' ? '−' : '+'}
-                            </button>
-                            <input
-                              type="number"
-                              inputMode="decimal"
-                              step={0.5}
-                              min={0}
-                              max={100}
-                              defaultValue={percent}
-                              key={`${rule.id}-${percent}`}
-                              onBlur={(e) => {
-                                const v = parseFloat(e.target.value)
-                                if (Number.isFinite(v) && v >= 0 && v !== percent) onArvAdjustment(rule.id, { ...o, applied: true, percent: v })
-                              }}
-                              className="w-12 bg-transparent border-b border-border text-right tabular-nums text-caption outline-none focus:border-primary"
-                            />
-                            <span className="text-foreground-tertiary">%</span>
-                            {line && (
-                              <span className={cn('tabular-nums ml-auto', line.direction === 'deduction' ? 'text-red-500' : 'text-emerald-600')}>
-                                {line.direction === 'deduction' ? '−' : '+'}${safeFmt(line.amount)}
-                              </span>
-                            )}
-                          </>
-                        )}
-                      </div>
-                    )
-                  })}
-                </div>
-              )}
-            </div>
-          )}
 
           {(valuation.closingCosts != null || valuation.carryingCosts != null || valuation.totalInvestment != null || (valuation.locationPenalty ?? 0) > 0) && (
             <div className="flex items-center flex-wrap gap-x-6 gap-y-1 mt-3 text-body-sm px-1">

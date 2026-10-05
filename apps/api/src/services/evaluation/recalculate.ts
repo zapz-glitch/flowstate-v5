@@ -16,6 +16,10 @@ import type { Env } from '../../types'
 import { createValuationService } from '../valuation'
 import type { ValuationResult, MajorItem } from '../valuation/types'
 import type { AnalysisResponse } from '../analysis'
+import { evaluateB, bCondTier, HARNESS_VERSION } from '@flowstate-api/shared/appraisal'
+import { savedToBComps, savedToBSubject } from './saved-pool'
+import { gradeResult, resultStatusReason } from '../analysis/result-grade'
+import { checksForFlags } from '../analysis/rule-registry'
 
 const MAX_ARV_COMPS = 3
 
@@ -94,38 +98,64 @@ export async function recalculateReport(
       .sort((a, b) => (b.adjustedPrice ?? b.salePrice ?? 0) - (a.adjustedPrice ?? a.salePrice ?? 0))
       .slice(0, MAX_ARV_COMPS)
   } else {
-    const eligibleIds = new Set(eligible.map((c) => c.id))
-    const invalid = selectedCompIds.filter((id) => !eligibleIds.has(id))
+    // The operator's choice stands: the server's own selection never picks
+    // a comp that failed the rules, but a person may check one. It only has
+    // to be a real, priced sale with a known size.
+    const priced = items.filter((c) => (c.adjustedPrice ?? c.salePrice) != null &&
+      (c.adjustedPrice ?? c.salePrice)! > 0 && (c.squareFeet ?? 0) > 0)
+    const pricedIds = new Set(priced.map((c) => c.id))
+    const invalid = selectedCompIds.filter((id) => !pricedIds.has(id))
     if (invalid.length > 0) {
       throw Object.assign(
-        new Error(`One or more comparables lack valid sale evidence or failed appraisal rules: ${invalid.join(', ')}`),
+        new Error(`One or more comparables have no sale price or size on file: ${invalid.join(', ')}`),
         { status: 422 }
       )
     }
-    arvComps = eligible.filter((c) => selectedCompIds.includes(c.id))
+    arvComps = priced.filter((c) => selectedCompIds.includes(c.id))
   }
 
   if (arvComps.length === 0) {
     throw Object.assign(new Error('No comparable sales selected for ARV calculation.'), { status: 422 })
   }
 
-  // ARV = mean(adjustedPrice / compSqft) × subjectSqft, with a
-  // mean-adjusted-price fallback when sqft data is missing
-  const withSqft = arvComps.filter((c) => (c.squareFeet ?? 0) > 0)
-  let arv: number
-  if (withSqft.length === arvComps.length && subjectSqft > 0) {
-    const meanPerSqft = arvComps.reduce(
-      (sum, c) => sum + (c.adjustedPrice ?? c.salePrice!) / (c.squareFeet as number),
-      0
-    ) / arvComps.length
-    arv = Math.round(meanPerSqft * subjectSqft)
-  } else {
-    arv = Math.round(
-      arvComps.reduce((sum, c) => sum + (c.adjustedPrice ?? c.salePrice!), 0) / arvComps.length
-    )
+  // Set-B replay — saved comps carry their pinned evidence stamps
+  // (classification, curbAppeal, evidenceVerification) so the evaluation
+  // is deterministic: same stamps in, same ARV out. An operator selection
+  // constrains the enabled evidence set; the full pool still feeds pocket
+  // medians/verification context.
+  const enabledIds = selectedCompIds === null ? null : new Set(selectedCompIds)
+  const bComps = savedToBComps(items, enabledIds)
+  const savedVal = (saved.valuation ?? {}) as Record<string, unknown>
+  const engine = evaluateB(
+    savedToBSubject(saved),
+    bComps,
+    { rehabCost: (savedVal.rehabCost as number) ?? null },
+  )
+  // Operator selection — every checked comp counts. Each is repriced to the
+  // subject by the same size and land math the engine uses, and the ARV is
+  // the plain average of those repriced values. The automatic path (null)
+  // keeps the engine's own anchor answer.
+  const checked = enabledIds == null ? [] : engine.contribs.filter((x) => x.comp.isEnabled)
+  const bResult: typeof engine = enabledIds == null || checked.length === 0 ? engine : {
+    ...engine,
+    arv: Math.round(checked.reduce((sum, x) => sum + x.contrib, 0) / checked.length),
+    drivers: checked,
+    source: 'operator selection',
+    conf: 'low',
+    anchorAddress: null,
+    flags: [
+      ...engine.flags.filter((f) => !/^anchored to|^supporting range|anchor (above|below) supporting|^self-heal|no retail-priced evidence|no ARV-tier labels/.test(f)),
+      `operator selection — ARV is the average of ${checked.length} checked comp(s), each repriced to the subject`,
+    ],
   }
 
-  // Re-run valuation with the report's applied settings snapshot
+  // ARV = Set-B on the stamped evidence. When it produces no answer, the
+  // recalculated report withholds — it must not keep the prior ARV alive.
+  const arv = bResult.arv
+  const arvSource = bResult.arv != null ? bResult.source : 'withheld'
+
+  // Re-run valuation with the report's applied settings snapshot when an ARV
+  // exists; otherwise every downstream offer field is cleared with it.
   const applied = saved.appliedSettings
   const settings = applied
     ? {
@@ -140,7 +170,7 @@ export async function recalculateReport(
   const valuationService = createValuationService(applied?.rehabTable as never)
   const compAvgSqft =
     arvComps.reduce((sum, c) => sum + (c.squareFeet ?? 0), 0) / arvComps.length || subjectSqft
-  const valuation: ValuationResult = valuationService.calculateValuation({
+  const valuation: ValuationResult | null = arv != null ? valuationService.calculateValuation({
     arv,
     subjectSqft,
     compAvgSqft,
@@ -150,13 +180,62 @@ export async function recalculateReport(
     closingCostsPercent: settings?.closingCostsPercent ?? 8,
     carryingCostsPercent: settings?.carryingCostsPercent ?? 2,
     wholesaleFee: settings?.wholesaleFee ?? 10000,
-  })
+  }) : null
+  const grades = gradeResult(
+    bResult,
+    (saved.valuation?.bMechanics as { fallbackUsed?: string } | undefined)?.fallbackUsed ?? null,
+    [],
+  )
+  const statusReason = resultStatusReason(
+    bResult,
+    (saved.valuation?.bMechanics as { fallbackUsed?: string } | undefined)?.fallbackUsed ?? null,
+    [],
+    grades,
+    { arvSource },
+  )
+  const mechanics = {
+    source: bResult.source,
+    confidence: bResult.conf,
+    bracket: bResult.bracket,
+    flags: bResult.flags,
+    checks: checksForFlags(bResult.flags),
+    anchorAddress: bResult.anchorAddress ?? null,
+    conditionAdj: bResult.conditionAdj ?? null,
+    ceiling: bResult.ceiling ?? null,
+    landRateSource: bResult.landRateSource ?? null,
+    sqftRateSource: bResult.sqftRateSource ?? null,
+    healed: bResult.healed ?? false,
+    harnessVersion: HARNESS_VERSION,
+    fallbackUsed: (saved.valuation?.bMechanics as { fallbackUsed?: string } | undefined)?.fallbackUsed ?? null,
+    expansionApplied: (saved.valuation?.bMechanics as { expansionApplied?: string[] } | undefined)?.expansionApplied ?? [],
+    drivers: bResult.drivers.map((d) => ({
+      address: d.comp.address ?? null,
+      contribution: Math.round(d.contrib),
+      tier: d.tier,
+      conditionTier: bCondTier(d.comp),
+    })),
+  }
+
+  // Roles follow the answer just computed: checked comps are the drivers
+  // after an operator selection; after a reset the engine's own anchor and
+  // drivers come back.
+  const driverAddresses = new Set(bResult.drivers.map((d) => d.comp.address))
+  const roleOf = (c: SavedCompItem): string => {
+    const address = (c as { address?: string | null }).address ?? null
+    if (enabledIds) return enabledIds.has(c.id) ? 'driver' : c.appraisalRules?.passedFilters !== false ? 'pool' : 'excluded'
+    if (address != null && address === bResult.anchorAddress) return 'anchor'
+    if (address != null && driverAddresses.has(address)) return 'driver'
+    return c.appraisalRules?.passedFilters !== false ? 'pool' : 'excluded'
+  }
 
   // Recompute comp group tags + enabled counts
   const arvIds = new Set(arvComps.map((c) => c.id))
   const nextItems = items.map((c) => ({
     ...c,
-    isEnabled: c.appraisalRules?.passedFilters !== false,
+    // After an operator selection the checked comps ARE the enabled set, so
+    // the dashboard shows exactly the boxes the user left checked.
+    isEnabled: enabledIds ? enabledIds.has(c.id) : c.appraisalRules?.passedFilters !== false,
+    bRole: roleOf(c),
     compGroup: arvIds.has(c.id) ? ('arv' as const) : c.compGroup === 'arv' ? null : c.compGroup,
     isBestMatch: false,
   }))
@@ -172,21 +251,29 @@ export async function recalculateReport(
     valuation: {
       ...(saved.valuation ?? {}),
       arv,
-      arvPerSqft: subjectSqft > 0 ? Math.round(arv / subjectSqft) : null,
-      arvSource: 'appraisal',
-      arvMethodology: `avg(adjustedPrice/compSqft × subjectSqft) across ${arvComps.length} operator-selected comp${arvComps.length !== 1 ? 's' : ''}`,
-      buyPrice: valuation.buyPrice,
-      buyPricePercent: valuation.buyPricePercent,
-      rehabCost: valuation.totalRehabCost,
-      projectedProfit: valuation.projectedProfit,
-      projectedROI: valuation.projectedROI,
-      totalInvestment: valuation.totalInvestment,
-      wholesalePrice: valuation.wholesalePrice,
-      closingCosts: valuation.closingCosts,
-      carryingCosts: valuation.carryingCosts,
-      recommendation: valuation.recommendation,
-      recommendationReason: valuation.recommendationReason,
-      breakdown: valuation.breakdown,
+      arvPerSqft: arv != null && subjectSqft > 0 ? Math.round(arv / subjectSqft) : null,
+      arvSource,
+      arvB: bResult.arv,
+      confidence: bResult.conf === 'none' ? null : bResult.conf,
+      resultGrade: grades.resultGrade,
+      processGrade: grades.processGrade,
+      statusReason,
+      arvMethodology: bResult.arv != null
+        ? `Set-B replay: ${bResult.source}${bResult.anchorAddress ? ` — anchored ${bResult.anchorAddress}` : ''}`
+        : 'Set-B produced no ARV on this evidence set — valuation withheld',
+      bMechanics: mechanics,
+      buyPrice: valuation?.buyPrice ?? null,
+      buyPricePercent: valuation?.buyPricePercent ?? null,
+      rehabCost: valuation?.totalRehabCost ?? null,
+      projectedProfit: valuation?.projectedProfit ?? null,
+      projectedROI: valuation?.projectedROI ?? null,
+      totalInvestment: valuation?.totalInvestment ?? null,
+      wholesalePrice: valuation?.wholesalePrice ?? null,
+      closingCosts: valuation?.closingCosts ?? null,
+      carryingCosts: valuation?.carryingCosts ?? null,
+      recommendation: valuation?.recommendation ?? null,
+      recommendationReason: valuation?.recommendationReason ?? null,
+      breakdown: valuation?.breakdown ?? null,
     } as never,
     comps: {
       ...saved.comps,

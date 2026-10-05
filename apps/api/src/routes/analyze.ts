@@ -379,16 +379,34 @@ analyze.post('/', async (c) => {
         },
       }),
     });
-    // A live run owns the DO — surface its refusal (e.g. 409 already-running)
-    // instead of reporting success for a run that was never started.
+    // A live run owns the DO — don't error, hand the caller the same job
+    // and stream so it SUBSCRIBES to the in-flight evaluation. The jobId
+    // is deterministic per user+property and the SSE token validates
+    // against it regardless of when the run started — late-join replays
+    // the step state already streamed.
     if (!startResp.ok) {
+      if (startResp.status === 409) {
+        return c.json({
+          success: true,
+          data: {
+            jobId,
+            result: null,
+            alreadyRunning: true,
+            enrichment: {
+              streamUrl,
+              token,
+              pending: ['property_fetch', 'evaluation'],
+            },
+          },
+        })
+      }
       const errBody = await startResp.json().catch(() => null) as { error?: string } | null;
       return c.json(
         {
           success: false,
-          error: errBody?.error ?? 'Analysis could not be started — job already running',
+          error: errBody?.error ?? 'Analysis could not be started',
         },
-        startResp.status === 409 ? 409 : 502,
+        502,
       );
     }
     await startResp.text();
@@ -441,7 +459,7 @@ analyze.post('/', async (c) => {
  *
  * Poll a submitted analysis — the return channel for API clients that
  * can't hold the SSE stream. Returns job status while running and the
- * same AnalysisResponse (incl. jevOutcome) once complete. Falls back to
+ * same AnalysisResponse once complete. Falls back to
  * the saved report when the Durable Object state is gone.
  */
 analyze.get('/jobs/:jobId', async (c) => {
@@ -537,7 +555,7 @@ analyze.get('/jobs/:jobId', async (c) => {
  *
  * Manual comp-tier assignment — pin a comparable to 'arv' or 'as_is', or
  * clear the pin with tier null. Stored per (job, comp) and applied onto
- * the report at read time, so Jev's automatic classification is never
+ * the report at read time, so the automatic classification is never
  * rewritten — the override rides alongside it on the card and report.
  */
 analyze.put('/jobs/:jobId/comp-tier', async (c) => {

@@ -28,13 +28,31 @@ export function evaluateComparable(
   const filterResults = []
   const disableReasons: string[] = []
 
+  // Data-quality gates — mirror of the server evaluator; hard, never flexed.
+  if (comp.salePrice != null && comp.salePrice < 10_000) {
+    disableReasons.push(`Non-market sale — nominal price $${comp.salePrice.toLocaleString()}`)
+  }
+  if (comp.lotSizeSquareFeet != null && subject.lotSizeSquareFeet != null) {
+    const [big, small] = comp.lotSizeSquareFeet >= subject.lotSizeSquareFeet
+      ? [comp.lotSizeSquareFeet, subject.lotSizeSquareFeet]
+      : [subject.lotSizeSquareFeet, comp.lotSizeSquareFeet]
+    if (big > 43560 && big > small * 3) {
+      disableReasons.push(
+        `Lot category mismatch (${Math.round(comp.lotSizeSquareFeet).toLocaleString()} sqft vs subject ${Math.round(subject.lotSizeSquareFeet).toLocaleString()} sqft) — not comparable`,
+      )
+    }
+  }
+
   for (const filter of filters) {
     if (!filter.enabled) continue
 
     const result = evaluateFilter(subject, comp, filter)
     filterResults.push(result)
 
-    if (!result.passed && result.reason && filter.priority !== 'soft') {
+    // Name-based geography is rank-only — mirrors the API evaluator
+    // (docs/FILTER-LADDER.md): census tract / block group / neighborhood decide "same area".
+    if (!result.passed && result.reason && filter.priority !== 'soft' &&
+        !['geo_scope_match', 'subdivision_match', 'neighborhood_match'].includes(filter.type as string)) {
       disableReasons.push(result.reason)
     }
   }

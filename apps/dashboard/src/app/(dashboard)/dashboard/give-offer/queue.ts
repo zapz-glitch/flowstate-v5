@@ -34,11 +34,13 @@ const MIN_WAIT_SECONDS: Partial<Record<WaitFilter, number>> = {
   '24h': 24 * 3600,
 }
 
-/** Items that have a report to land on, filtered + ordered by wait. */
+/** All queued items — report or not — filtered + ordered by wait.
+ *  A lead whose eval failed or never ran still shows (needs-eval state)
+ *  rather than silently vanishing from the queue. */
 export function sortedQueue(items: PipelineItem[], mode: WaitFilter): PipelineItem[] {
   const now = Date.now()
   const minWait = MIN_WAIT_SECONDS[mode] ?? 0
-  const filtered = items.filter((i) => jobIdForItem(i) && (now - parseQueuedAt(i.queuedAt)) / 1000 >= minWait)
+  const filtered = items.filter((i) => (now - parseQueuedAt(i.queuedAt)) / 1000 >= minWait)
   return filtered.sort((a, b) =>
     mode === 'newest'
       ? parseQueuedAt(b.queuedAt) - parseQueuedAt(a.queuedAt)

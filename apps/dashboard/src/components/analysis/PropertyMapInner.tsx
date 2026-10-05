@@ -8,9 +8,13 @@ import type { MapCoordinate } from '@/lib/property-map-geometry'
 import { SubjectAerialMap, type SubjectAerialMapHandle } from './SubjectAerialMap'
 import { MapLegend } from './MapOverlay'
 import type { MapMarker } from './PropertyMap'
+import { emitMarkerHover } from './map-hover'
 
 type Panorama = NonNullable<Awaited<ReturnType<typeof resolveSubjectPanorama>>>
-const colors = { subject: '#3b82f6', 'comp-enabled': '#10b981', 'comp-disabled': '#6b7280' }
+// Comps are one neutral dot each · the price label beside it carries the
+// information, and the number ties the dot to its card.
+const colors = { subject: '#3b82f6', 'comp-arv': '#404040', 'comp-market': '#404040', 'comp-floor': '#404040', 'comp-disabled': '#a3a3a3' }
+const priceLabel = (price?: number | null) => price == null ? null : price >= 1_000_000 ? `$${(price / 1_000_000).toFixed(2)}M` : `$${Math.round(price / 1000)}k`
 const buttonClass = 'flex h-8 items-center justify-center gap-1 rounded-md border border-border bg-background px-2 text-xs text-foreground shadow-sm hover:bg-secondary disabled:opacity-40'
 
 // Optional Google libraries must fail independently; a missing 3D library must
@@ -25,26 +29,100 @@ async function loadLibrary(name: string): Promise<boolean> {
   } finally { clearTimeout(timer) }
 }
 
+const markerKey = (marker: MapMarker) => (marker.type === 'subject' ? 'subject' : marker.compKey)
+const markerIcon = (marker: MapMarker, active: boolean, index: number): google.maps.Icon | google.maps.Symbol => {
+  const fill = active ? '#f59e0b' : colors[marker.type]
+  if (marker.type === 'subject') {
+    return { path: google.maps.SymbolPath.CIRCLE, scale: 12, fillColor: fill, fillOpacity: 1, strokeColor: '#fff', strokeWeight: 2 }
+  }
+  // Dot with the card number inside; beside it a small tag: sale price, then
+  // price class, then condition.
+  const lines = [priceLabel(marker.price), marker.priceClass ?? null, marker.condition ?? null].filter((line): line is string => !!line)
+  const tagW = lines.length ? Math.max(...lines.map((line) => line.length)) * 6.8 + 14 : 0
+  const tagH = lines.length * 12 + 6
+  const h = Math.max(24, tagH)
+  const w = 24 + (lines.length ? 4 + tagW : 0)
+  const cy = h / 2
+  const esc = (text: string) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;')
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">`
+    + `<circle cx="12" cy="${cy}" r="10" fill="${fill}" stroke="#fff" stroke-width="2"/>`
+    + `<text x="12" y="${cy}" text-anchor="middle" dominant-baseline="central" font-family="system-ui,sans-serif" font-size="10" font-weight="700" fill="#fff">${index}</text>`
+    + (lines.length ? `<rect x="28" y="${(h - tagH) / 2}" width="${tagW}" height="${tagH}" rx="5" fill="#171717" fill-opacity="0.92" stroke="#fff" stroke-width="1"/>`
+      + lines.map((line, i) => `<text x="${28 + tagW / 2}" y="${(h - tagH) / 2 + 9 + i * 12}" text-anchor="middle" dominant-baseline="central" font-family="system-ui,sans-serif" font-size="${i === 0 ? 10 : 9}" font-weight="${i === 0 ? 700 : 500}" fill="${i === 0 ? '#fff' : '#d4d4d4'}">${esc(line)}</text>`).join('') : '')
+    + '</svg>'
+  return { url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`, anchor: new google.maps.Point(12, cy), size: new google.maps.Size(w, h) }
+}
+
+// Where the pointer is and where it last opened a comp from the map. Closing
+// the dialog with the pointer still resting on (or wiggling over) a marker must
+// not open it again. Module scope · the map layer remounts when the dialog
+// opens, which would otherwise forget the guard at the exact moment it matters.
+const hoverGuard: {
+  pointer: { current: { x: number; y: number } | null }
+  openedAt: { current: { x: number; y: number } | null }
+} = { pointer: { current: null }, openedAt: { current: null } }
+
 function FlatMarkers({ markers, activeMarkerKey, onMarkerClick }: {
   markers: MapMarker[]; activeMarkerKey?: string | null; onMarkerClick: (marker: MapMarker) => void
 }) {
   const map = useMap()
+  const instances = useRef<Array<{ marker: MapMarker; instance: google.maps.Marker }>>([])
+  const activeKey = useRef(activeMarkerKey)
+  activeKey.current = activeMarkerKey
+  // Hover opens the comp detail once, then stays quiet until the pointer has
+  // travelled away from where it opened (see hoverGuard). A click always opens.
+  const { pointer, openedAt } = hoverGuard
+
+  // Build markers once per marker set · a highlight change must not rebuild
+  // them under the pointer (that re-fires mouseover and reopens the dialog).
   useEffect(() => {
     if (!map) return
-    const instances = markers.map((marker, index) => {
-      const active = (marker.type === 'subject' ? 'subject' : marker.compKey) === activeMarkerKey
+    const REARM_DISTANCE = 32 // px · comfortably outside a 20px marker
+    const at = (event?: { domEvent?: Event }) => {
+      const dom = event?.domEvent
+      return dom instanceof MouseEvent ? { x: dom.clientX, y: dom.clientY } : pointer.current
+    }
+    const container = map.getDiv()
+    const track = (event: MouseEvent) => {
+      pointer.current = { x: event.clientX, y: event.clientY }
+      const origin = openedAt.current
+      if (origin && Math.hypot(event.clientX - origin.x, event.clientY - origin.y) > REARM_DISTANCE) openedAt.current = null
+    }
+    container.addEventListener('mousemove', track, true)
+    instances.current = markers.map((marker, index) => {
       const instance = new google.maps.Marker({
         map, position: marker, title: marker.label,
-        icon: { path: google.maps.SymbolPath.CIRCLE, scale: marker.type === 'subject' ? 12 : 10,
-          fillColor: active ? '#f59e0b' : colors[marker.type], fillOpacity: 1, strokeColor: '#fff', strokeWeight: 2 },
-        label: { text: marker.type === 'subject' ? 'S' : String(index), color: '#fff', fontSize: '10px' },
+        icon: markerIcon(marker, markerKey(marker) === activeKey.current, index),
+        label: marker.type === 'subject' ? { text: 'S', color: '#fff', fontSize: '10px' } : undefined,
         zIndex: marker.type === 'subject' ? 100 : 10,
       })
-      instance.addListener('click', () => onMarkerClick(marker))
-      return instance
+      instance.addListener('click', (event: google.maps.MapMouseEvent) => {
+        openedAt.current = at(event)
+        onMarkerClick(marker)
+      })
+      // Hover shows the comp beside the subject (see map-hover) · a click
+      // still opens the full comp detail.
+      if (marker.type !== 'subject' && marker.compKey) {
+        const compKey = marker.compKey
+        instance.addListener('mouseover', (event: google.maps.MapMouseEvent) => {
+          const point = at(event)
+          if (point) emitMarkerHover({ compKey, x: point.x, y: point.y })
+        })
+        instance.addListener('mouseout', () => emitMarkerHover(null))
+      }
+      return { marker, instance }
     })
-    return () => instances.forEach(marker => { google.maps.event.clearInstanceListeners(marker); marker.setMap(null) })
-  }, [map, markers, activeMarkerKey, onMarkerClick])
+    return () => {
+      container.removeEventListener('mousemove', track, true)
+      instances.current.forEach(({ instance }) => { google.maps.event.clearInstanceListeners(instance); instance.setMap(null) })
+      instances.current = []
+    }
+  }, [map, markers, onMarkerClick])
+
+  // Highlight (card hover, selection) only restyles the existing markers.
+  useEffect(() => {
+    instances.current.forEach(({ marker, instance }, index) => instance.setIcon(markerIcon(marker, markerKey(marker) === activeMarkerKey, index)))
+  }, [activeMarkerKey, markers, map])
   return null
 }
 
@@ -249,7 +327,13 @@ function SubjectMap({ markers, onMarkerClick, activeMarkerKey }: PropertyMapInne
           <SubjectAerialMap ref={aerial} subject={location.coordinate} markers={correctedMarkers} activeMarkerKey={activeMarkerKey} onMarkerClick={selectMarker} onStreetView={panorama ? openStreet : undefined} onUnavailable={mark3DUnavailable} /> : mapStyle !== '3d' || threeD === 'unavailable' ?
           <Map defaultCenter={location.coordinate} defaultZoom={18} mapTypeId={mapStyle === 'roadmap' ? 'roadmap' : 'hybrid'}
             mapId={process.env.NEXT_PUBLIC_GOOGLE_MAP_ID || undefined}
-            renderingType="VECTOR" isFractionalZoomEnabled tilt={0} gestureHandling="greedy" clickableIcons keyboardShortcuts
+            // Percentage heights collapse inside the min-h flex wrapper — pin
+            // the map to the container so it always has a real viewport size.
+            style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}
+            // VECTOR tiles require a Map ID — without one the map fails to
+            // init entirely. Omit renderingType so the default raster works.
+            {...(process.env.NEXT_PUBLIC_GOOGLE_MAP_ID ? { renderingType: 'VECTOR' as const } : {})}
+            isFractionalZoomEnabled tilt={0} gestureHandling="greedy" clickableIcons keyboardShortcuts
             zoomControl mapTypeControl={false} streetViewControl={false} fullscreenControl fullscreenControlOptions={{ position: google.maps.ControlPosition.LEFT_TOP }} scaleControl>
             <NativeMapCamera mapRef={nativeMap} />
             <FlatMarkers markers={correctedMarkers} activeMarkerKey={activeMarkerKey} onMarkerClick={selectMarker} />
@@ -257,11 +341,10 @@ function SubjectMap({ markers, onMarkerClick, activeMarkerKey }: PropertyMapInne
         {view === 'aerial' && (mapStyle !== '3d' || threeD !== 'loading') && <MapLegend />}
         {view === 'loading' && <div role="status" className="p-4 text-sm">{streetStatus}</div>}
       </div>
-      <div className="shrink-0 border-t border-border bg-background px-2 py-1 text-[10px] text-foreground-secondary" aria-live="polite">
-        <div className="truncate font-medium" title={original.label}>{original.label}</div>
-        {view === 'street' ? <><div>{streetStatus}</div><div>{location?.addressMatched ? 'Address matched.' : 'Using report coordinates; address not confirmed.'} Image may show neighboring buildings.</div></>
-          : view === 'aerial' ? <><div>{mapStyle !== '3d' ? 'Drag to explore · double-click or scroll to zoom · Subject to recenter' : threeD === 'unavailable' ? 'Satellite fallback · 3D unavailable' : '45° aerial · double-click to rotate · zoom in for Street View'}</div>{!location?.addressMatched && <div>Using report coordinates; address not confirmed.</div>}{!panorama && <div>{streetStatus}</div>}</> : null}
-      </div>
+      {/* Only real status shows under the map · no address or how-to text */}
+      {(view === 'street' || !panorama || !location?.addressMatched) && (view === 'street' || streetStatus) ? (
+        <div className="sr-only" aria-live="polite">{streetStatus}</div>
+      ) : null}
     </div>
   )
 }

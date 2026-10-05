@@ -250,7 +250,9 @@ matches. Misses and hand-offs use the model; `agent.assert`,
   and share replays with CI and teammates (CI stays `read-only` unless
   `cache: 'read-write'` is set).
 - A failing run evicts the entries it implicates; `--no-cache` rules the
-  cache out of a failure.
+  cache out of a failure. A cancelled run and a failure where no model
+  answered (`MODEL_PROVIDER_FAILED`, `MODEL_UNAVAILABLE`) implicate nothing
+  and evict nothing.
 - With committed recordings, `--strict-cache` in CI fails a recording that
   no longer replays with `REPLAY_STALE` instead of quietly spending model
   calls every run; re-record locally and commit. Unrecorded steps still run

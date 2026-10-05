@@ -12,6 +12,7 @@ import type { NormalizedProperty, NormalizedComparable } from '../property-api/t
 export type FilterType =
   | 'subdivision_match'
   | 'neighborhood_match'
+  | 'geo_scope_match'
   | 'building_style_match'
   | 'foundation_match'
   | 'construction_material_match'
@@ -19,7 +20,6 @@ export type FilterType =
   | 'garage_match'
   | 'stories_match'
   | 'roof_material_match'
-  | 'condition_match'
   | 'sale_age'
   | 'sqft_diff'
   | 'year_built_diff'
@@ -38,6 +38,10 @@ export type FilterType =
   // year_built_diff: evaluates comp.yearBuilt <= filter.value. Never a
   // default filter row — the evaluator exists only for that tier.
   | 'year_built_cap'
+  // Injected by the ladder at the deepest year tier for ANY subject:
+  // when every band tier fails, era-class matching is the fallback catch —
+  // same or adjacent era passes flagged, 2+ era gaps fail.
+  | 'year_built_era'
 
 export interface AppraisalFilter {
   type: FilterType
@@ -61,6 +65,10 @@ export const DEFAULT_FILTERS: AppraisalFilter[] = [
   // the comp pool (name OR code).
   { type: 'subdivision_match', enabled: true, value: 1 },
   { type: 'neighborhood_match', enabled: true, value: 1, priority: 'soft' },
+  // Phase-1 scope requirement — every populated geography scope (county,
+  // city, zip, school district, subdivision, N4) must match. Soft so the
+  // ladder can go lenient when no all-scope comps exist.
+  { type: 'geo_scope_match', enabled: true, value: 1, priority: 'hard' },
   { type: 'building_style_match', enabled: true, value: 1, priority: 'hard' }, // Ranch vs Ranch, 2-story style vs same — verified mismatches disqualify
   // Foundation is a verified-hard match — slab vs pier/crawl comps carry
   // real value gaps (typically ~10%); a verified mismatch disqualifies.
@@ -68,7 +76,6 @@ export const DEFAULT_FILTERS: AppraisalFilter[] = [
   { type: 'construction_material_match', enabled: true, value: 1, priority: 'soft' },
   { type: 'pool_match', enabled: true, value: 1, priority: 'soft' },
   { type: 'garage_match', enabled: true, value: 1, priority: 'soft' },
-  { type: 'condition_match', enabled: true, value: 1, priority: 'soft' }, // assessor condition — comp at/above subject tier scores higher
   { type: 'stories_match', enabled: true, value: 1, priority: 'hard' }, // 1-story vs 1-story, 2-story vs 2-story — verified mismatches disqualify
   { type: 'roof_material_match', enabled: true, value: 1, priority: 'soft' },
   // Size/recency/geography thresholds (relaxable in expansion tiers)
@@ -148,6 +155,12 @@ export const FILTER_LABELS: Record<FilterType, {
     unit: '',
     description: 'Must be in the same neighborhood — fallback geography when no subdivision exists',
   },
+  geo_scope_match: {
+    label: 'Geo Scope Match',
+    shortLabel: 'Geo Scope',
+    unit: '',
+    description: 'All populated ATTOM geography scopes (county, city, zip, school district, subdivision, neighborhood) must match',
+  },
   building_style_match: {
     label: 'Building Style Match',
     shortLabel: 'Style',
@@ -189,12 +202,6 @@ export const FILTER_LABELS: Record<FilterType, {
     shortLabel: 'Roof',
     unit: '',
     description: 'Roof cover material should match the subject (preferred — matters in some markets)',
-  },
-  condition_match: {
-    label: 'Assessor Condition Match',
-    shortLabel: 'Condition',
-    unit: '',
-    description: 'Comp assessor condition must be at or above the subject tier (e.g. comp cannot be worse condition)',
   },
   sale_age: {
     label: 'Sale Age',
@@ -261,6 +268,12 @@ export const FILTER_LABELS: Record<FilterType, {
     shortLabel: 'Year Cap',
     unit: 'year',
     description: 'Comp must be built on or before this year (vintage-subject fallback tier)',
+  },
+  year_built_era: {
+    label: 'Build Era Match',
+    shortLabel: 'Era Match',
+    unit: '',
+    description: 'Fallback catch at the deepest year tier — same or adjacent construction era as subject',
   },
 }
 
@@ -455,6 +468,12 @@ export interface ExpansionPolicy {
   yearBuiltExpansionSteps?: number[]
   /** Allow dropping the subdivision constraint within a widened radius (default: true) */
   allowGeographicExpansion?: boolean
+  /** Allow widening sqft_diff inside every geo scope — ±250 first, then
+   *  the listed absolute bands (default: [500, 750, 1000]). Size is a
+   *  preference order, not a wall. */
+  allowSqftExpansion?: boolean
+  /** Absolute sqft_diff bands tried in order after the configured value. */
+  sqftExpansionSteps?: number[]
   /** Allow dropping the radius constraint entirely (default: true) */
   allowNeighborhoodExpansion?: boolean
   /** Distance multiplier when geography expands (default: 2 = widen to 2× configured radius) */
@@ -478,6 +497,8 @@ export const DEFAULT_EXPANSION_POLICY: Required<ExpansionPolicy> = {
   allowYearBuiltExpansion: true,
   yearBuiltExpansionSteps: [2, 4],
   allowGeographicExpansion: true,
+  allowSqftExpansion: true,
+  sqftExpansionSteps: [500, 750, 1000],
   allowNeighborhoodExpansion: true,
   geographicDistanceMultiplier: 2,
   allowSaleAgeExpansion: true,
@@ -509,42 +530,9 @@ export interface AppraisedComparable extends NormalizedComparable {
   arvStatus?: 'selected' | 'not_examined' | 'disqualified'
   /** Adjusted price after applying rules */
   adjustedSalePrice: number | null
-  /**
-   * Jev truth scores (0–1). arvTruth: reliable evidence of the subject's
-   * after-renovation retail value. investmentTruth: reliable evidence of
-   * the subject's as-is investor value. Present when Jev comp selection ran.
-   */
-  jevArvTruth?: number | null
-  jevInvestmentTruth?: number | null
-  /**
-   * Candidate B structured price classification (ARV | AS_IS |
-   * UNIDENTIFIED) with probabilities + confidence. Present when the v2
-   * classifier ran (shadow or enabled); absent for comps that never
-   * reached classification. Observability only under shadow mode.
-   */
-  jevPriceClassification?: import('../jev').JevCompPriceClass | null
-  /**
-   * Attribute screen (services/jev attribute screen): Jev's 0–1 match per
-   * comparability attribute (same neighborhood/subdivision, sqft & lot
-   * range, style/construction/foundation, year built). Present when the
-   * screen ran (shadow or enabled).
-   */
-  jevAttributeScores?: Partial<Record<import('../jev').CompAttributeKey, number>> | null
   /** Weighted closeness score (0–1) from the deterministic exception screen */
-  jevScreenScore?: number | null
   /** Whether the comp made the exception screen's top-N candidate pool */
-  jevScreenPool?: boolean
   /** Price-band bucket the screened comp landed in — 'arv' or 'as_is', mutually exclusive */
-  jevScreenBand?: 'arv' | 'as_is' | null
-  jevScreenRank?: number | null
-  jevScreenBandRank?: number | null
-  /**
-   * V4 hybrid audit record (services/comp-hybrid): Jev's price-regime class
-   * over the UNGATED pool, hard-gate outcome, per-dimension recoverability
-   * scores against the appraisal preset, pool rank, and selection role.
-   * Present when the v4 hybrid ran (shadow or enabled).
-   */
-  jevHybrid?: import('../comp-hybrid').HybridCompScore | null
 }
 
 // ─── Appraisal Result ──────────────────────────────────────────────────────────
@@ -573,7 +561,7 @@ export interface AppraisalResult {
   /** True when fewer than 3 valid comps found even after approved expansion */
   insufficientComps?: boolean
   /** Expansion tiers actually applied to reach the comp set */
-  expansionApplied?: Array<'year_built' | 'subdivision' | 'neighborhood' | 'geographic' | 'sale_age'>
+  expansionApplied?: Array<'year_built' | 'sqft_diff' | 'pocket' | 'subdivision' | 'neighborhood' | 'geographic' | 'sale_age'>
 }
 
 // ─── Response Types ────────────────────────────────────────────────────────────

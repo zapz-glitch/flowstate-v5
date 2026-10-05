@@ -61,7 +61,7 @@ export function ReportSearchInput() {
             <button
               type="button"
               onClick={handleClear}
-              className="text-foreground-tertiary hover:text-foreground transition-colors"
+              className="text-foreground-tertiary hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors"
             >
               <X className="w-4 h-4" />
             </button>

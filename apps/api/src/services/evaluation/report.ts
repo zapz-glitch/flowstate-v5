@@ -29,32 +29,6 @@ export interface BuildReportInput {
   fallbacksUsed: string[]
   /** Computer-vision renovation assessment (subject photos) */
   renovationAssessment?: import('../vision/renovation').RenovationAssessment | null
-  /**
-   * Jev evaluation outcome for the comps that drive the ARV — the ARV-set
-   * comps' scores /100, whether each matched every appraisal rule, and
-   * whether the run flagged for human handoff (zero test-2 passers).
-   */
-  jev?: {
-    /** verdict: 'core' = ARV-tier test-2 passer */
-    selected: { compId: string; score: number | null; fullMatch: boolean; verdict: string; confidence: number | null }[]
-    counts: {
-      pool: number
-      ineligible: number
-      test1Passed: number
-      test1Failed: number
-      enriched: number
-      test2Passed: number
-      test2Failed: number
-      arv: number
-      asIs: number
-      selected: number
-    } | null
-    /** Zero comps passed test 2 — the report is flagged for manual review */
-    humanHandoff: boolean
-    /** Test-2 passers below the ARV price tier — as-is market reference */
-    asIsCompIds: string[]
-    topCompId: string | null
-  } | null
 }
 
 /**
@@ -79,14 +53,13 @@ function assessConfidence(input: BuildReportInput): {
 } {
   const reasons: string[] = []
   const appraisal = input.appraisalResult
-  const jev = input.jev
-
-  // When the Jev evaluation ran, confidence grades Jev's own evidence —
-  // rule matches, scores, and verdicts — not the deterministic filter
-  // outcomes it replaced.
-  if (jev) {
+  // Evidence grading — the ARV set is verified flip resales.
+  //   HIGH   — 3+ flip comps, subject condition verified
+  //   MEDIUM — 1-2 flip comps, or stale evidence, or unverified subject
+  //   LOW    — zero flip comps (no ARV evidence) or sales older than a year
+  {
     const now = Date.now()
-    const selectedIds = new Set(jev.selected.map((s) => s.compId))
+    const selectedIds = new Set(appraisal.selectedCompIds ?? [])
     const selectedComps = appraisal.comparables.filter((c) => selectedIds.has(c.id))
     const selectedAgesDays = selectedComps
       .map((c) => (c.saleDate ? (now - new Date(c.saleDate).getTime()) / 86_400_000 : null))
@@ -95,28 +68,24 @@ function assessConfidence(input: BuildReportInput): {
     const visionVerified =
       input.renovationAssessment?.status === 'ok' ||
       (input.renovationAssessment?.curbAppeal?.source === 'vision' &&
-        input.renovationAssessment.curbAppeal.condition !== 'unknown')
+        input.renovationAssessment?.curbAppeal?.condition !== 'unknown')
     const subjectConditionVerified =
       input.subjectClassification != null ||
       input.bundle.property.buildingCondition != null ||
       visionVerified === true
 
-    const fullMatchCount = jev.selected.filter((s) => s.fullMatch).length
-    const scores = jev.selected.map((s) => s.score).filter((s): s is number => s != null)
-    const topScore = scores.length ? Math.max(...scores) : null
-
-    if (jev.humanHandoff || jev.selected.length === 0) {
-      reasons.push('Jev evaluation flagged human handoff — zero comps passed test 2; any ARV shown is unexamined reference')
+    const flipCount = selectedComps.length
+    reasons.unshift(`${flipCount} verified flip resale(s) drive the ARV — transaction evidence`)
+    if (flipCount === 0) {
+      reasons.push(
+        input.valuation?.arv != null
+          ? 'No verified flip resales — valuation anchored on modeled value (AVM/assessment), not comp evidence'
+          : 'No verified flip resales — ARV is withheld, report is reference-only',
+      )
       return { level: 'low', reasons, requiresHumanReview: true }
     }
-    reasons.unshift(
-      `${fullMatchCount} comp(s) passed both Jev tests (raw fields + subdivision/neighborhood)`,
-    )
-    if (topScore != null) {
-      reasons.push(`Top selected comp scored ${topScore}/100 (enrichment match)`)
-    }
-    if (jev.selected.length < 3) {
-      reasons.push(`Only ${jev.selected.length} comp(s) drive the ARV — fewer than 3`)
+    if (flipCount < 3) {
+      reasons.push(`Only ${flipCount} comp(s) drive the ARV — fewer than 3`)
     }
     if (oldestSaleDays != null && oldestSaleDays > 365) {
       reasons.push(`Stale sale: oldest selected comp sold ${Math.round(oldestSaleDays / 30)} months ago`)
@@ -128,148 +97,18 @@ function assessConfidence(input: BuildReportInput): {
     }
 
     const level =
-      jev.selected.length === 0 ||
       (oldestSaleDays != null && oldestSaleDays > 365)
         ? 'low'
-        : fullMatchCount === jev.selected.length && jev.selected.length >= 3 && subjectConditionVerified
+        : flipCount >= 3 && subjectConditionVerified
           ? 'high'
           : 'medium'
 
     if (level === 'medium') {
-      reasons.unshift(`${jev.selected.length} ARV comps — ${fullMatchCount} passed both tests; reduced confidence`)
+      reasons.unshift(`${flipCount} ARV comps — thin or partially unverified evidence; reduced confidence`)
     }
     return { level, reasons, requiresHumanReview: level !== 'high' }
   }
 
-  const softTypes = new Set(
-    appraisal.appliedFilters.filter((f) => f.priority === 'soft').map((f) => f.type)
-  )
-  const selectedIds = new Set(
-    appraisal.selectedCompIds ??
-      appraisal.comparables.filter((c) => c.arvStatus === 'selected').map((c) => c.id)
-  )
-  const selected = appraisal.comparables.filter((c) => selectedIds.has(c.id))
-
-  // Per-comp grading: 'excellent' = every hard rule verified-pass AND
-  // style/condition verified; 'adequate' = no hard failure; 'weak' =
-  // a hard failure rescued by expansion.
-  const grades = selected.map((c) => {
-    const results = c.evaluation?.filterResults ?? []
-    const hardFailed = results.some(
-      (f) => f.status === 'failed' && !f.passed && !softTypes.has(f.type)
-    )
-    const hardUnverified = results.some(
-      (f) => f.status === 'not_verified' && !softTypes.has(f.type)
-    )
-    const keySoftUnverified = results.some(
-      (f) =>
-        softTypes.has(f.type) &&
-        f.status === 'not_verified' &&
-        (f.type === 'building_style_match' || f.type === 'condition_match')
-    )
-    const softFailed = results.some(
-      (f) => f.status === 'failed' && !f.passed && softTypes.has(f.type)
-    )
-    if (hardFailed) return 'weak' as const
-    if (hardUnverified || keySoftUnverified || softFailed) return 'adequate' as const
-    return 'excellent' as const
-  })
-
-  const weakCount = grades.filter((g) => g === 'weak').length
-  const excellentCount = grades.filter((g) => g === 'excellent').length
-
-  // Staleness — sale age is an absolute rule (≤180d at every tier), so
-  // anything past a year in a selected set means the data is wrong.
-  const now = Date.now()
-  const selectedAgesDays = selected
-    .map((c) => (c.saleDate ? (now - new Date(c.saleDate).getTime()) / 86_400_000 : null))
-    .filter((d): d is number => d != null && Number.isFinite(d))
-  const oldestSaleDays = selectedAgesDays.length ? Math.max(...selectedAgesDays) : null
-
-  // Subject condition verified via keyword classification, vision reno
-  // assessment, or assessor building condition
-  const visionVerified =
-    input.renovationAssessment?.status === 'ok' ||
-    (input.renovationAssessment?.curbAppeal?.source === 'vision' &&
-      input.renovationAssessment.curbAppeal.condition !== 'unknown')
-  const subjectConditionVerified =
-    input.subjectClassification != null ||
-    input.bundle.property.buildingCondition != null ||
-    visionVerified === true
-
-  if (selected.length === 0) {
-    reasons.push('No comps were selected for ARV')
-    return { level: 'low', reasons, requiresHumanReview: true }
-  }
-  if (selected.length < 3) {
-    reasons.push(`Only ${selected.length} comp(s) drive the ARV — fewer than 3`)
-  }
-  if (weakCount > 0) {
-    reasons.push(
-      `${weakCount} selected comp(s) breached a hard rule and were rescued by expansion`
-    )
-  }
-  if (appraisal.fallbackUsed === 'nearest_comps' || appraisal.fallbackUsed === 'insufficient') {
-    reasons.push(`Comp fallback used: ${appraisal.fallbackUsed}`)
-  } else if (appraisal.fallbackUsed !== 'none' && appraisal.fallbackUsed) {
-    reasons.push(`Comp expansion used: ${appraisal.fallbackUsed}`)
-  }
-  if (oldestSaleDays != null && oldestSaleDays > 365) {
-    reasons.push(`Stale sale: oldest selected comp sold ${Math.round(oldestSaleDays / 30)} months ago`)
-  } else if (oldestSaleDays != null && oldestSaleDays > 180) {
-    reasons.push(`Oldest selected comp sold ${Math.round(oldestSaleDays)} days ago (beyond 180-day window)`)
-  }
-  if (!subjectConditionVerified) {
-    reasons.push('Subject condition could not be verified')
-  }
-  // Top-of-market band disclosure — rule-passing comps priced >10% below
-  // the best comp were excluded from ARV (price is the condition proxy)
-  const enabledPriced = appraisal.comparables.filter(
-    (c) => c.isEnabled && (c.adjustedSalePrice ?? c.salePrice ?? 0) > 0
-  )
-  const topEnabledPrice = enabledPriced.reduce(
-    (m, c) => Math.max(m, c.adjustedSalePrice ?? c.salePrice ?? 0), 0
-  )
-  const bandExcluded = enabledPriced.filter(
-    (c) => (c.adjustedSalePrice ?? c.salePrice ?? 0) < topEnabledPrice * 0.9 &&
-      c.arvStatus !== 'selected'
-  ).length
-  if (bandExcluded > 0) {
-    reasons.push(`ARV anchored to top-of-market: ${bandExcluded} rule-passing comp(s) priced >10% below the best comp were excluded`)
-  }
-
-  // Confidence = quality of the comp MATCH, not comp count. A thin-market
-  // pocket can still produce a high-confidence ARV when the 1-2 comps
-  // that exist are verified matches. Volume is surfaced separately.
-  const level =
-    selected.length === 0 ||
-    weakCount > 0 ||
-    appraisal.fallbackUsed === 'nearest_comps' ||
-    appraisal.fallbackUsed === 'insufficient' ||
-    (oldestSaleDays != null && oldestSaleDays > 365)
-      ? 'low'
-      : selected.length > 0 &&
-          excellentCount === selected.length &&
-          appraisal.fallbackUsed === 'none' &&
-          subjectConditionVerified
-        ? 'high'
-        : 'medium'
-
-  if (level === 'high') {
-    reasons.unshift(
-      `${excellentCount} verified comps — recent sales, tight size/year/style match`
-    )
-  } else if (level === 'medium') {
-    reasons.unshift(
-      `${selected.length} comps selected with weaker dimensions — reduced confidence`
-    )
-  } else {
-    reasons.unshift('Thin or rule-breaching comp pool — treat the valuation as approximate')
-  }
-
-  // requiresHumanReview kept for API compatibility — there is no review
-  // workflow; consumers should read `confidence`/`reasons` instead.
-  return { level, reasons, requiresHumanReview: level !== 'high' }
 }
 
 /**
@@ -485,17 +324,6 @@ export function buildEvaluationReport(input: BuildReportInput): EvaluationReport
     confidence: confidence.level,
     confidenceReasons: [...confidence.reasons, ...derivedBuybox.notes],
     requiresHumanReview: confidence.requiresHumanReview,
-    humanHandoff: input.jev?.humanHandoff === true,
-    // The Jev funnel record — which comps drove ARV, the stage counts, the
-    // handoff flag. Reviewer tier pins are merged in at read time.
-    jev: input.jev
-      ? {
-          selected: input.jev.selected,
-          counts: input.jev.counts,
-          humanHandoff: input.jev.humanHandoff,
-          asIsCompIds: input.jev.asIsCompIds,
-          topCompId: input.jev.topCompId,
-        }
-      : null,
+
   }
 }

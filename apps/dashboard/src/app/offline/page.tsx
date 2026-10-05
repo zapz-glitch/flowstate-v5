@@ -21,7 +21,7 @@ export default function OfflinePage() {
         </p>
         <a
           href="/"
-          className="inline-block px-6 py-2.5 bg-foreground text-background font-medium rounded-full hover:bg-foreground/85 transition-colors"
+          className="inline-block px-6 py-2.5 bg-foreground text-background hover:bg-foreground/85 font-medium rounded-full transition-colors"
         >
           Try Again
         </a>

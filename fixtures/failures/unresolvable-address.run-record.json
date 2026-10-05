@@ -1,0 +1,260 @@
+{
+  "recordId": "35444e44-a6ed-4958-8596-c4ea868c9d51",
+  "jobId": "job_1791176016321_2df5cc98416d4755",
+  "payloadHash": "ebd080f5f166fedb1e9c3ddacbd45d15ed84418adb146fb4d443e66efa579490",
+  "exportedAt": "2026-10-05T05:15:00.000Z",
+  "payload": {
+    "attempts": [],
+    "evidence": null,
+    "jobId": "job_1791176016321_2df5cc98416d4755",
+    "property": {
+      "address": "123 Definitely Not Real St, Nowhere, ZZ 00000",
+      "city": null,
+      "clip": null,
+      "state": null,
+      "zipCode": null
+    },
+    "recordVersion": "run-record.v1",
+    "recordedAt": "2026-10-05T04:53:42.264Z",
+    "request": {
+      "cachedJobId": null,
+      "enrichment": null,
+      "evalParams": {
+        "appraisalRules": {
+          "adjustments": [
+            {
+              "amount": 0,
+              "enabled": false,
+              "percent": 15,
+              "type": "old_comp_discount"
+            },
+            {
+              "amount": 15000,
+              "enabled": true,
+              "percent": 0,
+              "type": "bedroom"
+            },
+            {
+              "amount": 10000,
+              "enabled": true,
+              "percent": 0,
+              "type": "bathroom"
+            },
+            {
+              "amount": 10000,
+              "enabled": true,
+              "percent": 0,
+              "type": "pool"
+            },
+            {
+              "amount": 10000,
+              "enabled": true,
+              "percent": 0,
+              "type": "garage"
+            },
+            {
+              "amount": 5000,
+              "enabled": true,
+              "percent": 0,
+              "type": "carport"
+            },
+            {
+              "amount": 10000,
+              "enabled": true,
+              "percent": 10,
+              "type": "traffic_siding"
+            },
+            {
+              "amount": 10000,
+              "enabled": true,
+              "percent": 15,
+              "type": "traffic_backing"
+            },
+            {
+              "amount": 15000,
+              "enabled": true,
+              "percent": 20,
+              "type": "traffic_fronting"
+            },
+            {
+              "amount": 0,
+              "enabled": true,
+              "percent": 50,
+              "type": "basement_sqft"
+            },
+            {
+              "amount": 0,
+              "enabled": true,
+              "percent": 10,
+              "type": "foundation"
+            }
+          ],
+          "filters": [
+            {
+              "enabled": true,
+              "priority": "hard",
+              "type": "subdivision_match",
+              "value": 1
+            },
+            {
+              "enabled": true,
+              "priority": "soft",
+              "type": "neighborhood_match",
+              "value": 1
+            },
+            {
+              "enabled": true,
+              "priority": "hard",
+              "type": "building_style_match",
+              "value": 1
+            },
+            {
+              "enabled": true,
+              "priority": "hard",
+              "type": "foundation_match",
+              "value": 1
+            },
+            {
+              "enabled": true,
+              "priority": "soft",
+              "type": "construction_material_match",
+              "value": 1
+            },
+            {
+              "enabled": true,
+              "priority": "soft",
+              "type": "pool_match",
+              "value": 1
+            },
+            {
+              "enabled": true,
+              "priority": "soft",
+              "type": "garage_match",
+              "value": 1
+            },
+            {
+              "enabled": true,
+              "priority": "soft",
+              "type": "condition_match",
+              "value": 1
+            },
+            {
+              "enabled": true,
+              "priority": "hard",
+              "type": "stories_match",
+              "value": 1
+            },
+            {
+              "enabled": true,
+              "priority": "soft",
+              "type": "roof_material_match",
+              "value": 1
+            },
+            {
+              "enabled": true,
+              "priority": "hard",
+              "type": "sale_age",
+              "value": 180
+            },
+            {
+              "enabled": true,
+              "priority": "hard",
+              "type": "sqft_diff",
+              "value": 250
+            },
+            {
+              "enabled": true,
+              "priority": "hard",
+              "type": "year_built_diff",
+              "value": 10
+            },
+            {
+              "enabled": true,
+              "priority": "hard",
+              "type": "distance",
+              "value": 1
+            },
+            {
+              "enabled": true,
+              "priority": "hard",
+              "type": "property_type",
+              "value": 1
+            },
+            {
+              "enabled": true,
+              "priority": "hard",
+              "type": "lot_size_diff",
+              "value": 2500
+            },
+            {
+              "enabled": true,
+              "priority": "hard",
+              "type": "road_barrier",
+              "value": 1
+            },
+            {
+              "enabled": true,
+              "priority": "hard",
+              "type": "geo_scope_match",
+              "value": 1
+            },
+            {
+              "enabled": true,
+              "priority": "soft",
+              "type": "sale_age_expansion",
+              "value": 365
+            },
+            {
+              "enabled": true,
+              "priority": "soft",
+              "type": "sale_age_expansion_2",
+              "value": 548
+            },
+            {
+              "enabled": true,
+              "priority": "soft",
+              "type": "vintage_year_cap",
+              "value": 1970
+            }
+          ]
+        },
+        "arvThreshold": {
+          "percent": 15
+        },
+        "buybox": {
+          "carryingCostsPercent": 2,
+          "closingCostsPercent": 8,
+          "wholesaleFee": 10000
+        }
+      },
+      "isRefresh": false,
+      "search": {
+        "address": "123 Definitely Not Real St, Nowhere, ZZ 00000"
+      },
+      "searchOptions": {},
+      "skipCache": true
+    },
+    "result": {
+      "errorCode": "PROPERTY_NOT_FOUND",
+      "errorMessage": "Property not found",
+      "response": null
+    },
+    "rules": {
+      "harnessVersion": "og-2026.10.05.1",
+      "models": {
+        "clef": "clef-flash",
+        "compSelection": null,
+        "general": null,
+        "marketSearch": null,
+        "vision": "openai/gpt-6-luna"
+      },
+      "pipelineVersion": "5.0",
+      "providers": {
+        "property": "attom-mcp"
+      },
+      "valuationDate": "2026-10-05"
+    },
+    "status": "error",
+    "userId": "8NLlVN9LtfODbvKJ6jpvk9W3a8pfMDep"
+  }
+}

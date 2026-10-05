@@ -1,0 +1,182 @@
+{
+  "recordId": "fixture-withheld-no-evidence",
+  "jobId": "fixture-withheld-no-evidence",
+  "payloadHash": "9938fd6b07dbdb74938adb4493be456be925d9a599aeb586bd5262d978645e52",
+  "exportedAt": "2026-10-05T00:00:00.000Z",
+  "payload": {
+    "recordVersion": "run-record.v1",
+    "jobId": "fixture-withheld-no-evidence",
+    "userId": "fixture-user",
+    "status": "completed",
+    "recordedAt": "2026-10-05T00:00:00.000Z",
+    "request": {
+      "search": {
+        "address": "200 Withheld Way"
+      },
+      "searchOptions": null,
+      "enrichment": null,
+      "evalParams": {},
+      "skipCache": true,
+      "isRefresh": false,
+      "cachedJobId": null
+    },
+    "property": {
+      "address": "200 Withheld Way",
+      "city": "Fixture",
+      "state": "GA",
+      "zipCode": "30000",
+      "clip": "fixture-withheld-no-evidence"
+    },
+    "rules": {
+      "harnessVersion": "og-2026.10.05.1",
+      "pipelineVersion": "5.0",
+      "valuationDate": "2026-10-05",
+      "models": {
+        "fixture": "synthetic"
+      },
+      "providers": {
+        "property": "fixture"
+      }
+    },
+    "evidence": {
+      "synthetic": true,
+      "subject": {
+        "address": "100 Frozen Way",
+        "squareFeet": 1000,
+        "yearBuilt": 1980,
+        "censusTract": "T-1",
+        "subdivision": "Fixture Estates",
+        "neighborhoodName": "Fixture Estates",
+        "lotSizeSquareFeet": 8000,
+        "avmValue": null,
+        "condition": "Heavy Rehab"
+      },
+      "compPool": [],
+      "attempts": [
+        {
+          "name": "attempt 1",
+          "subject": {
+            "address": "100 Frozen Way",
+            "squareFeet": 1000,
+            "yearBuilt": 1980,
+            "censusTract": "T-1",
+            "subdivision": "Fixture Estates",
+            "neighborhoodName": "Fixture Estates",
+            "lotSizeSquareFeet": 8000,
+            "avmValue": null,
+            "condition": "Heavy Rehab"
+          },
+          "comps": [],
+          "options": {
+            "rehabCost": null
+          },
+          "result": {
+            "arv": null,
+            "flags": [
+              "T5 report-only — no comp evidence, no anchor"
+            ],
+            "drivers": [],
+            "contribs": [],
+            "bracket": "ok",
+            "conf": "none",
+            "source": "T5 report-only"
+          },
+          "checks": [
+            {
+              "ruleId": "setb.t5.report_only",
+              "message": "T5 report-only — no comp evidence, no anchor"
+            }
+          ],
+          "verificationFailures": []
+        }
+      ],
+      "bAttemptTrail": [
+        "attempt 1 — withheld"
+      ]
+    },
+    "attempts": [
+      {
+        "name": "attempt 1",
+        "subject": {
+          "address": "100 Frozen Way",
+          "squareFeet": 1000,
+          "yearBuilt": 1980,
+          "censusTract": "T-1",
+          "subdivision": "Fixture Estates",
+          "neighborhoodName": "Fixture Estates",
+          "lotSizeSquareFeet": 8000,
+          "avmValue": null,
+          "condition": "Heavy Rehab"
+        },
+        "comps": [],
+        "options": {
+          "rehabCost": null
+        },
+        "result": {
+          "arv": null,
+          "flags": [
+            "T5 report-only — no comp evidence, no anchor"
+          ],
+          "drivers": [],
+          "contribs": [],
+          "bracket": "ok",
+          "conf": "none",
+          "source": "T5 report-only"
+        },
+        "checks": [
+          {
+            "ruleId": "setb.t5.report_only",
+            "message": "T5 report-only — no comp evidence, no anchor"
+          }
+        ],
+        "verificationFailures": []
+      }
+    ],
+    "result": {
+      "response": {
+        "subject": {
+          "id": "fixture-withheld-no-evidence",
+          "address": "200 Withheld Way",
+          "city": "Fixture",
+          "state": "GA",
+          "zipCode": "30000",
+          "squareFeet": 1000
+        },
+        "valuation": {
+          "arv": null,
+          "arvB": null,
+          "resultGrade": "withheld",
+          "processGrade": "clean",
+          "bMechanics": {
+            "arv": null,
+            "flags": [
+              "T5 report-only — no comp evidence, no anchor"
+            ],
+            "drivers": [],
+            "contribs": [],
+            "bracket": "ok",
+            "conf": "none",
+            "source": "T5 report-only",
+            "harnessVersion": "og-2026.10.05.1",
+            "checks": [
+              {
+                "ruleId": "setb.t5.report_only",
+                "message": "T5 report-only — no comp evidence, no anchor"
+              }
+            ],
+            "attemptTrail": [
+              "attempt 1 — withheld"
+            ]
+          }
+        },
+        "comps": {
+          "total": 0,
+          "enabledCount": 0,
+          "items": []
+        }
+      },
+      "errorCode": null,
+      "errorMessage": null
+    }
+  }
+}

@@ -1,13 +1,18 @@
 'use client'
 
 import { useState } from 'react'
-import { SlidersHorizontal, RefreshCw, FileSignature, CircleSlash, Check, X, Ban} from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { OfferWorkflow } from '@/lib/client-api'
 import { useEvaluation } from '@/hooks/use-evaluation'
 import type { ValuationData } from './shared-types'
 import { formatValuationNumber as fmt, formatMoneyThousands as fmtK } from './valuation-number'
 import { formatHeadlineMoney } from './headline-money'
+
+/** Header action · a plain word, same pill as the comp tier row */
+const ACTION = 'text-[11px] px-2 py-0.5 rounded whitespace-nowrap text-foreground-tertiary transition-colors'
+const ACTION_HOVER = 'hover:text-foreground hover:bg-secondary'
+/** Thin line between action groups · the same mark as between Investor and Report */
+const DIVIDER = 'w-px h-3 bg-border mx-1 flex-shrink-0'
 
 interface DealSummaryHeroProps {
   valuation: ValuationData
@@ -25,7 +30,7 @@ interface DealSummaryHeroProps {
 }
 
 export function DealSummaryHero({ valuation, isRecalculated, onOpenSettings, onRerun, rerunning, onOfferWorkflow, disposition }: DealSummaryHeroProps) {
-  const { arvOverride, onArvOverride } = useEvaluation()
+  const { arvOverride, onArvOverride, subject } = useEvaluation()
 
   // Inline ARV edit — click the value, type a new ARV, Enter/blur commits
   // (auto-recalcs + autosaves via the settings → recalc pipeline).
@@ -40,6 +45,17 @@ export function DealSummaryHero({ valuation, isRecalculated, onOpenSettings, onR
 
   // Offers go out at the computed price only — no manual overrides.
   const offerPrice = valuation.wholesalePrice ?? valuation.buyPrice
+  // Named floor source · shown only for a floor-grade result whose source the
+  // server named in a form we recognise; otherwise nothing is claimed.
+  // The displayed-ARV source wins; then the server's own source string, matched
+  // from its start so "median+50% AVM uplift" reads Median, not AVM.
+  const bSource = valuation.bMechanics?.source ?? ''
+  const floorSource = valuation.resultGrade !== 'floor' ? null
+    : valuation.arvSource === 'avm' || /^T3 AVM floor/i.test(bSource) ? 'AVM estimate'
+    : valuation.arvSource === 'assessed' || /^T4 assessed/i.test(bSource) ? 'County value'
+    : /^median/i.test(bSource) ? 'Median'
+    : /^as[- ]?is/i.test(bSource) ? 'As-is'
+    : null
   const canOffer = offerPrice != null && offerPrice > 0
 
   const fireOffer = async (workflow: OfferWorkflow) => {
@@ -60,8 +76,8 @@ export function DealSummaryHero({ valuation, isRecalculated, onOpenSettings, onR
   return (
     <div className="border border-border rounded-sm bg-background">
       {/* Header: title + recommendation + settings */}
-      <div className="px-3 py-1.5 border-b border-border/30 flex items-center justify-between">
-        <div className="flex items-center gap-2">
+      <div className="px-3 py-1.5 border-b border-border/30 flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
           <span className="text-[10px] font-semibold text-foreground-tertiary uppercase tracking-wider">Valuation</span>
           {isRecalculated && (
             <span className="text-[8px] font-medium px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-500">Recalculated</span>
@@ -77,25 +93,10 @@ export function DealSummaryHero({ valuation, isRecalculated, onOpenSettings, onR
               {disposition.workflow === 'prep_offer' ? 'Offer prepped' : disposition.workflow === 'no_offer' ? 'No offer' : 'No margin'} · {new Date(disposition.at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} {new Date(disposition.at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
             </span>
           )}
-          {valuation.confidence && (
-            <span
-              className={cn(
-                'text-[8px] font-medium px-1.5 py-0.5 rounded uppercase tracking-wide',
-                valuation.confidence === 'high' && 'bg-emerald-500/15 text-emerald-500',
-                valuation.confidence === 'medium' && 'bg-amber-500/15 text-amber-500',
-                valuation.confidence === 'low' && 'bg-red-500/15 text-red-500',
-              )}
-              title={(valuation.confidenceReasons ?? []).join('\n')}
-            >
-              {valuation.confidence === 'low'
-                ? 'Low confidence'
-                : valuation.confidence === 'medium'
-                  ? 'Medium confidence'
-                  : 'High confidence'}
-            </span>
-          )}
         </div>
-        <div className="flex items-center gap-1">
+        {/* Actions · plain words in the same pill style as the tier row below
+            (All / ARV / Median / Investor / Report), set apart by thin lines */}
+        <div className="flex flex-wrap items-center justify-end gap-1 no-print">
           {onOfferWorkflow && (
             offerPhase === 'idle' ? (
               <div key="offer-buttons" className="flex items-center gap-1 animate-in fade-in duration-300">
@@ -103,64 +104,59 @@ export function DealSummaryHero({ valuation, isRecalculated, onOpenSettings, onR
                   type="button"
                   onClick={() => fireOffer('prep_offer')}
                   disabled={!canOffer}
-                  className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium text-emerald-600 hover:bg-emerald-500/10 transition-colors disabled:opacity-40 no-print dark:text-emerald-400"
+                  className={cn(ACTION, 'hover:text-emerald-600 hover:bg-emerald-500/10 dark:hover:text-emerald-400 disabled:opacity-40')}
                   title={canOffer ? `Prep offer at $${fmtK(offerPrice)}` : 'Valuation incomplete — no offer price'}
                 >
-                  <FileSignature className="w-3 h-3" />
                   Prep offer
                 </button>
                 <button
                   type="button"
                   onClick={() => fireOffer('no_margin')}
-                  className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] text-foreground-tertiary hover:text-foreground hover:bg-secondary transition-colors no-print"
+                  className={cn(ACTION, ACTION_HOVER)}
                   title="No margin — records the decline and notifies the listener"
                 >
-                  <CircleSlash className="w-3 h-3" />
                   No margin
                 </button>
                 <button
                   type="button"
                   onClick={() => fireOffer('no_offer')}
-                  className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] text-foreground-tertiary hover:text-foreground hover:bg-secondary transition-colors no-print"
+                  className={cn(ACTION, ACTION_HOVER)}
                   title="No offer — decline without an offer and notify the listener"
                 >
-                  <Ban className="w-3 h-3" />
                   No offer
                 </button>
               </div>
             ) : offerPhase === 'busy' ? (
-              <span key="offer-busy" className="flex items-center gap-1 px-2 py-0.5 text-[10px] text-foreground-tertiary animate-in fade-in duration-300">
-                <RefreshCw className="w-3 h-3 animate-spin" />
+              <span key="offer-busy" className="px-2 py-0.5 text-[11px] text-foreground-tertiary whitespace-nowrap animate-in fade-in duration-300">
                 Dispatching…
               </span>
             ) : (
               <span
                 key="offer-done"
                 className={cn(
-                  'flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium animate-in fade-in duration-300',
-                  offerOutcome?.ok ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500',
+                  'px-2 py-0.5 text-[11px] font-medium whitespace-nowrap animate-in fade-in duration-300',
+                  offerOutcome?.ok ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400',
                 )}
               >
-                {offerOutcome?.ok ? <Check className="w-3 h-3" /> : <X className="w-3 h-3" />}
                 {offerOutcome?.ok ? 'Success' : 'Fail'}
               </span>
             )
           )}
+          {onOfferWorkflow && (onRerun || onOpenSettings) && <span className={DIVIDER} aria-hidden />}
           {onRerun && (
             <button
               type="button"
               onClick={onRerun}
               disabled={rerunning}
-              className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] text-foreground-tertiary hover:text-foreground hover:bg-secondary transition-colors no-print disabled:opacity-50"
+              className={cn(ACTION, ACTION_HOVER, 'disabled:opacity-50')}
               title="Re-run this analysis with fresh data"
             >
-              <RefreshCw className={cn('w-3 h-3', rerunning && 'animate-spin')} />
               {rerunning ? 'Running…' : 'Re-run'}
             </button>
           )}
+          {onRerun && onOpenSettings && <span className={DIVIDER} aria-hidden />}
           {onOpenSettings && (
-            <button type="button" onClick={onOpenSettings} className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] text-foreground-tertiary hover:text-foreground hover:bg-secondary transition-colors no-print">
-              <SlidersHorizontal className="w-3 h-3" />
+            <button type="button" onClick={onOpenSettings} className={cn(ACTION, ACTION_HOVER)}>
               Evaluation Settings
             </button>
           )}
@@ -169,6 +165,20 @@ export function DealSummaryHero({ valuation, isRecalculated, onOpenSettings, onR
 
       {/* Primary metrics grid */}
       <div className="hero-stats">
+        {subject?.avm?.value != null && (
+          <div
+            className="px-3 py-2.5 border-r border-border/20"
+            title={`${subject.avm.model ?? 'AVM'} modeled value${subject.avm.confidence != null ? ` — ${subject.avm.confidence}% confidence` : ''}${subject.avm.valueRangeLow != null && subject.avm.valueRangeHigh != null ? ` (range $${fmtK(subject.avm.valueRangeLow)}–$${fmtK(subject.avm.valueRangeHigh)})` : ''} — reference only, not comp-verified`}
+          >
+            <div className="text-[11px] text-foreground-tertiary uppercase tracking-wider">AVM</div>
+            <div className="text-base font-bold tabular-nums mt-0.5">${fmtK(subject.avm.value)}</div>
+            {valuation.arv != null && subject.avm.value !== valuation.arv && (
+              <div className="text-[10px] text-foreground-tertiary tabular-nums mt-0.5">
+                {((valuation.arv - subject.avm.value) / subject.avm.value * 100).toFixed(0)}% {valuation.arv > subject.avm.value ? 'below' : 'above'} ARV
+              </div>
+            )}
+          </div>
+        )}
         <div
           className="px-3 py-2.5 border-r border-border/20"
           title={valuation.asIsMarketIntel?.asIsMarketPrice != null
@@ -250,6 +260,16 @@ export function DealSummaryHero({ valuation, isRecalculated, onOpenSettings, onR
             </button>
           )}
           {valuation.arvPerSqft != null && <div className="text-[10px] text-foreground-tertiary tabular-nums mt-0.5">${valuation.arvPerSqft.toFixed(0)}/sf</div>}
+          {valuation.bMechanics?.ceiling != null && (
+            <div className="text-[10px] text-foreground-tertiary tabular-nums mt-0.5 no-print" title="The most the comp evidence supports">
+              Ceiling ${fmtK(valuation.bMechanics.ceiling)}
+            </div>
+          )}
+          {floorSource && (
+            <div className="text-[10px] text-foreground-tertiary mt-0.5 no-print" title={`This ARV is a floor, not comp-verified evidence${bSource ? ` · ${bSource}` : ''}`}>
+              Floor {floorSource}
+            </div>
+          )}
         </div>
         <div className="px-3 py-2.5 border-r border-border/20">
           <div className="text-[11px] text-foreground-tertiary uppercase tracking-wider">Buy</div>
@@ -263,7 +283,7 @@ export function DealSummaryHero({ valuation, isRecalculated, onOpenSettings, onR
         </div>
         <div className="px-3 py-2.5 border-r border-border/20">
           <div className="text-[11px] text-foreground-tertiary uppercase tracking-wider">Profit</div>
-          <div className={cn('text-base font-bold tabular-nums mt-0.5', (valuation.projectedProfit ?? 0) > 0 ? 'text-emerald-500' : 'text-red-500')}>${fmtK(valuation.projectedProfit)}</div>
+          <div className={cn('text-base font-bold tabular-nums mt-0.5', (valuation.projectedProfit ?? 0) > 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400')}>${fmtK(valuation.projectedProfit)}</div>
           {valuation.projectedROI != null && <div className="text-[10px] text-foreground-tertiary tabular-nums mt-0.5">{fmt(valuation.projectedROI)}% ROI</div>}
         </div>
       </div>

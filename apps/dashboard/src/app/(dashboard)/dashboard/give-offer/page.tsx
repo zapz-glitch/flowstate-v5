@@ -2,12 +2,13 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import {
   Ban,
   FileSignature, Inbox, ListChecks, Flame, Play, RotateCcw, CircleSlash,
-  ChevronRight, Copy, Check, Search, AlertTriangle,
+  ChevronRight, Copy, Check, Search, AlertTriangle, Trash2,
 } from 'lucide-react'
-import { getOfferQueue, type PipelineItem } from './actions'
+import { getOfferQueue, hideQueueItem, type PipelineItem } from './actions'
 import {
   getCachedQueue,
   getDecidedToday,
@@ -63,7 +64,7 @@ function CopyAddr({ text }: { text: string }) {
       type="button"
       aria-label="Copy address"
       title="Copy address"
-      className="p-1 rounded text-foreground-tertiary hover:text-foreground hover:bg-secondary transition-colors"
+      className="p-1 rounded text-foreground-tertiary hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors"
       onClick={(e) => {
         e.preventDefault()
         e.stopPropagation()
@@ -84,9 +85,12 @@ interface RowData {
   meta: string
   jobId: string | null
   icon: React.ReactNode
+  oppId?: string | null
+  needsEval?: boolean
 }
 
 export default function GiveOfferPage() {
+  const router = useRouter()
   const [raw, setRaw] = useState<PipelineItem[]>(getCachedQueue() ?? [])
   const [loaded, setLoaded] = useState(getCachedQueue() != null)
   const [failedFetch, setFailedFetch] = useState(false)
@@ -168,14 +172,25 @@ export default function GiveOfferPage() {
   const rows = useMemo<RowData[]>(() => {
     const q = query.trim().toLowerCase()
     const match = (addr: string) => !q || addr.toLowerCase().includes(q)
-    const queueRow = (item: PipelineItem, tag?: string): RowData => ({
-      key: `q:${item.leadId}`,
-      address: item.fullAddress ?? item.address ?? item.displayName ?? item.leadId,
-      meta: [tag, `waiting ${formatWait(Math.floor((now - parseQueuedAt(item.queuedAt)) / 1000))}`, fmtPrice(item.listPrice ?? item.wholesalePrice)]
-        .filter(Boolean).join(' · '),
-      jobId: jobIdForItem(item),
-      icon: <ChevronRight size={13} className="text-foreground-tertiary flex-shrink-0" />,
-    })
+    const queueRow = (item: PipelineItem, tag?: string): RowData => {
+      const jobId = jobIdForItem(item)
+      return {
+        key: `q:${item.leadId}`,
+        address: item.fullAddress ?? item.address ?? item.displayName ?? item.leadId,
+        meta: [
+          tag,
+          jobId ? null : 'needs evaluation',
+          `waiting ${formatWait(Math.floor((now - parseQueuedAt(item.queuedAt)) / 1000))}`,
+          fmtPrice(item.listPrice ?? item.wholesalePrice),
+        ].filter(Boolean).join(' · '),
+        jobId,
+        oppId: item.opportunityId,
+        needsEval: !jobId,
+        icon: jobId
+          ? <ChevronRight size={13} className="text-foreground-tertiary flex-shrink-0" />
+          : <AlertTriangle size={13} className="text-amber-500 flex-shrink-0" />,
+      }
+    }
     const decidedRow = (d: DecidedEntry): RowData => ({
       key: `d:${d.leadId}:${d.at}`,
       address: d.address,
@@ -206,7 +221,20 @@ export default function GiveOfferPage() {
     }
   }, [cat, query, queueItems, hotItems, prepDecided, marginDecided, failedDecided, decided, now])
 
-  const next = queueItems[0]
+  const dismiss = async (oppId: string | null | undefined) => {
+    if (!oppId) return
+    setRaw((prev) => {
+      const next = prev.filter((i) => i.opportunityId !== oppId)
+      setCachedQueue(next)
+      return next
+    })
+    await hideQueueItem(oppId).catch(() => null)
+  }
+  const evaluate = (address: string) => {
+    router.push(`/dashboard/analyze?address=${encodeURIComponent(address)}`)
+  }
+
+  const next = queueItems.find((i) => jobIdForItem(i)) ?? null
   const nextJobId = next ? jobIdForItem(next) : null
   const resume = lastViewed && lastViewed.jobId !== nextJobId ? lastViewed : null
 
@@ -261,7 +289,7 @@ export default function GiveOfferPage() {
                   href={`/dashboard/give-offer/${nextJobId}?cat=waiting`}
                   onMouseEnter={() => prefetchReport(nextJobId)}
                   onClick={() => { armNavVeil(); prefetchReport(nextJobId) }}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary/10 text-primary text-xs font-medium hover:bg-primary/20 transition-colors"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary/10 text-primary text-xs font-medium hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors"
                 >
                   <Play size={12} />
                   Next up — {next!.fullAddress ?? next!.address ?? 'top of queue'}
@@ -272,7 +300,7 @@ export default function GiveOfferPage() {
                   href={`/dashboard/give-offer/${resume.jobId}`}
                   onMouseEnter={() => prefetchReport(resume.jobId)}
                   onClick={() => { armNavVeil(); prefetchReport(resume.jobId) }}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-border text-xs text-foreground-secondary hover:bg-secondary transition-colors"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-border text-xs text-foreground-secondary hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors"
                 >
                   <RotateCcw size={12} />
                   Last report — {resume.address ?? resume.jobId}
@@ -292,7 +320,7 @@ export default function GiveOfferPage() {
                   className={`border rounded-md px-3 py-2.5 text-left transition-colors ${
                     cat === c
                       ? 'border-primary/60 bg-primary/10'
-                      : 'border-border/60 bg-background hover:bg-secondary/50'
+                      : 'border-border/60 bg-background hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10'
                   }`}
                 >
                   <div className={`flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider ${cat === c ? 'text-primary' : 'text-foreground-tertiary'}`}>
@@ -340,6 +368,30 @@ export default function GiveOfferPage() {
             ) : (
               <div className="divide-y divide-border/40">
                 {rows.map((row) => {
+                  const actions = (
+                    <span className="flex items-center gap-1 flex-shrink-0">
+                      {row.needsEval && (
+                        <button
+                          type="button"
+                          title="Run evaluation now"
+                          className="px-1.5 py-0.5 rounded text-[10px] font-medium border border-primary/40 text-primary hover:bg-primary/10"
+                          onClick={(e) => { e.preventDefault(); e.stopPropagation(); evaluate(row.address) }}
+                        >
+                          Evaluate
+                        </button>
+                      )}
+                      {row.oppId && (
+                        <button
+                          type="button"
+                          title="Remove from waiting queue"
+                          className="p-1 rounded text-foreground-tertiary hover:text-red-400 hover:bg-red-400/10"
+                          onClick={(e) => { e.preventDefault(); e.stopPropagation(); dismiss(row.oppId) }}
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      )}
+                    </span>
+                  )
                   const inner = (
                     <>
                       {row.icon}
@@ -348,6 +400,7 @@ export default function GiveOfferPage() {
                         <div className="text-[10px] text-foreground-tertiary">{row.meta}</div>
                       </div>
                       <CopyAddr text={row.address} />
+                      {actions}
                     </>
                   )
                   return row.jobId ? (

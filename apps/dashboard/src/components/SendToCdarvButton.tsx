@@ -56,7 +56,7 @@ export function SendToCdarvButton({
           disabled={pending || sent}
           title={sent ? 'Queued for CDARV review' : 'Send to CDARV review queue (does not change this report)'}
           onClick={() => setOpen(true)}
-          className="p-1.5 rounded-lg text-foreground-tertiary hover:text-foreground hover:bg-secondary transition-colors disabled:opacity-50"
+          className="p-1.5 rounded-lg text-foreground-tertiary hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors disabled:opacity-50"
         >
           <FlaskConical className={`w-3.5 h-3.5 ${sent ? 'text-emerald-500' : ''}`} />
         </button>
@@ -65,7 +65,7 @@ export function SendToCdarvButton({
           type="button"
           disabled={pending || sent}
           onClick={() => setOpen(true)}
-          className="flex items-center gap-1 text-caption text-foreground-tertiary hover:text-foreground font-medium transition-colors no-print disabled:opacity-50"
+          className="flex items-center gap-1 text-caption text-foreground-tertiary hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 font-medium transition-colors no-print disabled:opacity-50"
           title={sent ? 'Queued for CDARV review' : 'Send this report to CDARV for ML training review'}
         >
           <FlaskConical className={`w-3 h-3 ${sent ? 'text-emerald-500' : ''}`} />

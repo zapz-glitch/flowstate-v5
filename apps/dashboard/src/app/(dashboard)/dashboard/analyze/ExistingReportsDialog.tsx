@@ -9,6 +9,7 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog'
 import type { ExistingReport } from '@/lib/client-api'
+import { formatAddressCasing } from '@/components/analysis/format-helpers'
 
 interface ExistingReportsDialogProps {
   open: boolean
@@ -36,7 +37,7 @@ export function ExistingReportsDialog({ open, onOpenChange, reports, onNewAnalys
                 className="block border border-border px-4 py-3 hover:bg-muted/40 transition-colors"
               >
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-medium text-foreground truncate">{r.propertyAddress}</span>
+                  <span className="text-xs font-medium text-foreground truncate">{formatAddressCasing(r.propertyAddress)}</span>
                   <span className="text-[10px] text-foreground-tertiary flex-shrink-0 ml-2">
                     {new Date(r.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                   </span>

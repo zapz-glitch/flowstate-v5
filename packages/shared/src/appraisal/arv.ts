@@ -29,7 +29,7 @@ export interface ArvCompLike {
 export function calculateARV(comps: ArvCompLike[], subjectSqft?: number | null): number {
   const enabled = comps.filter((c) => c.isEnabled)
 
-  const compArvValues: number[] = []
+  const compArvValues: Array<{ value: number; weight: number }> = []
   for (const comp of enabled) {
     const adjustedPrice = comp.adjustedPrice ?? comp.salePrice
     const compSqft = comp.squareFeet
@@ -37,13 +37,19 @@ export function calculateARV(comps: ArvCompLike[], subjectSqft?: number | null):
       const netPricePerSqft = adjustedPrice / compSqft
       // Use subject sqft for the comp ARV projection; fall back to comp sqft if not available
       const targetSqft = subjectSqft && subjectSqft > 0 ? subjectSqft : compSqft
-      compArvValues.push(netPricePerSqft * targetSqft)
+      // Sqft-proximity weight — a comp close in size is more comparable;
+      // smaller homes carry inflated $/sf so they shouldn't dominate the mean.
+      const weight = subjectSqft && subjectSqft > 0
+        ? 1 / (1 + Math.abs(compSqft - subjectSqft) / subjectSqft)
+        : 1
+      compArvValues.push({ value: netPricePerSqft * targetSqft, weight })
     }
   }
 
   if (compArvValues.length === 0) return 0
 
-  const avgArv = compArvValues.reduce((sum, v) => sum + v, 0) / compArvValues.length
+  const totalWeight = compArvValues.reduce((s, v) => s + v.weight, 0)
+  const avgArv = compArvValues.reduce((s, v) => s + v.value * v.weight, 0) / totalWeight
   return Math.round(avgArv)
 }
 

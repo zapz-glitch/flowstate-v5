@@ -39,6 +39,31 @@ function evaluateSubdivisionMatch(
   }
 
   const passed = subdivisionsMatch(subjectSub, compSub)
+  if (!passed) {
+    // Census verification overrides the plat-name mismatch — legal
+    // subdivision names routinely diverge from the actual market area; a
+    // comp in the subject's census block group or tract is geographically
+    // verified regardless of its plat.
+    const censusVerified =
+      comp.sameBlockGroup === true ||
+      // Tract rescue needs proximity too — a tract can span multiple
+      // market pockets; same-tract at 2mi is not verified geography.
+      // Block groups are the pocket-sized unit and rescue on their own.
+      (comp.censusTract != null && subject.censusTract != null && comp.censusTract === subject.censusTract &&
+        (comp.distanceMiles == null || comp.distanceMiles <= 0.75)) ||
+      // Flex exception — under stretch, a plat-name mismatch survives when
+      // the pocket is value-equivalent to the subject's.
+      (typeof _filter.value === 'number' && _filter.value > 1 && isValueEquivalent(subject, comp))
+    if (censusVerified) {
+      return {
+        type: 'subdivision_match',
+        passed: true,
+        reason: `Legal subdivision differs ("${compSub}") — census tract/BG match verifies the geography`,
+        actualValue: compSub,
+        threshold: subjectSub,
+      }
+    }
+  }
   return {
     type: 'subdivision_match',
     passed,
@@ -47,6 +72,122 @@ function evaluateSubdivisionMatch(
     threshold: subjectSub,
   }
 }
+
+// Geo-name normalization — ATTOM writes "Saint Petersburg" where USPS and
+// county sources write "St. Petersburg"; a punctuation/abbreviation diff
+// is the same scope, not a mismatch. Whole-word substitutions only.
+const GEO_EQUIV: Record<string, string> = {
+  SAINT: 'ST', STE: 'STE', MOUNT: 'MT', FORT: 'FT',
+  NORTH: 'N', SOUTH: 'S', EAST: 'E', WEST: 'W',
+  NORTHEAST: 'NE', NORTHWEST: 'NW', SOUTHEAST: 'SE', SOUTHWEST: 'SW',
+  HEIGHTS: 'HTS', BEACH: 'BCH',
+}
+export function geoScopeNorm(v: string): string {
+  return v.toUpperCase()
+    .replace(/[^A-Z0-9 ]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .split(' ')
+    .map((w) => GEO_EQUIV[w] ?? w)
+    .join(' ')
+}
+
+/** Hard geo legs for the pocket catch — the name-label forgiveness covers
+ *  neighborhood/subdivision ONLY (enclave vs parent naming); city, county,
+ *  zip and school district must still literally match. */
+export function pocketHardScopesMatch(
+  subject: NormalizedProperty,
+  comp: NormalizedComparable,
+): boolean {
+  const pairs: Array<[string | undefined, string | undefined]> = [
+    [subject.geoScopes?.city ?? subject.city ?? undefined, comp.geoScopes?.city ?? comp.city ?? undefined],
+    [subject.geoScopes?.county ?? subject.county ?? undefined, comp.geoScopes?.county],
+    [subject.geoScopes?.zip ?? subject.zipCode ?? undefined, comp.geoScopes?.zip ?? comp.zipCode ?? undefined],
+    [subject.geoScopes?.schoolDistrict, comp.geoScopes?.schoolDistrict],
+  ]
+  return pairs.every(([a, b]) => !a || !b || geoScopeNorm(a) === geoScopeNorm(b))
+}
+
+/**
+ * Same-area rule — census geography decides (docs/FILTER-LADDER.md).
+ *
+ * A comp is in the subject's area when it shares the census tract or the
+ * block group. Provider name labels (city, zip, school district,
+ * subdivision) never reject a comp: one town can carry two labels.
+ *
+ * The filter ladder widens the area LAST by raising this rule's value:
+ *   1  tract or block group only (the default)
+ *   2  also a matching neighborhood / subdivision name
+ *   3  also a value-equivalent adjacent pocket (the rural rule)
+ * Census data missing on either side is unverifiable — not a mismatch.
+ */
+function evaluateGeoScopeMatch(
+  subject: NormalizedProperty,
+  comp: NormalizedComparable,
+  filter: AppraisalFilter,
+): FilterResult {
+  const level = typeof filter.value === 'number' ? filter.value : 1
+  const sameTract = subject.censusTract != null && comp.censusTract != null && subject.censusTract === comp.censusTract
+  const sameBlockGroup = comp.sameBlockGroup === true ||
+    (subject.censusBlockGroup != null && comp.censusBlockGroup != null && subject.censusBlockGroup === comp.censusBlockGroup)
+  if (sameTract || sameBlockGroup) {
+    return {
+      type: 'geo_scope_match',
+      passed: true,
+      actualValue: sameBlockGroup ? 'same block group' : 'same tract',
+      threshold: 'tract or block group',
+    }
+  }
+  const known = subject.censusTract != null && comp.censusTract != null
+  // At the default level a comp with no census stamp is unverifiable, and
+  // the distance rule still bounds it. Once the ladder has widened the area
+  // (and with it dropped the radius), an unstamped comp has to earn its
+  // place the same way a different-tract comp does.
+  if (!known && level < 2) {
+    return {
+      type: 'geo_scope_match',
+      passed: true,
+      status: 'not_verified',
+      reason: 'No census geography on one side — rule not verified',
+    }
+  }
+  const names = [subject.subdivision, subject.neighborhoodName, subject.geoScopes?.subdivision, subject.geoScopes?.n4]
+    .filter((v): v is string => !!v).map(geoScopeNorm)
+  const compNames = [comp.subdivision, comp.neighborhoodName, comp.geoScopes?.subdivision, comp.geoScopes?.n4]
+    .filter((v): v is string => !!v).map(geoScopeNorm)
+  if (level >= 2 && compNames.some((n) => names.includes(n))) {
+    return {
+      type: 'geo_scope_match',
+      passed: true,
+      reason: 'Different tract — same neighborhood name (area widened)',
+      actualValue: 'same neighborhood name',
+      threshold: 'tract, block group, or neighborhood',
+    }
+  }
+  // The approved rural rule: the comp's own pocket must price within range
+  // of the subject's pocket reference — a different-priced market is a
+  // different market, whatever the distance.
+  if (level >= 3 && pocketValueEquivalent(subjectPocketRefPpsf(subject, []), comp)) {
+    return {
+      type: 'geo_scope_match',
+      passed: true,
+      reason: 'Different tract — value-equivalent adjacent pocket (area widened)',
+      actualValue: 'value-equivalent pocket',
+      threshold: 'tract, block group, neighborhood, or equivalent pocket',
+    }
+  }
+  return {
+    type: 'geo_scope_match',
+    passed: false,
+    reason: known
+      ? `Outside the subject's census tract (${comp.censusTract} ≠ ${subject.censusTract})`
+      : 'Outside the widened area — no census stamp, no shared neighborhood name, not a value-equivalent pocket',
+    actualValue: known ? 'different tract' : 'area unverified',
+    threshold: level >= 3 ? 'tract, block group, neighborhood, or equivalent pocket'
+      : level >= 2 ? 'tract, block group, or neighborhood' : 'tract or block group',
+  }
+}
+
 
 function evaluateSaleAge(
   _subject: NormalizedProperty,
@@ -119,6 +260,48 @@ function evaluateSqftDiff(
   }
 }
 
+/** Vintage-era window — subjects ≤1945 comp to the whole pre-1970 buyer
+ *  class ("everything before 1970 is in play"). */
+const VINTAGE_SUBJECT_MAX_YEAR = 1945
+const VINTAGE_ERA_COMP_MAX_YEAR = 1969
+
+/** Era classes — same / adjacent / far relative to the subject. Vintage is
+ *  the only class spanning asymmetrically (pre-1970 = one buyer class). */
+const ERA_NAMES = ['vintage (≤1945)', 'post-war (1946-69)', 'late-20th (1970-89)', '90s-00s (1990-2009)', 'modern (2010+)'] as const
+const eraIndex = (yearBuilt: number) =>
+  yearBuilt <= 1945 ? 0 : yearBuilt <= 1969 ? 1 : yearBuilt <= 1989 ? 2 : yearBuilt <= 2009 ? 3 : 4
+
+/** The ladder's deepest year tier — a fallback catch, not a primary gate:
+ *  the strict band ran first and failed, so era-class rescues what it can.
+ *  Same or adjacent era passes flagged; 2+ era gaps fail. */
+function evaluateYearBuiltEra(
+  subject: NormalizedProperty,
+  comp: NormalizedComparable,
+  _filter: AppraisalFilter
+): FilterResult {
+  if (!subject.yearBuilt || !comp.yearBuilt) {
+    return {
+      type: 'year_built_era',
+      passed: true,
+      status: 'not_verified',
+      reason: 'Year built not available — rule not verified',
+    }
+  }
+  const sEra = eraIndex(subject.yearBuilt)
+  const cEra = eraIndex(comp.yearBuilt)
+  const eraGap = Math.abs(cEra - sEra)
+  const passed = eraGap <= 1
+  return {
+    type: 'year_built_era',
+    passed,
+    reason: passed
+      ? eraGap === 1 ? `Adjacent era: ${ERA_NAMES[cEra]} comp vs ${ERA_NAMES[sEra]} subject — fallback caught` : undefined
+      : `Era mismatch: ${ERA_NAMES[cEra]} comp vs ${ERA_NAMES[sEra]} subject`,
+    actualValue: eraGap,
+    threshold: 'same or adjacent era',
+  }
+}
+
 function evaluateYearBuiltDiff(
   subject: NormalizedProperty,
   comp: NormalizedComparable,
@@ -130,6 +313,22 @@ function evaluateYearBuiltDiff(
       passed: true,
       status: 'not_verified',
       reason: 'Year built not available — rule not verified',
+    }
+  }
+
+  // Vintage subjects → era window at tier-0: any comp ≤1969 is the same
+  // buyer class, whatever the year diff. Year proximity stays a ranking
+  // signal via the ladder's tight tiers, never a gate for vintage stock.
+  if (subject.yearBuilt <= VINTAGE_SUBJECT_MAX_YEAR) {
+    const passed = comp.yearBuilt <= VINTAGE_ERA_COMP_MAX_YEAR
+    return {
+      type: 'year_built_diff',
+      passed,
+      reason: passed
+        ? undefined
+        : `Modern-era comp (${comp.yearBuilt}) vs vintage subject (${subject.yearBuilt}) — era mismatch (vintage window ≤${VINTAGE_ERA_COMP_MAX_YEAR})`,
+      actualValue: comp.yearBuilt,
+      threshold: VINTAGE_ERA_COMP_MAX_YEAR,
     }
   }
 
@@ -275,13 +474,27 @@ function evaluateRoadBarrier(
     }
   }
 
-  const passed = comp.crossesMajorRoad === false
+  if (comp.crossesMajorRoad === false) {
+    return { type: 'road_barrier', passed: true, actualValue: 'same_side', threshold: 'same_side' }
+  }
+  // Flex exception — under stretched parameters a crossing comp survives
+  // when its pocket is value-equivalent to the subject's (±10% $/sf).
+  const flexed = typeof _filter.value === 'number' && _filter.value > 1
+  if (flexed && isValueEquivalent(_subject, comp)) {
+    return {
+      type: 'road_barrier',
+      passed: true,
+      reason: 'Crosses major road — pocket is value-equivalent to subject (flex)',
+      actualValue: 'crosses',
+      threshold: 'same_side',
+    }
+  }
   return {
     type: 'road_barrier',
-    passed,
-    status: passed ? 'passed' : 'failed',
-    reason: passed ? undefined : 'Comparable is across a major road from subject',
-    actualValue: comp.crossesMajorRoad ? 'crosses' : 'same_side',
+    passed: false,
+    status: 'failed',
+    reason: 'Comparable is across a major road from subject',
+    actualValue: 'crosses',
     threshold: 'same_side',
   }
 }
@@ -613,63 +826,13 @@ function evaluateRoofMaterialMatch(
   }
 }
 
-// Assessor condition tiers, best → worst. Unknown labels get no tier.
-const CONDITION_TIERS: Record<string, number> = {
-  excellent: 7,
-  verygood: 6,
-  good: 5,
-  average: 4,
-  fair: 3,
-  poor: 2,
-  verypoor: 1,
-}
-
-function conditionTier(v?: string | null): number | null {
-  if (!v) return null
-  return CONDITION_TIERS[v.toLowerCase().replace(/[^a-z]/g, '')] ?? null
-}
-
-/**
- * Assessor condition match — the comp cannot be in a worse assessor
- * condition tier than the subject (a distressed comp never anchors ARV).
- * Replaces the LLM/Firecrawl condition classification with provider data.
- */
-function evaluateConditionMatch(
-  subject: NormalizedProperty,
-  comp: NormalizedComparable,
-  _filter: AppraisalFilter
-): FilterResult {
-  const subjectTier = conditionTier(subject.buildingCondition)
-  const compTier = conditionTier(comp.buildingCondition)
-
-  if (subjectTier == null || compTier == null) {
-    return {
-      type: 'condition_match',
-      passed: true,
-      status: 'not_verified',
-      reason: 'Assessor condition data not available — rule not verified',
-    }
-  }
-
-  const passed = compTier >= subjectTier
-  return {
-    type: 'condition_match',
-    passed,
-    status: passed ? 'passed' : 'failed',
-    reason: passed
-      ? undefined
-      : `Condition mismatch: comp "${comp.buildingCondition}" below subject "${subject.buildingCondition}"`,
-    actualValue: comp.buildingCondition ?? undefined,
-    threshold: subject.buildingCondition ?? undefined,
-  }
-}
-
 const FILTER_EVALUATORS: Partial<Record<
   FilterType,
   (subject: NormalizedProperty, comp: NormalizedComparable, filter: AppraisalFilter) => FilterResult
 >> = {
   subdivision_match: evaluateSubdivisionMatch,
   neighborhood_match: evaluateNeighborhoodMatch,
+  geo_scope_match: evaluateGeoScopeMatch,
   building_style_match: evaluateBuildingStyleMatch,
   foundation_match: evaluateFoundationMatch,
   construction_material_match: evaluateConstructionMaterialMatch,
@@ -677,11 +840,11 @@ const FILTER_EVALUATORS: Partial<Record<
   garage_match: evaluateGarageMatch,
   stories_match: evaluateStoriesMatch,
   roof_material_match: evaluateRoofMaterialMatch,
-  condition_match: evaluateConditionMatch,
   sale_age: evaluateSaleAge,
   sqft_diff: evaluateSqftDiff,
   year_built_diff: evaluateYearBuiltDiff,
   year_built_cap: evaluateYearBuiltCap,
+  year_built_era: evaluateYearBuiltEra,
   distance: evaluateDistance,
   property_type: evaluatePropertyType,
   lot_size_diff: evaluateLotSizeDiff,
@@ -1126,6 +1289,27 @@ export function evaluateComparable(
   const filterResults: FilterResult[] = []
   const disableReasons: string[] = []
 
+  // ── Data-quality gates — hard, never stretched by the flex ladder ────────
+  // A $1/$100 recorded price is a quit-claim/family/deed transfer, not a
+  // market sale — it can never be comparable evidence regardless of rules.
+  if (comp.salePrice != null && comp.salePrice < 10_000) {
+    disableReasons.push(`Non-market sale — nominal price $${comp.salePrice.toLocaleString()}`)
+  }
+  // Rural acreage vs a suburban lot is a category mismatch — the ±lot_size
+  // tolerance (even flexed) is for same-pocket variance, not acreage.
+  // Symmetric: comp 3×+ bigger on acreage, or a rural subject against a
+  // comp on a fraction of its land — neither reconciles.
+  if (comp.lotSizeAcres != null && subject.lotSizeAcres != null) {
+    const [big, small] = comp.lotSizeAcres >= subject.lotSizeAcres
+      ? [comp.lotSizeAcres, subject.lotSizeAcres]
+      : [subject.lotSizeAcres, comp.lotSizeAcres]
+    if (big > 1 && big > small * 3) {
+      disableReasons.push(
+        `Lot category mismatch (${comp.lotSizeAcres.toFixed(2)} ac vs subject ${subject.lotSizeAcres.toFixed(2)} ac) — not comparable`,
+      )
+    }
+  }
+
   for (const filter of filters) {
     if (!filter.enabled) continue
 
@@ -1139,8 +1323,13 @@ export function evaluateComparable(
     filterResults.push(result)
 
     // Soft filters (stories, roof material) record the mismatch for
-    // ranking/reporting but never disqualify the comp.
-    if (!result.passed && result.reason && filter.priority !== 'soft') {
+    // ranking/reporting but never disqualify the comp. Subdivision and
+    // neighborhood NAME rules are rank-only too: "same area" is decided by
+    // the census rule (geo_scope_match — tract, then block group, then
+    // neighborhood; docs/FILTER-LADDER.md). Provider labels for one town
+    // can differ ("Rex" vs "Forest Park-Morrow") and must never reject a
+    // same-tract comp.
+    if (!result.passed && result.reason && filter.priority !== 'soft' && !NAME_SCOPE_RANK_ONLY.has(filter.type)) {
       disableReasons.push(result.reason)
     }
   }
@@ -1203,4 +1392,148 @@ export function evaluateComparables(
   }
 
   return evaluations
+}
+
+/** Name-based geography rules — recorded and ranked, never disqualifying. */
+export const NAME_SCOPE_RANK_ONLY = new Set<FilterType>([
+  'subdivision_match',
+  'neighborhood_match',
+])
+
+/**
+ * Percentage flex on numeric tolerances — sqft, year built, lot size,
+ * sale age, distance scale by `factor`; geo/exact-match filters never
+ * flex (census/SD/road barriers stay hard). Powers the thin-pool
+ * fallback ladder: strict → ×1.15 → ×1.25 → ×1.35 → … until evidence.
+ */
+const FLEXIBLE_FILTERS = new Set<FilterType>([
+  'sale_age',
+  'sale_age_expansion',
+  'sale_age_expansion_2',
+  'sqft_diff',
+  'year_built_diff',
+  'lot_size_diff',
+  'distance',
+])
+
+// Geo-adjacent filters carry a flex MARKER (value > 1) rather than a scaled
+// threshold — under stretch, a crossing/mismatch survives when the comp's
+// pocket is value-equivalent to the subject's (±10% $/sf).
+const FLEX_MARKER_FILTERS = new Set<FilterType>([
+  'road_barrier',
+  'subdivision_match',
+  'neighborhood_match',
+  'geo_scope_match',
+])
+
+export function flexNumericFilters(filters: AppraisalFilter[], factor: number): AppraisalFilter[] {
+  if (factor <= 1) return filters
+  return filters.map((f) =>
+    FLEXIBLE_FILTERS.has(f.type) && typeof f.value === 'number'
+      ? { ...f, value: Math.round(f.value * factor * 100) / 100 }
+      : FLEX_MARKER_FILTERS.has(f.type)
+        ? { ...f, value: factor }
+        : f,
+  )
+}
+
+/** Subject reference $/sqft for value equivalence — scope median first,
+ *  then AVM-implied ppsf as the always-available floor. */
+export function subjectRefPpsf(subject: NormalizedProperty): number | null {
+  const med = subject.ppsfMedians?.SD ?? subject.ppsfMedians?.N4 ?? subject.ppsfMedians?.N3
+  if (med != null && med > 0) return med
+  if (subject.avmValue != null && subject.squareFeet) return subject.avmValue / subject.squareFeet
+  return null
+}
+
+function compPpsf(c: { pricePerSqft?: number | null; salePrice?: number | null; squareFeet?: number | null }): number | null {
+  return c.pricePerSqft ?? (c.salePrice != null && c.squareFeet ? c.salePrice / c.squareFeet : null)
+}
+
+/** Rural gate — a comp's pocket must trade within 15% of the subject's
+ *  pocket level for selection at the wide geo tiers. */
+export const RURAL_POCKET_PCT = 0.15
+
+function median(values: number[]): number | null {
+  const sorted = values.filter((v) => Number.isFinite(v) && v > 0).sort((a, b) => a - b)
+  return sorted.length ? sorted[Math.floor(sorted.length / 2)] : null
+}
+
+const avmPpsf = (x: { avmValue?: number | null; squareFeet?: number | null }): number | null =>
+  x.avmValue != null && x.avmValue > 0 && x.squareFeet != null && x.squareFeet > 0
+    ? x.avmValue / x.squareFeet
+    : null
+
+/** The subject's rural market reference, per policy: subject AVM/sqft →
+ *  same-scope comp AVM/sqft → subject scope medians. A missing reference does
+ *  not prove value equivalence. */
+export function subjectPocketRefPpsf(
+  subject: NormalizedProperty,
+  pool: NormalizedComparable[],
+): number | null {
+  const subjectAvm = avmPpsf(subject)
+  if (subjectAvm != null) return subjectAvm
+
+  const sameScope = pool.filter((c) =>
+    c.sameBlockGroup === true ||
+    (subject.censusBlockGroup != null && c.censusBlockGroup === subject.censusBlockGroup) ||
+    (subject.censusTract != null && c.censusTract === subject.censusTract) ||
+    (subject.subdivision != null && c.subdivision === subject.subdivision) ||
+    (subject.neighborhoodName != null && c.neighborhoodName === subject.neighborhoodName))
+  const scopeAvm = median(sameScope.map(avmPpsf).filter((v): v is number => v != null))
+  if (scopeAvm != null) return scopeAvm
+  return subjectRefPpsf(subject)
+}
+
+/** Comp-side market evidence for the rural value check: own AVM/sqft →
+ *  tightest scope median → own sale $/sf. */
+export function compPocketRefPpsf(comp: NormalizedComparable): number | null {
+  return avmPpsf(comp) ?? comp.ppsfMedians?.SD ?? comp.ppsfMedians?.N4 ?? comp.ppsfMedians?.N3 ?? compPpsf(comp)
+}
+
+/** Is the comp's pocket priced like the subject's? Used at the wide geo
+ *  tiers: missing references cannot prove equivalence. */
+export function pocketValueEquivalent(
+  refPpsf: number | null,
+  comp: NormalizedComparable,
+): boolean {
+  if (refPpsf == null || refPpsf <= 0) return false
+  const compRef = compPocketRefPpsf(comp)
+  if (compRef == null || compRef <= 0) return false
+  return Math.abs(compRef - refPpsf) / refPpsf <= RURAL_POCKET_PCT
+}
+
+/** Adjacent-scope key for wide-tier ordering. Tightest known scope wins. */
+export function adjacentScopeKey(subject: NormalizedProperty, comp: NormalizedComparable): string | null {
+  if (comp.censusBlockGroup && comp.censusBlockGroup !== subject.censusBlockGroup) return `BG:${comp.censusBlockGroup}`
+  if (comp.censusTract && comp.censusTract !== subject.censusTract) return `T:${comp.censusTract}`
+  if (comp.neighborhoodName && comp.neighborhoodName !== subject.neighborhoodName) return `N:${comp.neighborhoodName}`
+  return null
+}
+
+/** Rank adjacent markets by their nearest comp (1 = closest). The rural
+ *  ladder only searches the closest five adjacent scope groups. */
+export function adjacentScopeRanks(
+  subject: NormalizedProperty,
+  comps: NormalizedComparable[],
+): Map<string, number> {
+  const nearest = new Map<string, number>()
+  for (const comp of comps) {
+    const key = adjacentScopeKey(subject, comp)
+    if (!key) continue
+    const d = comp.distanceMiles ?? 99
+    if (d < (nearest.get(key) ?? Infinity)) nearest.set(key, d)
+  }
+  const ranked = [...nearest.entries()].sort((a, b) => a[1] - b[1] || a[0].localeCompare(b[0]))
+  return new Map(ranked.map(([key], i) => [key, i + 1]))
+}
+
+/** ±10% pocket value equivalence — a comp across a boundary counts as the
+ *  same market when its price per sqft sits within 10% of the subject's
+ *  reference. Only consulted under flex (marker value > 1). */
+export function isValueEquivalent(subject: NormalizedProperty, comp: NormalizedComparable): boolean {
+  const ref = subjectRefPpsf(subject)
+  const ppsf = compPpsf(comp)
+  if (ref == null || ppsf == null) return false
+  return Math.abs(ppsf - ref) / ref <= 0.10
 }

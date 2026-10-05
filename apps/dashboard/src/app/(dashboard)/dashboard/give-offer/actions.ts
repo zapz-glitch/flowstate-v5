@@ -9,15 +9,17 @@ async function getDashboardSecret(): Promise<string> {
   return env.DASHBOARD_INTERNAL_SECRET || ''
 }
 
-async function internalFetch(path: string): Promise<Response | null> {
+async function internalFetch(path: string, init?: RequestInit): Promise<Response | null> {
   const session = await getSession()
   if (!session?.user) return null
   const secret = await getDashboardSecret()
   if (!secret) return null
   return fetch(`${process.env.NEXT_PUBLIC_API_URL}${path}`, {
+    ...init,
     headers: {
       'X-Dashboard-User-Id': session.user.id,
       'X-Dashboard-Secret': secret,
+      ...(init?.headers ?? {}),
     },
   })
 }
@@ -53,6 +55,13 @@ export interface PipelineMetrics {
   hotLeads: number
   evalsFailed: number
   avgPrepMinutes: number | null
+}
+
+/** Hide a stale item from the waiting queue — reversible (unhide endpoint),
+ *  Close untouched; the engine's opp stays at Give offer. */
+export async function hideQueueItem(opportunityId: string): Promise<{ ok: boolean }> {
+  const res = await internalFetch(`/v1/pipeline/queue/${encodeURIComponent(opportunityId)}`, { method: 'DELETE' })
+  return { ok: res?.ok === true }
 }
 
 export async function getOfferQueue(): Promise<{

@@ -142,9 +142,13 @@ export function createAuth(
         maxAge: 60 * 5, // 5 minutes
       },
     },
-    trustedOrigins: envDashboardUrl
-      ? [envDashboardUrl]
-      : [dashboardUrl],
+    trustedOrigins: [
+      ...(envDashboardUrl ? [envDashboardUrl] : [dashboardUrl]),
+      // Workers Builds previews live on <branch>.flowstate.homes subdomains
+      'https://*.flowstate.homes',
+      // workers.dev previews are account-scoped (<script>.weareflowstate1.workers.dev)
+      'https://*.weareflowstate1.workers.dev',
+    ],
     advanced: {
       ipAddress: {
         ipAddressHeaders: ['cf-connecting-ip', 'x-forwarded-for'],

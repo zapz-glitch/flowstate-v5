@@ -4,7 +4,7 @@ import { use, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { ChevronLeft, ChevronRight, Timer, ListFilter } from 'lucide-react'
-import DashboardReportPage from '../../reports/[jobId]/page'
+import { ReportPageView } from '../../reports/[jobId]/report-page-view'
 import { getOfferQueue, type PipelineItem } from '../actions'
 import { jobIdForItem, parseQueuedAt, sortedQueue, formatWait, WAIT_FILTER_LABELS, type WaitFilter, getCachedQueue, setCachedQueue, prefetchReport, recordDecision, setLastViewed, decisionFor, getDecidedToday, mergeDispositions, decidedLeadSet, consumeNavVeil, getOffersViewCached, type DecidedEntry, type ServerDisposition, type OfferWorkflow } from '../queue'
 import { useSidebar } from '@/components/SidebarProvider'
@@ -244,7 +244,7 @@ export default function GiveOfferReportPage({ params }: { params: Promise<{ jobI
         type="button"
         disabled={index <= 0}
         onClick={() => goToId(orderedJobIds[index - 1])}
-        className="p-1 rounded hover:bg-secondary disabled:opacity-30 transition-colors"
+        className="p-1 rounded hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 disabled:opacity-30 transition-colors"
         title="Previous property"
       >
         <ChevronLeft size={14} />
@@ -253,7 +253,7 @@ export default function GiveOfferReportPage({ params }: { params: Promise<{ jobI
         type="button"
         onClick={() => goToId(orderedJobIds[index + 1] ?? (index === -1 ? orderedJobIds[0] : undefined))}
         disabled={orderedJobIds.length === 0 || index >= orderedJobIds.length - 1}
-        className="p-1 rounded hover:bg-secondary disabled:opacity-30 transition-colors"
+        className="p-1 rounded hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 disabled:opacity-30 transition-colors"
         title="Skip — next property"
       >
         <ChevronRight size={14} />
@@ -265,7 +265,7 @@ export default function GiveOfferReportPage({ params }: { params: Promise<{ jobI
   // (QueueFallback + loading states).
   const bar = (
     <div className="shrink-0 no-print border-b border-border bg-background px-4 sm:px-6 lg:px-4 py-1.5 flex items-center gap-3 text-[11px]">
-      <Link href="/dashboard/give-offer" className="font-semibold hover:text-foreground-secondary transition-colors" title="Back to the offer queue">Offers</Link>
+      <Link href="/dashboard/give-offer" className="font-semibold hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors" title="Back to the offer queue">Offers</Link>
       {controls}
       <span className="flex-1" />
     </div>
@@ -281,7 +281,7 @@ export default function GiveOfferReportPage({ params }: { params: Promise<{ jobI
 
   return (
     <>
-      <DashboardReportPage
+      <ReportPageView
       params={reportParams}
       queue={{
         node: bar,

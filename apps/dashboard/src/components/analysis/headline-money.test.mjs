@@ -51,6 +51,7 @@ test('valuation headline renders ARV, Buy and Wholesale from display fields and 
     './valuation-number': whole,
     './format-helpers': { fmtNumber: value => value?.toLocaleString('en-US') ?? '-' },
     '@/lib/utils': { cn: (...classes) => classes.filter(Boolean).join(' ') },
+    '@/hooks/use-evaluation': { useEvaluation: () => ({ arvOverride: null, onArvOverride: () => {} }) },
   })
   const valuation = Object.freeze({
     arv: 612345.67, buyPrice: 450123.45, wholesalePrice: 440123.45,
@@ -78,7 +79,8 @@ test('permits render records and distinguish empty, unavailable, not-requested a
     'sonner': { toast: { success: () => {}, error: () => {} } },
   })
   const render = props => renderToStaticMarkup(React.createElement(PropertyPermits, props))
-  assert.match(render({ permits: { status: 'empty', items: [] } }), /Permits — NA[\s\S]*No permit records returned/)
+  // "Permits NA" · gray label, strong value, no dash between them
+  assert.match(render({ permits: { status: 'empty', items: [] } }), /Permits<\/span>\s*<span[^>]*>NA<[\s\S]*No permit records returned/)
   assert.match(render({ permits: { status: 'unavailable', items: [] } }), /lookup unavailable/)
   assert.match(render({}), /Not pulled during analysis/)
   assert.match(render({ permits: { status: 'not_requested', items: [] } }), /Not pulled during analysis/)

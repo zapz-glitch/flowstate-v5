@@ -286,8 +286,9 @@ export default {
   it: for parallel MCP sessions or bug-bash explorers, declare one target per
   device, each naming its `device`.
 - `device` can be a `DeviceProvider` leasing hosted devices, one per worker
-  slot: `easSimulators({ projectId, buildId })` from `@e2e-dev/eas` reads
-  `EXPO_TOKEN`, needs no Xcode or Android SDK, and with `buildId` EAS installs
+  slot: `easSimulators({ buildId })` from `@e2e-dev/eas` takes the project
+  from the app config's `extra.eas.projectId` (`projectId` overrides), reads
+  `EXPO_TOKEN`, else the `eas login` session, needs no Xcode or Android SDK, and with `buildId` EAS installs
   the app (omit `app.appPath`). A run must fit one session: `maxDurationMinutes`,
   absent, is the account's cap (40 on a standard plan). `videoTouches: false`
   on the engine for video there.
@@ -296,8 +297,9 @@ export default {
   150) before the next observation, `settle: false` skips it.
 - `screen`, `expect`, `app`, `agent` work unchanged; `test` from
   `@e2e-dev/mobile` types the `device` fixture (`installApp`, `openLink`,
-  `setPermission`, `setNetwork`, `setAppearance`, `clearKeychain`, `locator`,
-  more). Portable suites declare `requires: ['device']`.
+  `setPermission`, `setNetwork`, `setAppearance`, `clearKeychain`, `fold`
+  for an iPhone Duo's hinge, `locator`, more). Portable suites declare
+  `requires: ['device']`.
 - No `state` capability: `test.setup` and `session` are unavailable; sign in
   per test with `screen` actions or `agent.act`, both fill a `Secret` (topic
   `writing-tests`, Sign-in sessions).

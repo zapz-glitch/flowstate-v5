@@ -3,7 +3,7 @@
 import { useMemo, useCallback } from 'react'
 import dynamic from 'next/dynamic'
 import type { SubjectData, CompItem } from './shared-types'
-import { getCompKey } from './format-helpers'
+import { getCompKey, conditionLabel, priceClassLabel } from './format-helpers'
 import { isValidCoordinate } from '@/lib/property-map-geometry'
 
 const MapInner = dynamic(() => import('./PropertyMapInner'), {
@@ -18,10 +18,15 @@ const MapInner = dynamic(() => import('./PropertyMapInner'), {
 export interface MapMarker {
   lat: number
   lng: number
-  type: 'subject' | 'comp-enabled' | 'comp-disabled'
+  type: 'subject' | 'comp-arv' | 'comp-market' | 'comp-floor' | 'comp-disabled'
   label: string
   /** Comp key for toggling ARV selection (comp markers only) */
   compKey?: string
+  /** Sale price · drawn as a small label beside the dot */
+  price?: number | null
+  /** Price class and photo condition · the two lines under the price */
+  priceClass?: string | null
+  condition?: string | null
 }
 
 interface PropertyMapProps {
@@ -56,12 +61,21 @@ export function PropertyMap({ subject, comps, selectedCompKeys, onMarkerSelect, 
         if (isValidCoordinate({ lat: comp.latitude, lng: comp.longitude })) {
           const compKey = getCompKey(comp, i)
           const enabled = selectedCompKeys ? selectedCompKeys.has(compKey) : comp.isEnabled !== false
+          // Marker color = evidence class, not enabled state — green = ARV
+          // evidence, orange = market/median, red = investor floor.
+          const cls = comp.classification?.type
           m.push({
             lat: comp.latitude!,
             lng: comp.longitude!,
-            type: enabled ? 'comp-enabled' : 'comp-disabled',
+            type: !enabled ? 'comp-disabled'
+              : cls === 'after_renovation' ? 'comp-arv'
+              : cls === 'as_is' ? 'comp-floor'
+              : 'comp-market',
             label: comp.address ?? 'Comparable',
             compKey,
+            price: comp.salePrice ?? null,
+            priceClass: priceClassLabel(comp.badges?.price),
+            condition: comp.badges ? conditionLabel(comp.badges.condition) : null,
           })
         }
       }
@@ -77,11 +91,13 @@ export function PropertyMap({ subject, comps, selectedCompKeys, onMarkerSelect, 
   if (!markers.some(marker => marker.type === 'subject')) return null
 
   return (
+    <div className="relative flex-1 min-h-0 flex flex-col">
     <MapInner
       key={`${subject?.address}|${subject?.latitude}|${subject?.longitude}`}
       markers={markers}
       onMarkerClick={handleMarkerClick}
       activeMarkerKey={activeMarkerKey}
     />
+    </div>
   )
 }

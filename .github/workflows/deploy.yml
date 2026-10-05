@@ -6,6 +6,12 @@ on:
       - main
   workflow_dispatch:
 
+# Deploys serialize — never cancel a mid-flight deploy (API shipped but
+# dashboard didn't = skew). Queue instead.
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
 env:
   NODE_VERSION: '22'
 

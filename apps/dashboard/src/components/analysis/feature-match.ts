@@ -11,7 +11,7 @@
  */
 
 import { subdivisionsMatch, foundationFamily } from '@flowstate-api/shared'
-import type { CompItem, SubjectData } from './shared-types'
+import type { CompItem, PhysicalCharacteristic, PhysicalCharacteristicValue, SubjectData } from './shared-types'
 
 export type MatchState = 'match' | 'mismatch' | 'unknown'
 
@@ -70,36 +70,15 @@ const CONDITION_TIERS: Record<string, number> = {
 }
 const conditionTier = (v?: string | null) => (v ? CONDITION_TIERS[v.toLowerCase().replace(/[^a-z]/g, '')] ?? null : null)
 
-/** "One Story"/"1 Story"/"2 Level" → 1/2. Words and digits both handled. */
-const STORY_WORDS: Record<string, number> = {
-  one: 1, single: 1, two: 2, three: 3, four: 4, five: 5, bi: 2, tri: 3, split: 1.5,
-}
-function storyCount(v?: string | number | null): number | null {
-  if (v == null) return null
-  if (typeof v === 'number') return v
-  const n = v.toLowerCase()
-  const digit = n.match(/(\d+(?:\.\d+)?)/)?.[1]
-  if (digit) return parseFloat(digit)
-  for (const [word, num] of Object.entries(STORY_WORDS)) {
-    if (new RegExp(`\\b${word}`).test(n)) return num
-  }
-  return null
+function verified<T extends PhysicalCharacteristicValue>(field?: PhysicalCharacteristic<T>): T | null {
+  return field?.status === 'verified' ? field.value : null
 }
 
-const hasPool = (p: { pool?: string | null }) => p.pool != null && p.pool !== ''
-const hasCovered = (p: { garage?: string | null; garageSquareFeet?: number | null; carport?: string | null }) =>
-  (p.garage != null && p.garage !== '') || (p.garageSquareFeet ?? 0) > 0 || (p.carport != null && p.carport !== '')
-
-function eq(a: string | number | null | undefined, b: string | number | null | undefined): MatchState {
-  const x = typeof a === 'number' ? a : norm(a as string | null | undefined)
-  const y = typeof b === 'number' ? b : norm(b as string | null | undefined)
+function eq(a: string | number | boolean | null | undefined, b: string | number | boolean | null | undefined): MatchState {
+  const x = typeof a === 'string' ? norm(a) : a
+  const y = typeof b === 'string' ? norm(b) : b
   if (x == null || y == null) return 'unknown'
   return x === y ? 'match' : 'mismatch'
-}
-
-function boolEq(a: boolean, b: boolean, hasDataA: boolean, hasDataB: boolean): MatchState {
-  if (!hasDataA || !hasDataB) return 'unknown'
-  return a === b ? 'match' : 'mismatch'
 }
 
 /**
@@ -131,37 +110,47 @@ export function compFeatureMatches(comp: CompItem, subject: SubjectData | null |
     nbNameMatch == null && nbCodeMatch == null ? 'unknown' : (nbNameMatch || nbCodeMatch) ? 'match' : 'mismatch',
     comp.neighborhoodName ?? comp.neighborhoodCode ?? undefined)
 
-  // Physical structure
+  // Physical structure — only resolver-verified values can match or mismatch.
+  const subjectPhysical = subject.physicalCharacteristics
+  const compPhysical = comp.physicalCharacteristics
   {
-    const sf = foundationFamily(subject.foundationType)
-    const cf = foundationFamily(comp.foundationType)
+    const subjectFoundation = verified(subjectPhysical?.foundation)
+    const compFoundation = verified(compPhysical?.foundation)
+    const sf = foundationFamily(subjectFoundation)
+    const cf = foundationFamily(compFoundation)
     push('foundation',
       !sf || !cf ? 'unknown' : sf === 'other' || cf === 'other'
-        ? (norm(subject.foundationType) === norm(comp.foundationType) ? 'match' : 'unknown')
+        ? (norm(subjectFoundation) === norm(compFoundation) ? 'match' : 'unknown')
         : sf === cf ? 'match' : 'mismatch',
-      comp.foundationType ?? undefined)
+      compFoundation ?? undefined)
   }
-  push('style', eq(comp.buildingStyle, subject.buildingStyle), comp.buildingStyle ?? undefined)
+  push('style',
+    eq(verified(compPhysical?.style), verified(subjectPhysical?.style)),
+    verified(compPhysical?.style) ?? undefined)
 
   {
-    const ss = storyCount(subject.storiesType)
-    const cs = storyCount(comp.stories ?? comp.storiesType)
+    const ss = verified(subjectPhysical?.stories)
+    const cs = verified(compPhysical?.stories)
     push('stories',
       ss == null || cs == null ? 'unknown' : Math.abs(cs - ss) <= 0.5 ? 'match' : 'mismatch',
-      comp.storiesType ?? (comp.stories != null ? String(comp.stories) : undefined))
+      cs != null ? String(cs) : undefined)
   }
 
   {
-    const pairs: MatchState[] = [
-      eq(comp.constructionType, subject.constructionType),
-      eq(comp.exteriorWalls, subject.exteriorWalls),
-    ].filter((s) => s !== 'unknown')
+    const structure = verified(compPhysical?.constructionType)
+    const subjectStructure = verified(subjectPhysical?.constructionType)
+    const exterior = verified(compPhysical?.exterior)
+    const subjectExterior = verified(subjectPhysical?.exterior)
+    const states = [eq(structure, subjectStructure), eq(exterior, subjectExterior)]
+      .filter((state) => state !== 'unknown')
     push('construction',
-      pairs.length === 0 ? 'unknown' : pairs.every((s) => s === 'match') ? 'match' : 'mismatch',
-      [comp.constructionType, comp.exteriorWalls].filter(Boolean).join(' / ') || undefined)
+      states.length === 0 ? 'unknown' : states.every((state) => state === 'match') ? 'match' : 'mismatch',
+      [structure, exterior].filter(Boolean).join(' / ') || undefined)
   }
 
-  push('roof', eq(comp.roofCover ?? comp.roofType, subject.roofCover ?? subject.roofType), comp.roofCover ?? comp.roofType ?? undefined)
+  push('roof',
+    eq(verified(compPhysical?.roof), verified(subjectPhysical?.roof)),
+    verified(compPhysical?.roof) ?? undefined)
 
   {
     const st = conditionTier(subject.buildingCondition)
@@ -172,12 +161,12 @@ export function compFeatureMatches(comp: CompItem, subject: SubjectData | null |
   }
 
   // Amenities
-  push('pool', boolEq(hasPool(comp), hasPool(subject), comp.pool != null, subject.pool != null),
-    comp.pool ? 'Yes' : 'None')
-  push('garage', boolEq(hasCovered(comp), hasCovered(subject),
-    comp.garage != null || comp.garageSquareFeet != null || comp.carport != null,
-    subject.garage != null || subject.garageSquareFeet != null || subject.carport != null),
-    [comp.garage, comp.carport].filter(Boolean).join(' + ') || undefined)
+  const compPool = verified(compPhysical?.pool)
+  const subjectPool = verified(subjectPhysical?.pool)
+  push('pool', eq(compPool, subjectPool), compPool == null ? undefined : compPool ? 'Yes' : 'No')
+  const compGarage = verified(compPhysical?.garage)
+  const subjectGarage = verified(subjectPhysical?.garage)
+  push('garage', eq(compGarage, subjectGarage), compGarage ?? undefined)
 
   {
     const pairs: MatchState[] = [eq(comp.heating, subject.heating), eq(comp.cooling, subject.cooling)]
@@ -224,9 +213,14 @@ export function featureState(matches: FeatureMatch[], key: FeatureKey): MatchSta
   return matches.find((m) => m.key === key)?.state ?? 'unknown'
 }
 
+/** "Matches the subject" · one green everywhere (same pair the valuation box uses) */
+export const MATCH_TEXT = 'text-emerald-600 dark:text-emerald-400'
+/** "Differs from the subject" */
+export const MISMATCH_TEXT = 'text-red-600 dark:text-red-400'
+
 /** Tailwind class for a match-state value/label */
 export function matchTextClass(state: MatchState): string {
-  return state === 'match' ? 'text-emerald-500' : state === 'mismatch' ? 'text-red-400' : ''
+  return state === 'match' ? MATCH_TEXT : state === 'mismatch' ? MISMATCH_TEXT : ''
 }
 
 /** Tailwind class for a match-state dot */

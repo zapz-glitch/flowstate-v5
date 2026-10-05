@@ -59,7 +59,7 @@ export function useAutoSave({
   onSavedRef.current = onSaved
 
   useEffect(() => {
-    const pythonAuth = (analysisData as { evaluationEngine?: string } | null)?.evaluationEngine === 'python-v4'
+    const pythonAuth = ['python-v4', 'ts-v5'].includes((analysisData as { evaluationEngine?: string } | null)?.evaluationEngine ?? '')
     if (!jobId || !analysisData || !displayValuation) return
     // python-v4 reports skip recalcData — but report-local ARV overrides /
     // adjustments still need persisting (that's the whole point of the edit).
@@ -108,7 +108,11 @@ export function useAutoSave({
           const patched = { ...(analysisData as Record<string, unknown>) }
 
           // Patch comp selection
-          if (compOverride?.selectedCompKeys && (patched.comps as { items?: CompItem[] })?.items) {
+          // Server-computed reports already carry the server's own comp
+          // set and roles — the page saves that copy as-is. Only the older
+          // browser-calculated reports get their selection patched in.
+          const serverComputed = ['ts-v5', 'python-v4'].includes(String((patched as { evaluationEngine?: string }).evaluationEngine ?? ''))
+          if (!serverComputed && compOverride?.selectedCompKeys && (patched.comps as { items?: CompItem[] })?.items) {
             const comps = patched.comps as { items: CompItem[]; [k: string]: unknown }
             patched.comps = {
               ...comps,

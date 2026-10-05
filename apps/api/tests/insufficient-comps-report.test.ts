@@ -14,10 +14,12 @@
  *  2. `valuation === null`, `comps.insufficientComps === true`.
  *  3. Every comp item stays in the report with `isEnabled: false` and
  *     per-rule `appraisalRules` evidence.
- *  4. The step log records `appraisal_rules` failed + `valuation` skipped.
+ *  4. The step log records `appraisal_rules` failed + `valuation` skipped
+ *     (last `appraisal_rules` entry — an earlier `completed` entry records
+ *     the evidence-selection pass).
  *  5. `report.arv.value` / `report.outcome.*` are null — no fabricated ARV.
  *  6. Zero comps found → same degraded shape, empty pool.
- *  7. `jevOutcome` marks 'unavailable/insufficient_comps' — no LLM spend.
+ *  7. `jevOutcome` is absent — the Jev path was excised post-#79.
  */
 import assert from 'node:assert/strict'
 import { performAnalysis } from '../src/services/evaluation'
@@ -77,9 +79,11 @@ const staleComp = (i: number): NormalizedComparable => ({
   squareFeet: 1350 + i * 100,
   lotSizeAcres: 0.17,
   yearBuilt: 1990,
-  propertyType: 'SFR',
+  // A different property type is a rule the filter ladder never loosens —
+  // nothing can qualify. (Sale age alone no longer proves that: the ladder
+  // widens it without a fixed cap, docs/FILTER-LADDER.md.)
+  propertyType: 'Condominium',
   salePrice: 280000 + i * 10000,
-  // Older than every configured sale-age tier — nothing can qualify.
   saleDate: daysAgo(2400),
   pricePerSqft: 200,
 })
@@ -111,7 +115,10 @@ const result = await performAnalysis(
 
 const { response } = result
 assert.equal(response.evaluationEngine, 'ts-v5')
-assert.equal(response.valuation, null, 'no valuation is fabricated')
+// Assessed-value anchor: insufficient comps still produce a valuation when a
+// modeled value exists — marked 'assessed', never mistaken for comp-verified.
+assert.equal(response.valuation?.arvSource, 'assessed', 'valuation anchored on county assessment')
+assert.equal(response.valuation?.arv, 180000)
 assert.equal(response.comps.insufficientComps, true, 'pool flagged insufficient')
 assert.equal(response.comps.total, 3, 'full evaluated pool is preserved')
 assert.equal(response.comps.items.length, 3)
@@ -128,22 +135,32 @@ assert.ok(
 assert.equal(response.subject.address, '123 Subject St, Tampa, FL 33607')
 const steps = response.report?.steps ?? []
 assert.equal(
-  steps.find((s) => s.step === 'appraisal_rules')?.status,
+  steps.findLast((s) => s.step === 'appraisal_rules')?.status,
   'failed',
   'appraisal step records the failure',
 )
 assert.equal(
   steps.find((s) => s.step === 'valuation')?.status,
-  'skipped',
-  'valuation step records the skip',
+  'completed',
+  'valuation step completes on the assessed anchor',
 )
-assert.equal(response.report?.arv.value, null, 'report ARV is null, not invented')
-assert.equal(response.report?.outcome.recommendation, null)
+assert.match(
+  steps.find((s) => s.step === 'valuation')?.detail ?? '',
+  /Assessment-anchored/,
+  'valuation step marks the anchor, not comp evidence',
+)
+assert.equal(response.report?.arv.value, 180000, 'report ARV carries the assessment anchor')
+assert.ok(response.report?.outcome.recommendation != null, 'anchored valuation still yields a deal verdict')
+assert.equal(response.report?.requiresHumanReview, true, 'anchored runs still flag for human review')
 assert.ok(
   (response.report?.fallbacksUsed ?? []).includes('insufficient_comps'),
   'insufficient_comps is in the fallback ledger',
 )
-assert.deepEqual(response.jevOutcome, { status: 'unavailable', reason: 'insufficient_comps' })
+assert.equal(
+  'jevOutcome' in response,
+  false,
+  'jevOutcome field is gone — the Jev path was excised from this provider',
+)
 
 // ─── Empty pool → same degraded shape ───────────────────────────────────────
 
@@ -151,12 +168,34 @@ const empty = await performAnalysis(
   { jobId: 'job-no-comps', bundle: bundle([]) },
   env,
 )
-assert.equal(empty.response.valuation, null)
+assert.equal(empty.response.valuation?.arvSource, 'assessed', 'empty pool still anchors on assessment')
+assert.equal(empty.response.valuation?.arv, 180000)
 assert.equal(empty.response.comps.insufficientComps, true)
 assert.equal(empty.response.comps.items.length, 0)
 assert.equal(
-  empty.response.report?.steps.find((s) => s.step === 'appraisal_rules')?.status,
+  empty.response.report?.steps.findLast((s) => s.step === 'appraisal_rules')?.status,
   'failed',
+)
+
+// ─── No modeled value either → true report-only (valuation stays null) ──────
+
+const noAnchor = await performAnalysis(
+  {
+    jobId: 'job-no-anchor',
+    bundle: {
+      ...bundle([staleComp(9), staleComp(10)]),
+      property: { ...subject, assessedValue: null, avmValue: null, marketValue: null },
+      enrichment: { ...bundle([]).enrichment, avm: null },
+    },
+  },
+  env,
+)
+assert.equal(noAnchor.response.valuation, null, 'no anchor → no valuation is fabricated')
+assert.equal(noAnchor.response.comps.insufficientComps, true)
+assert.equal(
+  noAnchor.response.report?.steps.find((s) => s.step === 'valuation')?.status,
+  'skipped',
+  'valuation step records the skip when nothing anchors it',
 )
 
 console.log('insufficient-comps-report: all assertions passed')

@@ -11,6 +11,7 @@ import {
   type FilterType,
   type AdjustmentType,
 } from '@/lib/client-api'
+import { DraftNumberInput } from '@/components/ui/number-input'
 
 export interface FilterState {
   type: string
@@ -154,16 +155,12 @@ export function AppraisalFilterEditor({
             {!compact && <div className="text-[10px] text-muted-foreground mt-0.5">Top % of comps by sale price used for ARV</div>}
           </div>
           <div className="flex items-center rounded-md border border-border bg-muted/30 overflow-hidden w-20">
-            <Input
-              type="number"
+            <DraftNumberInput
+              value={arvThreshold}
               min={1}
               max={100}
               step={5}
-              value={arvThreshold}
-              onChange={(e) => {
-                const v = parseInt(e.target.value)
-                if (!isNaN(v) && v >= 1 && v <= 100) onArvThresholdChange(v)
-              }}
+              onCommit={onArvThresholdChange}
               className="h-7 w-14 text-[11px] text-right tabular-nums border-0 bg-transparent shadow-none focus-visible:ring-0 pr-1 pl-2"
             />
             <span className="text-[10px] text-muted-foreground pr-1.5">%</span>
@@ -205,16 +202,12 @@ export function AppraisalFilterEditor({
                 </div>
                 {!isBoolean && (
                   <div className="flex items-center rounded-md border border-border bg-muted/30 overflow-hidden w-20">
-                    <Input
-                      type="number"
+                    <DraftNumberInput
+                      value={f.value}
                       min={0}
                       step={f.type === 'distance' ? 0.1 : 1}
-                      value={f.value}
                       disabled={!f.enabled}
-                      onChange={(e) => {
-                        const v = parseFloat(e.target.value)
-                        if (!isNaN(v) && v >= 0) updateFilter(idx, { value: v })
-                      }}
+                      onCommit={(v) => updateFilter(idx, { value: v })}
                       className="h-7 w-14 text-[11px] text-right tabular-nums border-0 bg-transparent shadow-none focus-visible:ring-0 pr-1 pl-2"
                     />
                     <span className="text-[10px] text-muted-foreground pr-1.5">{label?.unit}</span>

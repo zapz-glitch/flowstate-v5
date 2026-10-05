@@ -175,6 +175,13 @@ export const savedReports = sqliteTable(
     asIsValue: real('as_is_value'),
     maxAllowableOffer: real('max_allowable_offer'),
     estimatedRepairs: real('estimated_repairs'),
+    // Set-B mechanics — extracted for queryable QA at volume (all T3
+    // fallbacks, all healed runs, etc.) without parsing full_response_json.
+    arvSource: text('arv_source'),
+    bConfidence: text('b_confidence'),
+    bHealed: integer('b_healed', { mode: 'boolean' }),
+    bAnchorAddress: text('b_anchor_address'),
+    bFlagCount: integer('b_flag_count'),
     // Workflow link
     jobId: text('job_id'), // Links to workflow job
     pdfKey: text('pdf_key'), // Reserved for future PDF support
@@ -194,6 +201,7 @@ export const savedReports = sqliteTable(
     index('idx_saved_reports_created_at').on(table.createdAt),
     index('idx_saved_reports_job_id').on(table.jobId),
     index('idx_saved_reports_address').on(table.userId, table.propertyAddress),
+    index('idx_saved_reports_arv_source').on(table.userId, table.arvSource),
   ]
 )
 
@@ -203,7 +211,7 @@ export const savedReports = sqliteTable(
 
 // Manual comp tier assignments — a reviewer pins a comparable to 'arv' or
 // 'as_is' on the comp card or report. Keyed by (job_id, comp_id) so the
-// override survives cache hits and saved reports; Jev's automatic
+// override survives cache hits and saved reports; the automatic
 // classification stays alongside it.
 export const compTierOverrides = sqliteTable(
   'comp_tier_overrides',
@@ -783,6 +791,94 @@ export const analysisRuns = sqliteTable(
 )
 
 // ==========================================
+// Run Records (immutable evidence record per evaluation)
+// ==========================================
+
+export const runRecords = sqliteTable(
+  'run_records',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    jobId: text('job_id').notNull(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    reportId: text('report_id')
+      .references(() => savedReports.id, { onDelete: 'set null' }),
+    // Property identity
+    propertyAddress: text('property_address'),
+    propertyCity: text('property_city'),
+    propertyState: text('property_state'),
+    propertyZip: text('property_zip'),
+    propertyClip: text('property_clip'),
+    // Outcome and provenance
+    status: text('status').notNull(), // 'completed' | 'error' | 'cached' | 'persistence_error'
+    errorCode: text('error_code'),
+    errorMessage: text('error_message'),
+    arv: real('arv'),
+    resultGrade: text('result_grade'),
+    processGrade: text('process_grade'),
+    harnessVersion: text('harness_version'),
+    pipelineVersion: text('pipeline_version'),
+    requestHash: text('request_hash'),
+    evidenceHash: text('evidence_hash'),
+    payloadHash: text('payload_hash').notNull(),
+    archiveKey: text('archive_key'),
+    archivedAt: text('archived_at'),
+    archiveError: text('archive_error'),
+    attemptCount: integer('attempt_count').notNull().default(0),
+    compCount: integer('comp_count'),
+    enabledCompCount: integer('enabled_comp_count'),
+    // Canonical record: subject, comp evidence, effective rules/settings,
+    // every Set-B attempt input/output, and the final response.
+    payloadJson: text('payload_json').notNull(),
+    createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
+  },
+  (table) => [
+    index('idx_run_records_job_id').on(table.jobId),
+    index('idx_run_records_user_id').on(table.userId),
+    index('idx_run_records_report_id').on(table.reportId),
+    index('idx_run_records_payload_hash').on(table.payloadHash),
+    index('idx_run_records_property').on(table.userId, table.propertyAddress),
+    index('idx_run_records_created_at').on(table.createdAt),
+  ]
+)
+
+// ==========================================
+// Report Outcomes (actual sale evidence after the prediction)
+// ==========================================
+
+export const reportOutcomes = sqliteTable(
+  'report_outcomes',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    reportId: text('report_id')
+      .notNull()
+      .references(() => savedReports.id, { onDelete: 'cascade' }),
+    runRecordId: text('run_record_id')
+      .references(() => runRecords.id, { onDelete: 'set null' }),
+    jobId: text('job_id').notNull(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    actualSalePrice: real('actual_sale_price').notNull(),
+    actualSaleDate: text('actual_sale_date'),
+    /** Where the outcome came from — closing statement, MLS, user entry, etc. */
+    source: text('source'),
+    note: text('note'),
+    predictedArv: real('predicted_arv'),
+    predictionDelta: real('prediction_delta'),
+    predictionDeltaPct: real('prediction_delta_pct'),
+    createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
+  },
+  (table) => [
+    index('idx_report_outcomes_report_id').on(table.reportId),
+    index('idx_report_outcomes_job_id').on(table.jobId),
+    index('idx_report_outcomes_run_record_id').on(table.runRecordId),
+    index('idx_report_outcomes_user_id').on(table.userId, table.createdAt),
+  ]
+)
+
+// ==========================================
 // Tasks (per-user to-do list)
 // ==========================================
 
@@ -835,5 +931,40 @@ export const activityEvents = sqliteTable(
     index('idx_activity_events_kind_ts').on(table.kind, table.ts),
     index('idx_activity_events_ts').on(table.ts),
     index('idx_activity_events_lead_id').on(table.leadId),
+  ]
+)
+
+// ==========================================
+// Run Telemetry — appraisal decision audit trail
+// ==========================================
+
+export const runTelemetry = sqliteTable(
+  'run_telemetry',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    jobId: text('job_id'),
+    userId: text('user_id'),
+    address: text('address'),
+    arv: integer('arv'),
+    arvSource: text('arv_source'),
+    confidence: text('confidence'),
+    bracket: text('bracket'),
+    anchorAddress: text('anchor_address'),
+    poolSize: integer('pool_size'),
+    enabledCount: integer('enabled_count'),
+    driverCount: integer('driver_count'),
+    /** Full structured decision trail — [{compAddress, stage, rule, verdict, value, note}] */
+    decisionsJson: text('decisions_json'),
+    /** Band medians + members, when the run banded the pocket */
+    bandsJson: text('bands_json'),
+    /** Named rules that fired this run — queryable bitmap-ish list */
+    rulesFiredJson: text('rules_fired_json'),
+    durationMs: integer('duration_ms'),
+    createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
+  },
+  (table) => [
+    index('idx_run_telemetry_addr').on(table.address),
+    index('idx_run_telemetry_created').on(table.createdAt),
+    index('idx_run_telemetry_job').on(table.jobId),
   ]
 )

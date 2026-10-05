@@ -19,7 +19,6 @@ import type { EvaluationSettings, RecalcResult, CompEvaluation, RecalcValuationR
 import { PROXIMITY_DEFAULTS, type ProximityConfig, type ArvAdjustmentRule, type ArvAdjustmentOverride } from '../client-api'
 import {
   evaluateComparable,
-  calculateARV,
   getCompAvgSqft,
   calculateValuation,
   calculateAllRehabLevelEstimates,
@@ -32,6 +31,7 @@ import {
   passesHardFilters,
   scoreComp,
 } from '@flowstate-api/shared'
+import { evaluateB, type BComp } from '@flowstate-api/shared/appraisal'
 
 /**
  * Check whether the user has changed any filter or adjustment settings
@@ -151,7 +151,10 @@ export function recalculateReport(
   // 2. Build ArvCompLike array for ARV calculation
   const arvComps: ArvCompLike[] = compEvaluations.map((ev, i) => ({
     isEnabled: ev.isEnabled,
-    adjustedPrice: ev.adjustedPrice,
+    // Server-adjusted price is authoritative — it was computed against the
+    // enriched comp data; the client re-derivation can drift (missing/extra
+    // adjustment signals). Fall back to the client's own eval when absent.
+    adjustedPrice: comps[i].adjustedPrice ?? ev.adjustedPrice,
     salePrice: comps[i].salePrice ?? null,
     squareFeet: comps[i].squareFeet ?? null,
     distanceMiles: comps[i].distanceMiles ?? null,
@@ -165,43 +168,88 @@ export function recalculateReport(
     })),
   }))
 
-  // 3. Use all enabled comps for ARV (no cap — users can enable/disable comps freely)
+  // 3. ARV pool = evidence-classified comps only — 'after_renovation'
+  //    (flip/premium/above-AVM) or an explicit operator ARV pin. Median
+  //    (transitional) comps never feed ARV; investor floor comps never can.
+  const subjectAvm = (subject as { avm?: { value?: number | null } | null }).avm?.value ?? null
+  const isArvComp = (i: number) =>
+    comps[i].classification?.type === 'after_renovation' || comps[i].userTier === 'arv'
+  const isAsIsComp = (i: number) => {
+    const c = comps[i]
+    if (c.classification?.type !== 'as_is' && c.userTier !== 'as_is') return false
+    // Investor-priced only — a distressed deed priced at/above the subject's
+    // AVM is not an investor purchase.
+    return subjectAvm == null || (c.salePrice != null && c.salePrice <= subjectAvm)
+  }
+
   const enabledCount = arvComps.filter((c) => c.isEnabled).length
   const disabledCount = comps.length - enabledCount
 
-  // 4. Calculate ARV using shared function
-  const arv = calculateARV(arvComps, subject.squareFeet)
+  // 4. ARV — the same Set-B engine the pipeline runs, on the serialized
+  //    (stamped) comps. When B produces nothing (pre-stamp reports), the
+  //    stored ARV carries through unchanged — no retired math.
+  const bComps: BComp[] = comps.map((c, i) => ({
+    address: c.address ?? null,
+    isEnabled: compEvaluations[i].isEnabled,
+    salePrice: c.salePrice ?? null,
+    saleDate: c.saleDate ?? null,
+    squareFeet: c.squareFeet ?? null,
+    pricePerSqft: c.pricePerSqft ?? null,
+    adjustedPrice: c.adjustedPrice ?? null,
+    distanceMiles: c.distanceMiles ?? null,
+    sameBlockGroup: c.sameBlockGroup ?? null,
+    censusTract: c.censusTract ?? null,
+    subdivision: c.subdivision ?? null,
+    yearBuilt: c.yearBuilt ?? null,
+    lotSizeAcres: c.lotSizeAcres ?? null,
+    lotSizeSquareFeet: c.lotSizeSquareFeet ?? null,
+    landAssessedValue: c.landAssessedValue ?? null,
+    propertyType: c.propertyType ?? null,
+    crossesMajorRoad: c.crossesMajorRoad ?? null,
+    disableReasons: (c.disableReasons as string[] | null) ?? null,
+    classification: c.userTier === 'as_is' ? { type: 'as_is' }
+      : c.userTier === 'arv' ? { type: 'after_renovation' }
+      : c.classification ?? null,
+    curbAppeal: (c.curbAppeal as BComp['curbAppeal']) ?? null,
+    evidenceVerification: (c.evidenceVerification as BComp['evidenceVerification']) ?? null,
+    appraisalRules: c.appraisalRules
+      ? { totalAdjustment: (c.appraisalRules as { totalAdjustment?: number | null }).totalAdjustment ?? null }
+      : null,
+  }))
+  const bSubject = {
+    squareFeet: subject.squareFeet ?? null,
+    yearBuilt: subject.yearBuilt ?? null,
+    censusTract: subject.censusTract ?? null,
+    subdivision: subject.subdivision ?? null,
+    landAssessedValue: subject.landAssessedValue ?? null,
+    taxAssessment: (subject as { taxAssessment?: number | null }).taxAssessment ?? (subject as { assessedValue?: number | null }).assessedValue ?? null,
+    assessedValue: (subject as { assessedValue?: number | null }).assessedValue ?? null,
+    avmValue: subjectAvm,
+    lotSizeAcres: subject.lotSizeAcres ?? null,
+    lotSizeSquareFeet: subject.lotSizeSquareFeet ?? null,
+    condition: data.valuation?.rehabLevel ?? null,
+  }
+  const bResult = evaluateB(bSubject, bComps, { rehabCost: data.valuation?.rehabCost ?? null })
+  // Server ARV is authoritative — the pipeline's evidence pool (rescues,
+  // widened comps, permit/geo/exclusion gates, devalue ladder) is richer
+  // than anything the browser can reconstruct. Client evaluateB stays as
+  // the fallback only when the server produced no ARV.
+  const arv = data.valuation?.arv ?? bResult.arv ?? 0
 
-  // 4b. Classify comps into groups:
-  //   1. Among ALL comps, find top arvThresholdPercent% by sale price
-  //   2. Comps that pass filters AND are in top price percentile = 'arv'
-  //   3. Remaining comps with salePrice ≤ ARV × asIsThreshold% = 'as_is'
-  const arvThresholdPct = settings.dealParams.arvThresholdPercent ?? 15
-  const asIsThreshold = settings.asIsThresholdPercent ?? settings.dealParams.asIsThresholdPercent ?? 70
-  const priceCeiling = arv * asIsThreshold / 100
-
-  // Rank ALL comps by sale price for percentile display
+  // 4b. Groups come from evidence classification — not price percentile.
+  //     'arv' = after_renovation evidence; 'as_is' = investor-priced
+  //     distressed; transitional stays ungrouped (market tier).
+  const rankMap = new Map<number, number>()
   const allWithPrice = comps
     .map((c, i) => ({ i, price: c.salePrice ?? 0 }))
     .filter((c) => c.price > 0)
     .sort((a, b) => b.price - a.price)
-
-  const topCount = Math.max(1, Math.ceil(allWithPrice.length * arvThresholdPct / 100))
-  const topPriceIndices = new Set(allWithPrice.slice(0, topCount).map((c) => c.i))
-
-  const rankMap = new Map<number, number>()
   allWithPrice.forEach((c, rank) => rankMap.set(c.i, rank))
 
   compEvaluations.forEach((ev, i) => {
-    const salePrice = comps[i].salePrice ?? 0
-
-    if (ev.isEnabled && topPriceIndices.has(i)) {
-      ev.compGroup = 'arv'
-    } else if (salePrice > 0 && salePrice <= priceCeiling) {
-      ev.compGroup = 'as_is'
-    } else {
-      ev.compGroup = null
-    }
+    ev.compGroup = ev.isEnabled && isArvComp(i) ? 'arv'
+      : ev.isEnabled && isAsIsComp(i) ? 'as_is'
+      : null
 
     // Percentile among ALL comps by sale price
     const rank = rankMap.get(i)
@@ -323,16 +371,14 @@ function mapValuationResult(
     tierRanges
   )
 
-  // Base ARV: a manual per-report override is the FINAL value — proximity
-  // and characteristic adjustments exist to correct the *computed* ARV and
-  // must not shave a number the user typed in themselves.
+  // A manual per-report override is the final ARV. Percent-of-ARV physical
+  // characteristic rules are retained in settings for compatibility but are
+  // no longer applied to displayed valuation.
   const manualArv = settings.arvOverride != null && settings.arvOverride > 0 ? settings.arvOverride : null
   const baseArv = manualArv ?? v.arv
   const proximityDeduction = manualArv != null ? 0 : calculateProximityDeduction(baseArv, settings)
-  const arvAdj = manualArv != null
-    ? { delta: 0, lines: [] as ArvAdjustmentLine[] }
-    : calculateArvAdjustmentDelta(baseArv, subject as Record<string, unknown> | null | undefined, settings)
-  const adjustedArv = baseArv - proximityDeduction + arvAdj.delta
+  const arvAdj = { delta: 0, lines: [] as ArvAdjustmentLine[] }
+  const adjustedArv = baseArv - proximityDeduction
 
   // Recalculate everything from adjusted ARV
   const adjustedClosing = adjustedArv * (settings.dealParams.closingCostsPercent / 100)
@@ -446,7 +492,8 @@ function calculateProximityDeduction(arv: number, settings: EvaluationSettings):
 
 /**
  * Recalculate valuation when user manually toggles comps.
- * Uses shared calculateARV + calculateValuation for consistency with server.
+ * Runs Set-B on the stamped comp pool — the operator selection constrains
+ * which comps are enabled; B does the tiering/anchoring math itself.
  */
 export function recalculateValuationFromComps(
   allComps: CompItem[],
@@ -460,7 +507,54 @@ export function recalculateValuationFromComps(
   const subjectSqft = subject.squareFeet ?? 0
   const selectedComps = allComps.filter((c, i) => selectedCompKeys.has(getCompKey(c, i)))
 
-  const arvComps: ArvCompLike[] = selectedComps.map((c) => ({
+  // Operator selection = enabled evidence. B reads classification + stamps
+  // for tiering; 'as_is' pins re-class the comp out of the ARV pool.
+  const bComps: BComp[] = allComps.map((c, i) => ({
+    address: c.address ?? null,
+    isEnabled: selectedCompKeys.has(getCompKey(c, i)),
+    salePrice: c.salePrice ?? null,
+    saleDate: c.saleDate ?? null,
+    squareFeet: c.squareFeet ?? null,
+    pricePerSqft: c.pricePerSqft ?? null,
+    adjustedPrice: c.adjustedPrice ?? null,
+    distanceMiles: c.distanceMiles ?? null,
+    sameBlockGroup: c.sameBlockGroup ?? null,
+    censusTract: c.censusTract ?? null,
+    subdivision: c.subdivision ?? null,
+    yearBuilt: c.yearBuilt ?? null,
+    lotSizeAcres: c.lotSizeAcres ?? null,
+    lotSizeSquareFeet: c.lotSizeSquareFeet ?? null,
+    landAssessedValue: c.landAssessedValue ?? null,
+    propertyType: c.propertyType ?? null,
+    crossesMajorRoad: c.crossesMajorRoad ?? null,
+    disableReasons: (c.disableReasons as string[] | null) ?? null,
+    classification: c.userTier === 'as_is' ? { type: 'as_is' }
+      : c.userTier === 'arv' ? { type: 'after_renovation' }
+      : c.classification ?? null,
+    curbAppeal: (c.curbAppeal as BComp['curbAppeal']) ?? null,
+    evidenceVerification: (c.evidenceVerification as BComp['evidenceVerification']) ?? null,
+    appraisalRules: c.appraisalRules
+      ? { totalAdjustment: (c.appraisalRules as { totalAdjustment?: number | null }).totalAdjustment ?? null }
+      : null,
+  }))
+  const bResult = evaluateB(
+    {
+      squareFeet: subject.squareFeet ?? null,
+      yearBuilt: subject.yearBuilt ?? null,
+      censusTract: subject.censusTract ?? null,
+      subdivision: subject.subdivision ?? null,
+      landAssessedValue: subject.landAssessedValue ?? null,
+      taxAssessment: (subject as { taxAssessment?: number | null }).taxAssessment ?? (subject as { assessedValue?: number | null }).assessedValue ?? null,
+      assessedValue: (subject as { assessedValue?: number | null }).assessedValue ?? null,
+      avmValue: (subject as { avm?: { value?: number | null } | null }).avm?.value ?? null,
+      lotSizeAcres: subject.lotSizeAcres ?? null,
+      lotSizeSquareFeet: subject.lotSizeSquareFeet ?? null,
+      condition: originalValuation.rehabLevel ?? null,
+    },
+    bComps,
+    { rehabCost: originalValuation.rehabCost ?? null },
+  )
+  const arvComps = selectedComps.map((c) => ({
     isEnabled: true,
     adjustedPrice: c.adjustedPrice ?? c.salePrice ?? null,
     salePrice: c.salePrice ?? null,
@@ -468,8 +562,7 @@ export function recalculateValuationFromComps(
     distanceMiles: c.distanceMiles ?? null,
     filterResults: [],
   }))
-
-  const newArv = arvComps.length > 0 ? calculateARV(arvComps, subjectSqft) : (originalValuation.arv ?? 0)
+  const newArv = bResult.arv ?? (originalValuation.arv ?? 0)
   const compAvgSqft = arvComps.length > 0 ? getCompAvgSqft(arvComps) : subjectSqft
 
   const selectedLevel = originalValuation.rehabLevelEstimates?.find((l) => l.isSelected)

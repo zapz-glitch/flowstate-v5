@@ -6,6 +6,9 @@ initOpenNextCloudflareForDev()
 const nextConfig = {
   output: 'standalone',
   reactStrictMode: true,
+  // Dev-only: the agent browser preview proxies localhost through 127.0.0.1,
+  // and Next blocks cross-origin dev resources (HMR, fonts) without this.
+  allowedDevOrigins: ['127.0.0.1'],
   experimental: {
     serverActions: {
       bodySizeLimit: '2mb',
