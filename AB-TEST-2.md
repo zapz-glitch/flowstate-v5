@@ -225,6 +225,16 @@ still hard + lone-outlier can't vouch itself into the top price group.
   taper 50/40/30, land ladder ±20%), then judge — >25% total adj =
   different product, use it as a bound and find better evidence.
 
+### Band spec (owner decision)
+- Curve: **renovated → maintained → dated/distressed** (dated top of the
+  bottom band, severe distress at its bottom). One member = a band.
+- `bConditionClass`: curb read votes; sale label corroborates;
+  unlabeled → maintained.
+- Carrier cascade: renovated → maintained (replaces ARV when no flips
+  exist — not a confidence penalty, it's what the pocket is) → dated
+  pocket picks the **best curb-rated** sales → distressed last.
+- Don't optimize for unseen pockets; iterate on real runs.
+
 ## Watch list for next runs
 
 - Does OG's anchor land where v2's ladder lands when evidence is dense?

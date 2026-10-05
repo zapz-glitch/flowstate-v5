@@ -280,6 +280,86 @@ swap. The defects were known, listed, and bounded — the alternative
 (Set A) drifted above its own evidence on exactly the thin pools where
 an investor needs the number most.
 
+## Generation 2 — rules hardened during the second A/B (2026-10-05)
+
+The ship-time harness stayed intact; every rule below is additive and
+proved on live addresses before it was committed.
+
+### G1 — Verified answers serve; insufficient comps is the last word
+`14f27a8`. The grid's enabled count gated the serve path, so a rescued-
+and-verified B answer could never reach the report (Camp Ground: verified
+$199,922 shelved for a $161,145 AVM). Now `insufficient` no longer blocks
+a B result whose verify ladder passed. Unverified results still floor
+honestly.
+
+### G2 — Geo hierarchy: tract → block group → neighborhood
+`746d8f3`, road rule `78cc9e4`. After the class pick, drivers restrict to
+the tightest geo tier present; out-of-tier comps drive only when nothing
+closer exists. **Tract/BG membership requires no major-road crossing** —
+a comp across the road may sit inside the census polygon but it isn't the
+same pocket; it can only claim the neighborhood-name tier. Names are
+normalized (spelling variants don't split a pocket).
+
+### G3 — URAR adjustment ceiling as judge, not clamp
+`a07bd4a`. A comp needing >25% total adjustment — measured by whichever
+engine asks most (grid totalAdjustment or our marginal size+land reprice
+vs its sale) — is a **bound, not a driver**. It stays in the evidence
+pool and the outlier ceiling but can never anchor or support.
+
+### G4 — T1b near-miss rescue + measured market conditions
+`e2e012e`. Same-pocket comps (same tract/BG, no road) killed **only** by
+sale-age or label mismatches get a second look: sales ≤365 days return
+with a time adjustment. The trend is *measured*, not assumed — OLS $/sf-
+per-month over cleaned same-tract sales, capped ±10%. Unmeasurable trend
+→ −10% stale haircut past 180 days. This is the appraiser's URAR
+"market conditions" line item.
+
+### G5 — T2 evidence bands: the three-band curve
+`af21cfb`, `8801630`, `b9391db`, `6d37f12`, `be8b1ba`, `102840a`.
+When no comp drives, the pocket's own sales classify themselves:
+
+- **Bands:** renovated (curb read / flip-class product) → maintained →
+  dated→distressed (one bottom band, dated at its top). One member
+  still makes a band.
+- **Condition vote:** the Clef curb read only — vision on listing
+  photos + description. No sale-label guessing, no price position as
+  condition. Unlabeled comps fill into the band whose price zone their
+  $/sf fits; a fully unlabeled pocket keeps its own median.
+- **Carrier cascade:** renovated band prices ARV; a renovated-free
+  pocket prices at maintained (that's what the pocket *is*, not a
+  penalty); a dated/distressed pocket falls to its best curb-rated
+  sales; distressed alone bounds, never drives.
+- **Cleaning:** as-is/bounded-low and stale/divergent excluded; IQR
+  fence on $/sf.
+- **Repricing:** band members get the same marginal sqft taper
+  (50/40/30) and land ladder (vacant-median → assessed curve →
+  per-parcel, ±20% cap) as driver contributions — the band's median
+  *implied* price is the answer, named members stand behind it.
+
+### G6 — Maintained-band floor (the hierarchy invariant)
+`6d37f12`. **ARV cannot sit below the maintained band.** An anchor
+priced under what maintained homes fetch is floored at the band
+median — either the anchor's label was wrong or the anchor was.
+(Charlotte: Fox Run anchored $198k while five same-tract maintained
+sales sat at $215–256k → floored to $247,953.)
+
+### G7 — Comp-evidence coverage: photos are never missing
+`b75f94e` (+ existing pipeline). Every comp gets a curb read before
+`evaluateB` runs: listing photos (Zillow→Redfin→Realtor) → **Firecrawl
+web image search on the address** → Clef classifies on up to 4 photos
++ description. The pipeline awaits the batch; reads land on ~90–100%
+of comps in practice.
+
+### G8 — Address resolution
+`4f58d09`. ATTOM lookup retries once with the street directional
+stripped ("SW"/"NE"…) — attribution fragility, not appraisal logic.
+
+### Tooling — run cards + tricks checklist
+`8751fa7`, `12a7404`. `scripts/ab-run-report.mjs` renders each artifact:
+timing, ARV vs served-vs-B split, comps used, strict-vs-widened rules,
+per-rule pass counts, flex/concession trail, missing-rule signals, and
+a per-trick ✓/—/✗ checklist so no run can quietly skip a rule.
+
 ## Sources
 
 - `scripts/ab-eval.py` — the harness itself (reference at `31cdd3f`)
