@@ -11,6 +11,17 @@ import { InvestorAnalysisSummary } from './InvestorAnalysisSummary'
 
 // ─── Analysis Result Layout ──────────────────────────────────────────────────
 
+const compactConcession = (text: string): string => {
+  const value = text.match(/(?:to|of)\s+±?\$?([\d,.]+)/)?.[1]?.replace(/,/g, '')
+  const n = value ? Number(value) : null
+  if (text.includes('sale age') && n != null) return `Age ≤${Math.round(n)}d`
+  if (text.includes('sqft tolerance') && n != null) return `Size ±${Math.round(n).toLocaleString()}sf`
+  if (text.includes('year built') && n != null) return `Year ±${Math.round(n)}y`
+  if (text.includes('distance') && n != null) return `Dist ≤${Math.round(n * 10) / 10}mi`
+  if (text.includes('lot size') && n != null) return `Lot ±${Math.round(n).toLocaleString()}sf`
+  return text.split(' (was ')[0]
+}
+
 export interface AnalysisResultLayoutProps {
   /** Map-list hover sync (local to map view, not in atoms) */
   onCompHover?: (key: string | null) => void
@@ -139,20 +150,20 @@ export function AnalysisResultLayout({
         )
       })() : null}
 
-      {/* Param-flex disclosure on successful runs — how far the rules
-          stretched to admit ARV evidence (geo stayed required). */}
+      {/* Result evidence — the server reason plus the short rules that made it. */}
       {subject && !isStreaming && comps?.insufficientComps !== true && comps?.retrieval?.paramFlex != null && (() => {
-        const { extensions, factor } = comps.retrieval.paramFlex
-        const tone = extensions === 0 ? 'text-emerald-500 border-emerald-500/30'
-          : extensions <= 2 ? 'text-amber-500 border-amber-500/30'
-          : 'text-red-400 border-red-400/30'
+        const concessions = comps.retrieval.paramFlex.concessions ?? []
         return (
-          <div className={`inline-flex border rounded-sm px-2 py-1 text-[10px] font-semibold ${tone}`}>
-            {extensions === 0
-              ? 'Comps qualified on strict rules'
-              : comps?.retrieval?.paramFlex?.concessions?.length
-                ? `Comp rules widened: ${comps.retrieval.paramFlex.concessions.join('; ')}`
-                : `Comp rules extended ${extensions}× (to ×${factor})`}
+          <div className="border border-border rounded-sm px-2.5 py-2 text-foreground">
+            <div className="text-[9px] font-semibold uppercase tracking-wider text-foreground-tertiary">Results</div>
+            <div className="text-[10px] font-medium mt-1">
+              {valuation?.statusReason ?? `Result ${valuation?.resultGrade ?? 'unknown'}`}
+            </div>
+            <div className="mt-1 space-y-0.5 text-[10px] text-foreground-secondary tabular-nums">
+              {concessions.length > 0
+                ? concessions.map((rule) => <div key={rule}>{compactConcession(rule)}</div>)
+                : <div>Strict rules</div>}
+            </div>
           </div>
         )
       })()}
