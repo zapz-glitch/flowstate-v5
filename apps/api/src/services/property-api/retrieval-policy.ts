@@ -87,6 +87,10 @@ export interface ComparablesRetrievalMeta {
   providerCandidatesReported: number | null
   /** Candidates actually returned to us. */
   providerCandidatesReceived: number
+  /** Unique property IDs after same-provider duplicate transaction rows merge. */
+  providerCandidatesAfterDedup?: number
+  /** Provider IDs that appeared more than once in one response. */
+  duplicateCandidateIds?: string[]
   /** maxComps we asked for (after env/request resolution, before provider clamp). */
   candidateLimitRequested: number
   /** Limit actually sent to the provider (<= provider max). */

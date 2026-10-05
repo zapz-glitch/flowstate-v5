@@ -542,14 +542,19 @@ export class AnalysisJobDO {
       return
     }
 
-    const pools = { comparables: compsResult.success ? compsResult.data.comparables : [], conflictIds: [] as string[] }
+    const providerComps = compsResult.success ? compsResult.data.comparables : []
+    const pools = mergeComparablePools(providerComps, [])
+    const duplicateIds = [...providerComps.reduce((m, c) => m.set(c.id, (m.get(c.id) ?? 0) + 1), new Map<string, number>())]
+      .filter(([, n]) => n > 1).map(([id]) => id)
     const rawComps = pools.comparables
     // Retrieval audit — what the provider actually returned for this pool.
     // Provider exposes no totalCount/hasMore, so providerTruncated is an
     // inference (received filled the whole requested window).
     const retrieval: ComparablesRetrievalMeta = compsResult.data.retrieval ?? {
       providerCandidatesReported: null,
-      providerCandidatesReceived: rawComps.length,
+      providerCandidatesReceived: providerComps.length,
+      providerCandidatesAfterDedup: rawComps.length,
+      ...(duplicateIds.length ? { duplicateCandidateIds: duplicateIds } : {}),
       candidateLimitRequested: candidateLimit,
       candidateLimitEffective: candidateLimit,
       providerTruncated: rawComps.length >= candidateLimit,
@@ -688,9 +693,19 @@ export class AnalysisJobDO {
           ids: seenIds,
           addresses: seenAddrs,
         })
-        if (supplement.length > 0) {
-          console.log(`[AnalysisJobDO] market-context supplement: +${supplement.length} comp(s) added to pool`)
-          comps = [...comps, ...supplement]
+        // ATTOM market-context can return one property ID on several sale
+        // rows. Merge them through the same conflict-aware transaction logic
+        // before they become separate comps.
+        const dedupedSupplement = mergeComparablePools([], supplement).comparables
+          .filter((c) => {
+            const key = String(c.id)
+            if (seenIds.has(key) || seenAddrs.has(normAddr(c.address))) return false
+            seenIds.add(key); seenAddrs.add(normAddr(c.address))
+            return true
+          })
+        if (dedupedSupplement.length > 0) {
+          console.log(`[AnalysisJobDO] market-context supplement: +${dedupedSupplement.length} comp(s) added to pool`)
+          comps = [...comps, ...dedupedSupplement]
         }
       } catch (e) {
         console.warn('[AnalysisJobDO] market-context supplement failed (non-fatal):', e instanceof Error ? e.message : e)

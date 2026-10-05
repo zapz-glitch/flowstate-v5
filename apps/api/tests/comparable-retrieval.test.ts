@@ -183,6 +183,21 @@ const merged = mergeComparablePools(pool.slice(0, 3), [pool[1], mkComp('wide-1',
 assert.equal(merged.comparables.length, 4, 'merge keeps overlap + new candidates')
 assert.equal(merged.conflictIds.length, 0)
 
+// The provider can repeat one property ID for multiple transactions; the
+// first pool must dedupe it the same way an expansion merge does.
+const repeated = mergeComparablePools([
+  mkComp('repeat', { salePrice: 155000, saleDate: daysAgo(90), raw: { isSale: true, salePrice: 155000, saleDate: daysAgo(90) } }),
+  mkComp('repeat', { salePrice: 5890000, saleDate: daysAgo(30), raw: { isSale: true, salePrice: 5890000, saleDate: daysAgo(30) } }),
+  mkComp('repeat', { salePrice: 5893875, saleDate: daysAgo(45), raw: { isSale: true, salePrice: 5893875, saleDate: daysAgo(45) } }),
+], [])
+assert.equal(repeated.comparables.length, 1)
+assert.equal(repeated.comparables[0].salePrice, 5890000, 'newest valid sale wins')
+assert.deepEqual(
+  (repeated.comparables[0].raw as { retrievalVariants?: unknown[] }).retrievalVariants?.length,
+  3,
+  'dropped sale variants remain in the evidence trail',
+)
+
 // ─── 6: bigger pool does not mean paid enrichment for every candidate ────────
 
 const thresholds = { saleAgeDays: 180, sqftDiff: 250, maxYearDiff: 14 }
