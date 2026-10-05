@@ -40,12 +40,12 @@ Ground re-run proves it: served $199,922 rescue answer, was $161,145 AVM.
 | 2782 Centerville Rosebud Rd | $254,524 → $408,002 → **$332,831** | Evidence bands replaced price thirds: maintained $152/sf · renovated $171/sf — lower but condition-honest | ? | ? |
 | 194 Cedar Mill Dr, Dallas GA | $462,903 → **$442,080** (uplift removed) | T0 anchor — self-heal to 108 Longwood Pl, +$77,120 uplift, ceiling cap at answer; full machinery, verified | ? | ? |
 
-| 2151 Shadowwood Dr, Marietta | **$347,743** | T0 anchor verified — 1 rescue | ? | ? |
-| 2772 Palm Dr, East Point | — | **provider miss** — 'Palm Dr'/'Palm Drive' both not-found (resolution, not harness) | ? | ? |
-| 1343 Emory Rd, Atlanta | **$959,002** | 7 rescues past city-label noise; self-heal +$68k; Druid Hills pocket | ? | ? |
-| 951 Oriole Ln SE, Marietta | **$405,670** | clean T0 anchor; median-tier at face value (no uplift) | ? | ? |
-| 2623 Preston Dr, Decatur | **$280,776** | 8 rescues — whole pocket hidden behind 'Decatur vs Atlanta-Decatur' labels | ? | ? |
-| 1300 Nash Rd NW, Atlanta | **$283,799** | 2 zip-label rescues, self-heal | ? | ? |
+| 2151 Shadowwood Dr, Marietta | **$347,743** | T0 anchor verified — 1 rescue | $537,779 (weak: 13 widenings, $18M bad record in pool, anchor 12yr newer, +75% over AVM) | ? |
+| 2772 Palm Dr, East Point | — | **resolution miss** — ATTOM lists it as 'Atlanta', city-label gap; needs zip-anchored retry in the lookup ladder | $201,006 (weak, strict rules — Raines St anchor) | ? |
+| 1343 Emory Rd, Atlanta | **$959,002** | 7 rescues past city-label noise; self-heal +$68k; Druid Hills pocket | $917,428 (verified — converged ~4.5%) | ? |
+| 951 Oriole Ln SE, Marietta | **$405,670** | clean T0 anchor; median-tier at face value (no uplift) | $406,059 (verified — SAME anchor, same number to within $389) | ? |
+| 2623 Preston Dr, Decatur | **$280,776** | 8 rescues — whole pocket hidden behind 'Decatur vs Atlanta-Decatur' labels | $216,421 (weak/unverified — 10 widenings, distressed band only; their own notes flag a better comp at $297k) | ? |
+| 1300 Nash Rd NW, Atlanta | **$283,799** | 2 zip-label rescues, self-heal | $275,957 (weak — same anchor Mango Cir, ~3% apart) | ? |
 
 **Verified-answer rate: 6/8 now (Tennis honest floor).** Dunseath headline —
 floored at AVM before hardening, now a verified pocket answer ~5% from
@@ -249,3 +249,24 @@ still hard + lone-outlier can't vouch itself into the top price group.
 - Does v2's price-group ARV class match OG's tier discipline on flips?
 - Any address where OG withholds but v2 answers — is v2's answer
   defensible or a stretch?
+
+
+### V2 comparison findings (read-only review)
+
+- **Convergence where evidence exists** — Oriole (identical anchor+answer),
+  Nash (same anchor, 3%), Emory (~4.5%). Both machines agree when the
+  pocket has real sales.
+- **V2 ladder drifts** — 10–15 widenings admits different-product homes
+  (Shadowwood ±2,166sf/±22yr). Our hard caps + rescue path find tighter
+  evidence first.
+- **V2 bands are price-placed** — Emory's only band 'distressed' $789k in
+  a million-dollar pocket; Nash's distressed band above the evidence.
+  Our condition-vote bands avoid this — the band is what the photos say,
+  not where the price sits.
+- **V2's own doubts = our rules**: $18M bad record would die on our IQR
+  fence + microscope; ladder-drift is what our sqft caps prevent.
+- **Palm Dr resolution**: ATTOM records it as 'Atlanta' not 'East Point' —
+  city-label miss. Resolver needs a zip-anchored retry (street+zip, no
+  city) when the full string misses.
+- **Scorecard this round**: OG better 2 (Shadowwood, Preston), tied/converged
+  3 (Oriole, Nash, Emory), v2 wins by existing 1 (Palm Dr).
