@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation'
 import {
   Ban,
   FileSignature, Inbox, ListChecks, Flame, Play, RotateCcw, CircleSlash,
-  ChevronRight, Copy, Check, Search, AlertTriangle, Trash2,
+  ChevronRight, Copy, Check, Search, AlertTriangle, Trash2, Loader2,
 } from 'lucide-react'
 import { getOfferQueue, hideQueueItem, type PipelineItem } from './actions'
 import {
@@ -29,17 +29,47 @@ import {
 } from './queue'
 
 const SORT_PREF_KEY = 'giveOffer.waitFilter'
-const POLL_MS = 10000
+const POLL_MS = 5000
 
-type Cat = 'waiting' | 'hot' | 'prep_offer' | 'no_margin' | 'no_offer' | 'failed'
+type Cat = 'waiting' | 'ready' | 'deadline' | 'hot' | 'prep_offer' | 'no_margin' | 'no_offer' | 'failed'
 
 const CAT_LABELS: Record<Cat, string> = {
-  waiting: 'Waiting',
+  waiting: 'Evaluating',
+  ready: 'Ready',
+  deadline: 'Deadline Today',
   hot: 'Hot leads',
   prep_offer: 'Prep offers',
   no_margin: 'No margin',
   no_offer: 'No offer',
   failed: 'Failed',
+}
+
+const EXPECTED_EVAL_MS = 90_000
+
+/** Circular elapsed-time indicator for leads still being evaluated —
+ *  fills clockwise over EXPECTED_EVAL_MS, then spins until the report
+ *  lands. Pure CSS animation — no JS tick needed for the spin phase. */
+function EvalRing({ elapsedMs }: { elapsedMs: number }) {
+  const r = 6
+  const c = 2 * Math.PI * r
+  const fill = Math.min(elapsedMs / EXPECTED_EVAL_MS, 1)
+  const overtime = elapsedMs > EXPECTED_EVAL_MS * 2
+  return (
+    <svg
+      width="16" height="16" viewBox="0 0 16 16"
+      className={overtime ? 'animate-spin' : ''}
+      style={{ transform: 'rotate(-90deg)' }}
+      aria-label={`evaluating ${Math.round(elapsedMs / 1000)}s`}
+    >
+      <circle cx="8" cy="8" r={r} fill="none" strokeWidth="2" className="stroke-foreground-tertiary/20" />
+      <circle
+        cx="8" cy="8" r={r} fill="none" strokeWidth="2" strokeLinecap="round"
+        strokeDasharray={c}
+        strokeDashoffset={c * (1 - Math.max(fill, 0.12))}
+        className={overtime ? 'stroke-amber-500' : 'stroke-primary'}
+      />
+    </svg>
+  )
 }
 
 function useNow(): number {
@@ -91,6 +121,7 @@ interface RowData {
   deadlineAt?: string | null
   deadlineNote?: string | null
   section?: string
+  evalElapsedMs?: number
 }
 
 export default function GiveOfferPage() {
@@ -157,6 +188,18 @@ export default function GiveOfferPage() {
     return sortedQueue(raw, filterPref).filter((i) => !excluded.has(i.leadId))
   }, [raw, filterPref, serverDisp])
 
+  const dueItems = useMemo(() =>
+    queueItems
+      .filter((i) => i.offer_stage === 'deadline_today')
+      .sort((a, b) => parseQueuedAt(a.deadline_at) - parseQueuedAt(b.deadline_at)),
+    [queueItems])
+  // waiting = queued/evaluating (no report yet); ready = report landed.
+  const waitingItems = useMemo(() =>
+    queueItems.filter((i) => i.offer_stage !== 'deadline_today' && !jobIdForItem(i)),
+    [queueItems])
+  const readyItems = useMemo(() =>
+    queueItems.filter((i) => i.offer_stage !== 'deadline_today' && jobIdForItem(i)),
+    [queueItems])
   const hotItems = useMemo(() => queueItems.filter((i) => hotIds.has(i.leadId)), [queueItems, hotIds])
   const prepDecided = useMemo(() => decided.filter((d) => d.ok && d.workflow === 'prep_offer'), [decided])
   const marginDecided = useMemo(() => decided.filter((d) => d.ok && d.workflow === 'no_margin'), [decided])
@@ -164,7 +207,9 @@ export default function GiveOfferPage() {
   const failedDecided = useMemo(() => decided.filter((d) => !d.ok), [decided])
 
   const counts: Record<Cat, number> = {
-    waiting: queueItems.length,
+    waiting: waitingItems.length,
+    ready: readyItems.length,
+    deadline: dueItems.length,
     hot: hotItems.length,
     prep_offer: prepDecided.length,
     no_margin: marginDecided.length,
@@ -191,6 +236,7 @@ export default function GiveOfferPage() {
         jobId,
         oppId: item.opportunityId,
         needsEval: !jobId,
+        evalElapsedMs: jobId ? undefined : Math.max(0, now - parseQueuedAt(item.queuedAt)),
         urgent: item.offer_stage === 'deadline_today',
         deadlineAt: item.deadline_at,
         deadlineNote: item.deadline_note,
@@ -198,7 +244,7 @@ export default function GiveOfferPage() {
           ? <AlertTriangle size={13} className="text-red-500 flex-shrink-0" />
           : jobId
             ? <ChevronRight size={13} className="text-foreground-tertiary flex-shrink-0" />
-            : <AlertTriangle size={13} className="text-amber-500 flex-shrink-0" />,
+            : <EvalRing elapsedMs={Math.max(0, now - parseQueuedAt(item.queuedAt))} />,
       }
     }
     const decidedRow = (d: DecidedEntry): RowData => ({
@@ -222,18 +268,9 @@ export default function GiveOfferPage() {
     }
 
     switch (cat) {
-      case 'waiting': {
-        const due = queueItems
-          .filter((i) => i.offer_stage === 'deadline_today')
-          .sort((a, b) => parseQueuedAt(a.deadline_at) - parseQueuedAt(b.deadline_at))
-        const rest = queueItems.filter((i) => i.offer_stage !== 'deadline_today')
-        return [
-          ...(due.length ? [{ key: 'sec:deadline', section: 'Deadline Today', jobId: null } as RowData] : []),
-          ...due.map((i) => ({ ...queueRow(i), urgent: true })),
-          ...(due.length ? [{ key: 'sec:waiting', section: 'Waiting For Offers', jobId: null } as RowData] : []),
-          ...rest.map((i) => queueRow(i)),
-        ]
-      }
+      case 'waiting': return waitingItems.map((i) => queueRow(i))
+      case 'ready': return readyItems.map((i) => queueRow(i))
+      case 'deadline': return dueItems.map((i) => ({ ...queueRow(i), urgent: true }))
       case 'hot': return hotItems.map((i) => queueRow(i, 'hot lead'))
       case 'prep_offer': return prepDecided.map(decidedRow)
       case 'no_margin': return marginDecided.map(decidedRow)
@@ -255,20 +292,23 @@ export default function GiveOfferPage() {
     router.push(`/dashboard/analyze?address=${encodeURIComponent(address)}`)
   }
 
-  const next = queueItems.find((i) => jobIdForItem(i)) ?? null
+  const next = readyItems[0] ?? queueItems.find((i) => jobIdForItem(i)) ?? null
   const nextJobId = next ? jobIdForItem(next) : null
   const resume = lastViewed && lastViewed.jobId !== nextJobId ? lastViewed : null
 
   const catIcons: Record<Cat, React.ReactNode> = {
-    waiting: <ListChecks size={14} />,
+    waiting: <Loader2 size={14} className="animate-spin" />,
+    ready: <Check size={14} />,
+    deadline: <AlertTriangle size={14} />,
     hot: <Flame size={14} />,
     prep_offer: <FileSignature size={14} />,
     no_margin: <CircleSlash size={14} />,
     no_offer: <Ban size={14} />,
     failed: <AlertTriangle size={14} />,
   }
-  const visibleCats: Cat[] = (['waiting', 'hot', 'prep_offer', 'no_margin', 'no_offer', 'failed'] as Cat[])
+  const visibleCats: Cat[] = (['deadline', 'waiting', 'ready', 'hot', 'prep_offer', 'no_margin', 'no_offer', 'failed'] as Cat[])
     .filter((c) => c !== 'hot' || counts.hot > 0)
+    .filter((c) => c !== 'deadline' || counts.deadline > 0)
 
   return (
     <div className="playground-bg -m-4 sm:-m-6 lg:-m-8 min-h-screen lg:h-[100dvh] flex flex-col lg:overflow-hidden">
@@ -283,7 +323,7 @@ export default function GiveOfferPage() {
               <div className="text-body-sm text-foreground-secondary">Offers</div>
               <div className="text-xs text-foreground-tertiary">
                 {loaded
-                  ? `${counts.waiting} waiting${decided.length ? ` · ${decided.filter((d) => d.ok).length} decided today` : ''}`
+                  ? `${counts.ready} ready${counts.waiting ? ` · ${counts.waiting} evaluating` : ''}${decided.length ? ` · ${decided.filter((d) => d.ok).length} decided today` : ''}`
                   : 'Loading queue…'}
               </div>
             </div>
@@ -307,7 +347,7 @@ export default function GiveOfferPage() {
             <div className="border border-border/60 bg-background shadow-sm px-3 py-2 flex items-center gap-2 flex-wrap">
               {nextJobId && (
                 <Link
-                  href={`/dashboard/give-offer/${nextJobId}?cat=waiting`}
+                  href={`/dashboard/give-offer/${nextJobId}?cat=ready`}
                   onMouseEnter={() => prefetchReport(nextJobId)}
                   onClick={() => { armNavVeil(); prefetchReport(nextJobId) }}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary/10 text-primary text-xs font-medium hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors"
@@ -376,7 +416,7 @@ export default function GiveOfferPage() {
               <div className="px-4 py-8 flex flex-col items-center gap-2 text-center">
                 <Inbox className="w-5 h-5 text-foreground-tertiary" />
                 <div className="text-body-sm text-foreground-secondary">
-                  {query ? 'No matches' : cat === 'waiting' ? 'Queue is clear' : `Nothing in ${CAT_LABELS[cat].toLowerCase()} yet`}
+                  {query ? 'No matches' : cat === 'waiting' ? 'Nothing evaluating right now' : `Nothing in ${CAT_LABELS[cat].toLowerCase()} yet`}
                 </div>
                 <div className="text-xs text-foreground-tertiary">
                   {query
