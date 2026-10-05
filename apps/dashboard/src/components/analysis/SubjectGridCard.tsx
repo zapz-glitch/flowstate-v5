@@ -20,9 +20,9 @@ interface SubjectGridCardProps {
 export function SubjectGridCard({ subject, isLoading, footer }: SubjectGridCardProps) {
   // Only geography we actually have · an empty value says nothing, so it is not drawn.
   const blockGroup = formatBlockGroup(subject.censusBlockGroup)
-  const geography = [
-    blockGroup ? { label: 'Group', value: blockGroup, title: 'Census block group' } : null,
-  ].filter((item): item is { label: string; value: string; title: string | undefined } => item !== null)
+  const geography = blockGroup
+    ? [{ label: 'Group', value: blockGroup, title: 'Census block group' }]
+    : []
 
   return (
     <div data-card-key="subject" className="border border-primary/30 rounded-sm overflow-hidden bg-primary/[0.02]">
