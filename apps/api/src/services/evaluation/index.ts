@@ -1256,7 +1256,11 @@ export async function performAnalysis(
     if (bAttemptTrail.length === 0 && fails.length === 0) bAttemptTrail.push('attempt 1 — verified')
     else if (fails.length) bAttemptTrail.push(`final — unverified (${fails.join('; ')})`)
     pipelineBResult = bResult
-    if (!insufficient && bResult.arv != null && bResult.arv !== finalArv) {
+    // "insufficient" is the ladder's last word, not the grid's first.
+    // When the grid enabled nothing but Set-B verified an answer on
+    // rescued or geo-tiered evidence, that answer serves — labeled by
+    // its source. Unverified B results still fall to the floor.
+    if ((!insufficient || fails.length === 0) && bResult.arv != null && bResult.arv !== finalArv) {
       const prevArv = finalArv
       finalArv = bResult.arv
       valuationAnchor = finalArv
