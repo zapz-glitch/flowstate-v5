@@ -375,6 +375,14 @@ function apnSpellings(apn: string): string[] {
   return out
 }
 
+/** Remove a trailing post-directional from the street part
+ *  ("2973 Cascade Rd SW, Atlanta" → "2973 Cascade Rd, Atlanta"). */
+function stripStreetDirectional(address: string): string {
+  const parts = address.split(',')
+  parts[0] = parts[0].replace(/\s+(N|S|E|W|NE|NW|SE|SW)\.?$/i, '')
+  return parts.map((p) => p.trim()).join(', ')
+}
+
 function parseOneLine(addr?: string | null): { line1: string; city: string; state: string; zip: string } {
   const m = (addr ?? '').match(/^(.+?),\s*([^,]+),\s*([A-Z]{2})\s+(\d{5})/i)
   if (!m) return { line1: addr ?? '', city: '', state: '', zip: '' }
@@ -701,8 +709,20 @@ class AttomMcpProvider implements PropertyProviderAdapter {
           }
         }
       }
-      const results = await this.propertyData({ lookupMode: 'address', address }, SUBJECT_DATASETS)
-      const property = await normalizeMcpProperty(results, this.env)
+      let results = await this.propertyData({ lookupMode: 'address', address }, SUBJECT_DATASETS)
+      let property = await normalizeMcpProperty(results, this.env)
+      // The address matcher misses post-directionals — "Cascade Rd SW" is
+      // empty, "Cascade Rd" hits the same parcel. Retry once without the
+      // trailing directional before giving up. (Seen live: Cascade Rd,
+      // Camp Ground Rd.)
+      if (!property.id) {
+        const retry = stripStreetDirectional(address)
+        if (retry !== address) {
+          const retryResults = await this.propertyData({ lookupMode: 'address', address: retry }, SUBJECT_DATASETS)
+          const retryProperty = await normalizeMcpProperty(retryResults, this.env)
+          if (retryProperty.id) { results = retryResults; property = retryProperty }
+        }
+      }
       if (!property.id) return { success: false, error: 'Property not found', code: 'NOT_FOUND' }
       this.subjectResults.set(property.id, results)
       return { success: true, data: property }
