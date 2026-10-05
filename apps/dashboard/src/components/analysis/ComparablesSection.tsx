@@ -16,7 +16,6 @@ import { cn } from '@/lib/utils'
 import { subdivisionsMatch } from '@flowstate-api/shared'
 import type { CompsData, CompItem, SubjectData } from './shared-types'
 import { getCompKey } from './format-helpers'
-import { CompCard } from './CompCard'
 import { CompGridCard } from './CompGridCard'
 import { RuleMatchDetails } from './RuleMatchDetails'
 import { generateCompFeedbackReport, type FeedbackContext, type FeedbackKind } from '@/lib/comp-feedback'
@@ -101,7 +100,6 @@ export function ComparablesSection({
 }: ComparablesSectionProps) {
   const [expandedComps, setExpandedComps] = useState<Set<string>>(new Set())
   const [excludedOpen, setExcludedOpen] = useState(false)
-  const [layout, setLayout] = useState<'grid' | 'list'>('grid')
   const [sortBy, setSortBy] = useState<SortOption>('default')
   const [tierFilter, setTierFilter] = useState<'all' | 'arv' | 'market' | 'floor'>('all')
   const [sortDesc, setSortDesc] = useState(true)
@@ -322,25 +320,7 @@ export function ComparablesSection({
               <Bell className="w-3 h-3" />
               Notify
             </button>
-            {/* Grid/List toggle */}
-            <div className="flex items-center border border-border rounded overflow-hidden no-print">
-              <button
-                type="button"
-                onClick={() => setLayout('grid')}
-                className={cn('p-1.5 transition-colors', layout === 'grid' ? 'bg-primary/10 text-primary' : 'text-foreground-tertiary hover:text-foreground')}
-                title="Grid view"
-              >
-                <LayoutGrid className="w-3.5 h-3.5" />
-              </button>
-              <button
-                type="button"
-                onClick={() => setLayout('list')}
-                className={cn('p-1.5 transition-colors', layout === 'list' ? 'bg-primary/10 text-primary' : 'text-foreground-tertiary hover:text-foreground')}
-                title="List view"
-              >
-                <List className="w-3.5 h-3.5" />
-              </button>
-            </div>
+
           </div>
         </div>
 
@@ -359,36 +339,13 @@ export function ComparablesSection({
               <button
                 key={t}
                 type="button"
-                onClick={() => setTierFilter(t)}
+                onClick={() => { setTierFilter(t); if (t !== 'all') { setSortBy('price'); setSortDesc(true) } else { setSortBy('default') } }}
                 className={cn('text-[10px] px-2 py-0.5 rounded transition-colors', colors[t])}
               >
                 {labels[t]}
               </button>
             )
           })}
-          <span className="w-px h-3 bg-border mx-1" />
-          <ArrowUpDown className="w-3 h-3 text-foreground-tertiary mr-0.5" />
-          {(['default', 'subdivision', 'neighborhood', 'distance', 'price', 'psf'] as const).map((opt) => (
-            <button
-              key={opt}
-              type="button"
-              onClick={() => {
-                if (sortBy === opt && opt !== 'default') setSortDesc((d) => !d)
-                else { setSortBy(opt); setSortDesc(true) }
-              }}
-              className={cn(
-                'text-[10px] px-2 py-0.5 rounded transition-colors inline-flex items-center gap-0.5',
-                sortBy === opt
-                  ? 'bg-primary/15 text-primary font-medium'
-                  : 'text-foreground-tertiary hover:text-foreground hover:bg-secondary'
-              )}
-            >
-              {SORT_LABELS[opt]}
-              {sortBy === opt && opt !== 'default' && (
-                <span className="text-[8px]">{sortDesc ? '↓' : '↑'}</span>
-              )}
-            </button>
-          ))}
         </div>
 
         {/* CDARV status — observational only; never gates evaluation */}
@@ -478,9 +435,9 @@ export function ComparablesSection({
         )}
       </div>
 
-      {/* All comps — grid or list */}
+      {/* All comps — grid only */}
       <div className="print:hidden">
-        {layout === 'grid' ? (
+        {(
           <div className="comps-grid">
             {sortedItems.map(({ comp, originalIndex }) => {
               const key = getCompKey(comp, originalIndex)
@@ -504,31 +461,6 @@ export function ComparablesSection({
               )
             })}
           </div>
-        ) : (
-          <div className="space-y-3">
-            {sortedItems.map(({ comp, originalIndex }) => {
-              const key = getCompKey(comp, originalIndex)
-              const isSelected = hasInteractiveSelection
-                ? selectedCompKeys!.has(key)
-                : comp.isEnabled === true
-              return (
-                <CompCard
-                  key={key}
-                  comp={compWithTier(comp)}
-                  index={originalIndex}
-                  isExpanded={expandedComps.has(key)}
-                  onToggle={toggleExpand}
-                  subject={subject}
-                  subjectSubdivision={subjectSubdivision}
-                  subjectLotAcres={subject?.lotSizeAcres}
-                  isSelectedForArv={isSelected}
-                  onToggleArv={onToggleComp}
-                  onAssignTier={jobId ? pinTier : undefined}
-                  tierPending={comp.id ? tierPending.has(comp.id) : false}
-                />
-              )
-            })}
-          </div>
         )}
       </div>
 
@@ -536,10 +468,10 @@ export function ComparablesSection({
       <Dialog open={notifyOpen} onOpenChange={setNotifyOpen}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle>Notify — comp selection feedback</DialogTitle>
+            <DialogTitle>Review this report</DialogTitle>
             <DialogDescription>
-              Submit a ticket on this report&apos;s comp selection. It&apos;s stored on the
-              report for review — no copy/paste needed.
+              Stamp this report as right or flag it for a fix. It saves to the
+              report&apos;s feedback trail — revisit it anytime.
             </DialogDescription>
           </DialogHeader>
 
@@ -554,7 +486,7 @@ export function ComparablesSection({
                   submitNotify('improve')
                 }
               }}
-              placeholder="Optional notes for this ticket — e.g. '10321 Briarcliff is the right comp, same street renovated sale'&#10;&#10;Enter = Flag for improvement · Shift+Enter = new line"
+              placeholder="Notes for later, e.g. '10321 Briarcliff is the right comp, same street renovated sale'&#10;&#10;Enter = Flag for improvement · Shift+Enter = new line"
               rows={4}
               className="w-full rounded-lg border border-border bg-background px-3 py-2 text-body-sm text-foreground placeholder:text-foreground-tertiary focus:outline-none focus:ring-1 focus:ring-primary resize-y"
             />

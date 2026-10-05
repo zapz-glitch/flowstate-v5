@@ -1562,6 +1562,8 @@ export function buildAnalysisResponse(
       // computed here from the same evidence the rules saw.
       badges: compBadges(comp as never, {
         subjectCensusTract: property.censusTract ?? null,
+        subjectSubdivision: property.subdivision ?? null,
+        subjectNeighborhood: (property as { neighborhoodName?: string | null }).neighborhoodName ?? null,
         subjectPpsfMedians: property.ppsfMedians ?? null,
         condition: ctx.compCurbAppeal?.[comp.id] ?? null,
         classification: compClassification?.classification ?? null,

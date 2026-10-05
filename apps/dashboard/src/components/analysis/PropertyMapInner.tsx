@@ -41,6 +41,8 @@ function FlatMarkers({ markers, activeMarkerKey, onMarkerClick }: {
         zIndex: marker.type === 'subject' ? 100 : 10,
       })
       instance.addListener('click', () => onMarkerClick(marker))
+      // Hover opens the comp card — same handler, same dialog.
+      if (marker.type !== 'subject') instance.addListener('mouseover', () => onMarkerClick(marker))
       return instance
     })
     return () => instances.forEach(marker => { google.maps.event.clearInstanceListeners(marker); marker.setMap(null) })

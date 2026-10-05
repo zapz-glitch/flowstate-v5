@@ -39,6 +39,8 @@ interface CompComparisonDialogProps {
 // ─── Stat cell ──────────────────────────────────────────────────────────────
 
 function StatCell({ label, value, highlight }: { label: string; value: string | number | null | undefined; highlight?: 'match' | 'mismatch' }) {
+  // Unpopulated fields say nothing — hide rather than render '-'.
+  if (value == null || value === '' || value === '-') return null
   return (
     <div className="py-2 px-1.5 sm:px-2 text-center border-r border-border/50 last:border-r-0 overflow-hidden">
       <div className="text-[9px] text-foreground-tertiary truncate">{label}</div>
@@ -121,6 +123,32 @@ export function CompComparisonDialog({ open, onOpenChange, subject, comp, isSele
         <DialogHeader className="px-4 sm:px-5 pt-4 sm:pt-5 pb-3 border-b border-border">
           <div className="flex items-center justify-between pr-6">
             <DialogTitle className="text-sm sm:text-base font-semibold">Comparable Details</DialogTitle>
+            {comp.badges && (
+              <div className="flex items-center gap-2 text-[11px]">
+                {comp.bRole && (
+                  <span className={cn(
+                    'px-1.5 py-0.5 rounded text-[10px] font-bold',
+                    comp.bRole === 'anchor' ? 'bg-amber-500/20 text-amber-500'
+                      : comp.bRole === 'driver' ? 'bg-emerald-500/15 text-emerald-500'
+                      : 'bg-muted text-foreground-tertiary'
+                  )}>
+                    {comp.bRole === 'anchor' ? 'ARV' : comp.bRole === 'driver' ? 'EVIDENCE' : comp.bRole === 'pool' ? 'SUPPORT' : 'excluded'}
+                  </span>
+                )}
+                {comp.badges.condition && <span className="text-foreground-tertiary">Condition <span className="text-foreground font-medium">{comp.badges.condition === 'reno' ? 'Reno' : comp.badges.condition === 'distressed' ? 'Distressed' : comp.badges.condition === 'unverified' ? 'Unverified' : 'Dated'}</span></span>}
+                {comp.badges.price && <span className="text-foreground-tertiary">Price <span className="text-foreground font-medium">{comp.badges.price === 'renovated' ? 'Renovated' : comp.badges.price === 'as_is' ? 'As-is' : 'Median'}</span></span>}
+                {comp.badges.pocket && comp.badges.pocket !== 'unknown' && (
+                  <span className={cn('px-1.5 py-0.5 rounded text-[10px] font-semibold',
+                    comp.badges.pocket === 'in' ? 'bg-emerald-500/15 text-emerald-400'
+                      : comp.badges.pocket === 'equal' ? 'bg-blue-500/15 text-blue-400'
+                      : 'bg-muted text-foreground-tertiary')}>
+                    {comp.badges.pocket === 'in'
+                      ? (comp.badges.pocketVia === 'tract' ? 'Tract' : comp.badges.pocketVia === 'block' ? 'Block' : 'Area ✓')
+                      : `Out ${comp.badges.pocket === 'equal' ? '=' : comp.badges.pocket === 'above' ? '>' : '<'}`}
+                  </span>
+                )}
+              </div>
+            )}
             <div className="flex items-center gap-2">
               {totalFilters > 0 && (
                 <Badge
@@ -130,11 +158,7 @@ export function CompComparisonDialog({ open, onOpenChange, subject, comp, isSele
                   {passedCount}/{evaluatedCount} filters
                 </Badge>
               )}
-              {comp.compGroup && (
-                <Badge variant="outline" className={`text-[10px] ${comp.compGroup === 'arv' ? 'border-emerald-500/30 text-emerald-500' : 'border-amber-500/30 text-amber-500'}`}>
-                  {comp.compGroup === 'arv' ? 'ARV' : 'As-Is'}
-                </Badge>
-              )}
+
             </div>
           </div>
           <RuleMatchDetails comp={comp} />
@@ -263,7 +287,7 @@ export function CompComparisonDialog({ open, onOpenChange, subject, comp, isSele
             </div>
             <div className="grid grid-cols-3 bg-muted/40">
               <StatCell label="Heat / AC" value={[comp.heating, comp.cooling].filter(Boolean).join(' / ') || '-'} highlight={fm('hvac')} />
-              <StatCell label="Assessor Cond." value={comp.buildingCondition || '-'} highlight={fm('condition')} />
+
               <StatCell
                 label="Condition"
                 value={
@@ -280,26 +304,7 @@ export function CompComparisonDialog({ open, onOpenChange, subject, comp, isSele
             </div>
           </div>
 
-          {/* ── AI Analysis (if available) ── */}
-          {(comp.selectionReason || comp.keyFeatures?.length) && (
-            <div className="border-b border-border">
-              <div className="px-3 sm:px-4 py-2 bg-muted/30 border-b border-border/50">
-                <span className="text-[10px] font-semibold text-foreground uppercase tracking-wider">AI Analysis</span>
-              </div>
-              <div className="px-3 sm:px-4 py-2.5 space-y-1.5">
-                {comp.selectionReason && (
-                  <p className="text-[11px] text-foreground-secondary leading-relaxed">{comp.selectionReason}</p>
-                )}
-                {comp.keyFeatures && comp.keyFeatures.length > 0 && (
-                  <div className="flex flex-wrap gap-1 mt-1">
-                    {comp.keyFeatures.map((f, i) => (
-                      <span key={i} className="text-[9px] px-1.5 py-0.5 rounded bg-muted text-foreground-tertiary">{f}</span>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
+
 
           {/* ── Filters + Adjustments ── */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-0 sm:gap-0">

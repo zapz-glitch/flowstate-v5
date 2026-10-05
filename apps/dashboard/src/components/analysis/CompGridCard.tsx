@@ -122,6 +122,15 @@ function CompGridCardInner({
             {index + 1}
           </div>
 
+          {comp.flip && (
+            <div
+              className="h-6 px-1.5 rounded-sm flex items-center text-[10px] font-bold bg-violet-500 text-white"
+              title={`Verified flip — bought $${comp.flip.priorSalePrice.toLocaleString()} ${comp.flip.daysHeld}d prior, resold +${comp.flip.gainPct}%`}
+            >
+              FLIP
+            </div>
+          )}
+
           {comp.bRole && (
             <div
               className={cn(
@@ -145,32 +154,13 @@ function CompGridCardInner({
             </div>
           )}
 
-          {comp.flip && (
-            <div
-              className="h-6 px-1.5 rounded-sm flex items-center text-[10px] font-bold bg-violet-500/90 text-white"
-              title={`Verified flip — bought $${comp.flip.priorSalePrice.toLocaleString()} ${comp.flip.daysHeld}d prior, resold +${comp.flip.gainPct}%`}
-            >
-              FLIP
-            </div>
-          )}
-          {comp.userTier && (
-            <div
-              className={cn(
-                'h-6 px-1.5 rounded-sm flex items-center text-[10px] font-bold',
-                comp.userTier === 'arv' ? 'bg-emerald-500/90 text-white' : 'bg-amber-500/90 text-white'
-              )}
-              title={`You pinned this comp as ${comp.userTier === 'arv' ? 'ARV' : 'as-is'}`}
-            >
-              {comp.userTier === 'arv' ? 'ARV' : 'AS-IS'}·YOU
-            </div>
-          )}
           {comp.badges?.price && (
             <div
               className={cn(
-                'h-6 px-1.5 rounded-sm flex items-center text-[10px] font-bold',
-                comp.badges.price === 'renovated' ? 'bg-emerald-500/90 text-white'
-                  : comp.badges.price === 'as_is' ? 'bg-orange-500/90 text-white'
-                  : 'bg-blue-500/90 text-white'
+                'h-6 px-1.5 rounded-sm flex items-center text-[10px] font-bold ring-1',
+                comp.badges.price === 'renovated' ? 'bg-emerald-500 text-white ring-emerald-300/60'
+                  : comp.badges.price === 'as_is' ? 'bg-orange-500 text-white ring-orange-300/60'
+                  : 'bg-blue-600 text-white ring-blue-300/60'
               )}
               title={comp.classification?.reasoning || `Price: ${comp.badges.price}`}
             >
@@ -183,9 +173,9 @@ function CompGridCardInner({
             <div
               className={cn(
                 'h-6 w-6 rounded-sm flex items-center justify-center',
-                comp.badges.trust === 'verified' ? 'text-emerald-400'
-                  : comp.badges.trust === 'partial' ? 'text-amber-400'
-                  : 'text-red-400'
+                comp.badges.trust === 'verified' ? 'bg-emerald-500/20 text-emerald-300'
+                  : comp.badges.trust === 'partial' ? 'bg-amber-500/20 text-amber-300'
+                  : 'bg-red-500/20 text-red-300'
               )}
               title={
                 comp.badges.trust === 'verified' ? 'Verified — evidence checks passed'
@@ -199,15 +189,7 @@ function CompGridCardInner({
             </div>
           )}
         </div>
-        {/* Bottom: price + date */}
-        <div className="absolute bottom-0 left-0 right-0 px-2 py-1.5 bg-gradient-to-t from-black/70 to-transparent flex items-end justify-between pointer-events-none">
-          <span className="text-sm font-bold text-white tabular-nums">
-            ${comp.salePrice?.toLocaleString() || '-'}
-          </span>
-          <span className="text-[9px] text-white/80 font-medium">
-            {comp.saleDate ? formatShortDate(comp.saleDate) : ''}
-          </span>
-        </div>
+        {/* Price lives inside the card — the photo carries only the verdict chips */}
         {/* ARV checkbox */}
         {hasArvSelection && onToggleArv && (
           <button
@@ -404,21 +386,6 @@ function CompGridCardInner({
             </div>
           )}
         </div>
-
-        {/* Feature-match strip — one dot per compared feature vs subject.
-            Green = match, red = verified mismatch, gray = no data to verify. */}
-        {featureMatches.length > 0 && (
-          <div className="flex items-center gap-1 mt-1.5" title={`${matchCount}/${verifiedCount} verified features match the subject`}>
-            {featureMatches.map((m) => (
-              <span
-                key={m.key}
-                title={`${m.label}: ${m.state === 'match' ? 'match' : m.state === 'mismatch' ? 'mismatch' : 'no data'}${m.detail ? ` — ${m.detail}` : ''}`}
-                className={cn('w-2 h-2 rounded-full flex-shrink-0', matchDotClass(m.state))}
-              />
-            ))}
-            <span className="text-[9px] text-foreground-tertiary tabular-nums ml-auto">{matchCount}/{verifiedCount}</span>
-          </div>
-        )}
       </div>
     </div>
   )

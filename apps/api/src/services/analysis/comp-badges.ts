@@ -20,6 +20,9 @@ export interface CompBadges {
   price: 'renovated' | 'median' | 'as_is' | null
   condition: 'reno' | 'dated' | 'distressed' | 'unverified' | null
   pocket: 'in' | 'equal' | 'above' | 'below' | 'unknown' | null
+  /** How the pocket match was earned — names the level for the badge:
+   *  tract | block | name (subdivision/neighborhood label) | null (out) */
+  pocketVia: 'tract' | 'block' | 'name' | null
   trust: 'verified' | 'partial' | 'unverified' | null
   checks: {
     pocket: boolean | null
@@ -56,6 +59,8 @@ interface BadgeComp {
   id?: string
   censusTract?: string | null
   sameBlockGroup?: boolean | null
+  subdivision?: string | null
+  neighborhoodName?: string | null
   ppsfMedians?: { SD?: number | null; N4?: number | null; N3?: number | null } | null
   evaluation?: { filterResults?: { type: string; passed: boolean }[] } | null
   /** Wire shape is flat strings: priceCheck verdict, staleness label,
@@ -75,6 +80,8 @@ export function compBadges(
   comp: BadgeComp,
   opts: {
     subjectCensusTract?: string | null
+    subjectSubdivision?: string | null
+    subjectNeighborhood?: string | null
     subjectPpsfMedians?: { SD?: number | null; N4?: number | null; N3?: number | null } | null
     condition?: { condition?: string | null } | null
     classification?: string | null
@@ -89,12 +96,18 @@ export function compBadges(
     return r ? r.passed : null
   }
 
-  // ── pocket ──
-  const inPocket = comp.censusTract != null && comp.censusTract === opts.subjectCensusTract
-    ? true
-    : comp.sameBlockGroup === true
+  // ── pocket — membership names the level (tract > block > name);
+  //  outside the pocket the badge shows the value gap instead ──
+  const tractMatch = comp.censusTract != null && comp.censusTract === opts.subjectCensusTract
+  const blockMatch = comp.sameBlockGroup === true
+  const nameMatch =
+    (comp.subdivision != null && opts.subjectSubdivision != null &&
+      comp.subdivision.toLowerCase() === opts.subjectSubdivision.toLowerCase()) ||
+    (comp.neighborhoodName != null && opts.subjectNeighborhood != null &&
+      comp.neighborhoodName.toLowerCase() === opts.subjectNeighborhood.toLowerCase())
+  const pocketVia: CompBadges['pocketVia'] = tractMatch ? 'tract' : blockMatch ? 'block' : nameMatch ? 'name' : null
   let pocket: CompBadges['pocket'] = null
-  if (inPocket) pocket = 'in'
+  if (tractMatch || blockMatch) pocket = 'in'
   else {
     const ref = scopeMedian(opts.subjectPpsfMedians)
     const own = scopeMedian(comp.ppsfMedians)
@@ -123,12 +136,13 @@ export function compBadges(
 
   return {
     price: classToPrice(opts.classification),
+    pocketVia,
     condition: condToBadge(opts.condition?.condition),
     pocket,
     trust,
     checks: {
       // pocket = the geography checks as a group (any geo label passing counts)
-      pocket: passed('subdivision') === true || passed('geo_scope') === true || inPocket,
+      pocket: passed('subdivision') === true || passed('geo_scope') === true || pocketVia != null,
       size: passed('sqft_diff'),
       fresh: passed('sale_age'),
       // 'unverified' = no AVM to corroborate against — not a pass, not a

@@ -520,6 +520,8 @@ export interface CompBadges {
   price: 'renovated' | 'median' | 'as_is' | null
   condition: 'reno' | 'dated' | 'distressed' | 'unverified' | null
   pocket: 'in' | 'equal' | 'above' | 'below' | 'unknown' | null
+  /** How the pocket match was earned — tract | block | name; null when out */
+  pocketVia: 'tract' | 'block' | 'name' | null
   trust: 'verified' | 'partial' | 'unverified' | null
   checks: {
     pocket: boolean | null
@@ -823,6 +825,8 @@ export interface CompBadges {
   price: 'renovated' | 'median' | 'as_is' | null
   condition: 'reno' | 'dated' | 'distressed' | 'unverified' | null
   pocket: 'in' | 'equal' | 'above' | 'below' | 'unknown' | null
+  /** How the pocket match was earned — tract | block | name; null when out */
+  pocketVia: 'tract' | 'block' | 'name' | null
   trust: 'verified' | 'partial' | 'unverified' | null
   checks: {
     pocket: boolean | null
