@@ -1176,7 +1176,6 @@ export async function performAnalysis(
     const verifyB = (r: ReturnType<typeof evaluateB>): string[] => {
       const fails: string[] = []
       if (r.arv == null) fails.push('no ARV — evidence pool produced no defensible answer')
-      else if (subjectAvm != null && r.arv < subjectAvm) fails.push('below as-is AVM')
       if (r.drivers.length === 0) fails.push('no verified drivers')
       if (r.conf === 'none') fails.push('no-confidence result')
       return fails

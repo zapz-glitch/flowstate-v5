@@ -579,18 +579,14 @@ export function evaluateB(
         x.tier !== 'as_is' && bCondTier(x.comp) !== 'median' &&
         topPpsf != null && (bPpsfOf(x.comp) ?? 0) >= B_RETAIL_BAND * topPpsf)
       if (!retail.length) {
-        // Median-only evidence — similarity-gated ceiling + AVM uplift
+        // Median-only evidence — the band IS the answer. No AVM uplift:
+        // the pocket's own maintained sales are the evidence; the AVM
+        // is an algorithm we don't control and carries no weight.
         if (medianComps.length) {
           const topSim = Math.max(...medianComps.map(similarity))
           const gatedMedian = medianComps.filter((x) => similarity(x) >= 0.6 * topSim)
           const medianCeiling = Math.max(...gatedMedian.map((x) => x.contrib))
-          const avm = bSubjectAvm(subject)
-          if (avm && avm > medianCeiling) {
-            flags.push(`median-tier evidence only (ceiling ${usd(medianCeiling)}) — ARV set at subject AVM ${usd(avm)} (corroborated uplift)`)
-            return { arv: Math.round(avm), flags, contribs, drivers: medianComps,
-              bracket: 'ok', conf: 'low', source: 'median+AVM uplift', landRateSource: landSource, sqftRateSource }
-          }
-          flags.push(`median-tier evidence only — ARV at median ceiling ${usd(medianCeiling)} (uplift unverified)`)
+          flags.push(`median-tier evidence only — ARV at median ceiling ${usd(medianCeiling)}`)
           return { arv: Math.round(medianCeiling), flags, contribs, drivers: medianComps,
             bracket: 'ok', conf: 'low', source: 'median ceiling', landRateSource: landSource, sqftRateSource }
         }
@@ -643,7 +639,7 @@ export function evaluateB(
   let anchor = ranked[0] ?? null
   if (!anchor) return { arv: null, flags, contribs, drivers: [], bracket: 'ok', conf: 'none', source,
     landRateSource: landSource, sqftRateSource }
-  const anchorScore = similarity(anchor)
+  let anchorScore = similarity(anchor)
 
   // Similarity gate — drop drivers below 60% of the anchor's score
   if (drivers.length > 1) {
@@ -653,7 +649,29 @@ export function evaluateB(
     if (gated.length) drivers = gated
   }
 
+  // ── Band microscope — >30% above the pocket's own band is an outlier ────
+  // The appraiser move: a comp pricing that far past the band gets
+  // scrutinized, not trusted. If the band is solid (≥2 members) and the
+  // gap persists, the comp is probably a different product — set it
+  // aside as a bound and let the next-strongest evidence drive.
+  for (let guard = 0; guard < 5 && anchor; guard++) {
+    const bandMembers = contribs.filter((x) => x !== anchor &&
+      (bConditionClass(x.comp) === 'renovated' || x.tier === 'arv'))
+    const band = bandMembers.length >= 2 ? bMedian(bandMembers.map((x) => x.contrib)) : null
+    if (band == null || anchor.contrib <= 1.30 * band) break
+    flags.push(`${anchor.comp.address}: contribution ${usd(anchor.contrib)} is +${Math.round((anchor.contrib / band - 1) * 100)}% above the renovated band ${usd(band)} (${bandMembers.length} members) — suspected outlier, set aside`)
+    drivers = drivers.filter((x) => x !== anchor)
+    const next = ranked.find((x) => drivers.includes(x))
+    if (!next) {
+      flags.push(`no driver survives — ARV set at the band median ${usd(band)}`)
+      return { arv: Math.round(band), flags, contribs, drivers: [], bracket: 'ok', conf: 'low',
+        source: `${source} — band median`, landRateSource: landSource, sqftRateSource }
+    }
+    anchor = next
+  }
+
   let arv = anchor.contrib
+  anchorScore = similarity(anchor)
   const support = ranked.filter((x) => drivers.includes(x) && x !== anchor)
   flags.push(`anchored to ${anchor.comp.address} (similarity ${anchorScore.toFixed(1)})`)
   if (support.length) {

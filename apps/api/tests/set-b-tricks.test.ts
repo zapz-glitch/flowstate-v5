@@ -296,6 +296,20 @@ assert.deepEqual(B_REHAB_FRACTION, {
   assert.ok(r.flags.some((f) => f.includes('no modeled uplift')))
 }
 
+// ── Band microscope — a driver >30% above the pocket's band is a
+// suspected outlier: set aside, next-strongest evidence drives.
+{
+  const outlier = comp({ address: 'outlier', salePrice: 400_000 })
+  const b1 = comp({ address: 'b1', salePrice: 250_000, distanceMiles: 0.3,
+    curbAppeal: { condition: 'renovated', confidence: 60 } })
+  const b2 = comp({ address: 'b2', salePrice: 255_000, distanceMiles: 0.35,
+    curbAppeal: { condition: 'renovated', confidence: 60 } })
+  const r = evaluateB(subject(), [outlier, b1, b2])
+  assert.equal(r.arv, 255_000) // outlier set aside; self-heal picks the median-closest driver
+  assert.ok(!r.drivers.some((x) => x.comp.address === 'outlier'))
+  assert.ok(r.flags.some((f) => f.includes('suspected outlier')))
+}
+
 // ── Trick 2: marginal land ladder — per-parcel fallback ───────────────────
 // No vacant sales, no ≥5-parcel curve → assessed delta × market ratio ×
 // 0.35, capped at ±20% of the sale.
