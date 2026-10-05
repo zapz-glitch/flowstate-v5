@@ -20,8 +20,8 @@ export interface CompBadges {
   price: 'renovated' | 'median' | 'as_is' | null
   condition: 'reno' | 'dated' | 'distressed' | 'unverified' | null
   pocket: 'in' | 'equal' | 'above' | 'below' | 'unknown' | null
-  /** How the pocket match was earned — names the level for the badge:
-   *  tract | block | name (subdivision/neighborhood label) | null (out) */
+  /** How the pocket match was earned — tightest scope wins:
+   *  block (block group) | tract | name (neighborhood label) | null (out) */
   pocketVia: 'tract' | 'block' | 'name' | null
   trust: 'verified' | 'partial' | 'unverified' | null
   checks: {
@@ -105,7 +105,7 @@ export function compBadges(
       comp.subdivision.toLowerCase() === opts.subjectSubdivision.toLowerCase()) ||
     (comp.neighborhoodName != null && opts.subjectNeighborhood != null &&
       comp.neighborhoodName.toLowerCase() === opts.subjectNeighborhood.toLowerCase())
-  const pocketVia: CompBadges['pocketVia'] = tractMatch ? 'tract' : blockMatch ? 'block' : nameMatch ? 'name' : null
+  const pocketVia: CompBadges['pocketVia'] = blockMatch ? 'block' : tractMatch ? 'tract' : nameMatch ? 'name' : null
   let pocket: CompBadges['pocket'] = null
   if (tractMatch || blockMatch) pocket = 'in'
   else {

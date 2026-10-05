@@ -143,7 +143,7 @@ export function CompComparisonDialog({ open, onOpenChange, subject, comp, isSele
                       : comp.badges.pocket === 'equal' ? 'bg-blue-500/15 text-blue-400'
                       : 'bg-muted text-foreground-tertiary')}>
                     {comp.badges.pocket === 'in'
-                      ? (comp.badges.pocketVia === 'tract' ? 'Tract' : comp.badges.pocketVia === 'block' ? 'Block' : 'Area ✓')
+                      ? (comp.badges.pocketVia === 'tract' ? 'Tract' : comp.badges.pocketVia === 'block' ? 'Group' : 'Neighborhood')
                       : `Out ${comp.badges.pocket === 'equal' ? '=' : comp.badges.pocket === 'above' ? '>' : '<'}`}
                   </span>
                 )}

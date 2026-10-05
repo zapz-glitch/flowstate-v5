@@ -225,7 +225,7 @@ function CompGridCardInner({
                 : 'text-foreground-tertiary'
             )}>
               {comp.badges.pocket === 'in'
-                ? (comp.badges.pocketVia === 'tract' ? 'Tract' : comp.badges.pocketVia === 'block' ? 'Block' : 'Neighborhood')
+                ? (comp.badges.pocketVia === 'tract' ? 'Tract' : comp.badges.pocketVia === 'block' ? 'Group' : 'Neighborhood')
                 : `Out ${comp.badges.pocket === 'equal' ? '=' : comp.badges.pocket === 'above' ? '>' : '<'}`}
             </span>
           </div>
