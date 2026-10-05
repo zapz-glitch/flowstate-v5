@@ -1,8 +1,8 @@
 {
   "recordId": "fixture-withheld-no-evidence",
   "jobId": "fixture-withheld-no-evidence",
-  "payloadHash": "9938fd6b07dbdb74938adb4493be456be925d9a599aeb586bd5262d978645e52",
-  "exportedAt": "2026-10-05T00:00:00.000Z",
+  "payloadHash": "d819935cd2527c2c1857a841232bef0d999fdd24d9c78e33088d0fa980f41c93",
+  "exportedAt": "2026-10-05T14:10:19.331Z",
   "payload": {
     "recordVersion": "run-record.v1",
     "jobId": "fixture-withheld-no-evidence",
@@ -28,7 +28,7 @@
       "clip": "fixture-withheld-no-evidence"
     },
     "rules": {
-      "harnessVersion": "og-2026.10.05.1",
+      "harnessVersion": "og-2026.10.05.6",
       "pipelineVersion": "5.0",
       "valuationDate": "2026-10-05",
       "models": {
@@ -79,7 +79,8 @@
             "contribs": [],
             "bracket": "ok",
             "conf": "none",
-            "source": "T5 report-only"
+            "source": "T5 report-only",
+            "decisions": []
           },
           "checks": [
             {
@@ -121,7 +122,8 @@
           "contribs": [],
           "bracket": "ok",
           "conf": "none",
-          "source": "T5 report-only"
+          "source": "T5 report-only",
+          "decisions": []
         },
         "checks": [
           {
@@ -157,7 +159,8 @@
             "bracket": "ok",
             "conf": "none",
             "source": "T5 report-only",
-            "harnessVersion": "og-2026.10.05.1",
+            "decisions": [],
+            "harnessVersion": "og-2026.10.05.6",
             "checks": [
               {
                 "ruleId": "setb.t5.report_only",
@@ -167,7 +170,8 @@
             "attemptTrail": [
               "attempt 1 — withheld"
             ]
-          }
+          },
+          "statusReason": "Withheld — evidence produced no defensible answer."
         },
         "comps": {
           "total": 0,

@@ -1,8 +1,8 @@
 {
   "recordId": "fixture-verified-three-drivers",
   "jobId": "fixture-verified-three-drivers",
-  "payloadHash": "4a4a8963d1f368f3d1f6cd7c4baeac8a0826d10cae166121e640ff76d7fdc670",
-  "exportedAt": "2026-10-05T00:00:00.000Z",
+  "payloadHash": "3c76a4e840f3186307da19b17c3ab1fea457d50244d0a707a15d3fe1c5e08752",
+  "exportedAt": "2026-10-05T14:10:19.331Z",
   "payload": {
     "recordVersion": "run-record.v1",
     "jobId": "fixture-verified-three-drivers",
@@ -28,7 +28,7 @@
       "clip": "fixture-verified-three-drivers"
     },
     "rules": {
-      "harnessVersion": "og-2026.10.05.1",
+      "harnessVersion": "og-2026.10.05.6",
       "pipelineVersion": "5.0",
       "valuationDate": "2026-10-05",
       "models": {
@@ -343,7 +343,8 @@
                 },
                 "contrib": 190000,
                 "weight": 1,
-                "tier": "arv"
+                "tier": "arv",
+                "boundOnly": false
               },
               {
                 "comp": {
@@ -385,7 +386,8 @@
                 },
                 "contrib": 200000,
                 "weight": 1,
-                "tier": "arv"
+                "tier": "arv",
+                "boundOnly": false
               },
               {
                 "comp": {
@@ -427,7 +429,8 @@
                 },
                 "contrib": 210000,
                 "weight": 1,
-                "tier": "arv"
+                "tier": "arv",
+                "boundOnly": false
               }
             ],
             "contribs": [
@@ -471,7 +474,8 @@
                 },
                 "contrib": 190000,
                 "weight": 1,
-                "tier": "arv"
+                "tier": "arv",
+                "boundOnly": false
               },
               {
                 "comp": {
@@ -513,7 +517,8 @@
                 },
                 "contrib": 200000,
                 "weight": 1,
-                "tier": "arv"
+                "tier": "arv",
+                "boundOnly": false
               },
               {
                 "comp": {
@@ -555,7 +560,8 @@
                 },
                 "contrib": 210000,
                 "weight": 1,
-                "tier": "arv"
+                "tier": "arv",
+                "boundOnly": false
               }
             ],
             "bracket": "ok",
@@ -566,7 +572,32 @@
             "anchorAddress": "v2 Fixture Ct",
             "ceiling": 210000,
             "conditionAdj": null,
-            "healed": true
+            "healed": true,
+            "decisions": [
+              {
+                "compAddress": "v1 Fixture Ct",
+                "stage": "answer",
+                "rule": "anchor",
+                "verdict": "anchored",
+                "value": 190000,
+                "note": "similarity 11.9"
+              },
+              {
+                "compAddress": "v1 Fixture Ct",
+                "stage": "answer",
+                "rule": "self-heal",
+                "verdict": "demoted",
+                "value": 190000,
+                "note": "evidence floor vs $200,000 median"
+              },
+              {
+                "compAddress": "v2 Fixture Ct",
+                "stage": "answer",
+                "rule": "self-heal",
+                "verdict": "anchored",
+                "value": 200000
+              }
+            ]
           },
           "checks": [
             {
@@ -772,7 +803,8 @@
               },
               "contrib": 190000,
               "weight": 1,
-              "tier": "arv"
+              "tier": "arv",
+              "boundOnly": false
             },
             {
               "comp": {
@@ -814,7 +846,8 @@
               },
               "contrib": 200000,
               "weight": 1,
-              "tier": "arv"
+              "tier": "arv",
+              "boundOnly": false
             },
             {
               "comp": {
@@ -856,7 +889,8 @@
               },
               "contrib": 210000,
               "weight": 1,
-              "tier": "arv"
+              "tier": "arv",
+              "boundOnly": false
             }
           ],
           "contribs": [
@@ -900,7 +934,8 @@
               },
               "contrib": 190000,
               "weight": 1,
-              "tier": "arv"
+              "tier": "arv",
+              "boundOnly": false
             },
             {
               "comp": {
@@ -942,7 +977,8 @@
               },
               "contrib": 200000,
               "weight": 1,
-              "tier": "arv"
+              "tier": "arv",
+              "boundOnly": false
             },
             {
               "comp": {
@@ -984,7 +1020,8 @@
               },
               "contrib": 210000,
               "weight": 1,
-              "tier": "arv"
+              "tier": "arv",
+              "boundOnly": false
             }
           ],
           "bracket": "ok",
@@ -995,7 +1032,32 @@
           "anchorAddress": "v2 Fixture Ct",
           "ceiling": 210000,
           "conditionAdj": null,
-          "healed": true
+          "healed": true,
+          "decisions": [
+            {
+              "compAddress": "v1 Fixture Ct",
+              "stage": "answer",
+              "rule": "anchor",
+              "verdict": "anchored",
+              "value": 190000,
+              "note": "similarity 11.9"
+            },
+            {
+              "compAddress": "v1 Fixture Ct",
+              "stage": "answer",
+              "rule": "self-heal",
+              "verdict": "demoted",
+              "value": 190000,
+              "note": "evidence floor vs $200,000 median"
+            },
+            {
+              "compAddress": "v2 Fixture Ct",
+              "stage": "answer",
+              "rule": "self-heal",
+              "verdict": "anchored",
+              "value": 200000
+            }
+          ]
         },
         "checks": [
           {
@@ -1082,7 +1144,8 @@
                 },
                 "contrib": 190000,
                 "weight": 1,
-                "tier": "arv"
+                "tier": "arv",
+                "boundOnly": false
               },
               {
                 "comp": {
@@ -1124,7 +1187,8 @@
                 },
                 "contrib": 200000,
                 "weight": 1,
-                "tier": "arv"
+                "tier": "arv",
+                "boundOnly": false
               },
               {
                 "comp": {
@@ -1166,7 +1230,8 @@
                 },
                 "contrib": 210000,
                 "weight": 1,
-                "tier": "arv"
+                "tier": "arv",
+                "boundOnly": false
               }
             ],
             "contribs": [
@@ -1210,7 +1275,8 @@
                 },
                 "contrib": 190000,
                 "weight": 1,
-                "tier": "arv"
+                "tier": "arv",
+                "boundOnly": false
               },
               {
                 "comp": {
@@ -1252,7 +1318,8 @@
                 },
                 "contrib": 200000,
                 "weight": 1,
-                "tier": "arv"
+                "tier": "arv",
+                "boundOnly": false
               },
               {
                 "comp": {
@@ -1294,7 +1361,8 @@
                 },
                 "contrib": 210000,
                 "weight": 1,
-                "tier": "arv"
+                "tier": "arv",
+                "boundOnly": false
               }
             ],
             "bracket": "ok",
@@ -1306,7 +1374,32 @@
             "ceiling": 210000,
             "conditionAdj": null,
             "healed": true,
-            "harnessVersion": "og-2026.10.05.1",
+            "decisions": [
+              {
+                "compAddress": "v1 Fixture Ct",
+                "stage": "answer",
+                "rule": "anchor",
+                "verdict": "anchored",
+                "value": 190000,
+                "note": "similarity 11.9"
+              },
+              {
+                "compAddress": "v1 Fixture Ct",
+                "stage": "answer",
+                "rule": "self-heal",
+                "verdict": "demoted",
+                "value": 190000,
+                "note": "evidence floor vs $200,000 median"
+              },
+              {
+                "compAddress": "v2 Fixture Ct",
+                "stage": "answer",
+                "rule": "self-heal",
+                "verdict": "anchored",
+                "value": 200000
+              }
+            ],
+            "harnessVersion": "og-2026.10.05.6",
             "checks": [
               {
                 "ruleId": "setb.anchor",
@@ -1328,7 +1421,8 @@
             "attemptTrail": [
               "attempt 1 — verified"
             ]
-          }
+          },
+          "statusReason": "Verified · medium confidence — supporting evidence has caveats."
         },
         "comps": {
           "total": 3,
