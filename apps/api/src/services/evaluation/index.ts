@@ -1478,7 +1478,9 @@ export async function performAnalysis(
   // valuation block. There is no human reviewer, so the formula call
   // always stands; confidence + reasons carry the reliability signal.
   if (response.valuation && valuation) {
-    response.valuation.confidence = response.report.confidence
+    // valuation.confidence stays the harness truth (bResult.conf, wired at
+    // build time) — report.confidence is a different rubric and no longer
+    // overwrites it. Reasons + review flag still come from the report.
     response.valuation.confidenceReasons = response.report.confidenceReasons
     response.valuation.requiresHumanReview = response.report.requiresHumanReview
     if (response.report.confidence === 'low') {
