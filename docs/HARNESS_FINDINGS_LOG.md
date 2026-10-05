@@ -192,3 +192,25 @@ Status: `open` until resolved in the v2 design.
   instead — using the same classification fields (renovated, dated, …).
   Subject classification and comp classification are separate paths and
   must never mix — the Luna fallback fills the comp fields only.
+
+## F30 — v2 live verification (2026-10-04, feat/attom-provider-swap-v2)
+
+Fresh runs on the restored + hardened harness (982b13f restore + d32c19f
+classify + 7651aaf geo + 01fd727 rural + d23ece8 uplift):
+
+- **2184 Dunseath Ave NW → ARV $402,294** (was $1.43M drifted, $1.11M
+  later-harness, $313,966 tract-only floor). Anchored to 1956 Main St
+  ($419,900, land-adj −$40k), `attempt 1 — verified`. Bolton $1.6M:
+  enabled=False (restored hard lot rule) AND `after_renovation` demoted
+  to `transitional` — its Clef read (Maintained 1.7/4, renovated 15%)
+  defined no band, so price could not mint the class. Anchor's investor
+  flag correctly downgraded its label. Pocket tier enabled Main/Claude/
+  Rando despite subdivision name mismatches (in-tract = in-pocket).
+- **4425 Chestnut Lake Ave → ARV $228,178** — matches the audit's OG
+  prediction to the dollar; `attempt 1 — verified`; median-tier drivers
+  honest (no unearned renovated labels).
+
+Known residual: F25 size grid still disables legit smaller comps
+(Sumter 608–634sf over the 500 max) — Dunseath lands at the low end of
+the appraiser band because the pocket's stock is uniformly smaller than
+the subject.

@@ -1249,25 +1249,12 @@ export async function performAnalysis(
       const existing = new Set(appraisalResult.comparables.map((c) => c.id))
       const added = (widened ?? []).filter((c) => !existing.has(c.id))
       if (added.length > 0) {
-        // Widened comps arrive un-appraised — stamp a pass-through
-        // evaluation so they join the pool as enabled evidence.
-        for (const c of added) {
-          appraisalResult.comparables.push({
-            ...c,
-            isEnabled: true,
-            adjustedSalePrice: c.salePrice ?? null,
-            evaluation: {
-              comparableId: c.id,
-              shouldDisable: false,
-              filterResults: [],
-              disableReasons: [],
-              totalAdjustment: 0,
-              adjustmentResults: [],
-              originalPrice: c.salePrice ?? null,
-              adjustedPrice: c.salePrice ?? null,
-            },
-          })
-        }
+        // Widened comps go through the SAME grid as the first pass — geo
+        // tiers, year bands, the size ladder, every hard rule. A comp that
+        // can't verify at the current thresholds joins as disabled
+        // evidence, never as a free anchor.
+        const widenedResult = appraisalService.evaluate(bundle.property, added, { filters, adjustments })
+        appraisalResult.comparables.push(...widenedResult.comparables)
         stampVerification()
         // Classify the widened set too — sale-type evidence (flip resale /
         // distressed) must stamp before B re-reads tiers, otherwise an

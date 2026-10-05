@@ -468,6 +468,12 @@ export interface ExpansionPolicy {
   yearBuiltExpansionSteps?: number[]
   /** Allow dropping the subdivision constraint within a widened radius (default: true) */
   allowGeographicExpansion?: boolean
+  /** Allow widening sqft_diff inside every geo scope — ±250 first, then
+   *  the listed absolute bands (default: [500, 750, 1000]). Size is a
+   *  preference order, not a wall. */
+  allowSqftExpansion?: boolean
+  /** Absolute sqft_diff bands tried in order after the configured value. */
+  sqftExpansionSteps?: number[]
   /** Allow dropping the radius constraint entirely (default: true) */
   allowNeighborhoodExpansion?: boolean
   /** Distance multiplier when geography expands (default: 2 = widen to 2× configured radius) */
@@ -491,6 +497,8 @@ export const DEFAULT_EXPANSION_POLICY: Required<ExpansionPolicy> = {
   allowYearBuiltExpansion: true,
   yearBuiltExpansionSteps: [2, 4],
   allowGeographicExpansion: true,
+  allowSqftExpansion: true,
+  sqftExpansionSteps: [500, 750, 1000],
   allowNeighborhoodExpansion: true,
   geographicDistanceMultiplier: 2,
   allowSaleAgeExpansion: true,
@@ -553,7 +561,7 @@ export interface AppraisalResult {
   /** True when fewer than 3 valid comps found even after approved expansion */
   insufficientComps?: boolean
   /** Expansion tiers actually applied to reach the comp set */
-  expansionApplied?: Array<'year_built' | 'pocket' | 'subdivision' | 'neighborhood' | 'geographic' | 'sale_age'>
+  expansionApplied?: Array<'year_built' | 'sqft_diff' | 'pocket' | 'subdivision' | 'neighborhood' | 'geographic' | 'sale_age'>
 }
 
 // ─── Response Types ────────────────────────────────────────────────────────────

@@ -207,6 +207,7 @@ export interface AppraisalResultWithFallback extends AppraisalResult {
     | 'none'
     | 'year_built_expansion'
     | 'pocket_expansion'
+    | 'sqft_expansion'
     | 'neighborhood_expansion'
     | 'subdivision_expansion'
     | 'geographic_expansion'
@@ -545,10 +546,21 @@ class PropertyAppraisalService implements AppraisalService {
     const yearLadder: YearStep[] = [strictYear, ...yearSteps, ...vintageSteps, 'era']
     const expansionYearSteps: YearStep[] = [...yearSteps, ...vintageSteps, 'era']
     const maxYear = Math.max(strictYear, ...yearSteps)
+    // Sqft ladder — ±250 first (or the configured strict band), then the
+    // absolute widened bands in order, inside every geo scope. The size
+    // adjustment reprices the gap once a comp is admitted; the ladder
+    // only decides who's allowed in.
+    const strictSqft = defaultFilters.find((f) => f.type === 'sqft_diff')?.value ?? 250
+    const sqftSteps: number[] = expansion.allowSqftExpansion
+      ? [...new Set([strictSqft, ...(expansion.sqftExpansionSteps ?? [])])].sort((a, b) => a - b)
+      : [strictSqft]
     const subdivisionName = subject.subdivision || subject.neighborhoodName || 'subject area'
 
-    const filtersAt = (yearLimit: YearStep, distanceMult = 1) =>
+    const filtersAt = (yearLimit: YearStep, distanceMult = 1, sqftLimit = strictSqft) =>
       defaultFilters.map((f) => {
+        if (f.type === 'sqft_diff' && sqftLimit !== strictSqft) {
+          return { ...f, value: sqftLimit }
+        }
         if (f.type === 'year_built_diff') {
           return yearLimit === 'vintage'
             ? { type: 'year_built_cap' as const, enabled: true, value: vintageCap!, priority: 'hard' as const }
@@ -577,10 +589,12 @@ class PropertyAppraisalService implements AppraisalService {
             : ''
     const appliedFor = (
       yearLimit: YearStep,
-      scope: 'pocket' | 'subdivision' | 'neighborhood' | 'geographic' | null
+      scope: 'pocket' | 'subdivision' | 'neighborhood' | 'geographic' | null,
+      sqftLimit = strictSqft,
     ): NonNullable<AppraisalResult['expansionApplied']> => {
       const applied: NonNullable<AppraisalResult['expansionApplied']> = []
       if (yearLimit === 'vintage' || yearLimit === 'era' || yearLimit > strictYear) applied.push('year_built')
+      if (sqftLimit !== strictSqft) applied.push('sqft_diff')
       if (scope) applied.push(scope)
       return applied
     }
@@ -632,18 +646,21 @@ class PropertyAppraisalService implements AppraisalService {
     // Step 2: widen the build-era INSIDE the subdivision first — better a
     // slightly older/newer comp in-area than a perfect-year comp out-of-area.
     // Comps legitimately pass at the tier's threshold — nothing is rescued.
-    for (const yearLimit of expansionYearSteps) {
-      const r = this.evaluate(subject, comparables, {
-        filters: filtersAt(yearLimit),
-        adjustments,
-      })
-      if (!r.insufficientComps) {
-        console.log(`Appraisal: ${r.selectedCompIds?.length} comps selected after year-built widening to ${yearDesc(yearLimit)}`)
-        return {
-          ...r,
-          fallbackUsed: 'year_built_expansion',
-          fallbackReason: `Insufficient comps within ±${strictYear}yr of the subject's build year in "${subdivisionName}". Widened year-built tolerance to ${yearDesc(yearLimit)} — sale age, subdivision and all other hard rules still enforced.`,
-          expansionApplied: ['year_built'],
+    for (const sqftLimit of sqftSteps) {
+      const yrSteps = sqftLimit === strictSqft ? expansionYearSteps : yearLadder
+      for (const yearLimit of yrSteps) {
+        const r = this.evaluate(subject, comparables, {
+          filters: filtersAt(yearLimit, 1, sqftLimit),
+          adjustments,
+        })
+        if (!r.insufficientComps) {
+          console.log(`Appraisal: ${r.selectedCompIds?.length} comps selected after year-built widening to ${yearDesc(yearLimit)}${sqftLimit !== strictSqft ? ` / sqft ±${sqftLimit}` : ''}`)
+          return {
+            ...r,
+            fallbackUsed: sqftLimit !== strictSqft ? 'sqft_expansion' : 'year_built_expansion',
+            fallbackReason: `Insufficient comps within ±${strictYear}yr${sqftLimit !== strictSqft ? ` / ±${strictSqft}sf` : ''} of the subject in "${subdivisionName}". Widened tolerance to ${yearDesc(yearLimit)}${sqftLimit !== strictSqft ? ` / sqft ±${sqftLimit}` : ''} — sale age, subdivision and all other hard rules still enforced.`,
+            expansionApplied: appliedFor(yearLimit, null, sqftLimit),
+          }
         }
       }
     }
@@ -662,19 +679,21 @@ class PropertyAppraisalService implements AppraisalService {
           || (subject.censusBlockGroup != null && c.censusBlockGroup != null && c.censusBlockGroup === subject.censusBlockGroup))
         && c.crossesMajorRoad !== true
         && pocketHardScopesMatch(subject, c)
-      for (const yearLimit of yearLadder) {
-        const resultPocket = this.evaluate(subject, comparables, {
-          filters: filtersAt(yearLimit),
-          adjustments,
-        })
-        const picked = rescue(resultPocket, new Set(['subdivision_match', 'neighborhood_match', 'geo_scope_match']), pocketMatch)
-        if (picked && picked.eligible.length >= REQUIRED_ARV_COMPS) {
-          console.log(`Appraisal: ${picked.selected.length} comps selected via census pocket match${yearNote(yearLimit)}`)
-          return {
-            ...applyRescued(resultPocket, picked),
-            fallbackUsed: 'pocket_expansion',
-            fallbackReason: `Insufficient comps in subdivision "${subject.subdivision || 'unknown'}". Expanded within the subject's census pocket (tract/block-group match — tract first, block corroborates)${yearNote(yearLimit)} — all other rules apply at the tier's thresholds.`,
-            expansionApplied: appliedFor(yearLimit, 'pocket'),
+      for (const sqftLimit of sqftSteps) {
+        for (const yearLimit of yearLadder) {
+          const resultPocket = this.evaluate(subject, comparables, {
+            filters: filtersAt(yearLimit, 1, sqftLimit),
+            adjustments,
+          })
+          const picked = rescue(resultPocket, new Set(['subdivision_match', 'neighborhood_match', 'geo_scope_match']), pocketMatch)
+          if (picked && picked.eligible.length >= REQUIRED_ARV_COMPS) {
+            console.log(`Appraisal: ${picked.selected.length} comps selected via census pocket match${yearNote(yearLimit)}`)
+            return {
+              ...applyRescued(resultPocket, picked),
+              fallbackUsed: 'pocket_expansion',
+              fallbackReason: `Insufficient comps in subdivision "${subject.subdivision || 'unknown'}". Expanded within the subject's census pocket (tract/block-group match — tract first, block corroborates)${yearNote(yearLimit)} — all other rules apply at the tier's thresholds.`,
+              expansionApplied: appliedFor(yearLimit, 'pocket', sqftLimit),
+            }
           }
         }
       }
@@ -685,21 +704,23 @@ class PropertyAppraisalService implements AppraisalService {
     // radius before expanding geography. Rescue subdivision_match only when
     // neighborhood_match verified-passed; any other hard failure still kills.
     if (expansion.allowNeighborhoodExpansion && (subject.neighborhoodName || subject.neighborhoodCode)) {
-      for (const yearLimit of yearLadder) {
-        const resultNb = this.evaluate(subject, comparables, {
-          filters: filtersAt(yearLimit),
-          adjustments,
-        })
-        const picked = rescue(resultNb, new Set(['subdivision_match']), (c) =>
-          neighborhoodsMatch(subject, c) === true
-        )
-        if (picked && picked.eligible.length >= REQUIRED_ARV_COMPS) {
-          console.log(`Appraisal: ${picked.selected.length} comps selected via neighborhood match${yearNote(yearLimit)}`)
-          return {
-            ...applyRescued(resultNb, picked),
-            fallbackUsed: 'neighborhood_expansion',
-            fallbackReason: `Insufficient comps in subdivision "${subject.subdivision || 'unknown'}". Expanded to neighborhood "${subject.neighborhoodName ?? subject.neighborhoodCode}" (verified name/code match)${yearNote(yearLimit)} — all other rules apply at the tier's thresholds.`,
-            expansionApplied: appliedFor(yearLimit, 'neighborhood'),
+      for (const sqftLimit of sqftSteps) {
+        for (const yearLimit of yearLadder) {
+          const resultNb = this.evaluate(subject, comparables, {
+            filters: filtersAt(yearLimit, 1, sqftLimit),
+            adjustments,
+          })
+          const picked = rescue(resultNb, new Set(['subdivision_match']), (c) =>
+            neighborhoodsMatch(subject, c) === true
+          )
+          if (picked && picked.eligible.length >= REQUIRED_ARV_COMPS) {
+            console.log(`Appraisal: ${picked.selected.length} comps selected via neighborhood match${yearNote(yearLimit)}`)
+            return {
+              ...applyRescued(resultNb, picked),
+              fallbackUsed: 'neighborhood_expansion',
+              fallbackReason: `Insufficient comps in subdivision "${subject.subdivision || 'unknown'}". Expanded to neighborhood "${subject.neighborhoodName ?? subject.neighborhoodCode}" (verified name/code match)${yearNote(yearLimit)} — all other rules apply at the tier's thresholds.`,
+              expansionApplied: appliedFor(yearLimit, 'neighborhood', sqftLimit),
+            }
           }
         }
       }
@@ -716,19 +737,21 @@ class PropertyAppraisalService implements AppraisalService {
       (ruralRef == null || pocketValueEquivalent(ruralRef, c)) &&
       c.crossesMajorRoad !== true
     if (expansion.allowGeographicExpansion) {
-      for (const yearLimit of yearLadder) {
-        const resultSub = this.evaluate(subject, comparables, {
-          filters: filtersAt(yearLimit, expansion.geographicDistanceMultiplier),
-          adjustments,
-        })
-        const picked = rescue(resultSub, new Set(['subdivision_match', 'neighborhood_match', 'geo_scope_match']), ruralOk)
-        if (picked && picked.eligible.length >= REQUIRED_ARV_COMPS) {
-          console.log(`Appraisal: ${picked.selected.length} comps selected after subdivision expansion${yearNote(yearLimit)}`)
-          return {
-            ...applyRescued(resultSub, picked),
-            fallbackUsed: 'subdivision_expansion',
-            fallbackReason: `Insufficient comps in subdivision "${subject.subdivision || 'unknown'}". Expanded to the surrounding area (radius ×${expansion.geographicDistanceMultiplier})${yearNote(yearLimit)} — all other rules apply at the tier's thresholds.`,
-            expansionApplied: appliedFor(yearLimit, 'subdivision'),
+      for (const sqftLimit of sqftSteps) {
+        for (const yearLimit of yearLadder) {
+          const resultSub = this.evaluate(subject, comparables, {
+            filters: filtersAt(yearLimit, expansion.geographicDistanceMultiplier, sqftLimit),
+            adjustments,
+          })
+          const picked = rescue(resultSub, new Set(['subdivision_match', 'neighborhood_match', 'geo_scope_match']), ruralOk)
+          if (picked && picked.eligible.length >= REQUIRED_ARV_COMPS) {
+            console.log(`Appraisal: ${picked.selected.length} comps selected after subdivision expansion${yearNote(yearLimit)}`)
+            return {
+              ...applyRescued(resultSub, picked),
+              fallbackUsed: 'subdivision_expansion',
+              fallbackReason: `Insufficient comps in subdivision "${subject.subdivision || 'unknown'}". Expanded to the surrounding area (radius ×${expansion.geographicDistanceMultiplier})${yearNote(yearLimit)} — all other rules apply at the tier's thresholds.`,
+              expansionApplied: appliedFor(yearLimit, 'subdivision', sqftLimit),
+            }
           }
         }
       }
@@ -737,19 +760,21 @@ class PropertyAppraisalService implements AppraisalService {
       // failures are subdivision and/or distance, year ladder restarts.
       {
         let resultGeo = result1
-        for (const yearLimit of yearLadder) {
-          resultGeo = this.evaluate(subject, comparables, {
-            filters: filtersAt(yearLimit),
-            adjustments,
-          })
-          const picked = rescue(resultGeo, new Set(['subdivision_match', 'neighborhood_match', 'geo_scope_match', 'distance']), ruralOk)
-          if (picked && picked.eligible.length >= REQUIRED_ARV_COMPS) {
-            console.log(`Appraisal: ${picked.selected.length} comps selected after geographic expansion${yearNote(yearLimit)}`)
-            return {
-              ...applyRescued(resultGeo, picked),
-              fallbackUsed: 'geographic_expansion',
-              fallbackReason: `Insufficient comps in "${subdivisionName}". Expanded to radius-only geography${yearNote(yearLimit)} — failed location rules remain visible per comp.`,
-              expansionApplied: appliedFor(yearLimit, 'geographic'),
+        for (const sqftLimit of sqftSteps) {
+          for (const yearLimit of yearLadder) {
+            resultGeo = this.evaluate(subject, comparables, {
+              filters: filtersAt(yearLimit, 1, sqftLimit),
+              adjustments,
+            })
+            const picked = rescue(resultGeo, new Set(['subdivision_match', 'neighborhood_match', 'geo_scope_match', 'distance']), ruralOk)
+            if (picked && picked.eligible.length >= REQUIRED_ARV_COMPS) {
+              console.log(`Appraisal: ${picked.selected.length} comps selected after geographic expansion${yearNote(yearLimit)}`)
+              return {
+                ...applyRescued(resultGeo, picked),
+                fallbackUsed: 'geographic_expansion',
+                fallbackReason: `Insufficient comps in "${subdivisionName}". Expanded to radius-only geography${yearNote(yearLimit)} — failed location rules remain visible per comp.`,
+                expansionApplied: appliedFor(yearLimit, 'geographic', sqftLimit),
+              }
             }
           }
         }
