@@ -310,7 +310,9 @@ async function replayCase(c: ReplayCase): Promise<ReplayResult> {
   const subjectAvm = numberOrNull(attemptSubject.avmValue)
     ?? numberOrNull((responseSubject.avm as Record<string, unknown> | undefined)?.value)
   const assessed = numberOrNull(attemptSubject.assessedValue) ?? numberOrNull(responseSubject.assessedValue)
-  const terminalReplayArv = fallbackUsed === 'insufficient' ? subjectAvm ?? assessed ?? null : replay.arv
+  const terminalReplayArv = (valuation?.arvSource === 'avm' ? subjectAvm
+    : valuation?.arvSource === 'assessed' ? assessed
+    : replay.arv)
   const valuationReplay = replayValuation(c, terminalReplayArv)
 
   pushDiff(diffs, 'arv', expected.arv, replay.arv, sameArv(expected.arv, replay.arv))
