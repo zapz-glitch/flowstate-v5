@@ -140,6 +140,21 @@ assert.deepEqual(B_REHAB_FRACTION, {
   assert.equal(r.arv, 285_000) // maintained band median = 190/sf; the 40 and 900 sales never touched it
   assert.ok(r.flags.some((f) => f.includes('dropped')))
 }
+// Dated/distressed pocket — no renovated or maintained inventory: the
+// best curb-rated dated sales carry the reference.
+{
+  const dead = (ppsf: number, score: string) => comp({
+    isEnabled: false, disableReasons: ['property type mismatch'],
+    salePrice: ppsf * 1500, squareFeet: 1500,
+    classification: { type: 'as_is' },
+    curbAppeal: { condition: 'dated', confidence: 60, summary: `Dated (${score}/4)` },
+  })
+  const r = evaluateB(subject(), [
+    dead(100, '1.5'), dead(110, '1.8'), dead(120, '2.9'),
+    dead(130, '1.2'), dead(140, '2.0'), dead(150, '1.0'),
+  ])
+  assert.equal(r.arv, 210_000) // top two curb reads (2.9 → 120/sf, 2.0 → 140/sf); median 140 → $210k
+}
 // Maintained-band floor — an anchor below the band's median gets
 // floored: a renovated product can't sell for less than maintained homes.
 {

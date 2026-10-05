@@ -164,6 +164,25 @@ const bIsUnfit = (c: BComp) =>
   c.evidenceVerification?.staleness === 'stale' ||
   c.evidenceVerification?.priceCheck === 'divergent'
 
+// ── Condition class — one resolved label per comp ─────────────────────────
+// The curve: renovated → maintained → dated → distressed. Curb read is the
+// condition vote; the sale-type label corroborates when photos are missing;
+// unlabeled comps sit in maintained (conservative middle of the curve).
+export function bConditionClass(c: BComp): 'renovated' | 'maintained' | 'dated' | 'distressed' {
+  const cond = (c.curbAppeal?.condition ?? '').toLowerCase()
+  const conf = c.curbAppeal?.confidence ?? 0
+  if (conf >= B_COND_MIN_CONF && cond) {
+    if (['renovated', 'updated', 'turnkey', 'move-in ready'].includes(cond)) return 'renovated'
+    if (['as_is', 'as-is', 'distressed', 'needs_work', 'teardown'].includes(cond)) return 'distressed'
+    if (['dated', 'original', 'needs_updates'].includes(cond)) return 'dated'
+    return 'maintained'
+  }
+  const type = (c.classification?.type ?? '').toLowerCase()
+  if (/as_is|as-is|investor|distress|teardown/.test(type)) return 'distressed'
+  if (/after_renovation|renovated|flip|arv/.test(type)) return 'renovated'
+  return 'maintained'
+}
+
 const bLotSf = (x: { lotSizeSquareFeet?: number | null; lotSizeAcres?: number | null }) =>
   x.lotSizeSquareFeet ?? (x.lotSizeAcres ? x.lotSizeAcres * 43560 : null)
 
@@ -335,18 +354,13 @@ export function evaluateB(
       if (clean.length < 3) continue
       const dropped = ps.length - clean.length
       const med = (xs: typeof clean) => xs[Math.floor(xs.length / 2)].ppsf
-      // Condition bands — the pocket classifies itself by evidence, not
-      // blind price thirds: renovated curb reads / flip sales on top,
-      // maintained reads in the middle, distressed at the bottom.
-      const bandOf = (c: BComp): 'renovated' | 'maintained' | 'distressed' => {
-        if (bTierOf(c) === 'as_is' || /distress|as_is|as-is|investor/i.test(c.classification?.type ?? '')) return 'distressed'
-        if (bCondTier(c) === 'median') return 'maintained' // curb read is the condition vote
-        if (bCondTier(c) === 'renovated' || bCondTier(c) === 'premium' || bTierOf(c) === 'arv') return 'renovated'
-        return 'maintained'
-      }
-      const inBand = (band: 'renovated' | 'maintained' | 'distressed') =>
-        clean.filter((x) => bandOf(x.c) === band)
-      const distressed = inBand('distressed')
+      // Condition bands — the curve: renovated → maintained → dated/
+      // distressed. One member still makes a band. Curb read is the
+      // condition vote; unlabeled comps sit in maintained.
+      const inBand = (band: 'renovated' | 'maintained' | 'dated' | 'distressed') =>
+        clean.filter((x) => bConditionClass(x.c) === band)
+      const distressed = [...inBand('dated'), ...inBand('distressed')]
+        .sort((a, b) => a.ppsf - b.ppsf)
       const maintained = inBand('maintained')
       const renovated = inBand('renovated')
       // Marginal repricing — same taper as the driver contribution. A
@@ -375,12 +389,16 @@ export function evaluateB(
         return v + landAdj
       }
       if (!subSqft) break
-      // Carriers: the renovated band is the ARV set — fix-flip sales or
-      // confident renovated reads. When the pocket has no renovated
-      // evidence, the whole maintained band carries the estimate —
-      // labeled maintained, never disguised as a flip read.
-      const carriers = renovated.length >= 2 ? renovated
-        : maintained.length ? maintained : clean
+      // Carrier cascade — renovated band is the ARV set; a pocket with
+      // no renovated evidence prices at maintained (that's what the
+      // pocket IS, not a penalty); a dated/distressed pocket falls to
+      // its best-rated sale — the nicest curb read it has.
+      const curbScore = (x: typeof clean[number]) =>
+        Number((x.c.curbAppeal?.summary ?? '').match(/\((\d\.?\d?)\/4\)/)?.[1] ?? 0)
+      const carriers = renovated.length ? renovated
+        : maintained.length ? maintained
+        : distressed.length ? distressed.sort((a, b) => curbScore(b) - curbScore(a)).slice(0, Math.max(1, Math.ceil(distressed.length / 3)))
+        : clean
       const bandNote = ' — ' + [
         distressed.length ? `distressed $${med(distressed).toFixed(0)}/sf` : null,
         maintained.length ? `maintained $${med(maintained).toFixed(0)}/sf` : null,
@@ -392,7 +410,7 @@ export function evaluateB(
       // selling above the answer means the band was read wrong.
       const maintainedTop = maintained.length
         ? Math.max(...maintained.map((x) => implied(x))) : null
-      if (renovated.length >= 2 && maintainedTop != null && arv < maintainedTop) {
+      if (renovated.length > 0 && maintainedTop != null && arv < maintainedTop) {
         flags.push(`ARV ${usd(arv)} below maintained band — floored at maintained ceiling ${usd(maintainedTop)}`)
         arv = maintainedTop
       }
