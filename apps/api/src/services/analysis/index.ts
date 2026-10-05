@@ -6,7 +6,7 @@
  */
 
 import type { PropertyBundle } from '../property-api'
-import { evaluateB, bCondTier } from '@flowstate-api/shared/appraisal'
+import { evaluateB, bCondTier, HARNESS_VERSION } from '@flowstate-api/shared/appraisal'
 import type { NormalizedProperty, NormalizedComparable } from '../property-api/types'
 import type { AppraisedComparable, AppraisalResultWithFallback, ClassificationSummaryResult } from '../appraisal'
 import type { PhotoBundle, PropertyPhotos } from '../photo-provider'
@@ -811,6 +811,12 @@ export interface AnalysisResponse {
       landRateSource: string | null
       sqftRateSource: string | null
       healed: boolean
+      /** The rule-set version that produced this run — attribution stamp */
+      harnessVersion: string
+      /** Grid ladder trail — which rung admitted the pool */
+      fallbackUsed: string | null
+      /** Which tolerances the ladder relaxed (year_built, sqft_diff, geo scopes) */
+      expansionApplied: string[]
       /** Verify-and-retry trail — widen/deepen attempts + verdicts */
       attemptTrail: string[]
       drivers: { address: string | null; contribution: number; tier: string; conditionTier: string }[]
@@ -1796,6 +1802,9 @@ export function buildAnalysisResponse(
         landRateSource: bResult.landRateSource ?? null,
         sqftRateSource: bResult.sqftRateSource ?? null,
         healed: bResult.healed ?? false,
+        harnessVersion: HARNESS_VERSION,
+        fallbackUsed: appraisalResult.fallbackUsed ?? 'none',
+        expansionApplied: appraisalResult.expansionApplied ?? [],
         attemptTrail: ctx.bAttemptTrail ?? [],
         drivers: bResult.drivers.map((d) => ({
           address: d.comp.address ?? null,

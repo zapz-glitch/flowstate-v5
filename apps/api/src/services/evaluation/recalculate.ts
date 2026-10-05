@@ -16,7 +16,8 @@ import type { Env } from '../../types'
 import { createValuationService } from '../valuation'
 import type { ValuationResult, MajorItem } from '../valuation/types'
 import type { AnalysisResponse } from '../analysis'
-import { evaluateB, bCondTier, type BComp } from '@flowstate-api/shared/appraisal'
+import { evaluateB, bCondTier, HARNESS_VERSION } from '@flowstate-api/shared/appraisal'
+import { savedToBComps, savedToBSubject } from './saved-pool'
 
 const MAX_ARV_COMPS = 3
 
@@ -116,49 +117,10 @@ export async function recalculateReport(
   // constrains the enabled evidence set; the full pool still feeds pocket
   // medians/verification context.
   const enabledIds = selectedCompIds === null ? null : new Set(selectedCompIds)
-  const bComps: BComp[] = items.map((c) => ({
-    address: (c.address as string) ?? null,
-    isEnabled: enabledIds ? enabledIds.has(c.id) : c.isEnabled !== false,
-    salePrice: c.salePrice ?? null,
-    saleDate: (c.saleDate as string) ?? null,
-    squareFeet: c.squareFeet ?? null,
-    pricePerSqft: (c.pricePerSqft as number) ?? null,
-    adjustedPrice: c.adjustedPrice ?? null,
-    distanceMiles: (c.distanceMiles as number) ?? null,
-    sameBlockGroup: (c.sameBlockGroup as boolean) ?? null,
-    censusTract: (c.censusTract as string) ?? null,
-    subdivision: (c.subdivision as string) ?? null,
-    yearBuilt: (c.yearBuilt as number) ?? null,
-    lotSizeAcres: (c.lotSizeAcres as number) ?? null,
-    lotSizeSquareFeet: (c.lotSizeSquareFeet as number) ?? null,
-    landAssessedValue: (c.landAssessedValue as number) ?? null,
-    propertyType: (c.propertyType as string) ?? null,
-    crossesMajorRoad: (c.crossesMajorRoad as boolean) ?? null,
-    disableReasons: (c.disableReasons as string[]) ?? null,
-    classification: c.classification ?? null,
-    curbAppeal: (c.curbAppeal as BComp['curbAppeal']) ?? null,
-    evidenceVerification: (c.evidenceVerification as BComp['evidenceVerification']) ?? null,
-    appraisalRules: c.appraisalRules
-      ? { totalAdjustment: (c.appraisalRules as { totalAdjustment?: number | null }).totalAdjustment ?? null }
-      : null,
-  }))
-  const subject = (saved.subject ?? {}) as Record<string, unknown>
+  const bComps = savedToBComps(items, enabledIds)
   const savedVal = (saved.valuation ?? {}) as Record<string, unknown>
-  const subjectAvm = (subject.avm as { value?: number } | undefined)?.value ?? (subject.avmValue as number) ?? null
   const bResult = evaluateB(
-    {
-      squareFeet: subjectSqft || null,
-      yearBuilt: (subject.yearBuilt as number) ?? null,
-      censusTract: (subject.censusTract as string) ?? null,
-      subdivision: (subject.subdivision as string) ?? null,
-      landAssessedValue: (subject.landAssessedValue as number) ?? null,
-      taxAssessment: (subject.assessedValue as number) ?? null,
-      assessedValue: (subject.assessedValue as number) ?? null,
-      avmValue: subjectAvm,
-      lotSizeAcres: (subject.lotSizeAcres as number) ?? null,
-      lotSizeSquareFeet: (subject.lotSizeSquareFeet as number) ?? null,
-      condition: (savedVal.rehabLevel as string) ?? null,
-    },
+    savedToBSubject(saved),
     bComps,
     { rehabCost: (savedVal.rehabCost as number) ?? null },
   )
@@ -247,6 +209,9 @@ export async function recalculateReport(
             landRateSource: bResult.landRateSource ?? null,
             sqftRateSource: bResult.sqftRateSource ?? null,
             healed: bResult.healed ?? false,
+            harnessVersion: HARNESS_VERSION,
+            fallbackUsed: (saved.valuation?.bMechanics as { fallbackUsed?: string } | undefined)?.fallbackUsed ?? null,
+            expansionApplied: (saved.valuation?.bMechanics as { expansionApplied?: string[] } | undefined)?.expansionApplied ?? [],
             drivers: bResult.drivers.map((d) => ({
               address: d.comp.address ?? null,
               contribution: Math.round(d.contrib),

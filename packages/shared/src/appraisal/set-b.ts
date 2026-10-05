@@ -3,6 +3,10 @@
  * calibration harness (scripts/ab-eval.py). Pure function over the same
  * enabled comp pool the legacy appraisal consumes.
  *
+ * HARNESS_VERSION bumps on every rule change — it's stamped on every
+ * saved run so a result is provably attributable to the code that made
+ * it (an old answer can never pass as a new one).
+ *
  * Semantics (calibrated against 27 live addresses):
  *   - evidence verification: stale/divergent sales never drive ARV
  *   - tier discipline: renovated preferred (sim ≥ 3) → median fallback
@@ -114,6 +118,8 @@ export interface BResult {
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 const usd = (n: number) => `$${Math.round(n).toLocaleString('en-US')}`
+
+export const HARNESS_VERSION = 'og-2026.10.04.1'
 
 export function bSubjectAvm(s: BSubject): number | null {
   return s.avmValue ?? s.avm?.value ?? null
