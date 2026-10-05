@@ -49,8 +49,8 @@ import { canonicalJson, sha256Text, buildRunRecordPayload, insertRunRecord } fro
   assert.equal(row[9], 'completed')
   assert.equal(row[12], 228269)
   assert.equal(row[13], 'weak')
-  assert.equal(row[20], 1)
-  assert.equal(row[23], json)
+  assert.equal(row[23], 1)
+  assert.equal(row[26], json)
 }
 
 console.log('run-record: canonical evidence, hash, and insert mapping passed')

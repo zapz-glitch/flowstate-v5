@@ -18,7 +18,7 @@ import { applyCompTierOverrides } from '../utils/comp-tier-overrides'
 import { deleteReportAssets } from '../services/report-assets'
 import { createPropertyApi } from '../services/property-api'
 import { createValuationService } from '../services/valuation'
-import { canonicalJson, sha256Text } from '../services/evaluation/run-record'
+import { archiveRunRecord, canonicalJson, sha256Text } from '../services/evaluation/run-record'
 import { calculateAllRehabLevelEstimates } from '../services/analysis'
 import { assessMajorItems, toValuationMajorItems } from '../services/evaluation/major-items'
 import { loadMajorItemConfig, computeLocationPenalty } from '../services/evaluation'
@@ -720,6 +720,28 @@ userReports.get('/:jobId/outcomes', async (c) => {
   return c.json({ outcomes })
 })
 
+userReports.post('/:jobId/run-records/:recordId/archive', async (c) => {
+  const session = await getSession(c)
+  if (!session?.user) return c.json({ error: 'Not authenticated' }, 401)
+  const origin = c.req.header('Origin')
+  if (origin != null && origin !== (c.env.DASHBOARD_URL ? new URL(c.env.DASHBOARD_URL).origin : null)) return c.json({ error: 'Untrusted origin' }, 403)
+  if (!c.env.REPORT_ASSETS) return c.json({ error: 'Run-record archive storage is unavailable' }, 503)
+  const db = drizzle(c.env.DB)
+  const jobId = c.req.param('jobId')
+  const recordId = c.req.param('recordId')
+  const [record] = await db.select({ id: runRecords.id })
+    .from(runRecords)
+    .where(and(eq(runRecords.id, recordId), eq(runRecords.jobId, jobId), eq(runRecords.userId, session.user.id)))
+    .limit(1)
+  if (!record) return c.json({ error: 'Run record not found' }, 404)
+  try {
+    const archived = await archiveRunRecord(c.env.DB, c.env.REPORT_ASSETS, recordId)
+    return c.json({ success: true, ...archived })
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : 'Archive retry failed' }, 502)
+  }
+})
+
 userReports.get('/:jobId/run-records', async (c) => {
   const session = await getSession(c)
   if (!session?.user) return c.json({ error: 'Not authenticated' }, 401)
@@ -742,6 +764,9 @@ userReports.get('/:jobId/run-records', async (c) => {
     requestHash: runRecords.requestHash,
     evidenceHash: runRecords.evidenceHash,
     payloadHash: runRecords.payloadHash,
+    archiveKey: runRecords.archiveKey,
+    archivedAt: runRecords.archivedAt,
+    archiveError: runRecords.archiveError,
     attemptCount: runRecords.attemptCount,
     compCount: runRecords.compCount,
     enabledCompCount: runRecords.enabledCompCount,
@@ -808,6 +833,9 @@ userReports.get('/:jobId', async (c) => {
     harnessVersion: runRecords.harnessVersion,
     pipelineVersion: runRecords.pipelineVersion,
     payloadHash: runRecords.payloadHash,
+    archiveKey: runRecords.archiveKey,
+    archivedAt: runRecords.archivedAt,
+    archiveError: runRecords.archiveError,
     payloadJson: runRecords.payloadJson,
     attemptCount: runRecords.attemptCount,
     compCount: runRecords.compCount,
@@ -833,6 +861,9 @@ userReports.get('/:jobId', async (c) => {
         harnessVersion: latestRun.harnessVersion,
         pipelineVersion: latestRun.pipelineVersion,
         payloadHash: latestRun.payloadHash,
+        archiveKey: latestRun.archiveKey,
+        archivedAt: latestRun.archivedAt,
+        archiveError: latestRun.archiveError,
         hashOk: latestRunIntegrity,
         attemptCount: latestRun.attemptCount,
         compCount: latestRun.compCount,

@@ -178,10 +178,18 @@ export function runRecordSummary(payload: RunRecordPayload, payloadJson = canoni
  * resolves its property row — the evidence write must happen before the
  * current report can be overwritten.
  */
+export function runRecordArchiveKey(jobId: string, recordId: string): string {
+  if (!/^[a-zA-Z0-9_-]{1,150}$/.test(jobId) || !/^[a-f0-9-]{36}$/.test(recordId)) {
+    throw new Error('Invalid run record archive identity')
+  }
+  return `run-records/${jobId}/${recordId}.json`
+}
+
 export async function insertRunRecord(
   db: D1Database,
   payload: RunRecordPayload,
-): Promise<{ id: string; payloadHash: string }> {
+  archive?: R2Bucket | null,
+): Promise<{ id: string; payloadHash: string; archiveKey: string | null; archivedAt: string | null }> {
   const payloadJson = canonicalJson(payload)
   const summary = runRecordSummary(payload, payloadJson)
   const id = crypto.randomUUID()
@@ -191,6 +199,21 @@ export async function insertRunRecord(
     sha256Text(payloadJson),
   ])
   const property = payload.property
+  let archiveKey: string | null = null
+  let archivedAt: string | null = null
+  let archiveError: string | null = null
+  if (archive) {
+    archiveKey = runRecordArchiveKey(payload.jobId, id)
+    try {
+      await archive.put(archiveKey, payloadJson, {
+        httpMetadata: { contentType: 'application/json' },
+        customMetadata: { payloadHash, jobId: payload.jobId, userId: payload.userId },
+      })
+      archivedAt = new Date().toISOString()
+    } catch (error) {
+      archiveError = error instanceof Error ? error.message : 'Archive write failed'
+    }
+  }
 
   await db.prepare(`
     INSERT INTO run_records (
@@ -198,8 +221,9 @@ export async function insertRunRecord(
       property_address, property_city, property_state, property_zip, property_clip,
       status, error_code, error_message, arv, result_grade, process_grade,
       harness_version, pipeline_version, request_hash, evidence_hash, payload_hash,
+      archive_key, archived_at, archive_error,
       attempt_count, comp_count, enabled_comp_count, payload_json, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).bind(
     id,
     payload.jobId,
@@ -221,6 +245,9 @@ export async function insertRunRecord(
     requestHash,
     evidenceHash,
     payloadHash,
+    archiveKey,
+    archivedAt,
+    archiveError,
     summary.attemptCount,
     summary.compCount,
     summary.enabledCompCount,
@@ -228,7 +255,31 @@ export async function insertRunRecord(
     payload.recordedAt,
   ).run()
 
-  return { id, payloadHash }
+  return { id, payloadHash, archiveKey, archivedAt }
+}
+
+/** Retry a missing/failed archive without touching the D1 evidence row. */
+export async function archiveRunRecord(
+  db: D1Database,
+  bucket: R2Bucket,
+  recordId: string,
+): Promise<{ archiveKey: string; archivedAt: string }> {
+  const row = await db.prepare('SELECT job_id, payload_hash, payload_json FROM run_records WHERE id = ?')
+    .bind(recordId)
+    .first<{ job_id: string; payload_hash: string; payload_json: string }>()
+  if (!row) throw new Error('Run record not found')
+  const hash = await sha256Text(canonicalJson(JSON.parse(row.payload_json)))
+  if (hash !== row.payload_hash) throw new Error('Run record payload hash mismatch')
+  const archiveKey = runRecordArchiveKey(row.job_id, recordId)
+  const archivedAt = new Date().toISOString()
+  await bucket.put(archiveKey, row.payload_json, {
+    httpMetadata: { contentType: 'application/json' },
+    customMetadata: { payloadHash: row.payload_hash, jobId: row.job_id },
+  })
+  await db.prepare('UPDATE run_records SET archive_key = ?, archived_at = ?, archive_error = NULL WHERE id = ?')
+    .bind(archiveKey, archivedAt, recordId)
+    .run()
+  return { archiveKey, archivedAt }
 }
 
 export async function linkRunRecordToReport(

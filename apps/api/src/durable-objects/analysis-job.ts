@@ -1402,7 +1402,7 @@ export class AnalysisJobDO {
       errorCode: input.errorCode,
       errorMessage: input.errorMessage,
     })
-    const saved = await insertRunRecord(this.env.DB, payload)
+    const saved = await insertRunRecord(this.env.DB, payload, this.env.REPORT_ASSETS)
     return saved.id
   }
 
