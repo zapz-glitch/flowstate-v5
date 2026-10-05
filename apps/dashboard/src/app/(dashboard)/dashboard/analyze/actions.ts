@@ -90,7 +90,7 @@ export interface ApiCallStats {
 export interface AnalyzeData {
   evaluationRevision?: number
   manualCompSelection?: string[] | null
-  evaluationEngine?: 'python-v4' | 'typescript'
+  evaluationEngine?: 'python-v4' | 'typescript' | 'ts-v5'
   /** Close CRM lead this report belongs to (from POST /v1/analyze leadId) — enables the Update CRM action */
   leadId?: string | null
   /** Close CRM opportunity linked to the lead */
@@ -391,6 +391,10 @@ export interface ValuationData {
   arv?: number
   arvSource?: string
   arvPerSqft?: number
+  /** Run-level trust grade — verified/weak/floor/withheld (server-computed) */
+  resultGrade?: 'verified' | 'weak' | 'floor' | 'withheld'
+  /** Did the run earn it — clean / retried / unverified */
+  processGrade?: 'clean' | 'retried' | 'unverified'
   /** Set-B trade-tricks ARV (the pipeline ARV post-swap) */
   arvB?: number | null
   /** Set-B mechanics trail — anchor, drivers, ceiling, flags */
@@ -673,6 +677,10 @@ export interface ValuationData {
   arv?: number
   arvSource?: string
   arvPerSqft?: number
+  /** Run-level trust grade — verified/weak/floor/withheld (server-computed) */
+  resultGrade?: 'verified' | 'weak' | 'floor' | 'withheld'
+  /** Did the run earn it — clean / retried / unverified */
+  processGrade?: 'clean' | 'retried' | 'unverified'
   /** Set-B trade-tricks ARV (the pipeline ARV post-swap) */
   arvB?: number | null
   /** Set-B mechanics trail — anchor, drivers, ceiling, flags */

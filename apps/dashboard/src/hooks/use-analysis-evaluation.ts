@@ -84,7 +84,7 @@ export function useAnalysisEvaluation({
   currentInputRef.current = inputData
   const activeSelection = serverSelection?.source === inputData ? serverSelection : null
   const data = activeSelection?.analysis ?? inputData
-  const pythonAuthoritative = data?.evaluationEngine === 'python-v4'
+  const pythonAuthoritative = data?.evaluationEngine === 'python-v4' || data?.evaluationEngine === 'ts-v5'
   // Settings panel open/close
   const [settingsOpen, setSettingsOpen] = useState(false)
 
@@ -108,23 +108,22 @@ export function useAnalysisEvaluation({
     setSelectionPending(true)
     try {
       const analysis = await recalculateReportComps(jobId, selectedCompIds, data.evaluationRevision ?? 0)
-      const status = (analysis as AnalyzeData & { pythonEvaluation?: { status?: string } } | null)?.pythonEvaluation?.status
       const validComps = Array.isArray(analysis?.comps?.items)
         && analysis.comps.items.every(comp => comp != null && typeof comp.id === 'string' && typeof comp.isEnabled === 'boolean')
-      const insufficient = status === 'INSUFFICIENT_COMPS' && analysis?.valuation === null
+      const insufficient = (analysis?.valuation?.resultGrade === 'withheld' || analysis?.valuation == null)
         && validComps && analysis.comps!.items!.every(comp => !comp.isEnabled)
-      const valued = status !== 'INSUFFICIENT_COMPS' && analysis?.valuation != null
+      const valued = analysis?.valuation?.resultGrade !== 'withheld' && analysis?.valuation != null
         && typeof analysis.valuation.arv === 'number' && Number.isFinite(analysis.valuation.arv) && analysis.valuation.arv > 0
         && Number.isFinite(analysis.valuation.buyPrice)
-      if (analysis?.evaluationEngine !== 'python-v4' || !validComps || (!insufficient && !valued)
+      if (!['python-v4', 'ts-v5'].includes(analysis?.evaluationEngine ?? '') || !validComps || (!insufficient && !valued)
         || analysis.meta?.analysisId !== jobId || analysis.evaluationRevision !== (data.evaluationRevision ?? 0) + 1) {
         throw new Error('The server returned an incomplete evaluation. Your previous result is unchanged.')
       }
       if (currentInputRef.current === inputData) {
         setServerSelection({ source: inputData, analysis, isManual: selectedCompIds !== null })
         toast.info(selectedCompIds === null
-          ? 'Python V4 automatic comparable selection restored.'
-          : 'Operator-selected comparables. Python V4 recalculated this preliminary evaluation.')
+          ? 'Automatic comparable selection restored.'
+          : 'Operator-selected comparables. The server recalculated this evaluation.')
       }
     } catch (error) {
       if (currentInputRef.current === inputData) toast.error(error instanceof Error ? error.message : 'Comp selection could not be saved. Your previous result is unchanged.')

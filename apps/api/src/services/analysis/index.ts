@@ -868,7 +868,7 @@ export interface AnalysisResponse {
     recommendation?: 'strong-buy' | 'buy' | 'hold' | 'pass' | 'manual-review'
     recommendationReason?: string
     /** Confidence gate on the comps driving the ARV */
-    confidence?: 'high' | 'medium' | 'low'
+    confidence?: 'high' | 'medium' | 'low' | null
     confidenceReasons?: string[]
     /** True unless HIGH — medium flags for review, low withholds the call */
     requiresHumanReview?: boolean
@@ -1756,6 +1756,9 @@ export function buildAnalysisResponse(
       arvMethodology,
       resultGrade: grades.resultGrade,
       processGrade: grades.processGrade,
+      // One confidence vocabulary — the hero badge reads this; 'none'
+      // renders no badge (never a misleading default).
+      confidence: bResult.conf === 'none' ? null : bResult.conf,
       arvPerSqft: valuation.pricePerSqft,
       asIsValue,
       afterRenovationValue,
