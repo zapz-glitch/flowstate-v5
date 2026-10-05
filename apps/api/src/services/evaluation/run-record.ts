@@ -36,6 +36,9 @@ export interface RunRecordPayload {
   rules: {
     harnessVersion: string
     pipelineVersion: string
+    valuationDate: string
+    models: Record<string, string | null>
+    providers: Record<string, string | null>
   }
   evidence: unknown
   attempts: unknown[]
@@ -112,6 +115,10 @@ export function buildRunRecordPayload(input: {
   errorCode?: string | null
   errorMessage?: string | null
   recordedAt?: string
+  runtime?: {
+    models?: Record<string, string | null | undefined>
+    providers?: Record<string, string | null | undefined>
+  }
 }): RunRecordPayload {
   const subject = subjectOf(input.response)
   const request = input.request
@@ -141,6 +148,9 @@ export function buildRunRecordPayload(input: {
     rules: {
       harnessVersion: HARNESS_VERSION,
       pipelineVersion: EVALUATION_PIPELINE_VERSION,
+      valuationDate: (input.recordedAt ?? new Date().toISOString()).slice(0, 10),
+      models: Object.fromEntries(Object.entries(input.runtime?.models ?? {}).map(([k, v]) => [k, v ?? null])),
+      providers: Object.fromEntries(Object.entries(input.runtime?.providers ?? {}).map(([k, v]) => [k, v ?? null])),
     },
     evidence: input.evidence ?? null,
     attempts: input.attempts ?? [],

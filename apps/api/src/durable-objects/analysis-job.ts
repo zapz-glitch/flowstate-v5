@@ -1396,6 +1396,18 @@ export class AnalysisJobDO {
         isRefresh: !!config.isRefresh,
         cachedJobId: input.cachedJobId ?? null,
       },
+      runtime: {
+        models: {
+          vision: this.env.VISION_MODEL ?? this.env.OPENROUTER_MODEL ?? 'google/gemini-2.5-flash',
+          general: this.env.OPENROUTER_MODEL ?? null,
+          compSelection: this.env.COMP_SELECTION_MODEL ?? null,
+          marketSearch: this.env.MARKET_SEARCH_MODEL ?? null,
+          clef: this.env.CLEF_MODEL ?? 'clef-flash',
+        },
+        providers: {
+          property: this.env.PROPERTY_PROVIDER ?? 'corelogic',
+        },
+      },
       evidence: input.evidence,
       attempts: input.attempts,
       response: input.response,

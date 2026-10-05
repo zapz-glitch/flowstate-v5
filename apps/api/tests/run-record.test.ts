@@ -17,6 +17,7 @@ import { canonicalJson, sha256Text, buildRunRecordPayload, insertRunRecord } fro
     request: { search: { address: '1 Main St' }, evalParams: { widen: () => [] } },
     evidence: { compPool: [{ address: '2 Main St' }] },
     attempts: [{ name: 'attempt 1' }],
+    runtime: { models: { vision: 'vision-v1', clef: null }, providers: { property: 'attom-mcp' } },
     response: {
       subject: { address: '1 Main St', city: 'Conley', state: 'GA', zipCode: '30288', id: 'clip-1' },
       valuation: { arv: 228269, resultGrade: 'weak', processGrade: 'clean', bMechanics: { harnessVersion: 'test-v1' } },
@@ -28,6 +29,9 @@ import { canonicalJson, sha256Text, buildRunRecordPayload, insertRunRecord } fro
   assert.equal(hash, await sha256Text(canonicalJson(payload)))
   assert.equal(payload.attempts.length, 1)
   assert.equal(payload.property.address, '1 Main St')
+  assert.equal(payload.rules.models.vision, 'vision-v1')
+  assert.equal(payload.rules.providers.property, 'attom-mcp')
+  assert.equal(payload.rules.valuationDate, payload.recordedAt.slice(0, 10))
 
   const writes: unknown[][] = []
   const db = {

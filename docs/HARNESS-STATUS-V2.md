@@ -78,8 +78,8 @@ commits.
   evidence test.
 - Finish the approved enrichment waves: best six, then next six, stop when
   enough defensible evidence exists.
-- Pin model versions, subject/rehab reads, valuation date, and any remaining
-  mutable inputs needed for perfect live reruns.
+- Pin any remaining mutable inputs needed for perfect live reruns. Model and
+  provider names plus valuation date are now recorded in `rules`.
 - After Claude's UI pass, verify server → dashboard → selection change →
   save → reload parity in a browser.
 - Build the deferred independent rule auditor. Replay proves the result
