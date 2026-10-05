@@ -81,9 +81,15 @@ export function arvEvidence(
 
 /** The minimal read shape needed for corroboration — CompCurbAppealMap
  *  values satisfy this; kept structural so evidence maps from any source
- *  (Clef, Luna, listing text) plug in. */
+ *  (Clef, Luna, listing text) plug in. The probability fields carry the
+ *  model's own scored evidence — the conflict arbiter's input. */
 export interface ConditionReads {
-  [compId: string]: { condition?: string | null; confidence?: number | null } | undefined
+  [compId: string]: {
+    condition?: string | null
+    confidence?: number | null
+    renovatedProbability?: number | null
+    asIsProbability?: number | null
+  } | undefined
 }
 
 /** The price band the vision-verified renovated comps established —
@@ -169,6 +175,44 @@ export function classifyCompsByEvidence(
         reasoning: 'Ordinary sale — no ARV or distress evidence; market-rate reference',
         indicators: {},
       })
+    }
+  }
+
+  // Conflict arbitration — when the evidence class and the vision
+  // condition disagree by a full tier (vision 'distressed' but the sale
+  // priced like a renovation, or vision 'renovated' on an investor-priced
+  // sale), neither signal gets to win by default: the model's own
+  // probabilities arbitrate — whichever pole it scored higher takes the
+  // class. No usable read → transitional (neither story proved). Flip
+  // chains are exempt — a recorded buy→resale is a transaction event,
+  // stronger than any model read.
+  if (conditionReads) {
+    const COND_TIER: Record<string, number> = {
+      renovated: 2, dated: 1, maintained: 1, transitional: 1, worn: 1,
+      distressed: 0, as_is: 0, needs_work: 0, poor: 0,
+    }
+    const CLASS_TIER = { as_is: 0, transitional: 1, after_renovation: 2 } as const
+    for (const comp of comparables) {
+      const cls = classifications.get(comp.id)
+      if (!cls || cls.method === 'evidence_flip_chain') continue
+      const read = conditionReads[comp.id]
+      const condTier = read?.condition ? COND_TIER[read.condition] : undefined
+      if (condTier === undefined || (read!.confidence ?? 0) < CONDITION_CONF_FLOOR) continue
+      if (Math.abs(CLASS_TIER[cls.classification] - condTier) < 2) continue
+      const rp = read!.renovatedProbability ?? null
+      const ap = read!.asIsProbability ?? null
+      const resolved = rp != null && ap != null
+        ? rp > ap ? 'after_renovation' : ap > rp ? 'as_is' : 'transitional'
+        : 'transitional'
+      if (resolved !== cls.classification) {
+        classifications.set(comp.id, {
+          classification: resolved,
+          confidence: Math.max(rp ?? 0, ap ?? 0, 40),
+          method: 'conflict_arbiter',
+          reasoning: `class ${cls.classification} vs vision ${read!.condition} — model scores reno ${rp ?? '?'}% vs as-is ${ap ?? '?'}% → ${resolved}`,
+          indicators: {},
+        })
+      }
     }
   }
   return classifications

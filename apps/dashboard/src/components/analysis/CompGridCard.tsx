@@ -1,7 +1,7 @@
 'use client'
 
 import { memo, useMemo } from 'react'
-import { Check, X } from 'lucide-react'
+import { Check, X, CheckCircle2, AlertTriangle, XCircle, MapPin, Ruler, Clock, TrendingUp, Expand } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { subdivisionsMatch } from '@flowstate-api/shared'
 import { CopyButton } from '@/components/ui/copy-button'
@@ -132,15 +132,15 @@ function CompGridCardInner({
                   : 'bg-neutral-700/80 text-white/50'
               )}
               title={
-                comp.bRole === 'anchor' ? 'Set-B anchor — the verified sale the ARV is priced off'
-                  : comp.bRole === 'driver' ? 'Set-B driver — verified evidence in the ARV answer'
-                  : comp.bRole === 'pool' ? 'In the Set-B evidence pool — evaluated but not a driver'
-                  : 'Not in the Set-B evidence pool — excluded from the verified ARV'
+                comp.bRole === 'anchor' ? 'The verified sale the ARV is priced off'
+                  : comp.bRole === 'driver' ? 'Verified evidence inside the ARV answer'
+                  : comp.bRole === 'pool' ? 'Evaluated — supports the answer without setting it'
+                  : 'Excluded from the ARV evidence'
               }
             >
-              {comp.bRole === 'anchor' ? 'ANCHOR'
-                : comp.bRole === 'driver' ? 'DRIVER'
-                : comp.bRole === 'pool' ? 'pool'
+              {comp.bRole === 'anchor' ? 'ARV'
+                : comp.bRole === 'driver' ? 'EVIDENCE'
+                : comp.bRole === 'pool' ? 'SUPPORT'
                 : 'excluded'}
             </div>
           )}
@@ -164,36 +164,38 @@ function CompGridCardInner({
               {comp.userTier === 'arv' ? 'ARV' : 'AS-IS'}·YOU
             </div>
           )}
-          {comp.classification && (
+          {comp.badges?.price && (
             <div
               className={cn(
                 'h-6 px-1.5 rounded-sm flex items-center text-[10px] font-bold',
-                comp.classification.type === 'after_renovation' ? 'bg-emerald-500/90 text-white'
-                  : comp.classification.type === 'as_is' ? 'bg-orange-500/90 text-white'
-                  : comp.classification.type === 'transitional' ? 'bg-blue-500/90 text-white'
-                  : 'bg-neutral-600 text-white/80'
+                comp.badges.price === 'renovated' ? 'bg-emerald-500/90 text-white'
+                  : comp.badges.price === 'as_is' ? 'bg-orange-500/90 text-white'
+                  : 'bg-blue-500/90 text-white'
               )}
-              title={comp.classification.reasoning || `Price classification: ${comp.classification.type}`}
+              title={comp.classification?.reasoning || `Price: ${comp.badges.price}`}
             >
-              {comp.classification.type === 'after_renovation' ? 'ARV'
-                : comp.classification.type === 'as_is' ? 'AS-IS'
-                : comp.classification.type === 'transitional' ? 'PARTIAL'
-                : 'UNVERIFIED'}
+              {comp.badges.price === 'renovated' ? 'RENOVATED'
+                : comp.badges.price === 'as_is' ? 'AS-IS'
+                : 'MEDIAN'}
             </div>
           )}
-          {comp.curbAppeal && comp.curbAppeal.condition && comp.curbAppeal.condition !== 'unknown' && (
+          {comp.badges?.trust && (
             <div
               className={cn(
-                'h-6 px-1.5 rounded-sm flex items-center text-[10px] font-bold',
-                comp.curbAppeal.condition === 'renovated' ? 'bg-emerald-600/90 text-white'
-                  : comp.curbAppeal.condition === 'dated' ? 'bg-amber-600/90 text-white'
-                  : 'bg-red-600/90 text-white'
+                'h-6 w-6 rounded-sm flex items-center justify-center',
+                comp.badges.trust === 'verified' ? 'text-emerald-400'
+                  : comp.badges.trust === 'partial' ? 'text-amber-400'
+                  : 'text-red-400'
               )}
-              title={comp.curbAppeal.summary ?? `Clef condition: ${comp.curbAppeal.condition}`}
+              title={
+                comp.badges.trust === 'verified' ? 'Verified — evidence checks passed'
+                  : comp.badges.trust === 'partial' ? 'Partially verified — some checks missing'
+                  : 'Unverified — an evidence check failed'
+              }
             >
-              {comp.curbAppeal.condition === 'renovated' ? 'RENO'
-                : comp.curbAppeal.condition === 'dated' ? 'DATED'
-                : 'DISTRESSED'}
+              {comp.badges.trust === 'verified' ? <CheckCircle2 className="w-4 h-4" />
+                : comp.badges.trust === 'partial' ? <AlertTriangle className="w-4 h-4" />
+                : <XCircle className="w-4 h-4" />}
             </div>
           )}
         </div>
@@ -279,13 +281,72 @@ function CompGridCardInner({
             )
           })()}
         </div>
+        {/* Server verdicts — Condition (photos) · Price (the sale) */}
+        {comp.badges && (comp.badges.condition || comp.badges.price) && (
+          <div className="flex items-center gap-2 mt-1 text-[10px] tabular-nums">
+            {comp.badges.condition && (
+              <span className="text-foreground-tertiary">Condition — <span className="text-foreground-secondary font-medium">{
+                comp.badges.condition === 'reno' ? 'Reno'
+                  : comp.badges.condition === 'distressed' ? 'Distressed'
+                  : comp.badges.condition === 'unverified' ? 'Unverified'
+                  : 'Dated'
+              }</span></span>
+            )}
+            {comp.badges.price && (
+              <span className="text-foreground-tertiary">Price — <span className="text-foreground-secondary font-medium">{
+                comp.badges.price === 'renovated' ? 'Renovated'
+                  : comp.badges.price === 'as_is' ? 'As-is'
+                  : 'Median'
+              }</span></span>
+            )}
+            {comp.badges.pocket && comp.badges.pocket !== 'unknown' && (
+              <span
+                className={cn(
+                  'ml-auto inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[9px] font-medium',
+                  comp.badges.pocket === 'in' ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20'
+                    : comp.badges.pocket === 'equal' ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20'
+                    : 'bg-muted text-foreground-tertiary border border-border'
+                )}
+                title={
+                  comp.badges.pocket === 'in' ? 'In the pocket — census tract or block-group match'
+                    : comp.badges.pocket === 'equal' ? "Out of pocket — trades at the subject\u2019s level"
+                    : comp.badges.pocket === 'above' ? "Out of pocket — trades above the subject\u2019s market"
+                    : "Out of pocket — trades below the subject\u2019s market"
+                }
+              >
+                <MapPin className="w-2.5 h-2.5" />
+                {comp.badges.pocket === 'in' ? 'Pocket' : `Out ${comp.badges.pocket === 'equal' ? '=' : comp.badges.pocket === 'above' ? '>' : '<'}`}
+              </span>
+            )}
+          </div>
+        )}
+
+        {/* Check ribbon — the scannable passes; dim = failed or unverified */}
+        {comp.badges && (
+          <div className="flex items-center gap-1.5 mt-1" title={[
+            `${comp.badges.checks.pocket === true ? '✓' : '✗'} pocket`,
+            `${comp.badges.checks.size === true ? '✓' : '✗'} size`,
+            `${comp.badges.checks.fresh === true ? '✓' : '✗'} fresh sale`,
+            `${comp.badges.checks.priceFit === true ? '✓' : '✗'} price fits`,
+            ...(comp.badges.widenedOn.length ? [`widened in on: ${comp.badges.widenedOn.join(', ')}`] : []),
+          ].join('\n')}>
+            <MapPin className={cn('w-3 h-3', comp.badges.checks.pocket === true ? 'text-emerald-500' : 'text-foreground-tertiary/30')} />
+            <Ruler className={cn('w-3 h-3', comp.badges.checks.size === true ? 'text-emerald-500' : 'text-foreground-tertiary/30')} />
+            <Clock className={cn('w-3 h-3', comp.badges.checks.fresh === true ? 'text-emerald-500' : 'text-foreground-tertiary/30')} />
+            <TrendingUp className={cn('w-3 h-3', comp.badges.checks.priceFit === true ? 'text-emerald-500' : 'text-foreground-tertiary/30')} />
+            {comp.badges.widenedOn.length > 0 && (
+              <Expand className="w-3 h-3 text-amber-500 ml-0.5" />
+            )}
+          </div>
+        )}
+
         {/* Distance + Adj price */}
         <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
           {comp.distanceMiles != null && (
             <span className="text-[9px] text-foreground-tertiary tabular-nums">{comp.distanceMiles.toFixed(2)} mi</span>
           )}
           {comp.adjustedPrice != null && comp.adjustedPrice !== comp.salePrice && (
-            <span className="text-[10px] font-medium text-emerald-500 tabular-nums ml-auto">Adj ${comp.adjustedPrice.toLocaleString()}</span>
+            <span className="text-[10px] font-medium text-emerald-500 tabular-nums ml-auto">Adjusted ${comp.adjustedPrice.toLocaleString()}</span>
           )}
         </div>
 

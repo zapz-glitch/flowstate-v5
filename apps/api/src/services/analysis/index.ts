@@ -8,6 +8,7 @@
 import type { PropertyBundle } from '../property-api'
 import { evaluateB, bCondTier, HARNESS_VERSION } from '@flowstate-api/shared/appraisal'
 import { gradeResult } from './result-grade'
+import { compBadges } from './comp-badges'
 import type { NormalizedProperty, NormalizedComparable } from '../property-api/types'
 import type { AppraisedComparable, AppraisalResultWithFallback, ClassificationSummaryResult } from '../appraisal'
 import type { PhotoBundle, PropertyPhotos } from '../photo-provider'
@@ -1557,6 +1558,15 @@ export function buildAnalysisResponse(
       // Which comps the Set-B answer actually used — display-only, never
       // feeds back into valuation.
       bRole: bRoleOf(comp.address),
+      // Server↔client trust contract — every badge the card shows is
+      // computed here from the same evidence the rules saw.
+      badges: compBadges(comp as never, {
+        subjectCensusTract: property.censusTract ?? null,
+        subjectPpsfMedians: property.ppsfMedians ?? null,
+        condition: ctx.compCurbAppeal?.[comp.id] ?? null,
+        classification: compClassification?.classification ?? null,
+        expansionApplied: appraisalResult.expansionApplied ?? [],
+      }),
       curbAppeal: ctx.compCurbAppeal?.[comp.id] ?? null,
       evidenceVerification: comp.evidenceVerification ?? null,
       // Sqft-conflict evidence — provider-vs-listing divergence + permit

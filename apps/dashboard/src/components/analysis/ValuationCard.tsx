@@ -86,13 +86,27 @@ export function ValuationCard({
                 tooltip={
                   <div className="space-y-1.5">
                     <p className="font-medium">After Repair Value</p>
-                    <p className="text-foreground-tertiary">Verified-evidence ARV — most-similar comp anchors, marginal size/land adjustments, condition uplift, ceiling-bounded.</p>
-                    <p className="font-mono text-[10px] text-foreground-tertiary mt-1">= anchor comp contribution + size/land/condition adj (capped at evidence top)</p>
+                    <p className="text-foreground-tertiary">Verified-evidence ARV — priced off the most similar verified comp, with size/lot/condition adjustments, capped at the evidence top.</p>
+                    <p className="font-mono text-[10px] text-foreground-tertiary mt-1">= the comp the ARV is priced off + adjustments (capped at the evidence top)</p>
                   </div>
                 }
               />
-              <div className="text-heading-sm font-bold text-primary">
+              <div className="text-heading-sm font-bold text-primary flex items-center gap-2">
                 ${formatHeadlineMoney(valuation.arv, valuation.displayedArv, valuation.displayRounding)}
+                {valuation.resultGrade && (
+                  <span
+                    className={cn(
+                      'text-[9px] font-bold px-1.5 py-0.5 rounded-full',
+                      valuation.resultGrade === 'verified' ? 'bg-emerald-500/15 text-emerald-500'
+                        : valuation.resultGrade === 'weak' ? 'bg-amber-500/15 text-amber-600'
+                        : valuation.resultGrade === 'floor' ? 'bg-blue-500/15 text-blue-500'
+                        : 'bg-red-500/15 text-red-400'
+                    )}
+                    title={`Result: ${valuation.resultGrade} · process: ${valuation.processGrade ?? 'unknown'}`}
+                  >
+                    {valuation.resultGrade}
+                  </span>
+                )}
               </div>
               {valuation.arvPerSqft != null && (
                 <div className="text-caption-sm text-foreground-tertiary mt-1">${valuation.arvPerSqft.toFixed(0)}/sqft</div>
@@ -102,7 +116,14 @@ export function ValuationCard({
                   className="text-[10px] font-mono text-cyan-600 dark:text-cyan-400 mt-1 truncate"
                   title={valuation.bMechanics.flags.join('\n')}
                 >
-                  → {valuation.bMechanics.source} · {valuation.bMechanics.anchorAddress.split(',')[0]}
+                  → {({
+                    'T0 anchor': 'Comp-anchored',
+                    'T1 land-adjusted': 'Comp-anchored',
+                    'T2 pocket-implied': 'Pocket est.',
+                    'T3 AVM floor': 'AVM est.',
+                    'T4 assessed': 'County value',
+                    'median+50% AVM uplift': 'Median + AVM est.',
+                  }[valuation.bMechanics.source] ?? valuation.bMechanics.source)} · {valuation.bMechanics.anchorAddress.split(',')[0]}
                 </div>
               )}
               {valuation.bMechanics && (valuation.bMechanics.drivers?.length ?? 0) > 0 && (

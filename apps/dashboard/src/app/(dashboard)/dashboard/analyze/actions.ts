@@ -516,6 +516,21 @@ export interface CompsData {
   items?: CompItem[]
 }
 
+export interface CompBadges {
+  price: 'renovated' | 'median' | 'as_is' | null
+  condition: 'reno' | 'dated' | 'distressed' | 'unverified' | null
+  pocket: 'in' | 'equal' | 'above' | 'below' | 'unknown' | null
+  trust: 'verified' | 'partial' | 'unverified' | null
+  checks: {
+    pocket: boolean | null
+    size: boolean | null
+    fresh: boolean | null
+    priceFit: boolean | null
+  }
+  /** Failed filters the run's expansion rescued (empty = strict admission) */
+  widenedOn: string[]
+}
+
 export interface CompItem {
   id?: string
   selectionPending?: boolean
@@ -621,6 +636,8 @@ export interface CompItem {
    * Display-only; separate from the appraisal-grid enabled/compGroup state.
    */
   bRole?: 'anchor' | 'driver' | 'pool' | 'excluded' | null
+  /** Server↔client trust contract — the server computes, the card renders */
+  badges?: CompBadges | null
   /**
    * Reviewer's manual tier pin — 'arv' or 'as_is' — assigned on the comp
    * card. Rides alongside the automatic evidence class; never rewrites it.
@@ -802,6 +819,21 @@ export interface CompsData {
   items?: CompItem[]
 }
 
+export interface CompBadges {
+  price: 'renovated' | 'median' | 'as_is' | null
+  condition: 'reno' | 'dated' | 'distressed' | 'unverified' | null
+  pocket: 'in' | 'equal' | 'above' | 'below' | 'unknown' | null
+  trust: 'verified' | 'partial' | 'unverified' | null
+  checks: {
+    pocket: boolean | null
+    size: boolean | null
+    fresh: boolean | null
+    priceFit: boolean | null
+  }
+  /** Failed filters the run's expansion rescued (empty = strict admission) */
+  widenedOn: string[]
+}
+
 export interface CompItem {
   id?: string
   selectionPending?: boolean
@@ -907,6 +939,8 @@ export interface CompItem {
    * Display-only; separate from the appraisal-grid enabled/compGroup state.
    */
   bRole?: 'anchor' | 'driver' | 'pool' | 'excluded' | null
+  /** Server↔client trust contract — the server computes, the card renders */
+  badges?: CompBadges | null
   /**
    * Reviewer's manual tier pin — 'arv' or 'as_is' — assigned on the comp
    * card. Rides alongside the automatic evidence class; never rewrites it.

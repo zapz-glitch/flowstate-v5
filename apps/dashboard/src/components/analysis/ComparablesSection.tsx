@@ -302,7 +302,6 @@ export function ComparablesSection({
         {/* Row 1: Title + stats + actions */}
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-2">
-            <h3 className="mono-label">Comparables</h3>
             <span className="text-[10px] text-foreground-tertiary tabular-nums">
               {selectedCount} selected
               {excludedComps.length > 0 && ` · ${excludedComps.length} excluded`}

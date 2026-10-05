@@ -97,3 +97,69 @@ const reads = (over: Record<string, { condition?: string; confidence?: number }>
 }
 
 console.log('comp-classification-chain: band corroboration, no-band demotion, flip-chain exemption, read floor passed')
+
+// ── Conflict arbiter — Clef's own probabilities decide, not a default ────
+// 8. Vision 'distressed' but sale priced into the renovated band:
+//    model says as-is (prob higher) → demotes to as_is.
+{
+  const pool = [
+    renovated(),
+    comp('conflict', 310000, 1500, { avmValue: 240000 }),
+  ]
+  const out = classifyCompsByEvidence(pool, 240000, reads({
+    conflict: { condition: 'distressed', confidence: 70, renovatedProbability: 15, asIsProbability: 75 },
+  }))
+  const cls = out.get('conflict')!
+  assert.equal(cls.classification, 'as_is')
+  assert.equal(cls.method, 'conflict_arbiter')
+}
+
+// 9. Same shape but the model backs the renovated story → stays.
+{
+  const pool = [
+    renovated(),
+    comp('conflict', 310000, 1500, { avmValue: 240000 }),
+  ]
+  const out = classifyCompsByEvidence(pool, 240000, reads({
+    conflict: { condition: 'distressed', confidence: 70, renovatedProbability: 80, asIsProbability: 15 },
+  }))
+  assert.equal(out.get('conflict')!.classification, 'after_renovation')
+}
+
+// 10. No probability scores → neither story proved → transitional.
+{
+  const pool = [
+    renovated(),
+    comp('conflict', 310000, 1500, { avmValue: 240000 }),
+  ]
+  const out = classifyCompsByEvidence(pool, 240000, reads({
+    conflict: { condition: 'distressed', confidence: 70 },
+  }))
+  assert.equal(out.get('conflict')!.classification, 'transitional')
+}
+
+// 11. Flip chain is a transaction event — exempt from arbitration even
+//     when vision reads distressed.
+{
+  const pool = [
+    comp('flipper', 300000, 1500, { flip: { priorSalePrice: 200000, daysHeld: 90, gainPct: 50 } }),
+  ]
+  const out = classifyCompsByEvidence(pool, 240000, {
+    flipper: { condition: 'distressed', confidence: 80, renovatedProbability: 10, asIsProbability: 85 },
+  })
+  assert.equal(out.get('flipper')!.classification, 'after_renovation')
+  assert.equal(out.get('flipper')!.method, 'evidence_flip_chain')
+}
+
+// 12. One-tier disagreement is NOT a conflict — adjacent labels stand.
+{
+  const pool = [
+    renovated(),
+    comp('adj', 310000, 1500, { avmValue: 240000 }),
+  ]
+  const out = classifyCompsByEvidence(pool, 240000, reads({
+    adj: { condition: 'dated', confidence: 70, renovatedProbability: 15, asIsProbability: 75 },
+  }))
+  assert.equal(out.get('adj')!.classification, 'after_renovation')
+}
+console.log('conflict-arbiter: Clef-prob arbitration, flip exemption, adjacent pass-through')

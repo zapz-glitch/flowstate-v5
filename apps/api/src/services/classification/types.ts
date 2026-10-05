@@ -31,6 +31,9 @@ export type ClassificationMethod =
   | 'evidence_avm'
   | 'evidence_distressed'
   | 'evidence_market'
+  // Price/vision conflict arbitration — the model's own probabilities
+  // decide which pole is true
+  | 'conflict_arbiter'
 
 /**
  * Result of photo-based analysis for classification
