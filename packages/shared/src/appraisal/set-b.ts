@@ -256,6 +256,54 @@ export function evaluateB(
     }
   }
 
+  // T1b — near-miss rescue + market-conditions adjustment. Same-pocket
+  // comps (same tract/BG, no road) killed ONLY on sale-age or label
+  // mismatches come back — with their price time-adjusted to the pocket's
+  // own measured trend, the way an appraiser does it. Sales ≤365d
+  // eligible; the trend is the OLS $/sf-per-month slope over cleaned
+  // same-tract sales; unmeasurable trend → −10% stale haircut past 180d.
+  {
+    const SOFT_KILL = /sale age|sale too old|geo scope|subdivision|neighborhood/i
+    const refMs = Math.max(...items.map((c) => Date.parse(c.saleDate ?? '') || 0)) || Date.now()
+    const daysOld = (d?: string | null) => d ? (refMs - Date.parse(d)) / 864e5 : null
+    const trendPts = items
+      .filter((c) => c.salePrice && c.squareFeet && c.saleDate &&
+        c.censusTract && c.censusTract === subject.censusTract &&
+        bTierOf(c) !== 'as_is' && !bIsUnfit(c))
+      .map((c) => ({ x: daysOld(c.saleDate)! / 30.44, y: bPpsfOf(c)! }))
+      .sort((a, b) => a.x - b.x)
+    let trendPerMo: number | null = null
+    if (trendPts.length >= 5 && trendPts[trendPts.length - 1].x - trendPts[0].x >= 3) {
+      const slope = olsSlope(trendPts)
+      const med = trendPts[Math.floor(trendPts.length / 2)].y
+      if (slope != null && med > 0) trendPerMo = -slope / med // +/− % per month of sale age
+    }
+    if (trendPerMo != null) flags.push(`pocket trend: ${trendPerMo >= 0 ? '+' : '−'}${Math.abs(trendPerMo * 100).toFixed(1)}%/mo over ${trendPts.length} tract sale(s)`)
+
+    const rescued = items.filter((c) => {
+      if (pool.includes(c)) return false
+      const reasons = c.disableReasons ?? []
+      if (!reasons.length || !reasons.every((r) => SOFT_KILL.test(r))) return false
+      if (!c.salePrice || !c.squareFeet || !c.saleDate) return false
+      if (c.crossesMajorRoad) return false
+      const samePocket = c.sameBlockGroup === true ||
+        (!!subject.censusTract && c.censusTract === subject.censusTract)
+      if (!samePocket) return false
+      const age = daysOld(c.saleDate)!
+      if (age > 365) return false
+      return true
+    })
+    for (const c of rescued) {
+      const ageMo = daysOld(c.saleDate)! / 30.44
+      let factor = 1
+      if (trendPerMo != null) factor = Math.max(0.9, Math.min(1.1, 1 + trendPerMo * ageMo))
+      else if (ageMo > 6) factor = 0.9
+      c.adjustedPrice = Math.round(c.salePrice! * factor)
+      flags.push(`${c.address}: rescued — ${(c.disableReasons ?? []).join('; ').slice(0, 60)}; time-adj ${factor >= 1 ? '+' : '−'}${Math.abs((1 - factor) * 100).toFixed(0)}%`)
+    }
+    if (rescued.length) pool = [...pool, ...rescued]
+  }
+
   // T2 — pocket tiers. The neighborhood's own sales classify themselves:
   // pool same-scope sales (tract first, then block group, then
   // neighborhood name), clean them — as-is/bounded-low and stale or
