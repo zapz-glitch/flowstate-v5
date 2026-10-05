@@ -200,3 +200,16 @@ the work. It is a caution, not a fault.
 | 3709 Charlotte Dr, Rex, GA 30273 | $252,975 | 5857 Mistyview Dr, $242,300 | turn 3, tract | 55s |
 
 Both graded weak for size. Neither is checked against a known right answer.
+
+## To do — after address fine-tuning (not started)
+
+Asked for by the product engineer on 2026-10-05. Do these only after the
+address tuning pass is finished.
+
+1. **"Tear down" means full gut.** When a listing description says tear
+   down (Clef condition read), classify the condition as needing a full gut
+   renovation, and set the rehab level to Full Gut.
+2. **Assess lot value alongside ARV.** Estimate the lot's value for the
+   subject and show it in the subject property box. Keep it separate from
+   the ARV: lot value is its own number, not an input that changes the ARV
+   unless a rule is approved for that.
