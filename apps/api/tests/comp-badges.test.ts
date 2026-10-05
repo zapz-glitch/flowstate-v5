@@ -33,7 +33,7 @@ const opts = { subjectCensusTract: 'T1', subjectPpsfMedians: { SD: 200 } }
   assert.equal(b.pocket, 'in')
   assert.equal(b.trust, 'verified')
   assert.deepEqual(b.widenedOn, [])
-  assert.deepEqual(b.checks, { pocket: true, size: true, fresh: true, priceFit: true })
+  assert.deepEqual(b.checks, { pocket: true, size: true, fresh: true, priceFit: true, marketFit: null })
 }
 
 // out-of-pocket, same market → 'equal'; pricier → 'above'
@@ -54,6 +54,23 @@ const opts = { subjectCensusTract: 'T1', subjectPpsfMedians: { SD: 200 } }
   assert.equal(b2.trust, 'partial')
   const b3 = compBadges(comp({ evidenceVerification: null }), opts)
   assert.equal(b3.trust, null)
+}
+
+// sale age and pocket-price fit stay separate on the badge contract
+{
+  const recentCheap = compBadges(comp({
+    evidenceVerification: { staleness: 'current', saleAgeDays: 30, marketFit: 'below_pocket', priceCheck: 'corroborated' },
+  }), opts)
+  assert.equal(recentCheap.checks.fresh, true)
+  assert.equal(recentCheap.checks.marketFit, false)
+  assert.equal(recentCheap.trust, 'unverified')
+
+  const oldInRange = compBadges(comp({
+    evidenceVerification: { staleness: 'stale', saleAgeDays: 220, marketFit: 'in_range', priceCheck: 'corroborated' },
+  }), opts)
+  assert.equal(oldInRange.checks.fresh, false)
+  assert.equal(oldInRange.checks.marketFit, true)
+  assert.equal(oldInRange.trust, 'unverified')
 }
 
 // rescued comp names its widened filter; strict-comp stays []

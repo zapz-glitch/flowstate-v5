@@ -297,7 +297,8 @@ export interface NormalizedComparable {
   /** Redfin MLS property-details enrichment — shadow display evidence */
   listingDetails?: import('../redfin-details').RedfinPropertyDetails | null
   /** ARV evidence verification — price cross-check (sale vs own AVM) +
-   *  staleness (sale $/sf vs current pocket median). Shadow evidence:
+   *  age staleness, own-AVM price check, and pocket market fit. Shadow
+   *  evidence:
    *  flags quality, never gates. */
   evidenceVerification?: import('../appraisal/verification').CompEvidenceVerification | null
 

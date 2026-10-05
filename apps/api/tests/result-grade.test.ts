@@ -13,7 +13,7 @@ const verifiedDriver = {
   comp: {
     salePrice: 300000,
     squareFeet: 1200,
-    evidenceVerification: { staleness: 'fresh', priceCheck: 'corroborated' },
+    evidenceVerification: { staleness: 'current', priceCheck: 'corroborated' },
   },
 }
 const clean = { source: 'T0 anchor', conf: 'medium' as const, drivers: [verifiedDriver, verifiedDriver, verifiedDriver], flags: [], arv: 300000 }
@@ -50,7 +50,7 @@ const clean = { source: 'T0 anchor', conf: 'medium' as const, drivers: [verified
     comp: {
       salePrice: 300000,
       squareFeet: 1200,
-      evidenceVerification: { staleness: 'stale', priceCheck: 'corroborated' },
+      evidenceVerification: { staleness: 'stale', saleAgeDays: 220, priceCheck: 'corroborated' },
     },
   }
   const g = gradeResult({ source: 'T0 anchor', conf: 'medium', drivers: [stale, stale, stale], flags: [], arv: 300000 }, 'none', ['attempt 1 — verified'])

@@ -444,6 +444,7 @@ export async function performAnalysis(
       filters.push({ ...defaultFilter })
     }
   }
+  const preferredSaleAgeDays = filters.find((f) => f.type === 'sale_age')?.value ?? 180
 
   const steps: ReportStep[] = []
   const fallbacksUsed: string[] = []
@@ -1152,8 +1153,9 @@ export async function performAnalysis(
   }
 
   // ── ARV evidence verification — shadow stamps on every comp ─────────────
-  // Price cross-check (sale vs own AVM) + staleness (sale $/sf vs current
-  // pocket median). Flags evidence quality; never gates comp selection.
+  // Price cross-check (sale vs own AVM), sale age vs the preferred window,
+  // and market fit vs current pocket $/sf. Flags evidence quality; never
+  // gates comp selection.
   {
     // Pool-derived pocket reference: median $/sf of same-tract comps IS the
     // current pocket pricing — used when provider scope medians are absent.
@@ -1165,7 +1167,7 @@ export async function performAnalysis(
     const poolRefPpsf = tractPpsfs.length >= 3 ? tractPpsfs[Math.floor(tractPpsfs.length / 2)] : null
     let verified = 0, stale = 0, divergent = 0
     for (const comp of appraisalResult.comparables) {
-      comp.evidenceVerification = verifyCompEvidence(bundle.property, comp, poolRefPpsf)
+      comp.evidenceVerification = verifyCompEvidence(bundle.property, comp, poolRefPpsf, preferredSaleAgeDays)
       if (comp.evidenceVerification.priceCheck === 'corroborated') verified++
       if (comp.evidenceVerification.staleness === 'stale') stale++
       if (comp.evidenceVerification.priceCheck === 'divergent') divergent++
@@ -1264,7 +1266,7 @@ export async function performAnalysis(
         .sort((a, b) => a - b)
       const ref = tractPpsfs.length >= 3 ? tractPpsfs[Math.floor(tractPpsfs.length / 2)] : null
       for (const comp of appraisalResult.comparables) {
-        comp.evidenceVerification = verifyCompEvidence(bundle.property, comp, ref)
+        comp.evidenceVerification = verifyCompEvidence(bundle.property, comp, ref, preferredSaleAgeDays)
       }
     }
 

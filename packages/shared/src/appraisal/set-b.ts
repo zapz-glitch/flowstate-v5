@@ -86,7 +86,12 @@ export interface BComp {
     summary?: string | null
   } | null
   evidenceVerification?: {
+    /** Age only — stale means outside the preferred sale-age window. */
     staleness?: string | null
+    saleAgeDays?: number | null
+    preferredSaleAgeDays?: number | null
+    /** Price fit against the comp's current pocket — separate from age. */
+    marketFit?: string | null
     priceCheck?: string | null
     flags?: string[] | null
   } | null
@@ -156,10 +161,20 @@ const bExplainsPremium = (c: BComp) =>
   bCondTier(c) === 'premium' ||
   bCondTier(c) === 'renovated'
 
-const bIsUnfit = (c: BComp) =>
-  c.evidenceVerification?.staleness === 'stale' ||
-  (c.evidenceVerification?.staleness === 'above_pocket' && !bExplainsPremium(c)) ||
-  c.evidenceVerification?.priceCheck === 'divergent'
+const bIsUnfit = (c: BComp) => {
+  const evidence = c.evidenceVerification
+  const staleByAge = evidence?.staleness === 'stale' && evidence.saleAgeDays != null
+  const marketFit = evidence?.marketFit ??
+    // Legacy records used staleness for pocket-price fit. Preserve their
+    // exclusion while keeping the labels separate going forward.
+    (evidence?.staleness === 'above_pocket' ? 'above_pocket'
+      : evidence?.staleness === 'stale' ? 'below_pocket'
+        : null)
+  return staleByAge ||
+    marketFit === 'below_pocket' ||
+    (marketFit === 'above_pocket' && !bExplainsPremium(c)) ||
+    evidence?.priceCheck === 'divergent'
+}
 
 const bLotSf = (x: { lotSizeSquareFeet?: number | null; lotSizeAcres?: number | null }) =>
   x.lotSizeSquareFeet ?? (x.lotSizeAcres ? x.lotSizeAcres * 43560 : null)

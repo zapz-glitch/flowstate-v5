@@ -12,7 +12,7 @@
  *   pocket    — in the subject's census pocket (tract/block-group), or
  *               outside it priced equal/above/below (±15% scope $/sf)
  *   trust     — verified | partial | unverified — the run's stamps
- *   checks    — the four scannable passes: pocket · size · fresh · price-fit
+ *   checks    — pocket · size · fresh · price-fit · market-fit
  *   widenedOn — which relaxed rules admitted the comp (empty = strict)
  */
 
@@ -29,6 +29,7 @@ export interface CompBadges {
     size: boolean | null
     fresh: boolean | null
     priceFit: boolean | null
+    marketFit: boolean | null
   }
   widenedOn: string[]
 }
@@ -68,13 +69,16 @@ interface BadgeComp {
   evidenceVerification?: {
     priceCheck?: string | null
     staleness?: string | null
+    saleAgeDays?: number | null
+    marketFit?: string | null
     pocketRatio?: number | null
     flags?: string[] | null
   } | null
 }
 
 const PASS_VERDICTS = new Set(['corroborated', 'plausible', 'market', 'market_verified'])
-const FAIL_VERDICTS = new Set(['divergent', 'above_pocket', 'suspect'])
+const FAIL_VERDICTS = new Set(['divergent', 'suspect'])
+const FAIL_MARKET_FIT = new Set(['below_pocket'])
 
 export function compBadges(
   comp: BadgeComp,
@@ -121,12 +125,17 @@ export function compBadges(
   const ev = comp.evidenceVerification
   const priceVerdict = ev?.priceCheck ?? null
   const stale = ev?.staleness ?? null
+  const staleByAge = stale === 'stale' && ev?.saleAgeDays != null
+  const marketFit = ev?.marketFit ??
+    // Legacy records stored pocket-price fit in staleness.
+    (stale === 'above_pocket' ? 'above_pocket' : stale === 'stale' ? 'below_pocket' : null)
+  const premiumExplained = opts.classification === 'after_renovation' || opts.condition?.condition === 'renovated'
   let trust: CompBadges['trust'] = null
   if (ev) {
     const failedPrice = priceVerdict != null && FAIL_VERDICTS.has(priceVerdict)
-    const failedStale = stale === 'stale'
-    if (failedPrice || failedStale) trust = 'unverified'
-    else if (priceVerdict != null && PASS_VERDICTS.has(priceVerdict) && stale === 'current') trust = 'verified'
+    const failedMarket = FAIL_MARKET_FIT.has(marketFit ?? '') || (marketFit === 'above_pocket' && !premiumExplained)
+    if (failedPrice || failedMarket || staleByAge) trust = 'unverified'
+    else if (priceVerdict != null && PASS_VERDICTS.has(priceVerdict) && stale === 'current' && (marketFit == null || marketFit === 'in_range')) trust = 'verified'
     else trust = 'partial'
   }
 
@@ -144,10 +153,11 @@ export function compBadges(
       // pocket = the geography checks as a group (any geo label passing counts)
       pocket: passed('subdivision') === true || passed('geo_scope') === true || pocketVia != null,
       size: passed('sqft_diff'),
-      fresh: passed('sale_age'),
+      fresh: ev == null ? passed('sale_age') : stale === 'current' ? true : ev.saleAgeDays != null ? false : passed('sale_age'),
       // 'unverified' = no AVM to corroborate against — not a pass, not a
       // fail; only a real corroborated/plausible verdict counts green.
       priceFit: priceVerdict == null ? null : PASS_VERDICTS.has(priceVerdict) ? true : FAIL_VERDICTS.has(priceVerdict) ? false : null,
+      marketFit: marketFit == null ? null : marketFit === 'in_range' || (marketFit === 'above_pocket' && premiumExplained),
     },
     widenedOn,
   }

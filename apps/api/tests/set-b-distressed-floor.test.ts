@@ -35,7 +35,7 @@ const comp = (address: string, over: Record<string, unknown> = {}) => ({
 const francis = comp('1854 Francis Ave NW', {
   salePrice: 1425000, squareFeet: 999, distanceMiles: 0.7,
   curbAppeal: { condition: 'distressed', confidence: 30, summary: 'Dated (0.8/4) · tier:investor' },
-  evidenceVerification: { staleness: 'above_pocket', priceCheck: 'unverified' },
+  evidenceVerification: { staleness: 'current', saleAgeDays: 20, marketFit: 'above_pocket', priceCheck: 'unverified' },
 })
 
 {
@@ -74,7 +74,7 @@ console.log('set-b-distressed-floor: above_pocket and distressed reads are floor
     salePrice: 450000,
     classification: { type: 'after_renovation' },
     curbAppeal: { condition: 'renovated', confidence: 85 },
-    evidenceVerification: { staleness: 'above_pocket', priceCheck: 'unverified' },
+    evidenceVerification: { staleness: 'current', saleAgeDays: 20, marketFit: 'above_pocket', priceCheck: 'unverified' },
   })
   const res = evaluateB(subject, [renovated])
   const drivers = (res.drivers ?? []).map((d) => d.comp.address)
