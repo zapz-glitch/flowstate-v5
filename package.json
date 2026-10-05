@@ -18,6 +18,7 @@
     "db:migrate:local": "turbo db:migrate:local",
     "db:migrate:remote": "turbo db:migrate:remote",
     "test:e2e": "node scripts/e2e-analyze.mjs",
+    "test:e2e:ui": "e2e run",
     "replay": "tsx scripts/replay.mts",
     "replay:all": "tsx scripts/replay.mts --all",
     "replay:strict": "tsx scripts/replay.mts --all --strict --report replay-report.json",
@@ -25,6 +26,7 @@
     "dev:check": "node scripts/dev-check.mjs",
     "audit:snapshots": "tsx scripts/audit-run-records.mts fixtures/snapshots/*.json fixtures/failures/*.json --strict",
     "eval": "node scripts/eval-address.mjs"
+
   },
   "devDependencies": {
     "eslint": "10.10.0",
@@ -33,7 +35,12 @@
     "tsx": "4.23.13",
     "esbuild": "0.28.2",
     "turbo": "^2.8.20",
-    "typescript": "^5.5.0"
+    "typescript": "^5.5.0",
+    "e2e": "^0.15.1",
+    "@e2e-dev/web": "^0.11.1",
+    "playwright": "^1.63.0",
+    "ai": "^7.0.0",
+    "@ai-sdk/openai": "^4.0.0"
   },
   "packageManager": "npm@10.2.0",
   "overrides": {

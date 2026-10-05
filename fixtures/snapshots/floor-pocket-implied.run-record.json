@@ -1,8 +1,8 @@
 {
   "recordId": "fixture-floor-pocket-implied",
   "jobId": "fixture-floor-pocket-implied",
-  "payloadHash": "80542c4bdb10d862a592682b8552d35f33cdb98ce8f3988a63f4b5c2fc539fb0",
-  "exportedAt": "2026-10-05T00:00:00.000Z",
+  "payloadHash": "c86f685f32d2c43202b07425835cf760da6191c3a35ead3ef50bf8cd3ad9a71c",
+  "exportedAt": "2026-10-05T14:10:19.328Z",
   "payload": {
     "recordVersion": "run-record.v1",
     "jobId": "fixture-floor-pocket-implied",
@@ -28,7 +28,7 @@
       "clip": "fixture-floor-pocket-implied"
     },
     "rules": {
-      "harnessVersion": "og-2026.10.05.1",
+      "harnessVersion": "og-2026.10.05.6",
       "pipelineVersion": "5.0",
       "valuationDate": "2026-10-05",
       "models": {
@@ -297,18 +297,160 @@
           "result": {
             "arv": 200000,
             "contribs": [],
-            "drivers": [],
             "bracket": "ok",
             "conf": "low",
-            "source": "T2 pocket-implied",
+            "source": "T2 pocket-tiers [tract]",
+            "drivers": [
+              {
+                "comp": {
+                  "address": "f1 Fixture Ct",
+                  "isEnabled": false,
+                  "salePrice": 180000,
+                  "saleDate": "2026-08-01",
+                  "squareFeet": 1000,
+                  "pricePerSqft": 180,
+                  "adjustedPrice": 180000,
+                  "distanceMiles": 0.2,
+                  "sameBlockGroup": true,
+                  "censusTract": "T-1",
+                  "subdivision": "Fixture Estates",
+                  "neighborhoodName": "Fixture Estates",
+                  "yearBuilt": 1980,
+                  "lotSizeSquareFeet": 8000,
+                  "propertyType": "Single Family Residence",
+                  "crossesMajorRoad": false,
+                  "classification": {
+                    "type": "arv"
+                  },
+                  "curbAppeal": {
+                    "condition": "renovated",
+                    "confidence": 80
+                  },
+                  "evidenceVerification": {
+                    "staleness": "current",
+                    "saleAgeDays": 30,
+                    "preferredSaleAgeDays": 180,
+                    "marketFit": "in_range",
+                    "transactionCheck": "clean",
+                    "priceCheck": "plausible",
+                    "flags": []
+                  },
+                  "appraisalRules": {
+                    "totalAdjustment": 0
+                  }
+                },
+                "contrib": 180000,
+                "weight": 0,
+                "tier": "arv"
+              },
+              {
+                "comp": {
+                  "address": "f2 Fixture Ct",
+                  "isEnabled": false,
+                  "salePrice": 200000,
+                  "saleDate": "2026-08-01",
+                  "squareFeet": 1000,
+                  "pricePerSqft": 200,
+                  "adjustedPrice": 200000,
+                  "distanceMiles": 0.2,
+                  "sameBlockGroup": true,
+                  "censusTract": "T-1",
+                  "subdivision": "Fixture Estates",
+                  "neighborhoodName": "Fixture Estates",
+                  "yearBuilt": 1980,
+                  "lotSizeSquareFeet": 8000,
+                  "propertyType": "Single Family Residence",
+                  "crossesMajorRoad": false,
+                  "classification": {
+                    "type": "arv"
+                  },
+                  "curbAppeal": {
+                    "condition": "renovated",
+                    "confidence": 80
+                  },
+                  "evidenceVerification": {
+                    "staleness": "current",
+                    "saleAgeDays": 30,
+                    "preferredSaleAgeDays": 180,
+                    "marketFit": "in_range",
+                    "transactionCheck": "clean",
+                    "priceCheck": "plausible",
+                    "flags": []
+                  },
+                  "appraisalRules": {
+                    "totalAdjustment": 0
+                  }
+                },
+                "contrib": 200000,
+                "weight": 0,
+                "tier": "arv"
+              },
+              {
+                "comp": {
+                  "address": "f3 Fixture Ct",
+                  "isEnabled": false,
+                  "salePrice": 220000,
+                  "saleDate": "2026-08-01",
+                  "squareFeet": 1000,
+                  "pricePerSqft": 220,
+                  "adjustedPrice": 220000,
+                  "distanceMiles": 0.2,
+                  "sameBlockGroup": true,
+                  "censusTract": "T-1",
+                  "subdivision": "Fixture Estates",
+                  "neighborhoodName": "Fixture Estates",
+                  "yearBuilt": 1980,
+                  "lotSizeSquareFeet": 8000,
+                  "propertyType": "Single Family Residence",
+                  "crossesMajorRoad": false,
+                  "classification": {
+                    "type": "arv"
+                  },
+                  "curbAppeal": {
+                    "condition": "renovated",
+                    "confidence": 80
+                  },
+                  "evidenceVerification": {
+                    "staleness": "current",
+                    "saleAgeDays": 30,
+                    "preferredSaleAgeDays": 180,
+                    "marketFit": "in_range",
+                    "transactionCheck": "clean",
+                    "priceCheck": "plausible",
+                    "flags": []
+                  },
+                  "appraisalRules": {
+                    "totalAdjustment": 0
+                  }
+                },
+                "contrib": 220000,
+                "weight": 0,
+                "tier": "arv"
+              }
+            ],
             "flags": [
-              "T2 pocket-implied — 3 same-tract sales, median $200/sf"
+              "f3 Fixture Ct: evicted — $220/sf vs band median $200/sf (>10%)",
+              "T2 pocket-tiers [tract] — 3 cleaned sale(s) — renovated $200/sf"
+            ],
+            "decisions": [
+              {
+                "compAddress": "f3 Fixture Ct",
+                "stage": "band",
+                "rule": "tight-band",
+                "verdict": "evicted",
+                "value": 220,
+                "note": "vs band median $200/sf"
+              }
             ]
           },
           "checks": [
             {
-              "ruleId": "setb.t2.pocket_implied",
-              "message": "T2 pocket-implied — 3 same-tract sales, median $200/sf"
+              "ruleId": "setb.trace_flag",
+              "message": "f3 Fixture Ct: evicted — $220/sf vs band median $200/sf (>10%)"
+            },
+            {
+              "ruleId": "setb.trace_flag",
+              "message": "T2 pocket-tiers [tract] — 3 cleaned sale(s) — renovated $200/sf"
             }
           ],
           "verificationFailures": []
@@ -451,18 +593,160 @@
         "result": {
           "arv": 200000,
           "contribs": [],
-          "drivers": [],
           "bracket": "ok",
           "conf": "low",
-          "source": "T2 pocket-implied",
+          "source": "T2 pocket-tiers [tract]",
+          "drivers": [
+            {
+              "comp": {
+                "address": "f1 Fixture Ct",
+                "isEnabled": false,
+                "salePrice": 180000,
+                "saleDate": "2026-08-01",
+                "squareFeet": 1000,
+                "pricePerSqft": 180,
+                "adjustedPrice": 180000,
+                "distanceMiles": 0.2,
+                "sameBlockGroup": true,
+                "censusTract": "T-1",
+                "subdivision": "Fixture Estates",
+                "neighborhoodName": "Fixture Estates",
+                "yearBuilt": 1980,
+                "lotSizeSquareFeet": 8000,
+                "propertyType": "Single Family Residence",
+                "crossesMajorRoad": false,
+                "classification": {
+                  "type": "arv"
+                },
+                "curbAppeal": {
+                  "condition": "renovated",
+                  "confidence": 80
+                },
+                "evidenceVerification": {
+                  "staleness": "current",
+                  "saleAgeDays": 30,
+                  "preferredSaleAgeDays": 180,
+                  "marketFit": "in_range",
+                  "transactionCheck": "clean",
+                  "priceCheck": "plausible",
+                  "flags": []
+                },
+                "appraisalRules": {
+                  "totalAdjustment": 0
+                }
+              },
+              "contrib": 180000,
+              "weight": 0,
+              "tier": "arv"
+            },
+            {
+              "comp": {
+                "address": "f2 Fixture Ct",
+                "isEnabled": false,
+                "salePrice": 200000,
+                "saleDate": "2026-08-01",
+                "squareFeet": 1000,
+                "pricePerSqft": 200,
+                "adjustedPrice": 200000,
+                "distanceMiles": 0.2,
+                "sameBlockGroup": true,
+                "censusTract": "T-1",
+                "subdivision": "Fixture Estates",
+                "neighborhoodName": "Fixture Estates",
+                "yearBuilt": 1980,
+                "lotSizeSquareFeet": 8000,
+                "propertyType": "Single Family Residence",
+                "crossesMajorRoad": false,
+                "classification": {
+                  "type": "arv"
+                },
+                "curbAppeal": {
+                  "condition": "renovated",
+                  "confidence": 80
+                },
+                "evidenceVerification": {
+                  "staleness": "current",
+                  "saleAgeDays": 30,
+                  "preferredSaleAgeDays": 180,
+                  "marketFit": "in_range",
+                  "transactionCheck": "clean",
+                  "priceCheck": "plausible",
+                  "flags": []
+                },
+                "appraisalRules": {
+                  "totalAdjustment": 0
+                }
+              },
+              "contrib": 200000,
+              "weight": 0,
+              "tier": "arv"
+            },
+            {
+              "comp": {
+                "address": "f3 Fixture Ct",
+                "isEnabled": false,
+                "salePrice": 220000,
+                "saleDate": "2026-08-01",
+                "squareFeet": 1000,
+                "pricePerSqft": 220,
+                "adjustedPrice": 220000,
+                "distanceMiles": 0.2,
+                "sameBlockGroup": true,
+                "censusTract": "T-1",
+                "subdivision": "Fixture Estates",
+                "neighborhoodName": "Fixture Estates",
+                "yearBuilt": 1980,
+                "lotSizeSquareFeet": 8000,
+                "propertyType": "Single Family Residence",
+                "crossesMajorRoad": false,
+                "classification": {
+                  "type": "arv"
+                },
+                "curbAppeal": {
+                  "condition": "renovated",
+                  "confidence": 80
+                },
+                "evidenceVerification": {
+                  "staleness": "current",
+                  "saleAgeDays": 30,
+                  "preferredSaleAgeDays": 180,
+                  "marketFit": "in_range",
+                  "transactionCheck": "clean",
+                  "priceCheck": "plausible",
+                  "flags": []
+                },
+                "appraisalRules": {
+                  "totalAdjustment": 0
+                }
+              },
+              "contrib": 220000,
+              "weight": 0,
+              "tier": "arv"
+            }
+          ],
           "flags": [
-            "T2 pocket-implied — 3 same-tract sales, median $200/sf"
+            "f3 Fixture Ct: evicted — $220/sf vs band median $200/sf (>10%)",
+            "T2 pocket-tiers [tract] — 3 cleaned sale(s) — renovated $200/sf"
+          ],
+          "decisions": [
+            {
+              "compAddress": "f3 Fixture Ct",
+              "stage": "band",
+              "rule": "tight-band",
+              "verdict": "evicted",
+              "value": 220,
+              "note": "vs band median $200/sf"
+            }
           ]
         },
         "checks": [
           {
-            "ruleId": "setb.t2.pocket_implied",
-            "message": "T2 pocket-implied — 3 same-tract sales, median $200/sf"
+            "ruleId": "setb.trace_flag",
+            "message": "f3 Fixture Ct: evicted — $220/sf vs band median $200/sf (>10%)"
+          },
+          {
+            "ruleId": "setb.trace_flag",
+            "message": "T2 pocket-tiers [tract] — 3 cleaned sale(s) — renovated $200/sf"
           }
         ],
         "verificationFailures": []
@@ -481,29 +765,172 @@
         "valuation": {
           "arv": 200000,
           "arvB": 200000,
-          "resultGrade": "floor",
+          "resultGrade": "verified",
           "processGrade": "clean",
           "bMechanics": {
             "arv": 200000,
             "contribs": [],
-            "drivers": [],
             "bracket": "ok",
             "conf": "low",
-            "source": "T2 pocket-implied",
-            "flags": [
-              "T2 pocket-implied — 3 same-tract sales, median $200/sf"
+            "source": "T2 pocket-tiers [tract]",
+            "drivers": [
+              {
+                "comp": {
+                  "address": "f1 Fixture Ct",
+                  "isEnabled": false,
+                  "salePrice": 180000,
+                  "saleDate": "2026-08-01",
+                  "squareFeet": 1000,
+                  "pricePerSqft": 180,
+                  "adjustedPrice": 180000,
+                  "distanceMiles": 0.2,
+                  "sameBlockGroup": true,
+                  "censusTract": "T-1",
+                  "subdivision": "Fixture Estates",
+                  "neighborhoodName": "Fixture Estates",
+                  "yearBuilt": 1980,
+                  "lotSizeSquareFeet": 8000,
+                  "propertyType": "Single Family Residence",
+                  "crossesMajorRoad": false,
+                  "classification": {
+                    "type": "arv"
+                  },
+                  "curbAppeal": {
+                    "condition": "renovated",
+                    "confidence": 80
+                  },
+                  "evidenceVerification": {
+                    "staleness": "current",
+                    "saleAgeDays": 30,
+                    "preferredSaleAgeDays": 180,
+                    "marketFit": "in_range",
+                    "transactionCheck": "clean",
+                    "priceCheck": "plausible",
+                    "flags": []
+                  },
+                  "appraisalRules": {
+                    "totalAdjustment": 0
+                  }
+                },
+                "contrib": 180000,
+                "weight": 0,
+                "tier": "arv"
+              },
+              {
+                "comp": {
+                  "address": "f2 Fixture Ct",
+                  "isEnabled": false,
+                  "salePrice": 200000,
+                  "saleDate": "2026-08-01",
+                  "squareFeet": 1000,
+                  "pricePerSqft": 200,
+                  "adjustedPrice": 200000,
+                  "distanceMiles": 0.2,
+                  "sameBlockGroup": true,
+                  "censusTract": "T-1",
+                  "subdivision": "Fixture Estates",
+                  "neighborhoodName": "Fixture Estates",
+                  "yearBuilt": 1980,
+                  "lotSizeSquareFeet": 8000,
+                  "propertyType": "Single Family Residence",
+                  "crossesMajorRoad": false,
+                  "classification": {
+                    "type": "arv"
+                  },
+                  "curbAppeal": {
+                    "condition": "renovated",
+                    "confidence": 80
+                  },
+                  "evidenceVerification": {
+                    "staleness": "current",
+                    "saleAgeDays": 30,
+                    "preferredSaleAgeDays": 180,
+                    "marketFit": "in_range",
+                    "transactionCheck": "clean",
+                    "priceCheck": "plausible",
+                    "flags": []
+                  },
+                  "appraisalRules": {
+                    "totalAdjustment": 0
+                  }
+                },
+                "contrib": 200000,
+                "weight": 0,
+                "tier": "arv"
+              },
+              {
+                "comp": {
+                  "address": "f3 Fixture Ct",
+                  "isEnabled": false,
+                  "salePrice": 220000,
+                  "saleDate": "2026-08-01",
+                  "squareFeet": 1000,
+                  "pricePerSqft": 220,
+                  "adjustedPrice": 220000,
+                  "distanceMiles": 0.2,
+                  "sameBlockGroup": true,
+                  "censusTract": "T-1",
+                  "subdivision": "Fixture Estates",
+                  "neighborhoodName": "Fixture Estates",
+                  "yearBuilt": 1980,
+                  "lotSizeSquareFeet": 8000,
+                  "propertyType": "Single Family Residence",
+                  "crossesMajorRoad": false,
+                  "classification": {
+                    "type": "arv"
+                  },
+                  "curbAppeal": {
+                    "condition": "renovated",
+                    "confidence": 80
+                  },
+                  "evidenceVerification": {
+                    "staleness": "current",
+                    "saleAgeDays": 30,
+                    "preferredSaleAgeDays": 180,
+                    "marketFit": "in_range",
+                    "transactionCheck": "clean",
+                    "priceCheck": "plausible",
+                    "flags": []
+                  },
+                  "appraisalRules": {
+                    "totalAdjustment": 0
+                  }
+                },
+                "contrib": 220000,
+                "weight": 0,
+                "tier": "arv"
+              }
             ],
-            "harnessVersion": "og-2026.10.05.1",
+            "flags": [
+              "f3 Fixture Ct: evicted — $220/sf vs band median $200/sf (>10%)",
+              "T2 pocket-tiers [tract] — 3 cleaned sale(s) — renovated $200/sf"
+            ],
+            "decisions": [
+              {
+                "compAddress": "f3 Fixture Ct",
+                "stage": "band",
+                "rule": "tight-band",
+                "verdict": "evicted",
+                "value": 220,
+                "note": "vs band median $200/sf"
+              }
+            ],
+            "harnessVersion": "og-2026.10.05.6",
             "checks": [
               {
-                "ruleId": "setb.t2.pocket_implied",
-                "message": "T2 pocket-implied — 3 same-tract sales, median $200/sf"
+                "ruleId": "setb.trace_flag",
+                "message": "f3 Fixture Ct: evicted — $220/sf vs band median $200/sf (>10%)"
+              },
+              {
+                "ruleId": "setb.trace_flag",
+                "message": "T2 pocket-tiers [tract] — 3 cleaned sale(s) — renovated $200/sf"
               }
             ],
             "attemptTrail": [
               "attempt 1 — floor"
             ]
-          }
+          },
+          "statusReason": "Verified · low confidence — supporting evidence has caveats."
         },
         "comps": {
           "total": 3,

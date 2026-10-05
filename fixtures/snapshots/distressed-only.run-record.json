@@ -1,8 +1,8 @@
 {
   "recordId": "fixture-distressed-only",
   "jobId": "fixture-distressed-only",
-  "payloadHash": "69bbdb62200f825a85b1707eb515173c59bb3fa7c1bc8c9ff145829d866333b4",
-  "exportedAt": "2026-10-05T00:00:00.000Z",
+  "payloadHash": "c14ddaaa29c336b3302d4c29ab52efcde83292dc31e175df02ef5e4b0c8788b3",
+  "exportedAt": "2026-10-05T14:10:19.310Z",
   "payload": {
     "recordVersion": "run-record.v1",
     "jobId": "fixture-distressed-only",
@@ -28,7 +28,7 @@
       "clip": "fixture-distressed-only"
     },
     "rules": {
-      "harnessVersion": "og-2026.10.05.1",
+      "harnessVersion": "og-2026.10.05.6",
       "pipelineVersion": "5.0",
       "valuationDate": "2026-10-05",
       "models": {
@@ -278,7 +278,8 @@
                 },
                 "contrib": 80000,
                 "weight": 1,
-                "tier": "as_is"
+                "tier": "as_is",
+                "boundOnly": false
               },
               {
                 "comp": {
@@ -322,7 +323,8 @@
                 },
                 "contrib": 90000,
                 "weight": 1,
-                "tier": "as_is"
+                "tier": "as_is",
+                "boundOnly": false
               }
             ],
             "drivers": [],
@@ -330,7 +332,23 @@
             "conf": "none",
             "source": "T0 anchor",
             "landRateSource": null,
-            "sqftRateSource": null
+            "sqftRateSource": null,
+            "decisions": [
+              {
+                "compAddress": "d1 Fixture Ct",
+                "stage": "pool",
+                "rule": "verification",
+                "verdict": "dropped",
+                "note": "Sale below current pocket"
+              },
+              {
+                "compAddress": "d2 Fixture Ct",
+                "stage": "pool",
+                "rule": "verification",
+                "verdict": "dropped",
+                "note": "Sale below current pocket"
+              }
+            ]
           },
           "checks": [
             {
@@ -500,7 +518,8 @@
               },
               "contrib": 80000,
               "weight": 1,
-              "tier": "as_is"
+              "tier": "as_is",
+              "boundOnly": false
             },
             {
               "comp": {
@@ -544,7 +563,8 @@
               },
               "contrib": 90000,
               "weight": 1,
-              "tier": "as_is"
+              "tier": "as_is",
+              "boundOnly": false
             }
           ],
           "drivers": [],
@@ -552,7 +572,23 @@
           "conf": "none",
           "source": "T0 anchor",
           "landRateSource": null,
-          "sqftRateSource": null
+          "sqftRateSource": null,
+          "decisions": [
+            {
+              "compAddress": "d1 Fixture Ct",
+              "stage": "pool",
+              "rule": "verification",
+              "verdict": "dropped",
+              "note": "Sale below current pocket"
+            },
+            {
+              "compAddress": "d2 Fixture Ct",
+              "stage": "pool",
+              "rule": "verification",
+              "verdict": "dropped",
+              "note": "Sale below current pocket"
+            }
+          ]
         },
         "checks": [
           {
@@ -636,7 +672,8 @@
                 },
                 "contrib": 80000,
                 "weight": 1,
-                "tier": "as_is"
+                "tier": "as_is",
+                "boundOnly": false
               },
               {
                 "comp": {
@@ -680,7 +717,8 @@
                 },
                 "contrib": 90000,
                 "weight": 1,
-                "tier": "as_is"
+                "tier": "as_is",
+                "boundOnly": false
               }
             ],
             "drivers": [],
@@ -689,7 +727,23 @@
             "source": "T0 anchor",
             "landRateSource": null,
             "sqftRateSource": null,
-            "harnessVersion": "og-2026.10.05.1",
+            "decisions": [
+              {
+                "compAddress": "d1 Fixture Ct",
+                "stage": "pool",
+                "rule": "verification",
+                "verdict": "dropped",
+                "note": "Sale below current pocket"
+              },
+              {
+                "compAddress": "d2 Fixture Ct",
+                "stage": "pool",
+                "rule": "verification",
+                "verdict": "dropped",
+                "note": "Sale below current pocket"
+              }
+            ],
+            "harnessVersion": "og-2026.10.05.6",
             "checks": [
               {
                 "ruleId": "evidence.market_fit.below_pocket",
@@ -707,7 +761,8 @@
             "attemptTrail": [
               "attempt 1 — withheld"
             ]
-          }
+          },
+          "statusReason": "Withheld — evidence produced no defensible answer."
         },
         "comps": {
           "total": 2,

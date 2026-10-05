@@ -1,35 +1,87 @@
 {
   "recordId": "79d92cd2-5567-4729-96a6-e384c95764bb",
   "jobId": "job_1791164799786_1ff81119533a41b4",
-  "payloadHash": "b88803d25f448c2077894802a5228d17af460cd071f38e6c025b57cbbe43e09e",
-  "exportedAt": "2026-10-05T04:12:35.231Z",
+  "payloadHash": "6783eb3a3b78fd22c196b56e34b59b920b928d53752371b68815be853ad4cc88",
+  "exportedAt": "2026-10-05T14:10:19.228Z",
   "payload": {
     "attempts": [
       {
         "checks": [
           {
-            "message": "1144 Elaine Dr: verification — Sale at $70/sf is 44% of current pocket $158/sf — below current pocket, verify market fit",
-            "ruleId": "evidence.market_fit.below_pocket"
+            "ruleId": "setb.trace_flag",
+            "message": "1620 Rock Cut Rd: rescued — Geo scope mismatch: city \"Conley\" ≠ \"Forest Park-Morrow\"; time-adj +0%"
           },
           {
-            "message": "1671 Lamont Ave: verification — No comp AVM — sale price uncorroborated; Sale is 315 days old — outside preferred 207-day ",
-            "ruleId": "evidence.sale_age.stale"
+            "ruleId": "setb.trace_flag",
+            "message": "1593 Jolly Green Ct: rescued — Geo scope mismatch: neighborhood \"Jolly Green Forest\" ≠ \"Sco; time-adj +0%"
           },
           {
-            "message": "4323 Edinburgh Way: verification — No comp AVM — sale price uncorroborated; Sale is 371 days old — outside preferred 207-day ",
-            "ruleId": "evidence.sale_age.stale"
+            "ruleId": "setb.trace_flag",
+            "message": "2006 Winmar Ln: rescued — Geo scope mismatch: neighborhood \"Rocklane Estates\" ≠ \"Scott; time-adj +0%"
           },
           {
-            "message": "no ARV-tier labels — ARV driven on 1 retail-marked comp(s); 3 as-is-priced sale(s) excluded from ARV",
-            "ruleId": "setb.unlabeled_retail_evidence"
+            "ruleId": "setb.trace_flag",
+            "message": "4206 Old Rock Cut Rd: rescued — Geo scope mismatch: neighborhood \"Telstar\" ≠ \"Scottish Manor; time-adj +0%"
           },
           {
-            "message": "anchored to 4532 Richard Rd (similarity 7.3)",
-            "ruleId": "setb.anchor"
+            "ruleId": "setb.trace_flag",
+            "message": "1556 Rock Cut Rd: rescued — Geo scope mismatch: neighborhood \"Greenbriar\" ≠ \"Scottish Ma; time-adj −10%"
           },
           {
-            "message": "bracketing: driver set is all-bigger — no size bracket",
-            "ruleId": "setb.size_bracket"
+            "ruleId": "setb.trace_flag",
+            "message": "1732 Slate Rd: rescued — Geo scope mismatch: subdivision \"TELSTAR\" ≠ \"SCOTTISH MANOR\"; time-adj −10%"
+          },
+          {
+            "ruleId": "evidence.market_fit.below_pocket",
+            "message": "1144 Elaine Dr: verification — Sale at $70/sf is 44% of current pocket $158/sf — below current pocket, verify market fit"
+          },
+          {
+            "ruleId": "evidence.sale_age.stale",
+            "message": "1671 Lamont Ave: verification — No comp AVM — sale price uncorroborated; Sale is 315 days old — outside preferred 207-day "
+          },
+          {
+            "ruleId": "evidence.sale_age.stale",
+            "message": "4323 Edinburgh Way: verification — No comp AVM — sale price uncorroborated; Sale is 371 days old — outside preferred 207-day "
+          },
+          {
+            "ruleId": "evidence.price.unverified",
+            "message": "1620 Rock Cut Rd: verification — No comp AVM — sale price uncorroborated; Sale at $105/sf is 66% of current pocket $158/sf "
+          },
+          {
+            "ruleId": "evidence.price.unverified",
+            "message": "2006 Winmar Ln: verification — No comp AVM — sale price uncorroborated; Sale at $107/sf is 67% of current pocket $158/sf "
+          },
+          {
+            "ruleId": "evidence.sale_age.stale",
+            "message": "4206 Old Rock Cut Rd: verification — No comp AVM — sale price uncorroborated; Sale is 216 days old — outside preferred 207-day "
+          },
+          {
+            "ruleId": "evidence.sale_age.stale",
+            "message": "1556 Rock Cut Rd: verification — No comp AVM — sale price uncorroborated; Sale is 300 days old — outside preferred 207-day "
+          },
+          {
+            "ruleId": "evidence.sale_age.stale",
+            "message": "1732 Slate Rd: verification — No comp AVM — sale price uncorroborated; Sale is 342 days old — outside preferred 207-day "
+          },
+          {
+            "ruleId": "setb.unlabeled_retail_evidence",
+            "message": "no ARV-tier labels — ARV driven on 2 retail-marked comp(s); 8 as-is-priced sale(s) excluded from ARV"
+          },
+          {
+            "ruleId": "setb.anchor",
+            "message": "anchored to 1593 Jolly Green Ct (similarity 10.5)"
+          },
+          {
+            "ruleId": "setb.supporting_range",
+            "message": "supporting range $223,738–$223,738 (1 comp(s) — bound, not blended)"
+          },
+          {
+            "ruleId": "setb.support_bound.high",
+            "message": "anchor above supporting range — top of evidence"
+          },
+          {
+            "ruleId": "setb.size_bracket",
+            "message": "bracketing: driver set is all-bigger — no size bracket"
           }
         ],
         "comps": [
@@ -1328,225 +1380,27 @@
           "rehabCost": 67190
         },
         "result": {
-          "anchorAddress": "4532 Richard Rd",
-          "arv": 223738,
-          "bracket": "all-bigger",
-          "ceiling": 223737.98076923078,
-          "conditionAdj": null,
-          "conf": "low",
-          "contribs": [
-            {
-              "comp": {
-                "address": "4532 Richard Rd",
-                "adjustedPrice": 225000,
-                "appraisalRules": {
-                  "totalAdjustment": 0
-                },
-                "censusTract": "13063040410",
-                "classification": {
-                  "type": "transitional"
-                },
-                "crossesMajorRoad": false,
-                "curbAppeal": {
-                  "condition": "renovated",
-                  "confidence": 19,
-                  "photosExamined": 8,
-                  "source": "vision",
-                  "summary": "Updated (2.4/4) · tier:median · renovated 68% · as-is 2% · investor 2% · via zillow · listing text available"
-                },
-                "disableReasons": [
-                  "Geo scope mismatch: neighborhood \"Millrun\" ≠ \"Scottish Manor\", city \"Conley\" ≠ \"Forest Park-Morrow\""
-                ],
-                "distanceMiles": 0.564280274799741,
-                "evidenceVerification": {
-                  "avmRatio": null,
-                  "flags": [
-                    "No comp AVM — sale price uncorroborated"
-                  ],
-                  "marketFit": "in_range",
-                  "pocketRatio": 1.141571194762684,
-                  "preferredSaleAgeDays": 207,
-                  "priceCheck": "unverified",
-                  "saleAgeDays": 80,
-                  "staleness": "current"
-                },
-                "isEnabled": true,
-                "landAssessedValue": null,
-                "lotSizeAcres": 0.25826446280991733,
-                "lotSizeSquareFeet": 11250,
-                "neighborhoodName": "Millrun",
-                "pricePerSqft": 180.28846153846155,
-                "propertyType": "SINGLE FAMILY RESIDENCE",
-                "saleDate": "2026-07-17",
-                "salePrice": 225000,
-                "sameBlockGroup": false,
-                "squareFeet": 1248,
-                "subdivision": null,
-                "yearBuilt": 1965
-              },
-              "contrib": 223737.98076923078,
-              "tier": "unidentified",
-              "weight": 1
-            },
-            {
-              "comp": {
-                "address": "1144 Elaine Dr",
-                "adjustedPrice": 115000,
-                "appraisalRules": {
-                  "totalAdjustment": 15000
-                },
-                "censusTract": "13063040310",
-                "classification": {
-                  "type": "transitional"
-                },
-                "crossesMajorRoad": true,
-                "curbAppeal": {
-                  "condition": "dated",
-                  "confidence": 31,
-                  "photosExamined": 8,
-                  "source": "vision",
-                  "summary": "Dated (1.5/4) · tier:median · renovated 9% · as-is 27% · investor 2% · via redfin"
-                },
-                "disableReasons": [],
-                "distanceMiles": 0.9907567120757778,
-                "evidenceVerification": {
-                  "avmRatio": 0.010539931485392645,
-                  "flags": [
-                    "Sale at $70/sf is 44% of current pocket $158/sf — below current pocket, verify market fit"
-                  ],
-                  "marketFit": "below_pocket",
-                  "pocketRatio": 0.44403330249768735,
-                  "preferredSaleAgeDays": 207,
-                  "priceCheck": "corroborated",
-                  "saleAgeDays": 159,
-                  "staleness": "current"
-                },
-                "isEnabled": true,
-                "landAssessedValue": 16000,
-                "lotSizeAcres": 0.26515151515151514,
-                "lotSizeSquareFeet": 11550,
-                "neighborhoodName": "Rocksprings Homes",
-                "pricePerSqft": 70.12622720897616,
-                "propertyType": "SINGLE FAMILY RESIDENCE",
-                "saleDate": "2026-04-29",
-                "salePrice": 100000,
-                "sameBlockGroup": false,
-                "squareFeet": 1426,
-                "subdivision": "ROCKSPRINGS HOMES",
-                "yearBuilt": 1952
-              },
-              "contrib": 109614.30575035063,
-              "tier": "unidentified",
-              "weight": 0.8695652173913044
-            },
-            {
-              "comp": {
-                "address": "1671 Lamont Ave",
-                "adjustedPrice": 240000,
-                "appraisalRules": {
-                  "totalAdjustment": -10000
-                },
-                "censusTract": "13063040410",
-                "classification": {
-                  "type": "transitional"
-                },
-                "crossesMajorRoad": false,
-                "curbAppeal": {
-                  "condition": "dated",
-                  "confidence": 40,
-                  "photosExamined": 8,
-                  "source": "vision",
-                  "summary": "Maintained (1.9/4) · tier:median · renovated 23% · as-is 2% · investor 2% · via zillow · listing text available"
-                },
-                "disableReasons": [
-                  "Geo scope mismatch: city \"Conley\" ≠ \"Forest Park-Morrow\""
-                ],
-                "distanceMiles": 0.07484278920028738,
-                "evidenceVerification": {
-                  "avmRatio": null,
-                  "flags": [
-                    "No comp AVM — sale price uncorroborated",
-                    "Sale is 315 days old — outside preferred 207-day window"
-                  ],
-                  "marketFit": "in_range",
-                  "pocketRatio": 1.132316683407908,
-                  "preferredSaleAgeDays": 207,
-                  "priceCheck": "unverified",
-                  "saleAgeDays": 315,
-                  "staleness": "stale"
-                },
-                "isEnabled": true,
-                "landAssessedValue": null,
-                "lotSizeAcres": null,
-                "lotSizeSquareFeet": null,
-                "neighborhoodName": "Scottish Manor",
-                "pricePerSqft": 178.826895565093,
-                "propertyType": "SINGLE FAMILY RESIDENCE",
-                "saleDate": "2025-11-24",
-                "salePrice": 250000,
-                "sameBlockGroup": true,
-                "squareFeet": 1398,
-                "subdivision": null,
-                "yearBuilt": 1968
-              },
-              "contrib": 228268.9556509299,
-              "tier": "unidentified",
-              "weight": 0.9615384615384615
-            },
-            {
-              "comp": {
-                "address": "4323 Edinburgh Way",
-                "adjustedPrice": 165000,
-                "appraisalRules": {
-                  "totalAdjustment": 0
-                },
-                "censusTract": "13063040410",
-                "classification": {
-                  "type": "after_renovation"
-                },
-                "crossesMajorRoad": false,
-                "curbAppeal": {
-                  "condition": "renovated",
-                  "confidence": 15,
-                  "photosExamined": 8,
-                  "source": "vision",
-                  "summary": "Updated (2.2/4) · tier:median · renovated 52% · as-is 9% · investor 1% · via zillow · listing text available"
-                },
-                "disableReasons": [
-                  "Geo scope mismatch: city \"Conley\" ≠ \"Forest Park-Morrow\""
-                ],
-                "distanceMiles": 0.1100689701345627,
-                "evidenceVerification": {
-                  "avmRatio": null,
-                  "flags": [
-                    "No comp AVM — sale price uncorroborated",
-                    "Sale is 371 days old — outside preferred 207-day window"
-                  ],
-                  "marketFit": "in_range",
-                  "pocketRatio": 1.0192838609237156,
-                  "preferredSaleAgeDays": 207,
-                  "priceCheck": "unverified",
-                  "saleAgeDays": 371,
-                  "staleness": "stale"
-                },
-                "isEnabled": true,
-                "landAssessedValue": null,
-                "lotSizeAcres": null,
-                "lotSizeSquareFeet": null,
-                "neighborhoodName": "Scottish Manor",
-                "pricePerSqft": 160.97560975609755,
-                "propertyType": "SINGLE FAMILY RESIDENCE",
-                "saleDate": "2025-09-29",
-                "salePrice": 165000,
-                "sameBlockGroup": true,
-                "squareFeet": 1025,
-                "subdivision": null,
-                "yearBuilt": 1965
-              },
-              "contrib": 178457.56097560975,
-              "tier": "arv",
-              "weight": 1
-            }
+          "arv": 266994,
+          "flags": [
+            "1620 Rock Cut Rd: rescued — Geo scope mismatch: city \"Conley\" ≠ \"Forest Park-Morrow\"; time-adj +0%",
+            "1593 Jolly Green Ct: rescued — Geo scope mismatch: neighborhood \"Jolly Green Forest\" ≠ \"Sco; time-adj +0%",
+            "2006 Winmar Ln: rescued — Geo scope mismatch: neighborhood \"Rocklane Estates\" ≠ \"Scott; time-adj +0%",
+            "4206 Old Rock Cut Rd: rescued — Geo scope mismatch: neighborhood \"Telstar\" ≠ \"Scottish Manor; time-adj +0%",
+            "1556 Rock Cut Rd: rescued — Geo scope mismatch: neighborhood \"Greenbriar\" ≠ \"Scottish Ma; time-adj −10%",
+            "1732 Slate Rd: rescued — Geo scope mismatch: subdivision \"TELSTAR\" ≠ \"SCOTTISH MANOR\"; time-adj −10%",
+            "1144 Elaine Dr: verification — Sale at $70/sf is 44% of current pocket $158/sf — below current pocket, verify market fit",
+            "1671 Lamont Ave: verification — No comp AVM — sale price uncorroborated; Sale is 315 days old — outside preferred 207-day ",
+            "4323 Edinburgh Way: verification — No comp AVM — sale price uncorroborated; Sale is 371 days old — outside preferred 207-day ",
+            "1620 Rock Cut Rd: verification — No comp AVM — sale price uncorroborated; Sale at $105/sf is 66% of current pocket $158/sf ",
+            "2006 Winmar Ln: verification — No comp AVM — sale price uncorroborated; Sale at $107/sf is 67% of current pocket $158/sf ",
+            "4206 Old Rock Cut Rd: verification — No comp AVM — sale price uncorroborated; Sale is 216 days old — outside preferred 207-day ",
+            "1556 Rock Cut Rd: verification — No comp AVM — sale price uncorroborated; Sale is 300 days old — outside preferred 207-day ",
+            "1732 Slate Rd: verification — No comp AVM — sale price uncorroborated; Sale is 342 days old — outside preferred 207-day ",
+            "no ARV-tier labels — ARV driven on 2 retail-marked comp(s); 8 as-is-priced sale(s) excluded from ARV",
+            "anchored to 1593 Jolly Green Ct (similarity 10.5)",
+            "supporting range $223,738–$223,738 (1 comp(s) — bound, not blended)",
+            "anchor above supporting range — top of evidence",
+            "bracketing: driver set is all-bigger — no size bracket"
           ],
           "drivers": [
             {
@@ -1599,22 +1453,736 @@
                 "yearBuilt": 1965
               },
               "contrib": 223737.98076923078,
+              "weight": 0.9944223107569723,
               "tier": "unidentified",
-              "weight": 1
+              "boundOnly": false
+            },
+            {
+              "comp": {
+                "address": "1593 Jolly Green Ct",
+                "adjustedPrice": 268500,
+                "appraisalRules": {
+                  "totalAdjustment": -5000
+                },
+                "censusTract": "13063040410",
+                "classification": {
+                  "type": "transitional"
+                },
+                "crossesMajorRoad": false,
+                "curbAppeal": {
+                  "condition": "renovated",
+                  "confidence": 20,
+                  "photosExamined": 8,
+                  "source": "vision",
+                  "summary": "Updated (2.6/4) · tier:median · renovated 78% · as-is 4% · investor 2% · via zillow · listing text available"
+                },
+                "disableReasons": [
+                  "Geo scope mismatch: neighborhood \"Jolly Green Forest\" ≠ \"Scottish Manor\", city \"Conley\" ≠ \"Forest Park-Morrow\""
+                ],
+                "distanceMiles": 0.17643520652656677,
+                "evidenceVerification": {
+                  "avmRatio": null,
+                  "flags": [
+                    "No comp AVM — sale price uncorroborated"
+                  ],
+                  "marketFit": "in_range",
+                  "pocketRatio": 1.3622749590834697,
+                  "preferredSaleAgeDays": 207,
+                  "priceCheck": "unverified",
+                  "saleAgeDays": 45,
+                  "staleness": "current"
+                },
+                "isEnabled": false,
+                "landAssessedValue": null,
+                "lotSizeAcres": 0.28344811753902666,
+                "lotSizeSquareFeet": 12347,
+                "neighborhoodName": "Jolly Green Forest",
+                "pricePerSqft": 215.14423076923077,
+                "propertyType": "SINGLE FAMILY RESIDENCE",
+                "saleDate": "2026-08-21",
+                "salePrice": 268500,
+                "sameBlockGroup": true,
+                "squareFeet": 1248,
+                "subdivision": null,
+                "yearBuilt": 1966
+              },
+              "contrib": 266993.9903846154,
+              "weight": 0.9817184643510054,
+              "tier": "unidentified",
+              "boundOnly": false
             }
           ],
-          "flags": [
-            "1144 Elaine Dr: verification — Sale at $70/sf is 44% of current pocket $158/sf — below current pocket, verify market fit",
-            "1671 Lamont Ave: verification — No comp AVM — sale price uncorroborated; Sale is 315 days old — outside preferred 207-day ",
-            "4323 Edinburgh Way: verification — No comp AVM — sale price uncorroborated; Sale is 371 days old — outside preferred 207-day ",
-            "no ARV-tier labels — ARV driven on 1 retail-marked comp(s); 3 as-is-priced sale(s) excluded from ARV",
-            "anchored to 4532 Richard Rd (similarity 7.3)",
-            "bracketing: driver set is all-bigger — no size bracket"
+          "contribs": [
+            {
+              "comp": {
+                "address": "4532 Richard Rd",
+                "adjustedPrice": 225000,
+                "appraisalRules": {
+                  "totalAdjustment": 0
+                },
+                "censusTract": "13063040410",
+                "classification": {
+                  "type": "transitional"
+                },
+                "crossesMajorRoad": false,
+                "curbAppeal": {
+                  "condition": "renovated",
+                  "confidence": 19,
+                  "photosExamined": 8,
+                  "source": "vision",
+                  "summary": "Updated (2.4/4) · tier:median · renovated 68% · as-is 2% · investor 2% · via zillow · listing text available"
+                },
+                "disableReasons": [
+                  "Geo scope mismatch: neighborhood \"Millrun\" ≠ \"Scottish Manor\", city \"Conley\" ≠ \"Forest Park-Morrow\""
+                ],
+                "distanceMiles": 0.564280274799741,
+                "evidenceVerification": {
+                  "avmRatio": null,
+                  "flags": [
+                    "No comp AVM — sale price uncorroborated"
+                  ],
+                  "marketFit": "in_range",
+                  "pocketRatio": 1.141571194762684,
+                  "preferredSaleAgeDays": 207,
+                  "priceCheck": "unverified",
+                  "saleAgeDays": 80,
+                  "staleness": "current"
+                },
+                "isEnabled": true,
+                "landAssessedValue": null,
+                "lotSizeAcres": 0.25826446280991733,
+                "lotSizeSquareFeet": 11250,
+                "neighborhoodName": "Millrun",
+                "pricePerSqft": 180.28846153846155,
+                "propertyType": "SINGLE FAMILY RESIDENCE",
+                "saleDate": "2026-07-17",
+                "salePrice": 225000,
+                "sameBlockGroup": false,
+                "squareFeet": 1248,
+                "subdivision": null,
+                "yearBuilt": 1965
+              },
+              "contrib": 223737.98076923078,
+              "weight": 0.9944223107569723,
+              "tier": "unidentified",
+              "boundOnly": false
+            },
+            {
+              "comp": {
+                "address": "1144 Elaine Dr",
+                "adjustedPrice": 115000,
+                "appraisalRules": {
+                  "totalAdjustment": 15000
+                },
+                "censusTract": "13063040310",
+                "classification": {
+                  "type": "transitional"
+                },
+                "crossesMajorRoad": true,
+                "curbAppeal": {
+                  "condition": "dated",
+                  "confidence": 31,
+                  "photosExamined": 8,
+                  "source": "vision",
+                  "summary": "Dated (1.5/4) · tier:median · renovated 9% · as-is 27% · investor 2% · via redfin"
+                },
+                "disableReasons": [],
+                "distanceMiles": 0.9907567120757778,
+                "evidenceVerification": {
+                  "avmRatio": 0.010539931485392645,
+                  "flags": [
+                    "Sale at $70/sf is 44% of current pocket $158/sf — below current pocket, verify market fit"
+                  ],
+                  "marketFit": "below_pocket",
+                  "pocketRatio": 0.44403330249768735,
+                  "preferredSaleAgeDays": 207,
+                  "priceCheck": "corroborated",
+                  "saleAgeDays": 159,
+                  "staleness": "current"
+                },
+                "isEnabled": true,
+                "landAssessedValue": 16000,
+                "lotSizeAcres": 0.26515151515151514,
+                "lotSizeSquareFeet": 11550,
+                "neighborhoodName": "Rocksprings Homes",
+                "pricePerSqft": 70.12622720897616,
+                "propertyType": "SINGLE FAMILY RESIDENCE",
+                "saleDate": "2026-04-29",
+                "salePrice": 100000,
+                "sameBlockGroup": false,
+                "squareFeet": 1426,
+                "subdivision": "ROCKSPRINGS HOMES",
+                "yearBuilt": 1952
+              },
+              "contrib": 109614.30575035063,
+              "weight": 0.8695652173913044,
+              "tier": "unidentified",
+              "boundOnly": false
+            },
+            {
+              "comp": {
+                "address": "1671 Lamont Ave",
+                "adjustedPrice": 240000,
+                "appraisalRules": {
+                  "totalAdjustment": -10000
+                },
+                "censusTract": "13063040410",
+                "classification": {
+                  "type": "transitional"
+                },
+                "crossesMajorRoad": false,
+                "curbAppeal": {
+                  "condition": "dated",
+                  "confidence": 40,
+                  "photosExamined": 8,
+                  "source": "vision",
+                  "summary": "Maintained (1.9/4) · tier:median · renovated 23% · as-is 2% · investor 2% · via zillow · listing text available"
+                },
+                "disableReasons": [
+                  "Geo scope mismatch: city \"Conley\" ≠ \"Forest Park-Morrow\""
+                ],
+                "distanceMiles": 0.07484278920028738,
+                "evidenceVerification": {
+                  "avmRatio": null,
+                  "flags": [
+                    "No comp AVM — sale price uncorroborated",
+                    "Sale is 315 days old — outside preferred 207-day window"
+                  ],
+                  "marketFit": "in_range",
+                  "pocketRatio": 1.132316683407908,
+                  "preferredSaleAgeDays": 207,
+                  "priceCheck": "unverified",
+                  "saleAgeDays": 315,
+                  "staleness": "stale"
+                },
+                "isEnabled": true,
+                "landAssessedValue": null,
+                "lotSizeAcres": null,
+                "lotSizeSquareFeet": null,
+                "neighborhoodName": "Scottish Manor",
+                "pricePerSqft": 178.826895565093,
+                "propertyType": "SINGLE FAMILY RESIDENCE",
+                "saleDate": "2025-11-24",
+                "salePrice": 250000,
+                "sameBlockGroup": true,
+                "squareFeet": 1398,
+                "subdivision": null,
+                "yearBuilt": 1968
+              },
+              "contrib": 228268.9556509299,
+              "weight": 0.9551790106586497,
+              "tier": "unidentified",
+              "boundOnly": false
+            },
+            {
+              "comp": {
+                "address": "4323 Edinburgh Way",
+                "adjustedPrice": 165000,
+                "appraisalRules": {
+                  "totalAdjustment": 0
+                },
+                "censusTract": "13063040410",
+                "classification": {
+                  "type": "after_renovation"
+                },
+                "crossesMajorRoad": false,
+                "curbAppeal": {
+                  "condition": "renovated",
+                  "confidence": 15,
+                  "photosExamined": 8,
+                  "source": "vision",
+                  "summary": "Updated (2.2/4) · tier:median · renovated 52% · as-is 9% · investor 1% · via zillow · listing text available"
+                },
+                "disableReasons": [
+                  "Geo scope mismatch: city \"Conley\" ≠ \"Forest Park-Morrow\""
+                ],
+                "distanceMiles": 0.1100689701345627,
+                "evidenceVerification": {
+                  "avmRatio": null,
+                  "flags": [
+                    "No comp AVM — sale price uncorroborated",
+                    "Sale is 371 days old — outside preferred 207-day window"
+                  ],
+                  "marketFit": "in_range",
+                  "pocketRatio": 1.0192838609237156,
+                  "preferredSaleAgeDays": 207,
+                  "priceCheck": "unverified",
+                  "saleAgeDays": 371,
+                  "staleness": "stale"
+                },
+                "isEnabled": true,
+                "landAssessedValue": null,
+                "lotSizeAcres": null,
+                "lotSizeSquareFeet": null,
+                "neighborhoodName": "Scottish Manor",
+                "pricePerSqft": 160.97560975609755,
+                "propertyType": "SINGLE FAMILY RESIDENCE",
+                "saleDate": "2025-09-29",
+                "salePrice": 165000,
+                "sameBlockGroup": true,
+                "squareFeet": 1025,
+                "subdivision": null,
+                "yearBuilt": 1965
+              },
+              "contrib": 178457.56097560975,
+              "weight": 0.9245895724337001,
+              "tier": "arv",
+              "boundOnly": false
+            },
+            {
+              "comp": {
+                "address": "1620 Rock Cut Rd",
+                "adjustedPrice": 148000,
+                "appraisalRules": {
+                  "totalAdjustment": -15000
+                },
+                "censusTract": "13063040410",
+                "classification": {
+                  "type": "transitional"
+                },
+                "crossesMajorRoad": false,
+                "curbAppeal": {
+                  "condition": "dated",
+                  "confidence": 33,
+                  "photosExamined": 8,
+                  "source": "vision",
+                  "summary": "Dated (1.3/4) · tier:median · renovated 4% · as-is 48% · investor 2% · via redfin"
+                },
+                "disableReasons": [
+                  "Geo scope mismatch: city \"Conley\" ≠ \"Forest Park-Morrow\""
+                ],
+                "distanceMiles": 0.19141022343490105,
+                "evidenceVerification": {
+                  "avmRatio": null,
+                  "flags": [
+                    "No comp AVM — sale price uncorroborated",
+                    "Sale at $105/sf is 66% of current pocket $158/sf — below current pocket, verify market fit"
+                  ],
+                  "marketFit": "below_pocket",
+                  "pocketRatio": 0.6646265278406519,
+                  "preferredSaleAgeDays": 207,
+                  "priceCheck": "unverified",
+                  "saleAgeDays": 82,
+                  "staleness": "current"
+                },
+                "isEnabled": false,
+                "landAssessedValue": null,
+                "lotSizeAcres": 0.2756657483930211,
+                "lotSizeSquareFeet": 12008,
+                "neighborhoodName": "Scottish Manor",
+                "pricePerSqft": 104.9645390070922,
+                "propertyType": "SINGLE FAMILY RESIDENCE",
+                "saleDate": "2026-07-15",
+                "salePrice": 148000,
+                "sameBlockGroup": true,
+                "squareFeet": 1410,
+                "subdivision": null,
+                "yearBuilt": 1965
+              },
+              "contrib": 140610.4964539007,
+              "weight": 0.9079754601226994,
+              "tier": "unidentified",
+              "boundOnly": false
+            },
+            {
+              "comp": {
+                "address": "1593 Jolly Green Ct",
+                "adjustedPrice": 268500,
+                "appraisalRules": {
+                  "totalAdjustment": -5000
+                },
+                "censusTract": "13063040410",
+                "classification": {
+                  "type": "transitional"
+                },
+                "crossesMajorRoad": false,
+                "curbAppeal": {
+                  "condition": "renovated",
+                  "confidence": 20,
+                  "photosExamined": 8,
+                  "source": "vision",
+                  "summary": "Updated (2.6/4) · tier:median · renovated 78% · as-is 4% · investor 2% · via zillow · listing text available"
+                },
+                "disableReasons": [
+                  "Geo scope mismatch: neighborhood \"Jolly Green Forest\" ≠ \"Scottish Manor\", city \"Conley\" ≠ \"Forest Park-Morrow\""
+                ],
+                "distanceMiles": 0.17643520652656677,
+                "evidenceVerification": {
+                  "avmRatio": null,
+                  "flags": [
+                    "No comp AVM — sale price uncorroborated"
+                  ],
+                  "marketFit": "in_range",
+                  "pocketRatio": 1.3622749590834697,
+                  "preferredSaleAgeDays": 207,
+                  "priceCheck": "unverified",
+                  "saleAgeDays": 45,
+                  "staleness": "current"
+                },
+                "isEnabled": false,
+                "landAssessedValue": null,
+                "lotSizeAcres": 0.28344811753902666,
+                "lotSizeSquareFeet": 12347,
+                "neighborhoodName": "Jolly Green Forest",
+                "pricePerSqft": 215.14423076923077,
+                "propertyType": "SINGLE FAMILY RESIDENCE",
+                "saleDate": "2026-08-21",
+                "salePrice": 268500,
+                "sameBlockGroup": true,
+                "squareFeet": 1248,
+                "subdivision": null,
+                "yearBuilt": 1966
+              },
+              "contrib": 266993.9903846154,
+              "weight": 0.9817184643510054,
+              "tier": "unidentified",
+              "boundOnly": false
+            },
+            {
+              "comp": {
+                "address": "2006 Winmar Ln",
+                "adjustedPrice": 128340,
+                "appraisalRules": {
+                  "totalAdjustment": -10000
+                },
+                "censusTract": "13063040410",
+                "classification": {
+                  "type": "transitional"
+                },
+                "crossesMajorRoad": false,
+                "curbAppeal": {
+                  "condition": "dated",
+                  "confidence": 33,
+                  "photosExamined": 2,
+                  "source": "vision",
+                  "summary": "Maintained (1.6/4) · tier:median · renovated 6% · as-is 7% · investor 2% · via zillow · listing text available"
+                },
+                "disableReasons": [
+                  "Geo scope mismatch: neighborhood \"Rocklane Estates\" ≠ \"Scottish Manor\", city \"Conley\" ≠ \"Forest Park-Morrow\""
+                ],
+                "distanceMiles": 0.7057770132157726,
+                "evidenceVerification": {
+                  "avmRatio": null,
+                  "flags": [
+                    "No comp AVM — sale price uncorroborated",
+                    "Sale at $107/sf is 67% of current pocket $158/sf — below current pocket, verify market fit"
+                  ],
+                  "marketFit": "below_pocket",
+                  "pocketRatio": 0.6749484696402064,
+                  "preferredSaleAgeDays": 207,
+                  "priceCheck": "unverified",
+                  "saleAgeDays": 80,
+                  "staleness": "current"
+                },
+                "isEnabled": false,
+                "landAssessedValue": null,
+                "lotSizeAcres": 0.30785123966942146,
+                "lotSizeSquareFeet": 13410,
+                "neighborhoodName": "Rocklane Estates",
+                "pricePerSqft": 106.59468438538207,
+                "propertyType": "SINGLE FAMILY RESIDENCE",
+                "saleDate": "2026-07-17",
+                "salePrice": 128340,
+                "sameBlockGroup": false,
+                "squareFeet": 1204,
+                "subdivision": null,
+                "yearBuilt": 1970
+              },
+              "contrib": 129938.92026578073,
+              "weight": 0.9277143270203845,
+              "tier": "unidentified",
+              "boundOnly": false
+            },
+            {
+              "comp": {
+                "address": "4206 Old Rock Cut Rd",
+                "adjustedPrice": 145000,
+                "appraisalRules": {
+                  "totalAdjustment": 0
+                },
+                "censusTract": "13063040410",
+                "classification": {
+                  "type": "transitional"
+                },
+                "crossesMajorRoad": false,
+                "curbAppeal": {
+                  "condition": "renovated",
+                  "confidence": 16,
+                  "photosExamined": 8,
+                  "source": "vision",
+                  "summary": "Updated (2.2/4) · tier:median · renovated 60% · as-is 5% · investor 2% · via zillow · listing text available"
+                },
+                "disableReasons": [
+                  "Geo scope mismatch: neighborhood \"Telstar\" ≠ \"Scottish Manor\", city \"Conley\" ≠ \"Forest Park-Morrow\""
+                ],
+                "distanceMiles": 0.20197949463904113,
+                "evidenceVerification": {
+                  "avmRatio": null,
+                  "flags": [
+                    "No comp AVM — sale price uncorroborated",
+                    "Sale is 216 days old — outside preferred 207-day window"
+                  ],
+                  "marketFit": "in_range",
+                  "pocketRatio": 0.8278878805901425,
+                  "preferredSaleAgeDays": 207,
+                  "priceCheck": "unverified",
+                  "saleAgeDays": 216,
+                  "staleness": "stale"
+                },
+                "isEnabled": false,
+                "landAssessedValue": null,
+                "lotSizeAcres": 0.25826446280991733,
+                "lotSizeSquareFeet": 11250,
+                "neighborhoodName": "Telstar",
+                "pricePerSqft": 130.74842200180342,
+                "propertyType": "SINGLE FAMILY RESIDENCE",
+                "saleDate": "2026-03-03",
+                "salePrice": 145000,
+                "sameBlockGroup": true,
+                "squareFeet": 1109,
+                "subdivision": null,
+                "yearBuilt": 1965
+              },
+              "contrib": 151537.42110009017,
+              "weight": 0.9568593615185504,
+              "tier": "unidentified",
+              "boundOnly": false
+            },
+            {
+              "comp": {
+                "address": "1556 Rock Cut Rd",
+                "adjustedPrice": 117000,
+                "appraisalRules": {
+                  "totalAdjustment": 15000
+                },
+                "censusTract": "13063040410",
+                "classification": {
+                  "type": "transitional"
+                },
+                "crossesMajorRoad": false,
+                "curbAppeal": {
+                  "condition": "dated",
+                  "confidence": 34,
+                  "photosExamined": 8,
+                  "source": "vision",
+                  "summary": "Dated (1.3/4) · tier:investor · renovated 3% · as-is 33% · investor 30% · via zillow · listing text available"
+                },
+                "disableReasons": [
+                  "Geo scope mismatch: neighborhood \"Greenbriar\" ≠ \"Scottish Manor\", city \"Conley\" ≠ \"Forest Park-Morrow\""
+                ],
+                "distanceMiles": 0.25127911023483807,
+                "evidenceVerification": {
+                  "avmRatio": null,
+                  "flags": [
+                    "No comp AVM — sale price uncorroborated",
+                    "Sale is 300 days old — outside preferred 207-day window",
+                    "Sale at $105/sf is 66% of current pocket $158/sf — below current pocket, verify market fit"
+                  ],
+                  "marketFit": "below_pocket",
+                  "pocketRatio": 0.6632948720146759,
+                  "preferredSaleAgeDays": 207,
+                  "priceCheck": "unverified",
+                  "saleAgeDays": 300,
+                  "staleness": "stale"
+                },
+                "isEnabled": false,
+                "landAssessedValue": null,
+                "lotSizeAcres": 0.25826446280991733,
+                "lotSizeSquareFeet": 11250,
+                "neighborhoodName": "Greenbriar",
+                "pricePerSqft": 104.75423045930701,
+                "propertyType": "SINGLE FAMILY RESIDENCE",
+                "saleDate": "2025-12-09",
+                "salePrice": 130000,
+                "sameBlockGroup": true,
+                "squareFeet": 1241,
+                "subdivision": null,
+                "yearBuilt": 1962
+              },
+              "contrib": 116633.36019339242,
+              "weight": 0.896551724137931,
+              "tier": "unidentified",
+              "boundOnly": false
+            },
+            {
+              "comp": {
+                "address": "1732 Slate Rd",
+                "adjustedPrice": 130500,
+                "appraisalRules": {
+                  "totalAdjustment": -5000
+                },
+                "censusTract": "13063040410",
+                "classification": {
+                  "type": "transitional"
+                },
+                "crossesMajorRoad": false,
+                "curbAppeal": {
+                  "condition": "dated",
+                  "confidence": 35,
+                  "photosExamined": 8,
+                  "source": "vision",
+                  "summary": "Dated (1.4/4) · tier:median · renovated 2% · as-is 20% · investor 3% · via zillow · listing text available"
+                },
+                "disableReasons": [
+                  "Geo scope mismatch: subdivision \"TELSTAR\" ≠ \"SCOTTISH MANOR\", neighborhood \"Telstar\" ≠ \"Scottish Manor\""
+                ],
+                "distanceMiles": 0.2907519079966136,
+                "evidenceVerification": {
+                  "avmRatio": null,
+                  "flags": [
+                    "No comp AVM — sale price uncorroborated",
+                    "Sale is 342 days old — outside preferred 207-day window"
+                  ],
+                  "marketFit": "in_range",
+                  "pocketRatio": 0.8957343020238713,
+                  "preferredSaleAgeDays": 207,
+                  "priceCheck": "unverified",
+                  "saleAgeDays": 342,
+                  "staleness": "stale"
+                },
+                "isEnabled": false,
+                "landAssessedValue": null,
+                "lotSizeAcres": 0.25826446280991733,
+                "lotSizeSquareFeet": 11250,
+                "neighborhoodName": "Telstar",
+                "pricePerSqft": 141.46341463414635,
+                "propertyType": "SINGLE FAMILY RESIDENCE",
+                "saleDate": "2025-10-28",
+                "salePrice": 145000,
+                "sameBlockGroup": false,
+                "squareFeet": 1025,
+                "subdivision": "TELSTAR",
+                "yearBuilt": 1967
+              },
+              "contrib": 142326.34146341463,
+              "weight": 0.9245895724337001,
+              "tier": "unidentified",
+              "boundOnly": false
+            }
           ],
-          "healed": false,
-          "landRateSource": null,
+          "bracket": "all-bigger",
+          "conf": "low",
           "source": "T0 anchor",
-          "sqftRateSource": null
+          "landRateSource": null,
+          "sqftRateSource": null,
+          "anchorAddress": "1593 Jolly Green Ct",
+          "ceiling": 266993.9903846154,
+          "conditionAdj": null,
+          "healed": false,
+          "decisions": [
+            {
+              "compAddress": "1620 Rock Cut Rd",
+              "stage": "rescue",
+              "rule": "T1b soft-kill",
+              "verdict": "rescued",
+              "value": 0,
+              "note": "time-adj 0%"
+            },
+            {
+              "compAddress": "1593 Jolly Green Ct",
+              "stage": "rescue",
+              "rule": "T1b soft-kill",
+              "verdict": "rescued",
+              "value": 0,
+              "note": "time-adj 0%"
+            },
+            {
+              "compAddress": "2006 Winmar Ln",
+              "stage": "rescue",
+              "rule": "T1b soft-kill",
+              "verdict": "rescued",
+              "value": 0,
+              "note": "time-adj 0%"
+            },
+            {
+              "compAddress": "4206 Old Rock Cut Rd",
+              "stage": "rescue",
+              "rule": "T1b soft-kill",
+              "verdict": "rescued",
+              "value": 0,
+              "note": "time-adj 0%"
+            },
+            {
+              "compAddress": "1556 Rock Cut Rd",
+              "stage": "rescue",
+              "rule": "T1b soft-kill",
+              "verdict": "rescued",
+              "value": -10,
+              "note": "time-adj -10%"
+            },
+            {
+              "compAddress": "1732 Slate Rd",
+              "stage": "rescue",
+              "rule": "T1b soft-kill",
+              "verdict": "rescued",
+              "value": -10,
+              "note": "time-adj -10%"
+            },
+            {
+              "compAddress": "1144 Elaine Dr",
+              "stage": "pool",
+              "rule": "verification",
+              "verdict": "dropped",
+              "note": "Sale at $70/sf is 44% of current pocket $158/sf — below current pocket, verify market fit"
+            },
+            {
+              "compAddress": "1671 Lamont Ave",
+              "stage": "pool",
+              "rule": "verification",
+              "verdict": "dropped",
+              "note": "No comp AVM — sale price uncorroborated; Sale is 315 days old — outside preferred 207-day "
+            },
+            {
+              "compAddress": "4323 Edinburgh Way",
+              "stage": "pool",
+              "rule": "verification",
+              "verdict": "dropped",
+              "note": "No comp AVM — sale price uncorroborated; Sale is 371 days old — outside preferred 207-day "
+            },
+            {
+              "compAddress": "1620 Rock Cut Rd",
+              "stage": "pool",
+              "rule": "verification",
+              "verdict": "dropped",
+              "note": "No comp AVM — sale price uncorroborated; Sale at $105/sf is 66% of current pocket $158/sf "
+            },
+            {
+              "compAddress": "2006 Winmar Ln",
+              "stage": "pool",
+              "rule": "verification",
+              "verdict": "dropped",
+              "note": "No comp AVM — sale price uncorroborated; Sale at $107/sf is 67% of current pocket $158/sf "
+            },
+            {
+              "compAddress": "4206 Old Rock Cut Rd",
+              "stage": "pool",
+              "rule": "verification",
+              "verdict": "dropped",
+              "note": "No comp AVM — sale price uncorroborated; Sale is 216 days old — outside preferred 207-day "
+            },
+            {
+              "compAddress": "1556 Rock Cut Rd",
+              "stage": "pool",
+              "rule": "verification",
+              "verdict": "dropped",
+              "note": "No comp AVM — sale price uncorroborated; Sale is 300 days old — outside preferred 207-day "
+            },
+            {
+              "compAddress": "1732 Slate Rd",
+              "stage": "pool",
+              "rule": "verification",
+              "verdict": "dropped",
+              "note": "No comp AVM — sale price uncorroborated; Sale is 342 days old — outside preferred 207-day "
+            },
+            {
+              "compAddress": "1593 Jolly Green Ct",
+              "stage": "answer",
+              "rule": "anchor",
+              "verdict": "anchored",
+              "value": 266993.9903846154,
+              "note": "similarity 10.5"
+            }
+          ]
         },
         "subject": {
           "assessedValue": 110400,
@@ -2029,28 +2597,80 @@
         {
           "checks": [
             {
-              "message": "1144 Elaine Dr: verification — Sale at $70/sf is 44% of current pocket $158/sf — below current pocket, verify market fit",
-              "ruleId": "evidence.market_fit.below_pocket"
+              "ruleId": "setb.trace_flag",
+              "message": "1620 Rock Cut Rd: rescued — Geo scope mismatch: city \"Conley\" ≠ \"Forest Park-Morrow\"; time-adj +0%"
             },
             {
-              "message": "1671 Lamont Ave: verification — No comp AVM — sale price uncorroborated; Sale is 315 days old — outside preferred 207-day ",
-              "ruleId": "evidence.sale_age.stale"
+              "ruleId": "setb.trace_flag",
+              "message": "1593 Jolly Green Ct: rescued — Geo scope mismatch: neighborhood \"Jolly Green Forest\" ≠ \"Sco; time-adj +0%"
             },
             {
-              "message": "4323 Edinburgh Way: verification — No comp AVM — sale price uncorroborated; Sale is 371 days old — outside preferred 207-day ",
-              "ruleId": "evidence.sale_age.stale"
+              "ruleId": "setb.trace_flag",
+              "message": "2006 Winmar Ln: rescued — Geo scope mismatch: neighborhood \"Rocklane Estates\" ≠ \"Scott; time-adj +0%"
             },
             {
-              "message": "no ARV-tier labels — ARV driven on 1 retail-marked comp(s); 3 as-is-priced sale(s) excluded from ARV",
-              "ruleId": "setb.unlabeled_retail_evidence"
+              "ruleId": "setb.trace_flag",
+              "message": "4206 Old Rock Cut Rd: rescued — Geo scope mismatch: neighborhood \"Telstar\" ≠ \"Scottish Manor; time-adj +0%"
             },
             {
-              "message": "anchored to 4532 Richard Rd (similarity 7.3)",
-              "ruleId": "setb.anchor"
+              "ruleId": "setb.trace_flag",
+              "message": "1556 Rock Cut Rd: rescued — Geo scope mismatch: neighborhood \"Greenbriar\" ≠ \"Scottish Ma; time-adj −10%"
             },
             {
-              "message": "bracketing: driver set is all-bigger — no size bracket",
-              "ruleId": "setb.size_bracket"
+              "ruleId": "setb.trace_flag",
+              "message": "1732 Slate Rd: rescued — Geo scope mismatch: subdivision \"TELSTAR\" ≠ \"SCOTTISH MANOR\"; time-adj −10%"
+            },
+            {
+              "ruleId": "evidence.market_fit.below_pocket",
+              "message": "1144 Elaine Dr: verification — Sale at $70/sf is 44% of current pocket $158/sf — below current pocket, verify market fit"
+            },
+            {
+              "ruleId": "evidence.sale_age.stale",
+              "message": "1671 Lamont Ave: verification — No comp AVM — sale price uncorroborated; Sale is 315 days old — outside preferred 207-day "
+            },
+            {
+              "ruleId": "evidence.sale_age.stale",
+              "message": "4323 Edinburgh Way: verification — No comp AVM — sale price uncorroborated; Sale is 371 days old — outside preferred 207-day "
+            },
+            {
+              "ruleId": "evidence.price.unverified",
+              "message": "1620 Rock Cut Rd: verification — No comp AVM — sale price uncorroborated; Sale at $105/sf is 66% of current pocket $158/sf "
+            },
+            {
+              "ruleId": "evidence.price.unverified",
+              "message": "2006 Winmar Ln: verification — No comp AVM — sale price uncorroborated; Sale at $107/sf is 67% of current pocket $158/sf "
+            },
+            {
+              "ruleId": "evidence.sale_age.stale",
+              "message": "4206 Old Rock Cut Rd: verification — No comp AVM — sale price uncorroborated; Sale is 216 days old — outside preferred 207-day "
+            },
+            {
+              "ruleId": "evidence.sale_age.stale",
+              "message": "1556 Rock Cut Rd: verification — No comp AVM — sale price uncorroborated; Sale is 300 days old — outside preferred 207-day "
+            },
+            {
+              "ruleId": "evidence.sale_age.stale",
+              "message": "1732 Slate Rd: verification — No comp AVM — sale price uncorroborated; Sale is 342 days old — outside preferred 207-day "
+            },
+            {
+              "ruleId": "setb.unlabeled_retail_evidence",
+              "message": "no ARV-tier labels — ARV driven on 2 retail-marked comp(s); 8 as-is-priced sale(s) excluded from ARV"
+            },
+            {
+              "ruleId": "setb.anchor",
+              "message": "anchored to 1593 Jolly Green Ct (similarity 10.5)"
+            },
+            {
+              "ruleId": "setb.supporting_range",
+              "message": "supporting range $223,738–$223,738 (1 comp(s) — bound, not blended)"
+            },
+            {
+              "ruleId": "setb.support_bound.high",
+              "message": "anchor above supporting range — top of evidence"
+            },
+            {
+              "ruleId": "setb.size_bracket",
+              "message": "bracketing: driver set is all-bigger — no size bracket"
             }
           ],
           "comps": [
@@ -3349,225 +3969,27 @@
             "rehabCost": 67190
           },
           "result": {
-            "anchorAddress": "4532 Richard Rd",
-            "arv": 223738,
-            "bracket": "all-bigger",
-            "ceiling": 223737.98076923078,
-            "conditionAdj": null,
-            "conf": "low",
-            "contribs": [
-              {
-                "comp": {
-                  "address": "4532 Richard Rd",
-                  "adjustedPrice": 225000,
-                  "appraisalRules": {
-                    "totalAdjustment": 0
-                  },
-                  "censusTract": "13063040410",
-                  "classification": {
-                    "type": "transitional"
-                  },
-                  "crossesMajorRoad": false,
-                  "curbAppeal": {
-                    "condition": "renovated",
-                    "confidence": 19,
-                    "photosExamined": 8,
-                    "source": "vision",
-                    "summary": "Updated (2.4/4) · tier:median · renovated 68% · as-is 2% · investor 2% · via zillow · listing text available"
-                  },
-                  "disableReasons": [
-                    "Geo scope mismatch: neighborhood \"Millrun\" ≠ \"Scottish Manor\", city \"Conley\" ≠ \"Forest Park-Morrow\""
-                  ],
-                  "distanceMiles": 0.564280274799741,
-                  "evidenceVerification": {
-                    "avmRatio": null,
-                    "flags": [
-                      "No comp AVM — sale price uncorroborated"
-                    ],
-                    "marketFit": "in_range",
-                    "pocketRatio": 1.141571194762684,
-                    "preferredSaleAgeDays": 207,
-                    "priceCheck": "unverified",
-                    "saleAgeDays": 80,
-                    "staleness": "current"
-                  },
-                  "isEnabled": true,
-                  "landAssessedValue": null,
-                  "lotSizeAcres": 0.25826446280991733,
-                  "lotSizeSquareFeet": 11250,
-                  "neighborhoodName": "Millrun",
-                  "pricePerSqft": 180.28846153846155,
-                  "propertyType": "SINGLE FAMILY RESIDENCE",
-                  "saleDate": "2026-07-17",
-                  "salePrice": 225000,
-                  "sameBlockGroup": false,
-                  "squareFeet": 1248,
-                  "subdivision": null,
-                  "yearBuilt": 1965
-                },
-                "contrib": 223737.98076923078,
-                "tier": "unidentified",
-                "weight": 1
-              },
-              {
-                "comp": {
-                  "address": "1144 Elaine Dr",
-                  "adjustedPrice": 115000,
-                  "appraisalRules": {
-                    "totalAdjustment": 15000
-                  },
-                  "censusTract": "13063040310",
-                  "classification": {
-                    "type": "transitional"
-                  },
-                  "crossesMajorRoad": true,
-                  "curbAppeal": {
-                    "condition": "dated",
-                    "confidence": 31,
-                    "photosExamined": 8,
-                    "source": "vision",
-                    "summary": "Dated (1.5/4) · tier:median · renovated 9% · as-is 27% · investor 2% · via redfin"
-                  },
-                  "disableReasons": [],
-                  "distanceMiles": 0.9907567120757778,
-                  "evidenceVerification": {
-                    "avmRatio": 0.010539931485392645,
-                    "flags": [
-                      "Sale at $70/sf is 44% of current pocket $158/sf — below current pocket, verify market fit"
-                    ],
-                    "marketFit": "below_pocket",
-                    "pocketRatio": 0.44403330249768735,
-                    "preferredSaleAgeDays": 207,
-                    "priceCheck": "corroborated",
-                    "saleAgeDays": 159,
-                    "staleness": "current"
-                  },
-                  "isEnabled": true,
-                  "landAssessedValue": 16000,
-                  "lotSizeAcres": 0.26515151515151514,
-                  "lotSizeSquareFeet": 11550,
-                  "neighborhoodName": "Rocksprings Homes",
-                  "pricePerSqft": 70.12622720897616,
-                  "propertyType": "SINGLE FAMILY RESIDENCE",
-                  "saleDate": "2026-04-29",
-                  "salePrice": 100000,
-                  "sameBlockGroup": false,
-                  "squareFeet": 1426,
-                  "subdivision": "ROCKSPRINGS HOMES",
-                  "yearBuilt": 1952
-                },
-                "contrib": 109614.30575035063,
-                "tier": "unidentified",
-                "weight": 0.8695652173913044
-              },
-              {
-                "comp": {
-                  "address": "1671 Lamont Ave",
-                  "adjustedPrice": 240000,
-                  "appraisalRules": {
-                    "totalAdjustment": -10000
-                  },
-                  "censusTract": "13063040410",
-                  "classification": {
-                    "type": "transitional"
-                  },
-                  "crossesMajorRoad": false,
-                  "curbAppeal": {
-                    "condition": "dated",
-                    "confidence": 40,
-                    "photosExamined": 8,
-                    "source": "vision",
-                    "summary": "Maintained (1.9/4) · tier:median · renovated 23% · as-is 2% · investor 2% · via zillow · listing text available"
-                  },
-                  "disableReasons": [
-                    "Geo scope mismatch: city \"Conley\" ≠ \"Forest Park-Morrow\""
-                  ],
-                  "distanceMiles": 0.07484278920028738,
-                  "evidenceVerification": {
-                    "avmRatio": null,
-                    "flags": [
-                      "No comp AVM — sale price uncorroborated",
-                      "Sale is 315 days old — outside preferred 207-day window"
-                    ],
-                    "marketFit": "in_range",
-                    "pocketRatio": 1.132316683407908,
-                    "preferredSaleAgeDays": 207,
-                    "priceCheck": "unverified",
-                    "saleAgeDays": 315,
-                    "staleness": "stale"
-                  },
-                  "isEnabled": true,
-                  "landAssessedValue": null,
-                  "lotSizeAcres": null,
-                  "lotSizeSquareFeet": null,
-                  "neighborhoodName": "Scottish Manor",
-                  "pricePerSqft": 178.826895565093,
-                  "propertyType": "SINGLE FAMILY RESIDENCE",
-                  "saleDate": "2025-11-24",
-                  "salePrice": 250000,
-                  "sameBlockGroup": true,
-                  "squareFeet": 1398,
-                  "subdivision": null,
-                  "yearBuilt": 1968
-                },
-                "contrib": 228268.9556509299,
-                "tier": "unidentified",
-                "weight": 0.9615384615384615
-              },
-              {
-                "comp": {
-                  "address": "4323 Edinburgh Way",
-                  "adjustedPrice": 165000,
-                  "appraisalRules": {
-                    "totalAdjustment": 0
-                  },
-                  "censusTract": "13063040410",
-                  "classification": {
-                    "type": "after_renovation"
-                  },
-                  "crossesMajorRoad": false,
-                  "curbAppeal": {
-                    "condition": "renovated",
-                    "confidence": 15,
-                    "photosExamined": 8,
-                    "source": "vision",
-                    "summary": "Updated (2.2/4) · tier:median · renovated 52% · as-is 9% · investor 1% · via zillow · listing text available"
-                  },
-                  "disableReasons": [
-                    "Geo scope mismatch: city \"Conley\" ≠ \"Forest Park-Morrow\""
-                  ],
-                  "distanceMiles": 0.1100689701345627,
-                  "evidenceVerification": {
-                    "avmRatio": null,
-                    "flags": [
-                      "No comp AVM — sale price uncorroborated",
-                      "Sale is 371 days old — outside preferred 207-day window"
-                    ],
-                    "marketFit": "in_range",
-                    "pocketRatio": 1.0192838609237156,
-                    "preferredSaleAgeDays": 207,
-                    "priceCheck": "unverified",
-                    "saleAgeDays": 371,
-                    "staleness": "stale"
-                  },
-                  "isEnabled": true,
-                  "landAssessedValue": null,
-                  "lotSizeAcres": null,
-                  "lotSizeSquareFeet": null,
-                  "neighborhoodName": "Scottish Manor",
-                  "pricePerSqft": 160.97560975609755,
-                  "propertyType": "SINGLE FAMILY RESIDENCE",
-                  "saleDate": "2025-09-29",
-                  "salePrice": 165000,
-                  "sameBlockGroup": true,
-                  "squareFeet": 1025,
-                  "subdivision": null,
-                  "yearBuilt": 1965
-                },
-                "contrib": 178457.56097560975,
-                "tier": "arv",
-                "weight": 1
-              }
+            "arv": 266994,
+            "flags": [
+              "1620 Rock Cut Rd: rescued — Geo scope mismatch: city \"Conley\" ≠ \"Forest Park-Morrow\"; time-adj +0%",
+              "1593 Jolly Green Ct: rescued — Geo scope mismatch: neighborhood \"Jolly Green Forest\" ≠ \"Sco; time-adj +0%",
+              "2006 Winmar Ln: rescued — Geo scope mismatch: neighborhood \"Rocklane Estates\" ≠ \"Scott; time-adj +0%",
+              "4206 Old Rock Cut Rd: rescued — Geo scope mismatch: neighborhood \"Telstar\" ≠ \"Scottish Manor; time-adj +0%",
+              "1556 Rock Cut Rd: rescued — Geo scope mismatch: neighborhood \"Greenbriar\" ≠ \"Scottish Ma; time-adj −10%",
+              "1732 Slate Rd: rescued — Geo scope mismatch: subdivision \"TELSTAR\" ≠ \"SCOTTISH MANOR\"; time-adj −10%",
+              "1144 Elaine Dr: verification — Sale at $70/sf is 44% of current pocket $158/sf — below current pocket, verify market fit",
+              "1671 Lamont Ave: verification — No comp AVM — sale price uncorroborated; Sale is 315 days old — outside preferred 207-day ",
+              "4323 Edinburgh Way: verification — No comp AVM — sale price uncorroborated; Sale is 371 days old — outside preferred 207-day ",
+              "1620 Rock Cut Rd: verification — No comp AVM — sale price uncorroborated; Sale at $105/sf is 66% of current pocket $158/sf ",
+              "2006 Winmar Ln: verification — No comp AVM — sale price uncorroborated; Sale at $107/sf is 67% of current pocket $158/sf ",
+              "4206 Old Rock Cut Rd: verification — No comp AVM — sale price uncorroborated; Sale is 216 days old — outside preferred 207-day ",
+              "1556 Rock Cut Rd: verification — No comp AVM — sale price uncorroborated; Sale is 300 days old — outside preferred 207-day ",
+              "1732 Slate Rd: verification — No comp AVM — sale price uncorroborated; Sale is 342 days old — outside preferred 207-day ",
+              "no ARV-tier labels — ARV driven on 2 retail-marked comp(s); 8 as-is-priced sale(s) excluded from ARV",
+              "anchored to 1593 Jolly Green Ct (similarity 10.5)",
+              "supporting range $223,738–$223,738 (1 comp(s) — bound, not blended)",
+              "anchor above supporting range — top of evidence",
+              "bracketing: driver set is all-bigger — no size bracket"
             ],
             "drivers": [
               {
@@ -3620,22 +4042,736 @@
                   "yearBuilt": 1965
                 },
                 "contrib": 223737.98076923078,
+                "weight": 0.9944223107569723,
                 "tier": "unidentified",
-                "weight": 1
+                "boundOnly": false
+              },
+              {
+                "comp": {
+                  "address": "1593 Jolly Green Ct",
+                  "adjustedPrice": 268500,
+                  "appraisalRules": {
+                    "totalAdjustment": -5000
+                  },
+                  "censusTract": "13063040410",
+                  "classification": {
+                    "type": "transitional"
+                  },
+                  "crossesMajorRoad": false,
+                  "curbAppeal": {
+                    "condition": "renovated",
+                    "confidence": 20,
+                    "photosExamined": 8,
+                    "source": "vision",
+                    "summary": "Updated (2.6/4) · tier:median · renovated 78% · as-is 4% · investor 2% · via zillow · listing text available"
+                  },
+                  "disableReasons": [
+                    "Geo scope mismatch: neighborhood \"Jolly Green Forest\" ≠ \"Scottish Manor\", city \"Conley\" ≠ \"Forest Park-Morrow\""
+                  ],
+                  "distanceMiles": 0.17643520652656677,
+                  "evidenceVerification": {
+                    "avmRatio": null,
+                    "flags": [
+                      "No comp AVM — sale price uncorroborated"
+                    ],
+                    "marketFit": "in_range",
+                    "pocketRatio": 1.3622749590834697,
+                    "preferredSaleAgeDays": 207,
+                    "priceCheck": "unverified",
+                    "saleAgeDays": 45,
+                    "staleness": "current"
+                  },
+                  "isEnabled": false,
+                  "landAssessedValue": null,
+                  "lotSizeAcres": 0.28344811753902666,
+                  "lotSizeSquareFeet": 12347,
+                  "neighborhoodName": "Jolly Green Forest",
+                  "pricePerSqft": 215.14423076923077,
+                  "propertyType": "SINGLE FAMILY RESIDENCE",
+                  "saleDate": "2026-08-21",
+                  "salePrice": 268500,
+                  "sameBlockGroup": true,
+                  "squareFeet": 1248,
+                  "subdivision": null,
+                  "yearBuilt": 1966
+                },
+                "contrib": 266993.9903846154,
+                "weight": 0.9817184643510054,
+                "tier": "unidentified",
+                "boundOnly": false
               }
             ],
-            "flags": [
-              "1144 Elaine Dr: verification — Sale at $70/sf is 44% of current pocket $158/sf — below current pocket, verify market fit",
-              "1671 Lamont Ave: verification — No comp AVM — sale price uncorroborated; Sale is 315 days old — outside preferred 207-day ",
-              "4323 Edinburgh Way: verification — No comp AVM — sale price uncorroborated; Sale is 371 days old — outside preferred 207-day ",
-              "no ARV-tier labels — ARV driven on 1 retail-marked comp(s); 3 as-is-priced sale(s) excluded from ARV",
-              "anchored to 4532 Richard Rd (similarity 7.3)",
-              "bracketing: driver set is all-bigger — no size bracket"
+            "contribs": [
+              {
+                "comp": {
+                  "address": "4532 Richard Rd",
+                  "adjustedPrice": 225000,
+                  "appraisalRules": {
+                    "totalAdjustment": 0
+                  },
+                  "censusTract": "13063040410",
+                  "classification": {
+                    "type": "transitional"
+                  },
+                  "crossesMajorRoad": false,
+                  "curbAppeal": {
+                    "condition": "renovated",
+                    "confidence": 19,
+                    "photosExamined": 8,
+                    "source": "vision",
+                    "summary": "Updated (2.4/4) · tier:median · renovated 68% · as-is 2% · investor 2% · via zillow · listing text available"
+                  },
+                  "disableReasons": [
+                    "Geo scope mismatch: neighborhood \"Millrun\" ≠ \"Scottish Manor\", city \"Conley\" ≠ \"Forest Park-Morrow\""
+                  ],
+                  "distanceMiles": 0.564280274799741,
+                  "evidenceVerification": {
+                    "avmRatio": null,
+                    "flags": [
+                      "No comp AVM — sale price uncorroborated"
+                    ],
+                    "marketFit": "in_range",
+                    "pocketRatio": 1.141571194762684,
+                    "preferredSaleAgeDays": 207,
+                    "priceCheck": "unverified",
+                    "saleAgeDays": 80,
+                    "staleness": "current"
+                  },
+                  "isEnabled": true,
+                  "landAssessedValue": null,
+                  "lotSizeAcres": 0.25826446280991733,
+                  "lotSizeSquareFeet": 11250,
+                  "neighborhoodName": "Millrun",
+                  "pricePerSqft": 180.28846153846155,
+                  "propertyType": "SINGLE FAMILY RESIDENCE",
+                  "saleDate": "2026-07-17",
+                  "salePrice": 225000,
+                  "sameBlockGroup": false,
+                  "squareFeet": 1248,
+                  "subdivision": null,
+                  "yearBuilt": 1965
+                },
+                "contrib": 223737.98076923078,
+                "weight": 0.9944223107569723,
+                "tier": "unidentified",
+                "boundOnly": false
+              },
+              {
+                "comp": {
+                  "address": "1144 Elaine Dr",
+                  "adjustedPrice": 115000,
+                  "appraisalRules": {
+                    "totalAdjustment": 15000
+                  },
+                  "censusTract": "13063040310",
+                  "classification": {
+                    "type": "transitional"
+                  },
+                  "crossesMajorRoad": true,
+                  "curbAppeal": {
+                    "condition": "dated",
+                    "confidence": 31,
+                    "photosExamined": 8,
+                    "source": "vision",
+                    "summary": "Dated (1.5/4) · tier:median · renovated 9% · as-is 27% · investor 2% · via redfin"
+                  },
+                  "disableReasons": [],
+                  "distanceMiles": 0.9907567120757778,
+                  "evidenceVerification": {
+                    "avmRatio": 0.010539931485392645,
+                    "flags": [
+                      "Sale at $70/sf is 44% of current pocket $158/sf — below current pocket, verify market fit"
+                    ],
+                    "marketFit": "below_pocket",
+                    "pocketRatio": 0.44403330249768735,
+                    "preferredSaleAgeDays": 207,
+                    "priceCheck": "corroborated",
+                    "saleAgeDays": 159,
+                    "staleness": "current"
+                  },
+                  "isEnabled": true,
+                  "landAssessedValue": 16000,
+                  "lotSizeAcres": 0.26515151515151514,
+                  "lotSizeSquareFeet": 11550,
+                  "neighborhoodName": "Rocksprings Homes",
+                  "pricePerSqft": 70.12622720897616,
+                  "propertyType": "SINGLE FAMILY RESIDENCE",
+                  "saleDate": "2026-04-29",
+                  "salePrice": 100000,
+                  "sameBlockGroup": false,
+                  "squareFeet": 1426,
+                  "subdivision": "ROCKSPRINGS HOMES",
+                  "yearBuilt": 1952
+                },
+                "contrib": 109614.30575035063,
+                "weight": 0.8695652173913044,
+                "tier": "unidentified",
+                "boundOnly": false
+              },
+              {
+                "comp": {
+                  "address": "1671 Lamont Ave",
+                  "adjustedPrice": 240000,
+                  "appraisalRules": {
+                    "totalAdjustment": -10000
+                  },
+                  "censusTract": "13063040410",
+                  "classification": {
+                    "type": "transitional"
+                  },
+                  "crossesMajorRoad": false,
+                  "curbAppeal": {
+                    "condition": "dated",
+                    "confidence": 40,
+                    "photosExamined": 8,
+                    "source": "vision",
+                    "summary": "Maintained (1.9/4) · tier:median · renovated 23% · as-is 2% · investor 2% · via zillow · listing text available"
+                  },
+                  "disableReasons": [
+                    "Geo scope mismatch: city \"Conley\" ≠ \"Forest Park-Morrow\""
+                  ],
+                  "distanceMiles": 0.07484278920028738,
+                  "evidenceVerification": {
+                    "avmRatio": null,
+                    "flags": [
+                      "No comp AVM — sale price uncorroborated",
+                      "Sale is 315 days old — outside preferred 207-day window"
+                    ],
+                    "marketFit": "in_range",
+                    "pocketRatio": 1.132316683407908,
+                    "preferredSaleAgeDays": 207,
+                    "priceCheck": "unverified",
+                    "saleAgeDays": 315,
+                    "staleness": "stale"
+                  },
+                  "isEnabled": true,
+                  "landAssessedValue": null,
+                  "lotSizeAcres": null,
+                  "lotSizeSquareFeet": null,
+                  "neighborhoodName": "Scottish Manor",
+                  "pricePerSqft": 178.826895565093,
+                  "propertyType": "SINGLE FAMILY RESIDENCE",
+                  "saleDate": "2025-11-24",
+                  "salePrice": 250000,
+                  "sameBlockGroup": true,
+                  "squareFeet": 1398,
+                  "subdivision": null,
+                  "yearBuilt": 1968
+                },
+                "contrib": 228268.9556509299,
+                "weight": 0.9551790106586497,
+                "tier": "unidentified",
+                "boundOnly": false
+              },
+              {
+                "comp": {
+                  "address": "4323 Edinburgh Way",
+                  "adjustedPrice": 165000,
+                  "appraisalRules": {
+                    "totalAdjustment": 0
+                  },
+                  "censusTract": "13063040410",
+                  "classification": {
+                    "type": "after_renovation"
+                  },
+                  "crossesMajorRoad": false,
+                  "curbAppeal": {
+                    "condition": "renovated",
+                    "confidence": 15,
+                    "photosExamined": 8,
+                    "source": "vision",
+                    "summary": "Updated (2.2/4) · tier:median · renovated 52% · as-is 9% · investor 1% · via zillow · listing text available"
+                  },
+                  "disableReasons": [
+                    "Geo scope mismatch: city \"Conley\" ≠ \"Forest Park-Morrow\""
+                  ],
+                  "distanceMiles": 0.1100689701345627,
+                  "evidenceVerification": {
+                    "avmRatio": null,
+                    "flags": [
+                      "No comp AVM — sale price uncorroborated",
+                      "Sale is 371 days old — outside preferred 207-day window"
+                    ],
+                    "marketFit": "in_range",
+                    "pocketRatio": 1.0192838609237156,
+                    "preferredSaleAgeDays": 207,
+                    "priceCheck": "unverified",
+                    "saleAgeDays": 371,
+                    "staleness": "stale"
+                  },
+                  "isEnabled": true,
+                  "landAssessedValue": null,
+                  "lotSizeAcres": null,
+                  "lotSizeSquareFeet": null,
+                  "neighborhoodName": "Scottish Manor",
+                  "pricePerSqft": 160.97560975609755,
+                  "propertyType": "SINGLE FAMILY RESIDENCE",
+                  "saleDate": "2025-09-29",
+                  "salePrice": 165000,
+                  "sameBlockGroup": true,
+                  "squareFeet": 1025,
+                  "subdivision": null,
+                  "yearBuilt": 1965
+                },
+                "contrib": 178457.56097560975,
+                "weight": 0.9245895724337001,
+                "tier": "arv",
+                "boundOnly": false
+              },
+              {
+                "comp": {
+                  "address": "1620 Rock Cut Rd",
+                  "adjustedPrice": 148000,
+                  "appraisalRules": {
+                    "totalAdjustment": -15000
+                  },
+                  "censusTract": "13063040410",
+                  "classification": {
+                    "type": "transitional"
+                  },
+                  "crossesMajorRoad": false,
+                  "curbAppeal": {
+                    "condition": "dated",
+                    "confidence": 33,
+                    "photosExamined": 8,
+                    "source": "vision",
+                    "summary": "Dated (1.3/4) · tier:median · renovated 4% · as-is 48% · investor 2% · via redfin"
+                  },
+                  "disableReasons": [
+                    "Geo scope mismatch: city \"Conley\" ≠ \"Forest Park-Morrow\""
+                  ],
+                  "distanceMiles": 0.19141022343490105,
+                  "evidenceVerification": {
+                    "avmRatio": null,
+                    "flags": [
+                      "No comp AVM — sale price uncorroborated",
+                      "Sale at $105/sf is 66% of current pocket $158/sf — below current pocket, verify market fit"
+                    ],
+                    "marketFit": "below_pocket",
+                    "pocketRatio": 0.6646265278406519,
+                    "preferredSaleAgeDays": 207,
+                    "priceCheck": "unverified",
+                    "saleAgeDays": 82,
+                    "staleness": "current"
+                  },
+                  "isEnabled": false,
+                  "landAssessedValue": null,
+                  "lotSizeAcres": 0.2756657483930211,
+                  "lotSizeSquareFeet": 12008,
+                  "neighborhoodName": "Scottish Manor",
+                  "pricePerSqft": 104.9645390070922,
+                  "propertyType": "SINGLE FAMILY RESIDENCE",
+                  "saleDate": "2026-07-15",
+                  "salePrice": 148000,
+                  "sameBlockGroup": true,
+                  "squareFeet": 1410,
+                  "subdivision": null,
+                  "yearBuilt": 1965
+                },
+                "contrib": 140610.4964539007,
+                "weight": 0.9079754601226994,
+                "tier": "unidentified",
+                "boundOnly": false
+              },
+              {
+                "comp": {
+                  "address": "1593 Jolly Green Ct",
+                  "adjustedPrice": 268500,
+                  "appraisalRules": {
+                    "totalAdjustment": -5000
+                  },
+                  "censusTract": "13063040410",
+                  "classification": {
+                    "type": "transitional"
+                  },
+                  "crossesMajorRoad": false,
+                  "curbAppeal": {
+                    "condition": "renovated",
+                    "confidence": 20,
+                    "photosExamined": 8,
+                    "source": "vision",
+                    "summary": "Updated (2.6/4) · tier:median · renovated 78% · as-is 4% · investor 2% · via zillow · listing text available"
+                  },
+                  "disableReasons": [
+                    "Geo scope mismatch: neighborhood \"Jolly Green Forest\" ≠ \"Scottish Manor\", city \"Conley\" ≠ \"Forest Park-Morrow\""
+                  ],
+                  "distanceMiles": 0.17643520652656677,
+                  "evidenceVerification": {
+                    "avmRatio": null,
+                    "flags": [
+                      "No comp AVM — sale price uncorroborated"
+                    ],
+                    "marketFit": "in_range",
+                    "pocketRatio": 1.3622749590834697,
+                    "preferredSaleAgeDays": 207,
+                    "priceCheck": "unverified",
+                    "saleAgeDays": 45,
+                    "staleness": "current"
+                  },
+                  "isEnabled": false,
+                  "landAssessedValue": null,
+                  "lotSizeAcres": 0.28344811753902666,
+                  "lotSizeSquareFeet": 12347,
+                  "neighborhoodName": "Jolly Green Forest",
+                  "pricePerSqft": 215.14423076923077,
+                  "propertyType": "SINGLE FAMILY RESIDENCE",
+                  "saleDate": "2026-08-21",
+                  "salePrice": 268500,
+                  "sameBlockGroup": true,
+                  "squareFeet": 1248,
+                  "subdivision": null,
+                  "yearBuilt": 1966
+                },
+                "contrib": 266993.9903846154,
+                "weight": 0.9817184643510054,
+                "tier": "unidentified",
+                "boundOnly": false
+              },
+              {
+                "comp": {
+                  "address": "2006 Winmar Ln",
+                  "adjustedPrice": 128340,
+                  "appraisalRules": {
+                    "totalAdjustment": -10000
+                  },
+                  "censusTract": "13063040410",
+                  "classification": {
+                    "type": "transitional"
+                  },
+                  "crossesMajorRoad": false,
+                  "curbAppeal": {
+                    "condition": "dated",
+                    "confidence": 33,
+                    "photosExamined": 2,
+                    "source": "vision",
+                    "summary": "Maintained (1.6/4) · tier:median · renovated 6% · as-is 7% · investor 2% · via zillow · listing text available"
+                  },
+                  "disableReasons": [
+                    "Geo scope mismatch: neighborhood \"Rocklane Estates\" ≠ \"Scottish Manor\", city \"Conley\" ≠ \"Forest Park-Morrow\""
+                  ],
+                  "distanceMiles": 0.7057770132157726,
+                  "evidenceVerification": {
+                    "avmRatio": null,
+                    "flags": [
+                      "No comp AVM — sale price uncorroborated",
+                      "Sale at $107/sf is 67% of current pocket $158/sf — below current pocket, verify market fit"
+                    ],
+                    "marketFit": "below_pocket",
+                    "pocketRatio": 0.6749484696402064,
+                    "preferredSaleAgeDays": 207,
+                    "priceCheck": "unverified",
+                    "saleAgeDays": 80,
+                    "staleness": "current"
+                  },
+                  "isEnabled": false,
+                  "landAssessedValue": null,
+                  "lotSizeAcres": 0.30785123966942146,
+                  "lotSizeSquareFeet": 13410,
+                  "neighborhoodName": "Rocklane Estates",
+                  "pricePerSqft": 106.59468438538207,
+                  "propertyType": "SINGLE FAMILY RESIDENCE",
+                  "saleDate": "2026-07-17",
+                  "salePrice": 128340,
+                  "sameBlockGroup": false,
+                  "squareFeet": 1204,
+                  "subdivision": null,
+                  "yearBuilt": 1970
+                },
+                "contrib": 129938.92026578073,
+                "weight": 0.9277143270203845,
+                "tier": "unidentified",
+                "boundOnly": false
+              },
+              {
+                "comp": {
+                  "address": "4206 Old Rock Cut Rd",
+                  "adjustedPrice": 145000,
+                  "appraisalRules": {
+                    "totalAdjustment": 0
+                  },
+                  "censusTract": "13063040410",
+                  "classification": {
+                    "type": "transitional"
+                  },
+                  "crossesMajorRoad": false,
+                  "curbAppeal": {
+                    "condition": "renovated",
+                    "confidence": 16,
+                    "photosExamined": 8,
+                    "source": "vision",
+                    "summary": "Updated (2.2/4) · tier:median · renovated 60% · as-is 5% · investor 2% · via zillow · listing text available"
+                  },
+                  "disableReasons": [
+                    "Geo scope mismatch: neighborhood \"Telstar\" ≠ \"Scottish Manor\", city \"Conley\" ≠ \"Forest Park-Morrow\""
+                  ],
+                  "distanceMiles": 0.20197949463904113,
+                  "evidenceVerification": {
+                    "avmRatio": null,
+                    "flags": [
+                      "No comp AVM — sale price uncorroborated",
+                      "Sale is 216 days old — outside preferred 207-day window"
+                    ],
+                    "marketFit": "in_range",
+                    "pocketRatio": 0.8278878805901425,
+                    "preferredSaleAgeDays": 207,
+                    "priceCheck": "unverified",
+                    "saleAgeDays": 216,
+                    "staleness": "stale"
+                  },
+                  "isEnabled": false,
+                  "landAssessedValue": null,
+                  "lotSizeAcres": 0.25826446280991733,
+                  "lotSizeSquareFeet": 11250,
+                  "neighborhoodName": "Telstar",
+                  "pricePerSqft": 130.74842200180342,
+                  "propertyType": "SINGLE FAMILY RESIDENCE",
+                  "saleDate": "2026-03-03",
+                  "salePrice": 145000,
+                  "sameBlockGroup": true,
+                  "squareFeet": 1109,
+                  "subdivision": null,
+                  "yearBuilt": 1965
+                },
+                "contrib": 151537.42110009017,
+                "weight": 0.9568593615185504,
+                "tier": "unidentified",
+                "boundOnly": false
+              },
+              {
+                "comp": {
+                  "address": "1556 Rock Cut Rd",
+                  "adjustedPrice": 117000,
+                  "appraisalRules": {
+                    "totalAdjustment": 15000
+                  },
+                  "censusTract": "13063040410",
+                  "classification": {
+                    "type": "transitional"
+                  },
+                  "crossesMajorRoad": false,
+                  "curbAppeal": {
+                    "condition": "dated",
+                    "confidence": 34,
+                    "photosExamined": 8,
+                    "source": "vision",
+                    "summary": "Dated (1.3/4) · tier:investor · renovated 3% · as-is 33% · investor 30% · via zillow · listing text available"
+                  },
+                  "disableReasons": [
+                    "Geo scope mismatch: neighborhood \"Greenbriar\" ≠ \"Scottish Manor\", city \"Conley\" ≠ \"Forest Park-Morrow\""
+                  ],
+                  "distanceMiles": 0.25127911023483807,
+                  "evidenceVerification": {
+                    "avmRatio": null,
+                    "flags": [
+                      "No comp AVM — sale price uncorroborated",
+                      "Sale is 300 days old — outside preferred 207-day window",
+                      "Sale at $105/sf is 66% of current pocket $158/sf — below current pocket, verify market fit"
+                    ],
+                    "marketFit": "below_pocket",
+                    "pocketRatio": 0.6632948720146759,
+                    "preferredSaleAgeDays": 207,
+                    "priceCheck": "unverified",
+                    "saleAgeDays": 300,
+                    "staleness": "stale"
+                  },
+                  "isEnabled": false,
+                  "landAssessedValue": null,
+                  "lotSizeAcres": 0.25826446280991733,
+                  "lotSizeSquareFeet": 11250,
+                  "neighborhoodName": "Greenbriar",
+                  "pricePerSqft": 104.75423045930701,
+                  "propertyType": "SINGLE FAMILY RESIDENCE",
+                  "saleDate": "2025-12-09",
+                  "salePrice": 130000,
+                  "sameBlockGroup": true,
+                  "squareFeet": 1241,
+                  "subdivision": null,
+                  "yearBuilt": 1962
+                },
+                "contrib": 116633.36019339242,
+                "weight": 0.896551724137931,
+                "tier": "unidentified",
+                "boundOnly": false
+              },
+              {
+                "comp": {
+                  "address": "1732 Slate Rd",
+                  "adjustedPrice": 130500,
+                  "appraisalRules": {
+                    "totalAdjustment": -5000
+                  },
+                  "censusTract": "13063040410",
+                  "classification": {
+                    "type": "transitional"
+                  },
+                  "crossesMajorRoad": false,
+                  "curbAppeal": {
+                    "condition": "dated",
+                    "confidence": 35,
+                    "photosExamined": 8,
+                    "source": "vision",
+                    "summary": "Dated (1.4/4) · tier:median · renovated 2% · as-is 20% · investor 3% · via zillow · listing text available"
+                  },
+                  "disableReasons": [
+                    "Geo scope mismatch: subdivision \"TELSTAR\" ≠ \"SCOTTISH MANOR\", neighborhood \"Telstar\" ≠ \"Scottish Manor\""
+                  ],
+                  "distanceMiles": 0.2907519079966136,
+                  "evidenceVerification": {
+                    "avmRatio": null,
+                    "flags": [
+                      "No comp AVM — sale price uncorroborated",
+                      "Sale is 342 days old — outside preferred 207-day window"
+                    ],
+                    "marketFit": "in_range",
+                    "pocketRatio": 0.8957343020238713,
+                    "preferredSaleAgeDays": 207,
+                    "priceCheck": "unverified",
+                    "saleAgeDays": 342,
+                    "staleness": "stale"
+                  },
+                  "isEnabled": false,
+                  "landAssessedValue": null,
+                  "lotSizeAcres": 0.25826446280991733,
+                  "lotSizeSquareFeet": 11250,
+                  "neighborhoodName": "Telstar",
+                  "pricePerSqft": 141.46341463414635,
+                  "propertyType": "SINGLE FAMILY RESIDENCE",
+                  "saleDate": "2025-10-28",
+                  "salePrice": 145000,
+                  "sameBlockGroup": false,
+                  "squareFeet": 1025,
+                  "subdivision": "TELSTAR",
+                  "yearBuilt": 1967
+                },
+                "contrib": 142326.34146341463,
+                "weight": 0.9245895724337001,
+                "tier": "unidentified",
+                "boundOnly": false
+              }
             ],
-            "healed": false,
-            "landRateSource": null,
+            "bracket": "all-bigger",
+            "conf": "low",
             "source": "T0 anchor",
-            "sqftRateSource": null
+            "landRateSource": null,
+            "sqftRateSource": null,
+            "anchorAddress": "1593 Jolly Green Ct",
+            "ceiling": 266993.9903846154,
+            "conditionAdj": null,
+            "healed": false,
+            "decisions": [
+              {
+                "compAddress": "1620 Rock Cut Rd",
+                "stage": "rescue",
+                "rule": "T1b soft-kill",
+                "verdict": "rescued",
+                "value": 0,
+                "note": "time-adj 0%"
+              },
+              {
+                "compAddress": "1593 Jolly Green Ct",
+                "stage": "rescue",
+                "rule": "T1b soft-kill",
+                "verdict": "rescued",
+                "value": 0,
+                "note": "time-adj 0%"
+              },
+              {
+                "compAddress": "2006 Winmar Ln",
+                "stage": "rescue",
+                "rule": "T1b soft-kill",
+                "verdict": "rescued",
+                "value": 0,
+                "note": "time-adj 0%"
+              },
+              {
+                "compAddress": "4206 Old Rock Cut Rd",
+                "stage": "rescue",
+                "rule": "T1b soft-kill",
+                "verdict": "rescued",
+                "value": 0,
+                "note": "time-adj 0%"
+              },
+              {
+                "compAddress": "1556 Rock Cut Rd",
+                "stage": "rescue",
+                "rule": "T1b soft-kill",
+                "verdict": "rescued",
+                "value": -10,
+                "note": "time-adj -10%"
+              },
+              {
+                "compAddress": "1732 Slate Rd",
+                "stage": "rescue",
+                "rule": "T1b soft-kill",
+                "verdict": "rescued",
+                "value": -10,
+                "note": "time-adj -10%"
+              },
+              {
+                "compAddress": "1144 Elaine Dr",
+                "stage": "pool",
+                "rule": "verification",
+                "verdict": "dropped",
+                "note": "Sale at $70/sf is 44% of current pocket $158/sf — below current pocket, verify market fit"
+              },
+              {
+                "compAddress": "1671 Lamont Ave",
+                "stage": "pool",
+                "rule": "verification",
+                "verdict": "dropped",
+                "note": "No comp AVM — sale price uncorroborated; Sale is 315 days old — outside preferred 207-day "
+              },
+              {
+                "compAddress": "4323 Edinburgh Way",
+                "stage": "pool",
+                "rule": "verification",
+                "verdict": "dropped",
+                "note": "No comp AVM — sale price uncorroborated; Sale is 371 days old — outside preferred 207-day "
+              },
+              {
+                "compAddress": "1620 Rock Cut Rd",
+                "stage": "pool",
+                "rule": "verification",
+                "verdict": "dropped",
+                "note": "No comp AVM — sale price uncorroborated; Sale at $105/sf is 66% of current pocket $158/sf "
+              },
+              {
+                "compAddress": "2006 Winmar Ln",
+                "stage": "pool",
+                "rule": "verification",
+                "verdict": "dropped",
+                "note": "No comp AVM — sale price uncorroborated; Sale at $107/sf is 67% of current pocket $158/sf "
+              },
+              {
+                "compAddress": "4206 Old Rock Cut Rd",
+                "stage": "pool",
+                "rule": "verification",
+                "verdict": "dropped",
+                "note": "No comp AVM — sale price uncorroborated; Sale is 216 days old — outside preferred 207-day "
+              },
+              {
+                "compAddress": "1556 Rock Cut Rd",
+                "stage": "pool",
+                "rule": "verification",
+                "verdict": "dropped",
+                "note": "No comp AVM — sale price uncorroborated; Sale is 300 days old — outside preferred 207-day "
+              },
+              {
+                "compAddress": "1732 Slate Rd",
+                "stage": "pool",
+                "rule": "verification",
+                "verdict": "dropped",
+                "note": "No comp AVM — sale price uncorroborated; Sale is 342 days old — outside preferred 207-day "
+              },
+              {
+                "compAddress": "1593 Jolly Green Ct",
+                "stage": "answer",
+                "rule": "anchor",
+                "verdict": "anchored",
+                "value": 266993.9903846154,
+                "note": "similarity 10.5"
+              }
+            ]
           },
           "subject": {
             "assessedValue": 110400,
@@ -27996,8 +29132,8 @@
         },
         "valuation": {
           "afterRenovationValue": 165000,
-          "arv": 223738,
-          "arvB": 223738,
+          "arv": 266994,
+          "arvB": 266994,
           "arvMethodology": "Set-B T0 anchor — anchored 4532 Richard Rd",
           "arvPerSqft": 181,
           "arvSource": "appraisal",
@@ -28014,68 +29150,894 @@
           },
           "asIsValue": null,
           "bMechanics": {
-            "anchorAddress": "4532 Richard Rd",
-            "attemptTrail": [
-              "attempt 1 — verified"
-            ],
-            "bracket": "all-bigger",
-            "ceiling": 223737.98076923078,
-            "checks": [
-              {
-                "message": "1144 Elaine Dr: verification — Sale at $70/sf is 44% of current pocket $158/sf — below current pocket, verify market fit",
-                "ruleId": "evidence.market_fit.below_pocket"
-              },
-              {
-                "message": "1671 Lamont Ave: verification — No comp AVM — sale price uncorroborated; Sale is 315 days old — outside preferred 207-day ",
-                "ruleId": "evidence.sale_age.stale"
-              },
-              {
-                "message": "4323 Edinburgh Way: verification — No comp AVM — sale price uncorroborated; Sale is 371 days old — outside preferred 207-day ",
-                "ruleId": "evidence.sale_age.stale"
-              },
-              {
-                "message": "no ARV-tier labels — ARV driven on 1 retail-marked comp(s); 3 as-is-priced sale(s) excluded from ARV",
-                "ruleId": "setb.unlabeled_retail_evidence"
-              },
-              {
-                "message": "anchored to 4532 Richard Rd (similarity 7.3)",
-                "ruleId": "setb.anchor"
-              },
-              {
-                "message": "bracketing: driver set is all-bigger — no size bracket",
-                "ruleId": "setb.size_bracket"
-              }
-            ],
-            "conditionAdj": null,
-            "confidence": "low",
-            "drivers": [
-              {
-                "address": "4532 Richard Rd",
-                "conditionTier": "unknown",
-                "contribution": 223738,
-                "tier": "unidentified"
-              }
-            ],
-            "expansionApplied": [
-              "subdivision",
-              "sale_age"
-            ],
-            "fallbackUsed": "sale_age_expansion",
+            "arv": 266994,
             "flags": [
+              "1620 Rock Cut Rd: rescued — Geo scope mismatch: city \"Conley\" ≠ \"Forest Park-Morrow\"; time-adj +0%",
+              "1593 Jolly Green Ct: rescued — Geo scope mismatch: neighborhood \"Jolly Green Forest\" ≠ \"Sco; time-adj +0%",
+              "2006 Winmar Ln: rescued — Geo scope mismatch: neighborhood \"Rocklane Estates\" ≠ \"Scott; time-adj +0%",
+              "4206 Old Rock Cut Rd: rescued — Geo scope mismatch: neighborhood \"Telstar\" ≠ \"Scottish Manor; time-adj +0%",
+              "1556 Rock Cut Rd: rescued — Geo scope mismatch: neighborhood \"Greenbriar\" ≠ \"Scottish Ma; time-adj −10%",
+              "1732 Slate Rd: rescued — Geo scope mismatch: subdivision \"TELSTAR\" ≠ \"SCOTTISH MANOR\"; time-adj −10%",
               "1144 Elaine Dr: verification — Sale at $70/sf is 44% of current pocket $158/sf — below current pocket, verify market fit",
               "1671 Lamont Ave: verification — No comp AVM — sale price uncorroborated; Sale is 315 days old — outside preferred 207-day ",
               "4323 Edinburgh Way: verification — No comp AVM — sale price uncorroborated; Sale is 371 days old — outside preferred 207-day ",
-              "no ARV-tier labels — ARV driven on 1 retail-marked comp(s); 3 as-is-priced sale(s) excluded from ARV",
-              "anchored to 4532 Richard Rd (similarity 7.3)",
+              "1620 Rock Cut Rd: verification — No comp AVM — sale price uncorroborated; Sale at $105/sf is 66% of current pocket $158/sf ",
+              "2006 Winmar Ln: verification — No comp AVM — sale price uncorroborated; Sale at $107/sf is 67% of current pocket $158/sf ",
+              "4206 Old Rock Cut Rd: verification — No comp AVM — sale price uncorroborated; Sale is 216 days old — outside preferred 207-day ",
+              "1556 Rock Cut Rd: verification — No comp AVM — sale price uncorroborated; Sale is 300 days old — outside preferred 207-day ",
+              "1732 Slate Rd: verification — No comp AVM — sale price uncorroborated; Sale is 342 days old — outside preferred 207-day ",
+              "no ARV-tier labels — ARV driven on 2 retail-marked comp(s); 8 as-is-priced sale(s) excluded from ARV",
+              "anchored to 1593 Jolly Green Ct (similarity 10.5)",
+              "supporting range $223,738–$223,738 (1 comp(s) — bound, not blended)",
+              "anchor above supporting range — top of evidence",
               "bracketing: driver set is all-bigger — no size bracket"
             ],
-            "harnessVersion": "og-2026.10.04.1",
-            "healed": false,
-            "landRateSource": null,
+            "drivers": [
+              {
+                "comp": {
+                  "address": "4532 Richard Rd",
+                  "adjustedPrice": 225000,
+                  "appraisalRules": {
+                    "totalAdjustment": 0
+                  },
+                  "censusTract": "13063040410",
+                  "classification": {
+                    "type": "transitional"
+                  },
+                  "crossesMajorRoad": false,
+                  "curbAppeal": {
+                    "condition": "renovated",
+                    "confidence": 19,
+                    "photosExamined": 8,
+                    "source": "vision",
+                    "summary": "Updated (2.4/4) · tier:median · renovated 68% · as-is 2% · investor 2% · via zillow · listing text available"
+                  },
+                  "disableReasons": [
+                    "Geo scope mismatch: neighborhood \"Millrun\" ≠ \"Scottish Manor\", city \"Conley\" ≠ \"Forest Park-Morrow\""
+                  ],
+                  "distanceMiles": 0.564280274799741,
+                  "evidenceVerification": {
+                    "avmRatio": null,
+                    "flags": [
+                      "No comp AVM — sale price uncorroborated"
+                    ],
+                    "marketFit": "in_range",
+                    "pocketRatio": 1.141571194762684,
+                    "preferredSaleAgeDays": 207,
+                    "priceCheck": "unverified",
+                    "saleAgeDays": 80,
+                    "staleness": "current"
+                  },
+                  "isEnabled": true,
+                  "landAssessedValue": null,
+                  "lotSizeAcres": 0.25826446280991733,
+                  "lotSizeSquareFeet": 11250,
+                  "neighborhoodName": "Millrun",
+                  "pricePerSqft": 180.28846153846155,
+                  "propertyType": "SINGLE FAMILY RESIDENCE",
+                  "saleDate": "2026-07-17",
+                  "salePrice": 225000,
+                  "sameBlockGroup": false,
+                  "squareFeet": 1248,
+                  "subdivision": null,
+                  "yearBuilt": 1965
+                },
+                "contrib": 223737.98076923078,
+                "weight": 0.9944223107569723,
+                "tier": "unidentified",
+                "boundOnly": false
+              },
+              {
+                "comp": {
+                  "address": "1593 Jolly Green Ct",
+                  "adjustedPrice": 268500,
+                  "appraisalRules": {
+                    "totalAdjustment": -5000
+                  },
+                  "censusTract": "13063040410",
+                  "classification": {
+                    "type": "transitional"
+                  },
+                  "crossesMajorRoad": false,
+                  "curbAppeal": {
+                    "condition": "renovated",
+                    "confidence": 20,
+                    "photosExamined": 8,
+                    "source": "vision",
+                    "summary": "Updated (2.6/4) · tier:median · renovated 78% · as-is 4% · investor 2% · via zillow · listing text available"
+                  },
+                  "disableReasons": [
+                    "Geo scope mismatch: neighborhood \"Jolly Green Forest\" ≠ \"Scottish Manor\", city \"Conley\" ≠ \"Forest Park-Morrow\""
+                  ],
+                  "distanceMiles": 0.17643520652656677,
+                  "evidenceVerification": {
+                    "avmRatio": null,
+                    "flags": [
+                      "No comp AVM — sale price uncorroborated"
+                    ],
+                    "marketFit": "in_range",
+                    "pocketRatio": 1.3622749590834697,
+                    "preferredSaleAgeDays": 207,
+                    "priceCheck": "unverified",
+                    "saleAgeDays": 45,
+                    "staleness": "current"
+                  },
+                  "isEnabled": false,
+                  "landAssessedValue": null,
+                  "lotSizeAcres": 0.28344811753902666,
+                  "lotSizeSquareFeet": 12347,
+                  "neighborhoodName": "Jolly Green Forest",
+                  "pricePerSqft": 215.14423076923077,
+                  "propertyType": "SINGLE FAMILY RESIDENCE",
+                  "saleDate": "2026-08-21",
+                  "salePrice": 268500,
+                  "sameBlockGroup": true,
+                  "squareFeet": 1248,
+                  "subdivision": null,
+                  "yearBuilt": 1966
+                },
+                "contrib": 266993.9903846154,
+                "weight": 0.9817184643510054,
+                "tier": "unidentified",
+                "boundOnly": false
+              }
+            ],
+            "contribs": [
+              {
+                "comp": {
+                  "address": "4532 Richard Rd",
+                  "adjustedPrice": 225000,
+                  "appraisalRules": {
+                    "totalAdjustment": 0
+                  },
+                  "censusTract": "13063040410",
+                  "classification": {
+                    "type": "transitional"
+                  },
+                  "crossesMajorRoad": false,
+                  "curbAppeal": {
+                    "condition": "renovated",
+                    "confidence": 19,
+                    "photosExamined": 8,
+                    "source": "vision",
+                    "summary": "Updated (2.4/4) · tier:median · renovated 68% · as-is 2% · investor 2% · via zillow · listing text available"
+                  },
+                  "disableReasons": [
+                    "Geo scope mismatch: neighborhood \"Millrun\" ≠ \"Scottish Manor\", city \"Conley\" ≠ \"Forest Park-Morrow\""
+                  ],
+                  "distanceMiles": 0.564280274799741,
+                  "evidenceVerification": {
+                    "avmRatio": null,
+                    "flags": [
+                      "No comp AVM — sale price uncorroborated"
+                    ],
+                    "marketFit": "in_range",
+                    "pocketRatio": 1.141571194762684,
+                    "preferredSaleAgeDays": 207,
+                    "priceCheck": "unverified",
+                    "saleAgeDays": 80,
+                    "staleness": "current"
+                  },
+                  "isEnabled": true,
+                  "landAssessedValue": null,
+                  "lotSizeAcres": 0.25826446280991733,
+                  "lotSizeSquareFeet": 11250,
+                  "neighborhoodName": "Millrun",
+                  "pricePerSqft": 180.28846153846155,
+                  "propertyType": "SINGLE FAMILY RESIDENCE",
+                  "saleDate": "2026-07-17",
+                  "salePrice": 225000,
+                  "sameBlockGroup": false,
+                  "squareFeet": 1248,
+                  "subdivision": null,
+                  "yearBuilt": 1965
+                },
+                "contrib": 223737.98076923078,
+                "weight": 0.9944223107569723,
+                "tier": "unidentified",
+                "boundOnly": false
+              },
+              {
+                "comp": {
+                  "address": "1144 Elaine Dr",
+                  "adjustedPrice": 115000,
+                  "appraisalRules": {
+                    "totalAdjustment": 15000
+                  },
+                  "censusTract": "13063040310",
+                  "classification": {
+                    "type": "transitional"
+                  },
+                  "crossesMajorRoad": true,
+                  "curbAppeal": {
+                    "condition": "dated",
+                    "confidence": 31,
+                    "photosExamined": 8,
+                    "source": "vision",
+                    "summary": "Dated (1.5/4) · tier:median · renovated 9% · as-is 27% · investor 2% · via redfin"
+                  },
+                  "disableReasons": [],
+                  "distanceMiles": 0.9907567120757778,
+                  "evidenceVerification": {
+                    "avmRatio": 0.010539931485392645,
+                    "flags": [
+                      "Sale at $70/sf is 44% of current pocket $158/sf — below current pocket, verify market fit"
+                    ],
+                    "marketFit": "below_pocket",
+                    "pocketRatio": 0.44403330249768735,
+                    "preferredSaleAgeDays": 207,
+                    "priceCheck": "corroborated",
+                    "saleAgeDays": 159,
+                    "staleness": "current"
+                  },
+                  "isEnabled": true,
+                  "landAssessedValue": 16000,
+                  "lotSizeAcres": 0.26515151515151514,
+                  "lotSizeSquareFeet": 11550,
+                  "neighborhoodName": "Rocksprings Homes",
+                  "pricePerSqft": 70.12622720897616,
+                  "propertyType": "SINGLE FAMILY RESIDENCE",
+                  "saleDate": "2026-04-29",
+                  "salePrice": 100000,
+                  "sameBlockGroup": false,
+                  "squareFeet": 1426,
+                  "subdivision": "ROCKSPRINGS HOMES",
+                  "yearBuilt": 1952
+                },
+                "contrib": 109614.30575035063,
+                "weight": 0.8695652173913044,
+                "tier": "unidentified",
+                "boundOnly": false
+              },
+              {
+                "comp": {
+                  "address": "1671 Lamont Ave",
+                  "adjustedPrice": 240000,
+                  "appraisalRules": {
+                    "totalAdjustment": -10000
+                  },
+                  "censusTract": "13063040410",
+                  "classification": {
+                    "type": "transitional"
+                  },
+                  "crossesMajorRoad": false,
+                  "curbAppeal": {
+                    "condition": "dated",
+                    "confidence": 40,
+                    "photosExamined": 8,
+                    "source": "vision",
+                    "summary": "Maintained (1.9/4) · tier:median · renovated 23% · as-is 2% · investor 2% · via zillow · listing text available"
+                  },
+                  "disableReasons": [
+                    "Geo scope mismatch: city \"Conley\" ≠ \"Forest Park-Morrow\""
+                  ],
+                  "distanceMiles": 0.07484278920028738,
+                  "evidenceVerification": {
+                    "avmRatio": null,
+                    "flags": [
+                      "No comp AVM — sale price uncorroborated",
+                      "Sale is 315 days old — outside preferred 207-day window"
+                    ],
+                    "marketFit": "in_range",
+                    "pocketRatio": 1.132316683407908,
+                    "preferredSaleAgeDays": 207,
+                    "priceCheck": "unverified",
+                    "saleAgeDays": 315,
+                    "staleness": "stale"
+                  },
+                  "isEnabled": true,
+                  "landAssessedValue": null,
+                  "lotSizeAcres": null,
+                  "lotSizeSquareFeet": null,
+                  "neighborhoodName": "Scottish Manor",
+                  "pricePerSqft": 178.826895565093,
+                  "propertyType": "SINGLE FAMILY RESIDENCE",
+                  "saleDate": "2025-11-24",
+                  "salePrice": 250000,
+                  "sameBlockGroup": true,
+                  "squareFeet": 1398,
+                  "subdivision": null,
+                  "yearBuilt": 1968
+                },
+                "contrib": 228268.9556509299,
+                "weight": 0.9551790106586497,
+                "tier": "unidentified",
+                "boundOnly": false
+              },
+              {
+                "comp": {
+                  "address": "4323 Edinburgh Way",
+                  "adjustedPrice": 165000,
+                  "appraisalRules": {
+                    "totalAdjustment": 0
+                  },
+                  "censusTract": "13063040410",
+                  "classification": {
+                    "type": "after_renovation"
+                  },
+                  "crossesMajorRoad": false,
+                  "curbAppeal": {
+                    "condition": "renovated",
+                    "confidence": 15,
+                    "photosExamined": 8,
+                    "source": "vision",
+                    "summary": "Updated (2.2/4) · tier:median · renovated 52% · as-is 9% · investor 1% · via zillow · listing text available"
+                  },
+                  "disableReasons": [
+                    "Geo scope mismatch: city \"Conley\" ≠ \"Forest Park-Morrow\""
+                  ],
+                  "distanceMiles": 0.1100689701345627,
+                  "evidenceVerification": {
+                    "avmRatio": null,
+                    "flags": [
+                      "No comp AVM — sale price uncorroborated",
+                      "Sale is 371 days old — outside preferred 207-day window"
+                    ],
+                    "marketFit": "in_range",
+                    "pocketRatio": 1.0192838609237156,
+                    "preferredSaleAgeDays": 207,
+                    "priceCheck": "unverified",
+                    "saleAgeDays": 371,
+                    "staleness": "stale"
+                  },
+                  "isEnabled": true,
+                  "landAssessedValue": null,
+                  "lotSizeAcres": null,
+                  "lotSizeSquareFeet": null,
+                  "neighborhoodName": "Scottish Manor",
+                  "pricePerSqft": 160.97560975609755,
+                  "propertyType": "SINGLE FAMILY RESIDENCE",
+                  "saleDate": "2025-09-29",
+                  "salePrice": 165000,
+                  "sameBlockGroup": true,
+                  "squareFeet": 1025,
+                  "subdivision": null,
+                  "yearBuilt": 1965
+                },
+                "contrib": 178457.56097560975,
+                "weight": 0.9245895724337001,
+                "tier": "arv",
+                "boundOnly": false
+              },
+              {
+                "comp": {
+                  "address": "1620 Rock Cut Rd",
+                  "adjustedPrice": 148000,
+                  "appraisalRules": {
+                    "totalAdjustment": -15000
+                  },
+                  "censusTract": "13063040410",
+                  "classification": {
+                    "type": "transitional"
+                  },
+                  "crossesMajorRoad": false,
+                  "curbAppeal": {
+                    "condition": "dated",
+                    "confidence": 33,
+                    "photosExamined": 8,
+                    "source": "vision",
+                    "summary": "Dated (1.3/4) · tier:median · renovated 4% · as-is 48% · investor 2% · via redfin"
+                  },
+                  "disableReasons": [
+                    "Geo scope mismatch: city \"Conley\" ≠ \"Forest Park-Morrow\""
+                  ],
+                  "distanceMiles": 0.19141022343490105,
+                  "evidenceVerification": {
+                    "avmRatio": null,
+                    "flags": [
+                      "No comp AVM — sale price uncorroborated",
+                      "Sale at $105/sf is 66% of current pocket $158/sf — below current pocket, verify market fit"
+                    ],
+                    "marketFit": "below_pocket",
+                    "pocketRatio": 0.6646265278406519,
+                    "preferredSaleAgeDays": 207,
+                    "priceCheck": "unverified",
+                    "saleAgeDays": 82,
+                    "staleness": "current"
+                  },
+                  "isEnabled": false,
+                  "landAssessedValue": null,
+                  "lotSizeAcres": 0.2756657483930211,
+                  "lotSizeSquareFeet": 12008,
+                  "neighborhoodName": "Scottish Manor",
+                  "pricePerSqft": 104.9645390070922,
+                  "propertyType": "SINGLE FAMILY RESIDENCE",
+                  "saleDate": "2026-07-15",
+                  "salePrice": 148000,
+                  "sameBlockGroup": true,
+                  "squareFeet": 1410,
+                  "subdivision": null,
+                  "yearBuilt": 1965
+                },
+                "contrib": 140610.4964539007,
+                "weight": 0.9079754601226994,
+                "tier": "unidentified",
+                "boundOnly": false
+              },
+              {
+                "comp": {
+                  "address": "1593 Jolly Green Ct",
+                  "adjustedPrice": 268500,
+                  "appraisalRules": {
+                    "totalAdjustment": -5000
+                  },
+                  "censusTract": "13063040410",
+                  "classification": {
+                    "type": "transitional"
+                  },
+                  "crossesMajorRoad": false,
+                  "curbAppeal": {
+                    "condition": "renovated",
+                    "confidence": 20,
+                    "photosExamined": 8,
+                    "source": "vision",
+                    "summary": "Updated (2.6/4) · tier:median · renovated 78% · as-is 4% · investor 2% · via zillow · listing text available"
+                  },
+                  "disableReasons": [
+                    "Geo scope mismatch: neighborhood \"Jolly Green Forest\" ≠ \"Scottish Manor\", city \"Conley\" ≠ \"Forest Park-Morrow\""
+                  ],
+                  "distanceMiles": 0.17643520652656677,
+                  "evidenceVerification": {
+                    "avmRatio": null,
+                    "flags": [
+                      "No comp AVM — sale price uncorroborated"
+                    ],
+                    "marketFit": "in_range",
+                    "pocketRatio": 1.3622749590834697,
+                    "preferredSaleAgeDays": 207,
+                    "priceCheck": "unverified",
+                    "saleAgeDays": 45,
+                    "staleness": "current"
+                  },
+                  "isEnabled": false,
+                  "landAssessedValue": null,
+                  "lotSizeAcres": 0.28344811753902666,
+                  "lotSizeSquareFeet": 12347,
+                  "neighborhoodName": "Jolly Green Forest",
+                  "pricePerSqft": 215.14423076923077,
+                  "propertyType": "SINGLE FAMILY RESIDENCE",
+                  "saleDate": "2026-08-21",
+                  "salePrice": 268500,
+                  "sameBlockGroup": true,
+                  "squareFeet": 1248,
+                  "subdivision": null,
+                  "yearBuilt": 1966
+                },
+                "contrib": 266993.9903846154,
+                "weight": 0.9817184643510054,
+                "tier": "unidentified",
+                "boundOnly": false
+              },
+              {
+                "comp": {
+                  "address": "2006 Winmar Ln",
+                  "adjustedPrice": 128340,
+                  "appraisalRules": {
+                    "totalAdjustment": -10000
+                  },
+                  "censusTract": "13063040410",
+                  "classification": {
+                    "type": "transitional"
+                  },
+                  "crossesMajorRoad": false,
+                  "curbAppeal": {
+                    "condition": "dated",
+                    "confidence": 33,
+                    "photosExamined": 2,
+                    "source": "vision",
+                    "summary": "Maintained (1.6/4) · tier:median · renovated 6% · as-is 7% · investor 2% · via zillow · listing text available"
+                  },
+                  "disableReasons": [
+                    "Geo scope mismatch: neighborhood \"Rocklane Estates\" ≠ \"Scottish Manor\", city \"Conley\" ≠ \"Forest Park-Morrow\""
+                  ],
+                  "distanceMiles": 0.7057770132157726,
+                  "evidenceVerification": {
+                    "avmRatio": null,
+                    "flags": [
+                      "No comp AVM — sale price uncorroborated",
+                      "Sale at $107/sf is 67% of current pocket $158/sf — below current pocket, verify market fit"
+                    ],
+                    "marketFit": "below_pocket",
+                    "pocketRatio": 0.6749484696402064,
+                    "preferredSaleAgeDays": 207,
+                    "priceCheck": "unverified",
+                    "saleAgeDays": 80,
+                    "staleness": "current"
+                  },
+                  "isEnabled": false,
+                  "landAssessedValue": null,
+                  "lotSizeAcres": 0.30785123966942146,
+                  "lotSizeSquareFeet": 13410,
+                  "neighborhoodName": "Rocklane Estates",
+                  "pricePerSqft": 106.59468438538207,
+                  "propertyType": "SINGLE FAMILY RESIDENCE",
+                  "saleDate": "2026-07-17",
+                  "salePrice": 128340,
+                  "sameBlockGroup": false,
+                  "squareFeet": 1204,
+                  "subdivision": null,
+                  "yearBuilt": 1970
+                },
+                "contrib": 129938.92026578073,
+                "weight": 0.9277143270203845,
+                "tier": "unidentified",
+                "boundOnly": false
+              },
+              {
+                "comp": {
+                  "address": "4206 Old Rock Cut Rd",
+                  "adjustedPrice": 145000,
+                  "appraisalRules": {
+                    "totalAdjustment": 0
+                  },
+                  "censusTract": "13063040410",
+                  "classification": {
+                    "type": "transitional"
+                  },
+                  "crossesMajorRoad": false,
+                  "curbAppeal": {
+                    "condition": "renovated",
+                    "confidence": 16,
+                    "photosExamined": 8,
+                    "source": "vision",
+                    "summary": "Updated (2.2/4) · tier:median · renovated 60% · as-is 5% · investor 2% · via zillow · listing text available"
+                  },
+                  "disableReasons": [
+                    "Geo scope mismatch: neighborhood \"Telstar\" ≠ \"Scottish Manor\", city \"Conley\" ≠ \"Forest Park-Morrow\""
+                  ],
+                  "distanceMiles": 0.20197949463904113,
+                  "evidenceVerification": {
+                    "avmRatio": null,
+                    "flags": [
+                      "No comp AVM — sale price uncorroborated",
+                      "Sale is 216 days old — outside preferred 207-day window"
+                    ],
+                    "marketFit": "in_range",
+                    "pocketRatio": 0.8278878805901425,
+                    "preferredSaleAgeDays": 207,
+                    "priceCheck": "unverified",
+                    "saleAgeDays": 216,
+                    "staleness": "stale"
+                  },
+                  "isEnabled": false,
+                  "landAssessedValue": null,
+                  "lotSizeAcres": 0.25826446280991733,
+                  "lotSizeSquareFeet": 11250,
+                  "neighborhoodName": "Telstar",
+                  "pricePerSqft": 130.74842200180342,
+                  "propertyType": "SINGLE FAMILY RESIDENCE",
+                  "saleDate": "2026-03-03",
+                  "salePrice": 145000,
+                  "sameBlockGroup": true,
+                  "squareFeet": 1109,
+                  "subdivision": null,
+                  "yearBuilt": 1965
+                },
+                "contrib": 151537.42110009017,
+                "weight": 0.9568593615185504,
+                "tier": "unidentified",
+                "boundOnly": false
+              },
+              {
+                "comp": {
+                  "address": "1556 Rock Cut Rd",
+                  "adjustedPrice": 117000,
+                  "appraisalRules": {
+                    "totalAdjustment": 15000
+                  },
+                  "censusTract": "13063040410",
+                  "classification": {
+                    "type": "transitional"
+                  },
+                  "crossesMajorRoad": false,
+                  "curbAppeal": {
+                    "condition": "dated",
+                    "confidence": 34,
+                    "photosExamined": 8,
+                    "source": "vision",
+                    "summary": "Dated (1.3/4) · tier:investor · renovated 3% · as-is 33% · investor 30% · via zillow · listing text available"
+                  },
+                  "disableReasons": [
+                    "Geo scope mismatch: neighborhood \"Greenbriar\" ≠ \"Scottish Manor\", city \"Conley\" ≠ \"Forest Park-Morrow\""
+                  ],
+                  "distanceMiles": 0.25127911023483807,
+                  "evidenceVerification": {
+                    "avmRatio": null,
+                    "flags": [
+                      "No comp AVM — sale price uncorroborated",
+                      "Sale is 300 days old — outside preferred 207-day window",
+                      "Sale at $105/sf is 66% of current pocket $158/sf — below current pocket, verify market fit"
+                    ],
+                    "marketFit": "below_pocket",
+                    "pocketRatio": 0.6632948720146759,
+                    "preferredSaleAgeDays": 207,
+                    "priceCheck": "unverified",
+                    "saleAgeDays": 300,
+                    "staleness": "stale"
+                  },
+                  "isEnabled": false,
+                  "landAssessedValue": null,
+                  "lotSizeAcres": 0.25826446280991733,
+                  "lotSizeSquareFeet": 11250,
+                  "neighborhoodName": "Greenbriar",
+                  "pricePerSqft": 104.75423045930701,
+                  "propertyType": "SINGLE FAMILY RESIDENCE",
+                  "saleDate": "2025-12-09",
+                  "salePrice": 130000,
+                  "sameBlockGroup": true,
+                  "squareFeet": 1241,
+                  "subdivision": null,
+                  "yearBuilt": 1962
+                },
+                "contrib": 116633.36019339242,
+                "weight": 0.896551724137931,
+                "tier": "unidentified",
+                "boundOnly": false
+              },
+              {
+                "comp": {
+                  "address": "1732 Slate Rd",
+                  "adjustedPrice": 130500,
+                  "appraisalRules": {
+                    "totalAdjustment": -5000
+                  },
+                  "censusTract": "13063040410",
+                  "classification": {
+                    "type": "transitional"
+                  },
+                  "crossesMajorRoad": false,
+                  "curbAppeal": {
+                    "condition": "dated",
+                    "confidence": 35,
+                    "photosExamined": 8,
+                    "source": "vision",
+                    "summary": "Dated (1.4/4) · tier:median · renovated 2% · as-is 20% · investor 3% · via zillow · listing text available"
+                  },
+                  "disableReasons": [
+                    "Geo scope mismatch: subdivision \"TELSTAR\" ≠ \"SCOTTISH MANOR\", neighborhood \"Telstar\" ≠ \"Scottish Manor\""
+                  ],
+                  "distanceMiles": 0.2907519079966136,
+                  "evidenceVerification": {
+                    "avmRatio": null,
+                    "flags": [
+                      "No comp AVM — sale price uncorroborated",
+                      "Sale is 342 days old — outside preferred 207-day window"
+                    ],
+                    "marketFit": "in_range",
+                    "pocketRatio": 0.8957343020238713,
+                    "preferredSaleAgeDays": 207,
+                    "priceCheck": "unverified",
+                    "saleAgeDays": 342,
+                    "staleness": "stale"
+                  },
+                  "isEnabled": false,
+                  "landAssessedValue": null,
+                  "lotSizeAcres": 0.25826446280991733,
+                  "lotSizeSquareFeet": 11250,
+                  "neighborhoodName": "Telstar",
+                  "pricePerSqft": 141.46341463414635,
+                  "propertyType": "SINGLE FAMILY RESIDENCE",
+                  "saleDate": "2025-10-28",
+                  "salePrice": 145000,
+                  "sameBlockGroup": false,
+                  "squareFeet": 1025,
+                  "subdivision": "TELSTAR",
+                  "yearBuilt": 1967
+                },
+                "contrib": 142326.34146341463,
+                "weight": 0.9245895724337001,
+                "tier": "unidentified",
+                "boundOnly": false
+              }
+            ],
+            "bracket": "all-bigger",
+            "conf": "low",
             "source": "T0 anchor",
-            "sqftRateSource": null
+            "landRateSource": null,
+            "sqftRateSource": null,
+            "anchorAddress": "1593 Jolly Green Ct",
+            "ceiling": 266993.9903846154,
+            "conditionAdj": null,
+            "healed": false,
+            "decisions": [
+              {
+                "compAddress": "1620 Rock Cut Rd",
+                "stage": "rescue",
+                "rule": "T1b soft-kill",
+                "verdict": "rescued",
+                "value": 0,
+                "note": "time-adj 0%"
+              },
+              {
+                "compAddress": "1593 Jolly Green Ct",
+                "stage": "rescue",
+                "rule": "T1b soft-kill",
+                "verdict": "rescued",
+                "value": 0,
+                "note": "time-adj 0%"
+              },
+              {
+                "compAddress": "2006 Winmar Ln",
+                "stage": "rescue",
+                "rule": "T1b soft-kill",
+                "verdict": "rescued",
+                "value": 0,
+                "note": "time-adj 0%"
+              },
+              {
+                "compAddress": "4206 Old Rock Cut Rd",
+                "stage": "rescue",
+                "rule": "T1b soft-kill",
+                "verdict": "rescued",
+                "value": 0,
+                "note": "time-adj 0%"
+              },
+              {
+                "compAddress": "1556 Rock Cut Rd",
+                "stage": "rescue",
+                "rule": "T1b soft-kill",
+                "verdict": "rescued",
+                "value": -10,
+                "note": "time-adj -10%"
+              },
+              {
+                "compAddress": "1732 Slate Rd",
+                "stage": "rescue",
+                "rule": "T1b soft-kill",
+                "verdict": "rescued",
+                "value": -10,
+                "note": "time-adj -10%"
+              },
+              {
+                "compAddress": "1144 Elaine Dr",
+                "stage": "pool",
+                "rule": "verification",
+                "verdict": "dropped",
+                "note": "Sale at $70/sf is 44% of current pocket $158/sf — below current pocket, verify market fit"
+              },
+              {
+                "compAddress": "1671 Lamont Ave",
+                "stage": "pool",
+                "rule": "verification",
+                "verdict": "dropped",
+                "note": "No comp AVM — sale price uncorroborated; Sale is 315 days old — outside preferred 207-day "
+              },
+              {
+                "compAddress": "4323 Edinburgh Way",
+                "stage": "pool",
+                "rule": "verification",
+                "verdict": "dropped",
+                "note": "No comp AVM — sale price uncorroborated; Sale is 371 days old — outside preferred 207-day "
+              },
+              {
+                "compAddress": "1620 Rock Cut Rd",
+                "stage": "pool",
+                "rule": "verification",
+                "verdict": "dropped",
+                "note": "No comp AVM — sale price uncorroborated; Sale at $105/sf is 66% of current pocket $158/sf "
+              },
+              {
+                "compAddress": "2006 Winmar Ln",
+                "stage": "pool",
+                "rule": "verification",
+                "verdict": "dropped",
+                "note": "No comp AVM — sale price uncorroborated; Sale at $107/sf is 67% of current pocket $158/sf "
+              },
+              {
+                "compAddress": "4206 Old Rock Cut Rd",
+                "stage": "pool",
+                "rule": "verification",
+                "verdict": "dropped",
+                "note": "No comp AVM — sale price uncorroborated; Sale is 216 days old — outside preferred 207-day "
+              },
+              {
+                "compAddress": "1556 Rock Cut Rd",
+                "stage": "pool",
+                "rule": "verification",
+                "verdict": "dropped",
+                "note": "No comp AVM — sale price uncorroborated; Sale is 300 days old — outside preferred 207-day "
+              },
+              {
+                "compAddress": "1732 Slate Rd",
+                "stage": "pool",
+                "rule": "verification",
+                "verdict": "dropped",
+                "note": "No comp AVM — sale price uncorroborated; Sale is 342 days old — outside preferred 207-day "
+              },
+              {
+                "compAddress": "1593 Jolly Green Ct",
+                "stage": "answer",
+                "rule": "anchor",
+                "verdict": "anchored",
+                "value": 266993.9903846154,
+                "note": "similarity 10.5"
+              }
+            ],
+            "harnessVersion": "og-2026.10.05.6",
+            "checks": [
+              {
+                "ruleId": "setb.trace_flag",
+                "message": "1620 Rock Cut Rd: rescued — Geo scope mismatch: city \"Conley\" ≠ \"Forest Park-Morrow\"; time-adj +0%"
+              },
+              {
+                "ruleId": "setb.trace_flag",
+                "message": "1593 Jolly Green Ct: rescued — Geo scope mismatch: neighborhood \"Jolly Green Forest\" ≠ \"Sco; time-adj +0%"
+              },
+              {
+                "ruleId": "setb.trace_flag",
+                "message": "2006 Winmar Ln: rescued — Geo scope mismatch: neighborhood \"Rocklane Estates\" ≠ \"Scott; time-adj +0%"
+              },
+              {
+                "ruleId": "setb.trace_flag",
+                "message": "4206 Old Rock Cut Rd: rescued — Geo scope mismatch: neighborhood \"Telstar\" ≠ \"Scottish Manor; time-adj +0%"
+              },
+              {
+                "ruleId": "setb.trace_flag",
+                "message": "1556 Rock Cut Rd: rescued — Geo scope mismatch: neighborhood \"Greenbriar\" ≠ \"Scottish Ma; time-adj −10%"
+              },
+              {
+                "ruleId": "setb.trace_flag",
+                "message": "1732 Slate Rd: rescued — Geo scope mismatch: subdivision \"TELSTAR\" ≠ \"SCOTTISH MANOR\"; time-adj −10%"
+              },
+              {
+                "ruleId": "evidence.market_fit.below_pocket",
+                "message": "1144 Elaine Dr: verification — Sale at $70/sf is 44% of current pocket $158/sf — below current pocket, verify market fit"
+              },
+              {
+                "ruleId": "evidence.sale_age.stale",
+                "message": "1671 Lamont Ave: verification — No comp AVM — sale price uncorroborated; Sale is 315 days old — outside preferred 207-day "
+              },
+              {
+                "ruleId": "evidence.sale_age.stale",
+                "message": "4323 Edinburgh Way: verification — No comp AVM — sale price uncorroborated; Sale is 371 days old — outside preferred 207-day "
+              },
+              {
+                "ruleId": "evidence.price.unverified",
+                "message": "1620 Rock Cut Rd: verification — No comp AVM — sale price uncorroborated; Sale at $105/sf is 66% of current pocket $158/sf "
+              },
+              {
+                "ruleId": "evidence.price.unverified",
+                "message": "2006 Winmar Ln: verification — No comp AVM — sale price uncorroborated; Sale at $107/sf is 67% of current pocket $158/sf "
+              },
+              {
+                "ruleId": "evidence.sale_age.stale",
+                "message": "4206 Old Rock Cut Rd: verification — No comp AVM — sale price uncorroborated; Sale is 216 days old — outside preferred 207-day "
+              },
+              {
+                "ruleId": "evidence.sale_age.stale",
+                "message": "1556 Rock Cut Rd: verification — No comp AVM — sale price uncorroborated; Sale is 300 days old — outside preferred 207-day "
+              },
+              {
+                "ruleId": "evidence.sale_age.stale",
+                "message": "1732 Slate Rd: verification — No comp AVM — sale price uncorroborated; Sale is 342 days old — outside preferred 207-day "
+              },
+              {
+                "ruleId": "setb.unlabeled_retail_evidence",
+                "message": "no ARV-tier labels — ARV driven on 2 retail-marked comp(s); 8 as-is-priced sale(s) excluded from ARV"
+              },
+              {
+                "ruleId": "setb.anchor",
+                "message": "anchored to 1593 Jolly Green Ct (similarity 10.5)"
+              },
+              {
+                "ruleId": "setb.supporting_range",
+                "message": "supporting range $223,738–$223,738 (1 comp(s) — bound, not blended)"
+              },
+              {
+                "ruleId": "setb.support_bound.high",
+                "message": "anchor above supporting range — top of evidence"
+              },
+              {
+                "ruleId": "setb.size_bracket",
+                "message": "bracketing: driver set is all-bigger — no size bracket"
+              }
+            ],
+            "attemptTrail": [
+              "attempt 1 — verified"
+            ],
+            "fallbackUsed": "sale_age_expansion"
           },
-          "buyPrice": 94174,
+          "buyPrice": 133104,
           "buyPricePercent": 42,
           "carryingCosts": 4475,
           "closingCosts": 17899,
@@ -28097,7 +30059,7 @@
           "locationPenaltyPercent": 0,
           "processGrade": "clean",
           "projectedProfit": 40000,
-          "projectedROI": 24.8,
+          "projectedROI": 20,
           "recommendation": "buy",
           "recommendationReason": "Good ROI (24.8%) with acceptable buy price (42% of ARV) — LOW confidence: comp evidence is thin or stale",
           "rehabCost": 67190,
@@ -28167,7 +30129,8 @@
           "totalCosts": 22374,
           "totalInvestment": 161364,
           "wholesaleFee": 10000,
-          "wholesalePrice": 84174
+          "wholesalePrice": 84174,
+          "statusReason": "Weak · low confidence — all driver comps are bigger than the subject."
         },
         "visionAnalysis": {
           "confidence": 38,
@@ -28234,8 +30197,14 @@
       }
     },
     "rules": {
-      "harnessVersion": "og-2026.10.04.1",
-      "pipelineVersion": "5.0"
+      "harnessVersion": "og-2026.10.05.6",
+      "pipelineVersion": "5.0",
+      "models": {
+        "fixture": "synthetic"
+      },
+      "providers": {
+        "property": "fixture"
+      }
     },
     "status": "completed",
     "userId": "8NLlVN9LtfODbvKJ6jpvk9W3a8pfMDep"

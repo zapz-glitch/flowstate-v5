@@ -26,18 +26,21 @@ const shared = {
 
 const { compFeatureMatches, featureState } = load('./feature-match.ts', { '@flowstate-api/shared': shared })
 
+// Physical features ride on the verified-source resolver output
+// (services/physical-characteristics → PhysicalCharacteristics). Only
+// status:'verified' values participate in match/mismatch.
+const v = (value) => ({ value, status: 'verified', sources: [{ source: 'redfin', value }] })
+const pc = (style, stories, constructionType, exterior, roof, foundation, garage, pool) => ({
+  style: v(style), stories: v(stories), constructionType: v(constructionType),
+  exterior: v(exterior), roof: v(roof), foundation: v(foundation),
+  garage: v(garage), pool: v(pool),
+})
+
 const subject = {
   subdivision: 'HIGHLAND HILLS SUB UN 17 NCB 1',
   neighborhoodName: 'High Country',
-  foundationType: 'Slab',
-  buildingStyle: 'Ranch',
-  storiesType: 'One Story',
-  constructionType: 'Frame',
-  exteriorWalls: 'Brick',
-  roofCover: 'Composition Shingle',
+  physicalCharacteristics: pc('Ranch', 1, 'Frame', 'Brick', 'Composition Shingle', 'Slab', 'Attached', true),
   buildingCondition: 'Average',
-  pool: 'In Ground',
-  garage: 'Attached',
   heating: 'Forced Air',
   cooling: 'Central',
   fireplacesCount: 1,
@@ -51,16 +54,8 @@ const subject = {
 const matchingComp = {
   subdivision: 'HIGHLAND HILLS BL 10854 UN 15',
   neighborhoodName: 'High Country',
-  foundationType: 'Concrete Slab',
-  buildingStyle: 'Ranch',
-  storiesType: '1 Story',
-  stories: 1,
-  constructionType: 'Frame',
-  exteriorWalls: 'Brick',
-  roofCover: 'Composition Shingle',
+  physicalCharacteristics: pc('Ranch', 1, 'Frame', 'Brick', 'Composition Shingle', 'Concrete Slab', 'Attached', true),
   buildingCondition: 'Good',
-  pool: 'In Ground',
-  garage: 'Attached',
   heating: 'Forced Air',
   cooling: 'Central',
   fireplacesCount: 1,
@@ -83,16 +78,8 @@ test('verified mismatches are red across the feature set', () => {
   const comp = {
     ...matchingComp,
     subdivision: 'OAKWOOD ESTATES',
-    foundationType: 'Pier & Beam',
-    buildingStyle: 'Colonial',
-    stories: 2,
-    constructionType: 'Masonry',
-    exteriorWalls: 'Stucco',
-    roofCover: 'Tile',
+    physicalCharacteristics: pc('Colonial', 2, 'Masonry', 'Stucco', 'Tile', 'Pier & Beam', 'Detached', false),
     buildingCondition: 'Poor',
-    pool: '',
-    garage: '',
-    carport: '',
     heating: 'Window Unit',
     cooling: 'None',
     fireplacesCount: 0,
@@ -111,7 +98,14 @@ test('verified mismatches are red across the feature set', () => {
 })
 
 test('missing data is unknown, never a false mismatch', () => {
-  const comp = { ...matchingComp, foundationType: null, stories: null, storiesType: null, pool: null, garage: null, carport: null, neighborhoodName: null, neighborhoodCode: null, subdivision: null }
+  const comp = {
+    ...matchingComp,
+    physicalCharacteristics: {
+      ...matchingComp.physicalCharacteristics,
+      foundation: v(null), stories: v(null), pool: v(null), garage: v(null),
+    },
+    neighborhoodName: null, neighborhoodCode: null, subdivision: null,
+  }
   const m = compFeatureMatches(comp, subject)
   for (const key of ['subdivision', 'foundation', 'stories', 'pool', 'garage', 'neighborhood']) {
     assert.equal(featureState(m, key), 'unknown', key)
@@ -131,6 +125,8 @@ test('sub-1000sf subject: comps ≤1000sf qualify regardless of ±250', () => {
 })
 
 test('unclassifiable foundation strings are not treated as mismatches', () => {
-  const m = compFeatureMatches({ ...matchingComp, foundationType: 'Unknown (with basement)' }, { ...subject, foundationType: 'Brick Veneer' })
+  const comp = { ...matchingComp, physicalCharacteristics: { ...matchingComp.physicalCharacteristics, foundation: v('Unknown (with basement)') } }
+  const subj = { ...subject, physicalCharacteristics: { ...subject.physicalCharacteristics, foundation: v('Brick Veneer') } }
+  const m = compFeatureMatches(comp, subj)
   assert.equal(featureState(m, 'foundation'), 'unknown')
 })

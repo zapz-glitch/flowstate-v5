@@ -2,14 +2,13 @@ import assert from 'node:assert/strict'
 import { evaluateB } from '@flowstate-api/shared/appraisal'
 
 /**
- * Median-only uplift — owner rule: with no ARV evidence the AVM uplift is
- * half-trusted. ARV lands halfway between the median evidence ceiling and
- * the subject's AVM instead of jumping the full gap.
+ * Median-only evidence — owner rule (f01f326): the band IS the answer.
+ * The AVM is removed from the ARV path entirely; it carries no weight.
  *
  * How this can fail:
- *  1. Median-only pool + AVM above ceiling → 50% of the gap, not 100%.
- *  2. AVM at or below the ceiling → stays at the ceiling (no uplift to halve).
- *  3. Real ARV evidence → full answer, rule doesn't touch it.
+ *  1. Median-only pool + AVM above ceiling → ARV stays at the ceiling
+ *     (no uplift — the pocket's own maintained sales are the evidence).
+ *  2. AVM below the ceiling → same ceiling, unchanged.
  */
 
 const subject = {
@@ -27,10 +26,10 @@ const medianComp = (address: string, salePrice: number) => ({
 })
 
 {
-  // Ceiling $240k, AVM $300k → 240 + 0.5×(300−240) = 270.
+  // Ceiling $240k, AVM $300k → AVM ignored, ARV = 240.
   const res = evaluateB(subject, [medianComp('1 Median St', 240000)])
-  assert.equal(res.arv, 270000, `expected 50% uplift → 270k, got ${res.arv}`)
-  assert.equal(res.source, 'median+50% AVM uplift')
+  assert.equal(res.arv, 240000, `expected median ceiling → 240k, got ${res.arv}`)
+  assert.equal(res.source, 'T0 anchor')
 }
 
 {
@@ -39,4 +38,4 @@ const medianComp = (address: string, salePrice: number) => ({
   assert.equal(res.arv, 240000)
 }
 
-console.log('set-b-median-uplift: 50% uplift with no ARV evidence, ceiling floor preserved')
+console.log('set-b-median-uplift: median ceiling stands — AVM carries no weight in the ARV path')

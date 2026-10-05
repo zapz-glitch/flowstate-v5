@@ -1,8 +1,8 @@
 {
   "recordId": "fixture-package-deed-noise",
   "jobId": "fixture-package-deed-noise",
-  "payloadHash": "a0a3ba91a30d55c4b05c7e56e3c9cd023350468cb1aeffa773134c3acb5287dc",
-  "exportedAt": "2026-10-05T00:00:00.000Z",
+  "payloadHash": "f2b9a64d5a8367ef5793defc0d94782faa581d2ce1adb7d10b99dea524bdc00c",
+  "exportedAt": "2026-10-05T14:10:19.329Z",
   "payload": {
     "recordVersion": "run-record.v1",
     "jobId": "fixture-package-deed-noise",
@@ -28,7 +28,7 @@
       "clip": "fixture-package-deed-noise"
     },
     "rules": {
-      "harnessVersion": "og-2026.10.05.1",
+      "harnessVersion": "og-2026.10.05.6",
       "pipelineVersion": "5.0",
       "valuationDate": "2026-10-05",
       "models": {
@@ -350,7 +350,8 @@
                 },
                 "contrib": 210000,
                 "weight": 1,
-                "tier": "arv"
+                "tier": "arv",
+                "boundOnly": false
               }
             ],
             "contribs": [
@@ -396,7 +397,8 @@
                 },
                 "contrib": 200000,
                 "weight": 1,
-                "tier": "arv"
+                "tier": "arv",
+                "boundOnly": false
               },
               {
                 "comp": {
@@ -440,7 +442,8 @@
                 },
                 "contrib": 200000,
                 "weight": 1,
-                "tier": "arv"
+                "tier": "arv",
+                "boundOnly": false
               },
               {
                 "comp": {
@@ -482,7 +485,8 @@
                 },
                 "contrib": 210000,
                 "weight": 1,
-                "tier": "arv"
+                "tier": "arv",
+                "boundOnly": false
               }
             ],
             "bracket": "ok",
@@ -493,7 +497,31 @@
             "anchorAddress": "clean Fixture Ct",
             "ceiling": 210000,
             "conditionAdj": null,
-            "healed": false
+            "healed": false,
+            "decisions": [
+              {
+                "compAddress": "p1 Fixture Ct",
+                "stage": "pool",
+                "rule": "verification",
+                "verdict": "dropped",
+                "note": "Same-day, same-price package deed — not an independent market comp"
+              },
+              {
+                "compAddress": "p2 Fixture Ct",
+                "stage": "pool",
+                "rule": "verification",
+                "verdict": "dropped",
+                "note": "Same-day, same-price package deed — not an independent market comp"
+              },
+              {
+                "compAddress": "clean Fixture Ct",
+                "stage": "answer",
+                "rule": "anchor",
+                "verdict": "anchored",
+                "value": 210000,
+                "note": "similarity 11.9"
+              }
+            ]
           },
           "checks": [
             {
@@ -698,7 +726,8 @@
               },
               "contrib": 210000,
               "weight": 1,
-              "tier": "arv"
+              "tier": "arv",
+              "boundOnly": false
             }
           ],
           "contribs": [
@@ -744,7 +773,8 @@
               },
               "contrib": 200000,
               "weight": 1,
-              "tier": "arv"
+              "tier": "arv",
+              "boundOnly": false
             },
             {
               "comp": {
@@ -788,7 +818,8 @@
               },
               "contrib": 200000,
               "weight": 1,
-              "tier": "arv"
+              "tier": "arv",
+              "boundOnly": false
             },
             {
               "comp": {
@@ -830,7 +861,8 @@
               },
               "contrib": 210000,
               "weight": 1,
-              "tier": "arv"
+              "tier": "arv",
+              "boundOnly": false
             }
           ],
           "bracket": "ok",
@@ -841,7 +873,31 @@
           "anchorAddress": "clean Fixture Ct",
           "ceiling": 210000,
           "conditionAdj": null,
-          "healed": false
+          "healed": false,
+          "decisions": [
+            {
+              "compAddress": "p1 Fixture Ct",
+              "stage": "pool",
+              "rule": "verification",
+              "verdict": "dropped",
+              "note": "Same-day, same-price package deed — not an independent market comp"
+            },
+            {
+              "compAddress": "p2 Fixture Ct",
+              "stage": "pool",
+              "rule": "verification",
+              "verdict": "dropped",
+              "note": "Same-day, same-price package deed — not an independent market comp"
+            },
+            {
+              "compAddress": "clean Fixture Ct",
+              "stage": "answer",
+              "rule": "anchor",
+              "verdict": "anchored",
+              "value": 210000,
+              "note": "similarity 11.9"
+            }
+          ]
         },
         "checks": [
           {
@@ -923,7 +979,8 @@
                 },
                 "contrib": 210000,
                 "weight": 1,
-                "tier": "arv"
+                "tier": "arv",
+                "boundOnly": false
               }
             ],
             "contribs": [
@@ -969,7 +1026,8 @@
                 },
                 "contrib": 200000,
                 "weight": 1,
-                "tier": "arv"
+                "tier": "arv",
+                "boundOnly": false
               },
               {
                 "comp": {
@@ -1013,7 +1071,8 @@
                 },
                 "contrib": 200000,
                 "weight": 1,
-                "tier": "arv"
+                "tier": "arv",
+                "boundOnly": false
               },
               {
                 "comp": {
@@ -1055,7 +1114,8 @@
                 },
                 "contrib": 210000,
                 "weight": 1,
-                "tier": "arv"
+                "tier": "arv",
+                "boundOnly": false
               }
             ],
             "bracket": "ok",
@@ -1067,7 +1127,31 @@
             "ceiling": 210000,
             "conditionAdj": null,
             "healed": false,
-            "harnessVersion": "og-2026.10.05.1",
+            "decisions": [
+              {
+                "compAddress": "p1 Fixture Ct",
+                "stage": "pool",
+                "rule": "verification",
+                "verdict": "dropped",
+                "note": "Same-day, same-price package deed — not an independent market comp"
+              },
+              {
+                "compAddress": "p2 Fixture Ct",
+                "stage": "pool",
+                "rule": "verification",
+                "verdict": "dropped",
+                "note": "Same-day, same-price package deed — not an independent market comp"
+              },
+              {
+                "compAddress": "clean Fixture Ct",
+                "stage": "answer",
+                "rule": "anchor",
+                "verdict": "anchored",
+                "value": 210000,
+                "note": "similarity 11.9"
+              }
+            ],
+            "harnessVersion": "og-2026.10.05.6",
             "checks": [
               {
                 "ruleId": "evidence.transaction.package_deed",
@@ -1085,7 +1169,8 @@
             "attemptTrail": [
               "attempt 1 — clean"
             ]
-          }
+          },
+          "statusReason": "Weak · low confidence — only 1 checked comp supports it."
         },
         "comps": {
           "total": 3,
