@@ -41,6 +41,8 @@ commits.
   - `apps/api/tests/set-b-distressed-floor.test.ts`
   - `apps/api/tests/recalculate-no-stale-arv.test.ts`
   - `apps/api/tests/eval-cache.test.ts`
+  - `apps/api/tests/comparable-retrieval.test.ts`
+  - `apps/api/tests/rural-pocket.test.ts`
 - `npx tsc --noEmit -p apps/api/tsconfig.json`
 - `npm run replay:snapshots` — frozen Bagpipe run record passes strict replay.
 - Local D1:
@@ -89,13 +91,15 @@ commits.
   save → reload parity in a browser.
 - Build the deferred independent rule auditor. Replay proves the result
   changed or did not; it does not prove every configured rule was followed.
-- Add more representative frozen fixtures: rural/large-lot, dense
-  subdivision, older/historic, distressed, withheld, and failure paths.
+- Add representative live fixtures: rural/large-lot, dense subdivision,
+  older/historic, and failure paths. Synthetic fixtures already cover
+  verified, floor, package-deed, distressed-only, and withheld outcomes.
 - No production migration or deploy has been run from this work.
 
 ## Known local fixture
 
-`fixtures/snapshots/bagpipe-2026-10-05.run-record.json` is the current strict
-replay contract. It proves the stored `og-2026.10.04.1` Bagpipe evidence
-reproduces under the current harness (`og-2026.10.05.1`) with hash
-verification. It does not prove appraisal accuracy against an actual sale.
+`fixtures/snapshots/bagpipe-2026-10-05.run-record.json` is the live-data
+strict replay contract. Five smaller synthetic fixtures cover verified,
+floor, package-deed, distressed-only, and withheld outcomes. Strict replay
+currently passes 6/6. These prove deterministic replay and hash integrity;
+they do not prove appraisal accuracy against actual sales.
