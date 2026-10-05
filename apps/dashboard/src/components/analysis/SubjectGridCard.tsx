@@ -5,7 +5,7 @@ import { cn } from '@/lib/utils'
 import { CopyButton } from '@/components/ui/copy-button'
 import type { SubjectData } from './shared-types'
 import { StreetViewImage } from './StreetViewImage'
-import { formatAddressCasing, formatBlockGroup, formatCensusTract, formatLotSize, formatShortDate, titleCaseWords } from './format-helpers'
+import { formatAddressCasing, formatBlockGroup, formatLotSize, formatShortDate, titleCaseWords } from './format-helpers'
 import { PropertyPermits } from './PropertyPermits'
 import { PhotoGallery } from './PhotoGallery'
 import { PhysicalCharacteristicsLine } from './PhysicalCharacteristicsLine'
@@ -19,12 +19,9 @@ interface SubjectGridCardProps {
 
 export function SubjectGridCard({ subject, isLoading, footer }: SubjectGridCardProps) {
   // Only geography we actually have · an empty value says nothing, so it is not drawn.
-  const tract = formatCensusTract(subject.censusTract)
   const blockGroup = formatBlockGroup(subject.censusBlockGroup)
   const geography = [
-    tract ? { label: 'Tract', value: tract, title: subject.censusTract ?? undefined } : null,
     blockGroup ? { label: 'Group', value: blockGroup, title: 'Census block group' } : null,
-    subject.neighborhoodName ? { label: 'Neighborhood', value: titleCaseWords(subject.neighborhoodName), title: undefined } : null,
   ].filter((item): item is { label: string; value: string; title: string | undefined } => item !== null)
 
   return (
@@ -74,6 +71,11 @@ export function SubjectGridCard({ subject, isLoading, footer }: SubjectGridCardP
                     <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-medium bg-primary/10 text-primary border border-primary/20">
                       {subject.subdivision}
                     </span>
+                  </div>
+                )}
+                {subject.neighborhoodName && (
+                  <div className="text-[11px] text-foreground-secondary mt-0.5">
+                    {titleCaseWords(subject.neighborhoodName)}
                   </div>
                 )}
                 {geography.length > 0 && (

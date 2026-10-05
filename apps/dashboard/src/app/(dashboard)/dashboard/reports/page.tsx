@@ -60,7 +60,6 @@ export default async function ReportsPage({
       {/* Header — same headline block as Property Search */}
       <div className="space-y-4">
         <div className="space-y-1">
-          <p className="mono-label mb-3">Flowstate | Property underwriting</p>
           <h1 className="text-heading-lg text-foreground tracking-[-0.03em] font-medium">Property Reports</h1>
         </div>
         <div className="flex items-center gap-3">
