@@ -13,9 +13,11 @@ import { PhysicalCharacteristicsLine } from './PhysicalCharacteristicsLine'
 interface SubjectGridCardProps {
   subject: SubjectData
   isLoading?: boolean
+  /** Extra lines inside the card, under the facts (comp rules, flood risk) */
+  footer?: React.ReactNode
 }
 
-export function SubjectGridCard({ subject, isLoading }: SubjectGridCardProps) {
+export function SubjectGridCard({ subject, isLoading, footer }: SubjectGridCardProps) {
   // Only geography we actually have · an empty value says nothing, so it is not drawn.
   const tract = formatCensusTract(subject.censusTract)
   const blockGroup = formatBlockGroup(subject.censusBlockGroup)
@@ -155,6 +157,7 @@ export function SubjectGridCard({ subject, isLoading }: SubjectGridCardProps) {
                 label="Subject construction"
               />
             </div>
+            {footer}
             <PropertyPermits permits={subject.permits} loading={isLoading} />
             {subject.photos && subject.photos.length > 0 && (
               <PhotoGallery photos={subject.photos} className="mt-2" />

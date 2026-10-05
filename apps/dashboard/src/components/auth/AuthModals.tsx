@@ -182,7 +182,7 @@ function SignInModal({ isOpen, onClose }: SignInModalProps) {
                 <button
                   type="submit"
                   disabled={isLoading}
-                  className="w-full py-2.5 px-4 bg-foreground text-background font-medium rounded-full hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-3"
+                  className="w-full py-2.5 px-4 bg-foreground text-background hover:bg-foreground/85 font-medium rounded-full disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-3"
                 >
                   {isLoading ? (
                     <>

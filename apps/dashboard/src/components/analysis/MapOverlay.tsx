@@ -1,6 +1,7 @@
 'use client'
 
 import { Droplets, AlertTriangle, ShieldCheck } from 'lucide-react'
+import { cn } from '@/lib/utils'
 
 interface MapOverlayProps {
   riskFlags?: string[] | null
@@ -31,6 +32,27 @@ export function MapLegend() {
 const ARV_LIST_FLAG = /^ARV (\$[\d,]+ (above|below) list price|at list price)$/
 // AVM-vs-ARV commentary is verdict meta, not a location risk — same rule.
 const AVM_FLAG = /as-is (AVM|estimate)|comp-evidenced ARV|as-is estimate/i
+
+/** Flood and location risks as one wrapping line · lives in the subject card */
+export function RiskLine({ riskFlags, floodZone }: MapOverlayProps) {
+  const flags = riskFlags?.filter((flag) => !ARV_LIST_FLAG.test(flag) && !AVM_FLAG.test(flag)) ?? []
+  if (!floodZone && flags.length === 0) return null
+  const flood = floodZone
+    ? floodZone.inFloodZone
+      ? (floodZone.source === 'listing' ? `Flood risk ${floodZone.zone ?? 'elevated'}` : `Flood zone${floodZone.zone ? ` ${floodZone.zone}` : ''}`)
+      : (floodZone.source === 'listing' ? `Flood risk ${floodZone.zone ?? 'low'}` : 'No flood zone')
+    : null
+  return (
+    <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px]">
+      {flood && (
+        <span className={cn('font-medium', floodZone?.inFloodZone ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400')}>{flood}</span>
+      )}
+      {flags.map((flag, i) => (
+        <span key={i} className="font-medium text-amber-600 dark:text-amber-400">{flag}</span>
+      ))}
+    </div>
+  )
+}
 
 export function MapOverlay({ riskFlags, floodZone }: MapOverlayProps) {
   const mapFlags = riskFlags?.filter((flag) => !ARV_LIST_FLAG.test(flag) && !AVM_FLAG.test(flag))

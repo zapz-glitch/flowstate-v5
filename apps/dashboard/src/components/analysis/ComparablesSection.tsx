@@ -183,20 +183,34 @@ export function ComparablesSection({
       subjectSubdivision && c.subdivision && subdivisionsMatch(subjectSubdivision, c.subdivision) ? 1 : 0
     const geoRank = (c: CompItem) => scopeRank(scopeLabel(c, subject))
 
+    // How far a comp sits from the rules: failed rules first (fewer is
+    // closer), then how far it misses on size, year and sale age.
+    const failedRules = (c: CompItem) =>
+      (c.appraisalRules?.filters ?? []).filter((f) => (f.status ?? (f.passed ? 'passed' : 'failed')) === 'failed').length
+    const miss = (c: CompItem) => {
+      const sf = c.squareFeet != null && subject?.squareFeet ? Math.abs(c.squareFeet - subject.squareFeet) / subject.squareFeet : 1
+      const yr = c.yearBuilt != null && subject?.yearBuilt ? Math.abs(c.yearBuilt - subject.yearBuilt) / 50 : 1
+      return sf + yr + (c.distanceMiles ?? 5) / 5
+    }
+    // The server's picks lead: the anchor, then the other drivers, then any
+    // other checked comp, then comps that pass the rules, then the rest.
+    const pickRank = (c: CompItem, i: number) =>
+      c.bRole === 'anchor' ? 0 : c.bRole === 'driver' ? 1 : isSel(c, i) ? 2 : c.bRole === 'pool' || (c.bRole == null && c.isEnabled === true) ? 3 : 4
+
     if (sortBy === 'default') {
-      // Tract matches always lead: tightest geography match (Group, Tract,
-      // Neighborhood) first; inside each, the selected block, then enabled,
-      // then excluded; then subdivision matches, then nearest first
+      // Server picks first, then every other comp from closest to the rules
+      // to furthest. Tighter geography breaks ties.
       return [...indexed].sort((a, b) => {
+        const pa = pickRank(a.comp, a.originalIndex), pb = pickRank(b.comp, b.originalIndex)
+        if (pa !== pb) return pa - pb
+        const fa = failedRules(a.comp), fb = failedRules(b.comp)
+        if (fa !== fb) return fa - fb
         const ga = geoRank(a.comp), gb = geoRank(b.comp)
         if (ga !== gb) return ga - gb
-        const ra = isSel(a.comp, a.originalIndex) ? 0 : a.comp.isEnabled ? 1 : 2
-        const rb = isSel(b.comp, b.originalIndex) ? 0 : b.comp.isEnabled ? 1 : 2
-        if (ra !== rb) return ra - rb
         const aMatch = subdivMatch(a.comp)
         const bMatch = subdivMatch(b.comp)
         if (aMatch !== bMatch) return bMatch - aMatch
-        return (a.comp.distanceMiles ?? 999) - (b.comp.distanceMiles ?? 999)
+        return (miss(a.comp) - miss(b.comp)) || ((a.comp.distanceMiles ?? 999) - (b.comp.distanceMiles ?? 999))
       })
     }
 

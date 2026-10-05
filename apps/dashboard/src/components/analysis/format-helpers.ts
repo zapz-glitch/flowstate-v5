@@ -245,7 +245,7 @@ export interface ScopeLabel {
   tone: ScopeTone
   /** Plain-words explanation for the tooltip */
   title: string
-  /** A name or census code that matches the subject · never a mismatch */
+  /** The comp's neighborhood name; the census tract when it has no name */
   matchedName: string | null
 }
 
@@ -276,7 +276,11 @@ export function scopeLabel(
   featureMatches?: FeatureMatch[],
 ): ScopeLabel {
   const b = comp.badges
-  const unverified = (title: string): ScopeLabel => ({ word: 'Unverified', tone: 'unverified', title, matchedName: null })
+  const rawName = comp.neighborhoodName || comp.subdivision || null
+  const unverified = (title: string): ScopeLabel => ({
+    word: 'Unverified', tone: 'unverified', title,
+    matchedName: rawName ? titleCaseWords(rawName) : formatCensusTract(comp.censusTract) ? `Tract ${formatCensusTract(comp.censusTract)}` : null,
+  })
   if (!b) return unverified('Geographic scope was not evaluated')
 
   const tractCode = formatCensusTract(comp.censusTract ?? subject?.censusTract)
@@ -288,7 +292,10 @@ export function scopeLabel(
       : comp.neighborhoodName && featureState(matches, 'neighborhood') === 'match'
         ? comp.neighborhoodName
         : null
-  const name = sharedName ? titleCaseWords(sharedName) : null
+  // The comp's own neighborhood name is what the card shows; the census
+  // tract number only stands in when the comp has no name on file.
+  const ownName = comp.neighborhoodName || comp.subdivision || null
+  const name = sharedName ? titleCaseWords(sharedName) : ownName ? titleCaseWords(ownName) : null
 
   const group = (): ScopeLabel => ({
     word: 'Group', tone: 'match', title: 'Same census block group as the subject',
@@ -315,11 +322,11 @@ export function scopeLabel(
       if (comp.censusTract && subject?.censusTract && comp.censusTract === subject.censusTract) return tract()
       return { word: 'Tract/Group', tone: 'match', title: 'Inside the subject census area · match level not recorded', matchedName: name }
     case 'equal':
-      return { word: 'Out =', tone: 'out', title: 'Outside the subject area · priced level with it', matchedName: null }
+      return { word: 'Out =', tone: 'out', title: 'Outside the subject area · priced level with it', matchedName: name }
     case 'above':
-      return { word: 'Out >', tone: 'out', title: 'Outside the subject area · priced above it', matchedName: null }
+      return { word: 'Out >', tone: 'out', title: 'Outside the subject area · priced above it', matchedName: name }
     case 'below':
-      return { word: 'Out <', tone: 'out', title: 'Outside the subject area · priced below it', matchedName: null }
+      return { word: 'Out <', tone: 'out', title: 'Outside the subject area · priced below it', matchedName: name }
     default:
       return unverified('Geographic scope could not be verified')
   }

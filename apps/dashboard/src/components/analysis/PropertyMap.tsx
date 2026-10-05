@@ -3,7 +3,7 @@
 import { useMemo, useCallback } from 'react'
 import dynamic from 'next/dynamic'
 import type { SubjectData, CompItem } from './shared-types'
-import { getCompKey } from './format-helpers'
+import { getCompKey, conditionLabel, priceClassLabel } from './format-helpers'
 import { isValidCoordinate } from '@/lib/property-map-geometry'
 
 const MapInner = dynamic(() => import('./PropertyMapInner'), {
@@ -24,6 +24,9 @@ export interface MapMarker {
   compKey?: string
   /** Sale price · drawn as a small label beside the dot */
   price?: number | null
+  /** Price class and photo condition · the two lines under the price */
+  priceClass?: string | null
+  condition?: string | null
 }
 
 interface PropertyMapProps {
@@ -71,6 +74,8 @@ export function PropertyMap({ subject, comps, selectedCompKeys, onMarkerSelect, 
             label: comp.address ?? 'Comparable',
             compKey,
             price: comp.salePrice ?? null,
+            priceClass: priceClassLabel(comp.badges?.price),
+            condition: comp.badges ? conditionLabel(comp.badges.condition) : null,
           })
         }
       }

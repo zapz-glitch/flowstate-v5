@@ -8,6 +8,7 @@ import type { MapCoordinate } from '@/lib/property-map-geometry'
 import { SubjectAerialMap, type SubjectAerialMapHandle } from './SubjectAerialMap'
 import { MapLegend } from './MapOverlay'
 import type { MapMarker } from './PropertyMap'
+import { emitMarkerHover } from './map-hover'
 
 type Panorama = NonNullable<Awaited<ReturnType<typeof resolveSubjectPanorama>>>
 // Comps are one neutral dot each · the price label beside it carries the
@@ -34,17 +35,22 @@ const markerIcon = (marker: MapMarker, active: boolean, index: number): google.m
   if (marker.type === 'subject') {
     return { path: google.maps.SymbolPath.CIRCLE, scale: 12, fillColor: fill, fillOpacity: 1, strokeColor: '#fff', strokeWeight: 2 }
   }
-  // Dot with the card number inside and the sale price in a pill beside it
-  const price = priceLabel(marker.price)
-  const pillW = price ? price.length * 7 + 10 : 0
-  const w = 24 + (price ? 4 + pillW : 0)
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="24" viewBox="0 0 ${w} 24">`
-    + `<circle cx="12" cy="12" r="10" fill="${fill}" stroke="#fff" stroke-width="2"/>`
-    + `<text x="12" y="12" text-anchor="middle" dominant-baseline="central" font-family="system-ui,sans-serif" font-size="10" font-weight="700" fill="#fff">${index}</text>`
-    + (price ? `<rect x="28" y="5" width="${pillW}" height="14" rx="7" fill="#171717" fill-opacity="0.92" stroke="#fff" stroke-width="1"/>`
-      + `<text x="${28 + pillW / 2}" y="12" text-anchor="middle" dominant-baseline="central" font-family="system-ui,sans-serif" font-size="10" font-weight="600" fill="#fff">${price}</text>` : '')
+  // Dot with the card number inside; beside it a small tag: sale price, then
+  // price class, then condition.
+  const lines = [priceLabel(marker.price), marker.priceClass ?? null, marker.condition ?? null].filter((line): line is string => !!line)
+  const tagW = lines.length ? Math.max(...lines.map((line) => line.length)) * 6.8 + 14 : 0
+  const tagH = lines.length * 12 + 6
+  const h = Math.max(24, tagH)
+  const w = 24 + (lines.length ? 4 + tagW : 0)
+  const cy = h / 2
+  const esc = (text: string) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;')
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">`
+    + `<circle cx="12" cy="${cy}" r="10" fill="${fill}" stroke="#fff" stroke-width="2"/>`
+    + `<text x="12" y="${cy}" text-anchor="middle" dominant-baseline="central" font-family="system-ui,sans-serif" font-size="10" font-weight="700" fill="#fff">${index}</text>`
+    + (lines.length ? `<rect x="28" y="${(h - tagH) / 2}" width="${tagW}" height="${tagH}" rx="5" fill="#171717" fill-opacity="0.92" stroke="#fff" stroke-width="1"/>`
+      + lines.map((line, i) => `<text x="${28 + tagW / 2}" y="${(h - tagH) / 2 + 9 + i * 12}" text-anchor="middle" dominant-baseline="central" font-family="system-ui,sans-serif" font-size="${i === 0 ? 10 : 9}" font-weight="${i === 0 ? 700 : 500}" fill="${i === 0 ? '#fff' : '#d4d4d4'}">${esc(line)}</text>`).join('') : '')
     + '</svg>'
-  return { url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`, anchor: new google.maps.Point(12, 12), size: new google.maps.Size(w, 24) }
+  return { url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`, anchor: new google.maps.Point(12, cy), size: new google.maps.Size(w, h) }
 }
 
 // Where the pointer is and where it last opened a comp from the map. Closing
@@ -94,13 +100,15 @@ function FlatMarkers({ markers, activeMarkerKey, onMarkerClick }: {
         openedAt.current = at(event)
         onMarkerClick(marker)
       })
-      // Hover opens the comp card · same handler, same dialog.
-      if (marker.type !== 'subject') {
+      // Hover shows the comp beside the subject (see map-hover) · a click
+      // still opens the full comp detail.
+      if (marker.type !== 'subject' && marker.compKey) {
+        const compKey = marker.compKey
         instance.addListener('mouseover', (event: google.maps.MapMouseEvent) => {
-          if (openedAt.current) return
-          openedAt.current = at(event)
-          onMarkerClick(marker)
+          const point = at(event)
+          if (point) emitMarkerHover({ compKey, x: point.x, y: point.y })
         })
+        instance.addListener('mouseout', () => emitMarkerHover(null))
       }
       return { marker, instance }
     })
@@ -333,11 +341,10 @@ function SubjectMap({ markers, onMarkerClick, activeMarkerKey }: PropertyMapInne
         {view === 'aerial' && (mapStyle !== '3d' || threeD !== 'loading') && <MapLegend />}
         {view === 'loading' && <div role="status" className="p-4 text-sm">{streetStatus}</div>}
       </div>
-      <div className="shrink-0 border-t border-border bg-background px-2 py-1 text-[10px] text-foreground-secondary" aria-live="polite">
-        <div className="truncate font-medium" title={original.label}>{original.label}</div>
-        {view === 'street' ? <><div>{streetStatus}</div><div>{location?.addressMatched ? 'Address matched.' : 'Using report coordinates; address not confirmed.'} Image may show neighboring buildings.</div></>
-          : view === 'aerial' ? <><div>{mapStyle !== '3d' ? 'Drag to explore · double-click or scroll to zoom · Subject to recenter' : threeD === 'unavailable' ? 'Satellite fallback · 3D unavailable' : '45° aerial · double-click to rotate · zoom in for Street View'}</div>{!location?.addressMatched && <div>Using report coordinates; address not confirmed.</div>}{!panorama && <div>{streetStatus}</div>}</> : null}
-      </div>
+      {/* Only real status shows under the map · no address or how-to text */}
+      {(view === 'street' || !panorama || !location?.addressMatched) && (view === 'street' || streetStatus) ? (
+        <div className="sr-only" aria-live="polite">{streetStatus}</div>
+      ) : null}
     </div>
   )
 }

@@ -72,6 +72,23 @@ export interface UseAnalysisEvaluationReturn {
 
 // ─── Hook ───────────────────────────────────────────────────────────────────
 
+/**
+ * Is this comp's box checked? A checked box means "this sale is in the ARV
+ * calculation". Fresh from the server that is the anchor and the other
+ * drivers, not every comp that passed the rules. Once the user has changed
+ * the selection, the server's enabled set IS their selection.
+ */
+function isCheckedForArv(
+  comp: { isEnabled?: boolean; bRole?: string | null },
+  items: Array<{ bRole?: string | null }>,
+  manual: boolean,
+): boolean {
+  if (comp.isEnabled !== true) return false
+  if (manual) return true
+  const hasRoles = items.some((c) => c.bRole === 'anchor' || c.bRole === 'driver')
+  return hasRoles ? comp.bRole === 'anchor' || comp.bRole === 'driver' : true
+}
+
 export function useAnalysisEvaluation({
   data: inputData,
   stickyBarRootMargin = '-60px 0px 0px 0px',
@@ -182,7 +199,9 @@ export function useAnalysisEvaluation({
         toast.error('This report has no saved comparable IDs. Run a new analysis first.')
         return
       }
-      const selected = new Set(items.filter(comp => comp.isEnabled).map(comp => comp.id!))
+      // Start from the boxes that are checked now — the comps in the ARV —
+      // then add or remove the one the user clicked.
+      const selected = new Set(items.filter(comp => isCheckedForArv(comp, items, data?.manualCompSelection != null)).map(comp => comp.id!))
       if (selected.has(target.id)) selected.delete(target.id)
       else selected.add(target.id)
       if (!selected.size) {
@@ -442,7 +461,8 @@ export function useAnalysisEvaluation({
   const isRecalculated = !pythonAuthoritative && (settingsChanged || (compOverride?.isManual ?? false))
   const effectiveComps = displayComps ?? data?.comps
   const authoritativeOverride = useMemo(() => pythonAuthoritative && data?.comps?.items ? {
-    selectedCompKeys: new Set(data.comps.items.flatMap((comp, index) => comp.isEnabled ? [getCompKey(comp, index)] : [])),
+    selectedCompKeys: new Set(data.comps.items.flatMap((comp, index) =>
+      isCheckedForArv(comp, data.comps!.items!, data.manualCompSelection != null) ? [getCompKey(comp, index)] : [])),
     isManual: activeSelection?.isManual ?? data.manualCompSelection != null,
   } : null, [pythonAuthoritative, data?.comps?.items, data?.manualCompSelection, activeSelection?.isManual])
 

@@ -42,8 +42,10 @@ export interface AnalysisResultLayoutProps {
   /** Prior session disposition — hero renders a dated warning chip */
   disposition?: { workflow: OfferWorkflow; at: number } | null
   /** 'left' = the page draws the valuation box elsewhere (under the map);
-   *  the subject card pins at the top of this column instead. */
+   *  this column is then the subject card and the comparables only. */
   valuationPlacement?: 'inline' | 'left'
+  /** Extra lines for the subject card (flood and location risks) */
+  subjectExtras?: React.ReactNode
 }
 
 export function AnalysisResultLayout({
@@ -57,6 +59,7 @@ export function AnalysisResultLayout({
   onOfferWorkflow,
   disposition,
   valuationPlacement = 'inline',
+  subjectExtras,
 }: AnalysisResultLayoutProps) {
   const {
     subject,
@@ -77,18 +80,20 @@ export function AnalysisResultLayout({
   const selectedCompKeys = compOverride?.selectedCompKeys
   const isManual = compOverride?.isManual ?? false
 
+  // The comp rules this run used, on one line inside the subject card. The
+  // server's grade sentence stays server-side; only the rules are shown.
+  const concessions = comps?.retrieval?.paramFlex?.concessions ?? []
+  const rulesLine = subject && !isStreaming && comps?.insufficientComps !== true && comps?.retrieval?.paramFlex != null ? (
+    <div className="mt-2 text-[11px] text-foreground-secondary tabular-nums" aria-label="Comp rules used">
+      {concessions.length > 0 ? concessions.map(compactConcession).join(' · ') : 'Strict rules'}
+    </div>
+  ) : null
+  const subjectFooter = (rulesLine || subjectExtras) ? <>{rulesLine}{subjectExtras}</> : null
+
   return (
     <>
-      {/* Subject property · pins at the top when the valuation sits under the map */}
-      {subject && (
-        valuationPlacement === 'left' ? (
-          <div data-pane-sticky className="sticky z-10 top-0 bg-background">
-            <SubjectGridCard subject={subject} isLoading={isStreaming} />
-          </div>
-        ) : (
-          <SubjectGridCard subject={subject} isLoading={isStreaming} />
-        )
-      )}
+      {/* Subject property */}
+      {subject && <SubjectGridCard subject={subject} isLoading={isStreaming} footer={subjectFooter} />}
 
       {/* Valuation panel — sticky so it's always visible while scrolling comps */}
       {valuationPlacement === 'left' ? null : valuation ? (
@@ -161,24 +166,6 @@ export function AnalysisResultLayout({
           </div>
         )
       })() : null}
-
-      {/* Result evidence — the server reason plus the short rules that made it. */}
-      {subject && !isStreaming && comps?.insufficientComps !== true && comps?.retrieval?.paramFlex != null && (() => {
-        const concessions = comps.retrieval.paramFlex.concessions ?? []
-        return (
-          <div className="border border-border rounded-sm px-2.5 py-2 text-foreground">
-            <div className="text-[9px] font-semibold uppercase tracking-wider text-foreground-tertiary">Results</div>
-            <div className="text-[10px] font-medium mt-1">
-              {valuation?.statusReason ?? `Result ${valuation?.resultGrade ?? 'unknown'}`}
-            </div>
-            <div className="mt-1 space-y-0.5 text-[10px] text-foreground-secondary tabular-nums">
-              {concessions.length > 0
-                ? concessions.map((rule) => <div key={rule}>{compactConcession(rule)}</div>)
-                : <div>Strict rules</div>}
-            </div>
-          </div>
-        )
-      })()}
 
       {notesSlot}
 

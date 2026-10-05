@@ -3,11 +3,12 @@
 import type { OfferWorkflow } from '@/lib/client-api'
 import { isValidCoordinate } from '@/lib/property-map-geometry'
 
-import { useState, useCallback, type ReactNode } from 'react'
+import { useState, useCallback, useEffect, useRef, type ReactNode } from 'react'
 import { cn } from '@/lib/utils'
 import { useEvaluation } from '@/hooks/use-evaluation'
 import { ResizableLayout } from '@/components/ui/resizable'
-import { MapOverlay } from './MapOverlay'
+import { RiskLine } from './MapOverlay'
+import { CompHoverPanel } from './CompHoverPanel'
 import { PropertyMap } from './PropertyMap'
 import { AnalysisResultLayout } from './AnalysisResultLayout'
 import { DealSummaryHero } from './DealSummaryHero'
@@ -52,6 +53,10 @@ export interface AnalysisPageLayoutProps {
   disposition?: { workflow: OfferWorkflow; at: number } | null
 }
 
+const VALUATION_HEIGHT_KEY = 'flowstate-valuation-height'
+const VALUATION_MIN = 96
+const MAP_MIN = 220
+
 export function AnalysisPageLayout({
   mapComps,
   onMarkerSelect,
@@ -79,7 +84,32 @@ export function AnalysisPageLayout({
   }, [])
   const mapActiveKey = hoveredCompKey ?? activeMarkerKey ?? null
 
+  // ─── Valuation box height · drag the bar above it to give the map more room ──
+  const leftColumn = useRef<HTMLDivElement>(null)
+  const [valuationHeight, setValuationHeight] = useState<number | null>(null)
+  useEffect(() => {
+    const saved = Number(localStorage.getItem(VALUATION_HEIGHT_KEY))
+    if (saved > 0) setValuationHeight(saved)
+  }, [])
+  const startValuationDrag = useCallback((event: React.MouseEvent) => {
+    event.preventDefault()
+    const column = leftColumn.current
+    if (!column) return
+    const move = (e: MouseEvent) => {
+      const rect = column.getBoundingClientRect()
+      // Keep every valuation row readable, and leave the map a usable height
+      const next = Math.round(Math.max(VALUATION_MIN, Math.min(rect.bottom - e.clientY, rect.height - MAP_MIN)))
+      setValuationHeight(next)
+      try { localStorage.setItem(VALUATION_HEIGHT_KEY, String(next)) } catch { /* private mode */ }
+    }
+    const stop = () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', stop); document.body.style.cursor = '' }
+    document.body.style.cursor = 'row-resize'
+    window.addEventListener('mousemove', move)
+    window.addEventListener('mouseup', stop)
+  }, [])
+
   const resultProps = {
+    subjectExtras: <RiskLine riskFlags={riskFlags} floodZone={floodZone} />,
     onCompHover: handleCompHover,
     valuationCardRef,
     statusLabel,
@@ -102,9 +132,9 @@ export function AnalysisPageLayout({
     <ResizableLayout
       className="flex-1 min-h-0 mx-4 sm:mx-6 mt-3"
       left={
-        <div className="h-full relative flex flex-col gap-3">
-          {/* Map on top, valuation box under it · both stay put while the
-              comps scroll on the right */}
+        <div ref={leftColumn} className="h-full relative flex flex-col">
+          {/* Map on top, reaching right down to the valuation box · both stay
+              put while the comps scroll on the right */}
           <div className="relative flex-1 min-h-0 flex flex-col">
             <PropertyMap
               subject={subject!}
@@ -113,21 +143,39 @@ export function AnalysisPageLayout({
               onMarkerSelect={onMarkerSelect}
               activeMarkerKey={mapActiveKey}
             />
-            <MapOverlay riskFlags={riskFlags} floodZone={floodZone} />
           </div>
           {!loading && valuation && (
-            <div ref={valuationCardRef as React.RefObject<HTMLDivElement>} className="flex-shrink-0 overflow-y-auto max-h-[55%]">
-              <DealSummaryHero
-                valuation={valuation}
-                isRecalculated={isRecalculated}
-                onOpenSettings={onOpenSettings}
-                onRerun={onRerun}
-                rerunning={rerunning}
-                onOfferWorkflow={onOfferWorkflow}
-                disposition={disposition}
-              />
-            </div>
+            <>
+              {/* Drag bar · pull down to shrink the valuation box, up to grow it */}
+              <div
+                role="separator"
+                aria-orientation="horizontal"
+                aria-label="Resize the valuation box"
+                title="Drag to resize the valuation box"
+                onMouseDown={startValuationDrag}
+                onDoubleClick={() => { setValuationHeight(null); try { localStorage.removeItem(VALUATION_HEIGHT_KEY) } catch { /* private mode */ } }}
+                className="hidden lg:flex flex-shrink-0 h-2 cursor-row-resize items-center justify-center group no-print"
+              >
+                <span className="h-0.5 w-10 rounded-full bg-border group-hover:bg-emerald-500/60 transition-colors" />
+              </div>
+              <div
+                ref={valuationCardRef as React.RefObject<HTMLDivElement>}
+                className="flex-shrink-0 overflow-y-auto max-h-[60%]"
+                style={{ containerType: 'inline-size', height: valuationHeight ?? undefined }}
+              >
+                <DealSummaryHero
+                  valuation={valuation}
+                  isRecalculated={isRecalculated}
+                  onOpenSettings={onOpenSettings}
+                  onRerun={onRerun}
+                  rerunning={rerunning}
+                  onOfferWorkflow={onOfferWorkflow}
+                  disposition={disposition}
+                />
+              </div>
+            </>
           )}
+          <CompHoverPanel />
         </div>
       }
       right={

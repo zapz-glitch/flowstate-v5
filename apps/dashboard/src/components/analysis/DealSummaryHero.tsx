@@ -8,9 +8,6 @@ import type { ValuationData } from './shared-types'
 import { formatValuationNumber as fmt, formatMoneyThousands as fmtK } from './valuation-number'
 import { formatHeadlineMoney } from './headline-money'
 
-/** Status chip · neutral gray with a border, like the subject card's tags */
-const NEUTRAL_CHIP = 'text-[8px] font-medium px-1.5 py-0.5 rounded uppercase tracking-wide bg-secondary text-foreground-secondary border border-border'
-
 /** Header action · a plain word, same pill as the comp tier row */
 const ACTION = 'text-[11px] px-2 py-0.5 rounded whitespace-nowrap text-foreground-tertiary transition-colors'
 const ACTION_HOVER = 'hover:text-foreground hover:bg-secondary'
@@ -94,27 +91,6 @@ export function DealSummaryHero({ valuation, isRecalculated, onOpenSettings, onR
               title="This property was already dispositioned this session"
             >
               {disposition.workflow === 'prep_offer' ? 'Offer prepped' : disposition.workflow === 'no_offer' ? 'No offer' : 'No margin'} · {new Date(disposition.at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} {new Date(disposition.at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
-            </span>
-          )}
-          {valuation.confidence && (
-            <span
-              className={NEUTRAL_CHIP}
-              title={valuation.statusReason ?? (valuation.confidenceReasons ?? []).join('\n')}
-            >
-              {valuation.confidence === 'low'
-                ? 'Low confidence'
-                : valuation.confidence === 'medium'
-                  ? 'Medium confidence'
-                  : 'High confidence'}
-            </span>
-          )}
-          {/* Appraisal result grade · its own axis, never a comp condition word */}
-          {valuation.resultGrade && (
-            <span
-              className={NEUTRAL_CHIP}
-              title={valuation.statusReason ?? (valuation.processGrade ? `Appraisal result grade · process ${valuation.processGrade}` : 'Appraisal result grade')}
-            >
-              Result {valuation.resultGrade}
             </span>
           )}
         </div>
