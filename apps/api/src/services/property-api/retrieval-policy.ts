@@ -228,3 +228,34 @@ export function isProvablyDeadComp(
   }
   return false
 }
+
+/** Free-data ordering for paid enrichment waves. Tightest proven scope wins;
+ * distance and sale recency break ties inside the same scope. */
+export function enrichmentRankScore(
+  subject: Pick<NormalizedProperty, 'censusBlockGroup' | 'censusTract' | 'subdivision' | 'neighborhoodName'>,
+  comp: Pick<NormalizedComparable, 'sameBlockGroup' | 'censusBlockGroup' | 'censusTract' | 'subdivision' | 'neighborhoodName' | 'distanceMiles' | 'saleDate'>,
+  nowMs = Date.now(),
+): number {
+  const scopeScore = comp.sameBlockGroup === true ||
+    (subject.censusBlockGroup != null && comp.censusBlockGroup === subject.censusBlockGroup)
+    ? 0
+    : subject.censusTract != null && comp.censusTract === subject.censusTract
+      ? 1
+      : (subject.subdivision != null && comp.subdivision === subject.subdivision) ||
+          (subject.neighborhoodName != null && comp.neighborhoodName === subject.neighborhoodName)
+        ? 2
+        : 3
+  const distance = comp.distanceMiles ?? 99
+  const ageDays = comp.saleDate ? Math.max(0, (nowMs - new Date(comp.saleDate).getTime()) / 86_400_000) : 99_999
+  return scopeScore * 1_000_000 + distance * 1_000 + Math.min(ageDays, 999)
+}
+
+export function rankEnrichmentCandidates<T extends NormalizedComparable>(
+  subject: NormalizedProperty,
+  comps: T[],
+  nowMs = Date.now(),
+): T[] {
+  return comps.slice().sort((a, b) =>
+    enrichmentRankScore(subject, a, nowMs) - enrichmentRankScore(subject, b, nowMs) ||
+    String(a.id).localeCompare(String(b.id)))
+}

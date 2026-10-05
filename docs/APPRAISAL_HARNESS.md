@@ -142,7 +142,6 @@ archive fields are checked separately.
 ## 9. Known open work
 
 - Broader bulk-sale detection beyond same-day same-price package deeds.
-- Best-six/next-six enrichment waves.
 - More frozen fixtures for rural, withheld, distressed, and failure paths.
 - Independent rule auditor.
 - Browser/server parity after Claude's UI work finishes.

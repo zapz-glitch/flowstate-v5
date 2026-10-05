@@ -74,6 +74,9 @@ commits.
 - **Rural wide-scope evidence must prove market fit.** Subject AVM/sqft is
   used first; same-scope comp AVMs can establish the reference when the
   subject AVM is missing; missing evidence cannot rescue an adjacent comp.
+- **Paid enrichment runs in ranked waves.** Dead and package-deed comps skip
+  paid calls; live candidates enrich six at a time, stop after three usable
+  ARV-evidence comps, and cap at 25 paid enrichments.
 
 ## Still open
 
@@ -82,8 +85,6 @@ commits.
   outlier policy remain open.
 - Audit any remaining condition reads outside `bCondTier`; Set-B now trusts
   structured condition and confidence before legacy `tier:*` text.
-- Finish the approved enrichment waves: best six, then next six, stop when
-  enough defensible evidence exists.
 - After Claude's UI pass, verify server → dashboard → selection change →
   save → reload parity in a browser.
 - Build the deferred independent rule auditor. Replay proves the result

@@ -25,8 +25,10 @@ import {
   resolveCandidateLimit,
   expansionRefetchRadius,
   isProvablyDeadComp,
+  rankEnrichmentCandidates,
   type ComparablesRetrievalMeta,
 } from '../services/property-api/retrieval-policy'
+import { packageDeedIds } from '../services/appraisal/verification'
 import { DEFAULT_FILTERS, evaluateComparable, type AppraisalFilter } from '../services/appraisal'
 import { flexNumericFilters, isValueEquivalent } from '../services/appraisal/evaluator'
 import { arvEvidence } from '../services/evaluation'
@@ -731,8 +733,10 @@ export class AnalysisJobDO {
       // look competitive (dead comps don't merit it) so "unverified" can't
       // silently read as "passes" downstream. Verified: half a pool failed
       // Census and two cross-boundary comps enabled without geography.
+      const packageIdsForGeo = packageDeedIds(comps)
       const censusMisses = comps.filter((c, i) =>
-        !geos[i] && c.latitude != null && c.salePrice != null && c.salePrice >= 10_000 && c.squareFeet != null)
+        !geos[i] && !packageIdsForGeo.has(c.id) && !isDeadComp(c) &&
+        c.latitude != null && c.salePrice != null && c.salePrice >= 10_000 && c.squareFeet != null)
       if (censusMisses.length > 0) {
         const geoEnriched = await propertyApi.enrichComparables(censusMisses, { concurrency: 5 })
           .catch(() => [] as NormalizedComparable[])
@@ -763,32 +767,38 @@ export class AnalysisJobDO {
       // Value-equivalent crossers — geocoded comps in a different tract
       // whose pocket sits within ±10% $/sf of the subject's. Census is
       // preferred; under flex (i≥1) these become enrichment candidates.
+      const packageIds = packageDeedIds(comps)
+      const spendable = (c: NormalizedComparable) =>
+        !packageIds.has(c.id) && !isDeadComp(c)
       const geoPasserIds = new Set(geoPassers.map((c) => c.id))
       const flexCrossers = comps.filter((c, i) => {
         const g = geos[i]
-        if (!g || geoPasserIds.has(c.id)) return false
+        if (!g || geoPasserIds.has(c.id) || !spendable(c)) return false
         return isValueEquivalent(property, c)
       })
       const FLEX_TIERS = [1, 1.15, 1.25, 1.35, 1.5, 1.75, 2, 2.5, 3, 4, 5]
+      const ENRICH_WAVE_SIZE = 6
+      const ENOUGH_ARV_EVIDENCE = 3
+      const MAX_PAID_ENRICHMENTS = 25
       const enrichedById = new Map<string, NormalizedComparable>()
-      for (let i = 0; i < FLEX_TIERS.length; i++) {
+      for (let i = 0; i < FLEX_TIERS.length && enrichedById.size < MAX_PAID_ENRICHMENTS; i++) {
         // Deepest stretch wins across gate invocations (initial pool and
         // expansion refetch share the record).
         paramFlexFactor = Math.max(paramFlexFactor, FLEX_TIERS[i])
         paramFlexExtensions = Math.max(paramFlexExtensions, i)
         const tierFilters = flexNumericFilters(filters, FLEX_TIERS[i])
         const candidates = i === 0 ? geoPassers : [...geoPassers, ...flexCrossers]
-        const newPassers = candidates.filter((c) => {
-          if (enrichedById.has(c.id)) return false
+        const newPassers = rankEnrichmentCandidates(property, candidates.filter((c) => {
+          if (enrichedById.has(c.id) || !spendable(c)) return false
           return !evaluateComparable(property, c, tierFilters, []).shouldDisable
-        })
+        }), nowMs).slice(0, Math.min(ENRICH_WAVE_SIZE, MAX_PAID_ENRICHMENTS - enrichedById.size))
         if (newPassers.length > 0) {
-          const enriched = await propertyApi.enrichComparables(newPassers, { concurrency: 10 })
+          const enriched = await propertyApi.enrichComparables(newPassers, { concurrency: 6 })
           for (const e of enriched) enrichedById.set(e.id, e)
           candidatesEnriched += enriched.filter((c) => c.isEnriched).length
         }
         const enrichedSoFar = [...geoPassers, ...flexCrossers].filter((c) => enrichedById.has(c.id))
-        if (enrichedSoFar.some((c) => arvEvidence(c, property.avmValue) != null)) break
+        if (enrichedSoFar.filter((c) => arvEvidence(c, property.avmValue) != null).length >= ENOUGH_ARV_EVIDENCE) break
         if (enrichedSoFar.length >= geoPassers.length + flexCrossers.length) break
       }
       retrieval.paramFlex = {

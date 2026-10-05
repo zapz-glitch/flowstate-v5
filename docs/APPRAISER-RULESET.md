@@ -55,12 +55,17 @@ should withhold or weaken the result rather than invent support.
 13. **Process grade is attempt health.** `clean`, `retried`, and
     `unverified` describe the evaluation path only. Hash/archive integrity is
     reported separately.
-14. **Every run must be replayable.** The run record stores request, rules,
+14. **Enrichment is staged.** Free evidence ranks candidates first:
+    block group, tract, neighborhood, then nearest. Provably dead or noisy
+    comps do not receive paid enrichment. The ladder enriches six candidates
+    at a time, stops once three usable ARV-evidence comps exist, and caps at
+    25 paid enrichments.
+15. **Every run must be replayable.** The run record stores request, rules,
     subject, comp evidence, every Set-B attempt, result, hash, model/runtime
     context, and archive status.
-15. **Actual outcomes do not rewrite predictions.** Later verified sale
+16. **Actual outcomes do not rewrite predictions.** Later verified sale
     results are stored separately for calibration and audit.
-16. **Dashboard/server parity.** The server computes the appraisal and
+17. **Dashboard/server parity.** The server computes the appraisal and
     downstream offer values. The dashboard renders and submits selections;
     it does not calculate a second ARV.
 

@@ -6,10 +6,13 @@
  * 3. Provider retrieval order does not determine ARV selection.
  * 4. Provider truncation is visible in the audit trail.
  * 5. Radius-bound expansion triggers a refetch, not an incomplete pool.
- * 6. A bigger pool does not enrich every candidate — only provably-dead
- *    comps (never-relaxed rules) skip the paid property-detail call.
+ * 6. A bigger pool does not enrich every candidate — provably-dead and
+ *    package-deed comps skip paid calls; live candidates enrich in ranked
+ *    six-comp waves.
  * 7. Pre-cap-vintage subjects (e.g. built <1970) get a last-resort
  *    one-sided year cap when no year-built tier finds comps.
+ * 8. Free evidence ranks same block group, then tract, then neighborhood,
+ *    then nearest out-of-scope candidate.
  */
 import assert from 'node:assert/strict'
 import { createPropertyApi } from '../src/services/property-api'
@@ -19,6 +22,7 @@ import {
   resolveCandidateLimit,
   expansionRefetchRadius,
   isProvablyDeadComp,
+  rankEnrichmentCandidates,
   CORELOGIC_MAX_COMPS,
 } from '../src/services/property-api/retrieval-policy'
 import type { ComparablesSearchParams } from '../src/services/property-api/types'
@@ -232,7 +236,8 @@ assert.ok(
 )
 
 // The rule is strictly for pre-cap stock: a 1975 subject never reaches
-// the vintage tier — same pool stays insufficient.
+// the vintage tier. A later era-class fallback may still admit the comps —
+// that admission must be audited as era-class, not year_built_cap.
 const modernSubject: NormalizedProperty = { ...subject, yearBuilt: 1975 }
 const modernPool = [
   mkComp('m-90a', { yearBuilt: 1990 }),
@@ -240,16 +245,25 @@ const modernPool = [
   mkComp('m-90c', { yearBuilt: 1990 }),
 ]
 const mr = service.evaluateWithFallback(modernSubject, modernPool, { filters: vintageFilters, adjustments: [] })
-assert.equal(mr.insufficientComps, true, 'vintage cap never applies to post-cap subjects')
+assert.equal(mr.insufficientComps, false)
+assert.ok(mr.fallbackReason?.includes('era-class'))
+assert.ok(
+  mr.comparables.every((c) => !c.evaluation?.filterResults.some((f) => f.type === 'year_built_cap' && f.passed === true)),
+  'post-cap admission is not a vintage-cap pass',
+)
 
-// Disabled config row → no vintage tier, identical vintage pool is insufficient.
+// Disabled config row → no vintage tier; an era-class fallback may still
+// admit comps, but it cannot claim a vintage-cap pass.
 const vrOff = service.evaluateWithFallback(vintageSubject, vintagePool, {
   filters: vintageFilters.map((f) =>
     f.type === 'vintage_year_cap' ? { ...f, enabled: false } : f
   ),
   adjustments: [],
 })
-assert.equal(vrOff.insufficientComps, true, 'disabling the row disables the tier')
+assert.ok(
+  vrOff.comparables.every((c) => !c.evaluation?.filterResults.some((f) => f.type === 'year_built_cap' && f.passed === true)),
+  'disabling the row disables the vintage-cap pass',
+)
 
 // Pruning honors the cap one-sidedly for pre-cap subjects.
 const vintageThresholds = { saleAgeDays: 548, sqftDiff: 250, maxYearDiff: 14, vintageYearCap: 1970 }
