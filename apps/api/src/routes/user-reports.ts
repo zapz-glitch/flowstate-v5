@@ -533,7 +533,27 @@ userReports.put('/:jobId', async (c) => {
 
   // Update report data
   const updates: Record<string, unknown> = {}
-  if (body.fullResponseJson !== undefined) updates.fullResponseJson = body.fullResponseJson
+  if (body.fullResponseJson !== undefined) {
+    // The server owns the evaluation. A page that autosaves an older copy
+    // (settings, notes) must never roll back a newer server calculation —
+    // that reverted the comp selection and made the next toggle fail as
+    // "report changed". Keep the saved comps, valuation and revision when
+    // they are newer than what the page sent.
+    let nextJson = body.fullResponseJson
+    try {
+      const savedNow = JSON.parse(report.fullResponseJson ?? '{}')
+      const incoming = JSON.parse(body.fullResponseJson)
+      if ((savedNow.evaluationRevision ?? 0) > (incoming.evaluationRevision ?? 0)) {
+        nextJson = JSON.stringify({
+          ...incoming,
+          comps: savedNow.comps,
+          valuation: savedNow.valuation,
+          evaluationRevision: savedNow.evaluationRevision,
+        })
+      }
+    } catch { /* unparseable either side — store what was sent, as before */ }
+    updates.fullResponseJson = nextJson
+  }
   if (body.arv !== undefined) updates.arv = body.arv
   if (body.maxAllowableOffer !== undefined) updates.maxAllowableOffer = body.maxAllowableOffer
   if (body.estimatedRepairs !== undefined) updates.estimatedRepairs = body.estimatedRepairs

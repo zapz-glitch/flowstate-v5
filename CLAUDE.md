@@ -9,6 +9,10 @@ repo root — the appraiser gate, address runs as read-only evaluations, bounded
 diagnosis before edits, server/dashboard symmetry, and the end-to-end approval
 gate. Read it before any evaluator work.
 
+The product rules for the evaluator (filter ladder, same-area, ARV price
+groups, checked-box meaning) and the fast address test are in
+`docs/EVAL-PLAYBOOK.md`. Run one address with `npm run eval -- "<address>"`.
+
 ## Workflow Rules
 
 - **Do NOT build or deploy after each change.** Only deploy when explicitly instructed by the user.

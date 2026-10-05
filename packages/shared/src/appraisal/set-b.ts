@@ -79,6 +79,9 @@ export interface BComp {
   propertyType?: string | null
   crossesMajorRoad?: boolean | null
   disableReasons?: string[] | null
+  /** A recorded buy → resale 30–365 days apart. The resale is the proof of
+   *  the renovation, so an own-AVM divergence does not bar it from driving. */
+  verifiedFlip?: boolean | null
   classification?: { type?: string | null } | null
   curbAppeal?: {
     condition?: string | null
@@ -125,7 +128,7 @@ export interface BResult {
 // ── Helpers ───────────────────────────────────────────────────────────────
 const usd = (n: number) => `$${Math.round(n).toLocaleString('en-US')}`
 
-export const HARNESS_VERSION = 'og-2026.10.05.2'
+export const HARNESS_VERSION = 'og-2026.10.05.5'
 
 export function bSubjectAvm(s: BSubject): number | null {
   return s.avmValue ?? s.avm?.value ?? null
@@ -178,7 +181,9 @@ const bIsUnfit = (c: BComp) => {
     evidence?.transactionCheck === 'extreme_outlier' ||
     marketFit === 'below_pocket' ||
     (marketFit === 'above_pocket' && !bExplainsPremium(c)) ||
-    evidence?.priceCheck === 'divergent'
+    // A verified flip is exempt from the own-AVM divergence screen: the
+    // AVM lags a renovation, and the buy → resale pair is stronger proof.
+    (evidence?.priceCheck === 'divergent' && c.verifiedFlip !== true)
 }
 
 const bLotSf = (x: { lotSizeSquareFeet?: number | null; lotSizeAcres?: number | null }) =>
@@ -367,6 +372,13 @@ export function evaluateB(
     flags.push(`${x.comp.address}: verification — ${(x.comp.evidenceVerification?.flags ?? []).join('; ').slice(0, 90)}`)
   }
   const verifiedPool = contribs.filter((x) => !unfit.includes(x))
+  // Flips allowed through despite an own-AVM divergence stay visible — the
+  // gap is worth watching even though it does not bar the comp.
+  for (const x of verifiedPool) {
+    if (x.comp.verifiedFlip === true && x.comp.evidenceVerification?.priceCheck === 'divergent') {
+      flags.push(`${x.comp.address}: verified flip kept despite own-AVM divergence — watch the gap`)
+    }
+  }
 
   // ── Similarity scoring ──────────────────────────────────────────────────
   const similarity = (x: BContribution): number => {

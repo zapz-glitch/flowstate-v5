@@ -25,6 +25,8 @@ export function ruleIdForFlag(flag: string): string {
   if (f.includes('sale age unverified')) return 'evidence.sale_age.unverified'
   if (f.includes('below current pocket')) return 'evidence.market_fit.below_pocket'
   if (f.includes('premium evidence')) return 'evidence.market_fit.above_pocket'
+  if (f.startsWith('operator selection')) return 'operator.selection_average'
+  if (f.includes('verified flip kept despite')) return 'evidence.price.flip_divergence_allowed'
   if (f.includes('diverges') && f.includes('own avm')) return 'evidence.price.divergent'
   if (f.includes('sale price uncorroborated')) return 'evidence.price.unverified'
   if (f.includes('package deed')) return 'evidence.transaction.package_deed'

@@ -49,7 +49,10 @@ export function evaluateComparable(
     const result = evaluateFilter(subject, comp, filter)
     filterResults.push(result)
 
-    if (!result.passed && result.reason && filter.priority !== 'soft') {
+    // Name-based geography is rank-only — mirrors the API evaluator
+    // (docs/FILTER-LADDER.md): census tract / block group / neighborhood decide "same area".
+    if (!result.passed && result.reason && filter.priority !== 'soft' &&
+        !['geo_scope_match', 'subdivision_match', 'neighborhood_match'].includes(filter.type as string)) {
       disableReasons.push(result.reason)
     }
   }

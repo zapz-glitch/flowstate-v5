@@ -28,8 +28,16 @@ import {
 } from '../appraisal'
 import { bulkSaleIds, packageDeedIds, verifyCompEvidence } from '../appraisal/verification'
 import { checksForFlags, type RuleCheck } from '../analysis/rule-registry'
-import { arvEvidence, classifyCompsByEvidence } from './comp-classification'
-export { arvEvidence, classifyCompsByEvidence }
+import { arvEvidence, classifyCompsByEvidence, pocketPriceGroups } from './comp-classification'
+
+/** Why a sale is switched off as transaction noise */
+const TRANSACTION_NOISE_REASON: Record<string, string> = {
+  extreme_outlier: 'Extreme price outlier — not market evidence',
+  package_deed: 'Package deed — several parcels on one same-day, same-price deed',
+  bulk_sale: 'Bulk sale — same-day sales sharing a buyer or seller',
+  nominal_sale: 'Nominal sale — not an arm\'s-length price',
+}
+export { arvEvidence, classifyCompsByEvidence, pocketPriceGroups }
 import { evaluateB, subdivisionsMatch, type BComp, type BSubject } from '@flowstate-api/shared/appraisal'
 import { createValuationService, MAJOR_ITEMS, type MajorItem } from '../valuation'
 import type { ClassificationResult } from '../classification'
@@ -680,8 +688,10 @@ export async function performAnalysis(
   const initialPoolRefPpsf = initialTractPpsfs.length >= 3
     ? initialTractPpsfs[Math.floor(initialTractPpsfs.length / 2)]
     : null
+  // Price classes come from the pocket's own sales (docs/FILTER-LADDER.md)
+  const initialPocket = pocketPriceGroups(appraisalResult.comparables, bundle.property)
   const arvComps = appraisalResult.comparables.filter(
-    (c) => c.isEnabled && arvEvidence(c, subjectAvm, initialPoolRefPpsf) != null,
+    (c) => c.isEnabled && arvEvidence(c, initialPocket) != null,
   )
   const arvIds = new Set(arvComps.map((c) => c.id))
   appraisalResult.comparables = appraisalResult.comparables.map((comp) => ({
@@ -838,7 +848,7 @@ export async function performAnalysis(
   // ── 4. Classifications — transaction evidence, not condition guessing ────
   // flip resale → after_renovation; distressed sale → as_is; ordinary sale
   // → transitional (market tier).
-  let compClassifications = classifyCompsByEvidence(bundle.comparables, subjectAvm, undefined, initialPoolRefPpsf)
+  let compClassifications = classifyCompsByEvidence(appraisalResult.comparables, bundle.property)
   let classificationSummary = summarizeClassifications(
     appraisalResult.comparables,
     compClassifications,
@@ -1207,7 +1217,7 @@ export async function performAnalysis(
   // Re-classify with the vision reads now landed — the renovated-band
   // corroboration check only works once Clef/Luna stamps exist.
   if (compCurbAppeal && Object.keys(compCurbAppeal).length > 0) {
-    compClassifications = classifyCompsByEvidence(appraisalResult.comparables, subjectAvm, compCurbAppeal)
+    compClassifications = classifyCompsByEvidence(appraisalResult.comparables, bundle.property, compCurbAppeal)
     classificationSummary = summarizeClassifications(
       appraisalResult.comparables,
       compClassifications,
@@ -1258,6 +1268,7 @@ export async function performAnalysis(
       propertyType: comp.propertyType ?? null,
       crossesMajorRoad: comp.crossesMajorRoad ?? null,
       disableReasons: comp.evaluation?.disableReasons ?? null,
+      verifiedFlip: compClassifications.get(comp.id)?.method === 'evidence_flip_chain',
       classification: compClassifications.get(comp.id)
         ? { type: compClassifications.get(comp.id)!.classification }
         : null,
@@ -1288,6 +1299,15 @@ export async function performAnalysis(
           packageDeed: packageIds.has(comp.id),
           bulkSale: bulkIds.has(comp.id),
         })
+        // Transaction noise is not a usable comp. It already cannot set the
+        // value; switching it off keeps it out of the enabled list, the
+        // price groups, and the outlier ceiling. It stays in the report,
+        // labelled with the reason.
+        const noise = TRANSACTION_NOISE_REASON[comp.evidenceVerification?.transactionCheck ?? '']
+        if (noise && comp.isEnabled) {
+          comp.isEnabled = false
+          if (comp.evaluation) comp.evaluation.disableReasons = [...(comp.evaluation.disableReasons ?? []), noise]
+        }
       }
     }
 
@@ -1332,7 +1352,10 @@ export async function performAnalysis(
         // Classify the widened set too — sale-type evidence (flip resale /
         // distressed) must stamp before B re-reads tiers, otherwise an
         // unclassified flip buy could read as upper-band evidence.
-        for (const [id, cls] of classifyCompsByEvidence(added, subjectAvm, compCurbAppeal)) {
+        // New sales change where the pocket's price groups break, so the
+        // whole pool is re-read — a comp must never keep a group label it
+        // earned in a smaller pool.
+        for (const [id, cls] of classifyCompsByEvidence(appraisalResult.comparables, bundle.property, compCurbAppeal)) {
           compClassifications.set(id, cls)
         }
         bResult = evaluateB(bSubjectFields, toBComps(), { rehabCost: valuation?.totalRehabCost ?? null })

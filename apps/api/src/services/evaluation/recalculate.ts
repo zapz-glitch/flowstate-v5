@@ -98,15 +98,20 @@ export async function recalculateReport(
       .sort((a, b) => (b.adjustedPrice ?? b.salePrice ?? 0) - (a.adjustedPrice ?? a.salePrice ?? 0))
       .slice(0, MAX_ARV_COMPS)
   } else {
-    const eligibleIds = new Set(eligible.map((c) => c.id))
-    const invalid = selectedCompIds.filter((id) => !eligibleIds.has(id))
+    // The operator's choice stands: the server's own selection never picks
+    // a comp that failed the rules, but a person may check one. It only has
+    // to be a real, priced sale with a known size.
+    const priced = items.filter((c) => (c.adjustedPrice ?? c.salePrice) != null &&
+      (c.adjustedPrice ?? c.salePrice)! > 0 && (c.squareFeet ?? 0) > 0)
+    const pricedIds = new Set(priced.map((c) => c.id))
+    const invalid = selectedCompIds.filter((id) => !pricedIds.has(id))
     if (invalid.length > 0) {
       throw Object.assign(
-        new Error(`One or more comparables lack valid sale evidence or failed appraisal rules: ${invalid.join(', ')}`),
+        new Error(`One or more comparables have no sale price or size on file: ${invalid.join(', ')}`),
         { status: 422 }
       )
     }
-    arvComps = eligible.filter((c) => selectedCompIds.includes(c.id))
+    arvComps = priced.filter((c) => selectedCompIds.includes(c.id))
   }
 
   if (arvComps.length === 0) {
@@ -121,11 +126,28 @@ export async function recalculateReport(
   const enabledIds = selectedCompIds === null ? null : new Set(selectedCompIds)
   const bComps = savedToBComps(items, enabledIds)
   const savedVal = (saved.valuation ?? {}) as Record<string, unknown>
-  const bResult = evaluateB(
+  const engine = evaluateB(
     savedToBSubject(saved),
     bComps,
     { rehabCost: (savedVal.rehabCost as number) ?? null },
   )
+  // Operator selection — every checked comp counts. Each is repriced to the
+  // subject by the same size and land math the engine uses, and the ARV is
+  // the plain average of those repriced values. The automatic path (null)
+  // keeps the engine's own anchor answer.
+  const checked = enabledIds == null ? [] : engine.contribs.filter((x) => x.comp.isEnabled)
+  const bResult: typeof engine = enabledIds == null || checked.length === 0 ? engine : {
+    ...engine,
+    arv: Math.round(checked.reduce((sum, x) => sum + x.contrib, 0) / checked.length),
+    drivers: checked,
+    source: 'operator selection',
+    conf: 'low',
+    anchorAddress: null,
+    flags: [
+      ...engine.flags.filter((f) => !/^anchored to|^supporting range|anchor (above|below) supporting|^self-heal|no retail-priced evidence|no ARV-tier labels/.test(f)),
+      `operator selection — ARV is the average of ${checked.length} checked comp(s), each repriced to the subject`,
+    ],
+  }
 
   // ARV = Set-B on the stamped evidence. When it produces no answer, the
   // recalculated report withholds — it must not keep the prior ARV alive.
@@ -194,11 +216,26 @@ export async function recalculateReport(
     })),
   }
 
+  // Roles follow the answer just computed: checked comps are the drivers
+  // after an operator selection; after a reset the engine's own anchor and
+  // drivers come back.
+  const driverAddresses = new Set(bResult.drivers.map((d) => d.comp.address))
+  const roleOf = (c: SavedCompItem): string => {
+    const address = (c as { address?: string | null }).address ?? null
+    if (enabledIds) return enabledIds.has(c.id) ? 'driver' : c.appraisalRules?.passedFilters !== false ? 'pool' : 'excluded'
+    if (address != null && address === bResult.anchorAddress) return 'anchor'
+    if (address != null && driverAddresses.has(address)) return 'driver'
+    return c.appraisalRules?.passedFilters !== false ? 'pool' : 'excluded'
+  }
+
   // Recompute comp group tags + enabled counts
   const arvIds = new Set(arvComps.map((c) => c.id))
   const nextItems = items.map((c) => ({
     ...c,
-    isEnabled: c.appraisalRules?.passedFilters !== false,
+    // After an operator selection the checked comps ARE the enabled set, so
+    // the dashboard shows exactly the boxes the user left checked.
+    isEnabled: enabledIds ? enabledIds.has(c.id) : c.appraisalRules?.passedFilters !== false,
+    bRole: roleOf(c),
     compGroup: arvIds.has(c.id) ? ('arv' as const) : c.compGroup === 'arv' ? null : c.compGroup,
     isBestMatch: false,
   }))

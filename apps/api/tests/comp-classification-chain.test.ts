@@ -1,185 +1,137 @@
-import assert from 'node:assert/strict'
-import { arvEvidence, classifyCompsByEvidence } from '../src/services/evaluation/comp-classification'
-import type { NormalizedComparable } from '../src/services/property-api/types'
-
 /**
- * Classification chain — condition labels come from vision (Clef → Luna)
- * or listing text. Price alone can only corroborate membership in a
- * renovated band that vision/text evidence already defined — it can never
- * mint the class itself (the Dunseath defect: a $1.6M sale at 410% of the
- * subject's AVM was stamped after_renovation and drove ARV).
+ * Comp classification proofs (docs/FILTER-LADDER.md).
  *
- * How this can fail:
- *  1. A price-promoted comp with NO verified-renovated band must demote.
- *  2. Inside the band it keeps 'after_renovation'.
- *  3. Above OR below the band it demotes — outliers and floor sales both.
- *  4. A flip chain (buy → resale) is a renovation EVENT — keeps the class
- *     with no band.
- *  5. Only confident reads (conf ≥ 30) define the band.
- *  6. Band math reads raw sale $/sf.
- *  7. Distressed stays as_is; ordinary sales stay transitional.
+ * 1. A real flip (resold 30–365 days after purchase) is ARV.
+ * 2. A buy-and-resell outside that window is NOT a flip.
+ * 3. The top price group of the pocket is ARV — with no condition read.
+ * 4. No AVM test: a sale far above its own AVM or the subject's is not ARV
+ *    unless it sits in the pocket's top group.
+ * 5. Groups come only from sales INSIDE the pocket.
+ * 6. The bottom group is investor-priced; distressed sales are never ARV.
+ * 7. A lone sale far above the pocket is an outlier, not a class…
+ * 8. …unless a confident renovated read vouches for it.
+ * 9. A full-tier conflict with a confident read is still arbitrated.
  */
+import assert from 'node:assert/strict'
+import { arvEvidence, classifyCompsByEvidence, pocketPriceGroups } from '../src/services/evaluation/comp-classification'
+import type { NormalizedComparable, NormalizedProperty } from '../src/services/property-api/types'
 
-const comp = (id: string, salePrice = 300000, squareFeet = 1500, extra: Partial<NormalizedComparable> = {}) => ({
-  id, provider: 'corelogic', address: `Synthetic ${id}`, city: 'Fixture', state: 'FL', zipCode: '00000',
-  salePrice, saleDate: '2026-01-01', squareFeet, yearBuilt: 1975,
-  raw: { salePrice, saleDate: '2026-01-01', isSale: true }, ...extra,
+const subject = {
+  censusTract: 'T1', censusBlockGroup: 'T1-1', subdivision: 'Oak Hills',
+  neighborhoodName: 'Oak Hills', propertyType: 'Single Family Residence',
+} as NormalizedProperty
+
+const comp = (id: string, ppsf: number, over: Partial<NormalizedComparable> = {}) => ({
+  id, provider: 'test', address: `${id} St`, squareFeet: 1000, salePrice: ppsf * 1000,
+  pricePerSqft: ppsf, censusTract: 'T1', propertyType: 'Single Family Residence',
+  saleDate: '2026-08-01', ...over,
 } as NormalizedComparable)
+const cls = (m: Map<string, { classification: string }>, id: string) => m.get(id)?.classification
 
-// A vision-verified renovated comp at $200/sf defines the band [180, 220].
-const renovated = (ppsf = 200) => comp('reno', ppsf * 1500, 1500)
-const reads = (over: Record<string, { condition?: string; confidence?: number }> = {}) =>
-  ({ reno: { condition: 'renovated', confidence: 80 }, ...over })
-
-// 1. Price promotion with no condition reads at all → demoted.
+// 1 — a real flip is ARV whatever group it lands in
 {
-  const pool = [comp('promo', 400000, 1500, { avmValue: 250000 })]
-  const out = classifyCompsByEvidence(pool, 250000)
-  assert.equal(out.get('promo')!.classification, 'transitional')
+  const flip = comp('flip', 150, { flip: { priorSalePrice: 90000, priorSaleDate: '2026-02-01', daysHeld: 180, gainPct: 67 } })
+  const m = classifyCompsByEvidence([flip, comp('a', 148), comp('b', 152), comp('c', 155)], subject)
+  assert.equal(cls(m, 'flip'), 'after_renovation')
+  assert.equal(m.get('flip')?.method, 'evidence_flip_chain')
 }
 
-// 2. Price promotion inside the verified band → keeps after_renovation.
-{
-  const pool = [renovated(), comp('promo', 310000, 1500, { avmValue: 240000 })]
-  const out = classifyCompsByEvidence(pool, 240000, reads())
-  assert.equal(out.get('promo')!.classification, 'after_renovation')
+// 2 — outside 30–365 days it is not a flip
+for (const daysHeld of [10, 400]) {
+  const c = comp('x', 150, { flip: { priorSalePrice: 90000, priorSaleDate: '2025-01-01', daysHeld, gainPct: 67 } })
+  const m = classifyCompsByEvidence([c, comp('a', 148), comp('b', 152), comp('c', 155)], subject)
+  assert.equal(cls(m, 'x'), 'transitional', `${daysHeld} days held is not a flip`)
 }
 
-// 3a. Price promotion ABOVE the band → demoted (Bolton-class outlier).
+// 3 — the pocket's top price group is ARV with no condition read at all
 {
-  const pool = [renovated(), comp('promo', 780000, 1500, { avmValue: 300000 })]
-  const out = classifyCompsByEvidence(pool, 300000, reads())
-  assert.equal(out.get('promo')!.classification, 'transitional')
+  const pool = [comp('i1', 90), comp('i2', 95), comp('m1', 150), comp('m2', 156), comp('r1', 240), comp('r2', 248)]
+  const m = classifyCompsByEvidence(pool, subject)
+  assert.deepEqual(['r1', 'r2'].map((id) => cls(m, id)), ['after_renovation', 'after_renovation'])
+  assert.equal(m.get('r1')?.method, 'evidence_price_group')
+  assert.deepEqual(['m1', 'm2'].map((id) => cls(m, id)), ['transitional', 'transitional'])
+  // 6 — the bottom group is investor-priced
+  assert.deepEqual(['i1', 'i2'].map((id) => cls(m, id)), ['as_is', 'as_is'])
 }
 
-// 3b. Price promotion BELOW the band → demoted (renovated claim at floor price).
-{
-  const pool = [renovated(300), comp('promo', 180000, 1500, { avmValue: 150000 })]
-  const out = classifyCompsByEvidence(pool, 150000, reads())
-  assert.equal(out.get('promo')!.classification, 'transitional')
-}
-
-// 4. Flip chain keeps after_renovation with no band — the sale pair is the
-//    renovation event, not a price read.
-{
-  const pool = [comp('flip', 420000, 1500, {
-    flip: { priorSalePrice: 240000, priorSaleDate: '2025-05-01', daysHeld: 245, gainPct: 75 },
-  })]
-  const out = classifyCompsByEvidence(pool, 250000)
-  assert.equal(out.get('flip')!.classification, 'after_renovation')
-}
-
-// 5. A low-confidence read cannot define the band.
-{
-  const pool = [renovated(), comp('promo', 310000, 1500, { avmValue: 240000 })]
-  const out = classifyCompsByEvidence(pool, 240000, { reno: { condition: 'renovated', confidence: 10 } })
-  assert.equal(out.get('promo')!.classification, 'transitional')
-}
-
-// 6. The band reads raw sale $/sf — a comp priced just over the band edge
-//    demotes even when its listing asks low.
-{
-  const pool = [renovated(200), comp('promo', 330600, 1500, { avmValue: 200000 })] // 220.4/sf > 220
-  const out = classifyCompsByEvidence(pool, 200000, reads())
-  assert.equal(out.get('promo')!.classification, 'transitional')
-}
-
-// 6b. A sale just over its own AVM is ordinary — the premium must clear 15%.
-{
-  const pool = [comp('near-avm', 148000, 1410, { avmValue: 147674 })]
-  const out = classifyCompsByEvidence(pool, 79490)
-  assert.equal(out.get('near-avm')!.classification, 'transitional')
-}
-
-// 6c. A bad/stale subject AVM cannot promote below-pocket sales into ARV.
-{
-  const low = [
-    comp('low-a', 100000, 1426, { avmValue: 98957 }), // $70/sf
-    comp('low-b', 97000, 1053),                       // $92/sf
-  ]
-  const out = classifyCompsByEvidence(low, 79490, undefined, 158)
-  assert.equal(arvEvidence(low[0], 79490, 158), null)
-  assert.equal(arvEvidence(low[1], 79490, 158), null)
-  assert.equal(out.get('low-a')!.classification, 'transitional')
-  assert.equal(out.get('low-b')!.classification, 'transitional')
-}
-
-// 7. Baselines hold — distressed and ordinary sales unchanged.
+// 4 — no AVM test: far above its own AVM, but in an evenly priced pocket → not ARV
 {
   const pool = [
-    renovated(),
-    comp('dist', 150000, 1500, { distressedSale: true }),
-    comp('plain', 210000, 1500),
+    comp('a', 150, { avmValue: 100000 }), comp('b', 152, { avmValue: 100000 }),
+    comp('c', 154, { avmValue: 100000 }), comp('d', 156, { avmValue: 100000 }),
   ]
-  const out = classifyCompsByEvidence(pool, 240000, reads())
-  assert.equal(out.get('dist')!.classification, 'as_is')
-  assert.equal(out.get('plain')!.classification, 'transitional')
+  const m = classifyCompsByEvidence(pool, subject)
+  assert.ok(pool.every((c) => cls(m, c.id) === 'transitional'), 'selling above an AVM is not a price class')
+  assert.equal(arvEvidence(pool[3], pocketPriceGroups(pool, subject)), null)
 }
 
-console.log('comp-classification-chain: band corroboration, no-band demotion, flip-chain exemption, read floor passed')
-
-// ── Conflict arbiter — Clef's own probabilities decide, not a default ────
-// 8. Vision 'distressed' but sale priced into the renovated band:
-//    model says as-is (prob higher) → demotes to as_is.
+// 5 — sales outside the pocket never shape the groups
 {
-  const pool = [
-    renovated(),
-    comp('conflict', 310000, 1500, { avmValue: 240000 }),
-  ]
-  const out = classifyCompsByEvidence(pool, 240000, reads({
-    conflict: { condition: 'distressed', confidence: 70, renovatedProbability: 15, asIsProbability: 75 },
-  }))
-  const cls = out.get('conflict')!
-  assert.equal(cls.classification, 'as_is')
-  assert.equal(cls.method, 'conflict_arbiter')
+  const inside = [comp('a', 150), comp('b', 153), comp('c', 156), comp('d', 159)]
+  const outside = [comp('o1', 320, { censusTract: 'T9' }), comp('o2', 330, { censusTract: 'T9' })]
+  const m = classifyCompsByEvidence([...inside, ...outside], subject)
+  assert.ok(inside.every((c) => cls(m, c.id) === 'transitional'), 'the pocket is evenly priced — outside sales do not make its top a class')
+  assert.ok(outside.every((c) => cls(m, c.id) === 'transitional'), 'outside sales get no pocket class')
+  assert.equal(pocketPriceGroups([...inside, ...outside], subject).scope, 'tract')
 }
 
-// 9. Same shape but the model backs the renovated story → stays.
+// 6 — a distressed sale is investor evidence even at a top price
 {
-  const pool = [
-    renovated(),
-    comp('conflict', 310000, 1500, { avmValue: 240000 }),
-  ]
-  const out = classifyCompsByEvidence(pool, 240000, reads({
-    conflict: { condition: 'distressed', confidence: 70, renovatedProbability: 80, asIsProbability: 15 },
-  }))
-  assert.equal(out.get('conflict')!.classification, 'after_renovation')
+  const pool = [comp('m1', 150), comp('m2', 156), comp('r1', 240), comp('d', 246, { distressedSale: true })]
+  const m = classifyCompsByEvidence(pool, subject)
+  assert.equal(cls(m, 'd'), 'as_is')
+  assert.equal(cls(m, 'r1'), 'after_renovation')
 }
 
-// 10. No probability scores → neither story proved → transitional.
+// 7 — a lone sale far above the pocket is an outlier, not ARV
 {
-  const pool = [
-    renovated(),
-    comp('conflict', 310000, 1500, { avmValue: 240000 }),
-  ]
-  const out = classifyCompsByEvidence(pool, 240000, reads({
-    conflict: { condition: 'distressed', confidence: 70 },
-  }))
-  assert.equal(out.get('conflict')!.classification, 'transitional')
+  const pool = [comp('m1', 273), comp('m2', 260), comp('m3', 280), comp('x', 1019)]
+  const m = classifyCompsByEvidence(pool, subject)
+  assert.equal(cls(m, 'x'), 'transitional')
+  assert.match(m.get('x')!.reasoning, /outlier/)
 }
 
-// 11. Flip chain is a transaction event — exempt from arbitration even
-//     when vision reads distressed.
+// 8 — a confident renovated read vouches for a lone top sale
 {
-  const pool = [
-    comp('flipper', 300000, 1500, { flip: { priorSalePrice: 200000, daysHeld: 90, gainPct: 50 } }),
-  ]
-  const out = classifyCompsByEvidence(pool, 240000, {
-    flipper: { condition: 'distressed', confidence: 80, renovatedProbability: 10, asIsProbability: 85 },
-  })
-  assert.equal(out.get('flipper')!.classification, 'after_renovation')
-  assert.equal(out.get('flipper')!.method, 'evidence_flip_chain')
+  const pool = [comp('m1', 150), comp('m2', 155), comp('m3', 160), comp('r', 250)]
+  assert.equal(cls(classifyCompsByEvidence(pool, subject), 'r'), 'transitional', 'alone and unvouched')
+  const reads = { r: { condition: 'renovated', confidence: 80 } }
+  assert.equal(cls(classifyCompsByEvidence(pool, subject, reads), 'r'), 'after_renovation', 'vouched by the read')
 }
 
-// 12. One-tier disagreement is NOT a conflict — adjacent labels stand.
+// 9 — a full-tier conflict with a confident read is arbitrated by the model's own scores
 {
-  const pool = [
-    renovated(),
-    comp('adj', 310000, 1500, { avmValue: 240000 }),
-  ]
-  const out = classifyCompsByEvidence(pool, 240000, reads({
-    adj: { condition: 'dated', confidence: 70, renovatedProbability: 15, asIsProbability: 75 },
-  }))
-  assert.equal(out.get('adj')!.classification, 'after_renovation')
+  const pool = [comp('m1', 150), comp('m2', 156), comp('r1', 240), comp('r2', 248)]
+  const reads = { r2: { condition: 'distressed', confidence: 80, renovatedProbability: 10, asIsProbability: 85 } }
+  const m = classifyCompsByEvidence(pool, subject, reads)
+  assert.equal(cls(m, 'r2'), 'as_is')
+  assert.equal(m.get('r2')?.method, 'conflict_arbiter')
+  assert.equal(cls(m, 'r1'), 'after_renovation', 'the comp without a conflict keeps its class')
 }
-console.log('conflict-arbiter: Clef-prob arbitration, flip exemption, adjacent pass-through')
+
+// a widened batch is classed against the FULL pool's pocket, not itself
+{
+  const pool = [comp('m1', 150), comp('m2', 156), comp('r1', 240)]
+  const added = [comp('r2', 246)]
+  const m = classifyCompsByEvidence(added, subject, undefined, [...pool, ...added])
+  assert.equal(cls(m, 'r2'), 'after_renovation')
+}
+
+// rules first, then groups — a comp that fails the rules never shapes a group
+{
+  const on = (c: NormalizedComparable) => ({ ...c, isEnabled: true }) as NormalizedComparable
+  const off = (c: NormalizedComparable) => ({ ...c, isEnabled: false }) as NormalizedComparable
+  // Two big-lot sales at $400+/sf fail the rules. Without them the passing
+  // pocket is evenly priced, so nobody is "top".
+  const pool = [on(comp('a', 150)), on(comp('b', 153)), on(comp('c', 156)), on(comp('d', 159)), off(comp('x1', 400)), off(comp('x2', 410))]
+  const m = classifyCompsByEvidence(pool, subject)
+  assert.ok(['a', 'b', 'c', 'd'].every((id) => cls(m, id) === 'transitional'))
+  assert.equal(cls(m, 'x1'), 'transitional', 'a rule-failing sale gets no price class')
+  assert.match(m.get('x1')!.reasoning, /Did not pass the evaluation rules/)
+  // …and a passing top pair is still read as the top group
+  const pool2 = [on(comp('a', 150)), on(comp('b', 153)), on(comp('r1', 240)), on(comp('r2', 246)), off(comp('x1', 90))]
+  const m2 = classifyCompsByEvidence(pool2, subject)
+  assert.deepEqual(['r1', 'r2'].map((id) => cls(m2, id)), ['after_renovation', 'after_renovation'])
+}
+
+console.log('comp-classification: flips, pocket price groups, outliers, and arbitration proofs passed')

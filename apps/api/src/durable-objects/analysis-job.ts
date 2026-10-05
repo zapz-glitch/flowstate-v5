@@ -30,8 +30,11 @@ import {
 } from '../services/property-api/retrieval-policy'
 import { bulkSaleIds, packageDeedIds } from '../services/appraisal/verification'
 import { DEFAULT_FILTERS, evaluateComparable, type AppraisalFilter } from '../services/appraisal'
-import { flexNumericFilters, isValueEquivalent } from '../services/appraisal/evaluator'
-import { arvEvidence } from '../services/evaluation'
+import { isValueEquivalent } from '../services/appraisal/evaluator'
+import {
+  describeLadderConcessions, filtersForLadder, geoLevelForScope, ladderFactorAt, ladderLimitsAt, lastUsefulLadderStep,
+} from '../services/appraisal/filter-ladder'
+import { arvEvidence, pocketPriceGroups } from '../services/evaluation'
 import { DEFAULT_EXPANSION_POLICY, saleAgeExpansionSteps, vintageYearCap } from '../services/appraisal/types'
 import { filtersToApiParams } from '../services/appraisal/types'
 import type { Env } from '../types'
@@ -630,34 +633,14 @@ export class AnalysisJobDO {
     const poolCompIds = new Set(rawComps.map((c) => c.id))
     // Param-flex ladder record — how far numeric tolerances stretched to
     // admit evidence (0 = strict tier admitted it).
-    let paramFlexExtensions = 0
     let paramFlexFactor = 1
+    // Filter ladder — the step the search settled on and the area it came from
+    let ladderStep = 0
+    let ladderFound = false
+    let ladderSettled = false
+    let ladderScope: 'tract' | 'block_group' | 'neighborhood' | 'value_equivalent' | null = null
     retrieval.candidatesPrunedBeforeEnrichment = candidatesPruned
     retrieval.candidatesEnriched = candidatesEnriched
-
-    // Human-readable concessions the winning flex tier made — only the
-    // numeric filters that actually moved.
-    const describeFlexConcessions = (base: AppraisalFilter[], factor: number): string[] => {
-      if (factor <= 1) return []
-      const label: Record<string, (v: number) => string> = {
-        sale_age: (v) => `sale age to ${Math.round(v)} days`,
-        sale_age_expansion: () => null as unknown as string,
-        sale_age_expansion_2: () => null as unknown as string,
-        sqft_diff: (v) => `sqft tolerance to ±${Math.round(v)}`,
-        year_built_diff: (v) => `year built to ±${Math.round(v)} yrs`,
-        lot_size_diff: (v) => `lot size to ±${Math.round(v)} sqft`,
-        distance: (v) => `distance to ${Math.round(v * 10) / 10}mi`,
-      }
-      const out: string[] = []
-      for (const f of base) {
-        const fmt = label[f.type]
-        if (!fmt || !f.enabled || typeof f.value !== 'number') continue
-        const stretched = f.value * factor
-        const txt = fmt(stretched)
-        if (txt) out.push(`${txt} (was ${fmt(f.value)})`)
-      }
-      return out
-    }
 
     // ── attom-mcp: free-first census gate + gated enrichment ──────────────────
     // Census-geocode every comp (free, no key) and only spend a provider
@@ -775,53 +758,111 @@ export class AnalysisJobDO {
         if (n) console.log(`[AnalysisJobDO] geography unverified: ${n} comps`)
       }
       if (geoPassers.length === 0) { flagUnverified(comps); return comps }
-      // Thin-pool flex ladder — geo stays required; numeric tolerances
-      // (sqft, year built, lot, sale age, distance) stretch ×1.15 → ×1.25 →
-      // ×1.35 → … until a passer carries ARV evidence or every geo-verified
-      // comp has been enriched. First admission stops the stretch, enriches
-      // the cohort, checks evidence; no ARV evidence → stretch again.
-      // Value-equivalent crossers — geocoded comps in a different tract
-      // whose pocket sits within ±10% $/sf of the subject's. Census is
-      // preferred; under flex (i≥1) these become enrichment candidates.
+      // Filter ladder (docs/FILTER-LADDER.md) — the user's settings are the
+      // ideal. Inside one area at a time, only square feet, year built and
+      // sale age widen, one step each in turn (25% of the subject's size, 3
+      // years, 30 days), until a comp carries ARV
+      // evidence. Geography loosens last: tract → block group →
+      // neighborhood name → value-equivalent adjacent pocket. Each step is
+      // the smallest possible widening, so the first comp admitted is the
+      // one closest to the strict settings. The data is the stop.
       const packageIds = packageDeedIds(comps)
       const bulkIds = bulkSaleIds(comps)
+      // Only transaction noise is barred from paid enrichment here. The
+      // old size/year/sale-age "dead comp" prune is a hidden cap — under the
+      // ladder those are exactly the rules allowed to widen, so the ladder
+      // (closest-first, 25-enrichment budget) decides, not a fixed cutoff.
       const spendable = (c: NormalizedComparable) =>
-        !packageIds.has(c.id) && !bulkIds.has(c.id) && !isDeadComp(c)
+        !packageIds.has(c.id) && !bulkIds.has(c.id)
       const geoPasserIds = new Set(geoPassers.map((c) => c.id))
-      const flexCrossers = comps.filter((c, i) => {
-        const g = geos[i]
-        if (!g || geoPasserIds.has(c.id) || !spendable(c)) return false
-        return isValueEquivalent(property, c)
-      })
-      const FLEX_TIERS = [1, 1.15, 1.25, 1.35, 1.5, 1.75, 2, 2.5, 3, 4, 5]
+      const normName = (v?: string | null) => v?.toLowerCase().replace(/[^a-z0-9]/g, '') || null
+      const subjectNames = new Set(
+        [property.subdivision, property.neighborhoodName].map(normName).filter((v): v is string => v != null))
+      const sameName = (c: NormalizedComparable) =>
+        [c.subdivision, c.neighborhoodName].map(normName).some((v) => v != null && subjectNames.has(v))
+      const outside = comps.filter((c, i) => geos[i] != null && !geoPasserIds.has(c.id) && spendable(c))
+      const scopes: Array<{ name: 'tract' | 'block_group' | 'neighborhood' | 'value_equivalent'; comps: NormalizedComparable[] }> = [
+        { name: 'tract', comps: geoPassers.filter((c) => c.censusTract != null && c.censusTract === subjectGeo.tract) },
+        { name: 'block_group', comps: geoPassers.filter((c) => !(c.censusTract != null && c.censusTract === subjectGeo.tract)) },
+        { name: 'neighborhood', comps: outside.filter(sameName) },
+        { name: 'value_equivalent', comps: outside.filter((c) => !sameName(c) && isValueEquivalent(property, c)) },
+      ]
       const ENRICH_WAVE_SIZE = 6
-      const ENOUGH_ARV_EVIDENCE = 3
       const MAX_PAID_ENRICHMENTS = 25
       const enrichedById = new Map<string, NormalizedComparable>()
-      for (let i = 0; i < FLEX_TIERS.length && enrichedById.size < MAX_PAID_ENRICHMENTS; i++) {
-        // Deepest stretch wins across gate invocations (initial pool and
-        // expansion refetch share the record).
-        paramFlexFactor = Math.max(paramFlexFactor, FLEX_TIERS[i])
-        paramFlexExtensions = Math.max(paramFlexExtensions, i)
-        const tierFilters = flexNumericFilters(filters, FLEX_TIERS[i])
-        const candidates = i === 0 ? geoPassers : [...geoPassers, ...flexCrossers]
-        const newPassers = rankEnrichmentCandidates(property, candidates.filter((c) => {
-          if (enrichedById.has(c.id) || !spendable(c)) return false
-          return !evaluateComparable(property, c, tierFilters, []).shouldDisable
-        }), nowMs).slice(0, Math.min(ENRICH_WAVE_SIZE, MAX_PAID_ENRICHMENTS - enrichedById.size))
-        if (newPassers.length > 0) {
-          const enriched = await propertyApi.enrichComparables(newPassers, { concurrency: 6 })
-          for (const e of enriched) enrichedById.set(e.id, e)
-          candidatesEnriched += enriched.filter((c) => c.isEnriched).length
+      let wonStep: number | null = null
+      let wonScope: typeof scopes[number]['name'] | null = null
+      // Fallback when no comp anywhere carries ARV evidence: the FIRST step
+      // that admitted anything in the tightest area — the closest comps to
+      // the strict settings — never the widest step reached while searching.
+      let firstPasser: { step: number; scope: typeof scopes[number]['name'] } | null = null
+      // A comp that fails a rule the ladder never loosens (property type,
+      // lot category, style…) can never be admitted, so it must not stretch
+      // the ladder either — one 53,000 sq ft outlier would otherwise widen
+      // square feet to cover it.
+      const ladderRules = new Set(['sqft_diff', 'year_built_diff', 'sale_age'])
+      search: for (const scope of scopes) {
+        const otherRulesOnly = filtersForLadder(filters, 0, scope.name, property.squareFeet)
+          .map((f) => (ladderRules.has(f.type) ? { ...f, enabled: false } : f))
+        const candidates = scope.comps.filter((c) =>
+          spendable(c) && !evaluateComparable(property, c, otherRulesOnly, []).shouldDisable)
+        if (candidates.length === 0) continue
+        const lastStep = lastUsefulLadderStep(filters, property, candidates, nowMs)
+        for (let step = 0; step <= lastStep; step++) {
+          const stepFilters = filtersForLadder(filters, step, scope.name, property.squareFeet)
+          const passers = candidates.filter((c) =>
+            !evaluateComparable(property, c, stepFilters, []).shouldDisable)
+          if (passers.length === 0) continue
+          firstPasser ??= { step, scope: scope.name }
+          // Enrich this step's passers closest-first, six at a time, and
+          // check for ARV evidence after every wave.
+          let pending = rankEnrichmentCandidates(property, passers.filter((c) => !enrichedById.has(c.id)), nowMs)
+          for (;;) {
+            // Enrichment can reveal a hard-rule failure (style, foundation,
+            // stories) the free data could not show — an enriched comp only
+            // counts when it still passes this step's rules.
+            // Rules first, then groups: only this step's rule-passers are
+            // grouped. Enriched comps are re-checked, since enrichment can
+            // reveal a hard-rule failure the free data could not show.
+            const stillPassing = passers
+              .map((c) => enrichedById.get(c.id) ?? c)
+              .filter((c) => !evaluateComparable(property, c, stepFilters, []).shouldDisable)
+            const pocket = pocketPriceGroups(stillPassing, property)
+            const hit = stillPassing.some((c) => enrichedById.has(c.id) && arvEvidence(c, pocket) != null)
+            if (hit) { wonStep = step; wonScope = scope.name; break search }
+            if (pending.length === 0 || enrichedById.size >= MAX_PAID_ENRICHMENTS) break
+            const wave = pending.slice(0, Math.min(ENRICH_WAVE_SIZE, MAX_PAID_ENRICHMENTS - enrichedById.size))
+            pending = pending.slice(wave.length)
+            const enriched = await propertyApi.enrichComparables(wave, { concurrency: 6 })
+            for (const e of enriched) enrichedById.set(e.id, e)
+            candidatesEnriched += enriched.filter((c) => c.isEnriched).length
+          }
+          if (enrichedById.size >= MAX_PAID_ENRICHMENTS) break search
         }
-        const enrichedSoFar = [...geoPassers, ...flexCrossers].filter((c) => enrichedById.has(c.id))
-        if (enrichedSoFar.filter((c) => arvEvidence(c, property.avmValue) != null).length >= ENOUGH_ARV_EVIDENCE) break
-        if (enrichedSoFar.length >= geoPassers.length + flexCrossers.length) break
       }
+      // No ARV evidence anywhere: settle on the first step that admitted any
+      // comp, so the closest median/dated evidence is the fallback. Across
+      // gate invocations (initial pool, expansion refetch) a real ARV find
+      // beats a fallback; otherwise the tightest step seen stands.
+      const settledStep = wonStep ?? firstPasser?.step ?? 0
+      const settledScope = wonScope ?? firstPasser?.scope ?? null
+      if (wonStep != null) {
+        ladderStep = ladderFound ? Math.min(ladderStep, wonStep) : wonStep
+        ladderScope = settledScope
+        ladderFound = true
+      } else if (!ladderFound) {
+        ladderStep = ladderSettled ? Math.min(ladderStep, settledStep) : settledStep
+        ladderScope = settledScope ?? ladderScope
+      }
+      ladderSettled = true
+      paramFlexFactor = ladderFactorAt(filters, ladderStep, property.squareFeet)
       retrieval.paramFlex = {
-        extensions: paramFlexExtensions,
+        extensions: ladderStep,
         factor: paramFlexFactor,
-        concessions: describeFlexConcessions(filters, paramFlexFactor),
+        concessions: describeLadderConcessions(filters, ladderStep, property.squareFeet),
+        limits: ladderLimitsAt(filters, ladderStep, property.squareFeet),
+        scope: ladderScope,
+        arvEvidenceFound: ladderFound,
       }
       if (enrichedById.size === 0) { flagUnverified(comps); return comps }
       const merged = comps.map((c) => enrichedById.get(c.id) ?? c)
@@ -1061,14 +1102,14 @@ export class AnalysisJobDO {
     const propertyCallStats = propertyApi.getCallStats()
     const evalParams = {
       ...config.evalParams,
-      // attom-mcp: when the flex ladder stretched numeric tolerances to
-      // admit evidence, evaluate the pool under the winning tier — comps
-      // admitted by flex must stay enabled through evaluation.
-      ...(isAttomMcp && paramFlexFactor > 1
+      // attom-mcp: when the filter ladder widened square feet, year or sale
+      // age to admit evidence, evaluate the pool under that same step —
+      // comps the ladder admitted must stay enabled through evaluation.
+      ...(isAttomMcp && (ladderStep > 0 || geoLevelForScope(ladderScope) > 1)
         ? {
             appraisalRules: {
               ...(config.evalParams.appraisalRules ?? {}),
-              filters: flexNumericFilters(filters, paramFlexFactor),
+              filters: filtersForLadder(filters, ladderStep, ladderScope, property.squareFeet),
             },
           }
         : {}),

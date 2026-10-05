@@ -8,6 +8,9 @@ import type { NormalizedProperty, NormalizedComparable } from '../src/services/p
  * not a wall: a thin market keeps asking for wider tolerances before it
  * goes further afield.
  *
+ * One rule-passing comp is sufficient — the ladder never widens just to
+ * collect more.
+ *
  * How this can fail:
  *  1. A comp inside the tighter band must never wait for a wide band.
  *  2. A comp failing strict but inside a widened band must be admitted —
@@ -44,15 +47,25 @@ const comp = (id: string, squareFeet: number, over: Partial<NormalizedComparable
 } as NormalizedComparable)
 
 {
-  // Dunseath shape — subject 1566sf, pool all ~950-1400sf. Diff 608sf:
-  // fails ±250 and ±500, admitted at ±750.
+  // One passing comp is enough (docs/FILTER-LADDER.md). The 1400sf comp is
+  // inside ±250, so the server must NOT widen just to collect the other two.
   const svc = createAppraisalService()
   const pool = [
     comp('s1', 958), comp('s2', 1010), comp('s3', 1400),
   ]
   const r = svc.evaluateWithFallback(subject, pool)
-  assert.equal(r.comparables.filter((c) => c.isEnabled).length, 3,
-    'all three comps within ±750 get admitted')
+  assert.deepEqual(r.comparables.filter((c) => c.isEnabled).map((c) => c.id), ['s3'],
+    'only the comp inside the strict band is admitted — no widening to collect more')
+  assert.equal(r.fallbackUsed, 'none', `one strict comp is sufficient, got ${r.fallbackUsed}`)
+}
+
+{
+  // Dunseath shape — subject 1566sf, pool all ~950-1010sf. Nothing passes
+  // ±250 or ±500, so the band widens to the first one that admits a comp.
+  const svc = createAppraisalService()
+  const pool = [comp('s1', 958), comp('s2', 1010)]
+  const r = svc.evaluateWithFallback(subject, pool)
+  assert.ok(r.comparables.some((c) => c.isEnabled), 'a comp is admitted once the band reaches it')
   assert.ok(
     r.expansionApplied?.includes('sqft_diff') || r.fallbackUsed === 'sqft_expansion',
     `sqft widening tagged, got ${r.fallbackUsed} ${r.expansionApplied}`,

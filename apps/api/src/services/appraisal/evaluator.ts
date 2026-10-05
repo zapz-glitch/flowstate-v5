@@ -108,51 +108,77 @@ export function pocketHardScopesMatch(
   return pairs.every(([a, b]) => !a || !b || geoScopeNorm(a) === geoScopeNorm(b))
 }
 
-/** Phase-1 scope requirement: every geography scope populated on BOTH
- *  sides must match (county, city, zip, school district, subdivision, N4).
- *  A scope absent on either side is unverifiable — not a mismatch. */
+/**
+ * Same-area rule — census geography decides (docs/FILTER-LADDER.md).
+ *
+ * A comp is in the subject's area when it shares the census tract or the
+ * block group. Provider name labels (city, zip, school district,
+ * subdivision) never reject a comp: one town can carry two labels.
+ *
+ * The filter ladder widens the area LAST by raising this rule's value:
+ *   1  tract or block group only (the default)
+ *   2  also a matching neighborhood / subdivision name
+ *   3  also a value-equivalent adjacent pocket (the rural rule)
+ * Census data missing on either side is unverifiable — not a mismatch.
+ */
 function evaluateGeoScopeMatch(
   subject: NormalizedProperty,
   comp: NormalizedComparable,
   filter: AppraisalFilter,
 ): FilterResult {
-  const s = subject.geoScopes
-  const c = comp.geoScopes
-  const pairs: Array<[string, string | undefined, string | undefined]> = [
-    ['subdivision', s?.subdivision ?? subject.subdivision ?? undefined, c?.subdivision ?? comp.subdivision ?? undefined],
-    ['neighborhood', s?.n4 ?? subject.neighborhoodName ?? undefined, c?.n4 ?? comp.neighborhoodName ?? undefined],
-    ['school district', s?.schoolDistrict, c?.schoolDistrict],
-    ['city', s?.city ?? subject.city ?? undefined, c?.city ?? comp.city ?? undefined],
-    ['county', s?.county ?? subject.county ?? undefined, c?.county],
-    ['zip', s?.zip ?? subject.zipCode ?? undefined, c?.zip ?? comp.zipCode ?? undefined],
-  ]
-  const populated = pairs.filter(([, a, b]) => a && b)
-  if (populated.length === 0) {
+  const level = typeof filter.value === 'number' ? filter.value : 1
+  const sameTract = subject.censusTract != null && comp.censusTract != null && subject.censusTract === comp.censusTract
+  const sameBlockGroup = comp.sameBlockGroup === true ||
+    (subject.censusBlockGroup != null && comp.censusBlockGroup != null && subject.censusBlockGroup === comp.censusBlockGroup)
+  if (sameTract || sameBlockGroup) {
+    return {
+      type: 'geo_scope_match',
+      passed: true,
+      actualValue: sameBlockGroup ? 'same block group' : 'same tract',
+      threshold: 'tract or block group',
+    }
+  }
+  const known = subject.censusTract != null && comp.censusTract != null
+  if (!known) {
     return {
       type: 'geo_scope_match',
       passed: true,
       status: 'not_verified',
-      reason: 'No geo-scope data — rule not verified',
+      reason: 'No census geography on one side — rule not verified',
     }
   }
-  const mismatches = populated.filter(([, a, b]) => geoScopeNorm(a!) !== geoScopeNorm(b!))
-  const passed = mismatches.length === 0
-  if (!passed && typeof filter.value === 'number' && filter.value > 1 && isValueEquivalent(subject, comp)) {
+  const names = [subject.subdivision, subject.neighborhoodName, subject.geoScopes?.subdivision, subject.geoScopes?.n4]
+    .filter((v): v is string => !!v).map(geoScopeNorm)
+  const compNames = [comp.subdivision, comp.neighborhoodName, comp.geoScopes?.subdivision, comp.geoScopes?.n4]
+    .filter((v): v is string => !!v).map(geoScopeNorm)
+  if (level >= 2 && compNames.some((n) => names.includes(n))) {
     return {
       type: 'geo_scope_match',
       passed: true,
-      reason: `Scope mismatch (${mismatches.map(([n]) => n).join(', ')}) — value-equivalent pocket under flex`,
-      actualValue: `${populated.length - mismatches.length}/${populated.length} scopes match`,
+      reason: 'Different tract — same neighborhood name (area widened)',
+      actualValue: 'same neighborhood name',
+      threshold: 'tract, block group, or neighborhood',
+    }
+  }
+  if (level >= 3 && isValueEquivalent(subject, comp)) {
+    return {
+      type: 'geo_scope_match',
+      passed: true,
+      reason: 'Different tract — value-equivalent adjacent pocket (area widened)',
+      actualValue: 'value-equivalent pocket',
+      threshold: 'tract, block group, neighborhood, or equivalent pocket',
     }
   }
   return {
     type: 'geo_scope_match',
-    passed,
-    reason: passed ? undefined : `Geo scope mismatch: ${mismatches.map(([n, a, b]) => `${n} "${b}" ≠ "${a}"`).join(', ')}`,
-    actualValue: `${populated.length - mismatches.length}/${populated.length} scopes match`,
-    threshold: 'all populated scopes',
+    passed: false,
+    reason: `Outside the subject's census tract (${comp.censusTract} ≠ ${subject.censusTract})`,
+    actualValue: 'different tract',
+    threshold: level >= 3 ? 'tract, block group, neighborhood, or equivalent pocket'
+      : level >= 2 ? 'tract, block group, or neighborhood' : 'tract or block group',
   }
 }
+
 
 function evaluateSaleAge(
   _subject: NormalizedProperty,
@@ -1288,8 +1314,13 @@ export function evaluateComparable(
     filterResults.push(result)
 
     // Soft filters (stories, roof material) record the mismatch for
-    // ranking/reporting but never disqualify the comp.
-    if (!result.passed && result.reason && filter.priority !== 'soft') {
+    // ranking/reporting but never disqualify the comp. Subdivision and
+    // neighborhood NAME rules are rank-only too: "same area" is decided by
+    // the census rule (geo_scope_match — tract, then block group, then
+    // neighborhood; docs/FILTER-LADDER.md). Provider labels for one town
+    // can differ ("Rex" vs "Forest Park-Morrow") and must never reject a
+    // same-tract comp.
+    if (!result.passed && result.reason && filter.priority !== 'soft' && !NAME_SCOPE_RANK_ONLY.has(filter.type)) {
       disableReasons.push(result.reason)
     }
   }
@@ -1353,6 +1384,12 @@ export function evaluateComparables(
 
   return evaluations
 }
+
+/** Name-based geography rules — recorded and ranked, never disqualifying. */
+export const NAME_SCOPE_RANK_ONLY = new Set<FilterType>([
+  'subdivision_match',
+  'neighborhood_match',
+])
 
 /**
  * Percentage flex on numeric tolerances — sqft, year built, lot size,

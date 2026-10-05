@@ -84,7 +84,19 @@ commits.
   paid calls; live candidates enrich six at a time, stop after three usable
   ARV-evidence comps, and cap at 25 paid enrichments.
 
+- **Filter ladder replaces the all-rules flex.** Square feet, year built, and
+  sale age widen one step at a time (25% of the subject's size, 3 years,
+  30 days) inside one area; geography loosens
+  last; the first step with ARV evidence wins; one passing comp is
+  sufficient. See `docs/FILTER-LADDER.md`. `HARNESS_VERSION` is
+  `og-2026.10.05.3`.
+
 ## Still open
+
+- The older in-appraisal expansion ladder (`evaluateExpansionLadder`) still
+  uses its own order (year, then square feet 500/750/1000, then geography,
+  then sale age 365/548). It now runs only when zero comps pass at the
+  filter-ladder step. Bring it onto the same order or retire it.
 
 - Extend transaction-noise screening beyond the shipped same-day same-price
   package-deed, bulk-sale, nominal-sale, and extreme-outlier checks;

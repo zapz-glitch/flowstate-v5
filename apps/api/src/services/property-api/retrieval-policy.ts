@@ -116,7 +116,16 @@ export interface ComparablesRetrievalMeta {
    * escalations were needed to admit ARV evidence (0 = strict pass), and
    * the winning factor. Geo filters never flex.
    */
-  paramFlex?: { extensions: number; factor: number; concessions?: string[] } | null
+  /** Filter-ladder record (docs/FILTER-LADDER.md) — `extensions` is the
+   *  ladder step, `limits` the square-feet / year / sale-age limits there. */
+  paramFlex?: {
+    extensions: number
+    factor: number
+    concessions?: string[]
+    limits?: { sqft: number | null; year: number | null; saleAge: number | null }
+    scope?: 'tract' | 'block_group' | 'neighborhood' | 'value_equivalent' | null
+    arvEvidenceFound?: boolean
+  } | null
 }
 
 export function buildRetrievalMeta(args: {

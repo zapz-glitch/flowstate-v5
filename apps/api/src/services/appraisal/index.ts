@@ -223,6 +223,14 @@ export interface AppraisalResultWithFallback extends AppraisalResult {
 const REQUIRED_ARV_COMPS = 3
 
 /**
+ * How many rule-passing comps make a set sufficient. Product rule
+ * (docs/FILTER-LADDER.md): one is enough to build an evaluation on — more is
+ * better, but the server must not loosen rules just to collect a third.
+ * REQUIRED_ARV_COMPS above still caps how many comps are SELECTED.
+ */
+const MIN_COMPS_TO_ANSWER = 1
+
+/**
  * Top-of-market band: only eligible comps priced within this fraction of the
  * highest-priced eligible comp may drive ARV. Guards against as-is /
  * original-condition sales dragging ARV down when vision can't verify
@@ -427,7 +435,7 @@ class PropertyAppraisalService implements AppraisalService {
       // Fewer than REQUIRED_ARV_COMPS verified comps is insufficient — thin
       // sets must trigger the expansion fallbacks (geography → older sales →
       // nearest) rather than silently anchoring ARV on 1–2 sales.
-      insufficientComps: eligible.length < REQUIRED_ARV_COMPS,
+      insufficientComps: eligible.length < MIN_COMPS_TO_ANSWER,
     }
   }
 
@@ -640,7 +648,7 @@ class PropertyAppraisalService implements AppraisalService {
       arv: picked.arv,
       enabledCount: picked.comparables.filter((c) => c.isEnabled).length,
       selectedCompIds: picked.selected.map((c) => c.id),
-      insufficientComps: picked.eligible.length < REQUIRED_ARV_COMPS,
+      insufficientComps: picked.eligible.length < MIN_COMPS_TO_ANSWER,
     })
 
     // Step 2: widen the build-era INSIDE the subdivision first — better a
@@ -686,7 +694,7 @@ class PropertyAppraisalService implements AppraisalService {
             adjustments,
           })
           const picked = rescue(resultPocket, new Set(['subdivision_match', 'neighborhood_match', 'geo_scope_match']), pocketMatch)
-          if (picked && picked.eligible.length >= REQUIRED_ARV_COMPS) {
+          if (picked && picked.eligible.length >= MIN_COMPS_TO_ANSWER) {
             console.log(`Appraisal: ${picked.selected.length} comps selected via census pocket match${yearNote(yearLimit)}`)
             return {
               ...applyRescued(resultPocket, picked),
@@ -713,7 +721,7 @@ class PropertyAppraisalService implements AppraisalService {
           const picked = rescue(resultNb, new Set(['subdivision_match']), (c) =>
             neighborhoodsMatch(subject, c) === true
           )
-          if (picked && picked.eligible.length >= REQUIRED_ARV_COMPS) {
+          if (picked && picked.eligible.length >= MIN_COMPS_TO_ANSWER) {
             console.log(`Appraisal: ${picked.selected.length} comps selected via neighborhood match${yearNote(yearLimit)}`)
             return {
               ...applyRescued(resultNb, picked),
@@ -756,7 +764,7 @@ class PropertyAppraisalService implements AppraisalService {
             adjustments,
           })
           const picked = rescue(resultSub, new Set(['subdivision_match', 'neighborhood_match', 'geo_scope_match']), ruralOk)
-          if (picked && picked.eligible.length >= REQUIRED_ARV_COMPS) {
+          if (picked && picked.eligible.length >= MIN_COMPS_TO_ANSWER) {
             console.log(`Appraisal: ${picked.selected.length} comps selected after subdivision expansion${yearNote(yearLimit)}`)
             return {
               ...applyRescued(resultSub, picked),
@@ -779,7 +787,7 @@ class PropertyAppraisalService implements AppraisalService {
               adjustments,
             })
             const picked = rescue(resultGeo, new Set(['subdivision_match', 'neighborhood_match', 'geo_scope_match', 'distance']), ruralOk)
-            if (picked && picked.eligible.length >= REQUIRED_ARV_COMPS) {
+            if (picked && picked.eligible.length >= MIN_COMPS_TO_ANSWER) {
               console.log(`Appraisal: ${picked.selected.length} comps selected after geographic expansion${yearNote(yearLimit)}`)
               return {
                 ...applyRescued(resultGeo, picked),
@@ -816,7 +824,7 @@ class PropertyAppraisalService implements AppraisalService {
           && (refPpsf == null || isValueEquivalent(subject, c))
         )
         if (picked) {
-          if (picked.eligible.length >= REQUIRED_ARV_COMPS) {
+          if (picked.eligible.length >= MIN_COMPS_TO_ANSWER) {
             console.log(`Appraisal: ${picked.selected.length} comps selected via pocket catch — geo_scope label mismatch rescued by coordinate+value proof`)
             return {
               ...applyRescued(resultPocket, picked),

@@ -109,11 +109,13 @@ const nComp = (id: string, over: Partial<NormalizedComparable>) => ({
     nComp('n1', { subdivision: 'Maple Glen', neighborhoodName: 'Riverside', censusTract: 'T9' }),
   ]
   const r = svc.evaluateWithFallback(subject, pool)
-  assert.equal(r.fallbackUsed, 'pocket_expansion',
-    `expected pocket_expansion, got ${r.fallbackUsed}`)
+  // Census geography decides "same area" (docs/FILTER-LADDER.md): the three
+  // same-tract comps pass the strict rules outright — name labels only rank
+  // — and the other-tract comp is out, whatever its neighborhood name says.
+  assert.equal(r.fallbackUsed, 'none', `same-tract comps need no rescue, got ${r.fallbackUsed}`)
   const enabled = r.comparables.filter((c) => c.isEnabled).map((c) => c.id).sort()
   assert.deepEqual(enabled, ['p1', 'p2', 'p3'],
-    'only pocket members rescued — neighborhood-name match waits for its own tier')
+    'only tract members pass — a neighborhood-name match in another tract waits for the ladder to widen the area')
 }
 
 console.log('geo-hierarchy: tract-first similarity, nested-pocket ranking, pocket-tier rescue order passed')

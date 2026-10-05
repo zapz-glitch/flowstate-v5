@@ -56,11 +56,19 @@ should withhold or weaken the result rather than invent support.
 13. **Process grade is attempt health.** `clean`, `retried`, and
     `unverified` describe the evaluation path only. Hash/archive integrity is
     reported separately.
-14. **Enrichment is staged.** Free evidence ranks candidates first:
-    block group, tract, neighborhood, then nearest. Provably dead or noisy
-    comps do not receive paid enrichment. The ladder enriches six candidates
-    at a time, stops once three usable ARV-evidence comps exist, and caps at
-    25 paid enrichments.
+14. **The server loosens rules, one small step at a time.** The user's
+    settings are the ideal and the user never loosens them by hand. When no
+    comp with ARV price evidence passes, only square feet, year built, and
+    sale age widen. Each step adds 25% of the subject's square feet, 3
+    years, or 30 days. Sale age goes first,
+    then square feet, then year, in turn. Geography loosens last: tract,
+    then block group, then neighborhood name, then a value-equivalent
+    adjacent pocket. The ladder stops at the first step that admits an ARV
+    comp; one passing comp is sufficient and the server does not widen to
+    collect more. There is no fixed cap: the data ends the ladder. Paid
+    enrichment follows the same order, six candidates at a time, capped at
+    25. Provably dead or noisy comps do not receive paid enrichment. Full
+    rule: `docs/FILTER-LADDER.md`.
 15. **Every run must be replayable.** The run record stores request, rules,
     subject, comp evidence, every Set-B attempt, result, hash, model/runtime
     context, and archive status.
@@ -77,6 +85,8 @@ should withhold or weaken the result rather than invent support.
 - Price ratio as the definition of stale.
 - Devalue/time-reprice rungs.
 - Automatic rehab-cost × 70% or ×80% condition uplift.
+- The all-rules flex ladder (×1.15 … ×5 on every numeric tolerance at once).
+- Requiring three rule-passing comps before a set counts as sufficient.
 - Land-extraction or `land_play` output as valuation evidence.
 - Free-form `tier:*` summary text overriding structured condition evidence.
 
