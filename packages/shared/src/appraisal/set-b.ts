@@ -429,12 +429,13 @@ export function evaluateB(
       const arvImplied = carriers.map((x) => implied(x)).sort((a, b) => a - b)
       let arv = arvImplied[Math.floor(arvImplied.length / 2)]
       // ARV cannot sit below the maintained band — maintained homes
-      // selling above the answer means the band was read wrong.
-      const maintainedTop = maintained.length
-        ? Math.max(...maintained.map((x) => implied(x))) : null
-      if (renovated.length > 0 && maintainedTop != null && arv < maintainedTop) {
-        flags.push(`ARV ${usd(arv)} below maintained band — floored at maintained ceiling ${usd(maintainedTop)}`)
-        arv = maintainedTop
+      // selling above the answer means the band was read wrong. The
+      // floor is the band's median implied, not its top member.
+      const maintainedMed = maintained.length
+        ? bMedian(maintained.map((x) => implied(x))) : null
+      if (renovated.length > 0 && maintainedMed != null && arv < maintainedMed) {
+        flags.push(`ARV ${usd(arv)} below maintained band — floored at maintained median ${usd(maintainedMed)}`)
+        arv = maintainedMed
       }
       flags.push(
         `T2 pocket-tiers [${label}] — ${clean.length} cleaned sale(s)` +
