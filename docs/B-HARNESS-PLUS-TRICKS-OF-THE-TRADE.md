@@ -361,6 +361,21 @@ of comps in practice.
 `4f58d09`. ATTOM lookup retries once with the street directional
 stripped ("SW"/"NE"…) — attribution fragility, not appraisal logic.
 
+### G9 — Band microscope (the 30% rule)
+Outlier scrutiny: a driver whose contribution sits >30% above a solid
+band (≥2 members) is a suspected outlier — set aside as a bound, the
+next-strongest evidence drives; if nothing survives, the band median
+answers. Cascade kept its +36% anchor because the band was a single
+comp — microscope needs the band to be real, not one sale.
+
+### G10 — AVM has no weight in the ARV path
+Bands are evidence; the AVM is a black-box model we don't control.
+Removed: the below-AVM verify-fail (a band-derived answer below the AVM
+is legal — Tennis served its $244,827 evidence over a $267,904 model),
+the median+AVM uplift path, and the subject-AVM label test stays only
+as a flag upstream. AVM appears solely as the last-resort anchor when
+zero comp evidence exists — labeled, never preferred.
+
 ### Tooling — run cards + tricks checklist
 `8751fa7`, `12a7404`. `scripts/ab-run-report.mjs` renders each artifact:
 timing, ARV vs served-vs-B split, comps used, strict-vs-widened rules,
