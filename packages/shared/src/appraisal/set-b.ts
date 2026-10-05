@@ -113,6 +113,8 @@ export interface BContribution {
   contrib: number
   weight: number
   tier: 'arv' | 'as_is' | 'unidentified'
+  /** URAR ceiling: needs >25% total adjustment — bound, not a driver. */
+  boundOnly?: boolean
 }
 
 export interface BResult {
@@ -403,12 +405,19 @@ export function evaluateB(
       flags.push(`${c.address}: land adj ${landAdj >= 0 ? '+' : '−'}$${Math.abs(landAdj).toLocaleString('en-US', { maximumFractionDigits: 0 })} [${landSource ?? 'T3 per-parcel'}] (cap ±${usd(B_LAND_CAP_PCT * c.salePrice!)})`)
     }
 
-    // Adjustment-cap downweight — >25% net adj halves the weight
-    const adjPct = Math.abs(c.appraisalRules?.totalAdjustment ?? 0) / c.salePrice!
-    const capped = adjPct > B_ADJ_CAP_PCT
-    if (capped) flags.push(`${c.address}: ${(adjPct * 100).toFixed(0)}% adj > cap — downweighted`)
-    const weight = (1 / (1 + adjPct)) * (capped ? 0.5 : 1)
-    contribs.push({ comp: c, contrib, weight, tier: bTierOf(c) })
+    // URAR ceiling — a comp needing >25% total adjustment isn't a comp.
+    // Measured on whichever engine asks the most of it: the grid's own
+    // totalAdjustment, or our marginal reprice (size + land) vs its sale.
+    // Over the line it becomes a bound — it can't drive or anchor.
+    const marginalPct = Math.abs(contrib - base) / c.salePrice!
+    const adjPct = Math.max(
+      Math.abs(c.appraisalRules?.totalAdjustment ?? 0) / c.salePrice!,
+      marginalPct,
+    )
+    const boundOnly = adjPct > B_ADJ_CAP_PCT
+    if (boundOnly) flags.push(`${c.address}: needs ±${(adjPct * 100).toFixed(0)}% adjustment — bound, not a driver`)
+    const weight = (1 / (1 + adjPct)) * (boundOnly ? 0.5 : 1)
+    contribs.push({ comp: c, contrib, weight, tier: bTierOf(c), boundOnly })
   }
 
   // ── Evidence verification — stale/divergent never drive ARV ─────────────
@@ -435,8 +444,11 @@ export function evaluateB(
   }
 
   // ── Tier discipline — renovated preferred → median fallback → retail ────
-  const medianComps = verifiedPool.filter((x) => bCondTier(x.comp) === 'median')
-  const preferred = verifiedPool.filter((x) =>
+  // Over-adjusted comps are bounds, not drivers — they sit in verifiedPool
+  // (and the ceiling) but can never anchor or support.
+  const driverPool = verifiedPool.filter((x) => !x.boundOnly)
+  const medianComps = driverPool.filter((x) => bCondTier(x.comp) === 'median')
+  const preferred = driverPool.filter((x) =>
     x.tier === 'arv' && bCondTier(x.comp) !== 'median' && similarity(x) >= B_MIN_SIM)
   let drivers: BContribution[]
   if (preferred.length) {
@@ -446,15 +458,15 @@ export function evaluateB(
     for (const x of medianComps)
       flags.push(`${x.comp.address}: median-tier driver — no high-similarity renovated evidence`)
   } else {
-    const weak = verifiedPool.filter((x) => x.tier === 'arv' && bCondTier(x.comp) !== 'median')
+    const weak = driverPool.filter((x) => x.tier === 'arv' && bCondTier(x.comp) !== 'median')
     if (weak.length) {
       flags.push(`non-median comps below similarity floor (${B_MIN_SIM}) — falling to median`)
       drivers = medianComps.length ? medianComps : weak
     } else {
-      const topPpsf = verifiedPool.length
-        ? Math.max(...verifiedPool.map((x) => bPpsfOf(x.comp) ?? 0))
+      const topPpsf = driverPool.length
+        ? Math.max(...driverPool.map((x) => bPpsfOf(x.comp) ?? 0))
         : null
-      const retail = verifiedPool.filter((x) =>
+      const retail = driverPool.filter((x) =>
         x.tier !== 'as_is' && bCondTier(x.comp) !== 'median' &&
         topPpsf != null && (bPpsfOf(x.comp) ?? 0) >= B_RETAIL_BAND * topPpsf)
       if (!retail.length) {

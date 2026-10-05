@@ -289,6 +289,20 @@ assert.deepEqual(B_REHAB_FRACTION, {
   assert.equal(r.conf, 'low')
 }
 
+// ── URAR ceiling — >25% total adjustment means bound, not driver ─────────
+// The comp can still sit in the evidence pool (and the ceiling), but it
+// can never anchor or support — even when it would have been preferred.
+{
+  const over = comp({ address: 'over', salePrice: 300_000,
+    appraisalRules: { totalAdjustment: 90_000 } }) // 30% of sale > 25% cap
+  const clean = comp({ address: 'clean', salePrice: 280_000, distanceMiles: 0.3 })
+  const r = evaluateB(subject(), [over, clean])
+  assert.ok(!r.drivers.some((x) => x.comp.address === 'over'))
+  assert.ok(r.contribs.some((x) => x.comp.address === 'over' && x.boundOnly))
+  assert.ok(r.flags.some((f) => f.includes('bound, not a driver')))
+  assert.equal(r.arv, 280_000) // the clean comp drives alone
+}
+
 // ── Geo hierarchy — tract first, block group second, neighborhood third ───
 // Owner decision (findings log, 2026-10-04): the class pick looks for
 // tract matches first, in every phase. A closer sale across the tract
