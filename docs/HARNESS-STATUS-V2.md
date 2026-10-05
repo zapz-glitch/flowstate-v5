@@ -69,8 +69,6 @@ commits.
 
 ## Still open
 
-- Reconcile `APPRAISER-RULESET.md`, `APPRAISAL_HARNESS.md`, and
-  `OFFICIAL-HARNESS.md` with the decisions actually implemented.
 - Extend transaction-noise screening beyond the shipped same-day same-price
   package-deed and nominal-sale checks; bulk-sale variants and broader
   outlier policy remain open.

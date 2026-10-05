@@ -1,4 +1,8 @@
-# The official harness — what shipped and won the A/B test
+# The official harness — historical A/B winner
+
+> Historical reference only. This describes the ship-time Set-B winner, not
+> the current V2 harness. Use `docs/APPRAISER-RULESET.md` and
+> `docs/APPRAISAL_HARNESS.md` for the active rules.
 
 The A/B winner is **Set-B** — the trade-tricks methodology, ported from
 `scripts/ab-eval.py`. It lives in

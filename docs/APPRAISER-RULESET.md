@@ -1,59 +1,80 @@
-# Appraiser Ruleset — Set-B harness (product-engineer approved)
+# Appraiser Ruleset — current Set-B harness
 
-Source of truth for how the B harness values property. Any harness change
-must trace to a rule here; rules change only with product-engineer sign-off.
+This is the active product rule record for the TypeScript Set-B evaluator.
+Rules change only with product-engineer sign-off. `docs/OFFICIAL-HARNESS.md`
+is the historical A/B winner; this file controls the current V2 harness.
 
-## Governing principle
-If a top appraiser wouldn't do it, neither does the harness. Every edge case is
-solved by asking first: what would a top 0.01% appraiser do here?
+## Governing question
 
-## Approved rules
+Would a highly skilled residential appraiser support this answer for this
+subject, using this evidence and these configured rules? If not, the harness
+should withhold or weaken the result rather than invent support.
 
-1. **Geography tiers** — tract first, block group second, neighborhood third;
-   widen only when the closer tier has nothing trustworthy. (A same-BG comp is
-   always same-tract, so inside the tract tier, BG matches rank first.)
-2. **Verification** — stale or divergent sales never set value.
-3. **Weighting** — sale price is 80% of the condition call, Clef 20%. Clef also
-   classifies comps for the user in the dashboard.
-4. **Banding** — comps without a Clef read are banded (floor/median/upper) by price.
-5. **Pocket rate** — the closest-tier renovated comp carries the most weight;
-   if none is trustworthy, step out one tier. Comps outside the subject's
-   market area (rule 14) never carry weight.
-6. **Minimum 3 sales, reconciled** — no single-comp anchoring. Reconcile at
-   least 3 closed sales (3–6 typical), most weight to the best comp (closest
-   tier, verified condition, least adjustment). If the closest tier has fewer
-   than 3, widen the search for the rest and state why.
-7. **Size integrity** — marketed vs tax sqft divergence with no permit →
-   comp excluded from ARV.
-8. **Tricks of the trade** — marginal $/sf size adjustment, lot/land value
-   adjustment, condition adjustment, outlier ceiling (above top sale only with
-   ≥2 supporters), within-tier least-adjustment weighting.
-9. **Truth loop** — widen pool → deepen evidence → time-adjust stale sales;
-   keep the closest verified answer.
-10. **Fallback order** — ARV → median value → AVM (last resort only).
-11. **Median-tier condition uplift** — market-derived first: the pocket's
-    renovated-vs-median price gap. If unmeasurable, 70% of rehab cost.
-    Never above the pocket's top verified sale.
-12. **Size-adjusted banding** — price bands rank comps by their price adjusted
-    to the subject's size, not raw $/sf (raw $/sf makes big houses look cheap).
-13. **No size double-count** — when the marginal $/sf size adjustment applies,
-    bed/bath adjustments are skipped; they apply only when room count differs
-    at similar size (e.g. 3-bed vs 4-bed, same sqft).
-14. **Market area, not just names** — a subdivision name is a hint. Two
-    properties share a market area when sales values agree (pocket $/sf within
-    ~15%), housing stock matches (era/style), and no physical boundary
-    separates them (major road, rail, water). Near-match names (spelling,
-    EXT/SUB/phase) count only if values agree; different names count if values
-    + stock + contiguity agree; matching names with divergent values do not.
-15. **Comp selection** — no similarity-score cutoff. Use the 3–6 most
-    comparable sales (least adjustment, closest, most recent). Avoid comps whose
-    gross adjustments exceed ~25% of sale price; allow one only in a thin pool,
-    with the reason stated.
+## Active rules
 
-## Architecture principle — server computes, dashboard displays
-All appraisal math (settings adjustments, tricks of the trade, every rule
-above) runs on the server and is assigned per comp in the response. The
-dashboard never computes valuation; comp toggles only re-combine values the
-server already assigned, so API and dashboard always show the same answer.
+1. **Geography uses the tightest proven scope.** Block group is the tightest
+   match, then tract, then neighborhood name. A comp outside all three is
+   out-of-pocket evidence, not pocket evidence.
+2. **Evidence is screened before it can drive.** A comp stamped stale,
+   divergent, below-pocket, unexplained above-pocket, package-deed, or
+   nominal-sale cannot set ARV.
+3. **Stale means old.** A sale is stale only when it is outside the
+   configured preferred `sale_age` window. Price is a separate market-fit
+   check.
+4. **Market fit is separate from age.** A sale far below the comp's current
+   pocket rate is `below_pocket`. A sale far above it is `above_pocket` unless
+   renovated evidence explains the premium.
+5. **Sale price is the final market anchor.** Clef/Luna condition and the
+   classification can change whether a comp may drive, but they do not
+   replace the recorded transaction.
+6. **Condition evidence is structured.** A confident structured condition
+   read wins. Old `tier:*` summary text is fallback only. Low-confidence
+   reads stay unverified.
+7. **Distressed and as-is sales are floor evidence.** They can bound or
+   explain the market, but they cannot set ARV.
+8. **One anchor sets ARV.** Other accepted drivers bound the answer; they are
+   not averaged into it. Similarity gates trim weaker drivers.
+9. **No unexplained uplift.** Market-measured premium-vs-median spread can
+   support a condition adjustment. If it cannot be measured, the median
+   anchor stands and the flag says uplift is unverified.
+10. **Median-only exception is limited.** When no ARV-tier evidence exists
+    but the subject AVM is above the gated median ceiling, the approved path
+    may move halfway toward that AVM. This is labeled `median+50% AVM uplift`
+    and graded weak. Otherwise AVM remains floor/display evidence only.
+11. **Fallbacks are explicit.** No comp evidence falls through labeled
+    floors: pocket-implied, AVM floor, assessed value, then report-only.
+    The fallback is not presented as verified comp evidence.
+12. **Result grade is evidence quality.** `verified` needs at least three
+    drivers with usable verification evidence. `weak` means the answer used
+    soft, thin, rescued, or unverified evidence. `floor` means non-comp
+    evidence. `withheld` means no defensible answer.
+13. **Process grade is attempt health.** `clean`, `retried`, and
+    `unverified` describe the evaluation path only. Hash/archive integrity is
+    reported separately.
+14. **Every run must be replayable.** The run record stores request, rules,
+    subject, comp evidence, every Set-B attempt, result, hash, model/runtime
+    context, and archive status.
+15. **Actual outcomes do not rewrite predictions.** Later verified sale
+    results are stored separately for calibration and audit.
+16. **Dashboard/server parity.** The server computes the appraisal and
+    downstream offer values. The dashboard renders and submits selections;
+    it does not calculate a second ARV.
 
-## Open decisions
+## Superseded rules — do not implement from old text
+
+- Minimum-three reconciliation as an automatic formula.
+- Price terciles or banding as the main evidence class.
+- Price ratio as the definition of stale.
+- Devalue/time-reprice rungs.
+- Automatic rehab-cost × 70% or ×80% condition uplift.
+- Land-extraction or `land_play` output as valuation evidence.
+- Free-form `tier:*` summary text overriding structured condition evidence.
+
+## Open decisions / not yet built
+
+- Whether a missing rural reference should fail or pass at wide geography
+  tiers. Current code intentionally preserves the old pass-through behavior.
+- Broader bulk-sale variants and same-day different-price package patterns.
+- Independent rule auditor. Replay proves determinism; it does not prove
+  every configured rule was followed.
+- Complete browser/server parity check after the dashboard edits settle.

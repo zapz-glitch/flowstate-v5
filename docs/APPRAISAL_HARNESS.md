@@ -1,210 +1,143 @@
-# Appraisal Harness — Set-B evaluator + tricks of the trade
+# Appraisal Harness — current Set-B evaluator
 
-The authoritative description of how the evaluator values a property.
-Companion to `docs/APPRAISER-RULESET.md` (the product-engineer-approved
-rules) and `SWE2_FLOWSTATE_FINISHING_GUIDE.md` (the operating contract).
+This document describes the implementation in this branch. The product rule
+record is `docs/APPRAISER-RULESET.md`. The operating contract is
+`SWE2_FLOWSTATE_FINISHING_GUIDE.md`.
 
-**Change control.** Every valuation-related patch must name the rule in
-this file it implements or repairs, and must show the acceptance cases
-(`scripts/golden/appraiser-cases.json`) still pass. Editing this document
-or the harness it describes requires the product engineer's explicit
-approval. Address runs are evaluations only — never edits.
+`packages/shared/src/appraisal/set-b.ts` is the valuation engine. The API
+pipeline builds the evidence, records every attempt, and saves the result.
+The dashboard renders and edits evidence selection; it does not calculate a
+second valuation.
 
-**Architecture.** One evaluator: `evaluateB` in
-`packages/shared/src/appraisal/set-b.ts`, run server-side inside the
-pipeline (`apps/api/src/services/evaluation/index.ts`). The dashboard
-displays the server's result and may re-combine values the server already
-assigned; it never appraises.
-
----
-
-## 1. Evidence inputs (what the harness reads)
+## 1. Evidence inputs
 
 | Input | Source | Role |
 |---|---|---|
-| Sale price + date | provider sales data | The liquidity anchor — final price evidence |
-| Square feet (tax) | provider | Size basis for rate + marginal adjustment |
-| Census tract / block group | Census geocoder + Geocodio | Geo-tier matching |
-| Subdivision / neighborhood | county GIS + provider | Closest tier (with value agreement) |
-| `evidenceVerification` | price cross-check vs own AVM + pocket $/sf | corroborated / divergent / stale / above_pocket |
-| `curbAppeal` (Clef) | listing photos + description | Condition INDICATION only — never verification |
-| `classification` | flip chain, distressed sale, listing evidence | arv / as_is / transitional |
-| `sqftEvidence` | marketed-vs-tax divergence + permit search | exclusion when unpermitted |
-| Land fields | landAssessedValue, improvementAssessedValue, lot sf/acres, zoning | land rate + extraction |
-| `listingDetails` / `physicalCharacteristics` | Redfin/Zillow listing pages | display + future per-comp feature adjustments |
-| `adjustedPrice` | appraisal grid (user's settings preset) | contribution base |
-| Subject: sqft, year, lot, tract, subdivision, land/improvement assessed, AVM, rehab level | provider + settings | subject profile |
+| Sale price/date | Provider sales data | Final transaction evidence |
+| Square feet, year, lot, property type | Provider/listing evidence | Comparability and adjustments |
+| Census tract / block group | Census geocoder + provider | Pocket membership |
+| Subdivision / neighborhood | Provider/listing | Market-area evidence |
+| `evidenceVerification.staleness` | Sale date vs preferred `sale_age` | `current` / `stale` / `unverified` |
+| `evidenceVerification.marketFit` | Comp sale $/sf vs its pocket reference | `in_range` / `below_pocket` / `above_pocket` / `unverified` |
+| `evidenceVerification.priceCheck` | Sale price vs the comp's own AVM | `corroborated` / `plausible` / `divergent` / `unverified` |
+| `evidenceVerification.transactionCheck` | Nominal + same-day same-price package-deed screen | `clean` / `package_deed` / `nominal_sale` / `unverified` |
+| `curbAppeal` | Clef/Luna listing evidence | Structured condition signal, confidence-gated |
+| `classification` | Flip/distress/transaction evidence | `arv` / `as_is` / `transitional` |
+| `adjustedPrice` | User appraisal rules | Contribution base |
+| Subject profile | Provider + applied settings | Sqft, year, lot, geography, condition scope, floor values |
 
----
+## 2. Evidence screen
 
-## 2. Fixed policy — cannot change during a repair
+Before a comp may drive ARV, Set-B removes unfit evidence from the driver
+pool:
 
-1. **Geography tiers:** tract first, block group second, neighborhood/
-   subdivision third. Widen only when the closer tier has nothing
-   trustworthy. (Every same-BG comp is same-tract, so inside the tract
-   tier, BG matches rank first.)
-2. **Pocket rate:** a verified renovated comp on the subject's block
-   group is the going ARV rate for that pocket and carries the most
-   weight. "Verified" requires price corroboration — the condition
-   claim AND an upper-band sale price must agree (rule 4).
-3. **Verification:** stale or divergent sales never set value.
-4. **Price is the liquidity anchor:** the sale price confirms the band;
-   condition labels are indications (≈80/20 price/condition weight).
-   Clef also labels condition for the dashboard.
-5. **Minimum 3 sales, reconciled:** no single-comp anchoring — 3–6 sales,
-   most weight to the best comp (closest tier, verified condition, least
-   adjustment). Thin tiers widen the search, not the standard.
-   *Status: approved, not yet implemented — code anchors 1 + bounds the
-   rest today.*
-6. **Market area, not names:** same market area requires value agreement
-   (pocket $/sf within ~15%), matching housing stock, and no physical
-   boundary (major road, rail, water). Near-match subdivision names count
-   only when values agree; divergent values disqualify even same names.
-7. **Size integrity:** marketed-vs-tax sqft divergence with no permit →
-   comp excluded from ARV evidence entirely.
-8. **Distressed/as-is sales never drive ARV** — floor evidence only.
-9. **AVM is display/research only:** zero influence on ARV, offers,
-   confidence, or comp ranking. It is the last-resort floor, never
-   evidence.
-10. **Fallback order:** ARV → median-tier value → AVM → report-only.
-11. **No invented adjustments:** every dollar change to a comp's evidence
-    traces to a listed adjustment or exception path. Land contribution to
-    a SFR is distinct from vacant-lot valuation; excess acreage is not
-    priced proportionally.
+- `staleness: stale` — sale date is outside the preferred sale-age window.
+- `marketFit: below_pocket` — sale is too far below the comp's own pocket.
+- `marketFit: above_pocket` — premium sale cannot drive unless renovated or
+  premium condition/class evidence explains it.
+- `priceCheck: divergent` — recorded sale conflicts with the comp's own AVM.
+- `transactionCheck: package_deed` or `nominal_sale` — not independent
+  market evidence.
 
-## 3. Configurable settings — defaults and meaning
+The comp remains in the trace and report. It just cannot set value.
 
-### 3a. User evaluation settings (appraisal preset, runs before Set-B)
+## 3. Pool and contributions
 
-Filters (hard = disqualifies, soft = similarity data):
+1. Enabled comps with sale price and size form the first pool.
+2. The land rate is measured from the pool where possible: same-tract vacant
+   sales, same-tract assessed curve, then capped per-parcel fallback.
+3. The size rate is measured from fit same-tract comps, then fit pool comps.
+   If no reliable slope exists, a tapered $/sf share handles the size gap.
+4. Each comp contributes `adjustedPrice + size delta + land delta`.
+5. A total adjustment above 25% is downweighted and flagged.
+6. Stale, divergent, poor market-fit, package-deed, and nominal-sale
+   evidence stays out of the verified driver pool.
 
-| Filter | Default | Meaning |
-|---|---|---|
-| sale_age | 180d (soft ladder 365/548) | Max comp age; stretches in widen rung |
-| sqft_diff | ±250 sf | Size band for grid pass |
-| lot_size_diff | ±2,500 sf (soft) | Similarity signal, not disqualifier |
-| subdivision_match / neighborhood_match | hard | Name match; not_verified ≠ fail |
-| building_style / foundation / stories_match | hard | Verified mismatches disqualify; unverifiable data → not_verified |
-| geo_scope_match, year_built, era windows | per settings | Normalizes Saint/St etc.; ≤1945 subjects use era window |
+## 4. Driver and anchor selection
 
-Adjustments (per-comp dollars applied to `adjustedPrice`):
+1. ARV-tier comps with non-median/non-distressed condition and minimum
+   similarity drive first.
+2. If none qualify, confident median-condition comps drive.
+3. If no median set exists, low-similarity ARV comps fall back.
+4. If still none, unidentified/non-as-is comps inside the retail band may
+   drive.
+5. Only as-is/distressed evidence means ARV is withheld.
 
-| Adjustment | Default |
-|---|---|
-| bedroom | $15,000/room |
-| bathroom | $10,000/room |
-| pool | $10,000 |
-| garage | $10,000 |
-| carport | $5,000 |
-| basement_sqft | 50% of area rate |
-| foundation | 10% |
-| traffic (fronting/backing/siding) | $10–15k / 10–20% over $500k |
-| old_comp_discount | 15% beyond 90d |
+Inside the selected set:
 
-### 3b. Set-B constants (`set-b.ts`, calibrated — approval required to change)
+- The most similar driver is the anchor.
+- Other drivers bound the answer; they are not averaged into it.
+- Drivers under 60% of the anchor's similarity score are dropped.
+- If the anchor is the floor of its own driver set, self-heal re-anchors to
+  the median driver.
 
-| Constant | Value | Meaning |
-|---|---|---|
-| `B_ADJ_CAP_PCT` | 0.25 | Gross-adjustment guard — wariness threshold |
-| `B_OUTLIER_SUPPORT` | 2 | Verified supporters needed to exceed top sale |
-| `B_SIM_GATE` | 0.60 | Drivers must score ≥60% of anchor's similarity (dense pools; thin pools use ladder) |
-| `B_MIN_SIM` | 3.0 | Minimum similarity floor |
-| `B_COND_MIN_CONF` | 30 | Clef confidence floor before a verdict counts |
-| `B_LAND_FACTOR` / `B_LAND_CAP_PCT` | 0.35 / 0.20 | Per-parcel land fallback factor; ±20% land-adj cap |
-| `B_REHAB_FRACTION` | Gut .95 / Heavy .85 / FullCos .75 / Light .45 / Lipstick .30 | Subject's completed scope share of the tier spread |
-| Size band (rescue) | 0.5–1.75× (devalue: 0.33–3×) | Adjustable-size envelope vs subject |
-| Marginal sqft rate | OLS pool slope (T1 tract ≥5 → T2 pool ≥5 → tapered ppsf fallback) | Prices size deltas at the pocket's own $/sf gradient |
-| Land rate ladder | T1 same-tract vacant-sales median (≥2) → T2 same-tract assessed-curve slope (≥5 parcels) → T3 per-parcel assessed × .35 | Prices lot deltas; landAdj capped ±20% of sale |
-| Land extraction | implied land = sale − improvement basis; basis = county split × mktRatio, else RCN model sqft×$110×(1−2%/yr, cap 80%) | Per-comp implied $/lot-sf |
-| `land_play` gates | county improvement share <25%, OR extracted land ≥1.5× improved ARV, OR teardown condition + land > ARV | Otherwise emits land context only |
-| Price bands | verified-pool $/sf terciles | floor / median / upper when no verdict — *approved change: band on size-adjusted price, pending* |
-| Condition uplift | tier spread × rehab fraction (T1, ≥2 premium + median comps) else 80% of rehab cost (T2), min $1,000 — *approved change: market-gap first, 70% cost fallback, pending* | Median-tier anchor → as-repaired value |
-| Stale time-adjust | stale sale repriced by 1/pocketRatio, capped 2× | Attempt-5 rung only |
+## 5. Condition and ceiling
 
-## 4. Permitted judgment — subject-specific interpretation
+- A structured `distressed`/`needs_work` read is always distressed.
+- A structured condition below `B_COND_MIN_CONF` stays `unknown`.
+- Confident structured condition beats old `tier:*` text.
+- Old `tier:*` text remains only as a fallback when no structured condition
+  exists.
+- If all drivers are median, the market premium-vs-median spread may adjust
+  ARV. If that spread cannot be measured, the median anchor stands.
+- An ARV above the top verified contribution needs enough supporting
+  drivers; otherwise it is capped.
+- All-smaller or all-bigger driver sets are flagged as unbracketed.
 
-Where the harness interprets evidence per subject, and what supports it:
+## 6. Retry ladder
 
-- **Band placement:** Clef verdict preferred; when Clef can't classify,
-  price position stands in. A verdict vs price disagreement resolves to
-  price (rule 4): a renovated/premium claim that sold at median or floor
-  prices is median/floor evidence — vision alone never confers ARV tier;
-  a dated claim buyers paid top-tercile for IS upper evidence.
-- **Soft-disable rescue:** grid-disabled comps may compete when every
-  disable reason is soft (not nominal/type mismatch), size is inside the
-  band, the sale is corroborated or plausible, and the comp is same-side
-  of the road barrier.
-- **Anchor eligibility:** a comp with verified-different block group or
-  verified-different subdivision bounds but can't anchor; sqft-conflicted
-  comps can't anchor. Unknown geo does not disqualify — missing evidence
-  can't fail a gate.
-- **Self-heal:** when the anchor is the evidence floor (<80% of driver
-  median), re-anchor to the anchorable comp nearest the driver median,
-  preferring same-BG renovated.
-- **Outlier ceiling:** ARV above the pool's top verified contribution
-  only with ≥2 supporters at ≥60% of the pool-best similarity.
-- **Land mode:** `land_play` labels the deal as the dirt; `land context`
-  keeps extraction visible without the verdict.
+The current pipeline records every attempt in the immutable run record:
 
-## 5. Insufficient evidence — when the harness withholds valuation
+1. `attempt 1` — evaluate the frozen comp set.
+2. `attempt 2 widen` — fetch a larger radius/window, evaluate new comps
+   through the same grid, restamp evidence, rerun Set-B.
+3. `attempt 3 deepen` — backfill missing AVM/land fields, restamp evidence,
+   rerun Set-B.
+4. Final — if the best result still fails verification, the process is
+   marked unverified and the labeled floor/result stands.
 
-- **T5 report-only:** no comp evidence and no anchor — no ARV is
-  fabricated.
-- **Insufficient-comps report:** saved with `valuation: null` +
-  `comps.insufficientComps` when the pool can't support a defensible
-  read. A ladder rung that produces a VERIFIED answer applies, flagged.
-- **Sqft-unverifiable comps are excluded**, not guessed at.
-- **Stale/divergent-only pools** devalue to median tier or report
-  insufficient — they never drive ARV.
-- **Unverified uplift:** when the condition adjustment can't be measured,
-  ARV stands at the median-tier anchor and the flag says so.
+No devalue or stale-reprice rung exists in the current harness.
 
-## 6. The attempt ladder (truth loop)
+## 7. Result and process labels
 
-```
-1  initial evaluation — verified evidence drives
-2  widen — +1mi radius, +6mo sale window; new comps re-eval + re-verify
-3  deepen — backfill missing evidence fields (≤8 comps)
-4  devalue — median-tier comps answer at relaxed size band
-5  devalue + stale — time-adjusted stale sales admitted (repriced by
-   pocket ratio, capped 2×)
-final — unverified → T2 pocket-implied / T3 AVM floor / T4 assessed /
-        T5 report-only
-```
+Result grade:
 
-A verified ladder answer applies even when the original pool was
-insufficient — the flag trail records which rung produced it.
+- `verified` — at least three drivers with usable verification evidence and
+  no rescue/weak source.
+- `weak` — thin, rescued, low-confidence, or soft evidence.
+- `floor` — non-comp floor sources such as pocket-implied, AVM, assessed, or
+  nearest-comp fallback.
+- `withheld` — no defensible ARV.
 
-## 7. Reconciliation (how the ARV is produced today)
+Process grade:
 
-1. Pool: enabled comps + rescued soft-disabled, sale + size required.
-2. Contributions: `adjustedPrice + (subjectSqft − compSqft) × marginalRate`
-   + land adjustment (capped ±20% of sale).
-3. Unfit removal: sqft-excluded + stale/divergent evidence can't drive.
-4. Drivers: upper-band comps (ARV evidence only).
-5. Anchor: same-BG renovated comp if anchorable, else most-similar
-   anchorable driver; similarity gate trims the driver set.
-6. Supporting range: remaining drivers bound, not blend.
-7. Condition uplift on all-median driver sets; outlier ceiling;
-   bracketing and confidence grading on the result.
+- `clean` — attempt 1 passed the current checks.
+- `retried` — a later verified attempt produced the answer.
+- `unverified` — the trail ended without verification.
 
-## 8. Known deltas — approved rules not yet in code
+Process grade does not claim record integrity. The run-record hash and
+archive fields are checked separately.
 
-| Approved rule | Code today | Status |
-|---|---|---|
-| Min-3 reconciliation (rule 5/2.5) | Single anchor + bound support | pending |
-| Size-adjusted banding | Raw-$/sf terciles (demotes big homes — Branchwood defect) | pending |
-| No bed/bath + size double-count (rule 13) | Grid and marginal rate can stack | pending |
-| Market-area values check (rule 14) | Name-match + BG gates only | pending |
-| 70% rehab / market-gap uplift (rule 11) | 80% of rehab cost, no gap check | pending |
-| Fallback-to-ranked[0] when nothing anchorable | Bypasses geo anchor gate (Branchwood) | pending repair |
-| Tract→BG→neighborhood driver weighting | Similarity score partially encodes | pending |
+## 8. Persistence and replay
 
-## 9. Acceptance cases
+- `run_records` is append-only. Every run/rerun stores request, rules,
+  evidence, attempts, response, hashes, model/provider context, and archive
+  status.
+- `report_outcomes` stores actual later sale outcomes separately from the
+  prediction.
+- `scripts/replay.mts` reads run records first, verifies payload hash,
+  replays the last saved Set-B attempt, and compares the full result.
+- `npm run replay:snapshots` is the strict local gate over
+  `fixtures/snapshots/*.json`.
+- The candidate workflow runs the same strict snapshot replay.
+- Evaluation-result cache keys include `HARNESS_VERSION`.
 
-`scripts/golden/appraiser-cases.json` — expected anchor, reconciled
-comps, exclusions, and ARV range per address, derived by applying this
-document as a top appraiser would. Current cases: Branchwood
-($285–300k, Arrowood anchor) and Baywood ($315–345k, Lois primary).
-Every valuation patch runs all cases; any regression outside a case's
-range blocks the patch.
+## 9. Known open work
+
+- Rural wide-scope behavior when no subject pocket reference exists is an
+  open policy decision; current code preserves the old pass-through.
+- Broader bulk-sale detection beyond same-day same-price package deeds.
+- Best-six/next-six enrichment waves.
+- More frozen fixtures for rural, withheld, distressed, and failure paths.
+- Independent rule auditor.
+- Browser/server parity after Claude's UI work finishes.
