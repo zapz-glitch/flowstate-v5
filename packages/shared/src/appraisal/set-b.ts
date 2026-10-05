@@ -385,7 +385,23 @@ export function evaluateB(
         target.push(x)
         target.sort((a, b) => a.ppsf - b.ppsf)
       }
-      // Marginal repricing — same taper as the driver contribution. A
+      // Tight bands — a band that's wide isn't a band. Members priced
+      // >10% off their band's median get evicted to the band their price
+      // actually fits; the core group is what prices the answer.
+      for (const band of [distressed, maintained, renovated]) {
+        if (band.length < 2) continue
+        const bMed = med(band)
+        const evicted = band.filter((x) => Math.abs(x.ppsf / bMed - 1) > 0.10)
+        for (const x of evicted) {
+          band.splice(band.indexOf(x), 1)
+          const dst = x.ppsf >= (renovated.length ? Math.min(...renovated.map((y) => y.ppsf)) : Infinity) ? renovated
+            : x.ppsf >= (maintained.length ? Math.min(...maintained.map((y) => y.ppsf)) : Infinity) ? maintained
+            : distressed
+          dst.push(x)
+          dst.sort((a, b) => a.ppsf - b.ppsf)
+          flags.push(`${x.c.address}: evicted — $${x.ppsf.toFixed(0)}/sf vs band median $${bMed.toFixed(0)}/sf (>10%)`)
+        }
+      }
       // band member's implied subject price is its sale plus the size
       // delta at a tapered rate, never flat $/sf.
       const implied = (x: { c: BComp; ppsf: number }) => {
@@ -652,13 +668,15 @@ export function evaluateB(
 
   // ── Band microscope — >30% above the pocket's own band is an outlier ────
   // The appraiser move: a comp pricing that far past the band gets
-  // scrutinized, not trusted. If the band is solid (≥2 members) and the
-  // gap persists, the comp is probably a different product — set it
-  // aside as a bound and let the next-strongest evidence drive.
+  // scrutinized, not trusted. The band outranks a deviating driver —
+  // the comp is probably a different product, so it's set aside as a
+  // bound and the next-strongest evidence drives.
   for (let guard = 0; guard < 5 && anchor; guard++) {
-    const bandMembers = contribs.filter((x) => x !== anchor &&
+    const bandMembers = driverPool.filter((x) => x !== anchor &&
       (bConditionClass(x.comp) === 'renovated' || x.tier === 'arv'))
-    const band = bandMembers.length >= 2 ? bMedian(bandMembers.map((x) => x.contrib)) : null
+    // One comp is still a band — the pocket's evidence outranks a
+    // deviating driver even when the band is a single sale.
+    const band = bandMembers.length ? bMedian(bandMembers.map((x) => x.contrib)) : null
     if (band == null || anchor.contrib <= 1.30 * band) break
     flags.push(`${anchor.comp.address}: contribution ${usd(anchor.contrib)} is +${Math.round((anchor.contrib / band - 1) * 100)}% above the renovated band ${usd(band)} (${bandMembers.length} members) — suspected outlier, set aside`)
     drivers = drivers.filter((x) => x !== anchor)

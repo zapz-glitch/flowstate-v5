@@ -100,9 +100,29 @@ if (b.attemptTrail?.length) {
 L.push(``)
 L.push(`## Comps used for ARV`)
 if (b.anchorAddress) L.push(`Anchor: **${b.anchorAddress}**`)
+const bandOf = (c) => {
+  const cond = (c?.curbAppeal?.condition ?? '').toLowerCase()
+  const conf = c?.curbAppeal?.confidence ?? 0
+  if (conf >= 30 && cond) {
+    if (['renovated','updated','turnkey','move-in ready'].includes(cond)) return 'renovated'
+    if (['as_is','as-is','distressed','needs_work','teardown'].includes(cond)) return 'distressed'
+    if (['dated','original','needs_updates'].includes(cond)) return 'dated'
+    return 'maintained'
+  }
+  return 'unclassified'
+}
+const itemByAddr = (a) => (comps.items ?? []).find((c) => (c.address ?? '').toLowerCase().startsWith((a ?? '').toLowerCase().slice(0, 14)))
 for (const x of b.drivers ?? []) {
   const c = x.comp ?? x
-  L.push(`- ${c.address ?? x.address} — sold ${usd(c.salePrice)} → contrib ${usd(x.contribution ?? x.contrib)} (${x.tier ?? ''})`)
+  const item = itemByAddr(c.address ?? x.address)
+  const band = bandOf(item)
+  const ca = item?.curbAppeal
+  const prov = [
+    `band: ${band}`,
+    ca ? `curb ${ca.condition ?? '?'}${ca.confidence != null ? ` @${ca.confidence}` : ''}` : 'no curb read',
+    item?.classification?.type ? `label:${item.classification.type}` : null,
+  ].filter(Boolean).join(' · ')
+  L.push(`- ${c.address ?? x.address} — sold ${usd(c.salePrice)} → contrib ${usd(x.contribution ?? x.contrib)} (${x.tier ?? ''}) — ${prov}`)
 }
 if (!(b.drivers ?? []).length) L.push(`- none — no verified drivers`)
 

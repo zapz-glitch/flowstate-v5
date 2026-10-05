@@ -123,7 +123,7 @@ assert.deepEqual(B_REHAB_FRACTION, {
     curbAppeal: { condition: 'maintained', confidence: 60 },
   })
   const r = evaluateB(subject(), [dead(140), dead(150), dead(160), dead(200), dead(210), dead(220)])
-  assert.equal(r.arv, 300_000) // band median (upper-middle) = 200/sf × 1500 — no renovated tier to lift it
+  assert.equal(r.arv, 315_000) // tight band evicts the <10%-off cheap end → carriers [200,210,220] → median 210/sf
 }
 // Cleaning: as-is-labeled and IQR outlier sales don't pollute the pocket.
 {
