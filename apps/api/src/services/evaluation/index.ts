@@ -1038,6 +1038,7 @@ export async function performAnalysis(
           if (addition) {
             raw.sqftResolution = 'permitted'
             raw.permitNote = `marketed ${raw.listingSqft}sf validated by permit ${addition.permitNumber ?? 'record'}`
+            raw.providerSqft ??= cc.squareFeet
             cc.squareFeet = raw.listingSqft as number
             cc.pricePerSqft = cc.salePrice != null && cc.squareFeet ? cc.salePrice / cc.squareFeet : cc.pricePerSqft
             delete raw.sqftConflict

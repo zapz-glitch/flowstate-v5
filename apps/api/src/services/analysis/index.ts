@@ -1470,7 +1470,11 @@ export function buildAnalysisResponse(
     // Prefer merged (Zillow-supplemented) values for fields that CoreLogic may be missing
     const bedrooms = merged?.bedrooms ?? comp.bedrooms ?? null
     const bathrooms = merged?.bathrooms ?? comp.bathrooms ?? null
-    const squareFeet = merged?.squareFeet ?? comp.squareFeet
+    // The sqft the math used — when a listing-sqft resolution rewrote the
+    // comp AFTER evaluation, the record shows the evaluated value and the
+    // marketed sqft stays evidence (sqftEvidence block below).
+    const evaluatedSqft = (comp.raw as Record<string, unknown> | undefined)?.providerSqft as number | undefined
+    const squareFeet = evaluatedSqft ?? merged?.squareFeet ?? comp.squareFeet
     const yearBuilt = merged?.yearBuilt ?? comp.yearBuilt
     const providerConstruction = resolveProviderConstruction(comp.construction)
     const zillowPhysical = ctx.compListingPhysicalDetails?.[comp.id] ?? null
