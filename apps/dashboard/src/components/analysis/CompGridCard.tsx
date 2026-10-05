@@ -3,12 +3,11 @@
 import { memo, useMemo } from 'react'
 import { Check } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { subdivisionsMatch } from '@flowstate-api/shared'
 import type { CompItem, SubjectData } from './shared-types'
 import { StreetViewImage } from './StreetViewImage'
 import { RuleMatchDetails } from './RuleMatchDetails'
 import { sqftMatchColor, yearMatchColor, lotMatchColor, fmtDeltaWords, formatShortDate, formatLotSize } from './format-helpers'
-import { compFeatureMatches, featureState, matchDotClass, matchTextClass } from './feature-match'
+import { compFeatureMatches, featureState, matchTextClass } from './feature-match'
 
 export interface CompGridCardProps {
   comp: CompItem
@@ -61,8 +60,6 @@ function CompGridCardInner({
 
   // Feature-vs-subject verification · every card-visible field, green/red/gray
   const featureMatches = useMemo(() => compFeatureMatches(comp, subject), [comp, subject])
-  const verifiedCount = featureMatches.filter((m) => m.state !== 'unknown').length
-  const matchCount = featureMatches.filter((m) => m.state === 'match').length
 
   // Build external links
   const streetViewUrl = comp.latitude && comp.longitude
@@ -70,10 +67,6 @@ function CompGridCardInner({
     : comp.address
       ? `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${encodeURIComponent(comp.address + (comp.city ? `, ${comp.city}` : '') + (comp.state ? `, ${comp.state}` : ''))}`
       : null
-
-  const zillowUrl = comp.zillowUrl || (comp.address
-    ? `https://www.zillow.com/homes/${encodeURIComponent(comp.address + (comp.city ? ` ${comp.city}` : '') + (comp.state ? ` ${comp.state}` : '') + (comp.zipCode ? ` ${comp.zipCode}` : ''))}_rb/`
-    : null)
 
   return (
     <div
@@ -112,17 +105,6 @@ function CompGridCardInner({
             className="w-full h-full object-cover"
           />
         )}
-        {/* photo click opens street view · the card body still opens detail */}
-        <a
-          href={comp.latitude && comp.longitude
-            ? `https://www.google.com/maps/@${comp.latitude},${comp.longitude},3a,75y,0h,90t/data=!3m4!1e1!3m2!1s!2e0?entry=ttu`
-            : `https://www.google.com/maps/search/${encodeURIComponent(comp.address ?? '')}/@?entry=ttu&layer=c`}
-          target="_blank"
-          rel="noopener noreferrer"
-          onClick={(e) => e.stopPropagation()}
-          className="absolute inset-0"
-          aria-label="Open street view"
-        />
         {/* Index badge */}
         <div className="absolute top-2 left-2 flex items-center gap-1 pointer-events-none">
           <div className={cn(

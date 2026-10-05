@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useMemo, useCallback } from 'react'
-import { SlidersHorizontal, RotateCcw, Loader2, LayoutGrid, List, ArrowUpDown, Bell, Check } from 'lucide-react'
+import { SlidersHorizontal, RotateCcw } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { CopyButton } from '@/components/ui/copy-button'
@@ -61,15 +61,6 @@ export interface ComparablesSectionProps {
 
 type SortOption = 'default' | 'subdivision' | 'neighborhood' | 'distance' | 'price' | 'psf'
 
-const SORT_LABELS: Record<SortOption, string> = {
-  default: 'Default',
-  subdivision: 'Subdivision',
-  neighborhood: 'Neighborhood',
-  distance: 'Distance',
-  price: 'Price',
-  psf: '$/Sqft',
-}
-
 /** Neighborhood match by normalized name OR provider code (mirrors server-side neighborhoodsMatch) */
 function neighborhoodsMatchClient(comp: CompItem, subject: SubjectData | null | undefined): boolean {
   const norm = (s?: string | null) => s?.trim().toLowerCase() || null
@@ -98,7 +89,6 @@ export function ComparablesSection({
   feedbackContext,
   onFeedbackSubmitted,
 }: ComparablesSectionProps) {
-  const [expandedComps, setExpandedComps] = useState<Set<string>>(new Set())
   const [excludedOpen, setExcludedOpen] = useState(false)
   const [sortBy, setSortBy] = useState<SortOption>('default')
   const [tierFilter, setTierFilter] = useState<'all' | 'arv' | 'market' | 'floor'>('all')
@@ -220,16 +210,6 @@ export function ComparablesSection({
       return dir * (numKey(a.comp) - numKey(b.comp)) || (a.originalIndex - b.originalIndex)
     })
   }, [filteredCompItems, compItems, sortBy, sortDesc, subjectSubdivision, subject, selectedCompKeys, hasInteractiveSelection])
-
-  // Functional update keeps the identity stable for memoized cards.
-  const toggleExpand = useCallback((key: string) => {
-    setExpandedComps((prev) => {
-      const next = new Set(prev)
-      if (next.has(key)) next.delete(key)
-      else next.add(key)
-      return next
-    })
-  }, [])
 
   // Group comps based on selection mode
   const arvComps = hasInteractiveSelection
