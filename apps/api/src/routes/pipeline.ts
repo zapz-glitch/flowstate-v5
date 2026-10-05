@@ -8,6 +8,7 @@
  */
 
 import { Hono } from 'hono'
+import { pocketFromPayload, deterministicInputs, provisionalScore, scorePocket, metroGuess } from '../services/pocket-score'
 import type { Env } from '../types'
 import type { AuthContext } from '../middleware/auth'
 
@@ -266,9 +267,70 @@ pipelineReads.get('/queue', async (c) => {
     const fresh = [...apiItems, ...inflight].filter((i) => !seen.has(addrKey(i.address as string)))
     body.items = [...(body.items ?? []), ...fresh]
   }
+  await attachPockets(c, body.items ?? [])
   body.count = body.items?.length ?? 0
   return c.json(body)
 })
+
+/** Resolve each item's pocket from its run_records payload → join
+ *  pocket_scores → attach metro/pocketScore/pocketName. Misses get a
+ *  provisional score now and a full Serper+Luna scoring job in waitUntil. */
+async function attachPockets(
+  c: { env: Env; executionCtx: { waitUntil(p: Promise<unknown>): void } },
+  items: Array<Record<string, unknown>>,
+): Promise<void> {
+  if (!items.length) return
+  const jobIdOf = (i: Record<string, unknown>) =>
+    (i.evalReportUrl as string | undefined)?.match(/\/reports\/(job_[^/?#]+)/)?.[1] ?? null
+  const jobIds = [...new Set(items.map(jobIdOf).filter((x): x is string => x != null))]
+  if (!jobIds.length) return
+
+  const rows = await c.env.DB.prepare(
+    `SELECT job_id, payload_json FROM run_records WHERE job_id IN (${jobIds.map(() => '?').join(',')})`,
+  ).bind(...jobIds).all<{ job_id: string; payload_json: string }>().catch(() => null)
+  const payloadByJob = new Map((rows?.results ?? []).map((r) => [r.job_id, r.payload_json]))
+
+  // Pass 1 — derive pocket identity + deterministic inputs per item.
+  const resolved = new Map<string, { id: ReturnType<typeof pocketFromPayload> & object; inputs: ReturnType<typeof deterministicInputs> }>()
+  const pockets = new Map<string, { id: NonNullable<ReturnType<typeof pocketFromPayload>>; inputs: ReturnType<typeof deterministicInputs> }>()
+  for (const item of items) {
+    const jobId = jobIdOf(item)
+    const payloadRaw = jobId ? payloadByJob.get(jobId) : undefined
+    if (!payloadRaw) continue
+    let payload: unknown = null
+    try { payload = JSON.parse(payloadRaw) } catch { continue }
+    const id = pocketFromPayload(payload)
+    if (!id) continue
+    item.pocketKey = id.pocketKey
+    item.pocketName = id.displayName
+    const inputs = deterministicInputs(payload, item.listPrice as number | null)
+    resolved.set(jobId as string, { id, inputs })
+    if (!pockets.has(id.pocketKey)) pockets.set(id.pocketKey, { id, inputs })
+  }
+  if (!pockets.size) return
+
+  // Pass 2 — one batch fetch for cached pocket scores.
+  const keys = [...pockets.keys()]
+  const cached = await c.env.DB.prepare(
+    `SELECT pocket_key, score, metro FROM pocket_scores WHERE pocket_key IN (${keys.map(() => '?').join(',')})`,
+  ).bind(...keys).all<{ pocket_key: string; score: number | null; metro: string | null }>().catch(() => null)
+  const scoreByPocket = new Map((cached?.results ?? []).map((r) => [r.pocket_key, r]))
+
+  // Pass 3 — attach; queue one scoring job per uncached pocket.
+  const pending: Promise<unknown>[] = []
+  for (const [jobId, { id, inputs }] of resolved) {
+    const item = items.find((i) => jobIdOf(i) === jobId)
+    if (!item) continue
+    const hit = scoreByPocket.get(id.pocketKey)
+    item.pocketScore = hit?.score ?? provisionalScore(inputs)
+    item.metro = hit?.metro ?? metroGuess(id.state)
+  }
+  for (const [key, { id, inputs }] of pockets) {
+    if (scoreByPocket.has(key)) continue
+    pending.push(scorePocket(c.env, id, inputs, null))
+  }
+  if (pending.length) c.executionCtx.waitUntil(Promise.allSettled(pending))
+}
 
 // DELETE /v1/pipeline/queue/:opportunityId — hide a stale item from the
 // waiting queue. Reversible via POST .../unhide; Close untouched.
