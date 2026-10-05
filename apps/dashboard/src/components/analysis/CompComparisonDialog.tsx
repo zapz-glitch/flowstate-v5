@@ -67,6 +67,8 @@ export function CompComparisonDialog({ open, onOpenChange, subject, comp, isSele
   // Legacy payloads carry no status — ambiguous passed:true renders unverified.
   const filterStatus = (f: (typeof filters)[number]) => f.status ?? (f.passed ? 'not_verified' : 'failed')
   const passedCount = filters.filter((f) => filterStatus(f) === 'passed').length
+  // Evaluated = passed + failed — unpopulated rules say nothing about this comp.
+  const evaluatedCount = filters.filter((f) => filterStatus(f) !== 'not_verified').length
   const totalFilters = filters.length
 
   // Per-feature verification vs subject — green/red, gray when unverifiable
@@ -125,7 +127,7 @@ export function CompComparisonDialog({ open, onOpenChange, subject, comp, isSele
                   variant="outline"
                   className={`text-[10px] ${passedCount === totalFilters ? 'border-emerald-500/30 text-emerald-500' : 'border-amber-500/30 text-amber-500'}`}
                 >
-                  {passedCount}/{totalFilters} filters
+                  {passedCount}/{evaluatedCount} filters
                 </Badge>
               )}
               {comp.compGroup && (
@@ -307,11 +309,14 @@ export function CompComparisonDialog({ open, onOpenChange, subject, comp, isSele
               <div className="border-b sm:border-b-0 sm:border-r border-border">
                 <div className="px-3 sm:px-4 py-2 bg-muted/30 border-b border-border/50">
                   <span className="text-[10px] font-semibold text-foreground uppercase tracking-wider">Filters</span>
-                  <span className="text-[10px] text-foreground-tertiary ml-2">{passedCount}/{totalFilters}</span>
+                  <span className="text-[10px] text-foreground-tertiary ml-2">{passedCount} passed</span>
                 </div>
                 <div className="divide-y divide-border/20">
                   {filters.map((f) => {
                     const status = filterStatus(f)
+                    // Unpopulated filters are noise — a rule that never
+                    // evaluated says nothing about this comp.
+                    if (status === 'not_verified') return null
                     return (
                     <div
                       key={f.type}

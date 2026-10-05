@@ -350,40 +350,6 @@ function CompGridCardInner({
           )}
         </div>
 
-        {/* Manual tier pin — reviewer's call */}
-        {onAssignTier && comp.id && (
-          <div
-            className="flex items-center gap-1 mt-1.5"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {(['arv', 'as_is'] as const).map((tier) => {
-              const active = comp.userTier === tier
-              return (
-                <button
-                  key={tier}
-                  type="button"
-                  disabled={tierPending}
-                  onClick={() => onAssignTier(comp, active ? null : tier)}
-                  title={active ? 'Clear your pin' : `Pin as ${tier === 'arv' ? 'ARV' : 'as-is'}${comp.id ? ` — comp ${comp.id}` : ''}`}
-                  className={cn(
-                    'h-5 px-1.5 rounded text-[9px] font-bold transition-colors disabled:opacity-50',
-                    active
-                      ? tier === 'arv' ? 'bg-emerald-500 text-white' : 'bg-amber-500 text-white'
-                      : 'bg-foreground/8 text-foreground-tertiary hover:bg-foreground/15'
-                  )}
-                >
-                  {tier === 'arv' ? 'ARV' : 'AS-IS'}
-                </button>
-              )
-            })}
-            {comp.id && (
-              <span className="text-[8px] text-foreground-tertiary tabular-nums ml-auto" title="Provider comp ID">
-                #{comp.id}
-              </span>
-            )}
-          </div>
-        )}
-
         <RuleMatchDetails comp={comp} />
 
         {/* Stats grid — collapsed essentials; full detail in the expand dialog */}

@@ -112,9 +112,12 @@ function CompCardInner({
       data-card-key={cardKey}
       data-geo-matched={geoMatched ? 'true' : 'false'}
       className={cn(
-        'transition-all duration-300 border border-border rounded-lg',
+        'transition-all duration-300 border border-border rounded-lg border-l-4',
+        comp.bRole === 'anchor' || comp.bRole === 'driver' ? 'border-l-emerald-500'
+          : comp.bRole === 'pool' ? 'border-l-sky-500'
+          : 'border-l-neutral-600',
         comp.isBestComp && isEnabled && 'border-amber-500/40 ring-1 ring-amber-500/20',
-        isEnabled ? 'border-l-2 border-l-emerald-500/50' : 'opacity-70'
+        !isEnabled && 'opacity-70'
       )}
     >
       <div className="px-4 py-3">
