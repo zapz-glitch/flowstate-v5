@@ -277,10 +277,10 @@ assert.deepEqual(B_REHAB_FRACTION, {
   assert.ok(r.flags.some((f) => f.includes('self-heal')))
 }
 
-// ── Trick 9: URAR condition adjustment — 1801 Carlton Dr ──────────────────
-// All-median drivers price median condition; the subject's as-repaired
-// state earns a premium — contributory rehab × 80% when the market gap
-// isn't measurable — but the outlier ceiling still binds (Woodcrest).
+// ── Investor rule — no modeled condition uplift ───────────────────────────
+// A median-tier anchor serves at face value. The old contributory path
+// (rehab × 80%) priced a premium the pocket never proved — you can't exit
+// on modeled value. If a renovated band exists it carries instead.
 {
   const m1 = comp({
     address: 'm1', salePrice: 250_000, classification: null,
@@ -291,9 +291,9 @@ assert.deepEqual(B_REHAB_FRACTION, {
     curbAppeal: { condition: 'dated', confidence: 55 },
   })
   const r = evaluateB(subject(), [m1, m2], { rehabCost: 50_000 })
-  assert.equal(r.conditionAdj, 40_000)              // uplift was computed
-  assert.equal(r.arv, 250_000)                      // …and capped at the evidence
-  assert.ok(r.flags.some((f) => f.includes('capped')))
+  assert.equal(r.conditionAdj, null)
+  assert.equal(r.arv, 250_000)                      // face value — no +$40k invented
+  assert.ok(r.flags.some((f) => f.includes('no modeled uplift')))
 }
 
 // ── Trick 2: marginal land ladder — per-parcel fallback ───────────────────

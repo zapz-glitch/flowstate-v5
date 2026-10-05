@@ -680,35 +680,15 @@ export function evaluateB(
     }
   }
 
-  // ── Condition adjustment — the URAR Condition line item ─────────────────
-  let conditionAdj: number | null = null
+  // ── No modeled condition uplift ────────────────────────────────────────
+  // Investor rule (owner decision): a median-tier answer serves at face
+  // value. The old URAR uplift — rehab × 80% or a tier-spread bump —
+  // inflated ARV on invented premium; you can't exit on modeled value.
+  // If the pocket proves a renovated band, that band prices it — the
+  // maintained evidence stands on its own here.
+  const conditionAdj: number | null = null
   if (drivers.length && drivers.every((x) => bCondTier(x.comp) === 'median')) {
-    const premium = contribs.filter((x) => bCondTier(x.comp) === 'premium')
-    let condAdj = 0
-    let condSrc: string | null = null
-    if (premium.length >= 2 && medianComps.length) {
-      const premMed = bMedian(premium.map((x) => x.contrib))!
-      const medMed = bMedian(medianComps.map((x) => x.contrib))!
-      const spread = medMed ? premMed / medMed - 1 : 0
-      if (spread > 0) {
-        const frac = B_REHAB_FRACTION[subject.condition ?? ''] ?? 0.5
-        condAdj = arv * spread * frac
-        condSrc = `T1 tier spread ${(spread * 100).toFixed(0)}% × ${frac.toFixed(2)} (${subject.condition})`
-      }
-    } else {
-      const rehab = opts?.rehabCost
-      if (rehab) {
-        condAdj = rehab * 0.8
-        condSrc = `T2 contributory — ${usd(rehab)} rehab cost × 80%`
-      }
-    }
-    if (condAdj >= 1000) {
-      arv += condAdj
-      conditionAdj = condAdj
-      flags.push(`condition adj +${usd(condAdj)} [${condSrc}] — median-priced anchor → as-repaired value`)
-    } else {
-      flags.push('condition uplift unverified — ARV at median-tier anchor')
-    }
+    flags.push('median-tier anchor — ARV serves at maintained-market value (no modeled uplift)')
   }
 
   // ── Outlier ceiling — top verified contribution in subject units ────────
