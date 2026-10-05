@@ -209,7 +209,7 @@ address tuning pass is finished.
 1. **"Tear down" means full gut.** When a listing description says tear
    down (Clef condition read), classify the condition as needing a full gut
    renovation, and set the rehab level to Full Gut.
-2. **Assess lot value alongside ARV.** Estimate the lot's value for the
-   subject and show it in the subject property box. Keep it separate from
-   the ARV: lot value is its own number, not an input that changes the ARV
-   unless a rule is approved for that.
+2. **Assess lot value alongside ARV.** Estimate the subject's lot value.
+   It is display only: a number shown next to the ARV, and shown in the
+   subject property card. It never changes the ARV, the buy price, or any
+   other calculated value. (Decided 2026-10-05.)
