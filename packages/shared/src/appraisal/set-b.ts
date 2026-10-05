@@ -248,6 +248,15 @@ export function evaluateB(
       if (clean.length < 3) continue
       const dropped = ps.length - clean.length
       const med = (xs: typeof clean) => xs[Math.floor(xs.length / 2)].ppsf
+      // Marginal repricing — same taper as the driver contribution. A
+      // band member's implied subject price is its sale plus the size
+      // delta at a tapered rate, never flat $/sf.
+      const implied = (x: { c: BComp; ppsf: number }) => {
+        if (!subSqft || !x.c.squareFeet) return x.c.salePrice!
+        const gap = Math.abs(subSqft - x.c.squareFeet) / x.c.squareFeet
+        const mf = gap <= 0.10 ? 0.50 : gap <= 0.25 ? 0.40 : 0.30
+        return x.c.salePrice! + (subSqft - x.c.squareFeet) * x.ppsf * mf
+      }
       const third = Math.floor(clean.length / 3)
       const banded = clean.length >= 6
       const bands = {
@@ -257,6 +266,9 @@ export function evaluateB(
       }
       const arvPpsf = banded ? med(bands.arv) : med(clean)
       if (!subSqft) break
+      const carriers = banded ? bands.arv : clean
+      const arvImplied = carriers.map((x) => implied(x)).sort((a, b) => a - b)
+      const arv = arvImplied[Math.floor(arvImplied.length / 2)]
       flags.push(
         `T2 pocket-tiers [${label}] — ${clean.length} cleaned sale(s)` +
         (dropped ? ` (${dropped} outlier/bounded-low dropped)` : '') +
@@ -264,10 +276,10 @@ export function evaluateB(
           ? ` — as-is $${med(bands.asIs).toFixed(0)}/sf · median $${med(bands.median).toFixed(0)}/sf · ARV $${arvPpsf.toFixed(0)}/sf`
           : ` — median $${arvPpsf.toFixed(0)}/sf (thin pocket)`))
       return {
-        arv: Math.round(arvPpsf * subSqft), contribs: [], bracket: 'ok', conf: 'low',
+        arv: Math.round(arv), contribs: [], bracket: 'ok', conf: 'low',
         source: `T2 pocket-tiers [${label}]`,
-        drivers: (banded ? bands.arv : clean).map((x) => ({
-          comp: x.c, contrib: Math.round(x.ppsf * subSqft), weight: 0, tier: 'arv' as const,
+        drivers: carriers.map((x) => ({
+          comp: x.c, contrib: Math.round(implied(x)), weight: 0, tier: 'arv' as const,
         })),
         flags,
       }
