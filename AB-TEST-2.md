@@ -40,6 +40,13 @@ Ground re-run proves it: served $199,922 rescue answer, was $161,145 AVM.
 | 2782 Centerville Rosebud Rd | $254,524 → $408,002 → **$332,831** | Evidence bands replaced price thirds: maintained $152/sf · renovated $171/sf — lower but condition-honest | ? | ? |
 | 194 Cedar Mill Dr, Dallas GA | $462,903 → **$442,080** (uplift removed) | T0 anchor — self-heal to 108 Longwood Pl, +$77,120 uplift, ceiling cap at answer; full machinery, verified | ? | ? |
 
+| 2151 Shadowwood Dr, Marietta | **$347,743** | T0 anchor verified — 1 rescue | ? | ? |
+| 2772 Palm Dr, East Point | — | **provider miss** — 'Palm Dr'/'Palm Drive' both not-found (resolution, not harness) | ? | ? |
+| 1343 Emory Rd, Atlanta | **$959,002** | 7 rescues past city-label noise; self-heal +$68k; Druid Hills pocket | ? | ? |
+| 951 Oriole Ln SE, Marietta | **$405,670** | clean T0 anchor; median-tier at face value (no uplift) | ? | ? |
+| 2623 Preston Dr, Decatur | **$280,776** | 8 rescues — whole pocket hidden behind 'Decatur vs Atlanta-Decatur' labels | ? | ? |
+| 1300 Nash Rd NW, Atlanta | **$283,799** | 2 zip-label rescues, self-heal | ? | ? |
+
 **Verified-answer rate: 6/8 now (Tennis honest floor).** Dunseath headline —
 floored at AVM before hardening, now a verified pocket answer ~5% from
 v2's number and at the bottom of the appraiser's band.
