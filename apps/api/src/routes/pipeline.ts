@@ -164,18 +164,108 @@ async function hiddenOpps(env: Env): Promise<Set<string>> {
   return new Set(Array.isArray(list) ? (list as string[]) : [])
 }
 
+/** Loose street-level dedupe key — engine items and saved reports spell the
+ * same address differently ("800 40th St S" vs "800 40TH ST S …"). */
+function addrKey(a?: string | null): string {
+  return (a ?? '').toLowerCase().split(',')[0].replace(/[^a-z0-9]/g, '')
+}
+
+/** In-flight evals for this user — KV markers written by AnalysisJobDO at
+ * run start and cleared on finish. These render as "Evaluating" rows. */
+async function inflightEvalItems(env: Env, userId: string | undefined): Promise<Array<Record<string, unknown>>> {
+  if (!userId) return []
+  const list = await env.API_CACHE.list({ prefix: `eval-active:${userId}:` }).catch(() => null)
+  const items: Array<Record<string, unknown>> = []
+  for (const k of list?.keys ?? []) {
+    const v = await env.API_CACHE.get(k.name, 'json').catch(() => null) as
+      { jobId?: string; address?: string; startedAt?: string } | null
+    if (!v?.jobId) continue
+    items.push({
+      leadId: `inflight_${v.jobId}`,
+      opportunityId: null,
+      displayName: v.address ?? v.jobId,
+      address: v.address ?? 'Evaluating…',
+      wholesalePrice: null,
+      listPrice: null,
+      fullAddress: v.address ?? null,
+      evalReportUrl: null,
+      evalSummary: null,
+      conditionNotes: [],
+      draft: null,
+      queuedAt: v.startedAt ?? new Date().toISOString(),
+      offer_stage: 'evaluating',
+      source: 'api',
+    })
+  }
+  return items
+}
+
+/** Today's completed evals as synthetic queue items — the engine queue only
+ * carries engine-tracked leads; direct /v1/analyze runs land here. */
+async function apiEvalQueueItems(env: Env, userId: string | undefined): Promise<Array<Record<string, unknown>>> {
+  if (!userId) return []
+  const rows = await env.DB.prepare(
+    `SELECT r.job_id, r.property_address, r.property_city, r.property_state,
+            r.property_zip, r.status, r.arv, r.created_at, r.report_id
+       FROM run_records r
+      WHERE r.user_id = ? AND r.created_at >= date('now')
+      ORDER BY r.created_at DESC`,
+  ).bind(userId).all<{
+    job_id: string; property_address: string | null; property_city: string | null
+    property_state: string | null; property_zip: string | null
+    status: string; arv: number | null; created_at: string; report_id: string | null
+  }>().catch((e) => {
+    console.error('[Pipeline] api-eval merge failed:', e)
+    return null
+  })
+
+  const items: Array<Record<string, unknown>> = []
+  for (const r of rows?.results ?? []) {
+    if (!r.job_id || r.status === 'error') continue
+    const address = [r.property_address, r.property_city, r.property_state]
+      .filter(Boolean).join(', ') || r.job_id
+    items.push({
+      leadId: `eval_${r.job_id}`,
+      opportunityId: null,
+      displayName: address,
+      address,
+      wholesalePrice: r.arv ?? null,
+      listPrice: null,
+      fullAddress: [r.property_address, r.property_city, r.property_state, r.property_zip].filter(Boolean).join(', '),
+      evalReportUrl: `/dashboard/reports/${r.job_id}`,
+      evalSummary: r.arv ? { arv: r.arv } : null,
+      conditionNotes: [],
+      draft: null,
+      queuedAt: r.created_at,
+      offer_stage: 'waiting_for_offers',
+      source: 'api',
+    })
+  }
+  return items
+}
+
 // GET /v1/pipeline/queue → GET /engine/queue (KV-cached, SWR, listPrice-enriched,
-// hidden items filtered)
+// hidden items filtered) + today's API evals merged in
 pipelineReads.get('/queue', async (c) => {
   const r = await engineJsonCached(c, '/engine/queue', enrichQueueListPrices)
   if (!r) return c.json({ ok: false, error: 'Engine unavailable' }, 502)
   if (!r.ok) return c.json({ ok: false, error: 'Engine fetch failed' }, 502)
   const hidden = await hiddenOpps(c.env)
-  const body = r.body as { items?: Array<{ opportunityId?: string }>; count?: number }
+  const body = r.body as { items?: Array<{ opportunityId?: string; address?: string }>; count?: number }
   if (Array.isArray(body?.items) && hidden.size) {
     body.items = body.items.filter((i) => !i.opportunityId || !hidden.has(i.opportunityId))
-    body.count = body.items.length
   }
+  const auth = c.get('auth') as AuthContext | undefined
+  const [apiItems, inflight] = await Promise.all([
+    apiEvalQueueItems(c.env, auth?.userId),
+    inflightEvalItems(c.env, auth?.userId),
+  ])
+  if (apiItems.length || inflight.length) {
+    const seen = new Set((body.items ?? []).flatMap((i) => [addrKey(i.address)]).filter(Boolean))
+    const fresh = [...apiItems, ...inflight].filter((i) => !seen.has(addrKey(i.address as string)))
+    body.items = [...(body.items ?? []), ...fresh]
+  }
+  body.count = body.items?.length ?? 0
   return c.json(body)
 })
 

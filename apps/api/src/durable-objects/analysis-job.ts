@@ -269,6 +269,7 @@ export class AnalysisJobDO {
     // moment this fetch returns — without it, polling-only API clients (no
     // SSE connection holding the object alive) lose the run mid-flight.
     this.runActive = true
+    this.markEvalActive(body)
     this.state.waitUntil(
       this.runStreamingAnalysis(body)
         .catch((err) => {
@@ -280,6 +281,7 @@ export class AnalysisJobDO {
         })
         .finally(() => {
           this.runActive = false
+          this.clearEvalActive(body.jobId)
         })
     )
 
@@ -1325,6 +1327,7 @@ export class AnalysisJobDO {
     // Run enrichment inside the DO under waitUntil — without it the DO can
     // be evicted mid-run once this fetch returns (see handleStartStreaming).
     this.runActive = true
+    this.markEvalActive(body)
     this.state.waitUntil(
       this.runEnrichment(body)
         .catch((err) => {
@@ -1334,6 +1337,7 @@ export class AnalysisJobDO {
         })
         .finally(() => {
           this.runActive = false
+          this.clearEvalActive(body.jobId)
         })
     )
 
@@ -1447,6 +1451,26 @@ export class AnalysisJobDO {
   // ─── Event Management ─────────────────────────────────────────────────────
 
   // ─── Observability: record every run outcome (success AND failure) ────────
+
+  /** KV markers for in-flight evals — the offers queue reads these to show
+   *  "Evaluating" items before a report exists. TTL is a safety net for
+   *  runs whose DO dies without reaching finally. */
+  private markEvalActive(body: { jobId: string; userId: string; search?: { address?: string; streetAddress?: string; city?: string; state?: string; zipCode?: string } }): void {
+    const srch = body.search ?? {}
+    const address = srch.address ?? [srch.streetAddress, srch.city, srch.state, srch.zipCode].filter(Boolean).join(', ')
+    this.state.waitUntil(
+      this.env.API_CACHE.put(
+        `eval-active:${body.userId}:${body.jobId}`,
+        JSON.stringify({ jobId: body.jobId, userId: body.userId, address, startedAt: new Date().toISOString() }),
+        { expirationTtl: 1800 },
+      ).catch(() => {}),
+    )
+  }
+
+  private clearEvalActive(jobId: string): void {
+    const uid = this.jobState?.userId ?? ''
+    this.state.waitUntil(this.env.API_CACHE.delete(`eval-active:${uid}:${jobId}`).catch(() => {}))
+  }
 
   private async saveRunRecord(
     config: Pick<StartStreamingRequest, 'jobId' | 'userId'> & Partial<StartStreamingRequest>,
