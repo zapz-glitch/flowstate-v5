@@ -8,6 +8,7 @@
 import type { PropertyBundle } from '../property-api'
 import { evaluateB, bCondTier, HARNESS_VERSION } from '@flowstate-api/shared/appraisal'
 import { gradeResult } from './result-grade'
+import { checksForFlags, type RuleCheck } from './rule-registry'
 import { compBadges } from './comp-badges'
 import type { NormalizedProperty, NormalizedComparable } from '../property-api/types'
 import type { AppraisedComparable, AppraisalResultWithFallback, ClassificationSummaryResult } from '../appraisal'
@@ -811,6 +812,8 @@ export interface AnalysisResponse {
       confidence: 'high' | 'medium' | 'low' | 'none'
       bracket: 'ok' | 'all-smaller' | 'all-bigger'
       flags: string[]
+      /** Stable decision IDs paired with the human-readable flags */
+      checks: RuleCheck[]
       anchorAddress: string | null
       conditionAdj: number | null
       ceiling: number | null
@@ -1824,6 +1827,7 @@ export function buildAnalysisResponse(
         confidence: bResult.conf,
         bracket: bResult.bracket,
         flags: bResult.flags,
+        checks: checksForFlags(bResult.flags),
         anchorAddress: bResult.anchorAddress ?? null,
         conditionAdj: bResult.conditionAdj ?? null,
         ceiling: bResult.ceiling ?? null,

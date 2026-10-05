@@ -27,6 +27,7 @@ import {
   type AppraisalAdjustment,
 } from '../appraisal'
 import { verifyCompEvidence } from '../appraisal/verification'
+import { checksForFlags, type RuleCheck } from '../analysis/rule-registry'
 import { arvEvidence, classifyCompsByEvidence } from './comp-classification'
 export { arvEvidence, classifyCompsByEvidence }
 import { evaluateB, subdivisionsMatch, type BComp, type BSubject } from '@flowstate-api/shared/appraisal'
@@ -180,6 +181,7 @@ export interface EvaluationAttemptRecord {
   comps: BComp[]
   options: { rehabCost?: number | null }
   result: ReturnType<typeof evaluateB>
+  checks: RuleCheck[]
   verificationFailures: string[]
   detail?: Record<string, unknown>
 }
@@ -1279,6 +1281,7 @@ export async function performAnalysis(
         comps: toBComps(),
         options: { rehabCost: valuation?.totalRehabCost ?? null },
         result,
+        checks: checksForFlags(result.flags),
         verificationFailures: verificationFailures,
         ...(detail ? { detail } : {}),
       })

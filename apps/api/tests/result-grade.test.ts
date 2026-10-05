@@ -9,7 +9,14 @@ import { gradeResult } from '../src/services/analysis/result-grade'
  * harness refused.
  */
 
-const clean = { source: 'T0 anchor', conf: 'medium' as const, drivers: [{}, {}, {}], flags: [], arv: 300000 }
+const verifiedDriver = {
+  comp: {
+    salePrice: 300000,
+    squareFeet: 1200,
+    evidenceVerification: { staleness: 'fresh', priceCheck: 'corroborated' },
+  },
+}
+const clean = { source: 'T0 anchor', conf: 'medium' as const, drivers: [verifiedDriver, verifiedDriver, verifiedDriver], flags: [], arv: 300000 }
 
 // verified — comp anchor, attempt 1 clean
 {
@@ -33,7 +40,20 @@ const clean = { source: 'T0 anchor', conf: 'medium' as const, drivers: [{}, {}, 
 
 // weak — single-comp driver
 {
-  const g = gradeResult({ source: 'T0 anchor', conf: 'low', drivers: [{}], flags: [], arv: 300000 }, 'none', ['attempt 1 — verified'])
+  const g = gradeResult({ source: 'T0 anchor', conf: 'low', drivers: [verifiedDriver], flags: [], arv: 300000 }, 'none', ['attempt 1 — verified'])
+  assert.equal(g.resultGrade, 'weak')
+}
+
+// weak — drivers exist but their verification evidence is absent/stale
+{
+  const stale = {
+    comp: {
+      salePrice: 300000,
+      squareFeet: 1200,
+      evidenceVerification: { staleness: 'stale', priceCheck: 'corroborated' },
+    },
+  }
+  const g = gradeResult({ source: 'T0 anchor', conf: 'medium', drivers: [stale, stale, stale], flags: [], arv: 300000 }, 'none', ['attempt 1 — verified'])
   assert.equal(g.resultGrade, 'weak')
 }
 
@@ -43,6 +63,8 @@ const clean = { source: 'T0 anchor', conf: 'medium' as const, drivers: [{}, {}, 
     const g = gradeResult({ source, conf: 'low', drivers: [], flags: [], arv: 300000 }, 'none', [])
     assert.equal(g.resultGrade, 'floor', source)
   }
+  const assessed = gradeResult({ source: 'T4 assessed', conf: 'none', drivers: [], flags: [], arv: 300000 }, 'none', [])
+  assert.equal(assessed.resultGrade, 'floor', 'assessed values stay floor, not withheld')
   const g = gradeResult({ ...clean }, 'nearest_comps', [])
   assert.equal(g.resultGrade, 'floor')
 }

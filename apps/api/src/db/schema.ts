@@ -841,6 +841,41 @@ export const runRecords = sqliteTable(
 )
 
 // ==========================================
+// Report Outcomes (actual sale evidence after the prediction)
+// ==========================================
+
+export const reportOutcomes = sqliteTable(
+  'report_outcomes',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    reportId: text('report_id')
+      .notNull()
+      .references(() => savedReports.id, { onDelete: 'cascade' }),
+    runRecordId: text('run_record_id')
+      .references(() => runRecords.id, { onDelete: 'set null' }),
+    jobId: text('job_id').notNull(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    actualSalePrice: real('actual_sale_price').notNull(),
+    actualSaleDate: text('actual_sale_date'),
+    /** Where the outcome came from — closing statement, MLS, user entry, etc. */
+    source: text('source'),
+    note: text('note'),
+    predictedArv: real('predicted_arv'),
+    predictionDelta: real('prediction_delta'),
+    predictionDeltaPct: real('prediction_delta_pct'),
+    createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
+  },
+  (table) => [
+    index('idx_report_outcomes_report_id').on(table.reportId),
+    index('idx_report_outcomes_job_id').on(table.jobId),
+    index('idx_report_outcomes_run_record_id').on(table.runRecordId),
+    index('idx_report_outcomes_user_id').on(table.userId, table.createdAt),
+  ]
+)
+
+// ==========================================
 // Tasks (per-user to-do list)
 // ==========================================
 

@@ -82,6 +82,9 @@ jobs:
           PYTHON: python
         run: npm test
 
+      - name: Replay frozen appraisal snapshots
+        run: npm run replay:snapshots
+
       - name: Audit locked JavaScript dependencies
         run: npm run security:audit
 

@@ -87,6 +87,11 @@ const stateOf = async (job: AnalysisJobDO) =>
     evalResultKey('u1', '123 main st', 'h'),
     'address normalizes into the key',
   )
+  assert.match(
+    evalResultKey('u1', '123 Main St', 'h'),
+    /^eval-result:v4:og-2026\.10\.04\.1:/,
+    'harness version is part of the result-cache key',
+  )
 }
 
 // ─── Verdict codec ───────────────────────────────────────────────────────────

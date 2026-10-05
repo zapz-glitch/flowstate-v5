@@ -19,6 +19,7 @@ import type { AnalysisResponse } from '../analysis'
 import { evaluateB, bCondTier, HARNESS_VERSION } from '@flowstate-api/shared/appraisal'
 import { savedToBComps, savedToBSubject } from './saved-pool'
 import { gradeResult } from '../analysis/result-grade'
+import { checksForFlags } from '../analysis/rule-registry'
 
 const MAX_ARV_COMPS = 3
 
@@ -126,26 +127,13 @@ export async function recalculateReport(
     { rehabCost: (savedVal.rehabCost as number) ?? null },
   )
 
-  // ARV = Set-B on the stamped evidence. B is the only path — when it
-  // produces nothing, the stored ARV is retained rather than re-derived.
-  let arv: number
-  let arvSource: string
-  if (bResult.arv != null) {
-    arv = bResult.arv
-    arvSource = bResult.source
-  } else if (typeof saved.valuation?.arv === 'number' && saved.valuation.arv > 0) {
-    // B produced no ARV — retain the stored value rather than re-derive
-    // it with the retired mean math.
-    arv = saved.valuation.arv
-    arvSource = 'retained'
-  } else {
-    throw Object.assign(
-      new Error('Set-B produced no ARV on this evidence set — the stored report is unchanged.'),
-      { status: 422 },
-    )
-  }
+  // ARV = Set-B on the stamped evidence. When it produces no answer, the
+  // recalculated report withholds — it must not keep the prior ARV alive.
+  const arv = bResult.arv
+  const arvSource = bResult.arv != null ? bResult.source : 'withheld'
 
-  // Re-run valuation with the report's applied settings snapshot
+  // Re-run valuation with the report's applied settings snapshot when an ARV
+  // exists; otherwise every downstream offer field is cleared with it.
   const applied = saved.appliedSettings
   const settings = applied
     ? {
@@ -160,7 +148,7 @@ export async function recalculateReport(
   const valuationService = createValuationService(applied?.rehabTable as never)
   const compAvgSqft =
     arvComps.reduce((sum, c) => sum + (c.squareFeet ?? 0), 0) / arvComps.length || subjectSqft
-  const valuation: ValuationResult = valuationService.calculateValuation({
+  const valuation: ValuationResult | null = arv != null ? valuationService.calculateValuation({
     arv,
     subjectSqft,
     compAvgSqft,
@@ -170,7 +158,34 @@ export async function recalculateReport(
     closingCostsPercent: settings?.closingCostsPercent ?? 8,
     carryingCostsPercent: settings?.carryingCostsPercent ?? 2,
     wholesaleFee: settings?.wholesaleFee ?? 10000,
-  })
+  }) : null
+  const grades = gradeResult(
+    bResult,
+    (saved.valuation?.bMechanics as { fallbackUsed?: string } | undefined)?.fallbackUsed ?? null,
+    [],
+  )
+  const mechanics = {
+    source: bResult.source,
+    confidence: bResult.conf,
+    bracket: bResult.bracket,
+    flags: bResult.flags,
+    checks: checksForFlags(bResult.flags),
+    anchorAddress: bResult.anchorAddress ?? null,
+    conditionAdj: bResult.conditionAdj ?? null,
+    ceiling: bResult.ceiling ?? null,
+    landRateSource: bResult.landRateSource ?? null,
+    sqftRateSource: bResult.sqftRateSource ?? null,
+    healed: bResult.healed ?? false,
+    harnessVersion: HARNESS_VERSION,
+    fallbackUsed: (saved.valuation?.bMechanics as { fallbackUsed?: string } | undefined)?.fallbackUsed ?? null,
+    expansionApplied: (saved.valuation?.bMechanics as { expansionApplied?: string[] } | undefined)?.expansionApplied ?? [],
+    drivers: bResult.drivers.map((d) => ({
+      address: d.comp.address ?? null,
+      contribution: Math.round(d.contrib),
+      tier: d.tier,
+      conditionTier: bCondTier(d.comp),
+    })),
+  }
 
   // Recompute comp group tags + enabled counts
   const arvIds = new Set(arvComps.map((c) => c.id))
@@ -192,50 +207,28 @@ export async function recalculateReport(
     valuation: {
       ...(saved.valuation ?? {}),
       arv,
-      arvPerSqft: subjectSqft > 0 ? Math.round(arv / subjectSqft) : null,
+      arvPerSqft: arv != null && subjectSqft > 0 ? Math.round(arv / subjectSqft) : null,
       arvSource,
       arvB: bResult.arv,
-      resultGrade: gradeResult(bResult,
-        (saved.valuation?.bMechanics as { fallbackUsed?: string } | undefined)?.fallbackUsed ?? null,
-        []).resultGrade,
+      confidence: bResult.conf === 'none' ? null : bResult.conf,
+      resultGrade: grades.resultGrade,
+      processGrade: grades.processGrade,
       arvMethodology: bResult.arv != null
         ? `Set-B replay: ${bResult.source}${bResult.anchorAddress ? ` — anchored ${bResult.anchorAddress}` : ''}`
-        : `Set-B produced no ARV on replay — stored value retained`,
-      bMechanics: bResult.arv != null
-        ? {
-            source: bResult.source,
-            confidence: bResult.conf,
-            bracket: bResult.bracket,
-            flags: bResult.flags,
-            anchorAddress: bResult.anchorAddress ?? null,
-            conditionAdj: bResult.conditionAdj ?? null,
-            ceiling: bResult.ceiling ?? null,
-            landRateSource: bResult.landRateSource ?? null,
-            sqftRateSource: bResult.sqftRateSource ?? null,
-            healed: bResult.healed ?? false,
-            harnessVersion: HARNESS_VERSION,
-            fallbackUsed: (saved.valuation?.bMechanics as { fallbackUsed?: string } | undefined)?.fallbackUsed ?? null,
-            expansionApplied: (saved.valuation?.bMechanics as { expansionApplied?: string[] } | undefined)?.expansionApplied ?? [],
-            drivers: bResult.drivers.map((d) => ({
-              address: d.comp.address ?? null,
-              contribution: Math.round(d.contrib),
-              tier: d.tier,
-              conditionTier: bCondTier(d.comp),
-            })),
-          }
-        : null,
-      buyPrice: valuation.buyPrice,
-      buyPricePercent: valuation.buyPricePercent,
-      rehabCost: valuation.totalRehabCost,
-      projectedProfit: valuation.projectedProfit,
-      projectedROI: valuation.projectedROI,
-      totalInvestment: valuation.totalInvestment,
-      wholesalePrice: valuation.wholesalePrice,
-      closingCosts: valuation.closingCosts,
-      carryingCosts: valuation.carryingCosts,
-      recommendation: valuation.recommendation,
-      recommendationReason: valuation.recommendationReason,
-      breakdown: valuation.breakdown,
+        : 'Set-B produced no ARV on this evidence set — valuation withheld',
+      bMechanics: mechanics,
+      buyPrice: valuation?.buyPrice ?? null,
+      buyPricePercent: valuation?.buyPricePercent ?? null,
+      rehabCost: valuation?.totalRehabCost ?? null,
+      projectedProfit: valuation?.projectedProfit ?? null,
+      projectedROI: valuation?.projectedROI ?? null,
+      totalInvestment: valuation?.totalInvestment ?? null,
+      wholesalePrice: valuation?.wholesalePrice ?? null,
+      closingCosts: valuation?.closingCosts ?? null,
+      carryingCosts: valuation?.carryingCosts ?? null,
+      recommendation: valuation?.recommendation ?? null,
+      recommendationReason: valuation?.recommendationReason ?? null,
+      breakdown: valuation?.breakdown ?? null,
     } as never,
     comps: {
       ...saved.comps,

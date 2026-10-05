@@ -18,6 +18,10 @@
     "db:migrate:local": "turbo db:migrate:local",
     "db:migrate:remote": "turbo db:migrate:remote",
     "test:e2e": "node scripts/e2e-analyze.mjs",
+    "replay": "tsx scripts/replay.mts",
+    "replay:all": "tsx scripts/replay.mts --all",
+    "replay:strict": "tsx scripts/replay.mts --all --strict --report replay-report.json",
+    "replay:snapshots": "tsx scripts/replay.mts fixtures/snapshots/*.json --strict --report replay-report.json",
     "dev:check": "node scripts/dev-check.mjs"
   },
   "devDependencies": {

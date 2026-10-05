@@ -8,6 +8,8 @@
  *   not found); replay the error without spending provider calls
  */
 
+import { HARNESS_VERSION } from '@flowstate-api/shared/appraisal'
+
 /** 21 days — window in which a repeat evaluation with identical params returns the stored report. */
 export const EVAL_RESULT_TTL_SECONDS = 21 * 24 * 60 * 60;
 
@@ -34,10 +36,9 @@ export async function hashEvalParams(params: unknown): Promise<string> {
 
 export function evalResultKey(userId: string, address: string, paramsHash: string): string {
   const norm = address.trim().toLowerCase().replace(/\s+/g, ' ');
-  // v3 — swe-2-eval funnel: no bathrooms noul, top-15% ARV/as-is price
-  // tier, no fill, humanHandoff flag. v2 payloads carry `fill` verdicts and
-  // lack the tier/handoff fields; don't serve them.
-  return `eval-result:v3:${userId}:${norm}:${paramsHash}`;
+  // v4 — harness-versioned: a rule release can never serve an old-code
+  // answer as if it were produced by the current evaluator.
+  return `eval-result:v4:${HARNESS_VERSION}:${userId}:${norm}:${paramsHash}`;
 }
 
 /**
