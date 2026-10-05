@@ -19,17 +19,36 @@
  *     exceeding it needs ≥2 supporters
  *   - cascade: T0 anchor → T1 rescue → T2 pocket → T3 AVM → T4 assessed
  *     → T5 report-only
+ *
+ * Tricks of the trade — every rule below was earned by a live case in
+ * the A/B run (27 addresses, B=26 / A=2; decision 2026-10-03, this port
+ * at 5953349, retry loop at c0f7bcc). When a change moves one of these,
+ * it should be deliberate — the case named is the reason the rule exists.
+ * Full record: docs/B-HARNESS-PLUS-TRICKS-OF-THE-TRADE.md
+ * Proofs:       apps/api/tests/set-b-tricks.test.ts
+ *
+ *   1. marginal sqft rate        — 18810 Geraci Rd: flat $/sf invented $104k
+ *   2. marginal land ladder      — Ruskin / Emerald Ln lot pricing
+ *   3. >25% adj cap → half weight — appraiser norm is ~10–15% net
+ *   4. stale/divergent never drive — Eagle Run, Toledo, Lenwood, Oak Crest
+ *   5. tier discipline            — Tampa: as-is pools can't price ARV
+ *   6. anchor, don't blend        — Cayuga: blending ran +31% over evidence
+ *   7. similarity gate 60%        — Marie St / 109th Ave weak-driver drag
+ *   8. self-heal floor anchor     — Indianapolis
+ *   9. URAR condition line        — Carlton Dr / Banjo reno premium
+ *  10. outlier ceiling, 2 votes  — Geraci / Woodcrest / Longwood
+ *  11. verify-and-retry ladder    — widen → deepen → labeled floor
  */
 
 // ── Constants (calibrated — see scoreboard.md) ────────────────────────────
-export const B_ADJ_CAP_PCT = 0.25
-export const B_OUTLIER_SUPPORT = 2
-export const B_LAND_FACTOR = 0.35
-export const B_LAND_CAP_PCT = 0.20
-export const B_RETAIL_BAND = 0.70
-export const B_SIM_GATE = 0.60
-export const B_MIN_SIM = 3.0
-export const B_COND_MIN_CONF = 30
+export const B_ADJ_CAP_PCT = 0.25      // trick 3
+export const B_OUTLIER_SUPPORT = 2     // trick 10
+export const B_LAND_FACTOR = 0.35      // trick 2, T3 per-parcel
+export const B_LAND_CAP_PCT = 0.20     // trick 2, cap
+export const B_RETAIL_BAND = 0.70      // trick 5, unlabeled fallback
+export const B_SIM_GATE = 0.60         // trick 7
+export const B_MIN_SIM = 3.0           // trick 7, driver floor
+export const B_COND_MIN_CONF = 30      // trick 5, Clef confidence floor
 export const B_REHAB_FRACTION: Record<string, number> = {
   'Full Gut': 0.95,
   'Heavy Rehab': 0.85,
