@@ -59,7 +59,13 @@ function check(record: Record<string, unknown>, storedHash: string | null, file:
   if (!recordedAt || Number.isNaN(Date.parse(recordedAt))) fail('record.time', 'missing/invalid recordedAt')
   if (!str(record.status)) fail('record.status', 'missing terminal status')
   if (!obj(record.request)) fail('record.request', 'missing request block')
-  if (!obj(record.evidence)) fail('record.evidence', 'missing evidence block')
+  const failedRun = record.status === 'error'
+  const completedRun = record.status === 'completed'
+  if (failedRun && (!str(obj(record.result)?.errorCode) || !str(obj(record.result)?.errorMessage))) {
+    fail('record.error', 'error record lacks errorCode/errorMessage')
+  }
+  if (!failedRun && !completedRun) fail('record.status', `unexpected status ${record.status}`)
+  if (completedRun && !obj(record.evidence)) fail('record.evidence', 'missing evidence block')
   if (!rules?.harnessVersion || !rules.pipelineVersion) fail('record.rules', 'missing harness/pipeline version')
   if (rules?.valuationDate && recordedAt && rules.valuationDate !== recordedAt.slice(0, 10)) {
     fail('record.valuation_date', `valuationDate ${rules.valuationDate} != recordedAt ${recordedAt.slice(0, 10)}`)
@@ -68,7 +74,8 @@ function check(record: Record<string, unknown>, storedHash: string | null, file:
     if (!obj(rules.models)) fail('record.runtime', 'missing model pins')
     if (!obj(rules.providers)) fail('record.runtime', 'missing provider pins')
   }
-  if (!subject?.address) fail('record.subject', 'missing subject address')
+  if (!subject?.address && completedRun) fail('record.subject', 'missing subject address')
+  if (failedRun) return { file, label: str(obj(record.property)?.address) ?? str(subject?.address) ?? basename(file), violations, warnings }
   if (!Array.isArray(evidence?.compPool)) fail('record.evidence.pool', 'missing compPool evidence')
   const compIds = arr(evidence?.compPool).map((comp) => str(comp.id)).filter((id): id is string => id != null)
   const duplicateIds = [...new Set(compIds.filter((id, i) => compIds.indexOf(id) !== i))]
