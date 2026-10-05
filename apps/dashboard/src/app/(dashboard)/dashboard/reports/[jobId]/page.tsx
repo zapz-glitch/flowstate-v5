@@ -369,7 +369,9 @@ export default function DashboardReportPage({ params, queue }: {
   // ─── Auto-save on evaluation/comp changes ──────────────────────────────
   const { autoSaveStatus } = useAutoSave({
     jobId,
-    analysisData: analyzeData,
+    // Save the copy the server last sent back (after a comp check or
+    // uncheck), so the last save is never an older version of the report.
+    analysisData: authoritativeData ?? analyzeData,
     displayValuation,
     recalcData,
     compOverride,

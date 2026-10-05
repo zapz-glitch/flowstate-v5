@@ -93,11 +93,8 @@ commits.
 
 ## Still open
 
-- The older in-appraisal expansion ladder (`evaluateExpansionLadder`) still
-  uses its own order (year, then square feet 500/750/1000, then geography,
-  then sale age 365/548). It now runs only when zero comps pass at the
-  filter-ladder step. Bring it onto the same order or retire it.
-
+- The older in-appraisal expansion ladder is replaced by the filter ladder
+  (`evaluateWithFallback`); `HARNESS_VERSION` is `og-2026.10.05.6`.
 - Extend transaction-noise screening beyond the shipped same-day same-price
   package-deed, bulk-sale, nominal-sale, and extreme-outlier checks;
   cross-date or document-only variants remain open.

@@ -139,7 +139,11 @@ function evaluateGeoScopeMatch(
     }
   }
   const known = subject.censusTract != null && comp.censusTract != null
-  if (!known) {
+  // At the default level a comp with no census stamp is unverifiable, and
+  // the distance rule still bounds it. Once the ladder has widened the area
+  // (and with it dropped the radius), an unstamped comp has to earn its
+  // place the same way a different-tract comp does.
+  if (!known && level < 2) {
     return {
       type: 'geo_scope_match',
       passed: true,
@@ -160,7 +164,10 @@ function evaluateGeoScopeMatch(
       threshold: 'tract, block group, or neighborhood',
     }
   }
-  if (level >= 3 && isValueEquivalent(subject, comp)) {
+  // The approved rural rule: the comp's own pocket must price within range
+  // of the subject's pocket reference — a different-priced market is a
+  // different market, whatever the distance.
+  if (level >= 3 && pocketValueEquivalent(subjectPocketRefPpsf(subject, []), comp)) {
     return {
       type: 'geo_scope_match',
       passed: true,
@@ -172,8 +179,10 @@ function evaluateGeoScopeMatch(
   return {
     type: 'geo_scope_match',
     passed: false,
-    reason: `Outside the subject's census tract (${comp.censusTract} ≠ ${subject.censusTract})`,
-    actualValue: 'different tract',
+    reason: known
+      ? `Outside the subject's census tract (${comp.censusTract} ≠ ${subject.censusTract})`
+      : 'Outside the widened area — no census stamp, no shared neighborhood name, not a value-equivalent pocket',
+    actualValue: known ? 'different tract' : 'area unverified',
     threshold: level >= 3 ? 'tract, block group, neighborhood, or equivalent pocket'
       : level >= 2 ? 'tract, block group, or neighborhood' : 'tract or block group',
   }

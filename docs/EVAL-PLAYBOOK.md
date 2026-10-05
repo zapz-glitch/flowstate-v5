@@ -61,8 +61,14 @@ Full text: `docs/FILTER-LADDER.md`.
   every comp that passes at that turn; never loosen to collect more.
 - A comp that fails a rule that never loosens cannot stretch the ladder.
 
-Code: `apps/api/src/services/appraisal/filter-ladder.ts`, wired in
-`apps/api/src/durable-objects/analysis-job.ts` (search "Filter ladder").
+One ladder, two callers: the paid-enrichment search in
+`apps/api/src/durable-objects/analysis-job.ts` (search "Filter ladder") and
+`evaluateWithFallback` in `apps/api/src/services/appraisal/index.ts`. The
+old year-first expansion ladder, the vintage year cap, the era-class match,
+and the forced "nearest comps" fallback are gone. When nothing passes, the
+result is `insufficient` and a labelled floor is used.
+
+Code: `apps/api/src/services/appraisal/filter-ladder.ts`.
 Proof: `apps/api/tests/filter-ladder.test.ts`, `sqft-ladder.test.ts`.
 
 ## Rule 2 — What "same area" means
@@ -146,7 +152,8 @@ at `c0f7bcc`. `HARNESS_VERSION` bumps on every rule change.
   same size and land math. Graded low confidence and labelled "operator
   selection".
 - Reset restores the server's own pick.
-- An autosave from the page can never roll back a newer server calculation.
+- Last save wins. The page always saves the copy the server last sent
+  back, so a save is never an older version of the report.
 
 Code: `apps/api/src/services/evaluation/recalculate.ts`, the PUT handler in
 `apps/api/src/routes/user-reports.ts`, `isCheckedForArv` in
@@ -171,8 +178,12 @@ the work. It is a caution, not a fault.
   sitting one or two turns further out.
 - Price per square foot favors small houses. Rules-first grouping limits
   this; it does not remove it.
-- An older second ladder inside the appraisal service still has its own
-  order. It runs only when zero comps pass.
+- When the area widens past the tract, the radius rule is dropped and
+  membership decides: a shared neighborhood name, or a value-equivalent
+  pocket. The pocket reference there is the subject's own (AVM per square
+  foot or scope medians), not one built from same-tract comps.
+- With no cap on sale age, a very old sale can pass the rules. It is still
+  stamped stale and cannot drive the value.
 - Foundation families (slab/block/concrete together; wood/pier/crawl
   together) and "materials rank only" have not been re-checked against the
   code.

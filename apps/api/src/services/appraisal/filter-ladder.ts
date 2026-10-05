@@ -196,6 +196,11 @@ export function filtersForLadder(
   subjectSqft?: number | null,
 ): AppraisalFilter[] {
   const level = geoLevelForScope(scope)
-  return filtersAtLadderStep(filters, step, subjectSqft).map((f) =>
-    f.type === 'geo_scope_match' && f.enabled ? { ...f, value: level } : f)
+  return filtersAtLadderStep(filters, step, subjectSqft).map((f) => {
+    if (f.type === 'geo_scope_match' && f.enabled) return { ...f, value: level }
+    // Once the area itself is widened, membership (a shared neighborhood
+    // name, or a value-equivalent pocket) defines "near" — not the radius.
+    if (f.type === 'distance' && level >= 2) return { ...f, enabled: false }
+    return f
+  })
 }
