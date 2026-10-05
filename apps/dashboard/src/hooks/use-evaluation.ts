@@ -33,12 +33,7 @@ export function useEvaluation() {
     marketContext: state.marketContext,
     aiReport: state.aiReport,
 
-    // Jev read-only outcome classification
-    jevOutcome: state.jevOutcome,
     // Candidate B comp classification + shadow counterfactual
-    jevCompClassification: state.jevCompClassification,
-    jevAttributeScreen: state.jevAttributeScreen,
-    jevHybrid: state.jevHybrid,
 
     // ARV editing
     arvOverride: state.arvOverride,
@@ -52,6 +47,7 @@ export function useEvaluation() {
     // Callbacks
     onToggleComp: state.callbacks.onToggleComp,
     onResetComps: state.callbacks.onResetComps,
+    onPinTier: state.callbacks.onPinTier,
     onOpenSettings: state.callbacks.onOpenSettings,
     onCompClick: state.callbacks.onCompClick,
     onRunAiAnalysis: state.callbacks.onRunAiAnalysis,

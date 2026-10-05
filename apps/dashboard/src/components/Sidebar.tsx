@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { useEffect, useState, type DragEvent } from 'react'
+import { useEffect, useRef, useState, type DragEvent } from 'react'
 import { useAtomValue } from 'jotai'
 import {
   Key,
@@ -98,7 +98,12 @@ export default function Sidebar() {
   const pathname = usePathname()
   const { user } = useUser()
   const { theme, setTheme } = useTheme()
-  const { collapsed, toggleCollapsed } = useSidebar()
+  const { collapsed: collapsedPref, toggleCollapsed } = useSidebar()
+  // Hover-expand — hovering the collapsed rail temporarily opens it;
+  // leaving collapses back after a beat. The stored pref stays collapsed.
+  const [hoverExpanded, setHoverExpanded] = useState(false)
+  const collapseTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const collapsed = collapsedPref && !hoverExpanded
   // Derived boolean atom — sidebar re-renders only when a run starts/ends,
   // not on every analysis atom write during a live run.
   const isAnalysisRunning = useAtomValue(isAnalysisRunningAtom)
@@ -232,23 +237,30 @@ export default function Sidebar() {
           collapsed ? 'w-[72px]' : 'w-64'
         )}
         style={{ paddingTop: 'var(--sat)', paddingBottom: 'var(--sab)' }}
+        onMouseEnter={() => {
+          if (collapseTimer.current) { clearTimeout(collapseTimer.current); collapseTimer.current = null }
+          if (collapsedPref) setHoverExpanded(true)
+        }}
+        onMouseLeave={() => {
+          collapseTimer.current = setTimeout(() => setHoverExpanded(false), 350)
+        }}
       >
         <div className="flex flex-col h-full">
           {/* Logo + collapse toggle — h-16 keeps the divider aligned with the topbar */}
           <div className={cn('flex items-center h-16 px-4 border-b border-border', collapsed ? 'justify-center' : 'justify-between')}>
+            <Link href="/dashboard" className="flex items-center min-w-0">
+              <Logo size="sm" showText={!collapsed} />
+            </Link>
             {!collapsed && (
-              <Link href="/dashboard" className="flex items-center min-w-0">
-                <Logo size="sm" showText={false} />
-              </Link>
+              <button
+                onClick={toggleCollapsed}
+                className="p-1.5 rounded-lg text-muted-foreground hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors"
+                aria-label="Collapse sidebar"
+                title="Collapse sidebar"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
             )}
-            <button
-              onClick={toggleCollapsed}
-              className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
-              aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-              title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-            >
-              {collapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
-            </button>
           </div>
 
           {/* Navigation */}
@@ -264,7 +276,7 @@ export default function Sidebar() {
                 collapsed ? 'justify-center px-2.5 py-2.5' : 'px-3 py-2.5',
                 isActive
                   ? 'bg-primary/10 text-primary'
-                  : 'text-foreground-secondary hover:text-foreground hover:bg-secondary'
+                  : 'text-foreground-secondary hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 '
               )
 
               if (item.external) {
@@ -346,7 +358,7 @@ export default function Sidebar() {
               <DropdownMenuTrigger asChild>
                 <button
                   className={cn(
-                    'flex items-center gap-3 w-full rounded-lg p-2 text-left transition-colors hover:bg-secondary',
+'flex items-center gap-3 w-full rounded-lg p-2 text-left transition-colors hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10',
                     collapsed && 'justify-center'
                   )}
                 >
@@ -483,7 +495,7 @@ export default function Sidebar() {
                   'relative flex flex-1 flex-col items-center justify-center gap-1 rounded-lg transition-colors active:scale-95',
                   isActive
                     ? 'text-primary'
-                    : 'text-foreground-tertiary hover:text-foreground'
+                    : 'text-foreground-tertiary hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10'
                 )}
               >
                 <item.icon className={cn('w-5 h-5 transition-transform', isActive && 'scale-110')} />

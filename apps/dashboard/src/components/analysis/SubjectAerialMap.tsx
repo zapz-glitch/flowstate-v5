@@ -300,7 +300,7 @@ export const SubjectAerialMap = forwardRef<SubjectAerialMapHandle, SubjectAerial
           const isSubject = marker.type === 'subject'
           if (!isSubject) compNumber++
           const active = activeMarkerKey === (isSubject ? 'subject' : marker.compKey)
-          const color = active ? '#f59e0b' : isSubject ? '#3b82f6' : marker.type === 'comp-enabled' ? '#10b981' : '#6b7280'
+          const color = active ? '#f59e0b' : isSubject ? '#3b82f6' : marker.type === 'comp-disabled' ? '#a3a3a3' : '#404040'
           return (
             <Marker3D key={isSubject ? 'subject' : marker.compKey ?? `${marker.lat},${marker.lng}`} position={{ lat: marker.lat, lng: marker.lng, altitude: 0 }} altitudeMode={AltitudeMode.CLAMP_TO_GROUND} drawsWhenOccluded collisionBehavior="REQUIRED" sizePreserved zIndex={isSubject ? 100 : active ? 50 : 10} title={marker.label} onClick={() => onMarkerClick?.(marker)}>
               <Pin background={color} borderColor="#fff" glyphColor="#fff" glyph={isSubject ? 'S' : String(compNumber)} scale={1.1} />

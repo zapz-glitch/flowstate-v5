@@ -48,3 +48,9 @@ coverage/
 e2e/artifacts/
 *.tsbuildinfo
 scripts/artifacts/
+
+# e2e runner output (reports, screenshots, cache)
+.e2e/
+
+# Harness replay scoreboard
+replay-report.json

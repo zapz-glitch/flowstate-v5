@@ -1,0 +1,77 @@
+{
+  "version": 1,
+  "skills": {
+    "21st-ai": {
+      "source": "21st-dev/skill",
+      "sourceType": "github",
+      "skillPath": "skills/21st-ai/SKILL.md",
+      "computedHash": "b73b9381044d9f285cf8b96e26eecf15962076c8748e6bfae0ff216cf1bd139b"
+    },
+    "21st-cli-use": {
+      "source": "21st-dev/skill",
+      "sourceType": "github",
+      "skillPath": "skills/21st-cli-use/SKILL.md",
+      "computedHash": "7ef87a695824a4719a8f1f211b72bbe03952a1fa4d40e0fd4c472d4eb1cbee0a"
+    },
+    "21st-design-sync": {
+      "source": "21st-dev/skill",
+      "sourceType": "github",
+      "skillPath": "skills/21st-design-sync/SKILL.md",
+      "computedHash": "668dee53bbf315073de60504ff0c74b8fc2bb3a41dc55e3a128d19351dbeb842"
+    },
+    "21st-registry": {
+      "source": "21st-dev/skill",
+      "sourceType": "github",
+      "skillPath": "skills/21st-registry/SKILL.md",
+      "computedHash": "1f88727b9bfc2e21ec4caee87e8978cdf2368138ddf2c74de1631fe483bc7de4"
+    },
+    "21st-ui-build": {
+      "source": "21st-dev/skill",
+      "sourceType": "github",
+      "skillPath": "skills/21st-ui-build/SKILL.md",
+      "computedHash": "1779535d72552feb5b0747e54f590ac3a849827de19399aff649ab5a7e90ae07"
+    },
+    "21st-ui-explore": {
+      "source": "21st-dev/skill",
+      "sourceType": "github",
+      "skillPath": "skills/21st-ui-explore/SKILL.md",
+      "computedHash": "cea7fb74b35f01701f0a48f7b904377d5cf70fa95393d831e64a86fd3a23af41"
+    },
+    "21st-ui-review": {
+      "source": "21st-dev/skill",
+      "sourceType": "github",
+      "skillPath": "skills/21st-ui-review/SKILL.md",
+      "computedHash": "5ef243e99a7c2a97eba56434e6a66cc93b4fe5687b6ef215238b13e6bb9c0f2b"
+    },
+    "babysit": {
+      "source": "tester-army/e2e",
+      "sourceType": "github",
+      "skillPath": ".claude/skills/babysit/SKILL.md",
+      "computedHash": "8795e0d12f5272d4b6d3b36a682852f6945d45d316e0a4ccb86b29a61a83ba5b"
+    },
+    "e2e": {
+      "source": "tester-army/e2e",
+      "sourceType": "github",
+      "skillPath": "skills/e2e/SKILL.md",
+      "computedHash": "d6fc293076f49227be01a6643a98fdbc194193ae26dfdecd95d073aa6111c9ab"
+    },
+    "ship-pr": {
+      "source": "tester-army/e2e",
+      "sourceType": "github",
+      "skillPath": ".claude/skills/ship-pr/SKILL.md",
+      "computedHash": "982000e4c223f24398d572d5387e6f6068e4648ec5958fa36ffb3cc9bef0e963"
+    },
+    "verify": {
+      "source": "tester-army/e2e",
+      "sourceType": "github",
+      "skillPath": ".claude/skills/verify/SKILL.md",
+      "computedHash": "579570bd3cfeaaca55220a5a415d8db64cc4ca9bfe1926651bcfbc17b791dea3"
+    },
+    "writing-pr": {
+      "source": "tester-army/e2e",
+      "sourceType": "github",
+      "skillPath": ".claude/skills/writing-pr/SKILL.md",
+      "computedHash": "0df20f3dbb5eb56f07a8a712efb88054844984bda9741a2544211ffe6e2179ed"
+    }
+  }
+}

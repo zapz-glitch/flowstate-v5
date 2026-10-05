@@ -19,7 +19,7 @@ import { drizzle } from 'drizzle-orm/d1'
 import { eq, and } from 'drizzle-orm'
 import type { Env } from '../../types'
 import { ghlSettings, apiKeys } from '../../db'
-import { upsertPropertyReport } from '../../services/report-upsert'
+import { upsertPropertyReport, bMetricsFromValuation } from '../../services/report-upsert'
 import { loadUserAnalysisSettings } from '../../services/user-settings'
 import { createPropertyApi } from '../../services/property-api'
 import { DEFAULT_FILTERS } from '../../services/appraisal'
@@ -369,6 +369,7 @@ ghlWebhook.post('/:webhookSecret', async (c) => {
           asIsValue: analysisResult.valuation?.asIsValue ?? null,
           maxAllowableOffer: analysisResult.valuation?.buyPrice ?? null,
           estimatedRepairs: analysisResult.valuation?.rehabCost ?? null,
+          ...bMetricsFromValuation(analysisResult.valuation as Record<string, unknown> | null | undefined),
         })
         console.log(`[GHL Webhook] Report saved for job ${jobId}`)
       } catch (error) {

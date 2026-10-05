@@ -5,14 +5,23 @@ import { Loader2 } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useEvaluation } from '@/hooks/use-evaluation'
 import { ComparablesSection } from './ComparablesSection'
+import { DecisionTrail } from './DecisionTrail'
 import { DealSummaryHero } from './DealSummaryHero'
 import { SubjectGridCard } from './SubjectGridCard'
 import { InvestorAnalysisSummary } from './InvestorAnalysisSummary'
-import { JevOutcomeCard } from './JevOutcomeCard'
-import { JevHybridCard } from './JevHybridCard'
-import { EvaluationProcessAudit } from './EvaluationProcessAudit'
 
 // ─── Analysis Result Layout ──────────────────────────────────────────────────
+
+const compactConcession = (text: string): string => {
+  const value = text.match(/(?:to|of)\s+±?\$?([\d,.]+)/)?.[1]?.replace(/,/g, '')
+  const n = value ? Number(value) : null
+  if (text.includes('sale age') && n != null) return `Age ≤${Math.round(n)}d`
+  if (text.includes('sqft tolerance') && n != null) return `Size ±${Math.round(n).toLocaleString()}sf`
+  if (text.includes('year built') && n != null) return `Year ±${Math.round(n)}y`
+  if (text.includes('distance') && n != null) return `Dist ≤${Math.round(n * 10) / 10}mi`
+  if (text.includes('lot size') && n != null) return `Lot ±${Math.round(n).toLocaleString()}sf`
+  return text.split(' (was ')[0]
+}
 
 export interface AnalysisResultLayoutProps {
   /** Map-list hover sync (local to map view, not in atoms) */
@@ -33,6 +42,11 @@ export interface AnalysisResultLayoutProps {
   onOfferWorkflow?: (workflow: OfferWorkflow, offerPrice?: number) => Promise<{ ok: boolean }>
   /** Prior session disposition — hero renders a dated warning chip */
   disposition?: { workflow: OfferWorkflow; at: number } | null
+  /** 'left' = the page draws the valuation box elsewhere (under the map);
+   *  this column is then the subject card and the comparables only. */
+  valuationPlacement?: 'inline' | 'left'
+  /** Extra lines for the subject card (flood and location risks) */
+  subjectExtras?: React.ReactNode
 }
 
 export function AnalysisResultLayout({
@@ -45,6 +59,8 @@ export function AnalysisResultLayout({
   rerunning,
   onOfferWorkflow,
   disposition,
+  valuationPlacement = 'inline',
+  subjectExtras,
 }: AnalysisResultLayoutProps) {
   const {
     subject,
@@ -56,24 +72,33 @@ export function AnalysisResultLayout({
     isStreaming,
     onToggleComp,
     onResetComps,
+    onPinTier,
     onOpenSettings,
     onCompClick,
     onFeedbackSubmitted,
-    jevOutcome,
-    jevHybrid,
   } = useEvaluation()
 
   const selectedCompKeys = compOverride?.selectedCompKeys
   const isManual = compOverride?.isManual ?? false
 
+  // The comp rules this run used, on one line inside the subject card. The
+  // server's grade sentence stays server-side; only the rules are shown.
+  const concessions = comps?.retrieval?.paramFlex?.concessions ?? []
+  const rulesLine = subject && !isStreaming && comps?.insufficientComps !== true && comps?.retrieval?.paramFlex != null ? (
+    <div className="mt-2 text-[11px] text-foreground-secondary tabular-nums" aria-label="Comp rules used">
+      {concessions.length > 0 ? concessions.map(compactConcession).join(' · ') : 'Strict rules'}
+    </div>
+  ) : null
+  const subjectFooter = (rulesLine || subjectExtras) ? <>{rulesLine}{subjectExtras}</> : null
+
   return (
     <>
       {/* Subject property */}
-      {subject && <SubjectGridCard subject={subject} isLoading={isStreaming} />}
+      {subject && <SubjectGridCard subject={subject} isLoading={isStreaming} footer={subjectFooter} />}
 
       {/* Valuation panel — sticky so it's always visible while scrolling comps */}
-      {valuation ? (
-        <div ref={valuationCardRef as React.RefObject<HTMLDivElement>} className="sticky z-10 top-[calc(3.5rem+var(--sat))] lg:top-0">
+      {valuationPlacement === 'left' ? null : valuation ? (
+        <div ref={valuationCardRef as React.RefObject<HTMLDivElement>} data-pane-sticky className="sticky z-10 top-[calc(3.5rem+var(--sat))] lg:top-0">
           <DealSummaryHero
             valuation={valuation}
             isRecalculated={isRecalculated}
@@ -100,35 +125,52 @@ export function AnalysisResultLayout({
             ))}
           </div>
         </div>
-      ) : subject && !isStreaming && comps?.insufficientComps === true ? (
-        /* Insufficient comps — the run completed with no valuation. The comp
-           pool and its Jev test evidence still render below. */
-        <div className="border border-amber-500/30 bg-amber-500/5 rounded-sm px-4 py-3">
-          <div className="text-sm font-semibold text-amber-500">Insufficient comps</div>
-          <p className="text-xs text-foreground-secondary mt-0.5">
-            No comparables qualified under the appraisal rules, so no ARV or offer math was produced.
-            The evaluated pool and per-comp test results are below — widen the rules or pick a nearby market and rerun.
-          </p>
-        </div>
       ) : null}
+
+      {/* Insufficient-comps disclosure — renders whether or not a valuation
+          exists (AVM-anchored runs show the hero AND this note). */}
+      {subject && !isStreaming && comps?.insufficientComps === true ? (() => {
+        /* Thin-pocket disclosure — the param-flex ladder stretched numeric
+           tolerances (geo stayed required) hunting ARV evidence. Green =
+           strict pass, yellow = extended once or twice, red = deeper. */
+        const extensions = comps?.retrieval?.paramFlex?.extensions ?? 0
+        const factor = comps?.retrieval?.paramFlex?.factor ?? 1
+        const tone = extensions === 0 ? 'text-emerald-500 border-emerald-500/30 bg-emerald-500/5'
+          : extensions <= 2 ? 'text-amber-500 border-amber-500/30 bg-amber-500/5'
+          : 'text-red-400 border-red-400/30 bg-red-400/5'
+        return (
+          <div className={`border rounded-sm px-4 py-3 ${tone}`}>
+            <div className="text-sm font-semibold">
+              {extensions === 0
+                ? 'No ARV evidence in the verified pool'
+                : 'No ARV evidence — rules had to be widened'}
+            </div>
+            <p className="text-xs text-foreground-secondary mt-0.5">
+              {comps?.retrieval?.paramFlex?.concessions?.length
+                ? `To reach comps we extended ${comps.retrieval.paramFlex.concessions.join(', ')}. `
+                : ''}
+              Every census-verified comp was evaluated and none carried ARV evidence
+              (flip resale, premium over scope median, or above AVM).
+              {(valuation?.arvSource === 'avm' || valuation?.arvSource === 'assessed') && valuation?.arv != null && (
+                <span className="block mt-1 font-medium text-foreground">
+                  ARV is set from the {valuation.arvSource === 'avm' ? 'subject AVM estimate' : 'county value'}, ${valuation.arv.toLocaleString()}.
+                  {' '}A conservative estimate until comp evidence exists.
+                </span>
+              )}
+              {comps?.asIsMarketIntel?.asIsMarketPrice != null && (
+                <span className="block mt-1 font-medium text-foreground">
+                  Investor floor: ${comps.asIsMarketIntel.asIsMarketPrice.toLocaleString()}
+                  {' '}({comps.asIsMarketIntel.compCount} distressed + {comps.asIsMarketIntel.flipSaleCount} flip buy(s))
+                </span>
+              )}
+            </p>
+          </div>
+        )
+      })() : null}
 
       {notesSlot}
 
       <InvestorAnalysisSummary analysis={valuation?.investorAnalysis} />
-
-      <JevOutcomeCard
-        outcome={jevOutcome}
-        title="Jev assessment"
-        footnote="Jev's read-only assessment of the completed valuation."
-      />
-
-      <JevHybridCard run={jevHybrid} />
-
-      <EvaluationProcessAudit
-        valuation={valuation}
-        comps={comps}
-        run={jevHybrid}
-      />
 
       {/* Streaming status — lives near the comps section, not the search bar */}
       {statusLabel && isStreaming && (
@@ -148,6 +190,7 @@ export function AnalysisResultLayout({
           isManual={isManual}
           recalculatedArv={isRecalculated ? valuation?.arv : undefined}
           onToggleComp={onToggleComp}
+          onPinTier={onPinTier}
           onReset={onResetComps}
           highlightedCompKey={null}
           onCompClick={onCompClick}
@@ -155,7 +198,14 @@ export function AnalysisResultLayout({
           feedbackContext={feedbackContext}
           onFeedbackSubmitted={onFeedbackSubmitted}
         />
-      ) : subject && isStreaming ? (
+      ) : null}
+
+      {/* Appraisal decision trail — per-comp rule audit */}
+      {valuation?.bMechanics?.decisions?.length ? (
+        <DecisionTrail decisions={valuation.bMechanics.decisions} />
+      ) : null}
+
+      {subject && isStreaming ? (
         /* Comps loading skeleton — only while streaming */
         <div className="space-y-3">
           <div className="flex items-center gap-2">

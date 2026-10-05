@@ -16,6 +16,11 @@ on:
   pull_request:
   workflow_dispatch:
 
+# Rapid pushes: a new commit kills the stale run instead of queuing behind it.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -76,6 +81,9 @@ jobs:
         env:
           PYTHON: python
         run: npm test
+
+      - name: Replay frozen appraisal snapshots
+        run: npm run replay:snapshots
 
       - name: Audit locked JavaScript dependencies
         run: npm run security:audit

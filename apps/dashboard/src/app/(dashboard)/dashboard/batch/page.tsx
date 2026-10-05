@@ -630,7 +630,7 @@ export default function BatchPage() {
             <button
               type="button"
               onClick={() => setShowUpload(false)}
-              className="text-xs text-foreground-tertiary hover:text-foreground transition-colors"
+              className="text-xs text-foreground-tertiary hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors"
             >
               ← Back to lists
             </button>
@@ -704,7 +704,7 @@ export default function BatchPage() {
                 onClick={selectAllLists}
                 className={cn(
                   'text-[11px] px-2.5 py-1 rounded transition-colors inline-flex items-center gap-1',
-                  viewAll ? 'bg-primary/15 text-primary font-medium' : 'text-foreground-tertiary hover:text-foreground hover:bg-secondary'
+                  viewAll ? 'bg-primary/15 text-primary font-medium' : 'text-foreground-tertiary hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 '
                 )}
               >
                 All lists
@@ -718,7 +718,7 @@ export default function BatchPage() {
                   title={`Uploaded ${new Date(j.createdAt).toLocaleString()}`}
                   className={cn(
                     'text-[11px] px-2.5 py-1 rounded transition-colors inline-flex items-center gap-1',
-                    !viewAll && batchId === j.id ? 'bg-primary/15 text-primary font-medium' : 'text-foreground-tertiary hover:text-foreground hover:bg-secondary',
+                    !viewAll && batchId === j.id ? 'bg-primary/15 text-primary font-medium' : 'text-foreground-tertiary hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 ',
                     loadingListId === j.id && 'opacity-60'
                   )}
                 >

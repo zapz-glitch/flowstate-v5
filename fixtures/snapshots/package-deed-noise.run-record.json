@@ -1,0 +1,1216 @@
+{
+  "recordId": "fixture-package-deed-noise",
+  "jobId": "fixture-package-deed-noise",
+  "payloadHash": "a0a3ba91a30d55c4b05c7e56e3c9cd023350468cb1aeffa773134c3acb5287dc",
+  "exportedAt": "2026-10-05T00:00:00.000Z",
+  "payload": {
+    "recordVersion": "run-record.v1",
+    "jobId": "fixture-package-deed-noise",
+    "userId": "fixture-user",
+    "status": "completed",
+    "recordedAt": "2026-10-05T00:00:00.000Z",
+    "request": {
+      "search": {
+        "address": "400 Package Way"
+      },
+      "searchOptions": null,
+      "enrichment": null,
+      "evalParams": {},
+      "skipCache": true,
+      "isRefresh": false,
+      "cachedJobId": null
+    },
+    "property": {
+      "address": "400 Package Way",
+      "city": "Fixture",
+      "state": "GA",
+      "zipCode": "30000",
+      "clip": "fixture-package-deed-noise"
+    },
+    "rules": {
+      "harnessVersion": "og-2026.10.05.1",
+      "pipelineVersion": "5.0",
+      "valuationDate": "2026-10-05",
+      "models": {
+        "fixture": "synthetic"
+      },
+      "providers": {
+        "property": "fixture"
+      }
+    },
+    "evidence": {
+      "synthetic": true,
+      "subject": {
+        "address": "100 Frozen Way",
+        "squareFeet": 1000,
+        "yearBuilt": 1980,
+        "censusTract": "T-1",
+        "subdivision": "Fixture Estates",
+        "neighborhoodName": "Fixture Estates",
+        "lotSizeSquareFeet": 8000,
+        "avmValue": null,
+        "condition": "Heavy Rehab"
+      },
+      "compPool": [
+        {
+          "address": "p1 Fixture Ct",
+          "isEnabled": true,
+          "salePrice": 200000,
+          "saleDate": "2026-08-01",
+          "squareFeet": 1000,
+          "pricePerSqft": 200,
+          "adjustedPrice": 200000,
+          "distanceMiles": 0.2,
+          "sameBlockGroup": true,
+          "censusTract": "T-1",
+          "subdivision": "Fixture Estates",
+          "neighborhoodName": "Fixture Estates",
+          "yearBuilt": 1980,
+          "lotSizeSquareFeet": 8000,
+          "propertyType": "Single Family Residence",
+          "crossesMajorRoad": false,
+          "classification": {
+            "type": "arv"
+          },
+          "curbAppeal": {
+            "condition": "renovated",
+            "confidence": 80
+          },
+          "evidenceVerification": {
+            "staleness": "current",
+            "saleAgeDays": 20,
+            "preferredSaleAgeDays": 180,
+            "marketFit": "in_range",
+            "transactionCheck": "package_deed",
+            "priceCheck": "plausible",
+            "flags": [
+              "Same-day, same-price package deed — not an independent market comp"
+            ]
+          },
+          "appraisalRules": {
+            "totalAdjustment": 0
+          }
+        },
+        {
+          "address": "p2 Fixture Ct",
+          "isEnabled": true,
+          "salePrice": 200000,
+          "saleDate": "2026-08-01",
+          "squareFeet": 1000,
+          "pricePerSqft": 200,
+          "adjustedPrice": 200000,
+          "distanceMiles": 0.2,
+          "sameBlockGroup": true,
+          "censusTract": "T-1",
+          "subdivision": "Fixture Estates",
+          "neighborhoodName": "Fixture Estates",
+          "yearBuilt": 1980,
+          "lotSizeSquareFeet": 8000,
+          "propertyType": "Single Family Residence",
+          "crossesMajorRoad": false,
+          "classification": {
+            "type": "arv"
+          },
+          "curbAppeal": {
+            "condition": "renovated",
+            "confidence": 80
+          },
+          "evidenceVerification": {
+            "staleness": "current",
+            "saleAgeDays": 20,
+            "preferredSaleAgeDays": 180,
+            "marketFit": "in_range",
+            "transactionCheck": "package_deed",
+            "priceCheck": "plausible",
+            "flags": [
+              "Same-day, same-price package deed — not an independent market comp"
+            ]
+          },
+          "appraisalRules": {
+            "totalAdjustment": 0
+          }
+        },
+        {
+          "address": "clean Fixture Ct",
+          "isEnabled": true,
+          "salePrice": 210000,
+          "saleDate": "2026-08-01",
+          "squareFeet": 1000,
+          "pricePerSqft": 210,
+          "adjustedPrice": 210000,
+          "distanceMiles": 0.2,
+          "sameBlockGroup": true,
+          "censusTract": "T-1",
+          "subdivision": "Fixture Estates",
+          "neighborhoodName": "Fixture Estates",
+          "yearBuilt": 1980,
+          "lotSizeSquareFeet": 8000,
+          "propertyType": "Single Family Residence",
+          "crossesMajorRoad": false,
+          "classification": {
+            "type": "arv"
+          },
+          "curbAppeal": {
+            "condition": "renovated",
+            "confidence": 80
+          },
+          "evidenceVerification": {
+            "staleness": "current",
+            "saleAgeDays": 30,
+            "preferredSaleAgeDays": 180,
+            "marketFit": "in_range",
+            "transactionCheck": "clean",
+            "priceCheck": "plausible",
+            "flags": []
+          },
+          "appraisalRules": {
+            "totalAdjustment": 0
+          }
+        }
+      ],
+      "attempts": [
+        {
+          "name": "attempt 1",
+          "subject": {
+            "address": "100 Frozen Way",
+            "squareFeet": 1000,
+            "yearBuilt": 1980,
+            "censusTract": "T-1",
+            "subdivision": "Fixture Estates",
+            "neighborhoodName": "Fixture Estates",
+            "lotSizeSquareFeet": 8000,
+            "avmValue": null,
+            "condition": "Heavy Rehab"
+          },
+          "comps": [
+            {
+              "address": "p1 Fixture Ct",
+              "isEnabled": true,
+              "salePrice": 200000,
+              "saleDate": "2026-08-01",
+              "squareFeet": 1000,
+              "pricePerSqft": 200,
+              "adjustedPrice": 200000,
+              "distanceMiles": 0.2,
+              "sameBlockGroup": true,
+              "censusTract": "T-1",
+              "subdivision": "Fixture Estates",
+              "neighborhoodName": "Fixture Estates",
+              "yearBuilt": 1980,
+              "lotSizeSquareFeet": 8000,
+              "propertyType": "Single Family Residence",
+              "crossesMajorRoad": false,
+              "classification": {
+                "type": "arv"
+              },
+              "curbAppeal": {
+                "condition": "renovated",
+                "confidence": 80
+              },
+              "evidenceVerification": {
+                "staleness": "current",
+                "saleAgeDays": 20,
+                "preferredSaleAgeDays": 180,
+                "marketFit": "in_range",
+                "transactionCheck": "package_deed",
+                "priceCheck": "plausible",
+                "flags": [
+                  "Same-day, same-price package deed — not an independent market comp"
+                ]
+              },
+              "appraisalRules": {
+                "totalAdjustment": 0
+              }
+            },
+            {
+              "address": "p2 Fixture Ct",
+              "isEnabled": true,
+              "salePrice": 200000,
+              "saleDate": "2026-08-01",
+              "squareFeet": 1000,
+              "pricePerSqft": 200,
+              "adjustedPrice": 200000,
+              "distanceMiles": 0.2,
+              "sameBlockGroup": true,
+              "censusTract": "T-1",
+              "subdivision": "Fixture Estates",
+              "neighborhoodName": "Fixture Estates",
+              "yearBuilt": 1980,
+              "lotSizeSquareFeet": 8000,
+              "propertyType": "Single Family Residence",
+              "crossesMajorRoad": false,
+              "classification": {
+                "type": "arv"
+              },
+              "curbAppeal": {
+                "condition": "renovated",
+                "confidence": 80
+              },
+              "evidenceVerification": {
+                "staleness": "current",
+                "saleAgeDays": 20,
+                "preferredSaleAgeDays": 180,
+                "marketFit": "in_range",
+                "transactionCheck": "package_deed",
+                "priceCheck": "plausible",
+                "flags": [
+                  "Same-day, same-price package deed — not an independent market comp"
+                ]
+              },
+              "appraisalRules": {
+                "totalAdjustment": 0
+              }
+            },
+            {
+              "address": "clean Fixture Ct",
+              "isEnabled": true,
+              "salePrice": 210000,
+              "saleDate": "2026-08-01",
+              "squareFeet": 1000,
+              "pricePerSqft": 210,
+              "adjustedPrice": 210000,
+              "distanceMiles": 0.2,
+              "sameBlockGroup": true,
+              "censusTract": "T-1",
+              "subdivision": "Fixture Estates",
+              "neighborhoodName": "Fixture Estates",
+              "yearBuilt": 1980,
+              "lotSizeSquareFeet": 8000,
+              "propertyType": "Single Family Residence",
+              "crossesMajorRoad": false,
+              "classification": {
+                "type": "arv"
+              },
+              "curbAppeal": {
+                "condition": "renovated",
+                "confidence": 80
+              },
+              "evidenceVerification": {
+                "staleness": "current",
+                "saleAgeDays": 30,
+                "preferredSaleAgeDays": 180,
+                "marketFit": "in_range",
+                "transactionCheck": "clean",
+                "priceCheck": "plausible",
+                "flags": []
+              },
+              "appraisalRules": {
+                "totalAdjustment": 0
+              }
+            }
+          ],
+          "options": {
+            "rehabCost": null
+          },
+          "result": {
+            "arv": 210000,
+            "flags": [
+              "p1 Fixture Ct: verification — Same-day, same-price package deed — not an independent market comp",
+              "p2 Fixture Ct: verification — Same-day, same-price package deed — not an independent market comp",
+              "anchored to clean Fixture Ct (similarity 11.9)"
+            ],
+            "drivers": [
+              {
+                "comp": {
+                  "address": "clean Fixture Ct",
+                  "isEnabled": true,
+                  "salePrice": 210000,
+                  "saleDate": "2026-08-01",
+                  "squareFeet": 1000,
+                  "pricePerSqft": 210,
+                  "adjustedPrice": 210000,
+                  "distanceMiles": 0.2,
+                  "sameBlockGroup": true,
+                  "censusTract": "T-1",
+                  "subdivision": "Fixture Estates",
+                  "neighborhoodName": "Fixture Estates",
+                  "yearBuilt": 1980,
+                  "lotSizeSquareFeet": 8000,
+                  "propertyType": "Single Family Residence",
+                  "crossesMajorRoad": false,
+                  "classification": {
+                    "type": "arv"
+                  },
+                  "curbAppeal": {
+                    "condition": "renovated",
+                    "confidence": 80
+                  },
+                  "evidenceVerification": {
+                    "staleness": "current",
+                    "saleAgeDays": 30,
+                    "preferredSaleAgeDays": 180,
+                    "marketFit": "in_range",
+                    "transactionCheck": "clean",
+                    "priceCheck": "plausible",
+                    "flags": []
+                  },
+                  "appraisalRules": {
+                    "totalAdjustment": 0
+                  }
+                },
+                "contrib": 210000,
+                "weight": 1,
+                "tier": "arv"
+              }
+            ],
+            "contribs": [
+              {
+                "comp": {
+                  "address": "p1 Fixture Ct",
+                  "isEnabled": true,
+                  "salePrice": 200000,
+                  "saleDate": "2026-08-01",
+                  "squareFeet": 1000,
+                  "pricePerSqft": 200,
+                  "adjustedPrice": 200000,
+                  "distanceMiles": 0.2,
+                  "sameBlockGroup": true,
+                  "censusTract": "T-1",
+                  "subdivision": "Fixture Estates",
+                  "neighborhoodName": "Fixture Estates",
+                  "yearBuilt": 1980,
+                  "lotSizeSquareFeet": 8000,
+                  "propertyType": "Single Family Residence",
+                  "crossesMajorRoad": false,
+                  "classification": {
+                    "type": "arv"
+                  },
+                  "curbAppeal": {
+                    "condition": "renovated",
+                    "confidence": 80
+                  },
+                  "evidenceVerification": {
+                    "staleness": "current",
+                    "saleAgeDays": 20,
+                    "preferredSaleAgeDays": 180,
+                    "marketFit": "in_range",
+                    "transactionCheck": "package_deed",
+                    "priceCheck": "plausible",
+                    "flags": [
+                      "Same-day, same-price package deed — not an independent market comp"
+                    ]
+                  },
+                  "appraisalRules": {
+                    "totalAdjustment": 0
+                  }
+                },
+                "contrib": 200000,
+                "weight": 1,
+                "tier": "arv"
+              },
+              {
+                "comp": {
+                  "address": "p2 Fixture Ct",
+                  "isEnabled": true,
+                  "salePrice": 200000,
+                  "saleDate": "2026-08-01",
+                  "squareFeet": 1000,
+                  "pricePerSqft": 200,
+                  "adjustedPrice": 200000,
+                  "distanceMiles": 0.2,
+                  "sameBlockGroup": true,
+                  "censusTract": "T-1",
+                  "subdivision": "Fixture Estates",
+                  "neighborhoodName": "Fixture Estates",
+                  "yearBuilt": 1980,
+                  "lotSizeSquareFeet": 8000,
+                  "propertyType": "Single Family Residence",
+                  "crossesMajorRoad": false,
+                  "classification": {
+                    "type": "arv"
+                  },
+                  "curbAppeal": {
+                    "condition": "renovated",
+                    "confidence": 80
+                  },
+                  "evidenceVerification": {
+                    "staleness": "current",
+                    "saleAgeDays": 20,
+                    "preferredSaleAgeDays": 180,
+                    "marketFit": "in_range",
+                    "transactionCheck": "package_deed",
+                    "priceCheck": "plausible",
+                    "flags": [
+                      "Same-day, same-price package deed — not an independent market comp"
+                    ]
+                  },
+                  "appraisalRules": {
+                    "totalAdjustment": 0
+                  }
+                },
+                "contrib": 200000,
+                "weight": 1,
+                "tier": "arv"
+              },
+              {
+                "comp": {
+                  "address": "clean Fixture Ct",
+                  "isEnabled": true,
+                  "salePrice": 210000,
+                  "saleDate": "2026-08-01",
+                  "squareFeet": 1000,
+                  "pricePerSqft": 210,
+                  "adjustedPrice": 210000,
+                  "distanceMiles": 0.2,
+                  "sameBlockGroup": true,
+                  "censusTract": "T-1",
+                  "subdivision": "Fixture Estates",
+                  "neighborhoodName": "Fixture Estates",
+                  "yearBuilt": 1980,
+                  "lotSizeSquareFeet": 8000,
+                  "propertyType": "Single Family Residence",
+                  "crossesMajorRoad": false,
+                  "classification": {
+                    "type": "arv"
+                  },
+                  "curbAppeal": {
+                    "condition": "renovated",
+                    "confidence": 80
+                  },
+                  "evidenceVerification": {
+                    "staleness": "current",
+                    "saleAgeDays": 30,
+                    "preferredSaleAgeDays": 180,
+                    "marketFit": "in_range",
+                    "transactionCheck": "clean",
+                    "priceCheck": "plausible",
+                    "flags": []
+                  },
+                  "appraisalRules": {
+                    "totalAdjustment": 0
+                  }
+                },
+                "contrib": 210000,
+                "weight": 1,
+                "tier": "arv"
+              }
+            ],
+            "bracket": "ok",
+            "conf": "low",
+            "source": "T0 anchor",
+            "landRateSource": null,
+            "sqftRateSource": null,
+            "anchorAddress": "clean Fixture Ct",
+            "ceiling": 210000,
+            "conditionAdj": null,
+            "healed": false
+          },
+          "checks": [
+            {
+              "ruleId": "evidence.transaction.package_deed",
+              "message": "p1 Fixture Ct: verification — Same-day, same-price package deed — not an independent market comp"
+            },
+            {
+              "ruleId": "evidence.transaction.package_deed",
+              "message": "p2 Fixture Ct: verification — Same-day, same-price package deed — not an independent market comp"
+            },
+            {
+              "ruleId": "setb.anchor",
+              "message": "anchored to clean Fixture Ct (similarity 11.9)"
+            }
+          ],
+          "verificationFailures": []
+        }
+      ],
+      "bAttemptTrail": [
+        "attempt 1 — clean"
+      ]
+    },
+    "attempts": [
+      {
+        "name": "attempt 1",
+        "subject": {
+          "address": "100 Frozen Way",
+          "squareFeet": 1000,
+          "yearBuilt": 1980,
+          "censusTract": "T-1",
+          "subdivision": "Fixture Estates",
+          "neighborhoodName": "Fixture Estates",
+          "lotSizeSquareFeet": 8000,
+          "avmValue": null,
+          "condition": "Heavy Rehab"
+        },
+        "comps": [
+          {
+            "address": "p1 Fixture Ct",
+            "isEnabled": true,
+            "salePrice": 200000,
+            "saleDate": "2026-08-01",
+            "squareFeet": 1000,
+            "pricePerSqft": 200,
+            "adjustedPrice": 200000,
+            "distanceMiles": 0.2,
+            "sameBlockGroup": true,
+            "censusTract": "T-1",
+            "subdivision": "Fixture Estates",
+            "neighborhoodName": "Fixture Estates",
+            "yearBuilt": 1980,
+            "lotSizeSquareFeet": 8000,
+            "propertyType": "Single Family Residence",
+            "crossesMajorRoad": false,
+            "classification": {
+              "type": "arv"
+            },
+            "curbAppeal": {
+              "condition": "renovated",
+              "confidence": 80
+            },
+            "evidenceVerification": {
+              "staleness": "current",
+              "saleAgeDays": 20,
+              "preferredSaleAgeDays": 180,
+              "marketFit": "in_range",
+              "transactionCheck": "package_deed",
+              "priceCheck": "plausible",
+              "flags": [
+                "Same-day, same-price package deed — not an independent market comp"
+              ]
+            },
+            "appraisalRules": {
+              "totalAdjustment": 0
+            }
+          },
+          {
+            "address": "p2 Fixture Ct",
+            "isEnabled": true,
+            "salePrice": 200000,
+            "saleDate": "2026-08-01",
+            "squareFeet": 1000,
+            "pricePerSqft": 200,
+            "adjustedPrice": 200000,
+            "distanceMiles": 0.2,
+            "sameBlockGroup": true,
+            "censusTract": "T-1",
+            "subdivision": "Fixture Estates",
+            "neighborhoodName": "Fixture Estates",
+            "yearBuilt": 1980,
+            "lotSizeSquareFeet": 8000,
+            "propertyType": "Single Family Residence",
+            "crossesMajorRoad": false,
+            "classification": {
+              "type": "arv"
+            },
+            "curbAppeal": {
+              "condition": "renovated",
+              "confidence": 80
+            },
+            "evidenceVerification": {
+              "staleness": "current",
+              "saleAgeDays": 20,
+              "preferredSaleAgeDays": 180,
+              "marketFit": "in_range",
+              "transactionCheck": "package_deed",
+              "priceCheck": "plausible",
+              "flags": [
+                "Same-day, same-price package deed — not an independent market comp"
+              ]
+            },
+            "appraisalRules": {
+              "totalAdjustment": 0
+            }
+          },
+          {
+            "address": "clean Fixture Ct",
+            "isEnabled": true,
+            "salePrice": 210000,
+            "saleDate": "2026-08-01",
+            "squareFeet": 1000,
+            "pricePerSqft": 210,
+            "adjustedPrice": 210000,
+            "distanceMiles": 0.2,
+            "sameBlockGroup": true,
+            "censusTract": "T-1",
+            "subdivision": "Fixture Estates",
+            "neighborhoodName": "Fixture Estates",
+            "yearBuilt": 1980,
+            "lotSizeSquareFeet": 8000,
+            "propertyType": "Single Family Residence",
+            "crossesMajorRoad": false,
+            "classification": {
+              "type": "arv"
+            },
+            "curbAppeal": {
+              "condition": "renovated",
+              "confidence": 80
+            },
+            "evidenceVerification": {
+              "staleness": "current",
+              "saleAgeDays": 30,
+              "preferredSaleAgeDays": 180,
+              "marketFit": "in_range",
+              "transactionCheck": "clean",
+              "priceCheck": "plausible",
+              "flags": []
+            },
+            "appraisalRules": {
+              "totalAdjustment": 0
+            }
+          }
+        ],
+        "options": {
+          "rehabCost": null
+        },
+        "result": {
+          "arv": 210000,
+          "flags": [
+            "p1 Fixture Ct: verification — Same-day, same-price package deed — not an independent market comp",
+            "p2 Fixture Ct: verification — Same-day, same-price package deed — not an independent market comp",
+            "anchored to clean Fixture Ct (similarity 11.9)"
+          ],
+          "drivers": [
+            {
+              "comp": {
+                "address": "clean Fixture Ct",
+                "isEnabled": true,
+                "salePrice": 210000,
+                "saleDate": "2026-08-01",
+                "squareFeet": 1000,
+                "pricePerSqft": 210,
+                "adjustedPrice": 210000,
+                "distanceMiles": 0.2,
+                "sameBlockGroup": true,
+                "censusTract": "T-1",
+                "subdivision": "Fixture Estates",
+                "neighborhoodName": "Fixture Estates",
+                "yearBuilt": 1980,
+                "lotSizeSquareFeet": 8000,
+                "propertyType": "Single Family Residence",
+                "crossesMajorRoad": false,
+                "classification": {
+                  "type": "arv"
+                },
+                "curbAppeal": {
+                  "condition": "renovated",
+                  "confidence": 80
+                },
+                "evidenceVerification": {
+                  "staleness": "current",
+                  "saleAgeDays": 30,
+                  "preferredSaleAgeDays": 180,
+                  "marketFit": "in_range",
+                  "transactionCheck": "clean",
+                  "priceCheck": "plausible",
+                  "flags": []
+                },
+                "appraisalRules": {
+                  "totalAdjustment": 0
+                }
+              },
+              "contrib": 210000,
+              "weight": 1,
+              "tier": "arv"
+            }
+          ],
+          "contribs": [
+            {
+              "comp": {
+                "address": "p1 Fixture Ct",
+                "isEnabled": true,
+                "salePrice": 200000,
+                "saleDate": "2026-08-01",
+                "squareFeet": 1000,
+                "pricePerSqft": 200,
+                "adjustedPrice": 200000,
+                "distanceMiles": 0.2,
+                "sameBlockGroup": true,
+                "censusTract": "T-1",
+                "subdivision": "Fixture Estates",
+                "neighborhoodName": "Fixture Estates",
+                "yearBuilt": 1980,
+                "lotSizeSquareFeet": 8000,
+                "propertyType": "Single Family Residence",
+                "crossesMajorRoad": false,
+                "classification": {
+                  "type": "arv"
+                },
+                "curbAppeal": {
+                  "condition": "renovated",
+                  "confidence": 80
+                },
+                "evidenceVerification": {
+                  "staleness": "current",
+                  "saleAgeDays": 20,
+                  "preferredSaleAgeDays": 180,
+                  "marketFit": "in_range",
+                  "transactionCheck": "package_deed",
+                  "priceCheck": "plausible",
+                  "flags": [
+                    "Same-day, same-price package deed — not an independent market comp"
+                  ]
+                },
+                "appraisalRules": {
+                  "totalAdjustment": 0
+                }
+              },
+              "contrib": 200000,
+              "weight": 1,
+              "tier": "arv"
+            },
+            {
+              "comp": {
+                "address": "p2 Fixture Ct",
+                "isEnabled": true,
+                "salePrice": 200000,
+                "saleDate": "2026-08-01",
+                "squareFeet": 1000,
+                "pricePerSqft": 200,
+                "adjustedPrice": 200000,
+                "distanceMiles": 0.2,
+                "sameBlockGroup": true,
+                "censusTract": "T-1",
+                "subdivision": "Fixture Estates",
+                "neighborhoodName": "Fixture Estates",
+                "yearBuilt": 1980,
+                "lotSizeSquareFeet": 8000,
+                "propertyType": "Single Family Residence",
+                "crossesMajorRoad": false,
+                "classification": {
+                  "type": "arv"
+                },
+                "curbAppeal": {
+                  "condition": "renovated",
+                  "confidence": 80
+                },
+                "evidenceVerification": {
+                  "staleness": "current",
+                  "saleAgeDays": 20,
+                  "preferredSaleAgeDays": 180,
+                  "marketFit": "in_range",
+                  "transactionCheck": "package_deed",
+                  "priceCheck": "plausible",
+                  "flags": [
+                    "Same-day, same-price package deed — not an independent market comp"
+                  ]
+                },
+                "appraisalRules": {
+                  "totalAdjustment": 0
+                }
+              },
+              "contrib": 200000,
+              "weight": 1,
+              "tier": "arv"
+            },
+            {
+              "comp": {
+                "address": "clean Fixture Ct",
+                "isEnabled": true,
+                "salePrice": 210000,
+                "saleDate": "2026-08-01",
+                "squareFeet": 1000,
+                "pricePerSqft": 210,
+                "adjustedPrice": 210000,
+                "distanceMiles": 0.2,
+                "sameBlockGroup": true,
+                "censusTract": "T-1",
+                "subdivision": "Fixture Estates",
+                "neighborhoodName": "Fixture Estates",
+                "yearBuilt": 1980,
+                "lotSizeSquareFeet": 8000,
+                "propertyType": "Single Family Residence",
+                "crossesMajorRoad": false,
+                "classification": {
+                  "type": "arv"
+                },
+                "curbAppeal": {
+                  "condition": "renovated",
+                  "confidence": 80
+                },
+                "evidenceVerification": {
+                  "staleness": "current",
+                  "saleAgeDays": 30,
+                  "preferredSaleAgeDays": 180,
+                  "marketFit": "in_range",
+                  "transactionCheck": "clean",
+                  "priceCheck": "plausible",
+                  "flags": []
+                },
+                "appraisalRules": {
+                  "totalAdjustment": 0
+                }
+              },
+              "contrib": 210000,
+              "weight": 1,
+              "tier": "arv"
+            }
+          ],
+          "bracket": "ok",
+          "conf": "low",
+          "source": "T0 anchor",
+          "landRateSource": null,
+          "sqftRateSource": null,
+          "anchorAddress": "clean Fixture Ct",
+          "ceiling": 210000,
+          "conditionAdj": null,
+          "healed": false
+        },
+        "checks": [
+          {
+            "ruleId": "evidence.transaction.package_deed",
+            "message": "p1 Fixture Ct: verification — Same-day, same-price package deed — not an independent market comp"
+          },
+          {
+            "ruleId": "evidence.transaction.package_deed",
+            "message": "p2 Fixture Ct: verification — Same-day, same-price package deed — not an independent market comp"
+          },
+          {
+            "ruleId": "setb.anchor",
+            "message": "anchored to clean Fixture Ct (similarity 11.9)"
+          }
+        ],
+        "verificationFailures": []
+      }
+    ],
+    "result": {
+      "response": {
+        "subject": {
+          "id": "fixture-package-deed-noise",
+          "address": "400 Package Way",
+          "city": "Fixture",
+          "state": "GA",
+          "zipCode": "30000",
+          "squareFeet": 1000
+        },
+        "valuation": {
+          "arv": 210000,
+          "arvB": 210000,
+          "resultGrade": "weak",
+          "processGrade": "clean",
+          "bMechanics": {
+            "arv": 210000,
+            "flags": [
+              "p1 Fixture Ct: verification — Same-day, same-price package deed — not an independent market comp",
+              "p2 Fixture Ct: verification — Same-day, same-price package deed — not an independent market comp",
+              "anchored to clean Fixture Ct (similarity 11.9)"
+            ],
+            "drivers": [
+              {
+                "comp": {
+                  "address": "clean Fixture Ct",
+                  "isEnabled": true,
+                  "salePrice": 210000,
+                  "saleDate": "2026-08-01",
+                  "squareFeet": 1000,
+                  "pricePerSqft": 210,
+                  "adjustedPrice": 210000,
+                  "distanceMiles": 0.2,
+                  "sameBlockGroup": true,
+                  "censusTract": "T-1",
+                  "subdivision": "Fixture Estates",
+                  "neighborhoodName": "Fixture Estates",
+                  "yearBuilt": 1980,
+                  "lotSizeSquareFeet": 8000,
+                  "propertyType": "Single Family Residence",
+                  "crossesMajorRoad": false,
+                  "classification": {
+                    "type": "arv"
+                  },
+                  "curbAppeal": {
+                    "condition": "renovated",
+                    "confidence": 80
+                  },
+                  "evidenceVerification": {
+                    "staleness": "current",
+                    "saleAgeDays": 30,
+                    "preferredSaleAgeDays": 180,
+                    "marketFit": "in_range",
+                    "transactionCheck": "clean",
+                    "priceCheck": "plausible",
+                    "flags": []
+                  },
+                  "appraisalRules": {
+                    "totalAdjustment": 0
+                  }
+                },
+                "contrib": 210000,
+                "weight": 1,
+                "tier": "arv"
+              }
+            ],
+            "contribs": [
+              {
+                "comp": {
+                  "address": "p1 Fixture Ct",
+                  "isEnabled": true,
+                  "salePrice": 200000,
+                  "saleDate": "2026-08-01",
+                  "squareFeet": 1000,
+                  "pricePerSqft": 200,
+                  "adjustedPrice": 200000,
+                  "distanceMiles": 0.2,
+                  "sameBlockGroup": true,
+                  "censusTract": "T-1",
+                  "subdivision": "Fixture Estates",
+                  "neighborhoodName": "Fixture Estates",
+                  "yearBuilt": 1980,
+                  "lotSizeSquareFeet": 8000,
+                  "propertyType": "Single Family Residence",
+                  "crossesMajorRoad": false,
+                  "classification": {
+                    "type": "arv"
+                  },
+                  "curbAppeal": {
+                    "condition": "renovated",
+                    "confidence": 80
+                  },
+                  "evidenceVerification": {
+                    "staleness": "current",
+                    "saleAgeDays": 20,
+                    "preferredSaleAgeDays": 180,
+                    "marketFit": "in_range",
+                    "transactionCheck": "package_deed",
+                    "priceCheck": "plausible",
+                    "flags": [
+                      "Same-day, same-price package deed — not an independent market comp"
+                    ]
+                  },
+                  "appraisalRules": {
+                    "totalAdjustment": 0
+                  }
+                },
+                "contrib": 200000,
+                "weight": 1,
+                "tier": "arv"
+              },
+              {
+                "comp": {
+                  "address": "p2 Fixture Ct",
+                  "isEnabled": true,
+                  "salePrice": 200000,
+                  "saleDate": "2026-08-01",
+                  "squareFeet": 1000,
+                  "pricePerSqft": 200,
+                  "adjustedPrice": 200000,
+                  "distanceMiles": 0.2,
+                  "sameBlockGroup": true,
+                  "censusTract": "T-1",
+                  "subdivision": "Fixture Estates",
+                  "neighborhoodName": "Fixture Estates",
+                  "yearBuilt": 1980,
+                  "lotSizeSquareFeet": 8000,
+                  "propertyType": "Single Family Residence",
+                  "crossesMajorRoad": false,
+                  "classification": {
+                    "type": "arv"
+                  },
+                  "curbAppeal": {
+                    "condition": "renovated",
+                    "confidence": 80
+                  },
+                  "evidenceVerification": {
+                    "staleness": "current",
+                    "saleAgeDays": 20,
+                    "preferredSaleAgeDays": 180,
+                    "marketFit": "in_range",
+                    "transactionCheck": "package_deed",
+                    "priceCheck": "plausible",
+                    "flags": [
+                      "Same-day, same-price package deed — not an independent market comp"
+                    ]
+                  },
+                  "appraisalRules": {
+                    "totalAdjustment": 0
+                  }
+                },
+                "contrib": 200000,
+                "weight": 1,
+                "tier": "arv"
+              },
+              {
+                "comp": {
+                  "address": "clean Fixture Ct",
+                  "isEnabled": true,
+                  "salePrice": 210000,
+                  "saleDate": "2026-08-01",
+                  "squareFeet": 1000,
+                  "pricePerSqft": 210,
+                  "adjustedPrice": 210000,
+                  "distanceMiles": 0.2,
+                  "sameBlockGroup": true,
+                  "censusTract": "T-1",
+                  "subdivision": "Fixture Estates",
+                  "neighborhoodName": "Fixture Estates",
+                  "yearBuilt": 1980,
+                  "lotSizeSquareFeet": 8000,
+                  "propertyType": "Single Family Residence",
+                  "crossesMajorRoad": false,
+                  "classification": {
+                    "type": "arv"
+                  },
+                  "curbAppeal": {
+                    "condition": "renovated",
+                    "confidence": 80
+                  },
+                  "evidenceVerification": {
+                    "staleness": "current",
+                    "saleAgeDays": 30,
+                    "preferredSaleAgeDays": 180,
+                    "marketFit": "in_range",
+                    "transactionCheck": "clean",
+                    "priceCheck": "plausible",
+                    "flags": []
+                  },
+                  "appraisalRules": {
+                    "totalAdjustment": 0
+                  }
+                },
+                "contrib": 210000,
+                "weight": 1,
+                "tier": "arv"
+              }
+            ],
+            "bracket": "ok",
+            "conf": "low",
+            "source": "T0 anchor",
+            "landRateSource": null,
+            "sqftRateSource": null,
+            "anchorAddress": "clean Fixture Ct",
+            "ceiling": 210000,
+            "conditionAdj": null,
+            "healed": false,
+            "harnessVersion": "og-2026.10.05.1",
+            "checks": [
+              {
+                "ruleId": "evidence.transaction.package_deed",
+                "message": "p1 Fixture Ct: verification — Same-day, same-price package deed — not an independent market comp"
+              },
+              {
+                "ruleId": "evidence.transaction.package_deed",
+                "message": "p2 Fixture Ct: verification — Same-day, same-price package deed — not an independent market comp"
+              },
+              {
+                "ruleId": "setb.anchor",
+                "message": "anchored to clean Fixture Ct (similarity 11.9)"
+              }
+            ],
+            "attemptTrail": [
+              "attempt 1 — clean"
+            ]
+          }
+        },
+        "comps": {
+          "total": 3,
+          "enabledCount": 3,
+          "items": [
+            {
+              "address": "p1 Fixture Ct",
+              "isEnabled": true,
+              "salePrice": 200000,
+              "saleDate": "2026-08-01",
+              "squareFeet": 1000,
+              "pricePerSqft": 200,
+              "adjustedPrice": 200000,
+              "distanceMiles": 0.2,
+              "sameBlockGroup": true,
+              "censusTract": "T-1",
+              "subdivision": "Fixture Estates",
+              "neighborhoodName": "Fixture Estates",
+              "yearBuilt": 1980,
+              "lotSizeSquareFeet": 8000,
+              "propertyType": "Single Family Residence",
+              "crossesMajorRoad": false,
+              "classification": {
+                "type": "arv"
+              },
+              "curbAppeal": {
+                "condition": "renovated",
+                "confidence": 80
+              },
+              "evidenceVerification": {
+                "staleness": "current",
+                "saleAgeDays": 20,
+                "preferredSaleAgeDays": 180,
+                "marketFit": "in_range",
+                "transactionCheck": "package_deed",
+                "priceCheck": "plausible",
+                "flags": [
+                  "Same-day, same-price package deed — not an independent market comp"
+                ]
+              },
+              "appraisalRules": {
+                "totalAdjustment": 0
+              }
+            },
+            {
+              "address": "p2 Fixture Ct",
+              "isEnabled": true,
+              "salePrice": 200000,
+              "saleDate": "2026-08-01",
+              "squareFeet": 1000,
+              "pricePerSqft": 200,
+              "adjustedPrice": 200000,
+              "distanceMiles": 0.2,
+              "sameBlockGroup": true,
+              "censusTract": "T-1",
+              "subdivision": "Fixture Estates",
+              "neighborhoodName": "Fixture Estates",
+              "yearBuilt": 1980,
+              "lotSizeSquareFeet": 8000,
+              "propertyType": "Single Family Residence",
+              "crossesMajorRoad": false,
+              "classification": {
+                "type": "arv"
+              },
+              "curbAppeal": {
+                "condition": "renovated",
+                "confidence": 80
+              },
+              "evidenceVerification": {
+                "staleness": "current",
+                "saleAgeDays": 20,
+                "preferredSaleAgeDays": 180,
+                "marketFit": "in_range",
+                "transactionCheck": "package_deed",
+                "priceCheck": "plausible",
+                "flags": [
+                  "Same-day, same-price package deed — not an independent market comp"
+                ]
+              },
+              "appraisalRules": {
+                "totalAdjustment": 0
+              }
+            },
+            {
+              "address": "clean Fixture Ct",
+              "isEnabled": true,
+              "salePrice": 210000,
+              "saleDate": "2026-08-01",
+              "squareFeet": 1000,
+              "pricePerSqft": 210,
+              "adjustedPrice": 210000,
+              "distanceMiles": 0.2,
+              "sameBlockGroup": true,
+              "censusTract": "T-1",
+              "subdivision": "Fixture Estates",
+              "neighborhoodName": "Fixture Estates",
+              "yearBuilt": 1980,
+              "lotSizeSquareFeet": 8000,
+              "propertyType": "Single Family Residence",
+              "crossesMajorRoad": false,
+              "classification": {
+                "type": "arv"
+              },
+              "curbAppeal": {
+                "condition": "renovated",
+                "confidence": 80
+              },
+              "evidenceVerification": {
+                "staleness": "current",
+                "saleAgeDays": 30,
+                "preferredSaleAgeDays": 180,
+                "marketFit": "in_range",
+                "transactionCheck": "clean",
+                "priceCheck": "plausible",
+                "flags": []
+              },
+              "appraisalRules": {
+                "totalAdjustment": 0
+              }
+            }
+          ]
+        }
+      },
+      "errorCode": null,
+      "errorMessage": null
+    }
+  }
+}

@@ -93,7 +93,7 @@ export default function DashboardPage() {
         <div className="flex items-center gap-3">
           <Link
             href="/dashboard/api-hub"
-            className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl border border-border text-foreground font-medium text-body hover:bg-secondary transition-colors"
+            className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl border border-border text-foreground font-medium text-body hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors"
           >
             <Key className="w-4 h-4" />
             API Hub
@@ -308,7 +308,7 @@ export default function DashboardPage() {
                 <span className="text-caption text-foreground-tertiary font-mono">terminal</span>
                 <button
                   onClick={copyCode}
-                  className="flex items-center gap-1.5 text-caption text-foreground-tertiary hover:text-foreground transition-colors"
+                  className="flex items-center gap-1.5 text-caption text-foreground-tertiary hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors"
                 >
                   {copied ? (
                     <>

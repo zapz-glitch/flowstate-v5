@@ -334,6 +334,7 @@ export function ReportPageView({ params, queue }: {
     compOverride,
     handleToggleComp,
     handleResetComps,
+    handlePinTier,
     displayValuation,
     effectiveComps,
     isRecalculated,
@@ -639,7 +640,7 @@ export function ReportPageView({ params, queue }: {
       const s = settingsHook.settings
       const response = await runCompSelection({
         subject: analysis.subject as Record<string, unknown>,
-        comps: analysis.comps as { items: Array<Record<string, unknown>> },
+        comps: analysis.comps as unknown as { items: Array<Record<string, unknown>> },
         riskFlags: (analysis as Record<string, unknown>).riskFlags as string[] | undefined,
         settings: {
           filters: s.filters.map((f) => ({ type: f.type, enabled: f.enabled, value: f.value })),
@@ -712,7 +713,7 @@ export function ReportPageView({ params, queue }: {
   )
 
   useEvaluationSync({
-    evaluation: { isRecalculated, recalcData, compOverride, handleToggleComp, handleResetComps },
+    evaluation: { isRecalculated, recalcData, compOverride, handleToggleComp, handleResetComps, handlePinTier },
     subject: analyzeData?.subject,
     displayValuation,
     effectiveComps,
@@ -720,10 +721,6 @@ export function ReportPageView({ params, queue }: {
     aiAnalyzing,
     marketContext,
     aiReport,
-    jevOutcome: analyzeData?.jevOutcome ?? null,
-    jevCompClassification: analyzeData?.jevCompClassification ?? null,
-    jevAttributeScreen: analyzeData?.jevAttributeScreen ?? null,
-    jevHybrid: analyzeData?.jevHybrid ?? null,
     onOpenSettings: openSettings,
     onCompClick: handleCompClick,
     onRunAiAnalysis: handleRunAiAnalysis,

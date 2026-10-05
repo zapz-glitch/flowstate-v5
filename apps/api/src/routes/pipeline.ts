@@ -153,12 +153,48 @@ async function enrichQueueListPrices(env: Env, body: unknown): Promise<unknown> 
 
 export const pipelineReads = new Hono<{ Bindings: Env; Variables: { auth: AuthContext } }>()
 
-// GET /v1/pipeline/queue → GET /engine/queue (KV-cached, SWR, listPrice-enriched)
+// ── Queue hide-list — dismissed items filtered from every queue read ─────
+// Reversible, never writes to Close: the engine keeps the opp at "Give
+// offer"; it just stops showing to us. DELETE adds; the list key holds a
+// JSON set of opportunityIds.
+const HIDE_KEY = 'pipeline-hidden-opps'
+
+async function hiddenOpps(env: Env): Promise<Set<string>> {
+  const list = await env.API_CACHE.get(HIDE_KEY, 'json').catch(() => null)
+  return new Set(Array.isArray(list) ? (list as string[]) : [])
+}
+
+// GET /v1/pipeline/queue → GET /engine/queue (KV-cached, SWR, listPrice-enriched,
+// hidden items filtered)
 pipelineReads.get('/queue', async (c) => {
   const r = await engineJsonCached(c, '/engine/queue', enrichQueueListPrices)
   if (!r) return c.json({ ok: false, error: 'Engine unavailable' }, 502)
   if (!r.ok) return c.json({ ok: false, error: 'Engine fetch failed' }, 502)
-  return c.json(r.body)
+  const hidden = await hiddenOpps(c.env)
+  const body = r.body as { items?: Array<{ opportunityId?: string }>; count?: number }
+  if (Array.isArray(body?.items) && hidden.size) {
+    body.items = body.items.filter((i) => !i.opportunityId || !hidden.has(i.opportunityId))
+    body.count = body.items.length
+  }
+  return c.json(body)
+})
+
+// DELETE /v1/pipeline/queue/:opportunityId — hide a stale item from the
+// waiting queue. Reversible via POST .../unhide; Close untouched.
+pipelineReads.delete('/queue/:opportunityId', async (c) => {
+  const oppId = c.req.param('opportunityId')
+  const hidden = await hiddenOpps(c.env)
+  hidden.add(oppId)
+  await c.env.API_CACHE.put(HIDE_KEY, JSON.stringify([...hidden]))
+  return c.json({ ok: true, hidden: oppId })
+})
+
+pipelineReads.post('/queue/:opportunityId/unhide', async (c) => {
+  const oppId = c.req.param('opportunityId')
+  const hidden = await hiddenOpps(c.env)
+  hidden.delete(oppId)
+  await c.env.API_CACHE.put(HIDE_KEY, JSON.stringify([...hidden]))
+  return c.json({ ok: true, unhidden: oppId })
 })
 
 // GET /v1/pipeline/metrics?since=<ISO> → GET /engine/dashboard (KV-cached, SWR)

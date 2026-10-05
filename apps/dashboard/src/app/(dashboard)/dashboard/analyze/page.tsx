@@ -39,6 +39,8 @@ import { DownloadReportButton } from '@/components/report/DownloadReportButton'
 import { useMapInteraction } from '@/hooks/use-map-interaction'
 import { useEvaluationSync } from '@/hooks/use-evaluation-sync'
 import type { CompItem } from './actions'
+import { ReportToolbar, REPORT_TOOLBAR_TILE } from '@/components/analysis/ReportToolbar'
+import { formatAddressCasing } from '@/components/analysis/format-helpers'
 
 // Keep the initial search route light; load report UI only when it is needed.
 const AnalysisPageLayout = dynamic(
@@ -415,6 +417,7 @@ export default function AnalyzePage() {
     compOverride,
     handleToggleComp,
     handleResetComps,
+    handlePinTier,
     displayValuation,
     effectiveComps,
     isRecalculated,
@@ -470,7 +473,7 @@ export default function AnalyzePage() {
       const s = settingsHook.settings
       const response = await runCompSelection({
         subject: analysisResult.subject as Record<string, unknown>,
-        comps: analysisResult.comps as { items: Array<Record<string, unknown>> },
+        comps: analysisResult.comps as unknown as { items: Array<Record<string, unknown>> },
         riskFlags: (analysisResult as Record<string, unknown>).riskFlags as string[] | undefined,
         settings: {
           filters: s.filters.map((f) => ({ type: f.type, enabled: f.enabled, value: f.value })),
@@ -540,7 +543,7 @@ export default function AnalyzePage() {
   const handlePermitsPulled = useCallback((a: AnalyzeData) => setAnalysisResult(a), [setAnalysisResult])
 
   useEvaluationSync({
-    evaluation: { isRecalculated, recalcData, compOverride, handleToggleComp, handleResetComps },
+    evaluation: { isRecalculated, recalcData, compOverride, handleToggleComp, handleResetComps, handlePinTier },
     subject: renderData?.subject,
     displayValuation: isReady ? displayValuation : undefined,
     effectiveComps: isReady ? effectiveComps : undefined,
@@ -549,10 +552,6 @@ export default function AnalyzePage() {
     isStreaming: streamingStep !== 'idle' && streamingStep !== 'done',
     marketContext,
     aiReport,
-    jevOutcome: renderData?.jevOutcome ?? null,
-    jevCompClassification: renderData?.jevCompClassification ?? null,
-    jevAttributeScreen: renderData?.jevAttributeScreen ?? null,
-    jevHybrid: renderData?.jevHybrid ?? null,
     onOpenSettings: openSettings,
     onCompClick: handleCompClick,
     onRunAiAnalysis: handleRunAiAnalysis,
@@ -614,6 +613,9 @@ export default function AnalyzePage() {
       })
 
       if (response.success) {
+        if (response.alreadyRunning) {
+          toast.info('Analysis already running — joining the live evaluation')
+        }
         setActiveAnalysis({ jobId: response.jobId ?? '', address: address.trim() })
         setAnalysisState({ ...initialAnalysisState, jobId: response.jobId ?? null, status: 'processing' })
         try {
@@ -748,25 +750,25 @@ export default function AnalyzePage() {
       )}>
       {phase === 'idle' && !error && (
         <div className="space-y-1">
-          <h1 className="text-heading-lg text-foreground tracking-tight">Property Search</h1>
+          <p className="mono-label mb-3">Flowstate | Property underwriting</p>
+          <h1 className="text-heading-lg text-foreground tracking-[-0.03em] font-medium">Property Search</h1>
           <p className="text-body text-foreground-tertiary">Search an address. Underwrite the deal.</p>
         </div>
       )}
 
       {/* Input Form — collapses to compact bar once active */}
       {isSearchCollapsed ? (
-        <div
-          className="w-full border border-border/60 overflow-hidden cursor-pointer hover:border-primary/30 transition-all bg-background shadow-sm corner-accents corner-accents-bottom"
+        <ReportToolbar
           onClick={() => setSearchExpanded(true)}
-        >
-          <div className="px-4 py-3 flex items-center gap-3">
-            <div className="w-7 h-7 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
+          lead={
+            <div className={REPORT_TOOLBAR_TILE}>
               <Search className="w-3.5 h-3.5 text-primary" />
             </div>
-            <div className="flex-1 min-w-0">
-              <div className="text-body-sm text-foreground-secondary truncate">
-                {activeAnalysis?.address || address || 'Search an address...'}
-              </div>
+          }
+          tooltip={activeAnalysis?.address || address || undefined}
+          title={formatAddressCasing(activeAnalysis?.address || address) || 'Search an address...'}
+          subline={
+            <>
               {error && (
                 <div className="text-xs text-red-500 mt-0.5 truncate">{error}</div>
               )}
@@ -776,7 +778,9 @@ export default function AnalyzePage() {
                   AI selecting best comps...
                 </div>
               )}
-            </div>
+            </>
+          }
+        >
             {isFetching ? (
               <Button variant="destructive" size="sm" onClick={(e) => { e.stopPropagation(); handleCancel() }}>
                 <StopCircle className="w-3.5 h-3.5 mr-1.5" />
@@ -805,8 +809,7 @@ export default function AnalyzePage() {
                 </Button>
               </div>
             )}
-          </div>
-        </div>
+        </ReportToolbar>
       ) : (
         <div className="relative z-20 border border-border/60 bg-background shadow-sm corner-accents corner-accents-bottom">
           <div className="px-6 py-5 border-b border-border">
@@ -822,7 +825,7 @@ export default function AnalyzePage() {
                 <button
                   type="button"
                   onClick={() => setSearchExpanded(false)}
-                  className="p-1.5 rounded-lg hover:bg-secondary transition-colors text-foreground-tertiary"
+                  className="p-1.5 rounded-lg hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors text-foreground-tertiary"
                 >
                   <ChevronDown className="w-4 h-4 rotate-180" />
                 </button>
@@ -859,7 +862,7 @@ export default function AnalyzePage() {
             <button
               type="button"
               onClick={() => setShowAdvanced((v) => !v)}
-              className="text-[11px] text-foreground-tertiary hover:text-foreground transition-colors flex items-center gap-1"
+              className="text-[11px] text-foreground-tertiary hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors flex items-center gap-1"
             >
               Advanced
               <ChevronDown className={cn('w-3 h-3 transition-transform', showAdvanced && 'rotate-180')} />
@@ -971,7 +974,8 @@ export default function AnalyzePage() {
           rerunning={isFetching}
           onOfferWorkflow={handleOfferWorkflow}
           statusLabel={
-            streamingStep === 'searching' ? 'Searching property...'
+            streamingStep === 'idle' && isFetching ? 'Starting analysis...'
+            : streamingStep === 'searching' ? 'Searching property...'
             : streamingStep === 'subject' ? 'Loading comparables...'
             : streamingStep === 'comps' ? 'Enriching comp details...'
             : streamingStep === 'evaluating' ? <EvalProgressLabel />

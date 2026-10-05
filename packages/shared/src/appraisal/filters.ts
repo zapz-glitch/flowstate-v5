@@ -97,6 +97,47 @@ const evaluators: Record<FilterType, FilterEvaluator> = {
     }
   },
 
+  geo_scope_match(subject, comp, _filter) {
+    const s = subject.geoScopes
+    const c = comp.geoScopes
+    // Geo-name normalization — "Saint Petersburg" vs "St. Petersburg" is the
+    // same scope, not a mismatch. Whole-word substitutions only.
+    const GEO_EQUIV: Record<string, string> = {
+      SAINT: 'ST', STE: 'STE', MOUNT: 'MT', FORT: 'FT',
+      NORTH: 'N', SOUTH: 'S', EAST: 'E', WEST: 'W',
+      NORTHEAST: 'NE', NORTHWEST: 'NW', SOUTHEAST: 'SE', SOUTHWEST: 'SW',
+      HEIGHTS: 'HTS', BEACH: 'BCH',
+    }
+    const norm = (v: string) =>
+      v.toUpperCase()
+        .replace(/[^A-Z0-9 ]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .split(' ')
+        .map((w) => GEO_EQUIV[w] ?? w)
+        .join(' ')
+    const pairs: Array<[string, string | undefined, string | undefined]> = [
+      ['subdivision', s?.subdivision ?? subject.subdivision ?? undefined, c?.subdivision ?? comp.subdivision ?? undefined],
+      ['neighborhood', s?.n4 ?? subject.neighborhoodName ?? undefined, c?.n4 ?? comp.neighborhoodName ?? undefined],
+      ['school district', s?.schoolDistrict ?? undefined, c?.schoolDistrict ?? undefined],
+      ['city', s?.city ?? undefined, c?.city ?? undefined],
+      ['county', s?.county ?? undefined, c?.county ?? undefined],
+      ['zip', s?.zip ?? undefined, c?.zip ?? undefined],
+    ]
+    const populated = pairs.filter(([, a, b]) => a && b)
+    if (populated.length === 0) {
+      return { type: 'geo_scope_match', passed: true, status: 'not_verified', reason: 'No geo-scope data' }
+    }
+    const mismatches = populated.filter(([, a, b]) => norm(a!) !== norm(b!))
+    const passed = mismatches.length === 0
+    return {
+      type: 'geo_scope_match',
+      passed,
+      reason: passed ? undefined : `Geo scope mismatch: ${mismatches.map(([n]) => n).join(', ')}`,
+      actualValue: `${populated.length - mismatches.length}/${populated.length} scopes match`,
+    }
+  },
+
   building_style_match(subject, comp, _filter) {
     const subjectStyle = subject.construction?.buildingStyle?.toLowerCase().trim()
     const compStyle = comp.construction?.buildingStyle?.toLowerCase().trim()
@@ -234,11 +275,25 @@ const evaluators: Record<FilterType, FilterEvaluator> = {
       }
     }
 
-    // Properties built 1940 and older are all treated as equivalent era
-    const PRE_WAR_CUTOFF = 1940
-    const effectiveSubject = Math.max(subject.yearBuilt, PRE_WAR_CUTOFF)
-    const effectiveComp = Math.max(comp.yearBuilt, PRE_WAR_CUTOFF)
-    const diff = Math.abs(effectiveComp - effectiveSubject)
+    // Vintage subjects → era window at tier-0: the whole pre-1970 buyer
+    // class is equivalent stock ("everything before 1970 is in play").
+    // Post-1945 subjects keep the symmetric year-diff band.
+    const VINTAGE_SUBJECT_MAX_YEAR = 1945
+    const VINTAGE_ERA_COMP_MAX_YEAR = 1969
+    if (subject.yearBuilt <= VINTAGE_SUBJECT_MAX_YEAR) {
+      const passed = comp.yearBuilt <= VINTAGE_ERA_COMP_MAX_YEAR
+      return {
+        type: 'year_built_diff',
+        passed,
+        reason: passed
+          ? undefined
+          : `Modern-era comp (${comp.yearBuilt}) vs vintage subject (${subject.yearBuilt}) — era mismatch (vintage window ≤${VINTAGE_ERA_COMP_MAX_YEAR})`,
+        actualValue: comp.yearBuilt,
+        threshold: VINTAGE_ERA_COMP_MAX_YEAR,
+      }
+    }
+
+    const diff = Math.abs(comp.yearBuilt - subject.yearBuilt)
     const passed = diff <= filter.value
 
     return {

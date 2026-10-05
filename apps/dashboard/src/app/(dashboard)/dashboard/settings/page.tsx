@@ -64,46 +64,43 @@ export default function SettingsPage() {
     }
   }
 
-  // Renders the Flowstate mark (icon only) to canvas and downloads a JPEG.
-  // dark=true → black background version; dark=false → white background version.
-  const downloadLogo = (dark: boolean) => {
-    const W = 1024, H = 1024
+  // Renders the Flowstate mark exactly as the app draws it — a rounded-md
+  // bg-foreground square holding the FlowGlyph at sm sizing — to a PNG.
+  // App geometry (Logo size="sm", 28×28): glyph is 16/28 of the square,
+  // corner radius 6/28, stroke 1.9 units on a 24-unit viewBox, dark-theme
+  // foreground #ebebeb square with background #0a0a0a glyph.
+  const downloadLogo = () => {
+    const S = 512
     const canvas = document.createElement('canvas')
-    canvas.width = W
-    canvas.height = H
+    canvas.width = S
+    canvas.height = S
     const ctx = canvas.getContext('2d')
     if (!ctx) return
 
-    const bg = dark ? '#0a0a0a' : '#ffffff'
-    const fg = dark ? '#fafafa' : '#0a0a0a'
-    ctx.fillStyle = bg
-    ctx.fillRect(0, 0, W, H)
+    const fg = '#ebebeb'   // --foreground (dark theme): the square
+    const bg = '#0a0a0a'   // --background (dark theme): the glyph stroke
 
-    // Logo mark — rounded square + flow glyph, centered with padding
-    const icon = 640
-    const ix = (W - icon) / 2
-    const iy = (H - icon) / 2
-
-    // Rounded-square icon background (manual path — roundRect isn't in all browsers)
-    const r = 100
+    // Rounded square, edge-to-edge — same rounded-md ratio (6/28)
+    const r = (6 / 28) * S
     ctx.fillStyle = fg
     ctx.beginPath()
-    ctx.moveTo(ix + r, iy)
-    ctx.lineTo(ix + icon - r, iy)
-    ctx.arcTo(ix + icon, iy, ix + icon, iy + r, r)
-    ctx.lineTo(ix + icon, iy + icon - r)
-    ctx.arcTo(ix + icon, iy + icon, ix + icon - r, iy + icon, r)
-    ctx.lineTo(ix + r, iy + icon)
-    ctx.arcTo(ix, iy + icon, ix, iy + icon - r, r)
-    ctx.lineTo(ix, iy + r)
-    ctx.arcTo(ix, iy, ix + r, iy, r)
+    ctx.moveTo(r, 0)
+    ctx.lineTo(S - r, 0)
+    ctx.arcTo(S, 0, S, r, r)
+    ctx.lineTo(S, S - r)
+    ctx.arcTo(S, S, S - r, S, r)
+    ctx.lineTo(r, S)
+    ctx.arcTo(0, S, 0, S - r, r)
+    ctx.lineTo(0, r)
+    ctx.arcTo(0, 0, r, 0, r)
     ctx.closePath()
     ctx.fill()
 
-    // Flow glyph — the 24x24 SVG path scaled into the icon box
-    const scale = icon / 24
+    // FlowGlyph — the 24×24 SVG path scaled to 16/28 of the square, centered
+    const glyph = (16 / 28) * S
+    const scale = glyph / 24
     ctx.save()
-    ctx.translate(ix, iy)
+    ctx.translate((S - glyph) / 2, (S - glyph) / 2)
     ctx.scale(scale, scale)
     const path = new Path2D(
       'M4.5 17.5 V10.8 L12 4.5 L19.5 10.8 V17.5 M4.5 17.5 C7 17.5 8 15.5 10.5 15.5 C13 15.5 14 17.5 16.5 17.5 C17.8 17.5 19 17 19.5 16.3'
@@ -120,12 +117,12 @@ export default function SettingsPage() {
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = dark ? 'flowstate-logo-black.jpg' : 'flowstate-logo-white.jpg'
+      a.download = 'flowstate-logo.png'
       document.body.appendChild(a)
       a.click()
       a.remove()
       URL.revokeObjectURL(url)
-    }, 'image/jpeg', 0.92)
+    }, 'image/png')
   }
 
   const handleDeleteAccount = async () => {
@@ -276,20 +273,14 @@ export default function SettingsPage() {
           Brand Assets
         </h2>
         <p className="text-sm text-neutral-500 dark:text-neutral-400 mb-4">
-          Download the Flowstate logo as a JPEG.
+          Download the Flowstate logo — identical to the app mark (transparent PNG).
         </p>
         <div className="flex flex-wrap gap-3">
           <button
-            onClick={() => downloadLogo(true)}
+            onClick={() => downloadLogo()}
             className="flex items-center gap-2 px-4 py-2 text-sm border border-neutral-200 dark:border-neutral-700 rounded-lg bg-neutral-900 text-white hover:opacity-90"
           >
-            <Download className="w-4 h-4" /> Logo — black background
-          </button>
-          <button
-            onClick={() => downloadLogo(false)}
-            className="flex items-center gap-2 px-4 py-2 text-sm border border-neutral-300 rounded-lg bg-white text-neutral-900 hover:bg-neutral-50"
-          >
-            <Download className="w-4 h-4" /> Logo — white background
+            <Download className="w-4 h-4" /> Download logo
           </button>
         </div>
       </div>

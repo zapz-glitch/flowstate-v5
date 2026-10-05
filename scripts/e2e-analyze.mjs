@@ -228,10 +228,20 @@ if (data?.result) {
 
 finish(0)
 
-function finish() {
+async function finish() {
   const verdict = assertions.every((a) => a.pass) ? 'PASS' : 'FAIL'
+  // Fingerprint — commit + input hash so every artifact is reproducible.
+  const { execSync } = await import('node:child_process')
+  const { createHash } = await import('node:crypto')
+  const commit = (() => { try { return execSync('git rev-parse --short HEAD').toString().trim() } catch { return null } })()
+  const branch = (() => { try { return execSync('git rev-parse --abbrev-ref HEAD').toString().trim() } catch { return null } })()
+  const inputHash = data?.result?.comps ? createHash('sha256')
+    .update(JSON.stringify(data.result.comps.items?.map((c) => [c.address, c.salePrice, c.curbAppeal?.condition]) ?? []))
+    .digest('hex').slice(0, 12) : null
+
   const artifact = {
-    meta: { address, api: API, jobId: jobId ?? null, durationMs: Date.now() - t0, ranAt: new Date().toISOString(), skipCache: SKIP_CACHE },
+    meta: { address, api: API, jobId: jobId ?? null, durationMs: Date.now() - t0, ranAt: new Date().toISOString(), skipCache: SKIP_CACHE,
+      harness: { branch, commit, inputHash } },
     verdict,
     assertions,
     result: data?.result ?? null,

@@ -124,6 +124,8 @@ export interface LLMRequest {
   images?: ImageInput[]
   /** Expected response format */
   responseFormat?: 'text' | 'json'
+  /** Strict JSON schema (OpenAI Structured Outputs) — sends response_format json_schema instead of json_object */
+  jsonSchema?: { name: string; schema: Record<string, unknown> }
   /** Maximum tokens to generate */
   maxTokens?: number
   /** Temperature for response randomness (0-1) */

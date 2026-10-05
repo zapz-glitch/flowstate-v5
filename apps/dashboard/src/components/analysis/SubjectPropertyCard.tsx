@@ -26,7 +26,7 @@ export function SubjectPropertyCard({ subject, children, footer }: SubjectProper
               <MapPin className="w-3 h-3" />
             </Badge>
             {subject.address ? (
-              <AddressDisplay address={subject.address} latitude={subject.latitude} longitude={subject.longitude} className="text-heading-sm font-semibold leading-tight" />
+              <AddressDisplay address={subject.address} latitude={subject.latitude} longitude={subject.longitude} className="text-heading-sm font-semibold leading-tight" showStreetView={false} />
             ) : (
               <h3 className="text-heading-sm font-semibold leading-tight">Unknown Address</h3>
             )}
@@ -55,6 +55,57 @@ export function SubjectPropertyCard({ subject, children, footer }: SubjectProper
           <StatCell label="Foundation" value={subject.foundationType || '-'} />
           <StatCell label="House Style" value={subject.buildingStyle || '-'} />
         </div>
+
+        {subject.listingDetails && (() => {
+          const ld = subject.listingDetails
+          const cells = [
+            ['MLS Bed/Bath', ld.beds != null || ld.bathsFull != null ? `${ld.beds ?? '-'}bd / ${ld.bathsFull ?? '-'}ba${ld.bathsHalf ? ` (+${ld.bathsHalf} half)` : ''}` : null],
+            ['HOA / mo', ld.hoaMonthly != null ? `$${ld.hoaMonthly.toLocaleString()}` : null],
+            ['Parking', ld.parking],
+            ['Garage', ld.garage],
+            ['Pool', ld.pool === true ? 'Yes' : ld.pool === false ? 'No' : null],
+            ['Stories', ld.stories != null ? String(ld.stories) : null],
+            ['Roof', ld.roof],
+            ['Foundation', ld.foundation],
+            ['Construction', ld.construction],
+            ['Heat / AC', [ld.heating, ld.cooling].filter(Boolean).join(' / ') || null],
+            ['Utilities', (ld.utilities ?? []).slice(0, 3).join(', ') || null],
+            ['Subdivision', ld.subdivision],
+            ['Zoning', ld.zoning],
+            ['Style', ld.style],
+            ['Interior', (ld.interiorFeatures ?? []).slice(0, 3).join(', ') || null],
+            ['Community', (ld.communityFeatures ?? []).slice(0, 3).join(', ') || null],
+            ['Schools', (ld.schools ?? []).length > 0
+              ? ld.schools!.map((s) => `${s.name.split(' ')[0]}${s.rating != null ? ` ${s.rating}/10` : ''}`).join(', ')
+              : null],
+            ['Climate', ld.climateRisks
+              ? [
+                  ld.climateRisks.floodFactor != null ? `Flood ${ld.climateRisks.floodFactor}/10` : null,
+                  ld.climateRisks.fireFactor != null ? `Fire ${ld.climateRisks.fireFactor}/10` : null,
+                  ld.climateRisks.heatFactor != null ? `Heat ${ld.climateRisks.heatFactor}/10` : null,
+                  ld.climateRisks.windFactor != null ? `Wind ${ld.climateRisks.windFactor}/10` : null,
+                  ld.climateRisks.airFactor != null ? `Air ${ld.climateRisks.airFactor}/10` : null,
+                ].filter(Boolean).join(', ') || null
+              : null],
+          ].filter(([, v]) => v != null && v !== '' && v !== '-') as Array<[string, string]>
+          if (cells.length === 0) return null
+          return (
+            <div className="mt-4">
+              <div className="text-caption font-medium text-foreground-secondary mb-1.5 flex items-center gap-2">
+                MLS Details{ld.mlsSource ? ` · ${ld.mlsSource}` : ''}
+                {ld.sourceUrl && <a href={ld.sourceUrl} target="_blank" rel="noreferrer" className="text-primary text-[10px] underline">Redfin ↗</a>}
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1">
+                {cells.map(([label, value]) => (
+                  <div key={label} className="flex items-center justify-between text-[11px]">
+                    <span className="text-foreground-tertiary">{label}</span>
+                    <span className="font-medium truncate ml-2" title={value}>{value}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )
+        })()}
 
         {subject.lastSale?.price && (
           <div className="mt-4 flex items-center justify-between text-body-sm">

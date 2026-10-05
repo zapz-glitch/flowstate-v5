@@ -329,6 +329,15 @@ export class ListingPhotoScraper {
   }
 
   /**
+   * Public listing-URL resolution — same chain as fetchPhotos, for callers
+   * that need the page URL itself (e.g. the Redfin property-details
+   * enricher). Every result is street-number validated.
+   */
+  async resolveUrl(property: PropertyIdentifier, adapter: ListingSiteAdapter): Promise<string | null> {
+    return this.resolveListingUrl(property, adapter)
+  }
+
+  /**
    * Resolve a listing page URL. Google site-search returns a bot/consent wall
    * to datacenter scrapers, so the chain is: Firecrawl /v1/search (reliable)
    * → DuckDuckGo HTML direct (free, rate-limited) → legacy Google scrape.

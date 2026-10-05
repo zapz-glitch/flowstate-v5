@@ -26,7 +26,7 @@ export function CopyButton({ text, className, title }: CopyButtonProps) {
     <button
       type="button"
       onClick={handleCopy}
-      className={cn('inline-flex align-middle text-foreground-tertiary hover:text-foreground transition-colors', className)}
+      className={cn('inline-flex align-middle text-foreground-tertiary hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors', className)}
       title={copied ? 'Copied!' : (title ?? 'Copy')}
     >
       {copied ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}

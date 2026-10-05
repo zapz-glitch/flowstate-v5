@@ -146,6 +146,8 @@ export function createAuth(
       ...(envDashboardUrl ? [envDashboardUrl] : [dashboardUrl]),
       // Workers Builds previews live on <branch>.flowstate.homes subdomains
       'https://*.flowstate.homes',
+      // workers.dev previews are account-scoped (<script>.weareflowstate1.workers.dev)
+      'https://*.weareflowstate1.workers.dev',
     ],
     advanced: {
       ipAddress: {

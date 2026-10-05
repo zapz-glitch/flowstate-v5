@@ -25,16 +25,26 @@ import {
   resolveCandidateLimit,
   expansionRefetchRadius,
   isProvablyDeadComp,
+  rankEnrichmentCandidates,
   type ComparablesRetrievalMeta,
 } from '../services/property-api/retrieval-policy'
+import { bulkSaleIds, packageDeedIds } from '../services/appraisal/verification'
 import { DEFAULT_FILTERS, evaluateComparable, type AppraisalFilter } from '../services/appraisal'
+import { isValueEquivalent } from '../services/appraisal/evaluator'
+import {
+  describeLadderConcessions, filtersForLadder, geoLevelForScope, ladderFactorAt, ladderLimitsAt, lastUsefulLadderStep,
+} from '../services/appraisal/filter-ladder'
+import { arvEvidence, pocketPriceGroups } from '../services/evaluation'
 import { DEFAULT_EXPANSION_POLICY, saleAgeExpansionSteps, vintageYearCap } from '../services/appraisal/types'
 import { filtersToApiParams } from '../services/appraisal/types'
 import type { Env } from '../types'
 import type { NormalizedProperty, NormalizedComparable } from '../services/property-api/types'
+import { fetchCensusGeography } from '../services/geo/census-geocoder'
+import { resolveParcelApn } from '../services/geo/parcel-gis'
+import { resolveZoning } from '../services/geo/zoning'
 import { drizzle } from 'drizzle-orm/d1'
 import { and, eq } from 'drizzle-orm'
-import { upsertPropertyReport } from '../services/report-upsert'
+import { upsertPropertyReport, bMetricsFromValuation, recordRunTelemetry } from '../services/report-upsert'
 import { notifyEvalComplete } from '../routes/offers'
 import { analysisRuns, savedReports } from '../db/schema'
 import {
@@ -44,6 +54,7 @@ import {
   isCacheableVerdict,
 } from '../utils/eval-cache'
 import { evaluateRun } from '../services/observability/evals'
+import { buildRunRecordPayload, insertRunRecord, linkRunRecordToReport } from '../services/evaluation/run-record'
 
 interface JobState {
   jobId: string
@@ -129,6 +140,11 @@ export class AnalysisJobDO {
   private sseClients: Set<WritableStreamDefaultWriter<Uint8Array>> = new Set()
   private encoder = new TextEncoder()
   private jobState: JobState | null = null
+  /** Clef comp curb-appeal map + the persisted result it patches. Set
+   *  independently because the batch resolves fire-and-forget — whichever
+   *  arrives second triggers applyCurbAppealWriteback. */
+  private curbAppealMap: import('../services/evaluation').CompCurbAppealMap | null = null
+  private curbAppealResult: Record<string, unknown> | null = null
   private persistence: ChunkedJobState<JobState>
   /** True while runStreamingAnalysis/runEnrichment is live in THIS isolate */
   private runActive = false
@@ -311,7 +327,7 @@ export class AnalysisJobDO {
           if (report?.fullResponseJson) {
             const analysisResult = JSON.parse(report.fullResponseJson)
             await this.pushEvent('evaluation_complete', { updatedResult: analysisResult })
-            await this.recordRun(config, { status: 'completed', durationMs: Date.now() - startTime, response: analysisResult })
+            await this.recordRun(config, { status: 'completed', durationMs: Date.now() - startTime, response: analysisResult, cachedJobId: cached })
             await this.pushEvent('enrichment_done', { totalDurationMs: Date.now() - startTime })
             return
           }
@@ -323,13 +339,36 @@ export class AnalysisJobDO {
     // ── Step 1: Search subject property ─────────────────────────────────────
     await this.pushEvent('property_fetch', { message: 'Searching property...' })
 
-    const searchResult = await propertyApi.searchProperty({
+    let searchResult = await propertyApi.searchProperty({
       address: config.search.address,
       streetAddress: config.search.streetAddress,
       city: config.search.city,
       state: config.search.state,
       zipCode: config.search.zipCode,
     })
+
+    // ATTOM address-string miss → parcel-GIS bridge: Census geocode →
+    // county parcel lookup → APN → exact fipsApn resolve on ATTOM. 100%
+    // ATTOM — a parcel hit resumes the full pipeline; a miss fails the
+    // run as PROPERTY_NOT_FOUND below.
+    if (!searchResult.success && propertyApi.providerName === 'attom-mcp') {
+      console.log('[AnalysisJobDO] attom-mcp could not resolve subject — trying parcel-GIS bridge')
+      await this.pushEvent('property_fetch', { message: 'ATTOM address lookup missed — resolving parcel via county records...' })
+      const parcel = await resolveParcelApn(config.search.address ??
+        [config.search.streetAddress, config.search.city, config.search.state, config.search.zipCode].filter(Boolean).join(', '))
+      if (parcel) {
+        const byParcel = await propertyApi.searchProperty({
+          address: config.search.address,
+          fips: parcel.fips,
+          apn: parcel.apn,
+        })
+        if (byParcel.success) {
+          console.log('[AnalysisJobDO] parcel bridge succeeded — ATTOM pipeline resumes on attomId', byParcel.data?.id)
+          await this.pushEvent('property_fetch', { message: 'Parcel resolved — continuing on ATTOM...' })
+          searchResult = byParcel
+        }
+      }
+    }
 
     if (!searchResult.success) {
       const msg = ('error' in searchResult ? searchResult.error : null) || 'Property not found'
@@ -357,8 +396,10 @@ export class AnalysisJobDO {
         yearBuilt: property.yearBuilt,
         subdivision: property.subdivision,
         parcelId: property.parcelId ?? null,
-        neighborhoodName: property.neighborhoodName ?? null,
+        neighborhoodName: property.neighborhoodName ?? property.geoScopes?.n4 ?? property.geoScopes?.n3 ?? null,
         cbsaCode: property.cbsaCode ?? null,
+        censusTract: property.censusTract ?? null,
+        censusBlockGroup: property.censusBlockGroup ?? null,
         lotSizeAcres: property.lotSizeAcres,
         propertyType: property.propertyType,
         lastSale: property.lastSalePrice ? {
@@ -386,7 +427,13 @@ export class AnalysisJobDO {
         propertyId: property.id,
         radiusMiles: config.searchOptions.radiusMiles ?? apiFilterParams.radiusMiles ?? 1,
         maxComps: candidateLimit,
-        monthsBack: config.searchOptions.monthsBack ?? apiFilterParams.monthsBack ?? 12,
+        // attom-mcp: the sale-age ladder (expansion tiers + param flex) can
+        // reach ~18 months — the configured window (often ~6mo, derived
+        // from sale_age) truncates the exact comps the rules are built to
+        // admit. Floor the fetch at the deepest reachable tier.
+        monthsBack: propertyApi.providerName === 'attom-mcp'
+          ? Math.max(18, config.searchOptions.monthsBack ?? apiFilterParams.monthsBack ?? 0)
+          : (config.searchOptions.monthsBack ?? apiFilterParams.monthsBack ?? 12),
         // Sub-1,000sf subjects: evaluation replaces the ±diff band with an
         // absolute 1,000sf ceiling — widen the provider-side diff so
         // qualifying comps aren't culled upstream.
@@ -396,7 +443,7 @@ export class AnalysisJobDO {
         subjectSqft: property.squareFeet ?? undefined,
         subjectPropertyType: property.propertyType ?? undefined,
     }
-    const [compsResult, permitsResult, floodResult, avmResult, buildingDetailResult, osmResult, prefetchedPhotoBundle] = await Promise.all([
+    const [compsResult, permitsResult, floodResult, avmResult, buildingDetailResult, osmResult, prefetchedPhotoBundleRaw] = await Promise.all([
       propertyApi.getComparables(comparablesParams),
       // Permits: fetched on every run (KV-cached) — the permit-age
       // thresholds drive major-item additions in the buybox derivation.
@@ -448,6 +495,48 @@ export class AnalysisJobDO {
       })(),
     ])
 
+    // Photo retry — the listing scrape keys on the address string and
+    // misses on odd spellings (same class of gap as the ATTOM address
+    // matcher). The county's canonical site address often matches what
+    // the listing sites index; retry once with it.
+    let prefetchedPhotoBundle = prefetchedPhotoBundleRaw
+    if (!prefetchedPhotoBundle?.subject?.photos?.length && propertyApi.providerName === 'attom-mcp') {
+      const parcel = await resolveParcelApn(
+        `${property.address}, ${property.city}, ${property.state} ${property.zipCode ?? ''}`.trim(),
+      ).catch(() => null)
+      if (parcel?.siteAddress && !property.address.toUpperCase().startsWith(parcel.siteAddress.slice(0, 12))) {
+        console.log('[AnalysisJobDO] subject photos empty — retrying scrape with county canonical address', parcel.siteAddress)
+        try {
+          const photoService = createPhotoService(this.env)
+          if (photoService.isAvailable()) {
+            prefetchedPhotoBundle = await photoService.fetchPhotoBundle({
+              propertyId: property.id,
+              address: parcel.siteAddress,
+              city: property.city,
+              state: property.state,
+              zipCode: property.zipCode,
+            }, [], { maxComps: 0, skipCache: true })
+          }
+        } catch { /* retry is best-effort */ }
+      }
+    }
+
+    // Zoning — county GIS point-in-polygon on the subject. ATTOM carries
+    // no zoning dataset; the county layers populate the fields
+    // detectLocationRisks already reads (commercial/mixed-use flags) and
+    // feed the HBU/development signal downstream.
+    if (property.zoning == null && property.latitude != null && property.longitude != null) {
+      const z = await resolveZoning(
+        property.latitude,
+        property.longitude,
+        (property.censusTract ?? '').slice(0, 5) || null,
+      ).catch(() => null)
+      if (z) {
+        property.zoning = z.code
+        property.zoningDescription = z.description ?? property.zoningDescription
+      }
+    }
+
     if (!compsResult.success) {
       const msg = ('error' in compsResult ? compsResult.error : null) || 'Failed to fetch comparables'
       await this.pushEvent('error', { step: 'comps_fetch', message: msg })
@@ -456,14 +545,19 @@ export class AnalysisJobDO {
       return
     }
 
-    const pools = { comparables: compsResult.success ? compsResult.data.comparables : [], conflictIds: [] as string[] }
+    const providerComps = compsResult.success ? compsResult.data.comparables : []
+    const pools = mergeComparablePools(providerComps, [])
+    const duplicateIds = [...providerComps.reduce((m, c) => m.set(c.id, (m.get(c.id) ?? 0) + 1), new Map<string, number>())]
+      .filter(([, n]) => n > 1).map(([id]) => id)
     const rawComps = pools.comparables
     // Retrieval audit — what the provider actually returned for this pool.
     // Provider exposes no totalCount/hasMore, so providerTruncated is an
     // inference (received filled the whole requested window).
     const retrieval: ComparablesRetrievalMeta = compsResult.data.retrieval ?? {
       providerCandidatesReported: null,
-      providerCandidatesReceived: rawComps.length,
+      providerCandidatesReceived: providerComps.length,
+      providerCandidatesAfterDedup: rawComps.length,
+      ...(duplicateIds.length ? { duplicateCandidateIds: duplicateIds } : {}),
       candidateLimitRequested: candidateLimit,
       candidateLimitEffective: candidateLimit,
       providerTruncated: rawComps.length >= candidateLimit,
@@ -497,8 +591,8 @@ export class AnalysisJobDO {
       })),
     })
 
-    // ── Step 3: Dead-comp pruning only — enrichment moved inside the Jev ──────
-    // funnel. Provider detail calls now run on test-1 passers only (nearest +
+    // ── Step 3: Dead-comp pruning — enrichment lives in the census gate ─────────
+    // for attom-mcp — provider detail calls run on census-verified comps only.
     // strongest first, capped) inside evaluation — mass-enriching the raw
     // pool here spent ~80 detail calls per run on comps that mostly fail
     // test 1. Pruning is pure field checks (no calls) and feeds retrieval
@@ -537,8 +631,249 @@ export class AnalysisJobDO {
 
     let enrichedComps = rawComps
     const poolCompIds = new Set(rawComps.map((c) => c.id))
+    // Param-flex ladder record — how far numeric tolerances stretched to
+    // admit evidence (0 = strict tier admitted it).
+    let paramFlexFactor = 1
+    // Filter ladder — the step the search settled on and the area it came from
+    let ladderStep = 0
+    let ladderFound = false
+    let ladderSettled = false
+    let ladderScope: 'tract' | 'block_group' | 'neighborhood' | 'value_equivalent' | null = null
     retrieval.candidatesPrunedBeforeEnrichment = candidatesPruned
     retrieval.candidatesEnriched = candidatesEnriched
+
+    // ── attom-mcp: free-first census gate + gated enrichment ──────────────────
+    // Census-geocode every comp (free, no key) and only spend a provider
+    // detail call (1 AI Intelligence Report each) on comps sharing the
+    // subject's census block group or tract. Non-passers stay in the pool
+    // unenriched with sameBlockGroup/crossesMajorRoad/censusTract stamped.
+    const isAttomMcp = propertyApi.providerName === 'attom-mcp'
+    const gateAndEnrich = async (
+      comps: NormalizedComparable[],
+    ): Promise<NormalizedComparable[]> => {
+      if (!isAttomMcp || property.latitude == null || property.longitude == null) return comps
+      const subjectGeo = await fetchCensusGeography(
+        property.latitude,
+        property.longitude,
+        this.env.API_CACHE,
+        this.env.FIRECRAWL_API_KEY,
+        this.env.GEOCODIO_API_KEY,
+      )
+      if (!subjectGeo) return comps
+      property.censusTract ??= subjectGeo.tract
+      property.censusBlockGroup ??= subjectGeo.blockGroup
+      property.neighborhoodName ??= property.geoScopes?.n4 ?? property.geoScopes?.n3
+
+      // market-context supplement — the second retrieval source: recent
+      // same-pocket sales the primary comp search missed entirely (e.g.
+      // same-street sales). Candidates arrive detail-enriched, then flow
+      // through the same census geo gate as everything else.
+      try {
+        const seenIds = new Set(comps.map((c) => String(c.id)))
+        const normAddr = (a?: string | null) => (a ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '')
+        const seenAddrs = new Set(comps.map((c) => normAddr(c.address)).filter(Boolean))
+        const supplement = await propertyApi.marketContextSupplement(String(property.id), {
+          ids: seenIds,
+          addresses: seenAddrs,
+        })
+        // ATTOM market-context can return one property ID on several sale
+        // rows. Merge them through the same conflict-aware transaction logic
+        // before they become separate comps.
+        const dedupedSupplement = mergeComparablePools([], supplement).comparables
+          .filter((c) => {
+            const key = String(c.id)
+            if (seenIds.has(key) || seenAddrs.has(normAddr(c.address))) return false
+            seenIds.add(key); seenAddrs.add(normAddr(c.address))
+            return true
+          })
+        if (dedupedSupplement.length > 0) {
+          console.log(`[AnalysisJobDO] market-context supplement: +${dedupedSupplement.length} comp(s) added to pool`)
+          comps = [...comps, ...dedupedSupplement]
+        }
+      } catch (e) {
+        console.warn('[AnalysisJobDO] market-context supplement failed (non-fatal):', e instanceof Error ? e.message : e)
+      }
+
+      const cache = this.env.API_CACHE ?? undefined
+      const lookup = async (lat: number, lng: number) => {
+        for (let attempt = 0; attempt < 3; attempt++) {
+          const g = await fetchCensusGeography(lat, lng, cache, this.env.FIRECRAWL_API_KEY, this.env.GEOCODIO_API_KEY).catch(() => null)
+          if (g) return g
+          // Brief spacing between retries — the free endpoint throttles bursts
+          if (attempt < 2) await new Promise((r) => setTimeout(r, 300 * (attempt + 1)))
+        }
+        return null
+      }
+      // Geocodio backs the lookups (1,000 lookups/min) — wide concurrency is
+      // safe; the Census/Firecrawl fallbacks only fire when Geocodio misses.
+      const geos: (Awaited<ReturnType<typeof lookup>> | null)[] = new Array(comps.length).fill(null)
+      const queue = comps.map((c, i) => ({ c, i }))
+      await Promise.all(
+        Array.from({ length: 15 }, async () => {
+          for (let item = queue.shift(); item; item = queue.shift()) {
+            if (item.c.latitude != null && item.c.longitude != null) {
+              geos[item.i] = await lookup(item.c.latitude, item.c.longitude)
+            }
+          }
+        }),
+      )
+      const geoPassers = comps.filter((c, i) => {
+        const g = geos[i]
+        if (!g) return false
+        c.censusTract ??= g.tract
+        c.censusBlockGroup ??= g.blockGroup
+        c.sameBlockGroup ??= g.blockGroup === subjectGeo.blockGroup
+        c.crossesMajorRoad ??= g.tract !== subjectGeo.tract
+        return g.blockGroup === subjectGeo.blockGroup || g.tract === subjectGeo.tract
+      })
+      // ATTOM fallback for Census misses: geography-context ships censusTract
+      // on the detail call anyway — spend one provider call on comps that
+      // look competitive (dead comps don't merit it) so "unverified" can't
+      // silently read as "passes" downstream. Verified: half a pool failed
+      // Census and two cross-boundary comps enabled without geography.
+      const packageIdsForGeo = packageDeedIds(comps)
+      const bulkIdsForGeo = bulkSaleIds(comps)
+      const censusMisses = comps.filter((c, i) =>
+        !geos[i] && !packageIdsForGeo.has(c.id) && !bulkIdsForGeo.has(c.id) && !isDeadComp(c) &&
+        c.latitude != null && c.salePrice != null && c.salePrice >= 10_000 && c.squareFeet != null)
+      if (censusMisses.length > 0) {
+        const geoEnriched = await propertyApi.enrichComparables(censusMisses, { concurrency: 5 })
+          .catch(() => [] as NormalizedComparable[])
+        for (const e of geoEnriched) {
+          const comp = comps.find((c) => c.id === e.id)
+          if (!comp || !e.censusTract) continue
+          comp.censusTract ??= e.censusTract
+          comp.censusBlockGroup ??= e.censusBlockGroup
+          comp.crossesMajorRoad ??= comp.censusTract !== subjectGeo.tract
+          if (comp.censusTract === subjectGeo.tract && !geoPassers.includes(comp)) geoPassers.push(comp)
+        }
+      }
+      // Still unstamped after both ladders → explicitly unverified so the
+      // evaluator/report can see "geography never checked" vs "passed".
+      // Runs at merge — enrichComparables returns fresh objects that would
+      // drop a flag set on the originals.
+      const flagUnverified = (list: NormalizedComparable[]) => {
+        let n = 0
+        list.forEach((c) => { if (c.censusTract == null && c.latitude != null) { c.geographyUnverified = true; n++ } })
+        if (n) console.log(`[AnalysisJobDO] geography unverified: ${n} comps`)
+      }
+      if (geoPassers.length === 0) { flagUnverified(comps); return comps }
+      // Filter ladder (docs/FILTER-LADDER.md) — the user's settings are the
+      // ideal. Inside one area at a time, only square feet, year built and
+      // sale age widen, one step each in turn (25% of the subject's size, 3
+      // years, 30 days), until a comp carries ARV
+      // evidence. Geography loosens last: tract → block group →
+      // neighborhood name → value-equivalent adjacent pocket. Each step is
+      // the smallest possible widening, so the first comp admitted is the
+      // one closest to the strict settings. The data is the stop.
+      const packageIds = packageDeedIds(comps)
+      const bulkIds = bulkSaleIds(comps)
+      // Only transaction noise is barred from paid enrichment here. The
+      // old size/year/sale-age "dead comp" prune is a hidden cap — under the
+      // ladder those are exactly the rules allowed to widen, so the ladder
+      // (closest-first, 25-enrichment budget) decides, not a fixed cutoff.
+      const spendable = (c: NormalizedComparable) =>
+        !packageIds.has(c.id) && !bulkIds.has(c.id)
+      const geoPasserIds = new Set(geoPassers.map((c) => c.id))
+      const normName = (v?: string | null) => v?.toLowerCase().replace(/[^a-z0-9]/g, '') || null
+      const subjectNames = new Set(
+        [property.subdivision, property.neighborhoodName].map(normName).filter((v): v is string => v != null))
+      const sameName = (c: NormalizedComparable) =>
+        [c.subdivision, c.neighborhoodName].map(normName).some((v) => v != null && subjectNames.has(v))
+      const outside = comps.filter((c, i) => geos[i] != null && !geoPasserIds.has(c.id) && spendable(c))
+      const scopes: Array<{ name: 'tract' | 'block_group' | 'neighborhood' | 'value_equivalent'; comps: NormalizedComparable[] }> = [
+        { name: 'tract', comps: geoPassers.filter((c) => c.censusTract != null && c.censusTract === subjectGeo.tract) },
+        { name: 'block_group', comps: geoPassers.filter((c) => !(c.censusTract != null && c.censusTract === subjectGeo.tract)) },
+        { name: 'neighborhood', comps: outside.filter(sameName) },
+        { name: 'value_equivalent', comps: outside.filter((c) => !sameName(c) && isValueEquivalent(property, c)) },
+      ]
+      const ENRICH_WAVE_SIZE = 6
+      const MAX_PAID_ENRICHMENTS = 25
+      const enrichedById = new Map<string, NormalizedComparable>()
+      let wonStep: number | null = null
+      let wonScope: typeof scopes[number]['name'] | null = null
+      // Fallback when no comp anywhere carries ARV evidence: the FIRST step
+      // that admitted anything in the tightest area — the closest comps to
+      // the strict settings — never the widest step reached while searching.
+      let firstPasser: { step: number; scope: typeof scopes[number]['name'] } | null = null
+      // A comp that fails a rule the ladder never loosens (property type,
+      // lot category, style…) can never be admitted, so it must not stretch
+      // the ladder either — one 53,000 sq ft outlier would otherwise widen
+      // square feet to cover it.
+      const ladderRules = new Set(['sqft_diff', 'year_built_diff', 'sale_age'])
+      search: for (const scope of scopes) {
+        const otherRulesOnly = filtersForLadder(filters, 0, scope.name, property.squareFeet)
+          .map((f) => (ladderRules.has(f.type) ? { ...f, enabled: false } : f))
+        const candidates = scope.comps.filter((c) =>
+          spendable(c) && !evaluateComparable(property, c, otherRulesOnly, []).shouldDisable)
+        if (candidates.length === 0) continue
+        const lastStep = lastUsefulLadderStep(filters, property, candidates, nowMs)
+        for (let step = 0; step <= lastStep; step++) {
+          const stepFilters = filtersForLadder(filters, step, scope.name, property.squareFeet)
+          const passers = candidates.filter((c) =>
+            !evaluateComparable(property, c, stepFilters, []).shouldDisable)
+          if (passers.length === 0) continue
+          firstPasser ??= { step, scope: scope.name }
+          // Enrich this step's passers closest-first, six at a time, and
+          // check for ARV evidence after every wave.
+          let pending = rankEnrichmentCandidates(property, passers.filter((c) => !enrichedById.has(c.id)), nowMs)
+          for (;;) {
+            // Enrichment can reveal a hard-rule failure (style, foundation,
+            // stories) the free data could not show — an enriched comp only
+            // counts when it still passes this step's rules.
+            // Rules first, then groups: only this step's rule-passers are
+            // grouped. Enriched comps are re-checked, since enrichment can
+            // reveal a hard-rule failure the free data could not show.
+            const stillPassing = passers
+              .map((c) => enrichedById.get(c.id) ?? c)
+              .filter((c) => !evaluateComparable(property, c, stepFilters, []).shouldDisable)
+            const pocket = pocketPriceGroups(stillPassing, property)
+            const hit = stillPassing.some((c) => enrichedById.has(c.id) && arvEvidence(c, pocket) != null)
+            if (hit) { wonStep = step; wonScope = scope.name; break search }
+            if (pending.length === 0 || enrichedById.size >= MAX_PAID_ENRICHMENTS) break
+            const wave = pending.slice(0, Math.min(ENRICH_WAVE_SIZE, MAX_PAID_ENRICHMENTS - enrichedById.size))
+            pending = pending.slice(wave.length)
+            const enriched = await propertyApi.enrichComparables(wave, { concurrency: 6 })
+            for (const e of enriched) enrichedById.set(e.id, e)
+            candidatesEnriched += enriched.filter((c) => c.isEnriched).length
+          }
+          if (enrichedById.size >= MAX_PAID_ENRICHMENTS) break search
+        }
+      }
+      // No ARV evidence anywhere: settle on the first step that admitted any
+      // comp, so the closest median/dated evidence is the fallback. Across
+      // gate invocations (initial pool, expansion refetch) a real ARV find
+      // beats a fallback; otherwise the tightest step seen stands.
+      const settledStep = wonStep ?? firstPasser?.step ?? 0
+      const settledScope = wonScope ?? firstPasser?.scope ?? null
+      if (wonStep != null) {
+        ladderStep = ladderFound ? Math.min(ladderStep, wonStep) : wonStep
+        ladderScope = settledScope
+        ladderFound = true
+      } else if (!ladderFound) {
+        ladderStep = ladderSettled ? Math.min(ladderStep, settledStep) : settledStep
+        ladderScope = settledScope ?? ladderScope
+      }
+      ladderSettled = true
+      paramFlexFactor = ladderFactorAt(filters, ladderStep, property.squareFeet)
+      retrieval.paramFlex = {
+        extensions: ladderStep,
+        factor: paramFlexFactor,
+        concessions: describeLadderConcessions(filters, ladderStep, property.squareFeet),
+        limits: ladderLimitsAt(filters, ladderStep, property.squareFeet),
+        scope: ladderScope,
+        arvEvidenceFound: ladderFound,
+      }
+      if (enrichedById.size === 0) { flagUnverified(comps); return comps }
+      const merged = comps.map((c) => enrichedById.get(c.id) ?? c)
+      flagUnverified(merged)
+      return merged
+    }
+    if (isAttomMcp) {
+      enrichedComps = await gateAndEnrich(rawComps)
+      retrieval.candidatesEnriched = candidatesEnriched
+      console.log(`[AnalysisJobDO] attom-mcp census gate: ${enrichedComps.filter((c) => c.isEnriched).length}/${rawComps.length} comps share the subject's tract/BG — enriched those only`)
+    }
 
     // ── Expansion refetch ─────────────────────────────────────────────────────
     // The pool fetched at radius R provably contains zero candidates beyond R.
@@ -563,17 +898,78 @@ export class AnalysisJobDO {
         console.warn(`[AnalysisJobDO] Expansion refetch failed: ${wider.error}`)
         return null
       }
-      const merged = mergeComparablePools(rawComps, wider.data.comparables)
+      // Merge against the CURRENT pool (enrichedComps), not rawComps — the
+      // attom-mcp census gate has already enriched passers; merging from
+      // rawComps would clobber the enriched records.
+      const merged = mergeComparablePools(enrichedComps, wider.data.comparables)
+      if (isAttomMcp) {
+        // mergeComparablePools prefers the expanded pool's copy of a duped
+        // comp — which is the unenriched variant. Overlay the enrichment
+        // fields the gate paid for onto the winner.
+        const ENRICHED_KEYS = [
+          'subdivision', 'neighborhoodName', 'neighborhoodCode', 'censusTract',
+          'censusBlockGroup', 'sameBlockGroup', 'crossesMajorRoad',
+          'buildingCondition', 'buildingGrade', 'stories', 'construction',
+          'transaction', 'features', 'flip', 'distressedSale', 'isEnriched',
+          'latestSale', 'ppsfMedians', 'avmValue',
+        ] as const
+        const enrichedById = new Map(
+          enrichedComps.filter((c) => c.isEnriched).map((c) => [c.id, c]),
+        )
+        // Geo stamps ride every gated comp, enriched or not — the merge
+        // prefers the expanded pool's clean copy, which would otherwise
+        // erase censusTract/sameBlockGroup/crossesMajorRoad/geoScopes and
+        // re-flag a verified comp as geographyUnverified.
+        const GEO_KEYS = [
+          'censusTract', 'censusBlockGroup', 'sameBlockGroup', 'crossesMajorRoad',
+          'geoScopes', 'geographyUnverified',
+        ] as const
+        const gatedById = new Map(enrichedComps.map((c) => [c.id, c]))
+        merged.comparables = merged.comparables.map((c) => {
+          const prior = enrichedById.get(c.id)
+          const gated = gatedById.get(c.id)
+          if ((!prior || c.isEnriched) && !gated) return c
+          const out = { ...c } as unknown as Record<string, unknown>
+          if (gated) {
+            const gsrc = gated as unknown as Record<string, unknown>
+            for (const k of GEO_KEYS) {
+              if (out[k] == null && gsrc[k] != null) out[k] = gsrc[k]
+            }
+          }
+          if (!prior || c.isEnriched) return out as unknown as NormalizedComparable
+          const src = prior as unknown as Record<string, unknown>
+          for (const k of ENRICHED_KEYS) {
+            if (out[k] == null && src[k] != null) {
+              out[k] = src[k]
+            }
+          }
+          // The widened winner can hold the flip's stale acquisition leg —
+          // re-apply the sales-history price correction on the merged comp.
+          const ls = src.latestSale as { price: number; date: string } | null | undefined
+          if (ls && (!out.saleDate || ls.date > (out.saleDate as string))) {
+            out.salePrice = ls.price
+            out.saleDate = ls.date
+            out.pricePerSqft = out.squareFeet ? Math.round(ls.price / (out.squareFeet as number)) : out.pricePerSqft
+          }
+          return out as unknown as NormalizedComparable
+        })
+      }
       for (const id of merged.conflictIds) {
         pools.conflictIds.push(id)
         evidenceLimitations.push(`${id}: Provider comparable pools disagree on the same sale date; price is quarantined from evaluation`)
       }
       // New candidates join the raw pool — enrichment is deferred to the
-      // Jev funnel (test-1 passers only), same as the initial pool.
-      const newCandidates = merged.comparables.filter((c) => !poolCompIds.has(c.id))
+      // census gate for attom-mcp, same as the initial pool.
+      // attom-mcp: same census gate + gated enrichment as the initial pool.
+      let newCandidates = merged.comparables.filter((c) => !poolCompIds.has(c.id))
       for (const c of newCandidates) poolCompIds.add(c.id)
       candidatesPruned += newCandidates.filter((c) => isDeadComp(c)).length
-      enrichedComps = merged.comparables
+      if (isAttomMcp) {
+        newCandidates = await gateAndEnrich(newCandidates)
+        retrieval.candidatesEnriched = candidatesEnriched
+      }
+      const newById = new Map(newCandidates.map((c) => [c.id, c]))
+      enrichedComps = merged.comparables.map((c) => newById.get(c.id) ?? c)
       retrieval.providerCallsUsed += 1
       retrieval.pagesRequested += 1
       if (monthsBack != null) retrieval.monthsBack = monthsBack
@@ -706,6 +1102,17 @@ export class AnalysisJobDO {
     const propertyCallStats = propertyApi.getCallStats()
     const evalParams = {
       ...config.evalParams,
+      // attom-mcp: when the filter ladder widened square feet, year or sale
+      // age to admit evidence, evaluate the pool under that same step —
+      // comps the ladder admitted must stay enabled through evaluation.
+      ...(isAttomMcp && (ladderStep > 0 || geoLevelForScope(ladderScope) > 1)
+        ? {
+            appraisalRules: {
+              ...(config.evalParams.appraisalRules ?? {}),
+              filters: filtersForLadder(filters, ladderStep, ladderScope, property.squareFeet),
+            },
+          }
+        : {}),
       apiCallStats: {
         corelogic: { total: propertyCallStats.total, cached: propertyCallStats.cached, endpoints: propertyCallStats.endpoints },
         totalExternalCalls: propertyCallStats.total,
@@ -713,13 +1120,27 @@ export class AnalysisJobDO {
       // Radius-bound expansion tiers refetch instead of pretending the
       // fetched-radius pool contains candidates it never had.
       expandComparablesPool,
-      // Jev evaluation enriches its top-screened candidates before the
-      // cross-examination — provider detail: style, foundation,
-      // construction, features, transaction.
-      enrichComparables: (comps: NormalizedComparable[]) =>
-        propertyApi.enrichComparables(comps, { concurrency: 10 }),
+      // B retry attempt 3 — per-comp valuation/tax-history fetch for pool
+      // members lacking AVM/land evidence.
+      enrichComparables: (comps: NormalizedComparable[]) => propertyApi.enrichComparables(comps, { concurrency: 8 }).catch(() => null),
+      // Sqft-conflict permit verification — ATTOM permits dataset per comp.
+      getCompPermits: (compId: string) =>
+        propertyApi.getBuildingPermits(compId)
+          .then((r) => (r.success ? r.data.permits : null))
+          .catch(() => null),
+      // attom-mcp comp enrichment happens in the census gate above —
+      // passers only, 1 provider call each.
       prefetchedPhotoBundle,
       skipCache: !!config.skipCache,
+      // Clef comp-evidence resolves fire-and-forget — the callback patches
+      // comp curb-appeal stamps into the persisted report whenever it lands.
+      onCurbAppeal: (map: import('../services/evaluation').CompCurbAppealMap) => {
+        this.curbAppealMap = map
+        if (this.curbAppealResult) {
+          void this.applyCurbAppealWriteback(config).catch((e) =>
+            console.warn('[AnalysisJobDO] curb-appeal writeback failed:', e))
+        }
+      },
     }
 
     let evalResult
@@ -762,7 +1183,9 @@ export class AnalysisJobDO {
     // OSM location risks now fetched during enrichment — they're already in
     // the response via bundle.enrichment.locationRisks (and feed valuation)
 
-    // Save/update report in DB
+    // Save/update report in DB — the immutable run evidence lands first so
+    // an overwrite can never erase what this run was computed from.
+    let completedRunRecordId: string | undefined
     try {
       const db = drizzle(this.env.DB)
       const subj = analysisResult.subject as Record<string, unknown>
@@ -773,7 +1196,15 @@ export class AnalysisJobDO {
         asIsValue: (val?.asIsValue as number) ?? null,
         maxAllowableOffer: (val?.buyPrice as number) ?? null,
         estimatedRepairs: (val?.rehabCost as number) ?? null,
+        ...bMetricsFromValuation(val),
       }
+
+      completedRunRecordId = await this.saveRunRecord(config, {
+        status: 'completed',
+        evidence: evalResult.runEvidence,
+        attempts: evalResult.runEvidence.attempts,
+        response: analysisResult,
+      })
 
       await upsertPropertyReport(db, {
         userId: config.userId,
@@ -784,6 +1215,16 @@ export class AnalysisJobDO {
         propertyZip: property.zipCode || '',
         propertyClip: property.id || null,
       }, reportData)
+      await linkRunRecordToReport(db.$client, completedRunRecordId, config.jobId, config.userId)
+
+      await recordRunTelemetry(db, {
+        jobId: config.jobId,
+        userId: config.userId,
+        address: (subj.address as string) || '',
+        valuation: val,
+        comps: analysisResult.comps as { items?: unknown[] } | null,
+        durationMs: Date.now() - evalStart,
+      }).catch((e) => console.log('[telemetry] run_telemetry insert failed:', e))
 
       if (config.evalResultCacheKey) {
         await this.env.API_CACHE.put(config.evalResultCacheKey, config.jobId, {
@@ -797,17 +1238,72 @@ export class AnalysisJobDO {
       return
     }
 
+    // Clef writeback — if the batch resolved mid-eval (after the response
+    // serialized without stamps), patch the saved report now. If it lands
+    // later, onCurbAppeal calls the same helper.
+    this.curbAppealResult = analysisResult
+    if (this.curbAppealMap) {
+      await this.applyCurbAppealWriteback(config).catch((e) =>
+        console.warn('[AnalysisJobDO] curb-appeal writeback failed:', e))
+    }
+
     // Private image access checks the saved report owner before serving any bytes.
     await this.pushEvent('evaluation_complete', { updatedResult: analysisResult })
-    await this.recordRun(config, { status: 'completed', durationMs: Date.now() - startTime, response: analysisResult })
+    await this.recordRun(config, { status: 'completed', durationMs: Date.now() - startTime, response: analysisResult, runRecordId: completedRunRecordId })
 
-    // LLM comp annotation removed — Jev is the selection/evaluation logic;
+    // LLM comp annotation removed — evidence classification drives the eval;
     // the separate annotate pass only wrote prose onto cards.
 
     // Wait for parallel tasks before closing SSE (so client receives them)
     await marketContextPromise
     await this.pushEvent('enrichment_done', { totalDurationMs: Date.now() - startTime })
     console.log(`[AnalysisJobDO] ── Streaming analysis complete in ${Date.now() - startTime}ms ──`)
+  }
+
+  /** Clef comp curb-appeal writeback — the comp-evidence batch resolves
+   *  fire-and-forget during/after evaluation. When the map and the persisted
+   *  result are both present this stamps missing curbAppeal fields onto
+   *  comps.items, re-saves the report, and emits an SSE event so live
+   *  clients can merge the stamps without a refresh. Idempotent. */
+  private async applyCurbAppealWriteback(config: StartStreamingRequest): Promise<void> {
+    const map = this.curbAppealMap
+    const result = this.curbAppealResult
+    if (!map || !result) return
+    const items = (result.comps as { items?: Array<{ id?: string; curbAppeal?: unknown }> } | undefined)?.items
+    let stamped = 0
+    if (Array.isArray(items)) {
+      for (const item of items) {
+        if (item?.id && !item.curbAppeal && map[item.id]) {
+          item.curbAppeal = map[item.id]
+          stamped++
+        }
+      }
+    }
+    await this.pushEvent('curb_appeal', { compCurbAppeal: map })
+    if (stamped === 0) return // response already carried the stamps
+    try {
+      const db = drizzle(this.env.DB)
+      const val = result.valuation as Record<string, unknown> | null
+      const subj = result.subject as Record<string, unknown>
+      await upsertPropertyReport(db, {
+        userId: config.userId,
+        jobId: config.jobId,
+        propertyAddress: (subj.address as string) || '',
+        propertyCity: (subj.city as string) || '',
+        propertyState: (subj.state as string) || '',
+        propertyZip: (subj.zipCode as string) || '',
+        propertyClip: (subj.id as string) || null,
+      }, {
+        fullResponseJson: JSON.stringify(result),
+        arv: (val?.arv as number) ?? null,
+        asIsValue: (val?.asIsValue as number) ?? null,
+        maxAllowableOffer: (val?.buyPrice as number) ?? null,
+        estimatedRepairs: (val?.rehabCost as number) ?? null,
+        ...bMetricsFromValuation(val),
+      })
+    } catch (e) {
+      console.warn('[AnalysisJobDO] curb-appeal re-save failed:', e instanceof Error ? e.message : e)
+    }
   }
 
   // ─── Start Enrichment (legacy — used when route returns result synchronously) ─
@@ -895,6 +1391,17 @@ export class AnalysisJobDO {
           const result = updatedResponse as Record<string, unknown>
           const subject = result.subject as Record<string, unknown>
           const valuation = result.valuation as Record<string, unknown> | null
+          const runRecordId = await this.saveRunRecord({
+            jobId: config.jobId,
+            userId: config.userId,
+            evalParams: config.evalParams,
+            skipCache: !!config.skipCache,
+          }, {
+            status: 'completed',
+            evidence: evalResult.runEvidence,
+            attempts: evalResult.runEvidence.attempts,
+            response: updatedResponse,
+          })
           await upsertPropertyReport(db, {
             userId: config.userId,
             jobId: config.jobId,
@@ -909,7 +1416,9 @@ export class AnalysisJobDO {
             asIsValue: (valuation?.asIsValue as number) ?? null,
             maxAllowableOffer: (valuation?.buyPrice as number) ?? null,
             estimatedRepairs: (valuation?.rehabCost as number) ?? null,
+            ...bMetricsFromValuation(valuation),
           })
+          await linkRunRecordToReport(db.$client, runRecordId, config.jobId, config.userId)
           if (config.evalResultCacheKey) {
             await this.env.API_CACHE.put(config.evalResultCacheKey, config.jobId, {
               expirationTtl: 21 * 24 * 60 * 60, // 21 days
@@ -926,7 +1435,7 @@ export class AnalysisJobDO {
       }
     }
 
-    // LLM comp annotation removed — Jev is the selection/evaluation logic.
+    // LLM comp annotation removed — evidence classification drives the eval.
 
     // Wait for OSM risk flags if still running
     await osmPromise
@@ -938,6 +1447,53 @@ export class AnalysisJobDO {
   // ─── Event Management ─────────────────────────────────────────────────────
 
   // ─── Observability: record every run outcome (success AND failure) ────────
+
+  private async saveRunRecord(
+    config: Pick<StartStreamingRequest, 'jobId' | 'userId'> & Partial<StartStreamingRequest>,
+    input: {
+      status: 'completed' | 'error' | 'cached' | 'persistence_error'
+      evidence?: unknown
+      attempts?: unknown[]
+      response?: unknown
+      errorCode?: string | null
+      errorMessage?: string | null
+      cachedJobId?: string | null
+    },
+  ): Promise<string> {
+    const payload = buildRunRecordPayload({
+      jobId: config.jobId,
+      userId: config.userId,
+      status: input.status,
+      request: {
+        search: config.search,
+        searchOptions: config.searchOptions,
+        enrichment: config.enrichment,
+        evalParams: config.evalParams,
+        skipCache: !!config.skipCache,
+        isRefresh: !!config.isRefresh,
+        cachedJobId: input.cachedJobId ?? null,
+      },
+      runtime: {
+        models: {
+          vision: this.env.VISION_MODEL ?? this.env.OPENROUTER_MODEL ?? 'google/gemini-2.5-flash',
+          general: this.env.OPENROUTER_MODEL ?? null,
+          compSelection: this.env.COMP_SELECTION_MODEL ?? null,
+          marketSearch: this.env.MARKET_SEARCH_MODEL ?? null,
+          clef: this.env.CLEF_MODEL ?? 'clef-flash',
+        },
+        providers: {
+          property: this.env.PROPERTY_PROVIDER ?? 'corelogic',
+        },
+      },
+      evidence: input.evidence,
+      attempts: input.attempts,
+      response: input.response,
+      errorCode: input.errorCode,
+      errorMessage: input.errorMessage,
+    })
+    const saved = await insertRunRecord(this.env.DB, payload, this.env.REPORT_ASSETS)
+    return saved.id
+  }
 
   /**
    * Persist a terminal verdict (insufficient comps / property not found) under
@@ -960,6 +1516,8 @@ export class AnalysisJobDO {
       errorCode?: string
       errorMessage?: string
       compCount?: number
+      cachedJobId?: string
+      runRecordId?: string
     }
   ): Promise<void> {
     try {
@@ -988,6 +1546,22 @@ export class AnalysisJobDO {
       }
       const runEval = evaluateRun(evidence)
 
+      // Every terminal outcome gets an immutable record. Full evaluations are
+      // saved before report overwrite above; cached/error outcomes record the
+      // terminal response/verdict here.
+      await (outcome.runRecordId
+        ? Promise.resolve(outcome.runRecordId)
+        : this.saveRunRecord(config, {
+          status: outcome.cachedJobId ? 'cached' : outcome.status,
+          response: outcome.response,
+          errorCode: outcome.errorCode,
+          errorMessage: outcome.errorMessage,
+          cachedJobId: outcome.cachedJobId ?? null,
+        }).catch((err) => {
+          console.warn('[AnalysisJobDO] run record fallback failed:', err instanceof Error ? err.message : err)
+          return undefined
+        }))
+
       await db.insert(analysisRuns).values({
         jobId: config.jobId,
         userId: config.userId,
@@ -1012,6 +1586,51 @@ export class AnalysisJobDO {
         evalJson: JSON.stringify(runEval),
         apiCallStatsJson: resp?.apiCallStats ? JSON.stringify(resp.apiCallStats) : null,
       })
+
+      // Basin lake — land every analysis outcome as an Iceberg row for the
+      // calibration/fine-tune corpus. Non-fatal: a stream failure must never
+      // touch the analysis path.
+      const stream = this.env.FLOWSTATE_ANALYSIS_EVENTS_STREAM
+      if (stream) {
+        const compItems = Array.isArray(comps?.items) ? comps.items : []
+        const curbAppeals = compItems
+          .filter((c) => (c as Record<string, unknown>).curbAppeal)
+          .map((c) => {
+            const cc = c as Record<string, unknown>
+            const ca = cc.curbAppeal as Record<string, unknown>
+            return {
+              compId: cc.id,
+              condition: ca.condition,
+              confidence: ca.confidence,
+              summary: ca.summary,
+              photosExamined: ca.photosExamined,
+            }
+          })
+        try {
+          await stream.send([
+            {
+              ts: new Date().toISOString(),
+              job_id: config.jobId,
+              address: (subj?.address as string) ?? config.search.address ?? '',
+              provider: (resp?.retrieval as Record<string, unknown> | null)?.provider ?? 'corelogic',
+              status: outcome.status,
+              arv: (val?.arv as number) ?? null,
+              enabled_comps: (comps?.enabledCount as number) ?? null,
+              comp_conditions: curbAppeals.length > 0 ? curbAppeals : null,
+              payload: {
+                errorCode: outcome.errorCode ?? null,
+                errorMessage: outcome.errorMessage ?? null,
+                compCount: outcome.compCount ?? (comps?.total as number) ?? null,
+                durationMs: outcome.durationMs,
+                fallbacks: report?.fallbacksUsed ?? [],
+                steps: report?.steps ?? null,
+              },
+            },
+          ])
+        } catch (err) {
+          console.warn('[AnalysisJobDO] basin stream send failed (non-fatal):', err instanceof Error ? err.message : err)
+        }
+      }
     } catch (err) {
       console.warn('[AnalysisJobDO] recordRun failed (non-fatal):', err instanceof Error ? err.message : err)
     }

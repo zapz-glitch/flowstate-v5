@@ -7,7 +7,19 @@
 
 // ─── Provider Types ─────────────────────────────────────────────────────────
 
-export type PropertyProvider = 'corelogic' | 'attom'
+export type PropertyProvider = 'corelogic' | 'attom' | 'attom-mcp'
+
+/** ATTOM geography-context layers keyed by scope — each value is the
+ *  geographyName the property belongs to at that scope. */
+export interface GeoScopes {
+  county?: string
+  city?: string
+  zip?: string
+  schoolDistrict?: string
+  subdivision?: string
+  n4?: string
+  n3?: string
+}
 
 // ─── Search Parameters ──────────────────────────────────────────────────────
 
@@ -18,6 +30,10 @@ export interface PropertySearchParams {
   city?: string
   state?: string
   zipCode?: string
+  /** County FIPS + assessor parcel number — exact-identity lookup used by
+   *  the attom-mcp path when the address-string resolver misses. */
+  fips?: string
+  apn?: string
 }
 
 export interface ComparablesSearchParams {
@@ -180,7 +196,25 @@ export interface NormalizedProperty {
   neighborhoodCode?: string
   cbsaCode?: string
   censusTract?: string
+  /** 12-digit Census block-group GEOID */
+  censusBlockGroup?: string
+  /** ATTOM geography-context layers keyed by scope */
+  geoScopes?: GeoScopes
+  /** Median $/sqft over trailing 365d per geography scope (SD/N4/N3) — geography-context */
+  ppsfMedians?: { SD?: number | null; N4?: number | null; N3?: number | null } | null
   legalDescription?: string
+  /** Redfin MLS property-details enrichment (shadow evidence — not used in appraisal math) */
+  listingDetails?: import('../redfin-details').RedfinPropertyDetails | null
+
+  /** Newest priced sale in the record — sales-history can carry a newer
+   *  transaction than the comparables pool returned (pool sometimes holds
+   *  the acquisition leg of a flip, not the resale) */
+  latestSale?: { price: number; date: string } | null
+  /** Verified flip on the latest sale: prior buy 30–365d before, resold for
+   *  profit. Provider sales-history source (attom-mcp). */
+  flip?: { priorSalePrice: number; priorSaleDate: string; daysHeld: number; gainPct: number } | null
+  /** Latest priced sale flagged distressed by the provider */
+  distressedSale?: boolean | null
 
   /** Raw API response for debugging */
   raw?: unknown
@@ -229,8 +263,14 @@ export interface NormalizedComparable {
    */
   saleReconciled?: { previousPrice: number | null; previousDate: string | null; source: 'zillow' }
 
-  /** Verified flip: prior sold event 30–365 days before saleDate at a lower price (from Zillow price history) */
-  flip?: { priorSalePrice: number; priorSaleDate: string; daysHeld: number; gainPct: number }
+  /** Newest priced sale in the comp's record — enrichment can surface a
+   *  newer transaction than the pool carried (pool may hold a flip's
+   *  acquisition leg, not the resale) */
+  latestSale?: { price: number; date: string } | null
+  /** Verified flip: prior sold event 30–365 days before saleDate at a lower price (provider sales-history under attom-mcp) */
+  flip?: { priorSalePrice: number; priorSaleDate: string; daysHeld: number; gainPct: number } | null
+  /** Provider-flagged distressed sale on this comp */
+  distressedSale?: boolean | null
 
   // Location details (from enrichment)
   subdivision?: string | null
@@ -240,6 +280,27 @@ export interface NormalizedComparable {
   neighborhoodCode?: string | null
   /** Census tract ID — boundaries follow major roads; proxy for road-barrier checks */
   censusTract?: string | null
+  /** 12-digit Census block-group GEOID */
+  censusBlockGroup?: string | null
+  /** Median $/sqft over trailing 365d for the comp's geography scopes (ATTOM geography-context, enriched comps only) */
+  ppsfMedians?: { SD?: number | null; N4?: number | null; N3?: number | null } | null
+  /** Comp's own ATTOM AVM value (valuation dataset, enriched comps only) */
+  avmValue?: number | null
+  /** County assessed total (tax-history, enriched comps only) */
+  assessedValue?: number | null
+  /** County assessed LAND value (tax-history) — feeds the market-derived
+   *  land curve: landValue vs lotSize fit per tract. */
+  landAssessedValue?: number | null
+  /** County assessed IMPROVEMENT value (tax-history) — feeds land
+   *  extraction: sale − improvement×mktRatio = implied land value. */
+  improvementAssessedValue?: number | null
+  /** Redfin MLS property-details enrichment — shadow display evidence */
+  listingDetails?: import('../redfin-details').RedfinPropertyDetails | null
+  /** ARV evidence verification — price cross-check (sale vs own AVM) +
+   *  age staleness, own-AVM price check, and pocket market fit. Shadow
+   *  evidence:
+   *  flags quality, never gates. */
+  evidenceVerification?: import('../appraisal/verification').CompEvidenceVerification | null
 
   /** Assessor building improvement condition (e.g. "Average") */
   buildingCondition?: string | null
@@ -249,6 +310,12 @@ export interface NormalizedComparable {
 
   /** True when the comp sits across a major road from the subject (not_verified when unknown) */
   crossesMajorRoad?: boolean
+  /** True when neither Census nor ATTOM geography-context produced a tract —
+   *  "unverified" must not read as "passed" downstream. */
+  geographyUnverified?: boolean
+  /** ATTOM geography-context layers (county/city/zip/school-district/
+   *  subdivision/N4) — the multi-scope match evidence for comp selection. */
+  geoScopes?: GeoScopes
   /** True when the comp shares the subject's census block group (not_verified when unknown) */
   sameBlockGroup?: boolean | null
   /** Site/influence quality flag from provider (e.g. traffic influence) */
@@ -269,6 +336,7 @@ export interface NormalizedComparable {
   // Transaction details (from enrichment)
   transaction?: {
     buyerNames?: string[]
+    sellerNames?: string[]
     buyerIsCorporate?: boolean
     isCashPurchase?: boolean
     isShortSale?: boolean

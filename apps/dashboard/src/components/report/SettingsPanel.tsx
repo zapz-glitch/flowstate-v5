@@ -85,7 +85,7 @@ function Section({
       <button
         type="button"
         onClick={() => setOpen(!open)}
-        className="w-full flex items-center gap-3 px-5 py-3.5 hover:bg-secondary/40 transition-colors"
+        className="w-full flex items-center gap-3 px-5 py-3.5 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors"
       >
         <Icon className="w-4 h-4 text-foreground-tertiary flex-shrink-0" />
         <span className="text-body-sm font-semibold text-foreground flex-1 text-left">{title}</span>
@@ -169,13 +169,22 @@ function CompactInput({
   width?: string
   placeholder?: string
 }) {
+  // The typed text stays as typed while focused · rewriting it from the parsed
+  // number on every keystroke moved the caret and blocked clearing the field.
+  // Only real numbers reach onChange; an empty field restores the last value.
+  const [draft, setDraft] = useState<string | null>(null)
   return (
     <div className="flex items-center gap-1">
       {prefix && <span className="text-caption-sm text-foreground-tertiary">{prefix}</span>}
       <Input
         type="number"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
+        value={draft ?? value}
+        onChange={(e) => {
+          const raw = e.target.value
+          setDraft(raw)
+          if (raw !== '' && !isNaN(parseFloat(raw))) onChange(raw)
+        }}
+        onBlur={() => setDraft(null)}
         disabled={disabled}
         placeholder={placeholder}
         className={cn('h-7 text-caption px-2 text-right tabular-nums', width)}
@@ -361,7 +370,7 @@ export function SettingsPanel({ settingsHook, recalcData }: SettingsPanelProps) 
               </div>
               <CompactInput
                 value={settings.dealParams.arvThresholdPercent ?? 15}
-                onChange={(v) => updateDealParams({ arvThresholdPercent: parseFloat(v) || 15 })}
+                onChange={(v) => { const n = parseFloat(v); if (n >= 1 && n <= 100) updateDealParams({ arvThresholdPercent: n }) }}
                 suffix="%"
                 step={5}
               />
@@ -373,7 +382,7 @@ export function SettingsPanel({ settingsHook, recalcData }: SettingsPanelProps) 
               </div>
               <CompactInput
                 value={settings.asIsThresholdPercent ?? 70}
-                onChange={(v) => updateAsIsThreshold(parseFloat(v) || 70)}
+                onChange={(v) => { const n = parseFloat(v); if (n >= 0 && n <= 100) updateAsIsThreshold(n) }}
                 suffix="%"
                 step={5}
               />
@@ -516,7 +525,7 @@ export function SettingsPanel({ settingsHook, recalcData }: SettingsPanelProps) 
         <button
           type="button"
           onClick={resetToDefaults}
-          className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-body-sm font-medium text-foreground-secondary hover:text-foreground hover:bg-secondary rounded-lg transition-colors border border-border"
+          className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-body-sm font-medium text-foreground-secondary hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 rounded-lg transition-colors border border-border"
         >
           <RotateCcw className="w-3.5 h-3.5" />
           Reset to My Defaults

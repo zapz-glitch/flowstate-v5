@@ -3,6 +3,10 @@
     "playwright": {
       "command": "npx",
       "args": ["-y", "@playwright/mcp@latest"]
+    },
+    "attom": {
+      "url": "https://mcp.intelligence.attomdata.com",
+      "transport": "http"
     }
   }
 }

@@ -1,0 +1,101 @@
+{
+  "_doc": "Expected outcomes derived by applying docs/APPRAISER-RULESET.md as a top appraiser would. Harness changes must land every case inside its range.",
+  "cases": [
+    {
+      "address": "2897 Branchwood Dr, East Point, GA 30344",
+      "fixtureJob": "job_1791077098614_8cbb8ea0721743d6",
+      "subject": {
+        "sqft": 1776,
+        "yearBuilt": 1964,
+        "list": 272000,
+        "avm": 339900
+      },
+      "expectedArv": {
+        "low": 285000,
+        "high": 300000,
+        "point": 292000
+      },
+      "reconciled": [
+        {
+          "address": "2952 Arrowood Dr",
+          "role": "primary",
+          "weight": 0.5,
+          "sizeAdjusted": 298354,
+          "why": "same BG, renovated (Updated 3.2/4), verified, Aug 2026, 8% gross adj"
+        },
+        {
+          "address": "2649 Janice Dr",
+          "role": "support",
+          "weight": 0.3,
+          "sizeAdjusted": 316389,
+          "why": "same tract, upper band by price, verified, least adjustment"
+        },
+        {
+          "address": "2800 Kingston Ter",
+          "role": "support",
+          "weight": 0.2,
+          "sizeAdjusted": 242074,
+          "why": "same BG, renovated (Updated 2.4/4), 16% gross adj, 11.5 mo old"
+        }
+      ],
+      "mustExclude": [
+        {
+          "address": "2877 Motts Cove Dr",
+          "why": "~2x pocket $/sf, different BG + subdivision \u2014 outside market area (rule 14)"
+        },
+        {
+          "address": "2609 Harmony Way",
+          "why": "renovated label at floor price \u2014 price outweighs Clef (rule 3)"
+        }
+      ]
+    },
+    {
+      "address": "2411 Baywood Dr SE, Atlanta, GA 30315",
+      "fixtureJob": "job_1791070886235_dab9cf600b3a4709",
+      "subject": {
+        "sqft": 1344,
+        "yearBuilt": 1955,
+        "list": 60000,
+        "avm": 197001
+      },
+      "expectedArv": {
+        "low": 315000,
+        "high": 345000,
+        "point": 330000
+      },
+      "reconciled": [
+        {
+          "address": "2592 Lois Ln Se",
+          "role": "primary",
+          "weight": 0.4,
+          "sizeAdjusted": 341860,
+          "why": "same BG, renovated, user-confirmed pocket ARV comp"
+        },
+        {
+          "address": "2410 Macon Dr Sw",
+          "role": "support",
+          "weight": 0.35,
+          "sizeAdjusted": 307006,
+          "why": "same BG, renovated (Updated 2.9/4), Browns Mill Park, verified"
+        },
+        {
+          "address": "4 Mobley Dr Se",
+          "role": "support",
+          "weight": 0.25,
+          "sizeAdjusted": 338494,
+          "why": "same BG, renovated (Updated 3.2/4); NO sale date \u2014 if unverifiable, swap 2308 Baywood Dr ($245,852) \u2192 ~$315k"
+        }
+      ],
+      "mustExclude": [
+        {
+          "address": "309 E East Rhinehill Rd",
+          "why": "unpermitted marketed-vs-tax sqft (2700 vs 1350), different BG (rule 7)"
+        },
+        {
+          "address": "2493 Mobley Ct Se",
+          "why": "$99,999 resale \u2014 floor price, not ARV evidence (rule 3)"
+        }
+      ]
+    }
+  ]
+}

@@ -6,10 +6,13 @@
  * 3. Provider retrieval order does not determine ARV selection.
  * 4. Provider truncation is visible in the audit trail.
  * 5. Radius-bound expansion triggers a refetch, not an incomplete pool.
- * 6. A bigger pool does not enrich every candidate — only provably-dead
- *    comps (never-relaxed rules) skip the paid property-detail call.
+ * 6. A bigger pool does not enrich every candidate — provably-dead and
+ *    package-deed comps skip paid calls; live candidates enrich in ranked
+ *    six-comp waves.
  * 7. Pre-cap-vintage subjects (e.g. built <1970) get a last-resort
  *    one-sided year cap when no year-built tier finds comps.
+ * 8. Free evidence ranks same block group, then tract, then neighborhood,
+ *    then nearest out-of-scope candidate.
  */
 import assert from 'node:assert/strict'
 import { createPropertyApi } from '../src/services/property-api'
@@ -19,6 +22,7 @@ import {
   resolveCandidateLimit,
   expansionRefetchRadius,
   isProvablyDeadComp,
+  rankEnrichmentCandidates,
   CORELOGIC_MAX_COMPS,
 } from '../src/services/property-api/retrieval-policy'
 import type { ComparablesSearchParams } from '../src/services/property-api/types'
@@ -179,6 +183,21 @@ const merged = mergeComparablePools(pool.slice(0, 3), [pool[1], mkComp('wide-1',
 assert.equal(merged.comparables.length, 4, 'merge keeps overlap + new candidates')
 assert.equal(merged.conflictIds.length, 0)
 
+// The provider can repeat one property ID for multiple transactions; the
+// first pool must dedupe it the same way an expansion merge does.
+const repeated = mergeComparablePools([
+  mkComp('repeat', { salePrice: 155000, saleDate: daysAgo(90), raw: { isSale: true, salePrice: 155000, saleDate: daysAgo(90) } }),
+  mkComp('repeat', { salePrice: 5890000, saleDate: daysAgo(30), raw: { isSale: true, salePrice: 5890000, saleDate: daysAgo(30) } }),
+  mkComp('repeat', { salePrice: 5893875, saleDate: daysAgo(45), raw: { isSale: true, salePrice: 5893875, saleDate: daysAgo(45) } }),
+], [])
+assert.equal(repeated.comparables.length, 1)
+assert.equal(repeated.comparables[0].salePrice, 5890000, 'newest valid sale wins')
+assert.deepEqual(
+  (repeated.comparables[0].raw as { retrievalVariants?: unknown[] }).retrievalVariants?.length,
+  3,
+  'dropped sale variants remain in the evidence trail',
+)
+
 // ─── 6: bigger pool does not mean paid enrichment for every candidate ────────
 
 const thresholds = { saleAgeDays: 180, sqftDiff: 250, maxYearDiff: 14 }
@@ -196,15 +215,16 @@ const bigPool = Array.from({ length: 60 }, (_, i) =>
 const enrichable = bigPool.filter((c) => !isProvablyDeadComp(c, subject, thresholds, now))
 assert.equal(enrichable.length, 50, 'only provably-live candidates get paid enrichment')
 
-// ─── 7: vintage-subject year cap (pre-1970 fallback) ─────────────────────────
+// ─── 7: old-stock subject — the filter ladder widens year built ──────────────
 
-// 1949 subject — nothing within the ±10/±12/±14 ladder, but comps built
-// ≤1970 qualify at the vintage tier (one-sided cap — 1920 is admissible).
+// 1949 subject — nothing within ±10. The ladder (docs/FILTER-LADDER.md)
+// widens year built 3 years a turn until the closest comp passes, then
+// stops. The old vintage-cap and era-class tiers are superseded: there is
+// no fixed cap, and the server never widens further to collect more.
 const vintageSubject: NormalizedProperty = { ...subject, yearBuilt: 1949 }
 const vintageFilters: AppraisalFilter[] = [
   ...filters,
   { type: 'year_built_diff', enabled: true, value: 10 },
-  { type: 'vintage_year_cap', enabled: true, value: 1970, priority: 'soft' },
 ]
 const vintagePool = [
   mkComp('v-64', { yearBuilt: 1964, salePrice: 210000 }),
@@ -213,43 +233,12 @@ const vintagePool = [
   mkComp('v-75', { yearBuilt: 1975, salePrice: 999999 }),
 ]
 const vr = service.evaluateWithFallback(vintageSubject, vintagePool, { filters: vintageFilters, adjustments: [] })
-assert.equal(vr.insufficientComps, false, 'vintage tier fills the pool')
-assert.equal(vr.fallbackUsed, 'year_built_expansion')
-const v20 = vr.comparables.find((c) => c.id === 'v-20')
-assert.equal(v20?.isEnabled, true, 'cap admits any ≤1970 build — however old')
-assert.ok(
-  v20?.evaluation?.filterResults.some((f) => f.type === 'year_built_cap' && f.passed === true),
-  'admission is audited as a passed year_built_cap row'
-)
-// Eligible ≠ selected: the cheapest vintage comp can still fall outside
-// the top-of-market ARV band — eligibility is what the cap governs.
-assert.equal(v20?.arvStatus, 'not_examined')
-const v75 = vr.comparables.find((c) => c.id === 'v-75')
-assert.equal(v75?.isEnabled, false, 'post-cap comp stays disqualified')
-assert.ok(
-  v75?.evaluation?.filterResults.some((f) => f.type === 'year_built_cap' && f.passed === false),
-  'post-cap failure is audited as year_built_cap'
-)
-
-// The rule is strictly for pre-cap stock: a 1975 subject never reaches
-// the vintage tier — same pool stays insufficient.
+assert.equal(vr.insufficientComps, false, 'the ladder finds the closest-year comp')
+assert.ok(vr.expansionApplied?.includes('year_built'), `year built widened, got ${vr.expansionApplied}`)
+assert.equal(vr.comparables.find((c) => c.id === 'v-64')?.isEnabled, true, '15 years off — the closest, admitted first')
+assert.equal(vr.comparables.find((c) => c.id === 'v-20')?.isEnabled, false, '29 years off — the ladder stopped before reaching it')
+assert.equal(vr.comparables.find((c) => c.id === 'v-75')?.isEnabled, false, '26 years off — not reached either')
 const modernSubject: NormalizedProperty = { ...subject, yearBuilt: 1975 }
-const modernPool = [
-  mkComp('m-90a', { yearBuilt: 1990 }),
-  mkComp('m-90b', { yearBuilt: 1990 }),
-  mkComp('m-90c', { yearBuilt: 1990 }),
-]
-const mr = service.evaluateWithFallback(modernSubject, modernPool, { filters: vintageFilters, adjustments: [] })
-assert.equal(mr.insufficientComps, true, 'vintage cap never applies to post-cap subjects')
-
-// Disabled config row → no vintage tier, identical vintage pool is insufficient.
-const vrOff = service.evaluateWithFallback(vintageSubject, vintagePool, {
-  filters: vintageFilters.map((f) =>
-    f.type === 'vintage_year_cap' ? { ...f, enabled: false } : f
-  ),
-  adjustments: [],
-})
-assert.equal(vrOff.insufficientComps, true, 'disabling the row disables the tier')
 
 // Pruning honors the cap one-sidedly for pre-cap subjects.
 const vintageThresholds = { saleAgeDays: 548, sqftDiff: 250, maxYearDiff: 14, vintageYearCap: 1970 }
