@@ -174,6 +174,7 @@ const bIsUnfit = (c: BComp) => {
   return staleByAge ||
     evidence?.transactionCheck === 'package_deed' ||
     evidence?.transactionCheck === 'nominal_sale' ||
+    evidence?.transactionCheck === 'bulk_sale' ||
     evidence?.transactionCheck === 'extreme_outlier' ||
     marketFit === 'below_pocket' ||
     (marketFit === 'above_pocket' && !bExplainsPremium(c)) ||

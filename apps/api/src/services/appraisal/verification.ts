@@ -26,9 +26,9 @@ export interface CompEvidenceVerification {
   /** comp sale $/sf vs the CURRENT pocket median — a comp priced far below
    *  or above today's pocket is a market-fit problem, not an age problem. */
   marketFit: 'in_range' | 'below_pocket' | 'above_pocket' | 'unverified'
-  /** Transaction noise: package deed / nominal sale / extreme outlier are
-   *  not independent market evidence. */
-  transactionCheck: 'clean' | 'package_deed' | 'nominal_sale' | 'extreme_outlier' | 'unverified'
+  /** Transaction noise: package deed / bulk sale / nominal sale / extreme
+   *  outlier are not independent market evidence. */
+  transactionCheck: 'clean' | 'package_deed' | 'bulk_sale' | 'nominal_sale' | 'extreme_outlier' | 'unverified'
   /** comp sale $/sf ÷ pocket reference $/sf — null when no reference */
   pocketRatio: number | null
   /** Human-readable flags for the audit/UI */
@@ -53,12 +53,31 @@ export function packageDeedIds(
   return new Set([...groups.values()].filter((ids) => ids.length > 1).flat())
 }
 
+/** Same-day sales sharing a buyer or seller are split-price package/bulk
+ * evidence even when the recorded prices differ. */
+export function bulkSaleIds(
+  comps: Array<Pick<NormalizedComparable, 'id' | 'saleDate' | 'transaction'>>,
+): Set<string> {
+  const groups = new Map<string, string[]>()
+  for (const comp of comps) {
+    if (!comp.id || !comp.saleDate) continue
+    const parties = [...(comp.transaction?.buyerNames ?? []), ...(comp.transaction?.sellerNames ?? [])]
+      .map((n) => n.toUpperCase().replace(/[^A-Z0-9]/g, ''))
+      .filter(Boolean)
+    for (const party of parties) {
+      const key = `${comp.saleDate.slice(0, 10)}|${party}`
+      groups.set(key, [...(groups.get(key) ?? []), comp.id])
+    }
+  }
+  return new Set([...groups.values()].filter((ids) => new Set(ids).size > 1).flat())
+}
+
 export function verifyCompEvidence(
   subject: NormalizedProperty,
   comp: NormalizedComparable,
   poolRefPpsf?: number | null,
   preferredSaleAgeDays?: number | null,
-  context?: { packageDeed?: boolean },
+  context?: { packageDeed?: boolean; bulkSale?: boolean },
 ): CompEvidenceVerification {
   const flags: string[] = []
   let transactionCheck: CompEvidenceVerification['transactionCheck'] = 'clean'
@@ -68,6 +87,9 @@ export function verifyCompEvidence(
   } else if (context?.packageDeed === true) {
     transactionCheck = 'package_deed'
     flags.push('Same-day, same-price package deed — not an independent market comp')
+  } else if (context?.bulkSale === true) {
+    transactionCheck = 'bulk_sale'
+    flags.push('Same-day shared-party bulk sale — not independent market evidence')
   } else if (comp.salePrice == null || comp.salePrice <= 0) {
     transactionCheck = 'unverified'
   }

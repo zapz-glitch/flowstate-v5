@@ -28,7 +28,7 @@ import {
   rankEnrichmentCandidates,
   type ComparablesRetrievalMeta,
 } from '../services/property-api/retrieval-policy'
-import { packageDeedIds } from '../services/appraisal/verification'
+import { bulkSaleIds, packageDeedIds } from '../services/appraisal/verification'
 import { DEFAULT_FILTERS, evaluateComparable, type AppraisalFilter } from '../services/appraisal'
 import { flexNumericFilters, isValueEquivalent } from '../services/appraisal/evaluator'
 import { arvEvidence } from '../services/evaluation'
@@ -734,8 +734,9 @@ export class AnalysisJobDO {
       // silently read as "passes" downstream. Verified: half a pool failed
       // Census and two cross-boundary comps enabled without geography.
       const packageIdsForGeo = packageDeedIds(comps)
+      const bulkIdsForGeo = bulkSaleIds(comps)
       const censusMisses = comps.filter((c, i) =>
-        !geos[i] && !packageIdsForGeo.has(c.id) && !isDeadComp(c) &&
+        !geos[i] && !packageIdsForGeo.has(c.id) && !bulkIdsForGeo.has(c.id) && !isDeadComp(c) &&
         c.latitude != null && c.salePrice != null && c.salePrice >= 10_000 && c.squareFeet != null)
       if (censusMisses.length > 0) {
         const geoEnriched = await propertyApi.enrichComparables(censusMisses, { concurrency: 5 })
@@ -768,8 +769,9 @@ export class AnalysisJobDO {
       // whose pocket sits within ±10% $/sf of the subject's. Census is
       // preferred; under flex (i≥1) these become enrichment candidates.
       const packageIds = packageDeedIds(comps)
+      const bulkIds = bulkSaleIds(comps)
       const spendable = (c: NormalizedComparable) =>
-        !packageIds.has(c.id) && !isDeadComp(c)
+        !packageIds.has(c.id) && !bulkIds.has(c.id) && !isDeadComp(c)
       const geoPasserIds = new Set(geoPassers.map((c) => c.id))
       const flexCrossers = comps.filter((c, i) => {
         const g = geos[i]

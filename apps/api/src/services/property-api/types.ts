@@ -336,6 +336,7 @@ export interface NormalizedComparable {
   // Transaction details (from enrichment)
   transaction?: {
     buyerNames?: string[]
+    sellerNames?: string[]
     buyerIsCorporate?: boolean
     isCashPurchase?: boolean
     isShortSale?: boolean

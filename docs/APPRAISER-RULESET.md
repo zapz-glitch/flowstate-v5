@@ -19,7 +19,7 @@ should withhold or weaken the result rather than invent support.
    groups first.
 2. **Evidence is screened before it can drive.** A comp stamped stale,
    divergent, below-pocket, unexplained above-pocket, package-deed,
-   nominal-sale, or extreme-outlier cannot set ARV.
+   bulk-sale, nominal-sale, or extreme-outlier cannot set ARV.
 3. **Stale means old.** A sale is stale only when it is outside the
    configured preferred `sale_age` window. Price is a separate market-fit
    check.
@@ -81,7 +81,8 @@ should withhold or weaken the result rather than invent support.
 
 ## Open decisions / not yet built
 
-- Broader bulk-sale variants and same-day different-price package patterns.
+- Deeper deed/document checks beyond same-day same-price packages and
+  same-day shared-party bulk sales.
 - Deeper auditor coverage. The independent record auditor checks stale,
   noisy, divergent, distressed, grade, hash, and runtime evidence; it does
   not yet prove every configurable rule was followed.

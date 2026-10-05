@@ -81,7 +81,7 @@ interface BadgeComp {
 const PASS_VERDICTS = new Set(['corroborated', 'plausible', 'market', 'market_verified'])
 const FAIL_VERDICTS = new Set(['divergent', 'suspect'])
 const FAIL_MARKET_FIT = new Set(['below_pocket'])
-const FAIL_TRANSACTION = new Set(['package_deed', 'nominal_sale', 'extreme_outlier'])
+const FAIL_TRANSACTION = new Set(['package_deed', 'bulk_sale', 'nominal_sale', 'extreme_outlier'])
 
 export function compBadges(
   comp: BadgeComp,

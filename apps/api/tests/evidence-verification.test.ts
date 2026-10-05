@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { packageDeedIds, verifyCompEvidence } from '../src/services/appraisal/verification'
+import { bulkSaleIds, packageDeedIds, verifyCompEvidence } from '../src/services/appraisal/verification'
 
 const daysAgo = (days: number) => new Date(Date.now() - days * 86400_000).toISOString().slice(0, 10)
 const subject = { address: '1 Subject St', squareFeet: 1200 } as never
@@ -59,6 +59,15 @@ const comp = (saleDate: string | null, salePrice: number, squareFeet = 1000, id 
   assert.equal(extreme.marketFit, 'above_pocket')
   assert.equal(extreme.transactionCheck, 'extreme_outlier')
   assert.ok(extreme.flags.some((f) => f.toLowerCase().includes('extreme outlier')))
+
+  const bulkComps = [
+    { ...comp(day, 747_000, 1000, 'b1'), transaction: { buyerNames: ['Portfolio Buyer LLC'] } },
+    { ...comp(day, 921_000, 1200, 'b2'), transaction: { buyerNames: ['Portfolio Buyer LLC'] } },
+    comp(day, 250_000, 1000, 'b3'),
+  ]
+  assert.deepEqual(bulkSaleIds(bulkComps), new Set(['b1', 'b2']))
+  const bulk = verifyCompEvidence(subject, comp(day, 921_000), 250, 180, { bulkSale: true })
+  assert.equal(bulk.transactionCheck, 'bulk_sale')
 }
 
 console.log('evidence-verification: sale age, pocket price, and transaction noise are separate checks')

@@ -26,7 +26,7 @@ import {
   type AppraisalFilter,
   type AppraisalAdjustment,
 } from '../appraisal'
-import { packageDeedIds, verifyCompEvidence } from '../appraisal/verification'
+import { bulkSaleIds, packageDeedIds, verifyCompEvidence } from '../appraisal/verification'
 import { checksForFlags, type RuleCheck } from '../analysis/rule-registry'
 import { arvEvidence, classifyCompsByEvidence } from './comp-classification'
 export { arvEvidence, classifyCompsByEvidence }
@@ -1166,10 +1166,12 @@ export async function performAnalysis(
       .sort((a, b) => a - b)
     const poolRefPpsf = tractPpsfs.length >= 3 ? tractPpsfs[Math.floor(tractPpsfs.length / 2)] : null
     const packageIds = packageDeedIds(appraisalResult.comparables)
+    const bulkIds = bulkSaleIds(appraisalResult.comparables)
     let verified = 0, stale = 0, divergent = 0, noisy = 0
     for (const comp of appraisalResult.comparables) {
       comp.evidenceVerification = verifyCompEvidence(bundle.property, comp, poolRefPpsf, preferredSaleAgeDays, {
         packageDeed: packageIds.has(comp.id),
+        bulkSale: bulkIds.has(comp.id),
       })
       if (comp.evidenceVerification.priceCheck === 'corroborated') verified++
       if (comp.evidenceVerification.staleness === 'stale') stale++
@@ -1270,9 +1272,11 @@ export async function performAnalysis(
         .sort((a, b) => a - b)
       const ref = tractPpsfs.length >= 3 ? tractPpsfs[Math.floor(tractPpsfs.length / 2)] : null
       const packageIds = packageDeedIds(appraisalResult.comparables)
+      const bulkIds = bulkSaleIds(appraisalResult.comparables)
       for (const comp of appraisalResult.comparables) {
         comp.evidenceVerification = verifyCompEvidence(bundle.property, comp, ref, preferredSaleAgeDays, {
           packageDeed: packageIds.has(comp.id),
+          bulkSale: bulkIds.has(comp.id),
         })
       }
     }
