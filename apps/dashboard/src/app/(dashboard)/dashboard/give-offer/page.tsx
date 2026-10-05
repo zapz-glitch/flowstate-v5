@@ -81,12 +81,16 @@ function CopyAddr({ text }: { text: string }) {
 
 interface RowData {
   key: string
-  address: string
-  meta: string
+  address?: string
+  meta?: string
   jobId: string | null
-  icon: React.ReactNode
+  icon?: React.ReactNode
   oppId?: string | null
   needsEval?: boolean
+  urgent?: boolean
+  deadlineAt?: string | null
+  deadlineNote?: string | null
+  section?: string
 }
 
 export default function GiveOfferPage() {
@@ -179,6 +183,7 @@ export default function GiveOfferPage() {
         address: item.fullAddress ?? item.address ?? item.displayName ?? item.leadId,
         meta: [
           tag,
+          item.deadline_at ? `due ${item.deadline_at}` : null,
           jobId ? null : 'needs evaluation',
           `waiting ${formatWait(Math.floor((now - parseQueuedAt(item.queuedAt)) / 1000))}`,
           fmtPrice(item.listPrice ?? item.wholesalePrice),
@@ -186,9 +191,14 @@ export default function GiveOfferPage() {
         jobId,
         oppId: item.opportunityId,
         needsEval: !jobId,
-        icon: jobId
-          ? <ChevronRight size={13} className="text-foreground-tertiary flex-shrink-0" />
-          : <AlertTriangle size={13} className="text-amber-500 flex-shrink-0" />,
+        urgent: item.offer_stage === 'deadline_today',
+        deadlineAt: item.deadline_at,
+        deadlineNote: item.deadline_note,
+        icon: item.offer_stage === 'deadline_today'
+          ? <AlertTriangle size={13} className="text-red-500 flex-shrink-0" />
+          : jobId
+            ? <ChevronRight size={13} className="text-foreground-tertiary flex-shrink-0" />
+            : <AlertTriangle size={13} className="text-amber-500 flex-shrink-0" />,
       }
     }
     const decidedRow = (d: DecidedEntry): RowData => ({
@@ -212,7 +222,18 @@ export default function GiveOfferPage() {
     }
 
     switch (cat) {
-      case 'waiting': return queueItems.map((i) => queueRow(i))
+      case 'waiting': {
+        const due = queueItems
+          .filter((i) => i.offer_stage === 'deadline_today')
+          .sort((a, b) => parseQueuedAt(a.deadline_at) - parseQueuedAt(b.deadline_at))
+        const rest = queueItems.filter((i) => i.offer_stage !== 'deadline_today')
+        return [
+          ...(due.length ? [{ key: 'sec:deadline', section: 'Deadline Today', jobId: null } as RowData] : []),
+          ...due.map((i) => ({ ...queueRow(i), urgent: true })),
+          ...(due.length ? [{ key: 'sec:waiting', section: 'Waiting For Offers', jobId: null } as RowData] : []),
+          ...rest.map((i) => queueRow(i)),
+        ]
+      }
       case 'hot': return hotItems.map((i) => queueRow(i, 'hot lead'))
       case 'prep_offer': return prepDecided.map(decidedRow)
       case 'no_margin': return marginDecided.map(decidedRow)
@@ -368,6 +389,13 @@ export default function GiveOfferPage() {
             ) : (
               <div className="divide-y divide-border/40">
                 {rows.map((row) => {
+                  if (row.section) {
+                    return (
+                      <div key={row.key} className="px-3 pt-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-foreground-tertiary">
+                        {row.section}
+                      </div>
+                    )
+                  }
                   const actions = (
                     <span className="flex items-center gap-1 flex-shrink-0">
                       {row.needsEval && (
@@ -375,7 +403,7 @@ export default function GiveOfferPage() {
                           type="button"
                           title="Run evaluation now"
                           className="px-1.5 py-0.5 rounded text-[10px] font-medium border border-primary/40 text-primary hover:bg-primary/10"
-                          onClick={(e) => { e.preventDefault(); e.stopPropagation(); evaluate(row.address) }}
+                          onClick={(e) => { e.preventDefault(); e.stopPropagation(); evaluate(row.address ?? '') }}
                         >
                           Evaluate
                         </button>
@@ -396,10 +424,11 @@ export default function GiveOfferPage() {
                     <>
                       {row.icon}
                       <div className="flex-1 min-w-0">
-                        <div className="text-xs text-foreground truncate">{row.address}</div>
-                        <div className="text-[10px] text-foreground-tertiary">{row.meta}</div>
+                        <div className={`text-xs truncate ${row.urgent ? 'text-red-500 font-medium' : 'text-foreground'}`}>{row.address}</div>
+                        <div className={`text-[10px] ${row.urgent ? 'text-red-400' : 'text-foreground-tertiary'}`}>{row.meta}</div>
+                        {row.deadlineNote && <div className="text-[10px] text-foreground-secondary truncate mt-0.5">{row.deadlineNote}</div>}
                       </div>
-                      <CopyAddr text={row.address} />
+                      <CopyAddr text={row.address ?? ''} />
                       {actions}
                     </>
                   )

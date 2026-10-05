@@ -42,6 +42,10 @@ export interface PipelineItem {
   conditionNotes?: string[]
   /** SQLite timestamp "YYYY-MM-DD HH:MM:SS" (UTC) */
   queuedAt: string
+  /** Engine-written offer urgency — absent until the engine ships it */
+  offer_stage?: 'deadline_today' | 'waiting_for_offers' | string | null
+  deadline_at?: string | null
+  deadline_note?: string | null
 }
 
 export interface PipelineMetrics {
