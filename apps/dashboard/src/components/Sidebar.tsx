@@ -254,7 +254,7 @@ export default function Sidebar() {
             {!collapsed && (
               <button
                 onClick={toggleCollapsed}
-                className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
+                className="p-1.5 rounded-lg text-muted-foreground hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors"
                 aria-label="Collapse sidebar"
                 title="Collapse sidebar"
               >
@@ -276,7 +276,7 @@ export default function Sidebar() {
                 collapsed ? 'justify-center px-2.5 py-2.5' : 'px-3 py-2.5',
                 isActive
                   ? 'bg-primary/10 text-primary'
-                  : 'text-foreground-secondary hover:text-foreground hover:bg-secondary'
+                  : 'text-foreground-secondary hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 '
               )
 
               if (item.external) {
@@ -358,7 +358,7 @@ export default function Sidebar() {
               <DropdownMenuTrigger asChild>
                 <button
                   className={cn(
-                    'flex items-center gap-3 w-full rounded-lg p-2 text-left transition-colors hover:bg-secondary',
+'flex items-center gap-3 w-full rounded-lg p-2 text-left transition-colors hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10',
                     collapsed && 'justify-center'
                   )}
                 >
@@ -495,7 +495,7 @@ export default function Sidebar() {
                   'relative flex flex-1 flex-col items-center justify-center gap-1 rounded-lg transition-colors active:scale-95',
                   isActive
                     ? 'text-primary'
-                    : 'text-foreground-tertiary hover:text-foreground'
+                    : 'text-foreground-tertiary hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10'
                 )}
               >
                 <item.icon className={cn('w-5 h-5 transition-transform', isActive && 'scale-110')} />

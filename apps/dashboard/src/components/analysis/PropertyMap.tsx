@@ -22,6 +22,8 @@ export interface MapMarker {
   label: string
   /** Comp key for toggling ARV selection (comp markers only) */
   compKey?: string
+  /** Sale price · drawn as a small label beside the dot */
+  price?: number | null
 }
 
 interface PropertyMapProps {
@@ -68,6 +70,7 @@ export function PropertyMap({ subject, comps, selectedCompKeys, onMarkerSelect, 
               : 'comp-market',
             label: comp.address ?? 'Comparable',
             compKey,
+            price: comp.salePrice ?? null,
           })
         }
       }

@@ -29,29 +29,30 @@ export function PhysicalCharacteristicsLine({
   characteristics?: PhysicalCharacteristics | null
   label: string
 }) {
+  // Show what is known · a verified value or a source conflict. A field with
+  // neither says nothing, so it is left out instead of drawing a dash.
+  const shown = FIELDS.flatMap(({ key, label: fieldLabel }) => {
+    const field = characteristics?.[key]
+    if (!field) return []
+    const conflict = field.status === 'conflict'
+    const value = field.status === 'verified' && field.value != null ? displayValue(field.value) : null
+    return conflict || value ? [{ key, fieldLabel, field, conflict, value }] : []
+  })
+  if (shown.length === 0) return null
+
   return (
-    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px]" aria-label={label}>
-      {FIELDS.map(({ key, label: fieldLabel }, index) => {
-        const field = characteristics?.[key]
-        const conflict = field?.status === 'conflict'
-        const value = field?.status === 'verified' && field.value != null ? displayValue(field.value) : null
-        return (
-          <span key={key} className="inline-flex items-center gap-1 min-w-0">
-            {index > 0 && <span className="text-border">·</span>}
-            <span className="text-foreground-tertiary">{fieldLabel}</span>
-            <span
-              className={cn(
-                'font-medium truncate',
-                conflict && 'text-amber-500',
-                !conflict && !value && 'text-foreground-tertiary',
-              )}
-              title={field ? sourceTitle(field) : undefined}
-            >
-              {conflict ? '⚠ conflict' : value || '—'}
-            </span>
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px]" aria-label={label}>
+      {shown.map(({ key, fieldLabel, field, conflict, value }) => (
+        <span key={key} className="inline-flex items-baseline gap-1 min-w-0">
+          <span className="text-foreground-tertiary">{fieldLabel}</span>
+          <span
+            className={cn('font-medium truncate capitalize', conflict && 'text-amber-600 dark:text-amber-400')}
+            title={sourceTitle(field)}
+          >
+            {conflict ? 'Conflict' : value}
           </span>
-        )
-      })}
+        </span>
+      ))}
     </div>
   )
 }

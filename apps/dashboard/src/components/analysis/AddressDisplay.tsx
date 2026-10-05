@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { Copy, Check } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { formatAddressCasing } from './format-helpers'
 
 interface AddressDisplayProps {
   address: string
@@ -37,7 +38,7 @@ export function AddressDisplay({ address, latitude, longitude, className, showSt
         <button
           type="button"
           onClick={handleCopy}
-          className="inline-flex align-middle ml-1.5 text-foreground-tertiary hover:text-foreground transition-colors"
+          className="inline-flex align-middle ml-1.5 text-foreground-tertiary hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors"
           title={copied ? 'Copied!' : 'Copy address'}
         >
           {copied ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}
@@ -48,7 +49,7 @@ export function AddressDisplay({ address, latitude, longitude, className, showSt
           href={streetViewUrl}
           target="_blank"
           rel="noopener noreferrer"
-          className="inline-flex ml-1.5 text-[10px] font-medium px-1.5 py-0.5 rounded bg-muted text-foreground-tertiary hover:text-foreground hover:bg-muted/70 transition-colors align-middle"
+          className="inline-flex ml-1.5 text-[10px] font-medium px-1.5 py-0.5 rounded bg-muted text-foreground-tertiary hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors align-middle"
           onClick={(e) => e.stopPropagation()}
         >
           Street View
@@ -56,23 +57,4 @@ export function AddressDisplay({ address, latitude, longitude, className, showSt
       )}
     </span>
   )
-}
-
-/** "1643 Bagpipe Pl, CONLEY, GA 30288" → "1643 Bagpipe Pl, Conley, GA 30288" —
- *  title-cases every word except 2-letter state codes and numbers. */
-function formatAddressCasing(address: string): string {
-  return address
-    .split(',')
-    .map((part) =>
-      part
-        .trim()
-        .split(/\s+/)
-        .map((word) =>
-          /^[A-Z]{2}$/.test(word) || /\d/.test(word)
-            ? word.toUpperCase()
-            : word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
-        )
-        .join(' ')
-    )
-    .join(', ')
 }

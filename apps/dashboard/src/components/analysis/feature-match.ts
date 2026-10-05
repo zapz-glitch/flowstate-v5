@@ -213,9 +213,14 @@ export function featureState(matches: FeatureMatch[], key: FeatureKey): MatchSta
   return matches.find((m) => m.key === key)?.state ?? 'unknown'
 }
 
+/** "Matches the subject" · one green everywhere (same pair the valuation box uses) */
+export const MATCH_TEXT = 'text-emerald-600 dark:text-emerald-400'
+/** "Differs from the subject" */
+export const MISMATCH_TEXT = 'text-red-600 dark:text-red-400'
+
 /** Tailwind class for a match-state value/label */
 export function matchTextClass(state: MatchState): string {
-  return state === 'match' ? 'text-emerald-500' : state === 'mismatch' ? 'text-red-400' : ''
+  return state === 'match' ? MATCH_TEXT : state === 'mismatch' ? MISMATCH_TEXT : ''
 }
 
 /** Tailwind class for a match-state dot */

@@ -41,6 +41,9 @@ export interface AnalysisResultLayoutProps {
   onOfferWorkflow?: (workflow: OfferWorkflow, offerPrice?: number) => Promise<{ ok: boolean }>
   /** Prior session disposition — hero renders a dated warning chip */
   disposition?: { workflow: OfferWorkflow; at: number } | null
+  /** 'left' = the page draws the valuation box elsewhere (under the map);
+   *  the subject card pins at the top of this column instead. */
+  valuationPlacement?: 'inline' | 'left'
 }
 
 export function AnalysisResultLayout({
@@ -53,6 +56,7 @@ export function AnalysisResultLayout({
   rerunning,
   onOfferWorkflow,
   disposition,
+  valuationPlacement = 'inline',
 }: AnalysisResultLayoutProps) {
   const {
     subject,
@@ -75,12 +79,20 @@ export function AnalysisResultLayout({
 
   return (
     <>
-      {/* Subject property */}
-      {subject && <SubjectGridCard subject={subject} isLoading={isStreaming} />}
+      {/* Subject property · pins at the top when the valuation sits under the map */}
+      {subject && (
+        valuationPlacement === 'left' ? (
+          <div data-pane-sticky className="sticky z-10 top-0 bg-background">
+            <SubjectGridCard subject={subject} isLoading={isStreaming} />
+          </div>
+        ) : (
+          <SubjectGridCard subject={subject} isLoading={isStreaming} />
+        )
+      )}
 
       {/* Valuation panel — sticky so it's always visible while scrolling comps */}
-      {valuation ? (
-        <div ref={valuationCardRef as React.RefObject<HTMLDivElement>} className="sticky z-10 top-[calc(3.5rem+var(--sat))] lg:top-0">
+      {valuationPlacement === 'left' ? null : valuation ? (
+        <div ref={valuationCardRef as React.RefObject<HTMLDivElement>} data-pane-sticky className="sticky z-10 top-[calc(3.5rem+var(--sat))] lg:top-0">
           <DealSummaryHero
             valuation={valuation}
             isRecalculated={isRecalculated}
@@ -135,8 +147,8 @@ export function AnalysisResultLayout({
               (flip resale, premium over scope median, or above AVM).
               {(valuation?.arvSource === 'avm' || valuation?.arvSource === 'assessed') && valuation?.arv != null && (
                 <span className="block mt-1 font-medium text-foreground">
-                  Valuation is anchored on the {valuation.arvSource === 'avm' ? 'subject AVM' : 'county assessment'} — ${valuation.arv.toLocaleString()}
-                  {' '}— a conservative estimate until comp evidence exists.
+                  ARV is set from the {valuation.arvSource === 'avm' ? 'subject AVM estimate' : 'county value'}, ${valuation.arv.toLocaleString()}.
+                  {' '}A conservative estimate until comp evidence exists.
                 </span>
               )}
               {comps?.asIsMarketIntel?.asIsMarketPrice != null && (

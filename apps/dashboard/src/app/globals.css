@@ -709,3 +709,13 @@ textarea:-webkit-autofill {
   caret-color: hsl(var(--foreground));
   transition: background-color 9999s ease-out;
 }
+
+/* Comp verdict edge — hatched = excluded from the ARV evidence. Solid edges
+   (ARV evidence, support) use bg-brand / bg-foreground utilities. */
+.verdict-edge-excluded {
+  background-image: repeating-linear-gradient(
+    135deg,
+    hsl(var(--foreground) / 0.55) 0 3px,
+    transparent 3px 6px
+  );
+}

@@ -49,13 +49,12 @@ export function PhotoGallery({ photos, className, children }: { photos: string[]
               className="w-20 h-14 object-cover transition-transform group-hover:scale-105"
               onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
             />
-            <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors" />
           </button>
         ))}
         {hasPhotos && photos.length > 6 && (
           <button
             onClick={() => { setCurrentIndex(6); setLightboxOpen(true) }}
-            className="w-20 h-14 rounded-lg border border-border flex items-center justify-center text-caption text-foreground-tertiary flex-shrink-0 hover:bg-secondary/80 transition-colors"
+            className="w-20 h-14 rounded-lg border border-border flex items-center justify-center text-caption text-foreground-tertiary flex-shrink-0 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors"
           >
             +{photos.length - 6}
           </button>

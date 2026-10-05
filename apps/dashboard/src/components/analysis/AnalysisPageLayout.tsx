@@ -10,6 +10,7 @@ import { ResizableLayout } from '@/components/ui/resizable'
 import { MapOverlay } from './MapOverlay'
 import { PropertyMap } from './PropertyMap'
 import { AnalysisResultLayout } from './AnalysisResultLayout'
+import { DealSummaryHero } from './DealSummaryHero'
 import {
   SubjectPropertySkeleton,
   ComparablesSkeleton,
@@ -67,7 +68,7 @@ export function AnalysisPageLayout({
   onOfferWorkflow,
   disposition,
 }: AnalysisPageLayoutProps) {
-  const { subject, displayComps: comps, compOverride } = useEvaluation()
+  const { subject, displayComps: comps, compOverride, displayValuation: valuation, isRecalculated, onOpenSettings } = useEvaluation()
   const selectedCompKeys = compOverride?.selectedCompKeys
   const hasMapData = isValidCoordinate({ lat: subject?.latitude, lng: subject?.longitude })
 
@@ -101,22 +102,39 @@ export function AnalysisPageLayout({
     <ResizableLayout
       className="flex-1 min-h-0 mx-4 sm:mx-6 mt-3"
       left={
-        <div className="h-full relative flex flex-col">
-          <PropertyMap
-            subject={subject!}
-            comps={mapComps ?? comps}
-            selectedCompKeys={selectedCompKeys}
-            onMarkerSelect={onMarkerSelect}
-            activeMarkerKey={mapActiveKey}
-          />
-          <MapOverlay riskFlags={riskFlags} floodZone={floodZone} />
+        <div className="h-full relative flex flex-col gap-3">
+          {/* Map on top, valuation box under it · both stay put while the
+              comps scroll on the right */}
+          <div className="relative flex-1 min-h-0 flex flex-col">
+            <PropertyMap
+              subject={subject!}
+              comps={mapComps ?? comps}
+              selectedCompKeys={selectedCompKeys}
+              onMarkerSelect={onMarkerSelect}
+              activeMarkerKey={mapActiveKey}
+            />
+            <MapOverlay riskFlags={riskFlags} floodZone={floodZone} />
+          </div>
+          {!loading && valuation && (
+            <div ref={valuationCardRef as React.RefObject<HTMLDivElement>} className="flex-shrink-0 overflow-y-auto max-h-[55%]">
+              <DealSummaryHero
+                valuation={valuation}
+                isRecalculated={isRecalculated}
+                onOpenSettings={onOpenSettings}
+                onRerun={onRerun}
+                rerunning={rerunning}
+                onOfferWorkflow={onOfferWorkflow}
+                disposition={disposition}
+              />
+            </div>
+          )}
         </div>
       }
       right={
         <div className="min-w-0 props-pane">
           <div className={cn('flex flex-col gap-4 lg:pl-4 pt-2 pb-4')}>
             {loading ? loadingSkeleton : (
-              <AnalysisResultLayout {...resultProps} />
+              <AnalysisResultLayout {...resultProps} valuationPlacement="left" />
             )}
           </div>
         </div>

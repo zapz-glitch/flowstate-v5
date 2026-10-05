@@ -108,11 +108,6 @@ export function ValuationCard({
                   </span>
                 )}
               </div>
-              {valuation.statusReason && (
-                <div className="text-[10px] text-foreground-tertiary mt-1 leading-snug">
-                  {valuation.statusReason}
-                </div>
-              )}
               {valuation.arvPerSqft != null && (
                 <div className="text-caption-sm text-foreground-tertiary mt-1">${valuation.arvPerSqft.toFixed(0)}/sqft</div>
               )}

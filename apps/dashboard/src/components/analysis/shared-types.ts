@@ -9,6 +9,7 @@ export type {
   ValuationData,
   CompsData,
   CompItem,
+  CompBadges,
   ClassificationSummary,
   RehabLevelEstimate,
   FloodZoneData,

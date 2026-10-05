@@ -11,6 +11,7 @@ import {
   type FilterType,
   type AdjustmentType,
 } from '@/lib/client-api'
+import { DraftNumberInput } from '@/components/ui/number-input'
 
 export interface FilterState {
   type: string
@@ -25,42 +26,6 @@ export interface AdjustmentState {
   enabled: boolean
   amount: number
   percent?: number
-}
-
-/** Numeric input that owns its text while focused. The old pattern
- *  parsed+rewrote `value` on every keystroke — the rewritten number moved
- *  the caret ("typing backwards") and blocked deleting down to 0. */
-function DraftNumberInput({
-  value, min = 0, max, step, disabled, onCommit, className,
-}: {
-  value: number
-  min?: number
-  max?: number
-  step?: number
-  disabled?: boolean
-  onCommit: (v: number) => void
-  className?: string
-}) {
-  const [draft, setDraft] = useState<string | null>(null)
-  return (
-    <Input
-      type="number"
-      min={min}
-      max={max}
-      step={step}
-      value={draft ?? String(value)}
-      disabled={disabled}
-      onChange={(e) => {
-        const raw = e.target.value
-        setDraft(raw)
-        if (raw === '') return                    // deleting is legal — commit on blur
-        const v = parseFloat(raw)
-        if (!isNaN(v) && v >= min && (max == null || v <= max)) onCommit(v)
-      }}
-      onBlur={() => setDraft(null)}
-      className={className}
-    />
-  )
 }
 
 interface AppraisalFilterEditorProps {

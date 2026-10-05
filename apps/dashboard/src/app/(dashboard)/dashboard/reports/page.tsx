@@ -5,6 +5,7 @@ import { FileText, ChevronLeft, ChevronRight } from 'lucide-react'
 import { Card } from '@/components/ui/card'
 import { ReportSearchInput } from './search-input'
 import { DeleteReportButton } from './delete-report-button'
+import { formatAddressCasing, formatCityState } from '@/components/analysis/format-helpers'
 
 const REPORTS_PER_PAGE = 20
 
@@ -101,10 +102,10 @@ export default async function ReportsPage({
                   <div className="flex items-start justify-between gap-2 mb-2">
                     <div className="min-w-0 flex-1">
                       <p className="text-body-sm font-medium text-foreground truncate">
-                        {report.propertyAddress}
+                        {formatAddressCasing(report.propertyAddress)}
                       </p>
                       <p className="text-caption text-foreground-tertiary">
-                        {[report.propertyCity, report.propertyState?.toUpperCase()].filter(Boolean).join(', ') || '-'}
+                        {formatCityState(report.propertyCity, report.propertyState) || '-'}
                       </p>
                     </div>
                     <div className="flex items-center gap-1.5 flex-shrink-0">
@@ -175,13 +176,11 @@ export default async function ReportsPage({
                       key={report.id}
                       className="hover:bg-secondary/30 transition-colors"
                     >
-                      <td className="px-6 py-4 text-body-sm text-foreground max-w-[250px] truncate">
-                        {report.propertyAddress}
+                      <td className="px-6 py-4 text-body-sm text-foreground max-w-[250px] truncate" title={report.propertyAddress}>
+                        {formatAddressCasing(report.propertyAddress)}
                       </td>
                       <td className="px-6 py-4 text-body-sm text-foreground-secondary whitespace-nowrap">
-                        {[report.propertyCity, report.propertyState?.toUpperCase()]
-                          .filter(Boolean)
-                          .join(', ') || '-'}
+                        {formatCityState(report.propertyCity, report.propertyState) || '-'}
                       </td>
                       <td className="px-6 py-4 text-body-sm text-foreground-secondary text-right whitespace-nowrap">
                         {report.arv ? formatCurrency(report.arv) : '-'}
@@ -228,7 +227,7 @@ export default async function ReportsPage({
                 {data.pagination.hasPrev ? (
                   <Link
                     href={`/dashboard/reports?page=${data.pagination.page - 1}${params.search ? `&search=${encodeURIComponent(params.search)}` : ''}`}
-                    className="flex items-center gap-1 px-3 py-1.5 text-body-sm text-foreground-secondary hover:bg-secondary rounded-lg transition-colors"
+                    className="flex items-center gap-1 px-3 py-1.5 text-body-sm text-foreground-secondary hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 rounded-lg transition-colors"
                   >
                     <ChevronLeft className="w-4 h-4" />
                     <span className="hidden sm:inline">Previous</span>
@@ -242,7 +241,7 @@ export default async function ReportsPage({
                 {data.pagination.hasNext ? (
                   <Link
                     href={`/dashboard/reports?page=${data.pagination.page + 1}${params.search ? `&search=${encodeURIComponent(params.search)}` : ''}`}
-                    className="flex items-center gap-1 px-3 py-1.5 text-body-sm text-foreground-secondary hover:bg-secondary rounded-lg transition-colors"
+                    className="flex items-center gap-1 px-3 py-1.5 text-body-sm text-foreground-secondary hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 rounded-lg transition-colors"
                   >
                     <span className="hidden sm:inline">Next</span>
                     <ChevronRight className="w-4 h-4" />

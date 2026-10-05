@@ -5,20 +5,10 @@ import { cn } from '@/lib/utils'
 import { CopyButton } from '@/components/ui/copy-button'
 import type { SubjectData } from './shared-types'
 import { StreetViewImage } from './StreetViewImage'
-import { formatShortDate, formatLotSize } from './format-helpers'
+import { formatAddressCasing, formatBlockGroup, formatCensusTract, formatLotSize, formatShortDate, titleCaseWords } from './format-helpers'
 import { PropertyPermits } from './PropertyPermits'
 import { PhotoGallery } from './PhotoGallery'
 import { PhysicalCharacteristicsLine } from './PhysicalCharacteristicsLine'
-
-function formatCensusTract(value?: string | null): string {
-  if (!value) return '—'
-  const tract = value.length >= 6 ? value.slice(-6) : value.padStart(6, '0')
-  return `${tract.slice(0, 4)}.${tract.slice(4)}`
-}
-
-function formatBlockGroup(value?: string | null): string {
-  return value ? value.slice(-1) : '—'
-}
 
 interface SubjectGridCardProps {
   subject: SubjectData
@@ -26,6 +16,15 @@ interface SubjectGridCardProps {
 }
 
 export function SubjectGridCard({ subject, isLoading }: SubjectGridCardProps) {
+  // Only geography we actually have · an empty value says nothing, so it is not drawn.
+  const tract = formatCensusTract(subject.censusTract)
+  const blockGroup = formatBlockGroup(subject.censusBlockGroup)
+  const geography = [
+    tract ? { label: 'Tract', value: tract, title: subject.censusTract ?? undefined } : null,
+    blockGroup ? { label: 'Group', value: blockGroup, title: 'Census block group' } : null,
+    subject.neighborhoodName ? { label: 'Neighborhood', value: titleCaseWords(subject.neighborhoodName), title: undefined } : null,
+  ].filter((item): item is { label: string; value: string; title: string | undefined } => item !== null)
+
   return (
     <div data-card-key="subject" className="border border-primary/30 rounded-sm overflow-hidden bg-primary/[0.02]">
       {/* Body: Image left + Details right */}
@@ -61,7 +60,7 @@ export function SubjectGridCard({ subject, isLoading }: SubjectGridCardProps) {
                       className="text-body-sm font-semibold hover:text-primary hover:underline truncate"
                       title={subject.listingUrl ? 'Open listing' : 'Search on Zillow'}
                     >
-                      {subject.address}
+                      {formatAddressCasing(subject.address)}
                     </a>
                   ) : (
                     <span className="text-body-sm font-semibold">Unknown Address</span>
@@ -75,13 +74,16 @@ export function SubjectGridCard({ subject, isLoading }: SubjectGridCardProps) {
                     </span>
                   </div>
                 )}
-                <div className="flex items-center gap-1.5 mt-1 text-[10px] text-foreground-tertiary flex-wrap" aria-label="Subject geography">
-                  <span title={subject.censusTract ?? 'Census tract unavailable'}>Tract {formatCensusTract(subject.censusTract)}</span>
-                  <span className="text-border">·</span>
-                  <span title={subject.censusBlockGroup ?? 'Census block group unavailable'}>BG {formatBlockGroup(subject.censusBlockGroup)}</span>
-                  <span className="text-border">·</span>
-                  <span>Neighborhood {subject.neighborhoodName || '—'}</span>
-                </div>
+                {geography.length > 0 && (
+                  <div className="flex items-center gap-x-3 gap-y-0.5 mt-1 text-[11px] flex-wrap" aria-label="Subject geography">
+                    {geography.map((item) => (
+                      <span key={item.label} className="whitespace-nowrap" title={item.title}>
+                        <span className="text-foreground-tertiary">{item.label}</span>{' '}
+                        <span className="font-medium text-foreground-secondary">{item.value}</span>
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
               {(subject.listPrice != null || subject.lastSale?.price) && (
                 <div className="text-right flex-shrink-0">
@@ -124,14 +126,7 @@ export function SubjectGridCard({ subject, isLoading }: SubjectGridCardProps) {
               </div>
               <div className="flex items-center justify-between text-[11px]">
                 <span className="text-foreground-tertiary">Condition</span>
-                <span className={cn(
-                  'font-medium truncate ml-2',
-                  subject.condition && subject.condition !== 'NA' && (
-                    /lipstick|light cosmetic/i.test(subject.condition) ? 'text-emerald-500'
-                    : /full cosmetic/i.test(subject.condition) ? 'text-amber-500'
-                    : 'text-red-400'
-                  ),
-                )} title={subject.conditionSummary ?? subject.curbAppeal?.summary ?? undefined}>
+                <span className="font-medium truncate ml-2" title={subject.conditionSummary ?? subject.curbAppeal?.summary ?? undefined}>
                   {subject.condition || 'NA'}
                 </span>
               </div>

@@ -79,7 +79,8 @@ test('permits render records and distinguish empty, unavailable, not-requested a
     'sonner': { toast: { success: () => {}, error: () => {} } },
   })
   const render = props => renderToStaticMarkup(React.createElement(PropertyPermits, props))
-  assert.match(render({ permits: { status: 'empty', items: [] } }), /Permits — NA[\s\S]*No permit records returned/)
+  // "Permits NA" · gray label, strong value, no dash between them
+  assert.match(render({ permits: { status: 'empty', items: [] } }), /Permits<\/span>\s*<span[^>]*>NA<[\s\S]*No permit records returned/)
   assert.match(render({ permits: { status: 'unavailable', items: [] } }), /lookup unavailable/)
   assert.match(render({}), /Not pulled during analysis/)
   assert.match(render({ permits: { status: 'not_requested', items: [] } }), /Not pulled during analysis/)

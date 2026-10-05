@@ -10,7 +10,10 @@ import { MapLegend } from './MapOverlay'
 import type { MapMarker } from './PropertyMap'
 
 type Panorama = NonNullable<Awaited<ReturnType<typeof resolveSubjectPanorama>>>
-const colors = { subject: '#3b82f6', 'comp-arv': '#10b981', 'comp-market': '#f97316', 'comp-floor': '#ef4444', 'comp-disabled': '#6b7280' }
+// Comps are one neutral dot each · the price label beside it carries the
+// information, and the number ties the dot to its card.
+const colors = { subject: '#3b82f6', 'comp-arv': '#404040', 'comp-market': '#404040', 'comp-floor': '#404040', 'comp-disabled': '#a3a3a3' }
+const priceLabel = (price?: number | null) => price == null ? null : price >= 1_000_000 ? `$${(price / 1_000_000).toFixed(2)}M` : `$${Math.round(price / 1000)}k`
 const buttonClass = 'flex h-8 items-center justify-center gap-1 rounded-md border border-border bg-background px-2 text-xs text-foreground shadow-sm hover:bg-secondary disabled:opacity-40'
 
 // Optional Google libraries must fail independently; a missing 3D library must
@@ -25,28 +28,93 @@ async function loadLibrary(name: string): Promise<boolean> {
   } finally { clearTimeout(timer) }
 }
 
+const markerKey = (marker: MapMarker) => (marker.type === 'subject' ? 'subject' : marker.compKey)
+const markerIcon = (marker: MapMarker, active: boolean, index: number): google.maps.Icon | google.maps.Symbol => {
+  const fill = active ? '#f59e0b' : colors[marker.type]
+  if (marker.type === 'subject') {
+    return { path: google.maps.SymbolPath.CIRCLE, scale: 12, fillColor: fill, fillOpacity: 1, strokeColor: '#fff', strokeWeight: 2 }
+  }
+  // Dot with the card number inside and the sale price in a pill beside it
+  const price = priceLabel(marker.price)
+  const pillW = price ? price.length * 7 + 10 : 0
+  const w = 24 + (price ? 4 + pillW : 0)
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="24" viewBox="0 0 ${w} 24">`
+    + `<circle cx="12" cy="12" r="10" fill="${fill}" stroke="#fff" stroke-width="2"/>`
+    + `<text x="12" y="12" text-anchor="middle" dominant-baseline="central" font-family="system-ui,sans-serif" font-size="10" font-weight="700" fill="#fff">${index}</text>`
+    + (price ? `<rect x="28" y="5" width="${pillW}" height="14" rx="7" fill="#171717" fill-opacity="0.92" stroke="#fff" stroke-width="1"/>`
+      + `<text x="${28 + pillW / 2}" y="12" text-anchor="middle" dominant-baseline="central" font-family="system-ui,sans-serif" font-size="10" font-weight="600" fill="#fff">${price}</text>` : '')
+    + '</svg>'
+  return { url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`, anchor: new google.maps.Point(12, 12), size: new google.maps.Size(w, 24) }
+}
+
+// Where the pointer is and where it last opened a comp from the map. Closing
+// the dialog with the pointer still resting on (or wiggling over) a marker must
+// not open it again. Module scope · the map layer remounts when the dialog
+// opens, which would otherwise forget the guard at the exact moment it matters.
+const hoverGuard: {
+  pointer: { current: { x: number; y: number } | null }
+  openedAt: { current: { x: number; y: number } | null }
+} = { pointer: { current: null }, openedAt: { current: null } }
+
 function FlatMarkers({ markers, activeMarkerKey, onMarkerClick }: {
   markers: MapMarker[]; activeMarkerKey?: string | null; onMarkerClick: (marker: MapMarker) => void
 }) {
   const map = useMap()
+  const instances = useRef<Array<{ marker: MapMarker; instance: google.maps.Marker }>>([])
+  const activeKey = useRef(activeMarkerKey)
+  activeKey.current = activeMarkerKey
+  // Hover opens the comp detail once, then stays quiet until the pointer has
+  // travelled away from where it opened (see hoverGuard). A click always opens.
+  const { pointer, openedAt } = hoverGuard
+
+  // Build markers once per marker set · a highlight change must not rebuild
+  // them under the pointer (that re-fires mouseover and reopens the dialog).
   useEffect(() => {
     if (!map) return
-    const instances = markers.map((marker, index) => {
-      const active = (marker.type === 'subject' ? 'subject' : marker.compKey) === activeMarkerKey
+    const REARM_DISTANCE = 32 // px · comfortably outside a 20px marker
+    const at = (event?: { domEvent?: Event }) => {
+      const dom = event?.domEvent
+      return dom instanceof MouseEvent ? { x: dom.clientX, y: dom.clientY } : pointer.current
+    }
+    const container = map.getDiv()
+    const track = (event: MouseEvent) => {
+      pointer.current = { x: event.clientX, y: event.clientY }
+      const origin = openedAt.current
+      if (origin && Math.hypot(event.clientX - origin.x, event.clientY - origin.y) > REARM_DISTANCE) openedAt.current = null
+    }
+    container.addEventListener('mousemove', track, true)
+    instances.current = markers.map((marker, index) => {
       const instance = new google.maps.Marker({
         map, position: marker, title: marker.label,
-        icon: { path: google.maps.SymbolPath.CIRCLE, scale: marker.type === 'subject' ? 12 : 10,
-          fillColor: active ? '#f59e0b' : colors[marker.type], fillOpacity: 1, strokeColor: '#fff', strokeWeight: 2 },
-        label: { text: marker.type === 'subject' ? 'S' : String(index), color: '#fff', fontSize: '10px' },
+        icon: markerIcon(marker, markerKey(marker) === activeKey.current, index),
+        label: marker.type === 'subject' ? { text: 'S', color: '#fff', fontSize: '10px' } : undefined,
         zIndex: marker.type === 'subject' ? 100 : 10,
       })
-      instance.addListener('click', () => onMarkerClick(marker))
-      // Hover opens the comp card — same handler, same dialog.
-      if (marker.type !== 'subject') instance.addListener('mouseover', () => onMarkerClick(marker))
-      return instance
+      instance.addListener('click', (event: google.maps.MapMouseEvent) => {
+        openedAt.current = at(event)
+        onMarkerClick(marker)
+      })
+      // Hover opens the comp card · same handler, same dialog.
+      if (marker.type !== 'subject') {
+        instance.addListener('mouseover', (event: google.maps.MapMouseEvent) => {
+          if (openedAt.current) return
+          openedAt.current = at(event)
+          onMarkerClick(marker)
+        })
+      }
+      return { marker, instance }
     })
-    return () => instances.forEach(marker => { google.maps.event.clearInstanceListeners(marker); marker.setMap(null) })
-  }, [map, markers, activeMarkerKey, onMarkerClick])
+    return () => {
+      container.removeEventListener('mousemove', track, true)
+      instances.current.forEach(({ instance }) => { google.maps.event.clearInstanceListeners(instance); instance.setMap(null) })
+      instances.current = []
+    }
+  }, [map, markers, onMarkerClick])
+
+  // Highlight (card hover, selection) only restyles the existing markers.
+  useEffect(() => {
+    instances.current.forEach(({ marker, instance }, index) => instance.setIcon(markerIcon(marker, markerKey(marker) === activeMarkerKey, index)))
+  }, [activeMarkerKey, markers, map])
   return null
 }
 

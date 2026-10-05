@@ -9,8 +9,8 @@ interface MapOverlayProps {
 
 const LEGEND_ITEMS = [
   { color: '#3b82f6', label: 'Subject' },
-  { color: '#10b981', label: 'Included' },
-  { color: '#6b7280', label: 'Excluded' },
+  { color: '#404040', label: 'Included' },
+  { color: '#a3a3a3', label: 'Excluded' },
 ]
 
 export function MapLegend() {

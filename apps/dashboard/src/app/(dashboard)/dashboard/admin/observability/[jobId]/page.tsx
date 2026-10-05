@@ -41,7 +41,7 @@ export default function ObservabilityRunPage() {
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 space-y-5 max-w-5xl mx-auto">
-      <Link href="/dashboard/admin/observability" className="inline-flex items-center gap-1.5 text-xs text-foreground-tertiary hover:text-foreground">
+      <Link href="/dashboard/admin/observability" className="inline-flex items-center gap-1.5 text-xs text-foreground-tertiary hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10">
         <ArrowLeft className="w-3.5 h-3.5" /> Observability
       </Link>
 

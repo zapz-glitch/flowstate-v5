@@ -302,7 +302,7 @@ export default function AnalyticsPage() {
                     'px-2.5 py-1 rounded text-[11px] font-medium transition-colors',
                     win === w.key
                       ? 'bg-primary/15 text-primary'
-                      : 'text-foreground-tertiary hover:text-foreground-secondary hover:bg-secondary/60',
+                      : 'text-foreground-tertiary hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 ',
                   )}
                 >
                   {w.label}
@@ -327,7 +327,7 @@ export default function AnalyticsPage() {
                   onClick={() => select(t)}
                   className={cn(
                     'border border-border/60 bg-background shadow-sm px-3 py-2.5 text-left transition-colors corner-accents',
-                    active ? 'border-primary/60 bg-primary/5' : 'hover:border-border hover:bg-secondary/40',
+                    active ? 'border-primary/60 bg-primary/5' : 'hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 ',
                   )}
                 >
                   <div className="text-[9px] uppercase tracking-wider text-foreground-tertiary">{t.label}</div>
