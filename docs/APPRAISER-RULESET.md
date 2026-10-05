@@ -82,6 +82,7 @@ should withhold or weaken the result rather than invent support.
 ## Open decisions / not yet built
 
 - Broader bulk-sale variants and same-day different-price package patterns.
-- Independent rule auditor. Replay proves determinism; it does not prove
-  every configured rule was followed.
+- Deeper auditor coverage. The independent record auditor checks stale,
+  noisy, divergent, distressed, grade, hash, and runtime evidence; it does
+  not yet prove every configurable rule was followed.
 - Complete browser/server parity check after the dashboard edits settle.

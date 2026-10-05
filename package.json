@@ -22,7 +22,8 @@
     "replay:all": "tsx scripts/replay.mts --all",
     "replay:strict": "tsx scripts/replay.mts --all --strict --report replay-report.json",
     "replay:snapshots": "tsx scripts/replay.mts fixtures/snapshots/*.json --strict --report replay-report.json",
-    "dev:check": "node scripts/dev-check.mjs"
+    "dev:check": "node scripts/dev-check.mjs",
+    "audit:snapshots": "tsx scripts/audit-run-records.mts fixtures/snapshots/*.json --strict"
   },
   "devDependencies": {
     "eslint": "10.10.0",

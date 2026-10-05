@@ -143,5 +143,6 @@ archive fields are checked separately.
 
 - Broader bulk-sale detection beyond same-day same-price package deeds.
 - More frozen fixtures for rural, withheld, distressed, and failure paths.
-- Independent rule auditor.
+- Independent auditor exists for the record/evidence contract; deeper
+  policy coverage remains open.
 - Browser/server parity after Claude's UI work finishes.

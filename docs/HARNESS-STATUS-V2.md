@@ -24,7 +24,7 @@ commits.
 | Facts | Every run can write a canonical `run_records` payload with request, subject, comps, effective settings, Set-B attempts, result, hashes, and timestamps. |
 | Harness | Set-B receives the frozen comps and options from each recorded attempt. |
 | Trace | `bMechanics.flags` are paired with stable `checks[].ruleId` values in `services/analysis/rule-registry.ts`. |
-| Compliance | `scripts/replay.mts` reads `run_records` first, verifies payload hashes, replays the last frozen attempt, compares ARV/source/anchor/drivers/confidence/flags/check IDs/result grade/process grade/buy price/rehab/ROI/recommendation, and supports `--strict`, `--report`, and `--snapshot-out`. |
+| Compliance | `scripts/replay.mts` reads `run_records` first, verifies payload hashes, replays the last frozen attempt, compares ARV/source/anchor/drivers/confidence/flags/check IDs/result grade/process grade/buy price/rehab/ROI/recommendation, and supports `--strict`, `--report`, and `--snapshot-out`. `scripts/audit-run-records.mts` independently audits saved records for stale/noisy/divergent drivers, grade mismatch, missing evidence, and hash failures. |
 | Result | `result-grade.ts` separates verified/weak/floor/withheld from clean/retried/unverified. Floor sources are checked before withheld, and `verified` requires at least three drivers with usable verification evidence. |
 | Feedback | Reports can record append-only actual-sale outcomes in `report_outcomes`, linked to the report and latest/specific run record, without changing the issued ARV. |
 | Change control | `fixtures/snapshots/bagpipe-2026-10-05.run-record.json` is a frozen replay fixture. `npm run replay:snapshots` runs strict replay. The candidate workflow runs it. Result-cache keys include `HARNESS_VERSION`. |
@@ -44,7 +44,8 @@ commits.
   - `apps/api/tests/comparable-retrieval.test.ts`
   - `apps/api/tests/rural-pocket.test.ts`
 - `npx tsc --noEmit -p apps/api/tsconfig.json`
-- `npm run replay:snapshots` — frozen Bagpipe run record passes strict replay.
+- `npm run replay:snapshots` — six frozen run records pass strict replay.
+- `npm run audit:snapshots` — six frozen run records pass the independent record audit.
 - Local D1:
   - `run_records` exists and stores separate rerun records.
   - `report_outcomes` exists and returned a Bagpipe outcome linked to a run record.
@@ -89,8 +90,8 @@ commits.
   structured condition and confidence before legacy `tier:*` text.
 - After Claude's UI pass, verify server → dashboard → selection change →
   save → reload parity in a browser.
-- Build the deferred independent rule auditor. Replay proves the result
-  changed or did not; it does not prove every configured rule was followed.
+- Extend the independent auditor. It now checks the evidence contract and
+  record integrity; deeper policy checks still remain.
 - Add representative live fixtures: rural/large-lot, dense subdivision,
   older/historic, and failure paths. Synthetic fixtures already cover
   verified, floor, package-deed, distressed-only, and withheld outcomes.
@@ -102,4 +103,5 @@ commits.
 strict replay contract. Five smaller synthetic fixtures cover verified,
 floor, package-deed, distressed-only, and withheld outcomes. Strict replay
 currently passes 6/6. These prove deterministic replay and hash integrity;
-they do not prove appraisal accuracy against actual sales.
+they do not prove appraisal accuracy against actual sales. `npm run
+audit:snapshots` audits the same six records without re-running Set-B.
