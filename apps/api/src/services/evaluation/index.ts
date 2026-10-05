@@ -68,7 +68,7 @@ function formatUsd(amount: number): string {
  *  Serialized onto `comps.items[].curbAppeal` when it lands in time; the
  *  onCurbAppeal callback carries it for late persistence writebacks. */
 export type CompCurbAppealMap = Record<string, {
-  condition: 'renovated' | 'dated' | 'distressed' | 'unknown'
+  condition: 'renovated' | 'maintained' | 'dated' | 'distressed' | 'unknown'
   source: 'vision'
   confidence: number | null
   summary: string | null
@@ -1022,7 +1022,9 @@ export async function performAnalysis(
             ? 'distressed' as const
             : c.renovated || c.conditionLabel === 'Renovated' || c.conditionLabel === 'Updated'
               ? 'renovated' as const
-              : 'dated' as const
+              : c.conditionLabel === 'Maintained'
+                ? 'maintained' as const
+                : 'dated' as const
         // Owner rule: investor-marketed listings are median/lower-tier sales —
         // the curb-appeal stamp can never claim 'renovated' for ARV candidacy
         // on an investor-tier comp no matter how updated it looks.

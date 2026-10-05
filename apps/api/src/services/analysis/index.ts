@@ -459,7 +459,7 @@ export interface ResponseContext {
   }
   /** Curb-appeal condition check on the subject's listing photos */
   subjectCurbAppeal?: {
-    condition: 'renovated' | 'dated' | 'distressed' | 'unknown'
+    condition: 'renovated' | 'maintained' | 'dated' | 'distressed' | 'unknown'
     source: 'vision' | 'price'
     confidence: number | null
     summary: string | null
@@ -473,7 +473,7 @@ export interface ResponseContext {
   subjectListingDetails?: import('../redfin-details').RedfinPropertyDetails | null
   /** Visual ARV-candidacy check per ARV-selected comp (by comp ID) */
   compCurbAppeal?: Record<string, {
-    condition: 'renovated' | 'dated' | 'distressed' | 'unknown'
+    condition: 'renovated' | 'maintained' | 'dated' | 'distressed' | 'unknown'
     source: 'vision' | 'price'
     confidence: number | null
     summary: string | null
@@ -603,7 +603,7 @@ export interface AnalysisResponse {
     conditionSummary: string | null
     /** Curb-appeal condition label (renovated/dated/distressed/unknown) */
     curbAppeal: {
-      condition: 'renovated' | 'dated' | 'distressed' | 'unknown'
+      condition: 'renovated' | 'maintained' | 'dated' | 'distressed' | 'unknown'
       source: 'vision' | 'price'
       confidence: number | null
       summary: string | null
@@ -861,7 +861,7 @@ export interface AnalysisResponse {
       roofCover: string | null
       /** Visual ARV-candidacy check (photos) for ARV-selected comps */
       curbAppeal?: {
-        condition: 'renovated' | 'dated' | 'distressed' | 'unknown'
+        condition: 'renovated' | 'maintained' | 'dated' | 'distressed' | 'unknown'
         /** vision = verified from photos; price = inferred from top-of-market sale */
         source: 'vision' | 'price'
         confidence: number | null

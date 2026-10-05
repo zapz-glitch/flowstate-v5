@@ -175,6 +175,9 @@ export function bConditionClass(c: BComp): 'renovated' | 'maintained' | 'dated' 
   if (conf >= B_COND_MIN_CONF && cond) {
     if (['renovated', 'updated', 'turnkey', 'move-in ready'].includes(cond)) return 'renovated'
     if (['as_is', 'as-is', 'distressed', 'needs_work', 'teardown'].includes(cond)) return 'distressed'
+    // Owner curve: maintained is the middle band; dated tops the
+    // dated/distressed bottom band.
+    if (['maintained', 'median'].includes(cond)) return 'maintained'
     if (['dated', 'original', 'needs_updates'].includes(cond)) return 'dated'
     return 'maintained'
   }
