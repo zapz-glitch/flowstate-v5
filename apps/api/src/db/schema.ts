@@ -845,3 +845,38 @@ export const activityEvents = sqliteTable(
     index('idx_activity_events_lead_id').on(table.leadId),
   ]
 )
+
+// ==========================================
+// Run Telemetry — appraisal decision audit trail
+// ==========================================
+
+export const runTelemetry = sqliteTable(
+  'run_telemetry',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    jobId: text('job_id'),
+    userId: text('user_id'),
+    address: text('address'),
+    arv: integer('arv'),
+    arvSource: text('arv_source'),
+    confidence: text('confidence'),
+    bracket: text('bracket'),
+    anchorAddress: text('anchor_address'),
+    poolSize: integer('pool_size'),
+    enabledCount: integer('enabled_count'),
+    driverCount: integer('driver_count'),
+    /** Full structured decision trail — [{compAddress, stage, rule, verdict, value, note}] */
+    decisionsJson: text('decisions_json'),
+    /** Band medians + members, when the run banded the pocket */
+    bandsJson: text('bands_json'),
+    /** Named rules that fired this run — queryable bitmap-ish list */
+    rulesFiredJson: text('rules_fired_json'),
+    durationMs: integer('duration_ms'),
+    createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
+  },
+  (table) => [
+    index('idx_run_telemetry_addr').on(table.address),
+    index('idx_run_telemetry_created').on(table.createdAt),
+    index('idx_run_telemetry_job').on(table.jobId),
+  ]
+)

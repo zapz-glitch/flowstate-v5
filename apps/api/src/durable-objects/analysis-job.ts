@@ -39,7 +39,7 @@ import { resolveParcelApn } from '../services/geo/parcel-gis'
 import { resolveZoning } from '../services/geo/zoning'
 import { drizzle } from 'drizzle-orm/d1'
 import { and, eq } from 'drizzle-orm'
-import { upsertPropertyReport, bMetricsFromValuation } from '../services/report-upsert'
+import { upsertPropertyReport, bMetricsFromValuation, recordRunTelemetry } from '../services/report-upsert'
 import { notifyEvalComplete } from '../routes/offers'
 import { analysisRuns, savedReports } from '../db/schema'
 import {
@@ -1125,6 +1125,15 @@ export class AnalysisJobDO {
         propertyZip: property.zipCode || '',
         propertyClip: property.id || null,
       }, reportData)
+
+      await recordRunTelemetry(db, {
+        jobId: config.jobId,
+        userId: config.userId,
+        address: (subj.address as string) || '',
+        valuation: val,
+        comps: analysisResult.comps as { items?: unknown[] } | null,
+        durationMs: Date.now() - evalStart,
+      }).catch((e) => console.log('[telemetry] run_telemetry insert failed:', e))
 
       if (config.evalResultCacheKey) {
         await this.env.API_CACHE.put(config.evalResultCacheKey, config.jobId, {

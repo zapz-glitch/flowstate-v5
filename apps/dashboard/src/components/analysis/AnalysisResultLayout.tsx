@@ -5,6 +5,7 @@ import { Loader2 } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useEvaluation } from '@/hooks/use-evaluation'
 import { ComparablesSection } from './ComparablesSection'
+import { DecisionTrail } from './DecisionTrail'
 import { DealSummaryHero } from './DealSummaryHero'
 import { SubjectGridCard } from './SubjectGridCard'
 import { InvestorAnalysisSummary } from './InvestorAnalysisSummary'
@@ -187,7 +188,14 @@ export function AnalysisResultLayout({
           feedbackContext={feedbackContext}
           onFeedbackSubmitted={onFeedbackSubmitted}
         />
-      ) : subject && isStreaming ? (
+      ) : null}
+
+      {/* Appraisal decision trail — per-comp rule audit */}
+      {valuation?.bMechanics?.decisions?.length ? (
+        <DecisionTrail decisions={valuation.bMechanics.decisions} />
+      ) : null}
+
+      {subject && isStreaming ? (
         /* Comps loading skeleton — only while streaming */
         <div className="space-y-3">
           <div className="flex items-center gap-2">

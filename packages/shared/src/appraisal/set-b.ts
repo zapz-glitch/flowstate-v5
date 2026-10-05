@@ -117,9 +117,19 @@ export interface BContribution {
   boundOnly?: boolean
 }
 
+export interface BDecision {
+  compAddress?: string | null
+  stage: string
+  rule: string
+  verdict: string
+  value?: number | string | null
+  note?: string
+}
+
 export interface BResult {
   arv: number | null
   flags: string[]
+  decisions?: BDecision[]
   drivers: BContribution[]
   contribs: BContribution[]
   bracket: 'ok' | 'all-smaller' | 'all-bigger'
@@ -212,6 +222,9 @@ export function evaluateB(
 ): BResult {
   const subSqft = subject.squareFeet
   const flags: string[] = []
+  const decisions: BDecision[] = []
+  const dec = (d: BDecision) => { decisions.push(d) }
+  const fin = (r: BResult): BResult => ({ ...r, decisions })
   const empty = (source: string): BResult => ({
     arv: null, flags, drivers: [], contribs: [], bracket: 'ok', conf: 'none', source,
   })
@@ -320,6 +333,8 @@ export function evaluateB(
       else if (ageMo > 6) factor = 0.9
       c.adjustedPrice = Math.round(c.salePrice! * factor)
       flags.push(`${c.address}: rescued — ${(c.disableReasons ?? []).join('; ').slice(0, 60)}; time-adj ${factor >= 1 ? '+' : '−'}${Math.abs((1 - factor) * 100).toFixed(0)}%`)
+      dec({ compAddress: c.address, stage: 'rescue', rule: 'T1b soft-kill', verdict: 'rescued',
+        value: Math.round((factor - 1) * 1000) / 10, note: `time-adj ${(factor * 100 - 100).toFixed(0)}%` })
     }
     if (rescued.length) pool = [...pool, ...rescued]
   }
@@ -400,6 +415,8 @@ export function evaluateB(
           dst.push(x)
           dst.sort((a, b) => a.ppsf - b.ppsf)
           flags.push(`${x.c.address}: evicted — $${x.ppsf.toFixed(0)}/sf vs band median $${bMed.toFixed(0)}/sf (>10%)`)
+          dec({ compAddress: x.c.address, stage: 'band', rule: 'tight-band', verdict: 'evicted',
+            value: x.ppsf, note: `vs band median $${bMed.toFixed(0)}/sf` })
         }
       }
       // band member's implied subject price is its sale plus the size
@@ -451,19 +468,21 @@ export function evaluateB(
         ? bMedian(maintained.map((x) => implied(x))) : null
       if (renovated.length > 0 && maintainedMed != null && arv < maintainedMed) {
         flags.push(`ARV ${usd(arv)} below maintained band — floored at maintained median ${usd(maintainedMed)}`)
+        dec({ stage: 'answer', rule: 'maintained-floor', verdict: 'floored', value: maintainedMed,
+          note: `from ${usd(arv)}` })
         arv = maintainedMed
       }
       flags.push(
         `T2 pocket-tiers [${label}] — ${clean.length} cleaned sale(s)` +
         (dropped ? ` (${dropped} outlier/bounded-low dropped)` : '') + bandNote)
-      return {
+      return fin({
         arv: Math.round(arv), contribs: [], bracket: 'ok', conf: 'low',
         source: `T2 pocket-tiers [${label}]`,
         drivers: carriers.map((x) => ({
           comp: x.c, contrib: Math.round(implied(x)), weight: 0, tier: 'arv' as const,
         })),
         flags,
-      }
+      })
     }
   }
 
@@ -471,15 +490,15 @@ export function evaluateB(
   if (!pool.length) {
     const avm = bSubjectAvm(subject)
     if (avm) {
-      return { arv: Math.round(avm), contribs: [], drivers: [], bracket: 'ok', conf: 'low',
-        source: 'T3 AVM floor', flags: ['T3 as-is AVM floor — ARV ≥ AVM, uplift unverified'] }
+      return fin({ arv: Math.round(avm), contribs: [], drivers: [], bracket: 'ok', conf: 'low',
+        source: 'T3 AVM floor', flags: ['T3 as-is AVM floor — ARV ≥ AVM, uplift unverified'] })
     }
     const assessed = subject.assessedValue ?? subject.taxAssessment ?? null
     if (assessed) {
-      return { arv: Math.round(assessed), contribs: [], drivers: [], bracket: 'ok', conf: 'none',
-        source: 'T4 assessed', flags: ['T4 assessed fallback — county estimate'] }
+      return fin({ arv: Math.round(assessed), contribs: [], drivers: [], bracket: 'ok', conf: 'none',
+        source: 'T4 assessed', flags: ['T4 assessed fallback — county estimate'] })
     }
-    return { ...empty('T5 report-only'), flags: ['T5 report-only — no comp evidence, no anchor'] }
+    return fin({ ...empty('T5 report-only'), flags: ['T5 report-only — no comp evidence, no anchor'] })
   }
 
   // ── Marginal sqft rate — appraiser ladder ───────────────────────────────
@@ -542,6 +561,8 @@ export function evaluateB(
     )
     const boundOnly = adjPct > B_ADJ_CAP_PCT
     if (boundOnly) flags.push(`${c.address}: needs ±${(adjPct * 100).toFixed(0)}% adjustment — bound, not a driver`)
+    if (boundOnly) dec({ compAddress: c.address, stage: 'contrib', rule: 'urar-cap-25', verdict: 'bound',
+      value: Math.round(adjPct * 1000) / 10, note: 'total adjustment >25%' })
     const weight = (1 / (1 + adjPct)) * (boundOnly ? 0.5 : 1)
     contribs.push({ comp: c, contrib, weight, tier: bTierOf(c), boundOnly })
   }
@@ -550,6 +571,8 @@ export function evaluateB(
   const unfit = contribs.filter((x) => bIsUnfit(x.comp))
   for (const x of unfit) {
     flags.push(`${x.comp.address}: verification — ${(x.comp.evidenceVerification?.flags ?? []).join('; ').slice(0, 90)}`)
+    dec({ compAddress: x.comp.address, stage: 'pool', rule: 'verification', verdict: 'dropped',
+      note: (x.comp.evidenceVerification?.flags ?? []).join('; ').slice(0, 90) })
   }
   const verifiedPool = contribs.filter((x) => !unfit.includes(x))
 
@@ -581,8 +604,10 @@ export function evaluateB(
     drivers = preferred
   } else if (medianComps.length) {
     drivers = medianComps
-    for (const x of medianComps)
+    for (const x of medianComps) {
       flags.push(`${x.comp.address}: median-tier driver — no high-similarity renovated evidence`)
+      dec({ compAddress: x.comp.address, stage: 'class', rule: 'tier-discipline', verdict: 'median-driver' })
+    }
   } else {
     const weak = driverPool.filter((x) => x.tier === 'arv' && bCondTier(x.comp) !== 'median')
     if (weak.length) {
@@ -604,12 +629,12 @@ export function evaluateB(
           const gatedMedian = medianComps.filter((x) => similarity(x) >= 0.6 * topSim)
           const medianCeiling = Math.max(...gatedMedian.map((x) => x.contrib))
           flags.push(`median-tier evidence only — ARV at median ceiling ${usd(medianCeiling)}`)
-          return { arv: Math.round(medianCeiling), flags, contribs, drivers: medianComps,
-            bracket: 'ok', conf: 'low', source: 'median ceiling', landRateSource: landSource, sqftRateSource }
+          return fin({ arv: Math.round(medianCeiling), flags, contribs, drivers: medianComps,
+            bracket: 'ok', conf: 'low', source: 'median ceiling', landRateSource: landSource, sqftRateSource })
         }
         flags.push('no retail-priced evidence — ARV withheld (as-is sales are floor evidence only)')
-        return { arv: null, flags, contribs, drivers: [], bracket: 'ok', conf: 'none', source,
-          landRateSource: landSource, sqftRateSource }
+        return fin({ arv: null, flags, contribs, drivers: [], bracket: 'ok', conf: 'none', source,
+          landRateSource: landSource, sqftRateSource })
       }
       drivers = retail
       flags.push(`no ARV-tier labels — ARV driven on ${drivers.length} retail-marked comp(s); ${contribs.length - retail.length} as-is-priced sale(s) excluded from ARV`)
@@ -645,8 +670,11 @@ export function evaluateB(
   const geoKept = tightestGeo(drivers)
   const geoTierName = GEO_LABEL[Math.min(...drivers.map((x) => geoTier(x.comp))) as 0 | 1 | 2]
   if (geoKept.length !== drivers.length) {
-    for (const x of drivers.filter((x) => !geoKept.includes(x)))
+    for (const x of drivers.filter((x) => !geoKept.includes(x))) {
       flags.push(`${x.comp.address}: dropped from drivers — outside the ${geoTierName} scope`)
+      dec({ compAddress: x.comp.address, stage: 'geo', rule: 'geo-tier', verdict: 'dropped',
+        note: `outside ${geoTierName}` })
+    }
     drivers = geoKept
   }
 
@@ -654,15 +682,18 @@ export function evaluateB(
   const ranked = drivers.slice().sort((a, b) =>
     similarity(b) - similarity(a) || b.weight - a.weight)
   let anchor = ranked[0] ?? null
-  if (!anchor) return { arv: null, flags, contribs, drivers: [], bracket: 'ok', conf: 'none', source,
-    landRateSource: landSource, sqftRateSource }
+  if (!anchor) return fin({ arv: null, flags, contribs, drivers: [], bracket: 'ok', conf: 'none', source,
+    landRateSource: landSource, sqftRateSource })
   let anchorScore = similarity(anchor)
 
   // Similarity gate — drop drivers below 60% of the anchor's score
   if (drivers.length > 1) {
     const gated = drivers.filter((x) => similarity(x) >= B_SIM_GATE * anchorScore)
-    for (const x of drivers.filter((x) => !gated.includes(x)))
+    for (const x of drivers.filter((x) => !gated.includes(x))) {
       flags.push(`${x.comp.address}: dropped from drivers — similarity ${similarity(x).toFixed(1)} below gate (${(B_SIM_GATE * anchorScore).toFixed(1)})`)
+      dec({ compAddress: x.comp.address, stage: 'gate', rule: 'similarity-60', verdict: 'dropped',
+        value: Number(similarity(x).toFixed(2)) })
+    }
     if (gated.length) drivers = gated
   }
 
@@ -679,12 +710,14 @@ export function evaluateB(
     const band = bandMembers.length ? bMedian(bandMembers.map((x) => x.contrib)) : null
     if (band == null || anchor.contrib <= 1.30 * band) break
     flags.push(`${anchor.comp.address}: contribution ${usd(anchor.contrib)} is +${Math.round((anchor.contrib / band - 1) * 100)}% above the renovated band ${usd(band)} (${bandMembers.length} members) — suspected outlier, set aside`)
+    dec({ compAddress: anchor.comp.address, stage: 'microscope', rule: 'band-deviation-30', verdict: 'set-aside',
+      value: anchor.contrib, note: `+${Math.round((anchor.contrib / band - 1) * 100)}% above ${usd(band)} band` })
     drivers = drivers.filter((x) => x !== anchor)
     const next = ranked.find((x) => drivers.includes(x))
     if (!next) {
       flags.push(`no driver survives — ARV set at the band median ${usd(band)}`)
-      return { arv: Math.round(band), flags, contribs, drivers: [], bracket: 'ok', conf: 'low',
-        source: `${source} — band median`, landRateSource: landSource, sqftRateSource }
+      return fin({ arv: Math.round(band), flags, contribs, drivers: [], bracket: 'ok', conf: 'low',
+        source: `${source} — band median`, landRateSource: landSource, sqftRateSource })
     }
     anchor = next
   }
@@ -693,6 +726,8 @@ export function evaluateB(
   anchorScore = similarity(anchor)
   const support = ranked.filter((x) => drivers.includes(x) && x !== anchor)
   flags.push(`anchored to ${anchor.comp.address} (similarity ${anchorScore.toFixed(1)})`)
+  dec({ compAddress: anchor.comp.address, stage: 'answer', rule: 'anchor', verdict: 'anchored',
+    value: anchor.contrib, note: `similarity ${anchorScore.toFixed(1)}` })
   if (support.length) {
     const lo = Math.min(...support.map((x) => x.contrib))
     const hi = Math.max(...support.map((x) => x.contrib))
@@ -713,6 +748,10 @@ export function evaluateB(
       if (healedAnchor !== anchor) {
         flags.push(`self-heal: anchor ${(anchor.comp.address ?? '').slice(0, 30)} was the evidence floor ` +
           `(${usd(anchor.contrib)} vs driver median ${usd(driverMedian)}) — re-anchored to ${(healedAnchor.comp.address ?? '').slice(0, 30)}`)
+        dec({ compAddress: anchor.comp.address, stage: 'answer', rule: 'self-heal', verdict: 'demoted',
+          value: anchor.contrib, note: `evidence floor vs ${usd(driverMedian)} median` })
+        dec({ compAddress: healedAnchor.comp.address, stage: 'answer', rule: 'self-heal', verdict: 'anchored',
+          value: healedAnchor.contrib })
         anchor = healedAnchor
         arv = anchor.contrib
         healed = true
@@ -745,6 +784,7 @@ export function evaluateB(
   const cappedOutlier = arv > ceiling && supporters < B_OUTLIER_SUPPORT
   if (cappedOutlier) {
     flags.push(`ARV ${usd(arv)} exceeds size-adjusted ceiling ${usd(ceiling)} with ${supporters} supporter(s) — capped`)
+    dec({ stage: 'answer', rule: 'outlier-ceiling', verdict: 'capped', value: ceiling, note: `from ${usd(arv)}` })
     arv = ceiling
   }
 
@@ -754,6 +794,7 @@ export function evaluateB(
   const maintainedVals = medianComps.map((x) => x.contrib)
   if (maintainedVals.length >= 2 && arv != null && arv < bMedian(maintainedVals)!) {
     flags.push(`ARV ${usd(arv)} below maintained band — floored at maintained median ${usd(bMedian(maintainedVals)!)}`)
+    dec({ stage: 'answer', rule: 'maintained-floor', verdict: 'floored', value: bMedian(maintainedVals)!, note: `from ${usd(arv)}` })
     arv = bMedian(maintainedVals)!
   }
 
@@ -769,9 +810,9 @@ export function evaluateB(
     : drivers.length >= 3 && !flags.length ? 'high'
     : drivers.length >= 3 ? 'medium' : 'low'
 
-  return {
+  return fin({
     arv: Math.round(arv), flags, drivers, contribs, bracket, conf, source,
     landRateSource: landSource, sqftRateSource,
     anchorAddress: anchor.comp.address ?? null, ceiling, conditionAdj, healed,
-  }
+  })
 }

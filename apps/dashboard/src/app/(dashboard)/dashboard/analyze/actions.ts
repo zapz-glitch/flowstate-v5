@@ -371,6 +371,7 @@ export interface ValuationData {
     sqftRateSource: string | null
     healed: boolean
     drivers: { address: string | null; contribution: number; tier: string; conditionTier: string }[]
+    decisions?: { compAddress?: string | null; stage: string; rule: string; verdict: string; value?: number | string | null; note?: string }[]
   } | null
   buyPrice?: number
   buyPricePercent?: number
@@ -621,6 +622,7 @@ export interface ValuationData {
     sqftRateSource: string | null
     healed: boolean
     drivers: { address: string | null; contribution: number; tier: string; conditionTier: string }[]
+    decisions?: { compAddress?: string | null; stage: string; rule: string; verdict: string; value?: number | string | null; note?: string }[]
   } | null
   buyPrice?: number
   buyPricePercent?: number

@@ -729,6 +729,8 @@ export interface AnalysisResponse {
       /** Verify-and-retry trail — widen/deepen attempts + verdicts */
       attemptTrail: string[]
       drivers: { address: string | null; contribution: number; tier: string; conditionTier: string }[]
+      /** Per-stage decision trail — {compAddress, stage, rule, verdict, value, note} */
+      decisions: { compAddress?: string | null; stage: string; rule: string; verdict: string; value?: number | string | null; note?: string }[]
     } | null
     buyPrice: number
     buyPricePercent: number
@@ -1602,6 +1604,7 @@ export function buildAnalysisResponse(
           tier: d.tier,
           conditionTier: bCondTier(d.comp),
         })),
+        decisions: bResult.decisions ?? [],
       },
     } : null,
     // ═══ COMPARABLE SALES (All comps with enable/disable status) ═══════════════
