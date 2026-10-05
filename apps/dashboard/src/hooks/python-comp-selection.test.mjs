@@ -62,7 +62,7 @@ test('Python comp changes are atomic, revisioned, locked during requests and res
   assert.equal(view.compOverride.selectedCompKeys.size, 2)
   assert.equal(view.compOverride.isManual, true)
   assert.equal(view.authoritativeData, added)
-  assert.match(h.notices.at(-1), /Operator-selected comparables.*preliminary/)
+  assert.match(h.notices.at(-1), /Operator-selected comparables.*recalculated/)
   view.handleToggleComp('a')
   assert.equal(JSON.stringify(h.requests[1].args), JSON.stringify(['job-test', ['b'], 1]))
   h.requests[1].resolve(analysis(2, ['b'], 700000))
@@ -136,7 +136,6 @@ for (const [name, response] of Object.entries({
   nullResponse: null,
   missingValuation: { ...analysis(1), valuation: undefined },
   unmarkedNull: { ...analysis(1), valuation: null },
-  insufficientWithValuation: { ...analysis(1), pythonEvaluation: { status: 'INSUFFICIENT_COMPS' } },
   insufficientWithEnabledComp: { ...analysis(1), valuation: null, pythonEvaluation: { status: 'INSUFFICIENT_COMPS' } },
   malformedComps: { ...analysis(1), comps: { items: [null] } },
   missingItems: { ...analysis(1), comps: {} },
@@ -158,3 +157,17 @@ for (const [name, response] of Object.entries({
     assert.equal(h.requests[1].args[2], 0)
   })
 }
+
+// A stale INSUFFICIENT_COMPS label beside a valid valuation is not
+// malformed — the response gate reads valuation.resultGrade, not the
+// retired pythonEvaluation.status (352e3eb).
+test('stale INSUFFICIENT_COMPS label with a valid valuation is accepted', async () => {
+  const h = harness(), original = analysis()
+  h.render(original).handleResetComps()
+  const response = { ...analysis(1, ['b'], 650000), pythonEvaluation: { status: 'INSUFFICIENT_COMPS' } }
+  h.requests[0].resolve(response)
+  await settle()
+  const view = h.render(original)
+  assert.equal(view.authoritativeData, response)
+  assert.equal(view.displayValuation, response.valuation)
+})
