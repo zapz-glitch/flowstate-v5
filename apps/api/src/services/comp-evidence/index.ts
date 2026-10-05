@@ -168,6 +168,34 @@ export async function gatherCompConditionEvidence(
     return evidence
   }
 
+  // No listing found — Google the property for photos via Firecrawl
+  // image search before the comp goes unclassified. Photos should
+  // never be missing: listing chain first, web image lookup second.
+  if (!photos && env.FIRECRAWL_API_KEY) {
+    try {
+      const res = await fetch('https://api.firecrawl.dev/v2/search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${env.FIRECRAWL_API_KEY}` },
+        body: JSON.stringify({
+          query: `${comp.address}, ${comp.city}, ${comp.state} ${comp.zipCode ?? ''} home exterior`,
+          limit: 10,
+          sources: [{ type: 'images' }],
+        }),
+        signal: AbortSignal.timeout(30000),
+      })
+      if (res.ok) {
+        const data = (await res.json()) as { data?: { images?: Array<{ imageUrl?: string }> } }
+        const urls = (data.data?.images ?? [])
+          .map((i) => i.imageUrl)
+          .filter((u): u is string => !!u && /^https?:\/\//.test(u))
+          .slice(0, MAX_IMAGES)
+        if (urls.length) {
+          photos = { propertyId: comp.propertyId, photos: urls, source: 'google-images', fetchedAt: new Date().toISOString() }
+        }
+      }
+    } catch { /* fall through to no_listing */ }
+  }
+
   if (!photos) {
     evidence.skippedReason = 'no_listing'
     return evidence
