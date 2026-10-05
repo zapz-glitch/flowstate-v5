@@ -116,6 +116,7 @@ interface RowData {
   jobId: string | null
   icon?: React.ReactNode
   oppId?: string | null
+  itemKey?: string
   needsEval?: boolean
   urgent?: boolean
   deadlineAt?: string | null
@@ -235,6 +236,7 @@ export default function GiveOfferPage() {
         ].filter(Boolean).join(' · '),
         jobId,
         oppId: item.opportunityId,
+        itemKey: item.opportunityId ?? item.leadId,
         needsEval: !jobId,
         evalElapsedMs: jobId ? undefined : Math.max(0, now - parseQueuedAt(item.queuedAt)),
         urgent: item.offer_stage === 'deadline_today',
@@ -279,14 +281,14 @@ export default function GiveOfferPage() {
     }
   }, [cat, query, queueItems, hotItems, prepDecided, marginDecided, failedDecided, decided, now])
 
-  const dismiss = async (oppId: string | null | undefined) => {
-    if (!oppId) return
+  const dismiss = async (key: string | null | undefined) => {
+    if (!key) return
     setRaw((prev) => {
-      const next = prev.filter((i) => i.opportunityId !== oppId)
+      const next = prev.filter((i) => (i.opportunityId ?? i.leadId) !== key)
       setCachedQueue(next)
       return next
     })
-    await hideQueueItem(oppId).catch(() => null)
+    await hideQueueItem(key).catch(() => null)
   }
   const evaluate = (address: string) => {
     router.push(`/dashboard/analyze?address=${encodeURIComponent(address)}`)
@@ -448,12 +450,12 @@ export default function GiveOfferPage() {
                           Evaluate
                         </button>
                       )}
-                      {row.oppId && (
+                      {row.itemKey && (
                         <button
                           type="button"
                           title="Remove from waiting queue"
                           className="p-1 rounded text-foreground-tertiary hover:text-red-400 hover:bg-red-400/10"
-                          onClick={(e) => { e.preventDefault(); e.stopPropagation(); dismiss(row.oppId) }}
+                          onClick={(e) => { e.preventDefault(); e.stopPropagation(); dismiss(row.itemKey) }}
                         >
                           <Trash2 size={12} />
                         </button>
@@ -462,7 +464,6 @@ export default function GiveOfferPage() {
                   )
                   const inner = (
                     <>
-                      {row.icon}
                       <div className="flex-1 min-w-0">
                         <div className={`text-xs truncate ${row.urgent ? 'text-red-500 font-medium' : 'text-foreground'}`}>{row.address}</div>
                         <div className={`text-[10px] ${row.urgent ? 'text-red-400' : 'text-foreground-tertiary'}`}>{row.meta}</div>
