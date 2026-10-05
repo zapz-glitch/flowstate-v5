@@ -37,6 +37,9 @@ pool:
 - `marketFit: above_pocket` — premium sale cannot drive unless renovated or
   premium condition/class evidence explains it.
 - `priceCheck: divergent` — recorded sale conflicts with the comp's own AVM.
+- A sale must clear a 15% own-AVM premium before `evidence_avm` applies.
+  When the tract has a current $/sf reference, a below-pocket sale cannot
+  become ARV support just because the subject AVM is stale/low.
 - `transactionCheck: package_deed`, `bulk_sale`, `nominal_sale`, or `extreme_outlier` —
   not independent market evidence.
 

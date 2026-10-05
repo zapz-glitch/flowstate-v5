@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { classifyCompsByEvidence } from '../src/services/evaluation/comp-classification'
+import { arvEvidence, classifyCompsByEvidence } from '../src/services/evaluation/comp-classification'
 import type { NormalizedComparable } from '../src/services/property-api/types'
 
 /**
@@ -82,6 +82,26 @@ const reads = (over: Record<string, { condition?: string; confidence?: number }>
   const pool = [renovated(200), comp('promo', 330600, 1500, { avmValue: 200000 })] // 220.4/sf > 220
   const out = classifyCompsByEvidence(pool, 200000, reads())
   assert.equal(out.get('promo')!.classification, 'transitional')
+}
+
+// 6b. A sale just over its own AVM is ordinary — the premium must clear 15%.
+{
+  const pool = [comp('near-avm', 148000, 1410, { avmValue: 147674 })]
+  const out = classifyCompsByEvidence(pool, 79490)
+  assert.equal(out.get('near-avm')!.classification, 'transitional')
+}
+
+// 6c. A bad/stale subject AVM cannot promote below-pocket sales into ARV.
+{
+  const low = [
+    comp('low-a', 100000, 1426, { avmValue: 98957 }), // $70/sf
+    comp('low-b', 97000, 1053),                       // $92/sf
+  ]
+  const out = classifyCompsByEvidence(low, 79490, undefined, 158)
+  assert.equal(arvEvidence(low[0], 79490, 158), null)
+  assert.equal(arvEvidence(low[1], 79490, 158), null)
+  assert.equal(out.get('low-a')!.classification, 'transitional')
+  assert.equal(out.get('low-b')!.classification, 'transitional')
 }
 
 // 7. Baselines hold — distressed and ordinary sales unchanged.

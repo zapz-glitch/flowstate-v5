@@ -670,8 +670,18 @@ export async function performAnalysis(
   // ARV. Flip acquisitions fold into the investor floor via summarizeGroupB.
   // Zero evidence → ARV withheld; the run degrades to report-only.
   const subjectAvm = bundle.enrichment?.avm?.value ?? bundle.property.avmValue ?? null
+  // Same-tract pool rate — the sanity check that keeps a stale subject AVM
+  // from promoting below-pocket sales into ARV support.
+  const initialTractPpsfs = appraisalResult.comparables
+    .filter((c) => c.censusTract != null && c.censusTract === bundle.property.censusTract)
+    .map((c) => c.pricePerSqft ?? (c.salePrice != null && c.squareFeet ? c.salePrice / c.squareFeet : null))
+    .filter((v): v is number => v != null && v > 0)
+    .sort((a, b) => a - b)
+  const initialPoolRefPpsf = initialTractPpsfs.length >= 3
+    ? initialTractPpsfs[Math.floor(initialTractPpsfs.length / 2)]
+    : null
   const arvComps = appraisalResult.comparables.filter(
-    (c) => c.isEnabled && arvEvidence(c, subjectAvm) != null,
+    (c) => c.isEnabled && arvEvidence(c, subjectAvm, initialPoolRefPpsf) != null,
   )
   const arvIds = new Set(arvComps.map((c) => c.id))
   appraisalResult.comparables = appraisalResult.comparables.map((comp) => ({
@@ -828,7 +838,7 @@ export async function performAnalysis(
   // ── 4. Classifications — transaction evidence, not condition guessing ────
   // flip resale → after_renovation; distressed sale → as_is; ordinary sale
   // → transitional (market tier).
-  let compClassifications = classifyCompsByEvidence(bundle.comparables, subjectAvm)
+  let compClassifications = classifyCompsByEvidence(bundle.comparables, subjectAvm, undefined, initialPoolRefPpsf)
   let classificationSummary = summarizeClassifications(
     appraisalResult.comparables,
     compClassifications,

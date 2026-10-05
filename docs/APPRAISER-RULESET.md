@@ -22,7 +22,8 @@ should withhold or weaken the result rather than invent support.
    bulk-sale, nominal-sale, or extreme-outlier cannot set ARV.
 3. **Stale means old.** A sale is stale only when it is outside the
    configured preferred `sale_age` window. Price is a separate market-fit
-   check.
+   check. A sale above a stale/low AVM is not ARV evidence unless it also
+   clears the current pocket market-fit floor and a real 15% AVM premium.
 4. **Market fit is separate from age.** A sale far below the comp's current
    pocket rate is `below_pocket`. A sale far above it is `above_pocket` unless
    renovated evidence explains the premium.

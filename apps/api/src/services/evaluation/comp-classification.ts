@@ -20,7 +20,9 @@ import type { NormalizedComparable } from '../property-api/types'
 import type { ClassificationResult } from '../classification'
 
 const ARV_PPSF_PREMIUM = 1.15
+const ARV_OWN_AVM_PREMIUM = 1.15
 const ARV_SUBJECT_AVM_PREMIUM = 1.15
+const MARKET_FIT_FLOOR = 0.85
 
 /** A band gets ±10% slack past the verified-renovated endpoints — a
  *  single-comp band is a point and needs room to corroborate. */
@@ -38,12 +40,15 @@ function compPpsf(c: { pricePerSqft?: number | null; salePrice?: number | null; 
  * ARV set (they cooperate; multiple qualifying comps average together):
  *   1. flip resale      — verified flip chain (resale leg)
  *   2. premium sale     — ≥15% over the comp's scope median $/sf
- *   3. above-own-AVM    — sale price above the comp's own AVM
+ *   3. above-own-AVM    — ≥15% above the comp's own AVM
  * Returns the evidence note, or null when no signal fires.
  */
 export function arvEvidence(
   c: NormalizedComparable,
   subjectAvm?: number | null,
+  /** Same-tract/pool median $/sf — keeps a stale subject AVM from minting
+   *  below-pocket sales into ARV support. */
+  poolRefPpsf?: number | null,
 ): { note: string; method: 'evidence_flip_chain' | 'evidence_premium' | 'evidence_avm' } | null {
   if (c.flip && c.flip.priorSalePrice > 0) {
     return {
@@ -62,15 +67,21 @@ export function arvEvidence(
       note: `Sold ${Math.round((ppsf / scopeMed) * 100 - 100)}% above scope median $/sf`,
     }
   }
-  if (c.salePrice != null && c.avmValue != null && c.salePrice > c.avmValue) {
+  // A below-pocket sale can still sit slightly above a stale AVM. Require a
+  // real 15% premium over the comp's own AVM, and never let AVM evidence
+  // rescue a sale the current pocket prices materially lower.
+  if (poolRefPpsf != null && ppsf != null && ppsf < poolRefPpsf * MARKET_FIT_FLOOR) return null
+  if (c.salePrice != null && c.avmValue != null && c.salePrice > c.avmValue * ARV_OWN_AVM_PREMIUM) {
     return {
       method: 'evidence_avm',
       note: `Sold $${Math.round((c.salePrice - c.avmValue) / 1000)}k above own AVM`,
     }
   }
   // Fallback ARV check per spec — comp sold above the SUBJECT's AVM
-  // (the subject's modeled as-is value): the premium implies renovation.
-  if (c.salePrice != null && subjectAvm != null && c.salePrice > subjectAvm * ARV_SUBJECT_AVM_PREMIUM) {
+  // (the subject's modeled as-is value), but only when the pocket rate says
+  // the sale can plausibly be ARV evidence.
+  if (c.salePrice != null && subjectAvm != null && poolRefPpsf != null &&
+      c.salePrice > subjectAvm * ARV_SUBJECT_AVM_PREMIUM) {
     return {
       method: 'evidence_avm',
       note: `Sold ${Math.round((c.salePrice / subjectAvm) * 100 - 100)}% above subject AVM`,
@@ -121,11 +132,12 @@ export function classifyCompsByEvidence(
   comparables: NormalizedComparable[],
   subjectAvm?: number | null,
   conditionReads?: ConditionReads,
+  poolRefPpsf?: number | null,
 ): Map<string, ClassificationResult> {
   const band = conditionReads ? renovatedBand(comparables, conditionReads) : null
   const classifications = new Map<string, ClassificationResult>()
   for (const comp of comparables) {
-    const ev = arvEvidence(comp, subjectAvm)
+    const ev = arvEvidence(comp, subjectAvm, poolRefPpsf)
     if (ev && ev.method === 'evidence_flip_chain') {
       classifications.set(comp.id, {
         classification: 'after_renovation',

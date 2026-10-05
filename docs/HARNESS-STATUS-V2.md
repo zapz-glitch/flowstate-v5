@@ -72,6 +72,9 @@ commits.
   process grade does not claim that storage is complete.
 - **Structured condition wins.** Confident condition reads take precedence
   over legacy `tier:*` text; low-confidence reads stay unverified.
+- **Stale/low AVM cannot mint ARV support.** Own-AVM evidence now needs a
+  15% premium, and below-pocket sales cannot qualify through the subject-AVM
+  fallback.
 - **Transaction noise is explicit.** Same-day same-price package deeds,
   same-day shared-party bulk sales, nominal sales, and extreme price outliers are stamped and cannot drive ARV.
 - **Rural wide-scope evidence must prove market fit.** Subject AVM/sqft is
