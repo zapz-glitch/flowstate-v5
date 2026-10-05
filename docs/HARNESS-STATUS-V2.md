@@ -71,9 +71,11 @@ commits.
 
 - Reconcile `APPRAISER-RULESET.md`, `APPRAISAL_HARNESS.md`, and
   `OFFICIAL-HARNESS.md` with the decisions actually implemented.
-- Add a general package-deed/bulk-sale/outlier screen.
-- Finish condition-precedence cleanup where old `tier:*` text still wins in
-  places.
+- Extend transaction-noise screening beyond the shipped same-day same-price
+  package-deed and nominal-sale checks; bulk-sale variants and broader
+  outlier policy remain open.
+- Audit any remaining condition reads outside `bCondTier`; Set-B now trusts
+  structured condition and confidence before legacy `tier:*` text.
 - Review rural wide-scope paths where missing reference data can weaken the
   evidence test.
 - Finish the approved enrichment waves: best six, then next six, stop when

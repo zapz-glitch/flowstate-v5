@@ -26,6 +26,8 @@ export interface CompEvidenceVerification {
   /** comp sale $/sf vs the CURRENT pocket median — a comp priced far below
    *  or above today's pocket is a market-fit problem, not an age problem. */
   marketFit: 'in_range' | 'below_pocket' | 'above_pocket' | 'unverified'
+  /** Transaction noise: package deed / nominal sale are not market evidence. */
+  transactionCheck: 'clean' | 'package_deed' | 'nominal_sale' | 'unverified'
   /** comp sale $/sf ÷ pocket reference $/sf — null when no reference */
   pocketRatio: number | null
   /** Human-readable flags for the audit/UI */
@@ -35,13 +37,39 @@ export interface CompEvidenceVerification {
 const compPpsf = (c: NormalizedComparable): number | null =>
   c.pricePerSqft ?? (c.salePrice != null && c.squareFeet ? c.salePrice / c.squareFeet : null)
 
+/** Same-day, same-price deeds across a pool are package evidence — the same
+ * deed may name multiple parcels, so identical price/date is objective proof
+ * that these are not independent market observations. */
+export function packageDeedIds(
+  comps: Array<Pick<NormalizedComparable, 'id' | 'saleDate' | 'salePrice'>>,
+): Set<string> {
+  const groups = new Map<string, string[]>()
+  for (const comp of comps) {
+    if (!comp.id || !comp.saleDate || comp.salePrice == null || comp.salePrice <= 0) continue
+    const key = `${comp.saleDate.slice(0, 10)}|${Math.round(comp.salePrice)}`
+    groups.set(key, [...(groups.get(key) ?? []), comp.id])
+  }
+  return new Set([...groups.values()].filter((ids) => ids.length > 1).flat())
+}
+
 export function verifyCompEvidence(
   subject: NormalizedProperty,
   comp: NormalizedComparable,
   poolRefPpsf?: number | null,
   preferredSaleAgeDays?: number | null,
+  context?: { packageDeed?: boolean },
 ): CompEvidenceVerification {
   const flags: string[] = []
+  let transactionCheck: CompEvidenceVerification['transactionCheck'] = 'clean'
+  if (comp.salePrice != null && comp.salePrice > 0 && comp.salePrice < 10_000) {
+    transactionCheck = 'nominal_sale'
+    flags.push(`Nominal sale $${comp.salePrice.toLocaleString()} — deed transfer, not market evidence`)
+  } else if (context?.packageDeed === true) {
+    transactionCheck = 'package_deed'
+    flags.push('Same-day, same-price package deed — not an independent market comp')
+  } else if (comp.salePrice == null || comp.salePrice <= 0) {
+    transactionCheck = 'unverified'
+  }
 
   // Price cross-check — comp's recorded sale vs its own AVM. A big gap means
   // the recorded transaction may be stale, partial, or wrong (the 59th Way
@@ -102,5 +130,5 @@ export function verifyCompEvidence(
     }
   }
 
-  return { priceCheck, avmRatio, staleness, saleAgeDays, preferredSaleAgeDays: preferredSaleAgeDays ?? null, marketFit, pocketRatio, flags }
+  return { priceCheck, avmRatio, staleness, saleAgeDays, preferredSaleAgeDays: preferredSaleAgeDays ?? null, marketFit, transactionCheck, pocketRatio, flags }
 }

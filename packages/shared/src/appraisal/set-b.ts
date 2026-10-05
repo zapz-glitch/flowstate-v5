@@ -92,6 +92,7 @@ export interface BComp {
     preferredSaleAgeDays?: number | null
     /** Price fit against the comp's current pocket — separate from age. */
     marketFit?: string | null
+    transactionCheck?: string | null
     priceCheck?: string | null
     flags?: string[] | null
   } | null
@@ -171,6 +172,8 @@ const bIsUnfit = (c: BComp) => {
       : evidence?.staleness === 'stale' ? 'below_pocket'
         : null)
   return staleByAge ||
+    evidence?.transactionCheck === 'package_deed' ||
+    evidence?.transactionCheck === 'nominal_sale' ||
     marketFit === 'below_pocket' ||
     (marketFit === 'above_pocket' && !bExplainsPremium(c)) ||
     evidence?.priceCheck === 'divergent'

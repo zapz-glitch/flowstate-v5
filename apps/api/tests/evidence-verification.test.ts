@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict'
-import { verifyCompEvidence } from '../src/services/appraisal/verification'
+import { packageDeedIds, verifyCompEvidence } from '../src/services/appraisal/verification'
 
 const daysAgo = (days: number) => new Date(Date.now() - days * 86400_000).toISOString().slice(0, 10)
 const subject = { address: '1 Subject St', squareFeet: 1200 } as never
-const comp = (saleDate: string | null, salePrice: number, squareFeet = 1000) => ({
+const comp = (saleDate: string | null, salePrice: number, squareFeet = 1000, id = 'c1') => ({
+  id,
   address: '2 Comp St',
   saleDate,
   salePrice,
@@ -41,4 +42,18 @@ const comp = (saleDate: string | null, salePrice: number, squareFeet = 1000) => 
   assert.equal(premium.marketFit, 'above_pocket')
 }
 
-console.log('evidence-verification: sale age and pocket price are separate checks')
+// Same-day, same-price deeds are package evidence, not independent comps.
+{
+  const day = daysAgo(20)
+  const ids = packageDeedIds([
+    comp(day, 747_000, 1000, 'a'),
+    comp(day, 747_000, 1100, 'b'),
+    comp(day, 260_000, 1000, 'c'),
+  ])
+  assert.deepEqual(ids, new Set(['a', 'b']))
+  const v = verifyCompEvidence(subject, comp(day, 747_000), 250, 180, { packageDeed: true })
+  assert.equal(v.transactionCheck, 'package_deed')
+  assert.ok(v.flags.some((f) => f.toLowerCase().includes('package deed')))
+}
+
+console.log('evidence-verification: sale age, pocket price, and transaction noise are separate checks')

@@ -33,7 +33,7 @@ const opts = { subjectCensusTract: 'T1', subjectPpsfMedians: { SD: 200 } }
   assert.equal(b.pocket, 'in')
   assert.equal(b.trust, 'verified')
   assert.deepEqual(b.widenedOn, [])
-  assert.deepEqual(b.checks, { pocket: true, size: true, fresh: true, priceFit: true, marketFit: null })
+  assert.deepEqual(b.checks, { pocket: true, size: true, fresh: true, priceFit: true, marketFit: null, transaction: null })
 }
 
 // out-of-pocket, same market → 'equal'; pricier → 'above'
@@ -71,6 +71,12 @@ const opts = { subjectCensusTract: 'T1', subjectPpsfMedians: { SD: 200 } }
   assert.equal(oldInRange.checks.fresh, false)
   assert.equal(oldInRange.checks.marketFit, true)
   assert.equal(oldInRange.trust, 'unverified')
+
+  const packageDeed = compBadges(comp({
+    evidenceVerification: { staleness: 'current', saleAgeDays: 20, marketFit: 'in_range', transactionCheck: 'package_deed', priceCheck: 'corroborated' },
+  }), opts)
+  assert.equal(packageDeed.checks.transaction, false)
+  assert.equal(packageDeed.trust, 'unverified')
 }
 
 // rescued comp names its widened filter; strict-comp stays []

@@ -65,6 +65,21 @@ const francis = comp('1854 Francis Ave NW', {
   assert.ok(!drivers.includes('9 Ruin Rd'), 'distressed cannot drive')
 }
 
+// Package deeds are noise evidence, not independent ARV drivers.
+{
+  const packaged = comp('1 Package Ct', {
+    evidenceVerification: { staleness: 'current', saleAgeDays: 10, marketFit: 'in_range', transactionCheck: 'package_deed', priceCheck: 'corroborated' },
+  })
+  const res = evaluateB(subject, [
+    packaged,
+    comp('1935 Sumter St NW', { salePrice: 400000 }),
+    comp('1981 Sumter St NW', { salePrice: 350000 }),
+    comp('1951 Sumter St NW', { salePrice: 380000 }),
+  ])
+  const drivers = (res.drivers ?? []).map((d) => d.comp.address)
+  assert.ok(!drivers.includes('1 Package Ct'), 'package deed cannot drive')
+}
+
 console.log('set-b-distressed-floor: above_pocket and distressed reads are floor evidence only')
 
 {

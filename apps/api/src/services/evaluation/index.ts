@@ -26,7 +26,7 @@ import {
   type AppraisalFilter,
   type AppraisalAdjustment,
 } from '../appraisal'
-import { verifyCompEvidence } from '../appraisal/verification'
+import { packageDeedIds, verifyCompEvidence } from '../appraisal/verification'
 import { checksForFlags, type RuleCheck } from '../analysis/rule-registry'
 import { arvEvidence, classifyCompsByEvidence } from './comp-classification'
 export { arvEvidence, classifyCompsByEvidence }
@@ -1165,17 +1165,21 @@ export async function performAnalysis(
       .filter((v): v is number => v != null && v > 0)
       .sort((a, b) => a - b)
     const poolRefPpsf = tractPpsfs.length >= 3 ? tractPpsfs[Math.floor(tractPpsfs.length / 2)] : null
-    let verified = 0, stale = 0, divergent = 0
+    const packageIds = packageDeedIds(appraisalResult.comparables)
+    let verified = 0, stale = 0, divergent = 0, noisy = 0
     for (const comp of appraisalResult.comparables) {
-      comp.evidenceVerification = verifyCompEvidence(bundle.property, comp, poolRefPpsf, preferredSaleAgeDays)
+      comp.evidenceVerification = verifyCompEvidence(bundle.property, comp, poolRefPpsf, preferredSaleAgeDays, {
+        packageDeed: packageIds.has(comp.id),
+      })
       if (comp.evidenceVerification.priceCheck === 'corroborated') verified++
       if (comp.evidenceVerification.staleness === 'stale') stale++
       if (comp.evidenceVerification.priceCheck === 'divergent') divergent++
+      if (comp.evidenceVerification.transactionCheck !== 'clean' && comp.evidenceVerification.transactionCheck !== 'unverified') noisy++
     }
     step(
       'evidence_verification',
       verified + stale + divergent > 0 ? 'completed' : 'skipped',
-      `${verified} price-corroborated · ${stale} stale-evidence · ${divergent} price-divergent`,
+      `${verified} price-corroborated · ${stale} stale-evidence · ${divergent} price-divergent · ${noisy} transaction-noise`,
     )
   }
 
@@ -1265,8 +1269,11 @@ export async function performAnalysis(
         .filter((v): v is number => v != null && v > 0)
         .sort((a, b) => a - b)
       const ref = tractPpsfs.length >= 3 ? tractPpsfs[Math.floor(tractPpsfs.length / 2)] : null
+      const packageIds = packageDeedIds(appraisalResult.comparables)
       for (const comp of appraisalResult.comparables) {
-        comp.evidenceVerification = verifyCompEvidence(bundle.property, comp, ref, preferredSaleAgeDays)
+        comp.evidenceVerification = verifyCompEvidence(bundle.property, comp, ref, preferredSaleAgeDays, {
+          packageDeed: packageIds.has(comp.id),
+        })
       }
     }
 

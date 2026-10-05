@@ -12,7 +12,7 @@
  *   pocket    — in the subject's census pocket (tract/block-group), or
  *               outside it priced equal/above/below (±15% scope $/sf)
  *   trust     — verified | partial | unverified — the run's stamps
- *   checks    — pocket · size · fresh · price-fit · market-fit
+ *   checks    — pocket · size · fresh · price-fit · market-fit · transaction
  *   widenedOn — which relaxed rules admitted the comp (empty = strict)
  */
 
@@ -30,6 +30,7 @@ export interface CompBadges {
     fresh: boolean | null
     priceFit: boolean | null
     marketFit: boolean | null
+    transaction: boolean | null
   }
   widenedOn: string[]
 }
@@ -71,6 +72,7 @@ interface BadgeComp {
     staleness?: string | null
     saleAgeDays?: number | null
     marketFit?: string | null
+    transactionCheck?: string | null
     pocketRatio?: number | null
     flags?: string[] | null
   } | null
@@ -79,6 +81,7 @@ interface BadgeComp {
 const PASS_VERDICTS = new Set(['corroborated', 'plausible', 'market', 'market_verified'])
 const FAIL_VERDICTS = new Set(['divergent', 'suspect'])
 const FAIL_MARKET_FIT = new Set(['below_pocket'])
+const FAIL_TRANSACTION = new Set(['package_deed', 'nominal_sale'])
 
 export function compBadges(
   comp: BadgeComp,
@@ -134,7 +137,8 @@ export function compBadges(
   if (ev) {
     const failedPrice = priceVerdict != null && FAIL_VERDICTS.has(priceVerdict)
     const failedMarket = FAIL_MARKET_FIT.has(marketFit ?? '') || (marketFit === 'above_pocket' && !premiumExplained)
-    if (failedPrice || failedMarket || staleByAge) trust = 'unverified'
+    const failedTransaction = FAIL_TRANSACTION.has(ev.transactionCheck ?? '')
+    if (failedPrice || failedMarket || failedTransaction || staleByAge) trust = 'unverified'
     else if (priceVerdict != null && PASS_VERDICTS.has(priceVerdict) && stale === 'current' && (marketFit == null || marketFit === 'in_range')) trust = 'verified'
     else trust = 'partial'
   }
@@ -158,6 +162,7 @@ export function compBadges(
       // fail; only a real corroborated/plausible verdict counts green.
       priceFit: priceVerdict == null ? null : PASS_VERDICTS.has(priceVerdict) ? true : FAIL_VERDICTS.has(priceVerdict) ? false : null,
       marketFit: marketFit == null ? null : marketFit === 'in_range' || (marketFit === 'above_pocket' && premiumExplained),
+      transaction: ev?.transactionCheck == null ? null : !FAIL_TRANSACTION.has(ev.transactionCheck),
     },
     widenedOn,
   }
