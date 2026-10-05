@@ -12,7 +12,7 @@ import { drizzle } from 'drizzle-orm/d1'
 import { eq } from 'drizzle-orm'
 import { majorItemSetting, majorItemCosts } from '../../db/schema'
 import type { PropertyBundle } from '../property-api'
-import type { NormalizedComparable, NormalizedProperty } from '../property-api/types'
+import type { NormalizedComparable, NormalizedPermit, NormalizedProperty } from '../property-api/types'
 import {
   createAppraisalService,
   DEFAULT_FILTERS,
@@ -26,8 +26,19 @@ import {
   type AppraisalFilter,
   type AppraisalAdjustment,
 } from '../appraisal'
-import { verifyCompEvidence } from '../appraisal/verification'
-import { evaluateB, type BComp } from '@flowstate-api/shared/appraisal'
+import { bulkSaleIds, packageDeedIds, verifyCompEvidence } from '../appraisal/verification'
+import { checksForFlags, type RuleCheck } from '../analysis/rule-registry'
+import { arvEvidence, classifyCompsByEvidence, pocketPriceGroups } from './comp-classification'
+
+/** Why a sale is switched off as transaction noise */
+const TRANSACTION_NOISE_REASON: Record<string, string> = {
+  extreme_outlier: 'Extreme price outlier — not market evidence',
+  package_deed: 'Package deed — several parcels on one same-day, same-price deed',
+  bulk_sale: 'Bulk sale — same-day sales sharing a buyer or seller',
+  nominal_sale: 'Nominal sale — not an arm\'s-length price',
+}
+export { arvEvidence, classifyCompsByEvidence, pocketPriceGroups }
+import { evaluateB, subdivisionsMatch, type BComp, type BSubject } from '@flowstate-api/shared/appraisal'
 import { createValuationService, MAJOR_ITEMS, type MajorItem } from '../valuation'
 import type { ClassificationResult } from '../classification'
 import type { RehabTable, TierRangeDefinition } from '@flowstate-api/shared/valuation'
@@ -42,6 +53,7 @@ import { createPhotoService, type PhotoBundle, type PropertyIdentifier, type Pro
 import { gatherCompConditionEvidence, type CompConditionEvidence } from '../comp-evidence'
 import { isClefAvailable } from '../clef'
 import { fetchRedfinPropertyDetails, type RedfinDetailsResult } from '../redfin-details'
+import type { PhysicalCharacteristicSourceData } from '../physical-characteristics'
 
 import { persistReportAssets } from '../report-assets'
 import { expansionRefetchRadius } from '../property-api/retrieval-policy'
@@ -125,6 +137,14 @@ export interface EvaluationParams {
    */
   enrichComparables?: (comps: NormalizedComparable[]) => Promise<NormalizedComparable[] | null>
   /**
+   * Sqft-conflict permit check — provider permits for one comp (ATTOM
+   * permits dataset). Resolves marketed-vs-tax sqft divergences: a
+   * permitted addition/basement finish validates the marketed size; no
+   * matching permit → the tax record stands. Missing = conflicts stay
+   * bound-only.
+   */
+  getCompPermits?: (compId: string) => Promise<NormalizedPermit[] | null>
+  /**
    * Subject photo bundle prefetched by the caller so the scrape overlaps the
    * comparables fetch. `undefined` = not prefetched — fetch inline.
    * `null` = prefetch ran and found nothing / provider unavailable — don't
@@ -163,113 +183,46 @@ export interface GroupBResult {
   noDataReason?: string
 }
 
+export interface EvaluationAttemptRecord {
+  name: string
+  subject: BSubject
+  comps: BComp[]
+  options: { rehabCost?: number | null }
+  result: ReturnType<typeof evaluateB>
+  checks: RuleCheck[]
+  verificationFailures: string[]
+  detail?: Record<string, unknown>
+}
+
+export interface EvaluationRunEvidence {
+  /** The provider/evidence set handed to the appraisal pipeline. */
+  compPool: NormalizedComparable[]
+  subject: NormalizedProperty
+  /** Effective appraisal grid + valuation inputs used for this run. */
+  appliedSettings: unknown
+  filters: AppraisalFilter[]
+  adjustments: AppraisalAdjustment[]
+  fallbackUsed: string | null
+  expansionApplied: string[]
+  compClassifications: Record<string, ClassificationResult>
+  compCurbAppeal: CompCurbAppealMap | null
+  bAttemptTrail: string[]
+  attempts: EvaluationAttemptRecord[]
+}
+
 export interface EvaluationResult {
   response: AnalysisResponse
   appraisalResult: AppraisalResultWithFallback
   compClassifications: Map<string, ClassificationResult>
   /** Group B as-is market intelligence (display only) */
   groupB: GroupBResult | null
+  /** Frozen inputs/outputs for every harness attempt in this run. */
+  runEvidence: EvaluationRunEvidence
 }
 
 // ─── Price Classification ────────────────────────────────────────────────────
 
 /** Sold ≥15% over the comp's own scope median $/sf → premium sale = ARV evidence */
-const ARV_PPSF_PREMIUM = 1.15
-/** Sold ≥15% over the subject's AVM → renovated-tier sale = ARV evidence */
-const ARV_SUBJECT_AVM_PREMIUM = 1.15
-
-function compPpsf(c: { pricePerSqft?: number | null; salePrice?: number | null; squareFeet?: number | null }): number | null {
-  return c.pricePerSqft ?? (c.salePrice != null && c.squareFeet ? c.salePrice / c.squareFeet : null)
-}
-
-/**
- * ARV evidence — three peer signals, any one qualifies the comp for the
- * ARV set (they cooperate; multiple qualifying comps average together):
- *   1. flip resale      — verified flip chain (resale leg)
- *   2. premium sale     — ≥15% over the comp's scope median $/sf
- *   3. above-own-AVM    — sale price above the comp's own AVM
- * Returns the evidence note, or null when no signal fires.
- */
-export function arvEvidence(
-  c: NormalizedComparable,
-  subjectAvm?: number | null,
-): { note: string; method: 'evidence_flip_chain' | 'evidence_premium' | 'evidence_avm' } | null {
-  if (c.flip && c.flip.priorSalePrice > 0) {
-    return {
-      method: 'evidence_flip_chain',
-      note: `Verified flip — bought $${c.flip.priorSalePrice.toLocaleString()} ${c.flip.daysHeld}d prior, resold +${c.flip.gainPct}%`,
-    }
-  }
-  // Distressed transactions are investor/as-is evidence — never ARV,
-  // even when the price reads premium.
-  if (c.distressedSale === true || c.transaction?.isForeclosure === true) return null
-  const ppsf = compPpsf(c)
-  const scopeMed = c.ppsfMedians?.SD ?? c.ppsfMedians?.N4 ?? c.ppsfMedians?.N3
-  if (ppsf != null && scopeMed != null && scopeMed > 0 && ppsf >= scopeMed * ARV_PPSF_PREMIUM) {
-    return {
-      method: 'evidence_premium',
-      note: `Sold ${Math.round((ppsf / scopeMed) * 100 - 100)}% above scope median $/sf`,
-    }
-  }
-  if (c.salePrice != null && c.avmValue != null && c.salePrice > c.avmValue) {
-    return {
-      method: 'evidence_avm',
-      note: `Sold $${Math.round((c.salePrice - c.avmValue) / 1000)}k above own AVM`,
-    }
-  }
-  // Fallback ARV check per spec — comp sold above the SUBJECT's AVM
-  // (the subject's modeled as-is value): the premium implies renovation.
-  if (c.salePrice != null && subjectAvm != null && c.salePrice > subjectAvm * ARV_SUBJECT_AVM_PREMIUM) {
-    return {
-      method: 'evidence_avm',
-      note: `Sold ${Math.round((c.salePrice / subjectAvm) * 100 - 100)}% above subject AVM`,
-    }
-  }
-  return null
-}
-
-/**
- * Evidence classification — transaction evidence only:
- *   flip resale / premium / above-AVM → after_renovation (ARV evidence)
- *   distressed sale                   → as_is (investor evidence)
- *   everything else                   → transitional (market tier)
- */
-export function classifyCompsByEvidence(
-  comparables: NormalizedComparable[],
-  subjectAvm?: number | null
-): Map<string, ClassificationResult> {
-  const classifications = new Map<string, ClassificationResult>()
-  for (const comp of comparables) {
-    const ev = arvEvidence(comp, subjectAvm)
-    if (ev) {
-      classifications.set(comp.id, {
-        classification: 'after_renovation',
-        confidence: ev.method === 'evidence_flip_chain' ? 90 : 80,
-        method: ev.method,
-        reasoning: ev.note,
-        indicators: {},
-      })
-    } else if (comp.distressedSale === true || comp.transaction?.isForeclosure === true) {
-      classifications.set(comp.id, {
-        classification: 'as_is',
-        confidence: 85,
-        method: 'evidence_distressed',
-        reasoning: 'Distressed-flagged transaction — investor/as-is evidence',
-        indicators: {},
-      })
-    } else {
-      classifications.set(comp.id, {
-        classification: 'transitional',
-        confidence: 50,
-        method: 'evidence_market',
-        reasoning: 'Ordinary sale — no ARV or distress evidence; market-rate reference',
-        indicators: {},
-      })
-    }
-  }
-  return classifications
-}
-
 // ─── Best Match Selection ────────────────────────────────────────────────────
 
 function selectBestMatch(
@@ -499,6 +452,7 @@ export async function performAnalysis(
       filters.push({ ...defaultFilter })
     }
   }
+  const preferredSaleAgeDays = filters.find((f) => f.type === 'sale_age')?.value ?? 180
 
   const steps: ReportStep[] = []
   const fallbacksUsed: string[] = []
@@ -724,8 +678,20 @@ export async function performAnalysis(
   // ARV. Flip acquisitions fold into the investor floor via summarizeGroupB.
   // Zero evidence → ARV withheld; the run degrades to report-only.
   const subjectAvm = bundle.enrichment?.avm?.value ?? bundle.property.avmValue ?? null
+  // Same-tract pool rate — the sanity check that keeps a stale subject AVM
+  // from promoting below-pocket sales into ARV support.
+  const initialTractPpsfs = appraisalResult.comparables
+    .filter((c) => c.censusTract != null && c.censusTract === bundle.property.censusTract)
+    .map((c) => c.pricePerSqft ?? (c.salePrice != null && c.squareFeet ? c.salePrice / c.squareFeet : null))
+    .filter((v): v is number => v != null && v > 0)
+    .sort((a, b) => a - b)
+  const initialPoolRefPpsf = initialTractPpsfs.length >= 3
+    ? initialTractPpsfs[Math.floor(initialTractPpsfs.length / 2)]
+    : null
+  // Price classes come from the pocket's own sales (docs/FILTER-LADDER.md)
+  const initialPocket = pocketPriceGroups(appraisalResult.comparables, bundle.property)
   const arvComps = appraisalResult.comparables.filter(
-    (c) => c.isEnabled && arvEvidence(c, subjectAvm) != null,
+    (c) => c.isEnabled && arvEvidence(c, initialPocket) != null,
   )
   const arvIds = new Set(arvComps.map((c) => c.id))
   appraisalResult.comparables = appraisalResult.comparables.map((comp) => ({
@@ -736,10 +702,45 @@ export async function performAnalysis(
   }))
   appraisalResult.selectedCompIds = [...arvIds]
 
-  // Redfin MLS property-details — subject + top-15 comps, kicked off here so
-  // the search+scrape+extract chain overlaps vision/valuation. Shadow
-  // evidence only: stamped on comp.listingDetails / the subject's
-  // listingDetails for the report + comp cards; nothing reads it into math.
+  // Redfin MLS details run in parallel with vision/valuation. Construction
+  // evidence covers every geo match; the original top-15 cohort remains a
+  // separate set because only those comps may supplement appraisal inputs.
+  const legacyRedfinCompTargets = appraisalResult.comparables
+    .slice()
+    .sort((a, b) =>
+      Number(b.isEnabled && arvIds.has(b.id)) - Number(a.isEnabled && arvIds.has(a.id))
+      || Number(b.isEnabled) - Number(a.isEnabled)
+      || (a.distanceMiles ?? 999) - (b.distanceMiles ?? 999))
+    .slice(0, 15)
+  const legacyRedfinCompIds = new Set(legacyRedfinCompTargets.map((comp) => comp.id))
+  const normalizeGeoName = (value?: string | null) =>
+    value?.toLowerCase().replace(/[^a-z0-9]/g, '') || null
+  const subjectNeighborhood = normalizeGeoName(bundle.property.neighborhoodName)
+  const geoPriority = (comp: AppraisedComparable): number | null => {
+    if (bundle.property.censusTract && comp.censusTract === bundle.property.censusTract) return 0
+    if (comp.sameBlockGroup === true) return 1
+    const neighborhoodMatch = subjectNeighborhood != null
+      && normalizeGeoName(comp.neighborhoodName) === subjectNeighborhood
+    const subdivisionMatch = subdivisionsMatch(bundle.property.subdivision, comp.subdivision)
+    return neighborhoodMatch || subdivisionMatch ? 2 : null
+  }
+  const geoMatchedRedfinTargets = appraisalResult.comparables
+    .map((comp) => ({ comp, priority: geoPriority(comp) }))
+    .filter((entry): entry is { comp: AppraisedComparable; priority: number } => entry.priority != null)
+    .sort((a, b) => a.priority - b.priority
+      || (a.comp.distanceMiles ?? 999) - (b.comp.distanceMiles ?? 999))
+    .map(({ comp }) => comp)
+  const geoMatchedRedfinIds = new Set(geoMatchedRedfinTargets.map((comp) => comp.id))
+  const constructionFillTargets = appraisalResult.comparables
+    .filter((comp) => !geoMatchedRedfinIds.has(comp.id))
+    .sort((a, b) => (a.distanceMiles ?? 999) - (b.distanceMiles ?? 999))
+    .slice(0, Math.max(0, 15 - geoMatchedRedfinTargets.length))
+  const constructionRedfinTargets = [...geoMatchedRedfinTargets, ...constructionFillTargets]
+  const redfinTargetsById = new Map(
+    [...legacyRedfinCompTargets, ...constructionRedfinTargets].map((comp) => [comp.id, comp]),
+  )
+  const extraRedfinTargetCount = Math.max(0, redfinTargetsById.size - legacyRedfinCompTargets.length)
+
   const redfinDetailsEnabled = !!(env.FIRECRAWL_API_KEY && env.OPENROUTER_API_KEY)
   const redfinSubjectPromise = redfinDetailsEnabled
     ? fetchRedfinPropertyDetails(env, bundle.property, env.API_CACHE).catch(
@@ -748,18 +749,11 @@ export async function performAnalysis(
     : null
   const redfinCompPromise = redfinDetailsEnabled
     ? Promise.all(
-        appraisalResult.comparables
-          .slice()
-          .sort((a, b) =>
-            Number(b.isEnabled && arvIds.has(b.id)) - Number(a.isEnabled && arvIds.has(a.id))
-            || Number(b.isEnabled) - Number(a.isEnabled)
-            || (a.distanceMiles ?? 999) - (b.distanceMiles ?? 999))
-          .slice(0, 15)
-          .map((comp) =>
-            fetchRedfinPropertyDetails(env, comp, env.API_CACHE)
-              .then((r): { id: string; r: RedfinDetailsResult } => ({ id: comp.id, r }))
-              .catch(() => ({ id: comp.id, r: { details: null, skippedReason: 'fetch_failed' } as RedfinDetailsResult })),
-          ),
+        [...redfinTargetsById.values()].map((comp) =>
+          fetchRedfinPropertyDetails(env, comp, env.API_CACHE)
+            .then((r): { id: string; r: RedfinDetailsResult } => ({ id: comp.id, r }))
+            .catch(() => ({ id: comp.id, r: { details: null, skippedReason: 'fetch_failed' } as RedfinDetailsResult })),
+        ),
       )
     : null
 
@@ -796,10 +790,9 @@ export async function performAnalysis(
         )
       : null
   if (arvComps.length > 0) {
-    appraisalResult.arv = appraisalService.calculateARV(arvComps, bundle.property.squareFeet)
     appraisalResult.insufficientComps = false
     step('appraisal_rules', 'completed',
-      `Evidence selection — ARV from ${arvComps.length} evidence comp(s)`)
+      `Evidence selection — ${arvComps.length} evidence comp(s) staged for Set-B`)
   } else {
     // finalArv reads `insufficient`, so the ladder's banded number is dead
     // weight — withholding it is what makes the run report-only.
@@ -824,7 +817,9 @@ export async function performAnalysis(
         (appraisalResult.fallbackUsed !== 'none' ? ` (${appraisalResult.fallbackUsed})` : '')
     )
   }
-  let finalArv = insufficient ? null : (appraisalResult.arv ?? null)
+  // Set-B is the only ARV path — it fills finalArv below; there is no
+  // legacy blend.
+  let finalArv: number | null = null
 
   // ── 3. Vision: subject renovation + curb appeal (one merged LLM call) ─────
   // Subject-only — comps are never photo-scraped, so there is no per-comp
@@ -853,8 +848,8 @@ export async function performAnalysis(
   // ── 4. Classifications — transaction evidence, not condition guessing ────
   // flip resale → after_renovation; distressed sale → as_is; ordinary sale
   // → transitional (market tier).
-  const compClassifications = classifyCompsByEvidence(bundle.comparables, subjectAvm)
-  const classificationSummary = summarizeClassifications(
+  let compClassifications = classifyCompsByEvidence(appraisalResult.comparables, bundle.property)
+  let classificationSummary = summarizeClassifications(
     appraisalResult.comparables,
     compClassifications,
     subjectAvm
@@ -1011,10 +1006,31 @@ export async function performAnalysis(
   // stamps ride the response; if it lands late, onCurbAppeal lets the
   // caller patch the persisted result (cards populate on next fetch).
   let compCurbAppeal: CompCurbAppealMap | undefined
+  const compListingPhysicalDetails: Record<string, PhysicalCharacteristicSourceData> = {}
+  // Permit types that validate added living area — county-dependent free
+  // text; a match means the marketed sqft is a permitted product.
+  const PERMIT_AREA_RE =
+    /addition|expand|extend|enlarg|basement|interior finish|finish(?:ed)? (?:basement|area|attic)|room add|second stor|2nd stor|conversion|garage conv|livable area|living area/i
+  // Clef resolve — the derived promise carries stamps + permit resolution;
+  // the await below targets IT (not the raw fetch) so B sees every stamp.
+  let clefResolvePromise: Promise<void> | null = null
   if (clefCompPromise) {
-    void clefCompPromise.then((settled) => {
+    clefResolvePromise = clefCompPromise.then(async (settled) => {
       const map: CompCurbAppealMap = {}
       for (const ev of settled) {
+        const details = ev?.listing?.details
+        if (details) {
+          compListingPhysicalDetails[ev.propertyId] = {
+            style: details.style,
+            stories: details.stories,
+            constructionType: details.construction,
+            exterior: details.construction,
+            roof: details.roof,
+            foundation: details.foundationType,
+            garage: details.parking,
+            pool: details.pool,
+          }
+        }
         if (!ev?.condition || !ev.listing) continue
         const c = ev.condition
         let condition =
@@ -1033,10 +1049,65 @@ export async function performAnalysis(
           condition,
           source: 'vision',
           confidence: c.confidence != null ? Math.round(c.confidence * 100) : Math.round(Math.max(c.renovatedProbability, c.asIsProbability, 0.5) * 100),
-          summary: `${c.conditionLabel} (${c.conditionScore.toFixed(1)}/4) · tier:${c.tier} · renovated ${(c.renovatedProbability * 100).toFixed(0)}% · as-is ${(c.asIsProbability * 100).toFixed(0)}% · investor ${(c.investorLanguageProbability * 100).toFixed(0)}% · via ${ev.listing.source}${ev.listing.description ? ' · listing text available' : ''}`,
+          summary: `${c.conditionLabel} (${c.conditionScore.toFixed(1)}/4) · tier:${c.tier} · renovated ${(c.renovatedProbability * 100).toFixed(0)}% · as-is ${(c.asIsProbability * 100).toFixed(0)}% · investor ${(c.investorLanguageProbability * 100).toFixed(0)}% · via ${ev.listing.source}${c.model === 'openai/gpt-6-luna' ? ' · luna' : ''}${ev.listing.description ? ' · listing text available' : ''}`,
           photosExamined: ev.listing.photoCount,
         }
+        // Sqft cross-check — Zillow counts finished basement/upper floors
+        // tax records miss. A >33% divergence means the comp's size math
+        // is unreliable: record the conflict; B treats it as unanchorable
+        // (bound-only) rather than trusting either figure.
+        const lsSf = ev.listing.details?.marketedSqft ?? ev.listing.details?.squareFeet
+        const compFor = appraisalResult.comparables.find((cc) => cc.id === ev.propertyId)
+        if (lsSf != null && compFor?.squareFeet != null) {
+          const ratio = lsSf / compFor.squareFeet
+          // >3× is a different field (lot sqft leaks into the extraction),
+          // not a living-area conflict — real basement/floor divergences
+          // run 1.4–3×.
+          if (lsSf >= 400 && ((ratio > 1.33 && ratio <= 3) || (ratio < 0.75 && ratio >= 0.33))) {
+            compFor.raw = {
+              ...(compFor.raw as Record<string, unknown> ?? {}),
+              providerSqft: compFor.squareFeet,
+              listingSqft: lsSf,
+              sqftConflict: `provider ${compFor.squareFeet}sf vs listing ${lsSf}sf`,
+            }
+          }
+        }
       }
+
+      // Permit-verify sqft conflicts — tax record is authoritative unless a
+      // permitted addition/finish validates the marketed figure.
+      //   permitted   → marketed sqft is the real product → adopt it
+      //   unpermitted → tax sqft stands → comp competes on provider size
+      //   no coverage → conflict stays → bound-only
+      if (params.getCompPermits) {
+        const conflicted = appraisalResult.comparables.filter(
+          (cc) => (cc.raw as Record<string, unknown> | undefined)?.sqftConflict && cc.id)
+        await Promise.all(conflicted.slice(0, 8).map(async (cc) => {
+          const raw = cc.raw as Record<string, unknown>
+          const permits = await params.getCompPermits!(cc.id!).catch(() => null)
+          if (!permits?.length) { raw.sqftResolution = 'unknown'; return }
+          const addition = permits.find((p) =>
+            PERMIT_AREA_RE.test(`${p.projectType ?? ''} ${p.description ?? ''}`))
+          if (addition) {
+            raw.sqftResolution = 'permitted'
+            raw.permitNote = `marketed ${raw.listingSqft}sf validated by permit ${addition.permitNumber ?? 'record'}`
+            raw.providerSqft ??= cc.squareFeet
+            cc.squareFeet = raw.listingSqft as number
+            cc.pricePerSqft = cc.salePrice != null && cc.squareFeet ? cc.salePrice / cc.squareFeet : cc.pricePerSqft
+            delete raw.sqftConflict
+          } else {
+            // Unpermitted add — an appraiser throws this comp OUT of ARV:
+            // buyers priced the marketed product, so neither the tax sqft
+            // nor the listing sqft normalizes the sale. The denominator is
+            // unverifiable — excluded from ARV evidence entirely.
+            raw.sqftResolution = 'unpermitted'
+            raw.sqftExcluded = true
+            raw.permitNote = `marketed ${raw.listingSqft}sf vs tax ${cc.squareFeet}sf, no addition permit — denominator unverifiable, excluded from ARV`
+            delete raw.sqftConflict
+          }
+        }))
+      }
+
       step(
         'comp_curb_appeal',
         Object.keys(map).length > 0 ? 'completed' : 'skipped',
@@ -1046,7 +1117,7 @@ export async function performAnalysis(
       )
       compCurbAppeal = map
       if (Object.keys(map).length > 0) params.onCurbAppeal?.(map)
-    })
+    }).catch(() => undefined)
   }
 
   // Redfin MLS details — awaited here; the fetches started at evidence
@@ -1065,11 +1136,25 @@ export async function performAnalysis(
         const d = detailsById.get(comp.id)
         if (d) {
           comp.listingDetails = d
-          // Redfin supplement — MLS beds/baths fill provider gaps so the
-          // eval grid + feature matching see real counts (ATTOM misses
-          // beds on whole pools in some pockets).
-          comp.bedrooms ??= d.beds ?? null
-          comp.bathrooms ??= (d.bathsFull != null ? d.bathsFull + (d.bathsHalf ?? 0) * 0.5 : null)
+          if (legacyRedfinCompIds.has(comp.id)) {
+            // Keep every appraisal-input supplement on the exact pre-existing
+            // top-15 cohort; widened geo coverage is construction-only.
+            comp.bedrooms ??= d.beds ?? null
+            comp.bathrooms ??= (d.bathsFull != null ? d.bathsFull + (d.bathsHalf ?? 0) * 0.5 : null)
+            if (d.squareFeet != null && comp.squareFeet != null) {
+              const ratio = d.squareFeet / comp.squareFeet
+              if (ratio > 1.33 || ratio < 0.75) {
+                comp.raw = {
+                  ...(comp.raw as Record<string, unknown> ?? {}),
+                  providerSqft: comp.squareFeet,
+                  listingSqft: d.squareFeet,
+                  sqftConflict: `provider ${comp.squareFeet}sf vs listing ${d.squareFeet}sf — listing used`,
+                }
+                comp.squareFeet = d.squareFeet
+                comp.pricePerSqft = comp.salePrice != null ? comp.salePrice / d.squareFeet : comp.pricePerSqft
+              }
+            }
+          }
           stamped++
         }
       }
@@ -1085,13 +1170,14 @@ export async function performAnalysis(
     step(
       'listing_details',
       (subjectRes?.details || stamped > 0) ? 'completed' : 'skipped',
-      `Redfin details — subject ${subjectRes?.details ? 'yes' : subjectRes?.skippedReason ?? 'no'} · ${stamped} comp(s) enriched`,
+      `Redfin details — subject ${subjectRes?.details ? 'yes' : subjectRes?.skippedReason ?? 'no'} · ${stamped}/${redfinTargetsById.size} comp(s) enriched · ${geoMatchedRedfinTargets.length} geo-matched target(s) · ${extraRedfinTargetCount} extra request(s)`,
     )
   }
 
   // ── ARV evidence verification — shadow stamps on every comp ─────────────
-  // Price cross-check (sale vs own AVM) + staleness (sale $/sf vs current
-  // pocket median). Flags evidence quality; never gates comp selection.
+  // Price cross-check (sale vs own AVM), sale age vs the preferred window,
+  // and market fit vs current pocket $/sf. Flags evidence quality; never
+  // gates comp selection.
   {
     // Pool-derived pocket reference: median $/sf of same-tract comps IS the
     // current pocket pricing — used when provider scope medians are absent.
@@ -1101,17 +1187,23 @@ export async function performAnalysis(
       .filter((v): v is number => v != null && v > 0)
       .sort((a, b) => a - b)
     const poolRefPpsf = tractPpsfs.length >= 3 ? tractPpsfs[Math.floor(tractPpsfs.length / 2)] : null
-    let verified = 0, stale = 0, divergent = 0
+    const packageIds = packageDeedIds(appraisalResult.comparables)
+    const bulkIds = bulkSaleIds(appraisalResult.comparables)
+    let verified = 0, stale = 0, divergent = 0, noisy = 0
     for (const comp of appraisalResult.comparables) {
-      comp.evidenceVerification = verifyCompEvidence(bundle.property, comp, poolRefPpsf)
+      comp.evidenceVerification = verifyCompEvidence(bundle.property, comp, poolRefPpsf, preferredSaleAgeDays, {
+        packageDeed: packageIds.has(comp.id),
+        bulkSale: bulkIds.has(comp.id),
+      })
       if (comp.evidenceVerification.priceCheck === 'corroborated') verified++
       if (comp.evidenceVerification.staleness === 'stale') stale++
       if (comp.evidenceVerification.priceCheck === 'divergent') divergent++
+      if (comp.evidenceVerification.transactionCheck !== 'clean' && comp.evidenceVerification.transactionCheck !== 'unverified') noisy++
     }
     step(
       'evidence_verification',
       verified + stale + divergent > 0 ? 'completed' : 'skipped',
-      `${verified} price-corroborated · ${stale} stale-evidence · ${divergent} price-divergent`,
+      `${verified} price-corroborated · ${stale} stale-evidence · ${divergent} price-divergent · ${noisy} transaction-noise`,
     )
   }
 
@@ -1121,9 +1213,22 @@ export async function performAnalysis(
   // ARV it replaces the legacy appraisal blend; valuation/groupB recompute
   // on the B anchor so every downstream dollar is priced off verified
   // evidence, not the blend.
-  if (clefCompPromise) await clefCompPromise.catch(() => undefined)
+  // Await the DERIVED promise — stamps + permit resolution must land
+  // before B evaluates.
+  if (clefResolvePromise) await clefResolvePromise
+  // Re-classify with the vision reads now landed — the renovated-band
+  // corroboration check only works once Clef/Luna stamps exist.
+  if (compCurbAppeal && Object.keys(compCurbAppeal).length > 0) {
+    compClassifications = classifyCompsByEvidence(appraisalResult.comparables, bundle.property, compCurbAppeal)
+    classificationSummary = summarizeClassifications(
+      appraisalResult.comparables,
+      compClassifications,
+      subjectAvm
+    )
+  }
   let pipelineBResult: ReturnType<typeof evaluateB> | null = null
   let bAttemptTrail: string[] = []
+  const bAttempts: EvaluationAttemptRecord[] = []
   {
     // Verify-and-retry — the harness ladder in-pipeline. Verification tests
     // answer-level invariants (evidence coherence, never outcome appeal);
@@ -1135,8 +1240,8 @@ export async function performAnalysis(
       squareFeet: bundle.property.squareFeet ?? null,
       yearBuilt: bundle.property.yearBuilt ?? null,
       censusTract: bundle.property.censusTract ?? null,
-      subdivision: bundle.property.subdivision ?? null,
       neighborhoodName: bundle.property.neighborhoodName ?? null,
+      subdivision: bundle.property.subdivision ?? null,
       landAssessedValue: bundle.property.landAssessedValue ?? null,
       taxAssessment: bundle.property.assessedValue ?? null,
       assessedValue: bundle.property.assessedValue ?? null,
@@ -1156,8 +1261,8 @@ export async function performAnalysis(
       distanceMiles: comp.distanceMiles ?? null,
       sameBlockGroup: comp.sameBlockGroup ?? null,
       censusTract: comp.censusTract ?? null,
-      subdivision: comp.subdivision ?? null,
       neighborhoodName: comp.neighborhoodName ?? null,
+      subdivision: comp.subdivision ?? null,
       yearBuilt: comp.yearBuilt ?? null,
       lotSizeAcres: comp.lotSizeAcres ?? null,
       lotSizeSquareFeet: comp.lotSizeSquareFeet ?? null,
@@ -1165,6 +1270,7 @@ export async function performAnalysis(
       propertyType: comp.propertyType ?? null,
       crossesMajorRoad: comp.crossesMajorRoad ?? null,
       disableReasons: comp.evaluation?.disableReasons ?? null,
+      verifiedFlip: compClassifications.get(comp.id)?.method === 'evidence_flip_chain',
       classification: compClassifications.get(comp.id)
         ? { type: compClassifications.get(comp.id)!.classification }
         : null,
@@ -1187,14 +1293,46 @@ export async function performAnalysis(
         .filter((v): v is number => v != null && v > 0)
         .sort((a, b) => a - b)
       const ref = tractPpsfs.length >= 3 ? tractPpsfs[Math.floor(tractPpsfs.length / 2)] : null
+      const packageIds = packageDeedIds(appraisalResult.comparables)
+      const bulkIds = bulkSaleIds(appraisalResult.comparables)
       for (const comp of appraisalResult.comparables) {
-        comp.evidenceVerification = verifyCompEvidence(bundle.property, comp, ref)
+        comp.evidenceVerification = verifyCompEvidence(bundle.property, comp, ref, preferredSaleAgeDays, {
+          packageDeed: packageIds.has(comp.id),
+          bulkSale: bulkIds.has(comp.id),
+        })
+        // Transaction noise is not a usable comp. It already cannot set the
+        // value; switching it off keeps it out of the enabled list, the
+        // price groups, and the outlier ceiling. It stays in the report,
+        // labelled with the reason.
+        const noise = TRANSACTION_NOISE_REASON[comp.evidenceVerification?.transactionCheck ?? '']
+        if (noise && comp.isEnabled) {
+          comp.isEnabled = false
+          if (comp.evaluation) comp.evaluation.disableReasons = [...(comp.evaluation.disableReasons ?? []), noise]
+        }
       }
     }
 
     bAttemptTrail = []
+    const recordBAttempt = (
+      name: string,
+      result: ReturnType<typeof evaluateB>,
+      verificationFailures: string[],
+      detail?: Record<string, unknown>,
+    ) => {
+      bAttempts.push({
+        name,
+        subject: { ...bSubjectFields },
+        comps: toBComps(),
+        options: { rehabCost: valuation?.totalRehabCost ?? null },
+        result,
+        checks: checksForFlags(result.flags),
+        verificationFailures: verificationFailures,
+        ...(detail ? { detail } : {}),
+      })
+    }
     let bResult = evaluateB(bSubjectFields, toBComps(), { rehabCost: valuation?.totalRehabCost ?? null })
     let fails = verifyB(bResult)
+    recordBAttempt('attempt 1', bResult, fails)
 
     // Attempt 2 — widen retrieval: fresh comps at a wider radius / longer
     // window merge in, get verification-stamped, then B re-evaluates.
@@ -1205,28 +1343,30 @@ export async function performAnalysis(
       const existing = new Set(appraisalResult.comparables.map((c) => c.id))
       const added = (widened ?? []).filter((c) => !existing.has(c.id))
       if (added.length > 0) {
-        // Widened comps arrive un-appraised — stamp a pass-through
-        // evaluation so they join the pool as enabled evidence.
-        for (const c of added) {
-          appraisalResult.comparables.push({
-            ...c,
-            isEnabled: true,
-            adjustedSalePrice: c.salePrice ?? null,
-            evaluation: {
-              comparableId: c.id,
-              shouldDisable: false,
-              filterResults: [],
-              disableReasons: [],
-              totalAdjustment: 0,
-              adjustmentResults: [],
-              originalPrice: c.salePrice ?? null,
-              adjustedPrice: c.salePrice ?? null,
-            },
-          })
-        }
+        // Widened comps go through the SAME grid as the first pass — geo
+        // tiers, year bands, the size ladder, every hard rule. A comp that
+        // can't verify at the current thresholds joins as disabled
+        // evidence, never as a free anchor.
+        const widenedResult = appraisalService.evaluate(bundle.property, added, { filters, adjustments })
+        appraisalResult.comparables.push(...widenedResult.comparables)
         stampVerification()
+        // Classify the widened set too — sale-type evidence (flip resale /
+        // distressed) must stamp before B re-reads tiers, otherwise an
+        // unclassified flip buy could read as upper-band evidence.
+        // New sales change where the pocket's price groups break, so the
+        // whole pool is re-read — a comp must never keep a group label it
+        // earned in a smaller pool.
+        for (const [id, cls] of classifyCompsByEvidence(appraisalResult.comparables, bundle.property, compCurbAppeal)) {
+          compClassifications.set(id, cls)
+        }
         bResult = evaluateB(bSubjectFields, toBComps(), { rehabCost: valuation?.totalRehabCost ?? null })
         fails = verifyB(bResult)
+        recordBAttempt('attempt 2 widen', bResult, fails, {
+          radiusMiles: baseRadius + 1,
+          monthsBack: (bundle.metadata?.comparablesParams?.monthsBack ?? 12) + 6,
+          addedCompIds: added.map((c) => c.id),
+          addedCompCount: added.length,
+        })
       }
       bAttemptTrail.push(`attempt 2 widen: +${added.length} comp(s) — ${fails.length ? fails.join('; ') : 'verified'}`)
     }
@@ -1237,7 +1377,10 @@ export async function performAnalysis(
     if (fails.length && params.enrichComparables) {
       const thin = appraisalResult.comparables
         .filter((c) => c.avmValue == null || c.landAssessedValue == null)
-        .sort((a, b) => (a.distanceMiles ?? 99) - (b.distanceMiles ?? 99))
+        .sort((a, b) =>
+          Number((b.censusTract != null && b.censusTract === bundle.property.censusTract) || b.sameBlockGroup === true)
+          - Number((a.censusTract != null && a.censusTract === bundle.property.censusTract) || a.sameBlockGroup === true)
+          || (a.distanceMiles ?? 99) - (b.distanceMiles ?? 99))
         .slice(0, 8)
       const enriched = await params.enrichComparables(thin).catch(() => null)
       const byId = new Map((enriched ?? []).map((c) => [c.id, c]))
@@ -1252,6 +1395,10 @@ export async function performAnalysis(
         stampVerification()
         bResult = evaluateB(bSubjectFields, toBComps(), { rehabCost: valuation?.totalRehabCost ?? null })
         fails = verifyB(bResult)
+        recordBAttempt('attempt 3 deepen', bResult, fails, {
+          deepenedCompIds: thin.map((c) => c.id),
+          deepenedFieldCount: deepened,
+        })
       }
       bAttemptTrail.push(`attempt 3 deepen: +${deepened} field(s) — ${fails.length ? fails.join('; ') : 'verified'}`)
     }
@@ -1308,10 +1455,34 @@ export async function performAnalysis(
         'set_b_arv',
         'completed',
         `Set-B ARV ${formatUsd(bResult.arv)} (${bResult.source}${bResult.healed ? ', self-healed' : ''})` +
-          (prevArv != null && prevArv !== bResult.arv ? ` — replaces appraisal ${formatUsd(prevArv)}` : ''),
+          (prevArv != null && prevArv !== bResult.arv ? ` — replaces pre-B anchor ${formatUsd(prevArv)}` : ''),
       )
     } else if (bResult.arv == null && !insufficient) {
-      step('set_b_arv', 'skipped', 'Set-B produced no ARV — legacy anchor retained')
+      step('set_b_arv', 'skipped', 'Set-B produced no ARV — no anchor produced')
+    }
+  }
+
+  // A Set-B widen can append comps after the overlapping Redfin batch began.
+  // Catch up construction evidence only; no appraisal-input fields are changed.
+  if (redfinDetailsEnabled) {
+    const lateGeoTargets = appraisalResult.comparables.filter(
+      (comp) => geoPriority(comp) != null && !redfinTargetsById.has(comp.id),
+    )
+    if (lateGeoTargets.length > 0) {
+      const lateResults = await Promise.all(lateGeoTargets.map((comp) =>
+        fetchRedfinPropertyDetails(env, comp, env.API_CACHE)
+          .then((r): { id: string; r: RedfinDetailsResult } => ({ id: comp.id, r }))
+          .catch(() => ({ id: comp.id, r: { details: null, skippedReason: 'fetch_failed' } as RedfinDetailsResult })),
+      ))
+      const lateById = new Map(lateResults.map(({ id, r }) => [id, r.details]))
+      let lateStamped = 0
+      for (const comp of appraisalResult.comparables) {
+        const details = lateById.get(comp.id)
+        if (!details) continue
+        comp.listingDetails = details
+        lateStamped++
+      }
+      console.log(`[Evaluate] Redfin geo catch-up: ${lateStamped}/${lateGeoTargets.length} widened comp(s) enriched`)
     }
   }
 
@@ -1378,6 +1549,7 @@ export async function performAnalysis(
       subjectCurbAppeal,
       subjectListingUrl: photoBundle?.subject?.sourceUrl ?? null,
       subjectListingDetails: subjectListingDetails?.details ?? null,
+      compListingPhysicalDetails,
       subjectListPrice: typeof photoBundle?.subject?.metadata?.listPrice === 'number'
         ? photoBundle.subject.metadata.listPrice
         : null,
@@ -1416,7 +1588,9 @@ export async function performAnalysis(
   // valuation block. There is no human reviewer, so the formula call
   // always stands; confidence + reasons carry the reliability signal.
   if (response.valuation && valuation) {
-    response.valuation.confidence = response.report.confidence
+    // valuation.confidence stays the harness truth (bResult.conf, wired at
+    // build time) — report.confidence is a different rubric and no longer
+    // overwrites it. Reasons + review flag still come from the report.
     response.valuation.confidenceReasons = response.report.confidenceReasons
     response.valuation.requiresHumanReview = response.report.requiresHumanReview
     if (response.report.confidence === 'low') {
@@ -1442,6 +1616,19 @@ export async function performAnalysis(
     appraisalResult,
     compClassifications,
     groupB: groupBResult,
+    runEvidence: {
+      compPool: appraisalResult.comparables,
+      subject: bundle.property,
+      appliedSettings,
+      filters,
+      adjustments,
+      fallbackUsed: appraisalResult.fallbackUsed ?? null,
+      expansionApplied: appraisalResult.expansionApplied ?? [],
+      compClassifications: Object.fromEntries(compClassifications),
+      compCurbAppeal: compCurbAppeal ?? null,
+      bAttemptTrail,
+      attempts: bAttempts,
+    },
   }
 }
 

@@ -87,6 +87,10 @@ export interface ComparablesRetrievalMeta {
   providerCandidatesReported: number | null
   /** Candidates actually returned to us. */
   providerCandidatesReceived: number
+  /** Unique property IDs after same-provider duplicate transaction rows merge. */
+  providerCandidatesAfterDedup?: number
+  /** Provider IDs that appeared more than once in one response. */
+  duplicateCandidateIds?: string[]
   /** maxComps we asked for (after env/request resolution, before provider clamp). */
   candidateLimitRequested: number
   /** Limit actually sent to the provider (<= provider max). */
@@ -112,7 +116,16 @@ export interface ComparablesRetrievalMeta {
    * escalations were needed to admit ARV evidence (0 = strict pass), and
    * the winning factor. Geo filters never flex.
    */
-  paramFlex?: { extensions: number; factor: number; concessions?: string[] } | null
+  /** Filter-ladder record (docs/FILTER-LADDER.md) — `extensions` is the
+   *  ladder step, `limits` the square-feet / year / sale-age limits there. */
+  paramFlex?: {
+    extensions: number
+    factor: number
+    concessions?: string[]
+    limits?: { sqft: number | null; year: number | null; saleAge: number | null }
+    scope?: 'tract' | 'block_group' | 'neighborhood' | 'value_equivalent' | null
+    arvEvidenceFound?: boolean
+  } | null
 }
 
 export function buildRetrievalMeta(args: {
@@ -227,4 +240,35 @@ export function isProvablyDeadComp(
     if (!yearOk) return true
   }
   return false
+}
+
+/** Free-data ordering for paid enrichment waves. Tightest proven scope wins;
+ * distance and sale recency break ties inside the same scope. */
+export function enrichmentRankScore(
+  subject: Pick<NormalizedProperty, 'censusBlockGroup' | 'censusTract' | 'subdivision' | 'neighborhoodName'>,
+  comp: Pick<NormalizedComparable, 'sameBlockGroup' | 'censusBlockGroup' | 'censusTract' | 'subdivision' | 'neighborhoodName' | 'distanceMiles' | 'saleDate'>,
+  nowMs = Date.now(),
+): number {
+  const scopeScore = comp.sameBlockGroup === true ||
+    (subject.censusBlockGroup != null && comp.censusBlockGroup === subject.censusBlockGroup)
+    ? 0
+    : subject.censusTract != null && comp.censusTract === subject.censusTract
+      ? 1
+      : (subject.subdivision != null && comp.subdivision === subject.subdivision) ||
+          (subject.neighborhoodName != null && comp.neighborhoodName === subject.neighborhoodName)
+        ? 2
+        : 3
+  const distance = comp.distanceMiles ?? 99
+  const ageDays = comp.saleDate ? Math.max(0, (nowMs - new Date(comp.saleDate).getTime()) / 86_400_000) : 99_999
+  return scopeScore * 1_000_000 + distance * 1_000 + Math.min(ageDays, 999)
+}
+
+export function rankEnrichmentCandidates<T extends NormalizedComparable>(
+  subject: NormalizedProperty,
+  comps: T[],
+  nowMs = Date.now(),
+): T[] {
+  return comps.slice().sort((a, b) =>
+    enrichmentRankScore(subject, a, nowMs) - enrichmentRankScore(subject, b, nowMs) ||
+    String(a.id).localeCompare(String(b.id)))
 }

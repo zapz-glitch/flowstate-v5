@@ -1,11 +1,9 @@
 'use client'
 
-import { useMemo, useCallback, useRef, useState } from 'react'
+import { useMemo, useCallback } from 'react'
 import dynamic from 'next/dynamic'
 import type { SubjectData, CompItem } from './shared-types'
-import { CompCard } from './CompCard'
-import { SubjectGridCard } from './SubjectGridCard'
-import { getCompKey } from './format-helpers'
+import { getCompKey, conditionLabel, priceClassLabel } from './format-helpers'
 import { isValidCoordinate } from '@/lib/property-map-geometry'
 
 const MapInner = dynamic(() => import('./PropertyMapInner'), {
@@ -24,6 +22,11 @@ export interface MapMarker {
   label: string
   /** Comp key for toggling ARV selection (comp markers only) */
   compKey?: string
+  /** Sale price · drawn as a small label beside the dot */
+  price?: number | null
+  /** Price class and photo condition · the two lines under the price */
+  priceClass?: string | null
+  condition?: string | null
 }
 
 interface PropertyMapProps {
@@ -70,6 +73,9 @@ export function PropertyMap({ subject, comps, selectedCompKeys, onMarkerSelect, 
               : 'comp-market',
             label: comp.address ?? 'Comparable',
             compKey,
+            price: comp.salePrice ?? null,
+            priceClass: priceClassLabel(comp.badges?.price),
+            condition: comp.badges ? conditionLabel(comp.badges.condition) : null,
           })
         }
       }
@@ -82,36 +88,6 @@ export function PropertyMap({ subject, comps, selectedCompKeys, onMarkerSelect, 
     onMarkerSelect?.(markerType, compKey)
   }, [onMarkerSelect])
 
-  // Marker hover → the SAME card that opens on click, overlaid on the map
-  // (subject card for the subject marker, CompCard for comps — the card
-  // itself is untouched). 250ms grace to move onto the card; it leaves
-  // shortly after the pointer does.
-  const compByKey = useMemo(() => {
-    const map = new Map<string, { comp: CompItem; index: number }>()
-    comps?.items?.forEach((comp, i) => map.set(getCompKey(comp, i), { comp, index: i }))
-    return map
-  }, [comps])
-
-  const [hoveredComp, setHoveredComp] = useState<{ comp: CompItem; index: number } | null>(null)
-  const [hoveredSubject, setHoveredSubject] = useState(false)
-  const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const cancelHide = useCallback(() => {
-    if (hideTimer.current) { clearTimeout(hideTimer.current); hideTimer.current = null }
-  }, [])
-  const scheduleHide = useCallback((ms = 250) => {
-    cancelHide()
-    hideTimer.current = setTimeout(() => { setHoveredComp(null); setHoveredSubject(false) }, ms)
-  }, [cancelHide])
-
-  const handleMarkerHover = useCallback((marker: MapMarker | null) => {
-    if (!marker) { scheduleHide(); return }
-    cancelHide()
-    if (marker.type === 'subject') { setHoveredSubject(true); setHoveredComp(null); return }
-    const hit = marker.compKey ? compByKey.get(marker.compKey) : undefined
-    setHoveredComp(hit ?? null)
-    setHoveredSubject(false)
-  }, [compByKey, cancelHide, scheduleHide])
-
   if (!markers.some(marker => marker.type === 'subject')) return null
 
   return (
@@ -120,19 +96,8 @@ export function PropertyMap({ subject, comps, selectedCompKeys, onMarkerSelect, 
       key={`${subject?.address}|${subject?.latitude}|${subject?.longitude}`}
       markers={markers}
       onMarkerClick={handleMarkerClick}
-      onMarkerHover={handleMarkerHover}
       activeMarkerKey={activeMarkerKey}
     />
-      {(hoveredComp || hoveredSubject) && (
-        <div
-          className="absolute left-2 top-2 z-20 w-[22rem] max-h-[85%] overflow-y-auto rounded-lg border border-border bg-background/95 shadow-xl backdrop-blur-sm"
-          onMouseEnter={cancelHide}
-          onMouseLeave={() => scheduleHide(150)}
-        >
-          {hoveredSubject && subject && <SubjectGridCard subject={subject} />}
-          {hoveredComp && <CompCard comp={hoveredComp.comp} index={hoveredComp.index} subject={subject ?? undefined} isExpanded />}
-        </div>
-      )}
     </div>
   )
 }

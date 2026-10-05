@@ -90,7 +90,7 @@ export interface ApiCallStats {
 export interface AnalyzeData {
   evaluationRevision?: number
   manualCompSelection?: string[] | null
-  evaluationEngine?: 'python-v4' | 'typescript'
+  evaluationEngine?: 'python-v4' | 'typescript' | 'ts-v5'
   /** Close CRM lead this report belongs to (from POST /v1/analyze leadId) — enables the Update CRM action */
   leadId?: string | null
   /** Close CRM opportunity linked to the lead */
@@ -226,6 +226,27 @@ export interface ListingDetails {
   sourceUrl?: string
 }
 
+export type PhysicalCharacteristicSource = 'redfin' | 'zillow' | 'attom'
+export type PhysicalCharacteristicStatus = 'verified' | 'conflict' | 'unverified'
+export type PhysicalCharacteristicValue = string | number | boolean
+
+export interface PhysicalCharacteristic<T extends PhysicalCharacteristicValue = PhysicalCharacteristicValue> {
+  value: T | null
+  status: PhysicalCharacteristicStatus
+  sources: Array<{ source: PhysicalCharacteristicSource; value: PhysicalCharacteristicValue }>
+}
+
+export interface PhysicalCharacteristics {
+  style: PhysicalCharacteristic<string>
+  stories: PhysicalCharacteristic<number>
+  constructionType: PhysicalCharacteristic<string>
+  exterior: PhysicalCharacteristic<string>
+  roof: PhysicalCharacteristic<string>
+  foundation: PhysicalCharacteristic<string>
+  garage: PhysicalCharacteristic<string>
+  pool: PhysicalCharacteristic<boolean>
+}
+
 export interface SubjectData {
   permits?: {
     status: 'available' | 'empty' | 'unavailable' | 'not_requested'
@@ -251,6 +272,7 @@ export interface SubjectData {
   lotSizeAcres?: number | null
   lotSizeSquareFeet?: number | null
   yearBuilt?: number | null
+  stories?: number | null
   propertyType?: string | null
   /** Subdivision name (if available) */
   subdivision?: string | null
@@ -277,8 +299,23 @@ export interface SubjectData {
   listingUrl?: string | null
   /** Redfin MLS property-details — shadow evidence */
   listingDetails?: ListingDetails | null
+  /** Listing-source physical fields resolved after valuation; display-only. */
+  physicalCharacteristics?: PhysicalCharacteristics
   /** Asking/list price scraped from the subject's listing (null when off-market) */
   listPrice?: number | null
+  /** Set-B evidence fields — serialized from the pipeline */
+  censusTract?: string | null
+  censusBlockGroup?: string | null
+  sameBlockGroup?: boolean | null
+  crossesMajorRoad?: boolean | null
+  landAssessedValue?: number | null
+  evidenceVerification?: { staleness?: string | null; priceCheck?: string | null; pocketRatio?: number | null; flags?: string[] | null } | null
+  /** Sqft-conflict evidence — provider-vs-marketed divergence + permit verdict */
+  sqftEvidence?: { provider: number | null; listing: number | null; conflict: string | null; resolution: string | null; note: string | null } | null
+  /** Land extraction — sale − contributory improvement = implied land value */
+  landEvidence?: { address?: string | null; impliedLand: number; landPpsf: number; lotSf: number; basis: string } | null
+  improvementAssessedValue?: number | null
+  disableReasons?: string[] | null
   /** Foundation type (e.g., Slab, Crawl Space, Basement) */
   foundationType?: string | null
   /** Building style (e.g., Colonial, Cape Cod, Ranch) */
@@ -354,10 +391,14 @@ export interface ValuationData {
   arv?: number
   arvSource?: string
   arvPerSqft?: number
+  /** Run-level trust grade — verified/weak/floor/withheld (server-computed) */
+  resultGrade?: 'verified' | 'weak' | 'floor' | 'withheld'
+  /** Did the run earn it — clean / retried / unverified */
+  processGrade?: 'clean' | 'retried' | 'unverified'
+  /** One-line server explanation for the result/confidence badge */
+  statusReason?: string
   /** Set-B trade-tricks ARV (the pipeline ARV post-swap) */
   arvB?: number | null
-  /** Legacy appraisal ARV — pre-swap pipeline number (parity display) */
-  arvLegacy?: number | null
   /** Set-B mechanics trail — anchor, drivers, ceiling, flags */
   bMechanics?: {
     source: string
@@ -370,7 +411,21 @@ export interface ValuationData {
     landRateSource: string | null
     sqftRateSource: string | null
     healed: boolean
-    drivers: { address: string | null; contribution: number; tier: string; conditionTier: string }[]
+    /** Pool rates + band thresholds — replay inputs for client-side toggles */
+    landRate?: number | null
+    sqftRate?: number | null
+    bandLo?: number | null
+    bandHi?: number | null
+    /** Land-extraction evidence — implied land $/lot-sf + land_play mode */
+    land?: {
+      pocketRate: number | null
+      source: string | null
+      subjectLandValue: number | null
+      mode: 'land_play' | null
+      comps: Array<{ address?: string | null; impliedLand: number; landPpsf: number; lotSf: number; basis: string }>
+    } | null
+    attemptTrail: string[]
+    drivers: { address: string | null; contribution: number; landAdj?: number | null; tier: string; conditionTier: string }[]
     decisions?: { compAddress?: string | null; stage: string; rule: string; verdict: string; value?: number | string | null; note?: string }[]
   } | null
   buyPrice?: number
@@ -464,6 +519,23 @@ export interface CompsData {
   items?: CompItem[]
 }
 
+export interface CompBadges {
+  price: 'renovated' | 'median' | 'as_is' | null
+  condition: 'reno' | 'dated' | 'distressed' | 'unverified' | null
+  pocket: 'in' | 'equal' | 'above' | 'below' | 'unknown' | null
+  /** How the pocket match was earned — tract | block | name; null when out */
+  pocketVia: 'tract' | 'block' | 'name' | null
+  trust: 'verified' | 'partial' | 'unverified' | null
+  checks: {
+    pocket: boolean | null
+    size: boolean | null
+    fresh: boolean | null
+    priceFit: boolean | null
+  }
+  /** Failed filters the run's expansion rescued (empty = strict admission) */
+  widenedOn: string[]
+}
+
 export interface CompItem {
   id?: string
   selectionPending?: boolean
@@ -496,6 +568,7 @@ export interface CompItem {
   yearBuilt?: number | null
   lotSizeAcres?: number | null
   lotSizeSquareFeet?: number | null
+  propertyType?: string | null
   adjustedPrice?: number | null
   qualityScore?: number | null
   condition?: string | null
@@ -503,6 +576,14 @@ export interface CompItem {
   photos?: string[]
   /** Subdivision name (if available) */
   subdivision?: string | null
+  /** Set-B evidence fields — serialized from the pipeline */
+  landAssessedValue?: number | null
+  evidenceVerification?: { staleness?: string | null; priceCheck?: string | null; pocketRatio?: number | null; flags?: string[] | null } | null
+  /** Sqft-conflict evidence — provider-vs-marketed divergence + permit verdict */
+  sqftEvidence?: { provider: number | null; listing: number | null; conflict: string | null; resolution: string | null; note: string | null } | null
+  /** Land extraction — sale − contributory improvement = implied land value */
+  landEvidence?: { address?: string | null; impliedLand: number; landPpsf: number; lotSf: number; basis: string } | null
+  improvementAssessedValue?: number | null
   /** Foundation type (e.g., Slab, Crawl Space, Basement) */
   foundationType?: string | null
   /** Building style (e.g., Colonial, Cape Cod, Ranch) */
@@ -554,12 +635,23 @@ export interface CompItem {
   /** Which comp group: 'arv' (Group A, drives valuation), 'as_is' (Group B, market intel), or null */
   compGroup?: 'arv' | 'as_is' | null
   /**
+   * Set-B verdict — which comps the server's verified ARV actually used.
+   * 'anchor' = the sale the ARV is priced off, 'driver' = verified evidence,
+   * 'pool' = evaluated but not a driver, 'excluded' = not in the Set-B pool.
+   * Display-only; separate from the appraisal-grid enabled/compGroup state.
+   */
+  bRole?: 'anchor' | 'driver' | 'pool' | 'excluded' | null
+  /** Server↔client trust contract — the server computes, the card renders */
+  badges?: CompBadges | null
+  /**
    * Reviewer's manual tier pin — 'arv' or 'as_is' — assigned on the comp
    * card. Rides alongside the automatic evidence class; never rewrites it.
    */
   userTier?: 'arv' | 'as_is' | null
   /** Census tract GEOID (Census geocoder, free tier) */
   censusTract?: string | null
+  /** 12-digit Census block-group GEOID */
+  censusBlockGroup?: string | null
   /** Road-barrier proxy — census tract differs from the subject's. Absent = unverified. */
   crossesMajorRoad?: boolean
   /** Same census block group as the subject — same micro-market evidence. Absent/null = unverified. */
@@ -577,6 +669,8 @@ export interface CompItem {
   } | null
   /** Redfin MLS property-details — shadow evidence */
   listingDetails?: ListingDetails | null
+  /** Listing-source physical fields resolved after valuation; display-only. */
+  physicalCharacteristics?: PhysicalCharacteristics
   /** Price percentile among all comps (1 = highest, 100 = lowest) */
   pricePercentile?: number | null
   /** Reasons why this comp was disabled (if any) */
@@ -605,10 +699,14 @@ export interface ValuationData {
   arv?: number
   arvSource?: string
   arvPerSqft?: number
+  /** Run-level trust grade — verified/weak/floor/withheld (server-computed) */
+  resultGrade?: 'verified' | 'weak' | 'floor' | 'withheld'
+  /** Did the run earn it — clean / retried / unverified */
+  processGrade?: 'clean' | 'retried' | 'unverified'
+  /** One-line server explanation for the result/confidence badge */
+  statusReason?: string
   /** Set-B trade-tricks ARV (the pipeline ARV post-swap) */
   arvB?: number | null
-  /** Legacy appraisal ARV — pre-swap pipeline number (parity display) */
-  arvLegacy?: number | null
   /** Set-B mechanics trail — anchor, drivers, ceiling, flags */
   bMechanics?: {
     source: string
@@ -621,7 +719,21 @@ export interface ValuationData {
     landRateSource: string | null
     sqftRateSource: string | null
     healed: boolean
-    drivers: { address: string | null; contribution: number; tier: string; conditionTier: string }[]
+    /** Pool rates + band thresholds — replay inputs for client-side toggles */
+    landRate?: number | null
+    sqftRate?: number | null
+    bandLo?: number | null
+    bandHi?: number | null
+    /** Land-extraction evidence — implied land $/lot-sf + land_play mode */
+    land?: {
+      pocketRate: number | null
+      source: string | null
+      subjectLandValue: number | null
+      mode: 'land_play' | null
+      comps: Array<{ address?: string | null; impliedLand: number; landPpsf: number; lotSf: number; basis: string }>
+    } | null
+    attemptTrail: string[]
+    drivers: { address: string | null; contribution: number; landAdj?: number | null; tier: string; conditionTier: string }[]
     decisions?: { compAddress?: string | null; stage: string; rule: string; verdict: string; value?: number | string | null; note?: string }[]
   } | null
   buyPrice?: number
@@ -715,6 +827,23 @@ export interface CompsData {
   items?: CompItem[]
 }
 
+export interface CompBadges {
+  price: 'renovated' | 'median' | 'as_is' | null
+  condition: 'reno' | 'dated' | 'distressed' | 'unverified' | null
+  pocket: 'in' | 'equal' | 'above' | 'below' | 'unknown' | null
+  /** How the pocket match was earned — tract | block | name; null when out */
+  pocketVia: 'tract' | 'block' | 'name' | null
+  trust: 'verified' | 'partial' | 'unverified' | null
+  checks: {
+    pocket: boolean | null
+    size: boolean | null
+    fresh: boolean | null
+    priceFit: boolean | null
+  }
+  /** Failed filters the run's expansion rescued (empty = strict admission) */
+  widenedOn: string[]
+}
+
 export interface CompItem {
   id?: string
   selectionPending?: boolean
@@ -747,6 +876,7 @@ export interface CompItem {
   yearBuilt?: number | null
   lotSizeAcres?: number | null
   lotSizeSquareFeet?: number | null
+  propertyType?: string | null
   adjustedPrice?: number | null
   qualityScore?: number | null
   condition?: string | null
@@ -754,6 +884,14 @@ export interface CompItem {
   photos?: string[]
   /** Subdivision name (if available) */
   subdivision?: string | null
+  /** Set-B evidence fields — serialized from the pipeline */
+  landAssessedValue?: number | null
+  evidenceVerification?: { staleness?: string | null; priceCheck?: string | null; pocketRatio?: number | null; flags?: string[] | null } | null
+  /** Sqft-conflict evidence — provider-vs-marketed divergence + permit verdict */
+  sqftEvidence?: { provider: number | null; listing: number | null; conflict: string | null; resolution: string | null; note: string | null } | null
+  /** Land extraction — sale − contributory improvement = implied land value */
+  landEvidence?: { address?: string | null; impliedLand: number; landPpsf: number; lotSf: number; basis: string } | null
+  improvementAssessedValue?: number | null
   /** Foundation type (e.g., Slab, Crawl Space, Basement) */
   foundationType?: string | null
   /** Building style (e.g., Colonial, Cape Cod, Ranch) */
@@ -805,12 +943,23 @@ export interface CompItem {
   /** Which comp group: 'arv' (Group A, drives valuation), 'as_is' (Group B, market intel), or null */
   compGroup?: 'arv' | 'as_is' | null
   /**
+   * Set-B verdict — which comps the server's verified ARV actually used.
+   * 'anchor' = the sale the ARV is priced off, 'driver' = verified evidence,
+   * 'pool' = evaluated but not a driver, 'excluded' = not in the Set-B pool.
+   * Display-only; separate from the appraisal-grid enabled/compGroup state.
+   */
+  bRole?: 'anchor' | 'driver' | 'pool' | 'excluded' | null
+  /** Server↔client trust contract — the server computes, the card renders */
+  badges?: CompBadges | null
+  /**
    * Reviewer's manual tier pin — 'arv' or 'as_is' — assigned on the comp
    * card. Rides alongside the automatic evidence class; never rewrites it.
    */
   userTier?: 'arv' | 'as_is' | null
   /** Census tract GEOID (Census geocoder, free tier) */
   censusTract?: string | null
+  /** 12-digit Census block-group GEOID */
+  censusBlockGroup?: string | null
   /** Road-barrier proxy — census tract differs from the subject's. Absent = unverified. */
   crossesMajorRoad?: boolean
   /** Same census block group as the subject — same micro-market evidence. Absent/null = unverified. */
@@ -828,6 +977,8 @@ export interface CompItem {
   } | null
   /** Redfin MLS property-details — shadow evidence */
   listingDetails?: ListingDetails | null
+  /** Listing-source physical fields resolved after valuation; display-only. */
+  physicalCharacteristics?: PhysicalCharacteristics
   /** Price percentile among all comps (1 = highest, 100 = lowest) */
   pricePercentile?: number | null
   /** Reasons why this comp was disabled (if any) */
@@ -947,6 +1098,8 @@ export type EnrichmentData = {
 export interface QueueAnalysisResult {
   success: boolean
   jobId?: string
+  /** The job was already live — this response attaches to it, not starts it */
+  alreadyRunning?: boolean
   error?: string
   /** Full analysis result (synchronous response — legacy) */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1036,6 +1189,7 @@ export async function queueAnalysis(request: AnalyzeRequest): Promise<QueueAnaly
       error?: string
       data?: {
         jobId: string
+        alreadyRunning?: boolean
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         result?: Record<string, any>
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1061,6 +1215,7 @@ export async function queueAnalysis(request: AnalyzeRequest): Promise<QueueAnaly
     return {
       success: true,
       jobId,
+      alreadyRunning: result.data?.alreadyRunning,
       result: result.data?.result,
       partialResult: result.data?.partialResult,
       enrichment: result.data?.enrichment,

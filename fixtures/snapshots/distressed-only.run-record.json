@@ -1,0 +1,801 @@
+{
+  "recordId": "fixture-distressed-only",
+  "jobId": "fixture-distressed-only",
+  "payloadHash": "69bbdb62200f825a85b1707eb515173c59bb3fa7c1bc8c9ff145829d866333b4",
+  "exportedAt": "2026-10-05T00:00:00.000Z",
+  "payload": {
+    "recordVersion": "run-record.v1",
+    "jobId": "fixture-distressed-only",
+    "userId": "fixture-user",
+    "status": "completed",
+    "recordedAt": "2026-10-05T00:00:00.000Z",
+    "request": {
+      "search": {
+        "address": "600 Distressed Way"
+      },
+      "searchOptions": null,
+      "enrichment": null,
+      "evalParams": {},
+      "skipCache": true,
+      "isRefresh": false,
+      "cachedJobId": null
+    },
+    "property": {
+      "address": "600 Distressed Way",
+      "city": "Fixture",
+      "state": "GA",
+      "zipCode": "30000",
+      "clip": "fixture-distressed-only"
+    },
+    "rules": {
+      "harnessVersion": "og-2026.10.05.1",
+      "pipelineVersion": "5.0",
+      "valuationDate": "2026-10-05",
+      "models": {
+        "fixture": "synthetic"
+      },
+      "providers": {
+        "property": "fixture"
+      }
+    },
+    "evidence": {
+      "synthetic": true,
+      "subject": {
+        "address": "100 Frozen Way",
+        "squareFeet": 1000,
+        "yearBuilt": 1980,
+        "censusTract": "T-1",
+        "subdivision": "Fixture Estates",
+        "neighborhoodName": "Fixture Estates",
+        "lotSizeSquareFeet": 8000,
+        "avmValue": null,
+        "condition": "Heavy Rehab"
+      },
+      "compPool": [
+        {
+          "address": "d1 Fixture Ct",
+          "isEnabled": true,
+          "salePrice": 80000,
+          "saleDate": "2026-08-01",
+          "squareFeet": 1000,
+          "pricePerSqft": 80,
+          "adjustedPrice": 80000,
+          "distanceMiles": 0.2,
+          "sameBlockGroup": true,
+          "censusTract": "T-1",
+          "subdivision": "Fixture Estates",
+          "neighborhoodName": "Fixture Estates",
+          "yearBuilt": 1980,
+          "lotSizeSquareFeet": 8000,
+          "propertyType": "Single Family Residence",
+          "crossesMajorRoad": false,
+          "classification": {
+            "type": "as_is"
+          },
+          "curbAppeal": {
+            "condition": "distressed",
+            "confidence": 90
+          },
+          "evidenceVerification": {
+            "staleness": "current",
+            "saleAgeDays": 20,
+            "preferredSaleAgeDays": 180,
+            "marketFit": "below_pocket",
+            "transactionCheck": "clean",
+            "priceCheck": "plausible",
+            "flags": [
+              "Sale below current pocket"
+            ]
+          },
+          "appraisalRules": {
+            "totalAdjustment": 0
+          }
+        },
+        {
+          "address": "d2 Fixture Ct",
+          "isEnabled": true,
+          "salePrice": 90000,
+          "saleDate": "2026-08-01",
+          "squareFeet": 1000,
+          "pricePerSqft": 90,
+          "adjustedPrice": 90000,
+          "distanceMiles": 0.2,
+          "sameBlockGroup": true,
+          "censusTract": "T-1",
+          "subdivision": "Fixture Estates",
+          "neighborhoodName": "Fixture Estates",
+          "yearBuilt": 1980,
+          "lotSizeSquareFeet": 8000,
+          "propertyType": "Single Family Residence",
+          "crossesMajorRoad": false,
+          "classification": {
+            "type": "as_is"
+          },
+          "curbAppeal": {
+            "condition": "distressed",
+            "confidence": 90
+          },
+          "evidenceVerification": {
+            "staleness": "current",
+            "saleAgeDays": 20,
+            "preferredSaleAgeDays": 180,
+            "marketFit": "below_pocket",
+            "transactionCheck": "clean",
+            "priceCheck": "plausible",
+            "flags": [
+              "Sale below current pocket"
+            ]
+          },
+          "appraisalRules": {
+            "totalAdjustment": 0
+          }
+        }
+      ],
+      "attempts": [
+        {
+          "name": "attempt 1",
+          "subject": {
+            "address": "100 Frozen Way",
+            "squareFeet": 1000,
+            "yearBuilt": 1980,
+            "censusTract": "T-1",
+            "subdivision": "Fixture Estates",
+            "neighborhoodName": "Fixture Estates",
+            "lotSizeSquareFeet": 8000,
+            "avmValue": null,
+            "condition": "Heavy Rehab"
+          },
+          "comps": [
+            {
+              "address": "d1 Fixture Ct",
+              "isEnabled": true,
+              "salePrice": 80000,
+              "saleDate": "2026-08-01",
+              "squareFeet": 1000,
+              "pricePerSqft": 80,
+              "adjustedPrice": 80000,
+              "distanceMiles": 0.2,
+              "sameBlockGroup": true,
+              "censusTract": "T-1",
+              "subdivision": "Fixture Estates",
+              "neighborhoodName": "Fixture Estates",
+              "yearBuilt": 1980,
+              "lotSizeSquareFeet": 8000,
+              "propertyType": "Single Family Residence",
+              "crossesMajorRoad": false,
+              "classification": {
+                "type": "as_is"
+              },
+              "curbAppeal": {
+                "condition": "distressed",
+                "confidence": 90
+              },
+              "evidenceVerification": {
+                "staleness": "current",
+                "saleAgeDays": 20,
+                "preferredSaleAgeDays": 180,
+                "marketFit": "below_pocket",
+                "transactionCheck": "clean",
+                "priceCheck": "plausible",
+                "flags": [
+                  "Sale below current pocket"
+                ]
+              },
+              "appraisalRules": {
+                "totalAdjustment": 0
+              }
+            },
+            {
+              "address": "d2 Fixture Ct",
+              "isEnabled": true,
+              "salePrice": 90000,
+              "saleDate": "2026-08-01",
+              "squareFeet": 1000,
+              "pricePerSqft": 90,
+              "adjustedPrice": 90000,
+              "distanceMiles": 0.2,
+              "sameBlockGroup": true,
+              "censusTract": "T-1",
+              "subdivision": "Fixture Estates",
+              "neighborhoodName": "Fixture Estates",
+              "yearBuilt": 1980,
+              "lotSizeSquareFeet": 8000,
+              "propertyType": "Single Family Residence",
+              "crossesMajorRoad": false,
+              "classification": {
+                "type": "as_is"
+              },
+              "curbAppeal": {
+                "condition": "distressed",
+                "confidence": 90
+              },
+              "evidenceVerification": {
+                "staleness": "current",
+                "saleAgeDays": 20,
+                "preferredSaleAgeDays": 180,
+                "marketFit": "below_pocket",
+                "transactionCheck": "clean",
+                "priceCheck": "plausible",
+                "flags": [
+                  "Sale below current pocket"
+                ]
+              },
+              "appraisalRules": {
+                "totalAdjustment": 0
+              }
+            }
+          ],
+          "options": {
+            "rehabCost": null
+          },
+          "result": {
+            "arv": null,
+            "flags": [
+              "d1 Fixture Ct: verification — Sale below current pocket",
+              "d2 Fixture Ct: verification — Sale below current pocket",
+              "no retail-priced evidence — ARV withheld (as-is sales are floor evidence only)"
+            ],
+            "contribs": [
+              {
+                "comp": {
+                  "address": "d1 Fixture Ct",
+                  "isEnabled": true,
+                  "salePrice": 80000,
+                  "saleDate": "2026-08-01",
+                  "squareFeet": 1000,
+                  "pricePerSqft": 80,
+                  "adjustedPrice": 80000,
+                  "distanceMiles": 0.2,
+                  "sameBlockGroup": true,
+                  "censusTract": "T-1",
+                  "subdivision": "Fixture Estates",
+                  "neighborhoodName": "Fixture Estates",
+                  "yearBuilt": 1980,
+                  "lotSizeSquareFeet": 8000,
+                  "propertyType": "Single Family Residence",
+                  "crossesMajorRoad": false,
+                  "classification": {
+                    "type": "as_is"
+                  },
+                  "curbAppeal": {
+                    "condition": "distressed",
+                    "confidence": 90
+                  },
+                  "evidenceVerification": {
+                    "staleness": "current",
+                    "saleAgeDays": 20,
+                    "preferredSaleAgeDays": 180,
+                    "marketFit": "below_pocket",
+                    "transactionCheck": "clean",
+                    "priceCheck": "plausible",
+                    "flags": [
+                      "Sale below current pocket"
+                    ]
+                  },
+                  "appraisalRules": {
+                    "totalAdjustment": 0
+                  }
+                },
+                "contrib": 80000,
+                "weight": 1,
+                "tier": "as_is"
+              },
+              {
+                "comp": {
+                  "address": "d2 Fixture Ct",
+                  "isEnabled": true,
+                  "salePrice": 90000,
+                  "saleDate": "2026-08-01",
+                  "squareFeet": 1000,
+                  "pricePerSqft": 90,
+                  "adjustedPrice": 90000,
+                  "distanceMiles": 0.2,
+                  "sameBlockGroup": true,
+                  "censusTract": "T-1",
+                  "subdivision": "Fixture Estates",
+                  "neighborhoodName": "Fixture Estates",
+                  "yearBuilt": 1980,
+                  "lotSizeSquareFeet": 8000,
+                  "propertyType": "Single Family Residence",
+                  "crossesMajorRoad": false,
+                  "classification": {
+                    "type": "as_is"
+                  },
+                  "curbAppeal": {
+                    "condition": "distressed",
+                    "confidence": 90
+                  },
+                  "evidenceVerification": {
+                    "staleness": "current",
+                    "saleAgeDays": 20,
+                    "preferredSaleAgeDays": 180,
+                    "marketFit": "below_pocket",
+                    "transactionCheck": "clean",
+                    "priceCheck": "plausible",
+                    "flags": [
+                      "Sale below current pocket"
+                    ]
+                  },
+                  "appraisalRules": {
+                    "totalAdjustment": 0
+                  }
+                },
+                "contrib": 90000,
+                "weight": 1,
+                "tier": "as_is"
+              }
+            ],
+            "drivers": [],
+            "bracket": "ok",
+            "conf": "none",
+            "source": "T0 anchor",
+            "landRateSource": null,
+            "sqftRateSource": null
+          },
+          "checks": [
+            {
+              "ruleId": "evidence.market_fit.below_pocket",
+              "message": "d1 Fixture Ct: verification — Sale below current pocket"
+            },
+            {
+              "ruleId": "evidence.market_fit.below_pocket",
+              "message": "d2 Fixture Ct: verification — Sale below current pocket"
+            },
+            {
+              "ruleId": "setb.no_retail_evidence",
+              "message": "no retail-priced evidence — ARV withheld (as-is sales are floor evidence only)"
+            }
+          ],
+          "verificationFailures": []
+        }
+      ],
+      "bAttemptTrail": [
+        "attempt 1 — withheld"
+      ]
+    },
+    "attempts": [
+      {
+        "name": "attempt 1",
+        "subject": {
+          "address": "100 Frozen Way",
+          "squareFeet": 1000,
+          "yearBuilt": 1980,
+          "censusTract": "T-1",
+          "subdivision": "Fixture Estates",
+          "neighborhoodName": "Fixture Estates",
+          "lotSizeSquareFeet": 8000,
+          "avmValue": null,
+          "condition": "Heavy Rehab"
+        },
+        "comps": [
+          {
+            "address": "d1 Fixture Ct",
+            "isEnabled": true,
+            "salePrice": 80000,
+            "saleDate": "2026-08-01",
+            "squareFeet": 1000,
+            "pricePerSqft": 80,
+            "adjustedPrice": 80000,
+            "distanceMiles": 0.2,
+            "sameBlockGroup": true,
+            "censusTract": "T-1",
+            "subdivision": "Fixture Estates",
+            "neighborhoodName": "Fixture Estates",
+            "yearBuilt": 1980,
+            "lotSizeSquareFeet": 8000,
+            "propertyType": "Single Family Residence",
+            "crossesMajorRoad": false,
+            "classification": {
+              "type": "as_is"
+            },
+            "curbAppeal": {
+              "condition": "distressed",
+              "confidence": 90
+            },
+            "evidenceVerification": {
+              "staleness": "current",
+              "saleAgeDays": 20,
+              "preferredSaleAgeDays": 180,
+              "marketFit": "below_pocket",
+              "transactionCheck": "clean",
+              "priceCheck": "plausible",
+              "flags": [
+                "Sale below current pocket"
+              ]
+            },
+            "appraisalRules": {
+              "totalAdjustment": 0
+            }
+          },
+          {
+            "address": "d2 Fixture Ct",
+            "isEnabled": true,
+            "salePrice": 90000,
+            "saleDate": "2026-08-01",
+            "squareFeet": 1000,
+            "pricePerSqft": 90,
+            "adjustedPrice": 90000,
+            "distanceMiles": 0.2,
+            "sameBlockGroup": true,
+            "censusTract": "T-1",
+            "subdivision": "Fixture Estates",
+            "neighborhoodName": "Fixture Estates",
+            "yearBuilt": 1980,
+            "lotSizeSquareFeet": 8000,
+            "propertyType": "Single Family Residence",
+            "crossesMajorRoad": false,
+            "classification": {
+              "type": "as_is"
+            },
+            "curbAppeal": {
+              "condition": "distressed",
+              "confidence": 90
+            },
+            "evidenceVerification": {
+              "staleness": "current",
+              "saleAgeDays": 20,
+              "preferredSaleAgeDays": 180,
+              "marketFit": "below_pocket",
+              "transactionCheck": "clean",
+              "priceCheck": "plausible",
+              "flags": [
+                "Sale below current pocket"
+              ]
+            },
+            "appraisalRules": {
+              "totalAdjustment": 0
+            }
+          }
+        ],
+        "options": {
+          "rehabCost": null
+        },
+        "result": {
+          "arv": null,
+          "flags": [
+            "d1 Fixture Ct: verification — Sale below current pocket",
+            "d2 Fixture Ct: verification — Sale below current pocket",
+            "no retail-priced evidence — ARV withheld (as-is sales are floor evidence only)"
+          ],
+          "contribs": [
+            {
+              "comp": {
+                "address": "d1 Fixture Ct",
+                "isEnabled": true,
+                "salePrice": 80000,
+                "saleDate": "2026-08-01",
+                "squareFeet": 1000,
+                "pricePerSqft": 80,
+                "adjustedPrice": 80000,
+                "distanceMiles": 0.2,
+                "sameBlockGroup": true,
+                "censusTract": "T-1",
+                "subdivision": "Fixture Estates",
+                "neighborhoodName": "Fixture Estates",
+                "yearBuilt": 1980,
+                "lotSizeSquareFeet": 8000,
+                "propertyType": "Single Family Residence",
+                "crossesMajorRoad": false,
+                "classification": {
+                  "type": "as_is"
+                },
+                "curbAppeal": {
+                  "condition": "distressed",
+                  "confidence": 90
+                },
+                "evidenceVerification": {
+                  "staleness": "current",
+                  "saleAgeDays": 20,
+                  "preferredSaleAgeDays": 180,
+                  "marketFit": "below_pocket",
+                  "transactionCheck": "clean",
+                  "priceCheck": "plausible",
+                  "flags": [
+                    "Sale below current pocket"
+                  ]
+                },
+                "appraisalRules": {
+                  "totalAdjustment": 0
+                }
+              },
+              "contrib": 80000,
+              "weight": 1,
+              "tier": "as_is"
+            },
+            {
+              "comp": {
+                "address": "d2 Fixture Ct",
+                "isEnabled": true,
+                "salePrice": 90000,
+                "saleDate": "2026-08-01",
+                "squareFeet": 1000,
+                "pricePerSqft": 90,
+                "adjustedPrice": 90000,
+                "distanceMiles": 0.2,
+                "sameBlockGroup": true,
+                "censusTract": "T-1",
+                "subdivision": "Fixture Estates",
+                "neighborhoodName": "Fixture Estates",
+                "yearBuilt": 1980,
+                "lotSizeSquareFeet": 8000,
+                "propertyType": "Single Family Residence",
+                "crossesMajorRoad": false,
+                "classification": {
+                  "type": "as_is"
+                },
+                "curbAppeal": {
+                  "condition": "distressed",
+                  "confidence": 90
+                },
+                "evidenceVerification": {
+                  "staleness": "current",
+                  "saleAgeDays": 20,
+                  "preferredSaleAgeDays": 180,
+                  "marketFit": "below_pocket",
+                  "transactionCheck": "clean",
+                  "priceCheck": "plausible",
+                  "flags": [
+                    "Sale below current pocket"
+                  ]
+                },
+                "appraisalRules": {
+                  "totalAdjustment": 0
+                }
+              },
+              "contrib": 90000,
+              "weight": 1,
+              "tier": "as_is"
+            }
+          ],
+          "drivers": [],
+          "bracket": "ok",
+          "conf": "none",
+          "source": "T0 anchor",
+          "landRateSource": null,
+          "sqftRateSource": null
+        },
+        "checks": [
+          {
+            "ruleId": "evidence.market_fit.below_pocket",
+            "message": "d1 Fixture Ct: verification — Sale below current pocket"
+          },
+          {
+            "ruleId": "evidence.market_fit.below_pocket",
+            "message": "d2 Fixture Ct: verification — Sale below current pocket"
+          },
+          {
+            "ruleId": "setb.no_retail_evidence",
+            "message": "no retail-priced evidence — ARV withheld (as-is sales are floor evidence only)"
+          }
+        ],
+        "verificationFailures": []
+      }
+    ],
+    "result": {
+      "response": {
+        "subject": {
+          "id": "fixture-distressed-only",
+          "address": "600 Distressed Way",
+          "city": "Fixture",
+          "state": "GA",
+          "zipCode": "30000",
+          "squareFeet": 1000
+        },
+        "valuation": {
+          "arv": null,
+          "arvB": null,
+          "resultGrade": "withheld",
+          "processGrade": "clean",
+          "bMechanics": {
+            "arv": null,
+            "flags": [
+              "d1 Fixture Ct: verification — Sale below current pocket",
+              "d2 Fixture Ct: verification — Sale below current pocket",
+              "no retail-priced evidence — ARV withheld (as-is sales are floor evidence only)"
+            ],
+            "contribs": [
+              {
+                "comp": {
+                  "address": "d1 Fixture Ct",
+                  "isEnabled": true,
+                  "salePrice": 80000,
+                  "saleDate": "2026-08-01",
+                  "squareFeet": 1000,
+                  "pricePerSqft": 80,
+                  "adjustedPrice": 80000,
+                  "distanceMiles": 0.2,
+                  "sameBlockGroup": true,
+                  "censusTract": "T-1",
+                  "subdivision": "Fixture Estates",
+                  "neighborhoodName": "Fixture Estates",
+                  "yearBuilt": 1980,
+                  "lotSizeSquareFeet": 8000,
+                  "propertyType": "Single Family Residence",
+                  "crossesMajorRoad": false,
+                  "classification": {
+                    "type": "as_is"
+                  },
+                  "curbAppeal": {
+                    "condition": "distressed",
+                    "confidence": 90
+                  },
+                  "evidenceVerification": {
+                    "staleness": "current",
+                    "saleAgeDays": 20,
+                    "preferredSaleAgeDays": 180,
+                    "marketFit": "below_pocket",
+                    "transactionCheck": "clean",
+                    "priceCheck": "plausible",
+                    "flags": [
+                      "Sale below current pocket"
+                    ]
+                  },
+                  "appraisalRules": {
+                    "totalAdjustment": 0
+                  }
+                },
+                "contrib": 80000,
+                "weight": 1,
+                "tier": "as_is"
+              },
+              {
+                "comp": {
+                  "address": "d2 Fixture Ct",
+                  "isEnabled": true,
+                  "salePrice": 90000,
+                  "saleDate": "2026-08-01",
+                  "squareFeet": 1000,
+                  "pricePerSqft": 90,
+                  "adjustedPrice": 90000,
+                  "distanceMiles": 0.2,
+                  "sameBlockGroup": true,
+                  "censusTract": "T-1",
+                  "subdivision": "Fixture Estates",
+                  "neighborhoodName": "Fixture Estates",
+                  "yearBuilt": 1980,
+                  "lotSizeSquareFeet": 8000,
+                  "propertyType": "Single Family Residence",
+                  "crossesMajorRoad": false,
+                  "classification": {
+                    "type": "as_is"
+                  },
+                  "curbAppeal": {
+                    "condition": "distressed",
+                    "confidence": 90
+                  },
+                  "evidenceVerification": {
+                    "staleness": "current",
+                    "saleAgeDays": 20,
+                    "preferredSaleAgeDays": 180,
+                    "marketFit": "below_pocket",
+                    "transactionCheck": "clean",
+                    "priceCheck": "plausible",
+                    "flags": [
+                      "Sale below current pocket"
+                    ]
+                  },
+                  "appraisalRules": {
+                    "totalAdjustment": 0
+                  }
+                },
+                "contrib": 90000,
+                "weight": 1,
+                "tier": "as_is"
+              }
+            ],
+            "drivers": [],
+            "bracket": "ok",
+            "conf": "none",
+            "source": "T0 anchor",
+            "landRateSource": null,
+            "sqftRateSource": null,
+            "harnessVersion": "og-2026.10.05.1",
+            "checks": [
+              {
+                "ruleId": "evidence.market_fit.below_pocket",
+                "message": "d1 Fixture Ct: verification — Sale below current pocket"
+              },
+              {
+                "ruleId": "evidence.market_fit.below_pocket",
+                "message": "d2 Fixture Ct: verification — Sale below current pocket"
+              },
+              {
+                "ruleId": "setb.no_retail_evidence",
+                "message": "no retail-priced evidence — ARV withheld (as-is sales are floor evidence only)"
+              }
+            ],
+            "attemptTrail": [
+              "attempt 1 — withheld"
+            ]
+          }
+        },
+        "comps": {
+          "total": 2,
+          "enabledCount": 2,
+          "items": [
+            {
+              "address": "d1 Fixture Ct",
+              "isEnabled": true,
+              "salePrice": 80000,
+              "saleDate": "2026-08-01",
+              "squareFeet": 1000,
+              "pricePerSqft": 80,
+              "adjustedPrice": 80000,
+              "distanceMiles": 0.2,
+              "sameBlockGroup": true,
+              "censusTract": "T-1",
+              "subdivision": "Fixture Estates",
+              "neighborhoodName": "Fixture Estates",
+              "yearBuilt": 1980,
+              "lotSizeSquareFeet": 8000,
+              "propertyType": "Single Family Residence",
+              "crossesMajorRoad": false,
+              "classification": {
+                "type": "as_is"
+              },
+              "curbAppeal": {
+                "condition": "distressed",
+                "confidence": 90
+              },
+              "evidenceVerification": {
+                "staleness": "current",
+                "saleAgeDays": 20,
+                "preferredSaleAgeDays": 180,
+                "marketFit": "below_pocket",
+                "transactionCheck": "clean",
+                "priceCheck": "plausible",
+                "flags": [
+                  "Sale below current pocket"
+                ]
+              },
+              "appraisalRules": {
+                "totalAdjustment": 0
+              }
+            },
+            {
+              "address": "d2 Fixture Ct",
+              "isEnabled": true,
+              "salePrice": 90000,
+              "saleDate": "2026-08-01",
+              "squareFeet": 1000,
+              "pricePerSqft": 90,
+              "adjustedPrice": 90000,
+              "distanceMiles": 0.2,
+              "sameBlockGroup": true,
+              "censusTract": "T-1",
+              "subdivision": "Fixture Estates",
+              "neighborhoodName": "Fixture Estates",
+              "yearBuilt": 1980,
+              "lotSizeSquareFeet": 8000,
+              "propertyType": "Single Family Residence",
+              "crossesMajorRoad": false,
+              "classification": {
+                "type": "as_is"
+              },
+              "curbAppeal": {
+                "condition": "distressed",
+                "confidence": 90
+              },
+              "evidenceVerification": {
+                "staleness": "current",
+                "saleAgeDays": 20,
+                "preferredSaleAgeDays": 180,
+                "marketFit": "below_pocket",
+                "transactionCheck": "clean",
+                "priceCheck": "plausible",
+                "flags": [
+                  "Sale below current pocket"
+                ]
+              },
+              "appraisalRules": {
+                "totalAdjustment": 0
+              }
+            }
+          ]
+        }
+      },
+      "errorCode": null,
+      "errorMessage": null
+    }
+  }
+}

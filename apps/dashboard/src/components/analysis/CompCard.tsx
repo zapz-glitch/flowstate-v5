@@ -1,7 +1,7 @@
 'use client'
 
 import { memo, useMemo, useState } from 'react'
-import { ChevronRight, Check, Loader2 } from 'lucide-react'
+import { ChevronRight, Check, Loader2, CheckCircle2, AlertTriangle, XCircle, MapPin, Ruler, Clock, TrendingUp, Expand } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 import { subdivisionsMatch } from '@flowstate-api/shared'
@@ -14,6 +14,27 @@ import { formatFilterType, formatAdjustmentType, formatCurrency, getCompKey, fmt
 import { compFeatureMatches, featureState, matchDotClass, matchTextClass } from './feature-match'
 import { StreetViewImage } from './StreetViewImage'
 import { RuleMatchDetails } from './RuleMatchDetails'
+import { PhysicalCharacteristicsLine } from './PhysicalCharacteristicsLine'
+
+function formatCensusTract(value?: string | null): string {
+  if (!value) return '—'
+  const tract = value.length >= 6 ? value.slice(-6) : value.padStart(6, '0')
+  return `${tract.slice(0, 4)}.${tract.slice(4)}`
+}
+
+function formatBlockGroup(value?: string | null): string {
+  return value ? value.slice(-1) : '—'
+}
+
+const normalizeGeoName = (value?: string | null) =>
+  value?.toLowerCase().replace(/[^a-z0-9]/g, '') || null
+
+function filterStatusLabel(status?: 'passed' | 'failed' | 'not_verified'): string {
+  if (status === 'passed') return '✓ passed'
+  if (status === 'failed') return '✗ failed'
+  if (status === 'not_verified') return 'not verified'
+  return 'not reported'
+}
 
 export interface CompCardProps {
   comp: CompItem
@@ -75,14 +96,28 @@ function CompCardInner({
   // Feature-vs-subject verification — green/red/neutral per displayable field
   const featureMatches = useMemo(() => compFeatureMatches(comp, subject), [comp, subject])
   const fm = (key: Parameters<typeof featureState>[1]) => featureState(featureMatches, key)
+  const tractMatches = !!(subject?.censusTract && comp.censusTract === subject.censusTract)
+  const blockGroupMatches = !!(
+    subject?.censusBlockGroup && comp.censusBlockGroup === subject.censusBlockGroup
+  ) || comp.sameBlockGroup === true
+  const neighborhoodMatches = !!(
+    subject?.neighborhoodName
+    && comp.neighborhoodName
+    && normalizeGeoName(subject.neighborhoodName) === normalizeGeoName(comp.neighborhoodName)
+  )
+  const geoMatched = tractMatches || blockGroupMatches || neighborhoodMatches || hasSubdivisionMatch
 
   return (
     <div
       data-card-key={cardKey}
+      data-geo-matched={geoMatched ? 'true' : 'false'}
       className={cn(
-        'transition-all duration-300 border border-border rounded-lg',
+        'transition-all duration-300 border border-border rounded-lg border-l-4',
+        comp.bRole === 'anchor' || comp.bRole === 'driver' ? 'border-l-emerald-500'
+          : comp.bRole === 'pool' ? 'border-l-sky-500'
+          : 'border-l-neutral-600',
         comp.isBestComp && isEnabled && 'border-amber-500/40 ring-1 ring-amber-500/20',
-        isEnabled ? 'border-l-2 border-l-emerald-500/50' : 'opacity-70'
+        !isEnabled && 'opacity-70'
       )}
     >
       <div className="px-4 py-3">
@@ -95,6 +130,29 @@ function CompCardInner({
             )}>
               {index + 1}
             </div>
+
+            {comp.bRole && (
+              <div
+                className={cn(
+                  'h-6 px-1.5 rounded flex items-center text-[10px] font-bold flex-shrink-0',
+                  comp.bRole === 'anchor' ? 'bg-amber-500/20 text-amber-500 ring-1 ring-amber-500/40'
+                    : comp.bRole === 'driver' ? 'bg-emerald-500/15 text-emerald-600'
+                    : comp.bRole === 'pool' ? 'bg-foreground/8 text-foreground-secondary'
+                    : 'bg-muted text-foreground-tertiary'
+                )}
+                title={
+                  comp.bRole === 'anchor' ? 'The verified sale the ARV is priced off'
+                    : comp.bRole === 'driver' ? 'Verified evidence inside the ARV answer'
+                    : comp.bRole === 'pool' ? 'Evaluated — supports the answer without setting it'
+                    : 'Excluded from the ARV evidence'
+                }
+              >
+                {comp.bRole === 'anchor' ? 'ARV'
+                  : comp.bRole === 'driver' ? 'EVIDENCE'
+                  : comp.bRole === 'pool' ? 'SUPPORT'
+                  : 'excluded'}
+              </div>
+            )}
 
             {comp.flip && (
               <div
@@ -115,22 +173,75 @@ function CompCardInner({
                 {comp.userTier === 'arv' ? 'ARV' : 'AS-IS'}·YOU
               </div>
             )}
-            {comp.classification && (
+            {comp.badges?.price && (
               <div
                 className={cn(
                   'h-6 px-1.5 rounded flex items-center text-[10px] font-bold flex-shrink-0',
-                  comp.classification.type === 'after_renovation' ? 'bg-emerald-500/15 text-emerald-600'
-                    : comp.classification.type === 'as_is' ? 'bg-orange-500/15 text-orange-600'
-                    : comp.classification.type === 'transitional' ? 'bg-blue-500/15 text-blue-600'
+                  comp.badges.price === 'renovated' ? 'bg-emerald-500/15 text-emerald-600'
+                    : comp.badges.price === 'as_is' ? 'bg-orange-500/15 text-orange-600'
+                    : 'bg-blue-500/15 text-blue-600'
+                )}
+                title={comp.classification?.reasoning || `Price: ${comp.badges.price}`}
+              >
+                {comp.badges.price === 'renovated' ? 'RENOVATED'
+                  : comp.badges.price === 'as_is' ? 'AS-IS'
+                  : 'MEDIAN'}
+              </div>
+            )}
+            {comp.badges?.trust && (
+              <div
+                className={cn(
+                  'h-6 w-6 rounded flex items-center justify-center flex-shrink-0',
+                  comp.badges.trust === 'verified' ? 'text-emerald-500'
+                    : comp.badges.trust === 'partial' ? 'text-amber-500'
+                    : 'text-red-400'
+                )}
+                title={
+                  comp.badges.trust === 'verified' ? 'Verified — evidence checks passed'
+                    : comp.badges.trust === 'partial' ? 'Partially verified — some checks missing'
+                    : 'Unverified — an evidence check failed'
+                }
+              >
+                {comp.badges.trust === 'verified' ? <CheckCircle2 className="w-4 h-4" />
+                  : comp.badges.trust === 'partial' ? <AlertTriangle className="w-4 h-4" />
+                  : <XCircle className="w-4 h-4" />}
+              </div>
+            )}
+            {comp.badges?.pocket && comp.badges.pocket !== 'unknown' && (
+              <span
+                className={cn(
+                  'h-6 px-1.5 rounded inline-flex items-center gap-0.5 text-[10px] font-medium flex-shrink-0',
+                  comp.badges.pocket === 'in' ? 'bg-emerald-500/10 text-emerald-500'
+                    : comp.badges.pocket === 'equal' ? 'bg-blue-500/10 text-blue-400'
                     : 'bg-muted text-foreground-tertiary'
                 )}
-                title={comp.classification.reasoning || `Price classification: ${comp.classification.type}`}
+                title={
+                  comp.badges.pocket === 'in' ? 'In the pocket — census tract or block-group match'
+                    : comp.badges.pocket === 'equal' ? 'Out of pocket — trades at the subject\u2019s level'
+                    : comp.badges.pocket === 'above' ? 'Out of pocket — trades above the subject\u2019s market'
+                    : 'Out of pocket — trades below the subject\u2019s market'
+                }
               >
-                {comp.classification.type === 'after_renovation' ? 'ARV'
-                  : comp.classification.type === 'as_is' ? 'AS-IS'
-                  : comp.classification.type === 'transitional' ? 'PARTIAL'
-                  : 'UNVERIFIED'}
-              </div>
+                <MapPin className="w-3 h-3" />
+                {comp.badges.pocket === 'in' ? 'Pocket' : `Out ${comp.badges.pocket === 'equal' ? '=' : comp.badges.pocket === 'above' ? '>' : '<'}`}
+              </span>
+            )}
+            {comp.badges && (
+              <span
+                className="h-6 px-1 rounded inline-flex items-center gap-1 flex-shrink-0"
+                title={[
+                  `${comp.badges.checks.pocket === true ? '✓' : '✗'} pocket`,
+                  `${comp.badges.checks.size === true ? '✓' : '✗'} size`,
+                  `${comp.badges.checks.fresh === true ? '✓' : '✗'} fresh sale`,
+                  `${comp.badges.checks.priceFit === true ? '✓' : '✗'} price fits`,
+                  ...(comp.badges.widenedOn.length ? [`widened in on: ${comp.badges.widenedOn.join(', ')}`] : []),
+                ].join('\n')}
+              >
+                <Ruler className={cn('w-3 h-3', comp.badges.checks.size === true ? 'text-emerald-500' : 'text-foreground-tertiary/30')} />
+                <Clock className={cn('w-3 h-3', comp.badges.checks.fresh === true ? 'text-emerald-500' : 'text-foreground-tertiary/30')} />
+                <TrendingUp className={cn('w-3 h-3', comp.badges.checks.priceFit === true ? 'text-emerald-500' : 'text-foreground-tertiary/30')} />
+                {comp.badges.widenedOn.length > 0 && <Expand className="w-3 h-3 text-amber-500" />}
+              </span>
             )}
             {comp.curbAppeal && comp.curbAppeal.condition && comp.curbAppeal.condition !== 'unknown' && (
               <div
@@ -145,6 +256,34 @@ function CompCardInner({
                 {comp.curbAppeal.condition === 'renovated' ? 'RENO'
                   : comp.curbAppeal.condition === 'dated' ? 'DATED'
                   : 'DISTRESSED'}
+              </div>
+            )}
+            {comp.evidenceVerification &&
+              (comp.evidenceVerification.priceCheck !== 'corroborated' || comp.evidenceVerification.staleness === 'stale') && (
+              <div
+                className={cn(
+                  'h-6 px-1.5 rounded flex items-center text-[10px] font-bold flex-shrink-0',
+                  comp.evidenceVerification.staleness === 'stale' ? 'bg-amber-500/15 text-amber-600'
+                    : 'bg-red-500/15 text-red-400'
+                )}
+                title={(comp.evidenceVerification.flags ?? []).join('\n') || `Evidence: ${comp.evidenceVerification.priceCheck ?? ''} ${comp.evidenceVerification.staleness ?? ''}`}
+              >
+                {comp.evidenceVerification.staleness === 'stale' ? 'STALE'
+                  : comp.evidenceVerification.priceCheck === 'divergent' ? 'DIVERGENT'
+                  : comp.evidenceVerification.priceCheck === 'below_pocket' ? 'LOW'
+                  : comp.evidenceVerification.priceCheck === 'above_pocket' ? 'HIGH'
+                  : 'UNVERIFIED'}
+              </div>
+            )}
+            {comp.sqftEvidence?.conflict && (
+              <div
+                className={cn(
+                  'h-6 px-1.5 rounded flex items-center text-[10px] font-bold flex-shrink-0',
+                  comp.sqftEvidence.resolution === 'unpermitted' ? 'bg-red-500/15 text-red-400' : 'bg-amber-500/15 text-amber-600'
+                )}
+                title={comp.sqftEvidence.note ?? `Sqft conflict: tax ${comp.sqftEvidence.provider ?? '?'}sf vs marketed ${comp.sqftEvidence.listing ?? '?'}sf`}
+              >
+                {comp.sqftEvidence.resolution === 'unpermitted' ? 'SQFT-EXCLUDED' : 'SQFT?'}
               </div>
             )}
             <div className="flex-1 min-w-0">
@@ -208,33 +347,32 @@ function CompCardInner({
           </div>
         )}
 
-        {/* Row 2: Meta — distance, date, subdivision, adjusted price */}
+        {/* Row 2: distance, subdivision, and actual geography values */}
         <div className="flex items-center gap-2 mt-1 text-[10px] text-foreground-tertiary flex-wrap pl-8">
           {comp.distanceMiles != null && <span>{comp.distanceMiles.toFixed(2)} mi</span>}
           {comp.subdivision && (
             <>
               <span className="text-border">·</span>
-              <span className={cn(hasSubdivisionMatch && 'text-emerald-500', subjectSubdiv && comp.subdivision && !hasSubdivisionMatch && 'text-red-400')}>
-                {comp.subdivision}
+              <span className={cn(hasSubdivisionMatch && 'text-emerald-500')}>
+                {hasSubdivisionMatch && '✓ '}{comp.subdivision}
               </span>
             </>
           )}
           {comp.adjustedPrice && comp.salePrice !== comp.adjustedPrice && (
             <><span className="text-border">·</span><span className="text-emerald-600">Adj: ${comp.adjustedPrice.toLocaleString()}</span></>
           )}
-          {hasSubdivisionMatch && <span className="text-emerald-500">✓ Subdivision</span>}
-          {comp.sameBlockGroup === true && (
-            <><span className="text-border">·</span><span className="text-emerald-500" title="Same census block group as the subject — same micro-market">✓ Block Group</span></>
-          )}
-          {comp.crossesMajorRoad === false && comp.sameBlockGroup === false && (
-            <><span className="text-border">·</span><span className="text-emerald-500" title={`Same census tract as the subject${comp.censusTract ? ` (${comp.censusTract})` : ''}`}>✓ Tract</span></>
-          )}
-          {comp.crossesMajorRoad === true && (
-            <><span className="text-border">·</span><span className="text-amber-500" title="Different census tract — tract boundaries follow major roads">⚠ Crosses tract</span></>
-          )}
-          {comp.geographyUnverified === true && (
-            <><span className="text-border">·</span><span className="text-amber-600" title="No census tract from Census or ATTOM — geography was never verified">? Geo unverified</span></>
-          )}
+          <span className="text-border">·</span>
+          <span className={cn(tractMatches && 'text-emerald-500')} title={comp.censusTract ?? 'Census tract unavailable'}>
+            {tractMatches && '✓ '}Tract {formatCensusTract(comp.censusTract)}
+          </span>
+          <span className="text-border">·</span>
+          <span className={cn(blockGroupMatches && 'text-emerald-500')} title={comp.censusBlockGroup ?? 'Census block group unavailable'}>
+            {blockGroupMatches && '✓ '}BG {formatBlockGroup(comp.censusBlockGroup)}
+          </span>
+          <span className="text-border">·</span>
+          <span className={cn(neighborhoodMatches && 'text-emerald-500')}>
+            {neighborhoodMatches && '✓ '}Neighborhood {comp.neighborhoodName || '—'}
+          </span>
         </div>
         <RuleMatchDetails comp={comp} />
       </div>
@@ -299,27 +437,13 @@ function CompCardInner({
           {/* Full property details — everything valid for comparison */}
           <div>
             <div className="text-caption font-medium text-foreground-secondary mb-1.5">Property Details</div>
+            <div className="mb-2">
+              <PhysicalCharacteristicsLine
+                characteristics={comp.physicalCharacteristics}
+                label="Construction comparison"
+              />
+            </div>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1">
-              <div className="flex items-center justify-between text-[11px]">
-                <span className="text-foreground-tertiary">Foundation</span>
-                <span className={cn('font-medium truncate ml-2', matchTextClass(fm('foundation')))}>{comp.foundationType || '-'}</span>
-              </div>
-              <div className="flex items-center justify-between text-[11px]">
-                <span className="text-foreground-tertiary">Construction</span>
-                <span className={cn('font-medium truncate ml-2', matchTextClass(fm('construction')))}>{comp.constructionType || '-'}</span>
-              </div>
-              <div className="flex items-center justify-between text-[11px]">
-                <span className="text-foreground-tertiary">Ext. Walls</span>
-                <span className={cn('font-medium truncate ml-2', matchTextClass(fm('construction')))}>{comp.exteriorWalls || '-'}</span>
-              </div>
-              <div className="flex items-center justify-between text-[11px]">
-                <span className="text-foreground-tertiary">Roof</span>
-                <span className={cn('font-medium truncate ml-2', matchTextClass(fm('roof')))}>{comp.roofCover || comp.roofType || '-'}</span>
-              </div>
-              <div className="flex items-center justify-between text-[11px]">
-                <span className="text-foreground-tertiary">Stories</span>
-                <span className={cn('font-medium truncate ml-2', matchTextClass(fm('stories')))}>{comp.storiesType || (comp.stories != null ? String(comp.stories) : '-')}</span>
-              </div>
               <div className="flex items-center justify-between text-[11px]">
                 <span className="text-foreground-tertiary">Heat / AC</span>
                 <span className={cn('font-medium truncate ml-2', matchTextClass(fm('hvac')))}>{[comp.heating, comp.cooling].filter(Boolean).join(' / ') || '-'}</span>
@@ -341,22 +465,10 @@ function CompCardInner({
                     : '-'}
                 </span>
               </div>
-              <div className="flex items-center justify-between text-[11px]">
-                <span className="text-foreground-tertiary">Pool</span>
-                <span className={cn('font-medium', matchTextClass(fm('pool')))}>{comp.pool ? 'Yes' : '-'}</span>
-              </div>
-              <div className="flex items-center justify-between text-[11px]">
-                <span className="text-foreground-tertiary">Garage</span>
-                <span className={cn('font-medium truncate ml-2', matchTextClass(fm('garage')))} title={[comp.garage, comp.carport].filter(Boolean).join(' + ') || undefined}>
-                  {comp.garage
-                    ? `${comp.garage}${comp.garageSquareFeet ? ` ${comp.garageSquareFeet} sf` : ''}${comp.carport ? ` + ${comp.carport}` : ''}`
-                    : comp.carport ?? '-'}
-                </span>
-              </div>
             </div>
           </div>
 
-          {/* MLS details from Redfin — shadow evidence, top-15 comps */}
+          {/* MLS details from Redfin — shadow evidence for geo-matched/display comps */}
           {comp.listingDetails && (() => {
             const ld = comp.listingDetails
             const cells = [
@@ -442,36 +554,25 @@ function CompCardInner({
               <div className="space-y-1.5">
                 <div className="text-caption-sm text-foreground-tertiary">Filters Applied</div>
                 <div className="grid gap-1.5">
-                  {comp.appraisalRules.filters.map((filter, i) => {
-                    // Legacy payloads carry no status — passed:true is then
-                    // ambiguous (verified pass vs unverifiable data), so
-                    // render it unverified rather than a false green check.
-                    const status = filter.status ?? (filter.passed ? 'not_verified' : 'failed')
-                    return (
-                      <div
-                        key={i}
-                        className={cn(
-                          'text-caption-sm px-2.5 py-1.5 rounded-lg flex items-center justify-between',
-                          status === 'passed'
-                            ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'
-                            : status === 'failed'
-                              ? 'bg-red-500/10 text-red-700 dark:text-red-400'
-                              : 'bg-muted/50 text-foreground-tertiary'
-                        )}
-                      >
+                  {comp.appraisalRules.filters.map((filter, i) => (
+                    <div
+                      key={i}
+                      className={cn(
+                        'text-caption-sm px-2.5 py-1.5 rounded-lg',
+                        filter.status === 'passed'
+                          ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'
+                          : filter.status === 'failed'
+                            ? 'bg-red-500/10 text-red-700 dark:text-red-400'
+                            : 'bg-muted/50 text-foreground-tertiary'
+                      )}
+                    >
+                      <div className="flex items-center justify-between gap-3">
                         <span className="font-medium">{formatFilterType(filter.type)}</span>
-                        <span>
-                          {status === 'passed' ? '✓' : status === 'failed' ? '✗' : '—'}
-                          {status === 'not_verified' && <span className="ml-1 opacity-70">unverified</span>}
-                          {filter.actualValue != null && (
-                            <span className="ml-1 opacity-70">
-                              ({String(filter.actualValue)}{filter.threshold ? ` / ${filter.threshold}` : ''})
-                            </span>
-                          )}
-                        </span>
+                        <span className="text-[10px]">{filterStatusLabel(filter.status)}</span>
                       </div>
-                    )
-                  })}
+                      {filter.reason && <div className="mt-0.5 opacity-80">{filter.reason}</div>}
+                    </div>
+                  ))}
                 </div>
               </div>
               {comp.appraisalRules.adjustments.length > 0 && (

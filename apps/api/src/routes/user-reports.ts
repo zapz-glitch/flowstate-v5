@@ -10,7 +10,7 @@ import { drizzle } from 'drizzle-orm/d1'
 import { eq, desc, sql, like, or, and } from 'drizzle-orm'
 import type { Env } from '../types'
 import { getSession } from '../lib/session'
-import { savedReports, reportHistory, analysisRuns } from '../db/schema'
+import { savedReports, reportHistory, analysisRuns, reportOutcomes, runRecords } from '../db/schema'
 import { hashSharePassword } from '../lib/share-token'
 import { bodyLimit } from 'hono/body-limit'
 import { recalculateReport } from '../services/evaluation/recalculate'
@@ -18,6 +18,7 @@ import { applyCompTierOverrides } from '../utils/comp-tier-overrides'
 import { deleteReportAssets } from '../services/report-assets'
 import { createPropertyApi } from '../services/property-api'
 import { createValuationService } from '../services/valuation'
+import { archiveRunRecord, canonicalJson, sha256Text } from '../services/evaluation/run-record'
 import { calculateAllRehabLevelEstimates } from '../services/analysis'
 import { assessMajorItems, toValuationMajorItems } from '../services/evaluation/major-items'
 import { loadMajorItemConfig, computeLocationPenalty } from '../services/evaluation'
@@ -532,6 +533,7 @@ userReports.put('/:jobId', async (c) => {
 
   // Update report data
   const updates: Record<string, unknown> = {}
+  // Last save wins — the page sends its current copy of the report.
   if (body.fullResponseJson !== undefined) updates.fullResponseJson = body.fullResponseJson
   if (body.arv !== undefined) updates.arv = body.arv
   if (body.maxAllowableOffer !== undefined) updates.maxAllowableOffer = body.maxAllowableOffer
@@ -625,6 +627,164 @@ userReports.post('/:jobId/feedback', bodyLimit({ maxSize: 100000 }), async (c) =
   return c.json({ success: true, feedbackStatus: status })
 })
 
+// ─── POST /user/reports/:jobId/outcome — actual sale result ──────────────────
+// Outcomes are append-only evidence. They score the saved prediction later;
+// they never change the ARV that was issued.
+
+userReports.post('/:jobId/outcome', bodyLimit({ maxSize: 20000 }), async (c) => {
+  const session = await getSession(c)
+  if (!session?.user) return c.json({ error: 'Not authenticated' }, 401)
+  const origin = c.req.header('Origin')
+  if (origin != null && origin !== (c.env.DASHBOARD_URL ? new URL(c.env.DASHBOARD_URL).origin : null)) return c.json({ error: 'Untrusted origin' }, 403)
+  if (!c.req.header('Content-Type')?.toLowerCase().startsWith('application/json')) return c.json({ error: 'JSON request required' }, 415)
+
+  const body = await c.req.json().catch(() => null)
+  if (!body || typeof body !== 'object' || Array.isArray(body) ||
+      Object.keys(body).some(key => !['actualSalePrice', 'actualSaleDate', 'source', 'note', 'runRecordId'].includes(key)) ||
+      typeof body.actualSalePrice !== 'number' || !Number.isFinite(body.actualSalePrice) || body.actualSalePrice <= 0 ||
+      (body.actualSaleDate != null && (typeof body.actualSaleDate !== 'string' || Number.isNaN(Date.parse(body.actualSaleDate)))) ||
+      (body.source != null && typeof body.source !== 'string') ||
+      (body.note != null && typeof body.note !== 'string') ||
+      (body.runRecordId != null && typeof body.runRecordId !== 'string')) {
+    return c.json({ error: 'Provide a positive actualSalePrice and optional date/source/note' }, 400)
+  }
+
+  const jobId = c.req.param('jobId')
+  const db = drizzle(c.env.DB)
+  const [report] = await db.select({
+    id: savedReports.id,
+    arv: savedReports.arv,
+    valuationData: savedReports.valuationData,
+  })
+    .from(savedReports)
+    .where(and(eq(savedReports.jobId, jobId), eq(savedReports.userId, session.user.id)))
+    .limit(1)
+  if (!report) return c.json({ error: 'Report not found' }, 404)
+
+  let runRecordId = typeof body.runRecordId === 'string' ? body.runRecordId : null
+  const runQuery = db.select({ id: runRecords.id })
+    .from(runRecords)
+    .where(and(eq(runRecords.jobId, jobId), eq(runRecords.userId, session.user.id)))
+    .orderBy(desc(runRecords.createdAt))
+    .limit(1)
+  if (runRecordId) {
+    const [run] = await db.select({ id: runRecords.id })
+      .from(runRecords)
+      .where(and(eq(runRecords.id, runRecordId), eq(runRecords.jobId, jobId), eq(runRecords.userId, session.user.id)))
+      .limit(1)
+    if (!run) return c.json({ error: 'Run record not found for this report' }, 404)
+  } else {
+    runRecordId = (await runQuery)[0]?.id ?? null
+  }
+
+  const predictedArv = report.arv ?? null
+  const delta = predictedArv != null ? body.actualSalePrice - predictedArv : null
+  const deltaPct = predictedArv != null && predictedArv > 0 ? delta! / predictedArv : null
+  const [outcome] = await db.insert(reportOutcomes).values({
+    reportId: report.id,
+    runRecordId,
+    jobId,
+    userId: session.user.id,
+    actualSalePrice: body.actualSalePrice,
+    actualSaleDate: body.actualSaleDate?.slice(0, 32) ?? null,
+    source: body.source?.slice(0, 200) ?? 'manual',
+    note: body.note?.slice(0, 5000) ?? null,
+    predictedArv,
+    predictionDelta: delta,
+    predictionDeltaPct: deltaPct,
+  }).returning()
+
+  await db.insert(reportHistory).values({
+    reportId: report.id,
+    userId: session.user.id,
+    action: 'actual_outcome',
+    description: 'Recorded actual sale outcome',
+    changesJson: JSON.stringify({ outcomeId: outcome.id, actualSalePrice: outcome.actualSalePrice, actualSaleDate: outcome.actualSaleDate, source: outcome.source }),
+  })
+
+  return c.json({ success: true, outcome })
+})
+
+userReports.get('/:jobId/outcomes', async (c) => {
+  const session = await getSession(c)
+  if (!session?.user) return c.json({ error: 'Not authenticated' }, 401)
+  const jobId = c.req.param('jobId')
+  const db = drizzle(c.env.DB)
+  const [report] = await db.select({ id: savedReports.id })
+    .from(savedReports)
+    .where(and(eq(savedReports.jobId, jobId), eq(savedReports.userId, session.user.id)))
+    .limit(1)
+  if (!report) return c.json({ error: 'Report not found' }, 404)
+  const outcomes = await db.select().from(reportOutcomes)
+    .where(eq(reportOutcomes.reportId, report.id))
+    .orderBy(desc(reportOutcomes.createdAt))
+  return c.json({ outcomes })
+})
+
+userReports.post('/:jobId/run-records/:recordId/archive', async (c) => {
+  const session = await getSession(c)
+  if (!session?.user) return c.json({ error: 'Not authenticated' }, 401)
+  const origin = c.req.header('Origin')
+  if (origin != null && origin !== (c.env.DASHBOARD_URL ? new URL(c.env.DASHBOARD_URL).origin : null)) return c.json({ error: 'Untrusted origin' }, 403)
+  if (!c.env.REPORT_ASSETS) return c.json({ error: 'Run-record archive storage is unavailable' }, 503)
+  const db = drizzle(c.env.DB)
+  const jobId = c.req.param('jobId')
+  const recordId = c.req.param('recordId')
+  const [record] = await db.select({ id: runRecords.id })
+    .from(runRecords)
+    .where(and(eq(runRecords.id, recordId), eq(runRecords.jobId, jobId), eq(runRecords.userId, session.user.id)))
+    .limit(1)
+  if (!record) return c.json({ error: 'Run record not found' }, 404)
+  try {
+    const archived = await archiveRunRecord(c.env.DB, c.env.REPORT_ASSETS, recordId)
+    return c.json({ success: true, ...archived })
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : 'Archive retry failed' }, 502)
+  }
+})
+
+userReports.get('/:jobId/run-records', async (c) => {
+  const session = await getSession(c)
+  if (!session?.user) return c.json({ error: 'Not authenticated' }, 401)
+  const jobId = c.req.param('jobId')
+  const db = drizzle(c.env.DB)
+  const [report] = await db.select({ id: savedReports.id })
+    .from(savedReports)
+    .where(and(eq(savedReports.jobId, jobId), eq(savedReports.userId, session.user.id)))
+    .limit(1)
+  if (!report) return c.json({ error: 'Report not found' }, 404)
+
+  const records = await db.select({
+    id: runRecords.id,
+    status: runRecords.status,
+    arv: runRecords.arv,
+    resultGrade: runRecords.resultGrade,
+    processGrade: runRecords.processGrade,
+    harnessVersion: runRecords.harnessVersion,
+    pipelineVersion: runRecords.pipelineVersion,
+    requestHash: runRecords.requestHash,
+    evidenceHash: runRecords.evidenceHash,
+    payloadHash: runRecords.payloadHash,
+    archiveKey: runRecords.archiveKey,
+    archivedAt: runRecords.archivedAt,
+    archiveError: runRecords.archiveError,
+    attemptCount: runRecords.attemptCount,
+    compCount: runRecords.compCount,
+    enabledCompCount: runRecords.enabledCompCount,
+    payloadJson: runRecords.payloadJson,
+    createdAt: runRecords.createdAt,
+  }).from(runRecords)
+    .where(and(eq(runRecords.jobId, jobId), eq(runRecords.userId, session.user.id)))
+    .orderBy(desc(runRecords.createdAt))
+
+  const withIntegrity = await Promise.all(records.map(async ({ payloadJson, ...record }) => {
+    let hashOk = false
+    try { hashOk = await sha256Text(canonicalJson(JSON.parse(payloadJson))) === record.payloadHash } catch { /* corrupt payload */ }
+    return { ...record, hashOk }
+  }))
+  return c.json({ runRecords: withIntegrity })
+})
+
 // ─── GET /user/reports/:jobId ─────────────────────────────────────────────────
 
 userReports.get('/:jobId', async (c) => {
@@ -662,6 +822,56 @@ userReports.get('/:jobId', async (c) => {
   // Manual comp-tier assignments ride the stored payload — applied at read
   // time so saved reports show the reviewer's pins next to the evidence class.
   await applyCompTierOverrides(c.env, session.user.id, jobId, analysis)
+  const outcomes = await db.select().from(reportOutcomes)
+    .where(eq(reportOutcomes.reportId, report.id))
+    .orderBy(desc(reportOutcomes.createdAt))
+  const [latestRun] = await db.select({
+    id: runRecords.id,
+    status: runRecords.status,
+    arv: runRecords.arv,
+    resultGrade: runRecords.resultGrade,
+    processGrade: runRecords.processGrade,
+    harnessVersion: runRecords.harnessVersion,
+    pipelineVersion: runRecords.pipelineVersion,
+    payloadHash: runRecords.payloadHash,
+    archiveKey: runRecords.archiveKey,
+    archivedAt: runRecords.archivedAt,
+    archiveError: runRecords.archiveError,
+    payloadJson: runRecords.payloadJson,
+    attemptCount: runRecords.attemptCount,
+    compCount: runRecords.compCount,
+    enabledCompCount: runRecords.enabledCompCount,
+    createdAt: runRecords.createdAt,
+  }).from(runRecords)
+    .where(and(eq(runRecords.jobId, jobId), eq(runRecords.userId, session.user.id)))
+    .orderBy(desc(runRecords.createdAt))
+    .limit(1)
+  let latestRunIntegrity = false
+  if (latestRun) {
+    try {
+      latestRunIntegrity = await sha256Text(canonicalJson(JSON.parse(latestRun.payloadJson))) === latestRun.payloadHash
+    } catch { /* corrupt payload */ }
+  }
+  const runRecord = latestRun
+    ? {
+        id: latestRun.id,
+        status: latestRun.status,
+        arv: latestRun.arv,
+        resultGrade: latestRun.resultGrade,
+        processGrade: latestRun.processGrade,
+        harnessVersion: latestRun.harnessVersion,
+        pipelineVersion: latestRun.pipelineVersion,
+        payloadHash: latestRun.payloadHash,
+        archiveKey: latestRun.archiveKey,
+        archivedAt: latestRun.archivedAt,
+        archiveError: latestRun.archiveError,
+        hashOk: latestRunIntegrity,
+        attemptCount: latestRun.attemptCount,
+        compCount: latestRun.compCount,
+        enabledCompCount: latestRun.enabledCompCount,
+        createdAt: latestRun.createdAt,
+      }
+    : null
 
   return c.json({
     jobId: report.jobId,
@@ -670,6 +880,8 @@ userReports.get('/:jobId', async (c) => {
     analysis,
     feedbackStatus: report.feedbackStatus ?? null,
     feedbackAt: report.feedbackAt ?? null,
+    outcomes,
+    runRecord,
   })
 })
 

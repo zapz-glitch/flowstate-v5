@@ -6,7 +6,10 @@
  */
 
 import type { PropertyBundle } from '../property-api'
-import { evaluateB, bCondTier } from '@flowstate-api/shared/appraisal'
+import { evaluateB, bCondTier, HARNESS_VERSION } from '@flowstate-api/shared/appraisal'
+import { gradeResult, resultStatusReason } from './result-grade'
+import { checksForFlags, type RuleCheck } from './rule-registry'
+import { compBadges } from './comp-badges'
 import type { NormalizedProperty, NormalizedComparable } from '../property-api/types'
 import type { AppraisedComparable, AppraisalResultWithFallback, ClassificationSummaryResult } from '../appraisal'
 import type { PhotoBundle, PropertyPhotos } from '../photo-provider'
@@ -14,6 +17,13 @@ import type { MajorItem, ValuationService } from '../valuation'
 import { REHAB_LEVELS } from '../valuation'
 import type { ClassificationResult, PropertyClassification } from '../classification'
 import { generateZillowUrl } from '../photo-provider'
+import {
+  resolvePhysicalCharacteristics,
+  type PhysicalCharacteristic,
+  type PhysicalCharacteristics,
+  type PhysicalCharacteristicSourceData,
+  type PhysicalCharacteristicValue,
+} from '../physical-characteristics'
 import {
   lookupCode,
   BUILDING_STYLE,
@@ -25,18 +35,92 @@ import {
   BUILDING_QUALITY,
 } from '../property-api/providers/corelogic-codes'
 
-/** Resolve construction codes to labels (safety net for cached data with raw codes) */
-function resolveConstruction(c?: { type?: string; qualityCode?: string; buildingStyle?: string; foundationType?: string; roofType?: string; exteriorWalls?: string; storiesType?: string; roofCover?: string }) {
-  if (!c) return { foundationType: null as string | null, buildingStyle: null as string | null, storiesType: null as string | null, constructionType: null as string | null, qualityCode: null as string | null, roofType: null as string | null, roofCover: null as string | null, exteriorWalls: null as string | null }
+function resolveProviderConstruction(
+  c?: { type?: string; qualityCode?: string; buildingStyle?: string; foundationType?: string; roofType?: string; exteriorWalls?: string; storiesType?: string; roofCover?: string },
+) {
   return {
-    foundationType: lookupCode(FOUNDATION_TYPE, c.foundationType) ?? null,
-    buildingStyle: lookupCode(BUILDING_STYLE, c.buildingStyle) ?? null,
-    storiesType: c.storiesType ?? null,
-    constructionType: lookupCode(CONSTRUCTION_TYPE, c.type) ?? null,
-    qualityCode: lookupCode(BUILDING_QUALITY, c.qualityCode) ?? null,
-    roofType: lookupCode(ROOF_TYPE, c.roofType) ?? null,
-    roofCover: lookupCode(ROOF_COVER, c.roofCover) ?? null,
-    exteriorWalls: lookupCode(EXTERIOR_WALLS, c.exteriorWalls) ?? null,
+    foundationType: lookupCode(FOUNDATION_TYPE, c?.foundationType) ?? null,
+    buildingStyle: lookupCode(BUILDING_STYLE, c?.buildingStyle) ?? null,
+    storiesType: c?.storiesType ?? null,
+    constructionType: lookupCode(CONSTRUCTION_TYPE, c?.type) ?? null,
+    qualityCode: lookupCode(BUILDING_QUALITY, c?.qualityCode) ?? null,
+    roofType: lookupCode(ROOF_TYPE, c?.roofType) ?? null,
+    roofCover: lookupCode(ROOF_COVER, c?.roofCover) ?? null,
+    exteriorWalls: lookupCode(EXTERIOR_WALLS, c?.exteriorWalls) ?? null,
+  }
+}
+
+function verifiedValue<T extends PhysicalCharacteristicValue>(field: PhysicalCharacteristic<T>): T | null {
+  return field.status === 'verified' ? field.value : null
+}
+
+function physicalDisplayFields(physical: PhysicalCharacteristics, qualityCode: string | null) {
+  const stories = verifiedValue(physical.stories)
+  return {
+    foundationType: verifiedValue(physical.foundation),
+    buildingStyle: verifiedValue(physical.style),
+    stories,
+    storiesType: stories != null ? String(stories) : null,
+    constructionType: verifiedValue(physical.constructionType),
+    exteriorWalls: verifiedValue(physical.exterior),
+    qualityCode,
+    roofType: verifiedValue(physical.roof),
+    roofCover: null,
+  }
+}
+
+function redfinPhysical(
+  listing?: import('../redfin-details').RedfinPropertyDetails | null,
+): PhysicalCharacteristicSourceData | null {
+  if (!listing) return null
+  return {
+    style: listing.style,
+    stories: listing.stories,
+    constructionType: listing.construction,
+    exterior: listing.construction,
+    roof: listing.roof,
+    foundation: listing.foundation,
+    garage: listing.garage ?? listing.parking,
+    pool: listing.pool,
+  }
+}
+
+function photoPhysical(listing?: PropertyPhotos | null): PhysicalCharacteristicSourceData | null {
+  if (!listing) return null
+  return {
+    style: listing.style,
+    stories: listing.stories,
+    constructionType: listing.construction,
+    exterior: listing.construction,
+    roof: listing.roof,
+    foundation: listing.foundationType,
+    garage: listing.parking,
+    pool: listing.pool,
+  }
+}
+
+function attomPhysical(
+  provider: ReturnType<typeof resolveProviderConstruction>,
+  stories: number | null | undefined,
+  garage: string | null | undefined,
+  pool: string | null | undefined,
+  zillow?: PhysicalCharacteristicSourceData | null,
+): PhysicalCharacteristicSourceData {
+  const differs = (value: PhysicalCharacteristicValue | null | undefined, listingValue: PhysicalCharacteristicValue | null | undefined) =>
+    value != null && String(value).trim().toLowerCase() !== String(listingValue ?? '').trim().toLowerCase()
+  const text = (value: string | null | undefined, listingValue: string | null | undefined) =>
+    differs(value, listingValue) ? value : null
+  const storyValue = stories ?? provider.storiesType
+  const providerPool = pool == null ? null : !/^(no|none|false)$/i.test(pool.trim())
+  return {
+    style: text(provider.buildingStyle, zillow?.style),
+    stories: differs(storyValue, zillow?.stories) ? storyValue : null,
+    constructionType: text(provider.constructionType, zillow?.constructionType),
+    exterior: text(provider.exteriorWalls, zillow?.exterior),
+    roof: text(provider.roofCover ?? provider.roofType, zillow?.roof),
+    foundation: text(provider.foundationType, zillow?.foundation),
+    garage: text(garage, zillow?.garage),
+    pool: differs(providerPool, zillow?.pool) ? providerPool : null,
   }
 }
 
@@ -471,6 +555,8 @@ export interface ResponseContext {
   subjectListPrice?: number | null
   /** Redfin MLS property-details for the subject — shadow evidence */
   subjectListingDetails?: import('../redfin-details').RedfinPropertyDetails | null
+  /** Zillow/listing-page physical fields from the pinned comp-evidence scrape. */
+  compListingPhysicalDetails?: Record<string, PhysicalCharacteristicSourceData>
   /** Visual ARV-candidacy check per ARV-selected comp (by comp ID) */
   compCurbAppeal?: Record<string, {
     condition: 'renovated' | 'maintained' | 'dated' | 'distressed' | 'unknown'
@@ -553,6 +639,7 @@ export interface AnalysisResponse {
     squareFeet: number | null
     lotSizeAcres: number | null
     yearBuilt: number | null
+    stories: number | null
     propertyType: string | null
     /** Subdivision name (if available) */
     subdivision: string | null
@@ -566,6 +653,7 @@ export interface AnalysisResponse {
     /** Core Based Statistical Area code (metro geography for market analytics) */
     cbsaCode: string | null
     censusTract: string | null
+    censusBlockGroup: string | null
     /** Legal description from site-location (plat/block/lot) */
     legalDescription: string | null
     lastSale: {
@@ -655,6 +743,8 @@ export interface AnalysisResponse {
     cooling: string | null
     /** Fireplace count */
     fireplacesCount: number | null
+    /** Listing-source physical characteristics, resolved after valuation for display only. */
+    physicalCharacteristics: PhysicalCharacteristics
     /** Cotality THV AVM estimate (subject only, parcel-level, display-only — never enters valuation math) */
     avm: {
       value: number | null
@@ -682,6 +772,12 @@ export interface AnalysisResponse {
     arvSource: 'appraisal' | 'comp-selection' | 'avm' | 'assessed'
     /** Methodology used to calculate ARV */
     arvMethodology: string
+    /** Run-level trust grade — verified/weak/floor/withheld (not comp classification) */
+    resultGrade?: import('./result-grade').ResultGrade
+    /** Did the run earn it — clean (attempt 1) / retried / unverified */
+    processGrade?: import('./result-grade').ProcessGrade
+    /** One-line server explanation for the result/confidence badge */
+    statusReason?: string
     arvPerSqft: number
     /** As-Is value (current market value based on as_is comps) */
     asIsValue: number | null
@@ -710,9 +806,7 @@ export interface AnalysisResponse {
     listPrice: number | null
     /** ARV minus list price — negative = ARV below asking (negotiation room), positive = above */
     arvVsListPrice: number | null
-    /** Legacy appraisal ARV — the pre-Set-B pipeline number (parity display) */
-    arvLegacy: number | null
-    /** Set-B parallel ARV — trade-tricks methodology (shared/appraisal set-b) */
+    /** Set-B ARV — trade-tricks methodology (shared/appraisal set-b) */
     arvB: number | null
     /** B mechanics trail — anchor, flags, ceiling, driver set for the UI panel */
     bMechanics: {
@@ -720,12 +814,20 @@ export interface AnalysisResponse {
       confidence: 'high' | 'medium' | 'low' | 'none'
       bracket: 'ok' | 'all-smaller' | 'all-bigger'
       flags: string[]
+      /** Stable decision IDs paired with the human-readable flags */
+      checks: RuleCheck[]
       anchorAddress: string | null
       conditionAdj: number | null
       ceiling: number | null
       landRateSource: string | null
       sqftRateSource: string | null
       healed: boolean
+      /** The rule-set version that produced this run — attribution stamp */
+      harnessVersion: string
+      /** Grid ladder trail — which rung admitted the pool */
+      fallbackUsed: string | null
+      /** Which tolerances the ladder relaxed (year_built, sqft_diff, geo scopes) */
+      expansionApplied: string[]
       /** Verify-and-retry trail — widen/deepen attempts + verdicts */
       attemptTrail: string[]
       drivers: { address: string | null; contribution: number; tier: string; conditionTier: string }[]
@@ -774,7 +876,7 @@ export interface AnalysisResponse {
     recommendation?: 'strong-buy' | 'buy' | 'hold' | 'pass' | 'manual-review'
     recommendationReason?: string
     /** Confidence gate on the comps driving the ARV */
-    confidence?: 'high' | 'medium' | 'low'
+    confidence?: 'high' | 'medium' | 'low' | null
     confidenceReasons?: string[]
     /** True unless HIGH — medium flags for review, low withholds the call */
     requiresHumanReview?: boolean
@@ -837,6 +939,8 @@ export interface AnalysisResponse {
       neighborhoodName: string | null
       /** Cotality site-location neighborhood code */
       neighborhoodCode: string | null
+      censusTract: string | null
+      censusBlockGroup: string | null
       /** Assessor building improvement condition */
       buildingCondition: string | null
       /** Construction quality grade */
@@ -861,6 +965,8 @@ export interface AnalysisResponse {
       roofType: string | null
       /** Roof cover material (e.g. Composition Shingle, Tile) */
       roofCover: string | null
+      /** Listing-source physical characteristics, resolved after valuation for display only. */
+      physicalCharacteristics: PhysicalCharacteristics
       /** Visual ARV-candidacy check (photos) for ARV-selected comps */
       curbAppeal?: {
         condition: 'renovated' | 'maintained' | 'dated' | 'distressed' | 'unknown'
@@ -910,6 +1016,7 @@ export interface AnalysisResponse {
         filters: Array<{
           type: string
           passed: boolean
+          status?: 'passed' | 'failed' | 'not_verified'
           reason?: string
           actualValue?: number | string | null
           threshold?: number | string | null
@@ -1237,10 +1344,48 @@ export function buildAnalysisResponse(
   if (devSignal) riskFlags.push(devSignal)
 
   // B unverified — the retry ladder ran and the answer still failed an
-  // invariant (e.g. below as-is AVM). Flag it so the underwriter sees the
-  // evidence bound, not just the number.
+  // invariant (e.g. below as-is AVM). Write the flag as the underwriter
+  // would say it: the delta, the evidence composition, the implication.
   if (ctx.bAttemptTrail?.length && ctx.bAttemptTrail[ctx.bAttemptTrail.length - 1].startsWith('final — unverified')) {
-    riskFlags.push(`Set-B evidence unverified after retry: ${ctx.bAttemptTrail[ctx.bAttemptTrail.length - 1].replace('final — unverified (', '').replace(')', '')}`)
+    const avm = property.avmValue ?? enrichment.avm?.value ?? null
+    const b = ctx.pipelineBResult
+    const renovatedDrivers = b?.drivers.filter((d) => d.tier === 'arv' && bCondTier(d.comp) === 'renovated').length ?? 0
+    const driverCount = b?.drivers.length ?? 0
+    if (avm != null && ctx.finalArv != null && ctx.finalArv < avm) {
+      const gap = avm - ctx.finalArv
+      const pct = ((gap / avm) * 100).toFixed(0)
+      const money = (n: number) => `$${Math.round(n).toLocaleString('en-US')}`
+      const compRead = driverCount > 0 && renovatedDrivers === 0
+        ? `no renovated-product sales verified in this pocket — ${driverCount} driver${driverCount !== 1 ? 's' : ''} price median-tier product`
+        : `${driverCount} verified driver${driverCount !== 1 ? 's' : ''} after the retry ladder`
+      riskFlags.push(
+        `ARV ${money(ctx.finalArv)} sits ${money(gap)} (${pct}%) below the ${money(avm)} as-is estimate — ${compRead}. Renovation uplift is unproven here; negotiate as if the spread doesn't exist.`,
+      )
+    } else {
+      riskFlags.push(`Set-B evidence unverified after retry: ${ctx.bAttemptTrail[ctx.bAttemptTrail.length - 1].replace('final — unverified (', '').replace(')', '')}`)
+    }
+  }
+
+  // Premium read on thin evidence — a single comp (or low-confidence set)
+  // carrying ARV well above the as-is estimate is a flag, not a failure:
+  // the answer may be right, but the underwriter needs to see that one
+  // sale is carrying the spread into a different submarket.
+  {
+    const avm = property.avmValue ?? enrichment.avm?.value ?? null
+    const b = ctx.pipelineBResult
+    if (b?.arv != null && avm != null && b.arv > avm * 1.2 && b.drivers.length <= 1) {
+      const pct = Math.round(((b.arv - avm) / avm) * 100)
+      const money = (n: number) => `$${Math.round(n).toLocaleString('en-US')}`
+      riskFlags.push(
+        `ARV ${money(b.arv)} rides a single comp (${b.anchorAddress ?? 'unidentified'}) — ${pct}% above the ${money(avm)} as-is estimate. Verify the anchor's pocket before trusting the spread.`,
+      )
+    } else if (b?.arv != null && avm != null && b.arv > avm * 1.5) {
+      const pct = Math.round(((b.arv - avm) / avm) * 100)
+      const money = (n: number) => `$${Math.round(n).toLocaleString('en-US')}`
+      riskFlags.push(
+        `As-is AVM ${money(avm)} runs ${pct}% below comp-evidenced ARV ${money(b.arv)} — distressed/stale model read; the comps are the evidence here.`,
+      )
+    }
   }
 
   // ARV vs asking price is surfaced on the valuation hero (list price cell
@@ -1258,6 +1403,31 @@ export function buildAnalysisResponse(
   const mergedCompLookup = new Map(
     bundle.comparables.map((c) => [c.id, c])
   )
+
+  // ── Set-B comp roles ───────────────────────────────────────────────────
+  // The pre-B enabled/ARV grid doesn't tell the reviewer which comps the
+  // verified answer actually used. Serialize the per-comp verdict from the
+  // pipeline's post-retry BResult so the dashboard can show the true
+  // anchor/drivers instead of inferring status from the appraisal grid.
+  // BComp carries no id — match on normalized street address.
+  const bRoleOf = (() => {
+    const b = ctx.pipelineBResult
+    if (!b) return () => null
+    const norm = (a?: string | null) => (a ?? '').trim().toLowerCase()
+    const driverKeys = new Set(b.drivers.map((d) => norm(d.comp.address)))
+    const contribKeys = new Set(b.contribs.map((x) => norm(x.comp.address)))
+    const anchorComp =
+      b.drivers.find((d) => norm(d.comp.address) === norm(b.anchorAddress))
+      ?? b.drivers[0]
+    const anchorKey = anchorComp ? norm(anchorComp.comp.address) : ''
+    return (address?: string | null): 'anchor' | 'driver' | 'pool' | 'excluded' => {
+      const k = norm(address)
+      if (k && k === anchorKey) return 'anchor'
+      if (driverKeys.has(k)) return 'driver'
+      if (contribKeys.has(k)) return 'pool'
+      return 'excluded'
+    }
+  })()
 
   // Return ALL comps: enabled first (closest → farthest), then disabled (same order)
   const allComps = [
@@ -1308,8 +1478,25 @@ export function buildAnalysisResponse(
     // Prefer merged (Zillow-supplemented) values for fields that CoreLogic may be missing
     const bedrooms = merged?.bedrooms ?? comp.bedrooms ?? null
     const bathrooms = merged?.bathrooms ?? comp.bathrooms ?? null
-    const squareFeet = merged?.squareFeet ?? comp.squareFeet
+    // The sqft the math used — when a listing-sqft resolution rewrote the
+    // comp AFTER evaluation, the record shows the evaluated value and the
+    // marketed sqft stays evidence (sqftEvidence block below).
+    const evaluatedSqft = (comp.raw as Record<string, unknown> | undefined)?.providerSqft as number | undefined
+    const squareFeet = evaluatedSqft ?? merged?.squareFeet ?? comp.squareFeet
     const yearBuilt = merged?.yearBuilt ?? comp.yearBuilt
+    const providerConstruction = resolveProviderConstruction(comp.construction)
+    const zillowPhysical = ctx.compListingPhysicalDetails?.[comp.id] ?? null
+    const physicalCharacteristics = resolvePhysicalCharacteristics({
+      redfin: redfinPhysical(comp.listingDetails),
+      zillow: zillowPhysical,
+      attom: attomPhysical(
+        providerConstruction,
+        comp.stories,
+        comp.features?.garageType,
+        comp.features?.poolType,
+        zillowPhysical,
+      ),
+    })
 
     return {
       id: comp.id,
@@ -1339,6 +1526,7 @@ export function buildAnalysisResponse(
       neighborhoodName: comp.neighborhoodName ?? null,
       neighborhoodCode: comp.neighborhoodCode ?? null,
       censusTract: comp.censusTract ?? null,
+      censusBlockGroup: comp.censusBlockGroup ?? null,
       // Enrichment signals serialized so reports/replays carry the same
       // evidence the rules evaluated — value-equivalence (ppsfMedians),
       // above-AVM (avmValue), transaction distress flags (transaction).
@@ -1351,15 +1539,14 @@ export function buildAnalysisResponse(
       // Computed at serialize-time — "no tract after both ladders" is the
       // honest signal; a stored flag would get dropped by pool merges.
       ...(comp.censusTract == null && comp.latitude != null ? { geographyUnverified: true } : {}),
-      // Redfin MLS details — shadow evidence, top-15 comps only
       ...(comp.listingDetails ? { listingDetails: comp.listingDetails } : {}),
       buildingCondition: comp.buildingCondition ?? null,
       buildingGrade: comp.buildingGrade ?? null,
-      stories: comp.stories ?? null,
       heating: merged?.features?.heating ?? comp.features?.heating ?? null,
       cooling: merged?.features?.cooling ?? comp.features?.cooling ?? null,
       fireplacesCount: merged?.features?.fireplacesCount ?? comp.features?.fireplacesCount ?? null,
-      ...resolveConstruction(comp.construction),
+      ...physicalDisplayFields(physicalCharacteristics, providerConstruction.qualityCode),
+      physicalCharacteristics,
       pool: merged?.features?.poolType ?? null,
       garage: merged?.features?.garageType ?? null,
       garageSquareFeet: merged?.features?.garageSquareFeet ?? null,
@@ -1375,9 +1562,39 @@ export function buildAnalysisResponse(
       compGroup: ctx.groupACompIds?.has(comp.id) ? 'arv' as const
         : ctx.groupBCompIds?.has(comp.id) ? 'as_is' as const
         : null,
+      // Which comps the Set-B answer actually used — display-only, never
+      // feeds back into valuation.
+      bRole: bRoleOf(comp.address),
+      // Server↔client trust contract — every badge the card shows is
+      // computed here from the same evidence the rules saw.
+      badges: compBadges(comp as never, {
+        subjectCensusTract: property.censusTract ?? null,
+        subjectSubdivision: property.subdivision ?? null,
+        subjectNeighborhood: (property as { neighborhoodName?: string | null }).neighborhoodName ?? null,
+        subjectPpsfMedians: property.ppsfMedians ?? null,
+        condition: ctx.compCurbAppeal?.[comp.id] ?? null,
+        classification: compClassification?.classification ?? null,
+        expansionApplied: appraisalResult.expansionApplied ?? [],
+      }),
       curbAppeal: ctx.compCurbAppeal?.[comp.id] ?? null,
       evidenceVerification: comp.evidenceVerification ?? null,
+      // Sqft-conflict evidence — provider-vs-listing divergence + permit
+      // resolution when one ran (permitted → listing adopted, unpermitted
+      // → tax stands, unknown → comp bound-only).
+      ...((comp.raw as Record<string, unknown> | undefined)?.sqftConflict != null ||
+          (comp.raw as Record<string, unknown> | undefined)?.sqftResolution != null
+        ? {
+            sqftEvidence: {
+              providerSqft: (comp.raw as Record<string, unknown>).providerSqft ?? null,
+              listingSqft: (comp.raw as Record<string, unknown>).listingSqft ?? null,
+              conflict: (comp.raw as Record<string, unknown>).sqftConflict ?? null,
+              resolution: (comp.raw as Record<string, unknown>).sqftResolution ?? 'unverified',
+              note: (comp.raw as Record<string, unknown>).permitNote ?? null,
+            },
+          }
+        : {}),
       landAssessedValue: comp.landAssessedValue ?? null,
+      improvementAssessedValue: comp.improvementAssessedValue ?? null,
       assessedValue: comp.assessedValue ?? null,
       disableReasons: evaluation?.disableReasons ?? [],
       classification: classificationSummary,
@@ -1411,12 +1628,6 @@ export function buildAnalysisResponse(
         }
       : null
 
-  const arvMethodology = arvSource === 'avm'
-    ? 'subject AVM — no comp ARV evidence (conservative anchor)'
-    : arvSource === 'assessed'
-      ? 'county assessed value — no comp ARV evidence (conservative anchor)'
-    : ctx.classificationSummary?.methodology ?? `avg price/sqft of ${enabledComps.length} comp${enabledComps.length !== 1 ? 's' : ''} × subject sqft`
-
   // ── Set-B ARV (trade-tricks methodology) ───────────────────────────────
   // The pipeline's post-retry result is canonical; serialization falls back
   // to a recompute over the serialized pool only when no result was passed.
@@ -1438,6 +1649,37 @@ export function buildAnalysisResponse(
     { rehabCost: valuation?.totalRehabCost ?? null },
   )
 
+  const grades = gradeResult(bResult, appraisalResult.fallbackUsed, ctx.bAttemptTrail ?? [])
+  const statusReason = resultStatusReason(
+    bResult,
+    appraisalResult.fallbackUsed,
+    ctx.bAttemptTrail ?? [],
+    grades,
+    { arvSource },
+  )
+
+  const arvMethodology = bResult.arv != null
+    ? `Set-B ${bResult.source}${bResult.anchorAddress ? ` — anchored ${bResult.anchorAddress}` : ''}`
+    : arvSource === 'avm'
+      ? 'subject AVM — no comp ARV evidence (conservative anchor)'
+      : arvSource === 'assessed'
+        ? 'county assessed value — no comp ARV evidence (conservative anchor)'
+        : 'Set-B produced no ARV on this evidence set'
+
+  const subjectProviderConstruction = resolveProviderConstruction(property.construction)
+  const subjectZillowPhysical = photoPhysical(photoBundle?.subject)
+  const subjectPhysicalCharacteristics = resolvePhysicalCharacteristics({
+    redfin: redfinPhysical(ctx.subjectListingDetails),
+    zillow: subjectZillowPhysical,
+    attom: attomPhysical(
+      subjectProviderConstruction,
+      property.stories,
+      property.features?.garageType,
+      property.features?.poolType,
+      subjectZillowPhysical,
+    ),
+  })
+
   return {
     // ═══ SUBJECT PROPERTY ═══════════════════════════════════════════════════
     subject: {
@@ -1456,10 +1698,11 @@ export function buildAnalysisResponse(
       subdivision: property.subdivision ?? null,
       parcelId: property.parcelId ?? null,
       apnFormatted: property.apnFormatted ?? null,
-      neighborhoodName: property.neighborhoodName ?? null,
+      neighborhoodName: property.neighborhoodName ?? property.geoScopes?.n4 ?? property.geoScopes?.n3 ?? null,
       neighborhoodCode: property.neighborhoodCode ?? null,
       cbsaCode: property.cbsaCode ?? null,
       censusTract: property.censusTract ?? null,
+      censusBlockGroup: property.censusBlockGroup ?? null,
       ...(property.ppsfMedians != null ? { ppsfMedians: property.ppsfMedians } : {}),
       legalDescription: property.legalDescription ?? null,
       lastSale: property.lastSalePrice
@@ -1475,7 +1718,8 @@ export function buildAnalysisResponse(
       zoningDescription: property.zoningDescription ?? null,
       developmentSignal: devSignal,
       photos: subjectPhotos,
-      ...resolveConstruction(property.construction),
+      ...physicalDisplayFields(subjectPhysicalCharacteristics, subjectProviderConstruction.qualityCode),
+      physicalCharacteristics: subjectPhysicalCharacteristics,
       pool: property.features?.poolType ?? null,
       garage: property.features?.garageType ?? null,
       garageSquareFeet: property.features?.garageSquareFeet ?? null,
@@ -1540,6 +1784,12 @@ export function buildAnalysisResponse(
       arv: ctx.valuationAnchor ?? finalArv,
       arvSource: arvSource,
       arvMethodology,
+      resultGrade: grades.resultGrade,
+      processGrade: grades.processGrade,
+      statusReason,
+      // One confidence vocabulary — the hero badge reads this; 'none'
+      // renders no badge (never a misleading default).
+      confidence: bResult.conf === 'none' ? null : bResult.conf,
       arvPerSqft: valuation.pricePerSqft,
       asIsValue,
       afterRenovationValue,
@@ -1583,20 +1833,22 @@ export function buildAnalysisResponse(
           : null,
       // Set-B parallel output — trade-tricks ARV + mechanics trail (the
       // calibration harness methodology, ported to shared/appraisal)
-      /** Legacy appraisal ARV — the pre-swap pipeline number (parity display) */
-      arvLegacy: appraisalResult.arv ?? null,
       arvB: bResult.arv,
       bMechanics: {
         source: bResult.source,
         confidence: bResult.conf,
         bracket: bResult.bracket,
         flags: bResult.flags,
+        checks: checksForFlags(bResult.flags),
         anchorAddress: bResult.anchorAddress ?? null,
         conditionAdj: bResult.conditionAdj ?? null,
         ceiling: bResult.ceiling ?? null,
         landRateSource: bResult.landRateSource ?? null,
         sqftRateSource: bResult.sqftRateSource ?? null,
         healed: bResult.healed ?? false,
+        harnessVersion: HARNESS_VERSION,
+        fallbackUsed: appraisalResult.fallbackUsed ?? 'none',
+        expansionApplied: appraisalResult.expansionApplied ?? [],
         attemptTrail: ctx.bAttemptTrail ?? [],
         drivers: bResult.drivers.map((d) => ({
           address: d.comp.address ?? null,

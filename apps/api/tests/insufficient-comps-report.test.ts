@@ -79,9 +79,11 @@ const staleComp = (i: number): NormalizedComparable => ({
   squareFeet: 1350 + i * 100,
   lotSizeAcres: 0.17,
   yearBuilt: 1990,
-  propertyType: 'SFR',
+  // A different property type is a rule the filter ladder never loosens —
+  // nothing can qualify. (Sale age alone no longer proves that: the ladder
+  // widens it without a fixed cap, docs/FILTER-LADDER.md.)
+  propertyType: 'Condominium',
   salePrice: 280000 + i * 10000,
-  // Older than every configured sale-age tier — nothing can qualify.
   saleDate: daysAgo(2400),
   pricePerSqft: 200,
 })

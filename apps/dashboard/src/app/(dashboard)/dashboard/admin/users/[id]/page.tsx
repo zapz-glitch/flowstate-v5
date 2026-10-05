@@ -145,7 +145,7 @@ export default function AdminUserDetailPage() {
       <div className="flex items-start gap-4">
         <Link
           href="/dashboard/admin/users"
-          className="mt-1 p-2 rounded-lg border border-border hover:bg-secondary transition-colors"
+          className="mt-1 p-2 rounded-lg border border-border hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors"
         >
           <ArrowLeft className="w-4 h-4" />
         </Link>
@@ -248,7 +248,7 @@ export default function AdminUserDetailPage() {
               className={`flex items-center gap-2 px-4 py-2.5 text-body-sm font-medium border-b-2 transition-colors ${
                 activeTab === tab.id
                   ? 'border-foreground text-foreground'
-                  : 'border-transparent text-foreground-secondary hover:text-foreground'
+                  : 'border-transparent text-foreground-secondary hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10'
               }`}
             >
               <tab.icon className="w-4 h-4" />
@@ -428,14 +428,14 @@ export default function AdminUserDetailPage() {
                 <button
                   onClick={() => setLogsPage((p) => Math.max(1, p - 1))}
                   disabled={logsPage === 1}
-                  className="p-2 rounded-lg border border-border hover:bg-secondary disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  className="p-2 rounded-lg border border-border hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                 >
                   <ChevronLeft className="w-4 h-4" />
                 </button>
                 <button
                   onClick={() => setLogsPage((p) => Math.min(logsPagination.totalPages, p + 1))}
                   disabled={logsPage === logsPagination.totalPages}
-                  className="p-2 rounded-lg border border-border hover:bg-secondary disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  className="p-2 rounded-lg border border-border hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                 >
                   <ChevronRight className="w-4 h-4" />
                 </button>

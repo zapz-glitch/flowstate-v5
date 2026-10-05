@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useCallback, useRef, useEffect, type ReactNode } from "react"
+import { usePacedWheel } from '@/hooks/use-paced-wheel'
 import { GripVertical } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -16,6 +17,8 @@ interface ResizableLayoutProps {
 }
 
 export function ResizableLayout({ left, right, className }: ResizableLayoutProps) {
+  const rightPane = useRef<HTMLDivElement>(null)
+  usePacedWheel(rightPane)
   const [leftPct, setLeftPct] = useState(DEFAULT_PCT)
   const [isDragging, setIsDragging] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -105,8 +108,9 @@ export function ResizableLayout({ left, right, className }: ResizableLayoutProps
         </div>
       </div>
 
-      {/* Right panel */}
+      {/* Right panel · wheel scrolling is paced (see usePacedWheel) */}
       <div
+        ref={rightPane}
         className="flex-1 min-w-0 overflow-y-auto min-h-0"
         style={{ pointerEvents: isDragging ? "none" : undefined }}
       >

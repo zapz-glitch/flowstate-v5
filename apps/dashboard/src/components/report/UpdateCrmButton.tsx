@@ -45,7 +45,7 @@ export function UpdateCrmButton({
       title={leadId
         ? 'Push the current (edited) evaluation values to this lead in Close CRM'
         : 'No CRM lead linked — this report was created without a Close leadId'}
-      className="p-1.5 rounded-lg text-foreground-tertiary hover:text-foreground hover:bg-secondary transition-colors disabled:opacity-50 no-print"
+      className="p-1.5 rounded-lg text-foreground-tertiary hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors disabled:opacity-50 no-print"
     >
       {pending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Building2 className="w-3.5 h-3.5" />}
     </button>

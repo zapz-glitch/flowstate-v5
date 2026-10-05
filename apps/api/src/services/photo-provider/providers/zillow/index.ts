@@ -60,6 +60,7 @@ export function createZillowFetcher(env: Env): ZillowFetcher | null {
       apiKey: env.FIRECRAWL_API_KEY,
       openrouterApiKey: env.OPENROUTER_API_KEY,  // Optional fallback
       openrouterModel: env.OPENROUTER_MODEL,
+      scrapflyApiKey: env.SCRAPFLY_API_KEY,
       cache: env.API_CACHE,
       cacheTtl: 30 * 24 * 60 * 60,
     })

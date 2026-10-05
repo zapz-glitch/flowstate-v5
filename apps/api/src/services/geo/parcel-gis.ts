@@ -54,6 +54,30 @@ const COUNTY_SOURCES: CountyParcelSource[] = [
     apn: (a) => (typeof a.PIN_NUM === 'string' && a.PIN_NUM ? a.PIN_NUM : null),
     siteAddress: (a) => (typeof a.FULLADDR === 'string' && a.FULLADDR ? a.FULLADDR : null),
   },
+  {
+    fips: '13121',
+    name: 'Fulton County, GA',
+    url: 'https://services1.arcgis.com/AQDHTHDrZzfsFsB5/arcgis/rest/services/Tax_Parcels/FeatureServer/0/query',
+    // Fulton splits the site address: AddrNumber, AddrStreet, AddrSuffix, AddrPosDir
+    where: (addr) => {
+      const DIRS = /^(N|S|E|W|NE|NW|SE|SW)$/
+      const SUFS = /^(ST|AVE|AV|DR|RD|CT|LN|CIR|BLVD|PL|TER|WAY|PKWY|TRL|CV|RUN|SQ|HWY|XING|PT|LOOP)$/
+      const parts = addr.split(/\s+/)
+      const num = parts[0]
+      let name = parts.slice(1).join(' ')
+      let posdir = ''
+      const last = name.split(' ').pop() ?? ''
+      if (DIRS.test(last)) { posdir = ` AND AddrPosDir = '${last}'`; name = name.slice(0, -last.length).trim() }
+      let suffix = ''
+      const suf = name.split(' ').pop() ?? ''
+      if (SUFS.test(suf)) { suffix = ` AND AddrSuffix = '${suf}'`; name = name.slice(0, -suf.length).trim() }
+      return `AddrNumber = '${num.replace(/'/g, "''")}' AND AddrStreet = '${name.replace(/'/g, "''")}'${suffix}${posdir}`
+    },
+    pinField: 'ParcelID',
+    outFields: 'ParcelID,Address',
+    apn: (a) => (typeof a.ParcelID === 'string' && a.ParcelID ? a.ParcelID : null),
+    siteAddress: (a) => (typeof a.Address === 'string' && a.Address ? a.Address : null),
+  },
 ]
 
 // ─── Census address geocode ──────────────────────────────────────────────────

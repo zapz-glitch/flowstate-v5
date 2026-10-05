@@ -791,6 +791,94 @@ export const analysisRuns = sqliteTable(
 )
 
 // ==========================================
+// Run Records (immutable evidence record per evaluation)
+// ==========================================
+
+export const runRecords = sqliteTable(
+  'run_records',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    jobId: text('job_id').notNull(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    reportId: text('report_id')
+      .references(() => savedReports.id, { onDelete: 'set null' }),
+    // Property identity
+    propertyAddress: text('property_address'),
+    propertyCity: text('property_city'),
+    propertyState: text('property_state'),
+    propertyZip: text('property_zip'),
+    propertyClip: text('property_clip'),
+    // Outcome and provenance
+    status: text('status').notNull(), // 'completed' | 'error' | 'cached' | 'persistence_error'
+    errorCode: text('error_code'),
+    errorMessage: text('error_message'),
+    arv: real('arv'),
+    resultGrade: text('result_grade'),
+    processGrade: text('process_grade'),
+    harnessVersion: text('harness_version'),
+    pipelineVersion: text('pipeline_version'),
+    requestHash: text('request_hash'),
+    evidenceHash: text('evidence_hash'),
+    payloadHash: text('payload_hash').notNull(),
+    archiveKey: text('archive_key'),
+    archivedAt: text('archived_at'),
+    archiveError: text('archive_error'),
+    attemptCount: integer('attempt_count').notNull().default(0),
+    compCount: integer('comp_count'),
+    enabledCompCount: integer('enabled_comp_count'),
+    // Canonical record: subject, comp evidence, effective rules/settings,
+    // every Set-B attempt input/output, and the final response.
+    payloadJson: text('payload_json').notNull(),
+    createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
+  },
+  (table) => [
+    index('idx_run_records_job_id').on(table.jobId),
+    index('idx_run_records_user_id').on(table.userId),
+    index('idx_run_records_report_id').on(table.reportId),
+    index('idx_run_records_payload_hash').on(table.payloadHash),
+    index('idx_run_records_property').on(table.userId, table.propertyAddress),
+    index('idx_run_records_created_at').on(table.createdAt),
+  ]
+)
+
+// ==========================================
+// Report Outcomes (actual sale evidence after the prediction)
+// ==========================================
+
+export const reportOutcomes = sqliteTable(
+  'report_outcomes',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    reportId: text('report_id')
+      .notNull()
+      .references(() => savedReports.id, { onDelete: 'cascade' }),
+    runRecordId: text('run_record_id')
+      .references(() => runRecords.id, { onDelete: 'set null' }),
+    jobId: text('job_id').notNull(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    actualSalePrice: real('actual_sale_price').notNull(),
+    actualSaleDate: text('actual_sale_date'),
+    /** Where the outcome came from — closing statement, MLS, user entry, etc. */
+    source: text('source'),
+    note: text('note'),
+    predictedArv: real('predicted_arv'),
+    predictionDelta: real('prediction_delta'),
+    predictionDeltaPct: real('prediction_delta_pct'),
+    createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
+  },
+  (table) => [
+    index('idx_report_outcomes_report_id').on(table.reportId),
+    index('idx_report_outcomes_job_id').on(table.jobId),
+    index('idx_report_outcomes_run_record_id').on(table.runRecordId),
+    index('idx_report_outcomes_user_id').on(table.userId, table.createdAt),
+  ]
+)
+
+// ==========================================
 // Tasks (per-user to-do list)
 // ==========================================
 

@@ -59,7 +59,7 @@ export default function DocsLayout({ children }: { children: React.ReactNode }) 
                       'px-3 py-1.5 rounded-lg text-sm transition-colors',
                       isActive
                         ? 'text-foreground font-medium bg-secondary'
-                        : 'text-muted-foreground hover:text-foreground hover:bg-secondary/50'
+                        : 'text-muted-foreground hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 '
                     )}
                   >
                     {tab.name}
@@ -73,7 +73,7 @@ export default function DocsLayout({ children }: { children: React.ReactNode }) 
               variant="ghost"
               size="icon"
               onClick={toggleTheme}
-              className="text-muted-foreground hover:text-foreground hover:bg-secondary"
+              className="text-muted-foreground hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 "
             >
               {theme === 'night' || theme === 'dawn' ? (
                 <Sun className="h-5 w-5" />
@@ -83,7 +83,7 @@ export default function DocsLayout({ children }: { children: React.ReactNode }) 
             </Button>
             <Link
               href="/dashboard"
-              className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
+              className="flex items-center gap-2 text-sm text-muted-foreground hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors"
             >
               <ArrowLeft className="h-4 w-4" />
               Back to Dashboard
@@ -105,7 +105,7 @@ export default function DocsLayout({ children }: { children: React.ReactNode }) 
                   'px-3 py-1.5 rounded-lg text-sm transition-colors',
                   isActive
                     ? 'text-foreground font-medium bg-secondary'
-                    : 'text-muted-foreground hover:text-foreground'
+                    : 'text-muted-foreground hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10'
                 )}
               >
                 {tab.name}

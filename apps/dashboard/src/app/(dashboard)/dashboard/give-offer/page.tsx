@@ -63,7 +63,7 @@ function CopyAddr({ text }: { text: string }) {
       type="button"
       aria-label="Copy address"
       title="Copy address"
-      className="p-1 rounded text-foreground-tertiary hover:text-foreground hover:bg-secondary transition-colors"
+      className="p-1 rounded text-foreground-tertiary hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors"
       onClick={(e) => {
         e.preventDefault()
         e.stopPropagation()
@@ -261,7 +261,7 @@ export default function GiveOfferPage() {
                   href={`/dashboard/give-offer/${nextJobId}?cat=waiting`}
                   onMouseEnter={() => prefetchReport(nextJobId)}
                   onClick={() => { armNavVeil(); prefetchReport(nextJobId) }}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary/10 text-primary text-xs font-medium hover:bg-primary/20 transition-colors"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary/10 text-primary text-xs font-medium hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors"
                 >
                   <Play size={12} />
                   Next up — {next!.fullAddress ?? next!.address ?? 'top of queue'}
@@ -272,7 +272,7 @@ export default function GiveOfferPage() {
                   href={`/dashboard/give-offer/${resume.jobId}`}
                   onMouseEnter={() => prefetchReport(resume.jobId)}
                   onClick={() => { armNavVeil(); prefetchReport(resume.jobId) }}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-border text-xs text-foreground-secondary hover:bg-secondary transition-colors"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-border text-xs text-foreground-secondary hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors"
                 >
                   <RotateCcw size={12} />
                   Last report — {resume.address ?? resume.jobId}
@@ -292,7 +292,7 @@ export default function GiveOfferPage() {
                   className={`border rounded-md px-3 py-2.5 text-left transition-colors ${
                     cat === c
                       ? 'border-primary/60 bg-primary/10'
-                      : 'border-border/60 bg-background hover:bg-secondary/50'
+                      : 'border-border/60 bg-background hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10'
                   }`}
                 >
                   <div className={`flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider ${cat === c ? 'text-primary' : 'text-foreground-tertiary'}`}>

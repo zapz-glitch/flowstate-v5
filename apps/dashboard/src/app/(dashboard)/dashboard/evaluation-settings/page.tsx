@@ -31,6 +31,7 @@ import {
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { DraftNumberInput } from '@/components/ui/number-input'
 import { Badge } from '@/components/ui/badge'
 import { Switch } from '@/components/ui/switch'
 import { Card, CardContent, CardTitle } from '@/components/ui/card'
@@ -216,16 +217,13 @@ function FilterRow({
           <span className="text-[10px] text-muted-foreground select-none">must match</span>
         ) : (
           <div className="flex items-center rounded-md border border-border bg-muted/30 overflow-hidden focus-within:ring-1 focus-within:ring-primary/30 focus-within:border-primary/50">
-            <Input
-              type="number"
+            <DraftNumberInput
               min={0}
               step={filterType === 'distance' ? 0.1 : 1}
               value={value}
               disabled={!enabled}
-              onChange={(e) => {
-                const v = parseFloat(e.target.value)
-                if (!isNaN(v) && v >= 0) onValueChange(v)
-              }}
+              onCommit={onValueChange}
+              aria-label={label}
               className="h-7 w-16 text-[11px] text-right tabular-nums border-0 bg-transparent shadow-none focus-visible:ring-0 pr-1 pl-2"
             />
             <span className="text-[10px] text-muted-foreground pr-2 select-none">{unit}</span>
@@ -305,17 +303,18 @@ function AdjustmentRow({
         ) : adjustmentType === 'old_comp_discount' ? (
           <>
             <div className="flex items-center rounded-md border border-border bg-muted/30 overflow-hidden focus-within:ring-1 focus-within:ring-primary/30 focus-within:border-primary/50" title="Apply to sales older than this many days">
-              <Input
-                type="number" min={0} max={365} value={amount || 90} disabled={!enabled}
-                onChange={(e) => { const v = parseInt(e.target.value, 10); if (!isNaN(v) && v >= 0 && v <= 365) onAmountChange(v) }}
+              {/* 0 is not a value here · the server reads it as the 90-day default */}
+              <DraftNumberInput
+                integer min={1} max={365} value={amount || 90} disabled={!enabled}
+                onCommit={onAmountChange}
                 className="h-7 w-12 text-[11px] text-right tabular-nums border-0 bg-transparent shadow-none focus-visible:ring-0 pr-1 pl-2"
               />
               <span className="text-[10px] text-muted-foreground pr-2 select-none">d</span>
             </div>
             <div className="flex items-center rounded-md border border-border bg-muted/30 overflow-hidden focus-within:ring-1 focus-within:ring-primary/30 focus-within:border-primary/50">
-              <Input
-                type="number" min={0} max={100} value={percentage} disabled={!enabled}
-                onChange={(e) => { const v = parseInt(e.target.value, 10); if (!isNaN(v) && v >= 0 && v <= 100) onPercentageChange(v) }}
+              <DraftNumberInput
+                integer min={0} max={100} value={percentage} disabled={!enabled}
+                onCommit={onPercentageChange}
                 className="h-7 w-12 text-[11px] text-right tabular-nums border-0 bg-transparent shadow-none focus-visible:ring-0 pr-1 pl-2"
               />
               <span className="text-[10px] text-muted-foreground pr-2 select-none">%</span>
@@ -325,16 +324,16 @@ function AdjustmentRow({
           <>
             <div className="flex items-center rounded-md border border-border bg-muted/30 overflow-hidden focus-within:ring-1 focus-within:ring-primary/30 focus-within:border-primary/50" title="Flat deduction below the value threshold">
               <span className="text-[10px] text-muted-foreground pl-2 select-none">$</span>
-              <Input
-                type="number" min={0} step={1000} value={amount} disabled={!enabled}
-                onChange={(e) => { const v = parseInt(e.target.value, 10); if (!isNaN(v) && v >= 0) onAmountChange(v) }}
+              <DraftNumberInput
+                integer min={0} step={1000} value={amount} disabled={!enabled}
+                onCommit={onAmountChange}
                 className="h-7 w-14 text-[11px] text-right tabular-nums border-0 bg-transparent shadow-none focus-visible:ring-0 pr-1"
               />
             </div>
             <div className="flex items-center rounded-md border border-border bg-muted/30 overflow-hidden focus-within:ring-1 focus-within:ring-primary/30 focus-within:border-primary/50" title="Percent deduction at/above the value threshold">
-              <Input
-                type="number" min={0} max={100} value={percentage} disabled={!enabled}
-                onChange={(e) => { const v = parseInt(e.target.value, 10); if (!isNaN(v) && v >= 0 && v <= 100) onPercentageChange(v) }}
+              <DraftNumberInput
+                integer min={0} max={100} value={percentage} disabled={!enabled}
+                onCommit={onPercentageChange}
                 className="h-7 w-12 text-[11px] text-right tabular-nums border-0 bg-transparent shadow-none focus-visible:ring-0 pr-1 pl-2"
               />
               <span className="text-[10px] text-muted-foreground pr-2 select-none">%</span>
@@ -342,9 +341,9 @@ function AdjustmentRow({
           </>
         ) : isPercentage ? (
           <div className="flex items-center rounded-md border border-border bg-muted/30 overflow-hidden focus-within:ring-1 focus-within:ring-primary/30 focus-within:border-primary/50">
-            <Input
-              type="number" min={0} max={100} value={percentage} disabled={!enabled}
-              onChange={(e) => { const v = parseInt(e.target.value, 10); if (!isNaN(v) && v >= 0 && v <= 100) onPercentageChange(v) }}
+            <DraftNumberInput
+              integer min={0} max={100} value={percentage} disabled={!enabled}
+              onCommit={onPercentageChange}
               className="h-7 w-12 text-[11px] text-right tabular-nums border-0 bg-transparent shadow-none focus-visible:ring-0 pr-1 pl-2"
             />
             <span className="text-[10px] text-muted-foreground pr-2 select-none">%</span>
@@ -352,9 +351,9 @@ function AdjustmentRow({
         ) : (
           <div className="flex items-center rounded-md border border-border bg-muted/30 overflow-hidden focus-within:ring-1 focus-within:ring-primary/30 focus-within:border-primary/50">
             <span className="text-[10px] text-muted-foreground pl-2 select-none">$</span>
-            <Input
-              type="number" min={0} step={1000} value={amount} disabled={!enabled}
-              onChange={(e) => { const v = parseInt(e.target.value, 10); if (!isNaN(v) && v >= 0) onAmountChange(v) }}
+            <DraftNumberInput
+              integer min={0} step={1000} value={amount} disabled={!enabled}
+              onCommit={onAmountChange}
               className="h-7 w-20 text-[11px] text-right tabular-nums border-0 bg-transparent shadow-none focus-visible:ring-0 pr-2"
             />
           </div>
@@ -2113,16 +2112,12 @@ function NumericInput({
   return (
     <div className={`flex items-center rounded-md border border-border bg-background overflow-hidden focus-within:ring-2 focus-within:ring-primary/25 focus-within:border-primary/50 transition-colors ${className ?? ''}`}>
       {prefix && <span className="text-sm text-muted-foreground pl-2.5 select-none">{prefix}</span>}
-      <Input
-        type="number"
+      <DraftNumberInput
         min={min}
         max={max}
         step={step}
         value={value}
-        onChange={(e) => {
-          const v = parseFloat(e.target.value)
-          if (!isNaN(v) && v >= min && (max === undefined || v <= max)) onChange(v)
-        }}
+        onCommit={onChange}
         className="h-9 border-0 shadow-none focus-visible:ring-0 bg-transparent text-sm tabular-nums"
       />
       {suffix && <span className="text-sm text-muted-foreground pr-2.5 select-none">{suffix}</span>}
@@ -3599,11 +3594,12 @@ function ArvAdjustmentsSection({ rules, onChange }: { rules: ArvAdjustmentRule[]
               placeholder="value"
             />
           )}
-          <input
-            type="number" step={0.5} min={0} max={100}
+          <DraftNumberInput
+            step={0.5} min={0} max={100}
             value={rule.percent}
-            onChange={(e) => update(i, { percent: parseFloat(e.target.value) || 0 })}
-            className="w-14 h-7 px-1 rounded bg-secondary/30 border-0 text-[11px] text-right tabular-nums outline-none focus:ring-1 focus:ring-primary"
+            onCommit={(percent) => update(i, { percent })}
+            aria-label="Percent"
+            className="w-14 h-7 px-1 rounded bg-secondary/30 border-0 shadow-none text-[11px] text-right tabular-nums outline-none focus-visible:ring-1 focus-visible:ring-primary"
           />
           <span className="text-muted-foreground">%</span>
           <button

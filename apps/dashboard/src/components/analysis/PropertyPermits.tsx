@@ -26,7 +26,7 @@ export function PropertyPermits({ permits, loading = false }: { permits: Subject
       const analysis = await pullReportPermits(jobId)
       onPermitsPulled!(analysis)
       const count = analysis.subject?.permits?.items?.length ?? 0
-      toast.success(count > 0 ? `${count} permit${count === 1 ? '' : 's'} pulled — valuation updated` : 'No permits on file — valuation updated')
+      toast.success(count > 0 ? `${count} permit${count === 1 ? '' : 's'} pulled. Valuation updated` : 'No permits on file. Valuation updated')
       if (count > 0) setOpen(true)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Permit pull failed')
@@ -36,22 +36,26 @@ export function PropertyPermits({ permits, loading = false }: { permits: Subject
   }
 
   if (loading && !permits) {
-    return <p className="mt-3 border-t border-border pt-2 text-xs text-foreground-secondary">Permits — loading…</p>
+    return (
+      <p className="mt-3 border-t border-border pt-2 text-xs font-medium">
+        <span className="text-foreground-tertiary">Permits</span>{' '}<span className="text-foreground-secondary">Loading…</span>
+      </p>
+    )
   }
 
   if (!items.length) {
     return (
       <div className="mt-3 border-t border-border pt-2 text-xs">
         <div className="flex items-center justify-between gap-2">
-          <p className="font-medium">Permits — NA</p>
+          <p className="font-medium"><span className="text-foreground-tertiary">Permits</span>{' '}<span className="text-foreground">NA</span></p>
           {pullable && canPull && (
             <button
               type="button"
               onClick={pull}
-              className="flex items-center gap-1 px-2 py-1 rounded-sm border border-border text-foreground-secondary hover:text-foreground hover:border-foreground/40 transition-colors"
+              className="flex items-center gap-1 px-2 py-1 rounded-sm border border-border text-foreground-secondary hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors"
             >
               <FileText className="w-3 h-3" />
-              Permits
+              Pull
             </button>
           )}
           {pulling && <Loader2 className="w-3 h-3 animate-spin text-foreground-tertiary" />}
@@ -61,7 +65,7 @@ export function PropertyPermits({ permits, loading = false }: { permits: Subject
             ? 'No permit records returned by the provider.'
             : permits?.status === 'unavailable'
               ? 'Permit lookup unavailable. This does not confirm that no permits exist.'
-              : 'Not pulled during analysis — pull on demand to update major items and buy price.'}
+              : 'Not pulled during analysis. Pull on demand to update major items and buy price.'}
         </p>
       </div>
     )

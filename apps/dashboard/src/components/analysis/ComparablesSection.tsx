@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useEffect, useMemo, useCallback } from 'react'
-import { SlidersHorizontal, RotateCcw, Loader2, LayoutGrid, List, ArrowUpDown, Bell, Check } from 'lucide-react'
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
+import { SlidersHorizontal, RotateCcw } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { CopyButton } from '@/components/ui/copy-button'
@@ -15,8 +15,7 @@ import {
 import { cn } from '@/lib/utils'
 import { subdivisionsMatch } from '@flowstate-api/shared'
 import type { CompsData, CompItem, SubjectData } from './shared-types'
-import { getCompKey } from './format-helpers'
-import { CompCard } from './CompCard'
+import { getCompKey, scopeLabel, scopeRank } from './format-helpers'
 import { CompGridCard } from './CompGridCard'
 import { RuleMatchDetails } from './RuleMatchDetails'
 import { generateCompFeedbackReport, type FeedbackContext, type FeedbackKind } from '@/lib/comp-feedback'
@@ -42,43 +41,27 @@ export interface ComparablesSectionProps {
   onPinTier?: (compId: string, tier: 'arv' | 'as_is' | null) => void
   /** Called when reset button is clicked */
   onReset?: () => void
-  /** When set, auto-expands excluded section and highlights this comp key */
+  /** Highlights this comp key (map marker hover / click) */
   highlightedCompKey?: string | null
-  /** When true, shows all comps expanded with analysis-in-progress animation */
-  isAnalyzing?: boolean
-  /** Called to trigger AI comp selection */
-  onRunAiAnalysis?: () => void
-  /** Called to undo AI comp selection — only passed when AI analysis has been done */
-  onUndoAiSelection?: () => void
   /** Called when a comp card is clicked (for comparison dialog) */
   onCompClick?: (comp: CompItem) => void
   /** Called when a comp card is hovered (for map marker sync) */
   onCompHover?: (key: string | null) => void
-  /** Rules/fallback context for the "Notify" comp-selection feedback report */
+  /** Rules/fallback context for the "Report" comp-selection feedback ticket */
   feedbackContext?: FeedbackContext | null
   /** Called after a feedback stamp is submitted — batch review uses it to advance */
   onFeedbackSubmitted?: (type: 'validate' | 'improve') => void
 }
 
-type SortOption = 'default' | 'subdivision' | 'neighborhood' | 'distance' | 'price' | 'psf'
+/** 'default' = what the rules selected · 'price' = a tier, highest sale first */
+type SortOption = 'default' | 'price'
 
-const SORT_LABELS: Record<SortOption, string> = {
-  default: 'Default',
-  subdivision: 'Subdivision',
-  neighborhood: 'Neighborhood',
-  distance: 'Distance',
-  price: 'Price',
-  psf: '$/Sqft',
-}
+type Tier = 'all' | 'arv' | 'market' | 'floor'
+/** Thin line between pills · the same mark the valuation box uses */
+const DIVIDER = 'w-px h-3 bg-border mx-1 flex-shrink-0'
 
-/** Neighborhood match by normalized name OR provider code (mirrors server-side neighborhoodsMatch) */
-function neighborhoodsMatchClient(comp: CompItem, subject: SubjectData | null | undefined): boolean {
-  const norm = (s?: string | null) => s?.trim().toLowerCase() || null
-  const a = norm(comp.neighborhoodName)
-  const b = norm(subject?.neighborhoodName)
-  if (a && b && a === b) return true
-  return comp.neighborhoodCode != null && subject?.neighborhoodCode != null && comp.neighborhoodCode === subject.neighborhoodCode
-}
+/** Tier words · shared by the pills and the empty state */
+const TIER_LABEL: Record<Tier, string> = { all: 'All', arv: 'ARV', market: 'Median', floor: 'Investor' }
 
 export function ComparablesSection({
   comps,
@@ -91,24 +74,39 @@ export function ComparablesSection({
   onPinTier,
   onReset,
   highlightedCompKey,
-  isAnalyzing = false,
-  onRunAiAnalysis,
-  onUndoAiSelection,
   onCompClick,
   onCompHover,
   feedbackContext,
   onFeedbackSubmitted,
 }: ComparablesSectionProps) {
-  const [expandedComps, setExpandedComps] = useState<Set<string>>(new Set())
-  const [excludedOpen, setExcludedOpen] = useState(false)
-  const [layout, setLayout] = useState<'grid' | 'list'>('grid')
   const [sortBy, setSortBy] = useState<SortOption>('default')
-  const [tierFilter, setTierFilter] = useState<'all' | 'arv' | 'market' | 'floor'>('all')
-  const [sortDesc, setSortDesc] = useState(true)
-  const [notifyOpen, setNotifyOpen] = useState(false)
-  const [notifyNotes, setNotifyNotes] = useState('')
-  const [notifySubmitting, setNotifySubmitting] = useState<FeedbackKind | null>(null)
-  const [notifySaveError, setNotifySaveError] = useState<string | null>(null)
+  const [tierFilter, setTierFilter] = useState<Tier>('all')
+  const [reportOpen, setReportOpen] = useState(false)
+  const [reportNotes, setReportNotes] = useState('')
+  const [reportSubmitting, setReportSubmitting] = useState<FeedbackKind | null>(null)
+  const [reportSaveError, setReportSaveError] = useState<string | null>(null)
+  // Tier switches swap a tall grid for a short one (or an empty state). The
+  // grid keeps a minimum height so the page never collapses and yanks the
+  // reader back up to the subject card.
+  const gridRef = useRef<HTMLDivElement>(null)
+  const tierRowRef = useRef<HTMLDivElement>(null)
+  const tierBarRef = useRef<HTMLDivElement>(null)
+  // The bar pins right under whatever is pinned above it (the subject card,
+  // or the valuation box on the single-column page) · its top follows that
+  // element's height, which changes with pane width and wrapping.
+  const [stickyTop, setStickyTop] = useState(0)
+  useEffect(() => {
+    const bar = tierBarRef.current
+    if (!bar) return
+    const hero = bar.closest('.props-pane, body')?.querySelector<HTMLElement>('[data-pane-sticky]')
+    if (!hero) return
+    const measure = () => setStickyTop(Math.round((parseFloat(getComputedStyle(hero).top) || 0) + hero.offsetHeight))
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(hero)
+    return () => ro.disconnect()
+  }, [])
+  const [lockedGridHeight, setLockedGridHeight] = useState<number | null>(null)
   // Reviewer-pinned comp tiers — compId → 'arv'|'as_is'. Optimistic local
   // state; persisted via PUT /v1/analyze/jobs/:jobId/comp-tier.
   const [tierPins, setTierPins] = useState<Record<string, 'arv' | 'as_is'>>({})
@@ -146,24 +144,25 @@ export function ComparablesSection({
     return pinned ? { ...comp, userTier: pinned } : comp
   }
 
-  // Auto-expand excluded section when a highlighted comp is in it
-  useEffect(() => {
-    if (!highlightedCompKey) return
-    const compItems = comps.items || []
-    const isExcluded = selectedCompKeys
-      ? !selectedCompKeys.has(highlightedCompKey)
-      : compItems.some((c, i) => getCompKey(c, i) === highlightedCompKey && c.isEnabled === false)
-    if (isExcluded && !excludedOpen) {
-      setExcludedOpen(true)
-    }
-  }, [highlightedCompKey, comps.items, selectedCompKeys, excludedOpen])
+  // A new comp list (new analysis, streaming update) releases the height lock.
+  useEffect(() => { setLockedGridHeight(null) }, [comps.items])
+
+  const selectTier = (tier: Tier) => {
+    if (tier === tierFilter) return
+    // Hold the grid down to the bottom of the screen: the scroll position
+    // stays valid, and a short tier leaves at most one screen of space.
+    const top = gridRef.current?.getBoundingClientRect().top
+    if (top != null) setLockedGridHeight(Math.max(0, Math.ceil(window.innerHeight - top)))
+    setTierFilter(tier)
+    setSortBy(tier === 'all' ? 'default' : 'price')
+    // Stay with the comp list after the grid re-renders.
+    requestAnimationFrame(() => tierRowRef.current?.scrollIntoView({ block: 'nearest' }))
+  }
+
   const compItems = comps.items || []
   const hasInteractiveSelection = !!selectedCompKeys
 
-  // Sorted items preserving original index for stable keys & map marker numbering.
-  // Stacked ordering: selected block pinned first → geo grouping (subdivision/
-  // neighborhood modes) → appraisal-rule closeness (constant across every sort)
-  // → directional key (price under geo modes, own key for distance/price/psf).
+  // Sorted items keep their original index for stable keys & map marker numbering.
   // Evidence-tier filter — ARV (after_renovation) / Median (transitional)
   // / Investor (as_is). Drives the card list, not the map colors.
   const tierOf = (c: CompItem) =>
@@ -182,56 +181,45 @@ export function ComparablesSection({
       hasInteractiveSelection ? selectedCompKeys!.has(getCompKey(c, i)) : (c.compGroup === 'arv' || c.isEnabled === true)
     const subdivMatch = (c: CompItem) =>
       subjectSubdivision && c.subdivision && subdivisionsMatch(subjectSubdivision, c.subdivision) ? 1 : 0
+    const geoRank = (c: CompItem) => scopeRank(scopeLabel(c, subject))
+
+    // How far a comp sits from the rules: failed rules first (fewer is
+    // closer), then how far it misses on size, year and sale age.
+    const failedRules = (c: CompItem) =>
+      (c.appraisalRules?.filters ?? []).filter((f) => (f.status ?? (f.passed ? 'passed' : 'failed')) === 'failed').length
+    const miss = (c: CompItem) => {
+      const sf = c.squareFeet != null && subject?.squareFeet ? Math.abs(c.squareFeet - subject.squareFeet) / subject.squareFeet : 1
+      const yr = c.yearBuilt != null && subject?.yearBuilt ? Math.abs(c.yearBuilt - subject.yearBuilt) / 50 : 1
+      return sf + yr + (c.distanceMiles ?? 5) / 5
+    }
+    // The server's picks lead: the anchor, then the other drivers, then any
+    // other checked comp, then comps that pass the rules, then the rest.
+    const pickRank = (c: CompItem, i: number) =>
+      c.bRole === 'anchor' ? 0 : c.bRole === 'driver' ? 1 : isSel(c, i) ? 2 : c.bRole === 'pool' || (c.bRole == null && c.isEnabled === true) ? 3 : 4
 
     if (sortBy === 'default') {
-      // What the rules selected: selected block first, then enabled, then
-      // excluded; subdivision matches before non-matches; nearest first
+      // Server picks first, then every other comp from closest to the rules
+      // to furthest. Tighter geography breaks ties.
       return [...indexed].sort((a, b) => {
-        const ra = isSel(a.comp, a.originalIndex) ? 0 : a.comp.isEnabled ? 1 : 2
-        const rb = isSel(b.comp, b.originalIndex) ? 0 : b.comp.isEnabled ? 1 : 2
-        if (ra !== rb) return ra - rb
+        const pa = pickRank(a.comp, a.originalIndex), pb = pickRank(b.comp, b.originalIndex)
+        if (pa !== pb) return pa - pb
+        const fa = failedRules(a.comp), fb = failedRules(b.comp)
+        if (fa !== fb) return fa - fb
+        const ga = geoRank(a.comp), gb = geoRank(b.comp)
+        if (ga !== gb) return ga - gb
         const aMatch = subdivMatch(a.comp)
         const bMatch = subdivMatch(b.comp)
         if (aMatch !== bMatch) return bMatch - aMatch
-        return (a.comp.distanceMiles ?? 999) - (b.comp.distanceMiles ?? 999)
+        return (miss(a.comp) - miss(b.comp)) || ((a.comp.distanceMiles ?? 999) - (b.comp.distanceMiles ?? 999))
       })
     }
 
-    const dir = sortDesc ? -1 : 1
-
-    const geoMatch = (c: CompItem): number => {
-      if (sortBy === 'subdivision') return subdivMatch(c)
-      if (sortBy === 'neighborhood') return neighborhoodsMatchClient(c, subject) ? 1 : 0
-      return 0
-    }
-    const numKey = (c: CompItem): number => {
-      switch (sortBy) {
-        case 'distance': return c.distanceMiles ?? 999
-        case 'psf': return c.pricePerSqft ?? 0
-        // subdivision & neighborhood ascend/descend by price
-        default: return c.salePrice ?? 0
-      }
-    }
-
-    return [...indexed].sort((a, b) => {
-      const sa = isSel(a.comp, a.originalIndex) ? 0 : 1
-      const sb = isSel(b.comp, b.originalIndex) ? 0 : 1
-      if (sa !== sb) return sa - sb
-      const ga = geoMatch(a.comp), gb = geoMatch(b.comp)
-      if (ga !== gb) return gb - ga
-      return dir * (numKey(a.comp) - numKey(b.comp)) || (a.originalIndex - b.originalIndex)
-    })
-  }, [filteredCompItems, compItems, sortBy, sortDesc, subjectSubdivision, subject, selectedCompKeys, hasInteractiveSelection])
-
-  // Functional update keeps the identity stable for memoized cards.
-  const toggleExpand = useCallback((key: string) => {
-    setExpandedComps((prev) => {
-      const next = new Set(prev)
-      if (next.has(key)) next.delete(key)
-      else next.add(key)
-      return next
-    })
-  }, [])
+    // A tier view: tract matches first, then highest sale · no selected-first pinning.
+    return [...indexed].sort((a, b) =>
+      (geoRank(a.comp) - geoRank(b.comp))
+      || ((b.comp.salePrice ?? 0) - (a.comp.salePrice ?? 0))
+      || (a.originalIndex - b.originalIndex))
+  }, [filteredCompItems, compItems, sortBy, subjectSubdivision, subject, selectedCompKeys, hasInteractiveSelection])
 
   // Group comps based on selection mode
   const arvComps = hasInteractiveSelection
@@ -240,47 +228,45 @@ export function ComparablesSection({
   const excludedComps = hasInteractiveSelection
     ? filteredCompItems.filter((c) => !selectedCompKeys!.has(getCompKey(c, compItems.indexOf(c))))
     : filteredCompItems.filter((c) => c.isEnabled !== true)
-  // If no comps are selected (e.g. streaming, before evaluation), show all in main section
-  const showAllFlat = arvComps.length === 0 && excludedComps.length > 0
-
   const selectedCount = arvComps.length
 
-  // Notify — submit the feedback ticket (stored on the report for the agent),
+  // Report — submit the feedback ticket (stored on the report for the agent),
   // stamp it, then advance to the next property in batch-review mode
-  const submitNotify = async (kind: FeedbackKind) => {
-    if (notifySubmitting) return
-    setNotifySubmitting(kind)
-    setNotifySaveError(null)
+  const submitReport = async (kind: FeedbackKind) => {
+    if (reportSubmitting) return
+    setReportSubmitting(kind)
+    setReportSaveError(null)
     const report = generateCompFeedbackReport({
       subject,
       comps: compItems,
       userSelectedKeys: selectedCompKeys ?? new Set(),
       context: feedbackContext ?? {},
-      userNotes: notifyNotes,
+      userNotes: reportNotes,
       kind,
     })
+
+    // Shown inline and as a toast, so a failed save is never silent.
+    const fail = (message: string) => {
+      setReportSaveError(message)
+      setReportSubmitting(null)
+      toast.error(message)
+    }
 
     const jobId = feedbackContext?.jobId
     if (jobId) {
       try {
-        const res = await submitReportFeedback(jobId, kind, notifyNotes, report)
-        if (!res.success) {
-          setNotifySaveError(res.error ?? 'Submission failed')
-          setNotifySubmitting(null)
-          return
-        }
+        const res = await submitReportFeedback(jobId, kind, reportNotes, report)
+        if (!res.success) return fail(res.error ?? 'Could not save the review. Try again.')
       } catch (err) {
         if (reloadForStaleAction(err)) return
-        setNotifySaveError('Submission failed')
-        setNotifySubmitting(null)
-        return
+        return fail('Could not save the review. Try again.')
       }
     }
 
-    setNotifySubmitting(null)
-    setNotifyOpen(false)
-    setNotifyNotes('')
-    toast.success(kind === 'validate' ? 'Validated — report stamped' : 'Submitted — feedback ticket saved')
+    setReportSubmitting(null)
+    setReportOpen(false)
+    setReportNotes('')
+    toast.success(kind === 'validate' ? 'Report validated' : 'Flagged for improvement')
     onFeedbackSubmitted?.(kind === 'validate' ? 'validate' : 'improve')
   }
 
@@ -298,98 +284,52 @@ export function ComparablesSection({
 
   return (
     <div>
-      <div className="mb-4 space-y-2">
-        {/* Row 1: Title + stats + actions */}
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <h3 className="mono-label">Comparables</h3>
-            <span className="text-[10px] text-foreground-tertiary tabular-nums">
-              {selectedCount} selected
-              {excludedComps.length > 0 && ` · ${excludedComps.length} excluded`}
-              {avgPsf != null && ` · $${avgPsf}/sf avg`}
-              {priceMin != null && priceMax != null && priceMin !== priceMax && (
-                <span className="hidden sm:inline"> · ${(priceMin / 1000).toFixed(0)}k–${(priceMax / 1000).toFixed(0)}k</span>
-              )}
-            </span>
-          </div>
-          <div className="flex items-center gap-2">
-            {/* Notify — comp-selection feedback report (always available) */}
-            <button
-              type="button"
-              onClick={() => { setNotifyNotes(''); setNotifySaveError(null); setNotifyOpen(true) }}
-              className="flex items-center gap-1 text-caption text-foreground-tertiary hover:text-foreground font-medium transition-colors no-print"
-              title="Generate a comp-selection feedback report for devin.ai"
-            >
-              <Bell className="w-3 h-3" />
-              Notify
-            </button>
-            {/* Grid/List toggle */}
-            <div className="flex items-center border border-border rounded overflow-hidden no-print">
-              <button
-                type="button"
-                onClick={() => setLayout('grid')}
-                className={cn('p-1.5 transition-colors', layout === 'grid' ? 'bg-primary/10 text-primary' : 'text-foreground-tertiary hover:text-foreground')}
-                title="Grid view"
-              >
-                <LayoutGrid className="w-3.5 h-3.5" />
-              </button>
-              <button
-                type="button"
-                onClick={() => setLayout('list')}
-                className={cn('p-1.5 transition-colors', layout === 'list' ? 'bg-primary/10 text-primary' : 'text-foreground-tertiary hover:text-foreground')}
-                title="List view"
-              >
-                <List className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          </div>
+      {/* Stats + tiers stay pinned under the valuation box while the list scrolls,
+          so the selection count and the tier switches are always in reach. */}
+      <div
+        ref={tierBarRef}
+        data-comps-anchor
+        className="sticky z-[9] bg-background pb-2 mb-2 space-y-2 border-b border-border/60"
+        style={{ top: stickyTop }}
+      >
+        {/* Selection stats */}
+        <div className="text-[11px] text-foreground-tertiary tabular-nums">
+          {selectedCount} selected
+          {excludedComps.length > 0 && ` · ${excludedComps.length} excluded`}
+          {avgPsf != null && ` · $${avgPsf}/sf avg`}
+          {priceMin != null && priceMax != null && priceMin !== priceMax && (
+            <span className="hidden sm:inline"> · ${(priceMin / 1000).toFixed(0)}k to ${(priceMax / 1000).toFixed(0)}k</span>
+          )}
         </div>
 
-        {/* Row 2: Evidence-tier filter + sort controls */}
-        <div className="flex items-center gap-1 no-print flex-wrap">
-          {/* Tier filter — ARV evidence / median / investor floor */}
-          {(['all', 'arv', 'market', 'floor'] as const).map((t) => {
-            const labels = { all: 'All', arv: 'ARV', market: 'Median', floor: 'Investor' }
-            const colors = {
-              all: tierFilter === t ? 'bg-secondary text-foreground font-medium' : 'text-foreground-tertiary hover:text-foreground hover:bg-secondary',
-              arv: tierFilter === t ? 'bg-brand/15 text-brand font-medium' : 'text-foreground-tertiary hover:text-foreground hover:bg-secondary',
-              market: tierFilter === t ? 'bg-orange-500/15 text-orange-500 font-medium' : 'text-foreground-tertiary hover:text-foreground hover:bg-secondary',
-              floor: tierFilter === t ? 'bg-red-500/15 text-red-400 font-medium' : 'text-foreground-tertiary hover:text-foreground hover:bg-secondary',
-            }
-            return (
-              <button
-                key={t}
-                type="button"
-                onClick={() => setTierFilter(t)}
-                className={cn('text-[10px] px-2 py-0.5 rounded transition-colors', colors[t])}
-              >
-                {labels[t]}
-              </button>
-            )
-          })}
-          <span className="w-px h-3 bg-border mx-1" />
-          <ArrowUpDown className="w-3 h-3 text-foreground-tertiary mr-0.5" />
-          {(['default', 'subdivision', 'neighborhood', 'distance', 'price', 'psf'] as const).map((opt) => (
-            <button
-              key={opt}
-              type="button"
-              onClick={() => {
-                if (sortBy === opt && opt !== 'default') setSortDesc((d) => !d)
-                else { setSortBy(opt); setSortDesc(true) }
-              }}
-              className={cn(
-                'text-[10px] px-2 py-0.5 rounded transition-colors inline-flex items-center gap-0.5',
-                sortBy === opt
-                  ? 'bg-primary/15 text-primary font-medium'
-                  : 'text-foreground-tertiary hover:text-foreground hover:bg-secondary'
-              )}
-            >
-              {SORT_LABELS[opt]}
-              {sortBy === opt && opt !== 'default' && (
-                <span className="text-[8px]">{sortDesc ? '↓' : '↑'}</span>
-              )}
-            </button>
+        {/* Evidence tiers · ARV evidence / median / investor floor */}
+        <div ref={tierRowRef} className="flex items-center gap-1 no-print flex-wrap scroll-mt-24">
+          {/* A thin line between every tier */}
+          {(['all', 'arv', 'market'] as const).map((t, i) => (
+            <span key={t} className="inline-flex items-center gap-1">
+              {i > 0 && <span className={DIVIDER} aria-hidden />}
+              <TierPill tier={t} active={tierFilter === t} onSelect={selectTier} />
+            </span>
           ))}
+          {/* Investor and Report travel together · they never wrap apart */}
+          <span className="inline-flex items-center gap-1">
+            <span className={DIVIDER} aria-hidden />
+            <TierPill tier="floor" active={tierFilter === 'floor'} onSelect={selectTier} />
+            {jobId && (
+              <>
+                <span className={DIVIDER} aria-hidden />
+                {/* Review · stamp this report or flag it; saved on the report */}
+                <button
+                  type="button"
+                  onClick={() => { setReportNotes(''); setReportSaveError(null); setReportOpen(true) }}
+                  className="text-[11px] px-2 py-0.5 rounded text-foreground-tertiary hover:text-foreground hover:bg-secondary transition-colors"
+                  title="Validate this report or flag it for improvement"
+                >
+                  Report
+                </button>
+              </>
+            )}
+          </span>
         </div>
 
         {/* CDARV status — observational only; never gates evaluation */}
@@ -419,12 +359,6 @@ export function ComparablesSection({
           </div>
         )}
       </div>
-
-      {comps.items?.some(comp => comp.priorityRank != null) && (
-        <p className="mb-3 text-[11px] text-foreground">
-          Priority order: subdivision, year built, square footage, lot size, physical style. Rule match reports enabled-rule results separately from this ranking.
-        </p>
-      )}
 
       {/* Print-only compact comp table */}
       <div className="hidden print:block px-6 py-4">
@@ -479,9 +413,26 @@ export function ComparablesSection({
         )}
       </div>
 
-      {/* All comps — grid or list */}
-      <div className="print:hidden">
-        {layout === 'grid' ? (
+      {/* All comps · grid only. The wrapper keeps a minimum height across tier
+          switches so an empty or short tier never collapses the page. */}
+      <div
+        ref={gridRef}
+        className="print:hidden"
+        style={lockedGridHeight ? { minHeight: lockedGridHeight } : undefined}
+      >
+        {sortedItems.length === 0 && tierFilter !== 'all' && (
+          <div className="border border-dashed border-border rounded-sm flex flex-col items-center justify-center gap-2 min-h-[16rem] px-4 text-center">
+            <p className="text-body-sm text-foreground-secondary">No {TIER_LABEL[tierFilter]} comps in this report</p>
+            <button
+              type="button"
+              onClick={() => selectTier('all')}
+              className="text-[11px] font-medium text-foreground-tertiary underline underline-offset-2 hover:text-foreground transition-colors"
+            >
+              Show all
+            </button>
+          </div>
+        )}
+        {sortedItems.length > 0 && (
           <div className="comps-grid">
             {sortedItems.map(({ comp, originalIndex }) => {
               const key = getCompKey(comp, originalIndex)
@@ -496,8 +447,6 @@ export function ComparablesSection({
                   subject={subject}
                   isSelectedForArv={isSelected}
                   onToggleArv={onToggleComp}
-                  onAssignTier={jobId ? pinTier : undefined}
-                  tierPending={comp.id ? tierPending.has(comp.id) : false}
                   onCompClick={onCompClick}
                   onHover={onCompHover}
                   isHighlighted={highlightedCompKey === key}
@@ -505,82 +454,49 @@ export function ComparablesSection({
               )
             })}
           </div>
-        ) : (
-          <div className="space-y-3">
-            {sortedItems.map(({ comp, originalIndex }) => {
-              const key = getCompKey(comp, originalIndex)
-              const isSelected = hasInteractiveSelection
-                ? selectedCompKeys!.has(key)
-                : comp.isEnabled === true
-              return (
-                <CompCard
-                  key={key}
-                  comp={compWithTier(comp)}
-                  index={originalIndex}
-                  isExpanded={expandedComps.has(key)}
-                  onToggle={toggleExpand}
-                  subject={subject}
-                  subjectSubdivision={subjectSubdivision}
-                  subjectLotAcres={subject?.lotSizeAcres}
-                  isSelectedForArv={isSelected}
-                  onToggleArv={onToggleComp}
-                  onAssignTier={jobId ? pinTier : undefined}
-                  tierPending={comp.id ? tierPending.has(comp.id) : false}
-                />
-              )
-            })}
-          </div>
         )}
       </div>
 
-      {/* Notify dialog — notes → submits a feedback ticket, then advances */}
-      <Dialog open={notifyOpen} onOpenChange={setNotifyOpen}>
+      {/* Report dialog · notes, then Validate or Flag. Stays open while saving. */}
+      <Dialog open={reportOpen} onOpenChange={(next) => { if (!reportSubmitting) setReportOpen(next) }}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle>Notify — comp selection feedback</DialogTitle>
+            <DialogTitle>Review this report</DialogTitle>
             <DialogDescription>
-              Submit a ticket on this report&apos;s comp selection. It&apos;s stored on the
-              report for review — no copy/paste needed.
+              Validate this report or flag it for improvement. Your notes are saved with the report.
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-3">
             <textarea
               autoFocus
-              value={notifyNotes}
-              onChange={(e) => setNotifyNotes(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault()
-                  submitNotify('improve')
-                }
-              }}
-              placeholder="Optional notes for this ticket — e.g. '10321 Briarcliff is the right comp, same street renovated sale'&#10;&#10;Enter = Flag for improvement · Shift+Enter = new line"
+              aria-label="Notes"
+              value={reportNotes}
+              onChange={(e) => setReportNotes(e.target.value)}
+              disabled={reportSubmitting !== null}
               rows={4}
-              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-body-sm text-foreground placeholder:text-foreground-tertiary focus:outline-none focus:ring-1 focus:ring-primary resize-y"
+              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-body-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary resize-y disabled:opacity-60"
             />
-            {notifySaveError && (
-              <p className="text-xs text-red-400">{notifySaveError}</p>
+            {reportSaveError && (
+              <p role="alert" className="text-body-sm text-red-600 dark:text-red-400">{reportSaveError}</p>
             )}
             <div className="flex items-center justify-end gap-2">
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => submitNotify('validate')}
-                disabled={notifySubmitting !== null}
-                className="text-emerald-600 border-emerald-500/30 hover:bg-emerald-500/10"
+                onClick={() => submitReport('validate')}
+                disabled={reportSubmitting !== null}
+                className="text-emerald-600 dark:text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10"
               >
-                {notifySubmitting === 'validate' ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <Check className="w-3.5 h-3.5 mr-1.5" />}
-                Validate
+                {reportSubmitting === 'validate' ? 'Saving…' : 'Validate'}
               </Button>
               <Button
                 size="sm"
-                onClick={() => submitNotify('improve')}
-                disabled={notifySubmitting !== null}
+                onClick={() => submitReport('improve')}
+                disabled={reportSubmitting !== null}
                 className="bg-amber-600 hover:bg-amber-700 text-white"
               >
-                {notifySubmitting === 'improve' ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <Bell className="w-3.5 h-3.5 mr-1.5" />}
-                Flag for improvement
+                {reportSubmitting === 'improve' ? 'Saving…' : 'Flag for improvement'}
               </Button>
             </div>
           </div>
@@ -588,5 +504,28 @@ export function ComparablesSection({
       </Dialog>
 
     </div>
+  )
+}
+
+/** One evidence-tier pill · hues match the map pins and the card stamps */
+function TierPill({ tier, active, onSelect }: { tier: Tier; active: boolean; onSelect: (tier: Tier) => void }) {
+  const activeClass: Record<Tier, string> = {
+    all: 'bg-secondary text-foreground font-medium',
+    arv: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-medium',
+    market: 'bg-orange-500/15 text-orange-500 font-medium',
+    floor: 'bg-red-500/15 text-red-400 font-medium',
+  }
+  return (
+    <button
+      type="button"
+      aria-pressed={active}
+      onClick={() => onSelect(tier)}
+      className={cn(
+        'text-[11px] px-2 py-0.5 rounded transition-colors',
+        active ? activeClass[tier] : 'text-foreground-tertiary hover:text-foreground hover:bg-secondary',
+      )}
+    >
+      {TIER_LABEL[tier]}
+    </button>
   )
 }

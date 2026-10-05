@@ -2,6 +2,17 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Operating Contract
+
+All valuation and harness work follows `SWE2_FLOWSTATE_FINISHING_GUIDE.md` at the
+repo root — the appraiser gate, address runs as read-only evaluations, bounded
+diagnosis before edits, server/dashboard symmetry, and the end-to-end approval
+gate. Read it before any evaluator work.
+
+The product rules for the evaluator (filter ladder, same-area, ARV price
+groups, checked-box meaning) and the fast address test are in
+`docs/EVAL-PLAYBOOK.md`. Run one address with `npm run eval -- "<address>"`.
+
 ## Workflow Rules
 
 - **Do NOT build or deploy after each change.** Only deploy when explicitly instructed by the user.
@@ -185,19 +196,23 @@ apps/api/src/
 ### Analysis Pipeline (`AnalysisJobDO` + `services/evaluation`)
 
 There is no Cloudflare Workflow — the pipeline runs inside the per-job
-Durable Object. `POST /v1/analyze` prefetches the property bundle from
-CoreLogic (saves a round-trip), posts `/start-streaming` to the job's
+Durable Object. `POST /v1/analyze` prefetches the property bundle (ATTOM
+MCP on `feat/attom-provider-swap`), posts `/start-streaming` to the job's
 `AnalysisJobDO`, and returns the jobId immediately. The DO runs
 `services/evaluation` end-to-end and streams step events over SSE:
 
 ```
-Property fetch (preloaded) → enrichment (building detail, transaction
-facts, Zillow reconciliation, flip detection) → photo/Zillow supplement →
-deterministic appraisal gate → Jev comp classifier (Candidate B Choice:
-ARV/AS_IS/UNIDENTIFIED; Baseline A behind JEV_COMP_CLASSIFIER_V2_ENABLED
-="false") → ARV condition gate → ARV + valuation → Group B as-is intel →
-Jev outcome classification → response persisted to saved_reports.
+Property fetch (preloaded) → enrichment (geo census gates, sales
+history, tax-history, permits) → listing/photo evidence + Clef comp
+condition (shadow evidence) → evidence verification (stale/divergent)
+→ deterministic appraisal gate → Set-B ARV (verify-and-retry ladder:
+widen → deepen → devalue → stale-adjust) → valuation + buy/ROI →
+Group B as-is/floor intel → response persisted to saved_reports.
 ```
+
+Set-B (`packages/shared/src/appraisal/set-b.ts`) is the only ARV path —
+the legacy ARV math was removed. `docs/APPRAISER-RULESET.md` is the
+product-engineer-approved ruleset the harness must trace to.
 
 Clients get the result via the SSE `evaluation_complete` event or by
 polling `GET /v1/analyze/jobs/:jobId` (which falls back to the saved
@@ -235,8 +250,9 @@ report when the DO state is evicted).
 services/
 ├── property-api/       # Unified property data interface
 │   ├── providers/
-│   │   ├── corelogic.ts  # CoreLogic API (primary, with key rotation)
-│   │   └── attom.ts      # ATTOM API (fallback)
+│   │   ├── attom-mcp.ts  # ATTOM MCP (active provider — OAuth/M2M)
+│   │   ├── attom.ts      # ATTOM REST adapter (partial, unused)
+│   │   └── corelogic.ts  # Legacy provider — license ended, do not re-enable
 │   └── types.ts          # NormalizedProperty, NormalizedComparable, PropertyBundle
 ├── appraisal/          # 3-pass comp evaluation engine
 │   ├── index.ts          # AppraisalService (orchestrates passes)
@@ -551,8 +567,8 @@ request body params → zip override → city+state override → state override 
 
 | Service | Purpose | Config |
 |---------|---------|--------|
-| **CoreLogic API** | Primary property data (search, details, comps) | `PROPERTY_PROVIDER=corelogic`, key rotation support |
-| **ATTOM Data API** | Alternate property data provider | `PROPERTY_PROVIDER=attom` |
+| **ATTOM MCP** | Property data (search, details, comps) | `PROPERTY_PROVIDER=attom-mcp`, M2M/OAuth token broker |
+| **Census + Geocodio** | Tract/block-group stamps | Free + `GEOCODIO_API_KEY` |
 | **Firecrawl API** | Zillow scraping for photos/supplemental data | Rate-limited via DO (50 concurrent) |
 | **Google Gemini** | Zillow listing data extraction | `GEMINI_API_KEY` |
 | **OpenRouter API** | Unified LLM access (vision analysis) | `OPENROUTER_API_KEY` |
@@ -567,10 +583,11 @@ request body params → zip override → city+state override → state override 
 
 **apps/api/.dev.vars:**
 ```
-PROPERTY_PROVIDER=corelogic
-CORELOGIC_CLIENT_ID=
-CORELOGIC_CLIENT_SECRET=
-ATTOM_API_KEY=
+PROPERTY_PROVIDER=attom-mcp
+ATTOM_MCP_M2M_CLIENT_ID=
+ATTOM_MCP_CLIENT_SECRET=
+ATTOM_MCP_ACCESS_TOKEN=
+ATTOM_MCP_REFRESH_TOKEN=
 OPENROUTER_API_KEY=
 FIRECRAWL_API_KEY=
 GEMINI_API_KEY=
@@ -599,8 +616,9 @@ NEXT_PUBLIC_API_URL=http://localhost:8787
 | Response building | `apps/api/src/services/analysis/index.ts` |
 | Valuation (shared) | `packages/shared/src/valuation/calculate.ts` |
 | Valuation (API wrapper) | `apps/api/src/services/valuation/index.ts` |
-| Property API (CoreLogic) | `apps/api/src/services/property-api/providers/corelogic.ts` |
-| Property API (ATTOM) | `apps/api/src/services/property-api/providers/attom.ts` |
+| Property API (ATTOM MCP) | `apps/api/src/services/property-api/providers/attom-mcp.ts` |
+| Set-B appraisal harness | `packages/shared/src/appraisal/set-b.ts` |
+| Physical characteristics | `apps/api/src/services/physical-characteristics/index.ts` |
 | User settings loader | `apps/api/src/services/user-settings/index.ts` |
 | GHL integration | `apps/api/src/services/ghl/index.ts` |
 | Job state (DO) | `apps/api/src/durable-objects/analysis-job.ts` |

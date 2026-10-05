@@ -20,7 +20,10 @@
  */
 
 import type { NormalizedProperty, NormalizedComparable } from '../property-api/types'
-import { evaluateComparables, evaluateComparable, neighborhoodsMatch, isValueEquivalent, pocketHardScopesMatch, subjectRefPpsf } from './evaluator'
+import { evaluateComparables, evaluateComparable, neighborhoodsMatch, isValueEquivalent, pocketHardScopesMatch, subjectRefPpsf, subjectPocketRefPpsf, pocketValueEquivalent, adjacentScopeKey, adjacentScopeRanks } from './evaluator'
+import {
+  describeLadderConcessions, filtersForLadder, ladderTiersAt, lastUsefulLadderStep, type LadderScope,
+} from './filter-ladder'
 import type {
   AppraisalFilter,
   AppraisalAdjustment,
@@ -206,6 +209,8 @@ export interface AppraisalResultWithFallback extends AppraisalResult {
   fallbackUsed:
     | 'none'
     | 'year_built_expansion'
+    | 'pocket_expansion'
+    | 'sqft_expansion'
     | 'neighborhood_expansion'
     | 'subdivision_expansion'
     | 'geographic_expansion'
@@ -219,6 +224,14 @@ export interface AppraisalResultWithFallback extends AppraisalResult {
 
 /** Number of valid comps required for ARV (classical appraisal model) */
 const REQUIRED_ARV_COMPS = 3
+
+/**
+ * How many rule-passing comps make a set sufficient. Product rule
+ * (docs/FILTER-LADDER.md): one is enough to build an evaluation on — more is
+ * better, but the server must not loosen rules just to collect a third.
+ * REQUIRED_ARV_COMPS above still caps how many comps are SELECTED.
+ */
+const MIN_COMPS_TO_ANSWER = 1
 
 /**
  * Top-of-market band: only eligible comps priced within this fraction of the
@@ -425,413 +438,93 @@ class PropertyAppraisalService implements AppraisalService {
       // Fewer than REQUIRED_ARV_COMPS verified comps is insufficient — thin
       // sets must trigger the expansion fallbacks (geography → older sales →
       // nearest) rather than silently anchoring ARV on 1–2 sales.
-      insufficientComps: eligible.length < REQUIRED_ARV_COMPS,
+      insufficientComps: eligible.length < MIN_COMPS_TO_ANSWER,
     }
   }
 
+  /**
+   * Evaluate under the filter ladder (docs/FILTER-LADDER.md) — the one way
+   * the server loosens rules. Strict first; then only sale age, square feet
+   * and year built widen, one small turn at a time; geography loosens last
+   * (tract/block group → neighborhood name → value-equivalent pocket). The
+   * first turn that admits a rule-passing comp wins. There is no fixed cap:
+   * the data ends the ladder. When nothing passes anywhere the result is
+   * `insufficient` — no comp is forced in.
+   */
   evaluateWithFallback(
     subject: NormalizedProperty,
     comparables: NormalizedComparable[],
     options?: AppraisalOptions & FallbackOptions
   ): AppraisalResultWithFallback {
-    const result = this.evaluateExpansionLadder(subject, comparables, options)
-    if (!result.insufficientComps) return result
-
-    // Sale-age ladder — LAST resort. Every location/year tier already ran
-    // at the configured sale_age and still ended insufficient. Each
-    // enabled sale_age_expansion* filter row is one step that re-runs the
-    // FULL ladder with only the sale_age ceiling widened; recursion
-    // walks the steps (default tiers: 365d → 548d ≈ 18mo).
-    const expansion: Required<ExpansionPolicy> = {
-      ...DEFAULT_EXPANSION_POLICY,
-      ...(options?.expansion ?? {}),
-    }
-    if (!expansion.enabled || !expansion.allowSaleAgeExpansion) return result
-    const filters = options?.filters ?? DEFAULT_FILTERS
-    const saleAgeFilter = filters.find((f) => f.type === 'sale_age')
-    if (!saleAgeFilter?.enabled) return result
-    // Retry windows come from the preset's enabled sale_age_expansion*
-    // filter rows — user-configurable like every other filter.
-    const next = saleAgeExpansionSteps(filters, saleAgeFilter.value)[0]
-    if (next == null) return result
-
-    const retry = this.evaluateWithFallback(subject, comparables, {
-      ...options,
-      filters: filters.map((f) => (f.type === 'sale_age' ? { ...f, value: next } : f)),
-    })
-    if (retry.insufficientComps) return retry
-    return {
-      ...retry,
-      fallbackUsed: 'sale_age_expansion',
-      fallbackReason: `Insufficient comps within ${saleAgeFilter.value}d sale age — widened to ${next}d. ${retry.fallbackReason ?? ''}`.trim(),
-      expansionApplied: [...(retry.expansionApplied ?? []), 'sale_age'],
-    }
-  }
-
-  private evaluateExpansionLadder(
-    subject: NormalizedProperty,
-    comparables: NormalizedComparable[],
-    options?: AppraisalOptions & FallbackOptions
-  ): AppraisalResultWithFallback {
     const adjustments = options?.adjustments ?? DEFAULT_ADJUSTMENTS
+    const filters = options?.filters ?? DEFAULT_FILTERS
     const expansion: Required<ExpansionPolicy> = {
       ...DEFAULT_EXPANSION_POLICY,
       ...(options?.expansion ?? {}),
     }
 
-    // Step 1: Strict rules — never silently weakened
-    const defaultFilters = options?.filters ?? DEFAULT_FILTERS
-    const result1 = this.evaluate(subject, comparables, {
-      filters: defaultFilters,
-      adjustments,
-    })
-
-    if (!result1.insufficientComps) {
-      console.log(`Appraisal: ${result1.selectedCompIds?.length} comps selected under strict rules`)
-      return { ...result1, fallbackUsed: 'none' }
+    const strict = this.evaluate(subject, comparables, { filters, adjustments })
+    if (!strict.insufficientComps) {
+      console.log(`Appraisal: ${strict.selectedCompIds?.length} comps selected under strict rules`)
+      return { ...strict, fallbackUsed: 'none' }
     }
-
     if (!expansion.enabled) {
-      console.log(`Appraisal: ${result1.selectedCompIds?.length ?? 0} valid comps — INSUFFICIENT_COMPS (expansion disabled)`)
       return {
-        ...result1,
+        ...strict,
         fallbackUsed: 'insufficient',
-        fallbackReason: `Only ${result1.selectedCompIds?.length ?? 0} comps passed appraisal rules; expansion policy disabled.`,
+        fallbackReason: `Only ${strict.selectedCompIds?.length ?? 0} comps passed appraisal rules; expansion policy disabled.`,
       }
     }
 
-    // Steps 2+: every tier keeps the FULL rule set evaluated so the per-comp
-    // audit trail never disappears — a comp always shows exactly which rules
-    // passed, failed, or were unverifiable at that tier's thresholds.
-    //
-    // Ladder (each tier requires ≥REQUIRED_ARV_COMPS selected):
-    //   1. strict rules (done above)
-    //   2. widen year_built INSIDE the subdivision — ±10 → ±12 → ±14
-    //   3. verified same-NEIGHBORHOOD comps (name/code) at strict radius,
-    //      year ladder restarts — subdivision_match may be rescued
-    //   4. leave the subdivision (radius ×mult), re-walking the year ladder
-    //   5. drop the radius gate entirely, re-walking the year ladder
-    //   6. most recent sales — only location failures may be carried
-    //
-    // sale_age is never relaxed INSIDE this ladder: every comp must be
-    // within the configured max (default 180d) at every tier — the most
-    // recent sales win. Only when the whole ladder ends insufficient does
-    // the caller's sale-age ladder re-run this entire sequence at a wider
-    // ceiling (the preset's sale_age_expansion* rows). Older qualifying
-    // sales get the
-    // configurable old_comp_discount adjustment (threshold + percent live
-    // on the adjustment, not this policy).
-    // Year-widening is a real threshold change, not a rescue: a comp at
-    // ±12 passes year_built_diff with threshold:12 on its audit record.
-
-    const strictYear = defaultFilters.find((f) => f.type === 'year_built_diff')?.value ?? 10
-    const yearSteps = expansion.allowYearBuiltExpansion
-      ? expansion.yearBuiltExpansionSteps.map((s) => strictYear + s)
-      : []
-    // Vintage-subject last-resort year step: for subjects built before the
-    // configured cap (vintage_year_cap row, default 1970) the ladder's
-    // deepest year step swaps the ±diff rule for an absolute build-year
-    // ceiling — "no year-built comps found" → allow comps built on or
-    // before the cap year. Tried inside every geography scope, after the
-    // numeric tolerances.
-    type YearStep = number | 'vintage' | 'era'
-    const vintageCap = vintageYearCap(defaultFilters, subject.yearBuilt)
-    const vintageSteps: YearStep[] =
-      expansion.allowYearBuiltExpansion && vintageCap != null ? ['vintage'] : []
-    // 'era' is the fallback catch at the ladder floor for every subject:
-    // the band and its widened tiers ran first and failed, so era-class
-    // matching (same/adjacent era) rescues what it can before giving up.
-    const yearLadder: YearStep[] = [strictYear, ...yearSteps, ...vintageSteps, 'era']
-    const expansionYearSteps: YearStep[] = [...yearSteps, ...vintageSteps, 'era']
-    const maxYear = Math.max(strictYear, ...yearSteps)
-    const subdivisionName = subject.subdivision || subject.neighborhoodName || 'subject area'
-
-    const filtersAt = (yearLimit: YearStep, distanceMult = 1) =>
-      defaultFilters.map((f) => {
-        if (f.type === 'year_built_diff') {
-          return yearLimit === 'vintage'
-            ? { type: 'year_built_cap' as const, enabled: true, value: vintageCap!, priority: 'hard' as const }
-            : yearLimit === 'era'
-              ? { type: 'year_built_era' as const, enabled: true, value: 0, priority: 'hard' as const }
-              : { ...f, value: yearLimit }
-        }
-        if (f.type === 'distance' && distanceMult !== 1) {
-          return { ...f, value: f.value * distanceMult }
-        }
-        return f
-      })
-    const yearDesc = (yearLimit: YearStep) =>
-      yearLimit === 'vintage'
-        ? `build-year cap ${vintageCap} (vintage subject)`
-        : yearLimit === 'era'
-          ? 'era-class match (fallback catch)'
-          : `±${yearLimit}yr`
-    const yearNote = (yearLimit: YearStep) =>
-      yearLimit === 'vintage'
-        ? ` (pre-${vintageCap} subject — year-built relaxed to ≤${vintageCap})`
-        : yearLimit === 'era'
-          ? ' (year-built fell back to era-class match)'
-          : yearLimit > strictYear
-            ? ` (year-built widened to ±${yearLimit}yr)`
-            : ''
-    const appliedFor = (
-      yearLimit: YearStep,
-      scope: 'subdivision' | 'neighborhood' | 'geographic' | null
-    ): NonNullable<AppraisalResult['expansionApplied']> => {
-      const applied: NonNullable<AppraisalResult['expansionApplied']> = []
-      if (yearLimit === 'vintage' || yearLimit === 'era' || yearLimit > strictYear) applied.push('year_built')
-      if (scope) applied.push(scope)
-      return applied
-    }
-
-    // Rescue helper: force-enable disabled comps whose hard failures are all
-    // in `allowed` (and that satisfy `extra` when given), then re-run ARV
-    // selection over the combined pool — closest-first ordering applies to
-    // rescued comps the same as rule-passing ones.
-    const rescue = (
-      base: AppraisalResult,
-      allowed: ReadonlySet<string>,
-      extra?: (c: AppraisedComparable) => boolean
-    ) => {
-      const priorityByType = new Map(
-        base.appliedFilters.map((f) => [f.type, f.priority ?? 'hard'])
-      )
-      const rescuedIds = new Set(
-        base.comparables
-          .filter((c) => {
-            if (c.isEnabled) return false
-            if ((c.adjustedSalePrice ?? c.salePrice ?? 0) <= 0) return false
-            if (extra && !extra(c)) return false
-            const failures = (c.evaluation?.filterResults ?? []).filter(
-              (f) => !f.passed && f.status === 'failed' && priorityByType.get(f.type) !== 'soft'
-            )
-            return failures.length > 0 && failures.every((f) => allowed.has(f.type))
-          })
-          .map((c) => c.id)
-      )
-      if (rescuedIds.size === 0) return null
-      const marked = base.comparables.map((c) =>
-        rescuedIds.has(c.id) ? { ...c, isEnabled: true } : c
-      )
-      return this.selectArvComps(subject, marked)
-    }
-
-    const applyRescued = (
-      base: AppraisalResult,
-      picked: { comparables: AppraisedComparable[]; selected: AppraisedComparable[]; eligible: AppraisedComparable[]; arv: number }
-    ) => ({
-      ...base,
-      comparables: picked.comparables,
-      arv: picked.arv,
-      enabledCount: picked.comparables.filter((c) => c.isEnabled).length,
-      selectedCompIds: picked.selected.map((c) => c.id),
-      insufficientComps: picked.eligible.length < REQUIRED_ARV_COMPS,
-    })
-
-    // Step 2: widen the build-era INSIDE the subdivision first — better a
-    // slightly older/newer comp in-area than a perfect-year comp out-of-area.
-    // Comps legitimately pass at the tier's threshold — nothing is rescued.
-    for (const yearLimit of expansionYearSteps) {
-      const r = this.evaluate(subject, comparables, {
-        filters: filtersAt(yearLimit),
-        adjustments,
-      })
-      if (!r.insufficientComps) {
-        console.log(`Appraisal: ${r.selectedCompIds?.length} comps selected after year-built widening to ${yearDesc(yearLimit)}`)
+    const ladderRules = new Set(['sqft_diff', 'year_built_diff', 'sale_age'])
+    const scopes: LadderScope[] = ['tract', 'neighborhood', 'value_equivalent']
+    for (const scope of scopes) {
+      // Comps that fail a rule the ladder never loosens cannot be admitted,
+      // so they must not stretch it either.
+      const otherRulesOnly = filtersForLadder(filters, 0, scope, subject.squareFeet)
+        .map((f) => (ladderRules.has(f.type) ? { ...f, enabled: false } : f))
+      const candidates = comparables.filter((c) =>
+        !evaluateComparable(subject, c, otherRulesOnly, []).shouldDisable)
+      if (candidates.length === 0) continue
+      const lastStep = lastUsefulLadderStep(filters, subject, candidates)
+      for (let step = scope === 'tract' ? 1 : 0; step <= lastStep; step++) {
+        const r = this.evaluate(subject, comparables, {
+          filters: filtersForLadder(filters, step, scope, subject.squareFeet),
+          adjustments,
+        })
+        if (r.insufficientComps) continue
+        const tiers = ladderTiersAt(step)
+        const applied: NonNullable<AppraisalResult['expansionApplied']> = []
+        if (tiers.year > 0) applied.push('year_built')
+        if (tiers.sqft > 0) applied.push('sqft_diff')
+        if (tiers.saleAge > 0) applied.push('sale_age')
+        if (scope === 'neighborhood') applied.push('neighborhood')
+        if (scope === 'value_equivalent') applied.push('geographic')
+        const moved = describeLadderConcessions(filters, step, subject.squareFeet)
+        console.log(`Appraisal: ${r.selectedCompIds?.length} comps selected at ladder turn ${step} (${scope})`)
         return {
           ...r,
-          fallbackUsed: 'year_built_expansion',
-          fallbackReason: `Insufficient comps within ±${strictYear}yr of the subject's build year in "${subdivisionName}". Widened year-built tolerance to ${yearDesc(yearLimit)} — sale age, subdivision and all other hard rules still enforced.`,
-          expansionApplied: ['year_built'],
+          fallbackUsed: scope === 'neighborhood' ? 'neighborhood_expansion'
+            : scope === 'value_equivalent' ? 'geographic_expansion'
+            : tiers.sqft > 0 ? 'sqft_expansion'
+            : tiers.year > 0 ? 'year_built_expansion'
+            : 'sale_age_expansion',
+          fallbackReason: [
+            scope === 'tract' ? null : scope === 'neighborhood'
+              ? 'No comp passed inside the census tract — widened to the same neighborhood name.'
+              : 'No comp passed in the tract or neighborhood — widened to a value-equivalent adjacent pocket.',
+            moved.length ? `Widened ${moved.join('; ')}.` : null,
+          ].filter(Boolean).join(' '),
+          expansionApplied: applied,
         }
       }
     }
 
-    // Step 3: neighborhood tier — when the subdivision can't fill the pool,
-    // prefer verified same-neighborhood comps (name OR code) at the strict
-    // radius before expanding geography. Rescue subdivision_match only when
-    // neighborhood_match verified-passed; any other hard failure still kills.
-    if (expansion.allowNeighborhoodExpansion && (subject.neighborhoodName || subject.neighborhoodCode)) {
-      for (const yearLimit of yearLadder) {
-        const resultNb = this.evaluate(subject, comparables, {
-          filters: filtersAt(yearLimit),
-          adjustments,
-        })
-        const picked = rescue(resultNb, new Set(['subdivision_match']), (c) =>
-          neighborhoodsMatch(subject, c) === true
-        )
-        if (picked && picked.eligible.length >= REQUIRED_ARV_COMPS) {
-          console.log(`Appraisal: ${picked.selected.length} comps selected via neighborhood match${yearNote(yearLimit)}`)
-          return {
-            ...applyRescued(resultNb, picked),
-            fallbackUsed: 'neighborhood_expansion',
-            fallbackReason: `Insufficient comps in subdivision "${subject.subdivision || 'unknown'}". Expanded to neighborhood "${subject.neighborhoodName ?? subject.neighborhoodCode}" (verified name/code match)${yearNote(yearLimit)} — all other rules apply at the tier's thresholds.`,
-            expansionApplied: appliedFor(yearLimit, 'neighborhood'),
-          }
-        }
-      }
-    }
-
-    // Step 4: leave the subdivision — radius ×mult, year ladder restarts at
-    // each scope. Rescue is subdivision_match-only: a comp failing any other
-    // hard rule at this tier's thresholds stays disqualified.
-    if (expansion.allowGeographicExpansion) {
-      for (const yearLimit of yearLadder) {
-        const resultSub = this.evaluate(subject, comparables, {
-          filters: filtersAt(yearLimit, expansion.geographicDistanceMultiplier),
-          adjustments,
-        })
-        const picked = rescue(resultSub, new Set(['subdivision_match', 'neighborhood_match']))
-        if (picked && picked.eligible.length >= REQUIRED_ARV_COMPS) {
-          console.log(`Appraisal: ${picked.selected.length} comps selected after subdivision expansion${yearNote(yearLimit)}`)
-          return {
-            ...applyRescued(resultSub, picked),
-            fallbackUsed: 'subdivision_expansion',
-            fallbackReason: `Insufficient comps in subdivision "${subject.subdivision || 'unknown'}". Expanded to the surrounding area (radius ×${expansion.geographicDistanceMultiplier})${yearNote(yearLimit)} — all other rules apply at the tier's thresholds.`,
-            expansionApplied: appliedFor(yearLimit, 'subdivision'),
-          }
-        }
-      }
-
-      // Step 5: drop the radius gate — rescue comps whose only hard
-      // failures are subdivision and/or distance, year ladder restarts.
-      {
-        let resultGeo = result1
-        for (const yearLimit of yearLadder) {
-          resultGeo = this.evaluate(subject, comparables, {
-            filters: filtersAt(yearLimit),
-            adjustments,
-          })
-          const picked = rescue(resultGeo, new Set(['subdivision_match', 'neighborhood_match', 'distance']))
-          if (picked && picked.eligible.length >= REQUIRED_ARV_COMPS) {
-            console.log(`Appraisal: ${picked.selected.length} comps selected after geographic expansion${yearNote(yearLimit)}`)
-            return {
-              ...applyRescued(resultGeo, picked),
-              fallbackUsed: 'geographic_expansion',
-              fallbackReason: `Insufficient comps in "${subdivisionName}". Expanded to radius-only geography${yearNote(yearLimit)} — failed location rules remain visible per comp.`,
-              expansionApplied: appliedFor(yearLimit, 'geographic'),
-            }
-          }
-        }
-
-      // Step 5b: pocket catch — the geo_scope_match label check kills on
-      // enclave-vs-parent naming (Eagle Run ⊂ Greenbrook): a close comp in
-      // the same tract wears the parent label and dies anyway. A comp whose
-      // ONLY hard failure is that label survives when the coordinate facts
-      // + a value check verify the pocket: same side of barriers, same
-      // tract/BG, ≤0.5mi, city/county/zip/school-district legs still hard,
-      // and sale $/sf within 10% of the subject's implied value.
-      {
-        const resultPocket = this.evaluate(subject, comparables, {
-          filters: filtersAt('era'),
-          adjustments,
-        })
-        // Value check only applies when a reference exists — an unanchored
-        // subject (no scope median, no AVM) can't prove pocket equivalence,
-        // so the coordinate facts carry it.
-        const refPpsf = subjectRefPpsf(subject)
-        const picked = rescue(resultPocket, new Set(['geo_scope_match']), (c) =>
-          c.crossesMajorRoad !== true
-          && (c.sameBlockGroup === true ||
-              (c.censusTract != null && subject.censusTract != null && c.censusTract === subject.censusTract))
-          && (c.distanceMiles ?? 99) <= 0.5
-          && pocketHardScopesMatch(subject, c)
-          && (refPpsf == null || isValueEquivalent(subject, c))
-        )
-        if (picked) {
-          if (picked.eligible.length >= REQUIRED_ARV_COMPS) {
-            console.log(`Appraisal: ${picked.selected.length} comps selected via pocket catch — geo_scope label mismatch rescued by coordinate+value proof`)
-            return {
-              ...applyRescued(resultPocket, picked),
-              fallbackUsed: 'pocket_catch',
-              fallbackReason: `Geo-scope label mismatch caught by pocket verification — same tract, same side of barriers, ≤0.5mi, hard scopes match, sale $/sf within 10% of subject implied value.`,
-              expansionApplied: appliedFor('era', null),
-            }
-          }
-          // Fewer than the ARV set needs — merge rescued comps into the
-          // pool so the enabled evidence survives for downstream paths.
-          resultGeo = {
-            ...resultGeo,
-            comparables: picked.comparables,
-            enabledCount: picked.comparables.filter((c) => c.isEnabled).length,
-          }
-        }
-      }
-
-        // Step 6: No rule-qualified set exists. Final fallback — the most
-        // recent sales that still satisfy every intrinsic hard rule (sale
-        // age, sqft, property type, road barrier, year built at the widest
-        // sanctioned tolerance — ±maxYear, or the vintage cap when the
-        // subject predates it); only location failures
-        // (subdivision/neighborhood/distance) may be carried. A comp that breaches a
-        // hard property rule is never enabled — better INSUFFICIENT_COMPS
-        // than a valuation on a rule-breaker.
-        console.log('Appraisal: no comps passed all rules — checking for recent sales')
-        const saleAgeDays = defaultFilters.find((f) => f.type === 'sale_age')?.value ?? 180
-        const LOCATION_FAILURES = new Set(['subdivision_match', 'neighborhood_match', 'distance'])
-        const geoPriority = new Map(
-          resultGeo.appliedFilters.map((f) => [f.type, f.priority ?? 'hard'])
-        )
-        const now = Date.now()
-        const recentComps = resultGeo.comparables
-          .filter((c) => {
-            if (!c.saleDate || (c.adjustedSalePrice ?? c.salePrice ?? 0) <= 0) return false
-            const days = (now - new Date(c.saleDate).getTime()) / 86_400_000
-            if (!Number.isFinite(days) || days > saleAgeDays) return false
-            // Intrinsic hard rules must all pass — only location may fail
-            const hardFailures = (c.evaluation?.filterResults ?? []).filter(
-              (f) =>
-                !f.passed &&
-                f.status === 'failed' &&
-                geoPriority.get(f.type) !== 'soft' &&
-                !LOCATION_FAILURES.has(f.type)
-            )
-            return hardFailures.length === 0
-          })
-          .sort((a, b) =>
-            proximityCompare(a, b, streetNameKey(subject.address)) ||
-            new Date(b.saleDate!).getTime() - new Date(a.saleDate!).getTime()
-          )
-          .slice(0, REQUIRED_ARV_COMPS)
-
-        if (recentComps.length === 0) {
-          console.log('Appraisal: INSUFFICIENT_COMPS — no comps satisfy the hard rules')
-          return {
-            ...resultGeo,
-            insufficientComps: true,
-            fallbackUsed: 'insufficient',
-            fallbackReason: `INSUFFICIENT_COMPS: no comparables sold within the last ${saleAgeDays} days satisfy appraisal rules.`,
-          }
-        }
-
-        const recentIds = new Set(recentComps.map((c) => c.id))
-        const marked = resultGeo.comparables.map((c) =>
-          recentIds.has(c.id) ? { ...c, isEnabled: true } : c
-        )
-        const relaxed = this.selectArvComps(subject, marked)
-        console.log(`Appraisal: relaxed to ${recentComps.length} closest comps (no rule-qualified set exists)`)
-        return {
-          ...resultGeo,
-          comparables: relaxed.comparables,
-          arv: relaxed.arv,
-          enabledCount: relaxed.comparables.filter((c) => c.isEnabled).length,
-          selectedCompIds: relaxed.selected.map((c) => c.id),
-          insufficientComps: false,
-          fallbackUsed: 'nearest_comps',
-          fallbackReason: `No comps satisfied all appraisal rules; using the ${recentComps.length} closest sale(s) within ${saleAgeDays} days (year-built tolerance ${vintageCap != null ? `≤${vintageCap} vintage cap` : `±${maxYear}yr`}). Failed rules remain visible per comp.`,
-          expansionApplied: appliedFor(vintageCap != null ? 'vintage' : maxYear, 'geographic'),
-        }
-      }
-    }
-
-    // Expansion disabled at some level and strict rules found too few comps —
-    // honest insufficient rather than silently picking the nearest sales.
-    console.log(`Appraisal: ${result1.selectedCompIds?.length ?? 0} valid comps — INSUFFICIENT_COMPS (expansion limited)`)
+    console.log('Appraisal: no comp passes at any ladder turn — INSUFFICIENT_COMPS')
     return {
-      ...result1,
-      insufficientComps: true,
+      ...strict,
       fallbackUsed: 'insufficient',
-      fallbackReason: `Only ${result1.selectedCompIds?.length ?? 0} comps passed appraisal rules within the allowed expansion policy.`,
+      fallbackReason: 'No comparable passes the appraisal rules at any ladder turn in the tract, neighborhood, or an equivalent pocket.',
     }
   }
 

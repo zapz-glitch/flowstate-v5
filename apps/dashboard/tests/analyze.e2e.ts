@@ -19,7 +19,7 @@ test('analyze produces a report with comps', { session: 'local', platforms: ['we
   // The pipeline streams progress for ~1–3 min; the agent polls the screen
   // and only spends a model call when the observation changes.
   await agent.waitFor('the analysis has finished and a results report is showing', { interval: 2000, timeout: 360_000 })
-  await expect(screen.getByRole('heading', 'Comparables')).toBeVisible({ timeout: 30_000 })
+  await expect(screen.getByRole('button', 'ARV').first()).toBeVisible({ timeout: 30_000 })
   // A finished report renders actionable comp cards — the 'Add to ARV'
   // buttons only exist on a completed comp list (layout text varies across
   // report variants: Valuation hero, report-only notice, manual-selection).

@@ -26,7 +26,7 @@ export function SubjectPropertyCard({ subject, children, footer }: SubjectProper
               <MapPin className="w-3 h-3" />
             </Badge>
             {subject.address ? (
-              <AddressDisplay address={subject.address} latitude={subject.latitude} longitude={subject.longitude} className="text-heading-sm font-semibold leading-tight" />
+              <AddressDisplay address={subject.address} latitude={subject.latitude} longitude={subject.longitude} className="text-heading-sm font-semibold leading-tight" showStreetView={false} />
             ) : (
               <h3 className="text-heading-sm font-semibold leading-tight">Unknown Address</h3>
             )}
@@ -92,7 +92,7 @@ export function SubjectPropertyCard({ subject, children, footer }: SubjectProper
           return (
             <div className="mt-4">
               <div className="text-caption font-medium text-foreground-secondary mb-1.5 flex items-center gap-2">
-                MLS Details{ld.mlsSource ? ` — ${ld.mlsSource}` : ''}
+                MLS Details{ld.mlsSource ? ` · ${ld.mlsSource}` : ''}
                 {ld.sourceUrl && <a href={ld.sourceUrl} target="_blank" rel="noreferrer" className="text-primary text-[10px] underline">Redfin ↗</a>}
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1">

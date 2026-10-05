@@ -12,6 +12,17 @@ import { InvestorAnalysisSummary } from './InvestorAnalysisSummary'
 
 // ─── Analysis Result Layout ──────────────────────────────────────────────────
 
+const compactConcession = (text: string): string => {
+  const value = text.match(/(?:to|of)\s+±?\$?([\d,.]+)/)?.[1]?.replace(/,/g, '')
+  const n = value ? Number(value) : null
+  if (text.includes('sale age') && n != null) return `Age ≤${Math.round(n)}d`
+  if (text.includes('sqft tolerance') && n != null) return `Size ±${Math.round(n).toLocaleString()}sf`
+  if (text.includes('year built') && n != null) return `Year ±${Math.round(n)}y`
+  if (text.includes('distance') && n != null) return `Dist ≤${Math.round(n * 10) / 10}mi`
+  if (text.includes('lot size') && n != null) return `Lot ±${Math.round(n).toLocaleString()}sf`
+  return text.split(' (was ')[0]
+}
+
 export interface AnalysisResultLayoutProps {
   /** Map-list hover sync (local to map view, not in atoms) */
   onCompHover?: (key: string | null) => void
@@ -31,6 +42,11 @@ export interface AnalysisResultLayoutProps {
   onOfferWorkflow?: (workflow: OfferWorkflow, offerPrice?: number) => Promise<{ ok: boolean }>
   /** Prior session disposition — hero renders a dated warning chip */
   disposition?: { workflow: OfferWorkflow; at: number } | null
+  /** 'left' = the page draws the valuation box elsewhere (under the map);
+   *  this column is then the subject card and the comparables only. */
+  valuationPlacement?: 'inline' | 'left'
+  /** Extra lines for the subject card (flood and location risks) */
+  subjectExtras?: React.ReactNode
 }
 
 export function AnalysisResultLayout({
@@ -43,6 +59,8 @@ export function AnalysisResultLayout({
   rerunning,
   onOfferWorkflow,
   disposition,
+  valuationPlacement = 'inline',
+  subjectExtras,
 }: AnalysisResultLayoutProps) {
   const {
     subject,
@@ -63,14 +81,24 @@ export function AnalysisResultLayout({
   const selectedCompKeys = compOverride?.selectedCompKeys
   const isManual = compOverride?.isManual ?? false
 
+  // The comp rules this run used, on one line inside the subject card. The
+  // server's grade sentence stays server-side; only the rules are shown.
+  const concessions = comps?.retrieval?.paramFlex?.concessions ?? []
+  const rulesLine = subject && !isStreaming && comps?.insufficientComps !== true && comps?.retrieval?.paramFlex != null ? (
+    <div className="mt-2 text-[11px] text-foreground-secondary tabular-nums" aria-label="Comp rules used">
+      {concessions.length > 0 ? concessions.map(compactConcession).join(' · ') : 'Strict rules'}
+    </div>
+  ) : null
+  const subjectFooter = (rulesLine || subjectExtras) ? <>{rulesLine}{subjectExtras}</> : null
+
   return (
     <>
       {/* Subject property */}
-      {subject && <SubjectGridCard subject={subject} isLoading={isStreaming} />}
+      {subject && <SubjectGridCard subject={subject} isLoading={isStreaming} footer={subjectFooter} />}
 
       {/* Valuation panel — sticky so it's always visible while scrolling comps */}
-      {valuation ? (
-        <div ref={valuationCardRef as React.RefObject<HTMLDivElement>} className="sticky z-10 top-[calc(3.5rem+var(--sat))] lg:top-0">
+      {valuationPlacement === 'left' ? null : valuation ? (
+        <div ref={valuationCardRef as React.RefObject<HTMLDivElement>} data-pane-sticky className="sticky z-10 top-[calc(3.5rem+var(--sat))] lg:top-0">
           <DealSummaryHero
             valuation={valuation}
             isRecalculated={isRecalculated}
@@ -125,8 +153,8 @@ export function AnalysisResultLayout({
               (flip resale, premium over scope median, or above AVM).
               {(valuation?.arvSource === 'avm' || valuation?.arvSource === 'assessed') && valuation?.arv != null && (
                 <span className="block mt-1 font-medium text-foreground">
-                  Valuation is anchored on the {valuation.arvSource === 'avm' ? 'subject AVM' : 'county assessment'} — ${valuation.arv.toLocaleString()}
-                  {' '}— a conservative estimate until comp evidence exists.
+                  ARV is set from the {valuation.arvSource === 'avm' ? 'subject AVM estimate' : 'county value'}, ${valuation.arv.toLocaleString()}.
+                  {' '}A conservative estimate until comp evidence exists.
                 </span>
               )}
               {comps?.asIsMarketIntel?.asIsMarketPrice != null && (
@@ -139,24 +167,6 @@ export function AnalysisResultLayout({
           </div>
         )
       })() : null}
-
-      {/* Param-flex disclosure on successful runs — how far the rules
-          stretched to admit ARV evidence (geo stayed required). */}
-      {subject && !isStreaming && comps?.insufficientComps !== true && comps?.retrieval?.paramFlex != null && (() => {
-        const { extensions, factor } = comps.retrieval.paramFlex
-        const tone = extensions === 0 ? 'text-emerald-500 border-emerald-500/30'
-          : extensions <= 2 ? 'text-amber-500 border-amber-500/30'
-          : 'text-red-400 border-red-400/30'
-        return (
-          <div className={`inline-flex border rounded-sm px-2 py-1 text-[10px] font-semibold ${tone}`}>
-            {extensions === 0
-              ? 'Comps qualified on strict rules'
-              : comps?.retrieval?.paramFlex?.concessions?.length
-                ? `Comp rules widened: ${comps.retrieval.paramFlex.concessions.join('; ')}`
-                : `Comp rules extended ${extensions}× (to ×${factor})`}
-          </div>
-        )
-      })()}
 
       {notesSlot}
 

@@ -3,6 +3,10 @@
  * calibration harness (scripts/ab-eval.py). Pure function over the same
  * enabled comp pool the legacy appraisal consumes.
  *
+ * HARNESS_VERSION bumps on every rule change — it's stamped on every
+ * saved run so a result is provably attributable to the code that made
+ * it (an old answer can never pass as a new one).
+ *
  * Semantics (calibrated against 27 live addresses):
  *   - evidence verification: stale/divergent sales never drive ARV
  *   - tier discipline: renovated preferred (sim ≥ 3) → median fallback
@@ -94,6 +98,9 @@ export interface BComp {
   propertyType?: string | null
   crossesMajorRoad?: boolean | null
   disableReasons?: string[] | null
+  /** A recorded buy → resale 30–365 days apart. The resale is the proof of
+   *  the renovation, so an own-AVM divergence does not bar it from driving. */
+  verifiedFlip?: boolean | null
   classification?: { type?: string | null } | null
   curbAppeal?: {
     condition?: string | null
@@ -101,7 +108,13 @@ export interface BComp {
     summary?: string | null
   } | null
   evidenceVerification?: {
+    /** Age only — stale means outside the preferred sale-age window. */
     staleness?: string | null
+    saleAgeDays?: number | null
+    preferredSaleAgeDays?: number | null
+    /** Price fit against the comp's current pocket — separate from age. */
+    marketFit?: string | null
+    transactionCheck?: string | null
     priceCheck?: string | null
     flags?: string[] | null
   } | null
@@ -146,6 +159,8 @@ export interface BResult {
 // ── Helpers ───────────────────────────────────────────────────────────────
 const usd = (n: number) => `$${Math.round(n).toLocaleString('en-US')}`
 
+export const HARNESS_VERSION = 'og-2026.10.05.6'
+
 export function bSubjectAvm(s: BSubject): number | null {
   return s.avmValue ?? s.avm?.value ?? null
 }
@@ -157,22 +172,50 @@ export function bTierOf(c: BComp): 'arv' | 'as_is' | 'unidentified' {
   return 'unidentified'
 }
 
-export function bCondTier(c: BComp): 'renovated' | 'median' | 'premium' | 'unknown' {
+export function bCondTier(c: BComp): 'renovated' | 'median' | 'premium' | 'distressed' | 'unknown' {
   const ca = c.curbAppeal ?? {}
   const summary = (ca.summary ?? '').toLowerCase()
-  if (summary.includes('tier:median')) return 'median'
-  if (summary.includes('tier:premium') || summary.includes('tier:luxury')) return 'premium'
   const cond = (ca.condition ?? '').toLowerCase()
-  if ((ca.confidence ?? 0) < B_COND_MIN_CONF) return 'unknown'
+  // Structured vision condition wins; legacy tier:* text is fallback only.
+  // A weak confidence score cannot be rescued by old summary text.
+  if (['distressed', 'needs_work'].includes(cond)) return 'distressed'
+  if (ca.condition != null && (ca.confidence ?? 0) < B_COND_MIN_CONF) return 'unknown'
   if (['renovated', 'updated', 'turnkey', 'move-in ready'].includes(cond)) return 'renovated'
-  if (['dated', 'maintained', 'median', 'as_is', 'as-is', 'distressed', 'needs_work'].includes(cond))
-    return 'median'
+  if (['dated', 'maintained', 'median', 'as_is', 'as-is'].includes(cond)) return 'median'
+  if (['premium', 'luxury'].includes(cond)) return 'premium'
+  if (summary.includes('tier:premium') || summary.includes('tier:luxury')) return 'premium'
+  if (summary.includes('tier:median')) return 'median'
   return 'unknown'
 }
 
-const bIsUnfit = (c: BComp) =>
-  c.evidenceVerification?.staleness === 'stale' ||
-  c.evidenceVerification?.priceCheck === 'divergent'
+/** A premium-priced comp stays fit when the class chain explains the
+ *  premium — verified-renovated, vision-premium, or a resale event. An
+ *  above-pocket comp that CAN'T explain its price is an outlier. */
+const bExplainsPremium = (c: BComp) =>
+  bTierOf(c) === 'arv' ||
+  bCondTier(c) === 'premium' ||
+  bCondTier(c) === 'renovated'
+
+const bIsUnfit = (c: BComp) => {
+  const evidence = c.evidenceVerification
+  const staleByAge = evidence?.staleness === 'stale' && evidence.saleAgeDays != null
+  const marketFit = evidence?.marketFit ??
+    // Legacy records used staleness for pocket-price fit. Preserve their
+    // exclusion while keeping the labels separate going forward.
+    (evidence?.staleness === 'above_pocket' ? 'above_pocket'
+      : evidence?.staleness === 'stale' ? 'below_pocket'
+        : null)
+  return staleByAge ||
+    evidence?.transactionCheck === 'package_deed' ||
+    evidence?.transactionCheck === 'nominal_sale' ||
+    evidence?.transactionCheck === 'bulk_sale' ||
+    evidence?.transactionCheck === 'extreme_outlier' ||
+    marketFit === 'below_pocket' ||
+    (marketFit === 'above_pocket' && !bExplainsPremium(c)) ||
+    // A verified flip is exempt from the own-AVM divergence screen: the
+    // AVM lags a renovation, and the buy → resale pair is stronger proof.
+    (evidence?.priceCheck === 'divergent' && c.verifiedFlip !== true)
+}
 
 // ── Condition class — one resolved label per comp ─────────────────────────
 // The curve: renovated → maintained → dated → distressed → unclassified.
@@ -575,6 +618,13 @@ export function evaluateB(
       note: (x.comp.evidenceVerification?.flags ?? []).join('; ').slice(0, 90) })
   }
   const verifiedPool = contribs.filter((x) => !unfit.includes(x))
+  // Flips allowed through despite an own-AVM divergence stay visible — the
+  // gap is worth watching even though it does not bar the comp.
+  for (const x of verifiedPool) {
+    if (x.comp.verifiedFlip === true && x.comp.evidenceVerification?.priceCheck === 'divergent') {
+      flags.push(`${x.comp.address}: verified flip kept despite own-AVM divergence — watch the gap`)
+    }
+  }
 
   // ── Similarity scoring ──────────────────────────────────────────────────
   const similarity = (x: BContribution): number => {
@@ -582,9 +632,11 @@ export function evaluateB(
     let s = 0
     const d = c.distanceMiles
     if (d != null) s += Math.max(0, 1 - d) * 3.0
-    if (c.sameBlockGroup) s += 3.0
-    else if (subject.censusTract && c.censusTract === subject.censusTract) s += 2.0
-    if (c.subdivision && c.subdivision === subject.subdivision) s += 2.0
+    if (subject.censusTract && c.censusTract === subject.censusTract) s += 3.0
+    if (c.sameBlockGroup) s += 2.0
+    if (c.subdivision && c.subdivision === subject.subdivision) s += 1.5
+    else if (c.neighborhoodName && subject.neighborhoodName
+        && c.neighborhoodName === subject.neighborhoodName) s += 1.0
     const yd = c.yearBuilt && subject.yearBuilt ? Math.abs(c.yearBuilt - subject.yearBuilt) : null
     if (yd != null) s += yd <= 10 ? 1.5 : yd <= 20 ? 0.75 : 0
     const sd = c.squareFeet && subject.squareFeet ? Math.abs(c.squareFeet - subject.squareFeet) : null
@@ -598,7 +650,7 @@ export function evaluateB(
   const driverPool = verifiedPool.filter((x) => !x.boundOnly)
   const medianComps = driverPool.filter((x) => bCondTier(x.comp) === 'median')
   const preferred = driverPool.filter((x) =>
-    x.tier === 'arv' && bCondTier(x.comp) !== 'median' && similarity(x) >= B_MIN_SIM)
+    x.tier === 'arv' && !['median', 'distressed'].includes(bCondTier(x.comp)) && similarity(x) >= B_MIN_SIM)
   let drivers: BContribution[]
   if (preferred.length) {
     drivers = preferred
@@ -609,7 +661,7 @@ export function evaluateB(
       dec({ compAddress: x.comp.address, stage: 'class', rule: 'tier-discipline', verdict: 'median-driver' })
     }
   } else {
-    const weak = driverPool.filter((x) => x.tier === 'arv' && bCondTier(x.comp) !== 'median')
+    const weak = driverPool.filter((x) => x.tier === 'arv' && !['median', 'distressed'].includes(bCondTier(x.comp)))
     if (weak.length) {
       flags.push(`non-median comps below similarity floor (${B_MIN_SIM}) — falling to median`)
       drivers = medianComps.length ? medianComps : weak
@@ -618,7 +670,7 @@ export function evaluateB(
         ? Math.max(...driverPool.map((x) => bPpsfOf(x.comp) ?? 0))
         : null
       const retail = driverPool.filter((x) =>
-        x.tier !== 'as_is' && bCondTier(x.comp) !== 'median' &&
+        x.tier !== 'as_is' && !['median', 'distressed'].includes(bCondTier(x.comp)) &&
         topPpsf != null && (bPpsfOf(x.comp) ?? 0) >= B_RETAIL_BAND * topPpsf)
       if (!retail.length) {
         // Median-only evidence — the band IS the answer. No AVM uplift:

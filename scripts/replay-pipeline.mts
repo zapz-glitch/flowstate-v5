@@ -18,6 +18,7 @@ import { readFileSync, writeFileSync, readdirSync, mkdirSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import { performAnalysis } from '../apps/api/src/services/evaluation'
 import { flexNumericFilters } from '../apps/api/src/services/appraisal/evaluator'
+import { filtersForLadder } from '../apps/api/src/services/appraisal/filter-ladder'
 import { DEFAULT_FILTERS, DEFAULT_ADJUSTMENTS } from '../apps/api/src/services/appraisal/types'
 import type { Env } from '../apps/api/src/types'
 import type {
@@ -272,14 +273,19 @@ async function replay(path: string) {
   const recorded = artifact?.data?.result ?? artifact?.result ?? artifact
   if (!recorded?.subject || !recorded?.comps) throw new Error(`${path}: no recorded result shape`)
   const bundle = toBundle(recorded)
-  // The DO's flex ladder lives outside performAnalysis — re-apply the recorded
-  // winning stretch so flex-admitted comps stay enabled (mirrors
-  // analysis-job.ts: filters → flexNumericFilters(filters, paramFlexFactor)).
-  const flexFactor = recorded.comps?.retrieval?.paramFlex?.factor ?? 1
+  // The DO's filter ladder lives outside performAnalysis — re-apply the
+  // recorded winning step so ladder-admitted comps stay enabled. New records
+  // carry the exact limits; records from before the ladder carry only the
+  // old all-rules flex factor.
+  const flex = recorded.comps?.retrieval?.paramFlex
+  const flexFactor = flex?.factor ?? 1
+  const isAttom = bundle.metadata.provider === 'attom-mcp'
   const appraisalRules =
-    bundle.metadata.provider === 'attom-mcp' && flexFactor > 1
-      ? { filters: flexNumericFilters(DEFAULT_FILTERS, flexFactor), adjustments: DEFAULT_ADJUSTMENTS }
-      : undefined
+    isAttom && flex?.limits
+      ? { filters: filtersForLadder(DEFAULT_FILTERS, flex.extensions, flex.scope, recorded.subject?.squareFeet), adjustments: DEFAULT_ADJUSTMENTS }
+      : isAttom && flexFactor > 1
+        ? { filters: flexNumericFilters(DEFAULT_FILTERS, flexFactor), adjustments: DEFAULT_ADJUSTMENTS }
+        : undefined
   const { response } = await performAnalysis(
     { jobId: `replay-${Date.now()}`, bundle, appraisalRules },
     env,

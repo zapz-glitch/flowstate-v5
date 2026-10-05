@@ -20,7 +20,7 @@ import type {
 } from '@/app/(dashboard)/dashboard/analyze/actions'
 import { getCompKey } from '@/components/analysis/format-helpers'
 import { useReportSettings, type UseReportSettingsReturn } from '@/hooks/use-report-settings'
-import { calculateArvAdjustmentDelta, recalculateValuationFromComps, type RecalcResult } from '@/lib/recalc'
+import { recalculateValuationFromComps, type RecalcResult } from '@/lib/recalc'
 import { recalculateReportComps } from '@/lib/client-api'
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -72,6 +72,23 @@ export interface UseAnalysisEvaluationReturn {
 
 // ─── Hook ───────────────────────────────────────────────────────────────────
 
+/**
+ * Is this comp's box checked? A checked box means "this sale is in the ARV
+ * calculation". Fresh from the server that is the anchor and the other
+ * drivers, not every comp that passed the rules. Once the user has changed
+ * the selection, the server's enabled set IS their selection.
+ */
+function isCheckedForArv(
+  comp: { isEnabled?: boolean; bRole?: string | null },
+  items: Array<{ bRole?: string | null }>,
+  manual: boolean,
+): boolean {
+  if (comp.isEnabled !== true) return false
+  if (manual) return true
+  const hasRoles = items.some((c) => c.bRole === 'anchor' || c.bRole === 'driver')
+  return hasRoles ? comp.bRole === 'anchor' || comp.bRole === 'driver' : true
+}
+
 export function useAnalysisEvaluation({
   data: inputData,
   stickyBarRootMargin = '-60px 0px 0px 0px',
@@ -84,7 +101,7 @@ export function useAnalysisEvaluation({
   currentInputRef.current = inputData
   const activeSelection = serverSelection?.source === inputData ? serverSelection : null
   const data = activeSelection?.analysis ?? inputData
-  const pythonAuthoritative = data?.evaluationEngine === 'python-v4'
+  const pythonAuthoritative = data?.evaluationEngine === 'python-v4' || data?.evaluationEngine === 'ts-v5'
   // Settings panel open/close
   const [settingsOpen, setSettingsOpen] = useState(false)
 
@@ -108,23 +125,22 @@ export function useAnalysisEvaluation({
     setSelectionPending(true)
     try {
       const analysis = await recalculateReportComps(jobId, selectedCompIds, data.evaluationRevision ?? 0)
-      const status = (analysis as AnalyzeData & { pythonEvaluation?: { status?: string } } | null)?.pythonEvaluation?.status
       const validComps = Array.isArray(analysis?.comps?.items)
         && analysis.comps.items.every(comp => comp != null && typeof comp.id === 'string' && typeof comp.isEnabled === 'boolean')
-      const insufficient = status === 'INSUFFICIENT_COMPS' && analysis?.valuation === null
+      const insufficient = (analysis?.valuation?.resultGrade === 'withheld' || analysis?.valuation == null)
         && validComps && analysis.comps!.items!.every(comp => !comp.isEnabled)
-      const valued = status !== 'INSUFFICIENT_COMPS' && analysis?.valuation != null
+      const valued = analysis?.valuation?.resultGrade !== 'withheld' && analysis?.valuation != null
         && typeof analysis.valuation.arv === 'number' && Number.isFinite(analysis.valuation.arv) && analysis.valuation.arv > 0
         && Number.isFinite(analysis.valuation.buyPrice)
-      if (analysis?.evaluationEngine !== 'python-v4' || !validComps || (!insufficient && !valued)
+      if (!['python-v4', 'ts-v5'].includes(analysis?.evaluationEngine ?? '') || !validComps || (!insufficient && !valued)
         || analysis.meta?.analysisId !== jobId || analysis.evaluationRevision !== (data.evaluationRevision ?? 0) + 1) {
         throw new Error('The server returned an incomplete evaluation. Your previous result is unchanged.')
       }
       if (currentInputRef.current === inputData) {
         setServerSelection({ source: inputData, analysis, isManual: selectedCompIds !== null })
         toast.info(selectedCompIds === null
-          ? 'Python V4 automatic comparable selection restored.'
-          : 'Operator-selected comparables. Python V4 recalculated this preliminary evaluation.')
+          ? 'Automatic comparable selection restored.'
+          : 'Operator-selected comparables. The server recalculated this evaluation.')
       }
     } catch (error) {
       if (currentInputRef.current === inputData) toast.error(error instanceof Error ? error.message : 'Comp selection could not be saved. Your previous result is unchanged.')
@@ -183,7 +199,9 @@ export function useAnalysisEvaluation({
         toast.error('This report has no saved comparable IDs. Run a new analysis first.')
         return
       }
-      const selected = new Set(items.filter(comp => comp.isEnabled).map(comp => comp.id!))
+      // Start from the boxes that are checked now — the comps in the ARV —
+      // then add or remove the one the user clicked.
+      const selected = new Set(items.filter(comp => isCheckedForArv(comp, items, data?.manualCompSelection != null)).map(comp => comp.id!))
       if (selected.has(target.id)) selected.delete(target.id)
       else selected.add(target.id)
       if (!selected.size) {
@@ -253,21 +271,12 @@ export function useAnalysisEvaluation({
   const computedValuation = useMemo((): ValuationData | undefined => {
     if (!data?.valuation) return undefined
     if (pythonAuthoritative) {
-      // Server-authoritative report — full recalc is disabled, but a manual
-      // ARV / adjustment override is pure deterministic math on top of the
-      // displayed deal: new ARV flows through rehab/closing/carrying/fee
-      // exactly like the JS recalc path.
+      // Server-authoritative report — only an explicit manual ARV override
+      // may alter the displayed deal. Stored percent-of-ARV rules are inert.
       const ov = settingsHook.settings.arvOverride
-      const rules = settingsHook.settings.arvAdjustmentRules ?? []
-      const overrides = settingsHook.settings.arvAdjustments ?? {}
-      const hasOverride = (ov != null && ov > 0) || rules.some((r) => overrides[r.id] !== undefined)
-      if (!hasOverride) return data.valuation
+      if (ov == null || ov <= 0) return data.valuation
       const v0 = data.valuation
-      const base0 = ov != null && ov > 0 ? ov : (v0.arv ?? 0)
-      const { delta, lines } = ov != null && ov > 0
-        ? { delta: 0, lines: [] as Array<{ id: string; label: string; amount: number; direction: 'deduction' | 'addition' }> }
-        : calculateArvAdjustmentDelta(base0, data.subject as unknown as Record<string, unknown>, settingsHook.settings)
-      const newArv = Math.max(0, Math.round(base0 + delta))
+      const newArv = Math.max(0, Math.round(ov))
       const ref = Math.max(1, v0.arv ?? 0)
       const closingPct = (v0.closingCosts ?? 0) / ref
       const carryingPct = (v0.carryingCosts ?? 0) / ref
@@ -294,7 +303,7 @@ export function useAnalysisEvaluation({
         totalInvestment: totalInv,
         projectedProfit: profit,
         projectedROI: totalInv > 0 ? Math.round((profit / totalInv) * 1000) / 10 : v0.projectedROI,
-        arvAdjustments: lines,
+        arvAdjustments: [],
       }
     }
 
@@ -452,7 +461,8 @@ export function useAnalysisEvaluation({
   const isRecalculated = !pythonAuthoritative && (settingsChanged || (compOverride?.isManual ?? false))
   const effectiveComps = displayComps ?? data?.comps
   const authoritativeOverride = useMemo(() => pythonAuthoritative && data?.comps?.items ? {
-    selectedCompKeys: new Set(data.comps.items.flatMap((comp, index) => comp.isEnabled ? [getCompKey(comp, index)] : [])),
+    selectedCompKeys: new Set(data.comps.items.flatMap((comp, index) =>
+      isCheckedForArv(comp, data.comps!.items!, data.manualCompSelection != null) ? [getCompKey(comp, index)] : [])),
     isManual: activeSelection?.isManual ?? data.manualCompSelection != null,
   } : null, [pythonAuthoritative, data?.comps?.items, data?.manualCompSelection, activeSelection?.isManual])
 

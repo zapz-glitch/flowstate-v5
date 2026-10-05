@@ -601,6 +601,9 @@ export interface FirecrawlZillowFetcherConfig {
   cache?: KVNamespace
   /** Cache TTL in seconds (default: 24 hours) */
   cacheTtl?: number
+  /** Scrapfly API key for listing-URL discovery when the generated
+   *  search URL misses (optional) */
+  scrapflyApiKey?: string
 }
 
 export class FirecrawlZillowFetcher {
@@ -609,6 +612,7 @@ export class FirecrawlZillowFetcher {
   private openrouterModel: string
   private cache?: KVNamespace
   private cacheTtl: number
+  private scrapflyApiKey?: string
 
   /** Tracks number of Firecrawl API calls (scrapes) */
   firecrawlCallCount = 0
@@ -623,6 +627,62 @@ export class FirecrawlZillowFetcher {
     this.openrouterModel = config.openrouterModel ?? 'google/gemini-2.0-flash-001'
     this.cache = config.cache
     this.cacheTtl = config.cacheTtl ?? DEFAULT_CACHE_TTL
+    this.scrapflyApiKey = config.scrapflyApiKey
+  }
+
+  /**
+   * Discovery fallback — the generated Zillow URL targets a search results
+   * page, which can miss the listing entirely even when the homedetails
+   * page exists. Scrapfly's ASP + residential pool can read that search
+   * page where Firecrawl gets denied; we extract the homedetails link
+   * whose slug matches the street address and hand it back to the normal
+   * extraction path.
+   */
+  private async resolveListingUrlViaSearch(
+    property: ZillowPropertyIdentifier,
+    searchUrl: string,
+  ): Promise<string | null> {
+    if (!this.scrapflyApiKey) return null
+    try {
+      const api = `https://api.scrapfly.io/scrape?${new URLSearchParams({
+        url: searchUrl,
+        key: this.scrapflyApiKey,
+        render_js: 'true',
+        asp: 'true',
+        country: 'us',
+        proxy_pool: 'public_residential_pool',
+        format: 'text',
+      })}`
+      const resp = await fetch(api)
+      if (!resp.ok) return null
+      const data = (await resp.json()) as { result?: { status_code?: number; content?: string } }
+      const content = data.result?.content ?? ''
+      if (!content) return null
+      const links = [
+        ...new Set(
+          (content.match(/zillow\.com\/homedetails\/[A-Za-z0-9\-_.%]+/g) ?? [])
+            .map((l) => `https://www.${l}`.replace(/\/$/, '')),
+        ),
+      ]
+      // Match the homedetails slug to the street address — number + street
+      // name tokens, direction-suffix tolerant (Ct vs Ct-NE variants).
+      const tokens = property.address
+        .toLowerCase()
+        .replace(/[^\w\s]/g, ' ')
+        .split(/\s+/)
+        .filter((t) => t.length > 1 && !/^(n|s|e|w|ne|nw|se|sw)$/.test(t))
+      const streetName = tokens.slice(1).filter((t) => !/^(st|ave|dr|rd|ct|ln|cir|blvd|pl|ter|way|pkwy|trl|cv|run)$/.test(t)).join(' ')
+      const found = links.find((l) => {
+        const slug = l.toLowerCase()
+        const numOk = tokens[0] ? slug.includes(`-${tokens[0]}-`) || slug.includes(`/${tokens[0]}-`) : true
+        const nameOk = streetName ? streetName.split(' ').every((t) => slug.includes(t)) : true
+        return numOk && nameOk
+      })
+      if (found) console.log(`[FirecrawlZillow] Scrapfly resolved listing URL: ${found}`)
+      return found ?? null
+    } catch {
+      return null
+    }
   }
 
   /** Reset call counters for a new analysis run */
@@ -1218,6 +1278,22 @@ ${content.html.slice(0, 80000)}
         }
       }
 
+      // Discovery fallback — the generated search-page URL missed, but the
+      // listing page may exist. Resolve the real homedetails URL via
+      // Scrapfly and re-scrape that.
+      let resolvedUrl = zillowUrl
+      if (!isValidExtraction(extracted)) {
+        const found = await this.resolveListingUrlViaSearch(property, zillowUrl)
+        if (found && found !== zillowUrl) {
+          const alt = await this.fetchAndExtract(found, extractOpts)
+          if (isValidExtraction(alt)) {
+            extracted = alt
+            resolvedUrl = found
+            await this.saveToCache(found, alt)
+          }
+        }
+      }
+
       // Normalize photo URLs
       const photos = this.normalizePhotoUrls(extracted.photos || [])
 
@@ -1238,7 +1314,7 @@ ${content.html.slice(0, 80000)}
       console.log(`[FirecrawlZillow] Structured data: beds=${bedrooms}, baths=${bathrooms}, sqft=${squareFeet}, year=${yearBuilt}, foundation=${foundationType}, hoa=${hoaFee}, lastSale=${lastSaleDate}`)
 
       const listing: ZillowListingData = {
-        zillowUrl,
+        zillowUrl: resolvedUrl,
         photos,
         description: extracted.description,
         price: extracted.price,
