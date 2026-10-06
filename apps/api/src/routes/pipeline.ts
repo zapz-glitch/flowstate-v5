@@ -387,13 +387,44 @@ pipelineReads.get('/pocket-test', async (c) => {
   const id = pocketFromPayload(payload)
   if (!id) return c.json({ ok: false, error: 'no pocket identity in payload' }, 422)
   const inputs = deterministicInputs(payload, null)
-  const subj = (payload as { result?: { response?: { subject?: { listPrice?: number }; report?: { arv?: { value?: number; asIsValue?: number } } } } })?.result?.response
+  const subj = (payload as { result?: { response?: { subject?: {
+    listPrice?: number
+    listingDetails?: {
+      daysOnRedfin?: number | null
+      listPrice?: number | null
+      saleHistory?: Array<{ date?: string; event?: string; price?: number | null }>
+    }
+  }; report?: { arv?: { value?: number; asIsValue?: number } }; valuation?: {
+    buyPrice?: number; rehabCost?: number; carryingCosts?: number
+    closingCosts?: number; wholesaleFee?: number; projectedProfit?: number
+  } } } })?.result?.response
+  const ld = subj?.subject?.listingDetails
+  const events = (ld?.saleHistory ?? []).map((e) => `${e.date ?? ''}: ${e.event ?? ''}${e.price ? ` $${e.price.toLocaleString()}` : ''}`)
+  let drops = 0, fallouts = 0, lastList: number | null = null
+  for (const e of [...(ld?.saleHistory ?? [])].reverse()) { // oldest → newest
+    const ev = (e.event ?? '').toLowerCase()
+    if ((ev === 'listed' || ev === 'relisted' || ev.includes('price')) && e.price != null) {
+      if (lastList != null && e.price < lastList) drops++
+      lastList = e.price
+    }
+    if (ev === 'pending' || ev === 'contingent' || ev === 'pending continue to show' || ev === 'under contract') fallouts++
+  }
   const econ = {
     wholesalePrice: c.req.query('wholesale') ? Number(c.req.query('wholesale')) : null,
-    listPrice: subj?.subject?.listPrice ?? null,
+    listPrice: subj?.subject?.listPrice ?? ld?.listPrice ?? null,
     medianLo: inputs.medianLo, medianHi: inputs.medianHi,
     arv: subj?.report?.arv?.value ?? inputs.arv,
     asIsValue: subj?.report?.arv?.asIsValue ?? null,
+    daysOnMarket: ld?.daysOnRedfin ?? null,
+    priceDrops: drops,
+    contractFallouts: fallouts,
+    listingEvents: events.slice(-10),
+    rehabCost: subj?.valuation?.rehabCost ?? null,
+    carryingCosts: subj?.valuation?.carryingCosts ?? null,
+    closingCosts: subj?.valuation?.closingCosts ?? null,
+    wholesaleFee: subj?.valuation?.wholesaleFee ?? null,
+    buyPrice: subj?.valuation?.buyPrice ?? null,
+    projectedProfit: subj?.valuation?.projectedProfit ?? null,
   }
   const [pocket, economics] = await Promise.all([
     classifyPocket(c.env, id, inputs),

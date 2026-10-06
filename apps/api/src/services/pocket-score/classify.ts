@@ -178,18 +178,40 @@ export interface EconomicsInput {
   medianHi: number | null
   arv: number | null
   asIsValue: number | null
+  /** Achievability signals — from subject.listingDetails */
+  daysOnMarket: number | null
+  priceDrops: number            // count of downward price events
+  contractFallouts: number      // pending→relisted cycles
+  listingEvents: string[]       // compact "Oct 2: Listed $279k" lines
+  /** The real cost stack from valuation — the number where everything fits */
+  rehabCost: number | null
+  carryingCosts: number | null
+  closingCosts: number | null
+  wholesaleFee: number | null
+  buyPrice: number | null       // MAO — the eval's own max allowable offer
+  projectedProfit: number | null
 }
 
 export async function classifyEconomics(env: Env2, id: PocketIdentity, econ: EconomicsInput): Promise<ClassifyResult | null> {
   const out = await luna(env, [
-    { role: 'system', content: 'You score acquisition likelihood for a wholesaler, 0-10 — based on ARV vs list price, how likely is the seller to accept the wholesale number? Reply ONLY JSON: {"score": <0-10>, "rationale": "<one sentence>"}.' },
+    { role: 'system', content: [
+      'You score acquisition likelihood for a wholesaler, 0-10 — can we buy at our wholesale number? Two sub-scores, merged:',
+      'MARGIN FIT — does ARV minus list hold the whole cost stack (rehab + carrying + closing + wholesale fee + investor profit)? No fixed dollar target — judge fit from the actual numbers.',
+      'ACHIEVABILITY — will the seller take it? DOM + price-drop cadence + contract fallout are the reads. A discount off list is EXPECTED — list is usually rich.',
+      'Motivated: long DOM with regular price drops (~every 30d), or pending→relisted cycles. Fishing: long DOM, zero drops, never under contract.',
+      'Fresh listing with strong demand = priced right; wholesale near list is still achievable there.',
+      'Reply ONLY JSON: {"score": <0-10>, "rationale": "<one sentence — cite the deltas and the signals you weighed>"}.',
+    ].join('\n') },
     { role: 'user', content: [
       `Property in ${id.displayName}, ${id.city ?? ''}, ${id.state}`,
       `ARV: ${econ.arv ? '$' + econ.arv.toLocaleString() : 'unknown'}${econ.asIsValue ? `, as-is $${econ.asIsValue.toLocaleString()}` : ''}`,
       `List price: ${econ.listPrice ? '$' + econ.listPrice.toLocaleString() : 'unknown'}`,
       `Our wholesale number: ${econ.wholesalePrice ? '$' + econ.wholesalePrice.toLocaleString() : 'unknown'}`,
       `Pocket median band: ${econ.medianLo && econ.medianHi ? `$${econ.medianLo.toLocaleString()}-$${econ.medianHi.toLocaleString()}` : 'unknown'}`,
-      'Two deltas: ARV minus wholesale = margin room (thin = no deal). List minus wholesale = discount the seller must accept (deep = unlikely).',
+      `Cost stack (eval's own math): rehab ${econ.rehabCost ? '$'+econ.rehabCost.toLocaleString() : '?'}, closing ${econ.closingCosts ? '$'+econ.closingCosts.toLocaleString() : '?'}, carrying ${econ.carryingCosts ? '$'+econ.carryingCosts.toLocaleString() : '?'}, wholesale fee ${econ.wholesaleFee ? '$'+econ.wholesaleFee.toLocaleString() : '?'}`,
+      `MAO (number where all costs fit): ${econ.buyPrice ? '$' + econ.buyPrice.toLocaleString() : 'unknown'}${econ.projectedProfit ? ` | projected profit $${econ.projectedProfit.toLocaleString()}` : ''}`,
+      `Days on market: ${econ.daysOnMarket ?? 'unknown'} | price drops: ${econ.priceDrops} | contract fallouts: ${econ.contractFallouts}`,
+      econ.listingEvents.length ? `Listing history:\n${econ.listingEvents.join('\n')}` : 'Listing history: none',
     ].join('\n') },
   ])
   const parsed = parseScore(out)

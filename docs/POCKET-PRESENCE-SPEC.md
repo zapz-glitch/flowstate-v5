@@ -48,26 +48,45 @@ a real statistical identity, so coverage is uniform across submarkets.
 
 ## Economics score — what goes in
 
-The operator's actual question: "based on ARV vs list, how likely is the
-seller to take my wholesale number?" Two deltas, all produced by the
-eval — **zero new fetches**:
+The operator's question: "can I acquire this at my wholesale number?"
+Two sub-scores, both reasoned by Luna:
 
-| Input | Source | Drives |
+### Cost fit — does ARV − list hold the whole cost stack?
+
+Not a fixed dollar target. The eval already computes every cost —
+rehab + carrying + closing + wholesale fee + investor profit — and the
+buyPrice (MAO) where they all fit. The question is whether ARV − list
+covers that stack with room to spare, and whether the required discount
+below list is negotiable. Rough guide: workable deals negotiate
+~$30–50k off list; the MAO itself is the ceiling.
+
+| Input | Source |
+|---|---|
+| ARV | `report.arv.value` |
+| As-is value | `report.arv.asIsValue` |
+| List price | `subject.listPrice` / `listingDetails.listPrice` |
+| Wholesale price | queue item / lead |
+| Cost stack | renovation + carrying + closing + wholesale fee + investor profit (deal-params) |
+
+### Achievability — will the seller take our number?
+
+All already in `subject.listingDetails` — **zero fetches**:
+
+| Signal | Source | Read |
 |---|---|---|
-| ARV | `report.arv.value` | margin headroom |
-| List price | `subject.listPrice` | seller's anchor |
-| Wholesale price | queue item / lead | our number |
-| As-is value | `report.arv.asIsValue` | condition gap |
-| Pocket median band | comp math | where the price sits |
+| Days on market | `listingDetails.daysOnRedfin` | long sit = motivated or fishing |
+| Price-drop cadence | `listingDetails.saleHistory` price-change events | drops every ~30d = motivated; never dropped = fishing/out to lunch |
+| Contract fallouts | `saleHistory` pending→relisted cycles | multiple fallouts = deal-hungry BUT ⚠️ flag it on the card — "find out why" |
+| View/save counts | not captured today — Zillow scrape (enhancement) | hot views+saves = priced right, real demand |
 
-The two deltas Luna scores:
+Operator rules baked in: a discount from list is always expected (list
+is usually rich, especially when sitting); wholesale≈list + hot views =
+priced right; wholesale≈list + 30-90+ DOM + no drops = fishing.
 
-- **ARV − wholesale** — profit room after rehab/costs. Thin = no deal.
-- **List − wholesale** — discount depth the seller must accept.
-  Deep discount = unlikely acquisition; shallow = believable.
+### Card flag
 
-Fallback when list price is absent: score on the wholesale/ARV spread
-alone, flag `no list price` on the rationale.
+`fell out of contract N times — find out why` renders as a note on the
+property card whenever saleHistory shows a pending→relisted cycle.
 
 ## Evidence quality flag
 
