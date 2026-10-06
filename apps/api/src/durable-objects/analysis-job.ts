@@ -333,7 +333,7 @@ export class AnalysisJobDO {
             await this.pushEvent('enrichment_done', { totalDurationMs: Date.now() - startTime })
             return
           }
-          await this.env.API_CACHE.delete(config.evalResultCacheKey).catch(() => {})
+          await this.env.API_CACHE?.delete(config.evalResultCacheKey).catch(() => {})
         }
       } catch { /* cache lookup best-effort */ }
     }
@@ -1229,7 +1229,7 @@ export class AnalysisJobDO {
       }).catch((e) => console.log('[telemetry] run_telemetry insert failed:', e))
 
       if (config.evalResultCacheKey) {
-        await this.env.API_CACHE.put(config.evalResultCacheKey, config.jobId, {
+        await this.env.API_CACHE?.put(config.evalResultCacheKey, config.jobId, {
           expirationTtl: 21 * 24 * 60 * 60, // 21 days
         }).catch(() => { /* best-effort */ })
       }
@@ -1424,7 +1424,7 @@ export class AnalysisJobDO {
           })
           await linkRunRecordToReport(db.$client, runRecordId, config.jobId, config.userId)
           if (config.evalResultCacheKey) {
-            await this.env.API_CACHE.put(config.evalResultCacheKey, config.jobId, {
+            await this.env.API_CACHE?.put(config.evalResultCacheKey, config.jobId, {
               expirationTtl: 21 * 24 * 60 * 60, // 21 days
             }).catch(() => { /* best-effort */ })
           }
