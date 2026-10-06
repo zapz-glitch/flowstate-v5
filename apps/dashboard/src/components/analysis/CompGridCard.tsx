@@ -114,6 +114,7 @@ function CompGridCardInner({
     <div
       data-card-key={cardKey}
       data-verdict={verdict}
+      data-in-arv={isEnabled ? 'true' : 'false'}
       onMouseEnter={() => onHover?.(cardKey)}
       onMouseLeave={() => onHover?.(null)}
       className={cn(
@@ -144,14 +145,15 @@ function CompGridCardInner({
         {/* Stamps · number, role, flip, price class. Kept clear of the checkbox. */}
         <div className="absolute top-2 left-2.5 flex flex-wrap items-center gap-1 max-w-[calc(100%-3.25rem)] pointer-events-none">
           {/* Number · green when the comp is in the ARV, gray when it is not */}
-          <div className={cn(STAMP, 'w-[22px] px-0 justify-center tabular-nums', isEnabled ? 'bg-emerald-600 text-white' : 'bg-neutral-600 text-white')}>
+          <div data-stamp="number" className={cn(STAMP, 'w-[22px] px-0 justify-center tabular-nums', isEnabled ? 'bg-emerald-600 text-white' : 'bg-neutral-600 text-white')}>
             {index + 1}
           </div>
           {role && comp.bRole && (
-            <div className={cn(STAMP, ROLE_STAMP_CLASS[comp.bRole])} title={roleTitle(comp.bRole)}>{role}</div>
+            <div data-stamp={comp.bRole} className={cn(STAMP, ROLE_STAMP_CLASS[comp.bRole])} title={roleTitle(comp.bRole)}>{role}</div>
           )}
           {comp.flip && (
             <div
+              data-stamp="flip"
               className={cn(STAMP, 'bg-violet-600 text-white')}
               title={`Verified flip · bought $${comp.flip.priorSalePrice.toLocaleString()} ${comp.flip.daysHeld}d prior, resold +${comp.flip.gainPct}%`}
             >
@@ -160,6 +162,7 @@ function CompGridCardInner({
           )}
           {comp.badges?.price && priceClass && (
             <div
+              data-stamp={comp.badges.price}
               className={cn(STAMP, PRICE_STAMP_CLASS[comp.badges.price])}
               title={comp.classification?.reasoning || `Price class ${priceClass}`}
             >

@@ -824,7 +824,7 @@ export default function AnalyzePage() {
             )}
         </ReportToolbar>
       ) : (
-        <div className="relative z-20 border border-border/60 bg-background shadow-sm corner-accents corner-accents-bottom">
+        <div data-surface="card" className="relative z-20 border border-border/60 bg-background shadow-sm corner-accents corner-accents-bottom">
           {/* Title and the collapse arrow · only while a property is loaded. With nothing
               loaded the page header above is the title. */}
           {isActive && (
@@ -861,7 +861,7 @@ export default function AnalyzePage() {
                   Cancel
                 </Button>
               ) : (
-                <Button onClick={() => { handleAnalyze(); setSearchExpanded(false) }} disabled={isFetching || !address.trim()}>
+                <Button data-action="run" onClick={() => { handleAnalyze(); setSearchExpanded(false) }} disabled={isFetching || !address.trim()}>
                   <Play className="w-4 h-4 mr-2" />
                   Run
                 </Button>

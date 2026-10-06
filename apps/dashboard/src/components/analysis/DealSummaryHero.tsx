@@ -36,7 +36,7 @@ export function DealSummaryHero({ valuation, isRecalculated, disposition }: Deal
     : null
 
   return (
-    <div className="border border-border rounded-sm bg-background">
+    <div data-surface="card" className="border border-border rounded-sm bg-background">
       {/* Header: title + flags · the deal actions live on the subject card */}
       <div className="px-3 py-1.5 border-b border-border/30 flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">

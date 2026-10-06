@@ -752,19 +752,43 @@ textarea:-webkit-autofill {
 
 /* ─────────────────────────────────────────────────────────────────────────────
    PROTOTYPE SKIN · "Studio" · set on <html data-skin="nds"> by SkinPreview, only
-   while Property Search is open. Read from the National Design Studio's own CSS
-   (ndstudio.gov): neutral #f2f2f2 surface under white cards, near-black ink
-   #010101, #3a3a3a / #6b6b6b for secondary text, 10%-black hairlines, 6px radius,
-   tight -0.02em type with a monospace voice for labels, dark filled primary
-   buttons with hairline-outlined secondary ones. Warm black with cream text in
-   dark mode (the Real Food site). The real theme tokens above are not edited.
+   while Property Search is open. The real theme tokens above are not edited.
+
+   Read from the National Design Studio's own sites (measured, not guessed):
+   - ndstudio.gov: flat #f2f2f2 surface, ink #010101, no cards. Body and headings
+     at weight 450, 12-14px captions at 530, display lines at 700. Text at 14px and
+     under is never tightened; large type is (-0.02em at 44px). Hairlines at 10%
+     ink, section rules at 20%.
+   - TrumpRx.gov (their listing page): cards are a slightly darker fill on the
+     page, a segmented control whose active segment is a solid ink fill, filled
+     primary buttons at weight 400-500, two outlined nav buttons at ~50% ink,
+     6px radius on buttons and cards.
+   - techforce.gov: a near-black site set in Inter, the typeface this app ships,
+     with weight 500 headings. So the type here is Inter itself.
+   - Realfood.gov (dark): #110000 page, #fdfbee text, 20% hairlines.
+   Our adaptation, not theirs: data on WHITE cards over the gray page (a 33-card
+   comp grid needs grouping the studio's sparse pages do not), one ink, meaning
+   colors kept but darkened until readable, three button levels (filled, outlined,
+   quiet), the selected tab as an ink fill.
+
+   RULES FOR THIS BLOCK
+   1. Never write a selector containing a bare class that the base stylesheet
+      @applies (.border-border, .bg-background, .text-foreground). Tailwind copies
+      the whole skin selector into the global rule; that is how an earlier version
+      recolored every border on the page. Use [class~="border-border"] if needed.
+   2. Key rules on what a thing IS (data-deal, data-surface, data-stamp,
+      data-in-arv, data-notice, data-action, roles and aria state), not on its
+      utility classes, wherever a hook exists.
    ───────────────────────────────────────────────────────────────────────────── */
+
+/* ── Tokens ─────────────────────────────────────────────────────────────────── */
 html[data-skin="nds"][data-skin="nds"].light,
 html[data-skin="nds"][data-skin="nds"]:not(.dark) {
   --background: 0 0% 94.9%;
   --foreground: 0 0% 0.4%;
   --foreground-secondary: 0 0% 23%;
-  --foreground-tertiary: 0 0% 42%;
+  /* #616161: 5.5:1 on the page and 5.2:1 on the muted fill, so small gray text has margin */
+  --foreground-tertiary: 0 0% 38%;
   --card: 0 0% 100%;
   --card-hover: 0 0% 97%;
   --card-foreground: 0 0% 0.4%;
@@ -775,71 +799,358 @@ html[data-skin="nds"][data-skin="nds"]:not(.dark) {
   --secondary: 0 0% 92%;
   --secondary-foreground: 0 0% 0.4%;
   --muted: 0 0% 92%;
-  --muted-foreground: 0 0% 42%;
+  --muted-foreground: 0 0% 38%;
   --accent: 0 0% 90%;
-  --border: 0 0% 89%;
+  --accent-secondary: 0 0% 38%;
+  --accent-foreground: 0 0% 0.4%;
+  /* 10% ink on the #f2f2f2 surface (#dadada), the studio's inner hairline */
+  --border: 0 0% 85.5%;
   --input: 0 0% 80%;
   --input-fill: 0 0% 100%;
   --ring: 0 0% 0.4%;
-  --radius: 0.375rem;
 }
 html[data-skin="nds"][data-skin="nds"].dark {
-  --background: 0 28% 4%;
-  --foreground: 48 55% 95%;
+  /* Realfood's warm black, one step calmer so it does not read oxblood on a bright monitor */
+  --background: 0 45% 3.5%;
+  --foreground: 52 79% 96%;
   --foreground-secondary: 45 14% 76%;
-  --foreground-tertiary: 40 8% 58%;
-  --card: 0 18% 7%;
-  --card-hover: 0 14% 10%;
-  --card-foreground: 48 55% 95%;
-  --popover: 0 18% 7%;
-  --popover-foreground: 48 55% 95%;
-  --primary: 48 55% 95%;
-  --primary-foreground: 0 28% 5%;
-  --secondary: 0 12% 12%;
-  --secondary-foreground: 48 55% 95%;
-  --muted: 0 12% 12%;
-  --muted-foreground: 40 8% 58%;
-  --accent: 0 10% 15%;
-  --border: 0 8% 17%;
-  --input: 0 8% 24%;
-  --input-fill: 0 18% 8%;
-  --ring: 48 55% 95%;
+  --foreground-tertiary: 40 9% 62%;
+  --card: 0 26% 7%;
+  --card-hover: 0 22% 10%;
+  --card-foreground: 52 79% 96%;
+  --popover: 0 26% 7%;
+  --popover-foreground: 52 79% 96%;
+  --primary: 52 79% 96%;
+  --primary-foreground: 0 45% 4%;
+  --secondary: 0 20% 13%;
+  --secondary-foreground: 52 79% 96%;
+  --muted: 0 20% 13%;
+  --muted-foreground: 40 9% 62%;
+  --accent: 0 16% 16%;
+  --accent-secondary: 40 8% 58%;
+  --accent-foreground: 52 79% 96%;
+  --border: 0 13% 21%;
+  --input: 0 10% 30%;
+  --input-fill: 0 26% 6%;
+  --ring: 52 79% 96%;
 }
-html[data-skin="nds"] body {
-  letter-spacing: -0.01em;
-  font-feature-settings: "cv11", "ss03", "tnum";
+/* Print: a dark skin must not print cream text or dark blocks on a white sheet. Every token is
+   reset to the light values. One attribute more than the blocks above, so it wins. */
+@media print {
+  html[data-skin="nds"][data-skin="nds"][data-skin="nds"] {
+    --background: 0 0% 100%;
+    --foreground: 0 0% 0.4%;
+    --foreground-secondary: 0 0% 23%;
+    --foreground-tertiary: 0 0% 38%;
+    --card: 0 0% 100%;
+    --card-hover: 0 0% 97%;
+    --card-foreground: 0 0% 0.4%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 0.4%;
+    --primary: 0 0% 11%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 0 0% 92%;
+    --secondary-foreground: 0 0% 0.4%;
+    --muted: 0 0% 92%;
+    --muted-foreground: 0 0% 38%;
+    --accent: 0 0% 90%;
+    --accent-secondary: 0 0% 38%;
+    --accent-foreground: 0 0% 0.4%;
+    --border: 0 0% 80%;
+    --input: 0 0% 80%;
+    --input-fill: 0 0% 100%;
+    --ring: 0 0% 0.4%;
+  }
 }
-html[data-skin="nds"] h1,
-html[data-skin="nds"] h2,
-html[data-skin="nds"] h3 {
+
+/* ── Type ───────────────────────────────────────────────────────────────────── */
+/* Small text keeps Inter's normal spacing: tight 9-11px text is hard to read, and the studio never
+   tightens text at 14px and under. Only headings and 16px-and-up figures are tightened, and with zero
+   specificity, so a tracking-* utility on the element (and the logo) still wins. The second rule is
+   for figures that are buttons (the ARV value): Tailwind's reset gives buttons letter-spacing: inherit. */
+:where(html[data-skin="nds"]) :where(h1, h2, h3) {
   letter-spacing: -0.02em;
+}
+:where(html[data-skin="nds"]) :where(.text-base, .text-lg, .text-xl),
+:where(html[data-skin="nds"]) button:where(.text-base, .text-lg, .text-xl) {
+  letter-spacing: -0.011em;
+}
+html[data-skin="nds"] :is(h1, h2, h3) {
   font-weight: 500;
 }
-/* Labels speak in the monospace voice, as the studio's small caps do */
-html[data-skin="nds"] .uppercase {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-  letter-spacing: 0.04em;
-  font-weight: 500;
-}
-/* Hairline cards on the neutral surface */
-html[data-skin="nds"] .border-border { border-color: hsl(var(--border)); }
-/* Deal buttons: Prep offer is the dark filled one; the declines are outlined; the tools stay quiet */
-html[data-skin="nds"] [data-deal="prep"] {
-  background: hsl(var(--primary));
-  color: hsl(var(--primary-foreground));
-  border-radius: 6px;
-  padding: 3px 12px;
+/* The page's real headings are its figures: valuation numbers, card prices, the dialog's sale price.
+   600 keeps them leading without the 700 the studio keeps for display lines. Photo stamps stay 700. */
+html[data-skin="nds"] .hero-stats .font-bold,
+html[data-skin="nds"] [data-card-key] .text-sm.font-bold,
+html[data-skin="nds"] [role="dialog"] .text-base.font-bold {
   font-weight: 600;
 }
-html[data-skin="nds"] [data-deal="prep"]:hover:not(:disabled) {
-  background: hsl(var(--foreground-secondary));
+
+/* ── Surfaces: flat page, data on white ─────────────────────────────────────── */
+html[data-skin="nds"] .playground-bg {
+  background: hsl(var(--background));
+}
+html[data-skin="nds"] :is(.corner-accents, .corner-accents-bottom)::before,
+html[data-skin="nds"] :is(.corner-accents, .corner-accents-bottom)::after {
+  content: none;
+}
+html[data-skin="nds"] .corner-accents {
+  box-shadow: none;
+}
+html[data-skin="nds"] [data-card-key],
+html[data-skin="nds"] [data-surface="card"],
+html[data-skin="nds"] [role="dialog"][aria-label="Comp beside the subject property"] > .isolate {
+  background-color: hsl(var(--card));
+}
+html[data-skin="nds"] [data-card-key="subject"] {
+  border-color: hsl(var(--border));
+}
+/* The valuation tiles are scanned as columns: their dividers are full hairlines. The grid is pulled
+   1px over the box's own edge so the tiles at the right (one at 1440, three when it wraps to two
+   columns) do not double it. */
+html[data-skin="nds"] .hero-stats {
+  margin-right: -1px;
+}
+html[data-skin="nds"] .hero-stats > div {
+  border-right-color: hsl(var(--border));
+}
+/* The one section rule on the page, at the studio's second tier (20% ink) */
+html[data-skin="nds"] [data-comps-anchor] {
+  border-bottom-color: hsl(var(--foreground) / 0.2);
+}
+html[data-skin="nds"] [role="dialog"][class~="sm:rounded-2xl"] {
+  border-radius: 6px;
+}
+/* Fields are white with an edge that can be seen: the search box, and the notes box in the review dialog */
+html[data-skin="nds"] [data-surface="card"] input,
+html[data-skin="nds"] [role="dialog"] textarea {
+  background-color: hsl(var(--input-fill));
+  border-color: hsl(var(--foreground) / 0.45);
+}
+/* The manual ARV box inside the valuation tiles is not a field of that kind: it keeps its own wrapper */
+html[data-skin="nds"] .hero-stats input {
+  background-color: transparent;
+  outline: none;
+}
+/* A list that opens from a white field is white too */
+html[data-skin="nds"] [data-surface="card"] div:has(> [role="listbox"]) {
+  background-color: hsl(var(--popover));
+  border-radius: 6px;
+}
+
+/* ── Comp cards ─────────────────────────────────────────────────────────────── */
+/* A comp left out of the ARV dims its photo, not its numbers: an underwriter reads those to decide
+   whether to add it. Pointing at the card, or tabbing into it, brings the photo back. The compare
+   panel exists to compare two photos, so it never dims one; touch screens have no hover, so they
+   do not dim either (the stamp and the edge still say the comp is out). */
+html[data-skin="nds"] [data-in-arv="false"] {
+  opacity: 1;
+}
+html[data-skin="nds"] [data-in-arv="false"] img {
+  opacity: 0.6;
+  transition: opacity 0.2s cubic-bezier(0.215, 0.61, 0.355, 1);
+}
+html[data-skin="nds"] [data-in-arv="false"]:is(:hover, :focus-within) img,
+html[data-skin="nds"] [role="dialog"][aria-label="Comp beside the subject property"] [data-in-arv="false"] img {
+  opacity: 1;
+}
+@media (hover: none) {
+  html[data-skin="nds"] [data-in-arv="false"] img {
+    opacity: 1;
+  }
+}
+/* At full strength an empty check box showed its ghost tick and read as checked. The tick appears
+   only when the box is pointed at or focused. */
+html[data-skin="nds"] [data-card-key] button[aria-pressed="false"] > span > svg {
+  opacity: 0;
+}
+html[data-skin="nds"] [data-card-key] button[aria-pressed="false"]:is(:hover, :focus-visible) > span > svg {
+  opacity: 0.7;
+}
+/* Photo stamps keep their words and their meaning; only what could not be read changes.
+   White on amber and on orange was about 2:1; ink is 9:1. */
+html[data-skin="nds"] :is([data-stamp="anchor"], [data-stamp="as_is"]) {
+  color: #170404;
+}
+/* MEDIAN is on most cards and shared its blue with SUBJECT. It takes the card's own surface (white
+   in light, the dark card in dark), which keeps the word and leaves blue for the subject alone. */
+html[data-skin="nds"] [data-stamp="median"] {
+  background-color: hsl(var(--card));
+  color: hsl(var(--card-foreground));
+  box-shadow: 0 0 0 1px hsl(var(--foreground) / 0.14);
+}
+/* White on emerald-600 was 3.77:1; one step darker is 5.5:1. The green stamps and every checked ARV
+   box (card and detail dialog) are darkened in both themes. The card's edge strip follows in light
+   only: in dark it is the app's own lighter emerald, as is green text. */
+html[data-skin="nds"] [data-in-arv="true"] [data-stamp="number"],
+html[data-skin="nds"] :is([data-stamp="driver"], [data-stamp="renovated"]),
+html[data-skin="nds"] [data-card-key] button[aria-pressed="true"] > span,
+html[data-skin="nds"] [role="dialog"] button[aria-pressed="true"][aria-label="Remove from ARV"] {
+  background-color: #047857;
+  border-color: #047857;
+}
+html[data-skin="nds"]:not(.dark) [data-in-arv="true"] [data-verdict-edge] {
+  background-color: #047857;
+}
+
+/* ── Meaning colors, readable ───────────────────────────────────────────────── */
+html[data-skin="nds"] [class~="text-foreground-tertiary/70"] {
+  color: hsl(var(--foreground-tertiary));
+}
+html[data-skin="nds"]:not(.dark) :is(.text-emerald-600, .text-emerald-500) {
+  color: #047857;
+}
+html[data-skin="nds"]:not(.dark) :is(.text-amber-600, .text-amber-500) {
+  color: #a34a05;
+}
+html[data-skin="nds"]:not(.dark) .text-red-600 {
+  color: #b91c1c;
+}
+/* On paper there is no dark theme: the same readable tones, whatever the screen theme was */
+@media print {
+  html[data-skin="nds"] :is([class~="text-emerald-600"], [class~="text-emerald-500"], [class~="dark:text-emerald-400"]) {
+    color: #047857;
+  }
+  html[data-skin="nds"] :is([class~="text-amber-600"], [class~="text-amber-500"], [class~="dark:text-amber-400"]) {
+    color: #a34a05;
+  }
+  html[data-skin="nds"] :is([class~="text-red-600"], [class~="dark:text-red-400"]) {
+    color: #b91c1c;
+  }
+}
+/* The notice keeps its tint and border (green, amber and red each mean something); its title is ink */
+html[data-skin="nds"] [data-notice] > .font-semibold {
+  color: hsl(var(--foreground));
+}
+/* SUBJECT on the photo: its text follows the chip (white on ink in light, ink on cream in dark) */
+html[data-skin="nds"] [data-card-key="subject"] [class~="bg-primary/90"] :is(span, svg) {
   color: hsl(var(--primary-foreground));
 }
+
+/* ── Controls: filled, outlined, quiet ──────────────────────────────────────── */
+html[data-skin="nds"] [data-deal] {
+  min-height: 24px;
+  transition: background-color 0.15s cubic-bezier(0.215, 0.61, 0.355, 1), color 0.15s cubic-bezier(0.215, 0.61, 0.355, 1), border-color 0.15s cubic-bezier(0.215, 0.61, 0.355, 1);
+}
+/* Filled: Prep offer and Run are the same ink, and the same pale slab when they cannot be used
+   (not an outline, which would read as one more decline) */
+html[data-skin="nds"] [data-deal="prep"] {
+  border-radius: 6px;
+  padding: 3px 12px;
+  font-weight: 500;
+}
+html[data-skin="nds"] :is([data-deal="prep"], [data-action="run"]) {
+  background-color: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+}
+html[data-skin="nds"] :is([data-deal="prep"], [data-action="run"]):hover:not(:disabled) {
+  background-color: hsl(var(--foreground-secondary));
+  color: hsl(var(--primary-foreground));
+}
+html[data-skin="nds"] :is([data-deal="prep"], [data-action="run"]):disabled {
+  background-color: hsl(var(--foreground) / 0.08);
+  color: hsl(var(--foreground-tertiary));
+  opacity: 1;
+  cursor: not-allowed;
+}
+/* Outlined: the declines, and every other outlined button on the page (Download Report, Pull, Reset) */
 html[data-skin="nds"] [data-deal="decline"] {
-  border: 1px solid hsl(var(--border));
+  border: 1px solid hsl(var(--foreground) / 0.45);
   border-radius: 6px;
   padding: 2px 10px;
   color: hsl(var(--foreground));
+  font-weight: 500;
 }
-html[data-skin="nds"] [data-deal="decline"]:hover { background: hsl(var(--secondary)); }
-html[data-skin="nds"] [data-deal] { transition: background-color 0.15s cubic-bezier(0.215, 0.61, 0.355, 1), color 0.15s cubic-bezier(0.215, 0.61, 0.355, 1); }
+html[data-skin="nds"] [data-deal="decline"]:hover {
+  background: hsl(var(--foreground) / 0.06);
+  border-color: hsl(var(--foreground));
+}
+html[data-skin="nds"] button[class~="border"][class~="border-border"]:not([role="switch"]) {
+  border-color: hsl(var(--foreground) / 0.45);
+  color: hsl(var(--foreground));
+  font-weight: 500;
+  border-radius: 6px;
+}
+/* The review dialog's two actions join the system: Validate is an outline, and Flag's words can be read */
+html[data-skin="nds"] [role="dialog"] button[class~="border-emerald-500/30"] {
+  background-color: transparent;
+  border-color: hsl(var(--foreground) / 0.45);
+}
+html[data-skin="nds"] [role="dialog"] button[class~="bg-amber-600"][class~="text-white"] {
+  color: #170404;
+}
+/* Quiet: Re-run and Evaluation Settings. While a run is going its label is the status people read. */
+html[data-skin="nds"] [data-deal="tool"],
+html[data-skin="nds"] button.rounded-full.inline-flex:not([role="switch"]) {
+  border-radius: 6px;
+}
+html[data-skin="nds"] [data-deal="tool"]:disabled {
+  opacity: 1;
+  color: hsl(var(--foreground-tertiary));
+  cursor: progress;
+}
+/* The selected tab is an ink fill, as in the studio's segmented control */
+html[data-skin="nds"] [data-comps-anchor] button {
+  min-height: 24px;
+  border-radius: 6px;
+}
+html[data-skin="nds"] [data-comps-anchor] button[aria-pressed="true"] {
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+  font-weight: 500;
+}
+/* Dark: the "on" switch has a cream track, so its thumb is ink (a white thumb vanished on it) */
+html[data-skin="nds"].dark [role="switch"][data-state="checked"] > span {
+  background-color: hsl(var(--primary-foreground));
+}
+
+/* ── Focus ──────────────────────────────────────────────────────────────────── */
+/* A panel that opens by mouse focuses its Close button; do not draw the ring until the keyboard is used */
+html[data-skin="nds"] [role="dialog"] > button[class~="focus:ring-2"]:focus:not(:focus-visible) {
+  box-shadow: none;
+}
+/* Photo links and the check box sit inside clipped boxes, so the ring is drawn inside them, in two
+   tones so it shows on a dark photo and a bright one. Same for the photo in the detail dialog. */
+html[data-skin="nds"] :is(.subject-card-media, [data-card-key] [class*="aspect-"]) :focus-visible,
+html[data-skin="nds"] [role="dialog"] a[title="Open Street View"]:focus-visible {
+  outline-offset: -4px;
+  box-shadow: inset 0 0 0 2px hsl(var(--background));
+}
+html[data-skin="nds"] :is(.subject-card-media, [data-card-key] [class*="aspect-"]) a:focus-visible img,
+html[data-skin="nds"] [role="dialog"] a[title="Open Street View"]:focus-visible img {
+  outline: 2px solid hsl(var(--background));
+  outline-offset: -2px;
+}
+/* Full-width row buttons inside clipping parents (the decision trail, the settings section headers) */
+html[data-skin="nds"] .overflow-hidden > button.w-full:focus-visible,
+html[data-skin="nds"] [role="dialog"] button.w-full:focus-visible {
+  outline-offset: -2px;
+}
+/* Photo thumbnails in the subject card's strip: the strip clips a ring drawn outside them */
+html[data-skin="nds"] [data-card-key="subject"] button[class~="rounded-lg"][class~="overflow-hidden"]:focus-visible {
+  box-shadow: none;
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: -2px;
+}
+html[data-skin="nds"] [data-card-key="subject"] button[class~="rounded-lg"][class~="overflow-hidden"]:focus-visible img {
+  outline: 2px solid hsl(var(--background));
+  outline-offset: -4px;
+}
+
+/* ── Permit steps ───────────────────────────────────────────────────────────── */
+/* Done steps are filled, steps to come are hollow, so "step 1 of 3" reads as three marks, not one dash */
+html[data-skin="nds"] [role="status"] [aria-label^="Step "] > span {
+  height: 5px;
+}
+html[data-skin="nds"] [role="status"] [aria-label^="Step "] > [class~="bg-border"] {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px hsl(var(--foreground-tertiary));
+}
+
+/* ── Reduced motion: the skin's own fades stop ──────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  html[data-skin="nds"] [data-deal],
+  html[data-skin="nds"] [data-in-arv="false"] img {
+    transition: none;
+  }
+}

@@ -55,6 +55,16 @@ cd /tmp && LD_LIBRARY_PATH=$HOME/.local/lib/playwright-deps \
 ## Review template
 
 ```
+### 2026-10-06 — Studio skin, re-examined and rebuilt (two review rounds)
+Screenshots: `~/code/ui-shots/studio-review/` — `before-*` (first version), `after-*` (first rebuild), `final-*` (after the second round), each in light and dark at 1440, light at 1100 and 390, in every state: loaded, comp list, pinned compare panel, comp detail dialog, Evaluation Settings, empty, the four permit stages. Close-ups: `final-*-arv-edit`, `final-*-valuation`, `final-*-cards`.
+Requirement: have the new model look over the Studio prototype and improve it.
+Method: reference re-captured from the studio's own sites with real computed styles (8 pages). Round 1: six independent reviewers (fidelity, visual defects, measured accessibility, CSS engineering, component by component, dark mode), one merge, three skeptics: 62 raw findings, 30 merged, 28 confirmed. Round 2 on the rebuild: five checkers (regressions, accessibility in every state, what each CSS rule really matches, fidelity, lifecycle and test quality), two skeptics: 23 confirmed by both, 10 split, 1 rejected. Reviewers only read and measured; every change was made by one hand and re-measured.
+Worst defect found: one skin rule was merged by the build into the rule for every element and grayed every border on the page (check-box rings, the notice border, the legend rings).
+Measured on the final build: no skin rule merged into the universal rule; with the skin off the loaded page is pixel-identical outside live map imagery (the only other differing pixels are the switch itself); text under readable contrast on the first screen 85 off / 0 on (light), 9 / 0 (dark); small text with tightened spacing 0; deal buttons and tabs 24px; dark print 4 dark blocks off / 1 on, tokens on paper values.
+Defects introduced by my own first rebuild and caught by round 2: empty check boxes read as ticked, the manual ARV box took the search-field style, a doubled valuation-box edge at 1100 and 390, MEDIAN pure white in dark, two tests that could not fail, three wrong statements in the write-up.
+Tests: unit 26 files (the skin guards catch 15 of 15 planted mistakes; the first version of them missed most); e2e 38 of 38, twice (two were shown to fail on a planted bug: a missing cleanup, a gray valuation box).
+Not fixed, by decision: the switch can float over a comp card at rest (prototype control); small click targets and field edges outside the skin's scope (listed in UI-NDS-ASSESSMENT.md for the real theme).
+
 ### 2026-10-06 — Permit stages, like the comp stages
 Screenshots: `permits-pull-light-1..3` (the Pull path, real page)
 Requirement: the Permits row should update in real time through stages, the way the comp fetch does ("Photos fetched", "Renovation level assessed").

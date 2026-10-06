@@ -77,28 +77,218 @@ describe('Offers', () => {
 })
 
 describe('Skin prototype', () => {
-  const skin = (browser: { evaluate: (fn: () => unknown) => Promise<unknown> }) =>
-    browser.evaluate(() => document.documentElement.dataset.skin ?? 'none') as Promise<string>
+  type Page = { evaluate: (fn: () => unknown) => Promise<unknown> }
+  const skin = (browser: Page) => browser.evaluate(() => document.documentElement.dataset.skin ?? 'none') as Promise<string>
+  const stored = (browser: Page) => browser.evaluate(() => localStorage.getItem('flowstate:skin-preview') ?? 'none') as Promise<string>
+  const switches = (browser: Page) => browser.evaluate(() => {
+    const all = [...document.querySelectorAll('[aria-label="Skin prototype"]')]
+    return { count: all.length, onBody: all.every((el) => el.parentElement === document.body) }
+  }) as Promise<{ count: number; onBody: boolean }>
+  const clearChoice = (browser: Page) => browser.evaluate(() => { localStorage.removeItem('flowstate:skin-preview'); return true })
 
-  test('it is off by default, the switch turns it on and off, and it never reaches other pages', WEB, async ({ app, screen, browser }) => {
+  test('it is off by default, and leaving Property Search by the app\'s own links takes the skin and the switch with it', WEB, async ({ app, screen, browser }) => {
     await app.open('/dashboard/analyze?address=')
-    await browser.evaluate(() => { localStorage.removeItem('flowstate:skin-preview'); return true })
+    await clearChoice(browser)
     await app.open('/dashboard/analyze?address=')
     await expect(screen.getByRole('button', 'Studio')).toBeVisible()
     expect(await skin(browser), 'the current look is the default').toBe('none')
+    expect(await switches(browser), 'one switch, drawn on <body>').toEqual({ count: 1, onBody: true })
     await screen.getByRole('button', 'Studio').click()
     await expect.poll(() => skin(browser)).toBe('nds')
-    // The skin changes colors and the Prep offer button, not the theme tokens' names or the layout
+    // Leave through the sidebar: a client-side move in the SAME document, so only the page's own cleanup can
+    // remove the attribute (a fresh page load would hide a missing cleanup)
+    await browser.evaluate(() => { (window as unknown as { __sameDocument: boolean }).__sameDocument = true; return true })
+    await screen.getByRole('link', 'Property Reports').first().click()
+    await expect(screen.getByRole('heading', 'Property Reports', { level: 1 })).toBeVisible()
+    expect((await browser.evaluate(() => (window as unknown as { __sameDocument?: boolean }).__sameDocument === true)) as boolean, 'the document was not reloaded').toBe(true)
+    expect(await skin(browser), 'the skin ends when Property Search is left').toBe('none')
+    expect((await switches(browser)).count, 'the switch leaves with the page').toBe(0)
+    // Back: the skin and exactly one switch return
+    await browser.back()
+    await expect(screen.getByRole('button', 'Studio')).toBeVisible()
+    await expect.poll(() => skin(browser)).toBe('nds')
+    expect(await switches(browser)).toEqual({ count: 1, onBody: true })
     await screen.getByRole('button', 'Current').click()
     await expect.poll(() => skin(browser)).toBe('none')
-    // ?skin=nds starts it on
+    await clearChoice(browser)
+  })
+
+  test('?skin= in the address: nds turns it on and is remembered, off turns it off and forgets, anything else changes nothing', WEB, async ({ app, screen, browser }) => {
+    await app.open('/dashboard/analyze?address=')
+    await clearChoice(browser)
     await app.open('/dashboard/analyze?address=&skin=nds')
     await expect.poll(() => skin(browser)).toBe('nds')
-    // Other pages are untouched
-    await app.open('/dashboard/reports')
-    await expect(screen.getByRole('heading', 'Property Reports', { level: 1 })).toBeVisible()
-    expect(await skin(browser), 'the skin ends when Property Search is left').toBe('none')
-    await browser.evaluate(() => { localStorage.removeItem('flowstate:skin-preview'); return true })
+    await expect.poll(() => stored(browser)).toBe('nds')
+    // An unknown value is ignored: the remembered choice stands
+    await app.open('/dashboard/analyze?address=&skin=garbage')
+    await expect(screen.getByRole('button', 'Studio')).toBeVisible()
+    await expect.poll(() => skin(browser)).toBe('nds')
+    await app.open('/dashboard/analyze?address=&skin=off')
+    await expect(screen.getByRole('button', 'Studio')).toBeVisible()
+    await expect.poll(() => stored(browser)).toBe('none')
+    expect(await skin(browser)).toBe('none')
+  })
+
+  test('a choice made with the switch replaces ?skin=, and the switch stays out of the page and off the phone nav', WEB, async ({ app, screen, browser }) => {
+    await app.open('/dashboard/analyze?address=&skin=nds')
+    await expect.poll(() => skin(browser)).toBe('nds')
+    await screen.getByRole('button', 'Current').click()
+    await expect.poll(() => skin(browser)).toBe('none')
+    // The address no longer says nds, so a reload cannot bring the skin back
+    expect((await browser.evaluate(() => location.search)) as string).not.toContain('skin')
+    await app.open('/dashboard/analyze?address=')
+    await expect(screen.getByRole('button', 'Studio')).toBeVisible()
+    expect(await skin(browser), 'Current survived the reload').toBe('none')
+    // On a phone it sits above the bottom nav, never on it
+    await browser.setViewport({ width: 390, height: 844 })
+    const phone = (await browser.evaluate(() => {
+      const sw = document.querySelector('[aria-label="Skin prototype"]')!.getBoundingClientRect()
+      const navTops = [...document.querySelectorAll('a')].map((a) => a.getBoundingClientRect()).filter((r) => r.height > 0 && r.top > innerHeight - 80).map((r) => r.top)
+      return { switchBottom: Math.round(sw.bottom), navTop: navTops.length ? Math.round(Math.min(...navTops)) : -1 }
+    })) as { switchBottom: number; navTop: number }
+    expect(phone.navTop, 'the phone has a bottom nav').toBeGreaterThan(0)
+    expect(phone.switchBottom, 'the switch ends above the nav').toBeLessThanOrEqual(phone.navTop)
+    await browser.setViewport({ width: 1280, height: 720 })
+    await clearChoice(browser)
+  })
+
+  /** Everything the skin promises, read from the live page. Throws if a thing it looks for is missing. */
+  const readSkin = (browser: Page) => browser.evaluate(() => {
+    const need = (sel: string, root: ParentNode = document) => { const e = root.querySelector(sel); if (!e) throw new Error(`nothing matches ${sel}`); return e }
+    const css = (el: Element, prop: string) => getComputedStyle(el).getPropertyValue(prop)
+    const all = (sel: string) => [...document.querySelectorAll(sel)]
+    // A compiled rule that pairs the skin selector with the universal selector recolors the whole page
+    const leaks: string[] = []
+    const walk = (rules: CSSRuleList) => {
+      for (const rule of Array.from(rules)) {
+        const nested = (rule as CSSGroupingRule).cssRules
+        if (nested) walk(nested)
+        const text = (rule as CSSStyleRule).selectorText
+        if (text && text.includes('data-skin') && text.split(',').some((part) => /(^|\s)\*$/.test(part.trim()))) leaks.push(text.slice(0, 80))
+      }
+    }
+    for (const sheet of Array.from(document.styleSheets)) { try { walk(sheet.cssRules) } catch { /* cross-origin sheet */ } }
+    const main = need('.playground-bg')
+    let tightSmall = 0
+    const fonts = new Set<string>()
+    for (const el of Array.from(main.querySelectorAll('*'))) {
+      if (el.closest('[data-testid="subject-map"]')) continue
+      const c = getComputedStyle(el)
+      if (el.childElementCount === 0 && (el.textContent ?? '').trim() && parseFloat(c.fontSize) < 14 && parseFloat(c.letterSpacing) < 0) tightSmall++
+      if (el.classList.contains('uppercase')) fonts.add(c.fontFamily)
+    }
+    const cards = all('[data-card-key]')
+    const out = all('[data-in-arv="false"]')
+    const outPhoto = out.map((c) => c.querySelector('img')).find((img): img is HTMLImageElement => !!img)
+    const emptyBox = out.map((c) => c.querySelector('button[aria-pressed="false"] > span > svg')).find(Boolean)
+    const median = document.querySelector('[data-stamp="median"]')
+    return JSON.stringify({
+      leaks, tightSmall, labelFonts: [...fonts], bodyFont: css(document.body, 'font-family'),
+      page: css(main, 'background-color'), pageImage: css(main, 'background-image'),
+      cardFills: [...new Set(cards.map((c) => css(c, 'background-color')))],
+      valuation: css(need('[data-surface="card"]:has(.hero-stats)'), 'background-color'),
+      toolbar: css(need('[data-surface="card"]'), 'background-color'),
+      hairline: css(need('[data-card-key]:not([data-card-key="subject"])'), 'border-top-color'),
+      checkedBox: css(need('[data-card-key] button[aria-pressed="true"] > span'), 'border-top-color'),
+      tabs: all('[data-comps-anchor] button[aria-pressed]').map((b) => css(b, 'background-color')),
+      tabOn: css(need('[data-comps-anchor] button[aria-pressed="true"]'), 'background-color'),
+      prep: css(need('[data-deal="prep"]'), 'background-color'),
+      outline: css(need('[data-deal="decline"]'), 'border-top-color'),
+      minControl: Math.min(...all('[data-deal], [data-comps-anchor] button').map((e) => Math.round(e.getBoundingClientRect().height))),
+      radii: [...new Set(all('[data-deal], [data-comps-anchor] button').map((e) => css(e, 'border-top-left-radius')))],
+      outCount: out.length, outCardOpacity: [...new Set(out.map((c) => css(c, 'opacity')))],
+      outPhotoOpacity: outPhoto ? css(outPhoto, 'opacity') : 'no photo', ghostTick: emptyBox ? css(emptyBox, 'opacity') : 'no box',
+      median: median ? `${css(median, 'background-color')} | ${css(median, 'color')}` : 'none',
+      green: (() => { const e = document.querySelector('.text-emerald-600'); return e ? css(e, 'color') : 'none' })(),
+      subjectChip: (() => { const e = document.querySelector('[data-card-key="subject"] [class~="bg-primary/90"] span'); return e ? css(e, 'color') : 'none' })(),
+      figureWeight: css(need('.hero-stats .font-bold'), 'font-weight'),
+      card: css(need('[data-card-key="subject"]'), 'background-color'), cardInk: css(need('[data-card-key="subject"]'), 'color'),
+    })
+  }).then((v) => JSON.parse(v as string))
+
+  test('the Studio skin, light: data on white, borders keep their colors, one ink for filled things, nothing small is tightened', WEB, async (fx) => {
+    const { browser, screen } = fx
+    await openLoadedSearch(fx)
+    const off = await readSkin(browser)
+    await screen.getByRole('button', 'Studio').click()
+    await expect.poll(async () => (await readSkin(browser)).card).not.toBe(off.card)
+    await new Promise((resolve) => setTimeout(resolve, 700)) // let color transitions settle
+    const on = await readSkin(browser)
+    expect(on.leaks, 'no skin rule is merged into the universal rule').toEqual([])
+    // Surfaces: every card, the valuation box and the top bar are one white; the page is flat gray with no gradient
+    expect(on.cardFills, 'every subject and comp card has the same fill').toEqual(['rgb(255, 255, 255)'])
+    expect(on.valuation).toBe('rgb(255, 255, 255)')
+    expect(on.toolbar).toBe('rgb(255, 255, 255)')
+    expect(on.page).toBe('rgb(242, 242, 242)')
+    expect(on.pageImage).toBe('none')
+    expect(off.cardFills, 'with the skin off a comp card has no fill of its own').toContain('rgba(0, 0, 0, 0)')
+    // Borders: the hairline is the 10% ink value, and a colored border (the checked ARV box) is not flattened to it
+    expect(on.hairline).toBe('rgb(218, 218, 218)')
+    expect(on.checkedBox).toBe('rgb(4, 120, 87)')
+    // Controls: the selected tab is the same ink as Prep offer, the other tabs are not filled, one radius, 24px minimum
+    expect(on.tabOn).toBe(on.prep)
+    expect(on.prep).toBe('rgb(28, 28, 28)')
+    expect(on.tabs.filter((fill: string) => fill === on.tabOn).length, 'only the selected tab is filled').toBe(1)
+    expect(on.outline, 'outlined buttons have an edge that can be seen').toBe('rgba(1, 1, 1, 0.45)')
+    expect(on.radii).toEqual(['6px'])
+    expect(on.minControl).toBeGreaterThanOrEqual(24)
+    // Comps left out of the ARV: numbers at full strength, photo dimmed, and an empty box shows no ghost tick
+    expect(on.outCount, 'this report has comps left out of the ARV').toBeGreaterThan(0)
+    expect(on.outCardOpacity).toEqual(['1'])
+    expect(off.outCardOpacity).toEqual(['0.7'])
+    expect(Number(on.outPhotoOpacity)).toBeLessThan(1)
+    expect(on.ghostTick).toBe('0')
+    // Meaning colors: green text is the readable step; MEDIAN sits on the card's own surface
+    expect(on.green).toBe('rgb(4, 120, 87)')
+    if (on.median !== 'none') expect(on.median).toBe('rgb(255, 255, 255) | rgb(1, 1, 1)')
+    // Type: nothing under 14px is tightened anywhere in the page, labels stay in the page's typeface, figures are 600
+    expect(on.tightSmall).toBe(0)
+    expect(on.labelFonts).toEqual([on.bodyFont])
+    expect(on.figureWeight).toBe('600')
+    // Back to Current: the cards lose their fill and the left-out cards dim as before
+    await screen.getByRole('button', 'Current').click()
+    await expect.poll(async () => (await readSkin(browser)).outCardOpacity).toEqual(['0.7'])
+    expect((await readSkin(browser)).cardFills).toContain('rgba(0, 0, 0, 0)')
+    await clearChoice(browser)
+  })
+
+  test('the Studio skin, dark: warm black, cream ink, and nothing left pure white or unreadable', WEB, async (fx) => {
+    const { browser, app } = fx
+    await openLoadedSearch(fx)
+    // Remember the theme this browser had, switch to dark with the skin on, and put it back at the end
+    const themeBefore = (await browser.evaluate(() => {
+      const before = localStorage.getItem('fs-theme')
+      localStorage.setItem('fs-theme', 'dark'); localStorage.setItem('flowstate:skin-preview', 'nds')
+      return before ?? ''
+    })) as string
+    try {
+      await app.open('/dashboard/analyze')
+      await expect(browser.locator('[data-card-key="subject"]')).toBeVisible({ timeout: 30_000 })
+      await expect.poll(() => skin(browser)).toBe('nds')
+      expect((await browser.evaluate(() => document.documentElement.classList.contains('dark'))) as boolean, 'the page is in dark').toBe(true)
+      await new Promise((resolve) => setTimeout(resolve, 700))
+      const on = await readSkin(browser)
+      expect(on.leaks).toEqual([])
+      expect(on.page).toBe('rgb(13, 5, 5)')
+      expect(on.cardFills).toEqual(['rgb(22, 13, 13)'])
+      expect(on.cardInk, 'cream ink, not white').toBe('rgb(253, 251, 237)')
+      // Filled things are cream with ink words; the selected tab matches Prep offer
+      expect(on.prep).toBe('rgb(253, 251, 237)')
+      expect(on.tabOn).toBe(on.prep)
+      // MEDIAN takes the dark card's surface (it was the one pure-white thing on the page)
+      if (on.median !== 'none') expect(on.median).toBe('rgb(22, 13, 13) | rgb(253, 251, 237)')
+      // SUBJECT on the photo: ink words on the cream chip (white on cream could not be read)
+      expect(on.subjectChip).not.toBe('rgb(255, 255, 255)')
+      // Green text keeps the app's own lighter emerald in dark; only light is darkened
+      expect(on.green).not.toBe('rgb(4, 120, 87)')
+      expect(on.tightSmall).toBe(0)
+    } finally {
+      await browser.evaluate((before: string) => {
+        if (before) localStorage.setItem('fs-theme', before); else localStorage.removeItem('fs-theme')
+        localStorage.removeItem('flowstate:skin-preview')
+        return true
+      }, themeBefore)
+    }
   })
 })
 

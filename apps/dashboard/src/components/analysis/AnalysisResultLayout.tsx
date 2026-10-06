@@ -169,7 +169,7 @@ export function AnalysisResultLayout({
           : extensions <= 2 ? 'text-amber-500 border-amber-500/30 bg-amber-500/5'
           : 'text-red-400 border-red-400/30 bg-red-400/5'
         return (
-          <div className={`border rounded-sm px-4 py-3 ${tone}`}>
+          <div data-notice className={`border rounded-sm px-4 py-3 ${tone}`}>
             <div className="text-sm font-semibold">
               {extensions === 0
                 ? 'No ARV evidence in the verified pool'

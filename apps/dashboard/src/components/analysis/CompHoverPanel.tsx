@@ -200,7 +200,7 @@ function SubjectCompareCard({ subject }: { subject: SubjectData }) {
           </a>
         ) : photo}
         <div className="absolute top-2 left-2.5 flex flex-wrap items-center gap-1 pointer-events-none">
-          <div className={cn(STAMP, 'bg-blue-600 text-white')}>SUBJECT</div>
+          <div data-stamp="subject" className={cn(STAMP, 'bg-blue-600 text-white')}>SUBJECT</div>
         </div>
       </div>
       <div className="flex flex-1 flex-col pl-3.5 pr-3 py-2.5 text-[11px]">
