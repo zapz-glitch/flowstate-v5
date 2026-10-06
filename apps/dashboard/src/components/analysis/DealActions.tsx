@@ -6,10 +6,10 @@ import type { OfferWorkflow } from '@/lib/client-api'
 import { formatMoneyThousands as fmtK } from './valuation-number'
 
 /** A plain word, same pill as the comp tier row */
-const ACTION = 'text-[11px] px-2 py-0.5 rounded whitespace-nowrap text-foreground-tertiary transition-colors'
+const ACTION = 'text-[11px] px-1.5 py-0.5 rounded whitespace-nowrap text-foreground-tertiary transition-colors'
 const ACTION_HOVER = 'hover:text-foreground hover:bg-secondary'
 /** Thin line between action groups · the same mark as between Investor and Report */
-const DIVIDER = 'w-px h-3 bg-border mx-1 flex-shrink-0'
+const DIVIDER = 'w-px h-3 bg-border mx-0.5 flex-shrink-0'
 
 interface DealActionsProps {
   /** The price an offer goes out at · wholesale, else buy price */
@@ -21,6 +21,8 @@ interface DealActionsProps {
   /** True while a rerun is in flight */
   rerunning?: boolean
   onOpenSettings?: () => void
+  /** No border or padding of its own · it sits in a strip with other content */
+  bare?: boolean
   className?: string
 }
 
@@ -29,7 +31,7 @@ interface DealActionsProps {
  * card's foot: decide (prep offer, no margin, no offer), then tools (re-run,
  * evaluation settings), set apart by a thin line.
  */
-export function DealActions({ offerPrice, onOfferWorkflow, onRerun, rerunning, onOpenSettings, className }: DealActionsProps) {
+export function DealActions({ offerPrice, onOfferWorkflow, onRerun, rerunning, onOpenSettings, bare = false, className }: DealActionsProps) {
   // Offer-button state machine: idle (buttons) → busy → done (result
   // chip) → back to idle. Everything crossfades via animate-in/fade-in.
   // Both workflows dispatch immediately — no price editing.
@@ -57,7 +59,8 @@ export function DealActions({ offerPrice, onOfferWorkflow, onRerun, rerunning, o
   return (
     <div
       className={cn(
-        'flex flex-wrap items-center justify-end gap-x-1 gap-y-0.5 border-t border-border/60 px-3 py-1 no-print',
+        'flex flex-wrap items-center justify-end gap-x-1 gap-y-0.5 no-print',
+        !bare && 'border-t border-border/60 px-3 py-1',
         className,
       )}
     >

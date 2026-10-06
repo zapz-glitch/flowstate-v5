@@ -62,3 +62,11 @@ test('a rerun in flight disables Re-run and says so', () => {
 test('with nothing to do it renders nothing', () => {
   assert.equal(render({}), '')
 })
+
+test('bare drops the strip border and padding so it can sit beside other content', () => {
+  const plain = render(all)
+  const bare = render({ ...all, bare: true })
+  assert.match(plain, /border-t border-border\/60 px-3 py-1/)
+  assert.doesNotMatch(bare, /border-t|px-3 py-1/)
+  assert.equal(dividers(bare), dividers(plain), 'the buttons themselves are unchanged')
+})

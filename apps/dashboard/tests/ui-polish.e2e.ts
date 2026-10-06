@@ -100,6 +100,36 @@ describe('Property Search with a report loaded', () => {
     for (let i = 1; i < boxes.length; i++) expect(boxes[i].x, 'left to right, in order').toBeGreaterThan(boxes[i - 1].x)
   })
 
+  test('the comp stats sit in the subject card foot, on the same row as Prep offer, and are not repeated above the comps', WEB, async (fx) => {
+    const { browser, screen } = fx
+    await openLoadedSearch(fx)
+    const card = browser.locator('[data-card-key="subject"]')
+    const stats = card.getByText(/^\d+ selected/)
+    await expect(stats).toBeVisible()
+    await expect(card.getByText('excluded', { exact: false })).toBeVisible()
+    await expect(card.getByText('/sf avg', { exact: false })).toBeVisible()
+    // Only one copy on the whole page
+    await expect(screen.getByText(/^\d+ selected/)).toHaveCount(1)
+    // Left of Prep offer, and on the same line when the card is wide enough
+    const s = (await stats.boundingBox()) as Rect
+    const prep = (await card.getByRole('button', 'Prep offer').boundingBox()) as Rect
+    // The stats block is the first line's parent; read its box in the page
+    const block = (await browser.evaluate(() => {
+      const line = [...document.querySelectorAll('[data-card-key="subject"] div')].find((e) => /^\d+ selected/.test(e.textContent ?? '') && e.children.length === 0)
+      const r = line?.parentElement?.getBoundingClientRect()
+      const card = document.querySelector('[data-card-key="subject"]')!.getBoundingClientRect()
+      return r ? { y: r.y, height: r.height, cardWidth: card.width } : null
+    })) as { y: number; height: number; cardWidth: number } | null
+    expect(block).not.toBeNull()
+    if (block!.cardWidth >= 540) {
+      expect(s.x, 'stats left of Prep offer').toBeLessThan(prep.x)
+      expect(prep.y, 'beside the stats, not under them').toBeLessThan(block!.y + block!.height - 4)
+    } else {
+      // A narrow card puts the buttons under the stats, still inside the same foot strip
+      expect(prep.y, 'under the stats').toBeGreaterThan(s.y)
+    }
+  })
+
   test('there is no comp rules line on the subject card', WEB, async (fx) => {
     const { screen } = fx
     await openLoadedSearch(fx)

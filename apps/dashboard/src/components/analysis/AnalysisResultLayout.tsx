@@ -2,9 +2,10 @@
 
 import type { OfferWorkflow } from '@/lib/client-api'
 import { Loader2 } from 'lucide-react'
+import { useState } from 'react'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useEvaluation } from '@/hooks/use-evaluation'
-import { ComparablesSection } from './ComparablesSection'
+import { ComparablesSection, type CompSelectionStats } from './ComparablesSection'
 import { DecisionTrail } from './DecisionTrail'
 import { DealSummaryHero } from './DealSummaryHero'
 import { DealActions } from './DealActions'
@@ -71,6 +72,23 @@ export function AnalysisResultLayout({
   const selectedCompKeys = compOverride?.selectedCompKeys
   const isManual = compOverride?.isManual ?? false
 
+  // The comp selection stats ("5 selected · 25 excluded · $241/sf avg · $320k to $410k") are
+  // calculated by the comps section for the tier on screen and drawn at the foot of the subject card.
+  const [compStats, setCompStats] = useState<CompSelectionStats | null>(null)
+  const priceRange = compStats && compStats.priceMin != null && compStats.priceMax != null && compStats.priceMin !== compStats.priceMax
+    ? `$${(compStats.priceMin / 1000).toFixed(0)}k to $${(compStats.priceMax / 1000).toFixed(0)}k`
+    : null
+  const statsNode = compStats ? (
+    <div className="text-[11px] leading-snug tabular-nums text-foreground-tertiary">
+      <div>
+        {compStats.selected} selected
+        {compStats.excluded > 0 && ` · ${compStats.excluded} excluded`}
+      </div>
+      {compStats.avgPsf != null && <div>${compStats.avgPsf}/sf avg</div>}
+      {priceRange && <div>{priceRange}</div>}
+    </div>
+  ) : null
+
   return (
     <>
       {/* Subject property */}
@@ -79,8 +97,10 @@ export function AnalysisResultLayout({
           subject={subject}
           isLoading={isStreaming}
           footer={subjectExtras}
+          stats={statsNode}
           actions={valuation ? (
             <DealActions
+              bare
               offerPrice={valuation.wholesalePrice ?? valuation.buyPrice}
               onOfferWorkflow={onOfferWorkflow}
               onRerun={onRerun}
@@ -174,6 +194,7 @@ export function AnalysisResultLayout({
       {/* Properties grid (subject + comps) */}
       {comps ? (
         <ComparablesSection
+          onSelectionStats={setCompStats}
           comps={comps}
           subject={subject}
           subjectSubdivision={subject?.subdivision}

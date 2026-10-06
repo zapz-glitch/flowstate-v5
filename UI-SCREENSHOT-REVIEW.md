@@ -55,6 +55,13 @@ cd /tmp && LD_LIBRARY_PATH=$HOME/.local/lib/playwright-deps \
 ## Review template
 
 ```
+### 2026-10-06 — Comp stats moved into the subject card foot
+Screenshots: `m1`, `m2`, `m3` (light 1440, dark 1440, light 1280, light 390)
+Requirement: move "5 selected · 25 excluded · $241/sf avg · $320k to $410k" next to Prep offer, in the small strip at the bottom of the subject card.
+Defects found while verifying: first try put the buttons on a second row under the stats at 1440; two-line stats were still 8px too wide. Fixed by trimming button padding and splitting the stats into three short lines. At 1280 the card is narrower, so the buttons sit under the stats inside the same strip.
+Tests: unit 19 files pass (new card-foot and `bare` tests); e2e 27 of 27, twice.
+Gate: dark checked at 1440; phone width shows no sideways scroll.
+
 ### <date> — <component / page>
 Screenshots: before <path> · after <path> · narrow <path> · dark <path>
 Requirement:

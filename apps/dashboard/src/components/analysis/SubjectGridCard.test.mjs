@@ -90,7 +90,7 @@ test('Condition starts under Sq Ft and spans two columns so it is never cut shor
 test('the actions render at the foot of the card, after the details', () => {
   const out = render(base, { actions: h('button', null, 'Prep offer') })
   assert.ok(out.indexOf('Prep offer') > out.indexOf('Light Cosmetic'))
-  assert.ok(out.endsWith('</button></div>'), 'last thing inside the card')
+  assert.ok(out.endsWith('</button></div></div>'), 'the buttons are the last thing inside the card, in the foot strip')
 })
 
 test('no comp rules line on the card', () => {
@@ -124,4 +124,20 @@ test('with no location at all the photo is not a link', () => {
   const out = render({ ...base, address: undefined, latitude: null, longitude: null })
   assert.doesNotMatch(out, /Open Street View/)
   assert.match(out, /data-stub="photo"/)
+})
+
+test('the foot of the card holds the comp stats on the left and the deal buttons on the right, in one strip', () => {
+  const out = render(base, { stats: h('span', null, 'STATS'), actions: h('span', null, 'ACTIONS') })
+  const strip = out.indexOf('border-t border-border/60')
+  assert.ok(strip > -1, 'a foot strip is drawn')
+  assert.ok(out.indexOf('STATS') > strip && out.indexOf('ACTIONS') > out.indexOf('STATS'), 'stats first, then actions, inside the strip')
+  assert.equal(count(out, 'border-border/60'), 1, 'one strip, not two')
+})
+
+test('with neither stats nor actions the foot strip is not drawn', () => {
+  assert.doesNotMatch(render(base), /border-border\/60/)
+})
+
+test('with only the stats, the foot strip still shows them', () => {
+  assert.match(render(base, { stats: h('span', null, 'STATS') }), /border-border\/60[\s\S]*STATS/)
 })
