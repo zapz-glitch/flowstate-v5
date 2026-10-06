@@ -2421,7 +2421,19 @@ export class AnalysisJobDO {
       deadlineAt: deadline,
       parkedAt: now,
       updatedAt: now,
-    }).onConflictDoNothing()
+    }).onConflictDoUpdate({
+      target: harnessQueue.jobId,
+      set: {
+        status: 'awaiting_agent',
+        claimedBy: null,
+        claimedAt: null,
+        leaseExpiresAt: null,
+        rounds: 0,
+        deadlineAt: deadline,
+        parkedAt: now,
+        updatedAt: now,
+      },
+    })
   }
 
   /** Mirror the terminal outcome onto the queue row (complete | error). */
@@ -2512,8 +2524,6 @@ export class AnalysisJobDO {
         apiCallStatsJson: resp?.apiCallStats ? JSON.stringify(resp.apiCallStats) : null,
       })
 
-      await this.dequeueHarnessJob(config, outcome.status === 'completed' ? 'complete' : 'error').catch(() => { /* queue mirror is best-effort */ })
-
       // Basin lake — land every analysis outcome as an Iceberg row for the
       // calibration/fine-tune corpus. Non-fatal: a stream failure must never
       // touch the analysis path.
@@ -2560,6 +2570,10 @@ export class AnalysisJobDO {
       }
     } catch (err) {
       console.warn('[AnalysisJobDO] recordRun failed (non-fatal):', err instanceof Error ? err.message : err)
+    } finally {
+      // Terminal outcome → mirror onto the queue row even when persistence
+      // above failed, else a finished job stays claimable forever.
+      await this.dequeueHarnessJob(config, outcome.status === 'completed' ? 'complete' : 'error').catch(() => { /* queue mirror is best-effort */ })
     }
 
     // Terminal state → tell the engine so underwriting→Give Offer moves

@@ -752,10 +752,26 @@ analyze.get('/jobs/:jobId/harness/evidence', async (c) => {
 analyze.post('/jobs/:jobId/harness/selection', async (c) => {
   const ownership = await harnessOwnerCheck(c, c.req.param('jobId'));
   if (ownership instanceof Response) return ownership;
+  // Lease gate: when a live claim exists, only the lease holder may verdict —
+  // drainers share one API user, so ownership alone can't isolate them.
+  const rawBody = await c.req.text();
+  const body = (() => { try { return JSON.parse(rawBody) as { agent?: string }; } catch { return null; } })();
+  if (body) {
+    const db = drizzle(c.env.DB);
+    const now = new Date().toISOString();
+    const [row] = await db
+      .select({ status: harnessQueue.status, claimedBy: harnessQueue.claimedBy, leaseExpiresAt: harnessQueue.leaseExpiresAt })
+      .from(harnessQueue)
+      .where(and(eq(harnessQueue.jobId, c.req.param('jobId')), eq(harnessQueue.userId, c.get('auth').userId)))
+      .limit(1);
+    if (row?.status === 'claimed' && row.leaseExpiresAt && row.leaseExpiresAt > now && row.claimedBy !== body.agent) {
+      return c.json({ success: false, error: 'Job claimed by another agent' }, 409);
+    }
+  }
   const resp = await ownership.fetch('http://internal/harness/selection', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: await c.req.text(),
+    body: rawBody,
   });
   const text = await resp.text();
   return new Response(text, { status: resp.status, headers: { 'Content-Type': 'application/json' } });
@@ -833,6 +849,7 @@ analyze.post('/jobs/:jobId/harness/claim', async (c) => {
   const auth = c.get('auth');
   const jobId = c.req.param('jobId');
   const body = await c.req.json<{ agent?: string }>().catch(() => ({} as { agent?: string }));
+  const agent = typeof body.agent === 'string' && body.agent.trim() ? body.agent.trim().slice(0, 64) : 'drainer';
   const db = drizzle(c.env.DB);
   const now = new Date().toISOString();
   const lease = new Date(Date.now() + 10 * 60 * 1000).toISOString();
@@ -840,7 +857,7 @@ analyze.post('/jobs/:jobId/harness/claim', async (c) => {
     .update(harnessQueue)
     .set({
       status: 'claimed',
-      claimedBy: body.agent ?? 'drainer',
+      claimedBy: agent,
       claimedAt: now,
       leaseExpiresAt: lease,
       updatedAt: now,
@@ -850,14 +867,14 @@ analyze.post('/jobs/:jobId/harness/claim', async (c) => {
       eq(harnessQueue.userId, auth.userId),
       or(
         eq(harnessQueue.status, 'awaiting_agent'),
-        lt(harnessQueue.leaseExpiresAt, now),
+        and(eq(harnessQueue.status, 'claimed'), lt(harnessQueue.leaseExpiresAt, now)),
       ),
     ))
     .run();
   if ((res.meta?.changes ?? 0) === 0) {
     return c.json({ success: false, error: 'Job not claimable (not parked or lease held)' }, 409);
   }
-  return c.json({ success: true, data: { jobId, claimedBy: body.agent ?? 'drainer', leaseExpiresAt: lease } });
+  return c.json({ success: true, data: { jobId, claimedBy: agent, leaseExpiresAt: lease } });
 });
 
 export default analyze;
