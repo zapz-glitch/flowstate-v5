@@ -84,14 +84,46 @@ describe('Property Search with a report loaded', () => {
     }
   })
 
-  test('the comp rules live inside the subject card, not elsewhere', WEB, async (fx) => {
-    const { screen, browser } = fx
+  test('the five deal buttons are one horizontal row', WEB, async (fx) => {
+    const { browser } = fx
     await openLoadedSearch(fx)
     const card = browser.locator('[data-card-key="subject"]')
-    // A run that used strict rules or had no rule data shows no line at all
-    const inCard = await card.getByText('Comp rules').count()
-    const onPage = await screen.getByText('Comp rules').count()
-    expect(onPage, 'every "Comp rules" line is inside the subject card').toBe(inCard)
+    const labels = ['Prep offer', 'No margin', 'No offer', 'Re-run', 'Evaluation Settings']
+    const boxes: Rect[] = []
+    for (const label of labels) boxes.push((await card.getByRole('button', label).boundingBox()) as Rect)
+    for (const box of boxes) expect(Math.abs(box.y - boxes[0].y), 'same row').toBeLessThan(4)
+    for (let i = 1; i < boxes.length; i++) expect(boxes[i].x, 'left to right, in order').toBeGreaterThan(boxes[i - 1].x)
+  })
+
+  test('there is no comp rules line on the subject card', WEB, async (fx) => {
+    const { screen } = fx
+    await openLoadedSearch(fx)
+    await expect(screen.getByText('Comp rules')).toHaveCount(0)
+  })
+
+  test('the valuation header carries the costs, right-aligned, and List is not repeated', WEB, async (fx) => {
+    const { screen, browser } = fx
+    await openLoadedSearch(fx)
+    const close = (await screen.getByText('Close $', { exact: false }).boundingBox()) as Rect
+    const carry = (await screen.getByText('Carry $', { exact: false }).boundingBox()) as Rect
+    const invest = (await screen.getByText('Invest $', { exact: false }).boundingBox()) as Rect
+    const wholesale = (await screen.getByText('Wholesale $', { exact: false }).boundingBox()) as Rect
+    // Close at the left of the line, Wholesale at the right, all on one row
+    expect(close.x).toBeLessThan(carry.x)
+    expect(carry.x).toBeLessThan(invest.x)
+    expect(invest.x).toBeLessThan(wholesale.x)
+    for (const box of [carry, invest, wholesale]) expect(Math.abs(box.y - close.y)).toBeLessThan(4)
+    // Right-aligned: Wholesale ends at the right edge of the valuation box
+    const gapToEdge = (await browser.evaluate(() => {
+      const span = [...document.querySelectorAll('span')].find((e) => e.textContent?.startsWith('Wholesale $'))
+      const box = span?.closest('.border.rounded-sm') as HTMLElement | null
+      if (!span || !box) return -1
+      return Math.round(box.getBoundingClientRect().right - span.getBoundingClientRect().right)
+    })) as number
+    expect(gapToEdge, 'Wholesale sits at the right edge of the valuation box').toBeGreaterThanOrEqual(0)
+    expect(gapToEdge).toBeLessThanOrEqual(16)
+    // The old footer repeated the list price; it is already the List tile
+    await expect(screen.getByText('List $', { exact: false })).toHaveCount(0)
   })
 
   test('Condition sits under Sq Ft', WEB, async (fx) => {

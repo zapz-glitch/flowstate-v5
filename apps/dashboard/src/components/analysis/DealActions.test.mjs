@@ -26,19 +26,16 @@ test('all five actions are present, decisions before tools', () => {
 
 const dividers = (out) => (out.match(/w-px h-3 bg-border/g) ?? []).length
 
-test('spanning strip has its own top border and a divider between decisions and tools, and between the tools', () => {
+test('the strip has its own top border and a divider between decisions and tools, and between the tools', () => {
   const out = render(all)
   assert.match(out, /border-t/)
   assert.equal(dividers(out), 2)
 })
 
-test('stacked: no border and no divider between decisions and tools; wraps to two lines at the right', () => {
-  const out = render({ ...all, stacked: true })
-  assert.doesNotMatch(out, /border-t/)
-  // The line break separates decisions from tools; only Re-run | Evaluation Settings keeps its divider
-  assert.equal(dividers(out), 1)
-  assert.match(out, /basis-\[13rem\]/)
-  assert.match(out, /ml-auto/)
+test('the five actions sit in one horizontal row at the right', () => {
+  const out = render(all)
+  assert.match(out, /flex flex-wrap items-center justify-end/)
+  assert.doesNotMatch(out, /flex-col/)
 })
 
 test('Prep offer is disabled when there is no offer price, enabled and priced otherwise', () => {

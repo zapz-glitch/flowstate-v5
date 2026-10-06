@@ -67,6 +67,14 @@ Gate: <n>/21 checked. Unchecked and why:
 
 Newest first.
 
+### 2026-10-05 — Comp rules off the subject card, one-row buttons, costs line into the valuation header
+Screenshots: `after10-search-{light,dark}-1440`, `after10-search-light-1100`, `after10-search-light-390`
+Requirement: remove the comp rules from the subject card; the five deal buttons in one horizontal row; move "Close / Carry / Invest / Wholesale" into the valuation header, right-aligned (Close left, Wholesale right); drop List from it (it is already the List tile).
+Done: rules line and its plumbing removed (the comp rules are no longer shown anywhere on the page); `DealActions` is back to a single row (stacked mode removed); the costs line is in the valuation header at the right; the footer is gone, so the map and tiles gained its height.
+At 1100px wide the card is too narrow for five buttons in one row (about 395px needed, 343px available) so they wrap to two lines there; at 1440 they are one row.
+Tests: unit (SubjectGridCard, DealActions) updated; e2e adds "five buttons are one row", "no comp rules line", "valuation header carries the costs, right-aligned, List not repeated". 116 unit and 21 e2e pass.
+Gate: 20/21 (hover on the buttons unchanged).
+
 ### 2026-10-05 — Tests and push
 Verification: types clean, lint clean, unit 19 files / 116 tests passing, end-to-end 19 of 19 passing against the branch dev server. Mutation check: with the original instant-close dialog behavior put back, the end-to-end fade test fails; with the fix it passes.
 Found by the tests: sale dates one day early in US time zones (fixed).

@@ -21,17 +21,15 @@ interface DealActionsProps {
   /** True while a rerun is in flight */
   rerunning?: boolean
   onOpenSettings?: () => void
-  /** Sits beside other content instead of spanning the card: no border, wraps to two lines at the right */
-  stacked?: boolean
   className?: string
 }
 
 /**
- * What you can do with the deal, in one row at the right of the subject card's
- * foot: decide (prep offer, no margin, no offer), then tools (re-run,
+ * What you can do with the deal, in one horizontal row at the right of the subject
+ * card's foot: decide (prep offer, no margin, no offer), then tools (re-run,
  * evaluation settings), set apart by a thin line.
  */
-export function DealActions({ offerPrice, onOfferWorkflow, onRerun, rerunning, onOpenSettings, stacked = false, className }: DealActionsProps) {
+export function DealActions({ offerPrice, onOfferWorkflow, onRerun, rerunning, onOpenSettings, className }: DealActionsProps) {
   // Offer-button state machine: idle (buttons) → busy → done (result
   // chip) → back to idle. Everything crossfades via animate-in/fade-in.
   // Both workflows dispatch immediately — no price editing.
@@ -59,8 +57,7 @@ export function DealActions({ offerPrice, onOfferWorkflow, onRerun, rerunning, o
   return (
     <div
       className={cn(
-        'flex flex-wrap items-center justify-end gap-x-1 gap-y-0.5 no-print',
-        stacked ? 'ml-auto basis-[13rem] shrink-0' : 'border-t border-border/60 px-3 py-1',
+        'flex flex-wrap items-center justify-end gap-x-1 gap-y-0.5 border-t border-border/60 px-3 py-1 no-print',
         className,
       )}
     >
@@ -111,7 +108,7 @@ export function DealActions({ offerPrice, onOfferWorkflow, onRerun, rerunning, o
           )
         )}
       </div>
-      {!stacked && onOfferWorkflow && (onRerun || onOpenSettings) && <span className={DIVIDER} aria-hidden />}
+      {onOfferWorkflow && (onRerun || onOpenSettings) && <span className={DIVIDER} aria-hidden />}
       <div className="flex flex-wrap items-center justify-end gap-1">
         {onRerun && (
           <button

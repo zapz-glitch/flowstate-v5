@@ -13,17 +13,6 @@ import { InvestorAnalysisSummary } from './InvestorAnalysisSummary'
 
 // ─── Analysis Result Layout ──────────────────────────────────────────────────
 
-const compactConcession = (text: string): string => {
-  const value = text.match(/(?:to|of)\s+±?\$?([\d,.]+)/)?.[1]?.replace(/,/g, '')
-  const n = value ? Number(value) : null
-  if (text.includes('sale age') && n != null) return `Age ≤${Math.round(n)}d`
-  if (text.includes('sqft tolerance') && n != null) return `Size ±${Math.round(n).toLocaleString()}sf`
-  if (text.includes('year built') && n != null) return `Year ±${Math.round(n)}y`
-  if (text.includes('distance') && n != null) return `Dist ≤${Math.round(n * 10) / 10}mi`
-  if (text.includes('lot size') && n != null) return `Lot ±${Math.round(n).toLocaleString()}sf`
-  return text.split(' (was ')[0]
-}
-
 export interface AnalysisResultLayoutProps {
   /** Map-list hover sync (local to map view, not in atoms) */
   onCompHover?: (key: string | null) => void
@@ -82,18 +71,6 @@ export function AnalysisResultLayout({
   const selectedCompKeys = compOverride?.selectedCompKeys
   const isManual = compOverride?.isManual ?? false
 
-  // The comp rules this run used, titled, bottom of the subject card, above the actions. The
-  // server's grade sentence stays server-side; only the rules are shown.
-  const concessions = comps?.retrieval?.paramFlex?.concessions ?? []
-  const rulesNote = subject && !isStreaming && comps?.insufficientComps !== true && comps?.retrieval?.paramFlex != null ? (
-    <div className="text-[11px] leading-snug tabular-nums">
-      <span className="font-semibold text-foreground">Comp rules</span>
-      <span className="ml-2 text-foreground-secondary">
-        {concessions.length > 0 ? concessions.map(compactConcession).join(' · ') : 'Strict rules'}
-      </span>
-    </div>
-  ) : null
-
   return (
     <>
       {/* Subject property */}
@@ -102,10 +79,8 @@ export function AnalysisResultLayout({
           subject={subject}
           isLoading={isStreaming}
           footer={subjectExtras}
-          rules={rulesNote}
           actions={valuation ? (
             <DealActions
-              stacked
               offerPrice={valuation.wholesalePrice ?? valuation.buyPrice}
               onOfferWorkflow={onOfferWorkflow}
               onRerun={onRerun}

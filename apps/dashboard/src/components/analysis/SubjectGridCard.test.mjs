@@ -87,23 +87,18 @@ test('Condition starts under Sq Ft and spans two columns so it is never cut shor
   assert.match(out, /Light Cosmetic/)
 })
 
-test('the foot strip holds the rules on the left and the actions on the right', () => {
-  const out = render(base, {
-    rules: h('span', null, 'Comp rules Age ≤207d'),
-    actions: h('button', null, 'Prep offer'),
-  })
-  assert.match(out, /border-t border-border\/60 px-4 py-1/)
-  assert.ok(out.indexOf('Comp rules') < out.indexOf('Prep offer'))
-  assert.match(out, /min-w-\[14rem\] flex-1/, 'rules column has a minimum width so a narrow card wraps it')
+test('the actions render at the foot of the card, after the details', () => {
+  const out = render(base, { actions: h('button', null, 'Prep offer') })
+  assert.ok(out.indexOf('Prep offer') > out.indexOf('Light Cosmetic'))
+  assert.ok(out.endsWith('</button></div>'), 'last thing inside the card')
 })
 
-test('no rules and no actions means no foot strip at all', () => {
-  assert.doesNotMatch(render(base), /border-t border-border\/60 px-4 py-1/)
+test('no comp rules line on the card', () => {
+  assert.doesNotMatch(render(base), /Comp rules/)
 })
 
-test('actions alone still get the strip', () => {
-  const out = render(base, { actions: h('button', null, 'Re-run') })
-  assert.match(out, /border-t border-border\/60 px-4 py-1/)
+test('with no actions there is nothing at the foot', () => {
+  assert.doesNotMatch(render(base), /Prep offer|Re-run|Evaluation Settings/)
 })
 
 test('the photo strip uses compact thumbnails', () => {

@@ -14,13 +14,11 @@ interface SubjectGridCardProps {
   isLoading?: boolean
   /** Extra lines inside the card, under the facts (flood risk) */
   footer?: React.ReactNode
-  /** Left side of the card's foot strip · the comp rules this run used */
-  rules?: React.ReactNode
-  /** Right side of the card's foot strip · the deal actions */
+  /** Foot of the card · the deal actions, one horizontal row */
   actions?: React.ReactNode
 }
 
-export function SubjectGridCard({ subject, isLoading, footer, rules, actions }: SubjectGridCardProps) {
+export function SubjectGridCard({ subject, isLoading, footer, actions }: SubjectGridCardProps) {
   // Only geography we actually have · an empty value says nothing, so it is not drawn.
   const blockGroup = formatBlockGroup(subject.censusBlockGroup)
   // One name for the area · the neighborhood, or the subdivision when the
@@ -163,14 +161,7 @@ export function SubjectGridCard({ subject, isLoading, footer, rules, actions }: 
           </div>
         </div>
       </div>
-      {/* Foot of the card: the comp rules on the left, the deal actions on the right, one strip */}
-      {(rules || actions) && (
-        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 border-t border-border/60 px-4 py-1">
-          {/* min width: on a narrow card the rules drop to their own line instead of breaking mid-phrase */}
-          {rules && <div className="min-w-[14rem] flex-1">{rules}</div>}
-          {actions}
-        </div>
-      )}
+      {actions}
     </div>
   )
 }

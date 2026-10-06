@@ -56,6 +56,14 @@ export function DealSummaryHero({ valuation, isRecalculated, disposition }: Deal
             </span>
           )}
         </div>
+        {/* Costs, right-aligned: Close at the left of the line, Wholesale at the right.
+            List price is not repeated here · it is already the List tile below. */}
+        <div className="ml-auto flex flex-wrap items-center justify-end gap-x-3 gap-y-0.5 text-[10px] tabular-nums text-foreground-tertiary/70">
+          {valuation.closingCosts != null && <span>Close ${fmtK(valuation.closingCosts)}</span>}
+          {valuation.carryingCosts != null && <span>Carry ${fmtK(valuation.carryingCosts)}</span>}
+          {valuation.totalInvestment != null && <span>Invest ${fmtK(valuation.totalInvestment)}</span>}
+          {valuation.wholesalePrice != null && <span>Wholesale ${formatHeadlineMoney(valuation.wholesalePrice, valuation.displayedWholesalePrice, valuation.displayRounding)}</span>}
+        </div>
       </div>
 
       {/* Primary metrics grid */}
@@ -181,15 +189,6 @@ export function DealSummaryHero({ valuation, isRecalculated, disposition }: Deal
           <div className={cn('text-base font-bold tabular-nums mt-0.5', (valuation.projectedProfit ?? 0) > 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400')}>${fmtK(valuation.projectedProfit)}</div>
           {valuation.projectedROI != null && <div className="text-[10px] text-foreground-tertiary tabular-nums mt-0.5">{fmt(valuation.projectedROI)}% ROI</div>}
         </div>
-      </div>
-
-      {/* Footer: secondary costs */}
-      <div className="px-3 py-1.5 border-t border-border/30 flex items-center gap-3 text-[10px] tabular-nums text-foreground-tertiary/70">
-        {valuation.closingCosts != null && <span>Close ${fmtK(valuation.closingCosts)}</span>}
-        {valuation.carryingCosts != null && <span>Carry ${fmtK(valuation.carryingCosts)}</span>}
-        {valuation.totalInvestment != null && <span>Invest ${fmtK(valuation.totalInvestment)}</span>}
-        {valuation.listPrice != null && <span>List ${fmtK(valuation.listPrice)}</span>}
-        {valuation.wholesalePrice != null && <span>Wholesale ${formatHeadlineMoney(valuation.wholesalePrice, valuation.displayedWholesalePrice, valuation.displayRounding)}</span>}
       </div>
     </div>
   )
