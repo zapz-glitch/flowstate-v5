@@ -6,9 +6,20 @@ import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import * as VisuallyHidden from '@radix-ui/react-visually-hidden'
 import { cn } from '@/lib/utils'
 
-export function PhotoGallery({ photos, className, children }: { photos: string[]; className?: string; children?: React.ReactNode }) {
+/** The thumbnails to draw: the first six photos, minus any that failed to load.
+ *  Failed photos are dropped, not hidden, so they leave no gap behind. */
+export function visibleThumbnails(photos: string[], failed: ReadonlySet<number>): Array<{ photo: string; i: number }> {
+  return photos.slice(0, 6).map((photo, i) => ({ photo, i })).filter(({ i }) => !failed.has(i))
+}
+
+export function PhotoGallery({ photos, className, children, compact = false }: { photos: string[]; className?: string; children?: React.ReactNode; compact?: boolean }) {
+  // compact: smaller thumbnails for tight cards
+  const thumb = compact ? 'w-14 h-10' : 'w-20 h-14'
   const [lightboxOpen, setLightboxOpen] = useState(false)
   const [currentIndex, setCurrentIndex] = useState(0)
+  // Photos that failed to load are dropped, not hidden: a hidden thumbnail
+  // still takes a flex gap and pushes the visible ones off the left edge.
+  const [failed, setFailed] = useState<ReadonlySet<number>>(new Set())
 
   const goToPrevious = () => {
     setCurrentIndex((prev) => (prev === 0 ? photos.length - 1 : prev - 1))
@@ -31,12 +42,15 @@ export function PhotoGallery({ photos, className, children }: { photos: string[]
 
   const hasPhotos = photos && photos.length > 0
 
+  const shown = hasPhotos ? visibleThumbnails(photos, failed) : []
+
   if (!hasPhotos && !children) return null
+  if (shown.length === 0 && photos.length <= 6 && !children) return null
 
   return (
     <>
       <div className={cn('flex gap-1.5 overflow-x-auto pb-1 items-center', className)}>
-        {hasPhotos && photos.slice(0, 6).map((photo, i) => (
+        {shown.map(({ photo, i }) => (
           <button
             key={i}
             onClick={() => { setCurrentIndex(i); setLightboxOpen(true) }}
@@ -46,15 +60,15 @@ export function PhotoGallery({ photos, className, children }: { photos: string[]
               src={photo}
               alt={`Photo ${i + 1}`}
               referrerPolicy="no-referrer"
-              className="w-20 h-14 object-cover transition-transform group-hover:scale-105"
-              onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
+              className={cn(thumb, 'object-cover transition-transform group-hover:scale-105')}
+              onError={() => setFailed((prev) => new Set(prev).add(i))}
             />
           </button>
         ))}
         {hasPhotos && photos.length > 6 && (
           <button
             onClick={() => { setCurrentIndex(6); setLightboxOpen(true) }}
-            className="w-20 h-14 rounded-lg border border-border flex items-center justify-center text-caption text-foreground-tertiary flex-shrink-0 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors"
+            className={cn(thumb, 'rounded-lg border border-border flex items-center justify-center text-caption text-foreground-tertiary flex-shrink-0 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors')}
           >
             +{photos.length - 6}
           </button>

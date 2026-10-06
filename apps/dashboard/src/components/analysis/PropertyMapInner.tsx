@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react'
 import { APIProvider, Map, useApiIsLoaded, useMap } from '@vis.gl/react-google-maps'
-import { Crosshair, PersonStanding, Plus, Minus, RotateCcw, ArrowLeft } from 'lucide-react'
 import { resolvePropertyLocation, resolveSubjectPanorama } from '@/lib/resolve-property-map'
 import type { MapCoordinate } from '@/lib/property-map-geometry'
 import { SubjectAerialMap, type SubjectAerialMapHandle } from './SubjectAerialMap'
@@ -67,6 +66,13 @@ function FlatMarkers({ markers, activeMarkerKey, onMarkerClick }: {
 }) {
   const map = useMap()
   const instances = useRef<Array<{ marker: MapMarker; instance: google.maps.Marker }>>([])
+  // Icons are SVG strings turned into data URLs · build each (marker, active) pair once
+  const iconCache = useRef<Record<string, ReturnType<typeof markerIcon>>>({})
+  const iconFor = (marker: MapMarker, active: boolean, index: number) => {
+    const cacheKey = `${index}|${active ? 1 : 0}`
+    return (iconCache.current[cacheKey] ??= markerIcon(marker, active, index))
+  }
+  const previousActive = useRef<string | null | undefined>(undefined)
   const activeKey = useRef(activeMarkerKey)
   activeKey.current = activeMarkerKey
   // Hover opens the comp detail once, then stays quiet until the pointer has
@@ -89,10 +95,12 @@ function FlatMarkers({ markers, activeMarkerKey, onMarkerClick }: {
       if (origin && Math.hypot(event.clientX - origin.x, event.clientY - origin.y) > REARM_DISTANCE) openedAt.current = null
     }
     container.addEventListener('mousemove', track, true)
+    iconCache.current = {}
     instances.current = markers.map((marker, index) => {
       const instance = new google.maps.Marker({
-        map, position: marker, title: marker.label,
-        icon: markerIcon(marker, markerKey(marker) === activeKey.current, index),
+        // Comp markers show our own hover panel · a browser tooltip beside it only gets in the way
+        map, position: marker, title: marker.type === 'subject' ? marker.label : undefined,
+        icon: iconFor(marker, markerKey(marker) === activeKey.current, index),
         label: marker.type === 'subject' ? { text: 'S', color: '#fff', fontSize: '10px' } : undefined,
         zIndex: marker.type === 'subject' ? 100 : 10,
       })
@@ -119,9 +127,16 @@ function FlatMarkers({ markers, activeMarkerKey, onMarkerClick }: {
     }
   }, [map, markers, onMarkerClick])
 
-  // Highlight (card hover, selection) only restyles the existing markers.
+  // Highlight (card hover, selection) restyles only the two markers that change:
+  // the one that just lost the highlight and the one that just gained it.
   useEffect(() => {
-    instances.current.forEach(({ marker, instance }, index) => instance.setIcon(markerIcon(marker, markerKey(marker) === activeMarkerKey, index)))
+    const previous = previousActive.current
+    previousActive.current = activeMarkerKey
+    instances.current.forEach(({ marker, instance }, index) => {
+      const key = markerKey(marker)
+      if (key === activeMarkerKey || key === previous) instance.setIcon(iconFor(marker, key === activeMarkerKey, index))
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeMarkerKey, markers, map])
   return null
 }
@@ -132,6 +147,27 @@ function NativeMapCamera({ mapRef }: { mapRef: MutableRefObject<google.maps.Map 
     mapRef.current = map
     return () => { if (mapRef.current === map) mapRef.current = null }
   }, [map, mapRef])
+  return null
+}
+
+// Right-click leaves full screen. Outside full screen the browser menu is untouched.
+function FullscreenRightClickExit() {
+  const map = useMap()
+  useEffect(() => {
+    if (!map) return
+    const container = map.getDiv()
+    const onContextMenu = (event: MouseEvent) => {
+      const full = document.fullscreenElement
+      // Only the map's own full screen · the fullscreen element is the map div
+      // or a wrapper around it, depending on how the map was mounted.
+      if (!full || !(full.contains(container) || container.contains(full))) return
+      event.preventDefault()
+      event.stopPropagation()
+      void document.exitFullscreen()
+    }
+    document.addEventListener('contextmenu', onContextMenu, true)
+    return () => document.removeEventListener('contextmenu', onContextMenu, true)
+  }, [map])
   return null
 }
 
@@ -222,7 +258,8 @@ function SubjectMap({ markers, onMarkerClick, activeMarkerKey }: PropertyMapInne
   const [view, setView] = useState<'loading' | 'street' | 'aerial'>('loading')
   const [streetStatus, setStreetStatus] = useState('Checking subject location…')
   const [threeD, setThreeD] = useState<'loading' | 'ready' | 'unavailable'>('loading')
-  const [mapStyle, setMapStyle] = useState<'roadmap' | 'hybrid' | '3d'>('hybrid')
+  // Satellite only · the layer buttons are gone; the 3D and Street View paths below are no longer reachable from the UI
+  const [mapStyle] = useState<'roadmap' | 'hybrid' | '3d'>('hybrid')
   const nativeMap = useRef<google.maps.Map | null>(null)
   const aerial = useRef<SubjectAerialMapHandle>(null)
   const streetView = useRef<google.maps.StreetViewPanorama | null>(null)
@@ -244,8 +281,8 @@ function SubjectMap({ markers, onMarkerClick, activeMarkerKey }: PropertyMapInne
       const resolved = geocoding ? await resolvePropertyLocation(original.label, coordinate) : { coordinate, addressMatched: false }
       if (cancelled) return
       setLocation(resolved)
-      // Satellite map is the standard view — Street View stays one click away
-      // once the panorama resolves below.
+      // Satellite map is the standard view. Street View is reached by zooming
+      // the 3D map in to street level (see onStreetView).
       if (!viewChoice.current) setView('aerial')
       setStreetStatus('Looking for nearby Street View…')
       const nearby = await streetLibrary ? await resolveSubjectPanorama(resolved.coordinate) : null
@@ -290,37 +327,9 @@ function SubjectMap({ markers, onMarkerClick, activeMarkerKey }: PropertyMapInne
     () => markers.map(marker => marker.type === 'subject' && location ? { ...marker, ...location.coordinate } : marker),
     [markers, location],
   )
-  const zoomBy = (direction: 1 | -1) => {
-    if (view === 'street') {
-      const zoom = streetView.current?.getZoom() ?? 0
-      if (direction < 0 && zoom <= 0) backToMap()
-      else streetView.current?.setZoom(Math.max(0, Math.min(3, zoom + direction * 0.5)))
-      return
-    }
-    if (mapStyle === '3d' && threeD === 'ready') aerial.current?.zoomBy(direction)
-    else {
-      const map = nativeMap.current
-      if (map) map.setZoom(Math.min(22, Math.max(3, (map.getZoom() ?? 18) + direction)))
-    }
-  }
-
   if (loadFailed && !loaded) return <div role="status" className="p-4 text-sm">Map could not load. Reload this page to try again.</div>
   return (
     <div className="flex min-h-0 flex-1 flex-col" data-testid="subject-map" data-view={view}>
-      <div className="flex shrink-0 flex-wrap items-center gap-1 border-b border-border bg-background p-2">
-        {view === 'street' ? <button type="button" className={buttonClass} onClick={backToMap}><ArrowLeft size={14} /> Back to map</button>
-          : <button type="button" className={buttonClass} onClick={openStreet} disabled={!panorama}><PersonStanding size={14} /> Street View</button>}
-        <button type="button" className={buttonClass} disabled={!location} onClick={() => { backToMap(); aerial.current?.recenter(); if (location) { nativeMap.current?.panTo(location.coordinate); nativeMap.current?.setZoom(18) } }}><Crosshair size={14} /> Subject</button>
-        <button type="button" className={buttonClass} aria-label="Zoom in" disabled={view === 'loading'} onClick={() => zoomBy(1)}><Plus size={14} /></button>
-        <button type="button" className={buttonClass} aria-label="Zoom out" disabled={view === 'loading'} onClick={() => zoomBy(-1)}><Minus size={14} /></button>
-        <button type="button" className={buttonClass} aria-label="Rotate counterclockwise" title="Rotate N → W → S → E; or double-click the map" disabled={view !== 'aerial' || mapStyle !== '3d' || threeD !== 'ready'} onClick={() => aerial.current?.rotate()}><RotateCcw size={14} /></button>
-        <div className="flex gap-1" role="group" aria-label="Map layers">
-          {([['roadmap', 'Map'], ['hybrid', 'Satellite'], ['3d', '3D']] as const).map(([style, label]) =>
-            <button key={style} type="button" className={`${buttonClass} ${view === 'aerial' && mapStyle === style ? 'border-primary bg-secondary font-semibold' : ''}`} aria-pressed={view === 'aerial' && mapStyle === style} disabled={!location}
-              onClick={() => { setMapStyle(style); backToMap() }}>{label}</button>)}
-        </div>
-        {view === 'loading' && location && <button type="button" className={buttonClass} onClick={backToMap}>Open map</button>}
-      </div>
       <div className="relative min-h-[160px] flex-1 overflow-hidden bg-secondary/30">
         {view === 'street' && panorama && location && <SubjectStreetView viewRef={streetView} panorama={panorama} subject={location.coordinate} onBack={backToMap} onFailure={streetFailed} />}
         {view === 'aerial' && location && (mapStyle === '3d' && threeD === 'ready' ?
@@ -336,6 +345,7 @@ function SubjectMap({ markers, onMarkerClick, activeMarkerKey }: PropertyMapInne
             isFractionalZoomEnabled tilt={0} gestureHandling="greedy" clickableIcons keyboardShortcuts
             zoomControl mapTypeControl={false} streetViewControl={false} fullscreenControl fullscreenControlOptions={{ position: google.maps.ControlPosition.LEFT_TOP }} scaleControl>
             <NativeMapCamera mapRef={nativeMap} />
+            <FullscreenRightClickExit />
             <FlatMarkers markers={correctedMarkers} activeMarkerKey={activeMarkerKey} onMarkerClick={selectMarker} />
           </Map> : <div role="status" className="p-4 text-sm">Loading 3D map…</div>)}
         {view === 'aerial' && (mapStyle !== '3d' || threeD !== 'loading') && <MapLegend />}

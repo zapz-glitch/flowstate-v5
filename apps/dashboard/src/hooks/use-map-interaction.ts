@@ -12,7 +12,12 @@ import { getCompKey } from '@/components/analysis/format-helpers'
 export function useMapInteraction(getComps: () => CompItem[]) {
   const [activeMarkerKey, setActiveMarkerKey] = useState<string | null>(null)
   const [comparisonComp, setComparisonComp] = useState<CompItem | null>(null)
-  const [comparisonOpen, setComparisonOpen] = useState(false)
+  const [comparisonOpen, setComparisonOpenRaw] = useState(false)
+  // Closing the dialog also clears the highlighted marker (a comp click sets it and nothing else clears it)
+  const setComparisonOpen = useCallback((open: boolean) => {
+    setComparisonOpenRaw(open)
+    if (!open) setActiveMarkerKey(null)
+  }, [])
 
   const scrollAndHighlight = useCallback((key: string) => {
     const el = document.querySelector(`[data-card-key="${key}"]`)

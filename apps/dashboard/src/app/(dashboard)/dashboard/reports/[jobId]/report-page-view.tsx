@@ -38,11 +38,13 @@ import { useMapInteraction } from '@/hooks/use-map-interaction'
 import { useEvaluationSync } from '@/hooks/use-evaluation-sync'
 import { useEnrichmentSSE, type EnrichmentEvent } from '@/hooks/use-enrichment-sse'
 import { getBatchStatus } from '@/lib/batch-client'
+import { usePreloadOnIdle, useStayMounted } from '@/hooks/use-stay-mounted'
 
 const EvaluationSettingsSheet = dynamic(() => import('@/components/report/EvaluationSettingsSheet').then((mod) => mod.EvaluationSettingsSheet))
 const ShareReportDialog = dynamic(() => import('@/components/report/ShareReportDialog').then((mod) => mod.ShareReportDialog))
 const ReportHistoryTimeline = dynamic(() => import('@/components/report/ReportHistoryTimeline').then((mod) => mod.ReportHistoryTimeline))
-const CompComparisonDialog = dynamic(() => import('@/components/analysis/CompComparisonDialog').then((mod) => mod.CompComparisonDialog))
+const loadCompComparisonDialog = () => import('@/components/analysis/CompComparisonDialog')
+const CompComparisonDialog = dynamic(() => loadCompComparisonDialog().then((mod) => mod.CompComparisonDialog))
 
 // ─── Give Offer fallback — queue disposition when the report can't load ────
 
@@ -712,6 +714,12 @@ export function ReportPageView({ params, queue }: {
     [],
   )
 
+  // Overlays are built on first open, then kept mounted so they can animate out
+  const mountSettings = useStayMounted(settingsOpen)
+  const mountShare = useStayMounted(shareOpen)
+  const mountComparison = useStayMounted(comparisonOpen)
+  usePreloadOnIdle(loadCompComparisonDialog)
+
   useEvaluationSync({
     evaluation: { isRecalculated, recalcData, compOverride, handleToggleComp, handleResetComps, handlePinTier },
     subject: analyzeData?.subject,
@@ -896,7 +904,7 @@ export function ReportPageView({ params, queue }: {
         />
 
       {/* Evaluation Settings Sheet */}
-      {settingsOpen && <EvaluationSettingsSheet
+      {mountSettings && <EvaluationSettingsSheet
         open={settingsOpen}
         onOpenChange={setSettingsOpen}
         settingsHook={settingsHook}
@@ -921,14 +929,14 @@ export function ReportPageView({ params, queue }: {
       </Sheet>
 
       {/* Share Dialog */}
-      {shareOpen && <ShareReportDialog
+      {mountShare && <ShareReportDialog
         open={shareOpen}
         onOpenChange={setShareOpen}
         jobId={jobId}
       />}
 
       {/* Subject vs Comp comparison dialog */}
-      {comparisonOpen && <CompComparisonDialog
+      {mountComparison && <CompComparisonDialog
         open={comparisonOpen}
         onOpenChange={setComparisonOpen}
         subject={analyzeData?.subject ?? null}

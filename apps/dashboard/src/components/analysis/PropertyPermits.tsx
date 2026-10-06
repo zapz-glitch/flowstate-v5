@@ -37,7 +37,7 @@ export function PropertyPermits({ permits, loading = false }: { permits: Subject
 
   if (loading && !permits) {
     return (
-      <p className="mt-3 border-t border-border pt-2 text-xs font-medium">
+      <p className="mt-2 border-t border-border pt-1.5 text-xs font-medium">
         <span className="text-foreground-tertiary">Permits</span>{' '}<span className="text-foreground-secondary">Loading…</span>
       </p>
     )
@@ -45,7 +45,7 @@ export function PropertyPermits({ permits, loading = false }: { permits: Subject
 
   if (!items.length) {
     return (
-      <div className="mt-3 border-t border-border pt-2 text-xs">
+      <div className="mt-2 border-t border-border pt-1.5 text-xs">
         <div className="flex items-center justify-between gap-2">
           <p className="font-medium"><span className="text-foreground-tertiary">Permits</span>{' '}<span className="text-foreground">NA</span></p>
           {pullable && canPull && (
@@ -74,7 +74,7 @@ export function PropertyPermits({ permits, loading = false }: { permits: Subject
   const totalValue = items.reduce((sum, p) => sum + (p.jobValue ?? 0), 0)
 
   return (
-    <section aria-label="Property permits" className="mt-3 border-t border-border pt-2 text-xs break-words">
+    <section aria-label="Property permits" className="mt-2 border-t border-border pt-1.5 text-xs break-words">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}

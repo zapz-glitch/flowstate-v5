@@ -73,7 +73,7 @@ export function AnalysisPageLayout({
   onOfferWorkflow,
   disposition,
 }: AnalysisPageLayoutProps) {
-  const { subject, displayComps: comps, compOverride, displayValuation: valuation, isRecalculated, onOpenSettings } = useEvaluation()
+  const { subject, displayComps: comps, compOverride, displayValuation: valuation, isRecalculated } = useEvaluation()
   const selectedCompKeys = compOverride?.selectedCompKeys
   const hasMapData = isValidCoordinate({ lat: subject?.latitude, lng: subject?.longitude })
 
@@ -166,10 +166,6 @@ export function AnalysisPageLayout({
                 <DealSummaryHero
                   valuation={valuation}
                   isRecalculated={isRecalculated}
-                  onOpenSettings={onOpenSettings}
-                  onRerun={onRerun}
-                  rerunning={rerunning}
-                  onOfferWorkflow={onOfferWorkflow}
                   disposition={disposition}
                 />
               </div>

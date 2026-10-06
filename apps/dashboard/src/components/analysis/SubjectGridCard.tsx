@@ -1,7 +1,6 @@
 'use client'
 
 import { MapPin } from 'lucide-react'
-import { cn } from '@/lib/utils'
 import { CopyButton } from '@/components/ui/copy-button'
 import type { SubjectData } from './shared-types'
 import { StreetViewImage } from './StreetViewImage'
@@ -13,16 +12,30 @@ import { PhysicalCharacteristicsLine } from './PhysicalCharacteristicsLine'
 interface SubjectGridCardProps {
   subject: SubjectData
   isLoading?: boolean
-  /** Extra lines inside the card, under the facts (comp rules, flood risk) */
+  /** Extra lines inside the card, under the facts (flood risk) */
   footer?: React.ReactNode
+  /** Left side of the card's foot strip · the comp rules this run used */
+  rules?: React.ReactNode
+  /** Right side of the card's foot strip · the deal actions */
+  actions?: React.ReactNode
 }
 
-export function SubjectGridCard({ subject, isLoading, footer }: SubjectGridCardProps) {
+export function SubjectGridCard({ subject, isLoading, footer, rules, actions }: SubjectGridCardProps) {
   // Only geography we actually have · an empty value says nothing, so it is not drawn.
   const blockGroup = formatBlockGroup(subject.censusBlockGroup)
-  const geography = blockGroup
-    ? [{ label: 'Group', value: blockGroup, title: 'Census block group' }]
-    : []
+  // One name for the area · the neighborhood, or the subdivision when the
+  // neighborhood is missing. Never both.
+  const area = subject.neighborhoodName || subject.subdivision
+  // The headline price and what it is. The last sale gets its own line when
+  // a list price takes the headline.
+  const headline = subject.listPrice ?? subject.lastSale?.price ?? null
+  const lastSaleDate = subject.lastSale?.date ? formatShortDate(subject.lastSale.date) : null
+  const headlineLabel = subject.listPrice != null
+    ? 'List price'
+    : headline != null ? `Last sale${lastSaleDate ? ` · ${lastSaleDate}` : ''}` : null
+  const lastSale = subject.listPrice != null && subject.lastSale?.price ? subject.lastSale : null
+  // Written like a comp's address: street, city, state · no ZIP (the copy button keeps it)
+  const shortAddress = subject.address ? formatAddressCasing(subject.address.replace(/\s+\d{5}(-\d{4})?$/, '')) : null
 
   return (
     <div data-card-key="subject" className="border border-primary/30 rounded-sm overflow-hidden bg-primary/[0.02]">
@@ -46,114 +59,97 @@ export function SubjectGridCard({ subject, isLoading, footer }: SubjectGridCardP
         </div>
 
         {/* Details */}
-        <div className="flex-1 min-w-0 px-4 py-2.5 flex flex-col justify-between">
+        <div className="flex-1 min-w-0 px-4 py-2 flex flex-col justify-between">
           <div>
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <div className="flex items-center gap-1.5">
-                  {subject.address ? (
-                    <a
-                      href={subject.listingUrl ?? `https://www.zillow.com/homes/${encodeURIComponent(subject.address)}_rb/`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-body-sm font-semibold hover:text-primary hover:underline truncate"
-                      title={subject.listingUrl ? 'Open listing' : 'Search on Zillow'}
-                    >
-                      {formatAddressCasing(subject.address)}
-                    </a>
-                  ) : (
-                    <span className="text-body-sm font-semibold">Unknown Address</span>
-                  )}
-                  {subject.address && <CopyButton text={subject.address} title="Copy address" />}
-                </div>
-                {subject.subdivision && (
-                  <div className="flex items-center gap-1 mt-1 flex-wrap">
-                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-medium bg-primary/10 text-primary border border-primary/20">
-                      {subject.subdivision}
-                    </span>
-                  </div>
+            {/* Address + price, then area + what the price is · the comp card's two lines */}
+            <div className="flex items-baseline justify-between gap-2">
+              <div className="min-w-0 flex items-center gap-1.5">
+                {shortAddress ? (
+                  <a
+                    href={subject.listingUrl ?? `https://www.zillow.com/homes/${encodeURIComponent(subject.address!)}_rb/`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-body-sm font-semibold hover:text-primary hover:underline truncate"
+                    title={subject.address ?? undefined}
+                  >
+                    {shortAddress}
+                  </a>
+                ) : (
+                  <span className="text-body-sm font-semibold">Unknown Address</span>
                 )}
-                {subject.neighborhoodName && (
-                  <div className="text-[11px] text-foreground-secondary mt-0.5">
-                    {titleCaseWords(subject.neighborhoodName)}
-                  </div>
-                )}
-                {geography.length > 0 && (
-                  <div className="flex items-center gap-x-3 gap-y-0.5 mt-1 text-[11px] flex-wrap" aria-label="Subject geography">
-                    {geography.map((item) => (
-                      <span key={item.label} className="whitespace-nowrap" title={item.title}>
-                        <span className="text-foreground-tertiary">{item.label}</span>{' '}
-                        <span className="font-medium text-foreground-secondary">{item.value}</span>
-                      </span>
-                    ))}
-                  </div>
-                )}
+                {subject.address && <CopyButton text={subject.address} title="Copy address" />}
               </div>
-              {(subject.listPrice != null || subject.lastSale?.price) && (
-                <div className="text-right flex-shrink-0">
-                  {subject.listPrice != null && (
-                    <>
-                      <div className="text-sm font-bold tabular-nums">${subject.listPrice.toLocaleString()}</div>
-                      <div className="text-[9px] text-foreground-tertiary">List Price</div>
-                    </>
-                  )}
-                  {subject.lastSale?.price && (
-                    <div className={subject.listPrice != null ? 'mt-1' : ''}>
-                      <div className="text-[11px] font-medium tabular-nums text-foreground-secondary">${subject.lastSale.price.toLocaleString()}</div>
-                      <div className="text-[9px] text-foreground-tertiary tabular-nums">
-                        {subject.lastSale.pricePerSqft ? `$${subject.lastSale.pricePerSqft.toFixed(0)}/sf · ` : ''}
-                        {subject.lastSale.date ? formatShortDate(subject.lastSale.date) : 'Last Sale'}
-                      </div>
-                    </div>
-                  )}
-                </div>
+              {headline != null && (
+                <span className="text-sm font-bold tabular-nums flex-shrink-0">${headline.toLocaleString()}</span>
               )}
             </div>
+            {(area || blockGroup || headlineLabel) && (
+              <div className="flex items-center justify-between gap-2 mt-0.5 text-[11px]">
+                <span className="min-w-0 truncate text-foreground-secondary">
+                  {area ? titleCaseWords(area) : ''}
+                  {blockGroup && (
+                    <span aria-label="Subject geography" title="Census block group" className="text-foreground-tertiary">
+                      {area ? ' · ' : ''}Group {blockGroup}
+                    </span>
+                  )}
+                </span>
+                {headlineLabel && <span className="flex-shrink-0 text-foreground-tertiary tabular-nums">{headlineLabel}</span>}
+              </div>
+            )}
+            {lastSale && (
+              <div className="mt-0.5 text-[11px] text-foreground-tertiary tabular-nums">
+                Last sold ${lastSale.price!.toLocaleString()}
+                {lastSale.pricePerSqft ? ` · $${lastSale.pricePerSqft.toFixed(0)}/sf` : ''}
+                {lastSaleDate ? ` · ${lastSaleDate}` : ''}
+              </div>
+            )}
 
             {/* Property stats — 3-column grid keeps the subject card ratio closer to comp cards */}
-            <div className="subject-stats mt-2.5">
-              <div className="flex items-center justify-between text-[11px]">
+            <div className="subject-stats mt-1.5">
+              <div className="flex items-center justify-between gap-2 text-[11px]">
                 <span className="text-foreground-tertiary">Bed/Bath</span>
                 <span className="font-medium">{subject.bedrooms ?? '-'}/{subject.bathrooms ?? '-'}</span>
               </div>
-              <div className="flex items-center justify-between text-[11px]">
+              <div className="flex items-center justify-between gap-2 text-[11px]">
                 <span className="text-foreground-tertiary">Sq Ft</span>
                 <span className="font-medium tabular-nums">{subject.squareFeet?.toLocaleString() || '-'}</span>
               </div>
-              <div className="flex items-center justify-between text-[11px]">
+              <div className="flex items-center justify-between gap-2 text-[11px]">
                 <span className="text-foreground-tertiary">Year Built</span>
                 <span className="font-medium">{subject.yearBuilt ?? '-'}</span>
               </div>
-              <div className="flex items-center justify-between text-[11px]">
+              <div className="flex items-center justify-between gap-2 text-[11px]">
                 <span className="text-foreground-tertiary">Lot</span>
                 <span className="font-medium">{formatLotSize(subject.lotSizeAcres)}</span>
               </div>
-              <div className="flex items-center justify-between text-[11px]">
+              {/* Starts under Sq Ft and runs two columns, so the condition is never cut short */}
+              <div className="col-span-2 col-start-2 flex items-center gap-2 text-[11px]">
                 <span className="text-foreground-tertiary">Condition</span>
-                <span className="font-medium truncate ml-2" title={subject.conditionSummary ?? subject.curbAppeal?.summary ?? undefined}>
+                <span className="font-medium truncate" title={subject.conditionSummary ?? subject.curbAppeal?.summary ?? undefined}>
                   {subject.condition || 'NA'}
                 </span>
               </div>
               {(subject.heating || subject.cooling) && (
-                <div className="flex items-center justify-between text-[11px]">
+                <div className="flex items-center justify-between gap-2 text-[11px]">
                   <span className="text-foreground-tertiary">Heat / AC</span>
                   <span className="font-medium truncate ml-2">{[subject.heating, subject.cooling].filter(Boolean).join(' / ')}</span>
                 </div>
               )}
               {subject.buildingCondition && (
-                <div className="flex items-center justify-between text-[11px]">
+                <div className="flex items-center justify-between gap-2 text-[11px]">
                   <span className="text-foreground-tertiary">Assessor Cond.</span>
                   <span className="font-medium truncate ml-2">{subject.buildingCondition}{subject.buildingGrade ? ` · ${subject.buildingGrade} grade` : ''}</span>
                 </div>
               )}
               {subject.additionSquareFeet != null && subject.additionSquareFeet > 0 && (
-                <div className="flex items-center justify-between text-[11px]">
+                <div className="flex items-center justify-between gap-2 text-[11px]">
                   <span className="text-foreground-tertiary">Addition</span>
                   <span className="font-medium tabular-nums">{subject.additionSquareFeet.toLocaleString()} sf</span>
                 </div>
               )}
             </div>
-            <div className="mt-2">
+            {/* empty:hidden · the line can render nothing, and then it must not leave a gap */}
+            <div className="mt-2 empty:hidden">
               <PhysicalCharacteristicsLine
                 characteristics={subject.physicalCharacteristics}
                 label="Subject construction"
@@ -162,11 +158,19 @@ export function SubjectGridCard({ subject, isLoading, footer }: SubjectGridCardP
             {footer}
             <PropertyPermits permits={subject.permits} loading={isLoading} />
             {subject.photos && subject.photos.length > 0 && (
-              <PhotoGallery photos={subject.photos} className="mt-2" />
+              <PhotoGallery photos={subject.photos} compact className="mt-1.5" />
             )}
           </div>
         </div>
       </div>
+      {/* Foot of the card: the comp rules on the left, the deal actions on the right, one strip */}
+      {(rules || actions) && (
+        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 border-t border-border/60 px-4 py-1">
+          {/* min width: on a narrow card the rules drop to their own line instead of breaking mid-phrase */}
+          {rules && <div className="min-w-[14rem] flex-1">{rules}</div>}
+          {actions}
+        </div>
+      )}
     </div>
   )
 }

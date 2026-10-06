@@ -7,6 +7,7 @@ import { useEvaluation } from '@/hooks/use-evaluation'
 import { ComparablesSection } from './ComparablesSection'
 import { DecisionTrail } from './DecisionTrail'
 import { DealSummaryHero } from './DealSummaryHero'
+import { DealActions } from './DealActions'
 import { SubjectGridCard } from './SubjectGridCard'
 import { InvestorAnalysisSummary } from './InvestorAnalysisSummary'
 
@@ -81,20 +82,39 @@ export function AnalysisResultLayout({
   const selectedCompKeys = compOverride?.selectedCompKeys
   const isManual = compOverride?.isManual ?? false
 
-  // The comp rules this run used, on one line inside the subject card. The
+  // The comp rules this run used, titled, bottom of the subject card, above the actions. The
   // server's grade sentence stays server-side; only the rules are shown.
   const concessions = comps?.retrieval?.paramFlex?.concessions ?? []
-  const rulesLine = subject && !isStreaming && comps?.insufficientComps !== true && comps?.retrieval?.paramFlex != null ? (
-    <div className="mt-2 text-[11px] text-foreground-secondary tabular-nums" aria-label="Comp rules used">
-      {concessions.length > 0 ? concessions.map(compactConcession).join(' · ') : 'Strict rules'}
+  const rulesNote = subject && !isStreaming && comps?.insufficientComps !== true && comps?.retrieval?.paramFlex != null ? (
+    <div className="text-[11px] leading-snug tabular-nums">
+      <span className="font-semibold text-foreground">Comp rules</span>
+      <span className="ml-2 text-foreground-secondary">
+        {concessions.length > 0 ? concessions.map(compactConcession).join(' · ') : 'Strict rules'}
+      </span>
     </div>
   ) : null
-  const subjectFooter = (rulesLine || subjectExtras) ? <>{rulesLine}{subjectExtras}</> : null
 
   return (
     <>
       {/* Subject property */}
-      {subject && <SubjectGridCard subject={subject} isLoading={isStreaming} footer={subjectFooter} />}
+      {subject && (
+        <SubjectGridCard
+          subject={subject}
+          isLoading={isStreaming}
+          footer={subjectExtras}
+          rules={rulesNote}
+          actions={valuation ? (
+            <DealActions
+              stacked
+              offerPrice={valuation.wholesalePrice ?? valuation.buyPrice}
+              onOfferWorkflow={onOfferWorkflow}
+              onRerun={onRerun}
+              rerunning={rerunning}
+              onOpenSettings={onOpenSettings}
+            />
+          ) : null}
+        />
+      )}
 
       {/* Valuation panel — sticky so it's always visible while scrolling comps */}
       {valuationPlacement === 'left' ? null : valuation ? (
@@ -102,10 +122,6 @@ export function AnalysisResultLayout({
           <DealSummaryHero
             valuation={valuation}
             isRecalculated={isRecalculated}
-            onOpenSettings={onOpenSettings}
-            onRerun={onRerun}
-            rerunning={rerunning}
-            onOfferWorkflow={onOfferWorkflow}
             disposition={disposition}
           />
         </div>

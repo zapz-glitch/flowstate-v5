@@ -73,7 +73,12 @@ export function fmtNumber(v: number | null | undefined): string {
 /** Format a date string as "Mar 15, 2024" */
 export function formatShortDate(date: string | null | undefined): string {
   if (!date) return '-'
-  return new Date(date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+  // A date with no time ("2016-04-14") is a calendar day, not a moment. Read as UTC
+  // midnight and shown in the viewer's zone it lands on the day before in the US.
+  const calendarDay = /^\d{4}-\d{2}-\d{2}$/.test(date)
+  return new Date(date).toLocaleDateString('en-US', {
+    month: 'short', day: 'numeric', year: 'numeric', ...(calendarDay ? { timeZone: 'UTC' } : {}),
+  })
 }
 
 /** Format a numeric delta as "+1,200" or "-300" */

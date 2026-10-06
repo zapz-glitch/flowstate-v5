@@ -1,12 +1,13 @@
 'use client'
 
-import { memo, useMemo, type ReactNode } from 'react'
+import { memo, useMemo } from 'react'
 import { Check } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { CopyButton } from '@/components/ui/copy-button'
 import type { CompItem, SubjectData } from './shared-types'
 import { StreetViewImage } from './StreetViewImage'
 import { RuleMatchDetails } from './RuleMatchDetails'
+import { Fact, Pair, STAMP } from './property-card-parts'
 import {
   MATCH_TEXT,
   PRICE_STAMP_CLASS,
@@ -47,42 +48,6 @@ export interface CompGridCardProps {
   /** Called with the card's comp key on enter, null on leave */
   onHover?: (key: string | null) => void
   isHighlighted?: boolean
-}
-
-/** Photo stamp · opaque colored chip with white text so it reads on any photo */
-const STAMP = 'h-[22px] px-1.5 rounded-sm flex items-center text-[11px] font-bold tracking-wide shadow-sm'
-
-/** "Label value" pair on one line · gray label, strong value */
-function Pair({ label, value, title }: { label: string; value: string; title?: string }) {
-  return (
-    <span className="whitespace-nowrap" title={title}>
-      <span className="text-foreground-tertiary">{label}</span>{' '}
-      <span className="font-medium text-foreground">{value}</span>
-    </span>
-  )
-}
-
-/** One property fact · the difference from the subject sits on its own line
- *  under the value so it never truncates in a narrow card. */
-function Fact({ label, value, valueClass, title, delta, deltaClass }: {
-  label: string
-  value: ReactNode
-  valueClass?: string
-  title?: string
-  delta?: string | null
-  deltaClass?: string | null
-}) {
-  return (
-    <div className="min-w-0">
-      <div className="flex items-baseline justify-between gap-2">
-        <span className="text-foreground-tertiary flex-shrink-0">{label}</span>
-        <span className={cn('font-medium tabular-nums truncate', valueClass)} title={title}>{value}</span>
-      </div>
-      {delta && (
-        <div className={cn('text-right whitespace-nowrap leading-tight', deltaClass ?? 'text-foreground-tertiary')}>{delta}</div>
-      )}
-    </div>
-  )
 }
 
 function CompGridCardInner({

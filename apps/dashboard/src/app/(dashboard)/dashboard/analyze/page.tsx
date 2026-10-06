@@ -18,6 +18,8 @@ import {
   Loader2,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { PageHeader } from '@/components/ui/page-header'
+import { usePreloadOnIdle, useStayMounted } from '@/hooks/use-stay-mounted'
 import { AddressAutocomplete } from '@/components/AddressAutocomplete'
 import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
@@ -48,7 +50,8 @@ const AnalysisPageLayout = dynamic(
   { loading: () => <AnalysisPageSkeleton /> },
 )
 const EvaluationSettingsSheet = dynamic(() => import('@/components/report/EvaluationSettingsSheet').then((mod) => mod.EvaluationSettingsSheet))
-const CompComparisonDialog = dynamic(() => import('@/components/analysis/CompComparisonDialog').then((mod) => mod.CompComparisonDialog))
+const loadCompComparisonDialog = () => import('@/components/analysis/CompComparisonDialog')
+const CompComparisonDialog = dynamic(() => loadCompComparisonDialog().then((mod) => mod.CompComparisonDialog))
 const ExistingReportsDialog = dynamic(() => import('./ExistingReportsDialog').then((mod) => mod.ExistingReportsDialog))
 const AppraisalFilterEditor = dynamic(() => import('@/components/analysis/AppraisalFilterEditor').then((mod) => mod.AppraisalFilterEditor))
 
@@ -729,6 +732,11 @@ export default function AnalyzePage() {
     cancelAnalysis()
   }, [cancelAnalysis])
 
+  // Overlays are built on first open, then kept mounted so they can animate out
+  const mountSettings = useStayMounted(settingsOpen)
+  const mountComparison = useStayMounted(comparisonOpen)
+  usePreloadOnIdle(loadCompComparisonDialog)
+
   // ─── Layout Flags ────────────────────────────────────────────────────────
 
   const isSearchCollapsed = isActive && !searchExpanded
@@ -748,13 +756,7 @@ export default function AnalyzePage() {
             : 'px-4 sm:px-6 lg:px-4 pt-3 pb-1 lg:pt-8 space-y-3 flex-shrink-0'
           : 'space-y-6'
       )}>
-      {phase === 'idle' && !error && (
-        <div className="space-y-1">
-          <p className="mono-label mb-3">Flowstate | Property underwriting</p>
-          <h1 className="text-heading-lg text-foreground tracking-[-0.03em] font-medium">Property Search</h1>
-          <p className="text-body text-foreground-tertiary">Search an address. Underwrite the deal.</p>
-        </div>
-      )}
+      {phase === 'idle' && !error && <PageHeader title="Property Search" />}
 
       {/* Input Form — collapses to compact bar once active */}
       {isSearchCollapsed ? (
@@ -812,26 +814,21 @@ export default function AnalyzePage() {
         </ReportToolbar>
       ) : (
         <div className="relative z-20 border border-border/60 bg-background shadow-sm corner-accents corner-accents-bottom">
-          <div className="px-6 py-5 border-b border-border">
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center">
-                <Search className="w-4.5 h-4.5 text-primary" />
-              </div>
-              <div className="flex-1">
-                <h2 className="text-body font-semibold">/v1/analyze</h2>
-                <p className="text-caption text-foreground-tertiary">Property details, comparables, and valuation</p>
-              </div>
-              {isActive && (
-                <button
-                  type="button"
-                  onClick={() => setSearchExpanded(false)}
-                  className="p-1.5 rounded-lg hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors text-foreground-tertiary"
-                >
-                  <ChevronDown className="w-4 h-4 rotate-180" />
-                </button>
-              )}
+          {/* Title and the collapse arrow · only while a property is loaded. With nothing
+              loaded the page header above is the title. */}
+          {isActive && (
+            <div className="px-6 py-3 border-b border-border flex items-center justify-between gap-3">
+              <h2 className="text-heading-sm text-foreground">Search an address</h2>
+              <button
+                type="button"
+                onClick={() => setSearchExpanded(false)}
+                aria-label="Collapse search"
+                className="p-1.5 rounded-lg hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors text-foreground-tertiary"
+              >
+                <ChevronDown className="w-4 h-4 rotate-180" />
+              </button>
             </div>
-          </div>
+          )}
           <div className="px-6 py-5 space-y-4">
             <div className="flex gap-3">
               <AddressAutocomplete
@@ -888,11 +885,12 @@ export default function AnalyzePage() {
         </div>
       )}
 
+      {/* One loader type for the whole opening sequence: the same skeleton as the route and the dynamic layout */}
       {restoringReport && (
-        <p role="status" className="text-caption text-foreground-tertiary flex items-center gap-2">
-          <Loader2 className="w-3.5 h-3.5 animate-spin" />
-          Restoring your last report. You can start a new search now.
-        </p>
+        <div role="status" aria-busy="true" className="space-y-4">
+          <p className="text-caption text-foreground-tertiary">Restoring your last report. You can start a new search now.</p>
+          <AnalysisPageSkeleton />
+        </div>
       )}
 
       {/* Error display */}
@@ -1022,7 +1020,7 @@ export default function AnalyzePage() {
       )}
 
       {/* Evaluation Settings Sheet */}
-      {settingsOpen && <EvaluationSettingsSheet
+      {mountSettings && <EvaluationSettingsSheet
         open={settingsOpen}
         onOpenChange={(open) => {
           setSettingsOpen(open)
@@ -1036,7 +1034,7 @@ export default function AnalyzePage() {
       />}
 
       {/* Subject vs Comp comparison dialog */}
-      {comparisonOpen && <CompComparisonDialog
+      {mountComparison && <CompComparisonDialog
         open={comparisonOpen}
         onOpenChange={setComparisonOpen}
         subject={renderData?.subject ?? null}
