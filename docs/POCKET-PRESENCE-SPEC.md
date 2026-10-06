@@ -1,101 +1,104 @@
-# Pocket Presence — Design Spec
+# Scoring Spec v2 — Pocket, Economics, Evidence Quality
 
-Status: **proposed — awaiting sign-off before implementation.**
+Status: **draft — replaces the v1 pocket-presence spec.**
 
-Goal: the offers queue groups leads by metro, and inside each metro orders
-properties by how strong their comp pocket is — so the most desirable
-underwrites surface first. Scoring is cheap because pockets are scored
-once and reused: a property carries its pocket; the pocket carries the
-score.
+The offers queue needs three independent judgments per evaluated
+property, computed **after the eval completes** — once ARV, median band,
+as-is, and list price are locked. Scores are stored, not recomputed at
+queue-read time.
 
-## 1. Pocket identity
+## Scores
 
-Every evaluated property already carries geography in its run record.
-The pocket is the tract / block group / neighborhood trio:
+| Score | 0–10 | Question it answers | Cache unit |
+|---|---|---|---|
+| **Pocket** | tract/neighborhood desirability | Do people want to move here? Do investors want to buy here? | per pocket (90d) |
+| **Economics** | acquisition likelihood | Can we buy this at our number? | per property |
+| **Overall** | blend | How strong is this lead overall? | per property |
+| **Evidence quality** | flag, not a score | Was our comp pool clean enough to trust? | per property |
 
-1. `censusTract` + `blockGroup` + county — the statistical anchor
-2. `neighborhoodName` + city + state — the lived-market anchor
-3. `zip` — last resort
+Evidence quality stays OUT of the pocket score — a thin comp pull
+doesn't mean a bad pocket. It displays as a flag (strong/thin) next to
+the score instead of silently dragging it.
 
-The pocket carries both identities (tract+block for stability, name for
-humans); a property joins whichever the payload has.
+## Pocket identity
 
-Normalization: lowercase, strip punctuation/spaces, e.g.
-`oakwood-estates|marietta|ga`.
+`censusTract` + `censusBlockGroup` + `subdivision`/`neighborhoodName` —
+the statistical anchor AND the lived-market name, both kept. Queries hit
+the tract/block group directly, never the name alone — every pocket has
+a real statistical identity, so coverage is uniform across submarkets.
 
-## 2. `pocket_scores` table (D1)
+## Pocket score — what goes in
 
-| column | notes |
+**Produced by the eval (free, uniform coverage):**
+
+| Input | Source |
 |---|---|
-| `pocket_key` | PK — normalized key above |
-| `display_name` | "Oakwood Estates" |
-| `metro` | resolved metro umbrella ("Atlanta") |
-| `city`, `state`, `zip` | anchor |
-| `score` | 0–10 |
-| `median_lo`, `median_hi` | pocket price band from comp evidence |
-| `inputs_json` | deterministic inputs snapshot |
-| `evidence_json` | Serper/LLM desirability evidence |
-| `scored_by` | `deterministic` \| `clef` |
-| `eval_count` | how many evals have hit this pocket |
-| `scored_at`, `refresh_due_at` | refresh cadence ~90d or on drift |
+| Median price band (25–75th pct of enabled comps) | `compPool[].salePrice` |
+| Pocket price trend — rising / flat / declining | time-adjustment mechanics + pocket price groups already in the payload |
+| Turnover velocity — recent-sale density | `compPool[].saleDate` distribution |
+| ARV band vs median band delta | report.arv vs comp pool band |
 
-## 3. Score composition (0–10)
+**Fetched once per pocket (cached 90d):**
 
-| Weight | Input | Source |
+| Source | Query |
+|---|---|
+| Serper / Scrapfly fallback | desirability evidence for the tract+subdivision — school district, demand, buyer/investor activity, reputation |
+| Clef (`clef-flash`) | structured score-question on geo + evidence → verdict + probabilities |
+| GPT-6 Luna | independent read over same evidence → then the **final merge call**: Clef verdict + its own analysis + band/trend/velocity inputs → final score + rationale |
+
+## Economics score — what goes in
+
+The operator's actual question: "based on ARV vs list, how likely is the
+seller to take my wholesale number?" Two deltas, all produced by the
+eval — **zero new fetches**:
+
+| Input | Source | Drives |
 |---|---|---|
-| 40% | **Alpha delta** — list price vs pocket median band vs ARV band. List below the band = upside to capture; at/above = thin | run payload (deterministic) |
-| 25% | **Band discipline** — comp-selection bands reused: coherence, outlier flags already emitted at eval time. Bands are the ground truth — they keep scoring honest | run payload (deterministic) |
-| 35% | **Desirability + activity** — demand, reputation, momentum signals | Serper search → Clef/Luna classify, cached per pocket |
+| ARV | `report.arv.value` | margin headroom |
+| List price | `subject.listPrice` | seller's anchor |
+| Wholesale price | queue item / lead | our number |
+| As-is value | `report.arv.asIsValue` | condition gap |
+| Pocket median band | comp math | where the price sits |
 
-The comp-selection bands (T1/T2 tiers, price-band outliers) are written
-into run_records at eval time — scoring reads them back rather than
-re-deriving. Outlier flags pass through as score inputs so a pocket
-built on outliers can't masquerade as clean.
+The two deltas Luna scores:
 
-Per-property pieces (alpha, density) always compute fresh from the eval's
-own payload. Per-pocket pieces (desirability, band, metro) compute once
-per pocket and cache.
+- **ARV − wholesale** — profit room after rehab/costs. Thin = no deal.
+- **List − wholesale** — discount depth the seller must accept.
+  Deep discount = unlikely acquisition; shallow = believable.
 
-## 4. Lifecycle
+Fallback when list price is absent: score on the wholesale/ARV spread
+alone, flag `no list price` on the rationale.
 
-1. Eval completes → run_records row exists (already true).
-2. Queue read resolves each item's `pocket_key`.
-   - **Hit** → cached score + name, zero cost.
-   - **Miss** → provisional deterministic score now + enqueue scoring
-     job (Serper + Clef) → row written; next read is cached.
-3. Re-score on refresh_due_at (90-day cadence) — plus opportunistic
-   refresh when a new eval lands in a stale pocket.
+## Evidence quality flag
 
-## 5. Metro grouping
+`strong | thin` — from enabled/examined share, outlier share, in-pocket
+comp share. Displayed next to the scores so a low pocket score with thin
+evidence reads differently than one with strong evidence.
 
-Umbrella = major metro, not listing city. `metro_map` table caches
-city→metro (Marietta → Atlanta, St. Petersburg → Tampa Bay, Wylie →
-Dallas-Fort Worth). Unknown cities classify once via LLM and cache;
-unmapped → "Other". Submarkets rank inside their metro umbrella by score.
+## Overall score
 
-Queue response gains per item: `metro`, `pocketKey`, `pocketName`,
-`pocketScore` (or grouped `{metros:[{name, items}]}`). Deadline items get
-urgent styling inside their metro group — no separate pinned section.
+Deterministic blend — default **50/50** pocket/economics (weight is a
+decision, see below). Scores stand alone; overall is just the sort key.
 
-## 6. Cost profile
+## Flow
 
-- Queue read: SQL join only — instant, zero external calls.
-- New pocket: ~1 Serper query + ~1 Clef/Luna classify, once.
-- New city: 1 metro classify, once.
-- No re-evaluation of anything already scored.
+1. Eval completes → run_records payload locks (bands, list price, geo).
+2. Post-eval scoring job: pocket (gather → Clef ∥ Luna → Luna merge) +
+   economics (Luna over bands) + evidence flag → write `property_scores`.
+3. Queue read: SQL join only — instant, zero external calls.
+4. New pocket → score once, reuse 90 days. Refresh on timer.
 
-## 7. Open decisions
+## Storage
 
-- [x] Pocket = tract + block group + neighborhood
-- [x] Refresh: 90-day timer
-- [x] Serper key — approved for flowstate-api
-- [ ] Classifier: Clef (Workers AI binding) vs Luna (OpenRouter, already wired)
-- [ ] Card display: numeric score + pocket name chip?
+- `pocket_scores` (per pocket): dynamics verdict, evidence, 90d TTL.
+- `property_scores` (per jobId): pocketScore ref, economicsScore,
+  overallScore, rationales, evidence flag.
+- `metro_map` unchanged.
 
-## 8. Definition of done
+## Open decisions
 
-- Queue groups by metro umbrella; within each, sorted by score desc.
-- Deadline items render urgent inside their metro.
-- Every item shows score + pocket name when scored.
-- Re-opening the queue costs zero external calls.
-- The 391 evals already in today's queue get scored without re-running evals.
+- [ ] Overall weight: 50/50, or economics-weighted (60/40)?
+- [ ] Economics needs wholesale price — engine items have it; api items
+      may only have listPrice. Fallback chain: listPrice → wholesalePrice →
+      neutral 5?
+- [ ] Evidence-quality display: flag chip vs tooltip?

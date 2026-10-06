@@ -9,6 +9,7 @@
 
 import { Hono } from 'hono'
 import { pocketFromPayload, deterministicInputs, provisionalScore, scorePocket, metroGuess } from '../services/pocket-score'
+import { classifyPocket, classifyEconomics } from '../services/pocket-score/classify'
 import type { Env } from '../types'
 import type { AuthContext } from '../middleware/auth'
 
@@ -372,3 +373,31 @@ pipelineReads.get('/metrics', async (c) => {
 })
 
 export default pipelineReads
+
+// GET /v1/pipeline/pocket-test?jobId=… — prototype: run the dual
+// classification (pocket ∥ economics) on a real run_records payload.
+pipelineReads.get('/pocket-test', async (c) => {
+  const jobId = c.req.query('jobId')
+  const row = jobId
+    ? await c.env.DB.prepare('SELECT job_id, payload_json FROM run_records WHERE job_id = ?').bind(jobId).first<{ job_id: string; payload_json: string }>()
+    : await c.env.DB.prepare('SELECT job_id, payload_json FROM run_records ORDER BY created_at DESC LIMIT 1').first<{ job_id: string; payload_json: string }>()
+  if (!row) return c.json({ ok: false, error: 'no run record found' }, 404)
+  let payload: unknown = null
+  try { payload = JSON.parse(row.payload_json) } catch { return c.json({ ok: false, error: 'bad payload' }, 500) }
+  const id = pocketFromPayload(payload)
+  if (!id) return c.json({ ok: false, error: 'no pocket identity in payload' }, 422)
+  const inputs = deterministicInputs(payload, null)
+  const subj = (payload as { result?: { response?: { subject?: { listPrice?: number }; report?: { arv?: { value?: number; asIsValue?: number } } } } })?.result?.response
+  const econ = {
+    wholesalePrice: c.req.query('wholesale') ? Number(c.req.query('wholesale')) : null,
+    listPrice: subj?.subject?.listPrice ?? null,
+    medianLo: inputs.medianLo, medianHi: inputs.medianHi,
+    arv: subj?.report?.arv?.value ?? inputs.arv,
+    asIsValue: subj?.report?.arv?.asIsValue ?? null,
+  }
+  const [pocket, economics] = await Promise.all([
+    classifyPocket(c.env, id, inputs),
+    classifyEconomics(c.env, id, econ),
+  ])
+  return c.json({ jobId: row.job_id, pocket: id, deterministic: inputs, econ, pocketScore: pocket, economicsScore: economics })
+})
