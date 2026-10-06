@@ -67,6 +67,11 @@ Gate: <n>/21 checked. Unchecked and why:
 
 Newest first.
 
+### 2026-10-05 — Two more review decisions
+Screenshots: `cdarv3-light-1440`
+- The user-detail and observability run-detail headers stay as they are: they are record cards with data (decided).
+- CDARV keeps its "Experimental / Shadow" label (right side of the header) and the note "Production underwriting is unaffected." under the title; every other page stays title-only (decided).
+
 ### 2026-10-05 — Decisions on four review findings
 Screenshots: `hdr-batch-light-1440`, `hdr-cdarv-light-1440`, `hdr-seo-light-1440`
 1. Same title-only header on every dashboard page (decided): Batch Import, SEO Engine, CDARV, Admin Panel, User Management, Observability and API request detail now use `PageHeader`. Subtitles are gone; useful values moved to the right side (user count, request time). Not changed: the two record-detail headers (a user's name with email and join date; a run's address with status and job ID), which carry data, not a section title.

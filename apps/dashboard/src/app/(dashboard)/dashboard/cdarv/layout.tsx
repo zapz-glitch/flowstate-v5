@@ -10,7 +10,14 @@ const NAV = [
 export default function CdarvLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="max-w-[1400px] mx-auto space-y-6">
-      <PageHeader title="CDARV" />
+      {/* CDARV is a shadow tool: the page says so, and that production is untouched */}
+      <div>
+        <PageHeader
+          title="CDARV"
+          actions={<span className="text-body-sm text-foreground-tertiary">Experimental / Shadow</span>}
+        />
+        <p className="mt-1 text-body-sm text-foreground-tertiary">Production underwriting is unaffected.</p>
+      </div>
       <nav className="flex gap-1 border-b border-border">
         {NAV.map((item) => (
           <Link
