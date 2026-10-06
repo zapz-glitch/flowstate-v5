@@ -68,7 +68,7 @@ export function PhotoGallery({ photos, className, children, compact = false }: {
         {hasPhotos && photos.length > 6 && (
           <button
             onClick={() => { setCurrentIndex(6); setLightboxOpen(true) }}
-            className={cn(thumb, 'rounded-lg border border-border flex items-center justify-center text-caption text-foreground-tertiary flex-shrink-0 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors')}
+            className={cn(thumb, 'rounded-lg border border-border flex items-center justify-center text-caption text-foreground-tertiary flex-shrink-0 hover:text-foreground hover:bg-secondary transition-colors')}
           >
             +{photos.length - 6}
           </button>

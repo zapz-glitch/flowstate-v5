@@ -156,7 +156,7 @@ export function AnalysisPageLayout({
                 onDoubleClick={() => { setValuationHeight(null); try { localStorage.removeItem(VALUATION_HEIGHT_KEY) } catch { /* private mode */ } }}
                 className="hidden lg:flex flex-shrink-0 h-2 cursor-row-resize items-center justify-center group no-print"
               >
-                <span className="h-0.5 w-10 rounded-full bg-border group-hover:bg-emerald-500/60 transition-colors" />
+                <span className="h-0.5 w-10 rounded-full bg-border group-hover:bg-secondary0/60 transition-colors" />
               </div>
               <div
                 ref={valuationCardRef as React.RefObject<HTMLDivElement>}

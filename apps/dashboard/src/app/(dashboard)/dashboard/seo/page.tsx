@@ -38,7 +38,7 @@ export default function SeoPage() {
             href={SEO_CONSOLE_URL}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center gap-1.5 text-body-sm text-foreground-tertiary hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors"
+            className="inline-flex items-center gap-1.5 text-body-sm text-foreground-tertiary hover:text-foreground hover:bg-secondary transition-colors"
           >
             Open full console <ExternalLink className="h-3.5 w-3.5" />
           </a>

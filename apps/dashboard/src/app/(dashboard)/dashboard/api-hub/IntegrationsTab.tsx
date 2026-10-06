@@ -290,7 +290,7 @@ export default function IntegrationsTab() {
                 <button
                   onClick={handleTest}
                   disabled={testing}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border text-sm font-medium text-foreground hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors disabled:opacity-50"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border text-sm font-medium text-foreground hover:text-foreground hover:bg-secondary transition-colors disabled:opacity-50"
                 >
                   {testing ? (
                     <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -328,7 +328,7 @@ export default function IntegrationsTab() {
                   </code>
                   <button
                     onClick={handleCopyWebhook}
-                    className="p-2 rounded-lg border border-border hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors flex-shrink-0"
+                    className="p-2 rounded-lg border border-border hover:text-foreground hover:bg-secondary transition-colors flex-shrink-0"
                     title="Copy webhook URL"
                   >
                     {copied ? (
@@ -438,7 +438,7 @@ export default function IntegrationsTab() {
                   load()
                   setDirty(false)
                 }}
-                className="px-3 py-1.5 rounded-lg text-sm font-medium text-muted-foreground hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors"
+                className="px-3 py-1.5 rounded-lg text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
               >
                 Cancel
               </button>

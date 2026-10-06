@@ -78,7 +78,7 @@ export function RealtorNotesCard({
             <button
               type="button"
               onClick={() => setShowAll((v) => !v)}
-              className="flex items-center gap-1 text-[10px] text-foreground-tertiary hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10"
+              className="flex items-center gap-1 text-[10px] text-foreground-tertiary hover:text-foreground hover:bg-secondary"
             >
               {showAll ? 'Show fewer' : `All ${notes.length} notes`}
               <ChevronDown className={`w-3 h-3 transition-transform ${showAll ? 'rotate-180' : ''}`} />

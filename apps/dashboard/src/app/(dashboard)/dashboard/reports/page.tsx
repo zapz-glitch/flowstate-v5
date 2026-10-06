@@ -235,7 +235,7 @@ export default async function ReportsPage({
                 {data.pagination.hasPrev ? (
                   <Link
                     href={`/dashboard/reports?page=${data.pagination.page - 1}${params.search ? `&search=${encodeURIComponent(params.search)}` : ''}`}
-                    className="flex items-center gap-1 px-3 py-1.5 text-body-sm text-foreground-secondary hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 rounded-lg transition-colors"
+                    className="flex items-center gap-1 px-3 py-1.5 text-body-sm text-foreground-secondary hover:text-foreground hover:bg-secondary rounded-lg transition-colors"
                   >
                     <ChevronLeft className="w-4 h-4" />
                     <span className="hidden sm:inline">Previous</span>
@@ -249,7 +249,7 @@ export default async function ReportsPage({
                 {data.pagination.hasNext ? (
                   <Link
                     href={`/dashboard/reports?page=${data.pagination.page + 1}${params.search ? `&search=${encodeURIComponent(params.search)}` : ''}`}
-                    className="flex items-center gap-1 px-3 py-1.5 text-body-sm text-foreground-secondary hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 rounded-lg transition-colors"
+                    className="flex items-center gap-1 px-3 py-1.5 text-body-sm text-foreground-secondary hover:text-foreground hover:bg-secondary rounded-lg transition-colors"
                   >
                     <span className="hidden sm:inline">Next</span>
                     <ChevronRight className="w-4 h-4" />

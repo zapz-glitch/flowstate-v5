@@ -4,7 +4,7 @@ import { MapPin } from 'lucide-react'
 import { CopyButton } from '@/components/ui/copy-button'
 import type { SubjectData } from './shared-types'
 import { StreetViewImage } from './StreetViewImage'
-import { formatAddressCasing, formatBlockGroup, formatLotSize, formatShortDate, subjectStreetViewHref, titleCaseWords } from './format-helpers'
+import { formatAddressCasing, formatAreaLine, formatLotSize, formatShortDate, subjectStreetViewHref, titleCaseWords } from './format-helpers'
 import { PropertyPermits } from './PropertyPermits'
 import { PhotoGallery } from './PhotoGallery'
 import { PhysicalCharacteristicsLine } from './PhysicalCharacteristicsLine'
@@ -21,11 +21,10 @@ interface SubjectGridCardProps {
 }
 
 export function SubjectGridCard({ subject, isLoading, footer, stats, actions }: SubjectGridCardProps) {
+  // "Group 4 - Meadow Brook" · block group first, then one name for the area (the
+  // neighborhood, or the subdivision when the neighborhood is missing, never both).
   // Only geography we actually have · an empty value says nothing, so it is not drawn.
-  const blockGroup = formatBlockGroup(subject.censusBlockGroup)
-  // One name for the area · the neighborhood, or the subdivision when the
-  // neighborhood is missing. Never both.
-  const area = subject.neighborhoodName || subject.subdivision
+  const areaLine = formatAreaLine(subject.censusBlockGroup, subject.neighborhoodName || subject.subdivision)
   // The headline price and what it is. The last sale gets its own line when
   // a list price takes the headline.
   const headline = subject.listPrice ?? subject.lastSale?.price ?? null
@@ -101,16 +100,9 @@ export function SubjectGridCard({ subject, isLoading, footer, stats, actions }: 
                 <span className="text-sm font-bold tabular-nums flex-shrink-0">${headline.toLocaleString()}</span>
               )}
             </div>
-            {(area || blockGroup || headlineLabel) && (
+            {(areaLine || headlineLabel) && (
               <div className="flex items-center justify-between gap-2 mt-0.5 text-[11px]">
-                <span className="min-w-0 truncate text-foreground-secondary">
-                  {area ? titleCaseWords(area) : ''}
-                  {blockGroup && (
-                    <span aria-label="Subject geography" title="Census block group" className="text-foreground-tertiary">
-                      {area ? ' · ' : ''}Group {blockGroup}
-                    </span>
-                  )}
-                </span>
+                <span className="min-w-0 truncate text-foreground-secondary" title="Census block group - neighborhood">{areaLine ?? ''}</span>
                 {headlineLabel && <span className="flex-shrink-0 text-foreground-tertiary tabular-nums">{headlineLabel}</span>}
               </div>
             )}
@@ -182,11 +174,11 @@ export function SubjectGridCard({ subject, isLoading, footer, stats, actions }: 
         </div>
       </div>
       {/* Foot of the card: the comp selection stats beside the deal buttons. If they do not fit
-          on one line the buttons drop under the stats. */}
+          on one line the buttons drop to their own row, at the right. */}
       {(stats || actions) && (
         <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 border-t border-border/60 px-2 py-1">
           {stats && <div className="min-w-0 shrink-0">{stats}</div>}
-          {actions}
+          {actions && <div className="ml-auto">{actions}</div>}
         </div>
       )}
     </div>

@@ -135,28 +135,34 @@ export function DealSummaryHero({ valuation, isRecalculated, disposition }: Deal
               </button>
             )}
           </div>
+          {/* Same height and left edge in both states (24px line, text starts at the tile's edge),
+              so clicking the number swaps it for the box without moving anything around it. */}
           {arvEditing ? (
-            <input
-              autoFocus
-              type="number"
-              inputMode="numeric"
-              value={arvDraft}
-              onChange={(e) => setArvDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === 'Escape') (e.target as HTMLInputElement).blur()
-              }}
-              onBlur={() => {
-                const v = parseFloat(arvDraft)
-                onArvOverride?.(Number.isFinite(v) && v > 0 ? Math.round(v) : null)
-                setArvEditing(false)
-              }}
-              className="text-base font-bold tabular-nums text-primary mt-0.5 w-28 bg-secondary/50 rounded-md px-2 py-0.5 border border-border/60 outline-none focus:border-primary focus:ring-1 focus:ring-primary/40 transition-colors"
-            />
+            <div className="mt-0.5 -mx-1.5 flex h-6 w-[calc(100%+0.75rem)] items-center rounded border border-primary/50 bg-secondary/50 px-[5px] text-base font-bold tabular-nums text-primary focus-within:border-primary focus-within:ring-1 focus-within:ring-primary/40 transition-colors">
+              <span aria-hidden>$</span>
+              <input
+                autoFocus
+                type="number"
+                inputMode="numeric"
+                aria-label="Manual ARV"
+                value={arvDraft}
+                onChange={(e) => setArvDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === 'Escape') (e.target as HTMLInputElement).blur()
+                }}
+                onBlur={() => {
+                  const v = parseFloat(arvDraft)
+                  onArvOverride?.(Number.isFinite(v) && v > 0 ? Math.round(v) : null)
+                  setArvEditing(false)
+                }}
+                className="min-w-0 flex-1 bg-transparent p-0 font-bold tabular-nums leading-none text-primary outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+              />
+            </div>
           ) : (
             <button
               type="button"
               onClick={() => { setArvDraft(String(arvOverride ?? valuation.arv ?? '')); setArvEditing(true) }}
-              className="text-base font-bold tabular-nums text-primary mt-0.5 hover:underline decoration-dotted underline-offset-4 no-print"
+              className="mt-0.5 block h-6 text-base font-bold leading-6 tabular-nums text-primary hover:underline decoration-dotted underline-offset-4 no-print"
               title="Click to set a manual ARV — recalculates the whole deal"
             >
               ${formatHeadlineMoney(valuation.arv, valuation.displayedArv, valuation.displayRounding)}

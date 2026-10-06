@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { loadModule, realUtils } from '../../lib/test-load.mjs'
 
-const { formatShortDate, streetViewHref, subjectStreetViewHref } = loadModule(new URL('./format-helpers.ts', import.meta.url), {
+const { formatAreaLine, formatShortDate, streetViewHref, subjectStreetViewHref } = loadModule(new URL('./format-helpers.ts', import.meta.url), {
   '@/lib/utils': realUtils(),
   '@flowstate-api/shared': { subdivisionsMatch: () => true },
   './feature-match': { compFeatureMatches: () => [], featureState: () => 'unknown', MATCH_TEXT: '', MISMATCH_TEXT: '' },
@@ -60,4 +60,16 @@ test('the subject uses the same Street View rule as a comp', () => {
   assert.equal(subjectStreetViewHref(where), streetViewHref(where))
   assert.equal(subjectStreetViewHref({ latitude: null, longitude: null, address: null }), null)
   assert.match(subjectStreetViewHref({ address: '951 Oriole Ln SE, Marietta, GA 30067' }), /maps\/search/)
+})
+
+test('the area line puts the block group first, then " - ", then the neighborhood', () => {
+  // 12-digit census id · the block group is its last digit
+  assert.equal(formatAreaLine('130670312034', 'MEADOW BROOK'), 'Group 4 - Meadow Brook')
+})
+
+test('the area line shows whichever half it has, and nothing when it has neither', () => {
+  assert.equal(formatAreaLine('130670312034', null), 'Group 4')
+  assert.equal(formatAreaLine(null, 'CAVALIER GARDENS'), 'Cavalier Gardens')
+  assert.equal(formatAreaLine(undefined, ''), null)
+  assert.equal(formatAreaLine('', null), null)
 })

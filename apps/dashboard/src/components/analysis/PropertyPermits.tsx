@@ -52,7 +52,7 @@ export function PropertyPermits({ permits, loading = false }: { permits: Subject
             <button
               type="button"
               onClick={pull}
-              className="flex items-center gap-1 px-2 py-1 rounded-sm border border-border text-foreground-secondary hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors"
+              className="flex items-center gap-1 px-2 py-1 rounded-sm border border-border text-foreground-secondary hover:text-foreground hover:bg-secondary transition-colors"
             >
               <FileText className="w-3 h-3" />
               Pull

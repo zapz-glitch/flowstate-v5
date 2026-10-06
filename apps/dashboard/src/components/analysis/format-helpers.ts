@@ -266,6 +266,18 @@ export function formatBlockGroup(value?: string | null): string | null {
   return value ? value.slice(-1) : null
 }
 
+/**
+ * The area line on a property card: "Group 4 - Meadow Brook" · block group first,
+ * then the neighborhood name. Either half alone is drawn alone; neither gives null.
+ */
+export function formatAreaLine(blockGroupGeoid?: string | null, name?: string | null): string | null {
+  const group = formatBlockGroup(blockGroupGeoid)
+  const area = name ? titleCaseWords(name) : null
+  if (group && area) return `Group ${group} - ${area}`
+  if (group) return `Group ${group}`
+  return area
+}
+
 type ScopeComp = Pick<CompItem, 'badges' | 'subdivision' | 'neighborhoodName' | 'sameBlockGroup' | 'censusTract' | 'censusBlockGroup' | 'geographyUnverified'>
 
 /**

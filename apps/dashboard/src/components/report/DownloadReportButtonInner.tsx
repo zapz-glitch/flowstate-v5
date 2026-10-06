@@ -69,7 +69,7 @@ export default function DownloadReportButtonInner({
       type="button"
       onClick={handleDownload}
       disabled={generating}
-      className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-body-sm text-foreground-secondary hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors border border-border disabled:opacity-50 disabled:cursor-not-allowed no-print"
+      className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-body-sm text-foreground-secondary hover:text-foreground hover:bg-secondary transition-colors border border-border disabled:opacity-50 disabled:cursor-not-allowed no-print"
     >
       {generating ? (
         <Loader2 className="w-3.5 h-3.5 animate-spin" />

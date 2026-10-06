@@ -17,6 +17,7 @@ import {
   conflictNote,
   fmtDeltaWords,
   formatAddressCasing,
+  formatAreaLine,
   formatLotSize,
   formatShortDate,
   lotMatchColor,
@@ -201,7 +202,7 @@ function CompGridCardInner({
                 target="_blank"
                 rel="noopener noreferrer"
                 onClick={(e) => e.stopPropagation()}
-                className="text-body-sm font-semibold text-foreground truncate rounded px-0.5 -mx-0.5 transition-colors hover:text-emerald-600 hover:bg-emerald-500/10 active:scale-[0.98] dark:hover:text-emerald-400"
+                className="text-body-sm font-semibold text-foreground truncate rounded px-0.5 -mx-0.5 transition-colors hover:text-foreground hover:bg-secondary active:scale-[0.98]"
                 title={`${formatAddressCasing(comp.address)} · open on Zillow`}
               >
                 {formatAddressCasing(comp.address)}
@@ -220,7 +221,7 @@ function CompGridCardInner({
 
         {/* Scope · matching name left, tightest scope word right */}
         <div className="flex items-center justify-between gap-2 mt-0.5">
-          <span className="text-foreground-tertiary truncate">{scope.matchedName ?? ''}</span>
+          <span className="text-foreground-tertiary truncate">{formatAreaLine(comp.censusBlockGroup, scope.matchedName?.replace(/ BG \d$/, '')) ?? ''}</span>
           <span className={cn('font-medium flex-shrink-0', scopeToneClass(scope.tone))} title={scope.title}>
             {scope.word}
           </span>

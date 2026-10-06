@@ -824,7 +824,7 @@ export default function AnalyzePage() {
                 type="button"
                 onClick={() => setSearchExpanded(false)}
                 aria-label="Collapse search"
-                className="p-1.5 rounded-lg hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors text-foreground-tertiary"
+                className="p-1.5 rounded-lg hover:text-foreground hover:bg-secondary transition-colors text-foreground-tertiary"
               >
                 <ChevronDown className="w-4 h-4 rotate-180" />
               </button>
@@ -860,7 +860,7 @@ export default function AnalyzePage() {
             <button
               type="button"
               onClick={() => setShowAdvanced((v) => !v)}
-              className="text-[11px] text-foreground-tertiary hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors flex items-center gap-1"
+              className="text-[11px] text-foreground-tertiary hover:text-foreground hover:bg-secondary transition-colors flex items-center gap-1"
             >
               Advanced
               <ChevronDown className={cn('w-3 h-3 transition-transform', showAdvanced && 'rotate-180')} />

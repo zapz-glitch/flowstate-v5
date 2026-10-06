@@ -52,6 +52,30 @@ describe('Property Search with nothing loaded', () => {
   })
 })
 
+describe('Offers', () => {
+  test('the Evaluating tile icon is still, Ready is not a check mark, and Next up is gone', WEB, async ({ app, screen, browser }) => {
+    await app.open('/dashboard/give-offer')
+    await expect(screen.getByRole('heading', 'Offers', { level: 1 })).toBeVisible()
+    await expect.poll(() => browser.evaluate(() => [...document.querySelectorAll('svg')].length > 0)).toBe(true)
+    // The tile for the Evaluating bucket (not the progress rings in the list below it)
+    const tile = (await browser.evaluate(() => {
+      const el = [...document.querySelectorAll('button')].find((b) => /^Evaluating/i.test((b.textContent ?? '').trim()) && b.querySelector('svg'))
+      if (!el) return null
+      return { icons: el.querySelectorAll('svg').length, spinning: [...el.querySelectorAll('svg')].some((v) => getComputedStyle(v).animationName !== 'none') }
+    })) as { icons: number; spinning: boolean } | null
+    expect(tile, 'the Evaluating tile has an icon').not.toBeNull()
+    expect(tile!.spinning).toBe(false)
+    // Ready uses its own icon, not the check mark
+    const readyHasCheck = (await browser.evaluate(() => {
+      const el = [...document.querySelectorAll('button')].find((b) => /^Ready/i.test((b.textContent ?? '').trim()) && b.querySelector('svg'))
+      return !!el?.querySelector('svg.lucide-check')
+    })) as boolean
+    expect(readyHasCheck).toBe(false)
+    // The "Next up" shortcut above the tiles is gone
+    await expect(screen.getByText('Next up', { exact: false })).toHaveCount(0)
+  })
+})
+
 // ── A loaded report on Property Search ───────────────────────────────────────
 
 type Rect = { x: number; y: number; width: number; height: number }
@@ -128,6 +152,45 @@ describe('Property Search with a report loaded', () => {
       // A narrow card puts the buttons under the stats, still inside the same foot strip
       expect(prep.y, 'under the stats').toBeGreaterThan(s.y)
     }
+  })
+
+  test('clicking the ARV number swaps in an edit box of the same size, in the same place', WEB, async (fx) => {
+    const { browser } = fx
+    await openLoadedSearch(fx)
+    const read = (sel: string) => browser.evaluate((q: string) => {
+      const el = document.querySelector(q) as HTMLElement | null
+      if (!el) return null
+      const r = el.getBoundingClientRect()
+      const tile = el.closest('.border-r') as HTMLElement | null
+      return { x: r.x, y: r.y, h: r.height, tileH: tile ? tile.getBoundingClientRect().height : 0, tileW: tile ? tile.getBoundingClientRect().width : 0 }
+    }, sel) as Promise<{ x: number; y: number; h: number; tileH: number; tileW: number } | null>
+    await expect.poll(() => read('button[title^="Click to set a manual ARV"]')).not.toBeNull()
+    const before = (await read('button[title^="Click to set a manual ARV"]'))!
+    await browser.evaluate(() => { (document.querySelector('button[title^="Click to set a manual ARV"]') as HTMLElement).click(); return true })
+    await expect.poll(() => read('input[aria-label="Manual ARV"]')).not.toBeNull()
+    // The box is the input's parent; its "$" starts where the number started
+    const after = (await browser.evaluate(() => {
+      const box = document.querySelector('input[aria-label="Manual ARV"]')!.parentElement as HTMLElement
+      const dollar = box.querySelector('span') as HTMLElement
+      const tile = box.closest('.border-r') as HTMLElement
+      const r = box.getBoundingClientRect()
+      return { boxY: r.y, boxH: r.height, textX: dollar.getBoundingClientRect().x, tileH: tile.getBoundingClientRect().height, tileW: tile.getBoundingClientRect().width }
+    })) as { boxY: number; boxH: number; textX: number; tileH: number; tileW: number }
+    expect(Math.abs(after.textX - before.x), 'text starts at the same left edge').toBeLessThan(1.5)
+    expect(Math.abs(after.boxY - before.y), 'same top').toBeLessThan(1.5)
+    expect(Math.abs(after.boxH - before.h), 'same height as the number').toBeLessThan(1.5)
+    expect(Math.abs(after.tileH - before.tileH), 'the tile does not grow or shrink').toBeLessThan(1.5)
+    expect(Math.abs(after.tileW - before.tileW), 'nor get wider').toBeLessThan(1.5)
+    // Leave no trace: an emptied box commits nothing when it loses focus (a filled one would save a manual ARV on the report)
+    await browser.evaluate(() => {
+      const input = document.querySelector('input[aria-label="Manual ARV"]') as HTMLInputElement
+      const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!
+      set.call(input, '')
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+      input.blur()
+      return true
+    })
+    await expect.poll(() => read('input[aria-label="Manual ARV"]')).toBeNull()
   })
 
   test('there is no comp rules line on the subject card', WEB, async (fx) => {

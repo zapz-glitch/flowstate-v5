@@ -2,6 +2,7 @@
 
 import { Droplets, AlertTriangle, ShieldCheck } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { MAP_COLORS } from './map-colors'
 
 interface MapOverlayProps {
   riskFlags?: string[] | null
@@ -9,9 +10,9 @@ interface MapOverlayProps {
 }
 
 const LEGEND_ITEMS = [
-  { color: '#3b82f6', label: 'Subject' },
-  { color: '#404040', label: 'Included' },
-  { color: '#a3a3a3', label: 'Excluded' },
+  { color: MAP_COLORS.subject, label: 'Subject' },
+  { color: MAP_COLORS.included, label: 'Included' },
+  { color: MAP_COLORS.excluded, label: 'Excluded' },
 ]
 
 export function MapLegend() {

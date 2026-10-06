@@ -55,6 +55,13 @@ cd /tmp && LD_LIBRARY_PATH=$HOME/.local/lib/playwright-deps \
 ## Review template
 
 ```
+### 2026-10-06 — Gray hover everywhere, ARV edit box, Offers icons, area line, map legend
+Screenshots: `g1` (ARV edit/after, hover pill, hover nav), `g2` (Offers), `a2` (area line, report with block groups), `c1` (legend)
+Requirements: one light-gray hover across the app (green only on Prep offer); the ARV edit box matches the number; Offers: Evaluating icon not spinning (clock), Ready icon not a check (inbox), Next up button removed; area line "Group N - Neighborhood" on the subject card, comp cards and hover panel; legend Included green, Excluded light silver.
+Defects found while verifying: the first ARV test saved a manual ARV onto the local test report (the edit box commits on blur and the report autosaves). Cleared it again and made the test empty the box first so it saves nothing. The first Offers test matched the whole page and saw the list's own progress rings spinning; it now checks the tile only.
+Tests: unit 21 files pass (new: hover color guard, map colors, area line); e2e 29 of 29, twice.
+Gate: dark mode checked on the report page and Property Search; no sideways scroll.
+
 ### 2026-10-06 — Comp stats moved into the subject card foot
 Screenshots: `m1`, `m2`, `m3` (light 1440, dark 1440, light 1280, light 390)
 Requirement: move "5 selected · 25 excluded · $241/sf avg · $320k to $410k" next to Prep offer, in the small strip at the bottom of the subject card.

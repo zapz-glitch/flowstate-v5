@@ -272,7 +272,7 @@ export default function ApiKeysTab() {
                       <div className="flex items-center justify-end gap-1">
                         <button
                           onClick={() => handleToggle(key.id, key.isActive)}
-                          className="p-2 text-foreground-tertiary hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors rounded-lg"
+                          className="p-2 text-foreground-tertiary hover:text-foreground hover:bg-secondary transition-colors rounded-lg"
                           title={key.isActive ? 'Disable' : 'Enable'}
                         >
                           {key.isActive ? (

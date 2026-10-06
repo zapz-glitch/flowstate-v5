@@ -23,7 +23,7 @@ export default function CdarvLayout({ children }: { children: React.ReactNode })
           <Link
             key={item.href}
             href={item.href}
-            className="px-3 py-2 text-body-sm text-foreground-secondary hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 rounded-t-md transition-colors"
+            className="px-3 py-2 text-body-sm text-foreground-secondary hover:text-foreground hover:bg-secondary rounded-t-md transition-colors"
           >
             {item.label}
           </Link>

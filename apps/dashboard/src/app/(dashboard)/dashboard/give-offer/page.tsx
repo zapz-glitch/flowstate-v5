@@ -5,8 +5,8 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
   Ban,
-  FileSignature, Inbox, ListChecks, Flame, Play, RotateCcw, CircleSlash,
-  ChevronRight, Copy, Check, Search, AlertTriangle, Trash2, Loader2,
+  FileSignature, Inbox, ListChecks, Flame, RotateCcw, CircleSlash,
+  ChevronRight, Copy, Check, Search, AlertTriangle, Trash2, Clock,
 } from 'lucide-react'
 import { getOfferQueue, hideQueueItem, type PipelineItem } from './actions'
 import {
@@ -97,7 +97,7 @@ function CopyAddr({ text }: { text: string }) {
       type="button"
       aria-label="Copy address"
       title="Copy address"
-      className="p-1 rounded text-foreground-tertiary hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors"
+      className="p-1 rounded text-foreground-tertiary hover:text-foreground hover:bg-secondary transition-colors"
       onClick={(e) => {
         e.preventDefault()
         e.stopPropagation()
@@ -300,8 +300,8 @@ export default function GiveOfferPage() {
   const resume = lastViewed && lastViewed.jobId !== nextJobId ? lastViewed : null
 
   const catIcons: Record<Cat, React.ReactNode> = {
-    waiting: <Loader2 size={14} className="animate-spin" />,
-    ready: <Check size={14} />,
+    waiting: <Clock size={14} />,
+    ready: <Inbox size={14} />,
     deadline: <AlertTriangle size={14} />,
     hot: <Flame size={14} />,
     prep_offer: <FileSignature size={14} />,
@@ -336,26 +336,15 @@ export default function GiveOfferPage() {
 
       <div className="flex-1 min-h-0 overflow-y-auto">
         <div className="px-4 sm:px-6 lg:px-4 pt-3 pb-6 space-y-3">
-          {/* Actions row — continue the queue or jump back to the last report */}
-          {(nextJobId || resume) && !query && (
+          {/* Jump back to the last report */}
+          {resume && !query && (
             <div className="border border-border/60 bg-background shadow-sm px-3 py-2 flex items-center gap-2 flex-wrap">
-              {nextJobId && (
-                <Link
-                  href={`/dashboard/give-offer/${nextJobId}?cat=ready`}
-                  onMouseEnter={() => prefetchReport(nextJobId)}
-                  onClick={() => { armNavVeil(); prefetchReport(nextJobId) }}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary/10 text-primary text-xs font-medium hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors"
-                >
-                  <Play size={12} />
-                  Next up — {next!.fullAddress ?? next!.address ?? 'top of queue'}
-                </Link>
-              )}
               {resume && (
                 <Link
                   href={`/dashboard/give-offer/${resume.jobId}`}
                   onMouseEnter={() => prefetchReport(resume.jobId)}
                   onClick={() => { armNavVeil(); prefetchReport(resume.jobId) }}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-border text-xs text-foreground-secondary hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-border text-xs text-foreground-secondary hover:text-foreground hover:bg-secondary transition-colors"
                 >
                   <RotateCcw size={12} />
                   Last report — {resume.address ?? resume.jobId}
@@ -375,7 +364,7 @@ export default function GiveOfferPage() {
                   className={`border rounded-md px-3 py-2.5 text-left transition-colors ${
                     cat === c
                       ? 'border-primary/60 bg-primary/10'
-                      : 'border-border/60 bg-background hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10'
+                      : 'border-border/60 bg-background hover:text-foreground hover:bg-secondary'
                   }`}
                 >
                   <div className={`flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider ${cat === c ? 'text-primary' : 'text-foreground-tertiary'}`}>

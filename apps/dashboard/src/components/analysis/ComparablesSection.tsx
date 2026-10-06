@@ -494,7 +494,7 @@ export function ComparablesSection({
                 size="sm"
                 onClick={() => submitReport('validate')}
                 disabled={reportSubmitting !== null}
-                className="text-emerald-600 dark:text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10"
+                className="text-emerald-600 dark:text-emerald-400 border-emerald-500/30 hover:bg-secondary"
               >
                 {reportSubmitting === 'validate' ? 'Saving…' : 'Validate'}
               </Button>

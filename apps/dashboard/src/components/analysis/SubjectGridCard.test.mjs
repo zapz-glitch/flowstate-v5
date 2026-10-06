@@ -90,7 +90,7 @@ test('Condition starts under Sq Ft and spans two columns so it is never cut shor
 test('the actions render at the foot of the card, after the details', () => {
   const out = render(base, { actions: h('button', null, 'Prep offer') })
   assert.ok(out.indexOf('Prep offer') > out.indexOf('Light Cosmetic'))
-  assert.ok(out.endsWith('</button></div></div>'), 'the buttons are the last thing inside the card, in the foot strip')
+  assert.ok(out.endsWith('</button></div></div></div>'), 'the buttons are the last thing inside the card, in the foot strip')
 })
 
 test('no comp rules line on the card', () => {
@@ -140,4 +140,15 @@ test('with neither stats nor actions the foot strip is not drawn', () => {
 
 test('with only the stats, the foot strip still shows them', () => {
   assert.match(render(base, { stats: h('span', null, 'STATS') }), /border-border\/60[\s\S]*STATS/)
+})
+
+test('the area line reads block group, dash, neighborhood, once', () => {
+  const out = render({ ...base, censusBlockGroup: '130670312034' })
+  assert.match(out, />Group 4 - Meadow Brook</)
+  assert.equal(count(out, 'Meadow Brook'), 1)
+  assert.doesNotMatch(out, /Meadow Brook[^<]*Group 4/, 'the group is not after the name')
+})
+
+test('with no block group the area line is just the name', () => {
+  assert.match(render(base), />Meadow Brook</)
 })

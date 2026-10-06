@@ -38,7 +38,7 @@ export function AddressDisplay({ address, latitude, longitude, className, showSt
         <button
           type="button"
           onClick={handleCopy}
-          className="inline-flex align-middle ml-1.5 text-foreground-tertiary hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors"
+          className="inline-flex align-middle ml-1.5 text-foreground-tertiary hover:text-foreground hover:bg-secondary transition-colors"
           title={copied ? 'Copied!' : 'Copy address'}
         >
           {copied ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}
@@ -49,7 +49,7 @@ export function AddressDisplay({ address, latitude, longitude, className, showSt
           href={streetViewUrl}
           target="_blank"
           rel="noopener noreferrer"
-          className="inline-flex ml-1.5 text-[10px] font-medium px-1.5 py-0.5 rounded bg-muted text-foreground-tertiary hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors align-middle"
+          className="inline-flex ml-1.5 text-[10px] font-medium px-1.5 py-0.5 rounded bg-muted text-foreground-tertiary hover:text-foreground hover:bg-secondary transition-colors align-middle"
           onClick={(e) => e.stopPropagation()}
         >
           Street View

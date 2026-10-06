@@ -5,6 +5,7 @@ import { APIProvider, Map, useApiIsLoaded, useMap } from '@vis.gl/react-google-m
 import { resolvePropertyLocation, resolveSubjectPanorama } from '@/lib/resolve-property-map'
 import type { MapCoordinate } from '@/lib/property-map-geometry'
 import { SubjectAerialMap, type SubjectAerialMapHandle } from './SubjectAerialMap'
+import { MAP_COLORS, markerNumberColor } from './map-colors'
 import { MapLegend } from './MapOverlay'
 import type { MapMarker } from './PropertyMap'
 import { emitMarkerHover } from './map-hover'
@@ -12,7 +13,7 @@ import { emitMarkerHover } from './map-hover'
 type Panorama = NonNullable<Awaited<ReturnType<typeof resolveSubjectPanorama>>>
 // Comps are one neutral dot each · the price label beside it carries the
 // information, and the number ties the dot to its card.
-const colors = { subject: '#3b82f6', 'comp-arv': '#404040', 'comp-market': '#404040', 'comp-floor': '#404040', 'comp-disabled': '#a3a3a3' }
+const colors = { subject: MAP_COLORS.subject, 'comp-arv': MAP_COLORS.included, 'comp-market': MAP_COLORS.included, 'comp-floor': MAP_COLORS.included, 'comp-disabled': MAP_COLORS.excluded }
 const priceLabel = (price?: number | null) => price == null ? null : price >= 1_000_000 ? `$${(price / 1_000_000).toFixed(2)}M` : `$${Math.round(price / 1000)}k`
 const buttonClass = 'flex h-8 items-center justify-center gap-1 rounded-md border border-border bg-background px-2 text-xs text-foreground shadow-sm hover:bg-secondary disabled:opacity-40'
 
@@ -30,7 +31,7 @@ async function loadLibrary(name: string): Promise<boolean> {
 
 const markerKey = (marker: MapMarker) => (marker.type === 'subject' ? 'subject' : marker.compKey)
 const markerIcon = (marker: MapMarker, active: boolean, index: number): google.maps.Icon | google.maps.Symbol => {
-  const fill = active ? '#f59e0b' : colors[marker.type]
+  const fill = active ? MAP_COLORS.active : colors[marker.type]
   if (marker.type === 'subject') {
     return { path: google.maps.SymbolPath.CIRCLE, scale: 12, fillColor: fill, fillOpacity: 1, strokeColor: '#fff', strokeWeight: 2 }
   }
@@ -45,7 +46,7 @@ const markerIcon = (marker: MapMarker, active: boolean, index: number): google.m
   const esc = (text: string) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;')
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">`
     + `<circle cx="12" cy="${cy}" r="10" fill="${fill}" stroke="#fff" stroke-width="2"/>`
-    + `<text x="12" y="${cy}" text-anchor="middle" dominant-baseline="central" font-family="system-ui,sans-serif" font-size="10" font-weight="700" fill="#fff">${index}</text>`
+    + `<text x="12" y="${cy}" text-anchor="middle" dominant-baseline="central" font-family="system-ui,sans-serif" font-size="10" font-weight="700" fill="${active ? '#fff' : markerNumberColor(marker.type)}">${index}</text>`
     + (lines.length ? `<rect x="28" y="${(h - tagH) / 2}" width="${tagW}" height="${tagH}" rx="5" fill="#171717" fill-opacity="0.92" stroke="#fff" stroke-width="1"/>`
       + lines.map((line, i) => `<text x="${28 + tagW / 2}" y="${(h - tagH) / 2 + 9 + i * 12}" text-anchor="middle" dominant-baseline="central" font-family="system-ui,sans-serif" font-size="${i === 0 ? 10 : 9}" font-weight="${i === 0 ? 700 : 500}" fill="${i === 0 ? '#fff' : '#d4d4d4'}">${esc(line)}</text>`).join('') : '')
     + '</svg>'

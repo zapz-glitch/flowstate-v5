@@ -85,7 +85,7 @@ function Section({
       <button
         type="button"
         onClick={() => setOpen(!open)}
-        className="w-full flex items-center gap-3 px-5 py-3.5 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors"
+        className="w-full flex items-center gap-3 px-5 py-3.5 hover:text-foreground hover:bg-secondary transition-colors"
       >
         <Icon className="w-4 h-4 text-foreground-tertiary flex-shrink-0" />
         <span className="text-body-sm font-semibold text-foreground flex-1 text-left">{title}</span>
@@ -525,7 +525,7 @@ export function SettingsPanel({ settingsHook, recalcData }: SettingsPanelProps) 
         <button
           type="button"
           onClick={resetToDefaults}
-          className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-body-sm font-medium text-foreground-secondary hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 rounded-lg transition-colors border border-border"
+          className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-body-sm font-medium text-foreground-secondary hover:text-foreground hover:bg-secondary rounded-lg transition-colors border border-border"
         >
           <RotateCcw className="w-3.5 h-3.5" />
           Reset to My Defaults

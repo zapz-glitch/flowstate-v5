@@ -132,7 +132,7 @@ function QueueFallback({ queue }: {
                   type="button"
                   onClick={() => decide('prep_offer')}
                   disabled={busy != null || !canOffer}
-                  className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded border border-emerald-600/40 text-xs font-medium text-emerald-600 hover:bg-emerald-500/10 transition-colors disabled:opacity-50 dark:text-emerald-400"
+                  className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded border border-emerald-600/40 text-xs font-medium text-emerald-600 hover:bg-secondary transition-colors disabled:opacity-50 dark:text-emerald-400"
                   title={canOffer ? `Prep offer at $${item.wholesalePrice!.toLocaleString('en-US')}` : 'No computed offer price'}
                 >
                   {busy === 'prep_offer' ? <RefreshCw size={13} className="animate-spin" /> : <FileSignature size={13} />}

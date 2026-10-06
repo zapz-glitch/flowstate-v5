@@ -8,7 +8,7 @@ import { Fact, Pair, STAMP } from './property-card-parts'
 import { CopyButton } from '@/components/ui/copy-button'
 import { cn } from '@/lib/utils'
 import type { SubjectData } from './shared-types'
-import { formatAddressCasing, formatCensusTract, formatLotSize, formatShortDate, getCompKey, subjectStreetViewHref, titleCaseWords } from './format-helpers'
+import { formatAddressCasing, formatAreaLine, formatCensusTract, formatLotSize, formatShortDate, getCompKey, subjectStreetViewHref, titleCaseWords } from './format-helpers'
 import { onMarkerHover, type MarkerHover } from './map-hover'
 
 const WIDTH = 660
@@ -157,7 +157,7 @@ function SubjectCompareCard({ subject }: { subject: SubjectData }) {
                 href={zillowUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-body-sm font-semibold text-foreground truncate rounded px-0.5 -mx-0.5 transition-colors hover:text-emerald-600 hover:bg-emerald-500/10 active:scale-[0.98] dark:hover:text-emerald-400"
+                className="text-body-sm font-semibold text-foreground truncate rounded px-0.5 -mx-0.5 transition-colors hover:text-foreground hover:bg-secondary active:scale-[0.98]"
                 title={`${subject.address} · open on Zillow`}
               >
                 {street}
@@ -174,7 +174,7 @@ function SubjectCompareCard({ subject }: { subject: SubjectData }) {
 
         {/* Area name left, what the price is right */}
         <div className="flex items-center justify-between gap-2 mt-0.5">
-          <span className="text-foreground-tertiary truncate">{area ? titleCaseWords(area) : tract ? `Tract ${tract}` : ''}</span>
+          <span className="text-foreground-tertiary truncate">{formatAreaLine(subject.censusBlockGroup, area) ?? (tract ? `Tract ${tract}` : '')}</span>
           <span className="font-medium flex-shrink-0 text-foreground-secondary">{subject.listPrice != null ? 'List price' : price != null ? 'Last sale' : ''}</span>
         </div>
 

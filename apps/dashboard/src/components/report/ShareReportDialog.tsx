@@ -178,7 +178,7 @@ export function ShareReportDialog({ open, onOpenChange, jobId }: ShareReportDial
                     <button
                       type="button"
                       onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-foreground-tertiary hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors"
+                      className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-foreground-tertiary hover:text-foreground hover:bg-secondary transition-colors"
                       tabIndex={-1}
                     >
                       {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
@@ -193,7 +193,7 @@ export function ShareReportDialog({ open, onOpenChange, jobId }: ShareReportDial
                   type="button"
                   onClick={handleEnableSharing}
                   disabled={saving || !password}
-                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-primary text-white text-body-sm font-medium hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-primary text-white text-body-sm font-medium hover:text-foreground hover:bg-secondary transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {saving ? (
                     <Loader2 className="w-4 h-4 animate-spin" />
@@ -226,7 +226,7 @@ export function ShareReportDialog({ open, onOpenChange, jobId }: ShareReportDial
                     <button
                       type="button"
                       onClick={handleCopyLink}
-                      className="p-2 rounded-lg border border-border hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors flex-shrink-0"
+                      className="p-2 rounded-lg border border-border hover:text-foreground hover:bg-secondary transition-colors flex-shrink-0"
                       title="Copy link"
                     >
                       {copied ? (
@@ -257,7 +257,7 @@ export function ShareReportDialog({ open, onOpenChange, jobId }: ShareReportDial
                       <button
                         type="button"
                         onClick={() => setShowPassword(!showPassword)}
-                        className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-foreground-tertiary hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors"
+                        className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-foreground-tertiary hover:text-foreground hover:bg-secondary transition-colors"
                         tabIndex={-1}
                       >
                         {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
@@ -267,7 +267,7 @@ export function ShareReportDialog({ open, onOpenChange, jobId }: ShareReportDial
                       type="button"
                       onClick={handleUpdatePassword}
                       disabled={saving || !password}
-                      className="px-3 py-2 rounded-lg text-body-sm font-medium bg-secondary text-foreground hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0"
+                      className="px-3 py-2 rounded-lg text-body-sm font-medium bg-secondary text-foreground hover:text-foreground hover:bg-secondary transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0"
                     >
                       {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Update'}
                     </button>

@@ -79,13 +79,11 @@ export function AnalysisResultLayout({
     ? `$${(compStats.priceMin / 1000).toFixed(0)}k to $${(compStats.priceMax / 1000).toFixed(0)}k`
     : null
   const statsNode = compStats ? (
-    <div className="text-[11px] leading-snug tabular-nums text-foreground-tertiary">
-      <div>
-        {compStats.selected} selected
-        {compStats.excluded > 0 && ` · ${compStats.excluded} excluded`}
-      </div>
-      {compStats.avgPsf != null && <div>${compStats.avgPsf}/sf avg</div>}
-      {priceRange && <div>{priceRange}</div>}
+    <div className="whitespace-nowrap text-[11px] tabular-nums text-foreground-tertiary">
+      {compStats.selected} selected
+      {compStats.excluded > 0 && ` · ${compStats.excluded} excluded`}
+      {compStats.avgPsf != null && ` · $${compStats.avgPsf}/sf avg`}
+      {priceRange && ` · ${priceRange}`}
     </div>
   ) : null
 

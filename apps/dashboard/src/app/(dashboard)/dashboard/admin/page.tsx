@@ -59,7 +59,7 @@ export default function AdminOverviewPage() {
         actions={
           <Link
             href="/dashboard/admin/users"
-            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-secondary text-foreground hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 text-body-sm font-medium transition-colors"
+            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-secondary text-foreground hover:text-foreground hover:bg-secondary text-body-sm font-medium transition-colors"
           >
             Manage Users
             <ArrowRight className="w-4 h-4" />
