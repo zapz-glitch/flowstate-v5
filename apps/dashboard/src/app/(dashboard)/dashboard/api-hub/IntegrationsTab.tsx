@@ -19,6 +19,7 @@ import {
   type GHLSettingsData,
   type GHLSettingsInput,
 } from '@/lib/client-api'
+import { SkeletonRows } from '@/components/ui/skeleton'
 
 interface FormState {
   apiToken: string
@@ -178,8 +179,8 @@ export default function IntegrationsTab() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+      <div className="max-w-3xl">
+        <SkeletonRows label="Loading integrations" rows={4} />
       </div>
     )
   }

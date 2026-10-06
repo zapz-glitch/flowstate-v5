@@ -27,6 +27,9 @@ import {
   type WaitFilter,
   type DecidedEntry,
 } from './queue'
+import { PageHeader } from '@/components/ui/page-header'
+import { SkeletonRows } from '@/components/ui/skeleton'
+import { EmptyState } from '@/components/ui/states'
 
 const SORT_PREF_KEY = 'giveOffer.waitFilter'
 const POLL_MS = 5000
@@ -312,22 +315,13 @@ export default function GiveOfferPage() {
 
   return (
     <div className="playground-bg -m-4 sm:-m-6 lg:-m-8 min-h-screen lg:h-[100dvh] flex flex-col lg:overflow-hidden">
-      {/* Header band — same geometry + card chrome as Property Search */}
-      <div className="px-4 sm:px-6 lg:px-4 pt-3 pb-1 lg:pt-4 lg:pb-0 lg:h-20 lg:flex lg:items-center lg:border-b lg:border-border space-y-3 flex-shrink-0">
-        <div className="w-full border border-border/60 overflow-hidden bg-background shadow-sm corner-accents corner-accents-bottom">
-          <div className="px-4 py-3 flex items-center gap-3">
-            <div className="w-7 h-7 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
-              <FileSignature className="w-3.5 h-3.5 text-primary" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="text-body-sm text-foreground-secondary">Offers</div>
-              <div className="text-xs text-foreground-tertiary">
-                {loaded
-                  ? `${counts.ready} ready${counts.waiting ? ` · ${counts.waiting} evaluating` : ''}${decided.length ? ` · ${decided.filter((d) => d.ok).length} decided today` : ''}`
-                  : 'Loading queue…'}
-              </div>
-            </div>
-            <div className="relative flex-shrink-0">
+      {/* Header band — keeps Property Search's height and bottom rule so panes line up */}
+      <div className="px-4 sm:px-6 lg:px-4 pt-3 pb-3 lg:pt-4 lg:pb-0 lg:h-20 lg:flex lg:items-center lg:border-b lg:border-border flex-shrink-0">
+        <PageHeader
+          title="Offers"
+          className="w-full"
+          actions={
+            <div className="relative">
               <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-foreground-tertiary pointer-events-none" />
               <input
                 value={query}
@@ -336,8 +330,8 @@ export default function GiveOfferPage() {
                 className="w-44 sm:w-56 bg-secondary/50 border border-border/50 rounded-md pl-7 pr-2 py-1.5 text-xs text-foreground placeholder:text-foreground-tertiary outline-none focus:border-primary/50"
               />
             </div>
-          </div>
-        </div>
+          }
+        />
       </div>
 
       <div className="flex-1 min-h-0 overflow-y-auto">
@@ -408,24 +402,16 @@ export default function GiveOfferPage() {
                 <div className="text-xs text-foreground-tertiary">The engine did not respond — try again shortly.</div>
               </div>
             ) : !loaded ? (
-              <div className="px-4 py-8 flex items-center justify-center gap-2">
-                <div className="w-4 h-4 rounded-full border-2 border-primary/30 border-t-primary animate-spin" />
-                <span className="text-xs text-foreground-tertiary">Loading queue…</span>
-              </div>
+              <SkeletonRows label="Loading offers" rows={5} className="border-0 rounded-none" />
             ) : rows.length === 0 ? (
-              <div className="px-4 py-8 flex flex-col items-center gap-2 text-center">
-                <Inbox className="w-5 h-5 text-foreground-tertiary" />
-                <div className="text-body-sm text-foreground-secondary">
-                  {query ? 'No matches' : cat === 'waiting' ? 'Nothing evaluating right now' : `Nothing in ${CAT_LABELS[cat].toLowerCase()} yet`}
-                </div>
-                <div className="text-xs text-foreground-tertiary">
-                  {query
-                    ? 'No queued or decided address matches.'
-                    : cat === 'waiting'
-                      ? 'Every queued property has been dispositioned — new ones land here as they reach underwriting.'
-                      : 'Dispositions land here as you work the queue.'}
-                </div>
-              </div>
+              <EmptyState
+                title={query ? 'No matches' : cat === 'waiting' ? 'Nothing evaluating right now' : `Nothing in ${CAT_LABELS[cat].toLowerCase()} yet`}
+                description={query
+                  ? 'No queued or decided address matches.'
+                  : cat === 'waiting'
+                    ? 'Every queued property has been dispositioned. New ones land here as they reach underwriting.'
+                    : 'Dispositions land here as you work the queue.'}
+              />
             ) : (
               <div className="divide-y divide-border/40">
                 {rows.map((row) => {

@@ -6,6 +6,7 @@ import { Key, BarChart3, Plug, BookOpen, ExternalLink } from 'lucide-react'
 import ApiKeysTab from './ApiKeysTab'
 import UsageTab from './UsageTab'
 import IntegrationsTab from './IntegrationsTab'
+import { PageHeader } from '@/components/ui/page-header'
 
 const VALID_TABS = ['api-keys', 'usage', 'integrations'] as const
 type TabValue = (typeof VALID_TABS)[number]
@@ -32,13 +33,7 @@ export default function ApiHubPage() {
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
-      {/* Header */}
-      <div className="space-y-1">
-        <h1 className="text-heading-lg text-foreground tracking-tight">API Hub</h1>
-        <p className="text-body text-foreground-tertiary">
-          Manage your API keys, monitor usage, and configure integrations
-        </p>
-      </div>
+      <PageHeader title="API Hub" />
 
       {/* Tabs */}
       <Tabs value={activeTab} onValueChange={onTabChange} className="space-y-6">
