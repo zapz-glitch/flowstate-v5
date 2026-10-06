@@ -124,6 +124,12 @@ interface RowData {
   evalElapsedMs?: number
   pocketScore?: number | null
   pocketName?: string | null
+  economicsScore?: number | null
+  overallScore?: number | null
+  scoreRationale?: string | null
+  evidenceQuality?: string | null
+  daysOnMarket?: number | null
+  contractFallouts?: number | null
 }
 
 export default function GiveOfferPage() {
@@ -245,6 +251,12 @@ export default function GiveOfferPage() {
         deadlineNote: item.deadline_note,
         pocketScore: item.pocketScore,
         pocketName: item.pocketName,
+        economicsScore: item.economicsScore,
+        overallScore: item.overallScore,
+        scoreRationale: item.scoreRationale,
+        evidenceQuality: item.evidenceQuality,
+        daysOnMarket: item.daysOnMarket,
+        contractFallouts: item.contractFallouts,
         icon: item.offer_stage === 'deadline_today'
           ? <AlertTriangle size={13} className="text-red-500 flex-shrink-0" />
           : jobId
@@ -486,20 +498,38 @@ export default function GiveOfferPage() {
                   )
                   const inner = (
                     <>
+                      {row.overallScore != null && (
+                        <span
+                          title="Overall score (50/50 pocket + economics)"
+                          className={`text-[11px] font-bold tabular-nums px-1.5 py-0.5 rounded flex-shrink-0 ${
+                            row.overallScore >= 7 ? 'text-emerald-400 bg-emerald-400/15'
+                            : row.overallScore >= 4 ? 'text-foreground-secondary bg-foreground-tertiary/10'
+                            : 'text-foreground-tertiary bg-foreground-tertiary/10'}`}
+                        >
+                          {row.overallScore.toFixed(1)}
+                        </span>
+                      )}
                       {row.pocketScore != null && (
                         <span
                           title={row.pocketName ? `Pocket: ${row.pocketName}` : 'Pocket score'}
-                          className={`text-[10px] font-semibold tabular-nums px-1.5 py-0.5 rounded flex-shrink-0 ${
-                            row.pocketScore >= 7 ? 'text-emerald-400 bg-emerald-400/10'
-                            : row.pocketScore >= 4 ? 'text-foreground-secondary bg-foreground-tertiary/10'
-                            : 'text-foreground-tertiary bg-foreground-tertiary/10'}`}
+                          className="text-[10px] font-semibold tabular-nums px-1.5 py-0.5 rounded flex-shrink-0 text-foreground-tertiary bg-foreground-tertiary/10"
                         >
-                          {row.pocketScore.toFixed(1)}
+                          {row.pocketScore.toFixed(1)}p
+                        </span>
+                      )}
+                      {row.economicsScore != null && (
+                        <span
+                          title="Economics — acquisition likelihood"
+                          className="text-[10px] font-semibold tabular-nums px-1.5 py-0.5 rounded flex-shrink-0 text-foreground-tertiary bg-foreground-tertiary/10"
+                        >
+                          {row.economicsScore.toFixed(1)}e
                         </span>
                       )}
                       <div className="flex-1 min-w-0">
                         <div className={`text-xs truncate ${row.urgent ? 'text-red-500 font-medium' : 'text-foreground'}`}>{row.address}</div>
-                        <div className={`text-[10px] ${row.urgent ? 'text-red-400' : 'text-foreground-tertiary'}`}>{row.meta}{row.pocketName ? ` · ${row.pocketName}` : ''}</div>
+                        <div className={`text-[10px] ${row.urgent ? 'text-red-400' : 'text-foreground-tertiary'}`}>{row.meta}{row.pocketName ? ` · ${row.pocketName}` : ''}{row.daysOnMarket != null ? ` · ${row.daysOnMarket}d` : ''}{row.evidenceQuality === 'thin' ? ' · thin evidence' : ''}</div>
+                        {row.contractFallouts ? <div className="text-[10px] text-amber-500 truncate mt-0.5">fell out of contract {row.contractFallouts}× — find out why</div> : null}
+                        {row.scoreRationale && <div className="text-[10px] text-foreground-secondary/80 truncate mt-0.5" title={row.scoreRationale}>{row.scoreRationale}</div>}
                         {row.deadlineNote && <div className="text-[10px] text-foreground-secondary truncate mt-0.5">{row.deadlineNote}</div>}
                       </div>
                       <CopyAddr text={row.address ?? ''} />

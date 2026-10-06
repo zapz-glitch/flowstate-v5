@@ -337,6 +337,32 @@ async function attachPockets(
     item.pocketScore = hit?.score ?? provisionalScore(inputs)
     item.metro = hit?.metro ?? metroGuess(id.state)
   }
+
+  // property_scores — the post-eval dual verdict (economics + overall +
+  // rationale + evidence flag + listing stats), keyed by job_id.
+  const psRows = []
+  for (let i = 0; i < jobIds.length; i += 90) {
+    const chunk = jobIds.slice(i, i + 90)
+    const r = await c.env.DB.prepare(
+      `SELECT job_id, pocket_score, economics_score, overall_score, economics_rationale,
+              evidence_quality, contract_fallouts, days_on_market
+         FROM property_scores WHERE job_id IN (${chunk.map(() => '?').join(',')})`,
+    ).bind(...chunk).all().catch(() => null)
+    psRows.push(...(r?.results ?? []))
+  }
+  const psByJob = new Map(psRows.map((r) => [r.job_id, r]))
+  for (const item of items) {
+    const jid = jobIdOf(item)
+    const ps = jid ? psByJob.get(jid) : null
+    if (!ps) continue
+    if (ps.pocket_score != null) item.pocketScore = ps.pocket_score
+    item.economicsScore = ps.economics_score ?? null
+    item.overallScore = ps.overall_score ?? null
+    item.scoreRationale = ps.economics_rationale ?? null
+    item.evidenceQuality = ps.evidence_quality ?? null
+    if (ps.contract_fallouts) item.contractFallouts = ps.contract_fallouts
+    if (ps.days_on_market != null) item.daysOnMarket = ps.days_on_market
+  }
   for (const [key, { id, inputs }] of pockets) {
     if (scoreByPocket.has(key)) continue
     pending.push(scorePocket(c.env, id, inputs, null))

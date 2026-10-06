@@ -51,6 +51,12 @@ export interface PipelineItem {
   pocketKey?: string | null
   pocketName?: string | null
   pocketScore?: number | null
+  economicsScore?: number | null
+  overallScore?: number | null
+  scoreRationale?: string | null
+  evidenceQuality?: string | null
+  daysOnMarket?: number | null
+  contractFallouts?: number | null
   source?: 'api' | string | null
 }
 
