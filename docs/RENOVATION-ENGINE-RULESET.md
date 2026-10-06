@@ -159,10 +159,13 @@ default. Resolution order:
 
 1. **Internal flip evidence (best).** Look at verified flips INSIDE the
    pocket from the comp pool: purchase price → renovated resale price.
-   `implied reno $/sqft = (sale price − purchase price − market
-   appreciation) / sqft` — the spread IS the local renovation cost plus
-   margin, the most local number that exists. Needs a known acquisition
-   price and a resale in the same geography.
+   `implied reno $/sqft = (resale price − purchase price − market
+   appreciation − estimated flip margin) / sqft`. The spread is cost
+   PLUS the flipper's margin — charge it as-is and the budget pretends
+   profit is construction. Estimate the flip's margin as at least the
+   system's minimum profit target plus acquisition/holding costs
+   (typically 15–25% of resale), and subtract it before dividing. Needs
+   a known acquisition price and a resale in the same geography.
 2. **Local search.** Query for zip/city-level remodel pricing:
    - `"cost to renovate a house per square foot <city> <state> 2026"`
    - `"homewyse whole house remodel cost <zip>"`
