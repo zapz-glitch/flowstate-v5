@@ -51,6 +51,11 @@ const EXPECTED_EVAL_MS = 90_000
 function EvalRing({ elapsedMs }: { elapsedMs: number }) {
   const r = 6
   const c = 2 * Math.PI * r
+  const STALL_MS = 30 * 60 * 1000
+  if (elapsedMs > STALL_MS) {
+    // Stalled — the eval marker likely expired mid-write; stop spinning.
+    return <span className="text-[9px] text-foreground-tertiary flex-shrink-0" title="Eval marker expired">stalled</span>
+  }
   const fill = Math.min(elapsedMs / EXPECTED_EVAL_MS, 1)
   const overtime = elapsedMs > EXPECTED_EVAL_MS * 2
   return (
@@ -121,6 +126,7 @@ interface RowData {
   deadlineAt?: string | null
   deadlineNote?: string | null
   section?: string
+  metroItems?: PipelineItem[]
   evalElapsedMs?: number
   pocketScore?: number | null
   pocketName?: string | null
@@ -173,7 +179,8 @@ export default function GiveOfferPage() {
         if (cancelled) return
         if (q.ok) {
           setCachedQueue(q.items)
-          setRaw((prev) => (JSON.stringify(prev.map((i) => i.leadId)) === JSON.stringify(q.items.map((i) => i.leadId)) ? prev : q.items))
+          const fp = (items: typeof q.items) => JSON.stringify(items.map((i) => [i.leadId, i.overallScore, i.pocketScore, i.evalReportUrl]))
+          setRaw((prev) => (fp(prev) === fp(q.items) ? prev : q.items))
           setFailedFetch(false)
         } else {
           setFailedFetch(true)
@@ -299,7 +306,7 @@ export default function GiveOfferPage() {
         })
         const out: RowData[] = []
         for (const [metro, metroItems] of metros) {
-          out.push({ key: `metro:${metro}`, section: metro, jobId: null } as RowData)
+          out.push({ key: `metro:${metro}`, section: metro, jobId: null, metroItems } as RowData)
           metroItems
             .sort((a, b) => (b.pocketScore ?? -1) - (a.pocketScore ?? -1))
             .forEach((i) => out.push({ ...queueRow(i), urgent: i.offer_stage === 'deadline_today' }))
@@ -314,6 +321,25 @@ export default function GiveOfferPage() {
       case 'failed': return failedDecided.map(decidedRow)
     }
   }, [cat, query, queueItems, hotItems, prepDecided, marginDecided, failedDecided, decided, now])
+
+  const [collapsedMetros, setCollapsedMetros] = useState<Set<string>>(new Set())
+  const [preppingMetro, setPreppingMetro] = useState<string | null>(null)
+  const prepMetro = async (metro: string, items: PipelineItem[]) => {
+    setPreppingMetro(metro)
+    const { dispatchOfferPrep } = await import('../analyze/actions')
+    for (const i of items) {
+      if (i.wholesalePrice == null || !i.address) continue
+      await dispatchOfferPrep({
+        propertyAddress: i.address,
+        leadId: i.leadId ?? undefined,
+        opportunityId: i.opportunityId ?? undefined,
+        purchasePrice: i.wholesalePrice,
+        jobId: jobIdForItem(i) ?? undefined,
+      }).catch(() => null)
+    }
+    setPreppingMetro(null)
+    // the 5s poll picks up the new disposition state on its own
+  }
 
   const dismiss = async (key: string | null | undefined) => {
     if (!key) return
@@ -466,12 +492,36 @@ export default function GiveOfferPage() {
               <div className="divide-y divide-border/40">
                 {rows.map((row) => {
                   if (row.section) {
+                    const isMetro = row.key.startsWith('metro:')
+                    const metro = isMetro ? row.section : null
+                    const collapsed = metro != null && collapsedMetros.has(metro)
+                    const metroCount = row.metroItems?.length ?? 0
+                    const topOverall = row.metroItems ? Math.max(...row.metroItems.map((i) => i.overallScore ?? -1), -1) : -1
                     return (
-                      <div key={row.key} className="px-3 pt-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-foreground-tertiary">
-                        {row.section}
+                      <div
+                        key={row.key}
+                        className={isMetro ? 'px-3 pt-3 pb-1 flex items-center gap-2 cursor-pointer select-none' : 'px-3 pt-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-foreground-tertiary'}
+                        onClick={isMetro ? () => setCollapsedMetros((prev) => { const n = new Set(prev); n.has(metro!) ? n.delete(metro!) : n.add(metro!); return n }) : undefined}
+                      >
+                        {isMetro ? (
+                          <>
+                            <ChevronRight size={11} className={`text-foreground-tertiary transition-transform ${collapsed ? '' : 'rotate-90'}`} />
+                            <span className="text-[10px] font-semibold uppercase tracking-wider text-foreground-tertiary">{metro}</span>
+                            <span className="text-[10px] text-foreground-tertiary/60">{metroCount}{topOverall >= 0 ? ` · top ${topOverall.toFixed(1)}` : ''}</span>
+                            <button
+                              type="button"
+                              disabled={preppingMetro === metro}
+                              className="ml-auto px-1.5 py-0.5 rounded text-[10px] font-medium border border-primary/40 text-primary hover:bg-primary/10 disabled:opacity-50"
+                              onClick={(e) => { e.stopPropagation(); if (row.metroItems) void prepMetro(metro!, row.metroItems) }}
+                            >
+                              {preppingMetro === metro ? 'Prepping…' : `Prep ${metroCount} offers`}
+                            </button>
+                          </>
+                        ) : row.section}
                       </div>
                     )
                   }
+                  if (row.metroItems && collapsedMetros.has(row.key.slice(6))) return null
                   const actions = (
                     <span className="flex items-center gap-1 flex-shrink-0">
                       {row.needsEval && (

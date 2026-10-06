@@ -248,28 +248,46 @@ async function apiEvalQueueItems(env: Env, userId: string | undefined): Promise<
 
 // GET /v1/pipeline/queue → GET /engine/queue (KV-cached, SWR, listPrice-enriched,
 // hidden items filtered) + today's API evals merged in
+const QUEUE_SNAPSHOT_FRESH_MS = 15_000
+
 pipelineReads.get('/queue', async (c) => {
-  const r = await engineJsonCached(c, '/engine/queue', enrichQueueListPrices)
-  if (!r) return c.json({ ok: false, error: 'Engine unavailable' }, 502)
-  if (!r.ok) return c.json({ ok: false, error: 'Engine fetch failed' }, 502)
-  const hidden = await hiddenOpps(c.env)
-  const body = r.body as { items?: Array<{ opportunityId?: string; address?: string }>; count?: number }
-  if (Array.isArray(body?.items) && hidden.size) {
-    body.items = body.items.filter((i) =>
-      (!i.opportunityId || !hidden.has(i.opportunityId)) && !hidden.has((i as { leadId?: string }).leadId ?? ''))
-  }
   const auth = c.get('auth') as AuthContext | undefined
-  const [apiItems, inflight] = await Promise.all([
-    apiEvalQueueItems(c.env, auth?.userId),
-    inflightEvalItems(c.env, auth?.userId),
-  ])
-  if (apiItems.length || inflight.length) {
-    const seen = new Set((body.items ?? []).flatMap((i) => [addrKey(i.address)]).filter(Boolean))
-    const fresh = [...apiItems, ...inflight].filter((i) => !seen.has(addrKey(i.address as string)))
-    body.items = [...(body.items ?? []), ...fresh]
+  const snapKey = `queue-snapshot:${auth?.userId ?? 'anon'}`
+
+  const build = async (): Promise<unknown> => {
+    const r = await engineJsonCached(c, '/engine/queue', enrichQueueListPrices)
+    if (!r) return null
+    if (!r.ok) return null
+    const hidden = await hiddenOpps(c.env)
+    const body = r.body as { items?: Array<{ opportunityId?: string; address?: string }>; count?: number }
+    if (Array.isArray(body?.items) && hidden.size) {
+      body.items = body.items.filter((i) =>
+        (!i.opportunityId || !hidden.has(i.opportunityId)) && !hidden.has((i as { leadId?: string }).leadId ?? ''))
+    }
+    const [apiItems, inflight] = await Promise.all([
+      apiEvalQueueItems(c.env, auth?.userId),
+      inflightEvalItems(c.env, auth?.userId),
+    ])
+    if (apiItems.length || inflight.length) {
+      const seen = new Set((body.items ?? []).flatMap((i) => [addrKey(i.address)]).filter(Boolean))
+      const fresh = [...apiItems, ...inflight].filter((i) => !seen.has(addrKey(i.address as string)))
+      body.items = [...(body.items ?? []), ...fresh]
+    }
+    await attachPockets(c, body.items ?? [])
+    body.count = body.items?.length ?? 0
+    await c.env.API_CACHE.put(snapKey, JSON.stringify({ t: Date.now(), body }), { expirationTtl: 600 }).catch(() => {})
+    return body
   }
-  await attachPockets(c, body.items ?? [])
-  body.count = body.items?.length ?? 0
+
+  const snap = await c.env.API_CACHE.get(snapKey, 'json') as { t: number; body: unknown } | null
+  if (snap && Date.now() - snap.t < QUEUE_SNAPSHOT_FRESH_MS) return c.json(snap.body)
+  if (snap) {
+    // Stale — serve instantly, rebuild in the background.
+    c.executionCtx.waitUntil(build())
+    return c.json(snap.body)
+  }
+  const body = await build()
+  if (!body) return c.json({ ok: false, error: 'Engine unavailable' }, 502)
   return c.json(body)
 })
 
