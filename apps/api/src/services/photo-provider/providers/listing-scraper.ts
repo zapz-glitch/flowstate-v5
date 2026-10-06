@@ -234,6 +234,11 @@ export class ListingPhotoScraper {
 
   /** Scrapfly scrape — ASP + JS render, residential escalation on denial. */
   private async scrapeViaScrapfly(url: string, residential = false): Promise<{ html: string; markdown: string }> {
+    // The API key rides in the query string — only ever send it to
+    // Scrapfly's own hosts, no matter what the env says.
+    const endpoint = this.scrapflyUrl ?? 'https://api.scrapfly.io/scrape'
+    const host = (() => { try { return new URL(endpoint).hostname } catch { return '' } })()
+    if (!host.endsWith('scrapfly.io')) throw new Error(`Scrapfly endpoint refused: ${endpoint}`)
     const params = new URLSearchParams({
       key: this.scrapflyApiKey as string,
       url,
@@ -242,7 +247,7 @@ export class ListingPhotoScraper {
       render_js: 'true',
     })
     if (residential) params.set('proxy_pool', 'public_residential_pool')
-    const resp = await fetch(`${this.scrapflyUrl ?? 'https://api.scrapfly.io/scrape'}?${params}`, {
+    const resp = await fetch(`${endpoint}?${params}`, {
       signal: AbortSignal.timeout(60_000),
     })
     if (!resp.ok) throw new Error(`Scrapfly failed: ${resp.status}`)

@@ -805,7 +805,12 @@ export async function performAnalysisPhase1(
               ]).catch(() => null)
             }
           }
-          await Promise.all(Array.from({ length: Math.min(6, clefCompsSorted.length) }, lane))
+          // Global deadline — 27 slow comps × 6 lanes could otherwise stall
+          // the pipeline for minutes; stragglers return as unlabeled.
+          await Promise.race([
+            Promise.all(Array.from({ length: Math.min(6, clefCompsSorted.length) }, lane)),
+            new Promise((r) => setTimeout(r, 90_000)),
+          ])
           return out
         })()
       : null

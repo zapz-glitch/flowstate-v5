@@ -81,8 +81,10 @@ import { createListingPhotoProvider } from './providers/listing-provider'
 
 export type PhotoProviderType = 'zillow' | 'mls' | 'redfin' | 'realtor' | 'manual'
 
-/** Subject-photo fallback order: Zillow → Redfin → Realtor.com → none */
-const SUBJECT_FALLBACK_ORDER: PhotoProviderType[] = ['zillow', 'redfin', 'realtor']
+/** Subject-photo fallback order: Redfin → Zillow → Realtor.com → none.
+ *  Redfin runs first so its listing metadata (ask price, flood signal)
+ *  merges into whichever provider wins on photos. */
+const SUBJECT_FALLBACK_ORDER: PhotoProviderType[] = ['redfin', 'zillow', 'realtor']
 
 /**
  * Comp-photo fallback order: Zillow first (richest listing data), then

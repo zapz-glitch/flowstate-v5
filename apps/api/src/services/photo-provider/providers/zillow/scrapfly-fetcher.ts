@@ -60,6 +60,7 @@ interface SerperResponse {
 export class ScrapflyZillowFetcher {
   private apiKey: string
   private apiUrl: string
+  private apiUrlOk: boolean
   private serperApiKey?: string
   private cache?: KVNamespace
   private cacheTtl: number
@@ -73,6 +74,16 @@ export class ScrapflyZillowFetcher {
   constructor(config: ScrapflyZillowFetcherConfig) {
     this.apiKey = config.apiKey
     this.apiUrl = config.apiUrl ?? 'https://api.scrapfly.io/scrape'
+    // The API key rides in the scrape query string — only ever send it to
+    // Scrapfly's own hosts, no matter what the env says.
+    this.apiUrlOk = (() => {
+      try {
+        return new URL(this.apiUrl).hostname.endsWith('scrapfly.io')
+      } catch {
+        return false
+      }
+    })()
+    if (!this.apiUrlOk) console.warn(`[ScrapflyZillow] refusing non-Scrapfly apiUrl: ${this.apiUrl}`)
     this.serperApiKey = config.serperApiKey
     this.cache = config.cache
     this.cacheTtl = config.cacheTtl ?? DEFAULT_CACHE_TTL
@@ -89,6 +100,7 @@ export class ScrapflyZillowFetcher {
   /** Scrapfly scrape → HTML. Workers' ladder, cheapest first:
    *  ASP datacenter (no JS) → ASP+JS render → ASP+JS+residential. */
   private async scrape(url: string, opts?: { residential?: boolean; render?: boolean }): Promise<string | null> {
+    if (!this.apiUrlOk) return null
     const run = async (render: boolean, residential: boolean): Promise<string | null> => {
       const params = new URLSearchParams({
         key: this.apiKey,
@@ -140,6 +152,17 @@ export class ScrapflyZillowFetcher {
     return null
   }
 
+  /** canonical/og:url of a rendered page — proves the scrape landed on a
+   *  real listing (with its zpid) rather than a results page full of other
+   *  homes' photos. */
+  private canonicalListingUrl(html: string): string | null {
+    return (
+      html.match(/<link[^>]+rel="canonical"[^>]+href="([^"]+)"/i)?.[1] ??
+      html.match(/<meta[^>]+property="og:url"[^>]+content="([^"]+)"/i)?.[1] ??
+      null
+    )
+  }
+
   /** Street-number guard — search engines happily return the neighbor's
    *  listing; wrong-house photos are worse than none. */
   private urlMatchesAddress(url: string, property: ZillowPropertyIdentifier): boolean {
@@ -152,14 +175,14 @@ export class ScrapflyZillowFetcher {
    *  Scrapfly-rendered pass over the generated search page. */
   private async resolveZillowUrl(property: ZillowPropertyIdentifier, searchUrl: string): Promise<string | null> {
     const q = `"${property.address} ${property.city} ${property.state}" site:zillow.com/homedetails`
-    const viaSerper = await this.serperResolve(q, /https?:\/\/(?:www\.)?zillow\.com\/homedetails\/[A-Za-z0-9\-_.%]+/)
+    const viaSerper = await this.serperResolve(q, /https?:\/\/(?:www\.)?zillow\.com\/homedetails\/[A-Za-z0-9\-_.%]+(?:\/\d+_zpid\/?)?/)
     if (viaSerper && this.urlMatchesAddress(viaSerper, property)) return viaSerper
 
     const html = await this.scrape(searchUrl, { render: true })
     if (!html) return null
     const links = [
       ...new Set(
-        (html.match(/zillow\.com\/homedetails\/[A-Za-z0-9\-_.%]+/g) ?? [])
+        (html.match(/zillow\.com\/homedetails\/[A-Za-z0-9\-_.%]+(?:\/\d+_zpid\/?)?/g) ?? [])
           .map((l) => `https://www.${l}`.replace(/\/$/, '')),
       ),
     ]
@@ -281,10 +304,19 @@ export class ScrapflyZillowFetcher {
 
       if (!extracted) {
         // Generated search-page URL first — cheap when the listing surfaces.
+        // A miss renders a *search page* whose photos belong to other homes,
+        // so the page is only evidence when its canonical URL proves it's
+        // this property's listing.
         const html = await this.scrape(zillowUrl, { render: true })
         if (html) {
-          const parsed = parseZillowHtml(html)
-          if (isValidExtraction(parsed)) extracted = parsed
+          const canonical = this.canonicalListingUrl(html)
+          if (canonical && canonical.includes('/homedetails/') && this.urlMatchesAddress(canonical, property)) {
+            const parsed = parseZillowHtml(html)
+            if (isValidExtraction(parsed)) {
+              extracted = parsed
+              resolvedUrl = canonical
+            }
+          }
         }
 
         // Miss → resolve the real homedetails URL (Serper → rendered search page).

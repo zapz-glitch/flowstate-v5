@@ -21,7 +21,9 @@ const PROP = {
 }
 
 const ZILLOW_HTML = `
-<html><body>
+<html><head>
+<link rel="canonical" href="https://www.zillow.com/homedetails/4428-Crenshaw-Ave-Fort-Worth-TX-76105/12345_zpid/"/>
+</head><body>
 <div class="hollywood-gallery">
   <img src="https://photos.zillowstatic.com/fp/abc123abc123abc123abc123-p_f.jpg"/>
   <img src="https://photos.zillowstatic.com/fp/def456def456def456def456-p_f.jpg"/>
@@ -84,6 +86,23 @@ function stubFetch(handlers: Array<{ match: string | RegExp; body: unknown; ok?:
   assert.ok((res.listing?.photos.length ?? 0) >= 2)
   assert.ok(calls.every((c) => c.includes('asp=true') && c.includes('render_js=true')))
   assert.equal(f.firecrawlCallCount >= 1, true)
+}
+
+// ── 3b. Search-page photos are NOT listing evidence: a scrape that lands
+// on a results page (no homedetails canonical) must be rejected even when
+// it carries photos — wrong-house evidence is worse than none.
+{
+  const SEARCH_PAGE_HTML = `
+  <html><body>
+    <img src="https://photos.zillowstatic.com/fp/other111other111other111-p_f.jpg"/>
+    <img src="https://photos.zillowstatic.com/fp/other222other222other222-p_f.jpg"/>
+  </body></html>`
+  stubFetch([
+    { match: 'api.scrapfly.io/scrape', body: { result: { status_code: 200, content: SEARCH_PAGE_HTML } } },
+  ])
+  const f = new ScrapflyZillowFetcher({ apiKey: 'k' })
+  const res = await f.fetchListing(PROP, { skipCache: true })
+  assert.equal(res.listing, undefined, 'results-page photos must not pass as listing evidence')
 }
 
 // ── 4. Ladder: search-page miss → Serper homedetails → photos ──
