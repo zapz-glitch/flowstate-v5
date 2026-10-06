@@ -1458,18 +1458,18 @@ export class AnalysisJobDO {
   private markEvalActive(body: { jobId: string; userId: string; search?: { address?: string; streetAddress?: string; city?: string; state?: string; zipCode?: string } }): void {
     const srch = body.search ?? {}
     const address = srch.address ?? [srch.streetAddress, srch.city, srch.state, srch.zipCode].filter(Boolean).join(', ')
-    this.state.waitUntil(
-      this.env.API_CACHE.put(
-        `eval-active:${body.userId}:${body.jobId}`,
-        JSON.stringify({ jobId: body.jobId, userId: body.userId, address, startedAt: new Date().toISOString() }),
-        { expirationTtl: 1800 },
-      ).catch(() => {}),
-    )
+    const marker = this.env.API_CACHE?.put(
+      `eval-active:${body.userId}:${body.jobId}`,
+      JSON.stringify({ jobId: body.jobId, userId: body.userId, address, startedAt: new Date().toISOString() }),
+      { expirationTtl: 1800 },
+    ).catch(() => {})
+    if (marker) this.state.waitUntil(marker)
   }
 
   private clearEvalActive(jobId: string): void {
     const uid = this.jobState?.userId ?? ''
-    this.state.waitUntil(this.env.API_CACHE.delete(`eval-active:${uid}:${jobId}`).catch(() => {}))
+    const cleared = this.env.API_CACHE?.delete(`eval-active:${uid}:${jobId}`).catch(() => {})
+    if (cleared) this.state.waitUntil(cleared)
   }
 
   private async saveRunRecord(
