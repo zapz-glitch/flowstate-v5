@@ -39,7 +39,7 @@ const TRANSACTION_NOISE_REASON: Record<string, string> = {
 }
 export { arvEvidence, classifyCompsByEvidence, pocketPriceGroups }
 import { evaluateB, subdivisionsMatch, type BComp, type BSubject } from '@flowstate-api/shared/appraisal'
-import { createValuationService, MAJOR_ITEMS, type MajorItem } from '../valuation'
+import { createValuationService, MAJOR_ITEMS, type MajorItem, type ValuationResult } from '../valuation'
 import type { ClassificationResult } from '../classification'
 import type { RehabTable, TierRangeDefinition } from '@flowstate-api/shared/valuation'
 import {
@@ -48,6 +48,7 @@ import {
   type AnalysisResponse,
   type ApiCallStats,
   type ResponseContext,
+  type RehabLevelEstimate,
 } from '../analysis'
 import { createPhotoService, type PhotoBundle, type PropertyIdentifier, type PropertyPhotos } from '../photo-provider'
 import { gatherCompConditionEvidence, type CompConditionEvidence } from '../comp-evidence'
@@ -208,6 +209,8 @@ export interface EvaluationRunEvidence {
   compCurbAppeal: CompCurbAppealMap | null
   bAttemptTrail: string[]
   attempts: EvaluationAttemptRecord[]
+  /** Present when the agent drove comp selection — the posted verdict. */
+  agentSelection?: AgentSelection
 }
 
 export interface EvaluationResult {
@@ -431,11 +434,11 @@ export function computeLocationPenalty(
  * - Vision: subject-photo renovation level drives the rehab tier (falls back
  *   to the caller's buybox or defaults when no evidence exists).
  */
-export async function performAnalysis(
+export async function performAnalysisPhase1(
   params: EvaluationParams,
   env: Env,
   onProgress?: (message: string, data?: Record<string, unknown>) => void
-): Promise<EvaluationResult> {
+): Promise<Phase1Context> {
   const { jobId } = params
   let { bundle } = params
   const appraisalService = createAppraisalService()
@@ -713,17 +716,8 @@ export async function performAnalysis(
       || (a.distanceMiles ?? 999) - (b.distanceMiles ?? 999))
     .slice(0, 15)
   const legacyRedfinCompIds = new Set(legacyRedfinCompTargets.map((comp) => comp.id))
-  const normalizeGeoName = (value?: string | null) =>
-    value?.toLowerCase().replace(/[^a-z0-9]/g, '') || null
-  const subjectNeighborhood = normalizeGeoName(bundle.property.neighborhoodName)
-  const geoPriority = (comp: AppraisedComparable): number | null => {
-    if (bundle.property.censusTract && comp.censusTract === bundle.property.censusTract) return 0
-    if (comp.sameBlockGroup === true) return 1
-    const neighborhoodMatch = subjectNeighborhood != null
-      && normalizeGeoName(comp.neighborhoodName) === subjectNeighborhood
-    const subdivisionMatch = subdivisionsMatch(bundle.property.subdivision, comp.subdivision)
-    return neighborhoodMatch || subdivisionMatch ? 2 : null
-  }
+  // Geo doctrine: block group > neighborhood/subdivision > tract (fallback tier).
+  const geoPriority = (comp: AppraisedComparable): number | null => compGeoPriority(bundle.property, comp)
   const geoMatchedRedfinTargets = appraisalResult.comparables
     .map((comp) => ({ comp, priority: geoPriority(comp) }))
     .filter((entry): entry is { comp: AppraisedComparable; priority: number } => entry.priority != null)
@@ -1226,6 +1220,78 @@ export async function performAnalysis(
       subjectAvm
     )
   }
+  return freezePhase1Context({
+    jobId, bundle, appraisalResult, subjectAvm, insufficient, preferredSaleAgeDays,
+    filters, adjustments, steps, fallbacksUsed, compClassifications, classificationSummary,
+    compCurbAppeal, compListingPhysicalDetails, subjectListingDetails,
+    redfinDetailsEnabled, redfinTargetsById, renovation, subjectCurbAppeal,
+    sellerNotes, rehabAdditions, rehabAdvisories, derivedBuybox,
+    subjectSqft, compAvgSqft, finalArv, valuation, valuationAnchor,
+    avmAnchor, assessedAnchor, rehabLevelEstimates, groupBResult,
+    groupACompIds, bestMatch, asIsThresholdPercent, photoBundlePromise,
+    apiCallStats: params.apiCallStats,
+  })
+}
+
+// ── Phase 2 — selection verdict + valuation tail ─────────────────────────────
+// Re-enterable: the deterministic path runs it immediately after phase 1; an
+// agent-harnessed job freezes the phase-1 context, waits for the agent's
+// selection, then runs the SAME tail on a thawed context — every dollar
+// downstream is identical no matter which path produced the selection.
+export async function performAnalysisPhase2(
+  ctx: Phase1Context,
+  params: EvaluationParams,
+  env: Env,
+  onProgress?: (message: string, data?: Record<string, unknown>) => void,
+  agentSelection?: AgentSelection,
+): Promise<EvaluationResult> {
+  const {
+    jobId, bundle, appraisalResult, subjectAvm, insufficient, preferredSaleAgeDays,
+    filters, adjustments, steps, fallbacksUsed, classificationSummary,
+    compCurbAppeal, compListingPhysicalDetails, subjectListingDetails,
+    redfinDetailsEnabled, renovation, subjectCurbAppeal,
+    sellerNotes, rehabAdditions, rehabAdvisories, derivedBuybox,
+    subjectSqft, compAvgSqft, avmAnchor, assessedAnchor, asIsThresholdPercent,
+  } = ctx
+  let {
+    finalArv, valuation, valuationAnchor, rehabLevelEstimates, groupBResult, bestMatch,
+  } = ctx
+  let compClassifications = new Map(ctx.compClassifications)
+  const groupACompIds = new Set(ctx.groupACompIds)
+  const redfinTargetsById = new Map(
+    ctx.redfinTargetIds
+      .map((id) => [id, appraisalResult.comparables.find((c) => c.id === id)!] as const)
+      .filter(([, comp]) => comp != null),
+  )
+  const appraisalService = createAppraisalService()
+  const valuationService = createValuationService(params.customRehabTable, params.customTierRanges)
+  const buybox = params.buybox ?? {}
+  let prevStepAt = Date.now()
+  const step = (name: string, status: ReportStep['status'], detail?: string) => {
+    const now = Date.now()
+    steps.push({ step: name, label: name, status, detail, durationMs: now - prevStepAt })
+    prevStepAt = now
+  }
+  const geoPriority = (comp: AppraisedComparable): number | null => compGeoPriority(bundle.property, comp)
+
+  // Agent-verdict application — the agent's picks replace the phase-1 evidence
+  // selection before the tail reads them: selectedCompIds, arvStatus stamps,
+  // group A membership, best match.
+  if (agentSelection) {
+    const picks = new Set(agentSelection.selectedCompIds)
+    appraisalResult.selectedCompIds = [...picks]
+    appraisalResult.comparables = appraisalResult.comparables.map((c) => ({
+      ...c,
+      arvStatus: picks.has(c.id)
+        ? ('selected' as const)
+        : c.arvStatus === 'selected' ? ('not_examined' as const) : c.arvStatus,
+    }))
+    groupACompIds.clear()
+    for (const id of picks) groupACompIds.add(id)
+    bestMatch = selectBestMatch(bundle.property, appraisalResult.comparables.filter((c) => groupACompIds.has(c.id)))
+    onProgress?.('Agent selection applied')
+  }
+
   let pipelineBResult: ReturnType<typeof evaluateB> | null = null
   let bAttemptTrail: string[] = []
   const bAttempts: EvaluationAttemptRecord[] = []
@@ -1236,48 +1302,8 @@ export async function performAnalysis(
     // A3 deepens enrichment for comps lacking AVM/land. Bounded at 3
     // attempts — a persistently failing pool ships its honest fallback
     // tier, never a forced number.
-    const bSubjectFields = {
-      squareFeet: bundle.property.squareFeet ?? null,
-      yearBuilt: bundle.property.yearBuilt ?? null,
-      censusTract: bundle.property.censusTract ?? null,
-      neighborhoodName: bundle.property.neighborhoodName ?? null,
-      subdivision: bundle.property.subdivision ?? null,
-      landAssessedValue: bundle.property.landAssessedValue ?? null,
-      taxAssessment: bundle.property.assessedValue ?? null,
-      assessedValue: bundle.property.assessedValue ?? null,
-      avmValue: subjectAvm ?? null,
-      lotSizeAcres: bundle.property.lotSizeAcres ?? null,
-      lotSizeSquareFeet: bundle.property.lotSizeSquareFeet ?? null,
-      condition: valuation?.rehabLevel ?? null,
-    }
-    const toBComps = (): BComp[] => appraisalResult.comparables.map((comp) => ({
-      address: comp.address ?? null,
-      isEnabled: comp.isEnabled,
-      salePrice: comp.salePrice ?? null,
-      saleDate: comp.saleDate ?? null,
-      squareFeet: comp.squareFeet ?? null,
-      pricePerSqft: comp.pricePerSqft ?? null,
-      adjustedPrice: comp.adjustedSalePrice ?? null,
-      distanceMiles: comp.distanceMiles ?? null,
-      sameBlockGroup: comp.sameBlockGroup ?? null,
-      censusTract: comp.censusTract ?? null,
-      neighborhoodName: comp.neighborhoodName ?? null,
-      subdivision: comp.subdivision ?? null,
-      yearBuilt: comp.yearBuilt ?? null,
-      lotSizeAcres: comp.lotSizeAcres ?? null,
-      lotSizeSquareFeet: comp.lotSizeSquareFeet ?? null,
-      landAssessedValue: comp.landAssessedValue ?? null,
-      propertyType: comp.propertyType ?? null,
-      crossesMajorRoad: comp.crossesMajorRoad ?? null,
-      disableReasons: comp.evaluation?.disableReasons ?? null,
-      verifiedFlip: compClassifications.get(comp.id)?.method === 'evidence_flip_chain',
-      classification: compClassifications.get(comp.id)
-        ? { type: compClassifications.get(comp.id)!.classification }
-        : null,
-      curbAppeal: compCurbAppeal?.[comp.id] ?? null,
-      evidenceVerification: comp.evidenceVerification ?? null,
-      appraisalRules: comp.evaluation ? { totalAdjustment: comp.evaluation.totalAdjustment } : null,
-    }))
+    const bSubjectFields = buildBSubjectFields(bundle, valuation, subjectAvm)
+    const toBComps = (): BComp[] => toBCompsOf(appraisalResult.comparables, compClassifications, compCurbAppeal)
 
     const verifyB = (r: ReturnType<typeof evaluateB>): string[] => {
       const fails: string[] = []
@@ -1286,31 +1312,8 @@ export async function performAnalysis(
       if (r.conf === 'none') fails.push('no-confidence result')
       return fails
     }
-    const stampVerification = () => {
-      const tractPpsfs = appraisalResult.comparables
-        .filter((c) => c.censusTract != null && c.censusTract === bundle.property.censusTract)
-        .map((c) => c.pricePerSqft ?? (c.salePrice != null && c.squareFeet ? c.salePrice / c.squareFeet : null))
-        .filter((v): v is number => v != null && v > 0)
-        .sort((a, b) => a - b)
-      const ref = tractPpsfs.length >= 3 ? tractPpsfs[Math.floor(tractPpsfs.length / 2)] : null
-      const packageIds = packageDeedIds(appraisalResult.comparables)
-      const bulkIds = bulkSaleIds(appraisalResult.comparables)
-      for (const comp of appraisalResult.comparables) {
-        comp.evidenceVerification = verifyCompEvidence(bundle.property, comp, ref, preferredSaleAgeDays, {
-          packageDeed: packageIds.has(comp.id),
-          bulkSale: bulkIds.has(comp.id),
-        })
-        // Transaction noise is not a usable comp. It already cannot set the
-        // value; switching it off keeps it out of the enabled list, the
-        // price groups, and the outlier ceiling. It stays in the report,
-        // labelled with the reason.
-        const noise = TRANSACTION_NOISE_REASON[comp.evidenceVerification?.transactionCheck ?? '']
-        if (noise && comp.isEnabled) {
-          comp.isEnabled = false
-          if (comp.evaluation) comp.evaluation.disableReasons = [...(comp.evaluation.disableReasons ?? []), noise]
-        }
-      }
-    }
+    const stampVerification = () =>
+      stampPoolVerification(appraisalResult.comparables, bundle.property, preferredSaleAgeDays)
 
     bAttemptTrail = []
     const recordBAttempt = (
@@ -1330,9 +1333,12 @@ export async function performAnalysis(
         ...(detail ? { detail } : {}),
       })
     }
-    let bResult = evaluateB(bSubjectFields, toBComps(), { rehabCost: valuation?.totalRehabCost ?? null })
+    let bResult = agentSelection
+      ? adaptAgentSelection(agentSelection, toBComps(), appraisalResult.comparables)
+      : evaluateB(bSubjectFields, toBComps(), { rehabCost: valuation?.totalRehabCost ?? null })
     let fails = verifyB(bResult)
-    recordBAttempt('attempt 1', bResult, fails)
+    recordBAttempt(agentSelection ? 'agent selection' : 'attempt 1', bResult, fails,
+      agentSelection ? { source: 'agent', notes: agentSelection.notes ?? null } : undefined)
 
     // Attempt 2 — widen retrieval: fresh comps at a wider radius / longer
     // window merge in, get verification-stamped, then B re-evaluates.
@@ -1514,7 +1520,7 @@ export async function performAnalysis(
   }
 
   // ── 9. Build response ───────────────────────────────────────────────────────
-  const photoBundle = await photoBundlePromise
+  const photoBundle = ctx.photoBundle ?? (ctx.photoBundlePromise ? await ctx.photoBundlePromise : null)
   const response = buildAnalysisResponse(
     bundle,
     appraisalResult,
@@ -1610,6 +1616,16 @@ export async function performAnalysis(
   }
   response.evaluationEngine = 'ts-v5'
   if (photoBundle) response.photoProvider = photoBundle.provider
+  if (agentSelection) {
+    // The agent's pocket/deal-economics classification rides the report —
+    // same persistence path as every other field on the response.
+    response.harness = {
+      source: 'agent',
+      pocketScore: agentSelection.pocketScore ?? null,
+      dealEconomics: agentSelection.dealEconomics ?? null,
+      ...(agentSelection.notes ? { notes: agentSelection.notes } : {}),
+    }
+  }
 
   return {
     response,
@@ -1628,6 +1644,7 @@ export async function performAnalysis(
       compCurbAppeal: compCurbAppeal ?? null,
       bAttemptTrail,
       attempts: bAttempts,
+      ...(agentSelection ? { agentSelection } : {}),
     },
   }
 }
@@ -1661,4 +1678,337 @@ function mapRenovationToVision(
       notes: [...assessment.visibleMajorSystemConcerns, ...assessment.structuralConcerns],
     },
   }
+}
+
+// ─── Harness seam ────────────────────────────────────────────────────────────
+// The Evaluation Agent is a comp-selection verdict rendered outside the Worker
+// by a Devin session governed by docs/EVAL-AGENT-RULESET.md. Phase 1 freezes
+// the evidence-complete context; the agent's selection re-enters phase 2 in
+// place of evaluateB. Server-side validation bounds the verdict; the
+// deterministic ladder (deepen) stays available between selection rounds.
+
+/** Frozen, JSON-serializable state at the evidence-complete boundary.
+ *  Everything phase 2 reads, and nothing it doesn't. */
+export interface Phase1Context {
+  jobId: string
+  bundle: PropertyBundle
+  appraisalResult: AppraisalResultWithFallback
+  subjectAvm: number | null
+  insufficient: boolean
+  preferredSaleAgeDays: number
+  filters: AppraisalFilter[]
+  adjustments: AppraisalAdjustment[]
+  steps: ReportStep[]
+  fallbacksUsed: string[]
+  compClassifications: Array<[string, ClassificationResult]>
+  classificationSummary: ReturnType<typeof summarizeClassifications>
+  compCurbAppeal?: CompCurbAppealMap
+  compListingPhysicalDetails: Record<string, PhysicalCharacteristicSourceData>
+  subjectListingDetails: RedfinDetailsResult | null
+  redfinDetailsEnabled: boolean
+  redfinTargetIds: string[]
+  renovation: RenovationAssessment
+  subjectCurbAppeal: CurbAppealCheck | null
+  sellerNotes: Awaited<ReturnType<typeof fetchSellerNotes>>
+  rehabAdditions: RehabAddition[]
+  rehabAdvisories: RehabAdvisory[]
+  derivedBuybox: ReturnType<typeof deriveBuybox>
+  subjectSqft: number
+  compAvgSqft: number
+  finalArv: number | null
+  valuation: ValuationResult | null
+  valuationAnchor: number | null
+  avmAnchor: number | null
+  assessedAnchor: number | null
+  rehabLevelEstimates: RehabLevelEstimate[]
+  groupBResult: GroupBResult | null
+  groupACompIds: string[]
+  bestMatch: ReturnType<typeof selectBestMatch>
+  asIsThresholdPercent: number
+  /** Resolved bundle when the caller serialized the context for a resume. */
+  photoBundle?: PhotoBundle | null
+  /** Live in-process promise on the single-invocation path — stripped when
+   *  the context is persisted for an agent resume. */
+  photoBundlePromise?: Promise<PhotoBundle | null>
+  apiCallStats?: ApiCallStats
+}
+
+function freezePhase1Context(l: Omit<Phase1Context, 'compClassifications' | 'groupACompIds' | 'redfinTargetIds'> & {
+  compClassifications: Map<string, ClassificationResult>
+  groupACompIds: Set<string>
+  redfinTargetsById: Map<string, AppraisedComparable>
+}): Phase1Context {
+  const { compClassifications, groupACompIds, redfinTargetsById, ...rest } = l
+  return {
+    ...rest,
+    compClassifications: [...compClassifications.entries()],
+    groupACompIds: [...groupACompIds],
+    redfinTargetIds: [...redfinTargetsById.keys()],
+  }
+}
+
+/** Full deterministic path — phase 1 evidence → phase 2 selection + tail.
+ *  Identical to the pre-split pipeline; the harness seam only adds the
+ *  ability to pause at the boundary. */
+export async function performAnalysis(
+  params: EvaluationParams,
+  env: Env,
+  onProgress?: (message: string, data?: Record<string, unknown>) => void
+): Promise<EvaluationResult> {
+  const ctx = await performAnalysisPhase1(params, env, onProgress)
+  return performAnalysisPhase2(ctx, params, env, onProgress)
+}
+
+/** Geo doctrine (EVAL-AGENT-RULESET §3): block group is the strongest
+ *  enclosure, neighborhood/subdivision second, census tract the fallback. */
+const normalizeGeoName = (value?: string | null) =>
+  value?.toLowerCase().replace(/[^a-z0-9]/g, '') || null
+
+function compGeoPriority(subject: NormalizedProperty, comp: AppraisedComparable): number | null {
+  if (comp.sameBlockGroup === true) return 0
+  const subjectNeighborhood = normalizeGeoName(subject.neighborhoodName)
+  const neighborhoodMatch = subjectNeighborhood != null
+    && normalizeGeoName(comp.neighborhoodName) === subjectNeighborhood
+  const subdivisionMatch = subdivisionsMatch(subject.subdivision, comp.subdivision)
+  if (neighborhoodMatch || subdivisionMatch) return 1
+  if (subject.censusTract && comp.censusTract === subject.censusTract) return 2
+  return null
+}
+
+function buildBSubjectFields(
+  bundle: PropertyBundle,
+  valuation: ValuationResult | null,
+  subjectAvm: number | null,
+) {
+  return {
+    squareFeet: bundle.property.squareFeet ?? null,
+    yearBuilt: bundle.property.yearBuilt ?? null,
+    censusTract: bundle.property.censusTract ?? null,
+    neighborhoodName: bundle.property.neighborhoodName ?? null,
+    subdivision: bundle.property.subdivision ?? null,
+    landAssessedValue: bundle.property.landAssessedValue ?? null,
+    taxAssessment: bundle.property.assessedValue ?? null,
+    assessedValue: bundle.property.assessedValue ?? null,
+    avmValue: subjectAvm ?? null,
+    lotSizeAcres: bundle.property.lotSizeAcres ?? null,
+    lotSizeSquareFeet: bundle.property.lotSizeSquareFeet ?? null,
+    condition: valuation?.rehabLevel ?? null,
+  }
+}
+
+function toBCompsOf(
+  comparables: AppraisedComparable[],
+  compClassifications: Map<string, ClassificationResult>,
+  compCurbAppeal?: CompCurbAppealMap,
+): BComp[] {
+  return comparables.map((comp) => ({
+    address: comp.address ?? null,
+    isEnabled: comp.isEnabled,
+    salePrice: comp.salePrice ?? null,
+    saleDate: comp.saleDate ?? null,
+    squareFeet: comp.squareFeet ?? null,
+    pricePerSqft: comp.pricePerSqft ?? null,
+    adjustedPrice: comp.adjustedSalePrice ?? null,
+    distanceMiles: comp.distanceMiles ?? null,
+    sameBlockGroup: comp.sameBlockGroup ?? null,
+    censusTract: comp.censusTract ?? null,
+    neighborhoodName: comp.neighborhoodName ?? null,
+    subdivision: comp.subdivision ?? null,
+    yearBuilt: comp.yearBuilt ?? null,
+    lotSizeAcres: comp.lotSizeAcres ?? null,
+    lotSizeSquareFeet: comp.lotSizeSquareFeet ?? null,
+    landAssessedValue: comp.landAssessedValue ?? null,
+    propertyType: comp.propertyType ?? null,
+    crossesMajorRoad: comp.crossesMajorRoad ?? null,
+    disableReasons: comp.evaluation?.disableReasons ?? null,
+    verifiedFlip: compClassifications.get(comp.id)?.method === 'evidence_flip_chain',
+    classification: compClassifications.get(comp.id)
+      ? { type: compClassifications.get(comp.id)!.classification }
+      : null,
+    curbAppeal: compCurbAppeal?.[comp.id] ?? null,
+    evidenceVerification: comp.evidenceVerification ?? null,
+    appraisalRules: comp.evaluation ? { totalAdjustment: comp.evaluation.totalAdjustment } : null,
+  }))
+}
+
+/** Re-stamp price/age/market-fit verification across the pool and switch off
+ *  transaction-noise comps. Same body phase 2's ladder uses — shared so the
+ *  agent's deepen round restamps identically. */
+function stampPoolVerification(
+  comparables: AppraisedComparable[],
+  subject: NormalizedProperty,
+  preferredSaleAgeDays: number,
+): void {
+  const tractPpsfs = comparables
+    .filter((c) => c.censusTract != null && c.censusTract === subject.censusTract)
+    .map((c) => c.pricePerSqft ?? (c.salePrice != null && c.squareFeet ? c.salePrice / c.squareFeet : null))
+    .filter((v): v is number => v != null && v > 0)
+    .sort((a, b) => a - b)
+  const ref = tractPpsfs.length >= 3 ? tractPpsfs[Math.floor(tractPpsfs.length / 2)] : null
+  const packageIds = packageDeedIds(comparables)
+  const bulkIds = bulkSaleIds(comparables)
+  for (const comp of comparables) {
+    comp.evidenceVerification = verifyCompEvidence(subject, comp, ref, preferredSaleAgeDays, {
+      packageDeed: packageIds.has(comp.id),
+      bulkSale: bulkIds.has(comp.id),
+    })
+    const noise = TRANSACTION_NOISE_REASON[comp.evidenceVerification?.transactionCheck ?? '']
+    if (noise && comp.isEnabled) {
+      comp.isEnabled = false
+      if (comp.evaluation) comp.evaluation.disableReasons = [...(comp.evaluation.disableReasons ?? []), noise]
+    }
+  }
+}
+
+/** The agent's comp-selection verdict — posted to
+ *  POST /v1/analyze/jobs/:jobId/harness/selection. */
+export interface AgentSelection {
+  /** The ARV the agent derives under the ruleset — becomes the valuation anchor. */
+  arv: number
+  conf: 'high' | 'medium' | 'low'
+  /** Enabled-pool comp ids the agent selected — the only comps the client sees as selected. */
+  selectedCompIds: string[]
+  /** Subset of selectedCompIds that drove the ARV (defaults to all picks). */
+  drivers?: string[]
+  /** Per-comp band assignment for the report: arv | median | asis | outlier. */
+  bands?: Record<string, 'arv' | 'median' | 'asis' | 'outlier'>
+  /** Per-comp adjustments applied by the agent (audit trail). */
+  adjustments?: Record<string, Array<{ type: string; amount: number; note?: string }>>
+  flags?: string[]
+  /** Pocket value classification (0-10) — rides the report when present. */
+  pocketScore?: number | null
+  /** Deal-economics classification prose — rides the report when present. */
+  dealEconomics?: string | null
+  /** Free-text verdict summary for the run record. */
+  notes?: string
+}
+
+/** Server-side bounds on the agent verdict — coherence checks, never an
+ *  outcome appeal. Returns the list of failures; empty = accepted. */
+export function validateAgentSelection(sel: AgentSelection, comps: AppraisedComparable[]): string[] {
+  const fails: string[] = []
+  const enabled = new Map(comps.filter((c) => c.isEnabled && c.id).map((c) => [c.id, c] as const))
+  const picks = sel.selectedCompIds ?? []
+  if (picks.length === 0) fails.push('empty selection — at least one comp is required')
+  for (const id of picks) {
+    if (!enabled.has(id)) fails.push(`selected comp ${id} is not an enabled pool member`)
+  }
+  for (const id of sel.drivers ?? []) {
+    if (!picks.includes(id)) fails.push(`driver ${id} is not in selectedCompIds`)
+  }
+  if (typeof sel.arv !== 'number' || !Number.isFinite(sel.arv) || sel.arv <= 0) {
+    fails.push('arv missing or not a positive number')
+  } else {
+    const pickPrices = picks
+      .map((id) => enabled.get(id)?.salePrice)
+      .filter((p): p is number => p != null && p > 0)
+    if (pickPrices.length > 0) {
+      const lo = Math.min(...pickPrices) * 0.75
+      const hi = Math.max(...pickPrices) * 1.25
+      if (sel.arv < lo || sel.arv > hi) {
+        fails.push(`arv ${sel.arv} outside the selected-evidence envelope ${Math.round(lo)}–${Math.round(hi)}`)
+      }
+    }
+  }
+  if (!['high', 'medium', 'low'].includes(sel.conf)) fails.push('conf must be high|medium|low')
+  return fails
+}
+
+/** Adapt the agent verdict into the BResult shape phase 2 consumes — the
+ *  valuation tail is identical whether the verdict came from the agent or
+ *  from evaluateB. */
+export function adaptAgentSelection(
+  sel: AgentSelection,
+  bcomps: BComp[],
+  comps: AppraisedComparable[],
+): ReturnType<typeof evaluateB> {
+  const byId = new Map(comps.map((c, i) => [c.id, bcomps[i]!] as const))
+  const driverIds = sel.drivers ?? sel.selectedCompIds
+  const drivers = driverIds
+    .map((id) => byId.get(id))
+    .filter((c): c is BComp => c != null)
+    .map((comp) => ({ comp, contrib: comp.adjustedPrice ?? comp.salePrice ?? sel.arv, weight: 1, tier: 'arv' as const }))
+  return {
+    arv: Math.round(sel.arv),
+    flags: sel.flags ?? [],
+    drivers,
+    contribs: [],
+    bracket: 'ok',
+    conf: sel.conf,
+    source: 'agent harness',
+    anchorAddress: drivers[0]?.comp.address ?? null,
+    healed: false,
+  }
+}
+
+/** The evidence bundle handed to the agent — exactly the inputs evaluateB
+ *  would have seen, plus the resolved appraisal grid and the engine's own
+ *  evidence-driven suggestion so the agent can accept, adjust, or reject. */
+export interface HarnessEvidence {
+  jobId: string
+  subject: ReturnType<typeof buildBSubjectFields> & { address?: string | null; id?: string }
+  comps: Array<BComp & { id: string; salePriceFormatted?: string }>
+  suggestedSelection: string[]
+  classifications: Record<string, ClassificationResult>
+  classificationSummary: ReturnType<typeof summarizeClassifications> | null
+  insufficient: boolean
+  rules: {
+    filters: AppraisalFilter[]
+    adjustments: AppraisalAdjustment[]
+    preferredSaleAgeDays: number
+    asIsThresholdPercent: number
+  }
+  steps: ReportStep[]
+}
+
+export function buildHarnessEvidence(ctx: Phase1Context): HarnessEvidence {
+  const compClassifications = new Map(ctx.compClassifications)
+  const bcomps = toBCompsOf(ctx.appraisalResult.comparables, compClassifications, ctx.compCurbAppeal)
+  return {
+    jobId: ctx.jobId,
+    subject: {
+      ...buildBSubjectFields(ctx.bundle, ctx.valuation, ctx.subjectAvm),
+      address: ctx.bundle.property.address,
+      id: ctx.bundle.property.id,
+    },
+    comps: ctx.appraisalResult.comparables.map((comp, i) => ({ id: comp.id, ...bcomps[i]! })),
+    suggestedSelection: ctx.appraisalResult.selectedCompIds ?? [],
+    classifications: Object.fromEntries(compClassifications),
+    classificationSummary: ctx.classificationSummary ?? null,
+    insufficient: ctx.insufficient,
+    rules: {
+      filters: ctx.filters,
+      adjustments: ctx.adjustments,
+      preferredSaleAgeDays: ctx.preferredSaleAgeDays,
+      asIsThresholdPercent: ctx.asIsThresholdPercent,
+    },
+    steps: ctx.steps,
+  }
+}
+
+/** Agent retry round — deepen enrichment on thin pool members and restamp
+ *  verification, mirroring the B ladder's third attempt. Returns the number
+ *  of fields filled so the caller can decide whether to re-offer the bundle. */
+export async function harnessDeepen(ctx: Phase1Context, params: EvaluationParams): Promise<number> {
+  if (!params.enrichComparables) return 0
+  const thin = ctx.appraisalResult.comparables
+    .filter((c) => c.avmValue == null || c.landAssessedValue == null)
+    .sort((a, b) =>
+      Number((b.censusTract != null && b.censusTract === ctx.bundle.property.censusTract) || b.sameBlockGroup === true)
+      - Number((a.censusTract != null && a.censusTract === ctx.bundle.property.censusTract) || a.sameBlockGroup === true)
+      || (a.distanceMiles ?? 99) - (b.distanceMiles ?? 99))
+    .slice(0, 8)
+  const enriched = await params.enrichComparables(thin).catch(() => null)
+  const byId = new Map((enriched ?? []).map((c) => [c.id, c]))
+  let deepened = 0
+  for (const comp of ctx.appraisalResult.comparables) {
+    const e = byId.get(comp.id)
+    if (!e) continue
+    if (comp.avmValue == null && e.avmValue != null) { comp.avmValue = e.avmValue; deepened++ }
+    if (comp.landAssessedValue == null && e.landAssessedValue != null) { comp.landAssessedValue = e.landAssessedValue; deepened++ }
+  }
+  if (deepened > 0) {
+    stampPoolVerification(ctx.appraisalResult.comparables, ctx.bundle.property, ctx.preferredSaleAgeDays)
+  }
+  return deepened
 }

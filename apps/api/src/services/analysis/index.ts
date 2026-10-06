@@ -1154,6 +1154,14 @@ export interface AnalysisResponse {
   rehabAdvisories?: import('../seller-notes').RehabAdvisory[]
   /** Evaluation engine that produced this response */
   evaluationEngine?: string
+  /** Present when the Evaluation Agent drove comp selection — its verdict
+   *  plus the pocket/deal-economics classification it was assigned. */
+  harness?: {
+    source: 'agent'
+    pocketScore?: number | null
+    dealEconomics?: string | null
+    notes?: string
+  }
 }
 export interface ApiCallStats {
   corelogic: {

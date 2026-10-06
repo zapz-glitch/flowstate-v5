@@ -16,7 +16,16 @@ import { ChunkedJobState } from './chunked-job-state'
 
 import { fetchMarketContext, type MarketContext } from '../services/market-context'
 import { type EvaluationParams } from '../services/evaluation'
-import { performAnalysis } from '../services/evaluation'
+import {
+  performAnalysis,
+  performAnalysisPhase1,
+  performAnalysisPhase2,
+  buildHarnessEvidence,
+  harnessDeepen,
+  validateAgentSelection,
+  type AgentSelection,
+  type Phase1Context,
+} from '../services/evaluation'
 import { detectOsmLocationRisks } from '../services/location-risk'
 import { createPhotoService } from '../services/photo-provider'
 import { createPropertyApi } from '../services/property-api'
@@ -59,11 +68,21 @@ import { buildRunRecordPayload, insertRunRecord, linkRunRecordToReport } from '.
 interface JobState {
   jobId: string
   userId: string
-  status: 'idle' | 'processing' | 'complete' | 'error'
+  status: 'idle' | 'processing' | 'awaiting_agent' | 'complete' | 'error'
   pending: string[]
   events: Array<{ event: string; data: unknown; timestamp: number }>
   error?: string
   createdAt: number
+  /** Frozen phase-1 context while status === 'awaiting_agent' (JSON). */
+  harnessContext?: string
+  /** The original start config, needed to rebuild eval params on resume. */
+  harnessConfig?: string
+  /** Scalars the resume path needs to rebuild eval params identically. */
+  resumeSeed?: string
+  /** needsMoreEvidence rounds used by the agent (max 2). */
+  harnessRounds?: number
+  /** Epoch ms — the deterministic fallback fires when the deadline passes. */
+  harnessDeadline?: number
 }
 
 export interface StartEnrichmentRequest {
@@ -132,6 +151,9 @@ export interface StartStreamingRequest {
     marketSearchModel?: string
     reasoning?: boolean
   }
+  /** 'agent' pauses the run at the evidence-complete boundary and waits for
+   *  the Evaluation Agent's comp-selection verdict instead of evaluateB. */
+  harness?: 'agent'
 }
 
 export class AnalysisJobDO {
@@ -151,6 +173,9 @@ export class AnalysisJobDO {
 
   /** Watchdog cadence — comfortably above a typical run (~2min). */
   private static readonly WATCHDOG_MS = 5 * 60_000
+  /** Agent-selection deadline — a parked harness job falls back to the
+   *  deterministic verdict when the agent doesn't answer in time. */
+  private static readonly HARNESS_DEADLINE_MS = 30 * 60_000
 
   constructor(state: DurableObjectState, env: Env) {
     this.state = state
@@ -173,12 +198,31 @@ export class AnalysisJobDO {
       this.jobState = await this.persistence.read()
     }
     const js = this.jobState
-    if (!js || js.status !== 'processing') {
+    if (!js || (js.status !== 'processing' && js.status !== 'awaiting_agent')) {
       await this.state.storage.deleteAlarm()
       return
     }
     if (this.runActive) {
       await this.state.storage.setAlarm(Date.now() + AnalysisJobDO.WATCHDOG_MS)
+      return
+    }
+
+    if (js.status === 'awaiting_agent') {
+      if (Date.now() < (js.harnessDeadline ?? 0)) {
+        await this.state.storage.setAlarm(js.harnessDeadline!)
+        return
+      }
+      // Agent never answered — deterministic verdict on the frozen bundle,
+      // labelled in the run record by the attempt trail. No job hangs on the agent.
+      console.warn(`[AnalysisJobDO] harness deadline passed for job ${js.jobId} — deterministic fallback`)
+      this.runActive = true
+      this.state.waitUntil(
+        this.runHarnessResume(undefined)
+          .finally(() => {
+            this.runActive = false
+            this.clearEvalActive(js.jobId)
+          }),
+      )
       return
     }
 
@@ -220,6 +264,12 @@ export class AnalysisJobDO {
     }
     if (request.method === 'GET' && path === '/state') {
       return this.handleGetState()
+    }
+    if (request.method === 'GET' && path === '/harness/evidence') {
+      return this.handleHarnessEvidence()
+    }
+    if (request.method === 'POST' && path === '/harness/selection') {
+      return this.handleHarnessSelection(request)
     }
 
     return new Response('Not found', { status: 404 })
@@ -281,7 +331,9 @@ export class AnalysisJobDO {
         })
         .finally(() => {
           this.runActive = false
-          this.clearEvalActive(body.jobId)
+          // A harness job parked awaiting the agent keeps its eval-active
+          // marker — a duplicate dispatch must not start a second eval.
+          if (this.jobState?.status !== 'awaiting_agent') this.clearEvalActive(body.jobId)
         })
     )
 
@@ -1147,6 +1199,31 @@ export class AnalysisJobDO {
 
     let evalResult
     try {
+      if (config.harness === 'agent') {
+        // Harness mode: freeze at the evidence-complete boundary and park
+        // until the Evaluation Agent posts its comp-selection verdict (or
+        // the deadline fires the deterministic fallback).
+        const ctx = await performAnalysisPhase1({ jobId: config.jobId, bundle, ...evalParams, userId: config.userId, leadId: config.leadId }, this.env,
+          (message, data) => { void this.pushEvent('eval_progress', { message, ...data }) })
+        if (ctx.photoBundlePromise) ctx.photoBundle = await ctx.photoBundlePromise
+        delete ctx.photoBundlePromise
+        await marketContextPromise.catch(() => { /* display-only */ })
+        ctx.steps.push({ step: 'agent_selection', label: 'agent_selection', status: 'skipped', detail: 'Awaiting Evaluation Agent verdict', durationMs: 0 })
+        this.jobState = {
+          ...(this.jobState ?? { jobId: config.jobId, userId: config.userId, status: 'processing' as const, pending: [], events: [], createdAt: Date.now() }),
+          status: 'awaiting_agent',
+          harnessContext: JSON.stringify(ctx),
+          harnessConfig: JSON.stringify(config),
+          resumeSeed: JSON.stringify({ isAttomMcp, ladderStep, ladderScope }),
+          harnessRounds: 0,
+          harnessDeadline: Date.now() + AnalysisJobDO.HARNESS_DEADLINE_MS,
+        }
+        await this.persistence.write(this.jobState)
+        await this.state.storage.setAlarm(this.jobState.harnessDeadline!)
+        await this.pushEvent('harness_awaiting', { jobId: config.jobId, compCount: ctx.appraisalResult.comparables.length, deadlineMs: AnalysisJobDO.HARNESS_DEADLINE_MS })
+        console.log(`[AnalysisJobDO] harness: job ${config.jobId} parked awaiting agent (${ctx.appraisalResult.comparables.length} comps)`)
+        return
+      }
       evalResult = await performAnalysis({ jobId: config.jobId, bundle, ...evalParams, userId: config.userId, leadId: config.leadId }, this.env,
         (message, data) => { void this.pushEvent('eval_progress', { message, ...data }) })
     } catch (evalError) {
@@ -1171,6 +1248,20 @@ export class AnalysisJobDO {
       return
     }
 
+    await this.finishEvaluation(config, evalResult, property, evalStart, startTime, marketContextPromise)
+  }
+
+  /** Shared finish: persist the report, run record, telemetry, cache, curb-
+   *  appeal writeback and terminal SSE events. Runs identically whether the
+   *  run came straight through or resumed from a harness freeze. */
+  private async finishEvaluation(
+    config: StartStreamingRequest,
+    evalResult: Awaited<ReturnType<typeof performAnalysis>>,
+    property: NormalizedProperty,
+    evalStart: number,
+    startTime: number,
+    marketContextPromise?: Promise<void>,
+  ): Promise<void> {
     let analysisResult = evalResult.response as unknown as Record<string, unknown>
 
     // Stamp the CRM link onto the persisted response — the report's
@@ -1178,12 +1269,7 @@ export class AnalysisJobDO {
     if (config.leadId) analysisResult.leadId = config.leadId
     if (config.opportunityId) analysisResult.opportunityId = config.opportunityId
 
-    // Rule-based comp selection stays intact — AI will override later if enabled
-
     console.log(`[AnalysisJobDO] ✓ Evaluation complete in ${Date.now() - evalStart}ms`)
-
-    // OSM location risks now fetched during enrichment — they're already in
-    // the response via bundle.enrichment.locationRisks (and feed valuation)
 
     // Save/update report in DB — the immutable run evidence lands first so
     // an overwrite can never erase what this run was computed from.
@@ -1253,13 +1339,201 @@ export class AnalysisJobDO {
     await this.pushEvent('evaluation_complete', { updatedResult: analysisResult })
     await this.recordRun(config, { status: 'completed', durationMs: Date.now() - startTime, response: analysisResult, runRecordId: completedRunRecordId })
 
-    // LLM comp annotation removed — evidence classification drives the eval;
-    // the separate annotate pass only wrote prose onto cards.
-
     // Wait for parallel tasks before closing SSE (so client receives them)
     await marketContextPromise
     await this.pushEvent('enrichment_done', { totalDurationMs: Date.now() - startTime })
     console.log(`[AnalysisJobDO] ── Streaming analysis complete in ${Date.now() - startTime}ms ──`)
+  }
+
+  // ─── Harness seam — Evaluation Agent verdict endpoints ─────────────────────
+
+  private async handleHarnessEvidence(): Promise<Response> {
+    if (!this.jobState) this.jobState = await this.persistence.read()
+    const js = this.jobState
+    if (!js || js.status !== 'awaiting_agent' || !js.harnessContext) {
+      return Response.json(
+        { error: 'Job is not awaiting an agent selection', status: js?.status ?? 'not_found' },
+        { status: 409 },
+      )
+    }
+    const ctx = JSON.parse(js.harnessContext) as Phase1Context
+    return Response.json({
+      jobId: js.jobId,
+      rounds: js.harnessRounds ?? 0,
+      deadlineMs: js.harnessDeadline ? Math.max(0, js.harnessDeadline - Date.now()) : null,
+      evidence: buildHarnessEvidence(ctx),
+    })
+  }
+
+  private async handleHarnessSelection(request: Request): Promise<Response> {
+    if (!this.jobState) this.jobState = await this.persistence.read()
+    const js = this.jobState
+    if (!js || js.status !== 'awaiting_agent' || !js.harnessContext || !js.harnessConfig) {
+      return Response.json(
+        { error: 'Job is not awaiting an agent selection', status: js?.status ?? 'not_found' },
+        { status: 409 },
+      )
+    }
+    const body = await request.json().catch(() => null) as {
+      selection?: AgentSelection
+      needsMoreEvidence?: string
+    } & Partial<AgentSelection> | null
+    if (!body) {
+      return Response.json({ error: 'JSON body required' }, { status: 400 })
+    }
+    const ctx = JSON.parse(js.harnessContext) as Phase1Context
+    const config = JSON.parse(js.harnessConfig) as StartStreamingRequest
+    const rounds = js.harnessRounds ?? 0
+
+    // Evidence retry — the deepen leg of the B ladder, agent-driven. Bounded
+    // like the deterministic ladder; 'widen' is out of v1 scope (the agent
+    // re-dispatches at a wider radius instead).
+    if (body.needsMoreEvidence) {
+      if (body.needsMoreEvidence !== 'deepen') {
+        return Response.json(
+          { error: `needsMoreEvidence '${body.needsMoreEvidence}' unsupported — 'deepen' only`, rounds },
+          { status: 422 },
+        )
+      }
+      if (rounds >= 2) {
+        return Response.json({ error: 'Evidence rounds exhausted — submit a selection', rounds }, { status: 409 })
+      }
+      const propertyApi = createPropertyApi(this.env)
+      propertyApi.setSkipCache(!!config.skipCache)
+      const deepened = await harnessDeepen(ctx, {
+        jobId: config.jobId,
+        bundle: ctx.bundle,
+        enrichComparables: (comps: NormalizedComparable[]) =>
+          propertyApi.enrichComparables(comps, { concurrency: 8 }).catch(() => null),
+      })
+      js.harnessContext = JSON.stringify(ctx)
+      js.harnessRounds = rounds + 1
+      js.harnessDeadline = Date.now() + AnalysisJobDO.HARNESS_DEADLINE_MS
+      this.jobState = js
+      await this.persistence.write(js)
+      await this.state.storage.setAlarm(js.harnessDeadline)
+      await this.pushEvent('harness_deepened', { jobId: js.jobId, rounds: js.harnessRounds, deepened })
+      return Response.json({ status: 'awaiting_agent', rounds: js.harnessRounds, deepened })
+    }
+
+    const sel = (body.selection ?? body) as AgentSelection
+    const fails = validateAgentSelection(sel, ctx.appraisalResult.comparables)
+    if (fails.length) {
+      return Response.json({ error: 'Selection rejected', fails }, { status: 422 })
+    }
+
+    // Resume the deterministic tail in the background — identical finish to
+    // any completed run. The eval-active marker clears when the run ends.
+    this.runActive = true
+    this.state.waitUntil(
+      this.runHarnessResume(sel)
+        .catch((err) => {
+          console.error('[AnalysisJobDO] harness resume fatal:', err)
+          void this.pushEvent('error', { step: 'harness_resume', message: err instanceof Error ? err.message : 'Resume failed' })
+        })
+        .finally(() => {
+          this.runActive = false
+          this.clearEvalActive(config.jobId)
+        }),
+    )
+    return Response.json({ status: 'resumed' })
+  }
+
+  /** Phase-2 resume on a thawed context — runs inside waitUntil so the DO
+   *  survives eviction mid-run exactly like the initial streaming run. */
+  private async runHarnessResume(agentSelection?: AgentSelection): Promise<void> {
+    if (!this.jobState) this.jobState = await this.persistence.read()
+    const js = this.jobState
+    if (!js?.harnessContext || !js.harnessConfig) throw new Error('No frozen harness context to resume')
+    const config = JSON.parse(js.harnessConfig) as StartStreamingRequest
+    const ctx = JSON.parse(js.harnessContext) as Phase1Context
+    const seed = js.resumeSeed
+      ? JSON.parse(js.resumeSeed) as {
+          isAttomMcp?: boolean
+          ladderStep?: number
+          ladderScope?: 'tract' | 'block_group' | 'neighborhood' | 'value_equivalent' | null
+        }
+      : {}
+    const evalStart = Date.now()
+    const startTime = js.createdAt
+    const propertyApi = createPropertyApi(this.env)
+    propertyApi.setSkipCache(!!config.skipCache)
+    const evalParams = this.buildResumeEvalParams(config, ctx, seed, propertyApi)
+    const bundle = ctx.bundle
+
+    js.status = 'processing'
+    js.harnessContext = undefined
+    js.harnessConfig = undefined
+    js.resumeSeed = undefined
+    this.jobState = js
+    await this.persistence.write(js)
+
+    let evalResult
+    try {
+      evalResult = await performAnalysisPhase2(
+        ctx,
+        { jobId: config.jobId, bundle, ...evalParams, userId: config.userId, leadId: config.leadId },
+        this.env,
+        (message, data) => { void this.pushEvent('eval_progress', { message, ...data }) },
+        agentSelection,
+      )
+    } catch (evalError) {
+      const msg = evalError instanceof Error ? evalError.message : 'Evaluation failed'
+      const code = (evalError as { code?: string })?.code
+      console.warn(`[AnalysisJobDO] Harness resume error (${code}): ${msg}`)
+      await this.pushEvent('error', { step: 'evaluation', message: msg, code })
+      await this.recordRun(config, { status: 'error', durationMs: Date.now() - startTime, errorCode: code ?? 'EVALUATION_ERROR', errorMessage: msg, compCount: bundle.comparables?.length })
+      await this.pushEvent('enrichment_done', { totalDurationMs: Date.now() - startTime })
+      return
+    }
+    await this.finishEvaluation(config, evalResult, ctx.bundle.property, evalStart, startTime)
+  }
+
+  /** Rebuild the eval-params surface on resume. Same shape as the streaming
+   *  path's evalParams minus the fetch-pipeline closures (expandComparablesPool
+   *  is intentionally absent — v1 agent retries use deepen only). */
+  private buildResumeEvalParams(
+    config: StartStreamingRequest,
+    ctx: Phase1Context,
+    seed: {
+      isAttomMcp?: boolean
+      ladderStep?: number
+      ladderScope?: 'tract' | 'block_group' | 'neighborhood' | 'value_equivalent' | null
+    },
+    propertyApi: ReturnType<typeof createPropertyApi>,
+  ): Omit<EvaluationParams, 'jobId' | 'bundle'> {
+    const filters = [...(config.evalParams.appraisalRules?.filters ?? DEFAULT_FILTERS)] as AppraisalFilter[]
+    for (const df of DEFAULT_FILTERS) {
+      if (!filters.some((f) => f.type === df.type)) filters.push({ ...df })
+    }
+    const property = ctx.bundle.property
+    return {
+      ...config.evalParams,
+      ...(seed.isAttomMcp && ((seed.ladderStep ?? 0) > 0 || geoLevelForScope(seed.ladderScope ?? null) > 1)
+        ? {
+            appraisalRules: {
+              ...(config.evalParams.appraisalRules ?? {}),
+              filters: filtersForLadder(filters, seed.ladderStep ?? 0, seed.ladderScope ?? null, property.squareFeet),
+            },
+          }
+        : {}),
+      apiCallStats: ctx.apiCallStats,
+      enrichComparables: (comps: NormalizedComparable[]) =>
+        propertyApi.enrichComparables(comps, { concurrency: 8 }).catch(() => null),
+      getCompPermits: (compId: string) =>
+        propertyApi.getBuildingPermits(compId)
+          .then((r) => (r.success ? r.data.permits : null))
+          .catch(() => null),
+      prefetchedPhotoBundle: ctx.photoBundle,
+      skipCache: !!config.skipCache,
+      onCurbAppeal: (map: import('../services/evaluation').CompCurbAppealMap) => {
+        this.curbAppealMap = map
+        if (this.curbAppealResult) {
+          void this.applyCurbAppealWriteback(config).catch((e) =>
+            console.warn('[AnalysisJobDO] curb-appeal writeback failed:', e))
+        }
+      },
+    }
   }
 
   /** Clef comp curb-appeal writeback — the comp-evidence batch resolves
