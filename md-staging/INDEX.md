@@ -1,9 +1,10 @@
-# asd-ste100 — markdown inventory
+# md-staging — markdown inventory
 
 Snapshot of every `.md` file in the repo (excluding `.agents/skills/` vendored
 skill boilerplate), taken from `main` on 2026-10-06 for the SWE-10-5-2026
-harness rebuild. Rewrite the files that belong in the new eval spec; the rest
-are reference/context.
+harness rebuild. Rewrite the files that belong in the new eval spec in plain
+natural language — the ASD-STE100 controlled-language approach was rejected;
+the rest are reference/context.
 
 ## Core eval contract (the spec layer)
 
