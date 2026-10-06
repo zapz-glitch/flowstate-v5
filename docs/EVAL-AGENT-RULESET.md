@@ -23,7 +23,40 @@ way, keep the evidence bands clean so the trends stay visible — what
 investors pay for ugly or investment-grade stock, what lived-in
 move-in-ready stock sells for, and what clearly renovated stock sells for.
 
-## 2. Geography and location — where comps come from
+## 2. The pipeline this rides on
+
+When a property is searched in Property Search or queued via the API, the
+production stack does the deterministic work — the agent supplies the
+judgment:
+
+- Subject details come from the ATTOM MCP provider.
+- Comparables are pulled relative to the subject, then a geocode request
+  returns the block-group GEOID. Sales matching the subject's block group
+  are enriched first, neighborhood matches second, tract matches only as
+  the fallback tier.
+- Comp selection and the deduction adjustments (square footage,
+  bed/bath) are the harness's responsibility — historically deterministic
+  code under the appraisal rules, now guided by this ruleset.
+- In parallel, the subject's condition is classified: Clef reads up to 4
+  curb-appeal photos, and GPT-6 Luna vision reads all the photos and picks
+  the renovation level. Listing descriptions and photos supply condition
+  evidence for both subject and comps — but price is the strongest
+  evidence, because it is the outcome of what buyers actually paid.
+- Permits are pulled for the subject: permits outside the threshold go
+  into the renovation budget; no permits means assume no real work was
+  done — nothing is added.
+- The server renders the evaluation: ARV (price per square foot averaged
+  across the selected comps when several qualify), renovation
+  budget/level, the pre-approved profit margin, the wholesale fee, the
+  subject's own AVM from the data provider, and the valuation formula
+  math.
+- The client mirrors the server's selection — only comps selected
+  server-side appear selected client-side. Client edits (comp reselect,
+  evaluation settings, renovation line-item costs) recompute locally;
+  whether those recomputes also render server-side is an implementation
+  choice.
+
+## 3. Geography and location — where comps come from
 
 - **Block group is the strongest geographic unit.** It is the smallest
   atomic statistical geography defined by the U.S. Census Bureau, carries a
@@ -34,15 +67,19 @@ move-in-ready stock sells for, and what clearly renovated stock sells for.
   official standardized federal geocode. It is still effectively required:
   it carries the similar values and proximity we need, so prefer comps
   inside the subject's neighborhood whenever they exist.
-- **Census tract is disregarded.** It is too large and skews selection away
-  from the closest properties in proximity and value parity.
+- **Census tract is a fallback tier, never a lead.** It is too large for
+  primary selection — it skews away from the closest properties in
+  proximity and value parity — but tract-matched comps may still be
+  enriched and used when block-group and neighborhood tiers produce
+  nothing. Enrichment follows the same order: block group first,
+  neighborhood second, tract last.
 - **Major roads and physical barriers are a major negative.** A
   near-perfect twin sitting across a highway, major road, railroad, or
   other clear neighborhood divider loses to a same-side twin and needs a
   location adjustment — but the physical match can still outweigh the
   barrier when that comp is the best evidence available.
 
-## 3. The twin spec — what the ideal comp looks like
+## 4. The twin spec — what the ideal comp looks like
 
 Selection preferences, roughly in order of importance:
 
@@ -51,7 +88,7 @@ Selection preferences, roughly in order of importance:
   ranch — closer twins win even at a lower sale price.
 - **Living area: ±250–500 sqft preferred range** for selection (overrides
   the earlier ±250). Beyond it, the comp can still be used — with the full
-  square-footage adjustment from Section 6.
+  square-footage adjustment from Section 7.
 - **Year built: ±10 years preferred** — construction technology improves
   every decade. If ±10 fails, widen to ±12, then ±14, and keep stepping out
   2–3 years per iteration until the closest spec is found. Pre-1970 stock
@@ -65,7 +102,7 @@ Selection preferences, roughly in order of importance:
   pool in that submarket — do not keep searching past good twins for a
   pool comp.
 - **Construction and foundation material:** match where possible —
-  concrete to concrete, wood to wood. See FOUNDATION-001 in Section 6 for
+  concrete to concrete, wood to wood. See FOUNDATION-001 in Section 7 for
   the directional value rule.
 - **Bed/bath count:** preferred to match, but differences are adjustable
   for the value beds and baths add in that submarket or pocket. Not a hard
@@ -75,7 +112,7 @@ Selection preferences, roughly in order of importance:
   and treat that field as unknown. Never assume it matches, never drop the
   comp for the gap alone. Weigh it accordingly.
 
-## 4. The evidence bands
+## 5. The evidence bands
 
 Human reviewers group comps psychologically into bands. The agent must do
 the same and protect them — dirty bands let the agent hallucinate.
@@ -96,7 +133,7 @@ suggests ARV but condition suggests MEDIAN, the price position carries the
 weight. A distressed property that sold near MEDIAN or ARV prices does not
 stay in the AS-IS band — its price places it.
 
-## 5. Sale recency
+## 6. Sale recency
 
 - Prefer sales within 180 days. The more recent the sale, the steadier the
   price-per-square-foot assumption, because less market fluctuation has
@@ -109,7 +146,7 @@ stay in the AS-IS band — its price places it.
   months ago is preferred over a somewhat worse 60-day match, with the
   10% time adjustment applied.
 
-## 6. Adjustments — market-derived first
+## 7. Adjustments — market-derived first
 
 Fixed dollar adjustments are a last resort. Wherever local evidence
 exists, derive the adjustment from the market using **paired sales**:
@@ -157,7 +194,7 @@ the groups adjusts only one way:
 - Comps inside the subject's own foundation group are left alone — no
   adjustment either direction.
 
-## 7. Evidence quality rules
+## 8. Evidence quality rules
 
 - **Verified flips:** a confirmed investor purchase resold after
   renovation within a 30–365 day hold at a profit is very strong proof the
@@ -180,7 +217,7 @@ the groups adjusts only one way:
 - **When nothing matches everything,** select the comp or comp group with
   the fewest and least important differences from the subject.
 
-## 8. Discipline
+## 9. Discipline
 
 - The mission is the apples-to-apples comparison — the spitting image, the
   twin. Every deviation from the spec is a step into other genres of
