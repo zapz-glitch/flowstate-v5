@@ -76,6 +76,32 @@ describe('Offers', () => {
   })
 })
 
+describe('Skin prototype', () => {
+  const skin = (browser: { evaluate: (fn: () => unknown) => Promise<unknown> }) =>
+    browser.evaluate(() => document.documentElement.dataset.skin ?? 'none') as Promise<string>
+
+  test('it is off by default, the switch turns it on and off, and it never reaches other pages', WEB, async ({ app, screen, browser }) => {
+    await app.open('/dashboard/analyze?address=')
+    await browser.evaluate(() => { localStorage.removeItem('flowstate:skin-preview'); return true })
+    await app.open('/dashboard/analyze?address=')
+    await expect(screen.getByRole('button', 'Studio')).toBeVisible()
+    expect(await skin(browser), 'the current look is the default').toBe('none')
+    await screen.getByRole('button', 'Studio').click()
+    await expect.poll(() => skin(browser)).toBe('nds')
+    // The skin changes colors and the Prep offer button, not the theme tokens' names or the layout
+    await screen.getByRole('button', 'Current').click()
+    await expect.poll(() => skin(browser)).toBe('none')
+    // ?skin=nds starts it on
+    await app.open('/dashboard/analyze?address=&skin=nds')
+    await expect.poll(() => skin(browser)).toBe('nds')
+    // Other pages are untouched
+    await app.open('/dashboard/reports')
+    await expect(screen.getByRole('heading', 'Property Reports', { level: 1 })).toBeVisible()
+    expect(await skin(browser), 'the skin ends when Property Search is left').toBe('none')
+    await browser.evaluate(() => { localStorage.removeItem('flowstate:skin-preview'); return true })
+  })
+})
+
 // ── A loaded report on Property Search ───────────────────────────────────────
 
 type Rect = { x: number; y: number; width: number; height: number }

@@ -79,6 +79,7 @@ export function DealActions({ offerPrice, onOfferWorkflow, onRerun, rerunning, o
             <button
               type="button"
               onClick={() => fireOffer('prep_offer')}
+              data-deal="prep"
               disabled={!canOffer}
               className={cn(ACTION, 'hover:text-emerald-600 hover:bg-emerald-500/10 dark:hover:text-emerald-400 disabled:opacity-40')}
               title={canOffer ? `Prep offer at $${fmtK(offerPrice)}` : 'Valuation incomplete — no offer price'}
@@ -88,6 +89,7 @@ export function DealActions({ offerPrice, onOfferWorkflow, onRerun, rerunning, o
             <button
               type="button"
               onClick={() => fireOffer('no_margin')}
+              data-deal="decline"
               className={cn(ACTION, ACTION_HOVER)}
               title="No margin — records the decline and notifies the listener"
             >
@@ -96,6 +98,7 @@ export function DealActions({ offerPrice, onOfferWorkflow, onRerun, rerunning, o
             <button
               type="button"
               onClick={() => fireOffer('no_offer')}
+              data-deal="decline"
               className={cn(ACTION, ACTION_HOVER)}
               title="No offer — decline without an offer and notify the listener"
             >
@@ -122,6 +125,7 @@ export function DealActions({ offerPrice, onOfferWorkflow, onRerun, rerunning, o
           <button
             type="button"
             onClick={onRerun}
+            data-deal="tool"
             disabled={rerunning}
             className={cn(ACTION, ACTION_HOVER, 'disabled:opacity-50')}
             title="Re-run this analysis with fresh data"
@@ -135,7 +139,7 @@ export function DealActions({ offerPrice, onOfferWorkflow, onRerun, rerunning, o
         )}
         {onRerun && onOpenSettings && <span className={DIVIDER} aria-hidden />}
         {onOpenSettings && (
-          <button type="button" onClick={onOpenSettings} className={cn(ACTION, ACTION_HOVER)}>
+          <button type="button" onClick={onOpenSettings} data-deal="tool" className={cn(ACTION, ACTION_HOVER)}>
             Evaluation Settings
           </button>
         )}

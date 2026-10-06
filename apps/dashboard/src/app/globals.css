@@ -748,3 +748,98 @@ textarea:-webkit-autofill {
     transparent 3px 6px
   );
 }
+
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   PROTOTYPE SKIN · "Studio" · set on <html data-skin="nds"> by SkinPreview, only
+   while Property Search is open. Read from the National Design Studio's own CSS
+   (ndstudio.gov): neutral #f2f2f2 surface under white cards, near-black ink
+   #010101, #3a3a3a / #6b6b6b for secondary text, 10%-black hairlines, 6px radius,
+   tight -0.02em type with a monospace voice for labels, dark filled primary
+   buttons with hairline-outlined secondary ones. Warm black with cream text in
+   dark mode (the Real Food site). The real theme tokens above are not edited.
+   ───────────────────────────────────────────────────────────────────────────── */
+html[data-skin="nds"][data-skin="nds"].light,
+html[data-skin="nds"][data-skin="nds"]:not(.dark) {
+  --background: 0 0% 94.9%;
+  --foreground: 0 0% 0.4%;
+  --foreground-secondary: 0 0% 23%;
+  --foreground-tertiary: 0 0% 42%;
+  --card: 0 0% 100%;
+  --card-hover: 0 0% 97%;
+  --card-foreground: 0 0% 0.4%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 0 0% 0.4%;
+  --primary: 0 0% 11%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 0 0% 92%;
+  --secondary-foreground: 0 0% 0.4%;
+  --muted: 0 0% 92%;
+  --muted-foreground: 0 0% 42%;
+  --accent: 0 0% 90%;
+  --border: 0 0% 89%;
+  --input: 0 0% 80%;
+  --input-fill: 0 0% 100%;
+  --ring: 0 0% 0.4%;
+  --radius: 0.375rem;
+}
+html[data-skin="nds"][data-skin="nds"].dark {
+  --background: 0 28% 4%;
+  --foreground: 48 55% 95%;
+  --foreground-secondary: 45 14% 76%;
+  --foreground-tertiary: 40 8% 58%;
+  --card: 0 18% 7%;
+  --card-hover: 0 14% 10%;
+  --card-foreground: 48 55% 95%;
+  --popover: 0 18% 7%;
+  --popover-foreground: 48 55% 95%;
+  --primary: 48 55% 95%;
+  --primary-foreground: 0 28% 5%;
+  --secondary: 0 12% 12%;
+  --secondary-foreground: 48 55% 95%;
+  --muted: 0 12% 12%;
+  --muted-foreground: 40 8% 58%;
+  --accent: 0 10% 15%;
+  --border: 0 8% 17%;
+  --input: 0 8% 24%;
+  --input-fill: 0 18% 8%;
+  --ring: 48 55% 95%;
+}
+html[data-skin="nds"] body {
+  letter-spacing: -0.01em;
+  font-feature-settings: "cv11", "ss03", "tnum";
+}
+html[data-skin="nds"] h1,
+html[data-skin="nds"] h2,
+html[data-skin="nds"] h3 {
+  letter-spacing: -0.02em;
+  font-weight: 500;
+}
+/* Labels speak in the monospace voice, as the studio's small caps do */
+html[data-skin="nds"] .uppercase {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  letter-spacing: 0.04em;
+  font-weight: 500;
+}
+/* Hairline cards on the neutral surface */
+html[data-skin="nds"] .border-border { border-color: hsl(var(--border)); }
+/* Deal buttons: Prep offer is the dark filled one; the declines are outlined; the tools stay quiet */
+html[data-skin="nds"] [data-deal="prep"] {
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+  border-radius: 6px;
+  padding: 3px 12px;
+  font-weight: 600;
+}
+html[data-skin="nds"] [data-deal="prep"]:hover:not(:disabled) {
+  background: hsl(var(--foreground-secondary));
+  color: hsl(var(--primary-foreground));
+}
+html[data-skin="nds"] [data-deal="decline"] {
+  border: 1px solid hsl(var(--border));
+  border-radius: 6px;
+  padding: 2px 10px;
+  color: hsl(var(--foreground));
+}
+html[data-skin="nds"] [data-deal="decline"]:hover { background: hsl(var(--secondary)); }
+html[data-skin="nds"] [data-deal] { transition: background-color 0.15s cubic-bezier(0.215, 0.61, 0.355, 1), color 0.15s cubic-bezier(0.215, 0.61, 0.355, 1); }

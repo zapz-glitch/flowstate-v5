@@ -19,6 +19,7 @@ import {
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { PageHeader } from '@/components/ui/page-header'
+import { SkinPreview } from '@/components/prototype/SkinPreview'
 import { usePreloadOnIdle, useStayMounted } from '@/hooks/use-stay-mounted'
 import { AddressAutocomplete } from '@/components/AddressAutocomplete'
 import { Switch } from '@/components/ui/switch'
@@ -748,6 +749,8 @@ export default function AnalyzePage() {
 
   return (
     <div className={cn('playground-bg -m-4 sm:-m-6 lg:-m-8', showTwoColumn ? 'min-h-screen lg:h-[100dvh] flex flex-col lg:overflow-hidden' : 'min-h-screen p-4 sm:p-6 lg:p-8 space-y-6')}>
+      {/* PROTOTYPE: switchable look, only while this page is open (see SkinPreview) */}
+      <SkinPreview />
       {/* Search bar + controls — collapsed state renders as a fixed-height header
           band whose bottom border lands at 64px, aligned with the sidebar logo divider */}
       <div className={cn(
