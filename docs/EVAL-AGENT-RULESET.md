@@ -40,8 +40,7 @@ move-in-ready stock sells for, and what clearly renovated stock sells for.
   near-perfect twin sitting across a highway, major road, railroad, or
   other clear neighborhood divider loses to a same-side twin and needs a
   location adjustment — but the physical match can still outweigh the
-  barrier when that comp is the best evidence available. (Owner-confirmed
-  as a negative, not an exclusion.)
+  barrier when that comp is the best evidence available.
 
 ## 3. The twin spec — what the ideal comp looks like
 
@@ -141,9 +140,9 @@ adjustment = market rate per sqft  ×  full |comp sqft − subject sqft|
   only past the 250 threshold would give).
 - Per the source-of-truth interview, a comp that is bigger or smaller than
   the subject only commands **50% of the price per square foot** for the
-  size difference — so the default rate is 0.5 × the local $/sqft unless
-  paired sales in that pocket demonstrate a stronger rate. (Flagged for
-  owner confirmation.)
+  size difference — so the default rate is 0.5 × the local $/sqft, applied
+  linearly across the full difference, unless paired sales in that pocket
+  demonstrate a stronger rate.
 
 **FOUNDATION-001 — directional:** concrete and concrete-block foundations
 are equivalent. Wood, pier-and-beam and crawlspace are a separate group.
@@ -151,9 +150,12 @@ Concrete and block are stronger long term and depreciate less, so crossing
 the groups adjusts only one way:
 
 - Subject is the wood group, comp is concrete/block → deduct 10% from the
-  comp's price.
+  comp's price. Devaluing the stronger comp mirrors the wood-frame
+  depreciation the market already prices in.
 - Subject is concrete/block, comp is the wood group → leave the comp
   alone. No upward adjustment is taken.
+- Comps inside the subject's own foundation group are left alone — no
+  adjustment either direction.
 
 ## 7. Evidence quality rules
 
