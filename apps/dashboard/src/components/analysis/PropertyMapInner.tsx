@@ -6,9 +6,11 @@ import { resolvePropertyLocation, resolveSubjectPanorama } from '@/lib/resolve-p
 import type { MapCoordinate } from '@/lib/property-map-geometry'
 import { SubjectAerialMap, type SubjectAerialMapHandle } from './SubjectAerialMap'
 import { MAP_COLORS, markerNumberColor } from './map-colors'
+import { AREA_MATCH_WORDS } from './format-helpers'
 import { MapLegend } from './MapOverlay'
 import type { MapMarker } from './PropertyMap'
 import { emitMarkerHover } from './map-hover'
+import { DWELL_MS, hoverIntent, movedBeyondSlop, type Point } from './hover-intent'
 
 type Panorama = NonNullable<Awaited<ReturnType<typeof resolveSubjectPanorama>>>
 // Comps are one neutral dot each · the price label beside it carries the
@@ -35,32 +37,35 @@ const markerIcon = (marker: MapMarker, active: boolean, index: number): google.m
   if (marker.type === 'subject') {
     return { path: google.maps.SymbolPath.CIRCLE, scale: 12, fillColor: fill, fillOpacity: 1, strokeColor: '#fff', strokeWeight: 2 }
   }
-  // Dot with the card number inside; beside it a small tag: sale price, then
-  // price class, then condition.
-  const lines = [priceLabel(marker.price), marker.priceClass ?? null, marker.condition ?? null].filter((line): line is string => !!line)
-  const tagW = lines.length ? Math.max(...lines.map((line) => line.length)) * 6.8 + 14 : 0
-  const tagH = lines.length * 12 + 6
+  // Dot with the card number inside; beside it a white tag: the sale price, then how the comp sits
+  // against the subject (block group, neighborhood, both, or outside). Light tag on satellite
+  // imagery, dark text, a green dot when there is a match.
+  const price = priceLabel(marker.price)
+  const matchWord = AREA_MATCH_WORDS[marker.match ?? 'none']
+  const matched = !!marker.match && marker.match !== 'none'
+  const dotW = matched ? 12 : 0
+  const tagW = Math.max(price ? price.length * 7 + 12 : 0, matchWord.length * 5.6 + 14 + dotW)
+  const tagH = (price ? 30 : 18)
   const h = Math.max(24, tagH)
-  const w = 24 + (lines.length ? 4 + tagW : 0)
+  const w = 24 + 4 + tagW
   const cy = h / 2
+  const tagY = (h - tagH) / 2
   const esc = (text: string) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;')
+  const matchY = tagY + (price ? 22 : 9)
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">`
     + `<circle cx="12" cy="${cy}" r="10" fill="${fill}" stroke="#fff" stroke-width="2"/>`
     + `<text x="12" y="${cy}" text-anchor="middle" dominant-baseline="central" font-family="system-ui,sans-serif" font-size="10" font-weight="700" fill="${active ? '#fff' : markerNumberColor(marker.type)}">${index}</text>`
-    + (lines.length ? `<rect x="28" y="${(h - tagH) / 2}" width="${tagW}" height="${tagH}" rx="5" fill="#171717" fill-opacity="0.92" stroke="#fff" stroke-width="1"/>`
-      + lines.map((line, i) => `<text x="${28 + tagW / 2}" y="${(h - tagH) / 2 + 9 + i * 12}" text-anchor="middle" dominant-baseline="central" font-family="system-ui,sans-serif" font-size="${i === 0 ? 10 : 9}" font-weight="${i === 0 ? 700 : 500}" fill="${i === 0 ? '#fff' : '#d4d4d4'}">${esc(line)}</text>`).join('') : '')
+    + `<rect x="28" y="${tagY}" width="${tagW}" height="${tagH}" rx="5" fill="#ffffff" fill-opacity="0.96" stroke="${matched ? MAP_COLORS.included : '#a1a1aa'}" stroke-width="1"/>`
+    + (price ? `<text x="${28 + tagW / 2}" y="${tagY + 11}" text-anchor="middle" dominant-baseline="central" font-family="system-ui,sans-serif" font-size="11" font-weight="700" fill="#171717">${esc(price)}</text>` : '')
+    + (matched ? `<circle cx="${28 + 8}" cy="${matchY}" r="2.5" fill="${MAP_COLORS.included}"/>` : '')
+    + `<text x="${28 + tagW / 2 + dotW / 2}" y="${matchY}" text-anchor="middle" dominant-baseline="central" font-family="system-ui,sans-serif" font-size="9" font-weight="600" fill="${matched ? '#047857' : '#52525b'}">${esc(matchWord)}</text>`
     + '</svg>'
   return { url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`, anchor: new google.maps.Point(12, cy), size: new google.maps.Size(w, h) }
 }
 
-// Where the pointer is and where it last opened a comp from the map. Closing
-// the dialog with the pointer still resting on (or wiggling over) a marker must
-// not open it again. Module scope · the map layer remounts when the dialog
-// opens, which would otherwise forget the guard at the exact moment it matters.
-const hoverGuard: {
-  pointer: { current: { x: number; y: number } | null }
-  openedAt: { current: { x: number; y: number } | null }
-} = { pointer: { current: null }, openedAt: { current: null } }
+// Where the pointer is · module scope, because the map layer remounts (for example when a dialog
+// opens) and the position is needed at the first hover after that.
+const lastPointer: { current: Point | null } = { current: null }
 
 function FlatMarkers({ markers, activeMarkerKey, onMarkerClick }: {
   markers: MapMarker[]; activeMarkerKey?: string | null; onMarkerClick: (marker: MapMarker) => void
@@ -76,53 +81,84 @@ function FlatMarkers({ markers, activeMarkerKey, onMarkerClick }: {
   const previousActive = useRef<string | null | undefined>(undefined)
   const activeKey = useRef(activeMarkerKey)
   activeKey.current = activeMarkerKey
-  // Hover opens the comp detail once, then stays quiet until the pointer has
-  // travelled away from where it opened (see hoverGuard). A click always opens.
-  const { pointer, openedAt } = hoverGuard
-
   // Build markers once per marker set · a highlight change must not rebuild
   // them under the pointer (that re-fires mouseover and reopens the dialog).
   useEffect(() => {
     if (!map) return
-    const REARM_DISTANCE = 32 // px · comfortably outside a 20px marker
+    const pointer = lastPointer
     const at = (event?: { domEvent?: Event }) => {
       const dom = event?.domEvent
       return dom instanceof MouseEvent ? { x: dom.clientX, y: dom.clientY } : pointer.current
     }
     const container = map.getDiv()
-    const track = (event: MouseEvent) => {
-      pointer.current = { x: event.clientX, y: event.clientY }
-      const origin = openedAt.current
-      if (origin && Math.hypot(event.clientX - origin.x, event.clientY - origin.y) > REARM_DISTANCE) openedAt.current = null
+
+    // Hover has to be intentional: a drag, a zoom, a wheel turn or a held button is never a hover,
+    // and the pointer has to rest on the marker for a moment before its card opens.
+    let gesturing = false
+    let dragging = false
+    let lastInteractionAt = 0
+    const rest: { compKey: string; point: Point; since: number; timer: ReturnType<typeof setTimeout> | null } = { compKey: '', point: { x: 0, y: 0 }, since: 0, timer: null }
+    let over = false
+    const cancelRest = () => { over = false; if (rest.timer) { clearTimeout(rest.timer); rest.timer = null } }
+    const check = () => {
+      rest.timer = null
+      if (!over) return
+      const intent = hoverIntent({ now: Date.now(), restedSince: rest.since, lastInteractionAt, gesturing })
+      if (intent.ready) emitMarkerHover({ compKey: rest.compKey, x: rest.point.x, y: rest.point.y })
+      else rest.timer = setTimeout(check, Math.max(40, intent.waitMs))
     }
+    const startRest = (compKey: string, point: Point) => {
+      rest.compKey = compKey; rest.point = point; rest.since = Date.now(); over = true
+      if (rest.timer) clearTimeout(rest.timer)
+      rest.timer = setTimeout(check, DWELL_MS)
+    }
+    const track = (event: MouseEvent) => {
+      const point = { x: event.clientX, y: event.clientY }
+      pointer.current = point
+      gesturing = dragging || event.buttons !== 0
+      if (over && movedBeyondSlop(rest.point, point)) startRest(rest.compKey, point)
+    }
+    const touchInteraction = () => { lastInteractionAt = Date.now() }
+    const listeners = [
+      map.addListener('dragstart', () => { dragging = true; gesturing = true; cancelRest(); emitMarkerHover(null) }),
+      map.addListener('dragend', () => { dragging = false; gesturing = false; touchInteraction() }),
+      map.addListener('zoom_changed', touchInteraction),
+    ]
     container.addEventListener('mousemove', track, true)
+    container.addEventListener('wheel', touchInteraction, { capture: true, passive: true })
     iconCache.current = {}
     instances.current = markers.map((marker, index) => {
       const instance = new google.maps.Marker({
-        // Comp markers show our own hover panel · a browser tooltip beside it only gets in the way
+        // Comp markers show our own card · a browser tooltip beside it only gets in the way
         map, position: marker, title: marker.type === 'subject' ? marker.label : undefined,
         icon: iconFor(marker, markerKey(marker) === activeKey.current, index),
         label: marker.type === 'subject' ? { text: 'S', color: '#fff', fontSize: '10px' } : undefined,
         zIndex: marker.type === 'subject' ? 100 : 10,
       })
-      instance.addListener('click', (event: google.maps.MapMouseEvent) => {
-        openedAt.current = at(event)
-        onMarkerClick(marker)
-      })
-      // Hover shows the comp beside the subject (see map-hover) · a click
-      // still opens the full comp detail.
-      if (marker.type !== 'subject' && marker.compKey) {
-        const compKey = marker.compKey
-        instance.addListener('mouseover', (event: google.maps.MapMouseEvent) => {
-          const point = at(event)
-          if (point) emitMarkerHover({ compKey, x: point.x, y: point.y })
-        })
-        instance.addListener('mouseout', () => emitMarkerHover(null))
+      if (marker.type === 'subject' || !marker.compKey) {
+        instance.addListener('click', () => onMarkerClick(marker))
+        return { marker, instance }
       }
+      const compKey = marker.compKey
+      // A click or tap shows the comp beside the subject and keeps it there (the card itself opens the full
+      // detail). Resting on the marker shows the same card, and it goes when the pointer leaves.
+      instance.addListener('click', (event: google.maps.MapMouseEvent) => {
+        cancelRest()
+        const point = at(event)
+        if (point) emitMarkerHover({ compKey, x: point.x, y: point.y, pinned: true })
+      })
+      instance.addListener('mouseover', (event: google.maps.MapMouseEvent) => {
+        const point = at(event)
+        if (point) startRest(compKey, point)
+      })
+      instance.addListener('mouseout', () => { cancelRest(); emitMarkerHover(null) })
       return { marker, instance }
     })
     return () => {
+      cancelRest()
+      listeners.forEach((listener) => listener.remove())
       container.removeEventListener('mousemove', track, true)
+      container.removeEventListener('wheel', touchInteraction, true)
       instances.current.forEach(({ instance }) => { google.maps.event.clearInstanceListeners(instance); instance.setMap(null) })
       instances.current = []
     }

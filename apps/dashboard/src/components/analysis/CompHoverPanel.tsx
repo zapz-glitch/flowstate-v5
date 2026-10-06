@@ -13,17 +13,29 @@ import { onMarkerHover, type MarkerHover } from './map-hover'
 
 const WIDTH = 660
 const LEAVE_MS = 320
-/** Rest on a marker this long before the panel opens · sweeping across markers must not open it */
-const OPEN_MS = 140
-/** Once the panel is up, moving to another marker swaps after this short pause */
-const SWAP_MS = 60
 const FADE_MS = 150
+/** A pinned card closes this long after the pointer leaves it */
+const PINNED_LEAVE_MS = 160
+/** A pinned card also closes when the mouse wanders this far (px) from it without ever entering it */
+const PINNED_WANDER_PX = 140
+/** A click that opened a pinned card must not count as the tap-away that closes it */
+const PINNED_CLICK_GUARD_MS = 150
+
+/** Distance from a point to a rectangle (0 when inside) */
+function distanceToRect(x: number, y: number, r: DOMRect): number {
+  const dx = Math.max(r.left - x, 0, x - r.right)
+  const dy = Math.max(r.top - y, 0, y - r.bottom)
+  return Math.hypot(dx, dy)
+}
 
 /**
- * Resting on a map marker shows that comp (left) beside the subject (right).
- * The pair stays up while the pointer is on the marker or on either card, so
- * you can move from the marker onto the comp, then across to the subject. It
- * closes only once the pointer is outside both, and fades out as it goes.
+ * Resting on a map marker (the map decides what counts as resting) shows that comp (left)
+ * beside the subject (right). The pair stays up while the pointer is on the marker or on either
+ * card, so you can move from the marker onto the comp, then across to the subject. It closes only
+ * once the pointer is outside both, and fades out as it goes.
+ *
+ * A click or tap on a marker pins the pair: it stays after the pointer leaves the marker, and goes
+ * when the pointer leaves the card, when the person taps anywhere else, or on Escape.
  */
 export function CompHoverPanel() {
   const { subject, displayComps: comps, compOverride, onToggleComp, onCompClick } = useEvaluation()
@@ -34,6 +46,10 @@ export function CompHoverPanel() {
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const fadeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const overPanel = useRef(false)
+  const panelRef = useRef<HTMLDivElement>(null)
+  const pinned = useRef(false)
+  const pinnedAt = useRef(0)
+  const enteredPinned = useRef(false)
   hoverRef.current = hover
 
   useEffect(() => {
@@ -44,25 +60,63 @@ export function CompHoverPanel() {
       if (fadeTimer.current) { clearTimeout(fadeTimer.current); fadeTimer.current = null; setClosing(false) }
     }
     const beginClose = () => {
+      if (fadeTimer.current) return
       setClosing(true)
-      fadeTimer.current = setTimeout(() => { fadeTimer.current = null; setHover(null); setClosing(false) }, FADE_MS)
+      fadeTimer.current = setTimeout(() => {
+        fadeTimer.current = null
+        pinned.current = false; enteredPinned.current = false
+        setHover(null); setClosing(false)
+      }, FADE_MS)
     }
     const off = onMarkerHover((next) => {
+      // A pinned card ignores hovering: a stray pass over another marker must not swap it
+      if (pinned.current && !next?.pinned) return
       cancelAll()
+      if (next?.pinned) {
+        pinned.current = true; pinnedAt.current = Date.now(); enteredPinned.current = false
+        setHover(next)
+        return
+      }
       if (next) {
-        openTimer.current = setTimeout(() => { openTimer.current = null; setHover(next) }, hoverRef.current ? SWAP_MS : OPEN_MS)
+        // The map already waited for the pointer to rest on the marker · open now
+        setHover(next)
         return
       }
       // Left the marker · give the pointer a moment to reach the cards
       closeTimer.current = setTimeout(() => { closeTimer.current = null; if (hoverRef.current && !overPanel.current) beginClose() }, LEAVE_MS)
     })
-    const onPanelEnter = () => { overPanel.current = true; cancelAll() }
+    const onPanelEnter = () => { overPanel.current = true; if (pinned.current) enteredPinned.current = true; cancelAll() }
     const onPanelLeave = () => {
       overPanel.current = false
-      closeTimer.current = setTimeout(() => { closeTimer.current = null; if (hoverRef.current) beginClose() }, 160)
+      // A pinned card waits until the pointer has been on it at least once
+      if (pinned.current && !enteredPinned.current) return
+      closeTimer.current = setTimeout(() => { closeTimer.current = null; if (hoverRef.current) beginClose() }, pinned.current ? PINNED_LEAVE_MS : 160)
     }
     panelHandlers.current = { onPanelEnter, onPanelLeave }
-    return () => { off(); clear(openTimer); clear(closeTimer); clear(fadeTimer) }
+
+    // Ways out of a pinned card: tap or click anywhere else (a drag is not a tap), Escape, or the
+    // mouse wandering well away from it
+    const onDocClick = (event: MouseEvent) => {
+      if (!pinned.current || !hoverRef.current) return
+      if (Date.now() - pinnedAt.current < PINNED_CLICK_GUARD_MS) return
+      if (panelRef.current?.contains(event.target as Node)) return
+      beginClose()
+    }
+    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape' && pinned.current && hoverRef.current) beginClose() }
+    const onPointerMove = (event: PointerEvent) => {
+      if (!pinned.current || !hoverRef.current || event.pointerType !== 'mouse' || enteredPinned.current || closing) return
+      const box = panelRef.current?.getBoundingClientRect()
+      if (box && distanceToRect(event.clientX, event.clientY, box) > PINNED_WANDER_PX) beginClose()
+    }
+    document.addEventListener('click', onDocClick)
+    document.addEventListener('keydown', onKey)
+    document.addEventListener('pointermove', onPointerMove)
+    return () => {
+      off(); clear(openTimer); clear(closeTimer); clear(fadeTimer)
+      document.removeEventListener('click', onDocClick)
+      document.removeEventListener('keydown', onKey)
+      document.removeEventListener('pointermove', onPointerMove)
+    }
   }, [])
   const panelHandlers = useRef<{ onPanelEnter: () => void; onPanelLeave: () => void }>({ onPanelEnter: () => {}, onPanelLeave: () => {} })
 
@@ -81,6 +135,7 @@ export function CompHoverPanel() {
 
   return (
     <div
+      ref={panelRef}
       role="dialog"
       aria-label="Comp beside the subject property"
       className={cn(
@@ -97,7 +152,7 @@ export function CompHoverPanel() {
         subject={subject}
         isSelectedForArv={isSelected}
         onToggleArv={onToggleComp}
-        onCompClick={(c) => { setHover(null); setClosing(false); onCompClick?.(c) }}
+        onCompClick={(c) => { pinned.current = false; enteredPinned.current = false; setHover(null); setClosing(false); onCompClick?.(c) }}
       />
       <SubjectCompareCard subject={subject} />
     </div>

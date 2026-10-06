@@ -55,6 +55,15 @@ cd /tmp && LD_LIBRARY_PATH=$HOME/.local/lib/playwright-deps \
 ## Review template
 
 ```
+### 2026-10-06 — Map price tags, intentional hover, click to pin
+Screenshots: `t2` (tags, light), `pin-light` / `pin-dark` (pinned card)
+Requirement: a better tag on the satellite map showing block group / neighborhood / both and the sale price; hover must be intentional (not while dragging or zooming); click and tap must work too (iPad).
+Tag: white tag beside the numbered dot; price bold; below it "Block group", "Neighborhood", "Group + Neighborhood" or "Outside" (green with a dot when there is a match). The old price-class and condition lines are gone. The match uses the same facts the comp card does (same census block group, same neighborhood name or subdivision).
+Hover: the pointer has to rest on a marker for 250 ms (a few pixels of jitter allowed); drags, held buttons, zooms and wheel turns keep hover quiet until 350 ms after they end. Measured on the real page: the card opens at about 266 ms.
+Click or tap: the card opens at once and stays. It closes when the pointer leaves the card (after having been on it), when the person clicks or taps elsewhere (a drag does not count), on Escape, or when the mouse wanders 140 px away without ever entering it. Clicking the card itself still opens the full comp detail. A hover card that is merely hovered still closes when the pointer leaves the marker and the card.
+Change of behavior to know about: clicking a comp marker no longer opens the full detail directly; it shows the pinned card, and a click on the card opens the detail.
+Tests: unit 23 files (new: hover intent, area match); e2e 33 of 33, twice (new: sweep and drag open nothing, click pins and the three ways out, tag content).
+
 ### 2026-10-06 — Steady Re-run: hold, dim, fade in
 Screenshots: `rr-before`, `rr-during`, `rr-after` (light and dark, 1440)
 Requirement: on Re-run (and the offer buttons) the screen must not glitch; old comps leave and new ones appear smoothly.

@@ -278,6 +278,37 @@ export function formatAreaLine(blockGroupGeoid?: string | null, name?: string | 
   return area
 }
 
+export type AreaMatch = 'both' | 'block' | 'neighborhood' | 'none'
+
+const geoName = (value?: string | null) => (value ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+
+/**
+ * How a comp sits against the subject's area: the same census block group, the same
+ * neighborhood (name or subdivision), both, or neither. Unknown geography reads as neither.
+ */
+export function compAreaMatch(
+  comp: Pick<CompItem, 'sameBlockGroup' | 'censusBlockGroup' | 'neighborhoodName' | 'subdivision' | 'badges'>,
+  subject?: Pick<SubjectData, 'censusBlockGroup' | 'neighborhoodName' | 'subdivision'> | null,
+): AreaMatch {
+  const block = comp.sameBlockGroup === true
+    || comp.badges?.pocketVia === 'block'
+    || !!(subject?.censusBlockGroup && comp.censusBlockGroup && subject.censusBlockGroup === comp.censusBlockGroup)
+  const compName = geoName(comp.neighborhoodName)
+  const subjectName = geoName(subject?.neighborhoodName)
+  const neighborhood = comp.badges?.pocketVia === 'name'
+    || (!!compName && !!subjectName && compName === subjectName)
+    || !!(comp.subdivision && subject?.subdivision && subdivisionsMatch(comp.subdivision, subject.subdivision))
+  return block && neighborhood ? 'both' : block ? 'block' : neighborhood ? 'neighborhood' : 'none'
+}
+
+/** The plain words for an area match · what the map tag says under the price */
+export const AREA_MATCH_WORDS: Record<AreaMatch, string> = {
+  both: 'Group + Neighborhood',
+  block: 'Block group',
+  neighborhood: 'Neighborhood',
+  none: 'Outside',
+}
+
 type ScopeComp = Pick<CompItem, 'badges' | 'subdivision' | 'neighborhoodName' | 'sameBlockGroup' | 'censusTract' | 'censusBlockGroup' | 'geographyUnverified'>
 
 /**

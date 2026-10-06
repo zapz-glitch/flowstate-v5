@@ -73,3 +73,31 @@ test('the area line shows whichever half it has, and nothing when it has neither
   assert.equal(formatAreaLine(undefined, ''), null)
   assert.equal(formatAreaLine('', null), null)
 })
+
+const { compAreaMatch, AREA_MATCH_WORDS } = loadModule(new URL('./format-helpers.ts', import.meta.url), {
+  '@/lib/utils': realUtils(),
+  '@flowstate-api/shared': { subdivisionsMatch: (a, b) => String(a).toLowerCase() === String(b).toLowerCase() },
+  './feature-match': { compFeatureMatches: () => [], featureState: () => 'unknown', MATCH_TEXT: '', MISMATCH_TEXT: '' },
+})
+const subject = { censusBlockGroup: '130670312034', neighborhoodName: 'Meadow Brook', subdivision: 'MEADOW BROOK' }
+
+test('a comp in the same block group and neighborhood matches both', () => {
+  assert.equal(compAreaMatch({ censusBlockGroup: '130670312034', neighborhoodName: 'MEADOW BROOK' }, subject), 'both')
+})
+
+test('same block group only, same neighborhood only, and neither', () => {
+  assert.equal(compAreaMatch({ censusBlockGroup: '130670312034', neighborhoodName: 'Other Place' }, subject), 'block')
+  assert.equal(compAreaMatch({ censusBlockGroup: '130670312039', neighborhoodName: 'meadow-brook' }, subject), 'neighborhood')
+  assert.equal(compAreaMatch({ censusBlockGroup: '130670312039', neighborhoodName: 'Other Place' }, subject), 'none')
+})
+
+test('the server\'s own match flags count, and unknown geography is no match', () => {
+  assert.equal(compAreaMatch({ sameBlockGroup: true }, subject), 'block')
+  assert.equal(compAreaMatch({ badges: { pocketVia: 'name' } }, subject), 'neighborhood')
+  assert.equal(compAreaMatch({}, subject), 'none')
+  assert.equal(compAreaMatch({ censusBlockGroup: '130670312034' }, null), 'none')
+})
+
+test('the map tag words are plain', () => {
+  assert.deepEqual(JSON.parse(JSON.stringify(AREA_MATCH_WORDS)), { both: 'Group + Neighborhood', block: 'Block group', neighborhood: 'Neighborhood', none: 'Outside' })
+})

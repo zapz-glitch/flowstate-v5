@@ -339,6 +339,104 @@ describe('Property Search with a report loaded', () => {
     expect(opacity.some((v) => v !== null && v > 0.05 && v < 0.95), 'it faded rather than cut out').toBe(true)
   })
 
+  /** The centre of a comp marker's numbered dot, inside the visible map (some markers sit past its edge) */
+  async function visibleMarkerPoint(browser: { evaluate: (fn: () => unknown) => Promise<unknown> }, poll: (fn: () => Promise<number>) => Promise<void>) {
+    await poll(() => browser.evaluate(() => document.querySelectorAll('[data-testid="subject-map"] img[src^="data:image/svg+xml"]').length) as Promise<number>)
+    const point = (await browser.evaluate(() => {
+      const map = document.querySelector('[data-testid="subject-map"]') as HTMLElement
+      const m = map.getBoundingClientRect()
+      for (const marker of [...map.querySelectorAll('img[src^="data:image/svg+xml"]')] as HTMLElement[]) {
+        const r = marker.getBoundingClientRect()
+        const x = r.x + 12
+        const y = r.y + r.height / 2
+        if (x > m.left + 40 && x < m.right - 40 && y > m.top + 40 && y < m.bottom - 40) return { x, y }
+      }
+      return null
+    })) as { x: number; y: number } | null
+    expect(point, 'a comp marker is inside the visible map').not.toBeNull()
+    return point as { x: number; y: number }
+  }
+  const PANEL = '[role="dialog"][aria-label="Comp beside the subject property"]'
+  const panelCount = (browser: { evaluate: (fn: (sel: string) => unknown, arg: string) => Promise<unknown> }) =>
+    browser.evaluate((sel: string) => document.querySelectorAll(sel).length, PANEL) as Promise<number>
+  const waitMs = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+  const markersReady = (browser: { evaluate: (fn: () => unknown) => Promise<unknown> }) => () =>
+    expect.poll(() => browser.evaluate(() => document.querySelectorAll('[data-testid="subject-map"] img[src^="data:image/svg+xml"]').length), { timeout: 30_000 }).toBeGreaterThan(0)
+
+  test('a quick sweep across a marker opens nothing, and neither does a drag', WEB, async (fx) => {
+    const { browser } = fx
+    await openLoadedSearch(fx)
+    const target = await visibleMarkerPoint(browser, async () => { await markersReady(browser)() })
+    // Pass over the marker in well under the rest time
+    await browser.mouse.move(target.x - 40, target.y)
+    await browser.mouse.move(target.x, target.y)
+    await browser.mouse.move(5, 5) // off the marker and its price tag
+    await waitMs(700)
+    expect(await panelCount(browser), 'a sweep is not a hover').toBe(0)
+    // Press on the marker and drag: still not a hover, and not right after it either
+    await browser.mouse.move(target.x, target.y)
+    await browser.mouse.down()
+    await browser.mouse.move(target.x + 30, target.y + 20)
+    await browser.mouse.move(target.x + 60, target.y + 40)
+    await waitMs(500)
+    await browser.mouse.up()
+    await browser.mouse.move(5, 5)
+    await waitMs(200)
+    expect(await panelCount(browser), 'a drag is not a hover').toBe(0)
+  })
+
+  test('clicking a marker pins its card; Escape, a click elsewhere, or leaving the card closes it', WEB, async (fx) => {
+    const { browser, screen } = fx
+    await openLoadedSearch(fx)
+    const target = await visibleMarkerPoint(browser, async () => { await markersReady(browser)() })
+    const panel = screen.getByRole('dialog', 'Comp beside the subject property')
+    const open = async () => {
+      await browser.mouse.move(target.x - 30, target.y - 30)
+      await browser.mouse.move(target.x, target.y)
+      await browser.mouse.down()
+      await browser.mouse.up()
+      await expect(panel).toBeVisible()
+    }
+    // 1. Pinned: still there after the pointer has sat still for a good while
+    await open()
+    await waitMs(900)
+    expect(await panelCount(browser), 'the card stays after a click').toBe(1)
+    // 2. Escape closes it
+    await browser.keyboard.press('Escape')
+    await expect(panel).toBeHidden({ timeout: 5000 })
+    // 3. A click somewhere else on the page closes it
+    await open()
+    await waitMs(300)
+    await browser.mouse.move(target.x, target.y - 4)
+    await browser.evaluate(() => { (document.querySelector('[data-testid="subject-map"]')!.parentElement as HTMLElement).click(); return true })
+    await expect(panel).toBeHidden({ timeout: 5000 })
+    // 4. Moving onto the card and off it again closes it
+    await open()
+    const box = (await browser.evaluate((sel: string) => { const r = document.querySelector(sel)!.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height } }, PANEL)) as Rect
+    await browser.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+    await waitMs(250)
+    expect(await panelCount(browser), 'still open while the pointer is on it').toBe(1)
+    await browser.mouse.move(5, 5)
+    await expect(panel).toBeHidden({ timeout: 5000 })
+  })
+
+  test('each comp marker tag shows the sale price and how it matches the subject', WEB, async (fx) => {
+    const { browser } = fx
+    await openLoadedSearch(fx)
+    await markersReady(browser)()
+    const tags = (await browser.evaluate(() => [...document.querySelectorAll('[data-testid="subject-map"] img[src^="data:image/svg+xml"]')]
+      .map((img) => decodeURIComponent((img as HTMLImageElement).src.split(',')[1] ?? ''))
+      .map((svg) => [...svg.matchAll(/<text[^>]*>([^<]*)<\/text>/g)].map((m) => m[1])))) as string[][]
+    expect(tags.length).toBeGreaterThan(0)
+    const words = ['Group + Neighborhood', 'Block group', 'Neighborhood', 'Outside']
+    for (const lines of tags) {
+      // [number, price, match word] · never the old price class or condition lines
+      expect(lines.length, 'number, price and match').toBe(3)
+      expect(lines[1], 'the sale price').toMatch(/^\$[\d.]+[kM]$/)
+      expect(words, 'a plain match word').toContain(lines[2])
+    }
+  })
+
   test('the comp dialog opens, and fades out when closed', WEB, async (fx) => {
     const { screen, browser } = fx
     await openLoadedSearch(fx)
