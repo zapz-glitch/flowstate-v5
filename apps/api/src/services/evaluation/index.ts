@@ -161,6 +161,11 @@ export interface EvaluationParams {
   /** Explicit rerun — bypass photo/listing caches so the subject
    *  condition read and list price come back fresh. */
   skipCache?: boolean
+  /** Ruleset-governed run (harness: 'agent' on POST /v1/analyze). The
+   *  caller's appraisal overrides are verbatim — no DEFAULT_FILTERS /
+   *  DEFAULT_ADJUSTMENTS injection — so enablement reflects only the hard
+   *  data gates; the agent weighs the doctrine's geo/age/size preferences. */
+  harness?: 'agent'
 }
 
 export interface GroupBResult {
@@ -443,16 +448,27 @@ export async function performAnalysisPhase1(
   let { bundle } = params
   const appraisalService = createAppraisalService()
   const rules = params.appraisalRules ?? {}
-  const filters = [...(rules.filters ?? DEFAULT_FILTERS)]
-  const adjustments = rules.adjustments ?? DEFAULT_ADJUSTMENTS
+  let filters: AppraisalFilter[]
+  let adjustments: AppraisalAdjustment[]
 
-  // Filters the preset doesn't define at all are injected with system defaults
-  // so the audit trail always covers every rule. Filters the preset DOES define
-  // keep the user's own enabled + required(preferred) choices — the preset is
-  // authoritative for those.
-  for (const defaultFilter of DEFAULT_FILTERS) {
-    if (!filters.some((f) => f.type === defaultFilter.type)) {
-      filters.push({ ...defaultFilter })
+  if (params.harness === 'agent') {
+    // Ruleset-governed run — the caller's overrides are the whole grid.
+    // No default injection: an empty override means "no filters", so comps
+    // stay enabled unless a hard data gate fails. The agent weighs geo /
+    // age / size preferences itself under EVAL-AGENT-RULESET.md.
+    filters = [...(rules.filters ?? [])]
+    adjustments = [...(rules.adjustments ?? [])]
+  } else {
+    filters = [...(rules.filters ?? DEFAULT_FILTERS)]
+    adjustments = rules.adjustments ?? DEFAULT_ADJUSTMENTS
+    // Filters the preset doesn't define at all are injected with system defaults
+    // so the audit trail always covers every rule. Filters the preset DOES define
+    // keep the user's own enabled + required(preferred) choices — the preset is
+    // authoritative for those.
+    for (const defaultFilter of DEFAULT_FILTERS) {
+      if (!filters.some((f) => f.type === defaultFilter.type)) {
+        filters.push({ ...defaultFilter })
+      }
     }
   }
   const preferredSaleAgeDays = filters.find((f) => f.type === 'sale_age')?.value ?? 180
@@ -1893,6 +1909,15 @@ export function validateAgentSelection(sel: AgentSelection, comps: AppraisedComp
   for (const id of picks) {
     if (!enabled.has(id)) fails.push(`selected comp ${id} is not an enabled pool member`)
   }
+  // Hard floor — the valuation math needs a defensible $/sqft per pick, so
+  // a selected comp must carry both a sale price and a living area no
+  // matter which filters the run evaluated.
+  for (const id of picks) {
+    const c = enabled.get(id)
+    if (!c) continue
+    if (!(c.salePrice != null && c.salePrice > 0)) fails.push(`selected comp ${id} has no sale price`)
+    if (!(c.squareFeet != null && c.squareFeet > 0)) fails.push(`selected comp ${id} has no square footage`)
+  }
   for (const id of sel.drivers ?? []) {
     if (!picks.includes(id)) fails.push(`driver ${id} is not in selectedCompIds`)
   }
@@ -2018,4 +2043,34 @@ export async function harnessDeepen(ctx: Phase1Context, params: EvaluationParams
     stampPoolVerification(ctx.appraisalResult.comparables, ctx.bundle.property, ctx.preferredSaleAgeDays)
   }
   return deepened
+}
+
+/** Agent retry round — widen retrieval in TIME (never geography — see
+ *  EVAL-AGENT-RULESET §8a). The caller refetches comparables at a longer
+ *  sale window, geo-stamps and enriches new candidates through the same
+ *  gates as the initial pool, and passes them here. They go through the
+ *  same appraisal grid + verification + classification as the first pass;
+ *  the whole pool is re-classified so group labels re-break on the bigger
+ *  evidence set. Returns the count of comps added. */
+export function harnessWiden(ctx: Phase1Context, widened: NormalizedComparable[]): number {
+  const existing = new Set(ctx.appraisalResult.comparables.map((c) => c.id))
+  const added = widened.filter((c) => !existing.has(c.id))
+  if (added.length === 0) return 0
+  const appraisalService = createAppraisalService()
+  const widenedResult = appraisalService.evaluate(ctx.bundle.property, added, {
+    filters: ctx.filters,
+    adjustments: ctx.adjustments,
+  })
+  ctx.appraisalResult.comparables.push(...widenedResult.comparables)
+  // The response builder reads bundle.comparables for comp source/listing
+  // detail — widened comps must join it or a selected widened comp loses
+  // its source evidence in the saved report.
+  ctx.bundle.comparables.push(...added)
+  stampPoolVerification(ctx.appraisalResult.comparables, ctx.bundle.property, ctx.preferredSaleAgeDays)
+  const cls = new Map(ctx.compClassifications)
+  for (const [id, c] of classifyCompsByEvidence(ctx.appraisalResult.comparables, ctx.bundle.property, ctx.compCurbAppeal)) {
+    cls.set(id, c)
+  }
+  ctx.compClassifications = [...cls.entries()]
+  return widenedResult.comparables.length
 }

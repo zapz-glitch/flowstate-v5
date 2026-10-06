@@ -22,6 +22,7 @@ import {
   performAnalysisPhase2,
   buildHarnessEvidence,
   harnessDeepen,
+  harnessWiden,
   validateAgentSelection,
   type AgentSelection,
   type Phase1Context,
@@ -367,9 +368,14 @@ export class AnalysisJobDO {
     const filters = [...(config.evalParams.appraisalRules?.filters ?? DEFAULT_FILTERS)] as AppraisalFilter[]
     // Inject defaults for filter types the preset doesn't define — same
     // merge performAnalysis does, so pruning/params see the identical
-    // effective rule set (incl. sale_age_expansion* tiers).
-    for (const df of DEFAULT_FILTERS) {
-      if (!filters.some((f) => f.type === df.type)) filters.push({ ...df })
+    // effective rule set (incl. sale_age_expansion* tiers). Agent runs
+    // keep the caller's overrides verbatim instead: injected defaults
+    // would push sqft/sale-age constraints into the provider request and
+    // cull upstream the very comps the agent is meant to weigh.
+    if (config.harness !== 'agent') {
+      for (const df of DEFAULT_FILTERS) {
+        if (!filters.some((f) => f.type === df.type)) filters.push({ ...df })
+      }
     }
     const apiFilterParams = filtersToApiParams(filters)
 
@@ -1171,10 +1177,13 @@ export class AnalysisJobDO {
     const propertyCallStats = propertyApi.getCallStats()
     const evalParams = {
       ...config.evalParams,
+      harness: config.harness,
       // attom-mcp: when the filter ladder widened square feet, year or sale
       // age to admit evidence, evaluate the pool under that same step —
       // comps the ladder admitted must stay enabled through evaluation.
-      ...(isAttomMcp && (ladderStep > 0 || geoLevelForScope(ladderScope) > 1)
+      // Agent runs keep the caller's overrides verbatim instead — the
+      // ruleset is the doctrine, not the preset ladder.
+      ...(isAttomMcp && config.harness !== 'agent' && (ladderStep > 0 || geoLevelForScope(ladderScope) > 1)
         ? {
             appraisalRules: {
               ...(config.evalParams.appraisalRules ?? {}),
@@ -1406,13 +1415,16 @@ export class AnalysisJobDO {
     const config = JSON.parse(js.harnessConfig) as StartStreamingRequest
     const rounds = js.harnessRounds ?? 0
 
-    // Evidence retry — the deepen leg of the B ladder, agent-driven. Bounded
-    // like the deterministic ladder; 'widen' is out of v1 scope (the agent
-    // re-dispatches at a wider radius instead).
+    // Evidence retry — the deepen (enrichment) and widen (time-back
+    // refetch) legs of the B ladder, agent-driven. Bounded like the
+    // deterministic ladder. Per the eval ruleset, widen extends the sale
+    // window inside the SAME geography — going back in time, never out
+    // of the block group, unless the block group is truly empty.
     if (body.needsMoreEvidence) {
-      if (body.needsMoreEvidence !== 'deepen') {
+      const mode = body.needsMoreEvidence
+      if (mode !== 'deepen' && mode !== 'widen') {
         return Response.json(
-          { error: `needsMoreEvidence '${body.needsMoreEvidence}' unsupported — 'deepen' only`, rounds },
+          { error: `needsMoreEvidence '${mode}' unsupported — 'deepen' or 'widen'`, rounds },
           { status: 422 },
         )
       }
@@ -1421,17 +1433,43 @@ export class AnalysisJobDO {
       }
       const propertyApi = createPropertyApi(this.env)
       propertyApi.setSkipCache(!!config.skipCache)
-      const deepened = await harnessDeepen(ctx, {
-        jobId: config.jobId,
-        bundle: ctx.bundle,
-        enrichComparables: (comps: NormalizedComparable[]) =>
-          propertyApi.enrichComparables(comps, { concurrency: 8 }).catch(() => null),
-      })
-      // A selection may have resumed the job while deepen awaited provider
-      // data — never reopen a resumed job with this stale context.
+      let deepened: number | undefined
+      let widened: number | undefined
+      let monthsBack: number | undefined
+      if (mode === 'deepen') {
+        deepened = await harnessDeepen(ctx, {
+          jobId: config.jobId,
+          bundle: ctx.bundle,
+          enrichComparables: (comps: NormalizedComparable[]) =>
+            propertyApi.enrichComparables(comps, { concurrency: 8 }).catch(() => null),
+        })
+      } else {
+        // Time-widen: same radius and filters as the initial fetch,
+        // monthsBack stepped +12 per round (12→24→36…). New candidates go
+        // through the same census geo gate + gated enrichment before they
+        // join the pool — never raw.
+        const base = ctx.bundle.metadata?.comparablesParams
+        monthsBack = (base?.monthsBack ?? 12) + 12 * (rounds + 1)
+        const wider = await propertyApi.getComparables({
+          ...(base ?? {}),
+          propertyId: ctx.bundle.property.id,
+          monthsBack,
+          subjectSqft: ctx.bundle.property.squareFeet ?? undefined,
+          subjectPropertyType: ctx.bundle.property.propertyType ?? undefined,
+        })
+        if (!wider.success) {
+          return Response.json({ error: `widen refetch failed: ${wider.error ?? 'provider error'}` }, { status: 502 })
+        }
+        const existing = new Set(ctx.appraisalResult.comparables.map((c) => c.id))
+        const fresh = (wider.data.comparables ?? []).filter((c) => !existing.has(c.id))
+        const gated = await this.gateWidenedComps(fresh, ctx.bundle.property, propertyApi)
+        widened = harnessWiden(ctx, gated)
+      }
+      // A selection may have resumed the job while the retry awaited
+      // provider data — never reopen a resumed job with this stale context.
       if (js.status !== 'awaiting_agent') {
         return Response.json(
-          { error: 'Job resumed while deepen was running', status: js.status },
+          { error: `Job resumed while ${mode} was running`, status: js.status },
           { status: 409 },
         )
       }
@@ -1441,8 +1479,8 @@ export class AnalysisJobDO {
       this.jobState = js
       await this.persistence.write(js)
       await this.state.storage.setAlarm(js.harnessDeadline)
-      await this.pushEvent('harness_deepened', { jobId: js.jobId, rounds: js.harnessRounds, deepened })
-      return Response.json({ status: 'awaiting_agent', rounds: js.harnessRounds, deepened })
+      await this.pushEvent(`harness_${mode}ed`, { jobId: js.jobId, rounds: js.harnessRounds, deepened, widened, monthsBack })
+      return Response.json({ status: 'awaiting_agent', rounds: js.harnessRounds, deepened, widened, monthsBack })
     }
 
     const sel = (body.selection ?? body) as AgentSelection
@@ -1466,6 +1504,71 @@ export class AnalysisJobDO {
         }),
     )
     return Response.json({ status: 'resumed' })
+  }
+
+  /** Reduced census gate for widened (time-back) candidates — geo-stamps
+   *  each new comp, then pays for detail enrichment on the geography that
+   *  matters per the ruleset: block group first, tract second, same
+   *  subdivision/neighborhood name third. Closest-first, capped at 10 paid
+   *  calls. Non-attom providers pass through ungated, same as the initial
+   *  pool. */
+  private async gateWidenedComps(
+    comps: NormalizedComparable[],
+    property: NormalizedProperty,
+    propertyApi: ReturnType<typeof createPropertyApi>,
+  ): Promise<NormalizedComparable[]> {
+    if (comps.length === 0) return comps
+    if (propertyApi.providerName !== 'attom-mcp' || property.latitude == null || property.longitude == null) return comps
+    const subjectGeo = await fetchCensusGeography(
+      property.latitude,
+      property.longitude,
+      this.env.API_CACHE,
+      this.env.FIRECRAWL_API_KEY,
+      this.env.GEOCODIO_API_KEY,
+    )
+    if (!subjectGeo) return comps
+    const cache = this.env.API_CACHE ?? undefined
+    const lookup = async (lat: number, lng: number) => {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const g = await fetchCensusGeography(lat, lng, cache, this.env.FIRECRAWL_API_KEY, this.env.GEOCODIO_API_KEY).catch(() => null)
+        if (g) return g
+        if (attempt < 2) await new Promise((r) => setTimeout(r, 300 * (attempt + 1)))
+      }
+      return null
+    }
+    const queue = [...comps]
+    await Promise.all(
+      Array.from({ length: 8 }, async () => {
+        for (let c = queue.shift(); c; c = queue.shift()) {
+          if (c.latitude == null || c.longitude == null) continue
+          const g = await lookup(c.latitude, c.longitude)
+          if (!g) continue
+          c.censusTract ??= g.tract
+          c.censusBlockGroup ??= g.blockGroup
+          c.sameBlockGroup ??= g.blockGroup === subjectGeo.blockGroup
+          c.crossesMajorRoad ??= g.tract !== subjectGeo.tract
+        }
+      }),
+    )
+    const normName = (v?: string | null) => v?.toLowerCase().replace(/[^a-z0-9]/g, '') || null
+    const subjectNames = new Set(
+      [property.subdivision, property.neighborhoodName].map(normName).filter((v): v is string => v != null))
+    const sameName = (c: NormalizedComparable) =>
+      [c.subdivision, c.neighborhoodName].map(normName).some((v) => v != null && subjectNames.has(v))
+    const packageIds = packageDeedIds(comps)
+    const bulkIds = bulkSaleIds(comps)
+    const passers = comps
+      .filter((c) => !packageIds.has(c.id) && !bulkIds.has(c.id))
+      .filter((c) => c.sameBlockGroup === true
+        || (c.censusTract != null && c.censusTract === subjectGeo.tract)
+        || sameName(c))
+      .sort((a, b) =>
+        Number(b.sameBlockGroup === true) - Number(a.sameBlockGroup === true)
+        || (a.distanceMiles ?? 99) - (b.distanceMiles ?? 99))
+    const enriched = await propertyApi.enrichComparables(passers.slice(0, 10), { concurrency: 5 })
+      .catch(() => [] as NormalizedComparable[])
+    const byId = new Map(enriched.map((c) => [c.id, c]))
+    return comps.map((c) => byId.get(c.id) ?? c)
   }
 
   /** Phase-2 resume on a thawed context — runs inside waitUntil so the DO
@@ -1538,7 +1641,8 @@ export class AnalysisJobDO {
     const property = ctx.bundle.property
     return {
       ...config.evalParams,
-      ...(seed.isAttomMcp && ((seed.ladderStep ?? 0) > 0 || geoLevelForScope(seed.ladderScope ?? null) > 1)
+      harness: config.harness,
+      ...(seed.isAttomMcp && config.harness !== 'agent' && ((seed.ladderStep ?? 0) > 0 || geoLevelForScope(seed.ladderScope ?? null) > 1)
         ? {
             appraisalRules: {
               ...(config.evalParams.appraisalRules ?? {}),

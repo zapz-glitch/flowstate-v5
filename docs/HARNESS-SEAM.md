@@ -14,6 +14,22 @@ Nothing else moves: provider fetch, geocode tiers, enrichment, Clef/Luna
 vision, permits, evidence verification, classification, valuation math,
 report persistence — all stay deterministic in the Worker.
 
+## Agent-run rule authority
+
+For `harness: "agent"` jobs the appraisal grid is the caller's
+`appraisalOverrides` verbatim — the user's saved preset and the
+`DEFAULT_FILTERS`/`DEFAULT_ADJUSTMENTS` injection do NOT apply (they still
+apply to every deterministic run). Doctrine lives in
+EVAL-AGENT-RULESET.md, not the preset: an empty override means "no
+filters", so a comp is enabled unless it fails a hard data gate
+(non-market price, lot-category mismatch, transaction noise). Geo, age,
+size, and distance preferences are the agent's call, not server gates.
+Filterless runs surface the same raw evidence fields (distanceMiles,
+sameBlockGroup, censusTract, yearBuilt, saleDate, crossesMajorRoad) for
+the agent to weigh. Because sqft-less comps can stay enabled, selection
+validation enforces a math floor: every pick must carry `salePrice > 0`
+and `squareFeet > 0`.
+
 ## The seam
 
 ```
@@ -74,6 +90,8 @@ or, before answering, a request for more evidence:
 
 - `selectedCompIds` must be a subset of the enabled pool — unknown or
   disabled ids are rejected, not silently dropped.
+- Every pick must carry `salePrice > 0` and `squareFeet > 0` — the
+  valuation math needs a defensible $/sqft per comp.
 - `arv` sanity: inside the pool's evidence range (rejected if outside the
   [min enabled sale, max enabled sale] envelope by more than the ruleset's
   own tolerance).
@@ -82,12 +100,14 @@ or, before answering, a request for more evidence:
 
 ## Retry ladder (agent-driven)
 
-`needsMoreEvidence` triggers the SAME deterministic retries the B ladder
-runs today: `widen` = +1mi/+6mo provider refetch into the merged pool,
-`deepen` = AVM/land enrichment for thin comps. Bounded at 3 evidence rounds
-total. After the last round the agent must answer; if it still cannot, the
-job falls back to `evaluateB` as an honest final answer rather than
-hanging.
+`needsMoreEvidence` triggers evidence retries against the live provider:
+`widen` = provider refetch at +12mo sale window per round in the SAME
+geography (go back in time, never out of the block group — EVAL-AGENT-RULESET
+§8a), `deepen` = AVM/land enrichment for thin comps. Widened candidates are
+geo-stamped and enriched through the census gate before joining the pool.
+Bounded at 2 evidence rounds total. After the last round the agent must
+answer; if it still cannot, the job falls back to `evaluateB` as an honest
+final answer rather than hanging.
 
 ## Timeout / fallback
 

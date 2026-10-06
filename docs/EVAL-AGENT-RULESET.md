@@ -88,7 +88,8 @@ Selection preferences, roughly in order of importance:
   ranch — closer twins win even at a lower sale price.
 - **Living area: ±250–500 sqft preferred range** for selection (overrides
   the earlier ±250). Beyond it, the comp can still be used — with the full
-  square-footage adjustment from Section 7.
+  square-footage adjustment from Section 7. A comp whose GLA varies more
+  than ±25% from the subject loses half its selection weight.
 - **Year built: ±10 years preferred** — construction technology improves
   every decade. If ±10 fails, widen to ±12, then ±14, and keep stepping out
   2–3 years per iteration until the closest spec is found. Pre-1970 stock
@@ -165,21 +166,61 @@ of a pool in that submarket), and to the per-square-foot rate.
 **Square footage** is adjusted linearly from the very first square foot of
 difference — appraisers do not use threshold brackets, because market
 buyers do not discount the first 250–500 sqft as free space. Every square
-foot carries structural, material and utility cost:
+foot carries structural, material and utility cost. The full GLA spec:
+
+**Step 1 — bracketed selection.** Select 3–5 renovated comps from the
+subject's subdivision / neighborhood / block group (0.5-mile max radius),
+sold within the last 6 months, prioritizing a *bracketed* set:
+
+- At least 1 comp smaller than the subject's GLA.
+- At least 1 comp larger than the subject's GLA.
+- If a comp's GLA variance exceeds ±25% of the subject, reduce that
+  comp's weight by 50%.
+
+**Step 2 — the marginal GLA rate.** The marginal value of extra square
+footage is 40% of the blended renovated $/sqft:
 
 ```
-adjustment = market rate per sqft  ×  full |comp sqft − subject sqft|
+Avg_Comp_$/sqft   = sum(selected comp sale prices) / sum(selected comp GLAs)
+Marginal_GLA_Rate = Avg_Comp_$/sqft × 0.40
 ```
 
-- Direction: subtract when the comp is larger, add when it is smaller.
-- Worked example from the spec: subject 2,000 sqft, comp 2,300 sqft,
-  $50/sqft market rate → −$15,000 (not −$2,500, which is what adjusting
-  only past the 250 threshold would give).
-- Per the source-of-truth interview, a comp that is bigger or smaller than
-  the subject only commands **50% of the price per square foot** for the
-  size difference — so the default rate is 0.5 × the local $/sqft, applied
-  linearly across the full difference, unless paired sales in that pocket
-  demonstrate a stronger rate.
+Adjust each comp linearly across the full difference:
+
+```
+GLA_Delta            = Subject_GLA − Comp_GLA
+Adjusted_Comp_Price  = Comp_Sale_Price + (GLA_Delta × Marginal_GLA_Rate)
+```
+
+Direction: add when the comp is smaller, subtract when it is larger.
+Preliminary ARV is the weighted average of the adjusted comp prices.
+
+**Step 3 — ceiling and floor guardrails.**
+
+- **Ceiling (prevent over-improvement):** find the subdivision's highest
+  *renovated* sale (`Max_Renovated_Price`). If the preliminary ARV
+  exceeds it, cap: `Final_ARV = Max_Renovated_Price` and set flag
+  `CEILING_CAP_APPLIED` — a renovated valuation may never claim a value
+  higher than the best renovated sale that exists. Regression is real: a
+  buyer willing to spend record money leaves the pocket for a
+  neighborhood where that price is the average, not the maximum.
+- **Floor (prevent undervaluation):**
+  `ARV_Floor = max(Min_Renovated_Price × 0.90, Max_Distressed_Price × 1.15)`.
+  If the preliminary ARV falls below it, raise to the floor and set flag
+  `FLOOR_GUARDRAIL_APPLIED`.
+
+Before declaring the ceiling real, expand the search — go further back
+(12–24 months) in the immediate pocket and, only if the block group is
+truly empty, to competing similar-value block groups — to look for a
+renovated sale at the subject's scale. This is what `widen` is for
+(Section 8a).
+
+**Step 4 — output.** The verdict reports the preliminary ARV, the final
+ARV after guardrails, the applied flags (`NONE`, `CEILING_CAP_APPLIED`,
+`FLOOR_GUARDRAIL_APPLIED`, `WIDE_GLA_BRACKET` — the last when no larger
+comp exists to bracket the subject), and an itemized adjustment matrix:
+per comp, base price, GLA delta, marginal adjustment, final adjusted
+price.
 
 **FOUNDATION-001 — directional:** concrete and concrete-block foundations
 are equivalent. Wood, pier-and-beam and crawlspace are a separate group.
@@ -195,6 +236,13 @@ the groups adjusts only one way:
   adjustment either direction.
 
 ## 8. Evidence quality rules
+
+- **Missing sale dates:** a comp with no sale date is flagged "date
+  unknown" — never silently dropped, never silently trusted. If it is a
+  distressed fixer or otherwise low-value to the evaluation's accuracy,
+  leave it out. If it could matter — above all a *renovated* comp that
+  might anchor the ARV band — it is worth a sale-date lookup to rescue
+  it.
 
 - **Verified flips:** a confirmed investor purchase resold after
   renovation within a 30–365 day hold at a profit is very strong proof the
@@ -216,6 +264,29 @@ the groups adjusts only one way:
   better evidence than any one of them.
 - **When nothing matches everything,** select the comp or comp group with
   the fewest and least important differences from the subject.
+
+## 8a. Thin pools — widen before concluding
+
+When the usable pool is thin — no renovated comp, fewer than ~3 usable
+comps, or no size bracket for an above-ceiling projection — ask for more
+evidence before producing a number:
+
+- **deepen** enriches the comps already fetched (classification, photos,
+  listing evidence). It cannot rescue a comp whose sale data is missing —
+  use it when the pool exists but is unclassified, not when it is empty.
+- **widen** goes back in TIME first — a longer sale window inside the
+  SAME geography. It does not leave the block group or the subdivision;
+  a bigger radius does not help when what we want is block matches and
+  neighborhood matches. Only when the block group is literally empty may
+  the search step slowly outward into ADJACENT block groups of similar
+  value — and only after verifying the adjacent pocket's values are
+  actually relative to the subject's. That is the worst-case escape
+  hatch; comps from outside always carry a heavier accuracy discount.
+  Prefer going 12→24+ months back in place over leaving the pocket.
+
+Cap the rounds. If widening once or twice still cannot produce a
+renovated comp or a size bracket, report the honest floor-only answer
+with low confidence — never inflate a thin pool into a confident number.
 
 ## 9. Discipline
 
