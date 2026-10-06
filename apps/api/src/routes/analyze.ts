@@ -392,6 +392,7 @@ analyze.post('/', async (c) => {
           ?? existingCrmLink?.leadId?.slice(0, 128),
         opportunityId: (typeof body.opportunityId === 'string' ? body.opportunityId.slice(0, 128) : undefined)
           ?? existingCrmLink?.opportunityId?.slice(0, 128),
+        callerRef: c.req.header('Idempotency-Key')?.slice(0, 128),
         llmOptions: {
           includePhotos: body.llmAnalysis?.includePhotos,
           compSelectionModel: validateModel(
@@ -798,6 +799,8 @@ async function harnessQueueListHandler(c: Context) {
       propertyCity: harnessQueue.propertyCity,
       propertyState: harnessQueue.propertyState,
       propertyZip: harnessQueue.propertyZip,
+      callerRef: harnessQueue.callerRef,
+      leadId: harnessQueue.leadId,
       status: harnessQueue.status,
       claimedBy: harnessQueue.claimedBy,
       leaseExpiresAt: harnessQueue.leaseExpiresAt,

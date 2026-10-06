@@ -158,6 +158,9 @@ export interface StartStreamingRequest {
    *  persisted report so it can be written back to the CRM */
   leadId?: string
   opportunityId?: string
+  /** Caller-supplied Idempotency-Key (flowstate-workers evalJobId) — stored on
+   *  the harness queue row so a drainer can complete the workers write-back. */
+  callerRef?: string
   llmOptions?: {
     includePhotos?: boolean
     compSelectionModel?: string
@@ -2412,6 +2415,8 @@ export class AnalysisJobDO {
       propertyCity: config.search.city ?? null,
       propertyState: config.search.state ?? null,
       propertyZip: config.search.zipCode ?? null,
+      callerRef: config.callerRef ?? null,
+      leadId: config.leadId ?? null,
       status: 'awaiting_agent',
       deadlineAt: deadline,
       parkedAt: now,

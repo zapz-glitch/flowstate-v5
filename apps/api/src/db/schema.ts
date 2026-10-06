@@ -984,6 +984,10 @@ export const harnessQueue = sqliteTable(
     propertyCity: text('property_city'),
     propertyState: text('property_state'),
     propertyZip: text('property_zip'),
+    /** Caller's Idempotency-Key — flowstate-workers' evalJobId ledger id, so a
+     *  drainer can post the /engine/eval/complete write-back. */
+    callerRef: text('caller_ref'),
+    leadId: text('lead_id'),
     // 'awaiting_agent' (parked, claimable) | 'claimed' (a drainer holds the lease)
     // | 'complete' | 'error'
     status: text('status').notNull().default('awaiting_agent'),
