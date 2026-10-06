@@ -247,41 +247,37 @@ async function classifyDesirability(env: Env, id: PocketIdentity): Promise<{ sco
     }
   }
 
-  // House classifier — TypeSafe System One (Jev). Structured choice maps
-  // to a 0-10 score; confidence weights how much it bends the provisional.
-  const jevKey = (env as Env & { JEV_API_KEY?: string }).JEV_API_KEY
-  const jevUrl = (env as Env & { TYPESAFE_URL?: string }).TYPESAFE_URL ?? 'https://api.typesafe.ai/v1/systemone'
-  if (!jevKey) return null
-  const res = await fetch(jevUrl, {
+  // Clef (Workers AI) — a native score question returns a probability-
+  // weighted 0..4, scaled to 0-10. Same System One shape as TypeSafe.
+  const acct = (env as Env & { CLOUDFLARE_ACCOUNT_ID?: string }).CLOUDFLARE_ACCOUNT_ID
+  const cfKey = (env as Env & { CLOUDFLARE_API_TOKEN?: string }).CLOUDFLARE_API_TOKEN
+  if (!acct || !cfKey) return null
+  const model = (env as Env & { CLEF_MODEL?: string }).CLEF_MODEL === 'clef' ? 'clef' : 'clef-flash'
+  const res = await fetch(`https://api.cloudflare.com/client/v4/accounts/${acct}/ai/run/@cf/cloudflare/${model}`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${jevKey}`, 'Content-Type': 'application/json' },
+    headers: { Authorization: `Bearer ${cfKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      model: (env as Env & { JEV_MODEL?: string }).JEV_MODEL ?? 'jev-latest',
-      state: `Neighborhood: ${id.displayName}, ${id.city ?? ''}, ${id.state ?? ''} ${id.zip ?? ''}\n\nWeb evidence:\n${snippets.join('\n') || '(none — judge from the name and market alone)'}`,
+      model,
+      state: {
+        pocket: { neighborhood: id.displayName, city: id.city, state: id.state, zip: id.zip, tract: id.tract, blockGroup: id.blockGroup },
+        webEvidence: snippets.join('\n').slice(0, 4000) || '(none — judge from the name and market alone)',
+      },
       questions: {
         desirability: {
-          type: 'choice',
-          instructions: 'Investment desirability + market activity for a wholesaler deciding where deals pencil fast. Demand, turnover speed, resale depth.',
-          criteria: {
-            STRONG: 'high demand, fast turnover, deep buyer pool — properties move quickly',
-            GOOD: 'healthy demand, steady activity',
-            MIXED: 'uneven demand — some streets strong, some soft',
-            SOFT: 'thin demand, slow turnover',
-            WEAK: 'distressed/low-demand area — deals sit',
-          },
+          type: 'score',
+          instructions: 'Investment desirability + market activity for a wholesaler deciding where deals pencil fast: demand depth, turnover speed, resale strength.',
+          criteria: ['WEAK — distressed/low-demand area, deals sit', 'SOFT — thin demand, slow turnover', 'MIXED — uneven demand', 'GOOD — healthy demand, steady activity', 'STRONG — high demand, fast turnover, deep buyer pool'],
         },
       },
     }),
     signal: AbortSignal.timeout(15000),
   })
   if (!res.ok) return null
-  const body = await res.json<{ answers?: Record<string, { choice?: string; confidence?: number }> }>()
-  const ans = body.answers?.desirability
-  const tier = { STRONG: 9, GOOD: 7, MIXED: 5, SOFT: 3, WEAK: 1 } as const
-  const base = tier[(ans?.choice ?? '') as keyof typeof tier]
-  if (base == null) return null
-  const conf = Math.max(0, Math.min(1, ans?.confidence ?? 0.5))
-  return { score: base, evidence: { tier: ans?.choice, confidence: conf, snippets: snippets.length } }
+  const raw = await res.json<{ success?: boolean; result?: { answers?: Record<string, { score?: number; confidence?: number }> } }>()
+  const ans = raw.result?.answers?.desirability
+  if (typeof ans?.score !== 'number') return null
+  // score is probability-weighted over 5 criteria (0-4) → scale to 0-10.
+  return { score: Math.max(0, Math.min(10, ans.score * 2.5)), evidence: { raw: ans.score, confidence: ans.confidence, snippets: snippets.length, model } }
 }
 
 /** Full score for a pocket — writes/upserts the pocket_scores row. */
@@ -310,7 +306,7 @@ export async function scorePocket(env: Env, id: PocketIdentity, inputs: Determin
     id.pocketKey, id.displayName, metro, id.city, id.state, id.zip, id.tract, id.blockGroup,
     score, inputs.medianLo, inputs.medianHi,
     JSON.stringify(inputs), JSON.stringify(desir?.evidence ?? null),
-    desir ? 'luna' : 'deterministic', now, due,
+    desir ? 'clef' : 'deterministic', now, due,
   ).run().catch((e) => console.error('[PocketScore] upsert failed:', e))
 
   return {
@@ -318,6 +314,6 @@ export async function scorePocket(env: Env, id: PocketIdentity, inputs: Determin
     city: id.city, state: id.state, zip: id.zip, census_tract: id.tract, block_group: id.blockGroup,
     score, median_lo: inputs.medianLo, median_hi: inputs.medianHi,
     inputs_json: JSON.stringify(inputs), evidence_json: JSON.stringify(desir?.evidence ?? null),
-    scored_by: desir ? 'luna' : 'deterministic', eval_count: 1, scored_at: now, refresh_due_at: due,
+    scored_by: desir ? 'clef' : 'deterministic', eval_count: 1, scored_at: now, refresh_due_at: due,
   }
 }

@@ -209,7 +209,7 @@ async function apiEvalQueueItems(env: Env, userId: string | undefined): Promise<
     `SELECT r.job_id, r.property_address, r.property_city, r.property_state,
             r.property_zip, r.status, r.arv, r.created_at, r.report_id
        FROM run_records r
-      WHERE r.user_id = ? AND r.created_at >= date('now')
+      WHERE r.user_id = ? AND r.created_at >= datetime('now', '-24 hours')
       ORDER BY r.created_at DESC`,
   ).bind(userId).all<{
     job_id: string; property_address: string | null; property_city: string | null
