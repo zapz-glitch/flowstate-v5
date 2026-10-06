@@ -45,6 +45,8 @@ import {
   describeLadderConcessions, filtersForLadder, geoLevelForScope, ladderFactorAt, ladderLimitsAt, lastUsefulLadderStep,
 } from '../services/appraisal/filter-ladder'
 import { arvEvidence, pocketPriceGroups } from '../services/evaluation'
+import { startCompEvidenceBatch } from '../services/comp-evidence'
+import { isClefAvailable } from '../services/clef'
 import { DEFAULT_EXPANSION_POLICY, saleAgeExpansionSteps, vintageYearCap } from '../services/appraisal/types'
 import { filtersToApiParams } from '../services/appraisal/types'
 import type { Env } from '../types'
@@ -518,8 +520,30 @@ export class AnalysisJobDO {
         subjectSqft: property.squareFeet ?? undefined,
         subjectPropertyType: property.propertyType ?? undefined,
     }
+    const compsPromise = propertyApi.getComparables(comparablesParams)
+    // Comp-evidence fan-out starts the MOMENT comps land — Firecrawl
+    // search→scrape→Clef runs beside geo/enrich instead of behind it.
+    const prefetchedCompEvidence = compsPromise.then(async (res) => {
+      try {
+        if (!res.success || this.env.CLEF_COMP_CONDITION_ENABLED !== 'true' || !isClefAvailable(this.env)) return null
+        const inputs = res.data.comparables.slice(0, Number(this.env.CLEF_COMP_MAX) || Infinity).map((c) => ({
+          propertyId: c.id,
+          address: c.address,
+          city: c.city,
+          state: c.state,
+          zipCode: c.zipCode,
+          latitude: c.latitude ?? null,
+          longitude: c.longitude ?? null,
+          salePrice: c.salePrice ?? undefined,
+          saleDate: c.saleDate ? String(c.saleDate) : undefined,
+          yearBuilt: c.yearBuilt ?? undefined,
+          squareFeet: c.squareFeet ?? undefined,
+        }))
+        return await startCompEvidenceBatch(this.env, inputs)
+      } catch { return null }
+    }).catch(() => null)
     const [compsResult, permitsResult, floodResult, avmResult, buildingDetailResult, osmResult, prefetchedPhotoBundleRaw] = await Promise.all([
-      propertyApi.getComparables(comparablesParams),
+      compsPromise,
       // Permits: fetched on every run (KV-cached) — the permit-age
       // thresholds drive major-item additions in the buybox derivation.
       // 'unavailable' must still mean the call failed, not that the
@@ -1209,6 +1233,9 @@ export class AnalysisJobDO {
       // attom-mcp comp enrichment happens in the census gate above —
       // passers only, 1 provider call each.
       prefetchedPhotoBundle,
+      // Comp evidence started the moment comps landed — a Map promise the
+      // pipeline awaits instead of launching its own batch late.
+      prefetchedCompEvidence,
       skipCache: !!config.skipCache,
       // Clef comp-evidence resolves fire-and-forget — the callback patches
       // comp curb-appeal stamps into the persisted report whenever it lands.

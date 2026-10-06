@@ -96,7 +96,8 @@ function stubFetch(handlers: Array<{ endpoint: string; contains?: string; body: 
   assert.equal(createZillowFetcher(noKeys), null)
 }
 
-// ── 3. Happy path: search resolves Zillow URL, scrape yields photos ──
+// ── 3. Happy path: constructed Zillow URL scrapes straight to photos —
+// zero search calls spent when the generated slug verifies. ──
 {
   const calls = stubFetch([
     { endpoint: 'v1/search', contains: 'zillow.com/homedetails', body: fcSearch([ZILLOW_URL]) },
@@ -107,13 +108,27 @@ function stubFetch(handlers: Array<{ endpoint: string; contains?: string; body: 
   assert.ok(res.listing, 'expected a listing')
   assert.ok((res.listing?.photos.length ?? 0) >= 2)
   assert.match(res.listing?.description ?? '', /Charming 3 bed/)
-  // Exactly the decision tree: one search call, one scrape call, in order.
-  const searches = calls.filter((c) => c.includes('v1/search'))
+  // Constructed URL verified on canonical — the search credit is never spent.
+  assert.equal(calls.filter((c) => c.includes('v1/search')).length, 0)
   const scrapes = calls.filter((c) => c.includes('v1/scrape'))
-  assert.equal(searches.length, 1)
   assert.equal(scrapes.length, 1)
-  assert.ok(scrapes[0].includes(ZILLOW_URL))
-  assert.equal(f.firecrawlCallCount, 2)
+  assert.ok(scrapes[0].includes('zillow.com'))
+  assert.equal(f.firecrawlCallCount, 1)
+}
+
+// ── 3a. Generated URL lands on a results page → canonical gate rejects,
+// lane falls through to Firecrawl search → scrape the resolved listing. ──
+{
+  const calls = stubFetch([
+    { endpoint: 'v1/search', contains: 'zillow.com/homedetails', body: fcSearch([ZILLOW_URL]) },
+    { endpoint: 'v1/scrape', contains: 'zillow.com/homes', body: fcScrape(SEARCH_PAGE_HTML) },
+    { endpoint: 'v1/scrape', contains: 'homedetails', body: fcScrape(ZILLOW_HTML) },
+  ])
+  const f = new ScrapflyZillowFetcher({ firecrawlApiKey: 'k' })
+  const res = await f.fetchListing(PROP, { skipCache: true })
+  assert.ok(res.listing, 'expected listing via search fallback after generated-URL miss')
+  assert.ok(calls.some((c) => c.includes('v1/search') && c.includes('zillow.com/homedetails')))
+  assert.ok(calls.some((c) => c.includes('v1/scrape') && c.includes(ZILLOW_URL)))
 }
 
 // ── 3b. Search-page photos are NOT listing evidence: a scrape that lands on
@@ -135,7 +150,8 @@ function stubFetch(handlers: Array<{ endpoint: string; contains?: string; body: 
 {
   const calls = stubFetch([
     { endpoint: 'v1/search', body: fcSearch(['https://www.zillow.com/homedetails/9999-Wrong-Ave-Fort-Worth-TX-76105/111_zpid/']) },
-    { endpoint: 'v1/scrape', body: fcScrape(ZILLOW_HTML) },
+    { endpoint: 'v1/scrape', contains: 'zillow.com/homes', body: fcScrape(SEARCH_PAGE_HTML) },
+    { endpoint: 'v1/scrape', contains: 'homedetails', body: fcScrape(ZILLOW_HTML) },
   ])
   const f = new ScrapflyZillowFetcher({ firecrawlApiKey: 'k' })
   const res = await f.fetchListing(PROP, { skipCache: true })

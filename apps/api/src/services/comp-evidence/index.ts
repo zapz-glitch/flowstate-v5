@@ -449,3 +449,37 @@ export async function gatherCompConditionEvidence(
 
   return evidence
 }
+
+/**
+ * Parallel comp-evidence fan-out — Firecrawl (search → scrape → photos+text)
+ * into Clef, 15 lanes wide (Firecrawl's 25-browser plan leaves headroom for
+ * the subject scrape + redfin lanes). Returns a propertyId → evidence map
+ * so callers that start the batch early (the moment comps land, before
+ * geo/enrich finishes) can hand the result into the pipeline as it sorts.
+ */
+export async function startCompEvidenceBatch(
+  env: Env,
+  comps: CompEvidenceInput[],
+  opts?: { lanes?: number; perCompTimeoutMs?: number; globalDeadlineMs?: number },
+): Promise<Map<string, CompConditionEvidence | null>> {
+  const out = new Map<string, CompConditionEvidence | null>()
+  const perComp = opts?.perCompTimeoutMs ?? 45_000
+  const deadline = opts?.globalDeadlineMs ?? 150_000
+  const laneCount = Math.min(opts?.lanes ?? 15, comps.length)
+  let next = 0
+  const lane = async () => {
+    while (next < comps.length) {
+      const comp = comps[next++]
+      const ev = await Promise.race([
+        gatherCompConditionEvidence(env, comp),
+        new Promise<null>((r) => setTimeout(() => r(null), perComp)),
+      ]).catch(() => null)
+      out.set(comp.propertyId, ev)
+    }
+  }
+  await Promise.race([
+    Promise.all(Array.from({ length: laneCount }, lane)),
+    new Promise((r) => setTimeout(r, deadline)),
+  ])
+  return out
+}

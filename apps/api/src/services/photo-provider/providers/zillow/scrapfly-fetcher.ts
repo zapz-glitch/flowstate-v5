@@ -110,7 +110,7 @@ export class ScrapflyZillowFetcher {
       const res = await fetch('https://api.firecrawl.dev/v1/scrape', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${this.firecrawlApiKey}` },
-        body: JSON.stringify({ url, formats: ['rawHtml', 'html'], onlyMainContent: false, waitFor: 3000 }),
+        body: JSON.stringify({ url, formats: ['rawHtml', 'html'], onlyMainContent: false }),
         signal: AbortSignal.timeout(45_000),
       })
       if (!res.ok) return null
@@ -192,13 +192,8 @@ export class ScrapflyZillowFetcher {
     site: 'zillow' | 'redfin' | 'realtor',
   ): Promise<{ extraction: ZillowExtraction; url: string } | null> {
     const cfg = this.siteLane(site)
-    const listingUrl = await this.search(cfg.query(property), cfg.urlPattern)
-    if (!listingUrl || !this.urlMatchesAddress(listingUrl, property)) return null
 
-    const html = await this.scrape(listingUrl)
-    if (!html) return null
-
-    if (site === 'zillow') {
+    const parseZillow = (html: string) => {
       const canonical = this.canonicalListingUrl(html)
       if (!(canonical && canonical.includes('/homedetails/') && this.urlMatchesAddress(canonical, property))) {
         return null
@@ -209,6 +204,25 @@ export class ScrapflyZillowFetcher {
       if (parsed.photos.length > 12) parsed.photos = parsed.photos.slice(0, 12)
       return isValidExtraction(parsed) ? { extraction: parsed, url: canonical } : null
     }
+
+    if (site === 'zillow') {
+      // Constructed URL first — address → canonical zillow slug is a code
+      // transform, so one scrape often replaces the search+scrape pair.
+      const generated = await this.scrape(generateZillowUrl(property))
+      if (generated) {
+        const hit = parseZillow(generated)
+        if (hit) return hit
+      }
+      const listingUrl = await this.search(cfg.query(property), cfg.urlPattern)
+      if (!listingUrl || !this.urlMatchesAddress(listingUrl, property)) return null
+      const html = await this.scrape(listingUrl)
+      return html ? parseZillow(html) : null
+    }
+
+    const listingUrl = await this.search(cfg.query(property), cfg.urlPattern)
+    if (!listingUrl || !this.urlMatchesAddress(listingUrl, property)) return null
+    const html = await this.scrape(listingUrl)
+    if (!html) return null
 
     const { photos, description } = this.parseGenericListing(html, cfg.photoPattern!)
     const normalized = photos.map(cfg.normalize!).slice(0, 12)

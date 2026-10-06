@@ -51,7 +51,7 @@ import {
   type RehabLevelEstimate,
 } from '../analysis'
 import { createPhotoService, type PhotoBundle, type PropertyIdentifier, type PropertyPhotos } from '../photo-provider'
-import { gatherCompConditionEvidence, type CompConditionEvidence } from '../comp-evidence'
+import { gatherCompConditionEvidence, startCompEvidenceBatch, type CompConditionEvidence } from '../comp-evidence'
 import { isClefAvailable } from '../clef'
 import { fetchRedfinPropertyDetails, type RedfinDetailsResult } from '../redfin-details'
 import type { PhysicalCharacteristicSourceData } from '../physical-characteristics'
@@ -152,6 +152,13 @@ export interface EvaluationParams {
    * refetch.
    */
   prefetchedPhotoBundle?: PhotoBundle | null
+  /**
+   * Comp-evidence batch started by the caller the moment comps landed —
+   * evidence lanes run beside geo/enrich instead of waiting for the sorted
+   * pool. Comps absent from the map (pool-expansion refetches) get a top-up
+   * batch inside evaluate.
+   */
+  prefetchedCompEvidence?: Promise<Map<string, CompConditionEvidence | null> | null> | null
   /**
    * Close CRM lead this eval belongs to — when present, realtor
    * conversation-log notes are fetched and folded into the rehab model
@@ -767,10 +774,11 @@ export async function performAnalysisPhase1(
       )
     : null
 
-  // Clef comp-evidence batch — kicked off here so the listing scrapes +
-  // classifications (the pipeline's longest wall-clock segment, up to ~45s)
-  // overlap the vision assessment and valuation instead of serializing at
-  // step 8b. Awaited where the comp_curb_appeal step records.
+  // Clef comp-evidence batch. The caller normally started this the moment
+  // comps landed (prefetchedCompEvidence — runs beside geo/enrich); when it
+  // didn't, the batch launches here so the listing scrapes + classifications
+  // still overlap vision and valuation. Awaited where the comp_curb_appeal
+  // step records.
   const clefCompsSorted = appraisalResult.comparables
     .slice()
     .sort((a, b) =>
@@ -778,44 +786,28 @@ export async function performAnalysisPhase1(
       || Number(b.isEnabled) - Number(a.isEnabled)
       || (a.distanceMiles ?? 999) - (b.distanceMiles ?? 999))
     .slice(0, Number(env.CLEF_COMP_MAX) || Infinity)
+  const clefInputs = clefCompsSorted.map((comp) => ({
+    propertyId: comp.id,
+    address: comp.address,
+    city: comp.city,
+    state: comp.state,
+    zipCode: comp.zipCode,
+    latitude: comp.latitude ?? null,
+    longitude: comp.longitude ?? null,
+    salePrice: comp.salePrice ?? undefined,
+    saleDate: comp.saleDate ? String(comp.saleDate) : undefined,
+    yearBuilt: comp.yearBuilt ?? undefined,
+    squareFeet: comp.squareFeet ?? undefined,
+  }))
   const clefCompPromise: Promise<(CompConditionEvidence | null)[]> | null =
     env.CLEF_COMP_CONDITION_ENABLED === 'true' && isClefAvailable(env)
       ? (async () => {
-          // Concurrency pool — most comps resolve through the non-rendered
-          // stingray JSON lane (~4s) after the reorder; the rendered stragglers
-          // are the minority, so lanes run 10-wide in sorted priority order.
-          const out: (CompConditionEvidence | null)[] = new Array(clefCompsSorted.length).fill(null)
-          let next = 0
-          const lane = async () => {
-            while (next < clefCompsSorted.length) {
-              const i = next++
-              const comp = clefCompsSorted[i]
-              out[i] = await Promise.race([
-                gatherCompConditionEvidence(env, {
-                  propertyId: comp.id,
-                  address: comp.address,
-                  city: comp.city,
-                  state: comp.state,
-                  zipCode: comp.zipCode,
-                  latitude: comp.latitude ?? null,
-                  longitude: comp.longitude ?? null,
-                  salePrice: comp.salePrice ?? undefined,
-                  saleDate: comp.saleDate ? String(comp.saleDate) : undefined,
-                  yearBuilt: comp.yearBuilt ?? undefined,
-                  squareFeet: comp.squareFeet ?? undefined,
-                }),
-                new Promise<null>((r) => setTimeout(() => r(null), 45_000)),
-              ]).catch(() => null)
-            }
-          }
-          // Global deadline — raised now that stingray covers most comps at
-          // JSON speed; the rendered stragglers get room to finish instead of
-          // being clipped unlabeled at 90s.
-          await Promise.race([
-            Promise.all(Array.from({ length: Math.min(10, clefCompsSorted.length) }, lane)),
-            new Promise((r) => setTimeout(r, 150_000)),
-          ])
-          return out
+          const early = params.prefetchedCompEvidence ? await params.prefetchedCompEvidence.catch(() => null) : null
+          const missing = early ? clefInputs.filter((c) => !early.has(c.propertyId)) : clefInputs
+          const filled = missing.length
+            ? await startCompEvidenceBatch(env, missing)
+            : new Map<string, CompConditionEvidence | null>()
+          return clefInputs.map((c) => early?.get(c.propertyId) ?? filled.get(c.propertyId) ?? null)
         })()
       : null
   if (arvComps.length > 0) {

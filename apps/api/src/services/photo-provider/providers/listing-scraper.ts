@@ -215,7 +215,6 @@ export class ListingPhotoScraper {
         url,
         formats: ['rawHtml', 'html', 'markdown'],
         onlyMainContent: false,
-        waitFor: 3000,
       }),
       signal: AbortSignal.timeout(60000),
     })
