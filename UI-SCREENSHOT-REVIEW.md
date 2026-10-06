@@ -55,6 +55,16 @@ cd /tmp && LD_LIBRARY_PATH=$HOME/.local/lib/playwright-deps \
 ## Review template
 
 ```
+### 2026-10-06 — Steady Re-run: hold, dim, fade in
+Screenshots: `rr-before`, `rr-during`, `rr-after` (light and dark, 1440)
+Requirement: on Re-run (and the offer buttons) the screen must not glitch; old comps leave and new ones appear smoothly.
+What was wrong: during a rerun the old results stayed on screen while new data streamed over them step by step, so numbers, comp order and map dots changed in place; a "Searching…" row also pushed the comps down; the buttons shifted when "Re-run" became "Running…" and when an offer was dispatched.
+Fix: while a rerun runs, the page holds what was on screen (dimmed, not clickable) and the step label floats over it; when the run ends the fresh results are released and the comps fade in one after another (30 ms apart, 300 ms each, off for reduced motion). A first run, with nothing on screen, still builds up live. The offer buttons keep their place under "Dispatching…" / "Success", and Re-run / Running… share one width.
+Measured on the real page: Prep offer, Re-run, Evaluation Settings, the subject card and the first comp card all stay at the same position and size during a rerun; the held results are dimmed.
+Not run: a full real rerun (it would start a real analysis and overwrite the saved report). The release was checked by its logic (unit tests) and by playing the fade-in on the real grid.
+Also fixed: the sweep had left a broken class on the valuation resize bar's hover.
+Tests: unit 22 files; e2e 30 of 30, twice.
+
 ### 2026-10-06 — Gray hover everywhere, ARV edit box, Offers icons, area line, map legend
 Screenshots: `g1` (ARV edit/after, hover pill, hover nav), `g2` (Offers), `a2` (area line, report with block groups), `c1` (legend)
 Requirements: one light-gray hover across the app (green only on Prep offer); the ARV edit box matches the number; Offers: Evaluating icon not spinning (clock), Ready icon not a check (inbox), Next up button removed; area line "Group N - Neighborhood" on the subject card, comp cards and hover panel; legend Included green, Excluded light silver.

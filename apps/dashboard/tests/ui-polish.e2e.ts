@@ -193,6 +193,41 @@ describe('Property Search with a report loaded', () => {
     await expect.poll(() => read('input[aria-label="Manual ARV"]')).toBeNull()
   })
 
+  test('Re-run holds the screen steady: nothing moves, the results dim, and the step label floats', WEB, async (fx) => {
+    const { browser } = fx
+    await openLoadedSearch(fx)
+    // The Re-run request never reaches the server: it stalls, then fails, after the measurements below
+    await browser.route('**/dashboard/analyze', async (route) => {
+      const request = route.request
+      if (request.method === 'POST' && (request.postData ?? '').includes('skipCache')) {
+        await new Promise((resolve) => setTimeout(resolve, 2500))
+        return route.abort()
+      }
+      return route.continue()
+    })
+    const snapshot = () => browser.evaluate(() => {
+      const r = (el: Element | null | undefined) => { if (!el) return null; const b = el.getBoundingClientRect(); return [Math.round(b.x), Math.round(b.y), Math.round(b.width), Math.round(b.height)] }
+      const btn = (t: string) => [...document.querySelectorAll('button')].find((b) => (b.textContent ?? '').trim().startsWith(t))
+      return JSON.stringify({
+        prep: r(btn('Prep offer')), rerun: r(document.querySelector('button[title^="Re-run"]')), settings: r(btn('Evaluation')),
+        subject: r(document.querySelector('[data-card-key="subject"]')), firstCard: r(document.querySelector('.comps-grid > *')),
+        held: document.querySelectorAll('[aria-busy="true"]').length,
+        dimmed: [...document.querySelectorAll('[aria-busy="true"]')].every((e) => Number(getComputedStyle(e).opacity) < 0.9),
+      })
+    })
+    await expect.poll(() => browser.evaluate(() => !!document.querySelector('.comps-grid > *'))).toBe(true)
+    const before = JSON.parse((await snapshot()) as string)
+    await browser.evaluate(() => { (document.querySelector('button[title^="Re-run"]') as HTMLElement).click(); return true })
+    await expect.poll(async () => JSON.parse((await snapshot()) as string).held).toBeGreaterThan(0)
+    await new Promise((resolve) => setTimeout(resolve, 600)) // let the dim finish
+    const during = JSON.parse((await snapshot()) as string)
+    expect(during.dimmed, 'the held results are dimmed').toBe(true)
+    // Nothing the person is looking at has moved or resized
+    for (const key of ['prep', 'rerun', 'settings', 'subject', 'firstCard']) {
+      expect(during[key], `${key} stays where it was`).toEqual(before[key])
+    }
+  })
+
   test('there is no comp rules line on the subject card', WEB, async (fx) => {
     const { screen } = fx
     await openLoadedSearch(fx)

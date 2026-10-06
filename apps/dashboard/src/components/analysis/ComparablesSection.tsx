@@ -53,6 +53,8 @@ export interface ComparablesSectionProps {
   onFeedbackSubmitted?: (type: 'validate' | 'improve') => void
   /** The selection stats for the tier being viewed · the page draws them (the subject card's foot) */
   onSelectionStats?: (stats: CompSelectionStats) => void
+  /** Goes up each time a held rerun finishes · the new cards fade in one after another on it */
+  enterKey?: number
 }
 
 /** "5 selected · 25 excluded · $241/sf avg · $320k to $410k", as numbers */
@@ -90,6 +92,7 @@ export function ComparablesSection({
   feedbackContext,
   onFeedbackSubmitted,
   onSelectionStats,
+  enterKey = 0,
 }: ComparablesSectionProps) {
   const [sortBy, setSortBy] = useState<SortOption>('default')
   const [tierFilter, setTierFilter] = useState<Tier>('all')
@@ -441,7 +444,7 @@ export function ComparablesSection({
           </div>
         )}
         {sortedItems.length > 0 && (
-          <div className="comps-grid">
+          <div key={enterKey} className={cn('comps-grid', enterKey > 0 && 'comps-enter')}>
             {sortedItems.map(({ comp, originalIndex }) => {
               const key = getCompKey(comp, originalIndex)
               const isSelected = hasInteractiveSelection

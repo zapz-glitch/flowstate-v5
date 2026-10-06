@@ -33,7 +33,7 @@ interface DealActionsProps {
  */
 export function DealActions({ offerPrice, onOfferWorkflow, onRerun, rerunning, onOpenSettings, bare = false, className }: DealActionsProps) {
   // Offer-button state machine: idle (buttons) → busy → done (result
-  // chip) → back to idle. Everything crossfades via animate-in/fade-in.
+  // chip) → back to idle. The result fades in over the buttons' own space.
   // Both workflows dispatch immediately — no price editing.
   const [offerPhase, setOfferPhase] = useState<'idle' | 'busy' | 'done'>('idle')
   const [offerOutcome, setOfferOutcome] = useState<{ ok: boolean } | null>(null)
@@ -64,53 +64,58 @@ export function DealActions({ offerPrice, onOfferWorkflow, onRerun, rerunning, o
         className,
       )}
     >
-      <div className="flex items-center gap-1">
-        {onOfferWorkflow && (
-          offerPhase === 'idle' ? (
-            <div key="offer-buttons" className="flex items-center gap-1 animate-in fade-in duration-300">
-              <button
-                type="button"
-                onClick={() => fireOffer('prep_offer')}
-                disabled={!canOffer}
-                className={cn(ACTION, 'hover:text-emerald-600 hover:bg-emerald-500/10 dark:hover:text-emerald-400 disabled:opacity-40')}
-                title={canOffer ? `Prep offer at $${fmtK(offerPrice)}` : 'Valuation incomplete — no offer price'}
-              >
-                Prep offer
-              </button>
-              <button
-                type="button"
-                onClick={() => fireOffer('no_margin')}
-                className={cn(ACTION, ACTION_HOVER)}
-                title="No margin — records the decline and notifies the listener"
-              >
-                No margin
-              </button>
-              <button
-                type="button"
-                onClick={() => fireOffer('no_offer')}
-                className={cn(ACTION, ACTION_HOVER)}
-                title="No offer — decline without an offer and notify the listener"
-              >
-                No offer
-              </button>
-            </div>
-          ) : offerPhase === 'busy' ? (
-            <span key="offer-busy" className="px-2 py-0.5 text-[11px] text-foreground-tertiary whitespace-nowrap animate-in fade-in duration-300">
-              Dispatching…
-            </span>
-          ) : (
+      {onOfferWorkflow && (
+        // The three buttons always hold their place; "Dispatching…" and "Success" are laid over them in
+        // the same cell, so the row never changes width or moves its neighbors while an offer goes out.
+        <div className="grid items-center">
+          <div
+            className={cn(
+              'col-start-1 row-start-1 flex items-center gap-1 transition-opacity duration-300',
+              offerPhase !== 'idle' && 'opacity-0 pointer-events-none',
+            )}
+            aria-hidden={offerPhase !== 'idle'}
+            inert={offerPhase !== 'idle'}
+          >
+            <button
+              type="button"
+              onClick={() => fireOffer('prep_offer')}
+              disabled={!canOffer}
+              className={cn(ACTION, 'hover:text-emerald-600 hover:bg-emerald-500/10 dark:hover:text-emerald-400 disabled:opacity-40')}
+              title={canOffer ? `Prep offer at $${fmtK(offerPrice)}` : 'Valuation incomplete — no offer price'}
+            >
+              Prep offer
+            </button>
+            <button
+              type="button"
+              onClick={() => fireOffer('no_margin')}
+              className={cn(ACTION, ACTION_HOVER)}
+              title="No margin — records the decline and notifies the listener"
+            >
+              No margin
+            </button>
+            <button
+              type="button"
+              onClick={() => fireOffer('no_offer')}
+              className={cn(ACTION, ACTION_HOVER)}
+              title="No offer — decline without an offer and notify the listener"
+            >
+              No offer
+            </button>
+          </div>
+          {offerPhase !== 'idle' && (
             <span
-              key="offer-done"
+              key={offerPhase}
+              role="status"
               className={cn(
-                'px-2 py-0.5 text-[11px] font-medium whitespace-nowrap animate-in fade-in duration-300',
-                offerOutcome?.ok ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400',
+                'col-start-1 row-start-1 justify-self-center whitespace-nowrap text-[11px] animate-in fade-in duration-300',
+                offerPhase === 'busy' ? 'text-foreground-tertiary' : cn('font-medium', offerOutcome?.ok ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'),
               )}
             >
-              {offerOutcome?.ok ? 'Success' : 'Fail'}
+              {offerPhase === 'busy' ? 'Dispatching…' : offerOutcome?.ok ? 'Success' : 'Fail'}
             </span>
-          )
-        )}
-      </div>
+          )}
+        </div>
+      )}
       {onOfferWorkflow && (onRerun || onOpenSettings) && <span className={DIVIDER} aria-hidden />}
       <div className="flex flex-wrap items-center justify-end gap-1">
         {onRerun && (
@@ -121,7 +126,11 @@ export function DealActions({ offerPrice, onOfferWorkflow, onRerun, rerunning, o
             className={cn(ACTION, ACTION_HOVER, 'disabled:opacity-50')}
             title="Re-run this analysis with fresh data"
           >
-            {rerunning ? 'Running…' : 'Re-run'}
+            {/* Both words share one cell, so "Re-run" and "Running…" take the same width and nothing moves */}
+            <span className="grid">
+              <span className="invisible col-start-1 row-start-1" aria-hidden>Running…</span>
+              <span className="col-start-1 row-start-1">{rerunning ? 'Running…' : 'Re-run'}</span>
+            </span>
           </button>
         )}
         {onRerun && onOpenSettings && <span className={DIVIDER} aria-hidden />}

@@ -3,6 +3,7 @@
 import type { OfferWorkflow } from '@/lib/client-api'
 import { Loader2 } from 'lucide-react'
 import { useState } from 'react'
+import { cn } from '@/lib/utils'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useEvaluation } from '@/hooks/use-evaluation'
 import { ComparablesSection, type CompSelectionStats } from './ComparablesSection'
@@ -38,6 +39,12 @@ export interface AnalysisResultLayoutProps {
   valuationPlacement?: 'inline' | 'left'
   /** Extra lines for the subject card (flood and location risks) */
   subjectExtras?: React.ReactNode
+  /** What to draw instead of the live evaluation · the page holds the previous results steady during a rerun */
+  evaluation?: ReturnType<typeof useEvaluation>
+  /** A rerun is streaming in: the held results are dimmed and not clickable */
+  refreshing?: boolean
+  /** Goes up each time a held rerun finishes · the fresh results animate in on it */
+  enterKey?: number
 }
 
 export function AnalysisResultLayout({
@@ -52,7 +59,11 @@ export function AnalysisResultLayout({
   disposition,
   valuationPlacement = 'inline',
   subjectExtras,
+  evaluation,
+  refreshing = false,
+  enterKey = 0,
 }: AnalysisResultLayoutProps) {
+  const live = useEvaluation()
   const {
     subject,
     displayValuation: valuation,
@@ -67,7 +78,7 @@ export function AnalysisResultLayout({
     onOpenSettings,
     onCompClick,
     onFeedbackSubmitted,
-  } = useEvaluation()
+  } = evaluation ?? live
 
   const selectedCompKeys = compOverride?.selectedCompKeys
   const isManual = compOverride?.isManual ?? false
@@ -111,7 +122,17 @@ export function AnalysisResultLayout({
 
       {/* Valuation panel — sticky so it's always visible while scrolling comps */}
       {valuationPlacement === 'left' ? null : valuation ? (
-        <div ref={valuationCardRef as React.RefObject<HTMLDivElement>} data-pane-sticky className="sticky z-10 top-[calc(3.5rem+var(--sat))] lg:top-0">
+        <div
+          key={enterKey}
+          ref={valuationCardRef as React.RefObject<HTMLDivElement>}
+          data-pane-sticky
+          aria-busy={refreshing}
+          className={cn(
+            'sticky z-10 top-[calc(3.5rem+var(--sat))] lg:top-0 transition-opacity duration-300',
+            refreshing && 'opacity-60 pointer-events-none select-none',
+            enterKey > 0 && !refreshing && 'animate-in fade-in duration-300',
+          )}
+        >
           <DealSummaryHero
             valuation={valuation}
             isRecalculated={isRecalculated}
@@ -182,7 +203,7 @@ export function AnalysisResultLayout({
       <InvestorAnalysisSummary analysis={valuation?.investorAnalysis} />
 
       {/* Streaming status — lives near the comps section, not the search bar */}
-      {statusLabel && isStreaming && (
+      {statusLabel && !refreshing && (isStreaming || live.isStreaming) && (
         <div className="flex items-center gap-2 px-1">
           <Loader2 className="w-3 h-3 text-primary animate-spin" />
           <span className="text-caption text-foreground-tertiary">{statusLabel}</span>
@@ -191,7 +212,20 @@ export function AnalysisResultLayout({
 
       {/* Properties grid (subject + comps) */}
       {comps ? (
+        <div className="relative">
+        {/* During a rerun the step label floats over the held comps instead of pushing them down */}
+        {refreshing && statusLabel && (
+          <div role="status" className="absolute left-1/2 top-12 z-10 flex -translate-x-1/2 items-center gap-2 rounded-sm border border-border bg-background px-3 py-1.5 shadow-sm animate-in fade-in duration-300">
+            <Loader2 className="w-3 h-3 text-primary animate-spin" />
+            <span className="text-caption text-foreground-secondary whitespace-nowrap">{statusLabel}</span>
+          </div>
+        )}
+        <div
+          aria-busy={refreshing}
+          className={cn('transition-opacity duration-300', refreshing && 'opacity-60 pointer-events-none select-none')}
+        >
         <ComparablesSection
+          enterKey={enterKey}
           onSelectionStats={setCompStats}
           comps={comps}
           subject={subject}
@@ -208,6 +242,8 @@ export function AnalysisResultLayout({
           feedbackContext={feedbackContext}
           onFeedbackSubmitted={onFeedbackSubmitted}
         />
+        </div>
+        </div>
       ) : null}
 
       {/* Appraisal decision trail — per-comp rule audit */}

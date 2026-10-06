@@ -56,7 +56,21 @@ test('without an offer handler there are no decision buttons and only the tools 
 
 test('a rerun in flight disables Re-run and says so', () => {
   const out = render({ ...all, rerunning: true })
-  assert.match(out, /<button[^>]*disabled=""[^>]*>Running…<\/button>/)
+  assert.match(out, /<button[^>]*disabled=""[^>]*><span class="grid">[\s\S]*col-start-1 row-start-1">Running…<\/span><\/span><\/button>/)
+})
+
+test('Re-run and Running… share one cell, so the row does not change width when a rerun starts', () => {
+  for (const rerunning of [false, true]) {
+    const out = render({ ...all, rerunning })
+    assert.match(out, /invisible col-start-1 row-start-1" aria-hidden="true">Running…<\/span>/, 'the wider word is always reserved')
+  }
+})
+
+test('the offer buttons keep their place while an offer is dispatched, so nothing moves', async () => {
+  // Static render shows the idle phase: the buttons are in a grid cell the status text can be laid over
+  const out = render(all)
+  assert.match(out, /<div class="grid items-center"><div class="col-start-1 row-start-1 flex items-center gap-1/)
+  assert.doesNotMatch(out, /role="status"/, 'no status text until an offer is sent')
 })
 
 test('with nothing to do it renders nothing', () => {
