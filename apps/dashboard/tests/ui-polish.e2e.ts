@@ -646,8 +646,8 @@ describe('Property Search with a report loaded', () => {
     expect(tags.length).toBeGreaterThan(0)
     const words = ['Group + Neighborhood', 'Block group', 'Neighborhood', 'Outside']
     for (const lines of tags) {
-      // [number, price, match word] · never the old price class or condition lines
-      expect(lines.length, 'number, price and match').toBe(3)
+      // [number, price, match word, and the condition when it is known] · no bullet, no price class
+      expect(lines.length === 3 || lines.length === 4, 'number, price, match, optional condition').toBe(true)
       expect(lines[1], 'the sale price').toMatch(/^\$[\d.]+[kM]$/)
       expect(words, 'a plain match word').toContain(lines[2])
     }

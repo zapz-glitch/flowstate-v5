@@ -86,6 +86,7 @@ export function DealActions({ offerPrice, onOfferWorkflow, onRerun, rerunning, o
             >
               Prep offer
             </button>
+            <span className={DIVIDER} aria-hidden />
             <button
               type="button"
               onClick={() => fireOffer('no_margin')}
@@ -95,6 +96,7 @@ export function DealActions({ offerPrice, onOfferWorkflow, onRerun, rerunning, o
             >
               No margin
             </button>
+            <span className={DIVIDER} aria-hidden />
             <button
               type="button"
               onClick={() => fireOffer('no_offer')}

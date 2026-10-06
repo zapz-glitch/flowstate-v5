@@ -165,12 +165,13 @@ export function AnalysisResultLayout({
            strict pass, yellow = extended once or twice, red = deeper. */
         const extensions = comps?.retrieval?.paramFlex?.extensions ?? 0
         const factor = comps?.retrieval?.paramFlex?.factor ?? 1
-        const tone = extensions === 0 ? 'text-emerald-500 border-emerald-500/30 bg-emerald-500/5'
+        // No widening is not good news, just a plain fact: neutral silver, not green
+        const tone = extensions === 0 ? 'text-foreground-secondary border-border bg-secondary/50'
           : extensions <= 2 ? 'text-amber-500 border-amber-500/30 bg-amber-500/5'
           : 'text-red-400 border-red-400/30 bg-red-400/5'
         return (
           <div data-notice className={`border rounded-sm px-4 py-3 ${tone}`}>
-            <div className="text-sm font-semibold">
+            <div className={cn('text-sm font-semibold', extensions === 0 && 'text-foreground')}>
               {extensions === 0
                 ? 'No ARV evidence in the verified pool'
                 : 'No ARV evidence — rules had to be widened'}

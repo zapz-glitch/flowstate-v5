@@ -44,13 +44,17 @@ export function RiskLine({ riskFlags, floodZone }: MapOverlayProps) {
       : (floodZone.source === 'listing' ? `Flood risk ${floodZone.zone ?? 'low'}` : 'No flood zone')
     : null
   return (
-    <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px]">
-      {flood && (
-        <span className={cn('font-medium', floodZone?.inFloodZone ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400')}>{flood}</span>
-      )}
-      {flags.map((flag, i) => (
-        <span key={i} className="font-medium text-amber-600 dark:text-amber-400">{flag}</span>
-      ))}
+    // A thin line sets each risk apart. It is each item's left edge, and the row is pulled left under
+    // a clip, so an item that starts a line (the first one, or one that wrapped) shows no line.
+    <div className="mt-1.5 overflow-hidden text-[11px]">
+      <div className="-ml-[17px] flex flex-wrap items-center gap-y-0.5">
+        {flood && (
+          <span className={cn('ml-2 border-l border-border pl-2 font-medium leading-tight', floodZone?.inFloodZone ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400')}>{flood}</span>
+        )}
+        {flags.map((flag, i) => (
+          <span key={i} className="ml-2 border-l border-border pl-2 font-medium leading-tight text-amber-600 dark:text-amber-400">{flag}</span>
+        ))}
+      </div>
     </div>
   )
 }

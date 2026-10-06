@@ -3,7 +3,7 @@
 import { useMemo, useCallback } from 'react'
 import dynamic from 'next/dynamic'
 import type { SubjectData, CompItem } from './shared-types'
-import { getCompKey, compAreaMatch, type AreaMatch } from './format-helpers'
+import { getCompKey, compAreaMatch, conditionLabel, type AreaMatch } from './format-helpers'
 import { isValidCoordinate } from '@/lib/property-map-geometry'
 
 const MapInner = dynamic(() => import('./PropertyMapInner'), {
@@ -26,6 +26,8 @@ export interface MapMarker {
   price?: number | null
   /** Block group, neighborhood, both or neither · the line under the price */
   match?: AreaMatch
+  /** Property condition · the last line of the tag */
+  condition?: string | null
 }
 
 interface PropertyMapProps {
@@ -74,6 +76,7 @@ export function PropertyMap({ subject, comps, selectedCompKeys, onMarkerSelect, 
             compKey,
             price: comp.salePrice ?? null,
             match: compAreaMatch(comp, subject),
+            condition: comp.badges ? conditionLabel(comp.badges.condition) : null,
           })
         }
       }

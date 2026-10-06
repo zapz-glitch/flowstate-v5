@@ -37,28 +37,36 @@ const markerIcon = (marker: MapMarker, active: boolean, index: number): google.m
   if (marker.type === 'subject') {
     return { path: google.maps.SymbolPath.CIRCLE, scale: 12, fillColor: fill, fillOpacity: 1, strokeColor: '#fff', strokeWeight: 2 }
   }
-  // Dot with the card number inside; beside it a white tag: the sale price, then how the comp sits
-  // against the subject (block group, neighborhood, both, or outside). Light tag on satellite
-  // imagery, dark text, a green dot when there is a match.
+  // Dot with the card number inside; beside it a white tag in the studio's manner: hairline edge,
+  // ink text set left. Sale price, then how the comp sits against the subject (green when it matches),
+  // then the property condition.
   const price = priceLabel(marker.price)
   const matchWord = AREA_MATCH_WORDS[marker.match ?? 'none']
   const matched = !!marker.match && marker.match !== 'none'
-  const dotW = matched ? 12 : 0
-  const tagW = Math.max(price ? price.length * 7 + 12 : 0, matchWord.length * 5.6 + 14 + dotW)
-  const tagH = (price ? 30 : 18)
+  const condition = marker.condition && marker.condition !== 'Unverified' ? marker.condition : null
+  const lines = [
+    price && { text: price, size: 12, weight: 600, fill: '#010101', w: 7.4 },
+    { text: matchWord, size: 9.5, weight: 500, fill: matched ? '#047857' : '#3a3a3a', w: 5.5 },
+    condition && { text: condition, size: 9.5, weight: 400, fill: '#6b6b6b', w: 5.3 },
+  ].filter((l): l is { text: string; size: number; weight: number; fill: string; w: number } => !!l)
+  const padX = 7
+  const tagW = Math.max(...lines.map((l) => l.text.length * l.w)) + padX * 2
+  const tagH = lines.reduce((sum, l) => sum + l.size + 3, 0) + 7
   const h = Math.max(24, tagH)
   const w = 24 + 4 + tagW
   const cy = h / 2
   const tagY = (h - tagH) / 2
   const esc = (text: string) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;')
-  const matchY = tagY + (price ? 22 : 9)
+  let y = tagY + 4
+  const text = lines.map((l) => {
+    y += l.size + 3
+    return `<text x="${28 + padX}" y="${y - 3}" font-family="Inter,system-ui,sans-serif" font-size="${l.size}" font-weight="${l.weight}" fill="${l.fill}">${esc(l.text)}</text>`
+  }).join('')
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">`
     + `<circle cx="12" cy="${cy}" r="10" fill="${fill}" stroke="#fff" stroke-width="2"/>`
     + `<text x="12" y="${cy}" text-anchor="middle" dominant-baseline="central" font-family="system-ui,sans-serif" font-size="10" font-weight="700" fill="${active ? '#fff' : markerNumberColor(marker.type)}">${index}</text>`
-    + `<rect x="28" y="${tagY}" width="${tagW}" height="${tagH}" rx="5" fill="#ffffff" fill-opacity="0.96" stroke="${matched ? MAP_COLORS.included : '#a1a1aa'}" stroke-width="1"/>`
-    + (price ? `<text x="${28 + tagW / 2}" y="${tagY + 11}" text-anchor="middle" dominant-baseline="central" font-family="system-ui,sans-serif" font-size="11" font-weight="700" fill="#171717">${esc(price)}</text>` : '')
-    + (matched ? `<circle cx="${28 + 8}" cy="${matchY}" r="2.5" fill="${MAP_COLORS.included}"/>` : '')
-    + `<text x="${28 + tagW / 2 + dotW / 2}" y="${matchY}" text-anchor="middle" dominant-baseline="central" font-family="system-ui,sans-serif" font-size="9" font-weight="600" fill="${matched ? '#047857' : '#52525b'}">${esc(matchWord)}</text>`
+    + `<rect x="28.5" y="${tagY + 0.5}" width="${tagW - 1}" height="${tagH - 1}" rx="4" fill="#ffffff" stroke="#010101" stroke-opacity="0.22" stroke-width="1"/>`
+    + text
     + '</svg>'
   return { url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`, anchor: new google.maps.Point(12, cy), size: new google.maps.Size(w, h) }
 }

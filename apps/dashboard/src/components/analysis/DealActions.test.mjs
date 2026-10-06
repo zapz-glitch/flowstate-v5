@@ -29,7 +29,7 @@ const dividers = (out) => (out.match(/w-px h-3 bg-border/g) ?? []).length
 test('the strip has its own top border and a divider between decisions and tools, and between the tools', () => {
   const out = render(all)
   assert.match(out, /border-t/)
-  assert.equal(dividers(out), 2)
+  assert.equal(dividers(out), 4, "two between the three offer buttons, one before the tools, one between the tools")
 })
 
 test('the five actions sit in one horizontal row at the right', () => {
