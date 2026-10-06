@@ -968,3 +968,36 @@ export const runTelemetry = sqliteTable(
     index('idx_run_telemetry_job').on(table.jobId),
   ]
 )
+
+// ==========================================
+// Harness Queue (Evaluation Agent work queue — parked jobs drainable by drainer sessions)
+// ==========================================
+
+export const harnessQueue = sqliteTable(
+  'harness_queue',
+  {
+    jobId: text('job_id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    propertyAddress: text('property_address'),
+    propertyCity: text('property_city'),
+    propertyState: text('property_state'),
+    propertyZip: text('property_zip'),
+    // 'awaiting_agent' (parked, claimable) | 'claimed' (a drainer holds the lease)
+    // | 'complete' | 'error'
+    status: text('status').notNull().default('awaiting_agent'),
+    claimedBy: text('claimed_by'),
+    claimedAt: text('claimed_at'),
+    /** Claim lease expiry (ISO). Expired claims return to the awaiting pool. */
+    leaseExpiresAt: text('lease_expires_at'),
+    rounds: integer('rounds').notNull().default(0),
+    deadlineAt: text('deadline_at'),
+    parkedAt: text('parked_at').notNull().$defaultFn(() => new Date().toISOString()),
+    updatedAt: text('updated_at').notNull().$defaultFn(() => new Date().toISOString()),
+  },
+  (table) => [
+    index('idx_harness_queue_user_status').on(table.userId, table.status),
+    index('idx_harness_queue_lease').on(table.leaseExpiresAt),
+  ]
+)

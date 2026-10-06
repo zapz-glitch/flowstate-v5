@@ -32,8 +32,8 @@ import {
   searchOptionsFingerprint,
 } from '../utils/eval-cache';
 import { drizzle } from 'drizzle-orm/d1';
-import { eq, and } from 'drizzle-orm';
-import { analysisRuns, savedReports, compTierOverrides } from '../db/schema';
+import { eq, and, or, lt, asc } from 'drizzle-orm';
+import { analysisRuns, harnessQueue, savedReports, compTierOverrides } from '../db/schema';
 import { applyCompTierOverrides } from '../utils/comp-tier-overrides';
 
 type Variables = { auth: AuthContext };
@@ -485,6 +485,9 @@ analyze.post('/', async (c) => {
  * same AnalysisResponse once complete. Falls back to
  * the saved report when the Durable Object state is gone.
  */
+// Registered before /jobs/:jobId so 'queue' isn't captured as a jobId param.
+analyze.get('/jobs/queue', harnessQueueListHandler);
+
 analyze.get('/jobs/:jobId', async (c) => {
   const auth = c.get('auth');
   const jobId = c.req.param('jobId');
@@ -775,6 +778,83 @@ analyze.post('/jobs/:jobId/harness/consult', async (c) => {
   });
   const text = await resp.text();
   return new Response(text, { status: resp.status, headers: { 'Content-Type': 'application/json' } });
+});
+
+/**
+ * The Evaluation Agent's work queue: this caller's parked jobs — status
+ * `awaiting_agent`, plus `claimed` rows whose lease expired (a crashed
+ * drainer's job returns to the pool). FIFO by park time.
+ * Declared as a hoisted function; registered at GET /jobs/queue above
+ * /jobs/:jobId so 'queue' isn't captured as a jobId param.
+ */
+async function harnessQueueListHandler(c: Context) {
+  const auth = c.get('auth');
+  const db = drizzle(c.env.DB);
+  const now = new Date().toISOString();
+  const rows = await db
+    .select({
+      jobId: harnessQueue.jobId,
+      propertyAddress: harnessQueue.propertyAddress,
+      propertyCity: harnessQueue.propertyCity,
+      propertyState: harnessQueue.propertyState,
+      propertyZip: harnessQueue.propertyZip,
+      status: harnessQueue.status,
+      claimedBy: harnessQueue.claimedBy,
+      leaseExpiresAt: harnessQueue.leaseExpiresAt,
+      rounds: harnessQueue.rounds,
+      deadlineAt: harnessQueue.deadlineAt,
+      parkedAt: harnessQueue.parkedAt,
+    })
+    .from(harnessQueue)
+    .where(and(
+      eq(harnessQueue.userId, auth.userId),
+      or(
+        eq(harnessQueue.status, 'awaiting_agent'),
+        and(eq(harnessQueue.status, 'claimed'), lt(harnessQueue.leaseExpiresAt, now)),
+      ),
+    ))
+    .orderBy(asc(harnessQueue.parkedAt))
+    .limit(50);
+  return c.json({ success: true, data: { jobs: rows, count: rows.length } });
+}
+
+/**
+ * POST /analyze/jobs/:jobId/harness/claim
+ *
+ * Atomic claim so two drainer sessions can't work the same parked job.
+ * Body: { agent?: string } — a drainer id for observability. 409 when the
+ * job isn't claimable (not parked, or a live lease is held). The claim is a
+ * 10-minute lease; an expired lease returns the job to the queue.
+ */
+analyze.post('/jobs/:jobId/harness/claim', async (c) => {
+  const auth = c.get('auth');
+  const jobId = c.req.param('jobId');
+  const body = await c.req.json<{ agent?: string }>().catch(() => ({} as { agent?: string }));
+  const db = drizzle(c.env.DB);
+  const now = new Date().toISOString();
+  const lease = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+  const res = await db
+    .update(harnessQueue)
+    .set({
+      status: 'claimed',
+      claimedBy: body.agent ?? 'drainer',
+      claimedAt: now,
+      leaseExpiresAt: lease,
+      updatedAt: now,
+    })
+    .where(and(
+      eq(harnessQueue.jobId, jobId),
+      eq(harnessQueue.userId, auth.userId),
+      or(
+        eq(harnessQueue.status, 'awaiting_agent'),
+        lt(harnessQueue.leaseExpiresAt, now),
+      ),
+    ))
+    .run();
+  if ((res.meta?.changes ?? 0) === 0) {
+    return c.json({ success: false, error: 'Job not claimable (not parked or lease held)' }, 409);
+  }
+  return c.json({ success: true, data: { jobId, claimedBy: body.agent ?? 'drainer', leaseExpiresAt: lease } });
 });
 
 export default analyze;
