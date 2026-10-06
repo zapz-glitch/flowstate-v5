@@ -1,5 +1,6 @@
 'use client'
 
+import type { PermitProgress } from '@/lib/permit-progress'
 import { atom } from 'jotai'
 import type { AnalysisState } from '@/types/analysis'
 import { initialAnalysisState } from '@/types/analysis'
@@ -30,6 +31,8 @@ export const analysisStateAtom = atom<AnalysisState>(initialAnalysisState)
 export const analysisActionsAtom = atom<AnalysisActions>(noopActions)
 /** Per-tick eval progress label — atom so SSE ticks re-render only the label, not the page */
 export const evalProgressAtom = atom<string | null>(null)
+/** The permit lookup's current stage · set by the server's permit progress messages, read by the Permits row only */
+export const permitProgressAtom = atom<PermitProgress | null>(null)
 
 // ─── Derived Atoms (read-only) ──────────────────────────────────────────────
 

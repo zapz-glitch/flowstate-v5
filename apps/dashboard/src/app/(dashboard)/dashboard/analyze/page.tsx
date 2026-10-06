@@ -5,7 +5,8 @@ import { isValidCoordinate } from '@/lib/property-map-geometry'
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import dynamic from 'next/dynamic'
 import { useAtomValue, useSetAtom } from 'jotai'
-import { activeAnalysisAtom, analysisResultAtom, analysisStateAtom, evalProgressAtom } from '@/atoms/analysis'
+import { activeAnalysisAtom, analysisResultAtom, analysisStateAtom, evalProgressAtom, permitProgressAtom } from '@/atoms/analysis'
+import { permitProgressFromEvent } from '@/lib/permit-progress'
 import { initialAnalysisState } from '@/types/analysis'
 import {
   Search,
@@ -180,6 +181,7 @@ export default function AnalyzePage() {
   const [streamingStep, setStreamingStep] = useState<'idle' | 'searching' | 'subject' | 'comps' | 'evaluating' | 'done'>('idle')
   // Atom, not useState — eval_progress SSE ticks re-render only the label leaf.
   const setEvalProgress = useSetAtom(evalProgressAtom)
+  const setPermitProgress = useSetAtom(permitProgressAtom)
   const [enrichmentStreamUrl, setEnrichmentStreamUrl] = useState<string | null>(null)
   const [enrichmentToken, setEnrichmentToken] = useState<string | null>(null)
 
@@ -298,9 +300,13 @@ export default function AnalyzePage() {
         setEvalProgress(null)
         break
 
-      case 'eval_progress':
-        if (typeof data.message === 'string') setEvalProgress(data.message)
+      case 'eval_progress': {
+        // Permit stages go to the Permits row; every other message is the evaluation's own label
+        const permitStage = permitProgressFromEvent(data)
+        if (permitStage) setPermitProgress(permitStage)
+        else if (typeof data.message === 'string') setEvalProgress(data.message)
         break
+      }
 
       case 'evaluation_complete':
         if (isAiOnly) break // Skip — keep existing evaluation, wait for LLM
@@ -593,6 +599,7 @@ export default function AnalyzePage() {
     aiOnlyModeRef.current = false
     setStreamingStep('idle')
     setEvalProgress(null)
+    setPermitProgress(null)
     setPhase('fetching')
     lastEventAtRef.current = Date.now()
 

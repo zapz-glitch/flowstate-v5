@@ -55,6 +55,15 @@ cd /tmp && LD_LIBRARY_PATH=$HOME/.local/lib/playwright-deps \
 ## Review template
 
 ```
+### 2026-10-06 — Permit stages, like the comp stages
+Screenshots: `permits-pull-light-1..3` (the Pull path, real page)
+Requirement: the Permits row should update in real time through stages, the way the comp fetch does ("Photos fetched", "Renovation level assessed").
+Server (approved by the owner, narrow): three progress messages on the existing `eval_progress` channel, each tagged `stage`: Requesting permit records; N permits found / No permits on file / Permit lookup unavailable; Major items assessed from permits · N charged. A failed send never touches the lookup.
+Screen: while an analysis runs, the Permits row shows the current stage in place (spinner, words, a three-step marker; a check when nothing more is coming). The on-demand Pull shows the same three stages from what the browser can see (request sent, N permits found, major items and valuation updated), each held about 0.8 s so it can be read. The comp stage label is untouched: permit messages are routed to the Permits row only.
+Verified: the Pull path on the real page (stubbed responses): step 1 "Requesting permit records", step 2 "3 permits found", step 3 "Major items and valuation updated" with a check. A fresh real analysis ran, but the local API on :8787 is a different checkout (feat/pocket-classify-v2) that does not have the new server messages, so the server stages were not seen live; they are covered by unit tests and need a run against this branch's API.
+Fixed on the way: Pull stages 2 and 3 were invisible because the row switches views when permits arrive; the stage line is now drawn in both views.
+Tests: dashboard unit 25 files; e2e 34 of 34; API: 6 new permit-progress tests pass (3 older report.test.ts failures exist without this change).
+
 ### 2026-10-06 — Map price tags, intentional hover, click to pin
 Screenshots: `t2` (tags, light), `pin-light` / `pin-dark` (pinned card)
 Requirement: a better tag on the satellite map showing block group / neighborhood / both and the sale price; hover must be intentional (not while dragging or zooming); click and tap must work too (iPad).

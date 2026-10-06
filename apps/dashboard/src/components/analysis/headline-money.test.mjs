@@ -77,6 +77,9 @@ test('permits render records and distinguish empty, unavailable, not-requested a
     '@/hooks/use-evaluation': { useEvaluation: () => ({ feedbackContext: null, onPermitsPulled: undefined }) },
     '@/lib/client-api': { pullReportPermits: async () => ({}) },
     'sonner': { toast: { success: () => {}, error: () => {} } },
+    // The row reads the permit stage from an atom (none set here: no server stage yet)
+    '@/atoms/analysis': { permitProgressAtom: require('jotai').atom(null) },
+    '@/lib/permit-progress': load('../../lib/permit-progress.ts'),
   })
   const render = props => renderToStaticMarkup(React.createElement(PropertyPermits, props))
   // "Permits NA" · gray label, strong value, no dash between them
