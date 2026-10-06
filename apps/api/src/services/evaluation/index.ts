@@ -796,6 +796,8 @@ export async function performAnalysisPhase1(
                   city: comp.city,
                   state: comp.state,
                   zipCode: comp.zipCode,
+                  latitude: comp.latitude ?? null,
+                  longitude: comp.longitude ?? null,
                   salePrice: comp.salePrice ?? undefined,
                   saleDate: comp.saleDate ? String(comp.saleDate) : undefined,
                   yearBuilt: comp.yearBuilt ?? undefined,

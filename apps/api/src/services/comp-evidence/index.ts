@@ -32,6 +32,10 @@ export interface CompEvidenceInput extends PropertyIdentifier {
   saleDate?: string
   yearBuilt?: number
   squareFeet?: number
+  /** Geocoded comp coordinates — enable the Street View fallback when no
+   *  listing exists on any portal. */
+  latitude?: number | null
+  longitude?: number | null
 }
 
 export interface CompConditionEvidence {
@@ -331,6 +335,47 @@ export async function gatherCompConditionEvidence(
         }
       }
     } catch { /* fall through to no_listing */ }
+  }
+
+  // Serper image search — replaces the dead Firecrawl image lookup when
+  // no portal listing exists. Returns real photos when the property was
+  // ever photographed for a listing/news/county source.
+  if (!photos && env.SERPER_API_KEY) {
+    try {
+      const res = await fetch('https://google.serper.dev/images', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-API-KEY': env.SERPER_API_KEY },
+        body: JSON.stringify({
+          q: `${comp.address}, ${comp.city}, ${comp.state} ${comp.zipCode ?? ''} house exterior`,
+          gl: 'us',
+          num: 8,
+        }),
+        signal: AbortSignal.timeout(15000),
+      })
+      if (res.ok) {
+        const data = (await res.json()) as { images?: Array<{ imageUrl?: string }> }
+        const urls = (data.images ?? [])
+          .map((i) => i.imageUrl)
+          .filter((u): u is string => !!u && /^https?:\/\//.test(u))
+          .slice(0, MAX_IMAGES)
+        if (urls.length) {
+          photos = { propertyId: comp.propertyId, photos: urls, source: 'serper-images', fetchedAt: new Date().toISOString() }
+        }
+      }
+    } catch { /* fall through */ }
+  }
+
+  // Street View last resort — every address has a facade photo even when
+  // it was never listed. Curb-appeal-only evidence (no description text).
+  // return_error_code makes missing imagery a 404 instead of a gray tile.
+  if (!photos && env.GOOGLE_MAPS_KEY) {
+    const location = comp.latitude != null && comp.longitude != null
+      ? `${comp.latitude},${comp.longitude}`
+      : `${comp.address}, ${comp.city}, ${comp.state} ${comp.zipCode ?? ''}`
+    const svUrl = `https://maps.googleapis.com/maps/api/streetview?location=${encodeURIComponent(location)}&size=640x640&key=${env.GOOGLE_MAPS_KEY}&source=outdoor&radius=500&return_error_code=true`
+    if (await tryFetchImage(svUrl)) {
+      photos = { propertyId: comp.propertyId, photos: [svUrl], source: 'streetview', fetchedAt: new Date().toISOString() }
+    }
   }
 
   if (!photos) {

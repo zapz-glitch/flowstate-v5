@@ -119,6 +119,8 @@ export interface Env {
   SCRAPFLY_URL?: string
   /** Serper — Google site-search for listing URL resolution */
   SERPER_API_KEY?: string
+  /** Google Maps Platform — Street View Static curb-appeal fallback */
+  GOOGLE_MAPS_KEY?: string
   /** Geocodio — metered census-geography lookups (primary path; free 2.5k/day) */
   GEOCODIO_API_KEY?: string
 
