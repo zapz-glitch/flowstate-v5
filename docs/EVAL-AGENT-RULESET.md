@@ -261,10 +261,15 @@ evidence before producing a number:
 - **deepen** enriches the comps already fetched (classification, photos,
   listing evidence). It cannot rescue a comp whose sale data is missing —
   use it when the pool exists but is unclassified, not when it is empty.
-- **widen** refetches with a bigger radius and a longer sale window
-  (further out + further back, per the regression doctrine). Use it when
-  the pool itself is thin or when an above-ceiling ARV needs a size
-  bracket from a competing area.
+- **widen** goes back in TIME first — a longer sale window inside the
+  SAME geography. It does not leave the block group or the subdivision;
+  a bigger radius does not help when what we want is block matches and
+  neighborhood matches. Only when the block group is literally empty may
+  the search step slowly outward into ADJACENT block groups of similar
+  value — and only after verifying the adjacent pocket's values are
+  actually relative to the subject's. That is the worst-case escape
+  hatch; comps from outside always carry a heavier accuracy discount.
+  Prefer going 12→24+ months back in place over leaving the pocket.
 
 Cap the rounds. If widening once or twice still cannot produce a
 renovated comp or a size bracket, report the honest floor-only answer

@@ -248,14 +248,14 @@ analyze.post('/', async (c) => {
     // The route returns immediately with jobId + SSE token.
 
     let appraisalRules = userSettings.appraisalRules;
-    if (body.appraisalOverrides) {
-      const overrideFilters = body.appraisalOverrides.filters?.map((f) => ({
+    if (body.appraisalOverrides || body.harness === 'agent') {
+      const overrideFilters = body.appraisalOverrides?.filters?.map((f) => ({
         type: f.type as import('../services/appraisal').FilterType,
         enabled: f.enabled,
         value: f.value,
         priority: f.priority,
       }));
-      const overrideAdjustments = body.appraisalOverrides.adjustments?.map(
+      const overrideAdjustments = body.appraisalOverrides?.adjustments?.map(
         (a) => ({
           type: a.type as import('../services/appraisal').AdjustmentType,
           enabled: a.enabled,
@@ -263,10 +263,19 @@ analyze.post('/', async (c) => {
           percent: a.percent,
         }),
       );
-      appraisalRules = {
-        filters: overrideFilters ?? appraisalRules?.filters ?? [],
-        adjustments: overrideAdjustments ?? appraisalRules?.adjustments ?? [],
-      };
+      appraisalRules = body.harness === 'agent'
+        // Agent runs are governed by EVAL-AGENT-RULESET.md — the caller's
+        // overrides are verbatim and the user's preset never merges in.
+        // With no filters enabled, comps stay enabled except for the hard
+        // data gates (non-market price, lot mismatch, transaction noise).
+        ? {
+            filters: overrideFilters ?? [],
+            adjustments: overrideAdjustments ?? [],
+          }
+        : {
+            filters: overrideFilters ?? appraisalRules?.filters ?? [],
+            adjustments: overrideAdjustments ?? appraisalRules?.adjustments ?? [],
+          };
     }
 
     const arvThreshold = body.arvThresholdPercent

@@ -14,6 +14,22 @@ Nothing else moves: provider fetch, geocode tiers, enrichment, Clef/Luna
 vision, permits, evidence verification, classification, valuation math,
 report persistence — all stay deterministic in the Worker.
 
+## Agent-run rule authority
+
+For `harness: "agent"` jobs the appraisal grid is the caller's
+`appraisalOverrides` verbatim — the user's saved preset and the
+`DEFAULT_FILTERS`/`DEFAULT_ADJUSTMENTS` injection do NOT apply (they still
+apply to every deterministic run). Doctrine lives in
+EVAL-AGENT-RULESET.md, not the preset: an empty override means "no
+filters", so a comp is enabled unless it fails a hard data gate
+(non-market price, lot-category mismatch, transaction noise). Geo, age,
+size, and distance preferences are the agent's call, not server gates.
+Filterless runs surface the same raw evidence fields (distanceMiles,
+sameBlockGroup, censusTract, yearBuilt, saleDate, crossesMajorRoad) for
+the agent to weigh. Because sqft-less comps can stay enabled, selection
+validation enforces a math floor: every pick must carry `salePrice > 0`
+and `squareFeet > 0`.
+
 ## The seam
 
 ```
@@ -74,6 +90,8 @@ or, before answering, a request for more evidence:
 
 - `selectedCompIds` must be a subset of the enabled pool — unknown or
   disabled ids are rejected, not silently dropped.
+- Every pick must carry `salePrice > 0` and `squareFeet > 0` — the
+  valuation math needs a defensible $/sqft per comp.
 - `arv` sanity: inside the pool's evidence range (rejected if outside the
   [min enabled sale, max enabled sale] envelope by more than the ruleset's
   own tolerance).

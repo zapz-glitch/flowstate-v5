@@ -1172,10 +1172,13 @@ export class AnalysisJobDO {
     const propertyCallStats = propertyApi.getCallStats()
     const evalParams = {
       ...config.evalParams,
+      harness: config.harness,
       // attom-mcp: when the filter ladder widened square feet, year or sale
       // age to admit evidence, evaluate the pool under that same step —
       // comps the ladder admitted must stay enabled through evaluation.
-      ...(isAttomMcp && (ladderStep > 0 || geoLevelForScope(ladderScope) > 1)
+      // Agent runs keep the caller's overrides verbatim instead — the
+      // ruleset is the doctrine, not the preset ladder.
+      ...(isAttomMcp && config.harness !== 'agent' && (ladderStep > 0 || geoLevelForScope(ladderScope) > 1)
         ? {
             appraisalRules: {
               ...(config.evalParams.appraisalRules ?? {}),
@@ -1633,7 +1636,8 @@ export class AnalysisJobDO {
     const property = ctx.bundle.property
     return {
       ...config.evalParams,
-      ...(seed.isAttomMcp && ((seed.ladderStep ?? 0) > 0 || geoLevelForScope(seed.ladderScope ?? null) > 1)
+      harness: config.harness,
+      ...(seed.isAttomMcp && config.harness !== 'agent' && ((seed.ladderStep ?? 0) > 0 || geoLevelForScope(seed.ladderScope ?? null) > 1)
         ? {
             appraisalRules: {
               ...(config.evalParams.appraisalRules ?? {}),
