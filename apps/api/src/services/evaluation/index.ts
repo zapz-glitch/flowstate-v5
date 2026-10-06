@@ -2019,3 +2019,29 @@ export async function harnessDeepen(ctx: Phase1Context, params: EvaluationParams
   }
   return deepened
 }
+
+/** Agent retry round — widen retrieval in TIME (never geography — see
+ *  EVAL-AGENT-RULESET §8a). The caller refetches comparables at a longer
+ *  sale window, geo-stamps and enriches new candidates through the same
+ *  gates as the initial pool, and passes them here. They go through the
+ *  same appraisal grid + verification + classification as the first pass;
+ *  the whole pool is re-classified so group labels re-break on the bigger
+ *  evidence set. Returns the count of comps added. */
+export function harnessWiden(ctx: Phase1Context, widened: NormalizedComparable[]): number {
+  const existing = new Set(ctx.appraisalResult.comparables.map((c) => c.id))
+  const added = widened.filter((c) => !existing.has(c.id))
+  if (added.length === 0) return 0
+  const appraisalService = createAppraisalService()
+  const widenedResult = appraisalService.evaluate(ctx.bundle.property, added, {
+    filters: ctx.filters,
+    adjustments: ctx.adjustments,
+  })
+  ctx.appraisalResult.comparables.push(...widenedResult.comparables)
+  stampPoolVerification(ctx.appraisalResult.comparables, ctx.bundle.property, ctx.preferredSaleAgeDays)
+  const cls = new Map(ctx.compClassifications)
+  for (const [id, c] of classifyCompsByEvidence(ctx.appraisalResult.comparables, ctx.bundle.property, ctx.compCurbAppeal)) {
+    cls.set(id, c)
+  }
+  ctx.compClassifications = [...cls.entries()]
+  return widenedResult.comparables.length
+}

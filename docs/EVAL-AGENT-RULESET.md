@@ -181,6 +181,34 @@ adjustment = market rate per sqft  ×  full |comp sqft − subject sqft|
   linearly across the full difference, unless paired sales in that pocket
   demonstrate a stronger rate.
 
+**Regression — the neighborhood ceiling.** When the subject is
+significantly larger or more luxurious than the surrounding homes, its
+value is dragged down by its smaller neighbors. If the home truly belongs
+to this sub-market, it cannot escape the gravity of the neighborhood's
+ceiling — a buyer willing to spend record-breaking money usually leaves
+the pocket entirely for a neighborhood where that price is the average,
+not the maximum.
+
+Do not cap the ARV at the top print out of fear — but do not trust raw
+math above the ceiling either. To project ARV above the pocket's highest
+sale:
+
+1. **Slash the size adjustment.** For square footage *above the
+   neighborhood average*, cut the rate 50–60% — excess space is worth
+   roughly 40–50% of the normal 0.5×PSF rate, i.e. about 0.2–0.25 ×
+   local $/sqft.
+2. **Bracket the size.** Require at least one comp of similar large size
+   — even unrenovated, even two miles out in a competing neighborhood —
+   proving the market actually desires and pays for that extra footage.
+3. **If nothing at that scale has ever sold** in competing areas either,
+   the market is saying the ceiling is real: pull the ARV back to the
+   pocket's highest historical print (time-adjusted if needed).
+
+Before declaring the ceiling real, expand the search — go further out to
+competing similar-quality neighborhoods where larger homes trade, and go
+further back (12–24 months) in the immediate pocket and apply a market
+adjustment for time. This is what `widen` is for (Section 8a).
+
 **FOUNDATION-001 — directional:** concrete and concrete-block foundations
 are equivalent. Wood, pier-and-beam and crawlspace are a separate group.
 Concrete and block are stronger long term and depreciate less, so crossing
@@ -195,6 +223,13 @@ the groups adjusts only one way:
   adjustment either direction.
 
 ## 8. Evidence quality rules
+
+- **Missing sale dates:** a comp with no sale date is flagged "date
+  unknown" — never silently dropped, never silently trusted. If it is a
+  distressed fixer or otherwise low-value to the evaluation's accuracy,
+  leave it out. If it could matter — above all a *renovated* comp that
+  might anchor the ARV band — it is worth a sale-date lookup to rescue
+  it.
 
 - **Verified flips:** a confirmed investor purchase resold after
   renovation within a 30–365 day hold at a profit is very strong proof the
@@ -216,6 +251,24 @@ the groups adjusts only one way:
   better evidence than any one of them.
 - **When nothing matches everything,** select the comp or comp group with
   the fewest and least important differences from the subject.
+
+## 8a. Thin pools — widen before concluding
+
+When the usable pool is thin — no renovated comp, fewer than ~3 usable
+comps, or no size bracket for an above-ceiling projection — ask for more
+evidence before producing a number:
+
+- **deepen** enriches the comps already fetched (classification, photos,
+  listing evidence). It cannot rescue a comp whose sale data is missing —
+  use it when the pool exists but is unclassified, not when it is empty.
+- **widen** refetches with a bigger radius and a longer sale window
+  (further out + further back, per the regression doctrine). Use it when
+  the pool itself is thin or when an above-ceiling ARV needs a size
+  bracket from a competing area.
+
+Cap the rounds. If widening once or twice still cannot produce a
+renovated comp or a size bracket, report the honest floor-only answer
+with low confidence — never inflate a thin pool into a confident number.
 
 ## 9. Discipline
 

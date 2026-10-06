@@ -82,12 +82,14 @@ or, before answering, a request for more evidence:
 
 ## Retry ladder (agent-driven)
 
-`needsMoreEvidence` triggers the SAME deterministic retries the B ladder
-runs today: `widen` = +1mi/+6mo provider refetch into the merged pool,
-`deepen` = AVM/land enrichment for thin comps. Bounded at 3 evidence rounds
-total. After the last round the agent must answer; if it still cannot, the
-job falls back to `evaluateB` as an honest final answer rather than
-hanging.
+`needsMoreEvidence` triggers evidence retries against the live provider:
+`widen` = provider refetch at +12mo sale window per round in the SAME
+geography (go back in time, never out of the block group — EVAL-AGENT-RULESET
+§8a), `deepen` = AVM/land enrichment for thin comps. Widened candidates are
+geo-stamped and enriched through the census gate before joining the pool.
+Bounded at 2 evidence rounds total. After the last round the agent must
+answer; if it still cannot, the job falls back to `evaluateB` as an honest
+final answer rather than hanging.
 
 ## Timeout / fallback
 
