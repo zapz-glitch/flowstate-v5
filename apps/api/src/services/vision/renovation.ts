@@ -149,6 +149,8 @@ export interface RenovationEnv {
   VISION_MODEL?: string
   /** Reasoning effort for the vision call (low|medium|high|xhigh|max) — default medium. */
   VISION_REASONING_EFFORT?: string
+  /** Workers AI binding — Clef is the subject's primary reader. */
+  AI?: import('../../types').Env['AI']
 }
 
 const ROOM_CONDITIONS = ['excellent', 'good', 'dated', 'poor', 'failed', 'not_visible']
@@ -191,6 +193,102 @@ const RENOVATION_SCHEMA = {
 const MIN_UNIQUE_PHOTOS = 1
 const MAX_PHOTOS = 12
 const LOW_CONFIDENCE = 40
+/** Clef's image budget is 4 — the comp lane uses the same cap. */
+const CLEF_MAX_PHOTOS = 4
+
+// ─── Clef subject read ──────────────────────────────────────────────────────
+// The subject reads through the same chain as comps: Clef (Workers AI)
+// primary, Luna (gpt-6-luna via OpenRouter) fallback. Clef answers a level
+// choice + a curb-appeal choice — level granularity only, so room
+// conditions stay 'NA' rather than invented at photo-4 depth.
+
+interface ClefAnswerMap {
+  renovation_level?: { choice?: string; probabilities?: Record<string, number> }
+  curb_appeal?: { choice?: string; probabilities?: Record<string, number> }
+}
+
+async function assessViaClef(
+  env: RenovationEnv,
+  live: FetchedImage[],
+  propertyContext: { address?: string; squareFeet?: number | null; yearBuilt?: number | null },
+): Promise<RenovationAssessment | null> {
+  if (!env.AI) return null
+  const model = '@cf/cloudflare/clef-flash'
+  const questions = {
+    renovation_level: {
+      type: 'choice',
+      instructions:
+        'Examine ALL photos together as one property and choose the single ' +
+        'renovation level that best describes the work required across the ' +
+        'whole property. Weight majority-condition and the most expensive ' +
+        'required work — a dated kitchen alone is not Heavy Rehab; partial ' +
+        'demo is not Full Gut.',
+      criteria: Object.fromEntries(RENOVATION_LEVEL_DEFINITIONS.map((d) => [d.name, d.criteria])),
+    },
+    curb_appeal: {
+      type: 'choice',
+      instructions: 'Describe the property\'s visible exterior/curb condition.',
+      criteria: {
+        renovated: 'modern finishes, updated, move-in ready',
+        dated: 'livable but visibly dated finishes',
+        distressed: 'obvious disrepair, damage, heavy wear',
+        unknown: 'photos insufficient to judge',
+      },
+    },
+  }
+  const res = (await env.AI.run(model, {
+    state: {
+      subject: 'Subject-property renovation assessment for a fix-and-flip appraisal.',
+      property: {
+        address: propertyContext.address ?? null,
+        squareFeet: propertyContext.squareFeet ?? null,
+        yearBuilt: propertyContext.yearBuilt ?? null,
+      },
+    },
+    questions,
+    images: live.slice(0, CLEF_MAX_PHOTOS).map((f) => ({ content_type: f.mimeType, base64: f.base64 })),
+  })) as { answers?: ClefAnswerMap }
+
+  const pick = res?.answers?.renovation_level?.choice
+  const levelIndex = renovationLevelToIndex(pick)
+  if (levelIndex === null) return null
+  const p = res?.answers?.renovation_level?.probabilities
+  const confidence = p && pick ? Math.round(Math.min(1, Math.max(0, p[pick] ?? 0)) * 100) : null
+  const curbPick = res?.answers?.curb_appeal?.choice
+  const curbP = res?.answers?.curb_appeal?.probabilities
+
+  return {
+    status: confidence !== null && confidence < LOW_CONFIDENCE ? 'needs_review' : 'ok',
+    renovationLevelIndex: levelIndex,
+    renovationLevel: REHAB_LEVELS[levelIndex],
+    confidence,
+    photosExamined: Math.min(live.length, CLEF_MAX_PHOTOS),
+    majorObservations: [],
+    kitchenCondition: 'NA',
+    bathroomCondition: 'NA',
+    flooringCondition: 'NA',
+    wallCeilingCondition: 'NA',
+    exteriorCondition: 'NA',
+    visibleMajorSystemConcerns: [],
+    structuralConcerns: [],
+    rationale: null,
+    evidenceForClassification: [],
+    evidenceAgainstMoreSevereLevel: [],
+    evidenceAgainstLessSevereLevel: [],
+    limitations: ['Clef level-read only — per-room conditions unverified'],
+    provider: 'workers-ai',
+    model: 'clef-flash',
+    curbAppeal: curbPick && curbPick !== 'unknown'
+      ? {
+          condition: curbPick as CurbAppealCheck['condition'],
+          source: 'vision' as const,
+          confidence: curbP && curbPick ? Math.round((curbP[curbPick] ?? 0) * 100) : null,
+          summary: null,
+          photosExamined: Math.min(live.length, CLEF_MAX_PHOTOS),
+        }
+      : null,
+  }
+}
 
 // ─── Prompt ───────────────────────────────────────────────────────────────────
 
@@ -293,7 +391,7 @@ export async function assessRenovationFromPhotos(
     }
   }
 
-  if (!env.OPENROUTER_API_KEY && !providerOverride) {
+  if (!env.OPENROUTER_API_KEY && !env.AI && !providerOverride) {
     return {
       ...base,
       status: 'unavailable',
@@ -308,7 +406,8 @@ export async function assessRenovationFromPhotos(
     createLLMProvider({
       provider: 'openrouter',
       apiKey: env.OPENROUTER_API_KEY as string,
-      model: env.VISION_MODEL || env.OPENROUTER_MODEL || 'google/gemini-2.5-flash',
+      // Luna is the fallback reader — same chain as the comp lane.
+      model: env.VISION_MODEL || env.OPENROUTER_MODEL || 'openai/gpt-6-luna',
     })
 
   const photos = uniquePhotos.slice(0, MAX_PHOTOS)
@@ -328,6 +427,12 @@ export async function assessRenovationFromPhotos(
       limitations: [live.length === 0 ? 'No photos fetchable' : `Only ${live.length} of ${photos.length} photo URL(s) were fetchable`],
     }
   }
+
+  // Clef first — Workers AI reads the subject the same way it reads comps.
+  // Level granularity only; when it can't answer, Luna takes the full
+  // schema read below. Clef failures fall through silently to Luna.
+  const clef = await assessViaClef(env, live, propertyContext ?? {}).catch(() => null)
+  if (clef) return clef
 
   let prompt = ''
   if (propertyContext) {
