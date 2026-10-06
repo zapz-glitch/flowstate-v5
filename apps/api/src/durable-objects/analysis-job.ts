@@ -218,6 +218,11 @@ export class AnalysisJobDO {
       this.runActive = true
       this.state.waitUntil(
         this.runHarnessResume(undefined)
+          .catch((err) => {
+            console.error('[AnalysisJobDO] harness fallback fatal:', err)
+            void this.pushEvent('error', { step: 'harness_resume', message: err instanceof Error ? err.message : 'Resume failed' })
+            void this.pushEvent('enrichment_done', { totalDurationMs: Date.now() - js.createdAt })
+          })
           .finally(() => {
             this.runActive = false
             this.clearEvalActive(js.jobId)
@@ -298,6 +303,16 @@ export class AnalysisJobDO {
     if (this.jobState && this.jobState.userId !== body.userId) {
       return new Response(JSON.stringify({ error: 'Job belongs to another user' }), {
         status: 403,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }
+
+    // A job parked awaiting the agent owns its frozen context — a repeat
+    // start must subscribe to it, not overwrite the pending verdict's
+    // evidence with a fresh provider run.
+    if (this.jobState?.status === 'awaiting_agent') {
+      return new Response(JSON.stringify({ error: 'Job already running' }), {
+        status: 409,
         headers: { 'Content-Type': 'application/json' },
       })
     }
@@ -1374,11 +1389,17 @@ export class AnalysisJobDO {
         { status: 409 },
       )
     }
-    const body = await request.json().catch(() => null) as {
+    const raw = await request.text().catch(() => '')
+    // Verdict bodies persist into runEvidence.agentSelection — bound them
+    // before they can exhaust job storage or stall report completion.
+    if (raw.length > 256 * 1024) {
+      return Response.json({ error: 'Selection body too large' }, { status: 413 })
+    }
+    const body = JSON.parse(raw) as {
       selection?: AgentSelection
       needsMoreEvidence?: string
     } & Partial<AgentSelection> | null
-    if (!body) {
+    if (!body || typeof body !== 'object') {
       return Response.json({ error: 'JSON body required' }, { status: 400 })
     }
     const ctx = JSON.parse(js.harnessContext) as Phase1Context
@@ -1406,6 +1427,14 @@ export class AnalysisJobDO {
         enrichComparables: (comps: NormalizedComparable[]) =>
           propertyApi.enrichComparables(comps, { concurrency: 8 }).catch(() => null),
       })
+      // A selection may have resumed the job while deepen awaited provider
+      // data — never reopen a resumed job with this stale context.
+      if (js.status !== 'awaiting_agent') {
+        return Response.json(
+          { error: 'Job resumed while deepen was running', status: js.status },
+          { status: 409 },
+        )
+      }
       js.harnessContext = JSON.stringify(ctx)
       js.harnessRounds = rounds + 1
       js.harnessDeadline = Date.now() + AnalysisJobDO.HARNESS_DEADLINE_MS

@@ -1902,7 +1902,9 @@ export function validateAgentSelection(sel: AgentSelection, comps: AppraisedComp
     const pickPrices = picks
       .map((id) => enabled.get(id)?.salePrice)
       .filter((p): p is number => p != null && p > 0)
-    if (pickPrices.length > 0) {
+    if (pickPrices.length === 0) {
+      fails.push('no selected comp carries a positive sale price — nothing anchors the ARV')
+    } else {
       const lo = Math.min(...pickPrices) * 0.75
       const hi = Math.max(...pickPrices) * 1.25
       if (sel.arv < lo || sel.arv > hi) {
@@ -1911,6 +1913,9 @@ export function validateAgentSelection(sel: AgentSelection, comps: AppraisedComp
     }
   }
   if (!['high', 'medium', 'low'].includes(sel.conf)) fails.push('conf must be high|medium|low')
+  // Persisted verbatim into runEvidence — bound the fields the report keeps.
+  if (typeof sel.notes === 'string' && sel.notes.length > 4_000) fails.push('notes exceeds 4000 chars')
+  if (typeof sel.dealEconomics === 'string' && sel.dealEconomics.length > 1_000) fails.push('dealEconomics exceeds 1000 chars')
   return fails
 }
 
@@ -1930,7 +1935,9 @@ export function adaptAgentSelection(
     .map((comp) => ({ comp, contrib: comp.adjustedPrice ?? comp.salePrice ?? sel.arv, weight: 1, tier: 'arv' as const }))
   return {
     arv: Math.round(sel.arv),
-    flags: sel.flags ?? [],
+    // Caller-supplied flags are namespaced so report checks never read them
+    // as engine findings — they surface alongside, distinct from bResult's own.
+    flags: (sel.flags ?? []).map((f) => `agent:${String(f).slice(0, 200)}`),
     drivers,
     contribs: [],
     bracket: 'ok',

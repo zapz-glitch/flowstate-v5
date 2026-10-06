@@ -294,7 +294,14 @@ analyze.post('/', async (c) => {
       evalParams,
       searchOptions: searchOptionsFingerprint(body.searchOptions),
     });
-    const resultCacheKey = evalResultKey(auth.userId, body.address ?? '', evalParamsHash);
+    // Harness mode gets its own cache keyspace — a deterministic report is
+    // never served to an agent run (it needs to park for the verdict), and
+    // an agent verdict never leaks into deterministic cached results.
+    const resultCacheKey = evalResultKey(
+      auth.userId,
+      body.address ?? '',
+      evalParamsHash + (body.harness === 'agent' ? ':agent' : ''),
+    );
     if (!body.skipCache && !isRefresh && c.env.API_CACHE) {
       try {
         const cachedJobId = await c.env.API_CACHE.get(resultCacheKey)
