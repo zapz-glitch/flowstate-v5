@@ -317,3 +317,70 @@ export async function scorePocket(env: Env, id: PocketIdentity, inputs: Determin
     scored_by: desir ? 'clef' : 'deterministic', eval_count: 1, scored_at: now, refresh_due_at: due,
   }
 }
+
+export interface ListingSignals {
+  daysOnMarket: number | null
+  priceDrops: number
+  contractFallouts: number
+  listingEvents: string[]
+  listPrice: number | null
+  schools: string[]
+  zillowUrl: string | null
+}
+
+/** Pull the listing signals + cost stack the economics score needs. */
+interface PayloadShape {
+  result?: {
+    response?: {
+      subject?: {
+        listPrice?: number
+        listingDetails?: {
+          daysOnRedfin?: number | null
+          listPrice?: number | null
+          saleHistory?: Array<{ date?: string; event?: string; price?: number | null }>
+          schools?: Array<{ name?: string; rating?: number | string }>
+        }
+        zillowUrl?: string
+        listingUrl?: string
+      }
+      valuation?: {
+        buyPrice?: number; rehabCost?: number; carryingCosts?: number
+        closingCosts?: number; wholesaleFee?: number; projectedProfit?: number
+        wholesalePrice?: number
+      }
+    }
+  }
+}
+
+export interface ValuationStack {
+  buyPrice?: number; rehabCost?: number; carryingCosts?: number
+  closingCosts?: number; wholesaleFee?: number; projectedProfit?: number
+  wholesalePrice?: number
+}
+
+export function listingSignals(payload: unknown): ListingSignals & { valuation: ValuationStack } {
+  const subj = (payload as PayloadShape).result?.response
+  const ld = subj?.subject?.listingDetails
+  const hist = ld?.saleHistory ?? []
+  const events = hist.map((e) => `${e.date ?? ''}: ${e.event ?? ''}${e.price ? ` $${e.price.toLocaleString()}` : ''}`)
+  let drops = 0, fallouts = 0, lastList: number | null = null
+  for (const e of [...hist].reverse()) {
+    const ev = (e.event ?? '').toLowerCase()
+    if ((ev === 'listed' || ev === 'relisted' || ev.includes('price')) && e.price != null) {
+      if (lastList != null && e.price < lastList) drops++
+      lastList = e.price
+    }
+    if (ev === 'pending' || ev === 'contingent' || ev.includes('contract')) fallouts++
+  }
+  const schools = (ld?.schools ?? []).map((s) => `${s.name ?? ''}(${s.rating ?? '?'})`).filter(Boolean)
+  return {
+    daysOnMarket: ld?.daysOnRedfin ?? null,
+    priceDrops: drops,
+    contractFallouts: fallouts,
+    listingEvents: events.slice(-10),
+    listPrice: subj?.subject?.listPrice ?? ld?.listPrice ?? null,
+    schools,
+    zillowUrl: subj?.subject?.zillowUrl ?? null,
+    valuation: subj?.valuation ?? {},
+  }
+}

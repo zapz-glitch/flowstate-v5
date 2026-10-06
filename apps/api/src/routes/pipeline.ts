@@ -8,7 +8,7 @@
  */
 
 import { Hono } from 'hono'
-import { pocketFromPayload, deterministicInputs, provisionalScore, scorePocket, metroGuess } from '../services/pocket-score'
+import { pocketFromPayload, deterministicInputs, provisionalScore, scorePocket, metroGuess, listingSignals } from '../services/pocket-score'
 import { classifyPocket, classifyEconomics } from '../services/pocket-score/classify'
 import type { Env } from '../types'
 import type { AuthContext } from '../middleware/auth'
@@ -387,48 +387,122 @@ pipelineReads.get('/pocket-test', async (c) => {
   const id = pocketFromPayload(payload)
   if (!id) return c.json({ ok: false, error: 'no pocket identity in payload' }, 422)
   const inputs = deterministicInputs(payload, null)
-  const subj = (payload as { result?: { response?: { subject?: {
-    listPrice?: number
-    listingDetails?: {
-      daysOnRedfin?: number | null
-      listPrice?: number | null
-      saleHistory?: Array<{ date?: string; event?: string; price?: number | null }>
-    }
-  }; report?: { arv?: { value?: number; asIsValue?: number } }; valuation?: {
-    buyPrice?: number; rehabCost?: number; carryingCosts?: number
-    closingCosts?: number; wholesaleFee?: number; projectedProfit?: number
-  } } } })?.result?.response
-  const ld = subj?.subject?.listingDetails
-  const events = (ld?.saleHistory ?? []).map((e) => `${e.date ?? ''}: ${e.event ?? ''}${e.price ? ` $${e.price.toLocaleString()}` : ''}`)
-  let drops = 0, fallouts = 0, lastList: number | null = null
-  for (const e of [...(ld?.saleHistory ?? [])].reverse()) { // oldest → newest
-    const ev = (e.event ?? '').toLowerCase()
-    if ((ev === 'listed' || ev === 'relisted' || ev.includes('price')) && e.price != null) {
-      if (lastList != null && e.price < lastList) drops++
-      lastList = e.price
-    }
-    if (ev === 'pending' || ev === 'contingent' || ev === 'pending continue to show' || ev === 'under contract') fallouts++
-  }
+  const sig = listingSignals(payload)
+  const subj = (payload as { result?: { response?: { report?: { arv?: { value?: number; asIsValue?: number } } } } })?.result?.response
   const econ = {
     wholesalePrice: c.req.query('wholesale') ? Number(c.req.query('wholesale')) : null,
-    listPrice: subj?.subject?.listPrice ?? ld?.listPrice ?? null,
+    listPrice: sig.listPrice,
     medianLo: inputs.medianLo, medianHi: inputs.medianHi,
     arv: subj?.report?.arv?.value ?? inputs.arv,
     asIsValue: subj?.report?.arv?.asIsValue ?? null,
-    daysOnMarket: ld?.daysOnRedfin ?? null,
-    priceDrops: drops,
-    contractFallouts: fallouts,
-    listingEvents: events.slice(-10),
-    rehabCost: subj?.valuation?.rehabCost ?? null,
-    carryingCosts: subj?.valuation?.carryingCosts ?? null,
-    closingCosts: subj?.valuation?.closingCosts ?? null,
-    wholesaleFee: subj?.valuation?.wholesaleFee ?? null,
-    buyPrice: subj?.valuation?.buyPrice ?? null,
-    projectedProfit: subj?.valuation?.projectedProfit ?? null,
+    daysOnMarket: sig.daysOnMarket,
+    priceDrops: sig.priceDrops,
+    contractFallouts: sig.contractFallouts,
+    listingEvents: sig.listingEvents,
+    rehabCost: sig.valuation.rehabCost ?? null,
+    carryingCosts: sig.valuation.carryingCosts ?? null,
+    closingCosts: sig.valuation.closingCosts ?? null,
+    wholesaleFee: sig.valuation.wholesaleFee ?? null,
+    buyPrice: sig.valuation.buyPrice ?? null,
+    projectedProfit: sig.valuation.projectedProfit ?? null,
   }
   const [pocket, economics] = await Promise.all([
     classifyPocket(c.env, id, inputs),
     classifyEconomics(c.env, id, econ),
   ])
   return c.json({ jobId: row.job_id, pocket: id, deterministic: inputs, econ, pocketScore: pocket, economicsScore: economics })
+})
+
+
+/** Score one evaluated property end-to-end — pocket (cached/classify) +
+ *  economics + evidence flag + fallout flag → property_scores row. */
+async function scoreProperty(c: { env: Env; executionCtx: { waitUntil(p: Promise<unknown>): void } }, row: { job_id: string; user_id: string | null; payload_json: string; created_at?: string }, wholesalePrice: number | null): Promise<{ jobId: string; ok: boolean; pocketScore?: number | null; economicsScore?: number | null; overall?: number | null; error?: string }> {
+  let payload: unknown
+  try { payload = JSON.parse(row.payload_json) } catch { return { jobId: row.job_id, ok: false, error: 'bad payload' } }
+  const id = pocketFromPayload(payload)
+  if (!id) {
+    // Failed/empty eval — mark skipped so it never re-enters a cohort.
+    await c.env.DB.prepare(
+      `INSERT OR IGNORE INTO property_scores (job_id, user_id, evidence_quality, scored_at) VALUES (?,?, 'skipped', ?)`,
+    ).bind(row.job_id, row.user_id, new Date().toISOString()).run().catch(() => {})
+    return { jobId: row.job_id, ok: false, error: 'skipped: no pocket identity (failed eval)' }
+  }
+  const inputs = deterministicInputs(payload, wholesalePrice)
+  const sig = listingSignals(payload)
+  const subj = (payload as { result?: { response?: { report?: { arv?: { value?: number; asIsValue?: number } } } } })?.result?.response
+
+  // Pocket — cached verdict wins; else classify once and persist.
+  let pocket = await c.env.DB.prepare('SELECT score, evidence_json FROM pocket_scores WHERE pocket_key = ?').bind(id.pocketKey)
+    .first<{ score: number; evidence_json: string | null }>().catch(() => null)
+  let pocketScore = pocket?.score ?? null
+  let pocketRationale: string | null = null
+  if (pocketScore == null) {
+    const scored = await classifyPocket(c.env, id, inputs).catch(() => null)
+    pocketScore = scored?.score ?? provisionalScore(inputs)
+    pocketRationale = scored?.rationale ?? null
+    c.executionCtx.waitUntil(scorePocket(c.env, id, inputs, wholesalePrice))
+  } else {
+    try { pocketRationale = pocket?.evidence_json ? (JSON.parse(pocket.evidence_json) as { rationale?: string }).rationale ?? null : null } catch { /* noop */ }
+  }
+
+  // Economics — per-property, reasons the cost stack + listing signals.
+  const ws = sig.valuation.wholesalePrice ?? wholesalePrice
+  const econ = {
+    wholesalePrice: ws, listPrice: sig.listPrice,
+    medianLo: inputs.medianLo, medianHi: inputs.medianHi,
+    arv: subj?.report?.arv?.value ?? inputs.arv,
+    asIsValue: subj?.report?.arv?.asIsValue ?? null,
+    daysOnMarket: sig.daysOnMarket, priceDrops: sig.priceDrops,
+    contractFallouts: sig.contractFallouts, listingEvents: sig.listingEvents,
+    rehabCost: sig.valuation.rehabCost ?? null, carryingCosts: sig.valuation.carryingCosts ?? null,
+    closingCosts: sig.valuation.closingCosts ?? null, wholesaleFee: sig.valuation.wholesaleFee ?? null,
+    buyPrice: sig.valuation.buyPrice ?? null, projectedProfit: sig.valuation.projectedProfit ?? null,
+  }
+  const econResult = await classifyEconomics(c.env, id, econ).catch(() => null)
+  const econScore = econResult?.score ?? null
+  const overall = pocketScore != null || econScore != null
+    ? Math.round((((pocketScore ?? 5) + (econScore ?? 5)) / 2) * 10) / 10
+    : null
+
+  const evidence = inputs.bandCoherence >= 0.4 && inputs.outlierShare < 0.6 ? 'strong' : 'thin'
+  const addr = (payload as { result?: { response?: { subject?: { fullAddress?: string; address?: string } } } })?.result?.response?.subject
+  await c.env.DB.prepare(
+    `INSERT INTO property_scores
+      (job_id, user_id, address, pocket_key, pocket_score, pocket_rationale, economics_score, economics_rationale,
+       overall_score, evidence_quality, contract_fallouts, days_on_market, list_price, wholesale_price, inputs_json, scored_at)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+     ON CONFLICT(job_id) DO UPDATE SET
+       pocket_score=excluded.pocket_score, pocket_rationale=excluded.pocket_rationale,
+       economics_score=excluded.economics_score, economics_rationale=excluded.economics_rationale,
+       overall_score=excluded.overall_score, evidence_quality=excluded.evidence_quality,
+       contract_fallouts=excluded.contract_fallouts, days_on_market=excluded.days_on_market,
+       inputs_json=excluded.inputs_json, scored_at=excluded.scored_at`,
+  ).bind(
+    row.job_id, row.user_id, addr?.fullAddress ?? addr?.address ?? null, id.pocketKey,
+    pocketScore, pocketRationale, econScore, econResult?.rationale ?? null, overall,
+    evidence, sig.contractFallouts, sig.daysOnMarket, sig.listPrice, ws,
+    JSON.stringify({ ...inputs, ...econ, listingEvents: undefined }), new Date().toISOString(),
+  ).run().catch((e) => { throw new Error(`property_scores write: ${e}`) })
+
+  return { jobId: row.job_id, ok: true, pocketScore, economicsScore: econScore, overall }
+}
+
+// POST /v1/pipeline/score-batch?limit=10 — score the newest unscored
+// run_records. Runs async via waitUntil; read property_scores to inspect.
+pipelineReads.post('/score-batch', async (c) => {
+  const limit = Math.min(50, Math.max(1, Number(c.req.query('limit') ?? 10)))
+  const rows = await c.env.DB.prepare(
+    `SELECT r.job_id, r.user_id, r.payload_json, r.created_at
+       FROM run_records r
+       LEFT JOIN property_scores ps ON ps.job_id = r.job_id
+      WHERE ps.job_id IS NULL
+      ORDER BY r.created_at DESC LIMIT ?`,
+  ).bind(limit).all<{ job_id: string; user_id: string | null; payload_json: string; created_at: string }>().catch(() => null)
+  const batch = rows?.results ?? []
+  if (!batch.length) return c.json({ ok: true, scored: 0, note: 'no unscored run records' })
+
+  // wholesalePrice ships inside the eval payload (valuation.wholesalePrice) —
+  // scoreProperty reads it there; no queue join needed.
+  const results = await Promise.all(batch.map((r) => scoreProperty(c, r, null)))
+  return c.json({ ok: true, scored: results.filter((r) => r.ok).length, results })
 })
