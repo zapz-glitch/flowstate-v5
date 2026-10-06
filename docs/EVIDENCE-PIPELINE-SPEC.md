@@ -46,9 +46,10 @@ address
 ```
 
 Failure at every rung → `null`, chain records `condition_source:
-'no_listing'`, and the comp keeps its price-inference label with
-`condition_source: 'price_inference'` stamped — so the agent and the lake
-always know the label's provenance.
+'no_listing'`, and the comp's condition stays `unknown`. No price-based
+label is ever applied — the price-percentile rule is removed as a
+classification input entirely. Labels come only from curb-appeal photos +
+listing description.
 
 ## Classification layer (already built — just needs feeding)
 
@@ -85,7 +86,7 @@ both lanes.
 |-------|--------|
 | `subject.condition` / `visionAssessment` | populated by real photos — reno-tier stops being text-only |
 | `comps[].curbAppeal` | Clef/Luna evidence stamp (label, confidence, model, source) |
-| `comps[].classification.type` | evidence label when Clef scores it; `condition_source` records `evidence` vs `price_inference` |
+| `comps[].classification.type` | evidence label from Clef only — no price distinctions; `condition_source` records `evidence` / `no_listing` / `clef_unavailable` |
 | bundle `steps` | `comp_curb_appeal` + `photo_fetch` report real counts instead of fallbacks |
 | Basin lake rows | already capture comp condition stamps — provenance auditable per run |
 
@@ -114,5 +115,6 @@ up end-to-end.
 1. Serper key for v5 (exists in workers `.dev.vars`? or new key)
 2. Scrapfly key same — port `SCRAPFLY_URL`/`SCRAPFLY_API_KEY`
 3. Per-comp scrape cap (`CLEF_COMP_MAX` — all comps vs top-N by distance)
-4. Whether the price-inference label stays as fallback (recommend: yes,
-   flagged `condition_source: 'price_inference'`)
+4. ~~Price-inference as fallback~~ — RESOLVED: removed entirely. Labels
+   are evidence-only (curb appeal + description); unverifiable comps are
+   `unknown`, never price-guessed
