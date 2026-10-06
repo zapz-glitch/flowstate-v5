@@ -781,8 +781,9 @@ export async function performAnalysisPhase1(
   const clefCompPromise: Promise<(CompConditionEvidence | null)[]> | null =
     env.CLEF_COMP_CONDITION_ENABLED === 'true' && isClefAvailable(env)
       ? (async () => {
-          // Concurrency pool — Scrapfly saturates well below 27 parallel
-          // renders, so lanes run 6-wide in the sorted priority order.
+          // Concurrency pool — most comps resolve through the non-rendered
+          // stingray JSON lane (~4s) after the reorder; the rendered stragglers
+          // are the minority, so lanes run 10-wide in sorted priority order.
           const out: (CompConditionEvidence | null)[] = new Array(clefCompsSorted.length).fill(null)
           let next = 0
           const lane = async () => {
@@ -807,11 +808,12 @@ export async function performAnalysisPhase1(
               ]).catch(() => null)
             }
           }
-          // Global deadline — 27 slow comps × 6 lanes could otherwise stall
-          // the pipeline for minutes; stragglers return as unlabeled.
+          // Global deadline — raised now that stingray covers most comps at
+          // JSON speed; the rendered stragglers get room to finish instead of
+          // being clipped unlabeled at 90s.
           await Promise.race([
-            Promise.all(Array.from({ length: Math.min(6, clefCompsSorted.length) }, lane)),
-            new Promise((r) => setTimeout(r, 90_000)),
+            Promise.all(Array.from({ length: Math.min(10, clefCompsSorted.length) }, lane)),
+            new Promise((r) => setTimeout(r, 150_000)),
           ])
           return out
         })()

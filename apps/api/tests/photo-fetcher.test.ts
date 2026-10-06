@@ -84,8 +84,64 @@ function stubFetch(handlers: Array<{ match: string | RegExp; body: unknown; ok?:
   const res = await f.fetchListing(PROP, { skipCache: true })
   assert.ok(res.listing, 'expected a listing')
   assert.ok((res.listing?.photos.length ?? 0) >= 2)
-  assert.ok(calls.every((c) => c.includes('asp=true') && c.includes('render_js=true')))
+  // Stingray lane fires first (non-rendered) and fails to parse HTML, then the
+  // rendered Zillow scrape succeeds — at least one render_js call required.
+  assert.ok(calls.some((c) => c.includes('render_js=true')), 'expected a rendered fallback call')
   assert.equal(f.firecrawlCallCount >= 1, true)
+}
+
+// ── 3c. Stingray-first: resolve + media JSON short-circuit before any render ──
+{
+  const ST_AUTOCOMPLETE = '{}&&' + JSON.stringify({
+    payload: { sections: [{ rows: [{
+      id: '1_31706722',
+      name: '4428 Crenshaw Ave',
+      subName: 'Fort Worth, TX 76105',
+      url: '/TX/Fort-Worth/4428-Crenshaw-Ave-76105/home/31706722',
+    }] }] },
+  })
+  const ST_MEDIA = '{}&&' + JSON.stringify({
+    payload: {
+      mediaBrowserInfo: { photos: [
+        { photoUrls: { fullScreenPhotoUrl: 'https://ssl.cdn-redfin.com/photo/a.jpg' } },
+        { photoUrls: { nonFullScreenPhotoUrl: 'https://ssl.cdn-redfin.com/photo/b.jpg' } },
+      ] },
+      addressSectionInfo: { marketingRemarks: 'Updated ranch with new roof.' },
+    },
+  })
+  const calls = stubFetch([
+    { match: 'location-autocomplete', body: { result: { status_code: 200, content: ST_AUTOCOMPLETE } } },
+    { match: 'aboveTheFold', body: { result: { status_code: 200, content: ST_MEDIA } } },
+    { match: 'belowTheFold', body: { result: { status_code: 200, content: '{}&&{"payload":{}}' } } },
+  ])
+  const f = new ScrapflyZillowFetcher({ apiKey: 'k' })
+  const res = await f.fetchListing(PROP, { skipCache: true })
+  assert.ok(res.listing, 'expected a stingray listing')
+  assert.equal(res.listing?.photos.length, 2)
+  assert.ok(res.listing?.description?.includes('Updated ranch'))
+  // The whole point of the reorder: no rendered scrape should ever fire.
+  assert.ok(!calls.some((c) => c.includes('render_js=true')), 'stingray hit must not render')
+}
+
+// ── 3d. Stingray resolve must reject wrong-house rows ──
+{
+  const ST_WRONG = '{}&&' + JSON.stringify({
+    payload: { sections: [{ rows: [{
+      id: '1_999',
+      name: '4428 Different Blvd',
+      subName: 'Fort Worth, TX 76105',
+      url: '/TX/Fort-Worth/4428-Different-Blvd-76105/home/999',
+    }] }] },
+  })
+  const calls = stubFetch([
+    { match: 'location-autocomplete', body: { result: { status_code: 200, content: ST_WRONG } } },
+    { match: 'api.scrapfly.io/scrape', body: { result: { status_code: 200, content: ZILLOW_HTML } } },
+  ])
+  const f = new ScrapflyZillowFetcher({ apiKey: 'k' })
+  const res = await f.fetchListing(PROP, { skipCache: true })
+  // Wrong row ignored → falls through to the rendered Zillow lane.
+  assert.ok(res.listing, 'expected zillow fallback listing')
+  assert.ok((res.listing?.photos.length ?? 0) >= 2)
 }
 
 // ── 3b. Search-page photos are NOT listing evidence: a scrape that lands

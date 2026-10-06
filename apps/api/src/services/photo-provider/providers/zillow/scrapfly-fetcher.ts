@@ -311,6 +311,7 @@ export class ScrapflyZillowFetcher {
   private async fetchViaSite(
     property: ZillowPropertyIdentifier,
     site: 'redfin' | 'realtor',
+    preResolvedStingray?: { propertyId: string; url: string } | null,
   ): Promise<ZillowExtraction | null> {
     const cfg =
       site === 'redfin'
@@ -332,12 +333,16 @@ export class ScrapflyZillowFetcher {
       // Free internal resolver first — stingray covers every parcel and its
       // media endpoints carry property-bound photos (verified, unlike CDN
       // matches on a rendered page which can be similar-homes thumbnails).
-      const st = await this.stingrayResolve(property)
+      // undefined = resolve fresh; null = already attempted, no match; object =
+      // already resolved AND media already tried (empty) → skip to page scrape.
+      const st = preResolvedStingray === undefined ? await this.stingrayResolve(property) : preResolvedStingray
       if (st) {
-        const media = await this.stingrayMedia(st.propertyId)
-        if (media.photos.length) {
-          console.log(`[ScrapflyZillow] redfin stingray lane: ${media.photos.length} photos`)
-          return { photos: media.photos, description: media.description }
+        if (preResolvedStingray === undefined) {
+          const media = await this.stingrayMedia(st.propertyId)
+          if (media.photos.length) {
+            console.log(`[ScrapflyZillow] redfin stingray lane: ${media.photos.length} photos`)
+            return { photos: media.photos, description: media.description }
+          }
         }
         listingUrl = st.url // verified URL — page scrape below as last resort
       }
@@ -398,6 +403,9 @@ export class ScrapflyZillowFetcher {
       let extracted: ZillowExtraction | null = null
       let resolvedUrl = zillowUrl
       let fromCache = false
+      // undefined until the stingray lane runs; null = resolve found no match;
+      // object = resolved (media already tried when extracted stayed null).
+      let stAttempt: { propertyId: string; url: string } | null | undefined
 
       if (!options?.skipCache) {
         extracted = await this.getFromCache(zillowUrl)
@@ -405,7 +413,22 @@ export class ScrapflyZillowFetcher {
       }
 
       if (!extracted) {
-        // Generated search-page URL first — cheap when the listing surfaces.
+        // Stingray first — non-rendered JSON (~3-5s) vs ~20s for a rendered
+        // scrape. Resolves every parcel; property-bound media is verified
+        // evidence. Only comps without Redfin media pay for renders below.
+        stAttempt = await this.stingrayResolve(property)
+        if (stAttempt) {
+          const media = await this.stingrayMedia(stAttempt.propertyId)
+          if (media.photos.length) {
+            extracted = { photos: media.photos, description: media.description }
+            resolvedUrl = stAttempt.url
+            console.log(`[ScrapflyZillow] stingray lane: ${media.photos.length} photos`)
+          }
+        }
+      }
+
+      if (!extracted) {
+        // Generated search-page URL — cheap when the listing surfaces.
         // A miss renders a *search page* whose photos belong to other homes,
         // so the page is only evidence when its canonical URL proves it's
         // this property's listing.
@@ -436,8 +459,9 @@ export class ScrapflyZillowFetcher {
           }
         }
 
-        // Site fallbacks — Redfin then Realtor (spec ladder order).
-        if (!extracted) extracted = await this.fetchViaSite(property, 'redfin')
+        // Site fallbacks — Redfin then Realtor (spec ladder order). The
+        // redfin lane reuses the stingray result instead of re-resolving.
+        if (!extracted) extracted = await this.fetchViaSite(property, 'redfin', stAttempt)
         if (!extracted) extracted = await this.fetchViaSite(property, 'realtor')
 
         if (extracted && extracted.photos.length) await this.saveToCache(resolvedUrl, extracted)
